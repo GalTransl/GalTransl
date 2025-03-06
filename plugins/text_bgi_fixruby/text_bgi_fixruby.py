@@ -1,6 +1,10 @@
 from GalTransl import DEBUG_LEVEL, LOGGER
 from GalTransl.CSentense import CSentense
 from GalTransl.GTPlugin import GTextPlugin
+from re import compile
+
+
+BGI_AUTO_CORRECT_PATTERN = compile(r'^(・|…)+$')
 
 
 def process_string(source: str, remove_incorrect: bool = True, auto_correct: bool = True):
@@ -38,9 +42,8 @@ def process_string(source: str, remove_incorrect: bool = True, auto_correct: boo
                             rt_len = len(rt)
                             if auto_correct and rt_len > 0:
                                 ruby_len = len(ruby)
-                                o = '・' * rt_len
-                                if rt == o and ruby_len != rt_len:
-                                    o = '・' * ruby_len
+                                o = '・' * ruby_len
+                                if rt != o and BGI_AUTO_CORRECT_PATTERN.match(rt):
                                     s = s[:ruby_rt_start+2] + o + '>' + s[ruby_rt_end:]
                                     offset = ruby_len - rt_len
                                     le += offset
@@ -69,9 +72,14 @@ def process_string(source: str, remove_incorrect: bool = True, auto_correct: boo
                         pre_is_angle_bracket = False
                         continue
                     elif remove_incorrect:
-                        s = s[:i-1] + s[i+1:]
-                        le -= 2
-                        i -= 2
+                        if s[i + 1] == 'r':
+                            s = s[:i-1] + s[i+2:]
+                            le -= 3
+                            i -= 3
+                        else:
+                            s = s[:i-1] + s[i+1:]
+                            le -= 2
+                            i -= 2
                 elif remove_incorrect:
                     if i + 1 < le:
                         if s[i + 1] == 'r':
