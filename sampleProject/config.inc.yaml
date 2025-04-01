@@ -46,6 +46,9 @@ common:
   gpt.enableProofRead: false # (GPT4)是否开启译后校润。（不建议使用，很久未维护）[True/False]
   gpt.numPerRequestProofRead: 7 # (GPT4)单次校润句子数量，不建议修改
   gpt.restoreContextMode: true # (GPT3.5/4)重启时恢复上一轮的译文前文。[True/False]
+  gpt.change_prompt: false # (GPT-4/r1)是否开启修改默认prompt
+  gpt.prompt_type: "AdditionalPrompt" # (GPT-4/r1)"AdditionalPrompt"为额外translate-prompt，"OverwritePrompt"为覆写全部translate-prompt
+  gpt.prompt_content: "翻译结果使用文言文" # 示例
   # Sakura/GalTransl
   gpt.token_limit: 0 # (Sakura/Galtransl-7b)（实验性）大于0时限制每轮请求的token数量。防止爆context时可以设置为llama.cpp -c的数值除2。
   gpt.transl_dropout: 0 # (Sakura/Galtransl-7b)（实验性）丢弃翻译结果末尾的n行，可能会提高上下文准确性。[0-2]

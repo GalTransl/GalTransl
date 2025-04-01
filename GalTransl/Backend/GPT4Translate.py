@@ -145,15 +145,47 @@ class CGPT4Translate(BaseTranslate):
 
         self.token = self.tokenProvider.getToken(False, True)
         eng_name = "gpt-4-1106-preview" if eng_name == "" else eng_name
-        system_prompt = GPT4Turbo_SYSTEM_PROMPT
-        trans_prompt = GPT4Turbo_TRANS_PROMPT
-        proofread_prompt = GPT4Turbo_PROOFREAD_PROMPT
-        # R1需要使用专用的prompt
-        if eng_type == "r1":
-            system_prompt = DEEPSEEK_SYSTEM_PROMPT
-            trans_prompt = DEEPSEEK_TRANS_PROMPT
-            proofread_prompt = DEEPSEEK_PROOFREAD_PROMPT
 
+        try:
+            change_prompt = CProjectConfig.getProjectConfig(config)['common']['gpt.change_prompt']
+            prompt_type = CProjectConfig.getProjectConfig(config)['common']['gpt.prompt_type']
+            prompt_content = CProjectConfig.getProjectConfig(config)['common']['gpt.prompt_content']
+
+            if change_prompt and prompt_type == "AdditionalPrompt":
+                system_prompt = GPT4Turbo_SYSTEM_PROMPT
+                trans_prompt = GPT4Turbo_TRANS_PROMPT + "\n# Additional Requirements: " + prompt_content
+                proofread_prompt = GPT4Turbo_PROOFREAD_PROMPT
+                # R1需要使用专用的prompt
+                if eng_type == "r1":
+                    system_prompt = DEEPSEEK_SYSTEM_PROMPT
+                    trans_prompt = DEEPSEEK_TRANS_PROMPT + prompt_content
+                    proofread_prompt = DEEPSEEK_PROOFREAD_PROMPT
+
+            elif change_prompt and prompt_type == "OverwritePrompt":
+                system_prompt = GPT4Turbo_SYSTEM_PROMPT
+                trans_prompt = prompt_content
+                proofread_prompt = GPT4Turbo_PROOFREAD_PROMPT
+                if eng_type == "r1":
+                    system_prompt = DEEPSEEK_SYSTEM_PROMPT
+                    trans_prompt = prompt_content
+                    proofread_prompt = DEEPSEEK_PROOFREAD_PROMPT
+
+            else:
+                system_prompt = GPT4Turbo_SYSTEM_PROMPT
+                trans_prompt = GPT4Turbo_TRANS_PROMPT
+                proofread_prompt = GPT4Turbo_PROOFREAD_PROMPT
+                if eng_type == "r1":
+                    system_prompt = DEEPSEEK_SYSTEM_PROMPT
+                    trans_prompt = DEEPSEEK_TRANS_PROMPT
+                    proofread_prompt = DEEPSEEK_PROOFREAD_PROMPT
+        except KeyError:
+            system_prompt = GPT4Turbo_SYSTEM_PROMPT
+            trans_prompt = GPT4Turbo_TRANS_PROMPT
+            proofread_prompt = GPT4Turbo_PROOFREAD_PROMPT
+            if eng_type == "r1":
+                system_prompt = DEEPSEEK_SYSTEM_PROMPT
+                trans_prompt = DEEPSEEK_TRANS_PROMPT
+                proofread_prompt = DEEPSEEK_PROOFREAD_PROMPT
 
         base_path = "/v1" if not re.search(r"/v\d+$", self.token.domain) else ""
         self.chatbot = ChatbotV3(
