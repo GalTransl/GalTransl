@@ -3,9 +3,9 @@
 backendSpecific:
   OpenAI-Compatible: # (ForGal/gpt4/r1模板)OpenAI API兼容接口通用
     tokens:
-      - token: sk-25da45a760734e17942031d42cea624c
-        endpoint: https://api.deepseek.com # 请求地址，使用转发或第三方API时修改
-    rewriteModelName: "deepseek-chat" # 设置自定义的模型名称，用于调用Claude/Deepseek等模型
+      - token: sk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        endpoint: https://api.openai.com # 请求地址，使用转发或第三方API时修改
+    rewriteModelName: "" # 设置自定义的模型名称，用于调用Claude/Deepseek等模型
     checkAvailable: true # 翻译前检查API是否可用
     apiTimeout: 30 # 请求超时时间，单位秒
     rateLimitWait: 10 # 当触发rateLimit时等待时间，单位秒
@@ -65,11 +65,11 @@ common:
 
   # 分词过滤器设置
   min_word_count: 2    # 最低词频阈值
-  exclude_patterns:    # 正则表达式排除规则
+  exclude_patterns: # 正则表达式排除规则
     - "^[0-9]+$"      # 纯数字
     - "^[\\W_]+$"     # 纯符号
     - ".*心.*"            # 实例
-  force_include:       # 强制保留的词汇（即使命中排除规则）
+  force_include: # 强制保留的词汇（即使命中排除规则）
     - "NPC"
     - "BOSS"
 
@@ -114,7 +114,5 @@ dictionary:
     - 00通用字典_符号_译后.txt # 符号矫正
     - 00通用字典_译后.txt
     - (project_dir)项目字典_译后.txt
-
-
 
 
