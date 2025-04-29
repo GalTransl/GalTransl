@@ -191,16 +191,12 @@ class GenDic(BaseTranslate):
                 continue
             if item[0] in H_WORDS_LIST:
                 continue
-
-            if self.dic_counter[item[0]] > 1:
-                final_list.append(item)
-            elif "人名" in item[2]:
-                final_list.append(item)
-            elif "地名" in item[2]:
-                final_list.append(item)
-            elif item[0] in word_counter:
-                final_list.append(item)
-            elif item[0] in name_set:
+            if not self._should_keep_word(item[0], self.min_word_count):
+                continue
+            if (
+                    item[0] in name_set
+                    or any(tag in item[2] for tag in ["人名", "地名"])
+            ):
                 final_list.append(item)
 
         result_path = os.path.join(self.config.getProjectDir(), "项目GPT字典-生成.txt")
