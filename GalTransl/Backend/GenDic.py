@@ -161,7 +161,7 @@ class GenDic(BaseTranslate):
 
         index_list = solve_sentence_selection(segment_words_list_new)
         # 取前100个
-        index_list = index_list[:128]
+        index_list = index_list[:100]
         LOGGER.info(f"启动{self.wokers}个工作线程，共{len(index_list)}个任务")
         sem = asyncio.Semaphore(self.wokers)
 
