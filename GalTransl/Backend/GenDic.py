@@ -145,7 +145,7 @@ class GenDic(BaseTranslate):
                 segment_words_list.append(tmp_words)
                 bar()
 
-        # 剔除出现次数小于2的词语
+        # 剔除不满足自定义规则的词语
         word_counter = {
             word: count
             for word, count in word_counter.items()
