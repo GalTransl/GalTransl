@@ -1,0 +1,120 @@
+---
+# 翻译后端相关设置
+backendSpecific:
+  OpenAI-Compatible: # (ForGal/gpt4/r1模板)OpenAI API兼容接口通用
+    tokens:
+      - token: sk-25da45a760734e17942031d42cea624c
+        endpoint: https://api.deepseek.com # 请求地址，使用转发或第三方API时修改
+    rewriteModelName: "deepseek-chat" # 设置自定义的模型名称，用于调用Claude/Deepseek等模型
+    checkAvailable: true # 翻译前检查API是否可用
+    apiTimeout: 30 # 请求超时时间，单位秒
+    rateLimitWait: 10 # 当触发rateLimit时等待时间，单位秒
+
+  SakuraLLM: # Sakura/Galtransl API
+    endpoints:
+      - http://127.0.0.1:8080
+      #- http://127.0.0.1:5001 # 可以填入多个endpoints，用于多线程
+    rewriteModelName: "" # 设置自定义的模型名称，在使用ollama时要修改
+
+# 插件，插件列表可在启动程序后选择show-plugs查看，或在plugins目录内查看
+plugin:
+  filePlugin: file_galtransl_json # 用于支持更多格式，file_galtransl_json是本程序的标准格式插件
+  # 字幕使用file_subtitle_srt_lrc_vtt，小说使用file_epub_epub或file_plaintext_txt，mtool导出json使用file_i18n_json
+  textPlugins: # 文本处理插件列表，可以设置多个，按顺序执行
+    - text_common_normalfix # 常规文本修复插件
+    #- text_common_skipNoJP # 跳过无日语句子插件
+
+# 程序设置
+common:
+  gpt.numPerRequestTranslate: 8 # 单次请求翻译句子数量，推荐值 < 15
+  workersPerProject: 16 # 同时翻译n个文件（单个文件要多线程时需开启splitFile）
+  sortBy: "size" # 翻译顺序，name为文件名，size为大文件优先，多线程时大文件优先可以提高整体速度[name/size]
+  language: "ja2zh-cn" # 源语言2(to)目标语言。[zh-cn/zh-tw/en/ja/ko/ru/fr]
+
+  # 单文件分割设置（※重要：不要在翻译中途修改，否则会导致缓存失效）
+  splitFile: "Num" # 是否启用单文件分割,Num为每n条分割一次，Equal为每个文件均分n份。[no/Num/Equal]
+  splitFileNum: 512 # Equal分句时，表示每个文件均分拆成n部分；Num分句时，表示n句拆分一次，此时建议大于100
+  splitFileCrossNum: 0 # 分割文件时前后交叉n句，可能可以提高衔接处翻译质量[推荐0或10]。
+
+  save_steps: 1 # 每翻译n次保存一次缓存，单个大文件保存耗时久，可以调高到100之类的数来提高速度。[1-999]
+  start_time: "" # 定时启动，例如00:30，留空则立即启动。[00:00-23:59]
+  linebreakSymbol: "\r\n" # 这个项目在json中使用的换行符，找问题和自动修复时用到，不影响翻译。
+  skipH: false # 跳过可能触发敏感词检测的句子。[True/False]
+  skipRetry: false # 解析结果出错时，是否跳过循环重试，直接用"Fail Translation"占位。[True/False]
+  retranslFail: false # 重启时重翻所有显示为"Fail Translation"的句子。[True/False]
+  retranslKey:
+    - "重翻在缓存的problem或pre_jp中包含对应**关键字**的句子，去掉下面列表中的#号注释来使用，也可添加自定义的关键字。"
+    #- "残留日文" # 日文平假名片假名残留
+    #- "项目GPT字典" # LLM没有按GPT字典要求翻译
+
+  # GPT4
+  gpt.enableProofRead: false # (GPT4)是否开启译后校润。（不建议使用，很久未维护）[True/False]
+  gpt.numPerRequestProofRead: 7 # (GPT4)单次校润句子数量，不建议修改
+  gpt.change_prompt: "no" # (GPT-4/r1)是否开启修改默认prompt,"AdditionalPrompt"为增加额外要求，"OverwritePrompt"为覆写原本的prompt
+  gpt.prompt_content: "翻译结果使用文言文" # 示例额外要求，change_prompt为AdditionalPrompt时才生效
+  # Sakura/GalTransl
+  gpt.token_limit: 0 # (Sakura/Galtransl-7b)（实验性）大于0时限制每轮请求的token数量。防止爆context时可以设置为llama.cpp -c的数值除2。
+  gpt.transl_dropout: 0 # (Sakura/Galtransl-7b)（实验性）丢弃翻译结果末尾的n行，可能会提高上下文准确性。[0-2]
+  # 调试日志
+  loggingLevel: info # 日志级别[debug/info/warning]
+  saveLog: false # 是否记录日志到文件[True/False]
+
+  # 某个插件自己的设置可以进入plugins目录内修改对应的yaml文件，也可以这样设置：
+  file_subtitle_srt_lrc_vtt: # 示例，可以在项目配置文件中覆盖插件yaml的设置项
+    保存双语字幕: true
+
+  # 分词过滤器设置
+  min_word_count: 2    # 最低词频阈值
+  exclude_patterns:    # 正则表达式排除规则
+    - "^[0-9]+$"      # 纯数字
+    - "^[\\W_]+$"     # 纯符号
+    - ".*心.*"            # 实例
+  force_include:       # 强制保留的词汇（即使命中排除规则）
+    - "NPC"
+    - "BOSS"
+
+# 代理设置，使用中转供应商时一般不用开代理
+proxy:
+  enableProxy: false # 是否启用代理。[True/False]
+  proxies:
+    - address: http://127.0.0.1:7890
+
+# 自动问题分析配置，在-前面加#号可以禁用
+problemAnalyze:
+  problemList: # 要发现的问题清单
+    - 词频过高 # 重复大于20次
+    - 标点错漏 # 标点符号多加或漏加
+    - 残留日文 # 日文平假名片假名残留
+    - 丢失换行 # 缺少换行符，一般没事
+    - 多加换行 # 换行符比原句多，可能导致溢出屏幕
+    - 比日文长 # 比日文长1.3倍以上
+    - 字典使用 # 没有按GPT字典要求翻译
+    - 引入英文 # 本来没有英文，译文引入了英文
+    #- 语言不通 # 疑似没有被翻译成目标语言
+    #- 比日文长严格 # 严格查找，不能比日文长
+
+# 字典设置
+dictionary:
+  defaultDictFolder: Dict # 通用字典文件夹，相对于程序目录，也可填入绝对路径
+  usePreDictInName: false # 将译前字典用在name字段，可用于改名，不会改变结果的name字段[True/False]
+  usePostDictInName: false # 将译后字典用在name字段，可用于翻译name字段[True/False]
+  sortDict: true # 将所有字典按查找词长度重排序。[True/False]
+  # 译前字典
+  preDict:
+    - 01H字典_矫正_译前.txt # 用于口齿不清的矫正
+    - 00通用字典_译前.txt
+    - (project_dir)项目字典_译前.txt # (project_dir)代表字典在项目文件夹
+  # GPT 字典
+  gpt.dict:
+    - GPT字典.txt
+    - (project_dir)项目GPT字典.txt
+    - (project_dir)项目GPT字典-生成.txt
+  # 译后字典
+  postDict:
+    - 00通用字典_符号_译后.txt # 符号矫正
+    - 00通用字典_译后.txt
+    - (project_dir)项目字典_译后.txt
+
+
+
+
