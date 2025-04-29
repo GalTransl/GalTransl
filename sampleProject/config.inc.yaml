@@ -105,4 +105,12 @@ dictionary:
     - 00通用字典_译后.txt
     - (project_dir)项目字典_译后.txt
 
-
+# 分词过滤器设置
+dictionary_filters:
+  min_word_count: 2    # 最低词频阈值
+  exclude_patterns:    # 正则表达式排除规则
+    - "^[0-9]+$"      # 纯数字
+    - "^[\\W_]+$"     # 纯符号
+  force_include:       # 强制保留的词汇（即使命中排除规则）
+    - "NPC"
+    - "BOSS"
