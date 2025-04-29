@@ -194,7 +194,7 @@ class GenDic(BaseTranslate):
             if not self._should_keep_word(item[0], self.min_word_count):
                 continue
             if (
-                    item[0] in name_set
+                    item[0] in name_set or item[0] in word_counter
                     or any(tag in item[2] for tag in ["人名", "地名"])
             ):
                 final_list.append(item)
