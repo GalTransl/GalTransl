@@ -384,6 +384,13 @@ class CGPT4Translate(BaseTranslate):
                         )
                         error_flag = True
                         break
+                # 针对混元模型的乱码问题
+                if "�" in line_json[key_name]:
+                    error_message = (
+                        f"第{line_id}句包含乱码：" + line_json[key_name]
+                    )
+                    error_flag = True
+                    break
                 if self.target_lang != "English":
                     if "can't fullfill" in line_json[key_name]:
                         error_message = f"GPT4拒绝了翻译"
