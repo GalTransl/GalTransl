@@ -392,11 +392,10 @@ class CGPT4Translate(BaseTranslate):
                     error_flag = True
                     break
 
-                # 检查字符串是否包含非中文、英文、数字、空白字符和中英文标点符号
-                if re.search(r"[^\u4e00-\u9fffA-Za-z0-9\s.,!?;:()\"'“”‘’\-，。！？；：（）【】《》、]", line_json[key_name]):
-                    error_message = (
-                            f"第{line_id}句包含非中文、英文、数字、空白字符和标点符号：" + line_json[key_name]
-                    )
+                # 检查字符串是否包含非中文、日文、英文、数字、空白字符和中英文标点符号
+                if re.search(r"[^\u4e00-\u9fff\u3040-\u30ff\u31f0-\u31ffA-Za-z0-9\s.,!?;:()\"'“”‘’\-，。！？；：（）【】《》、]",
+                             line_json[key_name]):
+                    error_message = f"第{line_id}句包含非中文、日文、英文、数字、空白字符和标点符号：" + line_json[key_name]
                     error_flag = True
                     break
 
