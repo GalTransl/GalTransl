@@ -1,6 +1,9 @@
 import json, time, asyncio, os, random, re
 from opencc import OpenCC
 from typing import Optional
+
+from regex import regex
+
 from GalTransl.COpenAI import COpenAITokenPool
 from GalTransl.ConfigHelper import CProxyPool
 from GalTransl import LOGGER, LANG_SUPPORTED, TRANSLATOR_DEFAULT_ENGINE
@@ -396,6 +399,13 @@ class CGPT4Translate(BaseTranslate):
                     )
                     error_flag = True
                     break
+
+                # 检查字符串是否包含非中文、日文、英文、数字、空白字符、所有标点符号、特殊symbol
+                if regex.search(r"[^\p{Han}\p{Hiragana}\p{Katakana}\p{Latin}\p{N}\s\p{P}\p{So}]", line_json[key_name], flags=re.UNICODE):
+                    error_message = f"第{line_id}句包含非中文、日文、英文、数字、空白字符和标点符号：" + line_json[key_name]
+                    error_flag = True
+                    break
+
                 if self.target_lang != "English":
                     if "can't fullfill" in line_json[key_name]:
                         error_message = f"GPT4拒绝了翻译"
