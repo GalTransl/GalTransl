@@ -5,7 +5,7 @@ from random import choice
 from GalTransl import LOGGER, LANG_SUPPORTED
 from GalTransl.ConfigHelper import CProjectConfig, CProxyPool
 from GalTransl.CSentense import CSentense, CTransList
-from GalTransl.Cache import get_transCache_from_json_new, save_transCache_to_json
+from GalTransl.Cache import save_transCache_to_json
 from GalTransl.Dictionary import CGptDict
 from GalTransl.Utils import find_most_repeated_substring
 from GalTransl.Backend.BaseTranslate import BaseTranslate
@@ -58,11 +58,16 @@ class CSakuraTranslate(BaseTranslate):
 
         self.last_translation = ""
         self.endpoint = endpoint
-        self.api_timeout=30
-        self.rateLimitWait=1
+        self.api_timeout = 30
+        self.rateLimitWait = 1
+        if eng_type == "sakura-v1.0":
+            self.system_prompt = Sakura_SYSTEM_PROMPT010
+            self.trans_prompt = Sakura_TRANS_PROMPT010
+        if "galtransl" in eng_type:
+            self.system_prompt = GalTransl_SYSTEM_PROMPT
+            self.trans_prompt = GalTransl_TRANS_PROMPT_V3
         self.init_chatbot(eng_type=eng_type, config=config)  # 模型初始化
         self._set_temp_type("precise")
-
 
         pass
 
@@ -81,13 +86,9 @@ class CSakuraTranslate(BaseTranslate):
         endpoint = self.endpoint
         endpoint = endpoint[:-1] if endpoint.endswith("/") else endpoint
         base_path = "/v1" if not re.search(r"/v\d+$", endpoint) else ""
-
-        if eng_type == "sakura-v1.0":
-            self.system_prompt = Sakura_SYSTEM_PROMPT010
-            self.trans_prompt = Sakura_TRANS_PROMPT010
-        if "galtransl" in eng_type:
-            self.system_prompt = GalTransl_SYSTEM_PROMPT
-            self.trans_prompt = GalTransl_TRANS_PROMPT_V3
+        self.stream = True
+        if "sakura-share" in endpoint:
+            self.stream = False
 
         if self.proxyProvider:
             self.proxy = self.proxyProvider.getProxy()
@@ -138,8 +139,11 @@ class CSakuraTranslate(BaseTranslate):
         messages.append({"role": "user", "content": prompt_req})
 
         while True:  # 一直循环，直到得到数据
-            LOGGER.debug(f"->'翻译输入'：{prompt_req}")
-            LOGGER.debug("->输出：")
+            if self.pj_config.active_workers == 1:
+                print(f"-> 字典输入: \n{gptdict}")
+                print(f"-> 翻译输入: \n{input_str}")
+                print("-> 输出: ")
+
             resp = ""
             resp = await self.ask_chatbot(
                 messages=messages,
@@ -147,6 +151,7 @@ class CSakuraTranslate(BaseTranslate):
                 frequency_penalty=self.frequency_penalty,
                 top_p=self.top_p,
                 max_tokens=len(input_str) * 2,
+                stream=self.stream,
             )
 
             result_list = resp.strip("\n").split("\n")

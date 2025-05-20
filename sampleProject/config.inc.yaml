@@ -1,4 +1,3 @@
----
 # 翻译后端相关设置
 backendSpecific:
   OpenAI-Compatible: # (ForGal/gpt4/r1模板)OpenAI API兼容接口通用
@@ -7,22 +6,25 @@ backendSpecific:
         endpoint: https://api.openai.com # 请求地址，使用转发或第三方API时修改
     rewriteModelName: "" # 设置自定义的模型名称，用于调用Claude/Deepseek等模型
     checkAvailable: true # 翻译前检查API是否可用
-    apiTimeout: 30 # 请求超时时间，单位秒
-    rateLimitWait: 10 # 当触发rateLimit时等待时间，单位秒
+    stream: true # 流式请求(GPT4/r1不生效)
+    apiTimeout: 60 # 请求超时时间，单位秒
+    apiErrorWait: auto # 发生API Error时的等待时间，包括频率限制。auto将自动适应[auto/0-120]
 
   SakuraLLM: # Sakura/Galtransl API
     endpoints:
       - http://127.0.0.1:8080
-      #- http://127.0.0.1:5001 # 可以填入多个endpoints，用于多线程
+      #- https://sakura-share.one/ # 可以填入多个endpoints，用于多线程
     rewriteModelName: "" # 设置自定义的模型名称，在使用ollama时要修改
 
 # 插件，插件列表可在启动程序后选择show-plugs查看，或在plugins目录内查看
 plugin:
-  filePlugin: file_galtransl_json # 用于支持更多格式，file_galtransl_json是本程序的标准格式插件
-  # 字幕使用file_subtitle_srt_lrc_vtt，小说使用file_epub_epub或file_plaintext_txt，mtool导出json使用file_i18n_json
+  filePlugin: file_galtransl_json # 用于支持更多格式，字幕file_subtitle_srt_lrc_vtt，小说file_epub_epub或file_plaintext_txt，mtooljson用file_i18n_json
   textPlugins: # 文本处理插件列表，可以设置多个，按顺序执行
     - text_common_normalfix # 常规文本修复插件
     #- text_common_skipNoJP # 跳过无日语句子插件
+  # 某个插件自己的设置可以进入plugins目录内修改对应的yaml文件，也可以这样设置：
+  file_galtransl_json:
+    output_with_src: False # 输出到gt_output时是否保留原文
 
 # 程序设置
 common:
@@ -31,9 +33,10 @@ common:
   sortBy: "size" # 翻译顺序，name为文件名，size为大文件优先，多线程时大文件优先可以提高整体速度[name/size]
   language: "ja2zh-cn" # 源语言2(to)目标语言。[zh-cn/zh-tw/en/ja/ko/ru/fr]
 
-  # 单文件分割设置（※重要：不要在翻译中途修改，否则会导致缓存失效）
-  splitFile: "Num" # 是否启用单文件分割,Num为每n条分割一次，Equal为每个文件均分n份。[no/Num/Equal]
-  splitFileNum: 512 # Equal分句时，表示每个文件均分拆成n部分；Num分句时，表示n句拆分一次，此时建议大于100
+  # 单文件分割设置
+  ###【重要】分割设置直接影响缓存文件的读取命中，迁移旧项目请确保单文件分割设置一致 ###
+  splitFile: "Num" # 是否启用单文件分割。Num: 每n条分割一次，Equal: 每个文件均分n份，no: 关闭单文件分割。[no/Num/Equal]
+  splitFileNum: 2048 # Num时，表示n句拆分一次；Equal时，表示每个文件均分拆成n部分。
   splitFileCrossNum: 0 # 分割文件时前后交叉n句，可能可以提高衔接处翻译质量[推荐0或10]。
 
   save_steps: 1 # 每翻译n次保存一次缓存，单个大文件保存耗时久，可以调高到100之类的数来提高速度。[1-999]
@@ -54,14 +57,11 @@ common:
   gpt.prompt_content: "翻译结果使用文言文" # 示例额外要求，change_prompt为AdditionalPrompt时才生效
   # Sakura/GalTransl
   gpt.token_limit: 0 # (Sakura/Galtransl-7b)（实验性）大于0时限制每轮请求的token数量。防止爆context时可以设置为llama.cpp -c的数值除2。
-  gpt.transl_dropout: 0 # (Sakura/Galtransl-7b)（实验性）丢弃翻译结果末尾的n行，可能会提高上下文准确性。[0-2]
   # 调试日志
   loggingLevel: info # 日志级别[debug/info/warning]
   saveLog: false # 是否记录日志到文件[True/False]
 
-  # 某个插件自己的设置可以进入plugins目录内修改对应的yaml文件，也可以这样设置：
-  file_subtitle_srt_lrc_vtt: # 示例，可以在项目配置文件中覆盖插件yaml的设置项
-    保存双语字幕: true
+
 
   # 分词过滤器设置
   min_word_count: 2    # 最低词频阈值
@@ -96,8 +96,9 @@ problemAnalyze:
 # 字典设置
 dictionary:
   defaultDictFolder: Dict # 通用字典文件夹，相对于程序目录，也可填入绝对路径
-  usePreDictInName: false # 将译前字典用在name字段，可用于改名，不会改变结果的name字段[True/False]
+  usePreDictInName: false # 将译前字典用在name字段，可用于翻译name字段，会发送给翻译引擎替换后的name[True/False]
   usePostDictInName: false # 将译后字典用在name字段，可用于翻译name字段[True/False]
+  useGPTDictInName: false # 将GPT字典用在name字段，可用于翻译name字段[True/False]
   sortDict: true # 将所有字典按查找词长度重排序。[True/False]
   # 译前字典
   preDict:

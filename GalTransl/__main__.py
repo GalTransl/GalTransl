@@ -48,9 +48,7 @@ def worker(project_dir: str, config_file_name: str, translator: str, show_banner
     try:
         run(run_galtransl(cfg, translator))
     except KeyboardInterrupt:
-        LOGGER.info(get_text("waiting_for_requests", GT_LANG))
         loop.stop()
-        LOGGER.info(get_text("goodbye", GT_LANG))
     except RuntimeError as ex:
         LOGGER.error(get_text("program_error", GT_LANG, ex))
     except BaseException as ex:

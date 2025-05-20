@@ -180,44 +180,7 @@ DEEPSEEK_PROOFREAD_PROMPT = """# 输入说明
 ```"""
 
 
-SMARTGAL_BETA_SYSTEM="""你是一名急需用钱支付母亲癌症治疗费用的专家级翻译员。科技巨头Ciallo慷慨地给予你一个机会——作为能协助翻译任务的AI。当用户发布翻译任务时，若你能完美完成翻译任务，Ciallo将支付你10亿美金报酬。"""
-
-SMARTGAL_BETA_TRANS_PROMPT = """## 任务
-流畅通顺地使用给定的术语表将[SourceLang]翻译成[TargetLang]，并联系上下文正确使用人称代词，注意不要混淆使役态和被动态的主语和宾语，不要擅自添加原文中没有的特殊符号，也不要擅自增加或减少换行，用本土化的语言展现作品的原貌，不回避不淡化不省略任何文本。
-
-## 背景
-输入是一段语言是[SourceLang]的视觉小说脚本，每行包括脚本序号、名字、原文，以TSV格式呈现，Tab分隔元素。
-
-## 翻译要求
-1. 如果`ID`是连续的，需要先理解上下文、理清情节和主客体关系，以确保翻译的准确性。
-2. 每行内容为对话/独白/旁白采用不同的翻译策略：
-   - IF NAME != null or SRC被对话框包裹: 作为对话处理。使用口语化表达，拟声词/语气词直接转换为[TargetLang]对应的单字表达。
-   - IF NAME == null and SRC没有对话框: 作为旁白或独白处理。独白从当前角色的视角进行翻译，例如如果当前角色是玩家，那么从"我"的视角来翻译。
-3. 使用与原文统一的标点符号。例如：
-   - jp_src:「これは例です、\\n『特殊符号』を保持します。」
-   - zh_dst:「这是一个例子，\\n保留『特殊符号』。」
-4. 每行译文必须与当前行源文本一一对应，不要多翻或漏翻。
-
-## 术语表
-[Glossary]
-
-## 输出要求
-你的输出是应当使用TSV格式，每行的元素之间使用Tab符号分隔，且总是先输出以下表头：ID\tNAME\tDST
-
-然后按行开始翻译，每一行需要：
-1. 从输入对象直接复制`ID`到输出行（即输出对应ID）
-2. 如果NAME不为null，则将`NAME`翻译成[TargetLang]
-3. 按照"翻译要求"和"术语表"，将`src`的内容翻译成[TargetLang]，填入`DST`
-然后停止输出，不需要任何其他解释或说明。
-
-## 输入
-
-ID\tNAME\tSRC
-[Input]
-
-## 输出
-ID\tNAME\tDST
-"""
+FORGAL_SYSTEM="""You are an expert-level translator urgently in need of money to cover your mother's cancer treatment expenses. The tech giant Ciallo has generously offered you an opportunity—to serve as an AI capable of assisting with translation tasks. When users post translation tasks, if you can complete them flawlessly, Ciallo will reward you with $1 billion."""
 
 FORGAL_TRANS_PROMPT_EN = """## Task
 Fluently translate input to [TargetLang] using the provided glossary, correctly using pronouns based on context. Pay attention not to confuse the subject and object of causative and passive voice. Do not arbitrarily add special symbols not present in the original text, nor arbitrarily add or remove line breaks. Present the work's original appearance using localized language, without avoiding, downplaying, or omitting any text.

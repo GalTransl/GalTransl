@@ -1,12 +1,13 @@
----
-# Translation Backend Settings
 backendSpecific:
-  OpenAI-Compatible: # (ForGal/gpt4/r1 template) OpenAI API compatible interface
+  OpenAI-Compatible: # (ForGal/gpt4/r1 template) Universal OpenAI API compatible interface
     tokens:
       - token: sk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         endpoint: https://api.openai.com # Request address, modify when using forwarding or third-party API
-    rewriteModelName: "" # Set custom model name, used for calling Claude/Deepseek models
+    rewriteModelName: "" # Set custom model name, used for calling Claude/Deepseek and other models
     checkAvailable: true # Check if API is available before translation
+    stream: true # Streaming request
+    apiTimeout: 60 # Request timeout in seconds
+    apiErrorWait: auto # Wait time for API errors such as rate limiting, 'auto' will manage automatically [auto/0-120]
 
   SakuraLLM: # Sakura/Galtransl API
     endpoints:
@@ -40,8 +41,6 @@ common:
     #- "Introduced English" # No English originally, but translation introduced English
 
   # General Translation Settings
-  gpt.streamOutputMode: true # Streaming output effect, ineffective in multi-threading. [True/False]
-  gpt.tooManyRequestsWaitTime: 60 # Wait time for Too Many Requests error, in seconds
   gpt.enhance_jailbreak: False # Reduce general model translation refusals
   # GPT4
   gpt.enableProofRead: false # (GPT4) Whether to enable post-translation proofreading. (Not recommended, long unmaintained) [True/False]

@@ -11,11 +11,11 @@ from GalTransl.ConfigHelper import (
 )
 from random import choice
 from GalTransl.CSentense import CSentense, CTransList
-from GalTransl.Cache import get_transCache_from_json_new, save_transCache_to_json
+from GalTransl.Cache import save_transCache_to_json
 from GalTransl.Dictionary import CGptDict
 from GalTransl.Utils import extract_code_blocks, fix_quotes2
 from GalTransl.Backend.Prompts import (
-    SMARTGAL_BETA_SYSTEM,
+    FORGAL_SYSTEM,
     FORGAL_TRANS_PROMPT_EN,
     H_WORDS_LIST,
 )
@@ -38,10 +38,12 @@ class ForGalTranslate(BaseTranslate):
         else:
             self.enhance_jailbreak = False
         self.trans_prompt = FORGAL_TRANS_PROMPT_EN
-        self.system_prompt = SMARTGAL_BETA_SYSTEM
+        self.system_prompt = FORGAL_SYSTEM
         self.last_translation = ""
         self._set_temp_type("precise")
         self.init_chatbot(eng_type=eng_type, config=config)
+        if "qwen3" in self.model_name.lower():
+            self.system_prompt+="/no_think"
 
         pass
 
@@ -77,10 +79,11 @@ class ForGalTranslate(BaseTranslate):
             messages.append({"role": "assistant", "content": assistant_prompt})
 
         while True:  # 一直循环，直到得到数据
-            LOGGER.debug(
-                f"->{'翻译输入' if not proofread else '校对输入'}：{gptdict}\n{input_src}\n"
-            )
-            LOGGER.debug("->输出：")
+            if self.pj_config.active_workers == 1:
+                LOGGER.info(
+                    f"->{'翻译输入' if not proofread else '校对输入'}：\n{gptdict}\n{input_src}\n"
+                )
+                LOGGER.info("->输出：")
             resp = ""
             resp = await self.ask_chatbot(
                 model_name=self.model_name,

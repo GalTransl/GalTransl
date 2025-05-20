@@ -1,4 +1,4 @@
-import time, asyncio
+import asyncio
 import httpx
 from opencc import OpenCC
 from typing import Optional
@@ -10,10 +10,11 @@ from GalTransl.ConfigHelper import (
     CProjectConfig,
 )
 from GalTransl.CSentense import CSentense, CTransList
-from GalTransl.Cache import get_transCache_from_json_new, save_transCache_to_json
+from GalTransl.Cache import save_transCache_to_json
 from GalTransl.Dictionary import CGptDict
 from openai import RateLimitError, AsyncOpenAI
 import re
+import random
 
 
 class BaseTranslate:
@@ -21,8 +22,8 @@ class BaseTranslate:
         self,
         config: CProjectConfig,
         eng_type: str,
-        proxy_pool: Optional[CProxyPool]=None,
-        token_pool: COpenAITokenPool=None,
+        proxy_pool: Optional[CProxyPool] = None,
+        token_pool: COpenAITokenPool = None,
     ):
         """
         根据提供的类型、配置、API 密钥和代理设置初始化 Chatbot 对象。
@@ -69,14 +70,14 @@ class BaseTranslate:
         else:
             self.target_lang = LANG_SUPPORTED[self.target_lang]
 
-        # 429等待时间
+        # 429等待时间（废弃）
         self.wait_time = config.getKey("gpt.tooManyRequestsWaitTime", 60)
         # 跳过重试
         self.skipRetry = config.getKey("skipRetry", False)
         # 跳过h
         self.skipH = config.getKey("skipH", False)
 
-        # 流式输出模式
+        # 流式输出模式（废弃）
         self.streamOutputMode = config.getKey("gpt.streamOutputMode", False)
         if config.getKey("workersPerProject") > 1:  # 多线程关闭流式输出
             self.streamOutputMode = False
@@ -103,8 +104,18 @@ class BaseTranslate:
         )
         self.token = self.tokenProvider.getToken()
         base_path = "/v1" if not re.search(r"/v\d+$", self.token.domain) else ""
-        self.api_timeout=config.getBackendConfigSection(section_name).get("apiTimeout", 30)
-        self.rateLimitWait=config.getBackendConfigSection(section_name).get("rateLimitWait", self.wait_time)
+        self.api_timeout = config.getBackendConfigSection(section_name).get(
+            "apiTimeout", 60
+        )
+        self.apiErrorWait = config.getBackendConfigSection(section_name).get(
+            "apiErrorWait", "0"
+        )
+        self.stream=config.getBackendConfigSection(section_name).get(
+            "stream", True
+        )
+        if self.apiErrorWait == "auto":
+            self.apiErrorWait = 0
+
         if self.proxyProvider:
             self.proxy = self.proxyProvider.getProxy()
             client = httpx.AsyncClient(proxy=self.proxy.addr if self.proxy else None)
@@ -127,10 +138,11 @@ class BaseTranslate:
         temperature=0.5,
         frequency_penalty=0.1,
         top_p=1,
-        stream=False,
+        stream=None,
         max_tokens=None,
     ):
-        retry_count = 0
+        api_try_count = 0
+        stream=stream if stream else self.stream
         while True:
             try:
                 if messages == []:
@@ -148,19 +160,42 @@ class BaseTranslate:
                     timeout=self.api_timeout,
                     top_p=top_p,
                 )
+                result = ""
+                lastline = ""
                 if stream:
-                    return response
-                return response.choices[0].message.content
-            except RateLimitError as e:
-                LOGGER.debug(f"[RateLimit] {e}")
-                await asyncio.sleep(self.rateLimitWait)
+                    async for chunk in response:
+                        result += chunk.choices[0].delta.content or ""
+                        lastline += chunk.choices[0].delta.content or ""
+                        if lastline.endswith("\n"):
+                            if self.pj_config.active_workers == 1:
+                                print(lastline)
+                            lastline = ""
+                else:
+                    result = response.choices[0].message.content
+                return result
             except Exception as e:
-                retry_count += 1
-                try:
-                    LOGGER.error(f"[API Error] {response.model_extra['error']}")
-                except:
-                    LOGGER.error(f"[API Error] {e}")
-                await asyncio.sleep(2)
+
+                api_try_count += 1
+                if self.apiErrorWait > 0:
+                    sleep_time = self.apiErrorWait + random.random()
+                else:
+                    # https://aws.amazon.com/cn/blogs/architecture/exponential-backoff-and-jitter/
+                    sleep_time = 2 ** min(api_try_count, 6)
+                    sleep_time = random.randint(0, sleep_time)
+
+                if isinstance(e, RateLimitError):
+                    self.pj_config.bar.text(
+                        "-> 检测到频率限制(429 RateLimitError)，翻译仍在进行中但速度将受影响..."
+                    )
+                else:
+                    try:
+                        LOGGER.error(
+                            f"[API Error] {response.model_extra['error']}, sleeping {sleep_time}s"
+                        )
+                    except:
+                        LOGGER.error(f"[API Error] {e}, sleeping {sleep_time}s")
+
+                await asyncio.sleep(sleep_time)
 
     def clean_up(self):
         pass
@@ -179,13 +214,6 @@ class BaseTranslate:
         proofread: bool = False,
         retran_key: str = "",
     ) -> CTransList:
-        _, translist_unhit = get_transCache_from_json_new(
-            trans_list,
-            cache_file_path,
-            retry_failed=retry_failed,
-            proofread=proofread,
-            retran_key=retran_key,
-        )
 
         if self.skipH:
             LOGGER.warning("skipH: 将跳过含有敏感词的句子")

@@ -10,6 +10,9 @@ class file_plugin(GFilePlugin):
         :param plugin_conf: The settings for the plugin.插件yaml中所有设置的dict。
         :param project_conf: The settings for the project.项目yaml中common下设置的dict。
         """
+        self.pname = plugin_conf["Core"].get("Name", "")
+        settings = plugin_conf["Settings"]
+        self.output_with_src = settings.get("output_with_src", False)
         pass
 
     def load_file(self, file_path: str) -> list:
@@ -24,6 +27,9 @@ class file_plugin(GFilePlugin):
             raise TypeError("请检查filePlugin的配置并选择合适的文件插件.")
         with open(file_path, "r", encoding="utf-8") as f:
             json_list = orjson.loads(f.read())
+        if self.output_with_src:
+            for i in json_list:
+                i["src_msg"]=i["message"]
         return json_list
 
     def save_file(self, file_path: str, transl_json: list):

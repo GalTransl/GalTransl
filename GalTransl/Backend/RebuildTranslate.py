@@ -1,7 +1,6 @@
 from GalTransl.CSentense import *
 from GalTransl.ConfigHelper import CProjectConfig
 from GalTransl.Dictionary import CGptDict
-from GalTransl.Cache import get_transCache_from_json_new
 from GalTransl.Backend.BaseTranslate import BaseTranslate
 from GalTransl import LOGGER
 from GalTransl.i18n import get_text,GT_LANG

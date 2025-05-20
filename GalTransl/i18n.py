@@ -88,8 +88,8 @@ UI_TEXT = {
     
     # Status messages
     "translation_completed": {
-        "zh-cn": "翻译任务完成，准备重新开始...",
-        "en": "Translation task completed, preparing to restart..."
+        "zh-cn": "任务完成，准备重新开始...",
+        "en": "task completed, preparing to restart..."
     },
     "waiting_for_requests": {
         "zh-cn": "正在等待现有请求返回...",

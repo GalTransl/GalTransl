@@ -133,6 +133,12 @@ class CNormalDic:
         """
         self.dic_list.sort(key=lambda x: len(x.search_word), reverse=True)
 
+    def get_dst(self,word):
+        for dic in self.dic_list:
+            if dic.search_word == word:
+                return dic.replace_word
+        return ""
+
     def load_dic(self, dic_path: str):
         """加载一个字典txt到这个对象的内存"""
         if not path.exists(dic_path):
@@ -425,7 +431,7 @@ class CGptDict:
                         promt += f"\t{dic.note}"
                     promt += "\n"
             if promt!= "":
-                promt = f"原文\t译文\t备注\n{promt}"
+                promt = f"SRC\tDST\tNOTE\n{promt}"
         return promt
 
     def check_dic_use(self, find_from_str: str, tran: CSentense):
