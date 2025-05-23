@@ -1,7 +1,9 @@
-import json, time, asyncio, os, random, re
-from regex import regex
+import json, time, asyncio, os, traceback, re
 from opencc import OpenCC
 from typing import Optional
+
+from regex import regex
+
 from GalTransl.COpenAI import COpenAITokenPool
 from GalTransl.ConfigHelper import CProxyPool
 from GalTransl import LOGGER, LANG_SUPPORTED, TRANSLATOR_DEFAULT_ENGINE
@@ -10,7 +12,7 @@ from GalTransl.ConfigHelper import (
     CProjectConfig,
 )
 from GalTransl.CSentense import CSentense, CTransList
-from GalTransl.Cache import save_transCache_to_json
+from GalTransl.Cache import get_transCache_from_json_new, save_transCache_to_json
 from GalTransl.Dictionary import CGptDict
 from GalTransl.Utils import extract_code_blocks, fix_quotes
 from GalTransl.Backend.Prompts import (
@@ -108,6 +110,14 @@ class CGPT4Translate(BaseTranslate):
             self.enhance_jailbreak = val
         else:
             self.enhance_jailbreak = False
+        # 流式输出模式
+        if val := config.getKey("gpt.streamOutputMode"):
+            self.streamOutputMode = val
+        else:
+            self.streamOutputMode = False
+        if val := config.getKey("workersPerProject"):  # 多线程关闭流式输出
+            if val > 1:
+                self.streamOutputMode = False
 
         self.tokenProvider = token_pool
         if config.getKey("internals.enableProxy") == True:
@@ -139,14 +149,6 @@ class CGPT4Translate(BaseTranslate):
 
         self.token = self.tokenProvider.getToken()
         eng_name = "gpt-4-1106-preview" if eng_name == "" else eng_name
-        self.api_timeout = config.getBackendConfigSection(section_name).get(
-            "apiTimeout", 60
-        )
-        self.apiErrorWait = config.getBackendConfigSection(section_name).get(
-            "apiErrorWait", "auto"
-        )
-        if self.apiErrorWait == "auto":
-            self.apiErrorWait = 0
 
         try:
             change_prompt = CProjectConfig.getProjectConfig(config)['common']['gpt.change_prompt']
@@ -187,9 +189,6 @@ class CGPT4Translate(BaseTranslate):
                 trans_prompt = DEEPSEEK_TRANS_PROMPT
                 proofread_prompt = DEEPSEEK_PROOFREAD_PROMPT
 
-        # qwen3 
-        if eng_type=="gpt4" and "qwen3" in eng_name.lower():
-            system_prompt = system_prompt+"/no_think"
         base_path = "/v1" if not re.search(r"/v\d+$", self.token.domain) else ""
         self.chatbot = ChatbotV3(
             api_key=self.token.token,
@@ -198,7 +197,7 @@ class CGPT4Translate(BaseTranslate):
             system_prompt=system_prompt,
             engine=eng_name,
             api_address=f"{self.token.domain}{base_path}/chat/completions",
-            timeout=self.api_timeout,
+            timeout=30,
             response_format="json",
         )
         self.chatbot.trans_prompt = trans_prompt
@@ -262,7 +261,6 @@ class CGPT4Translate(BaseTranslate):
         else:
             assistant_prompt = ""
         while True:  # 一直循环，直到得到数据
-            api_try_count = 0
             try:
                 # change token
 
@@ -272,38 +270,33 @@ class CGPT4Translate(BaseTranslate):
                 self.chatbot.set_api_addr(
                     f"{self.token.domain}{base_path}/chat/completions"
                 )
-                if self.pj_config.active_workers == 1:
-                    LOGGER.info(
-                        get_text("translation_input" if not proofread else "proofread_input", GT_LANG, gptdict, input_json)
-                    )
-                    LOGGER.info(get_text("output", GT_LANG))
-                resp, data,lastline = "", "",""
+
+                # LOGGER.info(
+                #     get_text("translation_input" if not proofread else "proofread_input", GT_LANG, gptdict, input_json)
+                # )
+                # if self.streamOutputMode:
+                #     LOGGER.info(get_text("output", GT_LANG))
+                resp, data = "", ""
                 if not self.full_context_mode:
                     self._del_previous_message()
                 async for data in self.chatbot.ask_stream_async(
                     prompt_req, assistant_prompt=assistant_prompt
                 ):
+                    # if self.streamOutputMode:
+                    #     print(data, end="", flush=True)
                     resp += data
-                    lastline+=data
-                    if lastline.endswith("\n"):
-                        if self.pj_config.active_workers==1:
-                            print(lastline)
-                        lastline=""
+
+                # if not self.streamOutputMode:
+                #     LOGGER.info(get_text("output_with_content", GT_LANG, resp))
+                # else:
+                #     print("")
             except asyncio.CancelledError:
                 raise
             except RuntimeError:
                 raise
             except Exception as ex:
-                api_try_count += 1
-                if self.apiErrorWait > 0:
-                    sleep_time = self.apiErrorWait + random.random()
-                else:
-                    # https://aws.amazon.com/cn/blogs/architecture/exponential-backoff-and-jitter/
-                    sleep_time = 2 ** min(api_try_count, 6)
-                    sleep_time = random.randint(0, sleep_time)
-
                 str_ex = str(ex).lower()
-
+                LOGGER.error(f"-> {str_ex}")
                 if "quota" in str_ex:
                     self.tokenProvider.reportTokenProblem(self.token)
                     LOGGER.error(get_text("request_error_quota", GT_LANG, self.token.maskToken()))
@@ -313,15 +306,19 @@ class CGPT4Translate(BaseTranslate):
                     LOGGER.warning(get_text("request_error_switch_token", GT_LANG, self.token.maskToken()))
                     continue
                 elif "try again later" in str_ex or "too many requests" in str_ex:
-                    self.pj_config.bar.text(
-                        "-> 检测到频率限制(429 RateLimitError)，翻译仍在进行中但速度将受影响..."
+                    LOGGER.warning(
+                        get_text("request_error_too_many", GT_LANG, self.wait_time)
                     )
-                    await asyncio.sleep(sleep_time)
+                    await asyncio.sleep(self.wait_time)
+                    continue
+                elif "try reload" in str_ex:
+                    self.reset_conversation()
+                    LOGGER.error(get_text("request_error_reset", GT_LANG))
                     continue
                 else:
                     self._del_last_answer()
-                    LOGGER.info(get_text("request_error_retry", GT_LANG, str_ex))
-                    await asyncio.sleep(sleep_time)
+                    LOGGER.info(get_text("request_error_retry", GT_LANG, ex))
+                    await asyncio.sleep(2)
                     continue
 
             result_text = resp
@@ -397,12 +394,13 @@ class CGPT4Translate(BaseTranslate):
                     )
                     error_flag = True
                     break
-                     # 检查字符串是否包含非中文、日文、英文、数字、空白字符、所有标点符号、特殊symbol
+
+                # 检查字符串是否包含非中文、日文、英文、数字、空白字符、所有标点符号、特殊symbol
                 if regex.search(r"[^\p{Han}\p{Hiragana}\p{Katakana}\p{Latin}\p{N}\s\p{P}\p{So}]", line_json[key_name], flags=re.UNICODE):
                     error_message = f"第{line_id}句包含非中文、日文、英文、数字、空白字符和标点符号：" + line_json[key_name]
                     error_flag = True
                     break
-                    
+
                 if self.target_lang != "English":
                     if "can't fullfill" in line_json[key_name]:
                         error_message = f"GPT4拒绝了翻译"

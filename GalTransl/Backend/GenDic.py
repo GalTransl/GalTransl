@@ -1,4 +1,6 @@
 import json, time, asyncio, os, traceback
+import re
+from re import Pattern
 from turtle import title
 from opencc import OpenCC
 from typing import Optional
@@ -36,7 +38,9 @@ class GenDic(BaseTranslate):
         self.list_lock = Lock()
         self.config = config
         self.init_chatbot(eng_type, config)
-        pass
+        self._compile_patterns()
+
+
 
     async def llm_gen_dic(self, text: str, name_list=[]):
         hint = "无"
@@ -141,9 +145,11 @@ class GenDic(BaseTranslate):
                 segment_words_list.append(tmp_words)
                 bar()
 
-        # 剔除出现次数小于2的词语
+        # 剔除不满足自定义规则的词语
         word_counter = {
-            word: count for word, count in word_counter.items() if count >= 2
+            word: count
+            for word, count in word_counter.items()
+            if self._should_keep_word(word, count)
         }
         segment_words_list_new = []
         for item in segment_words_list:
@@ -155,7 +161,7 @@ class GenDic(BaseTranslate):
 
         index_list = solve_sentence_selection(segment_words_list_new)
         # 取前100个
-        index_list = index_list[:128]
+        index_list = index_list[:100]
         LOGGER.info(f"启动{self.wokers}个工作线程，共{len(index_list)}个任务")
         sem = asyncio.Semaphore(self.wokers)
 
@@ -185,16 +191,12 @@ class GenDic(BaseTranslate):
                 continue
             if item[0] in H_WORDS_LIST:
                 continue
-
-            if self.dic_counter[item[0]] > 1:
-                final_list.append(item)
-            elif "人名" in item[2]:
-                final_list.append(item)
-            elif "地名" in item[2]:
-                final_list.append(item)
-            elif item[0] in word_counter:
-                final_list.append(item)
-            elif item[0] in name_set:
+            if not self._should_keep_word(item[0], self.min_word_count):
+                continue
+            if (
+                    item[0] in name_set or item[0] in word_counter
+                    or any(tag in item[2] for tag in ["人名", "地名"])
+            ):
                 final_list.append(item)
 
         result_path = os.path.join(self.config.getProjectDir(), "项目GPT字典-生成.txt")
@@ -206,6 +208,46 @@ class GenDic(BaseTranslate):
         LOGGER.info(f"字典生成完成，共{len(final_list)}个词语，保存到{result_path}")
 
         return True
+
+    def _compile_patterns(self):
+        """编译正则表达式过滤规则"""
+        self.exclude_patterns: List[Pattern] = []
+        for pattern in self.config.getKey("exclude_patterns"):
+            try:
+                self.exclude_patterns.append(re.compile(pattern))
+            except re.error as e:
+                LOGGER.warning(f"无效的正则表达式 '{pattern}': {e}")
+
+        self.force_include = set(self.config.getKey("force_include"))
+        self.min_word_count = self.config.getKey("min_word_count")
+
+    def _should_keep_word(self, word: str, count: int) -> bool:
+        """
+        判断是否保留该词汇
+        :param word: 待检查的词汇
+        :param count: 出现次数
+        :return: True表示保留，False表示过滤
+        """
+        # 强制保留的词汇直接通过
+        if word in self.force_include:
+            return True
+
+        # 检查词频阈值
+        if count < self.min_word_count:
+            return False
+
+        # 检查黑名单
+        if word in H_WORDS_LIST:
+            return False
+
+        # 检查正则排除规则
+        for pattern in self.exclude_patterns:
+            if pattern.fullmatch(word):
+                return False
+
+        return True
+
+    pass
 
 
 def solve_sentence_selection(sentences):
