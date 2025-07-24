@@ -1,4 +1,4 @@
-import json, re
+import orjson, re
 from collections import OrderedDict
 from GalTransl import LOGGER
 from GalTransl.GTPlugin import GFilePlugin
@@ -24,7 +24,7 @@ class file_plugin(GFilePlugin):
         if not file_path.endswith(".json"):
             raise TypeError("File type not supported.")
         with open(file_path, "r", encoding="utf-8") as f:
-            raw_dict = json.load(f)
+            raw_dict = orjson.loads(f.read())
         # 检查文件内容是否为字典并抛出TypeError
         if type(raw_dict) is not dict:
             raise TypeError("File content is not a dictionary.")
@@ -55,8 +55,8 @@ class file_plugin(GFilePlugin):
             else:
                 result_dict[item["key"]] = item["value"]
         result_dict = unflatten(result_dict)
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(result_dict, f, ensure_ascii=False, indent=4)
+        with open(file_path, "wb") as f:
+            f.write(orjson.dumps(result_dict, option=orjson.OPT_INDENT_2))
 
     def gtp_final(self):
         """

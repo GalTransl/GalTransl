@@ -1,0 +1,8 @@
+# This is the post-translation dictionary file
+# Format: search_word<tab>replace_word
+# Example: Hello<tab>Greetings
+# Lines starting with # are comments and will be ignored
+
+# The following are some common examples, please modify according to your needs
+failed translation	Translation failed
+Failed Translation	Translation Failed

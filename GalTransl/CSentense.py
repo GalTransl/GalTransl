@@ -52,6 +52,15 @@ class CSentense:
         if hasattr(self, "_pre_jp"):
             raise AttributeError("Can't modify pre_jp")
         self._pre_jp = value
+    
+    def get_speaker_name(self):
+        if isinstance(self.speaker, str):
+            return self.speaker
+        if isinstance(self.speaker, list):
+            return "/".join(self.speaker)
+
+        return ""
+
 
     def __repr__(self) -> str:
         name = self.speaker
@@ -61,7 +70,7 @@ class CSentense:
         tmp_proofread_zh = self.proofread_zh.replace("\r", "\\r").replace("\n", "\\n")
         char_t = "\t"
         char_n = "\n"
-        return f"{char_n}⇣--{self.index}{name}{char_n}> Src: {tmp_post_jp}{char_n}> Dst: {tmp_post_zh if self.proofread_zh == '' else tmp_proofread_zh}"
+        return f"{char_n}v--{self.index}{name}{char_n}> Src: {tmp_post_jp}{char_n}> Dst: {tmp_post_zh if self.proofread_zh == '' else tmp_proofread_zh}"
 
     def analyse_dialogue(self, dia_format: str = "#句子", mono_format: str = "#句子"):
         """对话分析，根据对话框判断是否为对话，暂时隐藏对话框，分别格式化diag与mono到不同的format

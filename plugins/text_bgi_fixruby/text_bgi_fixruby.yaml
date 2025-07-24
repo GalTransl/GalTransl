@@ -1,0 +1,17 @@
+Core:
+  Name: BGI 修复 ruby 标签插件
+  Type: text
+  Module: text_bgi_fixruby
+
+Documentation:
+  Author: lifegpc
+  Version: 1.0
+  Description: 支持移除不正确的 ruby 标签和自动修正着重符号（・）数量
+
+Settings: # 这里存放插件的设置
+  # 移除不正确的 ruby 标签
+  remove_incorrect: true
+  # 自动修正着重符号（・）数量
+  auto_correct: true
+  # 修改过的文本输出时的日志级别
+  process_log_level: debug

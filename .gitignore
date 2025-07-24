@@ -1,6 +1,9 @@
 __pycache__/
 *.pyc
 
+# Unit test files
+unittest_*
+
 # VSCode
 .vscode
 useful_tools/GalTransl_DumpInjector/config.ini

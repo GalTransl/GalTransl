@@ -127,6 +127,18 @@ class CNormalDic:
         for dic_path in dic_list:
             self.load_dic(dic_path)  # 加载字典
 
+    def sort_dic(self):
+        """
+        按字典search_word的长度重排序
+        """
+        self.dic_list.sort(key=lambda x: len(x.search_word), reverse=True)
+
+    def get_dst(self,word):
+        for dic in self.dic_list:
+            if dic.search_word == word:
+                return dic.replace_word
+        return ""
+
     def load_dic(self, dic_path: str):
         """加载一个字典txt到这个对象的内存"""
         if not path.exists(dic_path):
@@ -158,7 +170,7 @@ class CNormalDic:
                 continue
             # 处理转义字符
             for i in range(len_sp):
-                sp[i]=process_escape(sp[i])
+                sp[i] = process_escape(sp[i])
 
             is_conditionaDic_line = True if sp[0] in self.conditionaDic_key else False
             is_situationsDic_line = True if sp[0] in self.situationsDic_key else False
@@ -203,11 +215,14 @@ class CNormalDic:
             )
         )
 
-    def do_replace(self, input_text: str, input_tran: CSentense) -> str:
+    def do_replace(
+        self, input_text: str, input_tran: CSentense, full_match: bool = False
+    ) -> str:
         """
         通过这个dic字典来优化一个句子。
         input_text：要被润色的句子
         input_translate：这个句子所在的Translate对象
+        full_match：是否全匹配，默认False，开启后查找词完全等于input_text才替换
         """
         # 遍历每个BasicDicElement做替换
         for dic in self.dic_list:
@@ -295,7 +310,10 @@ class CNormalDic:
             elif dic.onetime_flag:  # onetime情况，只替换一次
                 input_text = input_text.replace(search_word, replace_word, 1)
             else:  # 普通情况
-                input_text = input_text.replace(search_word, replace_word)
+                if not full_match:
+                    input_text = input_text.replace(search_word, replace_word)
+                elif search_word == input_text:
+                    input_text = replace_word
 
         return input_text
 
@@ -305,6 +323,18 @@ class CGptDict:
         self._dic_list: List[CBasicDicElement] = []
         for dic_path in dic_list:
             self.load_dic(dic_path)  # 加载字典
+    
+    def get_dst(self,word):
+        for dic in self._dic_list:
+            if dic.search_word == word:
+                return dic.replace_word
+        return ""
+
+    def sort_dic(self):
+        """
+        按字典search_word的长度重排序
+        """
+        self._dic_list.sort(key=lambda x: len(x.search_word), reverse=True)
 
     def load_dic(self, dic_path: str):
         """加载一个字典txt到这个对象的内存"""
@@ -323,11 +353,12 @@ class CGptDict:
         for line in dic_lines:
             if line.startswith("\n"):
                 continue
-            # elif line.startswith("\\\\") or line.startswith("//"):  # 注释行跳过
-            #     continue
 
-            # 四个空格换成Tab
+            # 兼容四个空格
             line = line.replace("    ", "\t")
+            # 兼容src->dst #note
+            if "->" in line:
+                line = line.replace("->", "\t").replace("#", "\t")
 
             sp = line.rstrip("\r\n").split("\t")  # 去多余换行符，Tab分割
             len_sp = len(sp)
@@ -335,11 +366,25 @@ class CGptDict:
             if len_sp < 2:  # 至少是2个元素
                 continue
 
-            dic = CBasicDicElement(sp[0], sp[1], dic_name=dic_name)
+            search_word = sp[0]
+            replace_word = sp[1]
             if len_sp > 2 and sp[2]:
-                dic.note = sp[2]
+                note = sp[2]
             else:
-                dic.note = ""
+                note = ""
+
+            redundant_flag = False
+            for d in self._dic_list:
+                if d.search_word == search_word and d.replace_word == replace_word:
+                    if d.note and d.note == note:
+                        LOGGER.warning(f"重复的GPT字典词条 {search_word} -> {replace_word} 已忽略")
+                        redundant_flag = True
+                        break
+            if redundant_flag:
+                continue
+
+            dic = CBasicDicElement(search_word, replace_word, dic_name=dic_name)
+            dic.note = note
             self._dic_list.append(dic)
             normalDic_count += 1
         LOGGER.info(
@@ -347,36 +392,67 @@ class CGptDict:
         )
 
     def gen_prompt(self, trans_list: CTransList, type="gpt"):
+        def _should_add_dic(dic, input_text, input_text_copy, used_dic):
+            """判断是否应该添加字典条目到提示中"""
+            if dic.search_word in input_text:
+                return True
+            if dic.search_word in input_text_copy:
+                for word in used_dic:
+                    if word in dic.search_word:
+                        return True
+            return False
+
+        def _format_dic_entry_gpt(dic:CBasicDicElement):
+            """格式化字典条目为提示所需的字符串"""
+            entry = f"| {dic.search_word} | {dic.replace_word} |"
+            if dic.note:
+                entry += f" {dic.note}"
+            entry += " |\n"
+            return entry
+        TITLE_GPT="# Glossary\n| Src | Dst(/Dst2/..) | Note |\n| --- | --- | --- |\n"
+        def _format_dic_entry_sakura(dic:CBasicDicElement):
+            """格式化字典条目为提示所需的字符串"""
+            entry = f"{dic.search_word}->{dic.replace_word}"
+            if dic.note:
+                entry += f" #{dic.note}"
+            entry += "\n"
+            return entry
+        TITLE_SAKURA=""
+        def _format_dic_entry_tsv(dic:CBasicDicElement):
+            """格式化字典条目为提示所需的字符串"""
+            entry = f"{dic.search_word}\t{dic.replace_word}"
+            if dic.note:
+                entry += f"\t{dic.note}"
+            entry += "\n"
+            return entry
+        TITLE_TSV="SRC\tDST\tNOTE\n"
+
         promt = ""
         input_text = "\n".join(
-            [f"{tran.speaker}:{tran.post_jp}" for tran in trans_list]
+            [f"{tran.get_speaker_name()}:{tran.post_jp}" for tran in trans_list]
         )
-        if type == "gpt":
-            for i, dic in enumerate(self._dic_list):
-                prev_dic = self._dic_list[i - 1] if i > 0 else None
-                if prev_dic and dic.search_word in prev_dic.search_word:
-                    input_text = input_text.replace(prev_dic.search_word, "")
-                if dic.startswith_flag or dic.search_word in input_text:
-                    promt += f"| {dic.search_word} | {dic.replace_word} |"
-                    if dic.note != "":
-                        promt += f" {dic.note}"
-                    promt += " |\n"
+        input_text_copy=input_text
+        used_dic=[]
 
-            if promt != "":
-                promt = (
-                    "# Glossary\n| Src | Dst(/Dst2/..) | Note |\n| --- | --- | --- |\n"
-                    + promt
-                )
-        elif type == "sakura":
-            for i, dic in enumerate(self._dic_list):
-                prev_dic = self._dic_list[i - 1] if i > 0 else None
-                if prev_dic and dic.search_word in prev_dic.search_word:
-                    input_text = input_text.replace(prev_dic.search_word, "")
-                if dic.startswith_flag or dic.search_word in input_text:
-                    promt += f"{dic.search_word}->{dic.replace_word}"
-                    if dic.note != "":
-                        promt += f" #{dic.note}"
-                    promt += "\n"
+
+        for dic in self._dic_list:
+            if _should_add_dic(dic, input_text, input_text_copy, used_dic):
+                if type=="gpt":
+                    promt += _format_dic_entry_gpt(dic)
+                elif type=="sakura":
+                    promt += _format_dic_entry_sakura(dic)
+                elif type=="tsv":
+                    promt += _format_dic_entry_tsv(dic)
+                input_text = input_text.replace(dic.search_word, "")
+                used_dic.append(dic.search_word)
+        if promt:
+            if type=="gpt":
+                promt=TITLE_GPT+promt
+            elif type=="sakura":
+                promt=TITLE_SAKURA+promt
+            elif type=="tsv":
+                promt=TITLE_TSV+promt
+
 
         return promt
 

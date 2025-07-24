@@ -1,0 +1,17 @@
+# This is the post-translation dictionary for symbol corrections
+# Format: search_word<tab>replace_word
+# Example: ,.<tab>, .
+# Lines starting with # are comments and will be ignored
+
+# The following are some common examples for symbol corrections
+,.	, .
+..	. .
+,	, 
+.	. 
+!	! 
+?	? 
+
+# Quotation mark corrections
+""	""
+''	''
+"

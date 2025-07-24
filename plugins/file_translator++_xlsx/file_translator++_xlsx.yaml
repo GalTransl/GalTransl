@@ -9,5 +9,7 @@ Documentation:
   Description: Translator++ 导出的 xlsx 文件，将会写入到 Machine translation 栏目中。
 
 Settings: # 这里存放插件的设置
-  是否自动识别名称: True 
-  名称识别正则表达式: ^(?P<name>.*?)「(?P<message>.*?)」$ # 用于识别名称的正则表达式，两个part分别标识name和message
+  是否自动识别名称: False  
+  名称识别正则表达式: ^(?P<name>.*?)(?P<message>「.*?」)$ # 用于识别名称的正则表达式，两个part分别标识name和message
+  名称识别拼接方案: "{name}\n{message}" # 用于拼接名称的格式化字符串（f-string），{name}和{message}分别表示name和message
+  清除换行符: False # 是否清除导出的xlsx文件中的换行符

@@ -24,7 +24,7 @@ class file_plugin(GFilePlugin):
         self.srt_pattern = re.compile(
             r"(\d+)\n([\d:,]+ --> [\d:,]+)\n(.+?)(?=\n\d+|\Z)", re.DOTALL
         )
-        self.lrc_pattern = re.compile(r"\[(\d+:\d+\.\d+)\](.+)", re.UNICODE)
+        self.lrc_pattern = re.compile(r"\[(\d+:\d+\.\d+)\](.*)", re.UNICODE)
 
     def load_file(self, file_path: str) -> list:
         """
@@ -105,10 +105,16 @@ class file_plugin(GFilePlugin):
                         result += f"{item['index']}\n{item['timestamp']}\n{item['message']}\n{item['org_message']}\n\n"
         elif file_path.endswith(".lrc"):
             for item in transl_json:
-                if not self.保存双语字幕:
+                if not item['message'] and not item['org_message']:
+                    # 只有时间戳的行，只保存一次
+                    result += f"[{item['timestamp']}]\n"
+                elif not self.保存双语字幕:
                     result += f"[{item['timestamp']}]{item['message']}\n"
-                else:
-                    result += f"[{item['timestamp']}]{item['message']} {item['org_message']}\n"
+                elif self.保存双语字幕:
+                    if self.上下双语1左右双语2 == 1:
+                        result += f"[{item['timestamp']}]{item['message']}\n[{item['timestamp']}]{item['org_message']}\n"
+                    elif self.上下双语1左右双语2 == 2:
+                        result += f"[{item['timestamp']}]{item['message']} {item['org_message']}\n"
         elif file_path.endswith(".vtt"):
             vtt = webvtt.WebVTT()
             for item in transl_json:

@@ -1,6 +1,7 @@
 """
 读取 / 处理配置
 """
+
 from GalTransl import (
     LOGGER,
     CONFIG_FILENAME,
@@ -8,6 +9,7 @@ from GalTransl import (
     OUTPUT_FOLDERNAME,
     CACHE_FOLDERNAME,
 )
+from GalTransl.Dictionary import CGptDict, CNormalDic
 from asyncio import gather
 from tenacity import retry, stop_after_attempt, wait_fixed
 from httpx import AsyncClient, TimeoutException
@@ -17,6 +19,7 @@ from random import choice
 from yaml import safe_load
 from os import path, sep
 from enum import Enum
+from importlib.metadata import version
 
 
 class CProxy:
@@ -46,6 +49,9 @@ class CProblemType(Enum):
     多加换行 = 5
     比日文长 = 6
     字典使用 = 7
+    引入英文 = 8
+    比日文长严格 = 9
+    语言不通 = 10
 
 
 class CProjectConfig:
@@ -78,6 +84,19 @@ class CProjectConfig:
             self.cachePath,
             self.keyValues,
         )
+
+        self.select_translator = ""  # 本次选择的翻译器
+        self.pre_dic: CNormalDic = None  # 预处理字典
+        self.post_dic: CNormalDic = None  # 后处理字典
+        self.gpt_dic: CGptDict = None  # gpt字典
+        self.file_save_funcs = {}  # 文件保存函数
+        self.name_replaceDict = {}  # 名字替换字典
+        self.tPlugins = []  # 文本插件列表
+        self.fPlugins = []  # 文件插件列表
+        self.tokenPool = None  # 令牌池
+        self.proxyPool = None  # 代理池
+        self.endpointQueue = None  # 端点队列
+        self.input_splitter = None  # 输入分割器
 
     def getProjectConfig(self) -> dict:
         """
@@ -112,8 +131,11 @@ class CProjectConfig:
     def getCommonConfigSection(self) -> dict:
         return self.projectConfig["common"]
 
+    def getPluginConfigSection(self) -> dict:
+        return self.projectConfig["plugin"]
+
     def getlbSymbol(self) -> str:
-        lbSymbol = self.projectConfig["common"].get("linebreakSymbol", "\r\n")
+        lbSymbol = self.projectConfig["common"].get("linebreakSymbol", "auto")
         return lbSymbol
 
     def getProxyConfigSection(self) -> dict:
@@ -123,6 +145,12 @@ class CProjectConfig:
         """
         backendName: GPT35 / GPT4 / ChatGPT / bingGPT4
         """
+        if backendName=="OpenAI-Compatible":
+            if "OpenAI-Compatible" not in self.projectConfig["backendSpecific"]:
+                backendName="GPT4"
+        elif backendName=="SakuraLLM":
+            if "SakuraLLM" not in self.projectConfig["backendSpecific"]:
+                backendName="Sakura"
         return self.projectConfig["backendSpecific"][backendName]
 
     def getDictCfgSection(self, key: str = "") -> dict:
@@ -133,8 +161,8 @@ class CProjectConfig:
         else:
             return None
 
-    def getKey(self, key: str) -> str | bool | int | None:
-        return self.keyValues.get(key)
+    def getKey(self, key: str, default: None = None) -> str | bool | int | None:
+        return self.keyValues.get(key, default)
 
     def getProblemAnalyzeConfig(self, backendName: str) -> list[CProblemType]:
         if backendName not in self.projectConfig["problemAnalyze"]:
@@ -146,6 +174,10 @@ class CProjectConfig:
         return result
 
     def getProblemAnalyzeArinashiDict(self) -> dict:
+        if "arinashiDict" not in self.projectConfig["problemAnalyze"]:
+            return {}
+        elif not self.projectConfig["problemAnalyze"]["arinashiDict"]:
+            return {}
         return self.projectConfig["problemAnalyze"]["arinashiDict"]
 
 
@@ -164,10 +196,12 @@ class CProxyPool:
         try:
             st = time()
             LOGGER.debug("start testing proxy %s", proxy.addr)
-            async with AsyncClient(proxies={"http://": proxy.addr}) as client:
+            async with AsyncClient(proxy=proxy.addr) as client:
                 response = await client.get(test_address)
                 if response.status_code != 204:
-                    LOGGER.debug("tested proxy %s failed (%s)", proxy.addr, response)
+                    LOGGER.debug(
+                        "tested proxy %s failed (%s)", proxy.addr, response
+                    )
                     return False, proxy
                 else:
                     return True, proxy
@@ -175,8 +209,7 @@ class CProxyPool:
             LOGGER.debug("we got exception in testing proxy %s", proxy.addr)
             return False, proxy
         except:
-            LOGGER.debug("we got exception in testing proxy %s", proxy.addr)
-            raise
+            LOGGER.error("代理 %s 无法连接", proxy.addr)
             return False, proxy
         finally:
             et = time()
@@ -200,7 +233,7 @@ class CProxyPool:
         rounds: int = 0
         while True:
             if rounds > 10:
-                raise RuntimeError("CProxyPool::getProxy: 迭代次数过多！")
+                raise RuntimeError("CProxyPool::getProxy: 没有可用的代理！")
             available, proxy = choice(self.proxies)
             if not available:
                 rounds += 1

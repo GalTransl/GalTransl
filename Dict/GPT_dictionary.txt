@@ -1,0 +1,14 @@
+# GPT Dictionary
+# Format: search_word<tab>replace_word<tab>explanation
+# Example: Alice<tab>Alice<tab>The main character, a 16-year-old high school girl
+# Lines starting with # are comments and will be ignored
+
+# Character names and explanations
+# Example:
+# Sakura<tab>Sakura<tab>The main heroine, a cheerful 17-year-old high school student
+# Takashi<tab>Takashi<tab>The protagonist, a 18-year-old high school student
+
+# Terminology specific to the game
+# Example:
+# Magic Academy<tab>Magic Academy<tab>The school where the story takes place
+# Spirit Stone<tab>Spirit Stone<tab>A magical item that enhances magical abilities

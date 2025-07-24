@@ -1,0 +1,18 @@
+Core:
+  Name: Epub 文件
+  Type: file
+  Module: file_epub_epub
+
+Documentation:
+  Author: PiDanShouRouZhou
+  Version: 1.0
+  Description: 翻译 Epub 文件, 支持自动识别名称、双语显示、缩小比例、拆分文件以支持单文件多线程翻译等功能。部分代码和正则来自Ainiee。
+
+Settings: # 这里存放插件的设置
+  是否自动识别名称: False  # 默认关闭自动识别名称
+  名称识别正则表达式: ^(?P<name>.*?)「(?P<message>.*?)」$ # 用于识别名称的正则表达式，两个part分别标识name和message
+  名称识别拼接方案: "{name}\n「{message}」" # 用于拼接名称的格式化字符串（f-string），{name}和{message}分别表示name和message
+  双语显示: True  # 默认开启双语显示
+  原文颜色: "#808080" #默认灰色
+  缩小比例: 0.8  # 默认缩小到原始大小的80%
+  是否拆分文件以支持单文件多线程: False  # 单文件拆分功能，用于支持单文件多线程翻译，默认关闭。

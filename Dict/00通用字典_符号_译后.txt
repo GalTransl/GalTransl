@@ -36,3 +36,4 @@ post_jp	」	”	」
 pre_jp	!“	“		
 pre_jp	!”	”		
 pre_jp	!。）	。）	）
+pre_jp	!。。	。。	。

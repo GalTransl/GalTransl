@@ -1,0 +1,30 @@
+Core:
+  Name: 完成消息推送
+  Type: text
+  Module: text_message_serverchan_tgbot
+
+Documentation:
+  Author: PiDanShouRouZhou
+  Version: 1.3
+  Description: 完成所有翻译后，推送完成消息到ServerChan / Telegram Bot，并支持声音通知
+
+Settings:
+  推送渠道: # 推送渠道，可以选择多个
+    - ServerChan
+    - Telegram Bot
+  Telegram_Bot_API_URL: "https://api.telegram.org"
+  Telegram_Bot_Token: ""
+  Telegram_Bot_ChatID: ""
+  ServerChan_SendKey: ""
+
+  # 声音通知设置
+  启用声音通知: false
+  # 自定义声音文件路径，关闭则使用默认音频
+  使用自定义音频: false
+  成功音频路径: "custom_sound/success_Asta_happy.wav"
+  失败音频路径: "custom_sound/fail_Asta_sad.wav"
+  # 使用OpenAI TTS 合成完整的语音播报
+  使用OpenAI TTS: false
+  OpenAI_API_Key: ""
+  OpenAI_API_Base_URL: "https://api.openai.com/v1"
+  OpenAI_TTS_Voice: "onyx" # 可选 alloy, echo, fable, onyx, nova, shimmer

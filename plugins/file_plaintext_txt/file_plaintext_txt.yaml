@@ -1,0 +1,29 @@
+Core:
+  Name: txt文本文件读取
+  Type: file
+  Module: file_plaintext_txt
+
+Documentation:
+  Author: PiDanShouRouZhou
+  Version: 1.1
+  Description: 可以直接处理.txt文本文件并翻译，但不应该用于翻译包含大量控制符的脚本。
+  
+# 控制符是指任何游戏实际文本以外的内容，如控制立绘、音效、语音播放的脚本。示例如下：
+
+# 错误的脚本示例，包含大量控制符：
+
+# ;//背景：主人公自室_夜
+# *seal107_27_0001|
+# [TR_IN_CG back_cg = bg_008b t_rule = mask_clock_rl time = 1500]
+
+# 正确的脚本示例，不包含控制符：
+
+# 这是一段普通的文本。
+# 不包含任何控制符。
+# 只有纯粹的文本。
+
+Settings: # 这里存放插件的设置
+  保存双语txt文件: false # 是否保存双语txt文件
+  上下双语1左右双语2: 1 # 1表示上下双语，2表示左右双语
+  txt读取编码: utf-8 # txt文件读取编码
+  txt写入编码: utf-8 # txt文件写入编码

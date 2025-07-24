@@ -7,3 +7,6 @@ Documentation:
   Author: cx2333
   Version: 1.0
   Description: 标准的name(可选)-message格式json文件，有name效果更好
+
+Settings: # 这里存放插件的设置
+  output_with_src: False # 输出到gt_output时是否保留原文

@@ -1,4 +1,4 @@
-import json
+import orjson
 from GalTransl.CSentense import CTransList
 
 
@@ -20,8 +20,8 @@ def save_transList_to_json_cn(trans_list: CTransList, save_path: str, name_dict=
                 result_list.append({"name": result_name, "message": tran.post_zh})
         else:
             result_list.append({"message": tran.post_zh})
-    with open(save_path, "w", encoding="utf8") as f:
-        json.dump(result_list, f, ensure_ascii=False, indent=4)
+    with open(save_path, "wb") as f:
+        f.write(orjson.dumps(result_list, option=orjson.OPT_INDENT_2))
 
 
 def update_json_with_transList(
@@ -54,5 +54,5 @@ def update_json_with_transList(
 
 
 def save_json(file_path: str, result_json: list):
-    with open(file_path, "w", encoding="utf8") as f:
-        json.dump(result_json, f, ensure_ascii=False, indent=4)
+    with open(file_path, "wb") as f:
+        f.write(orjson.dumps(result_json, option=orjson.OPT_INDENT_2))

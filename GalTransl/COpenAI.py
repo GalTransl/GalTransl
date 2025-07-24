@@ -2,23 +2,18 @@
 CloseAI related classes
 """
 
-from httpx import AsyncClient
 import asyncio
-from tqdm.asyncio import tqdm
+from asyncio import gather
+from alive_progress import alive_bar
 from time import time
-from GalTransl import LOGGER
+from GalTransl import LOGGER, TRANSLATOR_DEFAULT_ENGINE
 from GalTransl.ConfigHelper import CProjectConfig, CProxy
 from typing import Optional, Tuple
 from random import choice
-
-TRANSLATOR_ENGINE = {
-    "gpt35": "gpt-3.5-turbo",
-    "gpt35-0613": "gpt-3.5-turbo-0613",
-    "gpt35-1106": "gpt-3.5-turbo-1106",
-    "gpt35-0125": "gpt-3.5-turbo-0125",
-    "gpt4": "gpt-4",
-    "gpt4-turbo": "gpt-4-0125-preview",
-}
+from asyncio import Queue
+from openai import OpenAI
+import re
+import httpx
 
 
 class COpenAIToken:
@@ -26,62 +21,23 @@ class COpenAIToken:
     OpenAI 令牌
     """
 
-    def __init__(self, token: str, domain: str, gpt3: bool, gpt4: bool) -> None:
+    def __init__(self, token: str, domain: str,model_name:str, isAvailable: bool) -> None:
         self.token: str = token
-        # it's domain, not endpoint address..
         self.domain: str = domain
-        self.isGPT35Available: bool = gpt3
-        self.isGPT4Available: bool = gpt4
+        self.model_name:str=model_name
+        self.isAvailable: bool = isAvailable
+        self.avg_latency:float=0
+        self.req_count:int=0
 
     def maskToken(self) -> str:
         """
-        返回脱敏后的 sk-
+        返回脱敏后的 sk-*******-****
         """
-        return self.token[:6] + "*" * 17
+        if len(self.token)>10:
+            return self.token[:6] + "..." + self.token[-4:]
+        else:
+            return self.token
 
-
-def initGPTToken(config: CProjectConfig, eng_type: str) -> Optional[list[COpenAIToken]]:
-    """
-    处理 GPT Token 设置项
-    """
-    result: list[dict] = []
-    degradeBackend: bool = False
-
-    if val := config.getKey("gpt.degradeBackend"):
-        degradeBackend = val
-
-    defaultEndpoint = "https://api.openai.com"
-    gpt35_tokens = config.getBackendConfigSection("GPT35").get("tokens")
-    if "gpt35" in eng_type and gpt35_tokens:
-        for tokenEntry in gpt35_tokens:
-            token = tokenEntry["token"]
-            domain = (
-                tokenEntry["endpoint"]
-                if tokenEntry.get("endpoint")
-                else defaultEndpoint
-            )
-            domain = domain[:-1] if domain.endswith("/") else domain
-            result.append(COpenAIToken(token, domain, True, False))
-            pass
-
-        if not degradeBackend:
-            return result
-
-    if gpt4_tokens := config.getBackendConfigSection("GPT4").get("tokens"):
-        for tokenEntry in gpt4_tokens:
-            token = tokenEntry["token"]
-            domain = (
-                tokenEntry["endpoint"]
-                if tokenEntry.get("endpoint")
-                else defaultEndpoint
-            )
-            domain = domain[:-1] if domain.endswith("/") else domain
-            result.append(
-                COpenAIToken(token, domain, True if degradeBackend else False, True)
-            )
-            pass
-
-    return result
 
 
 class COpenAITokenPool:
@@ -90,60 +46,82 @@ class COpenAITokenPool:
     """
 
     def __init__(self, config: CProjectConfig, eng_type: str) -> None:
+
+        token_list: list[dict] = []
+        defaultEndpoint = "https://api.openai.com"
+        section_name = "OpenAI-Compatible"
         self.tokens: list[tuple[bool, COpenAIToken]] = []
-        for token in initGPTToken(config, eng_type):
-            self.tokens.append((False, token))
-        if "gpt35" in eng_type:
-            section = config.getBackendConfigSection("GPT35")
-        elif "gpt4" in eng_type:
-            section = config.getBackendConfigSection("GPT4")
-        self.force_eng_name = section.get("rewriteModelName", "")
+        self.force_eng_name = config.getBackendConfigSection(section_name).get(
+            "rewriteModelName", ""
+        )
+        self.stream=config.getBackendConfigSection(section_name).get(
+            "stream", False
+        )
+        self.timeout=config.getBackendConfigSection(section_name).get(
+            "apiTimeout", 60
+        )
+
+        if all_tokens := config.getBackendConfigSection(section_name).get("tokens"):
+            for tokenEntry in all_tokens:
+                token = tokenEntry["token"]
+                if "-example-" in token:
+                    continue
+                domain = (
+                    tokenEntry["endpoint"]
+                    if tokenEntry.get("endpoint")
+                    else defaultEndpoint
+                )
+                if "modelName" in tokenEntry:
+                    model_name=tokenEntry["modelName"]
+                else:
+                    model_name=self.force_eng_name
+
+                domain = domain[:-1] if domain.endswith("/") else domain
+                base_path="/v1" if not re.search(r"/v\d+", domain) else ""
+                token_list.append(COpenAIToken(token, domain+base_path, model_name, True))
+                pass
+
+        for token in token_list:
+            self.tokens.append((True, token))
 
     async def _isTokenAvailable(
-        self, token: COpenAIToken, proxy: CProxy = None, eng_type: str = ""
+        self, token: COpenAIToken, proxy: CProxy = None
     ) -> Tuple[bool, bool, bool, COpenAIToken]:
-        # returns isAvailable,isGPT3Available,isGPT4Available,token
-        # todo: do not remove token directly, we can score the token
+
+
         try:
             st = time()
-            async with AsyncClient(
-                proxies={"https://": proxy.addr} if proxy else None
-            ) as client:
-                auth = {"Authorization": "Bearer " + token.token}
-                model_name = TRANSLATOR_ENGINE.get(eng_type, "gpt-3.5-turbo")
-                if self.force_eng_name:
-                    model_name = self.force_eng_name
-                # test if have balance
-                chatResponse = await client.post(
-                    token.domain + "/v1/chat/completions",
-                    headers=auth,
-                    json={
-                        "model": model_name,
-                        "messages": [{"role": "user", "content": "Echo OK"}],
-                        "temperature": 0.7,
-                    },
-                    timeout=10,
-                )
-                if chatResponse.status_code != 200:
-                    # token not available, may token has been revoked
-                    return False, False, False, token
+            
+            client = OpenAI(
+                api_key=token.token,
+                base_url=token.domain,
+                http_client=httpx.Client(proxy=proxy.addr if proxy else None)
+            )
+            response = client.chat.completions.create(
+                model=token.model_name,
+                messages=[{"role": "user", "content": "JUST echo OK"}],
+                timeout=self.timeout,
+                stream=self.stream,
+            )
+            if self.stream==False:
+                if len(response.choices) > 0:
+                    return True, token
                 else:
-                    isGPT3Available = False
-                    isGPT4Available = False
-
-                    if "gpt-4" in model_name:
-                        isGPT4Available = True
-                    elif "gpt-3.5" in model_name:
-                        isGPT3Available = True
+                    return False, token
+            else:
+                for chunk in response:
+                    if len(chunk.choices) > 0:
+                        return True, token
                     else:
-                        isGPT4Available, isGPT3Available = True, True
+                        return False, token
+                    pass
+        except Exception as e:
+            LOGGER.error(e)
 
-                    return True, isGPT3Available, isGPT4Available, token
-        except:
             LOGGER.debug(
                 "we got exception in testing OpenAI token %s", token.maskToken()
             )
-            return False, False, False, token
+            return False, token
         finally:
             et = time()
             LOGGER.debug("tested OpenAI token %s in %s", token.maskToken(), et - st)
@@ -153,21 +131,21 @@ class COpenAITokenPool:
         self,
         token: COpenAIToken,
         proxy: CProxy = None,
-        eng_type: str = "",
         max_retries: int = 3,
-    ) -> Tuple[bool, bool, bool, COpenAIToken]:
+    ) -> Tuple[bool, COpenAIToken]:
         for retry_count in range(max_retries):
-            is_available, is_gpt3_available, is_gpt4_available, token = (
-                await self._isTokenAvailable(token, proxy, eng_type)
-            )
+            is_available, token = await self._isTokenAvailable(token, proxy)
             if is_available:
-                return is_available, is_gpt3_available, is_gpt4_available, token
+                self.bar()
+                return is_available, token
             else:
                 # wait for some time before retrying, you can add some delay here
+                LOGGER.warning(f"可用性检查失败，正在重试 {retry_count + 1} 次...")
                 await asyncio.sleep(1)
 
         # If all retries fail, return the result from the last attempt
-        return is_available, is_gpt3_available, is_gpt4_available, token
+        self.bar()
+        return is_available, token
 
     async def checkTokenAvailablity(
         self, proxy: CProxy = None, eng_type: str = ""
@@ -175,31 +153,28 @@ class COpenAITokenPool:
         """
         检测令牌有效性
         """
-        model_name = TRANSLATOR_ENGINE.get(eng_type, "gpt-3.5-turbo")
-        if self.force_eng_name:
-            model_name = self.force_eng_name
-        if model_name == "gpt-3.5-turbo-0125":
-            raise RuntimeError("gpt-3.5-turbo-0125质量太差，请更换其他模型！")
-        LOGGER.info(f"测试key是否能调用{model_name}模型...")
         fs = []
-        for _, token in self.tokens:
-            fs.append(
-                self._check_token_availability_with_retry(
-                    token, proxy if proxy else None, eng_type
+        with alive_bar(total=len(self.tokens),title="Testing Key……") as bar:
+            self.bar = bar
+            index=0
+            for _, token in self.tokens:
+                index+=1
+                LOGGER.info(f"Testing key{index}---{token.maskToken()}---{token.model_name}")
+                fs.append(
+                    self._check_token_availability_with_retry(
+                        token, proxy if proxy else None
+                    )
                 )
-            )
-        result: list[tuple[bool, bool, bool, COpenAIToken]] = await tqdm.gather(
-            *fs, ncols=80
-        )
+            result: list[tuple[bool, COpenAIToken]] = await gather(*fs)
 
         # replace list with new one
         newList: list[tuple[bool, COpenAIToken]] = []
-        for isAvailable, isGPT3Available, isGPT4Available, token in result:
+        for isAvailable, token in result:
             if isAvailable != True:
                 LOGGER.warning(
                     "%s is not available for %s, will be removed",
                     token.maskToken(),
-                    model_name,
+                    token.model_name,
                 )
             else:
                 newList.append((True, token))
@@ -216,24 +191,54 @@ class COpenAITokenPool:
             pass
         pass
 
-    def getToken(self, needGPT3: bool, needGPT4: bool) -> COpenAIToken:
+    def getToken(self) -> COpenAIToken:
         """
         获取一个有效的 token
         """
         rounds: int = 0
         while True:
             if rounds > 20:
-                raise RuntimeError(
-                    "COpenAITokenPool::getToken: 可用的API key耗尽！"
-                )
+                raise RuntimeError("COpenAITokenPool::getToken: 可用的API key耗尽！")
             try:
                 available, token = choice(self.tokens)
                 if not available:
                     continue
-                if needGPT3 and token.isGPT35Available:
-                    return token
-                if needGPT4 and token.isGPT4Available:
+                if token.isAvailable:
                     return token
                 rounds += 1
             except IndexError:
                 raise RuntimeError("没有可用的 API key！")
+    
+    def get_available_token(self) -> list[COpenAIToken]:
+        """
+        获取所有可用的token
+        """
+        return [token for available, token in self.tokens if available]
+
+
+async def init_sakura_endpoint_queue(projectConfig: CProjectConfig) -> Optional[Queue]:
+    """
+    初始化端点队列，用于Sakura或GalTransl引擎。
+
+    参数:
+    projectConfig: 项目配置对象
+    workersPerProject: 每个项目的工作线程数
+    eng_type: 引擎类型
+
+    返回:
+    初始化的端点队列，如果不需要则返回None
+    """
+
+    workersPerProject = projectConfig.getKey("workersPerProject") or 1
+    sakura_endpoint_queue = asyncio.Queue()
+    section_name = "SakuraLLM" 
+    if "endpoints" in projectConfig.getBackendConfigSection(section_name):
+        endpoints = projectConfig.getBackendConfigSection(section_name)["endpoints"]
+    else:
+        endpoints = [projectConfig.getBackendConfigSection(section_name)["endpoint"]]
+    repeated = (workersPerProject + len(endpoints) - 1) // len(endpoints)
+    for _ in range(repeated):
+        for endpoint in endpoints:
+            await sakura_endpoint_queue.put(endpoint)
+    LOGGER.info(f"当前使用 {workersPerProject} 个Sakura worker引擎")
+    return sakura_endpoint_queue

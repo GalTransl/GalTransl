@@ -1,45 +1,97 @@
----
+# 翻译后端相关设置
+backendSpecific:
+  OpenAI-Compatible: # (ForGal/ForNovel/r1/Gendic)OpenAI API兼容接口通用
+    tokens:
+      - token: sk-example-key1
+        endpoint: https://api.deepseek.com # 请求地址，加不加/v1都行
+        modelName: deepseek-chat
+      - token: sk-example-key2
+        endpoint: https://openrouter.ai/api/v1
+        modelName: deepseek/deepseek-chat-v3-0324:free
+    tokenStrategy: "random" # 令牌策略，random随机轮询；fallback优先第一个，出现[API错误]或[解析错误]时使用下一个
+    checkAvailable: true # 翻译前检查API是否可用[True/False]
+    stream: true # 流式请求[True/False]
+    apiTimeout: 120 # 请求超时时间，单位秒
+    apiErrorWait: auto # 发生API Error时的等待时间，包括频率限制。auto将自动适应[auto/0-120]
+
+  SakuraLLM: # (Sakura/Galtransl)
+    endpoints:
+      - http://127.0.0.1:8080
+      #- https://sakura-share.one/ # 可以使用sakura-share的免费sakura-v1.0模型
+    rewriteModelName: "" # 设置自定义的模型名称，在使用ollama时要修改
+
+# 插件，插件列表可在启动程序后选择show-plugs查看，或在plugins目录内查看
+plugin:
+  filePlugin: file_galtransl_json # 用于支持更多格式，字幕file_subtitle_srt_lrc_vtt，小说file_epub_epub或file_plaintext_txt，mtooljson用file_i18n_json
+  textPlugins: # 文本处理插件列表，可以设置多个，按顺序执行
+    - text_common_normalfix # 常规文本修复插件
+    #- text_common_skipNoJP # 跳过无日语句子插件
+  # 某个插件自己的设置可以进入plugins目录内修改对应的yaml文件，也可以这样设置：
+  file_galtransl_json:
+    output_with_src: False # 输出到gt_output时是否保留原文[True/False]
+
 # 程序设置
 common:
-  loggingLevel: info # 日志级别[DEBUG/INFO/WARNING/ERROR/CRITICAL]
-  saveLog: false # 是否记录日志到文件[True/False]
-  workersPerProject: 1 # 多线程，同时翻译的**文件**数量（单文件只能单线程）
-  language: "ja2zh-cn" # 源语言2(to)目标语言。[zh-cn/zh-tw/en/ja/ko/ru/fr]
-  save_steps: 1 # 每翻译n次保存一次缓存，单个文件较大时可以调高到10-100来提升速度。[1-999]
-  linebreakSymbol: "\r\n" # 这个项目在json中使用的换行符，找问题和自动修复时用到，不影响翻译。
+  gpt.numPerRequestTranslate: 8 # 单次请求翻译句子数量，推荐值 < 15
+  workersPerProject: 16 # 同时翻译n个文件（单个文件要多线程时需开启splitFile）
+  sortBy: "size" # 翻译顺序，name为文件名，size为大文件优先，多线程时大文件优先可以提高整体速度[name/size]
+  language: "zh-cn" # 翻译到的目标语言。[zh-cn/zh-tw/en/ja/ko/ru/fr]
+
+  # 单文件分割设置
+  ###【重要】分割设置直接影响缓存文件的读取命中，迁移旧项目请确保单文件分割设置一致 ###
+  splitFile: "Num" # 是否启用单文件分割。Num: 每n条分割一次，Equal: 每个文件均分n份，no: 关闭单文件分割。[no/Num/Equal]
+  splitFileNum: 2048 # Num时，表示n句拆分一次；Equal时，表示每个文件均分拆成n部分。
+  splitFileCrossNum: 0 # 分割文件时前后交叉n句，可能可以提高衔接处翻译质量[推荐0或10]。
+
+  save_steps: 1 # 每翻译n次保存一次缓存，单个大文件保存耗时久，可以调高到100之类的数来提高速度。[1-999]
+  start_time: "" # 定时启动，例如00:30，留空则立即启动。[00:00-23:59]
+  linebreakSymbol: "auto" # 这个项目在json中使用的换行符，找问题和自动修复时用到，不影响翻译。
   skipH: false # 跳过可能触发敏感词检测的句子。[True/False]
-  skipRetry: false # 开启则解析结果出错时跳过循环重试，直接用"Fail Translation"占位。[True/False]
-  retranslFail: false # 重启时重翻所有显示为"Fail Translation"的句子。[True/False]
-  retranslKey: "" # 重启时主动重翻在problem或pre_jp中包含此关键字的句子，例如"残留日文"
-  # 通用翻译设置
-  gpt.numPerRequestTranslate: 8 # 单次翻译句子数量，推荐值 < 15
-  gpt.streamOutputMode: true # 流式输出效果，多线程下无效。[True/False]
-  # NewBing/GPT4
-  gpt.enableProofRead: false # (NewBing/GPT4)是否开启译后校润。（不建议使用，很久未维护）[True/False]
-  gpt.numPerRequestProofRead: 7 # (NewBing/GPT4)单次校润句子数量，不建议修改
-  # GPT3.5/GPT4
-  gpt.restoreContextMode: true # (GPT3.5/4)重启时恢复上一轮的译文前文。[True/False]
+  retranslFail: false # 重启时重翻所有"(Failed)"的句子。[True/False]
+  retranslKey:
+    - "重翻在缓存的problem或pre_jp中包含对应**关键字**的句子，去掉下面列表中的#号注释来使用，也可添加自定义的关键字。"
+    - "翻译失败" # 重试翻译失败的
+    #- "残留日文" # 日文平假名片假名残留
+
+  # ForGal/ForGal-json/ForNovel/r1
+  gpt.enhance_jailbreak: False # 改善拒答[True/False]
+  gpt.change_prompt: "no" # 是否开启修改默认prompt,"AdditionalPrompt"为增加额外要求，"OverwritePrompt"为覆写原本的prompt
+  gpt.prompt_content: "翻译结果使用文言文" # 示例额外要求，change_prompt为AdditionalPrompt/OverwritePrompt时才生效
   # Sakura/GalTransl
-  gpt.transl_dropout: 0 # (Sakura/Galtransl)（实验性）丢弃翻译结果末尾的n行，可能会提高上下文准确性。[0-2]
-  # GalTransl
-  gpt.transl_style: "流畅" # (GalTransl)翻译风格[流畅/文艺]
-# 插件设置
-plugin:
-  filePlugin: file_galtransl_json # 指定文件读取插件，默认使用file_galtransl_json
-  textPlugins: # 文本处理插件列表，按顺序执行
-    - text_common_normalfix # 默认插件，修复常规通用问题
-    - (project_dir)text_common_example # 示例，(project_dir)代表插件在项目的plugins目录里
-    #- (project_dir)text_common_2333 # 示例，在 - 前加#号可以禁用插件
-# 代理设置
+  gpt.token_limit: 0 # (Sakura/Galtransl-7b)（实验性）大于0时限制每轮请求的token数量。防止爆context时可以设置为llama.cpp -c的数值除2。
+  # 调试日志
+  loggingLevel: info # 日志级别[debug/info/warning]
+  saveLog: false # 是否记录日志到文件[True/False]
+
+
+
+# 代理设置，使用中转供应商时一般不用开代理
 proxy:
   enableProxy: false # 是否启用代理。[True/False]
   proxies:
     - address: http://127.0.0.1:7890
-# 字典设置，所有字典、字典内词条将按顺序从上到下替换
+
+# 自动问题分析配置，在-前面加#号可以禁用
+problemAnalyze:
+  problemList: # 要发现的问题清单
+    - 词频过高 # 重复大于20次
+    - 标点错漏 # 标点符号多加或漏加
+    - 残留日文 # 日文平假名片假名残留
+    - 丢失换行 # 缺少换行符，一般没事
+    - 多加换行 # 换行符比原句多，可能导致溢出屏幕
+    - 比日文长 # 比日文长1.3倍以上
+    - 字典使用 # 没有按GPT字典要求翻译
+    #- 引入英文 # 本来没有英文，译文引入了英文
+    #- 语言不通 # 疑似没有被翻译成目标语言
+    #- 比日文长严格 # 严格查找，不能比日文长
+
+# 字典设置
 dictionary:
   defaultDictFolder: Dict # 通用字典文件夹，相对于程序目录，也可填入绝对路径
-  usePreDictInName: false # 将译前字典用在name字段，可用于改名[True/False]
-  usePostDictInName: false # 将译后字典用在name字段，可用于汉化name[True/False]
+  usePreDictInName: false # 将译前字典用在name字段，可用于翻译name字段，会发送给翻译引擎替换后的name[True/False]
+  usePostDictInName: false # 将译后字典用在name字段，可用于翻译name字段[True/False]
+  useGPTDictInName: false # 将GPT字典用在name字段，可用于翻译name字段[True/False]
+  sortDict: true # 将所有字典按查找词长度重排序。[True/False]
   # 译前字典
   preDict:
     - 01H字典_矫正_译前.txt # 用于口齿不清的矫正
@@ -49,44 +101,11 @@ dictionary:
   gpt.dict:
     - GPT字典.txt
     - (project_dir)项目GPT字典.txt
+    - (project_dir)项目GPT字典-生成.txt
   # 译后字典
   postDict:
     - 00通用字典_符号_译后.txt # 符号矫正
     - 00通用字典_译后.txt
     - (project_dir)项目字典_译后.txt
-# 翻译后端相关设置
-backendSpecific:
-  GPT35: # GPT3.5 API
-    tokens:
-      - token: sk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-        endpoint: https://api.openai.com # 使用转发或第三方API时修改
-      - token: sk-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-        endpoint: ""
-    rewriteModelName: "" # 使用指定的模型型号替换默认模型
-  GPT4: # GPT4 API/claude-3第三方中转
-    tokens:
-      - token: sk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-        endpoint: https://api.openai.com # 使用转发或第三方API时修改
-    rewriteModelName: "" # 使用指定的模型型号替换默认模型
-  bingGPT4: # NewBing API
-    cookiePath:
-      - newbing_cookies/cookie1.json # 你的 cookies 文件，相对于项目目录
-      - newbing_cookies/cookie2.json # 你的 cookies 文件2，会自动切换
-  SakuraLLM: # Sakura/Galtransl API
-    endpoints: 
-      - http://127.0.0.1:8080
-      #- http://127.0.0.1:5001 # 可以填入多个endpoints，用于多线程
-    rewriteModelName: "" # 使用指定的模型型号替换默认模型
-# 自动问题分析配置
-problemAnalyze: 
-  problemList: # 要发现的问题清单
-    - 词频过高
-    - 标点错漏
-    - 残留日文
-    - 丢失换行
-    - 多加换行
-    - 比日文长
-    - 字典使用
-  arinashiDict: # 格式为 aaa:<空格>bbb
-    aaa: bbb
-    ccc: ddd
+
+

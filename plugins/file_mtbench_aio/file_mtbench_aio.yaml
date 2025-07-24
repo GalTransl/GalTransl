@@ -1,0 +1,16 @@
+Core:
+  Name: 机器翻译质量评估
+  Type: file
+  Module: file_mtbench_aio
+
+Documentation:
+  Author: cx2333
+  Version: 2.0
+  Description: 用于机器翻译质量评估。输入文件为name(可选)-message格式json文件再加上ref字段，ref字段为参考译文。
+
+Settings: # 这里存放插件的设置
+  task: "chrf"  # 评估指标，目前支持chrf/comet/cutoff_rate
+  chrf_ngram: 4
+  chrf_beta: 2
+  comet_model_name: "Unbabel/wmt22-comet-da"
+  comet_batch_size: 8

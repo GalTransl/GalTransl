@@ -1,0 +1,13 @@
+# This is the pre-translation dictionary file
+# Format: search_word<tab>replace_word
+# Example: こんにちは<tab>Hello
+# Lines starting with # are comments and will be ignored
+
+# The following are some common examples, please modify according to your needs
+わたし	I
+あたし	I
+おれ	I
+ぼく	I
+私	I
+俺	I
+僕	I

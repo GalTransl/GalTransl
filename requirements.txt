@@ -1,12 +1,28 @@
-httpx
 opencc
+openai
 packaging
-prompt_toolkit
 PyYAML
-re_edge_gpt
 Requests
 tenacity
 tiktoken
-tqdm
 colorlog
 openpyxl
+orjson
+EbookLib
+beautifulsoup4
+playsound3
+fasttext-predict
+InquirerPy
+alive-progress
+vaporetto
+langid
+aiofiles
+
+# Tokenizer
+budoux
+# Optional tokenizers
+# jieba
+# pkuseg
+# Very heavyweight tokenizer, manual installation recommended
+# numpy < 2.0.0
+# hanlp

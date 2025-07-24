@@ -1,9 +1,9 @@
 Core:
-  Name: 通用-译后常规修复
+  Name: 通用-文本常规修复
   Type: text
   Module: text_common_normalfix
 
 Documentation:
   Author: cx2333
-  Version: 1.0
-  Description: 少许常规译后修复，包括1.修复首尾标点符号多加 2.修复\r\n换行符翻成\n的情况。
+  Version: 1.1
+  Description: 通用文本修复，包括1.修复首尾标点符号多加 2.修复\r\n换行符翻成\n的情况。

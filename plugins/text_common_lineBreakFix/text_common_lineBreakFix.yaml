@@ -1,0 +1,66 @@
+Core:
+  Name: 行内换行修复
+  Type: text
+  Module: text_common_lineBreakFix
+
+Documentation:
+  Author: PiDanShouRouZhou
+  Version: 1.2
+  Description: 对比翻译前后的文本，把翻译后的文本的行内换行符的数量补足/减少到相同数量。
+
+Settings: 
+  换行符: "\r\n"
+
+  换行模式: "保持位置"  # [平均|切最长|保持位置|前置|后置|固定字数]
+  分段字数阈值: 21  # 仅在固定字数模式有效
+  # 平均模式下，会忽略原有换行符，将文本等分，在等分点插入换行符
+  # 切最长模式下，会保留原有换行符，反复找最长片段从中间切分，直到达到目标换行符数量
+  # 保持位置模式下，会忽略原有换行符，根据原文的换行符相对位置，重新计算目标换行符的位置，保证相对位置不变
+  # 前置模式下，将所有换行符放在文本的最前面
+  # 后置模式下，将所有换行符放在文本的最后面
+  # 固定字数模式下，无论原文有无换行符，在字数达到分段字数阈值时插入换行符
+
+  强制修复: false  # 是否强制修复，即使原文和译文的换行符数量相同也会进行修复
+  分词器: "budoux"  # [budoux|jieba|pkuseg|hanlp] 
+  # 选择分词器：
+  # budoux最轻量化，为默认选项。
+  # jieba分词效果更好，但需要安装jieba库。
+  # pkuseg分词效果比jieba好，但需要安装pkuseg库。
+  # hanlp分词效果……我不好说。这个分词器不仅需要安装hanlp库，而且需要下载模型文件和pytorch（1GB+）。
+
+
+# 举例
+
+# 原文：
+# This is a piece of text, [r]which contains some line breaks. [r]The number of these line breaks is uncertain. [r]
+
+# 丢失换行符的译文：
+# 这是一段文本，其中包含了一些换行符。[r]这些换行符的数量是不确定的。
+
+# 平均：
+# 这是一段文本，其[r]中包含了一些换行[r]符。这些换行符的[r]数量是不确定的。
+
+
+# 切最长：
+# 这是一段文本，其中[r]包含了一些换行符。[r]这些换行符的数[r]量是不确定的。
+
+# 保持位置：
+# "This [r] is a piece of text, which contains [r] some line[r] breaks."
+# 这是一[r]段文本，其中包含了一些换行符。[r]额外的换[r]行符。
+
+
+# 如果是四个换行符：
+# 原文：
+# This is a piece of text, [r]which contains some line breaks. [r]The number of these line breaks is uncertain. [r]And here's one more break.[r]
+
+# 丢失换行符的译文：
+# 这是一段文本，其中包含了一些换行符。[r]这些换行符的数量是不确定的。这里还有一个换行符。
+
+# 切最长（四个换行符）：
+# 这是一段文本，其中[r]包含了一些换行符。[r]这些换行符的[r]数量是不确定[r]的。这里还有一个换行符。
+
+# 固定字数:
+# 假设阈值为10字符
+# 原文: "This is a long text without line breaks."
+# 译文: "这是一段没有换行符的长文本。"
+# 处理后: "这是一段没有换行符的[r]长文本。"

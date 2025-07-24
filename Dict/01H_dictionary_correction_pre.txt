@@ -1,0 +1,13 @@
+# This is the pre-translation correction dictionary for unclear speech
+# Format: search_word<tab>replace_word
+# Example: わかんない<tab>わからない
+# Lines starting with # are comments and will be ignored
+
+# The following are some common examples for speech corrections
+わかんない	わからない
+すげー	すごい
+やべー	やばい
+めっちゃ	とても
+すっげー	すごい
+めちゃくちゃ	とても
+めちゃ	とても
