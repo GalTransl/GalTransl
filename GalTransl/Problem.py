@@ -107,10 +107,11 @@ def find_problems(
             if CProblemType.比日文长严格 in find_type:
                 len_beta = 1.0
                 min_diff=0
+            # 由于业务逻辑保证pre_jp为空时pre_zh也为空(会被continue跳过)，
+            # 所以这里len(pre_jp)不会为0，可以安全地进行除法运算
             if len(post_zh) > len(pre_jp) * len_beta and len(post_zh)-len(pre_jp)>=min_diff:
                 problem_list.append(
-                    f"比日文长{round(len(post_zh)/max(len(pre_jp),0.1),1)}倍({len(post_zh)-len(pre_jp)}字符)"
-
+                    f"比日文长{round(len(post_zh)/len(pre_jp),1)}倍({len(post_zh)-len(pre_jp)}字符)"
                 )
         if CProblemType.字典使用 in find_type:
             if val := gpt_dict.check_dic_use(pre_zh, tran):
