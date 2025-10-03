@@ -166,6 +166,25 @@ class CProjectConfig:
 
     def getKey(self, key: str, default: None = None) -> str | bool | int | None:
         return self.keyValues.get(key, default)
+    
+    def getSafeWriteConfig(self) -> dict:
+        """
+        获取安全写入配置
+        """
+        safe_write_config = self.projectConfig.get("safeWrite", {})
+        # 合并默认配置
+        default_config = {
+            'enable_safe_write': True,
+            'backup_retention_count': 3,
+            'write_verification': True,
+            'temp_file_cleanup': True,
+            'write_timeout_seconds': 30,
+            'enable_backup': True
+        }
+        # 将用户配置合并到默认配置中
+        for key, value in safe_write_config.items():
+            default_config[key] = value
+        return default_config
 
     def getProblemAnalyzeConfig(self, backendName: str) -> list[CProblemType]:
         if backendName not in self.projectConfig["problemAnalyze"]:

@@ -438,7 +438,7 @@ async def postprocess_results(
 
         if eng_type != "rebuildr":
             find_problems(trans_list, projectConfig, gpt_dic)
-            await save_transCache_to_json(trans_list, cache_file_path, post_save=True)
+            await save_transCache_to_json(trans_list, cache_file_path, post_save=True, project_config=projectConfig)
 
     # 使用output_combiner合并结果，即使只有一个结果
     all_trans_list, all_json_list = DictionaryCombiner.combine(resultChunks)

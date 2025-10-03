@@ -66,6 +66,15 @@ common:
   loggingLevel: info # 日志级别[debug/info/warning]
   saveLog: false # 是否记录日志到文件[True/False]
 
+# 安全写入机制配置
+safeWrite:
+  enable_safe_write: true # 启用安全写入机制，防止缓存写入时数据损坏[True/False]
+  backup_retention_count: 3 # 备份文件保留数量[1-10]
+  write_verification: true # 启用写入数据验证[True/False]
+  temp_file_cleanup: true # 自动清理临时文件[True/False]
+  write_timeout_seconds: 30 # 写入操作超时时间，单位秒[5-300]
+  enable_backup: true # 启用自动备份功能[True/False]
+
 
 
 # 代理设置，使用中转供应商时一般不用开代理

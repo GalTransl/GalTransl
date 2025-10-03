@@ -4,21 +4,27 @@
 
 from GalTransl.CSentense import CTransList
 from GalTransl import LOGGER
-from typing import List
+from typing import List, Optional, TYPE_CHECKING
 import orjson
 import os
-from GalTransl.i18n import get_text,GT_LANG
+from GalTransl.i18n import get_text, GT_LANG
 import aiofiles
 
+# 避免循环导入
+if TYPE_CHECKING:
+    from GalTransl.ConfigHelper import CProjectConfig
 
-async def save_transCache_to_json(trans_list: CTransList, cache_file_path, post_save=False):
+
+async def save_transCache_to_json(trans_list: CTransList, cache_file_path, post_save=False, project_config: Optional['CProjectConfig'] = None):
     """
     此函数将翻译缓存保存到 JSON 文件中。
+    使用安全写入机制确保数据完整性。
 
     Args:
         trans_list (CTransList): 要保存的翻译列表。
         cache_file_path (str): 要保存到的 JSON 文件的路径。
         post_save (bool, optional): 是否是翻译结束后的存储。默认为 False。
+        project_config (CProjectConfig, optional): 项目配置对象。
     """
     if not cache_file_path.endswith(".json"):
         cache_file_path += ".json"
@@ -30,7 +36,6 @@ async def save_transCache_to_json(trans_list: CTransList, cache_file_path, post_
             continue
         if tran.pre_zh == "":
             continue
-
 
         cache_obj = {
             "index": tran.index,
@@ -58,8 +63,77 @@ async def save_transCache_to_json(trans_list: CTransList, cache_file_path, post_
             cache_obj["post_zh_preview"] = tran.post_zh
         cache_json.append(cache_obj)
 
-    async with aiofiles.open(cache_file_path, mode="wb") as f:
-        await f.write(orjson.dumps(cache_json, option=orjson.OPT_INDENT_2))
+    # 检查是否启用安全写入机制
+    use_safe_write = True
+    if project_config:
+        safe_write_config = project_config.getSafeWriteConfig()
+        use_safe_write = safe_write_config.get('enable_safe_write', True)
+    
+    if use_safe_write:
+        # 使用安全写入机制
+        await _save_with_safe_write(cache_json, cache_file_path, project_config)
+    else:
+        # 使用原有的简单写入方式
+        await _save_with_simple_write(cache_json, cache_file_path)
+
+
+async def _save_with_safe_write(cache_json: list, cache_file_path: str, project_config: Optional['CProjectConfig']):
+    """
+    使用安全写入机制保存缓存数据
+    """
+    try:
+        from GalTransl.SafeWrite import AtomicFileWriter, DataValidator, BackupManager, SafeWriteConfig
+        from pathlib import Path
+        
+        # 获取安全写入配置
+        safe_config_dict = project_config.getSafeWriteConfig() if project_config else {}
+        safe_config = SafeWriteConfig(safe_config_dict)
+        
+        # 初始化备份管理器
+        backup_manager = BackupManager(safe_config_dict) if safe_config.get('enable_backup') else None
+        
+        # 序列化数据
+        json_data = orjson.dumps(cache_json, option=orjson.OPT_INDENT_2)
+        
+        # 创建验证函数
+        async def validate_func(file_path: Path) -> bool:
+            if safe_config.get('write_verification', True):
+                return await DataValidator.validate_json_file(file_path)
+            return True
+        
+        # 使用原子写入器
+        async with AtomicFileWriter(cache_file_path, backup_manager) as writer:
+            success = await writer.write_atomic(json_data, validate_func)
+            
+            if success:
+                LOGGER.debug(f"[SafeWrite] 缓存安全写入成功: {cache_file_path}")
+            else:
+                LOGGER.error(f"[SafeWrite] 缓存安全写入失败: {cache_file_path}")
+                # 如果安全写入失败，尝试使用简单写入作为备选
+                LOGGER.warning(f"[SafeWrite] 降级为简单写入模式")
+                await _save_with_simple_write(cache_json, cache_file_path)
+                
+    except ImportError as e:
+        LOGGER.error(f"[SafeWrite] 安全写入模块导入失败: {e}")
+        # 降级为简单写入
+        await _save_with_simple_write(cache_json, cache_file_path)
+    except Exception as e:
+        LOGGER.error(f"[SafeWrite] 安全写入异常: {e}")
+        # 降级为简单写入
+        await _save_with_simple_write(cache_json, cache_file_path)
+
+
+async def _save_with_simple_write(cache_json: list, cache_file_path: str):
+    """
+    使用简单写入方式保存缓存数据（原有方式）
+    """
+    try:
+        async with aiofiles.open(cache_file_path, mode="wb") as f:
+            await f.write(orjson.dumps(cache_json, option=orjson.OPT_INDENT_2))
+        LOGGER.debug(f"[SimpleWrite] 缓存简单写入成功: {cache_file_path}")
+    except Exception as e:
+        LOGGER.error(f"[SimpleWrite] 缓存写入失败: {cache_file_path}, 错误: {e}")
+        raise
 
 
 async def get_transCache_from_json(
