@@ -82,6 +82,7 @@ class ForNovelTranslate(BaseTranslate):
         self.restore_context(trans_list, self.contextNum, filename)
 
         prompt_req = self.trans_prompt
+        prompt_req = prompt_req.replace("[translation_guideline]", self.pj_config.translation_guideline)
         prompt_req = prompt_req.replace("[Input]", input_src)
         prompt_req = prompt_req.replace("[Glossary]", gptdict)
         prompt_req = prompt_req.replace("[SourceLang]", self.source_lang)

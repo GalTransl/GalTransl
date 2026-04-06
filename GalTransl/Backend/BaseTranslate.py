@@ -12,6 +12,7 @@ from GalTransl.ConfigHelper import (
 from GalTransl.CSentense import CSentense, CTransList
 from GalTransl.Cache import save_transCache_to_json
 from GalTransl.Dictionary import CGptDict
+from GalTransl.Utils import load_guideline_file
 from openai import RateLimitError, AsyncOpenAI
 from openai import DefaultAioHttpClient
 from openai._types import NOT_GIVEN
@@ -42,6 +43,13 @@ class BaseTranslate:
         self.eng_type = eng_type
         self.last_file_name = ""
         self.restore_context_mode = config.getKey("gpt.restoreContextMode", True)
+        # 翻译规范
+        if val := config.getKey("gpt.translation_guideline"):
+            guideline_file = val
+        else:
+            guideline_file = "日译中_基础.md"
+        self.pj_config.translation_guideline=load_guideline_file(guideline_file)
+        
         # 保存间隔
         if val := config.getKey("save_steps"):
             self.save_steps = val
@@ -150,7 +158,7 @@ class BaseTranslate:
                 base_url=token.domain,
                 max_retries=0,
                 http_client=DefaultAioHttpClient(
-                    proxy=proxy_addr,
+                    #proxy=proxy_addr,
                     trust_env=trust_env,
                     limits=httpx.Limits(
                         max_keepalive_connections=None, max_connections=None

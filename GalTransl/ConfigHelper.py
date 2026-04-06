@@ -100,6 +100,7 @@ class CProjectConfig:
         self.input_splitter = None  # 输入分割器
         self.active_workers: int=0
         self.target_lang=""
+        self.translation_guideline=""
         
 
     def getProjectConfig(self) -> dict:

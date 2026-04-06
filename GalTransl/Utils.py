@@ -22,7 +22,16 @@ punctuation = r"""!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"""
 punctuation_zh = "。？！…（）；：《》「」『』【】"
 printable = digits + ascii_letters + punctuation + whitespace
 
-
+def load_guideline_file(file_path: str) -> str:
+    try:
+        if "translation_guidelines" not in file_path:
+            file_path=os.path.join( "translation_guidelines",file_path)
+        with open(file_path, "r", encoding="utf-8") as file:
+            return file.read()
+    except Exception as e:
+        print(f"Error reading translation_guideline file {file_path}: {e}")
+        raise e
+    
 def extract_control_substrings(text: str) -> list[str]:
     """
     提取文本中所有以英文标点符号开头，且仅包含英文字母、数字和标点符号的子串。

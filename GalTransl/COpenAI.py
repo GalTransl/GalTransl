@@ -116,7 +116,7 @@ class COpenAITokenPool:
             client = OpenAI(
                 api_key=token.token,
                 base_url=token.domain,
-                http_client=httpx.Client(proxy=proxy.addr if proxy else None),
+                #http_client=httpx.Client(proxy=proxy.addr if proxy else None),
             )
             response = client.chat.completions.create(
                 model=token.model_name,

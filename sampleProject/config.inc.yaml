@@ -57,6 +57,7 @@ common:
 
   gpt.contextNum: 8 # 每次翻译携带多少前文，提高上下文连贯性，8一般已经足够[0-32]
   # ForGal/ForGal-json/ForNovel/r1
+  gpt.translation_guideline: "日译中_基础.md" # 翻译规范，见translation_guidelines文件夹，不同的翻译规范对文风/流畅度等有不同影响，可以自己写。
   gpt.enhance_jailbreak: False # 改善拒答[True/False]
   gpt.change_prompt: "no" # 是否开启修改默认prompt,"AdditionalPrompt"为增加额外要求/故事背景，"OverwritePrompt"为覆写原本的prompt[no/AdditionalPrompt/OverwritePrompt]
   gpt.prompt_content: "翻译结果使用文言文" # 示例额外要求/故事背景，change_prompt为AdditionalPrompt/OverwritePrompt时才生效
