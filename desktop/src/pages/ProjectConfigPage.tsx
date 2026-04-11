@@ -1,21 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { Button } from '../components/Button';
 import { Panel } from '../components/Panel';
 import { BackendConfigEditor } from '../components/BackendConfigEditor';
 import { ProxyConfigEditor } from '../components/ProxyConfigEditor';
 import { PluginSettingsEditor } from '../components/PluginSettingsEditor';
 import {
   ApiError,
-  type ProjectConfigResponse,
-  type BackendProfilesResponse,
   type PluginInfo,
   fetchProjectConfig,
   updateProjectConfig,
   fetchBackendProfiles,
   fetchPlugins,
   getSelectedBackendProfile,
-  getDefaultBackendProfile,
   setSelectedBackendProfile,
 } from '../lib/api';
 
@@ -261,6 +257,7 @@ export function ProjectConfigPage() {
         <aside className="project-config-page__sidebar">
           {CONFIG_SECTIONS.map((section) => (
             <button
+              type="button"
               key={section.key}
               className={`project-config-page__section-btn ${activeSection === section.key ? 'project-config-page__section-btn--active' : ''}`}
               onClick={() => setActiveSection(section.key)}
@@ -269,8 +266,18 @@ export function ProjectConfigPage() {
               <span>{section.label}</span>
             </button>
           ))}
+          <button
+            type="button"
+            className="project-config-page__save-btn"
+            onClick={() => void handleSave()}
+            disabled={saving || !config}
+          >
+            <span>💾</span>
+            <span>{saving ? '保存中…' : '保存配置'}</span>
+          </button>
           <div className="project-config-page__section-divider" />
           <button
+            type="button"
             className={`project-config-page__section-btn ${yamlView ? 'project-config-page__section-btn--active' : ''}`}
             onClick={() => setYamlView(!yamlView)}
           >
@@ -300,13 +307,15 @@ export function ProjectConfigPage() {
                 <Panel title="通用设置" description="翻译核心参数配置。">
                   <div className="config-form">
                     {COMMON_FIELDS.map((field) => {
+                      const fieldId = `common-${field.key.replace(/\./g, '-')}`;
                       const value = getNestedValue(commonConfig, field.key);
                       const displayValue = value == null ? '' : String(value);
                       return (
-                        <label key={field.key} className="field">
-                          <span>{field.label}</span>
+                        <div key={field.key} className="field">
+                          <label htmlFor={fieldId}>{field.label}</label>
                           {field.type === 'select' ? (
                             <select
+                              id={fieldId}
                               value={displayValue}
                               onChange={(e) => handleFieldChange(`common.${field.key}`, e.target.value)}
                             >
@@ -316,6 +325,7 @@ export function ProjectConfigPage() {
                             </select>
                           ) : (
                             <input
+                              id={fieldId}
                               type={field.type}
                               value={displayValue}
                               placeholder={field.placeholder}
@@ -323,7 +333,7 @@ export function ProjectConfigPage() {
                             />
                           )}
                           <span className="field__hint">{field.key}</span>
-                        </label>
+                        </div>
                       );
                     })}
                   </div>
@@ -527,11 +537,6 @@ export function ProjectConfigPage() {
           )}
           </div>
 
-          <div className="form-actions" style={{ marginTop: '16px' }}>
-            <Button onClick={() => void handleSave()} disabled={saving || !config}>
-              {saving ? '保存中…' : '保存配置'}
-            </Button>
-          </div>
         </div>
       </div>
     </div>
