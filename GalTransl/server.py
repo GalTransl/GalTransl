@@ -375,6 +375,219 @@ def _list_dir_entries(dir_path: str) -> list[dict[str, Any]]:
     return entries
 
 
+DICT_PROJECT_MARKER = "(project_dir)"
+COMMON_DICT_CATEGORY_MAP = ".category_map.json"
+
+
+def _is_safe_dict_filename(filename: str) -> bool:
+    if not isinstance(filename, str):
+        return False
+    trimmed = filename.strip()
+    if not trimmed:
+        return False
+    if trimmed != os.path.basename(trimmed):
+        return False
+    if any(sep in trimmed for sep in ("/", "\\")):
+        return False
+    return True
+
+
+def _is_safe_config_filename(filename: str) -> bool:
+    if not isinstance(filename, str):
+        return False
+    trimmed = filename.strip()
+    if not trimmed:
+        return False
+    if trimmed != os.path.basename(trimmed):
+        return False
+    if any(sep in trimmed for sep in ("/", "\\")):
+        return False
+    if ".." in trimmed:
+        return False
+    return True
+
+
+def _is_path_within(base_dir: str, target_path: str) -> bool:
+    base_abs = os.path.abspath(base_dir)
+    target_abs = os.path.abspath(target_path)
+    try:
+        common = os.path.commonpath([base_abs, target_abs])
+    except ValueError:
+        return False
+    return common == base_abs
+
+
+def _normalize_dict_text(content: str) -> str:
+    return str(content or "").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _dict_category_config_key(category: str) -> str:
+    if category == "pre":
+        return "preDict"
+    if category == "gpt":
+        return "gpt.dict"
+    if category == "post":
+        return "postDict"
+    raise ValueError(f"invalid dictionary category: {category}")
+
+
+def _read_dict_file_payload(file_path: str) -> dict[str, Any]:
+    if not os.path.isfile(file_path):
+        return {
+            "path": file_path,
+            "lines": [],
+            "count": 0,
+            "error": "file not found",
+        }
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        return {
+            "path": file_path,
+            "lines": lines,
+            "count": len([
+                line_item
+                for line_item in lines
+                if line_item.strip() and not line_item.startswith("\\\\") and not line_item.startswith("//")
+            ]),
+        }
+    except Exception:
+        return {
+            "path": file_path,
+            "lines": [],
+            "count": 0,
+            "error": "failed to read",
+        }
+
+
+def _collect_project_dict_payload(project_dir: str, config_name: str) -> dict[str, Any]:
+    if not _is_safe_config_filename(config_name):
+        raise ValueError("invalid config filename")
+    config_path = os.path.join(project_dir, config_name)
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(f"config file not found: {config_name}")
+
+    data = _read_yaml_file(config_path)
+    dict_cfg = data.get("dictionary", {})
+
+    pre_all = [str(x) for x in dict_cfg.get("preDict", [])]
+    gpt_all = [str(x) for x in dict_cfg.get("gpt.dict", [])]
+    post_all = [str(x) for x in dict_cfg.get("postDict", [])]
+
+    pre_files = [x for x in pre_all if x.startswith(DICT_PROJECT_MARKER)]
+    gpt_files = [x for x in gpt_all if x.startswith(DICT_PROJECT_MARKER)]
+    post_files = [x for x in post_all if x.startswith(DICT_PROJECT_MARKER)]
+
+    dict_contents: dict[str, dict[str, Any]] = {}
+    for file_key in pre_files + gpt_files + post_files:
+        clean = file_key.replace(DICT_PROJECT_MARKER, "").strip()
+        if not _is_safe_dict_filename(clean):
+            dict_contents[file_key] = {
+                "path": os.path.join(project_dir, clean),
+                "lines": [],
+                "count": 0,
+                "error": "invalid dictionary filename",
+            }
+            continue
+        file_path = os.path.join(project_dir, clean)
+        if not _is_path_within(project_dir, file_path):
+            dict_contents[file_key] = {
+                "path": file_path,
+                "lines": [],
+                "count": 0,
+                "error": "dictionary path escapes project directory",
+            }
+            continue
+        dict_contents[file_key] = _read_dict_file_payload(file_path)
+
+    return {
+        "project_dir": project_dir,
+        "config_file_name": config_name,
+        "pre_dict_files": pre_files,
+        "gpt_dict_files": gpt_files,
+        "post_dict_files": post_files,
+        "dict_contents": dict_contents,
+    }
+
+
+def _common_dict_directory() -> str:
+    return os.path.abspath("Dict")
+
+
+def _common_dict_category_map_path(dict_dir: str) -> str:
+    return os.path.join(dict_dir, COMMON_DICT_CATEGORY_MAP)
+
+
+def _read_common_dict_category_map(dict_dir: str) -> dict[str, str]:
+    map_path = _common_dict_category_map_path(dict_dir)
+    if not os.path.isfile(map_path):
+        return {}
+    try:
+        with open(map_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {}
+        result: dict[str, str] = {}
+        for key, value in data.items():
+            if _is_safe_dict_filename(str(key)) and str(value) in {"pre", "gpt", "post"}:
+                result[str(key)] = str(value)
+        return result
+    except Exception:
+        return {}
+
+
+def _write_common_dict_category_map(dict_dir: str, category_map: dict[str, str]) -> None:
+    map_path = _common_dict_category_map_path(dict_dir)
+    tmp_path = map_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(category_map, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, map_path)
+
+
+def _categorize_common_dict_file(filename: str) -> str:
+    lower = filename.lower()
+    if "gpt" in lower:
+        return "gpt"
+    if "post" in lower or "译后" in filename:
+        return "post"
+    return "pre"
+
+
+def _collect_common_dict_payload() -> dict[str, Any]:
+    dict_dir = _common_dict_directory()
+    os.makedirs(dict_dir, exist_ok=True)
+    category_map = _read_common_dict_category_map(dict_dir)
+
+    files = [
+        name
+        for name in sorted(os.listdir(dict_dir))
+        if os.path.isfile(os.path.join(dict_dir, name)) and name != COMMON_DICT_CATEGORY_MAP
+    ]
+
+    pre_files: list[str] = []
+    gpt_files: list[str] = []
+    post_files: list[str] = []
+    dict_contents: dict[str, dict[str, Any]] = {}
+
+    for name in files:
+        category = category_map.get(name) or _categorize_common_dict_file(name)
+        if category == "gpt":
+            gpt_files.append(name)
+        elif category == "post":
+            post_files.append(name)
+        else:
+            pre_files.append(name)
+        dict_contents[name] = _read_dict_file_payload(os.path.join(dict_dir, name))
+
+    return {
+        "dict_dir": dict_dir,
+        "pre_dict_files": pre_files,
+        "gpt_dict_files": gpt_files,
+        "post_dict_files": post_files,
+        "dict_contents": dict_contents,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Global backend profiles helpers
 # ---------------------------------------------------------------------------
@@ -1073,6 +1286,9 @@ def build_handler(registry: JobRegistry):
             # GET /api/projects/:id/dictionary
             if sub_path == "/dictionary":
                 config_name = parse_qs(urlparse(self.path).query).get("config", ["config.yaml"])[0]
+                if not _is_safe_config_filename(config_name):
+                    self._send_json({"error": "invalid config filename"}, status=HTTPStatus.BAD_REQUEST)
+                    return
                 config_path = os.path.join(project_dir, config_name)
                 if not os.path.isfile(config_path):
                     self._send_json({"error": f"config file not found: {config_name}"}, status=HTTPStatus.NOT_FOUND)
@@ -1081,7 +1297,6 @@ def build_handler(registry: JobRegistry):
                     data = _read_yaml_file(config_path)
                     dict_cfg = data.get("dictionary", {})
                     default_folder = dict_cfg.get("defaultDictFolder", "Dict")
-                    # Resolve absolute or relative dict folder
                     if os.path.isabs(default_folder):
                         dict_base = default_folder
                     else:
@@ -1094,28 +1309,188 @@ def build_handler(registry: JobRegistry):
                         "post_dict_files": dict_cfg.get("postDict", []),
                         "dict_contents": {},
                     }
-                    # Read contents of each dict file
-                    for key, file_list in [("preDict", dict_cfg.get("preDict", [])), ("gpt.dict", dict_cfg.get("gpt.dict", [])), ("postDict", dict_cfg.get("postDict", []))]:
+                    for _, file_list in [
+                        ("preDict", dict_cfg.get("preDict", [])),
+                        ("gpt.dict", dict_cfg.get("gpt.dict", [])),
+                        ("postDict", dict_cfg.get("postDict", [])),
+                    ]:
                         for fname in file_list:
-                            clean = fname.replace("(project_dir)", "").strip()
-                            if "(project_dir)" in fname:
+                            clean = str(fname).replace(DICT_PROJECT_MARKER, "").strip()
+                            if DICT_PROJECT_MARKER in str(fname):
                                 fpath = os.path.join(project_dir, clean)
                             else:
                                 fpath = os.path.join(dict_base, clean)
-                            if os.path.isfile(fpath):
-                                try:
-                                    with open(fpath, "r", encoding="utf-8") as f:
-                                        lines = f.read().splitlines()
-                                    result["dict_contents"][fname] = {
-                                        "path": fpath,
-                                        "lines": lines,
-                                        "count": len([l for l in lines if l.strip() and not l.startswith("\\\\") and not l.startswith("//")]),
-                                    }
-                                except Exception:
-                                    result["dict_contents"][fname] = {"path": fpath, "lines": [], "count": 0, "error": "failed to read"}
+                            result["dict_contents"][str(fname)] = _read_dict_file_payload(fpath)
                     self._send_json(result)
                 except Exception as exc:
                     self._send_json({"error": f"failed to read dictionary config: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # GET /api/projects/:id/dictionary/project
+            if sub_path == "/dictionary/project":
+                if self.command != "GET":
+                    self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
+                    return
+                config_name = parse_qs(urlparse(self.path).query).get("config", ["config.yaml"])[0]
+                if not _is_safe_config_filename(config_name):
+                    self._send_json({"error": "invalid config filename"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                try:
+                    self._send_json(_collect_project_dict_payload(project_dir, config_name))
+                except FileNotFoundError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.NOT_FOUND)
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to load project dictionaries: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # POST /api/projects/:id/dictionary/project/create
+            if sub_path == "/dictionary/project/create":
+                if self.command != "POST":
+                    self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
+                    return
+                try:
+                    payload = self._read_json_body()
+                    config_name = str(payload.get("config_file_name", "config.yaml") or "config.yaml")
+                    category = str(payload.get("category", "")).strip()
+                    filename = str(payload.get("filename", "")).strip()
+
+                    if not _is_safe_config_filename(config_name):
+                        self._send_json({"error": "invalid config filename"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    if not _is_safe_dict_filename(filename):
+                        self._send_json({"error": "invalid dictionary filename"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    config_path = os.path.join(project_dir, config_name)
+                    if not os.path.isfile(config_path):
+                        self._send_json({"error": f"config file not found: {config_name}"}, status=HTTPStatus.NOT_FOUND)
+                        return
+
+                    data = _read_yaml_file(config_path)
+                    dict_cfg = data.get("dictionary", {})
+                    list_key = _dict_category_config_key(category)
+                    current_list = [str(x) for x in dict_cfg.get(list_key, [])]
+                    file_key = f"{DICT_PROJECT_MARKER}{filename}"
+
+                    if file_key not in current_list:
+                        current_list.append(file_key)
+                        dict_cfg[list_key] = current_list
+                        data["dictionary"] = dict_cfg
+                        _write_yaml_file(config_path, data)
+
+                    file_path = os.path.join(project_dir, filename)
+                    os.makedirs(os.path.dirname(file_path) or project_dir, exist_ok=True)
+                    if not os.path.exists(file_path):
+                        with open(file_path, "w", encoding="utf-8") as f:
+                            f.write("")
+
+                    self._send_json({"success": True, "file_key": file_key, "path": file_path})
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to create project dictionary file: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # POST /api/projects/:id/dictionary/project/save
+            if sub_path == "/dictionary/project/save":
+                if self.command != "POST":
+                    self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
+                    return
+                try:
+                    payload = self._read_json_body()
+                    config_name = str(payload.get("config_file_name", "config.yaml") or "config.yaml")
+                    file_key = str(payload.get("file_key", "")).strip()
+                    content = _normalize_dict_text(str(payload.get("content", "")))
+
+                    if not _is_safe_config_filename(config_name):
+                        self._send_json({"error": "invalid config filename"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    if DICT_PROJECT_MARKER not in file_key:
+                        self._send_json({"error": "file_key must be a project dictionary"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    clean_name = file_key.replace(DICT_PROJECT_MARKER, "").strip()
+                    if not _is_safe_dict_filename(clean_name):
+                        self._send_json({"error": "invalid dictionary filename"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    config_path = os.path.join(project_dir, config_name)
+                    if not os.path.isfile(config_path):
+                        self._send_json({"error": f"config file not found: {config_name}"}, status=HTTPStatus.NOT_FOUND)
+                        return
+
+                    data = _read_yaml_file(config_path)
+                    dict_cfg = data.get("dictionary", {})
+                    listed = set(str(x) for x in dict_cfg.get("preDict", []))
+                    listed.update(str(x) for x in dict_cfg.get("gpt.dict", []))
+                    listed.update(str(x) for x in dict_cfg.get("postDict", []))
+                    if file_key not in listed:
+                        self._send_json({"error": "dictionary file is not configured in project dictionary lists"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    file_path = os.path.join(project_dir, clean_name)
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    self._send_json({"success": True, "file_key": file_key})
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to save project dictionary file: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # POST /api/projects/:id/dictionary/project/delete
+            if sub_path == "/dictionary/project/delete":
+                if self.command != "POST":
+                    self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
+                    return
+                try:
+                    payload = self._read_json_body()
+                    config_name = str(payload.get("config_file_name", "config.yaml") or "config.yaml")
+                    file_key = str(payload.get("file_key", "")).strip()
+                    delete_file = bool(payload.get("delete_file", True))
+
+                    if not _is_safe_config_filename(config_name):
+                        self._send_json({"error": "invalid config filename"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    if DICT_PROJECT_MARKER not in file_key:
+                        self._send_json({"error": "file_key must be a project dictionary"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    clean_name = file_key.replace(DICT_PROJECT_MARKER, "").strip()
+                    if not _is_safe_dict_filename(clean_name):
+                        self._send_json({"error": "invalid dictionary filename"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    config_path = os.path.join(project_dir, config_name)
+                    if not os.path.isfile(config_path):
+                        self._send_json({"error": f"config file not found: {config_name}"}, status=HTTPStatus.NOT_FOUND)
+                        return
+
+                    data = _read_yaml_file(config_path)
+                    dict_cfg = data.get("dictionary", {})
+                    for list_key in ("preDict", "gpt.dict", "postDict"):
+                        current = [str(x) for x in dict_cfg.get(list_key, [])]
+                        dict_cfg[list_key] = [x for x in current if x != file_key]
+                    data["dictionary"] = dict_cfg
+                    _write_yaml_file(config_path, data)
+
+                    if delete_file:
+                        file_path = os.path.join(project_dir, clean_name)
+                        if os.path.isfile(file_path):
+                            os.remove(file_path)
+
+                    self._send_json({"success": True, "file_key": file_key, "deleted_file": delete_file})
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to delete project dictionary file: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
             # GET /api/projects/:id/problems
@@ -1234,6 +1609,14 @@ def build_handler(registry: JobRegistry):
                 self._route_project_api(project_id, sub_path)
                 return
 
+            # GET /api/dictionaries/common
+            if path == "/api/dictionaries/common":
+                try:
+                    self._send_json(_collect_common_dict_payload())
+                except Exception as exc:
+                    self._send_json({"error": f"failed to load common dictionaries: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:
@@ -1262,6 +1645,88 @@ def build_handler(registry: JobRegistry):
                     return
 
                 self._send_json(job, status=HTTPStatus.ACCEPTED)
+                return
+
+            # POST /api/dictionaries/common/create
+            if path == "/api/dictionaries/common/create":
+                try:
+                    payload = self._read_json_body()
+                    category = str(payload.get("category", "")).strip()
+                    filename = str(payload.get("filename", "")).strip()
+
+                    _dict_category_config_key(category)
+                    if not _is_safe_dict_filename(filename):
+                        self._send_json({"error": "invalid dictionary filename"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    dict_dir = _common_dict_directory()
+                    os.makedirs(dict_dir, exist_ok=True)
+                    file_path = os.path.join(dict_dir, filename)
+                    if not os.path.exists(file_path):
+                        with open(file_path, "w", encoding="utf-8") as f:
+                            f.write("")
+
+                    category_map = _read_common_dict_category_map(dict_dir)
+                    category_map[filename] = category
+                    _write_common_dict_category_map(dict_dir, category_map)
+
+                    self._send_json({"success": True, "filename": filename, "path": file_path})
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to create common dictionary file: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # POST /api/dictionaries/common/save
+            if path == "/api/dictionaries/common/save":
+                try:
+                    payload = self._read_json_body()
+                    filename = str(payload.get("filename", "")).strip()
+                    content = _normalize_dict_text(str(payload.get("content", "")))
+
+                    if not _is_safe_dict_filename(filename):
+                        self._send_json({"error": "invalid dictionary filename"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    dict_dir = _common_dict_directory()
+                    os.makedirs(dict_dir, exist_ok=True)
+                    file_path = os.path.join(dict_dir, filename)
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(content)
+
+                    self._send_json({"success": True, "filename": filename})
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to save common dictionary file: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # POST /api/dictionaries/common/delete
+            if path == "/api/dictionaries/common/delete":
+                try:
+                    payload = self._read_json_body()
+                    filename = str(payload.get("filename", "")).strip()
+                    if not _is_safe_dict_filename(filename):
+                        self._send_json({"error": "invalid dictionary filename"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    file_path = os.path.join(_common_dict_directory(), filename)
+                    if os.path.isfile(file_path):
+                        os.remove(file_path)
+
+                    dict_dir = _common_dict_directory()
+                    category_map = _read_common_dict_category_map(dict_dir)
+                    if filename in category_map:
+                        del category_map[filename]
+                        _write_common_dict_category_map(dict_dir, category_map)
+
+                    self._send_json({"success": True, "filename": filename})
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to delete common dictionary file: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)

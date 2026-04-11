@@ -5,10 +5,9 @@ import { encodeProjectDir, decodeProjectDir } from '../lib/api';
 const PROJECT_TABS = [
   { path: 'translate', label: '翻译工作台', icon: '🌐' },
   { path: 'config', label: '配置编辑', icon: '⚙️' },
-  { path: 'dictionary', label: '字典管理', icon: '📖' },
+  { path: 'dictionary', label: '项目字典管理', icon: '📖' },
   { path: 'cache', label: '缓存浏览', icon: '💾' },
   { path: 'problems', label: '问题审查', icon: '🔍' },
-  { path: 'logs', label: '日志查看', icon: '📋' },
 ];
 
 type SidebarProps = {
@@ -39,7 +38,7 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
     if (openProjects.length > prev.length) {
       const newProject = openProjects.find((p) => !prev.includes(p));
       if (newProject) {
-        setExpandedProjects((ep) => {
+        setExpandedProjects(() => {
           const next: Record<string, boolean> = {};
           for (const key of openProjects) {
             next[key] = key === newProject;
@@ -286,9 +285,10 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
             <div className="sidebar__project-group" key={projectDir}>
               {expanded ? (
                 <>
-                  <div
+                  <button
                     className="sidebar__project-header"
                     title={projectDir}
+                    type="button"
                     onClick={() => toggleProjectExpanded(projectDir)}
                   >
                     <span
@@ -300,6 +300,7 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
                     <span className="sidebar__project-name">{projectName}</span>
                     <button
                       className="sidebar__project-close"
+                      type="button"
                       onClick={(e) => { e.stopPropagation(); handleRequestClose(projectDir); }}
                       title="关闭项目"
                     >
@@ -309,24 +310,25 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
                       <div
                         className="sidebar__project-confirm-bubble"
                         ref={confirmBubbleRef}
-                        onClick={(e) => e.stopPropagation()}
                       >
                         <span className="sidebar__project-confirm-text">关闭?</span>
                         <button
                           className="sidebar__project-confirm-yes"
+                          type="button"
                           onClick={() => handleConfirmClose(projectDir)}
                         >
                           确定
                         </button>
                         <button
                           className="sidebar__project-confirm-no"
+                          type="button"
                           onClick={handleCancelClose}
                         >
                           取消
                         </button>
                       </div>
                     )}
-                  </div>
+                  </button>
                   {shouldRenderProjectChildren && (
                     <div
                       className={`sidebar__project-children ${isProjectChildrenVisible ? 'sidebar__project-children--expanded' : 'sidebar__project-children--collapsed'}`}
@@ -399,6 +401,17 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
         </NavLink>
 
         <NavLink
+          to="/common-dictionaries"
+          className={({ isActive }) =>
+            `sidebar__nav-item ${isActive ? 'sidebar__nav-item--active' : ''}`
+          }
+          title="通用字典管理"
+        >
+          <span className="sidebar__nav-icon">📚</span>
+          {expanded && <span className="sidebar__nav-label">通用字典管理</span>}
+        </NavLink>
+
+        <NavLink
           to="/plugins"
           className={({ isActive }) =>
             `sidebar__nav-item ${isActive ? 'sidebar__nav-item--active' : ''}`
@@ -424,6 +437,7 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
       <div className="sidebar__footer">
         <button
           className="sidebar__toggle-btn"
+          type="button"
           onClick={toggleExpanded}
           title={expanded ? '收起侧边栏' : '展开侧边栏'}
         >

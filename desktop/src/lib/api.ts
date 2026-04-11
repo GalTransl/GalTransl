@@ -189,6 +189,25 @@ export type ProjectDictionaryResponse = {
   dict_contents: Record<string, DictFileContent>;
 };
 
+export type DictionaryCategory = 'pre' | 'gpt' | 'post';
+
+export type ProjectDictionaryManagerResponse = {
+  project_dir: string;
+  config_file_name: string;
+  pre_dict_files: string[];
+  gpt_dict_files: string[];
+  post_dict_files: string[];
+  dict_contents: Record<string, DictFileContent>;
+};
+
+export type CommonDictionaryManagerResponse = {
+  dict_dir: string;
+  pre_dict_files: string[];
+  gpt_dict_files: string[];
+  post_dict_files: string[];
+  dict_contents: Record<string, DictFileContent>;
+};
+
 export type ProblemEntry = {
   filename: string;
   index: number;
@@ -345,6 +364,103 @@ export async function stopProjectTranslation(projectId: string) {
 export async function fetchProjectDictionary(projectId: string, configFileName = 'config.yaml') {
   return apiRequest<ProjectDictionaryResponse>(
     `/api/projects/${projectId}/dictionary?config=${encodeURIComponent(configFileName)}`,
+  );
+}
+
+export async function fetchProjectDictionaryManager(projectId: string, configFileName = 'config.yaml') {
+  return apiRequest<ProjectDictionaryManagerResponse>(
+    `/api/projects/${projectId}/dictionary/project?config=${encodeURIComponent(configFileName)}`,
+  );
+}
+
+export async function createProjectDictionaryFile(
+  projectId: string,
+  payload: { config_file_name: string; category: DictionaryCategory; filename: string },
+) {
+  return apiRequest<{ success: boolean; file_key: string; path: string }>(
+    `/api/projects/${projectId}/dictionary/project/create`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function saveProjectDictionaryFile(
+  projectId: string,
+  payload: { config_file_name: string; file_key: string; content: string },
+) {
+  return apiRequest<{ success: boolean; file_key: string }>(
+    `/api/projects/${projectId}/dictionary/project/save`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function deleteProjectDictionaryFile(
+  projectId: string,
+  payload: { config_file_name: string; file_key: string; delete_file?: boolean },
+) {
+  return apiRequest<{ success: boolean; file_key: string; deleted_file: boolean }>(
+    `/api/projects/${projectId}/dictionary/project/delete`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function fetchCommonDictionaryManager() {
+  return apiRequest<CommonDictionaryManagerResponse>('/api/dictionaries/common');
+}
+
+export async function createCommonDictionaryFile(payload: { category: DictionaryCategory; filename: string }) {
+  return apiRequest<{ success: boolean; filename: string; path: string }>(
+    '/api/dictionaries/common/create',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function saveCommonDictionaryFile(payload: { filename: string; content: string }) {
+  return apiRequest<{ success: boolean; filename: string }>(
+    '/api/dictionaries/common/save',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function deleteCommonDictionaryFile(payload: { filename: string }) {
+  return apiRequest<{ success: boolean; filename: string }>(
+    '/api/dictionaries/common/delete',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    },
   );
 }
 

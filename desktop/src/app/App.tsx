@@ -11,9 +11,9 @@ import { SettingsPage } from '../pages/SettingsPage';
 import { ProjectTranslatePage } from '../pages/ProjectTranslatePage';
 import { ProjectConfigPage } from '../pages/ProjectConfigPage';
 import { ProjectDictionaryPage } from '../pages/ProjectDictionaryPage';
+import { CommonDictionaryPage } from '../pages/CommonDictionaryPage';
 import { ProjectCachePage } from '../pages/ProjectCachePage';
 import { ProjectProblemsPage } from '../pages/ProjectProblemsPage';
-import { ProjectLogsPage } from '../pages/ProjectLogsPage';
 
 const CONFIG_FILE_KEY = 'galtransl-config-file';
 const OPEN_PROJECTS_KEY = 'galtransl-open-projects';
@@ -181,6 +181,10 @@ function AppInner({ openProjects, onOpenProject, onCloseProject }: AppInnerProps
                 element={<BackendProfilesPage />}
               />
               <Route
+                path="/common-dictionaries"
+                element={<CommonDictionaryPage />}
+              />
+              <Route
                 path="/plugins"
                 element={<PluginsPage />}
               />
@@ -198,7 +202,6 @@ function AppInner({ openProjects, onOpenProject, onCloseProject }: AppInnerProps
                 <Route path="dictionary" element={<ProjectDictionaryPage />} />
                 <Route path="cache" element={<ProjectCachePage />} />
                 <Route path="problems" element={<ProjectProblemsPage />} />
-                <Route path="logs" element={<ProjectLogsPage />} />
               </Route>
         </Routes>
       </main>

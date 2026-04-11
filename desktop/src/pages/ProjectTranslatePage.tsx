@@ -27,6 +27,8 @@ import {
 const JOB_POLL_INTERVAL_MS = 2000;
 const RUNTIME_POLL_INTERVAL_MS = 1000;
 const SUCCESS_STICK_BOTTOM_THRESHOLD_PX = 24;
+const INPUT_FOLDER_NAME = 'gt_input';
+const OUTPUT_FOLDER_NAME = 'gt_output';
 
 type OutletContext = {
   projectDir: string;
@@ -343,15 +345,49 @@ export function ProjectTranslatePage() {
     const distanceToBottom = element.scrollHeight - element.clientHeight - element.scrollTop;
     shouldStickToBottomRef.current = distanceToBottom <= SUCCESS_STICK_BOTTOM_THRESHOLD_PX;
   }, []);
+  const handleOpenFolder = useCallback((path: string) => {
+    if (!path) return;
+    void invoke('open_folder', { path });
+  }, []);
+  const normalizedProjectDir = projectDir.replace(/[\\/]+$/, '');
+  const inputFolderPath = projectDir ? `${normalizedProjectDir}\\${INPUT_FOLDER_NAME}` : '';
+  const outputFolderPath = projectDir ? `${normalizedProjectDir}\\${OUTPUT_FOLDER_NAME}` : '';
 
   return (
     <div className="project-translate-page">
       <div className="project-translate-page__header">
         <div className="project-translate-page__header-row">
           <h1>翻译工作台{projectName ? `-${projectName}` : ''}</h1>
-          <Button variant="secondary" onClick={() => void invoke('open_folder', { path: projectDir })} title={projectDir}>
-            📂 打开项目文件夹
-          </Button>
+          <div className="project-translate-page__folder-menu">
+            <Button
+              disabled={!projectDir}
+              onClick={() => handleOpenFolder(projectDir)}
+              title={projectDir}
+              variant="secondary"
+            >
+              📂 打开项目文件夹
+            </Button>
+            <div className="project-translate-page__folder-menu-dropdown" role="menu">
+              <Button
+                className="project-translate-page__folder-menu-item"
+                disabled={!projectDir}
+                onClick={() => handleOpenFolder(inputFolderPath)}
+                title={inputFolderPath}
+                variant="secondary"
+              >
+                📥 打开输入文件夹
+              </Button>
+              <Button
+                className="project-translate-page__folder-menu-item"
+                disabled={!projectDir}
+                onClick={() => handleOpenFolder(outputFolderPath)}
+                title={outputFolderPath}
+                variant="secondary"
+              >
+                📤 打开输出文件夹
+              </Button>
+            </div>
+          </div>
         </div>
         <p>启动翻译任务后，这里会切换为运行时仪表盘，持续展示状态、吞吐、错误与成功句流。</p>
       </div>
