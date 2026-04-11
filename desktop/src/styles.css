@@ -1683,7 +1683,7 @@ code {
 .runtime-success-compact__line {
   display: grid;
   grid-template-columns: 26px minmax(0, 1fr);
-  align-items: start;
+  align-items: center;
   gap: 4px;
   margin: 0;
   min-width: 0;
@@ -1710,7 +1710,7 @@ code {
   display: grid;
   gap: var(--space-3);
   max-height: 420px;
-  padding-right: var(--space-2);
+  padding-inline: 0;
   overflow-y: auto;
 }
 
@@ -1780,9 +1780,42 @@ code {
   opacity: 0.84;
 }
 
-.project-translate-page .runtime-event-list,
+.project-translate-page .runtime-event-list {
+  scrollbar-gutter: stable;
+}
+
 .project-translate-page .file-progress-list--runtime {
   scrollbar-gutter: stable;
+}
+
+.project-translate-page .runtime-event-list,
+.project-translate-page .file-progress-list--runtime {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.28) transparent;
+}
+
+.project-translate-page .runtime-event-list::-webkit-scrollbar,
+.project-translate-page .file-progress-list--runtime::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.project-translate-page .runtime-event-list::-webkit-scrollbar-track,
+.project-translate-page .file-progress-list--runtime::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.project-translate-page .runtime-event-list::-webkit-scrollbar-thumb,
+.project-translate-page .file-progress-list--runtime::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.24);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+.project-translate-page .runtime-event-list:hover::-webkit-scrollbar-thumb,
+.project-translate-page .file-progress-list--runtime:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.4);
 }
 
 @keyframes runtimeSweep {
@@ -1954,6 +1987,7 @@ code {
 .file-progress-row__count {
   font-size: 12px;
   color: var(--color-text-muted);
+  padding-right: var(--space-2);
 }
 
 .file-progress-row__problems {

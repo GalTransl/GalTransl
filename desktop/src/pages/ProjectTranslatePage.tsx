@@ -285,7 +285,7 @@ export function ProjectTranslatePage() {
 
       <div className="project-translate-page__content">
         <div className="project-translate-page__sidebar">
-          <Panel title="翻译控制" description="左侧保留固定宽度的项目控制台，集中查看当前任务与运行摘要。">
+          <Panel title="翻译控制">
             <div className="form-stack">
               <label className="field">
                 <span>翻译模板</span>
@@ -376,7 +376,7 @@ export function ProjectTranslatePage() {
             </div>
           </Panel>
 
-          <Panel title="文件进度" description="按文件查看累计翻译进度与问题密度。">
+          <Panel title="文件进度">
             {runtimeFiles.length > 0 ? (
               <div className="file-progress-list file-progress-list--runtime">
                 {runtimeFiles.map((file) => (
@@ -411,7 +411,7 @@ export function ProjectTranslatePage() {
               </Panel>
             </div>
 
-            <Panel title="最近错误" description="集中展示 API / 解析异常，便于盯住重试与退避。">
+            <Panel title="最近错误">
               {runtime?.recent_errors.length ? (
                 <div className="runtime-event-list runtime-event-list--error">
                   {runtime.recent_errors.map((entry) => (
@@ -479,11 +479,11 @@ function RuntimeSuccessRow({ entry, isFresh }: { entry: ProjectRuntimeSuccessEnt
       </div>
       <div className="runtime-success-compact">
         <p className="runtime-success-compact__line">
-          <span className="runtime-success-compact__label">JP</span>
+          <span className="runtime-success-compact__label">SRC</span>
           <span>{entry.source_preview || '—'}</span>
         </p>
         <p className="runtime-success-compact__line">
-          <span className="runtime-success-compact__label">ZH</span>
+          <span className="runtime-success-compact__label">DST</span>
           <span>{entry.translation_preview || '—'}</span>
         </p>
       </div>
@@ -494,7 +494,6 @@ function RuntimeSuccessRow({ entry, isFresh }: { entry: ProjectRuntimeSuccessEnt
 function FileProgressRow({ file }: { file: FileProgress }) {
   const percent = file.total > 0 ? Math.round((file.translated / file.total) * 100) : 0;
   const isComplete = file.translated === file.total && file.total > 0;
-  const hasProblems = file.problems > 0;
   const hasFailed = file.failed > 0;
 
   return (
@@ -506,7 +505,6 @@ function FileProgressRow({ file }: { file: FileProgress }) {
         </div>
         <span className="file-progress-row__count">
           {file.translated}/{file.total}
-          {hasProblems ? <span className="file-progress-row__problems"> · {file.problems}问题</span> : null}
           {hasFailed ? <span className="file-progress-row__failed"> · {file.failed}失败</span> : null}
         </span>
       </div>
