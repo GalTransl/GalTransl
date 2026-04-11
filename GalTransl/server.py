@@ -889,7 +889,10 @@ def build_handler(registry: JobRegistry):
 
             # GET /api/projects/:id/cache/:filename
             if sub_path.startswith("/cache/"):
-                filename = sub_path[len("/cache/"):]
+                filename = unquote(sub_path[len("/cache/"):])
+                if not filename or filename != os.path.basename(filename):
+                    self._send_json({"error": "invalid cache filename"}, status=HTTPStatus.BAD_REQUEST)
+                    return
                 cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
                 file_path = os.path.join(cache_dir, filename)
                 if not os.path.isfile(file_path):

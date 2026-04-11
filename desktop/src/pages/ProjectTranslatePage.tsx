@@ -48,6 +48,7 @@ export function ProjectTranslatePage() {
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [selectedTranslator, setSelectedTranslator] = useState('');
   const [runtime, setRuntime] = useState<ProjectRuntimeResponse | null>(null);
+  const [selectedSuccessFiles, setSelectedSuccessFiles] = useState<string[]>([]);
   const [freshSuccessIds, setFreshSuccessIds] = useState<string[]>([]);
   const seenSuccessIdsRef = useRef<Set<string>>(new Set());
   const successListRef = useRef<HTMLDivElement | null>(null);
@@ -266,9 +267,39 @@ export function ProjectTranslatePage() {
   const workersConfigured = summary?.workers_configured ?? 0;
   const speedText = formatSpeed(summary?.translation_speed_lpm ?? 0);
   const etaText = formatEta(summary?.eta_seconds ?? 0);
+
+  useEffect(() => {
+    const availableFiles = new Set(runtimeFiles.map((file) => file.filename));
+    setSelectedSuccessFiles((current) => current.filter((filename) => availableFiles.has(filename)));
+  }, [runtimeFiles]);
+
+  const handleToggleSuccessFileFilter = useCallback((filename: string) => {
+    setSelectedSuccessFiles((current) =>
+      current.includes(filename) ? current.filter((name) => name !== filename) : [...current, filename],
+    );
+  }, []);
+  const handleClearSuccessFileFilters = useCallback(() => {
+    setSelectedSuccessFiles([]);
+  }, []);
+
+  const selectedSuccessFileSet = useMemo(() => new Set(selectedSuccessFiles), [selectedSuccessFiles]);
+  const hasSelectedSuccessFileFilter = selectedSuccessFiles.length > 0;
+  const selectedSuccessFileFilterSummary = useMemo(() => {
+    if (!hasSelectedSuccessFileFilter) return '';
+    const preview = selectedSuccessFiles.slice(0, 2);
+    const extraCount = selectedSuccessFiles.length - preview.length;
+    return extraCount > 0 ? `${preview.join('、')} 等 ${selectedSuccessFiles.length} 个文件` : preview.join('、');
+  }, [hasSelectedSuccessFileFilter, selectedSuccessFiles]);
   const successEntries = useMemo(
-    () => [...(runtimeMatchesProject ? runtime?.recent_successes ?? [] : [])].reverse(),
-    [runtime?.recent_successes, runtimeMatchesProject],
+    () => {
+      const entries = runtimeMatchesProject ? runtime?.recent_successes ?? [] : [];
+      const shouldFilterByFiles = selectedSuccessFileSet.size > 0;
+      const filteredEntries = shouldFilterByFiles
+        ? entries.filter((entry) => selectedSuccessFileSet.has(entry.filename || ''))
+        : entries;
+      return [...filteredEntries].reverse();
+    },
+    [runtime?.recent_successes, runtimeMatchesProject, selectedSuccessFileSet],
   );
   const isCurrentProjectActive = currentJob?.status === 'pending' || currentJob?.status === 'running';
   const primaryActionDisabled =
@@ -379,12 +410,17 @@ export function ProjectTranslatePage() {
 
           <Panel title="文件进度">
             {prioritizedRuntimeFiles.length > 0 ? (
-              <div className="file-progress-list file-progress-list--runtime">
-                {prioritizedRuntimeFiles.map((file) => (
-                  <FileProgressRow key={file.filename} file={file} />
-                ))}
-              </div>
-            ) : (
+                <div className="file-progress-list file-progress-list--runtime">
+                  {prioritizedRuntimeFiles.map((file) => (
+                    <FileProgressRow
+                      key={file.filename}
+                      file={file}
+                      isSuccessFileFilterActive={selectedSuccessFileSet.has(file.filename)}
+                      onToggleSuccessFileFilter={handleToggleSuccessFileFilter}
+                    />
+                  ))}
+                </div>
+              ) : (
               <EmptyState title="暂无文件进度" description="启动翻译后，文件级进度会在这里逐步展开。" />
             )}
           </Panel>
@@ -400,10 +436,30 @@ export function ProjectTranslatePage() {
           <div className="runtime-dashboard-grid">
             <div className={`project-translate-page__success-panel${successEntries.length ? ' project-translate-page__success-panel--active' : ''}`}>
               <Panel title="成功句流">
+                {hasSelectedSuccessFileFilter ? (
+                  <div className="runtime-success-filter-hint" role="status">
+                    <span className="runtime-success-filter-hint__text" title={selectedSuccessFiles.join('\n')}>
+                      已筛选文件：{selectedSuccessFileFilterSummary}
+                    </span>
+                    <button
+                      className="runtime-success-filter-hint__clear"
+                      onClick={handleClearSuccessFileFilters}
+                      type="button"
+                    >
+                      取消所有筛选
+                    </button>
+                  </div>
+                ) : null}
                 {successEntries.length ? (
                   <div className="runtime-event-list runtime-event-list--success" onScroll={handleSuccessListScroll} ref={successListRef}>
                     {successEntries.map((entry) => (
-                      <RuntimeSuccessRow entry={entry} isFresh={freshSuccessIds.includes(entry.id)} key={entry.id} />
+                      <RuntimeSuccessRow
+                        entry={entry}
+                        isFresh={freshSuccessIds.includes(entry.id)}
+                        isSuccessFileFilterActive={selectedSuccessFileSet.has(entry.filename || '')}
+                        onToggleSuccessFileFilter={handleToggleSuccessFileFilter}
+                        key={entry.id}
+                      />
                     ))}
                   </div>
                 ) : (
@@ -462,16 +518,44 @@ function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) {
   );
 }
 
-function RuntimeSuccessRow({ entry, isFresh }: { entry: ProjectRuntimeSuccessEntry; isFresh: boolean }) {
+function RuntimeSuccessRow({
+  entry,
+  isFresh,
+  isSuccessFileFilterActive,
+  onToggleSuccessFileFilter,
+}: {
+  entry: ProjectRuntimeSuccessEntry;
+  isFresh: boolean;
+  isSuccessFileFilterActive: boolean;
+  onToggleSuccessFileFilter: (filename: string) => void;
+}) {
   const speakerLabel = Array.isArray(entry.speaker) ? entry.speaker.join(' / ') : entry.speaker;
+  const entryFilename = entry.filename || '未命名文件';
+  const filterFilename = entry.filename;
 
   return (
     <article className={`runtime-event runtime-event--success${isFresh ? ' runtime-event--fresh' : ''}`}>
       <div className="runtime-event__header">
         <div className="runtime-event__badges">
           <span className="runtime-event__pill runtime-event__pill--success">#{entry.index}</span>
-          <span className="runtime-event__pill runtime-event__pill--file" title={entry.filename || '未命名文件'}>
-            {entry.filename || '未命名文件'}
+          <span
+            className={`runtime-event__pill runtime-event__pill--file${filterFilename ? ' runtime-event__pill--file-clickable' : ''}${isSuccessFileFilterActive ? ' runtime-event__pill--file-active' : ''}`}
+            title={entryFilename}
+          >
+            {filterFilename ? (
+              <button
+                aria-label="筛选句流"
+                aria-pressed={isSuccessFileFilterActive}
+                className="runtime-event__file-name-btn"
+                onClick={() => onToggleSuccessFileFilter(filterFilename)}
+                title="筛选句流"
+                type="button"
+              >
+                {entryFilename}
+              </button>
+            ) : (
+              <span className="runtime-event__file-text">{entryFilename}</span>
+            )}
           </span>
         </div>
         <div className="runtime-event__header-right">
@@ -495,7 +579,15 @@ function RuntimeSuccessRow({ entry, isFresh }: { entry: ProjectRuntimeSuccessEnt
   );
 }
 
-function FileProgressRow({ file }: { file: FileProgress }) {
+function FileProgressRow({
+  file,
+  isSuccessFileFilterActive,
+  onToggleSuccessFileFilter,
+}: {
+  file: FileProgress;
+  isSuccessFileFilterActive: boolean;
+  onToggleSuccessFileFilter: (filename: string) => void;
+}) {
   const percent = file.total > 0 ? Math.round((file.translated / file.total) * 100) : 0;
   const isComplete = file.translated === file.total && file.total > 0;
   const hasFailed = file.failed > 0;
@@ -504,7 +596,21 @@ function FileProgressRow({ file }: { file: FileProgress }) {
     <div className="file-progress-row file-progress-row--runtime">
       <div className="file-progress-row__info">
         <div className="file-progress-row__identity">
-          <span className="file-progress-row__name">{file.filename}</span>
+          <span className="file-progress-row__name-wrap">
+            <span className="file-progress-row__name">{file.filename}</span>
+            <button
+              aria-label="筛选句流"
+              aria-pressed={isSuccessFileFilterActive}
+              className={`file-progress-row__filter-toggle${isSuccessFileFilterActive ? ' file-progress-row__filter-toggle--active' : ''}`}
+              onClick={() => onToggleSuccessFileFilter(file.filename)}
+              title="筛选句流"
+              type="button"
+            >
+              <FilterFunnelIcon className="file-progress-row__filter-icon" />
+              <span className="file-progress-row__filter-tooltip">筛选句流</span>
+              {isSuccessFileFilterActive ? <span className="file-progress-row__filter-check">✓</span> : null}
+            </button>
+          </span>
           <span className="file-progress-row__state">{isComplete ? '已完成' : percent > 0 ? '处理中' : '排队中'}</span>
         </div>
         <span className="file-progress-row__count">
@@ -516,6 +622,14 @@ function FileProgressRow({ file }: { file: FileProgress }) {
         <div className="progress-bar__fill" style={{ width: `${percent}%` }} />
       </div>
     </div>
+  );
+}
+
+function FilterFunnelIcon({ className }: { className: string }) {
+  return (
+    <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
+      <path d="M3 5h18l-7 8v5.5l-4 1.9V13L3 5z" fill="currentColor" />
+    </svg>
   );
 }
 

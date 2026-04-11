@@ -19,38 +19,51 @@ type OutletContext = {
 };
 
 export function ProjectCachePage() {
-  const { projectDir, projectId } = useOutletContext<OutletContext>();
+  const { projectId } = useOutletContext<OutletContext>();
 
   const [cacheFiles, setCacheFiles] = useState<FileEntry[]>([]);
   const [cacheDir, setCacheDir] = useState<string>('');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [entries, setEntries] = useState<CacheEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshingFiles, setRefreshingFiles] = useState(false);
   const [loadingEntries, setLoadingEntries] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterProblems, setFilterProblems] = useState(false);
 
+  const loadCacheFiles = useCallback(
+    async (showPageLoading = false) => {
+      if (!projectId) return;
+      if (showPageLoading) {
+        setLoading(true);
+      } else {
+        setRefreshingFiles(true);
+      }
+      setError(null);
+      try {
+        const res = await fetchProjectCache(projectId);
+        const files = res.files.filter((f) => f.is_file && f.name.endsWith('.json'));
+        setCacheFiles(files);
+        setCacheDir(res.cache_dir || '');
+        setSelectedFile((prev) => (prev && files.some((file) => file.name === prev) ? prev : null));
+      } catch (err) {
+        setError(getErrorMessage(err, '加载缓存列表失败'));
+      } finally {
+        if (showPageLoading) {
+          setLoading(false);
+        } else {
+          setRefreshingFiles(false);
+        }
+      }
+    },
+    [projectId],
+  );
+
   // Load cache file list
   useEffect(() => {
-    if (!projectId) return;
-    let cancelled = false;
-    setLoading(true);
-    fetchProjectCache(projectId)
-      .then((res) => {
-        if (!cancelled) {
-          setCacheFiles(res.files.filter((f) => f.is_file && f.name.endsWith('.json')));
-          setCacheDir(res.cache_dir || '');
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) setError(getErrorMessage(err, '加载缓存列表失败'));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [projectId]);
+    void loadCacheFiles(true);
+  }, [loadCacheFiles]);
 
   // Load selected cache file entries
   useEffect(() => {
@@ -118,10 +131,24 @@ export function ProjectCachePage() {
 
       <div className="cache-layout">
         <aside className="cache-layout__sidebar">
-          <h3>缓存文件</h3>
+          <div className="cache-layout__sidebar-header">
+            <h3>缓存文件</h3>
+            <Button
+              type="button"
+              variant="secondary"
+              className="cache-file-refresh"
+              onClick={() => void loadCacheFiles()}
+              disabled={refreshingFiles}
+              title="刷新缓存文件列表"
+              aria-label="刷新缓存文件列表"
+            >
+              {refreshingFiles ? '⏳' : '🔄'}
+            </Button>
+          </div>
           <div className="cache-file-list">
             {cacheFiles.map((file) => (
               <button
+                type="button"
                 key={file.name}
                 className={`cache-file-item ${selectedFile === file.name ? 'cache-file-item--active' : ''}`}
                 onClick={() => setSelectedFile(file.name)}
@@ -207,7 +234,7 @@ export function ProjectCachePage() {
 
 function truncate(str: string, max: number): string {
   if (!str) return '';
-  return str.length > max ? str.slice(0, max) + '…' : str;
+  return str.length > max ? `${str.slice(0, max)}…` : str;
 }
 
 function formatSize(bytes: number): string {
