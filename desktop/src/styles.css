@@ -1695,7 +1695,7 @@ code {
 
 .runtime-success-compact__line {
   display: grid;
-  grid-template-columns: 34px auto minmax(0, 1fr);
+  grid-template-columns: max-content max-content minmax(0, 1fr);
   align-items: center;
   gap: 6px;
   margin: 0;
