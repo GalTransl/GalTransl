@@ -23,6 +23,14 @@ from GalTransl.Backend.BaseTranslate import BaseTranslate
 from openai._types import NOT_GIVEN
 
 
+def _check_stop_requested(project_config):
+    stop_event = getattr(project_config, "stop_event", None)
+    if stop_event is not None and stop_event.is_set():
+        from GalTransl.Service import JobCancelledError
+
+        raise JobCancelledError()
+
+
 class ForNovelTranslate(BaseTranslate):
     # init
     def __init__(
@@ -90,6 +98,7 @@ class ForNovelTranslate(BaseTranslate):
 
         retry_count = 0
         while True:  # 一直循环，直到得到数据
+            _check_stop_requested(self.pj_config)
             if self.enhance_jailbreak or tmp_enhance_jailbreak:
                 assistant_prompt = "```DST\tID\n"
             else:
@@ -218,11 +227,26 @@ class ForNovelTranslate(BaseTranslate):
                 error_flag = False  # 部分解析
 
             if error_flag:
+                try:
+                    from GalTransl.server import record_runtime_error
+                    record_runtime_error(
+                        getattr(self.pj_config, "runtime_project_dir", self.pj_config.getProjectDir()),
+                        kind="parse",
+                        message=error_message,
+                        filename=filename,
+                        index_range=idx_tip,
+                        retry_count=retry_count + 1,
+                        model=getattr(token, "model_name", ""),
+                        level="warning",
+                    )
+                except Exception:
+                    pass
 
                 LOGGER.warning(
                     f"[解析错误][{filename}:{idx_tip}]解析结果出错：{error_message}"
                 )
                 retry_count += 1
+                _check_stop_requested(self.pj_config)
                 await asyncio.sleep(1)
 
                 tmp_enhance_jailbreak = not tmp_enhance_jailbreak
@@ -305,6 +329,7 @@ class ForNovelTranslate(BaseTranslate):
         transl_step_count = 0
 
         while i < len_trans_list:
+            _check_stop_requested(self.pj_config)
             # await asyncio.sleep(1)
             trans_list_split = (
                 translist_unhit[i : i + num_pre_request]
@@ -323,6 +348,20 @@ class ForNovelTranslate(BaseTranslate):
             self.pj_config.bar(num)
             result_output = ""
             for trans in trans_result:
+                if not proofread and trans.pre_zh and "(翻译失败)" not in trans.pre_zh and "(Failed)" not in trans.pre_zh:
+                    try:
+                        from GalTransl.server import record_runtime_success
+                        record_runtime_success(
+                            getattr(self.pj_config, "runtime_project_dir", self.pj_config.getProjectDir()),
+                            filename=filename,
+                            index=getattr(trans, "index", 0),
+                            speaker=getattr(trans, "speaker", None),
+                            source_preview=getattr(trans, "post_jp", ""),
+                            translation_preview=getattr(trans, "pre_zh", ""),
+                            trans_by=getattr(trans, "trans_by", ""),
+                        )
+                    except Exception:
+                        pass
                 result_output = result_output + repr(trans)
             LOGGER.info(result_output)
             trans_result_list += trans_result

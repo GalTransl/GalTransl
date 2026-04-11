@@ -75,9 +75,9 @@ class CProjectConfig:
         self.keyValues = dict()
         for k, v in self.projectConfig["common"].items():
             self.keyValues[k] = v
-        self.keyValues["internals.enableProxy"] = self.projectConfig["proxy"][
-            "enableProxy"
-        ]
+        self.keyValues["internals.enableProxy"] = (
+            self.projectConfig.get("proxy", {}).get("enableProxy", False)
+        )
         LOGGER.debug(
             "inputPath: %s, outputPath: %s, cachePath: %s,keyValues: %s",
             self.inputPath,
@@ -101,6 +101,8 @@ class CProjectConfig:
         self.active_workers: int=0
         self.target_lang=""
         self.translation_guideline=""
+        self.non_interactive: bool = False  # 非交互模式（前端启动时为True）
+        self.runtime_project_dir: str = projectPath
         
 
     def getProjectConfig(self) -> dict:
@@ -144,7 +146,7 @@ class CProjectConfig:
         return lbSymbol
 
     def getProxyConfigSection(self) -> dict:
-        return self.projectConfig["proxy"]["proxies"]
+        return self.projectConfig.get("proxy", {}).get("proxies", [])
 
     def getBackendConfigSection(self, backendName: str) -> dict:
         """

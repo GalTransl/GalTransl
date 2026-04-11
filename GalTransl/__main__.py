@@ -1,8 +1,6 @@
-import argparse, traceback
-from asyncio import get_event_loop, run, new_event_loop, set_event_loop
-from GalTransl.ConfigHelper import CProjectConfig
-from GalTransl.Runner import run_galtransl
+import argparse
 from GalTransl.i18n import get_text,GT_LANG
+from GalTransl.Service import JobSpec, run_job
 from GalTransl import (
     PROGRAM_SPLASH,
     TRANSLATOR_SUPPORTED,
@@ -31,34 +29,14 @@ def worker(project_dir: str, config_file_name: str, translator: str, show_banner
         print(f"Author: {AUTHOR}")
         print(f"Contributors: {CONTRIBUTORS}")
 
-    try:
-        cfg = CProjectConfig(project_dir, config_file_name)
-        LOGGER.setLevel(DEBUG_LEVEL[cfg.getCommonConfigSection().get("loggingLevel", "info")])
-    except Exception as ex:
-        LOGGER.error(get_text("error_loading_config", GT_LANG, str(ex)))
-        return False
-
-    try:
-        loop = get_event_loop()
-    except RuntimeError:
-        LOGGER.info(get_text("error_creating_event_loop", GT_LANG))
-        loop = new_event_loop()
-        set_event_loop(loop)
-
-    try:
-        run(run_galtransl(cfg, translator))
-    except KeyboardInterrupt:
-        loop.stop()
-    except RuntimeError as ex:
-        LOGGER.error(get_text("program_error", GT_LANG, ex))
-    except BaseException as ex:
-        LOGGER.error(get_text("error_unexpected", GT_LANG, str(ex)),exc_info=True)
-    finally:
-        try:
-            loop.close()
-        except Exception as ex:
-            LOGGER.error(get_text("error_closing_event_loop", GT_LANG, str(ex)))
-        return True
+    state = run_job(
+        JobSpec(
+            project_dir=project_dir,
+            config_file_name=config_file_name,
+            translator=translator,
+        )
+    )
+    return state.success
 
 
 def main() -> int:
@@ -94,7 +72,8 @@ def main() -> int:
     print(f"Author: {AUTHOR}")
     print(f"Contributors: {CONTRIBUTORS}")
 
-    return worker(args.project_dir, "config.yaml", args.translator, ui_lang=args.language)
+    success = worker(args.project_dir, "config.yaml", args.translator)
+    return 0 if success else 1
 
 
 if __name__ == "__main__":

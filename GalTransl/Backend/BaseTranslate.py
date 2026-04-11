@@ -270,14 +270,33 @@ class BaseTranslate:
                 else:
                     if file_name != "" and file_name[:1] != "[":
                         file_name = f"[{file_name}]"
+                    raw_file_name = file_name[1:-1] if file_name.startswith("[") and file_name.endswith("]") else file_name
+                    message_text = ""
                     try:
+                        message_text = f"{response.model_extra['error']} sleeping {sleep_time}s"
                         LOGGER.warning(
-                            f"[API Error]{token_info}{file_name} {response.model_extra['error']} sleeping {sleep_time}s"
+                            f"[API Error]{token_info}{file_name} {message_text}"
                         )
                     except:
+                        message_text = f"{e} sleeping {sleep_time}s"
                         LOGGER.warning(
-                            f"[API Error]{token_info}{file_name} {e} sleeping {sleep_time}s"
+                            f"[API Error]{token_info}{file_name} {message_text}"
                         )
+
+                    try:
+                        from GalTransl.server import record_runtime_error
+                        record_runtime_error(
+                            getattr(self.pj_config, "runtime_project_dir", self.pj_config.getProjectDir()),
+                            kind="api",
+                            message=message_text,
+                            filename=raw_file_name,
+                            retry_count=api_try_count,
+                            model=getattr(token, "model_name", ""),
+                            sleep_seconds=float(sleep_time),
+                            level="warning",
+                        )
+                    except Exception:
+                        pass
 
                 await asyncio.sleep(sleep_time)
 
@@ -298,13 +317,15 @@ class BaseTranslate:
         proofread: bool = False,
         retran_key: str = "",
     ) -> CTransList:
+        translist_unhit = list(trans_list)
 
         if self.skipH:
             LOGGER.warning("skipH: 将跳过含有敏感词的句子")
+            h_words_list = globals().get("H_WORDS_LIST", [])
             translist_unhit = [
                 tran
                 for tran in translist_unhit
-                if not any(word in tran.post_jp for word in H_WORDS_LIST)
+                if not any(word in tran.post_jp for word in h_words_list)
             ]
 
         if len(translist_unhit) == 0:

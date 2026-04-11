@@ -22,6 +22,14 @@ from GalTransl.Backend.Prompts import (
 from GalTransl import transl_counter
 
 
+def _check_stop_requested(project_config):
+    stop_event = getattr(project_config, "stop_event", None)
+    if stop_event is not None and stop_event.is_set():
+        from GalTransl.Service import JobCancelledError
+
+        raise JobCancelledError()
+
+
 class CSakuraTranslate(BaseTranslate):
     # init
     def __init__(
@@ -158,6 +166,7 @@ class CSakuraTranslate(BaseTranslate):
         messages.append({"role": "user", "content": prompt_req})
 
         while True:  # 一直循环，直到得到数据
+            _check_stop_requested(self.pj_config)
             if self.pj_config.active_workers == 1:
                 print(f"-> 字典输入: \n{gptdict}")
                 print(f"-> 翻译输入: \n{input_str}")
@@ -220,6 +229,20 @@ class CSakuraTranslate(BaseTranslate):
                 result_trans_list.append(trans_list[i])
 
             if error_flag:
+                try:
+                    from GalTransl.server import record_runtime_error
+                    record_runtime_error(
+                        getattr(self.pj_config, "runtime_project_dir", self.pj_config.getProjectDir()),
+                        kind="parse",
+                        message=error_message,
+                        filename=filename,
+                        index_range=idx_tip,
+                        retry_count=retry_count + 1,
+                        model=getattr(token, "model_name", self.model_name),
+                        level="warning",
+                    )
+                except Exception:
+                    pass
                 transl_counter["error_count"] += 1
                 LOGGER.debug(f"错误计数：{transl_counter['error_count']}")
                 LOGGER.debug(f"翻译句数：{transl_counter['tran_count']}")
@@ -269,6 +292,7 @@ class CSakuraTranslate(BaseTranslate):
                         LOGGER.warning(
                             f"[{filename}:{idx_tip}]单句循环重试{retry_count}次出错，重置会话"
                         )
+                        _check_stop_requested(self.pj_config)
                         continue
                     continue
             else:
@@ -303,6 +327,7 @@ class CSakuraTranslate(BaseTranslate):
         transl_step_count = 0
 
         while i < len_trans_list:
+            _check_stop_requested(self.pj_config)
             # await asyncio.sleep(1)
 
             trans_list_split = translist_unhit[i : i + num_pre_request]
@@ -328,6 +353,22 @@ class CSakuraTranslate(BaseTranslate):
                 transl_step_count = 0
 
             trans_result_list += trans_result
+
+            for trans in trans_result:
+                if trans.pre_zh and "(Failed)" not in trans.pre_zh and "(翻译失败)" not in trans.pre_zh:
+                    try:
+                        from GalTransl.server import record_runtime_success
+                        record_runtime_success(
+                            getattr(self.pj_config, "runtime_project_dir", self.pj_config.getProjectDir()),
+                            filename=filename,
+                            index=getattr(trans, "index", 0),
+                            speaker=getattr(trans, "speaker", None),
+                            source_preview=getattr(trans, "post_jp", ""),
+                            translation_preview=getattr(trans, "pre_zh", ""),
+                            trans_by=getattr(trans, "trans_by", ""),
+                        )
+                    except Exception:
+                        pass
 
             LOGGER.info("".join([repr(tran) for tran in trans_result]))
             LOGGER.info(

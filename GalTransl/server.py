@@ -1,0 +1,1396 @@
+from __future__ import annotations
+
+import argparse
+import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse, parse_qs, unquote
+from uuid import uuid4
+
+import os
+from datetime import datetime
+from collections import deque
+from dataclasses import asdict, dataclass, field
+from yaml import safe_load, safe_dump
+
+from base64 import urlsafe_b64decode, urlsafe_b64encode
+
+from GalTransl import TRANSLATOR_SUPPORTED, INPUT_FOLDERNAME, OUTPUT_FOLDERNAME, CACHE_FOLDERNAME
+from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
+
+
+def _utcnow_text() -> str:
+    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+
+def _normalize_project_dir(project_dir: str) -> str:
+    return str(Path(project_dir).resolve())
+
+
+@dataclass(slots=True)
+class RuntimeSentenceEvent:
+    id: str
+    ts: str
+    filename: str
+    index: int
+    speaker: str | list[str] | None
+    source_preview: str
+    translation_preview: str
+    trans_by: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class RuntimeErrorEvent:
+    id: str
+    ts: str
+    kind: str
+    level: str
+    message: str
+    filename: str = ""
+    index_range: str = ""
+    retry_count: int | None = None
+    model: str = ""
+    sleep_seconds: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+RUNTIME_RECENT_EVENT_LIMIT = 80
+
+
+@dataclass(slots=True)
+class RuntimeState:
+    project_dir: str
+    workers_active: int = 0
+    workers_configured: int = 0
+    current_file: str = ""
+    updated_at: str = field(default_factory=_utcnow_text)
+    file_totals: dict[str, int] = field(default_factory=dict)
+    cache_file_display_map: dict[str, str] = field(default_factory=dict)
+    recent_successes: deque[RuntimeSentenceEvent] = field(default_factory=lambda: deque(maxlen=RUNTIME_RECENT_EVENT_LIMIT))
+    recent_errors: deque[RuntimeErrorEvent] = field(default_factory=lambda: deque(maxlen=RUNTIME_RECENT_EVENT_LIMIT))
+    success_timestamps: deque[float] = field(default_factory=deque)
+
+
+class RuntimeRegistry:
+    def __init__(self) -> None:
+        self._states: dict[str, RuntimeState] = {}
+        self._lock = threading.Lock()
+
+    def ensure_project(self, project_dir: str) -> RuntimeState:
+        normalized = _normalize_project_dir(project_dir)
+        with self._lock:
+            state = self._states.get(normalized)
+            if state is None:
+                state = RuntimeState(project_dir=project_dir)
+                self._states[normalized] = state
+            else:
+                state.project_dir = project_dir
+            state.updated_at = _utcnow_text()
+            return state
+
+    def reset_project(self, project_dir: str) -> None:
+        with self._lock:
+            normalized = _normalize_project_dir(project_dir)
+            self._states[normalized] = RuntimeState(project_dir=project_dir)
+
+    def update_status(
+        self,
+        project_dir: str,
+        *,
+        current_file: str | None = None,
+        workers_active: int | None = None,
+        workers_configured: int | None = None,
+        file_totals: dict[str, int] | None = None,
+        cache_file_display_map: dict[str, str] | None = None,
+    ) -> None:
+        with self._lock:
+            state = self._states.get(_normalize_project_dir(project_dir))
+            if state is None:
+                state = RuntimeState(project_dir=project_dir)
+                self._states[_normalize_project_dir(project_dir)] = state
+            if current_file is not None:
+                state.current_file = current_file
+            if workers_active is not None:
+                state.workers_active = max(0, workers_active)
+            if workers_configured is not None:
+                state.workers_configured = max(0, workers_configured)
+            if file_totals is not None:
+                state.file_totals = dict(file_totals)
+            if cache_file_display_map is not None:
+                state.cache_file_display_map = dict(cache_file_display_map)
+            state.updated_at = _utcnow_text()
+
+    def append_success(
+        self,
+        project_dir: str,
+        *,
+        filename: str,
+        index: int,
+        speaker: str | list[str] | None,
+        source_preview: str,
+        translation_preview: str,
+        trans_by: str = "",
+    ) -> None:
+        now = datetime.utcnow().timestamp()
+        with self._lock:
+            state = self._states.get(_normalize_project_dir(project_dir))
+            if state is None:
+                state = RuntimeState(project_dir=project_dir)
+                self._states[_normalize_project_dir(project_dir)] = state
+            event = RuntimeSentenceEvent(
+                id=f"{filename}:{index}:{int(now * 1000)}",
+                ts=_utcnow_text(),
+                filename=filename,
+                index=index,
+                speaker=speaker,
+                source_preview=_trim_preview(source_preview),
+                translation_preview=_trim_preview(translation_preview),
+                trans_by=trans_by,
+            )
+            state.recent_successes.appendleft(event)
+            state.success_timestamps.append(now)
+            self._trim_speed_window_locked(state, now)
+            state.updated_at = event.ts
+
+    def append_error(
+        self,
+        project_dir: str,
+        *,
+        kind: str,
+        message: str,
+        filename: str = "",
+        index_range: str = "",
+        retry_count: int | None = None,
+        model: str = "",
+        sleep_seconds: float | None = None,
+        level: str = "error",
+    ) -> None:
+        with self._lock:
+            state = self._states.get(_normalize_project_dir(project_dir))
+            if state is None:
+                state = RuntimeState(project_dir=project_dir)
+                self._states[_normalize_project_dir(project_dir)] = state
+            ts = _utcnow_text()
+            state.recent_errors.appendleft(RuntimeErrorEvent(
+                id=f"{kind}:{filename}:{int(datetime.utcnow().timestamp() * 1000)}",
+                ts=ts,
+                kind=kind,
+                level=level,
+                message=_trim_preview(message, 240),
+                filename=filename,
+                index_range=index_range,
+                retry_count=retry_count,
+                model=model,
+                sleep_seconds=sleep_seconds,
+            ))
+            state.updated_at = ts
+
+    def get_runtime_snapshot(self, project_dir: str) -> dict[str, Any]:
+        normalized = _normalize_project_dir(project_dir)
+        with self._lock:
+            state = self._states.get(normalized)
+            if state is None:
+                return {
+                    "current_file": "",
+                    "workers_active": 0,
+                    "workers_configured": 0,
+                    "translation_speed_lpm": 0,
+                    "file_totals": {},
+                    "cache_file_display_map": {},
+                    "recent_errors": [],
+                    "recent_successes": [],
+                    "updated_at": _utcnow_text(),
+                }
+            now = datetime.utcnow().timestamp()
+            self._trim_speed_window_locked(state, now)
+            speed = round((len(state.success_timestamps) / 60) * 60, 1) if state.success_timestamps else 0
+            return {
+                "current_file": state.current_file,
+                "workers_active": state.workers_active,
+                "workers_configured": state.workers_configured,
+                "translation_speed_lpm": speed,
+                "file_totals": dict(state.file_totals),
+                "cache_file_display_map": dict(state.cache_file_display_map),
+                "recent_errors": [event.to_dict() for event in state.recent_errors],
+                "recent_successes": [event.to_dict() for event in state.recent_successes],
+                "updated_at": state.updated_at,
+            }
+
+    @staticmethod
+    def _trim_speed_window_locked(state: RuntimeState, now: float) -> None:
+        while state.success_timestamps and now - state.success_timestamps[0] > 60:
+            state.success_timestamps.popleft()
+
+
+def _trim_preview(value: str, limit: int = 140) -> str:
+    normalized = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: max(0, limit - 1)] + "…"
+
+
+RUNTIME_REGISTRY = RuntimeRegistry()
+
+
+def reset_runtime_project(project_dir: str) -> None:
+    RUNTIME_REGISTRY.reset_project(project_dir)
+
+
+def update_runtime_status(
+    project_dir: str,
+    *,
+    current_file: str | None = None,
+    workers_active: int | None = None,
+    workers_configured: int | None = None,
+    file_totals: dict[str, int] | None = None,
+    cache_file_display_map: dict[str, str] | None = None,
+) -> None:
+    RUNTIME_REGISTRY.update_status(
+        project_dir,
+        current_file=current_file,
+        workers_active=workers_active,
+        workers_configured=workers_configured,
+        file_totals=file_totals,
+        cache_file_display_map=cache_file_display_map,
+    )
+
+
+def record_runtime_success(
+    project_dir: str,
+    *,
+    filename: str,
+    index: int,
+    speaker: str | list[str] | None,
+    source_preview: str,
+    translation_preview: str,
+    trans_by: str = "",
+) -> None:
+    RUNTIME_REGISTRY.append_success(
+        project_dir,
+        filename=filename,
+        index=index,
+        speaker=speaker,
+        source_preview=source_preview,
+        translation_preview=translation_preview,
+        trans_by=trans_by,
+    )
+
+
+def record_runtime_error(
+    project_dir: str,
+    *,
+    kind: str,
+    message: str,
+    filename: str = "",
+    index_range: str = "",
+    retry_count: int | None = None,
+    model: str = "",
+    sleep_seconds: float | None = None,
+    level: str = "error",
+) -> None:
+    RUNTIME_REGISTRY.append_error(
+        project_dir,
+        kind=kind,
+        message=message,
+        filename=filename,
+        index_range=index_range,
+        retry_count=retry_count,
+        model=model,
+        sleep_seconds=sleep_seconds,
+        level=level,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Project path helpers – encode/decode directory paths for use in URLs
+# ---------------------------------------------------------------------------
+
+def encode_project_dir(project_dir: str) -> str:
+    """Encode a filesystem path to a URL-safe token."""
+    return urlsafe_b64encode(project_dir.encode("utf-8")).decode("ascii")
+
+
+def decode_project_dir(token: str) -> str:
+    """Decode a URL-safe token back to a filesystem path."""
+    # Restore base64 padding that may have been stripped for URL safety
+    padding = 4 - len(token) % 4
+    if padding != 4:
+        token += "=" * padding
+    return urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Filesystem helpers for project API
+# ---------------------------------------------------------------------------
+
+def _safe_project_dir(token: str) -> str:
+    """Decode and validate a project directory token. Raises ValueError on failure."""
+    try:
+        project_dir = decode_project_dir(token)
+    except Exception:
+        raise ValueError("invalid project id")
+    if not os.path.isdir(project_dir):
+        raise ValueError(f"project directory does not exist: {project_dir}")
+    return project_dir
+
+
+def _read_yaml_file(path: str) -> dict:
+    """Read and parse a YAML file."""
+    with open(path, "r", encoding="utf-8") as f:
+        return safe_load(f) or {}
+
+
+def _write_yaml_file(path: str, data: dict) -> None:
+    """Write data to a YAML file atomically."""
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        safe_dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    os.replace(tmp, path)
+
+
+def _list_dir_entries(dir_path: str) -> list[dict[str, Any]]:
+    """List files in a directory with basic metadata."""
+    entries = []
+    if not os.path.isdir(dir_path):
+        return entries
+    for name in sorted(os.listdir(dir_path)):
+        full = os.path.join(dir_path, name)
+        stat = os.stat(full) if os.path.isfile(full) else None
+        entries.append({
+            "name": name,
+            "is_file": os.path.isfile(full),
+            "size": stat.st_size if stat else 0,
+            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat() if stat else "",
+        })
+    return entries
+
+
+# ---------------------------------------------------------------------------
+# Global backend profiles helpers
+# ---------------------------------------------------------------------------
+
+_BACKEND_PROFILES_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backend_profiles.yaml")
+
+
+def _read_backend_profiles() -> dict:
+    """Read the global backend profiles YAML file."""
+    if not os.path.isfile(_BACKEND_PROFILES_PATH):
+        return {"profiles": {}}
+    try:
+        return _read_yaml_file(_BACKEND_PROFILES_PATH)
+    except Exception:
+        return {"profiles": {}}
+
+
+def _write_backend_profiles(data: dict) -> None:
+    """Write the global backend profiles YAML file atomically."""
+    _write_yaml_file(_BACKEND_PROFILES_PATH, data)
+
+
+def _scan_plugins() -> list[dict[str, Any]]:
+    """Scan the plugins directory and return plugin metadata."""
+    plugins_dir = os.path.abspath("plugins")
+    result = []
+    if not os.path.isdir(plugins_dir):
+        return result
+    for name in sorted(os.listdir(plugins_dir)):
+        yaml_path = os.path.join(plugins_dir, name, f"{name}.yaml")
+        if not os.path.isfile(yaml_path):
+            continue
+        try:
+            info = _read_yaml_file(yaml_path)
+            core = info.get("Core", {})
+            settings = info.get("Settings", {})
+            result.append({
+                "name": name,
+                "display_name": core.get("Name", name),
+                "version": core.get("Version", ""),
+                "author": core.get("Author", ""),
+                "description": core.get("Description", ""),
+                "type": core.get("Type", "unknown").lower(),
+                "module": core.get("Module", name),
+                "settings": settings,
+            })
+        except Exception:
+            continue
+    return result
+
+
+INDEX_HTML = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GalTransl Backend Mode</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --line: #d9e1ec;
+      --text: #1f2a37;
+      --muted: #5b6b7f;
+      --primary: #2f6feb;
+      --primary-hover: #1d5fe0;
+      --success: #0f9d58;
+      --warning: #f39c12;
+      --danger: #d93025;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .page {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .hero {
+      margin-bottom: 20px;
+    }
+    .hero h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+    }
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(320px, 420px) 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow: 0 8px 30px rgba(16, 24, 40, 0.05);
+    }
+    .card h2 {
+      margin: 0 0 16px;
+      font-size: 18px;
+    }
+    .field {
+      margin-bottom: 14px;
+    }
+    .field label {
+      display: block;
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .field input,
+    .field select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      font-size: 14px;
+      background: #fff;
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 10px;
+    }
+    button {
+      border: 0;
+      background: var(--primary);
+      color: white;
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button:hover { background: var(--primary-hover); }
+    button.secondary {
+      background: #e8eef9;
+      color: var(--primary);
+    }
+    .hint {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.6;
+      margin-top: 12px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .status-pending { background: #eef3ff; color: #3159c9; }
+    .status-running { background: #fff4dd; color: #a96500; }
+    .status-completed { background: #e7f8ee; color: var(--success); }
+    .status-failed { background: #fdecea; color: var(--danger); }
+    .status-cancelled { background: #f1f3f5; color: #667085; }
+    .job-list {
+      display: grid;
+      gap: 12px;
+    }
+    .job {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      background: #fff;
+    }
+    .job-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .job-title {
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+    .job-meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 8px 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+      margin-top: 10px;
+    }
+    .job-error {
+      margin-top: 10px;
+      color: var(--danger);
+      background: #fff4f4;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 13px;
+      white-space: pre-wrap;
+    }
+    .empty {
+      color: var(--muted);
+      font-size: 14px;
+      padding: 18px 0;
+    }
+    @media (max-width: 860px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="hero">
+      <h1>GalTransl Backend Mode</h1>
+      <p>这是一个为后续 Web UI 铺路的最小验证界面。它不会替换原来的 <code>run_GalTransl.py</code>，而是通过独立的本地服务入口提交和查看翻译任务。</p>
+    </section>
+
+    <div class="layout">
+      <section class="card">
+        <h2>提交任务</h2>
+        <form id="job-form">
+          <div class="field">
+            <label for="project_dir">项目目录</label>
+            <input id="project_dir" name="project_dir" placeholder="例如：E:\\GalTransl\\sampleProject" required />
+          </div>
+          <div class="field">
+            <label for="config_file_name">配置文件名</label>
+            <input id="config_file_name" name="config_file_name" value="config.yaml" required />
+          </div>
+          <div class="field">
+            <label for="translator">翻译模板</label>
+            <select id="translator" name="translator" required></select>
+          </div>
+          <div class="actions">
+            <button type="submit">启动任务</button>
+            <button type="button" class="secondary" id="refresh-btn">刷新状态</button>
+          </div>
+        </form>
+        <div class="hint">
+          建议先用 <code>show-plugs</code> 或现有可工作的项目配置来验证服务链路。当前版本采用单执行槽，避免和共享日志、缓存输出发生冲突。
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>任务列表</h2>
+        <div id="jobs" class="job-list"></div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const translatorSelect = document.getElementById('translator');
+    const jobsContainer = document.getElementById('jobs');
+    const form = document.getElementById('job-form');
+    const refreshBtn = document.getElementById('refresh-btn');
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function statusClass(status) {
+      return `status-${status || 'pending'}`;
+    }
+
+    async function loadTranslators() {
+      const response = await fetch('/api/translators');
+      const data = await response.json();
+      translatorSelect.innerHTML = data.translators.map(item => {
+        return `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)} - ${escapeHtml(item.description)}</option>`;
+      }).join('');
+    }
+
+    function renderJobs(jobs) {
+      if (!jobs.length) {
+        jobsContainer.innerHTML = '<div class="empty">还没有任务，先从左侧提交一个本地任务。</div>';
+        return;
+      }
+
+      jobsContainer.innerHTML = jobs.map(job => `
+        <article class="job">
+          <div class="job-header">
+            <div class="job-title">${escapeHtml(job.project_dir)}</div>
+            <span class="pill ${statusClass(job.status)}">${escapeHtml(job.status)}</span>
+          </div>
+          <div>${escapeHtml(job.translator)} / ${escapeHtml(job.config_file_name)}</div>
+          <div class="job-meta">
+            <div><strong>任务 ID：</strong>${escapeHtml(job.job_id)}</div>
+            <div><strong>创建时间：</strong>${escapeHtml(job.created_at || '-')}</div>
+            <div><strong>开始时间：</strong>${escapeHtml(job.started_at || '-')}</div>
+            <div><strong>结束时间：</strong>${escapeHtml(job.finished_at || '-')}</div>
+            <div><strong>执行结果：</strong>${job.success ? 'success' : 'not finished / failed'}</div>
+          </div>
+          ${job.error ? `<div class="job-error">${escapeHtml(job.error)}</div>` : ''}
+        </article>
+      `).join('');
+    }
+
+    async function loadJobs() {
+      const response = await fetch('/api/jobs');
+      const data = await response.json();
+      renderJobs(data.jobs || []);
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const payload = {
+        project_dir: document.getElementById('project_dir').value,
+        config_file_name: document.getElementById('config_file_name').value,
+        translator: translatorSelect.value,
+      };
+
+      const response = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        alert(data.error || '提交任务失败');
+        return;
+      }
+
+      await loadJobs();
+    });
+
+    refreshBtn.addEventListener('click', () => loadJobs());
+    loadTranslators().then(loadJobs);
+    setInterval(loadJobs, 2000);
+  </script>
+</body>
+</html>
+"""
+
+
+class JobRegistry:
+    def __init__(self) -> None:
+        self._jobs: dict[str, JobState] = {}
+        self._stop_events: dict[str, threading.Event] = {}
+        self._lock = threading.Lock()
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="galtransl-job")
+
+    def list_jobs(self) -> list[dict[str, Any]]:
+        with self._lock:
+            jobs = [job.to_dict() for job in self._jobs.values()]
+        return sorted(jobs, key=lambda job: job["created_at"], reverse=True)
+
+    def get_job(self, job_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            return None if job is None else job.to_dict()
+
+    def get_project_job(self, project_dir: str) -> JobState | None:
+        normalized = _normalize_project_dir(project_dir)
+        with self._lock:
+            project_jobs = [
+                job for job in self._jobs.values()
+                if _normalize_project_dir(job.project_dir) == normalized
+            ]
+        if not project_jobs:
+            return None
+        active_jobs = [job for job in project_jobs if job.status in {"pending", "running"}]
+        if active_jobs:
+            active_jobs.sort(key=lambda job: job.created_at, reverse=True)
+            return active_jobs[0]
+        project_jobs.sort(key=lambda job: job.created_at, reverse=True)
+        return project_jobs[0]
+
+    def request_project_stop(self, project_dir: str) -> JobState | None:
+        normalized = _normalize_project_dir(project_dir)
+        with self._lock:
+            active_jobs = [
+                job for job in self._jobs.values()
+                if _normalize_project_dir(job.project_dir) == normalized and job.status in {"pending", "running"}
+            ]
+            if not active_jobs:
+                return None
+            active_jobs.sort(key=lambda job: job.created_at, reverse=True)
+            event = self._stop_events.get(normalized)
+            if event is not None:
+                event.set()
+            return active_jobs[0]
+
+    def clear_project_stop(self, project_dir: str) -> None:
+        normalized = _normalize_project_dir(project_dir)
+        with self._lock:
+            self._stop_events.pop(normalized, None)
+
+    def _has_running_job_for_project(self, project_dir: str) -> bool:
+        normalized = str(Path(project_dir).resolve())
+        for job in self._jobs.values():
+            if str(Path(job.project_dir).resolve()) == normalized and job.status in {"pending", "running"}:
+                return True
+        return False
+
+    def submit(self, payload: dict[str, Any]) -> dict[str, Any]:
+        project_dir = str(payload.get("project_dir", "")).strip()
+        config_file_name = str(payload.get("config_file_name", "config.yaml")).strip() or "config.yaml"
+        translator = str(payload.get("translator", "")).strip()
+        backend_profile = str(payload.get("backend_profile", "")).strip()
+
+        if not project_dir:
+            raise ValueError("project_dir is required")
+        if not translator:
+            raise ValueError("translator is required")
+        if translator not in TRANSLATOR_SUPPORTED:
+            raise ValueError(f"unsupported translator: {translator}")
+
+        with self._lock:
+            if self._has_running_job_for_project(project_dir):
+                raise ValueError("the project already has a pending or running job")
+
+            job_id = uuid4().hex[:12]
+            spec = JobSpec(
+                job_id=job_id,
+                project_dir=project_dir,
+                config_file_name=config_file_name,
+                translator=translator,
+                backend_profile=backend_profile,
+            )
+            state = create_job_state(spec)
+            reset_runtime_project(project_dir)
+            self._jobs[job_id] = state
+            self._stop_events[_normalize_project_dir(project_dir)] = threading.Event()
+            self._executor.submit(self._execute_job, spec, state)
+            return state.to_dict()
+
+    def _execute_job(self, spec: JobSpec, state: JobState) -> None:
+        stop_event = self._stop_events.get(_normalize_project_dir(spec.project_dir))
+        try:
+            run_job(spec, state, stop_event=stop_event)
+        finally:
+            self.clear_project_stop(spec.project_dir)
+
+
+def build_handler(registry: JobRegistry):
+    class RequestHandler(BaseHTTPRequestHandler):
+        def end_headers(self) -> None:
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            super().end_headers()
+
+        def do_OPTIONS(self) -> None:
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.end_headers()
+
+        # -----------------------------------------------------------------
+        # Routing helpers
+        # -----------------------------------------------------------------
+
+        def _route_project_api(self, project_id: str, sub_path: str) -> None:
+            """Handle /api/projects/:id/* routes."""
+            try:
+                project_dir = _safe_project_dir(project_id)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            # GET /api/projects/:id/config
+            if sub_path == "/config":
+                config_name = parse_qs(urlparse(self.path).query).get("config", ["config.yaml"])[0]
+                config_path = os.path.join(project_dir, config_name)
+                if not os.path.isfile(config_path):
+                    self._send_json({"error": f"config file not found: {config_name}"}, status=HTTPStatus.NOT_FOUND)
+                    return
+                try:
+                    data = _read_yaml_file(config_path)
+                    self._send_json({"config": data, "project_dir": project_dir, "config_file_name": config_name})
+                except Exception as exc:
+                    self._send_json({"error": f"failed to read config: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # GET /api/projects/:id/files
+            if sub_path == "/files":
+                input_dir = os.path.join(project_dir, INPUT_FOLDERNAME)
+                output_dir = os.path.join(project_dir, OUTPUT_FOLDERNAME)
+                cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+                self._send_json({
+                    "project_dir": project_dir,
+                    "input_dir": input_dir,
+                    "output_dir": output_dir,
+                    "cache_dir": cache_dir,
+                    "input_files": _list_dir_entries(input_dir),
+                    "output_files": _list_dir_entries(output_dir),
+                    "cache_files": _list_dir_entries(cache_dir),
+                })
+                return
+
+            # GET /api/projects/:id/cache
+            if sub_path == "/cache":
+                cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+                self._send_json({
+                    "project_dir": project_dir,
+                    "cache_dir": cache_dir,
+                    "files": _list_dir_entries(cache_dir),
+                })
+                return
+
+            # GET /api/projects/:id/cache/:filename
+            if sub_path.startswith("/cache/"):
+                filename = sub_path[len("/cache/"):]
+                cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+                file_path = os.path.join(cache_dir, filename)
+                if not os.path.isfile(file_path):
+                    self._send_json({"error": f"cache file not found: {filename}"}, status=HTTPStatus.NOT_FOUND)
+                    return
+                try:
+                    import orjson
+                    with open(file_path, "rb") as f:
+                        data = orjson.loads(f.read())
+                    self._send_json({"project_dir": project_dir, "filename": filename, "entries": data})
+                except Exception as exc:
+                    self._send_json({"error": f"failed to read cache: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # GET /api/projects/:id/progress
+            if sub_path == "/progress":
+                cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+                total = 0
+                translated = 0
+                problems = 0
+                failed = 0
+                file_progress = []
+                if os.path.isdir(cache_dir):
+                    for name in sorted(os.listdir(cache_dir)):
+                        fp = os.path.join(cache_dir, name)
+                        if not os.path.isfile(fp) or not fp.endswith(".json"):
+                            continue
+                        try:
+                            import orjson
+                            with open(fp, "rb") as f:
+                                entries = orjson.loads(f.read())
+                            f_total = len(entries)
+                            f_translated = sum(1 for e in entries if isinstance(e, dict) and e.get("pre_zh", ""))
+                            f_problems = sum(1 for e in entries if isinstance(e, dict) and e.get("problem", ""))
+                            f_failed = sum(1 for e in entries if isinstance(e, dict) and "(Failed)" in str(e.get("problem", "")))
+                            total += f_total
+                            translated += f_translated
+                            problems += f_problems
+                            failed += f_failed
+                            file_progress.append({
+                                "filename": name,
+                                "total": f_total,
+                                "translated": f_translated,
+                                "problems": f_problems,
+                                "failed": f_failed,
+                            })
+                        except Exception:
+                            continue
+                self._send_json({
+                    "project_dir": project_dir,
+                    "total": total,
+                    "translated": translated,
+                    "problems": problems,
+                    "failed": failed,
+                    "files": file_progress,
+                })
+                return
+
+            # GET /api/projects/:id/runtime
+            if sub_path == "/runtime":
+                runtime = RUNTIME_REGISTRY.get_runtime_snapshot(project_dir)
+                progress_payload = {
+                    "total": 0,
+                    "translated": 0,
+                    "problems": 0,
+                    "failed": 0,
+                    "files": [],
+                }
+                file_progress_map: dict[str, dict[str, Any]] = {}
+                file_totals = runtime.get("file_totals", {})
+                cache_file_display_map = runtime.get("cache_file_display_map", {})
+                cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+                if os.path.isdir(cache_dir):
+                    for name in sorted(os.listdir(cache_dir)):
+                        fp = os.path.join(cache_dir, name)
+                        if not os.path.isfile(fp) or not fp.endswith(".json"):
+                            continue
+                        try:
+                            import orjson
+                            with open(fp, "rb") as f:
+                                entries = orjson.loads(f.read())
+                            f_translated = sum(1 for e in entries if isinstance(e, dict) and e.get("pre_zh", ""))
+                            f_problems = sum(1 for e in entries if isinstance(e, dict) and e.get("problem", ""))
+                            f_failed = sum(
+                                1 for e in entries
+                                if isinstance(e, dict)
+                                and (
+                                    "翻译失败" in str(e.get("problem", ""))
+                                    or "(Failed)" in str(e.get("pre_zh", ""))
+                                    or "(翻译失败)" in str(e.get("pre_zh", ""))
+                                )
+                            )
+                            display_name = cache_file_display_map.get(name, name)
+                            if display_name not in file_progress_map:
+                                file_progress_map[display_name] = {
+                                    "filename": display_name,
+                                    "total": int(file_totals.get(display_name, 0)),
+                                    "translated": 0,
+                                    "problems": 0,
+                                    "failed": 0,
+                                }
+                            file_progress_map[display_name]["translated"] += f_translated
+                            file_progress_map[display_name]["problems"] += f_problems
+                            file_progress_map[display_name]["failed"] += f_failed
+                        except Exception:
+                            continue
+                for display_name, total_count in file_totals.items():
+                    file_progress_map.setdefault(display_name, {
+                        "filename": display_name,
+                        "total": int(total_count),
+                        "translated": 0,
+                        "problems": 0,
+                        "failed": 0,
+                    })
+                progress_payload["files"] = sorted(file_progress_map.values(), key=lambda item: item["filename"])
+                progress_payload["total"] = sum(int(item["total"]) for item in progress_payload["files"])
+                progress_payload["translated"] = sum(int(item["translated"]) for item in progress_payload["files"])
+                progress_payload["problems"] = sum(int(item["problems"]) for item in progress_payload["files"])
+                progress_payload["failed"] = sum(int(item["failed"]) for item in progress_payload["files"])
+                job = registry.get_project_job(project_dir)
+                total = progress_payload["total"]
+                translated = progress_payload["translated"]
+                percent = round((translated / total) * 100) if total > 0 else 0
+                speed = runtime["translation_speed_lpm"]
+                remaining = max(total - translated, 0)
+                eta_seconds = round((remaining / speed) * 60) if speed > 0 and remaining > 0 else None
+                self._send_json({
+                    "project_dir": project_dir,
+                    "job": None if job is None else {
+                        "job_id": job.job_id,
+                        "status": job.status,
+                        "translator": job.translator,
+                        "created_at": job.created_at,
+                        "started_at": job.started_at,
+                        "finished_at": job.finished_at,
+                    },
+                    "summary": {
+                        "total": total,
+                        "translated": translated,
+                        "problems": progress_payload["problems"],
+                        "failed": progress_payload["failed"],
+                        "percent": percent,
+                        "workers_active": runtime["workers_active"],
+                        "workers_configured": runtime["workers_configured"],
+                        "translation_speed_lpm": speed,
+                        "eta_seconds": eta_seconds,
+                        "updated_at": runtime["updated_at"],
+                    },
+                    "current_file": runtime["current_file"],
+                    "recent_errors": runtime["recent_errors"],
+                    "recent_successes": runtime["recent_successes"],
+                    "files": progress_payload["files"],
+                })
+                return
+
+            # POST /api/projects/:id/stop
+            if sub_path == "/stop":
+                if self.command != "POST":
+                    self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
+                    return
+                job = registry.request_project_stop(project_dir)
+                if job is None:
+                    self._send_json(
+                        {"success": False, "project_dir": project_dir, "error": "no active job for project"},
+                        status=HTTPStatus.CONFLICT,
+                    )
+                    return
+                self._send_json({
+                    "success": True,
+                    "project_dir": project_dir,
+                    "job_id": job.job_id,
+                    "status": job.status,
+                    "message": "stop requested",
+                })
+                return
+
+            # GET /api/projects/:id/dictionary
+            if sub_path == "/dictionary":
+                config_name = parse_qs(urlparse(self.path).query).get("config", ["config.yaml"])[0]
+                config_path = os.path.join(project_dir, config_name)
+                if not os.path.isfile(config_path):
+                    self._send_json({"error": f"config file not found: {config_name}"}, status=HTTPStatus.NOT_FOUND)
+                    return
+                try:
+                    data = _read_yaml_file(config_path)
+                    dict_cfg = data.get("dictionary", {})
+                    default_folder = dict_cfg.get("defaultDictFolder", "Dict")
+                    # Resolve absolute or relative dict folder
+                    if os.path.isabs(default_folder):
+                        dict_base = default_folder
+                    else:
+                        dict_base = os.path.abspath(default_folder)
+                    result = {
+                        "project_dir": project_dir,
+                        "default_dict_folder": default_folder,
+                        "pre_dict_files": dict_cfg.get("preDict", []),
+                        "gpt_dict_files": dict_cfg.get("gpt.dict", []),
+                        "post_dict_files": dict_cfg.get("postDict", []),
+                        "dict_contents": {},
+                    }
+                    # Read contents of each dict file
+                    for key, file_list in [("preDict", dict_cfg.get("preDict", [])), ("gpt.dict", dict_cfg.get("gpt.dict", [])), ("postDict", dict_cfg.get("postDict", []))]:
+                        for fname in file_list:
+                            clean = fname.replace("(project_dir)", "").strip()
+                            if "(project_dir)" in fname:
+                                fpath = os.path.join(project_dir, clean)
+                            else:
+                                fpath = os.path.join(dict_base, clean)
+                            if os.path.isfile(fpath):
+                                try:
+                                    with open(fpath, "r", encoding="utf-8") as f:
+                                        lines = f.read().splitlines()
+                                    result["dict_contents"][fname] = {
+                                        "path": fpath,
+                                        "lines": lines,
+                                        "count": len([l for l in lines if l.strip() and not l.startswith("\\\\") and not l.startswith("//")]),
+                                    }
+                                except Exception:
+                                    result["dict_contents"][fname] = {"path": fpath, "lines": [], "count": 0, "error": "failed to read"}
+                    self._send_json(result)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to read dictionary config: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # GET /api/projects/:id/problems
+            if sub_path == "/problems":
+                cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+                all_problems = []
+                if os.path.isdir(cache_dir):
+                    for name in sorted(os.listdir(cache_dir)):
+                        fp = os.path.join(cache_dir, name)
+                        if not os.path.isfile(fp) or not fp.endswith(".json"):
+                            continue
+                        try:
+                            import orjson
+                            with open(fp, "rb") as f:
+                                entries = orjson.loads(f.read())
+                            for e in entries:
+                                if isinstance(e, dict) and e.get("problem", ""):
+                                    all_problems.append({
+                                        "filename": name,
+                                        "index": e.get("index", 0),
+                                        "speaker": e.get("name", ""),
+                                        "post_jp": e.get("post_jp", ""),
+                                        "pre_zh": e.get("pre_zh", ""),
+                                        "problem": e.get("problem", ""),
+                                        "trans_by": e.get("trans_by", ""),
+                                    })
+                        except Exception:
+                            continue
+                self._send_json({"project_dir": project_dir, "problems": all_problems, "total": len(all_problems)})
+                return
+
+            # GET /api/projects/:id/logs
+            if sub_path == "/logs":
+                log_path = os.path.join(project_dir, "GalTransl.log")
+                if not os.path.isfile(log_path):
+                    self._send_json({"project_dir": project_dir, "exists": False, "lines": []})
+                    return
+                try:
+                    with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                        lines = f.read().splitlines()
+                    # Return last 2000 lines by default
+                    query = parse_qs(urlparse(self.path).query)
+                    tail = int(query.get("tail", ["2000"])[0])
+                    self._send_json({
+                        "project_dir": project_dir,
+                        "exists": True,
+                        "total_lines": len(lines),
+                        "lines": lines[-tail:],
+                    })
+                except Exception as exc:
+                    self._send_json({"error": f"failed to read log: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
+
+        def do_GET(self) -> None:
+            parsed = urlparse(self.path)
+            path = parsed.path
+
+            if path == "/":
+                self._send_html(INDEX_HTML)
+                return
+            if path == "/api/translators":
+                translators = [
+                    {
+                        "name": name,
+                        "description": description.get("zh-cn") or next(iter(description.values())),
+                    }
+                    for name, description in TRANSLATOR_SUPPORTED.items()
+                ]
+                self._send_json({"translators": translators})
+                return
+            if path == "/api/jobs":
+                self._send_json({"jobs": registry.list_jobs()})
+                return
+            if path.startswith("/api/jobs/"):
+                job_id = path.rsplit("/", 1)[-1]
+                job = registry.get_job(job_id)
+                if job is None:
+                    self._send_json({"error": "job not found"}, status=HTTPStatus.NOT_FOUND)
+                    return
+                self._send_json(job)
+                return
+
+            # --- Backend Profiles API ---
+            if path == "/api/backend-profiles":
+                data = _read_backend_profiles()
+                self._send_json(data)
+                return
+
+            if path.startswith("/api/backend-profiles/"):
+                profile_name = unquote(path.split("/", 3)[-1])
+                data = _read_backend_profiles()
+                profiles = data.get("profiles", {})
+                if profile_name not in profiles:
+                    self._send_json({"error": f"profile not found: {profile_name}"}, status=HTTPStatus.NOT_FOUND)
+                    return
+                self._send_json({"name": profile_name, "profile": profiles[profile_name]})
+                return
+
+            # --- Project API ---
+            if path == "/api/plugins":
+                self._send_json({"plugins": _scan_plugins()})
+                return
+
+            if path.startswith("/api/projects/"):
+                parts = path.split("/", 4)  # /api/projects/:id/sub...
+                if len(parts) < 4:
+                    self._send_json({"error": "invalid project path"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                project_id = parts[3]
+                sub_path = "/" + "/".join(parts[4:]) if len(parts) > 4 else "/"
+                self._route_project_api(project_id, sub_path)
+                return
+
+            self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
+
+        def do_POST(self) -> None:
+            parsed = urlparse(self.path)
+            path = parsed.path
+
+            if path.startswith("/api/projects/"):
+                parts = path.split("/", 4)
+                if len(parts) < 4:
+                    self._send_json({"error": "invalid project path"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                project_id = parts[3]
+                sub_path = "/" + "/".join(parts[4:]) if len(parts) > 4 else "/"
+                self._route_project_api(project_id, sub_path)
+                return
+
+            if path == "/api/jobs":
+                try:
+                    payload = self._read_json_body()
+                    job = registry.submit(payload)
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+
+                self._send_json(job, status=HTTPStatus.ACCEPTED)
+                return
+
+            self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
+
+        def do_PUT(self) -> None:
+            parsed = urlparse(self.path)
+            path = parsed.path
+
+            # PUT /api/backend-profiles/:name
+            if path.startswith("/api/backend-profiles/"):
+                profile_name = unquote(path.split("/", 3)[-1])
+                if not profile_name:
+                    self._send_json({"error": "profile name is required"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                try:
+                    payload = self._read_json_body()
+                    profile_data = payload.get("profile")
+                    if profile_data is None:
+                        self._send_json({"error": "profile field is required"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    data = _read_backend_profiles()
+                    if "profiles" not in data:
+                        data["profiles"] = {}
+                    data["profiles"][profile_name] = profile_data
+                    _write_backend_profiles(data)
+                    self._send_json({"success": True, "name": profile_name})
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to write profile: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # PUT /api/projects/:id/config
+            if path.startswith("/api/projects/") and path.endswith("/config"):
+                parts = path.split("/")
+                if len(parts) < 5:
+                    self._send_json({"error": "invalid project path"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                project_id = parts[3]
+                try:
+                    project_dir = _safe_project_dir(project_id)
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                try:
+                    payload = self._read_json_body()
+                    config_data = payload.get("config")
+                    config_name = payload.get("config_file_name", "config.yaml")
+                    if config_data is None:
+                        self._send_json({"error": "config field is required"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    config_path = os.path.join(project_dir, config_name)
+                    if not os.path.isfile(config_path):
+                        self._send_json({"error": f"config file not found: {config_name}"}, status=HTTPStatus.NOT_FOUND)
+                        return
+                    _write_yaml_file(config_path, config_data)
+                    self._send_json({"success": True, "project_dir": project_dir, "config_file_name": config_name})
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to write config: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
+
+        def do_DELETE(self) -> None:
+            parsed = urlparse(self.path)
+            path = parsed.path
+
+            # DELETE /api/backend-profiles/:name
+            if path.startswith("/api/backend-profiles/"):
+                profile_name = unquote(path.split("/", 3)[-1])
+                if not profile_name:
+                    self._send_json({"error": "profile name is required"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                data = _read_backend_profiles()
+                profiles = data.get("profiles", {})
+                if profile_name not in profiles:
+                    self._send_json({"error": f"profile not found: {profile_name}"}, status=HTTPStatus.NOT_FOUND)
+                    return
+                del data["profiles"][profile_name]
+                _write_backend_profiles(data)
+                self._send_json({"success": True, "name": profile_name})
+                return
+
+            self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
+
+        def log_message(self, format: str, *args: Any) -> None:
+            return
+
+        def _read_json_body(self) -> dict[str, Any]:
+            content_length = int(self.headers.get("Content-Length", "0"))
+            raw_body = self.rfile.read(content_length) if content_length > 0 else b"{}"
+            data = json.loads(raw_body.decode("utf-8") or "{}")
+            if not isinstance(data, dict):
+                raise ValueError("json body must be an object")
+            return data
+
+        def _send_json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _send_html(self, html: str) -> None:
+            body = html.encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    return RequestHandler
+
+
+def serve(host: str = "127.0.0.1", port: int = 18000) -> None:
+    registry = JobRegistry()
+    server = ThreadingHTTPServer((host, port), build_handler(registry))
+    print(f"GalTransl backend mode listening at http://{host}:{port}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser("GalTransl backend mode")
+    parser.add_argument("--host", default="127.0.0.1", help="bind host")
+    parser.add_argument("--port", type=int, default=18000, help="bind port")
+    args = parser.parse_args()
+    serve(args.host, args.port)
+
+
+if __name__ == "__main__":
+    main()

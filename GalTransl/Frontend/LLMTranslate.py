@@ -28,6 +28,44 @@ from GalTransl.CSplitter import (
 )
 
 
+def _runtime_project_dir(projectConfig: CProjectConfig) -> str:
+    return getattr(projectConfig, "runtime_project_dir", projectConfig.getProjectDir())
+
+
+def _update_runtime(projectConfig: CProjectConfig, **kwargs):
+    try:
+        from GalTransl.server import update_runtime_status
+        update_runtime_status(_runtime_project_dir(projectConfig), **kwargs)
+    except Exception:
+        return
+
+
+def _check_stop_requested(projectConfig: CProjectConfig):
+    stop_event = getattr(projectConfig, "stop_event", None)
+    if stop_event is not None and stop_event.is_set():
+        from GalTransl.Service import JobCancelledError
+
+        raise JobCancelledError()
+
+
+def _build_runtime_file_maps(ordered_chunks: list[SplitChunkMetadata], input_dir: str) -> tuple[dict[str, int], dict[str, str]]:
+    file_totals: dict[str, int] = {}
+    cache_file_display_map: dict[str, str] = {}
+
+    for chunk in ordered_chunks:
+        display_name = chunk.file_path.replace(input_dir, "").lstrip(os_sep).replace(os_sep, "/")
+        file_totals.setdefault(display_name, 0)
+        file_totals[display_name] += chunk.chunk_non_cross_size
+        cache_key = display_name.replace("/", "-}")
+        if chunk.total_chunks > 1:
+            cache_key = f"{cache_key}_{chunk.chunk_index}.json"
+        else:
+            cache_key = f"{cache_key}.json"
+        cache_file_display_map[cache_key] = display_name
+
+    return file_totals, cache_file_display_map
+
+
 async def update_progress_title(
     bar, semaphore, workersPerProject: int, projectConfig: CProjectConfig
 ):
@@ -45,6 +83,11 @@ async def update_progress_title(
                 projectConfig.active_workers = workersPerProject
             else:
                 projectConfig.active_workers = active_workers
+            _update_runtime(
+                projectConfig,
+                workers_active=active_workers,
+                workers_configured=workersPerProject,
+            )
             # 更新标题
             new_title = f"{base_title} [{active_workers}/{workersPerProject} 并发]"
             bar.title(new_title)
@@ -66,6 +109,8 @@ async def doLLMTranslate(
     projectConfig: CProjectConfig,
 ) -> bool:
 
+    _check_stop_requested(projectConfig)
+
     project_dir = projectConfig.getProjectDir()
     input_dir = projectConfig.getInputPath()
     output_dir = projectConfig.getOutputPath()
@@ -84,6 +129,7 @@ async def doLLMTranslate(
     SplitChunkMetadata.clear_file_finished_chunk()
     total_chunks = []
     projectConfig.active_workers = 1
+    _update_runtime(projectConfig, workers_active=0, workers_configured=workersPerProject)
     
     makedirs(output_dir, exist_ok=True)
     makedirs(cache_dir, exist_ok=True)
@@ -119,6 +165,7 @@ async def doLLMTranslate(
             for file_path in file_list
         }
         for future in as_completed(future_to_file):
+            _check_stop_requested(projectConfig)
             file_path = future_to_file[future]
             try:
                 json_list, save_func = future.result()
@@ -130,10 +177,12 @@ async def doLLMTranslate(
                 LOGGER.error(get_text("file_processing_error", GT_LANG, file_path, exc))
 
     if "dump-name" in eng_type:
+        _check_stop_requested(projectConfig)
         await dump_name_table_from_chunks(total_chunks, projectConfig)
         return True
 
     if eng_type == "GenDic":
+        _check_stop_requested(projectConfig)
         gptapi = await init_gptapi(projectConfig)
         await gptapi.batch_translate(all_jsons)
         return True
@@ -169,6 +218,8 @@ async def doLLMTranslate(
         ordered_chunks = total_chunks
 
     total_lines = sum([len(chunk.trans_list) for chunk in ordered_chunks])
+    runtime_file_totals, runtime_cache_map = _build_runtime_file_maps(ordered_chunks, input_dir)
+    _update_runtime(projectConfig, file_totals=runtime_file_totals, cache_file_display_map=runtime_cache_map)
 
     # 初始生成name替换表
     name_replaceDict_path_xlsx = joinpath(
@@ -228,6 +279,7 @@ async def doLLMTranslate(
         # 创建所有翻译任务
         all_tasks = []
         for chunk in ordered_chunks:
+            _check_stop_requested(projectConfig)
             all_tasks.append(
                 doLLMTranslSingleChunk(
                     semaphore,
@@ -259,6 +311,7 @@ async def doLLMTranslSingleChunk(
 ) -> Tuple[bool, List, List, str, SplitChunkMetadata]:
 
     async with semaphore:
+        _check_stop_requested(projectConfig)
         st = time()
         proj_dir = projectConfig.getProjectDir()
         input_dir = projectConfig.getInputPath()
@@ -290,6 +343,7 @@ async def doLLMTranslSingleChunk(
         )
 
         part_info = f" (part {file_index+1}/{total_splits})" if total_splits > 1 else ""
+        _update_runtime(projectConfig, current_file=file_name, workers_configured=projectConfig.getKey("workersPerProject") or 1)
         LOGGER.info(f">>> 开始翻译 (project_dir){split_chunk.file_path.replace(proj_dir,'')}")
         LOGGER.debug(f"文件 {file_name} 分块 {file_index+1}/{total_splits}:")
         LOGGER.debug(f"  开始索引: {split_chunk.start_index}")
@@ -348,6 +402,7 @@ async def doLLMTranslSingleChunk(
             projectConfig.bar(len(translist_hit), skipped=True) # 更新进度条
 
         if len(translist_unhit) > 0:
+            _check_stop_requested(projectConfig)
             # 执行翻译
             await gptapi.batch_translate(
                 file_name + (f"_{file_index}" if total_splits > 1 else ""),
@@ -363,6 +418,7 @@ async def doLLMTranslSingleChunk(
 
             # 执行校对（如果启用）
             if projectConfig.getKey("gpt.enableProofRead"):
+                _check_stop_requested(projectConfig)
                 if "gpt4" in eng_type:
                     await gptapi.batch_translate(
                         file_name,
@@ -379,6 +435,7 @@ async def doLLMTranslSingleChunk(
             gptapi.clean_up()
 
         # 翻译后处理
+        _check_stop_requested(projectConfig)
         for tran in split_chunk.trans_list:
             for plugin in tPlugins:
                 try:
@@ -411,6 +468,8 @@ async def doLLMTranslSingleChunk(
             await postprocess_results(
                 split_chunk.get_file_finished_chunks(), projectConfig
             )
+
+        _update_runtime(projectConfig, current_file=file_name)
 
 
 async def postprocess_results(

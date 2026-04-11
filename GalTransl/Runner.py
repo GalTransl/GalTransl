@@ -16,6 +16,13 @@ from GalTransl.CSplitter import (
 )
 
 
+def _raise_if_stop_requested(stop_event):
+    if stop_event is not None and stop_event.is_set():
+        from GalTransl.Service import JobCancelledError
+
+        raise JobCancelledError()
+
+
 CONSOLE_FORMAT = colorlog.ColoredFormatter(
     "[%(asctime)s]%(log_color)s[%(levelname)s]%(reset)s%(message)s",
     datefmt="%m-%d %H:%M:%S",
@@ -32,9 +39,10 @@ File_FORMAT = logging.Formatter(
 )
 
 
-async def run_galtransl(cfg: CProjectConfig, translator: str):
+async def run_galtransl(cfg: CProjectConfig, translator: str, stop_event=None):
     PROJECT_DIR = cfg.getProjectDir()
     cfg.select_translator = translator
+    cfg.stop_event = stop_event
 
     def get_pluginInfo_path(name):
         if "(project_dir)" in name:
@@ -73,6 +81,7 @@ async def run_galtransl(cfg: CProjectConfig, translator: str):
         LOGGER.info("* 要修改插件的设置，可以进入插件路径，编辑其中的.yaml文件。")
 
     start_time = time.time()
+    _raise_if_stop_requested(stop_event)
 
     if translator not in TRANSLATOR_SUPPORTED.keys():
         raise Exception(f"不支持的翻译器: {translator}")
@@ -108,6 +117,7 @@ async def run_galtransl(cfg: CProjectConfig, translator: str):
         cfg.getOutputPath(),
         cfg.getCachePath(),
     ]:
+        _raise_if_stop_requested(stop_event)
         if not isPathExists(dir_path):
             LOGGER.info("%s 文件夹不存在，让我们创建它...", dir_path)
             mkdir(dir_path)
@@ -141,6 +151,7 @@ async def run_galtransl(cfg: CProjectConfig, translator: str):
     text_plugins = plugin_manager.getPluginsOfCategory("GTextPlugin")
     file_plugins = plugin_manager.getPluginsOfCategory("GFilePlugin")
     for plugin in file_plugins + text_plugins:
+        _raise_if_stop_requested(stop_event)
         plugin_conf = plugin.yaml_dict
         plugin_module = plugin_conf["Core"]["Module"]
         project_conf = cfg.getCommonConfigSection()
@@ -166,6 +177,7 @@ async def run_galtransl(cfg: CProjectConfig, translator: str):
         "dump-name",
         "show-plugs",
     ]:
+        _raise_if_stop_requested(stop_event)
         await proxyPool.checkAvailablity()
         if not proxyPool.proxies:
             raise Exception("没有可用的代理，请检查代理设置")
@@ -178,6 +190,7 @@ async def run_galtransl(cfg: CProjectConfig, translator: str):
         OpenAITokenPool = COpenAITokenPool(cfg, translator)
         checkAvailable=cfg.getBackendConfigSection("OpenAI-Compatible").get("checkAvailable",True)
         if checkAvailable:
+            _raise_if_stop_requested(stop_event)
             await OpenAITokenPool.checkTokenAvailablity(
                 proxyPool.getProxy() if proxyPool else None, translator
             )
@@ -187,6 +200,7 @@ async def run_galtransl(cfg: CProjectConfig, translator: str):
 
     # 初始化sakura端点队列
     if "sakura" in translator or "galtransl" in translator:
+        _raise_if_stop_requested(stop_event)
         sakura_endpoint_queue = await init_sakura_endpoint_queue(cfg)
         cfg.endpointQueue = sakura_endpoint_queue
 
@@ -227,9 +241,11 @@ async def run_galtransl(cfg: CProjectConfig, translator: str):
     cfg.proxyPool = proxyPool
     cfg.input_splitter = input_splitter
 
+    _raise_if_stop_requested(stop_event)
     await doLLMTranslate(cfg)
 
     for plugin in file_plugins + text_plugins:
+        _raise_if_stop_requested(stop_event)
         plugin.plugin_object.gtp_final()
 
     end_time = time.time()

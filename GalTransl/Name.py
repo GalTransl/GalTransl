@@ -130,15 +130,18 @@ def load_name_table(
         LOGGER.warning(
             f"\n\n(这个提示只会在首次显示)\n\n'{table_base_name}' 中有name的翻译未补齐，可以现在编辑并补齐对应翻译，或以后编辑并通过刷新结果来补全name字段的翻译。\n\n配置文件中usePostDictInName, useGPTDictInName也可将译后、GPT字典用于刷写name字段。"
         )
-        print()
-        try:
-            input("按 Enter 继续，或ctrl+c暂时返回...")
-        except EOFError:
-            raise KeyboardInterrupt
-        # Second attempt to load after user edit
-        name_table, missing_cn_names, file_loaded_successfully = _load_internal(
-            name_table_path
-        )
+        if not proj_config.non_interactive:
+            print()
+            try:
+                input("按 Enter 继续，或ctrl+c暂时返回...")
+            except EOFError:
+                raise KeyboardInterrupt
+            # Second attempt to load after user edit
+            name_table, missing_cn_names, file_loaded_successfully = _load_internal(
+                name_table_path
+            )
+        else:
+            LOGGER.info("非交互模式，跳过等待用户编辑name替换表")
 
     # Log final status
     if file_loaded_successfully:
@@ -207,18 +210,22 @@ async def dump_name_table_from_chunks(
         LOGGER.debug(f"{name}: {count}")
 
     # Ask user for export format
-    try:
-        export_format = await inquirer.select(
-            message="请选择导出 name替换表 的格式 (这个替换表可以刷写结果文件中的name字段):",
-            choices=[
-                Choice(value="csv", name="CSV (默认)"),
-                Choice(value="xlsx", name="Excel (.xlsx)"),
-            ],
-            default="csv",
-        ).execute_async()
-    except Exception as e:
-        LOGGER.warning(f"无法获取用户输入，将默认使用 CSV 格式: {e}")
-        export_format = "csv"  # Default to csv if inquirer fails
+    if proj_config.non_interactive:
+        LOGGER.info("非交互模式，自动使用 CSV 格式导出name替换表")
+        export_format = "csv"
+    else:
+        try:
+            export_format = await inquirer.select(
+                message="请选择导出 name替换表 的格式 (这个替换表可以刷写结果文件中的name字段):",
+                choices=[
+                    Choice(value="csv", name="CSV (默认)"),
+                    Choice(value="xlsx", name="Excel (.xlsx)"),
+                ],
+                default="csv",
+            ).execute_async()
+        except Exception as e:
+            LOGGER.warning(f"无法获取用户输入，将默认使用 CSV 格式: {e}")
+            export_format = "csv"  # Default to csv if inquirer fails
 
     file_extension = f".{export_format}"
     output_path = joinpath(proj_dir, f"name替换表{file_extension}")

@@ -1,0 +1,20 @@
+[package]
+name = "galtransl-desktop"
+version = "0.1.0"
+description = "GalTransl desktop client"
+authors = ["GalTransl"]
+edition = "2021"
+
+[package.metadata]
+
+[build-dependencies]
+tauri-build = { version = "2.0.1", features = [] }
+
+[dependencies]
+tauri = { version = "2.0.6", features = [] }
+tauri-plugin-shell = "2.0.2"
+tauri-plugin-dialog = "2"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
