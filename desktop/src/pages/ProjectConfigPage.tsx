@@ -33,28 +33,35 @@ const CONFIG_SECTIONS: { key: ConfigSection; label: string; icon: string }[] = [
 ];
 
 // Field definitions for common config section
-const COMMON_FIELDS: { key: string; label: string; type: 'number' | 'text' | 'select'; options?: string[]; placeholder?: string }[] = [
-  { key: 'workersPerProject', label: '并发文件数', type: 'number', placeholder: '16' },
-  { key: 'gpt.numPerRequestTranslate', label: '单次翻译句数', type: 'number', placeholder: '10' },
-  { key: 'language', label: '目标语言', type: 'select', options: ['zh-cn', 'zh-tw', 'en', 'ja', 'ko', 'ru', 'fr'] },
-  { key: 'sortBy', label: '翻译顺序', type: 'select', options: ['name', 'size'] },
-  { key: 'splitFile', label: '文件分割', type: 'select', options: ['no', 'Num', 'Equal'] },
-  { key: 'splitFileNum', label: '分割数量', type: 'number', placeholder: '2048' },
-  { key: 'splitFileCrossNum', label: '分割交叉句数', type: 'number', placeholder: '0' },
-  { key: 'save_steps', label: '缓存保存频率', type: 'number', placeholder: '1' },
-  { key: 'start_time', label: '定时启动', type: 'text', placeholder: '留空则立即启动' },
-  { key: 'linebreakSymbol', label: '换行符', type: 'text', placeholder: 'auto' },
-  { key: 'skipH', label: '跳过敏感句', type: 'select', options: ['true', 'false'] },
-  { key: 'smartRetry', label: '智能重试', type: 'select', options: ['true', 'false'] },
-  { key: 'retranslFail', label: '重翻失败句', type: 'select', options: ['true', 'false'] },
-  { key: 'gpt.contextNum', label: '上下文句数', type: 'number', placeholder: '8' },
-  { key: 'gpt.translation_guideline', label: '翻译规范', type: 'text', placeholder: '日译中_基础.md' },
-  { key: 'gpt.enhance_jailbreak', label: '改善拒答', type: 'select', options: ['true', 'false'] },
-  { key: 'gpt.change_prompt', label: '修改Prompt', type: 'select', options: ['no', 'AdditionalPrompt', 'OverwritePrompt'] },
-  { key: 'gpt.prompt_content', label: '额外Prompt内容', type: 'text' },
-  { key: 'gpt.token_limit', label: 'Token限制(Sakura)', type: 'number', placeholder: '0' },
-  { key: 'loggingLevel', label: '日志级别', type: 'select', options: ['debug', 'info', 'warning'] },
-  { key: 'saveLog', label: '保存日志到文件', type: 'select', options: ['true', 'false'] },
+const COMMON_FIELDS: {
+  key: string;
+  label: string;
+  description: string;
+  type: 'number' | 'text' | 'select';
+  options?: string[];
+  placeholder?: string;
+}[] = [
+  { key: 'workersPerProject', label: '并发文件数', description: '项目级并行文件数；单文件并行需配合“文件分割”。', type: 'number', placeholder: '16' },
+  { key: 'gpt.numPerRequestTranslate', label: '单次翻译句数', description: '每次请求打包的句子数，建议不超过 16。', type: 'number', placeholder: '10' },
+  { key: 'language', label: '目标语言', description: '翻译输出语言。', type: 'select', options: ['zh-cn', 'zh-tw', 'en', 'ja', 'ko', 'ru', 'fr'] },
+  { key: 'sortBy', label: '翻译顺序', description: 'name 按文件名，size 优先大文件（并行时通常更快）。', type: 'select', options: ['name', 'size'] },
+  { key: 'splitFile', label: '文件分割', description: '单文件分片模式：no 关闭，Num 按句数切片，Equal 按份数均分。', type: 'select', options: ['no', 'Num', 'Equal'] },
+  { key: 'splitFileNum', label: '分割数量', description: 'Num 模式下表示每片句数；Equal 模式下表示分片总数。', type: 'number', placeholder: '2048' },
+  { key: 'splitFileCrossNum', label: '分割交叉句数', description: '分片间重叠句数，可提升片段衔接质量（常用 0 或 10）。', type: 'number', placeholder: '0' },
+  { key: 'save_steps', label: '缓存保存频率', description: '每处理 N 个批次保存一次缓存。', type: 'number', placeholder: '1' },
+  { key: 'start_time', label: '定时启动', description: '24 小时制时间（如 00:30）；留空则立即启动。', type: 'text', placeholder: '留空则立即启动' },
+  { key: 'linebreakSymbol', label: '换行符', description: 'JSON 内换行符类型，供问题检测/自动修复使用。', type: 'text', placeholder: 'auto' },
+  { key: 'skipH', label: '跳过敏感句', description: '是否跳过可能触发敏感词检测的句子。', type: 'select', options: ['true', 'false'] },
+  { key: 'smartRetry', label: '智能重试', description: '解析失败时自动缩小批次并重置上下文，减少无效重试。', type: 'select', options: ['true', 'false'] },
+  { key: 'retranslFail', label: '重翻失败句', description: '启动时是否自动重翻标记为 (Failed) 的句子。', type: 'select', options: ['true', 'false'] },
+  { key: 'gpt.contextNum', label: '上下文句数', description: '每次请求附带的前文句数，常用 8。', type: 'number', placeholder: '8' },
+  { key: 'gpt.translation_guideline', label: '翻译规范', description: '使用的翻译规范文件名（位于 translation_guidelines）。', type: 'text', placeholder: '日译中_基础.md' },
+  { key: 'gpt.enhance_jailbreak', label: '改善拒答', description: '启用后可降低模型拒答概率。', type: 'select', options: ['true', 'false'] },
+  { key: 'gpt.change_prompt', label: '修改Prompt', description: 'no 不改；AdditionalPrompt 追加；OverwritePrompt 覆盖默认提示词。', type: 'select', options: ['no', 'AdditionalPrompt', 'OverwritePrompt'] },
+  { key: 'gpt.prompt_content', label: '额外Prompt内容', description: '仅在“修改Prompt”非 no 时生效。', type: 'text' },
+  { key: 'gpt.token_limit', label: 'Token限制(Sakura)', description: 'Sakura 场景下单轮 token 上限；0 表示不限制。', type: 'number', placeholder: '0' },
+  { key: 'loggingLevel', label: '日志级别', description: 'debug 详细，info 常规，warning 仅警告。', type: 'select', options: ['debug', 'info', 'warning'] },
+  { key: 'saveLog', label: '保存日志到文件', description: '是否将运行日志写入文件。', type: 'select', options: ['true', 'false'] },
 ];
 
 export function ProjectConfigPage() {
@@ -157,7 +164,7 @@ export function ProjectConfigPage() {
       if (!prev) return prev;
       // Try to parse numbers
       let parsedValue: unknown = value;
-      if (value !== '' && !isNaN(Number(value))) {
+      if (value !== '' && !Number.isNaN(Number(value))) {
         parsedValue = Number(value);
       } else if (value === 'true') {
         parsedValue = true;
@@ -304,7 +311,7 @@ export function ProjectConfigPage() {
           ) : (
             <>
               {activeSection === 'common' && (
-                <Panel title="通用设置" description="翻译核心参数配置。">
+                <Panel title="通用设置" description="翻译核心参数配置（说明已与 sampleProject/config.inc.yaml 同步）。">
                   <div className="config-form">
                     {COMMON_FIELDS.map((field) => {
                       const fieldId = `common-${field.key.replace(/\./g, '-')}`;
@@ -332,7 +339,7 @@ export function ProjectConfigPage() {
                               onChange={(e) => handleFieldChange(`common.${field.key}`, e.target.value)}
                             />
                           )}
-                          <span className="field__hint">{field.key}</span>
+                          <span className="field__hint">{field.description}</span>
                         </div>
                       );
                     })}

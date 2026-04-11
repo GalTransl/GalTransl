@@ -33,39 +33,39 @@ plugin:
 
 # 程序设置
 common:
-  gpt.numPerRequestTranslate: 10 # 单次请求翻译句子数量，一般推荐不大于16[1-32]
-  workersPerProject: 16 # 同时翻译n个文件（单个文件要多线程时需开启splitFile）
-  sortBy: "size" # 翻译顺序，name为文件名，size为大文件优先，多线程时大文件优先可以提高整体速度[name/size]
-  language: "zh-cn" # 翻译到的目标语言。[zh-cn/zh-tw/en/ja/ko/ru/fr]
+  gpt.numPerRequestTranslate: 10 # 每次请求包含的句子数，建议不超过16。[1-32]
+  workersPerProject: 16 # 项目级并行文件数；单文件并行需配合splitFile。
+  sortBy: "size" # 文件调度顺序：name按文件名，size优先大文件（并行时通常更快）。[name/size]
+  language: "zh-cn" # 目标输出语言。[zh-cn/zh-tw/en/ja/ko/ru/fr]
 
   # 单文件分割设置
   ###【重要】分割设置直接影响缓存文件的读取命中，迁移旧项目请确保单文件分割设置一致 ###
-  splitFile: "Num" # 是否启用单文件分割。Num: 每n条分割一次，Equal: 每个文件均分n份，no: 关闭单文件分割。[no/Num/Equal]
-  splitFileNum: 2048 # Num时，表示n句拆分一次；Equal时，表示每个文件均分拆成n部分。
-  splitFileCrossNum: 0 # 分割文件时前后交叉n句，可能可以提高衔接处翻译质量[推荐0或10]。
+  splitFile: "Num" # 单文件分片模式：no关闭；Num每n句切一片；Equal每文件均分n片。[no/Num/Equal]
+  splitFileNum: 2048 # 分片参数：Num模式表示每片句数；Equal模式表示分片总数。
+  splitFileCrossNum: 0 # 分片重叠句数（上下文缓冲），可提升片段衔接质量。[推荐0或10]
 
-  save_steps: 1 # 每翻译n次保存一次缓存，单个大文件保存耗时久，可以调高到100之类的数来提高速度。[1-999]
-  start_time: "" # 定时启动，例如00:30，留空则立即启动。[00:00-23:59]
-  linebreakSymbol: "auto" # 这个项目在json中使用的换行符，找问题和自动修复时用到，不影响翻译。
-  skipH: false # 跳过可能触发敏感词检测的句子。[True/False]
-  smartRetry: True # 解析结果失败时尝试折半重翻与清空上下文，避免无效重试。[True/False]
-  retranslFail: false # 重启时重翻所有"(Failed)"的句子。[True/False]
+  save_steps: 1 # 每处理n个批次保存一次缓存；值越大保存更少、速度可能更快。[1-999]
+  start_time: "" # 定时启动时间（24小时制，如00:30）；留空表示立即启动。[00:00-23:59]
+  linebreakSymbol: "auto" # JSON内换行符类型，供问题检测/自动修复使用，不改变翻译语义。
+  skipH: false # 是否跳过可能触发敏感词检测的句子。[True/False]
+  smartRetry: True # 解析失败时自动缩小批次并重置上下文，减少无效重试。[True/False]
+  retranslFail: false # 程序重启时是否自动重翻标记为"(Failed)"的句子。[True/False]
   retranslKey:
-    - "重翻在缓存的problem或pre_jp中包含对应**关键字**的句子，去掉下面列表中的#号注释来使用，也可添加自定义的关键字。"
-    - "翻译失败" # 每次启动重试翻译失败的
-    #- "残留日文" # 日文平假名片假名残留
+    - "关键字重翻：命中缓存problem或pre_jp关键字的句子会被重翻；去掉#可启用，也可自定义关键字。"
+    - "翻译失败" # 启动时重翻命中“翻译失败”的句子
+    #- "残留日文" # 启动时重翻命中“残留日文”的句子
 
-  gpt.contextNum: 8 # 每次翻译携带多少前文，提高上下文连贯性，8一般已经足够[0-32]
+  gpt.contextNum: 8 # 每次请求附带的前文句数；值越大上下文更强、成本更高（常用8）。[0-32]
   # ForGal/ForGal-json/ForNovel/r1
-  gpt.translation_guideline: "日译中_基础.md" # 翻译规范，见translation_guidelines文件夹，不同的翻译规范对文风/流畅度等有不同影响，可以自己写。
-  gpt.enhance_jailbreak: False # 改善拒答[True/False]
-  gpt.change_prompt: "no" # 是否开启修改默认prompt,"AdditionalPrompt"为增加额外要求/故事背景，"OverwritePrompt"为覆写原本的prompt[no/AdditionalPrompt/OverwritePrompt]
-  gpt.prompt_content: "翻译结果使用文言文" # 示例额外要求/故事背景，change_prompt为AdditionalPrompt/OverwritePrompt时才生效
+  gpt.translation_guideline: "日译中_基础.md" # 使用的翻译规范文件名（位于translation_guidelines），会影响文风与措辞。
+  gpt.enhance_jailbreak: False # 是否启用“抗拒答”增强提示，降低模型拒答概率。[True/False]
+  gpt.change_prompt: "no" # Prompt修改模式：no不改；AdditionalPrompt追加；OverwritePrompt覆盖默认提示词。[no/AdditionalPrompt/OverwritePrompt]
+  gpt.prompt_content: "翻译结果使用文言文" # Prompt自定义内容；仅在change_prompt为AdditionalPrompt/OverwritePrompt时生效。
   # Sakura/GalTransl
-  gpt.token_limit: 0 # (Sakura/Galtransl-7b)（实验性）大于0时限制每轮请求的token数量。防止爆context时可以设置为llama.cpp -c的数值除2。
+  gpt.token_limit: 0 # (Sakura/GalTransl) 单轮token上限；0表示不限制。用于避免上下文溢出。
   # 调试日志
-  loggingLevel: info # 日志级别[debug/info/warning]
-  saveLog: false # 是否记录日志到文件[True/False]
+  loggingLevel: info # 日志输出级别：debug详细，info常规，warning仅警告。[debug/info/warning]
+  saveLog: false # 是否将日志写入文件。[True/False]
 
 
 

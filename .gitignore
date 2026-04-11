@@ -15,3 +15,4 @@ desktop/dist/
 desktop/src-tauri/target/
 backend_profiles.yaml
 /plans
+app_settings.json

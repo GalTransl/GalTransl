@@ -4,7 +4,6 @@ CloseAI related classes
 
 import asyncio
 from asyncio import gather
-from alive_progress import alive_bar
 from time import time
 from GalTransl import LOGGER, TRANSLATOR_DEFAULT_ENGINE
 from GalTransl.ConfigHelper import CProjectConfig, CProxy
@@ -14,6 +13,7 @@ from asyncio import Queue
 from openai import OpenAI
 import re
 import httpx
+from GalTransl.TerminalOutput import should_print_translation_logs, terminal_progress
 
 
 class COpenAIToken:
@@ -55,6 +55,7 @@ class COpenAITokenPool:
     def __init__(self, config: CProjectConfig, eng_type: str) -> None:
 
         token_list: list[COpenAIToken] = []
+        self.pj_config = config
         defaultEndpoint = "https://api.openai.com"
         section_name = "OpenAI-Compatible"
         self.tokens: list[tuple[bool, COpenAIToken]] = []
@@ -177,7 +178,11 @@ class COpenAITokenPool:
         检测令牌有效性
         """
         fs = []
-        with alive_bar(total=len(self.tokens), title="Testing Key……") as bar:
+        with terminal_progress(
+            should_print_translation_logs(self.pj_config),
+            total=len(self.tokens),
+            title="Testing Key……",
+        ) as bar:
             self.bar = bar
             index = 0
             for _, token in self.tokens:

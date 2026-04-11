@@ -18,6 +18,7 @@ from GalTransl.Backend.Prompts import GENDIC_PROMPT, GENDIC_SYSTEM, H_WORDS_LIST
 import collections
 from typing import List, Set, Dict, Optional
 from threading import Lock
+from GalTransl.TerminalOutput import should_print_translation_logs, terminal_progress
 
 
 class GenDic(BaseTranslate):
@@ -50,7 +51,8 @@ class GenDic(BaseTranslate):
         rsp,token = await self.ask_chatbot(
             prompt=prompt, system=GENDIC_SYSTEM, temperature=0.6
         )
-        print(rsp)
+        if should_print_translation_logs(self.pj_config):
+            print(rsp)
         lines = rsp.split("\n")
 
         for line in lines:
@@ -66,7 +68,8 @@ class GenDic(BaseTranslate):
                 if src in self.dic_counter:
                     self.dic_counter[src] += 1
                     if self.dic_counter[src] == 2:
-                        print(f"{src}\t{dst}\t{note}")
+                        if should_print_translation_logs(self.pj_config):
+                            print(f"{src}\t{dst}\t{note}")
                 else:
                     self.dic_counter[src] = 1
                     with self.list_lock:
@@ -77,7 +80,7 @@ class GenDic(BaseTranslate):
         json_list: list,
     ) -> bool:
 
-        with alive_bar(title="载入分词……") as bar:
+        with terminal_progress(should_print_translation_logs(self.pj_config), title="载入分词……") as bar:
             # get tmp dir
             import tempfile
 
@@ -167,7 +170,8 @@ class GenDic(BaseTranslate):
                     LOGGER.error(f"处理任务时出错: {e}")
 
         tasks = [process_item_async(idx) for idx in index_list]
-        with alive_bar(
+        with terminal_progress(
+            should_print_translation_logs(self.pj_config),
             total=len(index_list), title=f"{self.wokers} 线程生成字典中……"
         ) as bar:
             self.pj_config.bar=bar

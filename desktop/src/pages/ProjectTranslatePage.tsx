@@ -52,7 +52,9 @@ export function ProjectTranslatePage() {
   const [freshSuccessIds, setFreshSuccessIds] = useState<string[]>([]);
   const seenSuccessIdsRef = useRef<Set<string>>(new Set());
   const successListRef = useRef<HTMLDivElement | null>(null);
+  const fileProgressListRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
+  const [hasFileProgressScrollbar, setHasFileProgressScrollbar] = useState(false);
 
   useEffect(() => {
     if (!projectDir || translators.length === 0) {
@@ -256,6 +258,32 @@ export function ProjectTranslatePage() {
       })
       .map((item) => item.file);
   }, [runtimeFiles]);
+
+  useEffect(() => {
+    if (runtimeFiles.length === 0) {
+      setHasFileProgressScrollbar(false);
+      return;
+    }
+
+    const container = fileProgressListRef.current;
+    if (!container) {
+      setHasFileProgressScrollbar(false);
+      return;
+    }
+
+    const syncScrollbarState = () => {
+      setHasFileProgressScrollbar(container.scrollHeight > container.clientHeight + 1);
+    };
+
+    syncScrollbarState();
+
+    const resizeObserver = new ResizeObserver(syncScrollbarState);
+    resizeObserver.observe(container);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [runtimeFiles.length]);
   const projectName = projectDir ? projectDir.split(/[/\\]/).filter(Boolean).pop() || '' : '';
   const updatedAtText = summary?.updated_at ? formatDate(summary.updated_at) : '等待首次快照';
   const statusTone = currentJob?.status ?? 'pending';
@@ -410,7 +438,10 @@ export function ProjectTranslatePage() {
 
           <Panel title="文件进度">
             {prioritizedRuntimeFiles.length > 0 ? (
-                <div className="file-progress-list file-progress-list--runtime">
+                <div
+                  className={`file-progress-list file-progress-list--runtime${hasFileProgressScrollbar ? ' file-progress-list--runtime-has-scrollbar' : ''}`}
+                  ref={fileProgressListRef}
+                >
                   {prioritizedRuntimeFiles.map((file) => (
                     <FileProgressRow
                       key={file.filename}

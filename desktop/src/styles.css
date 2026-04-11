@@ -642,6 +642,30 @@ code {
   gap: var(--space-6);
 }
 
+.settings-toggle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+.settings-toggle-row__label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.settings-toggle-row__control {
+  flex-shrink: 0;
+}
+
+.settings-toggle-row__desc {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 /* ── Progress Bar ── */
 
 .progress-section {
@@ -1176,9 +1200,9 @@ code {
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(circle at top right, rgba(34, 211, 238, 0.12), transparent 24%),
-    radial-gradient(circle at 20% 15%, rgba(16, 185, 129, 0.12), transparent 22%),
-    linear-gradient(180deg, rgba(7, 10, 18, 0.1), rgba(7, 10, 18, 0));
+    radial-gradient(circle at top right, rgba(47, 111, 235, 0.12), transparent 26%),
+    radial-gradient(circle at 20% 15%, rgba(15, 157, 88, 0.1), transparent 24%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.48), rgba(255, 255, 255, 0));
   z-index: 0;
 }
 
@@ -1242,14 +1266,14 @@ code {
 .project-translate-page .panel {
   position: relative;
   overflow: hidden;
-  border-color: rgba(103, 232, 249, 0.12);
+  border-color: rgba(191, 208, 226, 0.86);
   background:
-    linear-gradient(180deg, rgba(8, 13, 24, 0.92), rgba(10, 17, 31, 0.9)),
-    rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(18px);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(248, 251, 255, 0.9)),
+    var(--color-surface);
+  backdrop-filter: blur(14px);
   box-shadow:
-    0 20px 48px rgba(2, 6, 23, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    0 18px 42px rgba(16, 24, 40, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 .project-translate-page .panel::before {
@@ -1258,15 +1282,15 @@ code {
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(120deg, transparent 0%, rgba(34, 211, 238, 0.08) 48%, transparent 100%),
+    linear-gradient(120deg, transparent 0%, rgba(47, 111, 235, 0.08) 48%, transparent 100%),
     repeating-linear-gradient(
       180deg,
-      rgba(148, 163, 184, 0.03) 0,
-      rgba(148, 163, 184, 0.03) 1px,
+      rgba(191, 208, 226, 0.22) 0,
+      rgba(191, 208, 226, 0.22) 1px,
       transparent 1px,
       transparent 26px
     );
-  opacity: 0.7;
+  opacity: 0.42;
 }
 
 .project-translate-page .panel__header h2,
@@ -1283,7 +1307,7 @@ code {
 .project-translate-page .file-progress-row__name,
 .project-translate-page .file-progress-row__count,
 .project-translate-page .file-progress-row__state {
-  color: #e2e8f0;
+  color: var(--color-text);
 }
 
 .project-translate-page .panel__header p,
@@ -1293,28 +1317,28 @@ code {
 .project-translate-page .job-card__title-block p,
 .project-translate-page .file-progress-row__count,
 .project-translate-page .file-progress-row__state {
-  color: #94a3b8;
+  color: var(--color-text-muted);
 }
 
 .project-translate-page .meta-grid div,
 .project-translate-page .job-card,
 .project-translate-page .empty-state,
 .project-translate-page .job-card__error {
-  border-color: rgba(103, 232, 249, 0.14);
-  background: rgba(15, 23, 42, 0.56);
+  border-color: rgba(191, 208, 226, 0.84);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 250, 255, 0.9));
 }
 
 .project-translate-page .field input,
 .project-translate-page .field select {
-  border-color: rgba(100, 116, 139, 0.44);
-  background: rgba(15, 23, 42, 0.88);
-  color: #e2e8f0;
+  border-color: var(--color-line);
+  background: var(--color-surface-strong);
+  color: var(--color-text);
 }
 
 .project-translate-page .field input:focus,
 .project-translate-page .field select:focus {
-  border-color: rgba(34, 211, 238, 0.66);
-  box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.12);
+  border-color: rgba(47, 111, 235, 0.62);
+  box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);
 }
 
 .runtime-dashboard-grid {
@@ -1345,13 +1369,13 @@ code {
   gap: var(--space-4);
   padding: var(--space-5);
   border-radius: calc(var(--radius-card) + 2px);
-  border: 1px solid rgba(34, 211, 238, 0.18);
+  border: 1px solid rgba(191, 208, 226, 0.9);
   background:
-    linear-gradient(180deg, rgba(2, 6, 23, 0.86), rgba(8, 15, 28, 0.96)),
-    rgba(15, 23, 42, 0.82);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 250, 255, 0.94)),
+    var(--color-surface-strong);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.02),
-    0 16px 40px rgba(2, 8, 23, 0.32);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.7),
+    0 14px 30px rgba(16, 24, 40, 0.08);
 }
 
 .runtime-summary-strip::before,
@@ -1365,15 +1389,15 @@ code {
 
 .runtime-summary-strip::before {
   background:
-    linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.08), transparent),
+    linear-gradient(90deg, transparent, rgba(47, 111, 235, 0.08), transparent),
     repeating-linear-gradient(
       180deg,
-      rgba(59, 130, 246, 0.03) 0,
-      rgba(59, 130, 246, 0.03) 1px,
+      rgba(191, 208, 226, 0.24) 0,
+      rgba(191, 208, 226, 0.24) 1px,
       transparent 1px,
       transparent 18px
     );
-  opacity: 0.9;
+  opacity: 0.6;
 }
 
 .runtime-summary-strip::after {
@@ -1401,20 +1425,20 @@ code {
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #67e8f9;
+  color: var(--color-primary);
 }
 
 .runtime-summary-strip__speed,
 .runtime-summary-strip__percent,
 .runtime-summary-strip__file strong {
-  color: #f8fafc;
+  color: var(--color-text);
   font-family: "Cascadia Code", "Consolas", monospace;
 }
 
 .runtime-summary-strip__speed {
   font-size: 18px;
   font-weight: 700;
-  text-shadow: 0 0 18px rgba(34, 211, 238, 0.18);
+  text-shadow: 0 0 16px rgba(47, 111, 235, 0.12);
 }
 
 .runtime-summary-strip__bar {
@@ -1423,16 +1447,16 @@ code {
   height: 12px;
   overflow: hidden;
   border-radius: 999px;
-  border: 1px solid rgba(34, 211, 238, 0.14);
-  background: rgba(15, 23, 42, 0.96);
+  border: 1px solid rgba(191, 208, 226, 0.94);
+  background: rgba(237, 243, 255, 0.88);
 }
 
 .runtime-summary-strip__bar-fill {
   position: relative;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #22d3ee 0%, #60a5fa 50%, #34d399 100%);
-  box-shadow: 0 0 18px rgba(34, 211, 238, 0.28);
+  background: linear-gradient(90deg, var(--color-primary) 0%, #4c8af0 52%, #34b57a 100%);
+  box-shadow: 0 0 16px rgba(47, 111, 235, 0.18);
 }
 
 .runtime-summary-strip__bar-fill::after {
@@ -1461,9 +1485,9 @@ code {
   position: relative;
   overflow: hidden;
   padding: var(--space-3) var(--space-4);
-  border: 1px solid rgba(34, 211, 238, 0.12);
+  border: 1px solid rgba(191, 208, 226, 0.9);
   border-radius: var(--radius-control);
-  background: rgba(15, 23, 42, 0.68);
+  background: rgba(255, 255, 255, 0.78);
 }
 
 .runtime-summary-strip--live .runtime-summary-strip__metrics div::after {
@@ -1484,14 +1508,14 @@ code {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #67e8f9;
+  color: var(--color-primary);
 }
 
 .runtime-summary-strip__metrics dd {
   margin: 0;
   font-size: 16px;
   font-weight: 700;
-  color: #f8fafc;
+  color: var(--color-text);
   overflow-wrap: anywhere;
 }
 
@@ -1500,8 +1524,8 @@ code {
   gap: var(--space-1);
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-control);
-  border: 1px solid rgba(52, 211, 153, 0.18);
-  background: rgba(5, 15, 26, 0.84);
+  border: 1px solid rgba(184, 229, 202, 0.9);
+  background: linear-gradient(180deg, rgba(247, 255, 251, 0.96), rgba(238, 251, 243, 0.9));
 }
 
 .runtime-summary-strip__file strong {
@@ -1523,12 +1547,12 @@ code {
 .runtime-event {
   position: relative;
   display: grid;
-  gap: var(--space-2);
+  gap: 6px;
   min-width: 0;
-  padding: var(--space-3);
+  padding: 10px 12px;
   border-radius: var(--radius-card);
-  border: 1px solid rgba(100, 116, 139, 0.28);
-  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(191, 208, 226, 0.82);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 250, 255, 0.9));
   opacity: 1;
   transform: translateZ(0);
   backface-visibility: hidden;
@@ -1543,38 +1567,50 @@ code {
   bottom: 14px;
   width: 3px;
   border-radius: 999px;
-  background: rgba(148, 163, 184, 0.24);
+  background: rgba(191, 208, 226, 0.9);
 }
 
 .runtime-event--error {
-  border-color: rgba(248, 113, 113, 0.28);
-  background: linear-gradient(180deg, rgba(42, 16, 23, 0.72), rgba(24, 11, 18, 0.84));
+  gap: 10px;
+  padding: 12px 14px;
+  border-color: rgba(217, 48, 37, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(252, 246, 245, 0.9)),
+    var(--color-surface-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 8px 22px rgba(217, 48, 37, 0.05);
 }
 
 .runtime-event--error::before {
-  background: linear-gradient(180deg, #fb7185, #f97316);
-  box-shadow: 0 0 12px rgba(251, 113, 133, 0.22);
+  background: linear-gradient(180deg, var(--color-danger), #f97316);
+  box-shadow: 0 0 10px rgba(217, 48, 37, 0.14);
 }
 
 .runtime-event--success {
-  border-color: rgba(74, 222, 128, 0.22);
-  background: linear-gradient(180deg, rgba(9, 26, 23, 0.74), rgba(8, 20, 21, 0.84));
-  padding: 10px;
+  border-color: rgba(15, 157, 88, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 252, 255, 0.9)),
+    var(--color-surface-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 10px 24px rgba(15, 157, 88, 0.06);
+  padding: 12px;
 }
 
 .runtime-event-list--success {
   --success-row-height: 104px;
   --success-row-gap: var(--space-3);
-  max-height: calc(var(--success-row-height) * 5 + var(--success-row-gap) * 4);
+  max-height: calc(var(--success-row-height) * 5 + var(--success-row-gap) * 4 + (var(--success-row-height) / 2));
 }
 
 .project-translate-page__success-panel .runtime-event-list--success {
-  max-height: calc(var(--success-row-height) * 5 + var(--success-row-gap) * 4);
+  max-height: calc(var(--success-row-height) * 5 + var(--success-row-gap) * 4 + (var(--success-row-height) / 2));
 }
 
 .runtime-event--success::before {
-  background: linear-gradient(180deg, #34d399, #22d3ee);
-  box-shadow: 0 0 12px rgba(34, 211, 238, 0.2);
+  background: linear-gradient(180deg, var(--color-success), #5fb88a);
+  box-shadow: 0 0 10px rgba(15, 157, 88, 0.12);
 }
 
 .runtime-event--fresh {
@@ -1603,6 +1639,7 @@ code {
 
 .runtime-event__header {
   justify-content: space-between;
+  gap: 10px;
 }
 
 .runtime-event__header-right {
@@ -1620,22 +1657,28 @@ code {
   min-height: 24px;
   padding: 0 10px;
   border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.26);
-  background: rgba(15, 23, 42, 0.84);
-  color: #cbd5e1;
+  border: 1px solid rgba(191, 208, 226, 0.9);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--color-text-muted);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
 }
 
 .runtime-event__pill--danger {
-  border-color: rgba(248, 113, 113, 0.4);
-  color: #fecaca;
+  border-color: rgba(217, 48, 37, 0.28);
+  background: rgba(253, 236, 234, 0.9);
+  color: var(--color-danger);
 }
 
 .runtime-event__pill--success {
-  border-color: rgba(74, 222, 128, 0.38);
-  color: #bbf7d0;
+  border-color: rgba(15, 157, 88, 0.3);
+  background: rgba(231, 248, 238, 0.92);
+  color: var(--color-success);
+}
+
+.runtime-event--success .runtime-event__badges > .runtime-event__pill--success {
+  margin-left: 6px;
 }
 
 .runtime-event__pill--file {
@@ -1651,15 +1694,15 @@ code {
 
 .runtime-event__pill--file-clickable:hover,
 .runtime-event__pill--file-clickable .runtime-event__file-name-btn:focus-visible {
-  border-color: rgba(34, 211, 238, 0.5);
-  color: #67e8f9;
-  background: rgba(8, 47, 73, 0.45);
+  border-color: rgba(47, 111, 235, 0.42);
+  color: var(--color-primary);
+  background: rgba(237, 243, 255, 0.9);
 }
 
 .runtime-event__pill--file-active {
-  border-color: rgba(52, 211, 153, 0.54);
-  color: #6ee7b7;
-  background: rgba(6, 78, 59, 0.36);
+  border-color: rgba(15, 157, 88, 0.34);
+  color: var(--color-success);
+  background: rgba(231, 248, 238, 0.92);
 }
 
 .runtime-event__file-text {
@@ -1695,7 +1738,7 @@ code {
 .runtime-event__file,
 .runtime-success-pair__label,
 .runtime-event__meta dt {
-  color: #94a3b8;
+  color: var(--color-text-muted);
   font-size: 12px;
 }
 
@@ -1707,9 +1750,18 @@ code {
 .runtime-success-pair p,
 .runtime-event__meta dd {
   margin: 0;
-  color: #f8fafc;
-  line-height: 1.6;
+  color: var(--color-text);
+  line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+.runtime-event--error .runtime-event__message {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  line-height: 1.45;
+  font-size: 13px;
 }
 
 .runtime-event__file {
@@ -1721,12 +1773,18 @@ code {
 .runtime-event__meta {
   margin: 0;
   justify-content: flex-start;
+  gap: 6px;
 }
 
 .runtime-event__meta div {
-  padding: var(--space-2) var(--space-3);
-  border-radius: 12px;
-  background: rgba(2, 6, 23, 0.36);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid rgba(216, 225, 236, 0.9);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
 }
 
 .runtime-event__meta dt,
@@ -1736,39 +1794,73 @@ code {
 }
 
 .runtime-event__meta dt::after {
-  content: ": ";
+  content: "";
+}
+
+.runtime-event--error .runtime-event__meta dt {
+  color: var(--color-danger);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.runtime-event--error .runtime-event__meta dd {
+  min-width: 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .runtime-success-compact {
   display: grid;
   gap: 4px;
   min-width: 0;
-  padding: 4px 8px;
+  padding: 6px 8px;
   border-radius: 12px;
-  border: 1px solid rgba(74, 222, 128, 0.12);
-  background: rgba(2, 6, 23, 0.34);
+  border: 1px solid rgba(216, 225, 236, 0.9);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(244, 247, 251, 0.86)),
+    var(--color-surface);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 .runtime-success-compact__line {
   display: grid;
-  grid-template-columns: max-content max-content minmax(0, 1fr);
-  align-items: center;
-  gap: 6px;
+  grid-template-columns: 40px max-content minmax(0, 1fr);
+  align-items: start;
+  column-gap: 6px;
+  row-gap: 4px;
   margin: 0;
   min-width: 0;
-  color: #f8fafc;
-  line-height: 1.2;
+  color: var(--color-text);
+  line-height: 1.3;
+}
+
+.runtime-success-compact__line + .runtime-success-compact__line {
+  padding-top: 4px;
+  border-top: 1px solid rgba(216, 225, 236, 0.82);
 }
 
 .runtime-success-compact__line span:last-child {
+  grid-column: 3;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 12px;
 }
 
 .runtime-success-compact__label {
-  color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -1777,14 +1869,14 @@ code {
 
 .runtime-success-compact__speaker-inline {
   max-width: 140px;
-  padding: 0 8px;
-  border: 1px solid rgba(148, 163, 184, 0.24);
+  padding: 0 6px;
+  border: 1px solid rgba(15, 157, 88, 0.16);
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.6);
-  color: #cbd5e1;
-  font-size: 11px;
+  background: rgba(231, 248, 238, 0.82);
+  color: #357a50;
+  font-size: 10px;
   font-weight: 700;
-  line-height: 20px;
+  line-height: 18px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1793,9 +1885,9 @@ code {
 .runtime-success-filter-hint {
   margin-bottom: var(--space-3);
   padding: 8px 10px;
-  border: 1px solid rgba(34, 211, 238, 0.28);
+  border: 1px solid rgba(47, 111, 235, 0.2);
   border-radius: 10px;
-  background: rgba(8, 47, 73, 0.26);
+  background: rgba(237, 243, 255, 0.82);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1803,7 +1895,7 @@ code {
 }
 
 .runtime-success-filter-hint__text {
-  color: #bae6fd;
+  color: var(--color-primary);
   font-size: 12px;
   min-width: 0;
   overflow: hidden;
@@ -1813,10 +1905,10 @@ code {
 
 .runtime-success-filter-hint__clear {
   flex-shrink: 0;
-  border: 1px solid rgba(148, 163, 184, 0.35);
+  border: 1px solid rgba(191, 208, 226, 0.9);
   border-radius: 8px;
-  background: rgba(15, 23, 42, 0.62);
-  color: #e2e8f0;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--color-text);
   font-size: 12px;
   line-height: 1;
   padding: 6px 9px;
@@ -1826,9 +1918,9 @@ code {
 
 .runtime-success-filter-hint__clear:hover,
 .runtime-success-filter-hint__clear:focus-visible {
-  border-color: rgba(56, 189, 248, 0.52);
-  color: #67e8f9;
-  background: rgba(8, 47, 73, 0.5);
+  border-color: rgba(47, 111, 235, 0.48);
+  color: var(--color-primary);
+  background: rgba(237, 243, 255, 0.92);
 }
 
 .file-progress-list--runtime {
@@ -1836,12 +1928,17 @@ code {
   gap: var(--space-3);
   max-height: 420px;
   padding-inline: 0;
+  overflow-x: hidden;
   overflow-y: auto;
+}
+
+.file-progress-list--runtime-has-scrollbar .file-progress-row--runtime {
+  padding-right: 8px;
 }
 
 .file-progress-row--runtime {
   padding: var(--space-3) 0;
-  border-bottom: 1px solid rgba(100, 116, 139, 0.18);
+  border-bottom: 1px solid rgba(191, 208, 226, 0.78);
 }
 
 .file-progress-row--runtime:last-child {
@@ -1860,31 +1957,31 @@ code {
 }
 
 .file-progress-row__failed {
-  color: #fda4af;
+  color: var(--color-danger);
 }
 
 .project-translate-page .progress-bar {
   height: 8px;
-  border: 1px solid rgba(34, 211, 238, 0.12);
-  background: rgba(15, 23, 42, 0.84);
+  border: 1px solid rgba(191, 208, 226, 0.9);
+  background: rgba(237, 243, 255, 0.88);
 }
 
 .project-translate-page .progress-bar__fill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #22d3ee, #34d399);
-  box-shadow: 0 0 12px rgba(34, 211, 238, 0.24);
+  background: linear-gradient(90deg, var(--color-primary), #34b57a);
+  box-shadow: 0 0 12px rgba(47, 111, 235, 0.18);
 }
 
 .project-translate-page .button--secondary {
-  background: rgba(15, 23, 42, 0.84);
-  border-color: rgba(34, 211, 238, 0.2);
-  color: #67e8f9;
+  background: var(--color-primary-soft);
+  border-color: rgba(47, 111, 235, 0.18);
+  color: var(--color-primary);
 }
 
 .project-translate-page .button--primary {
-  background: linear-gradient(180deg, #0891b2, #0f766e);
-  box-shadow: 0 14px 28px rgba(8, 145, 178, 0.24);
+  background: linear-gradient(180deg, var(--color-primary), var(--color-primary-strong));
+  box-shadow: var(--shadow-button);
 }
 
 .project-translate-page__stop-button.button--primary {
@@ -1916,7 +2013,7 @@ code {
 .project-translate-page .runtime-event-list,
 .project-translate-page .file-progress-list--runtime {
   scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.28) transparent;
+  scrollbar-color: rgba(191, 208, 226, 0.9) transparent;
 }
 
 .project-translate-page .runtime-event-list::-webkit-scrollbar,
@@ -1932,7 +2029,7 @@ code {
 
 .project-translate-page .runtime-event-list::-webkit-scrollbar-thumb,
 .project-translate-page .file-progress-list--runtime::-webkit-scrollbar-thumb {
-  background-color: rgba(148, 163, 184, 0.24);
+  background-color: rgba(191, 208, 226, 0.9);
   border: 2px solid transparent;
   border-radius: 999px;
   background-clip: content-box;
@@ -1940,7 +2037,7 @@ code {
 
 .project-translate-page .runtime-event-list:hover::-webkit-scrollbar-thumb,
 .project-translate-page .file-progress-list--runtime:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(148, 163, 184, 0.4);
+  background-color: rgba(176, 195, 219, 0.94);
 }
 
 @keyframes runtimeSweep {

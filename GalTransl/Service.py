@@ -9,6 +9,7 @@ from GalTransl import DEBUG_LEVEL, LOGGER
 from GalTransl.ConfigHelper import CProjectConfig
 from GalTransl.Runner import run_galtransl
 from GalTransl.i18n import GT_LANG, get_text
+from GalTransl.AppSettings import load_app_settings
 
 
 class JobCancelledError(Exception):
@@ -92,6 +93,8 @@ async def run_job_async(
         cfg = CProjectConfig(spec.project_dir, spec.config_file_name)
         cfg.non_interactive = True  # 前端启动，非交互模式
         cfg.runtime_project_dir = spec.project_dir
+        app_settings = load_app_settings()
+        cfg.print_translation_log_in_terminal = bool(app_settings.get("printTranslationLogInTerminal", True))
         LOGGER.setLevel(
             DEBUG_LEVEL[cfg.getCommonConfigSection().get("loggingLevel", "info")]
         )

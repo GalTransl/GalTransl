@@ -21,6 +21,7 @@ from base64 import urlsafe_b64decode, urlsafe_b64encode
 
 from GalTransl import TRANSLATOR_SUPPORTED, INPUT_FOLDERNAME, OUTPUT_FOLDERNAME, CACHE_FOLDERNAME
 from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
+from GalTransl.AppSettings import load_app_settings, save_app_settings
 
 
 def _utcnow_text() -> str:
@@ -1190,6 +1191,9 @@ def build_handler(registry: JobRegistry):
             if path == "/api/jobs":
                 self._send_json({"jobs": registry.list_jobs()})
                 return
+            if path == "/api/app-settings":
+                self._send_json(load_app_settings())
+                return
             if path.startswith("/api/jobs/"):
                 job_id = path.rsplit("/", 1)[-1]
                 job = registry.get_job(job_id)
@@ -1265,6 +1269,17 @@ def build_handler(registry: JobRegistry):
         def do_PUT(self) -> None:
             parsed = urlparse(self.path)
             path = parsed.path
+
+            if path == "/api/app-settings":
+                try:
+                    payload = self._read_json_body()
+                    settings = save_app_settings(payload)
+                    self._send_json(settings)
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to write app settings: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
 
             # PUT /api/backend-profiles/:name
             if path.startswith("/api/backend-profiles/"):

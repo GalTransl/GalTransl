@@ -18,6 +18,7 @@ from openai import DefaultAioHttpClient
 from openai._types import NOT_GIVEN
 import random
 import time
+from GalTransl.TerminalOutput import should_print_translation_logs
 
 
 class BaseTranslate:
@@ -234,7 +235,7 @@ class BaseTranslate:
                             result = result + (chunk.choices[0].delta.content or "")
                             lastline = lastline + (chunk.choices[0].delta.content or "")
                         if "\n" in lastline:
-                            if self.pj_config.active_workers == 1:
+                            if should_print_translation_logs(self.pj_config) and self.pj_config.active_workers == 1:
                                 lastline_sp = lastline.split("\n")
                                 print("\n".join(lastline_sp[:-1]))
                                 lastline = lastline_sp[-1]
@@ -358,15 +359,17 @@ class BaseTranslate:
             result_output = ""
             for trans in trans_result:
                 result_output = result_output + repr(trans)
-            LOGGER.info(result_output)
+            if should_print_translation_logs(self.pj_config):
+                LOGGER.info(result_output)
             trans_result_list += trans_result
             transl_step_count += 1
             if transl_step_count >= self.save_steps:
                 await save_transCache_to_json(trans_list, cache_file_path)
                 transl_step_count = 0
-            LOGGER.info(
-                f"{filename}: {str(len(trans_result_list))}/{str(len_trans_list)}"
-            )
+            if should_print_translation_logs(self.pj_config):
+                LOGGER.info(
+                    f"{filename}: {str(len(trans_result_list))}/{str(len_trans_list)}"
+                )
 
         return trans_result_list
 

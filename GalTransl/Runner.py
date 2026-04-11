@@ -16,6 +16,11 @@ from GalTransl.CSplitter import (
 )
 
 
+class _ExceptionOnlyConsoleFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return bool(record.exc_info)
+
+
 def _raise_if_stop_requested(stop_event):
     if stop_event is not None and stop_event.is_set():
         from GalTransl.Service import JobCancelledError
@@ -90,6 +95,8 @@ async def run_galtransl(cfg: CProjectConfig, translator: str, stop_event=None):
     LOGGER.handlers.clear()
     handler = logging.StreamHandler(stream=sys.stdout)
     handler.setFormatter(CONSOLE_FORMAT)
+    if not getattr(cfg, "print_translation_log_in_terminal", True):
+        handler.addFilter(_ExceptionOnlyConsoleFilter())
     LOGGER.addHandler(handler)
     if cfg.getCommonConfigSection().get("saveLog", False):
         log_path = os.path.join(PROJECT_DIR, "GalTransl.log")

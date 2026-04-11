@@ -20,6 +20,7 @@ from GalTransl.Backend.Prompts import (
     GalTransl_TRANS_PROMPT_V3,
 )
 from GalTransl import transl_counter
+from GalTransl.TerminalOutput import should_print_translation_logs
 
 
 def _check_stop_requested(project_config):
@@ -167,7 +168,7 @@ class CSakuraTranslate(BaseTranslate):
 
         while True:  # 一直循环，直到得到数据
             _check_stop_requested(self.pj_config)
-            if self.pj_config.active_workers == 1:
+            if should_print_translation_logs(self.pj_config) and self.pj_config.active_workers == 1:
                 print(f"-> 字典输入: \n{gptdict}")
                 print(f"-> 翻译输入: \n{input_str}")
                 print("-> 输出: ")

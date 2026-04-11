@@ -223,6 +223,10 @@ export type PluginInfo = {
   settings: Record<string, unknown>;
 };
 
+export type AppSettings = {
+  printTranslationLogInTerminal: boolean;
+};
+
 export type PluginsResponse = {
   plugins: PluginInfo[];
 };
@@ -357,6 +361,20 @@ export async function fetchProjectLogs(projectId: string, tail = 2000) {
 export async function fetchPlugins() {
   const response = await apiRequest<PluginsResponse>('/api/plugins');
   return response.plugins;
+}
+
+export async function fetchAppSettings() {
+  return apiRequest<AppSettings>('/api/app-settings');
+}
+
+export async function updateAppSettings(settings: AppSettings) {
+  return apiRequest<AppSettings>('/api/app-settings', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(settings),
+  });
 }
 
 // ---- Backend Profiles API types ----

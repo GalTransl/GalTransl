@@ -2,7 +2,6 @@ from typing import List, Dict, Any, Optional, Union, Tuple
 from os import makedirs, cpu_count, sep as os_sep,listdir
 from os.path import join as joinpath, exists as isPathExists, dirname
 from venv import logger
-from alive_progress import alive_bar
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import time
 import asyncio
@@ -24,8 +23,8 @@ from GalTransl.Utils import get_file_list
 from GalTransl.CSplitter import (
     SplitChunkMetadata,
     DictionaryCombiner,
-    EqualPartsSplitter,
 )
+from GalTransl.TerminalOutput import should_print_translation_logs, terminal_progress
 
 
 def _runtime_project_dir(projectConfig: CProjectConfig) -> str:
@@ -70,6 +69,8 @@ async def update_progress_title(
     bar, semaphore, workersPerProject: int, projectConfig: CProjectConfig
 ):
     """异步任务，用于动态更新 alive_bar 的标题以显示活动工作线程数。"""
+    if not should_print_translation_logs(projectConfig):
+        return
     base_title = "翻译进度"
     while True:
         try:
@@ -266,7 +267,8 @@ async def doLLMTranslate(
 
     title_update_task = None  # 初始化任务变量
 
-    with alive_bar(
+    with terminal_progress(
+        should_print_translation_logs(projectConfig),
         total=total_lines, title="翻译进度", unit=" line", enrich_print=False, dual_line=True,length=30
     ) as bar:
         projectConfig.bar = bar
