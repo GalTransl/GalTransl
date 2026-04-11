@@ -240,6 +240,21 @@ export function ProjectTranslatePage() {
 
   const summary = runtimeMatchesProject ? (runtime?.summary ?? null) : null;
   const runtimeFiles = runtimeMatchesProject ? (runtime?.files ?? []) : [];
+  const prioritizedRuntimeFiles = useMemo(() => {
+    return runtimeFiles
+      .map((file, index) => ({
+        file,
+        index,
+        isTranslating: file.translated > 0 && file.translated < file.total,
+      }))
+      .sort((a, b) => {
+        if (a.isTranslating !== b.isTranslating) {
+          return a.isTranslating ? -1 : 1;
+        }
+        return a.index - b.index;
+      })
+      .map((item) => item.file);
+  }, [runtimeFiles]);
   const projectName = projectDir ? projectDir.split(/[/\\]/).filter(Boolean).pop() || '' : '';
   const updatedAtText = summary?.updated_at ? formatDate(summary.updated_at) : '等待首次快照';
   const statusTone = currentJob?.status ?? 'pending';
@@ -251,7 +266,6 @@ export function ProjectTranslatePage() {
   const workersConfigured = summary?.workers_configured ?? 0;
   const speedText = formatSpeed(summary?.translation_speed_lpm ?? 0);
   const etaText = formatEta(summary?.eta_seconds ?? 0);
-  const currentFile = runtimeMatchesProject ? (runtime?.current_file || '等待调度') : '等待调度';
   const successEntries = useMemo(
     () => [...(runtimeMatchesProject ? runtime?.recent_successes ?? [] : [])].reverse(),
     [runtime?.recent_successes, runtimeMatchesProject],
@@ -351,10 +365,6 @@ export function ProjectTranslatePage() {
                     <dd>{workersActive}/{workersConfigured}</dd>
                   </div>
                   <div>
-                    <dt>问题</dt>
-                    <dd>{summary?.problems ?? 0}</dd>
-                  </div>
-                  <div>
                     <dt>失败</dt>
                     <dd>{summary?.failed ?? 0}</dd>
                   </div>
@@ -362,24 +372,15 @@ export function ProjectTranslatePage() {
                     <dt>ETA</dt>
                     <dd>{etaText}</dd>
                   </div>
-                  <div>
-                    <dt>模板</dt>
-                    <dd>{currentJob?.translator || selectedTranslator || '—'}</dd>
-                  </div>
                 </dl>
-
-                <div className="runtime-summary-strip__file" title={currentFile}>
-                  <span className="runtime-summary-strip__file-label">CURRENT FILE</span>
-                  <strong>{currentFile}</strong>
-                </div>
               </div>
             </div>
           </Panel>
 
           <Panel title="文件进度">
-            {runtimeFiles.length > 0 ? (
+            {prioritizedRuntimeFiles.length > 0 ? (
               <div className="file-progress-list file-progress-list--runtime">
-                {runtimeFiles.map((file) => (
+                {prioritizedRuntimeFiles.map((file) => (
                   <FileProgressRow key={file.filename} file={file} />
                 ))}
               </div>
@@ -469,21 +470,24 @@ function RuntimeSuccessRow({ entry, isFresh }: { entry: ProjectRuntimeSuccessEnt
       <div className="runtime-event__header">
         <div className="runtime-event__badges">
           <span className="runtime-event__pill runtime-event__pill--success">#{entry.index}</span>
-          {speakerLabel ? <span className="runtime-event__pill">{speakerLabel}</span> : null}
-          {entry.trans_by ? <span className="runtime-event__pill">{entry.trans_by}</span> : null}
           <span className="runtime-event__pill runtime-event__pill--file" title={entry.filename || '未命名文件'}>
             {entry.filename || '未命名文件'}
           </span>
         </div>
-        <time className="runtime-event__timestamp">{formatTime(entry.ts)}</time>
+        <div className="runtime-event__header-right">
+          {entry.trans_by ? <span className="runtime-event__pill runtime-event__pill--translator">{entry.trans_by}</span> : null}
+          <time className="runtime-event__timestamp">{formatTime(entry.ts)}</time>
+        </div>
       </div>
       <div className="runtime-success-compact">
         <p className="runtime-success-compact__line">
           <span className="runtime-success-compact__label">SRC</span>
+          {speakerLabel ? <span className="runtime-success-compact__speaker-inline">{speakerLabel}</span> : null}
           <span>{entry.source_preview || '—'}</span>
         </p>
         <p className="runtime-success-compact__line">
           <span className="runtime-success-compact__label">DST</span>
+          {speakerLabel ? <span className="runtime-success-compact__speaker-inline">{speakerLabel}</span> : null}
           <span>{entry.translation_preview || '—'}</span>
         </p>
       </div>
