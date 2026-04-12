@@ -29,6 +29,7 @@ const RUNTIME_POLL_INTERVAL_MS = 1000;
 const SUCCESS_STICK_BOTTOM_THRESHOLD_PX = 24;
 const INPUT_FOLDER_NAME = 'gt_input';
 const OUTPUT_FOLDER_NAME = 'gt_output';
+const CACHE_FOLDER_NAME = 'transl_cache';
 
 type OutletContext = {
   projectDir: string;
@@ -352,6 +353,7 @@ export function ProjectTranslatePage() {
   const normalizedProjectDir = projectDir.replace(/[\\/]+$/, '');
   const inputFolderPath = projectDir ? `${normalizedProjectDir}\\${INPUT_FOLDER_NAME}` : '';
   const outputFolderPath = projectDir ? `${normalizedProjectDir}\\${OUTPUT_FOLDER_NAME}` : '';
+  const cacheFolderPath = projectDir ? `${normalizedProjectDir}\\${CACHE_FOLDER_NAME}` : '';
 
   return (
     <div className="project-translate-page">
@@ -375,7 +377,7 @@ export function ProjectTranslatePage() {
                 title={inputFolderPath}
                 variant="secondary"
               >
-                📥 打开输入文件夹
+                📥 输入文件夹
               </Button>
               <Button
                 className="project-translate-page__folder-menu-item"
@@ -384,7 +386,16 @@ export function ProjectTranslatePage() {
                 title={outputFolderPath}
                 variant="secondary"
               >
-                📤 打开输出文件夹
+                📤 输出文件夹
+              </Button>
+              <Button
+                className="project-translate-page__folder-menu-item"
+                disabled={!projectDir}
+                onClick={() => handleOpenFolder(cacheFolderPath)}
+                title={cacheFolderPath}
+                variant="secondary"
+              >
+                💾 缓存文件夹
               </Button>
             </div>
           </div>
