@@ -1936,10 +1936,9 @@ code {
 .runtime-success-compact__speaker-inline {
   max-width: 140px;
   padding: 0 6px;
-  border: 1px solid rgba(15, 157, 88, 0.16);
+  border: 1px solid transparent;
   border-radius: 999px;
-  background: rgba(231, 248, 238, 0.82);
-  color: #357a50;
+  /* background, color, border-color set via inline style from speakerStyle() */
   font-size: 10px;
   font-weight: 700;
   line-height: 18px;
@@ -2934,159 +2933,294 @@ code {
   box-shadow: 0 0 0 3px var(--color-primary-soft);
 }
 
-.dict-table-wrap {
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-control);
-  overflow: auto;
+/* ── Dictionary Card Mode ── */
+
+.dict-card-list {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
   max-height: 620px;
+  padding-right: var(--space-2);
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
-.dict-table {
-  width: 100%;
-  border-collapse: collapse;
-  min-width: 900px;
+.dict-card {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-card);
+  border: 1px solid rgba(191, 208, 226, 0.82);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 250, 255, 0.9));
+  contain: paint;
 }
 
-.dict-table th,
-.dict-table td {
-  border-bottom: 1px solid var(--color-line);
-  border-right: 1px solid var(--color-line);
-  padding: 8px;
-  vertical-align: top;
+.dict-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 3px;
+  border-radius: 999px;
+  background: rgba(191, 208, 226, 0.9);
 }
 
-.dict-table th:last-child,
-.dict-table td:last-child {
-  border-right: none;
+/* ── Card type variants ── */
+
+.dict-card--normal {
+  border-color: rgba(59, 130, 246, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 252, 255, 0.9)),
+    var(--color-surface-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 6px 18px rgba(59, 130, 246, 0.05);
 }
 
-.dict-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--color-neutral-soft);
-  font-size: 12px;
-  color: var(--color-text-muted);
-  text-align: left;
+.dict-card--normal::before {
+  background: linear-gradient(180deg, var(--color-primary), #5b9cf6);
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.12);
 }
 
-.dict-cell-input {
-  width: 100%;
-  min-height: 34px;
-  border: 1px solid transparent;
-  border-radius: 8px;
+.dict-card--conditional {
+  border-color: rgba(169, 101, 0, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 250, 244, 0.9)),
+    var(--color-surface-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 6px 18px rgba(169, 101, 0, 0.05);
+}
+
+.dict-card--conditional::before {
+  background: linear-gradient(180deg, #a96500, #c4841d);
+  box-shadow: 0 0 10px rgba(169, 101, 0, 0.12);
+}
+
+.dict-card--situation {
+  border-color: rgba(15, 157, 88, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 252, 255, 0.9)),
+    var(--color-surface-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 6px 18px rgba(15, 157, 88, 0.05);
+}
+
+.dict-card--situation::before {
+  background: linear-gradient(180deg, #0f9d58, #5fb88a);
+  box-shadow: 0 0 10px rgba(15, 157, 88, 0.12);
+}
+
+.dict-card--gpt {
+  border-color: rgba(109, 70, 196, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(252, 250, 255, 0.9)),
+    var(--color-surface-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 6px 18px rgba(109, 70, 196, 0.05);
+}
+
+.dict-card--gpt::before {
+  background: linear-gradient(180deg, #6d46c4, #8b6fd4);
+  box-shadow: 0 0 10px rgba(109, 70, 196, 0.12);
+}
+
+.dict-card--comment {
+  border-color: rgba(120, 140, 160, 0.2);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 249, 251, 0.9)),
+    var(--color-surface-strong);
+}
+
+.dict-card--comment::before {
+  background: rgba(160, 175, 190, 0.7);
+}
+
+/* ── Card header (badges + delete) ── */
+
+.dict-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.dict-card__badges {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.dict-card__pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
   padding: 0 8px;
-  background: transparent;
-  font-size: 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
 }
 
-.dict-cell-input:focus {
+.dict-card__pill--normal {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.dict-card__pill--conditional {
+  background: #fff4dd;
+  color: #a96500;
+}
+
+.dict-card__pill--situation {
+  background: #e7f8ee;
+  color: #0f9d58;
+}
+
+.dict-card__pill--gpt {
+  background: #efe9ff;
+  color: #6d46c4;
+}
+
+.dict-card__pill--comment {
+  background: var(--color-neutral-soft);
+  color: var(--color-text-muted);
+}
+
+.dict-card__pill--index {
+  background: var(--color-neutral-soft);
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.dict-card__delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(217, 48, 37, 0.2);
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.dict-card__delete:hover {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  border-color: rgba(217, 48, 37, 0.35);
+}
+
+/* ── Card body / fields ── */
+
+.dict-card__body {
+  padding-left: 2px;
+}
+
+.dict-card__fields {
+  display: grid;
+  gap: 6px;
+  padding: 2px 2px 2px 4px;
+}
+
+.dict-card__field {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+
+.dict-card__field-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.dict-card__input {
+  width: 100%;
+  min-height: 30px;
+  border: 1px solid rgba(191, 208, 226, 0.7);
+  border-radius: 10px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.85);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text);
+  transition: all var(--transition-fast);
+}
+
+.dict-card__input:focus {
   outline: none;
   border-color: var(--color-primary);
   background: var(--color-surface-strong);
   box-shadow: 0 0 0 3px var(--color-primary-soft);
 }
 
-.dict-row-type {
+.dict-card__input--comment {
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
+.dict-card-add {
+  display: flex;
+  justify-content: center;
+}
+
+.dict-card__add-note {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  min-width: 56px;
-  min-height: 22px;
   padding: 0 8px;
+  min-height: 20px;
+  border: 1px dashed rgba(191, 208, 226, 0.8);
   border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-muted);
   font-size: 11px;
-  font-weight: 700;
-  text-transform: capitalize;
-}
-
-.dict-row-type--normal {
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-}
-
-.dict-row-type--conditional {
-  background: #fff4dd;
-  color: #a96500;
-}
-
-.dict-row-type--situation {
-  background: #e7f8ee;
-  color: #0f9d58;
-}
-
-.dict-row-type--gpt {
-  background: #efe9ff;
-  color: #6d46c4;
-}
-
-.dict-row-type--comment,
-.dict-row-type--blank {
-  background: var(--color-neutral-soft);
-  color: var(--color-text-muted);
-}
-
-.dict-row-delete {
-  border: 1px solid rgba(217, 48, 37, 0.3);
-  background: rgba(253, 236, 234, 0.75);
-  color: var(--color-danger);
-  border-radius: 8px;
-  padding: 6px 10px;
-  font-size: 12px;
   cursor: pointer;
+  transition: all var(--transition-fast);
+  opacity: 0;
 }
 
-.dict-row-delete:hover {
-  background: var(--color-danger-soft);
+.dict-card:hover .dict-card__add-note {
+  opacity: 1;
 }
 
-.dict-entry-list {
-  max-height: 600px;
-  overflow-y: auto;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-control);
-}
-
-.dict-entry {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--color-line);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.dict-entry:last-child {
-  border-bottom: none;
-}
-
-.dict-entry--comment {
-  color: var(--color-text-muted);
-  font-style: italic;
-}
-
-.dict-entry__search {
-  font-weight: 600;
+.dict-card__add-note:hover {
+  border-color: var(--color-primary);
   color: var(--color-primary);
-  min-width: 0;
-  word-break: break-all;
+  background: var(--color-primary-soft);
 }
 
-.dict-entry__arrow {
-  color: var(--color-text-muted);
-  flex-shrink: 0;
-}
-
-.dict-entry__replace {
+.dict-card__note-input {
+  min-height: 20px;
+  padding: 0 8px;
+  border: 1px solid rgba(191, 208, 226, 0.6);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  font-size: 11px;
   color: var(--color-text);
-  min-width: 0;
-  word-break: break-all;
+  min-width: 60px;
+  width: calc(max(60px, var(--note-char-count, 4) * 0.88em + 20px));
+  max-width: 500px;
+  transition: all var(--transition-fast);
 }
 
-.dict-entry__line {
-  white-space: pre-wrap;
-  word-break: break-all;
+.dict-card__note-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-soft);
 }
 
 /* ── Project Cache Page ── */
@@ -3160,6 +3294,30 @@ code {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  max-height: calc(100vh - 320px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(191, 208, 226, 0.9) transparent;
+}
+
+.cache-file-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.cache-file-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cache-file-list::-webkit-scrollbar-thumb {
+  background-color: rgba(191, 208, 226, 0.9);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+.cache-file-list:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(176, 195, 219, 0.94);
 }
 
 .cache-file-item {
@@ -3233,71 +3391,191 @@ code {
   white-space: nowrap;
 }
 
-.cache-table-wrapper {
-  overflow-x: auto;
+.cache-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: calc(100vh - 360px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(191, 208, 226, 0.9) transparent;
+}
+
+.cache-card-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.cache-card-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cache-card-list::-webkit-scrollbar-thumb {
+  background-color: rgba(191, 208, 226, 0.9);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+.cache-card-list:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(176, 195, 219, 0.94);
+}
+
+.cache-card {
+  background: var(--color-surface-strong);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  padding: var(--space-2) var(--space-3);
+  transition: border-color var(--transition-fast);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cache-card:hover {
+  border-color: var(--color-primary-soft);
+}
+
+.cache-card--problem {
+  border-color: var(--color-warning-soft);
+  background: color-mix(in srgb, var(--color-warning-soft) 15%, var(--color-surface-strong));
+}
+
+.cache-card__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.cache-card__spacer {
+  flex: 1;
+}
+
+.cache-card__pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.cache-card__pill--engine {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.cache-card__pill--speaker {
+  /* colors set via inline style from speakerHue() */
+  border: 1px solid transparent;
+}
+
+.cache-card__pill--problem {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.cache-card__expand,
+.cache-card__delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  transition: all var(--transition-fast);
+}
+
+.cache-card__expand:hover,
+.cache-card__delete:hover {
+  background: var(--color-neutral-soft);
+}
+
+.cache-card__delete:hover {
+  color: var(--color-danger);
+}
+
+.cache-card__fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.cache-card__field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.cache-card__field--textarea {
+  align-items: flex-start;
+}
+
+.cache-card__field-label {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  flex-shrink: 0;
+  min-width: 28px;
+}
+
+.cache-card__field--textarea .cache-card__field-label {
+  padding-top: var(--space-1);
+}
+
+.cache-card__input {
+  width: 100%;
+  padding: 2px var(--space-2);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-control);
-}
-
-.cache-table {
-  width: 100%;
-  border-collapse: collapse;
   font-size: 13px;
+  background: var(--color-surface-base);
+  color: var(--color-text);
+  transition: border-color var(--transition-fast);
 }
 
-.cache-table th {
-  background: var(--color-neutral-soft);
-  padding: var(--space-3) var(--space-4);
-  text-align: left;
-  font-weight: 600;
-  color: var(--color-text-muted);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  border-bottom: 1px solid var(--color-line);
-  white-space: nowrap;
+.cache-card__input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-soft);
 }
 
-.cache-table td {
-  padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--color-line);
-  vertical-align: top;
-  line-height: 1.5;
+.cache-card__input--zh {
+  font-weight: 500;
 }
 
-.cache-table__row--problem {
-  background: var(--color-danger-soft);
+.cache-card__textarea {
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  font-size: 13px;
+  background: var(--color-surface-base);
+  color: var(--color-text);
+  resize: vertical;
+  line-height: 1.4;
+  transition: border-color var(--transition-fast);
 }
 
-.cache-table__idx {
-  width: 50px;
-  text-align: right;
-  color: var(--color-text-muted);
+.cache-card__textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-soft);
 }
 
-.cache-table__speaker {
-  width: 100px;
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.cache-card__textarea--zh {
+  font-weight: 500;
 }
 
-.cache-table__jp,
-.cache-table__zh {
-  max-width: 300px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cache-table__problem {
-  width: 160px;
-}
-
-.cache-table__engine {
-  width: 90px;
-  color: var(--color-text-muted);
+.cache-panel-actions {
+  display: flex;
+  gap: var(--space-2);
 }
 
 .problem-badge {

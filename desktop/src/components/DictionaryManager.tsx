@@ -42,7 +42,7 @@ function parseRows(text: string, tab: DictTab): DictRow[] {
   const lines = text.split('\n');
   return lines.map((line) => {
     if (!line.trim()) return { type: 'blank', values: [], raw: line };
-    if (line.startsWith('//') || line.startsWith('\\\\')) {
+    if (line.startsWith('//') || line.startsWith('#') || line.startsWith('\\\\')) {
       return { type: 'comment', values: [line], raw: line };
     }
     const parts = line.split('\t');
@@ -54,15 +54,15 @@ function parseRows(text: string, tab: DictTab): DictRow[] {
       parts.length >= 4
       && ['pre_jp', 'post_jp', 'pre_zh', 'post_zh'].includes(parts[0])
     ) {
-      const [target = '', cond = '', search = '', ...replace] = parts;
-      return { type: 'conditional', values: [target, cond, search, replace.join('\t')], raw: line };
+      const [target = '', cond = '', search = '', replace = '', ...rest] = parts;
+      return { type: 'conditional', values: [target, cond, search, replace, rest.join('\t')], raw: line };
     }
     if (parts.length >= 3 && ['diag', 'mono'].includes(parts[0])) {
       const [scene = '', search = '', ...replace] = parts;
       return { type: 'situation', values: [scene, search, replace.join('\t')], raw: line };
     }
-    const [search = '', ...replace] = parts;
-    return { type: 'normal', values: [search, replace.join('\t')], raw: line };
+    const [search = '', replace = '', ...rest] = parts;
+    return { type: 'normal', values: [search, replace, rest.join('\t')], raw: line };
   });
 }
 
@@ -74,13 +74,127 @@ function rowsToText(rows: DictRow[]): string {
   }).join('\n');
 }
 
+/** Column labels by tab & row type for the card's header pills */
+function getTypeLabel(type: DictRowType, tab: DictTab): string {
+  if (type === 'comment') return '注释';
+  if (type === 'blank') return '空行';
+  if (type === 'gpt') return 'GPT';
+  if (type === 'normal') return '普通';
+  if (type === 'conditional') return '条件';
+  if (type === 'situation') return '场景';
+  return type;
+}
+
+/** Field labels for each row type */
+function getFieldLabels(type: DictRowType, _tab: DictTab): string[] {
+  if (type === 'gpt') return ['原文', '译文', '备注'];
+  if (type === 'normal') return ['搜索', '替换', '备注'];
+  if (type === 'conditional') return ['目标', '条件', '搜索', '替换', '备注'];
+  if (type === 'situation') return ['场景', '搜索', '替换'];
+  if (type === 'comment') return ['内容'];
+  return [];
+}
+
+/* ── Individual dict entry card ── */
+function DictEntryCard({
+  row,
+  rowIndex,
+  tab,
+  onCellChange,
+  onDelete,
+}: {
+  row: DictRow;
+  rowIndex: number;
+  tab: DictTab;
+  onCellChange: (rowIndex: number, cellIndex: number, value: string) => void;
+  onDelete: (rowIndex: number) => void;
+}) {
+  if (row.type === 'blank') return null;
+
+  const labels = getFieldLabels(row.type, tab);
+  const isComment = row.type === 'comment';
+  const noteIndex = row.type === 'normal' ? 2 : row.type === 'conditional' ? 4 : -1;
+  const hasNote = noteIndex >= 0 && (row.values[noteIndex]?.trim() ?? '') !== '';
+  const [noteActivated, setNoteActivated] = useState(false);
+  const showNoteInput = noteIndex >= 0 && (hasNote || noteActivated);
+  const visibleCount = noteIndex >= 0 ? noteIndex : row.values.length;
+
+  return (
+    <article className={`dict-card dict-card--${row.type}`}>
+      <div className="dict-card__header">
+        <div className="dict-card__badges">
+          <span className={`dict-card__pill dict-card__pill--${row.type}`}>
+            {getTypeLabel(row.type, tab)}
+          </span>
+          <span className="dict-card__pill dict-card__pill--index">#{rowIndex + 1}</span>
+          {showNoteInput && (
+            <input
+              className="dict-card__note-input"
+              value={row.values[noteIndex] ?? ''}
+              onChange={(e) => onCellChange(rowIndex, noteIndex, e.target.value)}
+              onBlur={() => { if (!hasNote) setNoteActivated(false); }}
+              placeholder="备注"
+              style={{ '--note-char-count': !hasNote ? 80 : (row.values[noteIndex] ?? '').length } as React.CSSProperties}
+            />
+          )}
+          {noteIndex >= 0 && !hasNote && !noteActivated && (
+            <button
+              type="button"
+              className="dict-card__add-note"
+              onClick={() => { onCellChange(rowIndex, noteIndex, ''); setNoteActivated(true); }}
+            >
+              + 备注
+            </button>
+          )}
+        </div>
+        <button
+          type="button"
+          className="dict-card__delete"
+          onClick={() => onDelete(rowIndex)}
+          title="删除此条"
+        >
+          ✕
+        </button>
+      </div>
+
+      {isComment ? (
+        <div className="dict-card__body">
+          <input
+            className="dict-card__input dict-card__input--comment"
+            value={row.values[0] ?? ''}
+            onChange={(e) => onCellChange(rowIndex, 0, e.target.value)}
+            placeholder="注释内容"
+          />
+        </div>
+      ) : (
+        <div className="dict-card__fields">
+          {row.values.slice(0, visibleCount).map((val, ci) => (
+            <div key={ci} className="dict-card__field">
+              {labels[ci] && (
+                <span className="dict-card__field-label">{labels[ci]}</span>
+              )}
+              <input
+                className="dict-card__input"
+                value={val}
+                onChange={(e) => onCellChange(rowIndex, ci, e.target.value)}
+                placeholder={labels[ci] || `列${ci + 1}`}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </article>
+  );
+}
+
+/* ── Main component ── */
 export function DictionaryManager(props: DictionaryManagerProps) {
   const { data, loading, error, onReload, onCreateFile, onSaveFile, onDeleteFile, title, description } = props;
 
   const [activeTab, setActiveTab] = useState<DictTab>('pre');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [mode, setMode] = useState<'table' | 'text'>('table');
+  const [mode, setMode] = useState<'card' | 'text'>('card');
   const [draftText, setDraftText] = useState<string>('');
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -100,11 +214,20 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   const parsedRows = useMemo(() => parseRows(draftText, activeTab), [draftText, activeTab]);
 
   const filteredRows = useMemo(() => {
-    if (!searchTerm.trim()) return parsedRows.map((row, rowIndex) => ({ row, rowIndex }));
-    const needle = searchTerm.toLowerCase();
-    return parsedRows
+    const visible = parsedRows
       .map((row, rowIndex) => ({ row, rowIndex }))
-      .filter(({ row }) => row.values.join('\t').toLowerCase().includes(needle));
+      .filter(({ row }) => {
+        // 过滤掉注释行（// 或 # 开头）
+        if (row.type === 'comment') return false;
+        // 过滤掉空行
+        if (row.type === 'blank') return false;
+        // 过滤掉少于 1 个 tab 分隔的行（即没有 tab 的行）
+        if (!row.raw.includes('\t')) return false;
+        return true;
+      });
+    if (!searchTerm.trim()) return visible;
+    const needle = searchTerm.toLowerCase();
+    return visible.filter(({ row }) => row.values.join('\t').toLowerCase().includes(needle));
   }, [parsedRows, searchTerm]);
 
   const ensureSelection = (nextFiles: string[]) => {
@@ -338,8 +461,8 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                 description={`${selectedContent?.count ?? 0} 条有效条目 · ${selectedContent?.path ?? ''}`}
                 actions={(
                   <div className="dict-panel-actions">
-                    <Button variant="secondary" onClick={() => setMode(mode === 'table' ? 'text' : 'table')}>
-                      {mode === 'table' ? '切换纯文本' : '切换表格'}
+                    <Button variant="secondary" onClick={() => setMode(mode === 'card' ? 'text' : 'card')}>
+                      {mode === 'card' ? '切换纯文本' : '切换卡片'}
                     </Button>
                     <Button variant="secondary" onClick={() => void handleDelete()} disabled={deleting}>删除文件</Button>
                     <Button onClick={() => void handleSave()} disabled={saving || !dirty}>保存</Button>
@@ -368,45 +491,29 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                     spellCheck={false}
                   />
                 ) : (
-                  <div className="dict-table-wrap">
-                    <table className="dict-table">
-                      <thead>
-                        <tr>
-                          <th>类型</th>
-                          <th>列1</th>
-                          <th>列2</th>
-                          <th>列3</th>
-                          <th>列4</th>
-                          <th>操作</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredRows.map(({ row, rowIndex }) => (
-                          <tr key={`${rowIndex}-${row.raw}`}>
-                            <td>
-                              <span className={`dict-row-type dict-row-type--${row.type}`}>{row.type}</span>
-                            </td>
-                            {[0, 1, 2, 3].map((col) => (
-                              <td key={col}>
-                                  <input
-                                    className="dict-cell-input"
-                                    value={row.values[col] ?? ''}
-                                    disabled={row.type === 'blank' || (row.type === 'comment' && col > 0)}
-                                  onChange={(e) => updateRowCell(rowIndex, col, e.target.value)}
-                                  />
-                                </td>
-                              ))}
-                            <td>
-                              <button type="button" className="dict-row-delete" onClick={() => deleteRow(rowIndex)}>删除行</button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    <div className="form-actions" style={{ marginTop: 12 }}>
-                      <Button variant="secondary" onClick={addRow}>+ 新增行</Button>
+                  <>
+                    <div className="dict-card-list">
+                      {filteredRows.map(({ row, rowIndex }) => (
+                        <DictEntryCard
+                          key={`${rowIndex}-${row.raw}`}
+                          row={row}
+                          rowIndex={rowIndex}
+                          tab={activeTab}
+                          onCellChange={updateRowCell}
+                          onDelete={deleteRow}
+                        />
+                      ))}
+                      {filteredRows.length === 0 && (
+                        <div className="empty-state">
+                          <strong>无匹配条目</strong>
+                          <span>尝试更换搜索关键词或新增条目。</span>
+                        </div>
+                      )}
                     </div>
-                  </div>
+                    <div className="dict-card-add" style={{ marginTop: 12 }}>
+                      <Button variant="secondary" onClick={addRow}>+ 新增条目</Button>
+                    </div>
+                  </>
                 )}
               </Panel>
             ) : (

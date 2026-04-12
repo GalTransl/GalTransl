@@ -1121,6 +1121,72 @@ def build_handler(registry: JobRegistry):
                     self._send_json({"error": f"failed to read cache: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
+            # POST /api/projects/:id/cache/save
+            if sub_path == "/cache/save":
+                if self.command != "POST":
+                    self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
+                    return
+                try:
+                    payload = self._read_json_body()
+                    filename = str(payload.get("filename", "")).strip()
+                    entries = payload.get("entries", [])
+
+                    if not filename or filename != os.path.basename(filename):
+                        self._send_json({"error": "invalid cache filename"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+                    file_path = os.path.join(cache_dir, filename)
+                    if not os.path.isfile(file_path):
+                        self._send_json({"error": f"cache file not found: {filename}"}, status=HTTPStatus.NOT_FOUND)
+                        return
+
+                    import orjson
+                    with open(file_path, "wb") as f:
+                        f.write(orjson.dumps(entries, option=orjson.OPT_INDENT_2 | orjson.OPT_ENSURE_ASCII))
+                    self._send_json({"success": True, "filename": filename})
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to save cache file: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # POST /api/projects/:id/cache/delete-entry
+            if sub_path == "/cache/delete-entry":
+                if self.command != "POST":
+                    self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
+                    return
+                try:
+                    payload = self._read_json_body()
+                    filename = str(payload.get("filename", "")).strip()
+                    entry_index = int(payload.get("index", -1))
+
+                    if not filename or filename != os.path.basename(filename):
+                        self._send_json({"error": "invalid cache filename"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+                    file_path = os.path.join(cache_dir, filename)
+                    if not os.path.isfile(file_path):
+                        self._send_json({"error": f"cache file not found: {filename}"}, status=HTTPStatus.NOT_FOUND)
+                        return
+
+                    import orjson
+                    with open(file_path, "rb") as f:
+                        data = orjson.loads(f.read())
+                    if not isinstance(data, list) or entry_index < 0 or entry_index >= len(data):
+                        self._send_json({"error": "invalid entry index"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    deleted = data.pop(entry_index)
+                    with open(file_path, "wb") as f:
+                        f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2 | orjson.OPT_ENSURE_ASCII))
+                    self._send_json({"success": True, "filename": filename, "deleted_index": entry_index})
+                except (json.JSONDecodeError, ValueError):
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to delete cache entry: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
             # GET /api/projects/:id/progress
             if sub_path == "/progress":
                 cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)

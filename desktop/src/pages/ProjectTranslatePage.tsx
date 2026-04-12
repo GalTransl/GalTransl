@@ -6,6 +6,7 @@ import { EmptyState } from '../components/EmptyState';
 import { Panel } from '../components/Panel';
 import { StatusBadge } from '../components/StatusBadge';
 import { useConnection } from '../features/connection/ConnectionContext';
+import { speakerStyle } from '../lib/speaker';
 import {
   ApiError,
   type FileProgress,
@@ -709,6 +710,7 @@ function RuntimeSuccessRow({
   onToggleSuccessFileFilter: (filename: string) => void;
 }) {
   const speakerLabel = Array.isArray(entry.speaker) ? entry.speaker.join(' / ') : entry.speaker;
+  const speakerStyleVal = speakerLabel ? speakerStyle(speakerLabel) : undefined;
   const entryFilename = entry.filename || '未命名文件';
   const filterFilename = entry.filename;
 
@@ -745,12 +747,12 @@ function RuntimeSuccessRow({
       <div className="runtime-success-compact">
         <p className="runtime-success-compact__line">
           <span className="runtime-success-compact__label">SRC</span>
-          {speakerLabel ? <span className="runtime-success-compact__speaker-inline">{speakerLabel}</span> : null}
+          {speakerLabel ? <span className="runtime-success-compact__speaker-inline" style={speakerStyleVal}>{speakerLabel}</span> : null}
           <span>{entry.source_preview || '—'}</span>
         </p>
         <p className="runtime-success-compact__line">
           <span className="runtime-success-compact__label">DST</span>
-          {speakerLabel ? <span className="runtime-success-compact__speaker-inline">{speakerLabel}</span> : null}
+          {speakerLabel ? <span className="runtime-success-compact__speaker-inline" style={speakerStyleVal}>{speakerLabel}</span> : null}
           <span>{entry.translation_preview || '—'}</span>
         </p>
       </div>

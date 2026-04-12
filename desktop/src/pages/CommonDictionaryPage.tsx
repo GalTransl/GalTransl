@@ -41,7 +41,7 @@ export function CommonDictionaryPage() {
   return (
     <DictionaryManager
       title="通用字典管理"
-      description="仅管理程序根目录 Dict 下的通用字典文件，支持表格编辑与纯文本编辑。"
+      description="仅管理程序根目录 Dict 下的通用字典文件，支持卡片编辑与纯文本编辑。"
       data={data}
       loading={loading}
       error={error}
