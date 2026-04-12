@@ -72,6 +72,7 @@ export function ProjectConfigPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [activeSection, setActiveSection] = useState<ConfigSection>('common');
   const [yamlView, setYamlView] = useState(false);
 
@@ -91,7 +92,10 @@ export function ProjectConfigPage() {
     setError(null);
     fetchProjectConfig(projectId, configFileName)
       .then((data) => {
-        if (!cancelled) setConfig(data.config);
+        if (!cancelled) {
+          setConfig(data.config);
+          setDirty(false);
+        }
       })
       .catch((err) => {
         if (!cancelled) setError(getErrorMessage(err, '加载配置失败'));
@@ -174,6 +178,7 @@ export function ProjectConfigPage() {
       return setNestedValue(prev, path, parsedValue);
     });
     setSaveSuccess(false);
+    setDirty(true);
   }, [setNestedValue]);
 
   // Unified plugin setting change handler
@@ -187,6 +192,7 @@ export function ProjectConfigPage() {
       return { ...prev, plugin };
     });
     setSaveSuccess(false);
+    setDirty(true);
   }, []);
 
   // Toggle a text plugin on/off
@@ -207,6 +213,7 @@ export function ProjectConfigPage() {
       return { ...prev, plugin };
     });
     setSaveSuccess(false);
+    setDirty(true);
   }, []);
 
   const handleSave = useCallback(async () => {
@@ -220,6 +227,7 @@ export function ProjectConfigPage() {
         config_file_name: configFileName,
       });
       setSaveSuccess(true);
+      setDirty(false);
     } catch (err) {
       setError(getErrorMessage(err, '保存配置失败'));
     } finally {
@@ -280,7 +288,7 @@ export function ProjectConfigPage() {
             disabled={saving || !config}
           >
             <span>💾</span>
-            <span>{saving ? '保存中…' : '保存配置'}</span>
+            <span>{saving ? '保存中…' : '保存配置'}{dirty && !saving && <span style={{ color: '#e53e3e', marginLeft: 4 }}>●</span>}</span>
           </button>
           <div className="project-config-page__section-divider" />
           <button
@@ -382,6 +390,7 @@ export function ProjectConfigPage() {
                         onChange={(newBackend) => {
                           setConfig((prev) => prev ? { ...prev, backendSpecific: newBackend } : prev);
                           setSaveSuccess(false);
+                          setDirty(true);
                         }}
                       />
                     )}
@@ -391,6 +400,7 @@ export function ProjectConfigPage() {
                       onChange={(newProxy) => {
                         setConfig((prev) => prev ? { ...prev, proxy: newProxy } : prev);
                         setSaveSuccess(false);
+                        setDirty(true);
                       }}
                     />
                   </div>
@@ -413,6 +423,7 @@ export function ProjectConfigPage() {
                               return prev ? { ...prev, plugin } : prev;
                             });
                             setSaveSuccess(false);
+                            setDirty(true);
                           }}
                         >
                           {filePlugins.length > 0 ? (
@@ -510,6 +521,7 @@ export function ProjectConfigPage() {
                     onChange={(newDict) => {
                       setConfig((prev) => prev ? { ...prev, dictionary: newDict } : prev);
                       setSaveSuccess(false);
+                      setDirty(true);
                     }}
                   />
                 </Panel>
@@ -533,6 +545,7 @@ export function ProjectConfigPage() {
                             return prev ? { ...prev, problemAnalyze: pa } : prev;
                           });
                           setSaveSuccess(false);
+                          setDirty(true);
                         }}
                       />
                       <span className="field__hint">每行一个问题类型，如：词频过高、残留日文等</span>

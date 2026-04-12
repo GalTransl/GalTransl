@@ -109,6 +109,7 @@ async def run_galtransl(cfg: CProjectConfig, translator: str, stop_event=None):
         LOGGER.info(f"翻译开始时间: {start_time_text}")
         start_transl_time = datetime.datetime.strptime(start_time_text, "%H:%M")
         while True:
+            _raise_if_stop_requested(stop_event)
             now = datetime.datetime.now()
             if (
                 now.hour == start_transl_time.hour

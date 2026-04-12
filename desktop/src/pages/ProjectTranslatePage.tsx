@@ -30,6 +30,13 @@ const SUCCESS_STICK_BOTTOM_THRESHOLD_PX = 24;
 const INPUT_FOLDER_NAME = 'gt_input';
 const OUTPUT_FOLDER_NAME = 'gt_output';
 const CACHE_FOLDER_NAME = 'transl_cache';
+const LAUNCH_CHARGE_MS = 500;
+const LAUNCH_BLAST_MS = 600;
+const STRIP_BOOT_MS = 1200;
+const BAR_SURGE_MS = 800;
+const PARTICLE_COUNT = 12;
+const PARTICLE_DISTANCE_MIN = 30;
+const PARTICLE_DISTANCE_MAX = 80;
 
 type OutletContext = {
   projectDir: string;
@@ -58,6 +65,13 @@ export function ProjectTranslatePage() {
   const fileProgressListRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
   const [hasFileProgressScrollbar, setHasFileProgressScrollbar] = useState(false);
+  const [launchPhase, setLaunchPhase] = useState<'idle' | 'charging' | 'blasting'>('idle');
+  const [stripBooting, setStripBooting] = useState(false);
+  const [barSurging, setBarSurging] = useState(false);
+  const [particles, setParticles] = useState<Array<{ id: number; x: number; y: number; dx: number; dy: number; color: string }>>([]);
+  const [ripples, setRipples] = useState<Array<{ id: number; x: number; y: number; size: number }>>([]);
+  const launchButtonRef = useRef<HTMLDivElement | null>(null);
+  const prevShouldPollRuntimeRef = useRef(false);
 
   useEffect(() => {
     if (!projectDir || translators.length === 0) {
@@ -137,6 +151,22 @@ export function ProjectTranslatePage() {
   const shouldPollRuntime = currentJob?.status === 'pending' || currentJob?.status === 'running';
   const isSelectedTranslatorValid = translators.some((item) => item.name === selectedTranslator);
 
+  // Fire strip boot-up and bar surge when translation first starts
+  useEffect(() => {
+    const justStarted = shouldPollRuntime && !prevShouldPollRuntimeRef.current;
+    prevShouldPollRuntimeRef.current = shouldPollRuntime;
+    if (!justStarted) return;
+
+    setStripBooting(true);
+    setBarSurging(true);
+    const stripTimer = window.setTimeout(() => setStripBooting(false), STRIP_BOOT_MS);
+    const barTimer = window.setTimeout(() => setBarSurging(false), BAR_SURGE_MS);
+    return () => {
+      window.clearTimeout(stripTimer);
+      window.clearTimeout(barTimer);
+    };
+  }, [shouldPollRuntime]);
+
   useEffect(() => {
     if (!projectDir || !runtimeMatchesProject || !currentJob?.translator) return;
     setSelectedTranslator((current) => (current === currentJob.translator ? current : currentJob.translator));
@@ -208,13 +238,53 @@ export function ProjectTranslatePage() {
     }
     setSubmitError(null);
     setSelectedTranslatorTemplate(projectDir, selectedTranslator);
-    const backendProfile = getSelectedBackendProfile(projectDir);
-    void handleSubmit({
-      config_file_name: configFileName || 'config.yaml',
-      project_dir: projectDir,
-      translator: selectedTranslator,
-      ...(backendProfile ? { backend_profile: backendProfile } : {}),
-    });
+
+    // Spawn ripple at button center
+    const btnEl = launchButtonRef.current;
+    if (btnEl) {
+      const rect = btnEl.getBoundingClientRect();
+      const cx = rect.width / 2;
+      const cy = rect.height / 2;
+      setRipples([{ id: Date.now(), x: cx, y: cy, size: Math.max(rect.width, rect.height) }]);
+      window.setTimeout(() => setRipples([]), 700);
+    }
+
+    // Phase 1: charge-up
+    setLaunchPhase('charging');
+
+    window.setTimeout(() => {
+      // Phase 2: blast-off + particle burst
+      setLaunchPhase('blasting');
+
+      // Spawn particles
+      const newParticles = Array.from({ length: PARTICLE_COUNT }, (_, i) => {
+        const angle = (Math.PI * 2 * i) / PARTICLE_COUNT + (Math.random() - 0.5) * 0.4;
+        const dist = PARTICLE_DISTANCE_MIN + Math.random() * (PARTICLE_DISTANCE_MAX - PARTICLE_DISTANCE_MIN);
+        const colors = ['#3b82f6', '#22d3ee', '#34d399', '#a78bfa', '#fbbf24'];
+        return {
+          id: Date.now() + i,
+          x: 50,
+          y: 50,
+          dx: Math.cos(angle) * dist,
+          dy: Math.sin(angle) * dist,
+          color: colors[i % colors.length],
+        };
+      });
+      setParticles(newParticles);
+      window.setTimeout(() => setParticles([]), 800);
+
+      // Submit the actual job
+      const backendProfile = getSelectedBackendProfile(projectDir);
+      void handleSubmit({
+        config_file_name: configFileName || 'config.yaml',
+        project_dir: projectDir,
+        translator: selectedTranslator,
+        ...(backendProfile ? { backend_profile: backendProfile } : {}),
+      });
+
+      // Phase 3: settle
+      window.setTimeout(() => setLaunchPhase('idle'), LAUNCH_BLAST_MS);
+    }, LAUNCH_CHARGE_MS);
   }, [configFileName, handleSubmit, isSelectedTranslatorValid, projectDir, selectedTranslator]);
 
   const handleStopTranslation = useCallback(async () => {
@@ -435,17 +505,44 @@ export function ProjectTranslatePage() {
                 </div>
               ) : null}
 
-              <div className="form-actions">
-                <Button
-                  className={primaryActionClassName}
-                  disabled={primaryActionDisabled}
-                  onClick={handlePrimaryAction}
-                >
-                  {primaryActionLabel}
-                </Button>
+              <div className={`form-actions${launchPhase !== 'idle' ? ` project-translate-page__launch-${launchPhase}` : ''}`}>
+                <div className="project-translate-page__launch-wrapper" ref={launchButtonRef}>
+                  {ripples.map((r) => (
+                    <span
+                      key={r.id}
+                      className="project-translate-page__launch-ripple"
+                      style={{
+                        left: r.x - r.size / 2,
+                        top: r.y - r.size / 2,
+                        width: r.size,
+                        height: r.size,
+                      }}
+                    />
+                  ))}
+                  {particles.map((p) => (
+                    <span
+                      key={p.id}
+                      className="project-translate-page__launch-particle"
+                      style={{
+                        left: `${p.x}%`,
+                        top: `${p.y}%`,
+                        background: p.color,
+                        '--launch-particle-x': `${p.dx}px`,
+                        '--launch-particle-y': `${p.dy}px`,
+                      } as React.CSSProperties}
+                    />
+                  ))}
+                  <Button
+                    className={primaryActionClassName}
+                    disabled={primaryActionDisabled}
+                    onClick={handlePrimaryAction}
+                  >
+                    {primaryActionLabel}
+                  </Button>
+                </div>
               </div>
 
-              <div className={`runtime-summary-strip runtime-summary-strip--sidebar${shouldPollRuntime ? ' runtime-summary-strip--live' : ''}`}>
+              <div className={`runtime-summary-strip runtime-summary-strip--sidebar${shouldPollRuntime ? ' runtime-summary-strip--live' : ''}${stripBooting ? ' project-translate-page__strip-booting' : ''}${barSurging ? ' project-translate-page__bar-surge' : ''}`}>
                 <div className="runtime-summary-strip__topline">
                   <div className="runtime-summary-strip__status">
                     <StatusBadge label={statusLabel} tone={statusTone} />
@@ -573,20 +670,24 @@ function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) {
           <span className="runtime-event__pill runtime-event__pill--danger">{entry.kind || 'error'}</span>
           <span className="runtime-event__pill">{entry.level || 'warn'}</span>
           {(entry.retry_count ?? 0) > 0 ? <span className="runtime-event__pill">重试 {entry.retry_count}</span> : null}
-          {(entry.sleep_seconds ?? 0) > 0 ? <span className="runtime-event__pill">退避 {entry.sleep_seconds}s</span> : null}
+          {(entry.sleep_seconds ?? 0) > 0 ? <span className="runtime-event__pill">退避 {Number(entry.sleep_seconds).toFixed(3)}s</span> : null}
         </div>
         <time className="runtime-event__timestamp">{formatTime(entry.ts)}</time>
       </div>
       <p className="runtime-event__message">{entry.message || '未提供错误详情。'}</p>
       <dl className="runtime-event__meta">
-        <div>
-          <dt>文件</dt>
-          <dd>{entry.filename || '—'}</dd>
-        </div>
-        <div>
-          <dt>范围</dt>
-          <dd>{entry.index_range || '—'}</dd>
-        </div>
+        {entry.kind !== 'api' && (
+          <div>
+            <dt>文件</dt>
+            <dd>{entry.filename || '—'}</dd>
+          </div>
+        )}
+        {entry.kind !== 'api' && (
+          <div>
+            <dt>范围</dt>
+            <dd>{entry.index_range || '—'}</dd>
+          </div>
+        )}
         <div>
           <dt>模型</dt>
           <dd>{entry.model || '—'}</dd>

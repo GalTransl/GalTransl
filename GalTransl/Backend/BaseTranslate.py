@@ -198,6 +198,14 @@ class BaseTranslate:
             temperature = NOT_GIVEN
 
         while True:
+            # Check stop_event before each API attempt so that cancelling
+            # the job actually works even when we are stuck in an API-error
+            # retry loop with long backoff sleeps.
+            stop_event = getattr(self.pj_config, "stop_event", None)
+            if stop_event is not None and stop_event.is_set():
+                from GalTransl.Service import JobCancelledError
+                raise JobCancelledError()
+
             try:
                 if self.tokenStrategy == "random":
                     if api_try_count % 2 == 0:
@@ -274,12 +282,12 @@ class BaseTranslate:
                     raw_file_name = file_name[1:-1] if file_name.startswith("[") and file_name.endswith("]") else file_name
                     message_text = ""
                     try:
-                        message_text = f"{response.model_extra['error']} sleeping {sleep_time}s"
+                        message_text = f"{response.model_extra['error']} sleeping {sleep_time:.3f}s"
                         LOGGER.warning(
                             f"[API Error]{token_info}{file_name} {message_text}"
                         )
                     except:
-                        message_text = f"{e} sleeping {sleep_time}s"
+                        message_text = f"{e} sleeping {sleep_time:.3f}s"
                         LOGGER.warning(
                             f"[API Error]{token_info}{file_name} {message_text}"
                         )
