@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
+import { PageHeader } from '../components/PageHeader';
 import { ConnectionStatusCard } from '../features/connection/ConnectionStatusCard';
+import { InlineFeedback } from '../components/page-state';
 import { useConnection } from '../features/connection/ConnectionContext';
-import { ApiError, fetchAppSettings, updateAppSettings } from '../lib/api';
+import { fetchAppSettings, updateAppSettings } from '../lib/api';
+import { normalizeError } from '../lib/errors';
 
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiError) return error.message;
-  if (error instanceof Error && error.message.trim()) return error.message;
-  return fallback;
-}
 
 export function SettingsPage() {
   const {
@@ -17,8 +15,7 @@ export function SettingsPage() {
     loadingInitialData,
     refreshingJobs,
     loadInitialData,
-    translators,
-  } = useConnection();
+    translators } = useConnection();
 
   const [printTranslationLogInTerminal, setPrintTranslationLogInTerminal] = useState(true);
   const [loadingAppSettings, setLoadingAppSettings] = useState(true);
@@ -37,7 +34,7 @@ export function SettingsPage() {
       })
       .catch((error) => {
         if (!cancelled) {
-          setAppSettingsError(getErrorMessage(error, '加载程序设置失败'));
+          setAppSettingsError(normalizeError(error, '加载程序设置失败'));
         }
       })
       .finally(() => {
@@ -60,7 +57,7 @@ export function SettingsPage() {
       setPrintTranslationLogInTerminal(Boolean(saved.printTranslationLogInTerminal));
     } catch (error) {
       setPrintTranslationLogInTerminal(previousValue);
-      setAppSettingsError(getErrorMessage(error, '保存程序设置失败'));
+      setAppSettingsError(normalizeError(error, '保存程序设置失败'));
     } finally {
       setSavingAppSettings(false);
     }
@@ -68,10 +65,7 @@ export function SettingsPage() {
 
   return (
     <div className="settings-page">
-      <div className="settings-page__header">
-        <h1>设置</h1>
-        <p>管理应用配置和后端连接。</p>
-      </div>
+      <PageHeader className="settings-page__header" title="设置" description="管理应用配置和后端连接。" />
 
       <div className="settings-page__content">
         <section className="panel">
@@ -102,9 +96,7 @@ export function SettingsPage() {
           <div className="settings-toggle-row__desc">
             {loadingAppSettings ? '正在加载程序设置…' : '关闭后将静默进度条、翻译结果及普通错误输出，仅保留 except 异常信息。'}
           </div>
-          {appSettingsError ? (
-            <div className="inline-alert inline-alert--error" role="alert">{appSettingsError}</div>
-          ) : null}
+          {appSettingsError ? <InlineFeedback tone="error" title="程序设置异常" description={appSettingsError} /> : null}
         </section>
 
         <ConnectionStatusCard

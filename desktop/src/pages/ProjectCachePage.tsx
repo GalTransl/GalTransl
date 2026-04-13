@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '../components/Button';
+import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
+import { EmptyState, InlineFeedback, LoadingState } from '../components/page-state';
 import { speakerStyle } from '../lib/speaker';
 import {
-  ApiError,
   type FileEntry,
   type CacheEntry,
   type CacheSearchResult,
@@ -16,8 +17,8 @@ import {
   fetchCacheFile,
   saveCacheFile,
   searchCache,
-  replaceCache,
-} from '../lib/api';
+  replaceCache } from '../lib/api';
+import { normalizeError } from '../lib/errors';
 
 /** 兼容读取缓存字段：优先新key，回退旧key */
 function src(e: CacheEntry): string { return e.post_src || e.post_jp || ''; }
@@ -65,8 +66,7 @@ function CacheEntryCard({
   projectId,
   onEntryChange,
   onDelete,
-  highlightQuery,
-}: {
+  highlightQuery }: {
   entry: CacheEntry;
   filename: string;
   projectId: string;
@@ -196,8 +196,7 @@ function CacheEntryCard({
 function SearchResultCard({
   result,
   query,
-  onJumpToFile,
-}: {
+  onJumpToFile }: {
   result: CacheSearchResult;
   query: string;
   onJumpToFile: (filename: string, index: number) => void;
@@ -303,8 +302,7 @@ export function ProjectCachePage() {
     rememberCurrentScrollPosition();
     pendingScrollRestoreRef.current = {
       file,
-      top: scrollPositionsRef.current.get(file) ?? 0,
-    };
+      top: scrollPositionsRef.current.get(file) ?? 0 };
   }, [rememberCurrentScrollPosition]);
 
   const loadCacheFiles = useCallback(
@@ -323,7 +321,7 @@ export function ProjectCachePage() {
         setCacheDir(res.cache_dir || '');
         setSelectedFile((prev) => (prev && files.some((file) => file.name === prev) ? prev : null));
       } catch (err) {
-        setError(getErrorMessage(err, '加载缓存列表失败'));
+        setError(normalizeError(err, '加载缓存列表失败'));
       } finally {
         if (showPageLoading) {
           setLoading(false);
@@ -358,7 +356,7 @@ export function ProjectCachePage() {
         }
       })
       .catch((err) => {
-        if (!cancelled) setError(getErrorMessage(err, '加载缓存内容失败'));
+        if (!cancelled) setError(normalizeError(err, '加载缓存内容失败'));
       })
       .finally(() => {
         if (!cancelled) setLoadingEntries(false);
@@ -450,7 +448,7 @@ export function ProjectCachePage() {
           setSearchTotal(res.total);
         })
         .catch((err) => {
-          setLocalError(getErrorMessage(err, '全局搜索失败'));
+          setLocalError(normalizeError(err, '全局搜索失败'));
           setSearchResults([]);
           setSearchTotal(0);
         })
@@ -523,7 +521,7 @@ export function ProjectCachePage() {
       });
       setInfo(targetFile === selectedFile ? '已保存并重建缓存' : `已保存 ${targetFile}`);
     } catch (err) {
-      setLocalError(getErrorMessage(err, '保存缓存失败'));
+      setLocalError(normalizeError(err, '保存缓存失败'));
     } finally {
       setSaving(false);
     }
@@ -550,7 +548,7 @@ export function ProjectCachePage() {
         }
         savedFiles.push(file);
       } catch (err) {
-        lastError = getErrorMessage(err, `保存 ${file} 失败`);
+        lastError = normalizeError(err, `保存 ${file} 失败`);
       }
     }
     // 清除成功保存的文件的 dirty 标记
@@ -623,7 +621,7 @@ export function ProjectCachePage() {
       setReplacePreview(res.file_details);
       setReplacePreviewTotal(res.total_matches);
     } catch (err) {
-      setLocalError(getErrorMessage(err, '替换预览失败'));
+      setLocalError(normalizeError(err, '替换预览失败'));
     } finally {
       setReplacing(false);
     }
@@ -665,7 +663,7 @@ export function ProjectCachePage() {
         });
       }
     } catch (err) {
-      setLocalError(getErrorMessage(err, '全局替换失败'));
+      setLocalError(normalizeError(err, '全局替换失败'));
     } finally {
       setReplacing(false);
     }
@@ -674,29 +672,31 @@ export function ProjectCachePage() {
   if (loading) {
     return (
       <div className="project-cache-page">
-        <div className="project-cache-page__header"><h1>缓存编辑</h1></div>
-        <div className="empty-state"><strong>加载中…</strong></div>
+        <PageHeader className="project-cache-page__header" title="缓存编辑" />
+        <LoadingState title="加载缓存列表中…" description="正在读取项目缓存文件。" />
       </div>
     );
   }
 
   return (
     <div className="project-cache-page">
-      <div className="project-cache-page__header">
-        <div className="project-cache-page__header-row">
-          <h1>缓存编辑</h1>
-          {cacheDir && (
-            <Button variant="secondary" onClick={() => void invoke('open_folder', { path: cacheDir })} title={cacheDir}>
-              📂 打开缓存文件夹
-            </Button>
-          )}
-        </div>
-        <p>查看与编辑翻译缓存，对比原文与译文，筛选问题句。</p>
-      </div>
-
-      {error && <div className="inline-alert inline-alert--error" role="alert">{error}</div>}
-      {localError && <div className="inline-alert inline-alert--error" role="alert">{localError}</div>}
-      {info && <div className="inline-alert inline-alert--success" role="status">{info}</div>}
+      <PageHeader
+        className="project-cache-page__header"
+        title="缓存编辑"
+        description="查看与编辑翻译缓存，对比原文与译文，筛选问题句。"
+        actions={cacheDir ? (
+          <Button variant="secondary" onClick={() => void invoke('open_folder', { path: cacheDir })} title={cacheDir}>
+            📂 打开缓存文件夹
+          </Button>
+        ) : null}
+        status={
+          <>
+            {error && <InlineFeedback tone="error" title="加载缓存失败" description={error} />}
+            {localError && <InlineFeedback tone="error" title="操作失败" description={localError} />}
+            {info && <InlineFeedback tone="success" title="操作成功" description={info} />}
+          </>
+        }
+      />
 
       <div className="cache-layout">
         <aside className="cache-layout__sidebar">
@@ -936,19 +936,13 @@ export function ProjectCachePage() {
                     />
                   ))}
                   {filteredEntries.length === 0 && !loadingEntries && (
-                    <div className="empty-state">
-                      <strong>无匹配条目</strong>
-                      <span>尝试更换搜索关键词。</span>
-                    </div>
+                    <EmptyState title="无匹配条目" description="尝试更换搜索关键词。" />
                   )}
                 </div>
               </div>
             </Panel>
           ) : (
-            <div className="empty-state">
-              <strong>选择一个缓存文件</strong>
-              <span>从左侧选择缓存文件查看翻译内容，或使用全局搜索。</span>
-            </div>
+            <EmptyState title="选择一个缓存文件" description="从左侧选择缓存文件查看翻译内容，或使用全局搜索。" />
           )}
         </div>
       </div>
@@ -962,8 +956,3 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiError) return error.message;
-  if (error instanceof Error && error.message.trim()) return error.message;
-  return fallback;
-}

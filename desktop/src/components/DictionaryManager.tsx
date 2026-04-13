@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from './Button';
 import { Panel } from './Panel';
+import { EmptyState, ErrorState, InlineFeedback, LoadingState } from './page-state';
 import type { DictFileContent, DictionaryCategory } from '../lib/api';
 
 type DictTab = DictionaryCategory;
@@ -375,7 +376,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     return (
       <div className="project-dictionary-page">
         <div className="project-dictionary-page__header"><h1>{title}</h1></div>
-        <div className="empty-state"><strong>加载中…</strong></div>
+        <LoadingState title="加载字典中…" description="正在读取当前字典目录与文件内容。" />
       </div>
     );
   }
@@ -384,7 +385,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     return (
       <div className="project-dictionary-page">
         <div className="project-dictionary-page__header"><h1>{title}</h1></div>
-        <div className="inline-alert inline-alert--error" role="alert">{error}</div>
+        <ErrorState title="加载字典失败" description={error} />
       </div>
     );
   }
@@ -396,8 +397,8 @@ export function DictionaryManager(props: DictionaryManagerProps) {
         <p>{description}</p>
       </div>
 
-      {localError && <div className="inline-alert inline-alert--error" role="alert">{localError}</div>}
-      {info && <div className="inline-alert inline-alert--success" role="status">{info}</div>}
+      {localError && <InlineFeedback tone="error" title="操作失败" description={localError} />}
+      {info && <InlineFeedback tone="success" title="操作成功" description={info} />}
 
       <div className="project-dictionary-page__content">
         <div className="dict-tabs">
@@ -446,10 +447,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                 );
               })}
               {activeFiles.length === 0 && (
-                <div className="empty-state">
-                  <strong>当前分类无字典文件</strong>
-                  <span>请先创建一个字典文件。</span>
-                </div>
+                <EmptyState title="当前分类无字典文件" description="请先创建一个字典文件。" />
               )}
             </div>
           </aside>
@@ -504,10 +502,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                         />
                       ))}
                       {filteredRows.length === 0 && (
-                        <div className="empty-state">
-                          <strong>无匹配条目</strong>
-                          <span>尝试更换搜索关键词或新增条目。</span>
-                        </div>
+                        <EmptyState title="无匹配条目" description="尝试更换搜索关键词或新增条目。" />
                       )}
                     </div>
                     <div className="dict-card-add" style={{ marginTop: 12 }}>
@@ -517,10 +512,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                 )}
               </Panel>
             ) : (
-              <div className="empty-state">
-                <strong>选择一个字典文件</strong>
-                <span>从左侧选择字典文件开始编辑。</span>
-              </div>
+              <EmptyState title="选择一个字典文件" description="从左侧选择字典文件开始编辑。" />
             )}
           </div>
         </div>

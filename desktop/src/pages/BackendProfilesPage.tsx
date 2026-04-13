@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BackendConfigEditor } from '../components/BackendConfigEditor';
 import { Button } from '../components/Button';
+import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
+import { EmptyState, InlineFeedback, LoadingState } from '../components/page-state';
 import { ProxyConfigEditor } from '../components/ProxyConfigEditor';
 import {
-  ApiError,
   createBackendProfile,
   deleteBackendProfile,
   fetchBackendProfiles,
   getDefaultBackendProfile,
-  setDefaultBackendProfile,
-} from '../lib/api';
+  setDefaultBackendProfile } from '../lib/api';
+import { normalizeError } from '../lib/errors';
 
 type ProfileEntry = {
   name: string;
@@ -60,11 +61,6 @@ function getProfileMeta(config: Record<string, unknown>) {
   return { baseUrl, modelName };
 }
 
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiError) return error.message;
-  if (error instanceof Error && error.message.trim()) return error.message;
-  return fallback;
-}
 
 export function BackendProfilesPage() {
   const [profiles, setProfiles] = useState<ProfileEntry[]>([]);
@@ -90,7 +86,7 @@ export function BackendProfilesPage() {
       );
       setProfiles(entries);
     } catch (err) {
-      setError(getErrorMessage(err, '加载后端配置失败'));
+      setError(normalizeError(err, '加载后端配置失败'));
     } finally {
       setLoading(false);
     }
@@ -143,7 +139,7 @@ export function BackendProfilesPage() {
       setIsNew(false);
       void loadProfiles();
     } catch (err) {
-      setError(getErrorMessage(err, '保存配置失败'));
+      setError(normalizeError(err, '保存配置失败'));
     } finally {
       setSaving(false);
     }
@@ -159,35 +155,33 @@ export function BackendProfilesPage() {
       }
       void loadProfiles();
     } catch (err) {
-      setError(getErrorMessage(err, '删除配置失败'));
+      setError(normalizeError(err, '删除配置失败'));
     }
   }, [editingName, handleCancel, loadProfiles]);
 
   return (
     <div className="backend-profiles-page">
-      <div className="backend-profiles-page__header">
-        <h1>🤖 翻译后端配置</h1>
-        <p>管理全局翻译后端配置，可在项目中直接选用，避免每个项目都重复配置。</p>
-      </div>
-
-      {error && (
-        <div className="inline-alert inline-alert--error" role="alert">{error}</div>
-      )}
-      {saveSuccess && (
-        <div className="inline-alert inline-alert--success" role="status">配置已保存</div>
-      )}
+      <PageHeader
+        className="backend-profiles-page__header"
+        title="🤖 翻译后端配置"
+        description="管理全局翻译后端配置，可在项目中直接选用，避免每个项目都重复配置。"
+        status={
+          <>
+            {error && <InlineFeedback tone="error" title="操作失败" description={error} />}
+            {saveSuccess && <InlineFeedback tone="success" title="配置已保存" description="新的后端配置已写入，可在项目中直接选用。" />}
+          </>
+        }
+      />
 
       <div className="backend-profiles-page__content">
         <Panel title="配置列表" description="已创建的全局翻译后端配置。">
           {loading ? (
-            <div className="empty-state">
-              <strong>加载中…</strong>
-            </div>
+            <LoadingState title="加载配置列表中…" description="正在读取全局翻译后端配置。" />
           ) : profiles.length === 0 ? (
-            <div className="empty-state">
-              <strong>暂无配置</strong>
-              <span>点击下方「新建配置」按钮创建一个翻译后端配置。</span>
-            </div>
+            <EmptyState
+              title="暂无配置"
+              description="点击下方「新建配置」按钮创建一个翻译后端配置。"
+            />
           ) : (
             <div className="profile-list">
               {profiles.map((entry) => {

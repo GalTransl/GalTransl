@@ -2,13 +2,15 @@ import { invoke } from '@tauri-apps/api/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Button } from '../components/Button';
-import { EmptyState } from '../components/EmptyState';
+import { MetricCard } from '../components/MetricCard';
+import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
 import { StatusBadge } from '../components/StatusBadge';
+import { EmptyState, InlineFeedback } from '../components/page-state';
+import { StatsGrid } from '../components/StatsGrid';
 import { useConnection } from '../features/connection/ConnectionContext';
 import { speakerStyle } from '../lib/speaker';
 import {
-  ApiError,
   type FileProgress,
   type Job,
   type ProjectRuntimeErrorEntry,
@@ -22,8 +24,8 @@ import {
   getSelectedBackendProfile,
   setSelectedTranslatorTemplate,
   stopProjectTranslation,
-  submitJob,
-} from '../lib/api';
+  submitJob } from '../lib/api';
+import { normalizeError } from '../lib/errors';
 
 const JOB_POLL_INTERVAL_MS = 2000;
 const RUNTIME_POLL_INTERVAL_MS = 1000;
@@ -76,7 +78,6 @@ export function ProjectTranslatePage() {
   const [ripples, setRipples] = useState<Array<{ id: number; x: number; y: number; size: number }>>([]);
   const launchButtonRef = useRef<HTMLDivElement | null>(null);
   const prevShouldPollRuntimeRef = useRef(false);
-  const prevJobCompletedRef = useRef<boolean | null>(null);
 
   useEffect(() => {
     if (!projectDir || translators.length === 0) {
@@ -102,7 +103,7 @@ export function ProjectTranslatePage() {
       setJobs(nextJobs);
       setJobsError(null);
     } catch (error) {
-      setJobsError(getErrorMessage(error, '读取任务列表失败'));
+      setJobsError(normalizeError(error, '读取任务列表失败'));
     } finally {
       if (!silent) setRefreshingJobs(false);
     }
@@ -119,7 +120,7 @@ export function ProjectTranslatePage() {
       setRuntimeError(null);
     } catch (error) {
       if (!silent) {
-        setRuntimeError(getErrorMessage(error, '读取运行时快照失败'));
+        setRuntimeError(normalizeError(error, '读取运行时快照失败'));
       }
     }
   }, [projectId]);
@@ -172,18 +173,31 @@ export function ProjectTranslatePage() {
     };
   }, [shouldPollRuntime]);
 
+  const prevJobCompletedRef = useRef<boolean | null>(null);
+  const prevJobIdRef = useRef<string | null>(null);
+  const celebratedJobIdRef = useRef<string | null>(null);
+
   // Fire celebration animation when translation completes
   useEffect(() => {
     const isCompleted = currentJob?.status === 'completed';
+    const jobId = currentJob?.job_id ?? null;
     const wasPreviously = prevJobCompletedRef.current;
+    const prevJobId = prevJobIdRef.current;
     prevJobCompletedRef.current = !!isCompleted;
-    // Only celebrate on transition: not-completed → completed (skip initial load)
-    if (!isCompleted || wasPreviously !== false) return;
+    prevJobIdRef.current = jobId;
+
+    // Only celebrate on transition: not-completed → completed during the SAME job
+    // - wasPreviously !== false ensures we saw a non-completed state first
+    // - prevJobId === jobId ensures it's the same job (not a page remount with a completed job)
+    // - celebratedJobIdRef prevents double-celebration if effect re-runs
+    if (!isCompleted || wasPreviously !== false || prevJobId !== jobId) return;
+    if (celebratedJobIdRef.current === jobId) return;
+    celebratedJobIdRef.current = jobId;
 
     setJustCompleted(true);
     const timer = window.setTimeout(() => setJustCompleted(false), COMPLETE_CELEBRATE_MS);
     return () => window.clearTimeout(timer);
-  }, [currentJob?.status]);
+  }, [currentJob?.status, currentJob?.job_id]);
 
   useEffect(() => {
     if (!projectDir || !runtimeMatchesProject || !currentJob?.translator) return;
@@ -239,7 +253,7 @@ export function ProjectTranslatePage() {
         setJobs((current) => [createdJob, ...current.filter((job) => job.job_id !== createdJob.job_id)]);
         await refreshRuntime(true);
       } catch (error) {
-        const message = getErrorMessage(error, '提交任务失败');
+        const message = normalizeError(error, '提交任务失败');
         setSubmitError(message);
         throw error;
       } finally {
@@ -285,8 +299,7 @@ export function ProjectTranslatePage() {
           y: 50,
           dx: Math.cos(angle) * dist,
           dy: Math.sin(angle) * dist,
-          color: colors[i % colors.length],
-        };
+          color: colors[i % colors.length] };
       });
       setParticles(newParticles);
       window.setTimeout(() => setParticles([]), 800);
@@ -297,8 +310,7 @@ export function ProjectTranslatePage() {
         config_file_name: configFileName || 'config.yaml',
         project_dir: projectDir,
         translator: selectedTranslator,
-        ...(backendProfile ? { backend_profile: backendProfile } : {}),
-      });
+        ...(backendProfile ? { backend_profile: backendProfile } : {}) });
 
       // Phase 3: settle
       window.setTimeout(() => setLaunchPhase('idle'), LAUNCH_BLAST_MS);
@@ -317,15 +329,14 @@ export function ProjectTranslatePage() {
             ? {
                 ...job,
                 status: stoppedJob.status,
-                success: stoppedJob.success,
-              }
+                success: stoppedJob.success }
             : job,
         ),
       );
       await refreshRuntime(true);
       await refreshJobs(true);
     } catch (error) {
-      const message = getErrorMessage(error, '停止任务失败');
+      const message = normalizeError(error, '停止任务失败');
       setSubmitError(message);
     } finally {
       setStopping(false);
@@ -339,8 +350,7 @@ export function ProjectTranslatePage() {
       .map((file, index) => ({
         file,
         index,
-        isTranslating: file.translated > 0 && file.translated < file.total,
-      }))
+        isTranslating: file.translated > 0 && file.translated < file.total }))
       .sort((a, b) => {
         if (a.isTranslating !== b.isTranslating) {
           return a.isTranslating ? -1 : 1;
@@ -376,18 +386,19 @@ export function ProjectTranslatePage() {
     };
   }, [runtimeFiles.length]);
   const projectName = projectDir ? projectDir.split(/[/\\]/).filter(Boolean).pop() || '' : '';
-  const updatedAtText = summary?.updated_at ? formatDate(summary.updated_at) : '等待首次快照';
   const statusTone = currentJob?.status ?? 'pending';
   const statusLabel = getStatusLabel(currentJob?.status);
   const currentJobError = currentJob?.error?.trim() ?? '';
   const progressPercent = clampPercent(summary?.percent ?? 0);
   const translatedCount = summary?.translated ?? 0;
   const totalCount = summary?.total ?? 0;
+  const remainingCount = Math.max(totalCount - translatedCount, 0);
   const workersActive = summary?.workers_active ?? 0;
   const workersConfigured = summary?.workers_configured ?? 0;
   const speedText = formatSpeed(summary?.translation_speed_lpm ?? 0);
   const etaText = formatEta(summary?.eta_seconds ?? 0);
   const elapsedText = formatElapsedTime(currentJob, nowMs);
+  const updatedAtText = summary?.updated_at ? formatDate(summary.updated_at) : '等待首次快照';
 
   useEffect(() => {
     if (!currentJob?.started_at) return;
@@ -464,9 +475,11 @@ export function ProjectTranslatePage() {
 
   return (
     <div className="project-translate-page">
-      <div className="project-translate-page__header">
-        <div className="project-translate-page__header-row">
-          <h1>翻译工作台{projectName ? `-${projectName}` : ''}</h1>
+      <PageHeader
+        className="project-translate-page__header"
+        title={`翻译工作台${projectName ? `-${projectName}` : ''}`}
+        description="启动翻译任务后，这里会切换为运行时仪表盘，持续展示状态、吞吐、错误与成功句流。"
+        actions={
           <div className="project-translate-page__folder-menu">
             <Button
               disabled={!projectDir}
@@ -506,9 +519,8 @@ export function ProjectTranslatePage() {
               </Button>
             </div>
           </div>
-        </div>
-        <p>启动翻译任务后，这里会切换为运行时仪表盘，持续展示状态、吞吐、错误与成功句流。</p>
-      </div>
+        }
+      />
 
       <div className="project-translate-page__content">
         <div className="project-translate-page__sidebar">
@@ -536,11 +548,7 @@ export function ProjectTranslatePage() {
                 </select>
               </label>
 
-              {submitError ? (
-                <div className="inline-alert inline-alert--error" role="alert">
-                  {submitError}
-                </div>
-              ) : null}
+              {submitError ? <InlineFeedback tone="error" title="启动翻译失败" description={submitError} /> : null}
 
               <div className={`form-actions${launchPhase !== 'idle' ? ` project-translate-page__launch-${launchPhase}` : ''}`}>
                 <div className="project-translate-page__launch-wrapper" ref={launchButtonRef}>
@@ -552,8 +560,7 @@ export function ProjectTranslatePage() {
                         left: r.x - r.size / 2,
                         top: r.y - r.size / 2,
                         width: r.size,
-                        height: r.size,
-                      }}
+                        height: r.size }}
                     />
                   ))}
                   {particles.map((p) => (
@@ -565,8 +572,7 @@ export function ProjectTranslatePage() {
                         top: `${p.y}%`,
                         background: p.color,
                         '--launch-particle-x': `${p.dx}px`,
-                        '--launch-particle-y': `${p.dy}px`,
-                      } as React.CSSProperties}
+                        '--launch-particle-y': `${p.dy}px` } as React.CSSProperties}
                     />
                   ))}
                   <Button
@@ -587,49 +593,52 @@ export function ProjectTranslatePage() {
                   </div>
                 </div>
 
-                <div className="runtime-summary-strip__progress">
-                  <div className="runtime-summary-strip__bar">
-                    <div className={`runtime-summary-strip__bar-fill${justCompleted ? ' runtime-summary-strip__bar-fill--complete' : ''}`} style={{ width: `${progressPercent}%` }} />
+                <div className="runtime-summary-strip__hero">
+                  <div className="runtime-summary-strip__hero-header">
+                    <div className="runtime-summary-strip__hero-copy">
+                      <span className="runtime-summary-strip__eyebrow">进度</span>
+                      <strong className="runtime-summary-strip__fraction">{translatedCount}/{totalCount} 句</strong>
+                    </div>
+                    <span className="runtime-summary-strip__percent">{progressPercent}%</span>
                   </div>
-                  <span className="runtime-summary-strip__percent">{progressPercent}%</span>
+
+                  <div className="runtime-summary-strip__progress runtime-summary-strip__progress--hero">
+                    <div className="runtime-summary-strip__bar">
+                      <div className={`runtime-summary-strip__bar-fill${justCompleted ? ' runtime-summary-strip__bar-fill--complete' : ''}`} style={{ width: `${progressPercent}%` }} />
+                    </div>
+                  </div>
+
+                  <div className="runtime-summary-strip__hero-meta">
+                    <span className="runtime-summary-strip__hero-meta-primary">已完成 {translatedCount} / 共 {totalCount} 句</span>
+                    <span className="runtime-summary-strip__hero-meta-separator">·</span>
+                    <span>剩余 {remainingCount} 句</span>
+                  </div>
                 </div>
 
-                <dl className="runtime-summary-strip__metrics">
-                  <div>
-                    <dt>进度</dt>
-                    <dd>{translatedCount}/{totalCount}</dd>
-                  </div>
-                  <div>
-                    <dt>线程</dt>
-                    <dd>{workersActive}/{workersConfigured}</dd>
-                  </div>
-                  <div>
-                    <dt>速度</dt>
-                    <dd>{speedText}</dd>
-                  </div>
-                  <div>
-                    <dt>耗时</dt>
-                    <dd>{elapsedText}</dd>
-                  </div>
-                  <div>
-                    <dt>ETA</dt>
-                    <dd>{etaText}</dd>
-                  </div>
-                </dl>
+                <StatsGrid className="runtime-summary-strip__metrics" compact>
+                  <MetricCard label="速度" value={speedText} hint="平均吞吐" tone="accent" />
+                  <MetricCard label="ETA" value={etaText} hint="预计剩余时间" />
+                  <MetricCard label="线程" value={`${workersActive}/${workersConfigured}`} hint="当前/配置线程数" />
+                  <MetricCard label="耗时" value={elapsedText} hint="任务累计运行时间" />
+                </StatsGrid>
               </div>
 
               {currentJob?.status === 'failed' && currentJobError ? (
-                <div className="inline-alert inline-alert--error project-translate-page__job-alert" role="alert">
-                  <strong>任务失败：</strong>
-                  <span>{currentJobError}</span>
-                </div>
+                <InlineFeedback
+                  className="project-translate-page__job-alert"
+                  tone="error"
+                  title="任务失败"
+                  description={currentJobError}
+                />
               ) : null}
 
               {currentJob?.status === 'cancelled' && currentJobError ? (
-                <div className="inline-alert inline-alert--info project-translate-page__job-alert" role="status">
-                  <strong>任务已取消：</strong>
-                  <span>{currentJobError}</span>
-                </div>
+                <InlineFeedback
+                  className="project-translate-page__job-alert"
+                  tone="info"
+                  title="任务已取消"
+                  description={currentJobError}
+                />
               ) : null}
             </div>
           </Panel>
@@ -656,11 +665,7 @@ export function ProjectTranslatePage() {
         </div>
 
         <div className="project-translate-page__main">
-          {runtimeError ? (
-            <div className="inline-alert inline-alert--error" role="alert">
-              {runtimeError}
-            </div>
-          ) : null}
+          {runtimeError ? <InlineFeedback tone="error" title="运行时状态异常" description={runtimeError} /> : null}
 
           <div className="runtime-dashboard-grid">
             <div className={`project-translate-page__success-panel${successEntries.length ? ' project-translate-page__success-panel--active' : ''}`}>
@@ -755,8 +760,7 @@ function RuntimeSuccessRow({
   entry,
   isFresh,
   isSuccessFileFilterActive,
-  onToggleSuccessFileFilter,
-}: {
+  onToggleSuccessFileFilter }: {
   entry: ProjectRuntimeSuccessEntry;
   isFresh: boolean;
   isSuccessFileFilterActive: boolean;
@@ -816,8 +820,7 @@ function RuntimeSuccessRow({
 function FileProgressRow({
   file,
   isSuccessFileFilterActive,
-  onToggleSuccessFileFilter,
-}: {
+  onToggleSuccessFileFilter }: {
   file: FileProgress;
   isSuccessFileFilterActive: boolean;
   onToggleSuccessFileFilter: (filename: string) => void;
@@ -875,15 +878,9 @@ function toRuntimeJob(job: Job): RuntimeJob {
     created_at: job.created_at,
     started_at: job.started_at,
     finished_at: job.finished_at,
-    error: job.error,
-  };
+    error: job.error };
 }
 
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiError) return error.message;
-  if (error instanceof Error && error.message.trim()) return error.message;
-  return fallback;
-}
 
 function getStatusLabel(status?: RuntimeJob['status']) {
   switch (status) {
@@ -911,8 +908,7 @@ function formatDate(isoString: string): string {
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
-      second: '2-digit',
-    });
+      second: '2-digit' });
   } catch {
     return isoString;
   }
@@ -924,8 +920,7 @@ function formatTime(isoString: string): string {
     return new Date(isoString).toLocaleTimeString('zh-CN', {
       hour: '2-digit',
       minute: '2-digit',
-      second: '2-digit',
-    });
+      second: '2-digit' });
   } catch {
     return isoString;
   }

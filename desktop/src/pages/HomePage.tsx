@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Button } from '../components/Button';
-import { EmptyState } from '../components/EmptyState';
+import { MetricCard } from '../components/MetricCard';
+import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
+import { EmptyState, InlineFeedback } from '../components/page-state';
+import { StatsGrid } from '../components/StatsGrid';
 import { JobCard } from '../features/jobs/JobCard';
-import { ApiError, encodeProjectDir, fetchJobs, fetchProjectRuntime, type Job } from '../lib/api';
+import { encodeProjectDir, fetchJobs, fetchProjectRuntime, type Job } from '../lib/api';
+import { normalizeError } from '../lib/errors';
 
 const HISTORY_KEY = 'galtransl-project-history';
 const MAX_HISTORY = 20;
@@ -35,8 +39,7 @@ export function addProjectToHistory(projectDir: string, configFileName: string) 
   withoutDuplicate.unshift({
     projectDir,
     configFileName,
-    lastOpened: new Date().toISOString(),
-  });
+    lastOpened: new Date().toISOString() });
   saveHistory(withoutDuplicate.slice(0, MAX_HISTORY));
 }
 
@@ -87,8 +90,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
                 currentFile: runtime.current_file,
                 percent: runtime.summary.percent,
                 total: runtime.summary.total,
-                translated: runtime.summary.translated,
-              }] as const;
+                translated: runtime.summary.translated }] as const;
             } catch {
               return null;
             }
@@ -105,7 +107,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
         );
       }
     } catch (error) {
-      setJobsError(getErrorMessage(error, '读取全局任务列表失败'));
+      setJobsError(normalizeError(error, '读取全局任务列表失败'));
     } finally {
       setRefreshingJobs(false);
     }
@@ -125,8 +127,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
       filters: [
         { name: '配置文件', extensions: ['yaml', 'yml', 'inc.yaml', 'inc.yml'] },
         { name: '所有文件', extensions: ['*'] },
-      ],
-    });
+      ] });
     if (selected) {
       const filePath = selected as string;
       const normalized = filePath.replace(/\\/g, '/');
@@ -166,12 +167,28 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     [],
   );
 
+  const activeJobsCount = useMemo(
+    () => jobs.filter((job) => job.status === 'pending' || job.status === 'running').length,
+    [jobs],
+  );
+  const completedJobsCount = useMemo(() => jobs.filter((job) => job.status === 'completed').length, [jobs]);
+  const failedJobsCount = useMemo(() => jobs.filter((job) => job.status === 'failed').length, [jobs]);
+
   return (
     <div className="home-page">
-      <div className="home-page__hero">
-        <h1>GalTransl Desktop</h1>
-        <p>本地翻译后端桌面控制台，管理翻译项目、提交任务并实时查看翻译进度。</p>
-      </div>
+      <PageHeader
+        className="home-page__hero page-header--hero"
+        title="GalTransl Desktop"
+        description="本地翻译后端桌面控制台，管理翻译项目、提交任务并实时查看翻译进度。"
+        status={
+          <StatsGrid className="home-page__overview" compact>
+            <MetricCard label="历史项目" value={history.length} hint="支持快速回到最近项目" tone="accent" />
+            <MetricCard label="活跃任务" value={activeJobsCount} hint="运行中与排队中的翻译任务" tone="success" />
+            <MetricCard label="已完成任务" value={completedJobsCount} hint="已完成的本地翻译记录" />
+            <MetricCard label="失败任务" value={failedJobsCount} hint="需要回看日志或重新提交" tone={failedJobsCount > 0 ? 'danger' : 'default'} />
+          </StatsGrid>
+        }
+      />
 
       <div className="home-page__content">
         <Panel title="打开项目" description="输入项目目录路径和配置文件名，开始翻译工作。">
@@ -214,10 +231,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
 
         <Panel title="历史项目" description="最近打开过的项目，点击可快速打开。">
           {history.length === 0 ? (
-            <div className="empty-state">
-              <strong>暂无历史项目</strong>
-              <span>打开一个项目后，它会自动出现在这里。</span>
-            </div>
+            <EmptyState title="暂无历史项目" description="打开一个项目后，它会自动出现在这里。" />
           ) : (
               <div className="history-list">
                 {history.map((entry) => (
@@ -257,11 +271,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
             </Button>
           }
         >
-          {jobsError ? (
-            <div className="inline-alert inline-alert--error" role="alert">
-              {jobsError}
-            </div>
-          ) : null}
+          {jobsError ? <InlineFeedback tone="error" title="加载任务失败" description={jobsError} /> : null}
 
           {jobs.length === 0 ? (
             <EmptyState title="还没有翻译任务" description="启动任意项目的翻译后，这里会汇总展示所有任务。" />
@@ -278,11 +288,6 @@ export function HomePage({ onOpenProject }: HomePageProps) {
   );
 }
 
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiError) return error.message;
-  if (error instanceof Error && error.message.trim()) return error.message;
-  return fallback;
-}
 
 function formatDate(isoString: string): string {
   try {
@@ -291,8 +296,7 @@ function formatDate(isoString: string): string {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
-      minute: '2-digit',
-    });
+      minute: '2-digit' });
   } catch {
     return isoString;
   }

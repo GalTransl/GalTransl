@@ -1,20 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { DictionaryManager } from '../components/DictionaryManager';
 import {
-  ApiError,
   createCommonDictionaryFile,
   deleteCommonDictionaryFile,
   fetchCommonDictionaryManager,
   saveCommonDictionaryFile,
   type CommonDictionaryManagerResponse,
-  type DictionaryCategory,
-} from '../lib/api';
+  type DictionaryCategory } from '../lib/api';
+import { normalizeError } from '../lib/errors';
 
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiError) return error.message;
-  if (error instanceof Error && error.message.trim()) return error.message;
-  return fallback;
-}
 
 export function CommonDictionaryPage() {
   const [data, setData] = useState<CommonDictionaryManagerResponse | null>(null);
@@ -28,7 +22,7 @@ export function CommonDictionaryPage() {
       const res = await fetchCommonDictionaryManager();
       setData(res);
     } catch (err) {
-      setError(getErrorMessage(err, '加载通用字典失败'));
+      setError(normalizeError(err, '加载通用字典失败'));
     } finally {
       setLoading(false);
     }

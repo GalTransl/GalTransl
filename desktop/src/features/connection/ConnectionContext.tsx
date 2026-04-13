@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ConnectionPhase, TranslatorOption } from '../../lib/api';
-import { ApiError, fetchJobs, fetchTranslators } from '../../lib/api';
+import { fetchJobs, fetchTranslators } from '../../lib/api';
+import { normalizeError } from '../../lib/errors';
 
 type ConnectionContextValue = {
   backendUrl: string;
@@ -45,7 +46,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       setConnectionPhase('online');
       setConnectionMessage('已连接到本地后端，任务状态会自动轮询刷新。');
     } catch (error) {
-      const message = getErrorMessage(error, '读取任务列表失败');
+      const message = normalizeError(error, '读取任务列表失败');
       setConnectionPhase('offline');
       setConnectionMessage(message);
     } finally {
@@ -66,7 +67,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       setConnectionPhase('online');
       setConnectionMessage('后端在线，可以立即提交本地翻译任务。');
     } catch (error) {
-      const message = getErrorMessage(error, '无法连接到本地后端');
+      const message = normalizeError(error, '无法连接到本地后端');
       setTranslators([]);
       setConnectionPhase('offline');
       setConnectionMessage(message);
@@ -96,14 +97,3 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   return <ConnectionContext.Provider value={value}>{children}</ConnectionContext.Provider>;
 }
 
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiError) {
-    return error.message;
-  }
-
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-
-  return fallback;
-}

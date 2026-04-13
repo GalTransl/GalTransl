@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
+import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
+import { EmptyState, ErrorState, LoadingState } from '../components/page-state';
 import {
-  ApiError,
   type PluginInfo,
-  fetchPlugins,
-} from '../lib/api';
+  fetchPlugins } from '../lib/api';
+import { normalizeError } from '../lib/errors';
 
 export function PluginsPage() {
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
@@ -20,7 +21,7 @@ export function PluginsPage() {
         if (!cancelled) setPlugins(res);
       })
       .catch((err) => {
-        if (!cancelled) setError(getErrorMessage(err, '加载插件列表失败'));
+        if (!cancelled) setError(normalizeError(err, '加载插件列表失败'));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -35,8 +36,8 @@ export function PluginsPage() {
   if (loading) {
     return (
       <div className="plugins-page">
-        <div className="plugins-page__header"><h1>插件管理</h1></div>
-        <div className="empty-state"><strong>加载中…</strong></div>
+        <PageHeader className="plugins-page__header" title="插件管理" />
+        <LoadingState title="加载插件中…" description="正在读取当前可用的文件插件与文本插件。" />
       </div>
     );
   }
@@ -44,18 +45,15 @@ export function PluginsPage() {
   if (error) {
     return (
       <div className="plugins-page">
-        <div className="plugins-page__header"><h1>插件管理</h1></div>
-        <div className="inline-alert inline-alert--error" role="alert">{error}</div>
+        <PageHeader className="plugins-page__header" title="插件管理" />
+        <ErrorState title="加载插件列表失败" description={error} />
       </div>
     );
   }
 
   return (
     <div className="plugins-page">
-      <div className="plugins-page__header">
-        <h1>插件管理</h1>
-        <p>查看和管理翻译插件，共 {plugins.length} 个插件。</p>
-      </div>
+      <PageHeader className="plugins-page__header" title="插件管理" description={`查看和管理翻译插件，共 ${plugins.length} 个插件。`} />
 
       <div className="plugins-page__content">
         <div className="plugin-tabs">
@@ -80,7 +78,12 @@ export function PluginsPage() {
         </div>
 
         <div className="plugin-list">
-          {filteredPlugins.map((plugin) => (
+          {filteredPlugins.length === 0 ? (
+            <EmptyState
+              title={typeFilter ? '当前筛选下没有插件' : '暂无插件'}
+              description={typeFilter ? '试试切换到其他插件类型，或检查后端插件目录。' : '后端暂未返回任何插件信息。'}
+            />
+          ) : filteredPlugins.map((plugin) => (
             <div key={plugin.name} className="plugin-card">
               <div className="plugin-card__header">
                 <span className="plugin-card__name">{plugin.display_name}</span>
@@ -115,8 +118,3 @@ export function PluginsPage() {
   );
 }
 
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiError) return error.message;
-  if (error instanceof Error && error.message.trim()) return error.message;
-  return fallback;
-}

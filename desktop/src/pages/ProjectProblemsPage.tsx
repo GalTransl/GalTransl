@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
+import { MetricCard } from '../components/MetricCard';
+import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
+import { EmptyState, ErrorState, LoadingState } from '../components/page-state';
+import { StatsGrid } from '../components/StatsGrid';
 import {
-  ApiError,
   type ProblemEntry,
-  fetchProjectProblems,
-} from '../lib/api';
+  fetchProjectProblems } from '../lib/api';
+import { normalizeError } from '../lib/errors';
 
 type OutletContext = {
   projectDir: string;
@@ -50,7 +53,7 @@ export function ProjectProblemsPage() {
         if (!cancelled) setProblems(res.problems);
       })
       .catch((err) => {
-        if (!cancelled) setError(getErrorMessage(err, '加载问题列表失败'));
+        if (!cancelled) setError(normalizeError(err, '加载问题列表失败'));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -90,8 +93,8 @@ export function ProjectProblemsPage() {
   if (loading) {
     return (
       <div className="project-problems-page">
-        <div className="project-problems-page__header"><h1>问题审查</h1></div>
-        <div className="empty-state"><strong>加载中…</strong></div>
+        <PageHeader className="project-problems-page__header" title="问题审查" />
+        <LoadingState title="加载问题列表中…" description="正在读取项目问题检测结果。" />
       </div>
     );
   }
@@ -99,34 +102,32 @@ export function ProjectProblemsPage() {
   if (error) {
     return (
       <div className="project-problems-page">
-        <div className="project-problems-page__header"><h1>问题审查</h1></div>
-        <div className="inline-alert inline-alert--error" role="alert">{error}</div>
+        <PageHeader className="project-problems-page__header" title="问题审查" />
+        <ErrorState title="加载问题列表失败" description={error} />
       </div>
     );
   }
 
   return (
     <div className="project-problems-page">
-      <div className="project-problems-page__header">
-        <h1>问题审查</h1>
-        <p>审查翻译质量问题，共 {problems.length} 个问题。</p>
-      </div>
+      <PageHeader className="project-problems-page__header" title="问题审查" description={`审查翻译质量问题，共 ${problems.length} 个问题。`} />
 
       <div className="project-problems-page__content">
         {/* Problem Stats */}
         <Panel title="问题统计" description="按类型分组统计。">
-          <div className="problem-stats">
+          <StatsGrid className="problem-stats" compact>
             {problemStats.map(([type, count]) => (
-              <button
+              <MetricCard
                 key={type}
-                className={`problem-stat-item ${typeFilter === type ? 'problem-stat-item--active' : ''}`}
+                active={typeFilter === type}
+                hint={typeFilter === type ? '再次点击取消筛选' : '点击按该问题类型筛选'}
+                label={type}
                 onClick={() => setTypeFilter(typeFilter === type ? '' : type)}
-              >
-                <span className="problem-stat-item__type">{type}</span>
-                <span className="problem-stat-item__count">{count}</span>
-              </button>
+                tone={typeFilter === type ? 'danger' : 'default'}
+                value={count}
+              />
             ))}
-          </div>
+          </StatsGrid>
         </Panel>
 
         {/* Problem List */}
@@ -147,10 +148,10 @@ export function ProjectProblemsPage() {
           </div>
 
           {filteredProblems.length === 0 ? (
-            <div className="empty-state">
-              <strong>没有匹配的问题</strong>
-              <span>{problems.length === 0 ? '翻译质量良好，没有发现问题。' : '调整筛选条件查看更多问题。'}</span>
-            </div>
+            <EmptyState
+              title={problems.length === 0 ? '暂未发现问题' : '没有匹配的问题'}
+              description={problems.length === 0 ? '翻译质量良好，目前没有检测到问题条目。' : '调整筛选条件后再试一次。'}
+            />
           ) : (
             <div className="problem-list">
               {filteredProblems.map((p, i) => (
@@ -186,8 +187,3 @@ export function ProjectProblemsPage() {
   );
 }
 
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiError) return error.message;
-  if (error instanceof Error && error.message.trim()) return error.message;
-  return fallback;
-}

@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Panel } from '../components/Panel';
+import { PageHeader } from '../components/PageHeader';
 import { BackendConfigEditor } from '../components/BackendConfigEditor';
+import { EmptyState, ErrorState, InlineFeedback, LoadingState } from '../components/page-state';
 import { ProxyConfigEditor } from '../components/ProxyConfigEditor';
 import { PluginSettingsEditor } from '../components/PluginSettingsEditor';
 import {
-  ApiError,
   type PluginInfo,
   fetchProjectConfig,
   updateProjectConfig,
   fetchBackendProfiles,
   fetchPlugins,
   getSelectedBackendProfile,
-  setSelectedBackendProfile,
-} from '../lib/api';
+  setSelectedBackendProfile } from '../lib/api';
+import { normalizeError } from '../lib/errors';
 
 type OutletContext = {
   projectDir: string;
@@ -98,7 +99,7 @@ export function ProjectConfigPage() {
         }
       })
       .catch((err) => {
-        if (!cancelled) setError(getErrorMessage(err, '加载配置失败'));
+        if (!cancelled) setError(normalizeError(err, '加载配置失败'));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -224,12 +225,11 @@ export function ProjectConfigPage() {
     try {
       await updateProjectConfig(projectId, {
         config,
-        config_file_name: configFileName,
-      });
+        config_file_name: configFileName });
       setSaveSuccess(true);
       setDirty(false);
     } catch (err) {
-      setError(getErrorMessage(err, '保存配置失败'));
+      setError(normalizeError(err, '保存配置失败'));
     } finally {
       setSaving(false);
     }
@@ -238,12 +238,8 @@ export function ProjectConfigPage() {
   if (loading) {
     return (
       <div className="project-config-page">
-        <div className="project-config-page__header">
-          <h1>配置编辑</h1>
-        </div>
-        <div className="empty-state">
-          <strong>加载中…</strong>
-        </div>
+        <PageHeader className="project-config-page__header" title="配置编辑" />
+        <LoadingState title="加载配置中…" description={`正在读取 ${configFileName}。`} />
       </div>
     );
   }
@@ -251,10 +247,8 @@ export function ProjectConfigPage() {
   if (error && !config) {
     return (
       <div className="project-config-page">
-        <div className="project-config-page__header">
-          <h1>配置编辑</h1>
-        </div>
-        <div className="inline-alert inline-alert--error" role="alert">{error}</div>
+        <PageHeader className="project-config-page__header" title="配置编辑" />
+        <ErrorState title="加载配置失败" description={error} />
       </div>
     );
   }
@@ -263,10 +257,7 @@ export function ProjectConfigPage() {
 
   return (
     <div className="project-config-page">
-      <div className="project-config-page__header">
-        <h1>配置编辑</h1>
-        <p>可视化编辑项目配置文件 {configFileName}</p>
-      </div>
+      <PageHeader className="project-config-page__header" title="配置编辑" description={`可视化编辑项目配置文件 ${configFileName}`} />
 
       <div className="project-config-page__content">
         <aside className="project-config-page__sidebar">
@@ -303,10 +294,10 @@ export function ProjectConfigPage() {
 
         <div className="project-config-page__main">
           {error && (
-            <div className="inline-alert inline-alert--error" role="alert">{error}</div>
+            <InlineFeedback tone="error" title="配置保存失败" description={error} />
           )}
           {saveSuccess && (
-            <div className="inline-alert inline-alert--success" role="status">配置已保存</div>
+            <InlineFeedback tone="success" title="配置已保存" description="当前项目配置已成功写入磁盘。" />
           )}
 
           <div key={yamlView ? 'yaml' : activeSection} className="section-fade-in">
@@ -381,9 +372,11 @@ export function ProjectConfigPage() {
                     </label>
 
                     {selectedProfile ? (
-                      <div className="inline-alert inline-alert--info" role="status">
-                        已选择全局配置「{selectedProfile}」，翻译时将使用该配置覆盖项目后端设置。如需修改配置内容，请前往「翻译后端配置」页面。
-                      </div>
+                      <InlineFeedback
+                        tone="info"
+                        title={`当前使用全局配置：${selectedProfile}`}
+                        description="翻译时将使用该配置覆盖项目后端设置。如需修改配置内容，请前往「翻译后端配置」页面。"
+                      />
                     ) : (
                       <BackendConfigEditor
                         config={config?.backendSpecific as Record<string, unknown> || {}}
@@ -567,8 +560,7 @@ export function ProjectConfigPage() {
 
 function DictConfigEditor({
   dictConfig,
-  onChange,
-}: {
+  onChange }: {
   dictConfig: Record<string, unknown>;
   onChange: (newConfig: Record<string, unknown>) => void;
 }) {
@@ -653,8 +645,3 @@ function DictConfigEditor({
   );
 }
 
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiError) return error.message;
-  if (error instanceof Error && error.message.trim()) return error.message;
-  return fallback;
-}

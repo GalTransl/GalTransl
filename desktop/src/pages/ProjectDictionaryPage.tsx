@@ -2,14 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { DictionaryManager } from '../components/DictionaryManager';
 import {
-  ApiError,
   type ProjectDictionaryManagerResponse,
   createProjectDictionaryFile,
   deleteProjectDictionaryFile,
   fetchProjectDictionaryManager,
   saveProjectDictionaryFile,
-  type DictionaryCategory,
-} from '../lib/api';
+  type DictionaryCategory } from '../lib/api';
+import { normalizeError } from '../lib/errors';
 
 type OutletContext = {
   projectDir: string;
@@ -32,7 +31,7 @@ export function ProjectDictionaryPage() {
       const res = await fetchProjectDictionaryManager(projectId, configFileName);
       setData(res);
     } catch (err) {
-      setError(getErrorMessage(err, '加载项目字典失败'));
+      setError(normalizeError(err, '加载项目字典失败'));
     } finally {
       setLoading(false);
     }
@@ -57,8 +56,7 @@ export function ProjectDictionaryPage() {
         const result = await createProjectDictionaryFile(projectId, {
           config_file_name: configFileName,
           category,
-          filename,
-        });
+          filename });
         return result.file_key;
       }}
       onSaveFile={async (fileKey: string, content: string) => {
@@ -66,23 +64,16 @@ export function ProjectDictionaryPage() {
         await saveProjectDictionaryFile(projectId, {
           config_file_name: configFileName,
           file_key: fileKey,
-          content,
-        });
+          content });
       }}
       onDeleteFile={async (fileKey: string) => {
         if (!projectId) return;
         await deleteProjectDictionaryFile(projectId, {
           config_file_name: configFileName,
           file_key: fileKey,
-          delete_file: true,
-        });
+          delete_file: true });
       }}
     />
   );
 }
 
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiError) return error.message;
-  if (error instanceof Error && error.message.trim()) return error.message;
-  return fallback;
-}
