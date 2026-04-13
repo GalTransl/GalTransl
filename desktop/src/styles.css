@@ -3298,6 +3298,19 @@ code {
   margin: 0;
 }
 
+.cache-layout__sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.cache-file-save-all {
+  font-size: 11px;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  white-space: nowrap;
+}
+
 .cache-file-refresh {
   min-height: 32px;
   width: 32px;
@@ -3373,6 +3386,21 @@ code {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.cache-file-item__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-warning);
+  flex-shrink: 0;
+}
+
+.cache-file-item--dirty .cache-file-item__name {
+  font-weight: 500;
 }
 
 .cache-file-item__size {

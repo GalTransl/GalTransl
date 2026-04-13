@@ -231,14 +231,18 @@ export function ProjectCachePage() {
   const [cacheDir, setCacheDir] = useState<string>('');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [entries, setEntries] = useState<CacheEntry[]>([]);
+  /** 每个文件的条目缓存（含未保存修改） */
+  const entriesMapRef = useRef<Map<string, CacheEntry[]>>(new Map());
+  /** 有未保存修改的文件集合 */
+  const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [refreshingFiles, setRefreshingFiles] = useState(false);
   const [loadingEntries, setLoadingEntries] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterProblems, setFilterProblems] = useState(false);
-  const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [savingAll, setSavingAll] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
@@ -264,6 +268,9 @@ export function ProjectCachePage() {
 
   // Scroll-to-entry after clicking search result
   const [scrollToIndex, setScrollToIndex] = useState<number | null>(null);
+
+  /** 当前文件是否dirty */
+  const dirty = selectedFile != null && dirtyFiles.has(selectedFile);
 
   const loadCacheFiles = useCallback(
     async (showPageLoading = false) => {
@@ -299,13 +306,20 @@ export function ProjectCachePage() {
 
   useEffect(() => {
     if (!projectId || !selectedFile) return;
+    // 如果 entriesMap 中有缓存（含未保存修改），直接使用
+    const cached = entriesMapRef.current.get(selectedFile);
+    if (cached) {
+      setEntries(cached);
+      setLoadingEntries(false);
+      return;
+    }
     let cancelled = false;
     setLoadingEntries(true);
     fetchCacheFile(projectId, selectedFile)
       .then((res) => {
         if (!cancelled) {
           setEntries(res.entries);
-          setDirty(false);
+          entriesMapRef.current.set(selectedFile, res.entries);
         }
       })
       .catch((err) => {
@@ -376,10 +390,14 @@ export function ProjectCachePage() {
   const withProblems = entries.filter((e) => e.problem).length;
 
   const handleEntryChange = (index: number, field: keyof CacheEntry, value: string) => {
-    setEntries((prev) =>
-      prev.map((e) => (e.index === index ? { ...e, [field]: value } : e)),
-    );
-    setDirty(true);
+    setEntries((prev) => {
+      const next = prev.map((e) => (e.index === index ? { ...e, [field]: value } : e));
+      if (selectedFile) entriesMapRef.current.set(selectedFile, next);
+      return next;
+    });
+    if (selectedFile) {
+      setDirtyFiles((prev) => new Set(prev).add(selectedFile));
+    }
     setInfo(null);
   };
 
@@ -388,24 +406,36 @@ export function ProjectCachePage() {
     setEntries((prev) => {
       const next = prev.filter((e) => e.index !== index);
       // Re-index remaining entries
-      return next.map((e, i) => ({ ...e, index: i }));
+      const reindexed = next.map((e, i) => ({ ...e, index: i }));
+      entriesMapRef.current.set(selectedFile, reindexed);
+      return reindexed;
     });
-    setDirty(true);
+    setDirtyFiles((prev) => new Set(prev).add(selectedFile));
     setInfo(null);
   };
 
-  const handleSave = async () => {
-    if (!selectedFile) return;
+  const handleSave = async (filename?: string) => {
+    const targetFile = filename || selectedFile;
+    if (!targetFile) return;
+    const targetEntries = entriesMapRef.current.get(targetFile);
+    if (!targetEntries) return;
     setSaving(true);
     setLocalError(null);
     setInfo(null);
     try {
-      const res = await saveCacheFile(projectId, selectedFile, entries, configFileName);
-      if (res.entries) {
-        setEntries(res.entries);
+      const res = await saveCacheFile(projectId, targetFile, targetEntries, configFileName);
+      const savedEntries = res.entries || targetEntries;
+      entriesMapRef.current.set(targetFile, savedEntries);
+      // 如果保存的是当前打开的文件，同步 entries 状态
+      if (targetFile === selectedFile) {
+        setEntries(savedEntries);
       }
-      setDirty(false);
-      setInfo('已保存并重建缓存');
+      setDirtyFiles((prev) => {
+        const next = new Set(prev);
+        next.delete(targetFile);
+        return next;
+      });
+      setInfo(targetFile === selectedFile ? '已保存并重建缓存' : `已保存 ${targetFile}`);
     } catch (err) {
       setLocalError(getErrorMessage(err, '保存缓存失败'));
     } finally {
@@ -413,9 +443,48 @@ export function ProjectCachePage() {
     }
   };
 
+  /** 保存所有有修改的文件 */
+  const handleSaveAll = async () => {
+    const filesToSave = Array.from(dirtyFiles);
+    if (filesToSave.length === 0) return;
+    setSavingAll(true);
+    setLocalError(null);
+    setInfo(null);
+    const savedFiles: string[] = [];
+    let lastError: string | null = null;
+    for (const file of filesToSave) {
+      const fileEntries = entriesMapRef.current.get(file);
+      if (!fileEntries) continue;
+      try {
+        const res = await saveCacheFile(projectId, file, fileEntries, configFileName);
+        const savedEntries = res.entries || fileEntries;
+        entriesMapRef.current.set(file, savedEntries);
+        if (file === selectedFile) {
+          setEntries(savedEntries);
+        }
+        savedFiles.push(file);
+      } catch (err) {
+        lastError = getErrorMessage(err, `保存 ${file} 失败`);
+      }
+    }
+    // 清除成功保存的文件的 dirty 标记
+    setDirtyFiles((prev) => {
+      const next = new Set(prev);
+      for (const f of savedFiles) next.delete(f);
+      return next;
+    });
+    if (lastError) {
+      setLocalError(lastError);
+    } else {
+      setInfo(`已保存 ${savedFiles.length} 个文件`);
+    }
+    setSavingAll(false);
+  };
+
   const handleSelectFile = (file: string) => {
-    if (dirty && !confirm('当前文件有未保存改动，切换会丢失改动，是否继续？')) {
-      return;
+    // 先保存当前文件的修改到 entriesMap
+    if (selectedFile) {
+      entriesMapRef.current.set(selectedFile, entries);
     }
     setSelectedFile(file);
     setLocalError(null);
@@ -424,8 +493,8 @@ export function ProjectCachePage() {
 
   // Jump from search result to file editor
   const handleJumpToFile = (filename: string, index: number) => {
-    if (dirty && selectedFile !== filename && !confirm('当前文件有未保存改动，切换会丢失改动，是否继续？')) {
-      return;
+    if (selectedFile) {
+      entriesMapRef.current.set(selectedFile, entries);
     }
     setSelectedFile(filename);
     setScrollToIndex(index);
@@ -471,11 +540,18 @@ export function ProjectCachePage() {
         setSearchResults(sr.results);
         setSearchTotal(sr.total);
       }
-      // Refresh current file if open
+      // Refresh current file if open — 替换是全局操作，需从服务端刷新
       if (selectedFile) {
         const cf = await fetchCacheFile(projectId, selectedFile);
         setEntries(cf.entries);
-        setDirty(false);
+        entriesMapRef.current.set(selectedFile, cf.entries);
+        // 替换操作本身已保存到后端，但其他文件的本地修改可能被覆盖
+        // 清除当前文件的 dirty，但不清其他文件
+        setDirtyFiles((prev) => {
+          const next = new Set(prev);
+          next.delete(selectedFile);
+          return next;
+        });
       }
     } catch (err) {
       setLocalError(getErrorMessage(err, '全局替换失败'));
@@ -536,27 +612,44 @@ export function ProjectCachePage() {
             <div className="cache-sidebar-tab-content">
               <div className="cache-layout__sidebar-header">
                 <h3>缓存文件</h3>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="cache-file-refresh"
-                  onClick={() => void loadCacheFiles()}
-                  disabled={refreshingFiles}
-                  title="刷新缓存文件列表"
-                  aria-label="刷新缓存文件列表"
-                >
-                  {refreshingFiles ? '⏳' : '🔄'}
-                </Button>
+                <div className="cache-layout__sidebar-header-actions">
+                  {dirtyFiles.size > 0 && (
+                    <Button
+                      type="button"
+                      variant="primary"
+                      className="cache-file-save-all"
+                      onClick={() => void handleSaveAll()}
+                      disabled={savingAll}
+                      title={`保存 ${dirtyFiles.size} 个有修改的文件`}
+                    >
+                      {savingAll ? '⏳' : `💾 全部保存 (${dirtyFiles.size})`}
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="cache-file-refresh"
+                    onClick={() => void loadCacheFiles()}
+                    disabled={refreshingFiles}
+                    title="刷新缓存文件列表"
+                    aria-label="刷新缓存文件列表"
+                  >
+                    {refreshingFiles ? '⏳' : '🔄'}
+                  </Button>
+                </div>
               </div>
               <div className="cache-file-list">
                 {cacheFiles.map((file) => (
                   <button
                     type="button"
                     key={file.name}
-                    className={`cache-file-item ${selectedFile === file.name ? 'cache-file-item--active' : ''}`}
+                    className={`cache-file-item ${selectedFile === file.name ? 'cache-file-item--active' : ''} ${dirtyFiles.has(file.name) ? 'cache-file-item--dirty' : ''}`}
                     onClick={() => handleSelectFile(file.name)}
                   >
-                    <span className="cache-file-item__name">{file.name}</span>
+                    <span className="cache-file-item__name">
+                      {dirtyFiles.has(file.name) && <span className="cache-file-item__dot" title="有未保存修改" />}
+                      {file.name}
+                    </span>
                     <span className="cache-file-item__size">{file.entry_count != null ? `${file.entry_count} 行` : formatSize(file.size)}</span>
                   </button>
                 ))}
