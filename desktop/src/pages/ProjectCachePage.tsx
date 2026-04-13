@@ -282,13 +282,30 @@ export function ProjectCachePage() {
 
   // Scroll-to-entry after clicking search result
   const [scrollToIndex, setScrollToIndex] = useState<number | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const scrollPositionsRef = useRef<Map<string, number>>(new Map());
+  const pendingScrollRestoreRef = useRef<{ file: string; top: number } | null>(null);
 
   // Post-load enter animation for cache list
   const [listEntering, setListEntering] = useState(false);
   const listEnterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingListEnterRef = useRef(false);
 
   /** 当前文件是否dirty */
   const dirty = selectedFile != null && dirtyFiles.has(selectedFile);
+
+  const rememberCurrentScrollPosition = useCallback(() => {
+    if (!selectedFile || !listRef.current) return;
+    scrollPositionsRef.current.set(selectedFile, listRef.current.scrollTop);
+  }, [selectedFile]);
+
+  const prepareFileSwitch = useCallback((file: string) => {
+    rememberCurrentScrollPosition();
+    pendingScrollRestoreRef.current = {
+      file,
+      top: scrollPositionsRef.current.get(file) ?? 0,
+    };
+  }, [rememberCurrentScrollPosition]);
 
   const loadCacheFiles = useCallback(
     async (showPageLoading = false) => {
@@ -351,6 +368,26 @@ export function ProjectCachePage() {
 
   useEffect(() => {
     if (!selectedFile) {
+      pendingScrollRestoreRef.current = null;
+      return;
+    }
+    if (loadingEntries) return;
+    const pendingRestore = pendingScrollRestoreRef.current;
+    if (!pendingRestore || pendingRestore.file !== selectedFile) return;
+    const frame = requestAnimationFrame(() => {
+      if (!listRef.current) return;
+      listRef.current.scrollTop = pendingRestore.top;
+      scrollPositionsRef.current.set(selectedFile, pendingRestore.top);
+      if (pendingScrollRestoreRef.current?.file === selectedFile) {
+        pendingScrollRestoreRef.current = null;
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [selectedFile, loadingEntries, entries]);
+
+  useEffect(() => {
+    if (!selectedFile) {
+      pendingListEnterRef.current = false;
       setListEntering(false);
       if (listEnterTimerRef.current) {
         clearTimeout(listEnterTimerRef.current);
@@ -358,14 +395,11 @@ export function ProjectCachePage() {
       }
       return;
     }
-    setListEntering(false);
-  }, [selectedFile]);
-
-  useEffect(() => {
-    if (!selectedFile || loadingEntries) return;
+    if (loadingEntries || !pendingListEnterRef.current) return;
     if (listEnterTimerRef.current) {
       clearTimeout(listEnterTimerRef.current);
     }
+    pendingListEnterRef.current = false;
     setListEntering(true);
     listEnterTimerRef.current = setTimeout(() => {
       setListEntering(false);
@@ -384,16 +418,20 @@ export function ProjectCachePage() {
     if (scrollToIndex === null || loadingEntries) return;
     // Small delay to ensure DOM is rendered
     const timer = setTimeout(() => {
-      const el = document.querySelector(`[data-cache-index="${scrollToIndex}"]`);
+      const scope = listRef.current ?? document;
+      const el = scope.querySelector(`[data-cache-index="${scrollToIndex}"]`);
       if (el) {
         el.scrollIntoView({ behavior: 'instant', block: 'center' });
+        if (selectedFile && listRef.current) {
+          scrollPositionsRef.current.set(selectedFile, listRef.current.scrollTop);
+        }
         el.classList.add('cache-card--highlight');
         setTimeout(() => el.classList.remove('cache-card--highlight'), 2000);
       }
       setScrollToIndex(null);
     }, 100);
     return () => clearTimeout(timer);
-  }, [scrollToIndex, loadingEntries]);
+  }, [scrollToIndex, loadingEntries, selectedFile]);
 
   // Auto-search with debounce
   useEffect(() => {
@@ -530,10 +568,21 @@ export function ProjectCachePage() {
   };
 
   const handleSelectFile = (file: string) => {
+    if (file === selectedFile) return;
     // 先保存当前文件的修改到 entriesMap
     if (selectedFile) {
       entriesMapRef.current.set(selectedFile, entries);
     }
+    prepareFileSwitch(file);
+    const cachedEntries = entriesMapRef.current.get(file);
+    pendingListEnterRef.current = true;
+    setListEntering(false);
+    if (listEnterTimerRef.current) {
+      clearTimeout(listEnterTimerRef.current);
+      listEnterTimerRef.current = null;
+    }
+    setEntries(cachedEntries ?? []);
+    setLoadingEntries(!cachedEntries);
     setSelectedFile(file);
     setLocalError(null);
     setInfo(null);
@@ -541,9 +590,23 @@ export function ProjectCachePage() {
 
   // Jump from search result to file editor
   const handleJumpToFile = (filename: string, index: number) => {
+    if (filename === selectedFile) {
+      setScrollToIndex(index);
+      return;
+    }
     if (selectedFile) {
       entriesMapRef.current.set(selectedFile, entries);
     }
+    prepareFileSwitch(filename);
+    const cachedEntries = entriesMapRef.current.get(filename);
+    pendingListEnterRef.current = true;
+    setListEntering(false);
+    if (listEnterTimerRef.current) {
+      clearTimeout(listEnterTimerRef.current);
+      listEnterTimerRef.current = null;
+    }
+    setEntries(cachedEntries ?? []);
+    setLoadingEntries(!cachedEntries);
     setSelectedFile(filename);
     setScrollToIndex(index);
     setLocalError(null);
@@ -857,8 +920,9 @@ export function ProjectCachePage() {
                   </div>
                 )}
                 <div
+                  ref={listRef}
+                  onScroll={rememberCurrentScrollPosition}
                   className={`cache-card-list ${loadingEntries ? 'cache-card-list--loading' : ''} ${listEntering ? 'cache-card-list--entering' : ''}`}
-                  key={selectedFile}
                 >
                   {filteredEntries.map((entry) => (
                     <CacheEntryCard

@@ -58,6 +58,7 @@ export function ProjectTranslatePage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [selectedTranslator, setSelectedTranslator] = useState('');
   const [runtime, setRuntime] = useState<ProjectRuntimeResponse | null>(null);
   const [selectedSuccessFiles, setSelectedSuccessFiles] = useState<string[]>([]);
@@ -378,6 +379,7 @@ export function ProjectTranslatePage() {
   const updatedAtText = summary?.updated_at ? formatDate(summary.updated_at) : '等待首次快照';
   const statusTone = currentJob?.status ?? 'pending';
   const statusLabel = getStatusLabel(currentJob?.status);
+  const currentJobError = currentJob?.error?.trim() ?? '';
   const progressPercent = clampPercent(summary?.percent ?? 0);
   const translatedCount = summary?.translated ?? 0;
   const totalCount = summary?.total ?? 0;
@@ -385,6 +387,24 @@ export function ProjectTranslatePage() {
   const workersConfigured = summary?.workers_configured ?? 0;
   const speedText = formatSpeed(summary?.translation_speed_lpm ?? 0);
   const etaText = formatEta(summary?.eta_seconds ?? 0);
+  const elapsedText = formatElapsedTime(currentJob, nowMs);
+
+  useEffect(() => {
+    if (!currentJob?.started_at) return;
+    if (currentJob.status !== 'pending' && currentJob.status !== 'running') return;
+
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [currentJob?.started_at, currentJob?.status]);
+
+  useEffect(() => {
+    if (currentJob?.finished_at) {
+      setNowMs(Date.now());
+    }
+  }, [currentJob?.finished_at]);
 
   useEffect(() => {
     const availableFiles = new Set(runtimeFiles.map((file) => file.filename));
@@ -588,11 +608,29 @@ export function ProjectTranslatePage() {
                     <dd>{speedText}</dd>
                   </div>
                   <div>
+                    <dt>耗时</dt>
+                    <dd>{elapsedText}</dd>
+                  </div>
+                  <div>
                     <dt>ETA</dt>
                     <dd>{etaText}</dd>
                   </div>
                 </dl>
               </div>
+
+              {currentJob?.status === 'failed' && currentJobError ? (
+                <div className="inline-alert inline-alert--error project-translate-page__job-alert" role="alert">
+                  <strong>任务失败：</strong>
+                  <span>{currentJobError}</span>
+                </div>
+              ) : null}
+
+              {currentJob?.status === 'cancelled' && currentJobError ? (
+                <div className="inline-alert inline-alert--info project-translate-page__job-alert" role="status">
+                  <strong>任务已取消：</strong>
+                  <span>{currentJobError}</span>
+                </div>
+              ) : null}
             </div>
           </Panel>
 
@@ -837,6 +875,7 @@ function toRuntimeJob(job: Job): RuntimeJob {
     created_at: job.created_at,
     started_at: job.started_at,
     finished_at: job.finished_at,
+    error: job.error,
   };
 }
 
@@ -904,6 +943,31 @@ function formatEta(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.round((seconds % 3600) / 60);
   return `${hours} 小时 ${minutes} 分钟`;
+}
+
+function formatElapsedTime(job: RuntimeJob | null, nowMs: number): string {
+  if (!job?.started_at) {
+    return job?.status === 'pending' ? '等待开始' : '—';
+  }
+
+  const startMs = Date.parse(job.started_at);
+  if (Number.isNaN(startMs)) return '—';
+
+  const endMs = job.finished_at ? Date.parse(job.finished_at) : nowMs;
+  const safeEndMs = Number.isNaN(endMs) ? nowMs : endMs;
+  const elapsedSeconds = Math.max(0, Math.floor((safeEndMs - startMs) / 1000));
+
+  if (elapsedSeconds < 60) return `${elapsedSeconds} 秒`;
+  if (elapsedSeconds < 3600) {
+    const minutes = Math.floor(elapsedSeconds / 60);
+    const seconds = elapsedSeconds % 60;
+    return `${minutes} 分 ${seconds} 秒`;
+  }
+
+  const hours = Math.floor(elapsedSeconds / 3600);
+  const minutes = Math.floor((elapsedSeconds % 3600) / 60);
+  const seconds = elapsedSeconds % 60;
+  return `${hours} 小时 ${minutes} 分 ${seconds} 秒`;
 }
 
 function clampPercent(value: number): number {

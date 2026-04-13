@@ -161,7 +161,8 @@ async def get_transCache_from_json(
             except Exception as e:
                 LOGGER.error(str(e))
                 LOGGER.error(get_text("cache_read_error", GT_LANG, cache_file_path))
-                raise e
+                custom_msg = get_text("cache_read_error", GT_LANG, cache_file_path) + f": {str(e)}"
+                raise RuntimeError(custom_msg) from e
 
 
     for tran in trans_list:

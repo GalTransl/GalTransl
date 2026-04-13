@@ -898,6 +898,75 @@ code {
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
+.field textarea,
+.dict-text-editor,
+.plugin-setting-textarea,
+.cache-card__textarea {
+  width: 100%;
+  padding: 11px 14px;
+  border: 1px solid rgba(191, 208, 226, 0.92);
+  border-radius: calc(var(--radius-control) + 2px);
+  background: var(--color-surface-strong);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  color: var(--color-text);
+  line-height: 1.6;
+  resize: vertical;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    background-color var(--transition-fast);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.7) transparent;
+}
+
+.field textarea,
+.dict-text-editor,
+.plugin-setting-textarea {
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 12.5px;
+}
+
+.field textarea {
+  min-height: 92px;
+}
+
+.field textarea:hover,
+.dict-text-editor:hover,
+.plugin-setting-textarea:hover,
+.cache-card__textarea:hover {
+  border-color: rgba(47, 111, 235, 0.28);
+}
+
+.field textarea:focus,
+.dict-text-editor:focus,
+.plugin-setting-textarea:focus,
+.cache-card__textarea:focus {
+  outline: none;
+  border-color: rgba(47, 111, 235, 0.72);
+  background: var(--color-surface-strong);
+  box-shadow:
+    0 0 0 4px rgba(47, 111, 235, 0.12),
+    0 10px 24px rgba(47, 111, 235, 0.08);
+}
+
+.field textarea::placeholder,
+.dict-text-editor::placeholder,
+.plugin-setting-textarea::placeholder,
+.cache-card__textarea::placeholder {
+  color: rgba(100, 116, 139, 0.88);
+}
+
+.field textarea:disabled,
+.dict-text-editor:disabled,
+.plugin-setting-textarea:disabled,
+.cache-card__textarea:disabled {
+  color: var(--color-text-muted);
+  background: rgba(241, 245, 249, 0.96);
+  border-color: rgba(203, 213, 225, 0.92);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
 .field input:focus,
 .field select:focus {
   outline: none;
@@ -1418,6 +1487,10 @@ code {
 
 .runtime-summary-strip--sidebar {
   margin-top: var(--space-2);
+}
+
+.project-translate-page__job-alert {
+  margin-bottom: 0;
 }
 
 .project-translate-page__sidebar,
@@ -2968,22 +3041,14 @@ code {
 }
 
 .dict-text-editor {
-  width: 100%;
   min-height: 460px;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-control);
-  padding: var(--space-4);
-  font-family: "Cascadia Code", "Consolas", monospace;
   font-size: 13px;
-  line-height: 1.6;
-  background: var(--color-surface-strong);
-  resize: vertical;
 }
 
 .dict-text-editor:focus {
-  outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-soft);
+  box-shadow:
+    0 0 0 4px rgba(47, 111, 235, 0.12),
+    0 14px 30px rgba(47, 111, 235, 0.1);
 }
 
 /* ── Dictionary Card Mode ── */
@@ -3319,7 +3384,7 @@ code {
   display: grid;
   grid-template-columns: 240px 1fr;
   gap: var(--space-5);
-  align-items: start;
+  align-items: stretch;
 }
 
 .cache-layout__sidebar {
@@ -3329,7 +3394,8 @@ code {
   padding: var(--space-4);
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 150px);
+  height: calc(100vh - 150px);
+  min-height: calc(100vh - 150px);
 }
 
 .cache-layout__sidebar h3 {
@@ -3374,7 +3440,8 @@ code {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 150px);
+  height: calc(100vh - 150px);
+  min-height: calc(100vh - 150px);
 }
 
 .cache-file-list {
@@ -3504,20 +3571,24 @@ code {
 
 .cache-card-list-loading {
   position: absolute;
-  inset: 0;
-  display: flex;
+  top: 0;
+  right: 0;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(4px);
-  border-radius: var(--radius-control);
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(191, 208, 226, 0.9);
+  border-radius: 999px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
   z-index: 2;
   color: var(--color-text-muted);
-  font-size: 14px;
+  font-size: 12px;
+  line-height: 1;
+  pointer-events: none;
 }
 
 .cache-card-list--loading {
-  opacity: 0.4;
   pointer-events: none;
 }
 
@@ -3536,7 +3607,7 @@ code {
 }
 
 .cache-card-list--entering {
-  animation: cacheContentFadeIn 250ms ease;
+  animation: cacheContentSlideIn 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .cache-card-list::-webkit-scrollbar {
@@ -3598,9 +3669,13 @@ code {
   to { opacity: 1; transform: translateX(0); }
 }
 
-@keyframes cacheContentFadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+@keyframes cacheContentSlideIn {
+  from {
+    transform: translateY(8px);
+  }
+  to {
+    transform: translateY(0);
+  }
 }
 
 .cache-card__row {
@@ -3756,22 +3831,16 @@ code {
 }
 
 .cache-card__textarea {
-  width: 100%;
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-control);
   font-size: 13px;
-  background: var(--color-surface-base);
-  color: var(--color-text);
-  resize: vertical;
   line-height: 1.4;
-  transition: border-color var(--transition-fast);
+  padding: 10px 12px;
+  background: var(--color-surface-strong);
 }
 
 .cache-card__textarea:focus {
-  outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px var(--color-primary-soft);
+  box-shadow:
+    0 0 0 3px rgba(47, 111, 235, 0.12),
+    0 8px 18px rgba(47, 111, 235, 0.08);
 }
 
 .cache-card__textarea--zh {
@@ -4907,8 +4976,7 @@ code {
   color: var(--color-text-muted);
 }
 
-.plugin-setting-input,
-.plugin-setting-textarea {
+.plugin-setting-input {
   width: 100%;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-line);
@@ -4919,8 +4987,7 @@ code {
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.plugin-setting-input:focus,
-.plugin-setting-textarea:focus {
+.plugin-setting-input:focus {
   outline: none;
   border-color: rgba(47, 111, 235, 0.65);
   box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.1);
@@ -4931,11 +4998,7 @@ code {
 }
 
 .plugin-setting-textarea {
-  resize: vertical;
-  min-height: 48px;
-  font-family: "Cascadia Code", "Consolas", monospace;
-  font-size: 12px;
-  line-height: 1.5;
+  min-height: 64px;
 }
 
 /* ── Toggle Switch ── */

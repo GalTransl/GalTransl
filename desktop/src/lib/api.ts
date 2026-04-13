@@ -158,6 +158,7 @@ export type RuntimeJob = {
   created_at: string;
   started_at: string;
   finished_at: string;
+  error?: string;
 };
 
 export type ProjectRuntimeSummary = {

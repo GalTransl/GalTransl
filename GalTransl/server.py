@@ -1573,6 +1573,7 @@ def build_handler(registry: JobRegistry):
                         "created_at": job.created_at,
                         "started_at": job.started_at,
                         "finished_at": job.finished_at,
+                        "error": job.error,
                     },
                     "summary": {
                         "total": total,
