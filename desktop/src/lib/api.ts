@@ -59,6 +59,7 @@ export type FileEntry = {
   is_file: boolean;
   size: number;
   modified: string;
+  entry_count?: number;
 };
 
 export type ProjectFilesResponse = {
@@ -80,16 +81,57 @@ export type CacheFileResponse = {
 export type CacheEntry = {
   index: number;
   name: string | string[];
-  pre_jp: string;
-  post_jp: string;
-  pre_zh: string;
-  proofread_zh?: string;
+  pre_src: string;
+  post_src: string;
+  pre_dst: string;
+  proofread_dst?: string;
   trans_by?: string;
   proofread_by?: string;
   problem?: string;
   trans_conf?: number;
   doub_content?: string;
   unknown_proper_noun?: string;
+  // 旧key名兼容字段（读取旧缓存时可能存在）
+  pre_jp?: string;
+  post_jp?: string;
+  pre_zh?: string;
+  proofread_zh?: string;
+  post_zh_preview?: string;
+  post_dst_preview?: string;
+};
+
+export type CacheSearchField = 'all' | 'src' | 'dst';
+
+export type CacheSearchResult = {
+  filename: string;
+  index: number;
+  speaker: string | string[];
+  post_src: string;
+  pre_dst: string;
+  match_src: boolean;
+  match_dst: boolean;
+  problem: string;
+  trans_by: string;
+};
+
+export type CacheSearchResponse = {
+  results: CacheSearchResult[];
+  total: number;
+};
+
+export type CacheReplaceField = 'src' | 'dst' | 'all';
+
+export type CacheReplaceFileDetail = {
+  filename: string;
+  matches: number;
+};
+
+export type CacheReplaceResponse = {
+  success: boolean;
+  total_matches: number;
+  total_files: number;
+  dry_run: boolean;
+  file_details: CacheReplaceFileDetail[];
 };
 
 export type FileProgress = {
@@ -212,10 +254,13 @@ export type ProblemEntry = {
   filename: string;
   index: number;
   speaker: string | string[];
-  post_jp: string;
-  pre_zh: string;
+  post_src: string;
+  pre_dst: string;
   problem: string;
   trans_by: string;
+  // 旧key名兼容
+  post_jp?: string;
+  pre_zh?: string;
 };
 
 export type ProjectProblemsResponse = {
@@ -365,6 +410,39 @@ export async function deleteCacheEntry(projectId: string, filename: string, inde
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filename, index }),
+    },
+  );
+}
+
+export async function searchCache(
+  projectId: string,
+  query: string,
+  field: CacheSearchField = 'all',
+  maxResults = 500,
+) {
+  return apiRequest<CacheSearchResponse>(
+    `/api/projects/${projectId}/cache/search`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, field, max_results: maxResults }),
+    },
+  );
+}
+
+export async function replaceCache(
+  projectId: string,
+  query: string,
+  replacement: string,
+  field: CacheReplaceField = 'dst',
+  dryRun = false,
+) {
+  return apiRequest<CacheReplaceResponse>(
+    `/api/projects/${projectId}/cache/replace`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, replacement, field, dry_run: dryRun }),
     },
   );
 }

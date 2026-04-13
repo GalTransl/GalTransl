@@ -30,7 +30,7 @@ def update_json_with_transList(
     result_json_list = old_json_list.copy()
     # Iterate over the old JSON data and the trans_list simultaneously
     for old_item, tran in zip(result_json_list, trans_list):
-        # Check if the 'message' in the old JSON data matches with 'pre_jp' in the tran
+        # Check if the 'message' in the old JSON data matches with 'pre_jp' (pre_src in cache) in the tran
         if old_item.get("message") == tran.pre_jp:
             # Update the 'message' field
             old_item["message"] = tran.post_zh

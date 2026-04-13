@@ -33,7 +33,7 @@ class ifWord:
 class CBasicDicElement:
     """字典基本字元素"""
 
-    conditionaDic_key = ["pre_jp", "post_jp", "pre_zh", "post_zh"]  # 条件字典
+    conditionaDic_key = ["pre_src", "post_src", "pre_dst", "post_dst", "pre_jp", "post_jp", "pre_zh", "post_zh"]  # 条件字典（新名在前，旧名兼容）
     situationsDic_key = ["mono", "diag"]  # 场景字典
     __slots__ = [
         "search_word",  # 搜索词
@@ -119,7 +119,7 @@ class CNormalDic:
     :dic_base_dir:字典目录的path，会自动进行拼接
     """
 
-    conditionaDic_key = ["pre_jp", "post_jp", "pre_zh", "post_zh"]  # 条件字典
+    conditionaDic_key = ["pre_src", "post_src", "pre_dst", "post_dst", "pre_jp", "post_jp", "pre_zh", "post_zh"]  # 条件字典（新名在前，旧名兼容）
     situationsDic_key = ["mono", "diag"]  # 场景字典
 
     def __init__(self, dic_list: list) -> None:
@@ -237,13 +237,13 @@ class CNormalDic:
                 can_replace = False  # True代表本轮满足替换条件
                 # 取对应的查找关键字的句子
                 match dic.special_key:
-                    case "pre_jp":
+                    case "pre_src" | "pre_jp":
                         find_ifword_text = input_tran.pre_jp
-                    case "post_jp":
+                    case "post_src" | "post_jp":
                         find_ifword_text = input_tran.post_jp
-                    case "pre_zh":
+                    case "pre_dst" | "pre_zh":
                         find_ifword_text = input_tran.pre_zh
-                    case "post_zh":
+                    case "post_dst" | "post_zh":
                         find_ifword_text = input_tran.post_zh
                     case _:
                         raise ValueError(f"不支持的条件字典关键字{dic.special_key}")
@@ -254,10 +254,10 @@ class CNormalDic:
                     if if_word_now == "":
                         continue
                     if if_word.startswith_flag:
-                        if dic.special_key == "pre_jp":
+                        if dic.special_key in ("pre_src", "pre_jp"):
                             # 把left_symbol先拼接回去
                             if_word_now = input_tran.left_symbol + if_word_now
-                        elif dic.special_key == "post_jp":
+                        elif dic.special_key in ("post_src", "post_jp"):
                             # 需要给判断词加上对应的format
                             if input_tran.is_dialogue:
                                 if_word_now = (

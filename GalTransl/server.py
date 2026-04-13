@@ -358,7 +358,7 @@ def _write_yaml_file(path: str, data: dict) -> None:
     os.replace(tmp, path)
 
 
-def _list_dir_entries(dir_path: str) -> list[dict[str, Any]]:
+def _list_dir_entries(dir_path: str, *, count_json_entries: bool = False) -> list[dict[str, Any]]:
     """List files in a directory with basic metadata."""
     entries = []
     if not os.path.isdir(dir_path):
@@ -366,12 +366,21 @@ def _list_dir_entries(dir_path: str) -> list[dict[str, Any]]:
     for name in sorted(os.listdir(dir_path)):
         full = os.path.join(dir_path, name)
         stat = os.stat(full) if os.path.isfile(full) else None
-        entries.append({
+        entry = {
             "name": name,
             "is_file": os.path.isfile(full),
             "size": stat.st_size if stat else 0,
             "modified": datetime.fromtimestamp(stat.st_mtime).isoformat() if stat else "",
-        })
+        }
+        if count_json_entries and name.endswith(".json") and os.path.isfile(full):
+            try:
+                with open(full, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    entry["entry_count"] = len(data)
+            except Exception:
+                pass
+        entries.append(entry)
     return entries
 
 
@@ -1087,7 +1096,7 @@ def build_handler(registry: JobRegistry):
                     "cache_dir": cache_dir,
                     "input_files": _list_dir_entries(input_dir),
                     "output_files": _list_dir_entries(output_dir),
-                    "cache_files": _list_dir_entries(cache_dir),
+                    "cache_files": _list_dir_entries(cache_dir, count_json_entries=True),
                 })
                 return
 
@@ -1097,28 +1106,8 @@ def build_handler(registry: JobRegistry):
                 self._send_json({
                     "project_dir": project_dir,
                     "cache_dir": cache_dir,
-                    "files": _list_dir_entries(cache_dir),
+                    "files": _list_dir_entries(cache_dir, count_json_entries=True),
                 })
-                return
-
-            # GET /api/projects/:id/cache/:filename
-            if sub_path.startswith("/cache/"):
-                filename = unquote(sub_path[len("/cache/"):])
-                if not filename or filename != os.path.basename(filename):
-                    self._send_json({"error": "invalid cache filename"}, status=HTTPStatus.BAD_REQUEST)
-                    return
-                cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
-                file_path = os.path.join(cache_dir, filename)
-                if not os.path.isfile(file_path):
-                    self._send_json({"error": f"cache file not found: {filename}"}, status=HTTPStatus.NOT_FOUND)
-                    return
-                try:
-                    import orjson
-                    with open(file_path, "rb") as f:
-                        data = orjson.loads(f.read())
-                    self._send_json({"project_dir": project_dir, "filename": filename, "entries": data})
-                except Exception as exc:
-                    self._send_json({"error": f"failed to read cache: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
             # POST /api/projects/:id/cache/save
@@ -1187,6 +1176,172 @@ def build_handler(registry: JobRegistry):
                     self._send_json({"error": f"failed to delete cache entry: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
+            # POST /api/projects/:id/cache/search
+            if sub_path == "/cache/search":
+                if self.command != "POST":
+                    self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
+                    return
+                try:
+                    payload = self._read_json_body()
+                    query = str(payload.get("query", "")).strip()
+                    field = str(payload.get("field", "all")).strip()  # all | src | dst
+                    max_results = min(int(payload.get("max_results", 500)), 2000)
+
+                    if not query:
+                        self._send_json({"results": [], "total": 0})
+                        return
+
+                    cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+                    results = []
+                    if os.path.isdir(cache_dir):
+                        for name in sorted(os.listdir(cache_dir)):
+                            if not name.endswith(".json"):
+                                continue
+                            fp = os.path.join(cache_dir, name)
+                            if not os.path.isfile(fp):
+                                continue
+                            try:
+                                import orjson
+                                with open(fp, "rb") as f:
+                                    entries = orjson.loads(f.read())
+                                for e in entries:
+                                    if not isinstance(e, dict):
+                                        continue
+                                    src_text = e.get("post_src", "") or e.get("post_jp", "") or e.get("pre_src", "") or e.get("pre_jp", "")
+                                    dst_text = e.get("pre_dst", "") or e.get("pre_zh", "") or e.get("proofread_dst", "") or e.get("proofread_zh", "")
+                                    match_src = query.lower() in src_text.lower()
+                                    match_dst = query.lower() in dst_text.lower()
+                                    if field == "src" and not match_src:
+                                        continue
+                                    if field == "dst" and not match_dst:
+                                        continue
+                                    if field == "all" and not match_src and not match_dst:
+                                        continue
+                                    results.append({
+                                        "filename": name,
+                                        "index": e.get("index", 0),
+                                        "speaker": e.get("name", ""),
+                                        "post_src": src_text,
+                                        "pre_dst": dst_text,
+                                        "match_src": match_src,
+                                        "match_dst": match_dst,
+                                        "problem": e.get("problem", ""),
+                                        "trans_by": e.get("trans_by", ""),
+                                    })
+                                    if len(results) >= max_results:
+                                        break
+                            except Exception:
+                                continue
+                            if len(results) >= max_results:
+                                break
+                    self._send_json({"results": results, "total": len(results)})
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to search cache: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # POST /api/projects/:id/cache/replace
+            if sub_path == "/cache/replace":
+                if self.command != "POST":
+                    self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
+                    return
+                try:
+                    payload = self._read_json_body()
+                    query = str(payload.get("query", "")).strip()
+                    replacement = str(payload.get("replacement", ""))
+                    field = str(payload.get("field", "dst")).strip()  # src | dst | all
+                    dry_run = bool(payload.get("dry_run", False))
+
+                    if not query:
+                        self._send_json({"error": "empty query"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    import orjson
+                    cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+                    total_matches = 0
+                    total_files = 0
+                    file_details = []
+
+                    if os.path.isdir(cache_dir):
+                        for name in sorted(os.listdir(cache_dir)):
+                            if not name.endswith(".json"):
+                                continue
+                            fp = os.path.join(cache_dir, name)
+                            if not os.path.isfile(fp):
+                                continue
+                            try:
+                                with open(fp, "rb") as f:
+                                    entries = orjson.loads(f.read())
+                                file_changed = False
+                                file_matches = 0
+                                for e in entries:
+                                    if not isinstance(e, dict):
+                                        continue
+                                    src_key = "post_src" if "post_src" in e else ("post_jp" if "post_jp" in e else None)
+                                    dst_key = "pre_dst" if "pre_dst" in e else ("pre_zh" if "pre_zh" in e else None)
+                                    # replace in src
+                                    if field in ("src", "all") and src_key and query in e.get(src_key, ""):
+                                        if not dry_run:
+                                            e[src_key] = e[src_key].replace(query, replacement)
+                                        file_matches += 1
+                                        file_changed = True
+                                    # replace in dst
+                                    if field in ("dst", "all") and dst_key and query in e.get(dst_key, ""):
+                                        if not dry_run:
+                                            e[dst_key] = e[dst_key].replace(query, replacement)
+                                        file_matches += 1
+                                        file_changed = True
+                                    # also replace in proofread_dst / proofread_zh
+                                    if field in ("dst", "all"):
+                                        pr_key = "proofread_dst" if "proofread_dst" in e else ("proofread_zh" if "proofread_zh" in e else None)
+                                        if pr_key and query in e.get(pr_key, ""):
+                                            if not dry_run:
+                                                e[pr_key] = e[pr_key].replace(query, replacement)
+                                            file_matches += 1
+                                            file_changed = True
+                                if file_changed and not dry_run:
+                                    with open(fp, "wb") as f:
+                                        f.write(orjson.dumps(entries, option=orjson.OPT_INDENT_2 | orjson.OPT_ENSURE_ASCII))
+                                if file_matches > 0:
+                                    total_matches += file_matches
+                                    total_files += 1
+                                    file_details.append({"filename": name, "matches": file_matches})
+                            except Exception:
+                                continue
+                    self._send_json({
+                        "success": True,
+                        "total_matches": total_matches,
+                        "total_files": total_files,
+                        "dry_run": dry_run,
+                        "file_details": file_details,
+                    })
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to replace in cache: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # GET /api/projects/:id/cache/:filename (catch-all, must be after specific /cache/* routes)
+            if sub_path.startswith("/cache/"):
+                filename = unquote(sub_path[len("/cache/"):])
+                if not filename or filename != os.path.basename(filename):
+                    self._send_json({"error": "invalid cache filename"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+                file_path = os.path.join(cache_dir, filename)
+                if not os.path.isfile(file_path):
+                    self._send_json({"error": f"cache file not found: {filename}"}, status=HTTPStatus.NOT_FOUND)
+                    return
+                try:
+                    import orjson
+                    with open(file_path, "rb") as f:
+                        data = orjson.loads(f.read())
+                    self._send_json({"project_dir": project_dir, "filename": filename, "entries": data})
+                except Exception as exc:
+                    self._send_json({"error": f"failed to read cache: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
             # GET /api/projects/:id/progress
             if sub_path == "/progress":
                 cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
@@ -1205,7 +1360,7 @@ def build_handler(registry: JobRegistry):
                             with open(fp, "rb") as f:
                                 entries = orjson.loads(f.read())
                             f_total = len(entries)
-                            f_translated = sum(1 for e in entries if isinstance(e, dict) and e.get("pre_zh", ""))
+                            f_translated = sum(1 for e in entries if isinstance(e, dict) and (e.get("pre_dst", "") or e.get("pre_zh", "")))
                             f_problems = sum(1 for e in entries if isinstance(e, dict) and e.get("problem", ""))
                             f_failed = sum(1 for e in entries if isinstance(e, dict) and "(Failed)" in str(e.get("problem", "")))
                             total += f_total
@@ -1254,15 +1409,15 @@ def build_handler(registry: JobRegistry):
                             import orjson
                             with open(fp, "rb") as f:
                                 entries = orjson.loads(f.read())
-                            f_translated = sum(1 for e in entries if isinstance(e, dict) and e.get("pre_zh", ""))
+                            f_translated = sum(1 for e in entries if isinstance(e, dict) and (e.get("pre_dst", "") or e.get("pre_zh", "")))
                             f_problems = sum(1 for e in entries if isinstance(e, dict) and e.get("problem", ""))
                             f_failed = sum(
                                 1 for e in entries
                                 if isinstance(e, dict)
                                 and (
                                     "翻译失败" in str(e.get("problem", ""))
-                                    or "(Failed)" in str(e.get("pre_zh", ""))
-                                    or "(翻译失败)" in str(e.get("pre_zh", ""))
+                                    or "(Failed)" in str(e.get("pre_dst", "") or e.get("pre_zh", ""))
+                                    or "(翻译失败)" in str(e.get("pre_dst", "") or e.get("pre_zh", ""))
                                 )
                             )
                             display_name = cache_file_display_map.get(name, name)
@@ -1578,8 +1733,8 @@ def build_handler(registry: JobRegistry):
                                         "filename": name,
                                         "index": e.get("index", 0),
                                         "speaker": e.get("name", ""),
-                                        "post_jp": e.get("post_jp", ""),
-                                        "pre_zh": e.get("pre_zh", ""),
+                                        "post_src": e.get("post_src", "") or e.get("post_jp", ""),
+                                        "pre_dst": e.get("pre_dst", "") or e.get("pre_zh", ""),
                                         "problem": e.get("problem", ""),
                                         "trans_by": e.get("trans_by", ""),
                                     })

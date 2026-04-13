@@ -52,7 +52,7 @@ function parseRows(text: string, tab: DictTab): DictRow[] {
     }
     if (
       parts.length >= 4
-      && ['pre_jp', 'post_jp', 'pre_zh', 'post_zh'].includes(parts[0])
+      && ['pre_jp', 'post_jp', 'pre_zh', 'post_zh', 'pre_src', 'post_src', 'pre_dst', 'post_dst'].includes(parts[0])
     ) {
       const [target = '', cond = '', search = '', replace = '', ...rest] = parts;
       return { type: 'conditional', values: [target, cond, search, replace, rest.join('\t')], raw: line };

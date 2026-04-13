@@ -14,6 +14,10 @@ type OutletContext = {
   onProjectDirChange: (dir: string) => void;
 };
 
+/** 兼容读取问题条目字段：优先新key，回退旧key */
+function pSrc(p: ProblemEntry): string { return p.post_src || p.post_jp || ''; }
+function pDst(p: ProblemEntry): string { return p.pre_dst || p.pre_zh || ''; }
+
 const PROBLEM_TYPES = [
   '词频过高',
   '标点错漏',
@@ -74,8 +78,8 @@ export function ProjectProblemsPage() {
       if (searchTerm) {
         const term = searchTerm.toLowerCase();
         return (
-          p.post_jp?.toLowerCase().includes(term) ||
-          p.pre_zh?.toLowerCase().includes(term) ||
+          pSrc(p)?.toLowerCase().includes(term) ||
+          pDst(p)?.toLowerCase().includes(term) ||
           p.problem?.toLowerCase().includes(term)
         );
       }
@@ -159,11 +163,11 @@ export function ProjectProblemsPage() {
                   <div className="problem-entry__body">
                     <div className="problem-entry__row">
                       <span className="problem-entry__label">原文：</span>
-                      <span className="problem-entry__jp">{p.post_jp}</span>
+                      <span className="problem-entry__jp">{pSrc(p)}</span>
                     </div>
                     <div className="problem-entry__row">
                       <span className="problem-entry__label">译文：</span>
-                      <span className="problem-entry__zh">{p.pre_zh}</span>
+                      <span className="problem-entry__zh">{pDst(p)}</span>
                     </div>
                     {p.speaker && (
                       <div className="problem-entry__row">
