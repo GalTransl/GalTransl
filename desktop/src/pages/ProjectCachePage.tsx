@@ -15,7 +15,6 @@ import {
   fetchProjectCache,
   fetchCacheFile,
   saveCacheFile,
-  deleteCacheEntry,
   searchCache,
   replaceCache,
 } from '../lib/api';
@@ -384,20 +383,15 @@ export function ProjectCachePage() {
     setInfo(null);
   };
 
-  const handleDelete = async (index: number) => {
+  const handleDelete = (index: number) => {
     if (!selectedFile) return;
-    try {
-      setLocalError(null);
-      await deleteCacheEntry(projectId, selectedFile, index);
-      setEntries((prev) => {
-        const next = prev.filter((e) => e.index !== index);
-        // Re-index remaining entries
-        return next.map((e, i) => ({ ...e, index: i }));
-      });
-      setInfo('已删除缓存条目');
-    } catch (err) {
-      setLocalError(getErrorMessage(err, '删除缓存条目失败'));
-    }
+    setEntries((prev) => {
+      const next = prev.filter((e) => e.index !== index);
+      // Re-index remaining entries
+      return next.map((e, i) => ({ ...e, index: i }));
+    });
+    setDirty(true);
+    setInfo(null);
   };
 
   const handleSave = async () => {

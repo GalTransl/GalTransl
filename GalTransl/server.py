@@ -1139,6 +1139,43 @@ def build_handler(registry: JobRegistry):
                     try:
                         from GalTransl.CSentense import CSentense
                         from GalTransl.Problem import find_problems
+                        from GalTransl.Frontend.LLMTranslate import preprocess_trans_list, postprocess_trans_list
+
+                        # Load project config and dictionaries for rebuild
+                        proj_config = None
+                        pre_dic = None
+                        post_dic = None
+                        gpt_dic = None
+                        tPlugins = []
+                        try:
+                            from GalTransl.ConfigHelper import CProjectConfig, initDictList
+                            from GalTransl.Dictionary import CNormalDic, CGptDict
+                            proj_config = CProjectConfig(project_dir, config_name)
+                            dict_cfg = proj_config.getDictCfgSection()
+                            pre_dic_list = dict_cfg.get("preDict", [])
+                            post_dic_list = dict_cfg.get("postDict", [])
+                            gpt_dic_list = dict_cfg.get("gpt.dict", [])
+                            default_dic_dir = dict_cfg.get("defaultDictFolder", "")
+                            pre_dic = CNormalDic(
+                                initDictList(pre_dic_list, default_dic_dir, project_dir)
+                            )
+                            post_dic = CNormalDic(
+                                initDictList(post_dic_list, default_dic_dir, project_dir)
+                            )
+                            gpt_dic = CGptDict(
+                                initDictList(gpt_dic_list, default_dic_dir, project_dir)
+                            )
+                            if dict_cfg.get("sortDict", True):
+                                pre_dic.sort_dic()
+                                post_dic.sort_dic()
+                                gpt_dic.sort_dic()
+                            # Load text plugins
+                            try:
+                                tPlugins = proj_config.tPlugins
+                            except Exception:
+                                tPlugins = []
+                        except Exception:
+                            pass  # If config loading fails, skip dict processing
 
                         # Build CSentense list from saved entries
                         trans_list = []
@@ -1153,7 +1190,7 @@ def build_handler(registry: JobRegistry):
                             if post_src == "":
                                 continue
                             s = CSentense(pre_src, speaker if speaker else "", e.get("index", 0))
-                            s.post_jp = post_src
+                            s.post_jp = pre_src
                             s.pre_zh = pre_dst
                             s.proofread_zh = proofread_dst
                             s.post_zh = proofread_dst if proofread_dst else pre_dst
@@ -1171,14 +1208,18 @@ def build_handler(registry: JobRegistry):
                             if i < len(trans_list) - 1:
                                 s.next_tran = trans_list[i + 1]
 
+                        # Pre-processing and post-processing (shared with LLMTranslate)
+                        if pre_dic and proj_config:
+                            preprocess_trans_list(trans_list, proj_config, pre_dic, tPlugins or None)
+                        if post_dic and proj_config:
+                            postprocess_trans_list(trans_list, proj_config, post_dic, tPlugins or None)
+
                         # Run find_problems
                         if trans_list:
                             try:
-                                from GalTransl.ConfigHelper import CProjectConfig
-                                proj_config = CProjectConfig(project_dir, config_name)
-                                find_problems(trans_list, proj_config)
+                                find_problems(trans_list, proj_config, gpt_dic)
                             except Exception:
-                                pass  # If config loading fails, skip problem detection
+                                pass  # If problem detection fails, skip
 
                         # Update entries with problem and post_dst_preview
                         idx = 0

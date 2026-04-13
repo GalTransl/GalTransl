@@ -106,6 +106,64 @@ async def update_progress_title(
             break
 
 
+def preprocess_trans_list(trans_list, projectConfig, pre_dic, tPlugins=None):
+    """翻译前处理：插件before_src → 对话分析 → 预处理字典替换源文 → 预处理字典替换说话人 → 插件after_src"""
+    for tran in trans_list:
+        if tPlugins:
+            for plugin in tPlugins:
+                try:
+                    tran = plugin.plugin_object.before_src_processed(tran)
+                except Exception as e:
+                    LOGGER.error(
+                        get_text("plugin_execution_failed", GT_LANG, plugin.name, e)
+                    )
+
+        if projectConfig.getFilePlugin() in [
+            "file_galtransl_json",
+            "file_mtbench_aio",
+        ]:
+            if projectConfig.select_translator not in ["ForNovel"]:
+                tran.analyse_dialogue()
+
+        tran.post_jp = pre_dic.do_replace(tran.post_jp, tran)
+
+        if projectConfig.getDictCfgSection("usePreDictInName"):
+            if isinstance(tran.speaker, str) and isinstance(tran._speaker, str):
+                tran.speaker = pre_dic.do_replace(tran.speaker, tran)
+
+        if tPlugins:
+            for plugin in tPlugins:
+                try:
+                    tran = plugin.plugin_object.after_src_processed(tran)
+                except Exception as e:
+                    LOGGER.error(
+                        get_text("plugin_execution_failed", GT_LANG, plugin.name, e)
+                    )
+
+
+def postprocess_trans_list(trans_list, projectConfig, post_dic, tPlugins=None):
+    """翻译后处理：插件before_dst → 恢复对话符号 → 后处理字典替换译文 → 插件after_dst"""
+    for tran in trans_list:
+        if tPlugins:
+            for plugin in tPlugins:
+                try:
+                    tran = plugin.plugin_object.before_dst_processed(tran)
+                except Exception as e:
+                    LOGGER.error(f" 插件 {plugin.name} 执行失败: {e}", exc_info=True)
+
+        tran.recover_dialogue_symbol()
+        tran.post_zh = post_dic.do_replace(tran.post_zh, tran)
+
+        if tPlugins:
+            for plugin in tPlugins:
+                try:
+                    tran = plugin.plugin_object.after_dst_processed(tran)
+                except Exception as e:
+                    LOGGER.error(
+                        get_text("plugin_execution_failed", GT_LANG, plugin.name, e)
+                    )
+
+
 async def doLLMTranslate(
     projectConfig: CProjectConfig,
 ) -> bool:
@@ -355,34 +413,7 @@ async def doLLMTranslSingleChunk(
         LOGGER.debug(f"  交叉数量: {split_chunk.cross_num}")
 
         # 翻译前处理
-        for tran in split_chunk.trans_list:
-            for plugin in tPlugins:
-                try:
-                    tran = plugin.plugin_object.before_src_processed(tran)
-                except Exception as e:
-                    LOGGER.error(
-                        get_text("plugin_execution_failed", GT_LANG, plugin.name, e)
-                    )
-
-            if projectConfig.getFilePlugin() in [
-                "file_galtransl_json",
-                "file_mtbench_aio",
-            ]:
-                if projectConfig.select_translator not in ["ForNovel"]:
-                    tran.analyse_dialogue()
-
-            tran.post_jp = pre_dic.do_replace(tran.post_jp, tran)
-
-            if projectConfig.getDictCfgSection("usePreDictInName"):
-                if isinstance(tran.speaker, str) and isinstance(tran._speaker, str):
-                    tran.speaker = pre_dic.do_replace(tran.speaker, tran)
-            for plugin in tPlugins:
-                try:
-                    tran = plugin.plugin_object.after_src_processed(tran)
-                except Exception as e:
-                    LOGGER.error(
-                        get_text("plugin_execution_failed", GT_LANG, plugin.name, e)
-                    )
+        preprocess_trans_list(split_chunk.trans_list, projectConfig, pre_dic, tPlugins)
 
         translist_hit, translist_unhit = await get_transCache_from_json(
             split_chunk.trans_list,
@@ -438,23 +469,7 @@ async def doLLMTranslSingleChunk(
 
         # 翻译后处理
         _check_stop_requested(projectConfig)
-        for tran in split_chunk.trans_list:
-            for plugin in tPlugins:
-                try:
-                    tran = plugin.plugin_object.before_dst_processed(tran)
-                except Exception as e:
-                    LOGGER.error(f" 插件 {plugin.name} 执行失败: {e}", exc_info=True)
-
-            tran.recover_dialogue_symbol()
-            tran.post_zh = post_dic.do_replace(tran.post_zh, tran)
-
-            for plugin in tPlugins:
-                try:
-                    tran = plugin.plugin_object.after_dst_processed(tran)
-                except Exception as e:
-                    LOGGER.error(
-                        get_text("plugin_execution_failed", GT_LANG, plugin.name, e)
-                    )
+        postprocess_trans_list(split_chunk.trans_list, projectConfig, post_dic, tPlugins)
 
         et = time()
         LOGGER.info(
