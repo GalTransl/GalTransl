@@ -5,8 +5,9 @@ type StatusBadgeTone = JobStatus | 'online' | 'offline' | 'connecting';
 type StatusBadgeProps = {
   label: string;
   tone: StatusBadgeTone;
+  celebrate?: boolean;
 };
 
-export function StatusBadge({ label, tone }: StatusBadgeProps) {
-  return <span className={`status-badge status-badge--${tone}`}>{label}</span>;
+export function StatusBadge({ label, tone, celebrate }: StatusBadgeProps) {
+  return <span className={`status-badge status-badge--${tone}${celebrate ? ' status-badge--celebrate' : ''}`}>{label}</span>;
 }

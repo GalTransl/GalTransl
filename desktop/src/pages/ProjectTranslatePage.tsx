@@ -35,6 +35,7 @@ const LAUNCH_CHARGE_MS = 500;
 const LAUNCH_BLAST_MS = 600;
 const STRIP_BOOT_MS = 1200;
 const BAR_SURGE_MS = 800;
+const COMPLETE_CELEBRATE_MS = 1200;
 const PARTICLE_COUNT = 12;
 const PARTICLE_DISTANCE_MIN = 30;
 const PARTICLE_DISTANCE_MAX = 80;
@@ -69,10 +70,12 @@ export function ProjectTranslatePage() {
   const [launchPhase, setLaunchPhase] = useState<'idle' | 'charging' | 'blasting'>('idle');
   const [stripBooting, setStripBooting] = useState(false);
   const [barSurging, setBarSurging] = useState(false);
+  const [justCompleted, setJustCompleted] = useState(false);
   const [particles, setParticles] = useState<Array<{ id: number; x: number; y: number; dx: number; dy: number; color: string }>>([]);
   const [ripples, setRipples] = useState<Array<{ id: number; x: number; y: number; size: number }>>([]);
   const launchButtonRef = useRef<HTMLDivElement | null>(null);
   const prevShouldPollRuntimeRef = useRef(false);
+  const prevJobCompletedRef = useRef<boolean | null>(null);
 
   useEffect(() => {
     if (!projectDir || translators.length === 0) {
@@ -167,6 +170,19 @@ export function ProjectTranslatePage() {
       window.clearTimeout(barTimer);
     };
   }, [shouldPollRuntime]);
+
+  // Fire celebration animation when translation completes
+  useEffect(() => {
+    const isCompleted = currentJob?.status === 'completed';
+    const wasPreviously = prevJobCompletedRef.current;
+    prevJobCompletedRef.current = !!isCompleted;
+    // Only celebrate on transition: not-completed → completed (skip initial load)
+    if (!isCompleted || wasPreviously !== false) return;
+
+    setJustCompleted(true);
+    const timer = window.setTimeout(() => setJustCompleted(false), COMPLETE_CELEBRATE_MS);
+    return () => window.clearTimeout(timer);
+  }, [currentJob?.status]);
 
   useEffect(() => {
     if (!projectDir || !runtimeMatchesProject || !currentJob?.translator) return;
@@ -546,14 +562,14 @@ export function ProjectTranslatePage() {
               <div className={`runtime-summary-strip runtime-summary-strip--sidebar${shouldPollRuntime ? ' runtime-summary-strip--live' : ''}${stripBooting ? ' project-translate-page__strip-booting' : ''}${barSurging ? ' project-translate-page__bar-surge' : ''}`}>
                 <div className="runtime-summary-strip__topline">
                   <div className="runtime-summary-strip__status">
-                    <StatusBadge label={statusLabel} tone={statusTone} />
+                    <StatusBadge label={statusLabel} tone={statusTone} celebrate={justCompleted} />
                     <span className="runtime-summary-strip__updated">{updatedAtText}</span>
                   </div>
                 </div>
 
                 <div className="runtime-summary-strip__progress">
                   <div className="runtime-summary-strip__bar">
-                    <div className="runtime-summary-strip__bar-fill" style={{ width: `${progressPercent}%` }} />
+                    <div className={`runtime-summary-strip__bar-fill${justCompleted ? ' runtime-summary-strip__bar-fill--complete' : ''}`} style={{ width: `${progressPercent}%` }} />
                   </div>
                   <span className="runtime-summary-strip__percent">{progressPercent}%</span>
                 </div>

@@ -2372,6 +2372,49 @@ code {
   animation: barSurgeFill 0.8s ease-out forwards;
 }
 
+/* ── Translation complete celebration ── */
+
+/* Effect 1: bar-fill brightness pulse + green tint */
+.runtime-summary-strip__bar-fill--complete {
+  background: linear-gradient(90deg, #34b57a 0%, #45c785 50%, #0f9d58 100%);
+  animation: completeBarGlow 0.8s ease-out forwards;
+}
+
+/* Effect 2: badge spring overshoot */
+.status-badge--celebrate {
+  animation: completeBadgePop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes completeBarGlow {
+  0% {
+    filter: brightness(1);
+  }
+  40% {
+    filter: brightness(1.35);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
+
+@keyframes completeBadgePop {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.22);
+  }
+  60% {
+    transform: scale(0.94);
+  }
+  80% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
 @media (min-width: 1200px) {
   .project-translate-page__content {
     grid-template-columns: 360px minmax(0, 1fr);
