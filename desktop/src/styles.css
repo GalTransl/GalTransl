@@ -3533,6 +3533,9 @@ code {
   scrollbar-color: rgba(191, 208, 226, 0.9) transparent;
   padding: 2px;
   margin: -2px;
+}
+
+.cache-card-list--entering {
   animation: cacheContentFadeIn 250ms ease;
 }
 

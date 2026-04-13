@@ -22,6 +22,12 @@ import {
 /** 兼容读取缓存字段：优先新key，回退旧key */
 function src(e: CacheEntry): string { return e.post_src || e.post_jp || ''; }
 function dst(e: CacheEntry): string { return e.pre_dst || e.pre_zh || ''; }
+function escapeControlChars(text: string): string {
+  return text.replace(/\r/g, '\\r').replace(/\n/g, '\\n');
+}
+function unescapeControlChars(text: string): string {
+  return text.replace(/\\r/g, '\r').replace(/\\n/g, '\n');
+}
 
 type OutletContext = {
   projectDir: string;
@@ -112,7 +118,9 @@ function CacheEntryCard({
               <span className="cache-card__field-label">原文</span>
               <div className="cache-card__input-wrap">
                 <span className="cache-card__readonly-input">
-                  {highlightQuery ? <HighlightText text={src(entry)} query={highlightQuery} /> : src(entry)}
+                  {highlightQuery
+                    ? <HighlightText text={escapeControlChars(src(entry))} query={highlightQuery} />
+                    : escapeControlChars(src(entry))}
                 </span>
               </div>
             </div>
@@ -121,11 +129,15 @@ function CacheEntryCard({
               <div className="cache-card__input-wrap">
                 <input
                   className="cache-card__input cache-card__input--zh"
-                  value={dst(entry)}
-                  onChange={(e) => onEntryChange(entry.index, 'pre_dst', e.target.value)}
+                  value={escapeControlChars(dst(entry))}
+                  onChange={(e) => onEntryChange(entry.index, 'pre_dst', unescapeControlChars(e.target.value))}
                   placeholder="译文"
                 />
-                {highlightQuery && <span className="cache-card__input-overlay cache-card__input-overlay--zh"><HighlightText text={dst(entry)} query={highlightQuery} /></span>}
+                {highlightQuery && (
+                  <span className="cache-card__input-overlay cache-card__input-overlay--zh">
+                    <HighlightText text={escapeControlChars(dst(entry))} query={highlightQuery} />
+                  </span>
+                )}
               </div>
             </div>
           </>
@@ -136,21 +148,23 @@ function CacheEntryCard({
             <div className="cache-card__field cache-card__field--textarea">
               <span className="cache-card__field-label">pre_src</span>
               <div className="cache-card__readonly-textarea">
-                {(entry.pre_src || '').replace(/\n/g, '\\n')}
+                {escapeControlChars(entry.pre_src || '')}
               </div>
             </div>
             <div className="cache-card__field cache-card__field--textarea">
               <span className="cache-card__field-label">post_src</span>
               <div className="cache-card__readonly-textarea">
-                {highlightQuery ? <HighlightText text={src(entry)} query={highlightQuery} /> : src(entry)}
+                {highlightQuery
+                  ? <HighlightText text={escapeControlChars(src(entry))} query={highlightQuery} />
+                  : escapeControlChars(src(entry))}
               </div>
             </div>
             <div className="cache-card__field cache-card__field--textarea">
               <span className="cache-card__field-label">pre_dst</span>
               <textarea
                 className="cache-card__textarea cache-card__textarea--zh"
-                value={entry.pre_dst || entry.pre_zh || ''}
-                onChange={(e) => onEntryChange(entry.index, 'pre_dst', e.target.value)}
+                value={escapeControlChars(entry.pre_dst || entry.pre_zh || '')}
+                onChange={(e) => onEntryChange(entry.index, 'pre_dst', unescapeControlChars(e.target.value))}
                 placeholder="预翻译"
                 rows={3}
               />
@@ -159,8 +173,8 @@ function CacheEntryCard({
               <span className="cache-card__field-label">proofread</span>
               <textarea
                 className="cache-card__textarea cache-card__textarea--zh"
-                value={entry.proofread_dst || entry.proofread_zh || ''}
-                onChange={(e) => onEntryChange(entry.index, 'proofread_dst', e.target.value)}
+                value={escapeControlChars(entry.proofread_dst || entry.proofread_zh || '')}
+                onChange={(e) => onEntryChange(entry.index, 'proofread_dst', unescapeControlChars(e.target.value))}
                 placeholder="校对"
                 rows={3}
               />
@@ -168,7 +182,7 @@ function CacheEntryCard({
             <div className="cache-card__field cache-card__field--textarea">
               <span className="cache-card__field-label">preview</span>
               <div className="cache-card__readonly-textarea">
-                {entry.post_dst_preview || entry.post_zh_preview || ''}
+                {escapeControlChars(entry.post_dst_preview || entry.post_zh_preview || '')}
               </div>
             </div>
           </>
@@ -210,13 +224,13 @@ function SearchResultCard({
       {result.post_src && (
         <div className="search-result-card__line">
           <span className="search-result-card__label">原文</span>
-          <span className="search-result-card__text"><HighlightText text={result.post_src} query={query} /></span>
+          <span className="search-result-card__text"><HighlightText text={escapeControlChars(result.post_src)} query={query} /></span>
         </div>
       )}
       {result.pre_dst && (
         <div className="search-result-card__line">
           <span className="search-result-card__label">译文</span>
-          <span className="search-result-card__text search-result-card__text--dst"><HighlightText text={result.pre_dst} query={query} /></span>
+          <span className="search-result-card__text search-result-card__text--dst"><HighlightText text={escapeControlChars(result.pre_dst)} query={query} /></span>
         </div>
       )}
     </button>
@@ -268,6 +282,10 @@ export function ProjectCachePage() {
 
   // Scroll-to-entry after clicking search result
   const [scrollToIndex, setScrollToIndex] = useState<number | null>(null);
+
+  // Post-load enter animation for cache list
+  const [listEntering, setListEntering] = useState(false);
+  const listEnterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** 当前文件是否dirty */
   const dirty = selectedFile != null && dirtyFiles.has(selectedFile);
@@ -330,6 +348,36 @@ export function ProjectCachePage() {
       });
     return () => { cancelled = true; };
   }, [projectId, selectedFile]);
+
+  useEffect(() => {
+    if (!selectedFile) {
+      setListEntering(false);
+      if (listEnterTimerRef.current) {
+        clearTimeout(listEnterTimerRef.current);
+        listEnterTimerRef.current = null;
+      }
+      return;
+    }
+    setListEntering(false);
+  }, [selectedFile]);
+
+  useEffect(() => {
+    if (!selectedFile || loadingEntries) return;
+    if (listEnterTimerRef.current) {
+      clearTimeout(listEnterTimerRef.current);
+    }
+    setListEntering(true);
+    listEnterTimerRef.current = setTimeout(() => {
+      setListEntering(false);
+      listEnterTimerRef.current = null;
+    }, 300);
+    return () => {
+      if (listEnterTimerRef.current) {
+        clearTimeout(listEnterTimerRef.current);
+        listEnterTimerRef.current = null;
+      }
+    };
+  }, [selectedFile, loadingEntries]);
 
   // Scroll to entry after jumping from search result
   useEffect(() => {
@@ -808,7 +856,10 @@ export function ProjectCachePage() {
                     <strong>加载中…</strong>
                   </div>
                 )}
-                <div className={`cache-card-list ${loadingEntries ? 'cache-card-list--loading' : ''}`} key={selectedFile}>
+                <div
+                  className={`cache-card-list ${loadingEntries ? 'cache-card-list--loading' : ''} ${listEntering ? 'cache-card-list--entering' : ''}`}
+                  key={selectedFile}
+                >
                   {filteredEntries.map((entry) => (
                     <CacheEntryCard
                       key={`${selectedFile}-${entry.index}`}
