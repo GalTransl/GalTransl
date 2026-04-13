@@ -549,7 +549,6 @@ export function ProjectTranslatePage() {
                     <StatusBadge label={statusLabel} tone={statusTone} />
                     <span className="runtime-summary-strip__updated">{updatedAtText}</span>
                   </div>
-                  <span className="runtime-summary-strip__speed">{speedText}</span>
                 </div>
 
                 <div className="runtime-summary-strip__progress">
@@ -569,8 +568,8 @@ export function ProjectTranslatePage() {
                     <dd>{workersActive}/{workersConfigured}</dd>
                   </div>
                   <div>
-                    <dt>失败</dt>
-                    <dd>{summary?.failed ?? 0}</dd>
+                    <dt>速度</dt>
+                    <dd>{speedText}</dd>
                   </div>
                   <div>
                     <dt>ETA</dt>

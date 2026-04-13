@@ -921,6 +921,7 @@ code {
   font-size: 12px;
   font-weight: 700;
   text-transform: capitalize;
+  white-space: nowrap;
 }
 
 .status-badge--online,
@@ -1482,8 +1483,12 @@ code {
 .runtime-summary-strip__status {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-3);
+}
+
+.runtime-summary-strip__topline,
+.runtime-summary-strip__progress {
+  justify-content: space-between;
 }
 
 .runtime-summary-strip__updated,
@@ -1495,17 +1500,10 @@ code {
   color: var(--color-primary);
 }
 
-.runtime-summary-strip__speed,
 .runtime-summary-strip__percent,
 .runtime-summary-strip__file strong {
   color: var(--color-text);
   font-family: "Cascadia Code", "Consolas", monospace;
-}
-
-.runtime-summary-strip__speed {
-  font-size: 18px;
-  font-weight: 700;
-  text-shadow: 0 0 16px rgba(47, 111, 235, 0.12);
 }
 
 .runtime-summary-strip__bar {
@@ -1531,7 +1529,14 @@ code {
   position: absolute;
   inset: 0;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.26), transparent);
-  animation: runtimePulse 1.6s linear infinite;
+  animation: runtimePulse 1.6s linear infinite paused;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.runtime-summary-strip--live .runtime-summary-strip__bar-fill::after {
+  animation-play-state: running;
+  opacity: 1;
 }
 
 .runtime-summary-strip__percent {
@@ -2053,15 +2058,19 @@ code {
 .project-translate-page__stop-button.button--primary {
   background: linear-gradient(180deg, #ef4444, #b91c1c);
   border-color: rgba(254, 202, 202, 0.2);
-  box-shadow:
-    0 18px 34px rgba(185, 28, 28, 0.34),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  box-shadow: var(--shadow-button);
 }
 
 .project-translate-page__stop-button.button--primary:hover:not(:disabled) {
   box-shadow:
-    0 22px 40px rgba(185, 28, 28, 0.4),
+    0 6px 18px rgba(185, 28, 28, 0.22),
     0 0 0 1px rgba(254, 202, 202, 0.12);
+}
+
+.project-translate-page__stop-button.button--primary:active:not(:disabled) {
+  box-shadow:
+    0 18px 34px rgba(185, 28, 28, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 
 .project-translate-page__stop-button.button--primary:disabled {
