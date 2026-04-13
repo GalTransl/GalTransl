@@ -1119,6 +1119,7 @@ def build_handler(registry: JobRegistry):
                     payload = self._read_json_body()
                     filename = str(payload.get("filename", "")).strip()
                     entries = payload.get("entries", [])
+                    config_name = str(payload.get("config_file_name", "config.yaml")).strip() or "config.yaml"
 
                     if not filename or filename != os.path.basename(filename):
                         self._send_json({"error": "invalid cache filename"}, status=HTTPStatus.BAD_REQUEST)
@@ -1132,8 +1133,76 @@ def build_handler(registry: JobRegistry):
 
                     import orjson
                     with open(file_path, "wb") as f:
-                        f.write(orjson.dumps(entries, option=orjson.OPT_INDENT_2 | orjson.OPT_ENSURE_ASCII))
-                    self._send_json({"success": True, "filename": filename})
+                        f.write(orjson.dumps(entries, option=orjson.OPT_INDENT_2))
+
+                    # Rebuild: re-derive problem and post_dst_preview fields
+                    try:
+                        from GalTransl.CSentense import CSentense
+                        from GalTransl.Problem import find_problems
+
+                        # Build CSentense list from saved entries
+                        trans_list = []
+                        for e in entries:
+                            speaker = e.get("name", "")
+                            if isinstance(speaker, list):
+                                speaker = "/".join(speaker)
+                            pre_src = e.get("pre_src", "") or e.get("pre_jp", "")
+                            post_src = e.get("post_src", "") or e.get("post_jp", "")
+                            pre_dst = e.get("pre_dst", "") or e.get("pre_zh", "")
+                            proofread_dst = e.get("proofread_dst", "") or e.get("proofread_zh", "")
+                            if post_src == "":
+                                continue
+                            s = CSentense(pre_src, speaker if speaker else "", e.get("index", 0))
+                            s.post_jp = post_src
+                            s.pre_zh = pre_dst
+                            s.proofread_zh = proofread_dst
+                            s.post_zh = proofread_dst if proofread_dst else pre_dst
+                            s.trans_by = e.get("trans_by", "")
+                            s.proofread_by = e.get("proofread_by", "")
+                            s.trans_conf = e.get("trans_conf", 0)
+                            s.doub_content = e.get("doub_content", "")
+                            s.unknown_proper_noun = e.get("unknown_proper_noun", "")
+                            trans_list.append(s)
+
+                        # Link prev/next
+                        for i, s in enumerate(trans_list):
+                            if i > 0:
+                                s.prev_tran = trans_list[i - 1]
+                            if i < len(trans_list) - 1:
+                                s.next_tran = trans_list[i + 1]
+
+                        # Run find_problems
+                        if trans_list:
+                            try:
+                                from GalTransl.ConfigHelper import CProjectConfig
+                                proj_config = CProjectConfig(project_dir, config_name)
+                                find_problems(trans_list, proj_config)
+                            except Exception:
+                                pass  # If config loading fails, skip problem detection
+
+                        # Update entries with problem and post_dst_preview
+                        idx = 0
+                        for e in entries:
+                            post_src_val = e.get("post_src", "") or e.get("post_jp", "")
+                            if post_src_val == "":
+                                continue
+                            if idx < len(trans_list):
+                                tran = trans_list[idx]
+                                if tran.problem:
+                                    e["problem"] = tran.problem
+                                elif "problem" in e:
+                                    del e["problem"]
+                                e["post_dst_preview"] = tran.post_zh
+                                idx += 1
+
+                        # Re-save with updated fields
+                        with open(file_path, "wb") as f:
+                            f.write(orjson.dumps(entries, option=orjson.OPT_INDENT_2))
+
+                        self._send_json({"success": True, "filename": filename, "entries": entries})
+                    except Exception:
+                        # Rebuild failed, but original save succeeded
+                        self._send_json({"success": True, "filename": filename})
                 except json.JSONDecodeError:
                     self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
                 except Exception as exc:
@@ -1168,7 +1237,7 @@ def build_handler(registry: JobRegistry):
                         return
                     deleted = data.pop(entry_index)
                     with open(file_path, "wb") as f:
-                        f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2 | orjson.OPT_ENSURE_ASCII))
+                        f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))
                     self._send_json({"success": True, "filename": filename, "deleted_index": entry_index})
                 except (json.JSONDecodeError, ValueError):
                     self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
@@ -1302,7 +1371,7 @@ def build_handler(registry: JobRegistry):
                                             file_changed = True
                                 if file_changed and not dry_run:
                                     with open(fp, "wb") as f:
-                                        f.write(orjson.dumps(entries, option=orjson.OPT_INDENT_2 | orjson.OPT_ENSURE_ASCII))
+                                        f.write(orjson.dumps(entries, option=orjson.OPT_INDENT_2))
                                 if file_matches > 0:
                                     total_matches += file_matches
                                     total_files += 1

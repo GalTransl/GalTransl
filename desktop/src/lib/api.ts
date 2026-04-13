@@ -392,13 +392,13 @@ export async function fetchCacheFile(projectId: string, filename: string) {
   );
 }
 
-export async function saveCacheFile(projectId: string, filename: string, entries: CacheEntry[]) {
-  return apiRequest<{ success: boolean; filename: string }>(
+export async function saveCacheFile(projectId: string, filename: string, entries: CacheEntry[], configFileName?: string) {
+  return apiRequest<{ success: boolean; filename: string; entries?: CacheEntry[] }>(
     `/api/projects/${projectId}/cache/save`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename, entries }),
+      body: JSON.stringify({ filename, entries, config_file_name: configFileName || 'config.yaml' }),
     },
   );
 }

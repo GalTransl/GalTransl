@@ -106,50 +106,74 @@ function CacheEntryCard({
       </div>
 
       <div className="cache-card__fields">
-        <div className={`cache-card__field ${expanded ? 'cache-card__field--textarea' : ''}`}>
-          <span className="cache-card__field-label">原文</span>
-          {expanded ? (
-            <textarea
-              className="cache-card__textarea"
-              value={src(entry)}
-              onChange={(e) => onEntryChange(entry.index, 'post_src', e.target.value)}
-              placeholder="原文"
-              rows={3}
-            />
-          ) : (
-            <div className="cache-card__input-wrap">
-              <input
-                className="cache-card__input"
-                value={src(entry)}
-                onChange={(e) => onEntryChange(entry.index, 'post_src', e.target.value)}
-                placeholder="原文"
-              />
-              {highlightQuery && <span className="cache-card__input-overlay"><HighlightText text={src(entry)} query={highlightQuery} /></span>}
+        {/* 折叠态：原文 + 译文 */}
+        {!expanded && (
+          <>
+            <div className="cache-card__field">
+              <span className="cache-card__field-label">原文</span>
+              <div className="cache-card__input-wrap">
+                <span className="cache-card__readonly-input">
+                  {highlightQuery ? <HighlightText text={src(entry)} query={highlightQuery} /> : src(entry)}
+                </span>
+              </div>
             </div>
-          )}
-        </div>
-        <div className={`cache-card__field ${expanded ? 'cache-card__field--textarea' : ''}`}>
-          <span className="cache-card__field-label">译文</span>
-          {expanded ? (
-            <textarea
-              className="cache-card__textarea cache-card__textarea--zh"
-              value={dst(entry)}
-              onChange={(e) => onEntryChange(entry.index, 'pre_dst', e.target.value)}
-              placeholder="译文"
-              rows={3}
-            />
-          ) : (
-            <div className="cache-card__input-wrap">
-              <input
-                className="cache-card__input cache-card__input--zh"
-                value={dst(entry)}
+            <div className="cache-card__field">
+              <span className="cache-card__field-label">译文</span>
+              <div className="cache-card__input-wrap">
+                <input
+                  className="cache-card__input cache-card__input--zh"
+                  value={dst(entry)}
+                  onChange={(e) => onEntryChange(entry.index, 'pre_dst', e.target.value)}
+                  placeholder="译文"
+                />
+                {highlightQuery && <span className="cache-card__input-overlay cache-card__input-overlay--zh"><HighlightText text={dst(entry)} query={highlightQuery} /></span>}
+              </div>
+            </div>
+          </>
+        )}
+        {/* 展开态：五个字段 */}
+        {expanded && (
+          <>
+            <div className="cache-card__field cache-card__field--textarea">
+              <span className="cache-card__field-label">pre_src</span>
+              <div className="cache-card__readonly-textarea">
+                {(entry.pre_src || '').replace(/\n/g, '\\n')}
+              </div>
+            </div>
+            <div className="cache-card__field cache-card__field--textarea">
+              <span className="cache-card__field-label">post_src</span>
+              <div className="cache-card__readonly-textarea">
+                {highlightQuery ? <HighlightText text={src(entry)} query={highlightQuery} /> : src(entry)}
+              </div>
+            </div>
+            <div className="cache-card__field cache-card__field--textarea">
+              <span className="cache-card__field-label">pre_dst</span>
+              <textarea
+                className="cache-card__textarea cache-card__textarea--zh"
+                value={entry.pre_dst || entry.pre_zh || ''}
                 onChange={(e) => onEntryChange(entry.index, 'pre_dst', e.target.value)}
-                placeholder="译文"
+                placeholder="预翻译"
+                rows={3}
               />
-              {highlightQuery && <span className="cache-card__input-overlay cache-card__input-overlay--zh"><HighlightText text={dst(entry)} query={highlightQuery} /></span>}
             </div>
-          )}
-        </div>
+            <div className="cache-card__field cache-card__field--textarea">
+              <span className="cache-card__field-label">proofread</span>
+              <textarea
+                className="cache-card__textarea cache-card__textarea--zh"
+                value={entry.proofread_dst || entry.proofread_zh || ''}
+                onChange={(e) => onEntryChange(entry.index, 'proofread_dst', e.target.value)}
+                placeholder="校对"
+                rows={3}
+              />
+            </div>
+            <div className="cache-card__field cache-card__field--textarea">
+              <span className="cache-card__field-label">preview</span>
+              <div className="cache-card__readonly-textarea">
+                {entry.post_dst_preview || entry.post_zh_preview || ''}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </article>
   );
@@ -202,7 +226,7 @@ function SearchResultCard({
 
 /* ── Main Page ── */
 export function ProjectCachePage() {
-  const { projectId } = useOutletContext<OutletContext>();
+  const { projectId, configFileName } = useOutletContext<OutletContext>();
 
   const [cacheFiles, setCacheFiles] = useState<FileEntry[]>([]);
   const [cacheDir, setCacheDir] = useState<string>('');
@@ -382,9 +406,12 @@ export function ProjectCachePage() {
     setLocalError(null);
     setInfo(null);
     try {
-      await saveCacheFile(projectId, selectedFile, entries);
+      const res = await saveCacheFile(projectId, selectedFile, entries, configFileName);
+      if (res.entries) {
+        setEntries(res.entries);
+      }
       setDirty(false);
-      setInfo('已保存');
+      setInfo('已保存并重建缓存');
     } catch (err) {
       setLocalError(getErrorMessage(err, '保存缓存失败'));
     } finally {
@@ -512,7 +539,7 @@ export function ProjectCachePage() {
 
           {/* Tab: Files */}
           {sidebarTab === 'files' && (
-            <>
+            <div className="cache-sidebar-tab-content">
               <div className="cache-layout__sidebar-header">
                 <h3>缓存文件</h3>
                 <Button
@@ -540,7 +567,7 @@ export function ProjectCachePage() {
                   </button>
                 ))}
               </div>
-            </>
+            </div>
           )}
 
           {/* Tab: Search */}
@@ -688,10 +715,13 @@ export function ProjectCachePage() {
                 </label>
               </div>
 
-              {loadingEntries ? (
-                <div className="empty-state"><strong>加载中…</strong></div>
-              ) : (
-                <div className="cache-card-list">
+              <div className="cache-card-list-wrapper">
+                {loadingEntries && (
+                  <div className="cache-card-list-loading">
+                    <strong>加载中…</strong>
+                  </div>
+                )}
+                <div className={`cache-card-list ${loadingEntries ? 'cache-card-list--loading' : ''}`} key={selectedFile}>
                   {filteredEntries.map((entry) => (
                     <CacheEntryCard
                       key={`${selectedFile}-${entry.index}`}
@@ -703,14 +733,14 @@ export function ProjectCachePage() {
                       highlightQuery={searchTerm || searchQuery}
                     />
                   ))}
-                  {filteredEntries.length === 0 && (
+                  {filteredEntries.length === 0 && !loadingEntries && (
                     <div className="empty-state">
                       <strong>无匹配条目</strong>
                       <span>尝试更换搜索关键词。</span>
                     </div>
                   )}
                 </div>
-              )}
+              </div>
             </Panel>
           ) : (
             <div className="empty-state">
