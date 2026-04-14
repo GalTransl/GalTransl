@@ -271,6 +271,38 @@ export type ProjectProblemsResponse = {
   total: number;
 };
 
+// ---- Name Table API types ----
+
+export type NameEntry = {
+  src_name: string;
+  dst_name: string;
+  count: number;
+};
+
+export type NameTableResponse = {
+  project_dir: string;
+  source_file: string | null;
+  names: NameEntry[];
+};
+
+export type NameTableGenerateResponse = {
+  success: boolean;
+  source_file: string;
+  names: NameEntry[];
+  total: number;
+};
+
+export type NameTableSaveResponse = {
+  success: boolean;
+  source_file: string;
+  total: number;
+};
+
+export type NameDictResponse = {
+  project_dir: string;
+  name_dict: Record<string, string>;
+};
+
 export type ProjectLogsResponse = {
   project_dir: string;
   exists: boolean;
@@ -568,6 +600,31 @@ export async function deleteCommonDictionaryFile(payload: { filename: string }) 
 
 export async function fetchProjectProblems(projectId: string) {
   return apiRequest<ProjectProblemsResponse>(`/api/projects/${projectId}/problems`);
+}
+
+// ---- Name Table API functions ----
+
+export async function fetchNameTable(projectId: string) {
+  return apiRequest<NameTableResponse>(`/api/projects/${projectId}/name-table`);
+}
+
+export async function generateNameTable(projectId: string) {
+  return apiRequest<NameTableGenerateResponse>(`/api/projects/${projectId}/name-table/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+export async function saveNameTable(projectId: string, names: NameEntry[]) {
+  return apiRequest<NameTableSaveResponse>(`/api/projects/${projectId}/name-table/save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ names }),
+  });
+}
+
+export async function fetchNameDict(projectId: string) {
+  return apiRequest<NameDictResponse>(`/api/projects/${projectId}/name-dict`);
 }
 
 export async function fetchProjectLogs(projectId: string, tail = 2000) {

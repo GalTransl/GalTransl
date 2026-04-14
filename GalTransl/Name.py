@@ -47,24 +47,28 @@ def load_name_table(
                 sheet = workbook.active
                 header = [cell.value for cell in sheet[1]]
                 try:
-                    jp_name_col_idx = header.index("JP_Name")
-                    cn_name_col_idx = header.index("CN_Name")
+                    src_name_col_idx = header.index("SRC_Name")
+                    dst_name_col_idx = header.index("DST_Name")
                 except ValueError:
-                    LOGGER.warning(f"name替换表 {path} 缺少 'JP_Name' 或 'CN_Name' 列")
-                    return {}, [], False
+                    try:
+                        src_name_col_idx = header.index("JP_Name")
+                        dst_name_col_idx = header.index("CN_Name")
+                    except ValueError:
+                        LOGGER.warning(f"name替换表 {path} 缺少 'SRC_Name'/'DST_Name' (或旧版 'JP_Name'/'CN_Name') 列")
+                        return {}, [], False
 
                 for row_idx, row in enumerate(sheet.iter_rows(min_row=2), start=2):
-                    jp_name_cell = row[jp_name_col_idx]
-                    cn_name_cell = row[cn_name_col_idx]
-                    jp_name = jp_name_cell.value
-                    cn_name = cn_name_cell.value
+                    src_name_cell = row[src_name_col_idx]
+                    dst_name_cell = row[dst_name_col_idx]
+                    src_name = src_name_cell.value
+                    dst_name = dst_name_cell.value
 
-                    if jp_name is not None:
-                        jp_name_str = str(jp_name)
-                        if cn_name is None or str(cn_name).strip() == "":
-                            missing_cn_names_internal.append(jp_name_str)
+                    if src_name is not None:
+                        src_name_str = str(src_name)
+                        if dst_name is None or str(dst_name).strip() == "":
+                            missing_cn_names_internal.append(src_name_str)
                         else:
-                            name_table_internal[jp_name_str] = str(cn_name)
+                            name_table_internal[src_name_str] = str(dst_name)
                 file_loaded_successfully_internal = True
 
             elif file_extension == ".csv":
@@ -76,25 +80,29 @@ def load_name_table(
                         LOGGER.warning(f"CSV name替换表 {path} 为空或无法读取表头")
                         return {}, [], False
                     try:
-                        jp_name_col_idx = header.index("JP_Name")
-                        cn_name_col_idx = header.index("CN_Name")
+                        src_name_col_idx = header.index("SRC_Name")
+                        dst_name_col_idx = header.index("DST_Name")
                     except ValueError:
-                        LOGGER.warning(
-                            f"CSV name替换表 {path} 缺少 'JP_Name' 或 'CN_Name' 列"
-                        )
-                        return {}, [], False
+                        try:
+                            src_name_col_idx = header.index("JP_Name")
+                            dst_name_col_idx = header.index("CN_Name")
+                        except ValueError:
+                            LOGGER.warning(
+                                f"CSV name替换表 {path} 缺少 'SRC_Name'/'DST_Name' (或旧版 'JP_Name'/'CN_Name') 列"
+                            )
+                            return {}, [], False
 
                     for row_idx, row in enumerate(reader, start=2):
-                        if len(row) > max(jp_name_col_idx, cn_name_col_idx):
-                            jp_name = row[jp_name_col_idx]
-                            cn_name = row[cn_name_col_idx]
+                        if len(row) > max(src_name_col_idx, dst_name_col_idx):
+                            src_name = row[src_name_col_idx]
+                            dst_name = row[dst_name_col_idx]
 
-                            if jp_name is not None:
-                                jp_name_str = str(jp_name)
-                                if cn_name is None or str(cn_name).strip() == "":
-                                    missing_cn_names_internal.append(jp_name_str)
+                            if src_name is not None:
+                                src_name_str = str(src_name)
+                                if dst_name is None or str(dst_name).strip() == "":
+                                    missing_cn_names_internal.append(src_name_str)
                                 else:
-                                    name_table_internal[jp_name_str] = str(cn_name)
+                                    name_table_internal[src_name_str] = str(dst_name)
                         else:
                             LOGGER.warning(
                                 f"CSV name替换表 {path} 中发现格式不正确的行 (行号 {row_idx}): {row}"
@@ -125,7 +133,7 @@ def load_name_table(
     )
 
     table_base_name = os.path.basename(name_table_path)
-    # Check for missing CN_Names after the first attempt
+    # Check for missing DST_Names after the first attempt
     if file_loaded_successfully and missing_cn_names and firstime_load:
         LOGGER.warning(
             f"\n\n(这个提示只会在首次显示)\n\n'{table_base_name}' 中有name的翻译未补齐，可以现在编辑并补齐对应翻译，或以后编辑并通过刷新结果来补全name字段的翻译。\n\n配置文件中usePostDictInName, useGPTDictInName也可将译后、GPT字典用于刷写name字段。"
@@ -237,8 +245,8 @@ async def dump_name_table_from_chunks(
             sheet.title = "NameTable"
 
             # Write header
-            sheet["A1"] = "JP_Name"
-            sheet["B1"] = "CN_Name"
+            sheet["A1"] = "SRC_Name"
+            sheet["B1"] = "DST_Name"
             sheet["C1"] = "Count"
 
             # Write data
@@ -251,18 +259,18 @@ async def dump_name_table_from_chunks(
 
             workbook.save(output_path)
             LOGGER.info(
-                f"name已保存到'{output_path}' (Excel格式)，填入CN_Name后可用于后续翻译name字段。"
+                f"name已保存到'{output_path}' (Excel格式)，填入DST_Name后可用于后续翻译name字段。"
             )
         elif export_format == "csv":
             with open(output_path, "w", newline="", encoding="utf-8-sig") as csvfile:
                 writer = csv.writer(csvfile)
                 # Write header
-                writer.writerow(["JP_Name", "CN_Name", "Count"])
+                writer.writerow(["SRC_Name", "DST_Name", "Count"])
                 # Write data
                 for name, count in name_dict.items():
                     writer.writerow([name, "", count])
             LOGGER.info(
-                f"name已保存到'{output_path}' (CSV格式)，填入CN_Name后可用于后续翻译name字段。"
+                f"name已保存到'{output_path}' (CSV格式)，填入DST_Name后可用于后续翻译name字段。"
             )
 
     except Exception as e:

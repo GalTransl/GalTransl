@@ -6,6 +6,7 @@ import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
 import { EmptyState, InlineFeedback, LoadingState } from '../components/page-state';
 import { speakerStyle } from '../lib/speaker';
+import { useNameDict, resolveSpeakerName } from '../lib/useNameDict';
 import {
   type FileEntry,
   type CacheEntry,
@@ -66,16 +67,23 @@ function CacheEntryCard({
   projectId,
   onEntryChange,
   onDelete,
-  highlightQuery }: {
+  highlightQuery,
+  nameDict }: {
   entry: CacheEntry;
   filename: string;
   projectId: string;
   onEntryChange: (index: number, field: keyof CacheEntry, value: string) => void;
   onDelete: (index: number) => void;
   highlightQuery?: string;
+  nameDict: Map<string, string>;
 }) {
   const hasProblem = !!entry.problem;
-  const speaker = Array.isArray(entry.name) ? entry.name.join('/') : entry.name || '—';
+  const rawSpeaker = Array.isArray(entry.name) ? entry.name.join('/') : entry.name || '—';
+  const speaker = rawSpeaker !== '—'
+    ? (Array.isArray(entry.name)
+        ? entry.name.map((s) => resolveSpeakerName(s, nameDict)).join('/')
+        : resolveSpeakerName(rawSpeaker, nameDict))
+    : rawSpeaker;
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -83,7 +91,7 @@ function CacheEntryCard({
       <div className="cache-card__row">
         <span className="cache-card__field-label">#{entry.index}</span>
         {speaker !== '—' && (
-          <span className="cache-card__pill cache-card__pill--speaker" style={speakerStyle(speaker)}>{speaker}</span>
+          <span className="cache-card__pill cache-card__pill--speaker" style={speakerStyle(rawSpeaker)}>{speaker}</span>
         )}
         {hasProblem && (
           <span className="cache-card__pill cache-card__pill--problem">{entry.problem}</span>
@@ -196,12 +204,19 @@ function CacheEntryCard({
 function SearchResultCard({
   result,
   query,
-  onJumpToFile }: {
+  onJumpToFile,
+  nameDict }: {
   result: CacheSearchResult;
   query: string;
   onJumpToFile: (filename: string, index: number) => void;
+  nameDict: Map<string, string>;
 }) {
-  const speaker = Array.isArray(result.speaker) ? result.speaker.join('/') : result.speaker || '—';
+  const rawSpeaker = Array.isArray(result.speaker) ? result.speaker.join('/') : result.speaker || '—';
+  const speaker = rawSpeaker !== '—'
+    ? (Array.isArray(result.speaker)
+        ? result.speaker.map((s) => resolveSpeakerName(s, nameDict)).join('/')
+        : resolveSpeakerName(rawSpeaker, nameDict))
+    : rawSpeaker;
 
   return (
     <button
@@ -214,7 +229,7 @@ function SearchResultCard({
         <span className="search-result-card__file">{result.filename}</span>
         <span className="search-result-card__index">#{result.index}</span>
         {speaker !== '—' && (
-          <span className="cache-card__pill cache-card__pill--speaker" style={speakerStyle(speaker)}>{speaker}</span>
+          <span className="cache-card__pill cache-card__pill--speaker" style={speakerStyle(rawSpeaker)}>{speaker}</span>
         )}
         {result.match_src && <span className="search-result-card__badge search-result-card__badge--src">原文</span>}
         {result.match_dst && <span className="search-result-card__badge search-result-card__badge--dst">译文</span>}
@@ -239,6 +254,7 @@ function SearchResultCard({
 /* ── Main Page ── */
 export function ProjectCachePage() {
   const { projectId, configFileName } = useOutletContext<OutletContext>();
+  const { nameDict } = useNameDict(projectId);
 
   const [cacheFiles, setCacheFiles] = useState<FileEntry[]>([]);
   const [cacheDir, setCacheDir] = useState<string>('');
@@ -882,6 +898,7 @@ export function ProjectCachePage() {
                     result={r}
                     query={searchQuery.trim()}
                     onJumpToFile={handleJumpToFile}
+                    nameDict={nameDict}
                   />
                 ))}
               </div>
@@ -940,6 +957,7 @@ export function ProjectCachePage() {
                       onEntryChange={handleEntryChange}
                       onDelete={handleDelete}
                       highlightQuery={searchTerm || searchQuery}
+                      nameDict={nameDict}
                     />
                   ))}
                   {filteredEntries.length === 0 && !loadingEntries && (

@@ -1825,6 +1825,213 @@ def build_handler(registry: JobRegistry):
                     self._send_json({"error": f"failed to delete project dictionary file: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
+            # GET /api/projects/:id/name-table
+            if sub_path == "/name-table":
+                # Read the name replacement table (CSV or XLSX)
+                csv_path = os.path.join(project_dir, "name替换表.csv")
+                xlsx_path = os.path.join(project_dir, "name替换表.xlsx")
+                names = []
+                source_file = None
+
+                if os.path.isfile(csv_path):
+                    source_file = "name替换表.csv"
+                    try:
+                        import csv as _csv
+                        with open(csv_path, "r", newline="", encoding="utf-8-sig") as f:
+                            reader = _csv.reader(f)
+                            header = next(reader, None)
+                            if header:
+                                try:
+                                    src_idx = header.index("SRC_Name")
+                                    dst_idx = header.index("DST_Name")
+                                except ValueError:
+                                    try:
+                                        src_idx = header.index("JP_Name")
+                                        dst_idx = header.index("CN_Name")
+                                    except ValueError:
+                                        self._send_json({"error": "CSV缺少 SRC_Name/DST_Name (或旧版 JP_Name/CN_Name) 列"}, status=HTTPStatus.BAD_REQUEST)
+                                        return
+                                count_idx = header.index("Count") if "Count" in header else -1
+                                for row in reader:
+                                    if len(row) > max(src_idx, dst_idx):
+                                        names.append({
+                                            "src_name": row[src_idx],
+                                            "dst_name": row[dst_idx] if dst_idx < len(row) else "",
+                                            "count": int(row[count_idx]) if count_idx >= 0 and count_idx < len(row) and row[count_idx].isdigit() else 0,
+                                        })
+                    except Exception as exc:
+                        self._send_json({"error": f"读取CSV人名表失败: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                        return
+                elif os.path.isfile(xlsx_path):
+                    source_file = "name替换表.xlsx"
+                    try:
+                        import openpyxl
+                        wb = openpyxl.load_workbook(xlsx_path)
+                        sheet = wb.active
+                        header = [cell.value for cell in sheet[1]]
+                        try:
+                            src_idx = header.index("SRC_Name")
+                            dst_idx = header.index("DST_Name")
+                        except ValueError:
+                            try:
+                                src_idx = header.index("JP_Name")
+                                dst_idx = header.index("CN_Name")
+                            except ValueError:
+                                self._send_json({"error": "XLSX缺少 SRC_Name/DST_Name (或旧版 JP_Name/CN_Name) 列"}, status=HTTPStatus.BAD_REQUEST)
+                                return
+                        count_idx = header.index("Count") if "Count" in header else -1
+                        for row in sheet.iter_rows(min_row=2):
+                            src_val = row[src_idx].value if src_idx < len(row) else None
+                            dst_val = row[dst_idx].value if dst_idx < len(row) else None
+                            count_val = row[count_idx].value if count_idx >= 0 and count_idx < len(row) else 0
+                            if src_val is not None:
+                                names.append({
+                                    "src_name": str(src_val),
+                                    "dst_name": str(dst_val) if dst_val is not None else "",
+                                    "count": int(count_val) if count_val else 0,
+                                })
+                    except Exception as exc:
+                        self._send_json({"error": f"读取XLSX人名表失败: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                        return
+
+                self._send_json({
+                    "project_dir": project_dir,
+                    "source_file": source_file,
+                    "names": names,
+                })
+                return
+
+            # POST /api/projects/:id/name-table/generate
+            if sub_path == "/name-table/generate":
+                if self.command != "POST":
+                    self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
+                    return
+                # Generate name table from cache entries (speaker field)
+                try:
+                    cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+                    name_counter: dict[str, int] = {}
+                    if os.path.isdir(cache_dir):
+                        for fname in sorted(os.listdir(cache_dir)):
+                            if not fname.endswith(".json"):
+                                continue
+                            fpath = os.path.join(cache_dir, fname)
+                            try:
+                                with open(fpath, "rb") as f:
+                                    entries = orjson.loads(f.read())
+                            except Exception:
+                                continue
+                            if not isinstance(entries, list):
+                                continue
+                            for entry in entries:
+                                speaker = entry.get("name", "")
+                                if isinstance(speaker, list):
+                                    for s in speaker:
+                                        if s and isinstance(s, str):
+                                            name_counter[s] = name_counter.get(s, 0) + 1
+                                elif speaker and isinstance(speaker, str):
+                                    name_counter[speaker] = name_counter.get(speaker, 0) + 1
+                    # Sort by count descending
+                    sorted_names = sorted(name_counter.items(), key=lambda x: x[1], reverse=True)
+                    # Write CSV
+                    csv_path = os.path.join(project_dir, "name替换表.csv")
+                    import csv as _csv
+                    with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
+                        writer = _csv.writer(f)
+                        writer.writerow(["SRC_Name", "DST_Name", "Count"])
+                        for name, count in sorted_names:
+                            writer.writerow([name, "", count])
+                    # Build response
+                    names = [{"src_name": n, "dst_name": "", "count": c} for n, c in sorted_names]
+                    self._send_json({
+                        "success": True,
+                        "source_file": "name替换表.csv",
+                        "names": names,
+                        "total": len(names),
+                    })
+                except Exception as exc:
+                    self._send_json({"error": f"生成人名表失败: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # POST /api/projects/:id/name-table/save
+            if sub_path == "/name-table/save":
+                if self.command != "POST":
+                    self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
+                    return
+                try:
+                    payload = self._read_json_body()
+                    names = payload.get("names", [])
+                    if not isinstance(names, list):
+                        self._send_json({"error": "names must be an array"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    csv_path = os.path.join(project_dir, "name替换表.csv")
+                    import csv as _csv
+                    with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
+                        writer = _csv.writer(f)
+                        writer.writerow(["SRC_Name", "DST_Name", "Count"])
+                        for item in names:
+                            src_name = str(item.get("src_name", "") or item.get("jp_name", ""))
+                            dst_name = str(item.get("dst_name", "") or item.get("cn_name", ""))
+                            count = int(item.get("count", 0))
+                            writer.writerow([src_name, dst_name, count])
+                    self._send_json({"success": True, "source_file": "name替换表.csv", "total": len(names)})
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"保存人名表失败: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # GET /api/projects/:id/name-dict
+            if sub_path == "/name-dict":
+                # Return the name replacement dict (SRC→DST) for UI pill display
+                csv_path = os.path.join(project_dir, "name替换表.csv")
+                xlsx_path = os.path.join(project_dir, "name替换表.xlsx")
+                name_dict: dict[str, str] = {}
+
+                def _find_col(header, new_name, old_name):
+                    """Find column index, preferring new name, falling back to old."""
+                    if new_name in header:
+                        return header.index(new_name)
+                    if old_name in header:
+                        return header.index(old_name)
+                    return -1
+
+                if os.path.isfile(csv_path):
+                    try:
+                        import csv as _csv
+                        with open(csv_path, "r", newline="", encoding="utf-8-sig") as f:
+                            reader = _csv.reader(f)
+                            header = next(reader, None)
+                            if header:
+                                src_idx = _find_col(header, "SRC_Name", "JP_Name")
+                                dst_idx = _find_col(header, "DST_Name", "CN_Name")
+                                if src_idx >= 0 and dst_idx >= 0:
+                                    for row in reader:
+                                        if len(row) > max(src_idx, dst_idx):
+                                            dst = row[dst_idx].strip() if dst_idx < len(row) else ""
+                                            if dst:
+                                                name_dict[row[src_idx]] = dst
+                    except Exception:
+                        pass
+                elif os.path.isfile(xlsx_path):
+                    try:
+                        import openpyxl
+                        wb = openpyxl.load_workbook(xlsx_path)
+                        sheet = wb.active
+                        header = [cell.value for cell in sheet[1]]
+                        src_idx = _find_col(header, "SRC_Name", "JP_Name")
+                        dst_idx = _find_col(header, "DST_Name", "CN_Name")
+                        if src_idx >= 0 and dst_idx >= 0:
+                            for row in sheet.iter_rows(min_row=2):
+                                src_val = row[src_idx].value if src_idx < len(row) else None
+                                dst_val = row[dst_idx].value if dst_idx < len(row) else None
+                                if src_val is not None and dst_val is not None and str(dst_val).strip():
+                                    name_dict[str(src_val)] = str(dst_val)
+                    except Exception:
+                        pass
+
+                self._send_json({"project_dir": project_dir, "name_dict": name_dict})
+                return
+
             # GET /api/projects/:id/problems
             if sub_path == "/problems":
                 cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)

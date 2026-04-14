@@ -10,6 +10,7 @@ import { EmptyState, InlineFeedback } from '../components/page-state';
 import { StatsGrid } from '../components/StatsGrid';
 import { useConnection } from '../features/connection/ConnectionContext';
 import { speakerStyle } from '../lib/speaker';
+import { useNameDict, resolveSpeakerName } from '../lib/useNameDict';
 import {
   type FileProgress,
   type Job,
@@ -46,6 +47,7 @@ export function ProjectTranslatePage() {
   const { projectDir, projectId, configFileName } = useOutletContext<OutletContext>();
   const { connectionPhase, translators, loadJobs } = useConnection();
   const reducedMotion = usePrefersReducedMotion();
+  const { nameDict } = useNameDict(projectId);
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [refreshingJobs, setRefreshingJobs] = useState(false);
@@ -701,6 +703,7 @@ export function ProjectTranslatePage() {
                         isFresh={freshSuccessIds.includes(entry.id)}
                         isSuccessFileFilterActive={selectedSuccessFileSet.has(entry.filename || '')}
                         onToggleSuccessFileFilter={handleToggleSuccessFileFilter}
+                        nameDict={nameDict}
                         key={entry.id}
                       />
                     ))}
@@ -769,14 +772,21 @@ function RuntimeSuccessRow({
   entry,
   isFresh,
   isSuccessFileFilterActive,
-  onToggleSuccessFileFilter }: {
+  onToggleSuccessFileFilter,
+  nameDict }: {
   entry: ProjectRuntimeSuccessEntry;
   isFresh: boolean;
   isSuccessFileFilterActive: boolean;
   onToggleSuccessFileFilter: (filename: string) => void;
+  nameDict: Map<string, string>;
 }) {
-  const speakerLabel = Array.isArray(entry.speaker) ? entry.speaker.join(' / ') : entry.speaker;
-  const speakerStyleVal = speakerLabel ? speakerStyle(speakerLabel) : undefined;
+  const rawSpeakerLabel = Array.isArray(entry.speaker) ? entry.speaker.join(' / ') : entry.speaker;
+  const speakerLabel = rawSpeakerLabel
+    ? (Array.isArray(entry.speaker)
+        ? entry.speaker.map((s) => resolveSpeakerName(s, nameDict)).join(' / ')
+        : resolveSpeakerName(rawSpeakerLabel, nameDict))
+    : rawSpeakerLabel;
+  const speakerStyleVal = rawSpeakerLabel ? speakerStyle(rawSpeakerLabel) : undefined;
   const entryFilename = entry.filename || '未命名文件';
   const filterFilename = entry.filename;
 

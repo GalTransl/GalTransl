@@ -13,6 +13,7 @@ import { ProjectConfigPage } from '../pages/ProjectConfigPage';
 import { ProjectDictionaryPage } from '../pages/ProjectDictionaryPage';
 import { CommonDictionaryPage } from '../pages/CommonDictionaryPage';
 import { ProjectCachePage } from '../pages/ProjectCachePage';
+import { ProjectNamePage } from '../pages/ProjectNamePage';
 import { ProjectProblemsPage } from '../pages/ProjectProblemsPage';
 
 const CONFIG_FILE_KEY = 'galtransl-config-file';
@@ -200,6 +201,7 @@ function AppInner({ openProjects, onOpenProject, onCloseProject }: AppInnerProps
                 <Route path="translate" element={<ProjectTranslatePage />} />
                 <Route path="config" element={<ProjectConfigPage />} />
                 <Route path="dictionary" element={<ProjectDictionaryPage />} />
+                <Route path="names" element={<ProjectNamePage />} />
                 <Route path="cache" element={<ProjectCachePage />} />
                 <Route path="problems" element={<ProjectProblemsPage />} />
               </Route>
