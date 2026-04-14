@@ -101,6 +101,67 @@ def write_name_table_csv(
             writer.writerow([name, dst, count])
 
 
+def _load_existing_dst_names(proj_dir: str) -> Dict[str, str]:
+    """
+    Read existing name replacement table (CSV or XLSX) and return
+    a dict of src_name -> dst_name for entries that already have a translation.
+
+    Args:
+        proj_dir: Path to the project root directory.
+
+    Returns:
+        Dict mapping src_name -> dst_name (only entries with non-empty dst_name).
+    """
+    dst_names: Dict[str, str] = {}
+    csv_path = joinpath(proj_dir, "name替换表.csv")
+    xlsx_path = joinpath(proj_dir, "name替换表.xlsx")
+
+    def _find_col(header, new_name, old_name):
+        if new_name in header:
+            return header.index(new_name)
+        if old_name in header:
+            return header.index(old_name)
+        return -1
+
+    if os.path.isfile(csv_path):
+        try:
+            with open(csv_path, "r", newline="", encoding="utf-8-sig") as f:
+                reader = csv.reader(f)
+                header = next(reader, None)
+                if not header:
+                    return dst_names
+                src_idx = _find_col(header, "SRC_Name", "JP_Name")
+                dst_idx = _find_col(header, "DST_Name", "CN_Name")
+                if src_idx < 0 or dst_idx < 0:
+                    return dst_names
+                for row in reader:
+                    if len(row) > max(src_idx, dst_idx):
+                        src = row[src_idx].strip()
+                        dst = row[dst_idx].strip()
+                        if src and dst:
+                            dst_names[src] = dst
+        except Exception:
+            pass
+    elif os.path.isfile(xlsx_path):
+        try:
+            workbook = openpyxl.load_workbook(xlsx_path)
+            sheet = workbook.active
+            header = [cell.value for cell in sheet[1]]
+            src_idx = _find_col(header, "SRC_Name", "JP_Name")
+            dst_idx = _find_col(header, "DST_Name", "CN_Name")
+            if src_idx < 0 or dst_idx < 0:
+                return dst_names
+            for row in sheet.iter_rows(min_row=2):
+                src_val = row[src_idx].value if src_idx < len(row) else None
+                dst_val = row[dst_idx].value if dst_idx < len(row) else None
+                if src_val and dst_val:
+                    dst_names[str(src_val).strip()] = str(dst_val).strip()
+        except Exception:
+            pass
+
+    return dst_names
+
+
 def load_name_table(
     name_table_path: str, firstime_load: bool, chunks: List[SplitChunkMetadata], proj_config: CProjectConfig
 ) -> Dict[str, str]:
@@ -306,6 +367,12 @@ async def dump_name_table_from_chunks(
     for name, count in name_dict.items():
         LOGGER.debug(f"{name}: {count}")
 
+    # Preserve existing translations from the current name table
+    existing_dst = _load_existing_dst_names(proj_dir)
+    if existing_dst:
+        preserved = sum(1 for n in name_dict if n in existing_dst)
+        LOGGER.info(f"保留已有翻译 {preserved} 条")
+
     # Ask user for export format
     if proj_config.non_interactive:
         LOGGER.info("非交互模式，自动使用 CSV 格式导出name替换表")
@@ -329,7 +396,7 @@ async def dump_name_table_from_chunks(
 
     try:
         if export_format == "csv":
-            write_name_table_csv(output_path, name_dict)
+            write_name_table_csv(output_path, name_dict, existing_dst)
             LOGGER.info(
                 f"name已保存到'{output_path}' (CSV格式)，填入DST_Name后可用于后续翻译name字段。"
             )
@@ -347,7 +414,7 @@ async def dump_name_table_from_chunks(
             row_num = 2
             for name, count in name_dict.items():
                 sheet[f"A{row_num}"] = name
-                sheet[f"B{row_num}"] = ""
+                sheet[f"B{row_num}"] = existing_dst.get(name, "")
                 sheet[f"C{row_num}"] = count
                 row_num += 1
 
