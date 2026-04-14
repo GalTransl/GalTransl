@@ -5,7 +5,7 @@ import { Button } from '../components/Button';
 import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
 import { EmptyState, InlineFeedback, LoadingState } from '../components/page-state';
-import { speakerStyle } from '../lib/speaker';
+import { speakerStyle, speakerHue } from '../lib/speaker';
 import { useNameDict, resolveSpeakerName } from '../lib/useNameDict';
 import {
   type FileEntry,
@@ -226,15 +226,24 @@ function SearchResultCard({
       title={`跳转到 ${result.filename} #${result.index}`}
     >
       <div className="search-result-card__header">
-        <span className="search-result-card__file">{result.filename}</span>
-        <span className="search-result-card__index">#{result.index}</span>
-        {speaker !== '—' && (
-          <span className="cache-card__pill cache-card__pill--speaker" style={speakerStyle(rawSpeaker)}>{speaker}</span>
+        {(result.match_src || result.match_dst || result.match_problem) && (
+          <span className="search-result-card__match-badges">
+            {result.match_src && <span className="search-result-card__badge search-result-card__badge--src">原文</span>}
+            {result.match_dst && <span className="search-result-card__badge search-result-card__badge--dst">译文</span>}
+            {result.match_problem && <span className="search-result-card__badge search-result-card__badge--problem">问题</span>}
+          </span>
         )}
-        {result.match_src && <span className="search-result-card__badge search-result-card__badge--src">原文</span>}
-        {result.match_dst && <span className="search-result-card__badge search-result-card__badge--dst">译文</span>}
-        {result.problem && <span className="cache-card__pill cache-card__pill--problem">{result.problem}</span>}
+        <span className="search-result-card__file">{result.filename}</span>
       </div>
+      {(result.index !== undefined || speaker !== '—' || result.problem) && (
+        <div className="search-result-card__tags">
+          <span className="search-result-card__index">#{result.index}</span>
+          {speaker !== '—' && (
+            <span className="search-result-card__speaker" style={{ color: `hsl(${speakerHue(rawSpeaker)}, 55%, 32%)` }}>{speaker}</span>
+          )}
+          {result.problem && <span className="search-result-card__problem">{result.problem}</span>}
+        </div>
+      )}
       {result.post_src && (
         <div className="search-result-card__line">
           <span className="search-result-card__label">原文</span>
@@ -284,6 +293,7 @@ export function ProjectCachePage() {
   const [searchResults, setSearchResults] = useState<CacheSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchTotal, setSearchTotal] = useState(0);
+  const [selectedSearchIdx, setSelectedSearchIdx] = useState(-1);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Replace state
@@ -810,11 +820,12 @@ export function ProjectCachePage() {
                   <option value="all">全部</option>
                   <option value="src">仅原文</option>
                   <option value="dst">仅译文</option>
+                  <option value="problem">仅问题</option>
                 </select>
               </div>
 
-              {/* Replace toggle */}
-              <div className="cache-replace-toggle">
+              {/* Replace toggle + Search results summary */}
+              <div className="cache-search-meta">
                 <button
                   type="button"
                   className="cache-replace-toggle__btn"
@@ -823,8 +834,13 @@ export function ProjectCachePage() {
                 >
                   {showReplace ? '▾ 替换' : '▸ 替换'}
                 </button>
+                {searching && <span className="cache-search-status">搜索中…</span>}
+                {!searching && searchQuery.trim() && (
+                  <span className="cache-search-status">
+                    {searchTotal > 0 ? `${searchTotal} 条结果` : '无匹配结果'}
+                  </span>
+                )}
               </div>
-
               {showReplace && (
                 <div className="cache-replace-group">
                   <input
@@ -879,14 +895,6 @@ export function ProjectCachePage() {
                       ))}
                     </div>
                   )}
-                </div>
-              )}
-
-              {/* Search results summary */}
-              {searching && <div className="cache-search-status">搜索中…</div>}
-              {!searching && searchQuery.trim() && (
-                <div className="cache-search-status">
-                  {searchTotal > 0 ? `${searchTotal} 条结果` : '无匹配结果'}
                 </div>
               )}
 

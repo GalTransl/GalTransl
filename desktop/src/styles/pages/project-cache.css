@@ -195,11 +195,13 @@
 
 .cache-search {
   flex: 1;
-  padding: var(--space-3) var(--space-4);
+  padding: 4px 8px;
   border: 1px solid var(--color-line);
   border-radius: var(--radius-control);
-  font-size: 14px;
+  font-size: 12px;
   background: var(--color-surface-strong);
+  height: 26px;
+  box-sizing: border-box;
 }
 
 .cache-search:focus {
@@ -600,10 +602,10 @@
 }
 
 .cache-search-field {
-  padding: var(--space-1) var(--space-2);
+  padding: 2px 6px;
   border: 1px solid var(--color-line);
   border-radius: var(--radius-control);
-  font-size: 12px;
+  font-size: 11px;
   background: var(--color-surface-base);
   color: var(--color-text);
   cursor: pointer;
@@ -611,6 +613,8 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  height: 26px;
+  box-sizing: border-box;
 }
 
 .cache-search-field:focus {
@@ -618,9 +622,14 @@
   border-color: var(--color-primary);
 }
 
-.cache-replace-toggle {
+.cache-search-meta {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.cache-search-meta .cache-search-status {
+  margin-left: auto;
 }
 
 .cache-replace-toggle__btn {
@@ -759,18 +768,53 @@
 .search-result-card__header {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.search-result-card__match-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.search-result-card__tags {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.search-result-card__speaker {
+  font-size: 10px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.search-result-card__problem {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-warning);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 1;
 }
 
 .search-result-card__file {
   font-size: 11px;
   color: var(--color-primary);
   font-weight: 500;
-  max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .search-result-card__index {
@@ -796,6 +840,11 @@
 .search-result-card__badge--dst {
   background: rgba(34, 197, 94, 0.12);
   color: #16a34a;
+}
+
+.search-result-card__badge--problem {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
 }
 
 .search-result-card__line {
