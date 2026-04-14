@@ -1,11 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Panel } from '../components/Panel';
 import { PageHeader } from '../components/PageHeader';
-import { BackendConfigEditor } from '../components/BackendConfigEditor';
 import { EmptyState, ErrorState, InlineFeedback, LoadingState } from '../components/page-state';
-import { ProxyConfigEditor } from '../components/ProxyConfigEditor';
-import { PluginSettingsEditor } from '../components/PluginSettingsEditor';
 import {
   type PluginInfo,
   fetchProjectConfig,
@@ -15,6 +12,15 @@ import {
   getSelectedBackendProfile,
   setSelectedBackendProfile } from '../lib/api';
 import { normalizeError } from '../lib/errors';
+import {
+  ConfigSectionNav,
+  CommonSettingsSection,
+  BackendSettingsSection,
+  PluginSettingsSection,
+  DictionarySettingsSection,
+  ProblemAnalyzeSection,
+  type ConfigSectionKey,
+} from './project-config';
 
 type OutletContext = {
   projectDir: string;
@@ -22,48 +28,6 @@ type OutletContext = {
   configFileName: string;
   onProjectDirChange: (dir: string) => void;
 };
-
-type ConfigSection = 'common' | 'backendSpecific' | 'plugin' | 'dictionary' | 'problemAnalyze';
-
-const CONFIG_SECTIONS: { key: ConfigSection; label: string; icon: string }[] = [
-  { key: 'common', label: '通用设置', icon: '⚙️' },
-  { key: 'backendSpecific', label: '翻译后端', icon: '🤖' },
-  { key: 'plugin', label: '插件设置', icon: '🧩' },
-  { key: 'dictionary', label: '字典设置', icon: '📖' },
-  { key: 'problemAnalyze', label: '问题分析', icon: '🔍' },
-];
-
-// Field definitions for common config section
-const COMMON_FIELDS: {
-  key: string;
-  label: string;
-  description: string;
-  type: 'number' | 'text' | 'select';
-  options?: string[];
-  placeholder?: string;
-}[] = [
-  { key: 'workersPerProject', label: '并发文件数', description: '项目级并行文件数；单文件并行需配合“文件分割”。', type: 'number', placeholder: '16' },
-  { key: 'gpt.numPerRequestTranslate', label: '单次翻译句数', description: '每次请求打包的句子数，建议不超过 16。', type: 'number', placeholder: '10' },
-  { key: 'language', label: '目标语言', description: '翻译输出语言。', type: 'select', options: ['zh-cn', 'zh-tw', 'en', 'ja', 'ko', 'ru', 'fr'] },
-  { key: 'sortBy', label: '翻译顺序', description: 'name 按文件名，size 优先大文件（并行时通常更快）。', type: 'select', options: ['name', 'size'] },
-  { key: 'splitFile', label: '文件分割', description: '单文件分片模式：no 关闭，Num 按句数切片，Equal 按份数均分。', type: 'select', options: ['no', 'Num', 'Equal'] },
-  { key: 'splitFileNum', label: '分割数量', description: 'Num 模式下表示每片句数；Equal 模式下表示分片总数。', type: 'number', placeholder: '2048' },
-  { key: 'splitFileCrossNum', label: '分割交叉句数', description: '分片间重叠句数，可提升片段衔接质量（常用 0 或 10）。', type: 'number', placeholder: '0' },
-  { key: 'save_steps', label: '缓存保存频率', description: '每处理 N 个批次保存一次缓存。', type: 'number', placeholder: '1' },
-  { key: 'start_time', label: '定时启动', description: '24 小时制时间（如 00:30）；留空则立即启动。', type: 'text', placeholder: '留空则立即启动' },
-  { key: 'linebreakSymbol', label: '换行符', description: 'JSON 内换行符类型，供问题检测/自动修复使用。', type: 'text', placeholder: 'auto' },
-  { key: 'skipH', label: '跳过敏感句', description: '是否跳过可能触发敏感词检测的句子。', type: 'select', options: ['true', 'false'] },
-  { key: 'smartRetry', label: '智能重试', description: '解析失败时自动缩小批次并重置上下文，减少无效重试。', type: 'select', options: ['true', 'false'] },
-  { key: 'retranslFail', label: '重翻失败句', description: '启动时是否自动重翻标记为 (Failed) 的句子。', type: 'select', options: ['true', 'false'] },
-  { key: 'gpt.contextNum', label: '上下文句数', description: '每次请求附带的前文句数，常用 8。', type: 'number', placeholder: '8' },
-  { key: 'gpt.translation_guideline', label: '翻译规范', description: '使用的翻译规范文件名（位于 translation_guidelines）。', type: 'text', placeholder: '日译中_基础.md' },
-  { key: 'gpt.enhance_jailbreak', label: '改善拒答', description: '启用后可降低模型拒答概率。', type: 'select', options: ['true', 'false'] },
-  { key: 'gpt.change_prompt', label: '修改Prompt', description: 'no 不改；AdditionalPrompt 追加；OverwritePrompt 覆盖默认提示词。', type: 'select', options: ['no', 'AdditionalPrompt', 'OverwritePrompt'] },
-  { key: 'gpt.prompt_content', label: '额外Prompt内容', description: '仅在“修改Prompt”非 no 时生效。', type: 'text' },
-  { key: 'gpt.token_limit', label: 'Token限制(Sakura)', description: 'Sakura 场景下单轮 token 上限；0 表示不限制。', type: 'number', placeholder: '0' },
-  { key: 'loggingLevel', label: '日志级别', description: 'debug 详细，info 常规，warning 仅警告。', type: 'select', options: ['debug', 'info', 'warning'] },
-  { key: 'saveLog', label: '保存日志到文件', description: '是否将运行日志写入文件。', type: 'select', options: ['true', 'false'] },
-];
 
 export function ProjectConfigPage() {
   const { projectDir, projectId, configFileName } = useOutletContext<OutletContext>();
@@ -74,7 +38,7 @@ export function ProjectConfigPage() {
   const [error, setError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [activeSection, setActiveSection] = useState<ConfigSection>('common');
+  const [activeSection, setActiveSection] = useState<ConfigSectionKey>('common');
   const [yamlView, setYamlView] = useState(false);
 
   // Global backend profile selection
@@ -84,6 +48,9 @@ export function ProjectConfigPage() {
   // Plugin lists from global plugin manager
   const [filePlugins, setFilePlugins] = useState<PluginInfo[]>([]);
   const [textPlugins, setTextPlugins] = useState<PluginInfo[]>([]);
+
+  // Ref for scroll-to-section
+  const mainRef = useRef<HTMLDivElement>(null);
 
   // Load config
   useEffect(() => {
@@ -235,6 +202,16 @@ export function ProjectConfigPage() {
     }
   }, [projectId, config, configFileName]);
 
+  // Scroll to active section
+  const handleSectionChange = useCallback((section: ConfigSectionKey) => {
+    setActiveSection(section);
+    setYamlView(false);
+    // Scroll main area to top so new section is visible
+    if (mainRef.current) {
+      mainRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, []);
+
   if (loading) {
     return (
       <div className="project-config-page">
@@ -260,39 +237,18 @@ export function ProjectConfigPage() {
       <PageHeader className="project-config-page__header" title="配置编辑" description={`可视化编辑项目配置文件 ${configFileName}`} />
 
       <div className="project-config-page__content">
-        <aside className="project-config-page__sidebar">
-          {CONFIG_SECTIONS.map((section) => (
-            <button
-              type="button"
-              key={section.key}
-              className={`project-config-page__section-btn ${activeSection === section.key ? 'project-config-page__section-btn--active' : ''}`}
-              onClick={() => setActiveSection(section.key)}
-            >
-              <span>{section.icon}</span>
-              <span>{section.label}</span>
-            </button>
-          ))}
-          <button
-            type="button"
-            className="project-config-page__save-btn"
-            onClick={() => void handleSave()}
-            disabled={saving || !config}
-          >
-            <span>💾</span>
-            <span>{saving ? '保存中…' : '保存配置'}{dirty && !saving && <span style={{ color: '#e53e3e', marginLeft: 4 }}>●</span>}</span>
-          </button>
-          <div className="project-config-page__section-divider" />
-          <button
-            type="button"
-            className={`project-config-page__section-btn ${yamlView ? 'project-config-page__section-btn--active' : ''}`}
-            onClick={() => setYamlView(!yamlView)}
-          >
-            <span>📝</span>
-            <span>YAML源码</span>
-          </button>
-        </aside>
+        <ConfigSectionNav
+          activeSection={activeSection}
+          onSectionChange={handleSectionChange}
+          yamlView={yamlView}
+          onYamlToggle={() => setYamlView(!yamlView)}
+          onSave={() => void handleSave()}
+          saving={saving}
+          dirty={dirty}
+          disabled={!config}
+        />
 
-        <div className="project-config-page__main">
+        <div className="project-config-page__main" ref={mainRef}>
           {error && (
             <InlineFeedback tone="error" title="配置保存失败" description={error} />
           )}
@@ -310,241 +266,77 @@ export function ProjectConfigPage() {
           ) : (
             <>
               {activeSection === 'common' && (
-                <Panel title="通用设置" description="翻译核心参数配置（说明已与 sampleProject/config.inc.yaml 同步）。">
-                  <div className="config-form">
-                    {COMMON_FIELDS.map((field) => {
-                      const fieldId = `common-${field.key.replace(/\./g, '-')}`;
-                      const value = getNestedValue(commonConfig, field.key);
-                      const displayValue = value == null ? '' : String(value);
-                      return (
-                        <div key={field.key} className="field">
-                          <label htmlFor={fieldId}>{field.label}</label>
-                          {field.type === 'select' ? (
-                            <select
-                              id={fieldId}
-                              value={displayValue}
-                              onChange={(e) => handleFieldChange(`common.${field.key}`, e.target.value)}
-                            >
-                              {field.options?.map((opt) => (
-                                <option key={opt} value={opt}>{opt}</option>
-                              ))}
-                            </select>
-                          ) : (
-                            <input
-                              id={fieldId}
-                              type={field.type}
-                              value={displayValue}
-                              placeholder={field.placeholder}
-                              onChange={(e) => handleFieldChange(`common.${field.key}`, e.target.value)}
-                            />
-                          )}
-                          <span className="field__hint">{field.description}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </Panel>
+                <CommonSettingsSection
+                  commonConfig={commonConfig}
+                  onFieldChange={handleFieldChange}
+                />
               )}
 
               {activeSection === 'backendSpecific' && (
-                <Panel title="翻译后端" description="OpenAI兼容接口、Sakura本地模型和代理配置。">
-                  <div className="config-form">
-                    <label className="field">
-                      <span>全局后端配置</span>
-                      <select
-                        value={selectedProfile}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setSelectedProfile(val);
-                          setSelectedBackendProfile(projectDir, val);
-                        }}
-                      >
-                        <option value="">不使用（使用项目自身配置）</option>
-                        {backendProfileNames.map((name) => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                      </select>
-                      <span className="field__hint">
-                        {selectedProfile
-                          ? `翻译时将使用全局配置「${selectedProfile}」覆盖项目后端设置`
-                          : '新项目默认使用全局默认配置，可在「翻译后端配置」页面设置默认'}
-                      </span>
-                    </label>
-
-                    {selectedProfile ? (
-                      <InlineFeedback
-                        tone="info"
-                        title={`当前使用全局配置：${selectedProfile}`}
-                        description="翻译时将使用该配置覆盖项目后端设置。如需修改配置内容，请前往「翻译后端配置」页面。"
-                      />
-                    ) : (
-                      <BackendConfigEditor
-                        config={config?.backendSpecific as Record<string, unknown> || {}}
-                        onChange={(newBackend) => {
-                          setConfig((prev) => prev ? { ...prev, backendSpecific: newBackend } : prev);
-                          setSaveSuccess(false);
-                          setDirty(true);
-                        }}
-                      />
-                    )}
-
-                    <ProxyConfigEditor
-                      proxyConfig={(config?.proxy as Record<string, unknown>) || {}}
-                      onChange={(newProxy) => {
-                        setConfig((prev) => prev ? { ...prev, proxy: newProxy } : prev);
-                        setSaveSuccess(false);
-                        setDirty(true);
-                      }}
-                    />
-                  </div>
-                </Panel>
+                <BackendSettingsSection
+                  config={config}
+                  selectedProfile={selectedProfile}
+                  backendProfileNames={backendProfileNames}
+                  onProfileChange={(profile) => {
+                    setSelectedProfile(profile);
+                    setSelectedBackendProfile(projectDir, profile);
+                  }}
+                  onBackendChange={(newBackend) => {
+                    setConfig((prev) => prev ? { ...prev, backendSpecific: newBackend } : prev);
+                    setSaveSuccess(false);
+                    setDirty(true);
+                  }}
+                  onProxyChange={(newProxy) => {
+                    setConfig((prev) => prev ? { ...prev, proxy: newProxy } : prev);
+                    setSaveSuccess(false);
+                    setDirty(true);
+                  }}
+                  onDirty={() => { setSaveSuccess(false); setDirty(true); }}
+                />
               )}
 
               {activeSection === 'plugin' && (
-                <Panel title="插件设置" description="文件插件和文本插件配置。">
-                  <div className="config-form">
-                    {/* ── 文件插件 ── */}
-                    <div className="plugin-section">
-                      <div className="plugin-section__title">文件插件</div>
-                      <label className="field">
-                        <select
-                          value={String((config?.plugin as Record<string, unknown>)?.filePlugin ?? 'file_galtransl_json')}
-                          onChange={(e) => {
-                            setConfig((prev) => {
-                              const plugin = { ...((prev?.plugin as Record<string, unknown>) || {}) };
-                              plugin.filePlugin = e.target.value;
-                              return prev ? { ...prev, plugin } : prev;
-                            });
-                            setSaveSuccess(false);
-                            setDirty(true);
-                          }}
-                        >
-                          {filePlugins.length > 0 ? (
-                            filePlugins.map((p) => (
-                              <option key={p.name} value={p.name}>
-                                {p.display_name} ({p.name})
-                              </option>
-                            ))
-                          ) : (
-                            <option value={String((config?.plugin as Record<string, unknown>)?.filePlugin ?? 'file_galtransl_json')}>
-                              {String((config?.plugin as Record<string, unknown>)?.filePlugin ?? 'file_galtransl_json')}
-                            </option>
-                          )}
-                        </select>
-                        <span className="field__hint">从全局插件管理中获取可用文件插件</span>
-                      </label>
-                      {/* 文件插件设置项 */}
-                      {(() => {
-                        const selectedFilePlugin = filePlugins.find(
-                          (p) => p.name === String((config?.plugin as Record<string, unknown>)?.filePlugin ?? 'file_galtransl_json')
-                        );
-                        if (!selectedFilePlugin || Object.keys(selectedFilePlugin.settings || {}).length === 0) return null;
-                        return (
-                          <PluginSettingsEditor
-                            plugin={selectedFilePlugin}
-                            overrides={((config?.plugin as Record<string, unknown>)?.[selectedFilePlugin.name] as Record<string, unknown>) || {}}
-                            onChange={handlePluginSettingChange}
-                          />
-                        );
-                      })()}
-                    </div>
-
-                    {/* ── 文本插件 ── */}
-                    <div className="plugin-section">
-                      <div className="plugin-section__title">文本插件</div>
-                      {textPlugins.length > 0 ? (
-                        <div className="plugin-check-list">
-                          {textPlugins.map((plugin) => {
-                            const enabledTextPlugins = new Set(
-                              Array.isArray((config?.plugin as Record<string, unknown>)?.textPlugins)
-                                ? ((config?.plugin as Record<string, unknown>).textPlugins as string[])
-                                : []
-                            );
-                            const isChecked = enabledTextPlugins.has(plugin.name);
-                            const hasSettings = Object.keys(plugin.settings || {}).length > 0;
-
-                            return (
-                              <div key={plugin.name} className="plugin-check-item">
-                                <label className="plugin-check-item__header">
-                                  <input
-                                    type="checkbox"
-                                    checked={isChecked}
-                                    onChange={() => handleToggleTextPlugin(plugin.name)}
-                                  />
-                                  <span className="plugin-check-item__name">
-                                    {plugin.display_name}
-                                  </span>
-                                  <span className="plugin-check-item__module">
-                                    ({plugin.name})
-                                  </span>
-                                  {plugin.version && (
-                                    <span className="plugin-check-item__version">
-                                      v{plugin.version}
-                                    </span>
-                                  )}
-                                </label>
-                                {plugin.description && (
-                                  <div className="plugin-check-item__desc">{plugin.description}</div>
-                                )}
-                                {isChecked && hasSettings && (
-                                  <div className="plugin-check-item__settings">
-                                    <PluginSettingsEditor
-                                      plugin={plugin}
-                                      overrides={((config?.plugin as Record<string, unknown>)?.[plugin.name] as Record<string, unknown>) || {}}
-                                      onChange={handlePluginSettingChange}
-                                    />
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div className="plugin-check-empty">未找到可用的文本插件</div>
-                      )}
-                    </div>
-                  </div>
-                </Panel>
+                <PluginSettingsSection
+                  config={config}
+                  filePlugins={filePlugins}
+                  textPlugins={textPlugins}
+                  onFilePluginChange={(value) => {
+                    setConfig((prev) => {
+                      const plugin = { ...((prev?.plugin as Record<string, unknown>) || {}) };
+                      plugin.filePlugin = value;
+                      return prev ? { ...prev, plugin } : prev;
+                    });
+                    setSaveSuccess(false);
+                    setDirty(true);
+                  }}
+                  onPluginSettingChange={handlePluginSettingChange}
+                  onToggleTextPlugin={handleToggleTextPlugin}
+                />
               )}
 
               {activeSection === 'dictionary' && (
-                <Panel title="字典设置" description="译前/GPT/译后字典文件配置。">
-                  <DictConfigEditor
-                    dictConfig={(config?.dictionary as Record<string, unknown>) || {}}
-                    onChange={(newDict) => {
-                      setConfig((prev) => prev ? { ...prev, dictionary: newDict } : prev);
-                      setSaveSuccess(false);
-                      setDirty(true);
-                    }}
-                  />
-                </Panel>
+                <DictionarySettingsSection
+                  dictConfig={(config?.dictionary as Record<string, unknown>) || {}}
+                  onChange={(newDict) => {
+                    setConfig((prev) => prev ? { ...prev, dictionary: newDict } : prev);
+                    setSaveSuccess(false);
+                    setDirty(true);
+                  }}
+                />
               )}
 
               {activeSection === 'problemAnalyze' && (
-                <Panel title="问题分析" description="翻译质量检测配置。">
-                  <div className="config-form">
-                    <label className="field">
-                      <span>问题检测列表</span>
-                      <textarea
-                        rows={8}
-                        value={Array.isArray((config?.problemAnalyze as Record<string, unknown>)?.problemList)
-                          ? ((config?.problemAnalyze as Record<string, unknown>).problemList as string[]).join('\n')
-                          : String((config?.problemAnalyze as Record<string, unknown>)?.problemList ?? '')}
-                        onChange={(e) => {
-                          const lines = e.target.value.split('\n').filter(Boolean);
-                          setConfig((prev) => {
-                            const pa = { ...((prev?.problemAnalyze as Record<string, unknown>) || {}) };
-                            pa.problemList = lines;
-                            return prev ? { ...prev, problemAnalyze: pa } : prev;
-                          });
-                          setSaveSuccess(false);
-                          setDirty(true);
-                        }}
-                      />
-                      <span className="field__hint">每行一个问题类型，如：词频过高、残留日文等</span>
-                    </label>
-                  </div>
-                </Panel>
+                <ProblemAnalyzeSection
+                  config={config}
+                  onProblemListChange={(lines) => {
+                    setConfig((prev) => {
+                      const pa = { ...((prev?.problemAnalyze as Record<string, unknown>) || {}) };
+                      pa.problemList = lines;
+                      return prev ? { ...prev, problemAnalyze: pa } : prev;
+                    });
+                  }}
+                  onDirty={() => { setSaveSuccess(false); setDirty(true); }}
+                />
               )}
             </>
           )}
@@ -555,93 +347,3 @@ export function ProjectConfigPage() {
     </div>
   );
 }
-
-// ---- Dictionary Config Sub-editor ----
-
-function DictConfigEditor({
-  dictConfig,
-  onChange }: {
-  dictConfig: Record<string, unknown>;
-  onChange: (newConfig: Record<string, unknown>) => void;
-}) {
-  return (
-    <>
-      <label className="field">
-        <span>通用字典文件夹</span>
-        <input
-          type="text"
-          value={String(dictConfig.defaultDictFolder ?? 'Dict')}
-          onChange={(e) => onChange({ ...dictConfig, defaultDictFolder: e.target.value })}
-        />
-      </label>
-      <label className="field">
-        <span>译前字典</span>
-        <textarea
-          rows={4}
-          value={Array.isArray(dictConfig.preDict) ? (dictConfig.preDict as string[]).join('\n') : String(dictConfig.preDict ?? '')}
-          onChange={(e) => onChange({ ...dictConfig, preDict: e.target.value.split('\n').filter(Boolean) })}
-        />
-        <span className="field__hint">每行一个字典文件名</span>
-      </label>
-      <label className="field">
-        <span>GPT字典</span>
-        <textarea
-          rows={4}
-          value={Array.isArray(dictConfig['gpt.dict']) ? (dictConfig['gpt.dict'] as string[]).join('\n') : String(dictConfig['gpt.dict'] ?? '')}
-          onChange={(e) => onChange({ ...dictConfig, 'gpt.dict': e.target.value.split('\n').filter(Boolean) })}
-        />
-        <span className="field__hint">每行一个字典文件名</span>
-      </label>
-      <label className="field">
-        <span>译后字典</span>
-        <textarea
-          rows={4}
-          value={Array.isArray(dictConfig.postDict) ? (dictConfig.postDict as string[]).join('\n') : String(dictConfig.postDict ?? '')}
-          onChange={(e) => onChange({ ...dictConfig, postDict: e.target.value.split('\n').filter(Boolean) })}
-        />
-        <span className="field__hint">每行一个字典文件名</span>
-      </label>
-      <label className="field">
-        <span>字典用在name字段(译前)</span>
-        <select
-          value={String(dictConfig.usePreDictInName ?? 'false')}
-          onChange={(e) => onChange({ ...dictConfig, usePreDictInName: e.target.value === 'true' })}
-        >
-          <option value="true">是</option>
-          <option value="false">否</option>
-        </select>
-      </label>
-      <label className="field">
-        <span>字典用在name字段(GPT)</span>
-        <select
-          value={String(dictConfig.useGPTDictInName ?? 'false')}
-          onChange={(e) => onChange({ ...dictConfig, useGPTDictInName: e.target.value === 'true' })}
-        >
-          <option value="true">是</option>
-          <option value="false">否</option>
-        </select>
-      </label>
-      <label className="field">
-        <span>字典用在name字段(译后)</span>
-        <select
-          value={String(dictConfig.usePostDictInName ?? 'false')}
-          onChange={(e) => onChange({ ...dictConfig, usePostDictInName: e.target.value === 'true' })}
-        >
-          <option value="true">是</option>
-          <option value="false">否</option>
-        </select>
-      </label>
-      <label className="field">
-        <span>字典排序</span>
-        <select
-          value={String(dictConfig.sortDict ?? 'true')}
-          onChange={(e) => onChange({ ...dictConfig, sortDict: e.target.value === 'true' })}
-        >
-          <option value="true">是</option>
-          <option value="false">否</option>
-        </select>
-      </label>
-    </>
-  );
-}
-

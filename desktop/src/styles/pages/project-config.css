@@ -26,6 +26,8 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  position: sticky;
+  top: var(--space-6);
 }
 
 .project-config-page__section-btn {
@@ -90,6 +92,7 @@
 
 .project-config-page__main {
   min-width: 0;
+  overflow-y: auto;
 }
 
 .config-form {
@@ -133,3 +136,204 @@
   overflow-y: auto;
 }
 
+/* ── Config Field Row (new component) ── */
+
+.config-field-row {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: var(--space-2) var(--space-4);
+  align-items: start;
+  padding: var(--space-2) 0;
+}
+
+.config-field-row--advanced {
+  opacity: 0.85;
+}
+
+.config-field-row--primary {
+  /* primary fields are full opacity by default */
+}
+
+.config-field-row__label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+  line-height: 1.5;
+  padding-top: 6px;
+  align-self: start;
+}
+
+.config-field-row__input {
+  min-width: 0;
+}
+
+.config-field-row__input input,
+.config-field-row__input select {
+  width: 100%;
+  max-width: 420px;
+  min-height: 48px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.config-field-row__input textarea {
+  width: 100%;
+  max-width: 420px;
+  padding: 11px 14px;
+  border: 1px solid rgba(191, 208, 226, 0.92);
+  border-radius: calc(var(--radius-control) + 2px);
+  background: var(--color-surface-strong);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  color: var(--color-text);
+  line-height: 1.6;
+  resize: vertical;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 12.5px;
+  min-height: 92px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.7) transparent;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.config-field-row__input input:focus,
+.config-field-row__input select:focus {
+  outline: none;
+  border-color: rgba(47, 111, 235, 0.65);
+  box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);
+}
+
+.config-field-row__input textarea:focus {
+  outline: none;
+  border-color: rgba(47, 111, 235, 0.72);
+  background: var(--color-surface-strong);
+  box-shadow:
+    0 0 0 4px rgba(47, 111, 235, 0.12),
+    0 10px 24px rgba(47, 111, 235, 0.08);
+}
+
+.config-field-row__input input:hover,
+.config-field-row__input select:hover {
+  border-color: rgba(47, 111, 235, 0.28);
+}
+
+.config-field-row__input textarea:hover {
+  border-color: rgba(47, 111, 235, 0.28);
+}
+
+.config-field-row__input textarea::placeholder {
+  color: rgba(100, 116, 139, 0.88);
+}
+
+.config-field-row__input input:disabled,
+.config-field-row__input select:disabled,
+.config-field-row__input textarea:disabled {
+  color: var(--color-text-muted);
+  background: rgba(241, 245, 249, 0.96);
+  border-color: rgba(203, 213, 225, 0.92);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.config-field-row__hint {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  line-height: 1.4;
+}
+
+/* ── Config Field Group ── */
+
+.config-field-group {
+  margin-bottom: var(--space-5);
+}
+
+.config-field-group:last-child {
+  margin-bottom: 0;
+}
+
+.config-field-group__title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.config-field-group--advanced .config-field-group__title {
+  color: var(--color-text-muted);
+  opacity: 0.8;
+}
+
+.config-field-group__fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* ── Advanced Details (collapsible) ── */
+
+.config-advanced-details {
+  margin-top: var(--space-5);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+}
+
+.config-advanced-details__summary {
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  user-select: none;
+  transition: color var(--transition-fast);
+}
+
+.config-advanced-details__summary:hover {
+  color: var(--color-text);
+}
+
+.config-advanced-details__summary::before {
+  content: '▸';
+  font-size: 11px;
+  transition: transform var(--transition-fast);
+}
+
+.config-advanced-details[open] .config-advanced-details__summary::before {
+  transform: rotate(90deg);
+}
+
+.config-advanced-details .config-field-group {
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+/* ── Section Fade-in ── */
+
+.section-fade-in {
+  animation: sectionFadeIn 200ms ease-out;
+}
+
+@keyframes sectionFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .section-fade-in { animation: none; }
+}
