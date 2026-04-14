@@ -1906,48 +1906,22 @@ def build_handler(registry: JobRegistry):
                 if self.command != "POST":
                     self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
                     return
-                # Generate name table from cache entries (speaker field)
+                # Generate name table by submitting a dump-name job.
+                # This reuses the full pipeline (frontend plugins, splitter, etc.)
+                # so speaker names are extracted correctly regardless of input format.
                 try:
-                    cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
-                    name_counter: dict[str, int] = {}
-                    if os.path.isdir(cache_dir):
-                        for fname in sorted(os.listdir(cache_dir)):
-                            if not fname.endswith(".json"):
-                                continue
-                            fpath = os.path.join(cache_dir, fname)
-                            try:
-                                with open(fpath, "rb") as f:
-                                    entries = orjson.loads(f.read())
-                            except Exception:
-                                continue
-                            if not isinstance(entries, list):
-                                continue
-                            for entry in entries:
-                                speaker = entry.get("name", "")
-                                if isinstance(speaker, list):
-                                    for s in speaker:
-                                        if s and isinstance(s, str):
-                                            name_counter[s] = name_counter.get(s, 0) + 1
-                                elif speaker and isinstance(speaker, str):
-                                    name_counter[speaker] = name_counter.get(speaker, 0) + 1
-                    # Sort by count descending
-                    sorted_names = sorted(name_counter.items(), key=lambda x: x[1], reverse=True)
-                    # Write CSV
-                    csv_path = os.path.join(project_dir, "name替换表.csv")
-                    import csv as _csv
-                    with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
-                        writer = _csv.writer(f)
-                        writer.writerow(["SRC_Name", "DST_Name", "Count"])
-                        for name, count in sorted_names:
-                            writer.writerow([name, "", count])
-                    # Build response
-                    names = [{"src_name": n, "dst_name": "", "count": c} for n, c in sorted_names]
+                    config_name = parse_qs(urlparse(self.path).query).get("config", ["config.yaml"])[0]
+                    result = registry.submit({
+                        "project_dir": project_dir,
+                        "config_file_name": config_name,
+                        "translator": "dump-name",
+                    })
                     self._send_json({
                         "success": True,
-                        "source_file": "name替换表.csv",
-                        "names": names,
-                        "total": len(names),
+                        "job_id": result.get("job_id", ""),
                     })
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.CONFLICT)
                 except Exception as exc:
                     self._send_json({"error": f"生成人名表失败: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
@@ -1958,21 +1932,25 @@ def build_handler(registry: JobRegistry):
                     self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
                     return
                 try:
+                    from GalTransl.Name import write_name_table_csv
                     payload = self._read_json_body()
                     names = payload.get("names", [])
                     if not isinstance(names, list):
                         self._send_json({"error": "names must be an array"}, status=HTTPStatus.BAD_REQUEST)
                         return
+                    # Build name_counter and dst_names from the posted data
+                    name_counter: dict[str, int] = {}
+                    dst_names: dict[str, str] = {}
+                    for item in names:
+                        src_name = str(item.get("src_name", "") or item.get("jp_name", ""))
+                        dst_name = str(item.get("dst_name", "") or item.get("cn_name", ""))
+                        count = int(item.get("count", 0))
+                        if src_name:
+                            name_counter[src_name] = count
+                            if dst_name:
+                                dst_names[src_name] = dst_name
                     csv_path = os.path.join(project_dir, "name替换表.csv")
-                    import csv as _csv
-                    with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
-                        writer = _csv.writer(f)
-                        writer.writerow(["SRC_Name", "DST_Name", "Count"])
-                        for item in names:
-                            src_name = str(item.get("src_name", "") or item.get("jp_name", ""))
-                            dst_name = str(item.get("dst_name", "") or item.get("cn_name", ""))
-                            count = int(item.get("count", 0))
-                            writer.writerow([src_name, dst_name, count])
+                    write_name_table_csv(csv_path, name_counter, dst_names)
                     self._send_json({"success": True, "source_file": "name替换表.csv", "total": len(names)})
                 except json.JSONDecodeError:
                     self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)

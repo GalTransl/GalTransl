@@ -6,11 +6,15 @@ import { Panel } from '../components/Panel';
 import { EmptyState, InlineFeedback, LoadingState } from '../components/page-state';
 import {
   type NameEntry,
+  type Job,
   fetchNameTable,
-  generateNameTable,
+  submitJob,
+  fetchJob,
   saveNameTable,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
+
+const JOB_POLL_INTERVAL_MS = 1500;
 
 type OutletContext = {
   projectDir: string;
@@ -20,7 +24,7 @@ type OutletContext = {
 };
 
 export function ProjectNamePage() {
-  const { projectId } = useOutletContext<OutletContext>();
+  const { projectId, projectDir, configFileName } = useOutletContext<OutletContext>();
 
   const [names, setNames] = useState<NameEntry[]>([]);
   const [sourceFile, setSourceFile] = useState<string | null>(null);
@@ -32,6 +36,7 @@ export function ProjectNamePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Debounced search
   useEffect(() => {
@@ -60,21 +65,55 @@ export function ProjectNamePage() {
     void loadData();
   }, [loadData]);
 
+  // Cleanup poll timer on unmount
+  useEffect(() => {
+    return () => { if (pollTimerRef.current) clearTimeout(pollTimerRef.current); };
+  }, []);
+
   const handleGenerate = useCallback(async () => {
-    if (!projectId) return;
+    if (!projectId || !projectDir) return;
     setGenerating(true);
     setError(null);
     try {
-      const res = await generateNameTable(projectId);
-      setNames(res.names);
-      setSourceFile(res.source_file);
-      setDirty(false);
+      // Submit a dump-name job which goes through the full pipeline
+      // (frontend plugins, splitter, etc.) to extract speaker names
+      const job = await submitJob({
+        project_dir: projectDir,
+        config_file_name: configFileName || 'config.yaml',
+        translator: 'dump-name',
+      });
+
+      // Poll until the job finishes
+      const pollJob = async (jobId: string): Promise<Job> => {
+        const j = await fetchJob(jobId);
+        if (j.status === 'pending' || j.status === 'running') {
+          await new Promise<void>((resolve) => {
+            pollTimerRef.current = setTimeout(resolve, JOB_POLL_INTERVAL_MS);
+          });
+          return pollJob(jobId);
+        }
+        return j;
+      };
+
+      const finished = await pollJob(job.job_id);
+
+      if (finished.status === 'failed') {
+        setError(`生成人名表失败: ${finished.error || '未知错误'}`);
+      } else if (finished.status === 'cancelled') {
+        setError('生成人名表已被取消');
+      } else {
+        // Success — reload the name table from the generated file
+        const res = await fetchNameTable(projectId);
+        setNames(res.names);
+        setSourceFile(res.source_file);
+        setDirty(false);
+      }
     } catch (err) {
       setError(normalizeError(err, '生成人名表失败'));
     } finally {
       setGenerating(false);
     }
-  }, [projectId]);
+  }, [projectId, projectDir, configFileName]);
 
   const handleSave = useCallback(async () => {
     if (!projectId) return;
@@ -156,7 +195,7 @@ export function ProjectNamePage() {
       <div className="name-page__toolbar">
         <div className="name-page__toolbar-left">
           <Button onClick={handleGenerate} disabled={generating}>
-            {generating ? '生成中...' : '从缓存生成人名表'}
+            {generating ? '提取中...' : '提取人名表'}
           </Button>
           <Button onClick={handleSave} disabled={!dirty || saving} variant="primary">
             {saving ? '保存中...' : '保存'}
@@ -193,7 +232,7 @@ export function ProjectNamePage() {
         {names.length === 0 && !generating ? (
           <EmptyState
             title="尚未生成人名表"
-            description="点击「从缓存生成人名表」从当前项目的缓存文件中提取所有人名。"
+            description="点击「提取人名表」从当前项目的输入文件中提取所有人名。"
           />
         ) : (
           <div className="name-page__table-wrap">

@@ -1,8 +1,8 @@
-from typing import Dict, List
+from typing import Dict, List, Tuple
 import openpyxl
 from os.path import join as joinpath, splitext
 from GalTransl.CSplitter import SplitChunkMetadata
-from GalTransl import LOGGER
+from GalTransl import LOGGER, INPUT_FOLDERNAME, CACHE_FOLDERNAME
 from GalTransl.ConfigHelper import CProjectConfig
 import csv
 from InquirerPy import inquirer
@@ -10,6 +10,95 @@ from InquirerPy.base.control import Choice
 import asyncio
 import sys  # Added for input
 import os
+
+try:
+    import orjson
+except ImportError:
+    orjson = None  # type: ignore[assignment]
+
+
+def extract_names_from_dir(dir_path: str) -> Dict[str, int]:
+    """
+    Scan all .json files in a directory and count speaker names.
+    Supports both input format (name/names) and cache format (name).
+
+    Args:
+        dir_path: Path to the directory containing JSON files.
+
+    Returns:
+        Dict mapping speaker name -> occurrence count, sorted by count descending.
+    """
+    name_counter: Dict[str, int] = {}
+    if not os.path.isdir(dir_path):
+        return name_counter
+
+    for fname in sorted(os.listdir(dir_path)):
+        if not fname.endswith(".json"):
+            continue
+        fpath = os.path.join(dir_path, fname)
+        try:
+            with open(fpath, "rb") as f:
+                raw = f.read()
+            if orjson is not None:
+                entries = orjson.loads(raw)
+            else:
+                import json as _json
+                entries = _json.loads(raw)
+        except Exception:
+            continue
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            speaker = entry.get("name", entry.get("names", ""))
+            if isinstance(speaker, list):
+                for s in speaker:
+                    if s and isinstance(s, str):
+                        name_counter[s] = name_counter.get(s, 0) + 1
+            elif speaker and isinstance(speaker, str):
+                name_counter[speaker] = name_counter.get(speaker, 0) + 1
+
+    return dict(sorted(name_counter.items(), key=lambda x: x[1], reverse=True))
+
+
+def extract_names_from_project(project_dir: str) -> Dict[str, int]:
+    """
+    Extract speaker names from a project directory.
+    Tries gt_input first, falls back to transl_cache.
+
+    Args:
+        project_dir: Path to the project root directory.
+
+    Returns:
+        Dict mapping speaker name -> occurrence count, sorted by count descending.
+    """
+    input_dir = os.path.join(project_dir, INPUT_FOLDERNAME)
+    cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+    source_dir = input_dir if os.path.isdir(input_dir) else cache_dir
+    return extract_names_from_dir(source_dir)
+
+
+def write_name_table_csv(
+    csv_path: str,
+    name_counter: Dict[str, int],
+    dst_names: Dict[str, str] | None = None,
+) -> None:
+    """
+    Write a name replacement table to CSV format.
+    Columns: SRC_Name, DST_Name, Count
+
+    Args:
+        csv_path: Output CSV file path.
+        name_counter: Dict mapping speaker name -> occurrence count.
+        dst_names: Optional dict mapping src_name -> dst_name for translations.
+    """
+    with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        writer.writerow(["SRC_Name", "DST_Name", "Count"])
+        for name, count in name_counter.items():
+            dst = dst_names.get(name, "") if dst_names else ""
+            writer.writerow([name, dst, count])
 
 
 def load_name_table(
@@ -239,7 +328,12 @@ async def dump_name_table_from_chunks(
     output_path = joinpath(proj_dir, f"name替换表{file_extension}")
 
     try:
-        if export_format == "xlsx":
+        if export_format == "csv":
+            write_name_table_csv(output_path, name_dict)
+            LOGGER.info(
+                f"name已保存到'{output_path}' (CSV格式)，填入DST_Name后可用于后续翻译name字段。"
+            )
+        elif export_format == "xlsx":
             workbook = openpyxl.Workbook()
             sheet = workbook.active
             sheet.title = "NameTable"
@@ -260,17 +354,6 @@ async def dump_name_table_from_chunks(
             workbook.save(output_path)
             LOGGER.info(
                 f"name已保存到'{output_path}' (Excel格式)，填入DST_Name后可用于后续翻译name字段。"
-            )
-        elif export_format == "csv":
-            with open(output_path, "w", newline="", encoding="utf-8-sig") as csvfile:
-                writer = csv.writer(csvfile)
-                # Write header
-                writer.writerow(["SRC_Name", "DST_Name", "Count"])
-                # Write data
-                for name, count in name_dict.items():
-                    writer.writerow([name, "", count])
-            LOGGER.info(
-                f"name已保存到'{output_path}' (CSV格式)，填入DST_Name后可用于后续翻译name字段。"
             )
 
     except Exception as e:

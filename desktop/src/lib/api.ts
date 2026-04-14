@@ -379,6 +379,10 @@ export async function fetchJobs() {
   return response.jobs;
 }
 
+export async function fetchJob(jobId: string) {
+  return apiRequest<Job>(`/api/jobs/${jobId}`);
+}
+
 export async function submitJob(payload: SubmitJobPayload) {
   return apiRequest<Job>('/api/jobs', {
     body: JSON.stringify(payload),
