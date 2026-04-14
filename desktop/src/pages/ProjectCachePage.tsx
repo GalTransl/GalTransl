@@ -205,11 +205,17 @@ function SearchResultCard({
   result,
   query,
   onJumpToFile,
-  nameDict }: {
+  nameDict,
+  selected,
+  onSelect,
+  idx }: {
   result: CacheSearchResult;
   query: string;
   onJumpToFile: (filename: string, index: number) => void;
   nameDict: Map<string, string>;
+  selected: boolean;
+  onSelect: () => void;
+  idx: number;
 }) {
   const rawSpeaker = Array.isArray(result.speaker) ? result.speaker.join('/') : result.speaker || '—';
   const speaker = rawSpeaker !== '—'
@@ -221,8 +227,9 @@ function SearchResultCard({
   return (
     <button
       type="button"
-      className="search-result-card"
-      onClick={() => onJumpToFile(result.filename, result.index)}
+      className={`search-result-card${selected ? ' search-result-card--selected' : ''}`}
+      data-search-idx={idx}
+      onClick={() => { onSelect(); onJumpToFile(result.filename, result.index); }}
       title={`跳转到 ${result.filename} #${result.index}`}
     >
       <div className="search-result-card__header">
@@ -295,6 +302,7 @@ export function ProjectCachePage() {
   const [searchTotal, setSearchTotal] = useState(0);
   const [selectedSearchIdx, setSelectedSearchIdx] = useState(-1);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchResultsRef = useRef<HTMLDivElement>(null);
 
   // Replace state
   const [replaceQuery, setReplaceQuery] = useState('');
@@ -462,6 +470,7 @@ export function ProjectCachePage() {
     if (!searchQuery.trim()) {
       setSearchResults([]);
       setSearchTotal(0);
+      setSelectedSearchIdx(-1);
       return;
     }
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -472,6 +481,7 @@ export function ProjectCachePage() {
         .then((res) => {
           setSearchResults(res.results);
           setSearchTotal(res.total);
+          setSelectedSearchIdx(-1);
         })
         .catch((err) => {
           setLocalError(normalizeError(err, '全局搜索失败'));
@@ -482,6 +492,13 @@ export function ProjectCachePage() {
     }, 400);
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
   }, [projectId, searchQuery, searchField]);
+
+  // Scroll selected search result into view
+  useEffect(() => {
+    if (selectedSearchIdx < 0 || !searchResultsRef.current) return;
+    const el = searchResultsRef.current.querySelector(`[data-search-idx="${selectedSearchIdx}"]`) as HTMLElement | null;
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [selectedSearchIdx]);
 
   const filteredEntries = entries.filter((e) => {
     if (filterProblems && !e.problem) return false;
@@ -899,14 +916,42 @@ export function ProjectCachePage() {
               )}
 
               {/* Search results list */}
-              <div className="cache-search-results">
-                {searchResults.map((r) => (
+              <div
+                className="cache-search-results"
+                ref={searchResultsRef}
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setSelectedSearchIdx((i) => {
+                      const next = Math.min(i + 1, searchResults.length - 1);
+                      if (next >= 0 && next !== i) {
+                        handleJumpToFile(searchResults[next].filename, searchResults[next].index);
+                      }
+                      return next;
+                    });
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setSelectedSearchIdx((i) => {
+                      const next = Math.max(i - 1, 0);
+                      if (next !== i) {
+                        handleJumpToFile(searchResults[next].filename, searchResults[next].index);
+                      }
+                      return next;
+                    });
+                  }
+                }}
+              >
+                {searchResults.map((r, idx) => (
                   <SearchResultCard
                     key={`${r.filename}-${r.index}`}
                     result={r}
                     query={searchQuery.trim()}
                     onJumpToFile={handleJumpToFile}
                     nameDict={nameDict}
+                    selected={idx === selectedSearchIdx}
+                    onSelect={() => setSelectedSearchIdx(idx)}
+                    idx={idx}
                   />
                 ))}
               </div>
