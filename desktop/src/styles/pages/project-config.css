@@ -175,7 +175,7 @@
   padding: 0 var(--space-4);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-control);
-  background: var(--color-surface-strong);
+  background-color: var(--color-surface-strong);
   color: var(--color-text);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
@@ -202,8 +202,7 @@
     background-color var(--transition-fast);
 }
 
-.config-field-row__input input:focus,
-.config-field-row__input select:focus {
+.config-field-row__input input:focus {
   outline: none;
   border-color: rgba(47, 111, 235, 0.65);
   box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);
@@ -218,8 +217,7 @@
     0 10px 24px rgba(47, 111, 235, 0.08);
 }
 
-.config-field-row__input input:hover,
-.config-field-row__input select:hover {
+.config-field-row__input input:hover {
   border-color: rgba(47, 111, 235, 0.28);
 }
 
@@ -231,8 +229,14 @@
   color: rgba(100, 116, 139, 0.88);
 }
 
-.config-field-row__input input:disabled,
-.config-field-row__input select:disabled,
+.config-field-row__input input:disabled {
+  color: var(--color-text-muted);
+  background-color: rgba(241, 245, 249, 0.96);
+  border-color: rgba(203, 213, 225, 0.92);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
 .config-field-row__input textarea:disabled {
   color: var(--color-text-muted);
   background: rgba(241, 245, 249, 0.96);

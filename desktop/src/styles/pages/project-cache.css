@@ -602,11 +602,11 @@
 }
 
 .cache-search-field {
-  padding: 2px 20px 2px 6px;
+  padding: 2px 28px 2px 8px;
   border: 1px solid var(--color-line);
-  border-radius: var(--radius-control);
+  border-radius: calc(var(--radius-control) - 4px);
   font-size: 11px;
-  background: var(--color-surface-base) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 12 8'%3E%3Cpath d='M1.5 1.5L6 6l4.5-4.5' stroke='%235b6b7f' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 6px center;
+  background-color: var(--color-surface-strong);
   color: var(--color-text);
   appearance: none;
   -webkit-appearance: none;
@@ -622,24 +622,20 @@
 
 .cache-search-field:hover {
   border-color: rgba(47, 111, 235, 0.28);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 12 8'%3E%3Cpath d='M1.5 1.5L6 6l4.5-4.5' stroke='%232f6feb' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 .cache-search-field:focus {
   outline: none;
   border-color: rgba(47, 111, 235, 0.65);
   box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.1);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 12 8'%3E%3Cpath d='M1.5 1.5L6 6l4.5-4.5' stroke='%232f6feb' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 .cache-search-field:disabled {
   color: var(--color-text-muted);
-  background: rgba(241, 245, 249, 0.96);
+  background-color: rgba(241, 245, 249, 0.96);
   border-color: rgba(203, 213, 225, 0.92);
   box-shadow: none;
   cursor: not-allowed;
-  opacity: 1;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 12 8'%3E%3Cpath d='M1.5 1.5L6 6l4.5-4.5' stroke='%2394a3b8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 .cache-search-meta {

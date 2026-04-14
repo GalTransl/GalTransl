@@ -1,0 +1,80 @@
+/* ── Custom Select — unified dropdown appearance ── */
+
+/* ── Chevron SVG as data-URI ── */
+/* Default (muted gray) */
+/* Hover / Focus (primary blue) */
+/* Disabled (lighter gray) */
+
+/* ── Standard select (used inside .field, .config-field-row__input, etc.) ── */
+
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+
+  /* Custom chevron — default muted */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1.5 1.5L6 6l4.5-4.5' stroke='%235b6b7f' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 8px;
+  padding-right: 32px;
+}
+
+select:hover {
+  border-color: rgba(47, 111, 235, 0.28);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1.5 1.5L6 6l4.5-4.5' stroke='%232f6feb' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+select:focus {
+  outline: none;
+  border-color: rgba(47, 111, 235, 0.65);
+  box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1.5 1.5L6 6l4.5-4.5' stroke='%232f6feb' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+select:disabled {
+  cursor: not-allowed;
+  opacity: 1;
+  color: var(--color-text-muted);
+  background-color: rgba(241, 245, 249, 0.96);
+  border-color: rgba(203, 213, 225, 0.92);
+  box-shadow: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1.5 1.5L6 6l4.5-4.5' stroke='%2394a3b8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+/* ── Dropdown panel styling (option items) ── */
+/* Note: option styling support varies by browser; these are best-effort. */
+select option {
+  padding: 8px 12px;
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+  border-radius: 4px;
+}
+
+select option:checked {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+/* ── Compact select size (for inline / toolbar use) ── */
+/*
+  Apply .select--compact class to get a smaller 28px-high select.
+  Used in cache-search-field, log-level-select, etc.
+*/
+.select--compact,
+select.select--compact {
+  min-height: 28px;
+  padding: 2px 28px 2px 8px;
+  font-size: 12px;
+  border-radius: calc(var(--radius-control) - 4px);
+  background-position: right 8px center;
+  background-size: 10px 7px;
+}
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  select {
+    transition: none;
+  }
+}

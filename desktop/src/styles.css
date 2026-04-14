@@ -25,6 +25,7 @@
 @import './styles/components/panel.css';
 @import './styles/components/button.css';
 @import './styles/components/field.css';
+@import './styles/components/select.css';
 @import './styles/components/status-badge.css';
 @import './styles/components/meta-grid.css';
 @import './styles/components/inline-alert.css';

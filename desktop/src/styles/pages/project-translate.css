@@ -56,29 +56,36 @@
   z-index: 40;
   width: 100%;
   display: grid;
-  gap: 8px;
-  margin-top: 0;
-  padding: 10px;
-  border-radius: 12px;
+  gap: 6px;
+  margin-top: 4px;
+  padding: var(--space-2);
+  border-radius: var(--radius-control);
   border: 1px solid rgba(191, 208, 226, 0.9);
   background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 14px 28px rgba(16, 24, 40, 0.14);
+  backdrop-filter: blur(14px);
+  box-shadow:
+    0 14px 28px rgba(16, 24, 40, 0.12),
+    0 4px 8px rgba(16, 24, 40, 0.06);
   opacity: 0;
-  transform: translateY(-8px);
+  transform: translateY(-6px) scale(0.98);
   pointer-events: none;
-  transition: opacity 180ms ease, transform 180ms ease;
+  transition:
+    opacity var(--dur-fast) var(--ease-decel),
+    transform var(--dur-fast) var(--ease-spring);
 }
 
 .project-translate-page__folder-menu:hover .project-translate-page__folder-menu-dropdown,
 .project-translate-page__folder-menu:focus-within .project-translate-page__folder-menu-dropdown {
   opacity: 1;
-  transform: translateY(0);
+  transform: translateY(0) scale(1);
   pointer-events: auto;
 }
 
 .project-translate-page__folder-menu-item {
   justify-content: flex-start;
   width: 100%;
+  border-radius: calc(var(--radius-control) - 4px);
+  transition: background var(--transition-fast);
 }
 
 .project-translate-page__header h1 {
@@ -202,12 +209,11 @@
 .project-translate-page .field input,
 .project-translate-page .field select {
   border-color: var(--color-line);
-  background: var(--color-surface-strong);
+  background-color: var(--color-surface-strong);
   color: var(--color-text);
 }
 
-.project-translate-page .field input:focus,
-.project-translate-page .field select:focus {
+.project-translate-page .field input:focus {
   border-color: rgba(47, 111, 235, 0.62);
   box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);
 }

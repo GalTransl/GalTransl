@@ -22,7 +22,7 @@
   padding: 0 var(--space-4);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-control);
-  background: var(--color-surface-strong);
+  background-color: var(--color-surface-strong);
   color: var(--color-text);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
@@ -96,8 +96,7 @@
   cursor: not-allowed;
 }
 
-.field input:focus,
-.field select:focus {
+.field input:focus {
   outline: none;
   border-color: rgba(47, 111, 235, 0.65);
   box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);

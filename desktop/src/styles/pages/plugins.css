@@ -190,7 +190,7 @@
   border: 1px solid var(--color-line);
   border-radius: var(--radius-control);
   font-size: 14px;
-  background: var(--color-surface-strong);
+  background-color: var(--color-surface-strong);
   color: var(--color-text);
 }
 
