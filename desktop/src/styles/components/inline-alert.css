@@ -10,7 +10,12 @@
   border: 1px solid transparent;
   font-size: 14px;
   line-height: 1.6;
-  margin-bottom: var(--space-4);
+  /* margin-bottom 仅用于独立使用；在 page-header__status 等有 gap 的容器内由 :last-child 归零 */
+  margin-bottom: var(--space-3);
+}
+
+.page-header__status .inline-alert {
+  margin-bottom: 0;
 }
 
 .page-state-feedback__body {
@@ -51,5 +56,26 @@
   background: var(--color-success-soft);
   border-color: rgba(15, 157, 88, 0.18);
   color: var(--color-success);
+}
+
+.inline-alert--fading {
+  animation: inline-alert-fade-out 400ms ease-out forwards;
+}
+
+@keyframes inline-alert-fade-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inline-alert--fading {
+    animation: none;
+  }
 }
 

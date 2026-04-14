@@ -168,7 +168,7 @@ export function BackendProfilesPage() {
         status={
           <>
             {error && <InlineFeedback tone="error" title="操作失败" description={error} />}
-            {saveSuccess && <InlineFeedback tone="success" title="配置已保存" description="新的后端配置已写入，可在项目中直接选用。" />}
+            {saveSuccess && <InlineFeedback tone="success" title="配置已保存" description="新的后端配置已写入，可在项目中直接选用。" onDismiss={() => setSaveSuccess(false)} />}
           </>
         }
       />

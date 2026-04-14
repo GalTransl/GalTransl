@@ -642,25 +642,32 @@ export function ProjectCachePage() {
       setShowReplace(false);
       setReplaceQuery('');
       setReplaceWith('');
-      setInfo(`已替换 ${res.total_matches} 处（涉及 ${res.total_files} 个文件）`);
+      setInfo(`已替换 ${res.total_matches} 处（涉及 ${res.total_files} 个文件），请保存后生效`);
+      // 将后端返回的修改后 entries 存入 entriesMap，并标记所有受影响文件为 dirty
+      const affectedFiles: string[] = [];
+      for (const fd of res.file_details) {
+        if (fd.entries) {
+          entriesMapRef.current.set(fd.filename, fd.entries);
+          affectedFiles.push(fd.filename);
+        }
+      }
+      if (affectedFiles.length > 0) {
+        setDirtyFiles((prev) => {
+          const next = new Set(prev);
+          for (const f of affectedFiles) next.add(f);
+          return next;
+        });
+      }
+      // 如果当前文件被替换，刷新显示
+      if (selectedFile && affectedFiles.includes(selectedFile)) {
+        const modifiedEntries = entriesMapRef.current.get(selectedFile);
+        if (modifiedEntries) setEntries(modifiedEntries);
+      }
       // Refresh search if query was set
       if (searchQuery.trim()) {
         const sr = await searchCache(projectId, searchQuery.trim(), searchField);
         setSearchResults(sr.results);
         setSearchTotal(sr.total);
-      }
-      // Refresh current file if open — 替换是全局操作，需从服务端刷新
-      if (selectedFile) {
-        const cf = await fetchCacheFile(projectId, selectedFile);
-        setEntries(cf.entries);
-        entriesMapRef.current.set(selectedFile, cf.entries);
-        // 替换操作本身已保存到后端，但其他文件的本地修改可能被覆盖
-        // 清除当前文件的 dirty，但不清其他文件
-        setDirtyFiles((prev) => {
-          const next = new Set(prev);
-          next.delete(selectedFile);
-          return next;
-        });
       }
     } catch (err) {
       setLocalError(normalizeError(err, '全局替换失败'));
@@ -683,7 +690,7 @@ export function ProjectCachePage() {
       <PageHeader
         className="project-cache-page__header"
         title="缓存编辑"
-        description="查看与编辑翻译缓存，对比原文与译文，筛选问题句。"
+        description="翻译缓存用来避免反复翻译以及控制最终结果，在这里可以浏览问题、手动润色，或通过删除缓存句条触发部分重翻。"
         actions={cacheDir ? (
           <Button variant="secondary" onClick={() => void invoke('open_folder', { path: cacheDir })} title={cacheDir}>
             📂 打开缓存文件夹
@@ -693,7 +700,7 @@ export function ProjectCachePage() {
           <>
             {error && <InlineFeedback tone="error" title="加载缓存失败" description={error} />}
             {localError && <InlineFeedback tone="error" title="操作失败" description={localError} />}
-            {info && <InlineFeedback tone="success" title="操作成功" description={info} />}
+            {info && <InlineFeedback tone="success" title="操作成功" description={info} onDismiss={() => setInfo(null)} />}
           </>
         }
       />

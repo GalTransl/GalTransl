@@ -253,7 +253,7 @@ export function ProjectConfigPage() {
             <InlineFeedback tone="error" title="配置保存失败" description={error} />
           )}
           {saveSuccess && (
-            <InlineFeedback tone="success" title="配置已保存" description="当前项目配置已成功写入磁盘。" />
+            <InlineFeedback tone="success" title="配置已保存" description="当前项目配置已成功写入磁盘。" onDismiss={() => setSaveSuccess(false)} />
           )}
 
           <div key={yamlView ? 'yaml' : activeSection} className="section-fade-in">

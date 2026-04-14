@@ -124,6 +124,7 @@ export type CacheReplaceField = 'src' | 'dst' | 'all';
 export type CacheReplaceFileDetail = {
   filename: string;
   matches: number;
+  entries?: CacheEntry[];
 };
 
 export type CacheReplaceResponse = {

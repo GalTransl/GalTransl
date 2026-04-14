@@ -1410,13 +1410,13 @@ def build_handler(registry: JobRegistry):
                                                 e[pr_key] = e[pr_key].replace(query, replacement)
                                             file_matches += 1
                                             file_changed = True
-                                if file_changed and not dry_run:
-                                    with open(fp, "wb") as f:
-                                        f.write(orjson.dumps(entries, option=orjson.OPT_INDENT_2))
                                 if file_matches > 0:
                                     total_matches += file_matches
                                     total_files += 1
-                                    file_details.append({"filename": name, "matches": file_matches})
+                                    detail: dict = {"filename": name, "matches": file_matches}
+                                    if file_changed and not dry_run:
+                                        detail["entries"] = entries
+                                    file_details.append(detail)
                             except Exception:
                                 continue
                     self._send_json({
