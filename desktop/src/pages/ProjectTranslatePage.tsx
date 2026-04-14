@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import type { ProjectPageContext } from '../components/ProjectLayout';
 import { Button } from '../components/Button';
 import { MetricCard } from '../components/MetricCard';
 import { PageHeader } from '../components/PageHeader';
@@ -36,15 +36,8 @@ const INPUT_FOLDER_NAME = 'gt_input';
 const OUTPUT_FOLDER_NAME = 'gt_output';
 const CACHE_FOLDER_NAME = 'transl_cache';
 
-type OutletContext = {
-  projectDir: string;
-  projectId: string;
-  configFileName: string;
-  onProjectDirChange: (dir: string) => void;
-};
-
-export function ProjectTranslatePage() {
-  const { projectDir, projectId, configFileName } = useOutletContext<OutletContext>();
+export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
+  const { projectDir, projectId, configFileName } = ctx;
   const { connectionPhase, translators, loadJobs } = useConnection();
   const reducedMotion = usePrefersReducedMotion();
   const { nameDict } = useNameDict(projectId);

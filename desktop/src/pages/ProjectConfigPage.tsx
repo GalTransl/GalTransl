@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import type { ProjectPageContext } from '../components/ProjectLayout';
 import { Panel } from '../components/Panel';
 import { PageHeader } from '../components/PageHeader';
 import { EmptyState, ErrorState, InlineFeedback, LoadingState } from '../components/page-state';
@@ -22,15 +22,8 @@ import {
   type ConfigSectionKey,
 } from './project-config';
 
-type OutletContext = {
-  projectDir: string;
-  projectId: string;
-  configFileName: string;
-  onProjectDirChange: (dir: string) => void;
-};
-
-export function ProjectConfigPage() {
-  const { projectDir, projectId, configFileName } = useOutletContext<OutletContext>();
+export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
+  const { projectDir, projectId, configFileName } = ctx;
 
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);

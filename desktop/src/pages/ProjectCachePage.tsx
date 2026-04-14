@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '../components/Button';
 import { PageHeader } from '../components/PageHeader';
+import type { ProjectPageContext } from '../components/ProjectLayout';
 import { Panel } from '../components/Panel';
 import { EmptyState, InlineFeedback, LoadingState } from '../components/page-state';
 import { speakerStyle, speakerHue } from '../lib/speaker';
@@ -30,13 +30,6 @@ function escapeControlChars(text: string): string {
 function unescapeControlChars(text: string): string {
   return text.replace(/\\r/g, '\r').replace(/\\n/g, '\n');
 }
-
-type OutletContext = {
-  projectDir: string;
-  projectId: string;
-  configFileName: string;
-  onProjectDirChange: (dir: string) => void;
-};
 
 type SidebarTab = 'files' | 'search';
 
@@ -268,8 +261,8 @@ function SearchResultCard({
 }
 
 /* ── Main Page ── */
-export function ProjectCachePage() {
-  const { projectId, configFileName } = useOutletContext<OutletContext>();
+export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
+  const { projectId, configFileName } = ctx;
   const { nameDict } = useNameDict(projectId);
 
   const [cacheFiles, setCacheFiles] = useState<FileEntry[]>([]);

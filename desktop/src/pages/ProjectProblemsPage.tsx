@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import type { ProjectPageContext } from '../components/ProjectLayout';
 import { MetricCard } from '../components/MetricCard';
 import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
@@ -9,13 +9,6 @@ import {
   type ProblemEntry,
   fetchProjectProblems } from '../lib/api';
 import { normalizeError } from '../lib/errors';
-
-type OutletContext = {
-  projectDir: string;
-  projectId: string;
-  configFileName: string;
-  onProjectDirChange: (dir: string) => void;
-};
 
 /** 兼容读取问题条目字段：优先新key，回退旧key */
 function pSrc(p: ProblemEntry): string { return p.post_src || p.post_jp || ''; }
@@ -35,8 +28,8 @@ const PROBLEM_TYPES = [
   '比日文长严格',
 ];
 
-export function ProjectProblemsPage() {
-  const { projectDir, projectId } = useOutletContext<OutletContext>();
+export function ProjectProblemsPage({ ctx }: { ctx: ProjectPageContext }) {
+  const { projectDir, projectId } = ctx;
 
   const [problems, setProblems] = useState<ProblemEntry[]>([]);
   const [loading, setLoading] = useState(true);

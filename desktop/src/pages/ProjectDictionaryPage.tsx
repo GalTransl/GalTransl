@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import type { ProjectPageContext } from '../components/ProjectLayout';
 import { DictionaryManager } from '../components/DictionaryManager';
 import {
   type ProjectDictionaryManagerResponse,
@@ -10,15 +10,8 @@ import {
   type DictionaryCategory } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 
-type OutletContext = {
-  projectDir: string;
-  projectId: string;
-  configFileName: string;
-  onProjectDirChange: (dir: string) => void;
-};
-
-export function ProjectDictionaryPage() {
-  const { projectId, configFileName } = useOutletContext<OutletContext>();
+export function ProjectDictionaryPage({ ctx }: { ctx: ProjectPageContext }) {
+  const { projectId, configFileName } = ctx;
 
   const [data, setData] = useState<ProjectDictionaryManagerResponse | null>(null);
   const [loading, setLoading] = useState(true);

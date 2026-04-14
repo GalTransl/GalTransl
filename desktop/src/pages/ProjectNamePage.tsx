@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import type { ProjectPageContext } from '../components/ProjectLayout';
 import { Button } from '../components/Button';
 import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
@@ -19,15 +19,8 @@ import { normalizeError } from '../lib/errors';
 
 const JOB_POLL_INTERVAL_MS = 1500;
 
-type OutletContext = {
-  projectDir: string;
-  projectId: string;
-  configFileName: string;
-  onProjectDirChange: (dir: string) => void;
-};
-
-export function ProjectNamePage() {
-  const { projectId, projectDir, configFileName } = useOutletContext<OutletContext>();
+export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
+  const { projectId, projectDir, configFileName } = ctx;
 
   const [names, setNames] = useState<NameEntry[]>([]);
   const [sourceFile, setSourceFile] = useState<string | null>(null);
