@@ -1,0 +1,41 @@
+/* Button component */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast),
+    border-color var(--transition-fast),
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.button--primary {
+  background: linear-gradient(180deg, var(--color-primary), var(--color-primary-strong));
+  color: #ffffff;
+  box-shadow: var(--shadow-button);
+}
+
+.button--secondary {
+  background: var(--color-primary-soft);
+  border-color: rgba(47, 111, 235, 0.18);
+  color: var(--color-primary);
+}
+

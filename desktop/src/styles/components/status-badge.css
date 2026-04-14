@@ -1,0 +1,42 @@
+/* Status badge component */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.status-badge--online,
+.status-badge--completed {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.status-badge--running {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.status-badge--pending,
+.status-badge--connecting {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.status-badge--failed,
+.status-badge--offline {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.status-badge--cancelled {
+  background: var(--color-neutral-soft);
+  color: var(--color-text-muted);
+}
+

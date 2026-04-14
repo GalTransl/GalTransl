@@ -1,0 +1,135 @@
+/* ── Project Config Page ── */
+
+.project-config-page__header {
+  margin-bottom: var(--space-6);
+}
+
+.project-config-page__header h1 {
+  margin: 0 0 var(--space-2);
+  font-size: 24px;
+}
+
+.project-config-page__header p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+.project-config-page__content {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.project-config-page__sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-config-page__section-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: none;
+  background: none;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--color-text-muted);
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.project-config-page__section-btn:hover {
+  background: var(--color-neutral-soft);
+  color: var(--color-text);
+}
+
+.project-config-page__section-btn--active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.project-config-page__save-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-line);
+  background: var(--color-surface-strong);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  text-align: left;
+  transition: all var(--transition-fast);
+  margin-top: var(--space-2);
+}
+
+.project-config-page__save-btn:hover:not(:disabled) {
+  background: var(--color-neutral-soft);
+  border-color: var(--color-line-strong);
+}
+
+.project-config-page__save-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.project-config-page__section-divider {
+  height: 1px;
+  background: var(--color-line);
+  margin: var(--space-3) 0;
+}
+
+.project-config-page__main {
+  min-width: 0;
+}
+
+.config-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.config-form .field {
+  margin-bottom: 0;
+}
+
+.field__hint {
+  display: block;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+  font-family: "Cascadia Code", "Consolas", monospace;
+}
+
+.config-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 var(--space-3);
+  color: var(--color-text);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.yaml-preview {
+  background: var(--color-neutral-soft);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  padding: var(--space-4);
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  max-height: 600px;
+  overflow-y: auto;
+}
+

@@ -1,0 +1,33 @@
+
+/* ── Page transition animations ── */
+
+@keyframes pageFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pageFadeOut {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-6px); }
+}
+
+.page-transition-fadeIn {
+  animation: pageFadeIn 200ms ease forwards;
+}
+
+.page-transition-fadeOut {
+  animation: pageFadeOut 150ms ease forwards;
+}
+
+.section-fade-in {
+  animation: pageFadeIn 200ms ease forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-transition-fadeIn,
+  .page-transition-fadeOut,
+  .section-fade-in {
+    animation: none;
+  }
+}
+

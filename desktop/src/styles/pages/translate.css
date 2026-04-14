@@ -1,0 +1,36 @@
+
+/* ── Translate Page ── */
+
+.translate-page {
+  max-width: 1440px;
+}
+
+.translate-page__header {
+  margin-bottom: var(--space-7);
+}
+
+.translate-page__header h1 {
+  margin: 0 0 var(--space-3);
+  font-size: clamp(28px, 3.5vw, 44px);
+  line-height: 1.1;
+}
+
+.translate-page__header p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.translate-page__content {
+  display: grid;
+  grid-template-columns: minmax(340px, 420px) minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.translate-page__sidebar {
+  display: grid;
+  gap: var(--space-6);
+}
+

@@ -1,0 +1,43 @@
+/* ── Progress Bar ── */
+
+.progress-section {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.progress-section__status {
+  display: flex;
+  align-items: center;
+}
+
+.progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-neutral-soft);
+  overflow: hidden;
+}
+
+.progress-bar__fill--indeterminate {
+  width: 30%;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-primary-strong));
+  animation: progress-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-bar__fill--indeterminate {
+    animation: none;
+    transform: none;
+  }
+}
+

@@ -1,0 +1,55 @@
+/* Inline alert & page-state feedback components */
+
+.inline-alert {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--radius-card);
+  border: 1px solid transparent;
+  font-size: 14px;
+  line-height: 1.6;
+  margin-bottom: var(--space-4);
+}
+
+.page-state-feedback__body {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.page-state-feedback__title {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.page-state-feedback__description {
+  min-width: 0;
+}
+
+.page-state-feedback__action {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.inline-alert--error {
+  background: var(--color-danger-soft);
+  border-color: rgba(217, 48, 37, 0.12);
+  color: var(--color-danger);
+}
+
+.inline-alert--info {
+  background: var(--color-primary-soft);
+  border-color: rgba(47, 111, 235, 0.12);
+  color: var(--color-primary);
+}
+
+.inline-alert--success {
+  background: var(--color-success-soft);
+  border-color: rgba(15, 157, 88, 0.18);
+  color: var(--color-success);
+}
+

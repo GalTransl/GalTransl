@@ -1,0 +1,111 @@
+/* Form fields, textarea shared styles */
+.form-stack {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.field span {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.field input,
+.field select {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.field textarea,
+.dict-text-editor,
+.plugin-setting-textarea,
+.cache-card__textarea {
+  width: 100%;
+  padding: 11px 14px;
+  border: 1px solid rgba(191, 208, 226, 0.92);
+  border-radius: calc(var(--radius-control) + 2px);
+  background: var(--color-surface-strong);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  color: var(--color-text);
+  line-height: 1.6;
+  resize: vertical;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    background-color var(--transition-fast);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.7) transparent;
+}
+
+.field textarea,
+.dict-text-editor,
+.plugin-setting-textarea {
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 12.5px;
+}
+
+.field textarea {
+  min-height: 92px;
+}
+
+.field textarea:hover,
+.dict-text-editor:hover,
+.plugin-setting-textarea:hover,
+.cache-card__textarea:hover {
+  border-color: rgba(47, 111, 235, 0.28);
+}
+
+.field textarea:focus,
+.dict-text-editor:focus,
+.plugin-setting-textarea:focus,
+.cache-card__textarea:focus {
+  outline: none;
+  border-color: rgba(47, 111, 235, 0.72);
+  background: var(--color-surface-strong);
+  box-shadow:
+    0 0 0 4px rgba(47, 111, 235, 0.12),
+    0 10px 24px rgba(47, 111, 235, 0.08);
+}
+
+.field textarea::placeholder,
+.dict-text-editor::placeholder,
+.plugin-setting-textarea::placeholder,
+.cache-card__textarea::placeholder {
+  color: rgba(100, 116, 139, 0.88);
+}
+
+.field textarea:disabled,
+.dict-text-editor:disabled,
+.plugin-setting-textarea:disabled,
+.cache-card__textarea:disabled {
+  color: var(--color-text-muted);
+  background: rgba(241, 245, 249, 0.96);
+  border-color: rgba(203, 213, 225, 0.92);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.field input:focus,
+.field select:focus {
+  outline: none;
+  border-color: rgba(47, 111, 235, 0.65);
+  box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-start;
+  gap: var(--space-2);
+}
+

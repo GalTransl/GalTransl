@@ -1,0 +1,28 @@
+/* ── Responsive ── */
+
+@media (max-width: 1100px) {
+  .project-translate-page__content {
+    grid-template-columns: 1fr;
+  }
+
+  .project-config-page__content {
+    grid-template-columns: 1fr;
+  }
+
+  .project-config-page__sidebar {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .dict-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .cache-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .plugin-list {
+    grid-template-columns: 1fr;
+  }
+}

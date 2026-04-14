@@ -1,0 +1,183 @@
+/* ── Project Problems Page ── */
+
+.project-problems-page__header {
+  margin-bottom: var(--space-6);
+}
+
+.project-problems-page__header h1 {
+  margin: 0 0 var(--space-2);
+  font-size: 24px;
+}
+
+.project-problems-page__header p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+.project-problems-page__content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.problem-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* ── Problem stat items (MetricCard overrides for pill-style filter tags) ── */
+
+.problem-stats .metric-card {
+  padding: var(--space-1) var(--space-3);
+  border-radius: 999px;
+  border: 1px solid var(--color-line);
+  background: var(--color-surface-strong);
+  gap: var(--space-1);
+  transition: all var(--transition-fast);
+}
+
+.problem-stats .metric-card__header {
+  gap: var(--space-1);
+}
+
+.problem-stats .metric-card__label {
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.problem-stats .metric-card__value {
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--color-neutral-soft);
+  padding: 1px 8px;
+  border-radius: 999px;
+}
+
+.problem-stats .metric-card__hint {
+  display: none;
+}
+
+.problem-stats .metric-card--interactive:hover,
+.problem-stats .metric-card--interactive:focus-visible {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  transform: none;
+  box-shadow: none;
+}
+
+.problem-stats .metric-card--active {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 600;
+  transform: none;
+  box-shadow: none;
+}
+
+.problem-stats .metric-card--active .metric-card__value {
+  background: var(--color-primary);
+  color: white;
+}
+
+.problem-stats .metric-card--active .metric-card__label {
+  color: var(--color-primary);
+}
+
+.problem-stats .metric-card--danger .metric-card__label {
+  color: var(--color-primary);
+}
+
+.problem-toolbar {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  margin-bottom: var(--space-4);
+}
+
+.problem-search {
+  flex: 1;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  font-size: 14px;
+  background: var(--color-surface-strong);
+}
+
+.problem-search:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
+}
+
+.problem-clear-filter {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-primary);
+  background: var(--color-primary-soft);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--color-primary);
+  white-space: nowrap;
+}
+
+.problem-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.problem-entry {
+  background: var(--color-surface-strong);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  padding: var(--space-4);
+}
+
+.problem-entry__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.problem-entry__file {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.problem-entry__index {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-family: "Cascadia Code", "Consolas", monospace;
+}
+
+.problem-entry__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.problem-entry__row {
+  display: flex;
+  gap: var(--space-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.problem-entry__label {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  min-width: 56px;
+}
+
+.problem-entry__jp {
+  color: var(--color-text-muted);
+}
+
+.problem-entry__zh {
+  color: var(--color-text);
+}
+

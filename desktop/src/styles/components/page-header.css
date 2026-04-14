@@ -1,0 +1,50 @@
+/* Page header component */
+.page-header {
+  display: grid;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.page-header__topline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.page-header__copy {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.page-header__copy h1 {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.15;
+}
+
+.page-header__copy p {
+  margin: 0;
+  color: var(--color-text-muted);
+  line-height: 1.7;
+}
+
+.page-header__actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.page-header__status {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.page-header--hero .page-header__copy h1 {
+  font-size: 36px;
+}
+

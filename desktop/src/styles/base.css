@@ -1,0 +1,32 @@
+/* Base resets & element styles */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--color-text);
+  background:
+    radial-gradient(circle at top left, rgba(47, 111, 235, 0.12), transparent 28%),
+    radial-gradient(circle at top right, rgba(15, 157, 88, 0.08), transparent 24%),
+    linear-gradient(180deg, #f8fbff 0%, var(--color-bg) 44%, #edf2f8 100%);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+code {
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 0.95em;
+}

@@ -26,6 +26,7 @@ import {
   stopProjectTranslation,
   submitJob } from '../lib/api';
 import { normalizeError } from '../lib/errors';
+import { usePrefersReducedMotion, LAUNCH, STRIP_BOOT, BAR_SURGE, COMPLETE, FRESH_HIGHLIGHT_MS } from '../lib/motion';
 
 const JOB_POLL_INTERVAL_MS = 2000;
 const RUNTIME_POLL_INTERVAL_MS = 1000;
@@ -33,14 +34,6 @@ const SUCCESS_STICK_BOTTOM_THRESHOLD_PX = 24;
 const INPUT_FOLDER_NAME = 'gt_input';
 const OUTPUT_FOLDER_NAME = 'gt_output';
 const CACHE_FOLDER_NAME = 'transl_cache';
-const LAUNCH_CHARGE_MS = 500;
-const LAUNCH_BLAST_MS = 600;
-const STRIP_BOOT_MS = 1200;
-const BAR_SURGE_MS = 800;
-const COMPLETE_CELEBRATE_MS = 1200;
-const PARTICLE_COUNT = 12;
-const PARTICLE_DISTANCE_MIN = 30;
-const PARTICLE_DISTANCE_MAX = 80;
 
 type OutletContext = {
   projectDir: string;
@@ -52,6 +45,7 @@ type OutletContext = {
 export function ProjectTranslatePage() {
   const { projectDir, projectId, configFileName } = useOutletContext<OutletContext>();
   const { connectionPhase, translators, loadJobs } = useConnection();
+  const reducedMotion = usePrefersReducedMotion();
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [refreshingJobs, setRefreshingJobs] = useState(false);
@@ -163,15 +157,17 @@ export function ProjectTranslatePage() {
     prevShouldPollRuntimeRef.current = shouldPollRuntime;
     if (!justStarted) return;
 
+    if (reducedMotion) return;
+
     setStripBooting(true);
     setBarSurging(true);
-    const stripTimer = window.setTimeout(() => setStripBooting(false), STRIP_BOOT_MS);
-    const barTimer = window.setTimeout(() => setBarSurging(false), BAR_SURGE_MS);
+    const stripTimer = window.setTimeout(() => setStripBooting(false), STRIP_BOOT.totalMs);
+    const barTimer = window.setTimeout(() => setBarSurging(false), BAR_SURGE.ms);
     return () => {
       window.clearTimeout(stripTimer);
       window.clearTimeout(barTimer);
     };
-  }, [shouldPollRuntime]);
+  }, [shouldPollRuntime, reducedMotion]);
 
   const prevJobCompletedRef = useRef<boolean | null>(null);
   const prevJobIdRef = useRef<string | null>(null);
@@ -195,7 +191,7 @@ export function ProjectTranslatePage() {
     celebratedJobIdRef.current = jobId;
 
     setJustCompleted(true);
-    const timer = window.setTimeout(() => setJustCompleted(false), COMPLETE_CELEBRATE_MS);
+    const timer = window.setTimeout(() => setJustCompleted(false), COMPLETE.celebrateMs);
     return () => window.clearTimeout(timer);
   }, [currentJob?.status, currentJob?.job_id]);
 
@@ -230,7 +226,7 @@ export function ProjectTranslatePage() {
 
     const timeout = window.setTimeout(() => {
       setFreshSuccessIds((current) => current.filter((id) => !nextFresh.includes(id)));
-    }, 2200);
+    }, FRESH_HIGHLIGHT_MS);
 
     return () => window.clearTimeout(timeout);
   }, [runtime?.recent_successes]);
@@ -271,14 +267,28 @@ export function ProjectTranslatePage() {
     setSubmitError(null);
     setSelectedTranslatorTemplate(projectDir, selectedTranslator);
 
-    // Spawn ripple at button center
-    const btnEl = launchButtonRef.current;
-    if (btnEl) {
-      const rect = btnEl.getBoundingClientRect();
-      const cx = rect.width / 2;
-      const cy = rect.height / 2;
-      setRipples([{ id: Date.now(), x: cx, y: cy, size: Math.max(rect.width, rect.height) }]);
-      window.setTimeout(() => setRipples([]), 700);
+    const backendProfile = getSelectedBackendProfile(projectDir);
+
+    // Spawn ripple at button center (skip in reduced-motion)
+    if (!reducedMotion) {
+      const btnEl = launchButtonRef.current;
+      if (btnEl) {
+        const rect = btnEl.getBoundingClientRect();
+        const cx = rect.width / 2;
+        const cy = rect.height / 2;
+        setRipples([{ id: Date.now(), x: cx, y: cy, size: Math.max(rect.width, rect.height) }]);
+        window.setTimeout(() => setRipples([]), LAUNCH.rippleMs);
+      }
+    }
+
+    if (reducedMotion) {
+      // Skip launch animation, submit immediately
+      void handleSubmit({
+        config_file_name: configFileName || 'config.yaml',
+        project_dir: projectDir,
+        translator: selectedTranslator,
+        ...(backendProfile ? { backend_profile: backendProfile } : {}) });
+      return;
     }
 
     // Phase 1: charge-up
@@ -289,9 +299,9 @@ export function ProjectTranslatePage() {
       setLaunchPhase('blasting');
 
       // Spawn particles
-      const newParticles = Array.from({ length: PARTICLE_COUNT }, (_, i) => {
-        const angle = (Math.PI * 2 * i) / PARTICLE_COUNT + (Math.random() - 0.5) * 0.4;
-        const dist = PARTICLE_DISTANCE_MIN + Math.random() * (PARTICLE_DISTANCE_MAX - PARTICLE_DISTANCE_MIN);
+      const newParticles = Array.from({ length: LAUNCH.particleCount }, (_, i) => {
+        const angle = (Math.PI * 2 * i) / LAUNCH.particleCount + (Math.random() - 0.5) * 0.4;
+        const dist = LAUNCH.particleDistanceMin + Math.random() * (LAUNCH.particleDistanceMax - LAUNCH.particleDistanceMin);
         const colors = ['#3b82f6', '#22d3ee', '#34d399', '#a78bfa', '#fbbf24'];
         return {
           id: Date.now() + i,
@@ -302,10 +312,9 @@ export function ProjectTranslatePage() {
           color: colors[i % colors.length] };
       });
       setParticles(newParticles);
-      window.setTimeout(() => setParticles([]), 800);
+      window.setTimeout(() => setParticles([]), LAUNCH.particleMs);
 
       // Submit the actual job
-      const backendProfile = getSelectedBackendProfile(projectDir);
       void handleSubmit({
         config_file_name: configFileName || 'config.yaml',
         project_dir: projectDir,
@@ -313,9 +322,9 @@ export function ProjectTranslatePage() {
         ...(backendProfile ? { backend_profile: backendProfile } : {}) });
 
       // Phase 3: settle
-      window.setTimeout(() => setLaunchPhase('idle'), LAUNCH_BLAST_MS);
-    }, LAUNCH_CHARGE_MS);
-  }, [configFileName, handleSubmit, isSelectedTranslatorValid, projectDir, selectedTranslator]);
+      window.setTimeout(() => setLaunchPhase('idle'), LAUNCH.blastMs);
+    }, LAUNCH.chargeMs);
+  }, [configFileName, handleSubmit, isSelectedTranslatorValid, projectDir, selectedTranslator, reducedMotion]);
 
   const handleStopTranslation = useCallback(async () => {
     if (!projectId) return;
@@ -604,7 +613,7 @@ export function ProjectTranslatePage() {
 
                   <div className="runtime-summary-strip__progress runtime-summary-strip__progress--hero">
                     <div className="runtime-summary-strip__bar">
-                      <div className={`runtime-summary-strip__bar-fill${justCompleted ? ' runtime-summary-strip__bar-fill--complete' : ''}`} style={{ width: `${progressPercent}%` }} />
+                      <div className={`runtime-summary-strip__bar-fill${currentJob?.status === 'completed' ? ' runtime-summary-strip__bar-fill--done' : ''}${justCompleted ? ' runtime-summary-strip__bar-fill--complete' : ''}`} style={{ width: `${progressPercent}%` }} />
                     </div>
                   </div>
 

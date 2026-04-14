@@ -1,0 +1,93 @@
+/* Panel, Hero, Workspace layout components */
+.meta-grid__long-text {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  font-size: 13px;
+}
+
+.hero {
+  margin-bottom: var(--space-7);
+}
+
+.hero__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-4);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(191, 208, 226, 0.8);
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hero__content {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(300px, 0.9fr);
+  gap: var(--space-6);
+  align-items: end;
+}
+
+.hero h1 {
+  margin: 0 0 var(--space-4);
+  font-size: clamp(34px, 4vw, 52px);
+  line-height: 1.05;
+}
+
+.hero p {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+/* hero__stats removed — now uses StatsGrid + MetricCard */
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(340px, 420px) minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.workspace__sidebar {
+  display: grid;
+  gap: var(--space-6);
+}
+
+.panel {
+  border: 1px solid rgba(191, 208, 226, 0.72);
+  border-radius: var(--radius-panel);
+  padding: var(--space-6);
+  background: var(--color-surface);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--shadow-panel);
+}
+
+.panel__header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  align-items: flex-start;
+  margin-bottom: var(--space-5);
+}
+
+.panel__header h2 {
+  margin: 0 0 var(--space-2);
+  font-size: 20px;
+}
+
+.panel__header p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.panel__actions {
+  flex-shrink: 0;
+}

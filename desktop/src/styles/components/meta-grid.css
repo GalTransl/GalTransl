@@ -1,0 +1,50 @@
+/* Connection card & meta grid components */
+.connection-card__status-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  align-items: center;
+}
+
+.connection-card__url {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.connection-card__message {
+  margin: var(--space-4) 0 var(--space-5);
+  color: var(--color-text-muted);
+  line-height: 1.7;
+}
+
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.meta-grid div {
+  padding: var(--space-4);
+  border: 1px solid rgba(216, 225, 236, 0.92);
+  border-radius: var(--radius-card);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.meta-grid dt {
+  margin-bottom: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.meta-grid dd {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}

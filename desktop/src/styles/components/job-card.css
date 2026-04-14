@@ -1,0 +1,107 @@
+/* Job list & job card components */
+.job-list {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.job-card {
+  border: 1px solid rgba(191, 208, 226, 0.72);
+  border-radius: var(--radius-card);
+  padding: var(--space-5);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(250, 252, 255, 0.8));
+}
+
+.job-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  align-items: flex-start;
+  margin-bottom: var(--space-5);
+}
+
+.job-card__title-block h3 {
+  margin: 0 0 var(--space-2);
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.job-card__title-block p {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.job-card__error {
+  margin-top: var(--space-5);
+  padding: var(--space-4);
+  border-radius: var(--radius-card);
+  background: rgba(253, 236, 234, 0.72);
+  border: 1px solid rgba(217, 48, 37, 0.14);
+}
+
+.job-card__error strong {
+  display: block;
+  margin-bottom: var(--space-2);
+  color: var(--color-danger);
+}
+
+.job-card__error pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  color: var(--color-text);
+}
+
+.job-card__progress {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+
+.job-card__progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.job-card__progress-meta strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.job-card__progress-file {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.home-page .history-item {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-3);
+}
+
+.home-page .history-item__button {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+.home-page .history-item__button:focus-visible {
+  outline: 2px solid rgba(47, 111, 235, 0.5);
+  outline-offset: 4px;
+  border-radius: var(--radius-control);
+}
+

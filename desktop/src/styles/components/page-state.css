@@ -1,0 +1,53 @@
+/* Empty state & page state components */
+.empty-state {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-6);
+  border: 1px dashed var(--color-line-strong);
+  border-radius: var(--radius-card);
+  color: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.empty-state strong {
+  color: var(--color-text);
+  font-size: 16px;
+}
+
+.page-state {
+  align-items: center;
+  justify-items: center;
+  text-align: center;
+}
+
+.page-state--loading {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(244, 248, 255, 0.84));
+}
+
+.page-state__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  background: rgba(47, 111, 235, 0.1);
+  color: var(--color-primary);
+  font-size: 20px;
+}
+
+.page-state__body {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 560px;
+}
+
+.page-state__body span {
+  line-height: 1.65;
+}
+
+.page-state__action {
+  display: flex;
+  justify-content: center;
+}
+

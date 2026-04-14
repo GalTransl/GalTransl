@@ -1,0 +1,136 @@
+/* Stats grid, metric card, input bubble & shared responsive overrides */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-4);
+}
+
+.stats-grid--compact {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+}
+
+.metric-card {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid rgba(191, 208, 226, 0.9);
+  border-radius: var(--radius-card);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--color-text);
+  text-align: left;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+}
+
+.metric-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.metric-card__label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.metric-card__icon {
+  color: inherit;
+  opacity: 0.78;
+}
+
+.metric-card__value {
+  font-size: 22px;
+  line-height: 1.15;
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+
+.metric-card__hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.metric-card--interactive {
+  width: 100%;
+  cursor: pointer;
+}
+
+.metric-card--interactive:hover,
+.metric-card--interactive:focus-visible,
+.metric-card--active {
+  transform: translateY(-1px);
+  border-color: rgba(47, 111, 235, 0.42);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.08);
+}
+
+.metric-card--accent {
+  background: linear-gradient(180deg, rgba(245, 249, 255, 0.98), rgba(236, 244, 255, 0.92));
+}
+
+.metric-card--success {
+  background: linear-gradient(180deg, rgba(240, 253, 248, 0.98), rgba(232, 250, 241, 0.92));
+}
+
+.metric-card--warning {
+  background: linear-gradient(180deg, rgba(255, 250, 235, 0.98), rgba(255, 245, 214, 0.92));
+}
+
+.metric-card--danger {
+  background: linear-gradient(180deg, rgba(255, 245, 245, 0.98), rgba(254, 226, 226, 0.92));
+}
+
+.metric-card--accent .metric-card__label,
+.metric-card--success .metric-card__label,
+.metric-card--warning .metric-card__label,
+.metric-card--danger .metric-card__label,
+.metric-card--active .metric-card__label {
+  color: var(--color-primary);
+}
+
+@media (max-width: 1120px) {
+  .app-layout__content {
+    padding: var(--space-5);
+  }
+
+  .hero__content,
+  .workspace,
+  .translate-page__content {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .app-layout__content {
+    padding: var(--space-4);
+  }
+
+  .sidebar--expanded {
+    width: 180px;
+  }
+
+  /* hero__stats responsive removed — now uses StatsGrid */
+
+  .panel,
+  .job-card,
+  .meta-grid div {
+    padding: var(--space-4);
+  }
+
+  .panel__header,
+  .job-card__header,
+  .connection-card__status-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .connection-card__url {
+    text-align: left;
+  }
+}
+

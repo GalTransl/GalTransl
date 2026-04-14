@@ -1,0 +1,49 @@
+/* Design tokens — CSS custom properties for colors, spacing, shadows, radii */
+:root {
+  color-scheme: light;
+  --font-sans: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --color-bg: #f4f7fb;
+  --color-surface: rgba(255, 255, 255, 0.9);
+  --color-surface-strong: #ffffff;
+  --color-text: #1f2a37;
+  --color-text-muted: #5b6b7f;
+  --color-line: #d8e1ec;
+  --color-line-strong: #bfd0e2;
+  --color-primary: #2f6feb;
+  --color-primary-strong: #1d5fe0;
+  --color-primary-soft: #edf3ff;
+  --color-success: #0f9d58;
+  --color-success-soft: #e7f8ee;
+  --color-warning: #a96500;
+  --color-warning-soft: #fff4dd;
+  --color-danger: #d93025;
+  --color-danger-soft: #fdecea;
+  --color-neutral-soft: #eef2f7;
+  --shadow-panel: 0 18px 48px rgba(16, 24, 40, 0.08);
+  --shadow-button: 0 10px 24px rgba(47, 111, 235, 0.2);
+  --radius-panel: 24px;
+  --radius-card: 18px;
+  --radius-control: 14px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --transition-fast: 160ms ease;
+
+  /* ── Motion tokens (synced with lib/motion.ts) ── */
+  --dur-micro: 120ms;
+  --dur-fast: 200ms;
+  --dur-standard: 300ms;
+  --dur-emphasized: 500ms;
+  --dur-celebration: 800ms;
+  --ease-default: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-decel: cubic-bezier(0, 0, 0.2, 1);
+  --ease-accel: cubic-bezier(0.4, 0, 1, 1);
+  --ease-sharp: cubic-bezier(0.4, 0, 0.6, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-bar-fill: cubic-bezier(0.22, 1, 0.36, 1);
+}
