@@ -11,6 +11,9 @@ import {
   submitJob,
   fetchJob,
   saveNameTable,
+  getAiTranslateUrl,
+  fetchBackendProfiles,
+  getSelectedBackendProfile,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 
@@ -31,6 +34,7 @@ export function ProjectNamePage() {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [aiTranslating, setAiTranslating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -38,12 +42,30 @@ export function ProjectNamePage() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // AI translate popover state
+  const [showAiPopover, setShowAiPopover] = useState(false);
+  const [aiProfileNames, setAiProfileNames] = useState<string[]>([]);
+  const [aiSelectedProfile, setAiSelectedProfile] = useState('');
+  const aiPopoverRef = useRef<HTMLDivElement>(null);
+
   // Debounced search
   useEffect(() => {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(() => setDebouncedSearch(searchQuery), 300);
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
   }, [searchQuery]);
+
+  // Close popover on outside click
+  useEffect(() => {
+    if (!showAiPopover) return;
+    const handler = (e: MouseEvent) => {
+      if (aiPopoverRef.current && !aiPopoverRef.current.contains(e.target as Node)) {
+        setShowAiPopover(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showAiPopover]);
 
   const loadData = useCallback(async () => {
     if (!projectId) return;
@@ -75,15 +97,12 @@ export function ProjectNamePage() {
     setGenerating(true);
     setError(null);
     try {
-      // Submit a dump-name job which goes through the full pipeline
-      // (frontend plugins, splitter, etc.) to extract speaker names
       const job = await submitJob({
         project_dir: projectDir,
         config_file_name: configFileName || 'config.yaml',
         translator: 'dump-name',
       });
 
-      // Poll until the job finishes
       const pollJob = async (jobId: string): Promise<Job> => {
         const j = await fetchJob(jobId);
         if (j.status === 'pending' || j.status === 'running') {
@@ -102,7 +121,6 @@ export function ProjectNamePage() {
       } else if (finished.status === 'cancelled') {
         setError('生成人名表已被取消');
       } else {
-        // Success — reload the name table from the generated file
         const res = await fetchNameTable(projectId);
         setNames(res.names);
         setSourceFile(res.source_file);
@@ -129,6 +147,117 @@ export function ProjectNamePage() {
     }
   }, [projectId, names]);
 
+  // Open AI translate popover — load profiles & preselect default
+  const handleOpenAiPopover = useCallback(() => {
+    if (names.filter((n) => n.dst_name.trim() === '').length === 0) {
+      setError('所有人名已翻译，无需AI翻译');
+      return;
+    }
+    fetchBackendProfiles()
+      .then((data) => {
+        const profileKeys = Object.keys(data.profiles || {});
+        setAiProfileNames(profileKeys);
+        const defaultName = getSelectedBackendProfile(projectDir);
+        setAiSelectedProfile(defaultName && profileKeys.includes(defaultName) ? defaultName : (profileKeys[0] || ''));
+        setShowAiPopover(true);
+      })
+      .catch(() => {
+        setError('加载后端配置失败');
+      });
+  }, [names, projectDir]);
+
+  const handleAiTranslate = useCallback(async () => {
+    if (!projectId) return;
+    const untranslated = names.filter((n) => n.dst_name.trim() === '');
+    if (untranslated.length === 0) {
+      setError('所有人名已翻译，无需AI翻译');
+      return;
+    }
+    setShowAiPopover(false);
+    setAiTranslating(true);
+    setError(null);
+    let aborted = false;
+    try {
+      const url = getAiTranslateUrl(projectId);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ names: untranslated, backend_profile: aiSelectedProfile }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `请求失败：${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('无法读取流式响应');
+
+      const decoder = new TextDecoder();
+      let sseBuf = '';
+      let filledCount = 0;
+      const remaining = new Map(untranslated.map((n) => [n.src_name, true]));
+
+      while (!aborted) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        sseBuf += decoder.decode(value, { stream: true });
+
+        const parts = sseBuf.split('\n\n');
+        sseBuf = parts.pop() || '';
+
+        for (const part of parts) {
+          if (!part.trim()) continue;
+          let eventType = '';
+          let eventData = '';
+          for (const line of part.split('\n')) {
+            if (line.startsWith('event: ')) eventType = line.slice(7).trim();
+            else if (line.startsWith('data: ')) eventData = line.slice(6);
+          }
+          if (!eventData) continue;
+
+          try {
+            const data = JSON.parse(eventData);
+            if (eventType === 'name') {
+              const src = data.src_name as string;
+              const dst = data.dst_name as string;
+              if (src && dst) {
+                setNames((prev) =>
+                  prev.map((entry) =>
+                    entry.src_name === src && entry.dst_name.trim() === ''
+                      ? { ...entry, dst_name: dst }
+                      : entry
+                  )
+                );
+                filledCount++;
+                remaining.delete(src);
+                if (remaining.size === 0) {
+                  aborted = true;
+                }
+              }
+            } else if (eventType === 'error') {
+              setError(data.error || 'AI翻译人名失败');
+            } else if (eventType === 'done') {
+              aborted = true;
+            }
+          } catch {
+            // Skip unparseable events
+          }
+        }
+      }
+
+      if (filledCount > 0) setDirty(true);
+      if (filledCount === 0) {
+        setError('AI未能返回任何翻译结果');
+      }
+    } catch (err) {
+      setError(normalizeError(err, 'AI翻译人名失败'));
+    } finally {
+      setAiTranslating(false);
+    }
+  }, [projectId, names, aiSelectedProfile]);
+
   const handleDstNameChange = useCallback((index: number, value: string) => {
     setNames((prev) => {
       const next = [...prev];
@@ -150,7 +279,6 @@ export function ProjectNamePage() {
 
   const handlePaste = useCallback((e: React.ClipboardEvent, field: 'src_name' | 'dst_name', startIndex: number) => {
     const text = e.clipboardData.getData('text/plain');
-    // If the pasted text contains newlines, split and fill multiple rows
     if (text.includes('\n') || text.includes('\t')) {
       e.preventDefault();
       const lines = text.split('\n').filter((l) => l.trim() !== '');
@@ -159,7 +287,6 @@ export function ProjectNamePage() {
         const parts = lines[i].split('\t');
         const targetIndex = startIndex + i;
         if (targetIndex >= newNames.length) {
-          // Auto-add rows
           newNames.push({ src_name: '', dst_name: '', count: 0 });
         }
         if (field === 'src_name') {
@@ -197,6 +324,40 @@ export function ProjectNamePage() {
           <Button onClick={handleGenerate} disabled={generating}>
             {generating ? '提取中...' : '提取人名表'}
           </Button>
+          <div className="name-page__ai-wrap" ref={aiPopoverRef}>
+            <Button onClick={handleOpenAiPopover} disabled={aiTranslating || names.length === 0}>
+              {aiTranslating ? 'AI翻译中...' : 'AI翻译人名'}
+            </Button>
+            {showAiPopover && (
+              <div className="name-page__ai-popover">
+                <div className="name-page__ai-popover-title">选择翻译后端</div>
+                {aiProfileNames.length === 0 ? (
+                  <div className="name-page__ai-popover-empty">
+                    未找到后端配置，请先在「后端配置」页添加 OpenAI 兼容接口
+                  </div>
+                ) : (
+                  <>
+                    <select
+                      className="name-page__ai-popover-select"
+                      value={aiSelectedProfile}
+                      onChange={(e) => setAiSelectedProfile(e.target.value)}
+                    >
+                      {aiProfileNames.map((name) => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </select>
+                    <Button
+                      variant="primary"
+                      onClick={handleAiTranslate}
+                      disabled={!aiSelectedProfile}
+                    >
+                      开始翻译
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
           <Button onClick={handleSave} disabled={!dirty || saving} variant="primary">
             {saving ? '保存中...' : '保存'}
           </Button>
@@ -248,7 +409,6 @@ export function ProjectNamePage() {
               </thead>
               <tbody>
                 {filteredNames.map((entry, i) => {
-                  // Find original index in unfiltered array
                   const originalIndex = names.indexOf(entry);
                   const hasTranslation = entry.dst_name.trim() !== '';
                   return (

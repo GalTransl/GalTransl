@@ -100,7 +100,7 @@ export type CacheEntry = {
   post_dst_preview?: string;
 };
 
-export type CacheSearchField = 'all' | 'src' | 'dst';
+export type CacheSearchField = 'all' | 'src' | 'dst' | 'problem';
 
 export type CacheSearchResult = {
   filename: string;
@@ -110,6 +110,7 @@ export type CacheSearchResult = {
   pre_dst: string;
   match_src: boolean;
   match_dst: boolean;
+  match_problem: boolean;
   problem: string;
   trans_by: string;
 };
@@ -625,6 +626,11 @@ export async function saveNameTable(projectId: string, names: NameEntry[]) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ names }),
   });
+}
+
+export function getAiTranslateUrl(projectId: string) {
+  const baseUrl = getBackendBaseUrl();
+  return `${baseUrl}/api/projects/${projectId}/name-table/ai-translate`;
 }
 
 export async function fetchNameDict(projectId: string) {

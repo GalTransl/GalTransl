@@ -1319,13 +1319,17 @@ def build_handler(registry: JobRegistry):
                                         continue
                                     src_text = e.get("post_src", "") or e.get("post_jp", "") or e.get("pre_src", "") or e.get("pre_jp", "")
                                     dst_text = e.get("pre_dst", "") or e.get("pre_zh", "") or e.get("proofread_dst", "") or e.get("proofread_zh", "")
+                                    problem_text = e.get("problem", "")
                                     match_src = query.lower() in src_text.lower()
                                     match_dst = query.lower() in dst_text.lower()
+                                    match_problem = query.lower() in problem_text.lower()
                                     if field == "src" and not match_src:
                                         continue
                                     if field == "dst" and not match_dst:
                                         continue
-                                    if field == "all" and not match_src and not match_dst:
+                                    if field == "problem" and not match_problem:
+                                        continue
+                                    if field == "all" and not match_src and not match_dst and not match_problem:
                                         continue
                                     results.append({
                                         "filename": name,
@@ -1335,6 +1339,7 @@ def build_handler(registry: JobRegistry):
                                         "pre_dst": dst_text,
                                         "match_src": match_src,
                                         "match_dst": match_dst,
+                                        "match_problem": match_problem,
                                         "problem": e.get("problem", ""),
                                         "trans_by": e.get("trans_by", ""),
                                     })
@@ -1924,6 +1929,157 @@ def build_handler(registry: JobRegistry):
                     self._send_json({"error": str(exc)}, status=HTTPStatus.CONFLICT)
                 except Exception as exc:
                     self._send_json({"error": f"生成人名表失败: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # POST /api/projects/:id/name-table/ai-translate  (SSE streaming)
+            if sub_path == "/name-table/ai-translate":
+                if self.command != "POST":
+                    self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
+                    return
+                try:
+                    payload = self._read_json_body()
+                    backend_profile = str(payload.get("backend_profile", "")).strip()
+                    untranslated = payload.get("names", [])
+                    if not isinstance(untranslated, list) or not untranslated:
+                        self._send_json({"error": "names must be a non-empty array"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    # Resolve the OpenAI-Compatible config from backend profiles
+                    profiles_data = _read_backend_profiles()
+                    profiles = profiles_data.get("profiles", {})
+
+                    oai_section = None
+                    if backend_profile and backend_profile in profiles:
+                        oai_section = profiles[backend_profile].get("OpenAI-Compatible")
+                    elif backend_profile:
+                        self._send_json({"error": f"后端配置 '{backend_profile}' 不存在"}, status=HTTPStatus.NOT_FOUND)
+                        return
+                    else:
+                        for _pname, _pconf in profiles.items():
+                            if "OpenAI-Compatible" in _pconf:
+                                oai_section = _pconf["OpenAI-Compatible"]
+                                break
+
+                    if not oai_section:
+                        self._send_json({"error": "未找到可用的 OpenAI 兼容后端配置，请先在后端配置中添加 OpenAI 兼容接口"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    tokens = oai_section.get("tokens", [])
+                    if not tokens:
+                        self._send_json({"error": "后端配置中没有 API token"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    token_entry = tokens[0]
+                    api_key = token_entry.get("token", "")
+                    endpoint = token_entry.get("endpoint", "https://api.openai.com")
+                    model_name = token_entry.get("modelName", oai_section.get("rewriteModelName", "gpt-4o-mini"))
+                    timeout = oai_section.get("apiTimeout", 60)
+
+                    if not api_key or "-example-" in api_key:
+                        self._send_json({"error": "后端配置中的 API token 无效"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    import re as _re
+                    if endpoint.endswith("/chat/completions"):
+                        endpoint = endpoint.replace("/chat/completions", "")
+                    if not _re.search(r"/v\d+", endpoint):
+                        base_path = "/v1"
+                    else:
+                        base_path = ""
+                    base_url = endpoint.strip("/") + base_path
+
+                    src_names = [str(n.get("src_name", "")) for n in untranslated if str(n.get("src_name", "")).strip()]
+                    if not src_names:
+                        self._send_json({"error": "没有需要翻译的人名"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    # --- SSE streaming response ---
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "keep-alive")
+                    self.end_headers()
+
+                    def _sse_send(event: str, data: dict) -> None:
+                        msg = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                        self.wfile.write(msg.encode("utf-8"))
+                        self.wfile.flush()
+
+                    names_text = "\n".join(f"- {n}" for n in src_names)
+                    system_prompt = (
+                        "你是一个专业的日语/中文人名翻译专家。"
+                        "请将以下日本人名翻译为中文译名。"
+                        "以JSONL格式回答，每行一个JSON对象，格式为："
+                        '{"src":"原名","dst":"译名"}\n'
+                        "每翻译一个人名就输出一行，不要输出其他任何内容。"
+                        "如果某个名字不确定，请尽量给出最常用的中文译名。"
+                    )
+                    user_prompt = f"请翻译以下人名：\n{names_text}"
+
+                    from openai import OpenAI
+                    client = OpenAI(api_key=api_key, base_url=base_url)
+                    stream = client.chat.completions.create(
+                        model=model_name,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        timeout=timeout,
+                        stream=True,
+                    )
+
+                    line_buf = ""
+                    for chunk in stream:
+                        if not chunk.choices:
+                            continue
+                        delta = chunk.choices[0].delta
+                        if not delta or not delta.content:
+                            continue
+                        line_buf += delta.content
+                        # Try to extract complete JSONL lines
+                        while "\n" in line_buf:
+                            line, line_buf = line_buf.split("\n", 1)
+                            line = line.strip()
+                            if not line:
+                                continue
+                            # Strip markdown fences if present
+                            if line.startswith("```"):
+                                continue
+                            try:
+                                obj = json.loads(line)
+                                src = str(obj.get("src", "")).strip()
+                                dst = str(obj.get("dst", "")).strip()
+                                if src and dst:
+                                    _sse_send("name", {"src_name": src, "dst_name": dst})
+                            except (json.JSONDecodeError, ValueError):
+                                # Not valid JSON — might be partial, skip
+                                pass
+
+                    # Flush remaining buffer
+                    if line_buf.strip():
+                        line = line_buf.strip()
+                        if not line.startswith("```"):
+                            try:
+                                obj = json.loads(line)
+                                src = str(obj.get("src", "")).strip()
+                                dst = str(obj.get("dst", "")).strip()
+                                if src and dst:
+                                    _sse_send("name", {"src_name": src, "dst_name": dst})
+                            except (json.JSONDecodeError, ValueError):
+                                pass
+
+                    _sse_send("done", {"total": len(untranslated)})
+
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    # If headers already sent (SSE started), send error as event
+                    try:
+                        err_msg = f"AI翻译人名失败: {exc}"
+                        self.wfile.write(f"event: error\ndata: {json.dumps({'error': err_msg}, ensure_ascii=False)}\n\n".encode("utf-8"))
+                        self.wfile.flush()
+                    except Exception:
+                        pass
                 return
 
             # POST /api/projects/:id/name-table/save
