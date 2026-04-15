@@ -60,6 +60,11 @@ export function ProjectLayout() {
     [projectDir, projectId, configFileName],
   );
 
+  // ── Scroll to top on tab switch ──
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [currentTab]);
+
   return (
     <div className="project-layout">
       {TAB_MAP.map((tab) => (
