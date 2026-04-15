@@ -6,7 +6,6 @@ import { ProjectConfigPage } from '../pages/ProjectConfigPage';
 import { ProjectDictionaryPage } from '../pages/ProjectDictionaryPage';
 import { ProjectNamePage } from '../pages/ProjectNamePage';
 import { ProjectCachePage } from '../pages/ProjectCachePage';
-import { ProjectProblemsPage } from '../pages/ProjectProblemsPage';
 
 const CONFIG_FILE_KEY = 'galtransl-config-file';
 
@@ -26,7 +25,6 @@ const TAB_MAP: { path: string; label: string }[] = [
   { path: 'dictionary', label: '项目字典' },
   { path: 'names', label: '人名翻译' },
   { path: 'cache', label: '缓存编辑' },
-  { path: 'problems', label: '问题审查' },
 ];
 
 /** Shared context passed to every child page */
@@ -77,7 +75,6 @@ export function ProjectLayout() {
           {tab.path === 'dictionary' && <ProjectDictionaryPage ctx={ctx} />}
           {tab.path === 'names' && <ProjectNamePage ctx={ctx} />}
           {tab.path === 'cache' && <ProjectCachePage ctx={ctx} />}
-          {tab.path === 'problems' && <ProjectProblemsPage ctx={ctx} />}
         </div>
       ))}
     </div>

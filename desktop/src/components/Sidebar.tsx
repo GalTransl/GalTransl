@@ -9,7 +9,6 @@ const PROJECT_TABS = [
   { path: 'dictionary', label: '项目字典', icon: '📖' },
   { path: 'names', label: '人名翻译', icon: '👤' },
   { path: 'cache', label: '缓存编辑', icon: '💾' },
-  { path: 'problems', label: '问题审查', icon: '🔍' },
 ];
 
 type SidebarProps = {
