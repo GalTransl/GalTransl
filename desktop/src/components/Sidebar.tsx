@@ -423,17 +423,6 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
         </NavLink>
 
         <NavLink
-          to="/plugins"
-          className={({ isActive }) =>
-            `sidebar__nav-item ${isActive ? 'sidebar__nav-item--active' : ''}`
-          }
-          title="插件管理"
-        >
-          <span className="sidebar__nav-icon">🧩</span>
-          {expanded && <span className="sidebar__nav-label">插件管理</span>}
-        </NavLink>
-
-        <NavLink
           to="/settings"
           className={({ isActive }) =>
             `sidebar__nav-item ${isActive ? 'sidebar__nav-item--active' : ''}`

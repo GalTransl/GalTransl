@@ -24,6 +24,7 @@
 .plugin-tabs {
   display: flex;
   gap: var(--space-2);
+  margin-bottom: var(--space-4);
 }
 
 .plugin-tab {
@@ -53,6 +54,9 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
   gap: var(--space-4);
+  max-height: 480px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .plugin-card {

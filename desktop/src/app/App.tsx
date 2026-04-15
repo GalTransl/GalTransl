@@ -6,7 +6,6 @@ import { ProjectLayout } from '../components/ProjectLayout';
 import { ConnectionProvider } from '../features/connection/ConnectionContext';
 import { HomePage, addProjectToHistory } from '../pages/HomePage';
 import { BackendProfilesPage } from '../pages/BackendProfilesPage';
-import { PluginsPage } from '../pages/PluginsPage';
 import { SettingsPage } from '../pages/SettingsPage';
 import { CommonDictionaryPage } from '../pages/CommonDictionaryPage';
 
@@ -183,10 +182,6 @@ function AppInner({ openProjects, onOpenProject, onCloseProject }: AppInnerProps
               <Route
                 path="/common-dictionaries"
                 element={<CommonDictionaryPage />}
-              />
-              <Route
-                path="/plugins"
-                element={<PluginsPage />}
               />
               <Route
                 path="/settings"
