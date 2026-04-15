@@ -70,6 +70,7 @@ export function CustomSelect({
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const instanceId = useId();
+  const justSelectedRef = useRef(false);
 
   const selectedOption = options.find((o) => o.value === value);
   const displayLabel = selectedOption?.label || String(value);
@@ -198,6 +199,11 @@ export function CustomSelect({
         aria-labelledby={rest['aria-labelledby'] as string | undefined}
         onClick={() => {
           if (disabled) return;
+          // If label just forwarded a click after selecting an option, ignore
+          if (justSelectedRef.current) {
+            justSelectedRef.current = false;
+            return;
+          }
           setOpen((prev) => !prev);
           setHighlightIdx(options.findIndex((o) => o.value === value));
         }}
@@ -243,13 +249,21 @@ export function CustomSelect({
               role="option"
               aria-selected={opt.value === value}
               data-idx={idx}
-              onClick={() => {
+              onClick={(e) => {
                 if (opt.disabled) return;
+                e.preventDefault();
+                e.stopPropagation();
+                justSelectedRef.current = true;
+                setTimeout(() => { justSelectedRef.current = false; }, 0);
                 notifyChange(opt.value);
                 setOpen(false);
                 setHighlightIdx(-1);
               }}
               onMouseEnter={() => setHighlightIdx(idx)}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
             >
               {opt.label}
             </div>
