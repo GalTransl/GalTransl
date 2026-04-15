@@ -397,7 +397,6 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
             </div>
           );
         })}
-
       </nav>
 
       <nav className="sidebar__bottom-nav">

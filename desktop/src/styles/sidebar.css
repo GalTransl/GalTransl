@@ -58,6 +58,28 @@
   gap: var(--space-1);
   overflow-y: auto;
   scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.sidebar__nav:not(:hover) {
+  scrollbar-color: transparent transparent;
+}
+
+.sidebar__nav:hover {
+  scrollbar-color: var(--color-neutral-soft) transparent;
+}
+
+.sidebar__nav::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar__nav::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: transparent;
+}
+
+.sidebar__nav:hover::-webkit-scrollbar-thumb {
+  background: var(--color-neutral-soft);
 }
 
 .sidebar__nav-item {
