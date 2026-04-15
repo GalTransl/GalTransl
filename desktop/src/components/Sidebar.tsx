@@ -405,16 +405,16 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
                         </NavLink>
                       ))}
                       <div className="sidebar__project-child-separator" />
-                      <button
-                        className="sidebar__project-child sidebar__project-child--action"
-                        type="button"
-                        disabled={!!rebuildingDirs[projectDir]}
-                        onClick={() => void handleRebuildOutput(projectDir)}
+                      <NavLink
+                        to="."
+                        onClick={(e) => { e.preventDefault(); if (!rebuildingDirs[projectDir]) void handleRebuildOutput(projectDir); }}
+                        className={() => 'sidebar__project-child sidebar__project-child--action'}
                         title="重建输出文件并打开文件夹"
+                        style={rebuildingDirs[projectDir] ? { opacity: 0.6, pointerEvents: 'none' } : undefined}
                       >
                         <span className="sidebar__project-child-icon">{rebuildingDirs[projectDir] ? '⏳' : '📤'}</span>
                         <span className="sidebar__project-child-label">输出文件</span>
-                      </button>
+                      </NavLink>
                     </div>
                   )}
                 </>
@@ -441,15 +441,15 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
                       <span className="sidebar__nav-icon">{tab.icon}</span>
                     </NavLink>
                   ))}
-                  <button
-                    className="sidebar__nav-item sidebar__nav-item--sub"
-                    type="button"
-                    disabled={!!rebuildingDirs[projectDir]}
-                    onClick={() => void handleRebuildOutput(projectDir)}
+                  <NavLink
+                    to="."
+                    onClick={(e) => { e.preventDefault(); if (!rebuildingDirs[projectDir]) void handleRebuildOutput(projectDir); }}
+                    className={() => 'sidebar__nav-item sidebar__nav-item--sub'}
                     title="输出文件"
+                    style={rebuildingDirs[projectDir] ? { opacity: 0.6, pointerEvents: 'none' } : undefined}
                   >
                     <span className="sidebar__nav-icon">{rebuildingDirs[projectDir] ? '⏳' : '📤'}</span>
-                  </button>
+                  </NavLink>
                 </>
               ) : (
                 <NavLink

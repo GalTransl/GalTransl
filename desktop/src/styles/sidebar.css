@@ -398,23 +398,12 @@
 }
 
 .sidebar__project-child--action {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  font: inherit;
-  width: 100%;
-  text-align: left;
   color: var(--color-text-muted);
 }
 
-.sidebar__project-child--action:hover:not(:disabled) {
+.sidebar__project-child--action:hover {
   background: var(--color-neutral-soft);
   color: var(--color-text);
-}
-
-.sidebar__project-child--action:disabled {
-  opacity: 0.6;
-  cursor: wait;
 }
 
 @media (prefers-reduced-motion: reduce) {
