@@ -69,7 +69,7 @@ export function App() {
     const cfg = config || 'config.yaml';
     setOpenProjects((prev) => {
       if (prev.includes(projectDir)) return prev;
-      return [...prev, projectDir];
+      return [projectDir, ...prev];
     });
     saveConfigFileName(projectDir, cfg);
     addProjectToHistory(projectDir, cfg);

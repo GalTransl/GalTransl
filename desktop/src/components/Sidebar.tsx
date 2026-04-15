@@ -262,7 +262,7 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
         {!expanded && <span className="sidebar__logo-icon">G</span>}
       </div>
 
-      <nav className="sidebar__nav">
+      <div className="sidebar__top-nav">
         <NavLink
           to="/"
           end
@@ -274,7 +274,9 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
           <span className="sidebar__nav-icon">🏠</span>
           {expanded && <span className="sidebar__nav-label">首页</span>}
         </NavLink>
+      </div>
 
+      <nav className="sidebar__nav">
         {openProjects.map((projectDir) => {
           const projectName = projectDir.replace(/[/\\]/g, '/').split('/').filter(Boolean).pop() || projectDir;
           const projectId = encodeProjectDir(projectDir);
@@ -396,6 +398,9 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
           );
         })}
 
+      </nav>
+
+      <nav className="sidebar__bottom-nav">
         <NavLink
           to="/backend-profiles"
           className={({ isActive }) =>
