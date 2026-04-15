@@ -37,7 +37,7 @@ export function ProjectDictionaryPage({ ctx }: { ctx: ProjectPageContext }) {
   return (
     <DictionaryManager
       title="项目字典"
-      description="仅管理项目目录下的字典文件（(project_dir)），支持卡片编辑与纯文本编辑。"
+      description="仅管理项目目录下的字典文件，支持卡片编辑与纯文本编辑。"
       data={data}
       loading={loading}
       error={error}

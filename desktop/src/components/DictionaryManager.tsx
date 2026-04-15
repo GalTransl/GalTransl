@@ -32,6 +32,13 @@ type DictionaryManagerProps = {
   onDeleteFile: (fileKey: string) => Promise<void>;
 };
 
+const PROJECT_DIR_MARKER = '(project_dir)';
+
+/** Strip the "(project_dir)" prefix for display purposes */
+function stripProjectDirMarker(name: string): string {
+  return name.replace(PROJECT_DIR_MARKER, '').trim();
+}
+
 function getFilesByTab(data: DictionaryManagerData | null, tab: DictTab): string[] {
   if (!data) return [];
   if (tab === 'pre') return data.pre_dict_files;
@@ -356,7 +363,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
 
   const handleDelete = async () => {
     if (!selectedFile) return;
-    if (!confirm(`确定删除字典文件「${selectedFile}」？`)) return;
+    if (!confirm(`确定删除字典文件「${stripProjectDirMarker(selectedFile)}」？`)) return;
     setDeleting(true);
     setLocalError(null);
     setInfo(null);
@@ -441,7 +448,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                     type="button"
                     onClick={() => handleSelectFile(file)}
                   >
-                    <span className="dict-file-item__name">{file}</span>
+                    <span className="dict-file-item__name">{stripProjectDirMarker(file)}</span>
                     {content && <span className="dict-file-item__count">{content.count}条</span>}
                   </button>
                 );
@@ -455,7 +462,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
           <div className="dict-layout__main">
             {selectedFile ? (
               <Panel
-                title={selectedFile}
+                title={stripProjectDirMarker(selectedFile)}
                 description={`${selectedContent?.count ?? 0} 条有效条目 · ${selectedContent?.path ?? ''}`}
                 actions={(
                   <div className="dict-panel-actions">
