@@ -37,6 +37,8 @@ const INPUT_FOLDER_NAME = 'gt_input';
 const OUTPUT_FOLDER_NAME = 'gt_output';
 const CACHE_FOLDER_NAME = 'transl_cache';
 
+const HIDDEN_TRANSLATORS = new Set(['rebuilda', 'rebuildr', 'show-plugs', 'dump-name']);
+
 export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const { projectDir, projectId, configFileName } = ctx;
   const { connectionPhase, translators, loadJobs } = useConnection();
@@ -131,7 +133,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   }, [loadJobs, refreshJobs]);
 
   const runningJobs = useMemo(
-    () => jobs.filter((job) => job.status === 'pending' || job.status === 'running'),
+    () => jobs.filter((job) => (job.status === 'pending' || job.status === 'running') && !HIDDEN_TRANSLATORS.has(job.translator)),
     [jobs],
   );
 
