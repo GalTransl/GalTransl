@@ -15,6 +15,7 @@ import {
   getAiTranslateUrl,
   fetchBackendProfiles,
   getSelectedBackendProfile,
+  DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 
@@ -39,6 +40,7 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
   // AI translate popover state
   const [showAiPopover, setShowAiPopover] = useState(false);
   const [aiProfileNames, setAiProfileNames] = useState<string[]>([]);
+  const [aiProfileModelMap, setAiProfileModelMap] = useState<Record<string, string>>({});
   const [aiSelectedProfile, setAiSelectedProfile] = useState('');
   const aiPopoverRef = useRef<HTMLDivElement>(null);
 
@@ -60,6 +62,22 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [showAiPopover]);
+
+  // React to global default backend profile changes
+  useEffect(() => {
+    const handler = () => {
+      if (projectDir) {
+        const newName = getSelectedBackendProfile(projectDir);
+        setAiSelectedProfile((prev) => {
+          // Only update if the project has no explicit selection (prev follows default)
+          // or always update to keep in sync with the global default
+          return newName !== prev ? newName : prev;
+        });
+      }
+    };
+    window.addEventListener(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, handler);
+    return () => window.removeEventListener(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, handler);
+  }, [projectDir]);
 
   const loadData = useCallback(async () => {
     if (!projectId) return;
@@ -149,8 +167,22 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
     }
     fetchBackendProfiles()
       .then((data) => {
-        const profileKeys = Object.keys(data.profiles || {});
+        const profiles = data.profiles || {};
+        const profileKeys = Object.keys(profiles);
         setAiProfileNames(profileKeys);
+        // Extract model name for each profile
+        const modelMap: Record<string, string> = {};
+        for (const [name, cfg] of Object.entries(profiles)) {
+          const c = cfg as Record<string, unknown>;
+          const oai = typeof c['OpenAI-Compatible'] === 'object' && c['OpenAI-Compatible'] !== null
+            ? c['OpenAI-Compatible'] as Record<string, unknown> : null;
+          const tokens = Array.isArray(oai?.tokens) ? oai!.tokens : [];
+          const firstToken = tokens.length > 0 && typeof tokens[0] === 'object' && tokens[0] !== null
+            ? tokens[0] as Record<string, unknown> : null;
+          const modelName = (firstToken?.modelName as string) || '';
+          modelMap[name] = modelName;
+        }
+        setAiProfileModelMap(modelMap);
         const defaultName = getSelectedBackendProfile(projectDir);
         setAiSelectedProfile(defaultName && profileKeys.includes(defaultName) ? defaultName : (profileKeys[0] || ''));
         setShowAiPopover(true);
@@ -336,9 +368,18 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
                       value={aiSelectedProfile}
                       onChange={(e) => setAiSelectedProfile(e.target.value)}
                     >
-                      {aiProfileNames.map((name) => (
-                        <option key={name} value={name}>{name}</option>
-                      ))}
+                      {(() => {
+                        const def = getSelectedBackendProfile(projectDir);
+                        const sorted = def && aiProfileNames.includes(def)
+                          ? [def, ...aiProfileNames.filter((n) => n !== def)]
+                          : aiProfileNames;
+                        return sorted.map((name) => {
+                          const model = aiProfileModelMap[name];
+                          const suffix = name === def ? '（默认）' : '';
+                          const label = model ? `${name} - ${model}${suffix}` : `${name}${suffix}`;
+                          return <option key={name} value={name}>{label}</option>;
+                        });
+                      })()}
                     </CustomSelect>
                     <Button
                       variant="primary"

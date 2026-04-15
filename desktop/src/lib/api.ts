@@ -726,6 +726,9 @@ const BACKEND_PROFILE_KEY = 'galtransl-backend-profile';
 const DEFAULT_BACKEND_PROFILE_KEY = 'galtransl-default-backend-profile';
 const TRANSLATOR_TEMPLATE_KEY = 'galtransl-project-translator-template';
 
+/** Custom event dispatched when the global default backend profile changes. */
+export const DEFAULT_BACKEND_PROFILE_CHANGE_EVENT = 'galtransl:default-backend-profile-change';
+
 /** Get the global default backend profile name. */
 export function getDefaultBackendProfile(): string {
   try {
@@ -743,6 +746,7 @@ export function setDefaultBackendProfile(name: string) {
     } else {
       localStorage.removeItem(DEFAULT_BACKEND_PROFILE_KEY);
     }
+    window.dispatchEvent(new CustomEvent(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, { detail: name }));
   } catch {
     // ignore storage errors
   }
@@ -765,12 +769,34 @@ export function getSelectedBackendProfile(projectDir: string): string {
   }
 }
 
+/**
+ * Get the backend profile display value for a project's dropdown.
+ * Returns '__default__' when no project-specific selection exists (following global default),
+ * empty string for "don't use any", or a specific profile name.
+ */
+export function getSelectedBackendProfileDisplay(projectDir: string): string {
+  try {
+    const map = JSON.parse(localStorage.getItem(BACKEND_PROFILE_KEY) || '{}');
+    if (map[projectDir] !== undefined) {
+      return map[projectDir]; // '' or a specific name
+    }
+    // No project-specific selection → show as "following default"
+    return '__default__';
+  } catch {
+    return '__default__';
+  }
+}
+
 export function setSelectedBackendProfile(projectDir: string, profileName: string) {
   try {
     const map = JSON.parse(localStorage.getItem(BACKEND_PROFILE_KEY) || '{}');
-    // Store even empty string — it means "explicitly don't use any global config".
-    // A missing key means "fall back to default".
-    map[projectDir] = profileName;
+    if (profileName === '__default__') {
+      // "Follow global default" → remove the project-specific key entirely
+      delete map[projectDir];
+    } else {
+      // Store even empty string — it means "explicitly don't use any global config".
+      map[projectDir] = profileName;
+    }
     localStorage.setItem(BACKEND_PROFILE_KEY, JSON.stringify(map));
   } catch {
     // ignore storage errors

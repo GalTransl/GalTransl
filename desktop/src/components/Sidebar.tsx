@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type TransitionEvent } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { invoke } from '@tauri-apps/api/core';
 import { encodeProjectDir, decodeProjectDir } from '../lib/api';
 
 const PROJECT_TABS = [
@@ -293,8 +294,12 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
                     onClick={() => toggleProjectExpanded(projectDir)}
                   >
                     <span
-                      className="sidebar__nav-icon sidebar__project-icon"
-                      aria-hidden="true"
+                      className="sidebar__nav-icon sidebar__project-icon sidebar__project-icon--link"
+                      role="button"
+                      tabIndex={0}
+                      title="打开项目文件夹"
+                      onClick={(e) => { e.stopPropagation(); void invoke('open_folder', { path: projectDir }); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); e.preventDefault(); void invoke('open_folder', { path: projectDir }); } }}
                     >
                       {isProjectExpanded ? '📂' : '📁'}
                     </span>

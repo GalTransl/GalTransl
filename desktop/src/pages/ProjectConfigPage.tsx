@@ -9,8 +9,10 @@ import {
   updateProjectConfig,
   fetchBackendProfiles,
   fetchPlugins,
-  getSelectedBackendProfile,
-  setSelectedBackendProfile } from '../lib/api';
+  getDefaultBackendProfile,
+  getSelectedBackendProfileDisplay,
+  setSelectedBackendProfile,
+  DEFAULT_BACKEND_PROFILE_CHANGE_EVENT } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 import {
   ConfigSectionNav,
@@ -37,6 +39,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   // Global backend profile selection
   const [backendProfileNames, setBackendProfileNames] = useState<string[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<string>('');
+  const [defaultProfileName, setDefaultProfileName] = useState(() => getDefaultBackendProfile());
 
   // Plugin lists from global plugin manager
   const [filePlugins, setFilePlugins] = useState<PluginInfo[]>([]);
@@ -78,9 +81,21 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
         // silently ignore — profiles are optional
       });
     if (projectDir) {
-      setSelectedProfile(getSelectedBackendProfile(projectDir));
+      setSelectedProfile(getSelectedBackendProfileDisplay(projectDir));
     }
     return () => { cancelled = true; };
+  }, [projectDir]);
+
+  // React to global default backend profile changes
+  useEffect(() => {
+    const handler = () => {
+      setDefaultProfileName(getDefaultBackendProfile());
+      if (projectDir) {
+        setSelectedProfile(getSelectedBackendProfileDisplay(projectDir));
+      }
+    };
+    window.addEventListener(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, handler);
+    return () => window.removeEventListener(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, handler);
   }, [projectDir]);
 
   // Load plugin lists from global plugin manager
@@ -269,6 +284,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
                 <BackendSettingsSection
                   config={config}
                   selectedProfile={selectedProfile}
+                  defaultProfileName={defaultProfileName}
                   backendProfileNames={backendProfileNames}
                   onProfileChange={(profile) => {
                     setSelectedProfile(profile);

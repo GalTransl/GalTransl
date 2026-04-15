@@ -46,7 +46,8 @@ function extractOptions(children: ReactNode): OptionData[] {
     // label falls back to children text
     let label = String(props.label ?? '');
     if (!label && props.children != null) {
-      label = String(props.children);
+      const ch = props.children;
+      label = Array.isArray(ch) ? ch.join('') : String(ch);
     }
     result.push({ value, label, disabled: Boolean(props.disabled) });
   });

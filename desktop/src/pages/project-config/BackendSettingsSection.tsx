@@ -7,6 +7,7 @@ import { ProxyConfigEditor } from '../../components/ProxyConfigEditor';
 interface BackendSettingsSectionProps {
   config: Record<string, unknown> | null;
   selectedProfile: string;
+  defaultProfileName: string;
   backendProfileNames: string[];
   onProfileChange: (profile: string) => void;
   onBackendChange: (newBackend: Record<string, unknown>) => void;
@@ -17,12 +18,15 @@ interface BackendSettingsSectionProps {
 export function BackendSettingsSection({
   config,
   selectedProfile,
+  defaultProfileName,
   backendProfileNames,
   onProfileChange,
   onBackendChange,
   onProxyChange,
   onDirty,
 }: BackendSettingsSectionProps) {
+  const resolvedProfile = selectedProfile === '__default__' ? defaultProfileName : selectedProfile;
+
   return (
     <Panel title="翻译后端" description="OpenAI兼容接口、Sakura本地模型和代理配置。">
       <div className="config-form">
@@ -32,22 +36,27 @@ export function BackendSettingsSection({
             value={selectedProfile}
             onChange={(e) => onProfileChange(e.target.value)}
           >
+            <option value="__default__">跟随全局默认</option>
             <option value="">不使用（使用项目自身配置）</option>
             {backendProfileNames.map((name) => (
               <option key={name} value={name}>{name}</option>
             ))}
           </CustomSelect>
           <span className="field__hint">
-            {selectedProfile
-              ? `翻译时将使用全局配置「${selectedProfile}」覆盖项目后端设置`
-              : '新项目默认使用全局默认配置，可在「翻译后端配置」页面设置默认'}
+            {selectedProfile === '__default__'
+              ? defaultProfileName
+                ? `当前默认配置为「${defaultProfileName}」，可在「翻译后端配置」页面修改`
+                : '尚未设置默认配置，请在「翻译后端配置」页面设置'
+              : selectedProfile
+                ? `翻译时将使用全局配置「${selectedProfile}」覆盖项目后端设置`
+                : '将忽略全局配置，使用项目自身的后端设置'}
           </span>
         </label>
 
-        {selectedProfile ? (
+        {resolvedProfile ? (
           <InlineFeedback
             tone="info"
-            title={`当前使用全局配置：${selectedProfile}`}
+            title={`当前使用全局配置：${resolvedProfile}`}
             description="翻译时将使用该配置覆盖项目后端设置。如需修改配置内容，请前往「翻译后端配置」页面。"
           />
         ) : (
