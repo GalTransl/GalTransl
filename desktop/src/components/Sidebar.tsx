@@ -92,6 +92,9 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
     setExpanded((prev) => !prev);
   }, []);
 
+  // Use compact project headers when many projects are open
+  const compactProjectHeaders = openProjects.length > 6;
+
   useEffect(() => {
     setRenderedProjectChildren((prev) => {
       let changed = false;
@@ -278,7 +281,7 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
 
       <nav className="sidebar__nav">
         {openProjects.map((projectDir) => {
-          const projectName = projectDir.replace(/[/\\]/g, '/').split('/').filter(Boolean).pop() || projectDir;
+          const projectName = projectDir.replace(/[/\\\\]/g, '/').split('/').filter(Boolean).pop() || projectDir;
           const projectId = encodeProjectDir(projectDir);
           const isProjectExpanded = getProjectExpanded(projectDir);
           const shouldRenderProjectChildren = renderedProjectChildren[projectDir] ?? isProjectExpanded;
@@ -286,17 +289,17 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
           const isConfirming = confirmCloseDir === projectDir;
 
           return (
-            <div className="sidebar__project-group" key={projectDir}>
+            <div className={`sidebar__project-group${compactProjectHeaders ? ' sidebar__project-group--compact' : ''}`} key={projectDir}>
               {expanded ? (
                 <>
                   <button
-                    className="sidebar__project-header"
+                    className={`sidebar__project-header${compactProjectHeaders ? ' sidebar__project-header--compact' : ''}`}
                     title={projectDir}
                     type="button"
                     onClick={() => toggleProjectExpanded(projectDir)}
                   >
                     <span
-                      className="sidebar__nav-icon sidebar__project-icon sidebar__project-icon--link"
+                      className={`sidebar__nav-icon sidebar__project-icon sidebar__project-icon--link${compactProjectHeaders ? ' sidebar__project-icon--compact' : ''}`}
                       role="button"
                       tabIndex={0}
                       title="打开项目文件夹"

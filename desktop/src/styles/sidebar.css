@@ -168,7 +168,14 @@
   white-space: nowrap;
   transition:
     background-color var(--transition-fast),
-    color var(--transition-fast);
+    color var(--transition-fast),
+    padding 180ms ease,
+    font-size 180ms ease;
+}
+
+.sidebar__project-header--compact {
+  padding: var(--space-1) var(--space-4);
+  font-size: 13px;
 }
 
 .sidebar__project-header:focus {
@@ -196,6 +203,14 @@
   font-size: 17px;
   flex-shrink: 0;
   color: inherit;
+  transition: width 180ms ease, height 180ms ease, font-size 180ms ease;
+}
+
+.sidebar__project-icon--compact {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  font-size: 14px;
 }
 
 .sidebar__project-icon--link {
