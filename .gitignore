@@ -16,3 +16,5 @@ desktop/src-tauri/target/
 backend_profiles.yaml
 /plans
 app_settings.json
+/release/
+/.venv-build/
