@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { CustomSelect } from '../../components/CustomSelect';
 
-export type FieldValueType = 'number' | 'text' | 'select' | 'textarea';
+export type FieldValueType = 'number' | 'text' | 'select' | 'textarea' | 'list';
 
 export interface ConfigFieldDef {
   key: string;
@@ -17,12 +17,13 @@ interface ConfigFieldRowProps {
   field: ConfigFieldDef;
   value: unknown;
   onChange: (path: string, value: string) => void;
+  onListChange?: (path: string, value: string[]) => void;
   pathPrefix: string;
   /** Optional visual emphasis level */
   tier?: 'primary' | 'advanced';
 }
 
-export function ConfigFieldRow({ field, value, onChange, pathPrefix, tier }: ConfigFieldRowProps) {
+export function ConfigFieldRow({ field, value, onChange, onListChange, pathPrefix, tier }: ConfigFieldRowProps) {
   const fieldId = `${pathPrefix}-${field.key.replace(/\./g, '-')}`;
   const displayValue = value == null ? '' : String(value);
   const fullPath = `${pathPrefix}.${field.key}`;
@@ -45,6 +46,21 @@ export function ConfigFieldRow({ field, value, onChange, pathPrefix, tier }: Con
         value={displayValue}
         placeholder={field.placeholder}
         onChange={(e) => onChange(fullPath, e.target.value)}
+      />
+    ) : field.type === 'list' ? (
+      <textarea
+        id={fieldId}
+        rows={field.rows ?? 4}
+        value={Array.isArray(value) ? value.join('\n') : (value == null ? '' : String(value))}
+        placeholder={field.placeholder || '每行一个条目'}
+        onChange={(e) => {
+          if (onListChange) {
+            const lines = e.target.value.split('\n').filter((l: string) => l.trim());
+            onListChange(fullPath, lines);
+          } else {
+            onChange(fullPath, e.target.value);
+          }
+        }}
       />
     ) : (
       <input

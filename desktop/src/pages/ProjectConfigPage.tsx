@@ -157,6 +157,15 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
     setDirty(true);
   }, [setNestedValue]);
 
+  const handleListFieldChange = useCallback((path: string, value: string[]) => {
+    setConfig((prev) => {
+      if (!prev) return prev;
+      return setNestedValue(prev, path, value);
+    });
+    setSaveSuccess(false);
+    setDirty(true);
+  }, [setNestedValue]);
+
   // Unified plugin setting change handler
   const handlePluginSettingChange = useCallback((pluginName: string, key: string, value: unknown) => {
     setConfig((prev) => {
@@ -277,6 +286,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
                 <CommonSettingsSection
                   commonConfig={commonConfig}
                   onFieldChange={handleFieldChange}
+                  onListFieldChange={handleListFieldChange}
                 />
               )}
 
