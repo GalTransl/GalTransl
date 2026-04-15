@@ -155,9 +155,14 @@ function AppInner({ openProjects, onOpenProject, onCloseProject }: AppInnerProps
 
   const handleCloseProjectAndNavigate = useCallback((projectDir: string) => {
     onCloseProject(projectDir);
-    // Navigate away if currently on this project's route
-    navigate('/');
-  }, [navigate, onCloseProject]);
+    // Navigate to home if this was the current project, or if no projects remain
+    const projectMatch = location.pathname.match(/^\/project\/([^/]+)/);
+    const isCurrentProject = projectMatch && decodeProjectDir(projectMatch[1]) === projectDir;
+    const willHaveNoProjects = openProjects.length <= 1;
+    if (isCurrentProject || willHaveNoProjects) {
+      navigate('/');
+    }
+  }, [navigate, onCloseProject, location.pathname, openProjects]);
 
   return (
     <div className="app-layout">

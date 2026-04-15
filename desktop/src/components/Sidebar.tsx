@@ -311,6 +311,7 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
                       <div
                         className="sidebar__project-confirm-bubble"
                         ref={confirmBubbleRef}
+                        onClick={(e) => e.stopPropagation()}
                       >
                         <span className="sidebar__project-confirm-text">关闭?</span>
                         <button
