@@ -30,3 +30,31 @@ code {
   font-family: "Cascadia Code", "Consolas", monospace;
   font-size: 0.95em;
 }
+
+/* ── Global scrollbar: thin, translucent, rounded ── */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(191, 208, 226, 0.9) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(191, 208, 226, 0.9);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+:hover > ::-webkit-scrollbar-thumb,
+*:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(176, 195, 219, 0.94);
+}

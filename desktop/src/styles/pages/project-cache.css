@@ -109,27 +109,6 @@
   min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(191, 208, 226, 0.9) transparent;
-}
-
-.cache-file-list::-webkit-scrollbar {
-  width: 10px;
-}
-
-.cache-file-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.cache-file-list::-webkit-scrollbar-thumb {
-  background-color: rgba(191, 208, 226, 0.9);
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background-clip: content-box;
-}
-
-.cache-file-list:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(176, 195, 219, 0.94);
 }
 
 .cache-file-item {
@@ -259,33 +238,12 @@
   min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(191, 208, 226, 0.9) transparent;
   padding: 2px;
   margin: -2px;
 }
 
 .cache-card-list--entering {
   animation: cacheContentSlideIn 180ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.cache-card-list::-webkit-scrollbar {
-  width: 10px;
-}
-
-.cache-card-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.cache-card-list::-webkit-scrollbar-thumb {
-  background-color: rgba(191, 208, 226, 0.9);
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background-clip: content-box;
-}
-
-.cache-card-list:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(176, 195, 219, 0.94);
 }
 
 .cache-card {
@@ -681,7 +639,6 @@
 .cache-replace-preview {
   max-height: 150px;
   overflow-y: auto;
-  scrollbar-width: thin;
 }
 
 .cache-replace-preview__summary {
@@ -731,28 +688,7 @@
   min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
-  scrollbar-width: thin;
   padding: 2px;
-  scrollbar-color: rgba(191, 208, 226, 0.9) transparent;
-}
-
-.cache-search-results::-webkit-scrollbar {
-  width: 10px;
-}
-
-.cache-search-results::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.cache-search-results::-webkit-scrollbar-thumb {
-  background-color: rgba(191, 208, 226, 0.9);
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background-clip: content-box;
-}
-
-.cache-search-results:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(176, 195, 219, 0.94);
 }
 
 /* ── Search Result Card ── */

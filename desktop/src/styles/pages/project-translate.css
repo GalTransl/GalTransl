@@ -959,35 +959,7 @@
   scrollbar-gutter: stable;
 }
 
-.project-translate-page .runtime-event-list,
-.project-translate-page .file-progress-list--runtime {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(191, 208, 226, 0.9) transparent;
-}
 
-.project-translate-page .runtime-event-list::-webkit-scrollbar,
-.project-translate-page .file-progress-list--runtime::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-.project-translate-page .runtime-event-list::-webkit-scrollbar-track,
-.project-translate-page .file-progress-list--runtime::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.project-translate-page .runtime-event-list::-webkit-scrollbar-thumb,
-.project-translate-page .file-progress-list--runtime::-webkit-scrollbar-thumb {
-  background-color: rgba(191, 208, 226, 0.9);
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background-clip: content-box;
-}
-
-.project-translate-page .runtime-event-list:hover::-webkit-scrollbar-thumb,
-.project-translate-page .file-progress-list--runtime:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(176, 195, 219, 0.94);
-}
 
 @keyframes runtimeSweep {
   0% {

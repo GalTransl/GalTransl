@@ -145,8 +145,6 @@ select option {
   max-height: 280px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(191, 208, 226, 0.9) transparent;
   padding: var(--space-1);
   background: rgba(255, 255, 255, 0.98);
   backdrop-filter: blur(16px);
@@ -156,21 +154,6 @@ select option {
     0 14px 28px rgba(16, 24, 40, 0.12),
     0 4px 8px rgba(16, 24, 40, 0.06);
   animation: selectPanelEnter var(--dur-fast) var(--ease-spring);
-}
-
-.custom-select__panel::-webkit-scrollbar {
-  width: 8px;
-}
-
-.custom-select__panel::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.custom-select__panel::-webkit-scrollbar-thumb {
-  background-color: rgba(191, 208, 226, 0.9);
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background-clip: content-box;
 }
 
 /* ── Option items ── */

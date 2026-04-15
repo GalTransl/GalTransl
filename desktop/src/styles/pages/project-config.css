@@ -199,8 +199,6 @@
   font-family: "Cascadia Code", "Consolas", monospace;
   font-size: 12.5px;
   min-height: 92px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.7) transparent;
   transition:
     border-color var(--transition-fast),
     box-shadow var(--transition-fast),
