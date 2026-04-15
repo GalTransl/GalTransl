@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button } from '../../components/Button';
+import { CustomSelect } from '../../components/CustomSelect';
 import { Panel } from '../../components/Panel';
 import type { SubmitJobPayload, TranslatorOption } from '../../lib/api';
 
@@ -78,7 +79,7 @@ export function JobSubmitForm({ disabled, isSubmitting, onSubmit, submitError, t
 
         <label className="field">
           <span>翻译模板</span>
-          <select
+          <CustomSelect
             disabled={disabled || isSubmitting || translators.length === 0}
             onChange={(event) => setTranslator(event.target.value)}
             value={translator}
@@ -89,7 +90,7 @@ export function JobSubmitForm({ disabled, isSubmitting, onSubmit, submitError, t
                 {item.name} · {item.description}
               </option>
             ))}
-          </select>
+          </CustomSelect>
         </label>
 
         {activeError ? (

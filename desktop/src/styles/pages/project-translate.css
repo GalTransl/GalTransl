@@ -207,7 +207,8 @@
 }
 
 .project-translate-page .field input,
-.project-translate-page .field select {
+.project-translate-page .field select,
+.project-translate-page .field .custom-select .custom-select__trigger {
   border-color: var(--color-line);
   background-color: var(--color-surface-strong);
   color: var(--color-text);

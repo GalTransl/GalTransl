@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { CustomSelect } from './CustomSelect';
 
 type ProxyEntry = {
   address: string;
@@ -44,14 +45,14 @@ export function ProxyConfigEditor({ proxyConfig, onChange, readOnly = false }: P
 
       <label className="field">
         <span>启用代理</span>
-        <select
+        <CustomSelect
           disabled={readOnly}
           value={String(enableProxy)}
           onChange={(e) => toggleEnableProxy(e.target.value === 'true')}
         >
           <option value="true">是</option>
           <option value="false">否</option>
-        </select>
+        </CustomSelect>
         <span className="field__hint">使用中转供应商时一般不用开代理</span>
       </label>
 

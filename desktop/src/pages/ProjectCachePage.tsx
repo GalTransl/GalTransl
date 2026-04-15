@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '../components/Button';
+import { CustomSelect } from '../components/CustomSelect';
 import { PageHeader } from '../components/PageHeader';
 import type { ProjectPageContext } from '../components/ProjectLayout';
 import { Panel } from '../components/Panel';
@@ -822,7 +823,7 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
-                <select
+                <CustomSelect
                   className="cache-search-field"
                   value={searchField}
                   onChange={(e) => setSearchField(e.target.value as CacheSearchField)}
@@ -831,7 +832,7 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
                   <option value="src">仅原文</option>
                   <option value="dst">仅译文</option>
                   <option value="problem">仅问题</option>
-                </select>
+                </CustomSelect>
               </div>
 
               {/* Replace toggle + Search results summary */}
@@ -867,7 +868,7 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
                     value={replaceWith}
                     onChange={(e) => setReplaceWith(e.target.value)}
                   />
-                  <select
+                  <CustomSelect
                     className="cache-search-field"
                     value={replaceField}
                     onChange={(e) => setReplaceField(e.target.value as CacheReplaceField)}
@@ -875,7 +876,7 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
                     <option value="dst">译文</option>
                     <option value="src">原文</option>
                     <option value="all">全部</option>
-                  </select>
+                  </CustomSelect>
                   <div className="cache-replace-actions">
                     <Button
                       variant="secondary"

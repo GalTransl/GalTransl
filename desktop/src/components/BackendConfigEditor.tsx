@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { CustomSelect } from './CustomSelect';
 
 type TokenEntry = {
   token: string;
@@ -180,7 +181,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false }: Back
                 </label>
                 <label className="field field--inline">
                   <span>流式请求</span>
-                  <select
+                  <CustomSelect
                     disabled={readOnly}
                     value={t.stream == null ? '' : String(t.stream)}
                     onChange={(e) => {
@@ -191,7 +192,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false }: Back
                     <option value="">默认</option>
                     <option value="true">是</option>
                     <option value="false">否</option>
-                  </select>
+                  </CustomSelect>
                 </label>
               </div>
             ))}
@@ -199,26 +200,26 @@ export function BackendConfigEditor({ config, onChange, readOnly = false }: Back
 
           <label className="field">
             <span>令牌策略</span>
-            <select
+            <CustomSelect
               disabled={readOnly}
               value={String(oaiConfig.tokenStrategy ?? 'random')}
               onChange={(e) => updateOai('tokenStrategy', e.target.value)}
             >
               <option value="random">随机轮询</option>
               <option value="fallback">优先降级</option>
-            </select>
+            </CustomSelect>
             <span className="field__hint">random 随机轮询；fallback 优先第一个，出错时使用下一个</span>
           </label>
           <label className="field">
             <span>检查可用性</span>
-            <select
+            <CustomSelect
               disabled={readOnly}
               value={String(oaiConfig.checkAvailable ?? 'true')}
               onChange={(e) => updateOai('checkAvailable', e.target.value === 'true')}
             >
               <option value="true">是</option>
               <option value="false">否</option>
-            </select>
+            </CustomSelect>
           </label>
           <label className="field">
             <span>请求超时(秒)</span>

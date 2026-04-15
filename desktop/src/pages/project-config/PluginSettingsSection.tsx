@@ -1,4 +1,5 @@
 import { Panel } from '../../components/Panel';
+import { CustomSelect } from '../../components/CustomSelect';
 import { PluginSettingsEditor } from '../../components/PluginSettingsEditor';
 import type { PluginInfo } from '../../lib/api';
 
@@ -26,7 +27,7 @@ export function PluginSettingsSection({
         <div className="plugin-section">
           <div className="plugin-section__title">文件插件</div>
           <label className="field">
-            <select
+            <CustomSelect
               value={String((config?.plugin as Record<string, unknown>)?.filePlugin ?? 'file_galtransl_json')}
               onChange={(e) => onFilePluginChange(e.target.value)}
             >
@@ -41,7 +42,7 @@ export function PluginSettingsSection({
                   {String((config?.plugin as Record<string, unknown>)?.filePlugin ?? 'file_galtransl_json')}
                 </option>
               )}
-            </select>
+            </CustomSelect>
             <span className="field__hint">从全局插件管理中获取可用文件插件</span>
           </label>
           {/* 文件插件设置项 */}

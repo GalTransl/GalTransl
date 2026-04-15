@@ -1,4 +1,5 @@
 import { Panel } from '../../components/Panel';
+import { CustomSelect } from '../../components/CustomSelect';
 import { BackendConfigEditor } from '../../components/BackendConfigEditor';
 import { InlineFeedback } from '../../components/page-state';
 import { ProxyConfigEditor } from '../../components/ProxyConfigEditor';
@@ -27,7 +28,7 @@ export function BackendSettingsSection({
       <div className="config-form">
         <label className="field">
           <span>全局后端配置</span>
-          <select
+          <CustomSelect
             value={selectedProfile}
             onChange={(e) => onProfileChange(e.target.value)}
           >
@@ -35,7 +36,7 @@ export function BackendSettingsSection({
             {backendProfileNames.map((name) => (
               <option key={name} value={name}>{name}</option>
             ))}
-          </select>
+          </CustomSelect>
           <span className="field__hint">
             {selectedProfile
               ? `翻译时将使用全局配置「${selectedProfile}」覆盖项目后端设置`

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { CustomSelect } from '../../components/CustomSelect';
 
 export type FieldValueType = 'number' | 'text' | 'select' | 'textarea';
 
@@ -28,7 +29,7 @@ export function ConfigFieldRow({ field, value, onChange, pathPrefix, tier }: Con
 
   const inputElement =
     field.type === 'select' ? (
-      <select
+      <CustomSelect
         id={fieldId}
         value={displayValue}
         onChange={(e) => onChange(fullPath, e.target.value)}
@@ -36,7 +37,7 @@ export function ConfigFieldRow({ field, value, onChange, pathPrefix, tier }: Con
         {field.options?.map((opt) => (
           <option key={opt} value={opt}>{opt}</option>
         ))}
-      </select>
+      </CustomSelect>
     ) : field.type === 'textarea' ? (
       <textarea
         id={fieldId}

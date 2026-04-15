@@ -1,4 +1,5 @@
 import { Panel } from '../../components/Panel';
+import { CustomSelect } from '../../components/CustomSelect';
 
 interface DictionarySettingsSectionProps {
   dictConfig: Record<string, unknown>;
@@ -60,43 +61,43 @@ function DictConfigEditor({
       </label>
       <label className="field">
         <span>字典用在name字段(译前)</span>
-        <select
+        <CustomSelect
           value={String(dictConfig.usePreDictInName ?? 'false')}
           onChange={(e) => onChange({ ...dictConfig, usePreDictInName: e.target.value === 'true' })}
         >
           <option value="true">是</option>
           <option value="false">否</option>
-        </select>
+        </CustomSelect>
       </label>
       <label className="field">
         <span>字典用在name字段(GPT)</span>
-        <select
+        <CustomSelect
           value={String(dictConfig.useGPTDictInName ?? 'false')}
           onChange={(e) => onChange({ ...dictConfig, useGPTDictInName: e.target.value === 'true' })}
         >
           <option value="true">是</option>
           <option value="false">否</option>
-        </select>
+        </CustomSelect>
       </label>
       <label className="field">
         <span>字典用在name字段(译后)</span>
-        <select
+        <CustomSelect
           value={String(dictConfig.usePostDictInName ?? 'false')}
           onChange={(e) => onChange({ ...dictConfig, usePostDictInName: e.target.value === 'true' })}
         >
           <option value="true">是</option>
           <option value="false">否</option>
-        </select>
+        </CustomSelect>
       </label>
       <label className="field">
         <span>字典排序</span>
-        <select
+        <CustomSelect
           value={String(dictConfig.sortDict ?? 'true')}
           onChange={(e) => onChange({ ...dictConfig, sortDict: e.target.value === 'true' })}
         >
           <option value="true">是</option>
           <option value="false">否</option>
-        </select>
+        </CustomSelect>
       </label>
     </>
   );

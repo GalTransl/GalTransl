@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ProjectPageContext } from '../components/ProjectLayout';
 import { Button } from '../components/Button';
+import { CustomSelect } from '../components/CustomSelect';
 import { MetricCard } from '../components/MetricCard';
 import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
@@ -532,7 +533,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
             <div className="form-stack">
               <label className="field">
                 <span>翻译模板</span>
-                <select
+                <CustomSelect
                   disabled={submitting || stopping || isCurrentProjectActive || translators.length === 0}
                   onChange={(event) => {
                     const nextTranslator = event.target.value;
@@ -549,7 +550,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                       {item.name} · {item.description}
                     </option>
                   ))}
-                </select>
+                </CustomSelect>
               </label>
 
               {submitError ? <InlineFeedback tone="error" title="启动翻译失败" description={submitError} /> : null}

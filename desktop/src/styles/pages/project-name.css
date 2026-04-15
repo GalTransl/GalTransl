@@ -203,21 +203,15 @@
   line-height: 1.5;
 }
 
-.name-page__ai-popover-select {
+/* ai-popover-select — CustomSelect in name-page AI popover */
+.name-page__ai-popover-select.custom-select {
   width: 100%;
-  min-height: 40px;
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-control);
-  background-color: var(--color-surface-strong);
-  color: var(--color-text);
-  font-size: var(--text-sm);
-  outline: none;
 }
 
-.name-page__ai-popover-select:focus {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.12);
+.name-page__ai-popover-select.custom-select .custom-select__trigger {
+  min-height: 40px;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
 }
 
 .name-page__footer {

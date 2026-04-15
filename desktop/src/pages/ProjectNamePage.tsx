@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ProjectPageContext } from '../components/ProjectLayout';
 import { Button } from '../components/Button';
+import { CustomSelect } from '../components/CustomSelect';
 import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
 import { EmptyState, InlineFeedback, LoadingState } from '../components/page-state';
@@ -330,7 +331,7 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
                   </div>
                 ) : (
                   <>
-                    <select
+                    <CustomSelect
                       className="name-page__ai-popover-select"
                       value={aiSelectedProfile}
                       onChange={(e) => setAiSelectedProfile(e.target.value)}
@@ -338,7 +339,7 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
                       {aiProfileNames.map((name) => (
                         <option key={name} value={name}>{name}</option>
                       ))}
-                    </select>
+                    </CustomSelect>
                     <Button
                       variant="primary"
                       onClick={handleAiTranslate}

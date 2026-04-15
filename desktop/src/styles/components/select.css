@@ -1,11 +1,6 @@
 /* ── Custom Select — unified dropdown appearance ── */
 
-/* ── Chevron SVG as data-URI ── */
-/* Default (muted gray) */
-/* Hover / Focus (primary blue) */
-/* Disabled (lighter gray) */
-
-/* ── Standard select (used inside .field, .config-field-row__input, etc.) ── */
+/* ── Native <select> global overrides (for pages not yet migrated) ── */
 
 select {
   appearance: none;
@@ -42,39 +37,229 @@ select:disabled {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1.5 1.5L6 6l4.5-4.5' stroke='%2394a3b8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
-/* ── Dropdown panel styling (option items) ── */
-/* Note: option styling support varies by browser; these are best-effort. */
 select option {
   padding: 8px 12px;
   background: var(--color-surface-strong);
   color: var(--color-text);
-  border-radius: 4px;
 }
 
-select option:checked {
-  background: var(--color-primary-soft);
+/* ── CustomSelect component ── */
+
+.custom-select {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+/* ── Trigger button (looks like the native select) ── */
+
+.custom-select__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 var(--space-4);
+  padding-right: 12px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background-color: var(--color-surface-strong);
+  color: var(--color-text);
+  font: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  overflow: hidden;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.custom-select__trigger:hover {
+  border-color: rgba(47, 111, 235, 0.28);
+}
+
+.custom-select__trigger:focus {
+  border-color: rgba(47, 111, 235, 0.65);
+  box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);
+}
+
+.custom-select--open .custom-select__trigger {
+  border-color: rgba(47, 111, 235, 0.65);
+  box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);
+}
+
+.custom-select--disabled .custom-select__trigger,
+.custom-select__trigger:disabled {
+  cursor: not-allowed;
+  color: var(--color-text-muted);
+  background-color: rgba(241, 245, 249, 0.96);
+  border-color: rgba(203, 213, 225, 0.92);
+  box-shadow: none;
+}
+
+.custom-select__value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-select__arrow {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: var(--space-2);
+  color: var(--color-text-muted);
+  transition: transform var(--dur-fast) var(--ease-spring), color var(--transition-fast);
+}
+
+.custom-select--open .custom-select__arrow {
+  transform: rotate(180deg);
   color: var(--color-primary);
-  font-weight: 600;
 }
 
-/* ── Compact select size (for inline / toolbar use) ── */
-/*
-  Apply .select--compact class to get a smaller 28px-high select.
-  Used in cache-search-field, log-level-select, etc.
-*/
-.select--compact,
-select.select--compact {
+.custom-select__trigger:hover .custom-select__arrow {
+  color: var(--color-primary);
+}
+
+.custom-select__trigger:disabled .custom-select__arrow,
+.custom-select--disabled .custom-select__arrow {
+  color: rgba(148, 163, 184, 0.8);
+}
+
+/* ── Dropdown panel ── */
+
+.custom-select__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(191, 208, 226, 0.9) transparent;
+  padding: var(--space-1);
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(191, 208, 226, 0.9);
+  border-radius: var(--radius-control);
+  box-shadow:
+    0 14px 28px rgba(16, 24, 40, 0.12),
+    0 4px 8px rgba(16, 24, 40, 0.06);
+  animation: selectPanelEnter var(--dur-fast) var(--ease-spring);
+}
+
+.custom-select__panel::-webkit-scrollbar {
+  width: 8px;
+}
+
+.custom-select__panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-select__panel::-webkit-scrollbar-thumb {
+  background-color: rgba(191, 208, 226, 0.9);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+/* ── Option items ── */
+
+.custom-select__option {
+  display: flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-radius: calc(var(--radius-control) - 4px);
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--color-text);
+  cursor: pointer;
+  transition:
+    background-color 80ms ease,
+    color 80ms ease;
+  user-select: none;
+}
+
+.custom-select__option:hover,
+.custom-select__option--highlighted {
+  background-color: var(--color-neutral-soft);
+}
+
+.custom-select__option--selected {
+  font-weight: 600;
+  color: var(--color-primary);
+  background-color: var(--color-primary-soft);
+}
+
+.custom-select__option--selected:hover,
+.custom-select__option--selected.custom-select__option--highlighted {
+  background-color: var(--color-primary-soft);
+}
+
+.custom-select__option--disabled {
+  color: var(--color-text-muted);
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* ── Compact variant (for inline / toolbar use) ── */
+
+.custom-select--compact .custom-select__trigger {
   min-height: 28px;
-  padding: 2px 28px 2px 8px;
+  padding: 2px 8px;
   font-size: 12px;
   border-radius: calc(var(--radius-control) - 4px);
-  background-position: right 8px center;
-  background-size: 10px 7px;
+}
+
+.custom-select--compact .custom-select__arrow {
+  width: 16px;
+  height: 16px;
+  margin-left: var(--space-1);
+}
+
+.custom-select--compact .custom-select__option {
+  padding: var(--space-1) var(--space-2);
+  font-size: 12px;
+}
+
+.custom-select--compact .custom-select__panel {
+  max-height: 200px;
+}
+
+/* ── Panel enter animation ── */
+
+@keyframes selectPanelEnter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* ── Reduced motion ── */
+
 @media (prefers-reduced-motion: reduce) {
-  select {
+  select,
+  .custom-select__trigger,
+  .custom-select__arrow,
+  .custom-select__option {
     transition: none;
+  }
+  .custom-select__panel {
+    animation: none;
   }
 }

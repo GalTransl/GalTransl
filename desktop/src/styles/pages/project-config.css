@@ -168,9 +168,14 @@
 }
 
 .config-field-row__input input,
-.config-field-row__input select {
+.config-field-row__input select,
+.config-field-row__input .custom-select {
   width: 100%;
   max-width: 420px;
+}
+
+.config-field-row__input input,
+.config-field-row__input select {
   min-height: 48px;
   padding: 0 var(--space-4);
   border: 1px solid var(--color-line);

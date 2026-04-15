@@ -27,6 +27,15 @@
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
+/* CustomSelect inside .field — inherits same sizing */
+.field .custom-select {
+  width: 100%;
+}
+
+.field .custom-select .custom-select__trigger {
+  min-height: 48px;
+}
+
 .field textarea,
 .dict-text-editor,
 .plugin-setting-textarea,
