@@ -1,0 +1,208 @@
+/* ─────────────────────────────────────────────────────────
+   New Project Wizard
+   ───────────────────────────────────────────────────────── */
+
+.wizard-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--space-4) 0;
+}
+
+/* ── Step indicator ── */
+
+.wizard-steps {
+  display: flex;
+  gap: 2px;
+  margin-bottom: var(--space-5);
+  list-style: none;
+  padding: 0;
+}
+
+.wizard-step {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-1);
+  font-size: 13px;
+  color: var(--color-text-muted);
+  border-bottom: 3px solid var(--color-line);
+  transition:
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.wizard-step--active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  font-weight: 600;
+}
+
+.wizard-step--completed {
+  color: var(--color-success);
+  border-bottom-color: var(--color-success);
+}
+
+.wizard-step__number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--color-neutral-soft);
+  color: var(--color-text-muted);
+}
+
+.wizard-step--active .wizard-step__number {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.wizard-step--completed .wizard-step__number {
+  background: var(--color-success-soft, rgba(76, 175, 80, 0.15));
+  color: var(--color-success);
+}
+
+.wizard-step__label {
+  white-space: nowrap;
+}
+
+/* ── Content area ── */
+
+.wizard-content {
+  min-height: 200px;
+  margin-bottom: var(--space-4);
+}
+
+/* ── Action rows ── */
+
+.wizard-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+/* ── Navigation ── */
+
+.wizard-nav {
+  display: flex;
+  justify-content: space-between;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-line);
+}
+
+/* ── Drop zone (Step 2) ── */
+
+.drop-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-4);
+  border: 2px dashed var(--color-line);
+  border-radius: var(--radius-container);
+  text-align: center;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.drop-zone:hover,
+.drop-zone--over {
+  border-color: var(--color-primary);
+  background-color: var(--color-primary-soft);
+}
+
+.drop-zone__icon {
+  font-size: 32px;
+}
+
+.drop-zone__text {
+  font-size: 14px;
+}
+
+/* ── File list (Step 2) ── */
+
+.wizard-file-list {
+  list-style: none;
+  padding: 0;
+  margin-top: var(--space-3);
+}
+
+.wizard-file-list__item {
+  padding: var(--space-1) var(--space-3);
+  background: var(--color-surface-strong);
+  border-radius: var(--radius-control);
+  margin-bottom: 2px;
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+/* ── Progress (Step 5) ── */
+
+.wizard-progress {
+  margin-top: var(--space-3);
+}
+
+.wizard-progress__bar {
+  height: 6px;
+  background: var(--color-neutral-soft);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.wizard-progress__fill {
+  height: 100%;
+  width: 100%;
+  background: var(--color-primary);
+  animation: wizard-progress-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes wizard-progress-pulse {
+  0% { opacity: 0.5; transform: scaleX(0.3); transform-origin: left; }
+  50% { opacity: 1; transform: scaleX(1); transform-origin: left; }
+  100% { opacity: 0.5; transform: scaleX(0.3); transform-origin: right; }
+}
+
+.wizard-progress__text {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin-top: var(--space-2);
+}
+
+/* ── Messages (Step 5) ── */
+
+.wizard-message {
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  margin-top: var(--space-3);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.wizard-message--success {
+  background: var(--color-success-soft, rgba(76, 175, 80, 0.12));
+  color: var(--color-success);
+}
+
+.wizard-message--error {
+  background: var(--color-danger-soft, rgba(244, 67, 54, 0.12));
+  color: var(--color-danger);
+}
+
+.wizard-message--info {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.wizard-message__hint {
+  font-size: 13px;
+  opacity: 0.85;
+}

@@ -8,6 +8,7 @@ import { HomePage, addProjectToHistory } from '../pages/HomePage';
 import { BackendProfilesPage } from '../pages/BackendProfilesPage';
 import { SettingsPage } from '../pages/SettingsPage';
 import { CommonDictionaryPage } from '../pages/CommonDictionaryPage';
+import { NewProjectWizard } from '../pages/NewProjectWizard';
 
 const CONFIG_FILE_KEY = 'galtransl-config-file';
 const OPEN_PROJECTS_KEY = 'galtransl-open-projects';
@@ -186,6 +187,10 @@ function AppInner({ openProjects, onOpenProject, onCloseProject }: AppInnerProps
               <Route
                 path="/settings"
                 element={<SettingsPage />}
+              />
+              <Route
+                path="/new-project"
+                element={<NewProjectWizard />}
               />
               <Route
                 path="/project/:projectId/*"

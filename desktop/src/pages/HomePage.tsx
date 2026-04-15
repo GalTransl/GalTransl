@@ -225,6 +225,9 @@ export function HomePage({ onOpenProject }: HomePageProps) {
               <Button type="submit" disabled={!projectDir.trim()}>
                 打开项目
               </Button>
+              <Button type="button" variant="secondary" onClick={() => navigate('/new-project')}>
+                新建项目
+              </Button>
             </div>
           </form>
         </Panel>

@@ -46,6 +46,7 @@
 @import './styles/pages/plugins.css';
 @import './styles/pages/backend-profiles.css';
 @import './styles/pages/plugin-settings.css';
+@import './styles/pages/new-project.css';
 
 /* ── 8. Responsive overrides (must come last) ── */
 @import './styles/responsive.css';
