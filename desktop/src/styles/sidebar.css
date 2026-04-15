@@ -162,12 +162,30 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   border-radius: 6px;
-  font-size: 16px;
+  font-size: 18px;
   flex-shrink: 0;
   color: inherit;
+}
+
+.sidebar__project-icon--link {
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  transition: background 150ms ease, transform 120ms ease;
+}
+
+.sidebar__project-icon--link:hover {
+  background: var(--color-primary-soft);
+  transform: scale(1.15);
+}
+
+.sidebar__project-icon--link:active {
+  transform: scale(0.95);
 }
 
 .sidebar__project-close {
