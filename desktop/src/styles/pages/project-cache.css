@@ -856,3 +856,117 @@
   }
 }
 
+/* ── Problems Tab ── */
+
+.cache-problems-panel {
+  padding: var(--space-2);
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.cache-problems-loading,
+.cache-problems-empty {
+  text-align: center;
+  color: var(--color-text-muted);
+  padding: var(--space-4);
+  font-size: 13px;
+}
+
+.cache-problems-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.cache-problems-group {
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+
+.cache-problems-group__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-strong);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.cache-problems-group__header:hover {
+  background: var(--color-neutral-soft);
+}
+
+.cache-problems-group__type {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.cache-problems-group__count {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  background: var(--color-neutral-soft);
+  padding: 1px 8px;
+  border-radius: 999px;
+}
+
+.cache-problems-group__items {
+  display: flex;
+  flex-direction: column;
+}
+
+.cache-problems-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  border-top: 1px solid var(--color-line);
+  font-size: 12px;
+}
+
+.cache-problems-item:hover {
+  background: var(--color-neutral-soft);
+}
+
+.cache-problems-item__info {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cache-problems-item__problem {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+}
+
+.cache-problems-item__retransl {
+  opacity: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: opacity var(--transition-fast), background var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.cache-problems-item:hover .cache-problems-item__retransl {
+  opacity: 1;
+}
+
+.cache-problems-item__retransl:hover {
+  background: var(--color-neutral-soft);
+}
+

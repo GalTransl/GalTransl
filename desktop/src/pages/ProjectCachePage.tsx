@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '../components/Button';
 import { CustomSelect } from '../components/CustomSelect';
@@ -15,11 +15,15 @@ import {
   type CacheSearchField,
   type CacheReplaceField,
   type CacheReplaceFileDetail,
+  type ProblemEntry,
   fetchProjectCache,
   fetchCacheFile,
   saveCacheFile,
   searchCache,
-  replaceCache } from '../lib/api';
+  replaceCache,
+  fetchProjectProblems,
+  fetchProjectConfig,
+  updateProjectConfig } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 
 /** 兼容读取缓存字段：优先新key，回退旧key */
@@ -32,7 +36,7 @@ function unescapeControlChars(text: string): string {
   return text.replace(/\\r/g, '\r').replace(/\\n/g, '\n');
 }
 
-type SidebarTab = 'files' | 'search';
+type SidebarTab = 'files' | 'search' | 'problems';
 
 /* ── Highlight helper ── */
 function HighlightText({ text, query }: { text: string; query: string }) {
@@ -297,6 +301,10 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
   const [selectedSearchIdx, setSelectedSearchIdx] = useState(-1);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchResultsRef = useRef<HTMLDivElement>(null);
+
+  // Problems tab state
+  const [problems, setProblems] = useState<ProblemEntry[]>([]);
+  const [loadingProblems, setLoadingProblems] = useState(false);
 
   // Replace state
   const [replaceQuery, setReplaceQuery] = useState('');
@@ -602,6 +610,59 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
     setSavingAll(false);
   };
 
+  // Load problems when switching to problems tab
+  const loadProblems = useCallback(async () => {
+    if (!projectId) return;
+    setLoadingProblems(true);
+    try {
+      const res = await fetchProjectProblems(projectId);
+      setProblems(res.problems);
+    } catch (err) {
+      setLocalError(normalizeError(err, '加载问题列表失败'));
+    } finally {
+      setLoadingProblems(false);
+    }
+  }, [projectId]);
+
+  // Problems grouped by type
+  const problemStats = useMemo(() => {
+    const stats: Record<string, ProblemEntry[]> = {};
+    for (const p of problems) {
+      const type = p.problem.split('：')[0].split('-')[0].trim();
+      if (!stats[type]) stats[type] = [];
+      stats[type].push(p);
+    }
+    return Object.entries(stats).sort((a, b) => b[1].length - a[1].length) as [string, ProblemEntry[]][];
+  }, [problems]);
+
+  // Jump from problem to search tab
+  const handleProblemClick = useCallback((problemType: string) => {
+    setSidebarTab('search');
+    setSearchField('problem');
+    setSearchQuery(problemType);
+  }, []);
+
+  // Add problem keyword to retranslKey config
+  const handleAddToRetranslKey = useCallback(async (keyword: string) => {
+    if (!projectId || !configFileName) return;
+    try {
+      const res = await fetchProjectConfig(projectId, configFileName);
+      const config = res.config;
+      const common = (config.common as Record<string, unknown>) || {};
+      const existingKeys: string[] = Array.isArray(common.retranslKey) ? common.retranslKey : [];
+      if (existingKeys.includes(keyword)) {
+        setInfo(`「${keyword}」已在重翻关键字列表中`);
+        return;
+      }
+      common.retranslKey = [...existingKeys, keyword];
+      config.common = common;
+      await updateProjectConfig(projectId, { config, config_file_name: configFileName });
+      setInfo(`已将「${keyword}」加入重翻关键字`);
+    } catch (err) {
+      setLocalError(normalizeError(err, '添加重翻关键字失败'));
+    }
+  }, [projectId, configFileName]);
+
   const handleSelectFile = (file: string) => {
     if (file === selectedFile) return;
     // 先保存当前文件的修改到 entriesMap
@@ -751,14 +812,21 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
               className={`cache-sidebar-tab ${sidebarTab === 'files' ? 'cache-sidebar-tab--active' : ''}`}
               onClick={() => setSidebarTab('files')}
             >
-              📁 文件列表
+              📁 文件
             </button>
             <button
               type="button"
               className={`cache-sidebar-tab ${sidebarTab === 'search' ? 'cache-sidebar-tab--active' : ''}`}
               onClick={() => setSidebarTab('search')}
             >
-              🔍 全局搜索
+              🔍 搜索
+            </button>
+            <button
+              type="button"
+              className={`cache-sidebar-tab ${sidebarTab === 'problems' ? 'cache-sidebar-tab--active' : ''}`}
+              onClick={() => { setSidebarTab('problems'); void loadProblems(); }}
+            >
+              ⚠️ 问题{problems.length > 0 ? ` (${problems.length})` : ''}
             </button>
           </div>
 
@@ -949,6 +1017,54 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
                   />
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Tab: Problems */}
+          {sidebarTab === 'problems' && (
+            <div className="cache-problems-panel">
+              {loadingProblems ? (
+                <div className="cache-problems-loading">加载问题中…</div>
+              ) : problems.length === 0 ? (
+                <div className="cache-problems-empty">暂未发现问题</div>
+              ) : (
+                <div className="cache-problems-groups">
+                  {problemStats.map(([type, items]) => (
+                    <div key={type} className="cache-problems-group">
+                      <div
+                        className="cache-problems-group__header"
+                        onClick={() => handleProblemClick(type)}
+                        title={`点击搜索「${type}」类型问题`}
+                      >
+                        <span className="cache-problems-group__type">{type}</span>
+                        <span className="cache-problems-group__count">{items.length}</span>
+                      </div>
+                      <div className="cache-problems-group__items">
+                        {items.map((p, i) => (
+                          <div
+                            key={`${p.filename}-${p.index}-${i}`}
+                            className="cache-problems-item"
+                            onClick={() => handleProblemClick(type)}
+                          >
+                            <span className="cache-problems-item__info">
+                              {p.filename} #{p.index}
+                            </span>
+                            <span className="cache-problems-item__problem">{p.problem}</span>
+                            <button
+                              type="button"
+                              className="cache-problems-item__retransl"
+                              onClick={(e) => { e.stopPropagation(); void handleAddToRetranslKey(p.problem); }}
+                              title="加入重翻关键字"
+                            >
+                              🔄
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </aside>
