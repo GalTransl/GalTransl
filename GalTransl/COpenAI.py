@@ -215,11 +215,8 @@ class COpenAITokenPool:
         """
         报告令牌无效
         """
-        for id, tokenPair in enumerate(self.tokens):
-            if tokenPair[1] == token:
-                self.tokens.pop(id)
-            pass
-        pass
+        # 用过滤替代迭代中 pop，避免并发修改列表
+        self.tokens = [pair for pair in self.tokens if pair[1] != token]
 
     def getToken(self) -> COpenAIToken:
         """

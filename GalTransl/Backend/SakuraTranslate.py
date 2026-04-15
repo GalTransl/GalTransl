@@ -19,7 +19,7 @@ from GalTransl.Backend.Prompts import (
     GalTransl_TRANS_PROMPT,
     GalTransl_TRANS_PROMPT_V3,
 )
-from GalTransl import transl_counter
+from GalTransl import transl_counter, transl_counter_add, transl_counter_get
 from GalTransl.TerminalOutput import should_print_translation_logs
 
 
@@ -244,9 +244,9 @@ class CSakuraTranslate(BaseTranslate):
                     )
                 except Exception:
                     pass
-                transl_counter["error_count"] += 1
-                LOGGER.debug(f"错误计数：{transl_counter['error_count']}")
-                LOGGER.debug(f"翻译句数：{transl_counter['tran_count']}")
+                transl_counter_add("error_count")
+                LOGGER.debug(f"错误计数：{transl_counter_get('error_count')}")
+                LOGGER.debug(f"翻译句数：{transl_counter_get('tran_count')}")
 
                 if self.skipRetry:
                     self.reset_conversation()
@@ -346,7 +346,7 @@ class CSakuraTranslate(BaseTranslate):
                     trans_result = trans_result[:num]
 
             i += num if num > 0 else 0
-            transl_counter["tran_count"] += num
+            transl_counter_add("tran_count", num)
             self.pj_config.bar(num)
             transl_step_count += 1
             if transl_step_count >= self.save_steps:

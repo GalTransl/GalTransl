@@ -7,6 +7,7 @@ from typing import Any
 
 DEFAULT_APP_SETTINGS: dict[str, Any] = {
     "printTranslationLogInTerminal": True,
+    "maxConcurrentJobs": 4,
 }
 
 _SETTINGS_PATH = os.path.join(
@@ -23,7 +24,13 @@ def _normalize_settings(data: dict[str, Any] | None) -> dict[str, Any]:
                 "printTranslationLogInTerminal",
                 DEFAULT_APP_SETTINGS["printTranslationLogInTerminal"],
             )
-        )
+        ),
+        "maxConcurrentJobs": max(1, int(
+            source.get(
+                "maxConcurrentJobs",
+                DEFAULT_APP_SETTINGS["maxConcurrentJobs"],
+            )
+        )),
     }
 
 

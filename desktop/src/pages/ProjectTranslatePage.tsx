@@ -624,7 +624,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                   <MetricCard label="速度" value={speedText} hint="平均吞吐" tone="accent" />
                   <MetricCard label="ETA" value={etaText} hint="预计剩余时间" />
                   <MetricCard label="线程" value={`${workersActive}/${workersConfigured}`} hint="当前/配置线程数" />
-                  <MetricCard label="耗时" value={elapsedText} hint="任务累计运行时间" />
+                  <MetricCard label="耗时" value={elapsedText} hint="已运行时间" />
                 </StatsGrid>
               </div>
 

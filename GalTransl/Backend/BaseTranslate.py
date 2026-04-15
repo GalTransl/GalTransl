@@ -170,6 +170,26 @@ class BaseTranslate:
 
         pass
 
+    @staticmethod
+    def _is_stop_requested(pj_config) -> bool:
+        stop_event = getattr(pj_config, "stop_event", None)
+        return stop_event is not None and stop_event.is_set()
+
+    async def _interruptible_sleep(self, seconds: float) -> None:
+        """Sleep that can be interrupted by stop_event.
+
+        Instead of blocking for the full duration, we check every 0.5s
+        so that a stop request is honoured promptly.
+        """
+        remaining = seconds
+        while remaining > 0:
+            if self._is_stop_requested(self.pj_config):
+                from GalTransl.Service import JobCancelledError
+                raise JobCancelledError()
+            chunk = min(remaining, 0.5)
+            await asyncio.sleep(chunk)
+            remaining -= chunk
+
     async def ask_chatbot(
         self,
         prompt="",
@@ -201,8 +221,7 @@ class BaseTranslate:
             # Check stop_event before each API attempt so that cancelling
             # the job actually works even when we are stuck in an API-error
             # retry loop with long backoff sleeps.
-            stop_event = getattr(self.pj_config, "stop_event", None)
-            if stop_event is not None and stop_event.is_set():
+            if self._is_stop_requested(self.pj_config):
                 from GalTransl.Service import JobCancelledError
                 raise JobCancelledError()
 
@@ -218,21 +237,44 @@ class BaseTranslate:
                 is_stream=stream if stream != NOT_GIVEN else token.stream
                 LOGGER.debug(f"Call {token.domain} withs token {token.maskToken()}")
 
-                response = await client.chat.completions.create(
-                    model=token.model_name,
-                    messages=messages,
-                    stream=is_stream,
-                    temperature=temperature,
-                    frequency_penalty=frequency_penalty,
-                    max_tokens=max_tokens,
-                    timeout=self.api_timeout,
-                    top_p=top_p,
-                    reasoning_effort=reasoning_effort,
+                # Create the API call as a task so we can cancel it if
+                # the user requests a stop while the request is in-flight.
+                api_task = asyncio.ensure_future(
+                    client.chat.completions.create(
+                        model=token.model_name,
+                        messages=messages,
+                        stream=is_stream,
+                        temperature=temperature,
+                        frequency_penalty=frequency_penalty,
+                        max_tokens=max_tokens,
+                        timeout=self.api_timeout,
+                        top_p=top_p,
+                        reasoning_effort=reasoning_effort,
+                    )
                 )
+
+                # Poll stop_event while waiting for the API response.
+                # This ensures that a stop request is detected within 0.5s
+                # even when the LLM endpoint is slow or unresponsive.
+                while not api_task.done():
+                    if self._is_stop_requested(self.pj_config):
+                        api_task.cancel()
+                        from GalTransl.Service import JobCancelledError
+                        raise JobCancelledError()
+                    done, _ = await asyncio.wait({api_task}, timeout=0.5)
+                    if done:
+                        break
+
+                response = api_task.result()
                 result = ""
                 lastline = ""
                 if is_stream:
                     async for chunk in response:
+                        # Check stop in the middle of streaming so we don't
+                        # have to wait for the entire stream to finish.
+                        if self._is_stop_requested(self.pj_config):
+                            from GalTransl.Service import JobCancelledError
+                            raise JobCancelledError()
                         if not chunk.choices:
                             continue
                         if hasattr(chunk.choices[0].delta, "reasoning_content"):
@@ -307,7 +349,7 @@ class BaseTranslate:
                     except Exception:
                         pass
 
-                await asyncio.sleep(sleep_time)
+                await self._interruptible_sleep(sleep_time)
 
     def clean_up(self):
         pass

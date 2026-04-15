@@ -69,9 +69,8 @@ async def update_progress_title(
     bar, semaphore, workersPerProject: int, projectConfig: CProjectConfig
 ):
     """异步任务，用于动态更新 alive_bar 的标题以显示活动工作线程数。"""
-    if not should_print_translation_logs(projectConfig):
-        return
     base_title = "翻译进度"
+    is_interactive = should_print_translation_logs(projectConfig)
     while True:
         try:
             # 计算当前活动的任务数
@@ -89,15 +88,17 @@ async def update_progress_title(
                 workers_active=active_workers,
                 workers_configured=workersPerProject,
             )
-            # 更新标题
-            new_title = f"{base_title} [{active_workers}/{workersPerProject} 并发]"
-            bar.title(new_title)
+            # 更新标题（仅 CLI 模式有 bar）
+            if is_interactive:
+                new_title = f"{base_title} [{active_workers}/{workersPerProject} 并发]"
+                bar.title(new_title)
 
             # 每隔一段时间更新一次，避免过于频繁
             await asyncio.sleep(0.5)
         except asyncio.CancelledError:
             # 当任务被取消时，设置最终标题并退出循环
-            bar.title(f"{base_title} [处理完成]")
+            if is_interactive:
+                bar.title(f"{base_title} [处理完成]")
             break
         except Exception as e:
             # 记录任何其他异常并停止更新

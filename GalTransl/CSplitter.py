@@ -1,9 +1,29 @@
-from typing import List, Dict, Any, Optional, Union, Tuple
+from typing import List, Dict, Any, Optional, Union, Tuple, ClassVar
 from dataclasses import dataclass
 from collections import defaultdict
 import json
+import threading
 from GalTransl import LOGGER
 from GalTransl.Loader import load_transList
+
+# Thread-local storage for per-job chunk tracking.
+# Each thread (i.e. each translation job) gets its own tracker dict,
+# so concurrent jobs never interfere with each other.
+_local = threading.local()
+
+
+def _get_tracker() -> dict:
+    """Return the chunk tracker for the current thread, creating one if needed."""
+    tracker = getattr(_local, "chunk_tracker", None)
+    if tracker is None:
+        tracker = {}
+        _local.chunk_tracker = tracker
+    return tracker
+
+
+def _clear_tracker() -> None:
+    """Reset the chunk tracker for the current thread (called at job start)."""
+    _local.chunk_tracker = {}
 
 
 @dataclass
@@ -19,10 +39,6 @@ class SplitChunkMetadata:
     cross_num: 交叉句子数量
     content: 块的实际内容
     """
-
-    __file_finished_chunk = (
-        {}
-    )  # file_path: List[SplitChunkMetadata]，按文件存储已完成的块
 
     def __init__(
         self,
@@ -45,27 +61,28 @@ class SplitChunkMetadata:
         self.trans_list, _ = load_transList(json_list)  # 翻译列表
         self.file_path = file_path  # 文件路径
         self.total_chunks = 0  # 总块数
-        if self.file_path not in SplitChunkMetadata.__file_finished_chunk:
-            SplitChunkMetadata.__file_finished_chunk[self.file_path] = []
+        tracker = _get_tracker()
+        if self.file_path not in tracker:
+            tracker[self.file_path] = []
 
     def update_total_chunks(self, total_chunks: int):
         self.total_chunks = total_chunks
 
     def update_file_finished_chunk(self):
-        SplitChunkMetadata.__file_finished_chunk[self.file_path].append(self)
+        _get_tracker()[self.file_path].append(self)
 
     def is_file_finished(self):
         return (
-            len(SplitChunkMetadata.__file_finished_chunk[self.file_path])
+            len(_get_tracker()[self.file_path])
             == self.total_chunks
         )
 
     def get_file_finished_chunks(self):
-        return SplitChunkMetadata.__file_finished_chunk[self.file_path]
+        return _get_tracker()[self.file_path]
 
     @staticmethod
     def clear_file_finished_chunk():
-        SplitChunkMetadata.__file_finished_chunk = {}
+        _clear_tracker()
 
 
 class InputSplitter:

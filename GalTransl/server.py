@@ -32,6 +32,11 @@ def _normalize_project_dir(project_dir: str) -> str:
     return str(Path(project_dir).resolve())
 
 
+class _ConcurrentLimitError(ValueError):
+    """Raised when the global concurrent job limit has been reached."""
+    pass
+
+
 @dataclass(slots=True)
 class RuntimeSentenceEvent:
     id: str
@@ -947,11 +952,12 @@ INDEX_HTML = """<!DOCTYPE html>
 
 
 class JobRegistry:
-    def __init__(self) -> None:
+    def __init__(self, max_workers: int | None = None) -> None:
         self._jobs: dict[str, JobState] = {}
         self._stop_events: dict[str, threading.Event] = {}
         self._lock = threading.Lock()
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="galtransl-job")
+        self._max_workers = max_workers or load_app_settings().get("maxConcurrentJobs", 4)
+        self._executor = ThreadPoolExecutor(max_workers=self._max_workers, thread_name_prefix="galtransl-job")
 
     def list_jobs(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -1006,6 +1012,9 @@ class JobRegistry:
                 return True
         return False
 
+    def _running_job_count(self) -> int:
+        return sum(1 for job in self._jobs.values() if job.status in {"pending", "running"})
+
     def submit(self, payload: dict[str, Any]) -> dict[str, Any]:
         project_dir = str(payload.get("project_dir", "")).strip()
         config_file_name = str(payload.get("config_file_name", "config.yaml")).strip() or "config.yaml"
@@ -1022,6 +1031,8 @@ class JobRegistry:
         with self._lock:
             if self._has_running_job_for_project(project_dir):
                 raise ValueError("the project already has a pending or running job")
+            if self._running_job_count() >= self._max_workers:
+                raise _ConcurrentLimitError(f"已达到最大并发翻译任务数 ({self._max_workers})，请等待已有任务完成后再试")
 
             job_id = uuid4().hex[:12]
             spec = JobSpec(
@@ -1925,6 +1936,8 @@ def build_handler(registry: JobRegistry):
                         "success": True,
                         "job_id": result.get("job_id", ""),
                     })
+                except _ConcurrentLimitError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.TOO_MANY_REQUESTS)
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, status=HTTPStatus.CONFLICT)
                 except Exception as exc:
@@ -2227,12 +2240,14 @@ def build_handler(registry: JobRegistry):
                 self._send_html(INDEX_HTML)
                 return
             if path == "/api/translators":
+                _hidden_translators = {"show-plugs", "dump-name", "rebuildr", "rebuilda"}
                 translators = [
                     {
                         "name": name,
                         "description": description.get("zh-cn") or next(iter(description.values())),
                     }
                     for name, description in TRANSLATOR_SUPPORTED.items()
+                    if name not in _hidden_translators
                 ]
                 self._send_json({"translators": translators})
                 return
@@ -2310,6 +2325,9 @@ def build_handler(registry: JobRegistry):
                 try:
                     payload = self._read_json_body()
                     job = registry.submit(payload)
+                except _ConcurrentLimitError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.TOO_MANY_REQUESTS)
+                    return
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                     return

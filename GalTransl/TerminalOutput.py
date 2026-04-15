@@ -18,6 +18,13 @@ class NullProgressBar:
 
 
 def should_print_translation_logs(project_config: Any) -> bool:
+    """Return True only for CLI (interactive) jobs.
+
+    Server-started jobs (non_interactive=True) never use alive_bar
+    or print translation content to the terminal.
+    """
+    if getattr(project_config, "non_interactive", False):
+        return False
     return bool(getattr(project_config, "print_translation_log_in_terminal", True))
 
 
