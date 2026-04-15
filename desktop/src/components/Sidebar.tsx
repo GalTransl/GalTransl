@@ -1,7 +1,19 @@
-import { useCallback, useEffect, useRef, useState, type TransitionEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type TransitionEvent } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
-import { encodeProjectDir, decodeProjectDir } from '../lib/api';
+import { encodeProjectDir, decodeProjectDir, submitJob, fetchJob } from '../lib/api';
+
+const CONFIG_FILE_KEY = 'galtransl-config-file';
+const OUTPUT_FOLDER_NAME = 'gt_output';
+
+function loadConfigFileName(projectDir: string): string {
+  try {
+    const map = JSON.parse(localStorage.getItem(CONFIG_FILE_KEY) || '{}');
+    return map[projectDir] || 'config.yaml';
+  } catch {
+    return 'config.yaml';
+  }
+}
 
 const PROJECT_TABS = [
   { path: 'translate', label: '翻译工作台', icon: '🌐' },
@@ -28,6 +40,8 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
   const [visibleProjectChildren, setVisibleProjectChildren] = useState<Record<string, boolean>>({});
   // Track which project is showing the close confirmation bubble
   const [confirmCloseDir, setConfirmCloseDir] = useState<string | null>(null);
+  // Track which projects are currently rebuilding output
+  const [rebuildingDirs, setRebuildingDirs] = useState<Record<string, boolean>>({});
   const prevOpenProjectsRef = useRef<string[]>(openProjects);
   const confirmBubbleRef = useRef<HTMLDivElement>(null);
   const expandAnimationFrameRef = useRef<Record<string, number>>({});
@@ -223,6 +237,38 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
     setConfirmCloseDir(null);
   }, []);
 
+  const handleRebuildOutput = useCallback(async (projectDir: string) => {
+    const configFileName = loadConfigFileName(projectDir);
+    setRebuildingDirs((prev) => ({ ...prev, [projectDir]: true }));
+    try {
+      const job = await submitJob({
+        project_dir: projectDir,
+        config_file_name: configFileName,
+        translator: 'rebuilda',
+      });
+      // Poll until job completes
+      for (let i = 0; i < 120; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const status = await fetchJob(job.job_id);
+        if (status.status === 'completed' || status.status === 'failed' || status.status === 'cancelled') {
+          if (status.success) {
+            const normalizedDir = projectDir.replace(/[\\/]+$/, '');
+            const outputDir = `${normalizedDir}\\${OUTPUT_FOLDER_NAME}`;
+            await invoke('open_folder', { path: outputDir });
+          } else {
+            alert(`输出文件重建失败: ${status.error || '未知错误'}`);
+          }
+          return;
+        }
+      }
+      alert('输出文件重建超时');
+    } catch (err) {
+      alert(`输出文件重建出错: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setRebuildingDirs((prev) => ({ ...prev, [projectDir]: false }));
+    }
+  }, []);
+
   // When a new project is opened, collapse all others and expand the new one
   // We detect this by checking if a project in openProjects doesn't have an expanded state yet
   const getProjectExpanded = useCallback((projectDir: string) => {
@@ -358,6 +404,17 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
                           <span className="sidebar__project-child-label">{tab.label}</span>
                         </NavLink>
                       ))}
+                      <div className="sidebar__project-child-separator" />
+                      <button
+                        className="sidebar__project-child sidebar__project-child--action"
+                        type="button"
+                        disabled={!!rebuildingDirs[projectDir]}
+                        onClick={() => void handleRebuildOutput(projectDir)}
+                        title="重建输出文件并打开文件夹"
+                      >
+                        <span className="sidebar__project-child-icon">{rebuildingDirs[projectDir] ? '⏳' : '📤'}</span>
+                        <span className="sidebar__project-child-label">输出文件</span>
+                      </button>
                     </div>
                   )}
                 </>
@@ -384,6 +441,15 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
                       <span className="sidebar__nav-icon">{tab.icon}</span>
                     </NavLink>
                   ))}
+                  <button
+                    className="sidebar__nav-item sidebar__nav-item--sub"
+                    type="button"
+                    disabled={!!rebuildingDirs[projectDir]}
+                    onClick={() => void handleRebuildOutput(projectDir)}
+                    title="输出文件"
+                  >
+                    <span className="sidebar__nav-icon">{rebuildingDirs[projectDir] ? '⏳' : '📤'}</span>
+                  </button>
                 </>
               ) : (
                 <NavLink
