@@ -140,17 +140,3 @@ new_version = []
 update_thread = threading.Thread(target=check_for_tool_updates, args=(new_version,))
 update_thread.start()
 
-transl_counter = {"tran_count": 0, "error_count": 0}
-_transl_counter_lock = threading.Lock()
-
-
-def transl_counter_add(key: str, value: int = 1) -> None:
-    """Thread-safe increment for transl_counter."""
-    with _transl_counter_lock:
-        transl_counter[key] += value
-
-
-def transl_counter_get(key: str) -> int:
-    """Thread-safe read from transl_counter."""
-    with _transl_counter_lock:
-        return transl_counter[key]
