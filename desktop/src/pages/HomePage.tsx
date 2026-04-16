@@ -172,6 +172,12 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     [onOpenProject, navigate],
   );
 
+  const handleJobClick = useCallback((job: Job) => {
+    onOpenProject(job.project_dir, job.config_file_name);
+    const projectId = encodeProjectDir(job.project_dir);
+    navigate(`/project/${projectId}/translate`);
+  }, [onOpenProject, navigate]);
+
   const handleRemoveHistory = useCallback((projectDirToRemove: string, event: React.MouseEvent) => {
     event.stopPropagation();
     removeProjectFromHistory(projectDirToRemove);
@@ -346,9 +352,19 @@ export function HomePage({ onOpenProject }: HomePageProps) {
         <section className="home-jobs">
           <div className="home-jobs__header">
             <h2>翻译任务</h2>
-            <Button disabled={refreshingJobs} onClick={() => void refreshJobs()} variant="secondary">
-              {refreshingJobs ? '…' : '刷新'}
-            </Button>
+            <button
+              type="button"
+              className={`home-jobs__refresh-btn${refreshingJobs ? ' home-jobs__refresh-btn--spinning' : ''}`}
+              disabled={refreshingJobs}
+              onClick={() => void refreshJobs()}
+              title="刷新任务列表"
+              aria-label="刷新任务列表"
+            >
+              <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
+                <path d="M13.5 8a5.5 5.5 0 11-1.4-3.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                <path d="M12 2v3.5H8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
           </div>
           {jobsError ? <InlineFeedback tone="error" title="加载失败" description={jobsError} /> : null}
           {jobs.length === 0 ? (
@@ -361,9 +377,16 @@ export function HomePage({ onOpenProject }: HomePageProps) {
               {jobs.map((job) => {
                 const prog = jobProgressById[job.job_id];
                 return (
-                  <div key={job.job_id} className="home-job-row">
+                  <div
+                    key={job.job_id}
+                    className="home-job-row home-job-row--clickable"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => handleJobClick(job)}
+                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleJobClick(job)}
+                  >
                     <div className="home-job-row__top">
-                      <div className="home-job-row__path" title={job.project_dir}>{job.project_dir}</div>
+                      <div className="home-job-row__path" title={job.project_dir}>{projectName(job.project_dir)}</div>
                       <StatusBadge label={job.status} tone={job.status} />
                     </div>
                     <div className="home-job-row__meta">
@@ -398,6 +421,10 @@ export function HomePage({ onOpenProject }: HomePageProps) {
       </div>
     </div>
   );
+}
+
+function projectName(projectDir: string): string {
+  return projectDir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || projectDir;
 }
 
 function formatDate(isoString: string): string {

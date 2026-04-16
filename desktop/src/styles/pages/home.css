@@ -494,6 +494,45 @@
   color: var(--color-text);
 }
 
+.home-jobs__refresh-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.home-jobs__refresh-btn:hover:not(:disabled) {
+  background: var(--color-neutral-soft);
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.home-jobs__refresh-btn:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.home-jobs__refresh-btn--spinning svg {
+  animation: refreshSpin 0.75s linear infinite;
+}
+
+@keyframes refreshSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
 .home-jobs__empty {
   display: flex;
   flex-direction: column;
@@ -558,6 +597,20 @@
   transition:
     background-color var(--transition-fast),
     border-color var(--transition-fast);
+}
+
+.home-job-row--clickable {
+  cursor: pointer;
+}
+
+.home-job-row--clickable:hover {
+  background: var(--color-neutral-soft);
+  border-color: var(--color-line);
+}
+
+.home-job-row--clickable:focus-visible {
+  outline: 2px solid rgba(47, 111, 235, 0.5);
+  outline-offset: 2px;
 }
 
 .home-job-row:hover {
