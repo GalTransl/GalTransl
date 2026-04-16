@@ -1,14 +1,34 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { HashRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { decodeProjectDir, encodeProjectDir } from '../lib/api';
 import { Sidebar } from '../components/Sidebar';
-import { ProjectLayout } from '../components/ProjectLayout';
 import { ConnectionProvider } from '../features/connection/ConnectionContext';
 import { HomePage, addProjectToHistory } from '../pages/HomePage';
-import { BackendProfilesPage } from '../pages/BackendProfilesPage';
-import { SettingsPage } from '../pages/SettingsPage';
-import { CommonDictionaryPage } from '../pages/CommonDictionaryPage';
-import { NewProjectWizard } from '../pages/NewProjectWizard';
+
+const ProjectLayout = lazy(async () => {
+  const mod = await import('../components/ProjectLayout');
+  return { default: mod.ProjectLayout };
+});
+
+const BackendProfilesPage = lazy(async () => {
+  const mod = await import('../pages/BackendProfilesPage');
+  return { default: mod.BackendProfilesPage };
+});
+
+const SettingsPage = lazy(async () => {
+  const mod = await import('../pages/SettingsPage');
+  return { default: mod.SettingsPage };
+});
+
+const CommonDictionaryPage = lazy(async () => {
+  const mod = await import('../pages/CommonDictionaryPage');
+  return { default: mod.CommonDictionaryPage };
+});
+
+const NewProjectWizard = lazy(async () => {
+  const mod = await import('../pages/NewProjectWizard');
+  return { default: mod.NewProjectWizard };
+});
 
 const CONFIG_FILE_KEY = 'galtransl-config-file';
 const OPEN_PROJECTS_KEY = 'galtransl-open-projects';
@@ -21,6 +41,10 @@ function saveConfigFileName(projectDir: string, configFileName: string) {
   } catch {
     // ignore storage errors
   }
+}
+
+function RouteLoadingFallback() {
+  return <div className="inline-feedback">页面加载中…</div>;
 }
 
 function loadOpenProjects(): string[] {
@@ -158,23 +182,43 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
               />
               <Route
                 path="/backend-profiles"
-                element={<BackendProfilesPage />}
+                element={(
+                  <Suspense fallback={<RouteLoadingFallback />}>
+                    <BackendProfilesPage />
+                  </Suspense>
+                )}
               />
               <Route
                 path="/common-dictionaries"
-                element={<CommonDictionaryPage />}
+                element={(
+                  <Suspense fallback={<RouteLoadingFallback />}>
+                    <CommonDictionaryPage />
+                  </Suspense>
+                )}
               />
               <Route
                 path="/settings"
-                element={<SettingsPage />}
+                element={(
+                  <Suspense fallback={<RouteLoadingFallback />}>
+                    <SettingsPage />
+                  </Suspense>
+                )}
               />
               <Route
                 path="/new-project"
-                element={<NewProjectWizard onOpenProject={onOpenProject} />}
+                element={(
+                  <Suspense fallback={<RouteLoadingFallback />}>
+                    <NewProjectWizard onOpenProject={onOpenProject} />
+                  </Suspense>
+                )}
               />
               <Route
                 path="/project/:projectId/*"
-                element={<ProjectLayout />}
+                element={(
+                  <Suspense fallback={<RouteLoadingFallback />}>
+                    <ProjectLayout />
+                  </Suspense>
+                )}
               />
         </Routes>
       </main>

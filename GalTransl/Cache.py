@@ -39,7 +39,6 @@ def _cache_has(cache_obj: dict, key: str) -> bool:
 
 
 _CACHE_APPEND_SUFFIX = ".append.jsonl"
-_CACHE_APPEND_COMPACT_SIZE_BYTES = 64 * 1024
 
 
 def _append_cache_file_path(cache_file_path: str) -> str:
@@ -225,14 +224,6 @@ async def save_transCache_to_json(trans_list: CTransList, cache_file_path, post_
                     for entry in append_entries:
                         await f.write(orjson.dumps(entry))
                         await f.write(b"\n")
-
-            # 周期性压缩append日志，合并为快照
-            if os.path.exists(append_file_path):
-                append_size = os.path.getsize(append_file_path)
-                if (not os.path.exists(cache_file_path)) or (
-                    append_size >= _CACHE_APPEND_COMPACT_SIZE_BYTES
-                ):
-                    await _compact_cache_from_append(cache_file_path, append_file_path)
     except Exception as e:
         LOGGER.error(f"[cache]保存缓存失败：{str(e)}")
         

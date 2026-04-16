@@ -12,6 +12,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 from uuid import uuid4
 
 import os
+import re
 from datetime import datetime
 from collections import deque
 from dataclasses import asdict, dataclass, field
@@ -157,10 +158,11 @@ class RuntimeRegistry:
             if state is None:
                 state = RuntimeState(project_dir=project_dir)
                 self._states[_normalize_project_dir(project_dir)] = state
+            display_filename = self._resolve_display_filename_locked(state, filename)
             event = RuntimeSentenceEvent(
-                id=f"{filename}:{index}:{int(now * 1000)}",
+                id=f"{display_filename}:{index}:{int(now * 1000)}",
                 ts=_utcnow_text(),
-                filename=filename,
+                filename=display_filename,
                 index=index,
                 speaker=speaker,
                 source_preview=_trim_preview(source_preview),
@@ -190,20 +192,71 @@ class RuntimeRegistry:
             if state is None:
                 state = RuntimeState(project_dir=project_dir)
                 self._states[_normalize_project_dir(project_dir)] = state
+            display_filename = self._resolve_display_filename_locked(state, filename)
             ts = _utcnow_text()
             state.recent_errors.appendleft(RuntimeErrorEvent(
-                id=f"{kind}:{filename}:{int(datetime.utcnow().timestamp() * 1000)}",
+                id=f"{kind}:{display_filename}:{int(datetime.utcnow().timestamp() * 1000)}",
                 ts=ts,
                 kind=kind,
                 level=level,
                 message=_trim_preview(message, 240),
-                filename=filename,
+                filename=display_filename,
                 index_range=index_range,
                 retry_count=retry_count,
                 model=model,
                 sleep_seconds=sleep_seconds,
             ))
             state.updated_at = ts
+
+    @staticmethod
+    def _resolve_display_filename_locked(state: RuntimeState, filename: str) -> str:
+        normalized = str(filename or "").strip()
+        if not normalized:
+            return ""
+
+        candidates: list[str] = []
+
+        def add_candidate(value: str) -> None:
+            candidate = str(value or "").strip()
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+
+        add_candidate(normalized)
+        add_candidate(f"{normalized}.json")
+        add_candidate(f"{normalized}{_CACHE_APPEND_SUFFIX}")
+
+        split_match = re.match(r"^(.*)_\d+$", normalized)
+        if split_match:
+            split_base = split_match.group(1)
+            add_candidate(split_base)
+            add_candidate(f"{split_base}.json")
+            add_candidate(f"{split_base}{_CACHE_APPEND_SUFFIX}")
+
+        normalized_path = normalized.replace("-}", "/")
+        add_candidate(normalized_path)
+        add_candidate(f"{normalized_path}.json")
+        add_candidate(f"{normalized_path}{_CACHE_APPEND_SUFFIX}")
+
+        split_path_match = re.match(r"^(.*)_\d+$", normalized_path)
+        if split_path_match:
+            split_path_base = split_path_match.group(1)
+            add_candidate(split_path_base)
+            add_candidate(f"{split_path_base}.json")
+            add_candidate(f"{split_path_base}{_CACHE_APPEND_SUFFIX}")
+
+        for candidate in candidates:
+            display = state.cache_file_display_map.get(candidate)
+            if display:
+                return display
+
+        if normalized_path in state.file_totals:
+            return normalized_path
+        if split_path_match and split_path_match.group(1) in state.file_totals:
+            return split_path_match.group(1)
+        if normalized in state.file_totals:
+            return normalized
+
+        return normalized_path
 
     def get_runtime_snapshot(self, project_dir: str) -> dict[str, Any]:
         normalized = _normalize_project_dir(project_dir)
@@ -252,6 +305,7 @@ def _trim_preview(value: str, limit: int = 140) -> str:
 
 
 RUNTIME_REGISTRY = RuntimeRegistry()
+_CACHE_APPEND_SUFFIX = ".append.jsonl"
 
 
 @dataclass(slots=True)
@@ -288,7 +342,12 @@ class RuntimeProgressCache:
 
             if os.path.isdir(cache_dir):
                 for entry in os.scandir(cache_dir):
-                    if not entry.is_file() or not entry.name.endswith(".json"):
+                    if not entry.is_file():
+                        continue
+                    if not (
+                        entry.name.endswith(".json")
+                        or entry.name.endswith(_CACHE_APPEND_SUFFIX)
+                    ):
                         continue
 
                     name = entry.name
@@ -305,14 +364,6 @@ class RuntimeProgressCache:
                         and cached.mtime_ns == int(stat.st_mtime_ns)
                         and cached.size == int(stat.st_size)
                     ):
-                        continue
-
-                    try:
-                        import orjson
-
-                        with open(entry.path, "rb") as f:
-                            entries = orjson.loads(f.read())
-                    except Exception:
                         continue
 
                     translated_keys: set[str] = set()
@@ -363,11 +414,35 @@ class RuntimeProgressCache:
 
                         return f"{line_prev}|{line_now}|{line_next}"
 
+                    entries: list[Any] = []
+                    try:
+                        import orjson
+                        with open(entry.path, "rb") as f:
+                            raw = f.read()
+                        if entry.name.endswith(_CACHE_APPEND_SUFFIX):
+                            for line in raw.splitlines():
+                                if not line:
+                                    continue
+                                try:
+                                    row = orjson.loads(line)
+                                except Exception:
+                                    continue
+                                if isinstance(row, dict):
+                                    entries.append(row)
+                        else:
+                            loaded = orjson.loads(raw)
+                            if isinstance(loaded, list):
+                                entries = loaded
+                    except Exception:
+                        continue
+
                     for idx, item in enumerate(entries):
                         if not isinstance(item, dict):
                             continue
 
-                        entry_key = _entry_signature(entries, idx)
+                        entry_key = str(item.get("__cache_key", "")).strip()
+                        if not entry_key:
+                            entry_key = _entry_signature(entries, idx)
 
                         is_translated = bool(item.get("pre_dst", "") or item.get("pre_zh", ""))
                         is_problem = bool(item.get("problem", ""))
@@ -399,7 +474,12 @@ class RuntimeProgressCache:
             file_progress_map: dict[str, dict[str, Any]] = {}
 
             for name, stat in project_stats.items():
-                display_name = cache_file_display_map.get(name, name)
+                canonical_name = (
+                    name[: -len(_CACHE_APPEND_SUFFIX)]
+                    if name.endswith(_CACHE_APPEND_SUFFIX)
+                    else name
+                )
+                display_name = cache_file_display_map.get(canonical_name, canonical_name)
                 if display_name not in file_progress_map:
                     file_progress_map[display_name] = {
                         "filename": display_name,

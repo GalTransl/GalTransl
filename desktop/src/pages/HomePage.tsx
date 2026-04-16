@@ -62,6 +62,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [refreshingJobs, setRefreshingJobs] = useState(false);
   const [stoppingJobId, setStoppingJobId] = useState<string | null>(null);
+  const [shouldLoadJobProgress, setShouldLoadJobProgress] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [jobProgressById, setJobProgressById] = useState<
     Record<
@@ -82,6 +83,22 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     return () => cancelAnimationFrame(t);
   }, []);
 
+  useEffect(() => {
+    let delayTimer = 0;
+    const frameId = window.requestAnimationFrame(() => {
+      delayTimer = window.setTimeout(() => {
+        setShouldLoadJobProgress(true);
+      }, 300);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      if (delayTimer) {
+        window.clearTimeout(delayTimer);
+      }
+    };
+  }, []);
+
   const refreshJobs = useCallback(async (silent = false) => {
     const startedAt = Date.now();
     if (!silent) setRefreshingJobs(true);
@@ -90,10 +107,15 @@ export function HomePage({ onOpenProject }: HomePageProps) {
       setJobs(nextJobs);
       setJobsError(null);
 
-      const activeJobs = nextJobs.filter((job) => job.status === 'pending' || job.status === 'running');
-      if (activeJobs.length === 0) {
+      if (!shouldLoadJobProgress) {
         setJobProgressById({});
       } else {
+        const activeJobs = nextJobs.filter((job) => job.status === 'pending' || job.status === 'running');
+        if (activeJobs.length === 0) {
+          setJobProgressById({});
+          return;
+        }
+
         const progressEntries = await Promise.all(
           activeJobs.map(async (job) => {
             try {
@@ -138,7 +160,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
         setRefreshingJobs(false);
       }
     }
-  }, []);
+  }, [shouldLoadJobProgress]);
 
   useEffect(() => {
     void refreshJobs();
@@ -147,6 +169,13 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     }, 3000);
     return () => window.clearInterval(poller);
   }, [refreshJobs]);
+
+  useEffect(() => {
+    if (!shouldLoadJobProgress) {
+      return;
+    }
+    void refreshJobs(true);
+  }, [refreshJobs, shouldLoadJobProgress]);
 
   const handleOpenProject = useCallback(async () => {
     const selected = await open({

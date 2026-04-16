@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from GalTransl import LOGGER
 from GalTransl.i18n import get_text, GT_LANG
-from GalTransl.Cache import get_transCache_from_json
+from GalTransl.Cache import get_transCache_from_json, compact_cache_append_logs
 from GalTransl.ConfigHelper import initDictList, CProjectConfig
 from GalTransl.Dictionary import CGptDict, CNormalDic
 from GalTransl.Problem import find_problems
@@ -37,6 +37,17 @@ def _update_runtime(projectConfig: CProjectConfig, **kwargs):
         update_runtime_status(_runtime_project_dir(projectConfig), **kwargs)
     except Exception:
         return
+
+
+async def _compact_cache_before_start(cache_dir: str) -> None:
+    if not cache_dir:
+        return
+    try:
+        compacted_count = await compact_cache_append_logs(cache_dir)
+        if compacted_count > 0:
+            LOGGER.info(f"[cache]启动前已压缩 {compacted_count} 个 append 缓存文件")
+    except Exception as e:
+        LOGGER.warning(f"[cache]启动前压缩append缓存失败：{e}")
 
 
 @dataclass
@@ -241,6 +252,9 @@ async def doLLMTranslate(
     makedirs(output_dir, exist_ok=True)
     makedirs(cache_dir, exist_ok=True)
     makedirs(cache_bak_dir, exist_ok=True)
+
+    _check_stop_requested(projectConfig)
+    await _compact_cache_before_start(cache_dir)
 
     # 语言设置
     if val := projectConfig.getKey("language"):

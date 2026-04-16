@@ -539,7 +539,7 @@ class BaseTranslate:
             trans_result_list += trans_result
             transl_step_count += 1
             if transl_step_count >= self.save_steps:
-                await save_transCache_to_json(trans_list, cache_file_path)
+                await save_transCache_to_json(trans_result, cache_file_path)
                 transl_step_count = 0
             if should_print_translation_logs(self.pj_config):
                 LOGGER.info(

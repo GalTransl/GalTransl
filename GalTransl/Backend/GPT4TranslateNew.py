@@ -407,7 +407,7 @@ class GPT4TranslateNew(BaseTranslate):
                         record_runtime_success(
                             getattr(self.pj_config, "runtime_project_dir", self.pj_config.getProjectDir()),
                             filename=filename,
-                            index=getattr(trans, "index", 0),
+                            index=getattr(trans, "runtime_index", getattr(trans, "index", 0)),
                             speaker=getattr(trans, "speaker", None),
                             source_preview=getattr(trans, "post_jp", ""),
                             translation_preview=getattr(trans, "pre_zh", ""),
@@ -420,7 +420,7 @@ class GPT4TranslateNew(BaseTranslate):
             trans_result_list += trans_result
             transl_step_count += 1
             if transl_step_count >= self.save_steps:
-                await save_transCache_to_json(trans_list, cache_file_path)
+                await save_transCache_to_json(trans_result, cache_file_path)
                 transl_step_count = 0
 
             trans_by = trans_result[0].trans_by

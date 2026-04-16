@@ -1,11 +1,31 @@
+import { Suspense, lazy, useEffect, useMemo } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { useEffect, useMemo } from 'react';
 import { decodeProjectDir } from '../lib/api';
-import { ProjectTranslatePage } from '../pages/ProjectTranslatePage';
-import { ProjectConfigPage } from '../pages/ProjectConfigPage';
-import { ProjectDictionaryPage } from '../pages/ProjectDictionaryPage';
-import { ProjectNamePage } from '../pages/ProjectNamePage';
-import { ProjectCachePage } from '../pages/ProjectCachePage';
+
+const ProjectTranslatePage = lazy(async () => {
+  const mod = await import('../pages/ProjectTranslatePage');
+  return { default: mod.ProjectTranslatePage };
+});
+
+const ProjectConfigPage = lazy(async () => {
+  const mod = await import('../pages/ProjectConfigPage');
+  return { default: mod.ProjectConfigPage };
+});
+
+const ProjectDictionaryPage = lazy(async () => {
+  const mod = await import('../pages/ProjectDictionaryPage');
+  return { default: mod.ProjectDictionaryPage };
+});
+
+const ProjectNamePage = lazy(async () => {
+  const mod = await import('../pages/ProjectNamePage');
+  return { default: mod.ProjectNamePage };
+});
+
+const ProjectCachePage = lazy(async () => {
+  const mod = await import('../pages/ProjectCachePage');
+  return { default: mod.ProjectCachePage };
+});
 
 const CONFIG_FILE_KEY = 'galtransl-config-file';
 
@@ -63,20 +83,17 @@ export function ProjectLayout() {
     window.scrollTo(0, 0);
   }, [currentTab]);
 
+  const activeTab = TAB_MAP.some((tab) => tab.path === currentTab) ? currentTab : 'translate';
+
   return (
     <div className="project-layout">
-      {TAB_MAP.map((tab) => (
-        <div
-          key={tab.path}
-          style={{ display: currentTab === tab.path ? 'contents' : 'none' }}
-        >
-          {tab.path === 'translate' && <ProjectTranslatePage ctx={ctx} />}
-          {tab.path === 'config' && <ProjectConfigPage ctx={ctx} />}
-          {tab.path === 'dictionary' && <ProjectDictionaryPage ctx={ctx} />}
-          {tab.path === 'names' && <ProjectNamePage ctx={ctx} />}
-          {tab.path === 'cache' && <ProjectCachePage ctx={ctx} />}
-        </div>
-      ))}
+      <Suspense fallback={<div className="inline-feedback">页面加载中…</div>}>
+        {activeTab === 'translate' ? <ProjectTranslatePage ctx={ctx} /> : null}
+        {activeTab === 'config' ? <ProjectConfigPage ctx={ctx} /> : null}
+        {activeTab === 'dictionary' ? <ProjectDictionaryPage ctx={ctx} /> : null}
+        {activeTab === 'names' ? <ProjectNamePage ctx={ctx} /> : null}
+        {activeTab === 'cache' ? <ProjectCachePage ctx={ctx} /> : null}
+      </Suspense>
     </div>
   );
 }

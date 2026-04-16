@@ -59,6 +59,17 @@ class SplitChunkMetadata:
         self.cross_num = cross_num  # 交叉句子数量
         self.json_list = json_list  # 块内容
         self.trans_list, _ = load_transList(json_list)  # 翻译列表
+        chunk_start = max(0, self.start_index - self.cross_num)
+        for idx, trans in enumerate(self.trans_list):
+            row = self.json_list[idx] if idx < len(self.json_list) else {}
+            row_index = row.get("index") if isinstance(row, dict) else None
+            if isinstance(row_index, int):
+                runtime_index = row_index
+            elif isinstance(row_index, str) and row_index.isdigit():
+                runtime_index = int(row_index)
+            else:
+                runtime_index = chunk_start + idx + 1
+            trans.runtime_index = runtime_index
         self.file_path = file_path  # 文件路径
         self.total_chunks = 0  # 总块数
         tracker = _get_tracker()
