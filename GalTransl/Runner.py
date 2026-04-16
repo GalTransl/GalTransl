@@ -254,11 +254,17 @@ async def run_galtransl(cfg: CProjectConfig, translator: str, stop_event=None):
             OpenAITokenPool = COpenAITokenPool(cfg, translator)
             checkAvailable=cfg.getBackendConfigSection("OpenAI-Compatible").get("checkAvailable",True)
             if checkAvailable:
-                _raise_if_stop_requested(stop_event)
-                await OpenAITokenPool.checkTokenAvailablity(
-                    proxyPool.getProxy() if proxyPool else None, translator
-                )
-                OpenAITokenPool.getToken()
+                from GalTransl.server import update_runtime_status
+
+                update_runtime_status(PROJECT_DIR, stage="检查模型可用性")
+                try:
+                    _raise_if_stop_requested(stop_event)
+                    await OpenAITokenPool.checkTokenAvailablity(
+                        proxyPool.getProxy() if proxyPool else None, translator
+                    )
+                    OpenAITokenPool.getToken()
+                finally:
+                    update_runtime_status(PROJECT_DIR, stage="")
         else:
             OpenAITokenPool = None
 

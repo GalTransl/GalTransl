@@ -543,6 +543,10 @@
     0 8px 22px rgba(217, 48, 37, 0.05);
 }
 
+.runtime-event-list--error .runtime-event--error {
+  animation: runtimeCardIn 220ms ease-out both;
+}
+
 .runtime-event--error::before {
   background: linear-gradient(180deg, var(--color-danger), #f97316);
   box-shadow: 0 0 10px rgba(217, 48, 37, 0.14);
@@ -610,6 +614,20 @@
   gap: var(--space-2);
   margin-left: auto;
   min-width: 0;
+}
+
+.runtime-event__copy-btn svg {
+  transition: transform 180ms ease, opacity 140ms ease;
+}
+
+.runtime-event__copy-btn--copied {
+  color: var(--color-success);
+  border-color: rgba(15, 157, 88, 0.34);
+  background: rgba(231, 248, 238, 0.92);
+}
+
+.runtime-event__copy-btn--copied svg {
+  animation: runtimeCopyCheckPop 320ms cubic-bezier(0.2, 0.9, 0.2, 1);
 }
 
 .runtime-event__pill {
@@ -1033,6 +1051,21 @@
   100% {
     opacity: 0;
     transform: translateX(22%);
+  }
+}
+
+@keyframes runtimeCopyCheckPop {
+  0% {
+    transform: scale(0.72);
+    opacity: 0.35;
+  }
+  70% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
   }
 }
 
@@ -1542,6 +1575,10 @@
   .runtime-event--fresh::after {
     animation: none;
     opacity: 0;
+  }
+
+  .runtime-event-list--error .runtime-event--error {
+    animation: none;
   }
 
   /* Completion celebration: keep visual state, skip animations */

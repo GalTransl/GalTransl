@@ -78,6 +78,7 @@ class RuntimeState:
     project_dir: str
     workers_active: int = 0
     workers_configured: int = 0
+    stage: str = ""
     current_file: str = ""
     updated_at: str = field(default_factory=_utcnow_text)
     file_totals: dict[str, int] = field(default_factory=dict)
@@ -113,6 +114,7 @@ class RuntimeRegistry:
         self,
         project_dir: str,
         *,
+        stage: str | None = None,
         current_file: str | None = None,
         workers_active: int | None = None,
         workers_configured: int | None = None,
@@ -124,6 +126,8 @@ class RuntimeRegistry:
             if state is None:
                 state = RuntimeState(project_dir=project_dir)
                 self._states[_normalize_project_dir(project_dir)] = state
+            if stage is not None:
+                state.stage = stage
             if current_file is not None:
                 state.current_file = current_file
             if workers_active is not None:
@@ -207,6 +211,7 @@ class RuntimeRegistry:
             state = self._states.get(normalized)
             if state is None:
                 return {
+                    "stage": "",
                     "current_file": "",
                     "workers_active": 0,
                     "workers_configured": 0,
@@ -221,6 +226,7 @@ class RuntimeRegistry:
             self._trim_speed_window_locked(state, now)
             speed = round((len(state.success_timestamps) / 60) * 60, 1) if state.success_timestamps else 0
             return {
+                "stage": state.stage,
                 "current_file": state.current_file,
                 "workers_active": state.workers_active,
                 "workers_configured": state.workers_configured,
@@ -255,6 +261,7 @@ def reset_runtime_project(project_dir: str) -> None:
 def update_runtime_status(
     project_dir: str,
     *,
+    stage: str | None = None,
     current_file: str | None = None,
     workers_active: int | None = None,
     workers_configured: int | None = None,
@@ -263,6 +270,7 @@ def update_runtime_status(
 ) -> None:
     RUNTIME_REGISTRY.update_status(
         project_dir,
+        stage=stage,
         current_file=current_file,
         workers_active=workers_active,
         workers_configured=workers_configured,
@@ -1604,6 +1612,7 @@ def build_handler(registry: JobRegistry):
                         "eta_seconds": eta_seconds,
                         "updated_at": runtime["updated_at"],
                     },
+                    "stage": runtime["stage"],
                     "current_file": runtime["current_file"],
                     "recent_errors": runtime["recent_errors"],
                     "recent_successes": runtime["recent_successes"],

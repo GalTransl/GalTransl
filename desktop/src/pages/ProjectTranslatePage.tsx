@@ -409,7 +409,8 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   }, [runtimeFiles.length]);
   const projectName = projectDir ? projectDir.split(/[/\\]/).filter(Boolean).pop() || '' : '';
   const statusTone = currentJob?.status ?? 'pending';
-  const statusLabel = getStatusLabel(currentJob?.status);
+  const runtimeStage = (runtimeMatchesProject ? (runtime?.stage ?? '') : '').trim();
+  const statusLabel = runtimeStage === '检查模型可用性' ? '检查可用性' : getStatusLabel(currentJob?.status);
   const currentJobError = currentJob?.error?.trim() ?? '';
   const progressPercent = clampPercent(summary?.percent ?? 0);
   const translatedCount = summary?.translated ?? 0;
@@ -747,16 +748,49 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
 }
 
 function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) {
+  const [copied, setCopied] = useState(false);
+  const messageText = (entry.message || '').trim();
+  const kindLabel = getErrorKindLabel(entry.kind);
+
+  const handleCopyMessage = async () => {
+    if (!messageText) return;
+    const ok = await copyTextToClipboard(messageText);
+    if (!ok) return;
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
+  };
+
   return (
     <article className="runtime-event runtime-event--error">
       <div className="runtime-event__header">
         <div className="runtime-event__badges">
-          <span className="runtime-event__pill runtime-event__pill--danger">{entry.kind || 'error'}</span>
+          <span className="runtime-event__pill runtime-event__pill--danger">{kindLabel}</span>
           <span className="runtime-event__pill">{entry.level || 'warn'}</span>
           {(entry.retry_count ?? 0) > 0 ? <span className="runtime-event__pill">重试 {entry.retry_count}</span> : null}
           {(entry.sleep_seconds ?? 0) > 0 ? <span className="runtime-event__pill">退避 {Number(entry.sleep_seconds).toFixed(3)}s</span> : null}
         </div>
-        <time className="runtime-event__timestamp">{formatTime(entry.ts)}</time>
+        <div className="runtime-event__header-right">
+          <button
+            type="button"
+            className={`icon-btn runtime-event__copy-btn${copied ? ' runtime-event__copy-btn--copied' : ''}`}
+            onClick={() => void handleCopyMessage()}
+            disabled={!messageText}
+            title={!messageText ? '无可复制内容' : (copied ? '已复制' : '复制错误信息')}
+            aria-label={!messageText ? '无可复制内容' : '复制错误信息'}
+          >
+            {copied ? (
+              <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
+                <path d="M3.2 8.6l3.1 3.1 6.5-6.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
+                <rect x="6" y="2.5" width="7.5" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
+                <path d="M4.5 5.5H3.9A1.4 1.4 0 0 0 2.5 6.9v5.2a1.4 1.4 0 0 0 1.4 1.4h4.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              </svg>
+            )}
+          </button>
+          <time className="runtime-event__timestamp">{formatTime(entry.ts)}</time>
+        </div>
       </div>
       <p className="runtime-event__message">{entry.message || '未提供错误详情。'}</p>
       <dl className="runtime-event__meta">
@@ -928,6 +962,39 @@ function getStatusLabel(status?: RuntimeJob['status']) {
       return '已取消';
     default:
       return '空闲';
+  }
+}
+
+function getErrorKindLabel(kind: string): string {
+  const normalized = (kind || '').trim().toLowerCase();
+  if (normalized === 'parse') return '结果解析';
+  if (normalized === 'api') return '模型请求';
+  return kind || 'error';
+}
+
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // fallback below
+  }
+
+  try {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', 'true');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    return copied;
+  } catch {
+    return false;
   }
 }
 

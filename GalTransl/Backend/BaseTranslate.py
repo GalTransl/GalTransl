@@ -322,17 +322,36 @@ class BaseTranslate:
                     if file_name != "" and file_name[:1] != "[":
                         file_name = f"[{file_name}]"
                     raw_file_name = file_name[1:-1] if file_name.startswith("[") and file_name.endswith("]") else file_name
-                    message_text = ""
+                    error_parts = []
+                    exception_type = type(e).__name__
+                    exception_text = str(e).strip()
+                    if exception_text:
+                        error_parts.append(f"{exception_type}: {exception_text}")
+                    else:
+                        error_parts.append(exception_type)
+
+                    api_error_text = ""
                     try:
-                        message_text = f"{response.model_extra['error']} sleeping {sleep_time:.3f}s"
-                        LOGGER.warning(
-                            f"[API Error]{token_info}{file_name} {message_text}"
-                        )
-                    except:
-                        message_text = f"{e} sleeping {sleep_time:.3f}s"
-                        LOGGER.warning(
-                            f"[API Error]{token_info}{file_name} {message_text}"
-                        )
+                        raw_api_error = response.model_extra.get("error")
+                        if isinstance(raw_api_error, dict):
+                            api_error_text = str(
+                                raw_api_error.get("message")
+                                or raw_api_error.get("code")
+                                or raw_api_error
+                            ).strip()
+                        elif raw_api_error is not None:
+                            api_error_text = str(raw_api_error).strip()
+                    except Exception:
+                        pass
+
+                    if api_error_text:
+                        error_parts.append(f"API返回: {api_error_text}")
+
+                    message_text = " | ".join(part for part in error_parts if part)
+                    message_text = f"{message_text} | sleeping {sleep_time:.3f}s"
+                    LOGGER.warning(
+                        f"[API Error]{token_info}{file_name} {message_text}"
+                    )
 
                     try:
                         from GalTransl.server import record_runtime_error

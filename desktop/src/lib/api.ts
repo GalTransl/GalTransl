@@ -208,6 +208,7 @@ export type ProjectRuntimeResponse = {
   project_dir: string;
   job: RuntimeJob | null;
   summary: ProjectRuntimeSummary;
+  stage: string;
   current_file: string;
   recent_errors: ProjectRuntimeErrorEntry[];
   recent_successes: ProjectRuntimeSuccessEntry[];
