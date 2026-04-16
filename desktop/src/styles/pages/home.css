@@ -8,12 +8,15 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  overflow: hidden;
 }
 
 /* ── When home page is active, suppress outer scroll ── */
 
 .app-layout__content:has(.home-page) {
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ── Hero: compact inline header ── */
@@ -67,6 +70,7 @@
 .home-page__content {
   display: grid;
   grid-template-columns: minmax(320px, 1fr) minmax(340px, 1.3fr);
+  grid-template-rows: 1fr;
   gap: var(--space-4);
   flex: 1;
   min-height: 0;
