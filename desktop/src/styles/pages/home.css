@@ -1169,6 +1169,8 @@
   height: 2px;
   background: linear-gradient(90deg, rgba(47, 111, 235, 0.26), rgba(15, 157, 88, 0.2));
   opacity: 1;
+  mask: linear-gradient(90deg, transparent 0%, black 15%, black 85%, transparent 100%);
+  -webkit-mask: linear-gradient(90deg, transparent 0%, black 15%, black 85%, transparent 100%);
 }
 
 .home-open__header p,
