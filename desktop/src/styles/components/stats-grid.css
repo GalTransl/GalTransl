@@ -48,6 +48,7 @@
   line-height: 1.15;
   color: inherit;
   overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 
 .metric-card__hint {
