@@ -22,6 +22,7 @@ from base64 import urlsafe_b64decode, urlsafe_b64encode
 from GalTransl import TRANSLATOR_SUPPORTED, INPUT_FOLDERNAME, OUTPUT_FOLDERNAME, CACHE_FOLDERNAME
 from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
 from GalTransl.AppSettings import load_app_settings, save_app_settings
+from GalTransl.DefaultProjectConfig import DEFAULT_PROJECT_CONFIG_YAML
 
 
 def _utcnow_text() -> str:
@@ -2256,6 +2257,9 @@ def build_handler(registry: JobRegistry):
                 return
             if path == "/api/app-settings":
                 self._send_json(load_app_settings())
+                return
+            if path == "/api/project-config-template":
+                self._send_json({"content": DEFAULT_PROJECT_CONFIG_YAML})
                 return
             if path.startswith("/api/jobs/"):
                 job_id = path.rsplit("/", 1)[-1]

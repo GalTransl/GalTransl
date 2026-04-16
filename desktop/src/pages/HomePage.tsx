@@ -7,9 +7,13 @@ import { InlineFeedback } from '../components/page-state';
 import { encodeProjectDir, fetchJobs, fetchProjectRuntime, type Job } from '../lib/api';
 import { formatTimestamp } from '../lib/format';
 import { normalizeError } from '../lib/errors';
+import desktopPackage from '../../package.json';
+import logoUrl from '../assets/logo.png';
 
 const HISTORY_KEY = 'galtransl-project-history';
 const MAX_HISTORY = 20;
+const PROJECT_HOMEPAGE = 'https://github.com/XD2333/GalTransl';
+const APP_VERSION = desktopPackage.version ? `v${desktopPackage.version}` : 'dev';
 
 export type ProjectHistoryEntry = {
   projectDir: string;
@@ -53,8 +57,6 @@ type HomePageProps = {
 export function HomePage({ onOpenProject }: HomePageProps) {
   const navigate = useNavigate();
   const [history, setHistory] = useState<ProjectHistoryEntry[]>([]);
-  const [projectDir, setProjectDir] = useState('');
-  const [configFileName, setConfigFileName] = useState('config.yaml');
   const [jobs, setJobs] = useState<Job[]>([]);
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [refreshingJobs, setRefreshingJobs] = useState(false);
@@ -134,7 +136,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     return () => window.clearInterval(poller);
   }, [refreshJobs]);
 
-  const handleSelectConfigFile = useCallback(async () => {
+  const handleOpenProject = useCallback(async () => {
     const selected = await open({
       multiple: false,
       filters: [
@@ -142,26 +144,19 @@ export function HomePage({ onOpenProject }: HomePageProps) {
         { name: '所有文件', extensions: ['*'] },
       ],
     });
-    if (selected) {
-      const filePath = selected as string;
-      const normalized = filePath.replace(/\\/g, '/');
-      const lastSlash = normalized.lastIndexOf('/');
-      const dir = lastSlash >= 0 ? normalized.substring(0, lastSlash) : '';
-      const fileName = lastSlash >= 0 ? normalized.substring(lastSlash + 1) : normalized;
-      setProjectDir(dir.replace(/\//g, '\\'));
-      setConfigFileName(fileName);
-    }
-  }, []);
+    if (!selected) return;
+    const filePath = selected as string;
+    const normalized = filePath.replace(/\\/g, '/');
+    const lastSlash = normalized.lastIndexOf('/');
+    const dir = (lastSlash >= 0 ? normalized.substring(0, lastSlash) : '').replace(/\//g, '\\');
+    const config = (lastSlash >= 0 ? normalized.substring(lastSlash + 1) : normalized).trim() || 'config.yaml';
 
-  const handleOpenProject = useCallback(() => {
-    const dir = projectDir.trim();
-    if (!dir) return;
-    const config = configFileName.trim() || 'config.yaml';
+    if (!dir.trim()) return;
     addProjectToHistory(dir, config);
     onOpenProject(dir, config);
     const projectId = encodeProjectDir(dir);
     navigate(`/project/${projectId}/translate`);
-  }, [projectDir, configFileName, onOpenProject, navigate]);
+  }, [onOpenProject, navigate]);
 
   const handleHistoryClick = useCallback(
     (entry: ProjectHistoryEntry) => {
@@ -197,24 +192,19 @@ export function HomePage({ onOpenProject }: HomePageProps) {
       <div className="home-hero">
         <div className="home-hero__brand">
           <div className="home-hero__logo">
-            <svg viewBox="0 0 40 40" width="40" height="40" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect width="40" height="40" rx="10" fill="url(#logo-grad)" />
-              <path
-                d="M12 14h4v12h-4zM18 14h4l4 8V14h4v12h-4l-4-8v8h-4z"
-                fill="white"
-                fillOpacity="0.95"
-              />
-              <defs>
-                <linearGradient id="logo-grad" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
-                  <stop stopColor="#2f6feb" />
-                  <stop offset="1" stopColor="#1d5fe0" />
-                </linearGradient>
-              </defs>
-            </svg>
+            <img src={logoUrl} alt="GalTransl" className="home-hero__logo-img" />
           </div>
           <div className="home-hero__text">
+            <span className="home-hero__eyebrow">Desktop Translation Console</span>
             <h1 className="home-hero__title">GalTransl</h1>
-            <p className="home-hero__subtitle">Visual Novel Translation Studio</p>
+            <p className="home-hero__subtitle">Translate your favorite Galgame</p>
+            <p className="home-hero__description">从项目打开到任务追踪，一屏完成翻译工作流。</p>
+            <div className="home-hero__chips" aria-label="首页信息">
+              <span className="home-hero__chip">版本 {APP_VERSION}</span>
+              <a className="home-hero__chip home-hero__chip--link" href={PROJECT_HOMEPAGE} target="_blank" rel="noreferrer noopener">
+                项目主页
+              </a>
+            </div>
           </div>
         </div>
 
@@ -252,53 +242,27 @@ export function HomePage({ onOpenProject }: HomePageProps) {
         <section className="home-open">
           <div className="home-open__header">
             <h2>打开项目</h2>
+            <p>点击打开项目后选择配置文件，立即进入翻译。</p>
           </div>
-          <form
-            className="home-open__form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleOpenProject();
-            }}
-          >
-            <div className="home-open__fields">
-              <label className="home-open__field">
-                <span className="home-open__field-label">项目目录</span>
-                <input
-                  autoComplete="off"
-                  className="home-open__input"
-                  onChange={(e) => setProjectDir(e.target.value)}
-                  placeholder="E:\GalTransl\sampleProject"
-                  value={projectDir}
-                />
-              </label>
-              <label className="home-open__field home-open__field--config">
-                <span className="home-open__field-label">配置文件</span>
-                <input
-                  autoComplete="off"
-                  className="home-open__input"
-                  onChange={(e) => setConfigFileName(e.target.value)}
-                  value={configFileName}
-                />
-              </label>
-            </div>
+          <div className="home-open__form">
             <div className="home-open__actions">
-              <Button type="button" variant="secondary" onClick={handleSelectConfigFile}>
-                浏览
-              </Button>
-              <Button type="submit" disabled={!projectDir.trim()}>
+              <Button type="button" className="home-open__action-btn" onClick={() => void handleOpenProject()}>
                 打开项目
               </Button>
-              <Button type="button" variant="secondary" onClick={() => navigate('/new-project')}>
+              <Button type="button" className="home-open__action-btn" variant="secondary" onClick={() => navigate('/new-project')}>
                 新建项目
               </Button>
             </div>
-          </form>
+          </div>
         </section>
 
         {/* Center: History */}
         <section className="home-history">
           <div className="home-history__header">
-            <h2>历史项目</h2>
+            <div>
+              <h2>历史项目</h2>
+              <p>最近使用的项目记录</p>
+            </div>
             <span className="home-history__count">{history.length}</span>
           </div>
           {history.length === 0 ? (
@@ -326,7 +290,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
                       </svg>
                     </div>
                     <div className="home-history__item-info">
-                      <div className="home-history__item-path">{entry.projectDir}</div>
+                      <div className="home-history__item-path">{projectName(entry.projectDir)}</div>
                       <div className="home-history__item-meta">
                         {entry.configFileName} · {formatDate(entry.lastOpened)}
                       </div>
@@ -351,7 +315,10 @@ export function HomePage({ onOpenProject }: HomePageProps) {
         {/* Right: Jobs */}
         <section className="home-jobs">
           <div className="home-jobs__header">
-            <h2>翻译任务</h2>
+            <div>
+              <h2>翻译任务</h2>
+              <p>实时进度与状态汇总</p>
+            </div>
             <button
               type="button"
               className={`home-jobs__refresh-btn${refreshingJobs ? ' home-jobs__refresh-btn--spinning' : ''}`}

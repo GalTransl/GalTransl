@@ -1,0 +1,115 @@
+DEFAULT_PROJECT_CONFIG_YAML = """# 翻译后端相关设置
+backendSpecific:
+  OpenAI-Compatible: # (ForGal/ForNovel/r1/Gendic)OpenAI API兼容接口通用
+    tokens:
+      - token: sk-example-key1
+        endpoint: https://api.deepseek.com # 请求地址，加不加v1都可以
+        modelName: deepseek-chat
+      - token: sk-example-key2
+        endpoint: https://openrouter.ai/api/v1/chat/completions # /chat/completions结尾则不自动补v1
+        modelName: deepseek/deepseek-chat-v3-0324:free
+        stream: true # 支持为单个token设置流式请求
+    tokenStrategy: "random" # 令牌策略，random随机轮询；fallback优先第一个，出现[API错误]或[解析错误]时使用下一个
+    checkAvailable: true # 翻译前检查API是否可用[True/False]
+    stream: true # 流式请求，一般不用修改除非接口不支持流式[True/False]
+    apiTimeout: 120 # 请求超时时间，单位秒
+    apiErrorWait: auto # 发生API Error时的等待时间，包括频率限制。auto将自动适应[auto/0-120]
+
+  SakuraLLM: # (Sakura/Galtransl)
+    endpoints:
+      - http://127.0.0.1:8080
+      #- https://sakura-share.one/ # 可以使用sakura-share的免费sakura-v1.0模型
+    rewriteModelName: "" # 设置自定义的模型名称，在使用ollama时要修改
+
+# 插件，插件列表可在启动程序后选择show-plugs查看，或在plugins目录内查看
+plugin:
+  filePlugin: file_galtransl_json # 用于支持更多格式，字幕file_subtitle_srt_lrc_vtt，小说file_epub_epub或file_plaintext_txt，mtooljson用file_i18n_json
+  textPlugins: # 文本处理插件列表，可以设置多个，按顺序执行
+    - text_common_normalfix # 常规文本修复插件
+    #- text_common_skipNoJP # 跳过无日语句子插件
+  # 某个插件自己的设置可以进入plugins目录内修改对应的yaml文件，也可以这样设置：
+  file_galtransl_json:
+    output_with_src: False # 输出到gt_output时是否保留原文[True/False]
+
+# 程序设置
+common:
+  gpt.numPerRequestTranslate: 10 # 每次请求包含的句子数，建议不超过16。[1-32]
+  workersPerProject: 16 # 项目级并行文件数；单文件并行需配合splitFile。
+  sortBy: "size" # 文件调度顺序：name按文件名，size优先大文件（并行时通常更快）。[name/size]
+  language: "zh-cn" # 目标输出语言。[zh-cn/zh-tw/en/ja/ko/ru/fr]
+
+  # 单文件分割设置
+  ###【重要】分割设置直接影响缓存文件的读取命中，迁移旧项目请确保单文件分割设置一致 ###
+  splitFile: "Num" # 单文件分片模式：no关闭；Num每n句切一片；Equal每文件均分n片。[no/Num/Equal]
+  splitFileNum: 2048 # 分片参数：Num模式表示每片句数；Equal模式表示分片总数。
+  splitFileCrossNum: 0 # 分片重叠句数（上下文缓冲），可提升片段衔接质量。[推荐0或10]
+
+  save_steps: 1 # 每处理n个批次保存一次缓存；值越大保存更少、速度可能更快。[1-999]
+  start_time: "" # 定时启动时间（24小时制，如00:30）；留空表示立即启动。[00:00-23:59]
+  linebreakSymbol: "auto" # JSON内换行符类型，供问题检测/自动修复使用，不改变翻译语义。
+  skipH: false # 是否跳过可能触发敏感词检测的句子。[True/False]
+  smartRetry: True # 解析失败时自动缩小批次并重置上下文，减少无效重试。[True/False]
+  retranslFail: false # 程序重启时是否自动重翻标记为"(Failed)"的句子。[True/False]
+  retranslKey:
+    - "关键字重翻：命中缓存problem或pre_jp关键字的句子会被重翻；去掉#可启用，也可自定义关键字。"
+    - "翻译失败" # 启动时重翻命中“翻译失败”的句子
+    #- "残留日文" # 启动时重翻命中“残留日文”的句子
+
+  gpt.contextNum: 8 # 每次请求附带的前文句数；值越大上下文更强、成本更高（常用8）。[0-32]
+  # ForGal/ForGal-json/ForNovel/r1
+  gpt.translation_guideline: "日译中_基础.md" # 使用的翻译规范文件名（位于translation_guidelines），会影响文风与措辞。
+  gpt.enhance_jailbreak: False # 是否启用“抗拒答”增强提示，降低模型拒答概率。[True/False]
+  gpt.change_prompt: "no" # Prompt修改模式：no不改；AdditionalPrompt追加；OverwritePrompt覆盖默认提示词。[no/AdditionalPrompt/OverwritePrompt]
+  gpt.prompt_content: "翻译结果使用文言文" # Prompt自定义内容；仅在change_prompt为AdditionalPrompt/OverwritePrompt时生效。
+  # Sakura/GalTransl
+  gpt.token_limit: 0 # (Sakura/GalTransl) 单轮token上限；0表示不限制。用于避免上下文溢出。
+  # 调试日志
+  loggingLevel: info # 日志输出级别：debug详细，info常规，warning仅警告。[debug/info/warning]
+  saveLog: false # 是否将日志写入文件。[True/False]
+
+
+
+# 代理设置，使用中转供应商时一般不用开代理
+proxy:
+  enableProxy: false # 是否启用代理。[True/False]
+  proxies:
+    - address: http://127.0.0.1:7890
+
+# 自动问题分析配置，在-前面加#号可以禁用
+problemAnalyze:
+  problemList: # 要发现的问题清单
+    - 词频过高 # 重复大于20次
+    - 标点错漏 # 标点符号多加或漏加
+    - 残留日文 # 日文平假名片假名残留
+    #- 丢失换行 # 缺少行内换行，一般没所谓
+    - 多加换行 # 换行符比原句多，可能导致溢出屏幕
+    - 比日文长 # 比日文长1.3倍以上
+    - 字典使用 # 没有按GPT字典要求翻译
+    - 语言不通 # 疑似没有被翻译成目标语言，翻译为中文时检查是否包含非GBK字符
+    - 缺控制符 # 检测译文丢失ruby或其他控制符的情况
+    #- 引入英文 # 本来没有英文，译文引入了英文
+    #- 比日文长严格 # 比日文长1倍以上就提醒
+
+# 字典设置
+dictionary:
+  defaultDictFolder: Dict # 通用字典文件夹，相对于程序目录，也可填入绝对路径
+  usePreDictInName: false # 将译前字典用在name字段，可用于翻译name字段，会发送给翻译引擎替换后的name[True/False]
+  usePostDictInName: false # 将译后字典用在name字段，可用于翻译name字段[True/False]
+  useGPTDictInName: false # 将GPT字典用在name字段，可用于翻译name字段[True/False]
+  sortDict: true # 将所有字典按查找词长度重排序。[True/False]
+  # 译前字典
+  preDict:
+    - 01H字典_矫正_译前.txt # 用于口齿不清的矫正
+    - 00通用字典_译前.txt
+    - (project_dir)项目字典_译前.txt # (project_dir)代表字典在项目文件夹
+  # GPT 字典
+  gpt.dict:
+    - GPT字典.txt
+    - (project_dir)项目GPT字典.txt
+    - (project_dir)项目GPT字典-生成.txt
+  # 译后字典
+  postDict:
+    - 00通用字典_符号_译后.txt # 符号矫正
+    - 00通用字典_译后.txt
+    - (project_dir)项目字典_译后.txt
+"""

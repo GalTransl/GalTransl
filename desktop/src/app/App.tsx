@@ -223,7 +223,7 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
               />
               <Route
                 path="/new-project"
-                element={<NewProjectWizard />}
+                element={<NewProjectWizard onOpenProject={onOpenProject} />}
               />
               <Route
                 path="/project/:projectId/*"

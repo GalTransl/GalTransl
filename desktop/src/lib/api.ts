@@ -41,6 +41,10 @@ type ErrorResponse = {
   error?: string;
 };
 
+type ProjectConfigTemplateResponse = {
+  content: string;
+};
+
 // ---- Project API types ----
 
 export type ProjectConfigResponse = {
@@ -650,6 +654,11 @@ export async function fetchPlugins() {
 
 export async function fetchAppSettings() {
   return apiRequest<AppSettings>('/api/app-settings');
+}
+
+export async function fetchDefaultProjectConfigTemplate() {
+  const response = await apiRequest<ProjectConfigTemplateResponse>('/api/project-config-template');
+  return response.content;
 }
 
 export async function updateAppSettings(settings: AppSettings) {
