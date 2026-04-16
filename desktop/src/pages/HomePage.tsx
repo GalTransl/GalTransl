@@ -4,7 +4,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
 import { InlineFeedback } from '../components/page-state';
-import { encodeProjectDir, fetchJobs, fetchProjectRuntime, type Job } from '../lib/api';
+import { encodeProjectDir, fetchJobs, fetchProjectRuntime, stopProjectTranslation, type Job } from '../lib/api';
 import { formatTimestamp } from '../lib/format';
 import { normalizeError } from '../lib/errors';
 import desktopPackage from '../../package.json';
@@ -61,6 +61,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [refreshingJobs, setRefreshingJobs] = useState(false);
+  const [stoppingJobId, setStoppingJobId] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const [jobProgressById, setJobProgressById] = useState<
     Record<
@@ -183,6 +184,37 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     const projectId = encodeProjectDir(job.project_dir);
     navigate(`/project/${projectId}/translate`);
   }, [onOpenProject, navigate]);
+
+  const handleStopJob = useCallback(async (job: Job, event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (stoppingJobId) return;
+    if (job.status !== 'pending' && job.status !== 'running') return;
+
+    setStoppingJobId(job.job_id);
+    setJobsError(null);
+
+    try {
+      const projectId = encodeProjectDir(job.project_dir);
+      const stoppedJob = await stopProjectTranslation(projectId);
+      setJobs((current) =>
+        current.map((currentJob) =>
+          currentJob.job_id === stoppedJob.job_id
+            ? {
+                ...currentJob,
+                status: stoppedJob.status,
+                success: stoppedJob.success,
+              }
+            : currentJob,
+        ),
+      );
+      await refreshJobs(true);
+    } catch (error) {
+      setJobsError(normalizeError(error, '停止任务失败'));
+      void refreshJobs(true);
+    } finally {
+      setStoppingJobId(null);
+    }
+  }, [refreshJobs, stoppingJobId]);
 
   const handleRemoveHistory = useCallback((projectDirToRemove: string, event: React.MouseEvent) => {
     event.stopPropagation();
@@ -351,6 +383,8 @@ export function HomePage({ onOpenProject }: HomePageProps) {
             <div className="home-jobs__list">
               {jobs.map((job) => {
                 const prog = jobProgressById[job.job_id];
+                const isRunningJob = job.status === 'running';
+                const isStoppingThisJob = stoppingJobId === job.job_id;
                 return (
                   <div
                     key={job.job_id}
@@ -358,11 +392,37 @@ export function HomePage({ onOpenProject }: HomePageProps) {
                     role="button"
                     tabIndex={0}
                     onClick={() => handleJobClick(job)}
-                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleJobClick(job)}
+                    onKeyDown={(e) => {
+                      if (e.target !== e.currentTarget) return;
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleJobClick(job);
+                      }
+                    }}
                   >
                     <div className="home-job-row__top">
                       <div className="home-job-row__path" title={job.project_dir}>{projectName(job.project_dir)}</div>
-                      <StatusBadge label={job.status} tone={job.status} />
+                      <div className="home-job-row__actions">
+                        {isRunningJob ? (
+                          <div className={`home-job-row__status-switch${isStoppingThisJob ? ' is-stopping' : ''}`}>
+                            <span className="home-job-row__status-pill" aria-hidden={isStoppingThisJob}>
+                              <StatusBadge label={job.status} tone={job.status} />
+                            </span>
+                            <button
+                              type="button"
+                              className={`home-job-row__stop-btn${isStoppingThisJob ? ' is-stopping' : ''}`}
+                              onClick={(event) => void handleStopJob(job, event)}
+                              disabled={Boolean(stoppingJobId) && !isStoppingThisJob}
+                              aria-label={isStoppingThisJob ? '正在停止任务' : `停止任务 ${projectName(job.project_dir)}`}
+                              title={isStoppingThisJob ? '正在停止任务' : '停止任务'}
+                            >
+                              {isStoppingThisJob ? '停止中…' : '停止'}
+                            </button>
+                          </div>
+                        ) : (
+                          <StatusBadge label={job.status} tone={job.status} />
+                        )}
+                      </div>
                     </div>
                     <div className="home-job-row__meta">
                       <span>{job.translator}</span>
