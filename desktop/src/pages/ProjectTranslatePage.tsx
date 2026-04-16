@@ -286,11 +286,15 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
         project_dir: projectDir,
         translator: selectedTranslator,
         ...(backendProfile ? { backend_profile: backendProfile } : {}) });
+      // Immediately refresh to show the new job status
+      void refreshRuntime();
       return;
     }
 
     // Phase 1: charge-up
     setLaunchPhase('charging');
+    // Immediately refresh to detect any existing job status changes
+    void refreshRuntime();
 
     window.setTimeout(() => {
       // Phase 2: blast-off + particle burst
@@ -312,24 +316,31 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
       setParticles(newParticles);
       window.setTimeout(() => setParticles([]), LAUNCH.particleMs);
 
-      // Submit the actual job
+      // Submit the actual job and immediately refresh status
       void handleSubmit({
         config_file_name: configFileName || 'config.yaml',
         project_dir: projectDir,
         translator: selectedTranslator,
-        ...(backendProfile ? { backend_profile: backendProfile } : {}) });
+        ...(backendProfile ? { backend_profile: backendProfile } : {}) })
+        .then(() => {
+          // Immediately refresh after submission to show the new job
+          void refreshRuntime();
+        });
 
       // Phase 3: settle
       window.setTimeout(() => setLaunchPhase('idle'), LAUNCH.blastMs);
     }, LAUNCH.chargeMs);
-  }, [configFileName, handleSubmit, isSelectedTranslatorValid, projectDir, selectedTranslator, reducedMotion]);
+  }, [configFileName, handleSubmit, isSelectedTranslatorValid, projectDir, selectedTranslator, reducedMotion, refreshRuntime]);
 
   const handleStopTranslation = useCallback(async () => {
     if (!projectId) return;
     setStopping(true);
     setSubmitError(null);
+    // Immediately refresh runtime to show the stopping state
+    void refreshRuntime();
     try {
       const stoppedJob = await stopProjectTranslation(projectId);
+      // Immediately update local jobs state for instant UI feedback
       setJobs((current) =>
         current.map((job) =>
           job.job_id === stoppedJob.job_id
@@ -340,11 +351,15 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
             : job,
         ),
       );
-      await refreshRuntime(true);
-      await refreshJobs(true);
+      // Immediately refresh to confirm the stopped state
+      await refreshRuntime();
+      await refreshJobs();
     } catch (error) {
       const message = normalizeError(error, '停止任务失败');
       setSubmitError(message);
+      // Refresh on error to show current actual state
+      void refreshRuntime();
+      void refreshJobs();
     } finally {
       setStopping(false);
     }

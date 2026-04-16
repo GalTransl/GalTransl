@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type TransitionEvent } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
-import { encodeProjectDir, decodeProjectDir, submitJob, fetchJob } from '../lib/api';
+import { encodeProjectDir, decodeProjectDir, submitJob, fetchJob, fetchProjectRuntime, type ProjectRuntimeResponse } from '../lib/api';
 import logoUrl from '../assets/logo.png';
 
 const CONFIG_FILE_KEY = 'galtransl-config-file';
@@ -45,6 +45,8 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
   const [confirmCloseDir, setConfirmCloseDir] = useState<string | null>(null);
   // Track which projects are currently rebuilding output
   const [rebuildingDirs, setRebuildingDirs] = useState<Record<string, boolean>>({});
+  // Track which projects have active translation jobs (running or pending)
+  const [translatingDirs, setTranslatingDirs] = useState<Record<string, boolean>>({});
   // Right-click context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; projectDir: string } | null>(null);
   const prevOpenProjectsRef = useRef<string[]>(openProjects);
@@ -166,6 +168,33 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
       return next;
     });
   }, [expandedProjects, openProjects]);
+
+  // Poll project runtime status to detect active translation jobs
+  useEffect(() => {
+    const pollTranslationStatus = async () => {
+      const statusMap: Record<string, boolean> = {};
+      await Promise.all(
+        openProjects.map(async (projectDir) => {
+          try {
+            const projectId = encodeProjectDir(projectDir);
+            const runtime: ProjectRuntimeResponse = await fetchProjectRuntime(projectId);
+            const isTranslating = runtime.job !== null &&
+              (runtime.job.status === 'pending' || runtime.job.status === 'running');
+            statusMap[projectDir] = isTranslating;
+          } catch {
+            statusMap[projectDir] = false;
+          }
+        })
+      );
+      setTranslatingDirs(statusMap);
+    };
+
+    void pollTranslationStatus();
+    const poller = window.setInterval(() => {
+      void pollTranslationStatus();
+    }, 3000);
+    return () => window.clearInterval(poller);
+  }, [openProjects]);
 
   useEffect(() => {
     for (const frameId of Object.values(expandAnimationFrameRef.current)) {
@@ -445,12 +474,12 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                       <div className="sidebar__project-child-separator" />
                       <NavLink
                         to="."
-                        onClick={(e) => { e.preventDefault(); if (!rebuildingDirs[projectDir]) void handleRebuildOutput(projectDir); }}
-                        className={() => 'sidebar__project-child sidebar__project-child--action'}
-                        title="重建输出文件并打开文件夹"
-                        style={rebuildingDirs[projectDir] ? { opacity: 0.6, pointerEvents: 'none' } : undefined}
+                        onClick={(e) => { e.preventDefault(); if (!rebuildingDirs[projectDir] && !translatingDirs[projectDir]) void handleRebuildOutput(projectDir); }}
+                        className={() => `sidebar__project-child sidebar__project-child--action${translatingDirs[projectDir] ? ' sidebar__project-child--disabled' : ''}`}
+                        title={translatingDirs[projectDir] ? '项目正在翻译中，无法构建输出' : '重建输出文件并打开文件夹'}
+                        style={(rebuildingDirs[projectDir] || translatingDirs[projectDir]) ? { opacity: 0.6, pointerEvents: 'none' } : undefined}
                       >
-                        <span className="sidebar__project-child-icon">{rebuildingDirs[projectDir] ? '⏳' : '📤'}</span>
+                        <span className="sidebar__project-child-icon">{rebuildingDirs[projectDir] ? '⏳' : translatingDirs[projectDir] ? '🚫' : '📤'}</span>
                         <span className="sidebar__project-child-label">构建输出</span>
                       </NavLink>
                     </div>
@@ -481,12 +510,12 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                   ))}
                   <NavLink
                     to="."
-                    onClick={(e) => { e.preventDefault(); if (!rebuildingDirs[projectDir]) void handleRebuildOutput(projectDir); }}
-                    className={() => 'sidebar__nav-item sidebar__nav-item--sub'}
-                    title="构建输出"
-                    style={rebuildingDirs[projectDir] ? { opacity: 0.6, pointerEvents: 'none' } : undefined}
+                    onClick={(e) => { e.preventDefault(); if (!rebuildingDirs[projectDir] && !translatingDirs[projectDir]) void handleRebuildOutput(projectDir); }}
+                    className={() => `sidebar__nav-item sidebar__nav-item--sub${translatingDirs[projectDir] ? ' sidebar__nav-item--disabled' : ''}`}
+                    title={translatingDirs[projectDir] ? '项目正在翻译中' : '构建输出'}
+                    style={(rebuildingDirs[projectDir] || translatingDirs[projectDir]) ? { opacity: 0.6, pointerEvents: 'none' } : undefined}
                   >
-                    <span className="sidebar__nav-icon">{rebuildingDirs[projectDir] ? '⏳' : '📤'}</span>
+                    <span className="sidebar__nav-icon">{rebuildingDirs[projectDir] ? '⏳' : translatingDirs[projectDir] ? '🚫' : '📤'}</span>
                   </NavLink>
                 </>
               ) : (
