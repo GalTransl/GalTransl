@@ -949,10 +949,10 @@ function formatSpeed(value: number): string {
 function formatEta(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '—';
   if (seconds < 60) return `${Math.round(seconds)} 秒`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)} 分`;
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.round((seconds % 3600) / 60);
-  return `${hours} 小时 ${minutes} 分钟`;
+  return `${hours} 时 ${minutes} 分`;
 }
 
 function formatElapsedTime(job: RuntimeJob | null, nowMs: number): string {
@@ -976,8 +976,7 @@ function formatElapsedTime(job: RuntimeJob | null, nowMs: number): string {
 
   const hours = Math.floor(elapsedSeconds / 3600);
   const minutes = Math.floor((elapsedSeconds % 3600) / 60);
-  const seconds = elapsedSeconds % 60;
-  return `${hours} 小时 ${minutes} 分 ${seconds} 秒`;
+  return `${hours} 时 ${minutes} 分`;
 }
 
 function clampPercent(value: number): number {

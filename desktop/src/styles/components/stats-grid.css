@@ -45,7 +45,7 @@
 }
 
 .metric-card__value {
-  font-size: clamp(14px, 8cqw, 22px);
+  font-size: 22px;
   line-height: 1.15;
   color: inherit;
   overflow-wrap: anywhere;

@@ -143,6 +143,9 @@
 }
 
 .history-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-control);
   border: 1px solid transparent;
@@ -197,9 +200,33 @@
 }
 
 .history-item__remove {
-  width: 22px;
-  height: 22px;
-  font-size: 10px;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    opacity var(--transition-fast);
+}
+
+.history-item:hover .history-item__remove {
+  opacity: 1;
+}
+
+.history-item__remove:hover {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
 }
 
 /* ── Job panel on right: scrollable if needed ── */
