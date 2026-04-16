@@ -2,12 +2,13 @@
 
 .app-layout {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
 }
 
 .app-layout__content {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   padding: var(--space-7);
   overflow-y: auto;
 }

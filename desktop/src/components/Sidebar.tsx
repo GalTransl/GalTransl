@@ -26,9 +26,11 @@ const PROJECT_TABS = [
 type SidebarProps = {
   openProjects: string[];
   onCloseProject: (projectDir: string) => void;
+  onCloseOtherProjects: (projectDir: string) => void;
+  onCloseAllProjects: () => void;
 };
 
-export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
+export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, onCloseAllProjects }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [expanded, setExpanded] = useState(true);
@@ -42,8 +44,11 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
   const [confirmCloseDir, setConfirmCloseDir] = useState<string | null>(null);
   // Track which projects are currently rebuilding output
   const [rebuildingDirs, setRebuildingDirs] = useState<Record<string, boolean>>({});
+  // Right-click context menu state
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; projectDir: string } | null>(null);
   const prevOpenProjectsRef = useRef<string[]>(openProjects);
   const confirmBubbleRef = useRef<HTMLDivElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
   const expandAnimationFrameRef = useRef<Record<string, number>>({});
 
   // When a new project is opened, collapse all others and expand the new one
@@ -100,6 +105,37 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [confirmCloseDir]);
+
+  // Close context menu when clicking outside
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [contextMenu]);
+
+  const handleProjectContextMenu = useCallback((e: React.MouseEvent, projectDir: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Clamp menu position to viewport
+    const menuWidth = 180;
+    const menuHeight = 120;
+    const x = Math.min(e.clientX, window.innerWidth - menuWidth - 8);
+    const y = Math.min(e.clientY, window.innerHeight - menuHeight - 8);
+    setContextMenu({ x, y, projectDir });
+    setConfirmCloseDir(null);
+  }, []);
 
   const toggleExpanded = useCallback(() => {
     setExpanded((prev) => !prev);
@@ -342,6 +378,7 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
                     title={projectDir}
                     type="button"
                     onClick={() => toggleProjectExpanded(projectDir)}
+                    onContextMenu={(e) => handleProjectContextMenu(e, projectDir)}
                   >
                     <span
                       className={`sidebar__nav-icon sidebar__project-icon sidebar__project-icon--link${compactProjectHeaders ? ' sidebar__project-icon--compact' : ''}`}
@@ -413,7 +450,7 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
                         style={rebuildingDirs[projectDir] ? { opacity: 0.6, pointerEvents: 'none' } : undefined}
                       >
                         <span className="sidebar__project-child-icon">{rebuildingDirs[projectDir] ? '⏳' : '📤'}</span>
-                        <span className="sidebar__project-child-label">输出文件</span>
+                        <span className="sidebar__project-child-label">构建输出</span>
                       </NavLink>
                     </div>
                   )}
@@ -445,7 +482,7 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
                     to="."
                     onClick={(e) => { e.preventDefault(); if (!rebuildingDirs[projectDir]) void handleRebuildOutput(projectDir); }}
                     className={() => 'sidebar__nav-item sidebar__nav-item--sub'}
-                    title="输出文件"
+                    title="构建输出"
                     style={rebuildingDirs[projectDir] ? { opacity: 0.6, pointerEvents: 'none' } : undefined}
                   >
                     <span className="sidebar__nav-icon">{rebuildingDirs[projectDir] ? '⏳' : '📤'}</span>
@@ -515,6 +552,47 @@ export function Sidebar({ openProjects, onCloseProject }: SidebarProps) {
           {expanded && <span className="sidebar__toggle-label">收起</span>}
         </button>
       </div>
+
+      {contextMenu && (
+        <div
+          className="sidebar__context-menu"
+          ref={contextMenuRef}
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            className="sidebar__context-menu-item"
+            type="button"
+            onClick={() => {
+              handleRequestClose(contextMenu.projectDir);
+              setContextMenu(null);
+            }}
+          >
+            关闭项目
+          </button>
+          <button
+            className="sidebar__context-menu-item"
+            type="button"
+            disabled={openProjects.length <= 1}
+            onClick={() => {
+              onCloseOtherProjects(contextMenu.projectDir);
+              setContextMenu(null);
+            }}
+          >
+            关闭其他项目
+          </button>
+          <button
+            className="sidebar__context-menu-item sidebar__context-menu-item--danger"
+            type="button"
+            disabled={openProjects.length === 0}
+            onClick={() => {
+              onCloseAllProjects();
+              setContextMenu(null);
+            }}
+          >
+            关闭所有项目
+          </button>
+        </div>
+      )}
     </aside>
   );
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { decodeProjectDir } from '../lib/api';
+import { decodeProjectDir, encodeProjectDir } from '../lib/api';
 import { Sidebar } from '../components/Sidebar';
 import { ProjectLayout } from '../components/ProjectLayout';
 import { ConnectionProvider } from '../features/connection/ConnectionContext';
@@ -79,6 +79,14 @@ export function App() {
     setOpenProjects((prev) => prev.filter((d) => d !== projectDir));
   }, []);
 
+  const handleCloseOtherProjects = useCallback((keepProjectDir: string) => {
+    setOpenProjects((prev) => prev.filter((d) => d === keepProjectDir));
+  }, []);
+
+  const handleCloseAllProjects = useCallback(() => {
+    setOpenProjects([]);
+  }, []);
+
   return (
     <HashRouter>
       <ConnectionProvider>
@@ -86,6 +94,8 @@ export function App() {
           openProjects={openProjects}
           onOpenProject={handleOpenProject}
           onCloseProject={handleCloseProject}
+          onCloseOtherProjects={handleCloseOtherProjects}
+          onCloseAllProjects={handleCloseAllProjects}
         />
       </ConnectionProvider>
     </HashRouter>
@@ -96,9 +106,11 @@ type AppInnerProps = {
   openProjects: string[];
   onOpenProject: (projectDir: string, config: string) => void;
   onCloseProject: (projectDir: string) => void;
+  onCloseOtherProjects: (keepProjectDir: string) => void;
+  onCloseAllProjects: () => void;
 };
 
-function AppInner({ openProjects, onOpenProject, onCloseProject }: AppInnerProps) {
+function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherProjects, onCloseAllProjects }: AppInnerProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [displayLocation, setDisplayLocation] = useState(location);
@@ -164,9 +176,30 @@ function AppInner({ openProjects, onOpenProject, onCloseProject }: AppInnerProps
     }
   }, [navigate, onCloseProject, location.pathname, openProjects]);
 
+  const handleCloseOtherProjectsAndNavigate = useCallback((keepProjectDir: string) => {
+    onCloseOtherProjects(keepProjectDir);
+    // Navigate to home if the current project is not the one being kept
+    const projectMatch = location.pathname.match(/^\/project\/([^/]+)/);
+    const isCurrentKept = projectMatch && decodeProjectDir(projectMatch[1]) === keepProjectDir;
+    if (!isCurrentKept) {
+      const projectId = encodeProjectDir(keepProjectDir);
+      navigate(`/project/${projectId}/translate`);
+    }
+  }, [navigate, onCloseOtherProjects, location.pathname]);
+
+  const handleCloseAllProjectsAndNavigate = useCallback(() => {
+    onCloseAllProjects();
+    navigate('/');
+  }, [navigate, onCloseAllProjects]);
+
   return (
     <div className="app-layout">
-      <Sidebar openProjects={openProjects} onCloseProject={handleCloseProjectAndNavigate} />
+      <Sidebar
+        openProjects={openProjects}
+        onCloseProject={handleCloseProjectAndNavigate}
+        onCloseOtherProjects={handleCloseOtherProjectsAndNavigate}
+        onCloseAllProjects={handleCloseAllProjectsAndNavigate}
+      />
       <main
         className={`app-layout__content page-transition-${transitionStage}`}
         onAnimationEnd={handleTransitionEnd}
