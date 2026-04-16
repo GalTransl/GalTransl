@@ -526,6 +526,24 @@
   border-bottom: 2px solid transparent;
   transition: all var(--transition-fast);
   text-align: center;
+  white-space: nowrap;
+}
+
+.cache-sidebar-tab__badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 16px;
+  border-radius: 8px;
+  background: var(--color-neutral-soft);
+  color: var(--color-text-muted);
+  vertical-align: middle;
+}
+
+.cache-sidebar-tab--active .cache-sidebar-tab__badge {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
 }
 
 .cache-sidebar-tab:hover {

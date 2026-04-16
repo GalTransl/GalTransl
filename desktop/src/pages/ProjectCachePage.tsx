@@ -812,21 +812,21 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
               className={`cache-sidebar-tab ${sidebarTab === 'files' ? 'cache-sidebar-tab--active' : ''}`}
               onClick={() => setSidebarTab('files')}
             >
-              📁 文件
+              文件
             </button>
             <button
               type="button"
               className={`cache-sidebar-tab ${sidebarTab === 'search' ? 'cache-sidebar-tab--active' : ''}`}
               onClick={() => setSidebarTab('search')}
             >
-              🔍 搜索
+              搜索
             </button>
             <button
               type="button"
               className={`cache-sidebar-tab ${sidebarTab === 'problems' ? 'cache-sidebar-tab--active' : ''}`}
               onClick={() => { setSidebarTab('problems'); void loadProblems(); }}
             >
-              ⚠️ 问题{problems.length > 0 ? ` (${problems.length})` : ''}
+              问题{problems.length > 0 ? <span className="cache-sidebar-tab__badge">{problems.length}</span> : ''}
             </button>
           </div>
 
