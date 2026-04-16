@@ -170,6 +170,9 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const prevJobCompletedRef = useRef<boolean | null>(null);
   const prevJobIdRef = useRef<string | null>(null);
   const celebratedJobIdRef = useRef<string | null>(null);
+  const prevJobStatusForCancelRef = useRef<Job['status'] | null>(null);
+  const prevJobIdForCancelRef = useRef<string | null>(null);
+  const [cancelledAlertJobId, setCancelledAlertJobId] = useState<string | null>(null);
 
   // Fire celebration animation when translation completes
   useEffect(() => {
@@ -198,6 +201,34 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     setSelectedTranslator((current) => (current === currentJob.translator ? current : currentJob.translator));
     setSelectedTranslatorTemplate(projectDir, currentJob.translator);
   }, [currentJob?.translator, projectDir, runtimeMatchesProject]);
+
+  useEffect(() => {
+    const jobId = currentJob?.job_id ?? null;
+    const status = currentJob?.status ?? null;
+    const prevJobId = prevJobIdForCancelRef.current;
+    const prevStatus = prevJobStatusForCancelRef.current;
+
+    if (jobId !== prevJobId && cancelledAlertJobId !== null) {
+      setCancelledAlertJobId(null);
+    }
+
+    if (
+      jobId
+      && status === 'cancelled'
+      && prevJobId === jobId
+      && (prevStatus === 'pending' || prevStatus === 'running')
+      && cancelledAlertJobId !== jobId
+    ) {
+      setCancelledAlertJobId(jobId);
+    }
+
+    if (status !== 'cancelled' && cancelledAlertJobId !== null && cancelledAlertJobId === jobId) {
+      setCancelledAlertJobId(null);
+    }
+
+    prevJobIdForCancelRef.current = jobId;
+    prevJobStatusForCancelRef.current = status;
+  }, [currentJob?.job_id, currentJob?.status, cancelledAlertJobId]);
 
   useEffect(() => {
     if (!shouldPollRuntime) return;
@@ -657,7 +688,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                 />
               ) : null}
 
-              {currentJob?.status === 'cancelled' && currentJobError ? (
+              {currentJob?.status === 'cancelled' && currentJobError && cancelledAlertJobId === currentJob.job_id ? (
                 <InlineFeedback
                   className="project-translate-page__job-alert"
                   tone="info"
