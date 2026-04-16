@@ -33,6 +33,7 @@ type DictionaryManagerProps = {
 };
 
 const PROJECT_DIR_MARKER = '(project_dir)';
+const REFRESH_SPIN_CYCLE_MS = 500;
 
 /** Strip the "(project_dir)" prefix for display purposes */
 function stripProjectDirMarker(name: string): string {
@@ -199,7 +200,7 @@ function DictEntryCard({
 export function DictionaryManager(props: DictionaryManagerProps) {
   const { data, loading, error, onReload, onCreateFile, onSaveFile, onDeleteFile, title, description } = props;
 
-  const [activeTab, setActiveTab] = useState<DictTab>('pre');
+  const [activeTab, setActiveTab] = useState<DictTab>('gpt');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [mode, setMode] = useState<'card' | 'text'>('card');
@@ -208,6 +209,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [newFilename, setNewFilename] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -237,6 +239,25 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     const needle = searchTerm.toLowerCase();
     return visible.filter(({ row }) => row.values.join('\t').toLowerCase().includes(needle));
   }, [parsedRows, searchTerm]);
+
+  const handleReload = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    const startedAt = Date.now();
+    try {
+      await onReload();
+    } finally {
+      const elapsedMs = Date.now() - startedAt;
+      const minVisibleMs = 420;
+      const minReachedMs = Math.max(elapsedMs, minVisibleMs);
+      const remainToFullCycleMs = (REFRESH_SPIN_CYCLE_MS - (minReachedMs % REFRESH_SPIN_CYCLE_MS)) % REFRESH_SPIN_CYCLE_MS;
+      const remainMs = Math.max(0, minVisibleMs - elapsedMs) + remainToFullCycleMs;
+      if (remainMs > 0) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, remainMs));
+      }
+      setRefreshing(false);
+    }
+  };
 
   const ensureSelection = (nextFiles: string[]) => {
     if (nextFiles.length === 0) {
@@ -409,7 +430,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
 
       <div className="project-dictionary-page__content">
         <div className="dict-tabs">
-          {(['pre', 'gpt', 'post'] as DictTab[]).map((tab) => (
+          {(['gpt', 'pre', 'post'] as DictTab[]).map((tab) => (
             <button
               key={tab}
               className={`dict-tab ${activeTab === tab ? 'dict-tab--active' : ''}`}
@@ -426,7 +447,19 @@ export function DictionaryManager(props: DictionaryManagerProps) {
           <aside className="dict-layout__sidebar">
             <div className="dict-layout__sidebar-header">
               <h3>字典文件</h3>
-              <Button variant="secondary" onClick={() => void onReload()}>刷新</Button>
+              <button
+                type="button"
+                className={`icon-btn icon-btn--refresh${refreshing ? ' icon-btn--spinning' : ''}`}
+                onClick={() => void handleReload()}
+                disabled={refreshing}
+                title="刷新字典文件列表"
+                aria-label="刷新字典文件列表"
+              >
+                <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
+                  <path d="M13.5 8a5.5 5.5 0 11-1.4-3.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  <path d="M12 2v3.5H8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
             </div>
             <div className="dict-create-file">
               <input

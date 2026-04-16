@@ -86,13 +86,6 @@
   white-space: nowrap;
 }
 
-.cache-file-refresh {
-  min-height: 32px;
-  width: 32px;
-  padding: 0;
-  font-size: 14px;
-}
-
 .cache-layout__main {
   min-width: 0;
   display: flex;

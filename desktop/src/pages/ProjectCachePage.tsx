@@ -37,6 +37,8 @@ function unescapeControlChars(text: string): string {
 }
 
 type SidebarTab = 'files' | 'search' | 'problems';
+const MIN_REFRESH_SPIN_MS = 420;
+const REFRESH_SPIN_CYCLE_MS = 500;
 
 /* ── Highlight helper ── */
 function HighlightText({ text, query }: { text: string; query: string }) {
@@ -344,6 +346,7 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
   const loadCacheFiles = useCallback(
     async (showPageLoading = false) => {
       if (!projectId) return;
+      const startedAt = Date.now();
       if (showPageLoading) {
         setLoading(true);
       } else {
@@ -362,6 +365,13 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
         if (showPageLoading) {
           setLoading(false);
         } else {
+          const elapsedMs = Date.now() - startedAt;
+          const minReachedMs = Math.max(elapsedMs, MIN_REFRESH_SPIN_MS);
+          const remainToFullCycleMs = (REFRESH_SPIN_CYCLE_MS - (minReachedMs % REFRESH_SPIN_CYCLE_MS)) % REFRESH_SPIN_CYCLE_MS;
+          const remainMs = Math.max(0, MIN_REFRESH_SPIN_MS - elapsedMs) + remainToFullCycleMs;
+          if (remainMs > 0) {
+            await new Promise<void>((resolve) => window.setTimeout(resolve, remainMs));
+          }
           setRefreshingFiles(false);
         }
       }
@@ -848,17 +858,19 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
                       {savingAll ? '⏳' : `💾 全部保存 (${dirtyFiles.size})`}
                     </Button>
                   )}
-                  <Button
+                  <button
                     type="button"
-                    variant="secondary"
-                    className="cache-file-refresh"
+                    className={`icon-btn icon-btn--refresh${refreshingFiles ? ' icon-btn--spinning' : ''}`}
                     onClick={() => void loadCacheFiles()}
                     disabled={refreshingFiles}
                     title="刷新缓存文件列表"
                     aria-label="刷新缓存文件列表"
                   >
-                    {refreshingFiles ? '⏳' : '🔄'}
-                  </Button>
+                    <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
+                      <path d="M13.5 8a5.5 5.5 0 11-1.4-3.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                      <path d="M12 2v3.5H8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
                 </div>
               </div>
               <div className="cache-file-list">

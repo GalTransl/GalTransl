@@ -13,6 +13,8 @@ const HISTORY_KEY = 'galtransl-project-history';
 const MAX_HISTORY = 20;
 const PROJECT_HOMEPAGE = 'https://github.com/XD2333/GalTransl';
 const APP_VERSION = desktopPackage.version ? `v${desktopPackage.version}` : 'dev';
+const MIN_REFRESH_SPIN_MS = 420;
+const REFRESH_SPIN_CYCLE_MS = 500;
 
 export type ProjectHistoryEntry = {
   projectDir: string;
@@ -79,8 +81,9 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     return () => cancelAnimationFrame(t);
   }, []);
 
-  const refreshJobs = useCallback(async () => {
-    setRefreshingJobs(true);
+  const refreshJobs = useCallback(async (silent = false) => {
+    const startedAt = Date.now();
+    if (!silent) setRefreshingJobs(true);
     try {
       const nextJobs = await fetchJobs();
       setJobs(nextJobs);
@@ -123,14 +126,23 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     } catch (error) {
       setJobsError(normalizeError(error, '读取全局任务列表失败'));
     } finally {
-      setRefreshingJobs(false);
+      if (!silent) {
+        const elapsedMs = Date.now() - startedAt;
+        const minReachedMs = Math.max(elapsedMs, MIN_REFRESH_SPIN_MS);
+        const remainToFullCycleMs = (REFRESH_SPIN_CYCLE_MS - (minReachedMs % REFRESH_SPIN_CYCLE_MS)) % REFRESH_SPIN_CYCLE_MS;
+        const remainMs = Math.max(0, MIN_REFRESH_SPIN_MS - elapsedMs) + remainToFullCycleMs;
+        if (remainMs > 0) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, remainMs));
+        }
+        setRefreshingJobs(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     void refreshJobs();
     const poller = window.setInterval(() => {
-      void refreshJobs();
+      void refreshJobs(true);
     }, 3000);
     return () => window.clearInterval(poller);
   }, [refreshJobs]);
@@ -317,7 +329,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
             </div>
             <button
               type="button"
-              className={`home-jobs__refresh-btn${refreshingJobs ? ' home-jobs__refresh-btn--spinning' : ''}`}
+              className={`icon-btn icon-btn--refresh${refreshingJobs ? ' icon-btn--spinning' : ''}`}
               disabled={refreshingJobs}
               onClick={() => void refreshJobs()}
               title="刷新任务列表"

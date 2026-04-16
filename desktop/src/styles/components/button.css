@@ -39,3 +39,56 @@
   color: var(--color-primary);
 }
 
+/* ═══════════════════════════════════════════════════════
+   Icon Button — Unified refresh button style
+   ═══════════════════════════════════════════════════════ */
+
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--color-neutral-soft);
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.icon-btn:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.icon-btn--refresh svg {
+  animation: none;
+}
+
+.icon-btn--refresh.icon-btn--spinning svg {
+  animation: refreshSpin 0.5s linear infinite;
+}
+
+@keyframes refreshSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-btn--refresh.icon-btn--spinning svg {
+    animation: none;
+  }
+}
+
