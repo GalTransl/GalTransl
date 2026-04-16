@@ -1,67 +1,181 @@
 
-/* ── Home Page ── */
+/* ── Home Page — single-viewport, no-scroll layout ── */
 
 .home-page {
-  max-width: 1120px;
+  max-width: 1200px;
   margin: 0 auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
+/* ── When home page is active, suppress outer scroll ── */
+
+.app-layout__content:has(.home-page) {
+  overflow: hidden;
+}
+
+/* ── Hero: compact inline header ── */
+
 .home-page__hero {
-  margin-bottom: var(--space-7);
+  margin-bottom: 0;
 }
 
 .home-page__hero h1 {
-  margin: 0 0 var(--space-3);
-  font-size: clamp(28px, 3.5vw, 44px);
-  line-height: 1.1;
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.2;
 }
 
 .home-page__hero p {
   margin: 0;
   color: var(--color-text-muted);
-  font-size: 16px;
-  line-height: 1.7;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.home-page__hero .page-header__topline {
+  align-items: center;
 }
 
 .home-page__overview {
-  margin-top: var(--space-2);
+  margin-top: 0;
 }
+
+/* ── Compact metric cards for the header ── */
+
+.home-page__overview .metric-card {
+  padding: var(--space-2) var(--space-3);
+  gap: var(--space-1);
+}
+
+.home-page__overview .metric-card__label {
+  font-size: 11px;
+}
+
+.home-page__overview .metric-card__value {
+  font-size: 18px;
+}
+
+.home-page__overview .metric-card__hint {
+  display: none;
+}
+
+/* ── Two-column content area ── */
 
 .home-page__content {
   display: grid;
-  gap: var(--space-6);
+  grid-template-columns: minmax(320px, 1fr) minmax(340px, 1.3fr);
+  gap: var(--space-4);
+  flex: 1;
+  min-height: 0;
 }
 
-.home-page .job-card {
-  border-color: rgba(191, 208, 226, 0.86);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(247, 250, 255, 0.88));
+/* ── Left column stacks vertically ── */
+
+.home-page__left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
 }
 
-/* ── History List ── */
+/* ── Compact panels ── */
 
-.history-list {
-  display: grid;
+.home-page__content .panel {
+  padding: var(--space-4);
+}
+
+.home-page__content .panel__header {
+  margin-bottom: var(--space-3);
+}
+
+.home-page__content .panel__header h2 {
+  font-size: 16px;
+  margin-bottom: var(--space-1);
+}
+
+.home-page__content .panel__header p {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* ── Open Project form: inline layout ── */
+
+.home-page .form-stack {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-end;
+}
+
+.home-page .form-stack .field {
+  flex: 1;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.home-page .form-stack .field span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.home-page .form-stack .field input {
+  font-size: 13px;
+  padding: 6px 10px;
+}
+
+.home-page .form-actions {
+  display: flex;
   gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* ── History list: compact single-line items ── */
+
+.home-page .history-list {
+  gap: var(--space-1);
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  max-height: 200px;
 }
 
 .history-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-4);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(250, 252, 255, 0.8));
-  cursor: pointer;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  border: 1px solid transparent;
+  background: transparent;
   transition:
-    border-color var(--transition-fast),
-    box-shadow var(--transition-fast);
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .history-item:hover {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.08);
+  background: var(--color-neutral-soft);
+  border-color: var(--color-line);
+}
+
+.history-item__button {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+.history-item__button:focus-visible {
+  outline: 2px solid rgba(47, 111, 235, 0.5);
+  outline-offset: 4px;
+  border-radius: var(--radius-control);
 }
 
 .history-item__info {
@@ -70,39 +184,91 @@
 }
 
 .history-item__path {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
-  color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .history-item__meta {
-  margin-top: var(--space-1);
-  font-size: 12px;
-  color: var(--color-text-muted);
+  margin-top: 2px;
+  font-size: 11px;
 }
 
 .history-item__remove {
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 12px;
-  cursor: pointer;
-  transition:
-    background-color var(--transition-fast),
-    color var(--transition-fast);
+  width: 22px;
+  height: 22px;
+  font-size: 10px;
 }
 
-.history-item__remove:hover {
-  background: var(--color-danger-soft);
-  color: var(--color-danger);
+/* ── Job panel on right: scrollable if needed ── */
+
+.home-page__right {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.home-page__right .panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.home-page .job-list {
+  gap: var(--space-3);
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Compact job cards on homepage */
+.home-page .job-card {
+  padding: var(--space-3);
+}
+
+.home-page .job-card__header {
+  margin-bottom: var(--space-2);
+}
+
+.home-page .job-card__title-block h3 {
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+
+.home-page .job-card__title-block p {
+  font-size: 12px;
+}
+
+.home-page .job-card .meta-grid {
+  gap: var(--space-1);
+}
+
+.home-page .job-card__progress {
+  margin-top: var(--space-2);
+  gap: var(--space-1);
+}
+
+.home-page .job-card__error {
+  margin-top: var(--space-3);
+  padding: var(--space-2);
+}
+
+/* ── Responsive: stack on narrow viewports ── */
+
+@media (max-width: 900px) {
+  .home-page__content {
+    grid-template-columns: 1fr;
+  }
+
+  .home-page .form-stack {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .home-page .form-actions {
+    justify-content: flex-end;
+  }
 }

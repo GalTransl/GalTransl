@@ -177,65 +177,66 @@ export function HomePage({ onOpenProject }: HomePageProps) {
   return (
     <div className="home-page">
       <PageHeader
-        className="home-page__hero page-header--hero"
+        className="home-page__hero"
         title="GalTransl Desktop"
-        description="本地翻译后端桌面控制台，管理翻译项目、提交任务并实时查看翻译进度。"
+        description="本地翻译后端桌面控制台，管理翻译项目与实时查看翻译进度。"
         status={
           <StatsGrid className="home-page__overview" compact>
-            <MetricCard label="历史项目" value={history.length} hint="支持快速回到最近项目" tone="accent" />
-            <MetricCard label="活跃任务" value={activeJobsCount} hint="运行中与排队中的翻译任务" tone="success" />
-            <MetricCard label="已完成任务" value={completedJobsCount} hint="已完成的本地翻译记录" />
-            <MetricCard label="失败任务" value={failedJobsCount} hint="需要回看日志或重新提交" tone={failedJobsCount > 0 ? 'danger' : 'default'} />
+            <MetricCard label="历史项目" value={history.length} tone="accent" />
+            <MetricCard label="活跃任务" value={activeJobsCount} tone="success" />
+            <MetricCard label="已完成" value={completedJobsCount} />
+            <MetricCard label="失败" value={failedJobsCount} tone={failedJobsCount > 0 ? 'danger' : 'default'} />
           </StatsGrid>
         }
       />
 
       <div className="home-page__content">
-        <Panel title="打开项目" description="输入项目目录路径和配置文件名，开始翻译工作。">
-          <form
-            className="form-stack"
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleOpenProject();
-            }}
-          >
-            <label className="field">
-              <span>项目目录</span>
-              <input
-                autoComplete="off"
-                onChange={(e) => setProjectDir(e.target.value)}
-                placeholder="例如：E:\GalTransl\sampleProject"
-                value={projectDir}
-              />
-            </label>
+        <div className="home-page__left">
+          <Panel title="打开项目">
+            <form
+              className="form-stack"
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleOpenProject();
+              }}
+            >
+              <label className="field">
+                <span>项目目录</span>
+                <input
+                  autoComplete="off"
+                  onChange={(e) => setProjectDir(e.target.value)}
+                  placeholder="E:\GalTransl\sampleProject"
+                  value={projectDir}
+                />
+              </label>
 
-            <label className="field">
-              <span>配置文件名</span>
-              <input
-                autoComplete="off"
-                onChange={(e) => setConfigFileName(e.target.value)}
-                value={configFileName}
-              />
-            </label>
+              <label className="field">
+                <span>配置文件</span>
+                <input
+                  autoComplete="off"
+                  onChange={(e) => setConfigFileName(e.target.value)}
+                  value={configFileName}
+                />
+              </label>
 
-            <div className="form-actions">
-              <Button type="button" variant="secondary" onClick={handleSelectConfigFile}>
-                选择配置文件
-              </Button>
-              <Button type="submit" disabled={!projectDir.trim()}>
-                打开项目
-              </Button>
-              <Button type="button" variant="secondary" onClick={() => navigate('/new-project')}>
-                新建项目
-              </Button>
-            </div>
-          </form>
-        </Panel>
+              <div className="form-actions">
+                <Button type="button" variant="secondary" onClick={handleSelectConfigFile}>
+                  浏览
+                </Button>
+                <Button type="submit" disabled={!projectDir.trim()}>
+                  打开
+                </Button>
+                <Button type="button" variant="secondary" onClick={() => navigate('/new-project')}>
+                  新建
+                </Button>
+              </div>
+            </form>
+          </Panel>
 
-        <Panel title="历史项目" description="最近打开过的项目，点击可快速打开。">
-          {history.length === 0 ? (
-            <EmptyState title="暂无历史项目" description="打开一个项目后，它会自动出现在这里。" />
-          ) : (
+          <Panel title="历史项目">
+            {history.length === 0 ? (
+              <EmptyState title="暂无历史" description="打开项目后自动出现在这里。" />
+            ) : (
               <div className="history-list">
                 {history.map((entry) => (
                   <div key={entry.projectDir} className="history-item">
@@ -247,7 +248,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
                       <div className="history-item__info">
                         <div className="history-item__path">{entry.projectDir}</div>
                         <div className="history-item__meta">
-                          配置: {entry.configFileName} · 上次打开: {formatDate(entry.lastOpened)}
+                          {entry.configFileName} · {formatDate(entry.lastOpened)}
                         </div>
                       </div>
                     </button>
@@ -263,29 +264,31 @@ export function HomePage({ onOpenProject }: HomePageProps) {
                 ))}
               </div>
             )}
-        </Panel>
+          </Panel>
+        </div>
 
-        <Panel
-          title="全局翻译任务"
-          description="跨项目查看当前与历史翻译任务，首页保留总览视角。"
-          actions={
-            <Button disabled={refreshingJobs} onClick={() => void refreshJobs()} variant="secondary">
-              {refreshingJobs ? '刷新中…' : '刷新列表'}
-            </Button>
-          }
-        >
-          {jobsError ? <InlineFeedback tone="error" title="加载任务失败" description={jobsError} /> : null}
+        <div className="home-page__right">
+          <Panel
+            title="全局翻译任务"
+            actions={
+              <Button disabled={refreshingJobs} onClick={() => void refreshJobs()} variant="secondary">
+                {refreshingJobs ? '…' : '刷新'}
+              </Button>
+            }
+          >
+            {jobsError ? <InlineFeedback tone="error" title="加载失败" description={jobsError} /> : null}
 
-          {jobs.length === 0 ? (
-            <EmptyState title="还没有翻译任务" description="启动任意项目的翻译后，这里会汇总展示所有任务。" />
-          ) : (
-            <div className="job-list">
-              {jobs.map((job) => (
-                <JobCard job={job} key={job.job_id} progress={jobProgressById[job.job_id]} />
-              ))}
-            </div>
-          )}
-        </Panel>
+            {jobs.length === 0 ? (
+              <EmptyState title="还没有翻译任务" description="启动翻译后，任务会汇总在这里。" />
+            ) : (
+              <div className="job-list">
+                {jobs.map((job) => (
+                  <JobCard job={job} key={job.job_id} progress={jobProgressById[job.job_id]} />
+                ))}
+              </div>
+            )}
+          </Panel>
+        </div>
       </div>
     </div>
   );
