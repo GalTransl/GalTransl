@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type TransitionEvent
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { encodeProjectDir, decodeProjectDir, submitJob, fetchJob } from '../lib/api';
+import logoUrl from '../assets/logo.png';
 
 const CONFIG_FILE_KEY = 'galtransl-config-file';
 const OUTPUT_FOLDER_NAME = 'gt_output';
@@ -342,8 +343,8 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
   return (
     <aside className={`sidebar ${expanded ? 'sidebar--expanded' : 'sidebar--collapsed'}`}>
       <div className="sidebar__header">
+        <img src={logoUrl} alt="" className="sidebar__logo-img" />
         {expanded && <span className="sidebar__logo">GalTransl</span>}
-        {!expanded && <span className="sidebar__logo-icon">G</span>}
       </div>
 
       <div className="sidebar__top-nav">

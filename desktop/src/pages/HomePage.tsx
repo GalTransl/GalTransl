@@ -8,7 +8,6 @@ import { encodeProjectDir, fetchJobs, fetchProjectRuntime, type Job } from '../l
 import { formatTimestamp } from '../lib/format';
 import { normalizeError } from '../lib/errors';
 import desktopPackage from '../../package.json';
-import logoUrl from '../assets/logo.png';
 
 const HISTORY_KEY = 'galtransl-project-history';
 const MAX_HISTORY = 20;
@@ -191,9 +190,6 @@ export function HomePage({ onOpenProject }: HomePageProps) {
       {/* ── Hero Brand Area ── */}
       <div className="home-hero">
         <div className="home-hero__brand">
-          <div className="home-hero__logo">
-            <img src={logoUrl} alt="GalTransl" className="home-hero__logo-img" />
-          </div>
           <div className="home-hero__text">
             <span className="home-hero__eyebrow">Desktop Translation Console</span>
             <h1 className="home-hero__title">GalTransl</h1>

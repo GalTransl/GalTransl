@@ -26,9 +26,18 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: var(--space-2);
   min-height: 56px;
   padding: var(--space-4) var(--space-3);
   border-bottom: 1px solid var(--color-line);
+}
+
+.sidebar__logo-img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  display: block;
+  flex-shrink: 0;
 }
 
 .sidebar__logo {
