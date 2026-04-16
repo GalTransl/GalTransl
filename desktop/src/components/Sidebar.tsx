@@ -411,7 +411,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                     onContextMenu={(e) => handleProjectContextMenu(e, projectDir)}
                   >
                     <span
-                      className={`sidebar__nav-icon sidebar__project-icon sidebar__project-icon--link${compactProjectHeaders ? ' sidebar__project-icon--compact' : ''}`}
+                      className={`sidebar__nav-icon sidebar__project-icon sidebar__project-icon--link${isProjectExpanded ? ' sidebar__project-icon--open' : ''}${compactProjectHeaders ? ' sidebar__project-icon--compact' : ''}`}
                       role="button"
                       tabIndex={0}
                       title="打开项目文件夹"
