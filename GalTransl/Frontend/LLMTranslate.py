@@ -39,6 +39,42 @@ def _update_runtime(projectConfig: CProjectConfig, **kwargs):
         return
 
 
+@dataclass
+class AdaptiveWorkerState:
+    max_workers: int
+    effective_workers: int
+
+
+async def auto_tune_workers(
+    projectConfig: CProjectConfig,
+    adaptive_state: AdaptiveWorkerState,
+    apply_limit,
+):
+    metrics = getattr(projectConfig, "request_health_metrics", None)
+    if metrics is None:
+        return
+
+    while True:
+        await asyncio.sleep(3.0)
+        snapshot = metrics.snapshot(window_seconds=30.0)
+        total = int(snapshot.get("total", 0))
+        if total < 8:
+            continue
+
+        ratio_429 = float(snapshot.get("rate_limited_ratio", 0.0))
+        avg_latency = float(snapshot.get("avg_latency", 0.0))
+        current = adaptive_state.effective_workers
+        target = current
+
+        if ratio_429 >= 0.18 or avg_latency >= 12.0:
+            target = max(1, current - 1)
+        elif ratio_429 <= 0.05 and avg_latency <= 6.0:
+            target = min(adaptive_state.max_workers, current + 1)
+
+        if target != current:
+            await apply_limit(target)
+
+
 def _check_stop_requested(projectConfig: CProjectConfig):
     stop_event = getattr(projectConfig, "stop_event", None)
     if stop_event is not None and stop_event.is_set():
@@ -76,21 +112,26 @@ async def update_progress_title(
             # 计算当前活动的任务数
             # semaphore.acquire() 会减少 _value，semaphore.release() 会增加 _value
             # 因此，活动任务数 = 总容量 - 当前可用容量
-            active_workers = workersPerProject - semaphore._value
+            reserved_workers = int(getattr(projectConfig, "runtime_workers_reserved", 0))
+            active_workers = workersPerProject - semaphore._value - reserved_workers
             # 确保 active_workers 不会是负数（以防万一）
             active_workers = max(0, active_workers)
+            configured_workers = int(
+                getattr(projectConfig, "runtime_workers_effective", workersPerProject)
+            )
+            configured_workers = max(1, configured_workers)
             if active_workers == 0:
-                projectConfig.active_workers = workersPerProject
+                projectConfig.active_workers = configured_workers
             else:
                 projectConfig.active_workers = active_workers
             _update_runtime(
                 projectConfig,
                 workers_active=active_workers,
-                workers_configured=workersPerProject,
+                workers_configured=configured_workers,
             )
             # 更新标题（仅 CLI 模式有 bar）
             if is_interactive:
-                new_title = f"{base_title} [{active_workers}/{workersPerProject} 并发]"
+                new_title = f"{base_title} [{active_workers}/{configured_workers} 并发]"
                 bar.title(new_title)
 
             # 每隔一段时间更新一次，避免过于频繁
@@ -182,6 +223,12 @@ async def doLLMTranslate(
     default_dic_dir = projectConfig.getDictCfgSection()["defaultDictFolder"]
     workersPerProject = projectConfig.getKey("workersPerProject") or 1
     semaphore = asyncio.Semaphore(workersPerProject)
+    adaptive_state = AdaptiveWorkerState(
+        max_workers=max(1, workersPerProject),
+        effective_workers=max(1, workersPerProject),
+    )
+    projectConfig.runtime_workers_effective = adaptive_state.effective_workers
+    projectConfig.runtime_workers_reserved = 0
     fPlugins = projectConfig.fPlugins
     tPlugins = projectConfig.tPlugins
     eng_type = projectConfig.select_translator
@@ -189,7 +236,7 @@ async def doLLMTranslate(
     SplitChunkMetadata.clear_file_finished_chunk()
     total_chunks = []
     projectConfig.active_workers = 1
-    _update_runtime(projectConfig, workers_active=0, workers_configured=workersPerProject)
+    _update_runtime(projectConfig, workers_active=0, workers_configured=adaptive_state.effective_workers)
     
     makedirs(output_dir, exist_ok=True)
     makedirs(cache_dir, exist_ok=True)
@@ -219,7 +266,8 @@ async def doLLMTranslate(
 
     all_jsons = []
     # 读取所有文件获得total_chunks列表
-    with ThreadPoolExecutor(max_workers=cpu_count()) as executor:
+    file_loader_workers = max(1, min(cpu_count() or 1, 8))
+    with ThreadPoolExecutor(max_workers=file_loader_workers) as executor:
         future_to_file = {
             executor.submit(fplugins_load_file, file_path, fPlugins): file_path
             for file_path in file_list
@@ -246,14 +294,6 @@ async def doLLMTranslate(
         gptapi = await init_gptapi(projectConfig)
         await gptapi.batch_translate(all_jsons)
         return True
-
-    async def run_task(task_func):
-        try:
-            result = await task_func
-            return result
-        except Exception as e:
-            LOGGER.error(get_text("task_execution_failed", GT_LANG, e))   
-            raise e
 
     soryBy = projectConfig.getKey("sortBy", "name")
     if soryBy == "name":
@@ -325,6 +365,36 @@ async def doLLMTranslate(
     gptapi = await init_gptapi(projectConfig)
 
     title_update_task = None  # 初始化任务变量
+    auto_tune_task = None
+    reserved_permits = 0
+
+    async def set_effective_workers(target: int) -> None:
+        nonlocal reserved_permits
+
+        target = max(1, min(adaptive_state.max_workers, int(target)))
+        current = adaptive_state.max_workers - reserved_permits
+        if target == current:
+            return
+
+        if target < current:
+            need_reserve = current - target
+            for _ in range(need_reserve):
+                _check_stop_requested(projectConfig)
+                await semaphore.acquire()
+                reserved_permits += 1
+        else:
+            release_count = min(target - current, reserved_permits)
+            for _ in range(release_count):
+                semaphore.release()
+                reserved_permits -= 1
+
+        adaptive_state.effective_workers = adaptive_state.max_workers - reserved_permits
+        projectConfig.runtime_workers_effective = adaptive_state.effective_workers
+        projectConfig.runtime_workers_reserved = reserved_permits
+        _update_runtime(
+            projectConfig,
+            workers_configured=adaptive_state.effective_workers,
+        )
 
     with terminal_progress(
         should_print_translation_logs(projectConfig),
@@ -337,23 +407,64 @@ async def doLLMTranslate(
             update_progress_title(bar, semaphore, workersPerProject, projectConfig)
         )
 
-        # 创建所有翻译任务
-        all_tasks = []
+        enable_auto_workers = bool(projectConfig.getKey("autoAdjustWorkers", True))
+        if enable_auto_workers and workersPerProject > 1:
+            auto_tune_task = asyncio.create_task(
+                auto_tune_workers(projectConfig, adaptive_state, set_effective_workers)
+            )
+
+        worker_count = max(1, workersPerProject)
+        chunk_queue: asyncio.Queue[Optional[SplitChunkMetadata]] = asyncio.Queue()
         for chunk in ordered_chunks:
             _check_stop_requested(projectConfig)
-            all_tasks.append(
-                doLLMTranslSingleChunk(
+            chunk_queue.put_nowait(chunk)
+
+        for _ in range(worker_count):
+            chunk_queue.put_nowait(None)
+
+        async def worker_loop():
+            while True:
+                _check_stop_requested(projectConfig)
+                split_chunk = await chunk_queue.get()
+                if split_chunk is None:
+                    return
+                await doLLMTranslSingleChunk(
                     semaphore,
-                    split_chunk=chunk,
+                    split_chunk=split_chunk,
                     projectConfig=projectConfig,
                     gptapi=gptapi,  # 传递共享的 gptapi 实例
                 )
-            )
+
+        worker_tasks = [
+            asyncio.create_task(worker_loop())
+            for _ in range(worker_count)
+        ]
 
         try:
-            # 使用信号量控制并发数量，同时启动所有翻译任务
-            await asyncio.gather(*[run_task(task) for task in all_tasks])
+            await asyncio.gather(*worker_tasks)
+        except Exception:
+            for worker_task in worker_tasks:
+                if not worker_task.done():
+                    worker_task.cancel()
+            await asyncio.gather(*worker_tasks, return_exceptions=True)
+            raise
         finally:
+            for worker_task in worker_tasks:
+                if not worker_task.done():
+                    worker_task.cancel()
+
+        try:
+            await asyncio.gather(*worker_tasks, return_exceptions=True)
+        finally:
+            if auto_tune_task:
+                auto_tune_task.cancel()
+                try:
+                    await auto_tune_task
+                except asyncio.CancelledError:
+                    pass
+            if reserved_permits > 0:
+                await set_effective_workers(adaptive_state.max_workers)
+
             # 确保无论 gather 成功还是失败，都取消标题更新任务
             if title_update_task:
                 title_update_task.cancel()
@@ -404,7 +515,17 @@ async def doLLMTranslSingleChunk(
         )
 
         part_info = f" (part {file_index+1}/{total_splits})" if total_splits > 1 else ""
-        _update_runtime(projectConfig, current_file=file_name, workers_configured=projectConfig.getKey("workersPerProject") or 1)
+        _update_runtime(
+            projectConfig,
+            current_file=file_name,
+            workers_configured=int(
+                getattr(
+                    projectConfig,
+                    "runtime_workers_effective",
+                    projectConfig.getKey("workersPerProject") or 1,
+                )
+            ),
+        )
         LOGGER.info(f">>> 开始翻译 (project_dir){split_chunk.file_path.replace(proj_dir,'')}")
         LOGGER.debug(f"文件 {file_name} 分块 {file_index+1}/{total_splits}:")
         LOGGER.debug(f"  开始索引: {split_chunk.start_index}")

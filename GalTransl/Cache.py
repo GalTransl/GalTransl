@@ -38,6 +38,145 @@ def _cache_has(cache_obj: dict, key: str) -> bool:
     return False
 
 
+_CACHE_APPEND_SUFFIX = ".append.jsonl"
+_CACHE_APPEND_COMPACT_SIZE_BYTES = 64 * 1024
+
+
+def _append_cache_file_path(cache_file_path: str) -> str:
+    return cache_file_path + _CACHE_APPEND_SUFFIX
+
+
+def _build_cache_key_for_tran(tran) -> str:
+    line_now, line_priv, line_next = "", "None", "None"
+    line_now = f"{tran.speaker}{tran.pre_jp}"
+
+    prev_tran = tran.prev_tran
+    while prev_tran and prev_tran.post_jp == "":
+        prev_tran = prev_tran.prev_tran
+    if prev_tran:
+        line_priv = f"{prev_tran.speaker}{prev_tran.pre_jp}"
+
+    next_tran = tran.next_tran
+    while next_tran and next_tran.post_jp == "":
+        next_tran = next_tran.next_tran
+    if next_tran:
+        line_next = f"{next_tran.speaker}{next_tran.pre_jp}"
+
+    line_priv = "None" if line_priv == "" else line_priv
+    line_next = "None" if line_next == "" else line_next
+    return line_priv + line_now + line_next
+
+
+def _build_cache_obj(tran, post_save: bool = False):
+    if tran.post_jp == "":
+        return None
+    if tran.pre_zh == "":
+        return None
+
+    cache_obj = {
+        "index": tran.index,
+        "name": tran.speaker,
+        "pre_src": tran.pre_jp,
+        "post_src": tran.post_jp,
+        "pre_dst": tran.pre_zh,
+    }
+    cache_obj["proofread_dst"] = tran.proofread_zh
+
+    if post_save and tran.problem != "":
+        cache_obj["problem"] = tran.problem
+
+    cache_obj["trans_by"] = tran.trans_by
+    cache_obj["proofread_by"] = tran.proofread_by
+
+    if tran.trans_conf != 0:
+        cache_obj["trans_conf"] = tran.trans_conf
+    if tran.doub_content != "":
+        cache_obj["doub_content"] = tran.doub_content
+    if tran.unknown_proper_noun != "":
+        cache_obj["unknown_proper_noun"] = tran.unknown_proper_noun
+    if post_save:
+        cache_obj["post_dst_preview"] = tran.post_zh
+
+    return cache_obj
+
+
+def _build_cache_dict_from_snapshot(cache_list: list) -> tuple[dict, list[str]]:
+    cache_dict = {}
+    cache_order: list[str] = []
+    for i, cache in enumerate(cache_list):
+        line_now, line_priv, line_next = "", "None", "None"
+        line_now = f'{cache.get("name", "")}{_cache_get(cache, "pre_src", "")}'
+        if i > 0:
+            line_priv = f'{cache_list[i-1].get("name", "")}{_cache_get(cache_list[i-1], "pre_src", "")}'
+        if i < len(cache_list) - 1:
+            line_next = f'{cache_list[i+1].get("name", "")}{_cache_get(cache_list[i+1], "pre_src", "")}'
+        line_priv = "None" if line_priv == "" else line_priv
+        line_next = "None" if line_next == "" else line_next
+        cache_key = line_priv + line_now + line_next
+        if cache_key not in cache_dict:
+            cache_order.append(cache_key)
+        cache_dict[cache_key] = cache
+    return cache_dict, cache_order
+
+
+async def _compact_cache_from_append(cache_file_path: str, append_file_path: str) -> None:
+    cache_list = []
+    if os.path.exists(cache_file_path):
+        async with aiofiles.open(cache_file_path, mode="rb") as f:
+            raw = await f.read()
+            if raw:
+                cache_list = orjson.loads(raw)
+
+    cache_dict, cache_order = _build_cache_dict_from_snapshot(cache_list)
+
+    if os.path.exists(append_file_path):
+        async with aiofiles.open(append_file_path, mode="rb") as f:
+            append_raw = await f.read()
+        for line in append_raw.splitlines():
+            if not line:
+                continue
+            try:
+                cache_obj = orjson.loads(line)
+            except Exception:
+                continue
+            cache_key = str(cache_obj.pop("__cache_key", ""))
+            if not cache_key:
+                continue
+            if cache_key not in cache_dict:
+                cache_order.append(cache_key)
+            cache_dict[cache_key] = cache_obj
+
+    merged_cache = [cache_dict[key] for key in cache_order if key in cache_dict]
+
+    temp_file_path = cache_file_path + ".tmp"
+    async with aiofiles.open(temp_file_path, mode="wb") as f:
+        await f.write(orjson.dumps(merged_cache, option=orjson.OPT_INDENT_2))
+    shutil.move(temp_file_path, cache_file_path)
+
+    if os.path.exists(append_file_path):
+        os.remove(append_file_path)
+
+
+async def compact_cache_append_logs(cache_dir: str) -> int:
+    if not cache_dir or not os.path.isdir(cache_dir):
+        return 0
+
+    compacted_count = 0
+    for name in os.listdir(cache_dir):
+        if not name.endswith(_CACHE_APPEND_SUFFIX):
+            continue
+
+        append_file_path = os.path.join(cache_dir, name)
+        cache_file_path = append_file_path[: -len(_CACHE_APPEND_SUFFIX)]
+        try:
+            await _compact_cache_from_append(cache_file_path, append_file_path)
+            compacted_count += 1
+        except Exception as e:
+            LOGGER.warning(f"[cache]压缩append缓存失败：{append_file_path}: {e}")
+
+    return compacted_count
+
+
 async def save_transCache_to_json(trans_list: CTransList, cache_file_path, post_save=False):
     """
     此函数将翻译缓存保存到 JSON 文件中。
@@ -51,53 +190,49 @@ async def save_transCache_to_json(trans_list: CTransList, cache_file_path, post_
     if not cache_file_path.endswith(".json"):
         cache_file_path += ".json"
 
+    append_file_path = _append_cache_file_path(cache_file_path)
+
     # 创建临时文件路径，用于原子写入
     temp_file_path = cache_file_path + ".tmp"
 
     cache_json = []
+    append_entries = []
 
     for tran in trans_list:
-        if tran.post_jp == "": # 对齐get逻辑
+        cache_obj = _build_cache_obj(tran, post_save=post_save)
+        if cache_obj is None:
             continue
-        if tran.pre_zh == "":
-            continue
-
-
-        cache_obj = {
-            "index": tran.index,
-            "name": tran.speaker,
-            "pre_src": tran.pre_jp,
-            "post_src": tran.post_jp,
-            "pre_dst": tran.pre_zh,
-        }
-
-        cache_obj["proofread_dst"] = tran.proofread_zh
-
-        if post_save and tran.problem != "":
-            cache_obj["problem"] = tran.problem
-
-        cache_obj["trans_by"] = tran.trans_by
-        cache_obj["proofread_by"] = tran.proofread_by
-
-        if tran.trans_conf != 0:
-            cache_obj["trans_conf"] = tran.trans_conf
-        if tran.doub_content != "":
-            cache_obj["doub_content"] = tran.doub_content
-        if tran.unknown_proper_noun != "":
-            cache_obj["unknown_proper_noun"] = tran.unknown_proper_noun
-        if post_save:
-            cache_obj["post_dst_preview"] = tran.post_zh
         cache_json.append(cache_obj)
+        cache_key = _build_cache_key_for_tran(tran)
+        if cache_key:
+            append_obj = dict(cache_obj)
+            append_obj["__cache_key"] = cache_key
+            append_entries.append(append_obj)
 
     try:
-        # 原子写入：先写入临时文件
-        async with aiofiles.open(temp_file_path, mode="wb") as f:
-            json_data = orjson.dumps(cache_json, option=orjson.OPT_INDENT_2)
-            await f.write(json_data)
-        
-        # 原子操作：重命名临时文件为目标文件
-        shutil.move(temp_file_path, cache_file_path)
-        #LOGGER.debug(f"[cache]缓存已安全保存到：{cache_file_path}")
+        if post_save:
+            # 翻译完成后做一次完整快照，并清理append日志
+            async with aiofiles.open(temp_file_path, mode="wb") as f:
+                json_data = orjson.dumps(cache_json, option=orjson.OPT_INDENT_2)
+                await f.write(json_data)
+            shutil.move(temp_file_path, cache_file_path)
+            if os.path.exists(append_file_path):
+                os.remove(append_file_path)
+        else:
+            # 增量写入append日志，避免频繁整文件重写
+            if append_entries:
+                async with aiofiles.open(append_file_path, mode="ab") as f:
+                    for entry in append_entries:
+                        await f.write(orjson.dumps(entry))
+                        await f.write(b"\n")
+
+            # 周期性压缩append日志，合并为快照
+            if os.path.exists(append_file_path):
+                append_size = os.path.getsize(append_file_path)
+                if (not os.path.exists(cache_file_path)) or (
+                    append_size >= _CACHE_APPEND_COMPACT_SIZE_BYTES
+                ):
+                    await _compact_cache_from_append(cache_file_path, append_file_path)
     except Exception as e:
         LOGGER.error(f"[cache]保存缓存失败：{str(e)}")
         
@@ -163,6 +298,25 @@ async def get_transCache_from_json(
                 LOGGER.error(get_text("cache_read_error", GT_LANG, cache_file_path))
                 custom_msg = get_text("cache_read_error", GT_LANG, cache_file_path) + f": {str(e)}"
                 raise RuntimeError(custom_msg) from e
+
+    append_file_path = _append_cache_file_path(cache_file_path)
+    if os.path.exists(append_file_path):
+        try:
+            async with aiofiles.open(append_file_path, mode="rb") as f:
+                append_raw = await f.read()
+            for line in append_raw.splitlines():
+                if not line:
+                    continue
+                try:
+                    cache_obj = orjson.loads(line)
+                except Exception:
+                    continue
+                cache_key = str(cache_obj.pop("__cache_key", ""))
+                if not cache_key:
+                    continue
+                cache_dict[cache_key] = cache_obj
+        except Exception as e:
+            LOGGER.warning(f"[cache]读取append缓存失败：{append_file_path}: {e}")
 
 
     for tran in trans_list:

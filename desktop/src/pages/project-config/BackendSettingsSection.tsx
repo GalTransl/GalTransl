@@ -11,6 +11,7 @@ interface BackendSettingsSectionProps {
   backendProfileNames: string[];
   onProfileChange: (profile: string) => void;
   onBackendChange: (newBackend: Record<string, unknown>) => void;
+  onCommonChange: (newCommon: Record<string, unknown>) => void;
   onProxyChange: (newProxy: Record<string, unknown>) => void;
   onDirty: () => void;
 }
@@ -22,10 +23,13 @@ export function BackendSettingsSection({
   backendProfileNames,
   onProfileChange,
   onBackendChange,
+  onCommonChange,
   onProxyChange,
   onDirty,
 }: BackendSettingsSectionProps) {
   const resolvedProfile = selectedProfile === '__default__' ? defaultProfileName : selectedProfile;
+  const commonConfig = (config?.common as Record<string, unknown>) || {};
+  const autoAdjustWorkers = commonConfig.autoAdjustWorkers !== false;
 
   return (
     <Panel title="翻译后端" description="OpenAI兼容接口、Sakura本地模型和代理配置。">
@@ -65,6 +69,21 @@ export function BackendSettingsSection({
             onChange={(newBackend) => { onBackendChange(newBackend); onDirty(); }}
           />
         )}
+
+        <label className="field">
+          <span>自动调节并发 Worker</span>
+          <CustomSelect
+            value={String(autoAdjustWorkers)}
+            onChange={(e) => {
+              onCommonChange({ ...commonConfig, autoAdjustWorkers: e.target.value === 'true' });
+              onDirty();
+            }}
+          >
+            <option value="true">开启</option>
+            <option value="false">关闭</option>
+          </CustomSelect>
+          <span className="field__hint">根据近期 429 比例和响应延迟自动降/升 worker 并发</span>
+        </label>
 
         <ProxyConfigEditor
           proxyConfig={(config?.proxy as Record<string, unknown>) || {}}

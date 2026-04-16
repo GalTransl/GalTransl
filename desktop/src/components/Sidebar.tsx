@@ -31,12 +31,40 @@ type SidebarProps = {
   onCloseAllProjects: () => void;
 };
 
+function buildInitialExpandedProjects(openProjects: string[], pathname: string): Record<string, boolean> {
+  if (openProjects.length === 0) {
+    return {};
+  }
+
+  let expandedProject: string | null = null;
+  const match = pathname.match(/^\/project\/([^/]+)/);
+  if (match) {
+    try {
+      const projectDir = decodeProjectDir(match[1]);
+      if (openProjects.includes(projectDir)) {
+        expandedProject = projectDir;
+      }
+    } catch {
+      expandedProject = null;
+    }
+  }
+
+  const target = expandedProject ?? openProjects[0];
+  const result: Record<string, boolean> = {};
+  for (const projectDir of openProjects) {
+    result[projectDir] = projectDir === target;
+  }
+  return result;
+}
+
 export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, onCloseAllProjects }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [expanded, setExpanded] = useState(true);
   // Track which projects are expanded in the sidebar (keyed by projectDir)
-  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
+  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>(() =>
+    buildInitialExpandedProjects(openProjects, location.pathname)
+  );
   // Keep submenu content mounted long enough for close animations to complete
   const [renderedProjectChildren, setRenderedProjectChildren] = useState<Record<string, boolean>>({});
   // Track the visual open/closed state separately so expand animations can start from collapsed
@@ -153,7 +181,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
       const next: Record<string, boolean> = {};
 
       for (const projectDir of openProjects) {
-        const isExpanded = projectDir in expandedProjects ? expandedProjects[projectDir] : true;
+        const isExpanded = projectDir in expandedProjects ? expandedProjects[projectDir] : false;
         const shouldRender = isExpanded || prev[projectDir] === true;
         next[projectDir] = shouldRender;
         if (prev[projectDir] !== shouldRender) {
@@ -208,7 +236,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
 
       for (const projectDir of openProjects) {
         const isRendered = renderedProjectChildren[projectDir] ?? false;
-        const isExpanded = projectDir in expandedProjects ? expandedProjects[projectDir] : true;
+        const isExpanded = projectDir in expandedProjects ? expandedProjects[projectDir] : false;
         const wasVisible = prev[projectDir] ?? false;
 
         if (!isRendered) {
@@ -269,7 +297,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
 
   const toggleProjectExpanded = useCallback((projectDir: string) => {
     setExpandedProjects((prev) => {
-      const isCurrentlyExpanded = prev[projectDir] ?? true;
+      const isCurrentlyExpanded = prev[projectDir] ?? false;
       if (isCurrentlyExpanded) {
         // Collapsing: just collapse this one
         return {
@@ -338,9 +366,9 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
   // When a new project is opened, collapse all others and expand the new one
   // We detect this by checking if a project in openProjects doesn't have an expanded state yet
   const getProjectExpanded = useCallback((projectDir: string) => {
-    // Default to expanded if not yet set
+    // Default to collapsed if not yet set
     if (!(projectDir in expandedProjects)) {
-      return true;
+      return false;
     }
     return expandedProjects[projectDir];
   }, [expandedProjects]);

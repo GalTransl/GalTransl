@@ -5,11 +5,12 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any
 
-from GalTransl import DEBUG_LEVEL, LOGGER
+from GalTransl import LOGGER, DEBUG_LEVEL
 from GalTransl.ConfigHelper import CProjectConfig
 from GalTransl.Runner import run_galtransl
-from GalTransl.i18n import GT_LANG, get_text
+from GalTransl.i18n import get_text, GT_LANG
 from GalTransl.AppSettings import load_app_settings
+from GalTransl.Cache import compact_cache_append_logs
 
 
 class JobCancelledError(Exception):
@@ -128,6 +129,12 @@ async def run_job_async(
         current_state.status = "completed"
         current_state.success = True
     except JobCancelledError:
+        try:
+            compacted = await compact_cache_append_logs(cfg.getCachePath())
+            if compacted > 0:
+                LOGGER.info(f"停止翻译后已合并缓存日志文件：{compacted}")
+        except Exception as exc:
+            LOGGER.warning(f"停止翻译后合并缓存日志失败：{exc}")
         current_state.status = "cancelled"
         current_state.error = "用户请求停止翻译"
     except KeyboardInterrupt:

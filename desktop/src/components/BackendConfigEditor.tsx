@@ -34,6 +34,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false }: Back
             tokens: [],
             tokenStrategy: 'random',
             checkAvailable: true,
+            globalRequestRPM: 0,
             apiTimeout: 120,
             apiErrorWait: 'auto',
           },
@@ -229,6 +230,17 @@ export function BackendConfigEditor({ config, onChange, readOnly = false }: Back
               value={String(oaiConfig.apiTimeout ?? 120)}
               onChange={(e) => updateOai('apiTimeout', Number(e.target.value))}
             />
+          </label>
+          <label className="field">
+            <span>全局请求限速(RPM)</span>
+            <input
+              disabled={readOnly}
+              type="number"
+              min={0}
+              value={String(oaiConfig.globalRequestRPM ?? 0)}
+              onChange={(e) => updateOai('globalRequestRPM', Number(e.target.value))}
+            />
+            <span className="field__hint">0 表示不限制；该限制在多任务间全局共享</span>
           </label>
           <label className="field">
             <span>API错误等待</span>

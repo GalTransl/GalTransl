@@ -11,6 +11,8 @@ backendSpecific:
         stream: true # 支持为单个token设置流式请求
     tokenStrategy: "random" # 令牌策略，random随机轮询；fallback优先第一个，出现[API错误]或[解析错误]时使用下一个
     checkAvailable: true # 翻译前检查API是否可用[True/False]
+    checkAvailableConcurrency: 4 # checkAvailable阶段的并发检测数，避免启动时瞬时打满请求。[1-16]
+    globalRequestRPM: 0 # 全局跨任务请求限速（每分钟请求数）。0表示不限制。[0-60000]
     stream: true # 流式请求，一般不用修改除非接口不支持流式[True/False]
     apiTimeout: 120 # 请求超时时间，单位秒
     apiErrorWait: auto # 发生API Error时的等待时间，包括频率限制。auto将自动适应[auto/0-120]
@@ -35,6 +37,7 @@ plugin:
 common:
   gpt.numPerRequestTranslate: 10 # 每次请求包含的句子数，建议不超过16。[1-32]
   workersPerProject: 16 # 项目级并行文件数；单文件并行需配合splitFile。
+  autoAdjustWorkers: true # 基于近期429比例和响应延迟自动调节并发worker数。[True/False]
   sortBy: "size" # 文件调度顺序：name按文件名，size优先大文件（并行时通常更快）。[name/size]
   language: "zh-cn" # 目标输出语言。[zh-cn/zh-tw/en/ja/ko/ru/fr]
 

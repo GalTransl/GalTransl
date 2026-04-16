@@ -2,6 +2,8 @@ import asyncio
 import httpx
 from opencc import OpenCC
 from typing import Optional
+from collections import deque
+from threading import Lock
 from GalTransl.COpenAI import COpenAITokenPool, COpenAIToken
 from GalTransl.ConfigHelper import CProxyPool
 from GalTransl import LOGGER, LANG_SUPPORTED, TRANSLATOR_DEFAULT_ENGINE
@@ -19,6 +21,49 @@ from openai._types import NOT_GIVEN
 import random
 import time
 from GalTransl.TerminalOutput import should_print_translation_logs
+
+
+_GLOBAL_RPM_LOCK = Lock()
+_GLOBAL_NEXT_ALLOWED_TS = 0.0
+
+
+class RequestHealthMetrics:
+    def __init__(self) -> None:
+        self._samples: deque[tuple[float, float, bool]] = deque()
+        self._lock = Lock()
+
+    def _trim_locked(self, now: float, window_seconds: float) -> None:
+        cutoff = now - max(5.0, float(window_seconds))
+        while self._samples and self._samples[0][0] < cutoff:
+            self._samples.popleft()
+
+    def record(self, latency_seconds: float, is_rate_limited: bool) -> None:
+        now = time.monotonic()
+        latency = max(0.0, float(latency_seconds))
+        with self._lock:
+            self._samples.append((now, latency, bool(is_rate_limited)))
+            self._trim_locked(now, 120.0)
+
+    def snapshot(self, window_seconds: float = 30.0) -> dict:
+        now = time.monotonic()
+        with self._lock:
+            self._trim_locked(now, window_seconds)
+            total = len(self._samples)
+            if total == 0:
+                return {
+                    "total": 0,
+                    "rate_limited": 0,
+                    "rate_limited_ratio": 0.0,
+                    "avg_latency": 0.0,
+                }
+            rate_limited = sum(1 for _, _, limited in self._samples if limited)
+            avg_latency = sum(lat for _, lat, _ in self._samples) / total
+            return {
+                "total": total,
+                "rate_limited": rate_limited,
+                "rate_limited_ratio": rate_limited / total,
+                "avg_latency": avg_latency,
+            }
 
 
 class BaseTranslate:
@@ -92,6 +137,24 @@ class BaseTranslate:
         self.contextNum:int = config.getKey("gpt.contextNum", 8)
 
         self.smartRetry:bool=config.getKey("smartRetry", True)
+
+        metrics = getattr(config, "request_health_metrics", None)
+        if metrics is None:
+            metrics = RequestHealthMetrics()
+            setattr(config, "request_health_metrics", metrics)
+        self.request_health_metrics: RequestHealthMetrics = metrics
+
+        backend_rpm = 0
+        try:
+            backend_rpm = int(
+                config.getBackendConfigSection("OpenAI-Compatible").get(
+                    "globalRequestRPM", 0
+                )
+                or 0
+            )
+        except Exception:
+            backend_rpm = 0
+        self.global_request_rpm = max(0, backend_rpm)
 
         if config.getKey("internals.enableProxy") == True:
             self.proxyProvider = proxy_pool
@@ -190,6 +253,32 @@ class BaseTranslate:
             await asyncio.sleep(chunk)
             remaining -= chunk
 
+    async def _wait_for_global_rpm_slot(self) -> None:
+        if self.global_request_rpm <= 0:
+            return
+
+        global _GLOBAL_NEXT_ALLOWED_TS
+        interval = 60.0 / float(self.global_request_rpm)
+        wait_seconds = 0.0
+
+        with _GLOBAL_RPM_LOCK:
+            now = time.monotonic()
+            if now >= _GLOBAL_NEXT_ALLOWED_TS:
+                _GLOBAL_NEXT_ALLOWED_TS = now + interval
+                wait_seconds = 0.0
+            else:
+                wait_seconds = _GLOBAL_NEXT_ALLOWED_TS - now
+                _GLOBAL_NEXT_ALLOWED_TS = _GLOBAL_NEXT_ALLOWED_TS + interval
+
+        if wait_seconds > 0:
+            await self._interruptible_sleep(wait_seconds)
+
+    def _record_request_health(self, latency_seconds: float, is_rate_limited: bool) -> None:
+        try:
+            self.request_health_metrics.record(latency_seconds, is_rate_limited)
+        except Exception:
+            return
+
     async def ask_chatbot(
         self,
         prompt="",
@@ -225,6 +314,7 @@ class BaseTranslate:
                 from GalTransl.Service import JobCancelledError
                 raise JobCancelledError()
 
+            request_started = time.monotonic()
             try:
                 if self.tokenStrategy == "random":
                     if api_try_count % 2 == 0:
@@ -236,6 +326,8 @@ class BaseTranslate:
                     raise ValueError("tokenStrategy must be random or fallback")
                 is_stream=stream if stream != NOT_GIVEN else token.stream
                 LOGGER.debug(f"Call {token.domain} withs token {token.maskToken()}")
+
+                await self._wait_for_global_rpm_slot()
 
                 # Create the API call as a task so we can cancel it if
                 # the user requests a stop while the request is in-flight.
@@ -296,8 +388,22 @@ class BaseTranslate:
                         raise ValueError(
                             "response.choices[0].message.content is None, no_candidates"
                         )
+                self._record_request_health(
+                    time.monotonic() - request_started,
+                    is_rate_limited=False,
+                )
                 return result, token
             except Exception as e:
+                is_rate_limited = isinstance(e, RateLimitError)
+                self._record_request_health(
+                    time.monotonic() - request_started,
+                    is_rate_limited=is_rate_limited,
+                )
+
+                from GalTransl.Service import JobCancelledError
+                if isinstance(e, JobCancelledError):
+                    raise
+
                 api_try_count += 1
                 # gemini no_candidates
                 if "candidates" in str(e) and api_try_count > 1:
@@ -314,7 +420,7 @@ class BaseTranslate:
                 else:
                     token_info = ""
 
-                if isinstance(e, RateLimitError):
+                if is_rate_limited:
                     self.pj_config.bar.text(
                         "-> 检测到频率限制(429 RateLimitError)，翻译仍在进行中但速度将受影响..."
                     )

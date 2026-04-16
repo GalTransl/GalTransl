@@ -254,8 +254,216 @@ def _trim_preview(value: str, limit: int = 140) -> str:
 RUNTIME_REGISTRY = RuntimeRegistry()
 
 
+@dataclass(slots=True)
+class _CacheProgressFileStat:
+    mtime_ns: int
+    size: int
+    translated_keys: frozenset[str]
+    problem_keys: frozenset[str]
+    failed_keys: frozenset[str]
+
+
+class RuntimeProgressCache:
+    def __init__(self) -> None:
+        self._project_files: dict[str, dict[str, _CacheProgressFileStat]] = {}
+        self._lock = threading.Lock()
+
+    def reset_project(self, project_dir: str) -> None:
+        normalized = _normalize_project_dir(project_dir)
+        with self._lock:
+            self._project_files.pop(normalized, None)
+
+    def get_progress(
+        self,
+        project_dir: str,
+        file_totals: dict[str, int],
+        cache_file_display_map: dict[str, str],
+    ) -> dict[str, Any]:
+        normalized = _normalize_project_dir(project_dir)
+        cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+
+        with self._lock:
+            project_stats = self._project_files.setdefault(normalized, {})
+            seen_files: set[str] = set()
+
+            if os.path.isdir(cache_dir):
+                for entry in os.scandir(cache_dir):
+                    if not entry.is_file() or not entry.name.endswith(".json"):
+                        continue
+
+                    name = entry.name
+                    seen_files.add(name)
+
+                    try:
+                        stat = entry.stat()
+                    except OSError:
+                        continue
+
+                    cached = project_stats.get(name)
+                    if (
+                        cached is not None
+                        and cached.mtime_ns == int(stat.st_mtime_ns)
+                        and cached.size == int(stat.st_size)
+                    ):
+                        continue
+
+                    try:
+                        import orjson
+
+                        with open(entry.path, "rb") as f:
+                            entries = orjson.loads(f.read())
+                    except Exception:
+                        continue
+
+                    translated_keys: set[str] = set()
+                    problem_keys: set[str] = set()
+                    failed_keys: set[str] = set()
+
+                    def _name_src(items: list[Any], idx: int) -> str:
+                        if idx < 0 or idx >= len(items):
+                            return ""
+                        item = items[idx]
+                        if not isinstance(item, dict):
+                            return ""
+                        name = str(item.get("name", "") or "")
+                        pre_src = str(item.get("pre_src", item.get("pre_jp", "")) or "")
+                        return f"{name}{pre_src}"
+
+                    def _entry_signature(items: list[Any], idx: int) -> str:
+                        line_now = _name_src(items, idx)
+                        if not line_now:
+                            row = items[idx] if 0 <= idx < len(items) else {}
+                            if isinstance(row, dict):
+                                row_index = str(row.get("index", ""))
+                                row_src = str(
+                                    row.get("pre_src", row.get("pre_jp", row.get("post_src", "")))
+                                    or ""
+                                )
+                                row_name = str(row.get("name", "") or "")
+                                return f"__row__:{idx}:{row_index}:{row_name}:{row_src}"
+                            return f"__row__:{idx}"
+
+                        line_prev = "None"
+                        j = idx - 1
+                        while j >= 0:
+                            candidate = _name_src(items, j)
+                            if candidate:
+                                line_prev = candidate
+                                break
+                            j -= 1
+
+                        line_next = "None"
+                        j = idx + 1
+                        while j < len(items):
+                            candidate = _name_src(items, j)
+                            if candidate:
+                                line_next = candidate
+                                break
+                            j += 1
+
+                        return f"{line_prev}|{line_now}|{line_next}"
+
+                    for idx, item in enumerate(entries):
+                        if not isinstance(item, dict):
+                            continue
+
+                        entry_key = _entry_signature(entries, idx)
+
+                        is_translated = bool(item.get("pre_dst", "") or item.get("pre_zh", ""))
+                        is_problem = bool(item.get("problem", ""))
+                        is_failed = (
+                            "翻译失败" in str(item.get("problem", ""))
+                            or "(Failed)" in str(item.get("pre_dst", "") or item.get("pre_zh", ""))
+                            or "(翻译失败)" in str(item.get("pre_dst", "") or item.get("pre_zh", ""))
+                        )
+
+                        if is_translated:
+                            translated_keys.add(entry_key)
+                        if is_problem:
+                            problem_keys.add(entry_key)
+                        if is_failed:
+                            failed_keys.add(entry_key)
+
+                    project_stats[name] = _CacheProgressFileStat(
+                        mtime_ns=int(stat.st_mtime_ns),
+                        size=int(stat.st_size),
+                        translated_keys=frozenset(translated_keys),
+                        problem_keys=frozenset(problem_keys),
+                        failed_keys=frozenset(failed_keys),
+                    )
+
+            stale_files = [name for name in project_stats if name not in seen_files]
+            for name in stale_files:
+                project_stats.pop(name, None)
+
+            file_progress_map: dict[str, dict[str, Any]] = {}
+
+            for name, stat in project_stats.items():
+                display_name = cache_file_display_map.get(name, name)
+                if display_name not in file_progress_map:
+                    file_progress_map[display_name] = {
+                        "filename": display_name,
+                        "total": int(file_totals.get(display_name, 0)),
+                        "translated": 0,
+                        "problems": 0,
+                        "failed": 0,
+                        "_translated_keys": set(),
+                        "_problem_keys": set(),
+                        "_failed_keys": set(),
+                    }
+                file_progress_map[display_name]["_translated_keys"].update(stat.translated_keys)
+                file_progress_map[display_name]["_problem_keys"].update(stat.problem_keys)
+                file_progress_map[display_name]["_failed_keys"].update(stat.failed_keys)
+
+            for display_name, total_count in file_totals.items():
+                file_progress_map.setdefault(
+                    display_name,
+                    {
+                        "filename": display_name,
+                        "total": int(total_count),
+                        "translated": 0,
+                        "problems": 0,
+                        "failed": 0,
+                        "_translated_keys": set(),
+                        "_problem_keys": set(),
+                        "_failed_keys": set(),
+                    },
+                )
+
+            for file_progress in file_progress_map.values():
+                total_count = int(file_progress.get("total", 0))
+                translated = len(file_progress["_translated_keys"])
+                problems = len(file_progress["_problem_keys"])
+                failed = len(file_progress["_failed_keys"])
+
+                if total_count > 0:
+                    translated = min(translated, total_count)
+                    problems = min(problems, total_count)
+                    failed = min(failed, total_count)
+
+                file_progress["translated"] = translated
+                file_progress["problems"] = problems
+                file_progress["failed"] = failed
+                file_progress.pop("_translated_keys", None)
+                file_progress.pop("_problem_keys", None)
+                file_progress.pop("_failed_keys", None)
+
+            files = sorted(file_progress_map.values(), key=lambda item: item["filename"])
+            return {
+                "total": sum(int(item["total"]) for item in files),
+                "translated": sum(int(item["translated"]) for item in files),
+                "problems": sum(int(item["problems"]) for item in files),
+                "failed": sum(int(item["failed"]) for item in files),
+                "files": files,
+            }
+
+
+RUNTIME_PROGRESS_CACHE = RuntimeProgressCache()
+
+
 def reset_runtime_project(project_dir: str) -> None:
     RUNTIME_REGISTRY.reset_project(project_dir)
+    RUNTIME_PROGRESS_CACHE.reset_project(project_dir)
 
 
 def update_runtime_status(
@@ -1524,64 +1732,13 @@ def build_handler(registry: JobRegistry):
             # GET /api/projects/:id/runtime
             if sub_path == "/runtime":
                 runtime = RUNTIME_REGISTRY.get_runtime_snapshot(project_dir)
-                progress_payload = {
-                    "total": 0,
-                    "translated": 0,
-                    "problems": 0,
-                    "failed": 0,
-                    "files": [],
-                }
-                file_progress_map: dict[str, dict[str, Any]] = {}
                 file_totals = runtime.get("file_totals", {})
                 cache_file_display_map = runtime.get("cache_file_display_map", {})
-                cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
-                if os.path.isdir(cache_dir):
-                    for name in sorted(os.listdir(cache_dir)):
-                        fp = os.path.join(cache_dir, name)
-                        if not os.path.isfile(fp) or not fp.endswith(".json"):
-                            continue
-                        try:
-                            import orjson
-                            with open(fp, "rb") as f:
-                                entries = orjson.loads(f.read())
-                            f_translated = sum(1 for e in entries if isinstance(e, dict) and (e.get("pre_dst", "") or e.get("pre_zh", "")))
-                            f_problems = sum(1 for e in entries if isinstance(e, dict) and e.get("problem", ""))
-                            f_failed = sum(
-                                1 for e in entries
-                                if isinstance(e, dict)
-                                and (
-                                    "翻译失败" in str(e.get("problem", ""))
-                                    or "(Failed)" in str(e.get("pre_dst", "") or e.get("pre_zh", ""))
-                                    or "(翻译失败)" in str(e.get("pre_dst", "") or e.get("pre_zh", ""))
-                                )
-                            )
-                            display_name = cache_file_display_map.get(name, name)
-                            if display_name not in file_progress_map:
-                                file_progress_map[display_name] = {
-                                    "filename": display_name,
-                                    "total": int(file_totals.get(display_name, 0)),
-                                    "translated": 0,
-                                    "problems": 0,
-                                    "failed": 0,
-                                }
-                            file_progress_map[display_name]["translated"] += f_translated
-                            file_progress_map[display_name]["problems"] += f_problems
-                            file_progress_map[display_name]["failed"] += f_failed
-                        except Exception:
-                            continue
-                for display_name, total_count in file_totals.items():
-                    file_progress_map.setdefault(display_name, {
-                        "filename": display_name,
-                        "total": int(total_count),
-                        "translated": 0,
-                        "problems": 0,
-                        "failed": 0,
-                    })
-                progress_payload["files"] = sorted(file_progress_map.values(), key=lambda item: item["filename"])
-                progress_payload["total"] = sum(int(item["total"]) for item in progress_payload["files"])
-                progress_payload["translated"] = sum(int(item["translated"]) for item in progress_payload["files"])
-                progress_payload["problems"] = sum(int(item["problems"]) for item in progress_payload["files"])
-                progress_payload["failed"] = sum(int(item["failed"]) for item in progress_payload["files"])
+                progress_payload = RUNTIME_PROGRESS_CACHE.get_progress(
+                    project_dir,
+                    file_totals=file_totals,
+                    cache_file_display_map=cache_file_display_map,
+                )
                 job = registry.get_project_job(project_dir)
                 total = progress_payload["total"]
                 translated = progress_payload["translated"]

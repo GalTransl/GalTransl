@@ -305,6 +305,11 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
                     setSaveSuccess(false);
                     setDirty(true);
                   }}
+                  onCommonChange={(newCommon) => {
+                    setConfig((prev) => prev ? { ...prev, common: newCommon } : prev);
+                    setSaveSuccess(false);
+                    setDirty(true);
+                  }}
                   onProxyChange={(newProxy) => {
                     setConfig((prev) => prev ? { ...prev, proxy: newProxy } : prev);
                     setSaveSuccess(false);

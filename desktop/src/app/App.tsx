@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { useCallback, useEffect, useState } from 'react';
+import { HashRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { decodeProjectDir, encodeProjectDir } from '../lib/api';
 import { Sidebar } from '../components/Sidebar';
 import { ProjectLayout } from '../components/ProjectLayout';
@@ -12,7 +12,6 @@ import { NewProjectWizard } from '../pages/NewProjectWizard';
 
 const CONFIG_FILE_KEY = 'galtransl-config-file';
 const OPEN_PROJECTS_KEY = 'galtransl-open-projects';
-const LAST_ROUTE_KEY = 'galtransl-last-route';
 
 function saveConfigFileName(projectDir: string, configFileName: string) {
   try {
@@ -36,22 +35,6 @@ function loadOpenProjects(): string[] {
 function saveOpenProjects(projects: string[]) {
   try {
     localStorage.setItem(OPEN_PROJECTS_KEY, JSON.stringify(projects));
-  } catch {
-    // ignore storage errors
-  }
-}
-
-function loadLastRoute(): string {
-  try {
-    return localStorage.getItem(LAST_ROUTE_KEY) || '/';
-  } catch {
-    return '/';
-  }
-}
-
-function saveLastRoute(route: string) {
-  try {
-    localStorage.setItem(LAST_ROUTE_KEY, route);
   } catch {
     // ignore storage errors
   }
@@ -115,42 +98,6 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
   const location = useLocation();
   const [displayLocation, setDisplayLocation] = useState(location);
   const [transitionStage, setTransitionStage] = useState<'fadeIn' | 'fadeOut'>('fadeIn');
-  const initialRestoreDone = useRef(false);
-
-  // On first mount, restore the last active route if we have open projects
-  useEffect(() => {
-    if (initialRestoreDone.current) return;
-    initialRestoreDone.current = true;
-    if (openProjects.length > 0) {
-      const lastRoute = loadLastRoute();
-      // Only restore if the route is a project route that still has an open project
-      const projectMatch = lastRoute.match(/^\/project\/([^/]+)/);
-      if (projectMatch) {
-        try {
-          const projectDir = decodeProjectDir(projectMatch[1]);
-          if (openProjects.includes(projectDir)) {
-            const normalizedRoute = lastRoute === `/project/${projectMatch[1]}`
-              ? `/project/${projectMatch[1]}/translate`
-              : lastRoute;
-            navigate(normalizedRoute, { replace: true });
-            return;
-          }
-        } catch {
-          // Invalid project ID, fall through to home
-        }
-        // Project no longer open, go home
-        navigate('/', { replace: true });
-      } else if (lastRoute !== '/') {
-        // Non-project route (settings, plugins, etc.), restore it
-        navigate(lastRoute, { replace: true });
-      }
-    }
-  }, [openProjects, navigate]);
-
-  // Persist the current route whenever it changes
-  useEffect(() => {
-    saveLastRoute(location.pathname);
-  }, [location.pathname]);
 
   useEffect(() => {
     if (location.pathname !== displayLocation.pathname) {

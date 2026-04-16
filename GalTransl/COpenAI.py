@@ -3,7 +3,6 @@ CloseAI related classes
 """
 
 import asyncio
-from asyncio import gather
 from time import time
 from GalTransl import LOGGER, TRANSLATOR_DEFAULT_ENGINE
 from GalTransl.ConfigHelper import CProjectConfig, CProxy
@@ -110,9 +109,14 @@ class COpenAITokenPool:
     async def _isTokenAvailable(
         self, token: COpenAIToken, proxy: CProxy = None
     ) -> Tuple[bool, COpenAIToken]:
+        return await asyncio.to_thread(self._isTokenAvailable_sync, token, proxy)
+
+    def _isTokenAvailable_sync(
+        self, token: COpenAIToken, proxy: CProxy = None
+    ) -> Tuple[bool, COpenAIToken]:
+        st = time()
 
         try:
-            st = time()
             LOGGER.info(f"API URL: {token.domain}/chat/completions")
             client = OpenAI(
                 api_key=token.token,
@@ -157,6 +161,7 @@ class COpenAITokenPool:
         proxy: CProxy = None,
         max_retries: int = 3,
     ) -> Tuple[bool, COpenAIToken]:
+        is_available = False
         for retry_count in range(max_retries):
             is_available, token = await self._isTokenAvailable(token, proxy)
             if is_available:
@@ -177,7 +182,23 @@ class COpenAITokenPool:
         """
         检测令牌有效性
         """
-        fs = []
+        section_name = "OpenAI-Compatible"
+        raw_concurrency = self.pj_config.getBackendConfigSection(section_name).get(
+            "checkAvailableConcurrency", 4
+        )
+        try:
+            check_concurrency = max(1, min(16, int(raw_concurrency)))
+        except (TypeError, ValueError):
+            check_concurrency = 4
+        check_semaphore = asyncio.Semaphore(check_concurrency)
+
+        async def check_one_token(token: COpenAIToken) -> Tuple[bool, COpenAIToken]:
+            async with check_semaphore:
+                return await self._check_token_availability_with_retry(
+                    token, proxy if proxy else None
+                )
+
+        tasks = []
         with terminal_progress(
             should_print_translation_logs(self.pj_config),
             total=len(self.tokens),
@@ -190,12 +211,8 @@ class COpenAITokenPool:
                 LOGGER.info(
                     f"Testing key{index}---{token.maskToken()}---{token.model_name}"
                 )
-                fs.append(
-                    self._check_token_availability_with_retry(
-                        token, proxy if proxy else None
-                    )
-                )
-            result: list[tuple[bool, COpenAIToken]] = await gather(*fs)
+                tasks.append(asyncio.create_task(check_one_token(token)))
+            result: list[tuple[bool, COpenAIToken]] = await asyncio.gather(*tasks)
 
         # replace list with new one
         newList: list[tuple[bool, COpenAIToken]] = []
