@@ -269,8 +269,34 @@
   font-size: 12px;
 }
 
+/* Flatten meta-grid into a single inline row */
 .home-page .job-card .meta-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.home-page .job-card .meta-grid div {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  display: flex;
+  align-items: baseline;
   gap: var(--space-1);
+}
+
+.home-page .job-card .meta-grid dt {
+  margin-bottom: 0;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.home-page .job-card .meta-grid dd {
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .home-page .job-card__progress {
