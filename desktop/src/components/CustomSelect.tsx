@@ -74,7 +74,8 @@ export function CustomSelect({
   const justSelectedRef = useRef(false);
 
   const selectedOption = options.find((o) => o.value === value);
-  const displayLabel = selectedOption?.label || String(value);
+  const fullLabel = selectedOption?.label || String(value);
+  const displayLabel = fullLabel.split('·')[0].trim();
 
   // Close on outside click
   useEffect(() => {

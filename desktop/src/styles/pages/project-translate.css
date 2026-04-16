@@ -4,6 +4,21 @@
   min-height: 100%;
 }
 
+.form-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.form-row .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.form-row .form-actions {
+  flex-shrink: 0;
+}
+
 /* ── Project Translate Page ── */
 
 .project-translate-page__header {

@@ -548,64 +548,66 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
         <div className="project-translate-page__sidebar">
           <Panel title="翻译控制">
             <div className="form-stack">
-              <label className="field">
-                <span>翻译模板</span>
-                <CustomSelect
-                  disabled={submitting || stopping || isCurrentProjectActive || translators.length === 0}
-                  onChange={(event) => {
-                    const nextTranslator = event.target.value;
-                    setSelectedTranslator(nextTranslator);
-                    if (projectDir) {
-                      setSelectedTranslatorTemplate(projectDir, nextTranslator);
-                    }
-                  }}
-                  value={selectedTranslator}
-                >
-                  {translators.length === 0 ? <option value="">暂无可用模板</option> : null}
-                  {translators.map((item) => (
-                    <option key={item.name} value={item.name}>
-                      {item.name} · {item.description}
-                    </option>
-                  ))}
-                </CustomSelect>
-              </label>
-
-              {submitError ? <InlineFeedback tone="error" title="启动翻译失败" description={submitError} /> : null}
-
-              <div className={`form-actions${launchPhase !== 'idle' ? ` project-translate-page__launch-${launchPhase}` : ''}`}>
-                <div className="project-translate-page__launch-wrapper" ref={launchButtonRef}>
-                  {ripples.map((r) => (
-                    <span
-                      key={r.id}
-                      className="project-translate-page__launch-ripple"
-                      style={{
-                        left: r.x - r.size / 2,
-                        top: r.y - r.size / 2,
-                        width: r.size,
-                        height: r.size }}
-                    />
-                  ))}
-                  {particles.map((p) => (
-                    <span
-                      key={p.id}
-                      className="project-translate-page__launch-particle"
-                      style={{
-                        left: `${p.x}%`,
-                        top: `${p.y}%`,
-                        background: p.color,
-                        '--launch-particle-x': `${p.dx}px`,
-                        '--launch-particle-y': `${p.dy}px` } as React.CSSProperties}
-                    />
-                  ))}
-                  <Button
-                    className={primaryActionClassName}
-                    disabled={primaryActionDisabled}
-                    onClick={handlePrimaryAction}
+              <div className="form-row">
+                <label className="field">
+                  <span>翻译模板</span>
+                  <CustomSelect
+                    disabled={submitting || stopping || isCurrentProjectActive || translators.length === 0}
+                    onChange={(event) => {
+                      const nextTranslator = event.target.value;
+                      setSelectedTranslator(nextTranslator);
+                      if (projectDir) {
+                        setSelectedTranslatorTemplate(projectDir, nextTranslator);
+                      }
+                    }}
+                    value={selectedTranslator}
                   >
-                    {primaryActionLabel}
-                  </Button>
+                    {translators.length === 0 ? <option value="">暂无可用模板</option> : null}
+                    {translators.map((item) => (
+                      <option key={item.name} value={item.name}>
+                        {item.name} · {item.description}
+                      </option>
+                    ))}
+                  </CustomSelect>
+                </label>
+
+                <div className={`form-actions${launchPhase !== 'idle' ? ` project-translate-page__launch-${launchPhase}` : ''}`}>
+                  <div className="project-translate-page__launch-wrapper" ref={launchButtonRef}>
+                    {ripples.map((r) => (
+                      <span
+                        key={r.id}
+                        className="project-translate-page__launch-ripple"
+                        style={{
+                          left: r.x - r.size / 2,
+                          top: r.y - r.size / 2,
+                          width: r.size,
+                          height: r.size }}
+                      />
+                    ))}
+                    {particles.map((p) => (
+                      <span
+                        key={p.id}
+                        className="project-translate-page__launch-particle"
+                        style={{
+                          left: `${p.x}%`,
+                          top: `${p.y}%`,
+                          background: p.color,
+                          '--launch-particle-x': `${p.dx}px`,
+                          '--launch-particle-y': `${p.dy}px` } as React.CSSProperties}
+                      />
+                    ))}
+                    <Button
+                      className={primaryActionClassName}
+                      disabled={primaryActionDisabled}
+                      onClick={handlePrimaryAction}
+                    >
+                      {primaryActionLabel}
+                    </Button>
+                  </div>
                 </div>
               </div>
+
+              {submitError ? <InlineFeedback tone="error" title="启动翻译失败" description={submitError} /> : null}
 
               <div className={`runtime-summary-strip runtime-summary-strip--sidebar${shouldPollRuntime ? ' runtime-summary-strip--live' : ''}${stripBooting ? ' project-translate-page__strip-booting' : ''}${barSurging ? ' project-translate-page__bar-surge' : ''}`}>
                 <div className="runtime-summary-strip__topline">
