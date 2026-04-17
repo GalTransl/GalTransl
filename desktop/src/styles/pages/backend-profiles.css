@@ -2,9 +2,13 @@
 /* ── Backend Profiles Page ── */
 
 .backend-profiles-page {
+  display: flex;
+  flex-direction: column;
   max-width: 960px;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
   margin: 0 auto;
-  padding: var(--space-6);
 }
 
 .backend-profiles-page__header {
@@ -27,12 +31,118 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
+  flex: 1;
+  min-height: 0;
+}
+
+/* List panel: adaptive frame, list scrolls inside */
+.backend-profiles-page__list-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  box-shadow: none;
+}
+
+.backend-profiles-page__list-panel > .panel__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .profile-list {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+/* ── New-profile dialog ── */
+
+.backend-profiles-page__dialog-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: rgba(16, 24, 40, 0.35);
+  backdrop-filter: blur(4px);
+  z-index: 50;
+  animation: bpDialogFadeIn 160ms var(--ease-default, ease-out);
+}
+
+.backend-profiles-page__dialog {
+  width: 100%;
+  max-width: 420px;
+  max-height: 100%;
+  padding: var(--space-6);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+  box-shadow: 0 20px 50px rgba(16, 24, 40, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+  animation: bpDialogPopIn 180ms var(--ease-default, ease-out);
+}
+
+.backend-profiles-page__dialog--wide {
+  max-width: 720px;
+}
+
+.backend-profiles-page__dialog-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.backend-profiles-page__dialog-subtitle {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.backend-profiles-page__dialog-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.backend-profiles-page__dialog-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.backend-profiles-page__dialog .form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+@keyframes bpDialogFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes bpDialogPopIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backend-profiles-page__dialog-overlay,
+  .backend-profiles-page__dialog {
+    animation: none;
+  }
 }
 
 .profile-card {

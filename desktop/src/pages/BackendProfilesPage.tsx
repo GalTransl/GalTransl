@@ -72,9 +72,13 @@ export function BackendProfilesPage() {
   const [editingName, setEditingName] = useState('');
   const [editingConfig, setEditingConfig] = useState<Record<string, unknown>>(DEFAULT_BACKEND_CONFIG);
   const [isEditing, setIsEditing] = useState(false);
-  const [isNew, setIsNew] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // New-profile dialog state
+  const [showNewDialog, setShowNewDialog] = useState(false);
+  const [newProfileName, setNewProfileName] = useState('');
+  const [creating, setCreating] = useState(false);
 
   const loadProfiles = useCallback(async () => {
     setLoading(true);
@@ -96,18 +100,51 @@ export function BackendProfilesPage() {
     void loadProfiles();
   }, [loadProfiles]);
 
-  const handleNew = useCallback(() => {
-    setIsEditing(true);
-    setIsNew(true);
-    setEditingName('');
-    setEditingConfig(JSON.parse(JSON.stringify(DEFAULT_BACKEND_CONFIG)));
-    setSaveSuccess(false);
+  const openNewDialog = useCallback(() => {
+    setNewProfileName('');
+    setShowNewDialog(true);
     setError(null);
+    setSaveSuccess(false);
   }, []);
+
+  const closeNewDialog = useCallback(() => {
+    if (creating) return;
+    setShowNewDialog(false);
+    setNewProfileName('');
+  }, [creating]);
+
+  const handleCreate = useCallback(async () => {
+    const name = newProfileName.trim();
+    if (!name) {
+      setError('配置名称不能为空');
+      return;
+    }
+    if (profiles.some((p) => p.name === name)) {
+      setError(`配置「${name}」已存在`);
+      return;
+    }
+    setCreating(true);
+    setError(null);
+    try {
+      const newConfig = JSON.parse(JSON.stringify(DEFAULT_BACKEND_CONFIG));
+      await createBackendProfile(name, newConfig);
+      setSaveSuccess(true);
+      setShowNewDialog(false);
+      setNewProfileName('');
+      await loadProfiles();
+      // Immediately open the edit dialog for the new profile
+      setEditingName(name);
+      setEditingConfig(newConfig);
+      setIsEditing(true);
+    } catch (err) {
+      setError(normalizeError(err, '创建配置失败'));
+    } finally {
+      setCreating(false);
+    }
+  }, [newProfileName, profiles, loadProfiles]);
 
   const handleEdit = useCallback((entry: ProfileEntry) => {
     setIsEditing(true);
-    setIsNew(false);
     setEditingName(entry.name);
     setEditingConfig(JSON.parse(JSON.stringify(entry.config)));
     setSaveSuccess(false);
@@ -116,7 +153,6 @@ export function BackendProfilesPage() {
 
   const handleCancel = useCallback(() => {
     setIsEditing(false);
-    setIsNew(false);
     setEditingName('');
     setEditingConfig(DEFAULT_BACKEND_CONFIG);
     setSaveSuccess(false);
@@ -136,7 +172,6 @@ export function BackendProfilesPage() {
       await createBackendProfile(name, editingConfig);
       setSaveSuccess(true);
       setIsEditing(false);
-      setIsNew(false);
       void loadProfiles();
     } catch (err) {
       setError(normalizeError(err, '保存配置失败'));
@@ -174,13 +209,22 @@ export function BackendProfilesPage() {
       />
 
       <div className="backend-profiles-page__content">
-        <Panel title="配置列表" description="已创建的全局翻译后端配置。">
+        <Panel
+          className="backend-profiles-page__list-panel"
+          title="配置列表"
+          description="已创建的全局翻译后端配置。"
+          actions={(
+            <Button onClick={openNewDialog}>
+              + 新建配置
+            </Button>
+          )}
+        >
           {loading ? (
             <LoadingState title="加载配置列表中…" description="正在读取全局翻译后端配置。" />
           ) : profiles.length === 0 ? (
             <EmptyState
               title="暂无配置"
-              description="点击下方「新建配置」按钮创建一个翻译后端配置。"
+              description="点击右上角「新建配置」按钮创建一个翻译后端配置。"
             />
           ) : (
             <div className="profile-list">
@@ -239,60 +283,116 @@ export function BackendProfilesPage() {
               })}
             </div>
           )}
-
-          <div className="form-actions" style={{ marginTop: '16px' }}>
-            <Button onClick={handleNew} disabled={isEditing}>
-              + 新建配置
-            </Button>
-          </div>
         </Panel>
 
-        {isEditing && (
-          <Panel
-            title={isNew ? '新建配置' : `编辑配置 - ${editingName}`}
-            description="配置翻译后端参数，与项目配置中的翻译后端设置一致。"
+      </div>
+
+      {isEditing && (
+        <div
+          className="backend-profiles-page__dialog-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-profile-dialog-title"
+          onClick={() => { if (!saving) handleCancel(); }}
+        >
+          <div
+            className="backend-profiles-page__dialog backend-profiles-page__dialog--wide"
+            onClick={(e) => e.stopPropagation()}
           >
-            <div className="config-form">
-              <label className="field">
-                <span>配置名称</span>
-                <input
-                  type="text"
-                  value={editingName}
-                  onChange={(e) => setEditingName(e.target.value)}
-                  placeholder="例如：gpt5"
-                  disabled={!isNew}
+            <header className="backend-profiles-page__dialog-header">
+              <h3
+                id="edit-profile-dialog-title"
+                className="backend-profiles-page__dialog-title"
+              >
+                编辑配置 - {editingName}
+              </h3>
+              <p className="backend-profiles-page__dialog-subtitle">
+                配置翻译后端参数，与项目配置中的翻译后端设置一致。
+              </p>
+            </header>
+
+            <div className="backend-profiles-page__dialog-body">
+              <div className="config-form">
+                <BackendConfigEditor
+                  config={editingConfig}
+                  onChange={setEditingConfig}
                 />
-                <span className="field__hint">配置名称创建后不可修改</span>
-              </label>
 
-              <BackendConfigEditor
-                config={editingConfig}
-                onChange={setEditingConfig}
-              />
-
-              <ProxyConfigEditor
-                proxyConfig={(editingConfig.proxy as Record<string, unknown>) || {}}
-                onChange={(newProxy) => {
-                  setEditingConfig((prev) => ({ ...prev, proxy: newProxy }));
-                  setSaveSuccess(false);
-                }}
-              />
+                <ProxyConfigEditor
+                  proxyConfig={(editingConfig.proxy as Record<string, unknown>) || {}}
+                  onChange={(newProxy) => {
+                    setEditingConfig((prev) => ({ ...prev, proxy: newProxy }));
+                    setSaveSuccess(false);
+                  }}
+                />
+              </div>
+              {error && <InlineFeedback tone="error" description={error} />}
             </div>
 
-            <div className="form-actions" style={{ marginTop: '16px' }}>
+            <div className="form-actions">
+              <Button variant="secondary" onClick={handleCancel} disabled={saving}>
+                取消
+              </Button>
               <Button
                 onClick={() => void handleSave()}
                 disabled={saving || !editingName.trim()}
               >
                 {saving ? '保存中…' : '保存配置'}
               </Button>
-              <Button variant="secondary" onClick={handleCancel}>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showNewDialog && (
+        <div
+          className="backend-profiles-page__dialog-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="new-profile-dialog-title"
+          onClick={closeNewDialog}
+        >
+          <div
+            className="backend-profiles-page__dialog"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3
+              id="new-profile-dialog-title"
+              className="backend-profiles-page__dialog-title"
+            >
+              新建后端配置
+            </h3>
+            <label className="field">
+              <span>配置名称</span>
+              <input
+                type="text"
+                value={newProfileName}
+                onChange={(e) => setNewProfileName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); void handleCreate(); }
+                  else if (e.key === 'Escape') { e.preventDefault(); closeNewDialog(); }
+                }}
+                placeholder="例如：gpt5"
+                autoFocus
+                disabled={creating}
+              />
+              <span className="field__hint">配置名称创建后不可修改，可在列表中点击「编辑」填写具体参数。</span>
+            </label>
+            {error && <InlineFeedback tone="error" description={error} />}
+            <div className="form-actions">
+              <Button
+                onClick={() => void handleCreate()}
+                disabled={creating || !newProfileName.trim()}
+              >
+                {creating ? '创建中…' : '创建'}
+              </Button>
+              <Button variant="secondary" onClick={closeNewDialog} disabled={creating}>
                 取消
               </Button>
             </div>
-          </Panel>
-        )}
-      </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
