@@ -735,9 +735,18 @@ export async function deleteBackendProfile(name: string) {
 const BACKEND_PROFILE_KEY = 'galtransl-backend-profile';
 const DEFAULT_BACKEND_PROFILE_KEY = 'galtransl-default-backend-profile';
 const TRANSLATOR_TEMPLATE_KEY = 'galtransl-project-translator-template';
+const HOME_HISTORY_LIMIT_KEY = 'galtransl-home-history-limit';
+const HOME_JOB_LIMIT_KEY = 'galtransl-home-job-limit';
+
+export const HOME_HISTORY_LIMIT_DEFAULT = 20;
+export const HOME_JOB_LIMIT_DEFAULT = 20;
+export const HOME_LIST_LIMIT_MIN = 1;
+export const HOME_LIST_LIMIT_MAX = 200;
 
 /** Custom event dispatched when the global default backend profile changes. */
 export const DEFAULT_BACKEND_PROFILE_CHANGE_EVENT = 'galtransl:default-backend-profile-change';
+export const HOME_HISTORY_LIMIT_CHANGE_EVENT = 'galtransl:home-history-limit-change';
+export const HOME_JOB_LIMIT_CHANGE_EVENT = 'galtransl:home-job-limit-change';
 
 /** Get the global default backend profile name. */
 export function getDefaultBackendProfile(): string {
@@ -851,6 +860,62 @@ export function setSelectedTranslatorTemplate(projectDir: string, translatorName
   } catch {
     // ignore storage errors
   }
+}
+
+function normalizeHomeListLimit(value: unknown, fallback: number): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+
+  const integer = Math.trunc(numeric);
+  if (integer < HOME_LIST_LIMIT_MIN) {
+    return HOME_LIST_LIMIT_MIN;
+  }
+  if (integer > HOME_LIST_LIMIT_MAX) {
+    return HOME_LIST_LIMIT_MAX;
+  }
+  return integer;
+}
+
+export function getHomeHistoryRetentionLimit(): number {
+  try {
+    const raw = localStorage.getItem(HOME_HISTORY_LIMIT_KEY);
+    return normalizeHomeListLimit(raw, HOME_HISTORY_LIMIT_DEFAULT);
+  } catch {
+    return HOME_HISTORY_LIMIT_DEFAULT;
+  }
+}
+
+export function setHomeHistoryRetentionLimit(limit: number): number {
+  const normalized = normalizeHomeListLimit(limit, HOME_HISTORY_LIMIT_DEFAULT);
+  try {
+    localStorage.setItem(HOME_HISTORY_LIMIT_KEY, String(normalized));
+    window.dispatchEvent(new CustomEvent(HOME_HISTORY_LIMIT_CHANGE_EVENT, { detail: normalized }));
+  } catch {
+    // ignore storage errors
+  }
+  return normalized;
+}
+
+export function getHomeJobRetentionLimit(): number {
+  try {
+    const raw = localStorage.getItem(HOME_JOB_LIMIT_KEY);
+    return normalizeHomeListLimit(raw, HOME_JOB_LIMIT_DEFAULT);
+  } catch {
+    return HOME_JOB_LIMIT_DEFAULT;
+  }
+}
+
+export function setHomeJobRetentionLimit(limit: number): number {
+  const normalized = normalizeHomeListLimit(limit, HOME_JOB_LIMIT_DEFAULT);
+  try {
+    localStorage.setItem(HOME_JOB_LIMIT_KEY, String(normalized));
+    window.dispatchEvent(new CustomEvent(HOME_JOB_LIMIT_CHANGE_EVENT, { detail: normalized }));
+  } catch {
+    // ignore storage errors
+  }
+  return normalized;
 }
 
 // ---- Internal ----

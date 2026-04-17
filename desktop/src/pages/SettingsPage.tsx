@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { ConnectionStatusCard } from '../features/connection/ConnectionStatusCard';
-import { InlineFeedback } from '../components/page-state';
 import { EmptyState, ErrorState, LoadingState } from '../components/page-state';
 import { useConnection } from '../features/connection/ConnectionContext';
-import { fetchAppSettings, updateAppSettings, type PluginInfo, fetchPlugins } from '../lib/api';
+import {
+  type PluginInfo,
+  fetchPlugins,
+  getHomeHistoryRetentionLimit,
+  getHomeJobRetentionLimit,
+  HOME_LIST_LIMIT_MAX,
+  HOME_LIST_LIMIT_MIN,
+  setHomeHistoryRetentionLimit,
+  setHomeJobRetentionLimit,
+} from '../lib/api';
 import { normalizeError } from '../lib/errors';
 
 
@@ -124,51 +132,18 @@ export function SettingsPage() {
     loadInitialData,
     translators } = useConnection();
 
-  const [printTranslationLogInTerminal, setPrintTranslationLogInTerminal] = useState(true);
-  const [loadingAppSettings, setLoadingAppSettings] = useState(true);
-  const [savingAppSettings, setSavingAppSettings] = useState(false);
-  const [appSettingsError, setAppSettingsError] = useState<string | null>(null);
+  const [homeHistoryLimitInput, setHomeHistoryLimitInput] = useState(() => String(getHomeHistoryRetentionLimit()));
+  const [homeJobLimitInput, setHomeJobLimitInput] = useState(() => String(getHomeJobRetentionLimit()));
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoadingAppSettings(true);
-    setAppSettingsError(null);
-    fetchAppSettings()
-      .then((data) => {
-        if (!cancelled) {
-          setPrintTranslationLogInTerminal(Boolean(data.printTranslationLogInTerminal));
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setAppSettingsError(normalizeError(error, '加载程序设置失败'));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoadingAppSettings(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
+  const applyHomeHistoryLimit = useCallback((rawValue: string) => {
+    const next = setHomeHistoryRetentionLimit(rawValue.trim() === '' ? Number.NaN : Number(rawValue));
+    setHomeHistoryLimitInput(String(next));
   }, []);
 
-  const handleToggleTerminalLogs = useCallback(async (nextValue: boolean) => {
-    const previousValue = printTranslationLogInTerminal;
-    setPrintTranslationLogInTerminal(nextValue);
-    setSavingAppSettings(true);
-    setAppSettingsError(null);
-    try {
-      const saved = await updateAppSettings({ printTranslationLogInTerminal: nextValue });
-      setPrintTranslationLogInTerminal(Boolean(saved.printTranslationLogInTerminal));
-    } catch (error) {
-      setPrintTranslationLogInTerminal(previousValue);
-      setAppSettingsError(normalizeError(error, '保存程序设置失败'));
-    } finally {
-      setSavingAppSettings(false);
-    }
-  }, [printTranslationLogInTerminal]);
+  const applyHomeJobLimit = useCallback((rawValue: string) => {
+    const next = setHomeJobRetentionLimit(rawValue.trim() === '' ? Number.NaN : Number(rawValue));
+    setHomeJobLimitInput(String(next));
+  }, []);
 
   return (
     <div className="settings-page">
@@ -178,32 +153,60 @@ export function SettingsPage() {
         <section className="panel">
           <header className="panel__header">
             <div>
-              <h2>翻译输出</h2>
-              <p>控制翻译运行时终端输出行为。关闭后仅保留 except 异常信息。</p>
+              <h2>首页记忆保留</h2>
+              <p>控制首页历史项目与翻译任务列表保留条数。</p>
             </div>
           </header>
 
-          <label className="settings-toggle-row">
-            <span className="settings-toggle-row__label">终端打印翻译日志</span>
-            <div className="settings-toggle-row__control">
-              <label className="toggle-switch">
-                <input
-                  type="checkbox"
-                  checked={printTranslationLogInTerminal}
-                  disabled={loadingAppSettings || savingAppSettings}
-                  onChange={(event) => {
-                    void handleToggleTerminalLogs(event.target.checked);
-                  }}
-                />
-                <span className="toggle-switch__slider" />
-              </label>
+          <label className="settings-number-row">
+            <span className="settings-number-row__label">历史项目保留条数</span>
+            <div className="settings-number-row__control">
+              <input
+                type="number"
+                min={HOME_LIST_LIMIT_MIN}
+                max={HOME_LIST_LIMIT_MAX}
+                value={homeHistoryLimitInput}
+                onChange={(event) => {
+                  setHomeHistoryLimitInput(event.target.value);
+                }}
+                onBlur={() => {
+                  applyHomeHistoryLimit(homeHistoryLimitInput);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.currentTarget.blur();
+                  }
+                }}
+              />
+            </div>
+          </label>
+
+          <label className="settings-number-row">
+            <span className="settings-number-row__label">翻译任务保留条数</span>
+            <div className="settings-number-row__control">
+              <input
+                type="number"
+                min={HOME_LIST_LIMIT_MIN}
+                max={HOME_LIST_LIMIT_MAX}
+                value={homeJobLimitInput}
+                onChange={(event) => {
+                  setHomeJobLimitInput(event.target.value);
+                }}
+                onBlur={() => {
+                  applyHomeJobLimit(homeJobLimitInput);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.currentTarget.blur();
+                  }
+                }}
+              />
             </div>
           </label>
 
           <div className="settings-toggle-row__desc">
-            {loadingAppSettings ? '正在加载程序设置…' : '关闭后将静默进度条、翻译结果及普通错误输出，仅保留 except 异常信息。'}
+            取值范围 {HOME_LIST_LIMIT_MIN}-{HOME_LIST_LIMIT_MAX}。超出范围会自动修正。
           </div>
-          {appSettingsError ? <InlineFeedback tone="error" title="程序设置异常" description={appSettingsError} /> : null}
         </section>
 
         <ConnectionStatusCard

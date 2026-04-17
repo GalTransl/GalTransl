@@ -4,13 +4,23 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
 import { InlineFeedback } from '../components/page-state';
-import { encodeProjectDir, fetchJobs, fetchProjectRuntime, stopProjectTranslation, type Job } from '../lib/api';
+import {
+  encodeProjectDir,
+  fetchJobs,
+  fetchProjectRuntime,
+  getHomeHistoryRetentionLimit,
+  getHomeJobRetentionLimit,
+  HOME_HISTORY_LIMIT_CHANGE_EVENT,
+  HOME_JOB_LIMIT_CHANGE_EVENT,
+  stopProjectTranslation,
+  type Job,
+} from '../lib/api';
 import { formatTimestamp } from '../lib/format';
 import { normalizeError } from '../lib/errors';
 import desktopPackage from '../../package.json';
 
 const HISTORY_KEY = 'galtransl-project-history';
-const MAX_HISTORY = 20;
+const JOB_MEMORY_KEY = 'galtransl-home-jobs-memory';
 const PROJECT_HOMEPAGE = 'https://github.com/XD2333/GalTransl';
 const APP_VERSION = desktopPackage.version ? `v${desktopPackage.version}` : 'dev';
 const MIN_REFRESH_SPIN_MS = 420;
@@ -22,10 +32,11 @@ export type ProjectHistoryEntry = {
   lastOpened: string;
 };
 
-function loadHistory(): ProjectHistoryEntry[] {
+function loadHistory(limit = getHomeHistoryRetentionLimit()): ProjectHistoryEntry[] {
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? (JSON.parse(raw) as ProjectHistoryEntry[]) : [];
+    return parsed.slice(0, limit);
   } catch {
     return [];
   }
@@ -33,6 +44,91 @@ function loadHistory(): ProjectHistoryEntry[] {
 
 function saveHistory(entries: ProjectHistoryEntry[]) {
   localStorage.setItem(HISTORY_KEY, JSON.stringify(entries));
+}
+
+function getJobSortTimestamp(job: Job): number {
+  const timestamp = Date.parse(job.finished_at || job.started_at || job.created_at || '');
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function normalizeRememberedJob(value: unknown): Job | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const raw = value as Partial<Record<keyof Job, unknown>>;
+  const status = raw.status;
+  if (status !== 'pending' && status !== 'running' && status !== 'completed' && status !== 'failed' && status !== 'cancelled') {
+    return null;
+  }
+
+  if (typeof raw.job_id !== 'string' || typeof raw.project_dir !== 'string') {
+    return null;
+  }
+
+  return {
+    config_file_name: typeof raw.config_file_name === 'string' ? raw.config_file_name : '',
+    created_at: typeof raw.created_at === 'string' ? raw.created_at : '',
+    error: typeof raw.error === 'string' ? raw.error : '',
+    finished_at: typeof raw.finished_at === 'string' ? raw.finished_at : '',
+    job_id: raw.job_id,
+    project_dir: raw.project_dir,
+    started_at: typeof raw.started_at === 'string' ? raw.started_at : '',
+    status,
+    success: typeof raw.success === 'boolean' ? raw.success : false,
+    translator: typeof raw.translator === 'string' ? raw.translator : '',
+  };
+}
+
+function sortAndLimitJobs(jobs: Job[], limit: number): Job[] {
+  return jobs
+    .sort((a, b) => getJobSortTimestamp(b) - getJobSortTimestamp(a))
+    .slice(0, limit);
+}
+
+function loadRememberedJobs(limit = getHomeJobRetentionLimit()): Job[] {
+  try {
+    const raw = localStorage.getItem(JOB_MEMORY_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return sortAndLimitJobs(
+      parsed.map(normalizeRememberedJob).filter((job): job is Job => job !== null),
+      limit,
+    );
+  } catch {
+    return [];
+  }
+}
+
+function saveRememberedJobs(jobs: Job[], limit: number) {
+  try {
+    localStorage.setItem(JOB_MEMORY_KEY, JSON.stringify(sortAndLimitJobs([...jobs], limit)));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function mergeJobsWithMemory(existing: Job[], incoming: Job[], limit: number): Job[] {
+  const merged = new Map<string, Job>();
+
+  incoming.forEach((job) => {
+    merged.set(job.job_id, job);
+  });
+
+  existing.forEach((job) => {
+    if (!merged.has(job.job_id)) {
+      merged.set(job.job_id, job);
+    }
+  });
+
+  return sortAndLimitJobs(Array.from(merged.values()), limit);
 }
 
 export function addProjectToHistory(projectDir: string, configFileName: string) {
@@ -43,7 +139,7 @@ export function addProjectToHistory(projectDir: string, configFileName: string) 
     configFileName,
     lastOpened: new Date().toISOString(),
   });
-  saveHistory(withoutDuplicate.slice(0, MAX_HISTORY));
+  saveHistory(withoutDuplicate.slice(0, getHomeHistoryRetentionLimit()));
 }
 
 export function removeProjectFromHistory(projectDir: string) {
@@ -57,8 +153,10 @@ type HomePageProps = {
 
 export function HomePage({ onOpenProject }: HomePageProps) {
   const navigate = useNavigate();
+  const [historyLimit, setHistoryLimit] = useState(() => getHomeHistoryRetentionLimit());
+  const [jobMemoryLimit, setJobMemoryLimit] = useState(() => getHomeJobRetentionLimit());
   const [history, setHistory] = useState<ProjectHistoryEntry[]>([]);
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobs, setJobs] = useState<Job[]>(() => loadRememberedJobs(getHomeJobRetentionLimit()));
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [refreshingJobs, setRefreshingJobs] = useState(false);
   const [stoppingJobId, setStoppingJobId] = useState<string | null>(null);
@@ -77,10 +175,31 @@ export function HomePage({ onOpenProject }: HomePageProps) {
   >({});
 
   useEffect(() => {
-    setHistory(loadHistory());
+    setHistory(loadHistory(historyLimit));
     // Stagger entrance animation
     const t = requestAnimationFrame(() => setMounted(true));
     return () => cancelAnimationFrame(t);
+  }, [historyLimit]);
+
+  useEffect(() => {
+    const handleHistoryLimitChanged = () => {
+      const nextLimit = getHomeHistoryRetentionLimit();
+      setHistoryLimit(nextLimit);
+      setHistory(loadHistory(nextLimit));
+    };
+
+    const handleJobLimitChanged = () => {
+      const nextLimit = getHomeJobRetentionLimit();
+      setJobMemoryLimit(nextLimit);
+      setJobs((currentJobs) => sortAndLimitJobs([...currentJobs], nextLimit));
+    };
+
+    window.addEventListener(HOME_HISTORY_LIMIT_CHANGE_EVENT, handleHistoryLimitChanged as EventListener);
+    window.addEventListener(HOME_JOB_LIMIT_CHANGE_EVENT, handleJobLimitChanged as EventListener);
+    return () => {
+      window.removeEventListener(HOME_HISTORY_LIMIT_CHANGE_EVENT, handleHistoryLimitChanged as EventListener);
+      window.removeEventListener(HOME_JOB_LIMIT_CHANGE_EVENT, handleJobLimitChanged as EventListener);
+    };
   }, []);
 
   useEffect(() => {
@@ -99,12 +218,16 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     };
   }, []);
 
+  useEffect(() => {
+    saveRememberedJobs(jobs, jobMemoryLimit);
+  }, [jobMemoryLimit, jobs]);
+
   const refreshJobs = useCallback(async (silent = false) => {
     const startedAt = Date.now();
     if (!silent) setRefreshingJobs(true);
     try {
       const nextJobs = await fetchJobs();
-      setJobs(nextJobs);
+      setJobs((currentJobs) => mergeJobsWithMemory(currentJobs, nextJobs, jobMemoryLimit));
       setJobsError(null);
 
       if (!shouldLoadJobProgress) {
@@ -160,7 +283,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
         setRefreshingJobs(false);
       }
     }
-  }, [shouldLoadJobProgress]);
+  }, [jobMemoryLimit, shouldLoadJobProgress]);
 
   useEffect(() => {
     void refreshJobs();
@@ -248,8 +371,8 @@ export function HomePage({ onOpenProject }: HomePageProps) {
   const handleRemoveHistory = useCallback((projectDirToRemove: string, event: React.MouseEvent) => {
     event.stopPropagation();
     removeProjectFromHistory(projectDirToRemove);
-    setHistory(loadHistory());
-  }, []);
+    setHistory(loadHistory(historyLimit));
+  }, [historyLimit]);
 
   const activeJobsCount = useMemo(
     () => jobs.filter((job) => job.status === 'pending' || job.status === 'running').length,
@@ -311,7 +434,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
         <section className="home-open">
           <div className="home-open__header">
             <h2>打开项目</h2>
-            <p>点击打开项目后选择配置文件，立即进入翻译。</p>
+            <p>打开或新建翻译项目</p>
           </div>
           <div className="home-open__form">
             <div className="home-open__actions">
@@ -330,7 +453,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
           <div className="home-history__header">
             <div>
               <h2>历史项目</h2>
-              <p>最近使用的项目记录</p>
+              <p>最近打开的项目</p>
             </div>
             <span className="home-history__count">{history.length}</span>
           </div>
@@ -386,7 +509,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
           <div className="home-jobs__header">
             <div>
               <h2>翻译任务</h2>
-              <p>实时进度与状态汇总</p>
+              <p>进度与状态汇总</p>
             </div>
             <button
               type="button"
