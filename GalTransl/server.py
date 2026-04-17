@@ -480,6 +480,8 @@ class RuntimeProgressCache:
                     else name
                 )
                 display_name = cache_file_display_map.get(canonical_name, canonical_name)
+                if file_totals and display_name not in file_totals:
+                    continue
                 if display_name not in file_progress_map:
                     file_progress_map[display_name] = {
                         "filename": display_name,
@@ -748,9 +750,11 @@ def _read_dict_file_payload(file_path: str) -> dict[str, Any]:
             "path": file_path,
             "lines": [],
             "count": 0,
+            "mtime": None,
             "error": "file not found",
         }
     try:
+        mtime = os.path.getmtime(file_path)
         with open(file_path, "r", encoding="utf-8") as f:
             lines = f.read().splitlines()
         return {
@@ -761,12 +765,14 @@ def _read_dict_file_payload(file_path: str) -> dict[str, Any]:
                 for line_item in lines
                 if line_item.strip() and not line_item.startswith("\\\\") and not line_item.startswith("//")
             ]),
+            "mtime": mtime,
         }
     except Exception:
         return {
             "path": file_path,
             "lines": [],
             "count": 0,
+            "mtime": None,
             "error": "failed to read",
         }
 
@@ -797,6 +803,7 @@ def _collect_project_dict_payload(project_dir: str, config_name: str) -> dict[st
                 "path": os.path.join(project_dir, clean),
                 "lines": [],
                 "count": 0,
+                "mtime": None,
                 "error": "invalid dictionary filename",
             }
             continue
@@ -806,6 +813,7 @@ def _collect_project_dict_payload(project_dir: str, config_name: str) -> dict[st
                 "path": file_path,
                 "lines": [],
                 "count": 0,
+                "mtime": None,
                 "error": "dictionary path escapes project directory",
             }
             continue

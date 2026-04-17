@@ -1,18 +1,18 @@
 /* ── Project Cache Page ── */
 
+.project-cache-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
 .cache-sidebar-tab-content {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
   animation: cacheSlideFromLeft 200ms ease;
-}
-
-.cache-layout__main > .panel {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
 }
 
 .project-cache-page__header {
@@ -42,6 +42,9 @@
   grid-template-columns: 240px 1fr;
   gap: var(--space-5);
   align-items: stretch;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .cache-layout__sidebar {
@@ -51,8 +54,7 @@
   padding: var(--space-4);
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 150px);
-  min-height: calc(100vh - 150px);
+  min-height: 0;
 }
 
 .cache-layout__sidebar h3 {
@@ -90,8 +92,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 150px);
-  min-height: calc(100vh - 150px);
+  min-height: 0;
 }
 
 .cache-file-list {

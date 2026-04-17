@@ -91,3 +91,44 @@
 .panel__actions {
   flex-shrink: 0;
 }
+
+/* Default: body is a normal block so existing non-flex panels look unchanged */
+.panel__body {
+  display: contents;
+}
+
+/* When panel is a flex column (adaptive pages), body becomes the scroll region */
+.panel.panel--flex,
+.dict-layout__main .panel,
+.cache-layout__main > .panel,
+.project-config-page__main .panel,
+.name-page > .panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  /* Drop the outset shadow: combined with overflow:hidden + tight ancestors
+     it renders as a sharp-edged band at the bottom. The rounded border alone
+     is enough for the adaptive-layout frame. */
+  box-shadow: none;
+}
+
+/* Dict/cache: children manage their own scroll, body just passes through height */
+.dict-layout__main .panel > .panel__body,
+.cache-layout__main > .panel > .panel__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Config/name: body itself is the scroll region */
+.panel.panel--flex > .panel__body,
+.project-config-page__main .panel > .panel__body,
+.name-page > .panel > .panel__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}

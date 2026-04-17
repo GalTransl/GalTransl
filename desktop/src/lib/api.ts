@@ -227,6 +227,7 @@ export type DictFileContent = {
   path: string;
   lines: string[];
   count: number;
+  mtime?: number | null;
   error?: string;
 };
 

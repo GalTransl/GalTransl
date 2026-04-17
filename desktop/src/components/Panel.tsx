@@ -16,7 +16,7 @@ export function Panel({ actions, children, description, title }: PanelProps) {
         </div>
         {actions ? <div className="panel__actions">{actions}</div> : null}
       </header>
-      {children}
+      <div className="panel__body">{children}</div>
     </section>
   );
 }

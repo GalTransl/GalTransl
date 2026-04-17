@@ -106,6 +106,21 @@ class COpenAITokenPool:
         for token in token_list:
             self.tokens.append((True, token))
 
+    def _raise_if_stop_requested(self) -> None:
+        stop_event = getattr(self.pj_config, "stop_event", None)
+        if stop_event is not None and stop_event.is_set():
+            from GalTransl.Service import JobCancelledError
+
+            raise JobCancelledError()
+
+    async def _interruptible_sleep(self, seconds: float) -> None:
+        remaining = float(seconds)
+        while remaining > 0:
+            self._raise_if_stop_requested()
+            step = min(remaining, 0.5)
+            await asyncio.sleep(step)
+            remaining -= step
+
     async def _isTokenAvailable(
         self, token: COpenAIToken, proxy: CProxy = None
     ) -> Tuple[bool, COpenAIToken]:
@@ -163,6 +178,7 @@ class COpenAITokenPool:
     ) -> Tuple[bool, COpenAIToken]:
         is_available = False
         for retry_count in range(max_retries):
+            self._raise_if_stop_requested()
             is_available, token = await self._isTokenAvailable(token, proxy)
             if is_available:
                 self.bar()
@@ -170,7 +186,7 @@ class COpenAITokenPool:
             else:
                 # wait for some time before retrying, you can add some delay here
                 LOGGER.warning(f"可用性检查失败，正在重试 {retry_count + 1} 次...")
-                await asyncio.sleep(1)
+                await self._interruptible_sleep(1)
 
         # If all retries fail, return the result from the last attempt
         self.bar()
@@ -194,6 +210,7 @@ class COpenAITokenPool:
 
         async def check_one_token(token: COpenAIToken) -> Tuple[bool, COpenAIToken]:
             async with check_semaphore:
+                self._raise_if_stop_requested()
                 return await self._check_token_availability_with_retry(
                     token, proxy if proxy else None
                 )
@@ -207,12 +224,30 @@ class COpenAITokenPool:
             self.bar = bar
             index = 0
             for _, token in self.tokens:
+                self._raise_if_stop_requested()
                 index += 1
                 LOGGER.info(
                     f"Testing key{index}---{token.maskToken()}---{token.model_name}"
                 )
                 tasks.append(asyncio.create_task(check_one_token(token)))
-            result: list[tuple[bool, COpenAIToken]] = await asyncio.gather(*tasks)
+            result: list[tuple[bool, COpenAIToken]] = []
+            pending = set(tasks)
+            try:
+                while pending:
+                    self._raise_if_stop_requested()
+                    done, pending = await asyncio.wait(
+                        pending,
+                        timeout=0.5,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    for done_task in done:
+                        result.append(await done_task)
+            except BaseException:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
 
         # replace list with new one
         newList: list[tuple[bool, COpenAIToken]] = []

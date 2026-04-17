@@ -28,9 +28,19 @@
 }
 
 .button--primary {
-  background: linear-gradient(180deg, var(--color-primary), var(--color-primary-strong));
+  background: linear-gradient(180deg, #5b8ef0, var(--color-primary));
   color: #ffffff;
-  box-shadow: var(--shadow-button);
+  box-shadow: 0 2px 6px rgba(47, 111, 235, 0.16);
+}
+
+.button--primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #6a98f2, #3d78ec);
+  box-shadow: 0 4px 12px rgba(47, 111, 235, 0.22);
+}
+
+.button--primary:active:not(:disabled) {
+  background: linear-gradient(180deg, var(--color-primary), var(--color-primary-strong));
+  box-shadow: 0 1px 3px rgba(47, 111, 235, 0.18);
 }
 
 .button--secondary {

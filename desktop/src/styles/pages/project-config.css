@@ -1,5 +1,12 @@
 /* ── Project Config Page ── */
 
+.project-config-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
 .project-config-page__header {
   margin-bottom: var(--space-6);
 }
@@ -19,15 +26,18 @@
   display: grid;
   grid-template-columns: 200px 1fr;
   gap: var(--space-6);
-  align-items: start;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .project-config-page__sidebar {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  position: sticky;
-  top: var(--space-6);
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .project-config-page__section-btn {
@@ -91,8 +101,24 @@
 }
 
 .project-config-page__main {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
-  overflow-y: auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.project-config-page__main > .section-fade-in {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.project-config-page__main > .section-fade-in > .panel {
+  flex: 1;
+  min-height: 0;
 }
 
 .config-form {

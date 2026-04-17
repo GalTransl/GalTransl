@@ -35,35 +35,121 @@ class GenDic(BaseTranslate):
         self.wokers = config.getKey("workersPerProject")
         self.counter_lock = Lock()
         self.list_lock = Lock()
+        self.progress_lock = Lock()
+        self.progress_display_name = "GenDic 术语提取"
+        self.progress_cache_key = "gendic_progress"
+        self.progress_append_path = ""
         self.init_chatbot(eng_type, config)
         pass
 
-    async def llm_gen_dic(self, text: str, name_list=[]):
+    def _raise_if_stop_requested(self):
+        if self._is_stop_requested(self.pj_config):
+            from GalTransl.Service import JobCancelledError
+
+            raise JobCancelledError()
+
+    def _runtime_project_dir(self) -> str:
+        return getattr(self.pj_config, "runtime_project_dir", self.pj_config.getProjectDir())
+
+    def _update_runtime(self, **kwargs):
+        try:
+            from GalTransl.server import update_runtime_status
+
+            update_runtime_status(self._runtime_project_dir(), **kwargs)
+        except Exception:
+            return
+
+    def _prepare_runtime_progress(self, total_tasks: int):
+        cache_dir = self.pj_config.getCachePath()
+        os.makedirs(cache_dir, exist_ok=True)
+        self.progress_append_path = os.path.join(
+            cache_dir, f"{self.progress_cache_key}.append.jsonl"
+        )
+        try:
+            if os.path.exists(self.progress_append_path):
+                os.remove(self.progress_append_path)
+        except Exception:
+            pass
+
+        self._update_runtime(
+            stage="GenDic 术语提取中",
+            current_file="准备生成任务",
+            workers_active=0,
+            workers_configured=int(self.wokers or 1),
+            file_totals={self.progress_display_name: int(total_tasks)},
+            cache_file_display_map={self.progress_cache_key: self.progress_display_name},
+        )
+
+    def _append_runtime_progress(self, task_index: int, success: bool, message: str = ""):
+        if not self.progress_append_path:
+            return
+        entry = {
+            "__cache_key": f"gendic-task-{int(task_index)}",
+            "pre_dst": "OK" if success else "(Failed)",
+            "problem": "" if success else (message or "GenDic 任务失败"),
+        }
+        line = json.dumps(entry, ensure_ascii=False)
+        with self.progress_lock:
+            with open(self.progress_append_path, "a", encoding="utf-8") as fp:
+                fp.write(line)
+                fp.write("\n")
+
+    def _record_runtime_success(self, index: int, source_preview: str, translation_preview: str):
+        try:
+            from GalTransl.server import record_runtime_success
+
+            record_runtime_success(
+                self._runtime_project_dir(),
+                filename=self.progress_display_name,
+                index=int(index),
+                speaker=None,
+                source_preview=source_preview,
+                translation_preview=translation_preview,
+                trans_by="GenDic",
+            )
+        except Exception:
+            return
+
+    async def llm_gen_dic(self, text: str, name_list=[], task_index: int = 0):
+        self._raise_if_stop_requested()
         hint = "无"
         name_hit = []
         for name in name_list:
+            self._raise_if_stop_requested()
             if name in text:
                 name_hit.append(name)
+
         if name_hit:
             hint = "输入文本中的这些词语是一定要加入术语表的: \n" + "\n".join(name_hit)
 
         prompt = GENDIC_PROMPT.format(input=text, hint=hint)
-        rsp,token = await self.ask_chatbot(
+        rsp, token = await self.ask_chatbot(
             prompt=prompt, system=GENDIC_SYSTEM, temperature=0.6
         )
         if should_print_translation_logs(self.pj_config):
             print(rsp)
         lines = rsp.split("\n")
+        runtime_preview_count = 0
+        runtime_preview_limit = 3
 
         for line in lines:
+            self._raise_if_stop_requested()
             sp = line.split("\t")
             if len(sp) < 3:
                 continue
+
             if "日文" in sp[0]:
                 continue
             src = sp[0]
             dst = sp[1]
             note = sp[2]
+            if runtime_preview_count < runtime_preview_limit:
+                self._record_runtime_success(
+                    index=task_index,
+                    source_preview=src,
+                    translation_preview=f"{dst}｜{note}",
+                )
+                runtime_preview_count += 1
             with self.counter_lock:
                 if src in self.dic_counter:
                     self.dic_counter[src] += 1
@@ -79,6 +165,8 @@ class GenDic(BaseTranslate):
         self,
         json_list: list,
     ) -> bool:
+        self._raise_if_stop_requested()
+        self._update_runtime(stage="GenDic 分词处理中", current_file="准备分词")
 
         with terminal_progress(should_print_translation_logs(self.pj_config), title="载入分词……") as bar:
             # get tmp dir
@@ -110,9 +198,11 @@ class GenDic(BaseTranslate):
             max_len = 512
             tmp_text = ""
             for item in json_list:
+                self._raise_if_stop_requested()
                 if len(tmp_text) > max_len:
                     segment_list.append(tmp_text)
                     tmp_text = ""
+
                 if "name" in item and item["name"] != "":
                     name_set.add(item["name"])
                     tmp_text += item["name"] + item["message"] + "\n"
@@ -124,9 +214,11 @@ class GenDic(BaseTranslate):
             bar.title = "处理分词……"
 
             for item in segment_list:
+                self._raise_if_stop_requested()
                 tmp_words = set()
                 tokens = tokenizer.tokenize(item)
                 for token in tokens:
+                    self._raise_if_stop_requested()
                     surf = token.surface()
                     tag = token.tag(0)
                     if len(surf) <= 1:
@@ -137,9 +229,6 @@ class GenDic(BaseTranslate):
                         if contains_katakana(surf):
                             tmp_words.add(surf)
                             word_counter[surf] += 1
-                    if tag and "固有名詞" in tag:
-                        tmp_words.add(surf)
-                        word_counter[surf] += 1
                 segment_words_list.append(tmp_words)
                 bar()
 
@@ -149,6 +238,7 @@ class GenDic(BaseTranslate):
         }
         segment_words_list_new = []
         for item in segment_words_list:
+            self._raise_if_stop_requested()
             item_new = set()
             for word in item:
                 if word in word_counter:
@@ -158,26 +248,57 @@ class GenDic(BaseTranslate):
         index_list = solve_sentence_selection(segment_words_list_new)
         # 取前100个
         index_list = index_list[:128]
+        self._prepare_runtime_progress(len(index_list))
         LOGGER.info(f"启动{self.wokers}个工作线程，共{len(index_list)}个任务")
         sem = asyncio.Semaphore(self.wokers)
+        completed_tasks = 0
 
         async def process_item_async(idx):
             async with sem:
+                self._raise_if_stop_requested()
                 try:
                     item = segment_list[idx]
-                    await self.llm_gen_dic(item, name_list=list(name_set))
+                    await self.llm_gen_dic(item, name_list=list(name_set), task_index=idx)
+                    return idx, True, ""
+                except asyncio.CancelledError:
+                    raise
                 except Exception as e:
-                    LOGGER.error(f"处理任务时出错: {e}")
+                    from GalTransl.Service import JobCancelledError
 
-        tasks = [process_item_async(idx) for idx in index_list]
+                    if isinstance(e, JobCancelledError):
+                        raise
+                    LOGGER.error(f"处理任务时出错: {e}")
+                    return idx, False, str(e)
+
+        tasks = [asyncio.create_task(process_item_async(idx)) for idx in index_list]
         with terminal_progress(
             should_print_translation_logs(self.pj_config),
             total=len(index_list), title=f"{self.wokers} 线程生成字典中……"
         ) as bar:
-            self.pj_config.bar=bar
-            for f in asyncio.as_completed(tasks):
-                await f
-                bar()
+            self.pj_config.bar = bar
+            self._update_runtime(
+                stage="GenDic 术语提取中",
+                current_file="开始并发生成",
+                workers_active=int(self.wokers or 1),
+            )
+            try:
+                for f in asyncio.as_completed(tasks):
+                    self._raise_if_stop_requested()
+                    idx, ok, error_message = await f
+                    completed_tasks += 1
+                    self._append_runtime_progress(idx, ok, error_message)
+                    self._update_runtime(
+                        stage="GenDic 术语提取中",
+                        current_file=f"已完成 {completed_tasks}/{len(index_list)}",
+                        workers_active=int(self.wokers or 1),
+                    )
+                    bar()
+            except BaseException:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
 
         # 保存到文件
         # 按出现次数排序
@@ -185,8 +306,10 @@ class GenDic(BaseTranslate):
         final_list = []
         # 过滤只出现1次的词语
         for item in self.dic_list:
+            self._raise_if_stop_requested()
             if "NULL" in item[0]:
                 continue
+
             if item[0] in H_WORDS_LIST:
                 continue
             if "（" not in item[0] and "（" in item[1]:
@@ -210,6 +333,7 @@ class GenDic(BaseTranslate):
             for item in final_list:
                 f.write(item[0] + "\t" + item[1] + "\t" + item[2] + "\n")
         LOGGER.info(f"字典生成完成，共{len(final_list)}个词语，保存到{result_path}")
+        self._update_runtime(stage="", current_file="", workers_active=0)
 
         return True
 

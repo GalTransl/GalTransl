@@ -36,6 +36,8 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const namesRef = useRef<NameEntry[]>([]);
 
   // AI translate popover state
   const [showAiPopover, setShowAiPopover] = useState(false);
@@ -104,6 +106,11 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
     return () => { if (pollTimerRef.current) clearTimeout(pollTimerRef.current); };
   }, []);
 
+  // Cleanup auto-save timer on unmount
+  useEffect(() => {
+    return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
+  }, []);
+
   const handleGenerate = useCallback(async () => {
     if (!projectId || !projectDir) return;
     setGenerating(true);
@@ -145,19 +152,47 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
     }
   }, [projectId, projectDir, configFileName]);
 
+  // Keep a ref in sync with names for safe access in async save handlers
+  useEffect(() => {
+    namesRef.current = names;
+  }, [names]);
+
   const handleSave = useCallback(async () => {
     if (!projectId) return;
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    const snapshot = namesRef.current;
     setSaving(true);
     setError(null);
     try {
-      await saveNameTable(projectId, names);
-      setDirty(false);
+      await saveNameTable(projectId, snapshot);
+      // Only clear dirty when no edits happened during the save
+      if (namesRef.current === snapshot) {
+        setDirty(false);
+      }
     } catch (err) {
       setError(normalizeError(err, '保存人名表失败'));
     } finally {
       setSaving(false);
     }
-  }, [projectId, names]);
+  }, [projectId]);
+
+  // Auto-save when dirty: debounce 1s after the last change
+  useEffect(() => {
+    if (!dirty || saving) return;
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      void handleSave();
+    }, 1000);
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+    };
+  }, [dirty, saving, names, handleSave]);
 
   // Open AI translate popover — load profiles & preselect default
   const handleOpenAiPopover = useCallback(() => {
@@ -341,76 +376,86 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
 
   if (loading) return <LoadingState />;
 
-  return (
-    <div className="page name-page">
-      <PageHeader title="人名翻译" description="管理项目的人名替换表，填入中文译名后可用于翻译工作台的 name 字段替换。" />
+  const saveLabel = saving
+    ? '保存中…'
+    : dirty
+      ? '待保存'
+      : '已保存';
 
-      <div className="name-page__toolbar">
-        <div className="name-page__toolbar-left">
-          <Button onClick={handleGenerate} disabled={generating}>
-            {generating ? '提取中...' : '提取人名表'}
-          </Button>
-          <div className="name-page__ai-wrap" ref={aiPopoverRef}>
-            <Button onClick={handleOpenAiPopover} disabled={aiTranslating || names.length === 0}>
-              {aiTranslating ? 'AI翻译中...' : 'AI翻译人名'}
-            </Button>
-            {showAiPopover && (
-              <div className="name-page__ai-popover">
-                <div className="name-page__ai-popover-title">选择翻译后端</div>
-                {aiProfileNames.length === 0 ? (
-                  <div className="name-page__ai-popover-empty">
-                    未找到后端配置，请先在「后端配置」页添加 OpenAI 兼容接口
-                  </div>
-                ) : (
-                  <>
-                    <CustomSelect
-                      className="name-page__ai-popover-select"
-                      value={aiSelectedProfile}
-                      onChange={(e) => setAiSelectedProfile(e.target.value)}
-                    >
-                      {(() => {
-                        const def = getSelectedBackendProfile(projectDir);
-                        const sorted = def && aiProfileNames.includes(def)
-                          ? [def, ...aiProfileNames.filter((n) => n !== def)]
-                          : aiProfileNames;
-                        return sorted.map((name) => {
-                          const model = aiProfileModelMap[name];
-                          const suffix = name === def ? '（默认）' : '';
-                          const label = model ? `${name} - ${model}${suffix}` : `${name}${suffix}`;
-                          return <option key={name} value={name}>{label}</option>;
-                        });
-                      })()}
-                    </CustomSelect>
-                    <Button
-                      variant="primary"
-                      onClick={handleAiTranslate}
-                      disabled={!aiSelectedProfile}
-                    >
-                      开始翻译
-                    </Button>
-                  </>
-                )}
+  const panelActions = (
+    <div className="name-page__panel-actions">
+      <Button onClick={handleGenerate} disabled={generating}>
+        {generating ? '提取中...' : '提取人名表'}
+      </Button>
+      <div className="name-page__ai-wrap" ref={aiPopoverRef}>
+        <Button onClick={handleOpenAiPopover} disabled={aiTranslating || names.length === 0}>
+          {aiTranslating ? 'AI翻译中...' : 'AI翻译人名'}
+        </Button>
+        {showAiPopover && (
+          <div className="name-page__ai-popover">
+            <div className="name-page__ai-popover-title">选择翻译后端</div>
+            {aiProfileNames.length === 0 ? (
+              <div className="name-page__ai-popover-empty">
+                未找到后端配置，请先在「后端配置」页添加 OpenAI 兼容接口
               </div>
+            ) : (
+              <>
+                <CustomSelect
+                  className="name-page__ai-popover-select"
+                  value={aiSelectedProfile}
+                  onChange={(e) => setAiSelectedProfile(e.target.value)}
+                >
+                  {(() => {
+                    const def = getSelectedBackendProfile(projectDir);
+                    const sorted = def && aiProfileNames.includes(def)
+                      ? [def, ...aiProfileNames.filter((n) => n !== def)]
+                      : aiProfileNames;
+                    return sorted.map((name) => {
+                      const model = aiProfileModelMap[name];
+                      const suffix = name === def ? '（默认）' : '';
+                      const label = model ? `${name} - ${model}${suffix}` : `${name}${suffix}`;
+                      return <option key={name} value={name}>{label}</option>;
+                    });
+                  })()}
+                </CustomSelect>
+                <Button
+                  variant="primary"
+                  onClick={handleAiTranslate}
+                  disabled={!aiSelectedProfile}
+                >
+                  开始翻译
+                </Button>
+              </>
             )}
           </div>
-          <Button onClick={handleSave} disabled={!dirty || saving} variant="primary">
-            {saving ? '保存中...' : '保存'}
-          </Button>
-        </div>
-        <div className="name-page__toolbar-right">
-          <input
-            type="text"
-            className="name-page__search"
-            placeholder="搜索人名..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
+        )}
       </div>
+      <Button
+        onClick={handleSave}
+        disabled={!dirty || saving}
+        variant="primary"
+        className={`name-page__save-btn name-page__save-btn--${saving ? 'saving' : dirty ? 'dirty' : 'saved'}`}
+        title={dirty ? '立即保存（编辑 1 秒后会自动保存）' : '已自动保存'}
+      >
+        {saveLabel}
+      </Button>
+      <input
+        type="text"
+        className="name-page__search"
+        placeholder="搜索人名..."
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+      />
+    </div>
+  );
+
+  return (
+    <div className="page name-page">
+      <PageHeader title="人名翻译" description="管理项目的人名替换表，填入中文译名后可用于翻译工作台的 name 字段替换。编辑后 1 秒自动保存。" />
 
       {error && <InlineFeedback tone="error">{error}</InlineFeedback>}
 
-      <Panel title="人名替换表">
+      <Panel title="人名替换表" actions={panelActions}>
         <div className="name-page__stats">
           <span className="name-page__stat">
             共 {names.length} 个人名
@@ -487,14 +532,23 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
                     </tr>
                   );
                 })}
+                <tr className="name-page__row name-page__row--add">
+                  <td className="name-page__td name-page__td--add" colSpan={5}>
+                    <button
+                      type="button"
+                      className="name-page__add-btn"
+                      onClick={handleAddRow}
+                      title="添加人名"
+                      aria-label="添加人名"
+                    >
+                      +
+                    </button>
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
         )}
-
-        <div className="name-page__footer">
-          <Button onClick={handleAddRow}>+ 添加人名</Button>
-        </div>
       </Panel>
     </div>
   );

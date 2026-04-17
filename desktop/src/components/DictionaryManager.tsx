@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { Button } from './Button';
 import { Panel } from './Panel';
 import { EmptyState, ErrorState, InlineFeedback, LoadingState } from './page-state';
@@ -11,6 +11,16 @@ type DictRow = {
   type: DictRowType;
   values: string[];
   raw: string;
+};
+
+type DictRowWithIndex = {
+  row: DictRow;
+  rowIndex: number;
+};
+
+type DictRowGroup = {
+  type: DictRowType;
+  items: DictRowWithIndex[];
 };
 
 type DictionaryManagerData = {
@@ -30,6 +40,7 @@ type DictionaryManagerProps = {
   onCreateFile: (category: DictTab, filename: string) => Promise<string>;
   onSaveFile: (fileKey: string, content: string) => Promise<void>;
   onDeleteFile: (fileKey: string) => Promise<void>;
+  onGenerateGptDict?: () => Promise<void>;
 };
 
 const PROJECT_DIR_MARKER = '(project_dir)';
@@ -42,15 +53,21 @@ function stripProjectDirMarker(name: string): string {
 
 function getFilesByTab(data: DictionaryManagerData | null, tab: DictTab): string[] {
   if (!data) return [];
-  if (tab === 'pre') return data.pre_dict_files;
-  if (tab === 'gpt') return data.gpt_dict_files;
-  return data.post_dict_files;
+  const files = tab === 'pre' ? data.pre_dict_files : tab === 'gpt' ? data.gpt_dict_files : data.post_dict_files;
+  return [...files].sort((a, b) => {
+    const aMtime = data.dict_contents[a]?.mtime ?? -1;
+    const bMtime = data.dict_contents[b]?.mtime ?? -1;
+    if (aMtime !== bMtime) {
+      return bMtime - aMtime;
+    }
+    return stripProjectDirMarker(a).localeCompare(stripProjectDirMarker(b));
+  });
 }
 
 function parseRows(text: string, tab: DictTab): DictRow[] {
   const lines = text.split('\n');
   return lines.map((line) => {
-    if (!line.trim()) return { type: 'blank', values: [], raw: line };
+    if (!line.trim() && !line.includes('\t')) return { type: 'blank', values: [], raw: line };
     if (line.startsWith('//') || line.startsWith('#') || line.startsWith('\\\\')) {
       return { type: 'comment', values: [line], raw: line };
     }
@@ -96,7 +113,7 @@ function getTypeLabel(type: DictRowType, tab: DictTab): string {
 
 /** Field labels for each row type */
 function getFieldLabels(type: DictRowType, _tab: DictTab): string[] {
-  if (type === 'gpt') return ['原文', '译文', '备注'];
+  if (type === 'gpt') return ['原文', '译文', '解释(可空)'];
   if (type === 'normal') return ['搜索', '替换', '备注'];
   if (type === 'conditional') return ['目标', '条件', '搜索', '替换', '备注'];
   if (type === 'situation') return ['场景', '搜索', '替换'];
@@ -104,101 +121,95 @@ function getFieldLabels(type: DictRowType, _tab: DictTab): string[] {
   return [];
 }
 
-/* ── Individual dict entry card ── */
-function DictEntryCard({
-  row,
-  rowIndex,
+/* ── Grouped dict entries card ── */
+function DictEntryGroupCard({
+  group,
   tab,
   onCellChange,
   onDelete,
+  onAddRow,
 }: {
-  row: DictRow;
-  rowIndex: number;
+  group: DictRowGroup;
   tab: DictTab;
   onCellChange: (rowIndex: number, cellIndex: number, value: string) => void;
   onDelete: (rowIndex: number) => void;
+  onAddRow: (rowType: DictRowType, insertAfterRowIndex: number) => void;
 }) {
-  if (row.type === 'blank') return null;
-
-  const labels = getFieldLabels(row.type, tab);
-  const isComment = row.type === 'comment';
-  const noteIndex = row.type === 'normal' ? 2 : row.type === 'conditional' ? 4 : -1;
-  const hasNote = noteIndex >= 0 && (row.values[noteIndex]?.trim() ?? '') !== '';
-  const [noteActivated, setNoteActivated] = useState(false);
-  const showNoteInput = noteIndex >= 0 && (hasNote || noteActivated);
-  const visibleCount = noteIndex >= 0 ? noteIndex : row.values.length;
+  const labels = getFieldLabels(group.type, tab);
+  const tableStyle = { '--dict-column-count': labels.length } as CSSProperties;
 
   return (
-    <article className={`dict-card dict-card--${row.type}`}>
+    <article className={`dict-card dict-card--${group.type} dict-card--grouped`}>
       <div className="dict-card__header">
         <div className="dict-card__badges">
-          <span className={`dict-card__pill dict-card__pill--${row.type}`}>
-            {getTypeLabel(row.type, tab)}
+          <span className={`dict-card__pill dict-card__pill--${group.type}`}>
+            {getTypeLabel(group.type, tab)}
           </span>
-          <span className="dict-card__pill dict-card__pill--index">#{rowIndex + 1}</span>
-          {showNoteInput && (
-            <input
-              className="dict-card__note-input"
-              value={row.values[noteIndex] ?? ''}
-              onChange={(e) => onCellChange(rowIndex, noteIndex, e.target.value)}
-              onBlur={() => { if (!hasNote) setNoteActivated(false); }}
-              placeholder="备注"
-              style={{ '--note-char-count': !hasNote ? 80 : (row.values[noteIndex] ?? '').length } as React.CSSProperties}
-            />
-          )}
-          {noteIndex >= 0 && !hasNote && !noteActivated && (
-            <button
-              type="button"
-              className="dict-card__add-note"
-              onClick={() => { onCellChange(rowIndex, noteIndex, ''); setNoteActivated(true); }}
-            >
-              + 备注
-            </button>
-          )}
+          <span className="dict-card__pill dict-card__pill--index">{group.items.length}条</span>
         </div>
-        <button
-          type="button"
-          className="dict-card__delete"
-          onClick={() => onDelete(rowIndex)}
-          title="删除此条"
-        >
-          ✕
-        </button>
       </div>
 
-      {isComment ? (
-        <div className="dict-card__body">
-          <input
-            className="dict-card__input dict-card__input--comment"
-            value={row.values[0] ?? ''}
-            onChange={(e) => onCellChange(rowIndex, 0, e.target.value)}
-            placeholder="注释内容"
-          />
-        </div>
-      ) : (
-        <div className="dict-card__fields">
-          {row.values.slice(0, visibleCount).map((val, ci) => (
-            <div key={ci} className="dict-card__field">
-              {labels[ci] && (
-                <span className="dict-card__field-label">{labels[ci]}</span>
-              )}
-              <input
-                className="dict-card__input"
-                value={val}
-                onChange={(e) => onCellChange(rowIndex, ci, e.target.value)}
-                placeholder={labels[ci] || `列${ci + 1}`}
-              />
-            </div>
+      <div className="dict-card__table" style={tableStyle}>
+        <div className="dict-card__table-head">
+          <div className="dict-card__head-cell dict-card__head-cell--index">ID</div>
+          {labels.map((label, ci) => (
+            <div key={ci} className="dict-card__head-cell">{label || `列${ci + 1}`}</div>
           ))}
         </div>
-      )}
+
+        {group.items.map(({ row, rowIndex }) => (
+          <div key={`${rowIndex}-${row.raw}`} className="dict-card__table-row">
+            <div className="dict-card__cell dict-card__cell--index">#{rowIndex + 1}</div>
+            {labels.map((label, ci) => (
+              <div key={ci} className="dict-card__cell">
+                <input
+                  className="dict-card__input"
+                  value={row.values[ci] ?? ''}
+                  onChange={(e) => onCellChange(rowIndex, ci, e.target.value)}
+                  placeholder={label || `列${ci + 1}`}
+                />
+              </div>
+            ))}
+            <button
+              type="button"
+              className="dict-card__row-delete"
+              onClick={() => onDelete(rowIndex)}
+              title="删除此条"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+
+        <div className="dict-card__table-add-row">
+          <button
+            type="button"
+            className="dict-card__add-row-btn"
+            onClick={() => onAddRow(group.type, group.items[group.items.length - 1]?.rowIndex ?? -1)}
+            title="新增同类型条目"
+          >
+            +
+          </button>
+        </div>
+      </div>
     </article>
   );
 }
 
 /* ── Main component ── */
 export function DictionaryManager(props: DictionaryManagerProps) {
-  const { data, loading, error, onReload, onCreateFile, onSaveFile, onDeleteFile, title, description } = props;
+  const {
+    data,
+    loading,
+    error,
+    onReload,
+    onCreateFile,
+    onSaveFile,
+    onDeleteFile,
+    onGenerateGptDict,
+    title,
+    description,
+  } = props;
 
   const [activeTab, setActiveTab] = useState<DictTab>('gpt');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -209,6 +220,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [generatingGptDict, setGeneratingGptDict] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [newFilename, setNewFilename] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
@@ -240,6 +252,19 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     return visible.filter(({ row }) => row.values.join('\t').toLowerCase().includes(needle));
   }, [parsedRows, searchTerm]);
 
+  const groupedRows = useMemo(() => {
+    const groups: DictRowGroup[] = [];
+    for (const item of filteredRows) {
+      const lastGroup = groups[groups.length - 1];
+      if (lastGroup && lastGroup.type === item.row.type) {
+        lastGroup.items.push(item);
+      } else {
+        groups.push({ type: item.row.type, items: [item] });
+      }
+    }
+    return groups;
+  }, [filteredRows]);
+
   const handleReload = async () => {
     if (refreshing) return;
     setRefreshing(true);
@@ -256,6 +281,20 @@ export function DictionaryManager(props: DictionaryManagerProps) {
         await new Promise<void>((resolve) => window.setTimeout(resolve, remainMs));
       }
       setRefreshing(false);
+    }
+  };
+
+  const handleGenerateGptDict = async () => {
+    if (!onGenerateGptDict || generatingGptDict) return;
+    setGeneratingGptDict(true);
+    setLocalError(null);
+    setInfo(null);
+    try {
+      await onGenerateGptDict();
+    } catch (e) {
+      setLocalError(e instanceof Error ? e.message : '启动 AI 生成 GPT 字典任务失败');
+    } finally {
+      setGeneratingGptDict(false);
     }
   };
 
@@ -333,11 +372,19 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     setInfo(null);
   };
 
-  const addRow = () => {
-    const base: DictRow = activeTab === 'gpt'
-      ? { type: 'gpt', values: ['', '', ''], raw: '' }
-      : { type: 'normal', values: ['', ''], raw: '' };
-    const next = [...parsedRows, base];
+  const buildRowByType = (rowType: DictRowType): DictRow => {
+    if (rowType === 'gpt') return { type: 'gpt', values: ['', '', ''], raw: '' };
+    if (rowType === 'conditional') return { type: 'conditional', values: ['', '', '', '', ''], raw: '' };
+    if (rowType === 'situation') return { type: 'situation', values: ['', '', ''], raw: '' };
+    if (rowType === 'comment') return { type: 'comment', values: [''], raw: '' };
+    return { type: 'normal', values: ['', '', ''], raw: '' };
+  };
+
+  const addRow = (rowType?: DictRowType, insertAfterRowIndex?: number) => {
+    const targetType = rowType ?? (activeTab === 'gpt' ? 'gpt' : 'normal');
+    const base = buildRowByType(targetType);
+    const insertIndex = typeof insertAfterRowIndex === 'number' ? Math.max(0, insertAfterRowIndex + 1) : parsedRows.length;
+    const next = [...parsedRows.slice(0, insertIndex), base, ...parsedRows.slice(insertIndex)];
     setDraftText(rowsToText(next));
     setDirty(true);
     setInfo(null);
@@ -345,6 +392,21 @@ export function DictionaryManager(props: DictionaryManagerProps) {
 
   const handleSave = async () => {
     if (!selectedFile) return;
+    if (activeTab === 'gpt') {
+      const invalidRow = parsedRows
+        .map((row, index) => ({ row, index }))
+        .find(({ row }) => {
+          if (row.type !== 'gpt') return false;
+          const src = row.values[0]?.trim() ?? '';
+          const dst = row.values[1]?.trim() ?? '';
+          return !src || !dst;
+        });
+      if (invalidRow) {
+        setLocalError(`GPT字典第 ${invalidRow.index + 1} 行的原文和译文不能为空`);
+        setInfo(null);
+        return;
+      }
+    }
     setSaving(true);
     setLocalError(null);
     setInfo(null);
@@ -441,6 +503,15 @@ export function DictionaryManager(props: DictionaryManagerProps) {
               <span className="dict-tab__count">{getFilesByTab(data, tab).length}</span>
             </button>
           ))}
+          {activeTab === 'gpt' && onGenerateGptDict ? (
+            <Button
+              variant="secondary"
+              onClick={() => void handleGenerateGptDict()}
+              disabled={generatingGptDict}
+            >
+              {generatingGptDict ? '启动中…' : 'AI生成GPT字典'}
+            </Button>
+          ) : null}
         </div>
 
         <div className="dict-layout">
@@ -529,26 +600,23 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                     spellCheck={false}
                   />
                 ) : (
-                  <>
+                  <div className="dict-card-mode">
                     <div className="dict-card-list">
-                      {filteredRows.map(({ row, rowIndex }) => (
-                        <DictEntryCard
-                          key={`${rowIndex}-${row.raw}`}
-                          row={row}
-                          rowIndex={rowIndex}
+                      {groupedRows.map((group, groupIndex) => (
+                        <DictEntryGroupCard
+                          key={`${groupIndex}-${group.type}-${group.items[0]?.rowIndex ?? 0}`}
+                          group={group}
                           tab={activeTab}
                           onCellChange={updateRowCell}
                           onDelete={deleteRow}
+                          onAddRow={addRow}
                         />
                       ))}
-                      {filteredRows.length === 0 && (
+                      {groupedRows.length === 0 && (
                         <EmptyState title="无匹配条目" description="尝试更换搜索关键词或新增条目。" />
                       )}
                     </div>
-                    <div className="dict-card-add" style={{ marginTop: 12 }}>
-                      <Button variant="secondary" onClick={addRow}>+ 新增条目</Button>
-                    </div>
-                  </>
+                  </div>
                 )}
               </Panel>
             ) : (

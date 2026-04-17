@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { ProjectPageContext } from '../components/ProjectLayout';
 import { DictionaryManager } from '../components/DictionaryManager';
 import {
@@ -6,12 +7,15 @@ import {
   createProjectDictionaryFile,
   deleteProjectDictionaryFile,
   fetchProjectDictionaryManager,
+  getSelectedBackendProfile,
   saveProjectDictionaryFile,
+  submitJob,
   type DictionaryCategory } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 
 export function ProjectDictionaryPage({ ctx }: { ctx: ProjectPageContext }) {
-  const { projectId, configFileName } = ctx;
+  const { projectId, projectDir, configFileName } = ctx;
+  const navigate = useNavigate();
 
   const [data, setData] = useState<ProjectDictionaryManagerResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,6 +69,19 @@ export function ProjectDictionaryPage({ ctx }: { ctx: ProjectPageContext }) {
           config_file_name: configFileName,
           file_key: fileKey,
           delete_file: true });
+      }}
+      onGenerateGptDict={async () => {
+        if (!projectId || !projectDir) {
+          throw new Error('项目信息缺失，无法启动任务');
+        }
+        const backendProfile = getSelectedBackendProfile(projectDir);
+        await submitJob({
+          config_file_name: configFileName || 'config.yaml',
+          project_dir: projectDir,
+          translator: 'GenDic',
+          ...(backendProfile ? { backend_profile: backendProfile } : {}),
+        });
+        navigate(`/project/${projectId}/translate`);
       }}
     />
   );
