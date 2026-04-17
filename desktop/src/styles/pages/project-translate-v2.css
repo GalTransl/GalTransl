@@ -1,0 +1,1103 @@
+/* ── Project Translate Workbench V2 — Single-viewport layout ── */
+
+.ptv2-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  height: 100%;
+  min-width: 0;
+  gap: var(--space-3);
+}
+
+.ptv2-alert {
+  margin: 0;
+}
+
+/* ── Floating toast (phone-notification style) ── */
+
+.ptv2-toast-host {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 80;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: min(380px, calc(100vw - 36px));
+}
+
+.ptv2-toast {
+  pointer-events: auto;
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(191, 208, 226, 0.6);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: saturate(160%) blur(22px);
+  -webkit-backdrop-filter: saturate(160%) blur(22px);
+  box-shadow:
+    0 22px 40px -18px rgba(15, 23, 42, 0.35),
+    0 6px 14px -6px rgba(15, 23, 42, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  animation: ptv2ToastIn 320ms cubic-bezier(0.22, 0.85, 0.35, 1) both;
+}
+
+.ptv2-toast__icon {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #3b82f6, #22d3ee);
+  box-shadow:
+    0 6px 14px -4px rgba(47, 111, 235, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.ptv2-toast__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ptv2-toast__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.02em;
+}
+
+.ptv2-toast__app {
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.ptv2-toast__dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(100, 116, 139, 0.6);
+}
+
+.ptv2-toast__title {
+  margin-top: 1px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+  line-height: 1.3;
+}
+
+.ptv2-toast__msg {
+  margin: 2px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  word-break: break-word;
+}
+
+.ptv2-toast__close {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin: -2px -4px 0 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.ptv2-toast__close:hover,
+.ptv2-toast__close:focus-visible {
+  background: rgba(15, 23, 42, 0.08);
+  color: var(--color-text);
+}
+
+@keyframes ptv2ToastIn {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -14px, 0) scale(0.96);
+    filter: blur(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ptv2-toast {
+    animation: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   COCKPIT — Unified hero surface with title, gauge, action, and ribbon
+   ═══════════════════════════════════════════════════════════════════ */
+
+.ptv2-cockpit {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 24px 14px;
+  border: 1px solid rgba(191, 208, 226, 0.7);
+  border-radius: var(--radius-panel);
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 92% -18%, rgba(47, 111, 235, 0.16), transparent 46%),
+    linear-gradient(90deg, #ffffff 0%, #ffffff 45%, rgba(247, 251, 255, 0.96) 100%),
+    var(--color-surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 0 rgba(191, 208, 226, 0.45);
+}
+
+/* Decorative layer wrapper — clips orbs + grid to the rounded rect without clipping dropdowns that escape the section. */
+.ptv2-cockpit__deco {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* Subtle dotted grid pattern for "texture" — confined to the right half so the left stays clean white. */
+.ptv2-cockpit__grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(47, 111, 235, 0.08) 1px, transparent 0);
+  background-size: 18px 18px;
+  opacity: 0.5;
+  mask-image: linear-gradient(90deg, transparent 0%, transparent 45%, rgba(0, 0, 0, 0.9) 85%, rgba(0, 0, 0, 0.5) 100%);
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, transparent 45%, rgba(0, 0, 0, 0.9) 85%, rgba(0, 0, 0, 0.5) 100%);
+}
+
+/* Decorative floating orbs */
+.ptv2-cockpit__orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(40px);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.7;
+  animation-duration: 12s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+.ptv2-cockpit__orb--a {
+  width: 280px;
+  height: 280px;
+  top: -120px;
+  right: -70px;
+  background: radial-gradient(circle, #5b8df6 0%, rgba(91, 141, 246, 0) 65%);
+  animation-name: ptv2OrbFloatA;
+}
+
+.ptv2-cockpit__orb--b {
+  /* Second orb moved to the right half so the left side stays clean white. */
+  width: 200px;
+  height: 200px;
+  bottom: -100px;
+  right: 22%;
+  background: radial-gradient(circle, #67c6ff 0%, rgba(103, 198, 255, 0) 65%);
+  animation-name: ptv2OrbFloatB;
+  animation-duration: 14s;
+  opacity: 0.45;
+}
+
+.ptv2-cockpit--live .ptv2-cockpit__orb--a {
+  animation-duration: 6s;
+  opacity: 0.85;
+}
+
+.ptv2-cockpit--live .ptv2-cockpit__orb--b {
+  animation-duration: 7s;
+  opacity: 0.7;
+}
+
+.ptv2-cockpit--done .ptv2-cockpit__orb--a {
+  /* Keep the blue orb; completion is signaled by the bar + badge, not by flooding the hero with green. */
+  opacity: 0.55;
+}
+
+.ptv2-cockpit--done .ptv2-cockpit__orb--b {
+  opacity: 0.35;
+}
+
+@keyframes ptv2OrbFloatA {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-22px, 18px) scale(1.08); }
+}
+
+@keyframes ptv2OrbFloatB {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(16px, -18px) scale(1.1); }
+}
+
+/* ── Arming: coherent hero initialization (no directional wipe) ── */
+
+.ptv2-cockpit--arming {
+  animation: ptv2CockpitArm 780ms cubic-bezier(0.22, 0.85, 0.35, 1) both;
+}
+
+.ptv2-cockpit--arming .ptv2-cockpit__orb {
+  animation: ptv2OrbArm 780ms cubic-bezier(0.22, 0.85, 0.35, 1) both;
+}
+
+.ptv2-cockpit--arming .ptv2-gauge__percent,
+.ptv2-cockpit--arming .ptv2-gauge__fraction {
+  animation: ptv2NumberArm 680ms cubic-bezier(0.22, 0.85, 0.35, 1) 80ms both;
+}
+
+.ptv2-cockpit--arming .ptv2-gauge__bar-fill {
+  animation: ptv2BarArm 780ms cubic-bezier(0.22, 0.85, 0.35, 1) both;
+}
+
+.ptv2-cockpit--arming .ptv2-stat__value {
+  animation: ptv2StatArm 680ms cubic-bezier(0.22, 0.85, 0.35, 1) 140ms both;
+}
+
+@keyframes ptv2CockpitArm {
+  0% { filter: brightness(0.98) saturate(0.94); }
+  45% { filter: brightness(1.04) saturate(1.08); }
+  100% { filter: brightness(1) saturate(1); }
+}
+
+@keyframes ptv2OrbArm {
+  0% { opacity: 0.3; transform: scale(0.92); }
+  55% { opacity: 0.9; transform: scale(1.05); }
+  100% { opacity: 0.7; transform: scale(1); }
+}
+
+@keyframes ptv2NumberArm {
+  0% { opacity: 0.55; transform: translateY(3px); filter: blur(2px); }
+  100% { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+@keyframes ptv2BarArm {
+  0% {
+    filter: brightness(0.88);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.2),
+      0 0 0 rgba(47, 111, 235, 0);
+  }
+  55% {
+    filter: brightness(1.14);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.45),
+      0 0 22px rgba(47, 111, 235, 0.55);
+  }
+  100% {
+    filter: brightness(1);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.35),
+      0 0 14px rgba(47, 111, 235, 0.35);
+  }
+}
+
+@keyframes ptv2StatArm {
+  0% { opacity: 0.35; transform: translateY(2px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ptv2-cockpit--arming,
+  .ptv2-cockpit--arming .ptv2-cockpit__orb,
+  .ptv2-cockpit--arming .ptv2-gauge__percent,
+  .ptv2-cockpit--arming .ptv2-gauge__fraction,
+  .ptv2-cockpit--arming .ptv2-gauge__bar-fill,
+  .ptv2-cockpit--arming .ptv2-stat__value {
+    animation: none;
+  }
+}
+
+/* ── Topline: eyebrow + title + status/timestamp ── */
+
+.ptv2-cockpit__topline {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  min-width: 0;
+}
+
+.ptv2-cockpit__brand {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ptv2-cockpit__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+  opacity: 0.92;
+}
+
+.ptv2-cockpit__eyebrow::before {
+  content: "";
+  width: 22px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--color-primary), transparent);
+}
+
+.ptv2-cockpit__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+  color: var(--color-text);
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 2px;
+}
+
+.ptv2-cockpit__title-sep {
+  margin: 0 8px;
+  color: rgba(100, 116, 139, 0.55);
+  font-weight: 400;
+  font-size: 18px;
+}
+
+.ptv2-cockpit__title-project {
+  color: var(--color-primary);
+  font-weight: 800;
+}
+
+.ptv2-cockpit__statusline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.ptv2-cockpit__tick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ptv2-cockpit__tick-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(148, 163, 184, 0.6);
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
+}
+
+.ptv2-cockpit--live .ptv2-cockpit__tick-dot {
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
+  animation: ptv2TickPulse 1.3s ease-in-out infinite;
+}
+
+@keyframes ptv2TickPulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18); }
+  50% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0.04); }
+}
+
+/* ── Gauge row: big number + progress runway + action cluster ── */
+
+.ptv2-cockpit__gauge {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 24px;
+  row-gap: 10px;
+}
+
+.ptv2-gauge__numbers {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 170px;
+}
+
+.ptv2-gauge__percent-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  line-height: 1;
+}
+
+.ptv2-gauge__percent {
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 52px;
+  font-weight: 800;
+  line-height: 0.9;
+  letter-spacing: -0.05em;
+  color: var(--color-primary);
+  font-variant-numeric: tabular-nums;
+  filter: drop-shadow(0 4px 12px rgba(47, 111, 235, 0.18));
+  transition: color 700ms cubic-bezier(0.4, 0, 0.2, 1),
+    filter 700ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ptv2-cockpit--live .ptv2-gauge__percent {
+  filter: drop-shadow(0 4px 18px rgba(47, 111, 235, 0.32));
+}
+
+.ptv2-cockpit--done .ptv2-gauge__percent {
+  color: #2fb27c;
+  filter: drop-shadow(0 4px 14px rgba(47, 157, 122, 0.22));
+}
+
+.ptv2-gauge__percent-sign {
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 22px;
+  font-weight: 800;
+  color: rgba(100, 116, 139, 0.65);
+  letter-spacing: -0.02em;
+}
+
+.ptv2-gauge__fraction {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ptv2-gauge__fraction-done {
+  color: var(--color-text);
+  font-weight: 800;
+  font-size: 15px;
+}
+
+.ptv2-gauge__fraction-sep {
+  margin: 0 2px;
+  opacity: 0.55;
+}
+
+.ptv2-gauge__fraction-total {
+  font-weight: 700;
+}
+
+.ptv2-gauge__fraction-unit {
+  margin: 0 2px 0 3px;
+  font-size: 11px;
+  color: rgba(100, 116, 139, 0.8);
+}
+
+.ptv2-gauge__fraction-divider {
+  width: 1px;
+  height: 11px;
+  margin: 0 8px;
+  background: rgba(191, 208, 226, 0.8);
+}
+
+.ptv2-gauge__fraction-remain {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+/* Progress runway */
+.ptv2-gauge__bar-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.ptv2-gauge__bar-track {
+  position: relative;
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(148, 163, 184, 0.2), rgba(148, 163, 184, 0.1));
+  border: 1px solid rgba(191, 208, 226, 0.55);
+  box-shadow:
+    inset 0 2px 3px rgba(16, 24, 40, 0.08),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.ptv2-gauge__bar-fill {
+  position: relative;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    #2f6feb 0%,
+    #3b82f6 35%,
+    #38bdf8 65%,
+    #60a5fa 100%
+  );
+  background-size: 220% 100%;
+  transition:
+    width 420ms cubic-bezier(0.22, 0.8, 0.4, 1),
+    box-shadow 700ms cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 0 14px rgba(47, 111, 235, 0.35);
+  overflow: hidden;
+}
+
+/* Green overlay used to crossfade the bar from blue to green on completion. */
+.ptv2-gauge__bar-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2f9d7a 0%, #3fb58c 55%, #86d0b4 100%);
+  opacity: 0;
+  transition: opacity 700ms cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.ptv2-cockpit--live .ptv2-gauge__bar-fill {
+  /* Keep the fill stable while running; let the subtle shine carry motion. */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.38),
+    0 0 14px rgba(47, 111, 235, 0.32);
+}
+
+.ptv2-gauge__bar-fill--done,
+.ptv2-cockpit--done .ptv2-gauge__bar-fill {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 0 14px rgba(47, 157, 122, 0.3);
+  animation: none;
+}
+
+.ptv2-gauge__bar-fill--done::after,
+.ptv2-cockpit--done .ptv2-gauge__bar-fill::after {
+  opacity: 1;
+}
+
+.ptv2-gauge__bar-fill--complete {
+  animation: ptv2BarCompleteGlow 0.9s ease-out 1;
+}
+
+.ptv2-gauge__bar-shine {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0) 30%,
+    rgba(255, 255, 255, 0.32) 50%,
+    rgba(255, 255, 255, 0) 70%,
+    transparent 100%
+  );
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ptv2-cockpit--live .ptv2-gauge__bar-shine {
+  animation: ptv2BarShine 6s ease-in-out infinite;
+}
+
+.ptv2-gauge__bar-ticks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.ptv2-gauge__bar-tick {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.55);
+  border-right: 1px solid rgba(16, 24, 40, 0.08);
+  mix-blend-mode: overlay;
+}
+
+@keyframes ptv2BarFlow {
+  0% { background-position: 220% 0; }
+  100% { background-position: -220% 0; }
+}
+
+@keyframes ptv2BarShine {
+  0% { transform: translateX(-110%); opacity: 0; }
+  20% { opacity: 0.9; }
+  80% { opacity: 0.9; }
+  100% { transform: translateX(110%); opacity: 0; }
+}
+
+@keyframes ptv2BarCompleteGlow {
+  0% { filter: brightness(1); }
+  40% { filter: brightness(1.4); }
+  100% { filter: brightness(1); }
+}
+
+/* Action cluster: translator + launch button */
+.ptv2-cockpit__action {
+  position: relative;
+  z-index: 30;
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ptv2-cockpit__field {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  max-width: 280px;
+}
+
+.ptv2-cockpit__field-label {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.ptv2-launch-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* Oversized launch / stop button */
+.button.ptv2-launch-btn {
+  position: relative;
+  height: 42px;
+  padding: 0 20px;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  border-radius: 14px;
+  border: none;
+  color: #ffffff;
+  background: linear-gradient(135deg, #2f6feb 0%, #3b82f6 50%, #22d3ee 100%);
+  box-shadow:
+    0 10px 24px -8px rgba(47, 111, 235, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -1px 0 rgba(16, 24, 40, 0.12);
+  transition:
+    transform 160ms ease,
+    box-shadow 500ms cubic-bezier(0.4, 0, 0.2, 1),
+    filter 200ms ease;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* Red overlay crossfaded in for the stop state — lets the button transition colors smoothly. */
+.button.ptv2-launch-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(135deg, #dc2626 0%, #ef4444 55%, #f97316 100%);
+  opacity: 0;
+  transition: opacity 500ms cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.button.ptv2-launch-btn > * {
+  position: relative;
+  z-index: 1;
+}
+
+.button.ptv2-launch-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+  box-shadow:
+    0 14px 30px -8px rgba(47, 111, 235, 0.65),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -1px 0 rgba(16, 24, 40, 0.1);
+}
+
+.button.ptv2-launch-btn:active:not(:disabled) {
+  transform: translateY(0);
+  filter: brightness(0.98);
+}
+
+.button.ptv2-launch-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.button.ptv2-launch-btn--stop {
+  box-shadow:
+    0 10px 24px -8px rgba(220, 38, 38, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -1px 0 rgba(16, 24, 40, 0.14);
+}
+
+.button.ptv2-launch-btn--stop::before {
+  opacity: 1;
+}
+
+.button.ptv2-launch-btn--stop:hover:not(:disabled) {
+  box-shadow:
+    0 14px 30px -8px rgba(220, 38, 38, 0.7),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -1px 0 rgba(16, 24, 40, 0.12);
+}
+
+.ptv2-launch-btn__glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 800;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.ptv2-launch-btn__label {
+  white-space: nowrap;
+}
+
+/* Pulse ring around button when stopping available (running) */
+.ptv2-cockpit--live .button.ptv2-launch-btn--stop::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 18px;
+  border: 2px solid rgba(239, 68, 68, 0.45);
+  pointer-events: none;
+  animation: ptv2LaunchPulse 1.8s ease-out infinite;
+}
+
+@keyframes ptv2LaunchPulse {
+  0% { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(1.12); opacity: 0; }
+}
+
+/* ── Ribbon: stats + folder menu ── */
+
+.ptv2-cockpit__ribbon {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 24px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(191, 208, 226, 0.75);
+}
+
+.ptv2-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 72px;
+}
+
+.ptv2-stat__value {
+  font-family: inherit;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text);
+  letter-spacing: -0.005em;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.ptv2-stat__value-sep {
+  margin: 0 1px;
+  color: rgba(100, 116, 139, 0.55);
+  font-weight: 500;
+}
+
+.ptv2-stat--primary .ptv2-stat__value {
+  color: var(--color-primary);
+}
+
+.ptv2-cockpit--live .ptv2-stat--primary .ptv2-stat__value {
+  text-shadow: 0 0 12px rgba(47, 111, 235, 0.28);
+  animation: ptv2StatPulse 2s ease-in-out infinite;
+}
+
+@keyframes ptv2StatPulse {
+  0%, 100% { text-shadow: 0 0 10px rgba(47, 111, 235, 0.2); }
+  50% { text-shadow: 0 0 18px rgba(47, 111, 235, 0.45); }
+}
+
+.ptv2-stat__label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.ptv2-cockpit__ribbon-spacer {
+  flex: 1;
+}
+
+.ptv2-cockpit__folder {
+  flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Main area: success stream + tabbed side panel
+   ═══════════════════════════════════════════════════════════════════ */
+
+.ptv2-main {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--space-3);
+}
+
+.ptv2-main__success,
+.ptv2-main__side {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+}
+
+.ptv2-main__success > .panel,
+.ptv2-main__side > .panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.ptv2-main__success > .panel > .panel__body,
+.ptv2-main__side > .panel > .panel__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Tabbed side panel (errors / file progress) ── */
+
+.ptv2-tabpanel__header {
+  padding-bottom: 0;
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid rgba(191, 208, 226, 0.6);
+  gap: 0;
+  align-items: flex-end;
+}
+
+.ptv2-tabs {
+  display: flex;
+  gap: 2px;
+  margin: -2px -6px 0;
+}
+
+.ptv2-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 8px 8px 0 0;
+  transition: color 140ms ease, background 140ms ease;
+}
+
+.ptv2-tab:hover {
+  color: var(--color-text);
+  background: rgba(47, 111, 235, 0.06);
+}
+
+.ptv2-tab--active {
+  color: var(--color-primary);
+  background: rgba(47, 111, 235, 0.08);
+}
+
+.ptv2-tab--active::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--color-primary), #34b57a);
+}
+
+.ptv2-tab__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(191, 208, 226, 0.6);
+  color: var(--color-text);
+  font-size: 11px;
+  font-weight: 700;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  line-height: 1;
+}
+
+.ptv2-tab__badge--danger {
+  background: rgba(217, 48, 37, 0.14);
+  color: var(--color-danger);
+}
+
+.ptv2-tab--active .ptv2-tab__badge {
+  background: rgba(47, 111, 235, 0.16);
+  color: var(--color-primary);
+}
+
+.ptv2-tab--active .ptv2-tab__badge--danger {
+  background: rgba(217, 48, 37, 0.18);
+  color: var(--color-danger);
+}
+
+.ptv2-tabpanel__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* File list inside the tab (vertical, fills available height) */
+.ptv2-filelist {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 4px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.ptv2-filelist .file-progress-row {
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(191, 208, 226, 0.5);
+}
+
+.ptv2-filelist .file-progress-row:last-child {
+  border-bottom: none;
+}
+
+.ptv2-filelist .progress-bar {
+  height: 5px;
+}
+
+.ptv2-eventlist {
+  flex: 1;
+  min-height: 0;
+  max-height: none !important;
+  overflow-y: auto;
+}
+
+.ptv2-main .panel {
+  padding-bottom: var(--space-3);
+}
+
+.ptv2-main .panel__body {
+  overflow: hidden;
+}
+
+/* ── Responsive fallbacks ── */
+
+@media (max-width: 1280px) {
+  .ptv2-cockpit__gauge {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "numbers action"
+      "bar bar";
+  }
+  .ptv2-gauge__numbers { grid-area: numbers; }
+  .ptv2-gauge__bar-wrap { grid-area: bar; }
+  .ptv2-cockpit__action { grid-area: action; justify-self: end; }
+}
+
+@media (max-width: 980px) {
+  .ptv2-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ptv2-cockpit__topline {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ptv2-cockpit__gauge {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "numbers"
+      "bar"
+      "action";
+  }
+  .ptv2-cockpit__action {
+    justify-self: stretch;
+  }
+  .ptv2-cockpit__ribbon {
+    flex-wrap: wrap;
+    gap: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ptv2-cockpit__orb,
+  .ptv2-cockpit--live .ptv2-gauge__bar-fill,
+  .ptv2-cockpit--live .ptv2-gauge__bar-shine,
+  .ptv2-cockpit--live .ptv2-cockpit__tick-dot,
+  .ptv2-cockpit--live .button.ptv2-launch-btn--stop::after,
+  .ptv2-cockpit--live .ptv2-stat--primary .ptv2-stat__value {
+    animation: none;
+  }
+}

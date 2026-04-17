@@ -11,7 +11,8 @@
 .project-layout > .project-dictionary-page,
 .project-layout > .project-cache-page,
 .project-layout > .project-config-page,
-.project-layout > .name-page {
+.project-layout > .name-page,
+.project-layout > .ptv2-page {
   flex: 1;
   min-height: 0;
 }

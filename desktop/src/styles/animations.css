@@ -19,6 +19,16 @@
   animation: pageFadeOut 150ms ease forwards;
 }
 
+/* Prevent a brief scrollbar flash while the page is animating:
+   during the fadeOut/fadeIn transition, content height can fluctuate
+   (Suspense fallback swap, translateY offset, etc.), which can momentarily
+   trigger the container's overflow-y: auto scrollbar. Suppress it here
+   and let the normal auto behaviour resume once the animation ends. */
+.app-layout__content.page-transition-fadeOut,
+.app-layout__content.page-transition-fadeIn {
+  overflow-y: clip;
+}
+
 .section-fade-in {
   animation: pageFadeIn 200ms ease forwards;
 }
