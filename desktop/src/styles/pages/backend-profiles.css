@@ -311,3 +311,96 @@
 .field--inline:last-child {
   margin-bottom: 0;
 }
+
+/* ── Model name + fetch-list button row ── */
+
+.model-name-row {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.model-name-row__input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Combobox-style input + arrow + dropdown panel */
+.model-name-combo {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.model-name-combo__input {
+  width: 100%;
+  min-width: 0;
+  padding-right: 32px; /* reserve space for arrow when present */
+}
+
+.model-name-combo__arrow {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color var(--transition-fast), background-color var(--transition-fast), transform var(--dur-fast) var(--ease-spring);
+}
+
+.model-name-combo__arrow:hover {
+  color: var(--color-primary);
+  background-color: var(--color-neutral-soft);
+}
+
+.model-name-combo--open .model-name-combo__arrow {
+  color: var(--color-primary);
+  transform: translateY(-50%) rotate(180deg);
+}
+
+/* Reuse .custom-select__panel look; only adjust positioning. */
+.model-name-combo__panel {
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+}
+
+.model-name-row__fetch-btn {
+  flex-shrink: 0;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--color-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-control);
+  padding: 0 var(--space-3);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.model-name-row__fetch-btn:hover:not(:disabled) {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.model-name-row__fetch-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.field__hint--error {
+  color: var(--color-danger);
+}

@@ -10,7 +10,7 @@ const PRIMARY_FIELDS: ConfigFieldDef[] = [
   { key: 'splitFile', label: '文件分割', description: '单文件分片模式：no 关闭，Num 按句数切片，Equal 按份数均分。', type: 'select', options: ['no', 'Num', 'Equal'] },
   { key: 'splitFileNum', label: '分割数量', description: 'Num 模式下表示每片句数；Equal 模式下表示分片总数。', type: 'number', placeholder: '2048' },
   { key: 'gpt.contextNum', label: '上下文句数', description: '每次请求附带的前文句数，常用 8。', type: 'number', placeholder: '8' },
-  { key: 'gpt.translation_guideline', label: '翻译规范', description: '使用的翻译规范文件名（位于 translation_guidelines）。', type: 'text', placeholder: '日译中_基础.md' },
+  { key: 'gpt.translation_guideline', label: '翻译规范', description: '使用的翻译规范文件名（位于 translation_guidelines）。', type: 'text', placeholder: 'Basic.md' },
 ];
 
 // ── Advanced (low-frequency) fields ──
@@ -73,13 +73,21 @@ export function CommonSettingsSection({ commonConfig, onFieldChange, onListField
   );
 }
 
-/** Get a nested value from an object by dot-separated path */
+/**
+ * Get a value from an object by dot-separated path. Prefers literal flat keys
+ * (YAML under `common:` uses flat dotted keys like `gpt.translation_guideline`).
+ */
 function getFieldValue(obj: Record<string, unknown>, path: string): unknown {
   const keys = path.split('.');
   let current: unknown = obj;
-  for (const key of keys) {
+  for (let i = 0; i < keys.length; i++) {
     if (current == null || typeof current !== 'object') return undefined;
-    current = (current as Record<string, unknown>)[key];
+    const remaining = keys.slice(i).join('.');
+    const cur = current as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(cur, remaining)) {
+      return cur[remaining];
+    }
+    current = cur[keys[i]];
   }
   return current;
 }

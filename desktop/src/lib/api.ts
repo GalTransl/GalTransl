@@ -731,6 +731,28 @@ export async function deleteBackendProfile(name: string) {
   );
 }
 
+// ---- OpenAI-Compatible model list query ----
+
+export interface FetchOpenAIModelsPayload {
+  endpoint: string;
+  token: string;
+  proxy?: { http?: string; https?: string } | string | null;
+  timeout?: number;
+}
+
+export interface FetchOpenAIModelsResponse {
+  models: string[];
+  url: string;
+}
+
+export async function fetchOpenAIModels(payload: FetchOpenAIModelsPayload) {
+  return apiRequest<FetchOpenAIModelsResponse>('/api/openai-models', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
 // ---- Backend Profile Selection (localStorage) ----
 
 const BACKEND_PROFILE_KEY = 'galtransl-backend-profile';

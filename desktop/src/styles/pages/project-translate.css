@@ -510,6 +510,8 @@
 
 .runtime-event-list {
   display: grid;
+  grid-auto-rows: max-content;
+  align-content: start;
   gap: var(--space-3);
   min-width: 0;
   max-height: 520px;
@@ -618,6 +620,15 @@
 .runtime-event__header {
   justify-content: space-between;
   gap: 10px;
+}
+
+.runtime-event__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-top: 2px;
 }
 
 .runtime-event__header-right {

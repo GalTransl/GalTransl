@@ -93,7 +93,7 @@ class BaseTranslate:
         if val := config.getKey("gpt.translation_guideline"):
             guideline_file = val
         else:
-            guideline_file = "日译中_基础.md"
+            guideline_file = "Basic.md"
         self.pj_config.translation_guideline=load_guideline_file(guideline_file)
         
         # 保存间隔

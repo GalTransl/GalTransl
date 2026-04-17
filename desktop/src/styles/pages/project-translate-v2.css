@@ -477,6 +477,8 @@
   letter-spacing: -0.05em;
   color: var(--color-primary);
   font-variant-numeric: tabular-nums;
+  min-width: 72px;
+  text-align: right;
   filter: drop-shadow(0 4px 12px rgba(47, 111, 235, 0.18));
   transition: color 700ms cubic-bezier(0.4, 0, 0.2, 1),
     filter 700ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -975,6 +977,38 @@
   height: 2px;
   border-radius: 2px;
   background: linear-gradient(90deg, var(--color-primary), #34b57a);
+  transform-origin: center;
+  animation: ptv2-tab-underline 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes ptv2-tab-underline {
+  0% {
+    transform: scaleX(0.2);
+    opacity: 0;
+  }
+  60% {
+    transform: scaleX(1.08);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+}
+
+.ptv2-tab--active .ptv2-tab__label {
+  animation: ptv2-tab-label 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes ptv2-tab-label {
+  0% {
+    transform: translateY(2px);
+    opacity: 0.6;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 .ptv2-tab__badge {
@@ -1013,6 +1047,37 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
+}
+
+.ptv2-tabpanel__pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  animation: ptv2-tabpane-in 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform, opacity;
+}
+
+@keyframes ptv2-tabpane-in {
+  0% {
+    transform: translateY(6px);
+    opacity: 0;
+    filter: blur(1px);
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ptv2-tab--active::after,
+  .ptv2-tab--active .ptv2-tab__label,
+  .ptv2-tabpanel__pane {
+    animation: none;
+  }
 }
 
 /* File list inside the tab (vertical, fills available height) */

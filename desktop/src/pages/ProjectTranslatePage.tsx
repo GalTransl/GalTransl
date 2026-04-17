@@ -43,20 +43,29 @@ const CACHE_FOLDER_NAME = 'transl_cache';
 
 const HIDDEN_TRANSLATORS = new Set(['rebuilda', 'rebuildr', 'show-plugs', 'dump-name']);
 
+// Module-level cache shared across remounts of this page. Switching project tabs
+// unmounts/remounts the component; without this cache the first render would see
+// empty state and flash the "启动翻译" (blue) button before fetches complete,
+// causing the button to flip blue→red on every tab switch.
+let cachedJobs: Job[] = [];
+const cachedRuntimeByProject = new Map<string, ProjectRuntimeResponse>();
+
 export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const { projectDir, projectId, configFileName } = ctx;
   const { connectionPhase, translators, loadJobs } = useConnection();
   const reducedMotion = usePrefersReducedMotion();
   const { nameDict } = useNameDict(projectId);
 
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobs, setJobs] = useState<Job[]>(() => cachedJobs);
   const [submitting, setSubmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [selectedTranslator, setSelectedTranslator] = useState('');
-  const [runtime, setRuntime] = useState<ProjectRuntimeResponse | null>(null);
+  const [runtime, setRuntime] = useState<ProjectRuntimeResponse | null>(
+    () => (projectId ? cachedRuntimeByProject.get(projectId) ?? null : null),
+  );
   const [selectedSuccessFiles, setSelectedSuccessFiles] = useState<string[]>([]);
   const [freshSuccessIds, setFreshSuccessIds] = useState<string[]>([]);
   const seenSuccessIdsRef = useRef<Set<string>>(new Set());
@@ -90,6 +99,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const refreshJobs = useCallback(async (_silent = false) => {
     try {
       const nextJobs = await fetchJobs();
+      cachedJobs = nextJobs;
       setJobs(nextJobs);
     } catch {
       // keep UI silent on background refresh errors
@@ -103,6 +113,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     }
     try {
       const data = await fetchProjectRuntime(projectId);
+      cachedRuntimeByProject.set(projectId, data);
       setRuntime(data);
       setRuntimeError(null);
     } catch (error) {
@@ -113,10 +124,12 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   }, [projectId]);
 
   useEffect(() => {
-    setRuntime(null);
+    // Do NOT clear runtime here: on tab remount we already hydrated from
+    // cachedRuntimeByProject so the stop/start button keeps the correct
+    // color until the fresh snapshot arrives.
     setRuntimeError(null);
     void refreshJobs();
-    void refreshRuntime();
+    void refreshRuntime(true);
   }, [refreshJobs, refreshRuntime]);
 
   const refreshRetranslKeys = useCallback(async () => {
@@ -733,6 +746,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
               </div>
             </header>
             <div className="panel__body ptv2-tabpanel__body">
+              <div className="ptv2-tabpanel__pane" key={rightTab}>
               {rightTab === 'errors' ? (
                 recentErrors.length ? (
                   <div className="runtime-event-list runtime-event-list--error ptv2-eventlist">
@@ -772,6 +786,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                   <EmptyState title="暂无重翻词条" description="在项目配置「重翻关键字」中添加后，启动翻译时命中的句子会被重新翻译。" />
                 )
               )}
+              </div>
             </div>
           </section>
         </div>

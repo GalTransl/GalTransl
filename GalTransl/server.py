@@ -2579,6 +2579,105 @@ def build_handler(registry: JobRegistry):
                 self._route_project_api(project_id, sub_path)
                 return
 
+            # POST /api/openai-models — query a list of models from an OpenAI-compatible API.
+            if path == "/api/openai-models":
+                try:
+                    payload = self._read_json_body()
+                    endpoint = str(payload.get("endpoint", "")).strip() or "https://api.openai.com"
+                    token = str(payload.get("token", "")).strip()
+                    proxy = payload.get("proxy")
+                    timeout = float(payload.get("timeout", 15))
+
+                    base = endpoint.rstrip("/")
+                    if base.endswith("/v1"):
+                        url = base + "/models"
+                    elif base.rstrip("/").endswith("/models"):
+                        url = base
+                    else:
+                        url = base + "/v1/models"
+
+                    import urllib.request
+                    import urllib.error
+                    req = urllib.request.Request(url, method="GET")
+                    if token:
+                        req.add_header("Authorization", f"Bearer {token}")
+                    req.add_header("Accept", "application/json")
+
+                    opener_args = []
+                    if isinstance(proxy, dict):
+                        proxy_map: dict[str, str] = {}
+                        http_proxy = str(proxy.get("http") or proxy.get("http_proxy") or "").strip()
+                        https_proxy = str(proxy.get("https") or proxy.get("https_proxy") or http_proxy).strip()
+                        if http_proxy:
+                            proxy_map["http"] = http_proxy
+                        if https_proxy:
+                            proxy_map["https"] = https_proxy
+                        if proxy_map:
+                            opener_args.append(urllib.request.ProxyHandler(proxy_map))
+                    elif isinstance(proxy, str) and proxy.strip():
+                        opener_args.append(urllib.request.ProxyHandler({"http": proxy.strip(), "https": proxy.strip()}))
+                    else:
+                        # Explicitly bypass system proxies when none provided to avoid unexpected routing.
+                        opener_args.append(urllib.request.ProxyHandler({}))
+
+                    opener = urllib.request.build_opener(*opener_args)
+                    try:
+                        with opener.open(req, timeout=timeout) as resp:
+                            raw = resp.read()
+                    except urllib.error.HTTPError as http_exc:
+                        try:
+                            body = http_exc.read().decode("utf-8", errors="replace")
+                        except Exception:
+                            body = ""
+                        self._send_json(
+                            {"error": f"HTTP {http_exc.code}: {http_exc.reason}", "detail": body[:1000]},
+                            status=HTTPStatus.BAD_GATEWAY,
+                        )
+                        return
+                    except urllib.error.URLError as url_exc:
+                        self._send_json({"error": f"请求失败: {url_exc.reason}"}, status=HTTPStatus.BAD_GATEWAY)
+                        return
+
+                    try:
+                        data = json.loads(raw.decode("utf-8", errors="replace"))
+                    except json.JSONDecodeError:
+                        self._send_json({"error": "响应不是合法的 JSON"}, status=HTTPStatus.BAD_GATEWAY)
+                        return
+
+                    # OpenAI-style: {"data": [{"id": "..."}, ...]}
+                    # Some backends may return a bare list.
+                    items: list[Any] = []
+                    if isinstance(data, dict):
+                        if isinstance(data.get("data"), list):
+                            items = data["data"]
+                        elif isinstance(data.get("models"), list):
+                            items = data["models"]
+                    elif isinstance(data, list):
+                        items = data
+
+                    models: list[str] = []
+                    for item in items:
+                        if isinstance(item, str):
+                            models.append(item)
+                        elif isinstance(item, dict):
+                            mid = item.get("id") or item.get("name") or item.get("model")
+                            if isinstance(mid, str) and mid:
+                                models.append(mid)
+                    # De-duplicate while preserving order.
+                    seen = set()
+                    unique_models: list[str] = []
+                    for m in models:
+                        if m not in seen:
+                            seen.add(m)
+                            unique_models.append(m)
+
+                    self._send_json({"models": unique_models, "url": url})
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to fetch models: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
             if path == "/api/jobs":
                 try:
                     payload = self._read_json_body()

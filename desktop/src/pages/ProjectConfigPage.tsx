@@ -114,13 +114,19 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
     return () => { cancelled = true; };
   }, []);
 
-  // Get/set nested config value
+  // Get/set nested config value. Prefer literal flat keys containing dots
+  // (e.g. YAML under `common:` uses keys like `gpt.translation_guideline`).
   const getNestedValue = useCallback((obj: Record<string, unknown>, path: string): unknown => {
     const keys = path.split('.');
     let current: unknown = obj;
-    for (const key of keys) {
+    for (let i = 0; i < keys.length; i++) {
       if (current == null || typeof current !== 'object') return undefined;
-      current = (current as Record<string, unknown>)[key];
+      const remaining = keys.slice(i).join('.');
+      const cur = current as Record<string, unknown>;
+      if (Object.prototype.hasOwnProperty.call(cur, remaining)) {
+        return cur[remaining];
+      }
+      current = cur[keys[i]];
     }
     return current;
   }, []);
@@ -130,6 +136,11 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
     const result = JSON.parse(JSON.stringify(obj));
     let current: Record<string, unknown> = result;
     for (let i = 0; i < keys.length - 1; i++) {
+      const remaining = keys.slice(i).join('.');
+      if (Object.prototype.hasOwnProperty.call(current, remaining)) {
+        current[remaining] = value;
+        return result;
+      }
       if (current[keys[i]] == null || typeof current[keys[i]] !== 'object') {
         current[keys[i]] = {};
       }

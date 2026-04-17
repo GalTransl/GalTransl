@@ -1,5 +1,6 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CustomSelect } from './CustomSelect';
+import { fetchOpenAIModels } from '../lib/api';
 
 type TokenEntry = {
   token: string;
@@ -12,9 +13,11 @@ type BackendConfigEditorProps = {
   config: Record<string, unknown>;
   onChange: (newConfig: Record<string, unknown>) => void;
   readOnly?: boolean;
+  /** Optional proxy config (e.g., project-level proxy) to use when fetching the model list. */
+  proxy?: { http?: string; https?: string } | null;
 };
 
-export function BackendConfigEditor({ config, onChange, readOnly = false }: BackendConfigEditorProps) {
+export function BackendConfigEditor({ config, onChange, readOnly = false, proxy = null }: BackendConfigEditorProps) {
   const hasOai = 'OpenAI-Compatible' in config;
   const hasSakura = 'SakuraLLM' in config;
 
@@ -86,6 +89,54 @@ export function BackendConfigEditor({ config, onChange, readOnly = false }: Back
     updateOai('tokens', next);
   }, [tokens, updateOai, readOnly]);
 
+  // Per-token model-list fetch state
+  type ModelsState = { loading: boolean; error: string | null; models: string[] };
+  const [modelsState, setModelsState] = useState<Record<number, ModelsState>>({});
+  // Which token's model dropdown is currently open (null = none)
+  const [openDropdownIdx, setOpenDropdownIdx] = useState<number | null>(null);
+  const dropdownContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (openDropdownIdx == null) return;
+    const handler = (e: MouseEvent) => {
+      if (dropdownContainerRef.current && !dropdownContainerRef.current.contains(e.target as Node)) {
+        setOpenDropdownIdx(null);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [openDropdownIdx]);
+
+  const handleFetchModels = useCallback(async (index: number) => {
+    const entry = tokens[index];
+    if (!entry) return;
+    setModelsState((prev) => ({
+      ...prev,
+      [index]: { loading: true, error: null, models: prev[index]?.models ?? [] },
+    }));
+    try {
+      const res = await fetchOpenAIModels({
+        endpoint: entry.endpoint || '',
+        token: entry.token || '',
+        proxy: proxy && (proxy.http || proxy.https) ? proxy : null,
+      });
+      setModelsState((prev) => ({
+        ...prev,
+        [index]: { loading: false, error: null, models: res.models || [] },
+      }));
+      if ((res.models?.length ?? 0) > 0) {
+        setOpenDropdownIdx(index);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '请求失败';
+      setModelsState((prev) => ({
+        ...prev,
+        [index]: { loading: false, error: msg, models: prev[index]?.models ?? [] },
+      }));
+    }
+  }, [tokens, proxy]);
+
   return (
     <>
       {/* Backend type selector */}
@@ -135,7 +186,9 @@ export function BackendConfigEditor({ config, onChange, readOnly = false }: Back
               </div>
             )}
 
-            {tokens.map((t, idx) => (
+            {tokens.map((t, idx) => {
+              const ms = modelsState[idx];
+              return (
               <div key={idx} className="token-entry">
                 <div className="token-entry__header">
                   <span className="token-entry__index">令牌 #{idx + 1}</span>
@@ -172,13 +225,79 @@ export function BackendConfigEditor({ config, onChange, readOnly = false }: Back
                 </label>
                 <label className="field field--inline">
                   <span>模型名称</span>
-                  <input
-                    type="text"
-                    disabled={readOnly}
-                    value={t.modelName ?? ''}
-                    onChange={(e) => updateToken(idx, 'modelName', e.target.value)}
-                    placeholder="gpt-4o-mini"
-                  />
+                  <div className="model-name-row">
+                    <div
+                      className={`model-name-combo${openDropdownIdx === idx ? ' model-name-combo--open' : ''}`}
+                      ref={openDropdownIdx === idx ? dropdownContainerRef : undefined}
+                    >
+                      <input
+                        type="text"
+                        disabled={readOnly}
+                        value={t.modelName ?? ''}
+                        onChange={(e) => updateToken(idx, 'modelName', e.target.value)}
+                        placeholder="gpt-4o-mini"
+                        className="model-name-combo__input"
+                        onFocus={() => {
+                          if (ms && ms.models.length > 0) setOpenDropdownIdx(idx);
+                        }}
+                      />
+                      {ms && ms.models.length > 0 && (
+                        <button
+                          type="button"
+                          className="model-name-combo__arrow"
+                          onClick={() => setOpenDropdownIdx((cur) => (cur === idx ? null : idx))}
+                          aria-label="展开模型列表"
+                          aria-expanded={openDropdownIdx === idx}
+                          tabIndex={-1}
+                        >
+                          <svg width="12" height="8" viewBox="0 0 12 8" fill="none" aria-hidden="true">
+                            <path d="M1.5 1.5L6 6l4.5-4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
+                      )}
+                      {openDropdownIdx === idx && ms && ms.models.length > 0 && (
+                        <div className="custom-select__panel model-name-combo__panel" role="listbox">
+                          {ms.models.map((m) => (
+                            <div
+                              key={m}
+                              role="option"
+                              aria-selected={t.modelName === m}
+                              className={`custom-select__option${t.modelName === m ? ' custom-select__option--selected' : ''}`}
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                updateToken(idx, 'modelName', m);
+                                setOpenDropdownIdx(null);
+                              }}
+                            >
+                              {m}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        className="model-name-row__fetch-btn"
+                        onClick={() => handleFetchModels(idx)}
+                        disabled={modelsState[idx]?.loading}
+                        title="通过当前 API Key 和 Base URL 获取模型列表"
+                      >
+                        {modelsState[idx]?.loading ? '获取中…' : '拉取模型列表'}
+                      </button>
+                    )}
+                  </div>
+                  {ms?.error && (
+                    <span className="field__hint field__hint--error">
+                      获取失败：{ms.error}
+                    </span>
+                  )}
+                  {ms && !ms.error && ms.models.length > 0 && (
+                    <span className="field__hint">
+                      已获取 {ms.models.length} 个模型，点击输入框右侧箭头可展开选择
+                    </span>
+                  )}
                 </label>
                 <label className="field field--inline">
                   <span>流式请求</span>
@@ -196,7 +315,8 @@ export function BackendConfigEditor({ config, onChange, readOnly = false }: Back
                   </CustomSelect>
                 </label>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           <label className="field">

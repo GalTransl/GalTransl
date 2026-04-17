@@ -67,6 +67,7 @@ export function BackendSettingsSection({
           <BackendConfigEditor
             config={config?.backendSpecific as Record<string, unknown> || {}}
             onChange={(newBackend) => { onBackendChange(newBackend); onDirty(); }}
+            proxy={(config?.proxy as { http?: string; https?: string } | undefined) ?? null}
           />
         )}
 
