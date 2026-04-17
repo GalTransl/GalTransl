@@ -13,6 +13,7 @@ import {
   type ProjectRuntimeResponse,
   type SubmitJobPayload,
   fetchJobs,
+  fetchProjectConfig,
   fetchProjectRuntime,
   getSelectedTranslatorTemplate,
   getSelectedBackendProfile,
@@ -61,7 +62,8 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const seenSuccessIdsRef = useRef<Set<string>>(new Set());
   const successListRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
-  const [rightTab, setRightTab] = useState<'errors' | 'files'>('errors');
+  const [rightTab, setRightTab] = useState<'errors' | 'files' | 'retransl'>('errors');
+  const [retranslKeys, setRetranslKeys] = useState<string[]>([]);
   const [launchPhase, setLaunchPhase] = useState<'idle' | 'charging' | 'blasting'>('idle');
   const [stripBooting, setStripBooting] = useState(false);
   const [barSurging, setBarSurging] = useState(false);
@@ -116,6 +118,36 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     void refreshJobs();
     void refreshRuntime();
   }, [refreshJobs, refreshRuntime]);
+
+  const refreshRetranslKeys = useCallback(async () => {
+    if (!projectId) {
+      setRetranslKeys([]);
+      return;
+    }
+    try {
+      const res = await fetchProjectConfig(projectId, configFileName || 'config.yaml');
+      const common = (res.config?.common as Record<string, unknown>) || {};
+      const raw = common.retranslKey;
+      let keys: string[] = [];
+      if (Array.isArray(raw)) {
+        keys = raw.map((k) => String(k ?? '').trim()).filter(Boolean);
+      } else if (typeof raw === 'string') {
+        keys = raw.split(/\r?\n/).map((k) => k.trim()).filter(Boolean);
+      }
+      setRetranslKeys(keys);
+    } catch {
+      // silent; keep prior list
+    }
+  }, [projectId, configFileName]);
+
+  useEffect(() => {
+    void refreshRetranslKeys();
+  }, [refreshRetranslKeys]);
+
+  useEffect(() => {
+    if (rightTab !== 'retransl') return;
+    void refreshRetranslKeys();
+  }, [rightTab, refreshRetranslKeys]);
 
   useEffect(() => {
     const poller = window.setInterval(() => {
@@ -686,6 +718,18 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                     <span className="ptv2-tab__badge">{prioritizedRuntimeFiles.length}</span>
                   ) : null}
                 </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={rightTab === 'retransl'}
+                  className={`ptv2-tab${rightTab === 'retransl' ? ' ptv2-tab--active' : ''}`}
+                  onClick={() => setRightTab('retransl')}
+                >
+                  <span className="ptv2-tab__label">重翻词条</span>
+                  {retranslKeys.length > 0 ? (
+                    <span className="ptv2-tab__badge">{retranslKeys.length}</span>
+                  ) : null}
+                </button>
               </div>
             </header>
             <div className="panel__body ptv2-tabpanel__body">
@@ -699,7 +743,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                 ) : (
                   <EmptyState title="最近没有错误" description="接口错误、解析错误或重试退避会显示在这里。" />
                 )
-              ) : (
+              ) : rightTab === 'files' ? (
                 prioritizedRuntimeFiles.length > 0 ? (
                   <div className="ptv2-filelist">
                     {prioritizedRuntimeFiles.map((file) => (
@@ -713,6 +757,19 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                   </div>
                 ) : (
                   <EmptyState title="暂无文件进度" description="启动翻译后，文件级进度会在这里展开。" />
+                )
+              ) : (
+                retranslKeys.length > 0 ? (
+                  <ul className="ptv2-retransl-list">
+                    {retranslKeys.map((key, idx) => (
+                      <li className="ptv2-retransl-list__item" key={`${idx}-${key}`}>
+                        <span className="ptv2-retransl-list__index">{idx + 1}</span>
+                        <span className="ptv2-retransl-list__text">{key}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <EmptyState title="暂无重翻词条" description="在项目配置「重翻关键字」中添加后，启动翻译时命中的句子会被重新翻译。" />
                 )
               )}
             </div>

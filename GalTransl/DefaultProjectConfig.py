@@ -54,13 +54,13 @@ common:
   smartRetry: True # 解析失败时自动缩小批次并重置上下文，减少无效重试。[True/False]
   retranslFail: false # 程序重启时是否自动重翻标记为"(Failed)"的句子。[True/False]
   retranslKey:
-    - "关键字重翻：命中缓存problem或pre_jp关键字的句子会被重翻；去掉#可启用，也可自定义关键字。"
-    - "翻译失败" # 启动时重翻命中“翻译失败”的句子
+    - ""
+    #- "翻译失败" # 启动时重翻命中“翻译失败”的句子
     #- "残留日文" # 启动时重翻命中“残留日文”的句子
 
   gpt.contextNum: 8 # 每次请求附带的前文句数；值越大上下文更强、成本更高（常用8）。[0-32]
   # ForGal/ForGal-json/ForNovel/r1
-  gpt.translation_guideline: "日译中_基础.md" # 使用的翻译规范文件名（位于translation_guidelines），会影响文风与措辞。
+  gpt.translation_guideline: "Basic.md" # 使用的翻译规范文件名（位于translation_guidelines），会影响文风与措辞。
   gpt.enhance_jailbreak: False # 是否启用“抗拒答”增强提示，降低模型拒答概率。[True/False]
   gpt.change_prompt: "no" # Prompt修改模式：no不改；AdditionalPrompt追加；OverwritePrompt覆盖默认提示词。[no/AdditionalPrompt/OverwritePrompt]
   gpt.prompt_content: "翻译结果使用文言文" # Prompt自定义内容；仅在change_prompt为AdditionalPrompt/OverwritePrompt时生效。

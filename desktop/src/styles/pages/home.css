@@ -130,16 +130,17 @@
   align-items: center;
   justify-content: center;
   gap: 2px;
+  text-align: center;
 }
 
 .home-hero__stat-value {
-  display: block;
-  width: 100%;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 22px;
   font-weight: 800;
   color: rgba(255, 255, 255, 0.92);
-  line-height: 1;
+  line-height: 1.08;
   font-variant-numeric: tabular-nums;
 }
 
@@ -153,12 +154,13 @@
 }
 
 .home-hero__stat-label {
-  display: block;
-  width: 100%;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 10px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.4);
+  line-height: 1.2;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
