@@ -12,6 +12,8 @@ from GalTransl import (
 from GalTransl.Dictionary import CGptDict, CNormalDic
 from asyncio import gather
 from tenacity import retry, stop_after_attempt, wait_fixed
+import httpx
+import inspect
 from httpx import AsyncClient, TimeoutException
 from time import time
 from typing import Optional
@@ -20,6 +22,42 @@ from yaml import safe_load
 from os import path, sep
 from enum import Enum
 from importlib.metadata import version
+
+
+def build_httpx_proxy_kwargs(proxy_addr: Optional[str]) -> dict:
+    """根据当前安装的 httpx 版本，返回与 `httpx.AsyncClient` 兼容的代理参数。
+
+    - httpx < 0.26: 仅支持 `proxies=`
+    - 0.26 <= httpx < 0.28: 同时支持 `proxy=` 与 `proxies=`
+    - httpx >= 0.28: 仅支持 `proxy=`
+    """
+    if not proxy_addr:
+        return {}
+    try:
+        params = inspect.signature(httpx.AsyncClient.__init__).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if "proxy" in params:
+        return {"proxy": proxy_addr}
+    if "proxies" in params:
+        return {"proxies": proxy_addr}
+    # 兜底：通过 mounts 指定代理传输层
+    return {"mounts": {"all://": httpx.AsyncHTTPTransport(proxy=proxy_addr)}}
+
+
+def build_httpx_sync_proxy_kwargs(proxy_addr: Optional[str]) -> dict:
+    """同 `build_httpx_proxy_kwargs`，但用于 `httpx.Client`。"""
+    if not proxy_addr:
+        return {}
+    try:
+        params = inspect.signature(httpx.Client.__init__).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if "proxy" in params:
+        return {"proxy": proxy_addr}
+    if "proxies" in params:
+        return {"proxies": proxy_addr}
+    return {"mounts": {"all://": httpx.HTTPTransport(proxy=proxy_addr)}}
 
 
 class CProxy:
@@ -203,7 +241,7 @@ class CProxyPool:
         try:
             st = time()
             LOGGER.debug("start testing proxy %s", proxy.addr)
-            async with AsyncClient(proxy=proxy.addr) as client:
+            async with AsyncClient(**build_httpx_proxy_kwargs(proxy.addr)) as client:
                 response = await client.get(test_address)
                 if response.status_code != 204:
                     LOGGER.debug(

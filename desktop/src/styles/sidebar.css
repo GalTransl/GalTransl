@@ -452,6 +452,18 @@
   animation: sidebar-context-menu-in 120ms ease-out;
 }
 
+.sidebar__toast-host {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 110;
+  width: min(380px, calc(100vw - 36px));
+}
+
+.sidebar__toast-host .inline-alert {
+  margin-bottom: 0;
+}
+
 @keyframes sidebar-context-menu-in {
   from {
     opacity: 0;

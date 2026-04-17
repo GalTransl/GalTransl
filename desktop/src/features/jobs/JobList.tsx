@@ -1,6 +1,7 @@
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
 import { Panel } from '../../components/Panel';
+import { InlineFeedback } from '../../components/page-state/InlineFeedback';
 import type { Job } from '../../lib/api';
 import { JobCard } from './JobCard';
 
@@ -23,11 +24,7 @@ export function JobList({ jobs, jobsError, loading, onRefresh, refreshing }: Job
         </Button>
       }
     >
-      {jobsError ? (
-        <div className="inline-alert inline-alert--error" role="alert">
-          {jobsError}
-        </div>
-      ) : null}
+      {jobsError ? <InlineFeedback tone="error" title="加载任务失败" description={jobsError} /> : null}
 
       {loading ? <EmptyState title="正在载入任务" description="正在请求后端任务列表，请稍候。" /> : null}
 

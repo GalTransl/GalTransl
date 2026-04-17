@@ -5,7 +5,7 @@ CloseAI related classes
 import asyncio
 from time import time
 from GalTransl import LOGGER, TRANSLATOR_DEFAULT_ENGINE
-from GalTransl.ConfigHelper import CProjectConfig, CProxy
+from GalTransl.ConfigHelper import CProjectConfig, CProxy, build_httpx_sync_proxy_kwargs
 from typing import Optional, Tuple
 from random import choice
 from asyncio import Queue
@@ -133,10 +133,11 @@ class COpenAITokenPool:
 
         try:
             LOGGER.info(f"API URL: {token.domain}/chat/completions")
+            proxy_kwargs = build_httpx_sync_proxy_kwargs(proxy.addr if proxy else None)
             client = OpenAI(
                 api_key=token.token,
                 base_url=token.domain,
-                #http_client=httpx.Client(proxy=proxy.addr if proxy else None),
+                http_client=httpx.Client(**proxy_kwargs) if proxy_kwargs else None,
             )
             response = client.chat.completions.create(
                 model=token.model_name,

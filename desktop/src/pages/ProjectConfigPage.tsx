@@ -21,6 +21,7 @@ import {
   PluginSettingsSection,
   DictionarySettingsSection,
   ProblemAnalyzeSection,
+  RetranslKeySection,
   type ConfigSectionKey,
 } from './project-config';
 
@@ -281,7 +282,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
             <InlineFeedback tone="error" title="配置保存失败" description={error} />
           )}
           {saveSuccess && (
-            <InlineFeedback tone="success" title="配置已保存" description="当前项目配置已成功写入磁盘。" onDismiss={() => setSaveSuccess(false)} />
+            <InlineFeedback className="inline-alert--floating" tone="success" title="配置已保存" description="当前项目配置已成功写入磁盘。" onDismiss={() => setSaveSuccess(false)} />
           )}
 
           <div key={yamlView ? 'yaml' : activeSection} className="section-fade-in">
@@ -368,6 +369,21 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
                       const pa = { ...((prev?.problemAnalyze as Record<string, unknown>) || {}) };
                       pa.problemList = lines;
                       return prev ? { ...prev, problemAnalyze: pa } : prev;
+                    });
+                  }}
+                  onDirty={() => { setSaveSuccess(false); setDirty(true); }}
+                />
+              )}
+
+              {activeSection === 'retranslKey' && (
+                <RetranslKeySection
+                  config={config}
+                  onChange={(keys) => {
+                    setConfig((prev) => {
+                      if (!prev) return prev;
+                      const common = { ...((prev.common as Record<string, unknown>) || {}) };
+                      common.retranslKey = keys;
+                      return { ...prev, common };
                     });
                   }}
                   onDirty={() => { setSaveSuccess(false); setDirty(true); }}

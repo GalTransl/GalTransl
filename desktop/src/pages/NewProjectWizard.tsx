@@ -619,7 +619,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
         <div key={currentStep} className={`wizard-step-stage wizard-step-stage--${stepDirection}`}>
           {stepRenderers[currentStep]()}
         </div>
-        {feedback && <InlineFeedback tone={feedback.type === 'error' ? 'error' : feedback.type === 'success' ? 'success' : 'info'} title={feedback.message} />}
+        {feedback && <InlineFeedback className={feedback.type === 'success' ? 'inline-alert--floating' : undefined} tone={feedback.type === 'error' ? 'error' : feedback.type === 'success' ? 'success' : 'info'} title={feedback.message} />}
       </div>
       <div className="wizard-nav">
         <Button variant="secondary" onClick={handlePrevStep} disabled={currentStep === 0}>

@@ -251,14 +251,3 @@
 .log-line--debug {
   color: #565f89;
 }
-
-/* ── Inline Alerts ── */
-
-.inline-alert--success {
-  background: var(--color-success-soft);
-  color: var(--color-success);
-  border-radius: var(--radius-control);
-  padding: var(--space-3) var(--space-4);
-  font-size: 14px;
-  margin-bottom: var(--space-4);
-}

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '../../components/Button';
 import { CustomSelect } from '../../components/CustomSelect';
 import { Panel } from '../../components/Panel';
+import { InlineFeedback } from '../../components/page-state/InlineFeedback';
 import type { SubmitJobPayload, TranslatorOption } from '../../lib/api';
 
 type JobSubmitFormProps = {
@@ -94,14 +95,12 @@ export function JobSubmitForm({ disabled, isSubmitting, onSubmit, submitError, t
         </label>
 
         {activeError ? (
-          <div className="inline-alert inline-alert--error" role="alert">
-            {activeError}
-          </div>
+          <InlineFeedback tone="error" title="启动任务失败" description={activeError} />
         ) : (
-          <div className="inline-alert inline-alert--info">
+          <InlineFeedback tone="info" title="连接提示">
             后端默认地址来自 <code>VITE_BACKEND_URL</code>，未设置时回退到{' '}
             <code>http://127.0.0.1:18000</code>。
-          </div>
+          </InlineFeedback>
         )}
 
         <div className="form-actions">

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '../components/Button';
 import { CustomSelect } from '../components/CustomSelect';
@@ -307,6 +308,14 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
   // Problems tab state
   const [problems, setProblems] = useState<ProblemEntry[]>([]);
   const [loadingProblems, setLoadingProblems] = useState(false);
+  // Retransl keyword popover editor
+  const [retranslEditor, setRetranslEditor] = useState<{
+    type: string;
+    draft: string;
+    anchor: { top: number; left: number };
+  } | null>(null);
+  const retranslPopoverRef = useRef<HTMLDivElement | null>(null);
+  const retranslInputRef = useRef<HTMLInputElement | null>(null);
 
   // Replace state
   const [replaceQuery, setReplaceQuery] = useState('');
@@ -634,11 +643,33 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
     }
   }, [projectId]);
 
+  // Close retransl popover on outside click / Escape
+  useEffect(() => {
+    if (!retranslEditor) return;
+    const onPointerDown = (e: MouseEvent) => {
+      const pop = retranslPopoverRef.current;
+      if (!pop) return;
+      if (pop.contains(e.target as Node)) return;
+      // Ignore the +/toggle button so it can toggle the popover itself
+      if ((e.target as HTMLElement).closest?.('.cache-problems-group__retransl')) return;
+      setRetranslEditor(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setRetranslEditor(null);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [retranslEditor]);
+
   // Problems grouped by type
   const problemStats = useMemo(() => {
     const stats: Record<string, ProblemEntry[]> = {};
     for (const p of problems) {
-      const type = p.problem.split('：')[0].split('-')[0].trim();
+      const type = p.problem.split('：')[0].trim();
       if (!stats[type]) stats[type] = [];
       stats[type].push(p);
     }
@@ -808,7 +839,7 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
           <>
             {error && <InlineFeedback tone="error" title="加载缓存失败" description={error} />}
             {localError && <InlineFeedback tone="error" title="操作失败" description={localError} />}
-            {info && <InlineFeedback tone="success" title="操作成功" description={info} onDismiss={() => setInfo(null)} />}
+            {info && <InlineFeedback className="inline-alert--floating" tone="success" title="操作成功" description={info} onDismiss={() => setInfo(null)} />}
           </>
         }
       />
@@ -1048,30 +1079,83 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
                         onClick={() => handleProblemClick(type)}
                         title={`点击搜索「${type}」类型问题`}
                       >
-                        <span className="cache-problems-group__type">{type}</span>
+                        <span className="cache-problems-group__summary">
+                          <span className="cache-problems-group__type">{type}</span>
+                        </span>
                         <span className="cache-problems-group__count">{items.length}</span>
-                      </div>
-                      <div className="cache-problems-group__items">
-                        {items.map((p, i) => (
+                        <button
+                          type="button"
+                          className={`cache-problems-group__retransl${retranslEditor?.type === type ? ' cache-problems-group__retransl--active' : ''}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                            const anchor = {
+                              top: rect.top + rect.height / 2,
+                              left: rect.right + 10 };
+                            setRetranslEditor((cur) => (cur && cur.type === type ? null : { type, draft: type, anchor }));
+                          }}
+                          title={`编辑并加入重翻关键字`}
+                          aria-label={`编辑并加入「${type}」到重翻关键字`}
+                          aria-expanded={retranslEditor?.type === type}
+                        >
+                          +
+                        </button>
+                        {retranslEditor?.type === type && createPortal((
                           <div
-                            key={`${p.filename}-${p.index}-${i}`}
-                            className="cache-problems-item"
-                            onClick={() => handleProblemClick(type)}
+                            ref={retranslPopoverRef}
+                            className="retransl-popover"
+                            role="dialog"
+                            aria-label="编辑重翻关键字"
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ top: retranslEditor.anchor.top, left: retranslEditor.anchor.left }}
                           >
-                            <span className="cache-problems-item__info">
-                              {p.filename} #{p.index}
-                            </span>
-                            <span className="cache-problems-item__problem">{p.problem}</span>
-                            <button
-                              type="button"
-                              className="cache-problems-item__retransl"
-                              onClick={(e) => { e.stopPropagation(); void handleAddToRetranslKey(p.problem); }}
-                              title="加入重翻关键字"
-                            >
-                              🔄
-                            </button>
+                            <div className="retransl-popover__arrow" aria-hidden="true" />
+                            <label className="retransl-popover__label">加入重翻关键字</label>
+                            <input
+                              ref={retranslInputRef}
+                              type="text"
+                              className="retransl-popover__input"
+                              value={retranslEditor.draft}
+                              onChange={(e) => setRetranslEditor((cur) => (cur ? { ...cur, draft: e.target.value } : cur))}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  const kw = retranslEditor.draft.trim();
+                                  if (!kw) return;
+                                  setRetranslEditor(null);
+                                  void handleAddToRetranslKey(kw);
+                                } else if (e.key === 'Escape') {
+                                  e.preventDefault();
+                                  setRetranslEditor(null);
+                                }
+                              }}
+                              placeholder="关键字"
+                              autoFocus
+                            />
+                            <div className="retransl-popover__actions">
+                              <button
+                                type="button"
+                                className="retransl-popover__btn retransl-popover__btn--ghost"
+                                onClick={() => setRetranslEditor(null)}
+                              >
+                                取消
+                              </button>
+                              <button
+                                type="button"
+                                className="retransl-popover__btn retransl-popover__btn--primary"
+                                disabled={!retranslEditor.draft.trim()}
+                                onClick={() => {
+                                  const kw = retranslEditor.draft.trim();
+                                  if (!kw) return;
+                                  setRetranslEditor(null);
+                                  void handleAddToRetranslKey(kw);
+                                }}
+                              >
+                                加入
+                              </button>
+                            </div>
                           </div>
-                        ))}
+                        ), document.body)}
                       </div>
                     </div>
                   ))}

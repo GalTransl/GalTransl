@@ -929,6 +929,31 @@ def _write_backend_profiles(data: dict) -> None:
     _write_yaml_file(_BACKEND_PROFILES_PATH, data)
 
 
+_PROBLEM_TYPE_CATALOG: list[dict[str, str]] = [
+    {"name": "词频过高", "description": "某字在译文中重复大于 20 次（且远多于原文）。"},
+    {"name": "标点错漏", "description": "括号/引号/冒号等标点与原文不一致。"},
+    {"name": "残留日文", "description": "译文中残留日文平假名或片假名。"},
+    {"name": "丢失换行", "description": "译文缺少原文中的行内换行。"},
+    {"name": "多加换行", "description": "译文换行符比原文多，可能导致溢出。"},
+    {"name": "比日文长", "description": "译文长度超过原文 1.3 倍（常用，宽松阈值）。"},
+    {"name": "比日文长严格", "description": "译文长度超过原文（零容忍，严格阈值）。"},
+    {"name": "字典使用", "description": "没有按 GPT 字典的要求翻译。"},
+    {"name": "引入英文", "description": "原文无英文，但译文引入了英文单词。"},
+    {"name": "语言不通", "description": "译文包含大量非 GBK 字符（仅对中文目标语言生效）。"},
+    {"name": "缺控制符", "description": "译文缺少原文中的控制符（如 \\n、变量标记等）。"},
+]
+
+
+def _list_problem_types() -> list[dict[str, str]]:
+    """Return the list of problem types supported by the backend analyzer.
+
+    Each entry has ``name`` (used in YAML config) and a short ``description``.
+    Kept in sync with :class:`GalTransl.ConfigHelper.CProblemType` and
+    :func:`GalTransl.Problem.find_problems`.
+    """
+    return list(_PROBLEM_TYPE_CATALOG)
+
+
 def _scan_plugins() -> list[dict[str, Any]]:
     """Scan the plugins directory and return plugin metadata."""
     plugins_dir = os.path.abspath("plugins")
@@ -2543,6 +2568,10 @@ def build_handler(registry: JobRegistry):
             # --- Project API ---
             if path == "/api/plugins":
                 self._send_json({"plugins": _scan_plugins()})
+                return
+
+            if path == "/api/problem-types":
+                self._send_json({"problem_types": _list_problem_types()})
                 return
 
             if path.startswith("/api/projects/"):

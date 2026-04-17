@@ -5,7 +5,7 @@ from typing import Optional
 from collections import deque
 from threading import Lock
 from GalTransl.COpenAI import COpenAITokenPool, COpenAIToken
-from GalTransl.ConfigHelper import CProxyPool
+from GalTransl.ConfigHelper import CProxyPool, build_httpx_proxy_kwargs
 from GalTransl import LOGGER, LANG_SUPPORTED, TRANSLATOR_DEFAULT_ENGINE
 from GalTransl.i18n import get_text, GT_LANG
 from GalTransl.ConfigHelper import (
@@ -209,24 +209,19 @@ class BaseTranslate:
             proxy_addr = None
 
         trust_env = False  # 不使用系统代理
+        proxy_kwargs = build_httpx_proxy_kwargs(proxy_addr)
         self.client_list = []
         for token in self.tokenProvider.get_available_token():
-            # client = AsyncOpenAI(
-            #     api_key=token.token,
-            #     base_url=token.domain,
-            #     max_retries=0,
-            #     http_client=httpx.AsyncClient(proxy=proxy_addr, trust_env=trust_env),
-            # )
             client = AsyncOpenAI(
                 api_key=token.token,
                 base_url=token.domain,
                 max_retries=0,
                 http_client=DefaultAioHttpClient(
-                    #proxy=proxy_addr,
                     trust_env=trust_env,
                     limits=httpx.Limits(
                         max_keepalive_connections=None, max_connections=None
                     ),
+                    **proxy_kwargs,
                 ),
             )
             self.client_list.append((client, token))

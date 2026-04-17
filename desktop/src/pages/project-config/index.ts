@@ -5,4 +5,5 @@ export { BackendSettingsSection } from './BackendSettingsSection';
 export { PluginSettingsSection } from './PluginSettingsSection';
 export { DictionarySettingsSection } from './DictionarySettingsSection';
 export { ProblemAnalyzeSection } from './ProblemAnalyzeSection';
+export { RetranslKeySection } from './RetranslKeySection';
 export { ConfigFieldRow, ConfigFieldGroup } from './ConfigFieldRow';

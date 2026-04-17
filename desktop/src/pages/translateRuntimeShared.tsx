@@ -133,12 +133,12 @@ export function RuntimeSuccessRow({
         <p className="runtime-success-compact__line">
           <span className="runtime-success-compact__label">SRC</span>
           {speakerLabel ? <span className="runtime-success-compact__speaker-inline" style={speakerStyleVal}>{speakerLabel}</span> : null}
-          <span>{entry.source_preview || '—'}</span>
+          <span title={entry.source_preview || undefined}>{entry.source_preview || '—'}</span>
         </p>
         <p className="runtime-success-compact__line">
           <span className="runtime-success-compact__label">DST</span>
           {speakerLabel ? <span className="runtime-success-compact__speaker-inline" style={speakerStyleVal}>{speakerLabel}</span> : null}
-          <span>{entry.translation_preview || '—'}</span>
+          <span title={entry.translation_preview || undefined}>{entry.translation_preview || '—'}</span>
         </p>
       </div>
     </article>

@@ -224,6 +224,10 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
 
   useEffect(() => {
     if (!projectDir || !runtimeMatchesProject || !currentJob?.translator) return;
+    // Auxiliary flows like 构建输出 (rebuilda/rebuildr) and 提取人名表 (dump-name)
+    // reuse the job pipeline but must not hijack the user's translator template
+    // selection in the cockpit dropdown.
+    if (HIDDEN_TRANSLATORS.has(currentJob.translator)) return;
     setSelectedTranslator((current) => (current === currentJob.translator ? current : currentJob.translator));
     setSelectedTranslatorTemplate(projectDir, currentJob.translator);
   }, [currentJob?.translator, projectDir, runtimeMatchesProject]);
@@ -512,15 +516,46 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
         <div className="ptv2-cockpit__topline">
           <div className="ptv2-cockpit__brand">
             <span className="ptv2-cockpit__eyebrow">Translation Cockpit</span>
-            <h1 className="ptv2-cockpit__title">
-              翻译工作台
+            <div className="ptv2-cockpit__title-row">
+              <h1 className="ptv2-cockpit__title">
+                翻译工作台
+                {projectName ? (
+                  <>
+                    <span className="ptv2-cockpit__title-sep">·</span>
+                    <span className="ptv2-cockpit__title-project">{projectName}</span>
+                  </>
+                ) : null}
+              </h1>
               {projectName ? (
-                <>
-                  <span className="ptv2-cockpit__title-sep">·</span>
-                  <span className="ptv2-cockpit__title-project">{projectName}</span>
-                </>
+                <div className="project-translate-page__folder-menu ptv2-cockpit__folder-inline">
+                  <button
+                    type="button"
+                    className="ptv2-folder-iconbtn"
+                    disabled={!projectDir}
+                    onClick={() => handleOpenFolder(projectDir)}
+                    title={projectDir || '打开项目文件夹'}
+                    aria-label="打开项目文件夹"
+                  >
+                    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                      <path
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M3 7.2c0-1.12.9-2.02 2-2.02h4.17c.53 0 1.04.21 1.41.59L12 7.2h7c1.1 0 2 .9 2 2.02v7.77c0 1.12-.9 2.02-2 2.02H5c-1.1 0-2-.9-2-2.02V7.2z"
+                      />
+                    </svg>
+                  </button>
+                  <div className="project-translate-page__folder-menu-dropdown" role="menu">
+                    <Button className="project-translate-page__folder-menu-item" disabled={!projectDir} onClick={() => handleOpenFolder(projectDir)} title={projectDir} variant="secondary">📂 项目文件夹</Button>
+                    <Button className="project-translate-page__folder-menu-item" disabled={!projectDir} onClick={() => handleOpenFolder(inputFolderPath)} title={inputFolderPath} variant="secondary">📥 输入文件夹</Button>
+                    <Button className="project-translate-page__folder-menu-item" disabled={!projectDir} onClick={() => handleOpenFolder(outputFolderPath)} title={outputFolderPath} variant="secondary">📤 输出文件夹</Button>
+                    <Button className="project-translate-page__folder-menu-item" disabled={!projectDir} onClick={() => handleOpenFolder(cacheFolderPath)} title={cacheFolderPath} variant="secondary">💾 缓存文件夹</Button>
+                  </div>
+                </div>
               ) : null}
-            </h1>
+            </div>
           </div>
           <div className="ptv2-cockpit__statusline">
             <StatusBadge label={statusLabel} tone={statusTone} celebrate={justCompleted} />
@@ -618,52 +653,23 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
             <span className="ptv2-stat__value">{elapsedText}</span>
             <span className="ptv2-stat__label">已用时长</span>
           </div>
-          <div className="ptv2-cockpit__ribbon-spacer" />
-          <div className="project-translate-page__folder-menu ptv2-cockpit__folder">
-            <Button disabled={!projectDir} onClick={() => handleOpenFolder(projectDir)} title={projectDir} variant="secondary">
-              📂 打开项目文件夹
-            </Button>
-            <div className="project-translate-page__folder-menu-dropdown" role="menu">
-              <Button className="project-translate-page__folder-menu-item" disabled={!projectDir} onClick={() => handleOpenFolder(inputFolderPath)} title={inputFolderPath} variant="secondary">📥 输入文件夹</Button>
-              <Button className="project-translate-page__folder-menu-item" disabled={!projectDir} onClick={() => handleOpenFolder(outputFolderPath)} title={outputFolderPath} variant="secondary">📤 输出文件夹</Button>
-              <Button className="project-translate-page__folder-menu-item" disabled={!projectDir} onClick={() => handleOpenFolder(cacheFolderPath)} title={cacheFolderPath} variant="secondary">💾 缓存文件夹</Button>
-            </div>
-          </div>
         </div>
       </section>
 
-      {submitError ? <InlineFeedback tone="error" title="启动翻译失败" description={submitError} className="ptv2-alert" /> : null}
-      {runtimeError ? <InlineFeedback tone="error" title="运行时状态异常" description={runtimeError} className="ptv2-alert" /> : null}
+      {submitError ? <InlineFeedback tone="error" title="启动翻译失败" description={submitError} className="ptv2-alert inline-alert--floating" /> : null}
+      {runtimeError ? <InlineFeedback tone="error" title="运行时状态异常" description={runtimeError} className="ptv2-alert inline-alert--floating" /> : null}
       {currentJob?.status === 'failed' && currentJobError ? (
-        <InlineFeedback className="ptv2-alert" tone="error" title="任务失败" description={currentJobError} />
+        <InlineFeedback className="ptv2-alert inline-alert--floating" tone="error" title="任务失败" description={currentJobError} />
       ) : null}
       {currentJob?.status === 'cancelled' && currentJobError && cancelledAlertJobId === currentJob.job_id ? (
-        <div className="ptv2-toast-host" aria-live="polite">
-          <div className="ptv2-toast ptv2-toast--info" role="status">
-            <div className="ptv2-toast__icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="20" height="20">
-                <path fill="currentColor" d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 4.5a1.3 1.3 0 110 2.6 1.3 1.3 0 010-2.6zm1.4 11.5h-2.8v-7h2.8v7z" />
-              </svg>
-            </div>
-            <div className="ptv2-toast__body">
-              <div className="ptv2-toast__meta">
-                <span className="ptv2-toast__app">GalTransl</span>
-                <span className="ptv2-toast__dot" aria-hidden="true" />
-                <span className="ptv2-toast__time">刚刚</span>
-              </div>
-              <div className="ptv2-toast__title">任务已取消</div>
-              <p className="ptv2-toast__msg">{currentJobError}</p>
-            </div>
-            <button
-              type="button"
-              className="ptv2-toast__close"
-              aria-label="关闭通知"
-              onClick={() => setCancelledAlertJobId(null)}
-            >
-              ×
-            </button>
-          </div>
-        </div>
+        <InlineFeedback
+          className="ptv2-alert inline-alert--floating"
+          tone="info"
+          title="任务已取消"
+          description={currentJobError}
+          autoDismiss={2800}
+          onDismiss={() => setCancelledAlertJobId(null)}
+        />
       ) : null}
 
       {/* Main area: success stream (wide) + recent errors (narrower) */}

@@ -336,6 +336,15 @@ export type PluginsResponse = {
   plugins: PluginInfo[];
 };
 
+export type ProblemTypeInfo = {
+  name: string;
+  description: string;
+};
+
+export type ProblemTypesResponse = {
+  problem_types: ProblemTypeInfo[];
+};
+
 // ---- Project ID helpers ----
 
 export function encodeProjectDir(projectDir: string): string {
@@ -652,6 +661,11 @@ export async function fetchProjectLogs(projectId: string, tail = 2000) {
 export async function fetchPlugins() {
   const response = await apiRequest<PluginsResponse>('/api/plugins');
   return response.plugins;
+}
+
+export async function fetchProblemTypes() {
+  const response = await apiRequest<ProblemTypesResponse>('/api/problem-types');
+  return response.problem_types;
 }
 
 export async function fetchAppSettings() {

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type TransitionEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type TransitionEvent } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { encodeProjectDir, decodeProjectDir, submitJob, fetchJob, fetchProjectRuntime, type ProjectRuntimeResponse } from '../lib/api';
+import { InlineFeedback } from './page-state/InlineFeedback';
 import logoUrl from '../assets/logo.png';
 
 const CONFIG_FILE_KEY = 'galtransl-config-file';
@@ -75,6 +76,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
   const [rebuildingDirs, setRebuildingDirs] = useState<Record<string, boolean>>({});
   // Track which projects have active translation jobs (running or pending)
   const [translatingDirs, setTranslatingDirs] = useState<Record<string, boolean>>({});
+  const [rebuildToast, setRebuildToast] = useState<string | null>(null);
   // Right-click context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; projectDir: string } | null>(null);
   const prevOpenProjectsRef = useRef<string[]>(openProjects);
@@ -350,14 +352,14 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
             const outputDir = `${normalizedDir}\\${OUTPUT_FOLDER_NAME}`;
             await invoke('open_folder', { path: outputDir });
           } else {
-            alert(`输出文件重建失败: ${status.error || '未知错误'}`);
+            setRebuildToast(`输出文件重建失败: ${status.error || '未知错误'}`);
           }
           return;
         }
       }
-      alert('输出文件重建超时');
+      setRebuildToast('输出文件重建超时');
     } catch (err) {
-      alert(`输出文件重建出错: ${err instanceof Error ? err.message : String(err)}`);
+      setRebuildToast(`输出文件重建出错: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setRebuildingDirs((prev) => ({ ...prev, [projectDir]: false }));
     }
@@ -651,6 +653,18 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
           </button>
         </div>
       )}
+
+      {rebuildToast ? (
+        <div className="sidebar__toast-host" aria-live="assertive">
+          <InlineFeedback
+            tone="error"
+            title="构建输出失败"
+            description={rebuildToast}
+            autoDismiss={2800}
+            onDismiss={() => setRebuildToast(null)}
+          />
+        </div>
+      ) : null}
     </aside>
   );
 }

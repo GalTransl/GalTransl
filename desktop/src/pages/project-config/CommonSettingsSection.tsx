@@ -22,7 +22,6 @@ const ADVANCED_FIELDS: ConfigFieldDef[] = [
   { key: 'skipH', label: '跳过敏感句', description: '是否跳过可能触发敏感词检测的句子。', type: 'select', options: ['true', 'false'] },
   { key: 'smartRetry', label: '智能重试', description: '解析失败时自动缩小批次并重置上下文，减少无效重试。', type: 'select', options: ['true', 'false'] },
   { key: 'retranslFail', label: '重翻失败句', description: '启动时是否自动重翻标记为 (Failed) 的句子。', type: 'select', options: ['true', 'false'] },
-  { key: 'retranslKey', label: '重翻关键字', description: '每行一个关键字，命中这些关键字的句子会被重新翻译。', type: 'list' },
   { key: 'gpt.enhance_jailbreak', label: '改善拒答', description: '启用后可降低模型拒答概率。', type: 'select', options: ['true', 'false'] },
   { key: 'gpt.change_prompt', label: '修改Prompt', description: 'no 不改；AdditionalPrompt 追加；OverwritePrompt 覆盖默认提示词。', type: 'select', options: ['no', 'AdditionalPrompt', 'OverwritePrompt'] },
   { key: 'gpt.prompt_content', label: '额外Prompt内容', description: '仅在"修改Prompt"非 no 时生效。', type: 'text' },

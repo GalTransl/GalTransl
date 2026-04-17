@@ -488,7 +488,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
       </div>
 
       {localError && <InlineFeedback tone="error" title="操作失败" description={localError} />}
-      {info && <InlineFeedback tone="success" title="操作成功" description={info} />}
+      {info && <InlineFeedback className="inline-alert--floating" tone="success" title="操作成功" description={info} />}
 
       <div className="project-dictionary-page__content">
         <div className="dict-tabs">
