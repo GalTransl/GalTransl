@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Button } from '../components/Button';
@@ -8,6 +8,7 @@ import {
   encodeProjectDir,
   fetchJobs,
   fetchProjectRuntime,
+  fetchVersion,
   getHomeHistoryRetentionLimit,
   getHomeJobRetentionLimit,
   HOME_HISTORY_LIMIT_CHANGE_EVENT,
@@ -17,12 +18,10 @@ import {
 } from '../lib/api';
 import { formatTimestamp } from '../lib/format';
 import { normalizeError } from '../lib/errors';
-import desktopPackage from '../../package.json';
-
 const HISTORY_KEY = 'galtransl-project-history';
 const JOB_MEMORY_KEY = 'galtransl-home-jobs-memory';
+const JOB_CLEARED_KEY = 'galtransl-home-jobs-cleared';
 const PROJECT_HOMEPAGE = 'https://github.com/XD2333/GalTransl';
-const APP_VERSION = desktopPackage.version ? `v${desktopPackage.version}` : 'dev';
 const MIN_REFRESH_SPIN_MS = 420;
 const REFRESH_SPIN_CYCLE_MS = 500;
 
@@ -115,14 +114,36 @@ function saveRememberedJobs(jobs: Job[], limit: number) {
   }
 }
 
-function mergeJobsWithMemory(existing: Job[], incoming: Job[], limit: number): Job[] {
+function loadClearedJobIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(JOB_CLEARED_KEY);
+    if (!raw) return new Set();
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((id): id is string => typeof id === 'string'));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveClearedJobIds(ids: Set<string>) {
+  try {
+    localStorage.setItem(JOB_CLEARED_KEY, JSON.stringify(Array.from(ids)));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function mergeJobsWithMemory(existing: Job[], incoming: Job[], limit: number, cleared: Set<string>): Job[] {
   const merged = new Map<string, Job>();
 
   incoming.forEach((job) => {
+    if (cleared.has(job.job_id)) return;
     merged.set(job.job_id, job);
   });
 
   existing.forEach((job) => {
+    if (cleared.has(job.job_id)) return;
     if (!merged.has(job.job_id)) {
       merged.set(job.job_id, job);
     }
@@ -162,6 +183,8 @@ export function HomePage({ onOpenProject }: HomePageProps) {
   const [stoppingJobId, setStoppingJobId] = useState<string | null>(null);
   const [shouldLoadJobProgress, setShouldLoadJobProgress] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [coreVersion, setCoreVersion] = useState<string | null>(null);
+  const clearedJobIds = useRef<Set<string>>(loadClearedJobIds());
   const [jobProgressById, setJobProgressById] = useState<
     Record<
       string,
@@ -180,6 +203,10 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     const t = requestAnimationFrame(() => setMounted(true));
     return () => cancelAnimationFrame(t);
   }, [historyLimit]);
+
+  useEffect(() => {
+    fetchVersion().then(setCoreVersion).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     const handleHistoryLimitChanged = () => {
@@ -227,7 +254,24 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     if (!silent) setRefreshingJobs(true);
     try {
       const nextJobs = await fetchJobs();
-      setJobs((currentJobs) => mergeJobsWithMemory(currentJobs, nextJobs, jobMemoryLimit));
+      let clearedDirty = false;
+      const backendJobIds = new Set(nextJobs.map((job) => job.job_id));
+      nextJobs.forEach((job) => {
+        if (job.status === 'running' || job.status === 'pending') {
+          if (clearedJobIds.current.delete(job.job_id)) {
+            clearedDirty = true;
+          }
+        }
+      });
+      // 回收：后端已不再返回的 id 无需继续保留在 cleared 集合里
+      clearedJobIds.current.forEach((id) => {
+        if (!backendJobIds.has(id)) {
+          clearedJobIds.current.delete(id);
+          clearedDirty = true;
+        }
+      });
+      if (clearedDirty) saveClearedJobIds(clearedJobIds.current);
+      setJobs((currentJobs) => mergeJobsWithMemory(currentJobs, nextJobs, jobMemoryLimit, clearedJobIds.current));
       setJobsError(null);
 
       if (!shouldLoadJobProgress) {
@@ -368,6 +412,24 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     }
   }, [refreshJobs, stoppingJobId]);
 
+  const handleClearFinishedJobs = useCallback(() => {
+    setJobs((current) => {
+      const kept = current.filter((job) => job.status === 'running' || job.status === 'pending');
+      let changed = false;
+      current.forEach((job) => {
+        if (job.status !== 'running' && job.status !== 'pending') {
+          if (!clearedJobIds.current.has(job.job_id)) {
+            clearedJobIds.current.add(job.job_id);
+            changed = true;
+          }
+        }
+      });
+      if (changed) saveClearedJobIds(clearedJobIds.current);
+      saveRememberedJobs(kept, jobMemoryLimit);
+      return kept;
+    });
+  }, [jobMemoryLimit]);
+
   const handleRemoveHistory = useCallback((projectDirToRemove: string, event: React.MouseEvent) => {
     event.stopPropagation();
     removeProjectFromHistory(projectDirToRemove);
@@ -390,9 +452,9 @@ export function HomePage({ onOpenProject }: HomePageProps) {
             <span className="home-hero__eyebrow">Desktop Translation Console</span>
             <h1 className="home-hero__title">GalTransl</h1>
             <p className="home-hero__subtitle">Translate your favorite Galgame</p>
-            <p className="home-hero__description">从项目打开到任务追踪，一屏完成翻译工作流。</p>
+            <p className="home-hero__description">基于AI大模型的galgame自动化翻译解决方案</p>
             <div className="home-hero__chips" aria-label="首页信息">
-              <span className="home-hero__chip">版本 {APP_VERSION}</span>
+              <span className="home-hero__chip">版本 {coreVersion ? `v${coreVersion}` : '—'}</span>
               <a className="home-hero__chip home-hero__chip--link" href={PROJECT_HOMEPAGE} target="_blank" rel="noreferrer noopener">
                 项目主页
               </a>
@@ -513,15 +575,14 @@ export function HomePage({ onOpenProject }: HomePageProps) {
             </div>
             <button
               type="button"
-              className={`icon-btn icon-btn--refresh${refreshingJobs ? ' icon-btn--spinning' : ''}`}
-              disabled={refreshingJobs}
-              onClick={() => void refreshJobs()}
-              title="刷新任务列表"
-              aria-label="刷新任务列表"
+              className="icon-btn icon-btn--clear"
+              disabled={jobs.every((job) => job.status === 'running' || job.status === 'pending')}
+              onClick={handleClearFinishedJobs}
+              title="清空已完成/失败的任务"
+              aria-label="清空已完成/失败的任务"
             >
               <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
-                <path d="M13.5 8a5.5 5.5 0 11-1.4-3.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                <path d="M12 2v3.5H8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M2 4h12M5 4V2.5a.5.5 0 01.5-.5h5a.5.5 0 01.5.5V4M6 7v5M10 7v5M3 4l.8 9.1A1 1 0 004.8 14h6.4a1 1 0 001-.9L13 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
           </div>

@@ -498,7 +498,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
       </div>
       <div className="wizard-tip-card">
         <strong>推荐策略</strong>
-        <span>新项目建议先使用稳定配置，后续可在项目内按章节切换不同后端。</span>
+        <span>如果没有翻译后端可以先去翻译后端配置设置中新建。</span>
       </div>
     </Panel>
   );

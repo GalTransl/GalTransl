@@ -443,8 +443,10 @@ def check_retran_key(retran_key, target):
     Returns:
         bool: 如果 retran_key 存在于目标字符串中，返回 True；否则返回 False。
     """
+    # 过滤空串/None：空子串恒 `in` 任何字符串，若用户配置里写成 `- ""`
+    # 或 `- null`，会导致所有句子被标记为需要重翻。这里防御性跳过。
     if isinstance(retran_key, str):
-        return retran_key in target
+        return bool(retran_key) and retran_key in target
     elif isinstance(retran_key, list):
-        return any(key in target for key in retran_key)
+        return any(key in target for key in retran_key if key)
     return False

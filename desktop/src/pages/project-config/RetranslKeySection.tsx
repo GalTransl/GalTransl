@@ -92,7 +92,7 @@ export function RetranslKeySection({ config, onChange, onDirty }: RetranslKeySec
   return (
     <Panel
       title="重翻关键字"
-      description="命中这些关键字的已翻译句子会在下次启动时被重翻。按条目管理，支持增、删、改。"
+      description="原文、译文、问题中命中这些关键字的句子会在下次启动时被重翻。"
     >
       <div className="retransl-key-section">
         <div className="retransl-key-section__add">

@@ -20,7 +20,7 @@ from yaml import safe_load, safe_dump
 
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 
-from GalTransl import TRANSLATOR_SUPPORTED, INPUT_FOLDERNAME, OUTPUT_FOLDERNAME, CACHE_FOLDERNAME
+from GalTransl import TRANSLATOR_SUPPORTED, INPUT_FOLDERNAME, OUTPUT_FOLDERNAME, CACHE_FOLDERNAME, GALTRANSL_VERSION
 from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
 from GalTransl.AppSettings import load_app_settings, save_app_settings
 from GalTransl.DefaultProjectConfig import DEFAULT_PROJECT_CONFIG_YAML
@@ -72,6 +72,13 @@ class RuntimeErrorEvent:
 
 
 RUNTIME_RECENT_EVENT_LIMIT = 80
+RUNTIME_PER_FILE_SUCCESS_LIMIT = 100
+# Upper bound on the flat list of success events returned per snapshot. Each
+# translating file keeps its own 100-slot deque, but returning all of them every
+# poll would quickly explode the HTTP payload. 500 is enough to satisfy the
+# UI's 100-card render budget plus any per-file filter on a small number of
+# concurrently active files.
+RUNTIME_SNAPSHOT_SUCCESS_LIMIT = 500
 
 
 @dataclass(slots=True)
@@ -84,7 +91,11 @@ class RuntimeState:
     updated_at: str = field(default_factory=_utcnow_text)
     file_totals: dict[str, int] = field(default_factory=dict)
     cache_file_display_map: dict[str, str] = field(default_factory=dict)
-    recent_successes: deque[RuntimeSentenceEvent] = field(default_factory=lambda: deque(maxlen=RUNTIME_RECENT_EVENT_LIMIT))
+    # Per-file deque of recent success events. Each file keeps up to
+    # RUNTIME_PER_FILE_SUCCESS_LIMIT events independently so that concurrent
+    # translations of multiple files do not evict each other's cards.
+    # Each deque stores newest-first (appendleft) for O(1) merging.
+    recent_successes_by_file: dict[str, deque[RuntimeSentenceEvent]] = field(default_factory=dict)
     recent_errors: deque[RuntimeErrorEvent] = field(default_factory=lambda: deque(maxlen=RUNTIME_RECENT_EVENT_LIMIT))
     success_timestamps: deque[float] = field(default_factory=deque)
 
@@ -169,7 +180,11 @@ class RuntimeRegistry:
                 translation_preview=_trim_preview(translation_preview),
                 trans_by=trans_by,
             )
-            state.recent_successes.appendleft(event)
+            file_deque = state.recent_successes_by_file.get(display_filename)
+            if file_deque is None:
+                file_deque = deque(maxlen=RUNTIME_PER_FILE_SUCCESS_LIMIT)
+                state.recent_successes_by_file[display_filename] = file_deque
+            file_deque.appendleft(event)
             state.success_timestamps.append(now)
             self._trim_speed_window_locked(state, now)
             state.updated_at = event.ts
@@ -278,6 +293,15 @@ class RuntimeRegistry:
             now = datetime.utcnow().timestamp()
             self._trim_speed_window_locked(state, now)
             speed = round((len(state.success_timestamps) / 60) * 60, 1) if state.success_timestamps else 0
+            # Flatten per-file success deques (each newest-first) and re-order
+            # globally by timestamp desc so the snapshot list remains newest-first
+            # for existing clients.
+            merged_successes: list[RuntimeSentenceEvent] = []
+            for file_deque in state.recent_successes_by_file.values():
+                merged_successes.extend(file_deque)
+            merged_successes.sort(key=lambda ev: ev.ts, reverse=True)
+            if len(merged_successes) > RUNTIME_SNAPSHOT_SUCCESS_LIMIT:
+                merged_successes = merged_successes[:RUNTIME_SNAPSHOT_SUCCESS_LIMIT]
             return {
                 "stage": state.stage,
                 "current_file": state.current_file,
@@ -287,7 +311,7 @@ class RuntimeRegistry:
                 "file_totals": dict(state.file_totals),
                 "cache_file_display_map": dict(state.cache_file_display_map),
                 "recent_errors": [event.to_dict() for event in state.recent_errors],
-                "recent_successes": [event.to_dict() for event in state.recent_successes],
+                "recent_successes": [event.to_dict() for event in merged_successes],
                 "updated_at": state.updated_at,
             }
 
@@ -412,7 +436,12 @@ class RuntimeProgressCache:
                                 break
                             j += 1
 
-                        return f"{line_prev}|{line_now}|{line_next}"
+                        # 必须与 GalTransl.Cache._build_cache_key_for_tran 的
+                        # 拼接格式完全一致（无分隔符），否则 .append.jsonl 中的
+                        # __cache_key 与 .json 里按 signature 重建出的 key 不匹配，
+                        # 同一句会被当作两条导致 _translated_keys 膨胀、被 min()
+                        # 截断后进度条永远卡在 .json 初始 translated 数。
+                        return f"{line_prev}{line_now}{line_next}"
 
                     entries: list[Any] = []
                     try:
@@ -2534,6 +2563,9 @@ def build_handler(registry: JobRegistry):
 
             if path == "/":
                 self._send_html(INDEX_HTML)
+                return
+            if path == "/api/version":
+                self._send_json({"version": GALTRANSL_VERSION})
                 return
             if path == "/api/translators":
                 _hidden_translators = {"show-plugs", "dump-name", "rebuildr", "rebuilda"}

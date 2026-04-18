@@ -102,3 +102,9 @@
   }
 }
 
+.icon-btn--clear:hover:not(:disabled) {
+  color: var(--color-danger, #e05252);
+  border-color: var(--color-danger, #e05252);
+  background: color-mix(in srgb, var(--color-danger, #e05252) 8%, transparent);
+}
+

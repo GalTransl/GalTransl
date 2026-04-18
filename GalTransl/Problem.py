@@ -61,7 +61,7 @@ def find_problems(
             most_word, word_count = get_most_common_char(pre_zh)
             most_word_jp, word_count_jp = get_most_common_char(pre_jp)
             if word_count > 20 and word_count>word_count_jp*2:
-                problem_list.append(f"词频过高-'{most_word}'{str(word_count)}次")
+                problem_list.append(f"词频过高：'{most_word}'{str(word_count)}次")
         if CProblemType.标点错漏 in find_type:
             char_to_error = {
                 ("（", ")"): "括号",
@@ -110,7 +110,7 @@ def find_problems(
                 min_diff=0
             if len(post_zh) > len(pre_jp) * len_beta and len(post_zh)-len(pre_jp)>=min_diff:
                 problem_list.append(
-                    f"比日文长{round(len(post_zh)/max(len(pre_jp),0.1),1)}倍({len(post_zh)-len(pre_jp)}字符)"
+                    f"比日文长：{round(len(post_zh)/max(len(pre_jp),0.1),1)}倍({len(post_zh)-len(pre_jp)}字符)"
 
                 )
         if CProblemType.字典使用 in find_type:

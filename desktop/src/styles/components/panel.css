@@ -132,3 +132,13 @@
   min-height: 0;
   overflow-y: auto;
 }
+
+/* ── Dark mode overrides ── */
+:root[data-theme='dark'] .panel {
+  border-color: rgba(65, 83, 111, 0.78);
+}
+
+:root[data-theme='dark'] .hero__eyebrow {
+  background: rgba(24, 34, 48, 0.72);
+  border-color: rgba(65, 83, 111, 0.8);
+}

@@ -37,6 +37,9 @@ import {
 const JOB_POLL_INTERVAL_MS = 2000;
 const RUNTIME_POLL_INTERVAL_MS = 1000;
 const SUCCESS_STICK_BOTTOM_THRESHOLD_PX = 24;
+// Backend keeps up to 100 success cards per translating file, but the UI only
+// renders the newest 100 cards (after filtering) to keep scrolling performant.
+const SUCCESS_RENDER_LIMIT = 100;
 const INPUT_FOLDER_NAME = 'gt_input';
 const OUTPUT_FOLDER_NAME = 'gt_output';
 const CACHE_FOLDER_NAME = 'transl_cache';
@@ -468,7 +471,10 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
       const filteredEntries = shouldFilterByFiles
         ? entries.filter((entry) => selectedSuccessFileSet.has(entry.filename || ''))
         : entries;
-      return [...filteredEntries].reverse();
+      // Backend returns newest-first; take the newest SUCCESS_RENDER_LIMIT and
+      // reverse so the list renders oldest→newest (newest at the bottom).
+      const trimmed = filteredEntries.slice(0, SUCCESS_RENDER_LIMIT);
+      return [...trimmed].reverse();
     },
     [runtime?.recent_successes, runtimeMatchesProject, selectedSuccessFileSet],
   );

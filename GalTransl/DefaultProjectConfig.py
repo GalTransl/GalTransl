@@ -53,8 +53,7 @@ common:
   skipH: false # 是否跳过可能触发敏感词检测的句子。[True/False]
   smartRetry: True # 解析失败时自动缩小批次并重置上下文，减少无效重试。[True/False]
   retranslFail: false # 程序重启时是否自动重翻标记为"(Failed)"的句子。[True/False]
-  retranslKey:
-    - ""
+  retranslKey: # 在下方添加需要重翻的关键字，匹配原文/译文/problem 中的子串；留空不重翻。
     #- "翻译失败" # 启动时重翻命中“翻译失败”的句子
     #- "残留日文" # 启动时重翻命中“残留日文”的句子
 

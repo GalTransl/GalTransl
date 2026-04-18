@@ -104,8 +104,9 @@ def _build_runtime_file_maps(ordered_chunks: list[SplitChunkMetadata], input_dir
         file_totals[display_name] += chunk.chunk_non_cross_size
         cache_key = display_name.replace("/", "-}")
         if chunk.total_chunks > 1:
-            cache_key = f"{cache_key}_{chunk.chunk_index}.json"
-        else:
+            cache_key = f"{cache_key}_{chunk.chunk_index}"
+
+        if not cache_key.endswith(".json"):
             cache_key = f"{cache_key}.json"
         cache_file_display_map[cache_key] = display_name
 

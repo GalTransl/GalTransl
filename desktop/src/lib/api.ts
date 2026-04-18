@@ -387,6 +387,11 @@ export class ApiError extends Error {
 
 // ---- Existing API functions ----
 
+export async function fetchVersion() {
+  const response = await apiRequest<{ version: string }>('/api/version');
+  return response.version;
+}
+
 export async function fetchTranslators() {
   const response = await apiRequest<TranslatorsResponse>('/api/translators');
   return response.translators;
