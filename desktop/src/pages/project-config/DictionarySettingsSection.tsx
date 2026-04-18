@@ -8,7 +8,7 @@ interface DictionarySettingsSectionProps {
 
 export function DictionarySettingsSection({ dictConfig, onChange }: DictionarySettingsSectionProps) {
   return (
-    <Panel title="字典设置" description="译前/GPT/译后字典文件配置。">
+    <Panel title="字典设置" description="译前/GPT/译后字典文件配置。(project_dir)代表在项目目录下">
       <DictConfigEditor dictConfig={dictConfig} onChange={onChange} />
     </Panel>
   );

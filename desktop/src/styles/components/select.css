@@ -246,3 +246,30 @@ select option {
     animation: none;
   }
 }
+
+:root[data-theme='dark'] .custom-select__panel {
+  background: rgba(20, 29, 41, 0.98);
+  border-color: rgba(65, 83, 111, 0.92);
+  box-shadow:
+    0 16px 30px rgba(4, 8, 14, 0.5),
+    0 4px 10px rgba(4, 8, 14, 0.34);
+}
+
+:root[data-theme='dark'] .custom-select--disabled .custom-select__trigger,
+:root[data-theme='dark'] .custom-select__trigger:disabled {
+  color: rgba(155, 169, 189, 0.92);
+  background-color: rgba(21, 29, 41, 0.76);
+  border-color: rgba(65, 83, 111, 0.68);
+}
+
+:root[data-theme='dark'] .custom-select__trigger:disabled .custom-select__arrow,
+:root[data-theme='dark'] .custom-select--disabled .custom-select__arrow {
+  color: rgba(123, 142, 168, 0.86);
+}
+
+:root[data-theme='dark'] select:disabled {
+  color: rgba(155, 169, 189, 0.92);
+  background-color: rgba(21, 29, 41, 0.76);
+  border-color: rgba(65, 83, 111, 0.68);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1.5 1.5L6 6l4.5-4.5' stroke='%237b8ea8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}

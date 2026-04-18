@@ -1242,3 +1242,48 @@
     animation: none;
   }
 }
+
+:root[data-theme='dark'] .ptv2-cockpit {
+  border-color: rgba(65, 83, 111, 0.82);
+  background:
+    radial-gradient(circle at 92% -18%, rgba(67, 129, 255, 0.24), transparent 48%),
+    linear-gradient(90deg, rgba(24, 34, 48, 0.96) 0%, rgba(24, 34, 48, 0.94) 45%, rgba(17, 26, 38, 0.92) 100%),
+    var(--color-surface);
+  box-shadow:
+    inset 0 1px 0 rgba(141, 170, 212, 0.18),
+    inset 0 -1px 0 rgba(65, 83, 111, 0.42);
+}
+
+:root[data-theme='dark'] .ptv2-cockpit__grid {
+  background-image: radial-gradient(circle at 1px 1px, rgba(111, 160, 255, 0.16) 1px, transparent 0);
+}
+
+:root[data-theme='dark'] .ptv2-folder-iconbtn {
+  border-color: rgba(111, 160, 255, 0.34);
+  background: rgba(28, 40, 58, 0.78);
+}
+
+:root[data-theme='dark'] .ptv2-cockpit__folder-inline .project-translate-page__folder-menu-dropdown {
+  border-color: rgba(111, 160, 255, 0.28);
+  background: linear-gradient(180deg, rgba(28, 40, 58, 0.98), rgba(18, 27, 40, 0.96));
+  box-shadow:
+    0 20px 40px -12px rgba(12, 18, 28, 0.62),
+    0 8px 16px -8px rgba(4, 8, 14, 0.44),
+    inset 0 1px 0 rgba(141, 170, 212, 0.16);
+}
+
+:root[data-theme='dark'] .ptv2-cockpit__folder-inline .project-translate-page__folder-menu-dropdown::before {
+  border-top-color: rgba(111, 160, 255, 0.28);
+  border-left-color: rgba(111, 160, 255, 0.28);
+}
+
+:root[data-theme='dark'] .ptv2-retransl-list__item {
+  border-color: rgba(65, 83, 111, 0.68);
+  background: rgba(23, 33, 48, 0.8);
+  color: var(--color-text);
+}
+
+:root[data-theme='dark'] .ptv2-retransl-list__item:hover {
+  background: rgba(29, 43, 63, 0.9);
+  border-color: rgba(111, 160, 255, 0.6);
+}

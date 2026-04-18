@@ -13,7 +13,25 @@ type InlineFeedbackProps = {
   autoDismiss?: number;
   /** 淡出动画结束后回调，通常用来清除父组件的 info/error 状态 */
   onDismiss?: () => void;
+  /**
+   * 去重键：若提供，则同一条通知在本次会话中只会弹出一次。关闭（手动或自动）后，
+   * 再次挂载相同 key 的 toast 会被立即跳过并触发 onDismiss。
+   * 若未提供但 className 含 `inline-alert--floating`，会根据 tone+title+description 自动生成 key。
+   * 传入 null 可显式禁用去重。
+   */
+  dedupeKey?: string | null;
 };
+
+// 模块级已读集合：记录在本次应用会话中已关闭过的 toast key。
+// 切换页面回来再次渲染相同通知时用于抑制重复弹出。
+const seenToastKeys = new Set<string>();
+
+function stringifyNode(node: ReactNode): string {
+  if (node == null || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(stringifyNode).join('');
+  return '';
+}
 
 const DEFAULT_AUTO_DISMISS: Record<InlineFeedbackTone, number | undefined> = {
   success: 2200,
@@ -48,16 +66,36 @@ export function InlineFeedback({
   className,
   autoDismiss,
   onDismiss,
+  dedupeKey,
 }: InlineFeedbackProps) {
   const content = children ?? description;
   const classes = ['inline-alert', `inline-alert--${tone}`, className].filter(Boolean).join(' ');
   const role = tone === 'error' ? 'alert' : 'status';
 
+  // 计算去重 key：显式传入优先；null 表示禁用；否则若是 floating toast 自动生成。
+  const isFloating = (className ?? '').includes('inline-alert--floating');
+  let effectiveKey: string | null = null;
+  if (dedupeKey !== undefined) {
+    effectiveKey = dedupeKey;
+  } else if (isFloating) {
+    effectiveKey = `${tone}|${title ?? ''}|${stringifyNode(content)}`;
+  }
+  const alreadySeen = !!effectiveKey && seenToastKeys.has(effectiveKey);
+
   const dismissMs = autoDismiss ?? DEFAULT_AUTO_DISMISS[tone];
-  const [visible, setVisible] = useState(true);
+  const [visible, setVisible] = useState(!alreadySeen);
   const [fading, setFading] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fadeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 若挂载时发现本会话已经看过该通知，立即静默触发父组件的 onDismiss 以清理其状态。
+  useEffect(() => {
+    if (alreadySeen) {
+      onDismiss?.();
+    }
+    // 仅在挂载时判断一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const startDismiss = useCallback(() => {
     if (fading || !visible) {
@@ -69,17 +107,19 @@ export function InlineFeedback({
     }
     fadeRef.current = setTimeout(() => {
       setVisible(false);
+      if (effectiveKey) seenToastKeys.add(effectiveKey);
       onDismiss?.();
     }, 400);
-  }, [fading, visible, onDismiss]);
+  }, [fading, visible, onDismiss, effectiveKey]);
 
   useEffect(() => {
+    if (alreadySeen) return;
     if (dismissMs == null) return;
     timerRef.current = setTimeout(startDismiss, dismissMs);
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [dismissMs, startDismiss]);
+  }, [dismissMs, startDismiss, alreadySeen]);
 
   useEffect(() => {
     return () => {

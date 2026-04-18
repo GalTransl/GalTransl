@@ -332,6 +332,8 @@ export type AppSettings = {
   printTranslationLogInTerminal: boolean;
 };
 
+export type ThemeMode = 'light' | 'dark' | 'system';
+
 export type PluginsResponse = {
   plugins: PluginInfo[];
 };
@@ -668,6 +670,11 @@ export async function fetchProblemTypes() {
   return response.problem_types;
 }
 
+export async function fetchTranslationGuidelines() {
+  const response = await apiRequest<{ guidelines: string[] }>('/api/translation-guidelines');
+  return response.guidelines;
+}
+
 export async function fetchAppSettings() {
   return apiRequest<AppSettings>('/api/app-settings');
 }
@@ -774,6 +781,7 @@ const DEFAULT_BACKEND_PROFILE_KEY = 'galtransl-default-backend-profile';
 const TRANSLATOR_TEMPLATE_KEY = 'galtransl-project-translator-template';
 const HOME_HISTORY_LIMIT_KEY = 'galtransl-home-history-limit';
 const HOME_JOB_LIMIT_KEY = 'galtransl-home-job-limit';
+const THEME_MODE_KEY = 'galtransl-theme-mode';
 
 export const HOME_HISTORY_LIMIT_DEFAULT = 20;
 export const HOME_JOB_LIMIT_DEFAULT = 20;
@@ -784,6 +792,7 @@ export const HOME_LIST_LIMIT_MAX = 200;
 export const DEFAULT_BACKEND_PROFILE_CHANGE_EVENT = 'galtransl:default-backend-profile-change';
 export const HOME_HISTORY_LIMIT_CHANGE_EVENT = 'galtransl:home-history-limit-change';
 export const HOME_JOB_LIMIT_CHANGE_EVENT = 'galtransl:home-job-limit-change';
+export const THEME_MODE_CHANGE_EVENT = 'galtransl:theme-mode-change';
 
 /** Get the global default backend profile name. */
 export function getDefaultBackendProfile(): string {
@@ -949,6 +958,33 @@ export function setHomeJobRetentionLimit(limit: number): number {
   try {
     localStorage.setItem(HOME_JOB_LIMIT_KEY, String(normalized));
     window.dispatchEvent(new CustomEvent(HOME_JOB_LIMIT_CHANGE_EVENT, { detail: normalized }));
+  } catch {
+    // ignore storage errors
+  }
+  return normalized;
+}
+
+function normalizeThemeMode(value: unknown): ThemeMode {
+  if (value === 'light' || value === 'dark' || value === 'system') {
+    return value;
+  }
+  return 'system';
+}
+
+export function getThemeModePreference(): ThemeMode {
+  try {
+    const raw = localStorage.getItem(THEME_MODE_KEY);
+    return normalizeThemeMode(raw);
+  } catch {
+    return 'system';
+  }
+}
+
+export function setThemeModePreference(mode: ThemeMode): ThemeMode {
+  const normalized = normalizeThemeMode(mode);
+  try {
+    localStorage.setItem(THEME_MODE_KEY, normalized);
+    window.dispatchEvent(new CustomEvent(THEME_MODE_CHANGE_EVENT, { detail: normalized }));
   } catch {
     // ignore storage errors
   }

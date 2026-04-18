@@ -51,3 +51,12 @@
   justify-content: center;
 }
 
+:root[data-theme='dark'] .empty-state {
+  border-color: rgba(65, 83, 111, 0.82);
+  background: rgba(20, 29, 41, 0.62);
+}
+
+:root[data-theme='dark'] .page-state--loading {
+  background: linear-gradient(180deg, rgba(24, 34, 48, 0.82), rgba(17, 26, 38, 0.88));
+}
+

@@ -193,3 +193,34 @@
   }
 }
 
+:root[data-theme='dark'] .inline-alert {
+  border-color: rgba(65, 83, 111, 0.82);
+  background: rgba(20, 29, 41, 0.82);
+  box-shadow:
+    0 24px 42px -18px rgba(4, 8, 14, 0.56),
+    0 8px 16px -8px rgba(4, 8, 14, 0.36),
+    inset 0 1px 0 rgba(141, 170, 212, 0.16);
+}
+
+:root[data-theme='dark'] .inline-alert--error {
+  border-color: rgba(248, 113, 113, 0.44);
+}
+
+:root[data-theme='dark'] .inline-alert--info {
+  border-color: rgba(111, 160, 255, 0.46);
+}
+
+:root[data-theme='dark'] .inline-alert--success {
+  border-color: rgba(80, 211, 141, 0.46);
+}
+
+:root[data-theme='dark'] .inline-alert__dot {
+  background: rgba(155, 169, 189, 0.72);
+}
+
+:root[data-theme='dark'] .inline-alert__close:hover,
+:root[data-theme='dark'] .inline-alert__close:focus-visible {
+  background: rgba(141, 170, 212, 0.14);
+  color: var(--color-text);
+}
+

@@ -16,9 +16,9 @@ body {
   font-family: var(--font-sans);
   color: var(--color-text);
   background:
-    radial-gradient(circle at top left, rgba(47, 111, 235, 0.12), transparent 28%),
-    radial-gradient(circle at top right, rgba(15, 157, 88, 0.08), transparent 24%),
-    linear-gradient(180deg, #f8fbff 0%, var(--color-bg) 44%, #edf2f8 100%);
+    radial-gradient(circle at top left, var(--bg-glow-primary), transparent 28%),
+    radial-gradient(circle at top right, var(--bg-glow-success), transparent 24%),
+    linear-gradient(180deg, var(--bg-gradient-top) 0%, var(--color-bg) 44%, var(--bg-gradient-bottom) 100%);
 }
 
 button,
@@ -36,7 +36,7 @@ code {
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(191, 208, 226, 0.9) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 ::-webkit-scrollbar {
@@ -49,7 +49,7 @@ code {
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: rgba(191, 208, 226, 0.9);
+  background-color: var(--scrollbar-thumb);
   border: 2px solid transparent;
   border-radius: 999px;
   background-clip: content-box;
@@ -57,5 +57,5 @@ code {
 
 :hover > ::-webkit-scrollbar-thumb,
 *:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(176, 195, 219, 0.94);
+  background-color: var(--scrollbar-thumb-hover);
 }

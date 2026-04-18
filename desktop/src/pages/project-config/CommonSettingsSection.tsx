@@ -1,5 +1,7 @@
+import { useEffect, useMemo, useState } from 'react';
 import { Panel } from '../../components/Panel';
 import { ConfigFieldRow, ConfigFieldGroup, type ConfigFieldDef } from './ConfigFieldRow';
+import { fetchTranslationGuidelines } from '../../lib/api';
 
 // ── Primary (high-frequency) fields ──
 const PRIMARY_FIELDS: ConfigFieldDef[] = [
@@ -10,7 +12,7 @@ const PRIMARY_FIELDS: ConfigFieldDef[] = [
   { key: 'splitFile', label: '文件分割', description: '单文件分片模式：no 关闭，Num 按句数切片，Equal 按份数均分。', type: 'select', options: ['no', 'Num', 'Equal'] },
   { key: 'splitFileNum', label: '分割数量', description: 'Num 模式下表示每片句数；Equal 模式下表示分片总数。', type: 'number', placeholder: '2048' },
   { key: 'gpt.contextNum', label: '上下文句数', description: '每次请求附带的前文句数，常用 8。', type: 'number', placeholder: '8' },
-  { key: 'gpt.translation_guideline', label: '翻译规范', description: '使用的翻译规范文件名（位于 translation_guidelines）。', type: 'text', placeholder: 'Basic.md' },
+  { key: 'gpt.translation_guideline', label: '翻译规范', description: '使用的翻译规范文件（位于 translation_guidelines 文件夹）。', type: 'select', options: [] },
 ];
 
 // ── Advanced (low-frequency) fields ──
@@ -37,10 +39,33 @@ interface CommonSettingsSectionProps {
 }
 
 export function CommonSettingsSection({ commonConfig, onFieldChange, onListFieldChange }: CommonSettingsSectionProps) {
+  const [guidelines, setGuidelines] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchTranslationGuidelines()
+      .then((list) => { if (!cancelled) setGuidelines(list); })
+      .catch(() => { /* optional; fallback to current value only */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  const primaryFields = useMemo<ConfigFieldDef[]>(() => {
+    const currentGuideline = String(getFieldValue(commonConfig, 'gpt.translation_guideline') ?? '');
+    const merged = [...guidelines];
+    if (currentGuideline && !merged.includes(currentGuideline)) {
+      merged.unshift(currentGuideline);
+    }
+    return PRIMARY_FIELDS.map((field) =>
+      field.key === 'gpt.translation_guideline'
+        ? { ...field, options: merged }
+        : field,
+    );
+  }, [commonConfig, guidelines]);
+
   return (
     <Panel title="通用设置" description="翻译核心参数配置（说明已与 sampleProject/config.inc.yaml 同步）。">
       <ConfigFieldGroup title="常用设置" tier="primary">
-        {PRIMARY_FIELDS.map((field) => (
+        {primaryFields.map((field) => (
           <ConfigFieldRow
             key={field.key}
             field={field}

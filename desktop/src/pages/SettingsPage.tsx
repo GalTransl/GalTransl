@@ -5,13 +5,16 @@ import { EmptyState, ErrorState, LoadingState } from '../components/page-state';
 import { useConnection } from '../features/connection/ConnectionContext';
 import {
   type PluginInfo,
+  type ThemeMode,
   fetchPlugins,
   getHomeHistoryRetentionLimit,
   getHomeJobRetentionLimit,
+  getThemeModePreference,
   HOME_LIST_LIMIT_MAX,
   HOME_LIST_LIMIT_MIN,
   setHomeHistoryRetentionLimit,
   setHomeJobRetentionLimit,
+  setThemeModePreference,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 
@@ -134,6 +137,7 @@ export function SettingsPage() {
 
   const [homeHistoryLimitInput, setHomeHistoryLimitInput] = useState(() => String(getHomeHistoryRetentionLimit()));
   const [homeJobLimitInput, setHomeJobLimitInput] = useState(() => String(getHomeJobRetentionLimit()));
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => getThemeModePreference());
 
   const applyHomeHistoryLimit = useCallback((rawValue: string) => {
     const next = setHomeHistoryRetentionLimit(rawValue.trim() === '' ? Number.NaN : Number(rawValue));
@@ -145,11 +149,43 @@ export function SettingsPage() {
     setHomeJobLimitInput(String(next));
   }, []);
 
+  const applyThemeMode = useCallback((mode: ThemeMode) => {
+    const next = setThemeModePreference(mode);
+    setThemeMode(next);
+  }, []);
+
   return (
     <div className="settings-page">
       <PageHeader className="settings-page__header" title="设置" description="管理应用配置和后端连接。" />
 
       <div className="settings-page__content">
+        <section className="panel">
+          <header className="panel__header">
+            <div>
+              <h2>外观</h2>
+              <p>设置界面主题风格，可选择浅色、深色或跟随系统。</p>
+            </div>
+          </header>
+
+          <label className="settings-number-row">
+            <span className="settings-number-row__label">主题模式</span>
+            <div className="settings-number-row__control">
+              <select
+                value={themeMode}
+                onChange={(event) => {
+                  applyThemeMode(event.target.value as ThemeMode);
+                }}
+              >
+                <option value="light">浅色</option>
+                <option value="dark">深色</option>
+                <option value="system">跟随系统</option>
+              </select>
+            </div>
+          </label>
+
+          <div className="settings-toggle-row__desc">主题切换会即时生效，并在下次打开应用时保持。</div>
+        </section>
+
         <section className="panel">
           <header className="panel__header">
             <div>

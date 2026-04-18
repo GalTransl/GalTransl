@@ -48,3 +48,18 @@
   font-weight: 600;
   overflow-wrap: anywhere;
 }
+
+:root[data-theme='dark'] .meta-grid div {
+  border-color: rgba(110, 134, 170, 0.32);
+  background: rgba(30, 40, 58, 0.55);
+  box-shadow: inset 0 1px 0 rgba(141, 170, 212, 0.08);
+}
+
+:root[data-theme='dark'] .meta-grid dt {
+  color: var(--color-text-muted);
+}
+
+:root[data-theme='dark'] .meta-grid dd {
+  color: var(--color-text);
+}
+

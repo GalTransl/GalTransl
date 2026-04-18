@@ -954,6 +954,22 @@ def _list_problem_types() -> list[dict[str, str]]:
     return list(_PROBLEM_TYPE_CATALOG)
 
 
+def _list_translation_guidelines() -> list[str]:
+    """List translation guideline filenames under the ``translation_guidelines`` folder."""
+    guidelines_dir = os.path.abspath("translation_guidelines")
+    if not os.path.isdir(guidelines_dir):
+        return []
+    result: list[str] = []
+    for name in sorted(os.listdir(guidelines_dir)):
+        full = os.path.join(guidelines_dir, name)
+        if not os.path.isfile(full):
+            continue
+        lower = name.lower()
+        if lower.endswith(".md") or lower.endswith(".txt"):
+            result.append(name)
+    return result
+
+
 def _scan_plugins() -> list[dict[str, Any]]:
     """Scan the plugins directory and return plugin metadata."""
     plugins_dir = os.path.abspath("plugins")
@@ -2572,6 +2588,10 @@ def build_handler(registry: JobRegistry):
 
             if path == "/api/problem-types":
                 self._send_json({"problem_types": _list_problem_types()})
+                return
+
+            if path == "/api/translation-guidelines":
+                self._send_json({"guidelines": _list_translation_guidelines()})
                 return
 
             if path.startswith("/api/projects/"):

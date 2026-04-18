@@ -16,6 +16,9 @@ import {
   fetchBackendProfiles,
   getSelectedBackendProfile,
   DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
+  fetchProjectConfig,
+  updateProjectConfig,
+  fetchProjectDictionaryManager,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 
@@ -38,6 +41,11 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const namesRef = useRef<NameEntry[]>([]);
+
+  // GPT dict integration state
+  const [useGptDictForName, setUseGptDictForName] = useState(false);
+  const [gptDictNameMap, setGptDictNameMap] = useState<Map<string, string>>(new Map());
+  const [gptToggleBusy, setGptToggleBusy] = useState(false);
 
   // AI translate popover state
   const [showAiPopover, setShowAiPopover] = useState(false);
@@ -111,6 +119,125 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
   }, []);
 
+  // Parse GPT dictionary lines into a search_word -> replace_word Map.
+  // Mirrors the parsing logic in GalTransl/Dictionary.py CGptDict.load_dic.
+  const parseGptDictLines = useCallback((allLines: string[]): Map<string, string> => {
+    const map = new Map<string, string>();
+    for (const raw of allLines) {
+      if (!raw || raw.startsWith('\n')) continue;
+      // Skip comment lines
+      const trimmedLeft = raw.replace(/^\s+/, '');
+      if (trimmedLeft.startsWith('//') || trimmedLeft.startsWith('\\\\')) continue;
+      // Tolerate 4-space as tab, and "src->dst #note" form
+      let line = raw.replace(/    /g, '\t');
+      if (line.includes('->')) {
+        line = line.replace('->', '\t').replace('#', '\t');
+      }
+      const parts = line.replace(/[\r\n]+$/, '').split('\t');
+      if (parts.length < 2) continue;
+      const src = parts[0].trim();
+      const dst = parts[1].trim();
+      if (!src || !dst) continue;
+      if (!map.has(src)) map.set(src, dst);
+    }
+    return map;
+  }, []);
+
+  // Load project GPT dictionaries (project-scoped files) and build name map.
+  const loadProjectGptDictMap = useCallback(async (): Promise<Map<string, string>> => {
+    if (!projectId) return new Map();
+    const res = await fetchProjectDictionaryManager(projectId, configFileName || 'config.yaml');
+    const lines: string[] = [];
+    for (const fileKey of res.gpt_dict_files) {
+      const content = res.dict_contents[fileKey];
+      if (content && Array.isArray(content.lines)) {
+        lines.push(...content.lines);
+      }
+    }
+    return parseGptDictLines(lines);
+  }, [projectId, configFileName, parseGptDictLines]);
+
+  // Overlay GPT dict translations onto empty dst_name entries.
+  const overlayGptDictOntoNames = useCallback(
+    (list: NameEntry[], dictMap: Map<string, string>): { next: NameEntry[]; changed: number } => {
+      let changed = 0;
+      const next = list.map((entry) => {
+        if (entry.dst_name.trim() !== '') return entry;
+        const src = entry.src_name.trim();
+        if (!src) return entry;
+        const mapped = dictMap.get(src);
+        if (!mapped) return entry;
+        changed++;
+        return { ...entry, dst_name: mapped };
+      });
+      return { next, changed };
+    },
+    [],
+  );
+
+  // Load initial useGPTDictInName toggle state from project config,
+  // and preload the dict map if already enabled (so extraction/generate also overlays).
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetchProjectConfig(projectId, configFileName || 'config.yaml');
+        const dictCfg = (res.config?.dictionary ?? {}) as Record<string, unknown>;
+        const enabled = Boolean(dictCfg.useGPTDictInName);
+        if (cancelled) return;
+        setUseGptDictForName(enabled);
+        if (enabled) {
+          const map = await loadProjectGptDictMap();
+          if (cancelled) return;
+          setGptDictNameMap(map);
+        }
+      } catch {
+        // Non-critical: leave toggle off if config can't be read
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectId, configFileName, loadProjectGptDictMap]);
+
+  // Toggle handler: persists config flag and applies/removes overlay.
+  const handleToggleGptDictForName = useCallback(async (nextEnabled: boolean) => {
+    if (!projectId || gptToggleBusy) return;
+    setGptToggleBusy(true);
+    setError(null);
+    try {
+      // 1) Read current config, set dictionary.useGPTDictInName, write back.
+      const current = await fetchProjectConfig(projectId, configFileName || 'config.yaml');
+      const newConfig = { ...(current.config as Record<string, unknown>) };
+      const dictCfg = { ...((newConfig.dictionary as Record<string, unknown>) ?? {}) };
+      dictCfg.useGPTDictInName = nextEnabled;
+      newConfig.dictionary = dictCfg;
+      await updateProjectConfig(projectId, {
+        config: newConfig,
+        config_file_name: configFileName || 'config.yaml',
+      });
+      setUseGptDictForName(nextEnabled);
+
+      // 2) If turning on, load project GPT dict and overlay onto empty dst_name.
+      if (nextEnabled) {
+        const map = await loadProjectGptDictMap();
+        setGptDictNameMap(map);
+        if (map.size > 0 && namesRef.current.length > 0) {
+          const { next, changed } = overlayGptDictOntoNames(namesRef.current, map);
+          if (changed > 0) {
+            setNames(next);
+            setDirty(true);
+          }
+        }
+      } else {
+        setGptDictNameMap(new Map());
+      }
+    } catch (err) {
+      setError(normalizeError(err, '切换 GPT 字典用于人名失败'));
+    } finally {
+      setGptToggleBusy(false);
+    }
+  }, [projectId, configFileName, gptToggleBusy, loadProjectGptDictMap, overlayGptDictOntoNames]);
+
   const handleGenerate = useCallback(async () => {
     if (!projectId || !projectDir) return;
     setGenerating(true);
@@ -141,16 +268,26 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
         setError('生成人名表已被取消');
       } else {
         const res = await fetchNameTable(projectId);
-        setNames(res.names);
+        let nextNames = res.names;
+        let nextDirty = false;
+        // If GPT-dict-for-name is enabled, overlay newly extracted names with GPT dict mappings.
+        if (useGptDictForName && gptDictNameMap.size > 0) {
+          const { next, changed } = overlayGptDictOntoNames(nextNames, gptDictNameMap);
+          if (changed > 0) {
+            nextNames = next;
+            nextDirty = true;
+          }
+        }
+        setNames(nextNames);
         setSourceFile(res.source_file);
-        setDirty(false);
+        setDirty(nextDirty);
       }
     } catch (err) {
       setError(normalizeError(err, '生成人名表失败'));
     } finally {
       setGenerating(false);
     }
-  }, [projectId, projectDir, configFileName]);
+  }, [projectId, projectDir, configFileName, useGptDictForName, gptDictNameMap, overlayGptDictOntoNames]);
 
   // Keep a ref in sync with names for safe access in async save handlers
   useEffect(() => {
@@ -387,9 +524,24 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
       <Button onClick={handleGenerate} disabled={generating}>
         {generating ? '提取中...' : '提取人名表'}
       </Button>
+      <label
+        className="name-page__gpt-toggle"
+        title="打开后：自动设置项目配置中的「字典用在name字段(GPT)」，并用项目GPT字典中的条目覆盖未翻译的人名（AI翻译时会自动跳过这些人名）"
+      >
+        <span className="toggle-switch">
+          <input
+            type="checkbox"
+            checked={useGptDictForName}
+            disabled={gptToggleBusy}
+            onChange={(e) => { void handleToggleGptDictForName(e.target.checked); }}
+          />
+          <span className="toggle-switch__slider" />
+        </span>
+        <span className="name-page__gpt-toggle-label">GPT字典用于人名</span>
+      </label>
       <div className="name-page__ai-wrap" ref={aiPopoverRef}>
         <Button onClick={handleOpenAiPopover} disabled={aiTranslating || names.length === 0}>
-          {aiTranslating ? 'AI翻译中...' : 'AI翻译人名'}
+          {aiTranslating ? 'AI翻译中，不要走开...' : 'AI翻译人名'}
         </Button>
         {showAiPopover && (
           <div className="name-page__ai-popover">
@@ -451,7 +603,7 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
 
   return (
     <div className="page name-page">
-      <PageHeader title="人名翻译" description="管理项目的人名替换表，填入中文译名后可用于翻译工作台的 name 字段替换。编辑后 1 秒自动保存。" />
+      <PageHeader title="人名翻译" description="用于翻译输入文件中的“name”字段，是直接替换模式。注意正文中的人名应使用“GPT字典”让模型翻译。" />
 
       {error && <InlineFeedback tone="error">{error}</InlineFeedback>}
 

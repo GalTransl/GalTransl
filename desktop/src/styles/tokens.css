@@ -46,4 +46,40 @@
   --ease-sharp: cubic-bezier(0.4, 0, 0.6, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --ease-bar-fill: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --bg-glow-primary: rgba(47, 111, 235, 0.12);
+  --bg-glow-success: rgba(15, 157, 88, 0.08);
+  --bg-gradient-top: #f8fbff;
+  --bg-gradient-bottom: #edf2f8;
+  --scrollbar-thumb: rgba(191, 208, 226, 0.9);
+  --scrollbar-thumb-hover: rgba(176, 195, 219, 0.94);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-bg: #0d1219;
+  --color-surface: rgba(21, 29, 41, 0.9);
+  --color-surface-strong: #141c28;
+  --color-text: #e5edf8;
+  --color-text-muted: #9ba9bd;
+  --color-line: #2d3b52;
+  --color-line-strong: #41536f;
+  --color-primary: #6fa0ff;
+  --color-primary-strong: #8ab2ff;
+  --color-primary-soft: rgba(111, 160, 255, 0.2);
+  --color-success: #50d38d;
+  --color-success-soft: rgba(80, 211, 141, 0.18);
+  --color-warning: #f0b95b;
+  --color-warning-soft: rgba(240, 185, 91, 0.2);
+  --color-danger: #ff8078;
+  --color-danger-soft: rgba(255, 128, 120, 0.2);
+  --color-neutral-soft: rgba(113, 144, 191, 0.18);
+  --shadow-panel: 0 22px 52px rgba(0, 0, 0, 0.36);
+  --shadow-button: 0 12px 30px rgba(54, 122, 255, 0.35);
+  --bg-glow-primary: rgba(67, 129, 255, 0.22);
+  --bg-glow-success: rgba(65, 194, 132, 0.16);
+  --bg-gradient-top: #101824;
+  --bg-gradient-bottom: #0a0f16;
+  --scrollbar-thumb: rgba(65, 83, 111, 0.9);
+  --scrollbar-thumb-hover: rgba(81, 103, 137, 0.96);
 }

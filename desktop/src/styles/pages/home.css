@@ -1401,3 +1401,42 @@
     transform: none;
   }
 }
+
+:root[data-theme='dark'] .app-layout__content:has(.home-page)::before {
+  background:
+    radial-gradient(circle at top right, rgba(67, 129, 255, 0.2), transparent 30%),
+    radial-gradient(circle at 20% 16%, rgba(65, 194, 132, 0.14), transparent 26%),
+    linear-gradient(180deg, rgba(11, 16, 24, 0.44), rgba(11, 16, 24, 0));
+}
+
+:root[data-theme='dark'] .home-hero {
+  border-color: rgba(65, 83, 111, 0.86);
+  background:
+    linear-gradient(180deg, rgba(24, 34, 48, 0.96), rgba(16, 24, 36, 0.92)),
+    var(--color-surface);
+  box-shadow: inset 0 1px 0 rgba(141, 170, 212, 0.14);
+}
+
+:root[data-theme='dark'] .home-hero__chip {
+  border-color: rgba(65, 83, 111, 0.9);
+  background: rgba(20, 29, 41, 0.9);
+}
+
+:root[data-theme='dark'] .home-hero__stats {
+  border-color: rgba(65, 83, 111, 0.86);
+  background: rgba(15, 23, 34, 0.82);
+}
+
+:root[data-theme='dark'] .home-hero__stat-divider {
+  background: rgba(65, 83, 111, 0.72);
+}
+
+:root[data-theme='dark'] .home-open,
+:root[data-theme='dark'] .home-history,
+:root[data-theme='dark'] .home-jobs {
+  border-color: rgba(65, 83, 111, 0.88);
+  background:
+    linear-gradient(180deg, rgba(23, 33, 47, 0.95), rgba(17, 25, 37, 0.9)),
+    var(--color-surface);
+  box-shadow: inset 0 1px 0 rgba(141, 170, 212, 0.14);
+}

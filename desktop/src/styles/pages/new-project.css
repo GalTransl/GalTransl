@@ -432,6 +432,46 @@
   opacity: 0.88;
 }
 
+:root[data-theme='dark'] .wizard-step-summary {
+  border-color: rgba(65, 83, 111, 0.8);
+  background: linear-gradient(180deg, rgba(24, 34, 48, 0.92), rgba(17, 26, 38, 0.88));
+}
+
+:root[data-theme='dark'] .wizard-step-summary__bar {
+  background: rgba(65, 83, 111, 0.44);
+}
+
+:root[data-theme='dark'] .wizard-step-summary__bar > span {
+  background: linear-gradient(90deg, var(--color-primary), #7ea7ff);
+}
+
+:root[data-theme='dark'] .wizard-path-preview {
+  border-color: rgba(65, 83, 111, 0.72);
+  background: rgba(24, 35, 50, 0.66);
+}
+
+:root[data-theme='dark'] .wizard-path-preview__path {
+  background: rgba(20, 29, 41, 0.88);
+  border-color: rgba(65, 83, 111, 0.72);
+}
+
+:root[data-theme='dark'] .wizard-tip-card {
+  border-color: rgba(111, 160, 255, 0.34);
+  background: linear-gradient(180deg, rgba(27, 39, 56, 0.78), rgba(20, 30, 44, 0.66));
+}
+
+:root[data-theme='dark'] .wizard-tip-card span {
+  color: var(--color-text-muted);
+}
+
+:root[data-theme='dark'] .wizard-progress__bar {
+  background: rgba(65, 83, 111, 0.5);
+}
+
+:root[data-theme='dark'] .wizard-progress__fill {
+  background: linear-gradient(90deg, var(--color-primary), #7ea7ff);
+}
+
 /* ── Responsive ── */
 
 @media (max-width: 980px) {

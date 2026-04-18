@@ -239,3 +239,8 @@
   box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.15);
 }
 
+:root[data-theme='dark'] .plugin-settings-panel {
+  border-color: rgba(65, 83, 111, 0.78);
+  background: rgba(20, 29, 41, 0.78);
+}
+

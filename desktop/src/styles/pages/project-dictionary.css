@@ -712,3 +712,77 @@
   box-shadow: 0 0 0 2px var(--color-primary-soft);
 }
 
+:root[data-theme='dark'] .dict-card {
+  border-color: rgba(65, 83, 111, 0.82);
+  background: linear-gradient(180deg, rgba(24, 34, 48, 0.96), rgba(17, 26, 38, 0.9));
+}
+
+:root[data-theme='dark'] .dict-card--normal,
+:root[data-theme='dark'] .dict-card--conditional,
+:root[data-theme='dark'] .dict-card--situation,
+:root[data-theme='dark'] .dict-card--gpt,
+:root[data-theme='dark'] .dict-card--comment {
+  box-shadow:
+    inset 0 1px 0 rgba(141, 170, 212, 0.14),
+    0 8px 20px rgba(4, 8, 14, 0.24);
+}
+
+:root[data-theme='dark'] .dict-card__table {
+  border-color: rgba(65, 83, 111, 0.62);
+  background: rgba(20, 29, 41, 0.92);
+}
+
+:root[data-theme='dark'] .dict-card__table-head {
+  border-bottom-color: rgba(65, 83, 111, 0.58);
+  background: linear-gradient(180deg, rgba(29, 41, 58, 0.96), rgba(22, 33, 48, 0.92));
+}
+
+:root[data-theme='dark'] .dict-card__table-row {
+  border-bottom-color: rgba(65, 83, 111, 0.4);
+}
+
+:root[data-theme='dark'] .dict-card__table-add-row {
+  border-top-color: rgba(65, 83, 111, 0.58);
+  background: linear-gradient(180deg, rgba(25, 37, 53, 0.96), rgba(18, 29, 42, 0.92));
+}
+
+:root[data-theme='dark'] .dict-card__add-row-btn {
+  border-color: rgba(65, 83, 111, 0.72);
+  background: rgba(24, 35, 50, 0.92);
+}
+
+:root[data-theme='dark'] .dict-card__head-cell,
+:root[data-theme='dark'] .dict-card__cell {
+  border-right-color: rgba(65, 83, 111, 0.4);
+}
+
+:root[data-theme='dark'] .dict-card__head-cell {
+  color: rgba(180, 196, 219, 0.95);
+}
+
+:root[data-theme='dark'] .dict-card__cell {
+  background: rgba(20, 29, 41, 0.9);
+}
+
+:root[data-theme='dark'] .dict-card__cell--index {
+  background: rgba(24, 35, 50, 0.88);
+}
+
+:root[data-theme='dark'] .dict-card__row-delete {
+  background: rgba(26, 38, 55, 0.92);
+  border-color: rgba(220, 94, 94, 0.28);
+}
+
+:root[data-theme='dark'] .dict-card__input {
+  background: rgba(20, 29, 41, 0.84);
+}
+
+:root[data-theme='dark'] .dict-card__input:focus {
+  background: rgba(23, 34, 49, 0.98);
+}
+
+:root[data-theme='dark'] .dict-card__note-input {
+  border-color: rgba(65, 83, 111, 0.62);
+  background: rgba(20, 29, 41, 0.86);
+}
+

@@ -188,14 +188,7 @@
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(120deg, transparent 0%, rgba(47, 111, 235, 0.08) 48%, transparent 100%),
-    repeating-linear-gradient(
-      180deg,
-      rgba(191, 208, 226, 0.22) 0,
-      rgba(191, 208, 226, 0.22) 1px,
-      transparent 1px,
-      transparent 26px
-    );
+    linear-gradient(120deg, transparent 0%, rgba(47, 111, 235, 0.08) 48%, transparent 100%);
   opacity: 0.42;
 }
 
@@ -774,6 +767,7 @@
 .runtime-event--error .runtime-event__message {
   display: -webkit-box;
   -webkit-box-orient: vertical;
+  line-clamp: 2;
   -webkit-line-clamp: 2;
   overflow: hidden;
   line-height: 1.45;
@@ -1254,6 +1248,86 @@
   pointer-events: none;
   animation: launchParticle 0.7s ease-out forwards;
   z-index: 10;
+}
+
+:root[data-theme='dark'] .project-translate-page::before {
+  background:
+    radial-gradient(circle at top right, rgba(67, 129, 255, 0.2), transparent 28%),
+    radial-gradient(circle at 20% 15%, rgba(65, 194, 132, 0.14), transparent 26%),
+    linear-gradient(180deg, rgba(12, 18, 28, 0.5), rgba(12, 18, 28, 0));
+}
+
+:root[data-theme='dark'] .project-translate-page .panel {
+  border-color: rgba(65, 83, 111, 0.86);
+  background:
+    linear-gradient(180deg, rgba(24, 34, 48, 0.95), rgba(16, 24, 36, 0.9)),
+    var(--color-surface);
+  box-shadow: inset 0 1px 0 rgba(141, 170, 212, 0.14);
+}
+
+:root[data-theme='dark'] .project-translate-page .meta-grid div,
+:root[data-theme='dark'] .project-translate-page .job-card,
+:root[data-theme='dark'] .project-translate-page .empty-state,
+:root[data-theme='dark'] .project-translate-page .job-card__error {
+  border-color: rgba(65, 83, 111, 0.84);
+  background: linear-gradient(180deg, rgba(24, 34, 48, 0.95), rgba(17, 26, 38, 0.9));
+}
+
+:root[data-theme='dark'] .runtime-summary-strip {
+  border-color: rgba(65, 83, 111, 0.88);
+  background:
+    linear-gradient(180deg, rgba(24, 34, 48, 0.97), rgba(16, 24, 36, 0.92)),
+    var(--color-surface-strong);
+  box-shadow: inset 0 0 0 1px rgba(141, 170, 212, 0.18);
+}
+
+:root[data-theme='dark'] .runtime-summary-strip__hero {
+  border-color: rgba(65, 83, 111, 0.76);
+  background:
+    radial-gradient(circle at top right, rgba(76, 138, 240, 0.12), transparent 32%),
+    linear-gradient(180deg, rgba(29, 40, 56, 0.9), rgba(18, 27, 40, 0.88));
+  box-shadow: inset 0 1px 0 rgba(141, 170, 212, 0.12);
+}
+
+:root[data-theme='dark'] .runtime-event {
+  border-color: rgba(65, 83, 111, 0.82);
+  background: linear-gradient(180deg, rgba(24, 34, 48, 0.96), rgba(17, 26, 38, 0.9));
+}
+
+:root[data-theme='dark'] .runtime-event--success .runtime-event__pill--file,
+:root[data-theme='dark'] .runtime-event--success .runtime-event__pill--translator {
+  border-color: rgba(65, 83, 111, 0.9);
+  background: rgba(28, 40, 58, 0.88);
+  color: var(--color-text);
+}
+
+:root[data-theme='dark'] .runtime-event--error .runtime-event__pill--file,
+:root[data-theme='dark'] .runtime-event--error .runtime-event__pill--translator {
+  border-color: rgba(65, 83, 111, 0.9);
+  background: rgba(28, 40, 58, 0.88);
+  color: var(--color-text);
+}
+
+:root[data-theme='dark'] .runtime-event--success .runtime-event__pill--file-clickable:hover,
+:root[data-theme='dark'] .runtime-event--success .runtime-event__pill--file-clickable .runtime-event__file-name-btn:focus-visible {
+  border-color: rgba(111, 160, 255, 0.5);
+  background: rgba(34, 49, 72, 0.92);
+  color: var(--color-primary);
+}
+
+:root[data-theme='dark'] .runtime-event--error .runtime-event__pill--file-clickable:hover,
+:root[data-theme='dark'] .runtime-event--error .runtime-event__pill--file-clickable .runtime-event__file-name-btn:focus-visible {
+  border-color: rgba(111, 160, 255, 0.5);
+  background: rgba(34, 49, 72, 0.92);
+  color: var(--color-primary);
+}
+
+:root[data-theme='dark'] .runtime-success-compact {
+  border-color: rgba(65, 83, 111, 0.86);
+  background:
+    linear-gradient(180deg, rgba(24, 34, 48, 0.95), rgba(17, 25, 37, 0.9)),
+    var(--color-surface);
+  box-shadow: inset 0 1px 0 rgba(141, 170, 212, 0.14);
 }
 
 /* Phase 1: charge-up glow on button */

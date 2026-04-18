@@ -1,6 +1,11 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { HashRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { decodeProjectDir, encodeProjectDir } from '../lib/api';
+import {
+  THEME_MODE_CHANGE_EVENT,
+  decodeProjectDir,
+  encodeProjectDir,
+  getThemeModePreference,
+} from '../lib/api';
 import { Sidebar } from '../components/Sidebar';
 import { ConnectionProvider } from '../features/connection/ConnectionContext';
 import { HomePage, addProjectToHistory } from '../pages/HomePage';
@@ -66,6 +71,37 @@ function saveOpenProjects(projects: string[]) {
 
 export function App() {
   const [openProjects, setOpenProjects] = useState<string[]>(() => loadOpenProjects());
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+
+    const applyTheme = () => {
+      const mode = getThemeModePreference();
+      const resolved = mode === 'system' ? (mediaQuery.matches ? 'dark' : 'light') : mode;
+      root.dataset.themeMode = mode;
+      root.dataset.theme = resolved;
+    };
+
+    const handleThemeModeChange = () => {
+      applyTheme();
+    };
+
+    const handleSystemSchemeChange = () => {
+      if (getThemeModePreference() === 'system') {
+        applyTheme();
+      }
+    };
+
+    applyTheme();
+    window.addEventListener(THEME_MODE_CHANGE_EVENT, handleThemeModeChange as EventListener);
+    mediaQuery.addEventListener('change', handleSystemSchemeChange);
+
+    return () => {
+      window.removeEventListener(THEME_MODE_CHANGE_EVENT, handleThemeModeChange as EventListener);
+      mediaQuery.removeEventListener('change', handleSystemSchemeChange);
+    };
+  }, []);
 
   // Persist open projects to localStorage whenever the list changes
   useEffect(() => {
