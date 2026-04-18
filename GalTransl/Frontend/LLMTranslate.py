@@ -1,3 +1,17 @@
+"""LLM 翻译前端。
+
+该模块把项目配置转化为一轮完整的翻译流水线：
+1. 读取输入文件 → 通过文件插件解析为 trans_list
+2. 按 splitter 切成多个 chunk，按 name/size 排序
+3. 载入字典 / name 替换表 / 初始化后端 gptapi
+4. 启动 worker 协程池（带信号量 + 自适应并发调节）消费 chunk 队列
+5. 每个 chunk：前处理 → 读缓存命中判定 → 调 gptapi.batch_translate →（可选）校对 → 后处理
+6. 文件全部 chunk 完成后：find_problems + 写完整快照缓存(post_save) + 合并输出 + 通过文件插件保存
+
+注：启动时不再做全局 jsonl 合并，仅在单文件完成时通过 `save_transCache_to_json(..., post_save=True)`
+重写快照并清理 append 日志。
+"""
+
 from typing import List, Dict, Any, Optional, Union, Tuple
 from os import makedirs, cpu_count, sep as os_sep,listdir
 from os.path import join as joinpath, exists as isPathExists, dirname
@@ -5,12 +19,11 @@ from venv import logger
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import time
 import asyncio
-import shutil
 from dataclasses import dataclass
 
 from GalTransl import LOGGER
 from GalTransl.i18n import get_text, GT_LANG
-from GalTransl.Cache import get_transCache_from_json, compact_cache_append_logs
+from GalTransl.Cache import get_transCache_from_json
 from GalTransl.ConfigHelper import initDictList, CProjectConfig
 from GalTransl.Dictionary import CGptDict, CNormalDic
 from GalTransl.Problem import find_problems
@@ -28,10 +41,15 @@ from GalTransl.TerminalOutput import should_print_translation_logs, terminal_pro
 
 
 def _runtime_project_dir(projectConfig: CProjectConfig) -> str:
+    """取当前运行时使用的项目目录（桌面端/服务端会覆盖为实际工作目录）。"""
     return getattr(projectConfig, "runtime_project_dir", projectConfig.getProjectDir())
 
 
 def _update_runtime(projectConfig: CProjectConfig, **kwargs):
+    """向 server 运行时状态上报进度信息（桌面端订阅用）。
+
+    服务端未启动时静默失败，不影响 CLI 运行。
+    """
     try:
         from GalTransl.server import update_runtime_status
         update_runtime_status(_runtime_project_dir(projectConfig), **kwargs)
@@ -39,19 +57,13 @@ def _update_runtime(projectConfig: CProjectConfig, **kwargs):
         return
 
 
-async def _compact_cache_before_start(cache_dir: str) -> None:
-    if not cache_dir:
-        return
-    try:
-        compacted_count = await compact_cache_append_logs(cache_dir)
-        if compacted_count > 0:
-            LOGGER.info(f"[cache]启动前已压缩 {compacted_count} 个 append 缓存文件")
-    except Exception as e:
-        LOGGER.warning(f"[cache]启动前压缩append缓存失败：{e}")
-
-
 @dataclass
 class AdaptiveWorkerState:
+    """自适应并发状态。
+
+    - max_workers: 用户在配置中指定的并发上限，运行期间不变。
+    - effective_workers: 当前实际允许的并发数，会被 auto_tune_workers 动态调整。
+    """
     max_workers: int
     effective_workers: int
 
@@ -61,6 +73,13 @@ async def auto_tune_workers(
     adaptive_state: AdaptiveWorkerState,
     apply_limit,
 ):
+    """后台自适应并发调节任务。
+
+    基于最近 30s 的请求健康度（429 比例 / 平均延迟）上下调 effective_workers：
+    - 429 比例高 或 延迟高 → 减 1（最低 1）
+    - 两者都低 → 加 1（不超过 max_workers）
+    通过 apply_limit 回调去 acquire/release 信号量槽位，实现软限流。
+    """
     metrics = getattr(projectConfig, "request_health_metrics", None)
     if metrics is None:
         return
@@ -70,6 +89,7 @@ async def auto_tune_workers(
         snapshot = metrics.snapshot(window_seconds=30.0)
         total = int(snapshot.get("total", 0))
         if total < 8:
+            # 样本不足，避免噪声触发调整
             continue
 
         ratio_429 = float(snapshot.get("rate_limited_ratio", 0.0))
@@ -87,6 +107,10 @@ async def auto_tune_workers(
 
 
 def _check_stop_requested(projectConfig: CProjectConfig):
+    """协作式取消检查点：若桌面端/服务端触发 stop_event，则抛出 JobCancelledError 中止当前任务。
+
+    在各关键步骤（IO 前、进入循环、chunk 处理前等）调用，避免写到一半被硬中断。
+    """
     stop_event = getattr(projectConfig, "stop_event", None)
     if stop_event is not None and stop_event.is_set():
         from GalTransl.Service import JobCancelledError
@@ -95,6 +119,11 @@ def _check_stop_requested(projectConfig: CProjectConfig):
 
 
 def _build_runtime_file_maps(ordered_chunks: list[SplitChunkMetadata], input_dir: str) -> tuple[dict[str, int], dict[str, str]]:
+    """构造两个给前端使用的映射：
+
+    - file_totals: {显示名: 该文件总行数}，用于前端展示每个文件的进度分母。
+    - cache_file_display_map: {缓存文件名(.json): 显示名}，用于把缓存回写事件关联到对应文件。
+    """
     file_totals: dict[str, int] = {}
     cache_file_display_map: dict[str, str] = {}
 
@@ -221,14 +250,20 @@ def postprocess_trans_list(trans_list, projectConfig, post_dic, tPlugins=None):
 async def doLLMTranslate(
     projectConfig: CProjectConfig,
 ) -> bool:
+    """整个项目的翻译入口。
+
+    负责：准备目录/字典/插件/后端 → 载入文件并切块 → 启动 worker 协程池 →
+    等所有 chunk 结束后清理自适应调节与进度条相关后台任务。
+    单文件完成的后续工作（find_problems / 写缓存快照 / 合并输出）由 `postprocess_results` 触发。
+    """
 
     _check_stop_requested(projectConfig)
 
+    # ---- 1. 基础路径与配置项 ----
     project_dir = projectConfig.getProjectDir()
     input_dir = projectConfig.getInputPath()
     output_dir = projectConfig.getOutputPath()
     cache_dir = projectConfig.getCachePath()
-    cache_bak_dir=cache_dir+"_autobak"
     pre_dic_list = projectConfig.getDictCfgSection()["preDict"]
     post_dic_list = projectConfig.getDictCfgSection()["postDict"]
     gpt_dic_list = projectConfig.getDictCfgSection()["gpt.dict"]
@@ -241,10 +276,11 @@ async def doLLMTranslate(
     )
     projectConfig.runtime_workers_effective = adaptive_state.effective_workers
     projectConfig.runtime_workers_reserved = 0
-    fPlugins = projectConfig.fPlugins
-    tPlugins = projectConfig.tPlugins
-    eng_type = projectConfig.select_translator
+    fPlugins = projectConfig.fPlugins       # 文件插件（负责 load/save 特定格式）
+    tPlugins = projectConfig.tPlugins       # 文本插件（前/后处理钩子）
+    eng_type = projectConfig.select_translator  # 选定的后端引擎标识
     input_splitter = projectConfig.input_splitter
+    # 清空跨任务残留的"文件已完成 chunk"记录，避免二次运行时误判
     SplitChunkMetadata.clear_file_finished_chunk()
     total_chunks = []
     projectConfig.active_workers = 1
@@ -252,10 +288,8 @@ async def doLLMTranslate(
     
     makedirs(output_dir, exist_ok=True)
     makedirs(cache_dir, exist_ok=True)
-    makedirs(cache_bak_dir, exist_ok=True)
 
     _check_stop_requested(projectConfig)
-    await _compact_cache_before_start(cache_dir)
 
     # 语言设置
     if val := projectConfig.getKey("language"):
@@ -280,7 +314,8 @@ async def doLLMTranslate(
     file_list.sort(key=natural_sort_key)
 
     all_jsons = []
-    # 读取所有文件获得total_chunks列表
+    # ---- 2. 读取所有文件并切分为 chunk ----
+    # 使用线程池并发读文件（IO 密集型），同时通过 fPlugins 解析为 json_list
     file_loader_workers = max(1, min(cpu_count() or 1, 8))
     with ThreadPoolExecutor(max_workers=file_loader_workers) as executor:
         future_to_file = {
@@ -299,6 +334,7 @@ async def doLLMTranslate(
             except Exception as exc:
                 LOGGER.error(get_text("file_processing_error", GT_LANG, file_path, exc))
 
+    # ---- 2.5 特殊引擎短路：只导出 name 表 / 只生成字典，不进入翻译流程 ----
     if "dump-name" in eng_type:
         _check_stop_requested(projectConfig)
         await dump_name_table_from_chunks(total_chunks, projectConfig)
@@ -310,6 +346,9 @@ async def doLLMTranslate(
         await gptapi.batch_translate(all_jsons)
         return True
 
+    # ---- 3. 根据 sortBy 决定 chunk 处理顺序 ----
+    # name: 按文件名自然序，文件内按 chunk_index 顺序（方便观察进度）
+    # size: 按 chunk 大小倒序（让大 chunk 先进入队列，平滑尾部长尾）
     soryBy = projectConfig.getKey("sortBy", "name")
     if soryBy == "name":
         # 按文件分组chunks，保持文件内部的顺序
@@ -336,7 +375,7 @@ async def doLLMTranslate(
     runtime_file_totals, runtime_cache_map = _build_runtime_file_maps(ordered_chunks, input_dir)
     _update_runtime(projectConfig, file_totals=runtime_file_totals, cache_file_display_map=runtime_cache_map)
 
-    # 初始生成name替换表
+    # ---- 4. name 替换表（首次运行时自动生成）----
     name_replaceDict_path_xlsx = joinpath(
         projectConfig.getProjectDir(), "name替换表.xlsx"
     )
@@ -350,7 +389,7 @@ async def doLLMTranslate(
         await dump_name_table_from_chunks(total_chunks, projectConfig)
         name_replaceDict_firstime = True
     
-    # 载入字典
+    # ---- 5. 载入字典（pre/post/gpt）----
     projectConfig.pre_dic = CNormalDic(
         initDictList(pre_dic_list, default_dic_dir, project_dir)
     )
@@ -376,14 +415,20 @@ async def doLLMTranslate(
             name_replaceDict_path_xlsx, name_replaceDict_firstime,total_chunks,projectConfig
         )
 
-    # 初始化共享的 gptapi 实例
+    # ---- 6. 初始化共享的 gptapi 实例（所有 worker 共用同一实例）----
     gptapi = await init_gptapi(projectConfig)
 
     title_update_task = None  # 初始化任务变量
     auto_tune_task = None
+    # 自适应降并发时通过 acquire 占住的槽位数；恢复时再 release
     reserved_permits = 0
 
     async def set_effective_workers(target: int) -> None:
+        """把 effective_workers 调整到 target：
+        - 降低：acquire (current-target) 个槽位记为 reserved_permits
+        - 提升：release 之前 reserved 的槽位
+        通过"预占信号量"而不是直接改 semaphore，避免破坏 asyncio.Semaphore 的内部状态。
+        """
         nonlocal reserved_permits
 
         target = max(1, min(adaptive_state.max_workers, int(target)))
@@ -411,6 +456,7 @@ async def doLLMTranslate(
             workers_configured=adaptive_state.effective_workers,
         )
 
+    # ---- 7. 进入翻译阶段：进度条 + worker 协程池 ----
     with terminal_progress(
         should_print_translation_logs(projectConfig),
         total=total_lines, title="翻译进度", unit=" line", enrich_print=False, dual_line=True,length=30
@@ -428,12 +474,14 @@ async def doLLMTranslate(
                 auto_tune_workers(projectConfig, adaptive_state, set_effective_workers)
             )
 
+        # 用队列 + 哨兵 None 驱动 worker，避免每个 worker 去算自己的分片
         worker_count = max(1, workersPerProject)
         chunk_queue: asyncio.Queue[Optional[SplitChunkMetadata]] = asyncio.Queue()
         for chunk in ordered_chunks:
             _check_stop_requested(projectConfig)
             chunk_queue.put_nowait(chunk)
 
+        # 每个 worker 取到 None 即退出
         for _ in range(worker_count):
             chunk_queue.put_nowait(None)
 
@@ -496,6 +544,16 @@ async def doLLMTranslSingleChunk(
     projectConfig: CProjectConfig,
     gptapi: Any,  # 添加 gptapi 参数
 ) -> Tuple[bool, List, List, str, SplitChunkMetadata]:
+    """处理单个切片(chunk)的翻译流程。
+
+    顺序：
+    1. acquire 信号量 → 进入并发窗口
+    2. 前处理（插件 before_src → 字典替换 → after_src）
+    3. 读缓存判定命中/未命中（含 append 日志合并）
+    4. 未命中部分调 gptapi.batch_translate；若启用则做校对
+    5. 后处理（恢复符号、post 字典、插件 after_dst）
+    6. 如果该文件所有 chunk 都完成，触发 postprocess_results 合并写出+快照缓存
+    """
 
     async with semaphore:
         _check_stop_requested(projectConfig)
@@ -521,11 +579,6 @@ async def doLLMTranslSingleChunk(
 
         cache_file_path = joinpath(
             cache_dir,
-            file_name + (f"_{file_index}" if total_splits > 1 else ""),
-        )
-        cache_bak_dir=cache_dir+"_autobak"
-        cache_bak_path = joinpath(
-            cache_bak_dir,
             file_name + (f"_{file_index}" if total_splits > 1 else ""),
         )
 
@@ -560,13 +613,6 @@ async def doLLMTranslSingleChunk(
             retran_key=projectConfig.getKey("retranslKey"),
             eng_type=eng_type,
         )
-
-        # 备份缓存文件
-        try:
-            if isPathExists(cache_file_path):
-                shutil.copyfile(cache_file_path,cache_bak_path)
-        except Exception as e:
-            LOGGER.warning(f"自动备份缓存失败：{e}")
 
         if len(translist_hit) > 0:
             projectConfig.bar(len(translist_hit), skipped=True) # 更新进度条
@@ -615,8 +661,8 @@ async def doLLMTranslSingleChunk(
             )
         )
 
+        # 登记本 chunk 已完成；只有当"同一文件的全部 chunk"都完成时才做整文件后处理
         split_chunk.update_file_finished_chunk()
-        # 检查是否该文件的所有chunk都翻译完成
         if split_chunk.is_file_finished():
             LOGGER.debug(get_text("file_chunks_completed", GT_LANG, file_name))
             await postprocess_results(
@@ -630,6 +676,12 @@ async def postprocess_results(
     resultChunks: List[SplitChunkMetadata],
     projectConfig: CProjectConfig,
 ):
+    """单个文件翻译完成后的收尾工作。
+
+    对每个 chunk 逐一：find_problems 标注问题 → save_transCache_to_json(post_save=True)
+    写完整 jsonl 快照（这也是唯一一次把 append 日志合并入主快照的时机）。
+    随后合并所有 chunk 的结果，套用 name 替换表并经文件插件写出最终译文。
+    """
 
     proj_dir = projectConfig.getProjectDir()
     input_dir = projectConfig.getInputPath()
@@ -649,8 +701,10 @@ async def postprocess_results(
             + (f"_{chunk.chunk_index}" if chunk.total_chunks > 1 else ""),
         )
 
+        # rebuildr 是"只重建输出文件"模式，不应修改缓存；其余引擎正常刷新
         if eng_type != "rebuildr":
             find_problems(trans_list, projectConfig, gpt_dic)
+            # post_save=True → 写完整快照并删除对应 .append 日志（即合并 jsonl）
             await save_transCache_to_json(trans_list, cache_file_path, post_save=True)
 
     # 使用output_combiner合并结果，即使只有一个结果
@@ -673,7 +727,7 @@ async def init_gptapi(
     projectConfig: CProjectConfig,
 ):
     """
-    根据引擎类型获取相应的API实例。
+    根据引擎类型获取相应的API实例（延迟导入后端模块以避免不必要依赖）。
 
     参数:
     projectConfig: 项目配置对象
@@ -717,6 +771,11 @@ async def init_gptapi(
 
 
 def fplugins_load_file(file_path: str, fPlugins: list) -> Tuple[List[Dict], Any]:
+    """按顺序尝试每个文件插件解析 file_path。
+
+    第一个成功的插件决定解析结果与对应的保存函数 save_func。
+    返回 (json_list, save_func)；若所有插件都失败则断言报错。
+    """
     result = None
     save_func = None
     for plugin in fPlugins:

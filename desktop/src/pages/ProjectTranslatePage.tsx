@@ -767,7 +767,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                     ))}
                   </div>
                 ) : (
-                  <EmptyState title="最近没有错误" description="接口错误、解析错误或重试退避会显示在这里。" />
+                  <EmptyState title="最近没有错误" description="接口错误、解析错误会显示在这里。" />
                 )
               ) : rightTab === 'files' ? (
                 prioritizedRuntimeFiles.length > 0 ? (

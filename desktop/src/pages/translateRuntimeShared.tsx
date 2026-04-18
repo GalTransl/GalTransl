@@ -27,9 +27,10 @@ export function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) 
       <div className="runtime-event__header">
         <div className="runtime-event__badges">
           <span className="runtime-event__pill runtime-event__pill--danger">{kindLabel}</span>
-          <span className="runtime-event__pill">{entry.level || 'warn'}</span>
           {(entry.retry_count ?? 0) > 0 ? <span className="runtime-event__pill">重试 {entry.retry_count}</span> : null}
-          {(entry.sleep_seconds ?? 0) > 0 ? <span className="runtime-event__pill">退避 {Number(entry.sleep_seconds).toFixed(3)}s</span> : null}
+        </div>
+        <div className="runtime-event__header-right">
+          <time className="runtime-event__timestamp">{formatTime(entry.ts)}</time>
         </div>
       </div>
       <p className="runtime-event__message">{entry.message || '未提供错误详情。'}</p>
@@ -50,11 +51,10 @@ export function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) 
           <dt>模型</dt>
           <dd>{entry.model || '—'}</dd>
         </div>
-      </dl>
-      <div className="runtime-event__footer">
+        {(entry.sleep_seconds ?? 0) > 0 ? <span className="runtime-event__pill">退避 {Number(entry.sleep_seconds).toFixed(3)}s</span> : null}
         <button
           type="button"
-          className={`icon-btn runtime-event__copy-btn${copied ? ' runtime-event__copy-btn--copied' : ''}`}
+          className={`icon-btn runtime-event__copy-btn runtime-event__meta-copy${copied ? ' runtime-event__copy-btn--copied' : ''}`}
           onClick={() => void handleCopyMessage()}
           disabled={!messageText}
           title={!messageText ? '无可复制内容' : (copied ? '已复制' : '复制错误信息')}
@@ -71,8 +71,7 @@ export function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) 
             </svg>
           )}
         </button>
-        <time className="runtime-event__timestamp">{formatTime(entry.ts)}</time>
-      </div>
+      </dl>
     </article>
   );
 }

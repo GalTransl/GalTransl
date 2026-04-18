@@ -374,8 +374,8 @@ export function DictionaryManager(props: DictionaryManagerProps) {
 
   const buildRowByType = (rowType: DictRowType): DictRow => {
     if (rowType === 'gpt') return { type: 'gpt', values: ['', '', ''], raw: '' };
-    if (rowType === 'conditional') return { type: 'conditional', values: ['', '', '', '', ''], raw: '' };
-    if (rowType === 'situation') return { type: 'situation', values: ['', '', ''], raw: '' };
+    if (rowType === 'conditional') return { type: 'conditional', values: ['pre_jp', '', '', '', ''], raw: '' };
+    if (rowType === 'situation') return { type: 'situation', values: ['diag', '', ''], raw: '' };
     if (rowType === 'comment') return { type: 'comment', values: [''], raw: '' };
     return { type: 'normal', values: ['', '', ''], raw: '' };
   };
@@ -423,11 +423,12 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   };
 
   const handleCreate = async () => {
-    const name = newFilename.trim();
-    if (!name) {
+    const raw = newFilename.trim();
+    if (!raw) {
       setLocalError('文件名不能为空');
       return;
     }
+    const name = /\.txt$/i.test(raw) ? raw : `${raw}.txt`;
     setCreating(true);
     setLocalError(null);
     setInfo(null);
@@ -586,6 +587,22 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="dict-search"
                   />
+                  {mode === 'card' && (
+                    activeTab === 'gpt' ? (
+                      <Button variant="secondary" onClick={() => addRow('gpt')}>
+                        + 新增条目
+                      </Button>
+                    ) : (
+                      <>
+                        <Button variant="secondary" onClick={() => addRow('normal')}>
+                          + 普通条目
+                        </Button>
+                        <Button variant="secondary" onClick={() => addRow('conditional')}>
+                          + 条件条目
+                        </Button>
+                      </>
+                    )
+                  )}
                 </div>
 
                 {mode === 'text' ? (
@@ -613,7 +630,20 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                         />
                       ))}
                       {groupedRows.length === 0 && (
-                        <EmptyState title="无匹配条目" description="尝试更换搜索关键词或新增条目。" />
+                        <EmptyState
+                          title={searchTerm.trim() ? '无匹配条目' : '字典为空'}
+                          description={searchTerm.trim() ? '尝试更换搜索关键词或新增条目。' : '点击下方按钮添加第一条字典条目。'}
+                          action={(
+                            activeTab === 'gpt' ? (
+                              <Button variant="secondary" onClick={() => addRow('gpt')}>+ 新增条目</Button>
+                            ) : (
+                              <div className="dict-empty-actions">
+                                <Button variant="secondary" onClick={() => addRow('normal')}>+ 普通条目</Button>
+                                <Button variant="secondary" onClick={() => addRow('conditional')}>+ 条件条目</Button>
+                              </div>
+                            )
+                          )}
+                        />
                       )}
                     </div>
                   </div>

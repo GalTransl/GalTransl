@@ -39,6 +39,12 @@ function unescapeControlChars(text: string): string {
 }
 
 type SidebarTab = 'files' | 'search' | 'problems';
+type CacheContextMenuState = {
+  x: number;
+  y: number;
+  filenames: string[];
+  showDelete: boolean;
+};
 const MIN_REFRESH_SPIN_MS = 420;
 const REFRESH_SPIN_CYCLE_MS = 500;
 
@@ -210,6 +216,7 @@ function SearchResultCard({
   nameDict,
   selected,
   onSelect,
+  onContextMenu,
   idx }: {
   result: CacheSearchResult;
   query: string;
@@ -217,6 +224,7 @@ function SearchResultCard({
   nameDict: Map<string, string>;
   selected: boolean;
   onSelect: () => void;
+  onContextMenu: (event: React.MouseEvent<HTMLButtonElement>) => void;
   idx: number;
 }) {
   const rawSpeaker = Array.isArray(result.speaker) ? result.speaker.join('/') : result.speaker || '—';
@@ -232,6 +240,11 @@ function SearchResultCard({
       className={`search-result-card${selected ? ' search-result-card--selected' : ''}`}
       data-search-idx={idx}
       onClick={() => { onSelect(); onJumpToFile(result.filename, result.index); }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onSelect();
+        onContextMenu(e);
+      }}
       title={`跳转到 ${result.filename} #${result.index}`}
     >
       <div className="search-result-card__header">
@@ -372,7 +385,7 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
 
   // File multi-select state
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; filenames: string[] } | null>(null);
+  const [contextMenu, setContextMenu] = useState<CacheContextMenuState | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Replace state
@@ -896,6 +909,25 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
     };
   }, [contextMenu]);
 
+  // Ctrl+S: save current file; Ctrl+Shift+S: save all dirty files
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return;
+      e.preventDefault();
+      if (e.shiftKey) {
+        if (!savingAll && dirtyFiles.size > 0) {
+          void handleSaveAll();
+        }
+        return;
+      }
+      if (!saving && selectedFile && dirtyFiles.has(selectedFile)) {
+        void handleSave();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [saving, savingAll, selectedFile, dirtyFiles, handleSave, handleSaveAll]);
+
   // Ctrl+A handler for file list
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -1004,20 +1036,19 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
     }
   };
 
-  if (loading) {
+  if (loading && cacheFiles.length === 0) {
     return (
       <div className="project-cache-page">
-        <PageHeader className="project-cache-page__header" title="缓存编辑" />
+        <PageHeader className="project-cache-page__header" title="缓存与问题" />
         <LoadingState title="加载缓存列表中…" description="正在读取项目缓存文件。" />
       </div>
     );
   }
-
   return (
     <div className="project-cache-page">
       <PageHeader
         className="project-cache-page__header"
-        title="缓存编辑"
+        title="缓存与问题"
         description="在这里可以浏览翻译问题、手动润色，或通过删除缓存句触发部分重翻。最终结果将基于这些缓存来构建。"
         actions={cacheDir ? (
           <Button variant="secondary" onClick={() => void invoke('open_folder', { path: cacheDir })} title={cacheDir}>
@@ -1096,6 +1127,27 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
                   </button>
                 </div>
               </div>
+              {selectedFiles.size > 0 && (
+                <div className="cache-file-list__selection-bar">
+                  <span className="cache-file-list__selection-count">已选择 {selectedFiles.size} 个文件</span>
+                  <div className="cache-file-list__selection-actions">
+                    <button
+                      type="button"
+                      className="cache-file-list__selection-delete"
+                      onClick={() => void handleDeleteSelectedFiles(Array.from(selectedFiles))}
+                    >
+                      删除
+                    </button>
+                    <button
+                      type="button"
+                      className="cache-file-list__selection-clear"
+                      onClick={() => setSelectedFiles(new Set())}
+                    >
+                      取消选择
+                    </button>
+                  </div>
+                </div>
+              )}
               <div
                 className="cache-file-list"
                 tabIndex={0}
@@ -1146,6 +1198,7 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
                           x: e.clientX,
                           y: e.clientY,
                           filenames: targetFiles,
+                          showDelete: true,
                         });
                       }}
                     >
@@ -1157,25 +1210,6 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
                     </button>
                   );
                 })}
-                {selectedFiles.size > 0 && (
-                  <div className="cache-file-list__selection-bar">
-                    已选择 {selectedFiles.size} 个文件
-                    <button
-                      type="button"
-                      className="cache-file-list__selection-delete"
-                      onClick={() => void handleDeleteSelectedFiles(Array.from(selectedFiles))}
-                    >
-                      删除
-                    </button>
-                    <button
-                      type="button"
-                      className="cache-file-list__selection-clear"
-                      onClick={() => setSelectedFiles(new Set())}
-                    >
-                      取消选择
-                    </button>
-                  </div>
-                )}
               </div>
             </div>
           )}
@@ -1313,6 +1347,14 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
                     nameDict={nameDict}
                     selected={idx === selectedSearchIdx}
                     onSelect={() => setSelectedSearchIdx(idx)}
+                    onContextMenu={(e) => {
+                      setContextMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        filenames: [r.filename],
+                        showDelete: false,
+                      });
+                    }}
                     idx={idx}
                   />
                 ))}
@@ -1515,22 +1557,24 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
             }}
           >
             <span className="cache-context-menu__icon" aria-hidden="true">📂</span>
-            <span className="cache-context-menu__label">在文件管理器查看</span>
+            <span className="cache-context-menu__label">在文件管理器中浏览</span>
           </button>
-          <button
-            type="button"
-            className="cache-context-menu__item cache-context-menu__item--danger"
-            onClick={() => {
-              const files = contextMenu.filenames;
-              setContextMenu(null);
-              void handleDeleteSelectedFiles(files);
-            }}
-          >
-            <span className="cache-context-menu__icon" aria-hidden="true">🗑</span>
-            <span className="cache-context-menu__label">
-              删除{contextMenu.filenames.length > 1 ? ` (${contextMenu.filenames.length} 个文件)` : ''}
-            </span>
-          </button>
+          {contextMenu.showDelete && (
+            <button
+              type="button"
+              className="cache-context-menu__item cache-context-menu__item--danger"
+              onClick={() => {
+                const files = contextMenu.filenames;
+                setContextMenu(null);
+                void handleDeleteSelectedFiles(files);
+              }}
+            >
+              <span className="cache-context-menu__icon" aria-hidden="true">🗑</span>
+              <span className="cache-context-menu__label">
+                删除{contextMenu.filenames.length > 1 ? ` (${contextMenu.filenames.length} 个文件)` : ''}
+              </span>
+            </button>
+          )}
         </div>,
         document.body,
       )}

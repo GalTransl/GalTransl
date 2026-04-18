@@ -41,10 +41,10 @@ function loadConfigFileName(projectDir: string): string {
 /** Tab path → component mapping */
 const TAB_MAP: { path: string; label: string }[] = [
   { path: 'translate', label: '翻译工作台' },
+  { path: 'cache', label: '缓存与问题' },
   { path: 'config', label: '配置编辑' },
   { path: 'dictionary', label: '项目字典' },
   { path: 'names', label: '人名翻译' },
-  { path: 'cache', label: '缓存编辑' },
 ];
 
 /** Shared context passed to every child page */
@@ -85,7 +85,7 @@ export function ProjectLayout() {
 
   const activeTab = TAB_MAP.some((tab) => tab.path === currentTab) ? currentTab : 'translate';
 
-  // 对"缓存编辑"页：一旦访问过就保持挂载，避免重新进入时重复拉取所有缓存文件。
+  // 对"缓存与问题"页：一旦访问过就保持挂载，避免重新进入时重复拉取所有缓存文件。
   // 其他页仍按需挂载以控制内存占用。
   const [cacheVisited, setCacheVisited] = useState(() => activeTab === 'cache');
   useEffect(() => {

@@ -3,12 +3,49 @@
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 
+#[cfg(target_os = "windows")]
+/// 使用 Windows Shell API 打开 Explorer：
+/// - 当 path 指向目录时：打开该目录（若已有同路径 Explorer 窗口则复用并激活）
+/// - 当 path 指向文件时：打开其父目录并滚动/高亮选中该文件（VSCode 风格）
+fn windows_shell_open(path: &str) -> Result<(), String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::System::Com::{
+        CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
+    };
+    use windows::Win32::UI::Shell::{ILCreateFromPathW, ILFree, SHOpenFolderAndSelectItems};
+
+    let win_path = path.replace('/', "\\");
+    let wide: Vec<u16> = win_path.encode_utf16().chain(std::iter::once(0)).collect();
+
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+
+        let pidl = ILCreateFromPathW(PCWSTR(wide.as_ptr()));
+        if pidl.is_null() {
+            CoUninitialize();
+            return Err(format!("无法解析路径: {}", win_path));
+        }
+
+        let hr = SHOpenFolderAndSelectItems(pidl, None, 0);
+
+        ILFree(Some(pidl));
+        CoUninitialize();
+
+        hr.map_err(|e| format!("打开 Explorer 失败: {}", e))?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn open_folder(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        // explorer 打开目录时默认会复用已经显示该路径的窗口（除非用户关闭了
+        // “在不同窗口中打开文件夹”选项）。不要用 SHOpenFolderAndSelectItems，
+        // 否则会在父目录中把该文件夹“选中”而不是进入它。
+        let win_path = path.replace('/', "\\");
         std::process::Command::new("explorer")
-            .arg(&path)
+            .arg(&win_path)
             .spawn()
             .map_err(|e| format!("打开文件夹失败: {}", e))?;
     }
@@ -33,38 +70,7 @@ fn open_folder(path: String) -> Result<(), String> {
 fn reveal_file(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        use windows::core::PCWSTR;
-        use windows::Win32::System::Com::{
-            CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
-        };
-        use windows::Win32::UI::Shell::{ILCreateFromPathW, ILFree, SHOpenFolderAndSelectItems};
-
-        // Normalize path separator; Shell API requires backslashes.
-        let win_path = path.replace('/', "\\");
-        let wide: Vec<u16> = win_path.encode_utf16().chain(std::iter::once(0)).collect();
-
-        unsafe {
-            // 初始化 COM（若已初始化会返回 S_FALSE，无需处理）
-            let _ = CoInitializeEx(
-                None,
-                COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE,
-            );
-
-            let pidl = ILCreateFromPathW(PCWSTR(wide.as_ptr()));
-            if pidl.is_null() {
-                CoUninitialize();
-                return Err("无法解析文件路径".into());
-            }
-
-            // 传入文件自身的 PIDL、apidl=None、flags=0：
-            // 会复用已经在父目录的 Explorer 窗口，并滚动/高亮选中该文件（与 VSCode 的 Reveal 一致）。
-            let hr = SHOpenFolderAndSelectItems(pidl, None, 0);
-
-            ILFree(Some(pidl));
-            CoUninitialize();
-
-            hr.map_err(|e| format!("定位文件失败: {}", e))?;
-        }
+        return windows_shell_open(&path);
     }
     #[cfg(target_os = "macos")]
     {
@@ -85,7 +91,10 @@ fn reveal_file(path: String) -> Result<(), String> {
             .spawn()
             .map_err(|e| format!("定位文件失败: {}", e))?;
     }
-    Ok(())
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(())
+    }
 }
 
 #[tauri::command]

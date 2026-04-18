@@ -795,6 +795,19 @@
   gap: 6px;
 }
 
+.runtime-event__meta-copy {
+  margin-left: auto;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.runtime-event--error:hover .runtime-event__meta-copy,
+.runtime-event--error:focus-within .runtime-event__meta-copy {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .runtime-event__meta div {
   display: inline-flex;
   align-items: center;

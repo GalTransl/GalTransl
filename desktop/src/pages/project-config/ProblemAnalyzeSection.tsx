@@ -87,7 +87,7 @@ export function ProblemAnalyzeSection({ config, onProblemListChange, onDirty }: 
   return (
     <Panel
       title="问题分析"
-      description="选择启用的翻译质量问题检测项。翻译过程中命中的问题会写入缓存并展示在缓存编辑页。"
+      description="选择启用的翻译质量问题检测项。翻译过程中命中的问题会写入缓存并展示在缓存与问题页。"
     >
       <div className="problem-analyze-section">
         {loadError && (

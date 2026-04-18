@@ -1422,6 +1422,12 @@
   background: rgba(20, 29, 41, 0.9);
 }
 
+:root[data-theme='dark'] .home-hero__eyebrow {
+  border-color: rgba(65, 83, 111, 0.9);
+  background: rgba(22, 34, 49, 0.86);
+  color: rgba(174, 206, 244, 0.94);
+}
+
 :root[data-theme='dark'] .home-hero__stats {
   border-color: rgba(65, 83, 111, 0.86);
   background: rgba(15, 23, 34, 0.82);

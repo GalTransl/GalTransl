@@ -210,6 +210,21 @@
 
 .dict-toolbar {
   margin-bottom: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.dict-toolbar .dict-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.dict-empty-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: center;
+  flex-wrap: wrap;
 }
 
 .dict-card-mode {
@@ -263,6 +278,8 @@
   display: grid;
   gap: var(--space-3);
   flex: 1;
+  align-content: start;
+  grid-auto-rows: max-content;
   min-width: 0;
   min-height: 0;
   max-height: none;

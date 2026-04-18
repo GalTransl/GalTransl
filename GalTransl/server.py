@@ -3022,7 +3022,21 @@ def build_handler(registry: JobRegistry):
 
 def serve(host: str = "127.0.0.1", port: int = 18000) -> None:
     registry = JobRegistry()
-    server = ThreadingHTTPServer((host, port), build_handler(registry))
+    try:
+        server = ThreadingHTTPServer((host, port), build_handler(registry))
+    except OSError as exc:
+        # WinError 10048 / errno 98 (EADDRINUSE) / errno 13 (EACCES on Windows for occupied ports)
+        errno_val = getattr(exc, "errno", None)
+        winerror = getattr(exc, "winerror", None)
+        if errno_val in (48, 98, 10048, 13) or winerror == 10048:
+            print(
+                f"[错误] 端口 {port} 已被占用，无法启动 GalTransl 后端服务。\n"
+                f"       请先关闭占用该端口的程序，或使用 --port 指定其他端口，例如：\n"
+                f"       python run_backend.py --host {host} --port {port + 1}"
+            )
+            raise SystemExit(1)
+        print(f"[错误] 无法绑定 {host}:{port} —— {exc}")
+        raise SystemExit(1)
     print(f"GalTransl backend mode listening at http://{host}:{port}")
     try:
         server.serve_forever()

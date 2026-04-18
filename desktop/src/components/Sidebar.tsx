@@ -19,10 +19,10 @@ function loadConfigFileName(projectDir: string): string {
 
 const PROJECT_TABS = [
   { path: 'translate', label: '翻译工作台', icon: '🌐' },
-  { path: 'config', label: '配置编辑', icon: '⚙️' },
+  { path: 'cache', label: '缓存与问题', icon: '💾' },
   { path: 'dictionary', label: '项目字典', icon: '📖' },
   { path: 'names', label: '人名翻译', icon: '👤' },
-  { path: 'cache', label: '缓存编辑', icon: '💾' },
+  { path: 'config', label: '配置编辑', icon: '⚙️' },
 ];
 
 type SidebarProps = {

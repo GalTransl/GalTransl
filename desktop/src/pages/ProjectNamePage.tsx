@@ -521,9 +521,13 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
 
   const panelActions = (
     <div className="name-page__panel-actions">
-      <Button onClick={handleGenerate} disabled={generating}>
-        {generating ? '提取中...' : '提取人名表'}
-      </Button>
+      <input
+        type="text"
+        className="name-page__search"
+        placeholder="搜索人名..."
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+      />
       <label
         className="name-page__gpt-toggle"
         title="打开后：自动设置项目配置中的「字典用在name字段(GPT)」，并用项目GPT字典中的条目覆盖未翻译的人名（AI翻译时会自动跳过这些人名）"
@@ -539,6 +543,10 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
         </span>
         <span className="name-page__gpt-toggle-label">GPT字典用于人名</span>
       </label>
+      <div className="name-page__panel-actions-group">
+      <Button onClick={handleGenerate} disabled={generating} variant="secondary">
+        {generating ? '提取中...' : '提取人名表'}
+      </Button>
       <div className="name-page__ai-wrap" ref={aiPopoverRef}>
         <Button onClick={handleOpenAiPopover} disabled={aiTranslating || names.length === 0}>
           {aiTranslating ? 'AI翻译中，不要走开...' : 'AI翻译人名'}
@@ -591,13 +599,7 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
       >
         {saveLabel}
       </Button>
-      <input
-        type="text"
-        className="name-page__search"
-        placeholder="搜索人名..."
-        value={searchQuery}
-        onChange={(e) => setSearchQuery(e.target.value)}
-      />
+      </div>
     </div>
   );
 
