@@ -1672,6 +1672,42 @@ def build_handler(registry: JobRegistry):
                     self._send_json({"error": f"failed to delete cache entry: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
+            # POST /api/projects/:id/cache/delete-file
+            if sub_path == "/cache/delete-file":
+                if self.command != "POST":
+                    self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
+                    return
+                try:
+                    payload = self._read_json_body()
+                    filenames = payload.get("filenames", [])
+                    if not isinstance(filenames, list) or not filenames:
+                        self._send_json({"error": "filenames must be a non-empty list"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+                    deleted_files = []
+                    not_found_files = []
+                    for fname in filenames:
+                        fname = str(fname).strip()
+                        if not fname or fname != os.path.basename(fname):
+                            not_found_files.append(fname)
+                            continue
+                        file_path = os.path.join(cache_dir, fname)
+                        if not os.path.isfile(file_path):
+                            not_found_files.append(fname)
+                            continue
+                        try:
+                            os.remove(file_path)
+                            deleted_files.append(fname)
+                        except OSError:
+                            not_found_files.append(fname)
+                    self._send_json({"success": True, "deleted_files": deleted_files, "not_found_files": not_found_files})
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to delete cache files: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
             # POST /api/projects/:id/cache/search
             if sub_path == "/cache/search":
                 if self.command != "POST":

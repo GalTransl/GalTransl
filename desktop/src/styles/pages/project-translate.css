@@ -12,9 +12,18 @@
 .project-layout > .project-cache-page,
 .project-layout > .project-config-page,
 .project-layout > .name-page,
-.project-layout > .ptv2-page {
+.project-layout > .ptv2-page,
+.project-layout > .project-layout__keep-alive,
+.project-layout > .project-layout__keep-alive > .project-cache-page {
   flex: 1;
   min-height: 0;
+}
+
+/* Keep-alive wrapper must itself be a flex column so the inner page can fill height. */
+.project-layout__keep-alive {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .form-row {

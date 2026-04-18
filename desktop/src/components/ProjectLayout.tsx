@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { decodeProjectDir } from '../lib/api';
 
@@ -85,6 +85,17 @@ export function ProjectLayout() {
 
   const activeTab = TAB_MAP.some((tab) => tab.path === currentTab) ? currentTab : 'translate';
 
+  // 对"缓存编辑"页：一旦访问过就保持挂载，避免重新进入时重复拉取所有缓存文件。
+  // 其他页仍按需挂载以控制内存占用。
+  const [cacheVisited, setCacheVisited] = useState(() => activeTab === 'cache');
+  useEffect(() => {
+    if (activeTab === 'cache') {
+      setCacheVisited(true);
+    }
+  }, [activeTab]);
+
+  const shouldRenderCache = cacheVisited || activeTab === 'cache';
+
   return (
     <div className="project-layout">
       <Suspense fallback={<div className="inline-feedback">页面加载中…</div>}>
@@ -92,7 +103,15 @@ export function ProjectLayout() {
         {activeTab === 'config' ? <ProjectConfigPage ctx={ctx} /> : null}
         {activeTab === 'dictionary' ? <ProjectDictionaryPage ctx={ctx} /> : null}
         {activeTab === 'names' ? <ProjectNamePage ctx={ctx} /> : null}
-        {activeTab === 'cache' ? <ProjectCachePage ctx={ctx} /> : null}
+        {shouldRenderCache ? (
+          <div
+            className="project-layout__keep-alive"
+            hidden={activeTab !== 'cache'}
+            style={activeTab !== 'cache' ? { display: 'none' } : undefined}
+          >
+            <ProjectCachePage ctx={ctx} />
+          </div>
+        ) : null}
       </Suspense>
     </div>
   );

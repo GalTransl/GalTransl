@@ -143,7 +143,15 @@ async def _compact_cache_from_append(cache_file_path: str, append_file_path: str
                 continue
             if cache_key not in cache_dict:
                 cache_order.append(cache_key)
-            cache_dict[cache_key] = cache_obj
+                cache_dict[cache_key] = cache_obj
+            else:
+                # 以快照为基合并：append 提供的键覆盖快照，
+                # append 未提供的键（如 problem 等派生字段）保留。
+                # 这样中途被打断后再启动 compaction 不会把 problem 字段抹掉，
+                # 避免 retranslKey-by-problem 失效。
+                merged_obj = dict(cache_dict[cache_key])
+                merged_obj.update(cache_obj)
+                cache_dict[cache_key] = merged_obj
 
     merged_cache = [cache_dict[key] for key in cache_order if key in cache_dict]
 
@@ -305,7 +313,16 @@ async def get_transCache_from_json(
                 cache_key = str(cache_obj.pop("__cache_key", ""))
                 if not cache_key:
                     continue
-                cache_dict[cache_key] = cache_obj
+                if cache_key in cache_dict:
+                    # 与 _compact_cache_from_append 保持一致的合并策略：
+                    # 保留快照中 append 未提供的派生字段（如 problem），
+                    # 这样 retranslKey-by-problem 检测仍能基于最近一次
+                    # 完整 post_save 记录的 problem 正确触发。
+                    merged_obj = dict(cache_dict[cache_key])
+                    merged_obj.update(cache_obj)
+                    cache_dict[cache_key] = merged_obj
+                else:
+                    cache_dict[cache_key] = cache_obj
         except Exception as e:
             LOGGER.warning(f"[cache]读取append缓存失败：{append_file_path}: {e}")
 

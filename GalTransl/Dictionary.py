@@ -476,7 +476,7 @@ class CGptDict:
 
             if not flag:
                 problem_list.append(
-                    f"{dic.dic_name} {dic.search_word} -> {dic.replace_word} 未使用"
+                    f"{dic.dic_name}未使用：{dic.search_word}---{dic.replace_word}"
                 )
 
         return ", ".join(problem_list)

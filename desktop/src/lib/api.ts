@@ -475,6 +475,17 @@ export async function deleteCacheEntry(projectId: string, filename: string, inde
   );
 }
 
+export async function deleteCacheFiles(projectId: string, filenames: string[]) {
+  return apiRequest<{ success: boolean; deleted_files: string[]; not_found_files: string[] }>(
+    `/api/projects/${projectId}/cache/delete-file`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filenames }),
+    },
+  );
+}
+
 export async function searchCache(
   projectId: string,
   query: string,
