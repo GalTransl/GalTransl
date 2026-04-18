@@ -1,9 +1,12 @@
-import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { HashRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import {
+  CUSTOM_BACKGROUND_CHANGE_EVENT,
   THEME_MODE_CHANGE_EVENT,
+  type CustomBackgroundPreference,
   decodeProjectDir,
   encodeProjectDir,
+  getCustomBackgroundPreference,
   getThemeModePreference,
 } from '../lib/api';
 import { Sidebar } from '../components/Sidebar';
@@ -158,6 +161,18 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
   const location = useLocation();
   const [displayLocation, setDisplayLocation] = useState(location);
   const [transitionStage, setTransitionStage] = useState<'fadeIn' | 'fadeOut'>('fadeIn');
+  const [customBackground, setCustomBackground] = useState<CustomBackgroundPreference>(() => getCustomBackgroundPreference());
+
+  useEffect(() => {
+    const handleCustomBackgroundChange = () => {
+      setCustomBackground(getCustomBackgroundPreference());
+    };
+
+    window.addEventListener(CUSTOM_BACKGROUND_CHANGE_EVENT, handleCustomBackgroundChange as EventListener);
+    return () => {
+      window.removeEventListener(CUSTOM_BACKGROUND_CHANGE_EVENT, handleCustomBackgroundChange as EventListener);
+    };
+  }, []);
 
   useEffect(() => {
     if (location.pathname !== displayLocation.pathname) {
@@ -199,8 +214,25 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
     navigate('/');
   }, [navigate, onCloseAllProjects]);
 
+  const surfaceOpacity = customBackground.surfaceOpacity / 100;
+  const softSurfaceOpacity = Math.max(0.1, surfaceOpacity - 0.14);
+  const appLayoutStyle = {
+    '--custom-bg-surface-opacity': String(surfaceOpacity),
+    '--custom-bg-surface-soft-opacity': String(softSurfaceOpacity),
+  } as CSSProperties;
+
   return (
-    <div className="app-layout">
+    <div
+      className={`app-layout${customBackground.imageDataUrl ? ' app-layout--custom-background' : ''}`}
+      style={appLayoutStyle}
+    >
+      <div
+        className={`app-layout__custom-background ${customBackground.imageDataUrl ? 'app-layout__custom-background--visible' : ''}`}
+        style={{
+          backgroundImage: customBackground.imageDataUrl ? `url(${customBackground.imageDataUrl})` : 'none',
+          opacity: customBackground.opacity / 100,
+        }}
+      />
       <Sidebar
         openProjects={openProjects}
         onCloseProject={handleCloseProjectAndNavigate}

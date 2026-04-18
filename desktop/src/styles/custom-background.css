@@ -1,0 +1,386 @@
+/* Custom background penetration overrides */
+
+.app-layout--custom-background {
+  --custom-bg-surface-opacity-resolved: var(--custom-bg-surface-opacity, 0.44);
+  --custom-bg-surface-soft-opacity-resolved: var(--custom-bg-surface-soft-opacity, 0.3);
+  --custom-bg-surface-blur: calc(2px + (var(--custom-bg-surface-opacity-resolved) * 12px));
+  --custom-bg-surface-blur-soft: calc(1px + (var(--custom-bg-surface-soft-opacity-resolved) * 8px));
+  --custom-bg-fill-strong: rgba(255, 255, 255, calc(var(--custom-bg-surface-opacity-resolved) + 0.16));
+  --custom-bg-fill-soft: rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.06));
+  --custom-bg-fill-soft-hover: rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.18));
+}
+
+.app-layout--custom-background .sidebar,
+.app-layout--custom-background .panel,
+.app-layout--custom-background .project-translate-page .panel,
+.app-layout--custom-background .home-open,
+.app-layout--custom-background .home-history,
+.app-layout--custom-background .home-jobs,
+.app-layout--custom-background .project-translate-page .ptv2-cockpit,
+.app-layout--custom-background .plugin-card,
+.app-layout--custom-background .job-card,
+.app-layout--custom-background .empty-state,
+.app-layout--custom-background .meta-grid div,
+.app-layout--custom-background .runtime-summary-strip,
+.app-layout--custom-background .project-translate-page .runtime-summary-strip,
+.app-layout--custom-background .runtime-success-compact,
+.app-layout--custom-background .runtime-event,
+.app-layout--custom-background .project-translate-page .runtime-event--success,
+.app-layout--custom-background .project-translate-page .runtime-event--error,
+.app-layout--custom-background .home-hero,
+.app-layout--custom-background .home-hero__stats,
+.app-layout--custom-background .project-cache-page .cache-layout,
+.app-layout--custom-background .sidebar__project-confirm-bubble,
+.app-layout--custom-background .sidebar__context-menu,
+.app-layout--custom-background .project-cache-page .cache-context-menu,
+.app-layout--custom-background .project-translate-page__folder-menu,
+.app-layout--custom-background .project-translate-page__folder-menu-content {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, calc(var(--custom-bg-surface-opacity-resolved) + 0.22)), rgba(248, 251, 255, calc(var(--custom-bg-surface-opacity-resolved) + 0.1))),
+    rgba(255, 255, 255, var(--custom-bg-surface-opacity-resolved));
+  backdrop-filter: blur(var(--custom-bg-surface-blur));
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur));
+}
+
+.app-layout--custom-background .app-layout__content:has(.home-page)::before {
+  opacity: calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.06);
+}
+
+.app-layout--custom-background .project-translate-page .ptv2-cockpit__grid {
+  opacity: calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.06);
+}
+
+.app-layout--custom-background .project-translate-page .ptv2-cockpit__orb {
+  opacity: calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.14) !important;
+}
+
+.app-layout--custom-background .project-translate-page .runtime-summary-strip::before,
+.app-layout--custom-background .project-translate-page .runtime-summary-strip::after,
+.app-layout--custom-background .project-translate-page .runtime-summary-strip__hero::after,
+.app-layout--custom-background .project-translate-page .runtime-summary-strip__metrics .metric-card::after {
+  opacity: calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.08);
+}
+
+.app-layout--custom-background .project-cache-page .cache-layout {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.14)), rgba(245, 249, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.04))),
+    rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.04)) !important;
+  backdrop-filter: blur(var(--custom-bg-surface-blur-soft)) !important;
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft)) !important;
+}
+
+.app-layout--custom-background .project-cache-page .cache-file-item--selected,
+.app-layout--custom-background .project-cache-page .cache-file-item--active,
+.app-layout--custom-background .project-cache-page .cache-file-list__selection-bar {
+  background: rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.16)) !important;
+}
+
+.app-layout--custom-background .project-cache-page .cache-card,
+.app-layout--custom-background .project-cache-page .cache-card--problem,
+.app-layout--custom-background .project-cache-page .cache-card__input,
+.app-layout--custom-background .project-cache-page .cache-card__textarea,
+.app-layout--custom-background .project-cache-page .cache-card__readonly-textarea,
+ .app-layout--custom-background .project-cache-page .cache-search,
+ .app-layout--custom-background .project-cache-page .cache-card-list-loading,
+ .app-layout--custom-background .project-cache-page .retransl-popover,
+ .app-layout--custom-background .project-cache-page .retransl-popover__arrow,
+ .app-layout--custom-background .project-cache-page .retransl-popover__input,
+ .app-layout--custom-background .project-dictionary-page .dict-tab,
+ .app-layout--custom-background .project-dictionary-page .dict-layout__sidebar,
+ .app-layout--custom-background .project-dictionary-page .dict-create-file input,
+ .app-layout--custom-background .project-dictionary-page .dict-search,
+ .app-layout--custom-background .project-dictionary-page .dict-card,
+ .app-layout--custom-background .project-dictionary-page .dict-card__table,
+ .app-layout--custom-background .project-dictionary-page .dict-card__cell,
+ .app-layout--custom-background .project-dictionary-page .dict-card__input,
+ .app-layout--custom-background .project-dictionary-page .dict-card__note-input,
+ .app-layout--custom-background .name-page .name-page__search,
+ .app-layout--custom-background .name-page .name-page__gpt-toggle,
+ .app-layout--custom-background .name-page .name-page__ai-popover {
+  background: var(--custom-bg-fill-soft) !important;
+  backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+}
+
+ .app-layout--custom-background .project-dictionary-page .dict-tab,
+ .app-layout--custom-background .project-dictionary-page .dict-layout__sidebar {
+  background: var(--custom-bg-fill-strong) !important;
+  backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+}
+
+ .app-layout--custom-background .project-dictionary-page .dict-card--normal,
+ .app-layout--custom-background .project-dictionary-page .dict-card--conditional,
+ .app-layout--custom-background .project-dictionary-page .dict-card--situation,
+ .app-layout--custom-background .project-dictionary-page .dict-card--gpt,
+ .app-layout--custom-background .project-dictionary-page .dict-card--comment,
+ .app-layout--custom-background .project-dictionary-page .dict-card__fields,
+ .app-layout--custom-background .project-dictionary-page .dict-card__table-head,
+ .app-layout--custom-background .project-dictionary-page .dict-card__table-add-row,
+ .app-layout--custom-background .project-dictionary-page .dict-card__field-label,
+ .app-layout--custom-background .project-dictionary-page .dict-card__cell--index,
+ .app-layout--custom-background .project-dictionary-page .dict-card__add-row-btn,
+ .app-layout--custom-background .project-dictionary-page .dict-card__row-delete,
+ .app-layout--custom-background .name-page .name-page__th {
+  background: var(--custom-bg-fill-strong) !important;
+  backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+}
+
+.app-layout--custom-background .project-cache-page .cache-layout__main > .cache-layout__empty {
+  background: rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.06)) !important;
+  border-color: rgba(191, 208, 226, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.5));
+  backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+}
+
+.app-layout--custom-background .project-cache-page .cache-layout__sidebar {
+  background: var(--custom-bg-fill-strong) !important;
+  backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+}
+
+.app-layout--custom-background .field input,
+.app-layout--custom-background .field select,
+.app-layout--custom-background .field textarea,
+.app-layout--custom-background .settings-number-row__control input,
+.app-layout--custom-background .settings-number-row__control select,
+.app-layout--custom-background .sidebar__project-close,
+.app-layout--custom-background .sidebar__project-confirm-no,
+.app-layout--custom-background .sidebar__toggle-btn {
+  background: rgba(255, 255, 255, calc(var(--custom-bg-surface-opacity-resolved) + 0.18));
+}
+
+.app-layout--custom-background .home-hero__chip,
+.app-layout--custom-background .home-open__input,
+.app-layout--custom-background .home-history__count,
+.app-layout--custom-background .project-translate-page .ptv2-folder-iconbtn,
+.app-layout--custom-background .project-translate-page .ptv2-cockpit__folder-inline .project-translate-page__folder-menu-dropdown,
+.app-layout--custom-background .project-translate-page .ptv2-tab,
+.app-layout--custom-background .project-translate-page .ptv2-tab__badge,
+.app-layout--custom-background .project-translate-page .ptv2-retransl-list__item,
+.app-layout--custom-background .project-translate-page .runtime-summary-strip__metrics .metric-card,
+.app-layout--custom-background .project-translate-page .runtime-event__pill,
+.app-layout--custom-background .project-translate-page .runtime-event__meta div,
+.app-layout--custom-background .project-translate-page .runtime-success-filter-hint,
+.app-layout--custom-background .project-cache-page .cache-sidebar-tab,
+.app-layout--custom-background .project-cache-page .cache-problems-group__header,
+.app-layout--custom-background .problem-analyze-section__loading,
+.app-layout--custom-background .problem-analyze-section__item,
+.app-layout--custom-background .problem-analyze-section__item--checked,
+.app-layout--custom-background .problem-analyze-section__item--extra {
+  background: rgba(255, 255, 255, calc(var(--custom-bg-surface-opacity-resolved) + 0.16));
+}
+
+.app-layout--custom-background .home-history__item:hover,
+.app-layout--custom-background .home-job-row:hover,
+.app-layout--custom-background .home-job-row--clickable:hover,
+.app-layout--custom-background .sidebar__nav-item:hover,
+.app-layout--custom-background .sidebar__project-header:hover,
+.app-layout--custom-background .sidebar__project-child:hover,
+.app-layout--custom-background .home-hero__chip--link:hover,
+.app-layout--custom-background .project-translate-page .ptv2-tab:hover,
+.app-layout--custom-background .project-translate-page .ptv2-tab--active,
+.app-layout--custom-background .project-translate-page .ptv2-retransl-list__item:hover,
+.app-layout--custom-background .project-cache-page .cache-sidebar-tab:hover,
+.app-layout--custom-background .project-cache-page .cache-file-item:hover,
+.app-layout--custom-background .project-cache-page .cache-card__expand:hover,
+.app-layout--custom-background .project-cache-page .cache-card__delete:hover,
+.app-layout--custom-background .project-cache-page .cache-problems-group__header:hover,
+.app-layout--custom-background .sidebar__context-menu-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.18));
+}
+
+.app-layout--custom-background .project-translate-page .ptv2-cockpit__folder-inline .project-translate-page__folder-menu-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.16)) !important;
+}
+
+:root[data-theme='dark'] .app-layout--custom-background {
+  --custom-bg-fill-strong: rgba(20, 30, 43, calc(var(--custom-bg-surface-opacity-resolved) + 0.18));
+  --custom-bg-fill-soft: rgba(20, 30, 43, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.08));
+  --custom-bg-fill-soft-hover: rgba(34, 49, 72, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.12));
+}
+
+:root[data-theme='dark'] .app-layout--custom-background .sidebar,
+:root[data-theme='dark'] .app-layout--custom-background .panel,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .panel,
+:root[data-theme='dark'] .app-layout--custom-background .home-open,
+:root[data-theme='dark'] .app-layout--custom-background .home-history,
+:root[data-theme='dark'] .app-layout--custom-background .home-jobs,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .ptv2-cockpit,
+:root[data-theme='dark'] .app-layout--custom-background .plugin-card,
+:root[data-theme='dark'] .app-layout--custom-background .job-card,
+:root[data-theme='dark'] .app-layout--custom-background .empty-state,
+:root[data-theme='dark'] .app-layout--custom-background .meta-grid div,
+:root[data-theme='dark'] .app-layout--custom-background .runtime-summary-strip,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .runtime-summary-strip,
+:root[data-theme='dark'] .app-layout--custom-background .runtime-success-compact,
+:root[data-theme='dark'] .app-layout--custom-background .runtime-event,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .runtime-event--success,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .runtime-event--error,
+:root[data-theme='dark'] .app-layout--custom-background .home-hero,
+:root[data-theme='dark'] .app-layout--custom-background .home-hero__stats,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-layout,
+:root[data-theme='dark'] .app-layout--custom-background .sidebar__project-confirm-bubble,
+:root[data-theme='dark'] .app-layout--custom-background .sidebar__context-menu,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-context-menu,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page__folder-menu,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page__folder-menu-content {
+  background:
+    linear-gradient(180deg, rgba(24, 34, 48, calc(var(--custom-bg-surface-opacity-resolved) + 0.24)), rgba(14, 22, 32, calc(var(--custom-bg-surface-opacity-resolved) + 0.12))),
+    rgba(14, 22, 32, var(--custom-bg-surface-opacity-resolved));
+  backdrop-filter: blur(var(--custom-bg-surface-blur));
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur));
+}
+
+:root[data-theme='dark'] .app-layout--custom-background .app-layout__content:has(.home-page)::before {
+  opacity: calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.08);
+}
+
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-layout {
+  background:
+    linear-gradient(180deg, rgba(24, 34, 48, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.18)), rgba(12, 19, 30, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.06))),
+    rgba(14, 22, 32, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.06)) !important;
+  backdrop-filter: blur(var(--custom-bg-surface-blur-soft)) !important;
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft)) !important;
+}
+
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-layout__sidebar {
+  background: var(--custom-bg-fill-strong) !important;
+  backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+}
+
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-file-item--selected,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-file-item--active,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-file-list__selection-bar {
+  background: rgba(20, 30, 43, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.16)) !important;
+}
+
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-card,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-card--problem,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-card__input,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-card__textarea,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-card__readonly-textarea,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-search,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-card-list-loading,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .retransl-popover,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .retransl-popover__arrow,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .retransl-popover__input,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-tab,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-layout__sidebar,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-create-file input,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-search,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__table,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__cell,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__input,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__note-input,
+:root[data-theme='dark'] .app-layout--custom-background .name-page .name-page__search,
+:root[data-theme='dark'] .app-layout--custom-background .name-page .name-page__gpt-toggle,
+:root[data-theme='dark'] .app-layout--custom-background .name-page .name-page__ai-popover {
+  background: var(--custom-bg-fill-soft) !important;
+  backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+}
+
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-tab,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-layout__sidebar {
+  background: var(--custom-bg-fill-strong) !important;
+  backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+}
+
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card--normal,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card--conditional,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card--situation,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card--gpt,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card--comment,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__fields,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__table-head,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__table-add-row,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__field-label,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__cell--index,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__add-row-btn,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__row-delete,
+:root[data-theme='dark'] .app-layout--custom-background .name-page .name-page__th {
+  background: var(--custom-bg-fill-strong) !important;
+  backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+}
+
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-layout__main > .cache-layout__empty {
+  background: rgba(14, 22, 32, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.08)) !important;
+  border-color: rgba(65, 83, 111, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.5));
+  backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+}
+
+:root[data-theme='dark'] .app-layout--custom-background .field input,
+:root[data-theme='dark'] .app-layout--custom-background .field select,
+:root[data-theme='dark'] .app-layout--custom-background .field textarea,
+:root[data-theme='dark'] .app-layout--custom-background .settings-number-row__control input,
+:root[data-theme='dark'] .app-layout--custom-background .settings-number-row__control select,
+:root[data-theme='dark'] .app-layout--custom-background .sidebar__project-close,
+:root[data-theme='dark'] .app-layout--custom-background .sidebar__project-confirm-no,
+:root[data-theme='dark'] .app-layout--custom-background .sidebar__toggle-btn {
+  background: rgba(20, 30, 43, calc(var(--custom-bg-surface-opacity-resolved) + 0.2));
+}
+
+:root[data-theme='dark'] .app-layout--custom-background .home-hero__chip,
+:root[data-theme='dark'] .app-layout--custom-background .home-open__input,
+:root[data-theme='dark'] .app-layout--custom-background .home-history__count,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .ptv2-folder-iconbtn,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .ptv2-cockpit__folder-inline .project-translate-page__folder-menu-dropdown,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .ptv2-tab,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .ptv2-tab__badge,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .ptv2-retransl-list__item,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .runtime-summary-strip__metrics .metric-card,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .runtime-event__pill,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .runtime-event__meta div,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .runtime-success-filter-hint,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-sidebar-tab,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-problems-group__header,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-file-item--active,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-tab--active,
+:root[data-theme='dark'] .app-layout--custom-background .name-page .name-page__input:focus,
+:root[data-theme='dark'] .app-layout--custom-background .problem-analyze-section__loading,
+:root[data-theme='dark'] .app-layout--custom-background .problem-analyze-section__item,
+:root[data-theme='dark'] .app-layout--custom-background .problem-analyze-section__item--checked,
+:root[data-theme='dark'] .app-layout--custom-background .problem-analyze-section__item--extra {
+  background: rgba(20, 30, 43, calc(var(--custom-bg-surface-opacity-resolved) + 0.18));
+}
+
+:root[data-theme='dark'] .app-layout--custom-background .home-history__item:hover,
+:root[data-theme='dark'] .app-layout--custom-background .home-job-row:hover,
+:root[data-theme='dark'] .app-layout--custom-background .home-job-row--clickable:hover,
+:root[data-theme='dark'] .app-layout--custom-background .sidebar__nav-item:hover,
+:root[data-theme='dark'] .app-layout--custom-background .sidebar__project-header:hover,
+:root[data-theme='dark'] .app-layout--custom-background .sidebar__project-child:hover,
+:root[data-theme='dark'] .app-layout--custom-background .home-hero__chip--link:hover,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .ptv2-tab:hover,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .ptv2-tab--active,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .ptv2-retransl-list__item:hover,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-sidebar-tab:hover,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-file-item:hover,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-card__expand:hover,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-card__delete:hover,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-problems-group__header:hover,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-file-item:hover,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-tab:hover,
+:root[data-theme='dark'] .app-layout--custom-background .sidebar__context-menu-item:hover:not(:disabled) {
+  background: var(--custom-bg-fill-soft-hover);
+}
+
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .ptv2-cockpit__folder-inline .project-translate-page__folder-menu-item:hover:not(:disabled) {
+  background: rgba(34, 49, 72, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.12)) !important;
+}
+
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__input:focus,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-create-file input:focus,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-search:focus,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .retransl-popover__input:focus,
+:root[data-theme='dark'] .app-layout--custom-background .name-page .name-page__search:focus {
+  background: var(--custom-bg-fill-strong) !important;
+}
+

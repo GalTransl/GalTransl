@@ -81,6 +81,12 @@
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
+.settings-number-row__control input[type='file'] {
+  width: 240px;
+  min-height: 36px;
+  padding: 6px var(--space-2);
+}
+
 .settings-number-row__control select {
   width: 160px;
   min-height: 36px;
@@ -91,6 +97,127 @@
   color: var(--color-text);
   font-size: 13px;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.settings-background-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 420px;
+}
+
+/* 隐藏原生文件选择器，使用自定义按钮触发 */
+.settings-background-control__file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.settings-background-control__pick,
+.settings-background-control__clear {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-control);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.settings-background-control__pick {
+  border: 1px solid rgba(47, 111, 235, 0.28);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.settings-background-control__pick:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  border-color: var(--color-primary);
+  box-shadow: 0 2px 8px rgba(47, 111, 235, 0.18);
+}
+
+.settings-background-control__pick:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
+.settings-background-control__pick:disabled,
+.settings-background-control__clear:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.settings-background-control__filename {
+  flex: 1 1 160px;
+  min-width: 120px;
+  max-width: 240px;
+  padding: 4px var(--space-2);
+  border-radius: var(--radius-control);
+  background: var(--color-neutral-soft, rgba(0, 0, 0, 0.04));
+  color: var(--color-text);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.settings-background-control__filename--empty {
+  color: var(--color-text-muted);
+  font-style: italic;
+  direction: ltr;
+}
+
+.settings-background-control__clear {
+  border: 1px solid var(--color-line);
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.settings-background-control__clear:hover:not(:disabled) {
+  color: var(--color-danger, #e05252);
+  border-color: var(--color-danger, #e05252);
+  background: color-mix(in srgb, var(--color-danger, #e05252) 8%, transparent);
+}
+
+.settings-background-control__clear:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.settings-background-control__error {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--color-danger, #e05252) 40%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--color-danger, #e05252) 10%, transparent);
+  color: var(--color-danger, #e05252);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.settings-opacity-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.settings-opacity-control input[type='range'] {
+  width: 200px;
 }
 
 .settings-number-row__control input:focus {

@@ -581,6 +581,21 @@
   gap: 3px;
 }
 
+.app-layout--custom-background .project-translate-page .panel {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(248, 251, 255, 0.64)),
+    rgba(255, 255, 255, 0.52);
+}
+
+.app-layout--custom-background .runtime-event--success {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(248, 252, 255, 0.64)),
+    rgba(255, 255, 255, 0.52);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.58),
+    0 8px 20px rgba(15, 157, 88, 0.04);
+}
+
 .runtime-event--success .runtime-event__pill {
   min-height: 20px;
   padding: 0 8px;
@@ -1287,6 +1302,12 @@
   box-shadow: inset 0 1px 0 rgba(141, 170, 212, 0.14);
 }
 
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .panel {
+  background:
+    linear-gradient(180deg, rgba(24, 34, 48, 0.72), rgba(16, 24, 36, 0.6)),
+    rgba(14, 22, 32, 0.52);
+}
+
 :root[data-theme='dark'] .project-translate-page .meta-grid div,
 :root[data-theme='dark'] .project-translate-page .job-card,
 :root[data-theme='dark'] .project-translate-page .empty-state,
@@ -1314,6 +1335,15 @@
 :root[data-theme='dark'] .runtime-event {
   border-color: rgba(65, 83, 111, 0.82);
   background: linear-gradient(180deg, rgba(24, 34, 48, 0.96), rgba(17, 26, 38, 0.9));
+}
+
+:root[data-theme='dark'] .app-layout--custom-background .runtime-event--success {
+  background:
+    linear-gradient(180deg, rgba(24, 34, 48, 0.74), rgba(17, 26, 38, 0.62)),
+    rgba(14, 22, 32, 0.52);
+  box-shadow:
+    inset 0 1px 0 rgba(141, 170, 212, 0.1),
+    0 8px 20px rgba(15, 157, 88, 0.08);
 }
 
 :root[data-theme='dark'] .runtime-event--success .runtime-event__pill--file,

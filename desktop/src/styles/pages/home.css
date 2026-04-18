@@ -1284,6 +1284,24 @@
   pointer-events: none;
 }
 
+/* ── Custom background penetration tuning ── */
+
+.app-layout--custom-background .home-history,
+.app-layout--custom-background .home-jobs,
+.app-layout--custom-background .home-open {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(248, 251, 255, 0.62)),
+    rgba(255, 255, 255, 0.52);
+}
+
+:root[data-theme='dark'] .app-layout--custom-background .home-history,
+:root[data-theme='dark'] .app-layout--custom-background .home-jobs,
+:root[data-theme='dark'] .app-layout--custom-background .home-open {
+  background:
+    linear-gradient(180deg, rgba(20, 28, 40, 0.66), rgba(16, 23, 33, 0.56)),
+    rgba(16, 24, 36, 0.5);
+}
+
 .home-job-row__status-pill {
   grid-area: 1 / 1;
   display: inline-flex;

@@ -1,8 +1,33 @@
 /* App-level layout (sidebar + main content) */
 
 .app-layout {
+  position: relative;
   display: flex;
   height: 100vh;
+  isolation: isolate;
+  --custom-bg-surface-opacity: 0.44;
+  --custom-bg-surface-soft-opacity: 0.3;
+}
+
+.app-layout__custom-background {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  transition: opacity 240ms ease;
+  opacity: 0;
+}
+
+.app-layout__custom-background--visible {
+  opacity: 0.26;
+}
+
+.app-layout > :not(.app-layout__custom-background) {
+  position: relative;
+  z-index: 1;
 }
 
 .app-layout__content {

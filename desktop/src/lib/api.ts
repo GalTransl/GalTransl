@@ -334,6 +334,13 @@ export type AppSettings = {
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
+export type CustomBackgroundPreference = {
+  imageDataUrl: string;
+  imageName: string;
+  opacity: number;
+  surfaceOpacity: number;
+};
+
 export type PluginsResponse = {
   plugins: PluginInfo[];
 };
@@ -798,17 +805,25 @@ const TRANSLATOR_TEMPLATE_KEY = 'galtransl-project-translator-template';
 const HOME_HISTORY_LIMIT_KEY = 'galtransl-home-history-limit';
 const HOME_JOB_LIMIT_KEY = 'galtransl-home-job-limit';
 const THEME_MODE_KEY = 'galtransl-theme-mode';
+const CUSTOM_BACKGROUND_KEY = 'galtransl-custom-background';
 
 export const HOME_HISTORY_LIMIT_DEFAULT = 20;
 export const HOME_JOB_LIMIT_DEFAULT = 20;
 export const HOME_LIST_LIMIT_MIN = 1;
 export const HOME_LIST_LIMIT_MAX = 200;
+export const CUSTOM_BACKGROUND_OPACITY_MIN = 0;
+export const CUSTOM_BACKGROUND_OPACITY_MAX = 80;
+export const CUSTOM_BACKGROUND_OPACITY_DEFAULT = 35;
+export const CUSTOM_BACKGROUND_SURFACE_OPACITY_MIN = 18;
+export const CUSTOM_BACKGROUND_SURFACE_OPACITY_MAX = 92;
+export const CUSTOM_BACKGROUND_SURFACE_OPACITY_DEFAULT = 33;
 
 /** Custom event dispatched when the global default backend profile changes. */
 export const DEFAULT_BACKEND_PROFILE_CHANGE_EVENT = 'galtransl:default-backend-profile-change';
 export const HOME_HISTORY_LIMIT_CHANGE_EVENT = 'galtransl:home-history-limit-change';
 export const HOME_JOB_LIMIT_CHANGE_EVENT = 'galtransl:home-job-limit-change';
 export const THEME_MODE_CHANGE_EVENT = 'galtransl:theme-mode-change';
+export const CUSTOM_BACKGROUND_CHANGE_EVENT = 'galtransl:custom-background-change';
 
 /** Get the global default backend profile name. */
 export function getDefaultBackendProfile(): string {
@@ -940,6 +955,21 @@ function normalizeHomeListLimit(value: unknown, fallback: number): number {
   return integer;
 }
 
+function normalizeCustomBackgroundSurfaceOpacity(value: unknown): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) {
+    return CUSTOM_BACKGROUND_SURFACE_OPACITY_DEFAULT;
+  }
+  const integer = Math.trunc(numeric);
+  if (integer < CUSTOM_BACKGROUND_SURFACE_OPACITY_MIN) {
+    return CUSTOM_BACKGROUND_SURFACE_OPACITY_MIN;
+  }
+  if (integer > CUSTOM_BACKGROUND_SURFACE_OPACITY_MAX) {
+    return CUSTOM_BACKGROUND_SURFACE_OPACITY_MAX;
+  }
+  return integer;
+}
+
 export function getHomeHistoryRetentionLimit(): number {
   try {
     const raw = localStorage.getItem(HOME_HISTORY_LIMIT_KEY);
@@ -1005,6 +1035,85 @@ export function setThemeModePreference(mode: ThemeMode): ThemeMode {
     // ignore storage errors
   }
   return normalized;
+}
+
+function normalizeCustomBackgroundOpacity(value: unknown): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) {
+    return CUSTOM_BACKGROUND_OPACITY_DEFAULT;
+  }
+  const integer = Math.trunc(numeric);
+  if (integer < CUSTOM_BACKGROUND_OPACITY_MIN) {
+    return CUSTOM_BACKGROUND_OPACITY_MIN;
+  }
+  if (integer > CUSTOM_BACKGROUND_OPACITY_MAX) {
+    return CUSTOM_BACKGROUND_OPACITY_MAX;
+  }
+  return integer;
+}
+
+function defaultCustomBackgroundPreference(): CustomBackgroundPreference {
+  return {
+    imageDataUrl: '',
+    imageName: '',
+    opacity: CUSTOM_BACKGROUND_OPACITY_DEFAULT,
+    surfaceOpacity: CUSTOM_BACKGROUND_SURFACE_OPACITY_DEFAULT,
+  };
+}
+
+function normalizeCustomBackgroundPreference(value: unknown): CustomBackgroundPreference {
+  if (!value || typeof value !== 'object') {
+    return defaultCustomBackgroundPreference();
+  }
+
+  const preference = value as Partial<CustomBackgroundPreference>;
+  const imageDataUrl = typeof preference.imageDataUrl === 'string' ? preference.imageDataUrl : '';
+  const imageName = typeof preference.imageName === 'string' ? preference.imageName : '';
+  return {
+    imageDataUrl,
+    imageName,
+    opacity: normalizeCustomBackgroundOpacity(preference.opacity),
+    surfaceOpacity: normalizeCustomBackgroundSurfaceOpacity(preference.surfaceOpacity),
+  };
+}
+
+export function getCustomBackgroundPreference(): CustomBackgroundPreference {
+  try {
+    const raw = localStorage.getItem(CUSTOM_BACKGROUND_KEY);
+    if (!raw) {
+      return defaultCustomBackgroundPreference();
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    return normalizeCustomBackgroundPreference(parsed);
+  } catch {
+    return defaultCustomBackgroundPreference();
+  }
+}
+
+/**
+ * Persist the custom-background preference.
+ *
+ * Throws if `localStorage.setItem` fails (e.g. quota exceeded). Callers are
+ * responsible for surfacing the error to the user — silently swallowing it
+ * previously caused the "restart reverts to an older wallpaper" bug, because
+ * the in-memory state diverged from what was actually persisted.
+ */
+export function setCustomBackgroundPreference(preference: CustomBackgroundPreference): CustomBackgroundPreference {
+  const normalized = normalizeCustomBackgroundPreference(preference);
+  localStorage.setItem(CUSTOM_BACKGROUND_KEY, JSON.stringify(normalized));
+  window.dispatchEvent(new CustomEvent(CUSTOM_BACKGROUND_CHANGE_EVENT, { detail: normalized }));
+  return normalized;
+}
+
+export function clearCustomBackgroundPreference(): CustomBackgroundPreference {
+  const cleared = defaultCustomBackgroundPreference();
+  try {
+    localStorage.removeItem(CUSTOM_BACKGROUND_KEY);
+    window.dispatchEvent(new CustomEvent(CUSTOM_BACKGROUND_CHANGE_EVENT, { detail: cleared }));
+  } catch {
+    // ignore storage errors
+  }
+  return cleared;
 }
 
 // ---- Internal ----

@@ -51,3 +51,6 @@
 
 /* ── 8. Responsive overrides (must come last) ── */
 @import './styles/responsive.css';
+
+/* ── 9. Custom background overrides (final) ── */
+@import './styles/custom-background.css';
