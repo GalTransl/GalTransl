@@ -18,7 +18,6 @@ GalTransl Windows 发布版构建脚本 (Python)
       GalTransl Desktop.exe          # Tauri 前端可执行文件
       backend/galtransl_backend.exe  # Python 后端 (PyInstaller)
       plugins/                       # 插件目录
-      README.txt
     GalTransl_{version}_win.zip
 """
 
@@ -311,18 +310,6 @@ def assemble_release(frontend_exe: Path | None, backend_exe: Path):
         copy_dir_filtered(GUIDELINES_DIR, dst_guidelines)
         print("  复制翻译指南目录 -> translation_guidelines/")
 
-    # 6. 生成 README
-    readme = BUILD_DIR / "README.txt"
-    readme.write_text(
-        f"GalTransl Desktop v{VERSION}\n"
-        "=" * 40 + "\n\n"
-        "启动方式:\n"
-        "  先运行 backend\\galtransl_backend.exe，再运行 GalTransl Desktop.exe\n\n"
-        "插件目录: plugins/\n",
-        encoding="utf-8",
-    )
-    print(f"  生成 README -> README.txt")
-
     print(f"\n\033[32m发布包组装完成: {BUILD_DIR}\033[0m")
 
 
@@ -396,6 +383,12 @@ def main():
     print(f"\n\033[32m✅ 构建完成！发布包位于: {BUILD_DIR}\033[0m")
     if not args.no_zip:
         print(f"   压缩包: {RELEASE_DIR / ZIP_NAME}")
+
+    # 清理构建临时目录
+    dist_dir = ROOT / "dist"
+    if dist_dir.exists():
+        print(f"\n清理临时目录: {dist_dir}")
+        shutil.rmtree(dist_dir)
 
 
 if __name__ == "__main__":

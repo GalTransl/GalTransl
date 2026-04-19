@@ -1,4 +1,5 @@
 const DEFAULT_BACKEND_URL = 'http://127.0.0.1:12333';
+let runtimeBackendBaseUrl: string | null = null;
 
 export type ConnectionPhase = 'connecting' | 'online' | 'offline';
 
@@ -1173,6 +1174,13 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function getBackendBaseUrl() {
+  if (runtimeBackendBaseUrl) {
+    return runtimeBackendBaseUrl;
+  }
   const configured = import.meta.env.VITE_BACKEND_URL?.trim();
   return configured ? configured.replace(/\/$/, '') : DEFAULT_BACKEND_URL;
+}
+
+export function setRuntimeBackendBaseUrl(url: string | null) {
+  runtimeBackendBaseUrl = url ? url.trim().replace(/\/$/, '') : null;
 }

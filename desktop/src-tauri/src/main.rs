@@ -1,12 +1,75 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use tauri::Manager;
+use std::sync::{Mutex, OnceLock};
 
-#[derive(serde::Serialize)]
-struct EnsureBackendResult {
-    found: bool,
-    started: bool,
+const BACKEND_HOST: &str = "127.0.0.1";
+const BACKEND_PORT: u16 = 12333;
+
+#[allow(dead_code)]
+struct ManagedBackend {
+    child: std::process::Child,
     path: String,
+    port: u16,
+}
+
+fn managed_backend_slot() -> &'static Mutex<Option<ManagedBackend>> {
+    static SLOT: OnceLock<Mutex<Option<ManagedBackend>>> = OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(None))
+}
+
+fn tcp_port_listening(port: u16) -> bool {
+    use std::net::TcpStream;
+    use std::time::Duration;
+
+    TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        Duration::from_millis(250),
+    )
+    .is_ok()
+}
+
+fn shutdown_managed_backend_inner() -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut cmd = std::process::Command::new("taskkill");
+        cmd.args(["/F", "/IM", "galtransl_backend.exe"]);
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        let output = cmd.output().map_err(|e| format!("执行 taskkill 失败: {}", e))?;
+
+        if output.status.success() {
+            let slot = managed_backend_slot();
+            if let Ok(mut guard) = slot.lock() {
+                *guard = None;
+            }
+            return Ok(true);
+        } else {
+            // 如果没有找到进程，taskkill 会返回错误，但这不算失败
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("未找到") || stderr.contains("not found") {
+                let slot = managed_backend_slot();
+                if let Ok(mut guard) = slot.lock() {
+                    *guard = None;
+                }
+                return Ok(false);
+            }
+            return Err(format!("杀掉后端进程失败: {}", stderr));
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let slot = managed_backend_slot();
+        let mut guard = slot.lock().map_err(|_| "后端进程状态锁定失败".to_string())?;
+        let Some(mut managed) = guard.take() else {
+            return Ok(false);
+        };
+
+        let _ = managed.child.kill();
+        let _ = managed.child.wait();
+        Ok(true)
+    }
 }
 
 fn backend_executable_candidates() -> Vec<std::path::PathBuf> {
@@ -44,39 +107,47 @@ fn backend_executable_candidates() -> Vec<std::path::PathBuf> {
     candidates
 }
 
-#[tauri::command]
-fn ensure_backend_running(hide_console: bool) -> Result<EnsureBackendResult, String> {
-    let backend_path = backend_executable_candidates()
-        .into_iter()
-        .find(|candidate| candidate.exists());
+/// 启动时拉起后端（仅一次）。若端口已监听则跳过；若未找到 exe 则静默跳过。
+fn spawn_backend_on_startup() {
+    let slot = managed_backend_slot();
+    let Ok(mut guard) = slot.lock() else { return };
 
-    let Some(path) = backend_path else {
-        return Ok(EnsureBackendResult {
-            found: false,
-            started: false,
-            path: String::new(),
-        });
+    if guard.is_some() {
+        return;
+    }
+
+    if tcp_port_listening(BACKEND_PORT) {
+        return;
+    }
+
+    let Some(path) = backend_executable_candidates()
+        .into_iter()
+        .find(|candidate| candidate.exists())
+    else {
+        return;
     };
 
     let mut command = std::process::Command::new(&path);
+    command
+        .arg("--host")
+        .arg(BACKEND_HOST)
+        .arg("--port")
+        .arg(BACKEND_PORT.to_string());
 
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        if hide_console {
-            command.creation_flags(0x08000000);
-        }
+        // 始终隐藏控制台窗口（CREATE_NO_WINDOW）
+        command.creation_flags(0x08000000);
     }
 
-    command
-        .spawn()
-        .map_err(|e| format!("启动服务端失败: {}", e))?;
-
-    Ok(EnsureBackendResult {
-        found: true,
-        started: true,
-        path: path.to_string_lossy().to_string(),
-    })
+    if let Ok(child) = command.spawn() {
+        *guard = Some(ManagedBackend {
+            child,
+            path: path.to_string_lossy().to_string(),
+            port: BACKEND_PORT,
+        });
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -208,9 +279,15 @@ fn main() {
             create_dir,
             write_text_file,
             copy_files,
-            ensure_backend_running
         ])
+        .on_window_event(|_window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                let _ = shutdown_managed_backend_inner();
+            }
+        })
         .setup(|app| {
+            // 启动时先拉起后端（仅一次），再显示前端窗口
+            spawn_backend_on_startup();
             #[cfg(debug_assertions)]
             {
                 let webview = app.get_webview_window("main").expect("main window");

@@ -20,3 +20,4 @@ app_settings.json
 /.venv-build/
 galtransl_backend.spec
 /build
+/dist
