@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from GalTransl import LOGGER, DEBUG_LEVEL
+from GalTransl.Cache import compact_cache_append_logs
 from GalTransl.ConfigHelper import CProjectConfig
 from GalTransl.Runner import run_galtransl
 from GalTransl.i18n import get_text, GT_LANG
@@ -64,6 +65,7 @@ async def run_job_async(
     from GalTransl.server import reset_runtime_project, update_runtime_status
 
     current_state = state or create_job_state(spec)
+    cfg: CProjectConfig | None = None
     current_state.started_at = _utcnow_text()
     current_state.finished_at = ""
     current_state.status = "running"
@@ -145,6 +147,13 @@ async def run_job_async(
         current_state.error = get_text("error_unexpected", GT_LANG, str(ex))
         LOGGER.error(current_state.error, exc_info=True)
     finally:
+        if current_state.status == "cancelled" and cfg is not None:
+            try:
+                compacted = await compact_cache_append_logs(cfg.getCachePath())
+                if compacted > 0:
+                    LOGGER.info(f"[cache]停止翻译后已合并 {compacted} 个增量缓存文件")
+            except Exception as ex:
+                LOGGER.warning(f"[cache]停止翻译后合并增量缓存失败：{str(ex)}")
         current_state.finished_at = _utcnow_text()
         update_runtime_status(spec.project_dir, workers_active=0)
 

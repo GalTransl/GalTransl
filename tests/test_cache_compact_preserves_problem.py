@@ -10,6 +10,8 @@ import asyncio
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import orjson
 
@@ -19,6 +21,7 @@ from GalTransl.Cache import (
     get_transCache_from_json,
 )
 from GalTransl.CSentense import CSentense
+from GalTransl.Service import JobCancelledError, JobSpec, run_job_async
 
 
 def _make_cache_key(speaker: str, pre_src: str, prev: str = "None", nxt: str = "None") -> str:
@@ -137,6 +140,78 @@ class CompactPreservesProblemTests(unittest.IsolatedAsyncioTestCase):
             # 仍应命中并将此句标记为需要重翻。
             self.assertEqual(len(unhit), 1)
             self.assertEqual(len(hit), 0)
+
+    async def test_run_job_async_compacts_append_cache_when_cancelled(self) -> None:
+        with tempfile.TemporaryDirectory() as cache_dir:
+            cache_file_path = os.path.join(cache_dir, "demo.json")
+            append_file_path = _append_cache_file_path(cache_file_path)
+
+            snapshot = [
+                {
+                    "index": 0,
+                    "name": "",
+                    "pre_src": "こんにちは",
+                    "post_src": "こんにちは",
+                    "pre_dst": "旧译文",
+                    "proofread_dst": "",
+                    "trans_by": "model(old)",
+                    "proofread_by": "",
+                }
+            ]
+            with open(cache_file_path, "wb") as f:
+                f.write(orjson.dumps(snapshot, option=orjson.OPT_INDENT_2))
+
+            append_entry = {
+                "index": 0,
+                "name": "",
+                "pre_src": "こんにちは",
+                "post_src": "こんにちは",
+                "pre_dst": "新译文",
+                "proofread_dst": "",
+                "trans_by": "model(new)",
+                "proofread_by": "",
+                "__cache_key": "NoneこんにちはNone",
+            }
+            with open(append_file_path, "ab") as f:
+                f.write(orjson.dumps(append_entry))
+                f.write(b"\n")
+
+            fake_cfg = SimpleNamespace(
+                projectConfig={"backendSpecific": {}},
+                keyValues={},
+                non_interactive=False,
+                runtime_project_dir="",
+                print_translation_log_in_terminal=True,
+                getCommonConfigSection=lambda: {"loggingLevel": "info"},
+                getKey=lambda key, default=None: 1 if key == "workersPerProject" else default,
+                getCachePath=lambda: cache_dir,
+            )
+
+            spec = JobSpec(
+                job_id="job123",
+                project_dir="dummy-project",
+                config_file_name="config.inc.yaml",
+                translator="gpt4",
+            )
+
+            with patch("GalTransl.server.reset_runtime_project"), patch(
+                "GalTransl.server.update_runtime_status"
+            ), patch("GalTransl.Service.CProjectConfig", return_value=fake_cfg), patch(
+                "GalTransl.Service.load_app_settings", return_value={}
+            ), patch(
+                "GalTransl.Service.run_galtransl",
+                new=AsyncMock(side_effect=JobCancelledError()),
+            ):
+                state = await run_job_async(spec)
+
+            self.assertEqual(state.status, "cancelled")
+            self.assertFalse(os.path.exists(append_file_path))
+
+            with open(cache_file_path, "rb") as f:
+                merged = orjson.loads(f.read())
+
+            self.assertEqual(merged[0]["pre_dst"], "新译文")
+            self.assertEqual(merged[0]["trans_by"], "model(new)")
 
 
 if __name__ == "__main__":
