@@ -1,4 +1,5 @@
 import {
+  type CSSProperties,
   type ReactNode,
   type SelectHTMLAttributes,
   Children,
@@ -10,6 +11,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 
 /* ── Option data extracted from <option> children ── */
 interface OptionData {
@@ -72,6 +74,7 @@ export function CustomSelect({
   const listRef = useRef<HTMLDivElement>(null);
   const instanceId = useId();
   const justSelectedRef = useRef(false);
+  const [panelStyle, setPanelStyle] = useState<CSSProperties | null>(null);
 
   const selectedOption = options.find((o) => o.value === value);
   const fullLabel = selectedOption?.label || String(value);
@@ -81,7 +84,12 @@ export function CustomSelect({
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(target) &&
+        !listRef.current?.contains(target)
+      ) {
         setOpen(false);
         setHighlightIdx(-1);
       }
@@ -98,6 +106,42 @@ export function CustomSelect({
     ) as HTMLElement | null;
     el?.scrollIntoView({ block: 'nearest' });
   }, [open, highlightIdx]);
+
+  useEffect(() => {
+    if (!open) {
+      setPanelStyle(null);
+      return;
+    }
+
+    const updatePanelStyle = () => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const gap = 6;
+      const estimatedPanelHeight = 280;
+      const openUpward = window.innerHeight - rect.bottom < estimatedPanelHeight && rect.top > window.innerHeight - rect.bottom;
+      const width = rect.width;
+      const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8));
+
+      setPanelStyle({
+        position: 'fixed',
+        left,
+        right: 'auto',
+        width,
+        top: openUpward ? undefined : rect.bottom + gap,
+        bottom: openUpward ? window.innerHeight - rect.top + gap : undefined,
+        zIndex: 4000,
+      });
+    };
+
+    updatePanelStyle();
+    window.addEventListener('resize', updatePanelStyle);
+    window.addEventListener('scroll', updatePanelStyle, true);
+
+    return () => {
+      window.removeEventListener('resize', updatePanelStyle);
+      window.removeEventListener('scroll', updatePanelStyle, true);
+    };
+  }, [open]);
 
   const notifyChange = useCallback(
     (val: string) => {
@@ -190,6 +234,55 @@ export function CustomSelect({
     .filter(Boolean)
     .join(' ');
 
+  const panel = open && options.length > 0 && panelStyle
+    ? createPortal(
+        <div className={rootClass}>
+          <div
+            ref={listRef}
+            className="custom-select__panel"
+            style={panelStyle}
+            role="listbox"
+            id={`custom-select-listbox-${instanceId}`}
+          >
+            {options.map((opt, idx) => (
+              <div
+                key={opt.value || `__empty_${idx}`}
+                className={[
+                  'custom-select__option',
+                  opt.value === value ? 'custom-select__option--selected' : '',
+                  idx === highlightIdx ? 'custom-select__option--highlighted' : '',
+                  opt.disabled ? 'custom-select__option--disabled' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                role="option"
+                aria-selected={opt.value === value}
+                data-idx={idx}
+                onClick={(e) => {
+                  if (opt.disabled) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  justSelectedRef.current = true;
+                  setTimeout(() => { justSelectedRef.current = false; }, 0);
+                  notifyChange(opt.value);
+                  setOpen(false);
+                  setHighlightIdx(-1);
+                }}
+                onMouseEnter={() => setHighlightIdx(idx)}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+              >
+                {opt.label}
+              </div>
+            ))}
+          </div>
+        </div>,
+        document.body,
+      )
+    : null;
+
   return (
     <div ref={containerRef} className={rootClass}>
       <button
@@ -229,49 +322,7 @@ export function CustomSelect({
           </svg>
         </span>
       </button>
-
-      {open && options.length > 0 && (
-        <div
-          ref={listRef}
-          className="custom-select__panel"
-          role="listbox"
-          id={`custom-select-listbox-${instanceId}`}
-        >
-          {options.map((opt, idx) => (
-            <div
-              key={opt.value || `__empty_${idx}`}
-              className={[
-                'custom-select__option',
-                opt.value === value ? 'custom-select__option--selected' : '',
-                idx === highlightIdx ? 'custom-select__option--highlighted' : '',
-                opt.disabled ? 'custom-select__option--disabled' : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              role="option"
-              aria-selected={opt.value === value}
-              data-idx={idx}
-              onClick={(e) => {
-                if (opt.disabled) return;
-                e.preventDefault();
-                e.stopPropagation();
-                justSelectedRef.current = true;
-                setTimeout(() => { justSelectedRef.current = false; }, 0);
-                notifyChange(opt.value);
-                setOpen(false);
-                setHighlightIdx(-1);
-              }}
-              onMouseEnter={() => setHighlightIdx(idx)}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-              }}
-            >
-              {opt.label}
-            </div>
-          ))}
-        </div>
-      )}
+      {panel}
     </div>
   );
 }

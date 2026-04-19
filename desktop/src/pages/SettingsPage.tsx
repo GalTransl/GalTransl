@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { CustomSelect } from '../components/CustomSelect';
 import { PageHeader } from '../components/PageHeader';
 import { ConnectionStatusCard } from '../features/connection/ConnectionStatusCard';
 import { EmptyState, ErrorState, LoadingState } from '../components/page-state';
@@ -281,7 +282,7 @@ export function SettingsPage() {
           <label className="settings-number-row">
             <span className="settings-number-row__label">主题模式</span>
             <div className="settings-number-row__control">
-              <select
+              <CustomSelect
                 value={themeMode}
                 onChange={(event) => {
                   applyThemeMode(event.target.value as ThemeMode);
@@ -290,7 +291,7 @@ export function SettingsPage() {
                 <option value="light">浅色</option>
                 <option value="dark">深色</option>
                 <option value="system">跟随系统</option>
-              </select>
+              </CustomSelect>
             </div>
           </label>
 

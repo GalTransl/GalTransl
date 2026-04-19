@@ -94,16 +94,14 @@
   padding: 6px var(--space-2);
 }
 
-.settings-number-row__control select {
+.settings-number-row__control .custom-select {
   width: 160px;
+}
+
+.settings-number-row__control .custom-select .custom-select__trigger {
   min-height: 36px;
   padding: 0 var(--space-2);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-control);
-  background: var(--color-surface);
-  color: var(--color-text);
   font-size: 13px;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .settings-background-control {
