@@ -99,7 +99,7 @@ export function JobSubmitForm({ disabled, isSubmitting, onSubmit, submitError, t
         ) : (
           <InlineFeedback tone="info" title="连接提示">
             后端默认地址来自 <code>VITE_BACKEND_URL</code>，未设置时回退到{' '}
-            <code>http://127.0.0.1:18000</code>。
+            <code>http://127.0.0.1:12333</code>。
           </InlineFeedback>
         )}
 

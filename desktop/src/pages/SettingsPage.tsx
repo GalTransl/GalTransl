@@ -13,12 +13,14 @@ import {
   clearCustomBackgroundPreference,
   fetchPlugins,
   getCustomBackgroundPreference,
+  getHideBackendConsolePreference,
   getHomeHistoryRetentionLimit,
   getHomeJobRetentionLimit,
   getThemeModePreference,
   HOME_LIST_LIMIT_MAX,
   HOME_LIST_LIMIT_MIN,
   setCustomBackgroundPreference,
+  setHideBackendConsolePreference,
   setHomeHistoryRetentionLimit,
   setHomeJobRetentionLimit,
   setThemeModePreference,
@@ -145,6 +147,7 @@ export function SettingsPage() {
   const [homeHistoryLimitInput, setHomeHistoryLimitInput] = useState(() => String(getHomeHistoryRetentionLimit()));
   const [homeJobLimitInput, setHomeJobLimitInput] = useState(() => String(getHomeJobRetentionLimit()));
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => getThemeModePreference());
+  const [hideBackendConsole, setHideBackendConsole] = useState(() => getHideBackendConsolePreference());
   const [customBackgroundImageDataUrl, setCustomBackgroundImageDataUrl] = useState(
     () => getCustomBackgroundPreference().imageDataUrl,
   );
@@ -174,6 +177,11 @@ export function SettingsPage() {
   const applyThemeMode = useCallback((mode: ThemeMode) => {
     const next = setThemeModePreference(mode);
     setThemeMode(next);
+  }, []);
+
+  const applyHideBackendConsole = useCallback((enabled: boolean) => {
+    const next = setHideBackendConsolePreference(enabled);
+    setHideBackendConsole(next);
   }, []);
 
   const applyCustomBackgroundOpacity = useCallback((rawValue: string) => {
@@ -283,6 +291,19 @@ export function SettingsPage() {
                 <option value="dark">深色</option>
                 <option value="system">跟随系统</option>
               </select>
+            </div>
+          </label>
+
+          <label className="settings-toggle-row">
+            <span className="settings-toggle-row__label">隐藏服务端控制台</span>
+            <div className="settings-toggle-row__control">
+              <input
+                type="checkbox"
+                checked={hideBackendConsole}
+                onChange={(event) => {
+                  applyHideBackendConsole(event.target.checked);
+                }}
+              />
             </div>
           </label>
 
@@ -397,6 +418,7 @@ export function SettingsPage() {
           <div className="settings-toggle-row__desc">
             {customBackgroundImageDataUrl ? '已启用自定义背景。' : '未设置自定义背景。'}
             主题、背景和容器透底设置会即时生效，并在下次打开应用时保持。
+            自动拉起服务端时会按“隐藏服务端控制台”选项决定是否显示命令行窗口。
           </div>
         </section>
 

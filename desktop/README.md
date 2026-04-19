@@ -7,7 +7,7 @@ This folder contains the Tauri desktop shell and the web frontend for GalTransl.
 1. Install frontend dependencies:
    `npm install`
 2. Start the Python backend from the repository root:
-   `python run_backend.py --host 127.0.0.1 --port 18000`
+   `python run_backend.py --host 127.0.0.1 --port 12333`
 3. Start the frontend dev server:
    `npm run dev`
 4. With Rust installed, you can run the desktop shell:

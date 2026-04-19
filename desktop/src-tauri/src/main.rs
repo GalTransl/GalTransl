@@ -1,7 +1,83 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use tauri::Manager;
-use tauri_plugin_shell::ShellExt;
+
+#[derive(serde::Serialize)]
+struct EnsureBackendResult {
+    found: bool,
+    started: bool,
+    path: String,
+}
+
+fn backend_executable_candidates() -> Vec<std::path::PathBuf> {
+    let mut candidates = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let backend_name = "galtransl_backend.exe";
+
+    let current_exe = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(_) => return candidates,
+    };
+
+    let exe_dir = match current_exe.parent() {
+        Some(path) => path.to_path_buf(),
+        None => return candidates,
+    };
+
+    for dir in std::iter::once(exe_dir.as_path()).chain(exe_dir.ancestors()) {
+        let backend_in_release = dir.join("backend").join(backend_name);
+        if seen.insert(backend_in_release.clone()) {
+            candidates.push(backend_in_release);
+        }
+
+        let backend_in_dist = dir.join("dist").join(backend_name);
+        if seen.insert(backend_in_dist.clone()) {
+            candidates.push(backend_in_dist);
+        }
+
+        let backend_same_dir = dir.join(backend_name);
+        if seen.insert(backend_same_dir.clone()) {
+            candidates.push(backend_same_dir);
+        }
+    }
+
+    candidates
+}
+
+#[tauri::command]
+fn ensure_backend_running(hide_console: bool) -> Result<EnsureBackendResult, String> {
+    let backend_path = backend_executable_candidates()
+        .into_iter()
+        .find(|candidate| candidate.exists());
+
+    let Some(path) = backend_path else {
+        return Ok(EnsureBackendResult {
+            found: false,
+            started: false,
+            path: String::new(),
+        });
+    };
+
+    let mut command = std::process::Command::new(&path);
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        if hide_console {
+            command.creation_flags(0x08000000);
+        }
+    }
+
+    command
+        .spawn()
+        .map_err(|e| format!("启动服务端失败: {}", e))?;
+
+    Ok(EnsureBackendResult {
+        found: true,
+        started: true,
+        path: path.to_string_lossy().to_string(),
+    })
+}
 
 #[cfg(target_os = "windows")]
 /// 使用 Windows Shell API 打开 Explorer：
@@ -117,7 +193,7 @@ fn copy_files(sources: Vec<String>, destination_dir: String) -> Result<(), Strin
             .to_string_lossy()
             .to_string();
         let dest = std::path::Path::new(&destination_dir).join(&file_name);
-        std::fs::copy(src, &dest).map_err(|e| format!("复制文件失败: {} → {}", src, dest.display()))?;
+        std::fs::copy(src, &dest).map_err(|e| format!("复制文件失败: {} → {} ({})", src, dest.display(), e))?;
     }
     Ok(())
 }
@@ -126,7 +202,14 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![open_folder, reveal_file, create_dir, write_text_file, copy_files])
+        .invoke_handler(tauri::generate_handler![
+            open_folder,
+            reveal_file,
+            create_dir,
+            write_text_file,
+            copy_files,
+            ensure_backend_running
+        ])
         .setup(|app| {
             #[cfg(debug_assertions)]
             {

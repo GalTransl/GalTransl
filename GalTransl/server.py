@@ -3020,7 +3020,7 @@ def build_handler(registry: JobRegistry):
     return RequestHandler
 
 
-def serve(host: str = "127.0.0.1", port: int = 18000) -> None:
+def serve(host: str = "127.0.0.1", port: int = 12333) -> None:
     registry = JobRegistry()
     try:
         server = ThreadingHTTPServer((host, port), build_handler(registry))
@@ -3049,7 +3049,7 @@ def serve(host: str = "127.0.0.1", port: int = 18000) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser("GalTransl backend mode")
     parser.add_argument("--host", default="127.0.0.1", help="bind host")
-    parser.add_argument("--port", type=int, default=18000, help="bind port")
+    parser.add_argument("--port", type=int, default=12333, help="bind port")
     args = parser.parse_args()
     serve(args.host, args.port)
 

@@ -14,6 +14,7 @@ tauri-build = { version = "2.0.1", features = [] }
 tauri = { version = "2.0.6", features = [] }
 tauri-plugin-shell = "2.0.2"
 tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [

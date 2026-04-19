@@ -169,6 +169,12 @@
   width: 100%;
 }
 
+.dict-layout__main > .empty-state {
+  flex: 1;
+  width: 100%;
+  min-height: 100%;
+}
+
 .dict-file-item {
   display: flex;
   justify-content: space-between;

@@ -18,3 +18,5 @@ backend_profiles.yaml
 app_settings.json
 /release/
 /.venv-build/
+galtransl_backend.spec
+/build

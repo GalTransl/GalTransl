@@ -922,6 +922,7 @@ dependencies = [
 name = "galtransl-desktop"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

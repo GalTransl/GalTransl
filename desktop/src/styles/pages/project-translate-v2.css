@@ -7,6 +7,11 @@
   height: 100%;
   min-width: 0;
   gap: var(--space-3);
+  /* Clip horizontal overflow so the launch-button particle burst
+     (translate up to 80px outward) cannot trigger a page-level
+     horizontal scrollbar. `overflow-x: clip` avoids creating a
+     scroll container while still confining visual overflow. */
+  overflow-x: clip;
 }
 
 .ptv2-alert {

@@ -1,4 +1,4 @@
-const DEFAULT_BACKEND_URL = 'http://127.0.0.1:18000';
+const DEFAULT_BACKEND_URL = 'http://127.0.0.1:12333';
 
 export type ConnectionPhase = 'connecting' | 'online' | 'offline';
 
@@ -806,6 +806,7 @@ const HOME_HISTORY_LIMIT_KEY = 'galtransl-home-history-limit';
 const HOME_JOB_LIMIT_KEY = 'galtransl-home-job-limit';
 const THEME_MODE_KEY = 'galtransl-theme-mode';
 const CUSTOM_BACKGROUND_KEY = 'galtransl-custom-background';
+const HIDE_BACKEND_CONSOLE_KEY = 'galtransl-hide-backend-console';
 
 export const HOME_HISTORY_LIMIT_DEFAULT = 20;
 export const HOME_JOB_LIMIT_DEFAULT = 20;
@@ -817,6 +818,7 @@ export const CUSTOM_BACKGROUND_OPACITY_DEFAULT = 35;
 export const CUSTOM_BACKGROUND_SURFACE_OPACITY_MIN = 18;
 export const CUSTOM_BACKGROUND_SURFACE_OPACITY_MAX = 92;
 export const CUSTOM_BACKGROUND_SURFACE_OPACITY_DEFAULT = 33;
+export const HIDE_BACKEND_CONSOLE_DEFAULT = true;
 
 /** Custom event dispatched when the global default backend profile changes. */
 export const DEFAULT_BACKEND_PROFILE_CHANGE_EVENT = 'galtransl:default-backend-profile-change';
@@ -824,6 +826,7 @@ export const HOME_HISTORY_LIMIT_CHANGE_EVENT = 'galtransl:home-history-limit-cha
 export const HOME_JOB_LIMIT_CHANGE_EVENT = 'galtransl:home-job-limit-change';
 export const THEME_MODE_CHANGE_EVENT = 'galtransl:theme-mode-change';
 export const CUSTOM_BACKGROUND_CHANGE_EVENT = 'galtransl:custom-background-change';
+export const HIDE_BACKEND_CONSOLE_CHANGE_EVENT = 'galtransl:hide-backend-console-change';
 
 /** Get the global default backend profile name. */
 export function getDefaultBackendProfile(): string {
@@ -990,6 +993,26 @@ export function setHomeHistoryRetentionLimit(limit: number): number {
   return normalized;
 }
 
+export function getHideBackendConsolePreference(): boolean {
+  try {
+    const raw = localStorage.getItem(HIDE_BACKEND_CONSOLE_KEY);
+    return normalizeHideBackendConsole(raw);
+  } catch {
+    return HIDE_BACKEND_CONSOLE_DEFAULT;
+  }
+}
+
+export function setHideBackendConsolePreference(enabled: boolean): boolean {
+  const normalized = normalizeHideBackendConsole(enabled);
+  try {
+    localStorage.setItem(HIDE_BACKEND_CONSOLE_KEY, String(normalized));
+    window.dispatchEvent(new CustomEvent(HIDE_BACKEND_CONSOLE_CHANGE_EVENT, { detail: normalized }));
+  } catch {
+    // ignore storage errors
+  }
+  return normalized;
+}
+
 export function getHomeJobRetentionLimit(): number {
   try {
     const raw = localStorage.getItem(HOME_JOB_LIMIT_KEY);
@@ -1015,6 +1038,19 @@ function normalizeThemeMode(value: unknown): ThemeMode {
     return value;
   }
   return 'system';
+}
+
+function normalizeHideBackendConsole(value: unknown): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (value === 'true') {
+    return true;
+  }
+  if (value === 'false') {
+    return false;
+  }
+  return HIDE_BACKEND_CONSOLE_DEFAULT;
 }
 
 export function getThemeModePreference(): ThemeMode {

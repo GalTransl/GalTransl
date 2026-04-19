@@ -14,16 +14,16 @@ GalTransl Windows 发布版构建脚本 (Python)
 
 产出目录:
   release/
-    GalTransl-Desktop-{version}-win64/
-      GalTransl Desktop.exe          # Tauri 前端 (仅 Windows 构建)
+    GalTransl_{version}_win/
+      GalTransl Desktop.exe          # Tauri 前端可执行文件
       backend/galtransl_backend.exe  # Python 后端 (PyInstaller)
       plugins/                       # 插件目录
-      启动 GalTransl Desktop.bat     # 启动脚本
       README.txt
-    GalTransl-Desktop-{version}-win64.zip
+    GalTransl_{version}_win.zip
 """
 
 import argparse
+import ast
 import os
 import shutil
 import subprocess
@@ -37,6 +37,8 @@ DESKTOP_DIR = ROOT / "desktop"
 TAURI_DIR = DESKTOP_DIR / "src-tauri"
 RELEASE_DIR = ROOT / "release"
 PLUGINS_DIR = ROOT / "plugins"
+DICT_DIR = ROOT / "Dict"
+GUIDELINES_DIR = ROOT / "translation_guidelines"
 
 
 def get_version() -> str:
@@ -49,7 +51,7 @@ def get_version() -> str:
 
 
 VERSION = get_version()
-BUILD_NAME = f"GalTransl-Desktop-{VERSION}-win64"
+BUILD_NAME = f"GalTransl_{VERSION}_win"
 BUILD_DIR = RELEASE_DIR / BUILD_NAME
 ZIP_NAME = f"{BUILD_NAME}.zip"
 
@@ -76,6 +78,67 @@ def copy_dir_filtered(src: Path, dst: Path):
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
         dirs_exist_ok=True,
     )
+
+
+def find_frontend_exe() -> Path | None:
+    """查找前端可执行文件路径（兼容不同构建命名）"""
+    candidates = [
+        TAURI_DIR / "target" / "release" / "GalTransl Desktop.exe",
+        TAURI_DIR / "target" / "release" / "galtransl-desktop.exe",
+    ]
+    for exe_path in candidates:
+        if exe_path.exists():
+            return exe_path
+    return None
+
+
+def scan_plugin_hidden_imports() -> list[str]:
+    """扫描 plugins/*/*.py 中的 import，提取第三方模块名用于 hidden-import。"""
+    if not PLUGINS_DIR.exists():
+        return []
+
+    stdlib_names = set(getattr(sys, "stdlib_module_names", ()))
+    stdlib_names.update({"__future__", "typing_extensions"})
+    skipped_roots = {"GalTransl", "plugins"}
+    discovered: set[str] = set()
+
+    for plugin_dir in PLUGINS_DIR.iterdir():
+        if not plugin_dir.is_dir():
+            continue
+
+        py_files = list(plugin_dir.glob("*.py"))
+        for py_file in py_files:
+            try:
+                source = py_file.read_text(encoding="utf-8")
+                tree = ast.parse(source, filename=str(py_file))
+            except Exception:
+                continue
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    names = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    if node.level and node.level > 0:
+                        continue
+                    if not node.module:
+                        continue
+                    names = [node.module]
+                else:
+                    continue
+
+                for name in names:
+                    root = name.split(".", 1)[0]
+                    if not root or root in skipped_roots or root in stdlib_names:
+                        continue
+
+                    local_py = plugin_dir / f"{root}.py"
+                    local_pkg = plugin_dir / root / "__init__.py"
+                    if local_py.exists() or local_pkg.exists():
+                        continue
+
+                    discovered.add(root)
+
+    return sorted(discovered)
 
 
 # ─── 构建步骤 ───────────────────────────────────────────
@@ -110,18 +173,16 @@ def build_frontend():
         print("  安装前端依赖...")
         run("npm install", cwd=DESKTOP_DIR)
 
-    print("  执行 tauri build...")
-    run("npx tauri build", cwd=DESKTOP_DIR)
+    print("  执行 tauri build（不生成安装包）...")
+    run("npx tauri build --no-bundle", cwd=DESKTOP_DIR)
 
-    bundle_dir = TAURI_DIR / "target" / "release" / "bundle"
-    exe_path = TAURI_DIR / "target" / "release" / "GalTransl Desktop.exe"
-
-    if not exe_path.exists():
-        print(f"\033[31m前端 exe 未找到: {exe_path}\033[0m")
+    exe_path = find_frontend_exe()
+    if not exe_path:
+        print("\033[31m前端 exe 未找到: target/release 下不存在可识别的前端可执行文件\033[0m")
         sys.exit(1)
 
     print(f"\033[32m  前端 exe 构建成功: {exe_path}\033[0m")
-    return exe_path, bundle_dir
+    return exe_path
 
 
 def build_backend():
@@ -145,7 +206,7 @@ def build_backend():
     req_file = ROOT / "requirements.txt"
     if req_file.exists():
         print("  安装项目依赖到虚拟环境...")
-        run(f'"{venv_pip}" install -r "{req_file}" --quiet')
+        run(f'"{venv_pip}" install -r "{req_file}"')
     else:
         print("  未找到 requirements.txt，跳过依赖安装")
 
@@ -165,6 +226,24 @@ def build_backend():
         "GalTransl.yapsy", "GalTransl.Frontend",
         "GalTransl.Frontend.LLMTranslate",
     ]
+
+    plugin_runtime_imports = [
+        "requests",
+        "playsound3",
+        "budoux",
+        "openpyxl",
+        "orjson",
+        "bs4",
+        "yaml",
+    ]
+
+    auto_plugin_imports = scan_plugin_hidden_imports()
+    if auto_plugin_imports:
+        print(f"  自动扫描插件依赖: {', '.join(auto_plugin_imports)}")
+
+    hidden_imports.extend(plugin_runtime_imports)
+    hidden_imports.extend(auto_plugin_imports)
+    hidden_imports = sorted(set(hidden_imports))
 
     hidden_args = " ".join(f'--hidden-import="{m}"' for m in hidden_imports)
 
@@ -195,7 +274,7 @@ def build_backend():
     return backend_exe
 
 
-def assemble_release(frontend_exe: Path | None, bundle_dir: Path | None, backend_exe: Path):
+def assemble_release(frontend_exe: Path | None, backend_exe: Path):
     """组装发布目录"""
     print("\n\033[32m═══ 组装发布包 ═══\033[0m")
 
@@ -207,57 +286,38 @@ def assemble_release(frontend_exe: Path | None, bundle_dir: Path | None, backend
         shutil.copy2(frontend_exe, dst_exe)
         print(f"  复制前端 exe -> {dst_exe}")
 
-    # 2. 复制 NSIS 安装包（如果有）
-    if bundle_dir and bundle_dir.exists():
-        nsis_dir = bundle_dir / "nsis"
-        if nsis_dir.exists():
-            for installer in nsis_dir.glob("*.exe"):
-                dst = BUILD_DIR / installer.name
-                shutil.copy2(installer, dst)
-                print(f"  复制 NSIS 安装包 -> {dst}")
-
-    # 3. 复制后端
+    # 2. 复制后端
     dst_backend_dir = BUILD_DIR / "backend"
     dst_backend_dir.mkdir(exist_ok=True)
     dst_name = "galtransl_backend.exe"
     shutil.copy2(backend_exe, dst_backend_dir / dst_name)
     print(f"  复制后端 -> backend/{dst_name}")
 
-    # 4. 复制插件
+    # 3. 复制插件
     if PLUGINS_DIR.exists():
         dst_plugins = BUILD_DIR / "plugins"
         copy_dir_filtered(PLUGINS_DIR, dst_plugins)
         print(f"  复制插件目录 -> plugins/")
 
-    # 5. 复制 CLI 入口
-    cli_entry = ROOT / "run_GalTransl.py"
-    if cli_entry.exists():
-        shutil.copy2(cli_entry, BUILD_DIR / "run_GalTransl.py")
-        print(f"  复制 CLI 入口 -> run_GalTransl.py")
+    # 4. 复制字典
+    if DICT_DIR.exists():
+        dst_dict = BUILD_DIR / "Dict"
+        copy_dir_filtered(DICT_DIR, dst_dict)
+        print("  复制字典目录 -> Dict/")
 
-    # 6. 生成启动脚本
-    launcher = BUILD_DIR / "启动 GalTransl Desktop.bat"
-    launcher.write_text(
-        "@echo off\n"
-        "chcp 65001 >nul\n"
-        "echo 正在启动 GalTransl Desktop...\n"
-        'start "" "backend\\galtransl_backend.exe"\n'
-        "timeout /t 2 /nobreak >nul\n"
-        'start "" "GalTransl Desktop.exe"\n',
-        encoding="utf-8",
-    )
-    print(f"  生成启动脚本 -> 启动 GalTransl Desktop.bat")
+    # 5. 复制翻译指南
+    if GUIDELINES_DIR.exists():
+        dst_guidelines = BUILD_DIR / "translation_guidelines"
+        copy_dir_filtered(GUIDELINES_DIR, dst_guidelines)
+        print("  复制翻译指南目录 -> translation_guidelines/")
 
-    # 7. 生成 README
+    # 6. 生成 README
     readme = BUILD_DIR / "README.txt"
     readme.write_text(
         f"GalTransl Desktop v{VERSION}\n"
         "=" * 40 + "\n\n"
         "启动方式:\n"
-        "  方式1: 双击「启动 GalTransl Desktop.bat」同时启动前后端\n"
-        "  方式2: 先运行 backend\\galtransl_backend.exe，再运行 GalTransl Desktop.exe\n\n"
-        "CLI 模式:\n"
-        "  python run_GalTransl.py\n\n"
+        "  先运行 backend\\galtransl_backend.exe，再运行 GalTransl Desktop.exe\n\n"
         "插件目录: plugins/\n",
         encoding="utf-8",
     )
@@ -299,18 +359,16 @@ def main():
         clean()
 
     frontend_exe = None
-    bundle_dir = None
     backend_exe = None
 
     # 前端构建
     if not args.skip_fe:
-        frontend_exe, bundle_dir = build_frontend()
+        frontend_exe = build_frontend()
     else:
         # 尝试从已有构建中找
-        candidate = TAURI_DIR / "target" / "release" / "GalTransl Desktop.exe"
-        if candidate.exists():
+        candidate = find_frontend_exe()
+        if candidate:
             frontend_exe = candidate
-            bundle_dir = TAURI_DIR / "target" / "release" / "bundle"
             print(f"跳过前端构建，使用已有 exe: {frontend_exe}")
         else:
             print("跳过前端构建（无已有 exe，最终发布包将不含前端）")
@@ -329,7 +387,7 @@ def main():
             sys.exit(1)
 
     # 组装
-    assemble_release(frontend_exe, bundle_dir, backend_exe)
+    assemble_release(frontend_exe, backend_exe)
 
     # 压缩
     if not args.no_zip:

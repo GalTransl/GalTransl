@@ -21,7 +21,7 @@ from time import time
 import asyncio
 from dataclasses import dataclass
 
-from GalTransl import LOGGER
+from GalTransl import LOGGER, NEED_OpenAITokenPool
 from GalTransl.i18n import get_text, GT_LANG
 from GalTransl.Cache import get_transCache_from_json
 from GalTransl.ConfigHelper import initDictList, CProjectConfig
@@ -55,6 +55,48 @@ def _update_runtime(projectConfig: CProjectConfig, **kwargs):
         update_runtime_status(_runtime_project_dir(projectConfig), **kwargs)
     except Exception:
         return
+
+
+async def ensure_model_available_if_needed(projectConfig: CProjectConfig):
+    """在真正需要调用模型前，按需执行一次可用性检查。"""
+    translator = getattr(projectConfig, "select_translator", "")
+    if not any(x in translator for x in NEED_OpenAITokenPool):
+        return
+
+    check_available = projectConfig.getBackendConfigSection("OpenAI-Compatible").get(
+        "checkAvailable", True
+    )
+    if not check_available:
+        return
+
+    if getattr(projectConfig, "_model_availability_checked", False):
+        return
+
+    model_check_lock = getattr(projectConfig, "_model_check_lock", None)
+    if model_check_lock is None:
+        model_check_lock = asyncio.Lock()
+        setattr(projectConfig, "_model_check_lock", model_check_lock)
+
+    async with model_check_lock:
+        if getattr(projectConfig, "_model_availability_checked", False):
+            return
+
+        token_pool = getattr(projectConfig, "tokenPool", None)
+        if token_pool is None:
+            return
+
+        _check_stop_requested(projectConfig)
+        proxy_pool = getattr(projectConfig, "proxyPool", None)
+        _update_runtime(projectConfig, stage="检查模型可用性")
+        try:
+            await token_pool.checkTokenAvailablity(
+                proxy_pool.getProxy() if proxy_pool else None,
+                translator,
+            )
+            token_pool.getToken()
+            setattr(projectConfig, "_model_availability_checked", True)
+        finally:
+            _update_runtime(projectConfig, stage="")
 
 
 @dataclass
@@ -348,6 +390,7 @@ async def doLLMTranslate(
 
     if eng_type == "GenDic":
         _check_stop_requested(projectConfig)
+        await ensure_model_available_if_needed(projectConfig)
         gptapi = await init_gptapi(projectConfig)
         await gptapi.batch_translate(all_jsons)
         return True
@@ -625,6 +668,7 @@ async def doLLMTranslSingleChunk(
 
         if len(translist_unhit) > 0:
             _check_stop_requested(projectConfig)
+            await ensure_model_available_if_needed(projectConfig)
             # 执行翻译
             await gptapi.batch_translate(
                 file_name + (f"_{file_index}" if total_splits > 1 else ""),

@@ -1,1 +1,0 @@
-https://github.com/satan53x/SExtractor

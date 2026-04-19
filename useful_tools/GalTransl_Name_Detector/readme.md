@@ -1,1 +1,0 @@
-https://github.com/xd2333/GalTransl_Name_Detector

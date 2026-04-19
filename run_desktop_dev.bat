@@ -32,7 +32,7 @@ if not exist "desktop\node_modules" (
   )
 )
 
-start "GalTransl Backend" cmd /k python run_backend.py --host 127.0.0.1 --port 18000
+start "GalTransl Backend" cmd /k python run_backend.py --host 127.0.0.1 --port 12333
 
 where cargo >nul 2>nul
 if errorlevel 1 (
