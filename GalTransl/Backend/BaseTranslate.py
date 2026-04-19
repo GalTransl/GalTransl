@@ -200,8 +200,24 @@ class BaseTranslate:
         if change_prompt == "OverwritePrompt" and prompt_content != "":
             self.trans_prompt = prompt_content
 
-        if self.apiErrorWait == "auto":
+        # 规范化 apiErrorWait：
+        # - "auto" / 非法值 -> -1（走指数退避）
+        # - 数字字符串如 "120" -> int(120)
+        # 避免后续 `self.apiErrorWait >= 0` 出现 str 与 int 比较的 TypeError。
+        if isinstance(self.apiErrorWait, bool):
+            # bool 是 int 的子类，显式拒绝，避免 True/False 被当作 1/0
             self.apiErrorWait = -1
+        elif isinstance(self.apiErrorWait, (int, float)):
+            self.apiErrorWait = int(self.apiErrorWait)
+        else:
+            raw_wait = str(self.apiErrorWait).strip().lower()
+            if raw_wait == "auto" or raw_wait == "":
+                self.apiErrorWait = -1
+            else:
+                try:
+                    self.apiErrorWait = int(float(raw_wait))
+                except (TypeError, ValueError):
+                    self.apiErrorWait = -1
 
         if self.proxyProvider:
             proxy_addr = self.proxyProvider.getProxy().addr
