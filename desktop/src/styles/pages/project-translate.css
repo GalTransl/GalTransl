@@ -1337,6 +1337,50 @@
   background: linear-gradient(180deg, rgba(24, 34, 48, 0.96), rgba(17, 26, 38, 0.9));
 }
 
+:root[data-theme='dark'] .runtime-event--success {
+  box-shadow:
+    inset 0 1px 0 rgba(141, 170, 212, 0.12),
+    0 10px 24px rgba(15, 157, 88, 0.08);
+}
+
+:root[data-theme='dark'] .runtime-event--error {
+  border-color: rgba(248, 113, 113, 0.24);
+  background:
+    linear-gradient(180deg, rgba(28, 38, 54, 0.96), rgba(22, 30, 44, 0.92)),
+    var(--color-surface-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(141, 170, 212, 0.12),
+    0 8px 22px rgba(217, 48, 37, 0.12);
+}
+
+:root[data-theme='dark'] .runtime-event__pill--success {
+  border-color: rgba(110, 231, 183, 0.38);
+  background: rgba(16, 63, 46, 0.7);
+  color: #6ee7b7;
+}
+
+:root[data-theme='dark'] .runtime-success-filter-hint {
+  border-color: rgba(111, 160, 255, 0.36);
+  background: rgba(28, 40, 58, 0.82);
+}
+
+:root[data-theme='dark'] .runtime-success-filter-hint__text {
+  color: #8fb6ff;
+}
+
+:root[data-theme='dark'] .runtime-success-filter-hint__clear {
+  border-color: rgba(65, 83, 111, 0.86);
+  background: rgba(23, 33, 48, 0.82);
+  color: var(--color-text);
+}
+
+:root[data-theme='dark'] .runtime-success-filter-hint__clear:hover,
+:root[data-theme='dark'] .runtime-success-filter-hint__clear:focus-visible {
+  border-color: rgba(111, 160, 255, 0.6);
+  background: rgba(34, 49, 72, 0.92);
+  color: #8fb6ff;
+}
+
 :root[data-theme='dark'] .app-layout--custom-background .runtime-event--success {
   background:
     linear-gradient(180deg, rgba(24, 34, 48, 0.74), rgba(17, 26, 38, 0.62)),
@@ -1353,11 +1397,23 @@
   color: var(--color-text);
 }
 
+:root[data-theme='dark'] .runtime-event--error .runtime-event__pill,
 :root[data-theme='dark'] .runtime-event--error .runtime-event__pill--file,
-:root[data-theme='dark'] .runtime-event--error .runtime-event__pill--translator {
+:root[data-theme='dark'] .runtime-event--error .runtime-event__pill--translator,
+:root[data-theme='dark'] .runtime-event__meta div {
   border-color: rgba(65, 83, 111, 0.9);
   background: rgba(28, 40, 58, 0.88);
   color: var(--color-text);
+}
+
+:root[data-theme='dark'] .runtime-event--error .runtime-event__meta dd {
+  color: var(--color-text);
+}
+
+:root[data-theme='dark'] .runtime-event--error .runtime-event__pill--danger {
+  border-color: rgba(248, 113, 113, 0.42);
+  background: rgba(94, 30, 36, 0.72);
+  color: #fca5a5;
 }
 
 :root[data-theme='dark'] .runtime-event--success .runtime-event__pill--file-clickable:hover,
@@ -1380,6 +1436,10 @@
     linear-gradient(180deg, rgba(24, 34, 48, 0.95), rgba(17, 25, 37, 0.9)),
     var(--color-surface);
   box-shadow: inset 0 1px 0 rgba(141, 170, 212, 0.14);
+}
+
+:root[data-theme='dark'] .runtime-success-compact__line + .runtime-success-compact__line {
+  border-top-color: rgba(65, 83, 111, 0.7);
 }
 
 /* Phase 1: charge-up glow on button */

@@ -300,6 +300,12 @@ async def doLLMTranslate(
     # 获取待翻译文件列表
     file_list = get_file_list(projectConfig.getInputPath())
     if not file_list:
+        # dump-name / GenDic 等仅基于输入文件的短路流程，空目录不算致命错误，友好返回
+        if "dump-name" in eng_type or eng_type == "GenDic":
+            LOGGER.warning(
+                f"{projectConfig.getInputPath()} 中没有待翻译的文件，已跳过。"
+            )
+            return True
         raise RuntimeError(f"{projectConfig.getInputPath()}中没有待翻译的文件")
 
     # 按文件名自然排序（处理数字部分）
@@ -746,14 +752,14 @@ async def init_gptapi(
 
     match eng_type:
         case "ForGal-tsv":
-            from GalTransl.Backend.ForGalTranslate import ForGalTranslate
-            return ForGalTranslate(projectConfig, eng_type, proxyPool, tokenPool)
+            from GalTransl.Backend.ForGalTsvTranslate import ForGalTsvTranslate
+            return ForGalTsvTranslate(projectConfig, eng_type, proxyPool, tokenPool)
         case "ForNovel":
             from GalTransl.Backend.ForNovelTranslate import ForNovelTranslate
             return ForNovelTranslate(projectConfig, eng_type, proxyPool, tokenPool)
         case "ForGal-json" | "r1":
-            from GalTransl.Backend.GPT4TranslateNew import GPT4TranslateNew
-            return GPT4TranslateNew(projectConfig, eng_type, proxyPool, tokenPool)
+            from GalTransl.Backend.ForGalJsonTranslate import ForGalJsonTranslate
+            return ForGalJsonTranslate(projectConfig, eng_type, proxyPool, tokenPool)
         case "sakura-v1.0" | "galtransl-v3":
             from GalTransl.Backend.SakuraTranslate import CSakuraTranslate
             sakura_endpoint = await sakuraEndpointQueue.get()

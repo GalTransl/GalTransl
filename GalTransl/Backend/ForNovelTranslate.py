@@ -15,7 +15,7 @@ from GalTransl.Cache import save_transCache_to_json
 from GalTransl.Dictionary import CGptDict
 from GalTransl.Utils import extract_code_blocks, fix_quotes2
 from GalTransl.Backend.Prompts import (
-    FORGAL_SYSTEM,
+    FORGAL_TSV_SYSTEM,
     FORNOVEL_TRANS_PROMPT_EN,
     H_WORDS_LIST,
 )
@@ -42,7 +42,7 @@ class ForNovelTranslate(BaseTranslate):
     ):
         super().__init__(config, eng_type, proxy_pool, token_pool)
         self.trans_prompt = FORNOVEL_TRANS_PROMPT_EN
-        self.system_prompt = FORGAL_SYSTEM
+        self.system_prompt = FORGAL_TSV_SYSTEM
         # enhance_jailbreak
         if val := config.getKey("gpt.enhance_jailbreak"):
             self.enhance_jailbreak = val
@@ -113,12 +113,9 @@ class ForNovelTranslate(BaseTranslate):
                 self.last_translations[filename] = self.last_translations[
                     filename
                 ].replace("<br>", "")
-                messages.append(
-                    {"role": "user", "content": "###Input\n(...truncated history source texts...)\n### Output\n"}
-                )
-                messages.append(
-                    {"role": "assistant", "content": self.last_translations[filename]}
-                )
+                prompt_req = prompt_req.replace("[history_result]", self.last_translations[filename])
+            else:
+                prompt_req = prompt_req.replace("[history_result]", "None")
             messages.append({"role": "user", "content": prompt_req})
             if assistant_prompt:
                 messages.append({"role": "assistant", "content": assistant_prompt})

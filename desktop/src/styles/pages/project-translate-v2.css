@@ -1287,3 +1287,27 @@
   background: rgba(29, 43, 63, 0.9);
   border-color: rgba(111, 160, 255, 0.6);
 }
+
+:root[data-theme='dark'] .ptv2-tab__badge {
+  background: rgba(65, 83, 111, 0.58);
+  color: var(--color-text);
+}
+
+:root[data-theme='dark'] .ptv2-tab__badge--danger {
+  background: rgba(248, 113, 113, 0.18);
+  color: #fca5a5;
+}
+
+:root[data-theme='dark'] .ptv2-tab--active .ptv2-tab__badge {
+  background: rgba(111, 160, 255, 0.22);
+  color: #8fb6ff;
+}
+
+:root[data-theme='dark'] .ptv2-tab--active .ptv2-tab__badge--danger {
+  background: rgba(248, 113, 113, 0.24);
+  color: #fca5a5;
+}
+
+:root[data-theme='dark'] .ptv2-tabpanel__header {
+  border-bottom-color: rgba(65, 83, 111, 0.82);
+}

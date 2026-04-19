@@ -415,6 +415,11 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
       .map((item) => item.file);
   }, [runtimeFiles]);
 
+  const unfinishedRuntimeFilesCount = useMemo(
+    () => runtimeFiles.filter((file) => file.translated < file.total).length,
+    [runtimeFiles],
+  );
+
   const projectName = projectDir ? projectDir.split(/[/\\]/).filter(Boolean).pop() || '' : '';
   const statusTone = currentJob?.status ?? 'pending';
   const runtimeStage = (runtimeMatchesProject ? (runtime?.stage ?? '') : '').trim();
@@ -739,8 +744,8 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                   onClick={() => setRightTab('files')}
                 >
                   <span className="ptv2-tab__label">文件进度</span>
-                  {prioritizedRuntimeFiles.length > 0 ? (
-                    <span className="ptv2-tab__badge">{prioritizedRuntimeFiles.length}</span>
+                  {unfinishedRuntimeFilesCount > 0 ? (
+                    <span className="ptv2-tab__badge" title="未完成的文件数量">{unfinishedRuntimeFilesCount}</span>
                   ) : null}
                 </button>
                 <button

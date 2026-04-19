@@ -4,6 +4,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { Button } from '../components/Button';
+import { CustomSelect } from '../components/CustomSelect';
 import { Panel } from '../components/Panel';
 import { PageHeader } from '../components/PageHeader';
 import { InlineFeedback } from '../components/page-state';
@@ -15,6 +16,7 @@ import {
   fetchPlugins,
   fetchDefaultProjectConfigTemplate,
   fetchProjectConfig,
+  fetchTranslationGuidelines,
   updateProjectConfig,
   submitJob,
   fetchJob,
@@ -60,6 +62,8 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
   const [workersPerProject, setWorkersPerProject] = useState(16);
   const [numPerRequest, setNumPerRequest] = useState(10);
   const [language, setLanguage] = useState('zh-cn');
+  const [guidelines, setGuidelines] = useState<string[]>([]);
+  const [translationGuideline, setTranslationGuideline] = useState('');
   const [settingsSaved, setSettingsSaved] = useState(false);
 
   // Step 5 state
@@ -276,6 +280,16 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
         setFilePlugins(plugins.filter((p) => p.type === 'file'));
       })
       .catch(() => {});
+    fetchTranslationGuidelines()
+      .then((list) => {
+        setGuidelines(list);
+        setTranslationGuideline((prev) => {
+          if (prev) return prev;
+          if (list.includes('日译中_增强')) return '日译中_增强';
+          return list[0] || '';
+        });
+      })
+      .catch(() => {});
   }, [currentStep]);
 
   const handleSaveSettings = useCallback(async () => {
@@ -292,6 +306,9 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
 
       common['gpt.numPerRequestTranslate'] = numPerRequest;
       common['gpt.contextNum'] = 8;
+      if (translationGuideline) {
+        common['gpt.translation_guideline'] = translationGuideline;
+      }
 
       config.common = common;
 
@@ -315,11 +332,18 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
     } catch (err) {
       setFeedback({ type: 'error', message: `保存失败: ${err instanceof Error ? err.message : String(err)}` });
     }
-  }, [projectDir, workersPerProject, language, numPerRequest, selectedFilePlugin, selectedBackend]);
+  }, [projectDir, workersPerProject, language, numPerRequest, selectedFilePlugin, selectedBackend, translationGuideline]);
 
   // ── Step 5: Auto-extract names on entry ──
   useEffect(() => {
     if (currentStep !== 4 || nameJobStatus !== 'idle' || !projectDir) return;
+
+    // 空输入目录：不提交 dump-name 任务，直接给出友好提示
+    if (importedFiles.length === 0) {
+      setNameJobStatus('completed');
+      setNameJobMessage('gt_input 中没有文件，已跳过人名提取。可返回上一步导入文件，或稍后手动添加。');
+      return;
+    }
 
     const run = async () => {
       try {
@@ -479,13 +503,13 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
     <Panel title="翻译后端" description="选择翻译后端配置，也可以跳过此步骤在配置编辑中设置。">
       <div className="field">
         <span className="field__label">后端配置</span>
-        <select className="field__select" value={selectedBackend} onChange={(e) => setSelectedBackend(e.target.value)}>
+        <CustomSelect value={selectedBackend} onChange={(e) => setSelectedBackend(e.target.value)}>
           <option value="__default__">跟随全局默认</option>
           <option value="">不使用（使用项目自身配置）</option>
           {backendProfileNames.map((name) => (
             <option key={name} value={name}>{name}</option>
           ))}
-        </select>
+        </CustomSelect>
         <span className="field__hint">
           {selectedBackend === '__default__'
             ? defaultBackendName
@@ -509,7 +533,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
       <div className="wizard-settings-grid">
       <div className="field wizard-settings-grid__full">
         <span className="field__label">文件插件</span>
-        <select className="field__select" value={selectedFilePlugin} onChange={(e) => setSelectedFilePlugin(e.target.value)}>
+        <CustomSelect value={selectedFilePlugin} onChange={(e) => setSelectedFilePlugin(e.target.value)}>
           {filePlugins.length > 0 ? (
             filePlugins.map((p) => (
               <option key={p.name} value={p.name}>{p.display_name} ({p.name})</option>
@@ -517,7 +541,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
           ) : (
             <option value={selectedFilePlugin}>{selectedFilePlugin}</option>
           )}
-        </select>
+        </CustomSelect>
         <span className="field__hint">用于识别与解析源文件格式。</span>
       </div>
       <div className="field">
@@ -544,13 +568,31 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
       </div>
       <div className="field wizard-settings-grid__full">
         <span className="field__label">目标语言</span>
-        <select className="field__select" value={language} onChange={(e) => setLanguage(e.target.value)}>
+        <CustomSelect value={language} onChange={(e) => setLanguage(e.target.value)}>
           <option value="zh-cn">简体中文</option>
           <option value="zh-tw">繁体中文</option>
           <option value="en">English</option>
           <option value="ja">日本語</option>
           <option value="ko">한국어</option>
-        </select>
+        </CustomSelect>
+      </div>
+      <div className="field wizard-settings-grid__full">
+        <span className="field__label">翻译规范</span>
+        <CustomSelect
+          value={translationGuideline}
+          onChange={(e) => setTranslationGuideline(e.target.value)}
+        >
+          {guidelines.length === 0 && translationGuideline === '' ? (
+            <option value="">（未找到翻译规范文件）</option>
+          ) : null}
+          {translationGuideline && !guidelines.includes(translationGuideline) ? (
+            <option value={translationGuideline}>{translationGuideline}</option>
+          ) : null}
+          {guidelines.map((g) => (
+            <option key={g} value={g}>{g}</option>
+          ))}
+        </CustomSelect>
+        <span className="field__hint">选择使用的翻译规范文件（位于 translation_guidelines 文件夹），高端模型日译中推荐【日译中_增强.md】</span>
       </div>
       </div>
       <div className="wizard-actions">

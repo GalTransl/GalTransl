@@ -472,6 +472,17 @@
   background: linear-gradient(90deg, var(--color-primary), #7ea7ff);
 }
 
+:root[data-theme='dark'] .wizard-steps,
+:root[data-theme='dark'] .wizard-nav {
+  border-color: rgba(65, 83, 111, 0.72);
+  background: rgba(21, 29, 41, 0.82);
+}
+
+:root[data-theme='dark'] .wizard-step--active {
+  background: rgba(111, 160, 255, 0.14);
+  border-color: rgba(111, 160, 255, 0.32);
+}
+
 /* ── Responsive ── */
 
 @media (max-width: 980px) {
