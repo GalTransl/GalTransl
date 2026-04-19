@@ -117,8 +117,19 @@ export function CustomSelect({
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
       const gap = 6;
-      const estimatedPanelHeight = 280;
-      const openUpward = window.innerHeight - rect.bottom < estimatedPanelHeight && rect.top > window.innerHeight - rect.bottom;
+      // Estimate panel height from actual option count so short lists don't
+      // mistakenly flip upward when there is plenty of room below.
+      const OPTION_ROW_HEIGHT = 36; // ~padding + line-height
+      const PANEL_PADDING = 8;
+      const MAX_PANEL_HEIGHT = 280;
+      const estimatedPanelHeight = Math.min(
+        MAX_PANEL_HEIGHT,
+        Math.max(OPTION_ROW_HEIGHT, options.length * OPTION_ROW_HEIGHT + PANEL_PADDING),
+      );
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      // Only flip upward when the panel truly doesn't fit below AND above has more room.
+      const openUpward = spaceBelow < estimatedPanelHeight && spaceAbove > spaceBelow;
       const width = rect.width;
       const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8));
 
@@ -127,8 +138,8 @@ export function CustomSelect({
         left,
         right: 'auto',
         width,
-        top: openUpward ? undefined : rect.bottom + gap,
-        bottom: openUpward ? window.innerHeight - rect.top + gap : undefined,
+        top: openUpward ? 'auto' : rect.bottom + gap,
+        bottom: openUpward ? window.innerHeight - rect.top + gap : 'auto',
         zIndex: 4000,
       });
     };
