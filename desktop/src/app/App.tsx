@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { HashRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import {
   CUSTOM_BACKGROUND_CHANGE_EVENT,
@@ -159,6 +159,7 @@ type AppInnerProps = {
 function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherProjects, onCloseAllProjects }: AppInnerProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const contentRef = useRef<HTMLElement | null>(null);
   const [displayLocation, setDisplayLocation] = useState(location);
   const [transitionStage, setTransitionStage] = useState<'fadeIn' | 'fadeOut'>('fadeIn');
   const [customBackground, setCustomBackground] = useState<CustomBackgroundPreference>(() => getCustomBackgroundPreference());
@@ -179,6 +180,10 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
       setTransitionStage('fadeOut');
     }
   }, [location, displayLocation]);
+
+  useLayoutEffect(() => {
+    contentRef.current?.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+  }, [displayLocation.pathname]);
 
   const handleTransitionEnd = () => {
     if (transitionStage === 'fadeOut') {
@@ -240,6 +245,7 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
         onCloseAllProjects={handleCloseAllProjectsAndNavigate}
       />
       <main
+        ref={contentRef}
         className={`app-layout__content page-transition-${transitionStage}`}
         onAnimationEnd={handleTransitionEnd}
       >
