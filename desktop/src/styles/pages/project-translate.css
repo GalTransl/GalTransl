@@ -14,7 +14,8 @@
 .project-layout > .name-page,
 .project-layout > .ptv2-page,
 .project-layout > .project-layout__keep-alive,
-.project-layout > .project-layout__keep-alive > .project-cache-page {
+.project-layout > .project-layout__keep-alive > .project-cache-page,
+.project-layout > .project-layout__keep-alive > .name-page {
   flex: 1;
   min-height: 0;
 }

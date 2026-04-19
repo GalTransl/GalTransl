@@ -85,16 +85,24 @@ export function ProjectLayout() {
 
   const activeTab = TAB_MAP.some((tab) => tab.path === currentTab) ? currentTab : 'translate';
 
-  // 对"缓存与问题"页：一旦访问过就保持挂载，避免重新进入时重复拉取所有缓存文件。
-  // 其他页仍按需挂载以控制内存占用。
+  // 对"缓存与问题"页、人名翻译页：一旦访问过就保持挂载，
+  // 避免重复加载，并让页内长任务在切换标签后继续运行。
   const [cacheVisited, setCacheVisited] = useState(() => activeTab === 'cache');
+  const [nameVisited, setNameVisited] = useState(() => activeTab === 'names');
   useEffect(() => {
     if (activeTab === 'cache') {
       setCacheVisited(true);
     }
   }, [activeTab]);
 
+  useEffect(() => {
+    if (activeTab === 'names') {
+      setNameVisited(true);
+    }
+  }, [activeTab]);
+
   const shouldRenderCache = cacheVisited || activeTab === 'cache';
+  const shouldRenderNames = nameVisited || activeTab === 'names';
 
   return (
     <div className="project-layout">
@@ -102,7 +110,15 @@ export function ProjectLayout() {
         {activeTab === 'translate' ? <ProjectTranslatePage ctx={ctx} /> : null}
         {activeTab === 'config' ? <ProjectConfigPage ctx={ctx} /> : null}
         {activeTab === 'dictionary' ? <ProjectDictionaryPage ctx={ctx} /> : null}
-        {activeTab === 'names' ? <ProjectNamePage ctx={ctx} /> : null}
+        {shouldRenderNames ? (
+          <div
+            className="project-layout__keep-alive"
+            hidden={activeTab !== 'names'}
+            style={activeTab !== 'names' ? { display: 'none' } : undefined}
+          >
+            <ProjectNamePage ctx={ctx} />
+          </div>
+        ) : null}
         {shouldRenderCache ? (
           <div
             className="project-layout__keep-alive"

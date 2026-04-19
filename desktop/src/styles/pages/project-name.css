@@ -12,7 +12,7 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .name-page__panel-actions {
@@ -21,6 +21,8 @@
   gap: var(--space-3);
   flex-wrap: wrap;
   width: 100%;
+  position: relative;
+  z-index: 3;
 }
 
 .name-page__panel-actions-group {
@@ -238,13 +240,14 @@
 .name-page__ai-wrap {
   position: relative;
   display: inline-flex;
+  z-index: 5;
 }
 
 .name-page__ai-popover {
   position: absolute;
   top: calc(100% + 8px);
-  left: 0;
-  z-index: 100;
+  left: -150px;
+  z-index: 320;
   min-width: 240px;
   padding: var(--space-4);
   background: rgba(255, 255, 255, 0.97);
@@ -281,6 +284,26 @@
   min-height: 40px;
   padding: var(--space-1) var(--space-2);
   font-size: var(--text-sm);
+}
+
+.name-page > .panel > .panel__body {
+  overflow-x: visible;
+}
+
+:root[data-theme='dark'] .name-page__ai-popover {
+  background: rgba(18, 27, 39, 0.96);
+  border-color: rgba(65, 83, 111, 0.88);
+  box-shadow:
+    0 18px 34px rgba(4, 8, 14, 0.48),
+    0 6px 14px rgba(4, 8, 14, 0.3);
+}
+
+:root[data-theme='dark'] .name-page__ai-popover-title {
+  color: rgba(241, 245, 249, 0.96);
+}
+
+:root[data-theme='dark'] .name-page__ai-popover-empty {
+  color: rgba(155, 169, 189, 0.92);
 }
 
 .name-page__row--add .name-page__td--add {

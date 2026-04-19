@@ -41,6 +41,7 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const namesRef = useRef<NameEntry[]>([]);
+  const aiTranslateAbortRef = useRef<AbortController | null>(null);
 
   // GPT dict integration state
   const [useGptDictForName, setUseGptDictForName] = useState(false);
@@ -117,6 +118,10 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
   // Cleanup auto-save timer on unmount
   useEffect(() => {
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
+  }, []);
+
+  useEffect(() => {
+    return () => { aiTranslateAbortRef.current?.abort(); };
   }, []);
 
   // Parse GPT dictionary lines into a search_word -> replace_word Map.
@@ -365,7 +370,7 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
   }, [names, projectDir]);
 
   const handleAiTranslate = useCallback(async () => {
-    if (!projectId) return;
+    if (!projectId || aiTranslating) return;
     const untranslated = names.filter((n) => n.dst_name.trim() === '');
     if (untranslated.length === 0) {
       setError('所有人名已翻译，无需AI翻译');
@@ -374,12 +379,16 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
     setShowAiPopover(false);
     setAiTranslating(true);
     setError(null);
+    const abortController = new AbortController();
+    aiTranslateAbortRef.current = abortController;
     let aborted = false;
+    let filledCount = 0;
     try {
       const url = getAiTranslateUrl(projectId);
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
         body: JSON.stringify({ names: untranslated, backend_profile: aiSelectedProfile }),
       });
 
@@ -393,7 +402,6 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
 
       const decoder = new TextDecoder();
       let sseBuf = '';
-      let filledCount = 0;
       const remaining = new Map(untranslated.map((n) => [n.src_name, true]));
 
       while (!aborted) {
@@ -450,11 +458,23 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
         setError('AI未能返回任何翻译结果');
       }
     } catch (err) {
-      setError(normalizeError(err, 'AI翻译人名失败'));
+      if ((err instanceof DOMException && err.name === 'AbortError') || ((err as Error | null)?.name === 'AbortError')) {
+        if (filledCount > 0) setDirty(true);
+        setError('AI翻译人名已取消');
+      } else {
+        setError(normalizeError(err, 'AI翻译人名失败'));
+      }
     } finally {
+      if (aiTranslateAbortRef.current === abortController) {
+        aiTranslateAbortRef.current = null;
+      }
       setAiTranslating(false);
     }
-  }, [projectId, names, aiSelectedProfile]);
+  }, [projectId, names, aiSelectedProfile, aiTranslating]);
+
+  const handleCancelAiTranslate = useCallback(() => {
+    aiTranslateAbortRef.current?.abort();
+  }, []);
 
   const handleDstNameChange = useCallback((index: number, value: string) => {
     setNames((prev) => {
@@ -548,8 +568,13 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
         {generating ? '提取中...' : '提取人名表'}
       </Button>
       <div className="name-page__ai-wrap" ref={aiPopoverRef}>
-        <Button onClick={handleOpenAiPopover} disabled={aiTranslating || names.length === 0}>
-          {aiTranslating ? 'AI翻译中，不要走开...' : 'AI翻译人名'}
+        <Button
+          onClick={aiTranslating ? handleCancelAiTranslate : handleOpenAiPopover}
+          disabled={!aiTranslating && names.length === 0}
+          variant={aiTranslating ? 'secondary' : 'primary'}
+          title={aiTranslating ? '点击取消当前人名翻译' : undefined}
+        >
+          {aiTranslating ? '翻译中，点击取消' : 'AI翻译人名'}
         </Button>
         {showAiPopover && (
           <div className="name-page__ai-popover">
@@ -607,7 +632,15 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
     <div className="page name-page">
       <PageHeader title="人名翻译" description="用于翻译输入文件中的“name”字段，是直接替换模式。注意正文中的人名应使用“GPT字典”让模型翻译。" />
 
-      {error && <InlineFeedback tone="error">{error}</InlineFeedback>}
+      {error ? (
+        <InlineFeedback
+          className="inline-alert--floating"
+          tone="error"
+          title="操作失败"
+          description={error}
+          onDismiss={() => setError(null)}
+        />
+      ) : null}
 
       <Panel title="人名替换表" actions={panelActions}>
         <div className="name-page__stats">
