@@ -5,6 +5,10 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  --cache-font-base: 14px;
+  --cache-font-sm: 13px;
+  --cache-font-xs: 12px;
+  --cache-font-xxs: 11px;
 }
 
 .cache-sidebar-tab-content {
@@ -520,7 +524,7 @@
   align-items: center;
   padding: 1px 8px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: var(--cache-font-xs);
   font-weight: 600;
   line-height: 1.6;
 }
@@ -582,7 +586,7 @@
 }
 
 .cache-card__field-label {
-  font-size: 11px;
+  font-size: var(--cache-font-xs);
   color: var(--color-text-muted);
   font-weight: 500;
   flex-shrink: 0;
@@ -600,7 +604,7 @@
   padding: 2px var(--space-2);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-control);
-  font-size: 13px;
+  font-size: var(--cache-font-base);
   background: var(--color-surface-base);
   color: var(--color-text);
   transition: border-color var(--transition-fast);
@@ -640,7 +644,7 @@
   padding: 2px var(--space-2);
   border: 1px solid transparent;
   border-radius: var(--radius-control);
-  font-size: 13px;
+  font-size: var(--cache-font-base);
   line-height: normal;
   pointer-events: none;
   white-space: pre;
@@ -658,7 +662,7 @@
 }
 
 .cache-card__textarea {
-  font-size: 13px;
+  font-size: var(--cache-font-base);
   line-height: 1.4;
   padding: 10px 12px;
   background: var(--color-surface-strong);
@@ -680,7 +684,7 @@
   padding: 2px var(--space-2);
   border: 1px solid transparent;
   border-radius: var(--radius-control);
-  font-size: 13px;
+  font-size: var(--cache-font-base);
   line-height: normal;
   white-space: pre;
   overflow: hidden;
@@ -701,7 +705,7 @@
   padding: var(--space-1) var(--space-2);
   border: 1px solid transparent;
   border-radius: var(--radius-control);
-  font-size: 13px;
+  font-size: var(--cache-font-base);
   line-height: 1.4;
   color: var(--color-text);
   background: transparent;

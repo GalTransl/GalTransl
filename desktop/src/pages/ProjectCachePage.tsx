@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '../components/Button';
@@ -10,6 +10,7 @@ import { EmptyState, InlineFeedback, LoadingState } from '../components/page-sta
 import { speakerStyle, speakerHue } from '../lib/speaker';
 import { useNameDict, resolveSpeakerName } from '../lib/useNameDict';
 import {
+  CACHE_BROWSER_FONT_SIZE_CHANGE_EVENT,
   type FileEntry,
   type CacheEntry,
   type CacheSearchResult,
@@ -25,6 +26,7 @@ import {
   replaceCache,
   fetchProjectProblems,
   fetchProjectConfig,
+  getCacheBrowserFontSizePreference,
   updateProjectConfig } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 
@@ -133,7 +135,7 @@ function CacheEntryCard({
             <div className="cache-card__field">
               <span className="cache-card__field-label">原文</span>
               <div className="cache-card__input-wrap">
-                <span className="cache-card__readonly-input">
+                <span className="cache-card__readonly-input" title={escapeControlChars(src(entry))}>
                   {highlightQuery
                     ? <HighlightText text={escapeControlChars(src(entry))} query={highlightQuery} />
                     : escapeControlChars(src(entry))}
@@ -148,6 +150,7 @@ function CacheEntryCard({
                   value={escapeControlChars(dst(entry))}
                   onChange={(e) => onEntryChange(entry.index, 'pre_dst', unescapeControlChars(e.target.value))}
                   placeholder="译文"
+                  title={escapeControlChars(dst(entry))}
                 />
                 {highlightQuery && (
                   <span className="cache-card__input-overlay cache-card__input-overlay--zh">
@@ -269,13 +272,13 @@ function SearchResultCard({
       {result.post_src && (
         <div className="search-result-card__line">
           <span className="search-result-card__label">原文</span>
-          <span className="search-result-card__text"><HighlightText text={escapeControlChars(result.post_src)} query={query} /></span>
+          <span className="search-result-card__text" title={escapeControlChars(result.post_src)}><HighlightText text={escapeControlChars(result.post_src)} query={query} /></span>
         </div>
       )}
       {result.pre_dst && (
         <div className="search-result-card__line">
           <span className="search-result-card__label">译文</span>
-          <span className="search-result-card__text search-result-card__text--dst"><HighlightText text={escapeControlChars(result.pre_dst)} query={query} /></span>
+          <span className="search-result-card__text search-result-card__text--dst" title={escapeControlChars(result.pre_dst)}><HighlightText text={escapeControlChars(result.pre_dst)} query={query} /></span>
         </div>
       )}
     </button>
@@ -286,6 +289,7 @@ function SearchResultCard({
 export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
   const { projectId, configFileName } = ctx;
   const { nameDict } = useNameDict(projectId);
+  const [cacheBrowserFontSize, setCacheBrowserFontSize] = useState(() => getCacheBrowserFontSizePreference());
 
   const [cacheFiles, setCacheFiles] = useState<FileEntry[]>([]);
   const [cacheDir, setCacheDir] = useState<string>('');
@@ -308,6 +312,24 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
     entries: Map<string, CacheEntry[]>;
     scrollPositions: Map<string, number>;
   };
+
+  useEffect(() => {
+    const handleCacheBrowserFontSizeChange = () => {
+      setCacheBrowserFontSize(getCacheBrowserFontSizePreference());
+    };
+
+    window.addEventListener(CACHE_BROWSER_FONT_SIZE_CHANGE_EVENT, handleCacheBrowserFontSizeChange as EventListener);
+    return () => {
+      window.removeEventListener(CACHE_BROWSER_FONT_SIZE_CHANGE_EVENT, handleCacheBrowserFontSizeChange as EventListener);
+    };
+  }, []);
+
+  const cacheBrowserFontStyle = {
+    '--cache-font-base': `${cacheBrowserFontSize}px`,
+    '--cache-font-sm': `${Math.max(10, cacheBrowserFontSize - 1)}px`,
+    '--cache-font-xs': `${Math.max(9, cacheBrowserFontSize - 2)}px`,
+    '--cache-font-xxs': `${Math.max(8, cacheBrowserFontSize - 3)}px`,
+  } as CSSProperties;
   const bucketsRef = useRef<Map<string, ProjectBucket>>(new Map());
   const lastProjectIdRef = useRef<string>('');
   const [loading, setLoading] = useState(true);
@@ -1038,14 +1060,14 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
 
   if (loading && cacheFiles.length === 0) {
     return (
-      <div className="project-cache-page">
+      <div className="project-cache-page" style={cacheBrowserFontStyle}>
         <PageHeader className="project-cache-page__header" title="缓存与问题" />
         <LoadingState title="加载缓存列表中…" description="正在读取项目缓存文件。" />
       </div>
     );
   }
   return (
-    <div className="project-cache-page">
+    <div className="project-cache-page" style={cacheBrowserFontStyle}>
       <PageHeader
         className="project-cache-page__header"
         title="缓存与问题"

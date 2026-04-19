@@ -826,6 +826,7 @@ const HOME_JOB_LIMIT_KEY = 'galtransl-home-job-limit';
 const THEME_MODE_KEY = 'galtransl-theme-mode';
 const CUSTOM_BACKGROUND_KEY = 'galtransl-custom-background';
 const HIDE_BACKEND_CONSOLE_KEY = 'galtransl-hide-backend-console';
+const CACHE_BROWSER_FONT_SIZE_KEY = 'galtransl-cache-browser-font-size';
 
 export const HOME_HISTORY_LIMIT_DEFAULT = 20;
 export const HOME_JOB_LIMIT_DEFAULT = 20;
@@ -838,6 +839,9 @@ export const CUSTOM_BACKGROUND_SURFACE_OPACITY_MIN = 18;
 export const CUSTOM_BACKGROUND_SURFACE_OPACITY_MAX = 92;
 export const CUSTOM_BACKGROUND_SURFACE_OPACITY_DEFAULT = 33;
 export const HIDE_BACKEND_CONSOLE_DEFAULT = true;
+export const CACHE_BROWSER_FONT_SIZE_MIN = 11;
+export const CACHE_BROWSER_FONT_SIZE_MAX = 20;
+export const CACHE_BROWSER_FONT_SIZE_DEFAULT = 14;
 
 /** Custom event dispatched when the global default backend profile changes. */
 export const BACKEND_PROFILES_CHANGE_EVENT = 'galtransl:backend-profiles-change';
@@ -847,6 +851,7 @@ export const HOME_JOB_LIMIT_CHANGE_EVENT = 'galtransl:home-job-limit-change';
 export const THEME_MODE_CHANGE_EVENT = 'galtransl:theme-mode-change';
 export const CUSTOM_BACKGROUND_CHANGE_EVENT = 'galtransl:custom-background-change';
 export const HIDE_BACKEND_CONSOLE_CHANGE_EVENT = 'galtransl:hide-backend-console-change';
+export const CACHE_BROWSER_FONT_SIZE_CHANGE_EVENT = 'galtransl:cache-browser-font-size-change';
 
 function cloneBackendProfile(profile: Record<string, unknown>): Record<string, unknown> {
   return JSON.parse(JSON.stringify(profile ?? {})) as Record<string, unknown>;
@@ -1086,6 +1091,26 @@ export function setHomeHistoryRetentionLimit(limit: number): number {
   return normalized;
 }
 
+export function getCacheBrowserFontSizePreference(): number {
+  try {
+    const raw = localStorage.getItem(CACHE_BROWSER_FONT_SIZE_KEY);
+    return normalizeCacheBrowserFontSize(raw);
+  } catch {
+    return CACHE_BROWSER_FONT_SIZE_DEFAULT;
+  }
+}
+
+export function setCacheBrowserFontSizePreference(size: number): number {
+  const normalized = normalizeCacheBrowserFontSize(size);
+  try {
+    localStorage.setItem(CACHE_BROWSER_FONT_SIZE_KEY, String(normalized));
+    window.dispatchEvent(new CustomEvent(CACHE_BROWSER_FONT_SIZE_CHANGE_EVENT, { detail: normalized }));
+  } catch {
+    // ignore storage errors
+  }
+  return normalized;
+}
+
 export function getHideBackendConsolePreference(): boolean {
   try {
     const raw = localStorage.getItem(HIDE_BACKEND_CONSOLE_KEY);
@@ -1131,6 +1156,21 @@ function normalizeThemeMode(value: unknown): ThemeMode {
     return value;
   }
   return 'system';
+}
+
+function normalizeCacheBrowserFontSize(value: unknown): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) {
+    return CACHE_BROWSER_FONT_SIZE_DEFAULT;
+  }
+  const integer = Math.trunc(numeric);
+  if (integer < CACHE_BROWSER_FONT_SIZE_MIN) {
+    return CACHE_BROWSER_FONT_SIZE_MIN;
+  }
+  if (integer > CACHE_BROWSER_FONT_SIZE_MAX) {
+    return CACHE_BROWSER_FONT_SIZE_MAX;
+  }
+  return integer;
 }
 
 function normalizeHideBackendConsole(value: unknown): boolean {

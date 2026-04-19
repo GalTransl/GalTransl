@@ -5,6 +5,8 @@ import { ConnectionStatusCard } from '../features/connection/ConnectionStatusCar
 import { EmptyState, ErrorState, LoadingState } from '../components/page-state';
 import { useConnection } from '../features/connection/ConnectionContext';
 import {
+  CACHE_BROWSER_FONT_SIZE_MAX,
+  CACHE_BROWSER_FONT_SIZE_MIN,
   CUSTOM_BACKGROUND_OPACITY_MAX,
   CUSTOM_BACKGROUND_OPACITY_MIN,
   CUSTOM_BACKGROUND_SURFACE_OPACITY_MAX,
@@ -13,6 +15,7 @@ import {
   type ThemeMode,
   clearCustomBackgroundPreference,
   fetchPlugins,
+  getCacheBrowserFontSizePreference,
   getCustomBackgroundPreference,
   getHideBackendConsolePreference,
   getHomeHistoryRetentionLimit,
@@ -21,6 +24,7 @@ import {
   HOME_LIST_LIMIT_MAX,
   HOME_LIST_LIMIT_MIN,
   setCustomBackgroundPreference,
+  setCacheBrowserFontSizePreference,
   setHideBackendConsolePreference,
   setHomeHistoryRetentionLimit,
   setHomeJobRetentionLimit,
@@ -148,6 +152,7 @@ export function SettingsPage() {
   const [homeHistoryLimitInput, setHomeHistoryLimitInput] = useState(() => String(getHomeHistoryRetentionLimit()));
   const [homeJobLimitInput, setHomeJobLimitInput] = useState(() => String(getHomeJobRetentionLimit()));
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => getThemeModePreference());
+  const [cacheBrowserFontSizeInput, setCacheBrowserFontSizeInput] = useState(() => String(getCacheBrowserFontSizePreference()));
   const [hideBackendConsole, setHideBackendConsole] = useState(() => getHideBackendConsolePreference());
   const [customBackgroundImageDataUrl, setCustomBackgroundImageDataUrl] = useState(
     () => getCustomBackgroundPreference().imageDataUrl,
@@ -178,6 +183,11 @@ export function SettingsPage() {
   const applyThemeMode = useCallback((mode: ThemeMode) => {
     const next = setThemeModePreference(mode);
     setThemeMode(next);
+  }, []);
+
+  const applyCacheBrowserFontSize = useCallback((rawValue: string) => {
+    const next = setCacheBrowserFontSizePreference(rawValue.trim() === '' ? Number.NaN : Number(rawValue));
+    setCacheBrowserFontSizeInput(String(next));
   }, []);
 
   const applyHideBackendConsole = useCallback((enabled: boolean) => {
@@ -406,6 +416,39 @@ export function SettingsPage() {
                 }}
                 onBlur={() => {
                   applyCustomBackgroundSurfaceOpacity(customBackgroundSurfaceOpacityInput);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.currentTarget.blur();
+                  }
+                }}
+              />
+            </div>
+          </label>
+
+          <label className="settings-number-row">
+            <span className="settings-number-row__label">缓存与问题字号</span>
+            <div className="settings-number-row__control settings-opacity-control">
+              <input
+                type="range"
+                min={CACHE_BROWSER_FONT_SIZE_MIN}
+                max={CACHE_BROWSER_FONT_SIZE_MAX}
+                value={cacheBrowserFontSizeInput}
+                onChange={(event) => {
+                  setCacheBrowserFontSizeInput(event.target.value);
+                  applyCacheBrowserFontSize(event.target.value);
+                }}
+              />
+              <input
+                type="number"
+                min={CACHE_BROWSER_FONT_SIZE_MIN}
+                max={CACHE_BROWSER_FONT_SIZE_MAX}
+                value={cacheBrowserFontSizeInput}
+                onChange={(event) => {
+                  setCacheBrowserFontSizeInput(event.target.value);
+                }}
+                onBlur={() => {
+                  applyCacheBrowserFontSize(cacheBrowserFontSizeInput);
                 }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
