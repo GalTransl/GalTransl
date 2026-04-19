@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from asyncio import run
+from asyncio import CancelledError, run
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+import os
+import traceback
 from typing import Any
 
 from GalTransl import LOGGER, DEBUG_LEVEL
@@ -17,8 +19,88 @@ class JobCancelledError(Exception):
     pass
 
 
+ERROR_LOG_MAX_BYTES = 1024 * 1024
+
+
 def _utcnow_text() -> str:
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+
+def _should_skip_error_log(ex: BaseException) -> bool:
+    if isinstance(ex, (JobCancelledError, KeyboardInterrupt, CancelledError)):
+        return True
+
+    module_name = type(ex).__module__ or ""
+    if module_name.startswith("openai"):
+        return True
+    if module_name.startswith("httpx"):
+        return True
+    if module_name.startswith("requests"):
+        return True
+
+    return False
+
+
+def _resolve_error_log_path(project_dir: str) -> str | None:
+    normalized_dir = str(project_dir or "").strip()
+    if not normalized_dir:
+        return None
+    try:
+        os.makedirs(normalized_dir, exist_ok=True)
+    except OSError:
+        return None
+    return os.path.join(normalized_dir, "error.log")
+
+
+def _append_error_log(spec: JobSpec, ex: BaseException, *, phase: str) -> None:
+    if _should_skip_error_log(ex):
+        return
+
+    log_path = _resolve_error_log_path(spec.project_dir)
+    if not log_path:
+        return
+
+    trace_text = traceback.format_exc().strip()
+    if not trace_text or trace_text == "NoneType: None":
+        trace_text = "".join(traceback.format_exception(type(ex), ex, ex.__traceback__)).strip()
+
+    lines = [
+        f"[{_utcnow_text()}] phase={phase}",
+        f"job_id={spec.job_id or '-'}",
+        f"project_dir={spec.project_dir}",
+        f"translator={spec.translator}",
+        f"config_file_name={spec.config_file_name}",
+        f"exception_type={type(ex).__module__}.{type(ex).__name__}",
+        f"exception_message={str(ex)}",
+        "traceback:",
+        trace_text,
+        "",
+    ]
+    payload = "\n".join(lines).encode("utf-8", errors="replace")
+    try:
+        if os.path.isfile(log_path):
+            current_size = os.path.getsize(log_path)
+        else:
+            current_size = 0
+
+        if current_size + len(payload) <= ERROR_LOG_MAX_BYTES:
+            with open(log_path, "ab") as f:
+                f.write(payload)
+            return
+
+        existing = b""
+        if current_size > 0:
+            with open(log_path, "rb") as f:
+                existing = f.read()
+
+        combined = existing + payload
+        trimmed = combined[-ERROR_LOG_MAX_BYTES:]
+        trimmed = trimmed.decode("utf-8", errors="ignore").encode("utf-8")
+
+        with open(log_path, "wb") as f:
+            f.write(trimmed)
+    except OSError:
+        return
 
 
 @dataclass(slots=True)
@@ -121,6 +203,7 @@ async def run_job_async(
             LOGGER.info("Applied backend profile: %s", spec.backend_profile or "inline")
 
     except Exception as ex:
+        _append_error_log(spec, ex, phase="load_config")
         current_state.status = "failed"
         current_state.error = get_text("error_loading_config", GT_LANG, str(ex))
         current_state.finished_at = _utcnow_text()
@@ -139,10 +222,12 @@ async def run_job_async(
         current_state.status = "cancelled"
         current_state.error = get_text("goodbye", GT_LANG)
     except RuntimeError as ex:
+        _append_error_log(spec, ex, phase="run_job")
         current_state.status = "failed"
         current_state.error = get_text("program_error", GT_LANG, ex)
         LOGGER.error(current_state.error)
     except BaseException as ex:
+        _append_error_log(spec, ex, phase="run_job")
         current_state.status = "failed"
         current_state.error = get_text("error_unexpected", GT_LANG, str(ex))
         LOGGER.error(current_state.error, exc_info=True)
