@@ -18,6 +18,7 @@ GalTransl Windows 发布版构建脚本 (Python)
       GalTransl Desktop.exe          # Tauri 前端可执行文件
       backend/galtransl_backend.exe  # Python 后端 (PyInstaller)
       plugins/                       # 插件目录
+      res/                           # 运行时资源目录
     GalTransl_{version}_win.zip
 """
 
@@ -38,6 +39,7 @@ RELEASE_DIR = ROOT / "release"
 PLUGINS_DIR = ROOT / "plugins"
 DICT_DIR = ROOT / "Dict"
 GUIDELINES_DIR = ROOT / "translation_guidelines"
+RES_DIR = ROOT / "res"
 
 
 def get_version() -> str:
@@ -332,6 +334,12 @@ def assemble_release(frontend_exe: Path | None, backend_exe: Path):
         dst_guidelines = BUILD_DIR / "translation_guidelines"
         copy_dir_filtered(GUIDELINES_DIR, dst_guidelines)
         print("  复制翻译指南目录 -> translation_guidelines/")
+
+    # 6. 复制运行时资源
+    if RES_DIR.exists():
+        dst_res = BUILD_DIR / "res"
+        copy_dir_filtered(RES_DIR, dst_res)
+        print("  复制运行时资源目录 -> res/")
 
     print(f"\n\033[32m发布包组装完成: {BUILD_DIR}\033[0m")
 
