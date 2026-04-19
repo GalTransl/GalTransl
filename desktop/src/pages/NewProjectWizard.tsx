@@ -9,10 +9,11 @@ import { Panel } from '../components/Panel';
 import { PageHeader } from '../components/PageHeader';
 import { InlineFeedback } from '../components/page-state';
 import {
+  BACKEND_PROFILES_CHANGE_EVENT,
   DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
   type PluginInfo,
   getDefaultBackendProfile,
-  fetchBackendProfiles,
+  getBackendProfileNames,
   fetchPlugins,
   fetchDefaultProjectConfigTemplate,
   fetchProjectConfig,
@@ -256,12 +257,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
   // ── Step 3: Load backend profiles on entry ──
   useEffect(() => {
     if (currentStep !== 2) return;
-    fetchBackendProfiles()
-      .then((res) => {
-        const names = Object.keys(res.profiles);
-        setBackendProfileNames(names);
-      })
-      .catch(() => {});
+    setBackendProfileNames(getBackendProfileNames());
   }, [currentStep]);
 
   useEffect(() => {
@@ -271,6 +267,16 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
     window.addEventListener(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, onDefaultBackendChange);
     return () => window.removeEventListener(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, onDefaultBackendChange);
   }, []);
+
+  useEffect(() => {
+    const onProfilesChange = () => {
+      if (currentStep === 2) {
+        setBackendProfileNames(getBackendProfileNames());
+      }
+    };
+    window.addEventListener(BACKEND_PROFILES_CHANGE_EVENT, onProfilesChange);
+    return () => window.removeEventListener(BACKEND_PROFILES_CHANGE_EVENT, onProfilesChange);
+  }, [currentStep]);
 
   // ── Step 4: Load plugins on entry ──
   useEffect(() => {

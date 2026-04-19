@@ -27,6 +27,7 @@ class JobSpec:
     config_file_name: str = "config.yaml"
     job_id: str = ""
     backend_profile: str = ""
+    backend_profile_data: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -99,21 +100,23 @@ async def run_job_async(
             DEBUG_LEVEL[cfg.getCommonConfigSection().get("loggingLevel", "info")]
         )
 
-        # Apply global backend profile if specified
-        if spec.backend_profile:
+        profile = spec.backend_profile_data if isinstance(spec.backend_profile_data, dict) else {}
+        if not profile and spec.backend_profile:
             from GalTransl.server import _read_backend_profiles
             profiles_data = _read_backend_profiles()
             profiles = profiles_data.get("profiles", {})
             if spec.backend_profile in profiles:
-                profile = profiles[spec.backend_profile]
-                cfg.projectConfig["backendSpecific"] = profile
-                # Apply proxy settings from profile if present
-                if "proxy" in profile:
-                    cfg.projectConfig["proxy"] = profile["proxy"]
-                    cfg.keyValues["internals.enableProxy"] = profile["proxy"].get("enableProxy", False)
-                LOGGER.info("Applied backend profile: %s", spec.backend_profile)
+                candidate = profiles[spec.backend_profile]
+                if isinstance(candidate, dict):
+                    profile = candidate
             else:
                 LOGGER.warning("Backend profile not found: %s", spec.backend_profile)
+        if profile:
+            cfg.projectConfig["backendSpecific"] = profile
+            if "proxy" in profile:
+                cfg.projectConfig["proxy"] = profile["proxy"]
+                cfg.keyValues["internals.enableProxy"] = profile["proxy"].get("enableProxy", False)
+            LOGGER.info("Applied backend profile: %s", spec.backend_profile or "inline")
 
     except Exception as ex:
         current_state.status = "failed"

@@ -16,7 +16,7 @@ import {
   fetchProjectConfig,
   fetchProjectRuntime,
   getSelectedTranslatorTemplate,
-  getSelectedBackendProfile,
+  getSelectedBackendProfileJobPayload,
   setSelectedTranslatorTemplate,
   stopProjectTranslation,
   submitJob } from '../lib/api';
@@ -323,7 +323,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     }
     setSubmitError(null);
     setSelectedTranslatorTemplate(projectDir, selectedTranslator);
-    const backendProfile = getSelectedBackendProfile(projectDir);
+    const backendProfilePayload = getSelectedBackendProfileJobPayload(projectDir);
 
     if (!reducedMotion) {
       const btnEl = launchButtonRef.current;
@@ -341,7 +341,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
         config_file_name: configFileName || 'config.yaml',
         project_dir: projectDir,
         translator: selectedTranslator,
-        ...(backendProfile ? { backend_profile: backendProfile } : {}) });
+        ...backendProfilePayload });
       void refreshRuntime();
       return;
     }
@@ -368,7 +368,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
         config_file_name: configFileName || 'config.yaml',
         project_dir: projectDir,
         translator: selectedTranslator,
-        ...(backendProfile ? { backend_profile: backendProfile } : {}) })
+        ...backendProfilePayload })
         .then(() => { void refreshRuntime(); });
       window.setTimeout(() => setLaunchPhase('idle'), LAUNCH.blastMs);
     }, LAUNCH.chargeMs);

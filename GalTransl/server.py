@@ -862,6 +862,39 @@ def _common_dict_directory() -> str:
     return os.path.abspath("Dict")
 
 
+def _ensure_project_dict_file_configured(project_dir: str, config_name: str, category: str, filename: str) -> None:
+    if not _is_safe_config_filename(config_name):
+        raise ValueError("invalid config filename")
+    if not _is_safe_dict_filename(filename):
+        raise ValueError("invalid dictionary filename")
+
+    config_path = os.path.join(project_dir, config_name)
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(f"config file not found: {config_name}")
+
+    data = _read_yaml_file(config_path)
+    dict_cfg_raw = data.get("dictionary", {})
+    dict_cfg = dict_cfg_raw if isinstance(dict_cfg_raw, dict) else {}
+    list_key = _dict_category_config_key(category)
+    current_items = dict_cfg.get(list_key, [])
+
+    if isinstance(current_items, list):
+        current_list = [str(x) for x in current_items]
+    elif current_items in (None, ""):
+        current_list = []
+    else:
+        current_list = [str(current_items)]
+
+    file_key = f"{DICT_PROJECT_MARKER}{filename}"
+    if file_key in current_list:
+        return
+
+    current_list.append(file_key)
+    dict_cfg[list_key] = current_list
+    data["dictionary"] = dict_cfg
+    _write_yaml_file(config_path, data)
+
+
 def _common_dict_category_map_path(dict_dir: str) -> str:
     return os.path.join(dict_dir, COMMON_DICT_CATEGORY_MAP)
 
@@ -1395,6 +1428,7 @@ class JobRegistry:
         config_file_name = str(payload.get("config_file_name", "config.yaml")).strip() or "config.yaml"
         translator = str(payload.get("translator", "")).strip()
         backend_profile = str(payload.get("backend_profile", "")).strip()
+        backend_profile_data = payload.get("backend_profile_data")
 
         if not project_dir:
             raise ValueError("project_dir is required")
@@ -1402,6 +1436,13 @@ class JobRegistry:
             raise ValueError("translator is required")
         if translator not in TRANSLATOR_SUPPORTED:
             raise ValueError(f"unsupported translator: {translator}")
+        if translator == "GenDic":
+            _ensure_project_dict_file_configured(
+                project_dir,
+                config_file_name,
+                "gpt",
+                "项目GPT字典-生成.txt",
+            )
 
         with self._lock:
             if self._has_running_job_for_project(project_dir):
@@ -1416,6 +1457,7 @@ class JobRegistry:
                 config_file_name=config_file_name,
                 translator=translator,
                 backend_profile=backend_profile,
+                backend_profile_data=backend_profile_data if isinstance(backend_profile_data, dict) else {},
             )
             state = create_job_state(spec)
             reset_runtime_project(project_dir)
@@ -2313,26 +2355,32 @@ def build_handler(registry: JobRegistry):
                 try:
                     payload = self._read_json_body()
                     backend_profile = str(payload.get("backend_profile", "")).strip()
+                    backend_profile_data = payload.get("backend_profile_data")
                     untranslated = payload.get("names", [])
                     if not isinstance(untranslated, list) or not untranslated:
                         self._send_json({"error": "names must be a non-empty array"}, status=HTTPStatus.BAD_REQUEST)
                         return
 
-                    # Resolve the OpenAI-Compatible config from backend profiles
-                    profiles_data = _read_backend_profiles()
-                    profiles = profiles_data.get("profiles", {})
-
                     oai_section = None
-                    if backend_profile and backend_profile in profiles:
-                        oai_section = profiles[backend_profile].get("OpenAI-Compatible")
-                    elif backend_profile:
-                        self._send_json({"error": f"后端配置 '{backend_profile}' 不存在"}, status=HTTPStatus.NOT_FOUND)
-                        return
+                    if isinstance(backend_profile_data, dict) and backend_profile_data:
+                        candidate = backend_profile_data.get("OpenAI-Compatible")
+                        if isinstance(candidate, dict):
+                            oai_section = candidate
                     else:
-                        for _pname, _pconf in profiles.items():
-                            if "OpenAI-Compatible" in _pconf:
-                                oai_section = _pconf["OpenAI-Compatible"]
-                                break
+                        profiles_data = _read_backend_profiles()
+                        profiles = profiles_data.get("profiles", {})
+                        if backend_profile and backend_profile in profiles:
+                            candidate = profiles[backend_profile].get("OpenAI-Compatible")
+                            if isinstance(candidate, dict):
+                                oai_section = candidate
+                        elif backend_profile:
+                            self._send_json({"error": f"后端配置 '{backend_profile}' 不存在"}, status=HTTPStatus.NOT_FOUND)
+                            return
+                        else:
+                            for _pname, _pconf in profiles.items():
+                                if "OpenAI-Compatible" in _pconf and isinstance(_pconf["OpenAI-Compatible"], dict):
+                                    oai_section = _pconf["OpenAI-Compatible"]
+                                    break
 
                     if not oai_section:
                         self._send_json({"error": "未找到可用的 OpenAI 兼容后端配置，请先在后端配置中添加 OpenAI 兼容接口"}, status=HTTPStatus.BAD_REQUEST)

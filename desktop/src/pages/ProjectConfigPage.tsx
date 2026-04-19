@@ -7,11 +7,12 @@ import {
   type PluginInfo,
   fetchProjectConfig,
   updateProjectConfig,
-  fetchBackendProfiles,
   fetchPlugins,
+  getBackendProfileNames,
   getDefaultBackendProfile,
   getSelectedBackendProfileDisplay,
   setSelectedBackendProfile,
+  BACKEND_PROFILES_CHANGE_EVENT,
   DEFAULT_BACKEND_PROFILE_CHANGE_EVENT } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 import {
@@ -73,19 +74,17 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
 
   // Load backend profile names and current selection
   useEffect(() => {
-    let cancelled = false;
-    fetchBackendProfiles()
-      .then((data) => {
-        if (!cancelled) setBackendProfileNames(Object.keys(data.profiles || {}));
-      })
-      .catch(() => {
-        // silently ignore — profiles are optional
-      });
+    setBackendProfileNames(getBackendProfileNames());
     if (projectDir) {
       setSelectedProfile(getSelectedBackendProfileDisplay(projectDir));
     }
-    return () => { cancelled = true; };
   }, [projectDir]);
+
+  useEffect(() => {
+    const handler = () => setBackendProfileNames(getBackendProfileNames());
+    window.addEventListener(BACKEND_PROFILES_CHANGE_EVENT, handler);
+    return () => window.removeEventListener(BACKEND_PROFILES_CHANGE_EVENT, handler);
+  }, []);
 
   // React to global default backend profile changes
   useEffect(() => {

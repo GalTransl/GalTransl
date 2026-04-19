@@ -30,6 +30,7 @@ export type SubmitJobPayload = {
   project_dir: string;
   translator: string;
   backend_profile?: string;
+  backend_profile_data?: Record<string, unknown>;
 };
 
 type TranslatorsResponse = {
@@ -742,51 +743,54 @@ export type BackendProfileResponse = {
   profile: Record<string, unknown>;
 };
 
+type BackendProfilesMap = Record<string, Record<string, unknown>>;
+
 // ---- Backend Profiles API functions ----
 
 export async function fetchBackendProfiles() {
-  return apiRequest<BackendProfilesResponse>('/api/backend-profiles');
+  return {
+    profiles: readBackendProfilesStorage(),
+  } satisfies BackendProfilesResponse;
 }
 
 export async function fetchBackendProfile(name: string) {
-  return apiRequest<BackendProfileResponse>(
-    `/api/backend-profiles/${encodeURIComponent(name)}`,
-  );
+  const profile = getBackendProfile(name);
+  if (!profile) {
+    throw new Error(`profile not found: ${name}`);
+  }
+  return { name, profile } satisfies BackendProfileResponse;
 }
 
 export async function createBackendProfile(name: string, profile: Record<string, unknown>) {
-  return apiRequest<{ success: boolean; name: string }>(
-    `/api/backend-profiles/${encodeURIComponent(name)}`,
-    {
-      body: JSON.stringify({ profile }),
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      method: 'PUT',
-    },
-  );
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    throw new Error('profile name is required');
+  }
+  const profiles = readBackendProfilesStorage();
+  profiles[trimmedName] = cloneBackendProfile(profile);
+  writeBackendProfilesStorage(profiles);
+  return { success: true, name: trimmedName };
 }
 
 export async function updateBackendProfile(name: string, profile: Record<string, unknown>) {
-  return apiRequest<{ success: boolean; name: string }>(
-    `/api/backend-profiles/${encodeURIComponent(name)}`,
-    {
-      body: JSON.stringify({ profile }),
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      method: 'PUT',
-    },
-  );
+  return createBackendProfile(name, profile);
 }
 
 export async function deleteBackendProfile(name: string) {
-  return apiRequest<{ success: boolean; name: string }>(
-    `/api/backend-profiles/${encodeURIComponent(name)}`,
-    {
-      method: 'DELETE',
-    },
-  );
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    throw new Error('profile name is required');
+  }
+  const profiles = readBackendProfilesStorage();
+  if (!(trimmedName in profiles)) {
+    throw new Error(`profile not found: ${trimmedName}`);
+  }
+  delete profiles[trimmedName];
+  writeBackendProfilesStorage(profiles);
+  if (getDefaultBackendProfile() === trimmedName) {
+    setDefaultBackendProfile('');
+  }
+  return { success: true, name: trimmedName };
 }
 
 // ---- OpenAI-Compatible model list query ----
@@ -814,6 +818,7 @@ export async function fetchOpenAIModels(payload: FetchOpenAIModelsPayload) {
 // ---- Backend Profile Selection (localStorage) ----
 
 const BACKEND_PROFILE_KEY = 'galtransl-backend-profile';
+const BACKEND_PROFILES_STORAGE_KEY = 'galtransl-backend-profiles';
 const DEFAULT_BACKEND_PROFILE_KEY = 'galtransl-default-backend-profile';
 const TRANSLATOR_TEMPLATE_KEY = 'galtransl-project-translator-template';
 const HOME_HISTORY_LIMIT_KEY = 'galtransl-home-history-limit';
@@ -835,12 +840,86 @@ export const CUSTOM_BACKGROUND_SURFACE_OPACITY_DEFAULT = 33;
 export const HIDE_BACKEND_CONSOLE_DEFAULT = true;
 
 /** Custom event dispatched when the global default backend profile changes. */
+export const BACKEND_PROFILES_CHANGE_EVENT = 'galtransl:backend-profiles-change';
 export const DEFAULT_BACKEND_PROFILE_CHANGE_EVENT = 'galtransl:default-backend-profile-change';
 export const HOME_HISTORY_LIMIT_CHANGE_EVENT = 'galtransl:home-history-limit-change';
 export const HOME_JOB_LIMIT_CHANGE_EVENT = 'galtransl:home-job-limit-change';
 export const THEME_MODE_CHANGE_EVENT = 'galtransl:theme-mode-change';
 export const CUSTOM_BACKGROUND_CHANGE_EVENT = 'galtransl:custom-background-change';
 export const HIDE_BACKEND_CONSOLE_CHANGE_EVENT = 'galtransl:hide-backend-console-change';
+
+function cloneBackendProfile(profile: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(profile ?? {})) as Record<string, unknown>;
+}
+
+function readBackendProfilesStorage(): BackendProfilesMap {
+  try {
+    const raw = localStorage.getItem(BACKEND_PROFILES_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+    const profiles: BackendProfilesMap = {};
+    for (const [name, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!name.trim()) {
+        continue;
+      }
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        profiles[name] = cloneBackendProfile(value as Record<string, unknown>);
+      }
+    }
+    return profiles;
+  } catch {
+    return {};
+  }
+}
+
+function writeBackendProfilesStorage(profiles: BackendProfilesMap) {
+  try {
+    localStorage.setItem(BACKEND_PROFILES_STORAGE_KEY, JSON.stringify(profiles));
+    window.dispatchEvent(new CustomEvent(BACKEND_PROFILES_CHANGE_EVENT, { detail: Object.keys(profiles) }));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function getBackendProfile(name: string): Record<string, unknown> | null {
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    return null;
+  }
+  const profiles = readBackendProfilesStorage();
+  return profiles[trimmedName] ? cloneBackendProfile(profiles[trimmedName]) : null;
+}
+
+export function getBackendProfileNames(): string[] {
+  return Object.keys(readBackendProfilesStorage());
+}
+
+export function resolveSelectedBackendProfile(projectDir: string): { name: string; profile: Record<string, unknown> | null } {
+  const name = getSelectedBackendProfile(projectDir);
+  if (!name) {
+    return { name: '', profile: null };
+  }
+  return {
+    name,
+    profile: getBackendProfile(name),
+  };
+}
+
+export function getSelectedBackendProfileJobPayload(projectDir: string): Pick<SubmitJobPayload, 'backend_profile' | 'backend_profile_data'> {
+  const { name, profile } = resolveSelectedBackendProfile(projectDir);
+  if (!profile) {
+    return {};
+  }
+  return {
+    ...(name ? { backend_profile: name } : {}),
+    ...(profile ? { backend_profile_data: profile } : {}),
+  };
+}
 
 /** Get the global default backend profile name. */
 export function getDefaultBackendProfile(): string {

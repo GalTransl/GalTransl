@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ProjectPageContext } from '../components/ProjectLayout';
 import { DictionaryManager } from '../components/DictionaryManager';
@@ -7,11 +7,27 @@ import {
   createProjectDictionaryFile,
   deleteProjectDictionaryFile,
   fetchProjectDictionaryManager,
-  getSelectedBackendProfile,
+  getSelectedBackendProfileJobPayload,
   saveProjectDictionaryFile,
   submitJob,
-  type DictionaryCategory } from '../lib/api';
+  type DictionaryCategory
+} from '../lib/api';
 import { normalizeError } from '../lib/errors';
+
+const DICT_POLL_INTERVAL_MS = 3000;
+
+function buildDictionarySnapshot(data: ProjectDictionaryManagerResponse | null): string {
+  if (!data) return '';
+  const collect = (category: 'pre' | 'gpt' | 'post', files: string[]) => [...files]
+    .sort((a, b) => a.localeCompare(b))
+    .map((file) => `${category}:${file}:${data.dict_contents[file]?.mtime ?? ''}`);
+
+  return [
+    ...collect('pre', data.pre_dict_files),
+    ...collect('gpt', data.gpt_dict_files),
+    ...collect('post', data.post_dict_files),
+  ].join('|');
+}
 
 export function ProjectDictionaryPage({ ctx }: { ctx: ProjectPageContext }) {
   const { projectId, projectDir, configFileName } = ctx;
@@ -20,23 +36,90 @@ export function ProjectDictionaryPage({ ctx }: { ctx: ProjectPageContext }) {
   const [data, setData] = useState<ProjectDictionaryManagerResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const loadData = useCallback(async () => {
+  const [isDocumentVisible, setIsDocumentVisible] = useState(() => document.visibilityState === 'visible');
+  const currentSnapshot = useMemo(() => buildDictionarySnapshot(data), [data]);
+
+  const loadData = useCallback(async (options?: { silent?: boolean }) => {
     if (!projectId) return;
-    setLoading(true);
-    setError(null);
+    const silent = options?.silent === true;
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const res = await fetchProjectDictionaryManager(projectId, configFileName);
-      setData(res);
+      setData((prev) => {
+        const prevSnapshot = buildDictionarySnapshot(prev);
+        const nextSnapshot = buildDictionarySnapshot(res);
+        return prevSnapshot === nextSnapshot ? prev : res;
+      });
+      if (silent) {
+        setError((prev) => (prev ? null : prev));
+      }
     } catch (err) {
-      setError(normalizeError(err, '加载项目字典失败'));
+      if (!silent) {
+        setError(normalizeError(err, '加载项目字典失败'));
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [projectId, configFileName]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      const visible = document.visibilityState === 'visible';
+      setIsDocumentVisible(visible);
+      if (visible) {
+        void loadData({ silent: true });
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [loadData]);
+
+  useEffect(() => {
+    if (!projectId || !isDocumentVisible) return;
+    let cancelled = false;
+    let timerId = 0;
+
+    const poll = async () => {
+      if (cancelled) return;
+      try {
+        const res = await fetchProjectDictionaryManager(projectId, configFileName);
+        if (cancelled) return;
+        const nextSnapshot = buildDictionarySnapshot(res);
+        if (nextSnapshot !== currentSnapshot) {
+          setData(res);
+          setError((prev) => (prev ? null : prev));
+        }
+      } catch {
+      } finally {
+        if (!cancelled) {
+          timerId = window.setTimeout(() => {
+            void poll();
+          }, DICT_POLL_INTERVAL_MS);
+        }
+      }
+    };
+
+    timerId = window.setTimeout(() => {
+      void poll();
+    }, DICT_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timerId);
+    };
+  }, [projectId, configFileName, currentSnapshot, isDocumentVisible]);
 
   return (
     <DictionaryManager
@@ -74,12 +157,11 @@ export function ProjectDictionaryPage({ ctx }: { ctx: ProjectPageContext }) {
         if (!projectId || !projectDir) {
           throw new Error('项目信息缺失，无法启动任务');
         }
-        const backendProfile = getSelectedBackendProfile(projectDir);
         await submitJob({
           config_file_name: configFileName || 'config.yaml',
           project_dir: projectDir,
           translator: 'GenDic',
-          ...(backendProfile ? { backend_profile: backendProfile } : {}),
+          ...getSelectedBackendProfileJobPayload(projectDir),
         });
         navigate(`/project/${projectId}/translate`);
       }}

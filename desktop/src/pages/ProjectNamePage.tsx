@@ -15,6 +15,8 @@ import {
   getAiTranslateUrl,
   fetchBackendProfiles,
   getSelectedBackendProfile,
+  getBackendProfile,
+  BACKEND_PROFILES_CHANGE_EVENT,
   DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
   fetchProjectConfig,
   updateProjectConfig,
@@ -89,6 +91,31 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
     window.addEventListener(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, handler);
     return () => window.removeEventListener(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, handler);
   }, [projectDir]);
+
+  useEffect(() => {
+    const handler = () => {
+      setAiProfileNames((prev) => prev.filter((name) => Boolean(getBackendProfile(name))));
+      setAiProfileModelMap((prev) => {
+        const next: Record<string, string> = {};
+        for (const name of Object.keys(prev)) {
+          const profile = getBackendProfile(name);
+          if (!profile) {
+            continue;
+          }
+          const oai = typeof profile['OpenAI-Compatible'] === 'object' && profile['OpenAI-Compatible'] !== null
+            ? profile['OpenAI-Compatible'] as Record<string, unknown> : null;
+          const tokens = Array.isArray(oai?.tokens) ? oai.tokens : [];
+          const firstToken = tokens.length > 0 && typeof tokens[0] === 'object' && tokens[0] !== null
+            ? tokens[0] as Record<string, unknown> : null;
+          next[name] = (firstToken?.modelName as string) || '';
+        }
+        return next;
+      });
+      setAiSelectedProfile((prev) => (prev && getBackendProfile(prev)) ? prev : '');
+    };
+    window.addEventListener(BACKEND_PROFILES_CHANGE_EVENT, handler);
+    return () => window.removeEventListener(BACKEND_PROFILES_CHANGE_EVENT, handler);
+  }, []);
 
   const loadData = useCallback(async () => {
     if (!projectId) return;
@@ -385,11 +412,16 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
     let filledCount = 0;
     try {
       const url = getAiTranslateUrl(projectId);
+      const selectedProfileData = aiSelectedProfile ? getBackendProfile(aiSelectedProfile) : null;
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: abortController.signal,
-        body: JSON.stringify({ names: untranslated, backend_profile: aiSelectedProfile }),
+        body: JSON.stringify({
+          names: untranslated,
+          ...(selectedProfileData && aiSelectedProfile ? { backend_profile: aiSelectedProfile } : {}),
+          ...(selectedProfileData ? { backend_profile_data: selectedProfileData } : {}),
+        }),
       });
 
       if (!response.ok) {
