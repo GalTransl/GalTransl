@@ -50,6 +50,14 @@ function getJobSortTimestamp(job: Job): number {
   return Number.isNaN(timestamp) ? 0 : timestamp;
 }
 
+function isActiveJobStatus(status: Job['status']): boolean {
+  return status === 'pending' || status === 'running';
+}
+
+function isActiveJob(job: Job): boolean {
+  return isActiveJobStatus(job.status);
+}
+
 function normalizeRememberedJob(value: unknown): Job | null {
   if (!value || typeof value !== 'object') {
     return null;
@@ -98,7 +106,10 @@ function loadRememberedJobs(limit = getHomeJobRetentionLimit()): Job[] {
     }
 
     return sortAndLimitJobs(
-      parsed.map(normalizeRememberedJob).filter((job): job is Job => job !== null),
+      parsed
+        .map(normalizeRememberedJob)
+        .filter((job): job is Job => job !== null)
+        .filter((job) => !isActiveJob(job)),
       limit,
     );
   } catch {
@@ -144,7 +155,7 @@ function mergeJobsWithMemory(existing: Job[], incoming: Job[], limit: number, cl
 
   existing.forEach((job) => {
     if (cleared.has(job.job_id)) return;
-    if (!merged.has(job.job_id)) {
+    if (!merged.has(job.job_id) && !isActiveJob(job)) {
       merged.set(job.job_id, job);
     }
   });
