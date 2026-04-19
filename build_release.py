@@ -55,6 +55,7 @@ BUILD_DIR = RELEASE_DIR / BUILD_NAME
 ZIP_NAME = f"{BUILD_NAME}.zip"
 
 BACKEND_ENTRY = ROOT / "run_backend.py"
+BACKEND_DIST_NAME = "galtransl_backend"
 VENV_DIR = ROOT / ".venv-build"  # 构建用虚拟环境（不提交到 git）
 
 
@@ -84,6 +85,22 @@ def find_frontend_exe() -> Path | None:
     candidates = [
         TAURI_DIR / "target" / "release" / "GalTransl Desktop.exe",
         TAURI_DIR / "target" / "release" / "galtransl-desktop.exe",
+    ]
+    for exe_path in candidates:
+        if exe_path.exists():
+            return exe_path
+    return None
+
+
+def backend_executable_name() -> str:
+    ext = ".exe" if sys.platform == "win32" else ""
+    return f"{BACKEND_DIST_NAME}{ext}"
+
+
+def find_backend_executable() -> Path | None:
+    candidates = [
+        ROOT / "dist" / BACKEND_DIST_NAME / backend_executable_name(),
+        ROOT / "dist" / backend_executable_name(),
     ]
     for exe_path in candidates:
         if exe_path.exists():
@@ -248,11 +265,10 @@ def build_backend():
 
     cmd = (
         f'"{venv_python}" -m PyInstaller '
-        f"--onefile "
         f"--noupx "
         f"--noconfirm "
         f"--clean "
-        f"--name galtransl_backend "
+        f"--name {BACKEND_DIST_NAME} "
         f"{hidden_args} "
         f'--collect-data="GalTransl" '
         f"--distpath dist "
@@ -261,11 +277,14 @@ def build_backend():
     )
     run(cmd)
 
-    # PyInstaller 在 Windows 上输出 .exe，在 Linux 上输出 ELF
-    ext = ".exe" if sys.platform == "win32" else ""
-    backend_exe = ROOT / "dist" / f"galtransl_backend{ext}"
+    backend_exe = find_backend_executable()
 
-    if not backend_exe.exists():
+    if not backend_exe or not backend_exe.exists():
+        expected_path = ROOT / "dist" / BACKEND_DIST_NAME / backend_executable_name()
+        print(f"\033[31m后端可执行文件未找到: {expected_path}\033[0m")
+        sys.exit(1)
+
+    if not backend_exe.parent.exists():
         print(f"\033[31m后端可执行文件未找到: {backend_exe}\033[0m")
         sys.exit(1)
 
@@ -288,9 +307,13 @@ def assemble_release(frontend_exe: Path | None, backend_exe: Path):
     # 2. 复制后端
     dst_backend_dir = BUILD_DIR / "backend"
     dst_backend_dir.mkdir(exist_ok=True)
-    dst_name = "galtransl_backend.exe"
-    shutil.copy2(backend_exe, dst_backend_dir / dst_name)
-    print(f"  复制后端 -> backend/{dst_name}")
+    if backend_exe.parent.name == BACKEND_DIST_NAME:
+        copy_dir_filtered(backend_exe.parent, dst_backend_dir)
+        print("  复制后端运行时目录 -> backend/")
+    else:
+        dst_name = backend_executable_name()
+        shutil.copy2(backend_exe, dst_backend_dir / dst_name)
+        print(f"  复制后端 -> backend/{dst_name}")
 
     # 3. 复制插件
     if PLUGINS_DIR.exists():
@@ -364,9 +387,8 @@ def main():
     if not args.skip_be:
         backend_exe = build_backend()
     else:
-        ext = ".exe" if sys.platform == "win32" else ""
-        candidate = ROOT / "dist" / f"galtransl_backend{ext}"
-        if candidate.exists():
+        candidate = find_backend_executable()
+        if candidate:
             backend_exe = candidate
             print(f"跳过后端构建，使用已有: {backend_exe}")
         else:

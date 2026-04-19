@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ConnectionPhase, TranslatorOption } from '../../lib/api';
-import { fetchJobs, fetchTranslators } from '../../lib/api';
+import { ensureDesktopBackendReady, fetchJobs, fetchTranslators } from '../../lib/api';
 import { normalizeError } from '../../lib/errors';
 
 type ConnectionContextValue = {
@@ -59,9 +59,12 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   const loadInitialData = useCallback(async () => {
     setLoadingInitialData(true);
     setConnectionPhase('connecting');
-    setConnectionMessage('正在连接本地翻译后端…');
+    setConnectionMessage('正在准备本地翻译服务…');
 
     try {
+      setConnectionMessage('正在启动并检查本地翻译服务…');
+      await ensureDesktopBackendReady({ timeoutMs: 20_000 });
+      setConnectionMessage('本地翻译服务已就绪，正在加载能力信息…');
       const nextTranslators = await fetchTranslators();
       setTranslators(nextTranslators);
       setConnectionPhase('online');

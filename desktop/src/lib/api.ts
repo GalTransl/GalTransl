@@ -1,3 +1,5 @@
+import { invoke } from '@tauri-apps/api/core';
+
 const DEFAULT_BACKEND_URL = 'http://127.0.0.1:12333';
 let runtimeBackendBaseUrl: string | null = null;
 
@@ -398,6 +400,17 @@ export class ApiError extends Error {
 export async function fetchVersion() {
   const response = await apiRequest<{ version: string }>('/api/version');
   return response.version;
+}
+
+export async function ensureDesktopBackendReady(options?: { hideConsole?: boolean; timeoutMs?: number }) {
+  if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window) || !shouldUseManagedDesktopBackend()) {
+    return null;
+  }
+
+  return invoke<string>('ensure_backend_ready', {
+    hideConsole: options?.hideConsole ?? getHideBackendConsolePreference(),
+    timeoutMs: options?.timeoutMs,
+  });
 }
 
 export async function fetchTranslators() {
@@ -1183,4 +1196,19 @@ function getBackendBaseUrl() {
 
 export function setRuntimeBackendBaseUrl(url: string | null) {
   runtimeBackendBaseUrl = url ? url.trim().replace(/\/$/, '') : null;
+}
+
+function shouldUseManagedDesktopBackend() {
+  const baseUrl = getBackendBaseUrl();
+
+  if (baseUrl === DEFAULT_BACKEND_URL) {
+    return true;
+  }
+
+  try {
+    const parsed = new URL(baseUrl);
+    return parsed.port === '12333' && (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost');
+  } catch {
+    return false;
+  }
 }

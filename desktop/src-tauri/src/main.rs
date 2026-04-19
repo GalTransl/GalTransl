@@ -1,10 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use tauri::Manager;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Condvar, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 const BACKEND_HOST: &str = "127.0.0.1";
 const BACKEND_PORT: u16 = 12333;
+
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+const BACKEND_STARTUP_TIMEOUT_MS: u64 = 20_000;
+const BACKEND_CONNECT_CHECK_INTERVAL_MS: u64 = 250;
 
 #[allow(dead_code)]
 struct ManagedBackend {
@@ -18,9 +23,26 @@ fn managed_backend_slot() -> &'static Mutex<Option<ManagedBackend>> {
     SLOT.get_or_init(|| Mutex::new(None))
 }
 
+struct BackendStartupState {
+    starting: bool,
+    last_error: Option<String>,
+}
+
+fn backend_startup_state() -> &'static (Mutex<BackendStartupState>, Condvar) {
+    static STATE: OnceLock<(Mutex<BackendStartupState>, Condvar)> = OnceLock::new();
+    STATE.get_or_init(|| {
+        (
+            Mutex::new(BackendStartupState {
+                starting: false,
+                last_error: None,
+            }),
+            Condvar::new(),
+        )
+    })
+}
+
 fn tcp_port_listening(port: u16) -> bool {
     use std::net::TcpStream;
-    use std::time::Duration;
 
     TcpStream::connect_timeout(
         &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
@@ -35,7 +57,7 @@ fn shutdown_managed_backend_inner() -> Result<bool, String> {
         use std::os::windows::process::CommandExt;
         let mut cmd = std::process::Command::new("taskkill");
         cmd.args(["/F", "/IM", "galtransl_backend.exe"]);
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        cmd.creation_flags(CREATE_NO_WINDOW);
         let output = cmd.output().map_err(|e| format!("执行 taskkill 失败: {}", e))?;
 
         if output.status.success() {
@@ -69,6 +91,16 @@ fn shutdown_managed_backend_inner() -> Result<bool, String> {
         let _ = managed.child.kill();
         let _ = managed.child.wait();
         Ok(true)
+    }
+}
+
+fn cleanup_managed_backend_if_exited() {
+    let slot = managed_backend_slot();
+    let Ok(mut guard) = slot.lock() else { return };
+    let Some(managed) = guard.as_mut() else { return };
+
+    if matches!(managed.child.try_wait(), Ok(Some(_))) {
+        *guard = None;
     }
 }
 
@@ -107,24 +139,43 @@ fn backend_executable_candidates() -> Vec<std::path::PathBuf> {
     candidates
 }
 
-/// 启动时拉起后端（仅一次）。若端口已监听则跳过；若未找到 exe 则静默跳过。
-fn spawn_backend_on_startup() {
+fn wait_for_backend_port(timeout: Duration) -> Result<(), String> {
+    let deadline = Instant::now() + timeout;
+
+    while Instant::now() < deadline {
+        cleanup_managed_backend_if_exited();
+        if tcp_port_listening(BACKEND_PORT) {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(BACKEND_CONNECT_CHECK_INTERVAL_MS));
+    }
+
+    cleanup_managed_backend_if_exited();
+    Err(format!(
+        "等待本地后端启动超时（{} ms）",
+        timeout.as_millis()
+    ))
+}
+
+fn try_spawn_backend_process(hide_console: bool) -> Result<String, String> {
+    cleanup_managed_backend_if_exited();
+
     let slot = managed_backend_slot();
-    let Ok(mut guard) = slot.lock() else { return };
+    let mut guard = slot.lock().map_err(|_| "后端进程状态锁定失败".to_string())?;
 
     if guard.is_some() {
-        return;
+        return Ok("managed-existing".to_string());
     }
 
     if tcp_port_listening(BACKEND_PORT) {
-        return;
+        return Ok("external-existing".to_string());
     }
 
     let Some(path) = backend_executable_candidates()
         .into_iter()
         .find(|candidate| candidate.exists())
     else {
-        return;
+        return Err("未找到可用的服务端可执行文件 galtransl_backend.exe".to_string());
     };
 
     let mut command = std::process::Command::new(&path);
@@ -137,17 +188,92 @@ fn spawn_backend_on_startup() {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        // 始终隐藏控制台窗口（CREATE_NO_WINDOW）
-        command.creation_flags(0x08000000);
+        if hide_console {
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
     }
 
-    if let Ok(child) = command.spawn() {
-        *guard = Some(ManagedBackend {
-            child,
-            path: path.to_string_lossy().to_string(),
-            port: BACKEND_PORT,
-        });
+    let child = command.spawn().map_err(|e| {
+        format!(
+            "启动服务端失败: {} ({})",
+            path.to_string_lossy(),
+            e
+        )
+    })?;
+
+    *guard = Some(ManagedBackend {
+        child,
+        path: path.to_string_lossy().to_string(),
+        port: BACKEND_PORT,
+    });
+
+    Ok(path.to_string_lossy().to_string())
+}
+
+fn ensure_backend_ready_inner(hide_console: bool, timeout_ms: Option<u64>) -> Result<String, String> {
+    cleanup_managed_backend_if_exited();
+
+    if tcp_port_listening(BACKEND_PORT) {
+        return Ok("后端已在线".to_string());
     }
+
+    let (state_lock, state_cvar) = backend_startup_state();
+    let mut state = state_lock
+        .lock()
+        .map_err(|_| "后端启动状态锁定失败".to_string())?;
+
+    loop {
+        if !state.starting {
+            state.starting = true;
+            state.last_error = None;
+            break;
+        }
+
+        state = state_cvar
+            .wait(state)
+            .map_err(|_| "等待后端启动状态失败".to_string())?;
+
+        cleanup_managed_backend_if_exited();
+        if tcp_port_listening(BACKEND_PORT) {
+            return Ok("后端已在线".to_string());
+        }
+
+        if let Some(error) = state.last_error.clone() {
+            return Err(error);
+        }
+    }
+
+    drop(state);
+
+    let startup_result = (|| {
+        let timeout = Duration::from_millis(timeout_ms.unwrap_or(BACKEND_STARTUP_TIMEOUT_MS));
+        let spawn_outcome = try_spawn_backend_process(hide_console)?;
+        wait_for_backend_port(timeout)?;
+        Ok(match spawn_outcome.as_str() {
+            "managed-existing" => "复用已拉起的服务端进程".to_string(),
+            "external-existing" => "检测到外部已运行的服务端".to_string(),
+            _ => format!("已启动本地服务端: {}", spawn_outcome),
+        })
+    })();
+
+    let mut state = state_lock
+        .lock()
+        .map_err(|_| "后端启动状态锁定失败".to_string())?;
+    state.starting = false;
+    state.last_error = startup_result.clone().err();
+    state_cvar.notify_all();
+    drop(state);
+
+    if startup_result.is_err() {
+        cleanup_managed_backend_if_exited();
+    }
+
+    startup_result
+}
+
+#[tauri::command]
+fn ensure_backend_ready(hide_console: Option<bool>, timeout_ms: Option<u64>) -> Result<String, String> {
+    ensure_backend_ready_inner(hide_console.unwrap_or(true), timeout_ms)
 }
 
 #[cfg(target_os = "windows")]
@@ -274,6 +400,7 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            ensure_backend_ready,
             open_folder,
             reveal_file,
             create_dir,
@@ -285,14 +412,7 @@ fn main() {
                 let _ = shutdown_managed_backend_inner();
             }
         })
-        .setup(|app| {
-            // 启动时先拉起后端（仅一次），再显示前端窗口
-            spawn_backend_on_startup();
-            #[cfg(debug_assertions)]
-            {
-                let webview = app.get_webview_window("main").expect("main window");
-                webview.show()?;
-            }
+        .setup(|_app| {
             Ok(())
         })
         .run(tauri::generate_context!())
