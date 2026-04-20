@@ -158,7 +158,7 @@ function DictEntryGroupCard({
         </div>
 
         {group.items.map(({ row, rowIndex }) => (
-          <div key={`${rowIndex}-${row.raw}`} className="dict-card__table-row">
+          <div key={`${rowIndex}`} className="dict-card__table-row">
             <div className="dict-card__cell dict-card__cell--index">#{rowIndex + 1}</div>
             {labels.map((label, ci) => (
               <div key={ci} className="dict-card__cell">
