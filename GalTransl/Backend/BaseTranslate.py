@@ -629,6 +629,7 @@ class BaseTranslate:
                 result = ""
                 lastline = ""
                 if is_stream:
+                    stream_abort_requested = False
                     stream_line_buffer = ""
                     async for chunk in response:
                         # Check stop in the middle of streaming so we don't
@@ -652,7 +653,12 @@ class BaseTranslate:
                                 finished_lines = line_parts[:-1]
                                 stream_line_buffer = line_parts[-1]
                                 try:
-                                    stream_line_callback(finished_lines, False)
+                                    callback_result = stream_line_callback(
+                                        finished_lines, False
+                                    )
+                                    if callback_result is False:
+                                        stream_abort_requested = True
+                                        break
                                 except Exception:
                                     pass
                         if "\n" in lastline:
@@ -662,9 +668,20 @@ class BaseTranslate:
                                 lastline = lastline_sp[-1]
                     if stream_line_callback and stream_line_buffer:
                         try:
-                            stream_line_callback([stream_line_buffer], True)
+                            callback_result = stream_line_callback(
+                                [stream_line_buffer], True
+                            )
+                            if callback_result is False:
+                                stream_abort_requested = True
                         except Exception:
                             pass
+                    if stream_abort_requested:
+                        close_stream = getattr(response, "aclose", None)
+                        if callable(close_stream):
+                            try:
+                                await close_stream()
+                            except Exception:
+                                pass
                 else:
                     try:
                         result = response.choices[0].message.content

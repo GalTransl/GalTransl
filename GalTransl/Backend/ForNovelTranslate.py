@@ -105,7 +105,7 @@ class ForNovelTranslate(BaseTranslate):
             def _parse_stream_lines(lines, is_final_chunk):
                 nonlocal stream_parse_error_message, parsed_result_trans_list
                 if stream_parse_error_message:
-                    return
+                    return False
                 for raw_line in lines:
                     line = raw_line.strip()
                     if not line or "```" in line or line.startswith("DST"):
@@ -123,7 +123,8 @@ class ForNovelTranslate(BaseTranslate):
                     )
                     if not parse_ok:
                         stream_parse_error_message = parse_error
-                        return
+                        return False
+                return True
             resp = None
             resp, token = await self.ask_chatbot(
                 messages=messages,
@@ -182,7 +183,7 @@ class ForNovelTranslate(BaseTranslate):
                     if i >= len(trans_list) - 1:
                         break
 
-            if success_count > 0:
+            if success_count > 0 and not stream_parse_error_message:
                 error_flag = False  # 部分解析
 
             if error_flag:
