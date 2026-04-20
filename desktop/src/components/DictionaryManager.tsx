@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import { Button } from './Button';
 import { Panel } from './Panel';
 import { EmptyState, ErrorState, InlineFeedback, LoadingState } from './page-state';
@@ -390,6 +390,22 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     setInfo(null);
   };
 
+  const handleTextEditorKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
+    const target = e.currentTarget;
+    const start = target.selectionStart;
+    const end = target.selectionEnd;
+    const nextValue = `${draftText.slice(0, start)}\t${draftText.slice(end)}`;
+    setDraftText(nextValue);
+    setDirty(true);
+    setInfo(null);
+    window.requestAnimationFrame(() => {
+      target.setSelectionRange(start + 1, start + 1);
+      target.focus();
+    });
+  };
+
   const handleSave = async () => {
     if (!selectedFile) return;
     if (activeTab === 'gpt') {
@@ -614,6 +630,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                       setDirty(true);
                       setInfo(null);
                     }}
+                    onKeyDown={handleTextEditorKeyDown}
                     spellCheck={false}
                   />
                 ) : (
