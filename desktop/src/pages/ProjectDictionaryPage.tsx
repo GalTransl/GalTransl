@@ -29,7 +29,13 @@ function buildDictionarySnapshot(data: ProjectDictionaryManagerResponse | null):
   ].join('|');
 }
 
-export function ProjectDictionaryPage({ ctx }: { ctx: ProjectPageContext }) {
+export function ProjectDictionaryPage({
+  ctx,
+  active = true,
+}: {
+  ctx: ProjectPageContext;
+  active?: boolean;
+}) {
   const { projectId, projectDir, configFileName } = ctx;
   const navigate = useNavigate();
 
@@ -75,7 +81,7 @@ export function ProjectDictionaryPage({ ctx }: { ctx: ProjectPageContext }) {
     const handleVisibilityChange = () => {
       const visible = document.visibilityState === 'visible';
       setIsDocumentVisible(visible);
-      if (visible) {
+      if (visible && active) {
         void loadData({ silent: true });
       }
     };
@@ -84,10 +90,16 @@ export function ProjectDictionaryPage({ ctx }: { ctx: ProjectPageContext }) {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [loadData]);
+  }, [active, loadData]);
 
   useEffect(() => {
-    if (!projectId || !isDocumentVisible) return;
+    if (active && isDocumentVisible) {
+      void loadData({ silent: true });
+    }
+  }, [active, isDocumentVisible, loadData]);
+
+  useEffect(() => {
+    if (!projectId || !isDocumentVisible || !active) return;
     let cancelled = false;
     let timerId = 0;
 
@@ -119,7 +131,7 @@ export function ProjectDictionaryPage({ ctx }: { ctx: ProjectPageContext }) {
       cancelled = true;
       window.clearTimeout(timerId);
     };
-  }, [projectId, configFileName, currentSnapshot, isDocumentVisible]);
+  }, [active, projectId, configFileName, currentSnapshot, isDocumentVisible]);
 
   return (
     <DictionaryManager
