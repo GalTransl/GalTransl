@@ -35,7 +35,7 @@ plugin:
 
 # 程序设置
 common:
-  gpt.numPerRequestTranslate: 10 # 每次请求包含的句子数，建议不超过16。[1-32]
+  gpt.numPerRequestTranslate: 16 # 每次请求包含的句子数，建议不超过16。[1-32]
   workersPerProject: 16 # 项目级并行文件数；单文件并行需配合splitFile。
   autoAdjustWorkers: true # 基于近期429比例和响应延迟自动调节并发worker数。[True/False]
   sortBy: "size" # 文件调度顺序：name按文件名，size优先大文件（并行时通常更快）。[name/size]

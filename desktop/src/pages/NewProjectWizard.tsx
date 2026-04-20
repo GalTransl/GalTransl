@@ -61,7 +61,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
   const [filePlugins, setFilePlugins] = useState<PluginInfo[]>([]);
   const [selectedFilePlugin, setSelectedFilePlugin] = useState('file_galtransl_json');
   const [workersPerProject, setWorkersPerProject] = useState(16);
-  const [numPerRequest, setNumPerRequest] = useState(10);
+  const [numPerRequest, setNumPerRequest] = useState(16);
   const [language, setLanguage] = useState('zh-cn');
   const [guidelines, setGuidelines] = useState<string[]>([]);
   const [translationGuideline, setTranslationGuideline] = useState('');

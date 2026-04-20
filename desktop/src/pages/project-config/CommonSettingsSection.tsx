@@ -6,7 +6,7 @@ import { fetchTranslationGuidelines } from '../../lib/api';
 // ── Primary (high-frequency) fields ──
 const PRIMARY_FIELDS: ConfigFieldDef[] = [
   { key: 'workersPerProject', label: '并发文件数', description: '项目级并行文件数；单文件并行需配合"文件分割"。', type: 'number', placeholder: '16' },
-  { key: 'gpt.numPerRequestTranslate', label: '单次翻译句数', description: '每次请求打包的句子数，建议不超过 16。', type: 'number', placeholder: '10' },
+  { key: 'gpt.numPerRequestTranslate', label: '单次翻译句数', description: '每次请求打包的句子数，建议不超过 16。', type: 'number', placeholder: '16' },
   { key: 'language', label: '目标语言', description: '翻译输出语言。', type: 'select', options: ['zh-cn', 'zh-tw', 'en', 'ja', 'ko', 'ru', 'fr'] },
   { key: 'sortBy', label: '翻译顺序', description: 'name 按文件名，size 优先大文件（并行时通常更快）。', type: 'select', options: ['name', 'size'] },
   { key: 'splitFile', label: '文件分割', description: '单文件分片模式：no 关闭，Num 按句数切片，Equal 按份数均分。', type: 'select', options: ['no', 'Num', 'Equal'] },
