@@ -13,6 +13,7 @@ export function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) 
   const [copied, setCopied] = useState(false);
   const messageText = (entry.message || '').trim();
   const kindLabel = getErrorKindLabel(entry.kind);
+  const modelLabel = compactModelLabel(entry.model);
 
   const handleCopyMessage = async () => {
     if (!messageText) return;
@@ -59,18 +60,12 @@ export function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) 
         {entry.kind !== 'api' && (
           <div>
             <dt>文件</dt>
-            <dd>{entry.filename || '—'}</dd>
-          </div>
-        )}
-        {entry.kind !== 'api' && (
-          <div>
-            <dt>范围</dt>
-            <dd>{entry.index_range || '—'}</dd>
+            <dd>{`${entry.filename || '—'}: ${entry.index_range || '—'}`}</dd>
           </div>
         )}
         <div>
           <dt>模型</dt>
-          <dd>{entry.model || '—'}</dd>
+          <dd>{modelLabel || '—'}</dd>
         </div>
         {(entry.sleep_seconds ?? 0) > 0 ? <span className="runtime-event__pill">退避 {Number(entry.sleep_seconds).toFixed(3)}s</span> : null}
       </dl>
@@ -99,6 +94,7 @@ export function RuntimeSuccessRow({
   const speakerStyleVal = rawSpeakerLabel ? speakerStyle(rawSpeakerLabel) : undefined;
   const entryFilename = entry.filename || '未命名文件';
   const filterFilename = entry.filename;
+  const translatorLabel = compactModelLabel(entry.trans_by);
 
   return (
     <article className={`runtime-event runtime-event--success${isFresh ? ' runtime-event--fresh' : ''}`}>
@@ -126,7 +122,7 @@ export function RuntimeSuccessRow({
           </span>
         </div>
         <div className="runtime-event__header-right">
-          {entry.trans_by ? <span className="runtime-event__pill runtime-event__pill--translator">{entry.trans_by}</span> : null}
+          {translatorLabel ? <span className="runtime-event__pill runtime-event__pill--translator">{translatorLabel}</span> : null}
           <time className="runtime-event__timestamp">{formatTime(entry.ts)}</time>
         </div>
       </div>
@@ -232,6 +228,15 @@ export function getErrorKindLabel(kind: string): string {
   if (normalized === 'parse') return '结果解析';
   if (normalized === 'api') return '模型请求';
   return kind || 'error';
+}
+
+function compactModelLabel(value: string | null | undefined): string {
+  const text = (value || '').trim();
+  if (!text) return '';
+  const idx = text.lastIndexOf('/');
+  if (idx < 0) return text;
+  const tail = text.slice(idx + 1).trim();
+  return tail || text;
 }
 
 async function copyTextToClipboard(text: string): Promise<boolean> {
