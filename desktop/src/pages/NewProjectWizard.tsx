@@ -598,7 +598,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
             <option key={g} value={g}>{g}</option>
           ))}
         </CustomSelect>
-        <span className="field__hint">选择使用的翻译规范文件（位于 translation_guidelines 文件夹），高端模型日译中推荐【日译中_增强.md】</span>
+        <span className="field__hint">选择使用的翻译规范文件（位于 translation_guidelines 文件夹），高端模型日译中推荐"增强"规范</span>
       </div>
       </div>
       <div className="wizard-actions">
