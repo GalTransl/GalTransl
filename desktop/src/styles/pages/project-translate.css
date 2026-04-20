@@ -780,6 +780,42 @@
   font-family: "Cascadia Code", "Consolas", monospace;
 }
 
+.runtime-event__error-time-action {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 64px;
+  min-height: 26px;
+}
+
+.runtime-event__timestamp--error {
+  transition: opacity 160ms ease, transform 180ms ease;
+}
+
+.runtime-event__time-copy {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%) scale(0.92);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease, transform 180ms ease;
+}
+
+.runtime-event--error:hover .runtime-event__timestamp--error,
+.runtime-event--error:focus-within .runtime-event__timestamp--error {
+  opacity: 0;
+  transform: translateY(-1px) scale(0.96);
+}
+
+.runtime-event--error:hover .runtime-event__time-copy,
+.runtime-event--error:focus-within .runtime-event__time-copy {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(-50%) scale(1);
+}
+
 .runtime-event__message,
 .runtime-success-pair p,
 .runtime-event__meta dd {
@@ -809,19 +845,6 @@
   margin: 0;
   justify-content: flex-start;
   gap: 6px;
-}
-
-.runtime-event__meta-copy {
-  margin-left: auto;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 160ms ease;
-}
-
-.runtime-event--error:hover .runtime-event__meta-copy,
-.runtime-event--error:focus-within .runtime-event__meta-copy {
-  opacity: 1;
-  pointer-events: auto;
 }
 
 .runtime-event__meta div {
