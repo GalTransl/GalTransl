@@ -22,14 +22,6 @@ from GalTransl.Backend.Prompts import (
 from GalTransl.TerminalOutput import should_print_translation_logs
 
 
-def _check_stop_requested(project_config):
-    stop_event = getattr(project_config, "stop_event", None)
-    if stop_event is not None and stop_event.is_set():
-        from GalTransl.Service import JobCancelledError
-
-        raise JobCancelledError()
-
-
 class CSakuraTranslate(BaseTranslate):
     # init
     def __init__(
@@ -127,11 +119,7 @@ class CSakuraTranslate(BaseTranslate):
         max_repeat = 0
         retry_count = 0
         line_lens = []
-        start_idx: int=trans_list[0].index
-        end_idx: int=trans_list[-1].index
-        idx_tip=""
-        if start_idx!=end_idx:
-            idx_tip=f"{start_idx}~{end_idx}"
+        idx_tip = self._build_idx_tip(trans_list)
         for i, trans in enumerate(trans_list):
             tmp_text = trans.post_jp.replace("\r\n", "\\n").replace("\n", "\\n")
             speaker_name=trans.get_speaker_name()
@@ -168,7 +156,7 @@ class CSakuraTranslate(BaseTranslate):
         messages.append({"role": "user", "content": prompt_req})
 
         while True:  # 一直循环，直到得到数据
-            _check_stop_requested(self.pj_config)
+            self._check_stop_requested()
             if should_print_translation_logs(self.pj_config) and self.pj_config.active_workers == 1:
                 print(f"-> 字典输入: \n{gptdict}")
                 print(f"-> 翻译输入: \n{input_str}")
@@ -249,13 +237,15 @@ class CSakuraTranslate(BaseTranslate):
                 if self.skipRetry:
                     self.reset_conversation()
                     LOGGER.warning(f"[{filename}:{idx_tip}]解析出错但跳过本轮翻译")
-                    i = 0 if i < 0 else i
-                    while i < len(trans_list):
-                        trans_list[i].pre_zh = "Failed translation"
-                        trans_list[i].post_zh = "Failed translation"
-                        trans_list[i].trans_by = f"{self.eng_type}(Failed)"
-                        result_trans_list.append(trans_list[i])
-                        i = i + 1
+                    i = self._append_parse_failure_fallback_results(
+                        trans_list,
+                        0 if i < 0 else i,
+                        result_trans_list,
+                        self.eng_type,
+                        proofread=False,
+                        translate_failed_prefix="(Failed)",
+                        translate_problem_message="翻译失败",
+                    )
                 else:
                     LOGGER.warning(f"[{filename}:{idx_tip}]错误的输出：{error_message}")
 
@@ -277,13 +267,15 @@ class CSakuraTranslate(BaseTranslate):
                         LOGGER.error(
                             f"[{filename}:{idx_tip}]单句循环重试{retry_count}次出错，填充原文"
                         )
-                        i = 0 if i < 0 else i
-                        while i < len(trans_list):
-                            trans_list[i].pre_zh = "(Failed)"+trans_list[i].post_jp
-                            trans_list[i].post_zh = "(Failed)"+trans_list[i].post_jp
-                            trans_list[i].trans_by = f"{self.eng_type}(Failed)"
-                            result_trans_list.append(trans_list[i])
-                            i = i + 1
+                        i = self._append_parse_failure_fallback_results(
+                            trans_list,
+                            0 if i < 0 else i,
+                            result_trans_list,
+                            self.eng_type,
+                            proofread=False,
+                            translate_failed_prefix="(Failed)",
+                            translate_problem_message="翻译失败",
+                        )
                         return i, result_trans_list
                     # 2次重试则重置会话
                     elif retry_count % 2 == 0:
@@ -291,7 +283,7 @@ class CSakuraTranslate(BaseTranslate):
                         LOGGER.warning(
                             f"[{filename}:{idx_tip}]单句循环重试{retry_count}次出错，重置会话"
                         )
-                        _check_stop_requested(self.pj_config)
+                        self._check_stop_requested()
                         continue
                     continue
             else:
@@ -326,7 +318,7 @@ class CSakuraTranslate(BaseTranslate):
         transl_step_count = 0
 
         while i < len_trans_list:
-            _check_stop_requested(self.pj_config)
+            self._check_stop_requested()
             # await asyncio.sleep(1)
 
             trans_list_split = translist_unhit[i : i + num_pre_request]
@@ -354,19 +346,7 @@ class CSakuraTranslate(BaseTranslate):
 
             for trans in trans_result:
                 if trans.pre_zh and "(Failed)" not in trans.pre_zh and "(翻译失败)" not in trans.pre_zh:
-                    try:
-                        from GalTransl.server import record_runtime_success
-                        record_runtime_success(
-                            getattr(self.pj_config, "runtime_project_dir", self.pj_config.getProjectDir()),
-                            filename=filename,
-                            index=getattr(trans, "runtime_index", getattr(trans, "index", 0)),
-                            speaker=getattr(trans, "speaker", None),
-                            source_preview=getattr(trans, "post_jp", ""),
-                            translation_preview=getattr(trans, "pre_zh", ""),
-                            trans_by=getattr(trans, "trans_by", ""),
-                        )
-                    except Exception:
-                        pass
+                    self._record_runtime_success(filename, trans)
 
             LOGGER.info("".join([repr(tran) for tran in trans_result]))
             LOGGER.info(
@@ -399,30 +379,11 @@ class CSakuraTranslate(BaseTranslate):
         self.frequency_penalty = frequency_penalty
         self.top_p = top_p
 
-    def restore_context(self, translist_unhit: CTransList, num_pre_request: int,filename=""):
-        if translist_unhit[0].prev_tran == None:
-            return
-        tmp_context = []
-        num_count = 0
-        current_tran = translist_unhit[0].prev_tran
-        while current_tran != None:
-            if current_tran.pre_zh == "" or "(Failed)" in current_tran.pre_zh:
-                current_tran = current_tran.prev_tran
-                continue
-            speaker_name=current_tran.get_speaker_name()
-            if speaker_name != "":
-                tmp_text = f"{speaker_name}「{current_tran.pre_zh}」"
-            else:
-                tmp_text = f"{current_tran.pre_zh}"
-            tmp_context.append(tmp_text)
-            num_count += 1
-            if num_count >= num_pre_request:
-                break
-            current_tran = current_tran.prev_tran
-
-        tmp_context.reverse()
-        json_lines = "\n".join(tmp_context)
-        self.last_translations[filename] = json_lines
+    def _format_restore_context_line(self, current_tran: CSentense) -> str:
+        speaker_name = current_tran.get_speaker_name()
+        if speaker_name != "":
+            return f"{speaker_name}「{current_tran.pre_zh}」"
+        return f"{current_tran.pre_zh}"
 
 
     def check_degen_in_process(self, cn: str = ""):

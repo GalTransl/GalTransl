@@ -1,6 +1,6 @@
 import type { JobStatus } from '../lib/api';
 
-type StatusBadgeTone = JobStatus | 'online' | 'offline' | 'connecting';
+type StatusBadgeTone = JobStatus | 'online' | 'offline' | 'connecting' | 'checking-availability';
 
 type StatusBadgeProps = {
   label: string;

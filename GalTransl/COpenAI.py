@@ -139,12 +139,21 @@ class COpenAITokenPool:
                 base_url=token.domain,
                 http_client=httpx.Client(**proxy_kwargs) if proxy_kwargs else None,
             )
-            response = client.chat.completions.create(
+            # 可用性检测只关心"能否成功返回一个响应"，
+            # 用极简 prompt + max_tokens=1 避免模型做无谓生成，大幅缩短检测耗时。
+            create_kwargs = dict(
                 model=token.model_name,
-                messages=[{"role": "user", "content": "JUST echo OK"}],
+                messages=[{"role": "user", "content": "1+1="}],
                 timeout=self.timeout,
                 stream=token.stream,
+                max_tokens=1,
             )
+            try:
+                response = client.chat.completions.create(**create_kwargs)
+            except TypeError:
+                # 少数兼容实现不接受 max_tokens 参数，回退一次
+                create_kwargs.pop("max_tokens", None)
+                response = client.chat.completions.create(**create_kwargs)
             if token.stream == False:
                 if len(response.choices) > 0:
                     return True, token
@@ -175,7 +184,7 @@ class COpenAITokenPool:
         self,
         token: COpenAIToken,
         proxy: CProxy = None,
-        max_retries: int = 3,
+        max_retries: int = 2,
     ) -> Tuple[bool, COpenAIToken]:
         is_available = False
         for retry_count in range(max_retries):
@@ -187,7 +196,7 @@ class COpenAITokenPool:
             else:
                 # wait for some time before retrying, you can add some delay here
                 LOGGER.warning(f"可用性检查失败，正在重试 {retry_count + 1} 次...")
-                await self._interruptible_sleep(1)
+                await self._interruptible_sleep(0.3)
 
         # If all retries fail, return the result from the last attempt
         self.bar()

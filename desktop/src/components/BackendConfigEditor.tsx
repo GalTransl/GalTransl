@@ -332,7 +332,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
             <span className="field__hint">random 随机轮询；fallback 优先第一个，出错时使用下一个</span>
           </label>
           <label className="field">
-            <span>检查可用性</span>
+            <span>测试模型可用性</span>
             <CustomSelect
               disabled={readOnly}
               value={String(oaiConfig.checkAvailable ?? 'true')}
