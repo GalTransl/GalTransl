@@ -7,25 +7,28 @@
 
   [English](https://github.com/XD2333/GalTransl/blob/main/README_EN.md)
   
-  GalTransl是一套将数个基础功能上的微小创新与对GPT提示工程（Prompt Engineering）的深度利用相结合的Galgame自动化翻译工具，用于制作内嵌式翻译补丁。   
+  GalTransl是一套将数个基础功能上的微小创新与对GPT提示工程（Prompt Engineering）的深度利用相结合的Galgame自动化翻译工具，用于制作内嵌式翻译补丁。现在提供**桌面端图形界面**，无需命令行操作即可完成翻译全流程。
+   
    <img width="2044" height="1397" alt="image" src="https://github.com/user-attachments/assets/f85e4782-e53e-4b03-ae24-cd77b453c6e3" />
 
 ## 前言
 &ensp;&ensp;&ensp;&ensp;GalTransl的核心是一组自动化翻译脚本，解决了使用ChatGPT自动化翻译Gal过程中已知的大部分问题，并提高了整体的翻译质量。同时，通过与其他项目的组合，打通了制作补丁的完整流程，一定程度降低了上手门槛。对此感兴趣的朋友可以通过本项目更容易的构建具有一定质量的机翻补丁，并(或许)可以尝试在此框架的基础上高效的构建更高质量的汉化补丁。  
 
   * 特性：   
-  1. 支持**GPT-4/Claude/Deepseek/Sakura**等大语言模型，并通过提示工程提高了GPT的翻译质量   
-  2. 首创**GPT字典**，让GPT了解人设，准确翻译人名、人称代词与生词   
-  3. 通过译前、译后字典与条件字典实现灵活的自动化字典系统   
-  4. 实时保存缓存、自动断点续翻   
-  5. 结合其他项目支持多引擎脚本一键解包与注入，提供完整教程降低上手难度
-  6. （新）现在也支持直接翻译srt、lrc、vtt字幕文件，mtool json文件，t++ excel文件，epub文件
-  7. （2025.5新）🤗 [Galtransl-7B-v3.5](https://huggingface.co/SakuraLLM/GalTransl-7B-v2)是为视觉小说翻译任务专项优化的本地模型，可在6G VRAM以上显卡部署，由sakuraumi和xd2333共同构建。
-  8. （2025.4新）🤗[GalTransl-14B-v3](https://huggingface.co/SakuraLLM/Sakura-GalTransl-14B-v3)是GalTransl-v3模型的14b版本，得益于更大的底模及改进的对齐训练，GalTransl-14B-v3整体质量好于GalTransl-7B-v3   
+  1. 🖥️ **桌面端图形界面**——基于Tauri + React构建的现代桌面应用，无需命令行操作，支持深色模式、自定义背景、多项目管理等
+  2. 支持**GPT-4/Claude/Deepseek/Sakura**等大语言模型，并通过提示工程提高了GPT的翻译质量   
+  3. 首创**GPT字典**，让GPT了解人设，准确翻译人名、人称代词与生词   
+  4. 通过译前、译后字典与条件字典实现灵活的自动化字典系统   
+  5. 实时保存缓存、自动断点续翻   
+  6. 结合其他项目支持多引擎脚本一键解包与注入，提供完整教程降低上手难度
+  7. 支持直接翻译srt、lrc、vtt字幕文件，mtool json文件，t++ excel文件，epub文件
+  8. 🤗 [Galtransl-7B-v3.5](https://huggingface.co/SakuraLLM/GalTransl-7B-v2)是为视觉小说翻译任务专项优化的本地模型，可在6G VRAM以上显卡部署，由sakuraumi和xd2333共同构建
+  9. 🤗 [GalTransl-14B-v3](https://huggingface.co/SakuraLLM/Sakura-GalTransl-14B-v3)是GalTransl-v3模型的14b版本，得益于更大的底模及改进的对齐训练，GalTransl-14B-v3整体质量好于GalTransl-7B-v3   
 
 <b>❗❗使用本工具翻译并在未做全文校对/润色的前提下发布时，请在最显眼的位置标注"GPT翻译/AI翻译补丁"，而不是"个人汉化"或"AI汉化"补丁。</b>
 
 ## 近期更新
+* 2026.4: 更新v7，新增**桌面端图形界面**（Tauri + React），支持深色模式、自定义背景、多项目管理、可视化翻译工作台等
 * 2025.5: 更新v6，新增翻译模板ForGal、新增GalTransl-14B-v3模型
 * 2024.5：更新v5，新增GalTransl-7B模型，新增多种文件类型支持   
 * 2024.2：更新v4版，主要支持了插件系统  
@@ -41,20 +44,17 @@
 * 后续教程已经[转移至Wiki](https://github.com/xd2333/GalTransl/wiki)
 
 ## 环境准备
-  * **免环境版**   
-  现在release里有winexe版本，不需要安装运行环境和依赖。
+  * **桌面版（推荐）**   
+  从 [Release](https://github.com/XD2333/GalTransl/releases/) 下载最新版压缩包，解压后双击 `GalTransl Desktop.exe` 即可使用，**无需安装Python或任何依赖**。桌面端会自动启动后端服务。
    
-  * [下载本项目](https://github.com/XD2333/GalTransl/releases/)   
-  解压到任意位置，例如 `D:\GalTransl`
+  * **命令行版（开发者/高级用户）**   
+  如需使用命令行版本或参与开发：
 
-  * Python   
-  安装 Python 3.11.9。 [下载](https://www.python.org/downloads/release/python-3119/)   
-  **安装时勾选下方 add Python to path**   
-
-  * 安装Python依赖   
-  安装 Python 后
-  
-可以直接双击`安装、更新依赖.bat`来安装本项目需要的依赖。
+  1. [下载本项目](https://github.com/XD2333/GalTransl/releases/) 或 clone 仓库，解压到任意位置
+  2. 安装 Python 3.11.9。 [下载](https://www.python.org/downloads/release/python-3119/)   
+  **安装时勾选下方 add Python to path**
+  3. 安装Python依赖：双击 `安装、更新依赖.bat`，或手动执行 `pip install -r requirements.txt`
+  4. （桌面端开发）安装 Node.js，在 `desktop` 目录执行 `npm install`，然后运行 `run_desktop_dev.bat`
 
 ## 实用工具
 | 名称 | 说明 |
@@ -128,11 +128,21 @@
 &ensp;&ensp;&ensp;&ensp;其中，每个{object(对象)}是一句话，`message`是消息内容，如果object还带了`name`，说明是对话。不过可能并不是所有类型的脚本都可以带name提取，**当可以正确提取name时，GalTransl的翻译质量会更好**。   
 &ensp;&ensp;&ensp;&ensp;PS. GalTransl只支持指定格式的json文件输入，但并不是说GalTransl就与VNTextPatch工具绑定了，也可以使用SExtractor工具，现在也支持导出GalTransl需要的name-message格式JSON   
 
-* **【2.2. GalTransl启动】**   
-&ensp;&ensp;&ensp;&ensp;将本项目下载下来解压到任意位置（示例中默认为D盘根目录），在项目示例文件夹`sampleProject`中，找到示例配置文件`config.inc.yaml`，将其重命名为`config.yaml`。另外，也将sampleProject文件夹改个名字，一般是游戏的名字。   
+* **【2.2. 使用桌面端翻译（推荐）】**
+&ensp;&ensp;&ensp;&ensp;从 [Release](https://github.com/XD2333/GalTransl/releases/) 下载最新版，解压后双击 `GalTransl Desktop.exe` 启动桌面端。桌面端会自动启动后端服务，无需手动操作。
 
-&ensp;&ensp;&ensp;&ensp;本教程使用deepseek API来举例，其他模型同理，对应修改示例项目的`config.yaml`即可调用。   
-&ensp;&ensp;&ensp;&ensp;先将所有提取出的日文json文件放入示例文件夹内的`gt_input`文件夹中，然后用任意文本编辑器编辑`config.yaml`文件，按**注释**修改以下内容：
+&ensp;&ensp;&ensp;&ensp;启动后的基本流程：
+1. **新建项目**：在首页点击"新建项目"，选择项目存放位置，导入待翻译文件
+2. **配置翻译后端**：在新建项目向导中选择翻译后端（如Deepseek、OpenAI等），填入API Key和Endpoint。也可以在左侧"后端配置"页面预先配置多个后端方案
+3. **设置字典**：在项目的"项目字典"页面配置GPT字典和常规字典（建议至少配置人名字典）
+4. **开始翻译**：在"翻译工作台"页面点击开始翻译，实时查看翻译进度和结果
+5. **查看缓存与问题**：翻译完成后在"缓存与问题"页面查看自动找错结果，修正缓存后重新生成
+
+&ensp;&ensp;&ensp;&ensp;桌面端支持同时打开多个项目、深色模式、自定义背景等功能，具体可在"设置"页面调整。
+
+* **【2.2b. 使用命令行翻译（高级用户）】**
+&ensp;&ensp;&ensp;&ensp;如需使用命令行版本，在项目示例文件夹`sampleProject`中，将`config.inc.yaml`重命名为`config.yaml`，将日文json文件放入`gt_input`文件夹，编辑`config.yaml`配置翻译后端：
+
 ```yaml
 # 翻译后端相关设置
 backendSpecific:
@@ -155,15 +165,7 @@ backendSpecific:
         endpoint: https://api.siliconflow.cn # 请求地址，加不加v1都可以
 ```   
    
-&ensp;&ensp;&ensp;&ensp;修改好项目设置后，确保你已经安装了需要的依赖（见环境准备），然后双击`run.bat`（免环境版双击exe），首先输入拖入项目配置文件，例如`D:\GalTransl-main\sampleProject\config.inc.yaml`   
-
-接着选择第一个翻译选项（现在是ForGal-json，可能与图片不对应）:
-
-![img_gpt35](./img/img_gpt35.png)
-
-程序就会启动并开始翻译： 
-
-![img_start](./img/img_start.png)
+&ensp;&ensp;&ensp;&ensp;修改好项目设置后，确保你已经安装了需要的依赖（见环境准备），然后双击`run_GalTransl_terminal.bat`，输入项目路径即可开始翻译。
 
 &ensp;&ensp;&ensp;&ensp;**但是，不建议就这样开始翻译了**，请至少要先学会[GPT字典的使用](https://github.com/XD2333/GalTransl#gpt字典)，或者选择GenDic来生成一个人名字典，为你要翻译的gal设定好各角色的人名字典，这样才能保证基本的翻译质量。   
 
@@ -399,7 +401,9 @@ problemAnalyze:
 
 ## 配置文件与翻译引擎设置
 
-2025.9：详细设置项可以直接阅读配置文件注释，目前已经比较详细，此处不再重复
+桌面端通过图形界面管理翻译后端配置（左侧"后端配置"页面），无需手动编辑YAML。项目级配置可在"配置编辑"页面修改。
+
+命令行版本的详细设置项可以直接阅读 `config.yaml` 配置文件注释，目前已经比较详细。
 
 
 
