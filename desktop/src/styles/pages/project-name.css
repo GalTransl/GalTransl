@@ -194,6 +194,14 @@
   left: 2px;
 }
 
+.name-page__row--gpt-translated .name-page__td--jp::after {
+  content: 'GPT';
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--color-primary, #3b82f6);
+}
+
 .name-page__input {
   width: 100%;
   background: transparent;

@@ -710,8 +710,14 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
                 {filteredNames.map((entry, i) => {
                   const originalIndex = names.indexOf(entry);
                   const hasTranslation = entry.dst_name.trim() !== '';
+                  const isGptDictApplied = useGptDictForName
+                    && hasTranslation
+                    && gptDictNameMap.get(entry.src_name.trim()) === entry.dst_name.trim();
                   return (
-                    <tr key={originalIndex} className={`name-page__row${hasTranslation ? ' name-page__row--translated' : ''}`}>
+                    <tr
+                      key={originalIndex}
+                      className={`name-page__row${hasTranslation ? ' name-page__row--translated' : ''}${isGptDictApplied ? ' name-page__row--gpt-translated' : ''}`}
+                    >
                       <td className="name-page__td name-page__td--index">{originalIndex + 1}</td>
                       <td className="name-page__td name-page__td--jp">
                         <input
