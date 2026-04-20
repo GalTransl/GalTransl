@@ -421,9 +421,9 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   );
 
   const projectName = projectDir ? projectDir.split(/[/\\]/).filter(Boolean).pop() || '' : '';
-  const statusTone = currentJob?.status ?? 'pending';
   const runtimeStage = (runtimeMatchesProject ? (runtime?.stage ?? '') : '').trim();
-  const statusLabel = runtimeStage === '检查模型可用性' ? '检查可用性' : getStatusLabel(currentJob?.status);
+  const statusTone = runtimeStage === '检查模型可用性' ? 'checking-availability' : (currentJob?.status ?? 'pending');
+  const statusLabel = runtimeStage === '检查模型可用性' ? '测试模型可用性' : getStatusLabel(currentJob?.status);
   const currentJobError = currentJob?.error?.trim() ?? '';
   const progressPercent = clampPercent(summary?.percent ?? 0);
   const translatedCount = summary?.translated ?? 0;
