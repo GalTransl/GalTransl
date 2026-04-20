@@ -200,7 +200,7 @@ async def update_progress_title(
             # 确保 active_workers 不会是负数（以防万一）
             active_workers = max(0, active_workers)
             configured_workers = int(
-                getattr(projectConfig, "runtime_workers_effective", workersPerProject)
+                getattr(projectConfig, "runtime_workers_configured", workersPerProject)
             )
             configured_workers = max(1, configured_workers)
             if active_workers == 0:
@@ -316,6 +316,7 @@ async def doLLMTranslate(
         max_workers=max(1, workersPerProject),
         effective_workers=max(1, workersPerProject),
     )
+    projectConfig.runtime_workers_configured = max(1, workersPerProject)
     projectConfig.runtime_workers_effective = adaptive_state.effective_workers
     projectConfig.runtime_workers_reserved = 0
     fPlugins = projectConfig.fPlugins       # 文件插件（负责 load/save 特定格式）
@@ -326,7 +327,11 @@ async def doLLMTranslate(
     SplitChunkMetadata.clear_file_finished_chunk()
     total_chunks = []
     projectConfig.active_workers = 1
-    _update_runtime(projectConfig, workers_active=0, workers_configured=adaptive_state.effective_workers)
+    _update_runtime(
+        projectConfig,
+        workers_active=0,
+        workers_configured=projectConfig.runtime_workers_configured,
+    )
     
     makedirs(output_dir, exist_ok=True)
     makedirs(cache_dir, exist_ok=True)
@@ -500,10 +505,6 @@ async def doLLMTranslate(
         adaptive_state.effective_workers = adaptive_state.max_workers - reserved_permits
         projectConfig.runtime_workers_effective = adaptive_state.effective_workers
         projectConfig.runtime_workers_reserved = reserved_permits
-        _update_runtime(
-            projectConfig,
-            workers_configured=adaptive_state.effective_workers,
-        )
 
     # ---- 7. 进入翻译阶段：进度条 + worker 协程池 ----
     with terminal_progress(
@@ -635,13 +636,6 @@ async def doLLMTranslSingleChunk(
         _update_runtime(
             projectConfig,
             current_file=file_name,
-            workers_configured=int(
-                getattr(
-                    projectConfig,
-                    "runtime_workers_effective",
-                    projectConfig.getKey("workersPerProject") or 1,
-                )
-            ),
         )
         LOGGER.info(f">>> 开始翻译 (project_dir){split_chunk.file_path.replace(proj_dir,'')}")
         LOGGER.debug(f"文件 {file_name} 分块 {file_index+1}/{total_splits}:")

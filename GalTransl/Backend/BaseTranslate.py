@@ -1,7 +1,7 @@
 import asyncio
 import httpx
 from opencc import OpenCC
-from typing import Optional
+from typing import Optional, List
 from collections import deque
 from threading import Lock
 from GalTransl.COpenAI import COpenAITokenPool, COpenAIToken
@@ -14,7 +14,7 @@ from GalTransl.ConfigHelper import (
 from GalTransl.CSentense import CSentense, CTransList
 from GalTransl.Cache import save_transCache_to_json
 from GalTransl.Dictionary import CGptDict
-from GalTransl.Utils import load_guideline_file
+from GalTransl.Utils import load_guideline_file, fix_quotes2
 from openai import RateLimitError, AsyncOpenAI
 from openai import DefaultAioHttpClient
 from openai._types import NOT_GIVEN
@@ -249,6 +249,260 @@ class BaseTranslate:
         stop_event = getattr(pj_config, "stop_event", None)
         return stop_event is not None and stop_event.is_set()
 
+    def _check_stop_requested(self) -> None:
+        if self._is_stop_requested(self.pj_config):
+            from GalTransl.Service import JobCancelledError
+
+            raise JobCancelledError()
+
+    @staticmethod
+    def _build_idx_tip(trans_list: CTransList) -> str:
+        start_idx = trans_list[0].index
+        end_idx = trans_list[-1].index
+        if start_idx != end_idx:
+            return f"{start_idx}~{end_idx}"
+        return str(start_idx)
+
+    def _build_prompt_request(self, input_src: str, gptdict: str) -> str:
+        prompt_req = self.trans_prompt
+        prompt_req = prompt_req.replace(
+            "[translation_guideline]", self.pj_config.translation_guideline
+        )
+        prompt_req = prompt_req.replace("[Input]", input_src)
+        prompt_req = prompt_req.replace("[Glossary]", gptdict)
+        prompt_req = prompt_req.replace("[SourceLang]", self.source_lang)
+        prompt_req = prompt_req.replace("[TargetLang]", self.target_lang)
+        return prompt_req
+
+    def _apply_history_result(self, prompt_req: str, filename: str) -> str:
+        if (
+            hasattr(self, "last_translations")
+            and filename in self.last_translations
+            and self.last_translations[filename] != ""
+        ):
+            history_result = self.last_translations[filename].replace("<br>", "")
+            return prompt_req.replace("[history_result]", history_result)
+        return prompt_req.replace("[history_result]", "None")
+
+    def _record_runtime_success(self, filename: str, trans: CSentense) -> None:
+        try:
+            from GalTransl.server import record_runtime_success
+
+            record_runtime_success(
+                getattr(
+                    self.pj_config,
+                    "runtime_project_dir",
+                    self.pj_config.getProjectDir(),
+                ),
+                filename=filename,
+                index=getattr(trans, "runtime_index", getattr(trans, "index", 0)),
+                speaker=getattr(trans, "speaker", None),
+                source_preview=getattr(trans, "post_jp", ""),
+                translation_preview=getattr(trans, "pre_zh", ""),
+                trans_by=getattr(trans, "trans_by", ""),
+            )
+        except Exception:
+            pass
+
+    def _normalize_parsed_translation_text(
+        self, line_dst: str, current_tran: CSentense, n_symbol: str
+    ) -> str:
+        if "Chinese" in self.target_lang:
+            line_dst = self.opencc.convert(line_dst)
+
+        if "”" not in current_tran.post_jp and '"' not in current_tran.post_jp:
+            line_dst = line_dst.replace('"', "")
+        elif '"' not in current_tran.post_jp and '"' in line_dst:
+            line_dst = fix_quotes2(line_dst)
+        elif '"' in current_tran.post_jp and "”" in line_dst:
+            line_dst = line_dst.replace("“", '"')
+            line_dst = line_dst.replace("”", '"')
+
+        if not line_dst.startswith("「") and current_tran.post_jp.startswith("「"):
+            line_dst = "「" + line_dst
+        if not line_dst.endswith("」") and current_tran.post_jp.endswith("」"):
+            line_dst = line_dst + "」"
+
+        line_dst = line_dst.replace("[t]", "\t")
+        if n_symbol:
+            line_dst = line_dst.replace("<br>", n_symbol)
+            line_dst = line_dst.replace("<BR>", n_symbol)
+
+        if "……" in current_tran.post_jp and "..." in line_dst:
+            line_dst = line_dst.replace("......", "……")
+            line_dst = line_dst.replace("...", "……")
+
+        return line_dst
+
+    def _append_parsed_translation_result(
+        self,
+        current_tran: CSentense,
+        line_dst: str,
+        model_name: str,
+        cursor: dict,
+        result_trans_list: list,
+        filename: str = "",
+        emit_runtime_success: bool = False,
+        emitted_success_indices=None,
+        result_index: Optional[int] = None,
+    ) -> tuple[bool, str]:
+        current_tran.pre_zh = line_dst
+        current_tran.post_zh = line_dst
+        current_tran.trans_by = model_name
+        if emit_runtime_success:
+            if emitted_success_indices is None:
+                emitted_success_indices = set()
+            if result_index is not None and result_index not in emitted_success_indices:
+                self._record_runtime_success(filename, current_tran)
+                emitted_success_indices.add(result_index)
+            current_tran._runtime_success_recorded = True
+        result_trans_list.append(current_tran)
+        cursor["success_count"] = cursor.get("success_count", 0) + 1
+        return True, ""
+
+    @staticmethod
+    def _merge_problem_message(
+        current_problem: str, message: str, append: bool = True
+    ) -> str:
+        current_problem = current_problem or ""
+        message = message or ""
+        if not message:
+            return current_problem
+        if not append:
+            return message
+        if message in current_problem:
+            return current_problem
+        if not current_problem:
+            return message
+        return f"{current_problem}, {message}"
+
+    def _append_parse_failure_fallback_results(
+        self,
+        trans_list: CTransList,
+        start_index: int,
+        result_trans_list: list,
+        model_name: str,
+        proofread: bool = False,
+        translate_failed_prefix: str = "(Failed)",
+        translate_problem_message: str = "翻译失败",
+        proofread_problem_message: str = "翻译失败",
+        proofread_problem_append: bool = True,
+    ) -> int:
+        i = max(0, start_index)
+        failed_model_name = f"{model_name}(Failed)"
+        while i < len(trans_list):
+            current_tran = trans_list[i]
+            if not proofread:
+                failed_text = translate_failed_prefix + current_tran.post_jp
+                current_tran.pre_zh = failed_text
+                current_tran.post_zh = failed_text
+                current_tran.problem = self._merge_problem_message(
+                    current_tran.problem, translate_problem_message, append=True
+                )
+                current_tran.trans_by = failed_model_name
+            else:
+                current_tran.proofread_zh = current_tran.pre_zh
+                current_tran.post_zh = current_tran.pre_zh
+                current_tran.problem = self._merge_problem_message(
+                    current_tran.problem,
+                    proofread_problem_message,
+                    append=proofread_problem_append,
+                )
+                current_tran.proofread_by = failed_model_name
+            result_trans_list.append(current_tran)
+            i += 1
+        return i
+
+    async def _batch_translate_common(
+        self,
+        filename,
+        cache_file_path,
+        translist_unhit: CTransList,
+        num_pre_request: int,
+        gpt_dic: CGptDict = None,
+        proofread: bool = False,
+        glossary_style: str = "",
+        failed_markers: tuple[str, ...] = ("(Failed)",),
+        h_words_list: Optional[List[str]] = None,
+        ensure_last_translations: bool = False,
+    ) -> CTransList:
+        if len(translist_unhit) == 0:
+            return []
+
+        if self.skipH and h_words_list:
+            translist_unhit = [
+                tran
+                for tran in translist_unhit
+                if not any(word in tran.post_jp for word in h_words_list)
+            ]
+
+        if ensure_last_translations and hasattr(self, "last_translations"):
+            if filename not in self.last_translations:
+                self.last_translations[filename] = ""
+
+        i = 0
+        trans_result_list = []
+        len_trans_list = len(translist_unhit)
+        transl_step_count = 0
+
+        while i < len_trans_list:
+            self._check_stop_requested()
+            trans_list_split = (
+                translist_unhit[i : i + num_pre_request]
+                if (i + num_pre_request < len_trans_list)
+                else translist_unhit[i:]
+            )
+
+            if gpt_dic:
+                if glossary_style:
+                    dic_prompt = gpt_dic.gen_prompt(trans_list_split, glossary_style)
+                else:
+                    dic_prompt = gpt_dic.gen_prompt(trans_list_split)
+            else:
+                dic_prompt = ""
+
+            num, trans_result = await self.translate(
+                trans_list_split,
+                dic_prompt,
+                proofread=proofread,
+                filename=filename,
+            )
+
+            if num <= 0 and not trans_result:
+                raise RuntimeError(
+                    f"[{filename}:{self._build_idx_tip(trans_list_split)}] translate returned no progress"
+                )
+
+            if num > 0:
+                i += num
+            self.pj_config.bar(num)
+
+            result_output = ""
+            for trans in trans_result:
+                if (
+                    not proofread
+                    and trans.pre_zh
+                    and not getattr(trans, "_runtime_success_recorded", False)
+                    and not any(marker in trans.pre_zh for marker in failed_markers)
+                ):
+                    self._record_runtime_success(filename, trans)
+                result_output += repr(trans)
+
+            LOGGER.info(result_output)
+            trans_result_list += trans_result
+            transl_step_count += 1
+            if transl_step_count >= self.save_steps:
+                await save_transCache_to_json(trans_result, cache_file_path)
+                transl_step_count = 0
+
+            if trans_result:
+                trans_by = trans_result[0].trans_by
+                LOGGER.info(
+                    f"{filename}: {str(len(trans_result_list))}/{str(len_trans_list)} with {trans_by}"
+                )
+
+        return trans_result_list
+
     async def _interruptible_sleep(self, seconds: float) -> None:
         """Sleep that can be interrupted by stop_event.
 
@@ -294,7 +548,7 @@ class BaseTranslate:
         self,
         prompt="",
         system="",
-        messages=[],
+        messages=None,
         temperature=NOT_GIVEN,
         frequency_penalty=NOT_GIVEN,
         top_p=NOT_GIVEN,
@@ -303,12 +557,13 @@ class BaseTranslate:
         reasoning_effort=NOT_GIVEN,
         file_name="",
         base_try_count=0,
+        stream_line_callback=None,
     ):
         api_try_count = base_try_count
         client: AsyncOpenAI
         token: COpenAIToken
         client, token = random.choices(self.client_list, k=1)[0]
-        if messages == []:
+        if messages is None:
             messages = [
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
@@ -336,6 +591,8 @@ class BaseTranslate:
                 else:
                     raise ValueError("tokenStrategy must be random or fallback")
                 is_stream=stream if stream != NOT_GIVEN else token.stream
+                self._last_chatbot_was_stream = bool(is_stream)
+                self._last_chatbot_model_name = getattr(token, "model_name", "")
                 LOGGER.debug(f"Call {token.domain} withs token {token.maskToken()}")
 
                 await self._wait_for_global_rpm_slot()
@@ -372,6 +629,7 @@ class BaseTranslate:
                 result = ""
                 lastline = ""
                 if is_stream:
+                    stream_line_buffer = ""
                     async for chunk in response:
                         # Check stop in the middle of streaming so we don't
                         # have to wait for the entire stream to finish.
@@ -385,13 +643,28 @@ class BaseTranslate:
                                 chunk.choices[0].delta.reasoning_content or ""
                             )
                         if hasattr(chunk.choices[0].delta, "content"):
-                            result = result + (chunk.choices[0].delta.content or "")
-                            lastline = lastline + (chunk.choices[0].delta.content or "")
+                            content_piece = chunk.choices[0].delta.content or ""
+                            result = result + content_piece
+                            lastline = lastline + content_piece
+                            stream_line_buffer += content_piece
+                            if stream_line_callback and "\n" in stream_line_buffer:
+                                line_parts = stream_line_buffer.split("\n")
+                                finished_lines = line_parts[:-1]
+                                stream_line_buffer = line_parts[-1]
+                                try:
+                                    stream_line_callback(finished_lines, False)
+                                except Exception:
+                                    pass
                         if "\n" in lastline:
                             if should_print_translation_logs(self.pj_config) and self.pj_config.active_workers == 1:
                                 lastline_sp = lastline.split("\n")
                                 print("\n".join(lastline_sp[:-1]))
                                 lastline = lastline_sp[-1]
+                    if stream_line_callback and stream_line_buffer:
+                        try:
+                            stream_line_callback([stream_line_buffer], True)
+                        except Exception:
+                            pass
                 else:
                     try:
                         result = response.choices[0].message.content
@@ -558,6 +831,63 @@ class BaseTranslate:
                 )
 
         return trans_result_list
+
+    def _get_restore_context_failed_markers(self) -> tuple[str, ...]:
+        return ("(Failed)",)
+
+    def _format_restore_context_line(self, current_tran: CSentense) -> str:
+        raise NotImplementedError
+
+    def _format_restore_context_payload(self, lines: List[str]) -> str:
+        return "\n".join(lines)
+
+    def _collect_restore_context_items(
+        self, translist_unhit: CTransList, num_pre_request: int
+    ) -> List[CSentense]:
+        if translist_unhit[0].prev_tran == None:
+            return []
+
+        context_items: List[CSentense] = []
+        num_count = 0
+        current_tran = translist_unhit[0].prev_tran
+        failed_markers = self._get_restore_context_failed_markers()
+
+        while current_tran != None:
+            if current_tran.pre_zh == "" or any(
+                marker in current_tran.pre_zh for marker in failed_markers
+            ):
+                current_tran = current_tran.prev_tran
+                continue
+
+            context_items.append(current_tran)
+            num_count += 1
+            if num_count >= num_pre_request:
+                break
+            current_tran = current_tran.prev_tran
+
+        context_items.reverse()
+        return context_items
+
+    def restore_context(
+        self, translist_unhit: CTransList, num_pre_request: int, filename=""
+    ):
+        if not hasattr(self, "last_translations"):
+            return
+
+        context_items = self._collect_restore_context_items(
+            translist_unhit, num_pre_request
+        )
+        if not context_items:
+            self.last_translations[filename] = ""
+            return
+
+        context_lines = [
+            self._format_restore_context_line(current_tran)
+            for current_tran in context_items
+        ]
+        self.last_translations[filename] = self._format_restore_context_payload(
+            context_lines
+        )
 
     def _set_temp_type(self, style_name: str):
         if self._current_temp_type == style_name:

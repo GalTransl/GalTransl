@@ -1,6 +1,6 @@
 import json, time, asyncio, os, traceback, re
 from opencc import OpenCC
-from typing import Optional
+from typing import Optional, List, Set
 
 from GalTransl.COpenAI import COpenAITokenPool
 from GalTransl.ConfigHelper import CProxyPool
@@ -14,7 +14,7 @@ from random import choice
 from GalTransl.CSentense import CSentense, CTransList
 from GalTransl.Cache import save_transCache_to_json
 from GalTransl.Dictionary import CGptDict
-from GalTransl.Utils import extract_code_blocks, fix_quotes, fix_quotes2
+from GalTransl.Utils import extract_code_blocks, fix_quotes
 from GalTransl.Backend.Prompts import (
     FORGAL_JSON_SYSTEM_PROMPT,
     FORGAL_JSON_TRANS_PROMPT,
@@ -25,14 +25,6 @@ from GalTransl.Backend.Prompts import (
 )
 from GalTransl.Backend.BaseTranslate import BaseTranslate
 from openai._types import NOT_GIVEN
-
-
-def _check_stop_requested(project_config):
-    stop_event = getattr(project_config, "stop_event", None)
-    if stop_event is not None and stop_event.is_set():
-        from GalTransl.Service import JobCancelledError
-
-        raise JobCancelledError()
 
 
 class ForGalJsonTranslate(BaseTranslate):
@@ -68,13 +60,7 @@ class ForGalJsonTranslate(BaseTranslate):
         input_list = []
         tmp_enhance_jailbreak = False
         n_symbol = ""
-        start_idx = trans_list[0].index
-        end_idx = trans_list[-1].index
-        idx_tip = ""
-        if start_idx != end_idx:
-            idx_tip = f"{start_idx}~{end_idx}"
-        else:
-            idx_tip = start_idx
+        idx_tip = self._build_idx_tip(trans_list)
 
         for i, trans in enumerate(trans_list):
             speaker_name = trans.get_speaker_name()
@@ -119,16 +105,12 @@ class ForGalJsonTranslate(BaseTranslate):
 
         self.restore_context(trans_list, self.contextNum, filename)
 
-        prompt_req = self.trans_prompt
-        prompt_req = prompt_req.replace("[translation_guideline]", self.pj_config.translation_guideline)
-        prompt_req = prompt_req.replace("[Input]", input_src)
-        prompt_req = prompt_req.replace("[Glossary]", gptdict)
-        prompt_req = prompt_req.replace("[SourceLang]", self.source_lang)
-        prompt_req = prompt_req.replace("[TargetLang]", self.target_lang)
+        prompt_template = self._build_prompt_request(input_src, gptdict)
 
         retry_count = 0
+        emitted_success_indices = set()
         while True:  # 一直循环，直到得到数据
-            _check_stop_requested(self.pj_config)
+            self._check_stop_requested()
             if self.enhance_jailbreak or tmp_enhance_jailbreak:
                 assistant_prompt = "```jsonline"
             else:
@@ -136,16 +118,7 @@ class ForGalJsonTranslate(BaseTranslate):
 
             messages = []
             messages.append({"role": "system", "content": self.system_prompt})
-            if (
-                filename in self.last_translations
-                and self.last_translations[filename] != ""
-            ):
-                self.last_translations[filename] = self.last_translations[
-                    filename
-                ].replace("<br>", "")
-                prompt_req = prompt_req.replace("[history_result]", self.last_translations[filename])
-            else:
-                prompt_req = prompt_req.replace("[history_result]", "None")
+            prompt_req = self._apply_history_result(prompt_template, filename)
             messages.append({"role": "user", "content": prompt_req})
             if assistant_prompt:
                 messages.append({"role": "assistant", "content": assistant_prompt})
@@ -155,11 +128,50 @@ class ForGalJsonTranslate(BaseTranslate):
                     f"->{'翻译输入' if not proofread else '校对输入'}：\n{gptdict}\n{input_src}\n"
                 )
                 LOGGER.info("->输出：")
+            parsed_result_trans_list = []
+            stream_parse_error_message = ""
+            stream_cursor = {"i": -1, "success_count": 0, "started": False}
+
+            def _parse_stream_lines(lines, is_final_chunk):
+                nonlocal stream_parse_error_message, parsed_result_trans_list
+                if stream_parse_error_message:
+                    return
+                key_name = "dst" if not proofread else "newdst"
+                for raw_line in lines:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    if line.startswith("```"):
+                        continue
+                    if not stream_cursor["started"]:
+                        if '{"id' in line:
+                            line = line[line.find('{"id') :]
+                            stream_cursor["started"] = True
+                        else:
+                            continue
+                    line = fix_quotes(line)
+                    parse_ok, parse_error = self._parse_jsonline_result_line(
+                        line,
+                        trans_list,
+                        getattr(self, "_last_chatbot_model_name", ""),
+                        n_symbol,
+                        key_name,
+                        stream_cursor,
+                        parsed_result_trans_list,
+                        filename=filename,
+                        emit_runtime_success=(not proofread),
+                        emitted_success_indices=emitted_success_indices,
+                    )
+                    if not parse_ok:
+                        stream_parse_error_message = parse_error
+                        return
+
             resp = None
             resp, token = await self.ask_chatbot(
                 messages=messages,
                 file_name=f"{filename}:{idx_tip}",
-                base_try_count=retry_count
+                base_try_count=retry_count,
+                stream_line_callback=_parse_stream_lines,
             )
 
             result_text = resp or ""
@@ -186,89 +198,35 @@ class ForGalJsonTranslate(BaseTranslate):
                 error_message = "输出为空/被拦截"
                 error_flag = True
 
-            for line in result_lines:
-                try:
-                    line_json = json.loads(line)  # 尝试解析json
-                except:
-                    error_message = f"json无法解析行：{line}"
+            if getattr(self, "_last_chatbot_was_stream", False):
+                if stream_parse_error_message:
+                    error_message = stream_parse_error_message
                     error_flag = True
-                    break
-
-                i += 1
-                # 本行输出不正常
-                if (
-                    isinstance(line_json, dict) == False
-                    or "id" not in line_json
-                    or type(line_json["id"]) != int
-                    or i > len(trans_list) - 1
-                ):
-                    error_message = f"{line}句无法解析"
-                    error_flag = True
-                    break
-
-                line_id = line_json["id"]
-                if line_id != trans_list[i].index:
-                    error_message = f"{line_id}句id未对应{trans_list[i].index}"
-                    error_flag = True
-                    break
-
-                if key_name not in line_json or type(line_json[key_name]) != str:
-                    error_message = f"第{trans_list[i].index}句找不到{key_name}"
-                    error_flag = True
-                    break
-
-                line_dst = line_json[key_name]
-
-                # 本行输出不应为空
-                if trans_list[i].post_jp != "" and line_dst == "":
-                    error_message = f"第{line_id}句空白"
-                    error_flag = True
-                    break
-
-                # 针对混元模型的乱码问题
-                if "�" in line_dst:
-                    error_message = f"第{line_id}句包含乱码：" + line_dst
-                    error_flag = True
-                    break
-
-                if "Chinese" in self.target_lang:  # 统一简繁体
-                    line_dst = self.opencc.convert(line_dst)
-
-                if (
-                    "”" not in trans_list[i].post_jp
-                    and '"' not in trans_list[i].post_jp
-                ):
-                    line_dst = line_dst.replace('"', "")
-                elif '"' not in trans_list[i].post_jp and '"' in line_dst:
-                    line_dst = fix_quotes2(line_dst)
-                elif '"' in trans_list[i].post_jp and "”" in line_dst:
-                    line_dst = line_dst.replace("“", '"')
-                    line_dst = line_dst.replace("”", '"')
-
-                if not line_dst.startswith("「") and trans_list[i].post_jp.startswith(
-                    "「"
-                ):
-                    line_dst = "「" + line_dst
-                if not line_dst.endswith("」") and trans_list[i].post_jp.endswith("」"):
-                    line_dst = line_dst + "」"
-
-                line_dst = line_dst.replace("[t]", "\t")
-                if n_symbol:
-                    line_dst = line_dst.replace("<br>", n_symbol)
-                    line_dst = line_dst.replace("<BR>", n_symbol)
-
-                if "……" in trans_list[i].post_jp and "..." in line_dst:
-                    line_dst = line_dst.replace("......", "……")
-                    line_dst = line_dst.replace("...", "……")
-
-                trans_list[i].pre_zh = line_dst
-                trans_list[i].post_zh = line_dst
-                trans_list[i].trans_by = token.model_name
-                result_trans_list.append(trans_list[i])
-                success_count += 1
-
-                if i >= len(trans_list) - 1:
-                    break
+                result_trans_list = parsed_result_trans_list
+                success_count = len(parsed_result_trans_list)
+                i = stream_cursor["i"]
+            else:
+                for line in result_lines:
+                    parse_ok, parse_error = self._parse_jsonline_result_line(
+                        line,
+                        trans_list,
+                        getattr(token, "model_name", ""),
+                        n_symbol,
+                        key_name,
+                        {"i": i, "success_count": success_count},
+                        result_trans_list,
+                        filename=filename,
+                        emit_runtime_success=False,
+                        emitted_success_indices=emitted_success_indices,
+                    )
+                    if not parse_ok:
+                        error_message = parse_error
+                        error_flag = True
+                        break
+                    i += 1
+                    success_count += 1
+                    if i >= len(trans_list) - 1:
+                        break
 
             if success_count > 0:
                 error_flag = False  # 部分解析
@@ -293,7 +251,7 @@ class ForGalJsonTranslate(BaseTranslate):
                     f"[解析错误][{filename}:{idx_tip}]解析结果出错：{error_message}"
                 )
                 retry_count += 1
-                _check_stop_requested(self.pj_config)
+                self._check_stop_requested()
                 await asyncio.sleep(1)
 
                 tmp_enhance_jailbreak = not tmp_enhance_jailbreak
@@ -322,20 +280,17 @@ class ForGalJsonTranslate(BaseTranslate):
                     LOGGER.error(
                         f"[解析错误][{filename}:{idx_tip}]解析反复出错，跳过本轮翻译"
                     )
-                    i = 0 if i < 0 else i
-                    while i < len(trans_list):
-                        if not proofread:
-                            trans_list[i].pre_zh = "(Failed)"+trans_list[i].post_jp
-                            trans_list[i].post_zh = "(Failed)"+trans_list[i].post_jp
-                            trans_list[i].problem += "翻译失败"
-                            trans_list[i].trans_by = f"{token.model_name}(Failed)"
-                        else:
-                            trans_list[i].proofread_zh = trans_list[i].pre_zh
-                            trans_list[i].post_zh = trans_list[i].pre_zh
-                            trans_list[i].problem = "Failed translation"
-                            trans_list[i].proofread_by = f"{token.model_name}(Failed)"
-                        result_trans_list.append(trans_list[i])
-                        i = i + 1
+                    i = self._append_parse_failure_fallback_results(
+                        trans_list,
+                        0 if i < 0 else i,
+                        result_trans_list,
+                        getattr(token, "model_name", ""),
+                        proofread=proofread,
+                        translate_failed_prefix="(Failed)",
+                        translate_problem_message="翻译失败",
+                        proofread_problem_message="翻译失败",
+                        proofread_problem_append=True,
+                    )
                     return i, result_trans_list
                 continue
             elif error_flag == False and error_message:
@@ -346,6 +301,63 @@ class ForGalJsonTranslate(BaseTranslate):
             # 翻译完成，收尾
             break
         return success_count, result_trans_list
+
+    def _parse_jsonline_result_line(
+        self,
+        line: str,
+        trans_list: CTransList,
+        model_name: str,
+        n_symbol: str,
+        key_name: str,
+        cursor: dict,
+        result_trans_list: list,
+        filename: str = "",
+        emit_runtime_success: bool = False,
+        emitted_success_indices: Optional[Set[int]] = None,
+    ):
+        try:
+            line_json = json.loads(line)
+        except Exception:
+            return False, f"json无法解析行：{line}"
+
+        cursor["i"] += 1
+        i = cursor["i"]
+        if (
+            isinstance(line_json, dict) == False
+            or "id" not in line_json
+            or type(line_json["id"]) != int
+            or i > len(trans_list) - 1
+        ):
+            return False, f"{line}句无法解析"
+
+        line_id = line_json["id"]
+        if line_id != trans_list[i].index:
+            return False, f"{line_id}句id未对应{trans_list[i].index}"
+
+        if key_name not in line_json or type(line_json[key_name]) != str:
+            return False, f"第{trans_list[i].index}句找不到{key_name}"
+
+        line_dst = line_json[key_name]
+        if trans_list[i].post_jp != "" and line_dst == "":
+            return False, f"第{line_id}句空白"
+        if "�" in line_dst:
+            return False, f"第{line_id}句包含乱码：{line_dst}"
+
+        line_dst = self._normalize_parsed_translation_text(
+            line_dst, trans_list[i], n_symbol
+        )
+
+        return self._append_parsed_translation_result(
+            trans_list[i],
+            line_dst,
+            model_name,
+            cursor,
+            result_trans_list,
+            filename=filename,
+            emit_runtime_success=emit_runtime_success,
+            emitted_success_indices=emitted_success_indices,
+            result_index=i,
+        )
 
     async def batch_translate(
         self,
@@ -360,107 +372,36 @@ class ForGalJsonTranslate(BaseTranslate):
         translist_hit: CTransList = [],
         translist_unhit: CTransList = [],
     ) -> CTransList:
-        if len(translist_unhit) == 0:
-            return []
-        if self.skipH:
-            translist_unhit = [
-                tran
-                for tran in translist_unhit
-                if not any(word in tran.post_jp for word in H_WORDS_LIST)
-            ]
-
-        if filename not in self.last_translations:
-            self.last_translations[filename] = ""
-
-        i = 0
-
-        trans_result_list = []
-        len_trans_list = len(translist_unhit)
-        transl_step_count = 0
-
-        while i < len_trans_list:
-            _check_stop_requested(self.pj_config)
-            # await asyncio.sleep(1)
-            trans_list_split = (
-                translist_unhit[i : i + num_pre_request]
-                if (i + num_pre_request < len_trans_list)
-                else translist_unhit[i:]
-            )
-
-            dic_prompt = gpt_dic.gen_prompt(trans_list_split, "gpt") if gpt_dic else ""
-
-            num, trans_result = await self.translate(
-                trans_list_split, dic_prompt, proofread=proofread, filename=filename
-            )
-
-            if num > 0:
-                i += num
-            self.pj_config.bar(num)
-            result_output = ""
-            for trans in trans_result:
-                if not proofread and trans.pre_zh and "(Failed)" not in trans.pre_zh and "(翻译失败)" not in trans.pre_zh:
-                    try:
-                        from GalTransl.server import record_runtime_success
-                        record_runtime_success(
-                            getattr(self.pj_config, "runtime_project_dir", self.pj_config.getProjectDir()),
-                            filename=filename,
-                            index=getattr(trans, "runtime_index", getattr(trans, "index", 0)),
-                            speaker=getattr(trans, "speaker", None),
-                            source_preview=getattr(trans, "post_jp", ""),
-                            translation_preview=getattr(trans, "pre_zh", ""),
-                            trans_by=getattr(trans, "trans_by", ""),
-                        )
-                    except Exception:
-                        pass
-                result_output = result_output + repr(trans)
-            LOGGER.info(result_output)
-            trans_result_list += trans_result
-            transl_step_count += 1
-            if transl_step_count >= self.save_steps:
-                await save_transCache_to_json(trans_result, cache_file_path)
-                transl_step_count = 0
-
-            trans_by = trans_result[0].trans_by
-            LOGGER.info(
-                f"{filename}: {str(len(trans_result_list))}/{str(len_trans_list)} with {trans_by}"
-            )
-
-        return trans_result_list
+        return await self._batch_translate_common(
+            filename=filename,
+            cache_file_path=cache_file_path,
+            translist_unhit=translist_unhit,
+            num_pre_request=num_pre_request,
+            gpt_dic=gpt_dic,
+            proofread=proofread,
+            glossary_style="gpt",
+            failed_markers=("(Failed)", "(翻译失败)"),
+            h_words_list=H_WORDS_LIST,
+            ensure_last_translations=True,
+        )
 
     def reset_conversation(self, filename=""):
         self.last_translations[filename] = ""
 
-    def restore_context(
-        self, translist_unhit: CTransList, num_pre_request: int, filename=""
-    ):
-        if translist_unhit[0].prev_tran == None:
-            return
-        tmp_context = []
-        num_count = 0
-        current_tran = translist_unhit[0].prev_tran
-        while current_tran != None:
-            if current_tran.pre_zh == "" or "(Failed)" in current_tran.pre_zh:
-                current_tran = current_tran.prev_tran
-                continue
-            speaker_name = current_tran.get_speaker_name()
-            speaker = speaker_name if speaker_name else "null"
-            tmp_obj = {
-                "id": current_tran.index,
-                "name": speaker,
-                "dst": current_tran.pre_zh,
-            }
-            if speaker == "null":
-                del tmp_obj["name"]
-            tmp_context.append(json.dumps(tmp_obj, ensure_ascii=False))
-            num_count += 1
-            if num_count >= num_pre_request:
-                break
-            current_tran = current_tran.prev_tran
+    def _format_restore_context_line(self, current_tran: CSentense) -> str:
+        speaker_name = current_tran.get_speaker_name()
+        speaker = speaker_name if speaker_name else "null"
+        tmp_obj = {
+            "id": current_tran.index,
+            "name": speaker,
+            "dst": current_tran.pre_zh,
+        }
+        if speaker == "null":
+            del tmp_obj["name"]
+        return json.dumps(tmp_obj, ensure_ascii=False)
 
-        tmp_context.reverse()
-        json_lines = "\n".join(tmp_context)
-        self.last_translations[filename] = "```jsonline\n" + json_lines + "\n```"
-        # LOGGER.info("-> 恢复了上下文")
+    def _format_restore_context_payload(self, lines: List[str]) -> str:
+        return "```jsonline\n" + "\n".join(lines) + "\n```"
 
 
 if __name__ == "__main__":
