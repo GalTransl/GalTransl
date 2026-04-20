@@ -28,7 +28,7 @@ In each line:
 2. Follow the "translation_guidelines" and "glossary", translate the value of `name` and `src` to [TargetLang].
 3. Change key `src` -> `dst`, and fill in your translation result. Result should corresponds to the current source jsonline's text.
 Then stop, without any other explanations or notes.
-### Output Recipe = { "id": int, (optional)"name": string, "dst": string } + <linebreak>
+### Output Recipe = { "id": int, (optional)"name": string, "dst": string } + <Line Feed>
 </process_requirements>
 
 <translation_guidelines>
