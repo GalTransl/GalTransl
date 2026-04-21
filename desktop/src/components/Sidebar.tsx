@@ -6,6 +6,7 @@ import { InlineFeedback } from './page-state/InlineFeedback';
 import logoUrl from '../assets/logo.png';
 
 const CONFIG_FILE_KEY = 'galtransl-config-file';
+const LAST_ACTIVE_PROJECT_KEY = 'galtransl-last-active-project';
 const OUTPUT_FOLDER_NAME = 'gt_output';
 
 function loadConfigFileName(projectDir: string): string {
@@ -14,6 +15,14 @@ function loadConfigFileName(projectDir: string): string {
     return map[projectDir] || 'config.yaml';
   } catch {
     return 'config.yaml';
+  }
+}
+
+function loadLastActiveProject(): string | null {
+  try {
+    return localStorage.getItem(LAST_ACTIVE_PROJECT_KEY);
+  } catch {
+    return null;
   }
 }
 
@@ -50,7 +59,12 @@ function buildInitialExpandedProjects(openProjects: string[], pathname: string):
     }
   }
 
-  const target = expandedProject ?? openProjects[0];
+  const lastActiveProject = loadLastActiveProject();
+  const rememberedProject = lastActiveProject && openProjects.includes(lastActiveProject)
+    ? lastActiveProject
+    : null;
+
+  const target = expandedProject ?? rememberedProject ?? openProjects[0];
   const result: Record<string, boolean> = {};
   for (const projectDir of openProjects) {
     result[projectDir] = projectDir === target;

@@ -40,6 +40,7 @@ const NewProjectWizard = lazy(async () => {
 
 const CONFIG_FILE_KEY = 'galtransl-config-file';
 const OPEN_PROJECTS_KEY = 'galtransl-open-projects';
+const LAST_ACTIVE_PROJECT_KEY = 'galtransl-last-active-project';
 
 function saveConfigFileName(projectDir: string, configFileName: string) {
   try {
@@ -67,6 +68,30 @@ function loadOpenProjects(): string[] {
 function saveOpenProjects(projects: string[]) {
   try {
     localStorage.setItem(OPEN_PROJECTS_KEY, JSON.stringify(projects));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function loadLastActiveProject(): string | null {
+  try {
+    return localStorage.getItem(LAST_ACTIVE_PROJECT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveLastActiveProject(projectDir: string) {
+  try {
+    localStorage.setItem(LAST_ACTIVE_PROJECT_KEY, projectDir);
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function clearLastActiveProject() {
+  try {
+    localStorage.removeItem(LAST_ACTIVE_PROJECT_KEY);
   } catch {
     // ignore storage errors
   }
@@ -163,6 +188,34 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
   const [displayLocation, setDisplayLocation] = useState(location);
   const [transitionStage, setTransitionStage] = useState<'fadeIn' | 'fadeOut'>('fadeIn');
   const [customBackground, setCustomBackground] = useState<CustomBackgroundPreference>(() => getCustomBackgroundPreference());
+
+  useEffect(() => {
+    const projectMatch = location.pathname.match(/^\/project\/([^/]+)/);
+    if (projectMatch) {
+      try {
+        const projectDir = decodeProjectDir(projectMatch[1]);
+        saveLastActiveProject(projectDir);
+      } catch {
+        // ignore invalid project id in URL
+      }
+    }
+  }, [location.pathname]);
+
+  useEffect(() => {
+    const lastActiveProject = loadLastActiveProject();
+    if (!lastActiveProject) {
+      return;
+    }
+
+    if (openProjects.length === 0) {
+      clearLastActiveProject();
+      return;
+    }
+
+    if (!openProjects.includes(lastActiveProject)) {
+      saveLastActiveProject(openProjects[0]);
+    }
+  }, [openProjects]);
 
   useEffect(() => {
     const handleCustomBackgroundChange = () => {
