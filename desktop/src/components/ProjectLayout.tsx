@@ -132,7 +132,7 @@ export function ProjectLayout() {
             hidden={activeTab !== 'names'}
             style={activeTab !== 'names' ? { display: 'none' } : undefined}
           >
-            <ProjectNamePage ctx={ctx} />
+            <ProjectNamePage ctx={ctx} active={activeTab === 'names'} />
           </div>
         ) : null}
         {shouldRenderCache ? (

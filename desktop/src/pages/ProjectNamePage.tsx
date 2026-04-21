@@ -26,7 +26,7 @@ import { normalizeError } from '../lib/errors';
 
 const JOB_POLL_INTERVAL_MS = 1500;
 
-export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
+export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContext; active?: boolean }) {
   const { projectId, projectDir, configFileName } = ctx;
 
   const [names, setNames] = useState<NameEntry[]>([]);
@@ -269,6 +269,34 @@ export function ProjectNamePage({ ctx }: { ctx: ProjectPageContext }) {
       setGptToggleBusy(false);
     }
   }, [projectId, configFileName, gptToggleBusy, loadProjectGptDictMap, overlayGptDictOntoNames]);
+
+  // Refresh GPT dict map when page becomes active (e.g. switching back from dictionary tab)
+  useEffect(() => {
+    if (!projectId || !active) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        if (useGptDictForName) {
+          const map = await loadProjectGptDictMap();
+          if (cancelled) return;
+          setGptDictNameMap(map);
+          // Re-overlay onto any empty dst_name entries so newly added dictionary lines apply
+          if (map.size > 0 && namesRef.current.length > 0) {
+            const { next, changed } = overlayGptDictOntoNames(namesRef.current, map);
+            if (changed > 0 && !cancelled) {
+              setNames(next);
+              setDirty(true);
+            }
+          }
+        } else {
+          setGptDictNameMap(new Map());
+        }
+      } catch {
+        // Non-critical: leave previous map if refresh fails
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [active, projectId, useGptDictForName, loadProjectGptDictMap, overlayGptDictOntoNames]);
 
   const handleGenerate = useCallback(async () => {
     if (!projectId || !projectDir) return;
