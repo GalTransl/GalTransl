@@ -1,4 +1,4 @@
-import json, time, asyncio, os, traceback
+import json, time, asyncio, os, traceback, re
 from turtle import title
 from opencc import OpenCC
 from typing import Optional
@@ -20,6 +20,32 @@ from typing import List, Set, Dict, Optional
 from threading import Lock
 from GalTransl.TerminalOutput import should_print_translation_logs, terminal_progress
 
+# 正则补充层：连续片假名字串（含・）
+_KATAKANA_SEQ_RE = re.compile(r"[ァ-ヶー・]{2,}")
+
+
+def _is_katakana_only(text: str) -> bool:
+    """判断是否为纯片假名字串（含ー・），且长度>=2"""
+    if len(text) < 2:
+        return False
+    for ch in text:
+        cp = ord(ch)
+        if ch in ("ー", "・"):
+            continue
+        if not (0x30A0 <= cp <= 0x30FF):
+            return False
+    return True
+
+
+def _extract_regex_terms(text: str) -> Set[str]:
+    """用正则补充提取专有名词候选：连续片假名字串。"""
+    words: Set[str] = set()
+    for m in _KATAKANA_SEQ_RE.finditer(text):
+        w = m.group(0)
+        if len(w) >= 2:
+            words.add(w)
+    return words
+
 
 class GenDic(BaseTranslate):
     def __init__(
@@ -32,6 +58,7 @@ class GenDic(BaseTranslate):
         super().__init__(config, eng_type, proxy_pool, token_pool)
         self.dic_counter = collections.Counter()
         self.dic_list = []
+        self.dic_votes = collections.defaultdict(collections.Counter)
         self.wokers = config.getKey("workersPerProject")
         self.counter_lock = Lock()
         self.list_lock = Lock()
@@ -130,47 +157,87 @@ class GenDic(BaseTranslate):
             if name in text:
                 name_hit.append(name)
 
+        parts: List[str] = []
+        existing_dict_map = getattr(self, "existing_dict_map", None) or {}
+        if existing_dict_map:
+            appeared = {
+                k: v for k, v in existing_dict_map.items()
+                if k in text
+            }
+            if appeared:
+                lines = [f"{src}\t{dst}\t{note}" for src, (dst, note) in appeared.items()]
+                parts.append("以下词汇已有确定翻译，请严格保持一致，不要重复提取：\n" + "\n".join(lines))
         if name_hit:
-            hint = "输入文本中的这些词语是一定要加入术语表的: \n" + "\n".join(name_hit)
+            parts.append("输入文本中的这些词语是一定要加入术语表的: \n" + "\n".join(name_hit))
+        if parts:
+            hint = "\n\n".join(parts)
 
         prompt = GENDIC_PROMPT.format(input=text, hint=hint)
-        rsp, token = await self.ask_chatbot(
-            prompt=prompt, system=GENDIC_SYSTEM, temperature=0.6
-        )
-        if should_print_translation_logs(self.pj_config):
-            print(rsp)
-        lines = rsp.split("\n")
-        runtime_preview_count = 0
-        runtime_preview_limit = 3
 
-        for line in lines:
+        valid_entries = []
+        for attempt in range(3):
             self._raise_if_stop_requested()
-            sp = line.split("\t")
-            if len(sp) < 3:
+            try:
+                rsp, token = await self.ask_chatbot(
+                    prompt=prompt, system=GENDIC_SYSTEM
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                if attempt == 2:
+                    LOGGER.error(
+                        f"GenDic 分片 {task_index} LLM请求失败，已重试3次，放弃该分片: {e}"
+                    )
+                    return
                 continue
 
-            if "日文" in sp[0]:
-                continue
-            src = sp[0]
-            dst = sp[1]
-            note = sp[2]
-            if runtime_preview_count < runtime_preview_limit:
+            if should_print_translation_logs(self.pj_config):
+                print(rsp)
+
+            lines = rsp.split("\n")
+            local_valid = []
+            for line in lines:
+                self._raise_if_stop_requested()
+                sp = line.split("\t")
+                if len(sp) < 3:
+                    continue
+                if "日文" in sp[0]:
+                    continue
+                src = sp[0].strip()
+                dst = sp[1].strip()
+                note = sp[2].strip()
+                if not src or not dst:
+                    continue
+                if src == "NULL" and dst == "NULL":
+                    return
+                local_valid.append((src, dst, note))
+
+            if local_valid:
+                valid_entries = local_valid
+                break
+            else:
+                if attempt == 2:
+                    LOGGER.warning(
+                        f"GenDic 分片 {task_index} 连续3次未解析到有效词条，放弃该分片"
+                    )
+                    return
+
+        for idx, (src, dst, note) in enumerate(valid_entries):
+            if idx < 3:
                 self._record_runtime_success(
                     index=task_index,
                     source_preview=src,
                     translation_preview=f"{dst}｜{note}",
                 )
-                runtime_preview_count += 1
             with self.counter_lock:
-                if src in self.dic_counter:
-                    self.dic_counter[src] += 1
-                    if self.dic_counter[src] == 2:
-                        if should_print_translation_logs(self.pj_config):
-                            print(f"{src}\t{dst}\t{note}")
-                else:
-                    self.dic_counter[src] = 1
+                self.dic_counter[src] += 1
+                self.dic_votes[src][(dst, note)] += 1
+                if self.dic_counter[src] == 1:
                     with self.list_lock:
                         self.dic_list.append([src, dst, note])
+                elif self.dic_counter[src] == 2:
+                    if should_print_translation_logs(self.pj_config):
+                        print(f"{src}\t{dst}\t{note}")
 
     async def batch_translate(
         self,
@@ -225,6 +292,20 @@ class GenDic(BaseTranslate):
                 segment_list.append(tmp_text)
                 bar.title = "处理分词……"
 
+                # 收集已有字典翻译，用于去重与提示
+                existing_dict_map: Dict[str, Tuple[str, str]] = {}
+                for attr in ("gpt_dic", "pre_dic", "post_dic"):
+                    dic_obj = getattr(self.pj_config, attr, None)
+                    if dic_obj is None:
+                        continue
+                    dic_list = getattr(dic_obj, "dic_list", None) or getattr(dic_obj, "_dic_list", None) or []
+                    for dic in dic_list:
+                        if dic.search_word and dic.replace_word:
+                            note = getattr(dic, "note", "") or ""
+                            existing_dict_map[dic.search_word] = (dic.replace_word, note)
+                self.existing_dict_map = existing_dict_map
+                all_text = "\n".join(segment_list)
+
                 for item in segment_list:
                     self._raise_if_stop_requested()
                     tmp_words = set()
@@ -241,11 +322,26 @@ class GenDic(BaseTranslate):
                             if contains_katakana(surf):
                                 tmp_words.add(surf)
                                 word_counter[surf] += 1
+
+                    # 正则补充层：片假名序列、引号/括号内词组
+                    for w in _extract_regex_terms(item):
+                        tmp_words.add(w)
+                        word_counter[w] += 1
+
+                    # 名字强制保留到 Set Cover（确保仅出现一次的名字也被覆盖）
+                    for name in name_set:
+                        if name in item and len(name) >= 2:
+                            tmp_words.add(name)
+                            if word_counter[name] < 2:
+                                word_counter[name] += 1
+
                     segment_words_list.append(tmp_words)
                     bar()
 
+            # 放宽过滤：名字和纯片假名词允许出现1次，其他仍需>=2
             word_counter = {
-                word: count for word, count in word_counter.items() if count >= 2
+                word: count for word, count in word_counter.items()
+                if count >= 2 or word in name_set or _is_katakana_only(word)
             }
             segment_words_list_new = []
             for item in segment_words_list:
@@ -256,8 +352,7 @@ class GenDic(BaseTranslate):
                         item_new.add(word)
                 segment_words_list_new.append(item_new)
 
-            index_list = solve_sentence_selection(segment_words_list_new)
-            index_list = index_list[:128]
+            index_list = solve_sentence_selection(segment_words_list_new, max_select=128, name_set=name_set)
             self._prepare_runtime_progress(len(index_list))
             LOGGER.info(f"启动{self.wokers}个工作线程，共{len(index_list)}个任务")
             sem = asyncio.Semaphore(self.wokers)
@@ -311,28 +406,44 @@ class GenDic(BaseTranslate):
                     raise
 
             self.dic_list.sort(key=lambda x: self.dic_counter[x[0]], reverse=True)
-            final_list = []
+
+            # 用多数投票结果覆盖 dic_list 中的翻译和备注
+            for i in range(len(self.dic_list)):
+                src = self.dic_list[i][0]
+                if src in self.dic_votes and self.dic_votes[src]:
+                    (best_dst, best_note), _ = self.dic_votes[src].most_common(1)[0]
+                    self.dic_list[i][1] = best_dst
+                    self.dic_list[i][2] = best_note
+
+            # 最终列表：先合并已有字典翻译（出现在当前文本中的），再合并 LLM 提取结果
+            final_set: Dict[str, List[str]] = {}
+            for src, (dst, note) in getattr(self, "existing_dict_map", {}).items():
+                if src in all_text:
+                    final_set[src] = [src, dst, note or ""]
+
             for item in self.dic_list:
-                self._raise_if_stop_requested()
-                if "NULL" in item[0]:
+                src = item[0]
+                if src in final_set:
+                    continue
+                if "NULL" in src:
+                    continue
+                if src in H_WORDS_LIST:
+                    continue
+                if "（" not in src and "（" in item[1]:
                     continue
 
-                if item[0] in H_WORDS_LIST:
-                    continue
-                if "（" not in item[0] and "（" in item[1]:
-                    continue
-
-                if self.dic_counter[item[0]] > 1:
-                    final_list.append(item)
+                if self.dic_counter[src] > 1:
+                    final_set[src] = item
                 elif "人名" in item[2]:
-                    final_list.append(item)
+                    final_set[src] = item
                 elif "地名" in item[2]:
-                    final_list.append(item)
-                elif item[0] in word_counter:
-                    final_list.append(item)
-                elif item[0] in name_set:
-                    final_list.append(item)
+                    final_set[src] = item
+                elif src in word_counter:
+                    final_set[src] = item
+                elif src in name_set:
+                    final_set[src] = item
 
+            final_list = list(final_set.values())
             result_path = os.path.join(self.pj_config.getProjectDir(), "项目GPT字典-生成.txt")
 
             with open(result_path, "w", encoding="utf-8") as f:
@@ -347,33 +458,97 @@ class GenDic(BaseTranslate):
             self._cleanup_runtime_progress()
 
 
-def solve_sentence_selection(sentences):
-    all_words = set()
-    for sentence in sentences:
-        all_words.update(sentence)
+def solve_sentence_selection(sentences, max_select=128, name_set=None):
+    """
+    加权贪心集合覆盖 + 逆向精简。
 
-    covered_words = set()
-    selected_indices = []
-    remaining_sentences_indices = list(range(len(sentences)))
+    策略：
+    1. 词权重 = 1 / doc_freq，越稀有的词权重越高；
+    2. name_set 中的词额外乘高系数，确保名字相关切片优先入选；
+    3. 贪心阶段每次选带来最大加权新覆盖的句子；
+    4. 若选出的句子超过 max_select，逆向精简：
+       计算每个句子的边际贡献（该句独有的词加权总和），
+       若移除会导致名字词完全丢失，则大幅抬高边际贡献避免被剔除，
+       循环剔除边际贡献最小的句子直到 <= max_select。
+    """
+    if not sentences:
+        return []
 
-    while covered_words != all_words and remaining_sentences_indices:
-        best_sentence_index = -1
-        max_new_coverage = -1
+    name_set = name_set or set()
 
-        for index in remaining_sentences_indices:
-            sentence = sentences[index]
-            new_coverage = len(sentence - covered_words)
+    # 1) 词频
+    doc_freq = collections.Counter()
+    for s in sentences:
+        for w in s:
+            doc_freq[w] += 1
 
-            if new_coverage > max_new_coverage:
-                max_new_coverage = new_coverage
-                best_sentence_index = index
+    # 2) 词权重函数
+    def _weight(word):
+        w = 1.0 / doc_freq[word]
+        if word in name_set:
+            w *= 5.0
+        return w
 
-        if best_sentence_index != -1:
-            best_sentence = sentences[best_sentence_index]
-            covered_words.update(best_sentence)
-            selected_indices.append(best_sentence_index)
-            remaining_sentences_indices.remove(best_sentence_index)
-        else:
-            break
+    # 3) 加权贪心选择
+    covered = set()
+    selected = []
+    remaining = set(range(len(sentences)))
 
-    return selected_indices
+    while remaining and len(selected) < max_select:
+        best_idx = -1
+        best_score = -1.0
+
+        for idx in remaining:
+            s = sentences[idx]
+            new_words = s - covered
+            if not new_words:
+                continue
+            score = sum(_weight(w) for w in new_words)
+            # 平局打破：新覆盖相同则优先选总长度更短/更精炼的句子
+            if score > best_score or (
+                abs(score - best_score) < 1e-9 and len(s) < len(sentences[best_idx])
+            ):
+                best_score = score
+                best_idx = idx
+
+        if best_idx == -1:
+            break  # 没有新覆盖可带来
+
+        selected.append(best_idx)
+        covered.update(sentences[best_idx])
+        remaining.discard(best_idx)
+
+    # 4) 逆向精简：若超过 max_select，剔除冗余
+    if len(selected) > max_select:
+        cover_count = collections.Counter()
+        for idx in selected:
+            for w in sentences[idx]:
+                cover_count[w] += 1
+
+        while len(selected) > max_select:
+            min_idx = -1
+            min_contrib = float("inf")
+
+            for i, idx in enumerate(selected):
+                contrib = 0.0
+                would_lose_name = False
+                for w in sentences[idx]:
+                    if cover_count[w] == 1:
+                        contrib += _weight(w)
+                        if w in name_set:
+                            would_lose_name = True
+                # 若移除会导致名字词丢失，大幅抬高边际贡献使其不被剔除
+                if would_lose_name:
+                    contrib += 1e6
+                if contrib < min_contrib:
+                    min_contrib = contrib
+                    min_idx = i
+
+            if min_idx == -1:
+                break
+
+            removed = selected.pop(min_idx)
+            for w in sentences[removed]:
+                cover_count[w] -= 1
+
+    return selected
