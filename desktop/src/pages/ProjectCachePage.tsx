@@ -1213,9 +1213,8 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
                       }}
                       onContextMenu={(e) => {
                         e.preventDefault();
-                        // If this file is not in the current selection, start a new selection with just this file
+                        // 右键仅决定本次菜单作用目标，避免触发选择栏插入导致菜单视觉错位
                         const targetFiles = isSelected ? Array.from(selectedFiles) : [file.name];
-                        if (!isSelected) setSelectedFiles(new Set([file.name]));
                         setContextMenu({
                           x: e.clientX,
                           y: e.clientY,
