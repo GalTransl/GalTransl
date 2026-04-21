@@ -587,6 +587,13 @@ async def doLLMTranslate(
                 except asyncio.CancelledError:
                     pass  # 捕获预期的取消错误
 
+            shutdown_callable = getattr(gptapi, "shutdown", None)
+            if callable(shutdown_callable):
+                try:
+                    await shutdown_callable()
+                except Exception as ex:
+                    LOGGER.warning(f"关闭模型客户端时出错: {str(ex)}")
+
 
 async def doLLMTranslSingleChunk(
     semaphore: asyncio.Semaphore,

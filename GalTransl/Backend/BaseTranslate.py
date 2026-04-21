@@ -20,6 +20,7 @@ from openai import DefaultAioHttpClient
 from openai._types import NOT_GIVEN
 import random
 import time
+from contextlib import suppress
 from GalTransl.TerminalOutput import should_print_translation_logs
 
 
@@ -162,6 +163,7 @@ class BaseTranslate:
             self.proxyProvider = None
 
         self._current_temp_type = ""
+        self._shutdown_done = False
 
         if self.target_lang == "Simplified_Chinese":
             self.opencc = OpenCC("t2s.json")
@@ -619,6 +621,8 @@ class BaseTranslate:
                 while not api_task.done():
                     if self._is_stop_requested(self.pj_config):
                         api_task.cancel()
+                        with suppress(BaseException):
+                            await api_task
                         from GalTransl.Service import JobCancelledError
                         raise JobCancelledError()
                     done, _ = await asyncio.wait({api_task}, timeout=0.5)
@@ -631,57 +635,62 @@ class BaseTranslate:
                 if is_stream:
                     stream_abort_requested = False
                     stream_line_buffer = ""
-                    async for chunk in response:
-                        # Check stop in the middle of streaming so we don't
-                        # have to wait for the entire stream to finish.
-                        if self._is_stop_requested(self.pj_config):
-                            from GalTransl.Service import JobCancelledError
-                            raise JobCancelledError()
-                        if not chunk.choices:
-                            continue
-                        if hasattr(chunk.choices[0].delta, "reasoning_content"):
-                            lastline = lastline + (
-                                chunk.choices[0].delta.reasoning_content or ""
-                            )
-                        if hasattr(chunk.choices[0].delta, "content"):
-                            content_piece = chunk.choices[0].delta.content or ""
-                            result = result + content_piece
-                            lastline = lastline + content_piece
-                            stream_line_buffer += content_piece
-                            if stream_line_callback and "\n" in stream_line_buffer:
-                                line_parts = stream_line_buffer.split("\n")
-                                finished_lines = line_parts[:-1]
-                                stream_line_buffer = line_parts[-1]
-                                try:
-                                    callback_result = stream_line_callback(
-                                        finished_lines, False
-                                    )
-                                    if callback_result is False:
-                                        stream_abort_requested = True
-                                        break
-                                except Exception:
-                                    pass
-                        if "\n" in lastline:
-                            if should_print_translation_logs(self.pj_config) and self.pj_config.active_workers == 1:
-                                lastline_sp = lastline.split("\n")
-                                print("\n".join(lastline_sp[:-1]))
-                                lastline = lastline_sp[-1]
-                    if stream_line_callback and stream_line_buffer:
-                        try:
-                            callback_result = stream_line_callback(
-                                [stream_line_buffer], True
-                            )
-                            if callback_result is False:
+                    stream_completed = False
+                    try:
+                        async for chunk in response:
+                            # Check stop in the middle of streaming so we don't
+                            # have to wait for the entire stream to finish.
+                            if self._is_stop_requested(self.pj_config):
                                 stream_abort_requested = True
-                        except Exception:
-                            pass
-                    if stream_abort_requested:
-                        close_stream = getattr(response, "aclose", None)
-                        if callable(close_stream):
+                                from GalTransl.Service import JobCancelledError
+                                raise JobCancelledError()
+                            if not chunk.choices:
+                                continue
+                            if hasattr(chunk.choices[0].delta, "reasoning_content"):
+                                lastline = lastline + (
+                                    chunk.choices[0].delta.reasoning_content or ""
+                                )
+                            if hasattr(chunk.choices[0].delta, "content"):
+                                content_piece = chunk.choices[0].delta.content or ""
+                                result = result + content_piece
+                                lastline = lastline + content_piece
+                                stream_line_buffer += content_piece
+                                if stream_line_callback and "\n" in stream_line_buffer:
+                                    line_parts = stream_line_buffer.split("\n")
+                                    finished_lines = line_parts[:-1]
+                                    stream_line_buffer = line_parts[-1]
+                                    try:
+                                        callback_result = stream_line_callback(
+                                            finished_lines, False
+                                        )
+                                        if callback_result is False:
+                                            stream_abort_requested = True
+                                            break
+                                    except Exception:
+                                        pass
+                            if "\n" in lastline:
+                                if should_print_translation_logs(self.pj_config) and self.pj_config.active_workers == 1:
+                                    lastline_sp = lastline.split("\n")
+                                    print("\n".join(lastline_sp[:-1]))
+                                    lastline = lastline_sp[-1]
+                        stream_completed = True
+                        if stream_line_callback and stream_line_buffer:
                             try:
-                                await close_stream()
+                                callback_result = stream_line_callback(
+                                    [stream_line_buffer], True
+                                )
+                                if callback_result is False:
+                                    stream_abort_requested = True
                             except Exception:
                                 pass
+                    finally:
+                        if not stream_completed or stream_abort_requested:
+                            close_stream = getattr(response, "aclose", None)
+                            if callable(close_stream):
+                                try:
+                                    await close_stream()
+                                except Exception:
+                                    pass
                 else:
                     try:
                         result = response.choices[0].message.content
@@ -779,6 +788,34 @@ class BaseTranslate:
 
     def clean_up(self):
         pass
+
+    async def shutdown(self):
+        if self._shutdown_done:
+            return
+        self._shutdown_done = True
+
+        for client, _ in getattr(self, "client_list", []):
+            if client is None:
+                continue
+
+            close_callable = getattr(client, "close", None)
+            if callable(close_callable):
+                try:
+                    maybe_coro = close_callable()
+                    if asyncio.iscoroutine(maybe_coro):
+                        await maybe_coro
+                    continue
+                except Exception:
+                    pass
+
+            aclose_callable = getattr(client, "aclose", None)
+            if callable(aclose_callable):
+                try:
+                    maybe_coro = aclose_callable()
+                    if asyncio.iscoroutine(maybe_coro):
+                        await maybe_coro
+                except Exception:
+                    pass
 
     def translate(self, trans_list: CTransList, gptdict=""):
         pass
