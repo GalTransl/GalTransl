@@ -341,9 +341,34 @@ class _CacheProgressFileStat:
     failed_keys: frozenset[str]
 
 
+@dataclass(slots=True)
+class _RetranConfigStat:
+    mtime_ns: int
+    size: int
+    retran_key: str | list[str]
+
+
+def _normalize_retran_key(value: Any) -> str | list[str]:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return [str(item) for item in value if item]
+    return ""
+
+
+def _check_retran_key(retran_key: str | list[str], target: Any) -> bool:
+    text = str(target or "")
+    if isinstance(retran_key, str):
+        return bool(retran_key) and retran_key in text
+    if isinstance(retran_key, list):
+        return any(key in text for key in retran_key if key)
+    return False
+
+
 class RuntimeProgressCache:
     def __init__(self) -> None:
         self._project_files: dict[str, dict[str, _CacheProgressFileStat]] = {}
+        self._retran_config_cache: dict[str, _RetranConfigStat] = {}
         self._lock = threading.Lock()
 
     def reset_project(self, project_dir: str) -> None:
@@ -351,11 +376,50 @@ class RuntimeProgressCache:
         with self._lock:
             self._project_files.pop(normalized, None)
 
+    def get_retran_key(self, project_dir: str, config_file_name: str = "config.yaml") -> str | list[str]:
+        config_path = os.path.join(project_dir, config_file_name or "config.yaml")
+        normalized_config = str(Path(config_path).resolve())
+
+        try:
+            stat = os.stat(config_path)
+        except OSError:
+            with self._lock:
+                self._retran_config_cache.pop(normalized_config, None)
+            return ""
+
+        with self._lock:
+            cached = self._retran_config_cache.get(normalized_config)
+            if (
+                cached is not None
+                and cached.mtime_ns == int(stat.st_mtime_ns)
+                and cached.size == int(stat.st_size)
+            ):
+                return cached.retran_key
+
+        retran_key: str | list[str] = ""
+        try:
+            with open(config_path, "rb") as cfg_file:
+                cfg = safe_load(cfg_file.read()) or {}
+            common = cfg.get("common", {}) if isinstance(cfg, dict) else {}
+            retran_key = _normalize_retran_key(common.get("retranslKey", ""))
+        except Exception:
+            retran_key = ""
+
+        with self._lock:
+            self._retran_config_cache[normalized_config] = _RetranConfigStat(
+                mtime_ns=int(stat.st_mtime_ns),
+                size=int(stat.st_size),
+                retran_key=retran_key,
+            )
+
+        return retran_key
+
     def get_progress(
         self,
         project_dir: str,
         file_totals: dict[str, int],
         cache_file_display_map: dict[str, str],
+        retran_key: str | list[str] = "",
     ) -> dict[str, Any]:
         normalized = _normalize_project_dir(project_dir)
         cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
@@ -480,6 +544,19 @@ class RuntimeProgressCache:
                             or "(Failed)" in str(item.get("pre_dst", "") or item.get("pre_zh", ""))
                             or "(翻译失败)" in str(item.get("pre_dst", "") or item.get("pre_zh", ""))
                         )
+
+                        no_proofread = str(item.get("proofread_dst", "") or "") == ""
+                        if (
+                            is_translated
+                            and not entry.name.endswith(_CACHE_APPEND_SUFFIX)
+                            and retran_key
+                            and no_proofread
+                            and (
+                                _check_retran_key(retran_key, item.get("pre_src", item.get("pre_jp", "")))
+                                or _check_retran_key(retran_key, item.get("problem", ""))
+                            )
+                        ):
+                            is_translated = False
 
                         if is_translated:
                             translated_keys.add(entry_key)
@@ -1970,10 +2047,15 @@ def build_handler(registry: JobRegistry):
                 runtime = RUNTIME_REGISTRY.get_runtime_snapshot(project_dir)
                 file_totals = runtime.get("file_totals", {})
                 cache_file_display_map = runtime.get("cache_file_display_map", {})
+                config_file_name = "config.yaml"
+                if job := registry.get_project_job(project_dir):
+                    config_file_name = job.config_file_name or "config.yaml"
+                retran_key = RUNTIME_PROGRESS_CACHE.get_retran_key(project_dir, config_file_name)
                 progress_payload = RUNTIME_PROGRESS_CACHE.get_progress(
                     project_dir,
                     file_totals=file_totals,
                     cache_file_display_map=cache_file_display_map,
+                    retran_key=retran_key,
                 )
                 job = registry.get_project_job(project_dir)
                 total = progress_payload["total"]
