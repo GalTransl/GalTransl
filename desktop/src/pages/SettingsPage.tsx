@@ -320,7 +320,7 @@ export function SettingsPage() {
 
           <label className="settings-number-row">
             <span className="settings-number-row__label">自定义背景</span>
-            <div className="settings-number-row__control settings-background-control">
+           <div className="settings-number-row__control settings-background-control">
               <input
                 ref={customBackgroundInputRef}
                 className="settings-background-control__file-input"
@@ -328,29 +328,31 @@ export function SettingsPage() {
                 accept="image/*"
                 onChange={handleCustomBackgroundFileChange}
               />
-              <button
-                type="button"
-                className="settings-background-control__pick"
-                onClick={triggerCustomBackgroundPicker}
-                disabled={customBackgroundBusy}
-              >
-                {customBackgroundBusy ? '处理中…' : customBackgroundImageDataUrl ? '更换图片' : '选择图片'}
-              </button>
               <span
                 className={`settings-background-control__filename${customBackgroundImageName ? '' : ' settings-background-control__filename--empty'}`}
                 title={customBackgroundImageName || '尚未选择图片'}
               >
                 {customBackgroundImageName || '尚未选择图片'}
               </span>
-              <button
-                type="button"
-                className="settings-background-control__clear"
-                onClick={clearCustomBackground}
-                disabled={!customBackgroundImageDataUrl || customBackgroundBusy}
-                aria-label="清除自定义背景"
-              >
-                清除
-              </button>
+              <span className="settings-background-control__actions">
+                <button
+                  type="button"
+                  className="settings-background-control__pick"
+                  onClick={triggerCustomBackgroundPicker}
+                  disabled={customBackgroundBusy}
+                >
+                  {customBackgroundBusy ? '处理中…' : customBackgroundImageDataUrl ? '更换图片' : '选择图片'}
+                </button>
+                <button
+                  type="button"
+                  className="settings-background-control__clear"
+                  onClick={clearCustomBackground}
+                  disabled={!customBackgroundImageDataUrl || customBackgroundBusy}
+                  aria-label="清除自定义背景"
+                >
+                  清除
+                </button>
+              </span>
             </div>
           </label>
 
