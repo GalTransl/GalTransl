@@ -471,9 +471,36 @@ class BaseTranslate:
             )
 
             if num <= 0 and not trans_result:
-                raise RuntimeError(
-                    f"[{filename}:{self._build_idx_tip(trans_list_split)}] translate returned no progress"
+                LOGGER.warning(
+                    f"[{filename}:{self._build_idx_tip(trans_list_split)}] translate returned no progress, retrying once"
                 )
+                self._check_stop_requested()
+                await asyncio.sleep(1)
+                # 重试一次
+                num, trans_result = await self.translate(
+                    trans_list_split,
+                    dic_prompt,
+                    proofread=proofread,
+                    filename=filename,
+                )
+
+            if num <= 0 and not trans_result:
+                LOGGER.error(
+                    f"[{filename}:{self._build_idx_tip(trans_list_split)}] translate returned no progress after retry, marking batch as failed"
+                )
+                fallback_list = []
+                # 按翻译失败处理
+                self._append_parse_failure_fallback_results(
+                    trans_list_split,
+                    0,
+                    fallback_list,
+                    "",
+                    proofread=proofread,
+                    translate_failed_prefix="(Failed)",
+                    translate_problem_message="翻译失败",
+                )
+                trans_result = fallback_list
+                num = len(fallback_list)
 
             if num > 0:
                 i += num
