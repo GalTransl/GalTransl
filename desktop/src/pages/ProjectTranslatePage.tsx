@@ -458,7 +458,15 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
       current.includes(filename) ? current.filter((name) => name !== filename) : [...current, filename],
     );
   }, []);
-  const handleClearSuccessFileFilters = useCallback(() => setSelectedSuccessFiles([]), []);
+  const handleClearSuccessFileFilters = useCallback(() => {
+    setSelectedSuccessFiles([]);
+    shouldStickToBottomRef.current = true;
+    window.requestAnimationFrame(() => {
+      const container = successListRef.current;
+      if (!container) return;
+      container.scrollTop = container.scrollHeight;
+    });
+  }, []);
 
   const selectedSuccessFileSet = useMemo(() => new Set(selectedSuccessFiles), [selectedSuccessFiles]);
   const hasSelectedSuccessFileFilter = selectedSuccessFiles.length > 0;
