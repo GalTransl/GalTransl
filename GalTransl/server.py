@@ -356,6 +356,8 @@ class _CacheProgressFileStat:
     translated_keys: frozenset[str]
     problem_keys: frozenset[str]
     failed_keys: frozenset[str]
+    retran_terms_signature: tuple[str, ...] = field(default_factory=tuple)
+    retran_hit_keys: dict[str, frozenset[str]] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -371,6 +373,20 @@ def _normalize_retran_key(value: Any) -> str | list[str]:
     if isinstance(value, list):
         return [str(item) for item in value if item]
     return ""
+
+
+def _normalize_retran_terms(value: str | list[str]) -> list[str]:
+    if isinstance(value, str):
+        normalized = value.strip()
+        return [normalized] if normalized else []
+    if isinstance(value, list):
+        result: list[str] = []
+        for item in value:
+            text = str(item or "").strip()
+            if text:
+                result.append(text)
+        return result
+    return []
 
 
 def _check_retran_key(retran_key: str | list[str], target: Any) -> bool:
@@ -449,10 +465,13 @@ class RuntimeProgressCache:
         file_totals: dict[str, int],
         cache_file_display_map: dict[str, str],
         retran_key: str | list[str] = "",
+        retran_terms: list[str] | None = None,
         current_job_started_at_ns: int | None = None,
     ) -> dict[str, Any]:
         normalized = _normalize_project_dir(project_dir)
         cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+        retran_terms = retran_terms or []
+        retran_terms_signature = tuple(retran_terms)
 
         with self._lock:
             project_stats = self._project_files.setdefault(normalized, {})
@@ -481,12 +500,14 @@ class RuntimeProgressCache:
                         cached is not None
                         and cached.mtime_ns == int(stat.st_mtime_ns)
                         and cached.size == int(stat.st_size)
+                        and cached.retran_terms_signature == retran_terms_signature
                     ):
                         continue
 
                     translated_keys: set[str] = set()
                     problem_keys: set[str] = set()
                     failed_keys: set[str] = set()
+                    retran_hit_keys: dict[str, set[str]] = {term: set() for term in retran_terms}
 
                     def _name_src(items: list[Any], idx: int) -> str:
                         if idx < 0 or idx >= len(items):
@@ -603,6 +624,18 @@ class RuntimeProgressCache:
                         ):
                             is_translated = False
 
+                        if (
+                            is_translated
+                            and not entry.name.endswith(_CACHE_APPEND_SUFFIX)
+                            and no_proofread
+                            and retran_hit_keys
+                        ):
+                            source_text = item.get("pre_src", item.get("pre_jp", ""))
+                            problem_text = item.get("problem", "")
+                            for term in retran_terms:
+                                if _check_retran_key(term, source_text) or _check_retran_key(term, problem_text):
+                                    retran_hit_keys[term].add(entry_key)
+
                         if is_translated:
                             translated_keys.add(entry_key)
                         if is_problem:
@@ -616,6 +649,11 @@ class RuntimeProgressCache:
                         translated_keys=frozenset(translated_keys),
                         problem_keys=frozenset(problem_keys),
                         failed_keys=frozenset(failed_keys),
+                        retran_terms_signature=retran_terms_signature,
+                        retran_hit_keys={
+                            term: frozenset(hit_keys)
+                            for term, hit_keys in retran_hit_keys.items()
+                        },
                     )
 
             stale_files = [name for name in project_stats if name not in seen_files]
@@ -623,6 +661,7 @@ class RuntimeProgressCache:
                 project_stats.pop(name, None)
 
             file_progress_map: dict[str, dict[str, Any]] = {}
+            retran_counts: dict[str, set[str]] = {term: set() for term in retran_terms}
 
             for name, stat in project_stats.items():
                 canonical_name = (
@@ -647,6 +686,8 @@ class RuntimeProgressCache:
                 file_progress_map[display_name]["_translated_keys"].update(stat.translated_keys)
                 file_progress_map[display_name]["_problem_keys"].update(stat.problem_keys)
                 file_progress_map[display_name]["_failed_keys"].update(stat.failed_keys)
+                for term, hit_keys in stat.retran_hit_keys.items():
+                    retran_counts.setdefault(term, set()).update(hit_keys)
 
             for display_name, total_count in file_totals.items():
                 file_progress_map.setdefault(
@@ -687,6 +728,10 @@ class RuntimeProgressCache:
                 "translated": sum(int(item["translated"]) for item in files),
                 "problems": sum(int(item["problems"]) for item in files),
                 "failed": sum(int(item["failed"]) for item in files),
+                "retransl_stats": [
+                    {"key": term, "count": len(retran_counts.get(term, set()))}
+                    for term in retran_terms
+                ],
                 "files": files,
             }
 
@@ -2097,16 +2142,19 @@ def build_handler(registry: JobRegistry):
                 job = registry.get_project_job(project_dir)
                 if job:
                     config_file_name = job.config_file_name or "config.yaml"
+                config_retran_key = RUNTIME_PROGRESS_CACHE.get_retran_key(project_dir, config_file_name)
+                retran_terms = _normalize_retran_terms(config_retran_key)
                 retran_key = ""
                 current_job_started_at_ns = None
                 if job and job.status in {"pending", "running"}:
-                    retran_key = RUNTIME_PROGRESS_CACHE.get_retran_key(project_dir, config_file_name)
+                    retran_key = config_retran_key
                     current_job_started_at_ns = _parse_runtime_job_started_at_ns(job.started_at)
                 progress_payload = RUNTIME_PROGRESS_CACHE.get_progress(
                     project_dir,
                     file_totals=file_totals,
                     cache_file_display_map=cache_file_display_map,
                     retran_key=retran_key,
+                    retran_terms=retran_terms,
                     current_job_started_at_ns=current_job_started_at_ns,
                 )
                 total = progress_payload["total"]
@@ -2142,6 +2190,7 @@ def build_handler(registry: JobRegistry):
                     "current_file": runtime["current_file"],
                     "recent_errors": runtime["recent_errors"],
                     "recent_successes": runtime["recent_successes"],
+                    "retransl_stats": progress_payload["retransl_stats"],
                     "files": progress_payload["files"],
                 })
                 return

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { ProjectPageContext } from '../components/ProjectLayout';
 import { Panel } from '../components/Panel';
 import { PageHeader } from '../components/PageHeader';
@@ -35,7 +36,12 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   const [error, setError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [activeSection, setActiveSection] = useState<ConfigSectionKey>('common');
+  const [searchParams] = useSearchParams();
+  const [activeSection, setActiveSection] = useState<ConfigSectionKey>(() => {
+    const s = searchParams.get('section');
+    if (s && ['common', 'backendSpecific', 'plugin', 'dictionary', 'problemAnalyze', 'retranslKey'].includes(s)) return s as ConfigSectionKey;
+    return 'common';
+  });
   const [yamlView, setYamlView] = useState(false);
 
   // Global backend profile selection

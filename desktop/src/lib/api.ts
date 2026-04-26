@@ -208,6 +208,11 @@ export type ProjectRuntimeSuccessEntry = {
   trans_by: string;
 };
 
+export type ProjectRetranslStatEntry = {
+  key: string;
+  count: number;
+};
+
 export type ProjectRuntimeResponse = {
   project_dir: string;
   job: RuntimeJob | null;
@@ -216,6 +221,7 @@ export type ProjectRuntimeResponse = {
   current_file: string;
   recent_errors: ProjectRuntimeErrorEntry[];
   recent_successes: ProjectRuntimeSuccessEntry[];
+  retransl_stats: ProjectRetranslStatEntry[];
   files: FileProgress[];
 };
 

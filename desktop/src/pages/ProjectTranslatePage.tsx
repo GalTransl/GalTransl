@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { ProjectPageContext } from '../components/ProjectLayout';
 import { Button } from '../components/Button';
 import { CustomSelect } from '../components/CustomSelect';
@@ -53,8 +54,14 @@ const HIDDEN_TRANSLATORS = new Set(['rebuilda', 'rebuildr', 'show-plugs', 'dump-
 let cachedJobs: Job[] = [];
 const cachedRuntimeByProject = new Map<string, ProjectRuntimeResponse>();
 
+type RetranslListItem = {
+  key: string;
+  count: number;
+};
+
 export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const { projectDir, projectId, configFileName } = ctx;
+  const navigate = useNavigate();
   const { connectionPhase, translators, loadJobs } = useConnection();
   const reducedMotion = usePrefersReducedMotion();
   const { nameDict } = useNameDict(projectId);
@@ -75,7 +82,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const successListRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
   const [rightTab, setRightTab] = useState<'errors' | 'files' | 'retransl'>('errors');
-  const [retranslKeys, setRetranslKeys] = useState<string[]>([]);
+  const [retranslKeys, setRetranslKeys] = useState<RetranslListItem[]>([]);
   const [launchPhase, setLaunchPhase] = useState<'idle' | 'charging' | 'blasting'>('idle');
   const [stripBooting, setStripBooting] = useState(false);
   const [barSurging, setBarSurging] = useState(false);
@@ -150,7 +157,10 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
       } else if (typeof raw === 'string') {
         keys = raw.split(/\r?\n/).map((k) => k.trim()).filter(Boolean);
       }
-      setRetranslKeys(keys);
+      const runtimeStats = new Map(
+        (cachedRuntimeByProject.get(projectId)?.retransl_stats || []).map((item) => [item.key, item.count]),
+      );
+      setRetranslKeys(keys.map((key) => ({ key, count: runtimeStats.get(key) ?? 0 })));
     } catch {
       // silent; keep prior list
     }
@@ -164,6 +174,12 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     if (rightTab !== 'retransl') return;
     void refreshRetranslKeys();
   }, [rightTab, refreshRetranslKeys]);
+
+  useEffect(() => {
+    if (rightTab !== 'retransl') return;
+    if (!projectId) return;
+    void refreshRetranslKeys();
+  }, [projectId, refreshRetranslKeys, rightTab, runtime?.retransl_stats]);
 
   useEffect(() => {
     const poller = window.setInterval(() => {
@@ -800,10 +816,20 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
               ) : (
                 retranslKeys.length > 0 ? (
                   <ul className="ptv2-retransl-list">
-                    {retranslKeys.map((key, idx) => (
-                      <li className="ptv2-retransl-list__item" key={`${idx}-${key}`}>
+                    {retranslKeys.map((item, idx) => (
+                      <li
+                        className="ptv2-retransl-list__item ptv2-retransl-list__item--link"
+                        key={`${idx}-${item.key}`}
+                        role="button"
+                        tabIndex={0}
+                        title="点击跳转到配置编辑-重翻关键字"
+                        onClick={() => navigate(`/project/${projectId}/config?section=retranslKey`)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/project/${projectId}/config?section=retranslKey`); } }}
+                      >
                         <span className="ptv2-retransl-list__index">{idx + 1}</span>
-                        <span className="ptv2-retransl-list__text">{key}</span>
+                        <span className="ptv2-retransl-list__text">{item.key}</span>
+                        <span className="ptv2-retransl-list__count">{item.count} 句</span>
+                        <span className="ptv2-retransl-list__arrow">›</span>
                       </li>
                     ))}
                   </ul>
