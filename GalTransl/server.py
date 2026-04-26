@@ -17,10 +17,11 @@ from datetime import datetime
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from yaml import safe_load, safe_dump
+from packaging.version import InvalidVersion, Version
 
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 
-from GalTransl import TRANSLATOR_SUPPORTED, INPUT_FOLDERNAME, OUTPUT_FOLDERNAME, CACHE_FOLDERNAME, GALTRANSL_VERSION
+from GalTransl import TRANSLATOR_SUPPORTED, INPUT_FOLDERNAME, OUTPUT_FOLDERNAME, CACHE_FOLDERNAME, GALTRANSL_VERSION, new_version
 from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
 from GalTransl.AppSettings import load_app_settings, save_app_settings
 from GalTransl.DefaultProjectConfig import DEFAULT_PROJECT_CONFIG_YAML
@@ -28,6 +29,22 @@ from GalTransl.DefaultProjectConfig import DEFAULT_PROJECT_CONFIG_YAML
 
 def _utcnow_text() -> str:
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+
+def _normalize_version_text(value: str) -> str:
+    return value.strip().removeprefix("v").removeprefix("V")
+
+
+def _has_newer_release(current_version: str, latest_version: str | None) -> bool:
+    if not latest_version:
+        return False
+
+    current_text = _normalize_version_text(current_version)
+    latest_text = _normalize_version_text(latest_version)
+    try:
+        return Version(latest_text) > Version(current_text)
+    except InvalidVersion:
+        return latest_text != current_text
 
 
 def _normalize_project_dir(project_dir: str) -> str:
@@ -2766,6 +2783,16 @@ def build_handler(registry: JobRegistry):
                 return
             if path == "/api/version":
                 self._send_json({"version": GALTRANSL_VERSION})
+                return
+            if path == "/api/version/check":
+                latest_version = new_version[0] if new_version else None
+                self._send_json(
+                    {
+                        "version": GALTRANSL_VERSION,
+                        "latest_version": latest_version,
+                        "update_available": _has_newer_release(GALTRANSL_VERSION, latest_version),
+                    }
+                )
                 return
             if path == "/api/translators":
                 _hidden_translators = {"show-plugs", "dump-name", "rebuildr", "rebuilda"}

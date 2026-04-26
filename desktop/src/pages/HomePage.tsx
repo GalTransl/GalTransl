@@ -9,6 +9,7 @@ import {
   fetchJobs,
   fetchProjectRuntime,
   fetchVersion,
+  fetchVersionCheck,
   getHomeHistoryRetentionLimit,
   getHomeJobRetentionLimit,
   HOME_HISTORY_LIMIT_CHANGE_EVENT,
@@ -195,6 +196,8 @@ export function HomePage({ onOpenProject }: HomePageProps) {
   const [shouldLoadJobProgress, setShouldLoadJobProgress] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [coreVersion, setCoreVersion] = useState<string | null>(null);
+  const [latestVersion, setLatestVersion] = useState<string | null>(null);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   const clearedJobIds = useRef<Set<string>>(loadClearedJobIds());
   const [jobProgressById, setJobProgressById] = useState<
     Record<
@@ -216,7 +219,28 @@ export function HomePage({ onOpenProject }: HomePageProps) {
   }, [historyLimit]);
 
   useEffect(() => {
-    fetchVersion().then(setCoreVersion).catch(() => undefined);
+    let cancelled = false;
+
+    // 当前版本：立即请求，快速显示
+    fetchVersion()
+      .then((version) => {
+        if (!cancelled) setCoreVersion(version);
+      })
+      .catch(() => undefined);
+
+    // 更新检查：异步叠加，不阻塞版本号显示
+    fetchVersionCheck()
+      .then((result) => {
+        if (cancelled) return;
+        setCoreVersion(result.version);
+        setLatestVersion(result.latest_version);
+        setUpdateAvailable(result.update_available);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -466,6 +490,16 @@ export function HomePage({ onOpenProject }: HomePageProps) {
             <p className="home-hero__description">基于AI大模型的galgame自动化翻译解决方案</p>
             <div className="home-hero__chips" aria-label="首页信息">
               <span className="home-hero__chip">版本 {coreVersion ? `v${coreVersion}` : '—'}</span>
+              {updateAvailable && latestVersion ? (
+                <a
+                  className="home-hero__chip home-hero__chip--update"
+                  href={PROJECT_HOMEPAGE + '/releases/latest'}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  发现新版本 v{latestVersion}
+                </a>
+              ) : null}
               <a className="home-hero__chip home-hero__chip--link" href={PROJECT_HOMEPAGE} target="_blank" rel="noreferrer noopener">
                 项目主页
               </a>

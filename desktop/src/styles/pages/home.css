@@ -868,6 +868,21 @@
   transition: transform var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
 }
 
+.home-hero__chip--update {
+  text-decoration: none;
+  border-color: rgba(255, 196, 112, 0.58);
+  color: rgba(255, 243, 214, 0.98);
+  background: rgba(117, 61, 8, 0.48);
+  transition: transform var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.home-hero__chip--update:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 213, 138, 0.92);
+  background: rgba(144, 74, 8, 0.66);
+  box-shadow: 0 10px 24px rgba(255, 173, 71, 0.18);
+}
+
 .home-hero__chip--link:hover {
   transform: translateY(-1px);
   border-color: rgba(147, 216, 255, 0.9);
@@ -1139,6 +1154,19 @@
   border-color: rgba(191, 208, 226, 0.9);
   background: rgba(255, 255, 255, 0.88);
   color: var(--color-text);
+}
+
+.home-hero__chip--update {
+  border-color: rgba(245, 181, 68, 0.54);
+  color: #8a4b00;
+  background: rgba(255, 195, 87, 0.18);
+}
+
+.home-hero__chip--update:hover {
+  border-color: rgba(230, 154, 9, 0.66);
+  background: rgba(255, 195, 87, 0.28);
+  transform: none;
+  box-shadow: none;
 }
 
 .home-hero__chip--link:hover {
@@ -1438,6 +1466,12 @@
 :root[data-theme='dark'] .home-hero__chip {
   border-color: rgba(65, 83, 111, 0.9);
   background: rgba(20, 29, 41, 0.9);
+}
+
+:root[data-theme='dark'] .home-hero__chip--update {
+  border-color: rgba(176, 115, 16, 0.72);
+  color: rgba(255, 230, 184, 0.98);
+  background: rgba(84, 48, 7, 0.72);
 }
 
 :root[data-theme='dark'] .home-hero__eyebrow {

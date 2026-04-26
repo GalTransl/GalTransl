@@ -150,7 +150,7 @@ export function ProjectLayout() {
             hidden={activeTab !== 'cache'}
             style={activeTab !== 'cache' ? { display: 'none' } : undefined}
           >
-            <ProjectCachePage ctx={ctx} />
+            <ProjectCachePage ctx={ctx} active={activeTab === 'cache'} />
           </div>
         ) : null}
       </Suspense>

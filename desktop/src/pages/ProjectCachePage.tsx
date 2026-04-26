@@ -286,7 +286,7 @@ function SearchResultCard({
 }
 
 /* ── Main Page ── */
-export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
+export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageContext; active?: boolean }) {
   const { projectId, configFileName } = ctx;
   const { nameDict } = useNameDict(projectId);
   const [cacheBrowserFontSize, setCacheBrowserFontSize] = useState(() => getCacheBrowserFontSizePreference());
@@ -345,6 +345,7 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
   const [refreshingFiles, setRefreshingFiles] = useState(false);
   const [loadingEntries, setLoadingEntries] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const activeRef = useRef(active);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterProblems, setFilterProblems] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -611,6 +612,42 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
     return () => { cancelled = true; };
   }, [projectId, selectedFile]);
 
+  const runGlobalSearch = useCallback(async () => {
+    if (!projectId || !searchQuery.trim()) {
+      setSearchResults([]);
+      setSearchTotal(0);
+      setSelectedSearchIdx(-1);
+      return;
+    }
+    setSearching(true);
+    try {
+      const res = await searchCache(projectId, searchQuery.trim(), searchField);
+      setSearchResults(res.results);
+      setSearchTotal(res.total);
+      setSelectedSearchIdx(-1);
+    } catch (err) {
+      setLocalError(normalizeError(err, '全局搜索失败'));
+      setSearchResults([]);
+      setSearchTotal(0);
+    } finally {
+      setSearching(false);
+    }
+  }, [projectId, searchField, searchQuery]);
+
+  const refreshCurrentFile = useCallback(async () => {
+    if (!projectId || !selectedFile || dirtyFiles.has(selectedFile)) return;
+    setLoadingEntries(true);
+    try {
+      const res = await fetchCacheFile(projectId, selectedFile);
+      entriesMapRef.current.set(selectedFile, res.entries);
+      setEntries(res.entries);
+    } catch (err) {
+      setLocalError(normalizeError(err, '刷新缓存内容失败'));
+    } finally {
+      setLoadingEntries(false);
+    }
+  }, [dirtyFiles, projectId, selectedFile]);
+
   useEffect(() => {
     if (!selectedFile) {
       pendingScrollRestoreRef.current = null;
@@ -688,23 +725,10 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
     }
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(() => {
-      if (!projectId || !searchQuery.trim()) return;
-      setSearching(true);
-      searchCache(projectId, searchQuery.trim(), searchField)
-        .then((res) => {
-          setSearchResults(res.results);
-          setSearchTotal(res.total);
-          setSelectedSearchIdx(-1);
-        })
-        .catch((err) => {
-          setLocalError(normalizeError(err, '全局搜索失败'));
-          setSearchResults([]);
-          setSearchTotal(0);
-        })
-        .finally(() => setSearching(false));
+      void runGlobalSearch();
     }, 400);
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
-  }, [projectId, searchQuery, searchField]);
+  }, [runGlobalSearch, searchQuery]);
 
   // Scroll selected search result into view
   useEffect(() => {
@@ -834,6 +858,23 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
       setLoadingProblems(false);
     }
   }, [projectId]);
+
+  const refreshVisibleData = useCallback(async () => {
+    if (!projectId) return;
+    await Promise.allSettled([
+      loadCacheFiles(),
+      runGlobalSearch(),
+      loadProblems(),
+      refreshCurrentFile(),
+    ]);
+  }, [loadCacheFiles, loadProblems, projectId, refreshCurrentFile, runGlobalSearch]);
+
+  useEffect(() => {
+    const wasActive = activeRef.current;
+    activeRef.current = active;
+    if (!active || wasActive === active) return;
+    void refreshVisibleData();
+  }, [active, refreshVisibleData]);
 
   // Close retransl popover on outside click / Escape
   useEffect(() => {
@@ -1098,9 +1139,7 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
       }
       // Refresh search if query was set
       if (searchQuery.trim()) {
-        const sr = await searchCache(projectId, searchQuery.trim(), searchField);
-        setSearchResults(sr.results);
-        setSearchTotal(sr.total);
+        await runGlobalSearch();
       }
     } catch (err) {
       setLocalError(normalizeError(err, '全局替换失败'));

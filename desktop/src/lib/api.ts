@@ -398,9 +398,19 @@ export class ApiError extends Error {
 
 // ---- Existing API functions ----
 
+export type VersionCheckResponse = {
+  version: string;
+  latest_version: string | null;
+  update_available: boolean;
+};
+
 export async function fetchVersion() {
   const response = await apiRequest<{ version: string }>('/api/version');
   return response.version;
+}
+
+export async function fetchVersionCheck() {
+  return apiRequest<VersionCheckResponse>('/api/version/check');
 }
 
 export async function ensureDesktopBackendReady(options?: { hideConsole?: boolean; timeoutMs?: number }) {
