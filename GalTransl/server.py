@@ -470,10 +470,10 @@ class RuntimeProgressCache:
 
                     def _entry_signature(items: list[Any], idx: int) -> str:
                         line_now = _name_src(items, idx)
+                        row = items[idx] if 0 <= idx < len(items) else {}
+                        row_index = str(row.get("index", "")) if isinstance(row, dict) else ""
                         if not line_now:
-                            row = items[idx] if 0 <= idx < len(items) else {}
                             if isinstance(row, dict):
-                                row_index = str(row.get("index", ""))
                                 row_src = str(
                                     row.get("pre_src", row.get("pre_jp", row.get("post_src", "")))
                                     or ""
@@ -500,12 +500,14 @@ class RuntimeProgressCache:
                                 break
                             j += 1
 
-                        # 必须与 GalTransl.Cache._build_cache_key_for_tran 的
-                        # 拼接格式完全一致（无分隔符），否则 .append.jsonl 中的
-                        # __cache_key 与 .json 里按 signature 重建出的 key 不匹配，
-                        # 同一句会被当作两条导致 _translated_keys 膨胀、被 min()
-                        # 截断后进度条永远卡在 .json 初始 translated 数。
-                        return f"{line_prev}{line_now}{line_next}"
+                        # 在 context key 前拼接 entry 的 index，使相同上下文三元组但位于
+                        # 不同位置的条目（如重复短句）生成不同 key，避免 set 去重导致
+                        # 进度少计。index 前缀同时保证 .json 与 .append.jsonl 对同一
+                        # 位置条目仍能正确去重（二者 index 相同 → key 相同）。
+                        context_key = f"{line_prev}{line_now}{line_next}"
+                        if row_index:
+                            return f"{row_index}:{context_key}"
+                        return context_key
 
                     entries: list[Any] = []
                     try:
@@ -534,7 +536,13 @@ class RuntimeProgressCache:
                             continue
 
                         entry_key = str(item.get("__cache_key", "")).strip()
-                        if not entry_key:
+                        if entry_key:
+                            # 同 _entry_signature：以 index 为前缀使不同位置的同文本条目
+                            # 在 set 中各占一席，同时保持与 .json 快照 key 的一致性。
+                            item_index = str(item.get("index", ""))
+                            if item_index:
+                                entry_key = f"{item_index}:{entry_key}"
+                        else:
                             entry_key = _entry_signature(entries, idx)
 
                         is_translated = bool(item.get("pre_dst", "") or item.get("pre_zh", ""))
