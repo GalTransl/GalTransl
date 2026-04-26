@@ -311,6 +311,15 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
     dirtyFiles: Set<string>;
     entries: Map<string, CacheEntry[]>;
     scrollPositions: Map<string, number>;
+    sidebarTab: SidebarTab;
+    searchQuery: string;
+    searchField: CacheSearchField;
+    searchResults: CacheSearchResult[];
+    searchTotal: number;
+    replaceQuery: string;
+    replaceWith: string;
+    replaceField: CacheReplaceField;
+    showReplace: boolean;
   };
 
   useEffect(() => {
@@ -495,6 +504,15 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
         dirtyFiles: new Set(),
         entries: new Map(),
         scrollPositions: new Map(),
+        sidebarTab: 'files',
+        searchQuery: '',
+        searchField: 'all',
+        searchResults: [],
+        searchTotal: 0,
+        replaceQuery: '',
+        replaceWith: '',
+        replaceField: 'dst',
+        showReplace: false,
       };
       prevBucket.cacheFiles = cacheFiles;
       prevBucket.cacheDir = cacheDir;
@@ -502,6 +520,15 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
       prevBucket.dirtyFiles = dirtyFiles;
       prevBucket.entries = entriesMapRef.current;
       prevBucket.scrollPositions = scrollPositionsRef.current;
+      prevBucket.sidebarTab = sidebarTab;
+      prevBucket.searchQuery = searchQuery;
+      prevBucket.searchField = searchField;
+      prevBucket.searchResults = searchResults;
+      prevBucket.searchTotal = searchTotal;
+      prevBucket.replaceQuery = replaceQuery;
+      prevBucket.replaceWith = replaceWith;
+      prevBucket.replaceField = replaceField;
+      prevBucket.showReplace = showReplace;
       bucketsRef.current.set(prev, prevBucket);
     }
     lastProjectIdRef.current = projectId;
@@ -515,6 +542,18 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
       setCacheDir(existing.cacheDir);
       setSelectedFile(existing.selectedFile);
       setDirtyFiles(existing.dirtyFiles);
+      setSidebarTab(existing.sidebarTab);
+      setSearchQuery(existing.searchQuery);
+      setSearchField(existing.searchField);
+      setSearchResults(existing.searchResults);
+      setSearchTotal(existing.searchTotal);
+      setSelectedSearchIdx(-1);
+      setReplaceQuery(existing.replaceQuery);
+      setReplaceWith(existing.replaceWith);
+      setReplaceField(existing.replaceField);
+      setShowReplace(existing.showReplace);
+      setReplacePreview(null);
+      setReplacePreviewTotal(0);
       // 若当前选中文件在缓存 Map 中有值，切换 selectedFile 的 effect 会同步 entries
       if (!existing.selectedFile) setEntries([]);
       setLoading(false);
@@ -527,6 +566,18 @@ export function ProjectCachePage({ ctx }: { ctx: ProjectPageContext }) {
       setSelectedFile(null);
       setDirtyFiles(new Set());
       setEntries([]);
+      setSidebarTab('files');
+      setSearchQuery('');
+      setSearchField('all');
+      setSearchResults([]);
+      setSearchTotal(0);
+      setSelectedSearchIdx(-1);
+      setReplaceQuery('');
+      setReplaceWith('');
+      setReplaceField('dst');
+      setShowReplace(false);
+      setReplacePreview(null);
+      setReplacePreviewTotal(0);
       void loadCacheFiles(true);
     }
     // 仅在 projectId 变化时运行；state 的 stale closure 正是我们需要快照的"旧值"
