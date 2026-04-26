@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type TransitionEvent } from '
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { encodeProjectDir, decodeProjectDir, submitJob, fetchJob, fetchProjectRuntime, type ProjectRuntimeResponse } from '../lib/api';
+import { loadLastProjectTab } from '../lib/projectTabMemory';
 import { InlineFeedback } from './page-state/InlineFeedback';
 import logoUrl from '../assets/logo.png';
 
@@ -326,9 +327,9 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
         for (const key of openProjects) {
           next[key] = key === projectDir;
         }
-        // Navigate to the project's translate page
+        // Navigate to the project's last visited page
         const projectId = encodeProjectDir(projectDir);
-        navigate(`/project/${projectId}/translate`);
+        navigate(`/project/${projectId}/${loadLastProjectTab(projectDir)}`);
         return next;
       }
     });
@@ -532,7 +533,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
               ) : isProjectExpanded ? (
                 <>
                   <NavLink
-                    to={`/project/${projectId}/translate`}
+                    to={`/project/${projectId}/${loadLastProjectTab(projectDir)}`}
                     className={({ isActive }) =>
                       `sidebar__nav-item ${isActive ? 'sidebar__nav-item--active' : ''}`
                     }
@@ -564,7 +565,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                 </>
               ) : (
                 <NavLink
-                  to={`/project/${projectId}/translate`}
+                  to={`/project/${projectId}/${loadLastProjectTab(projectDir)}`}
                   className={({ isActive }) =>
                     `sidebar__nav-item ${isActive ? 'sidebar__nav-item--active' : ''}`
                   }

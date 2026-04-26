@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { decodeProjectDir } from '../lib/api';
+import { loadLastProjectTab, saveLastProjectTab } from '../lib/projectTabMemory';
 
 const ProjectTranslatePage = lazy(async () => {
   const mod = await import('../pages/ProjectTranslatePage');
@@ -66,12 +67,13 @@ export function ProjectLayout() {
   const segments = location.pathname.split('/');
   const currentTab = segments[3] || 'translate';
 
-  // If accessing /project/:projectId without a tab, redirect to translate
+  // If accessing /project/:projectId without a tab, redirect to the last visited tab
   useEffect(() => {
     if (!segments[3]) {
-      navigate(location.pathname + '/translate', { replace: true });
+      const lastTab = loadLastProjectTab(projectDir);
+      navigate(location.pathname + '/' + lastTab, { replace: true });
     }
-  }, [segments[3], location.pathname, navigate]);
+  }, [segments[3], location.pathname, navigate, projectDir]);
 
   const ctx: ProjectPageContext = useMemo(
     () => ({ projectDir, projectId: projectId || '', configFileName }),
@@ -84,6 +86,13 @@ export function ProjectLayout() {
   }, [currentTab]);
 
   const activeTab = TAB_MAP.some((tab) => tab.path === currentTab) ? currentTab : 'translate';
+
+  // Save the active tab whenever it changes
+  useEffect(() => {
+    if (projectDir && activeTab) {
+      saveLastProjectTab(projectDir, activeTab);
+    }
+  }, [projectDir, activeTab]);
 
   // 对"缓存与问题"页、人名翻译页、项目字典页：一旦访问过就保持挂载，
   // 避免重复加载，并让页内长任务在切换标签后继续运行。
