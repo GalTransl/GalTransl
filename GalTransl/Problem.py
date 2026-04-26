@@ -15,6 +15,15 @@ from GalTransl.Utils import (
 )
 from GalTransl.Dictionary import CGptDict
 
+MONOLOGUE_MALE_HE_EXCLUDES = (
+    "其他",
+    "他们",
+    "他人",
+    "他乡",
+    "他国",
+    "他日",
+    "他山",
+)
 
 def find_problems(
     trans_list: CTransList,
@@ -139,6 +148,10 @@ def find_problems(
                     lost_list.append(control_jp)
             if lost_list:
                 problem_list.append(f"缺控制符：{' '.join(lost_list)}")
+        if CProblemType.独白男他 in find_type:
+            if tran.speaker == "" and "他" in post_zh:
+                if not any(exclude in post_zh for exclude in MONOLOGUE_MALE_HE_EXCLUDES):
+                    problem_list.append("独白男他")
 
         if arinashi_dict != {}:
             for key, value in arinashi_dict.items():

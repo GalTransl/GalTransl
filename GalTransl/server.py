@@ -1088,6 +1088,7 @@ _PROBLEM_TYPE_CATALOG: list[dict[str, str]] = [
     {"name": "引入英文", "description": "原文无英文，但译文引入了英文单词。"},
     {"name": "语言不通", "description": "译文包含大量非 GBK 字符（仅对中文目标语言生效）。"},
     {"name": "缺控制符", "description": "译文缺少原文中的控制符（如 \\n、变量标记等）。"},
+    {"name": "独白男他", "description": "独白（无name）译文出现'他'。"},
 ]
 
 

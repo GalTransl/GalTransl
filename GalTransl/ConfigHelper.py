@@ -91,6 +91,7 @@ class CProblemType(Enum):
     比日文长严格 = 9
     语言不通 = 10
     缺控制符 = 11
+    独白男他 = 12
 
 
 class CProjectConfig:
