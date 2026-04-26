@@ -28,6 +28,11 @@ from openai._types import NOT_GIVEN
 
 
 class ForGalJsonTranslate(BaseTranslate):
+    _SIGCHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+    def _encode_sig_jsonline(self, sig: str, obj: dict) -> str:
+        return f"{sig}|" + json.dumps(obj, ensure_ascii=False)
+
     # init
     def __init__(
         self,
@@ -58,6 +63,7 @@ class ForGalJsonTranslate(BaseTranslate):
         self, trans_list: CTransList, gptdict="", proofread=False, filename=""
     ):
         input_list = []
+        sig_list = []
         tmp_enhance_jailbreak = False
         n_symbol = ""
         idx_tip = self._build_idx_tip(trans_list)
@@ -81,6 +87,12 @@ class ForGalJsonTranslate(BaseTranslate):
             if n_symbol:
                 src_text = src_text.replace(n_symbol, "<br>")
 
+            while True:
+                sig = "".join(choice(self._SIGCHARS) for _ in range(3))
+                if sig not in sig_list:
+                    break
+            sig_list.append(sig)
+
             if not proofread:
                 tmp_obj = {
                     "id": trans.index,
@@ -100,7 +112,7 @@ class ForGalJsonTranslate(BaseTranslate):
             if tmp_obj["name"] == "null":
                 del tmp_obj["name"]
 
-            input_list.append(json.dumps(tmp_obj, ensure_ascii=False))
+            input_list.append(self._encode_sig_jsonline(sig, tmp_obj))
         input_src = "\n".join(input_list)
 
         self.restore_context(trans_list, self.contextNum, filename)
@@ -144,8 +156,9 @@ class ForGalJsonTranslate(BaseTranslate):
                     if line.startswith("```"):
                         continue
                     if not stream_cursor["started"]:
-                        if '{"id' in line:
-                            line = line[line.find('{"id') :]
+                        sig_start = re.search(r"\b[a-z0-9]{3}\|\{\"id\"", line)
+                        if sig_start:
+                            line = line[sig_start.start() :]
                             stream_cursor["started"] = True
                         else:
                             continue
@@ -161,6 +174,7 @@ class ForGalJsonTranslate(BaseTranslate):
                         filename=filename,
                         emit_runtime_success=(not proofread),
                         emitted_success_indices=emitted_success_indices,
+                        sig_list=sig_list,
                     )
                     if not parse_ok:
                         stream_parse_error_message = parse_error
@@ -183,8 +197,9 @@ class ForGalJsonTranslate(BaseTranslate):
                 lang_list, code_list = extract_code_blocks(result_text)
                 if len(lang_list) > 0 and len(code_list) > 0:
                     result_text = code_list[0]
-            if '{"id' in result_text:
-                result_text = result_text[result_text.find('{"id') :]
+            sig_start = re.search(r"\b[a-z0-9]{3}\|\{\"id\"", result_text)
+            if sig_start:
+                result_text = result_text[sig_start.start() :]
             result_text = fix_quotes(result_text)
 
             i = -1
@@ -219,6 +234,7 @@ class ForGalJsonTranslate(BaseTranslate):
                         filename=filename,
                         emit_runtime_success=False,
                         emitted_success_indices=emitted_success_indices,
+                        sig_list=sig_list,
                     )
                     if not parse_ok:
                         error_message = parse_error
@@ -315,7 +331,11 @@ class ForGalJsonTranslate(BaseTranslate):
         filename: str = "",
         emit_runtime_success: bool = False,
         emitted_success_indices: Optional[Set[int]] = None,
+        sig_list: Optional[List[str]] = None,
     ):
+        if "|" not in line:
+            return False, f"jsonline缺少sig前缀：{line}"
+        line_sig, line = line.split("|", 1)
         try:
             line_json = json.loads(line)
         except Exception:
@@ -332,6 +352,9 @@ class ForGalJsonTranslate(BaseTranslate):
             return False, f"{line}句无法解析"
 
         line_id = line_json["id"]
+        if sig_list is not None:
+            if line_sig != sig_list[i]:
+                return False, f"第{trans_list[i].index}句疑似串行：期望{sig_list[i]}，实际{line_sig}"
         if line_id != trans_list[i].index:
             return False, f"{line_id}句id未对应{trans_list[i].index}"
 
@@ -340,9 +363,9 @@ class ForGalJsonTranslate(BaseTranslate):
 
         line_dst = line_json[key_name]
         if trans_list[i].post_jp != "" and line_dst == "":
-            return False, f"第{line_id}句空白"
+            return False, f"第{trans_list[i].index}句空白"
         if "�" in line_dst:
-            return False, f"第{line_id}句包含乱码：{line_dst}"
+            return False, f"第{trans_list[i].index}句包含乱码：{line_dst}"
 
         line_dst = self._normalize_parsed_translation_text(
             line_dst, trans_list[i], n_symbol
@@ -399,7 +422,7 @@ class ForGalJsonTranslate(BaseTranslate):
         }
         if speaker == "null":
             del tmp_obj["name"]
-        return json.dumps(tmp_obj, ensure_ascii=False)
+        return self._encode_sig_jsonline("old", tmp_obj)
 
     def _format_restore_context_payload(self, lines: List[str]) -> str:
         return "```jsonline\n" + "\n".join(lines) + "\n```"
