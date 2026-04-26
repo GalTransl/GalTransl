@@ -5,12 +5,14 @@ from types import SimpleNamespace
 from GalTransl.Frontend.LLMTranslate import _build_runtime_file_maps
 
 
-def _chunk(file_path: str, chunk_index: int = 0, total_chunks: int = 1, size: int = 10):
+def _chunk(file_path: str, chunk_index: int = 0, total_chunks: int = 1, size: int = 10, cross_num: int = 0, json_list=None):
     return SimpleNamespace(
         file_path=file_path,
         chunk_index=chunk_index,
         total_chunks=total_chunks,
         chunk_non_cross_size=size,
+        cross_num=cross_num,
+        json_list=json_list if json_list is not None else [{"message": f"line-{i}"} for i in range(size + cross_num * 2)],
     )
 
 
@@ -54,6 +56,26 @@ class RuntimeFileProgressMappingTests(unittest.TestCase):
         self.assertIn("sub-}foo.json_0.json", cache_map)
         self.assertIn("sub-}foo.json_1.json", cache_map)
         self.assertEqual(cache_map["sub-}foo.json_0.json"], "sub/foo.json")
+
+    def test_runtime_totals_exclude_empty_message_rows(self) -> None:
+        input_dir = os.path.join("proj", "gt_input")
+        chunks = [
+            _chunk(
+                os.path.join(input_dir, "foo.json"),
+                size=5,
+                json_list=[
+                    {"message": "A"},
+                    {"message": ""},
+                    {"message": "B"},
+                    {"message": "   "},
+                    {"message": "C"},
+                ],
+            )
+        ]
+
+        file_totals, _ = _build_runtime_file_maps(chunks, input_dir)
+
+        self.assertEqual(file_totals["foo.json"], 3)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ RuntimeProgressCache 应正确统计每个位置的翻译进度，而不因 set 
 import json
 import os
 import tempfile
+import time
 import unittest
 
 import orjson
@@ -155,6 +156,49 @@ class TestRuntimeProgressDuplicateKeys(unittest.TestCase):
             2,
             f"期望 2 条（index 6 和 8 各算一条），实际 {info['translated']}（__cache_key 碰撞未修复）",
         )
+
+    def test_current_run_snapshot_matching_retransl_key_still_counts_as_translated(self):
+        """
+        当前轮次已经重写过的 .json 快照，即使新结果仍命中 retranslKey，
+        本轮 runtime 进度也应计为已完成；否则会出现 9954/9955 卡住不回满。
+        """
+        entries = [
+            {
+                "index": 1,
+                "name": "",
+                "pre_src": "原文",
+                "post_src": "原文",
+                "pre_dst": "这里仍然包含残留日文标记",
+                "proofread_dst": "",
+                "problem": "",
+                "trans_by": "test",
+                "proofread_by": "",
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = os.path.join(tmpdir, "transl_cache")
+            os.makedirs(cache_dir)
+            cache_file = os.path.join(cache_dir, "test.json")
+            with open(cache_file, "wb") as f:
+                f.write(orjson.dumps(entries, option=orjson.OPT_INDENT_2))
+
+            started_at_ns = time.time_ns()
+            time.sleep(0.01)
+            now = time.time()
+            os.utime(cache_file, (now, now))
+
+            result = RuntimeProgressCache().get_progress(
+                tmpdir,
+                file_totals={"test.json": 1},
+                cache_file_display_map={"test.json": "test.json"},
+                retran_key="残留日文",
+                current_job_started_at_ns=started_at_ns,
+            )
+
+        files = {f["filename"]: f for f in result["files"]}
+        info = files["test.json"]
+        self.assertEqual(info["translated"], 1)
 
 
 if __name__ == "__main__":

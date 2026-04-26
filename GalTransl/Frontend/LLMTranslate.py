@@ -172,7 +172,17 @@ def _build_runtime_file_maps(ordered_chunks: list[SplitChunkMetadata], input_dir
     for chunk in ordered_chunks:
         display_name = chunk.file_path.replace(input_dir, "").lstrip(os_sep).replace(os_sep, "/")
         file_totals.setdefault(display_name, 0)
-        file_totals[display_name] += chunk.chunk_non_cross_size
+        non_cross_start = max(0, int(chunk.cross_num or 0))
+        non_cross_end = min(non_cross_start + int(chunk.chunk_non_cross_size or 0), len(chunk.json_list))
+        progress_countable = 0
+        for row in chunk.json_list[non_cross_start:non_cross_end]:
+            if not isinstance(row, dict):
+                continue
+            message = str(row.get("message", "") or "").strip()
+            if not message:
+                continue
+            progress_countable += 1
+        file_totals[display_name] += progress_countable
         cache_key = display_name.replace("/", "-}")
         if chunk.total_chunks > 1:
             cache_key = f"{cache_key}_{chunk.chunk_index}"

@@ -365,6 +365,18 @@ def _check_retran_key(retran_key: str | list[str], target: Any) -> bool:
     return False
 
 
+def _parse_runtime_job_started_at_ns(value: str) -> int | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        normalized = text.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(normalized)
+        return int(dt.timestamp() * 1_000_000_000)
+    except Exception:
+        return None
+
+
 class RuntimeProgressCache:
     def __init__(self) -> None:
         self._project_files: dict[str, dict[str, _CacheProgressFileStat]] = {}
@@ -420,6 +432,7 @@ class RuntimeProgressCache:
         file_totals: dict[str, int],
         cache_file_display_map: dict[str, str],
         retran_key: str | list[str] = "",
+        current_job_started_at_ns: int | None = None,
     ) -> dict[str, Any]:
         normalized = _normalize_project_dir(project_dir)
         cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
@@ -554,9 +567,16 @@ class RuntimeProgressCache:
                         )
 
                         no_proofread = str(item.get("proofread_dst", "") or "") == ""
+                        should_apply_retransl_filter = not entry.name.endswith(_CACHE_APPEND_SUFFIX)
+                        if (
+                            should_apply_retransl_filter
+                            and current_job_started_at_ns is not None
+                            and int(stat.st_mtime_ns) >= int(current_job_started_at_ns)
+                        ):
+                            should_apply_retransl_filter = False
                         if (
                             is_translated
-                            and not entry.name.endswith(_CACHE_APPEND_SUFFIX)
+                            and should_apply_retransl_filter
                             and retran_key
                             and no_proofread
                             and (
@@ -2057,16 +2077,21 @@ def build_handler(registry: JobRegistry):
                 file_totals = runtime.get("file_totals", {})
                 cache_file_display_map = runtime.get("cache_file_display_map", {})
                 config_file_name = "config.yaml"
-                if job := registry.get_project_job(project_dir):
+                job = registry.get_project_job(project_dir)
+                if job:
                     config_file_name = job.config_file_name or "config.yaml"
-                retran_key = RUNTIME_PROGRESS_CACHE.get_retran_key(project_dir, config_file_name)
+                retran_key = ""
+                current_job_started_at_ns = None
+                if job and job.status in {"pending", "running"}:
+                    retran_key = RUNTIME_PROGRESS_CACHE.get_retran_key(project_dir, config_file_name)
+                    current_job_started_at_ns = _parse_runtime_job_started_at_ns(job.started_at)
                 progress_payload = RUNTIME_PROGRESS_CACHE.get_progress(
                     project_dir,
                     file_totals=file_totals,
                     cache_file_display_map=cache_file_display_map,
                     retran_key=retran_key,
+                    current_job_started_at_ns=current_job_started_at_ns,
                 )
-                job = registry.get_project_job(project_dir)
                 total = progress_payload["total"]
                 translated = progress_payload["translated"]
                 percent = round((translated / total) * 100) if total > 0 else 0
