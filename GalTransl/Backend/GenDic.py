@@ -66,6 +66,7 @@ class GenDic(BaseTranslate):
         self.progress_display_name = "GenDic 术语提取"
         self.progress_cache_key = "gendic_progress"
         self.progress_append_path = ""
+        self.trans_prompt = ""
         self.init_chatbot(eng_type, config)
         pass
 
