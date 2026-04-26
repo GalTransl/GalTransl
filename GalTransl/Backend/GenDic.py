@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from alive_progress import alive_bar
 from GalTransl.COpenAI import COpenAITokenPool
-from GalTransl.ConfigHelper import CProxyPool
+from GalTransl.ConfigHelper import CProxyPool, initDictList
 from GalTransl import LOGGER, LANG_SUPPORTED
 from GalTransl.i18n import get_text, GT_LANG
 from sys import exit
@@ -16,7 +16,7 @@ from GalTransl.Utils import contains_katakana, is_all_chinese, decompress_file_l
 from GalTransl.Backend.BaseTranslate import BaseTranslate
 from GalTransl.Backend.Prompts import GENDIC_PROMPT, GENDIC_SYSTEM, H_WORDS_LIST
 import collections
-from typing import List, Set, Dict, Optional
+from typing import List, Set, Dict, Optional, Tuple
 from threading import Lock
 from GalTransl.TerminalOutput import should_print_translation_logs, terminal_progress
 
@@ -69,6 +69,24 @@ class GenDic(BaseTranslate):
         self.trans_prompt = ""
         self.init_chatbot(eng_type, config)
         pass
+
+    def _load_existing_gpt_terms(self) -> Dict[str, Tuple[str, str]]:
+        result_path = os.path.join(self.pj_config.getProjectDir(), "项目GPT字典-生成.txt")
+        dict_cfg = self.pj_config.getDictCfgSection()
+        gpt_dic_list = dict_cfg.get("gpt.dict", []) if dict_cfg else []
+        default_dic_dir = dict_cfg.get("defaultDictFolder", "") if dict_cfg else ""
+        dic_paths = initDictList(gpt_dic_list, default_dic_dir, self.pj_config.getProjectDir())
+
+        existing_terms: Dict[str, Tuple[str, str]] = {}
+        for dic_path in dic_paths:
+            if os.path.abspath(dic_path) == os.path.abspath(result_path):
+                continue
+            dic_obj = CGptDict([dic_path])
+            dic_list = getattr(dic_obj, "_dic_list", None) or []
+            for dic in dic_list:
+                if dic.search_word and dic.replace_word and dic.search_word not in existing_terms:
+                    existing_terms[dic.search_word] = (dic.replace_word, getattr(dic, "note", "") or "")
+        return existing_terms
 
     def _raise_if_stop_requested(self):
         if self._is_stop_requested(self.pj_config):
@@ -293,17 +311,8 @@ class GenDic(BaseTranslate):
                 segment_list.append(tmp_text)
                 bar.title = "处理分词……"
 
-                # 收集已有字典翻译，用于去重与提示
-                existing_dict_map: Dict[str, Tuple[str, str]] = {}
-                for attr in ("gpt_dic", "pre_dic", "post_dic"):
-                    dic_obj = getattr(self.pj_config, attr, None)
-                    if dic_obj is None:
-                        continue
-                    dic_list = getattr(dic_obj, "dic_list", None) or getattr(dic_obj, "_dic_list", None) or []
-                    for dic in dic_list:
-                        if dic.search_word and dic.replace_word:
-                            note = getattr(dic, "note", "") or ""
-                            existing_dict_map[dic.search_word] = (dic.replace_word, note)
+                # 收集已有 GPT 字典翻译（排除当前生成文件），用于提示与最终结果去重
+                existing_dict_map = self._load_existing_gpt_terms()
                 self.existing_dict_map = existing_dict_map
                 all_text = "\n".join(segment_list)
 
@@ -416,15 +425,14 @@ class GenDic(BaseTranslate):
                     self.dic_list[i][1] = best_dst
                     self.dic_list[i][2] = best_note
 
-            # 最终列表：先合并已有字典翻译（出现在当前文本中的），再合并 LLM 提取结果
+            # 最终列表：仅保留新增词条，跳过已存在于 GPT 字典中的原文词条
+            existing_src_terms = set(getattr(self, "existing_dict_map", {}).keys())
             final_set: Dict[str, List[str]] = {}
-            for src, (dst, note) in getattr(self, "existing_dict_map", {}).items():
-                if src in all_text:
-                    final_set[src] = [src, dst, note or ""]
-
             for item in self.dic_list:
                 src = item[0]
                 if src in final_set:
+                    continue
+                if src in existing_src_terms:
                     continue
                 if "NULL" in src:
                     continue
