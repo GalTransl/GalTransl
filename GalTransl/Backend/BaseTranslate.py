@@ -172,6 +172,19 @@ class BaseTranslate:
 
         pass
 
+    def _apply_internal_prompt_template_overrides(self) -> None:
+        """Apply runtime prompt-template overrides passed from backend service layer."""
+        system_prompt_override = self.pj_config.getKey(
+            "internals.prompt_template.system_prompt_override", None
+        )
+        user_prompt_override = self.pj_config.getKey(
+            "internals.prompt_template.user_prompt_override", None
+        )
+        if isinstance(system_prompt_override, str):
+            self.system_prompt = system_prompt_override
+        if isinstance(user_prompt_override, str):
+            self.trans_prompt = user_prompt_override
+
     def init_chatbot(self, eng_type, config: CProjectConfig):
         section_name = "OpenAI-Compatible"
 

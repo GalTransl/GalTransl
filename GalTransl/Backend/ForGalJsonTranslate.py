@@ -19,9 +19,6 @@ from GalTransl.Backend.Prompts import (
     FORGAL_JSON_SYSTEM_PROMPT,
     FORGAL_JSON_TRANS_PROMPT,
     H_WORDS_LIST,
-    DEEPSEEK_SYSTEM_PROMPT,
-    DEEPSEEK_TRANS_PROMPT,
-    DEEPSEEK_PROOFREAD_PROMPT,
 )
 from GalTransl.Backend.BaseTranslate import BaseTranslate
 from openai._types import NOT_GIVEN
@@ -44,9 +41,7 @@ class ForGalJsonTranslate(BaseTranslate):
         super().__init__(config, eng_type, proxy_pool, token_pool)
         self.trans_prompt = FORGAL_JSON_TRANS_PROMPT
         self.system_prompt = FORGAL_JSON_SYSTEM_PROMPT
-        if "r1" in eng_type:
-            self.trans_prompt = DEEPSEEK_TRANS_PROMPT
-            self.system_prompt = DEEPSEEK_SYSTEM_PROMPT
+        self._apply_internal_prompt_template_overrides()
         # enhance_jailbreak
         if val := config.getKey("gpt.enhance_jailbreak"):
             self.enhance_jailbreak = val

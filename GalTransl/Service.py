@@ -111,6 +111,7 @@ class JobSpec:
     job_id: str = ""
     backend_profile: str = ""
     backend_profile_data: dict[str, Any] = field(default_factory=dict)
+    prompt_template_overrides: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -201,6 +202,19 @@ async def run_job_async(
                 cfg.projectConfig["proxy"] = profile["proxy"]
                 cfg.keyValues["internals.enableProxy"] = profile["proxy"].get("enableProxy", False)
             LOGGER.info("Applied backend profile: %s", spec.backend_profile or "inline")
+
+        # Apply prompt template overrides from job spec
+        prompt_overrides = spec.prompt_template_overrides or {}
+        template_override = prompt_overrides.get(spec.translator)
+        if isinstance(template_override, dict):
+            system_prompt_override = template_override.get("system_prompt")
+            user_prompt_override = template_override.get("user_prompt")
+            if isinstance(system_prompt_override, str):
+                cfg.keyValues["internals.prompt_template.system_prompt_override"] = system_prompt_override
+            if isinstance(user_prompt_override, str):
+                cfg.keyValues["internals.prompt_template.user_prompt_override"] = user_prompt_override
+            if isinstance(system_prompt_override, str) or isinstance(user_prompt_override, str):
+                LOGGER.info("Applied prompt template override from job spec: %s", spec.translator)
 
     except Exception as ex:
         _append_error_log(spec, ex, phase="load_config")

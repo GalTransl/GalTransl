@@ -146,7 +146,7 @@
 ```yaml
 # 翻译后端相关设置
 backendSpecific:
-  OpenAI-Compatible: # (ForGal/ForNovel/r1/Gendic)OpenAI API兼容接口通用
+  OpenAI-Compatible: # (ForGal/ForNovel/GenDic)OpenAI API兼容接口通用
     tokens:
       - token: sk-example-key1
         endpoint: https://api.deepseek.com # 请求地址，加不加v1都可以

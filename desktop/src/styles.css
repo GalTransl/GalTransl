@@ -38,6 +38,7 @@
 @import './styles/pages/home.css';
 @import './styles/pages/translate.css';
 @import './styles/pages/settings.css';
+@import './styles/pages/prompt-templates.css';
 @import './styles/pages/project-translate.css';
 @import './styles/pages/project-translate-v2.css';
 @import './styles/pages/project-config.css';

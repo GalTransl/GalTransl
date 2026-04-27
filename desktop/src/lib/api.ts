@@ -25,12 +25,18 @@ export type Job = {
   translator: string;
 };
 
+export type PromptTemplateOverride = {
+  system_prompt?: string;
+  user_prompt?: string;
+};
+
 export type SubmitJobPayload = {
   config_file_name: string;
   project_dir: string;
   translator: string;
   backend_profile?: string;
   backend_profile_data?: Record<string, unknown>;
+  prompt_template_overrides?: Record<string, PromptTemplateOverride>;
 };
 
 type TranslatorsResponse = {
@@ -364,6 +370,22 @@ export type ProblemTypesResponse = {
   problem_types: ProblemTypeInfo[];
 };
 
+export type PromptTemplateInfo = {
+  name: string;
+  description: string;
+  default_system_prompt: string;
+  system_prompt: string;
+  system_overridden: boolean;
+  default_user_prompt: string;
+  user_prompt: string;
+  user_overridden: boolean;
+  overridden: boolean;
+};
+
+export type PromptTemplatesResponse = {
+  templates: PromptTemplateInfo[];
+};
+
 // ---- Project ID helpers ----
 
 export function encodeProjectDir(projectDir: string): string {
@@ -445,8 +467,12 @@ export async function fetchJob(jobId: string) {
 }
 
 export async function submitJob(payload: SubmitJobPayload) {
+  const overrides = getPromptTemplateOverridesForJob(payload.translator);
+  const payloadWithOverrides = Object.keys(overrides).length > 0
+    ? { ...payload, prompt_template_overrides: overrides }
+    : payload;
   return apiRequest<Job>('/api/jobs', {
-    body: JSON.stringify(payload),
+    body: JSON.stringify(payloadWithOverrides),
     headers: {
       'Content-Type': 'application/json',
     },
@@ -736,6 +762,64 @@ export async function fetchAppSettings() {
 export async function fetchDefaultProjectConfigTemplate() {
   const response = await apiRequest<ProjectConfigTemplateResponse>('/api/project-config-template');
   return response.content;
+}
+
+export async function fetchPromptTemplates() {
+  return apiRequest<PromptTemplatesResponse>('/api/prompt-templates');
+}
+
+// ---- Prompt Template localStorage helpers ----
+
+const PROMPT_TEMPLATES_OVERRIDES_KEY = 'galtransl_prompt_templates_overrides';
+
+export function loadPromptTemplateOverrides(): Record<string, PromptTemplateOverride> {
+  try {
+    const raw = localStorage.getItem(PROMPT_TEMPLATES_OVERRIDES_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === 'object' && parsed !== null) {
+      return parsed as Record<string, PromptTemplateOverride>;
+    }
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+export function savePromptTemplateOverrides(overrides: Record<string, PromptTemplateOverride>): void {
+  try {
+    localStorage.setItem(PROMPT_TEMPLATES_OVERRIDES_KEY, JSON.stringify(overrides));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function getPromptTemplateOverride(name: string): PromptTemplateOverride | null {
+  const overrides = loadPromptTemplateOverrides();
+  const override = overrides[name];
+  if (override && typeof override === 'object') {
+    return override;
+  }
+  return null;
+}
+
+export function setPromptTemplateOverride(name: string, override: PromptTemplateOverride): void {
+  const overrides = loadPromptTemplateOverrides();
+  overrides[name] = override;
+  savePromptTemplateOverrides(overrides);
+}
+
+export function deletePromptTemplateOverride(name: string): void {
+  const overrides = loadPromptTemplateOverrides();
+  delete overrides[name];
+  savePromptTemplateOverrides(overrides);
+}
+
+export function getPromptTemplateOverridesForJob(translator: string): Record<string, PromptTemplateOverride> {
+  const overrides = loadPromptTemplateOverrides();
+  const override = overrides[translator];
+  if (!override) return {};
+  return { [translator]: override };
 }
 
 export async function updateAppSettings(settings: AppSettings) {

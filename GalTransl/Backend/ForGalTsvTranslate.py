@@ -36,6 +36,7 @@ class ForGalTsvTranslate(BaseTranslate):
         super().__init__(config, eng_type, proxy_pool, token_pool)
         self.trans_prompt = FORGAL_TSV_TRANS_PROMPT_EN
         self.system_prompt = FORGAL_TSV_SYSTEM
+        self._apply_internal_prompt_template_overrides()
         # enhance_jailbreak
         if val := config.getKey("gpt.enhance_jailbreak"):
             self.enhance_jailbreak = val

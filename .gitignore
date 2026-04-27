@@ -13,7 +13,6 @@ useful_tools/GalTransl_DumpInjector/VNTextPatch/names.xml
 desktop/node_modules/
 desktop/dist/
 desktop/src-tauri/target/
-backend_profiles.yaml
 /plans
 app_settings.json
 /release/

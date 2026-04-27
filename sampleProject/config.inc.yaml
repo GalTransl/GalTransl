@@ -1,6 +1,6 @@
 # 翻译后端相关设置
 backendSpecific:
-  OpenAI-Compatible: # (ForGal/ForNovel/r1/Gendic)OpenAI API兼容接口通用
+  OpenAI-Compatible: # (ForGal/ForNovel/GenDic)OpenAI API兼容接口通用
     tokens:
       - token: sk-example-key1
         endpoint: https://api.deepseek.com # 请求地址，加不加v1都可以
@@ -56,7 +56,7 @@ common:
     #- "残留日文" # 启动时重翻命中“残留日文”的句子
 
   gpt.contextNum: 8 # 每次请求附带的前文句数；值越大上下文更强、成本更高（常用8）。[0-32]
-  # ForGal/ForGal-json/ForNovel/r1
+  # ForGal/ForGal-json/ForNovel
   gpt.translation_guideline: "Basic.md" # 使用的翻译规范文件名（位于translation_guidelines），会影响文风与措辞。
   gpt.enhance_jailbreak: False # 是否启用“抗拒答”增强提示，降低模型拒答概率。[True/False]
   gpt.change_prompt: "no" # Prompt修改模式：no不改；AdditionalPrompt追加；OverwritePrompt覆盖默认提示词。[no/AdditionalPrompt/OverwritePrompt]

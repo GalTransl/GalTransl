@@ -148,7 +148,7 @@ To use the command-line version, rename `config.inc.yaml` to `config.yaml` in th
 ```yaml
 # Translation backend settings
 backendSpecific:
-  OpenAI-Compatible: # (ForGal/ForNovel/r1/Gendic) OpenAI API compatible interface
+  OpenAI-Compatible: # (ForGal/ForNovel/GenDic) OpenAI API compatible interface
     tokens:
       - token: sk-example-key1
         endpoint: https://api.deepseek.com # Request URL

@@ -812,7 +812,7 @@ async def init_gptapi(
         case "ForNovel":
             from GalTransl.Backend.ForNovelTranslate import ForNovelTranslate
             return ForNovelTranslate(projectConfig, eng_type, proxyPool, tokenPool)
-        case "ForGal-json" | "r1":
+        case "ForGal-json":
             from GalTransl.Backend.ForGalJsonTranslate import ForGalJsonTranslate
             return ForGalJsonTranslate(projectConfig, eng_type, proxyPool, tokenPool)
         case "sakura-v1.0" | "galtransl-v3":

@@ -58,6 +58,11 @@
   line-height: 1.6;
 }
 
+.settings-action-row {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .settings-number-row {
   display: flex;
   justify-content: space-between;

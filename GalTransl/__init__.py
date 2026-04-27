@@ -105,12 +105,11 @@ TRANSLATOR_DEFAULT_ENGINE = {
     "ForGal-tsv": "deepseek-chat",
     "ForNovel": "deepseek-chat",
     "ForGal-json": "gpt-4.1",
-    "r1": "deepseek-reasoner",
     "sakura-v1.0": "sakura-7b-qwen2.5-v1.0",
     "galtransl-v3": "Sakura-GalTransl-7B-v3",
     "GenDic": "deepseek-chat",
 }
-NEED_OpenAITokenPool=["ForGal-json", "r1", "ForGal-tsv","ForNovel","GenDic"]
+NEED_OpenAITokenPool=["ForGal-json", "ForGal-tsv", "ForNovel", "GenDic"]
 LANG_SUPPORTED = {
     "zh-cn": "Simplified_Chinese",
     "zh-tw": "Traditional_Chinese",

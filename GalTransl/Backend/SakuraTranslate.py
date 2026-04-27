@@ -67,6 +67,7 @@ class CSakuraTranslate(BaseTranslate):
         if "galtransl" in eng_type:
             self.system_prompt = GalTransl_SYSTEM_PROMPT
             self.trans_prompt = GalTransl_TRANS_PROMPT_V3
+        self._apply_internal_prompt_template_overrides()
         self.init_chatbot(eng_type=eng_type, config=config)  # 模型初始化
         self._set_temp_type("precise")
 

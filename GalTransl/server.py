@@ -25,6 +25,17 @@ from GalTransl import TRANSLATOR_SUPPORTED, INPUT_FOLDERNAME, OUTPUT_FOLDERNAME,
 from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
 from GalTransl.AppSettings import load_app_settings, save_app_settings
 from GalTransl.DefaultProjectConfig import DEFAULT_PROJECT_CONFIG_YAML
+from GalTransl.Backend.Prompts import (
+    FORGAL_JSON_SYSTEM_PROMPT,
+    FORGAL_JSON_TRANS_PROMPT,
+    FORGAL_TSV_SYSTEM,
+    FORGAL_TSV_TRANS_PROMPT_EN,
+    FORNOVEL_TRANS_PROMPT_EN,
+    GalTransl_SYSTEM_PROMPT,
+    GalTransl_TRANS_PROMPT_V3,
+    Sakura_SYSTEM_PROMPT010,
+    Sakura_TRANS_PROMPT010,
+)
 
 
 def _utcnow_text() -> str:
@@ -1140,7 +1151,29 @@ def _collect_common_dict_payload() -> dict[str, Any]:
 # Global backend profiles helpers
 # ---------------------------------------------------------------------------
 
-_BACKEND_PROFILES_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backend_profiles.yaml")
+
+_DEFAULT_TRANSLATOR_PROMPTS: dict[str, dict[str, str]] = {
+    "ForGal-json": {
+        "system_prompt": FORGAL_JSON_SYSTEM_PROMPT,
+        "user_prompt": FORGAL_JSON_TRANS_PROMPT,
+    },
+    "ForGal-tsv": {
+        "system_prompt": FORGAL_TSV_SYSTEM,
+        "user_prompt": FORGAL_TSV_TRANS_PROMPT_EN,
+    },
+    "ForNovel": {
+        "system_prompt": FORGAL_TSV_SYSTEM,
+        "user_prompt": FORNOVEL_TRANS_PROMPT_EN,
+    },
+    "sakura-v1.0": {
+        "system_prompt": Sakura_SYSTEM_PROMPT010,
+        "user_prompt": Sakura_TRANS_PROMPT010,
+    },
+    "galtransl-v3": {
+        "system_prompt": GalTransl_SYSTEM_PROMPT,
+        "user_prompt": GalTransl_TRANS_PROMPT_V3,
+    },
+}
 
 
 def _read_backend_profiles() -> dict:
@@ -1156,6 +1189,32 @@ def _read_backend_profiles() -> dict:
 def _write_backend_profiles(data: dict) -> None:
     """Write the global backend profiles YAML file atomically."""
     _write_yaml_file(_BACKEND_PROFILES_PATH, data)
+
+
+def _build_prompt_templates_payload() -> dict[str, Any]:
+    templates: list[dict[str, Any]] = []
+    for name, default_prompts in _DEFAULT_TRANSLATOR_PROMPTS.items():
+        description_map = TRANSLATOR_SUPPORTED.get(name, {})
+        if isinstance(description_map, dict):
+            description = description_map.get("zh-cn") or next(iter(description_map.values()), "")
+        else:
+            description = ""
+        default_system_prompt = default_prompts.get("system_prompt", "")
+        default_user_prompt = default_prompts.get("user_prompt", "")
+        templates.append(
+            {
+                "name": name,
+                "description": description,
+                "default_system_prompt": default_system_prompt,
+                "system_prompt": default_system_prompt,
+                "system_overridden": False,
+                "default_user_prompt": default_user_prompt,
+                "user_prompt": default_user_prompt,
+                "user_overridden": False,
+                "overridden": False,
+            }
+        )
+    return {"templates": templates}
 
 
 _PROBLEM_TYPE_CATALOG: list[dict[str, str]] = [
@@ -2863,6 +2922,9 @@ def build_handler(registry: JobRegistry):
                 return
             if path == "/api/project-config-template":
                 self._send_json({"content": DEFAULT_PROJECT_CONFIG_YAML})
+                return
+            if path == "/api/prompt-templates":
+                self._send_json(_build_prompt_templates_payload())
                 return
             if path.startswith("/api/jobs/"):
                 job_id = path.rsplit("/", 1)[-1]

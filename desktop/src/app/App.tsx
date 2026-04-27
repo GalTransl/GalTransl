@@ -28,6 +28,11 @@ const SettingsPage = lazy(async () => {
   return { default: mod.SettingsPage };
 });
 
+const PromptTemplatesPage = lazy(async () => {
+  const mod = await import('../pages/PromptTemplatesPage');
+  return { default: mod.PromptTemplatesPage };
+});
+
 const CommonDictionaryPage = lazy(async () => {
   const mod = await import('../pages/CommonDictionaryPage');
   return { default: mod.CommonDictionaryPage };
@@ -328,6 +333,14 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
                 element={(
                   <Suspense fallback={<RouteLoadingFallback />}>
                     <SettingsPage />
+                  </Suspense>
+                )}
+              />
+              <Route
+                path="/settings/prompt-templates"
+                element={(
+                  <Suspense fallback={<RouteLoadingFallback />}>
+                    <PromptTemplatesPage />
                   </Suspense>
                 )}
               />
