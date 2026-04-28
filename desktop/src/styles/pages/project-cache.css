@@ -1103,6 +1103,13 @@
   padding-right: calc(var(--space-2) + 2px);
 }
 
+.cache-problems-hint {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+  margin: 0 0 var(--space-2);
+}
+
 .cache-problems-loading,
 .cache-problems-empty {
   text-align: center;

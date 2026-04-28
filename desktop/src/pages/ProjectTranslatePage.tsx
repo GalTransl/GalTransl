@@ -44,6 +44,7 @@ const SUCCESS_RENDER_LIMIT = 100;
 const INPUT_FOLDER_NAME = 'gt_input';
 const OUTPUT_FOLDER_NAME = 'gt_output';
 const CACHE_FOLDER_NAME = 'transl_cache';
+const CONTINUOUS_RETRANSL_STORAGE_KEY = 'galtransl-continuous-retransl-by-project';
 
 const HIDDEN_TRANSLATORS = new Set(['rebuilda', 'rebuildr', 'show-plugs', 'dump-name']);
 
@@ -58,6 +59,28 @@ type RetranslListItem = {
   key: string;
   count: number;
 };
+
+function readContinuousRetranslEnabled(projectDir: string): boolean {
+  try {
+    const raw = localStorage.getItem(CONTINUOUS_RETRANSL_STORAGE_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return parsed[projectDir] === true;
+  } catch {
+    return false;
+  }
+}
+
+function saveContinuousRetranslEnabled(projectDir: string, enabled: boolean) {
+  try {
+    const raw = localStorage.getItem(CONTINUOUS_RETRANSL_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) as Record<string, unknown> : {};
+    parsed[projectDir] = enabled;
+    localStorage.setItem(CONTINUOUS_RETRANSL_STORAGE_KEY, JSON.stringify(parsed));
+  } catch {
+    // ignore storage errors
+  }
+}
 
 export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const { projectDir, projectId, configFileName } = ctx;
@@ -83,6 +106,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const shouldStickToBottomRef = useRef(true);
   const [rightTab, setRightTab] = useState<'errors' | 'files' | 'retransl'>('errors');
   const [retranslKeys, setRetranslKeys] = useState<RetranslListItem[]>([]);
+  const [continuousRetranslEnabled, setContinuousRetranslEnabled] = useState(false);
   const [launchPhase, setLaunchPhase] = useState<'idle' | 'charging' | 'blasting'>('idle');
   const [stripBooting, setStripBooting] = useState(false);
   const [barSurging, setBarSurging] = useState(false);
@@ -91,6 +115,10 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const [ripples, setRipples] = useState<Array<{ id: number; x: number; y: number; size: number }>>([]);
   const launchButtonRef = useRef<HTMLDivElement | null>(null);
   const prevShouldPollRuntimeRef = useRef(false);
+  const autoRetranslPrevPendingRef = useRef<number | null>(null);
+  const autoRetranslStagnationRoundsRef = useRef(0);
+  const autoRetranslPrevJobIdRef = useRef<string | null>(null);
+  const autoRetranslPrevJobStatusRef = useRef<Job['status'] | null>(null);
 
   useEffect(() => {
     if (!projectDir || translators.length === 0) {
@@ -105,6 +133,19 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
       setSelectedTranslatorTemplate(projectDir, nextTranslator);
     }
   }, [projectDir, translators]);
+
+  useEffect(() => {
+    if (!projectDir) {
+      setContinuousRetranslEnabled(false);
+      return;
+    }
+    setContinuousRetranslEnabled(readContinuousRetranslEnabled(projectDir));
+  }, [projectDir]);
+
+  useEffect(() => {
+    if (!projectDir) return;
+    saveContinuousRetranslEnabled(projectDir, continuousRetranslEnabled);
+  }, [projectDir, continuousRetranslEnabled]);
 
   const refreshJobs = useCallback(async (_silent = false) => {
     try {
@@ -438,6 +479,15 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
 
   const projectName = projectDir ? projectDir.split(/[/\\]/).filter(Boolean).pop() || '' : '';
   const runtimeStage = (runtimeMatchesProject ? (runtime?.stage ?? '') : '').trim();
+  const runtimeRetranslPendingCount = useMemo(
+    () => (runtimeMatchesProject
+      ? (runtime?.retransl_stats ?? []).reduce(
+        (sum, item) => sum + Math.max(Number(item.count) || 0, 0),
+        0,
+      )
+      : 0),
+    [runtimeMatchesProject, runtime?.retransl_stats],
+  );
   const statusTone = runtimeStage === '检查模型可用性' ? 'checking-availability' : (currentJob?.status ?? 'pending');
   const statusLabel = runtimeStage === '检查模型可用性' ? '测试模型可用性' : getStatusLabel(currentJob?.status);
   const currentJobError = currentJob?.error?.trim() ?? '';
@@ -517,6 +567,61 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const primaryActionLabel = isCurrentProjectActive ? (stopping ? '停止中…' : '停止翻译') : (submitting ? '提交中…' : '启动翻译');
   const handlePrimaryAction = isCurrentProjectActive ? handleStopTranslation : handleStartTranslation;
   const primaryActionClassName = isCurrentProjectActive ? 'project-translate-page__stop-button' : '';
+
+  useEffect(() => {
+    if (!continuousRetranslEnabled) {
+      autoRetranslPrevPendingRef.current = null;
+      autoRetranslStagnationRoundsRef.current = 0;
+    }
+  }, [continuousRetranslEnabled, projectId]);
+
+  useEffect(() => {
+    const jobId = currentJob?.job_id ?? null;
+    const status = currentJob?.status ?? null;
+    const prevJobId = autoRetranslPrevJobIdRef.current;
+    const prevStatus = autoRetranslPrevJobStatusRef.current;
+    autoRetranslPrevJobIdRef.current = jobId;
+    autoRetranslPrevJobStatusRef.current = status;
+
+    const justCompleted = Boolean(
+      jobId
+      && status === 'completed'
+      && prevJobId === jobId
+      && prevStatus !== 'completed',
+    );
+    if (!justCompleted) return;
+    if (!continuousRetranslEnabled) return;
+
+    if (runtimeRetranslPendingCount <= 0) {
+      autoRetranslPrevPendingRef.current = 0;
+      autoRetranslStagnationRoundsRef.current = 0;
+      return;
+    }
+
+    const prevPending = autoRetranslPrevPendingRef.current;
+    if (prevPending !== null && runtimeRetranslPendingCount >= prevPending) {
+      autoRetranslStagnationRoundsRef.current += 1;
+    } else {
+      autoRetranslStagnationRoundsRef.current = 0;
+    }
+    autoRetranslPrevPendingRef.current = runtimeRetranslPendingCount;
+
+    if (autoRetranslStagnationRoundsRef.current >= 3) return;
+
+    const timer = window.setTimeout(() => {
+      if (!isCurrentProjectActive) {
+        handleStartTranslation();
+      }
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [
+    continuousRetranslEnabled,
+    currentJob?.job_id,
+    currentJob?.status,
+    handleStartTranslation,
+    isCurrentProjectActive,
+    runtimeRetranslPendingCount,
+  ]);
 
   const handleSuccessListScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const element = event.currentTarget;
@@ -814,28 +919,47 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                   <EmptyState title="暂无文件进度" description="启动翻译后，文件级进度会在这里展开。" />
                 )
               ) : (
-                retranslKeys.length > 0 ? (
-                  <ul className="ptv2-retransl-list">
-                    {retranslKeys.map((item, idx) => (
-                      <li
-                        className="ptv2-retransl-list__item ptv2-retransl-list__item--link"
-                        key={`${idx}-${item.key}`}
-                        role="button"
-                        tabIndex={0}
-                        title="点击跳转到配置编辑-重翻关键字"
-                        onClick={() => navigate(`/project/${projectId}/config?section=retranslKey`)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/project/${projectId}/config?section=retranslKey`); } }}
-                      >
-                        <span className="ptv2-retransl-list__index">{idx + 1}</span>
-                        <span className="ptv2-retransl-list__text">{item.key}</span>
-                        <span className="ptv2-retransl-list__count">{item.count} 句</span>
-                        <span className="ptv2-retransl-list__arrow">›</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <EmptyState title="暂无重翻词条" description="在项目配置「重翻关键字」中添加后，启动翻译时命中的句子会被重新翻译。" />
-                )
+                <div className="ptv2-retransl-pane">
+                  <div className="ptv2-retransl-auto">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={continuousRetranslEnabled}
+                      className={`ptv2-retransl-auto__toggle${continuousRetranslEnabled ? ' ptv2-retransl-auto__toggle--on' : ''}`}
+                      onClick={() => setContinuousRetranslEnabled((prev) => !prev)}
+                    >
+                      <span className="ptv2-retransl-auto__toggle-track" aria-hidden="true">
+                        <span className="ptv2-retransl-auto__toggle-thumb" />
+                      </span>
+                      <span className="ptv2-retransl-auto__toggle-label">自动持续重翻</span>
+                    </button>
+                    <p className="ptv2-retransl-auto__hint">
+                      翻译结束后，自动启动翻译，直到连续3次待重翻的句子仍不减少。
+                    </p>
+                  </div>
+                  {retranslKeys.length > 0 ? (
+                    <ul className="ptv2-retransl-list">
+                      {retranslKeys.map((item, idx) => (
+                        <li
+                          className="ptv2-retransl-list__item ptv2-retransl-list__item--link"
+                          key={`${idx}-${item.key}`}
+                          role="button"
+                          tabIndex={0}
+                          title="点击跳转到配置编辑-重翻关键字"
+                          onClick={() => navigate(`/project/${projectId}/config?section=retranslKey`)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/project/${projectId}/config?section=retranslKey`); } }}
+                        >
+                          <span className="ptv2-retransl-list__index">{idx + 1}</span>
+                          <span className="ptv2-retransl-list__text">{item.key}</span>
+                          <span className="ptv2-retransl-list__count">{item.count} 句</span>
+                          <span className="ptv2-retransl-list__arrow">›</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <EmptyState title="暂无重翻词条" description="在项目配置「重翻关键字」中添加后，启动翻译时命中的句子会被重新翻译。" />
+                  )}
+                </div>
               )}
               </div>
             </div>

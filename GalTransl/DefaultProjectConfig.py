@@ -98,7 +98,7 @@ dictionary:
   defaultDictFolder: Dict # 通用字典文件夹，相对于程序目录，也可填入绝对路径
   usePreDictInName: false # 将译前字典用在name字段，可用于翻译name字段，会发送给翻译引擎替换后的name[True/False]
   usePostDictInName: false # 将译后字典用在name字段，可用于翻译name字段[True/False]
-  useGPTDictInName: false # 将GPT字典用在name字段，可用于翻译name字段[True/False]
+  useGPTDictInName: true # 将GPT字典用在name字段，可用于翻译name字段[True/False]
   sortDict: true # 将所有字典按查找词长度重排序。[True/False]
   # 译前字典
   preDict:

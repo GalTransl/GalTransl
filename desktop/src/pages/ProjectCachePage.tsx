@@ -1476,6 +1476,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
           {/* Tab: Problems */}
           {sidebarTab === 'problems' && (
             <div className="cache-problems-panel">
+              <div className="cache-problems-hint">点击+号加入重翻关键字</div>
               {loadingProblems ? (
                 <div className="cache-problems-loading">加载问题中…</div>
               ) : problems.length === 0 ? (

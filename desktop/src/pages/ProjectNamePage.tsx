@@ -46,7 +46,7 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
   const aiTranslateAbortRef = useRef<AbortController | null>(null);
 
   // GPT dict integration state
-  const [useGptDictForName, setUseGptDictForName] = useState(false);
+  const [useGptDictForName, setUseGptDictForName] = useState(true);
   const [gptDictNameMap, setGptDictNameMap] = useState<Map<string, string>>(new Map());
   const [gptToggleBusy, setGptToggleBusy] = useState(false);
 
@@ -216,7 +216,7 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
       try {
         const res = await fetchProjectConfig(projectId, configFileName || 'config.yaml');
         const dictCfg = (res.config?.dictionary ?? {}) as Record<string, unknown>;
-        const enabled = Boolean(dictCfg.useGPTDictInName);
+        const enabled = dictCfg.useGPTDictInName === undefined ? true : Boolean(dictCfg.useGPTDictInName);
         if (cancelled) return;
         setUseGptDictForName(enabled);
         if (enabled) {
@@ -225,7 +225,7 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
           setGptDictNameMap(map);
         }
       } catch {
-        // Non-critical: leave toggle off if config can't be read
+        // Non-critical: keep default enabled if config can't be read
       }
     })();
     return () => { cancelled = true; };
