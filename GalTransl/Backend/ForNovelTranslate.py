@@ -187,6 +187,10 @@ class ForNovelTranslate(BaseTranslate):
             if success_count > 0 and not stream_parse_error_message:
                 error_flag = False  # 部分解析
 
+            if not error_flag and success_count <= 0 and not result_trans_list:
+                error_message = "未解析到有效句子"
+                error_flag = True
+
             if error_flag:
                 try:
                     from GalTransl.server import record_runtime_error
