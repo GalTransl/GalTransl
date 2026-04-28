@@ -104,7 +104,9 @@ function CacheEntryCard({
           <span className="cache-card__pill cache-card__pill--speaker" style={speakerStyle(rawSpeaker)}>{speaker}</span>
         )}
         {hasProblem && (
-          <span className="cache-card__pill cache-card__pill--problem">{entry.problem}</span>
+          <div className="cache-card__problem-slot">
+            <span className="cache-card__pill cache-card__pill--problem" title={entry.problem}>{entry.problem}</span>
+          </div>
         )}
         <div className="cache-card__spacer" />
         {entry.trans_by && (

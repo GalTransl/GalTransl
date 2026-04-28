@@ -519,6 +519,11 @@
   flex: 1;
 }
 
+.cache-card__problem-slot {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
 .cache-card__pill {
   display: inline-flex;
   align-items: center;
@@ -532,20 +537,29 @@
 .cache-card__pill--engine {
   background: var(--color-primary-soft);
   color: var(--color-primary);
+  flex-shrink: 0;
 }
 
 .cache-card__pill--speaker {
   /* colors set via inline style from speakerHue() */
   border: 1px solid transparent;
+  flex-shrink: 0;
 }
 
 .cache-card__pill--problem {
   background: var(--color-warning-soft);
   color: var(--color-warning);
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cache-card__expand,
 .cache-card__delete {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
