@@ -141,10 +141,14 @@ def find_problems(
                         problem_list.append(f"语言不通-非GBK：{non_gbk_chars}")
         if CProblemType.缺控制符 in find_type:
             control_list_jp=extract_control_substrings(pre_jp)
-            control_list_zh=extract_control_substrings(post_zh)
+            control_list_pre_dst=extract_control_substrings(pre_zh)
+            control_list_post_dst=extract_control_substrings(post_zh)
             lost_list=[]
             for control_jp in control_list_jp:
-                if control_jp not in control_list_zh:
+                if (
+                    control_jp not in control_list_pre_dst
+                    and control_jp not in control_list_post_dst
+                ):
                     lost_list.append(control_jp)
             if lost_list:
                 problem_list.append(f"缺控制符：{' '.join(lost_list)}")
