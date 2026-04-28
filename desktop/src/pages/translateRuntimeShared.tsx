@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { speakerStyle } from '../lib/speaker';
 import { resolveSpeakerName } from '../lib/useNameDict';
 import type {
@@ -11,9 +11,37 @@ import type {
 
 export function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) {
   const [copied, setCopied] = useState(false);
+  const [isMessageTruncated, setIsMessageTruncated] = useState(false);
+  const messageRef = useRef<HTMLParagraphElement | null>(null);
   const messageText = (entry.message || '').trim();
   const kindLabel = getErrorKindLabel(entry.kind);
   const modelLabel = compactModelLabel(entry.model);
+
+  useEffect(() => {
+    const el = messageRef.current;
+    if (!el) {
+      setIsMessageTruncated(false);
+      return;
+    }
+
+    const updateTruncation = () => {
+      const truncated = el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1;
+      setIsMessageTruncated(truncated);
+    };
+
+    updateTruncation();
+
+    if (typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(() => {
+      updateTruncation();
+    });
+    observer.observe(el);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [messageText]);
 
   const handleCopyMessage = async () => {
     if (!messageText) return;
@@ -55,7 +83,13 @@ export function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) 
           </div>
         </div>
       </div>
-      <p className="runtime-event__message">{entry.message || '未提供错误详情。'}</p>
+      <p
+        ref={messageRef}
+        className="runtime-event__message"
+        title={isMessageTruncated && messageText ? messageText : undefined}
+      >
+        {entry.message || '未提供错误详情。'}
+      </p>
       <dl className="runtime-event__meta">
         {entry.kind !== 'api' && (
           <div>
