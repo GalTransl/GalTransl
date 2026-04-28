@@ -238,13 +238,13 @@ class CNormalDic:
                 # 取对应的查找关键字的句子
                 match dic.special_key:
                     case "pre_src" | "pre_jp":
-                        find_ifword_text = input_tran.pre_jp
+                        find_ifword_text = input_tran.pre_src
                     case "post_src" | "post_jp":
-                        find_ifword_text = input_tran.post_jp
+                        find_ifword_text = input_tran.post_src
                     case "pre_dst" | "pre_zh":
-                        find_ifword_text = input_tran.pre_zh
+                        find_ifword_text = input_tran.pre_dst
                     case "post_dst" | "post_zh":
-                        find_ifword_text = input_tran.post_zh
+                        find_ifword_text = input_tran.post_dst
                     case _:
                         raise ValueError(f"不支持的条件字典关键字{dic.special_key}")
                 # 遍历if_word_list
@@ -429,7 +429,7 @@ class CGptDict:
 
         promt = ""
         input_text = "\n".join(
-            [f"{tran.get_speaker_name()}:{tran.post_jp}" for tran in trans_list]
+            [f"{tran.get_speaker_name()}:{tran.post_src}" for tran in trans_list]
         )
         input_text_copy=input_text
         used_dic=[]
@@ -459,7 +459,7 @@ class CGptDict:
     def check_dic_use(self, find_from_str: str, tran: CSentense):
         problem_list = []
         for dic in self._dic_list:
-            if dic.search_word not in tran.post_jp:
+            if dic.search_word not in tran.post_src:
                 continue
 
             replace_word_list = (

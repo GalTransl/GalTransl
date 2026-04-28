@@ -1845,10 +1845,10 @@ def build_handler(registry: JobRegistry):
                             if post_src == "":
                                 continue
                             s = CSentense(pre_src, speaker if speaker else "", e.get("index", 0))
-                            s.post_jp = pre_src
-                            s.pre_zh = pre_dst
+                            s.post_src = pre_src
+                            s.pre_dst = pre_dst
                             s.proofread_zh = proofread_dst
-                            s.post_zh = proofread_dst if proofread_dst else pre_dst
+                            s.post_dst = proofread_dst if proofread_dst else pre_dst
                             s.trans_by = e.get("trans_by", "")
                             s.proofread_by = e.get("proofread_by", "")
                             s.trans_conf = e.get("trans_conf", 0)
@@ -1888,7 +1888,7 @@ def build_handler(registry: JobRegistry):
                                     e["problem"] = tran.problem
                                 elif "problem" in e:
                                     del e["problem"]
-                                e["post_dst_preview"] = tran.post_zh
+                                e["post_dst_preview"] = tran.post_dst
                                 idx += 1
 
                         # Re-save with updated fields

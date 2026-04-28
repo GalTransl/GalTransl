@@ -87,8 +87,8 @@ class LineBreakFix(GTextPlugin):
         :param tran: CSentense对象
         :return: 处理后的CSentense对象
         """
-        src_breaks = tran.pre_jp.count(self.linebreak)
-        dst_breaks = tran.post_zh.count(self.linebreak)
+        src_breaks = tran.pre_src.count(self.linebreak)
+        dst_breaks = tran.post_dst.count(self.linebreak)
         LOGGER.debug(f"[{self.pname}] 源文本换行符数量: {src_breaks}")
         LOGGER.debug(f"[{self.pname}] 目标文本换行符数量: {dst_breaks}")
 
@@ -100,17 +100,17 @@ class LineBreakFix(GTextPlugin):
 
         # 根据不同的换行模式调用相应的处理方法
         if self.mode == "平均":
-            tran.post_zh = self.average_mode(tran.post_zh, src_breaks)
+            tran.post_dst = self.average_mode(tran.post_dst, src_breaks)
         elif self.mode == "切最长":
-            tran.post_zh = self.intersperse_mode(tran.post_zh, src_breaks)
+            tran.post_dst = self.intersperse_mode(tran.post_dst, src_breaks)
         elif self.mode == "保持位置":
-            tran.post_zh = self.keep_position_mode(tran.post_zh, tran.pre_jp, src_breaks)
+            tran.post_dst = self.keep_position_mode(tran.post_dst, tran.pre_src, src_breaks)
         elif self.mode == "前置":
-            tran.post_zh = self.prepend_mode(tran.post_zh, src_breaks)
+            tran.post_dst = self.prepend_mode(tran.post_dst, src_breaks)
         elif self.mode == "后置":
-            tran.post_zh = self.append_mode(tran.post_zh, src_breaks)
+            tran.post_dst = self.append_mode(tran.post_dst, src_breaks)
         elif self.mode == "固定字数":
-            tran.post_zh = self.auto_segment_mode(tran.post_zh)
+            tran.post_dst = self.auto_segment_mode(tran.post_dst)
         else:
             LOGGER.warning(f"[{self.pname}] 未知的换行模式: {self.mode}")
 

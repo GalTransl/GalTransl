@@ -374,7 +374,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
 
   const buildRowByType = (rowType: DictRowType): DictRow => {
     if (rowType === 'gpt') return { type: 'gpt', values: ['', '', ''], raw: '' };
-    if (rowType === 'conditional') return { type: 'conditional', values: ['pre_jp', '', '', '', ''], raw: '' };
+    if (rowType === 'conditional') return { type: 'conditional', values: ['pre_src', '', '', '', ''], raw: '' };
     if (rowType === 'situation') return { type: 'situation', values: ['diag', '', ''], raw: '' };
     if (rowType === 'comment') return { type: 'comment', values: [''], raw: '' };
     return { type: 'normal', values: ['', '', ''], raw: '' };

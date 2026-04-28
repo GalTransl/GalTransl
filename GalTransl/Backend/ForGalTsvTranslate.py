@@ -61,7 +61,7 @@ class ForGalTsvTranslate(BaseTranslate):
             speaker = speaker_name if speaker_name else "null"
             speaker = speaker.replace("\r\n", "").replace("\t", "").replace("\n", "")
 
-            src_text = trans.post_jp
+            src_text = trans.post_src
             if "\\r\\n" in src_text:
                 n_symbol = "\\r\\n"
             elif "\r\n" in src_text:
@@ -288,7 +288,7 @@ class ForGalTsvTranslate(BaseTranslate):
             return False, f"{line_id}句id未对应{trans_list[i].index}"
 
         line_dst = line_sp[1]
-        if trans_list[i].post_jp != "" and line_dst == "":
+        if trans_list[i].post_src != "" and line_dst == "":
             return False, f"第{line_id}句空白"
         if "�" in line_dst:
             return False, f"第{line_id}句包含乱码：{line_dst}"
@@ -341,7 +341,7 @@ class ForGalTsvTranslate(BaseTranslate):
     def _format_restore_context_line(self, current_tran: CSentense) -> str:
         speaker_name = current_tran.get_speaker_name()
         speaker = speaker_name if speaker_name else "null"
-        return f"{speaker}\t{current_tran.pre_zh}\t{current_tran.index}"
+        return f"{speaker}\t{current_tran.pre_dst}\t{current_tran.index}"
 
     def _format_restore_context_payload(self, lines: List[str]) -> str:
         return "NAME\tDST\tID\n" + "\n".join(lines)

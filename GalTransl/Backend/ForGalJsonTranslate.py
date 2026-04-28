@@ -67,7 +67,7 @@ class ForGalJsonTranslate(BaseTranslate):
             speaker_name = trans.get_speaker_name()
             speaker = speaker_name if speaker_name else "null"
             speaker = speaker.replace("\r\n", "").replace("\t", "").replace("\n", "")
-            src_text = trans.post_jp
+            src_text = trans.post_src
 
             if "\\r\\n" in src_text:
                 n_symbol = "\\r\\n"
@@ -100,7 +100,7 @@ class ForGalJsonTranslate(BaseTranslate):
                     "name": speaker,
                     "src": src_text,
                     "dst": (
-                        trans.pre_zh if trans.proofread_zh == "" else trans.proofread_zh
+                        trans.pre_dst if trans.proofread_zh == "" else trans.proofread_zh
                     ),
                 }
 
@@ -357,7 +357,7 @@ class ForGalJsonTranslate(BaseTranslate):
             return False, f"第{trans_list[i].index}句找不到{key_name}"
 
         line_dst = line_json[key_name]
-        if trans_list[i].post_jp != "" and line_dst == "":
+        if trans_list[i].post_src != "" and line_dst == "":
             return False, f"第{trans_list[i].index}句空白"
         if "�" in line_dst:
             return False, f"第{trans_list[i].index}句包含乱码：{line_dst}"
@@ -413,7 +413,7 @@ class ForGalJsonTranslate(BaseTranslate):
         tmp_obj = {
             "id": current_tran.index,
             "name": speaker,
-            "dst": current_tran.pre_zh,
+            "dst": current_tran.pre_dst,
         }
         if speaker == "null":
             del tmp_obj["name"]

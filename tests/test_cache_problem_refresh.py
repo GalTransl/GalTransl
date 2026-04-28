@@ -65,7 +65,7 @@ class CacheProblemRefreshTests(unittest.IsolatedAsyncioTestCase):
 
             # 构造一个与缓存 key 匹配的 CSentense
             tran = CSentense(pre_src, speaker="", index=0)
-            tran.post_jp = post_src
+            tran.post_src = post_src
             trans_list = [tran]
 
             hit, unhit = await get_transCache_from_json(
@@ -74,8 +74,8 @@ class CacheProblemRefreshTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(len(hit), 1)
             self.assertEqual(len(unhit), 0)
-            # 缓存命中后 pre_zh 应为用户修好的译文
-            self.assertEqual(tran.pre_zh, "早上好")
+            # 缓存命中后 pre_dst 应为用户修好的译文
+            self.assertEqual(tran.pre_dst, "早上好")
 
             # 模拟 postprocess_results 的核心步骤
             config = FakeProblemConfig()

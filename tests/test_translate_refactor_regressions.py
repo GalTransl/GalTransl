@@ -74,6 +74,7 @@ class TranslateRefactorRegressionTests(unittest.IsolatedAsyncioTestCase):
         translator.target_lang = "English"
         translator.source_lang = "Japanese"
         translator.smartRetry = False
+        translator._SIGCHARS = "a"
         translator._last_chatbot_was_stream = False
         translator._last_chatbot_model_name = ""
         translator.restore_context = lambda trans_list, num_pre_request, filename="": None
@@ -83,8 +84,8 @@ class TranslateRefactorRegressionTests(unittest.IsolatedAsyncioTestCase):
         async def fake_ask_chatbot(**kwargs):
             translator._last_chatbot_model_name = "stream-model"
             translator._last_chatbot_was_stream = True
-            kwargs["stream_line_callback"]([r'{"id": 1, "dst": "hello"}'], True)
-            return r'{"id": 1, "dst": "hello"}', SimpleNamespace(model_name="fallback-model")
+            kwargs["stream_line_callback"]([r'aaa|{"id": 1, "dst": "hello"}'], True)
+            return r'aaa|{"id": 1, "dst": "hello"}', SimpleNamespace(model_name="fallback-model")
 
         translator.ask_chatbot = fake_ask_chatbot
 
@@ -96,7 +97,7 @@ class TranslateRefactorRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(success_count, 1)
         self.assertEqual(len(result_trans_list), 1)
-        self.assertEqual(result_trans_list[0].pre_zh, "hello")
+        self.assertEqual(result_trans_list[0].pre_dst, "hello")
         self.assertEqual(result_trans_list[0].trans_by, "stream-model")
 
     async def test_batch_translate_common_skips_duplicate_runtime_success_record(self) -> None:
@@ -119,8 +120,8 @@ class TranslateRefactorRegressionTests(unittest.IsolatedAsyncioTestCase):
                 return len(trans_list_split), trans_list_split
 
         trans = CSentense("line-1", index=1)
-        trans.pre_zh = "译文"
-        trans.post_zh = "译文"
+        trans.pre_dst = "译文"
+        trans.post_dst = "译文"
         trans.trans_by = "stream-model"
         trans._runtime_success_recorded = True
 

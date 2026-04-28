@@ -56,7 +56,7 @@ async def _run_refresh_cycle(cache_file_path: str, pre_src: str, post_src: str):
 
     # 构造 chunk 的 trans_list（就 1 句）
     tran = CSentense(pre_src, speaker="", index=0)
-    tran.post_jp = pre_src
+    tran.post_src = pre_src
     trans_list = [tran]
 
     config = FakeProblemConfig()

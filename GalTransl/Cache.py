@@ -47,19 +47,19 @@ def _append_cache_file_path(cache_file_path: str) -> str:
 
 def _build_cache_key_for_tran(tran) -> str:
     line_now, line_priv, line_next = "", "None", "None"
-    line_now = f"{tran.speaker}{tran.pre_jp}"
+    line_now = f"{tran.speaker}{tran.pre_src}"
 
     prev_tran = tran.prev_tran
-    while prev_tran and prev_tran.post_jp == "":
+    while prev_tran and prev_tran.post_src == "":
         prev_tran = prev_tran.prev_tran
     if prev_tran:
-        line_priv = f"{prev_tran.speaker}{prev_tran.pre_jp}"
+        line_priv = f"{prev_tran.speaker}{prev_tran.pre_src}"
 
     next_tran = tran.next_tran
-    while next_tran and next_tran.post_jp == "":
+    while next_tran and next_tran.post_src == "":
         next_tran = next_tran.next_tran
     if next_tran:
-        line_next = f"{next_tran.speaker}{next_tran.pre_jp}"
+        line_next = f"{next_tran.speaker}{next_tran.pre_src}"
 
     line_priv = "None" if line_priv == "" else line_priv
     line_next = "None" if line_next == "" else line_next
@@ -67,17 +67,17 @@ def _build_cache_key_for_tran(tran) -> str:
 
 
 def _build_cache_obj(tran, post_save: bool = False):
-    if tran.post_jp == "":
+    if tran.post_src == "":
         return None
-    if tran.pre_zh == "":
+    if tran.pre_dst == "":
         return None
 
     cache_obj = {
         "index": tran.index,
         "name": tran.speaker,
-        "pre_src": tran.pre_jp,
-        "post_src": tran.post_jp,
-        "pre_dst": tran.pre_zh,
+        "pre_src": tran.pre_src,
+        "post_src": tran.post_src,
+        "pre_dst": tran.pre_dst,
     }
     cache_obj["proofread_dst"] = tran.proofread_zh
 
@@ -94,7 +94,7 @@ def _build_cache_obj(tran, post_save: bool = False):
     if tran.unknown_proper_noun != "":
         cache_obj["unknown_proper_noun"] = tran.unknown_proper_noun
     if post_save:
-        cache_obj["post_dst_preview"] = tran.post_zh
+        cache_obj["post_dst_preview"] = tran.post_dst
 
     return cache_obj
 
@@ -252,8 +252,8 @@ async def get_transCache_from_json(
     retry_failed=False,
     proofread=False,
     retran_key="",
-    load_post_jp=False,
-    ignr_post_jp=False,
+    load_post_src=False,
+    ignr_post_src=False,
     eng_type="",
 ):
     """
@@ -265,8 +265,8 @@ async def get_transCache_from_json(
         retry_failed (bool, optional): 是否重试失败的翻译。默认为 False。
         proofread (bool, optional): 是否是校对模式。默认为 False。
         retran_key (str or list, optional): 重译关键字，可以是字符串或字符串列表。默认为空字符串。
-        load_post_jp (bool, optional): 不检查post_jp是否被改变, 且直接使用cache的post_jp。默认为 False。
-        ignr_post_jp (bool, optional): 仅不检查post_jp是否被改变。默认为 False。
+        load_post_src (bool, optional): 不检查post_src是否被改变, 且直接使用cache的post_src。默认为 False。
+        ignr_post_src (bool, optional): 仅不检查post_src是否被改变。默认为 False。
 
     Returns:
         Tuple[List[CTrans], List[CTrans]]: 包含两个列表的元组：击中缓存的翻译列表和未击中缓存的翻译列表。
@@ -329,30 +329,30 @@ async def get_transCache_from_json(
 
     for tran in trans_list:
         # 忽略jp为空的句子
-        if tran.pre_jp == "" or tran.post_jp == "":
-            tran.pre_zh, tran.post_zh = "", ""
+        if tran.pre_src == "" or tran.post_src == "":
+            tran.pre_dst, tran.post_dst = "", ""
             translist_hit.append(tran)
             continue
-        # 忽略在读取缓存前pre_zh就有值的句子
-        if tran.pre_zh != "":
-            tran.post_zh = tran.pre_zh
+        # 忽略在读取缓存前pre_dst就有值的句子
+        if tran.pre_dst != "":
+            tran.post_dst = tran.pre_dst
             translist_hit.append(tran)
             continue
 
         line_now, line_priv, line_next = "", "None", "None"
-        line_now = f"{tran.speaker}{tran.pre_jp}"
+        line_now = f"{tran.speaker}{tran.pre_src}"
         prev_tran = tran.prev_tran
         # 找非空前句
-        while prev_tran and prev_tran.post_jp == "":
+        while prev_tran and prev_tran.post_src == "":
             prev_tran = prev_tran.prev_tran
         if prev_tran:
-            line_priv = f"{prev_tran.speaker}{prev_tran.pre_jp}"
+            line_priv = f"{prev_tran.speaker}{prev_tran.pre_src}"
         # 找非空后句
         next_tran = tran.next_tran
-        while next_tran and next_tran.post_jp == "":
+        while next_tran and next_tran.post_src == "":
             next_tran = next_tran.next_tran
         if next_tran:
-            line_next = f"{next_tran.speaker}{next_tran.pre_jp}"
+            line_next = f"{next_tran.speaker}{next_tran.pre_src}"
 
         line_priv = "None" if line_priv == "" else line_priv
         line_next = "None" if line_next == "" else line_next
@@ -370,15 +370,15 @@ async def get_transCache_from_json(
 
         if no_proofread:
             # post_src被改变
-            if load_post_jp == ignr_post_jp == False:
-                if tran.post_jp != _cache_get(cache_dict[cache_key], "post_src"):
+            if load_post_src == ignr_post_src == False:
+                if tran.post_src != _cache_get(cache_dict[cache_key], "post_src"):
                     translist_unhit.append(tran)
-                    LOGGER.debug(f"[cache]post_src被改变: \npost_src_before{_cache_get(cache_dict[cache_key], 'post_src')}\npost_src_now{tran.post_jp}")
+                    LOGGER.debug(f"[cache]post_src被改变: \npost_src_before{_cache_get(cache_dict[cache_key], 'post_src')}\npost_src_now{tran.post_src}")
                     if "rebuild" in eng_type:
-                        LOGGER.error(f"[cache]post_src被改变: \npost_src_before: {_cache_get(cache_dict[cache_key], 'post_src')}\npost_src_now: {tran.post_jp}")
+                        LOGGER.error(f"[cache]post_src被改变: \npost_src_before: {_cache_get(cache_dict[cache_key], 'post_src')}\npost_src_now: {tran.post_src}")
                     continue
             # pre_dst为空
-            if tran.post_jp != "":
+            if tran.post_src != "":
                 if (
                     not _cache_has(cache_dict[cache_key], "pre_dst")
                     or _cache_get(cache_dict[cache_key], "pre_dst") == ""
@@ -415,8 +415,8 @@ async def get_transCache_from_json(
                         LOGGER.info(f"[cache]retran_key in 'problem' message: {line_now}")
                         continue
 
-        # 击中缓存的,post_zh初始值赋pre_dst
-        tran.pre_zh = _cache_get(cache_dict[cache_key], "pre_dst")
+        # 击中缓存的,post_dst初始值赋pre_dst
+        tran.pre_dst = _cache_get(cache_dict[cache_key], "pre_dst")
         if "trans_by" in cache_dict[cache_key]:
             tran.trans_by = cache_dict[cache_key]["trans_by"]
         if _cache_has(cache_dict[cache_key], "proofread_dst"):
@@ -431,9 +431,9 @@ async def get_transCache_from_json(
             tran.unknown_proper_noun = cache_dict[cache_key]["unknown_proper_noun"]
 
         if tran.proofread_zh != "":
-            tran.post_zh = tran.proofread_zh
+            tran.post_dst = tran.proofread_zh
         else:
-            tran.post_zh = tran.pre_zh
+            tran.post_dst = tran.pre_dst
 
         # 校对模式下，未校对的
         if proofread and tran.proofread_zh == "":
@@ -441,8 +441,8 @@ async def get_transCache_from_json(
             continue
 
         # 不检查post_src是否被改变, 且直接使用cache的post_src
-        if load_post_jp:
-            tran.post_jp = _cache_get(cache_dict[cache_key], "post_src")
+        if load_post_src:
+            tran.post_src = _cache_get(cache_dict[cache_key], "post_src")
 
         translist_hit.append(tran)
 

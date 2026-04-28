@@ -28,10 +28,10 @@ class skip_noJP(GTextPlugin):
         :param tran: The CSentense to be processed.
         :return: The modified CSentense.
         """
-        if not contains_japanese(tran.post_jp):
-            if not contains_hankaku(tran.post_jp):
+        if not contains_japanese(tran.post_src):
+            if not contains_hankaku(tran.post_src):
                 # 像这样赋值pre_zh后，这句话就不会被翻译。
-                tran.pre_zh = tran.post_jp
+                tran.pre_dst = tran.post_src
         return tran
 
     def before_dst_processed(self, tran: CSentense) -> CSentense:

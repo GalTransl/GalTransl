@@ -71,22 +71,22 @@ class text_common_fullWidthFix(GTextPlugin):
 
     def before_src_processed(self, tran: CSentense) -> CSentense:
         if self.替换时机 == "before_src_processed":
-            tran.post_jp = self.process_text(tran.pre_jp)
+            tran.post_src = self.process_text(tran.pre_src)
         return tran
 
     def after_src_processed(self, tran: CSentense) -> CSentense:
         if self.替换时机 == "after_src_processed":
-            tran.post_jp = self.process_text(tran.post_jp)
+            tran.post_src = self.process_text(tran.post_src)
         return tran
 
     def before_dst_processed(self, tran: CSentense) -> CSentense:
         if self.替换时机 == "before_dst_processed":
-            tran.post_zh = self.process_text(tran.pre_zh)
+            tran.post_dst = self.process_text(tran.pre_dst)
         return tran
 
     def after_dst_processed(self, tran: CSentense) -> CSentense:
         if self.替换时机 == "after_dst_processed":
-            tran.post_zh = self.process_text(tran.post_zh)
+            tran.post_dst = self.process_text(tran.post_dst)
         return tran
 
     def gtp_final(self):

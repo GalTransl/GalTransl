@@ -156,10 +156,10 @@ class TextBgiFixruby(GTextPlugin):
         """
         if self.remove_incorrect is False and self.auto_correct is False:
             return tran
-        t = process_string(tran.post_zh, self.remove_incorrect, self.auto_correct)
-        if t != tran.post_zh:
-            LOGGER.log(self.process_log_level, f"[{self.pname}][{tran.index}]{tran.post_zh} -> {t}")
-            tran.post_zh = t
+        t = process_string(tran.post_dst, self.remove_incorrect, self.auto_correct)
+        if t != tran.post_dst:
+            LOGGER.log(self.process_log_level, f"[{self.pname}][{tran.index}]{tran.post_dst} -> {t}")
+            tran.post_dst = t
             self.count += 1
         return tran
 

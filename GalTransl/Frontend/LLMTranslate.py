@@ -260,7 +260,7 @@ def preprocess_trans_list(trans_list, projectConfig, pre_dic, tPlugins=None):
             if projectConfig.select_translator not in ["ForNovel"]:
                 tran.analyse_dialogue()
 
-        tran.post_jp = pre_dic.do_replace(tran.post_jp, tran)
+        tran.post_src = pre_dic.do_replace(tran.post_src, tran)
 
         if projectConfig.getDictCfgSection("usePreDictInName"):
             if isinstance(tran.speaker, str) and isinstance(tran._speaker, str):
@@ -287,7 +287,7 @@ def postprocess_trans_list(trans_list, projectConfig, post_dic, tPlugins=None):
                     LOGGER.error(f" 插件 {plugin.name} 执行失败: {e}", exc_info=True)
 
         tran.recover_dialogue_symbol()
-        tran.post_zh = post_dic.do_replace(tran.post_zh, tran)
+        tran.post_dst = post_dic.do_replace(tran.post_dst, tran)
 
         if tPlugins:
             for plugin in tPlugins:

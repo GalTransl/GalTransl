@@ -122,7 +122,7 @@ class CSakuraTranslate(BaseTranslate):
         line_lens = []
         idx_tip = self._build_idx_tip(trans_list)
         for i, trans in enumerate(trans_list):
-            tmp_text = trans.post_jp.replace("\r\n", "\\n").replace("\n", "\\n")
+            tmp_text = trans.post_src.replace("\r\n", "\\n").replace("\n", "\\n")
             speaker_name=trans.get_speaker_name()
 
             if speaker_name != "":
@@ -189,7 +189,7 @@ class CSakuraTranslate(BaseTranslate):
                     break
                 i += 1
                 # 本行输出不应为空
-                if trans_list[i].post_jp != "" and line == "":
+                if trans_list[i].post_src != "" and line == "":
                     error_message = f"第{i+1}句空白"
                     error_flag = True
                     break
@@ -205,17 +205,17 @@ class CSakuraTranslate(BaseTranslate):
                 # 统一简繁体
                 line = self.opencc.convert(line)
                 # 还原换行
-                if "\r\n" in trans_list[i].post_jp:
+                if "\r\n" in trans_list[i].post_src:
                     line = line.replace("\\n", "\r\n")
-                elif "\n" in trans_list[i].post_jp:
+                elif "\n" in trans_list[i].post_src:
                     line = line.replace("\\n", "\n")
 
                 # fix trick
                 if line.startswith("："):
                     line = line[1:]
 
-                trans_list[i].pre_zh = line
-                trans_list[i].post_zh = line
+                trans_list[i].pre_dst = line
+                trans_list[i].post_dst = line
                 trans_list[i].trans_by = self.eng_type
                 result_trans_list.append(trans_list[i])
 
@@ -346,7 +346,7 @@ class CSakuraTranslate(BaseTranslate):
             trans_result_list += trans_result
 
             for trans in trans_result:
-                if trans.pre_zh and "(Failed)" not in trans.pre_zh and "(翻译失败)" not in trans.pre_zh:
+                if trans.pre_dst and "(Failed)" not in trans.pre_dst and "(翻译失败)" not in trans.pre_dst:
                     self._record_runtime_success(filename, trans)
 
             LOGGER.info("".join([repr(tran) for tran in trans_result]))
@@ -383,8 +383,8 @@ class CSakuraTranslate(BaseTranslate):
     def _format_restore_context_line(self, current_tran: CSentense) -> str:
         speaker_name = current_tran.get_speaker_name()
         if speaker_name != "":
-            return f"{speaker_name}「{current_tran.pre_zh}」"
-        return f"{current_tran.pre_zh}"
+            return f"{speaker_name}「{current_tran.pre_dst}」"
+        return f"{current_tran.pre_dst}"
 
 
     def check_degen_in_process(self, cn: str = ""):

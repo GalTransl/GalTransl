@@ -312,8 +312,8 @@ class BaseTranslate:
                 filename=filename,
                 index=getattr(trans, "runtime_index", getattr(trans, "index", 0)),
                 speaker=getattr(trans, "speaker", None),
-                source_preview=getattr(trans, "post_jp", ""),
-                translation_preview=getattr(trans, "pre_zh", ""),
+                source_preview=getattr(trans, "post_src", ""),
+                translation_preview=getattr(trans, "pre_dst", ""),
                 trans_by=getattr(trans, "trans_by", ""),
             )
         except Exception:
@@ -325,17 +325,17 @@ class BaseTranslate:
         if "Chinese" in self.target_lang:
             line_dst = self.opencc.convert(line_dst)
 
-        if "”" not in current_tran.post_jp and '"' not in current_tran.post_jp:
+        if "”" not in current_tran.post_src and '"' not in current_tran.post_src:
             line_dst = line_dst.replace('"', "")
-        elif '"' not in current_tran.post_jp and '"' in line_dst:
+        elif '"' not in current_tran.post_src and '"' in line_dst:
             line_dst = fix_quotes2(line_dst)
-        elif '"' in current_tran.post_jp and "”" in line_dst:
+        elif '"' in current_tran.post_src and "”" in line_dst:
             line_dst = line_dst.replace("“", '"')
             line_dst = line_dst.replace("”", '"')
 
-        if not line_dst.startswith("「") and current_tran.post_jp.startswith("「"):
+        if not line_dst.startswith("「") and current_tran.post_src.startswith("「"):
             line_dst = "「" + line_dst
-        if not line_dst.endswith("」") and current_tran.post_jp.endswith("」"):
+        if not line_dst.endswith("」") and current_tran.post_src.endswith("」"):
             line_dst = line_dst + "」"
 
         line_dst = line_dst.replace("[t]", "\t")
@@ -343,7 +343,7 @@ class BaseTranslate:
             line_dst = line_dst.replace("<br>", n_symbol)
             line_dst = line_dst.replace("<BR>", n_symbol)
 
-        if "……" in current_tran.post_jp and "..." in line_dst:
+        if "……" in current_tran.post_src and "..." in line_dst:
             line_dst = line_dst.replace("......", "……")
             line_dst = line_dst.replace("...", "……")
 
@@ -361,8 +361,8 @@ class BaseTranslate:
         emitted_success_indices=None,
         result_index: Optional[int] = None,
     ) -> tuple[bool, str]:
-        current_tran.pre_zh = line_dst
-        current_tran.post_zh = line_dst
+        current_tran.pre_dst = line_dst
+        current_tran.post_dst = line_dst
         current_tran.trans_by = model_name
         if emit_runtime_success:
             if emitted_success_indices is None:
@@ -408,16 +408,16 @@ class BaseTranslate:
         while i < len(trans_list):
             current_tran = trans_list[i]
             if not proofread:
-                failed_text = translate_failed_prefix + current_tran.post_jp
-                current_tran.pre_zh = failed_text
-                current_tran.post_zh = failed_text
+                failed_text = translate_failed_prefix + current_tran.post_src
+                current_tran.pre_dst = failed_text
+                current_tran.post_dst = failed_text
                 current_tran.problem = self._merge_problem_message(
                     current_tran.problem, translate_problem_message, append=True
                 )
                 current_tran.trans_by = failed_model_name
             else:
-                current_tran.proofread_zh = current_tran.pre_zh
-                current_tran.post_zh = current_tran.pre_zh
+                current_tran.proofread_zh = current_tran.pre_dst
+                current_tran.post_dst = current_tran.pre_dst
                 current_tran.problem = self._merge_problem_message(
                     current_tran.problem,
                     proofread_problem_message,
@@ -448,7 +448,7 @@ class BaseTranslate:
             translist_unhit = [
                 tran
                 for tran in translist_unhit
-                if not any(word in tran.post_jp for word in h_words_list)
+                if not any(word in tran.post_src for word in h_words_list)
             ]
 
         if ensure_last_translations and hasattr(self, "last_translations"):
@@ -523,9 +523,9 @@ class BaseTranslate:
             for trans in trans_result:
                 if (
                     not proofread
-                    and trans.pre_zh
+                    and trans.pre_dst
                     and not getattr(trans, "_runtime_success_recorded", False)
-                    and not any(marker in trans.pre_zh for marker in failed_markers)
+                    and not any(marker in trans.pre_dst for marker in failed_markers)
                 ):
                     self._record_runtime_success(filename, trans)
                 result_output += repr(trans)
@@ -885,7 +885,7 @@ class BaseTranslate:
             translist_unhit = [
                 tran
                 for tran in translist_unhit
-                if not any(word in tran.post_jp for word in h_words_list)
+                if not any(word in tran.post_src for word in h_words_list)
             ]
 
         if len(translist_unhit) == 0:
@@ -953,8 +953,8 @@ class BaseTranslate:
         failed_markers = self._get_restore_context_failed_markers()
 
         while current_tran != None:
-            if current_tran.pre_zh == "" or any(
-                marker in current_tran.pre_zh for marker in failed_markers
+            if current_tran.pre_dst == "" or any(
+                marker in current_tran.pre_dst for marker in failed_markers
             ):
                 current_tran = current_tran.prev_tran
                 continue

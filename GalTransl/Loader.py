@@ -7,7 +7,7 @@ from typing import Union, Tuple, List
 def load_transList(json_path_or_list: Union[str, list]) -> Tuple[CTransList, list]:
     """
     从json文件路径、json字符串、json list中载入待翻译列表
-    json格式为[{"name":xx/"names":[],"message/pre_jp":"xx"},...]
+    json格式为[{"name":xx/"names":[],"message/pre_src":"xx"},...]
     """
     trans_list: CTransList = []
 
@@ -41,9 +41,9 @@ def load_transList(json_path_or_list: Union[str, list]) -> Tuple[CTransList, lis
             raise ValueError(f"JSON格式不正确，第{i+1}个item缺少message字段：{item}")
 
         name = item.get("name", item.get("names", ""))
-        pre_jp = item["message"]
+        pre_src = item["message"]
         index = item.get("index", i + 1)
-        tmp_tran = CSentense(pre_jp, name, index)
+        tmp_tran = CSentense(pre_src, name, index)
         
         # 链接上下文
         if trans_list:
