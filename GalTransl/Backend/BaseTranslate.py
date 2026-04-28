@@ -600,6 +600,7 @@ class BaseTranslate:
         file_name="",
         base_try_count=0,
         stream_line_callback=None,
+        max_retry_count: Optional[int] = None,
     ):
         api_try_count = base_try_count
         client: AsyncOpenAI
@@ -755,6 +756,11 @@ class BaseTranslate:
                     raise
 
                 api_try_count += 1
+                if max_retry_count is not None and api_try_count >= max_retry_count:
+                    raise RuntimeError(
+                        f"ask_chatbot reached retry limit ({max_retry_count})"
+                    ) from e
+
                 # gemini no_candidates
                 if "candidates" in str(e) and api_try_count > 1:
                     return "", token

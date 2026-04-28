@@ -1,5 +1,6 @@
 import unittest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from GalTransl.Backend.BaseTranslate import BaseTranslate
 from GalTransl.Backend.ForGalJsonTranslate import ForGalJsonTranslate
@@ -16,6 +17,52 @@ class DummyBar:
 
 
 class TranslateRefactorRegressionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ask_chatbot_honours_max_retry_count(self) -> None:
+        class DummyToken:
+            model_name = "demo-model"
+            domain = "https://example.com"
+            stream = False
+
+            def maskToken(self) -> str:
+                return "sk-***"
+
+        class DummyCompletions:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def create(self, **kwargs):
+                self.calls += 1
+                raise TimeoutError("request timed out")
+
+        dummy_completions = DummyCompletions()
+        dummy_client = SimpleNamespace(chat=SimpleNamespace(completions=dummy_completions))
+        dummy = SimpleNamespace(
+            client_list=[(dummy_client, DummyToken())],
+            tokenStrategy="random",
+            api_timeout=1,
+            apiErrorWait=0,
+            pj_config=SimpleNamespace(
+                bar=DummyBar(),
+                active_workers=1,
+                stop_event=None,
+                getProjectDir=lambda: "",
+            ),
+            _is_stop_requested=lambda _: False,
+            _wait_for_global_rpm_slot=AsyncMock(return_value=None),
+            _interruptible_sleep=AsyncMock(return_value=None),
+            _record_request_health=lambda *args, **kwargs: None,
+        )
+
+        with self.assertRaises(RuntimeError):
+            await BaseTranslate.ask_chatbot(
+                dummy,
+                prompt="hello",
+                system="system",
+                max_retry_count=2,
+            )
+
+        self.assertEqual(dummy_completions.calls, 2)
+
     async def test_forgal_json_streaming_uses_runtime_model_name(self) -> None:
         translator = ForGalJsonTranslate.__new__(ForGalJsonTranslate)
         translator.pj_config = SimpleNamespace(active_workers=0, translation_guideline="")

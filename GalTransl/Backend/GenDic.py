@@ -68,6 +68,7 @@ class GenDic(BaseTranslate):
         self.progress_append_path = ""
         self.trans_prompt = ""
         self.init_chatbot(eng_type, config)
+        self.gendic_max_api_retries = 5
         pass
 
     def _load_existing_gpt_terms(self) -> Dict[str, Tuple[str, str]]:
@@ -193,53 +194,45 @@ class GenDic(BaseTranslate):
 
         prompt = GENDIC_PROMPT.format(input=text, hint=hint)
 
+        self._raise_if_stop_requested()
+        try:
+            rsp, token = await self.ask_chatbot(
+                prompt=prompt,
+                system=GENDIC_SYSTEM,
+                max_retry_count=self.gendic_max_api_retries,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            LOGGER.error(
+                f"GenDic 分片 {task_index} LLM请求失败，已重试{self.gendic_max_api_retries}次，放弃该分片: {e}"
+            )
+            return
+
+        if should_print_translation_logs(self.pj_config):
+            print(rsp)
+
+        lines = rsp.split("\n")
         valid_entries = []
-        for attempt in range(3):
+        for line in lines:
             self._raise_if_stop_requested()
-            try:
-                rsp, token = await self.ask_chatbot(
-                    prompt=prompt, system=GENDIC_SYSTEM
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                if attempt == 2:
-                    LOGGER.error(
-                        f"GenDic 分片 {task_index} LLM请求失败，已重试3次，放弃该分片: {e}"
-                    )
-                    return
+            sp = line.split("\t")
+            if len(sp) < 3:
                 continue
+            if "日文" in sp[0]:
+                continue
+            src = sp[0].strip()
+            dst = sp[1].strip()
+            note = sp[2].strip()
+            if not src or not dst:
+                continue
+            if src == "NULL" and dst == "NULL":
+                return
+            valid_entries.append((src, dst, note))
 
-            if should_print_translation_logs(self.pj_config):
-                print(rsp)
-
-            lines = rsp.split("\n")
-            local_valid = []
-            for line in lines:
-                self._raise_if_stop_requested()
-                sp = line.split("\t")
-                if len(sp) < 3:
-                    continue
-                if "日文" in sp[0]:
-                    continue
-                src = sp[0].strip()
-                dst = sp[1].strip()
-                note = sp[2].strip()
-                if not src or not dst:
-                    continue
-                if src == "NULL" and dst == "NULL":
-                    return
-                local_valid.append((src, dst, note))
-
-            if local_valid:
-                valid_entries = local_valid
-                break
-            else:
-                if attempt == 2:
-                    LOGGER.warning(
-                        f"GenDic 分片 {task_index} 连续3次未解析到有效词条，放弃该分片"
-                    )
-                    return
+        if not valid_entries:
+            LOGGER.warning(f"GenDic 分片 {task_index} 未解析到有效词条，放弃该分片")
+            return
 
         for idx, (src, dst, note) in enumerate(valid_entries):
             if idx < 3:
