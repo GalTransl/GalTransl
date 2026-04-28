@@ -33,6 +33,7 @@ import {
   formatSpeed,
   formatEta,
   formatElapsedTime,
+  formatPercentDisplay,
   clampPercent } from './translateRuntimeShared';
 
 const JOB_POLL_INTERVAL_MS = 2000;
@@ -492,6 +493,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const statusLabel = runtimeStage === '检查模型可用性' ? '测试模型可用性' : getStatusLabel(currentJob?.status);
   const currentJobError = currentJob?.error?.trim() ?? '';
   const progressPercent = clampPercent(summary?.percent ?? 0);
+  const progressPercentText = formatPercentDisplay(summary?.percent ?? 0);
   const translatedCount = summary?.translated ?? 0;
   const totalCount = summary?.total ?? 0;
   const remainingCount = Math.max(totalCount - translatedCount, 0);
@@ -709,7 +711,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
         <div className="ptv2-cockpit__gauge">
           <div className="ptv2-gauge__numbers">
             <div className="ptv2-gauge__percent-row">
-              <span className="ptv2-gauge__percent">{progressPercent}</span>
+              <span className="ptv2-gauge__percent">{progressPercentText}</span>
               <span className="ptv2-gauge__percent-sign">%</span>
             </div>
             <div className="ptv2-gauge__fraction">

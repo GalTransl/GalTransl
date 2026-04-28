@@ -93,12 +93,10 @@ export function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) 
       <dl className="runtime-event__meta">
         {entry.kind !== 'api' && (
           <div>
-            <dt>文件</dt>
-            <dd>{`${entry.filename || '—'}: ${entry.index_range || '—'}`}</dd>
+            <dd>{`${stripAllExtensions(entry.filename) || '—'}: ${entry.index_range || '—'}`}</dd>
           </div>
         )}
-        <div>
-          <dt>模型</dt>
+        <div className="runtime-event__meta-model">
           <dd>{modelLabel || '—'}</dd>
         </div>
         {(entry.sleep_seconds ?? 0) > 0 ? <span className="runtime-event__pill">退避 {Number(entry.sleep_seconds).toFixed(3)}s</span> : null}
@@ -259,8 +257,8 @@ export function getStatusLabel(status?: RuntimeJob['status']) {
 
 export function getErrorKindLabel(kind: string): string {
   const normalized = (kind || '').trim().toLowerCase();
-  if (normalized === 'parse') return '结果解析';
-  if (normalized === 'api') return '模型请求';
+  if (normalized === 'parse') return '解析';
+  if (normalized === 'api') return '后端';
   return kind || 'error';
 }
 
@@ -367,5 +365,15 @@ export function formatElapsedTime(job: RuntimeJob | null, nowMs: number): string
 
 export function clampPercent(value: number): number {
   if (!Number.isFinite(value)) return 0;
-  return Math.min(100, Math.max(0, Math.round(value)));
+  return Math.min(100, Math.max(0, value));
+}
+
+export function formatPercentDisplay(value: number): string {
+  const clamped = clampPercent(value);
+  const rounded = Number(clamped.toFixed(1));
+  return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
+}
+
+function stripAllExtensions(filename: string): string {
+  return filename.replace(/(\.[^.]+)+$/, '');
 }

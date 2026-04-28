@@ -512,6 +512,7 @@
 
 
 .runtime-event-list {
+  --runtime-stream-content-font-size: 12px;
   display: grid;
   grid-auto-rows: max-content;
   align-content: start;
@@ -550,8 +551,8 @@
 }
 
 .runtime-event--error {
-  gap: 10px;
-  padding: 12px 14px;
+  gap: 7px;
+  padding: 10px 11px;
   border-color: rgba(217, 48, 37, 0.14);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(252, 246, 245, 0.9)),
@@ -598,6 +599,12 @@
 }
 
 .runtime-event--success .runtime-event__pill {
+  min-height: 20px;
+  padding: 0 8px;
+  font-size: 10.5px;
+}
+
+.runtime-event--error .runtime-event__pill {
   min-height: 20px;
   padding: 0 8px;
   font-size: 10.5px;
@@ -831,8 +838,23 @@
   line-clamp: 2;
   -webkit-line-clamp: 2;
   overflow: hidden;
-  line-height: 1.45;
-  font-size: 13px;
+  line-height: 1.4;
+  font-size: var(--runtime-stream-content-font-size);
+}
+
+.runtime-event--error .runtime-event__meta {
+  gap: 5px;
+}
+
+.runtime-event--error .runtime-event__meta div {
+  gap: 3px;
+  min-height: 20px;
+  padding: 0 8px;
+}
+
+.runtime-event--error .runtime-event__meta dd {
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .runtime-event__file {
@@ -862,6 +884,10 @@
 .runtime-event__meta dd {
   display: inline;
   margin: 0;
+}
+
+.runtime-event__meta-model {
+  margin-left: auto;
 }
 
 .runtime-event__meta dt::after {
@@ -920,7 +946,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--runtime-stream-content-font-size);
 }
 
 .runtime-success-compact__label {

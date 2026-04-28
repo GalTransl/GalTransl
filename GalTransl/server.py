@@ -2218,7 +2218,7 @@ def build_handler(registry: JobRegistry):
                 )
                 total = progress_payload["total"]
                 translated = progress_payload["translated"]
-                percent = round((translated / total) * 100) if total > 0 else 0
+                percent = round((translated / total) * 100, 1) if total > 0 else 0
                 speed = runtime["translation_speed_lpm"]
                 remaining = max(total - translated, 0)
                 eta_seconds = round((remaining / speed) * 60) if speed > 0 and remaining > 0 else None
