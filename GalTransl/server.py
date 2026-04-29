@@ -618,13 +618,11 @@ class RuntimeProgressCache:
                         no_proofread = str(item.get("proofread_dst", "") or "") == ""
 
                         # retran_hit_keys 的统计不应受 retran_key 过滤影响：
-                        # 无论当前是否处于重翻 job 中，命中重翻词条且已翻译未校对的条目
+                        # 无论当前是否处于重翻 job 中，命中重翻词条的缓存条目
                         # 都应被一致地计入 retransl_stats，避免新旧文件统计口径不一致
                         # 导致前端句数在翻译过程中逐渐增加。
                         if (
-                            is_translated
-                            and not entry.name.endswith(_CACHE_APPEND_SUFFIX)
-                            and no_proofread
+                            not entry.name.endswith(_CACHE_APPEND_SUFFIX)
                             and retran_hit_keys
                         ):
                             source_text = item.get("pre_src", item.get("pre_jp", ""))
@@ -1999,6 +1997,7 @@ def build_handler(registry: JobRegistry):
 
                     cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
                     results = []
+                    total_matches = 0
                     if os.path.isdir(cache_dir):
                         for name in sorted(os.listdir(cache_dir)):
                             if not name.endswith(".json"):
@@ -2027,25 +2026,23 @@ def build_handler(registry: JobRegistry):
                                         continue
                                     if field == "all" and not match_src and not match_dst and not match_problem:
                                         continue
-                                    results.append({
-                                        "filename": name,
-                                        "index": e.get("index", 0),
-                                        "speaker": e.get("name", ""),
-                                        "post_src": src_text,
-                                        "pre_dst": dst_text,
-                                        "match_src": match_src,
-                                        "match_dst": match_dst,
-                                        "match_problem": match_problem,
-                                        "problem": e.get("problem", ""),
-                                        "trans_by": e.get("trans_by", ""),
-                                    })
-                                    if len(results) >= max_results:
-                                        break
+                                    total_matches += 1
+                                    if len(results) < max_results:
+                                        results.append({
+                                            "filename": name,
+                                            "index": e.get("index", 0),
+                                            "speaker": e.get("name", ""),
+                                            "post_src": src_text,
+                                            "pre_dst": dst_text,
+                                            "match_src": match_src,
+                                            "match_dst": match_dst,
+                                            "match_problem": match_problem,
+                                            "problem": e.get("problem", ""),
+                                            "trans_by": e.get("trans_by", ""),
+                                        })
                             except Exception:
                                 continue
-                            if len(results) >= max_results:
-                                break
-                    self._send_json({"results": results, "total": len(results)})
+                    self._send_json({"results": results, "total": total_matches})
                 except json.JSONDecodeError:
                     self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
                 except Exception as exc:

@@ -199,14 +199,17 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
       } else if (typeof raw === 'string') {
         keys = raw.split(/\r?\n/).map((k) => k.trim()).filter(Boolean);
       }
+      const runtimeSnapshot = runtime?.project_dir === projectDir
+        ? runtime
+        : cachedRuntimeByProject.get(projectId);
       const runtimeStats = new Map(
-        (cachedRuntimeByProject.get(projectId)?.retransl_stats || []).map((item) => [item.key, item.count]),
+        (runtimeSnapshot?.retransl_stats || []).map((item) => [item.key, item.count]),
       );
       setRetranslKeys(keys.map((key) => ({ key, count: runtimeStats.get(key) ?? 0 })));
     } catch {
       // silent; keep prior list
     }
-  }, [projectId, configFileName]);
+  }, [projectId, projectDir, configFileName, runtime]);
 
   useEffect(() => {
     void refreshRetranslKeys();
