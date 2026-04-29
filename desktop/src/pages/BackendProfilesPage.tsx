@@ -293,7 +293,6 @@ export function BackendProfilesPage() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="edit-profile-dialog-title"
-          onClick={() => { if (!saving) handleCancel(); }}
         >
           <div
             className="backend-profiles-page__dialog backend-profiles-page__dialog--wide"
