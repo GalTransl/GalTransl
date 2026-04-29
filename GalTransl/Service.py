@@ -123,6 +123,7 @@ class JobState:
     status: str = "pending"
     success: bool = False
     error: str = ""
+    gendic_added_entries: int = 0
     created_at: str = field(default_factory=_utcnow_text)
     started_at: str = ""
     finished_at: str = ""
@@ -229,9 +230,20 @@ async def run_job_async(
         await run_galtransl(cfg, spec.translator, stop_event=stop_event)
         current_state.status = "completed"
         current_state.success = True
+        if spec.translator == "GenDic":
+            current_state.gendic_added_entries = int(getattr(cfg, "gendic_added_count", 0) or 0)
     except JobCancelledError:
         current_state.status = "cancelled"
-        current_state.error = "用户请求停止翻译"
+        if spec.translator == "GenDic":
+            added_entries = int(getattr(cfg, "gendic_added_count", 0) or 0)
+            partial_saved = bool(getattr(cfg, "gendic_partial_saved", False))
+            current_state.gendic_added_entries = added_entries
+            if partial_saved:
+                current_state.error = f"已停止 GenDic，已使用当前结果生成字典，新增{added_entries}条"
+            else:
+                current_state.error = "用户请求停止翻译"
+        else:
+            current_state.error = "用户请求停止翻译"
     except KeyboardInterrupt:
         current_state.status = "cancelled"
         current_state.error = get_text("goodbye", GT_LANG)

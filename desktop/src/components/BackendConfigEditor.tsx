@@ -38,7 +38,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
             tokenStrategy: 'random',
             checkAvailable: true,
             globalRequestRPM: 0,
-            apiTimeout: 120,
+            apiTimeout: 300,
             apiErrorWait: 'auto',
           },
         });
@@ -347,7 +347,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
             <input
               disabled={readOnly}
               type="number"
-              value={String(oaiConfig.apiTimeout ?? 120)}
+              value={String(oaiConfig.apiTimeout ?? 300)}
               onChange={(e) => updateOai('apiTimeout', Number(e.target.value))}
             />
           </label>

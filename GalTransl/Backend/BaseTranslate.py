@@ -194,7 +194,7 @@ class BaseTranslate:
         section_name = "OpenAI-Compatible"
 
         self.api_timeout = config.getBackendConfigSection(section_name).get(
-            "apiTimeout", 60
+            "apiTimeout", 300
         )
         self.apiErrorWait = config.getBackendConfigSection(section_name).get(
             "apiErrorWait", "auto"

@@ -495,6 +495,16 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const statusTone = runtimeStage === '检查模型可用性' ? 'checking-availability' : (currentJob?.status ?? 'pending');
   const statusLabel = runtimeStage === '检查模型可用性' ? '测试模型可用性' : getStatusLabel(currentJob?.status);
   const currentJobError = currentJob?.error?.trim() ?? '';
+  const cancelledToastTitle = currentJob?.translator === 'GenDic' ? 'GenDic 已停止' : '任务已取消';
+  const cancelledToastDescription = useMemo(() => {
+    if (!currentJob || currentJob.status !== 'cancelled') return currentJobError;
+    if (currentJob.translator !== 'GenDic') return currentJobError;
+    const addedEntries = Number(currentJob.gendic_added_entries ?? 0);
+    if (Number.isFinite(addedEntries) && addedEntries >= 0) {
+      return `已使用当前结果生成字典，新增${addedEntries}条`;
+    }
+    return currentJobError;
+  }, [currentJob, currentJobError]);
   const progressPercent = clampPercent(summary?.percent ?? 0);
   const progressPercentText = formatPercentDisplay(summary?.percent ?? 0);
   const translatedCount = summary?.translated ?? 0;
@@ -810,8 +820,8 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
         <InlineFeedback
           className="ptv2-alert inline-alert--floating"
           tone="info"
-          title="任务已取消"
-          description={currentJobError}
+          title={cancelledToastTitle}
+          description={cancelledToastDescription}
           autoDismiss={2800}
           onDismiss={() => setCancelledAlertJobId(null)}
         />

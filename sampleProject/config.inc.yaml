@@ -12,7 +12,7 @@ backendSpecific:
     tokenStrategy: "random" # 令牌策略，random随机轮询；fallback优先第一个，出现[API错误]或[解析错误]时使用下一个
     checkAvailable: true # 翻译前检查API是否可用[True/False]
     stream: true # 流式请求，一般不用修改除非接口不支持流式[True/False]
-    apiTimeout: 120 # 请求超时时间，单位秒
+    apiTimeout: 300 # 请求超时时间，单位秒
     apiErrorWait: auto # 发生API Error时的等待时间，包括频率限制。auto将自动适应[auto/0-120]
 
   SakuraLLM: # (Sakura/Galtransl)

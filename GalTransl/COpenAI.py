@@ -63,7 +63,7 @@ class COpenAITokenPool:
         )
         self.stream = config.getBackendConfigSection(section_name).get("stream", False)
         self.timeout = config.getBackendConfigSection(section_name).get(
-            "apiTimeout", 60
+            "apiTimeout", 300
         )
 
         if all_tokens := config.getBackendConfigSection(section_name).get("tokens"):

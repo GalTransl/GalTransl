@@ -235,7 +235,9 @@ export function toRuntimeJob(job: Job): RuntimeJob {
     created_at: job.created_at,
     started_at: job.started_at,
     finished_at: job.finished_at,
-    error: job.error };
+    error: job.error,
+    gendic_added_entries: job.gendic_added_entries,
+  };
 }
 
 export function getStatusLabel(status?: RuntimeJob['status']) {

@@ -106,6 +106,55 @@ class GenDic(BaseTranslate):
         except Exception:
             return
 
+    def _build_final_list(self, word_counter: Optional[Dict[str, int]] = None, name_set: Optional[Set[str]] = None) -> List[List[str]]:
+        counters = word_counter or {}
+        names = name_set or set()
+
+        self.dic_list.sort(key=lambda x: self.dic_counter[x[0]], reverse=True)
+
+        for i in range(len(self.dic_list)):
+            src = self.dic_list[i][0]
+            if src in self.dic_votes and self.dic_votes[src]:
+                (best_dst, best_note), _ = self.dic_votes[src].most_common(1)[0]
+                self.dic_list[i][1] = best_dst
+                self.dic_list[i][2] = best_note
+
+        existing_src_terms = set(getattr(self, "existing_dict_map", {}).keys())
+        final_set: Dict[str, List[str]] = {}
+        for item in self.dic_list:
+            src = item[0]
+            if src in final_set:
+                continue
+            if src in existing_src_terms:
+                continue
+            if "NULL" in src:
+                continue
+            if src in H_WORDS_LIST:
+                continue
+            if "（" not in src and "（" in item[1]:
+                continue
+
+            if self.dic_counter[src] > 1:
+                final_set[src] = item
+            elif "人名" in item[2]:
+                final_set[src] = item
+            elif "地名" in item[2]:
+                final_set[src] = item
+            elif src in counters:
+                final_set[src] = item
+            elif src in names:
+                final_set[src] = item
+
+        return list(final_set.values())
+
+    def _save_generated_dictionary(self, final_list: List[List[str]]) -> str:
+        result_path = os.path.join(self.pj_config.getProjectDir(), "项目GPT字典-生成.txt")
+        with open(result_path, "w", encoding="utf-8") as f:
+            f.write("# 格式为日文[Tab]中文[Tab]解释(可不写)，参考项目wiki\n")
+            for item in final_list:
+                f.write(item[0] + "\t" + item[1] + "\t" + item[2] + "\n")
+        return result_path
+
     def _prepare_runtime_progress(self, total_tasks: int):
         cache_dir = self.pj_config.getCachePath()
         os.makedirs(cache_dir, exist_ok=True)
@@ -255,10 +304,15 @@ class GenDic(BaseTranslate):
         self,
         json_list: list,
     ) -> bool:
-        self._raise_if_stop_requested()
-        self._update_runtime(stage="GenDic 分词处理中", current_file="准备分词")
+        from GalTransl.Service import JobCancelledError
+
+        word_counter: Dict[str, int] = {}
+        name_set: Set[str] = set()
+        cancelled_error: Optional[JobCancelledError] = None
 
         try:
+            self._raise_if_stop_requested()
+            self._update_runtime(stage="GenDic 分词处理中", current_file="准备分词")
             with terminal_progress(should_print_translation_logs(self.pj_config), title="载入分词……") as bar:
                 # get tmp dir
                 import tempfile
@@ -408,56 +462,26 @@ class GenDic(BaseTranslate):
                     await asyncio.gather(*tasks, return_exceptions=True)
                     raise
 
-            self.dic_list.sort(key=lambda x: self.dic_counter[x[0]], reverse=True)
-
-            # 用多数投票结果覆盖 dic_list 中的翻译和备注
-            for i in range(len(self.dic_list)):
-                src = self.dic_list[i][0]
-                if src in self.dic_votes and self.dic_votes[src]:
-                    (best_dst, best_note), _ = self.dic_votes[src].most_common(1)[0]
-                    self.dic_list[i][1] = best_dst
-                    self.dic_list[i][2] = best_note
-
-            # 最终列表：仅保留新增词条，跳过已存在于 GPT 字典中的原文词条
-            existing_src_terms = set(getattr(self, "existing_dict_map", {}).keys())
-            final_set: Dict[str, List[str]] = {}
-            for item in self.dic_list:
-                src = item[0]
-                if src in final_set:
-                    continue
-                if src in existing_src_terms:
-                    continue
-                if "NULL" in src:
-                    continue
-                if src in H_WORDS_LIST:
-                    continue
-                if "（" not in src and "（" in item[1]:
-                    continue
-
-                if self.dic_counter[src] > 1:
-                    final_set[src] = item
-                elif "人名" in item[2]:
-                    final_set[src] = item
-                elif "地名" in item[2]:
-                    final_set[src] = item
-                elif src in word_counter:
-                    final_set[src] = item
-                elif src in name_set:
-                    final_set[src] = item
-
-            final_list = list(final_set.values())
-            result_path = os.path.join(self.pj_config.getProjectDir(), "项目GPT字典-生成.txt")
-
-            with open(result_path, "w", encoding="utf-8") as f:
-                f.write("# 格式为日文[Tab]中文[Tab]解释(可不写)，参考项目wiki\n")
-                for item in final_list:
-                    f.write(item[0] + "\t" + item[1] + "\t" + item[2] + "\n")
-            LOGGER.info(f"字典生成完成，共{len(final_list)}个词语，保存到{result_path}")
-            self._update_runtime(stage="", current_file="", workers_active=0)
-
-            return True
+        except JobCancelledError as ex:
+            cancelled_error = ex
+            self._update_runtime(stage="GenDic 停止处理中", current_file="整理当前结果", workers_active=0)
         finally:
             self._cleanup_runtime_progress()
+
+        final_list = self._build_final_list(word_counter=word_counter, name_set=name_set)
+        result_path = self._save_generated_dictionary(final_list)
+        added_count = len(final_list)
+        setattr(self.pj_config, "gendic_added_count", added_count)
+
+        if cancelled_error is not None:
+            setattr(self.pj_config, "gendic_partial_saved", True)
+            LOGGER.info(f"GenDic 已停止，使用当前结果生成字典，共{added_count}个词语，保存到{result_path}")
+            self._update_runtime(stage="", current_file="", workers_active=0)
+            raise cancelled_error
+
+        LOGGER.info(f"字典生成完成，共{added_count}个词语，保存到{result_path}")
+        self._update_runtime(stage="", current_file="", workers_active=0)
+        return True
 
 
 def solve_sentence_selection(sentences, max_select=128, name_set=None):

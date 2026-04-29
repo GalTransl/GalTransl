@@ -2234,6 +2234,7 @@ def build_handler(registry: JobRegistry):
                         "started_at": job.started_at,
                         "finished_at": job.finished_at,
                         "error": job.error,
+                        "gendic_added_entries": int(getattr(job, "gendic_added_entries", 0) or 0),
                     },
                     "summary": {
                         "total": total,
@@ -2638,7 +2639,7 @@ def build_handler(registry: JobRegistry):
                     api_key = token_entry.get("token", "")
                     endpoint = token_entry.get("endpoint", "https://api.openai.com")
                     model_name = token_entry.get("modelName", oai_section.get("rewriteModelName", "gpt-4o-mini"))
-                    timeout = oai_section.get("apiTimeout", 60)
+                    timeout = oai_section.get("apiTimeout", 300)
 
                     if not api_key or "-example-" in api_key:
                         self._send_json({"error": "后端配置中的 API token 无效"}, status=HTTPStatus.BAD_REQUEST)
