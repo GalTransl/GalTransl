@@ -106,9 +106,34 @@ class GenDic(BaseTranslate):
         except Exception:
             return
 
-    def _build_final_list(self, word_counter: Optional[Dict[str, int]] = None, name_set: Optional[Set[str]] = None) -> List[List[str]]:
+    def _load_existing_generated_terms(self, result_path: str) -> Set[str]:
+        terms: Set[str] = set()
+        if not os.path.exists(result_path):
+            return terms
+        try:
+            with open(result_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    sp = line.split("\t")
+                    if sp:
+                        src = sp[0].strip()
+                        if src:
+                            terms.add(src)
+        except Exception:
+            pass
+        return terms
+
+    def _build_final_list(
+        self,
+        word_counter: Optional[Dict[str, int]] = None,
+        name_set: Optional[Set[str]] = None,
+        existing_file_terms: Optional[Set[str]] = None,
+    ) -> Tuple[List[List[str]], int]:
         counters = word_counter or {}
         names = name_set or set()
+        file_terms = existing_file_terms or set()
 
         self.dic_list.sort(key=lambda x: self.dic_counter[x[0]], reverse=True)
 
@@ -120,12 +145,16 @@ class GenDic(BaseTranslate):
                 self.dic_list[i][2] = best_note
 
         existing_src_terms = set(getattr(self, "existing_dict_map", {}).keys())
+        existing_src_terms.update(file_terms)
         final_set: Dict[str, List[str]] = {}
+        duplicates = 0
         for item in self.dic_list:
             src = item[0]
             if src in final_set:
+                duplicates += 1
                 continue
             if src in existing_src_terms:
+                duplicates += 1
                 continue
             if "NULL" in src:
                 continue
@@ -145,15 +174,17 @@ class GenDic(BaseTranslate):
             elif src in names:
                 final_set[src] = item
 
-        return list(final_set.values())
+        return list(final_set.values()), duplicates
 
-    def _save_generated_dictionary(self, final_list: List[List[str]]) -> str:
-        result_path = os.path.join(self.pj_config.getProjectDir(), "项目GPT字典-生成.txt")
-        with open(result_path, "w", encoding="utf-8") as f:
-            f.write("# 格式为日文[Tab]中文[Tab]解释(可不写)，参考项目wiki\n")
+    def _save_generated_dictionary(self, final_list: List[List[str]], result_path: Optional[str] = None) -> str:
+        path = result_path or os.path.join(self.pj_config.getProjectDir(), "项目GPT字典-生成.txt")
+        has_content = os.path.exists(path) and os.path.getsize(path) > 0
+        with open(path, "a", encoding="utf-8") as f:
+            if not has_content:
+                f.write("# 格式为日文[Tab]中文[Tab]解释(可不写)，参考项目wiki\n")
             for item in final_list:
                 f.write(item[0] + "\t" + item[1] + "\t" + item[2] + "\n")
-        return result_path
+        return path
 
     def _prepare_runtime_progress(self, total_tasks: int):
         cache_dir = self.pj_config.getCachePath()
@@ -273,6 +304,8 @@ class GenDic(BaseTranslate):
             src = sp[0].strip()
             dst = sp[1].strip()
             note = sp[2].strip()
+            if len(note) > 20:
+                note = ""
             if not src or not dst:
                 continue
             if src == "NULL" and dst == "NULL":
@@ -468,18 +501,23 @@ class GenDic(BaseTranslate):
         finally:
             self._cleanup_runtime_progress()
 
-        final_list = self._build_final_list(word_counter=word_counter, name_set=name_set)
-        result_path = self._save_generated_dictionary(final_list)
+        result_path = os.path.join(self.pj_config.getProjectDir(), "项目GPT字典-生成.txt")
+        existing_file_terms = self._load_existing_generated_terms(result_path)
+        final_list, duplicates = self._build_final_list(
+            word_counter=word_counter, name_set=name_set, existing_file_terms=existing_file_terms
+        )
+        result_path = self._save_generated_dictionary(final_list, result_path)
         added_count = len(final_list)
         setattr(self.pj_config, "gendic_added_count", added_count)
+        setattr(self.pj_config, "gendic_duplicated_count", duplicates)
 
         if cancelled_error is not None:
             setattr(self.pj_config, "gendic_partial_saved", True)
-            LOGGER.info(f"GenDic 已停止，使用当前结果生成字典，共{added_count}个词语，保存到{result_path}")
+            LOGGER.info(f"GenDic 已停止，使用当前结果生成字典，新增{added_count}条，重复{duplicates}条，保存到{result_path}")
             self._update_runtime(stage="", current_file="", workers_active=0)
             raise cancelled_error
 
-        LOGGER.info(f"字典生成完成，共{added_count}个词语，保存到{result_path}")
+        LOGGER.info(f"字典生成完成，新增{added_count}条，重复{duplicates}条，保存到{result_path}")
         self._update_runtime(stage="", current_file="", workers_active=0)
         return True
 

@@ -237,6 +237,7 @@ export function toRuntimeJob(job: Job): RuntimeJob {
     finished_at: job.finished_at,
     error: job.error,
     gendic_added_entries: job.gendic_added_entries,
+    gendic_duplicated_entries: job.gendic_duplicated_entries,
   };
 }
 

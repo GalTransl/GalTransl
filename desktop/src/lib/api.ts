@@ -24,6 +24,7 @@ export type Job = {
   success: boolean;
   translator: string;
   gendic_added_entries?: number;
+  gendic_duplicated_entries?: number;
 };
 
 export type PromptTemplateOverride = {
@@ -177,6 +178,7 @@ export type RuntimeJob = {
   finished_at: string;
   error?: string;
   gendic_added_entries?: number;
+  gendic_duplicated_entries?: number;
 };
 
 export type ProjectRuntimeSummary = {

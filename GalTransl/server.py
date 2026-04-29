@@ -2235,6 +2235,7 @@ def build_handler(registry: JobRegistry):
                         "finished_at": job.finished_at,
                         "error": job.error,
                         "gendic_added_entries": int(getattr(job, "gendic_added_entries", 0) or 0),
+                        "gendic_duplicated_entries": int(getattr(job, "gendic_duplicated_entries", 0) or 0),
                     },
                     "summary": {
                         "total": total,

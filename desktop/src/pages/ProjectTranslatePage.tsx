@@ -500,8 +500,9 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     if (!currentJob || currentJob.status !== 'cancelled') return currentJobError;
     if (currentJob.translator !== 'GenDic') return currentJobError;
     const addedEntries = Number(currentJob.gendic_added_entries ?? 0);
-    if (Number.isFinite(addedEntries) && addedEntries >= 0) {
-      return `已使用当前结果生成字典，新增${addedEntries}条`;
+    const dupEntries = Number(currentJob.gendic_duplicated_entries ?? 0);
+    if (Number.isFinite(addedEntries) && addedEntries >= 0 && Number.isFinite(dupEntries) && dupEntries >= 0) {
+      return `已使用当前结果生成字典，新增${addedEntries}条，重复${dupEntries}条`;
     }
     return currentJobError;
   }, [currentJob, currentJobError]);

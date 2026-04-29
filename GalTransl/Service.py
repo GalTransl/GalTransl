@@ -124,6 +124,7 @@ class JobState:
     success: bool = False
     error: str = ""
     gendic_added_entries: int = 0
+    gendic_duplicated_entries: int = 0
     created_at: str = field(default_factory=_utcnow_text)
     started_at: str = ""
     finished_at: str = ""
@@ -232,14 +233,17 @@ async def run_job_async(
         current_state.success = True
         if spec.translator == "GenDic":
             current_state.gendic_added_entries = int(getattr(cfg, "gendic_added_count", 0) or 0)
+            current_state.gendic_duplicated_entries = int(getattr(cfg, "gendic_duplicated_count", 0) or 0)
     except JobCancelledError:
         current_state.status = "cancelled"
         if spec.translator == "GenDic":
             added_entries = int(getattr(cfg, "gendic_added_count", 0) or 0)
+            duplicated_entries = int(getattr(cfg, "gendic_duplicated_count", 0) or 0)
             partial_saved = bool(getattr(cfg, "gendic_partial_saved", False))
             current_state.gendic_added_entries = added_entries
+            current_state.gendic_duplicated_entries = duplicated_entries
             if partial_saved:
-                current_state.error = f"已停止 GenDic，已使用当前结果生成字典，新增{added_entries}条"
+                current_state.error = f"已停止 GenDic，已使用当前结果生成字典，新增{added_entries}条，重复{duplicated_entries}条"
             else:
                 current_state.error = "用户请求停止翻译"
         else:
