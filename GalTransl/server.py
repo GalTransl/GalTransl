@@ -616,6 +616,23 @@ class RuntimeProgressCache:
                         )
 
                         no_proofread = str(item.get("proofread_dst", "") or "") == ""
+
+                        # retran_hit_keys 的统计不应受 retran_key 过滤影响：
+                        # 无论当前是否处于重翻 job 中，命中重翻词条且已翻译未校对的条目
+                        # 都应被一致地计入 retransl_stats，避免新旧文件统计口径不一致
+                        # 导致前端句数在翻译过程中逐渐增加。
+                        if (
+                            is_translated
+                            and not entry.name.endswith(_CACHE_APPEND_SUFFIX)
+                            and no_proofread
+                            and retran_hit_keys
+                        ):
+                            source_text = item.get("pre_src", item.get("pre_jp", ""))
+                            problem_text = item.get("problem", "")
+                            for term in retran_terms:
+                                if _check_retran_key(term, source_text) or _check_retran_key(term, problem_text):
+                                    retran_hit_keys[term].add(entry_key)
+
                         should_apply_retransl_filter = not entry.name.endswith(_CACHE_APPEND_SUFFIX)
                         if (
                             should_apply_retransl_filter
@@ -634,18 +651,6 @@ class RuntimeProgressCache:
                             )
                         ):
                             is_translated = False
-
-                        if (
-                            is_translated
-                            and not entry.name.endswith(_CACHE_APPEND_SUFFIX)
-                            and no_proofread
-                            and retran_hit_keys
-                        ):
-                            source_text = item.get("pre_src", item.get("pre_jp", ""))
-                            problem_text = item.get("problem", "")
-                            for term in retran_terms:
-                                if _check_retran_key(term, source_text) or _check_retran_key(term, problem_text):
-                                    retran_hit_keys[term].add(entry_key)
 
                         if is_translated:
                             translated_keys.add(entry_key)
