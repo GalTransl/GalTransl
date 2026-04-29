@@ -63,6 +63,103 @@ class TranslateRefactorRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(dummy_completions.calls, 2)
 
+    async def test_ask_chatbot_aborts_stream_immediately_when_callback_returns_false(self) -> None:
+        class DummyToken:
+            model_name = "demo-model"
+            domain = "https://example.com"
+            stream = True
+
+            def maskToken(self) -> str:
+                return "sk-***"
+
+        class DummyStreamResponse:
+            def __init__(self) -> None:
+                self._chunks = [
+                    SimpleNamespace(
+                        choices=[
+                            SimpleNamespace(
+                                delta=SimpleNamespace(
+                                    content='aaa|{"id": 1, "dst": "hello"}\n',
+                                    reasoning_content=None,
+                                )
+                            )
+                        ]
+                    ),
+                    SimpleNamespace(
+                        choices=[
+                            SimpleNamespace(
+                                delta=SimpleNamespace(
+                                    content='aaa|{"id": 2, "dst": "should_not_be_consumed"}\n',
+                                    reasoning_content=None,
+                                )
+                            )
+                        ]
+                    ),
+                ]
+                self.next_calls = 0
+                self.aclose_calls = 0
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if self.next_calls >= len(self._chunks):
+                    raise StopAsyncIteration
+                chunk = self._chunks[self.next_calls]
+                self.next_calls += 1
+                return chunk
+
+            async def aclose(self):
+                self.aclose_calls += 1
+
+        class DummyCompletions:
+            def __init__(self, response: DummyStreamResponse) -> None:
+                self.response = response
+                self.calls = 0
+
+            async def create(self, **kwargs):
+                self.calls += 1
+                return self.response
+
+        stream_response = DummyStreamResponse()
+        dummy_completions = DummyCompletions(stream_response)
+        dummy_client = SimpleNamespace(chat=SimpleNamespace(completions=dummy_completions))
+        dummy = SimpleNamespace(
+            client_list=[(dummy_client, DummyToken())],
+            tokenStrategy="random",
+            api_timeout=1,
+            apiErrorWait=0,
+            pj_config=SimpleNamespace(
+                bar=DummyBar(),
+                active_workers=1,
+                stop_event=None,
+                non_interactive=True,
+                getProjectDir=lambda: "",
+            ),
+            _is_stop_requested=lambda _: False,
+            _wait_for_global_rpm_slot=AsyncMock(return_value=None),
+            _interruptible_sleep=AsyncMock(return_value=None),
+            _record_request_health=lambda *args, **kwargs: None,
+        )
+
+        callback_calls = []
+
+        def stream_line_callback(lines, is_final_chunk):
+            callback_calls.append((list(lines), is_final_chunk))
+            return False
+
+        result, _ = await BaseTranslate.ask_chatbot(
+            dummy,
+            messages=[{"role": "user", "content": "demo"}],
+            stream_line_callback=stream_line_callback,
+        )
+
+        self.assertEqual(dummy_completions.calls, 1)
+        self.assertEqual(stream_response.next_calls, 1)
+        self.assertEqual(stream_response.aclose_calls, 1)
+        self.assertEqual(callback_calls, [([r'aaa|{"id": 1, "dst": "hello"}'], False)])
+        self.assertEqual(result, 'aaa|{"id": 1, "dst": "hello"}\n')
+
     async def test_forgal_json_streaming_uses_runtime_model_name(self) -> None:
         translator = ForGalJsonTranslate.__new__(ForGalJsonTranslate)
         translator.pj_config = SimpleNamespace(active_workers=0, translation_guideline="")

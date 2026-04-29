@@ -16,6 +16,7 @@ alive-progress
 vaporetto
 aiofiles
 httpx-aiohttp
+pyreqwest
 
 # Tokenizer
 budoux

@@ -23,6 +23,11 @@ import time
 from contextlib import suppress
 from GalTransl.TerminalOutput import should_print_translation_logs
 
+try:
+    from pyreqwest.compatibility.httpx import HttpxTransport
+except Exception:
+    HttpxTransport = None
+
 
 _GLOBAL_RPM_LOCK = Lock()
 _GLOBAL_NEXT_ALLOWED_TS = 0.0
@@ -243,17 +248,41 @@ class BaseTranslate:
         proxy_kwargs = build_httpx_proxy_kwargs(proxy_addr)
         self.client_list = []
         for token in self.tokenProvider.get_available_token():
-            client = AsyncOpenAI(
-                api_key=token.token,
-                base_url=token.domain,
-                max_retries=0,
-                http_client=DefaultAioHttpClient(
+            http_client = None
+
+            use_pyreqwest_transport = HttpxTransport is not None and not proxy_kwargs
+            if use_pyreqwest_transport:
+                try:
+                    http_client = httpx.AsyncClient(
+                        trust_env=trust_env,
+                        limits=httpx.Limits(
+                            max_keepalive_connections=None, max_connections=None
+                        ),
+                        transport=HttpxTransport(),
+                    )
+                except Exception as e:
+                    LOGGER.warning(
+                        f"初始化 pyreqwest HttpxTransport 失败，回退 DefaultAioHttpClient: {e}"
+                    )
+
+            if http_client is None:
+                if HttpxTransport is not None and proxy_kwargs:
+                    LOGGER.warning(
+                        "检测到代理配置，当前回退到 DefaultAioHttpClient（pyreqwest transport 路径未启用代理注入）"
+                    )
+                http_client = DefaultAioHttpClient(
                     trust_env=trust_env,
                     limits=httpx.Limits(
                         max_keepalive_connections=None, max_connections=None
                     ),
                     **proxy_kwargs,
-                ),
+                )
+
+            client = AsyncOpenAI(
+                api_key=token.token,
+                base_url=token.domain,
+                max_retries=0,
+                http_client=http_client,
             )
             self.client_list.append((client, token))
 
@@ -642,6 +671,7 @@ class BaseTranslate:
 
                 # Create the API call as a task so we can cancel it if
                 # the user requests a stop while the request is in-flight.
+                LOGGER.info(f"timeout: {self.api_timeout}")
                 api_task = asyncio.ensure_future(
                     client.chat.completions.create(
                         model=token.model_name,
@@ -663,7 +693,12 @@ class BaseTranslate:
                     if self._is_stop_requested(self.pj_config):
                         api_task.cancel()
                         with suppress(BaseException):
-                            await api_task
+                            try:
+                                await asyncio.wait_for(
+                                    asyncio.shield(api_task), timeout=2.0
+                                )
+                            except (asyncio.TimeoutError, asyncio.CancelledError):
+                                pass
                         from GalTransl.Service import JobCancelledError
                         raise JobCancelledError()
                     done, _ = await asyncio.wait({api_task}, timeout=0.5)
@@ -729,8 +764,8 @@ class BaseTranslate:
                             close_stream = getattr(response, "aclose", None)
                             if callable(close_stream):
                                 try:
-                                    await close_stream()
-                                except Exception:
+                                    await asyncio.wait_for(close_stream(), timeout=3.0)
+                                except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
                                     pass
                 else:
                     try:
@@ -849,7 +884,10 @@ class BaseTranslate:
                 try:
                     maybe_coro = close_callable()
                     if asyncio.iscoroutine(maybe_coro):
-                        await maybe_coro
+                        try:
+                            await asyncio.wait_for(maybe_coro, timeout=3.0)
+                        except (asyncio.TimeoutError, asyncio.CancelledError):
+                            pass
                     continue
                 except Exception:
                     pass
@@ -859,7 +897,10 @@ class BaseTranslate:
                 try:
                     maybe_coro = aclose_callable()
                     if asyncio.iscoroutine(maybe_coro):
-                        await maybe_coro
+                        try:
+                            await asyncio.wait_for(maybe_coro, timeout=3.0)
+                        except (asyncio.TimeoutError, asyncio.CancelledError):
+                            pass
                 except Exception:
                     pass
 
