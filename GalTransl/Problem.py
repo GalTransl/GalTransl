@@ -101,10 +101,10 @@ def find_problems(
             if contains_korean(pre_dst) and not contains_korean(pre_src):
                 problem_list.append("本无韩文")
         if CProblemType.残留日文 in find_type:
-            if contains_japanese(pre_dst):
-                jp_chars = contains_japanese(post_dst)
-                if jp_chars != "":
-                    problem_list.append(f"残留日文：{jp_chars}")
+            pre_dst_jp_chars = contains_japanese(pre_dst)
+            post_dst_jp_chars = contains_japanese(post_dst)
+            if pre_dst_jp_chars != "" and post_dst_jp_chars != "":
+                problem_list.append(f"残留日文：{post_dst_jp_chars}")
         if CProblemType.丢失换行 in find_type and n_symbol != "":
             if pre_src.count(n_symbol) > post_dst.count(n_symbol):
                 problem_list.append("丢失换行")

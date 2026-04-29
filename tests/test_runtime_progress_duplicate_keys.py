@@ -200,6 +200,35 @@ class TestRuntimeProgressDuplicateKeys(unittest.TestCase):
         info = files["test.json"]
         self.assertEqual(info["translated"], 1)
 
+    def test_retransl_stats_counts_each_matching_row(self):
+        entries = [
+            {
+                **_make_cache_entry(1, "", "同一句", ""),
+                "problem": "残留日文",
+            },
+            {
+                **_make_cache_entry(2, "", "同一句", ""),
+                "problem": "残留日文",
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = os.path.join(tmpdir, "transl_cache")
+            os.makedirs(cache_dir)
+            cache_file = os.path.join(cache_dir, "test.json")
+            with open(cache_file, "wb") as f:
+                f.write(orjson.dumps(entries, option=orjson.OPT_INDENT_2))
+
+            result = RuntimeProgressCache().get_progress(
+                tmpdir,
+                file_totals={"test.json": 2},
+                cache_file_display_map={"test.json": "test.json"},
+                retran_terms=["残留日文"],
+            )
+
+        stats = {item["key"]: item["count"] for item in result["retransl_stats"]}
+        self.assertEqual(stats["残留日文"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()
