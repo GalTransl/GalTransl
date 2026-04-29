@@ -201,7 +201,7 @@ async def run_job_async(
             cfg.projectConfig["backendSpecific"] = profile
             if "proxy" in profile:
                 cfg.projectConfig["proxy"] = profile["proxy"]
-                cfg.keyValues["internals.enableProxy"] = profile["proxy"].get("enableProxy", False)
+                cfg.refreshProxyEnabledFlag()
             LOGGER.info("Applied backend profile: %s", spec.backend_profile or "inline")
 
         # Apply prompt template overrides from job spec

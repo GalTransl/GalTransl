@@ -60,6 +60,23 @@ def build_httpx_sync_proxy_kwargs(proxy_addr: Optional[str]) -> dict:
     return {"mounts": {"all://": httpx.HTTPTransport(proxy=proxy_addr)}}
 
 
+def has_usable_proxy_config(proxy_cfg: Optional[dict]) -> bool:
+    if not isinstance(proxy_cfg, dict):
+        return False
+    if not bool(proxy_cfg.get("enableProxy", False)):
+        return False
+    proxies = proxy_cfg.get("proxies", [])
+    if not isinstance(proxies, list):
+        return False
+    for item in proxies:
+        if not isinstance(item, dict):
+            continue
+        address = str(item.get("address", "")).strip()
+        if address:
+            return True
+    return False
+
+
 class CProxy:
     def __init__(
         self,
@@ -114,9 +131,7 @@ class CProjectConfig:
         self.keyValues = dict()
         for k, v in self.projectConfig["common"].items():
             self.keyValues[k] = v
-        self.keyValues["internals.enableProxy"] = (
-            self.projectConfig.get("proxy", {}).get("enableProxy", False)
-        )
+        self.refreshProxyEnabledFlag()
         LOGGER.debug(
             "inputPath: %s, outputPath: %s, cachePath: %s,keyValues: %s",
             self.inputPath,
@@ -226,13 +241,23 @@ class CProjectConfig:
             return {}
         return self.projectConfig["problemAnalyze"]["arinashiDict"]
 
+    def refreshProxyEnabledFlag(self) -> None:
+        self.keyValues["internals.enableProxy"] = has_usable_proxy_config(
+            self.projectConfig.get("proxy", {})
+        )
+
 
 class CProxyPool:
     def __init__(self, config: CProjectConfig) -> None:
         self.proxies: list[tuple[bool, CProxy]] = []
         for i in config.getProxyConfigSection():
+            if not isinstance(i, dict):
+                continue
+            address = str(i.get("address", "")).strip()
+            if not address:
+                continue
             self.proxies.append(
-                (False, CProxy(i["address"], i.get("username", i.get("password"))))
+                (False, CProxy(address, i.get("username"), i.get("password")))
             )
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
