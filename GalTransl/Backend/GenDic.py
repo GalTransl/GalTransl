@@ -68,7 +68,13 @@ class GenDic(BaseTranslate):
         self.progress_append_path = ""
         self.trans_prompt = ""
         self.init_chatbot(eng_type, config)
-        self.gendic_max_api_retries = 5
+        backend_cfg = config.getBackendConfigSection("OpenAI-Compatible")
+        raw_retry = backend_cfg.get("genDicMaxApiRetries", 6)
+        try:
+            parsed_retry = int(raw_retry)
+        except (TypeError, ValueError):
+            parsed_retry = 6
+        self.gendic_max_api_retries = max(1, parsed_retry)
         pass
 
     def _load_existing_gpt_terms(self) -> Dict[str, Tuple[str, str]]:
@@ -103,6 +109,32 @@ class GenDic(BaseTranslate):
             from GalTransl.server import update_runtime_status
 
             update_runtime_status(self._runtime_project_dir(), **kwargs)
+        except Exception:
+            return
+
+    def _record_runtime_error(
+        self,
+        *,
+        kind: str,
+        message: str,
+        task_index: int | None = None,
+        retry_count: int | None = None,
+        model: str = "",
+        level: str = "error",
+    ):
+        try:
+            from GalTransl.server import record_runtime_error
+
+            record_runtime_error(
+                self._runtime_project_dir(),
+                kind=kind,
+                message=message,
+                filename=self.progress_display_name,
+                index_range=(str(task_index) if task_index is not None else ""),
+                retry_count=retry_count,
+                model=model,
+                level=level,
+            )
         except Exception:
             return
 
@@ -150,6 +182,7 @@ class GenDic(BaseTranslate):
         duplicates = 0
         for item in self.dic_list:
             src = item[0]
+            note = item[2]
             if src in final_set:
                 duplicates += 1
                 continue
@@ -157,6 +190,8 @@ class GenDic(BaseTranslate):
                 duplicates += 1
                 continue
             if "NULL" in src:
+                continue
+            if "拟声" in note:
                 continue
             if src in H_WORDS_LIST:
                 continue
@@ -243,12 +278,12 @@ class GenDic(BaseTranslate):
                 speaker=None,
                 source_preview=source_preview,
                 translation_preview=translation_preview,
-                trans_by="GenDic",
+                trans_by=getattr(self, "_last_chatbot_model_name", "") or "GenDic",
             )
         except Exception:
             return
 
-    async def llm_gen_dic(self, text: str, name_list=[], task_index: int = 0):
+    async def llm_gen_dic(self, text: str, name_list=[], task_index: int = 0) -> bool:
         self._raise_if_stop_requested()
         hint = "无"
         name_hit = []
@@ -268,7 +303,7 @@ class GenDic(BaseTranslate):
                 lines = [f"{src}\t{dst}\t{note}" for src, (dst, note) in appeared.items()]
                 parts.append("以下词汇已有确定翻译，请严格保持一致，不要重复提取：\n" + "\n".join(lines))
         if name_hit:
-            parts.append("输入文本中的这些词语是一定要加入术语表的: \n" + "\n".join(name_hit))
+            parts.append("输入文本中的这些词是人名，要加入术语表: \n" + "\n".join(name_hit))
         if parts:
             hint = "\n\n".join(parts)
 
@@ -279,18 +314,38 @@ class GenDic(BaseTranslate):
             rsp, token = await self.ask_chatbot(
                 prompt=prompt,
                 system=GENDIC_SYSTEM,
+                file_name=self.progress_display_name,
                 max_retry_count=self.gendic_max_api_retries,
             )
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            LOGGER.error(
+            error_message = (
                 f"GenDic 分片 {task_index} LLM请求失败，已重试{self.gendic_max_api_retries}次，放弃该分片: {e}"
             )
-            return
+            LOGGER.error(error_message)
+            self._record_runtime_error(
+                kind="api",
+                message=error_message,
+                task_index=task_index,
+                retry_count=self.gendic_max_api_retries,
+                model=getattr(token, "model_name", "") if 'token' in locals() else "",
+            )
+            return False
 
         if should_print_translation_logs(self.pj_config):
             print(rsp)
+
+        if not isinstance(rsp, str) or rsp.strip() == "":
+            warning_message = f"GenDic 分片 {task_index} 返回空响应，放弃该分片"
+            LOGGER.warning(warning_message)
+            self._record_runtime_error(
+                kind="parse",
+                message=warning_message,
+                task_index=task_index,
+                level="warning",
+            )
+            return False
 
         lines = rsp.split("\n")
         valid_entries = []
@@ -309,12 +364,19 @@ class GenDic(BaseTranslate):
             if not src or not dst:
                 continue
             if src == "NULL" and dst == "NULL":
-                return
+                return True
             valid_entries.append((src, dst, note))
 
         if not valid_entries:
-            LOGGER.warning(f"GenDic 分片 {task_index} 未解析到有效词条，放弃该分片")
-            return
+            warning_message = f"GenDic 分片 {task_index} 未解析到有效词条，放弃该分片"
+            LOGGER.warning(warning_message)
+            self._record_runtime_error(
+                kind="parse",
+                message=warning_message,
+                task_index=task_index,
+                level="warning",
+            )
+            return False
 
         for idx, (src, dst, note) in enumerate(valid_entries):
             if idx < 3:
@@ -332,6 +394,7 @@ class GenDic(BaseTranslate):
                 elif self.dic_counter[src] == 2:
                     if should_print_translation_logs(self.pj_config):
                         print(f"{src}\t{dst}\t{note}")
+        return True
 
     async def batch_translate(
         self,
@@ -453,8 +516,8 @@ class GenDic(BaseTranslate):
                     self._raise_if_stop_requested()
                     try:
                         item = segment_list[idx]
-                        await self.llm_gen_dic(item, name_list=list(name_set), task_index=idx)
-                        return idx, True, ""
+                        ok = await self.llm_gen_dic(item, name_list=list(name_set), task_index=idx)
+                        return idx, bool(ok), ""
                     except asyncio.CancelledError:
                         raise
                     except Exception as e:
@@ -466,9 +529,11 @@ class GenDic(BaseTranslate):
                         return idx, False, str(e)
 
             tasks = [asyncio.create_task(process_item_async(idx)) for idx in index_list]
+
             with terminal_progress(
                 should_print_translation_logs(self.pj_config),
-                total=len(index_list), title=f"{self.wokers} 线程生成字典中……"
+                title="生成中……",
+                total=len(tasks),
             ) as bar:
                 self.pj_config.bar = bar
                 self._update_runtime(
@@ -478,14 +543,15 @@ class GenDic(BaseTranslate):
                 )
                 try:
                     for f in asyncio.as_completed(tasks):
-                        self._raise_if_stop_requested()
                         idx, ok, error_message = await f
+                        self._raise_if_stop_requested()
                         completed_tasks += 1
                         self._append_runtime_progress(idx, ok, error_message)
+                        remaining = len(tasks) - completed_tasks
                         self._update_runtime(
                             stage="GenDic 术语提取中",
-                            current_file=f"已完成 {completed_tasks}/{len(index_list)}",
-                            workers_active=int(self.wokers or 1),
+                            current_file=f"已完成 {completed_tasks}/{len(tasks)}",
+                            workers_active=min(int(self.wokers or 1), remaining),
                         )
                         bar()
                 except BaseException:

@@ -113,6 +113,31 @@ class COpenAITokenPool:
 
             raise JobCancelledError()
 
+    def _record_runtime_error(
+        self,
+        *,
+        kind: str,
+        message: str,
+        model: str = "",
+        level: str = "warning",
+    ) -> None:
+        try:
+            from GalTransl.server import record_runtime_error
+
+            record_runtime_error(
+                getattr(
+                    self.pj_config,
+                    "runtime_project_dir",
+                    self.pj_config.getProjectDir(),
+                ),
+                kind=kind,
+                message=message,
+                model=model,
+                level=level,
+            )
+        except Exception:
+            return
+
     async def _interruptible_sleep(self, seconds: float) -> None:
         remaining = float(seconds)
         while remaining > 0:
@@ -168,7 +193,21 @@ class COpenAITokenPool:
                 # 如果流响应为空，返回False
                 return False, token
         except Exception as e:
-            LOGGER.error(e)
+            exception_text = str(e).strip()
+            if exception_text:
+                message = f"{type(e).__name__}: {exception_text}"
+            else:
+                message = type(e).__name__
+            runtime_message = (
+                f"检查模型可用性请求失败 [{token.maskToken()}]: {message}"
+            )
+            LOGGER.error(runtime_message)
+            self._record_runtime_error(
+                kind="api",
+                message=runtime_message,
+                model=getattr(token, "model_name", ""),
+                level="warning",
+            )
 
 
             LOGGER.debug(

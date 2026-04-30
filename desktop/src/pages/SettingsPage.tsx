@@ -15,6 +15,8 @@ import {
   type PluginInfo,
   type ThemeMode,
   clearCustomBackgroundPreference,
+  fetchVersion,
+  fetchVersionCheck,
   fetchPlugins,
   getCacheBrowserFontSizePreference,
   getCustomBackgroundPreference,
@@ -32,6 +34,9 @@ import {
   setThemeModePreference,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
+
+const PROJECT_HOMEPAGE = 'https://github.com/GalTransl/GalTransl';
+const PROJECT_AUTHOR = 'xd2333';
 
 
 function PluginListSection() {
@@ -168,9 +173,52 @@ export function SettingsPage() {
   const [customBackgroundSurfaceOpacityInput, setCustomBackgroundSurfaceOpacityInput] = useState(
     () => String(getCustomBackgroundPreference().surfaceOpacity),
   );
+  const [coreVersion, setCoreVersion] = useState<string | null>(null);
+  const [latestVersion, setLatestVersion] = useState<string | null>(null);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [checkingVersion, setCheckingVersion] = useState(true);
+  const [versionCheckError, setVersionCheckError] = useState<string | null>(null);
   const [customBackgroundError, setCustomBackgroundError] = useState<string | null>(null);
   const [customBackgroundBusy, setCustomBackgroundBusy] = useState(false);
   const customBackgroundInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCheckingVersion(true);
+    setVersionCheckError(null);
+
+    fetchVersion()
+      .then((version) => {
+        if (!cancelled) {
+          setCoreVersion(version);
+        }
+      })
+      .catch(() => undefined);
+
+    fetchVersionCheck()
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        setCoreVersion(result.version);
+        setLatestVersion(result.latest_version);
+        setUpdateAvailable(result.update_available);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setVersionCheckError(normalizeError(error, '检查更新失败'));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCheckingVersion(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const applyHomeHistoryLimit = useCallback((rawValue: string) => {
     const next = setHomeHistoryRetentionLimit(rawValue.trim() === '' ? Number.NaN : Number(rawValue));
@@ -488,6 +536,70 @@ export function SettingsPage() {
               修改默认提示词
             </button>
           </div>
+        </section>
+
+        <section className="panel">
+          <header className="panel__header">
+            <div>
+              <h2>关于</h2>
+              <p>查看项目基础信息与版本更新状态。</p>
+            </div>
+          </header>
+
+          <div className="settings-about-list">
+            <div className="settings-about-list__row">
+              <span className="settings-about-list__label">项目主页</span>
+              <a
+                className="settings-about-list__value settings-about-list__value--link"
+                href={PROJECT_HOMEPAGE}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                {PROJECT_HOMEPAGE}
+              </a>
+            </div>
+
+            <div className="settings-about-list__row">
+              <span className="settings-about-list__label">当前版本</span>
+              <span className="settings-about-list__value">{coreVersion ? `v${coreVersion}` : '—'}</span>
+            </div>
+
+            <div className="settings-about-list__row">
+              <span className="settings-about-list__label">更新状态</span>
+              <span className="settings-about-list__value">
+                {checkingVersion
+                  ? '检查中…'
+                  : updateAvailable && latestVersion
+                    ? `发现新版本 v${latestVersion}`
+                    : '已是最新版本'}
+              </span>
+            </div>
+
+            {updateAvailable && latestVersion ? (
+              <div className="settings-about-list__row">
+                <span className="settings-about-list__label">更新下载</span>
+                <a
+                  className="settings-about-list__value settings-about-list__value--link"
+                  href={PROJECT_HOMEPAGE + '/releases/latest'}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  前往最新发布页
+                </a>
+              </div>
+            ) : null}
+
+            <div className="settings-about-list__row">
+              <span className="settings-about-list__label">作者</span>
+              <span className="settings-about-list__value">{PROJECT_AUTHOR}</span>
+            </div>
+          </div>
+
+          {versionCheckError ? (
+            <div className="settings-toggle-row__desc">
+              更新检查失败：{versionCheckError}
+            </div>
+          ) : null}
         </section>
 
         <section className="panel">

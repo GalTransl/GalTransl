@@ -63,6 +63,55 @@ class TranslateRefactorRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(dummy_completions.calls, 2)
 
+    async def test_ask_chatbot_non_stream_none_content_retries_and_fails(self) -> None:
+        class DummyToken:
+            model_name = "demo-model"
+            domain = "https://example.com"
+            stream = False
+
+            def maskToken(self) -> str:
+                return "sk-***"
+
+        class DummyCompletions:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def create(self, **kwargs):
+                self.calls += 1
+                return SimpleNamespace(
+                    choices=[SimpleNamespace(message=SimpleNamespace(content=None))],
+                    model_extra={},
+                )
+
+        dummy_completions = DummyCompletions()
+        dummy_client = SimpleNamespace(chat=SimpleNamespace(completions=dummy_completions))
+        dummy = SimpleNamespace(
+            client_list=[(dummy_client, DummyToken())],
+            tokenStrategy="random",
+            api_timeout=1,
+            apiErrorWait=0,
+            pj_config=SimpleNamespace(
+                bar=DummyBar(),
+                active_workers=1,
+                stop_event=None,
+                getProjectDir=lambda: "",
+            ),
+            _is_stop_requested=lambda _: False,
+            _wait_for_global_rpm_slot=AsyncMock(return_value=None),
+            _interruptible_sleep=AsyncMock(return_value=None),
+            _record_request_health=lambda *args, **kwargs: None,
+        )
+
+        with self.assertRaises(RuntimeError):
+            await BaseTranslate.ask_chatbot(
+                dummy,
+                prompt="hello",
+                system="system",
+                max_retry_count=2,
+            )
+
+        self.assertEqual(dummy_completions.calls, 2)
+
     async def test_ask_chatbot_aborts_stream_immediately_when_callback_returns_false(self) -> None:
         class DummyToken:
             model_name = "demo-model"

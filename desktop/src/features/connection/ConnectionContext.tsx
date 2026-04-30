@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ConnectionPhase, TranslatorOption } from '../../lib/api';
-import { ensureDesktopBackendReady, fetchJobs, fetchTranslators } from '../../lib/api';
+import { ensureDesktopBackendReady, fetchJobs, fetchTranslators, fetchVersion, fetchVersionCheck } from '../../lib/api';
 import { normalizeError } from '../../lib/errors';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 type ConnectionContextValue = {
   backendUrl: string;
@@ -67,6 +68,31 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       setConnectionMessage('本地翻译服务已就绪，正在加载能力信息…');
       const nextTranslators = await fetchTranslators();
       setTranslators(nextTranslators);
+
+      const version = await fetchVersion();
+      const applyWindowTitle = async (title: string) => {
+        if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+          try {
+            await getCurrentWindow().setTitle(title);
+          } catch {
+            // ignore window title errors
+          }
+        } else {
+          document.title = title;
+        }
+      };
+
+      await applyWindowTitle(`GalTransl Desktop - v${version}`);
+
+      fetchVersionCheck()
+        .then(async (result) => {
+          if (!result.update_available) {
+            return;
+          }
+          await applyWindowTitle(`GalTransl Desktop - v${result.version}（有新版本）`);
+        })
+        .catch(() => undefined);
+
       setConnectionPhase('online');
       setConnectionMessage('后端在线，可以立即提交本地翻译任务。');
     } catch (error) {

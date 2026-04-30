@@ -22,7 +22,7 @@ import { normalizeError } from '../lib/errors';
 const HISTORY_KEY = 'galtransl-project-history';
 const JOB_MEMORY_KEY = 'galtransl-home-jobs-memory';
 const JOB_CLEARED_KEY = 'galtransl-home-jobs-cleared';
-const PROJECT_HOMEPAGE = 'https://github.com/XD2333/GalTransl';
+const PROJECT_HOMEPAGE = 'https://github.com/GalTransl/GalTransl';
 const MIN_REFRESH_SPIN_MS = 420;
 const REFRESH_SPIN_CYCLE_MS = 500;
 

@@ -774,6 +774,10 @@ class BaseTranslate:
                         raise ValueError(
                             "response.choices[0].message.content is None, no_candidates"
                         )
+                    if not isinstance(result, str) or result.strip() == "":
+                        raise ValueError(
+                            "response.choices[0].message.content is empty"
+                        )
                 self._record_request_health(
                     time.monotonic() - request_started,
                     is_rate_limited=False,
