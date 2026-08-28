@@ -1184,7 +1184,9 @@ def build_handler(registry: JobRegistry):
                     payload = self._read_json_body()
                     query = str(payload.get("query", "")).strip()
                     field = str(payload.get("field", "all")).strip()  # all | src | dst
+                    options = payload.get("options", {})
                     max_results = min(int(payload.get("max_results", 500)), 2000)
+                    option_re = options.get("re", False)
 
                     if not query:
                         self._send_json({"results": [], "total": 0})
@@ -1210,9 +1212,19 @@ def build_handler(registry: JobRegistry):
                                     src_text = e.get("post_src", "") or e.get("post_jp", "") or e.get("pre_src", "") or e.get("pre_jp", "")
                                     dst_text = e.get("pre_dst", "") or e.get("pre_zh", "") or e.get("proofread_dst", "") or e.get("proofread_zh", "")
                                     problem_text = e.get("problem", "")
-                                    match_src = query.lower() in src_text.lower()
-                                    match_dst = query.lower() in dst_text.lower()
-                                    match_problem = query.lower() in problem_text.lower()
+                                    if option_re:
+                                        import re
+                                        try:
+                                            pattern = re.compile(query)
+                                            match_src = bool(re.search(pattern, src_text))
+                                            match_dst = bool(re.search(pattern, dst_text))
+                                            match_problem = bool(re.search(pattern, problem_text))
+                                        except re.error:
+                                            continue
+                                    else:
+                                        match_src = query.lower() in src_text.lower()
+                                        match_dst = query.lower() in dst_text.lower()
+                                        match_problem = query.lower() in problem_text.lower()
                                     if field == "src" and not match_src:
                                         continue
                                     if field == "dst" and not match_dst:

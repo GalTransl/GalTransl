@@ -138,6 +138,10 @@ export type CacheSearchResponse = {
 
 export type CacheReplaceField = 'src' | 'dst' | 'all';
 
+export type CacheSearchOptions = {
+  re: boolean;
+};
+
 export type CacheReplaceFileDetail = {
   filename: string;
   matches: number;
@@ -558,6 +562,7 @@ export async function searchCache(
   projectId: string,
   query: string,
   field: CacheSearchField = 'all',
+  options: CacheSearchOptions = { re: false },
   maxResults = 500,
 ) {
   return apiRequest<CacheSearchResponse>(
@@ -565,7 +570,7 @@ export async function searchCache(
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, field, max_results: maxResults }),
+      body: JSON.stringify({ query, field, options, max_results: maxResults }),
     },
   );
 }

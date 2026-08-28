@@ -872,6 +872,19 @@
   border-radius: var(--radius-card);
 }
 
+.cache-search-options {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 15px;
+  color: var(--color-text);
+  cursor: pointer;
+  white-space: nowrap;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-control);
+  transition: all var(--transition-fast);
+}
+
 .cache-search--replace {
   width: 100%;
 }

@@ -15,6 +15,7 @@ import {
   type CacheEntry,
   type CacheSearchResult,
   type CacheSearchField,
+  type CacheSearchOptions,
   type CacheReplaceField,
   type CacheReplaceFileDetail,
   type ProblemEntry,
@@ -316,6 +317,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     sidebarTab: SidebarTab;
     searchQuery: string;
     searchField: CacheSearchField;
+    searchOptions: CacheSearchOptions;
     searchResults: CacheSearchResult[];
     searchTotal: number;
     replaceQuery: string;
@@ -412,6 +414,9 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   // Global search state
   const [searchQuery, setSearchQuery] = useState('');
   const [searchField, setSearchField] = useState<CacheSearchField>('all');
+  const [searchOptions, setSearchOptions] = useState<CacheSearchOptions>({
+    re: false
+  });
   const [searchResults, setSearchResults] = useState<CacheSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchTotal, setSearchTotal] = useState(0);
@@ -524,6 +529,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         sidebarTab: 'files',
         searchQuery: '',
         searchField: 'all',
+        searchOptions: { re: false },
         searchResults: [],
         searchTotal: 0,
         replaceQuery: '',
@@ -540,6 +546,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       prevBucket.sidebarTab = sidebarTab;
       prevBucket.searchQuery = searchQuery;
       prevBucket.searchField = searchField;
+      prevBucket.searchOptions = searchOptions;
       prevBucket.searchResults = searchResults;
       prevBucket.searchTotal = searchTotal;
       prevBucket.replaceQuery = replaceQuery;
@@ -637,7 +644,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     }
     setSearching(true);
     try {
-      const res = await searchCache(projectId, searchQuery.trim(), searchField);
+      const res = await searchCache(projectId, searchQuery.trim(), searchField, searchOptions);
       setSearchResults(res.results);
       setSearchTotal(res.total);
       setSelectedSearchIdx(-1);
@@ -648,7 +655,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     } finally {
       setSearching(false);
     }
-  }, [projectId, searchField, searchQuery]);
+  }, [projectId, searchField, searchQuery, searchOptions]);
 
   const refreshCurrentFile = useCallback(async () => {
     if (!projectId || !selectedFile || dirtyFiles.has(selectedFile)) return;
@@ -745,6 +752,13 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     }, 400);
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
   }, [runGlobalSearch, searchQuery]);
+
+  // Immediate search (on search options change)
+  useEffect(() => {
+    if (!searchQuery.trim()) return;
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    void runGlobalSearch();
+  }, [runGlobalSearch, searchOptions]); 
 
   // Scroll selected search result into view
   useEffect(() => {
@@ -1344,6 +1358,16 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
           {/* Tab: Search */}
           {sidebarTab === 'search' && (
             <div className="cache-search-panel">
+              <div className="cache-search-options">
+                <label>
+                  <input
+                  type="checkbox"
+                  className="cache-search-option-re"
+                  onChange={(e) => setSearchOptions({...searchOptions, re: e.target.checked})}
+                  disabled={searching}
+                  />正则匹配
+                </label>
+              </div>
               <div className="cache-search-input-group">
                 <input
                   type="text"
