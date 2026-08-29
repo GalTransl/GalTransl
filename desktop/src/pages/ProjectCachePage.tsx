@@ -84,7 +84,7 @@ function CacheEntryCard({
   filename: string;
   projectId: string;
   onEntryChange: (index: number, field: keyof CacheEntry, value: string) => void;
-  onDelete: (index: number) => void;
+  onDelete: (deleteMode: boolean, index: number) => void;
   highlightQuery?: string;
   nameDict: Map<string, string>;
 }) {
@@ -98,7 +98,7 @@ function CacheEntryCard({
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <article className={`cache-card ${hasProblem ? 'cache-card--problem' : ''}`} data-cache-index={entry.index}>
+    <article className={`cache-card ${hasProblem ? 'cache-card--problem' : ''} ${entry.deleted ? 'cache-card--pre-deleted' : ''}`} data-cache-index={entry.index}>
       <div className="cache-card__row">
         <span className="cache-card__field-label">#{entry.index}</span>
         {speaker !== '—' && (
@@ -124,10 +124,13 @@ function CacheEntryCard({
         <button
           type="button"
           className="cache-card__delete"
-          onClick={() => onDelete(entry.index)}
-          title="删除此条"
+          onClick={() => {
+            onDelete(!entry.deleted, entry.index)
+            entry.deleted = !entry.deleted
+          }}
+          title={entry.deleted ? "撤销删除" : "删除此条"}
         >
-          ✕
+          {entry.deleted ? '↩' : '✕'}
         </button>
       </div>
 
@@ -785,7 +788,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
 
   const handleEntryChange = (index: number, field: keyof CacheEntry, value: string) => {
     setEntries((prev) => {
-      const next = prev.map((e) => (e.index === index ? { ...e, [field]: value } : e));
+      const next = prev.map((e) => (e.index === index ? { ...e, [field]: value, deleted: false } : e));
       if (selectedFile) entriesMapRef.current.set(selectedFile, next);
       return next;
     });
@@ -795,16 +798,18 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     setInfo(null);
   };
 
-  const handleDelete = (index: number) => {
+  // 不实际删除，处理删除和恢复
+  const handleDeleteAndRecover = (deleteMode: boolean, index: number) => {
     if (!selectedFile) return;
     setEntries((prev) => {
-      const next = prev.filter((e) => e.index !== index);
-      // Re-index remaining entries
-      const reindexed = next.map((e, i) => ({ ...e, index: i }));
-      entriesMapRef.current.set(selectedFile, reindexed);
-      return reindexed;
+      const next = prev.map((e) => e.index === index ? { ...e, deleted: deleteMode } : e);
+
+      entriesMapRef.current.set(selectedFile, next);
+      return next;
     });
-    setDirtyFiles((prev) => new Set(prev).add(selectedFile));
+    if (deleteMode) {
+      setDirtyFiles((prev) => new Set(prev).add(selectedFile));
+    }
     setInfo(null);
   };
 
@@ -817,8 +822,17 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     setLocalError(null);
     setInfo(null);
     try {
-      const res = await saveCacheFile(projectId, targetFile, targetEntries, configFileName);
-      const savedEntries = res.entries || targetEntries;
+      // 处理脏条目并重新索引
+      const entriesToSave = targetEntries
+        .filter(e => !e.deleted)  
+        .map(e => {
+          const { deleted, ...rest } = e;  
+          return rest;
+        });
+      
+      const res = await saveCacheFile(projectId, targetFile, entriesToSave, configFileName);
+      const savedEntries = res.entries || entriesToSave;
+
       entriesMapRef.current.set(targetFile, savedEntries);
       // 如果保存的是当前打开的文件，同步 entries 状态
       if (targetFile === selectedFile) {
@@ -850,8 +864,16 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       const fileEntries = entriesMapRef.current.get(file);
       if (!fileEntries) continue;
       try {
-        const res = await saveCacheFile(projectId, file, fileEntries, configFileName);
-        const savedEntries = res.entries || fileEntries;
+        const entriesToSave = fileEntries
+        .filter(e => !e.deleted)  
+        .map(e => {
+          const { deleted, ...rest } = e;  
+          return rest;
+        });
+
+        const res = await saveCacheFile(projectId, file, entriesToSave, configFileName);
+        const savedEntries = res.entries || entriesToSave;
+
         entriesMapRef.current.set(file, savedEntries);
         if (file === selectedFile) {
           setEntries(savedEntries);
@@ -1673,7 +1695,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                       filename={selectedFile}
                       projectId={projectId}
                       onEntryChange={handleEntryChange}
-                      onDelete={handleDelete}
+                      onDelete={handleDeleteAndRecover}
                       highlightQuery={searchTerm || searchQuery}
                       nameDict={nameDict}
                     />

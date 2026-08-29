@@ -480,6 +480,11 @@
   background: color-mix(in srgb, var(--color-warning-soft) 15%, var(--color-surface-strong));
 }
 
+.cache-card--pre-deleted {
+    opacity: 0.5;
+    background: color-mix(in srgb, var(--color-neutral-soft) 30%, var(--color-surface-strong));
+  }
+
 .cache-card--highlight {
   animation: cache-card-flash 2s ease-out;
 }
