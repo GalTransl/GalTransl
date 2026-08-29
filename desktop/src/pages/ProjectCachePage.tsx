@@ -851,6 +851,39 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     }
   };
 
+  // 撤销修改，即读取最近文件覆盖当前缓存，并清除 dirty 标记
+  const handleRecover = async (filename?: string) => {
+    const targetFile = filename || selectedFile;
+    if (!targetFile || !dirtyFiles.has(targetFile)) return;
+
+    setLoadingEntries(true);
+    setLocalError(null);
+    setInfo(null);
+
+    try {
+      const res = await fetchCacheFile(projectId, targetFile);
+      const recoveredEntries = res.entries;
+
+      entriesMapRef.current.set(targetFile, recoveredEntries);
+
+      if (targetFile === selectedFile) {
+        setEntries(recoveredEntries);
+      }
+
+      setDirtyFiles((prev) => {
+        const next = new Set(prev);
+        next.delete(targetFile);
+        return next;
+      });
+
+      setInfo(`已撤销 "${targetFile}" 本次修改`);
+    } catch (err) {
+      setLocalError(normalizeError(err, '撤销文件失败'));
+    } finally {
+      setLoadingEntries(false);
+    }
+  };
+
   /** 保存所有有修改的文件 */
   const handleSaveAll = async () => {
     const filesToSave = Array.from(dirtyFiles);
@@ -1653,6 +1686,9 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
               description={`${total} 句 · ${translated} 已翻译 · ${withProblems} 有问题`}
               actions={(
                 <div className="cache-panel-actions">
+                  <Button onClick={() => void handleRecover()} disabled={loadingEntries || !dirty}>
+                    {loadingEntries ? '撤销中…' : '撤销'}
+                  </Button>
                   <Button onClick={() => void handleSave()} disabled={saving || !dirty}>
                     {saving ? '保存中…' : '保存'}
                   </Button>
