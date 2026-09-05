@@ -39,7 +39,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   const [searchParams] = useSearchParams();
   const [activeSection, setActiveSection] = useState<ConfigSectionKey>(() => {
     const s = searchParams.get('section');
-    if (s && ['common', 'backendSpecific', 'plugin', 'dictionary', 'problemAnalyze', 'retranslKey'].includes(s)) return s as ConfigSectionKey;
+    if (s && ['common', 'backendSpecific', 'plugin', 'dictionary', 'problemAnalyze', 'retranslKey', 'problemFilterKey'].includes(s)) return s as ConfigSectionKey;
     return 'common';
   });
   const [yamlView, setYamlView] = useState(false);
@@ -380,14 +380,16 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
                 />
               )}
 
-              {activeSection === 'retranslKey' && (
+              {(activeSection === 'retranslKey' || activeSection === 'problemFilterKey') && (
                 <RetranslKeySection
+                  key={activeSection}
+                  field={activeSection}
                   config={config}
                   onChange={(keys) => {
                     setConfig((prev) => {
                       if (!prev) return prev;
                       const common = { ...((prev.common as Record<string, unknown>) || {}) };
-                      common.retranslKey = keys;
+                      common[activeSection] = keys;
                       return { ...prev, common };
                     });
                   }}

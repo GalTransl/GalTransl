@@ -19,6 +19,7 @@ from GalTransl import TRANSLATOR_SUPPORTED, INPUT_FOLDERNAME, OUTPUT_FOLDERNAME,
 from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
 from GalTransl.AppSettings import load_app_settings, save_app_settings
 from GalTransl.DefaultProjectConfig import DEFAULT_PROJECT_CONFIG_YAML
+from GalTransl.ProblemFilter import filter_problem_text
 from GalTransl.Backend.Prompts import (
     FORGAL_JSON_SYSTEM_PROMPT,
     FORGAL_JSON_TRANS_PROMPT,
@@ -1186,7 +1187,22 @@ def build_handler(registry: JobRegistry):
                     field = str(payload.get("field", "all")).strip()  # all | src | dst
                     options = payload.get("options", {})
                     max_results = min(int(payload.get("max_results", 500)), 2000)
-                    option_re = options.get("re", False)
+                    if not isinstance(options, dict):
+                        self._send_json({"error": "options must be an object"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    option_re = bool(options.get("re", False))
+                    filter_keys = RUNTIME_PROGRESS_CACHE.get_problem_filter_keys(
+                        project_dir, str(payload.get("config_file_name", "config.yaml"))
+                    )
+
+                    pattern = None
+                    if option_re:
+                        import re
+                        try:
+                            pattern = re.compile(query)
+                        except re.error as exc:
+                            self._send_json({"error": f"invalid regular expression: {exc}"}, status=HTTPStatus.BAD_REQUEST)
+                            return
 
                     if not query:
                         self._send_json({"results": [], "total": 0})
@@ -1211,20 +1227,16 @@ def build_handler(registry: JobRegistry):
                                         continue
                                     src_text = e.get("post_src", "") or e.get("post_jp", "") or e.get("pre_src", "") or e.get("pre_jp", "")
                                     dst_text = e.get("pre_dst", "") or e.get("pre_zh", "") or e.get("proofread_dst", "") or e.get("proofread_zh", "")
-                                    problem_text = e.get("problem", "")
-                                    if option_re:
-                                        import re
-                                        try:
-                                            pattern = re.compile(query)
-                                            match_src = bool(re.search(pattern, src_text))
-                                            match_dst = bool(re.search(pattern, dst_text))
-                                            match_problem = bool(re.search(pattern, problem_text))
-                                        except re.error:
-                                            continue
+                                    problem_text = filter_problem_text(e.get("problem", ""), filter_keys)
+                                    if pattern is not None:
+                                        match_src = bool(pattern.search(src_text))
+                                        match_dst = bool(pattern.search(dst_text))
+                                        match_problem = bool(pattern.search(problem_text))
                                     else:
-                                        match_src = query.lower() in src_text.lower()
-                                        match_dst = query.lower() in dst_text.lower()
-                                        match_problem = query.lower() in problem_text.lower()
+                                        query_lower = query.lower()
+                                        match_src = query_lower in src_text.lower()
+                                        match_dst = query_lower in dst_text.lower()
+                                        match_problem = query_lower in problem_text.lower()
                                     if field == "src" and not match_src:
                                         continue
                                     if field == "dst" and not match_dst:
@@ -1244,7 +1256,7 @@ def build_handler(registry: JobRegistry):
                                             "match_src": match_src,
                                             "match_dst": match_dst,
                                             "match_problem": match_problem,
-                                            "problem": e.get("problem", ""),
+                                            "problem": problem_text,
                                             "trans_by": e.get("trans_by", ""),
                                         })
                             except Exception:
@@ -1359,6 +1371,8 @@ def build_handler(registry: JobRegistry):
 
             # GET /api/projects/:id/progress
             if sub_path == "/progress":
+                config_name = parse_qs(urlparse(self.path).query).get("config", ["config.yaml"])[0]
+                filter_keys = RUNTIME_PROGRESS_CACHE.get_problem_filter_keys(project_dir, config_name)
                 cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
                 total = 0
                 translated = 0
@@ -1376,7 +1390,7 @@ def build_handler(registry: JobRegistry):
                                 entries = orjson.loads(f.read())
                             f_total = len(entries)
                             f_translated = sum(1 for e in entries if isinstance(e, dict) and (e.get("pre_dst", "") or e.get("pre_zh", "")))
-                            f_problems = sum(1 for e in entries if isinstance(e, dict) and e.get("problem", ""))
+                            f_problems = sum(1 for e in entries if isinstance(e, dict) and filter_problem_text(e.get("problem", ""), filter_keys))
                             f_failed = sum(1 for e in entries if isinstance(e, dict) and "(Failed)" in str(e.get("problem", "")))
                             total += f_total
                             translated += f_translated
@@ -1424,6 +1438,7 @@ def build_handler(registry: JobRegistry):
                     retran_key=retran_key,
                     retran_terms=retran_terms,
                     current_job_started_at_ns=current_job_started_at_ns,
+                    problem_filter_keys=RUNTIME_PROGRESS_CACHE.get_problem_filter_keys(project_dir, config_file_name),
                 )
                 total = progress_payload["total"]
                 translated = progress_payload["translated"]
@@ -2042,6 +2057,8 @@ def build_handler(registry: JobRegistry):
 
             # GET /api/projects/:id/problems
             if sub_path == "/problems":
+                config_name = parse_qs(urlparse(self.path).query).get("config", ["config.yaml"])[0]
+                filter_keys = RUNTIME_PROGRESS_CACHE.get_problem_filter_keys(project_dir, config_name)
                 cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
                 all_problems = []
                 if os.path.isdir(cache_dir):
@@ -2054,19 +2071,20 @@ def build_handler(registry: JobRegistry):
                             with open(fp, "rb") as f:
                                 entries = orjson.loads(f.read())
                             for e in entries:
-                                if isinstance(e, dict) and e.get("problem", ""):
+                                problem_text = filter_problem_text(e.get("problem", ""), filter_keys) if isinstance(e, dict) else ""
+                                if problem_text:
                                     all_problems.append({
                                         "filename": name,
                                         "index": e.get("index", 0),
                                         "speaker": e.get("name", ""),
                                         "post_src": e.get("post_src", "") or e.get("post_jp", ""),
                                         "pre_dst": e.get("pre_dst", "") or e.get("pre_zh", ""),
-                                        "problem": e.get("problem", ""),
+                                        "problem": problem_text,
                                         "trans_by": e.get("trans_by", ""),
                                     })
                         except Exception:
                             continue
-                self._send_json({"project_dir": project_dir, "problems": all_problems, "total": len(all_problems)})
+                self._send_json({"project_dir": project_dir, "problems": all_problems, "total": len(all_problems), "filter_keys": filter_keys})
                 return
 
             # GET /api/projects/:id/logs

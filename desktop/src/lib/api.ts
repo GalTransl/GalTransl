@@ -302,6 +302,7 @@ export type ProjectProblemsResponse = {
   project_dir: string;
   problems: ProblemEntry[];
   total: number;
+  filter_keys?: string[];
 };
 
 // ---- Name Table API types ----
@@ -566,13 +567,14 @@ export async function searchCache(
   field: CacheSearchField = 'all',
   options: CacheSearchOptions = { re: false },
   maxResults = 500,
+  configFileName = 'config.yaml',
 ) {
   return apiRequest<CacheSearchResponse>(
     `/api/projects/${projectId}/cache/search`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, field, options, max_results: maxResults }),
+      body: JSON.stringify({ query, field, options, max_results: maxResults, config_file_name: configFileName }),
     },
   );
 }
@@ -711,8 +713,8 @@ export async function deleteCommonDictionaryFile(payload: { filename: string }) 
   );
 }
 
-export async function fetchProjectProblems(projectId: string) {
-  return apiRequest<ProjectProblemsResponse>(`/api/projects/${projectId}/problems`);
+export async function fetchProjectProblems(projectId: string, configFileName = 'config.yaml') {
+  return apiRequest<ProjectProblemsResponse>(`/api/projects/${projectId}/problems?config=${encodeURIComponent(configFileName)}`);
 }
 
 // ---- Name Table API functions ----

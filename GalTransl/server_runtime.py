@@ -15,6 +15,7 @@ from packaging.version import InvalidVersion, Version
 from yaml import safe_load
 
 from GalTransl import CACHE_FOLDERNAME
+from GalTransl.ProblemFilter import filter_problem_text, normalize_problem_filter_keys
 
 def _utcnow_text() -> str:
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
@@ -347,6 +348,7 @@ class _CacheProgressFileStat:
     failed_keys: frozenset[str]
     retran_terms_signature: tuple[str, ...] = field(default_factory=tuple)
     retran_hit_keys: dict[str, frozenset[str]] = field(default_factory=dict)
+    problem_filter_signature: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(slots=True)
@@ -354,6 +356,7 @@ class _RetranConfigStat:
     mtime_ns: int
     size: int
     retran_key: str | list[str]
+    problem_filter_keys: list[str] = field(default_factory=list)
 
 
 def _normalize_retran_key(value: Any) -> str | list[str]:
@@ -431,11 +434,13 @@ class RuntimeProgressCache:
                 return cached.retran_key
 
         retran_key: str | list[str] = ""
+        problem_filter_keys = []
         try:
             with open(config_path, "rb") as cfg_file:
                 cfg = safe_load(cfg_file.read()) or {}
             common = cfg.get("common", {}) if isinstance(cfg, dict) else {}
             retran_key = _normalize_retran_key(common.get("retranslKey", ""))
+            problem_filter_keys = normalize_problem_filter_keys(common.get("problemFilterKey", []))
         except Exception:
             retran_key = ""
 
@@ -444,9 +449,17 @@ class RuntimeProgressCache:
                 mtime_ns=int(stat.st_mtime_ns),
                 size=int(stat.st_size),
                 retran_key=retran_key,
+                problem_filter_keys=problem_filter_keys,
             )
 
         return retran_key
+
+    def get_problem_filter_keys(self, project_dir: str, config_file_name: str = "config.yaml") -> list[str]:
+        self.get_retran_key(project_dir, config_file_name)
+        config_path = str(Path(project_dir, config_file_name or "config.yaml").resolve())
+        with self._lock:
+            cached = self._retran_config_cache.get(config_path)
+            return list(cached.problem_filter_keys) if cached else []
 
     def get_progress(
         self,
@@ -456,11 +469,14 @@ class RuntimeProgressCache:
         retran_key: str | list[str] = "",
         retran_terms: list[str] | None = None,
         current_job_started_at_ns: int | None = None,
+        problem_filter_keys=None,
     ) -> dict[str, Any]:
         normalized = _normalize_project_dir(project_dir)
         cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
         retran_terms = retran_terms or []
         retran_terms_signature = tuple(retran_terms)
+        problem_filter_keys = normalize_problem_filter_keys(problem_filter_keys)
+        problem_filter_signature = tuple(problem_filter_keys)
 
         with self._lock:
             project_stats = self._project_files.setdefault(normalized, {})
@@ -490,6 +506,7 @@ class RuntimeProgressCache:
                         and cached.mtime_ns == int(stat.st_mtime_ns)
                         and cached.size == int(stat.st_size)
                         and cached.retran_terms_signature == retran_terms_signature
+                        and cached.problem_filter_signature == problem_filter_signature
                     ):
                         continue
 
@@ -586,9 +603,10 @@ class RuntimeProgressCache:
                             entry_key = _entry_signature(entries, idx)
 
                         is_translated = bool(item.get("pre_dst", "") or item.get("pre_zh", ""))
-                        is_problem = bool(item.get("problem", ""))
+                        problem_text = filter_problem_text(item.get("problem", ""), problem_filter_keys)
+                        is_problem = bool(problem_text)
                         is_failed = (
-                            "翻译失败" in str(item.get("problem", ""))
+                            "翻译失败" in problem_text
                             or "(Failed)" in str(item.get("pre_dst", "") or item.get("pre_zh", ""))
                             or "(翻译失败)" in str(item.get("pre_dst", "") or item.get("pre_zh", ""))
                         )
@@ -604,7 +622,6 @@ class RuntimeProgressCache:
                             and retran_hit_keys
                         ):
                             source_text = item.get("pre_src", item.get("pre_jp", ""))
-                            problem_text = item.get("problem", "")
                             for term in retran_terms:
                                 if _check_retran_key(term, source_text) or _check_retran_key(term, problem_text):
                                     retran_hit_keys[term].add(entry_key)
@@ -623,7 +640,7 @@ class RuntimeProgressCache:
                             and no_proofread
                             and (
                                 _check_retran_key(retran_key, item.get("pre_src", item.get("pre_jp", "")))
-                                or _check_retran_key(retran_key, item.get("problem", ""))
+                                or _check_retran_key(retran_key, problem_text)
                             )
                         ):
                             is_translated = False
@@ -642,6 +659,7 @@ class RuntimeProgressCache:
                         problem_keys=frozenset(problem_keys),
                         failed_keys=frozenset(failed_keys),
                         retran_terms_signature=retran_terms_signature,
+                        problem_filter_signature=problem_filter_signature,
                         retran_hit_keys={
                             term: frozenset(hit_keys)
                             for term, hit_keys in retran_hit_keys.items()

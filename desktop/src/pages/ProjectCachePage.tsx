@@ -30,10 +30,21 @@ import {
   getCacheBrowserFontSizePreference,
   updateProjectConfig } from '../lib/api';
 import { normalizeError } from '../lib/errors';
+import { filterProblemText, normalizeKeywordList } from '../lib/problemFilter';
 
 /** 兼容读取缓存字段：优先新key，回退旧key */
 function src(e: CacheEntry): string { return e.post_src || e.post_jp || ''; }
 function dst(e: CacheEntry): string { return e.pre_dst || e.pre_zh || ''; }
+function cloneEntries(entries: CacheEntry[]): CacheEntry[] {
+  return entries.map((entry) => ({
+    ...entry,
+    ...(Array.isArray(entry.name) ? { name: [...entry.name] } : {}),
+  }));
+}
+function entriesMatch(left: CacheEntry[], right: CacheEntry[]): boolean {
+  const normalize = (items: CacheEntry[]) => items.map(({ deleted, ...entry }) => entry);
+  return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
+}
 function escapeControlChars(text: string): string {
   return text.replace(/\r/g, '\\r').replace(/\n/g, '\\n');
 }
@@ -124,10 +135,7 @@ function CacheEntryCard({
         <button
           type="button"
           className="cache-card__delete"
-          onClick={() => {
-            onDelete(!entry.deleted, entry.index)
-            entry.deleted = !entry.deleted
-          }}
+          onClick={() => onDelete(!entry.deleted, entry.index)}
           title={entry.deleted ? "撤销删除" : "删除此条"}
         >
           {entry.deleted ? '↩' : '✕'}
@@ -303,6 +311,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   const [entries, setEntries] = useState<CacheEntry[]>([]);
   /** 每个文件的条目缓存（含未保存修改），mount 后指向当前项目桶中的 Map */
   const entriesMapRef = useRef<Map<string, CacheEntry[]>>(new Map());
+  /** 每个文件最近一次从后端读取或保存后的干净快照，用于准确维护 dirty 状态 */
+  const cleanEntriesMapRef = useRef<Map<string, CacheEntry[]>>(new Map());
   /** 有未保存修改的文件集合 */
   const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(new Set());
 
@@ -316,6 +326,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     selectedFile: string | null;
     dirtyFiles: Set<string>;
     entries: Map<string, CacheEntry[]>;
+    cleanEntries: Map<string, CacheEntry[]>;
     scrollPositions: Map<string, number>;
     sidebarTab: SidebarTab;
     searchQuery: string;
@@ -430,6 +441,9 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   // Problems tab state
   const [problems, setProblems] = useState<ProblemEntry[]>([]);
   const [loadingProblems, setLoadingProblems] = useState(false);
+  const [problemFilterKeys, setProblemFilterKeys] = useState<string[]>([]);
+  const [savingKeyword, setSavingKeyword] = useState(false);
+  const problemRequestRef = useRef(0);
   // Retransl keyword popover editor
   const [retranslEditor, setRetranslEditor] = useState<{
     type: string;
@@ -528,6 +542,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         selectedFile: null,
         dirtyFiles: new Set(),
         entries: new Map(),
+        cleanEntries: new Map(),
         scrollPositions: new Map(),
         sidebarTab: 'files',
         searchQuery: '',
@@ -545,6 +560,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       prevBucket.selectedFile = selectedFile;
       prevBucket.dirtyFiles = dirtyFiles;
       prevBucket.entries = entriesMapRef.current;
+      prevBucket.cleanEntries = cleanEntriesMapRef.current;
       prevBucket.scrollPositions = scrollPositionsRef.current;
       prevBucket.sidebarTab = sidebarTab;
       prevBucket.searchQuery = searchQuery;
@@ -564,6 +580,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     if (existing) {
       // 恢复：ref 指向桶内共享 Map，state 恢复至桶内快照
       entriesMapRef.current = existing.entries;
+      cleanEntriesMapRef.current = existing.cleanEntries;
       scrollPositionsRef.current = existing.scrollPositions;
       setCacheFiles(existing.cacheFiles);
       setCacheDir(existing.cacheDir);
@@ -572,6 +589,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setSidebarTab(existing.sidebarTab);
       setSearchQuery(existing.searchQuery);
       setSearchField(existing.searchField);
+      setSearchOptions(existing.searchOptions);
       setSearchResults(existing.searchResults);
       setSearchTotal(existing.searchTotal);
       setSelectedSearchIdx(-1);
@@ -587,6 +605,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     } else {
       // 全新项目：重置 refs 与可见 state，然后拉取文件列表
       entriesMapRef.current = new Map();
+      cleanEntriesMapRef.current = new Map();
       scrollPositionsRef.current = new Map();
       setCacheFiles([]);
       setCacheDir('');
@@ -596,6 +615,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setSidebarTab('files');
       setSearchQuery('');
       setSearchField('all');
+      setSearchOptions({ re: false });
       setSearchResults([]);
       setSearchTotal(0);
       setSelectedSearchIdx(-1);
@@ -627,6 +647,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         if (!cancelled) {
           setEntries(res.entries);
           entriesMapRef.current.set(selectedFile, res.entries);
+          cleanEntriesMapRef.current.set(selectedFile, cloneEntries(res.entries));
         }
       })
       .catch((err) => {
@@ -647,7 +668,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     }
     setSearching(true);
     try {
-      const res = await searchCache(projectId, searchQuery.trim(), searchField, searchOptions);
+      const res = await searchCache(projectId, searchQuery.trim(), searchField, searchOptions, 500, configFileName);
       setSearchResults(res.results);
       setSearchTotal(res.total);
       setSelectedSearchIdx(-1);
@@ -658,7 +679,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     } finally {
       setSearching(false);
     }
-  }, [projectId, searchField, searchQuery, searchOptions]);
+  }, [projectId, configFileName, searchField, searchQuery, searchOptions]);
 
   const refreshCurrentFile = useCallback(async () => {
     if (!projectId || !selectedFile || dirtyFiles.has(selectedFile)) return;
@@ -666,6 +687,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     try {
       const res = await fetchCacheFile(projectId, selectedFile);
       entriesMapRef.current.set(selectedFile, res.entries);
+      cleanEntriesMapRef.current.set(selectedFile, cloneEntries(res.entries));
       setEntries(res.entries);
     } catch (err) {
       setLocalError(normalizeError(err, '刷新缓存内容失败'));
@@ -761,7 +783,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     if (!searchQuery.trim()) return;
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     void runGlobalSearch();
-  }, [runGlobalSearch, searchOptions]); 
+  }, [runGlobalSearch, searchOptions]);
 
   // Scroll selected search result into view
   useEffect(() => {
@@ -770,7 +792,10 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     el?.scrollIntoView({ block: 'nearest' });
   }, [selectedSearchIdx]);
 
-  const filteredEntries = entries.filter((e) => {
+  const visibleEntries = entries.map((entry) => ({
+    ...entry, problem: filterProblemText(entry.problem, problemFilterKeys),
+  }));
+  const filteredEntries = visibleEntries.filter((e) => {
     if (filterProblems && !e.problem) return false;
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
@@ -784,16 +809,20 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
 
   const total = entries.length;
   const translated = entries.filter((e) => dst(e)).length;
-  const withProblems = entries.filter((e) => e.problem).length;
+  const withProblems = visibleEntries.filter((e) => e.problem).length;
 
   const handleEntryChange = (index: number, field: keyof CacheEntry, value: string) => {
-    setEntries((prev) => {
-      const next = prev.map((e) => (e.index === index ? { ...e, [field]: value, deleted: false } : e));
-      if (selectedFile) entriesMapRef.current.set(selectedFile, next);
-      return next;
-    });
+    const next = entries.map((e) => (e.index === index ? { ...e, [field]: value, deleted: false } : e));
+    setEntries(next);
+    if (selectedFile) entriesMapRef.current.set(selectedFile, next);
     if (selectedFile) {
-      setDirtyFiles((prev) => new Set(prev).add(selectedFile));
+      const clean = cleanEntriesMapRef.current.get(selectedFile);
+      setDirtyFiles((current) => {
+        const updated = new Set(current);
+        if (clean && entriesMatch(next, clean)) updated.delete(selectedFile);
+        else updated.add(selectedFile);
+        return updated;
+      });
     }
     setInfo(null);
   };
@@ -801,15 +830,16 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   // 不实际删除，处理删除和恢复
   const handleDeleteAndRecover = (deleteMode: boolean, index: number) => {
     if (!selectedFile) return;
-    setEntries((prev) => {
-      const next = prev.map((e) => e.index === index ? { ...e, deleted: deleteMode } : e);
-
-      entriesMapRef.current.set(selectedFile, next);
-      return next;
+    const next = entries.map((e) => e.index === index ? { ...e, deleted: deleteMode } : e);
+    setEntries(next);
+    entriesMapRef.current.set(selectedFile, next);
+    const clean = cleanEntriesMapRef.current.get(selectedFile);
+    setDirtyFiles((current) => {
+      const updated = new Set(current);
+      if (clean && entriesMatch(next, clean)) updated.delete(selectedFile);
+      else updated.add(selectedFile);
+      return updated;
     });
-    if (deleteMode) {
-      setDirtyFiles((prev) => new Set(prev).add(selectedFile));
-    }
     setInfo(null);
   };
 
@@ -824,16 +854,17 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     try {
       // 处理脏条目并重新索引
       const entriesToSave = targetEntries
-        .filter(e => !e.deleted)  
+        .filter(e => !e.deleted)
         .map(e => {
-          const { deleted, ...rest } = e;  
+          const { deleted, ...rest } = e;
           return rest;
         });
-      
+
       const res = await saveCacheFile(projectId, targetFile, entriesToSave, configFileName);
       const savedEntries = res.entries || entriesToSave;
 
       entriesMapRef.current.set(targetFile, savedEntries);
+      cleanEntriesMapRef.current.set(targetFile, cloneEntries(savedEntries));
       // 如果保存的是当前打开的文件，同步 entries 状态
       if (targetFile === selectedFile) {
         setEntries(savedEntries);
@@ -865,6 +896,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       const recoveredEntries = res.entries;
 
       entriesMapRef.current.set(targetFile, recoveredEntries);
+      cleanEntriesMapRef.current.set(targetFile, cloneEntries(recoveredEntries));
 
       if (targetFile === selectedFile) {
         setEntries(recoveredEntries);
@@ -898,9 +930,9 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       if (!fileEntries) continue;
       try {
         const entriesToSave = fileEntries
-        .filter(e => !e.deleted)  
+        .filter(e => !e.deleted)
         .map(e => {
-          const { deleted, ...rest } = e;  
+          const { deleted, ...rest } = e;
           return rest;
         });
 
@@ -908,6 +940,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         const savedEntries = res.entries || entriesToSave;
 
         entriesMapRef.current.set(file, savedEntries);
+        cleanEntriesMapRef.current.set(file, cloneEntries(savedEntries));
         if (file === selectedFile) {
           setEntries(savedEntries);
         }
@@ -933,16 +966,26 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   // Load problems when switching to problems tab
   const loadProblems = useCallback(async () => {
     if (!projectId) return;
+    const request = ++problemRequestRef.current;
     setLoadingProblems(true);
     try {
-      const res = await fetchProjectProblems(projectId);
+      const res = await fetchProjectProblems(projectId, configFileName);
+      if (request !== problemRequestRef.current) return;
       setProblems(res.problems);
+      setProblemFilterKeys(res.filter_keys || []);
     } catch (err) {
-      setLocalError(normalizeError(err, '加载问题列表失败'));
+      if (request === problemRequestRef.current) setLocalError(normalizeError(err, '加载问题列表失败'));
     } finally {
-      setLoadingProblems(false);
+      if (request === problemRequestRef.current) setLoadingProblems(false);
     }
-  }, [projectId]);
+  }, [projectId, configFileName]);
+
+  useEffect(() => {
+    setProblemFilterKeys([]);
+    setProblems([]);
+    void loadProblems();
+    return () => { problemRequestRef.current += 1; };
+  }, [loadProblems]);
 
   const refreshVisibleData = useCallback(async () => {
     if (!projectId) return;
@@ -1013,26 +1056,34 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     setSearchQuery(problemType);
   }, []);
 
-  // Add problem keyword to retranslKey config
-  const handleAddToRetranslKey = useCallback(async (keyword: string) => {
-    if (!projectId || !configFileName) return;
+  const handleAddProblemKeyword = useCallback(async (keyword: string, field: 'retranslKey' | 'problemFilterKey') => {
+    if (!projectId || !configFileName || savingKeyword) return;
+    const label = field === 'problemFilterKey' ? '问题过滤' : '重翻关键字';
+    setSavingKeyword(true);
+    setLocalError(null);
     try {
       const res = await fetchProjectConfig(projectId, configFileName);
       const config = res.config;
       const common = (config.common as Record<string, unknown>) || {};
-      const existingKeys: string[] = Array.isArray(common.retranslKey) ? common.retranslKey : [];
+      const existingKeys = normalizeKeywordList(common[field]);
       if (existingKeys.includes(keyword)) {
-        setInfo(`「${keyword}」已在重翻关键字列表中`);
+        setInfo(`「${keyword}」已在${label}列表中`);
         return;
       }
-      common.retranslKey = [...existingKeys, keyword];
+      common[field] = [...existingKeys, keyword];
       config.common = common;
       await updateProjectConfig(projectId, { config, config_file_name: configFileName });
-      setInfo(`已将「${keyword}」加入重翻关键字`);
+      if (field === 'problemFilterKey') {
+        setProblemFilterKeys([...existingKeys, keyword]);
+        await Promise.allSettled([loadProblems(), runGlobalSearch()]);
+      }
+      setInfo(`已将「${keyword}」加入${label}`);
     } catch (err) {
-      setLocalError(normalizeError(err, '添加重翻关键字失败'));
+      setLocalError(normalizeError(err, `添加${label}失败`));
+    } finally {
+      setSavingKeyword(false);
     }
-  }, [projectId, configFileName]);
+  }, [projectId, configFileName, savingKeyword, loadProblems, runGlobalSearch]);
 
   const handleSelectFile = (file: string) => {
     if (file === selectedFile) return;
@@ -1067,6 +1118,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       // 清除已删除文件的 entriesMap 和 dirtyFiles
       for (const f of res.deleted_files) {
         entriesMapRef.current.delete(f);
+        cleanEntriesMapRef.current.delete(f);
       }
       setDirtyFiles((prev) => {
         const next = new Set(prev);
@@ -1416,10 +1468,11 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
               <div className="cache-search-options">
                 <label>
                   <input
-                  type="checkbox"
-                  className="cache-search-option-re"
-                  onChange={(e) => setSearchOptions({...searchOptions, re: e.target.checked})}
-                  disabled={searching}
+                    type="checkbox"
+                    className="cache-search-option-re"
+                    checked={searchOptions.re}
+                    onChange={(e) => setSearchOptions((current) => ({ ...current, re: e.target.checked }))}
+                    disabled={searching}
                   />正则匹配
                 </label>
               </div>
@@ -1603,8 +1656,23 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                           title={`编辑并加入重翻关键字`}
                           aria-label={`编辑并加入「${type}」到重翻关键字`}
                           aria-expanded={retranslEditor?.type === type}
+                          disabled={savingKeyword}
                         >
                           +
+                        </button>
+                        <button
+                          type="button"
+                          className="cache-problems-group__retransl cache-problems-group__filter"
+                          disabled={savingKeyword}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRetranslEditor(null);
+                            void handleAddProblemKeyword(type, 'problemFilterKey');
+                          }}
+                          title={`过滤「${type}」`}
+                          aria-label={`过滤「${type}」`}
+                        >
+                          -
                         </button>
                         {retranslEditor?.type === type && createPortal((
                           <div
@@ -1629,7 +1697,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                                   const kw = retranslEditor.draft.trim();
                                   if (!kw) return;
                                   setRetranslEditor(null);
-                                  void handleAddToRetranslKey(kw);
+                                  void handleAddProblemKeyword(kw, 'retranslKey');
                                 } else if (e.key === 'Escape') {
                                   e.preventDefault();
                                   setRetranslEditor(null);
@@ -1649,12 +1717,12 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                               <button
                                 type="button"
                                 className="retransl-popover__btn retransl-popover__btn--primary"
-                                disabled={!retranslEditor.draft.trim()}
+                                disabled={savingKeyword || !retranslEditor.draft.trim()}
                                 onClick={() => {
                                   const kw = retranslEditor.draft.trim();
                                   if (!kw) return;
                                   setRetranslEditor(null);
-                                  void handleAddToRetranslKey(kw);
+                                  void handleAddProblemKeyword(kw, 'retranslKey');
                                 }}
                               >
                                 加入

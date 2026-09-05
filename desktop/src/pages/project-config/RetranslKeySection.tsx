@@ -1,26 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Panel } from '../../components/Panel';
+import { normalizeKeywordList } from '../../lib/problemFilter';
 
 interface RetranslKeySectionProps {
   config: Record<string, unknown> | null;
   onChange: (keys: string[]) => void;
   onDirty: () => void;
+  field?: 'retranslKey' | 'problemFilterKey';
 }
 
-function readKeys(config: Record<string, unknown> | null): string[] {
+function readKeys(config: Record<string, unknown> | null, field: 'retranslKey' | 'problemFilterKey'): string[] {
   const common = (config?.common as Record<string, unknown>) || {};
-  const raw = common.retranslKey;
-  if (Array.isArray(raw)) {
-    return raw.map((k) => String(k ?? '').trim()).filter(Boolean);
-  }
-  if (typeof raw === 'string') {
-    return raw.split(/\r?\n/).map((k) => k.trim()).filter(Boolean);
-  }
-  return [];
+  return normalizeKeywordList(common[field]);
 }
 
-export function RetranslKeySection({ config, onChange, onDirty }: RetranslKeySectionProps) {
-  const keys = useMemo(() => readKeys(config), [config]);
+export function RetranslKeySection({ config, onChange, onDirty, field = 'retranslKey' }: RetranslKeySectionProps) {
+  const keys = useMemo(() => readKeys(config, field), [config, field]);
+  const isFilter = field === 'problemFilterKey';
 
   const [draft, setDraft] = useState('');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -91,8 +87,8 @@ export function RetranslKeySection({ config, onChange, onDirty }: RetranslKeySec
 
   return (
     <Panel
-      title="重翻关键字"
-      description="原文、译文、问题中命中这些关键字的句子会在下次启动时被重翻。"
+      title={isFilter ? '问题过滤关键字' : '重翻关键字'}
+      description={isFilter ? undefined : '原文、译文、问题中命中这些关键字的句子会在下次启动时被重翻。'}
     >
       <div className="retransl-key-section">
         <div className="retransl-key-section__add">
@@ -121,7 +117,7 @@ export function RetranslKeySection({ config, onChange, onDirty }: RetranslKeySec
 
         {keys.length === 0 ? (
           <div className="retransl-key-section__empty">
-            暂无重翻关键字。添加后，下次启动时命中这些关键字的句子会被重新翻译。
+            {isFilter ? '暂无过滤关键字' : '暂无重翻关键字。添加后，下次启动时命中这些关键字的句子会被重新翻译。'}
           </div>
         ) : (
           <ul className="retransl-key-section__list">
