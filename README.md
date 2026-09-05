@@ -48,6 +48,14 @@
   * **桌面版（推荐）**   
   从 [Release](https://github.com/XD2333/GalTransl/releases/) 下载最新版压缩包，解压后双击 `GalTransl Desktop.exe` 即可使用，**无需安装Python或任何依赖**。桌面端会自动启动后端服务。
    
+
+<details>
+<summary>
+
+### 开发环境配置（开发者/高级用户）
+
+</summary>
+
   * **命令行版（开发者/高级用户）**   
   如需使用命令行版本或参与开发：
 
@@ -55,14 +63,7 @@
   2. 安装 Python 3.11.9。 [下载](https://www.python.org/downloads/release/python-3119/)   
   **安装时勾选下方 add Python to path**
   3. 安装Python依赖：双击 `安装、更新依赖.bat`，或手动执行 `pip install -r requirements.txt`
-
-<details>
-<summary>
-
-### 桌面端开发模式
-
-</summary>
-
+     
 以下步骤适用于 Windows。从源码运行桌面端时，请先 clone 或下载本仓库源码，并在仓库根目录（包含 `run_desktop_dev.bat` 的目录）打开终端。
 
 **首次准备环境**
