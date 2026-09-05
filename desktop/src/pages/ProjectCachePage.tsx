@@ -1465,17 +1465,6 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
           {/* Tab: Search */}
           {sidebarTab === 'search' && (
             <div className="cache-search-panel">
-              <div className="cache-search-options">
-                <label>
-                  <input
-                    type="checkbox"
-                    className="cache-search-option-re"
-                    checked={searchOptions.re}
-                    onChange={(e) => setSearchOptions((current) => ({ ...current, re: e.target.checked }))}
-                    disabled={searching}
-                  />正则匹配
-                </label>
-              </div>
               <div className="cache-search-input-group">
                 <input
                   type="text"
@@ -1494,6 +1483,16 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                   <option value="dst">仅译文</option>
                   <option value="problem">仅问题</option>
                 </CustomSelect>
+                <label className="cache-search-regex-toggle" title="使用正则表达式搜索">
+                  <input
+                    type="checkbox"
+                    checked={searchOptions.re}
+                    onChange={(e) => setSearchOptions((current) => ({ ...current, re: e.target.checked }))}
+                    disabled={searching}
+                  />
+                  <span className="cache-search-regex-toggle__track" aria-hidden="true" />
+                  <span className="cache-search-regex-toggle__label">正则</span>
+                </label>
               </div>
 
               {/* Replace toggle + Search results summary */}

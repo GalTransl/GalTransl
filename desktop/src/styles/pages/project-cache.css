@@ -802,11 +802,13 @@
 
 .cache-search-input-group {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 
 .cache-search--global {
-  flex: 1;
+  flex: 1 1 150px;
   min-width: 0;
 }
 
@@ -877,17 +879,77 @@
   border-radius: var(--radius-card);
 }
 
-.cache-search-options {
+.cache-search-regex-toggle {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  font-size: 15px;
-  color: var(--color-text);
+  gap: 6px;
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 2px 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-strong);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1;
   cursor: pointer;
   white-space: nowrap;
-  padding: 2px var(--space-2);
-  border-radius: var(--radius-control);
-  transition: all var(--transition-fast);
+  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+}
+
+.cache-search-regex-toggle:hover {
+  border-color: var(--color-primary-soft);
+  background: var(--color-neutral-soft);
+  color: var(--color-text);
+}
+
+.cache-search-regex-toggle:has(input:focus-visible) {
+  outline: 2px solid var(--color-primary-soft);
+  outline-offset: 1px;
+}
+
+.cache-search-regex-toggle:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.cache-search-regex-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cache-search-regex-toggle__track {
+  position: relative;
+  width: 24px;
+  height: 14px;
+  flex: 0 0 24px;
+  border-radius: 999px;
+  background: var(--color-line-strong);
+  transition: background var(--transition-fast);
+}
+
+.cache-search-regex-toggle__track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-surface-strong);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.22);
+  transition: transform var(--transition-fast);
+}
+
+.cache-search-regex-toggle input:checked + .cache-search-regex-toggle__track {
+  background: var(--color-primary);
+}
+
+.cache-search-regex-toggle input:checked + .cache-search-regex-toggle__track::after {
+  transform: translateX(10px);
 }
 
 .cache-search--replace {
