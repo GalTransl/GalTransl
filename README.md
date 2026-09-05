@@ -69,7 +69,7 @@
 **首次准备环境**
 
 1. 安装 [Python 3.11.9](https://www.python.org/downloads/release/python-3119/) 和 [Node.js LTS](https://nodejs.org/)，确保 `python`、`node`、`npm` 已加入 PATH。
-2. 若要启动原生桌面窗口，安装 [Rust](https://www.rust-lang.org/tools/install)，使用默认的 Windows MSVC 工具链；同时安装 [Visual Studio 2022 或 Build Tools](https://visualstudio.microsoft.com/downloads/)，勾选“使用 C++ 的桌面开发”，包含 MSVC 编译工具和 Windows SDK。桌面窗口还需要 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)，Windows 通常已预装。
+2. 若要启动原生桌面窗口，安装 [Rust](https://www.rust-lang.org/tools/install)，使用默认的 Windows MSVC 工具链；安装Rust时会提示安装VC工具链和SDK，要一并安装。
 3. 安装完成后重新打开终端，在仓库根目录执行以下命令，建立项目独立的 Python 环境并安装依赖：
 
 ```powershell
