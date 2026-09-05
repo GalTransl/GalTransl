@@ -15,6 +15,7 @@ import {
   type CacheEntry,
   type CacheSearchResult,
   type CacheSearchField,
+  type CacheSearchOptions,
   type CacheReplaceField,
   type CacheReplaceFileDetail,
   type ProblemEntry,
@@ -34,6 +35,16 @@ import { filterProblemText, normalizeKeywordList } from '../lib/problemFilter';
 /** 兼容读取缓存字段：优先新key，回退旧key */
 function src(e: CacheEntry): string { return e.post_src || e.post_jp || ''; }
 function dst(e: CacheEntry): string { return e.pre_dst || e.pre_zh || ''; }
+function cloneEntries(entries: CacheEntry[]): CacheEntry[] {
+  return entries.map((entry) => ({
+    ...entry,
+    ...(Array.isArray(entry.name) ? { name: [...entry.name] } : {}),
+  }));
+}
+function entriesMatch(left: CacheEntry[], right: CacheEntry[]): boolean {
+  const normalize = (items: CacheEntry[]) => items.map(({ deleted, ...entry }) => entry);
+  return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
+}
 function escapeControlChars(text: string): string {
   return text.replace(/\r/g, '\\r').replace(/\n/g, '\\n');
 }
@@ -84,7 +95,7 @@ function CacheEntryCard({
   filename: string;
   projectId: string;
   onEntryChange: (index: number, field: keyof CacheEntry, value: string) => void;
-  onDelete: (index: number) => void;
+  onDelete: (deleteMode: boolean, index: number) => void;
   highlightQuery?: string;
   nameDict: Map<string, string>;
 }) {
@@ -98,7 +109,7 @@ function CacheEntryCard({
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <article className={`cache-card ${hasProblem ? 'cache-card--problem' : ''}`} data-cache-index={entry.index}>
+    <article className={`cache-card ${hasProblem ? 'cache-card--problem' : ''} ${entry.deleted ? 'cache-card--pre-deleted' : ''}`} data-cache-index={entry.index}>
       <div className="cache-card__row">
         <span className="cache-card__field-label">#{entry.index}</span>
         {speaker !== '—' && (
@@ -124,10 +135,10 @@ function CacheEntryCard({
         <button
           type="button"
           className="cache-card__delete"
-          onClick={() => onDelete(entry.index)}
-          title="删除此条"
+          onClick={() => onDelete(!entry.deleted, entry.index)}
+          title={entry.deleted ? "撤销删除" : "删除此条"}
         >
-          ✕
+          {entry.deleted ? '↩' : '✕'}
         </button>
       </div>
 
@@ -300,6 +311,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   const [entries, setEntries] = useState<CacheEntry[]>([]);
   /** 每个文件的条目缓存（含未保存修改），mount 后指向当前项目桶中的 Map */
   const entriesMapRef = useRef<Map<string, CacheEntry[]>>(new Map());
+  /** 每个文件最近一次从后端读取或保存后的干净快照，用于准确维护 dirty 状态 */
+  const cleanEntriesMapRef = useRef<Map<string, CacheEntry[]>>(new Map());
   /** 有未保存修改的文件集合 */
   const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(new Set());
 
@@ -313,10 +326,12 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     selectedFile: string | null;
     dirtyFiles: Set<string>;
     entries: Map<string, CacheEntry[]>;
+    cleanEntries: Map<string, CacheEntry[]>;
     scrollPositions: Map<string, number>;
     sidebarTab: SidebarTab;
     searchQuery: string;
     searchField: CacheSearchField;
+    searchOptions: CacheSearchOptions;
     searchResults: CacheSearchResult[];
     searchTotal: number;
     replaceQuery: string;
@@ -413,6 +428,9 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   // Global search state
   const [searchQuery, setSearchQuery] = useState('');
   const [searchField, setSearchField] = useState<CacheSearchField>('all');
+  const [searchOptions, setSearchOptions] = useState<CacheSearchOptions>({
+    re: false
+  });
   const [searchResults, setSearchResults] = useState<CacheSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchTotal, setSearchTotal] = useState(0);
@@ -524,10 +542,12 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         selectedFile: null,
         dirtyFiles: new Set(),
         entries: new Map(),
+        cleanEntries: new Map(),
         scrollPositions: new Map(),
         sidebarTab: 'files',
         searchQuery: '',
         searchField: 'all',
+        searchOptions: { re: false },
         searchResults: [],
         searchTotal: 0,
         replaceQuery: '',
@@ -540,10 +560,12 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       prevBucket.selectedFile = selectedFile;
       prevBucket.dirtyFiles = dirtyFiles;
       prevBucket.entries = entriesMapRef.current;
+      prevBucket.cleanEntries = cleanEntriesMapRef.current;
       prevBucket.scrollPositions = scrollPositionsRef.current;
       prevBucket.sidebarTab = sidebarTab;
       prevBucket.searchQuery = searchQuery;
       prevBucket.searchField = searchField;
+      prevBucket.searchOptions = searchOptions;
       prevBucket.searchResults = searchResults;
       prevBucket.searchTotal = searchTotal;
       prevBucket.replaceQuery = replaceQuery;
@@ -558,6 +580,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     if (existing) {
       // 恢复：ref 指向桶内共享 Map，state 恢复至桶内快照
       entriesMapRef.current = existing.entries;
+      cleanEntriesMapRef.current = existing.cleanEntries;
       scrollPositionsRef.current = existing.scrollPositions;
       setCacheFiles(existing.cacheFiles);
       setCacheDir(existing.cacheDir);
@@ -566,6 +589,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setSidebarTab(existing.sidebarTab);
       setSearchQuery(existing.searchQuery);
       setSearchField(existing.searchField);
+      setSearchOptions(existing.searchOptions);
       setSearchResults(existing.searchResults);
       setSearchTotal(existing.searchTotal);
       setSelectedSearchIdx(-1);
@@ -581,6 +605,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     } else {
       // 全新项目：重置 refs 与可见 state，然后拉取文件列表
       entriesMapRef.current = new Map();
+      cleanEntriesMapRef.current = new Map();
       scrollPositionsRef.current = new Map();
       setCacheFiles([]);
       setCacheDir('');
@@ -590,6 +615,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setSidebarTab('files');
       setSearchQuery('');
       setSearchField('all');
+      setSearchOptions({ re: false });
       setSearchResults([]);
       setSearchTotal(0);
       setSelectedSearchIdx(-1);
@@ -621,6 +647,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         if (!cancelled) {
           setEntries(res.entries);
           entriesMapRef.current.set(selectedFile, res.entries);
+          cleanEntriesMapRef.current.set(selectedFile, cloneEntries(res.entries));
         }
       })
       .catch((err) => {
@@ -641,7 +668,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     }
     setSearching(true);
     try {
-      const res = await searchCache(projectId, searchQuery.trim(), searchField, 500, configFileName);
+      const res = await searchCache(projectId, searchQuery.trim(), searchField, searchOptions, 500, configFileName);
       setSearchResults(res.results);
       setSearchTotal(res.total);
       setSelectedSearchIdx(-1);
@@ -652,7 +679,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     } finally {
       setSearching(false);
     }
-  }, [projectId, configFileName, searchField, searchQuery]);
+  }, [projectId, configFileName, searchField, searchQuery, searchOptions]);
 
   const refreshCurrentFile = useCallback(async () => {
     if (!projectId || !selectedFile || dirtyFiles.has(selectedFile)) return;
@@ -660,6 +687,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     try {
       const res = await fetchCacheFile(projectId, selectedFile);
       entriesMapRef.current.set(selectedFile, res.entries);
+      cleanEntriesMapRef.current.set(selectedFile, cloneEntries(res.entries));
       setEntries(res.entries);
     } catch (err) {
       setLocalError(normalizeError(err, '刷新缓存内容失败'));
@@ -750,6 +778,13 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
   }, [runGlobalSearch, searchQuery]);
 
+  // Immediate search (on search options change)
+  useEffect(() => {
+    if (!searchQuery.trim()) return;
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    void runGlobalSearch();
+  }, [runGlobalSearch, searchOptions]);
+
   // Scroll selected search result into view
   useEffect(() => {
     if (selectedSearchIdx < 0 || !searchResultsRef.current) return;
@@ -777,27 +812,34 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   const withProblems = visibleEntries.filter((e) => e.problem).length;
 
   const handleEntryChange = (index: number, field: keyof CacheEntry, value: string) => {
-    setEntries((prev) => {
-      const next = prev.map((e) => (e.index === index ? { ...e, [field]: value } : e));
-      if (selectedFile) entriesMapRef.current.set(selectedFile, next);
-      return next;
-    });
+    const next = entries.map((e) => (e.index === index ? { ...e, [field]: value, deleted: false } : e));
+    setEntries(next);
+    if (selectedFile) entriesMapRef.current.set(selectedFile, next);
     if (selectedFile) {
-      setDirtyFiles((prev) => new Set(prev).add(selectedFile));
+      const clean = cleanEntriesMapRef.current.get(selectedFile);
+      setDirtyFiles((current) => {
+        const updated = new Set(current);
+        if (clean && entriesMatch(next, clean)) updated.delete(selectedFile);
+        else updated.add(selectedFile);
+        return updated;
+      });
     }
     setInfo(null);
   };
 
-  const handleDelete = (index: number) => {
+  // 不实际删除，处理删除和恢复
+  const handleDeleteAndRecover = (deleteMode: boolean, index: number) => {
     if (!selectedFile) return;
-    setEntries((prev) => {
-      const next = prev.filter((e) => e.index !== index);
-      // Re-index remaining entries
-      const reindexed = next.map((e, i) => ({ ...e, index: i }));
-      entriesMapRef.current.set(selectedFile, reindexed);
-      return reindexed;
+    const next = entries.map((e) => e.index === index ? { ...e, deleted: deleteMode } : e);
+    setEntries(next);
+    entriesMapRef.current.set(selectedFile, next);
+    const clean = cleanEntriesMapRef.current.get(selectedFile);
+    setDirtyFiles((current) => {
+      const updated = new Set(current);
+      if (clean && entriesMatch(next, clean)) updated.delete(selectedFile);
+      else updated.add(selectedFile);
+      return updated;
     });
-    setDirtyFiles((prev) => new Set(prev).add(selectedFile));
     setInfo(null);
   };
 
@@ -810,9 +852,19 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     setLocalError(null);
     setInfo(null);
     try {
-      const res = await saveCacheFile(projectId, targetFile, targetEntries, configFileName);
-      const savedEntries = res.entries || targetEntries;
+      // 处理脏条目并重新索引
+      const entriesToSave = targetEntries
+        .filter(e => !e.deleted)
+        .map(e => {
+          const { deleted, ...rest } = e;
+          return rest;
+        });
+
+      const res = await saveCacheFile(projectId, targetFile, entriesToSave, configFileName);
+      const savedEntries = res.entries || entriesToSave;
+
       entriesMapRef.current.set(targetFile, savedEntries);
+      cleanEntriesMapRef.current.set(targetFile, cloneEntries(savedEntries));
       // 如果保存的是当前打开的文件，同步 entries 状态
       if (targetFile === selectedFile) {
         setEntries(savedEntries);
@@ -830,6 +882,40 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     }
   };
 
+  // 撤销修改，即读取最近文件覆盖当前缓存，并清除 dirty 标记
+  const handleRecover = async (filename?: string) => {
+    const targetFile = filename || selectedFile;
+    if (!targetFile || !dirtyFiles.has(targetFile)) return;
+
+    setLoadingEntries(true);
+    setLocalError(null);
+    setInfo(null);
+
+    try {
+      const res = await fetchCacheFile(projectId, targetFile);
+      const recoveredEntries = res.entries;
+
+      entriesMapRef.current.set(targetFile, recoveredEntries);
+      cleanEntriesMapRef.current.set(targetFile, cloneEntries(recoveredEntries));
+
+      if (targetFile === selectedFile) {
+        setEntries(recoveredEntries);
+      }
+
+      setDirtyFiles((prev) => {
+        const next = new Set(prev);
+        next.delete(targetFile);
+        return next;
+      });
+
+      setInfo(`已撤销 "${targetFile}" 本次修改`);
+    } catch (err) {
+      setLocalError(normalizeError(err, '撤销文件失败'));
+    } finally {
+      setLoadingEntries(false);
+    }
+  };
+
   /** 保存所有有修改的文件 */
   const handleSaveAll = async () => {
     const filesToSave = Array.from(dirtyFiles);
@@ -843,9 +929,18 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       const fileEntries = entriesMapRef.current.get(file);
       if (!fileEntries) continue;
       try {
-        const res = await saveCacheFile(projectId, file, fileEntries, configFileName);
-        const savedEntries = res.entries || fileEntries;
+        const entriesToSave = fileEntries
+        .filter(e => !e.deleted)
+        .map(e => {
+          const { deleted, ...rest } = e;
+          return rest;
+        });
+
+        const res = await saveCacheFile(projectId, file, entriesToSave, configFileName);
+        const savedEntries = res.entries || entriesToSave;
+
         entriesMapRef.current.set(file, savedEntries);
+        cleanEntriesMapRef.current.set(file, cloneEntries(savedEntries));
         if (file === selectedFile) {
           setEntries(savedEntries);
         }
@@ -1023,6 +1118,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       // 清除已删除文件的 entriesMap 和 dirtyFiles
       for (const f of res.deleted_files) {
         entriesMapRef.current.delete(f);
+        cleanEntriesMapRef.current.delete(f);
       }
       setDirtyFiles((prev) => {
         const next = new Set(prev);
@@ -1369,6 +1465,17 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
           {/* Tab: Search */}
           {sidebarTab === 'search' && (
             <div className="cache-search-panel">
+              <div className="cache-search-options">
+                <label>
+                  <input
+                    type="checkbox"
+                    className="cache-search-option-re"
+                    checked={searchOptions.re}
+                    onChange={(e) => setSearchOptions((current) => ({ ...current, re: e.target.checked }))}
+                    disabled={searching}
+                  />正则匹配
+                </label>
+              </div>
               <div className="cache-search-input-group">
                 <input
                   type="text"
@@ -1647,6 +1754,9 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
               description={`${total} 句 · ${translated} 已翻译 · ${withProblems} 有问题`}
               actions={(
                 <div className="cache-panel-actions">
+                  <Button onClick={() => void handleRecover()} disabled={loadingEntries || !dirty}>
+                    {loadingEntries ? '撤销中…' : '撤销'}
+                  </Button>
                   <Button onClick={() => void handleSave()} disabled={saving || !dirty}>
                     {saving ? '保存中…' : '保存'}
                   </Button>
@@ -1689,7 +1799,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                       filename={selectedFile}
                       projectId={projectId}
                       onEntryChange={handleEntryChange}
-                      onDelete={handleDelete}
+                      onDelete={handleDeleteAndRecover}
                       highlightQuery={searchTerm || searchQuery}
                       nameDict={nameDict}
                     />

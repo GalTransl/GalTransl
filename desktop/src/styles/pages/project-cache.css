@@ -480,6 +480,11 @@
   background: color-mix(in srgb, var(--color-warning-soft) 15%, var(--color-surface-strong));
 }
 
+.cache-card--pre-deleted {
+    opacity: 0.5;
+    background: color-mix(in srgb, var(--color-neutral-soft) 30%, var(--color-surface-strong));
+  }
+
 .cache-card--highlight {
   animation: cache-card-flash 2s ease-out;
 }
@@ -870,6 +875,19 @@
   background: var(--color-surface-base);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-card);
+}
+
+.cache-search-options {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 15px;
+  color: var(--color-text);
+  cursor: pointer;
+  white-space: nowrap;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-control);
+  transition: all var(--transition-fast);
 }
 
 .cache-search--replace {

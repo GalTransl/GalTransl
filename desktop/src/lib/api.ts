@@ -114,6 +114,8 @@ export type CacheEntry = {
   proofread_zh?: string;
   post_zh_preview?: string;
   post_dst_preview?: string;
+  // 用于标记条目是否被删除（前端状态，不会发送到后端）
+  deleted?: boolean;
 };
 
 export type CacheSearchField = 'all' | 'src' | 'dst' | 'problem';
@@ -137,6 +139,10 @@ export type CacheSearchResponse = {
 };
 
 export type CacheReplaceField = 'src' | 'dst' | 'all';
+
+export type CacheSearchOptions = {
+  re: boolean;
+};
 
 export type CacheReplaceFileDetail = {
   filename: string;
@@ -559,6 +565,7 @@ export async function searchCache(
   projectId: string,
   query: string,
   field: CacheSearchField = 'all',
+  options: CacheSearchOptions = { re: false },
   maxResults = 500,
   configFileName = 'config.yaml',
 ) {
@@ -567,7 +574,7 @@ export async function searchCache(
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, field, max_results: maxResults, config_file_name: configFileName }),
+      body: JSON.stringify({ query, field, options, max_results: maxResults, config_file_name: configFileName }),
     },
   );
 }

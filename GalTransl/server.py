@@ -1185,10 +1185,24 @@ def build_handler(registry: JobRegistry):
                     payload = self._read_json_body()
                     query = str(payload.get("query", "")).strip()
                     field = str(payload.get("field", "all")).strip()  # all | src | dst
+                    options = payload.get("options", {})
                     max_results = min(int(payload.get("max_results", 500)), 2000)
+                    if not isinstance(options, dict):
+                        self._send_json({"error": "options must be an object"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    option_re = bool(options.get("re", False))
                     filter_keys = RUNTIME_PROGRESS_CACHE.get_problem_filter_keys(
                         project_dir, str(payload.get("config_file_name", "config.yaml"))
                     )
+
+                    pattern = None
+                    if option_re:
+                        import re
+                        try:
+                            pattern = re.compile(query)
+                        except re.error as exc:
+                            self._send_json({"error": f"invalid regular expression: {exc}"}, status=HTTPStatus.BAD_REQUEST)
+                            return
 
                     if not query:
                         self._send_json({"results": [], "total": 0})
@@ -1214,9 +1228,15 @@ def build_handler(registry: JobRegistry):
                                     src_text = e.get("post_src", "") or e.get("post_jp", "") or e.get("pre_src", "") or e.get("pre_jp", "")
                                     dst_text = e.get("pre_dst", "") or e.get("pre_zh", "") or e.get("proofread_dst", "") or e.get("proofread_zh", "")
                                     problem_text = filter_problem_text(e.get("problem", ""), filter_keys)
-                                    match_src = query.lower() in src_text.lower()
-                                    match_dst = query.lower() in dst_text.lower()
-                                    match_problem = query.lower() in problem_text.lower()
+                                    if pattern is not None:
+                                        match_src = bool(pattern.search(src_text))
+                                        match_dst = bool(pattern.search(dst_text))
+                                        match_problem = bool(pattern.search(problem_text))
+                                    else:
+                                        query_lower = query.lower()
+                                        match_src = query_lower in src_text.lower()
+                                        match_dst = query_lower in dst_text.lower()
+                                        match_problem = query_lower in problem_text.lower()
                                     if field == "src" and not match_src:
                                         continue
                                     if field == "dst" and not match_dst:
