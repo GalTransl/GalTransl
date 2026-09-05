@@ -29,6 +29,7 @@ import {
   getCacheBrowserFontSizePreference,
   updateProjectConfig } from '../lib/api';
 import { normalizeError } from '../lib/errors';
+import { filterProblemText, normalizeKeywordList } from '../lib/problemFilter';
 
 /** 兼容读取缓存字段：优先新key，回退旧key */
 function src(e: CacheEntry): string { return e.post_src || e.post_jp || ''; }
@@ -422,6 +423,9 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   // Problems tab state
   const [problems, setProblems] = useState<ProblemEntry[]>([]);
   const [loadingProblems, setLoadingProblems] = useState(false);
+  const [problemFilterKeys, setProblemFilterKeys] = useState<string[]>([]);
+  const [savingKeyword, setSavingKeyword] = useState(false);
+  const problemRequestRef = useRef(0);
   // Retransl keyword popover editor
   const [retranslEditor, setRetranslEditor] = useState<{
     type: string;
@@ -637,7 +641,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     }
     setSearching(true);
     try {
-      const res = await searchCache(projectId, searchQuery.trim(), searchField);
+      const res = await searchCache(projectId, searchQuery.trim(), searchField, 500, configFileName);
       setSearchResults(res.results);
       setSearchTotal(res.total);
       setSelectedSearchIdx(-1);
@@ -648,7 +652,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     } finally {
       setSearching(false);
     }
-  }, [projectId, searchField, searchQuery]);
+  }, [projectId, configFileName, searchField, searchQuery]);
 
   const refreshCurrentFile = useCallback(async () => {
     if (!projectId || !selectedFile || dirtyFiles.has(selectedFile)) return;
@@ -753,7 +757,10 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     el?.scrollIntoView({ block: 'nearest' });
   }, [selectedSearchIdx]);
 
-  const filteredEntries = entries.filter((e) => {
+  const visibleEntries = entries.map((entry) => ({
+    ...entry, problem: filterProblemText(entry.problem, problemFilterKeys),
+  }));
+  const filteredEntries = visibleEntries.filter((e) => {
     if (filterProblems && !e.problem) return false;
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
@@ -767,7 +774,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
 
   const total = entries.length;
   const translated = entries.filter((e) => dst(e)).length;
-  const withProblems = entries.filter((e) => e.problem).length;
+  const withProblems = visibleEntries.filter((e) => e.problem).length;
 
   const handleEntryChange = (index: number, field: keyof CacheEntry, value: string) => {
     setEntries((prev) => {
@@ -864,16 +871,26 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   // Load problems when switching to problems tab
   const loadProblems = useCallback(async () => {
     if (!projectId) return;
+    const request = ++problemRequestRef.current;
     setLoadingProblems(true);
     try {
-      const res = await fetchProjectProblems(projectId);
+      const res = await fetchProjectProblems(projectId, configFileName);
+      if (request !== problemRequestRef.current) return;
       setProblems(res.problems);
+      setProblemFilterKeys(res.filter_keys || []);
     } catch (err) {
-      setLocalError(normalizeError(err, '加载问题列表失败'));
+      if (request === problemRequestRef.current) setLocalError(normalizeError(err, '加载问题列表失败'));
     } finally {
-      setLoadingProblems(false);
+      if (request === problemRequestRef.current) setLoadingProblems(false);
     }
-  }, [projectId]);
+  }, [projectId, configFileName]);
+
+  useEffect(() => {
+    setProblemFilterKeys([]);
+    setProblems([]);
+    void loadProblems();
+    return () => { problemRequestRef.current += 1; };
+  }, [loadProblems]);
 
   const refreshVisibleData = useCallback(async () => {
     if (!projectId) return;
@@ -944,26 +961,34 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     setSearchQuery(problemType);
   }, []);
 
-  // Add problem keyword to retranslKey config
-  const handleAddToRetranslKey = useCallback(async (keyword: string) => {
-    if (!projectId || !configFileName) return;
+  const handleAddProblemKeyword = useCallback(async (keyword: string, field: 'retranslKey' | 'problemFilterKey') => {
+    if (!projectId || !configFileName || savingKeyword) return;
+    const label = field === 'problemFilterKey' ? '问题过滤' : '重翻关键字';
+    setSavingKeyword(true);
+    setLocalError(null);
     try {
       const res = await fetchProjectConfig(projectId, configFileName);
       const config = res.config;
       const common = (config.common as Record<string, unknown>) || {};
-      const existingKeys: string[] = Array.isArray(common.retranslKey) ? common.retranslKey : [];
+      const existingKeys = normalizeKeywordList(common[field]);
       if (existingKeys.includes(keyword)) {
-        setInfo(`「${keyword}」已在重翻关键字列表中`);
+        setInfo(`「${keyword}」已在${label}列表中`);
         return;
       }
-      common.retranslKey = [...existingKeys, keyword];
+      common[field] = [...existingKeys, keyword];
       config.common = common;
       await updateProjectConfig(projectId, { config, config_file_name: configFileName });
-      setInfo(`已将「${keyword}」加入重翻关键字`);
+      if (field === 'problemFilterKey') {
+        setProblemFilterKeys([...existingKeys, keyword]);
+        await Promise.allSettled([loadProblems(), runGlobalSearch()]);
+      }
+      setInfo(`已将「${keyword}」加入${label}`);
     } catch (err) {
-      setLocalError(normalizeError(err, '添加重翻关键字失败'));
+      setLocalError(normalizeError(err, `添加${label}失败`));
+    } finally {
+      setSavingKeyword(false);
     }
-  }, [projectId, configFileName]);
+  }, [projectId, configFileName, savingKeyword, loadProblems, runGlobalSearch]);
 
   const handleSelectFile = (file: string) => {
     if (file === selectedFile) return;
@@ -1524,8 +1549,23 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                           title={`编辑并加入重翻关键字`}
                           aria-label={`编辑并加入「${type}」到重翻关键字`}
                           aria-expanded={retranslEditor?.type === type}
+                          disabled={savingKeyword}
                         >
                           +
+                        </button>
+                        <button
+                          type="button"
+                          className="cache-problems-group__retransl cache-problems-group__filter"
+                          disabled={savingKeyword}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRetranslEditor(null);
+                            void handleAddProblemKeyword(type, 'problemFilterKey');
+                          }}
+                          title={`过滤「${type}」`}
+                          aria-label={`过滤「${type}」`}
+                        >
+                          -
                         </button>
                         {retranslEditor?.type === type && createPortal((
                           <div
@@ -1550,7 +1590,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                                   const kw = retranslEditor.draft.trim();
                                   if (!kw) return;
                                   setRetranslEditor(null);
-                                  void handleAddToRetranslKey(kw);
+                                  void handleAddProblemKeyword(kw, 'retranslKey');
                                 } else if (e.key === 'Escape') {
                                   e.preventDefault();
                                   setRetranslEditor(null);
@@ -1570,12 +1610,12 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                               <button
                                 type="button"
                                 className="retransl-popover__btn retransl-popover__btn--primary"
-                                disabled={!retranslEditor.draft.trim()}
+                                disabled={savingKeyword || !retranslEditor.draft.trim()}
                                 onClick={() => {
                                   const kw = retranslEditor.draft.trim();
                                   if (!kw) return;
                                   setRetranslEditor(null);
-                                  void handleAddToRetranslKey(kw);
+                                  void handleAddProblemKeyword(kw, 'retranslKey');
                                 }}
                               >
                                 加入

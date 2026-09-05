@@ -1232,6 +1232,14 @@
   border-color: rgba(47, 111, 235, 0.42);
 }
 
+.cache-problems-group__filter {
+  right: 34px;
+}
+
+.cache-problems-group__retransl:disabled {
+  cursor: wait;
+}
+
 .cache-problems-group__retransl:active {
   transform: translateY(1px);
 }
