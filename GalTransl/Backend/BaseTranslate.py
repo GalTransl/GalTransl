@@ -1,8 +1,10 @@
 import asyncio
 import httpx
+from datetime import timedelta
 from opencc import OpenCC
 from typing import Optional, List
 from collections import deque
+from contextvars import ContextVar
 from threading import Lock
 from GalTransl.COpenAI import COpenAITokenPool, COpenAIToken
 from GalTransl.ConfigHelper import CProxyPool, build_httpx_proxy_kwargs
@@ -15,7 +17,7 @@ from GalTransl.CSentense import CSentense, CTransList
 from GalTransl.Cache import save_transCache_to_json
 from GalTransl.Dictionary import CGptDict
 from GalTransl.Utils import load_guideline_file, fix_quotes2
-from openai import RateLimitError, AsyncOpenAI
+from openai import RateLimitError, AsyncOpenAI, APIConnectionError, APITimeoutError
 from openai import DefaultAioHttpClient
 from openai._types import NOT_GIVEN
 import random
@@ -25,12 +27,17 @@ from GalTransl.TerminalOutput import should_print_translation_logs
 
 try:
     from pyreqwest.compatibility.httpx import HttpxTransport
+    from pyreqwest.client import ClientBuilder as PyreqwestClientBuilder
 except Exception:
     HttpxTransport = None
+    PyreqwestClientBuilder = None
 
 
 _GLOBAL_RPM_LOCK = Lock()
 _GLOBAL_NEXT_ALLOWED_TS = 0.0
+_CHATBOT_STATE: ContextVar[tuple[bool, str] | None] = ContextVar(
+    "galtransl_chatbot_state", default=None
+)
 
 
 class RequestHealthMetrics:
@@ -186,6 +193,9 @@ class BaseTranslate:
 
         self._current_temp_type = ""
         self._shutdown_done = False
+        self._client_failure_counts: dict[int, int] = {}
+        self._retired_clients: list[AsyncOpenAI] = []
+        self._client_recycle_lock = asyncio.Lock()
 
         if self.target_lang == "Simplified_Chinese":
             self.opencc = OpenCC("t2s.json")
@@ -279,17 +289,18 @@ class BaseTranslate:
 
     def init_chatbot(self, eng_type, config: CProjectConfig):
         section_name = "OpenAI-Compatible"
+        backend_config = config.getBackendConfigSection(section_name)
 
-        self.api_timeout = config.getBackendConfigSection(section_name).get(
-            "apiTimeout", 300
+        self.api_timeout = backend_config.get("apiTimeout", 300)
+        self.apiErrorWait = backend_config.get("apiErrorWait", "auto")
+        self.tokenStrategy = backend_config.get("tokenStrategy", "random")
+        self.stream = backend_config.get("stream", True)
+        # Bound each logical API request so a dead endpoint cannot keep a
+        # worker retrying forever. This is a total-call limit, including the
+        # first call; callers may override it explicitly in ask_chatbot().
+        self.max_api_retries = self._coerce_positive_int(
+            backend_config.get("maxApiRetries", 6), 6
         )
-        self.apiErrorWait = config.getBackendConfigSection(section_name).get(
-            "apiErrorWait", "auto"
-        )
-        self.tokenStrategy = config.getBackendConfigSection(section_name).get(
-            "tokenStrategy", "random"
-        )
-        self.stream = config.getBackendConfigSection(section_name).get("stream", True)
 
         change_prompt = CProjectConfig.getProjectConfig(config)["common"].get(
             "gpt.change_prompt", "no"
@@ -331,39 +342,9 @@ class BaseTranslate:
         else:
             proxy_addr = None
 
-        trust_env = False  # 不使用系统代理
-        proxy_kwargs = build_httpx_proxy_kwargs(proxy_addr)
         self.client_list = []
         for token in self.tokenProvider.get_available_token():
-            http_client = None
-
-            use_pyreqwest_transport = HttpxTransport is not None and not proxy_kwargs
-            if use_pyreqwest_transport:
-                try:
-                    http_client = httpx.AsyncClient(
-                        trust_env=trust_env,
-                        limits=httpx.Limits(
-                            max_keepalive_connections=None, max_connections=None
-                        ),
-                        transport=HttpxTransport(),
-                    )
-                except Exception as e:
-                    LOGGER.warning(
-                        f"初始化 pyreqwest HttpxTransport 失败，回退 DefaultAioHttpClient: {e}"
-                    )
-
-            if http_client is None:
-                if HttpxTransport is not None and proxy_kwargs:
-                    LOGGER.warning(
-                        "检测到代理配置，当前回退到 DefaultAioHttpClient（pyreqwest transport 路径未启用代理注入）"
-                    )
-                http_client = DefaultAioHttpClient(
-                    trust_env=trust_env,
-                    limits=httpx.Limits(
-                        max_keepalive_connections=None, max_connections=None
-                    ),
-                    **proxy_kwargs,
-                )
+            http_client = self._build_http_client(proxy_addr)
 
             client = AsyncOpenAI(
                 api_key=token.token,
@@ -374,6 +355,122 @@ class BaseTranslate:
             self.client_list.append((client, token))
 
         pass
+
+    @staticmethod
+    def _build_http_client(proxy_addr: Optional[str] = None):
+        """Build a bounded HTTP client and expire idle connections regularly."""
+        proxy_kwargs = build_httpx_proxy_kwargs(proxy_addr)
+        if HttpxTransport is not None and not proxy_kwargs:
+            try:
+                pyreqwest_client = None
+                if PyreqwestClientBuilder is not None:
+                    pyreqwest_client = (
+                        PyreqwestClientBuilder()
+                        .pool_idle_timeout(timedelta(seconds=30))
+                        .pool_max_idle_per_host(20)
+                        .build()
+                    )
+                return httpx.AsyncClient(
+                    trust_env=False,
+                    limits=httpx.Limits(
+                        max_keepalive_connections=20,
+                        max_connections=100,
+                        keepalive_expiry=30.0,
+                    ),
+                    transport=HttpxTransport(pyreqwest_client)
+                    if pyreqwest_client is not None
+                    else HttpxTransport(),
+                )
+            except Exception as exc:
+                LOGGER.warning(
+                    "初始化 pyreqwest HttpxTransport 失败，回退 DefaultAioHttpClient: %s",
+                    exc,
+                )
+        elif HttpxTransport is not None and proxy_kwargs:
+            LOGGER.warning(
+                "检测到代理配置，当前回退到 DefaultAioHttpClient（pyreqwest transport 路径未启用代理注入）"
+            )
+
+        return DefaultAioHttpClient(
+            trust_env=False,
+            limits=httpx.Limits(
+                max_keepalive_connections=20,
+                max_connections=100,
+                keepalive_expiry=30.0,
+            ),
+            **proxy_kwargs,
+        )
+
+    @staticmethod
+    def _is_transport_error(error: BaseException) -> bool:
+        """Return whether an error is likely caused by a broken connection.
+
+        API status errors (bad request, auth, quota, etc.) must not cause us to
+        churn clients. Connection and timeout errors are safe to recover from
+        by replacing the underlying HTTP client.
+        """
+        return isinstance(
+            error,
+            (
+                APIConnectionError,
+                APITimeoutError,
+                httpx.TransportError,
+                TimeoutError,
+                ConnectionError,
+                OSError,
+            ),
+        )
+
+    async def _recycle_failed_client(
+        self, failed_client: AsyncOpenAI, token: COpenAIToken
+    ) -> Optional[AsyncOpenAI]:
+        """Replace one unhealthy client without interrupting other workers."""
+        if self._shutdown_done:
+            return None
+        async with self._client_recycle_lock:
+            current = next(
+                (
+                    pair
+                    for pair in self.client_list
+                    if pair[0] is failed_client and pair[1] is token
+                ),
+                None,
+            )
+            if current is None:
+                return None
+
+            proxy_addr = None
+            if self.proxyProvider:
+                try:
+                    proxy_addr = self.proxyProvider.getProxy().addr
+                except Exception:
+                    proxy_addr = None
+            http_client = self._build_http_client(proxy_addr)
+
+            replacement = AsyncOpenAI(
+                api_key=token.token,
+                base_url=token.domain,
+                max_retries=0,
+                http_client=http_client,
+            )
+            self.client_list = [
+                (replacement if client is failed_client else client, pair_token)
+                for client, pair_token in self.client_list
+            ]
+            self._retired_clients.append(failed_client)
+            LOGGER.warning("连续网络错误，已刷新 API 客户端 [%s]", token.maskToken())
+            return replacement
+
+    def _get_chatbot_state(self) -> tuple[bool, str]:
+        """Get request-local metadata, with compatibility fallback for tests/plugins."""
+        return _CHATBOT_STATE.get() or (
+            getattr(self, "_last_chatbot_was_stream", False),
+            getattr(self, "_last_chatbot_model_name", ""),
+        )
+
+    @staticmethod
+    def _clear_chatbot_state() -> None:
+        _CHATBOT_STATE.set(None)
 
     @staticmethod
     def _is_stop_requested(pj_config) -> bool:
@@ -596,26 +693,83 @@ class BaseTranslate:
             else:
                 dic_prompt = ""
 
-            num, trans_result = await self.translate(
-                trans_list_split,
-                dic_prompt,
-                proofread=proofread,
-                filename=filename,
-            )
-
-            if num <= 0 and not trans_result:
-                LOGGER.warning(
-                    f"[{filename}:{self._build_idx_tip(trans_list_split)}] translate returned no progress, retrying once"
-                )
-                self._check_stop_requested()
-                await asyncio.sleep(1)
-                # 重试一次
+            try:
                 num, trans_result = await self.translate(
                     trans_list_split,
                     dic_prompt,
                     proofread=proofread,
                     filename=filename,
                 )
+            except Exception as exc:
+                from GalTransl.Service import JobCancelledError
+
+                if isinstance(exc, JobCancelledError):
+                    raise
+                LOGGER.error(
+                    f"[{filename}:{self._build_idx_tip(trans_list_split)}]批次翻译失败，跳过该批次：{exc}"
+                )
+                try:
+                    from GalTransl.server import record_runtime_error
+
+                    record_runtime_error(
+                        getattr(
+                            self.pj_config,
+                            "runtime_project_dir",
+                            self.pj_config.getProjectDir(),
+                        ),
+                        kind="api",
+                        message=str(exc),
+                        filename=filename,
+                        index_range=self._build_idx_tip(trans_list_split),
+                        level="error",
+                    )
+                except Exception:
+                    pass
+                trans_result = []
+                self._append_parse_failure_fallback_results(
+                    trans_list_split,
+                    0,
+                    trans_result,
+                    "",
+                    proofread=proofread,
+                    translate_failed_prefix="(Failed)",
+                    translate_problem_message="翻译失败",
+                )
+                num = len(trans_result)
+
+            if num <= 0 and not trans_result:
+                LOGGER.warning(
+                    f"[{filename}:{self._build_idx_tip(trans_list_split)}] translate returned no progress, retrying once"
+                )
+                self._check_stop_requested()
+                await self._interruptible_sleep(1)
+                # 重试一次
+                try:
+                    num, trans_result = await self.translate(
+                        trans_list_split,
+                        dic_prompt,
+                        proofread=proofread,
+                        filename=filename,
+                    )
+                except Exception as exc:
+                    from GalTransl.Service import JobCancelledError
+
+                    if isinstance(exc, JobCancelledError):
+                        raise
+                    LOGGER.error(
+                        f"[{filename}:{self._build_idx_tip(trans_list_split)}]重试批次失败，跳过该批次：{exc}"
+                    )
+                    trans_result = []
+                    self._append_parse_failure_fallback_results(
+                        trans_list_split,
+                        0,
+                        trans_result,
+                        "",
+                        proofread=proofread,
+                        translate_failed_prefix="(Failed)",
+                        translate_problem_message="翻译失败",
+                    )
+                    num = len(trans_result)
 
             if num <= 0 and not trans_result:
                 LOGGER.error(
@@ -737,7 +891,16 @@ class BaseTranslate:
         stream_line_callback=None,
         max_retry_count: Optional[int] = None,
     ):
+        if max_retry_count is None:
+            max_retry_count = getattr(self, "max_api_retries", None)
+        if max_retry_count is not None:
+            max_retry_count = self._coerce_positive_int(max_retry_count, 6)
+
+        # api_try_count controls token rotation and preserves the caller's
+        # existing base offset. api_attempts is independent so parse retries
+        # do not accidentally consume the API attempt budget.
         api_try_count = base_try_count
+        api_attempts = 0
         client: AsyncOpenAI
         token: COpenAIToken
         client, token = random.choices(self.client_list, k=1)[0]
@@ -771,6 +934,9 @@ class BaseTranslate:
                 is_stream=stream if stream != NOT_GIVEN else token.stream
                 self._last_chatbot_was_stream = bool(is_stream)
                 self._last_chatbot_model_name = getattr(token, "model_name", "")
+                _CHATBOT_STATE.set(
+                    (bool(is_stream), getattr(token, "model_name", ""))
+                )
                 LOGGER.debug(f"Call {token.domain} withs token {token.maskToken()}")
 
                 await self._wait_for_global_rpm_slot()
@@ -888,9 +1054,23 @@ class BaseTranslate:
                     time.monotonic() - request_started,
                     is_rate_limited=False,
                 )
+                getattr(self, "_client_failure_counts", {}).pop(id(client), None)
                 return result, token
             except Exception as e:
                 is_rate_limited = isinstance(e, RateLimitError)
+                if BaseTranslate._is_transport_error(e):
+                    failure_counts = getattr(self, "_client_failure_counts", None)
+                    if failure_counts is not None:
+                        client_key = id(client)
+                        failure_counts[client_key] = failure_counts.get(client_key, 0) + 1
+                        if failure_counts[client_key] >= 3:
+                            try:
+                                replacement = await self._recycle_failed_client(client, token)
+                                if replacement is not None:
+                                    client = replacement
+                            except Exception:
+                                LOGGER.debug("刷新失败的 API 客户端时出错", exc_info=True)
+                            failure_counts.pop(client_key, None)
                 self._record_request_health(
                     time.monotonic() - request_started,
                     is_rate_limited=is_rate_limited,
@@ -901,9 +1081,10 @@ class BaseTranslate:
                     raise
 
                 api_try_count += 1
-                if max_retry_count is not None and api_try_count >= max_retry_count:
+                api_attempts += 1
+                if max_retry_count is not None and api_attempts >= max_retry_count:
                     raise RuntimeError(
-                        f"ask_chatbot reached retry limit ({max_retry_count})"
+                        f"ask_chatbot reached attempt limit ({max_retry_count})"
                     ) from e
 
                 # gemini no_candidates
@@ -913,7 +1094,7 @@ class BaseTranslate:
                     sleep_time = self.apiErrorWait + random.random()
                 else:
                     # https://aws.amazon.com/cn/blogs/architecture/exponential-backoff-and-jitter/
-                    sleep_time = 2 ** min(api_try_count, 6)
+                    sleep_time = 2 ** min(api_attempts, 6)
                     sleep_time = random.randint(0, sleep_time)
 
                 if len(self.client_list) > 1:
@@ -967,7 +1148,7 @@ class BaseTranslate:
                             kind="api",
                             message=message_text,
                             filename=raw_file_name,
-                            retry_count=api_try_count,
+                            retry_count=api_attempts,
                             model=getattr(token, "model_name", ""),
                             sleep_seconds=float(sleep_time),
                             level="warning",
@@ -985,7 +1166,13 @@ class BaseTranslate:
             return
         self._shutdown_done = True
 
-        for client, _ in getattr(self, "client_list", []):
+        clients = [client for client, _ in getattr(self, "client_list", [])]
+        clients.extend(getattr(self, "_retired_clients", []))
+        seen_clients: set[int] = set()
+        for client in clients:
+            if id(client) in seen_clients:
+                continue
+            seen_clients.add(id(client))
             if client is None:
                 continue
 
@@ -1013,6 +1200,7 @@ class BaseTranslate:
                             pass
                 except Exception:
                     pass
+        self._retired_clients.clear()
 
     def translate(self, trans_list: CTransList, gptdict=""):
         pass

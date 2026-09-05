@@ -14,6 +14,8 @@ backendSpecific:
     stream: true # 流式请求，一般不用修改除非接口不支持流式[True/False]
     apiTimeout: 300 # 请求超时时间，单位秒
     apiErrorWait: auto # 发生API Error时的等待时间，包括频率限制。auto将自动适应[auto/0-120]
+    maxApiRetries: 6 # 单个批次最多调用API次数，达到上限后标记失败并继续后续批次。[1-100]
+    genDicMaxApiRetries: 6 # GenDic单个分片最多调用API次数。[1-100]
 
   SakuraLLM: # (Sakura/Galtransl)
     endpoints:
