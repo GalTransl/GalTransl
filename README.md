@@ -56,7 +56,12 @@
   **安装时勾选下方 add Python to path**
   3. 安装Python依赖：双击 `安装、更新依赖.bat`，或手动执行 `pip install -r requirements.txt`
 
+<details>
+<summary>
+
 ### 桌面端开发模式
+
+</summary>
 
 以下步骤适用于 Windows。从源码运行桌面端时，请先 clone 或下载本仓库源码，并在仓库根目录（包含 `run_desktop_dev.bat` 的目录）打开终端。
 
@@ -92,6 +97,8 @@ npm.cmd --prefix desktop ci
 - `.venv` 和依赖只需首次创建、安装。更新源码后，如果依赖有变化，重新执行上面的 Python 依赖安装命令和 `npm.cmd --prefix desktop ci`。
 - 如果出现 `ModuleNotFoundError`，检查是否已将依赖安装到仓库的 `.venv` 中；启动脚本不会自动安装 Python 依赖。
 - 启动前确保 `12333` 和 `1420` 端口未被其他实例占用。退出时在后端、前端两个开发控制台分别按 `Ctrl+C` 停止服务，再关闭控制台；只关闭桌面窗口不会停止单独运行的 Python 后端。
+
+</details>
 
 ## 实用工具
 | 名称 | 说明 |
