@@ -37,7 +37,8 @@
 * 2023.6：v1初版发布
 
 ## 导航
-* [环境准备](https://github.com/XD2333/GalTransl#环境准备)：环境与软件的安装   
+* [环境准备](https://github.com/XD2333/GalTransl#环境准备)：环境与软件的安装
+* [桌面端开发模式](#桌面端开发模式)：从源码准备环境并启动桌面端或浏览器开发页面
 * [上手教程](https://github.com/XD2333/GalTransl#上手教程)：全流程介绍如何制作一个机翻补丁，**只想看怎么使用本工具的话，可以直接跳转第2章的2.2节**   
 * [配置文件与翻译引擎设置](https://github.com/XD2333/GalTransl#配置文件与翻译引擎设置)：本篇详细介绍各个翻译引擎API的调用与配置方式。   
 * [GalTransl核心功能介绍](https://github.com/XD2333/GalTransl#galtransl核心功能介绍)：介绍GPT字典、缓存、普通字典、找问题等功能。
@@ -54,7 +55,43 @@
   2. 安装 Python 3.11.9。 [下载](https://www.python.org/downloads/release/python-3119/)   
   **安装时勾选下方 add Python to path**
   3. 安装Python依赖：双击 `安装、更新依赖.bat`，或手动执行 `pip install -r requirements.txt`
-  4. （桌面端开发）安装 Node.js，在 `desktop` 目录执行 `npm install`，然后运行 `run_desktop_dev.bat`
+
+### 桌面端开发模式
+
+以下步骤适用于 Windows。从源码运行桌面端时，请先 clone 或下载本仓库源码，并在仓库根目录（包含 `run_desktop_dev.bat` 的目录）打开终端。
+
+**首次准备环境**
+
+1. 安装 [Python 3.11.9](https://www.python.org/downloads/release/python-3119/) 和 [Node.js LTS](https://nodejs.org/)，确保 `python`、`node`、`npm` 已加入 PATH。
+2. 若要启动原生桌面窗口，安装 [Rust](https://www.rust-lang.org/tools/install)，使用默认的 Windows MSVC 工具链；同时安装 [Visual Studio 2022 或 Build Tools](https://visualstudio.microsoft.com/downloads/)，勾选“使用 C++ 的桌面开发”，包含 MSVC 编译工具和 Windows SDK。桌面窗口还需要 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)，Windows 通常已预装。
+3. 安装完成后重新打开终端，在仓库根目录执行以下命令，建立项目独立的 Python 环境并安装依赖：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+npm.cmd --prefix desktop ci
+```
+
+**日常启动**
+
+双击仓库根目录的 `run_desktop_dev.bat`，或在终端执行：
+
+```powershell
+.\run_desktop_dev.bat
+```
+
+启动脚本会自动激活仓库中的 `.venv`，并识别默认安装在 `%USERPROFILE%\.cargo\bin` 下的 Cargo。脚本会分别打开 Python 后端和前端开发控制台：
+
+- 后端地址为 [http://127.0.0.1:12333](http://127.0.0.1:12333)，前端开发地址为 [http://127.0.0.1:1420/](http://127.0.0.1:1420/)。
+- 检测到 Cargo 时，会编译并打开 Tauri 桌面窗口。首次启动需要下载 Rust 依赖并编译，请等待控制台完成。
+- 未检测到 Cargo 时，会启动浏览器开发模式；手动打开前端地址即可。此模式无需安装 Rust、C++ 编译工具或 WebView2。
+- 前端代码修改后支持热更新，Rust 代码修改后会自动重新编译；修改 Python 后端代码后需要重启后端。
+
+**使用注意**
+
+- `.venv` 和依赖只需首次创建、安装。更新源码后，如果依赖有变化，重新执行上面的 Python 依赖安装命令和 `npm.cmd --prefix desktop ci`。
+- 如果出现 `ModuleNotFoundError`，检查是否已将依赖安装到仓库的 `.venv` 中；启动脚本不会自动安装 Python 依赖。
+- 启动前确保 `12333` 和 `1420` 端口未被其他实例占用。退出时在后端、前端两个开发控制台分别按 `Ctrl+C` 停止服务，再关闭控制台；只关闭桌面窗口不会停止单独运行的 Python 后端。
 
 ## 实用工具
 | 名称 | 说明 |
