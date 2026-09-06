@@ -527,6 +527,18 @@
 .cache-card__problem-slot {
   flex: 0 1 auto;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.cache-card__problem-item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .cache-card__pill {
@@ -560,6 +572,47 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cache-card__problem-filter {
+  position: absolute;
+  top: 50%;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(180, 83, 9, 0.3);
+  border-radius: 50%;
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) scale(0.88);
+  transition:
+    opacity var(--transition-fast),
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.cache-card__problem-item:hover .cache-card__problem-filter,
+.cache-card__problem-item:focus-within .cache-card__problem-filter {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(-50%) scale(1);
+}
+
+.cache-card__problem-filter:hover {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(180, 83, 9, 0.55);
 }
 
 .cache-card__expand,
@@ -1324,7 +1377,6 @@
   transform: translateY(1px);
 }
 
-.cache-problems-group__header:has(.cache-problems-group__retransl--active) .cache-problems-group__retransl,
 .cache-problems-group__retransl--active {
   opacity: 1 !important;
   pointer-events: auto !important;
@@ -1332,6 +1384,15 @@
   background: var(--color-primary);
   color: #fff;
   border-color: var(--color-primary);
+}
+
+.cache-problems-group__filter--active {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  transform: scale(1) !important;
+  background: var(--color-warning);
+  color: #fff;
+  border-color: var(--color-warning);
 }
 
 /* ── Retransl keyword popover (bubble) ── */

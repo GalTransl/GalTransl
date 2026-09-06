@@ -5,6 +5,21 @@ export function normalizeKeywordList(value: unknown): string[] {
     .map((item) => item.trim()).filter(Boolean))];
 }
 
+/** 按缓存问题使用的英文逗号拆分问题项。 */
+export function splitProblemItems(problem: string | undefined): string[] {
+  return String(problem || '')
+    .split(/,\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+/** 将问题文本拆成可单独过滤的问题类型。 */
+export function splitProblemTypes(problem: string | undefined): string[] {
+  return [...new Set(splitProblemItems(problem)
+    .map((part) => part.split('：')[0].trim())
+    .filter(Boolean))];
+}
+
 export function filterProblemText(problem: string | undefined, keys: string[]): string {
   const text = problem || '';
   if (keys.length === 0) return text;

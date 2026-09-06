@@ -30,7 +30,7 @@ import {
   getCacheBrowserFontSizePreference,
   updateProjectConfig } from '../lib/api';
 import { normalizeError } from '../lib/errors';
-import { filterProblemText, normalizeKeywordList } from '../lib/problemFilter';
+import { filterProblemText, normalizeKeywordList, splitProblemItems, splitProblemTypes } from '../lib/problemFilter';
 
 /** 兼容读取缓存字段：优先新key，回退旧key */
 function src(e: CacheEntry): string { return e.post_src || e.post_jp || ''; }
@@ -89,6 +89,7 @@ function CacheEntryCard({
   projectId,
   onEntryChange,
   onDelete,
+  onAddProblemFilter,
   highlightQuery,
   nameDict }: {
   entry: CacheEntry;
@@ -96,6 +97,7 @@ function CacheEntryCard({
   projectId: string;
   onEntryChange: (index: number, field: keyof CacheEntry, value: string) => void;
   onDelete: (deleteMode: boolean, index: number) => void;
+  onAddProblemFilter: (keyword: string) => void;
   highlightQuery?: string;
   nameDict: Map<string, string>;
 }) {
@@ -117,7 +119,23 @@ function CacheEntryCard({
         )}
         {hasProblem && (
           <div className="cache-card__problem-slot">
-            <span className="cache-card__pill cache-card__pill--problem" title={entry.problem}>{entry.problem}</span>
+            {splitProblemItems(entry.problem).map((problemItem, itemIndex) => (
+              <span key={`${problemItem}-${itemIndex}`} className="cache-card__problem-item">
+                <span className="cache-card__pill cache-card__pill--problem" title={problemItem}>{problemItem}</span>
+                <button
+                  type="button"
+                  className="cache-card__problem-filter"
+                  title={`过滤「${problemItem}」`}
+                  aria-label={`过滤「${problemItem}」`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onAddProblemFilter(problemItem);
+                  }}
+                >
+                  -
+                </button>
+              </span>
+            ))}
           </div>
         )}
         <div className="cache-card__spacer" />
@@ -448,6 +466,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   const [retranslEditor, setRetranslEditor] = useState<{
     type: string;
     draft: string;
+    action: 'retransl' | 'filter';
     anchor: { top: number; left: number };
   } | null>(null);
   const retranslPopoverRef = useRef<HTMLDivElement | null>(null);
@@ -1030,17 +1049,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   const problemStats = useMemo(() => {
     const stats: Record<string, ProblemEntry[]> = {};
     for (const p of problems) {
-      // 一个句子的 problem 字段可能包含多个以 ", " 分隔的问题，需分别计入各自类型
-      const rawProblems = String(p.problem || '')
-        .split(/,\s*/)
-        .map((s) => s.trim())
-        .filter(Boolean);
-      const types = new Set<string>();
-      for (const item of rawProblems) {
-        const type = item.split('：')[0].trim();
-        if (type) types.add(type);
-      }
-      if (types.size === 0) continue;
+      const types = splitProblemTypes(p.problem);
       for (const type of types) {
         if (!stats[type]) stats[type] = [];
         stats[type].push(p);
@@ -1084,6 +1093,13 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setSavingKeyword(false);
     }
   }, [projectId, configFileName, savingKeyword, loadProblems, runGlobalSearch]);
+
+  const submitProblemKeywordEditor = useCallback((editor: NonNullable<typeof retranslEditor>) => {
+    const keyword = editor.draft.trim();
+    if (!keyword) return;
+    setRetranslEditor(null);
+    void handleAddProblemKeyword(keyword, editor.action === 'filter' ? 'problemFilterKey' : 'retranslKey');
+  }, [handleAddProblemKeyword]);
 
   const handleSelectFile = (file: string) => {
     if (file === selectedFile) return;
@@ -1623,7 +1639,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
           {/* Tab: Problems */}
           {sidebarTab === 'problems' && (
             <div className="cache-problems-panel">
-              <div className="cache-problems-hint">点击+号加入重翻关键字</div>
+              <div className="cache-problems-hint">点击+号加入重翻关键字，点击-号过滤问题</div>
               {loadingProblems ? (
                 <div className="cache-problems-loading">加载问题中…</div>
               ) : problems.length === 0 ? (
@@ -1643,33 +1659,45 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                         <span className="cache-problems-group__count">{items.length}</span>
                         <button
                           type="button"
-                          className={`cache-problems-group__retransl${retranslEditor?.type === type ? ' cache-problems-group__retransl--active' : ''}`}
+                          className={`cache-problems-group__retransl${retranslEditor?.type === type && retranslEditor.action === 'retransl' ? ' cache-problems-group__retransl--active' : ''}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
                             const anchor = {
                               top: rect.top + rect.height / 2,
                               left: rect.right + 10 };
-                            setRetranslEditor((cur) => (cur && cur.type === type ? null : { type, draft: type, anchor }));
+                            setRetranslEditor((cur) => (
+                              cur && cur.type === type && cur.action === 'retransl'
+                                ? null
+                                : { type, draft: type, action: 'retransl', anchor }
+                            ));
                           }}
                           title={`编辑并加入重翻关键字`}
                           aria-label={`编辑并加入「${type}」到重翻关键字`}
-                          aria-expanded={retranslEditor?.type === type}
+                          aria-expanded={retranslEditor?.type === type && retranslEditor.action === 'retransl'}
                           disabled={savingKeyword}
                         >
                           +
                         </button>
                         <button
                           type="button"
-                          className="cache-problems-group__retransl cache-problems-group__filter"
+                          className={`cache-problems-group__retransl cache-problems-group__filter${retranslEditor?.type === type && retranslEditor.action === 'filter' ? ' cache-problems-group__filter--active' : ''}`}
                           disabled={savingKeyword}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setRetranslEditor(null);
-                            void handleAddProblemKeyword(type, 'problemFilterKey');
+                            const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                            const anchor = {
+                              top: rect.top + rect.height / 2,
+                              left: rect.right + 10 };
+                            setRetranslEditor((cur) => (
+                              cur && cur.type === type && cur.action === 'filter'
+                                ? null
+                                : { type, draft: type, action: 'filter', anchor }
+                            ));
                           }}
-                          title={`过滤「${type}」`}
-                          aria-label={`过滤「${type}」`}
+                          title={`编辑并过滤「${type}」`}
+                          aria-label={`编辑并加入「${type}」到问题过滤`}
+                          aria-expanded={retranslEditor?.type === type && retranslEditor.action === 'filter'}
                         >
                           -
                         </button>
@@ -1678,12 +1706,14 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                             ref={retranslPopoverRef}
                             className="retransl-popover"
                             role="dialog"
-                            aria-label="编辑重翻关键字"
+                            aria-label={retranslEditor.action === 'filter' ? '编辑问题过滤关键字' : '编辑重翻关键字'}
                             onClick={(e) => e.stopPropagation()}
                             style={{ top: retranslEditor.anchor.top, left: retranslEditor.anchor.left }}
                           >
                             <div className="retransl-popover__arrow" aria-hidden="true" />
-                            <label className="retransl-popover__label">加入重翻关键字</label>
+                            <label className="retransl-popover__label">
+                              {retranslEditor.action === 'filter' ? '加入问题过滤' : '加入重翻关键字'}
+                            </label>
                             <input
                               ref={retranslInputRef}
                               type="text"
@@ -1693,10 +1723,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter') {
                                   e.preventDefault();
-                                  const kw = retranslEditor.draft.trim();
-                                  if (!kw) return;
-                                  setRetranslEditor(null);
-                                  void handleAddProblemKeyword(kw, 'retranslKey');
+                                  submitProblemKeywordEditor(retranslEditor);
                                 } else if (e.key === 'Escape') {
                                   e.preventDefault();
                                   setRetranslEditor(null);
@@ -1716,13 +1743,10 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                               <button
                                 type="button"
                                 className="retransl-popover__btn retransl-popover__btn--primary"
-                                disabled={savingKeyword || !retranslEditor.draft.trim()}
-                                onClick={() => {
-                                  const kw = retranslEditor.draft.trim();
-                                  if (!kw) return;
-                                  setRetranslEditor(null);
-                                  void handleAddProblemKeyword(kw, 'retranslKey');
-                                }}
+                                 disabled={savingKeyword || !retranslEditor.draft.trim()}
+                                 onClick={() => {
+                                  submitProblemKeywordEditor(retranslEditor);
+                                 }}
                               >
                                 加入
                               </button>
@@ -1799,6 +1823,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                       projectId={projectId}
                       onEntryChange={handleEntryChange}
                       onDelete={handleDeleteAndRecover}
+                      onAddProblemFilter={(keyword) => { void handleAddProblemKeyword(keyword, 'problemFilterKey'); }}
                       highlightQuery={searchTerm || searchQuery}
                       nameDict={nameDict}
                     />
