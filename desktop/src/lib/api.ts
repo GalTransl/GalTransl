@@ -963,12 +963,33 @@ export const CACHE_BROWSER_FONT_SIZE_DEFAULT = 14;
 /** Custom event dispatched when the global default backend profile changes. */
 export const BACKEND_PROFILES_CHANGE_EVENT = 'galtransl:backend-profiles-change';
 export const DEFAULT_BACKEND_PROFILE_CHANGE_EVENT = 'galtransl:default-backend-profile-change';
+export const PROJECT_CONFIG_DIRTY_CHANGE_EVENT = 'galtransl:project-config-dirty-change';
 export const HOME_HISTORY_LIMIT_CHANGE_EVENT = 'galtransl:home-history-limit-change';
 export const HOME_JOB_LIMIT_CHANGE_EVENT = 'galtransl:home-job-limit-change';
 export const THEME_MODE_CHANGE_EVENT = 'galtransl:theme-mode-change';
 export const CUSTOM_BACKGROUND_CHANGE_EVENT = 'galtransl:custom-background-change';
 export const HIDE_BACKEND_CONSOLE_CHANGE_EVENT = 'galtransl:hide-backend-console-change';
 export const CACHE_BROWSER_FONT_SIZE_CHANGE_EVENT = 'galtransl:cache-browser-font-size-change';
+
+const dirtyProjectConfigDirs = new Set<string>();
+
+/** Return whether a project's config page has unsaved changes in this session. */
+export function isProjectConfigDirty(projectDir: string): boolean {
+  return Boolean(projectDir) && dirtyProjectConfigDirs.has(projectDir);
+}
+
+/** Update a project's unsaved state and notify persistent UI such as the sidebar. */
+export function setProjectConfigDirty(projectDir: string, dirty: boolean) {
+  if (!projectDir) return;
+  if (dirty) {
+    dirtyProjectConfigDirs.add(projectDir);
+  } else {
+    dirtyProjectConfigDirs.delete(projectDir);
+  }
+  window.dispatchEvent(new CustomEvent(PROJECT_CONFIG_DIRTY_CHANGE_EVENT, {
+    detail: { projectDir, dirty },
+  }));
+}
 
 function cloneBackendProfile(profile: Record<string, unknown>): Record<string, unknown> {
   return JSON.parse(JSON.stringify(profile ?? {})) as Record<string, unknown>;

@@ -125,6 +125,11 @@
   pointer-events: none;
 }
 
+.sidebar__project-config-notice-dot {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
 .sidebar__nav-item:hover {
   background: var(--color-neutral-soft);
   color: var(--color-text);
@@ -419,6 +424,17 @@
 .sidebar__project-child-label {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.sidebar__project-child-notice-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--color-danger);
+  box-shadow: 0 0 0 2px var(--color-surface-strong);
+  pointer-events: none;
 }
 
 .sidebar__project-child-separator {

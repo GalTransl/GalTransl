@@ -13,6 +13,7 @@ import {
   getDefaultBackendProfile,
   getSelectedBackendProfileDisplay,
   setSelectedBackendProfile,
+  setProjectConfigDirty,
   BACKEND_PROFILES_CHANGE_EVENT,
   DEFAULT_BACKEND_PROFILE_CHANGE_EVENT } from '../lib/api';
 import { normalizeError } from '../lib/errors';
@@ -52,6 +53,12 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   // Plugin lists from global plugin manager
   const [filePlugins, setFilePlugins] = useState<PluginInfo[]>([]);
   const [textPlugins, setTextPlugins] = useState<PluginInfo[]>([]);
+
+  useEffect(() => {
+    if (projectDir) {
+      setProjectConfigDirty(projectDir, dirty);
+    }
+  }, [projectDir, dirty]);
 
   // Ref for scroll-to-section
   const mainRef = useRef<HTMLDivElement>(null);

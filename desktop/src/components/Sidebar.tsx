@@ -8,6 +8,9 @@ import {
   fetchJob,
   fetchProjectRuntime,
   getBackendProfileNames,
+  isProjectConfigDirty,
+  PROJECT_CONFIG_DIRTY_CHANGE_EVENT,
+  setProjectConfigDirty,
   submitJob,
   type ProjectRuntimeResponse,
 } from '../lib/api';
@@ -102,6 +105,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
   const [translatingDirs, setTranslatingDirs] = useState<Record<string, boolean>>({});
   const [rebuildToast, setRebuildToast] = useState<string | null>(null);
   const [hasBackendProfiles, setHasBackendProfiles] = useState(() => getBackendProfileNames().length > 0);
+  const [dirtyConfigProjects, setDirtyConfigProjects] = useState<Record<string, boolean>>({});
   // Right-click context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; projectDir: string } | null>(null);
   const prevOpenProjectsRef = useRef<string[]>(openProjects);
@@ -118,9 +122,35 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
     return () => window.removeEventListener(BACKEND_PROFILES_CHANGE_EVENT, updateBackendProfileNotice);
   }, []);
 
+  useEffect(() => {
+    setDirtyConfigProjects(() => {
+      const next: Record<string, boolean> = {};
+      for (const projectDir of openProjects) {
+        next[projectDir] = isProjectConfigDirty(projectDir);
+      }
+      return next;
+    });
+  }, [openProjects]);
+
+  useEffect(() => {
+    const handleProjectConfigDirtyChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectDir?: string; dirty?: boolean }>).detail;
+      if (!detail?.projectDir || typeof detail.dirty !== 'boolean') return;
+      setDirtyConfigProjects((prev) => ({ ...prev, [detail.projectDir as string]: detail.dirty as boolean }));
+    };
+
+    window.addEventListener(PROJECT_CONFIG_DIRTY_CHANGE_EVENT, handleProjectConfigDirtyChange);
+    return () => window.removeEventListener(PROJECT_CONFIG_DIRTY_CHANGE_EVENT, handleProjectConfigDirtyChange);
+  }, []);
+
   // When a new project is opened, collapse all others and expand the new one
   useEffect(() => {
     const prev = prevOpenProjectsRef.current;
+    for (const projectDir of prev) {
+      if (!openProjects.includes(projectDir)) {
+        setProjectConfigDirty(projectDir, false);
+      }
+    }
     // Detect newly added project
     if (openProjects.length > prev.length) {
       const newProject = openProjects.find((p) => !prev.includes(p));
@@ -533,6 +563,9 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                         >
                           <span className="sidebar__project-child-icon">{tab.icon}</span>
                           <span className="sidebar__project-child-label">{tab.label}</span>
+                          {tab.path === 'config' && dirtyConfigProjects[projectDir] && (
+                            <span className="sidebar__project-child-notice-dot" aria-label="配置有未保存的修改" />
+                          )}
                         </NavLink>
                       ))}
                       <div className="sidebar__project-child-separator" />
@@ -570,6 +603,9 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                       title={tab.label}
                     >
                       <span className="sidebar__nav-icon">{tab.icon}</span>
+                      {tab.path === 'config' && dirtyConfigProjects[projectDir] && (
+                        <span className="sidebar__nav-notice-dot sidebar__project-config-notice-dot" aria-label="配置有未保存的修改" />
+                      )}
                     </NavLink>
                   ))}
                   <NavLink
