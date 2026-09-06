@@ -155,6 +155,17 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
+.inline-alert--warning {
+  border-color: rgba(245, 158, 11, 0.48);
+}
+
+.inline-alert--warning .inline-alert__icon {
+  background: linear-gradient(135deg, #f59e0b, #f97316);
+  box-shadow:
+    0 6px 14px -4px rgba(245, 158, 11, 0.52),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
 .inline-alert--fading {
   animation: inline-alert-fade-out 400ms ease-out forwards;
 }
@@ -212,6 +223,10 @@
 
 :root[data-theme='dark'] .inline-alert--success {
   border-color: rgba(80, 211, 141, 0.46);
+}
+
+:root[data-theme='dark'] .inline-alert--warning {
+  border-color: rgba(251, 191, 36, 0.54);
 }
 
 :root[data-theme='dark'] .inline-alert__dot {

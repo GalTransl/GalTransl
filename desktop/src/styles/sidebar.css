@@ -14,6 +14,13 @@
   z-index: 10;
 }
 
+/* The app layout gives all direct children a positioned z-index with a more
+   specific selector. Keep the sidebar (and its viewport-level toast host)
+   above page surfaces such as the translation cockpit. */
+.app-layout > .sidebar {
+  z-index: 30;
+}
+
 .sidebar--expanded {
   width: 220px;
 }
@@ -488,6 +495,9 @@
   right: 18px;
   z-index: 110;
   width: min(380px, calc(100vw - 36px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .sidebar__toast-host .inline-alert {

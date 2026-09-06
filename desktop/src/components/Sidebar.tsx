@@ -6,6 +6,7 @@ import {
   encodeProjectDir,
   decodeProjectDir,
   fetchJob,
+  fetchProjectProblems,
   fetchProjectRuntime,
   getBackendProfileNames,
   isProjectConfigDirty,
@@ -21,6 +22,13 @@ import logoUrl from '../assets/logo.png';
 const CONFIG_FILE_KEY = 'galtransl-config-file';
 const LAST_ACTIVE_PROJECT_KEY = 'galtransl-last-active-project';
 const OUTPUT_FOLDER_NAME = 'gt_output';
+
+type RebuildToast = {
+  id: number;
+  tone: 'error' | 'warning' | 'success';
+  title: string;
+  description: string;
+};
 
 function loadConfigFileName(projectDir: string): string {
   try {
@@ -103,7 +111,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
   const [rebuildingDirs, setRebuildingDirs] = useState<Record<string, boolean>>({});
   // Track which projects have active translation jobs (running or pending)
   const [translatingDirs, setTranslatingDirs] = useState<Record<string, boolean>>({});
-  const [rebuildToast, setRebuildToast] = useState<string | null>(null);
+  const [rebuildToasts, setRebuildToasts] = useState<RebuildToast[]>([]);
   const [hasBackendProfiles, setHasBackendProfiles] = useState(() => getBackendProfileNames().length > 0);
   const [dirtyConfigProjects, setDirtyConfigProjects] = useState<Record<string, boolean>>({});
   // Right-click context menu state
@@ -112,6 +120,16 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
   const confirmBubbleRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const expandAnimationFrameRef = useRef<Record<string, number>>({});
+  const rebuildToastIdRef = useRef(0);
+
+  const pushRebuildToast = useCallback((toast: Omit<RebuildToast, 'id'>) => {
+    const id = ++rebuildToastIdRef.current;
+    setRebuildToasts((prev) => [...prev, { ...toast, id }]);
+  }, []);
+
+  const dismissRebuildToast = useCallback((id: number) => {
+    setRebuildToasts((prev) => prev.filter((toast) => toast.id !== id));
+  }, []);
 
   useEffect(() => {
     const updateBackendProfileNotice = () => {
@@ -412,18 +430,62 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
         const status = await fetchJob(job.job_id);
         if (status.status === 'completed' || status.status === 'failed' || status.status === 'cancelled') {
           if (status.success) {
+            // Rebuild refreshes the cache's derived problem fields. Check the
+            // refreshed list so stale translation failures are called out.
+            let translationFailureCount = 0;
+            try {
+              const problems = await fetchProjectProblems(encodeProjectDir(projectDir), configFileName);
+              translationFailureCount = problems.problems.filter((entry) => String(entry.problem || '').includes('翻译失败')).length;
+            } catch {
+              // A problem-list refresh should not turn a successful build into
+              // a failure toast; the output can still be opened normally.
+            }
+
+            if (translationFailureCount > 0) {
+              pushRebuildToast({
+                tone: 'warning',
+                title: '仍有翻译失败问题',
+                description: `问题清单中还有 ${translationFailureCount} 条“翻译失败”问题未修复。`,
+              });
+            }
+
             const normalizedDir = projectDir.replace(/[\\/]+$/, '');
             const outputDir = `${normalizedDir}\\${OUTPUT_FOLDER_NAME}`;
-            await invoke('open_folder', { path: outputDir });
+            pushRebuildToast({
+              tone: 'success',
+              title: '构建完毕',
+              description: '输出文件已生成。',
+            });
+            try {
+              await invoke('open_folder', { path: outputDir });
+            } catch (err) {
+              pushRebuildToast({
+                tone: 'error',
+                title: '打开输出文件夹失败',
+                description: err instanceof Error ? err.message : String(err),
+              });
+            }
           } else {
-            setRebuildToast(`输出文件重建失败: ${status.error || '未知错误'}`);
+            pushRebuildToast({
+              tone: 'error',
+              title: '构建输出失败',
+              description: `输出文件重建失败: ${status.error || '未知错误'}`,
+            });
           }
           return;
         }
       }
-      setRebuildToast('输出文件重建超时');
+      pushRebuildToast({
+        tone: 'error',
+        title: '构建输出失败',
+        description: '输出文件重建超时',
+      });
     } catch (err) {
-      setRebuildToast(`输出文件重建出错: ${err instanceof Error ? err.message : String(err)}`);
+      pushRebuildToast({
+        tone: 'error',
+        title: '构建输出失败',
+        description: `输出文件重建出错: ${err instanceof Error ? err.message : String(err)}`,
+      });
     } finally {
       setRebuildingDirs((prev) => ({ ...prev, [projectDir]: false }));
     }
@@ -725,15 +787,18 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
         </div>
       )}
 
-      {rebuildToast ? (
+      {rebuildToasts.length > 0 ? (
         <div className="sidebar__toast-host" aria-live="assertive">
-          <InlineFeedback
-            tone="error"
-            title="构建输出失败"
-            description={rebuildToast}
-            autoDismiss={2800}
-            onDismiss={() => setRebuildToast(null)}
-          />
+          {rebuildToasts.map((toast) => (
+            <InlineFeedback
+              key={toast.id}
+              tone={toast.tone}
+              title={toast.title}
+              description={toast.description}
+              autoDismiss={toast.tone === 'error' ? 4200 : undefined}
+              onDismiss={() => dismissRebuildToast(toast.id)}
+            />
+          ))}
         </div>
       ) : null}
     </aside>
