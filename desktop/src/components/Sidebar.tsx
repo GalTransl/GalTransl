@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useRef, useState, type TransitionEvent } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
-import { encodeProjectDir, decodeProjectDir, submitJob, fetchJob, fetchProjectRuntime, type ProjectRuntimeResponse } from '../lib/api';
+import {
+  BACKEND_PROFILES_CHANGE_EVENT,
+  encodeProjectDir,
+  decodeProjectDir,
+  fetchJob,
+  fetchProjectRuntime,
+  getBackendProfileNames,
+  submitJob,
+  type ProjectRuntimeResponse,
+} from '../lib/api';
 import { loadLastProjectTab } from '../lib/projectTabMemory';
 import { InlineFeedback } from './page-state/InlineFeedback';
 import logoUrl from '../assets/logo.png';
@@ -92,12 +101,22 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
   // Track which projects have active translation jobs (running or pending)
   const [translatingDirs, setTranslatingDirs] = useState<Record<string, boolean>>({});
   const [rebuildToast, setRebuildToast] = useState<string | null>(null);
+  const [hasBackendProfiles, setHasBackendProfiles] = useState(() => getBackendProfileNames().length > 0);
   // Right-click context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; projectDir: string } | null>(null);
   const prevOpenProjectsRef = useRef<string[]>(openProjects);
   const confirmBubbleRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const expandAnimationFrameRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    const updateBackendProfileNotice = () => {
+      setHasBackendProfiles(getBackendProfileNames().length > 0);
+    };
+
+    window.addEventListener(BACKEND_PROFILES_CHANGE_EVENT, updateBackendProfileNotice);
+    return () => window.removeEventListener(BACKEND_PROFILES_CHANGE_EVENT, updateBackendProfileNotice);
+  }, []);
 
   // When a new project is opened, collapse all others and expand the new one
   useEffect(() => {
@@ -583,12 +602,13 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
         <NavLink
           to="/backend-profiles"
           className={({ isActive }) =>
-            `sidebar__nav-item ${isActive ? 'sidebar__nav-item--active' : ''}`
+            `sidebar__nav-item${!hasBackendProfiles ? ' sidebar__nav-item--notice' : ''} ${isActive ? 'sidebar__nav-item--active' : ''}`
           }
           title="翻译后端配置"
         >
           <span className="sidebar__nav-icon">🤖</span>
           {expanded && <span className="sidebar__nav-label">翻译后端配置</span>}
+          {!hasBackendProfiles && <span className="sidebar__nav-notice-dot" aria-label="尚未配置翻译后端" />}
         </NavLink>
 
         <NavLink

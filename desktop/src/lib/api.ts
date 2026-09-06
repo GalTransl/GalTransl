@@ -880,8 +880,12 @@ export async function createBackendProfile(name: string, profile: Record<string,
     throw new Error('profile name is required');
   }
   const profiles = readBackendProfilesStorage();
+  const isFirstProfile = Object.keys(profiles).length === 0;
   profiles[trimmedName] = cloneBackendProfile(profile);
   writeBackendProfilesStorage(profiles);
+  if (isFirstProfile) {
+    setDefaultBackendProfile(trimmedName);
+  }
   return { success: true, name: trimmedName };
 }
 

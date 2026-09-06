@@ -93,6 +93,7 @@
 }
 
 .sidebar__nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -109,6 +110,19 @@
     color var(--transition-fast);
   white-space: nowrap;
   overflow: hidden;
+}
+
+.sidebar__nav-notice-dot {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--color-surface-strong);
+  border-radius: 50%;
+  background: var(--color-danger);
+  box-sizing: content-box;
+  pointer-events: none;
 }
 
 .sidebar__nav-item:hover {

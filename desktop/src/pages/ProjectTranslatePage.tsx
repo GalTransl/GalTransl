@@ -18,6 +18,7 @@ import {
   fetchProjectRuntime,
   getSelectedTranslatorTemplate,
   getSelectedBackendProfileJobPayload,
+  getSelectedBackendProfileDisplay,
   resolveSelectedBackendProfile,
   setSelectedTranslatorTemplate,
   stopProjectTranslation,
@@ -113,6 +114,19 @@ function collectBackendModels(config: Record<string, unknown> | null): { backend
 
 function summarizeBackendUsage(projectDir: string, projectBackendConfig: Record<string, unknown> | null): BackendUsageSummary {
   const { name, profile } = resolveSelectedBackendProfile(projectDir);
+  const selectedProfileDisplay = getSelectedBackendProfileDisplay(projectDir);
+
+  // Following an empty global default means no backend is configured. The
+  // project config is only used when the project explicitly opts out of the
+  // global profile with "不使用（使用项目自身配置）".
+  if (!profile && selectedProfileDisplay === '__default__') {
+    return {
+      backend: '未配置后端',
+      model: '',
+      profile: '',
+    };
+  }
+
   const activeConfig = profile ?? projectBackendConfig;
   const { model } = collectBackendModels(activeConfig);
   return {
@@ -574,7 +588,9 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
       : { backend: '未选择项目', model: '未选择项目', profile: '' },
     [projectDir, projectBackendConfig],
   );
-  const backendDisplayText = `${backendUsageSummary.backend}:${backendUsageSummary.model}`;
+  const backendDisplayText = backendUsageSummary.model
+    ? `${backendUsageSummary.backend}:${backendUsageSummary.model}`
+    : backendUsageSummary.backend;
   const runtimeStage = (runtimeMatchesProject ? (runtime?.stage ?? '') : '').trim();
   const runtimeRetranslPendingCount = useMemo(
     () => (runtimeMatchesProject
