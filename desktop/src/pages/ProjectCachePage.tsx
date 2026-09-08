@@ -42,7 +42,7 @@ function cloneEntries(entries: CacheEntry[]): CacheEntry[] {
   }));
 }
 function entriesMatch(left: CacheEntry[], right: CacheEntry[]): boolean {
-  const normalize = (items: CacheEntry[]) => items.map(({ deleted, ...entry }) => entry);
+  const normalize = (items: CacheEntry[]) => items.map((entry) => ({ ...entry, deleted: !!entry.deleted }));
   return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
 }
 function escapeControlChars(text: string): string {
