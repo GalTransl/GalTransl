@@ -557,6 +557,12 @@
   white-space: nowrap;
 }
 
+.cache-card__pill--skip-check {
+  background: var(--color-neutral-soft);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
 .cache-card__expand,
 .cache-card__delete {
   flex-shrink: 0;
@@ -726,6 +732,30 @@
   cursor: default;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.cache-card__field--skip-check {
+  padding-top: var(--space-1);
+  border-top: 1px dashed var(--color-line);
+}
+
+.cache-card__checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--cache-font-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.cache-card__checkbox-label input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: var(--color-primary);
+}
+
+.cache-card__checkbox-label:hover {
+  color: var(--color-text);
 }
 
 .cache-panel-actions {

@@ -134,6 +134,9 @@ def _build_cache_obj(tran, post_save: bool = False):
     if post_save and tran.problem != "":
         cache_obj["problem"] = tran.problem
 
+    if getattr(tran, "skip_check", False):
+        cache_obj["skip_check"] = True
+
     cache_obj["trans_by"] = tran.trans_by
     cache_obj["proofread_by"] = tran.proofread_by
 
@@ -501,6 +504,8 @@ async def get_transCache_from_json(
             tran.doub_content = cache_dict[cache_key]["doub_content"]
         if "unknown_proper_noun" in cache_dict[cache_key]:
             tran.unknown_proper_noun = cache_dict[cache_key]["unknown_proper_noun"]
+        if "skip_check" in cache_dict[cache_key]:
+            tran.skip_check = bool(cache_dict[cache_key]["skip_check"])
 
         if tran.proofread_zh != "":
             tran.post_dst = tran.proofread_zh

@@ -104,6 +104,7 @@ export type CacheEntry = {
   trans_by?: string;
   proofread_by?: string;
   problem?: string;
+  skip_check?: boolean;
   trans_conf?: number;
   doub_content?: string;
   unknown_proper_noun?: string;
