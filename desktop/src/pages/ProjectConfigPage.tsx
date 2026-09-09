@@ -376,6 +376,13 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
                       return prev ? { ...prev, problemAnalyze: pa } : prev;
                     });
                   }}
+                  onThresholdChange={(value) => {
+                    setConfig((prev) => {
+                      const pa = { ...((prev?.problemAnalyze as Record<string, unknown>) || {}) };
+                      pa.avgSentenceLengthThreshold = value;
+                      return prev ? { ...prev, problemAnalyze: pa } : prev;
+                    });
+                  }}
                   onDirty={() => { setSaveSuccess(false); setDirty(true); }}
                 />
               )}

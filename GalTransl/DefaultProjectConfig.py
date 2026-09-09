@@ -95,6 +95,8 @@ problemAnalyze:
     - 独白男他 # 独白（无name）里出现“他”，排除“其他/他们/他人/他乡/他国/他日/他山”
     #- 引入英文 # 本来没有英文，译文引入了英文
     #- 比日文长严格 # 比日文长1倍以上就提醒
+    #- 单句过长 # 平均分句长度超过阈值（avgSentenceLengthThreshold），单句过长
+  avgSentenceLengthThreshold: 17 # 单句过长的分句长度阈值，默认17，建议范围15~25
 
 # 字典设置
 dictionary:

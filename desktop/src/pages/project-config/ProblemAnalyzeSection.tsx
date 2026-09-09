@@ -5,6 +5,7 @@ import { fetchProblemTypes, type ProblemTypeInfo } from '../../lib/api';
 interface ProblemAnalyzeSectionProps {
   config: Record<string, unknown> | null;
   onProblemListChange: (lines: string[]) => void;
+  onThresholdChange: (value: number) => void;
   onDirty: () => void;
 }
 
@@ -20,7 +21,24 @@ function readProblemList(config: Record<string, unknown> | null): string[] {
   return [];
 }
 
-export function ProblemAnalyzeSection({ config, onProblemListChange, onDirty }: ProblemAnalyzeSectionProps) {
+const DEFAULT_THRESHOLD = 17;
+// 十进制数字字面量：Number() 会接受 "0x10"/"Infinity" 等后端 float() 会拒的写法
+const DECIMAL_LITERAL_RE = /^[+-]?(\d+(\.\d+)?|\.\d+)([eE][+-]?\d+)?$/;
+
+// 与后端 CProjectConfig.getAvgSentenceLengthThreshold 守卫口径逐条对齐：
+// 拒布尔、拒非十进制字面量、拒非有限数、拒非整数、拒 <=0（统一回退 17）。
+function resolveThreshold(config: Record<string, unknown> | null): number {
+  const pa = (config?.problemAnalyze as Record<string, unknown>) || {};
+  const raw = pa.avgSentenceLengthThreshold;
+  if (typeof raw === 'boolean') return DEFAULT_THRESHOLD;
+  if (typeof raw === 'string' && !DECIMAL_LITERAL_RE.test(raw.trim())) return DEFAULT_THRESHOLD;
+  const f = Number(raw);
+  if (!Number.isFinite(f) || !Number.isInteger(f)) return DEFAULT_THRESHOLD;
+  if (f <= 0) return DEFAULT_THRESHOLD;
+  return f;
+}
+
+export function ProblemAnalyzeSection({ config, onProblemListChange, onThresholdChange, onDirty }: ProblemAnalyzeSectionProps) {
   const [problemTypes, setProblemTypes] = useState<ProblemTypeInfo[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -43,6 +61,37 @@ export function ProblemAnalyzeSection({ config, onProblemListChange, onDirty }: 
 
   const selected = useMemo(() => readProblemList(config), [config]);
   const selectedSet = useMemo(() => new Set(selected), [selected]);
+
+  const threshold = useMemo(() => resolveThreshold(config), [config]);
+
+  // 本地输入态：保留用户输入的原始字符串（含空串 / 非整数等中间态），
+  // 以便对阈值类型做实时检测与提示，而不是直接吞掉非法输入。
+  const [thresholdInput, setThresholdInput] = useState<string>(String(threshold));
+  const [thresholdError, setThresholdError] = useState<string | null>(null);
+
+  // 依赖必须是 config 而非 threshold：阈值数值未变时（如两个项目都默认 17）
+  // 依赖 threshold 会让上一项目的错误输入与提示残留到新项目。
+  useEffect(() => {
+    setThresholdInput(String(resolveThreshold(config)));
+    setThresholdError(null);
+  }, [config]);
+
+  const validateAndCommitThreshold = (raw: string) => {
+    setThresholdInput(raw);
+    const trimmed = raw.trim();
+    if (trimmed === '') {
+      setThresholdError('阈值不能为空，请输入大于 0 的整数');
+      return;
+    }
+    const v = Number(trimmed);
+    if (!Number.isInteger(v) || v <= 0) {
+      setThresholdError('阈值类型无效：请输入大于 0 的整数');
+      return;
+    }
+    setThresholdError(null);
+    onThresholdChange(v);
+    onDirty();
+  };
 
   // Keep entries the user already has in config even if backend doesn't list them
   // (e.g. future types or custom strings); render them at the bottom.
@@ -172,6 +221,29 @@ export function ProblemAnalyzeSection({ config, onProblemListChange, onDirty }: 
                 </li>
               ))}
             </ul>
+
+            <div className="problem-analyze-section__threshold">
+              <label className="problem-analyze-section__threshold-label">
+                <span>长句判定阈值（avgSentenceLengthThreshold）</span>
+                <input
+                  type="number"
+                  className={`problem-analyze-section__threshold-input${thresholdError ? ' problem-analyze-section__threshold-input--error' : ''}`}
+                  min={1}
+                  max={99}
+                  value={thresholdInput}
+                  onChange={(e) => validateAndCommitThreshold(e.target.value)}
+                  onBlur={(e) => validateAndCommitThreshold(e.target.value)}
+                />
+              </label>
+              <span className="problem-analyze-section__threshold-desc">
+                译文平均分句长度超过此值时标记为"单句过长"。默认 17，建议范围 15~25。
+              </span>
+              {thresholdError && (
+                <span className="problem-analyze-section__threshold-error">
+                  {thresholdError}
+                </span>
+              )}
+            </div>
           </>
         )}
       </div>
