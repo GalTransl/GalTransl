@@ -14,6 +14,7 @@ from asyncio import gather
 from tenacity import retry, stop_after_attempt, wait_fixed
 import httpx
 import inspect
+import math
 from httpx import AsyncClient, TimeoutException
 from time import time
 from typing import Optional
@@ -22,6 +23,10 @@ from yaml import safe_load
 from os import path, sep
 from enum import Enum
 from importlib.metadata import version
+import re
+
+# 十进制数字字面量：拒下划线（float("1_000")=1000）等 Python 收而前端拒的写法
+_DECIMAL_LITERAL_RE = re.compile(r"^[+-]?(\d+(\.\d+)?|\.\d+)([eE][+-]?\d+)?$")
 
 
 def build_httpx_proxy_kwargs(proxy_addr: Optional[str]) -> dict:
@@ -109,6 +114,7 @@ class CProblemType(Enum):
     语言不通 = 10
     缺控制符 = 11
     独白男他 = 12
+    单句过长 = 13
 
 
 class CProjectConfig:
@@ -240,6 +246,28 @@ class CProjectConfig:
         elif not self.projectConfig["problemAnalyze"]["arinashiDict"]:
             return {}
         return self.projectConfig["problemAnalyze"]["arinashiDict"]
+
+    def getAvgSentenceLengthThreshold(self) -> int:
+        # 用户手改 config.yaml 可能写成 "17"(字符串) 或 17.5(浮点)，需强制转 int。
+        # 守卫与前端 resolveThreshold 完全对齐：拒 bool、拒非数字、拒非整数、拒 <=0，统一回退 17。
+        raw = self.projectConfig.get("problemAnalyze", {}).get(
+            "avgSentenceLengthThreshold", 17
+        )
+        if isinstance(raw, bool):
+            return 17
+        if isinstance(raw, str) and not _DECIMAL_LITERAL_RE.match(raw.strip()):
+            return 17
+        try:
+            f = float(raw)
+        except (TypeError, ValueError, OverflowError):
+            return 17
+        # 非整数值（如 17.5）直接拒绝，与前端 Number.isInteger 口径一致
+        if not math.isfinite(f) or not f.is_integer():
+            return 17
+        val = int(f)
+        if val <= 0:
+            return 17
+        return val
 
     def refreshProxyEnabledFlag(self) -> None:
         self.keyValues["internals.enableProxy"] = has_usable_proxy_config(

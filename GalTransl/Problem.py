@@ -108,6 +108,14 @@ def find_problems(
         if CProblemType.丢失换行 in find_type and n_symbol != "":
             if pre_src.count(n_symbol) > post_dst.count(n_symbol):
                 problem_list.append("丢失换行")
+        if CProblemType.单句过长 in find_type and n_symbol != "":
+            n_number = post_dst.count(n_symbol)
+            # 去除换行符本身的字符长度，只计算纯文本
+            clean_len = len(post_dst) - n_number * len(n_symbol)
+            avg_sentence_length = clean_len / (n_number + 1)
+            threshold = projectConfig.getAvgSentenceLengthThreshold()
+            if avg_sentence_length > threshold:
+                problem_list.append("单句过长")
         if CProblemType.多加换行 in find_type and n_symbol != "":
             if pre_src.count(n_symbol) < post_dst.count(n_symbol):
                 problem_list.append("多加换行")
