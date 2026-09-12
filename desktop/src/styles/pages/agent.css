@@ -726,6 +726,29 @@
   animation: agent-pulse 1.1s ease-in-out infinite;
 }
 
+/* 倒计时：数字用等宽字形，避免秒数跳动时整行抖动。 */
+.agent-tool__state.is-countdown {
+  font-family: var(--agent-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* 等待进度条：贴在工具行下方，随剩余时间填充。 */
+.agent-tool__waitbar {
+  height: 3px;
+  margin: 2px 0 2px 26px;
+  border-radius: 999px;
+  background: var(--agent-tile);
+  overflow: hidden;
+}
+
+.agent-tool__waitbar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-primary);
+  transition: width 500ms linear;
+}
+
 .agent-tool__caret {
   flex: none;
   margin-left: 2px;

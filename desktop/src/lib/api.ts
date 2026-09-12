@@ -1429,6 +1429,9 @@ export type AgentEventType =
   | 'thought'
   | 'tool_call'
   | 'tool_result'
+  | 'wait_start'
+  | 'wait_tick'
+  | 'wait_end'
   | 'finish'
   | 'error'
   | 'stopped'
@@ -1449,6 +1452,12 @@ export type AgentEvent = {
   result?: unknown;
   error?: string;
   duration_ms?: number;
+  // wait_start / wait_tick / wait_end
+  seconds?: number;
+  total_ms?: number;
+  remaining_ms?: number;
+  elapsed_ms?: number;
+  interrupted?: boolean;
   // finish
   summary?: string;
   total_steps?: number;

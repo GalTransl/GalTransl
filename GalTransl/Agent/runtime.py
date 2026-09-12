@@ -52,7 +52,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
    c. 若缺少人名表，调用 get_name_table；若返回为空，先调用 start_translation(translator="dump-name") 生成人名表（dump-name 是导出 name 字段的专用 translator），完成后再次 get_name_table 查看结果，再调用 save_name_table 写回（若需要修正译名）；
    d. 若 GPT 字典为空且项目较大，可调用 start_translation(translator="GenDic") 自动生成 GPT 字典，并在该任务 completed 后通过 list_dict_files/read_dict 确认生成结果。
 3. **启动翻译**：字典就绪后，调用 start_translation(translator="<主翻译引擎>")。主翻译引擎从项目配置或 overview 中确认，常用值：ForGal-json / ForGal-tsv / ForNovel / sakura-v1.0 / galtransl-v3。一次只启动一个，项目已有运行中任务时不要重复提交。
-4. **跟进进度**：调用 get_progress 或 get_runtime 轮询。翻译任务 completed 后再进入下一步；running 时等待并周期性查询；failed 时读取 error 判断原因。
+4. **跟进进度**：调用 get_progress 或 get_runtime 轮询。翻译任务 completed 后再进入下一步；running 时用 wait 工具等待一段合理时间（如翻译任务就 wait minutes=1~3，短任务 wait seconds=30）后再查，不要连续空转轮询。等待期间界面会显示倒计时。
 5. **复核结果**：调用 list_problems 查看自动检测到的翻译问题（残留日文、字典使用不当、过长等）。用 read_cache 的 index 参数精确读取有问题的条目（如 list_problems 返回的 index，可直接 `index="33-40,50-60"` 一次取多条）浏览实际译文。
 6. **问题修复循环**：对能直接改译文的条目，用 patch_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuildr") 用更新后的字典重建结果（rebuildr 会跳过翻译、仅用译前/译后字典刷写结果 json）。patch_cache 与 rebuildr 可配合使用：先 patch 掉个别硬错，再 rebuildr 统一刷一遍字典相关的问题。重建/修改后再 list_problems 复核，直到问题数量显著下降。
 7. **完成**：当翻译完成、问题数可控时，用一段自然语言总结本次操作（做了什么、翻译进度、剩余问题建议），不要调用工具，直接输出总结即可结束。
@@ -438,6 +438,35 @@ AGENT_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "wait",
+            "description": (
+                "等待一段时间后继续。用于翻译/GenDic 等后台任务还在跑、需要隔一会儿再看进度的场景。"
+                "等待期间界面会显示倒计时；若用户期间点了停止，会立即中断等待。"
+                "单次最多等待 1800 秒（30 分钟）。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "seconds": {
+                        "type": "number",
+                        "description": "等待的秒数。与 minutes 二选一；两个都传时以二者之和为准。",
+                    },
+                    "minutes": {
+                        "type": "number",
+                        "description": "等待的分钟数。适合等待较久的翻译任务。",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "可选。等待原因，会显示在界面上，如 '等待翻译任务完成'。",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_progress",
             "description": "查询当前翻译进度（已翻译/总句数、问题数、失败数、各文件进度）。",
             "parameters": {"type": "object", "properties": {}, "required": []},
@@ -632,6 +661,62 @@ def _tool_start_translation(runner: AgentRunner, args: dict[str, Any]) -> Any:
 def _tool_stop_translation(runner: AgentRunner, _args: dict[str, Any]) -> Any:
     pid = runner._project_id()
     return runner._http_post(f"/api/projects/{pid}/stop", {})
+
+
+WAIT_SECONDS_MAX = 1800  # 单次等待上限 30 分钟，避免 Agent 卡死在一次无限等待里
+WAIT_TICK = 0.5  # 倒计时刷新步长（秒），兼顾界面流畅与轮询开销
+
+
+def _tool_wait(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """等待指定时长。期间持续推 wait_tick 事件供界面显示倒计时。
+
+    等待可被停止信号立即打断：先等满则 normal，被打断则 interrupted。无论哪种
+    都以工具成功返回，把状态交给模型判断下一步，而不是抛错中断整个循环。
+    """
+    raw_seconds = args.get("seconds")
+    raw_minutes = args.get("minutes")
+    try:
+        seconds = float(raw_seconds) if raw_seconds is not None else 0.0
+        minutes = float(raw_minutes) if raw_minutes is not None else 0.0
+    except (TypeError, ValueError):
+        raise AgentToolError("seconds / minutes 必须是数字")
+    if seconds < 0 or minutes < 0:
+        raise AgentToolError("等待时长不能为负数")
+
+    total = seconds + minutes * 60
+    if total <= 0:
+        raise AgentToolError("未指定等待时长：请给出 seconds 或 minutes")
+    total = min(total, WAIT_SECONDS_MAX)
+
+    reason = str(args.get("reason", "") or "").strip()
+    total_ms = int(total * 1000)
+    started = time.monotonic()
+    _log(f"  ⏳ 开始等待 {total:g}s" + (f"（{reason}）" if reason else ""))
+    runner._emit("wait_start", {"seconds": round(total, 1), "total_ms": total_ms, "reason": reason})
+
+    interrupted = False
+    while True:
+        if runner.stop_event.is_set():
+            interrupted = True
+            break
+        elapsed = time.monotonic() - started
+        if elapsed >= total:
+            break
+        remaining_ms = max(0, total_ms - int(elapsed * 1000))
+        runner._emit("wait_tick", {"remaining_ms": remaining_ms, "total_ms": total_ms})
+        runner.stop_event.wait(WAIT_TICK)
+
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+    remaining_ms = 0 if interrupted else max(0, total_ms - elapsed_ms)
+    runner._emit(
+        "wait_end",
+        {"interrupted": interrupted, "elapsed_ms": elapsed_ms, "remaining_ms": remaining_ms, "total_ms": total_ms},
+    )
+    if interrupted:
+        _log(f"  ⏳ 等待被停止信号打断，已等 {elapsed_ms / 1000:.1f}s")
+        return {"waited_seconds": round(elapsed_ms / 1000, 1), "status": "interrupted", "note": "等待被用户停止打断"}
+    _log(f"  ⏳ 等待结束，共 {elapsed_ms / 1000:.1f}s")
+    return {"waited_seconds": round(elapsed_ms / 1000, 1), "status": "completed"}
 
 
 def _tool_get_progress(runner: AgentRunner, _args: dict[str, Any]) -> Any:
@@ -837,6 +922,7 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "save_name_table": _tool_save_name_table,
     "start_translation": _tool_start_translation,
     "stop_translation": _tool_stop_translation,
+    "wait": _tool_wait,
     "get_progress": _tool_get_progress,
     "get_runtime": _tool_get_runtime,
     "list_problems": _tool_list_problems,

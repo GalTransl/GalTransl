@@ -121,6 +121,10 @@ type ActivityItem = {
   result?: unknown;
   error?: string;
   durationMs?: number;
+  // wait tool: 倒计时快照
+  waitTotalMs?: number;
+  waitRemainingMs?: number;
+  waitInterrupted?: boolean;
 };
 
 type TimelineGroup =
@@ -188,6 +192,21 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
       continue;
     }
 
+    // wait 工具的倒计时事件：挂到对应的 wait 工具行上，不单独成行。
+    if (ev.type === 'wait_start' || ev.type === 'wait_tick' || ev.type === 'wait_end') {
+      if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
+      const target = current.items.find((it) => it.kind === 'tool' && it.name === 'wait');
+      if (target) {
+        if (typeof ev.total_ms === 'number') target.waitTotalMs = ev.total_ms;
+        if (typeof ev.remaining_ms === 'number') target.waitRemainingMs = ev.remaining_ms;
+        if (ev.type === 'wait_end') {
+          target.waitInterrupted = Boolean(ev.interrupted);
+          target.waitRemainingMs = 0;
+        }
+      }
+      continue;
+    }
+
     // Terminal moments close the current activity run.
     closeActivity();
     if (ev.type === 'finish') {
@@ -237,6 +256,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   save_name_table: { action: '保存人名表', running: '保存人名表', verb: '', icon: '👥', summary: (a) => (Array.isArray(a?.names) ? `${a.names.length} 条` : '') },
   start_translation: { action: '启动翻译', running: '启动翻译', verb: '', icon: '▶️', summary: (a) => str(a?.translator) },
   stop_translation: { action: '停止翻译', running: '停止翻译', verb: '', icon: '⏹️', summary: () => '' },
+  wait: { action: '等待', running: '等待中', verb: '', icon: '⏳', summary: (a) => waitSummary(a) },
   get_progress: { action: '查询进度', running: '查询进度', verb: '', icon: '📊', summary: () => '' },
   get_runtime: { action: '查询运行时', running: '查询运行时', verb: '', icon: '⚙️', summary: () => '' },
   list_problems: { action: '检查问题', running: '检查问题', verb: '', icon: '🔍', summary: () => '' },
@@ -255,6 +275,28 @@ function toolMeta(name: string | undefined): ToolMeta {
 function str(v: unknown): string {
   if (v === undefined || v === null) return '';
   return typeof v === 'string' ? v : JSON.stringify(v);
+}
+
+/** wait 工具的参数摘要：把 seconds/minutes 归一成"等待 2 分钟"。 */
+function waitSummary(args: Record<string, unknown> | undefined): string {
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  const totalSeconds = num(args?.seconds) + num(args?.minutes) * 60;
+  const reason = typeof args?.reason === 'string' ? args.reason.trim() : '';
+  if (totalSeconds <= 0) return reason;
+  const duration = totalSeconds % 60 === 0 && totalSeconds >= 60
+    ? `${totalSeconds / 60} 分钟`
+    : `${totalSeconds} 秒`;
+  return reason ? `${duration} · ${reason}` : duration;
+}
+
+/** 倒计时显示：mm:ss，超过一小时用 h:mm:ss。 */
+function formatCountdown(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 function formatDuration(ms: number | undefined): string {
@@ -907,15 +949,30 @@ function ToolRow({ item, live }: { item: ActivityItem; live: boolean }) {
   const pending = item.ok === undefined && item.result === undefined && !item.error;
   const isRunning = live && pending;
 
+  // wait 行：等待期间显示倒计时进度条。
+  const isWait = item.name === 'wait';
+  const waiting = isWait && pending && typeof item.waitTotalMs === 'number';
+  const waitTotal = item.waitTotalMs || 0;
+  const waitRemaining = item.waitRemainingMs ?? waitTotal;
+  const waitRatio = waitTotal > 0 ? Math.min(1, Math.max(0, 1 - waitRemaining / waitTotal)) : 0;
+
   const resultText = formatPayload(ok ? item.result : item.error);
   const hasDetails = Boolean(summary || resultText || item.arguments);
   const longResult = resultText.length > 400;
 
-  const stateLabel = isRunning ? '进行中' : ok ? '完成' : '失败';
-  const stateTone = isRunning ? 'running' : ok ? 'done' : 'error';
+  const stateLabel = waiting
+    ? formatCountdown(waitRemaining)
+    : isRunning
+      ? '进行中'
+      : isWait && item.waitInterrupted
+        ? '已中断'
+        : ok
+          ? '完成'
+          : '失败';
+  const stateTone = waiting || isRunning ? 'running' : ok ? 'done' : 'error';
 
   return (
-    <div className={`agent-tool${open ? ' is-open' : ''}`}>
+    <div className={`agent-tool${open ? ' is-open' : ''}${waiting ? ' is-waiting' : ''}`}>
       <button
         type="button"
         className="agent-tool__header"
@@ -924,14 +981,19 @@ function ToolRow({ item, live }: { item: ActivityItem; live: boolean }) {
         aria-expanded={open}
       >
         <span className="agent-tool__icon">{meta.icon}</span>
-        <span className={`agent-tool__name${isRunning ? ' is-running' : ''}`}>{meta.action}</span>
+        <span className={`agent-tool__name${waiting || isRunning ? ' is-running' : ''}`}>{meta.action}</span>
         {summary ? <span className="agent-tool__summary">{summary}</span> : null}
-        <span className={`agent-tool__state is-${stateTone}`}>
+        <span className={`agent-tool__state is-${stateTone}${waiting ? ' is-countdown' : ''}`}>
           <span className="agent-tool__state-dot" />
           {stateLabel}
         </span>
         <span className="agent-tool__caret">›</span>
       </button>
+      {waiting && waitTotal > 0 ? (
+        <div className="agent-tool__waitbar" aria-hidden>
+          <div className="agent-tool__waitbar-fill" style={{ width: `${Math.round(waitRatio * 100)}%` }} />
+        </div>
+      ) : null}
       {open ? (
         <div className="agent-tool__body">
           {item.arguments !== undefined ? (
