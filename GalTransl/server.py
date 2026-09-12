@@ -1054,6 +1054,7 @@ def build_handler(registry: JobRegistry):
                             s.trans_conf = e.get("trans_conf", 0)
                             s.doub_content = e.get("doub_content", "")
                             s.unknown_proper_noun = e.get("unknown_proper_noun", "")
+                            s.skip_check = bool(e.get("skip_check", False))
                             trans_list.append(s)
 
                         # Link prev/next

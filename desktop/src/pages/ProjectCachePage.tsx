@@ -95,7 +95,7 @@ function CacheEntryCard({
   entry: CacheEntry;
   filename: string;
   projectId: string;
-  onEntryChange: (index: number, field: keyof CacheEntry, value: string) => void;
+  onEntryChange: (index: number, field: keyof CacheEntry, value: string | boolean) => void;
   onDelete: (deleteMode: boolean, index: number) => void;
   onAddProblemFilter: (keyword: string) => void;
   highlightQuery?: string;
@@ -139,6 +139,9 @@ function CacheEntryCard({
           </div>
         )}
         <div className="cache-card__spacer" />
+        {entry.skip_check && (
+          <span className="cache-card__pill cache-card__pill--skip-check" title="已跳过问题检查">⏭</span>
+        )}
         {entry.trans_by && (
           <span className="cache-card__pill cache-card__pill--engine">{entry.trans_by}</span>
         )}
@@ -235,6 +238,16 @@ function CacheEntryCard({
               <div className="cache-card__readonly-textarea">
                 {escapeControlChars(entry.post_dst_preview || entry.post_zh_preview || '')}
               </div>
+            </div>
+            <div className="cache-card__field cache-card__field--skip-check">
+              <label className="cache-card__checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={!!entry.skip_check}
+                  onChange={(e) => onEntryChange(entry.index, 'skip_check', e.target.checked)}
+                />
+                <span>跳过检查（skip_check）</span>
+              </label>
             </div>
           </>
         )}
@@ -830,8 +843,16 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   const translated = entries.filter((e) => dst(e)).length;
   const withProblems = visibleEntries.filter((e) => e.problem).length;
 
-  const handleEntryChange = (index: number, field: keyof CacheEntry, value: string) => {
-    const next = entries.map((e) => (e.index === index ? { ...e, [field]: value, deleted: false } : e));
+  const handleEntryChange = (index: number, field: keyof CacheEntry, value: string | boolean) => {
+    const next = entries.map((e) => {
+      if (e.index !== index) return e;
+      const updated: CacheEntry = { ...e, [field]: value, deleted: false };
+      // 勾选跳过检查时同步清除问题标记
+      if (field === 'skip_check' && value === true) {
+        updated.problem = '';
+      }
+      return updated;
+    });
     setEntries(next);
     if (selectedFile) entriesMapRef.current.set(selectedFile, next);
     if (selectedFile) {

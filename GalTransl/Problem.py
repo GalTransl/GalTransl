@@ -47,6 +47,10 @@ def find_problems(
         find_type = projectConfig.getProblemAnalyzeConfig("GPT35")  # 兼容旧版
 
     for tran in trans_list:
+        if getattr(tran, "skip_check", False):
+            tran.problem = ""
+            continue
+
         pre_src = tran.pre_src
         post_src = tran.post_src
         pre_dst = tran.pre_dst
