@@ -2234,7 +2234,12 @@ def build_handler(registry: JobRegistry):
                 if not project_dir:
                     self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
                     return
-                self._stream_agent(project_dir)
+                # after_step: 只推该 step 之后的事件（续订时避免重放旧回合）
+                try:
+                    after_step = int(parse_qs(parsed.query).get("after_step", ["0"])[0])
+                except ValueError:
+                    after_step = 0
+                self._stream_agent(project_dir, after_step=after_step)
                 return
 
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
@@ -2650,9 +2655,9 @@ def build_handler(registry: JobRegistry):
             self.end_headers()
             self.wfile.write(body)
 
-        def _stream_agent(self, project_dir: str) -> None:
-            """SSE stream of agent events. Replays recent events then polls
-            new ones until the agent reaches a terminal state, then closes."""
+        def _stream_agent(self, project_dir: str, after_step: int = 0) -> None:
+            """SSE stream of agent events. Replays events after after_step then
+            polls new ones until the agent reaches a terminal state, then closes."""
             import time as _time
 
             self.send_response(HTTPStatus.OK)
@@ -2669,7 +2674,7 @@ def build_handler(registry: JobRegistry):
             try:
                 # 先发一次状态快照，让前端知道当前阶段
                 _sse({"type": "status", **{k: v for k, v in AGENT_REGISTRY.status(project_dir).items() if k != "events"}})
-                last_step = 0
+                last_step = max(0, after_step)
                 deadline_loops = 0
                 # 启动宽限期：Agent 线程可能略晚于 start() 返回才发出第一个事件，
                 # 在此之前 status 可能仍是 idle，不应据此提前结束流。
@@ -2682,7 +2687,9 @@ def build_handler(registry: JobRegistry):
                         if ev.get("step", 0) > last_step:
                             last_step = ev["step"]
                     snap = AGENT_REGISTRY.status(project_dir)
-                    terminal = snap["status"] in ("done", "stopped", "failed")
+                    # awaiting_input = 回合结束但会话还活着；对订阅方而言本轮已终态，
+                    # 流自然关闭，用户发下一条消息时前端带 after_step 重订即可。
+                    terminal = snap["status"] in ("done", "awaiting_input", "stopped", "failed")
                     # idle 仅在宽限期过后才视为结束（避免 start/订阅竞态下空流退出）
                     idle_expired = snap["status"] == "idle" and deadline_loops >= warmup_grace
                     if (terminal or idle_expired) and not events:

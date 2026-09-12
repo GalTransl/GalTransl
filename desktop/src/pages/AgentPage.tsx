@@ -145,7 +145,9 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
   let current: Extract<TimelineGroup, { type: 'activity' }> | null = null;
 
   const closeActivity = () => {
-    if (current && current.items.length) groups.push(current);
+    // finalThought 也算有效内容：纯文字回复的回合里 items 会被清空
+    // （finish 把同文的流式 thought 移出折叠区），只剩 finalThought 也要入组。
+    if (current && (current.items.length || current.finalThought)) groups.push(current);
     current = null;
   };
 
@@ -414,6 +416,9 @@ export function AgentPage() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
   const startRef = useRef(0);
+  // 本地已见的最大事件 step（SSE 续订的 after_step 起点 + 兜底去重）。
+  // 状态快照对账/持久化恢复时同步更新。
+  const lastStepRef = useRef(0);
   // 是否已在后端建立会话（首条消息 startAgent 成功后置 true；reset 清空）。
   // 不能用 events.length 判断：乐观追加后它立即 >0，但会话可能还没建好。
   const hasBackendSessionRef = useRef(false);
@@ -435,6 +440,7 @@ export function AgentPage() {
     setEvents(persisted?.events || []);
     setStatus(persisted?.status || 'idle');
     startRef.current = persisted?.startedAt || 0;
+    lastStepRef.current = maxStep(persisted?.events || []);
     // 本地有历史记录 = 后端大概率已有会话；以 status 快照对账结果为准
     hasBackendSessionRef.current = Boolean(persisted?.events.length);
 
@@ -443,6 +449,7 @@ export function AgentPage() {
         if (cancelled) return;
         if (snap.events && snap.events.length >= (persisted?.events.length || 0)) {
           setEvents(snap.events);
+          lastStepRef.current = maxStep(snap.events);
           hasBackendSessionRef.current = Boolean(snap.events.length);
         }
         const snapRunning = snap.status === 'running';
@@ -508,36 +515,63 @@ export function AgentPage() {
 
   const subscribeStream = useCallback((dir: string) => {
     abortRef.current?.();
+    // 续订时从本地已见的最大 step 之后开始拉，避免后端重放旧回合的事件
+    const afterStep = lastStepRef.current;
     abortRef.current = subscribeAgentStream(
       dir,
       (ev) => {
-        if (ev.type === 'close') return;
+        if (ev.type === 'close') {
+          // 后端明确关流才收尾（可能整段回放完才到）
+          setRunning(false);
+          return;
+        }
         if (ev.type === 'status') {
           if (ev.status) setStatus(ev.status);
+          // status 快照绝不主动 abort：订阅时回合可能已结束（首帧即终态），
+          // 但事件还在流里没发完，掐流会吞掉全部内容。流的关闭交给 close 帧
+          // 或 finish/stopped/error 事件。
           if (ev.status && isTerminal(ev.status)) {
             setRunning(false);
-            abortRef.current?.();
-            abortRef.current = null;
           }
           return;
         }
+        // 兜底去重：SSE 重放/竞态下 step 已见过的事件直接丢弃
+        // （本地乐观的 user_message 用 step=-1，不参与该判断）
+        if (typeof ev.step === 'number' && ev.step >= 0) {
+          if (ev.step <= lastStepRef.current) return;
+          lastStepRef.current = ev.step;
+        }
         if (ev.type === 'user_message') {
-          // 后端回放自己刚发的消息：本地已乐观显示，去重避免重复气泡
+          // 后端已收录这条消息：用真实事件替换本地乐观的占位（step=-1），
+          // 保持顺序正确且刷新后可完整回放
           const localId = `local:${ev.message}`;
           if (localMsgIdsRef.current.has(localId)) {
             localMsgIdsRef.current.delete(localId);
+            const text = ev.message;
+            setEvents((prev) => {
+              const idx = prev.findIndex(
+                (it) => it.type === 'user_message' && it.step === -1 && it.message === text,
+              );
+              if (idx === -1) return [...prev, ev];
+              const next = [...prev];
+              next[idx] = ev;
+              return next;
+            });
             return;
           }
         }
         setEvents((prev) => [...prev, ev]);
         if (ev.type === 'finish' || ev.type === 'error' || ev.type === 'stopped') {
           setRunning(false);
+          // 不主动 abort：后端若因滞留插话自动开 followup 回合，
+          // 同一条流会继续推后续事件；流的关闭由后端 close 帧决定。
         }
       },
       (err) => {
         setError(normalizeError(err, 'Agent 事件流中断'));
         setRunning(false);
       },
+      afterStep,
     );
   }, []);
 
@@ -631,6 +665,7 @@ export function AgentPage() {
     setError(null);
     localMsgIdsRef.current.clear();
     hasBackendSessionRef.current = false;
+    lastStepRef.current = 0;
     try {
       localStorage.removeItem(sessionsKey(effectiveProject));
     } catch {
@@ -887,6 +922,15 @@ export function AgentPage() {
 
 function isTerminal(s: string): boolean {
   return s === 'awaiting_input' || s === 'done' || s === 'failed' || s === 'idle';
+}
+
+/** 事件数组里的最大 step（忽略本地乐观的 -1）。 */
+function maxStep(events: AgentEvent[]): number {
+  let max = 0;
+  for (const ev of events) {
+    if (typeof ev.step === 'number' && ev.step > max) max = ev.step;
+  }
+  return max;
 }
 
 function workingLabel(timeline: TimelineGroup[]): string {

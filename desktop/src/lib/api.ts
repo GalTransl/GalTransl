@@ -1544,15 +1544,19 @@ export async function fetchAgentStatus(projectDir: string) {
 /**
  * Subscribe to an agent's SSE event stream. Calls `onEvent` for every agent
  * event (thought / tool_call / tool_result / finish / error / stopped / status / close).
+ * `afterStep`: skip replayed events with step <= afterStep (resume without duplicates).
  * Returns an abort function that closes the stream.
  */
 export function subscribeAgentStream(
   projectDir: string,
   onEvent: (event: AgentEvent) => void,
   onError?: (err: Error) => void,
+  afterStep?: number,
 ): () => void {
   const baseUrl = getBackendBaseUrl();
-  const url = `${baseUrl}/api/agent/stream?project_dir=${encodeURIComponent(projectDir)}`;
+  const url =
+    `${baseUrl}/api/agent/stream?project_dir=${encodeURIComponent(projectDir)}` +
+    (typeof afterStep === 'number' ? `&after_step=${afterStep}` : '');
   const controller = new AbortController();
 
   (async () => {
