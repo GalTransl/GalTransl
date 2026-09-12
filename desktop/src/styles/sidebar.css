@@ -14,6 +14,13 @@
   z-index: 10;
 }
 
+/* The app layout gives all direct children a positioned z-index with a more
+   specific selector. Keep the sidebar (and its viewport-level toast host)
+   above page surfaces such as the translation cockpit. */
+.app-layout > .sidebar {
+  z-index: 30;
+}
+
 .sidebar--expanded {
   width: 220px;
 }
@@ -93,6 +100,7 @@
 }
 
 .sidebar__nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -109,6 +117,24 @@
     color var(--transition-fast);
   white-space: nowrap;
   overflow: hidden;
+}
+
+.sidebar__nav-notice-dot {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--color-surface-strong);
+  border-radius: 50%;
+  background: var(--color-danger);
+  box-sizing: content-box;
+  pointer-events: none;
+}
+
+.sidebar__project-config-notice-dot {
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .sidebar__nav-item:hover {
@@ -407,6 +433,17 @@
   text-overflow: ellipsis;
 }
 
+.sidebar__project-child-notice-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--color-danger);
+  box-shadow: 0 0 0 2px var(--color-surface-strong);
+  pointer-events: none;
+}
+
 .sidebar__project-child-separator {
   height: 1px;
   margin: 4px 12px;
@@ -458,6 +495,9 @@
   right: 18px;
   z-index: 110;
   width: min(380px, calc(100vw - 36px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .sidebar__toast-host .inline-alert {

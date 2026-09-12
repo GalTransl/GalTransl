@@ -115,6 +115,8 @@ export type CacheEntry = {
   proofread_zh?: string;
   post_zh_preview?: string;
   post_dst_preview?: string;
+  // 用于标记条目是否被删除（前端状态，不会发送到后端）
+  deleted?: boolean;
 };
 
 export type CacheSearchField = 'all' | 'src' | 'dst' | 'problem';
@@ -138,6 +140,10 @@ export type CacheSearchResponse = {
 };
 
 export type CacheReplaceField = 'src' | 'dst' | 'all';
+
+export type CacheSearchOptions = {
+  re: boolean;
+};
 
 export type CacheReplaceFileDetail = {
   filename: string;
@@ -297,6 +303,7 @@ export type ProjectProblemsResponse = {
   project_dir: string;
   problems: ProblemEntry[];
   total: number;
+  filter_keys?: string[];
 };
 
 // ---- Name Table API types ----
@@ -559,14 +566,16 @@ export async function searchCache(
   projectId: string,
   query: string,
   field: CacheSearchField = 'all',
+  options: CacheSearchOptions = { re: false },
   maxResults = 500,
+  configFileName = 'config.yaml',
 ) {
   return apiRequest<CacheSearchResponse>(
     `/api/projects/${projectId}/cache/search`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, field, max_results: maxResults }),
+      body: JSON.stringify({ query, field, options, max_results: maxResults, config_file_name: configFileName }),
     },
   );
 }
@@ -705,8 +714,8 @@ export async function deleteCommonDictionaryFile(payload: { filename: string }) 
   );
 }
 
-export async function fetchProjectProblems(projectId: string) {
-  return apiRequest<ProjectProblemsResponse>(`/api/projects/${projectId}/problems`);
+export async function fetchProjectProblems(projectId: string, configFileName = 'config.yaml') {
+  return apiRequest<ProjectProblemsResponse>(`/api/projects/${projectId}/problems?config=${encodeURIComponent(configFileName)}`);
 }
 
 // ---- Name Table API functions ----
@@ -872,8 +881,12 @@ export async function createBackendProfile(name: string, profile: Record<string,
     throw new Error('profile name is required');
   }
   const profiles = readBackendProfilesStorage();
+  const isFirstProfile = Object.keys(profiles).length === 0;
   profiles[trimmedName] = cloneBackendProfile(profile);
   writeBackendProfilesStorage(profiles);
+  if (isFirstProfile) {
+    setDefaultBackendProfile(trimmedName);
+  }
   return { success: true, name: trimmedName };
 }
 
@@ -951,12 +964,33 @@ export const CACHE_BROWSER_FONT_SIZE_DEFAULT = 14;
 /** Custom event dispatched when the global default backend profile changes. */
 export const BACKEND_PROFILES_CHANGE_EVENT = 'galtransl:backend-profiles-change';
 export const DEFAULT_BACKEND_PROFILE_CHANGE_EVENT = 'galtransl:default-backend-profile-change';
+export const PROJECT_CONFIG_DIRTY_CHANGE_EVENT = 'galtransl:project-config-dirty-change';
 export const HOME_HISTORY_LIMIT_CHANGE_EVENT = 'galtransl:home-history-limit-change';
 export const HOME_JOB_LIMIT_CHANGE_EVENT = 'galtransl:home-job-limit-change';
 export const THEME_MODE_CHANGE_EVENT = 'galtransl:theme-mode-change';
 export const CUSTOM_BACKGROUND_CHANGE_EVENT = 'galtransl:custom-background-change';
 export const HIDE_BACKEND_CONSOLE_CHANGE_EVENT = 'galtransl:hide-backend-console-change';
 export const CACHE_BROWSER_FONT_SIZE_CHANGE_EVENT = 'galtransl:cache-browser-font-size-change';
+
+const dirtyProjectConfigDirs = new Set<string>();
+
+/** Return whether a project's config page has unsaved changes in this session. */
+export function isProjectConfigDirty(projectDir: string): boolean {
+  return Boolean(projectDir) && dirtyProjectConfigDirs.has(projectDir);
+}
+
+/** Update a project's unsaved state and notify persistent UI such as the sidebar. */
+export function setProjectConfigDirty(projectDir: string, dirty: boolean) {
+  if (!projectDir) return;
+  if (dirty) {
+    dirtyProjectConfigDirs.add(projectDir);
+  } else {
+    dirtyProjectConfigDirs.delete(projectDir);
+  }
+  window.dispatchEvent(new CustomEvent(PROJECT_CONFIG_DIRTY_CHANGE_EVENT, {
+    detail: { projectDir, dirty },
+  }));
+}
 
 function cloneBackendProfile(profile: Record<string, unknown>): Record<string, unknown> {
   return JSON.parse(JSON.stringify(profile ?? {})) as Record<string, unknown>;

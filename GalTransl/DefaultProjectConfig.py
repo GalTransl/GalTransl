@@ -16,6 +16,8 @@ backendSpecific:
     stream: true # 流式请求，一般不用修改除非接口不支持流式[True/False]
     apiTimeout: 300 # 请求超时时间，单位秒
     apiErrorWait: auto # 发生API Error时的等待时间，包括频率限制。auto将自动适应[auto/0-120]
+    maxApiRetries: 6 # 单个批次最多调用API次数，达到上限后标记失败并继续后续批次。[1-100]
+    genDicMaxApiRetries: 6 # GenDic单个分片最多调用API次数。[1-100]
 
   SakuraLLM: # (Sakura/Galtransl)
     endpoints:
@@ -59,6 +61,7 @@ common:
   retranslKey: # 在下方添加需要重翻的关键字，匹配原文/译文/problem 中的子串；留空不重翻。
     #- "翻译失败" # 启动时重翻命中“翻译失败”的句子
     #- "残留日文" # 启动时重翻命中“残留日文”的句子
+  problemFilterKey: [] # 按子串过滤问题；匹配的问题不展示，也不触发问题关键字重翻。
 
   gpt.contextNum: 8 # 每次请求附带的前文句数；值越大上下文更强、成本更高（常用8）。[0-32]
   # ForGal/ForGal-json/ForNovel
@@ -95,6 +98,8 @@ problemAnalyze:
     - 独白男他 # 独白（无name）里出现“他”，排除“其他/他们/他人/他乡/他国/他日/他山”
     #- 引入英文 # 本来没有英文，译文引入了英文
     #- 比日文长严格 # 比日文长1倍以上就提醒
+    #- 单句过长 # 平均分句长度超过阈值（avgSentenceLengthThreshold），单句过长
+  avgSentenceLengthThreshold: 17 # 单句过长的分句长度阈值，默认17，建议范围15~25
 
 # 字典设置
 dictionary:

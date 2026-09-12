@@ -3,6 +3,7 @@
 """
 
 from GalTransl.CSentense import CTransList
+from GalTransl.ProblemFilter import filter_problem_text, normalize_problem_filter_keys
 from GalTransl import LOGGER
 from typing import List
 import orjson
@@ -330,6 +331,7 @@ async def get_transCache_from_json(
     load_post_src=False,
     ignr_post_src=False,
     eng_type="",
+    problem_filter_keys=None,
 ):
     """
     此函数从 JSON 文件中检索翻译缓存，并相应地更新翻译列表。
@@ -351,6 +353,7 @@ async def get_transCache_from_json(
             cache_file_path += ".json"
 
     translist_hit = []
+    problem_filter_keys = normalize_problem_filter_keys(problem_filter_keys)
     translist_unhit = []
     cache_dict = {}
     if os.path.exists(cache_file_path):
@@ -464,7 +467,11 @@ async def get_transCache_from_json(
                         LOGGER.error(f"[cache]pre_dst为空: {line_now}")
                     continue
             # 重试失败的
-            if retry_failed and "(Failed)" in _cache_get(cache_dict[cache_key], "pre_dst"):
+            if (
+                retry_failed
+                and filter_problem_text("翻译失败", problem_filter_keys)
+                and "(Failed)" in _cache_get(cache_dict[cache_key], "pre_dst")
+            ):
                 if (
                     no_proofread or "Fail" in cache_dict[cache_key]["proofread_by"]
                 ):  # 且未校对
@@ -484,7 +491,7 @@ async def get_transCache_from_json(
                     continue
             # retran_key在problem中
             if retran_key and "problem" in cache_dict[cache_key]:
-                if check_retran_key(retran_key, cache_dict[cache_key]["problem"]):
+                if check_retran_key(retran_key, filter_problem_text(cache_dict[cache_key]["problem"], problem_filter_keys)):
                     if "rebuild" not in eng_type:
                         translist_unhit.append(tran)
                         LOGGER.info(f"[cache]retran_key in 'problem' message: {line_now}")

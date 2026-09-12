@@ -1129,7 +1129,8 @@
 .ptv2-filelist {
   flex: 1;
   min-height: 0;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 4px;
   overflow-y: auto;
   padding-right: 4px;

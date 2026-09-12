@@ -13,6 +13,7 @@ import {
   getDefaultBackendProfile,
   getSelectedBackendProfileDisplay,
   setSelectedBackendProfile,
+  setProjectConfigDirty,
   BACKEND_PROFILES_CHANGE_EVENT,
   DEFAULT_BACKEND_PROFILE_CHANGE_EVENT } from '../lib/api';
 import { normalizeError } from '../lib/errors';
@@ -39,7 +40,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   const [searchParams] = useSearchParams();
   const [activeSection, setActiveSection] = useState<ConfigSectionKey>(() => {
     const s = searchParams.get('section');
-    if (s && ['common', 'backendSpecific', 'plugin', 'dictionary', 'problemAnalyze', 'retranslKey'].includes(s)) return s as ConfigSectionKey;
+    if (s && ['common', 'backendSpecific', 'plugin', 'dictionary', 'problemAnalyze', 'retranslKey', 'problemFilterKey'].includes(s)) return s as ConfigSectionKey;
     return 'common';
   });
   const [yamlView, setYamlView] = useState(false);
@@ -52,6 +53,12 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   // Plugin lists from global plugin manager
   const [filePlugins, setFilePlugins] = useState<PluginInfo[]>([]);
   const [textPlugins, setTextPlugins] = useState<PluginInfo[]>([]);
+
+  useEffect(() => {
+    if (projectDir) {
+      setProjectConfigDirty(projectDir, dirty);
+    }
+  }, [projectDir, dirty]);
 
   // Ref for scroll-to-section
   const mainRef = useRef<HTMLDivElement>(null);
@@ -376,18 +383,27 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
                       return prev ? { ...prev, problemAnalyze: pa } : prev;
                     });
                   }}
+                  onThresholdChange={(value) => {
+                    setConfig((prev) => {
+                      const pa = { ...((prev?.problemAnalyze as Record<string, unknown>) || {}) };
+                      pa.avgSentenceLengthThreshold = value;
+                      return prev ? { ...prev, problemAnalyze: pa } : prev;
+                    });
+                  }}
                   onDirty={() => { setSaveSuccess(false); setDirty(true); }}
                 />
               )}
 
-              {activeSection === 'retranslKey' && (
+              {(activeSection === 'retranslKey' || activeSection === 'problemFilterKey') && (
                 <RetranslKeySection
+                  key={activeSection}
+                  field={activeSection}
                   config={config}
                   onChange={(keys) => {
                     setConfig((prev) => {
                       if (!prev) return prev;
                       const common = { ...((prev.common as Record<string, unknown>) || {}) };
-                      common.retranslKey = keys;
+                      common[activeSection] = keys;
                       return { ...prev, common };
                     });
                   }}

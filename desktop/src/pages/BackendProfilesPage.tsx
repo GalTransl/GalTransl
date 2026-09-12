@@ -89,6 +89,7 @@ export function BackendProfilesPage() {
         ([name, config]) => ({ name, config: config as Record<string, unknown> })
       );
       setProfiles(entries);
+      setDefaultProfileState(getDefaultBackendProfile());
     } catch (err) {
       setError(normalizeError(err, '加载后端配置失败'));
     } finally {

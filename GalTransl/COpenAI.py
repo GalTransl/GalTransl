@@ -290,21 +290,22 @@ class COpenAITokenPool:
                 )
 
         tasks = []
+        task_indices: dict[asyncio.Task, int] = {}
         with terminal_progress(
             should_print_translation_logs(self.pj_config),
             total=len(self.tokens),
             title="Testing Key……",
         ) as bar:
             self.bar = bar
-            index = 0
-            for _, token in self.tokens:
+            for token_index, (_, token) in enumerate(self.tokens):
                 self._raise_if_stop_requested()
-                index += 1
                 LOGGER.info(
-                    f"Testing key{index}---{token.maskToken()}---{token.model_name}"
+                    f"Testing key{token_index + 1}---{token.maskToken()}---{token.model_name}"
                 )
-                tasks.append(asyncio.create_task(check_one_token(token)))
-            result: list[tuple[bool, COpenAIToken]] = []
+                task = asyncio.create_task(check_one_token(token))
+                tasks.append(task)
+                task_indices[task] = token_index
+            result_by_index: dict[int, tuple[bool, COpenAIToken]] = {}
             pending = set(tasks)
             try:
                 while pending:
@@ -315,13 +316,17 @@ class COpenAITokenPool:
                         return_when=asyncio.FIRST_COMPLETED,
                     )
                     for done_task in done:
-                        result.append(await done_task)
+                        # Availability checks complete out of order, but the
+                        # fallback policy must keep the configured order.
+                        result_by_index[task_indices[done_task]] = await done_task
             except BaseException:
                 for task in tasks:
                     if not task.done():
                         task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
                 raise
+
+        result = [result_by_index[index] for index in range(len(tasks))]
 
         # replace list with new one
         newList: list[tuple[bool, COpenAIToken]] = []

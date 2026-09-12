@@ -119,7 +119,7 @@ class ForGalTsvTranslate(BaseTranslate):
                     parse_ok, parse_error = self._parse_tsv_result_line(
                         line,
                         trans_list,
-                        getattr(self, "_last_chatbot_model_name", ""),
+                        self._get_chatbot_state()[1],
                         n_symbol,
                         stream_cursor,
                         parsed_result_trans_list,
@@ -132,11 +132,13 @@ class ForGalTsvTranslate(BaseTranslate):
                         return False
                 return True
             resp = None
+            self._clear_chatbot_state()
             resp, token = await self.ask_chatbot(
                 messages=messages,
                 file_name=f"{filename}:{idx_tip}",
                 base_try_count=retry_count,
                 stream_line_callback=_parse_stream_lines,
+                max_retry_count=self.max_api_retries,
             )
 
             result_text = resp or ""
@@ -153,7 +155,7 @@ class ForGalTsvTranslate(BaseTranslate):
                 error_message = "输出为空/被拦截"
                 error_flag = True
 
-            if getattr(self, "_last_chatbot_was_stream", False):
+            if self._get_chatbot_state()[0]:
                 if stream_parse_error_message:
                     error_message = stream_parse_error_message
                     error_flag = True
@@ -216,7 +218,7 @@ class ForGalTsvTranslate(BaseTranslate):
                 )
                 retry_count += 1
                 self._check_stop_requested()
-                await asyncio.sleep(1)
+                await self._interruptible_sleep(1)
 
                 tmp_enhance_jailbreak = not tmp_enhance_jailbreak
 

@@ -407,7 +407,12 @@ async def doLLMTranslate(
         _check_stop_requested(projectConfig)
         await ensure_model_available_if_needed(projectConfig)
         gptapi = await init_gptapi(projectConfig)
-        await gptapi.batch_translate(all_jsons)
+        try:
+            await gptapi.batch_translate(all_jsons)
+        finally:
+            # GenDic returns before the normal translation cleanup path.
+            # Always close its HTTP clients, including on cancellation/errors.
+            await gptapi.shutdown()
         return True
 
     # ---- 3. 根据 sortBy 决定 chunk 处理顺序 ----
@@ -672,6 +677,7 @@ async def doLLMTranslSingleChunk(
             proofread=False,
             retran_key=projectConfig.getKey("retranslKey"),
             eng_type=eng_type,
+            problem_filter_keys=projectConfig.getKey("problemFilterKey", []),
         )
 
         if len(translist_hit) > 0:
