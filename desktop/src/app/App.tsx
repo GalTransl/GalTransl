@@ -43,6 +43,11 @@ const NewProjectWizard = lazy(async () => {
   return { default: mod.NewProjectWizard };
 });
 
+const AgentPage = lazy(async () => {
+  const mod = await import('../pages/AgentPage');
+  return { default: mod.AgentPage };
+});
+
 const CONFIG_FILE_KEY = 'galtransl-config-file';
 const OPEN_PROJECTS_KEY = 'galtransl-open-projects';
 const LAST_ACTIVE_PROJECT_KEY = 'galtransl-last-active-project';
@@ -370,6 +375,14 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
                 element={(
                   <Suspense fallback={<RouteLoadingFallback />}>
                     <NewProjectWizard onOpenProject={onOpenProject} />
+                  </Suspense>
+                )}
+              />
+              <Route
+                path="/agent"
+                element={(
+                  <Suspense fallback={<RouteLoadingFallback />}>
+                    <AgentPage />
                   </Suspense>
                 )}
               />

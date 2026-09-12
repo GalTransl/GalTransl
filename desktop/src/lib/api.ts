@@ -1423,6 +1423,151 @@ export function clearCustomBackgroundPreference(): CustomBackgroundPreference {
   return cleared;
 }
 
+// ---- Agent API ----
+
+export type AgentEventType =
+  | 'thought'
+  | 'tool_call'
+  | 'tool_result'
+  | 'finish'
+  | 'error'
+  | 'stopped'
+  | 'status'
+  | 'close';
+
+export type AgentEvent = {
+  type: AgentEventType;
+  step: number;
+  // thought
+  content?: string;
+  // tool_call
+  id?: string;
+  name?: string;
+  arguments?: unknown;
+  // tool_result
+  ok?: boolean;
+  result?: unknown;
+  error?: string;
+  duration_ms?: number;
+  // finish
+  summary?: string;
+  total_steps?: number;
+  // status
+  status?: string;
+  message?: string;
+  traceback?: string;
+  reason?: string;
+  started_at?: number;
+  finished_at?: number;
+  goal?: string;
+};
+
+export type AgentStatus = {
+  status: string;
+  project_dir: string;
+  goal?: string;
+  step: number;
+  started_at?: number;
+  finished_at?: number;
+  error?: string;
+  events?: AgentEvent[];
+};
+
+export type AgentStartPayload = {
+  project_dir: string;
+  config_file_name?: string;
+  backend_profile_data: Record<string, unknown>;
+  goal?: string;
+};
+
+export async function startAgent(payload: AgentStartPayload) {
+  return apiRequest<AgentStatus>('/api/agent/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function stopAgent(projectDir: string) {
+  return apiRequest<AgentStatus>('/api/agent/stop', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_dir: projectDir }),
+  });
+}
+
+export async function fetchAgentStatus(projectDir: string) {
+  return apiRequest<AgentStatus>(
+    `/api/agent/status?project_dir=${encodeURIComponent(projectDir)}`,
+  );
+}
+
+/**
+ * Subscribe to an agent's SSE event stream. Calls `onEvent` for every agent
+ * event (thought / tool_call / tool_result / finish / error / stopped / status / close).
+ * Returns an abort function that closes the stream.
+ */
+export function subscribeAgentStream(
+  projectDir: string,
+  onEvent: (event: AgentEvent) => void,
+  onError?: (err: Error) => void,
+): () => void {
+  const baseUrl = getBackendBaseUrl();
+  const url = `${baseUrl}/api/agent/stream?project_dir=${encodeURIComponent(projectDir)}`;
+  const controller = new AbortController();
+
+  (async () => {
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: { Accept: 'text/event-stream' },
+      });
+      if (!response.ok || !response.body) {
+        throw new Error(`agent stream 请求失败：${response.status}`);
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // SSE frames separated by "\n\n"
+        let sep: number;
+        while ((sep = buffer.indexOf('\n\n')) >= 0) {
+          const frame = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          parseAgentFrame(frame, onEvent);
+        }
+      }
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      onError?.(err instanceof Error ? err : new Error(String(err)));
+    }
+  })();
+
+  return () => controller.abort();
+}
+
+function parseAgentFrame(frame: string, onEvent: (event: AgentEvent) => void) {
+  // frame format: "event: agent\ndata: {...}"
+  const lines = frame.split('\n');
+  let dataLine = '';
+  for (const line of lines) {
+    if (line.startsWith('data:')) {
+      dataLine = line.slice(5).trim();
+    }
+  }
+  if (!dataLine) return;
+  try {
+    const payload = JSON.parse(dataLine) as AgentEvent;
+    onEvent(payload);
+  } catch {
+    // ignore malformed frame
+  }
+}
+
 // ---- Internal ----
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {

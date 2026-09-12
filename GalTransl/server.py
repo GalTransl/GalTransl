@@ -54,6 +54,8 @@ from GalTransl.server_runtime import (
     update_runtime_status,
 )
 
+from GalTransl.Agent import AgentRuntime
+
 def _read_yaml_file(path: str) -> dict:
     """Read and parse a YAML file."""
     with open(path, "r", encoding="utf-8") as f:
@@ -784,6 +786,11 @@ INDEX_HTML = """<!DOCTYPE html>
 </body>
 </html>
 """
+
+
+# Global Agent runtime registry. One per process (single server instance);
+# does not need the per-server config that JobRegistry carries.
+AGENT_REGISTRY: AgentRuntime = AgentRuntime()
 
 
 class JobRegistry:
@@ -2212,6 +2219,24 @@ def build_handler(registry: JobRegistry):
                     self._send_json({"error": f"failed to load common dictionaries: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
+            # GET /api/agent/status — current agent state + all events (snapshot)
+            if path == "/api/agent/status":
+                project_dir = parse_qs(parsed.query).get("project_dir", [""])[0]
+                if not project_dir:
+                    self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                self._send_json(AGENT_REGISTRY.status(project_dir))
+                return
+
+            # GET /api/agent/stream — SSE: stream agent events in real time
+            if path == "/api/agent/stream":
+                project_dir = parse_qs(parsed.query).get("project_dir", [""])[0]
+                if not project_dir:
+                    self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                self._stream_agent(project_dir)
+                return
+
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:
@@ -2228,7 +2253,48 @@ def build_handler(registry: JobRegistry):
                 self._route_project_api(project_id, sub_path)
                 return
 
-            # POST /api/openai-models — query a list of models from an OpenAI-compatible API.
+            # POST /api/agent/start — start an agent run for a project
+            if path == "/api/agent/start":
+                try:
+                    payload = self._read_json_body()
+                    project_dir = str(payload.get("project_dir", "")).strip()
+                    config_file_name = str(payload.get("config_file_name", "config.yaml") or "config.yaml")
+                    backend_profile_data = payload.get("backend_profile_data")
+                    goal = str(payload.get("goal", "") or "")
+                    if not project_dir:
+                        self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    if not isinstance(backend_profile_data, dict) or not backend_profile_data:
+                        self._send_json({"error": "backend_profile_data is required (请先选择一个翻译后端配置)"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    status = AGENT_REGISTRY.start(
+                        project_dir=project_dir,
+                        config_file_name=config_file_name,
+                        backend_profile_data=backend_profile_data,
+                        goal=goal,
+                    )
+                    self._send_json(status)
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.CONFLICT)
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": f"failed to start agent: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # POST /api/agent/stop — stop a running agent
+            if path == "/api/agent/stop":
+                try:
+                    payload = self._read_json_body()
+                    project_dir = str(payload.get("project_dir", "")).strip()
+                    if not project_dir:
+                        self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    status = AGENT_REGISTRY.stop(project_dir)
+                    self._send_json(status)
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": f"failed to stop agent: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+
             if path == "/api/openai-models":
                 try:
                     payload = self._read_json_body()
@@ -2548,6 +2614,51 @@ def build_handler(registry: JobRegistry):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def _stream_agent(self, project_dir: str) -> None:
+            """SSE stream of agent events. Replays recent events then polls
+            new ones until the agent reaches a terminal state, then closes."""
+            import time as _time
+
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+
+            def _sse(event: dict[str, Any]) -> None:
+                msg = f"event: agent\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                self.wfile.write(msg.encode("utf-8"))
+                self.wfile.flush()
+
+            try:
+                # 先发一次状态快照，让前端知道当前阶段
+                _sse({"type": "status", **{k: v for k, v in AGENT_REGISTRY.status(project_dir).items() if k != "events"}})
+                last_step = 0
+                deadline_loops = 0
+                # 启动宽限期：Agent 线程可能略晚于 start() 返回才发出第一个事件，
+                # 在此之前 status 可能仍是 idle，不应据此提前结束流。
+                warmup_grace = 20  # 最多等 20 个 tick (10s) 让首个事件到达
+                # 翻译流程可能很长；最多轮询 6 小时
+                while deadline_loops < 6 * 3600:
+                    events = AGENT_REGISTRY.drain_events(project_dir, after_step=last_step)
+                    for ev in events:
+                        _sse(ev)
+                        if ev.get("step", 0) > last_step:
+                            last_step = ev["step"]
+                    snap = AGENT_REGISTRY.status(project_dir)
+                    terminal = snap["status"] in ("done", "stopped", "failed")
+                    # idle 仅在宽限期过后才视为结束（避免 start/订阅竞态下空流退出）
+                    idle_expired = snap["status"] == "idle" and deadline_loops >= warmup_grace
+                    if (terminal or idle_expired) and not events:
+                        _sse({"type": "status", "status": snap["status"], "step": snap.get("step", 0)})
+                        break
+                    _time.sleep(0.5)
+                    deadline_loops += 1
+                _sse({"type": "close"})
+            except (BrokenPipeError, ConnectionResetError):
+                # 客户端断开连接
+                pass
 
     return RequestHandler
 

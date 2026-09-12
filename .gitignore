@@ -10,6 +10,7 @@ useful_tools/GalTransl_DumpInjector/config.ini
 useful_tools/GalTransl_DumpInjector/VNTextPatch/names.xml
 *.log
 /.qoder
+/.zcode
 desktop/node_modules/
 desktop/dist/
 desktop/src-tauri/target/

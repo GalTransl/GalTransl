@@ -544,6 +544,16 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
           <span className="sidebar__nav-icon">🏠</span>
           {expanded && <span className="sidebar__nav-label">首页</span>}
         </NavLink>
+        <NavLink
+          to="/agent"
+          className={({ isActive }) =>
+            `sidebar__nav-item ${isActive ? 'sidebar__nav-item--active' : ''}`
+          }
+          title="Agent 模式"
+        >
+          <span className="sidebar__nav-icon">🤖</span>
+          {expanded && <span className="sidebar__nav-label">Agent 模式</span>}
+        </NavLink>
       </div>
 
       <nav className="sidebar__nav">
