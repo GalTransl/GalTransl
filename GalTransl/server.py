@@ -2280,6 +2280,41 @@ def build_handler(registry: JobRegistry):
                     self._send_json({"error": f"failed to start agent: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
+            # POST /api/agent/message — send a user message to the project's
+            # agent session: queues as an interjection while running, or starts
+            # a new turn on the persistent conversation when idle.
+            if path == "/api/agent/message":
+                try:
+                    payload = self._read_json_body()
+                    project_dir = str(payload.get("project_dir", "")).strip()
+                    message = str(payload.get("message", "") or "")
+                    if not project_dir:
+                        self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    if not message.strip():
+                        self._send_json({"error": "message is required"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    status = AGENT_REGISTRY.message(project_dir, message)
+                    self._send_json(status)
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.CONFLICT)
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": f"failed to send agent message: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # POST /api/agent/reset — stop any run and drop the session history
+            if path == "/api/agent/reset":
+                try:
+                    payload = self._read_json_body()
+                    project_dir = str(payload.get("project_dir", "")).strip()
+                    if not project_dir:
+                        self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    self._send_json(AGENT_REGISTRY.reset(project_dir))
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": f"failed to reset agent: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
             # POST /api/agent/stop — stop a running agent
             if path == "/api/agent/stop":
                 try:

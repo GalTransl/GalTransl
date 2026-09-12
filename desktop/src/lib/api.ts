@@ -1427,6 +1427,9 @@ export function clearCustomBackgroundPreference(): CustomBackgroundPreference {
 
 export type AgentEventType =
   | 'thought'
+  | 'thought_delta'
+  | 'thought_end'
+  | 'user_message'
   | 'tool_call'
   | 'tool_result'
   | 'wait_start'
@@ -1443,6 +1446,12 @@ export type AgentEvent = {
   step: number;
   // thought
   content?: string;
+  // thought_delta（流式增量）/ thought_end（一段流式文本结束）
+  delta?: string;
+  index?: number;
+  length?: number;
+  // user_message
+  message?: string;
   // tool_call
   id?: string;
   name?: string;
@@ -1463,7 +1472,6 @@ export type AgentEvent = {
   total_steps?: number;
   // status
   status?: string;
-  message?: string;
   traceback?: string;
   reason?: string;
   started_at?: number;
@@ -1494,6 +1502,28 @@ export async function startAgent(payload: AgentStartPayload) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * Send a user message to the project's agent session. While the agent is
+ * running the message is queued as an interjection; otherwise it starts a
+ * new turn continuing the same conversation.
+ */
+export async function sendAgentMessage(projectDir: string, message: string) {
+  return apiRequest<AgentStatus>('/api/agent/message', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_dir: projectDir, message }),
+  });
+}
+
+/** Stop any running turn and drop the session history. */
+export async function resetAgent(projectDir: string) {
+  return apiRequest<AgentStatus>('/api/agent/reset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_dir: projectDir }),
   });
 }
 

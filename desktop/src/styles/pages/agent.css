@@ -394,7 +394,7 @@
 
 .agent-row {
   display: flex;
-  padding: 10px 0;
+  padding: 8px 0;
 }
 
 .agent-row--user {
@@ -404,7 +404,7 @@
 .agent-bubble--user {
   width: min(max-content, 82%, 620px);
   max-width: min(82%, 620px);
-  padding: 10px 14px;
+  padding: 9px 13px;
   border-radius: var(--agent-radius-lg);
   background: var(--color-primary-soft);
 }
@@ -415,13 +415,13 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  margin-bottom: 4px;
+  margin-bottom: 3px;
 }
 
 .agent-bubble__text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  line-height: 1.6;
+  line-height: 1.55;
   font-size: 0.92rem;
 }
 
@@ -529,8 +529,7 @@
 }
 
 .agent-activity__body {
-  margin: 4px 0 6px 8px;
-  padding: 2px 0 2px 12px;
+  margin: 4px 0 6px;
   display: flex;
   flex-direction: column;
 }
@@ -618,14 +617,208 @@
 }
 
 .agent-thought__text {
-  margin: 3px 0 6px 20px;
-  padding-left: 12px;
-  border-left: 2px solid var(--color-line);
+  margin: 3px 0 6px;
   color: var(--color-text-muted);
   font-size: 0.84rem;
-  line-height: 1.65;
-  white-space: pre-wrap;
+  line-height: 1.6;
   overflow-wrap: anywhere;
+}
+
+/* 流式回复（打字机）：文本 + 闪烁光标 */
+.agent-thought.is-streaming .agent-thought__text {
+  color: var(--color-text);
+}
+
+.agent-typing-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--color-primary);
+  animation: agent-cursor-blink 0.9s steps(2, start) infinite;
+}
+
+.agent-typing-cursor--inline {
+  margin-left: 4px;
+}
+
+@keyframes agent-cursor-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ── Final reply（回合收尾回复：顶层普通消息） ── */
+
+.agent-final {
+  margin: 2px 0 6px;
+  color: var(--color-text);
+  font-size: 0.92rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.agent-final p:last-child {
+  margin-bottom: 0;
+}
+
+/* ── Markdown（对话气泡 / 思考 / finish 摘要内的富文本） ──
+   对标主流聊天客户端的正文密度：行距舒展、段落留呼吸感。 */
+
+.agent-md {
+  line-height: 1.6;
+}
+
+.agent-md p {
+  margin: 0 0 0.45em;
+}
+
+.agent-md p:last-child {
+  margin-bottom: 0;
+}
+
+.agent-md h3,
+.agent-md h4,
+.agent-md h5,
+.agent-md h6 {
+  margin: 0.75em 0 0.35em;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.agent-md h3:first-child,
+.agent-md h4:first-child,
+.agent-md h5:first-child,
+.agent-md h6:first-child {
+  margin-top: 0;
+}
+
+.agent-md h3 {
+  font-size: 1.05em;
+}
+
+.agent-md h4 {
+  font-size: 1em;
+}
+
+.agent-md h5,
+.agent-md h6 {
+  font-size: 0.95em;
+}
+
+.agent-md strong {
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.agent-md em {
+  font-style: italic;
+}
+
+.agent-md ul,
+.agent-md ol {
+  margin: 0.25em 0 0.5em;
+  padding-left: 1.35em;
+}
+
+.agent-md li {
+  margin: 0.12em 0;
+}
+
+.agent-md blockquote {
+  margin: 0.35em 0;
+  padding: 0.15em 0.75em;
+  border-left: 3px solid var(--color-line);
+  color: var(--color-text-muted);
+}
+
+.agent-md code {
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--agent-tile-strong, rgba(16, 24, 40, 0.08));
+  font-family: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+  font-size: 0.9em;
+}
+
+.agent-md pre {
+  margin: 0.35em 0 0.55em;
+  padding: 0.55em 0.75em;
+  border-radius: 8px;
+  background: var(--agent-tile-strong, rgba(16, 24, 40, 0.08));
+  overflow-x: auto;
+}
+
+.agent-md pre code {
+  padding: 0;
+  background: none;
+  font-size: 0.85em;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.agent-md hr {
+  margin: 0.7em 0;
+  border: 0;
+  border-top: 1px solid var(--color-line);
+}
+
+/* 表格：圆角线框容器风（对标参考效果）。
+   border-collapse: collapse 会让外框圆角失效，所以用 separate：
+   外框画在 table 自身，内部网格线由单元格提供。 */
+.agent-md table {
+  margin: 0.4em 0 0.65em;
+  width: fit-content;
+  max-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.95em;
+  line-height: 1.5;
+  /* 外框：1px 线 + 圆角，画在 table 自身 */
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  /* 超宽在框内横向滚动 */
+  display: block;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.agent-md th,
+.agent-md td {
+  padding: 4px 10px;
+  border: 0;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.agent-md th {
+  font-weight: 700;
+  color: var(--color-text);
+  background: var(--agent-tile, rgba(16, 24, 40, 0.04));
+  white-space: nowrap;
+}
+
+.agent-md th + th,
+.agent-md td + td {
+  /* 列间竖线：浅色，从表头到最后一行 */
+  border-left: 1px solid var(--color-line);
+}
+
+.agent-md thead th {
+  border-bottom: 1px solid var(--color-line);
+}
+
+.agent-md tbody td {
+  /* 行间横线 */
+  border-bottom: 1px solid var(--color-line);
+}
+
+.agent-md tbody tr:last-child td {
+  border-bottom: 0;
 }
 
 /* ── Tool row ── */
@@ -889,8 +1082,8 @@
 .agent-notice {
   display: flex;
   gap: var(--space-3);
-  margin: 10px 0;
-  padding: 12px 14px;
+  margin: 8px 0;
+  padding: 11px 13px;
   border-radius: var(--agent-radius);
   background: var(--agent-tile);
 }
@@ -932,9 +1125,10 @@
 .agent-notice__text {
   color: var(--color-text-muted);
   font-size: 0.86rem;
-  line-height: 1.6;
-  white-space: pre-wrap;
+  line-height: 1.55;
   overflow-wrap: anywhere;
+  /* 与 notice 卡片内边距配合，宽块（表格等）不贴右边 */
+  padding-right: 4px;
 }
 
 /* ── Composer ── */
@@ -1130,7 +1324,8 @@
   .agent-working__dots span,
   .agent-status-pill--running .agent-status-pill__dot,
   .agent-activity__label.is-running::after,
-  .agent-tool__state.is-running .agent-tool__state-dot {
+  .agent-tool__state.is-running .agent-tool__state-dot,
+  .agent-typing-cursor {
     animation: none;
   }
 

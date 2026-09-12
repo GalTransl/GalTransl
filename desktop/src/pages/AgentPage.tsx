@@ -15,11 +15,14 @@ import {
   getDefaultBackendProfile,
   stopAgent,
   startAgent,
+  sendAgentMessage,
+  resetAgent,
   subscribeAgentStream,
   fetchAgentStatus,
   type AgentEvent,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
+import { renderMarkdown } from '../lib/markdown';
 
 const OPEN_PROJECTS_KEY = 'galtransl-open-projects';
 const CONFIG_FILE_KEY = 'galtransl-config-file';
@@ -121,6 +124,10 @@ type ActivityItem = {
   result?: unknown;
   error?: string;
   durationMs?: number;
+  // 流式 thought：正在收 delta、还没收到 thought_end
+  streaming?: boolean;
+  // 回合的收尾回复：渲染时提升为顶层普通消息（不折进活动组）
+  final?: boolean;
   // wait tool: 倒计时快照
   waitTotalMs?: number;
   waitRemainingMs?: number;
@@ -128,8 +135,8 @@ type ActivityItem = {
 };
 
 type TimelineGroup =
-  | { type: 'activity'; id: string; items: ActivityItem[] }
-  | { type: 'finish'; id: string; step: number; summary: string; totalSteps?: number }
+  | { type: 'activity'; id: string; items: ActivityItem[]; finalThought?: ActivityItem }
+  | { type: 'user'; id: string; step: number; message: string }
   | { type: 'error'; id: string; step: number; message: string; traceback?: string }
   | { type: 'stopped'; id: string; step: number; reason: string };
 
@@ -145,9 +152,41 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
   for (const ev of events) {
     if (ev.type === 'status' || ev.type === 'close') continue;
 
+    // 用户消息独立成行（右对齐气泡），并打断当前活动组。
+    if (ev.type === 'user_message') {
+      closeActivity();
+      groups.push({ type: 'user', id: `u-${ev.step}`, step: ev.step, message: ev.message || '' });
+      continue;
+    }
+
     if (ev.type === 'thought') {
       if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
       current.items.push({ kind: 'thought', step: ev.step, content: ev.content });
+      continue;
+    }
+
+    // 流式思考增量：拼到活动组里最后一条流式 thought 上（打字机效果）。
+    // 没有可拼接的 thought（比如恢复会话时第一事件就是 delta）时新起一条。
+    if (ev.type === 'thought_delta') {
+      if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
+      const last = current.items[current.items.length - 1];
+      if (last && last.kind === 'thought' && last.streaming) {
+        last.content = (last.content || '') + (ev.delta || '');
+      } else {
+        current.items.push({
+          kind: 'thought',
+          step: ev.step,
+          content: ev.delta || '',
+          streaming: true,
+        });
+      }
+      continue;
+    }
+
+    // 一段流式文本结束：撤掉打字机光标
+    if (ev.type === 'thought_end') {
+      const last = current?.items[current.items.length - 1];
+      if (last && last.kind === 'thought') last.streaming = false;
       continue;
     }
 
@@ -207,17 +246,28 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
       continue;
     }
 
+    // finish 是回合的收尾回复：并入当前活动组作为普通"回复"项，
+    // finish 是回合的收尾回复：作为活动组的 final 消息，渲染时提升为
+    // 顶层普通文本（不折进折叠区），像对话里最后一条普通消息。
+    if (ev.type === 'finish') {
+      if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
+      const summary = ev.summary || '';
+      const last = current.items[current.items.length - 1];
+      // 无工具调用的收尾：流式期间已展示同一段文本，把它直接转为 final，
+      // 从折叠 items 里移出（避免既在组内折叠区又在顶层出现两次）。
+      if (last && last.kind === 'thought' && !last.streaming && last.content === summary) {
+        current.items.pop();
+      }
+      if (summary) {
+        current.finalThought = { kind: 'thought', step: ev.step, content: summary, final: true };
+      }
+      closeActivity(); // 回合结束：把组压进 groups，后续事件（新的 user_message 等）起新组
+      continue;
+    }
+
     // Terminal moments close the current activity run.
     closeActivity();
-    if (ev.type === 'finish') {
-      groups.push({
-        type: 'finish',
-        id: `f-${ev.step}`,
-        step: ev.step,
-        summary: ev.summary || '',
-        totalSteps: ev.total_steps,
-      });
-    } else if (ev.type === 'error') {
+    if (ev.type === 'error') {
       groups.push({
         type: 'error',
         id: `e-${ev.step}`,
@@ -343,7 +393,7 @@ export function AgentPage() {
   const [backendProfileName, setBackendProfileName] = useState<string>(
     () => getDefaultBackendProfile() || getBackendProfileNames()[0] || '',
   );
-  const [goal, setGoal] = useState('按标准流程完成本项目的翻译：先准备字典，再启动翻译，最后复核结果与问题。');
+  const [goal, setGoal] = useState('');
 
   const [events, setEvents] = useState<AgentEvent[]>(() => {
     const first = projectOptions[0];
@@ -354,11 +404,19 @@ export function AgentPage() {
   const [error, setError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  // 界面上的「发送中」乐观态：消息已发出但后端尚未确认
+  const [sending, setSending] = useState(false);
+  // 本地已乐观追加的 user_message 的临时 id 集合，SSE 回放时据此去重，
+  // 避免同一条消息渲染两次（发送时本地先显示，后端确认后回放同一条）
+  const localMsgIdsRef = useRef<Set<string>>(new Set());
 
   const abortRef = useRef<(() => void) | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
   const startRef = useRef(0);
+  // 是否已在后端建立会话（首条消息 startAgent 成功后置 true；reset 清空）。
+  // 不能用 events.length 判断：乐观追加后它立即 >0，但会话可能还没建好。
+  const hasBackendSessionRef = useRef(false);
 
   const effectiveProject = projectDir;
 
@@ -366,7 +424,9 @@ export function AgentPage() {
      backend (which may have a run in flight from a previous app session). */
   useEffect(() => {
     let cancelled = false;
+    localMsgIdsRef.current.clear();
     if (!effectiveProject) {
+      hasBackendSessionRef.current = false;
       setRunning(false);
       setStatus('idle');
       return;
@@ -375,12 +435,15 @@ export function AgentPage() {
     setEvents(persisted?.events || []);
     setStatus(persisted?.status || 'idle');
     startRef.current = persisted?.startedAt || 0;
+    // 本地有历史记录 = 后端大概率已有会话；以 status 快照对账结果为准
+    hasBackendSessionRef.current = Boolean(persisted?.events.length);
 
     fetchAgentStatus(effectiveProject)
       .then((snap) => {
         if (cancelled) return;
         if (snap.events && snap.events.length >= (persisted?.events.length || 0)) {
           setEvents(snap.events);
+          hasBackendSessionRef.current = Boolean(snap.events.length);
         }
         const snapRunning = snap.status === 'running';
         setStatus(snap.status);
@@ -407,11 +470,11 @@ export function AgentPage() {
       projectDir: effectiveProject,
       events,
       status,
-      goal,
+      goal: '',
       startedAt: startRef.current,
       finishedAt: status === 'running' ? 0 : Date.now(),
     });
-  }, [events, status, goal, effectiveProject]);
+  }, [events, status, effectiveProject]);
 
   // Elapsed timer while running.
   useEffect(() => {
@@ -458,6 +521,14 @@ export function AgentPage() {
           }
           return;
         }
+        if (ev.type === 'user_message') {
+          // 后端回放自己刚发的消息：本地已乐观显示，去重避免重复气泡
+          const localId = `local:${ev.message}`;
+          if (localMsgIdsRef.current.has(localId)) {
+            localMsgIdsRef.current.delete(localId);
+            return;
+          }
+        }
         setEvents((prev) => [...prev, ev]);
         if (ev.type === 'finish' || ev.type === 'error' || ev.type === 'stopped') {
           setRunning(false);
@@ -470,7 +541,9 @@ export function AgentPage() {
     );
   }, []);
 
-  const handleStart = useCallback(async () => {
+  const handleSend = useCallback(async () => {
+    const text = goal.trim();
+    if (!text) return;
     setError(null);
     if (!effectiveProject) {
       setError('请先选择一个项目');
@@ -482,22 +555,40 @@ export function AgentPage() {
       setSettingsOpen(true);
       return;
     }
-    setEvents([]);
+
+    // 像聊天一样：发送时本地立刻把这条消息显示成气泡，不等后端确认
+    const localId = `local:${text}`;
+    localMsgIdsRef.current.add(localId);
+    setEvents((prev) => [
+      ...prev,
+      { type: 'user_message', step: -1, message: text },
+    ]);
+    setGoal('');
+    setSending(true);
+    startRef.current = Date.now();
     setStatus('running');
     setRunning(true);
-    startRef.current = Date.now();
     try {
-      await startAgent({
-        project_dir: effectiveProject,
-        config_file_name: configFileName || 'config.yaml',
-        backend_profile_data: profile,
-        goal,
-      });
+      if (!hasBackendSessionRef.current) {
+        // 第一条消息：创建会话并跑第一回合
+        await startAgent({
+          project_dir: effectiveProject,
+          config_file_name: configFileName || 'config.yaml',
+          backend_profile_data: profile,
+          goal: text,
+        });
+        hasBackendSessionRef.current = true;
+      } else {
+        // 已有会话：运行中→插话排队；已结束→同会话继续下一回合
+        await sendAgentMessage(effectiveProject, text);
+      }
       subscribeStream(effectiveProject);
     } catch (err) {
-      setError(normalizeError(err, '启动 Agent 失败'));
+      setError(normalizeError(err, '发送失败'));
       setRunning(false);
       setStatus('failed');
+    } finally {
+      setSending(false);
     }
   }, [effectiveProject, backendProfileName, configFileName, goal, subscribeStream]);
 
@@ -520,17 +611,26 @@ export function AgentPage() {
       if (typeof selected === 'string' && selected) {
         setProjectDir(selected);
         setConfigFileName(readConfigFileName(selected));
+        setGoal('');
       }
     } catch {
       // User cancelled.
     }
   }, []);
 
-  const handleClear = useCallback(() => {
+  const handleClear = useCallback(async () => {
     if (!effectiveProject) return;
+    try {
+      // 清空 = 重置会话：停掉运行中的回合并丢弃后端历史
+      await resetAgent(effectiveProject);
+    } catch {
+      // 后端不可达也要清本地视图
+    }
     setEvents([]);
     setStatus('idle');
     setError(null);
+    localMsgIdsRef.current.clear();
+    hasBackendSessionRef.current = false;
     try {
       localStorage.removeItem(sessionsKey(effectiveProject));
     } catch {
@@ -540,7 +640,8 @@ export function AgentPage() {
 
   const timeline = useMemo(() => buildTimeline(events), [events]);
   const stepCount = useMemo(() => timeline.reduce((n, g) => n + (g.type === 'activity' ? g.items.length : 1), 0), [timeline]);
-  const canStart = Boolean(projectDir) && Boolean(backendProfileName) && !running;
+  const hasSession = events.length > 0;
+  const canSend = Boolean(projectDir) && Boolean(backendProfileName) && goal.trim().length > 0 && !sending;
 
   return (
     <div className="agent-console">
@@ -594,9 +695,9 @@ export function AgentPage() {
           <button
             type="button"
             className="agent-console__icon-btn"
-            onClick={handleClear}
+            onClick={() => void handleClear()}
             disabled={running || !events.length}
-            title="清空对话"
+            title="重置会话（清空全部对话与后端历史）"
           >
             🗑
           </button>
@@ -651,7 +752,7 @@ export function AgentPage() {
               <div className="agent-hero__mark">🤖</div>
               <h2 className="agent-hero__title">让 Agent 替你跑完整个翻译流程</h2>
               <p className="agent-hero__subtitle">
-                它会自主了解项目、准备字典、启动翻译、跟进进度，并复核修复发现的问题。每一步的思考与操作都会实时显示在这里。
+                发送第一条消息启动会话，它会自主了解项目、准备字典、启动翻译、跟进进度，并复核修复发现的问题。运行中你可以随时插话或点停止打断，之后继续发消息它会在原会话上接着干。
               </p>
               <div className="agent-hero__steps">
                 <span>① 了解项目</span>
@@ -662,15 +763,6 @@ export function AgentPage() {
             </div>
           ) : (
             <>
-              {projectDir ? (
-                <div className="agent-row agent-row--user">
-                  <div className="agent-bubble agent-bubble--user">
-                    <div className="agent-bubble__label">目标</div>
-                    <div className="agent-bubble__text">{goal}</div>
-                  </div>
-                </div>
-              ) : null}
-
               {timeline.map((group, index) => (
                 <AgentGroupView
                   key={group.id}
@@ -710,13 +802,18 @@ export function AgentPage() {
             className="agent-composer__input"
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
-            placeholder="描述你希望 Agent 完成的目标，例如：按标准流程完成本项目的翻译。"
+            placeholder={
+              running
+                ? 'Agent 正在工作中，输入消息插话或留空等待；也可以点右侧 ■ 停止。'
+                : hasSession
+                  ? '给 Agent 下一步指令，它会接着当前进度继续。'
+                  : '描述你希望 Agent 完成的任务，例如：按标准流程完成本项目的翻译。'
+            }
             rows={2}
-            disabled={running}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && canStart) {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && canSend) {
                 e.preventDefault();
-                void handleStart();
+                void handleSend();
               }
             }}
           />
@@ -736,7 +833,6 @@ export function AgentPage() {
                 type="button"
                 className="agent-composer__chip"
                 onClick={() => setSettingsOpen((v) => !v)}
-                disabled={running}
                 title="模型与配置"
               >
                 <span className="agent-composer__chip-icon">⚙</span>
@@ -745,17 +841,29 @@ export function AgentPage() {
             </div>
             <div className="agent-composer__right">
               {running ? (
-                <button type="button" className="agent-composer__stop" onClick={handleStop} title="停止 Agent">
-                  <span className="agent-composer__stop-icon" />
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="agent-composer__send"
+                    onClick={() => void handleSend()}
+                    disabled={!canSend}
+                    title="发送插话（Agent 会在下一步看到，Ctrl/⌘ + Enter）"
+                    aria-label="发送插话"
+                  >
+                    ↑
+                  </button>
+                  <button type="button" className="agent-composer__stop" onClick={handleStop} title="停止 Agent">
+                    <span className="agent-composer__stop-icon" />
+                  </button>
+                </>
               ) : (
                 <button
                   type="button"
                   className="agent-composer__send"
-                  onClick={handleStart}
-                  disabled={!canStart}
-                  title="启动 Agent（Ctrl/⌘ + Enter）"
-                  aria-label="启动 Agent"
+                  onClick={() => void handleSend()}
+                  disabled={!canSend}
+                  title={hasSession ? '发送并继续（Ctrl/⌘ + Enter）' : '发送并启动 Agent（Ctrl/⌘ + Enter）'}
+                  aria-label="发送消息"
                 >
                   ↑
                 </button>
@@ -769,6 +877,8 @@ export function AgentPage() {
           <div className="agent-composer__hint agent-composer__hint--warn">
             尚未选择翻译后端配置，点击上方 ⚙ 设置
           </div>
+        ) : running ? null : hasSession ? (
+          <div className="agent-composer__hint">会话保留中 · 发送消息即可继续，🗑 可重置</div>
         ) : null}
       </div>
     </div>
@@ -776,7 +886,7 @@ export function AgentPage() {
 }
 
 function isTerminal(s: string): boolean {
-  return s === 'done' || s === 'stopped' || s === 'failed' || s === 'idle';
+  return s === 'awaiting_input' || s === 'done' || s === 'failed' || s === 'idle';
 }
 
 function workingLabel(timeline: TimelineGroup[]): string {
@@ -793,8 +903,8 @@ function StatusPill({ status, running, elapsed }: { status: string; running: boo
   const tone = running ? 'running' : status;
   const label = running
     ? `运行中 · ${formatElapsed(elapsed)}`
-    : status === 'done'
-      ? '已完成'
+    : status === 'awaiting_input' || status === 'done'
+      ? '等待指令'
       : status === 'stopped'
         ? '已停止'
         : status === 'failed'
@@ -813,10 +923,36 @@ function StatusPill({ status, running, elapsed }: { status: string; running: boo
 function AgentGroupView({ group, isLive }: { group: TimelineGroup; isLive: boolean }) {
   // Terminal groups render as notices and hold no disclosure state; dispatch
   // them before the activity component so its hooks never run conditionally.
-  if (group.type === 'finish') return <FinishNotice group={group} />;
+  if (group.type === 'user') return <UserMessageRow message={group.message} />;
   if (group.type === 'error') return <ErrorNotice group={group} />;
   if (group.type === 'stopped') return <StoppedNotice group={group} />;
+  if (group.type === 'activity' && group.finalThought) {
+    return (
+      <>
+        {group.items.length > 0 ? <AgentActivityGroup group={group} isLive={isLive} /> : null}
+        <FinalMessage item={group.finalThought} />
+      </>
+    );
+  }
   return <AgentActivityGroup group={group} isLive={isLive} />;
+}
+
+/** 回合收尾回复：顶层普通消息，像聊天里最后一条回答。 */
+function FinalMessage({ item }: { item: ActivityItem }) {
+  return (
+    <div className="agent-final agent-md" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.content || '') }} />
+  );
+}
+
+function UserMessageRow({ message }: { message: string }) {
+  return (
+    <div className="agent-row agent-row--user">
+      <div className="agent-bubble agent-bubble--user">
+        <div className="agent-bubble__label">我</div>
+        <div className="agent-bubble__text">{message}</div>
+      </div>
+    </div>
+  );
 }
 
 function AgentActivityGroup({
@@ -912,28 +1048,52 @@ function asArgs(args: unknown): Record<string, unknown> | undefined {
 
 function ThoughtRow({ item }: { item: ActivityItem }) {
   const [open, setOpen] = useState(false);
+  const userToggledRef = useRef(false);
   const text = item.content || '';
+  const streaming = Boolean(item.streaming);
   const long = text.length > 180 || text.includes('\n');
+
+  // 流式打字期间保持展开（用户没手动点过的话），结束后按用户意图/默认收起
+  useEffect(() => {
+    if (userToggledRef.current) return;
+    setOpen(streaming);
+  }, [streaming]);
+
   return (
-    <div className={`agent-thought${open ? ' is-open' : ''}`}>
+    <div className={`agent-thought${open ? ' is-open' : ''}${streaming ? ' is-streaming' : ''}`}>
       <button
         type="button"
         className="agent-thought__header"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          userToggledRef.current = true;
+          setOpen((v) => !v);
+        }}
         disabled={!long}
         aria-expanded={open}
       >
         <span className="agent-thought__icon">✳</span>
-        <span className="agent-thought__label">思考</span>
-        {!long ? <span className="agent-thought__inline">{collapse(text)}</span> : null}
+        <span className="agent-thought__label">{streaming ? '回复中' : '回复'}</span>
+        {!long ? (
+          <span
+            className="agent-thought__inline agent-md"
+            // markdown 已在渲染器内整体转义，无注入面
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
+          />
+        ) : null}
         {long ? <span className="agent-thought__caret">›</span> : null}
       </button>
       {long ? (
         <div className="agent-thought__collapse">
           <div className="agent-thought__collapse-inner">
-            <div className="agent-thought__text">{text}</div>
+            <div
+              className="agent-thought__text agent-md"
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
+            />
+            {streaming ? <span className="agent-typing-cursor" aria-hidden /> : null}
           </div>
         </div>
+      ) : streaming ? (
+        <span className="agent-typing-cursor agent-typing-cursor--inline" aria-hidden />
       ) : null}
     </div>
   );
@@ -1052,18 +1212,6 @@ function ToolBlock({
 }
 
 /* ── Terminal notices ── */
-
-function FinishNotice({ group }: { group: Extract<TimelineGroup, { type: 'finish' }> }) {
-  return (
-    <div className="agent-notice agent-notice--finish">
-      <span className="agent-notice__icon">🏁</span>
-      <div className="agent-notice__body">
-        <div className="agent-notice__title">已结束 · 共 {group.totalSteps ?? group.step} 步</div>
-        {group.summary ? <div className="agent-notice__text">{group.summary}</div> : null}
-      </div>
-    </div>
-  );
-}
 
 function ErrorNotice({ group }: { group: Extract<TimelineGroup, { type: 'error' }> }) {
   return (
