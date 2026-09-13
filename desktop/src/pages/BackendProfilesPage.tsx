@@ -6,10 +6,14 @@ import { Panel } from '../components/Panel';
 import { EmptyState, InlineFeedback, LoadingState } from '../components/page-state';
 import { ProxyConfigEditor } from '../components/ProxyConfigEditor';
 import {
+  AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
+  DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
   createBackendProfile,
   deleteBackendProfile,
   fetchBackendProfiles,
+  getAgentDefaultBackendProfile,
   getDefaultBackendProfile,
+  setAgentDefaultBackendProfile,
   setDefaultBackendProfile } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 
@@ -67,6 +71,7 @@ export function BackendProfilesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [defaultProfile, setDefaultProfileState] = useState(getDefaultBackendProfile());
+  const [agentDefaultProfile, setAgentDefaultState] = useState(getAgentDefaultBackendProfile());
 
   // Editor state
   const [editingName, setEditingName] = useState('');
@@ -90,6 +95,7 @@ export function BackendProfilesPage() {
       );
       setProfiles(entries);
       setDefaultProfileState(getDefaultBackendProfile());
+      setAgentDefaultState(getAgentDefaultBackendProfile());
     } catch (err) {
       setError(normalizeError(err, '加载后端配置失败'));
     } finally {
@@ -100,6 +106,18 @@ export function BackendProfilesPage() {
   useEffect(() => {
     void loadProfiles();
   }, [loadProfiles]);
+
+  // 默认标签可能从别处改动（将来留口子），监听两个事件保持 badge 实时同步
+  useEffect(() => {
+    const onTranslatorDefault = (e: Event) => setDefaultProfileState((e as CustomEvent<string>).detail || '');
+    const onAgentDefault = (e: Event) => setAgentDefaultState((e as CustomEvent<string>).detail || '');
+    window.addEventListener(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, onTranslatorDefault as EventListener);
+    window.addEventListener(AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, onAgentDefault as EventListener);
+    return () => {
+      window.removeEventListener(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, onTranslatorDefault as EventListener);
+      window.removeEventListener(AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, onAgentDefault as EventListener);
+    };
+  }, []);
 
   const openNewDialog = useCallback(() => {
     setNewProfileName('');
@@ -238,7 +256,10 @@ export function BackendProfilesPage() {
                       <div className="profile-card__name">
                         {entry.name}
                         {defaultProfile === entry.name && (
-                          <span className="profile-card__badge">默认</span>
+                          <span className="profile-card__badge">翻译器默认</span>
+                        )}
+                        {agentDefaultProfile === entry.name && (
+                          <span className="profile-card__badge profile-card__badge--agent">Agent 默认</span>
                         )}
                       </div>
                       <div className="profile-card__meta">Base URL：{baseUrl}</div>
@@ -253,7 +274,7 @@ export function BackendProfilesPage() {
                             setDefaultProfileState(entry.name);
                           }}
                         >
-                          设为默认
+                          设为翻译器默认
                         </Button>
                       ) : (
                         <Button
@@ -263,7 +284,28 @@ export function BackendProfilesPage() {
                             setDefaultProfileState('');
                           }}
                         >
-                          取消默认
+                          取消翻译器默认
+                        </Button>
+                      )}
+                      {agentDefaultProfile !== entry.name ? (
+                        <Button
+                          variant="secondary"
+                          onClick={() => {
+                            setAgentDefaultBackendProfile(entry.name);
+                            setAgentDefaultState(entry.name);
+                          }}
+                        >
+                          设为 Agent 默认
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="secondary"
+                          onClick={() => {
+                            setAgentDefaultBackendProfile('');
+                            setAgentDefaultState('');
+                          }}
+                        >
+                          取消 Agent 默认
                         </Button>
                       )}
                       <Button

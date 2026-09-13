@@ -10,10 +10,11 @@ import { useNavigate } from 'react-router-dom';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import {
   addOpenProject,
+  AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
   encodeProjectDir,
+  getAgentDefaultBackendProfile,
   getBackendProfile,
   getBackendProfileNames,
-  getDefaultBackendProfile,
   loadOpenProjects,
   OPEN_PROJECTS_CHANGE_EVENT,
   readConfigFileName,
@@ -570,13 +571,30 @@ export function AgentPage() {
     return () => window.removeEventListener(OPEN_PROJECTS_CHANGE_EVENT, sync);
   }, [mergeProjects]);
 
+  // 跟随 Agent 默认后端配置：默认标签变化时同步过来；但用户在⚙下拉里
+  // 临时改过的本次会话不再覆盖（profileTouchedRef），切会话时重置该标记。
+  useEffect(() => {
+    const sync = (e: Event) => {
+      if (profileTouchedRef.current) return;
+      const next = (e as CustomEvent<string>).detail || '';
+      if (next) setBackendProfileName(next);
+    };
+    window.addEventListener(AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, sync as EventListener);
+    // 进入页面时也对齐一次当前 Agent 默认（若本次会话还没临时改过）
+    if (!profileTouchedRef.current) {
+      const cur = getAgentDefaultBackendProfile();
+      if (cur) setBackendProfileName(cur);
+    }
+    return () => window.removeEventListener(AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, sync as EventListener);
+  }, []);
+
   const [projectDir, setProjectDir] = useState<string>(() => projectOptions[0] || '');
   const [configFileName, setConfigFileName] = useState<string>(() =>
     projectOptions[0] ? readConfigFileName(projectOptions[0]) : 'config.yaml',
   );
   const [backendProfileNames] = useState<string[]>(() => getBackendProfileNames());
   const [backendProfileName, setBackendProfileName] = useState<string>(
-    () => getDefaultBackendProfile() || getBackendProfileNames()[0] || '',
+    () => getAgentDefaultBackendProfile() || getBackendProfileNames()[0] || '',
   );
   const [goal, setGoal] = useState('');
 
@@ -610,10 +628,19 @@ export function AgentPage() {
   // 是否已在后端建立会话（首条消息 startAgent 成功后置 true；reset 清空）。
   // 不能用 events.length 判断：乐观追加后它立即 >0，但会话可能还没建好。
   const hasBackendSessionRef = useRef(false);
+  // 用户在⚙下拉里临时改过后端配置，则本次会话内 Agent 默认标签的变更不再覆盖。
+  // 新建/切换会话时重置，恢复跟随 Agent 默认。
+  const profileTouchedRef = useRef(false);
+  // 从 hero 选择项目 / 顶部＋新建空会话：切项目后不应自动加载该项目上次
+  // 记忆的会话，而要保持空态等用户发消息创建新会话。置位后项目 effect
+  // 会把 activeSessionId 清空而非取 remembered，随后清掉一次性标志。
+  const skipRememberedSessionRef = useRef(false);
   // 当前激活的会话 id，供回调读取（避免闭包读到旧值）
   const activeSessionRef = useRef('');
   useEffect(() => {
     activeSessionRef.current = activeSessionId;
+    // 切会话时重置"已临时改过"标记，让后端配置回到跟随 Agent 默认
+    profileTouchedRef.current = false;
   }, [activeSessionId]);
   // 当前活动项目，供回调读取（refreshSessions 判断是否接管 activeSessionId）
   const effectiveProjectRef = useRef(projectDir);
@@ -624,9 +651,10 @@ export function AgentPage() {
   const effectiveProject = projectDir;
 
   /** 拉取某项目的会话列表并写进按项目分组的 map（不动其他项目的会话）。
-   *  preferredId 命中则切到该会话；否则在该项目列表非空时取第一个。 */
+   *  preferredId 命中则切到该会话；allowAutoPick 为真（默认）且列表非空时取第一个，
+   *  否则保持现状（hero 选项目等空态场景不自动加载历史会话）。 */
   const refreshSessions = useCallback(
-    async (dir: string, preferredId?: string): Promise<AgentSessionMeta[]> => {
+    async (dir: string, preferredId?: string, allowAutoPick = true): Promise<AgentSessionMeta[]> => {
       try {
         const list = await listAgentSessions(dir);
         setSessionsByProject((prev) => ({ ...prev, [dir]: list }));
@@ -638,7 +666,7 @@ export function AgentPage() {
             setActiveSessionId(want);
             activeSessionRef.current = want;
             saveActiveSessionId(dir, want);
-          } else if (list.length) {
+          } else if (allowAutoPick && list.length) {
             setActiveSessionId(list[0].session_id);
             activeSessionRef.current = list[0].session_id;
             saveActiveSessionId(dir, list[0].session_id);
@@ -668,7 +696,11 @@ export function AgentPage() {
       setStatus('idle');
       return;
     }
-    const remembered = loadActiveSessionId(effectiveProject);
+    const skip = skipRememberedSessionRef.current;
+    skipRememberedSessionRef.current = false;
+    // hero 选项目 / 顶部＋：保持空态等用户发消息创建新会话，不取历史会话，
+    // 也不让 refreshSessions 自动切到该项目最近的会话
+    const remembered = skip ? '' : loadActiveSessionId(effectiveProject);
     setActiveSessionId(remembered);
     activeSessionRef.current = remembered;
     // accordion：展开当前项目、收起其他（用户仍可手动再展开别的）
@@ -677,7 +709,7 @@ export function AgentPage() {
       for (const d of projectOptions) next[d] = d !== effectiveProject;
       return next;
     });
-    void refreshSessions(effectiveProject, remembered);
+    void refreshSessions(effectiveProject, remembered, !skip);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveProject]);
 
@@ -930,6 +962,8 @@ export function AgentPage() {
       const selected = await openDialog({ directory: true, multiple: false });
       if (typeof selected === 'string' && selected) {
         const cfg = readConfigFileName(selected);
+        // 经 hero"打开项目"选的项目，保持空态等发消息建新会话，不取历史会话
+        skipRememberedSessionRef.current = true;
         setProjectDir(selected);
         setConfigFileName(cfg);
         setGoal('');
@@ -943,10 +977,12 @@ export function AgentPage() {
   }, []);
 
   /** 从 hero 的"已打开项目"列表里直接选中一个项目开始。幂等：addOpenProject
-   *  保证该项目在翻译器已打开列表里；项目 effect 接管加载该项目的会话列表。 */
+   *  保证该项目在翻译器已打开列表里。选中后保持空态等用户发消息创建新会话，
+   *  不自动加载该项目上次的历史会话。 */
   const chooseProject = useCallback((dir: string) => {
     if (!dir) return;
     const cfg = readConfigFileName(dir);
+    skipRememberedSessionRef.current = true;
     setProjectDir(dir);
     setConfigFileName(cfg);
     setGoal('');
@@ -1195,7 +1231,10 @@ export function AgentPage() {
             <span>翻译后端配置</span>
             <select
               value={backendProfileName}
-              onChange={(e) => setBackendProfileName(e.target.value)}
+              onChange={(e) => {
+                setBackendProfileName(e.target.value);
+                profileTouchedRef.current = true;
+              }}
               disabled={running}
             >
               {backendProfileNames.length === 0 ? (

@@ -171,6 +171,7 @@
   font-weight: 600;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 
@@ -184,6 +185,12 @@
   line-height: 1;
 }
 
+/* Agent 默认与翻译器默认用不同颜色区分，便于一眼看出哪个角色 */
+.profile-card__badge--agent {
+  background: var(--color-accent-soft, rgba(99, 102, 241, 0.14));
+  color: var(--color-accent, #6366f1);
+}
+
 .profile-card__meta {
   font-size: 13px;
   color: var(--color-text-muted);
@@ -191,6 +198,8 @@
 
 .profile-card__actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--space-2);
 }
 

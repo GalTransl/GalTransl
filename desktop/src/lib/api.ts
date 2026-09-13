@@ -884,7 +884,9 @@ export async function createBackendProfile(name: string, profile: Record<string,
   profiles[trimmedName] = cloneBackendProfile(profile);
   writeBackendProfilesStorage(profiles);
   if (isFirstProfile) {
+    // 首个配置：同时设为翻译器默认 + Agent 默认（两者独立，新装好都给它最省心）
     setDefaultBackendProfile(trimmedName);
+    setAgentDefaultBackendProfile(trimmedName);
   }
   return { success: true, name: trimmedName };
 }
@@ -904,8 +906,12 @@ export async function deleteBackendProfile(name: string) {
   }
   delete profiles[trimmedName];
   writeBackendProfilesStorage(profiles);
+  // 删配置时：若它是翻译器默认就清翻译器默认、若是 Agent 默认就清 Agent 默认（互不影响）
   if (getDefaultBackendProfile() === trimmedName) {
     setDefaultBackendProfile('');
+  }
+  if (getAgentDefaultBackendProfile() === trimmedName) {
+    setAgentDefaultBackendProfile('');
   }
   return { success: true, name: trimmedName };
 }
@@ -1148,6 +1154,37 @@ export function setDefaultBackendProfile(name: string) {
       localStorage.removeItem(DEFAULT_BACKEND_PROFILE_KEY);
     }
     window.dispatchEvent(new CustomEvent(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, { detail: name }));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+/* ── Agent 默认后端配置（与翻译器默认各自独立） ──
+ * 同一配置可同时是翻译器默认 + Agent 默认，也可只占其一；两者互不影响。
+ * Agent 页用这套；翻译器页继续用上面的 getDefaultBackendProfile（翻译器默认）。 */
+const AGENT_DEFAULT_BACKEND_PROFILE_KEY = 'galtransl-agent-default-backend-profile';
+
+/** Custom event dispatched when the Agent default backend profile changes. */
+export const AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT = 'galtransl:agent-default-backend-profile-change';
+
+/** Get the Agent default backend profile name (independent of translator default). */
+export function getAgentDefaultBackendProfile(): string {
+  try {
+    return localStorage.getItem(AGENT_DEFAULT_BACKEND_PROFILE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+/** Set the Agent default backend profile name. Pass empty to clear. */
+export function setAgentDefaultBackendProfile(name: string) {
+  try {
+    if (name) {
+      localStorage.setItem(AGENT_DEFAULT_BACKEND_PROFILE_KEY, name);
+    } else {
+      localStorage.removeItem(AGENT_DEFAULT_BACKEND_PROFILE_KEY);
+    }
+    window.dispatchEvent(new CustomEvent(AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, { detail: name }));
   } catch {
     // ignore storage errors
   }
