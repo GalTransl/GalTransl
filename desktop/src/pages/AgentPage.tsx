@@ -201,10 +201,13 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
       continue;
     }
 
-    // 一段流式文本结束：撤掉打字机光标
+    // 一段流式文本结束：撤掉打字机光标，并记下这段思考的耗时
     if (ev.type === 'thought_end') {
       const last = current?.items[current.items.length - 1];
-      if (last && last.kind === 'thought') last.streaming = false;
+      if (last && last.kind === 'thought') {
+        last.streaming = false;
+        if (typeof ev.duration_ms === 'number') last.durationMs = ev.duration_ms;
+      }
       continue;
     }
 
@@ -276,18 +279,13 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
       continue;
     }
 
-    // finish 是回合的收尾回复：并入当前活动组作为普通"回复"项，
     // finish 是回合的收尾回复：作为活动组的 final 消息，渲染时提升为
     // 顶层普通文本（不折进折叠区），像对话里最后一条普通消息。
     if (ev.type === 'finish') {
       if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
       const summary = ev.summary || '';
-      const last = current.items[current.items.length - 1];
-      // 无工具调用的收尾：流式期间已展示同一段文本，把它直接转为 final，
-      // 从折叠 items 里移出（避免既在组内折叠区又在顶层出现两次）。
-      if (last && last.kind === 'thought' && !last.streaming && last.content === summary) {
-        current.items.pop();
-      }
+      // 收尾回复保留折叠区里的流式 thought（显示「思考 · 耗时」），
+      // summary 另行提升为顶层 final 消息，两者并存。
       if (summary) {
         current.finalThought = { kind: 'thought', step: ev.step, content: summary, final: true };
       }
@@ -1563,7 +1561,8 @@ function AgentActivityGroup({
   if (totalMs > 0) parts.push(formatDuration(totalMs));
   if (visibleCount > 1) parts.push(`${visibleCount} 步`);
 
-  const tail = isLive ? liveTail(items) : '';
+  // 预览小字：只在折叠且回合仍在跑时显示（展开时内容全可见，无需预览）
+  const tail = isLive && !open ? liveTail(items) : '';
 
   return (
     <div className={`agent-activity${open ? ' is-open' : ''}${isLive ? ' is-live' : ''}`}>

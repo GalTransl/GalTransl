@@ -252,6 +252,7 @@ class AgentRunner:
         run 只负责循环。回合结束后状态置为 awaiting_input，用户可继续
         发消息触发下一回合。
         """
+        turns = 0  # 本回合真实 LLM 请求次数；state.step 是事件计数（含流式 delta），不代表轮数
         try:
             self._resolve_llm()
             if not self.state.messages:
@@ -277,7 +278,8 @@ class AgentRunner:
                 # 历史过长先压缩，避免下一步请求撑爆上下文窗口
                 self._maybe_compact()
 
-                loop_step = _ + 1
+                loop_step = turns + 1
+                turns += 1
                 _log(f"—— 第 {loop_step}/{MAX_STEPS} 轮：请求 LLM（流式）中…")
                 req_started = time.time()
                 content, tool_calls, finish_reason = self._stream_llm_response()
@@ -321,8 +323,8 @@ class AgentRunner:
                 if not tool_calls:
                     # 收尾回复也要写进历史，下一轮对话才能看到 Agent 说过什么
                     self._persist_message({"role": "assistant", "content": content})
-                    _log(f"无工具调用，回合完成，共 {self.state.step} 步")
-                    self._end_turn("done", {"summary": content, "total_steps": self.state.step})
+                    _log(f"无工具调用，回合完成，共 {turns} 轮")
+                    self._end_turn("done", {"summary": content, "total_steps": turns})
                     return
 
                 # 把 assistant 这条消息原样追加（含 tool_calls），再逐个执行
@@ -400,7 +402,7 @@ class AgentRunner:
                 "done",
                 {
                     "summary": f"本回合达到最大步数 {MAX_STEPS}，已暂停。你可以发消息让我继续。",
-                    "total_steps": self.state.step,
+                    "total_steps": turns,
                 },
             )
         except Exception as exc:  # noqa: BLE001 - 顶层守护
@@ -415,7 +417,7 @@ class AgentRunner:
             # 无论正常收尾还是异常退出，都要清掉落盘里的 running 标记
             if self._store is not None:
                 self._store.append_meta(running=False)
-            _log(f"Agent 回合结束，状态={self.state.status}，总步数={self.state.step}")
+            _log(f"Agent 回合结束，状态={self.state.status}，共 {turns} 轮（事件 {self.state.step} 个）")
             if self.state.pending_followup:
                 # 插话滞留到收尾（回合已停止消费），开新回合处理
                 followup_runner = getattr(self, "_registry", None)
@@ -494,6 +496,7 @@ class AgentRunner:
         last_delta_emit = 0.0
         pending_delta = []  # 距上次 emit 攒下的文本（节流缓冲）
         finish_reason = ""
+        stream_started = time.time()  # 用于前端「思考 · 耗时」展示
 
         for chunk in stream:
             if self.stop_event.is_set():
@@ -546,7 +549,10 @@ class AgentRunner:
             )
         # 告诉前端这一段文本流结束（前端据此撤掉打字机光标）
         if content_parts:
-            self._emit("thought_end", {"length": len("".join(content_parts))})
+            self._emit("thought_end", {
+                "length": len("".join(content_parts)),
+                "duration_ms": int((time.time() - stream_started) * 1000),
+            })
 
         tool_calls = [
             {
