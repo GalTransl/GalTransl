@@ -1613,27 +1613,19 @@ function asArgs(args: unknown): Record<string, unknown> | undefined {
 }
 
 function ThoughtRow({ item }: { item: ActivityItem }) {
-  const [open, setOpen] = useState(false);
-  const userToggledRef = useRef(false);
+  // 默认展开：模型「回复」始终可见，不随流式结束自动收起。
+  // 用户仍可手动点 header 折叠/展开单个回复。
+  const [open, setOpen] = useState(true);
   const text = item.content || '';
   const streaming = Boolean(item.streaming);
   const long = text.length > 180 || text.includes('\n');
-
-  // 流式打字期间保持展开（用户没手动点过的话），结束后按用户意图/默认收起
-  useEffect(() => {
-    if (userToggledRef.current) return;
-    setOpen(streaming);
-  }, [streaming]);
 
   return (
     <div className={`agent-thought${open ? ' is-open' : ''}${streaming ? ' is-streaming' : ''}`}>
       <button
         type="button"
         className="agent-thought__header"
-        onClick={() => {
-          userToggledRef.current = true;
-          setOpen((v) => !v);
-        }}
+        onClick={() => setOpen((v) => !v)}
         disabled={!long}
         aria-expanded={open}
       >
