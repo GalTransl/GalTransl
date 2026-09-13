@@ -1621,6 +1621,170 @@
   text-decoration: underline;
 }
 
+/* ── 写入类工具的变更卡片（diff 风格） ── */
+
+.agent-changes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-changes__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-muted);
+  font-size: 0.76rem;
+}
+
+.agent-changes__title {
+  font-weight: 600;
+}
+
+.agent-changes__count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--agent-tile-strong);
+  color: var(--color-text-muted);
+  font-family: var(--agent-mono);
+  font-size: 0.7rem;
+}
+
+.agent-changes__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 320px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: var(--agent-tile);
+  padding: 6px 8px;
+}
+
+/* 行级 diff（save_dict 整文本 / delete_cache 条目） */
+.agent-changes__dline {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-family: var(--agent-mono);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.agent-changes__dline--add {
+  background: rgba(47, 158, 68, 0.1);
+  color: var(--color-success);
+}
+
+.agent-changes__dline--del {
+  background: rgba(217, 48, 37, 0.08);
+  color: var(--color-danger);
+  text-decoration: line-through;
+  text-decoration-color: rgba(217, 48, 37, 0.45);
+}
+
+.agent-changes__sign {
+  flex: none;
+  width: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.agent-changes__dline--add .agent-changes__sign,
+.agent-changes__dline--del .agent-changes__sign {
+  text-decoration: none;
+}
+
+.agent-changes__dtext {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 键值级变更（配置/patch/人名表）：路径 + 旧值删除行 + 新值高亮行 */
+.agent-changes__item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px;
+  border-radius: 6px;
+  background: var(--agent-tile);
+}
+
+.agent-changes__item + .agent-changes__item {
+  margin-top: 3px;
+}
+
+.agent-changes__path {
+  color: var(--color-text-muted);
+  font-family: var(--agent-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.agent-changes__old,
+.agent-changes__new {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--agent-mono);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.agent-changes__old {
+  color: var(--color-danger);
+  text-decoration: line-through;
+  text-decoration-color: rgba(217, 48, 37, 0.45);
+}
+
+.agent-changes__old .agent-changes__sign {
+  text-decoration: none;
+  color: var(--color-danger);
+}
+
+.agent-changes__new {
+  color: var(--color-success);
+}
+
+.agent-changes__new .agent-changes__sign {
+  color: var(--color-success);
+}
+
+.agent-changes__more,
+.agent-changes__morebtn {
+  padding: 2px 4px;
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+}
+
+.agent-changes__morebtn {
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.agent-changes__morebtn:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+/* 折叠头部上的 ±N 徽标：一眼看出这个写入动作改了多少处 */
+.agent-tool__diffbadge {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--agent-tile-strong);
+  color: var(--color-text-muted);
+  font-family: var(--agent-mono);
+  font-size: 0.7rem;
+}
+
 /* ── Working indicator ── */
 
 .agent-working {

@@ -211,20 +211,22 @@ class AgentRunner:
         self._model: str = ""
         self._context_window = DEFAULT_CONTEXT_WINDOW
         self._compacted_this_turn = False
+        self._emit_lock = threading.Lock()
         # 会话落盘器：state 里没有 session_id（理论上不该发生）时退化为内存态
         self._store = SessionStore(state.project_dir, state.session_id) if state.session_id else None
 
     # ---- 事件 ----
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
-        self.state.step += 1
-        event = AgentEvent(type=event_type, step=self.state.step, data=data)
-        if event_type in _TRANSIENT_EVENT_TYPES:
-            # 瞬态事件只给实时流（SSE drain 即取即弃），不进长期窗口
-            self.state.transient_events.append(event)
-            return
-        self.state.events.append(event)
-        if self._store is not None:
-            self._store.append_event(event.to_dict())
+        with self._emit_lock:
+            self.state.step += 1
+            event = AgentEvent(type=event_type, step=self.state.step, data=data)
+            if event_type in _TRANSIENT_EVENT_TYPES:
+                # 瞬态事件只给实时流（SSE drain 即取即弃），不进长期窗口
+                self.state.transient_events.append(event)
+                return
+            self.state.events.append(event)
+            if self._store is not None:
+                self._store.append_event(event.to_dict())
 
     def _persist_message(self, message: dict[str, Any]) -> None:
         """把一条消息追加进历史并落盘。所有 message append 都走这里。"""
@@ -1435,12 +1437,32 @@ def _tool_save_dict(runner: AgentRunner, args: dict[str, Any]) -> Any:
     if not file_key:
         raise AgentToolError("file_key is required")
     pid = runner._project_id()
+    # 先读旧内容算行级 diff，写完后随结果返回（前端渲染变更卡片）
+    cfg = urllib.parse.quote(runner.state.config_file_name)
+    before_lines: list[str] = []
+    data = runner._http_get(f"/api/projects/{pid}/dictionary/project?config={cfg}")
+    contents = data.get("dict_contents", {})
+    old = contents.get(file_key)
+    if isinstance(old, dict):
+        before_lines = [str(x) for x in old.get("lines", [])]
     body = {
         "config_file_name": runner.state.config_file_name,
         "file_key": file_key,
         "content": content,
     }
-    return runner._http_post(f"/api/projects/{pid}/dictionary/project/save", body)
+    result = runner._http_post(f"/api/projects/{pid}/dictionary/project/save", body)
+    diff = _diff_lines("\n".join(before_lines), content)
+    added = sum(1 for r in diff["rows"] if r["op"] == "add")
+    removed = sum(1 for r in diff["rows"] if r["op"] == "del")
+    return {
+        **(result if isinstance(result, dict) else {}),
+        "file_key": file_key,
+        "line_count_before": len(before_lines),
+        "line_count_after": len(content.splitlines()),
+        "lines_added": added,
+        "lines_removed": removed,
+        "line_diff": diff,
+    }
 
 
 def _tool_create_dict_file(runner: AgentRunner, args: dict[str, Any]) -> Any:
@@ -1498,10 +1520,12 @@ def _tool_manage_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> An
         if keyword in keys:
             return {"filter_keys": keys, "count": len(keys), "added": False, "note": f"「{keyword}」已在列表中"}
         keys.append(keyword)
+        changes = [_change("problemFilterKey", None, keyword, "add")]
     else:  # remove
         if keyword not in keys:
             return {"filter_keys": keys, "count": len(keys), "removed": False, "note": f"「{keyword}」不在列表中"}
         keys.remove(keyword)
+        changes = [_change("problemFilterKey", keyword, None, "remove")]
 
     config["common"]["problemFilterKey"] = keys
     runner._http_put(
@@ -1510,7 +1534,7 @@ def _tool_manage_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> An
     )
     # 配置已写回：进度缓存按 mtime 自动失效，后续 list_problems 立即用新过滤
     verb = "added" if action == "add" else "removed"
-    return {"filter_keys": keys, "count": len(keys), verb: True}
+    return {"filter_keys": keys, "count": len(keys), verb: True, "changes": changes}
 
 
 def _parse_config_value(raw: Any) -> Any:
@@ -1559,6 +1583,40 @@ def _set_config_key(config: dict[str, Any], dotted: str, value: Any) -> bool:
     return _set_nested(config, dotted, value)
 
 
+# _get_config_key 的「键不存在」哨兵（None 和 False 都是合法配置值，不能用）
+_MISSING = object()
+
+
+def _get_config_key(config: dict[str, Any], dotted: str) -> Any:
+    """按 _set_config_key 的同一套匹配顺序读配置值。键不存在返回 _MISSING。"""
+    sections = ("common", "problemAnalyze", "dictionary", "plugin", "proxy", "backendSpecific")
+    section, _, rest = dotted.partition(".")
+    if section in sections and rest:
+        node = config.get(section)
+        if isinstance(node, dict):
+            if dotted in node:
+                return node[dotted]
+            if rest in node:
+                return node[rest]
+            if isinstance(node.get(rest.split(".")[0]), dict):
+                # 复用 _set_nested 的路径遍历
+                parts = dotted.split(".")
+                cur: Any = config
+                for p in parts:
+                    if not isinstance(cur, dict) or p not in cur:
+                        return _MISSING
+                    cur = cur[p]
+                return cur
+            return _MISSING
+    parts = dotted.split(".")
+    cur: Any = config
+    for p in parts:
+        if not isinstance(cur, dict) or p not in cur:
+            return _MISSING
+        cur = cur[p]
+    return cur
+
+
 def _tool_update_project_config(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """修改项目配置：读-改-写回（与桌面端「项目配置」页同一通道）。
 
@@ -1576,6 +1634,7 @@ def _tool_update_project_config(runner: AgentRunner, args: dict[str, Any]) -> An
 
     applied: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
+    changes: list[dict[str, Any]] = []
     for item in updates:
         if not isinstance(item, dict):
             continue
@@ -1583,8 +1642,11 @@ def _tool_update_project_config(runner: AgentRunner, args: dict[str, Any]) -> An
         if not key:
             continue
         value = _parse_config_value(item.get("value"))
+        before = _get_config_key(config, key)
         if _set_config_key(config, key, value):
             applied.append({"key": key, "value": value})
+            kind = "add" if before is _MISSING else "replace"
+            changes.append(_change(key, before if before is not _MISSING else None, value, kind))
         else:
             skipped.append({"key": key, "reason": "配置里不存在该键；只能修改已存在的键"})
 
@@ -1595,7 +1657,7 @@ def _tool_update_project_config(runner: AgentRunner, args: dict[str, Any]) -> An
         f"/api/projects/{pid}/config",
         {"config": config, "config_file_name": config_name},
     )
-    result: dict[str, Any] = {"updated": len(applied), "applied": applied}
+    result: dict[str, Any] = {"updated": len(applied), "applied": applied, "changes": changes}
     if skipped:
         result["skipped"] = skipped
     return result
@@ -1611,7 +1673,23 @@ def _tool_save_name_table(runner: AgentRunner, args: dict[str, Any]) -> Any:
     if not isinstance(names, list):
         raise AgentToolError("names must be an array")
     pid = runner._project_id()
-    return runner._http_post(f"/api/projects/{pid}/name-table/save", {"names": names})
+    old = runner._http_get(f"/api/projects/{pid}/name-table")
+    old_names = [n.get("name") if isinstance(n, dict) else n for n in old.get("names", [])]
+    result = runner._http_post(f"/api/projects/{pid}/name-table/save", {"names": names})
+    old_set = set(map(str, old_names))
+    new_set = set(map(str, names))
+    added = sorted(new_set - old_set)
+    removed = sorted(old_set - new_set)
+    changes: list[dict[str, Any]] = [
+        *(_change("人名表", None, n, "add") for n in added),
+        *(_change("人名表", n, None, "remove") for n in removed),
+    ]
+    return {
+        **(result if isinstance(result, dict) else {}),
+        "names_added": added,
+        "names_removed": removed,
+        "changes": changes,
+    }
 
 
 def _tool_start_translation(runner: AgentRunner, args: dict[str, Any]) -> Any:
@@ -1727,6 +1805,46 @@ def _tool_get_runtime(runner: AgentRunner, _args: dict[str, Any]) -> Any:
         },
         "recent_errors": data.get("recent_errors", [])[:5],
     }
+
+
+def _change(path: str, before: Any, after: Any, kind: str = "replace") -> dict[str, Any]:
+    """写入类工具的变更记录：前端据此渲染 diff 风格卡片。
+
+    kind: add（原不存在）/ remove（删后不存在）/ replace（改值）。
+    before/after 用 JSON 序列化保持类型可读；超长的文本（如整本字典内容）
+    不做 diff，改由工具自己返回统计（行数增删）而非全文。"""
+    return {"path": path, "before": before, "after": after, "kind": kind}
+
+
+def _diff_lines(before_text: str, after_text: str, *, context: int = 0, max_lines: int = 200) -> list[dict[str, Any]]:
+    """整文本替换时的逐行 diff（新增行/删除行），给前端渲染行级 diff。
+
+    用最长公共行序列近似（对字典这种逐行 KV 文本足够准确）；超过 max_lines
+    时截断并标记 truncated，避免整本小说级 diff 刷屏。"""
+    import difflib
+
+    before_lines = before_text.splitlines()
+    after_lines = after_text.splitlines()
+    sm = difflib.SequenceMatcher(a=before_lines, b=after_lines, autojunk=False)
+    rows: list[dict[str, Any]] = []
+    truncated = False
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            continue
+        if len(rows) >= max_lines:
+            truncated = True
+            break
+        for line in before_lines[i1:i2]:
+            if len(rows) >= max_lines:
+                truncated = True
+                break
+            rows.append({"op": "del", "line": line})
+        for line in after_lines[j1:j2]:
+            if len(rows) >= max_lines:
+                truncated = True
+                break
+            rows.append({"op": "add", "line": line})
+    return {"rows": rows, "truncated": truncated}
 
 
 def _split_problem_types(problem: str) -> list[str]:
@@ -1904,6 +2022,7 @@ def _tool_patch_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     skipped: list[dict[str, Any]] = []
     not_found: list[int] = []
     changed_fields: list[str] = []
+    changes: list[dict[str, Any]] = []
     for p in patches_raw:
         if not isinstance(p, dict):
             skipped.append({"index": None, "reason": "patch 不是对象"})
@@ -1922,8 +2041,12 @@ def _tool_patch_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
         if not updates:
             skipped.append({"index": idx_i, "reason": "无可更新字段（只允许 pre_dst/proofread_dst/trans_by/trans_conf/doub_content/unknown_proper_noun）"})
             continue
+        field_changes = []
+        for f, v in updates.items():
+            field_changes.append(_change(f"#{idx_i}.{f}", entry.get(f), v, "replace"))
         entry.update(updates)
         applied.append({"index": idx_i, "fields": list(updates.keys())})
+        changes.extend(field_changes)
         for f in updates:
             if f not in changed_fields:
                 changed_fields.append(f)
@@ -1946,6 +2069,7 @@ def _tool_patch_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
         "not_found_indexes": not_found,
         "skipped": skipped,
         "changed_fields": changed_fields,
+        "changes": changes,
         "save": save_result,
     }
 
@@ -1989,6 +2113,7 @@ def _tool_delete_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
 
     kept: list[dict[str, Any]] = []
     deleted_indexes: list[int] = []
+    deleted_previews: list[dict[str, Any]] = []
     for e in entries:
         try:
             idx = int(e.get("index"))
@@ -1997,6 +2122,10 @@ def _tool_delete_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
             continue
         if idx in wanted:
             deleted_indexes.append(idx)
+            preview = str(e.get("pre_dst", "") or e.get("post_dst", "") or "")
+            if len(preview) > 60:
+                preview = preview[:57] + "…"
+            deleted_previews.append({"index": idx, "text": preview})
         else:
             kept.append(e)
 
@@ -2015,6 +2144,7 @@ def _tool_delete_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
         "count_before": len(entries),
         "count_after": len(kept),
         "deleted_indexes": deleted_indexes,
+        "deleted_preview": deleted_previews[:50],
         "note": "被删除的句子已不在缓存中，重启翻译（start_translation）时它们会重新翻译",
     }
     if missing:

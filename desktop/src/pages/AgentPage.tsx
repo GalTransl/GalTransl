@@ -658,6 +658,7 @@ export function AgentPage() {
   const skipRememberedSessionRef = useRef(false);
   // 当前激活的会话 id，供回调读取（避免闭包读到旧值）
   const activeSessionRef = useRef('');
+  const statusSyncVersionRef = useRef(0);
   useEffect(() => {
     activeSessionRef.current = activeSessionId;
     // 切会话时重置"已临时改过"标记，让后端配置回到跟随 Agent 默认
@@ -738,6 +739,7 @@ export function AgentPage() {
      backend (which may have a run in flight, or history restored from disk). */
   useEffect(() => {
     let cancelled = false;
+    const syncVersion = statusSyncVersionRef.current;
     // 发送流程自身触发的会话过渡（create→start→subscribe）不按"用户切会话"
     // 恢复：此时 startAgent 还在路上，fetch 会拿到 idle 把 running 打回去。
     if (sendingRef.current && activeSessionId === sendTransitionRef.current) {
@@ -764,7 +766,8 @@ export function AgentPage() {
 
     fetchAgentStatus(effectiveProject, activeSessionId)
       .then((snap) => {
-        if (cancelled) return;
+        if (cancelled || syncVersion !== statusSyncVersionRef.current) return;
+        if (sendingRef.current && activeSessionId === sendTransitionRef.current) return;
         // 后端是权威来源：新会话后端空（events=0）时必须覆盖本地可能残留的
         // 旧缓存，否则会错把别的会话的内容糊在新建会话上。
         const snapEvents = snap.events || [];
@@ -925,7 +928,8 @@ export function AgentPage() {
     setGoal('');
     setSending(true);
     sendingRef.current = true;
-    sendTransitionRef.current = null;
+    sendTransitionRef.current = activeSessionRef.current;
+    statusSyncVersionRef.current += 1;
     startRef.current = Date.now();
     setStatus('running');
     setRunning(true);
@@ -974,6 +978,7 @@ export function AgentPage() {
     } finally {
       setSending(false);
       sendingRef.current = false;
+      statusSyncVersionRef.current += 1;
       sendTransitionRef.current = null;
     }
   }, [effectiveProject, backendProfileName, configFileName, goal, subscribeStream, refreshSessions]);
@@ -1723,6 +1728,12 @@ function ToolRow({ item, live }: { item: ActivityItem; live: boolean }) {
   const pending = item.ok === undefined && item.result === undefined && !item.error;
   const isRunning = live && pending;
 
+  // 写入类工具的变更卡片数据（后端在结果里带回）：
+  // - changes: [{path, before, after, kind}] 键值级 before→after
+  // - line_diff: {rows: [{op: add|del, line}], truncated} 行级 diff（save_dict）
+  // - deleted_preview: [{index, text}] 被删条目（delete_cache）
+  const changeList = extractChangeList(item.result);
+
   // wait 行：等待期间显示倒计时进度条。
   const isWait = item.name === 'wait';
   const waiting = isWait && pending && typeof item.waitTotalMs === 'number';
@@ -1731,7 +1742,7 @@ function ToolRow({ item, live }: { item: ActivityItem; live: boolean }) {
   const waitRatio = waitTotal > 0 ? Math.min(1, Math.max(0, 1 - waitRemaining / waitTotal)) : 0;
 
   const resultText = formatPayload(ok ? item.result : item.error);
-  const hasDetails = Boolean(summary || resultText || item.arguments);
+  const hasDetails = Boolean(summary || resultText || item.arguments || changeList);
   const longResult = resultText.length > 400;
 
   const stateLabel = waiting
@@ -1757,6 +1768,7 @@ function ToolRow({ item, live }: { item: ActivityItem; live: boolean }) {
         <span className="agent-tool__icon">{meta.icon}</span>
         <span className={`agent-tool__name${waiting || isRunning ? ' is-running' : ''}`}>{meta.action}</span>
         {summary ? <span className="agent-tool__summary">{summary}</span> : null}
+        {changeList ? <span className="agent-tool__diffbadge">±{changeList.total}</span> : null}
         <span className={`agent-tool__state is-${stateTone}${waiting ? ' is-countdown' : ''}`}>
           <span className="agent-tool__state-dot" />
           {stateLabel}
@@ -1770,6 +1782,7 @@ function ToolRow({ item, live }: { item: ActivityItem; live: boolean }) {
       ) : null}
       {open ? (
         <div className="agent-tool__body">
+          {changeList ? <ChangeListCard data={changeList} /> : null}
           {item.arguments !== undefined ? (
             <ToolBlock title="参数" content={formatPayload(item.arguments)} mono />
           ) : null}
@@ -1821,6 +1834,122 @@ function ToolBlock({
           {expanded ? '收起' : `展开全部（${content.length} 字符）`}
         </button>
       ) : null}
+    </div>
+  );
+}
+
+/* ── 写入类工具的变更卡片（diff 风格） ──
+   后端在写入结果里带回三类结构之一/组合：
+   - changes: [{path, before, after, kind}] —— update_project_config、
+     manage_problem_filter、patch_cache、save_name_table
+   - line_diff: {rows, truncated} —— save_dict 的整文本行级 diff
+   - deleted_preview: [{index, text}] —— delete_cache 被删条目 */
+
+type ChangeEntry = { path: string; before?: unknown; after?: unknown; kind?: string };
+type DiffRow = { op: 'add' | 'del'; line: string };
+
+type ChangeData = {
+  changes?: ChangeEntry[];
+  line_diff?: { rows?: DiffRow[]; truncated?: boolean };
+  deleted_preview?: { index: number; text: string }[];
+  total: number;
+};
+
+function extractChangeList(result: unknown): ChangeData | null {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
+  const r = result as Record<string, unknown>;
+  const changes = Array.isArray(r.changes) ? (r.changes as ChangeEntry[]) : undefined;
+  const lineDiff =
+    r.line_diff && typeof r.line_diff === 'object' && Array.isArray((r.line_diff as Record<string, unknown>).rows)
+      ? (r.line_diff as { rows?: DiffRow[]; truncated?: boolean })
+      : undefined;
+  const deletedPreview = Array.isArray(r.deleted_preview) ? (r.deleted_preview as { index: number; text: string }[]) : undefined;
+  const total =
+    (changes?.length || 0) +
+    (lineDiff?.rows?.length || 0) +
+    (deletedPreview?.length || 0);
+  if (!total) return null;
+  return { changes, line_diff: lineDiff, deleted_preview: deletedPreview, total };
+}
+
+function fmtChangeValue(v: unknown): string {
+  if (v === null || v === undefined) return '（空）';
+  if (typeof v === 'string') return v.length > 80 ? v.slice(0, 77) + '…' : v;
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
+function ChangeListCard({ data }: { data: ChangeData }) {
+  const [showAll, setShowAll] = useState(false);
+  const rows: ReactNode[] = [];
+
+  if (data.line_diff?.rows?.length) {
+    const diffRows = data.line_diff.rows;
+    const shown = showAll ? diffRows : diffRows.slice(0, 40);
+    for (const [i, r] of shown.entries()) {
+      rows.push(
+        <div key={`d-${i}`} className={`agent-changes__dline agent-changes__dline--${r.op}`}>
+          <span className="agent-changes__sign">{r.op === 'add' ? '+' : '−'}</span>
+          <span className="agent-changes__dtext">{r.line || ' '}</span>
+        </div>,
+      );
+    }
+    if (data.line_diff.truncated && showAll) {
+      rows.push(<div key="d-trunc" className="agent-changes__more">diff 过长已截断</div>);
+    }
+    if (diffRows.length > 40 && !showAll) {
+      rows.push(
+        <button key="d-more" type="button" className="agent-changes__morebtn" onClick={() => setShowAll(true)}>
+          展开全部 {diffRows.length} 行 diff
+        </button>,
+      );
+    }
+  }
+
+  if (data.deleted_preview?.length) {
+    for (const p of data.deleted_preview) {
+      rows.push(
+        <div key={`del-${p.index}`} className="agent-changes__dline agent-changes__dline--del">
+          <span className="agent-changes__sign">−</span>
+          <span className="agent-changes__path">#{p.index}</span>
+          <span className="agent-changes__dtext">{p.text || '（空译文）'}</span>
+        </div>,
+      );
+    }
+  }
+
+  if (data.changes?.length) {
+    for (const [i, c] of data.changes.entries()) {
+      rows.push(
+        <div key={`c-${i}`} className="agent-changes__item">
+          <span className="agent-changes__path">{c.path}</span>
+          {c.kind !== 'add' ? (
+            <span className="agent-changes__old">
+              <span className="agent-changes__sign">−</span>
+              {fmtChangeValue(c.before)}
+            </span>
+          ) : null}
+          {c.kind !== 'remove' ? (
+            <span className="agent-changes__new">
+              <span className="agent-changes__sign">+</span>
+              {fmtChangeValue(c.after)}
+            </span>
+          ) : null}
+        </div>,
+      );
+    }
+  }
+
+  return (
+    <div className="agent-changes">
+      <div className="agent-changes__head">
+        <span className="agent-changes__title">变更</span>
+        <span className="agent-changes__count">±{data.total}</span>
+      </div>
+      {rows.length ? <div className="agent-changes__body">{rows}</div> : null}
     </div>
   );
 }
