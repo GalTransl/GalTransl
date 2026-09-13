@@ -622,6 +622,13 @@ export function AgentPage() {
   // 本地已乐观追加的 user_message 的临时 id 集合，SSE 回放时据此去重，
   // 避免同一条消息渲染两次（发送时本地先显示，后端确认后回放同一条）
   const localMsgIdsRef = useRef<Set<string>>(new Set());
+  // 发送流程自身的会话过渡：首条消息 create→start→subscribe 期间
+  // activeSessionId 从空变到新会话，会触发会话切换 effect；它的恢复/对账
+  // 逻辑会清掉乐观气泡并把 running 打回 false（fetch 先于 startAgent 完成，
+  // 拿到 idle），界面就像没在跑一样。用 ref 标记该窗口让 effect 跳过；
+  // 用户在此窗口内手动切到别的会话则不拦（id 不匹配，正常恢复）。
+  const sendingRef = useRef(false);
+  const sendTransitionRef = useRef<string | null>(null);
 
   const abortRef = useRef<(() => void) | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -722,6 +729,11 @@ export function AgentPage() {
      backend (which may have a run in flight, or history restored from disk). */
   useEffect(() => {
     let cancelled = false;
+    // 发送流程自身触发的会话过渡（create→start→subscribe）不按"用户切会话"
+    // 恢复：此时 startAgent 还在路上，fetch 会拿到 idle 把 running 打回去。
+    if (sendingRef.current && activeSessionId === sendTransitionRef.current) {
+      return;
+    }
     abortRef.current?.();
     abortRef.current = null;
     localMsgIdsRef.current.clear();
@@ -903,6 +915,8 @@ export function AgentPage() {
     ]);
     setGoal('');
     setSending(true);
+    sendingRef.current = true;
+    sendTransitionRef.current = null;
     startRef.current = Date.now();
     setStatus('running');
     setRunning(true);
@@ -913,6 +927,10 @@ export function AgentPage() {
       if (!sid) {
         const created = await createAgentSession(effectiveProject);
         sid = created.session_id;
+        // 会话切换 effect 已在本 await 期间被触发（activeSessionId 仍为空，
+        // 走的是"清空"分支）；标记过渡窗口，随后的 setActiveSessionId 不再
+        // 触发恢复逻辑，running 保持 true。
+        sendTransitionRef.current = sid;
         activeSessionRef.current = sid;
         setActiveSessionId(sid);
         saveActiveSessionId(effectiveProject, sid);
@@ -929,6 +947,7 @@ export function AgentPage() {
         hasBackendSessionRef.current = true;
         if (snap.session_id) {
           sid = snap.session_id;
+          sendTransitionRef.current = sid;
           activeSessionRef.current = sid;
           setActiveSessionId(sid);
           saveActiveSessionId(effectiveProject, sid);
@@ -945,6 +964,8 @@ export function AgentPage() {
       setStatus('failed');
     } finally {
       setSending(false);
+      sendingRef.current = false;
+      sendTransitionRef.current = null;
     }
   }, [effectiveProject, backendProfileName, configFileName, goal, subscribeStream, refreshSessions]);
 
@@ -1534,6 +1555,7 @@ function AgentActivityGroup({
 }) {
   const [open, setOpen] = useState(isLive);
   const userToggledRef = useRef(false);
+  const items = group.items;
 
   // Follow the live run: auto-expand while working, auto-collapse when settled,
   // unless the user took manual control of this group.
@@ -1542,24 +1564,49 @@ function AgentActivityGroup({
     setOpen(isLive);
   }, [isLive]);
 
-  const items = group.items;
+  // 运行中墙钟计时（对标 PI-Desktop）：live 时每秒跳动，结束冻结在最后值。
+  const [now, setNow] = useState(() => Date.now());
+  const liveStartedRef = useRef<number | null>(null);
+  const wasLiveRef = useRef(isLive);
+  const [frozenSec, setFrozenSec] = useState<number | null>(null);
+  useEffect(() => {
+    if (isLive && !wasLiveRef.current) liveStartedRef.current = Date.now();
+    if (!isLive && wasLiveRef.current && liveStartedRef.current != null) {
+      setFrozenSec(Math.max(0, Math.floor((Date.now() - liveStartedRef.current) / 1000)));
+    }
+    wasLiveRef.current = isLive;
+    if (!isLive) return;
+    setNow(Date.now());
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [isLive]);
+  // 结束后展示用「事件耗时之和」兜底：恢复会话/刷新后没有墙钟起点。
   const totalMs = items.reduce((sum, it) => sum + (it.durationMs || 0), 0);
+  const wallSec = liveStartedRef.current != null ? Math.max(0, Math.floor((now - liveStartedRef.current) / 1000)) : 0;
+  const shownSec = isLive
+    ? wallSec > 0
+      ? wallSec
+      : Math.max(0, Math.floor(totalMs / 1000))
+    : frozenSec != null && frozenSec > 0
+      ? frozenSec
+      : Math.max(0, Math.floor(totalMs / 1000));
+
   const hasThought = items.some((it) => it.kind === 'thought');
   const toolCount = items.filter((it) => it.kind === 'tool').length;
   // 压缩提示不算"工作步骤"，避免污染耗时与步数统计
   const visibleCount = items.filter((it) => it.kind !== 'compact').length;
 
+  // 文案对齐 PI-Desktop zh-CN：运行中「思考中/处理中 · Ns」，结束「已思考/已处理 Ns」
   const label = isLive
-    ? hasThought && !toolCount
-      ? '思考中'
-      : '工作中'
+    ? `${hasThought && !toolCount ? '思考中' : '处理中'} · ${formatDuration(shownSec * 1000)}`
     : hasThought && !toolCount
-      ? '思考'
-      : '工作';
+      ? shownSec > 0 ? `已思考 ${formatDuration(shownSec * 1000)}` : '思考'
+      : shownSec > 0
+        ? `已处理 ${formatDuration(shownSec * 1000)}`
+        : '工作';
 
   const parts: string[] = [];
-  if (totalMs > 0) parts.push(formatDuration(totalMs));
-  if (visibleCount > 1) parts.push(`${visibleCount} 步`);
+  if (visibleCount > 1) parts.push(`${visibleCount} 个步骤`);
 
   // 预览小字：只在折叠且回合仍在跑时显示（展开时内容全可见，无需预览）
   const tail = isLive && !open ? liveTail(items) : '';
@@ -1603,17 +1650,20 @@ function AgentActivityGroup({
 function liveTail(items: ActivityItem[]): string {
   for (let i = items.length - 1; i >= 0; i -= 1) {
     const it = items[i];
-    if (it.kind === 'thought' && it.content) return collapse(it.content);
+    if (it.kind === 'thought' && it.content) {
+      // 取思考文本最后一行（对标 PI-Desktop）：折叠头部读起来像实时跑马灯
+      const lines = it.content
+        .split('\n')
+        .map((line) => line.replace(/^#+\s*|\*\*/g, '').trim())
+        .filter(Boolean);
+      return lines[lines.length - 1] || '';
+    }
     if (it.kind === 'tool') {
       const s = toolMeta(it.name).summary(asArgs(it.arguments));
       return [toolMeta(it.name).action, s].filter(Boolean).join(' ');
     }
   }
   return '';
-}
-
-function collapse(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
 }
 
 function asArgs(args: unknown): Record<string, unknown> | undefined {

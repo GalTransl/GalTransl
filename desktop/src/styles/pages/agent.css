@@ -1088,11 +1088,11 @@
 .agent-activity__header {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 28px;
+  gap: 5px;
+  min-height: 26px;
   max-width: 100%;
-  padding: 3px 7px;
-  margin: 0 -7px;
+  padding: 2px 5px;
+  margin: 0 -5px;
   border: 0;
   border-radius: 8px;
   background: none;
@@ -1111,14 +1111,18 @@
 
 .agent-activity__icon {
   flex: none;
-  color: var(--color-primary);
-  opacity: 0.75;
+  color: var(--color-text-muted);
   font-size: 0.9rem;
 }
 
 .agent-activity__label {
   flex: none;
   font-weight: 600;
+}
+
+/* 运行中标签保持可读色，脉冲点单独承载「活着」的反馈（对标 PI-Desktop） */
+.agent-activity__label.is-running {
+  color: var(--color-text-muted);
 }
 
 .agent-activity__label.is-running::after {
@@ -1129,7 +1133,7 @@
   margin-left: 6px;
   vertical-align: middle;
   border-radius: 50%;
-  background: var(--color-primary);
+  background: var(--color-text-muted);
   animation: agent-pulse 1s ease-in-out infinite;
 }
 
@@ -1144,8 +1148,15 @@
 
 .agent-activity__caret {
   flex: none;
-  opacity: 0.6;
-  transition: transform var(--dur-fast) var(--ease-default);
+  opacity: 0;
+  transition: transform var(--dur-fast) var(--ease-default), opacity var(--dur-fast) var(--ease-default);
+}
+
+/* 折叠箭头默认隐藏，悬停/展开/键盘聚焦时浮现（对标 PI-Desktop） */
+.agent-activity:hover .agent-activity__caret,
+.agent-activity.is-open .agent-activity__caret,
+.agent-activity__header:focus-visible .agent-activity__caret {
+  opacity: 0.65;
 }
 
 .agent-activity.is-open .agent-activity__caret {
@@ -1153,14 +1164,13 @@
 }
 
 .agent-activity__preview {
-  max-width: 100%;
-  margin: 2px 0 2px 26px;
+  max-width: min(100%, 720px);
+  margin: 1px 0 0 26px;
   overflow: hidden;
   color: var(--color-text-muted);
   font-size: 0.78rem;
   text-overflow: ellipsis;
   white-space: nowrap;
-  opacity: 0.9;
 }
 
 /* Grid-rows collapse: animates height without measuring content. */
@@ -1182,7 +1192,9 @@
 }
 
 .agent-activity__body {
-  margin: 4px 0 6px;
+  position: relative;
+  margin: 3px 0 6px 7px;
+  padding: 2px 0 2px 12px;
   display: flex;
   flex-direction: column;
 }
