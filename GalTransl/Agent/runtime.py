@@ -2061,6 +2061,9 @@ def _tool_patch_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
         "entries": entries,
         "config_file_name": runner.state.config_file_name,
     }
+    # 注意：/cache/save 的应答带全文件 entries（重建 problem 后原样回传给
+    # 桌面端用），绝不能透传给 LLM——大文件 patch 一条会把几千条全文灌进
+    # 上下文。这里只取成功标志。
     save_result = runner._http_post(f"/api/projects/{pid}/cache/save", save_body)
     return {
         "filename": filename,
@@ -2070,7 +2073,7 @@ def _tool_patch_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
         "skipped": skipped,
         "changed_fields": changed_fields,
         "changes": changes,
-        "save": save_result,
+        "saved": bool(isinstance(save_result, dict) and save_result.get("success")),
     }
 
 
