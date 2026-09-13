@@ -971,6 +971,72 @@ export const CUSTOM_BACKGROUND_CHANGE_EVENT = 'galtransl:custom-background-chang
 export const HIDE_BACKEND_CONSOLE_CHANGE_EVENT = 'galtransl:hide-backend-console-change';
 export const CACHE_BROWSER_FONT_SIZE_CHANGE_EVENT = 'galtransl:cache-browser-font-size-change';
 
+/* ── 已打开项目（open projects）的共享读写 + 广播 ──
+ * 翻译器（App.tsx）和 Agent 页面都用这一套，保证两边的"已打开项目"列表
+ * 始终同步：任一处 addOpenProject 都会写 localStorage 并广播，另一处监听
+ * 后更新自己的 state。单一数据源 = localStorage，单一写入路径 = addOpenProject。 */
+export const OPEN_PROJECTS_KEY = 'galtransl-open-projects';
+export const OPEN_PROJECTS_CHANGE_EVENT = 'galtransl:open-projects-change';
+const CONFIG_FILE_KEY = 'galtransl-config-file';
+
+export function loadOpenProjects(): string[] {
+  try {
+    const raw = localStorage.getItem(OPEN_PROJECTS_KEY);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveOpenProjects(projects: string[]): void {
+  try {
+    localStorage.setItem(OPEN_PROJECTS_KEY, JSON.stringify(projects));
+    window.dispatchEvent(new CustomEvent(OPEN_PROJECTS_CHANGE_EVENT, { detail: projects }));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function persistOpenProjects(projects: string[]): void {
+  // 静默写盘（不广播）：App 在自己 state 变更后调它做持久化，
+  // 避免与 OPEN_PROJECTS_CHANGE 监听器形成自回环。外部写入路径
+  // （addOpenProject）用 saveOpenProjects，会广播通知监听方。
+  try {
+    localStorage.setItem(OPEN_PROJECTS_KEY, JSON.stringify(projects));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function readConfigFileName(projectDir: string): string {
+  try {
+    const map = JSON.parse(localStorage.getItem(CONFIG_FILE_KEY) || '{}');
+    return map[projectDir] || 'config.yaml';
+  } catch {
+    return 'config.yaml';
+  }
+}
+
+export function saveConfigFileName(projectDir: string, configFileName: string): void {
+  try {
+    const map = JSON.parse(localStorage.getItem(CONFIG_FILE_KEY) || '{}');
+    map[projectDir] = configFileName;
+    localStorage.setItem(CONFIG_FILE_KEY, JSON.stringify(map));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+/** 注册一个已打开项目（幂等）。已存在则只刷新其 config 文件名、保持原顺序；
+ *  不存在则前插。写后广播 OPEN_PROJECTS_CHANGE_EVENT，监听方据此同步。 */
+export function addOpenProject(projectDir: string, configFileName = 'config.yaml'): void {
+  if (!projectDir) return;
+  saveConfigFileName(projectDir, configFileName || 'config.yaml');
+  const prev = loadOpenProjects();
+  if (prev.includes(projectDir)) return;
+  saveOpenProjects([projectDir, ...prev]);
+}
+
 const dirtyProjectConfigDirs = new Set<string>();
 
 /** Return whether a project's config page has unsaved changes in this session. */
@@ -1435,6 +1501,7 @@ export type AgentEventType =
   | 'wait_start'
   | 'wait_tick'
   | 'wait_end'
+  | 'compacted'
   | 'finish'
   | 'error'
   | 'stopped'
@@ -1467,6 +1534,10 @@ export type AgentEvent = {
   remaining_ms?: number;
   elapsed_ms?: number;
   interrupted?: boolean;
+  // compacted（上下文压缩）
+  removed?: number;
+  summary_chars?: number;
+  tokens_before?: number;
   // finish
   summary?: string;
   total_steps?: number;
@@ -1482,6 +1553,8 @@ export type AgentEvent = {
 export type AgentStatus = {
   status: string;
   project_dir: string;
+  session_id?: string;
+  title?: string;
   goal?: string;
   step: number;
   started_at?: number;
@@ -1490,11 +1563,21 @@ export type AgentStatus = {
   events?: AgentEvent[];
 };
 
+/** A conversation under a project. One project can hold many. */
+export type AgentSession = {
+  session_id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+};
+
 export type AgentStartPayload = {
   project_dir: string;
   config_file_name?: string;
   backend_profile_data: Record<string, unknown>;
   goal?: string;
+  /** Omit to let the backend create a fresh session. */
+  session_id?: string;
 };
 
 export async function startAgent(payload: AgentStartPayload) {
@@ -1510,35 +1593,62 @@ export async function startAgent(payload: AgentStartPayload) {
  * running the message is queued as an interjection; otherwise it starts a
  * new turn continuing the same conversation.
  */
-export async function sendAgentMessage(projectDir: string, message: string) {
+export async function sendAgentMessage(projectDir: string, message: string, sessionId?: string) {
   return apiRequest<AgentStatus>('/api/agent/message', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_dir: projectDir, message }),
+    body: JSON.stringify({ project_dir: projectDir, message, session_id: sessionId }),
   });
 }
 
 /** Stop any running turn and drop the session history. */
-export async function resetAgent(projectDir: string) {
+export async function resetAgent(projectDir: string, sessionId?: string) {
   return apiRequest<AgentStatus>('/api/agent/reset', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_dir: projectDir }),
+    body: JSON.stringify({ project_dir: projectDir, session_id: sessionId }),
   });
 }
 
-export async function stopAgent(projectDir: string) {
+export async function stopAgent(projectDir: string, sessionId?: string) {
   return apiRequest<AgentStatus>('/api/agent/stop', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_dir: projectDir }),
+    body: JSON.stringify({ project_dir: projectDir, session_id: sessionId }),
   });
 }
 
-export async function fetchAgentStatus(projectDir: string) {
+export async function fetchAgentStatus(projectDir: string, sessionId?: string) {
+  const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : '';
   return apiRequest<AgentStatus>(
-    `/api/agent/status?project_dir=${encodeURIComponent(projectDir)}`,
+    `/api/agent/status?project_dir=${encodeURIComponent(projectDir)}${sid}`,
   );
+}
+
+/** List all conversation sessions belonging to a project. */
+export async function listAgentSessions(projectDir: string) {
+  const res = await apiRequest<{ sessions: AgentSession[] }>(
+    `/api/agent/sessions?project_dir=${encodeURIComponent(projectDir)}`,
+  );
+  return res.sessions || [];
+}
+
+/** Create an empty session (no turn started). Title defaults to 项目名+序号. */
+export async function createAgentSession(projectDir: string, title?: string) {
+  return apiRequest<AgentSession>('/api/agent/sessions/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_dir: projectDir, title }),
+  });
+}
+
+/** Delete a session and its persisted history. */
+export async function deleteAgentSession(projectDir: string, sessionId: string) {
+  return apiRequest<{ status: string; session_id: string }>('/api/agent/sessions/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_dir: projectDir, session_id: sessionId }),
+  });
 }
 
 /**
@@ -1552,11 +1662,13 @@ export function subscribeAgentStream(
   onEvent: (event: AgentEvent) => void,
   onError?: (err: Error) => void,
   afterStep?: number,
+  sessionId?: string,
 ): () => void {
   const baseUrl = getBackendBaseUrl();
   const url =
     `${baseUrl}/api/agent/stream?project_dir=${encodeURIComponent(projectDir)}` +
-    (typeof afterStep === 'number' ? `&after_step=${afterStep}` : '');
+    (typeof afterStep === 'number' ? `&after_step=${afterStep}` : '') +
+    (sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : '');
   const controller = new AbortController();
 
   (async () => {

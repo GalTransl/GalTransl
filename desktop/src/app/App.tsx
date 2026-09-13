@@ -2,12 +2,16 @@ import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useRef, useSta
 import { HashRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import {
   CUSTOM_BACKGROUND_CHANGE_EVENT,
+  OPEN_PROJECTS_CHANGE_EVENT,
   THEME_MODE_CHANGE_EVENT,
   type CustomBackgroundPreference,
   decodeProjectDir,
   encodeProjectDir,
   getCustomBackgroundPreference,
   getThemeModePreference,
+  loadOpenProjects,
+  persistOpenProjects,
+  saveConfigFileName,
 } from '../lib/api';
 import { Sidebar } from '../components/Sidebar';
 import { ConnectionProvider } from '../features/connection/ConnectionContext';
@@ -48,39 +52,10 @@ const AgentPage = lazy(async () => {
   return { default: mod.AgentPage };
 });
 
-const CONFIG_FILE_KEY = 'galtransl-config-file';
-const OPEN_PROJECTS_KEY = 'galtransl-open-projects';
 const LAST_ACTIVE_PROJECT_KEY = 'galtransl-last-active-project';
-
-function saveConfigFileName(projectDir: string, configFileName: string) {
-  try {
-    const map = JSON.parse(localStorage.getItem(CONFIG_FILE_KEY) || '{}');
-    map[projectDir] = configFileName;
-    localStorage.setItem(CONFIG_FILE_KEY, JSON.stringify(map));
-  } catch {
-    // ignore storage errors
-  }
-}
 
 function RouteLoadingFallback() {
   return <div className="inline-feedback">页面加载中…</div>;
-}
-
-function loadOpenProjects(): string[] {
-  try {
-    const raw = localStorage.getItem(OPEN_PROJECTS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveOpenProjects(projects: string[]) {
-  try {
-    localStorage.setItem(OPEN_PROJECTS_KEY, JSON.stringify(projects));
-  } catch {
-    // ignore storage errors
-  }
 }
 
 function loadLastActiveProject(): string | null {
@@ -141,10 +116,26 @@ export function App() {
     };
   }, []);
 
-  // Persist open projects to localStorage whenever the list changes
+  // Persist open projects to localStorage whenever the list changes (silent —
+  // no broadcast, to avoid a self-loop with the OPEN_PROJECTS_CHANGE listener).
   useEffect(() => {
-    saveOpenProjects(openProjects);
+    persistOpenProjects(openProjects);
   }, [openProjects]);
+
+  // Listen for open-projects changed elsewhere (e.g. Agent page calling
+  // addOpenProject) and sync App's state so the global sidebar updates too.
+  useEffect(() => {
+    const sync = (e: Event) => {
+      const next = (e as CustomEvent<string[]>).detail;
+      if (!Array.isArray(next)) return;
+      setOpenProjects((prev) => {
+        if (prev.length === next.length && prev.every((d, i) => d === next[i])) return prev;
+        return next;
+      });
+    };
+    window.addEventListener(OPEN_PROJECTS_CHANGE_EVENT, sync as EventListener);
+    return () => window.removeEventListener(OPEN_PROJECTS_CHANGE_EVENT, sync as EventListener);
+  }, []);
 
   const handleOpenProject = useCallback((projectDir: string, config: string) => {
     const cfg = config || 'config.yaml';

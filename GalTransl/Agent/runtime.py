@@ -23,11 +23,28 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from GalTransl.Agent import session_store
+from GalTransl.Agent.session_store import SessionStore
+
 DEFAULT_BACKEND_HOST = "127.0.0.1"
 DEFAULT_BACKEND_PORT = 12333
 DEFAULT_CONFIG_FILE = "config.yaml"
 MAX_STEPS = 32
 RUNTIME_EVENT_KEEP = 500
+
+# ---- 上下文预算 ----
+# 后端配置未指定 contextWindow 时的默认窗口（token）
+DEFAULT_CONTEXT_WINDOW = 128_000
+# 用量超过窗口的该比例就触发压缩
+COMPACT_TRIGGER_RATIO = 0.80
+# 压缩时保留最近 N 条消息原文不动
+COMPACT_KEEP_RECENT_MSGS = 16
+# 尾部预留：当前轮新增消息 + 模型输出
+CONTEXT_RESERVE_TOKENS = 8_192
+# 摘要生成的最大输出 token
+SUMMARY_MAX_TOKENS = 2_048
+# 粗略字符->token 换算系数（无 tokenizer 时的估算）
+CHARS_PER_TOKEN = 4
 
 
 def _log(msg: str, *args: object) -> None:
@@ -67,6 +84,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 - 不要连续重复调用同一个工具相同参数（避免死循环）；若上一步结果不理想，换策略或总结收尾。
 - 工具返回的 error 要阅读并据此调整下一步，不要忽略。
 - 你无法关闭程序、无法修改项目目录以外的文件、无法访问网络。只做翻译相关工作。
+- 在启动翻译前，建议询问一下用户对你创建的字典是否满意，是否要开始翻译流程。
 """
 
 
@@ -77,6 +95,33 @@ AGENT_TURN_PROMPT = """
 - 这是一个多轮会话：用户可能中途打断你、也可能在你收尾后补充新指令。收到新消息时，接着当前的项目状态继续干，不要把已经完成的工作重来一遍。
 - 用户打断（stopped）后你收到的新消息，先确认现场（比如 get_runtime / get_progress 看任务是否还在跑），再决定从哪里继续。
 - 一次回复里把当前这轮指令做完：该调工具就调工具，做完用自然语言小结。除非用户另有要求，不要主动无限制地等待轮询。"""
+
+
+# 压缩会话历史时用于生成摘要的提示词。摘要要保留"接着干下去"所需的硬信息，
+# 而不是复述对话：文件路径、字典名、任务 id、问题条目 index 这些丢了就找不回来。
+COMPACT_SUMMARY_PROMPT = """你在为一个 Galgame 翻译项目的 AI 助手压缩对话历史。下面是这个助手之前的工作记录，请把它压缩成一份摘要，供助手在后续对话中继续工作时参考。
+
+要求：
+1. 只输出摘要正文，不要任何前言、客套或"好的"之类的话。
+2. 严格按下面的骨架输出 Markdown，每一节都要有内容（确实没有就写"无"）：
+   ## 目标
+   用户要完成的任务。
+   ## 已完成的工作
+   已经做完的关键操作（按时间顺序，简明）。
+   ## 关键决策
+   做过的重要选择及其原因（选了哪个翻译引擎、为什么改某个译名等）。
+   ## 当前进度与项目状态
+   项目现在处于什么状态：翻译是否在跑、进度如何、有哪些文件/字典已就绪。
+   ## 待办与注意事项
+   还没做的事、已知问题、下次继续时要注意的点。
+3. 必须原样保留这些硬信息，不要概括掉：文件路径、字典文件名、翻译引擎名（如 ForGal-json / rebuildr）、任务 id、问题条目 index 或 index 区间、具体的译名修正。
+4. 用中文写。简洁但不要丢信息。
+
+<conversation>
+{conversation}
+</conversation>
+
+请输出摘要："""
 
 @dataclass(slots=True)
 class AgentEvent:
@@ -114,6 +159,15 @@ class AgentState:
     pending_followup: bool = False
     # 本回合的收尾类型，SSE stream 据此判断是否还有后续（awaiting_input 不算终态）
     turn_end: str = ""
+    # 会话身份：一个项目下可以有多个会话，互不干扰
+    session_id: str = ""
+    title: str = ""
+    # 上次 LLM 响应的 prompt_tokens，作为上下文用量估算的锚点（0 表示未知）
+    last_prompt_tokens: int = 0
+    # 锚点对应的历史长度：锚点之后新增的消息要另外估算
+    anchored_message_count: int = 0
+    # 从磁盘恢复的会话标记（本次进程内还没跑过回合）
+    restored: bool = False
 
 
 class AgentToolError(Exception):
@@ -137,11 +191,24 @@ class AgentRunner:
         self._registry = registry
         self._openai_client: Any = None
         self._model: str = ""
+        self._context_window = DEFAULT_CONTEXT_WINDOW
+        self._compacted_this_turn = False
+        # 会话落盘器：state 里没有 session_id（理论上不该发生）时退化为内存态
+        self._store = SessionStore(state.project_dir, state.session_id) if state.session_id else None
 
     # ---- 事件 ----
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
         self.state.step += 1
-        self.state.events.append(AgentEvent(type=event_type, step=self.state.step, data=data))
+        event = AgentEvent(type=event_type, step=self.state.step, data=data)
+        self.state.events.append(event)
+        if self._store is not None:
+            self._store.append_event(event.to_dict())
+
+    def _persist_message(self, message: dict[str, Any]) -> None:
+        """把一条消息追加进历史并落盘。所有 message append 都走这里。"""
+        self.state.messages.append(message)
+        if self._store is not None:
+            self._store.append_message(message)
 
     # ---- OpenAI 客户端 ----
     def _resolve_llm(self) -> None:
@@ -164,9 +231,11 @@ class AgentRunner:
             raise RuntimeError("backend profile token is empty (请先在「翻译后端配置」页填写 token)")
         if not model:
             raise RuntimeError("backend profile modelName is empty (请先在「翻译后端配置」页填写 modelName)")
+        # 上下文窗口：可选配置，缺省用默认值。用于压缩触发判断。
+        self._context_window = _parse_context_window(first.get("contextWindow"))
         base_url = _normalize_endpoint(endpoint)
         masked = (token[:4] + "…" + token[-4:]) if len(token) > 8 else "***"
-        _log(f"LLM 配置: model={model} endpoint={base_url} token={masked}")
+        _log(f"LLM 配置: model={model} endpoint={base_url} token={masked} context_window={self._context_window}")
         try:
             from openai import OpenAI
         except ImportError as exc:  # pragma: no cover - 依赖缺失
@@ -186,21 +255,14 @@ class AgentRunner:
         try:
             self._resolve_llm()
             if not self.state.messages:
-                self.state.messages = [
-                    {"role": "system", "content": AGENT_SYSTEM_PROMPT + AGENT_TURN_PROMPT},
-                    {
-                        "role": "user",
-                        "content": (
-                            f"项目目录：{self.state.project_dir}\n"
-                            f"配置文件：{self.state.config_file_name}\n"
-                            f"目标：{self.state.goal or '按标准流程完成本项目的翻译'}\n\n"
-                            "请开始。先了解项目，再准备字典，然后启动翻译。"
-                        ),
-                    },
-                ]
+                self._persist_message({"role": "system", "content": _build_system_prompt(self.state)})
+                # user 消息只放用户的原始输入；项目目录/配置文件/目标这些环境
+                # 上下文已经拼进上面的 system prompt，这里不再重复塞。
+                first_user_text = self.state.goal or "按标准流程完成本项目的翻译。"
+                self._persist_message({"role": "user", "content": first_user_text})
                 # 首条用户消息也进事件流：SSE 全量回放（重开页面/状态对账）时
                 # 气泡不丢。前端发送时已乐观显示，收到会按内容去重。
-                self._emit("user_message", {"message": self.state.goal or "按标准流程完成本项目的翻译"})
+                self._emit("user_message", {"message": first_user_text})
 
             # 单回合步数上限：防止一轮内无限跑；超限不丢历史，用户可接着指挥
             for _ in range(MAX_STEPS):
@@ -210,20 +272,43 @@ class AgentRunner:
                 # 运行中用户插话：在这里注入，模型下一步就能看到
                 injected = self._drain_pending_messages()
                 if injected:
-                    self.state.messages.append({"role": "user", "content": "\n".join(injected)})
+                    self._persist_message({"role": "user", "content": "\n".join(injected)})
+
+                # 历史过长先压缩，避免下一步请求撑爆上下文窗口
+                self._maybe_compact()
 
                 loop_step = _ + 1
                 _log(f"—— 第 {loop_step}/{MAX_STEPS} 轮：请求 LLM（流式）中…")
                 req_started = time.time()
-                content, tool_calls = self._stream_llm_response()
+                content, tool_calls, finish_reason = self._stream_llm_response()
                 streamed_content = bool(content)
                 req_ms = int((time.time() - req_started) * 1000)
-                _log(f"LLM 返回（耗时 {req_ms}ms）：content 长度={len(content)} tool_calls={len(tool_calls)}")
+                _log(f"LLM 返回（耗时 {req_ms}ms）：content 长度={len(content)} tool_calls={len(tool_calls)} finish={finish_reason}")
 
                 # 流结束立刻检查停止信号：流期间用户可能已点了停止
                 if self.stop_event.is_set():
                     self._end_turn("stopped", {"reason": "用户停止"})
                     return
+
+                # 截断保护：输出被 max_tokens 截断时，流式拼出来的工具参数可能是
+                # "能解析但残缺"的半截 JSON，执行它会做出错误操作（pi 的做法）。
+                # 这里直接丢弃本批工具调用，把失败写回历史让模型重试。
+                if tool_calls and finish_reason == "length":
+                    _log(f"  ⚠ 响应被截断（finish_reason=length），丢弃 {len(tool_calls)} 个工具调用")
+                    self._persist_message({"role": "assistant", "content": content} if content else {"role": "assistant", "content": ""})
+                    truncated_msg = (
+                        "上一次响应因达到输出长度上限被截断，其中的工具调用可能不完整，已全部丢弃、未执行。"
+                        "请缩小单次操作范围（比如减少一次读取的条目数、拆分批量修改）后重试。"
+                    )
+                    self._persist_message({"role": "user", "content": truncated_msg})
+                    self._emit("tool_result", {
+                        "id": "truncated",
+                        "name": "(已丢弃的截断工具调用)",
+                        "ok": False,
+                        "error": f"响应被截断，{len(tool_calls)} 个工具调用未执行",
+                        "duration_ms": 0,
+                    })
+                    continue
 
                 # 思考/决策文本（即使同时有 tool_calls 也展示）。流式期间已通过
                 # thought_delta 增量推送；仅当流期间没有发出过任何 delta 时才
@@ -235,7 +320,7 @@ class AgentRunner:
 
                 if not tool_calls:
                     # 收尾回复也要写进历史，下一轮对话才能看到 Agent 说过什么
-                    self.state.messages.append({"role": "assistant", "content": content})
+                    self._persist_message({"role": "assistant", "content": content})
                     _log(f"无工具调用，回合完成，共 {self.state.step} 步")
                     self._end_turn("done", {"summary": content, "total_steps": self.state.step})
                     return
@@ -252,7 +337,7 @@ class AgentRunner:
                     }
                     for tc in tool_calls
                 ]
-                self.state.messages.append(assistant_msg)
+                self._persist_message(assistant_msg)
                 responded: set[str] = set()
 
                 def _fill_tool_placeholders() -> None:
@@ -260,7 +345,7 @@ class AgentRunner:
                     后必须紧跟对应的 tool 消息，否则下一回合的请求不合法。"""
                     for tc2 in tool_calls:
                         if tc2["id"] not in responded:
-                            self.state.messages.append({
+                            self._persist_message({
                                 "role": "tool",
                                 "tool_call_id": tc2["id"],
                                 "content": json.dumps({"error": "回合被用户停止", "status": "stopped"}, ensure_ascii=False),
@@ -282,7 +367,7 @@ class AgentRunner:
                         self._emit("tool_call", {"id": call_id, "name": name, "arguments": tc["arguments"]})
                         err = f"参数 JSON 解析失败：{exc}"
                         self._emit("tool_result", {"id": call_id, "name": name, "ok": False, "error": err, "duration_ms": 0})
-                        self.state.messages.append({"role": "tool", "tool_call_id": call_id, "content": json.dumps({"error": err}, ensure_ascii=False)})
+                        self._persist_message({"role": "tool", "tool_call_id": call_id, "content": json.dumps({"error": err}, ensure_ascii=False)})
                         continue
 
                     args_preview = json.dumps(args, ensure_ascii=False)
@@ -303,11 +388,11 @@ class AgentRunner:
                         _log(f"  ❌ 工具失败: {name} 耗时 {duration_ms}ms -> {exc}")
                         self._emit("tool_result", {"id": call_id, "name": name, "ok": False, "error": str(exc), "duration_ms": duration_ms})
                         content_str = json.dumps({"error": str(exc)}, ensure_ascii=False)
-                    self.state.messages.append({"role": "tool", "tool_call_id": call_id, "content": content_str})
+                    self._persist_message({"role": "tool", "tool_call_id": call_id, "content": content_str})
 
             # 超出单回合步数上限：收尾但保留历史，提示用户可以继续
             _log(f"超出最大步数 {MAX_STEPS}，回合收尾")
-            self.state.messages.append({
+            self._persist_message({
                 "role": "assistant",
                 "content": f"本回合达到最大步数 {MAX_STEPS}，已暂停。等待用户下一步指示。",
             })
@@ -327,12 +412,15 @@ class AgentRunner:
             self.state.turn_end = "failed"
         finally:
             self.state.finished_at = time.time()
+            # 无论正常收尾还是异常退出，都要清掉落盘里的 running 标记
+            if self._store is not None:
+                self._store.append_meta(running=False)
             _log(f"Agent 回合结束，状态={self.state.status}，总步数={self.state.step}")
             if self.state.pending_followup:
                 # 插话滞留到收尾（回合已停止消费），开新回合处理
                 followup_runner = getattr(self, "_registry", None)
                 if followup_runner is not None:
-                    followup_runner._begin_followup(self.state.project_dir)
+                    followup_runner._begin_followup(self.state.project_dir, self.state.session_id)
 
     def _end_turn(self, kind: str, data: dict[str, Any]) -> None:
         """收尾一个回合：发终态事件并落状态。awaiting_input 表示会话还活着。
@@ -342,8 +430,13 @@ class AgentRunner:
         """
         queued = self._drain_pending_messages()
         for msg in queued:
-            self.state.messages.append({"role": "user", "content": msg})
+            self._persist_message({"role": "user", "content": msg})
         self.state.pending_followup = bool(queued)
+        # 回合结束就把压缩标记清掉，下一回合重新评估上下文用量
+        self._compacted_this_turn = False
+        # 清掉落盘里的 running 标记：否则下次启动会误判"上次被中断"
+        if self._store is not None:
+            self._store.append_meta(running=False)
         if kind == "stopped":
             self._emit("stopped", data)
             self.state.status = "stopped"
@@ -363,38 +456,62 @@ class AgentRunner:
         return msgs
 
     # ---- 流式 LLM 响应 ----
-    def _stream_llm_response(self) -> tuple[str, list[dict[str, Any]]]:
+    def _stream_llm_response(self) -> tuple[str, list[dict[str, Any]], str]:
         """发起一次流式 chat.completions 请求，边收边推 thought_delta 事件。
 
-        返回 (content, tool_calls)：
+        返回 (content, tool_calls, finish_reason)：
         - content：文本部分全文（流期间已通过 thought_delta 增量推送过）；
         - tool_calls：按 delta 顺序拼接好的调用列表，结构为
-          [{id, name, arguments(str)}]。
+          [{id, name, arguments(str)}]；
+        - finish_reason：stop / length / tool_calls 等，length 表示被截断。
 
         停止信号在流期间到达时立即弃流返回（上层会走 stopped 收尾），
         不再消费后续 chunk。
         """
-        stream = self._openai_client.chat.completions.create(
-            model=self._model,
-            messages=self.state.messages,
-            tools=AGENT_TOOLS,
-            tool_choice="auto",
-            stream=True,
-        )
+        # include_usage 让 provider 在流末尾回一个 usage（部分兼容实现不认，
+        # 抛错就退回到不带该参数重试一次）。usage 用于上下文用量锚点估算。
+        try:
+            stream = self._openai_client.chat.completions.create(
+                model=self._model,
+                messages=self.state.messages,
+                tools=AGENT_TOOLS,
+                tool_choice="auto",
+                stream=True,
+                stream_options={"include_usage": True},
+            )
+        except Exception:  # noqa: BLE001 - 兼容不支持 stream_options 的实现
+            stream = self._openai_client.chat.completions.create(
+                model=self._model,
+                messages=self.state.messages,
+                tools=AGENT_TOOLS,
+                tool_choice="auto",
+                stream=True,
+            )
 
         content_parts: list[str] = []
         # index -> {id, name, arguments_parts}
         tool_calls_acc: dict[int, dict[str, Any]] = {}
         last_delta_emit = 0.0
         pending_delta = []  # 距上次 emit 攒下的文本（节流缓冲）
+        finish_reason = ""
 
         for chunk in stream:
             if self.stop_event.is_set():
                 _log("  流式响应被停止信号打断，弃流")
                 break
+            # usage 可能在 choices 为空的收尾 chunk 上单独到达
+            usage = getattr(chunk, "usage", None)
+            if usage is not None:
+                prompt_tokens = getattr(usage, "prompt_tokens", None)
+                if isinstance(prompt_tokens, int) and prompt_tokens > 0:
+                    self.state.last_prompt_tokens = prompt_tokens
+                    self.state.anchored_message_count = len(self.state.messages)
             if not getattr(chunk, "choices", None):
                 continue
-            delta = chunk.choices[0].delta
+            choice = chunk.choices[0]
+            if getattr(choice, "finish_reason", None):
+                finish_reason = str(choice.finish_reason)
+            delta = choice.delta
             piece = getattr(delta, "content", None)
             if piece:
                 content_parts.append(piece)
@@ -439,7 +556,86 @@ class AgentRunner:
             }
             for _, slot in sorted(tool_calls_acc.items())
         ]
-        return "".join(content_parts), tool_calls
+        return "".join(content_parts), tool_calls, finish_reason
+
+    # ---- 上下文用量估算与压缩 ----
+    def _estimate_context_tokens(self) -> int:
+        """估算当前历史占用的 token 数。
+
+        抄 pi 的用法锚定法：有上一次响应的 prompt_tokens 作锚点时，只对锚点
+        之后新增的消息按字符数估算；没有锚点就整体估算。不引入 tokenizer 依赖。
+        """
+        messages = self.state.messages
+        anchor = self.state.last_prompt_tokens
+        anchored = self.state.anchored_message_count
+        if anchor > 0 and 0 <= anchored <= len(messages):
+            tail = messages[anchored:]
+            return anchor + sum(_estimate_message_tokens(m) for m in tail)
+        return sum(_estimate_message_tokens(m) for m in messages)
+
+    def _maybe_compact(self) -> None:
+        """历史过长时压缩早期对话。每次回合最多压一次，失败降级为本地截断。
+
+        触发线：估算用量 > 窗口的 COMPACT_TRIGGER_RATIO。
+        """
+        if self._compacted_this_turn:
+            return
+        window = self._context_window
+        limit = int(window * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
+        estimated = self._estimate_context_tokens()
+        if estimated <= limit:
+            return
+
+        cut = _find_compaction_cut(self.state.messages, COMPACT_KEEP_RECENT_MSGS)
+        if cut <= 0:
+            _log(f"  ⚠ 上下文估算 {estimated} 超阈值 {limit}，但找不到安全切点，跳过压缩")
+            return
+
+        _log(f"  📦 上下文估算 {estimated} > {limit}，压缩前 {cut} 条消息")
+        head = self.state.messages[:cut]
+        tail = self.state.messages[cut:]
+
+        summary = ""
+        try:
+            summary = self._summarize_messages(head)
+        except Exception as exc:  # noqa: BLE001 - 摘要失败必须降级，不能卡死会话
+            _log(f"  ⚠ 摘要生成失败，回退本地截断: {exc}")
+        if not summary.strip():
+            summary = _local_fallback_summary(head)
+
+        self.state.messages = [
+            {"role": "system", "content": _build_system_prompt(self.state, summary=summary)},
+            {"role": "user", "content": "以上是之前对话的压缩摘要。请在此基础上继续，不要重复已完成的工作。"},
+            *tail,
+        ]
+        # 压缩后旧的 usage 锚点失效，重置避免继续用错误的估算
+        self.state.last_prompt_tokens = 0
+        self.state.anchored_message_count = 0
+        self._compacted_this_turn = True
+        if self._store is not None:
+            self._store.append_compact(removed=cut, summary_chars=len(summary), tokens_before=estimated)
+        self._emit("compacted", {
+            "removed": cut,
+            "summary_chars": len(summary),
+            "tokens_before": estimated,
+        })
+        _log(f"  📦 压缩完成：移除 {cut} 条，摘要 {len(summary)} 字符")
+
+    def _summarize_messages(self, messages: list[dict[str, Any]]) -> str:
+        """调 LLM 把一段历史压成结构化摘要（独立请求，非流式）。"""
+        conversation = _serialize_for_summary(messages)
+        prompt = COMPACT_SUMMARY_PROMPT.replace("{conversation}", conversation)
+        resp = self._openai_client.chat.completions.create(
+            model=self._model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=SUMMARY_MAX_TOKENS,
+            stream=False,
+        )
+        if not getattr(resp, "choices", None):
+            return ""
+        content = getattr(resp.choices[0].message, "content", None)
+        return str(content or "")
 
     # ---- 工具分发 ----
     def _dispatch_tool(self, name: str, args: dict[str, Any]) -> Any:
@@ -459,6 +655,152 @@ class AgentRunner:
     def _http_post(self, path: str, body: dict[str, Any]) -> Any:
         url = f"{self.base_url}{path}"
         return _http_json("POST", url, body)
+
+
+def _build_system_prompt(state: "AgentState", summary: str | None = None) -> str:
+    """构造 system prompt：基础约束 + 当前项目环境 +（可选）对话压缩摘要。
+
+    始终作为会话顶部唯一一条 system 消息。环境信息（项目目录/配置文件/目标）
+    集中注入到 system prompt，对应的 user 消息只放用户的原始输入，避免重复。
+    长会话压缩后调用方把摘要传进来，摘要块拼到末尾，这样压缩后仍能保持
+    「基础约束 + 环境信息 + 摘要」三段结构，环境上下文不丢。
+    """
+    goal = state.goal or "按标准流程完成本项目的翻译"
+    parts: list[str] = [AGENT_SYSTEM_PROMPT + AGENT_TURN_PROMPT]
+    parts.append(
+        "\n\n# 当前项目环境\n"
+        f"- 项目目录：{state.project_dir}\n"
+        f"- 配置文件：{state.config_file_name or DEFAULT_CONFIG_FILE}\n"
+        f"- 本次目标：{goal}"
+    )
+    if summary and summary.strip():
+        parts.append("\n\n# 会话摘要（早前对话已压缩）\n\n" + summary.strip())
+    return "".join(parts)
+
+
+def _parse_context_window(raw: Any) -> int:
+    """解析后端配置里的 contextWindow。非法/缺失时用默认值。
+
+    允许 "128000" / 128000 / "128k" 这几种写法。
+    """
+    if raw is None:
+        return DEFAULT_CONTEXT_WINDOW
+    try:
+        if isinstance(raw, str):
+            text = raw.strip().lower()
+            if not text:
+                return DEFAULT_CONTEXT_WINDOW
+            if text.endswith("k"):
+                value = int(float(text[:-1]) * 1000)
+            else:
+                value = int(float(text))
+        else:
+            value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_CONTEXT_WINDOW
+    # 明显不合理的值（负数、太小）当作没配
+    if value < 1000:
+        return DEFAULT_CONTEXT_WINDOW
+    return value
+
+
+def _estimate_message_tokens(message: dict[str, Any]) -> int:
+    """单条消息的 token 粗估：正文 + tool_calls 的参数 JSON，按字符数/4。"""
+    total_chars = 0
+    content = message.get("content")
+    if isinstance(content, str):
+        total_chars += len(content)
+    for tc in message.get("tool_calls") or []:
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get("function") or {}
+        if isinstance(fn, dict):
+            total_chars += len(str(fn.get("name") or ""))
+            total_chars += len(str(fn.get("arguments") or ""))
+    # 每条消息的固定开销（role/分隔符等）
+    return total_chars // CHARS_PER_TOKEN + 4
+
+
+def _is_tool_call_anchor(message: dict[str, Any]) -> bool:
+    """该消息是否为 tool 响应（必须紧跟其 assistant.tool_calls）。"""
+    return message.get("role") == "tool"
+
+
+def _message_has_tool_calls(message: dict[str, Any]) -> bool:
+    return bool(message.get("tool_calls"))
+
+
+def _find_compaction_cut(messages: list[dict[str, Any]], keep_recent: int) -> int:
+    """找出压缩切点：保留尾部 keep_recent 条，返回前缀长度。
+
+    切点必须落在"安全位置"，否则会切断 assistant.tool_calls 与后续 tool 响应
+    的配对，导致请求非法。具体规则：
+    - 切点前一条不能是带 tool_calls 的 assistant（否则其 tool 响应被留下）；
+    - 切点本身不能是 tool 响应（否则它的 assistant 被裁掉）。
+    找不到安全位置就往前退，退到 0 表示放弃本次压缩。
+    """
+    total = len(messages)
+    if total <= keep_recent + 1:
+        return 0
+    cut = total - keep_recent
+    # 我们要保留 [cut:]，所以被裁掉的是 [0:cut]
+    while cut > 0:
+        prev = messages[cut - 1] if cut - 1 >= 0 else None
+        nxt = messages[cut]
+        # 前缀最后一条是带 tool_calls 的 assistant -> 会拆散它和它的 tool 响应
+        if prev is not None and _message_has_tool_calls(prev):
+            cut -= 1
+            continue
+        # 后缀第一条是 tool 响应 -> 它的 assistant 被裁掉了
+        if _is_tool_call_anchor(nxt):
+            cut -= 1
+            continue
+        break
+    # 至少要有内容被裁掉，且尾部保留完整
+    if cut <= 0:
+        return 0
+    return cut
+
+
+def _serialize_for_summary(messages: list[dict[str, Any]]) -> str:
+    """把一段消息序列化成供摘要模型阅读的文本（截断超长工具结果）。"""
+    lines: list[str] = []
+    for msg in messages:
+        role = msg.get("role") or "?"
+        content = msg.get("content")
+        text = content if isinstance(content, str) else ""
+        calls = msg.get("tool_calls") or []
+        if calls:
+            names = []
+            for tc in calls:
+                fn = tc.get("function") or {} if isinstance(tc, dict) else {}
+                names.append(str(fn.get("name") or "?"))
+            text = (text + " " if text else "") + f"[调用工具: {', '.join(names)}]"
+        if len(text) > 1500:
+            text = text[:1500] + "…（已截断）"
+        lines.append(f"{role}: {text}")
+    return "\n".join(lines)
+
+
+def _local_fallback_summary(messages: list[dict[str, Any]]) -> str:
+    """摘要模型不可用时的兜底：只记录这段时间调用过哪些工具。"""
+    tools: list[str] = []
+    for msg in messages:
+        for tc in msg.get("tool_calls") or []:
+            fn = tc.get("function") or {} if isinstance(tc, dict) else {}
+            name = str(fn.get("name") or "")
+            if name:
+                tools.append(name)
+    tool_text = "、".join(dict.fromkeys(tools)) if tools else "无"
+    return (
+        "## 目标\n（早前对话已压缩，详细目标见消息历史）\n\n"
+        "## 已完成的工作\n"
+        f"早前 {len(messages)} 条消息因上下文超限被压缩。期间调用过的工具：{tool_text}。\n\n"
+        "## 关键决策\n无法从压缩中恢复，请根据当前项目状态判断。\n\n"
+        "## 当前进度与项目状态\n请先查一次项目概览与运行状态重新确认当前进度。\n\n"
+        "## 待办与注意事项\n"
+        "如不确定之前的进展，先查一次项目状态再继续，避免重复已完成的操作。"
+    )
 
 
 def _normalize_endpoint(endpoint: str) -> str:
@@ -1120,22 +1462,151 @@ def _join_lines(lines: list[str]) -> str:
 
 
 class AgentRuntime:
-    """全局 Agent 注册表：单项目单 agent 会话，与翻译 job 类似的互斥。
+    """全局 Agent 注册表：一个项目下可以有多个会话，互不干扰。
 
-    会话是持久的：start 创建会话并跑第一回合，message 在会话上继续（运行中
-    则排队插话），stop 打断当前回合但不销毁会话，reset 才清空。回合结束后
-    状态为 awaiting_input，随时可以 message 继续。
+    数据按 (project_dir, session_id) 组织。同一会话同时只跑一个回合（运行中
+    再发消息走插话排队），但不同会话可以各自独立运行。
+
+    会话落盘在 JSONL（session_store），进程重启后 status/drain_events/message
+    会按需从磁盘懒加载恢复，所以关掉应用再打开还能接着聊，不用清空重来。
     """
 
     def __init__(self) -> None:
-        self._states: dict[str, AgentState] = {}
-        self._runners: dict[str, AgentRunner] = {}
-        self._stop_events: dict[str, threading.Event] = {}
-        self._lock = threading.RLock()  # 可重入锁：允许在持锁时调用本类其它方法（如 start() 内调用 status()）
+        # project_dir -> session_id -> state / runner / stop_event
+        self._states: dict[str, dict[str, AgentState]] = {}
+        self._runners: dict[str, dict[str, AgentRunner]] = {}
+        self._stop_events: dict[str, dict[str, threading.Event]] = {}
+        self._lock = threading.RLock()  # 可重入锁：允许在持锁时调用本类其它方法
 
     @staticmethod
     def _key(project_dir: str) -> str:
         return os.path.abspath(project_dir)
+
+    # ---- 会话管理 ----
+
+    def list_sessions(self, project_dir: str) -> list[dict[str, Any]]:
+        """列出项目下的会话。内存里有状态的优先（可能还没落盘）。"""
+        return session_store.list_sessions(project_dir)
+
+    def create_session(self, project_dir: str, title: str = "") -> dict[str, Any]:
+        """新建一个空会话（不启动回合），标题缺省用"项目名+序号"。"""
+        base = os.path.basename(self._key(project_dir)) or "会话"
+        resolved = title.strip() or session_store.next_session_title(project_dir, base)
+        session_id = session_store.create_session(project_dir, resolved)
+        _log(f"新建会话: project={project_dir} session={session_id} title={resolved}")
+        store = SessionStore(project_dir, session_id)
+        store.append_meta(title=resolved, project_dir=project_dir)
+        return {
+            "session_id": session_id,
+            "title": resolved,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+        }
+
+    def delete_session(self, project_dir: str, session_id: str) -> dict[str, Any]:
+        """删除会话：先打断运行中的回合，再清内存与磁盘。"""
+        key = self._key(project_dir)
+        with self._lock:
+            event = self._stop_events.get(key, {}).get(session_id)
+            if event:
+                event.set()
+            self._states.get(key, {}).pop(session_id, None)
+            self._runners.get(key, {}).pop(session_id, None)
+            self._stop_events.get(key, {}).pop(session_id, None)
+            session_store.delete_session(project_dir, session_id)
+            _log(f"删除会话: project={key} session={session_id}")
+        return {"status": "ok", "session_id": session_id}
+
+    def rename_session(self, project_dir: str, session_id: str, title: str) -> dict[str, Any]:
+        """改会话标题（当前前端未用，留给后续重命名 UI）。"""
+        clean = (title or "").strip()
+        if not clean:
+            raise ValueError("title is required")
+        key = self._key(project_dir)
+        with self._lock:
+            state = self._states.get(key, {}).get(session_id)
+            if state is not None:
+                state.title = clean
+            store = SessionStore(project_dir, session_id)
+            store.append_meta(title=clean, project_dir=project_dir)
+        return {"status": "ok", "session_id": session_id, "title": clean}
+
+    def _resolve_session_id(self, project_dir: str, session_id: str | None) -> str | None:
+        """缺省 session_id 时取最近活跃的会话（兼容旧前端只传项目）。"""
+        if session_id:
+            return session_id
+        sessions = self.list_sessions(project_dir)
+        if sessions:
+            return sessions[0]["session_id"]
+        with self._lock:
+            states = self._states.get(self._key(project_dir)) or {}
+            if states:
+                return next(iter(states))
+        return None
+
+    def _restore(self, project_dir: str, session_id: str) -> AgentState | None:
+        """从磁盘懒加载一个会话到内存（进程重启后恢复用）。"""
+        store = SessionStore(project_dir, session_id)
+        data = store.load()
+        meta = data.get("meta") or {}
+        messages = data.get("messages") or []
+        events = data.get("events") or []
+        if not messages and not events:
+            return None
+        # 事件按 step 重建 deque（保留最近 RUNTIME_EVENT_KEEP 条）
+        ev_deque: deque[AgentEvent] = deque(maxlen=RUNTIME_EVENT_KEEP)
+        max_step = 0
+        for raw in events:
+            try:
+                step = int(raw.get("step", 0))
+                etype = str(raw.get("type", ""))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            data_fields = {k: v for k, v in raw.items() if k not in ("type", "step")}
+            ev_deque.append(AgentEvent(type=etype, step=step, data=data_fields))
+            max_step = max(max_step, step)
+        # 上次是运行中 -> 进程重启把回合中断了，标记为 stopped
+        was_running = bool(meta.get("running"))
+        state = AgentState(
+            status="stopped" if was_running else "awaiting_input",
+            goal=str(meta.get("goal") or ""),
+            project_dir=project_dir,
+            config_file_name=str(meta.get("config_file_name") or DEFAULT_CONFIG_FILE),
+            backend_profile_data=meta.get("backend_profile_data") or {},
+            started_at=float(meta.get("created_at") or 0.0),
+            error="上次运行被应用重启中断" if was_running else "",
+            messages=list(messages),
+            step=max_step,
+            session_id=session_id,
+            title=str(meta.get("title") or session_id),
+            restored=True,
+        )
+        state.events = ev_deque
+        if was_running:
+            # 给中断的会话补一条可见提示，用户继续发消息即可接着干
+            state.events.append(AgentEvent(
+                type="stopped",
+                step=max_step + 1,
+                data={"reason": "上次运行被应用重启中断，发消息即可继续"},
+            ))
+            state.step = max_step + 1
+        key = self._key(project_dir)
+        with self._lock:
+            self._states.setdefault(key, {})[session_id] = state
+        _log(f"从磁盘恢复会话: project={key} session={session_id} messages={len(messages)} events={len(ev_deque)}")
+        return state
+
+    def _get_state(self, project_dir: str, session_id: str | None) -> AgentState | None:
+        """取会话状态：内存优先，没有则尝试从磁盘恢复。"""
+        sid = self._resolve_session_id(project_dir, session_id)
+        if sid is None:
+            return None
+        key = self._key(project_dir)
+        with self._lock:
+            state = self._states.get(key, {}).get(sid)
+        if state is not None:
+            return state
+        return self._restore(project_dir, sid)
 
     def start(
         self,
@@ -1143,15 +1614,25 @@ class AgentRuntime:
         config_file_name: str,
         backend_profile_data: dict[str, Any],
         goal: str = "",
+        session_id: str | None = None,
         host: str = DEFAULT_BACKEND_HOST,
         port: int = DEFAULT_BACKEND_PORT,
     ) -> dict[str, Any]:
+        """启动一个回合。session_id 为空时新建会话（标题=项目名+序号）。"""
         key = self._key(project_dir)
         with self._lock:
-            existing = self._states.get(key)
-            if existing and existing.status == "running":
-                _log(f"启动被拒：项目已有 Agent 在运行 -> {key}")
-                raise ValueError("该项目已有 Agent 在运行")
+            sid = self._resolve_session_id(project_dir, session_id) if session_id else None
+            if sid is None:
+                session = self.create_session(project_dir)
+                sid = session["session_id"]
+                title = session["title"]
+            else:
+                existing = self._states.get(key, {}).get(sid)
+                if existing and existing.status == "running":
+                    _log(f"启动被拒：该会话已有回合在运行 -> {key}/{sid}")
+                    raise ValueError("该会话已有回合在运行")
+                title = existing.title if existing else sid
+
             stop_event = threading.Event()
             state = AgentState(
                 status="running",
@@ -1160,97 +1641,115 @@ class AgentRuntime:
                 config_file_name=config_file_name or DEFAULT_CONFIG_FILE,
                 backend_profile_data=backend_profile_data or {},
                 started_at=time.time(),
+                session_id=sid,
+                title=title,
             )
             runner = AgentRunner(state, host=host, port=port, stop_event=stop_event, registry=self)
-            self._states[key] = state
-            self._runners[key] = runner
-            self._stop_events[key] = stop_event
+            self._states.setdefault(key, {})[sid] = state
+            self._runners.setdefault(key, {})[sid] = runner
+            self._stop_events.setdefault(key, {})[sid] = stop_event
+            # meta 落盘：记录会话身份与运行标记，重启后据此恢复
+            if runner._store is not None:
+                runner._store.append_meta(
+                    project_dir=project_dir,
+                    title=title,
+                    goal=goal,
+                    config_file_name=state.config_file_name,
+                    created_at=state.started_at,
+                    running=True,
+                )
             thread = threading.Thread(target=runner.run, name=f"agent-{os.path.basename(key)}", daemon=True)
             thread.start()
-            _log(f"Agent 会话已启动: project={key} config={config_file_name} goal={goal[:60]}")
-            return self.status(project_dir)
+            _log(f"Agent 回合已启动: project={key} session={sid} config={config_file_name} goal={goal[:60]}")
+            return self.status(project_dir, sid)
 
-    def message(self, project_dir: str, message: str) -> dict[str, Any]:
+    def message(self, project_dir: str, message: str, session_id: str | None = None) -> dict[str, Any]:
         """向会话追加一条用户消息。
 
-        - 会话不存在或从未启动过：报错（前端应先 start）。
+        - 会话不存在（内存与磁盘都没有）：报错（前端应先 start/create）。
         - 正在运行：发 user_message 事件 + 插话排队，Agent 在下一个 LLM 调用前
           读到；若回合恰好正在收尾，插话转成 followup，自动开新回合消费。
-        - 已结束（awaiting_input / stopped / failed 等旧状态）：追加历史并
-          开新回合继续跑。
+        - 已结束（awaiting_input / stopped / failed 等旧状态，含重启恢复的）：
+          追加历史并开新回合继续跑。
         """
-        key = self._key(project_dir)
         text = (message or "").strip()
+        key = self._key(project_dir)
         with self._lock:
-            state = self._states.get(key)
+            sid = self._resolve_session_id(project_dir, session_id)
+            state = self._states.get(key, {}).get(sid) if sid else None
+            if state is None:
+                state = self._restore(project_dir, sid) if sid else None
             if state is None or not state.messages:
                 raise ValueError("该项目还没有 Agent 会话，请先发送第一条消息启动")
 
             if state.status == "running":
                 state.pending_messages.append(text)
-                runner = self._runners.get(key)
+                runner = self._runners.get(key, {}).get(sid)
                 if runner is not None:
                     runner._emit("user_message", {"message": text})
-                _log(f"Agent 运行中，消息已排队: project={key} msg={text[:60]}")
-                return self.status(project_dir)
+                _log(f"Agent 运行中，消息已排队: session={sid} msg={text[:60]}")
+                return self.status(project_dir, sid)
 
-            # 回合已结束
+            # 回合已结束（可能是重启后恢复的）
             if state.pending_followup:
-                # 收尾时已有滞留插话（可能就是本条之前排队的），只补事件
                 state.pending_followup = False
-            state.messages.append({"role": "user", "content": text})
+            runner = self._runners.get(key, {}).get(sid)
+            if runner is None:
+                stop_event = threading.Event()
+                runner = AgentRunner(state, stop_event=stop_event, registry=self)
+                self._runners.setdefault(key, {})[sid] = runner
+                self._stop_events.setdefault(key, {})[sid] = stop_event
+            else:
+                stop_event = threading.Event()
+                runner.stop_event = stop_event
+                self._stop_events.setdefault(key, {})[sid] = stop_event
+            runner._persist_message({"role": "user", "content": text})
 
             state.status = "running"
             state.error = ""
             state.finished_at = 0.0
             state.turn_end = ""
             state.goal = state.goal or text  # 保留初始目标；为空时用首条后续消息补上
-            runner = self._runners.get(key)
-            if runner is None:
-                stop_event = threading.Event()
-                runner = AgentRunner(state, stop_event=stop_event, registry=self)
-                self._runners[key] = runner
-                self._stop_events[key] = stop_event
-            else:
-                stop_event = threading.Event()
-                runner.stop_event = stop_event
-                self._stop_events[key] = stop_event
             runner._emit("user_message", {"message": text})
             thread = threading.Thread(target=runner.run, name=f"agent-{os.path.basename(key)}", daemon=True)
             thread.start()
-            _log(f"Agent 继续回合: project={key} msg={text[:60]}")
-            return self.status(project_dir)
+            _log(f"Agent 继续回合: session={sid} msg={text[:60]}")
+            return self.status(project_dir, sid)
 
-    def stop(self, project_dir: str) -> dict[str, Any]:
+    def stop(self, project_dir: str, session_id: str | None = None) -> dict[str, Any]:
         key = self._key(project_dir)
         with self._lock:
-            event = self._stop_events.get(key)
+            sid = self._resolve_session_id(project_dir, session_id)
+            event = self._stop_events.get(key, {}).get(sid) if sid else None
             if event:
                 event.set()
             # 不直接改状态：回合线程（可能正阻塞在一次 LLM/工具调用里）稍后
             # 自己收尾落 stopped，并消费排队中的插话。期间 status 保持 running，
             # 此时到达的 message() 会走插话路径，最终由 followup 消费。
-        return self.status(project_dir)
+        return self.status(project_dir, sid)
 
-    def reset(self, project_dir: str) -> dict[str, Any]:
-        """清空项目的 Agent 会话：停掉运行中的回合并丢弃全部历史。"""
+    def reset(self, project_dir: str, session_id: str | None = None) -> dict[str, Any]:
+        """清空该会话：停掉运行中的回合并丢弃全部历史（内存 + 磁盘）。"""
         key = self._key(project_dir)
         with self._lock:
-            event = self._stop_events.get(key)
+            sid = self._resolve_session_id(project_dir, session_id)
+            event = self._stop_events.get(key, {}).get(sid) if sid else None
             if event:
                 event.set()
-            self._states.pop(key, None)
-            self._runners.pop(key, None)
-            self._stop_events.pop(key, None)
-            _log(f"Agent 会话已重置: project={key}")
-        return {"status": "idle", "project_dir": project_dir, "step": 0, "events": []}
+            if sid:
+                self._states.get(key, {}).pop(sid, None)
+                self._runners.get(key, {}).pop(sid, None)
+                self._stop_events.get(key, {}).pop(sid, None)
+                session_store.delete_session(project_dir, sid)
+            _log(f"Agent 会话已重置: project={key} session={sid}")
+        return {"status": "idle", "project_dir": project_dir, "session_id": sid or "", "step": 0, "events": []}
 
-    def _begin_followup(self, project_dir: str) -> None:
+    def _begin_followup(self, project_dir: str, session_id: str) -> None:
         """回合收尾发现滞留插话时，由后台线程调用：开新回合消费。"""
         key = self._key(project_dir)
         with self._lock:
-            state = self._states.get(key)
-            runner = self._runners.get(key)
+            state = self._states.get(key, {}).get(session_id)
+            runner = self._runners.get(key, {}).get(session_id)
             if state is None or runner is None or not state.pending_followup:
                 return
             if state.status == "running":
@@ -1261,20 +1760,24 @@ class AgentRuntime:
             state.turn_end = ""
             stop_event = threading.Event()
             runner.stop_event = stop_event
-            self._stop_events[key] = stop_event
+            self._stop_events.setdefault(key, {})[session_id] = stop_event
             thread = threading.Thread(target=runner.run, name=f"agent-{os.path.basename(key)}", daemon=True)
             thread.start()
-            _log(f"Agent followup 回合已启动: project={key}")
+            _log(f"Agent followup 回合已启动: project={key} session={session_id}")
 
-    def status(self, project_dir: str) -> dict[str, Any]:
-        key = self._key(project_dir)
+    def status(self, project_dir: str, session_id: str | None = None) -> dict[str, Any]:
+        sid = self._resolve_session_id(project_dir, session_id)
+        if sid is None:
+            return {"status": "idle", "project_dir": project_dir, "session_id": "", "events": [], "step": 0}
+        state = self._get_state(project_dir, sid)
+        if state is None:
+            return {"status": "idle", "project_dir": project_dir, "session_id": sid, "events": [], "step": 0}
         with self._lock:
-            state = self._states.get(key)
-            if state is None:
-                return {"status": "idle", "project_dir": project_dir, "events": [], "step": 0}
             return {
                 "status": state.status,
                 "project_dir": state.project_dir,
+                "session_id": state.session_id,
+                "title": state.title,
                 "goal": state.goal,
                 "step": state.step,
                 "started_at": state.started_at,
@@ -1283,11 +1786,13 @@ class AgentRuntime:
                 "events": [e.to_dict() for e in state.events],
             }
 
-    def drain_events(self, project_dir: str, after_step: int = 0) -> list[dict[str, Any]]:
+    def drain_events(self, project_dir: str, after_step: int = 0, session_id: str | None = None) -> list[dict[str, Any]]:
         """取 after_step 之后的所有事件，供 SSE 增量推送。"""
-        key = self._key(project_dir)
+        sid = self._resolve_session_id(project_dir, session_id)
+        if sid is None:
+            return []
+        state = self._get_state(project_dir, sid)
+        if state is None:
+            return []
         with self._lock:
-            state = self._states.get(key)
-            if state is None:
-                return []
             return [e.to_dict() for e in state.events if e.step > after_step]

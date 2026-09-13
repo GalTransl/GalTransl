@@ -9,23 +9,29 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import {
+  addOpenProject,
   encodeProjectDir,
   getBackendProfile,
   getBackendProfileNames,
   getDefaultBackendProfile,
+  loadOpenProjects,
+  OPEN_PROJECTS_CHANGE_EVENT,
+  readConfigFileName,
   stopAgent,
   startAgent,
   sendAgentMessage,
   resetAgent,
   subscribeAgentStream,
   fetchAgentStatus,
+  listAgentSessions,
+  createAgentSession,
+  deleteAgentSession,
   type AgentEvent,
+  type AgentSession as AgentSessionMeta,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 import { renderMarkdown } from '../lib/markdown';
 
-const OPEN_PROJECTS_KEY = 'galtransl-open-projects';
-const CONFIG_FILE_KEY = 'galtransl-config-file';
 const HISTORY_KEY = 'galtransl-project-history';
 
 type HistoryEntry = {
@@ -39,8 +45,9 @@ type HistoryEntry = {
    "conversation" (events) lives in the page. Persist it so reopening the page
    or restarting the app restores the transcript instead of a blank slate. */
 
-type AgentSession = {
+type TranscriptSession = {
   projectDir: string;
+  sessionId: string;
   events: AgentEvent[];
   status: string;
   goal: string;
@@ -48,15 +55,38 @@ type AgentSession = {
   finishedAt: number;
 };
 
-function sessionsKey(projectDir: string): string {
-  return `galtransl-agent-session:${projectDir}`;
+function sessionsKey(projectDir: string, sessionId: string): string {
+  return `galtransl-agent-session:${projectDir}:${sessionId}`;
 }
 
-function loadSession(projectDir: string): AgentSession | null {
+/** 记住每个项目当前选中的会话 id，刷新页面后回到同一个会话。 */
+function activeSessionKey(projectDir: string): string {
+  return `galtransl-agent-session-id:${projectDir}`;
+}
+
+function loadActiveSessionId(projectDir: string): string {
   try {
-    const raw = localStorage.getItem(sessionsKey(projectDir));
+    return localStorage.getItem(activeSessionKey(projectDir)) || '';
+  } catch {
+    return '';
+  }
+}
+
+function saveActiveSessionId(projectDir: string, sessionId: string): void {
+  try {
+    if (sessionId) localStorage.setItem(activeSessionKey(projectDir), sessionId);
+    else localStorage.removeItem(activeSessionKey(projectDir));
+  } catch {
+    // 存储不可用不影响主流程
+  }
+}
+
+function loadSession(projectDir: string, sessionId: string): TranscriptSession | null {
+  if (!sessionId) return null;
+  try {
+    const raw = localStorage.getItem(sessionsKey(projectDir, sessionId));
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as AgentSession;
+    const parsed = JSON.parse(raw) as TranscriptSession;
     if (!parsed || !Array.isArray(parsed.events)) return null;
     return parsed;
   } catch {
@@ -64,23 +94,14 @@ function loadSession(projectDir: string): AgentSession | null {
   }
 }
 
-function saveSession(session: AgentSession): void {
+function saveSession(session: TranscriptSession): void {
+  if (!session.sessionId) return;
   try {
     // Bound the payload: keep the tail of very long transcripts.
     const events = session.events.length > 600 ? session.events.slice(-600) : session.events;
-    localStorage.setItem(sessionsKey(session.projectDir), JSON.stringify({ ...session, events }));
+    localStorage.setItem(sessionsKey(session.projectDir, session.sessionId), JSON.stringify({ ...session, events }));
   } catch {
     // Quota or serialization failure is non-fatal.
-  }
-}
-
-function readOpenProjects(): string[] {
-  try {
-    const raw = localStorage.getItem(OPEN_PROJECTS_KEY);
-    const parsed = raw ? (JSON.parse(raw) as string[]) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
   }
 }
 
@@ -91,15 +112,6 @@ function readHistory(): HistoryEntry[] {
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
-  }
-}
-
-function readConfigFileName(projectDir: string): string {
-  try {
-    const map = JSON.parse(localStorage.getItem(CONFIG_FILE_KEY) || '{}');
-    return map[projectDir] || 'config.yaml';
-  } catch {
-    return 'config.yaml';
   }
 }
 
@@ -114,7 +126,7 @@ function shortName(projectDir: string): string {
    This mirrors how modern agent clients avoid a wall of one-line cards. */
 
 type ActivityItem = {
-  kind: 'thought' | 'tool';
+  kind: 'thought' | 'tool' | 'compact';
   step: number;
   content?: string;
   id?: string;
@@ -132,6 +144,9 @@ type ActivityItem = {
   waitTotalMs?: number;
   waitRemainingMs?: number;
   waitInterrupted?: boolean;
+  // compact: 上下文压缩提示
+  removed?: number;
+  summaryChars?: number;
 };
 
 type TimelineGroup =
@@ -245,6 +260,18 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
           target.waitRemainingMs = 0;
         }
       }
+      continue;
+    }
+
+    // 上下文压缩：折叠成活动组里的一条提示行，不打断当前活动组。
+    if (ev.type === 'compacted') {
+      if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
+      current.items.push({
+        kind: 'compact',
+        step: ev.step,
+        removed: ev.removed,
+        summaryChars: ev.summary_chars,
+      });
       continue;
     }
 
@@ -364,15 +391,163 @@ function formatElapsed(seconds: number): string {
   return `${m}m ${s}s`;
 }
 
+/* ── Session sidebar ──
+   一个项目下可以有多个会话；这里负责新建、切换、删除。
+   标题目前由后端按"项目名+序号"生成。 */
+
+function AgentSessionSidebar({
+  sessionsByProject,
+  projects,
+  activeProject,
+  activeSessionId,
+  collapsed,
+  disabled,
+  onCreateBlank,
+  onCreateInProject,
+  onToggleProject,
+  onSelectSession,
+  onDeleteSession,
+}: {
+  sessionsByProject: Record<string, AgentSessionMeta[]>;
+  projects: string[];
+  activeProject: string;
+  activeSessionId: string;
+  collapsed: Record<string, boolean>;
+  disabled: boolean;
+  onCreateBlank: () => void;
+  onCreateInProject: (dir: string) => void;
+  onToggleProject: (dir: string) => void;
+  onSelectSession: (dir: string, sid: string) => void;
+  onDeleteSession: (dir: string, session: AgentSessionMeta) => void;
+}) {
+  return (
+    <aside className="agent-sessions">
+      <div className="agent-sessions__head">
+        <span className="agent-sessions__title">会话</span>
+        <button
+          type="button"
+          className="agent-sessions__new"
+          onClick={onCreateBlank}
+          disabled={disabled}
+          title={disabled ? 'Agent 运行中，请先停止或等待' : '新建会话（选择新项目）'}
+        >
+          ＋
+        </button>
+      </div>
+      <div className="agent-sessions__list">
+        {projects.length === 0 ? (
+          <div className="agent-sessions__empty">
+            还没有项目
+            <span>点 ＋ 新建，或在首页打开一个项目后再回到 Agent</span>
+          </div>
+        ) : (
+          projects.map((dir) => {
+            const list = sessionsByProject[dir] || [];
+            const isCollapsed = collapsed[dir] ?? dir !== activeProject;
+            const isGroupActive = dir === activeProject;
+            const shortDir = shortName(dir);
+            return (
+              <div
+                key={dir}
+                className={`agent-sessions__group${isCollapsed ? ' is-collapsed' : ''}${isGroupActive ? ' is-active' : ''}`}
+              >
+                <div className="agent-sessions__group-head">
+                  <button
+                    type="button"
+                    className="agent-sessions__group-toggle"
+                    onClick={() => onToggleProject(dir)}
+                    title={dir}
+                  >
+                    <span className={`agent-sessions__caret${isCollapsed ? '' : ' is-open'}`}>▾</span>
+                    <span className="agent-sessions__group-name">{shortDir}</span>
+                    <span className="agent-sessions__group-count">
+                      {list.length > 0 ? list.length : ''}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="agent-sessions__group-new"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCreateInProject(dir);
+                    }}
+                    disabled={disabled}
+                    title={disabled ? 'Agent 运行中' : `在「${shortDir}」下新建会话`}
+                    aria-label={`在 ${shortDir} 新建会话`}
+                  >
+                    ＋
+                  </button>
+                </div>
+                <div className="agent-sessions__group-list">
+                  {list.length === 0 ? (
+                    <div className="agent-sessions__group-empty">暂无会话</div>
+                  ) : (
+                    list.map((s) => (
+                      <div
+                        key={s.session_id}
+                        className={`agent-session-item${
+                          isGroupActive && s.session_id === activeSessionId ? ' is-active' : ''
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          className="agent-session-item__main"
+                          onClick={() => onSelectSession(dir, s.session_id)}
+                          title={s.title}
+                        >
+                          <span className="agent-session-item__title">{s.title}</span>
+                          <span className="agent-session-item__time">
+                            {formatSessionTime(s.updated_at)}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="agent-session-item__delete"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteSession(dir, s);
+                          }}
+                          disabled={disabled}
+                          title="删除该会话"
+                          aria-label={`删除会话 ${s.title}`}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function formatSessionTime(ts: number): string {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  if (sameDay) return `${hh}:${mm}`;
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
 /* ── Main page ── */
 
 export function AgentPage() {
   const navigate = useNavigate();
 
-  const projectOptions = useMemo(() => {
+  // 已打开项目与历史合并的去重列表。响应式：监听 OPEN_PROJECTS_CHANGE_EVENT
+  // （翻译器/别处打开或关闭项目时广播），让侧边栏分组与全局侧边栏保持同步。
+  const mergeProjects = useCallback((): string[] => {
     const seen = new Set<string>();
     const list: string[] = [];
-    for (const d of readOpenProjects()) {
+    for (const d of loadOpenProjects()) {
       if (!seen.has(d)) {
         seen.add(d);
         list.push(d);
@@ -386,6 +561,14 @@ export function AgentPage() {
     }
     return list;
   }, []);
+  const [projectOptions, setProjectOptions] = useState<string[]>(() => mergeProjects());
+  useEffect(() => {
+    const sync = () => setProjectOptions(mergeProjects());
+    window.addEventListener(OPEN_PROJECTS_CHANGE_EVENT, sync);
+    // 进入页面时也同步一次：可能在别处刚打开/关闭过项目
+    sync();
+    return () => window.removeEventListener(OPEN_PROJECTS_CHANGE_EVENT, sync);
+  }, [mergeProjects]);
 
   const [projectDir, setProjectDir] = useState<string>(() => projectOptions[0] || '');
   const [configFileName, setConfigFileName] = useState<string>(() =>
@@ -397,10 +580,7 @@ export function AgentPage() {
   );
   const [goal, setGoal] = useState('');
 
-  const [events, setEvents] = useState<AgentEvent[]>(() => {
-    const first = projectOptions[0];
-    return first ? loadSession(first)?.events || [] : [];
-  });
+  const [events, setEvents] = useState<AgentEvent[]>([]);
   const [status, setStatus] = useState<string>('idle');
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -408,6 +588,14 @@ export function AgentPage() {
   const [elapsed, setElapsed] = useState(0);
   // 界面上的「发送中」乐观态：消息已发出但后端尚未确认
   const [sending, setSending] = useState(false);
+  // 会话列表按项目分组：projectDir -> 该项目的会话列表
+  const [sessionsByProject, setSessionsByProject] = useState<Record<string, AgentSessionMeta[]>>({});
+  // 侧边栏每个项目分组的折叠态（默认当前活动项目展开，其余折叠）
+  const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
+  const [activeSessionId, setActiveSessionId] = useState<string>(() => {
+    const first = projectOptions[0];
+    return first ? loadActiveSessionId(first) : '';
+  });
   // 本地已乐观追加的 user_message 的临时 id 集合，SSE 回放时据此去重，
   // 避免同一条消息渲染两次（发送时本地先显示，后端确认后回放同一条）
   const localMsgIdsRef = useRef<Set<string>>(new Set());
@@ -422,40 +610,117 @@ export function AgentPage() {
   // 是否已在后端建立会话（首条消息 startAgent 成功后置 true；reset 清空）。
   // 不能用 events.length 判断：乐观追加后它立即 >0，但会话可能还没建好。
   const hasBackendSessionRef = useRef(false);
+  // 当前激活的会话 id，供回调读取（避免闭包读到旧值）
+  const activeSessionRef = useRef('');
+  useEffect(() => {
+    activeSessionRef.current = activeSessionId;
+  }, [activeSessionId]);
+  // 当前活动项目，供回调读取（refreshSessions 判断是否接管 activeSessionId）
+  const effectiveProjectRef = useRef(projectDir);
+  useEffect(() => {
+    effectiveProjectRef.current = projectDir;
+  }, [projectDir]);
 
   const effectiveProject = projectDir;
 
-  /* On project change: restore persisted transcript, then reconcile with the
-     backend (which may have a run in flight from a previous app session). */
+  /** 拉取某项目的会话列表并写进按项目分组的 map（不动其他项目的会话）。
+   *  preferredId 命中则切到该会话；否则在该项目列表非空时取第一个。 */
+  const refreshSessions = useCallback(
+    async (dir: string, preferredId?: string): Promise<AgentSessionMeta[]> => {
+      try {
+        const list = await listAgentSessions(dir);
+        setSessionsByProject((prev) => ({ ...prev, [dir]: list }));
+        // 仅当 dir 恰好是当前活动项目时才接管 activeSessionId 选择，
+        // 否则（点别的项目的 + / 删了另一项目的会话）不强改主区。
+        if (dir === effectiveProjectRef.current) {
+          const want = preferredId || activeSessionRef.current;
+          if (want && list.some((s) => s.session_id === want)) {
+            setActiveSessionId(want);
+            activeSessionRef.current = want;
+            saveActiveSessionId(dir, want);
+          } else if (list.length) {
+            setActiveSessionId(list[0].session_id);
+            activeSessionRef.current = list[0].session_id;
+            saveActiveSessionId(dir, list[0].session_id);
+          }
+        }
+        return list;
+      } catch {
+        // 后端不可达时保留现有列表
+        return [];
+      }
+    },
+    [],
+  );
+
+  /* Project change: adopt the remembered session for this project, load its
+     session list into the grouped map (without clobbering other projects),
+     and accordion-collapse so only the active project is expanded. The actual
+     transcript load happens in the session effect below (keyed on activeSessionId). */
   useEffect(() => {
-    let cancelled = false;
     localMsgIdsRef.current.clear();
     if (!effectiveProject) {
       hasBackendSessionRef.current = false;
+      activeSessionRef.current = '';
+      setActiveSessionId('');
+      setEvents([]);
       setRunning(false);
       setStatus('idle');
       return;
     }
-    const persisted = loadSession(effectiveProject);
+    const remembered = loadActiveSessionId(effectiveProject);
+    setActiveSessionId(remembered);
+    activeSessionRef.current = remembered;
+    // accordion：展开当前项目、收起其他（用户仍可手动再展开别的）
+    setCollapsedProjects(() => {
+      const next: Record<string, boolean> = {};
+      for (const d of projectOptions) next[d] = d !== effectiveProject;
+      return next;
+    });
+    void refreshSessions(effectiveProject, remembered);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveProject]);
+
+  /* Session change: restore this session's transcript, then reconcile with the
+     backend (which may have a run in flight, or history restored from disk). */
+  useEffect(() => {
+    let cancelled = false;
+    abortRef.current?.();
+    abortRef.current = null;
+    localMsgIdsRef.current.clear();
+    if (!effectiveProject || !activeSessionId) {
+      // 项目下还没有任何会话：显示空态，等用户发第一条消息
+      hasBackendSessionRef.current = false;
+      setEvents([]);
+      setRunning(false);
+      setStatus('idle');
+      return;
+    }
+    // 先用 localStorage 的缓存立刻渲染，避免切换时闪白
+    const persisted = loadSession(effectiveProject, activeSessionId);
     setEvents(persisted?.events || []);
     setStatus(persisted?.status || 'idle');
     startRef.current = persisted?.startedAt || 0;
     lastStepRef.current = maxStep(persisted?.events || []);
-    // 本地有历史记录 = 后端大概率已有会话；以 status 快照对账结果为准
     hasBackendSessionRef.current = Boolean(persisted?.events.length);
 
-    fetchAgentStatus(effectiveProject)
+    fetchAgentStatus(effectiveProject, activeSessionId)
       .then((snap) => {
         if (cancelled) return;
-        if (snap.events && snap.events.length >= (persisted?.events.length || 0)) {
-          setEvents(snap.events);
-          lastStepRef.current = maxStep(snap.events);
-          hasBackendSessionRef.current = Boolean(snap.events.length);
+        // 后端是权威来源：新会话后端空（events=0）时必须覆盖本地可能残留的
+        // 旧缓存，否则会错把别的会话的内容糊在新建会话上。
+        const snapEvents = snap.events || [];
+        const snapLen = snapEvents.length;
+        const cachedLen = persisted?.events.length || 0;
+        if (snapLen >= cachedLen || snapLen === 0) {
+          setEvents(snapEvents);
+          lastStepRef.current = maxStep(snapEvents);
+          hasBackendSessionRef.current = Boolean(snapLen);
         }
         const snapRunning = snap.status === 'running';
         setStatus(snap.status);
         setRunning(snapRunning);
-        if (snapRunning) subscribeStream(effectiveProject);
+        if (snapRunning) subscribeStream(effectiveProject, activeSessionId);
       })
       .catch(() => {
         // Backend not ready — keep the persisted view.
@@ -464,7 +729,7 @@ export function AgentPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveProject]);
+  }, [effectiveProject, activeSessionId]);
 
   useEffect(() => {
     if (projectDir) setConfigFileName(readConfigFileName(projectDir));
@@ -472,16 +737,17 @@ export function AgentPage() {
 
   // Persist transcript whenever it settles.
   useEffect(() => {
-    if (!effectiveProject || !events.length) return;
+    if (!effectiveProject || !activeSessionId || !events.length) return;
     saveSession({
       projectDir: effectiveProject,
+      sessionId: activeSessionId,
       events,
       status,
       goal: '',
       startedAt: startRef.current,
       finishedAt: status === 'running' ? 0 : Date.now(),
     });
-  }, [events, status, effectiveProject]);
+  }, [events, status, effectiveProject, activeSessionId]);
 
   // Elapsed timer while running.
   useEffect(() => {
@@ -513,7 +779,7 @@ export function AgentPage() {
     };
   }, []);
 
-  const subscribeStream = useCallback((dir: string) => {
+  const subscribeStream = useCallback((dir: string, sessionId?: string) => {
     abortRef.current?.();
     // 续订时从本地已见的最大 step 之后开始拉，避免后端重放旧回合的事件
     const afterStep = lastStepRef.current;
@@ -572,6 +838,7 @@ export function AgentPage() {
         setRunning(false);
       },
       afterStep,
+      sessionId,
     );
   }, []);
 
@@ -603,20 +870,38 @@ export function AgentPage() {
     setStatus('running');
     setRunning(true);
     try {
+      // 目标会话：优先用当前选中会话；没有就先建一个空会话再往里发消息。
+      // 走 create → message 两段式，让侧边栏立刻能看到这个新会话。
+      let sid = activeSessionRef.current;
+      if (!sid) {
+        const created = await createAgentSession(effectiveProject);
+        sid = created.session_id;
+        activeSessionRef.current = sid;
+        setActiveSessionId(sid);
+        saveActiveSessionId(effectiveProject, sid);
+      }
       if (!hasBackendSessionRef.current) {
-        // 第一条消息：创建会话并跑第一回合
-        await startAgent({
+        // 空会话：第一条消息启动首个回合
+        const snap = await startAgent({
           project_dir: effectiveProject,
           config_file_name: configFileName || 'config.yaml',
           backend_profile_data: profile,
           goal: text,
+          session_id: sid,
         });
         hasBackendSessionRef.current = true;
+        if (snap.session_id) {
+          sid = snap.session_id;
+          activeSessionRef.current = sid;
+          setActiveSessionId(sid);
+          saveActiveSessionId(effectiveProject, sid);
+        }
       } else {
         // 已有会话：运行中→插话排队；已结束→同会话继续下一回合
-        await sendAgentMessage(effectiveProject, text);
+        await sendAgentMessage(effectiveProject, text, sid);
       }
-      subscribeStream(effectiveProject);
+      void refreshSessions(effectiveProject, sid);
+      subscribeStream(effectiveProject, sid);
     } catch (err) {
       setError(normalizeError(err, '发送失败'));
       setRunning(false);
@@ -624,12 +909,12 @@ export function AgentPage() {
     } finally {
       setSending(false);
     }
-  }, [effectiveProject, backendProfileName, configFileName, goal, subscribeStream]);
+  }, [effectiveProject, backendProfileName, configFileName, goal, subscribeStream, refreshSessions]);
 
   const handleStop = useCallback(async () => {
     if (!effectiveProject) return;
     try {
-      await stopAgent(effectiveProject);
+      await stopAgent(effectiveProject, activeSessionRef.current || undefined);
       setStatus('stopped');
       setRunning(false);
       abortRef.current?.();
@@ -640,23 +925,157 @@ export function AgentPage() {
   }, [effectiveProject]);
 
   const handleOpenProject = useCallback(async () => {
+    // 项目选择集中在主区 hero：任何时候都允许用"打开项目"选/换一个项目。
     try {
       const selected = await openDialog({ directory: true, multiple: false });
       if (typeof selected === 'string' && selected) {
+        const cfg = readConfigFileName(selected);
         setProjectDir(selected);
-        setConfigFileName(readConfigFileName(selected));
+        setConfigFileName(cfg);
         setGoal('');
+        // 同步进翻译器的"已打开项目"列表（写盘 + 广播），让全局侧边栏
+        // 和 Agent 自己的侧边栏分组都出现这个项目。
+        addOpenProject(selected, cfg);
       }
     } catch {
       // User cancelled.
     }
   }, []);
 
+  /** 从 hero 的"已打开项目"列表里直接选中一个项目开始。幂等：addOpenProject
+   *  保证该项目在翻译器已打开列表里；项目 effect 接管加载该项目的会话列表。 */
+  const chooseProject = useCallback((dir: string) => {
+    if (!dir) return;
+    const cfg = readConfigFileName(dir);
+    setProjectDir(dir);
+    setConfigFileName(cfg);
+    setGoal('');
+    addOpenProject(dir, cfg);
+  }, []);
+
+  /** 顶部 ＋：新建"未打开项目"的会话 —— 清空当前项目选择，主区回空态，
+   *  让用户重新选/打开一个项目再发消息。侧边栏的其他项目会话分组保留显示，
+   *  不会被清掉（不再清空 sessionsByProject）。 */
+  const handleCreateBlankSession = useCallback(async () => {
+    if (running) await handleStop();
+    abortRef.current?.();
+    abortRef.current = null;
+    localMsgIdsRef.current.clear();
+    hasBackendSessionRef.current = false;
+    lastStepRef.current = 0;
+    activeSessionRef.current = '';
+    setActiveSessionId('');
+    setEvents([]);
+    setStatus('idle');
+    setRunning(false);
+    setError(null);
+    // 只清当前主区项目/目标/活动会话；不动 sessionsByProject，侧边栏保留历史
+    setProjectDir('');
+    setGoal('');
+  }, [running, handleStop]);
+
+  /** 项目分组行 ＋：在指定项目下新建一个会话。
+   *  - 若 dir 是当前活动项目 → 切到新会话（主区跟着切）。
+   *  - 若 dir 是别的项目 → 只在该分组列表里增一行，主区不变（用户点该会话才切过去）。 */
+  const handleCreateSessionInProject = useCallback(
+    async (dir: string) => {
+      if (!dir) return;
+      try {
+        const created = await createAgentSession(dir);
+        setSessionsByProject((prev) => ({
+          ...prev,
+          [dir]: [created, ...(prev[dir] || [])],
+        }));
+        // 确保该分组展开可见
+        setCollapsedProjects((prev) => ({ ...prev, [dir]: false }));
+        if (dir === effectiveProjectRef.current) {
+          // 当前项目：切到新会话，主区随之加载（空会话 → 等首条消息）
+          if (running) await handleStop();
+          abortRef.current?.();
+          abortRef.current = null;
+          activeSessionRef.current = created.session_id;
+          setActiveSessionId(created.session_id);
+          saveActiveSessionId(dir, created.session_id);
+          setEvents([]);
+          setStatus('idle');
+          setRunning(false);
+          setError(null);
+          hasBackendSessionRef.current = false;
+          lastStepRef.current = 0;
+        }
+      } catch (err) {
+        setError(normalizeError(err, '新建会话失败'));
+      }
+    },
+    [running, handleStop],
+  );
+
+  /** 折叠/展开某项目分组（手风琴外的自由切换：点击只翻转这一个）。 */
+  const handleToggleProject = useCallback((dir: string) => {
+    setCollapsedProjects((prev) => ({ ...prev, [dir]: !prev[dir] }));
+  }, []);
+
+  /** 选中某项目下的某会话：停 SSE、清视图，切项目+会话；转录由 session effect 加载。 */
+  const handleSelectSession = useCallback(
+    (dir: string, sessionId: string) => {
+      if (sessionId === activeSessionRef.current && dir === effectiveProjectRef.current) return;
+      abortRef.current?.();
+      abortRef.current = null;
+      setEvents([]);
+      setError(null);
+      activeSessionRef.current = sessionId;
+      setActiveSessionId(sessionId);
+      saveActiveSessionId(dir, sessionId);
+      if (dir !== effectiveProjectRef.current) {
+        // 切到别的项目：项目 effect 会触发加载该项目的会话列表，
+        // session effect 会加载该会话转录。展开目标项目分组。
+        setConfigFileName(readConfigFileName(dir));
+        setCollapsedProjects((prev) => ({ ...prev, [dir]: false }));
+        setProjectDir(dir);
+      }
+    },
+    [],
+  );
+
+  const handleDeleteSession = useCallback(
+    async (dir: string, session: AgentSessionMeta) => {
+      if (!window.confirm(`删除会话「${session.title}」？该会话的对话记录会被一并删除。`)) return;
+      try {
+        await deleteAgentSession(dir, session.session_id);
+      } catch (err) {
+        setError(normalizeError(err, '删除会话失败'));
+        return;
+      }
+      const prevList = sessionsByProject[dir] || [];
+      const remaining = prevList.filter((s) => s.session_id !== session.session_id);
+      setSessionsByProject((prev) => ({ ...prev, [dir]: remaining }));
+      try {
+        localStorage.removeItem(sessionsKey(dir, session.session_id));
+      } catch {
+        // ignore
+      }
+      // 删的是当前主区的活动会话 → 切到该分组剩下的第一个，没有则回空态
+      if (dir === effectiveProjectRef.current && session.session_id === activeSessionRef.current) {
+        abortRef.current?.();
+        abortRef.current = null;
+        const next = remaining[0]?.session_id || '';
+        setActiveSessionId(next);
+        activeSessionRef.current = next;
+        saveActiveSessionId(dir, next);
+        setEvents([]);
+        setStatus('idle');
+        hasBackendSessionRef.current = false;
+        lastStepRef.current = 0;
+      }
+    },
+    [sessionsByProject],
+  );
+
   const handleClear = useCallback(async () => {
-    if (!effectiveProject) return;
+    if (!effectiveProject || !activeSessionRef.current) return;
     try {
-      // 清空 = 重置会话：停掉运行中的回合并丢弃后端历史
-      await resetAgent(effectiveProject);
+      // 清空 = 重置当前会话：停掉运行中的回合并丢弃后端历史
+      await resetAgent(effectiveProject, activeSessionRef.current);
     } catch {
       // 后端不可达也要清本地视图
     }
@@ -667,44 +1086,66 @@ export function AgentPage() {
     hasBackendSessionRef.current = false;
     lastStepRef.current = 0;
     try {
-      localStorage.removeItem(sessionsKey(effectiveProject));
+      localStorage.removeItem(sessionsKey(effectiveProject, activeSessionRef.current));
     } catch {
       // ignore
     }
-  }, [effectiveProject]);
+    void refreshSessions(effectiveProject, activeSessionRef.current);
+  }, [effectiveProject, refreshSessions]);
 
   const timeline = useMemo(() => buildTimeline(events), [events]);
-  const stepCount = useMemo(() => timeline.reduce((n, g) => n + (g.type === 'activity' ? g.items.length : 1), 0), [timeline]);
+  const stepCount = useMemo(
+    () =>
+      timeline.reduce(
+        (n, g) =>
+          n +
+          (g.type === 'activity'
+            ? g.items.filter((it) => it.kind !== 'compact').length
+            : 1),
+        0,
+      ),
+    [timeline],
+  );
   const hasSession = events.length > 0;
   const canSend = Boolean(projectDir) && Boolean(backendProfileName) && goal.trim().length > 0 && !sending;
+  const activeTitle =
+    (sessionsByProject[effectiveProject] || []).find((s) => s.session_id === activeSessionId)?.title || '';
 
   return (
     <div className="agent-console">
+      <AgentSessionSidebar
+        sessionsByProject={sessionsByProject}
+        projects={projectOptions}
+        activeProject={effectiveProject}
+        activeSessionId={activeSessionId}
+        collapsed={collapsedProjects}
+        disabled={running}
+        onCreateBlank={() => void handleCreateBlankSession()}
+        onCreateInProject={(dir) => void handleCreateSessionInProject(dir)}
+        onToggleProject={handleToggleProject}
+        onSelectSession={handleSelectSession}
+        onDeleteSession={(dir, s) => void handleDeleteSession(dir, s)}
+      />
+      <div className="agent-console__main">
       <header className="agent-console__bar">
         <div className="agent-console__bar-left">
           <span className="agent-console__avatar">🤖</span>
           <div className="agent-console__bar-copy">
             <div className="agent-console__bar-title">
               <span className="agent-console__bar-name">翻译 Agent</span>
+              {activeTitle ? <span className="agent-console__bar-session">{activeTitle}</span> : null}
               <StatusPill status={status} running={running} elapsed={elapsed} />
             </div>
-            <button
-              type="button"
-              className="agent-console__project"
-              onClick={handleOpenProject}
-              disabled={running}
-              title="点击切换项目"
-            >
+            <div className="agent-console__project-static">
               {projectDir ? (
                 <>
                   <span className="agent-console__project-name">{shortName(projectDir)}</span>
                   <span className="agent-console__project-path">{projectDir}</span>
                 </>
               ) : (
-                <span className="agent-console__project-empty">选择项目…</span>
+                <span className="agent-console__project-empty">未选择项目</span>
               )}
-              <span className="agent-console__project-caret">▾</span>
-            </button>
+            </div>
           </div>
         </div>
 
@@ -795,6 +1236,49 @@ export function AgentPage() {
                 <span>③ 启动翻译</span>
                 <span>④ 复核修复</span>
               </div>
+              <div className="agent-hero__project-panel">
+                {projectOptions.length > 0 ? (
+                  <>
+                    <span className="agent-hero__open-projects-label">选择一个已打开的项目开始</span>
+                    <div className="agent-hero__project-chips">
+                      {projectOptions.map((dir) => (
+                        <button
+                          key={dir}
+                          type="button"
+                          className="agent-hero__project-chip"
+                          onClick={() => chooseProject(dir)}
+                          title={dir}
+                        >
+                          <span className="agent-hero__project-chip-icon">📁</span>
+                          <span className="agent-hero__project-chip-name">{shortName(dir)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <span className="agent-hero__open-projects-label">
+                    还没有打开的项目，从下方新建或打开一个吧
+                  </span>
+                )}
+                <div className="agent-hero__actions">
+                  <button
+                    type="button"
+                    className="agent-hero__action"
+                    onClick={() => void handleOpenProject()}
+                    title="从文件夹打开一个已有项目"
+                  >
+                    📂 打开项目
+                  </button>
+                  <button
+                    type="button"
+                    className="agent-hero__action agent-hero__action--secondary"
+                    onClick={() => navigate('/new-project')}
+                    title="新建项目向导"
+                  >
+                    ✨ 新建项目
+                  </button>
+                </div>
+              </div>
             </div>
           ) : (
             <>
@@ -854,16 +1338,10 @@ export function AgentPage() {
           />
           <div className="agent-composer__toolbar">
             <div className="agent-composer__left">
-              <button
-                type="button"
-                className="agent-composer__chip"
-                onClick={handleOpenProject}
-                disabled={running}
-                title="切换项目"
-              >
+              <span className="agent-composer__chip agent-composer__chip--static" title={projectDir || '未选择项目'}>
                 <span className="agent-composer__chip-icon">📁</span>
-                {projectDir ? shortName(projectDir) : '选择项目'}
-              </button>
+                {projectDir ? shortName(projectDir) : '未选择项目'}
+              </span>
               <button
                 type="button"
                 className="agent-composer__chip"
@@ -915,6 +1393,7 @@ export function AgentPage() {
         ) : running ? null : hasSession ? (
           <div className="agent-composer__hint">会话保留中 · 发送消息即可继续，🗑 可重置</div>
         ) : null}
+      </div>
       </div>
     </div>
   );
@@ -1020,6 +1499,8 @@ function AgentActivityGroup({
   const totalMs = items.reduce((sum, it) => sum + (it.durationMs || 0), 0);
   const hasThought = items.some((it) => it.kind === 'thought');
   const toolCount = items.filter((it) => it.kind === 'tool').length;
+  // 压缩提示不算"工作步骤"，避免污染耗时与步数统计
+  const visibleCount = items.filter((it) => it.kind !== 'compact').length;
 
   const label = isLive
     ? hasThought && !toolCount
@@ -1031,7 +1512,7 @@ function AgentActivityGroup({
 
   const parts: string[] = [];
   if (totalMs > 0) parts.push(formatDuration(totalMs));
-  if (items.length > 1) parts.push(`${items.length} 步`);
+  if (visibleCount > 1) parts.push(`${visibleCount} 步`);
 
   const tail = isLive ? liveTail(items) : '';
 
@@ -1058,6 +1539,8 @@ function AgentActivityGroup({
             {items.map((item, i) =>
               item.kind === 'thought' ? (
                 <ThoughtRow key={`t-${i}`} item={item} />
+              ) : item.kind === 'compact' ? (
+                <CompactRow key={`c-${i}`} item={item} />
               ) : (
                 <ToolRow key={`x-${item.id || i}`} item={item} live={isLive && i === items.length - 1} />
               ),
@@ -1139,6 +1622,23 @@ function ThoughtRow({ item }: { item: ActivityItem }) {
       ) : streaming ? (
         <span className="agent-typing-cursor agent-typing-cursor--inline" aria-hidden />
       ) : null}
+    </div>
+  );
+}
+
+/* ── Compact row (上下文压缩提示) ──
+   压缩是后台维护动作，不是用户要读的内容，所以只做一行轻量提示。 */
+
+function CompactRow({ item }: { item: ActivityItem }) {
+  const removed = item.removed || 0;
+  const tokens = item.summaryChars ? Math.round(item.summaryChars / 4) : 0;
+  return (
+    <div className="agent-compact-note" title="早期对话已被摘要压缩，以腾出上下文空间">
+      <span className="agent-compact-note__icon">🗜</span>
+      <span className="agent-compact-note__text">
+        已压缩上下文 · 摘要 {removed} 条早期消息
+        {tokens > 0 ? `（约 ${tokens} 字）` : ''}
+      </span>
     </div>
   );
 }

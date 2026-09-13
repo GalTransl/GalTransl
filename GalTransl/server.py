@@ -2221,25 +2221,38 @@ def build_handler(registry: JobRegistry):
 
             # GET /api/agent/status — current agent state + all events (snapshot)
             if path == "/api/agent/status":
+                params = parse_qs(parsed.query)
+                project_dir = params.get("project_dir", [""])[0]
+                session_id = params.get("session_id", [""])[0] or None
+                if not project_dir:
+                    self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                self._send_json(AGENT_REGISTRY.status(project_dir, session_id))
+                return
+
+            # GET /api/agent/sessions — list sessions of a project
+            if path == "/api/agent/sessions":
                 project_dir = parse_qs(parsed.query).get("project_dir", [""])[0]
                 if not project_dir:
                     self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
                     return
-                self._send_json(AGENT_REGISTRY.status(project_dir))
+                self._send_json({"sessions": AGENT_REGISTRY.list_sessions(project_dir)})
                 return
 
             # GET /api/agent/stream — SSE: stream agent events in real time
             if path == "/api/agent/stream":
-                project_dir = parse_qs(parsed.query).get("project_dir", [""])[0]
+                params = parse_qs(parsed.query)
+                project_dir = params.get("project_dir", [""])[0]
+                session_id = params.get("session_id", [""])[0] or None
                 if not project_dir:
                     self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
                     return
                 # after_step: 只推该 step 之后的事件（续订时避免重放旧回合）
                 try:
-                    after_step = int(parse_qs(parsed.query).get("after_step", ["0"])[0])
+                    after_step = int(params.get("after_step", ["0"])[0])
                 except ValueError:
                     after_step = 0
-                self._stream_agent(project_dir, after_step=after_step)
+                self._stream_agent(project_dir, after_step=after_step, session_id=session_id)
                 return
 
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
@@ -2266,6 +2279,7 @@ def build_handler(registry: JobRegistry):
                     config_file_name = str(payload.get("config_file_name", "config.yaml") or "config.yaml")
                     backend_profile_data = payload.get("backend_profile_data")
                     goal = str(payload.get("goal", "") or "")
+                    session_id = str(payload.get("session_id", "") or "") or None
                     if not project_dir:
                         self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
                         return
@@ -2277,12 +2291,41 @@ def build_handler(registry: JobRegistry):
                         config_file_name=config_file_name,
                         backend_profile_data=backend_profile_data,
                         goal=goal,
+                        session_id=session_id,
                     )
                     self._send_json(status)
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, status=HTTPStatus.CONFLICT)
                 except Exception as exc:  # noqa: BLE001
                     self._send_json({"error": f"failed to start agent: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # POST /api/agent/sessions/create — create an empty session
+            if path == "/api/agent/sessions/create":
+                try:
+                    payload = self._read_json_body()
+                    project_dir = str(payload.get("project_dir", "")).strip()
+                    title = str(payload.get("title", "") or "")
+                    if not project_dir:
+                        self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    self._send_json(AGENT_REGISTRY.create_session(project_dir, title))
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": f"failed to create agent session: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # POST /api/agent/sessions/delete — delete a session
+            if path == "/api/agent/sessions/delete":
+                try:
+                    payload = self._read_json_body()
+                    project_dir = str(payload.get("project_dir", "")).strip()
+                    session_id = str(payload.get("session_id", "")).strip()
+                    if not project_dir or not session_id:
+                        self._send_json({"error": "project_dir and session_id are required"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    self._send_json(AGENT_REGISTRY.delete_session(project_dir, session_id))
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": f"failed to delete agent session: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
             # POST /api/agent/message — send a user message to the project's
@@ -2293,13 +2336,14 @@ def build_handler(registry: JobRegistry):
                     payload = self._read_json_body()
                     project_dir = str(payload.get("project_dir", "")).strip()
                     message = str(payload.get("message", "") or "")
+                    session_id = str(payload.get("session_id", "") or "") or None
                     if not project_dir:
                         self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
                         return
                     if not message.strip():
                         self._send_json({"error": "message is required"}, status=HTTPStatus.BAD_REQUEST)
                         return
-                    status = AGENT_REGISTRY.message(project_dir, message)
+                    status = AGENT_REGISTRY.message(project_dir, message, session_id)
                     self._send_json(status)
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, status=HTTPStatus.CONFLICT)
@@ -2312,10 +2356,11 @@ def build_handler(registry: JobRegistry):
                 try:
                     payload = self._read_json_body()
                     project_dir = str(payload.get("project_dir", "")).strip()
+                    session_id = str(payload.get("session_id", "") or "") or None
                     if not project_dir:
                         self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
                         return
-                    self._send_json(AGENT_REGISTRY.reset(project_dir))
+                    self._send_json(AGENT_REGISTRY.reset(project_dir, session_id))
                 except Exception as exc:  # noqa: BLE001
                     self._send_json({"error": f"failed to reset agent: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
@@ -2325,10 +2370,11 @@ def build_handler(registry: JobRegistry):
                 try:
                     payload = self._read_json_body()
                     project_dir = str(payload.get("project_dir", "")).strip()
+                    session_id = str(payload.get("session_id", "") or "") or None
                     if not project_dir:
                         self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
                         return
-                    status = AGENT_REGISTRY.stop(project_dir)
+                    status = AGENT_REGISTRY.stop(project_dir, session_id)
                     self._send_json(status)
                 except Exception as exc:  # noqa: BLE001
                     self._send_json({"error": f"failed to stop agent: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
@@ -2655,7 +2701,7 @@ def build_handler(registry: JobRegistry):
             self.end_headers()
             self.wfile.write(body)
 
-        def _stream_agent(self, project_dir: str, after_step: int = 0) -> None:
+        def _stream_agent(self, project_dir: str, after_step: int = 0, session_id: str | None = None) -> None:
             """SSE stream of agent events. Replays events after after_step then
             polls new ones until the agent reaches a terminal state, then closes."""
             import time as _time
@@ -2673,7 +2719,7 @@ def build_handler(registry: JobRegistry):
 
             try:
                 # 先发一次状态快照，让前端知道当前阶段
-                _sse({"type": "status", **{k: v for k, v in AGENT_REGISTRY.status(project_dir).items() if k != "events"}})
+                _sse({"type": "status", **{k: v for k, v in AGENT_REGISTRY.status(project_dir, session_id).items() if k != "events"}})
                 last_step = max(0, after_step)
                 deadline_loops = 0
                 # 启动宽限期：Agent 线程可能略晚于 start() 返回才发出第一个事件，
@@ -2681,12 +2727,12 @@ def build_handler(registry: JobRegistry):
                 warmup_grace = 20  # 最多等 20 个 tick (10s) 让首个事件到达
                 # 翻译流程可能很长；最多轮询 6 小时
                 while deadline_loops < 6 * 3600:
-                    events = AGENT_REGISTRY.drain_events(project_dir, after_step=last_step)
+                    events = AGENT_REGISTRY.drain_events(project_dir, after_step=last_step, session_id=session_id)
                     for ev in events:
                         _sse(ev)
                         if ev.get("step", 0) > last_step:
                             last_step = ev["step"]
-                    snap = AGENT_REGISTRY.status(project_dir)
+                    snap = AGENT_REGISTRY.status(project_dir, session_id)
                     # awaiting_input = 回合结束但会话还活着；对订阅方而言本轮已终态，
                     # 流自然关闭，用户发下一条消息时前端带 after_step 重订即可。
                     terminal = snap["status"] in ("done", "awaiting_input", "stopped", "failed")
