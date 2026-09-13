@@ -68,7 +68,7 @@ common:
   gpt.translation_guideline: "Basic.md" # 使用的翻译规范文件名（位于translation_guidelines），会影响文风与措辞。
   gpt.enhance_jailbreak: False # 是否启用“抗拒答”增强提示，降低模型拒答概率。[True/False]
   gpt.change_prompt: "no" # Prompt修改模式：no不改；AdditionalPrompt追加；OverwritePrompt覆盖默认提示词。[no/AdditionalPrompt/OverwritePrompt]
-  gpt.prompt_content: "翻译结果使用文言文" # Prompt自定义内容；仅在change_prompt为AdditionalPrompt/OverwritePrompt时生效。
+  gpt.prompt_content: "" # Prompt自定义内容；仅在change_prompt为AdditionalPrompt/OverwritePrompt时生效。
   # Sakura/GalTransl
   gpt.token_limit: 0 # (Sakura/GalTransl) 单轮token上限；0表示不限制。用于避免上下文溢出。
   # 调试日志
