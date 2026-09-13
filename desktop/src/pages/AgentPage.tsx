@@ -1376,10 +1376,13 @@ export function AgentPage() {
             }
             rows={2}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && canSend) {
-                e.preventDefault();
-                void handleSend();
-              }
+              if (e.key !== 'Enter' || e.metaKey || e.ctrlKey) return;
+              // Shift+Enter 换行；输入法组词中的回车（选词）不触发发送
+              if (e.shiftKey) return;
+              if (e.nativeEvent.isComposing) return;
+              if (!canSend) return;
+              e.preventDefault();
+              void handleSend();
             }}
           />
           <div className="agent-composer__toolbar">
@@ -1406,7 +1409,7 @@ export function AgentPage() {
                     className="agent-composer__send"
                     onClick={() => void handleSend()}
                     disabled={!canSend}
-                    title="发送插话（Agent 会在下一步看到，Ctrl/⌘ + Enter）"
+                    title="发送插话（Agent 会在下一步看到，Enter 发送 / Shift+Enter 换行）"
                     aria-label="发送插话"
                   >
                     ↑
@@ -1421,7 +1424,7 @@ export function AgentPage() {
                   className="agent-composer__send"
                   onClick={() => void handleSend()}
                   disabled={!canSend}
-                  title={hasSession ? '发送并继续（Ctrl/⌘ + Enter）' : '发送并启动 Agent（Ctrl/⌘ + Enter）'}
+                  title={hasSession ? '发送并继续（Enter 发送 / Shift+Enter 换行）' : '发送并启动 Agent（Enter 发送 / Shift+Enter 换行）'}
                   aria-label="发送消息"
                 >
                   ↑
