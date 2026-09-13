@@ -461,21 +461,23 @@ def _list_translation_guidelines() -> list[str]:
     return result
 
 
-def _load_input_file_entries(project_dir: str, config_file_name: str, filename: str) -> list[dict[str, Any]]:
-    """Parse a project input file into normalized entries via its file plugin.
+def _load_input_file_entries(project_dir: str, config_file_name: str, filename: str, folder: str | None = None) -> list[dict[str, Any]]:
+    """Parse a project input/output file into normalized entries via its file plugin.
 
     Mirrors how the translation pipeline reads input (fplugins_load_file) so
     the Agent sees exactly what would be translated. Entries carry an `index`
-    (position in file) for range reads.
+    (position in file) for range reads. `folder` defaults to the input dir;
+    pass OUTPUT_FOLDERNAME to read a delivered output file instead.
     """
     from GalTransl.ConfigHelper import CProjectConfig
     from GalTransl.GTPlugin import GTextPlugin, GFilePlugin
     from GalTransl.yapsy.PluginManager import PluginManager
 
+    target_folder = folder or INPUT_FOLDERNAME
     cfg = CProjectConfig(project_dir, config_file_name or "config.yaml")
-    file_path = os.path.join(project_dir, INPUT_FOLDERNAME, filename)
+    file_path = os.path.join(project_dir, target_folder, filename)
     if not os.path.isfile(file_path):
-        raise FileNotFoundError(f"input file not found: {filename}")
+        raise FileNotFoundError(f"file not found in {target_folder}: {filename}")
 
     plugin_manager = PluginManager(
         {"GTextPlugin": GTextPlugin, "GFilePlugin": GFilePlugin},
@@ -1061,6 +1063,23 @@ def build_handler(registry: JobRegistry):
                     self._send_json({"error": f"failed to parse input file: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
+            # GET /api/projects/:id/output/:filename — 用文件插件解析最终输出文件
+            if sub_path.startswith("/output/"):
+                filename = unquote(sub_path[len("/output/"):])
+                if not filename or filename != os.path.basename(filename):
+                    self._send_json({"error": "invalid output filename"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                file_path = os.path.join(project_dir, OUTPUT_FOLDERNAME, filename)
+                if not os.path.isfile(file_path):
+                    self._send_json({"error": f"output file not found: {filename}"}, status=HTTPStatus.NOT_FOUND)
+                    return
+                try:
+                    entries = _load_input_file_entries(project_dir, config_name_from_query(self), filename, folder=OUTPUT_FOLDERNAME)
+                    self._send_json({"filename": filename, "count": len(entries), "entries": entries})
+                except Exception as exc:
+                    self._send_json({"error": f"failed to parse output file: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
             # GET /api/projects/:id/cache
             if sub_path == "/cache":
                 cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
@@ -1294,6 +1313,8 @@ def build_handler(registry: JobRegistry):
                     field = str(payload.get("field", "all")).strip()  # all | src | dst
                     options = payload.get("options", {})
                     max_results = min(int(payload.get("max_results", 500)), 2000)
+                    # 可选文件过滤：只搜这个缓存文件（Agent 修单文件问题时用）
+                    search_filename = str(payload.get("filename", "")).strip()
                     if not isinstance(options, dict):
                         self._send_json({"error": "options must be an object"}, status=HTTPStatus.BAD_REQUEST)
                         return
@@ -1321,6 +1342,8 @@ def build_handler(registry: JobRegistry):
                     if os.path.isdir(cache_dir):
                         for name in sorted(os.listdir(cache_dir)):
                             if not name.endswith(".json"):
+                                continue
+                            if search_filename and name != search_filename:
                                 continue
                             fp = os.path.join(cache_dir, name)
                             if not os.path.isfile(fp):
