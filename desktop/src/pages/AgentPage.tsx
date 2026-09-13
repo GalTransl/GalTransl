@@ -326,28 +326,37 @@ type ToolMeta = {
 
 const TOOL_META: Record<string, ToolMeta> = {
   get_project_overview: { action: '了解项目', running: '了解项目', verb: '', icon: '📂', summary: () => '读取项目概况' },
+  update_project_config: { action: '修改项目配置', running: '修改项目配置', verb: '', icon: '🛠️', summary: () => '调整翻译参数/规范等设置' },
+  list_input_files: { action: '查看原文文件', running: '查看原文文件', verb: '', icon: '🗃️', summary: () => '列出待翻译文件' },
+  read_input_file: { action: '读取原文', running: '读取原文', verb: '', icon: '📄', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
+  read_guideline: { action: '读取翻译规范', running: '读取翻译规范', verb: '', icon: '📜', summary: (a) => str(a?.name) },
   list_dict_files: { action: '查看字典', running: '查看字典', verb: '', icon: '📚', summary: () => '列出项目字典文件' },
   read_dict: { action: '读取字典', running: '读取字典', verb: '', icon: '📖', summary: (a) => str(a?.file_key) },
   save_dict: { action: '保存字典', running: '保存字典', verb: '', icon: '💾', summary: (a) => str(a?.file_key) },
   create_dict_file: { action: '新建字典', running: '新建字典', verb: '', icon: '🗂️', summary: (a) => str(a?.filename) },
   get_name_table: { action: '读取人名表', running: '读取人名表', verb: '', icon: '👤', summary: () => 'name替换表' },
   save_name_table: { action: '保存人名表', running: '保存人名表', verb: '', icon: '👥', summary: (a) => (Array.isArray(a?.names) ? `${a.names.length} 条` : '') },
-  start_translation: { action: '启动翻译', running: '启动翻译', verb: '', icon: '▶️', summary: (a) => str(a?.translator) },
+  start_translation: { action: '启动翻译', running: '启动翻译', verb: '', icon: '▶️', summary: (a) => [str(a?.translator), ...(Array.isArray(a?.files) ? [`仅 ${a.files.length} 个文件`] : [])].filter(Boolean).join(' · ') },
   stop_translation: { action: '停止翻译', running: '停止翻译', verb: '', icon: '⏹️', summary: () => '' },
   wait: { action: '等待', running: '等待中', verb: '', icon: '⏳', summary: (a) => waitSummary(a) },
   get_progress: { action: '查询进度', running: '查询进度', verb: '', icon: '📊', summary: () => '' },
   get_runtime: { action: '查询运行时', running: '查询运行时', verb: '', icon: '⚙️', summary: () => '' },
-  list_problems: { action: '检查问题', running: '检查问题', verb: '', icon: '🔍', summary: () => '' },
+  list_problems: { action: '检查问题', running: '检查问题', verb: '', icon: '🔍', summary: (a) => str(a?.problem_type) || '问题类型统计' },
+  manage_problem_filter: { action: '管理问题过滤', running: '管理问题过滤', verb: '', icon: '🧹', summary: (a) => [str(a?.action), str(a?.keyword)].filter(Boolean).join(' · ') },
   read_cache: { action: '读取缓存', running: '读取缓存', verb: '', icon: '📄', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
   search_cache: { action: '搜索缓存', running: '搜索缓存', verb: '', icon: '🔎', summary: (a) => str(a?.query) },
   patch_cache: { action: '修改译文', running: '修改译文', verb: '', icon: '✏️', summary: (a) => (Array.isArray(a?.patches) ? `${a.patches.length} 条` : str(a?.filename)) },
+  delete_cache: { action: '删除缓存', running: '删除缓存', verb: '', icon: '🗑️', summary: (a) => [str(a?.filename), str(a?.indexes)].filter(Boolean).join(' · ') },
 };
 
 const DEFAULT_TOOL_META: ToolMeta = { action: '调用工具', running: '调用工具', verb: '', icon: '🔧', summary: () => '' };
 
+/** 未收录进 TOOL_META 的工具：至少把原始工具名亮出来，不再只显示「调用工具」。 */
 function toolMeta(name: string | undefined): ToolMeta {
   if (!name) return DEFAULT_TOOL_META;
-  return TOOL_META[name] || DEFAULT_TOOL_META;
+  const meta = TOOL_META[name];
+  if (meta) return meta;
+  return { ...DEFAULT_TOOL_META, action: name, running: name };
 }
 
 function str(v: unknown): string {

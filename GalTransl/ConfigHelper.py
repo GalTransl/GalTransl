@@ -163,6 +163,9 @@ class CProjectConfig:
         self.translation_guideline=""
         self.non_interactive: bool = False  # 非交互模式（前端启动时为True）
         self.runtime_project_dir: str = projectPath
+        # 只翻译这些输入文件（文件名匹配）；空 = 全部。试译/部分重翻场景由
+        # JobSpec.input_files 注入，run_job 阶段设置，翻译流程读取。
+        self.runtime_input_files: list = []
         
 
     def getProjectConfig(self) -> dict:

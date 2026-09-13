@@ -461,6 +461,79 @@ def _list_translation_guidelines() -> list[str]:
     return result
 
 
+def _load_input_file_entries(project_dir: str, config_file_name: str, filename: str) -> list[dict[str, Any]]:
+    """Parse a project input file into normalized entries via its file plugin.
+
+    Mirrors how the translation pipeline reads input (fplugins_load_file) so
+    the Agent sees exactly what would be translated. Entries carry an `index`
+    (position in file) for range reads.
+    """
+    from GalTransl.ConfigHelper import CProjectConfig
+    from GalTransl.GTPlugin import GTextPlugin, GFilePlugin
+    from GalTransl.yapsy.PluginManager import PluginManager
+
+    cfg = CProjectConfig(project_dir, config_file_name or "config.yaml")
+    file_path = os.path.join(project_dir, INPUT_FOLDERNAME, filename)
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError(f"input file not found: {filename}")
+
+    plugin_manager = PluginManager(
+        {"GTextPlugin": GTextPlugin, "GFilePlugin": GFilePlugin},
+        ["plugins", os.path.join(project_dir, "plugins")],
+    )
+    plugin_manager.locatePlugins()
+
+    fname = cfg.getFilePlugin()
+    if not fname:
+        raise RuntimeError("项目配置没有设置文件插件（plugin.filePlugin），无法解析输入文件")
+    if "(project_dir)" in fname:
+        fname = fname.replace("(project_dir)", "")
+    info_path = os.path.join(project_dir, "plugins", fname, f"{fname}.yaml")
+    candidate = plugin_manager.getPluginCandidateByInfoPath(info_path)
+    if candidate is None:
+        info_path = os.path.join(os.path.abspath("plugins"), fname, f"{fname}.yaml")
+        candidate = plugin_manager.getPluginCandidateByInfoPath(info_path)
+    if candidate is None:
+        raise RuntimeError(f"未找到文件插件: {fname}")
+    plugin_manager.setPluginCandidates([candidate])
+    plugin_manager.loadPlugins()
+    file_plugins = plugin_manager.getPluginsOfCategory("GFilePlugin")
+    for plugin in file_plugins:
+        plugin_conf = plugin.yaml_dict
+        project_plugin_conf = cfg.getPluginConfigSection()
+        plugin_module = plugin_conf["Core"]["Module"]
+        if plugin_module in project_plugin_conf:
+            plugin_conf["Settings"].update(project_plugin_conf[plugin_module])
+        plugin_conf["Settings"]["project_dir"] = project_dir
+        plugin.plugin_object.gtp_init(plugin_conf, cfg.getCommonConfigSection())
+        result = plugin.plugin_object.load_file(file_path)
+        if isinstance(result, tuple):
+            result = result[0]
+        if not isinstance(result, list):
+            raise RuntimeError(f"文件插件 {fname} 返回了非列表结果")
+        entries: list[dict[str, Any]] = []
+        for i, item in enumerate(result):
+            # 文件插件返回原始条目：正文键是 message（GalTransl JSON 约定），
+            # 说话人键是 name。pre_src/post_jp 是管道后段 CSentense 的字段名，
+            # 这里一并兼容，映射成统一的 {index, name, pre_src} 给 Agent。
+            if isinstance(item, dict):
+                text = (
+                    str(item.get("message", "") or "")
+                    or str(item.get("pre_src", "") or "")
+                    or str(item.get("post_jp", "") or "")
+                    or str(item.get("src_msg", "") or "")
+                )
+                speaker = str(item.get("name", "") or "")
+                entry = {"index": i, "name": speaker, "pre_src": text}
+                if speaker:
+                    entry["speaker"] = speaker
+                entries.append(entry)
+            else:
+                entries.append({"index": i, "name": "", "pre_src": str(item)})
+        return entries
+    raise RuntimeError(f"文件插件 {fname} 加载失败")
+
+
 def _scan_plugins() -> list[dict[str, Any]]:
     """Scan the plugins directory and return plugin metadata."""
     plugins_dir = os.path.abspath("plugins")
@@ -863,6 +936,11 @@ class JobRegistry:
         translator = str(payload.get("translator", "")).strip()
         backend_profile = str(payload.get("backend_profile", "")).strip()
         backend_profile_data = payload.get("backend_profile_data")
+        input_files = payload.get("input_files")
+        if input_files is not None and not isinstance(input_files, list):
+            raise ValueError("input_files must be a list of filenames")
+        if input_files:
+            input_files = [str(f).strip() for f in input_files if str(f).strip()]
 
         if not project_dir:
             raise ValueError("project_dir is required")
@@ -892,6 +970,7 @@ class JobRegistry:
                 translator=translator,
                 backend_profile=backend_profile,
                 backend_profile_data=backend_profile_data if isinstance(backend_profile_data, dict) else {},
+                input_files=input_files or [],
             )
             state = create_job_state(spec)
             reset_runtime_project(project_dir)
@@ -932,6 +1011,9 @@ def build_handler(registry: JobRegistry):
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                 return
 
+            def config_name_from_query(handler) -> str:
+                return parse_qs(urlparse(handler.path).query).get("config", ["config.yaml"])[0]
+
             # GET /api/projects/:id/config
             if sub_path == "/config":
                 config_name = parse_qs(urlparse(self.path).query).get("config", ["config.yaml"])[0]
@@ -960,6 +1042,23 @@ def build_handler(registry: JobRegistry):
                     "output_files": _list_dir_entries(output_dir),
                     "cache_files": _list_dir_entries(cache_dir, count_json_entries=True),
                 })
+                return
+
+            # GET /api/projects/:id/input/:filename — 用文件插件解析待翻译原文
+            if sub_path.startswith("/input/"):
+                filename = unquote(sub_path[len("/input/"):])
+                if not filename or filename != os.path.basename(filename):
+                    self._send_json({"error": "invalid input filename"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                file_path = os.path.join(project_dir, INPUT_FOLDERNAME, filename)
+                if not os.path.isfile(file_path):
+                    self._send_json({"error": f"input file not found: {filename}"}, status=HTTPStatus.NOT_FOUND)
+                    return
+                try:
+                    entries = _load_input_file_entries(project_dir, config_name_from_query(self), filename)
+                    self._send_json({"filename": filename, "count": len(entries), "entries": entries})
+                except Exception as exc:
+                    self._send_json({"error": f"failed to parse input file: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
             # GET /api/projects/:id/cache
@@ -2199,6 +2298,25 @@ def build_handler(registry: JobRegistry):
 
             if path == "/api/translation-guidelines":
                 self._send_json({"guidelines": _list_translation_guidelines()})
+                return
+
+            # GET /api/translation-guidelines/:name — 读规范文件内容
+            if path.startswith("/api/translation-guidelines/"):
+                name = unquote(path.split("/", 3)[-1])
+                if not name or name != os.path.basename(name):
+                    self._send_json({"error": "invalid guideline name"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                guidelines_dir = os.path.abspath("translation_guidelines")
+                file_path = os.path.join(guidelines_dir, name)
+                if not os.path.isfile(file_path):
+                    self._send_json({"error": f"guideline not found: {name}", "available": _list_translation_guidelines()}, status=HTTPStatus.NOT_FOUND)
+                    return
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    self._send_json({"name": name, "content": content})
+                except Exception as exc:
+                    self._send_json({"error": f"failed to read guideline: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
             if path.startswith("/api/projects/"):

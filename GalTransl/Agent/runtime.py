@@ -31,6 +31,10 @@ DEFAULT_BACKEND_PORT = 12333
 DEFAULT_CONFIG_FILE = "config.yaml"
 MAX_STEPS = 32
 RUNTIME_EVENT_KEEP = 500
+# 瞬态事件：只进当前回合的 SSE 流 + 落盘（delta 由 SessionStore 再筛），
+# 不进内存 events deque。它们量最大（一次流式几十条），若进 deque 会把
+# user_message/tool_call 等长期事件挤出 maxlen 窗口，前端刷新后就丢内容。
+_TRANSIENT_EVENT_TYPES = frozenset({"thought_delta", "wait_tick"})
 
 # ---- 上下文预算 ----
 # 后端配置未指定 contextWindow 时的默认窗口（token）
@@ -72,11 +76,19 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
    b. 调用 read_dict 读取现有内容，判断人名、专有名词是否已收录；
    c. 若缺少人名表，调用 get_name_table；若返回为空，先调用 start_translation(translator="dump-name") 生成人名表（dump-name 是导出 name 字段的专用 translator），完成后再次 get_name_table 查看结果，再调用 save_name_table 写回（若需要修正译名）；
    d. 若 GPT 字典为空且项目较大，可调用 start_translation(translator="GenDic") 自动生成 GPT 字典，并在该任务 completed 后通过 list_dict_files/read_dict 确认生成结果。
-3. **启动翻译**：字典就绪后，调用 start_translation(translator="<主翻译引擎>")。主翻译引擎从项目配置或 overview 中确认，常用值：ForGal-json / ForGal-tsv / ForNovel / sakura-v1.0 / galtransl-v3。一次只启动一个，项目已有运行中任务时不要重复提交。
-4. **跟进进度**：调用 get_progress 或 get_runtime 轮询。翻译任务 completed 后再进入下一步；running 时用 wait 工具等待一段合理时间（如翻译任务就 wait minutes=1~3，短任务 wait seconds=30）后再查，不要连续空转轮询。等待期间界面会显示倒计时。
-5. **复核结果**：调用 list_problems 查看自动检测到的翻译问题（残留日文、字典使用不当、过长等）。用 read_cache 的 index 参数精确读取有问题的条目（如 list_problems 返回的 index，可直接 `index="33-40,50-60"` 一次取多条）浏览实际译文。
-6. **问题修复循环**：对能直接改译文的条目，用 patch_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuildr") 用更新后的字典重建结果（rebuildr 会跳过翻译、仅用译前/译后字典刷写结果 json）。patch_cache 与 rebuildr 可配合使用：先 patch 掉个别硬错，再 rebuildr 统一刷一遍字典相关的问题。重建/修改后再 list_problems 复核，直到问题数量显著下降。
-7. **完成**：当翻译完成、问题数可控时，用一段自然语言总结本次操作（做了什么、翻译进度、剩余问题建议），不要调用工具，直接输出总结即可结束。
+3. **试译定稿（全量翻译前必做，除非项目已有大量缓存）**：
+   a. 调用 read_guideline 读取项目当前使用的翻译规范（配置 common.gpt.translation_guideline），理解文风要求；
+   b. 调用 list_input_files + read_input_file 抽样了解原文：挑 1-2 个有代表性的文件，各读几十句（index 用区间如 "0-50"），掌握角色、语气、专有名词、场景类型；
+   c. 基于原文补充 GPT 字典：把抽读中遇到的人名、专有名词、常见口语用 save_dict 收录进项目 GPT 字典；
+   d. 调用 start_translation(translator="<主翻译引擎>", files=["<一个代表性文件>"]) 只翻译这一个文件作为试译；
+   e. 试译完成后用 read_cache 阅读试译文件的译文，对照翻译规范评估文风、译名、语气是否达标；
+   f. 若不满意：继续完善字典（save_dict）；对全局性的文风问题，用 update_project_config 把 common.gpt.change_prompt 设为 "AdditionalPrompt" 并设置 common.gpt.prompt_content 写入额外的翻译要求（如「译名统一用XX」「口语化程度、敬称的处理方式」等），这些要求会追加到每次翻译请求的 Prompt 里；也可以用 update_project_config 切换 common.gpt.translation_guideline 换一份更合适的规范；
+   g. 满意后，把试译结果告知用户并说明你的评估结论，询问是否开始全量翻译。用户确认后进入下一步。
+4. **启动翻译（全量）**：调用 start_translation(translator="<主翻译引擎>")（不传 files 即翻译全部）。主翻译引擎从项目配置或 overview 中确认，常用值：ForGal-json / ForGal-tsv / ForNovel / sakura-v1.0 / galtransl-v3。一次只启动一个，项目已有运行中任务时不要重复提交。
+5. **跟进进度（wait 前后都要查状态）**：启动翻译后先调用 get_runtime 确认任务已在跑，再调用 wait 等待一段合理时间（翻译任务 wait minutes=1~3，短任务 wait seconds=30）。wait 结束后必须再调用 get_runtime / get_progress 确认任务状态：completed 进入下一步；仍在 running 时看返回的 eta_seconds 估算剩余时间——eta 还很长（如 >10 分钟）就按其一半的时长继续 wait，快完了（如 <2 分钟）就 wait seconds=30 再查，不要连续空转轮询也不要一次等过头。等待期间界面会显示倒计时。
+6. **复核结果**：调用 list_problems（不带参数）先看类型统计，了解哪类问题最多；再传 problem_type（如 problem_type="残留日文"）+ limit/offset 分页查看该类型的具体条目。用 read_cache 的 index 参数精确读取有问题的条目（如 list_problems 返回的 index，可直接 `index="33-40,50-60"` 一次取多条）浏览实际译文。
+7. **问题修复循环**：对能直接改译文的条目，用 patch_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。对确认无需处理的系统性问题类型（如字典使用提示、纯语气词提示），可用 manage_problem_filter(action="add", keyword="…") 加入问题过滤清单，让统计聚焦真问题；过滤后统计会明显下降，属于预期效果。
+8. **完成**：当翻译完成、问题数可控时，用一段自然语言总结本次操作（做了什么、翻译进度、剩余问题建议），不要调用工具，直接输出总结即可结束。
 
 # 约束
 - 每一步只调用必要的工具；能在一次工具调用里拿到的信息不要拆成多次。
@@ -84,7 +96,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 - 不要连续重复调用同一个工具相同参数（避免死循环）；若上一步结果不理想，换策略或总结收尾。
 - 工具返回的 error 要阅读并据此调整下一步，不要忽略。
 - 你无法关闭程序、无法修改项目目录以外的文件、无法访问网络。只做翻译相关工作。
-- 在启动翻译前，建议询问一下用户对你创建的字典是否满意，是否要开始翻译流程。
+- 在启动全量翻译前，必须先完成试译定稿（流程 3），并把试译评估结论告知用户、确认后再全量启动。
 """
 
 
@@ -114,7 +126,7 @@ COMPACT_SUMMARY_PROMPT = """你在为一个 Galgame 翻译项目的 AI 助手压
    项目现在处于什么状态：翻译是否在跑、进度如何、有哪些文件/字典已就绪。
    ## 待办与注意事项
    还没做的事、已知问题、下次继续时要注意的点。
-3. 必须原样保留这些硬信息，不要概括掉：文件路径、字典文件名、翻译引擎名（如 ForGal-json / rebuildr）、任务 id、问题条目 index 或 index 区间、具体的译名修正。
+3. 必须原样保留这些硬信息，不要概括掉：文件路径、字典文件名、翻译引擎名（如 ForGal-json / rebuilda）、任务 id、问题条目 index 或 index 区间、具体的译名修正。
 4. 用中文写。简洁但不要丢信息。
 
 <conversation>
@@ -149,7 +161,13 @@ class AgentState:
     started_at: float = 0.0
     finished_at: float = 0.0
     error: str = ""
+    # 长期事件（user_message/tool_call/tool_result/finish/…）：进 deque（maxlen
+    # 防泄漏），status 快照与 SSE 回放都从这里取，刷新/重启后不丢。
     events: deque[AgentEvent] = field(default_factory=lambda: deque(maxlen=RUNTIME_EVENT_KEEP))
+    # 瞬态事件（thought_delta/wait_tick）：量大且只对当前回合的实时流有意义。
+    # 单走旁路队列，SSE drain 拉走即弃，不占长期 deque 的 maxlen 窗口——
+    # 否则一次长流式就会把 user_message 挤出窗口，刷新后首条消息消失。
+    transient_events: deque[AgentEvent] = field(default_factory=lambda: deque(maxlen=512))
     step: int = 0
     # 持久的多轮对话历史（OpenAI messages），跨回合保留，reset 才清空
     messages: list[dict[str, Any]] = field(default_factory=list)
@@ -200,6 +218,10 @@ class AgentRunner:
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
         self.state.step += 1
         event = AgentEvent(type=event_type, step=self.state.step, data=data)
+        if event_type in _TRANSIENT_EVENT_TYPES:
+            # 瞬态事件只给实时流（SSE drain 即取即弃），不进长期窗口
+            self.state.transient_events.append(event)
+            return
         self.state.events.append(event)
         if self._store is not None:
             self._store.append_event(event.to_dict())
@@ -662,6 +684,10 @@ class AgentRunner:
         url = f"{self.base_url}{path}"
         return _http_json("POST", url, body)
 
+    def _http_put(self, path: str, body: dict[str, Any]) -> Any:
+        url = f"{self.base_url}{path}"
+        return _http_json("PUT", url, body)
+
 
 def _build_system_prompt(state: "AgentState", summary: str | None = None) -> str:
     """构造 system prompt：基础约束 + 当前项目环境 +（可选）对话压缩摘要。
@@ -863,8 +889,48 @@ AGENT_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "list_input_files",
+            "description": "列出待翻译的输入文件（原文），供试译时挑选代表性文件。",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_input_file",
+            "description": "读取待翻译原文内容（文件插件解析后的条目：说话人+原文）。留空 index 返回前 30 条；指定 index 支持区间，如 \"0-100\"。试译前用它了解原文文风、角色、专有名词。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string", "description": "输入文件名，来自 list_input_files。"},
+                    "index": {
+                        "type": "string",
+                        "description": "可选。要读取的条目 index，支持逗号和区间，如 \"0-100\"。留空返回前 30 条。",
+                    },
+                },
+                "required": ["filename"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_guideline",
+            "description": "读取翻译规范文件（translation_guidelines 目录，决定文风与措辞）。不带参数列出可选文件名；传 name（如 \"日译中_增强v2.md\"）返回规范全文。试译定稿前必读。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "可选。规范文件名，来自不带参数调用返回的列表。"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_project_overview",
-            "description": "了解项目：列出输入/输出/缓存文件与当前翻译进度、项目配置。流程第一步，调用它确认项目可用。",
+            "description": "了解项目：列出输入/输出/缓存文件与当前翻译进度、项目配置。配置附带 config_field_descriptions（每个键的作用与取值说明）。流程第一步，调用它确认项目可用。",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -950,10 +1016,17 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "start_translation",
-            "description": "提交一个翻译任务。translator 取值：ForGal-json/ForGal-tsv/ForNovel（主翻译）；GenDic（生成GPT字典）；dump-name（导出人名表）；rebuildr（用字典重建结果，跳过翻译）；rebuilda（用字典重建缓存+结果）。会复用当前选定的后端配置。",
+            "description": "提交一个翻译任务。translator 取值：ForGal-json/ForGal-tsv/ForNovel（主翻译）；GenDic（生成GPT字典）；dump-name（导出人名表）；rebuilda（用字典重建缓存+结果，跳过翻译，复核时用这个才能在 list_problems 看到变化）；rebuildr（只重建结果 json，不更新缓存，一般不用）。会复用当前选定的后端配置。传 files 只翻译指定的输入文件（试译时用：只翻一两个文件验证文风）。",
             "parameters": {
                 "type": "object",
-                "properties": {"translator": {"type": "string"}},
+                "properties": {
+                    "translator": {"type": "string"},
+                    "files": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "可选。只翻译这些输入文件（文件名来自 list_input_files），如试译只翻第一个文件。留空翻译全部。",
+                    },
+                },
                 "required": ["translator"],
             },
         },
@@ -972,6 +1045,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
             "name": "wait",
             "description": (
                 "等待一段时间后继续。用于翻译/GenDic 等后台任务还在跑、需要隔一会儿再看进度的场景。"
+                "用法：先 get_runtime 确认任务在跑 → wait → wait 结束后再 get_runtime 查状态（completed / 仍在跑看 eta_seconds 决定下一轮等多久）。"
                 "等待期间界面会显示倒计时；若用户期间点了停止，会立即中断等待。"
                 "单次最多等待 1800 秒（30 分钟）。"
             ),
@@ -1014,9 +1088,73 @@ AGENT_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "update_project_config",
+            "description": "修改项目配置（与桌面端「项目配置」页同一通道）。键名与 get_project_overview 返回的 config/config_field_descriptions 一致（如 \"common.gpt.contextNum\"、\"common.language\"、\"common.gpt.translation_guideline\"），只允许改已存在的键。适合调整翻译参数、切换翻译规范文件、启停问题检测项等；改完对新启动的翻译任务生效。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "updates": {
+                        "type": "array",
+                        "description": "要修改的键值对列表，一次可改多个。",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": {"type": "string", "description": "配置键的点号路径，如 \"common.gpt.contextNum\"。说明见 get_project_overview 的 config_field_descriptions。"},
+                                "value": {"description": "新值，类型跟随配置原值（数字/布尔/字符串/列表）。"},
+                            },
+                            "required": ["key", "value"],
+                        },
+                    },
+                },
+                "required": ["updates"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "list_problems",
-            "description": "列出自动检测到的翻译问题（残留日文、字典使用、过长等），用于复核与修复循环。",
-            "parameters": {"type": "object", "properties": {}, "required": []},
+            "description": "查询自动检测到的翻译问题（残留日文、字典使用、过长等）。默认返回类型统计（各类型问题数）；传 problem_type 查看该类型的具体条目，支持分页。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "problem_type": {
+                        "type": "string",
+                        "description": "可选。要查看的问题类型（来自默认返回的统计列表，如 \"残留日文\"），支持逗号分隔多个；传 \"*\" 返回所有类型的具体条目。留空只返回类型统计。",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "可选。单次返回条目数，默认 50，最大 200。",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "可选。分页偏移，默认 0。配合 has_more 翻页。",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_problem_filter",
+            "description": "管理问题过滤关键字（项目配置 common.problemFilterKey，与「缓存与问题」页同一套配置）。命中的问题项会被 list_problems 和进度统计过滤掉。适合在确认某类问题（如字典使用提示、纯语气词提示）不需要处理后，将其加入过滤清单让统计聚焦真问题；也可移除误过滤的关键字。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "add", "remove"],
+                        "description": "list 查看当前关键字；add 添加；remove 移除。",
+                    },
+                    "keyword": {
+                        "type": "string",
+                        "description": "add/remove 必填。要操作的关键字（如 \"使用了GPT词典\"、\"正文直出\"），精确匹配、区分大小写。",
+                    },
+                },
+                "required": ["action"],
+            },
         },
     },
     {
@@ -1040,6 +1178,27 @@ AGENT_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "delete_cache",
+            "description": "删除缓存（条目或整个文件）。物理删除后，重启翻译时被删除的句子会因缓存未命中而重新翻译——这是触发部分重翻的手段。注意：删除不可撤销；rebuilda/rebuildr 依赖缓存，删除后不要再跑重建。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "缓存文件名（来自 get_project_overview 的 cache_files）。传 \"*\" 删除全部缓存文件。",
+                    },
+                    "indexes": {
+                        "type": "string",
+                        "description": "可选。要删除的条目 index 列表，支持逗号和区间（如 \"33-40,50-60\"，index 来自 read_cache/list_problems）。留空则删除整个文件。",
+                    },
+                },
+                "required": ["filename"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "search_cache",
             "description": "在缓存中搜索译文/原文/问题。query 为关键词，field 取 all/src/dst/problem。",
             "parameters": {
@@ -1053,7 +1212,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "patch_cache",
-            "description": "批量修改某个缓存文件中若干条目的译文/校对等字段。一次可改多条，只更新 patches 里指定的条目与字段，其它条目原样保留。适合发现问题后改译文、再配合 rebuildr 重建的复核循环。",
+            "description": "批量修改某个缓存文件中若干条目的译文/校对等字段。一次可改多条，只更新 patches 里指定的条目与字段，其它条目原样保留。适合发现问题后改译文、再配合 rebuilda 重建的复核循环。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1087,11 +1246,91 @@ def _join_lines(lines: list[str]) -> str:
 
 
 # ---- 工具实现 ----
+# 配置键说明表：get_project_overview 返回配置时附上，让 Agent 看懂每个键的
+# 作用与取值。口径与 sampleProject/config.inc.yaml 的注释、桌面端「项目配置」
+# 页各 section 的字段说明一致。键用点号路径，与 YAML 展平后一致。
+CONFIG_FIELD_DESCRIPTIONS: dict[str, str] = {
+    # ---- common ----
+    "common.gpt.numPerRequestTranslate": "每次请求打包的句子数，建议不超过 16 [1-32]",
+    "common.workersPerProject": "项目级并行文件数；单文件并行需配合 splitFile",
+    "common.autoAdjustWorkers": "根据近期 429 比例和响应延迟自动降/升 worker 并发 [true/false]",
+    "common.sortBy": "文件调度顺序：name 按文件名，size 优先大文件（并行时通常更快）",
+    "common.language": "目标输出语言 [zh-cn/zh-tw/en/ja/ko/ru/fr]",
+    "common.splitFile": "单文件分片模式：no 关闭；Num 每 n 句切一片；Equal 每文件均分 n 片。【重要】分割设置直接影响缓存读取命中，迁移旧项目必须保持一致",
+    "common.splitFileNum": "分片参数：Num 模式表示每片句数；Equal 模式表示分片总数",
+    "common.splitFileCrossNum": "分片重叠句数（上下文缓冲），可提升片段衔接质量 [常用 0 或 10]",
+    "common.save_steps": "每处理 n 个批次保存一次缓存；值越大保存越少、速度可能更快",
+    "common.start_time": "定时启动时间（24 小时制，如 00:30）；留空立即启动",
+    "common.linebreakSymbol": "JSON 内换行符类型，供问题检测/自动修复使用，不改变翻译语义",
+    "common.skipH": "是否跳过可能触发敏感词检测的句子 [true/false]",
+    "common.smartRetry": "解析失败时自动缩小批次并重置上下文，减少无效重试 [true/false]",
+    "common.retranslFail": "程序重启时是否自动重翻标记为 (Failed) 的句子 [true/false]",
+    "common.retranslKey": "重翻关键字列表：启动时命中缓存 problem 或原文关键字的句子会被重翻（如「翻译失败」「残留日文」）",
+    "common.problemFilterKey": "问题过滤关键字列表：命中的问题项在问题统计与 list_problems 中被过滤掉",
+    "common.gpt.contextNum": "每次请求附带的前文句数；值越大上下文越强、成本越高（常用 8）[0-32]",
+    "common.gpt.translation_guideline": "使用的翻译规范文件名（位于 translation_guidelines 文件夹），决定文风与措辞",
+    "common.gpt.enhance_jailbreak": "是否启用「抗拒答」增强提示，降低模型拒答概率 [true/false]",
+    "common.gpt.change_prompt": "Prompt 修改模式：no 不改；AdditionalPrompt 追加；OverwritePrompt 覆盖默认提示词",
+    "common.gpt.prompt_content": "Prompt 自定义内容；仅在 change_prompt 为 AdditionalPrompt/OverwritePrompt 时生效",
+    "common.gpt.token_limit": "(Sakura/GalTransl) 单轮 token 上限；0 表示不限制，用于避免上下文溢出",
+    "common.loggingLevel": "日志输出级别：debug 详细，info 常规，warning 仅警告 [debug/info/warning]",
+    "common.saveLog": "是否将运行日志写入文件 [true/false]",
+    "common.gpt.dynamicNumPerRequestTranslate": "动态句数调整：根据模型解析错误自动降/升单次翻译句数 [true/false]",
+    # ---- problemAnalyze ----
+    "problemAnalyze.problemList": "要启用的问题检测清单（词频过高/标点错漏/残留日文/丢失换行/多加换行/比日文长/比日文长严格/字典使用/引入英文/语言不通/缺控制符/独白男他/单句过长）",
+    "problemAnalyze.avgSentenceLengthThreshold": "单句过长检测的平均分句长度阈值",
+    "problemAnalyze.arinashiDict": "有無字典：检测多加/漏加字典符号（如【】）的词表",
+    # ---- dictionary ----
+    "dictionary.defaultDictFolder": "通用字典文件夹（相对程序目录，也可绝对路径）",
+    "dictionary.usePreDictInName": "将译前字典用在 name 字段（人名替换）[true/false]",
+    "dictionary.usePostDictInName": "将译后字典用在 name 字段 [true/false]",
+    "dictionary.useGPTDictInName": "将 GPT 字典用在 name 字段 [true/false]",
+    "dictionary.sortDict": "将所有字典按查找词长度重排序 [true/false]",
+    "dictionary.preDict": "译前字典文件列表（每行一个；前缀 (project_dir) 代表在项目目录下）。译前字典在送入模型前直接替换原文",
+    "dictionary.gpt.dict": "GPT 字典文件列表。随 Prompt 发给模型，约束人名/术语译法（Agent 应主要维护这层）",
+    "dictionary.postDict": "译后字典文件列表。翻译完成后对译文做替换（符号矫正等）",
+    # ---- backendSpecific ----
+    "backendSpecific.OpenAI-Compatible": "OpenAI 兼容接口配置（ForGal/ForNovel/GenDic 引擎用）：tokens 令牌列表、tokenStrategy 轮询策略、stream 流式、apiTimeout 超时秒数、maxApiRetries 单批次最大重试",
+    "backendSpecific.SakuraLLM": "Sakura 本地模型配置（Sakura/GalTransl 引擎用）：endpoints 端点列表",
+    # ---- plugin ----
+    "plugin.filePlugin": "文件插件（决定输入/输出格式）：file_galtransl_json；字幕 file_subtitle_srt_lrc_vtt；小说 file_epub_epub / file_plaintext_txt；Mtool json 用 file_i18n_json",
+    "plugin.textPlugins": "文本处理插件列表（按顺序执行）：如 text_common_normalfix 常规修复、text_common_skipNoJP 跳过无日文句",
+    # ---- proxy ----
+    "proxy.enableProxy": "是否启用代理 [true/false]，使用中转供应商时一般不用开",
+}
+
+
+def _annotate_config(config: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+    """给配置附带键说明。只附配置里实际存在的键（含点号键的 section 形式，
+    如 common 里直接写 gpt.numPerRequestTranslate 的展平路径）。"""
+    section_hints = {
+        "common": "通用程序设置",
+        "problemAnalyze": "自动问题分析配置",
+        "dictionary": "字典设置",
+        "backendSpecific": "翻译后端引擎配置（实际生效值可能被全局后端配置覆盖）",
+        "plugin": "文件/文本插件配置",
+        "proxy": "代理设置",
+    }
+    descriptions: dict[str, str] = {}
+    for section, note in section_hints.items():
+        if section in config:
+            descriptions[section] = note
+    for dotted, desc in CONFIG_FIELD_DESCRIPTIONS.items():
+        if "." not in dotted:
+            continue
+        section, _, key = dotted.partition(".")
+        value = config.get(section)
+        if isinstance(value, dict) and key in value:
+            descriptions[dotted] = desc
+    return config, descriptions
+
+
 def _tool_get_project_overview(runner: AgentRunner, _args: dict[str, Any]) -> Any:
     pid = runner._project_id()
     files = runner._http_get(f"/api/projects/{pid}/files")
     progress = runner._http_get(f"/api/projects/{pid}/progress")
     cfg = runner._http_get(f"/api/projects/{pid}/config?config={urllib.parse.quote(runner.state.config_file_name)}")
+    config, descriptions = _annotate_config(cfg.get("config", {}))
     return {
         "input_files": [f["name"] for f in files.get("input_files", [])],
         "output_files": [f["name"] for f in files.get("output_files", [])],
@@ -1102,8 +1341,62 @@ def _tool_get_project_overview(runner: AgentRunner, _args: dict[str, Any]) -> An
             "problems": progress.get("problems", 0),
             "failed": progress.get("failed", 0),
         },
-        "config": cfg.get("config", {}),
+        "config": config,
+        "config_field_descriptions": descriptions,
     }
+
+
+def _tool_list_input_files(runner: AgentRunner, _args: dict[str, Any]) -> Any:
+    """列出待翻译文件（原文件，输入目录）。带每个文件的句数（读文件解析后统计），
+    供试译时挑选文件。"""
+    pid = runner._project_id()
+    files = runner._http_get(f"/api/projects/{pid}/files")
+    input_files = [
+        {"name": f["name"], "size": f.get("size", 0)}
+        for f in files.get("input_files", [])
+        if f.get("is_file", True)
+    ]
+    return {"input_files": input_files, "count": len(input_files)}
+
+
+def _tool_read_input_file(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """读取待翻译原文。filename 来自 list_input_files；index 支持区间
+    （"0-100"、读取文件头几十句足够了解文风）。"""
+    filename = str(args.get("filename", "")).strip()
+    if not filename:
+        raise AgentToolError("filename is required")
+    pid = runner._project_id()
+    cfg = urllib.parse.quote(runner.state.config_file_name)
+    data = runner._http_get(f"/api/projects/{pid}/input/{urllib.parse.quote(filename)}?config={cfg}")
+    entries = data.get("entries", [])
+    index_spec = str(args.get("index", "") or "").strip()
+    if not index_spec:
+        return {"filename": filename, "count": len(entries), "returned": len(entries[:30]), "entries": entries[:30]}
+    wanted = _parse_index_spec(index_spec)
+    if not wanted:
+        raise AgentToolError(f"无法解析 index 列表：{index_spec!r}（示例：0-100）")
+    picked = [e for e in entries if int(e.get("index", -1)) in wanted]
+    missing = sorted(i for i in wanted if i >= len(entries))
+    result: dict[str, Any] = {
+        "filename": filename,
+        "count": len(entries),
+        "returned": len(picked),
+        "entries": picked,
+    }
+    if missing:
+        result["missing_indexes"] = missing
+    return result
+
+
+def _tool_read_guideline(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """读取翻译规范文件内容。不带参数列出可选的规范文件名。"""
+    name = str(args.get("name", "") or "").strip()
+    if not name:
+        data = runner._http_get("/api/translation-guidelines")
+        guidelines = data.get("guidelines", [])
+        current = "（见 get_project_overview 配置 common.gpt.translation_guideline）"
+        return {"guidelines": guidelines, "note": f"当前项目使用的规范：{current}。传 name 读取内容。"}
+    return runner._http_get(f"/api/translation-guidelines/{urllib.parse.quote(name)}")
 
 
 def _tool_list_dict_files(runner: AgentRunner, _args: dict[str, Any]) -> Any:
@@ -1162,6 +1455,152 @@ def _tool_create_dict_file(runner: AgentRunner, args: dict[str, Any]) -> Any:
     return runner._http_post(f"/api/projects/{pid}/dictionary/project/create", body)
 
 
+def _tool_manage_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """增/删/查项目配置 common.problemFilterKey（问题过滤关键字）。
+
+    与桌面端「缓存与问题」页同一套配置：命中的问题项会在 list_problems /
+    进度统计里被过滤掉。add/remove 都是对关键字的精确匹配（区分大小写）。"""
+    action = str(args.get("action", "")).strip()
+    if action not in ("list", "add", "remove"):
+        raise AgentToolError("action must be one of: list, add, remove")
+    pid = runner._project_id()
+    config_name = runner.state.config_file_name or DEFAULT_CONFIG_FILE
+
+    def _normalize(raw: Any) -> list[str]:
+        items = raw.split("\n") if isinstance(raw, str) else raw
+        if not isinstance(items, list):
+            return []
+        return [k.strip() for k in items if isinstance(k, str) and k.strip()]
+
+    def _load() -> tuple[dict[str, Any], list[str]]:
+        data = runner._http_get(f"/api/projects/{pid}/config?config={urllib.parse.quote(config_name)}")
+        config = data.get("config")
+        if not isinstance(config, dict):
+            raise AgentToolError("项目配置读取失败")
+        common = config.get("common")
+        if not isinstance(common, dict):
+            common = {}
+            config["common"] = common
+        keys = _normalize(common.get("problemFilterKey", []))
+        # 去重保序
+        return config, list(dict.fromkeys(keys))
+
+    if action == "list":
+        _, keys = _load()
+        return {"filter_keys": keys, "count": len(keys)}
+
+    keyword = str(args.get("keyword", "") or "").strip()
+    if not keyword:
+        raise AgentToolError("keyword is required for add/remove")
+
+    config, keys = _load()
+    if action == "add":
+        if keyword in keys:
+            return {"filter_keys": keys, "count": len(keys), "added": False, "note": f"「{keyword}」已在列表中"}
+        keys.append(keyword)
+    else:  # remove
+        if keyword not in keys:
+            return {"filter_keys": keys, "count": len(keys), "removed": False, "note": f"「{keyword}」不在列表中"}
+        keys.remove(keyword)
+
+    config["common"]["problemFilterKey"] = keys
+    runner._http_put(
+        f"/api/projects/{pid}/config",
+        {"config": config, "config_file_name": config_name},
+    )
+    # 配置已写回：进度缓存按 mtime 自动失效，后续 list_problems 立即用新过滤
+    verb = "added" if action == "add" else "removed"
+    return {"filter_keys": keys, "count": len(keys), verb: True}
+
+
+def _parse_config_value(raw: Any) -> Any:
+    """把工具参数里的标量值转成 YAML 配置里应有的类型。
+
+    模型经 JSON 传参，bool/数字天然带类型；字符串保持字符串——
+    YAML 里本来就大量存在如 "Num"/"size" 的字符串枚举，不做猜测。"""
+    return raw
+
+
+def _set_nested(config: dict[str, Any], dotted: str, value: Any) -> bool:
+    """按点号路径写入配置（如 common.gpt.contextNum）。返回键是否原本存在。"""
+    parts = dotted.split(".")
+    node: Any = config
+    for p in parts[:-1]:
+        if not isinstance(node, dict) or p not in node:
+            return False
+        node = node[p]
+    if not isinstance(node, dict) or parts[-1] not in node:
+        return False
+    node[parts[-1]] = value
+    return True
+
+
+# 点号键的特殊展平：YAML 里 common 下可以直接写 "gpt.numPerRequestTranslate"
+# 这种带点的键（不嵌套），但也存在真正的嵌套（如 common.gpt 为一个 dict）。
+# 匹配顺序：section 内字面点号键 → section 内短键 → 整体嵌套路径。
+def _set_config_key(config: dict[str, Any], dotted: str, value: Any) -> bool:
+    sections = ("common", "problemAnalyze", "dictionary", "plugin", "proxy", "backendSpecific")
+    section, _, rest = dotted.partition(".")
+    if section in sections and rest:
+        node = config.get(section)
+        if isinstance(node, dict):
+            # 字面点号键（common 的展平写法）
+            if dotted in node:
+                node[dotted] = value
+                return True
+            # 短键（去掉 section 前缀后直接是键名）
+            if rest in node:
+                node[rest] = value
+                return True
+            # 真嵌套（section 下有同名子 dict），交给通用嵌套写入
+            if isinstance(node.get(rest.split(".")[0]), dict):
+                return _set_nested(config, dotted, value)
+            return False
+    return _set_nested(config, dotted, value)
+
+
+def _tool_update_project_config(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """修改项目配置：读-改-写回（与桌面端「项目配置」页同一通道）。
+
+    只允许改已存在的键，防止模型凭空捏造配置项；键名与
+    get_project_overview 返回的 config/config_field_descriptions 一致。"""
+    updates = args.get("updates")
+    if not isinstance(updates, list) or not updates:
+        raise AgentToolError("updates must be a non-empty array of {key, value}")
+    pid = runner._project_id()
+    config_name = runner.state.config_file_name or DEFAULT_CONFIG_FILE
+    data = runner._http_get(f"/api/projects/{pid}/config?config={urllib.parse.quote(config_name)}")
+    config = data.get("config")
+    if not isinstance(config, dict):
+        raise AgentToolError("项目配置读取失败")
+
+    applied: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for item in updates:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key", "")).strip()
+        if not key:
+            continue
+        value = _parse_config_value(item.get("value"))
+        if _set_config_key(config, key, value):
+            applied.append({"key": key, "value": value})
+        else:
+            skipped.append({"key": key, "reason": "配置里不存在该键；只能修改已存在的键"})
+
+    if not applied:
+        return {"updated": 0, "applied": [], "skipped": skipped or [{"key": "", "reason": "updates 为空"}]}
+
+    runner._http_put(
+        f"/api/projects/{pid}/config",
+        {"config": config, "config_file_name": config_name},
+    )
+    result: dict[str, Any] = {"updated": len(applied), "applied": applied}
+    if skipped:
+        result["skipped"] = skipped
+    return result
+
+
 def _tool_get_name_table(runner: AgentRunner, _args: dict[str, Any]) -> Any:
     pid = runner._project_id()
     return runner._http_get(f"/api/projects/{pid}/name-table")
@@ -1185,8 +1624,20 @@ def _tool_start_translation(runner: AgentRunner, args: dict[str, Any]) -> Any:
         "translator": translator,
         "backend_profile_data": runner.state.backend_profile_data,
     }
+    files = args.get("files")
+    if files is not None:
+        if not isinstance(files, list) or not files:
+            raise AgentToolError("files must be a non-empty array of filenames")
+        body["input_files"] = [str(f).strip() for f in files if str(f).strip()]
+        if not body["input_files"]:
+            raise AgentToolError("files 里没有有效的文件名")
     result = runner._http_post("/api/jobs", body)
-    return {"job_id": result.get("job_id"), "status": result.get("status"), "translator": translator}
+    return {
+        "job_id": result.get("job_id"),
+        "status": result.get("status"),
+        "translator": translator,
+        **({"files": body["input_files"]} if files is not None else {}),
+    }
 
 
 def _tool_stop_translation(runner: AgentRunner, _args: dict[str, Any]) -> Any:
@@ -1278,12 +1729,68 @@ def _tool_get_runtime(runner: AgentRunner, _args: dict[str, Any]) -> Any:
     }
 
 
-def _tool_list_problems(runner: AgentRunner, _args: dict[str, Any]) -> Any:
+def _split_problem_types(problem: str) -> list[str]:
+    """问题文本按英文逗号拆项，取每项「类型：详情」的类型前缀去重。
+
+    与桌面端「缓存与问题」统计 tab 的归类口径一致（problemFilter.ts）。"""
+    types: list[str] = []
+    for part in str(problem or "").split(","):
+        token = part.strip()
+        if not token:
+            continue
+        type_name = token.split("：", 1)[0].strip()
+        if type_name and type_name not in types:
+            types.append(type_name)
+    return types
+
+
+def _tool_list_problems(runner: AgentRunner, args: dict[str, Any]) -> Any:
     pid = runner._project_id()
     cfg = urllib.parse.quote(runner.state.config_file_name)
     data = runner._http_get(f"/api/projects/{pid}/problems?config={cfg}")
     problems = data.get("problems", [])
-    return {"total": data.get("total", len(problems)), "problems": problems[:50]}
+
+    # 不带 problem_type：先给类型统计（大项目问题上千条，全量列出没有意义），
+    # Agent 据此决定看哪一类。
+    problem_type = str(args.get("problem_type", "") or "").strip()
+    if not problem_type:
+        stats: dict[str, int] = {}
+        for p in problems:
+            for t in _split_problem_types(p.get("problem", "")):
+                stats[t] = stats.get(t, 0) + 1
+        ranked = sorted(stats.items(), key=lambda kv: -kv[1])
+        return {
+            "total": data.get("total", len(problems)),
+            "mode": "stats",
+            "types": [{"type": t, "count": c} for t, c in ranked],
+            "hint": "默认只返回类型统计。用 problem_type 指定类型查看具体条目（配合 limit/offset 分页），problem_type 传 \"*\" 列出全部类型的具体条目。",
+        }
+
+    # 指定类型：过滤出问题里含该类型的条目（子串匹配，与统计口径对齐）
+    if problem_type != "*":
+        wanted = [t.strip() for t in problem_type.split(",") if t.strip()]
+        problems = [p for p in problems if any(w in _split_problem_types(p.get("problem", "")) for w in wanted)]
+
+    limit = args.get("limit", 50)
+    offset = args.get("offset", 0)
+    try:
+        limit = max(1, min(int(limit), 200))
+    except (TypeError, ValueError):
+        limit = 50
+    try:
+        offset = max(0, int(offset))
+    except (TypeError, ValueError):
+        offset = 0
+    matched = len(problems)
+    return {
+        "total": data.get("total", len(problems)),
+        "matched": matched,
+        "problem_type": problem_type,
+        "offset": offset,
+        "returned": len(problems[offset : offset + limit]),
+        "has_more": offset + limit < matched,
+        "problems": problems[offset : offset + limit],
+    }
 
 
 def _tool_read_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
@@ -1443,8 +1950,84 @@ def _tool_patch_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     }
 
 
+def _tool_delete_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """删除缓存：物理删除条目后，重启翻译时这些句子会 cache 未命中而重新翻译。
+
+    两种粒度：
+    - 指定 indexes：删除某个缓存文件里的部分条目（index 可用 read_cache /
+      list_problems 返回的 index，支持 "33-40,50-60" 区间写法）
+    - 不指定 indexes：删除整个缓存文件（该文件全部句子重翻）
+    删除不可撤销；rebuilda/rebuildr 依赖缓存存在，删除后不要跑重建。
+    """
+    filename = str(args.get("filename", "")).strip()
+    if not filename:
+        raise AgentToolError("filename is required")
+    pid = runner._project_id()
+    index_spec = str(args.get("indexes", "") or "").strip()
+
+    # 整文件删除
+    if not index_spec:
+        if filename == "*" or filename == "all":
+            # 全部缓存文件：列出后逐个删
+            listing = runner._http_get(f"/api/projects/{pid}/cache")
+            targets = [f["name"] for f in listing.get("files", []) if str(f.get("name", "")).endswith(".json")]
+            if not targets:
+                return {"deleted_files": [], "not_found_files": [], "note": "没有可删除的缓存文件"}
+            res = runner._http_post(f"/api/projects/{pid}/cache/delete-file", {"filenames": targets})
+            return {"deleted_files": res.get("deleted_files", []), "not_found_files": res.get("not_found_files", []), "note": "已删除全部缓存文件，重启翻译将全部重翻"}
+        res = runner._http_post(f"/api/projects/{pid}/cache/delete-file", {"filenames": [filename]})
+        return {"deleted_files": res.get("deleted_files", []), "not_found_files": res.get("not_found_files", [])}
+
+    # 按 index 删除部分条目：读全量 -> 剔除命中 -> 写回（与 patch_cache 同通道）
+    wanted = _parse_index_spec(index_spec)
+    if not wanted:
+        raise AgentToolError(f"无法解析 indexes：{index_spec!r}（示例：33-40,50-60）")
+    data = runner._http_get(f"/api/projects/{pid}/cache/{urllib.parse.quote(filename)}")
+    entries = data.get("entries", [])
+    if not isinstance(entries, list):
+        raise AgentToolError("缓存文件 entries 非数组，无法删除")
+
+    kept: list[dict[str, Any]] = []
+    deleted_indexes: list[int] = []
+    for e in entries:
+        try:
+            idx = int(e.get("index"))
+        except (TypeError, ValueError):
+            kept.append(e)
+            continue
+        if idx in wanted:
+            deleted_indexes.append(idx)
+        else:
+            kept.append(e)
+
+    if not deleted_indexes:
+        raise AgentToolError(f"没有命中的条目（文件共 {len(entries)} 条，请求 index：{sorted(wanted)}）")
+
+    save_body = {
+        "filename": filename,
+        "entries": kept,
+        "config_file_name": runner.state.config_file_name,
+    }
+    runner._http_post(f"/api/projects/{pid}/cache/save", save_body)
+    missing = sorted(i for i in wanted if i not in deleted_indexes)
+    result: dict[str, Any] = {
+        "filename": filename,
+        "count_before": len(entries),
+        "count_after": len(kept),
+        "deleted_indexes": deleted_indexes,
+        "note": "被删除的句子已不在缓存中，重启翻译（start_translation）时它们会重新翻译",
+    }
+    if missing:
+        result["missing_indexes"] = missing
+    return result
+
+
 _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "get_project_overview": _tool_get_project_overview,
+    "update_project_config": _tool_update_project_config,
+    "list_input_files": _tool_list_input_files,
+    "read_input_file": _tool_read_input_file,
+    "read_guideline": _tool_read_guideline,
     "list_dict_files": _tool_list_dict_files,
     "read_dict": _tool_read_dict,
     "save_dict": _tool_save_dict,
@@ -1457,7 +2040,9 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "get_progress": _tool_get_progress,
     "get_runtime": _tool_get_runtime,
     "list_problems": _tool_list_problems,
+    "manage_problem_filter": _tool_manage_problem_filter,
     "read_cache": _tool_read_cache,
+    "delete_cache": _tool_delete_cache,
     "search_cache": _tool_search_cache,
     "patch_cache": _tool_patch_cache,
 }
@@ -1793,7 +2378,10 @@ class AgentRuntime:
             }
 
     def drain_events(self, project_dir: str, after_step: int = 0, session_id: str | None = None) -> list[dict[str, Any]]:
-        """取 after_step 之后的所有事件，供 SSE 增量推送。"""
+        """取 after_step 之后的所有事件，供 SSE 增量推送。
+
+        合并长期 deque 与瞬态旁路（thought_delta/wait_tick），按 step 排序输出；
+        瞬态事件被取走即从旁路清除（实时流专用，不参与回放）。"""
         sid = self._resolve_session_id(project_dir, session_id)
         if sid is None:
             return []
@@ -1801,4 +2389,21 @@ class AgentRuntime:
         if state is None:
             return []
         with self._lock:
-            return [e.to_dict() for e in state.events if e.step > after_step]
+            out: list[dict[str, Any]] = []
+            keep_transient: deque[AgentEvent] = deque(maxlen=512)
+            while state.transient_events:
+                ev = state.transient_events.popleft()
+                if ev.step > after_step:
+                    out.append(ev.to_dict())
+                # <= after_step 的是上一条流已回放过的，直接丢弃
+                elif state.status == "running":
+                    keep_transient.append(ev)
+            # 仍 running 时未被消费的瞬态事件放回（客户端断线重订的场景），
+            # awaiting_input 等终态时旁路清空，避免跨回合残留
+            if state.status == "running":
+                keep_transient.extend(state.transient_events)
+            state.transient_events.clear()
+            state.transient_events.extend(keep_transient)
+            out.extend(e.to_dict() for e in state.events if e.step > after_step)
+            out.sort(key=lambda e: e.get("step", 0))
+            return out

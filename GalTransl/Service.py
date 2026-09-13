@@ -112,6 +112,9 @@ class JobSpec:
     backend_profile: str = ""
     backend_profile_data: dict[str, Any] = field(default_factory=dict)
     prompt_template_overrides: dict[str, dict[str, str]] = field(default_factory=dict)
+    # 只翻译输入目录下这些文件（相对输入目录的文件名）。空 = 全部文件。
+    # 用于试译：只翻一两个文件验证文风，再全量启动。
+    input_files: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -217,6 +220,15 @@ async def run_job_async(
                 cfg.keyValues["internals.prompt_template.user_prompt_override"] = user_prompt_override
             if isinstance(system_prompt_override, str) or isinstance(user_prompt_override, str):
                 LOGGER.info("Applied prompt template override from job spec: %s", spec.translator)
+
+        # 只翻译指定文件子集（试译场景）；空列表 = 全部
+        if spec.input_files:
+            valid_files = [f for f in spec.input_files if isinstance(f, str) and f.strip()]
+            if valid_files:
+                cfg.runtime_input_files = [f.strip() for f in valid_files]
+                LOGGER.info("Job restricted to input files: %s", ", ".join(cfg.runtime_input_files))
+            else:
+                spec.input_files = []
 
     except Exception as ex:
         _append_error_log(spec, ex, phase="load_config")
