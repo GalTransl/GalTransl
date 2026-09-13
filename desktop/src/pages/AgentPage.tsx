@@ -460,6 +460,9 @@ function AgentSessionSidebar({
                     title={dir}
                   >
                     <span className={`agent-sessions__caret${isCollapsed ? '' : ' is-open'}`}>▾</span>
+                    <span className="agent-sessions__group-icon" aria-hidden>
+                      {isCollapsed ? '📁' : '📂'}
+                    </span>
                     <span className="agent-sessions__group-name">{shortDir}</span>
                     <span className="agent-sessions__group-count">
                       {list.length > 0 ? list.length : ''}
@@ -479,44 +482,48 @@ function AgentSessionSidebar({
                     ＋
                   </button>
                 </div>
-                <div className="agent-sessions__group-list">
-                  {list.length === 0 ? (
-                    <div className="agent-sessions__group-empty">暂无会话</div>
-                  ) : (
-                    list.map((s) => (
-                      <div
-                        key={s.session_id}
-                        className={`agent-session-item${
-                          isGroupActive && s.session_id === activeSessionId ? ' is-active' : ''
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          className="agent-session-item__main"
-                          onClick={() => onSelectSession(dir, s.session_id)}
-                          title={s.title}
-                        >
-                          <span className="agent-session-item__title">{s.title}</span>
-                          <span className="agent-session-item__time">
-                            {formatSessionTime(s.updated_at)}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          className="agent-session-item__delete"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDeleteSession(dir, s);
-                          }}
-                          disabled={disabled}
-                          title="删除该会话"
-                          aria-label={`删除会话 ${s.title}`}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))
-                  )}
+                <div className="agent-sessions__group-collapse">
+                  <div className="agent-sessions__group-collapse-inner">
+                    <div className="agent-sessions__group-list">
+                      {list.length === 0 ? (
+                        <div className="agent-sessions__group-empty">暂无会话</div>
+                      ) : (
+                        list.map((s) => (
+                          <div
+                            key={s.session_id}
+                            className={`agent-session-item${
+                              isGroupActive && s.session_id === activeSessionId ? ' is-active' : ''
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              className="agent-session-item__main"
+                              onClick={() => onSelectSession(dir, s.session_id)}
+                              title={s.title}
+                            >
+                              <span className="agent-session-item__title">{s.title}</span>
+                              <span className="agent-session-item__time">
+                                {formatSessionTime(s.updated_at)}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="agent-session-item__delete"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteSession(dir, s);
+                              }}
+                              disabled={disabled}
+                              title="删除该会话"
+                              aria-label={`删除会话 ${s.title}`}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             );
@@ -1162,15 +1169,14 @@ export function AgentPage() {
         onSelectSession={handleSelectSession}
         onDeleteSession={(dir, s) => void handleDeleteSession(dir, s)}
       />
-      <div className="agent-console__main">
+      <div className="agent-console__main agent-cockpit">
       <header className="agent-console__bar">
         <div className="agent-console__bar-left">
-          <span className="agent-console__avatar">🤖</span>
+          <span className="agent-console__avatar" aria-hidden>🤖</span>
           <div className="agent-console__bar-copy">
             <div className="agent-console__bar-title">
               <span className="agent-console__bar-name">翻译 Agent</span>
               {activeTitle ? <span className="agent-console__bar-session">{activeTitle}</span> : null}
-              <StatusPill status={status} running={running} elapsed={elapsed} />
             </div>
             <div className="agent-console__project-static">
               {projectDir ? (
@@ -1183,12 +1189,13 @@ export function AgentPage() {
               )}
             </div>
           </div>
+          <StatusPill status={status} running={running} elapsed={elapsed} />
         </div>
 
         <div className="agent-console__bar-right">
           <span className="agent-console__metric" title="已记录步骤">
             <span className="agent-console__metric-value">{stepCount}</span>
-            <span className="agent-console__metric-label">步</span>
+            <span className="agent-console__metric-label">步数</span>
           </span>
           {backendProfileName ? (
             <span className="agent-console__chip" title="翻译后端配置">⚙ {backendProfileName}</span>

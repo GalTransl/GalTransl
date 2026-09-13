@@ -1,9 +1,9 @@
 /* ─────────────────────────────────────────────────────────
    Agent Console — a focused, chat-style workspace for the
-   translation agent. Follows the app's token system while
-   borrowing the disclosure-row / composer idiom of modern
-   agent clients: tonal layers instead of heavy borders,
-   grouped activity runs, and a lifted borderless composer.
+   translation agent. Visual language matches the translate
+   workbench cockpit: one large gradient panel with a radial
+   blue glow + inset highlights, tonal layers instead of
+   heavy borders, and a borderless lifted composer.
    ───────────────────────────────────────────────────────── */
 
 .agent-console {
@@ -13,23 +13,49 @@
   --agent-tile: rgba(15, 23, 42, 0.045);
   --agent-tile-strong: rgba(15, 23, 42, 0.075);
   --agent-hover: rgba(15, 23, 42, 0.055);
-  --agent-mono: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+  --agent-line: rgba(191, 208, 226, 0.7);
+  --agent-line-soft: rgba(191, 208, 226, 0.45);
+  --agent-mono: "Cascadia Code", "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
 
   display: grid;
-  grid-template-columns: 216px minmax(0, 1fr);
+  grid-template-columns: 228px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   gap: var(--space-4);
 }
 
-/* 主区：顶栏 + 线程 + 输入框纵向排布 */
+/* 主区：单个 cockpit 面板，顶栏 / 线程 / 输入区在面板内纵向分区 */
 .agent-console__main {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
   min-width: 0;
-  gap: var(--space-4);
+}
+
+/* ═══════════════════════════════════════════════════════
+   Cockpit panel — 主区唯一的大面板（对标 ptv2-cockpit）
+   ═══════════════════════════════════════════════════════ */
+
+.agent-cockpit {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  border: 1px solid var(--agent-line);
+  border-radius: var(--radius-panel);
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 92% -18%, rgba(47, 111, 235, 0.16), transparent 46%),
+    linear-gradient(90deg, #ffffff 0%, #ffffff 45%, rgba(247, 251, 255, 0.96) 100%),
+    var(--color-surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 0 rgba(191, 208, 226, 0.45);
 }
 
 /* ── Session sidebar ── */
@@ -38,10 +64,17 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-panel);
+  border: 1px solid var(--agent-line);
+  border-radius: var(--radius-panel);
+  background:
+    radial-gradient(circle at 14% -12%, rgba(47, 111, 235, 0.1), transparent 42%),
+    linear-gradient(180deg, #ffffff 0%, rgba(247, 251, 255, 0.96) 100%),
+    var(--color-surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 0 rgba(191, 208, 226, 0.45);
   overflow: hidden;
 }
 
@@ -49,36 +82,59 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-3) var(--space-3) var(--space-2);
+  padding: var(--space-4) var(--space-4) var(--space-3);
   flex: none;
 }
 
 .agent-sessions__title {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: var(--color-text-muted);
+  color: var(--color-primary);
+}
+
+.agent-sessions__title::before {
+  content: "";
+  width: 16px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--color-primary), transparent);
 }
 
 .agent-sessions__new {
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   flex: none;
-  border: none;
+  border: 1px solid rgba(47, 111, 235, 0.22);
   border-radius: 8px;
-  background: var(--agent-tile);
-  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--color-primary);
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease;
 }
 
 .agent-sessions__new:hover:not(:disabled) {
-  background: var(--agent-tile-strong);
+  background: rgba(47, 111, 235, 0.12);
+  border-color: rgba(47, 111, 235, 0.42);
+  box-shadow: 0 2px 8px rgba(47, 111, 235, 0.18);
+  transform: translateY(-1px);
+}
+
+.agent-sessions__new:active:not(:disabled) {
+  transform: translateY(0) scale(0.96);
+  box-shadow: none;
 }
 
 .agent-sessions__new:disabled {
@@ -90,10 +146,15 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 0 var(--space-2) var(--space-2);
+  padding: 0 var(--space-2) var(--space-3);
   overflow-y: auto;
   min-height: 0;
   flex: 1;
+  scrollbar-width: thin;
+}
+
+.agent-sessions__list:not(:hover) {
+  scrollbar-color: transparent transparent;
 }
 
 .agent-sessions__empty {
@@ -120,10 +181,6 @@
   border-radius: 10px;
 }
 
-.agent-sessions__group.is-active {
-  background: var(--agent-tile);
-}
-
 .agent-sessions__group-head {
   display: flex;
   align-items: center;
@@ -131,25 +188,21 @@
   padding: 0 2px;
 }
 
-.agent-sessions__group.is-active .agent-sessions__group-head {
-  background: var(--agent-tile-strong);
-  border-radius: 8px;
-}
-
 .agent-sessions__group-toggle {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   flex: 1;
   min-width: 0;
-  padding: 4px 6px;
+  padding: 5px 7px;
   border: none;
   background: transparent;
   color: var(--color-text);
   font: inherit;
   text-align: left;
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
+  transition: background 140ms ease;
 }
 
 .agent-sessions__group-toggle:hover {
@@ -160,13 +213,25 @@
   flex: none;
   font-size: 9px;
   line-height: 1;
-  color: var(--color-text-muted);
+  color: var(--color-primary);
+  opacity: 0.7;
   transition: transform 0.15s ease;
   transform: rotate(-90deg);
 }
 
 .agent-sessions__caret.is-open {
   transform: rotate(0deg);
+}
+
+.agent-sessions__group-icon {
+  flex: none;
+  font-size: 13px;
+  line-height: 1;
+  transition: transform var(--dur-fast) var(--ease-default);
+}
+
+.agent-sessions__group-toggle:hover .agent-sessions__group-icon {
+  transform: scale(1.12);
 }
 
 .agent-sessions__group-name {
@@ -176,14 +241,27 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 .agent-sessions__group-count {
   flex: none;
-  font-size: 10px;
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--agent-tile);
   color: var(--color-text-muted);
-  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-sessions__group.is-active .agent-sessions__group-count {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
 }
 
 .agent-sessions__group-new {
@@ -194,7 +272,7 @@
   flex: none;
   margin-right: 2px;
   border: none;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
   color: var(--color-text-muted);
   font-size: 14px;
@@ -210,8 +288,8 @@
 }
 
 .agent-sessions__group-new:hover:not(:disabled) {
-  background: var(--agent-tile-strong);
-  color: var(--color-text);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
 }
 
 .agent-sessions__group-new:disabled {
@@ -224,10 +302,28 @@
   flex-direction: column;
   gap: 1px;
   padding: 1px 0 2px 10px;
+  /* Grid-rows 展开折叠动画（与 .agent-activity__collapse 同方案） */
+  min-height: 0;
 }
 
-.agent-sessions__group.is-collapsed .agent-sessions__group-list {
-  display: none;
+/* 动画外壳：包住 group-list，随 is-collapsed 收拢到 0 高 */
+.agent-sessions__group-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--dur-standard) var(--ease-decel),
+    opacity var(--dur-fast) var(--ease-decel);
+}
+
+.agent-sessions__group:not(.is-collapsed) .agent-sessions__group-collapse {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.agent-sessions__group-collapse-inner {
+  min-height: 0;
+  overflow: hidden;
 }
 
 .agent-sessions__group-empty {
@@ -238,9 +334,10 @@
 }
 
 .agent-session-item {
+  position: relative;
   display: flex;
   align-items: center;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   transition: background 0.15s ease;
 }
 
@@ -249,7 +346,20 @@
 }
 
 .agent-session-item.is-active {
-  background: var(--agent-tile-strong);
+  background: var(--color-primary-soft);
+}
+
+/* 左侧激活指示条（对标全局侧边栏导航激活态） */
+.agent-session-item.is-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--color-primary);
 }
 
 .agent-session-item__main {
@@ -278,12 +388,14 @@
 }
 
 .agent-session-item.is-active .agent-session-item__title {
-  color: var(--color-accent, var(--color-text));
+  color: var(--color-primary);
+  font-weight: 600;
 }
 
 .agent-session-item__time {
   font-size: 11px;
   color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .agent-session-item__delete {
@@ -294,7 +406,7 @@
   flex: none;
   margin-right: var(--space-1);
   border: none;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
   color: var(--color-text-muted);
   font-size: 11px;
@@ -342,92 +454,138 @@
   --agent-tile: rgba(255, 255, 255, 0.05);
   --agent-tile-strong: rgba(255, 255, 255, 0.085);
   --agent-hover: rgba(255, 255, 255, 0.07);
+  --agent-line: rgba(65, 83, 111, 0.82);
+  --agent-line-soft: rgba(65, 83, 111, 0.55);
 }
 
-/* ── Top bar ── */
+:root[data-theme='dark'] .agent-cockpit {
+  border-color: var(--agent-line);
+  background:
+    radial-gradient(circle at 92% -18%, rgba(67, 129, 255, 0.24), transparent 48%),
+    linear-gradient(90deg, rgba(24, 34, 48, 0.96) 0%, rgba(24, 34, 48, 0.94) 45%, rgba(17, 26, 38, 0.92) 100%),
+    var(--color-surface);
+  box-shadow:
+    inset 0 1px 0 rgba(141, 170, 212, 0.18),
+    inset 0 -1px 0 rgba(65, 83, 111, 0.42);
+}
+
+:root[data-theme='dark'] .agent-sessions {
+  border-color: var(--agent-line);
+  background:
+    radial-gradient(circle at 14% -12%, rgba(67, 129, 255, 0.16), transparent 42%),
+    linear-gradient(180deg, rgba(24, 34, 48, 0.96) 0%, rgba(17, 26, 38, 0.94) 100%),
+    var(--color-surface);
+  box-shadow:
+    inset 0 1px 0 rgba(141, 170, 212, 0.18),
+    inset 0 -1px 0 rgba(65, 83, 111, 0.42);
+}
+
+:root[data-theme='dark'] .agent-sessions__new {
+  border-color: rgba(111, 160, 255, 0.34);
+  background: rgba(28, 40, 58, 0.78);
+}
+
+:root[data-theme='dark'] .agent-sessions__new:hover:not(:disabled) {
+  background: rgba(67, 129, 255, 0.22);
+  border-color: rgba(111, 160, 255, 0.6);
+}
+
+/* ═══════════════════════════════════════════════════════
+   Top bar — 面板内顶栏（eyebrow + 大标题 + 项目 tick + 右侧指标）
+   ═══════════════════════════════════════════════════════ */
 
 .agent-console__bar {
+  position: relative;
+  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-  background: var(--color-surface);
-  backdrop-filter: blur(14px);
-  box-shadow: var(--shadow-panel);
+  padding: 14px 24px 12px;
+  border-bottom: 1px solid var(--agent-line-soft);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
   flex: none;
+}
+
+:root[data-theme='dark'] .agent-console__bar {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0));
 }
 
 .agent-console__bar-left {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: 12px;
   min-width: 0;
 }
 
 .agent-console__avatar {
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
+  width: 40px;
+  height: 40px;
   flex: none;
   border-radius: 12px;
-  background: var(--color-primary-soft);
-  font-size: 1.15rem;
+  color: #ffffff;
+  font-size: 1.2rem;
+  background: linear-gradient(135deg, #2f6feb 0%, #3b82f6 55%, #22d3ee 100%);
+  box-shadow:
+    0 6px 16px -6px rgba(47, 111, 235, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
 .agent-console__bar-copy {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .agent-console__bar-title {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: var(--space-2);
+  min-width: 0;
 }
 
 .agent-console__bar-name {
-  font-weight: 700;
-  font-size: 0.95rem;
+  font-weight: 800;
+  font-size: 17px;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  white-space: nowrap;
 }
 
 /* 顶栏里的当前会话标题：次要信息，长了省略 */
 .agent-console__bar-session {
-  max-width: 200px;
+  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: var(--agent-tile);
   color: var(--color-text-muted);
-  font-size: 0.78rem;
+  font-size: 12px;
   font-weight: 500;
 }
 
-.agent-console__project {
-  display: inline-flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  max-width: 100%;
+/* 项目路径 tick 行（对标 ptv2-cockpit__tick：等宽 + 圆点） */
+.agent-console__project-static {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
   color: var(--color-text-muted);
-  font: inherit;
-  font-size: 0.82rem;
-  cursor: pointer;
-  text-align: left;
+  font-family: var(--agent-mono);
+  font-size: 11px;
+  cursor: default;
 }
 
-.agent-console__project:disabled {
-  cursor: default;
+.agent-console__project-static::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: rgba(148, 163, 184, 0.6);
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
 }
 
 .agent-console__project-name {
@@ -440,41 +598,49 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  opacity: 0.75;
-}
-
-.agent-console__project-caret {
-  flex: none;
-  opacity: 0.6;
+  opacity: 0.72;
 }
 
 .agent-console__project-empty {
-  color: var(--color-primary);
-  font-weight: 600;
+  color: var(--color-text-muted);
+  opacity: 0.85;
 }
 
 .agent-console__bar-right {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 6px;
   flex: none;
 }
 
+/* 右侧指标：ptv2-stat 式的「数值 + 标签」竖排，代替胶囊 */
 .agent-console__metric {
   display: inline-flex;
-  align-items: baseline;
-  gap: 3px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: var(--agent-tile);
-  color: var(--color-text-muted);
-  font-size: 0.78rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 2px 14px 2px 4px;
+  border-right: 1px dashed var(--agent-line);
+}
+
+.agent-console__metric:last-of-type {
+  border-right: 0;
 }
 
 .agent-console__metric-value {
-  font-weight: 700;
-  color: var(--color-text);
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--color-primary);
+  line-height: 1.15;
   font-variant-numeric: tabular-nums;
+}
+
+.agent-console__metric-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
 }
 
 .agent-console__chip {
@@ -482,41 +648,53 @@
   align-items: center;
   gap: 5px;
   max-width: 220px;
-  padding: 4px 10px;
+  padding: 4px 11px;
+  border: 1px solid var(--agent-line-soft);
   border-radius: 999px;
-  background: var(--agent-tile);
+  background: rgba(255, 255, 255, 0.6);
   color: var(--color-text-muted);
-  font-size: 0.78rem;
+  font-size: 0.76rem;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+:root[data-theme='dark'] .agent-console__chip {
+  border-color: rgba(65, 83, 111, 0.62);
+  background: rgba(28, 40, 58, 0.6);
+}
+
 .agent-console__chip--warn {
+  border-color: rgba(169, 101, 0, 0.35);
   background: var(--color-warning-soft);
   color: var(--color-warning);
-  font-weight: 600;
 }
 
 .agent-console__icon-btn {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--color-line);
-  border-radius: 10px;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 9px;
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), transform 140ms ease;
 }
 
-.agent-console__icon-btn:hover:not(:disabled),
-.agent-console__icon-btn.is-active {
-  background: var(--agent-hover);
+.agent-console__icon-btn:hover:not(:disabled) {
+  background: var(--color-primary-soft);
   color: var(--color-primary);
-  border-color: var(--color-primary);
+  transform: translateY(-1px);
+}
+
+.agent-console__icon-btn.is-active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  border-color: rgba(47, 111, 235, 0.35);
 }
 
 .agent-console__icon-btn:disabled {
@@ -534,9 +712,10 @@
   border-radius: 999px;
   background: var(--agent-tile);
   color: var(--color-text-muted);
-  font-size: 0.74rem;
-  font-weight: 600;
+  font-size: 0.72rem;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
+  flex: none;
 }
 
 .agent-status-pill__dot {
@@ -583,13 +762,18 @@
   align-items: flex-end;
   gap: var(--space-4);
   flex-wrap: wrap;
+  margin: 0 24px;
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--agent-line-soft);
   border-radius: var(--radius-card);
-  background: var(--color-surface);
-  backdrop-filter: blur(14px);
+  background: rgba(255, 255, 255, 0.72);
   flex: none;
   animation: agent-settings-in 200ms var(--ease-decel) both;
+}
+
+:root[data-theme='dark'] .agent-settings {
+  border-color: rgba(65, 83, 111, 0.62);
+  background: rgba(28, 40, 58, 0.72);
 }
 
 @keyframes agent-settings-in {
@@ -607,19 +791,29 @@
 
 .agent-settings__field span {
   color: var(--color-text-muted);
-  font-size: 0.78rem;
-  font-weight: 600;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .agent-settings__field input,
 .agent-settings__field select {
-  min-height: 40px;
+  min-height: 38px;
   padding: 0 12px;
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--agent-line-soft);
   border-radius: 10px;
   background: var(--color-surface-strong);
   color: var(--color-text);
   font: inherit;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.agent-settings__field input:focus,
+.agent-settings__field select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
 }
 
 .agent-settings__link {
@@ -637,23 +831,18 @@
   text-decoration: underline;
 }
 
-/* ── Thread scroller ── */
+/* ── Thread scroller — 面板内部区域，不再自带边框/投影 ── */
 
 .agent-console__thread {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-  background: var(--color-surface);
-  backdrop-filter: blur(14px);
-  box-shadow: var(--shadow-panel);
   scrollbar-gutter: stable;
 }
 
 .agent-thread {
-  width: min(100%, 820px);
+  width: min(100%, 840px);
   margin: 0 auto;
   padding: var(--space-5) var(--space-6) var(--space-6);
   display: flex;
@@ -661,7 +850,9 @@
   gap: 2px;
 }
 
-/* ── Empty hero ── */
+/* ═══════════════════════════════════════════════════════
+   Empty hero — 面板内空态
+   ═══════════════════════════════════════════════════════ */
 
 .agent-hero {
   display: flex;
@@ -679,8 +870,12 @@
   width: 76px;
   height: 76px;
   border-radius: 24px;
-  background: var(--color-primary-soft);
+  color: #ffffff;
   font-size: 2.2rem;
+  background: linear-gradient(135deg, #2f6feb 0%, #3b82f6 55%, #22d3ee 100%);
+  box-shadow:
+    0 16px 36px -12px rgba(47, 111, 235, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
   animation: agent-hero-float 5s ease-in-out infinite;
 }
 
@@ -691,8 +886,9 @@
 
 .agent-hero__title {
   margin: 0;
-  font-size: 1.35rem;
-  letter-spacing: -0.01em;
+  font-size: 1.4rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
 .agent-hero__subtitle {
@@ -714,10 +910,15 @@
 .agent-hero__steps span {
   padding: 5px 12px;
   border-radius: 999px;
-  background: var(--agent-tile);
+  border: 1px solid var(--agent-line-soft);
+  background: rgba(255, 255, 255, 0.55);
   color: var(--color-text-muted);
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   font-weight: 600;
+}
+
+:root[data-theme='dark'] .agent-hero__steps span {
+  background: rgba(28, 40, 58, 0.55);
 }
 
 .agent-hero__project-panel {
@@ -726,12 +927,15 @@
   align-items: center;
   gap: var(--space-3);
   margin-top: var(--space-4);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--color-line);
+  padding-top: var(--space-4);
+  border-top: 1px dashed var(--agent-line);
 }
 
 .agent-hero__open-projects-label {
-  font-size: 0.78rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   color: var(--color-text-muted);
 }
 
@@ -746,22 +950,28 @@
 .agent-hero__project-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border: 1px solid var(--color-line);
+  gap: 7px;
+  padding: 7px 14px;
+  border: 1px solid var(--agent-line);
   border-radius: 999px;
-  background: var(--color-surface);
+  background: rgba(255, 255, 255, 0.72);
   color: var(--color-text);
   font: inherit;
   font-size: 0.82rem;
   cursor: pointer;
   max-width: 220px;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 .agent-hero__project-chip:hover {
-  background: var(--agent-hover);
-  border-color: var(--color-line-strong, var(--color-line));
+  background: rgba(47, 111, 235, 0.08);
+  border-color: rgba(47, 111, 235, 0.45);
+  box-shadow: 0 2px 10px rgba(47, 111, 235, 0.16);
+  transform: translateY(-1px);
+}
+
+:root[data-theme='dark'] .agent-hero__project-chip {
+  background: rgba(28, 40, 58, 0.66);
 }
 
 .agent-hero__project-chip-icon {
@@ -774,7 +984,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .agent-hero__actions {
@@ -784,45 +994,47 @@
   gap: var(--space-2);
 }
 
+/* 主按钮：蓝青渐变（对标 ptv2-launch-btn） */
 .agent-hero__action {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 16px;
+  padding: 8px 18px;
   border: none;
-  border-radius: 999px;
-  background: var(--color-accent, #6366f1);
-  color: #fff;
+  border-radius: 12px;
+  color: #ffffff;
   font: inherit;
   font-size: 0.82rem;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
-  transition: opacity 0.15s ease;
+  background: linear-gradient(135deg, #2f6feb 0%, #3b82f6 50%, #22d3ee 100%);
+  box-shadow:
+    0 8px 20px -8px rgba(47, 111, 235, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transition: transform 140ms ease, box-shadow 140ms ease, filter 140ms ease;
 }
 
 .agent-hero__action:hover {
-  opacity: 0.9;
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+  box-shadow:
+    0 12px 26px -8px rgba(47, 111, 235, 0.65),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.agent-hero__action:active {
+  transform: translateY(0) scale(0.98);
 }
 
 .agent-hero__action--secondary {
-  background: var(--agent-tile-strong);
   color: var(--color-text);
+  background: var(--agent-tile-strong);
+  box-shadow: none;
 }
 
-/* bar/composer 里的项目显示改为纯展示（不再可点切换） */
-.agent-console__project-static {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-  padding: 0;
-  color: var(--color-text-muted);
-  cursor: default;
-}
-
-.agent-composer__chip--static {
-  cursor: default;
-  opacity: 0.85;
+.agent-hero__action--secondary:hover {
+  filter: none;
+  box-shadow: none;
 }
 
 /* ── User goal row ── */
@@ -839,16 +1051,21 @@
 .agent-bubble--user {
   width: min(max-content, 82%, 620px);
   max-width: min(82%, 620px);
-  padding: 9px 13px;
+  padding: 9px 14px;
   border-radius: var(--agent-radius-lg);
-  background: var(--color-primary-soft);
+  border-bottom-right-radius: 6px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #2f6feb 0%, #3b82f6 60%, #4a90f4 100%);
+  box-shadow:
+    0 6px 16px -8px rgba(47, 111, 235, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 .agent-bubble__label {
-  color: var(--color-primary);
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   margin-bottom: 3px;
 }
@@ -894,7 +1111,8 @@
 
 .agent-activity__icon {
   flex: none;
-  color: var(--color-text-muted);
+  color: var(--color-primary);
+  opacity: 0.75;
   font-size: 0.9rem;
 }
 
@@ -1091,7 +1309,7 @@
   padding: 0.1em 0.35em;
   border-radius: 4px;
   background: var(--agent-tile-strong, rgba(16, 24, 40, 0.08));
-  font-family: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+  font-family: var(--agent-mono);
   font-size: 0.9em;
 }
 
@@ -1231,7 +1449,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--agent-mono);
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   color: var(--color-text-muted);
   opacity: 0.9;
 }
@@ -1242,7 +1460,7 @@
   gap: 5px;
   flex: none;
   margin-left: auto;
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   color: var(--color-text-muted);
 }
 
@@ -1288,7 +1506,7 @@
 .agent-tool__waitbar-fill {
   height: 100%;
   border-radius: 999px;
-  background: var(--color-primary);
+  background: linear-gradient(90deg, #2f6feb, #22d3ee);
   transition: width 500ms linear;
 }
 
@@ -1334,9 +1552,9 @@
 
 .agent-toolblock__title {
   color: var(--color-text-muted);
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
@@ -1351,8 +1569,9 @@
   max-height: 300px;
   overflow: auto;
   padding: 10px 12px;
+  border: 1px solid var(--agent-line-soft);
   border-radius: var(--agent-radius);
-  background: var(--agent-tile);
+  background: rgba(255, 255, 255, 0.6);
   color: var(--color-text);
   font-size: 0.8rem;
   line-height: 1.55;
@@ -1360,12 +1579,17 @@
   overflow-wrap: anywhere;
 }
 
+:root[data-theme='dark'] .agent-toolblock__pre {
+  background: rgba(15, 22, 33, 0.55);
+}
+
 .agent-toolblock__pre.is-mono {
   font-family: var(--agent-mono);
-  font-size: 0.76rem;
+  font-size: 0.74rem;
 }
 
 .agent-toolblock.is-error .agent-toolblock__pre {
+  border-color: rgba(217, 48, 37, 0.3);
   background: var(--color-danger-soft);
   color: var(--color-danger);
 }
@@ -1423,6 +1647,7 @@
 }
 
 .agent-working__elapsed {
+  font-family: var(--agent-mono);
   font-variant-numeric: tabular-nums;
   opacity: 0.7;
 }
@@ -1443,6 +1668,7 @@
 }
 
 .agent-notice--error {
+  border: 1px solid rgba(217, 48, 37, 0.25);
   background: var(--color-danger-soft);
 }
 
@@ -1481,30 +1707,49 @@
   padding-right: 4px;
 }
 
-/* ── Composer ── */
+/* ═══════════════════════════════════════════════════════
+   Composer — 面板内底部输入区，与顶栏镜像的浅色分隔
+   ═══════════════════════════════════════════════════════ */
 
 .agent-console__composer {
   flex: none;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  padding: var(--space-3) var(--space-6) var(--space-4);
+  border-top: 1px solid var(--agent-line-soft);
+  background: linear-gradient(0deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
+}
+
+:root[data-theme='dark'] .agent-console__composer {
+  background: linear-gradient(0deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0));
 }
 
 .agent-composer {
-  width: min(100%, 820px);
-  border-radius: 20px;
-  background: var(--color-surface-strong);
-  box-shadow: 0 3px 8px rgba(16, 24, 40, 0.06), 0 0 20px rgba(16, 24, 40, 0.04);
-  transition: box-shadow var(--dur-standard) var(--ease-decel);
+  width: min(100%, 840px);
+  border: 1px solid var(--agent-line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow:
+    0 3px 10px rgba(16, 24, 40, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  transition: box-shadow var(--dur-standard) var(--ease-decel), border-color var(--dur-standard) var(--ease-decel);
 }
 
 :root[data-theme='dark'] .agent-composer {
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4), 0 0 24px rgba(0, 0, 0, 0.24);
+  border-color: rgba(65, 83, 111, 0.72);
+  background: rgba(28, 40, 58, 0.72);
+  box-shadow:
+    0 3px 10px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(141, 170, 212, 0.14);
 }
 
 .agent-composer:focus-within {
-  box-shadow: 0 6px 22px rgba(16, 24, 40, 0.12), 0 0 0 2px var(--color-primary-soft);
+  border-color: rgba(47, 111, 235, 0.55);
+  box-shadow:
+    0 6px 22px rgba(47, 111, 235, 0.14),
+    0 0 0 3px var(--color-primary-soft);
 }
 
 .agent-composer.is-running {
@@ -1513,9 +1758,9 @@
 
 .agent-composer__input {
   width: 100%;
-  min-height: 58px;
+  min-height: 54px;
   max-height: 180px;
-  padding: 14px 16px 4px;
+  padding: 13px 16px 4px;
   border: 0;
   outline: none;
   resize: none;
@@ -1541,7 +1786,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  padding: 4px 10px 10px;
+  padding: 4px 9px 9px;
 }
 
 .agent-composer__left,
@@ -1564,7 +1809,7 @@
   background: var(--agent-tile);
   color: var(--color-text-muted);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   font-weight: 600;
   cursor: pointer;
   overflow: hidden;
@@ -1588,28 +1833,33 @@
   font-size: 0.82rem;
 }
 
+/* 发送/停止：蓝青渐变圆钮（对标 ptv2-launch-btn） */
 .agent-composer__send,
 .agent-composer__stop {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   flex: none;
   border: 0;
   border-radius: 50%;
   cursor: pointer;
-  font-size: 1rem;
-  transition: opacity var(--transition-fast), transform var(--transition-fast);
+  font-size: 1.05rem;
+  transition: opacity var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
 }
 
 .agent-composer__send {
-  background: var(--color-primary);
   color: #ffffff;
+  background: linear-gradient(135deg, #2f6feb 0%, #3b82f6 50%, #22d3ee 100%);
+  box-shadow:
+    0 6px 14px -5px rgba(47, 111, 235, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
 .agent-composer__send:hover:not(:disabled) {
-  opacity: 0.9;
+  transform: translateY(-1px);
+  filter: brightness(1.06);
 }
 
 .agent-composer__send:active:not(:disabled) {
@@ -1619,6 +1869,7 @@
 .agent-composer__send:disabled {
   background: var(--agent-tile-strong);
   color: var(--color-text-muted);
+  box-shadow: none;
   cursor: default;
 }
 
@@ -1641,7 +1892,7 @@
 
 .agent-composer__hint {
   color: var(--color-text-muted);
-  font-size: 0.76rem;
+  font-size: 0.74rem;
 }
 
 .agent-composer__hint--warn {
@@ -1669,9 +1920,15 @@
     min-width: 0;
   }
 
-  /* 窄屏：分组不再折叠隐藏列表，改为始终横向平铺 */
-  .agent-sessions__group.is-collapsed .agent-sessions__group-list {
-    display: flex;
+  /* 窄屏：分组不做折叠动画，collapse 外壳始终展开，列表横向平铺 */
+  .agent-sessions__group-collapse {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    transition: none;
+  }
+
+  .agent-sessions__group-collapse-inner {
+    overflow: visible;
   }
 
   .agent-sessions__group-list {
@@ -1704,6 +1961,11 @@
     padding: var(--space-4);
   }
 
+  .agent-console__composer {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+  }
+
   .agent-row--user .agent-bubble--user {
     width: 100%;
     max-width: 100%;
@@ -1720,7 +1982,8 @@
     animation: none;
   }
 
-  .agent-activity__collapse {
+  .agent-activity__collapse,
+  .agent-sessions__group-collapse {
     transition: none;
   }
 }
