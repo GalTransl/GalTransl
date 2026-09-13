@@ -1613,46 +1613,17 @@ function asArgs(args: unknown): Record<string, unknown> | undefined {
 }
 
 function ThoughtRow({ item }: { item: ActivityItem }) {
-  // 默认展开：模型「回复」始终可见，不随流式结束自动收起。
-  // 用户仍可手动点 header 折叠/展开单个回复。
-  const [open, setOpen] = useState(true);
+  // 模型「回复」直接渲染为普通黑体纯文本，不再用可折叠卡片包裹。
   const text = item.content || '';
   const streaming = Boolean(item.streaming);
-  const long = text.length > 180 || text.includes('\n');
 
   return (
-    <div className={`agent-thought${open ? ' is-open' : ''}${streaming ? ' is-streaming' : ''}`}>
-      <button
-        type="button"
-        className="agent-thought__header"
-        onClick={() => setOpen((v) => !v)}
-        disabled={!long}
-        aria-expanded={open}
-      >
-        <span className="agent-thought__icon">✳</span>
-        <span className="agent-thought__label">{streaming ? '回复中' : '回复'}</span>
-        {!long ? (
-          <span
-            className="agent-thought__inline agent-md"
-            // markdown 已在渲染器内整体转义，无注入面
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
-          />
-        ) : null}
-        {long ? <span className="agent-thought__caret">›</span> : null}
-      </button>
-      {long ? (
-        <div className="agent-thought__collapse">
-          <div className="agent-thought__collapse-inner">
-            <div
-              className="agent-thought__text agent-md"
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
-            />
-            {streaming ? <span className="agent-typing-cursor" aria-hidden /> : null}
-          </div>
-        </div>
-      ) : streaming ? (
-        <span className="agent-typing-cursor agent-typing-cursor--inline" aria-hidden />
-      ) : null}
+    <div className={`agent-thought${streaming ? ' is-streaming' : ''}`}>
+      <div
+        className="agent-thought__text agent-md"
+        dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
+      />
+      {streaming ? <span className="agent-typing-cursor" aria-hidden /> : null}
     </div>
   );
 }

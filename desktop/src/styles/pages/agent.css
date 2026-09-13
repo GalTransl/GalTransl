@@ -969,99 +969,18 @@
   flex-direction: column;
 }
 
-/* ── Thought row ── */
+/* ── Thought row（模型回复：普通纯文本，无折叠框，与 FinalMessage 一致） ── */
 
 .agent-thought {
-  margin: 2px 0;
-}
-
-.agent-thought__header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  min-width: 0;
-  min-height: 24px;
-  padding: 2px 5px;
-  margin: 0 -5px;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: var(--color-text-muted);
-  font: inherit;
-  font-size: 0.82rem;
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-
-.agent-thought__header:hover:not(:disabled) {
-  background: var(--agent-hover);
-  color: var(--color-text);
-}
-
-.agent-thought__header:disabled {
-  cursor: default;
-}
-
-.agent-thought__icon {
-  flex: none;
-  font-size: 0.85rem;
-}
-
-.agent-thought__label {
-  flex: none;
-  font-weight: 600;
-}
-
-.agent-thought__inline {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.8rem;
-  opacity: 0.9;
-}
-
-.agent-thought__caret {
-  flex: none;
-  margin-left: auto;
-  opacity: 0.6;
-  transition: transform var(--dur-fast) var(--ease-default);
-}
-
-.agent-thought.is-open .agent-thought__caret {
-  transform: rotate(90deg);
-}
-
-.agent-thought__collapse {
-  display: grid;
-  grid-template-rows: 0fr;
-  opacity: 0;
-  transition: grid-template-rows var(--dur-standard) var(--ease-decel), opacity var(--dur-fast) var(--ease-decel);
-}
-
-.agent-thought.is-open .agent-thought__collapse {
-  grid-template-rows: 1fr;
-  opacity: 1;
-}
-
-.agent-thought__collapse-inner {
-  min-height: 0;
-  overflow: hidden;
+  margin: 2px 0 6px;
 }
 
 .agent-thought__text {
-  margin: 3px 0 6px;
-  color: var(--color-text-muted);
-  font-size: 0.84rem;
+  margin: 0;
+  color: var(--color-text);
+  font-size: 0.92rem;
   line-height: 1.6;
   overflow-wrap: anywhere;
-}
-
-/* 流式回复（打字机）：文本 + 闪烁光标 */
-.agent-thought.is-streaming .agent-thought__text {
-  color: var(--color-text);
 }
 
 .agent-typing-cursor {
@@ -1072,10 +991,6 @@
   vertical-align: text-bottom;
   background: var(--color-primary);
   animation: agent-cursor-blink 0.9s steps(2, start) infinite;
-}
-
-.agent-typing-cursor--inline {
-  margin-left: 4px;
 }
 
 @keyframes agent-cursor-blink {
@@ -1805,8 +1720,7 @@
     animation: none;
   }
 
-  .agent-activity__collapse,
-  .agent-thought__collapse {
+  .agent-activity__collapse {
     transition: none;
   }
 }
