@@ -1199,13 +1199,13 @@
   flex-direction: column;
 }
 
-/* ── Thought row（模型回复：普通纯文本，无折叠框，与 FinalMessage 一致） ── */
+/* ── Content row（模型回复：普通纯文本，无折叠框，与 FinalMessage 一致） ── */
 
-.agent-thought {
+.agent-content {
   margin: 2px 0 6px;
 }
 
-.agent-thought__text {
+.agent-content__text {
   margin: 0;
   color: var(--color-text);
   font-size: 0.92rem;
@@ -1213,12 +1213,14 @@
   overflow-wrap: anywhere;
 }
 
+/* 光标由 renderMarkdown({ cursor: true }) 注入到最后一个文本块内部，
+   随文字同行排布；-0.12em 让竖线贴合基线上下的字形高度。 */
 .agent-typing-cursor {
   display: inline-block;
   width: 2px;
   height: 1em;
   margin-left: 2px;
-  vertical-align: text-bottom;
+  vertical-align: -0.12em;
   background: var(--color-primary);
   animation: agent-cursor-blink 0.9s steps(2, start) infinite;
 }
@@ -1231,6 +1233,97 @@
   50% {
     opacity: 0;
   }
+}
+
+/* ── Reasoning row（模型「想」的思考过程：可折叠卡片，与「说」的纯文本区分） ── */
+
+.agent-reasoning {
+  margin: 2px 0 6px;
+}
+
+.agent-reasoning__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  min-height: 24px;
+  padding: 2px 5px;
+  margin: 0 -5px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.agent-reasoning__header:hover {
+  background: var(--agent-hover);
+  color: var(--color-text);
+}
+
+.agent-reasoning__icon {
+  flex: none;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+.agent-reasoning__label {
+  flex: none;
+  font-weight: 600;
+}
+
+/* 思考中标签：脉冲点承载「活着」的反馈（对标活动组标签） */
+.agent-reasoning__label.is-running::after {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  animation: agent-pulse 1s ease-in-out infinite;
+}
+
+.agent-reasoning__caret {
+  flex: none;
+  margin-left: auto;
+  opacity: 0.6;
+  transition: transform var(--dur-fast) var(--ease-default);
+}
+
+.agent-reasoning.is-open .agent-reasoning__caret {
+  transform: rotate(90deg);
+}
+
+.agent-reasoning__collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows var(--dur-standard) var(--ease-decel), opacity var(--dur-fast) var(--ease-decel);
+}
+
+.agent-reasoning.is-open .agent-reasoning__collapse {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.agent-reasoning__collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.agent-reasoning__text {
+  margin: 3px 0 6px;
+  color: var(--color-text-muted);
+  font-size: 0.84rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 
 /* ── Final reply（回合收尾回复：顶层普通消息） ── */
@@ -1661,7 +1754,7 @@
   padding: 6px 8px;
 }
 
-/* 行级 diff（save_dict 整文本 / delete_cache 条目） */
+/* 行级 diff（save_dict 整文本 / delete_transl_cache 条目） */
 .agent-changes__dline {
   display: flex;
   align-items: baseline;
@@ -2153,12 +2246,14 @@
   .agent-working__dots span,
   .agent-status-pill--running .agent-status-pill__dot,
   .agent-activity__label.is-running::after,
+  .agent-reasoning__label.is-running::after,
   .agent-tool__state.is-running .agent-tool__state-dot,
   .agent-typing-cursor {
     animation: none;
   }
 
   .agent-activity__collapse,
+  .agent-reasoning__collapse,
   .agent-sessions__group-collapse {
     transition: none;
   }

@@ -8,7 +8,7 @@
 
 - meta    —— 会话元信息（标题、配置文件、后端配置、目标、创建时间）
 - message —— 一条 OpenAI 格式的对话消息（角色/内容/tool_calls）
-- event   —— 一条 AgentEvent（前端转录用；thought_delta 不落盘，高频且可重建）
+- event   —— 一条 AgentEvent（前端转录用；content_delta 不落盘，高频且可重建）
 - compact —— 上下文压缩发生点的标记
 
 设计原则：落盘失败绝不能打断 Agent 主流程，所有 IO/解析异常都降级为日志警告。
@@ -28,7 +28,7 @@ _PROGRAM_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SESSIONS_ROOT = os.path.join(os.path.dirname(_PROGRAM_ROOT), "agent_sessions")
 
 # 不落盘的事件类型：流式增量高频且能由最终消息重建
-_SKIP_EVENT_TYPES = {"thought_delta", "wait_tick"}
+_SKIP_EVENT_TYPES = {"content_delta", "reasoning_delta", "wait_tick"}
 
 
 def _log(msg: str, *args: object) -> None:
@@ -128,7 +128,9 @@ class SessionStore:
                         continue
                     kind = rec.get("t")
                     if kind == "meta":
-                        out["meta"] = {k: v for k, v in rec.items() if k not in ("t", "at")}
+                        # meta 记录是增量写入的（例如收尾只写 running=false），
+                        # 不能用最新一条覆盖早先的 goal/title/config 等字段。
+                        out["meta"].update({k: v for k, v in rec.items() if k not in ("t", "at")})
                     elif kind == "message":
                         msg = rec.get("msg")
                         if isinstance(msg, dict):

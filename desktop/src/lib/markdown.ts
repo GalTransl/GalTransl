@@ -85,8 +85,40 @@ function renderTable(header: string, splitLine: string, bodyRows: string[]): str
   return html.join('');
 }
 
-/** 把一段 markdown 文本渲染成 HTML 片段。 */
-export function renderMarkdown(markdown: string): string {
+/** 打字机光标：流式输出时贴在最后一个字符之后的细竖线。 */
+const TYPING_CURSOR_HTML = '<span class="agent-typing-cursor" aria-hidden="true"></span>';
+
+/** 可容纳行内内容的文本容器闭合标签。 */
+const INLINE_TAIL_RE = /<\/(?:p|li|blockquote|h[3-6]|td|th|code)>/g;
+
+/** 只做结构收尾、自身不含文本的节点（列表闭合标签），光标要落到更早的节点里。 */
+const STRUCTURAL_TAIL_RE = /^<\/(?:ul|ol|table|thead|tbody|tr)>$/;
+
+/**
+ * 把打字机光标注入到最后一个文本块内部（取其最后一个闭合标签之前），
+ * 让光标停在文字的同一行末尾，而不是被块级元素挤到下一行。
+ * 若最后一块无法容纳行内内容（如水平线），才退化为独立的行内元素。
+ */
+function injectTypingCursor(nodes: string[]): void {
+  for (let i = nodes.length - 1; i >= 0; i -= 1) {
+    const node = nodes[i];
+    if (STRUCTURAL_TAIL_RE.test(node.trim())) continue;
+    let insertAt = -1;
+    INLINE_TAIL_RE.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = INLINE_TAIL_RE.exec(node)) !== null) insertAt = match.index;
+    if (insertAt >= 0) {
+      nodes[i] = node.slice(0, insertAt) + TYPING_CURSOR_HTML + node.slice(insertAt);
+      return;
+    }
+    break;
+  }
+  nodes.push(TYPING_CURSOR_HTML);
+}
+
+/** 把一段 markdown 文本渲染成 HTML 片段。
+ *  options.cursor 为真时，在末尾追加打字机光标（供流式输出使用）。 */
+export function renderMarkdown(markdown: string, options?: { cursor?: boolean }): string {
   const lines = markdown.replace(/\r\n/g, '\n').split('\n');
   const html: string[] = [];
 
@@ -266,5 +298,6 @@ export function renderMarkdown(markdown: string): string {
     html.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
   }
   closeAll();
+  if (options?.cursor) injectTypingCursor(html);
   return html.join('\n');
 }

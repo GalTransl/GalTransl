@@ -1529,9 +1529,11 @@ export function clearCustomBackgroundPreference(): CustomBackgroundPreference {
 // ---- Agent API ----
 
 export type AgentEventType =
-  | 'thought'
-  | 'thought_delta'
-  | 'thought_end'
+  | 'content'
+  | 'content_delta'
+  | 'content_end'
+  | 'reasoning_delta'
+  | 'reasoning_end'
   | 'user_message'
   | 'tool_call'
   | 'tool_result'
@@ -1548,9 +1550,9 @@ export type AgentEventType =
 export type AgentEvent = {
   type: AgentEventType;
   step: number;
-  // thought
+  // content
   content?: string;
-  // thought_delta（流式增量）/ thought_end（一段流式文本结束）
+  // content_delta（流式增量）/ content_end（一段流式文本结束）/ reasoning_*（思考流同构）
   delta?: string;
   index?: number;
   length?: number;
@@ -1690,7 +1692,7 @@ export async function deleteAgentSession(projectDir: string, sessionId: string) 
 
 /**
  * Subscribe to an agent's SSE event stream. Calls `onEvent` for every agent
- * event (thought / tool_call / tool_result / finish / error / stopped / status / close).
+ * event (content / tool_call / tool_result / finish / error / stopped / status / close).
  * `afterStep`: skip replayed events with step <= afterStep (resume without duplicates).
  * Returns an abort function that closes the stream.
  */

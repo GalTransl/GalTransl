@@ -28,7 +28,7 @@ class SessionStoreTests(unittest.TestCase):
         store = ss.SessionStore(self.project, sid)
         store.append_message({"role": "user", "content": "你好"})
         store.append_message({"role": "assistant", "content": "hi"})
-        store.append_event({"type": "thought", "step": 1, "content": "x"})
+        store.append_event({"type": "content", "step": 1, "content": "x"})
         store.append_compact(removed=5, summary_chars=100, tokens_before=900)
 
         data = store.load()
@@ -39,13 +39,26 @@ class SessionStoreTests(unittest.TestCase):
         self.assertEqual(len(data["compactions"]), 1)
 
     def test_high_frequency_events_are_not_persisted(self) -> None:
-        """thought_delta / wait_tick 是高频增量，落盘会被丢弃。"""
+        """content_delta / wait_tick 是高频增量，落盘会被丢弃。"""
         sid = ss.create_session(self.project, "t")
         store = ss.SessionStore(self.project, sid)
-        store.append_event({"type": "thought_delta", "step": 1, "delta": "a"})
+        store.append_event({"type": "content_delta", "step": 1, "delta": "a"})
         store.append_event({"type": "wait_tick", "step": 2, "remaining_ms": 1})
-        store.append_event({"type": "thought", "step": 3, "content": "kept"})
+        store.append_event({"type": "content", "step": 3, "content": "kept"})
         self.assertEqual(len(store.load()["events"]), 1)
+
+    def test_meta_records_are_merged(self) -> None:
+        """收尾写入 running=false 不能覆盖首条 meta 的会话信息。"""
+        sid = ss.create_session(self.project, "MyGame1")
+        store = ss.SessionStore(self.project, sid)
+        store.append_meta(goal="首条用户输入", config_file_name="config.yaml", running=True)
+        store.append_meta(running=False)
+
+        meta = store.load()["meta"]
+        self.assertEqual(meta["title"], "MyGame1")
+        self.assertEqual(meta["goal"], "首条用户输入")
+        self.assertEqual(meta["config_file_name"], "config.yaml")
+        self.assertFalse(meta["running"])
 
     def test_corrupted_line_is_skipped(self) -> None:
         """进程被强杀写了一半的行不能让整个会话不可读。"""

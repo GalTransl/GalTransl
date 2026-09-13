@@ -385,6 +385,25 @@ class SessionLifecycleTests(unittest.TestCase):
         # 恢复后会带上之前的消息历史
         self.assertNotEqual(st["status"], "running")  # 没 running 标记 -> awaiting_input
 
+    def test_restore_reconstructs_missing_initial_user_event(self):
+        """磁盘有消息但首条 user_message 事件缺失时，恢复仍显示首条输入。"""
+        from GalTransl.Agent.runtime import AgentRuntime
+
+        rt = AgentRuntime()
+        s = rt.create_session(self.project)
+        store = ss.SessionStore(self.project, s["session_id"])
+        store.append_meta(project_dir=self.project, title=s["title"], goal="首条用户输入")
+        store.append_message({"role": "system", "content": "system"})
+        store.append_message({"role": "user", "content": "首条用户输入"})
+        # 模拟旧版本/异常退出：只有后续事件，没有首条 user_message 事件。
+        store.append_event({"type": "content", "step": 2, "content": "已开始处理"})
+
+        st = rt.status(self.project, s["session_id"])
+        user_events = [e for e in st["events"] if e.get("type") == "user_message"]
+        self.assertEqual(len(user_events), 1)
+        self.assertEqual(user_events[0]["message"], "首条用户输入")
+        self.assertLess(user_events[0]["step"], st["events"][1]["step"])
+
 
 if __name__ == "__main__":
     unittest.main()

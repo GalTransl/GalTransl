@@ -89,7 +89,11 @@ function loadSession(projectDir: string, sessionId: string): TranscriptSession |
     if (!raw) return null;
     const parsed = JSON.parse(raw) as TranscriptSession;
     if (!parsed || !Array.isArray(parsed.events)) return null;
-    return parsed;
+    // Delta/tick events are a real-time-only SSE side channel.  They are not
+    // persisted by the backend and therefore must never contribute to the
+    // resume cursor after a restart.  Filter them here as well as in
+    // mergeTranscriptEvents so caches written by older versions are safe.
+    return { ...parsed, events: persistedTranscriptEvents(parsed.events) };
   } catch {
     return null;
   }
@@ -99,11 +103,33 @@ function saveSession(session: TranscriptSession): void {
   if (!session.sessionId) return;
   try {
     // Bound the payload: keep the tail of very long transcripts.
-    const events = session.events.length > 600 ? session.events.slice(-600) : session.events;
+    // 首条用户消息是会话的身份锚点，即使历史很长也要保留，不能只取尾部。
+    // Keep only replayable events in the durable browser cache.  The backend
+    // intentionally keeps content/reasoning deltas and wait ticks in a
+    // transient SSE queue; persisting them would advance after_step beyond
+    // the backend's post-restart cursor and permanently skip new events.
+    const events = boundTranscriptEvents(persistedTranscriptEvents(session.events));
     localStorage.setItem(sessionsKey(session.projectDir, session.sessionId), JSON.stringify({ ...session, events }));
   } catch {
     // Quota or serialization failure is non-fatal.
   }
+}
+
+const TRANSIENT_EVENT_TYPES = new Set<AgentEvent['type']>([
+  'content_delta',
+  'reasoning_delta',
+  'wait_tick',
+]);
+
+function persistedTranscriptEvents(events: AgentEvent[]): AgentEvent[] {
+  return events.filter((event) => !TRANSIENT_EVENT_TYPES.has(event.type));
+}
+
+function boundTranscriptEvents(events: AgentEvent[], limit = 600): AgentEvent[] {
+  if (events.length <= limit) return events;
+  const firstUser = events.find((event) => event.type === 'user_message');
+  if (!firstUser) return events.slice(-limit);
+  return [firstUser, ...events.slice(-(limit - 1))];
 }
 
 function readHistory(): HistoryEntry[] {
@@ -127,7 +153,7 @@ function shortName(projectDir: string): string {
    This mirrors how modern agent clients avoid a wall of one-line cards. */
 
 type ActivityItem = {
-  kind: 'thought' | 'tool' | 'compact';
+  kind: 'content' | 'reasoning' | 'tool' | 'compact';
   step: number;
   content?: string;
   id?: string;
@@ -137,7 +163,7 @@ type ActivityItem = {
   result?: unknown;
   error?: string;
   durationMs?: number;
-  // 流式 thought：正在收 delta、还没收到 thought_end
+  // 流式 content/reasoning：正在收 delta、还没收到对应的 *_end
   streaming?: boolean;
   // 回合的收尾回复：渲染时提升为顶层普通消息（不折进活动组）
   final?: boolean;
@@ -151,7 +177,7 @@ type ActivityItem = {
 };
 
 type TimelineGroup =
-  | { type: 'activity'; id: string; items: ActivityItem[]; finalThought?: ActivityItem }
+  | { type: 'activity'; id: string; items: ActivityItem[]; finalContent?: ActivityItem }
   | { type: 'user'; id: string; step: number; message: string }
   | { type: 'error'; id: string; step: number; message: string; traceback?: string }
   | { type: 'stopped'; id: string; step: number; reason: string };
@@ -160,11 +186,51 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
   const groups: TimelineGroup[] = [];
   let current: Extract<TimelineGroup, { type: 'activity' }> | null = null;
 
-  const closeActivity = () => {
-    // finalThought 也算有效内容：纯文字回复的回合里 items 会被清空
-    // （finish 把同文的流式 thought 移出折叠区），只剩 finalThought 也要入组。
-    if (current && (current.items.length || current.finalThought)) groups.push(current);
+  // final=true 表示组被真正终结（用户消息/finish/error/stopped）：此时兜底
+  // 撤掉残留光标。buildTimeline 每次全量重算，结尾的尾组冲刷不能算终结——
+  // 尾组正是正在流式的活动组，在那里清标志会让活卡片永远显示「已思考」。
+  const closeActivity = (final = false) => {
+    if (current && final) {
+      // 兜底：end 事件丢失时（异常中断/旧会话回放），组终结强制撤掉残留光标
+      for (const it of current.items) {
+        if ((it.kind === 'content' || it.kind === 'reasoning') && it.streaming) it.streaming = false;
+      }
+    }
+    // finalContent 也算有效内容：纯文字回复的回合里 items 会被清空
+    // （finish 把同文的流式 content 移出折叠区），只剩 finalContent 也要入组。
+    if (current && (current.items.length || current.finalContent)) groups.push(current);
     current = null;
+  };
+
+  // 收掉指定流（content/reasoning）里所有还在流式的段：撤光标、记耗时。
+  // 交替思考模型一路流里 想/说 来回切换，end 到达时它对应的段未必还是
+  // items 的最后一条（中间可能隔着别的段），所以按 kind 扫，不能只看末尾。
+  const endStreamKind = (kind: 'content' | 'reasoning', durationMs?: number) => {
+    if (!current) return;
+    let last: ActivityItem | null = null;
+    for (const it of current.items) {
+      if (it.kind === kind && it.streaming) {
+        it.streaming = false;
+        last = it;
+      }
+    }
+    if (last && typeof durationMs === 'number') {
+      // 同一张卡片在一次请求里可能收尾多次（想→说→想），耗时累加成总时长
+      last.durationMs = (last.durationMs || 0) + durationMs;
+    }
+  };
+
+  // 流式增量落点：从末尾往前找同 kind 的块拼回去。交替思考的 后段 要拼回
+  // 前面的块（同一段思考/同一个回复），而不是新起一块掉到回复下面；扫描
+  // 跨过说/想块，遇到工具/压缩行即止——那意味着上一轮请求已结束，不能跨轮拼。
+  const findAppendTarget = (kind: 'content' | 'reasoning'): ActivityItem | null => {
+    if (!current) return null;
+    for (let i = current.items.length - 1; i >= 0; i -= 1) {
+      const it = current.items[i];
+      if (it.kind === 'tool' || it.kind === 'compact') return null;
+      if (it.kind === kind && it.streaming !== undefined) return it;
+    }
+    return null;
   };
 
   for (const ev of events) {
@@ -172,27 +238,28 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
 
     // 用户消息独立成行（右对齐气泡），并打断当前活动组。
     if (ev.type === 'user_message') {
-      closeActivity();
+      closeActivity(true);
       groups.push({ type: 'user', id: `u-${ev.step}`, step: ev.step, message: ev.message || '' });
       continue;
     }
 
-    if (ev.type === 'thought') {
+    if (ev.type === 'content') {
       if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
-      current.items.push({ kind: 'thought', step: ev.step, content: ev.content });
+      current.items.push({ kind: 'content', step: ev.step, content: ev.content });
       continue;
     }
 
-    // 流式思考增量：拼到活动组里最后一条流式 thought 上（打字机效果）。
-    // 没有可拼接的 thought（比如恢复会话时第一事件就是 delta）时新起一条。
-    if (ev.type === 'thought_delta') {
+    // 流式「说」增量：拼回本轮请求里已有的 content 块（打字机效果）；
+    // 没有可拼接的（比如恢复会话时第一事件就是 delta）才新起一条。
+    if (ev.type === 'content_delta') {
       if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
-      const last = current.items[current.items.length - 1];
-      if (last && last.kind === 'thought' && last.streaming) {
-        last.content = (last.content || '') + (ev.delta || '');
+      const target = findAppendTarget('content');
+      if (target) {
+        target.content = (target.content || '') + (ev.delta || '');
+        target.streaming = true;
       } else {
         current.items.push({
-          kind: 'thought',
+          kind: 'content',
           step: ev.step,
           content: ev.delta || '',
           streaming: true,
@@ -201,13 +268,36 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
       continue;
     }
 
-    // 一段流式文本结束：撤掉打字机光标，并记下这段思考的耗时
-    if (ev.type === 'thought_end') {
-      const last = current?.items[current.items.length - 1];
-      if (last && last.kind === 'thought') {
-        last.streaming = false;
-        if (typeof ev.duration_ms === 'number') last.durationMs = ev.duration_ms;
+    // 一段「说」的流结束：撤掉打字机光标，并记下这段回复的耗时
+    if (ev.type === 'content_end') {
+      endStreamKind('content', ev.duration_ms);
+      continue;
+    }
+
+    // 思考流（reasoning）：与「说」（content）分开成独立的可折叠卡片。
+    // 增量拼回本轮请求里已有的思考卡片（交替思考的尾部也归位到上面那张），
+    // 没有可拼接的才新起一条。
+    if (ev.type === 'reasoning_delta') {
+      if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
+      const target = findAppendTarget('reasoning');
+      if (target) {
+        target.content = (target.content || '') + (ev.delta || '');
+        target.streaming = true;
+      } else {
+        current.items.push({
+          kind: 'reasoning',
+          step: ev.step,
+          content: ev.delta || '',
+          streaming: true,
+        });
       }
+      continue;
+    }
+
+    // 思考流结束：卡片收尾（撤光标、记耗时）。只挂在已有卡片上，不新建
+    // （恢复会话时 delta 是瞬态的、已不可回放，没有内容就没有卡片）。
+    if (ev.type === 'reasoning_end') {
+      endStreamKind('reasoning', ev.duration_ms);
       continue;
     }
 
@@ -284,17 +374,17 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
     if (ev.type === 'finish') {
       if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
       const summary = ev.summary || '';
-      // 收尾回复保留折叠区里的流式 thought（显示「思考 · 耗时」），
+      // 收尾回复保留折叠区里的流式 content（显示「思考 · 耗时」），
       // summary 另行提升为顶层 final 消息，两者并存。
       if (summary) {
-        current.finalThought = { kind: 'thought', step: ev.step, content: summary, final: true };
+        current.finalContent = { kind: 'content', step: ev.step, content: summary, final: true };
       }
-      closeActivity(); // 回合结束：把组压进 groups，后续事件（新的 user_message 等）起新组
+      closeActivity(true); // 回合结束：把组压进 groups，后续事件（新的 user_message 等）起新组
       continue;
     }
 
     // Terminal moments close the current activity run.
-    closeActivity();
+    closeActivity(true);
     if (ev.type === 'error') {
       groups.push({
         type: 'error',
@@ -327,10 +417,10 @@ type ToolMeta = {
 const TOOL_META: Record<string, ToolMeta> = {
   get_project_overview: { action: '了解项目', running: '了解项目', verb: '', icon: '📂', summary: () => '读取项目概况' },
   update_project_config: { action: '修改项目配置', running: '修改项目配置', verb: '', icon: '🛠️', summary: () => '调整翻译参数/规范等设置' },
-  list_input_files: { action: '查看原文文件', running: '查看原文文件', verb: '', icon: '🗃️', summary: () => '列出待翻译文件' },
+  list_input_files: { action: '查看原文文件清单', running: '查看原文文件清单', verb: '', icon: '🗃️', summary: () => '列出待翻译文件' },
   read_input_file: { action: '读取原文', running: '读取原文', verb: '', icon: '📄', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
   read_guideline: { action: '读取翻译规范', running: '读取翻译规范', verb: '', icon: '📜', summary: (a) => str(a?.name) },
-  list_dict_files: { action: '查看字典', running: '查看字典', verb: '', icon: '📚', summary: () => '列出项目字典文件' },
+  list_dict_files: { action: '查看字典清单', running: '查看字典清单', verb: '', icon: '📚', summary: () => '列出项目字典文件' },
   read_dict: { action: '读取字典', running: '读取字典', verb: '', icon: '📖', summary: (a) => str(a?.file_key) },
   save_dict: { action: '保存字典', running: '保存字典', verb: '', icon: '💾', summary: (a) => str(a?.file_key) },
   create_dict_file: { action: '新建字典', running: '新建字典', verb: '', icon: '🗂️', summary: (a) => str(a?.filename) },
@@ -341,12 +431,13 @@ const TOOL_META: Record<string, ToolMeta> = {
   wait: { action: '等待', running: '等待中', verb: '', icon: '⏳', summary: (a) => waitSummary(a) },
   get_progress: { action: '查询进度', running: '查询进度', verb: '', icon: '📊', summary: () => '' },
   get_runtime: { action: '查询运行时', running: '查询运行时', verb: '', icon: '⚙️', summary: () => '' },
-  list_problems: { action: '检查问题', running: '检查问题', verb: '', icon: '🔍', summary: (a) => str(a?.problem_type) || '问题类型统计' },
+  list_problems: { action: '检查问题清单', running: '检查问题清单', verb: '', icon: '🔍', summary: (a) => str(a?.problem_type) || '问题类型统计' },
   manage_problem_filter: { action: '管理问题过滤', running: '管理问题过滤', verb: '', icon: '🧹', summary: (a) => [str(a?.action), str(a?.keyword)].filter(Boolean).join(' · ') },
-  read_cache: { action: '读取缓存', running: '读取缓存', verb: '', icon: '📄', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
-  search_cache: { action: '搜索缓存', running: '搜索缓存', verb: '', icon: '🔎', summary: (a) => str(a?.query) },
-  patch_cache: { action: '修改译文', running: '修改译文', verb: '', icon: '✏️', summary: (a) => (Array.isArray(a?.patches) ? `${a.patches.length} 条` : str(a?.filename)) },
-  delete_cache: { action: '删除缓存', running: '删除缓存', verb: '', icon: '🗑️', summary: (a) => [str(a?.filename), str(a?.indexes)].filter(Boolean).join(' · ') },
+  list_transl_cache: { action: '查看缓存清单', running: '查看缓存清单', verb: '', icon: '🗃️', summary: () => '列出缓存文件' },
+  read_transl_cache: { action: '读取缓存', running: '读取缓存', verb: '', icon: '📄', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
+  search_transl_cache: { action: '搜索缓存', running: '搜索缓存', verb: '', icon: '🔎', summary: (a) => str(a?.query) },
+  patch_transl_cache: { action: '修改译文', running: '修改译文', verb: '', icon: '✏️', summary: (a) => (Array.isArray(a?.patches) ? `${a.patches.length} 条` : str(a?.filename)) },
+  delete_transl_cache: { action: '删除缓存', running: '删除缓存', verb: '', icon: '🗑️', summary: (a) => [str(a?.filename), str(a?.indexes)].filter(Boolean).join(' · ') },
 };
 
 const DEFAULT_TOOL_META: ToolMeta = { action: '调用工具', running: '调用工具', verb: '', icon: '🔧', summary: () => '' };
@@ -772,11 +863,19 @@ export function AgentPage() {
         // 旧缓存，否则会错把别的会话的内容糊在新建会话上。
         const snapEvents = snap.events || [];
         const snapLen = snapEvents.length;
-        const cachedLen = persisted?.events.length || 0;
-        if (snapLen >= cachedLen || snapLen === 0) {
-          setEvents(snapEvents);
-          lastStepRef.current = maxStep(snapEvents);
-          hasBackendSessionRef.current = Boolean(snapLen);
+        if (snapLen === 0) {
+          // 新建空会话：后端空快照应清掉可能残留的本地缓存。
+          setEvents([]);
+          lastStepRef.current = 0;
+          hasBackendSessionRef.current = false;
+        } else {
+          // 本地缓存上限为 600、后端内存窗口为 500，不能再用数组长度判断
+          // 谁“更权威”。按 step 合并，既保留本地较早历史，也接纳后端恢复时
+          // 补出的首条 user_message。
+          const mergedEvents = mergeTranscriptEvents(persisted?.events || [], snapEvents);
+          setEvents(mergedEvents);
+          lastStepRef.current = maxStep(mergedEvents);
+          hasBackendSessionRef.current = true;
         }
         const snapRunning = snap.status === 'running';
         setStatus(snap.status);
@@ -1494,11 +1593,32 @@ function maxStep(events: AgentEvent[]): number {
   return max;
 }
 
+function mergeTranscriptEvents(cached: AgentEvent[], backend: AgentEvent[]): AgentEvent[] {
+  const byStep = new Map<number, AgentEvent>();
+  const extras: AgentEvent[] = [];
+  // Older caches may contain transient events.  They are not present in a
+  // post-restart backend snapshot, so retaining them would make maxStep()
+  // return a cursor the backend can never reach.
+  for (const event of persistedTranscriptEvents(cached)) {
+    if (typeof event.step === 'number' && event.step >= 0) byStep.set(event.step, event);
+    else extras.push(event);
+  }
+  // 后端同 step 的事件覆盖本地缓存；它是恢复后的权威副本。
+  for (const event of persistedTranscriptEvents(backend)) {
+    if (typeof event.step === 'number' && event.step >= 0) byStep.set(event.step, event);
+    else extras.push(event);
+  }
+  const ordered = [...byStep.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, event]) => event);
+  return [...extras.filter((event) => event.step < 0), ...ordered];
+}
+
 function workingLabel(timeline: TimelineGroup[]): string {
   const last = timeline[timeline.length - 1];
   if (last && last.type === 'activity' && last.items.length) {
     const item = last.items[last.items.length - 1];
-    if (item.kind === 'thought') return '思考中';
+    if (item.kind === 'content' || item.kind === 'reasoning') return '思考中';
     return `${toolMeta(item.name).running}…`;
   }
   return '正在开始';
@@ -1531,11 +1651,11 @@ function AgentGroupView({ group, isLive }: { group: TimelineGroup; isLive: boole
   if (group.type === 'user') return <UserMessageRow message={group.message} />;
   if (group.type === 'error') return <ErrorNotice group={group} />;
   if (group.type === 'stopped') return <StoppedNotice group={group} />;
-  if (group.type === 'activity' && group.finalThought) {
+  if (group.type === 'activity' && group.finalContent) {
     return (
       <>
         {group.items.length > 0 ? <AgentActivityGroup group={group} isLive={isLive} /> : null}
-        <FinalMessage item={group.finalThought} />
+        <FinalMessage item={group.finalContent} />
       </>
     );
   }
@@ -1605,15 +1725,16 @@ function AgentActivityGroup({
       ? frozenSec
       : Math.max(0, Math.floor(totalMs / 1000));
 
-  const hasThought = items.some((it) => it.kind === 'thought');
+  // 「想」（reasoning）也算思考内容：只有思考流的回合标签用「思考」而非「处理」
+  const hasContent = items.some((it) => it.kind === 'content' || it.kind === 'reasoning');
   const toolCount = items.filter((it) => it.kind === 'tool').length;
   // 压缩提示不算"工作步骤"，避免污染耗时与步数统计
   const visibleCount = items.filter((it) => it.kind !== 'compact').length;
 
   // 文案对齐 PI-Desktop zh-CN：运行中「思考中/处理中 · Ns」，结束「已思考/已处理 Ns」
   const label = isLive
-    ? `${hasThought && !toolCount ? '思考中' : '处理中'} · ${formatDuration(shownSec * 1000)}`
-    : hasThought && !toolCount
+    ? `${hasContent && !toolCount ? '思考中' : '处理中'} · ${formatDuration(shownSec * 1000)}`
+    : hasContent && !toolCount
       ? shownSec > 0 ? `已思考 ${formatDuration(shownSec * 1000)}` : '思考'
       : shownSec > 0
         ? `已处理 ${formatDuration(shownSec * 1000)}`
@@ -1646,8 +1767,10 @@ function AgentActivityGroup({
         <div className="agent-activity__collapse-inner">
           <div className="agent-activity__body">
             {items.map((item, i) =>
-              item.kind === 'thought' ? (
-                <ThoughtRow key={`t-${i}`} item={item} />
+              item.kind === 'content' ? (
+                <ContentRow key={`t-${i}`} item={item} />
+              ) : item.kind === 'reasoning' ? (
+                <ReasoningRow key={`r-${i}`} item={item} />
               ) : item.kind === 'compact' ? (
                 <CompactRow key={`c-${i}`} item={item} />
               ) : (
@@ -1664,7 +1787,7 @@ function AgentActivityGroup({
 function liveTail(items: ActivityItem[]): string {
   for (let i = items.length - 1; i >= 0; i -= 1) {
     const it = items[i];
-    if (it.kind === 'thought' && it.content) {
+    if ((it.kind === 'content' || it.kind === 'reasoning') && it.content) {
       // 取思考文本最后一行（对标 PI-Desktop）：折叠头部读起来像实时跑马灯
       const lines = it.content
         .split('\n')
@@ -1685,18 +1808,62 @@ function asArgs(args: unknown): Record<string, unknown> | undefined {
   return undefined;
 }
 
-function ThoughtRow({ item }: { item: ActivityItem }) {
-  // 模型「回复」直接渲染为普通黑体纯文本，不再用可折叠卡片包裹。
+function ContentRow({ item }: { item: ActivityItem }) {
+  // 模型「说」的回复：直接渲染为普通黑体纯文本，不再用可折叠卡片包裹。
   const text = item.content || '';
   const streaming = Boolean(item.streaming);
 
   return (
-    <div className={`agent-thought${streaming ? ' is-streaming' : ''}`}>
+    <div className={`agent-content${streaming ? ' is-streaming' : ''}`}>
       <div
-        className="agent-thought__text agent-md"
-        dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
+        className="agent-content__text agent-md"
+        dangerouslySetInnerHTML={{ __html: renderMarkdown(text, { cursor: streaming }) }}
       />
-      {streaming ? <span className="agent-typing-cursor" aria-hidden /> : null}
+    </div>
+  );
+}
+
+/* ── Reasoning row（模型「想」的思考过程）──
+   与「说」分开：想用可折叠卡片，流式时展开实时滚动，结束后自动收起
+   成「已思考 Ns」一行；用户手动展开/收起后不再被自动行为覆盖。 */
+
+function ReasoningRow({ item }: { item: ActivityItem }) {
+  const streaming = Boolean(item.streaming);
+  const [open, setOpen] = useState(streaming);
+  const userToggledRef = useRef(false);
+
+  // 跟随思考流：来增量时展开，结束收起（除非用户接管了这张卡片）
+  useEffect(() => {
+    if (userToggledRef.current) return;
+    setOpen(streaming);
+  }, [streaming]);
+
+  const text = item.content || '';
+  const label = streaming ? '思考中' : item.durationMs ? `已思考 ${formatDuration(item.durationMs)}` : '已思考';
+
+  return (
+    <div className={`agent-reasoning${open ? ' is-open' : ''}${streaming ? ' is-streaming' : ''}`}>
+      <button
+        type="button"
+        className="agent-reasoning__header"
+        onClick={() => {
+          userToggledRef.current = true;
+          setOpen((v) => !v);
+        }}
+        aria-expanded={open}
+      >
+        <span className="agent-reasoning__icon">✳</span>
+        <span className={`agent-reasoning__label${streaming ? ' is-running' : ''}`}>{label}</span>
+        <span className="agent-reasoning__caret">›</span>
+      </button>
+      <div className="agent-reasoning__collapse">
+        <div className="agent-reasoning__collapse-inner">
+          <div
+            className="agent-reasoning__text agent-md"
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(text, { cursor: streaming }) }}
+          />
+        </div>
+      </div>
     </div>
   );
 }
@@ -1731,7 +1898,7 @@ function ToolRow({ item, live }: { item: ActivityItem; live: boolean }) {
   // 写入类工具的变更卡片数据（后端在结果里带回）：
   // - changes: [{path, before, after, kind}] 键值级 before→after
   // - line_diff: {rows: [{op: add|del, line}], truncated} 行级 diff（save_dict）
-  // - deleted_preview: [{index, text}] 被删条目（delete_cache）
+  // - deleted_preview: [{index, text}] 被删条目（delete_transl_cache）
   const changeList = extractChangeList(item.result);
 
   // wait 行：等待期间显示倒计时进度条。
@@ -1841,9 +2008,9 @@ function ToolBlock({
 /* ── 写入类工具的变更卡片（diff 风格） ──
    后端在写入结果里带回三类结构之一/组合：
    - changes: [{path, before, after, kind}] —— update_project_config、
-     manage_problem_filter、patch_cache、save_name_table
+     manage_problem_filter、patch_transl_cache、save_name_table
    - line_diff: {rows, truncated} —— save_dict 的整文本行级 diff
-   - deleted_preview: [{index, text}] —— delete_cache 被删条目 */
+   - deleted_preview: [{index, text}] —— delete_transl_cache 被删条目 */
 
 type ChangeEntry = { path: string; before?: unknown; after?: unknown; kind?: string };
 type DiffRow = { op: 'add' | 'del'; line: string };

@@ -34,7 +34,7 @@ RUNTIME_EVENT_KEEP = 500
 # 瞬态事件：只进当前回合的 SSE 流 + 落盘（delta 由 SessionStore 再筛），
 # 不进内存 events deque。它们量最大（一次流式几十条），若进 deque 会把
 # user_message/tool_call 等长期事件挤出 maxlen 窗口，前端刷新后就丢内容。
-_TRANSIENT_EVENT_TYPES = frozenset({"thought_delta", "wait_tick"})
+_TRANSIENT_EVENT_TYPES = frozenset({"content_delta", "reasoning_delta", "wait_tick"})
 
 # ---- 上下文预算 ----
 # 后端配置未指定 contextWindow 时的默认窗口（token）
@@ -81,13 +81,13 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
    b. 调用 list_input_files + read_input_file 抽样了解原文：挑 1-2 个有代表性的文件，各读几十句（index 用区间如 "0-50"），掌握角色、语气、专有名词、场景类型；
    c. 基于原文补充 GPT 字典：把抽读中遇到的人名、专有名词、常见口语用 save_dict 收录进项目 GPT 字典；
    d. 调用 start_translation(translator="<主翻译引擎>", files=["<一个代表性文件>"]) 只翻译这一个文件作为试译；
-   e. 试译完成后用 read_cache 阅读试译文件的译文，对照翻译规范评估文风、译名、语气是否达标；
+   e. 试译完成后用 read_transl_cache 阅读试译文件的译文，对照翻译规范评估文风、译名、语气是否达标；
    f. 若不满意：继续完善字典（save_dict）；对全局性的文风问题，用 update_project_config 把 common.gpt.change_prompt 设为 "AdditionalPrompt" 并设置 common.gpt.prompt_content 写入额外的翻译要求（如「译名统一用XX」「口语化程度、敬称的处理方式」等），这些要求会追加到每次翻译请求的 Prompt 里；也可以用 update_project_config 切换 common.gpt.translation_guideline 换一份更合适的规范；
    g. 满意后，把试译结果告知用户并说明你的评估结论，询问是否开始全量翻译。用户确认后进入下一步。
 4. **启动翻译（全量）**：调用 start_translation(translator="<主翻译引擎>")（不传 files 即翻译全部）。主翻译引擎从项目配置或 overview 中确认，常用值：ForGal-json / ForGal-tsv / ForNovel / sakura-v1.0 / galtransl-v3。一次只启动一个，项目已有运行中任务时不要重复提交。
 5. **跟进进度（wait 前后都要查状态）**：启动翻译后先调用 get_runtime 确认任务已在跑，再调用 wait 等待一段合理时间（翻译任务 wait minutes=1~3，短任务 wait seconds=30）。wait 结束后必须再调用 get_runtime 确认任务状态：completed 进入下一步；仍在 running 时看返回的 eta_seconds 估算剩余时间——eta 还很长（如 >10 分钟）就按其一半的时长继续 wait，快完了（如 <2 分钟）就 wait seconds=30 再查，不要连续空转轮询也不要一次等过头。等待期间界面会显示倒计时。
-6. **复核结果**：调用 list_problems（不带参数）先看类型统计，了解哪类问题最多；再传 problem_type（如 problem_type="残留日文"）+ limit/offset 分页查看该类型的具体条目。用 read_cache 的 index 参数精确读取有问题的条目（如 list_problems 返回的 index，可直接 `index="33-40,50-60"` 一次取多条）浏览实际译文；判断语意是否连贯时传 context（如 context=3）把前后各几句一起带上。需要看缓存文件全貌（文件、条数）时用 list_cache；注意返回里标注 translating / .append.jsonl 后缀的文件正在翻译中，此时读到的是旧快照，等任务 completed 再操作。
-7. **问题修复循环**：对能直接改译文的条目，用 patch_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。对确认无需处理的系统性问题类型（如字典使用提示、纯语气词提示），可用 manage_problem_filter(action="add", keyword="…") 加入问题过滤清单，让统计聚焦真问题；过滤后统计会明显下降，属于预期效果。
+6. **复核结果**：调用 list_problems（不带参数）先看类型统计，了解哪类问题最多；再传 problem_type（如 problem_type="残留日文"）+ limit/offset 分页查看该类型的具体条目。用 read_transl_cache 的 index 参数精确读取有问题的条目（如 list_problems 返回的 index，可直接 `index="33-40,50-60"` 一次取多条）浏览实际译文；判断语意是否连贯时传 context（如 context=3）把前后各几句一起带上。需要看缓存文件全貌（文件、条数）时用 list_transl_cache；注意返回里标注 translating / .append.jsonl 后缀的文件正在翻译中，此时读到的是旧快照，等任务 completed 再操作。
+7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。对确认无需处理的系统性问题类型（如字典使用提示、纯语气词提示），可用 manage_problem_filter(action="add", keyword="…") 加入问题过滤清单，让统计聚焦真问题；过滤后统计会明显下降，属于预期效果。
 8. **完成**：当翻译完成、问题数可控时，可用 read_output 抽查最终输出文件（交付物；输出与缓存不完全一致，译后字典替换只在输出生效），确认无误后用一段自然语言总结本次操作（做了什么、翻译进度、剩余问题建议），不要调用工具，直接输出总结即可结束。
 
 # 约束
@@ -139,7 +139,7 @@ COMPACT_SUMMARY_PROMPT = """你在为一个 Galgame 翻译项目的 AI 助手压
 class AgentEvent:
     """单条 Agent 事件，会原样推给前端 SSE。"""
 
-    type: str  # thought | thought_delta | thought_end | user_message | tool_call | tool_result | finish | error | stopped
+    type: str  # content | content_delta | content_end | reasoning_delta | reasoning_end | user_message | tool_call | tool_result | finish | error | stopped
     step: int
     data: dict[str, Any] = field(default_factory=dict)
 
@@ -164,7 +164,7 @@ class AgentState:
     # 长期事件（user_message/tool_call/tool_result/finish/…）：进 deque（maxlen
     # 防泄漏），status 快照与 SSE 回放都从这里取，刷新/重启后不丢。
     events: deque[AgentEvent] = field(default_factory=lambda: deque(maxlen=RUNTIME_EVENT_KEEP))
-    # 瞬态事件（thought_delta/wait_tick）：量大且只对当前回合的实时流有意义。
+    # 瞬态事件（content_delta/wait_tick）：量大且只对当前回合的实时流有意义。
     # 单走旁路队列，SSE drain 拉走即弃，不占长期 deque 的 maxlen 窗口——
     # 否则一次长流式就会把 user_message 挤出窗口，刷新后首条消息消失。
     transient_events: deque[AgentEvent] = field(default_factory=lambda: deque(maxlen=512))
@@ -337,12 +337,12 @@ class AgentRunner:
                     continue
 
                 # 思考/决策文本（即使同时有 tool_calls 也展示）。流式期间已通过
-                # thought_delta 增量推送；仅当流期间没有发出过任何 delta 时才
-                # 补发一条完整 thought（兜底非流式返回的 provider）。
+                # content_delta 增量推送；仅当流期间没有发出过任何 delta 时才
+                # 补发一条完整 content（兜底非流式返回的 provider）。
                 if content and not streamed_content:
                     preview = content if len(content) <= 120 else content[:117] + "…"
                     _log(f"  💭 思考: {preview}")
-                    self._emit("thought", {"content": content})
+                    self._emit("content", {"content": content})
 
                 if not tool_calls:
                     # 收尾回复也要写进历史，下一轮对话才能看到 Agent 说过什么
@@ -483,13 +483,20 @@ class AgentRunner:
 
     # ---- 流式 LLM 响应 ----
     def _stream_llm_response(self) -> tuple[str, list[dict[str, Any]], str]:
-        """发起一次流式 chat.completions 请求，边收边推 thought_delta 事件。
+        """发起一次流式 chat.completions 请求，边收边推 content_delta 事件。
 
         返回 (content, tool_calls, finish_reason)：
-        - content：文本部分全文（流期间已通过 thought_delta 增量推送过）；
+        - content：文本部分全文（流期间已通过 content_delta 增量推送过）；
         - tool_calls：按 delta 顺序拼接好的调用列表，结构为
           [{id, name, arguments(str)}]；
         - finish_reason：stop / length / tool_calls 等，length 表示被截断。
+
+        推理模型（DeepSeek-R1/GLM 等）的思考内容在非标准字段
+        reasoning_content / reasoning 里，位置因平台而异：有的在
+        delta.reasoning_content 直接属性上，有的被 OpenAI SDK 收进
+        delta.model_extra。这里统一提取并走独立的 reasoning_delta
+        事件流，前端渲染成可折叠的「思考中」卡片；但绝不进 content、
+        不写对话历史（发回给 provider 会被拒收或污染上下文）。
 
         停止信号在流期间到达时立即弃流返回（上层会走 stopped 收尾），
         不再消费后续 chunk。
@@ -514,13 +521,48 @@ class AgentRunner:
                 stream=True,
             )
 
-        content_parts: list[str] = []
+        content_parts: list[str] = []  # 「说」：模型回复正文
+        reasoning_parts: list[str] = []  # 「想」：思考内容，只展示不进历史
         # index -> {id, name, arguments_parts}
         tool_calls_acc: dict[int, dict[str, Any]] = {}
-        last_delta_emit = 0.0
-        pending_delta = []  # 距上次 emit 攒下的文本（节流缓冲）
+        pending_content: list[str] = []  # 距上次 emit 攒下的回复文本（节流缓冲）
+        pending_reasoning: list[str] = []  # 距上次 emit 攒下的思考文本（节流缓冲）
+        throttle: dict[str, float] = {"content": 0.0, "reasoning": 0.0}
         finish_reason = ""
-        stream_started = time.time()  # 用于前端「思考 · 耗时」展示
+        stream_started = time.time()  # 段起点缺失时的耗时兜底
+        # 交替思考模型（GLM-4.6 等）在同一条流里 想/说 会来回切换，而
+        # content_end / reasoning_end 是前端撤打字机光标的依据，必须跟着
+        # 段走：切换时立即收掉上一段，流结束时收掉还开着的那段。
+        open_kind: str | None = None  # 当前正在流的路：content / reasoning
+        segment_started: dict[str, float | None] = {"content": None, "reasoning": None}
+
+        def _end_stream_segment(kind: str) -> None:
+            """收掉一段流：发 {kind}_end（前端据此撤光标、记耗时）。
+
+            先冲掉该路节流缓冲里攒着的尾巴，保证 end 之前该段增量已全部
+            送达——否则尾部增量会晚于 end 到达，在前端漏成孤立的残段卡片。
+            """
+            if kind == "content":
+                _flush_stream("content", pending_content, len(content_parts), force=True)
+            else:
+                _flush_stream("reasoning", pending_reasoning, len(reasoning_parts), force=True)
+            started = segment_started[kind]
+            parts = content_parts if kind == "content" else reasoning_parts
+            self._emit(f"{kind}_end", {
+                "length": len("".join(parts)),
+                "duration_ms": int((time.time() - (started if started is not None else stream_started)) * 1000),
+            })
+            segment_started[kind] = None
+
+        def _flush_stream(kind: str, pending: list[str], total: int, force: bool = False) -> None:
+            """节流冲刷增量：最多 25ms 一条，避免 step 计数被 delta 刷爆。"""
+            if not pending:
+                return
+            now = time.monotonic()
+            if force or now - throttle[kind] >= 0.025:
+                self._emit(f"{kind}_delta", {"delta": "".join(pending), "index": total})
+                pending.clear()
+                throttle[kind] = now
 
         for chunk in stream:
             if self.stop_event.is_set():
@@ -539,19 +581,33 @@ class AgentRunner:
             if getattr(choice, "finish_reason", None):
                 finish_reason = str(choice.finish_reason)
             delta = choice.delta
+            # 思考内容：直接属性 / model_extra 里的 reasoning_content 或
+            # reasoning（OpenRouter 等平台用后者），逐个都试一遍。
+            extra = getattr(delta, "model_extra", None) or {}
+            reasoning_piece = getattr(delta, "reasoning_content", None)
+            if not reasoning_piece and isinstance(extra, dict):
+                reasoning_piece = extra.get("reasoning_content") or extra.get("reasoning")
+            if isinstance(reasoning_piece, str) and reasoning_piece:
+                if open_kind != "reasoning":
+                    if open_kind == "content":
+                        _end_stream_segment("content")  # 说→想 切换：先收掉说的一段
+                    open_kind = "reasoning"
+                if segment_started["reasoning"] is None:
+                    segment_started["reasoning"] = time.time()
+                reasoning_parts.append(reasoning_piece)
+                pending_reasoning.append(reasoning_piece)
+                _flush_stream("reasoning", pending_reasoning, len(reasoning_parts))
             piece = getattr(delta, "content", None)
             if piece:
+                if open_kind != "content":
+                    if open_kind == "reasoning":
+                        _end_stream_segment("reasoning")  # 想→说 切换：先收掉想的一段
+                    open_kind = "content"
+                if segment_started["content"] is None:
+                    segment_started["content"] = time.time()
                 content_parts.append(piece)
-                pending_delta.append(piece)
-                # 节流：文本增量最多 25ms 一条，避免 step 计数被 delta 刷爆
-                now = time.monotonic()
-                if now - last_delta_emit >= 0.025:
-                    self._emit(
-                        "thought_delta",
-                        {"delta": "".join(pending_delta), "index": len(content_parts)},
-                    )
-                    pending_delta = []
-                    last_delta_emit = now
+                pending_content.append(piece)
+                _flush_stream("content", pending_content, len(content_parts))
             for tc in getattr(delta, "tool_calls", None) or []:
                 idx = tc.index
                 slot = tool_calls_acc.setdefault(idx, {"id": "", "name": "", "arguments_parts": []})
@@ -565,18 +621,15 @@ class AgentRunner:
                     if fn.arguments:
                         slot["arguments_parts"].append(fn.arguments)
 
-        # 冲掉节流缓冲里剩下的文本
-        if pending_delta:
-            self._emit(
-                "thought_delta",
-                {"delta": "".join(pending_delta), "index": len(content_parts)},
-            )
-        # 告诉前端这一段文本流结束（前端据此撤掉打字机光标）
-        if content_parts:
-            self._emit("thought_end", {
-                "length": len("".join(content_parts)),
-                "duration_ms": int((time.time() - stream_started) * 1000),
-            })
+        # 冲掉两条节流缓冲里剩下的文本
+        _flush_stream("content", pending_content, len(content_parts), force=True)
+        _flush_stream("reasoning", pending_reasoning, len(reasoning_parts), force=True)
+        if reasoning_parts:
+            _log(f"  🧠 思考内容 {len(''.join(reasoning_parts))} 字（已并入思考展示流，不进对话历史）")
+        # 收掉还开着的最后一段（切换发生时上一段已当场收掉）。前端据此
+        # 撤掉打字机光标、记下耗时；停止信号弃流时也要走到这里，否则光标残留。
+        if open_kind is not None:
+            _end_stream_segment(open_kind)
 
         tool_calls = [
             {
@@ -932,7 +985,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_project_overview",
-            "description": "了解项目：查看当前翻译进度与项目配置。配置附带 config_field_descriptions（每个键的作用与取值说明）。流程第一步，调用它确认项目可用。文件清单用 list_input_files / list_cache 单独查询。",
+            "description": "了解项目：查看当前翻译进度与项目配置。配置附带 config_field_descriptions（每个键的作用与取值说明）。流程第一步，调用它确认项目可用。文件清单用 list_input_files / list_transl_cache 单独查询。",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -1163,7 +1216,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "list_cache",
+            "name": "list_transl_cache",
             "description": "列出缓存文件（译文）与各文件条目数。注意：后缀为 .append.jsonl 的文件表示对应文件正在翻译中（增量缓存），此时读取缓存读到的是旧快照，应等任务 completed 后再读取/修改。",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
@@ -1171,8 +1224,8 @@ AGENT_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "read_cache",
-            "description": "读取某个缓存文件的条目（译文）。filename 来自 list_cache 的缓存文件列表。留空 index 返回前 30 条；指定 index 只返回指定的条目。修问题/润色判断语意连贯时传 context 让目标条目前后各多带几句上下文。不要读取 .append.jsonl 增量文件（翻译中旧快照），读对应的 .json 文件。",
+            "name": "read_transl_cache",
+            "description": "读取某个缓存文件的条目（译文）。filename 来自 list_transl_cache 的缓存文件列表。留空 index 返回前 30 条；指定 index 只返回指定的条目。修问题/润色判断语意连贯时传 context 让目标条目前后各多带几句上下文。不要读取 .append.jsonl 增量文件（翻译中旧快照），读对应的 .json 文件。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1194,7 +1247,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_output",
-            "description": "读取最终输出文件（gt_output，交付物）。输出是缓存经译后字典替换、控制符处理后的最终形态，与缓存可能不完全一致——验收交付物、确认 postDict 替换效果用这个，而不是 read_cache。文件名通常与输入文件同名。留空 index 返回前 30 条。",
+            "description": "读取最终输出文件（gt_output，交付物）。输出是缓存经译后字典替换、控制符处理后的最终形态，与缓存可能不完全一致——验收交付物、确认 postDict 替换效果用这个，而不是 read_transl_cache。文件名通常与输入文件同名。留空 index 返回前 30 条。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1211,7 +1264,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "delete_cache",
+            "name": "delete_transl_cache",
             "description": "删除缓存（条目或整个文件）。物理删除后，重启翻译时被删除的句子会因缓存未命中而重新翻译——这是触发部分重翻的手段。注意：删除不可撤销；rebuilda/rebuildr 依赖缓存，删除后不要再跑重建。",
             "parameters": {
                 "type": "object",
@@ -1222,7 +1275,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     },
                     "indexes": {
                         "type": "string",
-                        "description": "可选。要删除的条目 index 列表，支持逗号和区间（如 \"33-40,50-60\"，index 来自 read_cache/list_problems）。留空则删除整个文件。",
+                        "description": "可选。要删除的条目 index 列表，支持逗号和区间（如 \"33-40,50-60\"，index 来自 read_transl_cache/list_problems）。留空则删除整个文件。",
                     },
                 },
                 "required": ["filename"],
@@ -1232,14 +1285,14 @@ AGENT_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "search_cache",
-            "description": "在缓存中搜索译文/原文/问题。query 为关键词，field 取 all/src/dst/problem。传 filename 只搜某个缓存文件（来自 list_cache），修单文件问题时用，如 search_cache(query=\"アクメ\", field=\"src\", filename=\"sc_2_st01.txt.json\")。",
+            "name": "search_transl_cache",
+            "description": "在缓存中搜索译文/原文/问题。query 为关键词，field 取 all/src/dst/problem。传 filename 只搜某个缓存文件（来自 list_transl_cache），修单文件问题时用，如 search_transl_cache(query=\"アクメ\", field=\"src\", filename=\"sc_2_st01.txt.json\")。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
                     "field": {"type": "string", "enum": ["all", "src", "dst", "problem"]},
-                    "filename": {"type": "string", "description": "可选。只在这个缓存文件里搜（来自 list_cache）。留空搜全项目。"},
+                    "filename": {"type": "string", "description": "可选。只在这个缓存文件里搜（来自 list_transl_cache）。留空搜全项目。"},
                 },
                 "required": ["query"],
             },
@@ -1248,12 +1301,12 @@ AGENT_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "patch_cache",
-            "description": "批量修改某个缓存文件中若干条目的译文/校对等字段。一次可改多条，只更新 patches 里指定的条目与字段，其它条目原样保留。返回 preview（被改条目重建后的最终译文 post_dst_preview 与新检测出的问题 problem），修改是否生效、有没有引入新问题当场可验，不必再 read_cache。适合发现问题后改译文、再配合 rebuilda 重建的复核循环。",
+            "name": "patch_transl_cache",
+            "description": "批量修改某个缓存文件中若干条目的译文/校对等字段。一次可改多条，只更新 patches 里指定的条目与字段，其它条目原样保留。返回 preview（被改条目重建后的最终译文 post_dst_preview 与新检测出的问题 problem），修改是否生效、有没有引入新问题当场可验，不必再 read_transl_cache。适合发现问题后改译文、再配合 rebuilda 重建的复核循环。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "filename": {"type": "string", "description": "缓存文件名，来自 list_cache 的缓存文件列表"},
+                    "filename": {"type": "string", "description": "缓存文件名，来自 list_transl_cache 的缓存文件列表"},
                     "patches": {
                         "type": "array",
                         "items": {
@@ -1946,11 +1999,11 @@ def _tool_list_problems(runner: AgentRunner, args: dict[str, Any]) -> Any:
     }
 
 
-def _tool_list_cache(runner: AgentRunner, _args: dict[str, Any]) -> Any:
+def _tool_list_transl_cache(runner: AgentRunner, _args: dict[str, Any]) -> Any:
     """列出缓存文件（译文）。带每个文件的条目数。
 
     .append.jsonl 后缀 = 增量缓存，说明该文件正在翻译中（快照+增量并行写）：
-    此时缓存还没合并，read_cache / patch_cache / delete_cache 读到的可能是
+    此时缓存还没合并，read_transl_cache / patch_transl_cache / delete_transl_cache 读到的可能是
     旧快照，操作前先确认翻译任务已结束。"""
     pid = runner._project_id()
     data = runner._http_get(f"/api/projects/{pid}/cache")
@@ -1976,7 +2029,7 @@ def _tool_list_cache(runner: AgentRunner, _args: dict[str, Any]) -> Any:
     return result
 
 
-def _tool_read_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
+def _tool_read_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     filename = str(args.get("filename", "")).strip()
     if not filename:
         raise AgentToolError("filename is required")
@@ -2008,7 +2061,6 @@ def _tool_read_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     result: dict[str, Any] = {
         "filename": filename,
         "count": len(entries),
-        "requested": sorted(wanted),
         "context": context,
         **result_extra,
     }
@@ -2027,7 +2079,7 @@ def _tool_read_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
             for j in range(max(0, a - context), b + context + 1):
                 wanted_ctx.add(j)
         # 浅拷贝再标注 in_context（不污染共享条目）；目标条目 False，扩展
-        # 出来的前后文 True，让模型聚焦 requested 条目
+        # 出来的前后文 True，让模型聚焦目标条目
         picked_ctx: list[dict[str, Any]] = []
         for i in sorted(wanted_ctx):
             e = by_index.get(i)
@@ -2084,7 +2136,6 @@ def _tool_read_output(runner: AgentRunner, args: dict[str, Any]) -> Any:
     result: dict[str, Any] = {
         "filename": filename,
         "count": len(entries),
-        "requested": sorted(wanted),
         "returned": len(picked),
         "entries": picked,
     }
@@ -2118,7 +2169,7 @@ def _parse_index_spec(spec: str) -> set[int]:
     return result
 
 
-def _tool_search_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
+def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     query = str(args.get("query", "")).strip()
     field = str(args.get("field", "all")).strip() or "all"
     if not query:
@@ -2142,14 +2193,14 @@ def _tool_search_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
             if not any(f.get("name") == filename for f in listing.get("files", [])):
                 result = {
                     **result,
-                    "note": f"缓存文件 {filename} 不存在（检查 list_cache 的文件名拼写）；这是全项目搜索的 0 命中。",
+                    "note": f"缓存文件 {filename} 不存在（检查 list_transl_cache 的文件名拼写）；这是全项目搜索的 0 命中。",
                 }
         except AgentToolError:
             pass
     return result
 
 
-# patch_cache 允许更新的条目字段白名单（其余字段一律不动，避免误改 problem/preview 等派生字段）
+# patch_transl_cache 允许更新的条目字段白名单（其余字段一律不动，避免误改 problem/preview 等派生字段）
 _PATCHABLE_FIELDS = {
     "pre_dst",
     "proofread_dst",
@@ -2160,7 +2211,7 @@ _PATCHABLE_FIELDS = {
 }
 
 
-def _tool_patch_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
+def _tool_patch_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     filename = str(args.get("filename", "")).strip()
     if not filename:
         raise AgentToolError("filename is required")
@@ -2231,7 +2282,7 @@ def _tool_patch_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     # 注意：/cache/save 的应答带全文件 entries（重建 problem 后原样回传给
     # 桌面端用），绝不能整体透传给 LLM。但重建后的 post_dst_preview/problem
     # 正是「修改后预览」：从这里只提取被改条目的这两个字段（轻量），
-    # 让模型立即看到改完的最终译文和是否引入新问题，不必再 read_cache。
+    # 让模型立即看到改完的最终译文和是否引入新问题，不必再 read_transl_cache。
     save_result = runner._http_post(f"/api/projects/{pid}/cache/save", save_body)
     result: dict[str, Any] = {
         "filename": filename,
@@ -2270,11 +2321,11 @@ def _tool_patch_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     return result
 
 
-def _tool_delete_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
+def _tool_delete_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """删除缓存：物理删除条目后，重启翻译时这些句子会 cache 未命中而重新翻译。
 
     两种粒度：
-    - 指定 indexes：删除某个缓存文件里的部分条目（index 可用 read_cache /
+    - 指定 indexes：删除某个缓存文件里的部分条目（index 可用 read_transl_cache /
       list_problems 返回的 index，支持 "33-40,50-60" 区间写法）
     - 不指定 indexes：删除整个缓存文件（该文件全部句子重翻）
     删除不可撤销；rebuilda/rebuildr 依赖缓存存在，删除后不要跑重建。
@@ -2298,7 +2349,7 @@ def _tool_delete_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
         res = runner._http_post(f"/api/projects/{pid}/cache/delete-file", {"filenames": [filename]})
         return {"deleted_files": res.get("deleted_files", []), "not_found_files": res.get("not_found_files", [])}
 
-    # 按 index 删除部分条目：读全量 -> 剔除命中 -> 写回（与 patch_cache 同通道）
+    # 按 index 删除部分条目：读全量 -> 剔除命中 -> 写回（与 patch_transl_cache 同通道）
     wanted = _parse_index_spec(index_spec)
     if not wanted:
         raise AgentToolError(f"无法解析 indexes：{index_spec!r}（示例：33-40,50-60）")
@@ -2367,12 +2418,12 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "get_runtime": _tool_get_runtime,
     "list_problems": _tool_list_problems,
     "manage_problem_filter": _tool_manage_problem_filter,
-    "list_cache": _tool_list_cache,
-    "read_cache": _tool_read_cache,
+    "list_transl_cache": _tool_list_transl_cache,
+    "read_transl_cache": _tool_read_transl_cache,
     "read_output": _tool_read_output,
-    "delete_cache": _tool_delete_cache,
-    "search_cache": _tool_search_cache,
-    "patch_cache": _tool_patch_cache,
+    "delete_transl_cache": _tool_delete_transl_cache,
+    "search_transl_cache": _tool_search_transl_cache,
+    "patch_transl_cache": _tool_patch_transl_cache,
 }
 
 
@@ -2484,6 +2535,31 @@ class AgentRuntime:
             data_fields = {k: v for k, v in raw.items() if k not in ("type", "step")}
             ev_deque.append(AgentEvent(type=etype, step=step, data=data_fields))
             max_step = max(max_step, step)
+
+        # 首条用户输入同时存在于 meta.goal / messages 和 user_message 事件中。
+        # 旧版本、异常退出或事件窗口裁剪可能只留下前两者；恢复时补一条内存事件，
+        # 否则模型回答能恢复，用户的第一条气泡却会消失。step 放在现有事件之前，
+        # 不改变后续事件编号，也不写回磁盘，避免恢复过程重复追加记录。
+        initial_text = str(meta.get("goal") or "").strip()
+        if not initial_text:
+            for message in messages:
+                if isinstance(message, dict) and message.get("role") == "user":
+                    candidate = str(message.get("content") or "").strip()
+                    if candidate:
+                        initial_text = candidate
+                        break
+        has_initial_event = any(
+            event.type == "user_message" and str(event.data.get("message") or "").strip() == initial_text
+            for event in ev_deque
+        )
+        if initial_text and not has_initial_event:
+            first_step = min((event.step for event in ev_deque), default=1)
+            ev_deque.appendleft(AgentEvent(
+                type="user_message",
+                step=max(0, first_step - 1),
+                data={"message": initial_text},
+            ))
+
         # 上次是运行中 -> 进程重启把回合中断了，标记为 stopped
         was_running = bool(meta.get("running"))
         state = AgentState(
@@ -2708,7 +2784,7 @@ class AgentRuntime:
     def drain_events(self, project_dir: str, after_step: int = 0, session_id: str | None = None) -> list[dict[str, Any]]:
         """取 after_step 之后的所有事件，供 SSE 增量推送。
 
-        合并长期 deque 与瞬态旁路（thought_delta/wait_tick），按 step 排序输出；
+        合并长期 deque 与瞬态旁路（content_delta/wait_tick），按 step 排序输出；
         瞬态事件被取走即从旁路清除（实时流专用，不参与回放）。"""
         sid = self._resolve_session_id(project_dir, session_id)
         if sid is None:
