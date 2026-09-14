@@ -466,7 +466,8 @@ def _load_input_file_entries(project_dir: str, config_file_name: str, filename: 
 
     Mirrors how the translation pipeline reads input (fplugins_load_file) so
     the Agent sees exactly what would be translated. Entries carry an `index`
-    (position in file) for range reads. `folder` defaults to the input dir;
+    (1-based position in file unless the plugin supplies an explicit index)
+    for range reads. `folder` defaults to the input dir;
     pass OUTPUT_FOLDERNAME to read a delivered output file instead.
     """
     from GalTransl.ConfigHelper import CProjectConfig
@@ -526,12 +527,21 @@ def _load_input_file_entries(project_dir: str, config_file_name: str, filename: 
                     or str(item.get("src_msg", "") or "")
                 )
                 speaker = str(item.get("name", "") or "")
-                entry = {"index": i, "name": speaker, "pre_src": text}
+                # Loader/translation cache use 1-based indexes when the
+                # source item does not provide one.  Preserve an explicit
+                # source index (some plugins emit it) and otherwise use the
+                # same 1-based fallback for both input and output parsing.
+                raw_index = item.get("index", i + 1)
+                try:
+                    entry_index = int(raw_index)
+                except (TypeError, ValueError):
+                    entry_index = i + 1
+                entry = {"index": entry_index, "name": speaker, "pre_src": text}
                 if speaker:
                     entry["speaker"] = speaker
                 entries.append(entry)
             else:
-                entries.append({"index": i, "name": "", "pre_src": str(item)})
+                entries.append({"index": i + 1, "name": "", "pre_src": str(item)})
         return entries
     raise RuntimeError(f"文件插件 {fname} 加载失败")
 

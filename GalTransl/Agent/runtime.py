@@ -70,7 +70,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 - 你可以也应该在调用工具的同时用自然语言说明你的决策与思考（这一段会实时展示给用户）。
 
 # 标准翻译流程（必须按此顺序推进）
-1. **了解项目**：先调用 get_project_overview 看输入文件、缓存进度、配置。确认项目输入文件非空、配置里已设翻译引擎，再继续。
+1. **了解项目**：先调用 get_project_overview 看翻译进度与项目配置。注意进度里的 total/translated 是「句数」且只统计已生成缓存的文件，translated==total 不等于整个项目翻完，整体是否翻完看 files_translated/files_total。再确认配置里已设翻译引擎、项目确有输入文件（输入文件清单用 list_input_files 查），然后继续。
 2. **字典准备（在启动翻译前必须完成）**：
    a. 调用 list_dict_files 查看项目已配置的译前/GPT/译后字典文件；
    b. 调用 read_dict 读取现有内容，判断人名、专有名词是否已收录；
@@ -78,7 +78,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
    d. 若 GPT 字典为空且项目较大，可调用 start_translation(translator="GenDic") 自动生成 GPT 字典，并在该任务 completed 后通过 list_dict_files/read_dict 确认生成结果。
 3. **试译定稿（全量翻译前必做，除非项目已有大量缓存）**：
    a. 调用 read_guideline 读取项目当前使用的翻译规范（配置 common.gpt.translation_guideline），理解文风要求；
-   b. 调用 list_input_files + read_input_file 抽样了解原文：挑 1-2 个有代表性的文件，各读几十句（index 用区间如 "0-50"），掌握角色、语气、专有名词、场景类型；
+   b. 调用 list_input_files + read_input_file 抽样了解原文：挑 1-2 个有代表性的文件，各读几十句（index 使用 1-based，区间如 "1-50"），掌握角色、语气、专有名词、场景类型；
    c. 基于原文补充 GPT 字典：把抽读中遇到的人名、专有名词、常见口语用 save_dict 收录进项目 GPT 字典；
    d. 调用 start_translation(translator="<主翻译引擎>", files=["<一个代表性文件>"]) 只翻译这一个文件作为试译；
    e. 试译完成后用 read_transl_cache 阅读试译文件的译文，对照翻译规范评估文风、译名、语气是否达标；
@@ -88,7 +88,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 5. **跟进进度（wait 前后都要查状态）**：启动翻译后先调用 get_runtime 确认任务已在跑，再调用 wait 等待一段合理时间（翻译任务 wait minutes=1~3，短任务 wait seconds=30）。wait 结束后必须再调用 get_runtime 确认任务状态：completed 进入下一步；仍在 running 时看返回的 eta_seconds 估算剩余时间——eta 还很长（如 >10 分钟）就按其一半的时长继续 wait，快完了（如 <2 分钟）就 wait seconds=30 再查，不要连续空转轮询也不要一次等过头。等待期间界面会显示倒计时。
 6. **复核结果**：调用 list_problems（不带参数）先看类型统计，了解哪类问题最多；再传 problem_type（如 problem_type="残留日文"）+ limit/offset 分页查看该类型的具体条目。用 read_transl_cache 的 index 参数精确读取有问题的条目（如 list_problems 返回的 index，可直接 `index="33-40,50-60"` 一次取多条）浏览实际译文；判断语意是否连贯时传 context（如 context=3）把前后各几句一起带上。需要看缓存文件全貌（文件、条数）时用 list_transl_cache；注意返回里标注 translating / .append.jsonl 后缀的文件正在翻译中，此时读到的是旧快照，等任务 completed 再操作。
 7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。对确认无需处理的系统性问题类型（如字典使用提示、纯语气词提示），可用 manage_problem_filter(action="add", keyword="…") 加入问题过滤清单，让统计聚焦真问题；过滤后统计会明显下降，属于预期效果。
-8. **完成**：当翻译完成、问题数可控时，可用 read_output 抽查最终输出文件（交付物；输出与缓存不完全一致，译后字典替换只在输出生效），确认无误后用一段自然语言总结本次操作（做了什么、翻译进度、剩余问题建议），不要调用工具，直接输出总结即可结束。
+8. **完成**：收尾前先调用 get_project_overview 确认项目真的翻完——只有 files_translated == files_total 且没有 running 任务才算整体完成（total==translated 可能只代表已缓存的部分翻完，不要据此收尾）；若还有文件没翻，回到流程 4 继续 start_translation 翻剩余文件。问题数可控、整体完成后，用 read_output 抽查最终输出文件（交付物；输出与缓存不完全一致，译后字典替换只在输出生效），确认无误后用一段自然语言总结本次操作（做了什么、翻译进度、剩余问题建议），不要调用工具，直接输出总结即可结束。
 
 # 约束
 - 每一步只调用必要的工具；能在一次工具调用里拿到的信息不要拆成多次。
@@ -953,14 +953,14 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_input_file",
-            "description": "读取待翻译原文内容（文件插件解析后的条目：说话人+原文）。留空 index 返回前 30 条；指定 index 支持区间，如 \"0-100\"。试译前用它了解原文文风、角色、专有名词。",
+            "description": "读取待翻译原文内容（文件插件解析后的条目：说话人+原文）。index 统一从 1 开始；留空 index 返回前 30 条；指定 index 支持区间，如 \"1-100\"。试译前用它了解原文文风、角色、专有名词。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "filename": {"type": "string", "description": "输入文件名，来自 list_input_files。"},
                     "index": {
                         "type": "string",
-                        "description": "可选。要读取的条目 index，支持逗号和区间，如 \"0-100\"。留空返回前 30 条。",
+                    "description": "可选。要读取的条目 index（从 1 开始），支持逗号和区间，如 \"1-100\"。留空返回前 30 条。",
                     },
                 },
                 "required": ["filename"],
@@ -985,7 +985,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_project_overview",
-            "description": "了解项目：查看当前翻译进度与项目配置。配置附带 config_field_descriptions（每个键的作用与取值说明）。流程第一步，调用它确认项目可用。文件清单用 list_input_files / list_transl_cache 单独查询。",
+            "description": "了解项目：查看翻译进度与项目配置。进度含句数 total/translated/problems/failed 和文件级 files_total/files_translated/files_untranslated；total/translated 只统计已生成缓存的文件，未翻译的文件不计入分母，translated==total 不代表整个项目翻完，整体进度看 files_translated/files_total。配置附带 config_field_descriptions（每个键的作用与取值说明）。流程第一步，调用它确认项目可用。输入文件清单本身用 list_input_files / list_transl_cache 单独查询。",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -1129,7 +1129,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_progress",
-            "description": "查询当前翻译进度（已翻译/总句数、问题数、失败数、各文件进度）。",
+            "description": "查询当前翻译进度（已翻译/总句数、问题数、失败数、各缓存文件进度）。注意 total/translated 是句数且只统计已生成缓存的文件，未翻译的文件不计入，translated==total 不代表整个项目翻完。",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -1254,7 +1254,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     "filename": {"type": "string", "description": "输出文件名，通常与输入文件同名（如 sc_0_pr00.txt.json）"},
                     "index": {
                         "type": "string",
-                        "description": "可选。要读取的条目 index，支持逗号和区间（如 \"0-100\"）。留空返回前 30 条。",
+                    "description": "可选。要读取的条目 index（从 1 开始），支持逗号和区间（如 \"1-100\"）。留空返回前 30 条。",
                     },
                 },
                 "required": ["filename"],
@@ -1302,7 +1302,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "patch_transl_cache",
-            "description": "批量修改某个缓存文件中若干条目的译文/校对等字段。一次可改多条，只更新 patches 里指定的条目与字段，其它条目原样保留。返回 preview（被改条目重建后的最终译文 post_dst_preview 与新检测出的问题 problem），修改是否生效、有没有引入新问题当场可验，不必再 read_transl_cache。适合发现问题后改译文、再配合 rebuilda 重建的复核循环。",
+            "description": "批量修改某个缓存文件中若干条目的译文/校对等字段。只更新 patches 里指定的条目与字段，其它条目原样保留。返回 updated（改动条目数）、changes（逐字段 before→after 的变更）与 problems（被改条目重建后仍存在的问题，没有则不返回）；改了什么一目了然、有没有引入新问题当场可验，不必再 read_transl_cache。适合发现问题后改译文、再配合 rebuilda 重建的复核循环。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1415,17 +1415,82 @@ def _annotate_config(config: dict[str, Any]) -> tuple[dict[str, Any], dict[str, 
     return config, descriptions
 
 
+# 翻译进行中会在 <缓存>.json 旁并行写 <缓存>.json.append.jsonl 增量日志（见 GalTransl/Cache.py）
+_APPEND_CACHE_SUFFIX = ".append.jsonl"
+
+
+def _input_cache_matchers(name: str) -> tuple[set[str], re.Pattern[str]]:
+    """把输入文件名换算成它在缓存目录里可能出现的文件名，用于把缓存归属回输入文件。
+
+    命名规则（见 Frontend/LLMTranslate._build_runtime_file_maps 与 doLLMTranslSingleChunk）：
+    输入文件相对路径把分隔符替换成 "-}"，多分块再追加 "_<分块号>"，最后
+    save_transCache_to_json 在结尾补一次 ".json"（已经以 ".json" 结尾则不再补）。例如：
+      foo.json → foo.json（单块）/ foo.json_0.json（多块）
+      foo.ks   → foo.ks.json（单块）/ foo.ks_0.json（多块）
+    """
+    base = name.replace("/", "-}").replace("\\", "-}")
+    single = base if base.endswith(".json") else f"{base}.json"
+    singles = {single, f"{single}{_APPEND_CACHE_SUFFIX}"}
+    chunk_re = re.compile(rf"^{re.escape(base)}_\d+\.json(?:{re.escape(_APPEND_CACHE_SUFFIX)})?$")
+    return singles, chunk_re
+
+
+def _count_input_file_progress(input_files: list[str], progress_files: list[dict[str, Any]]) -> dict[str, int]:
+    """按输入文件统计「已有译文的文件数 / 尚无译文的文件数」。
+
+    progress_files 是 /progress 返回的 files（每个缓存文件的 filename 与 translated 句数）。
+    只有累计译文句数 > 0 的文件才算「已翻译」，这样即使 rebuild 阶段生成了全空缓存，
+    也不会把尚未翻译的文件误算成已翻译。
+    """
+    translated_by_cache = {
+        str(item.get("filename", "")): int(item.get("translated", 0) or 0)
+        for item in progress_files
+        if isinstance(item, dict) and item.get("filename")
+    }
+    files_translated = 0
+    for name in input_files:
+        singles, chunk_re = _input_cache_matchers(name)
+        translated = sum(
+            count
+            for cache_name, count in translated_by_cache.items()
+            if cache_name in singles or chunk_re.match(cache_name)
+        )
+        if translated > 0:
+            files_translated += 1
+    total = len(input_files)
+    return {
+        "files_total": total,
+        "files_translated": files_translated,
+        "files_untranslated": max(total - files_translated, 0),
+    }
+
+
 def _tool_get_project_overview(runner: AgentRunner, _args: dict[str, Any]) -> Any:
     pid = runner._project_id()
-    progress = runner._http_get(f"/api/projects/{pid}/progress")
-    cfg = runner._http_get(f"/api/projects/{pid}/config?config={urllib.parse.quote(runner.state.config_file_name)}")
+    config_name = runner.state.config_file_name or DEFAULT_CONFIG_FILE
+    cfg_name = urllib.parse.quote(config_name)
+    progress = runner._http_get(f"/api/projects/{pid}/progress?config={cfg_name}")
+    cfg = runner._http_get(f"/api/projects/{pid}/config?config={cfg_name}")
+    files = runner._http_get(f"/api/projects/{pid}/files")
     config, descriptions = _annotate_config(cfg.get("config", {}))
+    input_files = [
+        str(entry.get("name", ""))
+        for entry in files.get("input_files", [])
+        if isinstance(entry, dict) and entry.get("is_file", True) and entry.get("name")
+    ]
+    file_counts = _count_input_file_progress(input_files, progress.get("files", []))
     return {
         "progress": {
             "total": progress.get("total", 0),
             "translated": progress.get("translated", 0),
             "problems": progress.get("problems", 0),
             "failed": progress.get("failed", 0),
+            **file_counts,
+            "note": (
+                "total/translated 是句数，且只统计已生成缓存的文件；未开始翻译的文件不计入分母，"
+                "所以 translated==total 只说明「已有缓存的部分翻完了」，不代表整个项目翻完。"
+                "整体进度请结合 files_translated/files_total 判断。"
+            ),
         },
         "config": config,
         "config_field_descriptions": descriptions,
@@ -1445,9 +1510,19 @@ def _tool_list_input_files(runner: AgentRunner, _args: dict[str, Any]) -> Any:
     return {"input_files": input_files, "count": len(input_files)}
 
 
+def _entry_index(entry: Any) -> int:
+    """Return a comparable entry index, or -1 for malformed/missing values."""
+    if not isinstance(entry, dict):
+        return -1
+    try:
+        return int(entry.get("index", -1))
+    except (TypeError, ValueError):
+        return -1
+
+
 def _tool_read_input_file(runner: AgentRunner, args: dict[str, Any]) -> Any:
-    """读取待翻译原文。filename 来自 list_input_files；index 支持区间
-    （"0-100"、读取文件头几十句足够了解文风）。"""
+    """读取待翻译原文。filename 来自 list_input_files；index 统一为 1-based，支持区间
+    （"1-100"、读取文件头几十句足够了解文风）。"""
     filename = str(args.get("filename", "")).strip()
     if not filename:
         raise AgentToolError("filename is required")
@@ -1460,9 +1535,10 @@ def _tool_read_input_file(runner: AgentRunner, args: dict[str, Any]) -> Any:
         return {"filename": filename, "count": len(entries), "returned": len(entries[:30]), "entries": entries[:30]}
     wanted = _parse_index_spec(index_spec)
     if not wanted:
-        raise AgentToolError(f"无法解析 index 列表：{index_spec!r}（示例：0-100）")
-    picked = [e for e in entries if int(e.get("index", -1)) in wanted]
-    missing = sorted(i for i in wanted if i >= len(entries))
+        raise AgentToolError(f"无法解析 index 列表：{index_spec!r}（示例：1-100）")
+    picked = [e for e in entries if _entry_index(e) in wanted]
+    available = {_entry_index(e) for e in entries}
+    missing = sorted(i for i in wanted if i not in available)
     result: dict[str, Any] = {
         "filename": filename,
         "count": len(entries),
@@ -2130,9 +2206,10 @@ def _tool_read_output(runner: AgentRunner, args: dict[str, Any]) -> Any:
         return {"filename": filename, "count": len(entries), "returned": len(entries[:30]), "entries": entries[:30]}
     wanted = _parse_index_spec(index_spec)
     if not wanted:
-        raise AgentToolError(f"无法解析 index 列表：{index_spec!r}（示例：0-100）")
-    picked = [e for e in entries if e.get("index") in wanted]
-    missing = sorted(i for i in wanted if i >= len(entries))
+        raise AgentToolError(f"无法解析 index 列表：{index_spec!r}（示例：1-100）")
+    picked = [e for e in entries if _entry_index(e) in wanted]
+    available = {_entry_index(e) for e in entries}
+    missing = sorted(i for i in wanted if i not in available)
     result: dict[str, Any] = {
         "filename": filename,
         "count": len(entries),
@@ -2236,10 +2313,9 @@ def _tool_patch_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
             except (TypeError, ValueError):
                 continue
 
-    applied: list[dict[str, Any]] = []
+    applied_indexes: list[int] = []
     skipped: list[dict[str, Any]] = []
     not_found: list[int] = []
-    changed_fields: list[str] = []
     changes: list[dict[str, Any]] = []
     for p in patches_raw:
         if not isinstance(p, dict):
@@ -2259,19 +2335,14 @@ def _tool_patch_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
         if not updates:
             skipped.append({"index": idx_i, "reason": "无可更新字段（只允许 pre_dst/proofread_dst/trans_by/trans_conf/doub_content/unknown_proper_noun）"})
             continue
-        field_changes = []
         for f, v in updates.items():
-            field_changes.append(_change(f"#{idx_i}.{f}", entry.get(f), v, "replace"))
+            changes.append(_change(f"#{idx_i}.{f}", entry.get(f), v, "replace"))
         entry.update(updates)
-        applied.append({"index": idx_i, "fields": list(updates.keys())})
-        changes.extend(field_changes)
-        for f in updates:
-            if f not in changed_fields:
-                changed_fields.append(f)
+        applied_indexes.append(idx_i)
 
-    if not applied:
+    if not applied_indexes:
         raise AgentToolError(
-            f"没有条目被更新（applied=0, skipped={len(skipped)}, not_found={len(not_found)}）"
+            f"没有条目被更新（updated=0, skipped={len(skipped)}, not_found={len(not_found)}）"
         )
 
     save_body = {
@@ -2280,24 +2351,23 @@ def _tool_patch_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
         "config_file_name": runner.state.config_file_name,
     }
     # 注意：/cache/save 的应答带全文件 entries（重建 problem 后原样回传给
-    # 桌面端用），绝不能整体透传给 LLM。但重建后的 post_dst_preview/problem
-    # 正是「修改后预览」：从这里只提取被改条目的这两个字段（轻量），
-    # 让模型立即看到改完的最终译文和是否引入新问题，不必再 read_transl_cache。
+    # 桌面端用），绝不能整体透传给 LLM。这里只提取「被改条目重建后仍存在的问题」
+    # 作为轻量校验信号——没引入新问题的条目不出现在 problems 里；改了什么由
+    # changes 的 before→after 表达，不重复回传最终译文，不必再 read_transl_cache。
     save_result = runner._http_post(f"/api/projects/{pid}/cache/save", save_body)
     result: dict[str, Any] = {
         "filename": filename,
-        "applied": applied,
-        "applied_count": len(applied),
-        "not_found_indexes": not_found,
-        "skipped": skipped,
-        "changed_fields": changed_fields,
+        "updated": len(applied_indexes),
         "changes": changes,
-        "saved": bool(isinstance(save_result, dict) and save_result.get("success")),
     }
+    if not_found:
+        result["not_found_indexes"] = sorted(not_found)
+    if skipped:
+        result["skipped"] = skipped
     saved_entries = save_result.get("entries") if isinstance(save_result, dict) else None
     if isinstance(saved_entries, list):
-        wanted = {a["index"] for a in applied}
-        preview: list[dict[str, Any]] = []
+        wanted = set(applied_indexes)
+        problems: list[dict[str, Any]] = []
         for e in saved_entries:
             if not isinstance(e, dict):
                 continue
@@ -2307,17 +2377,15 @@ def _tool_patch_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
                 continue
             if idx_i not in wanted:
                 continue
-            post_dst = str(e.get("post_dst_preview", ""))
             problem = str(e.get("problem", ""))
-            preview.append({
+            if not problem:
+                continue
+            problems.append({
                 "index": idx_i,
-                "post_dst_preview": post_dst[:80] + ("…" if len(post_dst) > 80 else ""),
                 "problem": problem[:120] + ("…" if len(problem) > 120 else ""),
             })
-            if len(preview) >= 50:
-                break
-        if preview:
-            result["preview"] = preview
+        if problems:
+            result["problems"] = problems
     return result
 
 
