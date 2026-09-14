@@ -2858,6 +2858,19 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
 }
 
 
+def _initial_session_title(project_dir: str, session_id: str, goal: str, current: str) -> str:
+    """首个回合的会话标题：取用户第一条消息；已有用户消息则保留 current。
+
+    新建会话时用户还没输入，create_session 只能给占位标题（「新会话」），
+    真正的标题在首条消息到达（start）时才定下来。续聊（会话里已有用户消息）
+    不重算，避免把标题改成后续某条消息。
+    """
+    text = (goal or "").strip()
+    if not text or session_store.has_user_message(project_dir, session_id):
+        return current
+    return session_store.title_from_message(text)
+
+
 class AgentRuntime:
     """全局 Agent 注册表：一个项目下可以有多个会话，互不干扰。
 
@@ -2886,9 +2899,12 @@ class AgentRuntime:
         return session_store.list_sessions(project_dir)
 
     def create_session(self, project_dir: str, title: str = "") -> dict[str, Any]:
-        """新建一个空会话（不启动回合），标题缺省用"项目名+序号"。"""
-        base = os.path.basename(self._key(project_dir)) or "会话"
-        resolved = title.strip() or session_store.next_session_title(project_dir, base)
+        """新建一个空会话（不启动回合）。
+
+        标题缺省为占位「新会话」——此时用户还没输入，等首条消息发出时
+        由 start 用这条消息的内容改写（见 _initial_session_title）。
+        """
+        resolved = title.strip() or session_store.DEFAULT_TITLE
         session_id = session_store.create_session(project_dir, resolved)
         _log(f"新建会话: project={project_dir} session={session_id} title={resolved}")
         store = SessionStore(project_dir, session_id)
@@ -3040,7 +3056,7 @@ class AgentRuntime:
         host: str = DEFAULT_BACKEND_HOST,
         port: int = DEFAULT_BACKEND_PORT,
     ) -> dict[str, Any]:
-        """启动一个回合。session_id 为空时新建会话（标题=项目名+序号）。"""
+        """启动一个回合。session_id 为空时新建会话；标题取用户第一条消息。"""
         key = self._key(project_dir)
         with self._lock:
             sid = self._resolve_session_id(project_dir, session_id) if session_id else None
@@ -3053,7 +3069,9 @@ class AgentRuntime:
                 if existing and existing.status == "running":
                     _log(f"启动被拒：该会话已有回合在运行 -> {key}/{sid}")
                     raise ValueError("该会话已有回合在运行")
-                title = existing.title if existing else sid
+                title = existing.title if existing else session_store.session_title(project_dir, sid)
+            # 会话标题 = 用户第一条消息（新建的空会话此时才拿到）
+            title = _initial_session_title(project_dir, sid, goal, title)
 
             stop_event = threading.Event()
             state = AgentState(

@@ -1,7 +1,7 @@
 """会话落盘（JSONL）的单元测试。
 
 验证 SessionStore 的写读往返、损坏行容错、会话列表/新建/删除，
-以及"项目名+序号"标题的递增逻辑。
+以及"标题取首条用户消息"的生成逻辑。
 """
 
 import os
@@ -98,18 +98,47 @@ class SessionStoreTests(unittest.TestCase):
         self.assertEqual(len(remaining), 1)
         self.assertEqual(remaining[0]["session_id"], sid1)
 
-    def test_next_title_increments_numeric_suffix(self) -> None:
-        self.assertEqual(ss.next_session_title(self.project, "MyGame"), "MyGame1")
-        ss.create_session(self.project, "MyGame1")
-        self.assertEqual(ss.next_session_title(self.project, "MyGame"), "MyGame2")
-        ss.create_session(self.project, "MyGame2")
-        self.assertEqual(ss.next_session_title(self.project, "MyGame"), "MyGame3")
+    def test_session_title_from_first_message(self) -> None:
+        """标题取首条用户消息：折叠换行/空白，超长截断。"""
+        self.assertEqual(ss.title_from_message("帮我翻译这个项目"), "帮我翻译这个项目")
+        self.assertEqual(ss.title_from_message("第一行\n第二行"), "第一行 第二行")
+        self.assertEqual(ss.title_from_message("  多个   空格  "), "多个 空格")
+        long_text = "字" * 50
+        title = ss.title_from_message(long_text)
+        self.assertEqual(len(title), ss.TITLE_MAX_CHARS + 1)  # 截断 + 省略号
+        self.assertTrue(title.endswith("…"))
+        self.assertTrue(long_text.startswith(title[:-1]))
 
-    def test_next_title_ignores_non_numeric_suffix(self) -> None:
-        """手动改过的标题（如"我的存档"）不应参与序号计算。"""
-        ss.create_session(self.project, "MyGame")
-        ss.create_session(self.project, "我的存档")
-        self.assertEqual(ss.next_session_title(self.project, "MyGame"), "MyGame1")
+    def test_session_title_falls_back_when_message_empty(self) -> None:
+        self.assertEqual(ss.title_from_message(""), ss.DEFAULT_TITLE)
+        self.assertEqual(ss.title_from_message("   \n "), ss.DEFAULT_TITLE)
+
+    def test_new_session_gets_placeholder_title(self) -> None:
+        """新建会话时用户还没输入，先用占位标题（不能再用"项目名+序号"）。"""
+        sid = ss.create_session(self.project)
+        meta = ss._read_meta(ss.SessionStore(self.project, sid).path)
+        self.assertEqual(meta["title"], ss.DEFAULT_TITLE)
+        self.assertEqual(ss.session_title(self.project, sid), ss.DEFAULT_TITLE)
+
+    def test_has_user_message_tracks_first_message(self) -> None:
+        """首条用户消息落盘后 has_user_message 变真（标题不再重算）。"""
+        sid = ss.create_session(self.project)
+        self.assertFalse(ss.has_user_message(self.project, sid))
+        store = ss.SessionStore(self.project, sid)
+        store.append_message({"role": "system", "content": "system"})
+        self.assertFalse(ss.has_user_message(self.project, sid))  # system 不算
+        store.append_message({"role": "user", "content": "帮我翻译"})
+        self.assertTrue(ss.has_user_message(self.project, sid))
+
+    def test_has_user_message_false_for_missing_session(self) -> None:
+        self.assertFalse(ss.has_user_message(self.project, "no-such-session"))
+
+    def test_meta_title_update_is_visible_to_list(self) -> None:
+        """标题是后补写的 meta（首条消息时改），列表/标题读取必须看到最新值。"""
+        sid = ss.create_session(self.project)
+        ss.SessionStore(self.project, sid).append_meta(title="帮我翻译这个项目")
+        self.assertEqual(ss.list_sessions(self.project)[0]["title"], "帮我翻译这个项目")
+        self.assertEqual(ss.session_title(self.project, sid), "帮我翻译这个项目")
 
     def test_project_dir_encoding_is_filename_safe(self) -> None:
         """含中文/空格/盘符的项目路径必须编码成安全文件名。"""

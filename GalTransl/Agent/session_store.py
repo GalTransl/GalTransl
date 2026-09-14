@@ -30,6 +30,11 @@ SESSIONS_ROOT = os.path.join(os.path.dirname(_PROGRAM_ROOT), "agent_sessions")
 # 不落盘的事件类型：流式增量高频且能由最终消息重建
 _SKIP_EVENT_TYPES = {"content_delta", "reasoning_delta", "wait_tick"}
 
+# 新建但还没发第一条消息时的占位标题；首条用户消息到达后会被其内容替换
+DEFAULT_TITLE = "新会话"
+# 标题最大字符数（超出截断并加省略号）
+TITLE_MAX_CHARS = 30
+
 
 def _log(msg: str, *args: object) -> None:
     try:
@@ -158,25 +163,28 @@ class SessionStore:
 
 
 def _read_meta(path: str) -> dict[str, Any]:
-    """只读文件头几行取 meta，避免为列表动作解析整个大文件。"""
+    """读会话的文件级 meta（标题/目标/配置/创建时间），后写的字段优先。
+
+    meta 是增量追加的：新建只写占位标题，首条消息到达后才补写真正的标题，
+    收尾再补 running=false。所以不能只认第一条 meta（否则列表里永远是新建
+    时的占位标题），要像 load() 那样按顺序合并。为兼顾大会话，只解析形如
+    meta 的行，message/event 大行直接跳过。
+    """
+    meta: dict[str, Any] = {}
     try:
         with open(path, "r", encoding="utf-8") as f:
-            for _ in range(20):
-                line = f.readline()
-                if not line:
-                    break
-                line = line.strip()
-                if not line:
+            for line in f:
+                if '"meta"' not in line:
                     continue
                 try:
                     rec = json.loads(line)
                 except json.JSONDecodeError:
                     continue
                 if isinstance(rec, dict) and rec.get("t") == "meta":
-                    return {k: v for k, v in rec.items() if k not in ("t",)}
+                    meta.update({k: v for k, v in rec.items() if k != "t"})
     except Exception:  # noqa: BLE001
         pass
-    return {}
+    return meta
 
 
 def list_sessions(project_dir: str) -> list[dict[str, Any]]:
@@ -210,12 +218,16 @@ def list_sessions(project_dir: str) -> list[dict[str, Any]]:
 
 
 def create_session(project_dir: str, title: str = "") -> str:
-    """新建会话文件并写 meta，返回 session_id。"""
+    """新建会话文件并写 meta，返回 session_id。
+
+    title 为空时先用占位标题（DEFAULT_TITLE），真正的标题在用户发出第一条
+    消息时由 title_from_message 生成并写回 meta。
+    """
     session_id = new_session_id()
     store = SessionStore(project_dir, session_id)
     store.append_meta(
         project_dir=project_dir,
-        title=title or session_id,
+        title=title or DEFAULT_TITLE,
         created_at=time.time(),
     )
     return session_id
@@ -229,18 +241,52 @@ def session_exists(project_dir: str, session_id: str) -> bool:
     return os.path.isfile(SessionStore(project_dir, session_id).path)
 
 
-def next_session_title(project_dir: str, base_name: str) -> str:
-    """生成"项目名+序号"标题：扫已有标题里同前缀的数字，取 max+1。
+def title_from_message(text: str, fallback: str = DEFAULT_TITLE) -> str:
+    """用用户的第一条消息生成会话标题。
 
-    标题形如 "MyProject123"（项目名 + 递增序号，序号从 1 开始）。
+    换行与连续空白折叠成单个空格（标题必须是单行），超过 TITLE_MAX_CHARS
+    截断并补省略号；消息为空时返回 fallback。
     """
-    prefix = base_name or "会话"
-    max_seq = 0
-    for item in list_sessions(project_dir):
-        title = item.get("title") or ""
-        if not title.startswith(prefix):
-            continue
-        suffix = title[len(prefix):]
-        if suffix.isdigit():
-            max_seq = max(max_seq, int(suffix))
-    return f"{prefix}{max_seq + 1}"
+    line = " ".join(str(text or "").split())
+    if not line:
+        return fallback
+    if len(line) <= TITLE_MAX_CHARS:
+        return line
+    return line[:TITLE_MAX_CHARS] + "…"
+
+
+def session_title(project_dir: str, session_id: str, fallback: str = "") -> str:
+    """读磁盘 meta 里的会话标题（内存中没有该会话状态时用）。"""
+    meta = _read_meta(SessionStore(project_dir, session_id).path)
+    return str(meta.get("title") or fallback or session_id)
+
+
+def has_user_message(project_dir: str, session_id: str) -> bool:
+    """会话是否已存过用户消息（据此判断本次 start 是不是首个回合）。
+
+    逐行扫到第一条用户消息就返回，不为大会话解析整个文件。
+    """
+    path = SessionStore(project_dir, session_id).path
+    if not os.path.isfile(path):
+        return False
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                if '"user"' not in line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(rec, dict) or rec.get("t") != "message":
+                    continue
+                msg = rec.get("msg")
+                if (
+                    isinstance(msg, dict)
+                    and msg.get("role") == "user"
+                    and str(msg.get("content") or "").strip()
+                ):
+                    return True
+    except Exception as exc:  # noqa: BLE001
+        _log(f"检查用户消息失败 {path}: {exc}")
+    return False

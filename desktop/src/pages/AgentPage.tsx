@@ -535,7 +535,7 @@ function formatDuration(ms: number | undefined): string {
 
 /* ── Session sidebar ──
    一个项目下可以有多个会话；这里负责新建、切换、删除。
-   标题目前由后端按"项目名+序号"生成。 */
+   标题由后端生成：新建时是占位「新会话」，首条消息发出后变成这条消息。 */
 
 function AgentSessionSidebar({
   sessionsByProject,

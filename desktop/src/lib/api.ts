@@ -1681,7 +1681,8 @@ export async function listAgentSessions(projectDir: string) {
   return res.sessions || [];
 }
 
-/** Create an empty session (no turn started). Title defaults to 项目名+序号. */
+/** Create an empty session (no turn started). Title defaults to 占位「新会话」，
+ * 首条消息发出后由后端改成这条消息的内容（见 startAgent 的 goal）。 */
 export async function createAgentSession(projectDir: string, title?: string) {
   return apiRequest<AgentSession>('/api/agent/sessions/create', {
     method: 'POST',

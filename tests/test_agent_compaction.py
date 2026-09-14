@@ -328,16 +328,46 @@ class SessionLifecycleTests(unittest.TestCase):
     def tearDown(self) -> None:
         ss.SESSIONS_ROOT = self._orig_root
 
-    def test_create_session_title_increments(self):
+    def test_create_session_title_is_placeholder(self):
+        """新建空会话只有占位标题：此刻用户还没输入，标题等首条消息再定。"""
         from GalTransl.Agent.runtime import AgentRuntime
 
         rt = AgentRuntime()
         s1 = rt.create_session(self.project)
         s2 = rt.create_session(self.project)
-        s3 = rt.create_session(self.project)
-        self.assertEqual(s1["title"], "MyGame1")
-        self.assertEqual(s2["title"], "MyGame2")
-        self.assertEqual(s3["title"], "MyGame3")
+        self.assertEqual(s1["title"], ss.DEFAULT_TITLE)
+        self.assertEqual(s2["title"], ss.DEFAULT_TITLE)
+
+    def test_first_message_becomes_session_title(self):
+        """首条消息决定会话标题；已经有用户消息的会话不重算。"""
+        from GalTransl.Agent.runtime import AgentRuntime, _initial_session_title
+
+        rt = AgentRuntime()
+        s = rt.create_session(self.project)
+        sid = s["session_id"]
+        title = _initial_session_title(
+            self.project, sid, "帮我翻译这个游戏\n风格轻松一点", s["title"]
+        )
+        self.assertEqual(title, "帮我翻译这个游戏 风格轻松一点")
+
+        # 首条消息已落盘（首个回合结束）→ 后续 start 不覆盖已有标题
+        ss.SessionStore(self.project, sid).append_message(
+            {"role": "user", "content": "帮我翻译这个游戏"}
+        )
+        self.assertEqual(
+            _initial_session_title(self.project, sid, "再翻一次", title),
+            title,
+        )
+
+    def test_empty_goal_keeps_placeholder_title(self):
+        from GalTransl.Agent.runtime import AgentRuntime, _initial_session_title
+
+        rt = AgentRuntime()
+        s = rt.create_session(self.project)
+        self.assertEqual(
+            _initial_session_title(self.project, s["session_id"], "  ", s["title"]),
+            ss.DEFAULT_TITLE,
+        )
 
     def test_delete_session_reduces_list(self):
         from GalTransl.Agent.runtime import AgentRuntime
