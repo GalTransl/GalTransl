@@ -746,13 +746,18 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  /* 两侧对称预留滚动条槽：中间栏才始终落在面板正中，正文左右边界才能和
+     composer 输入框的边界严格对齐（原来只占右侧会让正文整体左偏半个滚动条） */
+  scrollbar-gutter: stable both-edges;
 }
 
 .agent-thread {
   width: min(100%, 840px);
   margin: 0 auto;
-  padding: var(--space-5) var(--space-6) var(--space-6);
+  /* 正文列与输入框几乎齐平（composer 也是 840px 居中的一条，此前这里多出
+     24px 内边距导致正文明显偏窄）；左右各留 5px 呼吸量，正好也是工具/思考行
+     那 `margin: 0 -5px` 的悬停背景边界 */
+  padding: var(--space-5) 5px var(--space-6);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1198,6 +1203,28 @@
   animation: agent-pulse 1s ease-in-out infinite;
 }
 
+/* 折叠时的单行预览（跑马灯效果）：文本只保留一份，窗口贴在文本末尾——
+   模型边写边把窗口往左推，就是"滚动显示最新思考"；不做首尾相接的无缝循环，
+   否则同一句会同时出现两遍。左端渐隐表示后面还有内容，右端是最新的一句不遮。 */
+.agent-reasoning__marquee {
+  display: flex;
+  justify-content: flex-end;
+  width: fit-content;
+  min-width: 0;
+  max-width: min(62%, 460px);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 14px);
+  mask-image: linear-gradient(90deg, transparent, #000 14px);
+}
+
+.agent-reasoning__marquee-text {
+  flex: none;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  opacity: 0.85;
+}
+
 .agent-reasoning__caret {
   flex: none;
   margin-left: auto;
@@ -1505,22 +1532,6 @@
   font-family: var(--agent-mono);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
-}
-
-/* 等待进度条：贴在工具行下方，随剩余时间填充。 */
-.agent-tool__waitbar {
-  height: 3px;
-  margin: 2px 0 2px 26px;
-  border-radius: 999px;
-  background: var(--agent-tile);
-  overflow: hidden;
-}
-
-.agent-tool__waitbar-fill {
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #2f6feb, #22d3ee);
-  transition: width 500ms linear;
 }
 
 .agent-tool__caret {
@@ -2118,7 +2129,6 @@
   border: 0;
   border-radius: 50%;
   cursor: pointer;
-  font-size: 1.05rem;
   transition: opacity var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
 }
 
@@ -2156,11 +2166,10 @@
   color: var(--color-danger);
 }
 
-.agent-composer__stop-icon {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  background: currentColor;
+/* 发送/停止用内联 SVG 图标：块级化，避免行内基线留白 */
+.agent-composer__send > svg,
+.agent-composer__stop > svg {
+  display: block;
 }
 
 /* 已用上下文指示器：环形进度条，悬停显示「百分比 · 已用 / 窗口」（原生 title 提示） */
@@ -2251,7 +2260,8 @@
   }
 
   .agent-thread {
-    padding: var(--space-4);
+    /* 窄屏同样只留 5px 左右（composer 那边是 --space-4），正文边界跟着输入框走 */
+    padding: var(--space-4) 5px;
   }
 
   .agent-console__composer {

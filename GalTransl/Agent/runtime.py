@@ -353,6 +353,8 @@ class AgentRunner:
         # 正在生成中的助手消息累加器（pi 的 streamingMessage）：引用流式期间
         # 那几份 list/dict，响应落定后由 _take_stream_acc 取走并置空。
         self._stream_acc: dict[str, Any] | None = None
+        # 正在执行的工具调用 id（工具事件带上它，界面才能挂到对应行上）
+        self._active_tool_call_id = ""
         self._emit_lock = threading.Lock()
         # 会话落盘器：state 里没有 session_id（理论上不该发生）时退化为内存态
         self._store = SessionStore(state.project_dir, state.session_id) if state.session_id else None
@@ -561,6 +563,10 @@ class AgentRunner:
                     _log(f"  🔧 工具调用: {name}({args_preview})")
                     self._emit("tool_call", {"id": call_id, "name": name, "arguments": args})
                     started = time.time()
+                    # 让工具（wait 等）在事件里带上本次调用的 id：界面据此把倒计时挂到
+                    # 对应的那一行上。不能靠"找第一个 wait 行"——同一个活动组里等过几次
+                    # 就会挂到最早那行，后面的等待没有倒计时。
+                    self._active_tool_call_id = call_id
                     try:
                         result = self._dispatch_tool(name, args)
                         ok = True
@@ -573,6 +579,8 @@ class AgentRunner:
                         _log(f"  ❌ 工具失败: {name} 耗时 {duration_ms}ms -> {exc}")
                         self._emit("tool_result", {"id": call_id, "name": name, "ok": False, "error": str(exc), "duration_ms": duration_ms})
                         content_str = json.dumps({"error": str(exc)}, ensure_ascii=False)
+                    finally:
+                        self._active_tool_call_id = ""
                     self._persist_message({"role": "tool", "tool_call_id": call_id, "content": content_str})
 
             # 超出单回合步数上限：收尾但保留历史，提示用户可以继续
@@ -2403,8 +2411,10 @@ def _tool_wait(runner: AgentRunner, args: dict[str, Any]) -> Any:
     reason = str(args.get("reason", "") or "").strip()
     total_ms = int(total * 1000)
     started = time.monotonic()
+    # 事件带上本次工具调用 id：界面据此把倒计时挂到这一行（多次等待各挂各行）
+    call_id = runner._active_tool_call_id
     _log(f"  ⏳ 开始等待 {total:g}s" + (f"（{reason}）" if reason else ""))
-    runner._emit("wait_start", {"seconds": round(total, 1), "total_ms": total_ms, "reason": reason})
+    runner._emit("wait_start", {"id": call_id, "seconds": round(total, 1), "total_ms": total_ms, "reason": reason})
 
     interrupted = False
     while True:
@@ -2415,14 +2425,20 @@ def _tool_wait(runner: AgentRunner, args: dict[str, Any]) -> Any:
         if elapsed >= total:
             break
         remaining_ms = max(0, total_ms - int(elapsed * 1000))
-        runner._emit("wait_tick", {"remaining_ms": remaining_ms, "total_ms": total_ms})
+        runner._emit("wait_tick", {"id": call_id, "remaining_ms": remaining_ms, "total_ms": total_ms})
         runner.stop_event.wait(WAIT_TICK)
 
     elapsed_ms = int((time.monotonic() - started) * 1000)
     remaining_ms = 0 if interrupted else max(0, total_ms - elapsed_ms)
     runner._emit(
         "wait_end",
-        {"interrupted": interrupted, "elapsed_ms": elapsed_ms, "remaining_ms": remaining_ms, "total_ms": total_ms},
+        {
+            "id": call_id,
+            "interrupted": interrupted,
+            "elapsed_ms": elapsed_ms,
+            "remaining_ms": remaining_ms,
+            "total_ms": total_ms,
+        },
     )
     if interrupted:
         _log(f"  ⏳ 等待被停止信号打断，已等 {elapsed_ms / 1000:.1f}s")

@@ -402,10 +402,24 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
       continue;
     }
 
-    // wait 工具的倒计时事件：挂到对应的 wait 工具行上，不单独成行。
+    // wait 工具的倒计时事件：挂到**本次调用**那一行上，不单独成行。
+    // 按 id 匹配；老日志/异常情形没有 id 时，退回"最近一个还没收到 wait_end 的
+    // wait 行"——绝不能笼统找第一个，同一活动组里等待过多次时，tick 会一直打到
+    // 最早那行，后面几次等待就没有倒计时条了（只有个笼统的"进行中"）。
     if (ev.type === 'wait_start' || ev.type === 'wait_tick' || ev.type === 'wait_end') {
       if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
-      const target = current.items.find((it) => it.kind === 'tool' && it.name === 'wait');
+      let target = ev.id
+        ? current.items.find((it) => it.kind === 'tool' && it.id === ev.id)
+        : undefined;
+      if (!target) {
+        for (let i = current.items.length - 1; i >= 0; i -= 1) {
+          const it = current.items[i];
+          if (it.kind === 'tool' && it.name === 'wait' && it.waitInterrupted === undefined) {
+            target = it;
+            break;
+          }
+        }
+      }
       if (target) {
         if (typeof ev.total_ms === 'number') target.waitTotalMs = ev.total_ms;
         if (typeof ev.remaining_ms === 'number') target.waitRemainingMs = ev.remaining_ms;
@@ -501,6 +515,32 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
 
   closeActivity();
   return groups;
+}
+
+/** 发送/插话按钮的图标：上箭头。原来是字符「↑」，字重/基线随字体走，
+ *  改成 SVG 后与页面其它图标（开文件夹、上下文环）口径一致。 */
+function SendIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 19V5m0 0-5.5 5.5M12 5l5.5 5.5"
+      />
+    </svg>
+  );
+}
+
+/** 停止按钮的图标：实心圆角方块（原来是 CSS 画的方块）。 */
+function StopIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+      <rect x="6" y="6" width="12" height="12" rx="3" fill="currentColor" />
+    </svg>
+  );
 }
 
 /* ── Tool presentation ──
@@ -1727,10 +1767,10 @@ export function AgentPage() {
                     title="发送插话（Agent 会在下一步看到，Enter 发送 / Shift+Enter 换行）"
                     aria-label="发送插话"
                   >
-                    ↑
+                    <SendIcon />
                   </button>
                   <button type="button" className="agent-composer__stop" onClick={handleStop} title="停止 Agent">
-                    <span className="agent-composer__stop-icon" />
+                    <StopIcon />
                   </button>
                 </>
               ) : (
@@ -1742,7 +1782,7 @@ export function AgentPage() {
                   title={hasSession ? '发送并继续（Enter 发送 / Shift+Enter 换行）' : '发送并启动 Agent（Enter 发送 / Shift+Enter 换行）'}
                   aria-label="发送消息"
                 >
-                  ↑
+                  <SendIcon />
                 </button>
               )}
             </div>
@@ -2001,12 +2041,8 @@ function liveTail(items: ActivityItem[]): string {
   for (let i = items.length - 1; i >= 0; i -= 1) {
     const it = items[i];
     if ((it.kind === 'content' || it.kind === 'reasoning') && it.content) {
-      // 取思考文本最后一行（对标 PI-Desktop）：折叠头部读起来像实时跑马灯
-      const lines = it.content
-        .split('\n')
-        .map((line) => line.replace(/^#+\s*|\*\*/g, '').trim())
-        .filter(Boolean);
-      return lines[lines.length - 1] || '';
+      // 取思考文本最后一行：折叠头部读起来像实时滚动的一行预览
+      return lastReasoningLine(it.content);
     }
     if (it.kind === 'tool') {
       const s = toolMeta(it.name).summary(asArgs(it.arguments));
@@ -2037,36 +2073,62 @@ function ContentRow({ item }: { item: ActivityItem }) {
 }
 
 /* ── Reasoning row（模型「想」的思考过程）──
-   与「说」分开：想用可折叠卡片，流式时展开实时滚动，结束后自动收起
-   成「已思考 Ns」一行；用户手动展开/收起后不再被自动行为覆盖。 */
+   与「说」分开：想用可折叠卡片，**默认折叠**（思考过程不自动铺开，要看细节点一下）。
+   折叠且正在思考时，标题右侧用跑马灯滚动最近一行，保留"能感知在思考"的实时感；
+   展开后内容就在眼前，跑马灯随即消失。 */
+
+/** 折叠时跑马灯最多滚多少字符（取最近的一段，太长会滚得让人看不清）。 */
+const REASONING_MARQUEE_CHARS = 160;
+
+/** 思考文本压成一行：去掉标题/加粗标记，取最后一行（活动组头部的静态预览用）。 */
+function lastReasoningLine(text: string): string {
+  const lines = text
+    .split('\n')
+    .map((line) => line.replace(/^#+\s*|\*\*/g, '').trim())
+    .filter(Boolean);
+  return lines[lines.length - 1] || '';
+}
+
+/** 折叠跑马灯显示的文本：整段思考**压成一行**后取末尾一段。
+ *
+ *  刻意不按"最后一行"取：模型换行后新行往往只有一两个字（甚至先来一串空行），
+ *  窗口会瞬间缩成空白。压成一行（换行/连续空白折叠为空格）则前后文字连成一句，
+ *  换行在预览里不显示，滚动也不断线。 */
+function reasoningOneLiner(text: string): string {
+  return text
+    .replace(/^[ \t]*#{1,6}[ \t]*/gm, '') // 行首标题标记
+    .replace(/\*\*/g, '') // 加粗标记
+    .replace(/\s+/g, ' ') // 换行 / 连续空白 -> 单个空格
+    .trim()
+    .slice(-REASONING_MARQUEE_CHARS);
+}
 
 function ReasoningRow({ item }: { item: ActivityItem }) {
   const streaming = Boolean(item.streaming);
-  const [open, setOpen] = useState(streaming);
-  const userToggledRef = useRef(false);
-
-  // 跟随思考流：来增量时展开，结束收起（除非用户接管了这张卡片）
-  useEffect(() => {
-    if (userToggledRef.current) return;
-    setOpen(streaming);
-  }, [streaming]);
+  // 默认折叠，且不跟随流式自动展开（用户手动开过就一直是开的）
+  const [open, setOpen] = useState(false);
 
   const text = item.content || '';
   const label = streaming ? '思考中' : item.durationMs ? `已思考 ${formatDuration(item.durationMs)}` : '已思考';
+  // 只在「折叠 + 正在思考」时滚动最近内容；展开后不再显示
+  const marquee = !open && streaming ? reasoningOneLiner(text) : '';
 
   return (
     <div className={`agent-reasoning${open ? ' is-open' : ''}${streaming ? ' is-streaming' : ''}`}>
       <button
         type="button"
         className="agent-reasoning__header"
-        onClick={() => {
-          userToggledRef.current = true;
-          setOpen((v) => !v);
-        }}
+        onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >
         <span className="agent-reasoning__icon">✳</span>
         <span className={`agent-reasoning__label${streaming ? ' is-running' : ''}`}>{label}</span>
+        {marquee ? (
+          // 装饰性的一行滚动预览：整段思考在展开区里，读屏不必重复
+          <span className="agent-reasoning__marquee" aria-hidden="true">
+            <span className="agent-reasoning__marquee-text">{marquee}</span>
+          </span>
+        ) : null}
         <span className="agent-reasoning__caret">›</span>
       </button>
       <div className="agent-reasoning__collapse">
@@ -2157,12 +2219,11 @@ function ToolRow({ item, live }: { item: ActivityItem; live: boolean }) {
   // - deleted_preview: [{index, text}] 被删条目（delete_transl_cache）
   const changeList = extractChangeList(item.result);
 
-  // wait 行：等待期间显示倒计时进度条。
+  // wait 行：等待期间显示倒计时（只出秒数，不画进度条）。
   const isWait = item.name === 'wait';
   const waiting = isWait && pending && typeof item.waitTotalMs === 'number';
   const waitTotal = item.waitTotalMs || 0;
   const waitRemaining = item.waitRemainingMs ?? waitTotal;
-  const waitRatio = waitTotal > 0 ? Math.min(1, Math.max(0, 1 - waitRemaining / waitTotal)) : 0;
 
   const resultText = formatPayload(ok ? item.result : item.error);
   const hasDetails = Boolean(summary || resultText || item.arguments || changeList);
@@ -2180,7 +2241,7 @@ function ToolRow({ item, live }: { item: ActivityItem; live: boolean }) {
   const stateTone = waiting || isRunning ? 'running' : ok ? 'done' : 'error';
 
   return (
-    <div className={`agent-tool${open ? ' is-open' : ''}${waiting ? ' is-waiting' : ''}`}>
+    <div className={`agent-tool${open ? ' is-open' : ''}`}>
       <button
         type="button"
         className="agent-tool__header"
@@ -2198,11 +2259,6 @@ function ToolRow({ item, live }: { item: ActivityItem; live: boolean }) {
         </span>
         <span className="agent-tool__caret">›</span>
       </button>
-      {waiting && waitTotal > 0 ? (
-        <div className="agent-tool__waitbar" aria-hidden>
-          <div className="agent-tool__waitbar-fill" style={{ width: `${Math.round(waitRatio * 100)}%` }} />
-        </div>
-      ) : null}
       {open ? (
         <div className="agent-tool__body">
           {changeList ? <ChangeListCard data={changeList} /> : null}
