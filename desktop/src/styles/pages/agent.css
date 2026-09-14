@@ -2102,6 +2102,14 @@
   font-size: 0.82rem;
 }
 
+/* 文本单独一层，长内容（如 后端配置名/模型名）超出时省略号截断而不是硬裁 */
+.agent-composer__chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 发送/停止：蓝青渐变圆钮（对标 ptv2-launch-btn） */
 .agent-composer__send,
 .agent-composer__stop {

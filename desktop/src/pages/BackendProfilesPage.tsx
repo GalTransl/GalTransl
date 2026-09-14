@@ -16,6 +16,7 @@ import {
   setAgentDefaultBackendProfile,
   setDefaultBackendProfile } from '../lib/api';
 import { normalizeError } from '../lib/errors';
+import { getProfileMeta } from '../lib/backendProfile';
 
 type ProfileEntry = {
   name: string;
@@ -23,47 +24,6 @@ type ProfileEntry = {
 };
 
 const DEFAULT_BACKEND_CONFIG: Record<string, unknown> = {};
-const MISSING_PROFILE_META = '—';
-
-function getRecord(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-}
-
-function getFirstArrayRecord(value: unknown): Record<string, unknown> | null {
-  if (!Array.isArray(value) || value.length === 0) return null;
-  return getRecord(value[0]);
-}
-
-function getFirstArrayString(value: unknown): string | null {
-  if (!Array.isArray(value) || value.length === 0) return null;
-  return getNonEmptyString(value[0]);
-}
-
-function getNonEmptyString(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function getProfileMeta(config: Record<string, unknown>) {
-  const openAiCompatible = getRecord(config['OpenAI-Compatible']);
-  const firstOpenAiToken = getFirstArrayRecord(openAiCompatible?.tokens);
-  const sakuraLlm = getRecord(config.SakuraLLM);
-  const firstSakuraEndpoint = getFirstArrayString(sakuraLlm?.endpoints);
-
-  const baseUrl =
-    getNonEmptyString(firstOpenAiToken?.endpoint) ??
-    firstSakuraEndpoint ??
-    MISSING_PROFILE_META;
-
-  const modelName =
-    getNonEmptyString(firstOpenAiToken?.modelName) ??
-    getNonEmptyString(sakuraLlm?.rewriteModelName) ??
-    MISSING_PROFILE_META;
-
-  return { baseUrl, modelName };
-}
 
 
 export function BackendProfilesPage() {

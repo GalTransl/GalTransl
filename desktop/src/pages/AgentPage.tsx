@@ -32,6 +32,7 @@ import {
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 import { renderMarkdown } from '../lib/markdown';
+import { formatProfileLabel } from '../lib/backendProfile';
 
 const HISTORY_KEY = 'galtransl-project-history';
 
@@ -1285,6 +1286,11 @@ export function AgentPage() {
   const canSend = Boolean(projectDir) && Boolean(backendProfileName) && goal.trim().length > 0 && !sending;
   const activeTitle =
     (sessionsByProject[effectiveProject] || []).find((s) => s.session_id === activeSessionId)?.title || '';
+  // 展示「后端配置文件名/模型名」：模型名从当前配置里取，与「翻译后端配置」页同一口径
+  const backendProfileLabel = useMemo(
+    () => (backendProfileName ? formatProfileLabel(backendProfileName, getBackendProfile(backendProfileName)) : ''),
+    [backendProfileName],
+  );
 
   return (
     <div className="agent-console">
@@ -1521,16 +1527,16 @@ export function AgentPage() {
             <div className="agent-composer__left">
               <span className="agent-composer__chip agent-composer__chip--static" title={projectDir || '未选择项目'}>
                 <span className="agent-composer__chip-icon">📁</span>
-                {projectDir ? shortName(projectDir) : '未选择项目'}
+                <span className="agent-composer__chip-label">{projectDir ? shortName(projectDir) : '未选择项目'}</span>
               </span>
               <button
                 type="button"
                 className="agent-composer__chip"
                 onClick={() => setSettingsOpen((v) => !v)}
-                title="模型与配置"
+                title={backendProfileLabel ? `${backendProfileLabel} · 点击打开模型与配置` : '模型与配置'}
               >
                 <span className="agent-composer__chip-icon">⚙</span>
-                {backendProfileName || '未配置后端'}
+                <span className="agent-composer__chip-label">{backendProfileLabel || '未配置后端'}</span>
               </button>
             </div>
             <div className="agent-composer__right">
