@@ -55,6 +55,18 @@ const PROJECT_TABS = [
   { path: 'config', label: '配置编辑', icon: '⚙️' },
 ];
 
+/** 「翻译工作台」正在跑任务时的呼吸蓝点（与 Agent 页「运行中」指示同款）。
+ *  child = 展开态子项行（跟在文字后面靠右）；rail = 收起态只剩图标的导航项。 */
+function RunningDot({ variant }: { variant: 'child' | 'rail' }) {
+  return (
+    <span
+      className={variant === 'child' ? 'sidebar__project-child-running-dot' : 'sidebar__nav-running-dot'}
+      title="正在翻译"
+      aria-label="正在翻译"
+    />
+  );
+}
+
 type SidebarProps = {
   openProjects: string[];
   onCloseProject: (projectDir: string) => void;
@@ -635,6 +647,9 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                         >
                           <span className="sidebar__project-child-icon">{tab.icon}</span>
                           <span className="sidebar__project-child-label">{tab.label}</span>
+                          {tab.path === 'translate' && translatingDirs[projectDir] && (
+                            <RunningDot variant="child" />
+                          )}
                           {tab.path === 'config' && dirtyConfigProjects[projectDir] && (
                             <span className="sidebar__project-child-notice-dot" aria-label="配置有未保存的修改" />
                           )}
@@ -675,6 +690,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                       title={tab.label}
                     >
                       <span className="sidebar__nav-icon">{tab.icon}</span>
+                      {tab.path === 'translate' && translatingDirs[projectDir] && <RunningDot variant="rail" />}
                       {tab.path === 'config' && dirtyConfigProjects[projectDir] && (
                         <span className="sidebar__nav-notice-dot sidebar__project-config-notice-dot" aria-label="配置有未保存的修改" />
                       )}
