@@ -432,7 +432,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   get_progress: { action: '查询进度', running: '查询进度', verb: '', icon: '📊', summary: () => '' },
   get_runtime: { action: '查询运行时', running: '查询运行时', verb: '', icon: '⚙️', summary: () => '' },
   list_problems: { action: '检查问题清单', running: '检查问题清单', verb: '', icon: '🔍', summary: (a) => str(a?.problem_type) || '问题类型统计' },
-  manage_problem_filter: { action: '管理问题过滤', running: '管理问题过滤', verb: '', icon: '🧹', summary: (a) => [str(a?.action), str(a?.keyword)].filter(Boolean).join(' · ') },
+  manage_problem_filter: { action: '管理问题过滤', running: '管理问题过滤', verb: '', icon: '🧹', summary: (a) => [str(a?.action), Array.isArray(a?.keyword) ? a.keyword.map((k) => str(k)).join('、') : str(a?.keyword)].filter(Boolean).join(' · ') },
   list_transl_cache: { action: '查看缓存清单', running: '查看缓存清单', verb: '', icon: '🗃️', summary: () => '列出缓存文件' },
   read_transl_cache: { action: '读取缓存', running: '读取缓存', verb: '', icon: '📄', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
   search_transl_cache: { action: '搜索缓存', running: '搜索缓存', verb: '', icon: '🔎', summary: (a) => str(a?.query) },

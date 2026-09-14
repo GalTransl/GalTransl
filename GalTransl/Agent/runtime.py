@@ -79,7 +79,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 3. **试译定稿（全量翻译前必做，除非项目已有大量缓存）**：
    a. 调用 read_guideline 读取项目当前使用的翻译规范（配置 common.gpt.translation_guideline），理解文风要求；
    b. 调用 list_input_files + read_input_file 抽样了解原文：挑 1-2 个有代表性的文件，各读几十句（index 使用 1-based，区间如 "1-50"），掌握角色、语气、专有名词、场景类型；
-   c. 基于原文补充 GPT 字典：把抽读中遇到的人名、专有名词、常见口语用 save_dict 收录进项目 GPT 字典；
+   c. 基于原文补充 GPT 字典：把抽读中遇到的人名、专有名词、常见口语用 save_dict(action="append") 收录进项目 GPT 字典（只发新增行，不重发整份字典）；
    d. 调用 start_translation(translator="<主翻译引擎>", files=["<一个代表性文件>"]) 只翻译这一个文件作为试译；
    e. 试译完成后用 read_transl_cache 阅读试译文件的译文，对照翻译规范评估文风、译名、语气是否达标；
    f. 若不满意：继续完善字典（save_dict）；对全局性的文风问题，用 update_project_config 把 common.gpt.change_prompt 设为 "AdditionalPrompt" 并设置 common.gpt.prompt_content 写入额外的翻译要求（如「译名统一用XX」「口语化程度、敬称的处理方式」等），这些要求会追加到每次翻译请求的 Prompt 里；也可以用 update_project_config 切换 common.gpt.translation_guideline 换一份更合适的规范；
@@ -87,7 +87,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 4. **启动翻译（全量）**：调用 start_translation(translator="<主翻译引擎>")（不传 files 即翻译全部）。主翻译引擎从项目配置或 overview 中确认，常用值：ForGal-json / ForGal-tsv / ForNovel / sakura-v1.0 / galtransl-v3。一次只启动一个，项目已有运行中任务时不要重复提交。
 5. **跟进进度（wait 前后都要查状态）**：启动翻译后先调用 get_runtime 确认任务已在跑，再调用 wait 等待一段合理时间（翻译任务 wait minutes=1~3，短任务 wait seconds=30）。wait 结束后必须再调用 get_runtime 确认任务状态：completed 进入下一步；仍在 running 时看返回的 eta_seconds 估算剩余时间——eta 还很长（如 >10 分钟）就按其一半的时长继续 wait，快完了（如 <2 分钟）就 wait seconds=30 再查，不要连续空转轮询也不要一次等过头。等待期间界面会显示倒计时。
 6. **复核结果**：调用 list_problems（不带参数）先看类型统计，了解哪类问题最多；再传 problem_type（如 problem_type="残留日文"）+ limit/offset 分页查看该类型的具体条目。用 read_transl_cache 的 index 参数精确读取有问题的条目（如 list_problems 返回的 index，可直接 `index="33-40,50-60"` 一次取多条）浏览实际译文；判断语意是否连贯时传 context（如 context=3）把前后各几句一起带上。需要看缓存文件全貌（文件、条数）时用 list_transl_cache；注意返回里标注 translating / .append.jsonl 后缀的文件正在翻译中，此时读到的是旧快照，等任务 completed 再操作。
-7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。对确认无需处理的系统性问题类型（如字典使用提示、纯语气词提示），可用 manage_problem_filter(action="add", keyword="…") 加入问题过滤清单，让统计聚焦真问题；过滤后统计会明显下降，属于预期效果。
+7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。对确认无需处理的系统性问题类型（如字典使用提示、纯语气词提示），可用 manage_problem_filter(action="add", keyword=["…"]) 加入问题过滤清单（keyword 可传数组一次加多个），让统计聚焦真问题；过滤后统计会明显下降，属于预期效果。
 8. **完成**：收尾前先调用 get_project_overview 确认项目真的翻完——只有 files_translated == files_total 且没有 running 任务才算整体完成（total==translated 可能只代表已缓存的部分翻完，不要据此收尾）；若还有文件没翻，回到流程 4 继续 start_translation 翻剩余文件。问题数可控、整体完成后，用 read_output 抽查最终输出文件（交付物；输出与缓存不完全一致，译后字典替换只在输出生效），确认无误后用一段自然语言总结本次操作（做了什么、翻译进度、剩余问题建议），不要调用工具，直接输出总结即可结束。
 
 # 约束
@@ -993,7 +993,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "list_dict_files",
-            "description": "列出项目配置的译前字典(preDict)、GPT字典(gpt.dict)、译后字典(postDict)文件及各文件内容。准备字典阶段使用。",
+            "description": "列出项目配置的译前字典(preDict)、GPT字典(gpt.dict)、译后字典(postDict)文件与各文件行数（不含内容，读内容用 read_dict）。准备字典阶段使用。",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -1001,7 +1001,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_dict",
-            "description": "读取某个项目字典文件的完整内容（按 file_key，来自 list_dict_files 返回的 dict_contents 的 key）。",
+            "description": "读取某个项目字典文件的完整内容（按 file_key，来自 list_dict_files 返回的 pre_dict_files / gpt_dict_files / post_dict_files）。",
             "parameters": {
                 "type": "object",
                 "properties": {"file_key": {"type": "string", "description": "字典文件 key，形如 (project_dir)项目GPT字典.txt"}},
@@ -1013,12 +1013,17 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "save_dict",
-            "description": "写入/覆盖某个项目字典文件的内容。file_key 必须来自 list_dict_files；content 为 tab 分隔文本（格式：日文<Tab>中文[<Tab>解释]）。",
+            "description": "写入/维护某个项目字典文件。file_key 必须来自 list_dict_files；content 为 tab 分隔文本（格式：日文<Tab>中文[<Tab>解释]）。action 决定操作：overwrite（默认，整文件覆盖）、replace（按 key 替换已有词条，未匹配的 key 不新增）、append（追加到末尾，重复 key 跳过）、delete（按 key 删除词条）。补充新词条优先用 append，避免重发整份字典；delete 的 content 可整行粘贴，也可只写 key。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "file_key": {"type": "string"},
-                    "content": {"type": "string", "description": "字典全文，覆盖写入"},
+                    "content": {"type": "string", "description": "要写入的字典内容（tab 分隔文本）；delete 时传要删除的词条（每行一个，可整行或只写 key）"},
+                    "action": {
+                        "type": "string",
+                        "enum": ["overwrite", "replace", "append", "delete"],
+                        "description": "overwrite=全量覆盖（默认）；replace=按 key 部分替换已有词条；append=追加到末尾（重复 key 跳过）；delete=按 key 删除词条。",
+                    },
                 },
                 "required": ["file_key", "content"],
             },
@@ -1195,7 +1200,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "manage_problem_filter",
-            "description": "管理问题过滤关键字（项目配置 common.problemFilterKey，与「缓存与问题」页同一套配置）。命中的问题项会被 list_problems 和进度统计过滤掉。适合在确认某类问题（如字典使用提示、纯语气词提示）不需要处理后，将其加入过滤清单让统计聚焦真问题；也可移除误过滤的关键字。",
+            "description": "管理问题过滤关键字（项目配置 common.problemFilterKey，与「缓存与问题」页同一套配置）。命中的问题项会被 list_problems 和进度统计过滤掉。适合在确认某类问题（如字典使用提示、纯语气词提示）不需要处理后，将其加入过滤清单让统计聚焦真问题；也可移除误过滤的关键字。keyword 可传字符串或数组，一次增删多个。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1205,8 +1210,11 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                         "description": "list 查看当前关键字；add 添加；remove 移除。",
                     },
                     "keyword": {
-                        "type": "string",
-                        "description": "add/remove 必填。要操作的关键字（如 \"使用了GPT词典\"、\"正文直出\"），精确匹配、区分大小写。",
+                        "anyOf": [
+                            {"type": "string"},
+                            {"type": "array", "items": {"type": "string"}},
+                        ],
+                        "description": "add/remove 必填。要操作的关键字（如 \"使用了GPT词典\"、\"正文直出\"），精确匹配、区分大小写。可传单个字符串，也可传数组一次操作多个。",
                     },
                 },
                 "required": ["action"],
@@ -1217,7 +1225,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "list_transl_cache",
-            "description": "列出缓存文件（译文）与各文件条目数。注意：后缀为 .append.jsonl 的文件表示对应文件正在翻译中（增量缓存），此时读取缓存读到的是旧快照，应等任务 completed 后再读取/修改。",
+            "description": "列出缓存文件（译文）与各 .json 文件的条目数（.append.jsonl 增量日志不统计条目数）。注意：后缀为 .append.jsonl 的文件表示对应文件正在翻译中，此时读取缓存读到的是旧快照，应等任务 completed 后再读取/修改。",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -1329,10 +1337,6 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         },
     },
 ]
-
-
-def _join_lines(lines: list[str]) -> str:
-    return "\n".join(lines)
 
 
 # ---- 工具实现 ----
@@ -1562,6 +1566,7 @@ def _tool_read_guideline(runner: AgentRunner, args: dict[str, Any]) -> Any:
 
 
 def _tool_list_dict_files(runner: AgentRunner, _args: dict[str, Any]) -> Any:
+    """列出项目字典清单（文件 + 行数）。内容用 read_dict 单独读取，这里不回传全文。"""
     pid = runner._project_id()
     cfg = urllib.parse.quote(runner.state.config_file_name)
     data = runner._http_get(f"/api/projects/{pid}/dictionary/project?config={cfg}")
@@ -1572,7 +1577,6 @@ def _tool_list_dict_files(runner: AgentRunner, _args: dict[str, Any]) -> Any:
         "gpt_dict_files": data.get("gpt_dict_files", []),
         "post_dict_files": data.get("post_dict_files", []),
         "line_counts": summary,
-        "contents": {k: _join_lines(v.get("lines", [])) for k, v in contents.items()},
     }
 
 
@@ -1591,13 +1595,140 @@ def _tool_read_dict(runner: AgentRunner, args: dict[str, Any]) -> Any:
     return {"file_key": file_key, "lines": entry.get("lines", []), "count": entry.get("count", 0)}
 
 
+# 与 GalTransl/Dictionary.py 的解析口径一致：这两类别名的字典行，查找词不在第一列，
+# 所以拼 key 时要按各自的位置取（条件字典: sp[2]；情景字典: sp[1]）。
+_DICT_CONDITION_KEYS = frozenset({"pre_src", "post_src", "pre_dst", "post_dst", "pre_jp", "post_jp", "pre_zh", "post_zh"})
+_DICT_SITUATION_KEYS = frozenset({"mono", "diag"})
+
+
+def _dict_line_key(line: str, *, lenient: bool = False) -> str:
+    """取字典行的匹配键（replace/append/delete 判断同一词条用）。
+
+    普通行取第一列（原文）；条件字典/情景字典行取真正的查找词；空行与注释行
+    （// 或 \\ 开头）返回 ""，表示不参与按键匹配。
+
+    lenient=True 时，只有一列的行也按第一列当 key——delete 允许只写 key 而不
+    复制整行；append/replace 用严格模式，避免把残缺行当成新词条写进字典。"""
+    if not line.strip() or line.startswith("//") or line.startswith("\\\\"):
+        return ""
+    sp = line.replace("    ", "\t").split("\t")
+    if len(sp) < 2:
+        return sp[0].strip() if lenient else ""
+    head = sp[0].strip()
+    if head in _DICT_CONDITION_KEYS and len(sp) >= 4:
+        return sp[2].strip()
+    if head in _DICT_SITUATION_KEYS and len(sp) >= 3:
+        return sp[1].strip()
+    return head
+
+
+def _split_dict_incoming(content: str) -> list[str]:
+    """待写入内容切行：统一换行符，丢掉空行，保留注释行。"""
+    text = str(content or "").replace("\r\n", "\n").replace("\r", "\n")
+    return [line for line in text.split("\n") if line.strip()]
+
+
+def _merge_dict_lines(before_lines: list[str], incoming: list[str], action: str) -> tuple[list[str], dict[str, Any]]:
+    """按 action 把 incoming 合并到 before_lines，返回 (新行列表, 附加统计)。
+
+    - append：新词条追加到末尾；key 已存在则跳过并记入 skipped_duplicate_keys。
+    - replace：按 key 替换已有行；未匹配的 key 记入 not_found_keys，不新增（要新增用 append）。
+    - delete：按 key 删除已有行；未匹配的 key 记入 not_found_keys。
+    """
+    if action == "overwrite":
+        return list(incoming), {}
+
+    if action == "delete":
+        # incoming 是“要删除的词条”，允许只写 key（lenient）不复制整行
+        wanted: list[str] = []
+        for line in incoming:
+            key = _dict_line_key(line, lenient=True)
+            if key and key not in wanted:
+                wanted.append(key)
+        wanted_set = set(wanted)
+        kept: list[str] = []
+        deleted: list[str] = []
+        for line in before_lines:
+            key = _dict_line_key(line)
+            if key and key in wanted_set:
+                deleted.append(key)
+                continue
+            kept.append(line)
+        extra: dict[str, Any] = {"deleted_keys": deleted}
+        not_found = [k for k in wanted if k not in deleted]
+        if not_found:
+            extra["not_found_keys"] = not_found
+        return kept, extra
+
+    existing: dict[str, int] = {}
+    for i, line in enumerate(before_lines):
+        key = _dict_line_key(line)
+        if key:
+            existing.setdefault(key, i)
+
+    if action == "append":
+        new_lines = list(before_lines)
+        appended: list[str] = []
+        duplicates: list[str] = []
+        for line in incoming:
+            key = _dict_line_key(line)
+            if not key:  # 注释/无键行：原样追加
+                new_lines.append(line)
+                continue
+            if key in existing:
+                if key not in duplicates:
+                    duplicates.append(key)
+                continue
+            new_lines.append(line)
+            existing[key] = len(new_lines) - 1
+            appended.append(key)
+        extra: dict[str, Any] = {"appended_keys": appended}
+        if duplicates:
+            extra["skipped_duplicate_keys"] = duplicates
+        return new_lines, extra
+
+    # replace
+    new_lines = list(before_lines)
+    replaced: list[str] = []
+    not_found: list[str] = []
+    for line in incoming:
+        key = _dict_line_key(line)
+        if not key:  # 注释/无键行在 replace 下忽略
+            continue
+        idx = existing.get(key)
+        if idx is None:
+            if key not in not_found:
+                not_found.append(key)
+            continue
+        new_lines[idx] = line
+        if key not in replaced:
+            replaced.append(key)
+    extra = {"replaced_keys": replaced}
+    if not_found:
+        extra["not_found_keys"] = not_found
+    return new_lines, extra
+
+
 def _tool_save_dict(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """写入项目字典。action 决定写入方式：
+
+    - overwrite（默认）：整文件覆盖，等价于旧行为；
+    - replace：按每行的 key 替换已有词条，未匹配的 key 不新增；
+    - append：把行追加到末尾，key 已存在的行跳过；
+    - delete：按 key 删除词条（content 传要删的词条，可整行粘贴或只写 key）。
+    """
     file_key = str(args.get("file_key", "")).strip()
-    content = str(args.get("content", ""))
     if not file_key:
         raise AgentToolError("file_key is required")
+    action = str(args.get("action", "") or "overwrite").strip().lower() or "overwrite"
+    if action not in ("overwrite", "replace", "append", "delete"):
+        raise AgentToolError("action must be one of: overwrite, replace, append, delete")
+    content = str(args.get("content", ""))
+    if action == "delete" and not _split_dict_incoming(content):
+        raise AgentToolError("delete 需要 content（要删除的词条，每行一个 key）")
     pid = runner._project_id()
-    # 先读旧内容算行级 diff，写完后随结果返回（前端渲染变更卡片）
+
+    # 先读旧内容（算行级 diff + 作为 append/replace 的基底），写完后随结果返回
     cfg = urllib.parse.quote(runner.state.config_file_name)
     before_lines: list[str] = []
     data = runner._http_get(f"/api/projects/{pid}/dictionary/project?config={cfg}")
@@ -1605,23 +1736,36 @@ def _tool_save_dict(runner: AgentRunner, args: dict[str, Any]) -> Any:
     old = contents.get(file_key)
     if isinstance(old, dict):
         before_lines = [str(x) for x in old.get("lines", [])]
+
+    if action == "overwrite":
+        new_lines = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        extra: dict[str, Any] = {}
+    else:
+        new_lines, extra = _merge_dict_lines(before_lines, _split_dict_incoming(content), action)
+
+    before_text = "\n".join(before_lines)
+    new_text = "\n".join(new_lines)
+    if new_text == before_text:
+        return {"file_key": file_key, "action": action, "note": "内容没有变化，未写入", **extra}
+
     body = {
         "config_file_name": runner.state.config_file_name,
         "file_key": file_key,
-        "content": content,
+        "content": new_text,
     }
-    result = runner._http_post(f"/api/projects/{pid}/dictionary/project/save", body)
-    diff = _diff_lines("\n".join(before_lines), content)
+    runner._http_post(f"/api/projects/{pid}/dictionary/project/save", body)
+    diff = _diff_lines(before_text, new_text)
     added = sum(1 for r in diff["rows"] if r["op"] == "add")
     removed = sum(1 for r in diff["rows"] if r["op"] == "del")
     return {
-        **(result if isinstance(result, dict) else {}),
         "file_key": file_key,
+        "action": action,
         "line_count_before": len(before_lines),
-        "line_count_after": len(content.splitlines()),
+        "line_count_after": len(new_lines),
         "lines_added": added,
         "lines_removed": removed,
         "line_diff": diff,
+        **extra,
     }
 
 
@@ -1671,21 +1815,43 @@ def _tool_manage_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> An
         _, keys = _load()
         return {"filter_keys": keys, "count": len(keys)}
 
-    keyword = str(args.get("keyword", "") or "").strip()
-    if not keyword:
-        raise AgentToolError("keyword is required for add/remove")
+    # keyword 支持单个字符串或字符串数组（一次增删多个）：去重保序、忽略空串
+    raw_keyword = args.get("keyword")
+    if isinstance(raw_keyword, str):
+        keywords = [raw_keyword.strip()]
+    elif isinstance(raw_keyword, list):
+        keywords = [k.strip() for k in raw_keyword if isinstance(k, str)]
+    else:
+        keywords = []
+    keywords = [k for k in dict.fromkeys(keywords) if k]
+    if not keywords:
+        raise AgentToolError("keyword is required for add/remove（字符串或字符串数组）")
 
     config, keys = _load()
+    existing = set(keys)
     if action == "add":
-        if keyword in keys:
-            return {"filter_keys": keys, "count": len(keys), "added": False, "note": f"「{keyword}」已在列表中"}
-        keys.append(keyword)
-        changes = [_change("problemFilterKey", None, keyword, "add")]
+        hit = [k for k in keywords if k not in existing]  # 实际新增
+        miss = [k for k in keywords if k in existing]  # 本来就有
+        changes = [_change("problemFilterKey", None, k, "add") for k in hit]
+        hit_key, miss_key, miss_note = "added", "already_present", "已在列表中"
     else:  # remove
-        if keyword not in keys:
-            return {"filter_keys": keys, "count": len(keys), "removed": False, "note": f"「{keyword}」不在列表中"}
-        keys.remove(keyword)
-        changes = [_change("problemFilterKey", keyword, None, "remove")]
+        hit = [k for k in keywords if k in existing]  # 实际移除
+        miss = [k for k in keywords if k not in existing]  # 本来就没有
+        changes = [_change("problemFilterKey", k, None, "remove") for k in hit]
+        hit_key, miss_key, miss_note = "removed", "not_found", "不在列表中"
+
+    if not hit:
+        return {
+            "filter_keys": keys,
+            "count": len(keys),
+            "note": f"这些关键字{miss_note}，过滤清单未变化",
+        }
+
+    if action == "add":
+        keys.extend(hit)
+    else:
+        removing = set(hit)
+        keys = [k for k in keys if k not in removing]
 
     config["common"]["problemFilterKey"] = keys
     runner._http_put(
@@ -1693,8 +1859,10 @@ def _tool_manage_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> An
         {"config": config, "config_file_name": config_name},
     )
     # 配置已写回：进度缓存按 mtime 自动失效，后续 list_problems 立即用新过滤
-    verb = "added" if action == "add" else "removed"
-    return {"filter_keys": keys, "count": len(keys), verb: True, "changes": changes}
+    result: dict[str, Any] = {"filter_keys": keys, "count": len(keys), hit_key: hit, "changes": changes}
+    if miss:
+        result[miss_key] = miss
+    return result
 
 
 def _parse_config_value(raw: Any) -> Any:
@@ -2089,11 +2257,13 @@ def _tool_list_transl_cache(runner: AgentRunner, _args: dict[str, Any]) -> Any:
         name = str(f.get("name", ""))
         if not name:
             continue
-        entry = {
-            "name": name,
-            "entries": f.get("entries", 0),
-            "size": f.get("size", 0),
-        }
+        entry: dict[str, Any] = {"name": name, "size": f.get("size", 0)}
+        # 后端 _list_dir_entries 只对 .json 统计 entry_count（按 list 长度，含 0）；
+        # .append.jsonl 等没有该字段时干脆不返回 entries，而不是填 0——否则会被
+        # 误读成「空缓存」。
+        entry_count = f.get("entry_count")
+        if isinstance(entry_count, int):
+            entry["entries"] = entry_count
         if name.endswith(".append.jsonl"):
             entry["status"] = "translating"
             translating += 1
@@ -2493,10 +2663,6 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "search_transl_cache": _tool_search_transl_cache,
     "patch_transl_cache": _tool_patch_transl_cache,
 }
-
-
-def _join_lines(lines: list[str]) -> str:
-    return "\n".join(lines)
 
 
 class AgentRuntime:
