@@ -20,6 +20,7 @@ import json
 import os
 import time
 from base64 import urlsafe_b64encode
+from collections import deque
 from typing import Any
 from uuid import uuid4
 
@@ -34,6 +35,11 @@ _SKIP_EVENT_TYPES = {"content_delta", "reasoning_delta", "wait_tick"}
 DEFAULT_TITLE = "新会话"
 # 标题最大字符数（超出截断并加省略号）
 TITLE_MAX_CHARS = 30
+# 转录回放时跳过的事件类型：瞬态数据（流式增量、等待倒计时、上下文用量指标），
+# 它们不进 events deque 也不该出现在重建出来的转录里
+_SKIP_TRANSCRIPT_TYPES = frozenset({"content_delta", "reasoning_delta", "wait_tick", "context_usage"})
+# 一次最多回放多少条转录事件（超出只保留最早的 user_message + 最近这段）
+TRANSCRIPT_MAX_EVENTS = 2000
 
 
 def _log(msg: str, *args: object) -> None:
@@ -255,10 +261,56 @@ def title_from_message(text: str, fallback: str = DEFAULT_TITLE) -> str:
     return line[:TITLE_MAX_CHARS] + "…"
 
 
+def read_meta(project_dir: str, session_id: str) -> dict[str, Any]:
+    """读会话 meta（标题/目标/配置文件/创建时间等）。"""
+    return _read_meta(SessionStore(project_dir, session_id).path)
+
+
 def session_title(project_dir: str, session_id: str, fallback: str = "") -> str:
     """读磁盘 meta 里的会话标题（内存中没有该会话状态时用）。"""
-    meta = _read_meta(SessionStore(project_dir, session_id).path)
+    meta = read_meta(project_dir, session_id)
     return str(meta.get("title") or fallback or session_id)
+
+
+def read_transcript(project_dir: str, session_id: str, limit: int = TRANSCRIPT_MAX_EVENTS) -> list[dict[str, Any]]:
+    """从会话日志回放转录事件（已提交的那部分），按发生顺序返回。
+
+    与 status().events 的区别：那个是内存里 500 条的滑动窗口，长期会话里最早的
+    记录会被挤掉；这里直接读会话 JSONL，转录不会因为窗口而缺头（pi 的 capture
+    snapshot 也是同一个思路：转录从持久化日志派生，不从内存状态派生）。
+
+    超过 limit 时保留**首条 user_message + 最近 limit 条**——首条用户消息是会话
+    的身份锚点，丢了刷新后第一句话就没来源了。
+    """
+    path = SessionStore(project_dir, session_id).path
+    if not os.path.isfile(path):
+        return []
+    tail: deque[dict[str, Any]] = deque(maxlen=max(1, limit))
+    first_user: dict[str, Any] | None = None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                if '"event"' not in line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(rec, dict) or rec.get("t") != "event":
+                    continue
+                ev = rec.get("event")
+                if not isinstance(ev, dict) or ev.get("type") in _SKIP_TRANSCRIPT_TYPES:
+                    continue
+                if ev.get("type") == "user_message" and first_user is None:
+                    first_user = ev
+                tail.append(ev)
+    except Exception as exc:  # noqa: BLE001
+        _log(f"读取转录失败 {path}: {exc}")
+        return []
+    events = list(tail)
+    if first_user is not None and (not events or events[0] is not first_user):
+        events.insert(0, first_user)
+    return events
 
 
 def has_user_message(project_dir: str, session_id: str) -> bool:

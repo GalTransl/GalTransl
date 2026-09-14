@@ -2163,6 +2163,34 @@
   background: currentColor;
 }
 
+/* 已用上下文指示器：环形进度条，悬停显示「百分比 · 已用 / 窗口」（原生 title 提示） */
+.agent-context-meter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  margin-right: 1px;
+  cursor: default;
+}
+
+.agent-context-meter__track {
+  stroke: var(--agent-tile-strong);
+}
+
+.agent-context-meter__value {
+  stroke: #3b82f6;
+  transition:
+    stroke-dasharray var(--dur-standard) var(--ease-decel),
+    stroke var(--dur-fast) var(--ease-decel);
+}
+
+/* 接近压缩触发线（80%）：转警示色，提示上下文快满了 */
+.agent-context-meter.is-warn .agent-context-meter__value {
+  stroke: var(--color-danger);
+}
+
 /* ── Responsive ── */
 
 @media (max-width: 720px) {

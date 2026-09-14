@@ -24,11 +24,14 @@ import {
   resetAgent,
   subscribeAgentStream,
   fetchAgentStatus,
+  fetchAgentTranscript,
   listAgentSessions,
   createAgentSession,
   deleteAgentSession,
+  type AgentContextUsage,
   type AgentEvent,
   type AgentSession as AgentSessionMeta,
+  type AgentStreamingMessage,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 import { renderMarkdown } from '../lib/markdown';
@@ -120,10 +123,14 @@ const TRANSIENT_EVENT_TYPES = new Set<AgentEvent['type']>([
   'content_delta',
   'reasoning_delta',
   'wait_tick',
+  // 上下文用量只驱动指示器，不进转录、也不该进浏览器缓存（刷新后由状态快照给）
+  'context_usage',
 ]);
 
 function persistedTranscriptEvents(events: AgentEvent[]): AgentEvent[] {
-  return events.filter((event) => !TRANSIENT_EVENT_TYPES.has(event.type));
+  // streaming=true 的是"进行中的消息"快照合成的临时事件：每次都从后端快照重建，
+  // 绝不能进缓存或参与合并，否则会和收尾后的正式 assistant_message 重复一份。
+  return events.filter((event) => !TRANSIENT_EVENT_TYPES.has(event.type) && !event.streaming);
 }
 
 function boundTranscriptEvents(events: AgentEvent[], limit = 600): AgentEvent[] {
@@ -194,6 +201,11 @@ type TimelineGroup =
 function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
   const groups: TimelineGroup[] = [];
   let current: Extract<TimelineGroup, { type: 'activity' }> | null = null;
+  // 助手段落（parts）的认领游标：parts 与 delta 拼出来的卡片按顺序一一对应
+  // （两侧口径一致，见后端 _assistant_parts）。实时流里卡片已由 delta 建好，
+  // 这里按顺序认领并写入权威文本；重建时没有 delta，就按 parts 顺序新建。
+  // 游标只在同一个活动组内前进，组结束即归零。
+  let partsCursor = 0;
 
   // final=true 表示组被真正终结（用户消息/finish/error/stopped）：此时兜底
   // 撤掉残留光标。buildTimeline 每次全量重算，结尾的尾组冲刷不能算终结——
@@ -209,6 +221,7 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
     // （finish 把同文的流式 content 移出折叠区），只剩 finalContent 也要入组。
     if (current && (current.items.length || current.finalContent)) groups.push(current);
     current = null;
+    partsCursor = 0;
   };
 
   // 收掉指定流（content/reasoning）里所有还在流式的段：撤光标、记耗时。
@@ -242,8 +255,25 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
     return null;
   };
 
+  // 工具行 upsert：tool_call 事件与助手消息里的 tool_call 段落都走这里，按 id
+  // 复用同一行——两处都会发，界面不能出现两行。
+  const upsertToolCall = (
+    items: ActivityItem[],
+    step: number,
+    part: { id?: string; name?: string; arguments?: unknown },
+  ) => {
+    const existing = part.id ? items.find((it) => it.kind === 'tool' && it.id === part.id) : undefined;
+    if (existing) {
+      existing.name = part.name ?? existing.name;
+      existing.arguments = part.arguments;
+      return;
+    }
+    items.push({ kind: 'tool', step, id: part.id, name: part.name, arguments: part.arguments });
+  };
+
   for (const ev of events) {
-    if (ev.type === 'status' || ev.type === 'close') continue;
+    // status/close/context_usage 是控制与指标事件，不进对话转录
+    if (ev.type === 'status' || ev.type === 'close' || ev.type === 'context_usage') continue;
 
     // 用户消息独立成行（右对齐气泡），并打断当前活动组。
     if (ev.type === 'user_message') {
@@ -303,28 +333,49 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
       continue;
     }
 
-    // 思考流结束：卡片收尾（撤光标、记耗时）。只挂在已有卡片上，不新建
-    // （恢复会话时 delta 是瞬态的、已不可回放，没有内容就没有卡片）。
+    // 思考流结束：卡片收尾（撤光标、记耗时）。只挂在已有卡片上、不新建——
+    // 重建时的卡片由 assistant_message 的 parts 建（delta 是瞬态的，不回放）。
     if (ev.type === 'reasoning_end') {
       endStreamKind('reasoning', ev.duration_ms);
       continue;
     }
 
+    // 助手消息：思考/正文/工具调用的有序段落，转录里文本的唯一来源。
+    // delta 是瞬态的（刷新/切会话后根本不存在），重建完全靠这里；实时流里则
+    // 按顺序"认领"delta 已经建好的卡片、写入权威文本（幂等，不会多出一份）。
+    // streaming=true 的是"进行中"快照（status().streaming 合成），后续 delta
+    // 会继续往这批卡片上追加。
+    if (ev.type === 'assistant_message') {
+      if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
+      const partial = Boolean(ev.streaming);
+      for (const part of ev.parts || []) {
+        if (part.type === 'tool_call') {
+          upsertToolCall(current.items, ev.step, part);
+          continue;
+        }
+        const kind = part.type === 'reasoning' ? 'reasoning' : 'content';
+        let claimed: ActivityItem | undefined;
+        for (let i = partsCursor; i < current.items.length; i += 1) {
+          if (current.items[i].kind === kind) {
+            claimed = current.items[i];
+            partsCursor = i + 1;
+            break;
+          }
+        }
+        if (claimed) {
+          claimed.content = part.text;
+          claimed.streaming = partial;
+        } else {
+          current.items.push({ kind, step: ev.step, content: part.text, streaming: partial });
+          partsCursor = current.items.length;
+        }
+      }
+      continue;
+    }
+
     if (ev.type === 'tool_call') {
       if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
-      const existing = ev.id ? current.items.find((it) => it.kind === 'tool' && it.id === ev.id) : undefined;
-      if (existing) {
-        existing.name = ev.name ?? existing.name;
-        existing.arguments = ev.arguments;
-      } else {
-        current.items.push({
-          kind: 'tool',
-          step: ev.step,
-          id: ev.id,
-          name: ev.name,
-          arguments: ev.arguments,
-        });
-      }
+      upsertToolCall(current.items, ev.step, { id: ev.id, name: ev.name, arguments: ev.arguments });
       continue;
     }
 
@@ -525,6 +576,48 @@ function formatCountdown(ms: number): string {
   const s = total % 60;
   if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/** token 数显示：1000 起用 K（1 位小数），如 128.4K / 1000.0K。 */
+function formatTokenCount(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  if (n < 1000) return String(Math.round(n));
+  return `${(n / 1000).toFixed(1)}K`;
+}
+
+/** 已用上下文/上下文窗口的环形指示器（悬停显示百分比与具体 token 数）。
+ *  达到压缩触发线（80%）后转为警示色。 */
+function ContextMeter({ usage }: { usage: AgentContextUsage }) {
+  const window = usage.window_tokens > 0 ? usage.window_tokens : 0;
+  const used = Math.max(0, usage.used_tokens);
+  const ratio = window > 0 ? Math.min(1, used / window) : 0;
+  const percent = ratio * 100;
+  const r = 7;
+  const circumference = 2 * Math.PI * r;
+  const detail = `${percent.toFixed(1)}% · ${formatTokenCount(used)} / ${formatTokenCount(window)} 上下文已使用`;
+  return (
+    <span
+      className={`agent-context-meter${percent >= 80 ? ' is-warn' : ''}`}
+      title={detail}
+      aria-label={detail}
+      role="img"
+    >
+      <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
+        <circle className="agent-context-meter__track" cx="10" cy="10" r={r} fill="none" strokeWidth="2.5" />
+        <circle
+          className="agent-context-meter__value"
+          cx="10"
+          cy="10"
+          r={r}
+          fill="none"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeDasharray={`${circumference * ratio} ${circumference}`}
+          transform="rotate(-90 10 10)"
+        />
+      </svg>
+    </span>
+  );
 }
 
 function formatDuration(ms: number | undefined): string {
@@ -768,6 +861,9 @@ export function AgentPage() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   // 界面上的「发送中」乐观态：消息已发出但后端尚未确认
   const [sending, setSending] = useState(false);
+  // 已用上下文/上下文窗口（composer 右下角指示器）：
+  // 基线来自会话状态快照，运行中由 context_usage 事件实时更新。
+  const [contextUsage, setContextUsage] = useState<AgentContextUsage | null>(null);
   // 会话列表按项目分组：projectDir -> 该项目的会话列表
   const [sessionsByProject, setSessionsByProject] = useState<Record<string, AgentSessionMeta[]>>({});
   // 侧边栏每个项目分组的折叠态（默认当前活动项目展开，其余折叠）
@@ -925,6 +1021,7 @@ export function AgentPage() {
       setEvents([]);
       setRunning(false);
       setStatus('idle');
+      setContextUsage(null);
       return;
     }
     // 先用 localStorage 的缓存立刻渲染，避免切换时闪白
@@ -936,30 +1033,35 @@ export function AgentPage() {
     hasBackendSessionRef.current = Boolean(persisted?.events.length);
 
     fetchAgentStatus(effectiveProject, activeSessionId)
-      .then((snap) => {
+      .then(async (snap) => {
         if (cancelled || syncVersion !== statusSyncVersionRef.current) return;
         if (sendingRef.current && activeSessionId === sendTransitionRef.current) return;
-        // 后端是权威来源：新会话后端空（events=0）时必须覆盖本地可能残留的
-        // 旧缓存，否则会错把别的会话的内容糊在新建会话上。
+        // 转录的权威来源是后端会话日志（回放已提交事件，不受内存事件窗口与本地
+        // 缓存条数限制）；拿不到（旧后端/网络抖动）就退回本地缓存。
+        const transcript = await fetchAgentTranscript(effectiveProject, activeSessionId).catch(() => null);
+        if (cancelled || syncVersion !== statusSyncVersionRef.current) return;
         const snapEvents = snap.events || [];
-        const snapLen = snapEvents.length;
-        if (snapLen === 0) {
-          // 新建空会话：后端空快照应清掉可能残留的本地缓存。
+        const base = transcript && transcript.length ? transcript : persisted?.events || [];
+        if (!base.length) {
+          // 新建空会话：后端空快照应清掉可能残留的本地缓存，避免把别的会话的
+          // 内容糊在新建会话上。
           setEvents([]);
           lastStepRef.current = 0;
           hasBackendSessionRef.current = false;
         } else {
-          // 本地缓存上限为 600、后端内存窗口为 500，不能再用数组长度判断
-          // 谁“更权威”。按 step 合并，既保留本地较早历史，也接纳后端恢复时
-          // 补出的首条 user_message。
-          const mergedEvents = mergeTranscriptEvents(persisted?.events || [], snapEvents);
-          setEvents(mergedEvents);
-          lastStepRef.current = maxStep(mergedEvents);
+          // 日志与快照按 step 合并（同 step 以快照为准，它能恢复出首条 user_message）；
+          // 再把"正在生成的那半条消息"接在尾部（pi 的 streamingMessage）。
+          const mergedEvents = mergeTranscriptEvents(base, snapEvents);
+          setEvents(seedStreaming(mergedEvents, snap.streaming));
+          // 续订游标要跳过快照里已经包含的增量，否则会把同一段增量补第二遍
+          lastStepRef.current = Math.max(maxStep(mergedEvents), snap.streaming?.step ?? 0);
           hasBackendSessionRef.current = true;
         }
         const snapRunning = snap.status === 'running';
         setStatus(snap.status);
         setRunning(snapRunning);
+        // 上下文用量以快照为准（切会话/刷新后不用等下一次 LLM 请求）
+        setContextUsage(snap.context || null);
         if (snapRunning) subscribeStream(effectiveProject, activeSessionId);
       })
       .catch(() => {
@@ -1024,6 +1126,8 @@ export function AgentPage() {
         }
         if (ev.type === 'status') {
           if (ev.status) setStatus(ev.status);
+          // 订阅到一个已在运行的会话时，首帧快照里就带着上下文用量
+          if (ev.context) setContextUsage(ev.context);
           // status 快照绝不主动 abort：订阅时回合可能已结束（首帧即终态），
           // 但事件还在流里没发完，掐流会吞掉全部内容。流的关闭交给 close 帧
           // 或 finish/stopped/error 事件。
@@ -1037,6 +1141,12 @@ export function AgentPage() {
         if (typeof ev.step === 'number' && ev.step >= 0) {
           if (ev.step <= lastStepRef.current) return;
           lastStepRef.current = ev.step;
+        }
+        // 上下文用量：只更新指示器，不进对话转录（否则每次请求都会在
+        // 界面上多出一条无意义记录，刷新后由 status 快照兜底）
+        if (ev.type === 'context_usage') {
+          if (ev.context) setContextUsage(ev.context);
+          return;
         }
         if (ev.type === 'user_message') {
           // 后端已收录这条消息：用真实事件替换本地乐观的占位（step=-1），
@@ -1328,6 +1438,7 @@ export function AgentPage() {
     setEvents([]);
     setStatus('idle');
     setError(null);
+    setContextUsage(null);
     localMsgIdsRef.current.clear();
     hasBackendSessionRef.current = false;
     lastStepRef.current = 0;
@@ -1603,6 +1714,9 @@ export function AgentPage() {
               </div>
             </div>
             <div className="agent-composer__right">
+              {contextUsage && contextUsage.used_tokens > 0 ? (
+                <ContextMeter usage={contextUsage} />
+              ) : null}
               {running ? (
                 <>
                   <button
@@ -1651,6 +1765,23 @@ function maxStep(events: AgentEvent[]): number {
     if (typeof ev.step === 'number' && ev.step > max) max = ev.step;
   }
   return max;
+}
+
+/** 把「正在生成的助手消息」接在转录尾部（pi 的 streamingMessage 语义）。
+ *  刷新/切会话时照样看得到正在写的思考与正文，随后的 delta 会继续往这批卡片上
+ *  追加；等响应落定，正式的 assistant_message 事件会认领并校正它们。
+ *  step 取快照自报的序号，调用方据此推进续订游标，避免重复补增量。 */
+function seedStreaming(
+  events: AgentEvent[],
+  streaming: AgentStreamingMessage | null | undefined,
+): AgentEvent[] {
+  if (!streaming || !streaming.parts?.length) return events;
+  return [...events, {
+    type: 'assistant_message',
+    step: streaming.step,
+    parts: streaming.parts,
+    streaming: true,
+  }];
 }
 
 function mergeTranscriptEvents(cached: AgentEvent[], backend: AgentEvent[]): AgentEvent[] {

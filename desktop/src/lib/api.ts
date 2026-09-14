@@ -1543,11 +1543,36 @@ export type AgentEventType =
   | 'llm_retry_start'
   | 'llm_retry_end'
   | 'compacted'
+  | 'context_usage'
+  | 'assistant_message'
   | 'finish'
   | 'error'
   | 'stopped'
   | 'status'
   | 'close';
+
+/** 已用上下文 / 上下文窗口（token）。used_tokens 为估算值（含系统提示与对话历史）。 */
+export type AgentContextUsage = {
+  used_tokens: number;
+  window_tokens: number;
+};
+
+/**
+ * 助手消息的有序段落（pi 的 AssistantMessage.content 模型）。
+ * 思考与正文随消息一起持久化，所以刷新/切会话/重连后仍能重建出卡片；
+ * 流式增量只是实时打字机效果，不是转录的来源。
+ */
+export type AgentMessagePart =
+  | { type: 'reasoning'; text: string }
+  | { type: 'text'; text: string }
+  | { type: 'tool_call'; id?: string; name?: string; arguments?: string };
+
+/** 正在生成的助手消息（进行中）：重连时据此把"那半条消息"照原样补出来。 */
+export type AgentStreamingMessage = {
+  /** 快照覆盖到的事件序号，客户端据此续订 SSE（避免重复补增量） */
+  step: number;
+  parts: AgentMessagePart[];
+};
 
 export type AgentEvent = {
   type: AgentEventType;
@@ -1589,6 +1614,12 @@ export type AgentEvent = {
   // finish
   summary?: string;
   total_steps?: number;
+  // context_usage 事件 / status 快照里的上下文用量
+  context?: AgentContextUsage;
+  // assistant_message：助手消息的有序段落（思考/正文/工具调用）
+  parts?: AgentMessagePart[];
+  /** true 表示这是"进行中"的段落快照（由 status().streaming 合成，非持久化事件） */
+  streaming?: boolean;
   // status
   status?: string;
   traceback?: string;
@@ -1608,6 +1639,10 @@ export type AgentStatus = {
   started_at?: number;
   finished_at?: number;
   error?: string;
+  /** 已用上下文/窗口（界面指示器用；会话为空时 used_tokens 为 0） */
+  context?: AgentContextUsage;
+  /** 正在生成的助手消息（没有进行中的响应时为 null/缺省） */
+  streaming?: AgentStreamingMessage | null;
   events?: AgentEvent[];
 };
 
@@ -1679,6 +1714,19 @@ export async function listAgentSessions(projectDir: string) {
     `/api/agent/sessions?project_dir=${encodeURIComponent(projectDir)}`,
   );
   return res.sessions || [];
+}
+
+/**
+ * 回放某会话的已提交转录（后端从会话日志读，不受内存事件窗口限制）。
+ * 这是界面重建转录的权威历史来源；status().events 只当补充。
+ */
+export async function fetchAgentTranscript(projectDir: string, sessionId?: string, limit?: number) {
+  const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : '';
+  const lim = limit ? `&limit=${limit}` : '';
+  const res = await apiRequest<{ events: AgentEvent[] }>(
+    `/api/agent/transcript?project_dir=${encodeURIComponent(projectDir)}${sid}${lim}`,
+  );
+  return res.events || [];
 }
 
 /** Create an empty session (no turn started). Title defaults to 占位「新会话」，

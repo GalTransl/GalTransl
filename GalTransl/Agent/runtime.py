@@ -31,10 +31,11 @@ DEFAULT_BACKEND_PORT = 12333
 DEFAULT_CONFIG_FILE = "config.yaml"
 MAX_STEPS = 32
 RUNTIME_EVENT_KEEP = 500
-# 瞬态事件：只进当前回合的 SSE 流 + 落盘（delta 由 SessionStore 再筛），
-# 不进内存 events deque。它们量最大（一次流式几十条），若进 deque 会把
-# user_message/tool_call 等长期事件挤出 maxlen 窗口，前端刷新后就丢内容。
-_TRANSIENT_EVENT_TYPES = frozenset({"content_delta", "reasoning_delta", "wait_tick"})
+# 瞬态事件：只进当前回合的 SSE 流，不进内存 events deque（也不落盘）。
+# 两类：一类是流式增量（一次请求几十条，进 deque 会把 user_message/tool_call
+# 等长期事件挤出 maxlen 窗口，前端刷新后就丢内容）；一类是能从状态快照重建的
+# 实时指标（context_usage），刷新后由 status() 重新给出即可，不必占转录。
+_TRANSIENT_EVENT_TYPES = frozenset({"content_delta", "reasoning_delta", "wait_tick", "context_usage"})
 
 # ---- 上下文预算 ----
 # 后端配置未指定 contextWindow 时的默认窗口（token）
@@ -320,6 +321,8 @@ class AgentState:
     last_prompt_tokens: int = 0
     # 锚点对应的历史长度：锚点之后新增的消息要另外估算
     anchored_message_count: int = 0
+    # 上下文窗口（token），来自后端配置 contextWindow；界面指示器的分母
+    context_window: int = DEFAULT_CONTEXT_WINDOW
     # 从磁盘恢复的会话标记（本次进程内还没跑过回合）
     restored: bool = False
 
@@ -347,6 +350,9 @@ class AgentRunner:
         self._model: str = ""
         self._context_window = DEFAULT_CONTEXT_WINDOW
         self._compacted_this_turn = False
+        # 正在生成中的助手消息累加器（pi 的 streamingMessage）：引用流式期间
+        # 那几份 list/dict，响应落定后由 _take_stream_acc 取走并置空。
+        self._stream_acc: dict[str, Any] | None = None
         self._emit_lock = threading.Lock()
         # 会话落盘器：state 里没有 session_id（理论上不该发生）时退化为内存态
         self._store = SessionStore(state.project_dir, state.session_id) if state.session_id else None
@@ -391,8 +397,9 @@ class AgentRunner:
             raise RuntimeError("backend profile token is empty (请先在「翻译后端配置」页填写 token)")
         if not model:
             raise RuntimeError("backend profile modelName is empty (请先在「翻译后端配置」页填写 modelName)")
-        # 上下文窗口：可选配置，缺省用默认值。用于压缩触发判断。
-        self._context_window = _parse_context_window(first.get("contextWindow"))
+        # 上下文窗口：可选配置，缺省用默认值。用于压缩触发判断与界面用量指示。
+        self._context_window = _profile_context_window(profile)
+        self.state.context_window = self._context_window
         base_url = _normalize_endpoint(endpoint)
         masked = (token[:4] + "…" + token[-4:]) if len(token) > 8 else "***"
         _log(f"LLM 配置: model={model} endpoint={base_url} token={masked} context_window={self._context_window}")
@@ -440,11 +447,18 @@ class AgentRunner:
                 # 历史过长先压缩，避免下一步请求撑爆上下文窗口
                 self._maybe_compact()
 
+                # 上下文用量（界面指示器）：压缩之后再报，界面上立即看到回落
+                self._emit_context_usage()
+
                 loop_step = turns + 1
                 turns += 1
                 _log(f"—— 第 {loop_step}/{MAX_STEPS} 轮：请求 LLM（流式）中…")
                 req_started = time.time()
-                content, tool_calls, finish_reason = self._stream_llm_response()
+                try:
+                    content, tool_calls, finish_reason = self._stream_llm_response()
+                finally:
+                    # 响应已落定（或抛错）：不再对外暴露"进行中的消息"
+                    acc = self._take_stream_acc()
                 streamed_content = bool(content)
                 req_ms = int((time.time() - req_started) * 1000)
                 _log(f"LLM 返回（耗时 {req_ms}ms）：content 长度={len(content)} tool_calls={len(tool_calls)} finish={finish_reason}")
@@ -459,6 +473,8 @@ class AgentRunner:
                 # 这里直接丢弃本批工具调用，把失败写回历史让模型重试。
                 if tool_calls and finish_reason == "length":
                     _log(f"  ⚠ 响应被截断（finish_reason=length），丢弃 {len(tool_calls)} 个工具调用")
+                    # 思考/正文照常进转录，被丢弃的那批工具调用不进（它们没执行）
+                    self._emit_assistant_message(acc, drop_tools=True)
                     self._persist_message({"role": "assistant", "content": content} if content else {"role": "assistant", "content": ""})
                     truncated_msg = (
                         "上一次响应因达到输出长度上限被截断，其中的工具调用可能不完整，已全部丢弃、未执行。"
@@ -481,6 +497,11 @@ class AgentRunner:
                     preview = content if len(content) <= 120 else content[:117] + "…"
                     _log(f"  💭 思考: {preview}")
                     self._emit("content", {"content": content})
+
+                # 助手消息落定：思考/正文/工具调用作为有序 parts 提交（转录的文本
+                # 来源）。放在 tool_call 事件之前，界面先按 parts 校正文本卡片，
+                # 再由后面的 tool_call/tool_result 事件按 id 更新工具行。
+                self._emit_assistant_message(acc)
 
                 if not tool_calls:
                     # 收尾回复也要写进历史，下一轮对话才能看到 Agent 说过什么
@@ -623,6 +644,43 @@ class AgentRunner:
         _log(f"  💬 注入用户插话 x{len(msgs)}")
         return msgs
 
+    # ---- 助手消息（转录里思考/正文的唯一来源）----
+
+    def _take_stream_acc(self) -> dict[str, Any] | None:
+        """取走并清空"进行中消息"的累加器（响应落定或失败时调用）。"""
+        acc = self._stream_acc
+        self._stream_acc = None
+        return acc
+
+    def live_streaming(self) -> dict[str, Any] | None:
+        """当前正在生成的助手消息快照（pi 的 streamingMessage），没有则 None。
+
+        status() 直接调它：界面刷新/切会话时能把"正在写的那半条消息"照原样画
+        出来，不用等它收尾。step 是快照覆盖到的事件序号，客户端据此续订 SSE，
+        避免把快照里已经包含的增量又补一遍。
+        """
+        acc = self._stream_acc
+        if acc is None:
+            return None
+        parts = _assistant_parts(acc)
+        if not parts:
+            return None
+        return {"step": self.state.step, "parts": parts}
+
+    def _emit_assistant_message(self, acc: dict[str, Any] | None, *, drop_tools: bool = False) -> None:
+        """把一条已落定的助手响应提交为持久化事件。
+
+        content_delta / reasoning_delta 是瞬态的（不落盘、不进快照），思考与正文
+        只有并入这里才成为转录的一部分——刷新/切会话/重连后重建得出来，靠的就是
+        它。drop_tools 用于"响应被截断、工具调用已丢弃"的场景。
+        """
+        parts = _assistant_parts(acc)
+        if drop_tools:
+            parts = [p for p in parts if p["type"] != "tool_call"]
+        if not parts:
+            return
+        self._emit("assistant_message", {"parts": parts})
+
     # ---- 流式 LLM 响应 ----
     def _stream_llm_response(self) -> tuple[str, list[dict[str, Any]], str]:
         """带自动重试的流式请求：失败时退避重试，并把过程实时推给界面。
@@ -650,6 +708,9 @@ class AgentRunner:
                         ) from exc
                     raise
                 attempt += 1
+                # 失败那次尝试的半截内容作废：界面已按 llm_retry_start 丢掉这些卡片，
+                # 快照也别再挂着，免得刷新后又冒出来
+                self._stream_acc = None
                 delay_ms = _llm_retry_delay_ms(attempt, info)
                 _log(
                     f"  ⚠ 请求失败（{info['code']}: {info['message']}），"
@@ -718,6 +779,13 @@ class AgentRunner:
         reasoning_parts: list[str] = []  # 「想」：思考内容，只展示不进历史
         # index -> {id, name, arguments_parts}
         tool_calls_acc: dict[int, dict[str, Any]] = {}
+        # 对外暴露"正在生成的助手消息"（status().streaming）：这里只挂引用，
+        # 快照按需即时组装（见 live_streaming），不随每个 delta 重建。
+        self._stream_acc = {
+            "content": content_parts,
+            "reasoning": reasoning_parts,
+            "tools": tool_calls_acc,
+        }
         pending_content: list[str] = []  # 距上次 emit 攒下的回复文本（节流缓冲）
         pending_reasoning: list[str] = []  # 距上次 emit 攒下的思考文本（节流缓冲）
         throttle: dict[str, float] = {"content": 0.0, "reasoning": 0.0}
@@ -836,18 +904,25 @@ class AgentRunner:
 
     # ---- 上下文用量估算与压缩 ----
     def _estimate_context_tokens(self) -> int:
-        """估算当前历史占用的 token 数。
+        """估算当前历史占用的 token 数（锚点法，见 _estimate_usage_tokens）。"""
+        return _estimate_usage_tokens(
+            self.state.messages,
+            self.state.last_prompt_tokens,
+            self.state.anchored_message_count,
+        )
 
-        抄 pi 的用法锚定法：有上一次响应的 prompt_tokens 作锚点时，只对锚点
-        之后新增的消息按字符数估算；没有锚点就整体估算。不引入 tokenizer 依赖。
+    def _emit_context_usage(self) -> None:
+        """把当前上下文用量推给界面（指示器）。
+
+        走瞬态事件：刷新页面后由 status() 里的 context 快照重新给出，不必占
+        对话转录（否则每次 LLM 请求都会在界面上多出一条无意义记录）。
         """
-        messages = self.state.messages
-        anchor = self.state.last_prompt_tokens
-        anchored = self.state.anchored_message_count
-        if anchor > 0 and 0 <= anchored <= len(messages):
-            tail = messages[anchored:]
-            return anchor + sum(_estimate_message_tokens(m) for m in tail)
-        return sum(_estimate_message_tokens(m) for m in messages)
+        self._emit("context_usage", {
+            "context": {
+                "used_tokens": self._estimate_context_tokens(),
+                "window_tokens": self._context_window,
+            },
+        })
 
     def _maybe_compact(self) -> None:
         """历史过长时压缩早期对话。每次回合最多压一次，失败降级为本地截断。
@@ -984,6 +1059,21 @@ def _parse_context_window(raw: Any) -> int:
     return value
 
 
+def _profile_context_window(profile: dict[str, Any] | None) -> int:
+    """从后端配置里取上下文窗口（与 AgentRunner._resolve_llm 同一口径）。
+
+    窗口配在 OpenAI-Compatible.tokens[0].contextWindow，缺省/非法时用默认值。
+    AgentRuntime.start 要在建会话时就知道窗口（写进状态供界面显示），所以抽出来
+    共用，避免两处解析口径漂移。
+    """
+    openai_section = (profile or {}).get("OpenAI-Compatible") or {}
+    if isinstance(openai_section, dict):
+        tokens = openai_section.get("tokens") or []
+        if isinstance(tokens, list) and tokens and isinstance(tokens[0], dict):
+            return _parse_context_window(tokens[0].get("contextWindow"))
+    return DEFAULT_CONTEXT_WINDOW
+
+
 def _estimate_message_tokens(message: dict[str, Any]) -> int:
     """单条消息的 token 粗估：正文 + tool_calls 的参数 JSON，按字符数/4。"""
     total_chars = 0
@@ -999,6 +1089,47 @@ def _estimate_message_tokens(message: dict[str, Any]) -> int:
             total_chars += len(str(fn.get("arguments") or ""))
     # 每条消息的固定开销（role/分隔符等）
     return total_chars // CHARS_PER_TOKEN + 4
+
+
+def _assistant_parts(acc: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """把一条助手响应的累加器拍成有序 parts（pi 的 AssistantMessage.content 模型）。
+
+    段落顺序：思考 → 正文 → 工具调用。同类文本会归并成一段，不按「想/说」交替
+    逐段切分——provider 交替推思考时碎片极多，逐段成卡片会把界面刷爆；界面本身
+    也是按类归并渲染的（见 AgentPage 的 findAppendTarget），两边口径必须一致，
+    否则「进行中的消息」与 delta 拼出来的卡片对不上，收尾时会对不上号。
+
+    返回的是**可持久化的转录数据**：思考与正文只有进了这里，刷新/切会话后
+    才重建得出来（delta 事件是瞬态的、不落盘也不进快照）。
+    """
+    if not acc:
+        return []
+    parts: list[dict[str, Any]] = []
+    reasoning = "".join(acc.get("reasoning") or [])
+    if reasoning:
+        parts.append({"type": "reasoning", "text": reasoning})
+    content = "".join(acc.get("content") or [])
+    if content:
+        parts.append({"type": "text", "text": content})
+    for _, slot in sorted((acc.get("tools") or {}).items()):
+        parts.append({
+            "type": "tool_call",
+            "id": slot.get("id", ""),
+            "name": slot.get("name", ""),
+            "arguments": "".join(slot.get("arguments_parts") or []),
+        })
+    return parts
+
+
+def _estimate_usage_tokens(messages: list[dict[str, Any]], anchor: int = 0, anchored: int = 0) -> int:
+    """估算一段历史占用的 token 数（供压缩判断与界面用量指示共用）。
+
+    抄 pi 的用法锚定法：有上一次响应的 prompt_tokens 作锚点时，只对锚点之后
+    新增的消息按字符数估算；没有锚点就整体估算。不引入 tokenizer 依赖。
+    """
+    if anchor > 0 and 0 <= anchored <= len(messages):
+        return anchor + sum(_estimate_message_tokens(m) for m in messages[anchored:])
+    return sum(_estimate_message_tokens(m) for m in messages)
 
 
 def _is_tool_call_anchor(message: dict[str, Any]) -> bool:
@@ -3017,6 +3148,7 @@ class AgentRuntime:
             step=max_step,
             session_id=session_id,
             title=str(meta.get("title") or session_id),
+            context_window=int(meta.get("context_window") or DEFAULT_CONTEXT_WINDOW),
             restored=True,
         )
         state.events = ev_deque
@@ -3083,18 +3215,22 @@ class AgentRuntime:
                 started_at=time.time(),
                 session_id=sid,
                 title=title,
+                # 窗口在建会话时就定下来：界面指示器不用等第一轮请求
+                context_window=_profile_context_window(backend_profile_data),
             )
             runner = AgentRunner(state, host=host, port=port, stop_event=stop_event, registry=self)
             self._states.setdefault(key, {})[sid] = state
             self._runners.setdefault(key, {})[sid] = runner
             self._stop_events.setdefault(key, {})[sid] = stop_event
-            # meta 落盘：记录会话身份与运行标记，重启后据此恢复
+            # meta 落盘：记录会话身份与运行标记，重启后据此恢复。
+            # backend_profile_data（含 token）不落盘，只存窗口大小这一个整数。
             if runner._store is not None:
                 runner._store.append_meta(
                     project_dir=project_dir,
                     title=title,
                     goal=goal,
                     config_file_name=state.config_file_name,
+                    context_window=state.context_window,
                     created_at=state.started_at,
                     running=True,
                 )
@@ -3213,6 +3349,7 @@ class AgentRuntime:
         if state is None:
             return {"status": "idle", "project_dir": project_dir, "session_id": sid, "events": [], "step": 0}
         with self._lock:
+            runner = (self._runners.get(self._key(project_dir)) or {}).get(sid)
             return {
                 "status": state.status,
                 "project_dir": state.project_dir,
@@ -3223,8 +3360,41 @@ class AgentRuntime:
                 "started_at": state.started_at,
                 "finished_at": state.finished_at,
                 "error": state.error,
+                # 正在生成的助手消息（进行中）。与 events 里的已提交记录分离：
+                # 它就是 pi 的 streamingMessage，刷新/切会话时据此把半条消息补上。
+                "streaming": runner.live_streaming() if runner is not None else None,
+                # 上下文用量：界面指示器的兜底来源（实时更新走 context_usage 事件）。
+                # 打开页面/刷新时按当前历史现场估算，不依赖历史事件回放。
+                "context": {
+                    "used_tokens": _estimate_usage_tokens(
+                        state.messages,
+                        state.last_prompt_tokens,
+                        state.anchored_message_count,
+                    ),
+                    "window_tokens": state.context_window,
+                },
                 "events": [e.to_dict() for e in state.events],
             }
+
+    def transcript(self, project_dir: str, session_id: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+        """会话转录：已提交事件的完整回放（从会话日志读）。
+
+        界面重建转录的权威来源。内存里的 events deque 只有 RUNTIME_EVENT_KEEP 条，
+        长期会话会缺头；这里读日志，并把首条用户消息当锚点保住。
+        """
+        sid = self._resolve_session_id(project_dir, session_id)
+        if sid is None:
+            return []
+        events = session_store.read_transcript(
+            project_dir, sid, limit or session_store.TRANSCRIPT_MAX_EVENTS
+        )
+        # 旧版本/异常退出可能没落下首条 user_message 事件：用 meta.goal 补一条，
+        # 否则刷新后用户的第一句就没了（与 _restore 的补救口径一致）。
+        if not any(ev.get("type") == "user_message" for ev in events):
+            goal = str((session_store.read_meta(project_dir, sid).get("goal") or "")).strip()
+            if goal:
+                events.insert(0, {"type": "user_message", "step": 0, "message": goal})
+        return events
 
     def drain_events(self, project_dir: str, after_step: int = 0, session_id: str | None = None) -> list[dict[str, Any]]:
         """取 after_step 之后的所有事件，供 SSE 增量推送。

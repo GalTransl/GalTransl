@@ -2381,6 +2381,23 @@ def build_handler(registry: JobRegistry):
                 self._send_json(AGENT_REGISTRY.status(project_dir, session_id))
                 return
 
+            # GET /api/agent/transcript — replay committed transcript events from the
+            # session log (authoritative history; status().events is a bounded window)
+            if path == "/api/agent/transcript":
+                params = parse_qs(parsed.query)
+                project_dir = params.get("project_dir", [""])[0]
+                session_id = params.get("session_id", [""])[0] or None
+                if not project_dir:
+                    self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                try:
+                    limit = int(params.get("limit", ["0"])[0])
+                except ValueError:
+                    limit = 0
+                events = AGENT_REGISTRY.transcript(project_dir, session_id, limit or None)
+                self._send_json({"events": events})
+                return
+
             # GET /api/agent/sessions — list sessions of a project
             if path == "/api/agent/sessions":
                 project_dir = parse_qs(parsed.query).get("project_dir", [""])[0]

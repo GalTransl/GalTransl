@@ -206,5 +206,56 @@ class ReasoningStreamTests(unittest.TestCase):
         self.assertTrue(seen_reasoning_end)
 
 
+class StreamingPartsSnapshotTests(unittest.TestCase):
+    """进行中的助手消息（pi 的 streamingMessage）+ 落定后的 parts。
+
+    回归背景：思考/正文以前只存在于瞬态 delta 事件里，刷新或切会话后重建的转录
+    里就只剩工具调用了。现在流式期间随时能拍到"正在生成的助手消息"，落定后由
+    调用方取走并提交成持久的 assistant_message 事件。
+    """
+
+    def _make_runner(self):
+        state = AgentState()
+        state.session_id = ""  # 不落盘
+        state.messages = [{"role": "user", "content": "hi"}]
+        runner = AgentRunner(state)
+        runner._model = "fake"
+        return runner, state
+
+    def test_snapshot_available_while_streaming_then_taken(self):
+        from GalTransl.Agent.runtime import _assistant_parts
+
+        runner, _ = self._make_runner()
+        seen: list[list[str] | None] = []
+
+        def create(**_kw):
+            chunks = [
+                _delta_chunk(reasoning="先想"),
+                _delta_chunk(content="再说"),
+                _tool_call_chunk(),
+            ]
+            for chunk in chunks:
+                # 每个 chunk 到达前拍一张"进行中消息"：模拟界面在流式期间调 status
+                snap = runner.live_streaming()
+                seen.append(None if snap is None else [p["type"] for p in snap["parts"]])
+                yield chunk
+
+        runner._openai_client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+
+        content, tool_calls, _ = runner._stream_llm_response()
+        self.assertEqual(content, "再说")
+        self.assertEqual(tool_calls[0]["name"], "get_runtime")
+        # 流式期间快照逐步长出来：思考 → 思考+正文（工具调用要等它自己的 delta）
+        self.assertEqual(seen, [None, ["reasoning"], ["reasoning", "text"]])
+
+        # 响应落定后由调用方取走：取走后不再对外暴露进行中消息
+        parts = _assistant_parts(runner._take_stream_acc())
+        self.assertIsNone(runner.live_streaming())
+        self.assertEqual([p["type"] for p in parts], ["reasoning", "text", "tool_call"])
+        self.assertEqual(parts[0]["text"], "先想")
+
+
 if __name__ == "__main__":
     unittest.main()
