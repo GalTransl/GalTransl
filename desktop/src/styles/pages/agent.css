@@ -209,22 +209,12 @@
   background: var(--agent-hover);
 }
 
-.agent-sessions__caret {
-  flex: none;
-  font-size: 9px;
-  line-height: 1;
-  color: var(--color-primary);
-  opacity: 0.7;
-  transition: transform 0.15s ease;
-  transform: rotate(-90deg);
-}
-
-.agent-sessions__caret.is-open {
-  transform: rotate(0deg);
-}
-
+/* 固定图标宽度：emoji 自然宽度随字体浮动，定宽后下方会话列表才能按确定
+   的偏移对齐到项目名（见 .agent-sessions__group-list 的 padding-left） */
 .agent-sessions__group-icon {
   flex: none;
+  width: 16px;
+  text-align: center;
   font-size: 13px;
   line-height: 1;
   transition: transform var(--dur-fast) var(--ease-default);
@@ -301,7 +291,10 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 1px 0 2px 10px;
+  /* 会话标题与项目名左对齐：
+     head 左内边距 2 + toggle 左内边距 7 + 图标 16 + 图标/名字间距 5 = 30px，
+     再减去条目自身的 8px 左内边距 → 22px */
+  padding: 1px 0 2px 22px;
   /* Grid-rows 展开折叠动画（与 .agent-activity__collapse 同方案） */
   min-height: 0;
 }
@@ -364,9 +357,9 @@
 
 .agent-session-item__main {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
   flex: 1;
   min-width: 0;
   padding: var(--space-2);
@@ -379,7 +372,8 @@
 }
 
 .agent-session-item__title {
-  max-width: 100%;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -392,7 +386,10 @@
   font-weight: 600;
 }
 
+/* 时间贴在行尾（删除按钮之前），不再另起一行 */
 .agent-session-item__time {
+  flex: none;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
@@ -658,64 +655,6 @@
   flex: none;
 }
 
-/* 右侧指标：ptv2-stat 式的「数值 + 标签」竖排，代替胶囊 */
-.agent-console__metric {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  padding: 2px 14px 2px 4px;
-  border-right: 1px dashed var(--agent-line);
-}
-
-.agent-console__metric:last-of-type {
-  border-right: 0;
-}
-
-.agent-console__metric-value {
-  font-size: 15px;
-  font-weight: 800;
-  color: var(--color-primary);
-  line-height: 1.15;
-  font-variant-numeric: tabular-nums;
-}
-
-.agent-console__metric-label {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--color-text-muted);
-}
-
-.agent-console__chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  max-width: 220px;
-  padding: 4px 11px;
-  border: 1px solid var(--agent-line-soft);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.6);
-  color: var(--color-text-muted);
-  font-size: 0.76rem;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-:root[data-theme='dark'] .agent-console__chip {
-  border-color: rgba(65, 83, 111, 0.62);
-  background: rgba(28, 40, 58, 0.6);
-}
-
-.agent-console__chip--warn {
-  border-color: rgba(169, 101, 0, 0.35);
-  background: var(--color-warning-soft);
-  color: var(--color-warning);
-}
-
 .agent-console__icon-btn {
   display: grid;
   place-items: center;
@@ -798,82 +737,6 @@
 @keyframes agent-pulse {
   0%, 100% { opacity: 0.35; }
   50% { opacity: 1; }
-}
-
-/* ── Settings drawer ── */
-
-.agent-settings {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-  margin: 0 24px;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--agent-line-soft);
-  border-radius: var(--radius-card);
-  background: rgba(255, 255, 255, 0.72);
-  flex: none;
-  animation: agent-settings-in 200ms var(--ease-decel) both;
-}
-
-:root[data-theme='dark'] .agent-settings {
-  border-color: rgba(65, 83, 111, 0.62);
-  background: rgba(28, 40, 58, 0.72);
-}
-
-@keyframes agent-settings-in {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: none; }
-}
-
-.agent-settings__field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 200px;
-  flex: 1;
-}
-
-.agent-settings__field span {
-  color: var(--color-text-muted);
-  font-size: 0.76rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.agent-settings__field input,
-.agent-settings__field select {
-  min-height: 38px;
-  padding: 0 12px;
-  border: 1px solid var(--agent-line-soft);
-  border-radius: 10px;
-  background: var(--color-surface-strong);
-  color: var(--color-text);
-  font: inherit;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-}
-
-.agent-settings__field input:focus,
-.agent-settings__field select:focus {
-  outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-soft);
-}
-
-.agent-settings__link {
-  border: 0;
-  background: none;
-  color: var(--color-primary);
-  font: inherit;
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 0 0 10px;
-}
-
-.agent-settings__link:hover {
-  text-decoration: underline;
 }
 
 /* ── Thread scroller — 面板内部区域，不再自带边框/投影 ── */
@@ -2030,7 +1893,8 @@
   flex-direction: column;
   align-items: center;
   gap: 5px;
-  padding: var(--space-3) var(--space-6) var(--space-4);
+  /* 底边距与左右一致，避免输入框下方显得比两侧紧 */
+  padding: var(--space-3) var(--space-6) var(--space-6);
   border-top: 1px solid var(--agent-line-soft);
   background: linear-gradient(0deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
 }
@@ -2154,6 +2018,94 @@
   white-space: nowrap;
 }
 
+/* ── 后端配置/模型小菜单（点 chip 在它上方弹出） ── */
+.agent-profile-picker {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.agent-composer__chip.is-open {
+  background: var(--agent-tile-strong);
+  color: var(--color-text);
+}
+
+.agent-profile-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 220px;
+  max-width: min(360px, 80vw);
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--agent-line);
+  border-radius: 12px;
+  background: var(--color-surface-strong);
+  box-shadow: 0 12px 30px rgba(16, 24, 40, 0.16);
+  animation: agent-profile-menu-in 140ms var(--ease-decel) both;
+}
+
+.agent-profile-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-profile-menu__item:hover {
+  background: var(--agent-hover);
+}
+
+.agent-profile-menu__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-profile-menu__check {
+  flex: none;
+  color: var(--color-primary);
+  font-size: 0.9rem;
+}
+
+.agent-profile-menu__chev {
+  flex: none;
+  color: var(--color-text-muted);
+}
+
+.agent-profile-menu__sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--agent-line-soft);
+}
+
+.agent-profile-menu__empty {
+  padding: 8px 10px;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+}
+
+@keyframes agent-profile-menu-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
 /* 发送/停止：蓝青渐变圆钮（对标 ptv2-launch-btn） */
 .agent-composer__send,
 .agent-composer__stop {
@@ -2211,15 +2163,6 @@
   background: currentColor;
 }
 
-.agent-composer__hint {
-  color: var(--color-text-muted);
-  font-size: 0.74rem;
-}
-
-.agent-composer__hint--warn {
-  color: var(--color-warning);
-}
-
 /* ── Responsive ── */
 
 @media (max-width: 720px) {
@@ -2266,16 +2209,17 @@
     max-width: 160px;
   }
 
+  /* 窄屏会话是横向平铺的窄卡片，挤下标题就好，时间藏掉 */
+  .agent-session-item__time {
+    display: none;
+  }
+
   .agent-session-item__delete {
     opacity: 1;
   }
 
   .agent-console__bar {
     flex-wrap: wrap;
-  }
-
-  .agent-console__chip {
-    display: none;
   }
 
   .agent-thread {
@@ -2285,6 +2229,7 @@
   .agent-console__composer {
     padding-left: var(--space-4);
     padding-right: var(--space-4);
+    padding-bottom: var(--space-4);
   }
 
   .agent-row--user .agent-bubble--user {

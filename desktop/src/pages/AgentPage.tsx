@@ -8,10 +8,10 @@ import {
 } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
 import {
   addOpenProject,
   AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
-  encodeProjectDir,
   getAgentDefaultBackendProfile,
   getBackendProfile,
   getBackendProfileNames,
@@ -562,6 +562,13 @@ function AgentSessionSidebar({
   onSelectSession: (dir: string, sid: string) => void;
   onDeleteSession: (dir: string, session: AgentSessionMeta) => void;
 }) {
+  // 相对时间（刚刚 / N分钟前）要定时重算，否则页面静止时数字会一直停着不动
+  const [, setTimeTick] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setTimeTick((n) => n + 1), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   return (
     <aside className="agent-sessions">
       <div className="agent-sessions__head">
@@ -600,7 +607,6 @@ function AgentSessionSidebar({
                     onClick={() => onToggleProject(dir)}
                     title={dir}
                   >
-                    <span className={`agent-sessions__caret${isCollapsed ? '' : ' is-open'}`}>▾</span>
                     <span className="agent-sessions__group-icon" aria-hidden>
                       {isCollapsed ? '📁' : '📂'}
                     </span>
@@ -675,15 +681,23 @@ function AgentSessionSidebar({
   );
 }
 
+/** 会话时间改成相对时间：刚刚 / N分钟前 / N小时前 / N天前，超过一周退回日期。 */
 function formatSessionTime(ts: number): string {
   if (!ts) return '';
-  const d = new Date(ts * 1000);
-  const now = new Date();
-  const sameDay = d.toDateString() === now.toDateString();
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  if (sameDay) return `${hh}:${mm}`;
-  return `${d.getMonth() + 1}/${d.getDate()}`;
+  const then = new Date(ts * 1000);
+  const time = then.getTime();
+  if (Number.isNaN(time)) return '';
+  const diffMs = Date.now() - time;
+  if (diffMs < 60_000) return '刚刚'; // 含时钟偏差导致的「未来时间」
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 60) return `${minutes}分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}天前`;
+  const showYear = then.getFullYear() !== new Date().getFullYear();
+  const md = `${then.getMonth() + 1}/${then.getDate()}`;
+  return showYear ? `${then.getFullYear()}/${md}` : md;
 }
 
 /* ── Main page ── */
@@ -750,7 +764,8 @@ export function AgentPage() {
   const [status, setStatus] = useState<string>('idle');
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // 后端配置/模型选择小菜单（点 composer 的 chip 打开）
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   // 界面上的「发送中」乐观态：消息已发出但后端尚未确认
   const [sending, setSending] = useState(false);
   // 会话列表按项目分组：projectDir -> 该项目的会话列表
@@ -789,6 +804,8 @@ export function AgentPage() {
   // 记忆的会话，而要保持空态等用户发消息创建新会话。置位后项目 effect
   // 会把 activeSessionId 清空而非取 remembered，随后清掉一次性标志。
   const skipRememberedSessionRef = useRef(false);
+  // 后端配置小菜单的容器：点外面要能关掉
+  const profilePickerRef = useRef<HTMLDivElement | null>(null);
   // 当前激活的会话 id，供回调读取（避免闭包读到旧值）
   const activeSessionRef = useRef('');
   const statusSyncVersionRef = useRef(0);
@@ -802,6 +819,27 @@ export function AgentPage() {
   useEffect(() => {
     effectiveProjectRef.current = projectDir;
   }, [projectDir]);
+
+  // 后端配置小菜单：点外部 / Esc 关闭；Agent 跑起来后也收起（此时不能切配置）
+  useEffect(() => {
+    if (!profileMenuOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (!profilePickerRef.current?.contains(e.target as Node)) setProfileMenuOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setProfileMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [profileMenuOpen]);
+
+  useEffect(() => {
+    if (running) setProfileMenuOpen(false);
+  }, [running]);
 
   const effectiveProject = projectDir;
 
@@ -1046,7 +1084,7 @@ export function AgentPage() {
     const profile = getBackendProfile(backendProfileName);
     if (!profile) {
       setError('请先选择一个翻译后端配置（并在「翻译后端配置」页填写 token/模型）');
-      setSettingsOpen(true);
+      setProfileMenuOpen(true);
       return;
     }
 
@@ -1302,18 +1340,6 @@ export function AgentPage() {
   }, [effectiveProject, refreshSessions]);
 
   const timeline = useMemo(() => buildTimeline(events), [events]);
-  const stepCount = useMemo(
-    () =>
-      timeline.reduce(
-        (n, g) =>
-          n +
-          (g.type === 'activity'
-            ? g.items.filter((it) => it.kind !== 'compact').length
-            : 1),
-        0,
-      ),
-    [timeline],
-  );
   const hasSession = events.length > 0;
   const canSend = Boolean(projectDir) && Boolean(backendProfileName) && goal.trim().length > 0 && !sending;
   const activeTitle =
@@ -1363,23 +1389,24 @@ export function AgentPage() {
         </div>
 
         <div className="agent-console__bar-right">
-          <span className="agent-console__metric" title="已记录步骤">
-            <span className="agent-console__metric-value">{stepCount}</span>
-            <span className="agent-console__metric-label">步数</span>
-          </span>
-          {backendProfileName ? (
-            <span className="agent-console__chip" title="翻译后端配置">⚙ {backendProfileName}</span>
-          ) : (
-            <span className="agent-console__chip agent-console__chip--warn">未配置后端</span>
-          )}
           <button
             type="button"
-            className={`agent-console__icon-btn${settingsOpen ? ' is-active' : ''}`}
-            onClick={() => setSettingsOpen((v) => !v)}
-            title="运行设置"
-            aria-expanded={settingsOpen}
+            className="agent-console__icon-btn"
+            onClick={() => { if (projectDir) void invoke('open_folder', { path: projectDir }); }}
+            disabled={!projectDir}
+            title={projectDir || '打开项目文件夹'}
+            aria-label="打开项目文件夹"
           >
-            ⚙
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M3 7.2c0-1.12.9-2.02 2-2.02h4.17c.53 0 1.04.21 1.41.59L12 7.2h7c1.1 0 2 .9 2 2.02v7.77c0 1.12-.9 2.02-2 2.02H5c-1.1 0-2-.9-2-2.02V7.2z"
+              />
+            </svg>
           </button>
           <button
             type="button"
@@ -1392,50 +1419,6 @@ export function AgentPage() {
           </button>
         </div>
       </header>
-
-      {settingsOpen ? (
-        <div className="agent-settings">
-          <label className="agent-settings__field">
-            <span>配置文件</span>
-            <input
-              type="text"
-              value={configFileName}
-              onChange={(e) => setConfigFileName(e.target.value)}
-              disabled={running}
-            />
-          </label>
-          <label className="agent-settings__field">
-            <span>翻译后端配置</span>
-            <select
-              value={backendProfileName}
-              onChange={(e) => {
-                setBackendProfileName(e.target.value);
-                profileTouchedRef.current = true;
-              }}
-              disabled={running}
-            >
-              {backendProfileNames.length === 0 ? (
-                <option value="">（未配置，请在「翻译后端配置」页添加）</option>
-              ) : (
-                backendProfileNames.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))
-              )}
-            </select>
-          </label>
-          {projectDir ? (
-            <button
-              type="button"
-              className="agent-settings__link"
-              onClick={() => navigate(`/project/${encodeProjectDir(projectDir)}/translate`)}
-            >
-              在工作台查看该项目 →
-            </button>
-          ) : null}
-        </div>
-      ) : null}
 
       <div className="agent-console__thread" ref={scrollRef} onScroll={handleScroll}>
         <div className="agent-thread">
@@ -1562,15 +1545,62 @@ export function AgentPage() {
                 <span className="agent-composer__chip-icon">📁</span>
                 <span className="agent-composer__chip-label">{projectDir ? shortName(projectDir) : '未选择项目'}</span>
               </span>
-              <button
-                type="button"
-                className="agent-composer__chip"
-                onClick={() => setSettingsOpen((v) => !v)}
-                title={backendProfileLabel ? `${backendProfileLabel} · 点击打开模型与配置` : '模型与配置'}
-              >
-                <span className="agent-composer__chip-icon">⚙</span>
-                <span className="agent-composer__chip-label">{backendProfileLabel || '未配置后端'}</span>
-              </button>
+              <div className="agent-profile-picker" ref={profilePickerRef}>
+                <button
+                  type="button"
+                  className={`agent-composer__chip${profileMenuOpen ? ' is-open' : ''}`}
+                  onClick={() => setProfileMenuOpen((v) => !v)}
+                  disabled={running}
+                  aria-haspopup="menu"
+                  aria-expanded={profileMenuOpen}
+                  title={running ? 'Agent 运行中，暂不能切换后端配置' : backendProfileLabel ? `${backendProfileLabel} · 点击切换后端配置` : '选择后端配置'}
+                >
+                  <span className="agent-composer__chip-icon">⚙</span>
+                  <span className="agent-composer__chip-label">{backendProfileLabel || '未配置后端'}</span>
+                </button>
+                {profileMenuOpen ? (
+                  <div className="agent-profile-menu" role="menu">
+                    {backendProfileNames.length === 0 ? (
+                      <div className="agent-profile-menu__empty">还没有后端配置</div>
+                    ) : (
+                      backendProfileNames.map((name) => (
+                        <button
+                          key={name}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={name === backendProfileName}
+                          className="agent-profile-menu__item"
+                          onClick={() => {
+                            setBackendProfileName(name);
+                            profileTouchedRef.current = true;
+                            setProfileMenuOpen(false);
+                          }}
+                        >
+                          <span className="agent-profile-menu__label">
+                            {formatProfileLabel(name, getBackendProfile(name))}
+                          </span>
+                          {name === backendProfileName ? (
+                            <span className="agent-profile-menu__check" aria-hidden>✓</span>
+                          ) : null}
+                        </button>
+                      ))
+                    )}
+                    <div className="agent-profile-menu__sep" />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="agent-profile-menu__item agent-profile-menu__item--action"
+                      onClick={() => {
+                        setProfileMenuOpen(false);
+                        navigate('/backend-profiles');
+                      }}
+                    >
+                      <span className="agent-profile-menu__label">管理后端配置</span>
+                      <span className="agent-profile-menu__chev" aria-hidden>›</span>
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             </div>
             <div className="agent-composer__right">
               {running ? (
@@ -1604,15 +1634,6 @@ export function AgentPage() {
             </div>
           </div>
         </div>
-        {!projectDir ? (
-          <div className="agent-composer__hint">先选择一个项目再启动 Agent</div>
-        ) : !backendProfileName ? (
-          <div className="agent-composer__hint agent-composer__hint--warn">
-            尚未选择翻译后端配置，点击上方 ⚙ 设置
-          </div>
-        ) : running ? null : hasSession ? (
-          <div className="agent-composer__hint">会话保留中 · 发送消息即可继续，🗑 可重置</div>
-        ) : null}
       </div>
       </div>
     </div>
@@ -1786,8 +1807,9 @@ function AgentActivityGroup({
   // 「想」（reasoning）也算思考内容：只有思考流的回合标签用「思考」而非「处理」
   const hasContent = items.some((it) => it.kind === 'content' || it.kind === 'reasoning');
   const toolCount = items.filter((it) => it.kind === 'tool').length;
-  // 压缩提示不算"工作步骤"，避免污染耗时与步数统计
-  const visibleCount = items.filter((it) => it.kind !== 'compact').length;
+  // 压缩与重试提示都不算"工作步骤"：前者是后台维护动作，后者只是同一次请求
+  // 的重发（一次重试一个步骤会把「重试 10 次」显示成 10 个步骤）
+  const visibleCount = items.filter((it) => it.kind !== 'compact' && it.kind !== 'retry').length;
 
   // 文案对齐 PI-Desktop zh-CN：运行中「思考中/处理中 · Ns」，结束「已思考/已处理 Ns」
   const label = isLive
