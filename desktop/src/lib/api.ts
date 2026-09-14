@@ -1540,6 +1540,8 @@ export type AgentEventType =
   | 'wait_start'
   | 'wait_tick'
   | 'wait_end'
+  | 'llm_retry_start'
+  | 'llm_retry_end'
   | 'compacted'
   | 'finish'
   | 'error'
@@ -1577,6 +1579,13 @@ export type AgentEvent = {
   removed?: number;
   summary_chars?: number;
   tokens_before?: number;
+  // llm_retry_start / llm_retry_end（LLM 请求失败自动重试）
+  attempt?: number;
+  max_attempts?: number;
+  delay_ms?: number;
+  code?: string;
+  ts?: number;
+  aborted?: boolean;
   // finish
   summary?: string;
   total_steps?: number;

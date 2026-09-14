@@ -154,7 +154,7 @@ function shortName(projectDir: string): string {
    This mirrors how modern agent clients avoid a wall of one-line cards. */
 
 type ActivityItem = {
-  kind: 'content' | 'reasoning' | 'tool' | 'compact';
+  kind: 'content' | 'reasoning' | 'tool' | 'compact' | 'retry';
   step: number;
   content?: string;
   id?: string;
@@ -175,6 +175,14 @@ type ActivityItem = {
   // compact: 上下文压缩提示
   removed?: number;
   summaryChars?: number;
+  // retry: LLM 请求失败自动重试（倒计时 + 第 N/M 次）
+  attempt?: number;
+  maxAttempts?: number;
+  retryDelayMs?: number;
+  retryStartedAtMs?: number;
+  retryCode?: string;
+  retryReason?: string;
+  retryDone?: boolean;
 };
 
 type TimelineGroup =
@@ -228,7 +236,7 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
     if (!current) return null;
     for (let i = current.items.length - 1; i >= 0; i -= 1) {
       const it = current.items[i];
-      if (it.kind === 'tool' || it.kind === 'compact') return null;
+      if (it.kind === 'tool' || it.kind === 'compact' || it.kind === 'retry') return null;
       if (it.kind === kind && it.streaming !== undefined) return it;
     }
     return null;
@@ -370,6 +378,47 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
       continue;
     }
 
+    // LLM 请求失败自动重试：先在活动组里放一条带倒计时的重试提示行，
+    // 并丢掉上一次尝试已经流出的半截内容（那次请求已作废，重试会整段重发）。
+    if (ev.type === 'llm_retry_start') {
+      if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
+      // 从末尾往前清掉本次失败尝试流出的 content/reasoning；遇到工具/压缩/重试行
+      // 说明已到上一轮边界，停止清除，避免误删之前的内容。
+      for (let i = current.items.length - 1; i >= 0; i -= 1) {
+        const it = current.items[i];
+        if (it.kind === 'content' || it.kind === 'reasoning') {
+          current.items.splice(i, 1);
+          continue;
+        }
+        break;
+      }
+      current.items.push({
+        kind: 'retry',
+        step: ev.step,
+        attempt: ev.attempt,
+        maxAttempts: ev.max_attempts,
+        retryDelayMs: ev.delay_ms,
+        retryStartedAtMs: typeof ev.ts === 'number' ? ev.ts * 1000 : Date.now(),
+        retryCode: ev.code,
+        retryReason: ev.reason,
+      });
+      continue;
+    }
+
+    // 退避结束、下一次尝试已发出：把重试行定格为「已重试」，停掉倒计时。
+    if (ev.type === 'llm_retry_end') {
+      if (current) {
+        for (let i = current.items.length - 1; i >= 0; i -= 1) {
+          const it = current.items[i];
+          if (it.kind === 'retry') {
+            it.retryDone = true;
+            break;
+          }
+        }
+      }
+      continue;
+    }
+
     // finish 是回合的收尾回复：作为活动组的 final 消息，渲染时提升为
     // 顶层普通文本（不折进折叠区），像对话里最后一条普通消息。
     if (ev.type === 'finish') {
@@ -482,13 +531,6 @@ function formatDuration(ms: number | undefined): string {
   if (!ms || ms < 1000) return `${ms || 0}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
   return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
-}
-
-function formatElapsed(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}m ${s}s`;
 }
 
 /* ── Session sidebar ──
@@ -709,7 +751,6 @@ export function AgentPage() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
   // 界面上的「发送中」乐观态：消息已发出但后端尚未确认
   const [sending, setSending] = useState(false);
   // 会话列表按项目分组：projectDir -> 该项目的会话列表
@@ -909,15 +950,6 @@ export function AgentPage() {
       finishedAt: status === 'running' ? 0 : Date.now(),
     });
   }, [events, status, effectiveProject, activeSessionId]);
-
-  // Elapsed timer while running.
-  useEffect(() => {
-    if (!running) return;
-    const tick = () => setElapsed(Math.max(0, Math.round((Date.now() - startRef.current) / 1000)));
-    tick();
-    const timer = window.setInterval(tick, 1000);
-    return () => window.clearInterval(timer);
-  }, [running]);
 
   // Follow the tail unless the user scrolled away.
   useEffect(() => {
@@ -1327,7 +1359,7 @@ export function AgentPage() {
               )}
             </div>
           </div>
-          <StatusPill status={status} running={running} elapsed={elapsed} />
+          <StatusPill status={status} running={running} />
         </div>
 
         <div className="agent-console__bar-right">
@@ -1481,8 +1513,9 @@ export function AgentPage() {
                     <span />
                     <span />
                   </span>
-                  <span className="agent-working__label">{workingLabel(timeline)}</span>
-                  <span className="agent-working__elapsed">{formatElapsed(elapsed)}</span>
+                  <span className={`agent-working__label${lastActivityItem(timeline)?.kind === 'retry' ? ' is-retry' : ''}`}>
+                    {workingLabel(timeline)}
+                  </span>
                 </div>
               ) : null}
             </>
@@ -1620,20 +1653,35 @@ function mergeTranscriptEvents(cached: AgentEvent[], backend: AgentEvent[]): Age
   return [...extras.filter((event) => event.step < 0), ...ordered];
 }
 
-function workingLabel(timeline: TimelineGroup[]): string {
+/** 当前活动组最后一条被渲染的条目（决定运行指示器的文案与配色）。 */
+function lastActivityItem(timeline: TimelineGroup[]): ActivityItem | null {
   const last = timeline[timeline.length - 1];
   if (last && last.type === 'activity' && last.items.length) {
-    const item = last.items[last.items.length - 1];
+    return last.items[last.items.length - 1];
+  }
+  return null;
+}
+
+function workingLabel(timeline: TimelineGroup[]): string {
+  const item = lastActivityItem(timeline);
+  if (item) {
     if (item.kind === 'content' || item.kind === 'reasoning') return '思考中';
+    // 重试/压缩行不是工具调用、没有 name，走 toolMeta 会误显示成「调用工具」
+    if (item.kind === 'retry') {
+      const attempt = item.attempt ?? 1;
+      const max = item.maxAttempts ?? 0;
+      return max > 0 ? `重试中（第 ${attempt}/${max} 次）` : '重试中';
+    }
+    if (item.kind === 'compact') return '整理上下文';
     return `${toolMeta(item.name).running}…`;
   }
   return '正在开始';
 }
 
-function StatusPill({ status, running, elapsed }: { status: string; running: boolean; elapsed: number }) {
+function StatusPill({ status, running }: { status: string; running: boolean }) {
   const tone = running ? 'running' : status;
   const label = running
-    ? `运行中 · ${formatElapsed(elapsed)}`
+    ? '运行中'
     : status === 'awaiting_input' || status === 'done'
       ? '等待指令'
       : status === 'stopped'
@@ -1710,8 +1758,12 @@ function AgentActivityGroup({
   const wasLiveRef = useRef(isLive);
   const [frozenSec, setFrozenSec] = useState<number | null>(null);
   useEffect(() => {
-    if (isLive && !wasLiveRef.current) liveStartedRef.current = Date.now();
-    if (!isLive && wasLiveRef.current && liveStartedRef.current != null) {
+    // 墙钟起点：进入 live 时记一次。首次挂载时 wasLiveRef 已等于 isLive，只会走
+    // 「还没有起点」这一支——否则新建的活动组永远拿不到起点，头部会一直显示
+    // 0ms（重试这类没有 durationMs 的活动尤其明显）。
+    if (isLive) {
+      if (liveStartedRef.current == null || !wasLiveRef.current) liveStartedRef.current = Date.now();
+    } else if (wasLiveRef.current && liveStartedRef.current != null) {
       setFrozenSec(Math.max(0, Math.floor((Date.now() - liveStartedRef.current) / 1000)));
     }
     wasLiveRef.current = isLive;
@@ -1779,6 +1831,8 @@ function AgentActivityGroup({
                 <ReasoningRow key={`r-${i}`} item={item} />
               ) : item.kind === 'compact' ? (
                 <CompactRow key={`c-${i}`} item={item} />
+              ) : item.kind === 'retry' ? (
+                <RetryRow key={`rt-${i}`} item={item} />
               ) : (
                 <ToolRow key={`x-${item.id || i}`} item={item} live={isLive && i === items.length - 1} />
               ),
@@ -1886,6 +1940,49 @@ function CompactRow({ item }: { item: ActivityItem }) {
       <span className="agent-compact-note__text">
         已压缩上下文 · 摘要 {removed} 条早期消息
         {tokens > 0 ? `（约 ${tokens} 字）` : ''}
+      </span>
+    </div>
+  );
+}
+
+/* ── Retry row (LLM 请求失败自动重试) ──
+   退避等待期间每秒刷新剩余秒数，读起来像「3 秒后重试 · 第 1/3 次」；
+   退避结束（llm_retry_end）后定格成「已重试」，不再跳动。
+   失败原因挂在 title 上，鼠标悬停可看。 */
+
+const RETRY_CODE_LABELS: Record<string, string> = {
+  NETWORK_ERROR: '连接失败',
+  TIMEOUT: '请求超时',
+  RATE_LIMITED: '被限流',
+  PROVIDER_ERROR: '服务端错误',
+  STREAM_FAILED: '响应中断',
+};
+
+function RetryRow({ item }: { item: ActivityItem }) {
+  const live = !item.retryDone;
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!live) return undefined;
+    const timer = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(timer);
+  }, [live]);
+
+  const startedAt = item.retryStartedAtMs ?? now;
+  const delayMs = item.retryDelayMs ?? 0;
+  const remainingSec = Math.max(0, Math.ceil((delayMs - (now - startedAt)) / 1000));
+  const attempt = item.attempt ?? 1;
+  const maxAttempts = item.maxAttempts ?? 0;
+  const attemptText = maxAttempts > 0 ? `第 ${attempt}/${maxAttempts} 次` : `第 ${attempt} 次`;
+  const cause = item.retryCode ? RETRY_CODE_LABELS[item.retryCode] || '请求失败' : '请求失败';
+  const title = item.retryReason ? `${cause}：${item.retryReason}` : cause;
+
+  return (
+    <div className={`agent-retry-note${live ? ' is-live' : ''}`} title={title}>
+      <span className="agent-retry-note__icon">↻</span>
+      <span className="agent-retry-note__text">
+        {live ? `${cause}，${remainingSec} 秒后重试` : '已重试'}
+        <span className="agent-retry-note__count"> · {attemptText}</span>
       </span>
     </div>
   );

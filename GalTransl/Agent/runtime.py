@@ -50,6 +50,15 @@ SUMMARY_MAX_TOKENS = 2_048
 # 粗略字符->token 换算系数（无 tokenizer 时的估算）
 CHARS_PER_TOKEN = 4
 
+# ---- LLM 请求重试 ----
+# 失败自动重试的上限（不含首次请求）与退避参数。重试由 runtime 自己掌控，
+# 因此 SDK 内置的静默重试要关掉（见 _resolve_llm 的 max_retries=0）——否则
+# 失败会被 SDK 在后台悄悄重发，用户界面上什么都看不到。
+# 退避 1s/2s/4s/8s… 封顶 8s，10 次重试最长约 1 分钟。
+LLM_MAX_RETRIES = 10
+LLM_RETRY_INITIAL_DELAY_MS = 1_000
+LLM_RETRY_MAX_DELAY_MS = 8_000
+
 
 def _log(msg: str, *args: object) -> None:
     """后端控制台调试日志。print + flush，确保即时可见。"""
@@ -60,6 +69,133 @@ def _log(msg: str, *args: object) -> None:
         print(f"[{ts}] [Agent] {msg}", *args, flush=True)
     except Exception:  # noqa: BLE001 - 日志不能影响主流程
         pass
+
+
+class AgentStopRequested(Exception):
+    """重试退避等待期间收到停止信号：交给主循环按「用户停止」收尾。"""
+
+
+# 网络层关键词：SDK/网关把原因藏在文案里时的兜底识别
+_NETWORK_ERROR_HINTS = (
+    "connection",
+    "connect",
+    "network",
+    "socket",
+    "reset",
+    "refused",
+    "unreachable",
+    "timed out",
+    "timeout",
+    "dns",
+    "econn",
+    "etimedout",
+)
+
+
+def _retry_after_ms_from_response(exc: BaseException) -> int | None:
+    """从 429/5xx 响应的 Retry-After 头里取服务端建议的等待时长（毫秒）。"""
+    resp = getattr(exc, "response", None)
+    headers = getattr(resp, "headers", None)
+    if headers is None:
+        return None
+    try:
+        raw_ms = headers.get("retry-after-ms")
+        if raw_ms is not None:
+            return max(0, int(float(raw_ms)))
+        raw_s = headers.get("retry-after")
+        if raw_s is not None:
+            return max(0, int(float(raw_s) * 1000))
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def _classify_llm_error(exc: BaseException) -> dict[str, Any]:
+    """把请求异常归一成 {code, message, retriable, status, retry_after_ms}。
+
+    只重试「重试有意义」的瞬态错误（网络/超时/限流/5xx/流中断）；鉴权、参数、
+    上下文超限这类重试多少次都一样的问题直接终态，避免浪费时间。判断优先看
+    结构化字段（HTTP 状态码），再退回类名/文案关键词。
+    """
+    name = type(exc).__name__
+    status = _status_code_of(exc)
+
+    message = str(exc).strip() or name
+    lowered = message.lower()
+    # 是否来自 provider 传输层（openai / httpx）。自己代码里的 bug 不该重试。
+    module = type(exc).__module__ or ""
+    from_provider = module.startswith(("openai", "httpx", "httpcore"))
+
+    def result(code: str, retriable: bool) -> dict[str, Any]:
+        return {
+            "code": code,
+            "message": message[:600],
+            "retriable": retriable,
+            "status": status,
+            "retry_after_ms": _retry_after_ms_from_response(exc),
+        }
+
+    if status is not None:
+        if status in (401, 403):
+            return result("PROVIDER_UNAUTHORIZED", False)
+        if status == 404:
+            return result("MODEL_NOT_CONFIGURED", False)
+        if status == 413:
+            return result("CONTEXT_TOO_LARGE", False)
+        if status == 429:
+            return result("RATE_LIMITED", True)
+        if status in (408, 409) or status >= 500:
+            return result("PROVIDER_ERROR", True)
+        if status in (400, 422):
+            if "context" in lowered or "token" in lowered:
+                return result("CONTEXT_TOO_LARGE", False)
+            return result("PROVIDER_BAD_REQUEST", False)
+        return result("PROVIDER_ERROR", from_provider)
+
+    if "rate" in lowered and "limit" in lowered:
+        return result("RATE_LIMITED", True)
+    if "timeout" in lowered or "timed out" in lowered:
+        return result("TIMEOUT", True)
+    if any(hint in lowered for hint in _NETWORK_ERROR_HINTS):
+        return result("NETWORK_ERROR", True)
+    if "stream" in lowered:
+        return result("STREAM_FAILED", True)
+    if "context" in lowered and ("length" in lowered or "window" in lowered):
+        return result("CONTEXT_TOO_LARGE", False)
+    # provider 抛出的未知错误按瞬态处理（PI-Desktop 同口径）；自家代码的异常不重试
+    return result("PROVIDER_ERROR", from_provider)
+
+
+def _llm_retry_delay_ms(attempt: int, info: dict[str, Any]) -> int:
+    """退避时长：优先后端给的 Retry-After，否则 1s/2s/4s… 倍增并封顶。"""
+    server_delay = info.get("retry_after_ms")
+    if isinstance(server_delay, int) and server_delay >= 0:
+        return min(server_delay, LLM_RETRY_MAX_DELAY_MS)
+    base = LLM_RETRY_INITIAL_DELAY_MS * (2 ** max(0, attempt - 1))
+    return min(base, LLM_RETRY_MAX_DELAY_MS)
+
+
+def _status_code_of(exc: BaseException) -> int | None:
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status
+    resp = getattr(exc, "response", None)
+    candidate = getattr(resp, "status_code", None)
+    return candidate if isinstance(candidate, int) else None
+
+
+def _is_unsupported_param_error(exc: BaseException) -> bool:
+    """判断异常是否属于「不认识 stream_options 这个可选参数」。
+
+    限定在 400/422 这类参数错误里再按文案确认，避免把网络错误误判成参数问题
+    ——那会让同一次失败悄悄多发一次请求、正好绕开重试提示。"""
+    if _status_code_of(exc) not in (400, 404, 422):
+        return False
+    message = str(exc).lower()
+    return any(
+        key in message
+        for key in ("stream_options", "stream options", "unsupported", "unrecognized", "unknown", "invalid")
+    )
 
 
 AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到一个 Galgame 翻译项目，需要自主驱动从准备字典到完成翻译再到质量复核的全流程，就像一个熟手用户在桌面端图形界面里操作一样。
@@ -264,7 +400,9 @@ class AgentRunner:
             from openai import OpenAI
         except ImportError as exc:  # pragma: no cover - 依赖缺失
             raise RuntimeError("openai 包未安装，Agent 无法运行") from exc
-        self._openai_client = OpenAI(api_key=token, base_url=base_url)
+        # max_retries=0：关掉 SDK 的静默重试，改由 _stream_llm_response 自己按
+        # 退避重试，这样每一次重试都能作为事件推给界面（否则用户只看到长时间卡住）。
+        self._openai_client = OpenAI(api_key=token, base_url=base_url, max_retries=0)
         self._model = model
         _log("OpenAI 客户端就绪")
 
@@ -429,6 +567,10 @@ class AgentRunner:
                     "total_steps": turns,
                 },
             )
+        except AgentStopRequested:
+            # 重试退避等待期间用户点了停止：按正常停止收尾，不报错
+            _log("退避重试期间收到停止信号，按用户停止收尾")
+            self._end_turn("stopped", {"reason": "用户停止"})
         except Exception as exc:  # noqa: BLE001 - 顶层守护
             tb = traceback.format_exc()
             _log(f"❌ Agent 异常: {exc}\n{tb}")
@@ -483,6 +625,52 @@ class AgentRunner:
 
     # ---- 流式 LLM 响应 ----
     def _stream_llm_response(self) -> tuple[str, list[dict[str, Any]], str]:
+        """带自动重试的流式请求：失败时退避重试，并把过程实时推给界面。
+
+        重试对用户可见（llm_retry_start / llm_retry_end 事件），中间失败不落错误
+        提示；退避次数耗尽后才把失败交给上层报错。退避期间收到停止信号会立刻
+        中断（抛 AgentStopRequested，由主循环按「用户停止」收尾）。
+        """
+        attempt = 0
+        while True:
+            try:
+                return self._stream_llm_attempt()
+            except AgentStopRequested:
+                raise
+            except Exception as exc:  # noqa: BLE001 - 按分类决定是否重试
+                info = _classify_llm_error(exc)
+                if self.stop_event.is_set():
+                    # 请求失败的同时用户在停止：按停止收尾，不要当成错误弹给用户
+                    raise AgentStopRequested() from exc
+                if not info["retriable"] or attempt >= LLM_MAX_RETRIES:
+                    if attempt > 0:
+                        _log(f"  ❌ 重试 {attempt} 次后仍失败：{info['code']} {info['message']}")
+                        raise RuntimeError(
+                            f"模型请求失败（已重试 {attempt} 次）：{info['message']}"
+                        ) from exc
+                    raise
+                attempt += 1
+                delay_ms = _llm_retry_delay_ms(attempt, info)
+                _log(
+                    f"  ⚠ 请求失败（{info['code']}: {info['message']}），"
+                    f"{delay_ms / 1000:g}s 后重试 {attempt}/{LLM_MAX_RETRIES}"
+                )
+                self._emit("llm_retry_start", {
+                    "attempt": attempt,
+                    "max_attempts": LLM_MAX_RETRIES,
+                    "delay_ms": delay_ms,
+                    "code": info["code"],
+                    "reason": info["message"],
+                    "status": info["status"],
+                    "ts": time.time(),
+                })
+                aborted = self.stop_event.wait(delay_ms / 1000)
+                self._emit("llm_retry_end", {"attempt": attempt, "aborted": aborted})
+                if aborted:
+                    _log("  ⏹ 退避等待期间收到停止信号，放弃重试")
+                    raise AgentStopRequested() from exc
+
+    def _stream_llm_attempt(self) -> tuple[str, list[dict[str, Any]], str]:
         """发起一次流式 chat.completions 请求，边收边推 content_delta 事件。
 
         返回 (content, tool_calls, finish_reason)：
@@ -512,7 +700,12 @@ class AgentRunner:
                 stream=True,
                 stream_options={"include_usage": True},
             )
-        except Exception:  # noqa: BLE001 - 兼容不支持 stream_options 的实现
+        except Exception as exc:  # noqa: BLE001 - 只对「不认该参数」做回退
+            # 其它错误（网络/限流/5xx）必须抛给上层重试循环，否则会在这里再悄悄发
+            # 一次请求——既让用户看不到重试，又把请求次数翻倍。
+            if not _is_unsupported_param_error(exc):
+                raise
+            _log("  ⚠ provider 不支持 stream_options，退回不带 usage 的请求")
             stream = self._openai_client.chat.completions.create(
                 model=self._model,
                 messages=self.state.messages,

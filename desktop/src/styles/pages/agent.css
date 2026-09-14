@@ -450,6 +450,51 @@
   font-style: italic;
 }
 
+/* LLM 请求失败自动重试提示行：等待中走警告色 + 呼吸，定格后回落成普通灰字 */
+.agent-retry-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.agent-retry-note.is-live {
+  color: var(--color-warning);
+}
+
+.agent-retry-note__icon {
+  flex: none;
+  display: inline-block;
+  opacity: 0.9;
+}
+
+.agent-retry-note.is-live .agent-retry-note__icon {
+  animation: agent-retry-spin 1.6s linear infinite;
+}
+
+.agent-retry-note__count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+@keyframes agent-retry-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-retry-note.is-live .agent-retry-note__icon {
+    animation: none;
+  }
+}
+
 :root[data-theme='dark'] .agent-console {
   --agent-tile: rgba(255, 255, 255, 0.05);
   --agent-tile-strong: rgba(255, 255, 255, 0.085);
@@ -1915,10 +1960,9 @@
   font-weight: 600;
 }
 
-.agent-working__elapsed {
-  font-family: var(--agent-mono);
-  font-variant-numeric: tabular-nums;
-  opacity: 0.7;
+/* 正在自动重试：整行转警告色，和活动组里的重试行呼应 */
+.agent-working__label.is-retry {
+  color: var(--color-warning);
 }
 
 /* ── Terminal notices ── */
