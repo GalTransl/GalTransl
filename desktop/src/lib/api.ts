@@ -1565,7 +1565,7 @@ export type QueuedMessage = {
 };
 
 /**
- * 助手消息的有序段落（pi 的 AssistantMessage.content 模型）。
+ * 助手消息的有序段落（助手消息的 content 模型）。
  * 思考与正文随消息一起持久化，所以刷新/切会话/重连后仍能重建出卡片；
  * 流式增量只是实时打字机效果，不是转录的来源。
  */

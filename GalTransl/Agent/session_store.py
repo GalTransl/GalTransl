@@ -276,8 +276,8 @@ def read_transcript(project_dir: str, session_id: str, limit: int = TRANSCRIPT_M
     """从会话日志回放转录事件（已提交的那部分），按发生顺序返回。
 
     与 status().events 的区别：那个是内存里 500 条的滑动窗口，长期会话里最早的
-    记录会被挤掉；这里直接读会话 JSONL，转录不会因为窗口而缺头（pi 的 capture
-    snapshot 也是同一个思路：转录从持久化日志派生，不从内存状态派生）。
+    记录会被挤掉；这里直接读会话 JSONL，转录不会因为窗口而缺头
+    （转录从持久化日志派生，不从内存状态派生）。
 
     超过 limit 时保留**首条 user_message + 最近 limit 条**——首条用户消息是会话
     的身份锚点，丢了刷新后第一句话就没来源了。

@@ -796,6 +796,51 @@
   gap: 2px;
 }
 
+/* ── 回到最新（不在底部时贴转录区右下角的圆形按钮）──
+   用 sticky 而不是 absolute：它跟着滚动口走，不必换算 composer 的高度，
+   也不会因为容器内边距变化而跑偏。外层高度为 0，所以不占布局、不改动
+   "是否到底"的判断。 */
+.agent-thread__jump {
+  position: sticky;
+  bottom: 12px;
+  width: min(100%, 840px);
+  height: 0;
+  margin: 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.agent-jump-bottom {
+  /* 只让按钮本身可点，别挡住正文的点击 */
+  pointer-events: auto;
+  /* 往上提一个按钮高度：让它整个落在滚动口底部之上 */
+  transform: translateY(-100%);
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--agent-line);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--color-text-muted);
+  box-shadow: 0 6px 16px rgba(16, 24, 40, 0.14);
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.agent-jump-bottom:hover {
+  border-color: rgba(47, 111, 235, 0.4);
+  color: var(--color-primary);
+}
+
+:root[data-theme='dark'] .agent-jump-bottom {
+  background: rgba(28, 40, 58, 0.94);
+  border-color: rgba(65, 83, 111, 0.8);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+
 /* ═══════════════════════════════════════════════════════
    Empty hero — 面板内空态
    ═══════════════════════════════════════════════════════ */
@@ -1066,7 +1111,7 @@
   font-weight: 600;
 }
 
-/* 运行中标签保持可读色，脉冲点单独承载「活着」的反馈（对标 PI-Desktop） */
+/* 运行中标签保持可读色，脉冲点单独承载「活着」的反馈 */
 .agent-activity__label.is-running {
   color: var(--color-text-muted);
 }
@@ -1098,7 +1143,7 @@
   transition: transform var(--dur-fast) var(--ease-default), opacity var(--dur-fast) var(--ease-default);
 }
 
-/* 折叠箭头默认隐藏，悬停/展开/键盘聚焦时浮现（对标 PI-Desktop） */
+/* 折叠箭头默认隐藏，悬停/展开/键盘聚焦时浮现 */
 .agent-activity:hover .agent-activity__caret,
 .agent-activity.is-open .agent-activity__caret,
 .agent-activity__header:focus-visible .agent-activity__caret {
@@ -2214,7 +2259,7 @@
    贴在 composer 上方、和它连成一张卡片：消息先排队不直接进聊天框，
    点「立即」才打断模型马上发，也可以就地编辑/删除。 */
 /* ── 询问用户卡片（ask_user）──
-   钉在输入框上方（照 pi 的 asktool），一题一步；没有倒计时——后端那个工具不设超时。 */
+   钉在输入框上方，一题一步；没有倒计时——后端那个工具不设超时。 */
 
 .agent-ask {
   /* 与输入框同宽：输入区那层是 align-items:center，不写宽度就会按内容收缩，

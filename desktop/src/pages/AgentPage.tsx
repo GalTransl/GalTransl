@@ -1017,6 +1017,8 @@ export function AgentPage() {
   const abortRef = useRef<(() => void) | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
+  // 与 stickToBottomRef 同义，但"回到最新"按钮要随滚动出现/消失，得能触发渲染
+  const [atBottom, setAtBottom] = useState(true);
   const startRef = useRef(0);
   // 本地已见的最大事件 step（SSE 续订的 after_step 起点 + 兜底去重）。
   // 状态快照对账/持久化恢复时同步更新。
@@ -1228,7 +1230,7 @@ export function AgentPage() {
           hasBackendSessionRef.current = false;
         } else {
           // 日志与快照按 step 合并（同 step 以快照为准，它能恢复出首条 user_message）；
-          // 再把"正在生成的那半条消息"接在尾部（pi 的 streamingMessage）。
+          // 再把"正在生成的那半条消息"接在尾部（进行中的助手消息）。
           const mergedEvents = mergeTranscriptEvents(base, snapEvents);
           setEvents(seedStreaming(mergedEvents, snap.streaming));
           // 续订游标要跳过快照里已经包含的增量，否则会把同一段增量补第二遍
@@ -1276,13 +1278,27 @@ export function AgentPage() {
     const el = scrollRef.current;
     if (!el || !stickToBottomRef.current) return;
     el.scrollTop = el.scrollHeight;
+    setAtBottom(true);
   }, [events]);
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    stickToBottomRef.current = distance < 80;
+    const stick = distance < 80;
+    stickToBottomRef.current = stick;
+    // 只在状态真的翻转时 setState，滚动期间不会每帧触发渲染
+    setAtBottom((prev) => (prev === stick ? prev : stick));
+  }, []);
+
+  /** 回到转录最底部（并恢复"跟随新消息"）。 */
+  const handleJumpToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickToBottomRef.current = true;
+    setAtBottom(true);
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    el.scrollTo({ top: el.scrollHeight, behavior: reduced ? 'auto' : 'smooth' });
   }, []);
 
   useEffect(() => {
@@ -1951,6 +1967,30 @@ export function AgentPage() {
             </div>
           ) : null}
         </div>
+        {/* 不在底部时贴右下角的圆形"回到最新"（sticky 跟着滚动口走，见 CSS） */}
+        {!atBottom ? (
+          <div className="agent-thread__jump">
+            <button
+              type="button"
+              className="agent-jump-bottom"
+              onClick={handleJumpToBottom}
+              title="回到最新"
+              aria-label="回到最新"
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                {/* 只要一个 V 形雪佛龙，不带竖棍 */}
+                <path
+                  d="M6 9l6 6 6-6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div className="agent-console__composer">
@@ -2035,7 +2075,7 @@ export function AgentPage() {
             </div>
           </div>
         ) : null}
-        {/* Agent 的提问：钉在输入框上方（照 pi 的 asktool），不让它埋进转录里被折叠掉 */}
+        {/* Agent 的提问：钉在输入框上方，不让它埋进转录里被折叠掉 */}
         {pendingAsk && askId !== answeredAskId ? (
           <AskUserCard
             key={askId}
@@ -2185,7 +2225,7 @@ function maxStep(events: AgentEvent[]): number {
   return max;
 }
 
-/** 把「正在生成的助手消息」接在转录尾部（pi 的 streamingMessage 语义）。
+/** 把「正在生成的助手消息」接在转录尾部（进行中消息快照语义）。
  *  刷新/切会话时照样看得到正在写的思考与正文，随后的 delta 会继续往这批卡片上
  *  追加；等响应落定，正式的 assistant_message 事件会认领并校正它们。
  *  step 取快照自报的序号，调用方据此推进续订游标，避免重复补增量。 */
@@ -2331,7 +2371,7 @@ function AgentActivityGroup({
     setOpen(isLive);
   }, [isLive]);
 
-  // 运行中墙钟计时（对标 PI-Desktop）：live 时每秒跳动，结束冻结在最后值。
+  // 运行中墙钟计时：live 时每秒跳动，结束冻结在最后值。
   const [now, setNow] = useState(() => Date.now());
   const liveStartedRef = useRef<number | null>(null);
   const wasLiveRef = useRef(isLive);
@@ -2369,7 +2409,7 @@ function AgentActivityGroup({
   // 的重发（一次重试一个步骤会把「重试 10 次」显示成 10 个步骤）
   const visibleCount = items.filter((it) => it.kind !== 'compact' && it.kind !== 'retry').length;
 
-  // 文案对齐 PI-Desktop zh-CN：运行中「思考中/处理中 · Ns」，结束「已思考/已处理 Ns」
+  // 文案：运行中「思考中/处理中 · Ns」，结束「已思考/已处理 Ns」
   const label = isLive
     ? `${hasContent && !toolCount ? '思考中' : '处理中'} · ${formatDuration(shownSec * 1000)}`
     : hasContent && !toolCount
@@ -2784,7 +2824,7 @@ function translationJobId(item: ActivityItem): string {
 }
 
 /* ── 询问用户卡片（ask_user）──
-   照 pi 的 asktool：卡片**钉在输入框上方**、不埋进转录（转录里只留一行工具结果），
+   卡片**钉在输入框上方**、不埋进转录（转录里只留一行工具结果），
    一题一步、选项按钮 + 固定的「自己填」入口，可以跳过单题或全部跳过。
    **没有倒计时**：后端那个工具不设超时，会一直等着；不想答就点全部跳过，
    或者干脆点停止让 Agent 自己判断。 */

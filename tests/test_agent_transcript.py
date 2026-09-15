@@ -2,7 +2,7 @@
 
 背景：思考/正文以前只存在于瞬态的 content_delta / reasoning_delta 事件里，
 既不落盘也不进状态快照，于是刷新页面或切换会话后，重建出来的转录里思考块、
-正文块全部消失，只剩工具调用。这里锁定 pi 式的做法：
+正文块全部消失，只剩工具调用。这里锁定这套做法：
 
 - 助手响应落定时提交一条持久的 assistant_message 事件，内容是**有序 parts**
   （reasoning / text / tool_call）；

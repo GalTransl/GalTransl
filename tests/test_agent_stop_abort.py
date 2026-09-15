@@ -1,6 +1,6 @@
-"""用户点停止要「秒级」生效：在途请求必须被打断（照 pi 的 AbortSignal 语义）。
+"""用户点停止要「秒级」生效：在途请求必须被打断。
 
-pi 把 AbortSignal 一路传进 fetch，`abort()` 能真实中断在途 HTTP。Python 的
+支持取消的 HTTP 栈能把 abort 一路传进请求层、真实中断在途连接。Python 的
 OpenAI SDK 没有可传的 signal，等价手段是关掉该会话的客户端：httpx 会让阻塞在
 socket read 上的请求立刻抛 APIConnectionError（已用本地"黑洞"服务实测，close()
 0ms 返回、在途读立即被打断）。

@@ -29,7 +29,12 @@ from GalTransl.Agent.session_store import SessionStore
 DEFAULT_BACKEND_HOST = "127.0.0.1"
 DEFAULT_BACKEND_PORT = 12333
 DEFAULT_CONFIG_FILE = "config.yaml"
-MAX_STEPS = 32
+# 单回合的 LLM 轮数上限（一轮 = 一次请求 + 它带回的那批工具调用）。
+# 不设实际上限：主循环跑到"模型不再调工具"为止，收尾只由模型自身、工具批返回
+# terminate、请求出错或用户点停止决定，正常任务不靠计数收尾。
+# 这里仍留一个防呆值：万一模型陷入重复调用，不至于把回合线程挂到天荒地老。
+# 正常长任务（几十上百轮：等待-查进度-修复的循环）根本碰不到它。
+MAX_STEPS = 1000
 RUNTIME_EVENT_KEEP = 500
 # 瞬态事件：只进当前回合的 SSE 流，不进内存 events deque（也不落盘）。
 # 两类：一类是流式增量（一次请求几十条，进 deque 会把 user_message/tool_call
@@ -174,7 +179,7 @@ def _classify_llm_error(exc: BaseException) -> dict[str, Any]:
         return result("STREAM_FAILED", True)
     if "context" in lowered and ("length" in lowered or "window" in lowered):
         return result("CONTEXT_TOO_LARGE", False)
-    # provider 抛出的未知错误按瞬态处理（PI-Desktop 同口径）；自家代码的异常不重试
+    # provider 抛出的未知错误按瞬态处理；自家代码的异常不重试
     return result("PROVIDER_ERROR", from_provider)
 
 
@@ -305,7 +310,7 @@ class PendingMessage:
     """排队中的用户消息（模型还没看到）。
 
     带 id 是为了让界面上的队列面板能精确地"立即发送/编辑/删除"某一条——
-    文本可能重复，不能靠内容定位。队列只在内存里（与 pi 一致）：重启即清空。
+    文本可能重复，不能靠内容定位。队列只在内存里：重启即清空。
     """
 
     id: str
@@ -388,7 +393,7 @@ class AgentRunner:
         self._model: str = ""
         self._context_window = DEFAULT_CONTEXT_WINDOW
         self._compacted_this_turn = False
-        # 正在生成中的助手消息累加器（pi 的 streamingMessage）：引用流式期间
+        # 正在生成中的助手消息累加器（进行中消息快照）：引用流式期间
         # 那几份 list/dict，响应落定后由 _take_stream_acc 取走并置空。
         self._stream_acc: dict[str, Any] | None = None
         # 正在执行的工具调用 id（工具事件带上它，界面才能挂到对应行上）
@@ -472,9 +477,9 @@ class AgentRunner:
         _log("OpenAI 客户端就绪")
 
     def abort_in_flight(self) -> None:
-        """打断在途的 LLM 请求：等价于 pi 的 AbortController.abort()。
+        """打断在途的 LLM 请求（等价于给请求发一个 abort 信号）。
 
-        pi 把 AbortSignal 一路传进 fetch，所以「停止」能真实中断在途 HTTP 连接。
+        支持取消的 HTTP 栈能把 abort 一路传进请求层，在那里真实中断在途连接。
         Python 的 OpenAI SDK 没有可传的 signal，等价手段是关掉这份客户端：httpx 会让
         阻塞在 socket read 上的请求立刻抛 APIConnectionError（本地用"黑洞"服务实测：
         close() 0ms 返回、在途读立即被打断）。主循环随即看到停止信号、按「用户停止」
@@ -511,7 +516,8 @@ class AgentRunner:
                 # 气泡不丢。前端发送时已乐观显示，收到会按内容去重。
                 self._emit("user_message", {"message": first_user_text})
 
-            # 单回合步数上限：防止一轮内无限跑；超限不丢历史，用户可接着指挥
+            # 循环到模型不再调工具为止（没有实际步数上限）；MAX_STEPS 只是
+            # 防呆——真触发了也不丢历史，用户可以接着指挥继续。
             for _ in range(MAX_STEPS):
                 if self.stop_event.is_set():
                     self._end_turn("stopped", {"reason": "用户停止"})
@@ -547,7 +553,7 @@ class AgentRunner:
                     return
 
                 # 截断保护：输出被 max_tokens 截断时，流式拼出来的工具参数可能是
-                # "能解析但残缺"的半截 JSON，执行它会做出错误操作（pi 的做法）。
+                # "能解析但残缺"的半截 JSON，执行它会做出错误操作。
                 # 这里直接丢弃本批工具调用，把失败写回历史让模型重试。
                 if tool_calls and finish_reason == "length":
                     _log(f"  ⚠ 响应被截断（finish_reason=length），丢弃 {len(tool_calls)} 个工具调用")
@@ -659,16 +665,16 @@ class AgentRunner:
                         self._active_tool_call_id = ""
                     self._persist_message({"role": "tool", "tool_call_id": call_id, "content": content_str})
 
-            # 超出单回合步数上限：收尾但保留历史，提示用户可以继续
-            _log(f"超出最大步数 {MAX_STEPS}，回合收尾")
+            # 触到防呆上限（正常任务不会到这里）：收尾但保留历史，提示用户可以继续
+            _log(f"触及单回合防呆上限 {MAX_STEPS} 轮，回合收尾")
             self._persist_message({
                 "role": "assistant",
-                "content": f"本回合达到最大步数 {MAX_STEPS}，已暂停。等待用户下一步指示。",
+                "content": f"本回合轮数达到防呆上限 {MAX_STEPS}，已暂停。等待用户下一步指示。",
             })
             self._end_turn(
                 "done",
                 {
-                    "summary": f"本回合达到最大步数 {MAX_STEPS}，已暂停。你可以发消息让我继续。",
+                    "summary": f"本回合轮数达到防呆上限 {MAX_STEPS}，已暂停。你可以发消息让我继续。",
                     "total_steps": turns,
                 },
             )
@@ -721,7 +727,7 @@ class AgentRunner:
         """
         queued: list[PendingMessage] = []
         if kind == "stopped":
-            # 照 pi：用户主动停止时不代跑排队消息，它们留在队列面板里等用户决定
+            # 用户主动停止时不代跑排队消息，它们留在队列面板里等用户决定
             # （立即发送 / 编辑 / 删除，或直接再发一条）。一个字都不进历史。
             # 例外是用户点了「立即」的那条：它已被摘出队列、暂存在 immediate_message，
             # 这里把它作为新回合的第一条消息发出去（见 queue_send）。
@@ -789,7 +795,7 @@ class AgentRunner:
         return acc
 
     def live_streaming(self) -> dict[str, Any] | None:
-        """当前正在生成的助手消息快照（pi 的 streamingMessage），没有则 None。
+        """当前正在生成的助手消息快照（进行中消息），没有则 None。
 
         status() 直接调它：界面刷新/切会话时能把"正在写的那半条消息"照原样画
         出来，不用等它收尾。step 是快照覆盖到的事件序号，客户端据此续订 SSE，
@@ -1140,7 +1146,7 @@ class AgentRunner:
     ) -> list[list[str] | None]:
         """发起一次询问并**阻塞**等用户作答，返回每题答案（跳过为 None）。
 
-        照 pi 的 asktool：**没有超时**，只有两种情况会收尾——用户点了停止/会话被删
+        **没有超时**，只有两种情况会收尾——用户点了停止/会话被删
         （stop_event 置位），或前端把答案送了进来（AgentRuntime.answer_ask）。
         被中断时每题按"跳过"返回空答案，工具本身仍算成功：模型据此继续，而不是整个
         回合报错。这样"我问了但没人理"不会把会话卡死成错误态。
@@ -1300,7 +1306,7 @@ def _estimate_message_tokens(message: dict[str, Any]) -> int:
 
 
 def _assistant_parts(acc: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """把一条助手响应的累加器拍成有序 parts（pi 的 AssistantMessage.content 模型）。
+    """把一条助手响应的累加器拍成有序 parts（助手消息的 content 模型）。
 
     段落顺序：思考 → 正文 → 工具调用。同类文本会归并成一段，不按「想/说」交替
     逐段切分——provider 交替推思考时碎片极多，逐段成卡片会把界面刷爆；界面本身
@@ -1332,7 +1338,7 @@ def _assistant_parts(acc: dict[str, Any] | None) -> list[dict[str, Any]]:
 def _estimate_usage_tokens(messages: list[dict[str, Any]], anchor: int = 0, anchored: int = 0) -> int:
     """估算一段历史占用的 token 数（供压缩判断与界面用量指示共用）。
 
-    抄 pi 的用法锚定法：有上一次响应的 prompt_tokens 作锚点时，只对锚点之后
+    用法锚定法：有上一次响应的 prompt_tokens 作锚点时，只对锚点之后
     新增的消息按字符数估算；没有锚点就整体估算。不引入 tokenizer 依赖。
     """
     if anchor > 0 and 0 <= anchored <= len(messages):
@@ -1517,7 +1523,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_project_overview",
-            "description": "了解项目：查看翻译进度与项目配置。进度含句数 total/translated/problems/failed 和文件级 files_total/files_translated/files_untranslated；total/translated 只统计已生成缓存的文件，未翻译的文件不计入分母，translated==total 不代表整个项目翻完，整体进度看 files_translated/files_total。配置附带 config_field_descriptions（每个键的作用与取值说明）；backend 里是两份实际生效的后端（各含 name 配置名 / type 后端类型 / model 模型名，不含地址与密钥）：agent 是本会话在用的，translator 是翻译任务会用的（项目选择 → 否则全局「翻译器默认」）。流程第一步，调用它确认项目可用。输入文件清单本身用 list_input_files / list_transl_cache 单独查询。",
+            "description": "了解项目：查看翻译进度与项目配置。进度含句数 total/translated/problems/failed 和文件级 files_total/files_translated/files_untranslated；total/translated 只统计已生成缓存的文件，未翻译的文件不计入分母，translated==total 不代表整个项目翻完，整体进度看 files_translated/files_total。配置附带 config_field_descriptions（每个键的作用与取值说明）；backend 里是两份实际生效的后端（各含 name 配置名 / type 后端类型 / model 模型名，不含地址与密钥）：agent 是本会话在用的，translator 是翻译任务会用的。流程第一步，调用它确认项目可用。输入文件清单本身用 list_input_files / list_transl_cache 单独查询。",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -2116,7 +2122,6 @@ def _tool_get_project_overview(runner: AgentRunner, _args: dict[str, Any]) -> An
             "note": (
                 "实际生效的后端（各自含 name 配置名 / type 后端类型 / model 模型名）："
                 "agent 是本 Agent 会话在用的；translator 是翻译任务会用的"
-                "（项目选择 → 否则全局「翻译器默认」）。地址与密钥不返回。"
             ),
         },
         "config": config,
@@ -3269,7 +3274,7 @@ def _tool_delete_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
 
 
 # ---- 询问用户（ask_user）----
-# 语义照 pi 的 asktool：工具阻塞等回答、**不设超时**；用户跳过或回合被停止时，
+# 工具阻塞等回答、**不设超时**；用户跳过或回合被停止时，
 # 该题以空答案返回（工具仍算成功，模型据此继续，而不是让整个回合报错）。
 ASK_MAX_QUESTIONS = 4  # 一次最多问几题（界面一题一步，问太多就成了审讯）
 ASK_MAX_OPTIONS = 6  # 每题最多几个候选项（用户永远还能自己填）
@@ -3333,7 +3338,7 @@ def _normalize_ask_answers(raw: Any, questions: list[dict[str, Any]]) -> list[li
 
 
 def _format_ask_answers(questions: list[dict[str, Any]], answers: list[list[str] | None]) -> str:
-    """给模型看的答案文本（口径照 pi）：`问题：答案1、答案2`，多题用 --- 分隔。"""
+    """给模型看的答案文本（固定口径）：`问题：答案1、答案2`，多题用 --- 分隔。"""
     lines = []
     for question, answer in zip(questions, answers):
         lines.append(f"{question['question']}：{'、'.join(answer) if answer else '（跳过）'}")
@@ -3832,8 +3837,8 @@ class AgentRuntime:
             if event:
                 event.set()
             # 只置位事件不够：请求可能正阻塞在 socket read 上，主循环根本没机会看
-            # 信号（这正是以前"点了停止要等 1-2 分钟才收尾"的原因）。照 pi 的做法
-            # 主动打断在途请求，停止才能秒级生效。
+            # 信号（这正是以前"点了停止要等 1-2 分钟才收尾"的原因）。主动打断在途请求，
+            # 停止才能秒级生效。
             state = self._states.get(key, {}).get(sid) if sid else None
             runner = self._runners.get(key, {}).get(sid) if sid else None
             if runner is not None and (state is None or state.status == "running"):
@@ -3903,7 +3908,7 @@ class AgentRuntime:
                 "finished_at": state.finished_at,
                 "error": state.error,
                 # 正在生成的助手消息（进行中）。与 events 里的已提交记录分离：
-                # 它就是 pi 的 streamingMessage，刷新/切会话时据此把半条消息补上。
+                # 它就是"进行中的助手消息"快照，刷新/切会话时据此把半条消息补上。
                 "streaming": runner.live_streaming() if runner is not None else None,
                 # 上下文用量：界面指示器的兜底来源（实时更新走 context_usage 事件）。
                 # 打开页面/刷新时按当前历史现场估算，不依赖历史事件回放。

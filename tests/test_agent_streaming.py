@@ -207,7 +207,7 @@ class ReasoningStreamTests(unittest.TestCase):
 
 
 class StreamingPartsSnapshotTests(unittest.TestCase):
-    """进行中的助手消息（pi 的 streamingMessage）+ 落定后的 parts。
+    """进行中的助手消息（进行中消息快照）+ 落定后的 parts。
 
     回归背景：思考/正文以前只存在于瞬态 delta 事件里，刷新或切会话后重建的转录
     里就只剩工具调用了。现在流式期间随时能拍到"正在生成的助手消息"，落定后由
