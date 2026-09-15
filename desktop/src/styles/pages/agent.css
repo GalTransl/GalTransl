@@ -359,12 +359,12 @@
 }
 
 /* 侧边栏状态灯（常亮、不闪）：运行中=蓝灯，跑完没看过=绿灯，出错=橙灯。
-   位置就在行尾 ✕ 那个点上——✕ 平时是隐形的（悬停才显形），所以那里平时是灯；
-   悬停时灯让位给 ✕（两个换班，不叠在一起）。点开该会话即熄灭；运行中的那一行
-   同时会禁用它自己的 ✕。 */
+   位置就在行尾那个删除按钮的点上——删除按钮平时是隐形的（悬停才显形），所以那里
+   平时是灯；悬停时灯让位给删除按钮（两个换班，不叠在一起）。点开该会话即熄灭；
+   运行中的那一行同时会禁用它自己的删除按钮。 */
 .agent-session-item__light {
   position: absolute;
-  right: 12px; /* 与 ✕ 中心对齐 */
+  right: 12px; /* 与删除按钮中心对齐 */
   top: 50%;
   transform: translateY(-50%);
   width: 6px;
@@ -375,7 +375,7 @@
   transition: opacity 0.15s ease;
 }
 
-/* 键盘 Tab 聚焦到该行的 ✕ 时也要让位（✕ 此时是显形的） */
+/* 键盘 Tab 聚焦到该行的删除按钮时也要让位（此时它是显形的） */
 .agent-session-item:hover .agent-session-item__light,
 .agent-session-item:focus-within .agent-session-item__light {
   opacity: 0;
@@ -465,7 +465,7 @@
 }
 
 /* 禁用（所属会话正在跑等）：默认仍旧隐藏——不能因为 :disabled 的优先级更高
-   就把整列 ✕ 全冒出来；悬停时淡淡显示，提示"现在删不了"。 */
+   就把整列删除按钮全冒出来；悬停时淡淡显示，提示"现在删不了"。 */
 .agent-session-item__delete:disabled {
   cursor: not-allowed;
 }
@@ -961,8 +961,34 @@
   transform: translateY(-1px);
 }
 
+/* 选中的项目常亮：底色/描边比 hover 再实一档，文字与图标走主色。
+   悬停时只在它上面加重（下面是独立的 :hover 规则，不用再写一遍基础 hover）。 */
+.agent-hero__project-chip.is-selected {
+  background: rgba(47, 111, 235, 0.1);
+  border-color: rgba(47, 111, 235, 0.55);
+  color: var(--color-primary);
+}
+
+.agent-hero__project-chip.is-selected:hover {
+  background: rgba(47, 111, 235, 0.16);
+  border-color: rgba(47, 111, 235, 0.7);
+  box-shadow: 0 2px 10px rgba(47, 111, 235, 0.2);
+}
+
 :root[data-theme='dark'] .agent-hero__project-chip {
   background: rgba(28, 40, 58, 0.66);
+}
+
+/* 深色下基础规则的选择器更重（:root[data-theme='dark'] + 类），选中态必须单独覆盖，
+   否则底色会被上面那条抢回去。 */
+:root[data-theme='dark'] .agent-hero__project-chip.is-selected {
+  background: rgba(47, 111, 235, 0.22);
+  border-color: rgba(91, 142, 245, 0.6);
+  color: #a9c6ff;
+}
+
+:root[data-theme='dark'] .agent-hero__project-chip.is-selected:hover {
+  background: rgba(47, 111, 235, 0.3);
 }
 
 .agent-hero__project-chip-icon {
@@ -3127,12 +3153,12 @@
     display: none;
   }
 
-  /* 窄屏没有悬停，✕ 常显；禁用态仍淡化以示"暂时删不了" */
+  /* 窄屏没有悬停，删除按钮常显；禁用态仍淡化以示"暂时删不了" */
   .agent-session-item__delete {
     opacity: 1;
   }
 
-  /* ✕ 常显了，状态灯就挪到它左边，别叠在一起（这里也不会触发 hover 让位） */
+  /* 删除按钮常显了，状态灯就挪到它左边，别叠在一起（这里也不会触发 hover 让位） */
   .agent-session-item__light {
     right: 30px;
     opacity: 1;

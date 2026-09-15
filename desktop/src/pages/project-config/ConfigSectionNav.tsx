@@ -1,21 +1,22 @@
 import type { ReactNode } from 'react';
+import { Icon, type IconName } from '../../components/Icon';
 
 export type ConfigSectionKey = 'common' | 'backendSpecific' | 'plugin' | 'dictionary' | 'problemAnalyze' | 'retranslKey' | 'problemFilterKey';
 
 export interface ConfigSectionDef {
   key: ConfigSectionKey;
   label: string;
-  icon: string;
+  icon: IconName;
 }
 
 export const CONFIG_SECTIONS: ConfigSectionDef[] = [
-  { key: 'common', label: '通用设置', icon: '⚙️' },
-  { key: 'backendSpecific', label: '翻译后端', icon: '🤖' },
-  { key: 'plugin', label: '插件设置', icon: '🧩' },
-  { key: 'dictionary', label: '字典设置', icon: '📖' },
-  { key: 'problemAnalyze', label: '问题分析', icon: '🔍' },
-  { key: 'retranslKey', label: '重翻关键字', icon: '🔁' },
-  { key: 'problemFilterKey', label: '问题过滤', icon: '🚫' },
+  { key: 'common', label: '通用设置', icon: 'settings' },
+  { key: 'backendSpecific', label: '翻译后端', icon: 'bot' },
+  { key: 'plugin', label: '插件设置', icon: 'plug' },
+  { key: 'dictionary', label: '字典设置', icon: 'book' },
+  { key: 'problemAnalyze', label: '问题分析', icon: 'search' },
+  { key: 'retranslKey', label: '重翻关键字', icon: 'repeat' },
+  { key: 'problemFilterKey', label: '问题过滤', icon: 'ban' },
 ];
 
 interface ConfigSectionNavProps {
@@ -49,7 +50,7 @@ export function ConfigSectionNav({
           className={`project-config-page__section-btn ${activeSection === section.key ? 'project-config-page__section-btn--active' : ''}`}
           onClick={() => { onSectionChange(section.key); }}
         >
-          <span>{section.icon}</span>
+          <span><Icon name={section.icon} /></span>
           <span>{section.label}</span>
         </button>
       ))}
@@ -59,8 +60,12 @@ export function ConfigSectionNav({
         onClick={onSave}
         disabled={saving || disabled}
       >
-        <span>💾</span>
-        <span>{saving ? '保存中…' : '保存配置'}{dirty && !saving && <span style={{ color: '#e53e3e', marginLeft: 4 }}>●</span>}</span>
+        <span><Icon name="save" /></span>
+        <span>
+          {saving ? '保存中…' : '保存配置'}
+          {/* 未保存提示：一个小圆点（原来是圆点字符，CSS 画的更稳、颜色也走 token） */}
+          {dirty && !saving && <span className="project-config-page__dirty-dot" title="有未保存的修改" />}
+        </span>
       </button>
       <div className="project-config-page__section-divider" />
       <button
@@ -68,7 +73,7 @@ export function ConfigSectionNav({
         className={`project-config-page__section-btn ${yamlView ? 'project-config-page__section-btn--active' : ''}`}
         onClick={onYamlToggle}
       >
-        <span>📝</span>
+        <span><Icon name="note" /></span>
         <span>YAML源码</span>
       </button>
     </aside>

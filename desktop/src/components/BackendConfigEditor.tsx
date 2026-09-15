@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CustomSelect } from './CustomSelect';
+import { Icon } from './Icon';
 import { fetchOpenAIModels } from '../lib/api';
 
 type TokenEntry = {
@@ -222,7 +223,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
                       onClick={() => removeToken(idx)}
                       title="删除此令牌"
                     >
-                      ✕
+                      <Icon name="close" />
                     </button>
                   )}
                 </div>
@@ -430,7 +431,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
                       onClick={() => removeSakuraEndpoint(idx)}
                       title="删除此端点"
                     >
-                      ✕
+                      <Icon name="close" />
                     </button>
                   )}
                 </div>

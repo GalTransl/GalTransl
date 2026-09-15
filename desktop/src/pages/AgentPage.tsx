@@ -47,6 +47,7 @@ import {
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 import { AgentMarkdown } from '../components/AgentCacheRef';
+import { Icon, type IconName } from '../components/Icon';
 import { formatProfileLabel } from '../lib/backendProfile';
 import {
   clampPercent,
@@ -574,7 +575,7 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
   return groups;
 }
 
-/** 发送/插话按钮的图标：上箭头。原来是字符「↑」，字重/基线随字体走，
+/** 发送/插话按钮的图标：上箭头。原来是一个箭头字符，字重/基线随字体走，
  *  改成 SVG 后与页面其它图标（开文件夹、上下文环）口径一致。 */
 function SendIcon() {
   return (
@@ -607,7 +608,8 @@ function StopIcon() {
 type ToolMeta = {
   action: string;
   running: string;
-  icon: ReactNode;
+  /** 图标名（统一图标集）：渲染处 `<Icon name={meta.icon} />` */
+  icon: IconName;
   summary: (args: Record<string, unknown> | undefined) => string;
   verb: string;
 };
@@ -617,29 +619,29 @@ const TOOL_META: Record<string, ToolMeta> = {
     action: '了解项目',
     running: '了解项目',
     verb: '',
-    icon: '📂',
+    icon: 'folder-open',
     // 带了 include 就亮出来，界面上一眼看出这次只取了哪几段
     summary: (a) =>
       Array.isArray(a?.include) && a.include.length
         ? `按需：${a.include.map((s) => str(s)).join('、')}`
         : '读取项目概况',
   },
-  update_project_config: { action: '修改项目配置', running: '修改项目配置', verb: '', icon: '🛠️', summary: () => '调整翻译参数/规范等设置' },
-  list_input_files: { action: '查看原文文件清单', running: '查看原文文件清单', verb: '', icon: '🗃️', summary: () => '列出待翻译文件与句数' },
-  read_input_file: { action: '读取原文', running: '读取原文', verb: '', icon: '📄', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
-  read_guideline: { action: '读取翻译规范', running: '读取翻译规范', verb: '', icon: '📜', summary: (a) => str(a?.name) },
-  list_dict_files: { action: '查看字典清单', running: '查看字典清单', verb: '', icon: '📚', summary: () => '列出项目字典文件' },
-  read_dict: { action: '读取字典', running: '读取字典', verb: '', icon: '📖', summary: (a) => str(a?.file_key) },
-  save_dict: { action: '保存字典', running: '保存字典', verb: '', icon: '💾', summary: (a) => str(a?.file_key) },
-  create_dict_file: { action: '新建字典', running: '新建字典', verb: '', icon: '🗂️', summary: (a) => str(a?.filename) },
-  get_name_table: { action: '读取人名表', running: '读取人名表', verb: '', icon: '👤', summary: () => 'name替换表' },
-  save_name_table: { action: '保存人名表', running: '保存人名表', verb: '', icon: '👥', summary: (a) => (Array.isArray(a?.names) ? `${a.names.length} 条` : '') },
-  start_translation: { action: '启动翻译', running: '启动翻译', verb: '', icon: '▶️', summary: (a) => [str(a?.translator), ...(Array.isArray(a?.files) ? [`仅 ${a.files.length} 个文件`] : [])].filter(Boolean).join(' · ') },
+  update_project_config: { action: '修改项目配置', running: '修改项目配置', verb: '', icon: 'sliders', summary: () => '调整翻译参数/规范等设置' },
+  list_input_files: { action: '查看原文文件清单', running: '查看原文文件清单', verb: '', icon: 'archive', summary: () => '列出待翻译文件与句数' },
+  read_input_file: { action: '读取原文', running: '读取原文', verb: '', icon: 'file-text', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
+  read_guideline: { action: '读取翻译规范', running: '读取翻译规范', verb: '', icon: 'bookmark', summary: (a) => str(a?.name) },
+  list_dict_files: { action: '查看字典清单', running: '查看字典清单', verb: '', icon: 'books', summary: () => '列出项目字典文件' },
+  read_dict: { action: '读取字典', running: '读取字典', verb: '', icon: 'book', summary: (a) => str(a?.file_key) },
+  save_dict: { action: '保存字典', running: '保存字典', verb: '', icon: 'save', summary: (a) => str(a?.file_key) },
+  create_dict_file: { action: '新建字典', running: '新建字典', verb: '', icon: 'file-plus', summary: (a) => str(a?.filename) },
+  get_name_table: { action: '读取人名表', running: '读取人名表', verb: '', icon: 'user', summary: () => 'name替换表' },
+  save_name_table: { action: '保存人名表', running: '保存人名表', verb: '', icon: 'users', summary: (a) => (Array.isArray(a?.names) ? `${a.names.length} 条` : '') },
+  start_translation: { action: '启动翻译', running: '启动翻译', verb: '', icon: 'play', summary: (a) => [str(a?.translator), ...(Array.isArray(a?.files) ? [`仅 ${a.files.length} 个文件`] : [])].filter(Boolean).join(' · ') },
   ask_user: {
     action: '询问用户',
     running: '等你回答',
     verb: '',
-    icon: '❓',
+    icon: 'help',
     summary: (a) => {
       const questions = Array.isArray(a?.questions) ? a.questions : [];
       const first = questions[0] && typeof questions[0] === 'object'
@@ -648,20 +650,20 @@ const TOOL_META: Record<string, ToolMeta> = {
       return [first, questions.length > 1 ? `共 ${questions.length} 题` : ''].filter(Boolean).join(' · ');
     },
   },
-  stop_translation: { action: '停止翻译', running: '停止翻译', verb: '', icon: '⏹️', summary: () => '' },
-  wait: { action: '等待', running: '等待中', verb: '', icon: '⏳', summary: (a) => waitSummary(a) },
-  get_progress: { action: '查询进度', running: '查询进度', verb: '', icon: '📊', summary: () => '' },
-  get_runtime: { action: '查询运行时', running: '查询运行时', verb: '', icon: '⚙️', summary: () => '' },
-  list_problems: { action: '检查问题清单', running: '检查问题清单', verb: '', icon: '🔍', summary: (a) => str(a?.problem_type) || '问题类型统计' },
-  manage_problem_filter: { action: '管理问题过滤', running: '管理问题过滤', verb: '', icon: '🧹', summary: (a) => [str(a?.action), Array.isArray(a?.keyword) ? a.keyword.map((k) => str(k)).join('、') : str(a?.keyword)].filter(Boolean).join(' · ') },
-  list_transl_cache: { action: '查看缓存清单', running: '查看缓存清单', verb: '', icon: '🗃️', summary: () => '列出缓存文件' },
-  read_transl_cache: { action: '读取缓存', running: '读取缓存', verb: '', icon: '📄', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
-  search_transl_cache: { action: '搜索缓存', running: '搜索缓存', verb: '', icon: '🔎', summary: (a) => [str(a?.query), a?.context ? `±${a.context} 句上下文` : ''].filter(Boolean).join(' · ') },
-  patch_transl_cache: { action: '修改译文', running: '修改译文', verb: '', icon: '✏️', summary: (a) => (Array.isArray(a?.patches) ? `${a.patches.length} 条` : str(a?.filename)) },
-  delete_transl_cache: { action: '删除缓存', running: '删除缓存', verb: '', icon: '🗑️', summary: (a) => [str(a?.filename), str(a?.indexes)].filter(Boolean).join(' · ') },
+  stop_translation: { action: '停止翻译', running: '停止翻译', verb: '', icon: 'stop', summary: () => '' },
+  wait: { action: '等待', running: '等待中', verb: '', icon: 'hourglass', summary: (a) => waitSummary(a) },
+  get_progress: { action: '查询进度', running: '查询进度', verb: '', icon: 'chart', summary: () => '' },
+  get_runtime: { action: '查询运行时', running: '查询运行时', verb: '', icon: 'settings', summary: () => '' },
+  list_problems: { action: '检查问题清单', running: '检查问题清单', verb: '', icon: 'search', summary: (a) => str(a?.problem_type) || '问题类型统计' },
+  manage_problem_filter: { action: '管理问题过滤', running: '管理问题过滤', verb: '', icon: 'filter', summary: (a) => [str(a?.action), Array.isArray(a?.keyword) ? a.keyword.map((k) => str(k)).join('、') : str(a?.keyword)].filter(Boolean).join(' · ') },
+  list_transl_cache: { action: '查看缓存清单', running: '查看缓存清单', verb: '', icon: 'archive', summary: () => '列出缓存文件' },
+  read_transl_cache: { action: '读取缓存', running: '读取缓存', verb: '', icon: 'file-text', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
+  search_transl_cache: { action: '搜索缓存', running: '搜索缓存', verb: '', icon: 'search-plus', summary: (a) => [str(a?.query), a?.context ? `±${a.context} 句上下文` : ''].filter(Boolean).join(' · ') },
+  patch_transl_cache: { action: '修改译文', running: '修改译文', verb: '', icon: 'pencil', summary: (a) => (Array.isArray(a?.patches) ? `${a.patches.length} 条` : str(a?.filename)) },
+  delete_transl_cache: { action: '删除缓存', running: '删除缓存', verb: '', icon: 'trash', summary: (a) => [str(a?.filename), str(a?.indexes)].filter(Boolean).join(' · ') },
 };
 
-const DEFAULT_TOOL_META: ToolMeta = { action: '调用工具', running: '调用工具', verb: '', icon: '🔧', summary: () => '' };
+const DEFAULT_TOOL_META: ToolMeta = { action: '调用工具', running: '调用工具', verb: '', icon: 'tool', summary: () => '' };
 
 /** 未收录进 TOOL_META 的工具：至少把原始工具名亮出来，不再只显示「调用工具」。 */
 function toolMeta(name: string | undefined): ToolMeta {
@@ -827,7 +829,7 @@ function AgentSessionSidebar({
                     title={dir}
                   >
                     <span className="agent-sessions__group-icon" aria-hidden>
-                      {isCollapsed ? '📁' : '📂'}
+                      <Icon name={isCollapsed ? 'folder' : 'folder-open'} />
                     </span>
                     <span className="agent-sessions__group-name">{shortDir}</span>
                     <span className="agent-sessions__group-count">
@@ -912,7 +914,7 @@ function AgentSessionSidebar({
                                 title={isRowRunning ? '正在运行，停止后才能删除' : '删除该会话'}
                                 aria-label={`删除会话 ${s.title}`}
                               >
-                                ✕
+                                <Icon name="close" />
                               </button>
                             </div>
                           );
@@ -1887,7 +1889,7 @@ export function AgentPage() {
       <div className="agent-console__main agent-cockpit">
       <header className="agent-console__bar">
         <div className="agent-console__bar-left">
-          <span className="agent-console__avatar" aria-hidden>🤖</span>
+          <span className="agent-console__avatar" aria-hidden><Icon name="bot" /></span>
           <div className="agent-console__bar-copy">
             <div className="agent-console__bar-title">
               <span className="agent-console__bar-name">翻译 Agent</span>
@@ -1933,7 +1935,7 @@ export function AgentPage() {
             disabled={running || !events.length}
             title="重置会话（清空全部对话与后端历史）"
           >
-            🗑
+            <Icon name="trash" />
           </button>
         </div>
       </header>
@@ -1942,7 +1944,7 @@ export function AgentPage() {
         <div className="agent-thread">
           {timeline.length === 0 ? (
             <div className="agent-hero">
-              <div className="agent-hero__mark">🤖</div>
+              <div className="agent-hero__mark"><Icon name="bot" /></div>
               <h2 className="agent-hero__title">让 Agent 替你跑完整个翻译流程</h2>
               <p className="agent-hero__subtitle">
                 发送第一条消息启动会话，它会自主了解项目、准备字典、启动翻译、跟进进度，并复核修复发现的问题。运行中你可以随时插话或点停止打断，之后继续发消息它会在原会话上接着干。
@@ -1958,18 +1960,23 @@ export function AgentPage() {
                   <>
                     <span className="agent-hero__open-projects-label">选择一个已打开的项目开始</span>
                     <div className="agent-hero__project-chips">
-                      {projectOptions.map((dir) => (
-                        <button
-                          key={dir}
-                          type="button"
-                          className="agent-hero__project-chip"
-                          onClick={() => chooseProject(dir)}
-                          title={dir}
-                        >
-                          <span className="agent-hero__project-chip-icon">📁</span>
-                          <span className="agent-hero__project-chip-name">{shortName(dir)}</span>
-                        </button>
-                      ))}
+                      {projectOptions.map((dir) => {
+                        // 选中的那个常亮：只靠 hover 的话鼠标一移开就看不出当前选的是谁
+                        const selected = dir === projectDir;
+                        return (
+                          <button
+                            key={dir}
+                            type="button"
+                            className={`agent-hero__project-chip${selected ? ' is-selected' : ''}`}
+                            onClick={() => chooseProject(dir)}
+                            title={dir}
+                            aria-pressed={selected}
+                          >
+                            <span className="agent-hero__project-chip-icon"><Icon name="folder" /></span>
+                            <span className="agent-hero__project-chip-name">{shortName(dir)}</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </>
                 ) : (
@@ -1984,7 +1991,7 @@ export function AgentPage() {
                     onClick={() => void handleOpenProject()}
                     title="从文件夹打开一个已有项目"
                   >
-                    📂 打开项目
+                    <Icon name="folder-open" /> 打开项目
                   </button>
                   <button
                     type="button"
@@ -1992,7 +1999,7 @@ export function AgentPage() {
                     onClick={() => navigate('/new-project')}
                     title="新建项目向导"
                   >
-                    ✨ 新建项目
+                    <Icon name="sparkle" /> 新建项目
                   </button>
                 </div>
               </div>
@@ -2042,7 +2049,7 @@ export function AgentPage() {
 
           {error ? (
             <div className="agent-notice agent-notice--error">
-              <span className="agent-notice__icon">⚠</span>
+              <span className="agent-notice__icon"><Icon name="warning" /></span>
               <div className="agent-notice__body">
                 <div className="agent-notice__title">{error}</div>
               </div>
@@ -2129,7 +2136,7 @@ export function AgentPage() {
                           title="打断 Agent，马上发送这条"
                           onClick={() => void handleQueuedSendNow(item.id)}
                         >
-                          <span className="agent-queue__act-icon">⤒</span>立即
+                          <span className="agent-queue__act-icon"><Icon name="send-now" /></span>立即
                         </button>
                         <button
                           type="button"
@@ -2138,7 +2145,7 @@ export function AgentPage() {
                           aria-label="编辑这条"
                           onClick={() => setEditingQueued({ id: item.id, text: item.text })}
                         >
-                          ✎
+                          <Icon name="pencil" />
                         </button>
                         <button
                           type="button"
@@ -2147,7 +2154,7 @@ export function AgentPage() {
                           aria-label="删除这条"
                           onClick={() => void handleQueuedDelete(item.id)}
                         >
-                          🗑
+                          <Icon name="trash" />
                         </button>
                       </>
                     )}
@@ -2183,7 +2190,7 @@ export function AgentPage() {
           <div className="agent-composer__toolbar">
             <div className="agent-composer__left">
               <span className="agent-composer__chip agent-composer__chip--static" title={projectDir || '未选择项目'}>
-                <span className="agent-composer__chip-icon">📁</span>
+                <span className="agent-composer__chip-icon"><Icon name="folder" /></span>
                 <span className="agent-composer__chip-label">{projectDir ? shortName(projectDir) : '未选择项目'}</span>
               </span>
               <div className="agent-profile-picker" ref={profilePickerRef}>
@@ -2202,7 +2209,7 @@ export function AgentPage() {
                         } · 点击切换（只影响当前会话）`
                   }
                 >
-                  <span className="agent-composer__chip-icon">⚙</span>
+                  <span className="agent-composer__chip-icon"><Icon name="settings" /></span>
                   <span className="agent-composer__chip-label">{backendProfileLabel || '未配置后端'}</span>
                 </button>
                 {profileMenuOpen ? (
@@ -2245,7 +2252,7 @@ export function AgentPage() {
                               {formatProfileLabel(name, getBackendProfile(name))}
                             </span>
                             {name === backendProfileName ? (
-                              <span className="agent-profile-menu__check" aria-hidden>✓</span>
+                              <span className="agent-profile-menu__check" aria-hidden><Icon name="check" /></span>
                             ) : null}
                           </button>
                         ))}
@@ -2553,7 +2560,7 @@ function AgentActivityGroup({
         }}
         aria-expanded={open}
       >
-        <span className="agent-activity__icon">✳</span>
+        <span className="agent-activity__icon"><Icon name="spark" /></span>
         <span className={`agent-activity__label${isLive ? ' is-running' : ''}`}>{label}</span>
         {parts.length ? <span className="agent-activity__meta">{parts.join(' · ')}</span> : null}
         <span className="agent-activity__caret">›</span>
@@ -2687,7 +2694,7 @@ function ReasoningRow({
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >
-        <span className="agent-reasoning__icon">✳</span>
+        <span className="agent-reasoning__icon"><Icon name="spark" /></span>
         <span className={`agent-reasoning__label${streaming ? ' is-running' : ''}`}>{label}</span>
         {marquee ? (
           // 装饰性的一行滚动预览：整段思考在展开区里，读屏不必重复
@@ -2719,7 +2726,7 @@ function CompactRow({ item }: { item: ActivityItem }) {
   const tokens = item.summaryChars ? Math.round(item.summaryChars / 4) : 0;
   return (
     <div className="agent-compact-note" title="早期对话已被摘要压缩，以腾出上下文空间">
-      <span className="agent-compact-note__icon">🗜</span>
+      <span className="agent-compact-note__icon"><Icon name="compress" /></span>
       <span className="agent-compact-note__text">
         已压缩上下文 · 摘要 {removed} 条早期消息
         {tokens > 0 ? `（约 ${tokens} 字）` : ''}
@@ -2762,7 +2769,7 @@ function RetryRow({ item }: { item: ActivityItem }) {
 
   return (
     <div className={`agent-retry-note${live ? ' is-live' : ''}`} title={title}>
-      <span className="agent-retry-note__icon">↻</span>
+      <span className="agent-retry-note__icon"><Icon name="refresh" /></span>
       <span className="agent-retry-note__text">
         {live ? `${cause}，${remainingSec} 秒后重试` : '已重试'}
         <span className="agent-retry-note__count"> · {attemptText}</span>
@@ -2874,7 +2881,7 @@ function TranslationJobCard({ item, projectDir }: { item: ActivityItem; projectD
         }}
         aria-expanded={open}
       >
-        <span className="agent-tjob__icon">▶️</span>
+        <span className="agent-tjob__icon"><Icon name="play" /></span>
         <span className="agent-tjob__action">启动翻译</span>
         <span className="agent-tjob__summary">
           {[translator, fileCount ? `仅 ${fileCount} 个文件` : ''].filter(Boolean).join(' · ')}
@@ -3040,7 +3047,7 @@ function AskUserCard({
   return (
     <div className="agent-ask" role="form" aria-label="Agent 提问">
       <div className="agent-ask__head">
-        <span className="agent-ask__icon" aria-hidden>❓</span>
+        <span className="agent-ask__icon" aria-hidden><Icon name="help" /></span>
         <span className="agent-ask__title">Agent 想先问你</span>
         {questions.length > 1 ? (
           <span className="agent-ask__progress">
@@ -3092,7 +3099,7 @@ function AskUserCard({
               onClick={() => toggleOption(option)}
               disabled={submitting}
             >
-              <span className="agent-ask__mark" aria-hidden>{selected ? '✓' : ''}</span>
+              <span className="agent-ask__mark" aria-hidden>{selected ? <Icon name="check" /> : null}</span>
               <span>{option}</span>
             </button>
           );
@@ -3101,7 +3108,7 @@ function AskUserCard({
           /* 「自己填」就地变输入框：点开的是这一行本身，不再在下面另起一个浮出的
              输入框。整行包在 label 里，点行的空白处也能聚焦到输入。 */
           <label className="agent-ask__option agent-ask__option--editing is-selected">
-            <span className="agent-ask__mark" aria-hidden>✓</span>
+            <span className="agent-ask__mark" aria-hidden><Icon name="check" /></span>
             <input
               className="agent-ask__option-input"
               autoFocus
@@ -3233,7 +3240,7 @@ function ToolRow({
         disabled={!hasDetails}
         aria-expanded={open}
       >
-        <span className="agent-tool__icon">{meta.icon}</span>
+        <span className="agent-tool__icon"><Icon name={meta.icon} /></span>
         <span className={`agent-tool__name${waiting || isRunning ? ' is-running' : ''}`}>{meta.action}</span>
         {summary ? <span className="agent-tool__summary">{summary}</span> : null}
         {changeList ? <span className="agent-tool__diffbadge">±{changeList.total}</span> : null}
@@ -3422,7 +3429,7 @@ function ChangeListCard({ data }: { data: ChangeData }) {
 function ErrorNotice({ group }: { group: Extract<TimelineGroup, { type: 'error' }> }) {
   return (
     <div className="agent-notice agent-notice--error">
-      <span className="agent-notice__icon">⚠</span>
+      <span className="agent-notice__icon"><Icon name="warning" /></span>
       <div className="agent-notice__body">
         <div className="agent-notice__title">执行出错</div>
         <div className="agent-notice__text">{group.message}</div>

@@ -21,6 +21,7 @@
 @import './styles/sidebar.css';
 
 /* ── 6. Shared components ── */
+@import './styles/components/icon.css';
 @import './styles/components/progress-bar.css';
 @import './styles/components/panel.css';
 @import './styles/components/button.css';

@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Button } from '../components/Button';
 import { CustomSelect } from '../components/CustomSelect';
 import { PageHeader } from '../components/PageHeader';
+import { Icon } from '../components/Icon';
 import type { ProjectPageContext } from '../components/ProjectLayout';
 import { Panel } from '../components/Panel';
 import { EmptyState, InlineFeedback, LoadingState } from '../components/page-state';
@@ -148,7 +149,7 @@ function CacheEntryCard({
           onClick={() => setExpanded(!expanded)}
           title={expanded ? '收起' : '展开详情'}
         >
-          {expanded ? '▾' : '▸'}
+          {expanded ? <Icon name="chevron-down" /> : <Icon name="chevron-right" />}
         </button>
         <button
           type="button"
@@ -156,7 +157,7 @@ function CacheEntryCard({
           onClick={() => onDelete(!entry.deleted, entry.index)}
           title={entry.deleted ? "撤销删除" : "删除此条"}
         >
-          {entry.deleted ? '↩' : '✕'}
+          {entry.deleted ? <Icon name="undo" /> : <Icon name="close" />}
         </button>
       </div>
 
@@ -1317,7 +1318,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         description="在这里可以浏览翻译问题、手动润色，或通过删除缓存句触发部分重翻。最终结果将基于这些缓存来构建。"
         actions={cacheDir ? (
           <Button variant="secondary" onClick={() => void invoke('open_folder', { path: cacheDir })} title={cacheDir}>
-            📂 打开缓存文件夹
+            <Icon name="folder-open" /> 打开缓存文件夹
           </Button>
         ) : null}
         status={
@@ -1374,7 +1375,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                       disabled={savingAll}
                       title={`保存 ${dirtyFiles.size} 个有修改的文件`}
                     >
-                      {savingAll ? '⏳' : `💾 全部保存 (${dirtyFiles.size})`}
+                      {savingAll ? <Icon name="hourglass" /> : <><Icon name="save" /> 全部保存 ({dirtyFiles.size})</>}
                     </Button>
                   )}
                   <button
@@ -1519,7 +1520,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                   onClick={() => { setShowReplace(!showReplace); setReplaceQuery(searchQuery); }}
                   title={showReplace ? '隐藏替换' : '显示替换'}
                 >
-                  {showReplace ? '▾ 替换' : '▸ 替换'}
+                  {showReplace ? <><Icon name="chevron-down" /> 替换</> : <><Icon name="chevron-right" /> 替换</>}
                 </button>
                 {searching && <span className="cache-search-status">搜索中…</span>}
                 {!searching && searchQuery.trim() && (
@@ -1855,7 +1856,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
               void handleRevealCacheFiles(filenames);
             }}
           >
-            <span className="cache-context-menu__icon" aria-hidden="true">📂</span>
+            <span className="cache-context-menu__icon" aria-hidden="true"><Icon name="folder-open" /></span>
             <span className="cache-context-menu__label">在文件管理器中浏览</span>
           </button>
           {contextMenu.showDelete && (
@@ -1868,7 +1869,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                 void handleDeleteSelectedFiles(files);
               }}
             >
-              <span className="cache-context-menu__icon" aria-hidden="true">🗑</span>
+              <span className="cache-context-menu__icon" aria-hidden="true"><Icon name="trash" /></span>
               <span className="cache-context-menu__label">
                 删除{contextMenu.filenames.length > 1 ? ` (${contextMenu.filenames.length} 个文件)` : ''}
               </span>

@@ -40,6 +40,17 @@
   overflow-y: auto;
 }
 
+/* 「配置有未保存的修改」的小圆点（原来是圆点字符） */
+.project-config-page__dirty-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: var(--color-danger, #e53e3e);
+  vertical-align: middle;
+}
+
 .project-config-page__section-btn {
   display: flex;
   align-items: center;
@@ -343,8 +354,20 @@
 }
 
 .config-advanced-details__summary::before {
-  content: '▸';
-  font-size: 11px;
+  /* 折角用 Icon 集的图形（mask）而不是三角字符；展开时照样转 90° */
+  content: '';
+  flex: none;
+  width: 11px;
+  height: 11px;
+  background-color: currentColor;
+  -webkit-mask-image: var(--icon-chevron-right);
+  mask-image: var(--icon-chevron-right);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
   transition: transform var(--transition-fast);
 }
 

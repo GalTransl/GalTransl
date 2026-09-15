@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Icon } from '../components/Icon';
 import { speakerStyle } from '../lib/speaker';
 import { resolveSpeakerName } from '../lib/useNameDict';
 import type {
@@ -202,7 +203,7 @@ export function FileProgressRow({
             >
               <FilterFunnelIcon className="file-progress-row__filter-icon" />
               <span className="file-progress-row__filter-tooltip">筛选句流</span>
-              {isSuccessFileFilterActive ? <span className="file-progress-row__filter-check">✓</span> : null}
+              {isSuccessFileFilterActive ? <span className="file-progress-row__filter-check"><Icon name="check" /></span> : null}
             </button>
           </span>
           <span className="file-progress-row__state">{isComplete ? '已完成' : percent > 0 ? '处理中' : '排队中'}</span>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type Keyboard
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from './Button';
+import { Icon } from './Icon';
 import { Panel } from './Panel';
 import { EmptyState, ErrorState, InlineFeedback, LoadingState } from './page-state';
 import type { DictFileContent, DictionaryCategory } from '../lib/api';
@@ -184,7 +185,7 @@ function DictEntryGroupCard({
               onClick={() => onDelete(rowIndex)}
               title="删除此条"
             >
-              ✕
+              <Icon name="close" />
             </button>
           </div>
         ))}
@@ -739,7 +740,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
               void handleRevealFile(file);
             }}
           >
-            <span className="cache-context-menu__icon" aria-hidden="true">📂</span>
+            <span className="cache-context-menu__icon" aria-hidden="true"><Icon name="folder-open" /></span>
             <span className="cache-context-menu__label">在文件管理器中浏览</span>
           </button>
         </div>,

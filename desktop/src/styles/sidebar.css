@@ -328,7 +328,7 @@
   height: 22px;
   border: none;
   border-radius: 6px;
-  /* 透明的 ✕：默认不铺底色（以前是白色圆角块，压在行尾很显眼）。
+  /* 透明的关闭按钮：默认不铺底色（以前是白色圆角块，压在行尾很显眼）。
      悬停时才给一点淡红底（见下），保留"这是个能点的按钮"的可读性。 */
   background: transparent;
   color: var(--color-text-muted);

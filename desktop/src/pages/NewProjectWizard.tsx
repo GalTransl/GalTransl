@@ -7,6 +7,7 @@ import { Button } from '../components/Button';
 import { CustomSelect } from '../components/CustomSelect';
 import { Panel } from '../components/Panel';
 import { PageHeader } from '../components/PageHeader';
+import { Icon } from '../components/Icon';
 import { InlineFeedback } from '../components/page-state';
 import {
   BACKEND_PROFILES_CHANGE_EVENT,
@@ -426,7 +427,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
           key={i}
           className={`wizard-step${i === currentStep ? ' wizard-step--active' : ''}${i < currentStep ? ' wizard-step--completed' : ''}`}
         >
-          <span className="wizard-step__number">{i < currentStep ? '✓' : i + 1}</span>
+          <span className="wizard-step__number">{i < currentStep ? <Icon name="check" /> : i + 1}</span>
           <span className="wizard-step__label">{label}</span>
         </li>
       ))}
@@ -471,7 +472,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
       </div>
       <div className="wizard-actions">
         <Button disabled={projectCreated || !parentDir || !projectName} onClick={() => void handleCreateProject()}>
-          {projectCreated ? '已创建 ✓' : '创建项目'}
+          {projectCreated ? <>已创建 <Icon name="check" /></> : '创建项目'}
         </Button>
       </div>
     </Panel>
@@ -489,7 +490,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
         onDragLeave={(e) => { e.currentTarget.classList.remove('drop-zone--over'); }}
         onDrop={(e) => void handleFileDrop(e)}
       >
-        <div className="drop-zone__icon">📁</div>
+        <div className="drop-zone__icon"><Icon name="folder" /></div>
         <div className="drop-zone__text">拖放文件到此处导入</div>
       </div>
       <div className="wizard-actions">
@@ -637,7 +638,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
       </div>
       <div className="wizard-actions">
         <Button disabled={settingsSaved} onClick={() => void handleSaveSettings()}>
-          {settingsSaved ? '已保存 ✓' : '保存设置'}
+          {settingsSaved ? <>已保存 <Icon name="check" /></> : '保存设置'}
         </Button>
       </div>
     </Panel>
