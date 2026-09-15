@@ -7,8 +7,11 @@
 - delta.model_extra['reasoning']（OpenRouter 等平台键名）。
 
 约定：思考内容走独立的 reasoning_delta 事件流（前端渲染成可折叠的
-「思考中」卡片），绝不进返回的 content、不写对话历史（发回 provider
-会被拒收）。模型「说」的回复正文仍走 content_delta / content_end。
+「思考中」卡片），绝不进返回的 content。模型「说」的回复正文仍走
+content_delta / content_end。
+
+思考还会被记下**字段名**并随 assistant 消息回传给 provider——thinking 模式
+（DeepSeek 等）下带 tools 的请求不回传会 400，见 test_agent_reasoning_echo.py。
 
 不依赖真实 OpenAI / 后端：用 SimpleNamespace 伪造流式 chunk。
 """

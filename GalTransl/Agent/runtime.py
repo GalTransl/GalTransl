@@ -206,15 +206,36 @@ def _status_code_of(exc: BaseException) -> int | None:
 def _is_unsupported_param_error(exc: BaseException) -> bool:
     """判断异常是否属于「不认识 stream_options 这个可选参数」。
 
-    限定在 400/422 这类参数错误里再按文案确认，避免把网络错误误判成参数问题
-    ——那会让同一次失败悄悄多发一次请求、正好绕开重试提示。"""
+    限定在 400/404/422 这类参数错误里，且**必须点到该参数名**（写法不一：
+    stream_options / stream options）。不再用 "invalid"/"unknown"/"unsupported" 这类
+    泛关键词——各家的参数错误都长这样（DeepSeek 的 invalid_request_error 就是），
+    误判会让同一次失败悄悄多发一次请求，还会遮住其它 400 的兜底分支。"""
     if _status_code_of(exc) not in (400, 404, 422):
         return False
     message = str(exc).lower()
-    return any(
-        key in message
-        for key in ("stream_options", "stream options", "unsupported", "unrecognized", "unknown", "invalid")
-    )
+    return "stream_options" in message or "stream options" in message
+
+
+# 思考内容的字段名：不同平台不一样（DeepSeek 用 reasoning_content，OpenRouter 等用 reasoning）。
+# 提取时按这个顺序试，回传时用命中的那个原名。
+REASONING_FIELD_NAMES = ("reasoning_content", "reasoning")
+
+
+def _requested_reasoning_field(exc: BaseException) -> str:
+    """从 provider 的报错里认出它要的思考字段名（认不出返回空串）。
+
+    DeepSeek 的原文是「The `reasoning_content` in the thinking mode must be passed back
+    to the API」——把字段名抠出来，就能就地给老会话（历史里存的 assistant 消息还没带这个
+    字段）补上再重试一次。
+    """
+    text = str(exc)
+    lowered = text.lower()
+    if "thinking mode" not in lowered and "reasoning_content" not in text:
+        return ""
+    for name in REASONING_FIELD_NAMES:
+        if name in text:
+            return name
+    return REASONING_FIELD_NAMES[0] if "thinking mode" in lowered else ""
 
 
 AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到一个 Galgame 翻译项目，需要自主驱动从准备字典到完成翻译再到质量复核的全流程，就像一个熟手用户在桌面端图形界面里操作一样。
@@ -399,6 +420,10 @@ class AgentRunner:
         self._model: str = ""
         self._context_window = DEFAULT_CONTEXT_WINDOW
         self._compacted_this_turn = False
+        # thinking 模式（DeepSeek 等）下要回传给 provider 的思考字段名：流里见到过就记下来，
+        # 之后每条 assistant 消息都带回去（带 tools 的请求不回传会 400）。空 = 还没见过，
+        # 这时不往历史里塞这个字段，免得给不认它的 provider 添乱。
+        self._reasoning_field: str = ""
         # 正在生成中的助手消息累加器（进行中消息快照）：引用流式期间
         # 那几份 list/dict，响应落定后由 _take_stream_acc 取走并置空。
         self._stream_acc: dict[str, Any] | None = None
@@ -565,7 +590,7 @@ class AgentRunner:
                     _log(f"  ⚠ 响应被截断（finish_reason=length），丢弃 {len(tool_calls)} 个工具调用")
                     # 思考/正文照常进转录，被丢弃的那批工具调用不进（它们没执行）
                     self._emit_assistant_message(acc, drop_tools=True)
-                    self._persist_message({"role": "assistant", "content": content} if content else {"role": "assistant", "content": ""})
+                    self._persist_message({"role": "assistant", "content": content, **_reasoning_echo(acc)})
                     truncated_msg = (
                         "上一次响应因达到输出长度上限被截断，其中的工具调用可能不完整，已全部丢弃、未执行。"
                         "请缩小单次操作范围（比如减少一次读取的条目数、拆分批量修改）后重试。"
@@ -594,14 +619,16 @@ class AgentRunner:
                 self._emit_assistant_message(acc)
 
                 if not tool_calls:
-                    # 收尾回复也要写进历史，下一轮对话才能看到 Agent 说过什么
-                    self._persist_message({"role": "assistant", "content": content})
+                    # 收尾回复也要写进历史，下一轮对话才能看到 Agent 说过什么。
+                    # 思考（thinking 模式）一并回传：带 tools 的请求里，未调工具的那条
+                    # assistant 消息同样要带 reasoning_content，否则下一次请求 400。
+                    self._persist_message({"role": "assistant", "content": content, **_reasoning_echo(acc)})
                     _log(f"无工具调用，回合完成，共 {turns} 轮")
                     self._end_turn("done", {"summary": content, "total_steps": turns})
                     return
 
                 # 把 assistant 这条消息原样追加（含 tool_calls），再逐个执行
-                assistant_msg: dict[str, Any] = {"role": "assistant"}
+                assistant_msg: dict[str, Any] = {"role": "assistant", **_reasoning_echo(acc)}
                 if content:
                     assistant_msg["content"] = content
                 assistant_msg["tool_calls"] = [
@@ -882,6 +909,69 @@ class AgentRunner:
                     _log("  ⏹ 退避等待期间收到停止信号，放弃重试")
                     raise AgentStopRequested() from exc
 
+    def _create_stream(self, *, include_usage: bool) -> Any:
+        """发一次流式请求（不做重试，重试由外层的 _stream_llm_attempt 与重试循环负责）。"""
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": self._messages_for_request(),
+            "tools": AGENT_TOOLS,
+            "tool_choice": "auto",
+            "stream": True,
+        }
+        if include_usage:
+            kwargs["stream_options"] = {"include_usage": True}
+        return self._openai_client.chat.completions.create(**kwargs)
+
+    def _messages_for_request(self) -> list[dict[str, Any]]:
+        """发请求前的消息列表：按需给 assistant 消息补齐 thinking 模式的思考字段。
+
+        DeepSeek（及同类 thinking 模式）要求：只要请求带了 tools，历史里每条 assistant
+        消息都必须把当初的 reasoning_content 回传——**即使该轮模型没有实际进行工具调用**，
+        少一条就 400「The `reasoning_content` in the thinking mode must be passed back to
+        the API」。本方法负责：这场会话是 thinking 会话时（流里见过该字段，或历史里已有），
+        给缺的那些补空串；老会话（本修复之前存的 assistant 消息还没带这个字段）靠这一步
+        救回来。不是 thinking 会话就原样返回，不给不认它的 provider 塞陌生字段。
+        """
+        field = self._reasoning_field
+        if not field:
+            for message in self.state.messages:
+                if message.get("role") != "assistant":
+                    continue
+                field = next((name for name in REASONING_FIELD_NAMES if name in message), "")
+                if field:
+                    break
+        if not field:
+            return list(self.state.messages)
+        messages: list[dict[str, Any]] = []
+        for message in self.state.messages:
+            if message.get("role") == "assistant" and field not in message:
+                messages.append({**message, field: ""})
+            else:
+                messages.append(message)
+        return messages
+
+    def _open_stream(self, *, include_usage: bool) -> Any:
+        """建流式请求，并对两类「provider 侧的要求」就地兜底重试一次。
+
+        - 不认 stream_options → 摘掉它再试（usage 只是上下文用量的估算锚点，没有也能跑）；
+        - thinking 模式要求回传思考字段 → 记下字段名，补齐历史（见 _messages_for_request）后重试。
+
+        其它错误（网络/限流/5xx）一律抛给外层重试循环，否则会在这里再悄悄发一次请求——
+        既让用户看不到重试，又把请求次数翻倍。
+        """
+        try:
+            return self._create_stream(include_usage=include_usage)
+        except Exception as exc:  # noqa: BLE001 - 只对下面这两类做兜底，其余原样抛
+            if include_usage and _is_unsupported_param_error(exc):
+                _log("  ⚠ provider 不支持 stream_options，退回不带 usage 的请求")
+                return self._open_stream(include_usage=False)
+            field = _requested_reasoning_field(exc)
+            if field and field != self._reasoning_field:
+                _log(f"  ⚠ API 要求回传 {field}（thinking 模式 + tools），补齐历史后重试")
+                self._reasoning_field = field
+                return self._open_stream(include_usage=include_usage)
+            raise
+
     def _stream_llm_attempt(self) -> tuple[str, list[dict[str, Any]], str]:
         """发起一次流式 chat.completions 请求，边收边推 content_delta 事件。
 
@@ -894,37 +984,16 @@ class AgentRunner:
         推理模型（DeepSeek-R1/GLM 等）的思考内容在非标准字段
         reasoning_content / reasoning 里，位置因平台而异：有的在
         delta.reasoning_content 直接属性上，有的被 OpenAI SDK 收进
-        delta.model_extra。这里统一提取并走独立的 reasoning_delta
-        事件流，前端渲染成可折叠的「思考中」卡片；但绝不进 content、
-        不写对话历史（发回给 provider 会被拒收或污染上下文）。
+        delta.model_extra。这里统一提取：走独立的 reasoning_delta 事件流给前端渲染成
+        可折叠的「思考中」卡片，同时记下字段名——thinking 模式下它还要跟着 assistant
+        消息回传给 provider（带 tools 的请求不回传会 400，见 _messages_for_request）。
 
         停止信号在流期间到达时立即弃流返回（上层会走 stopped 收尾），
         不再消费后续 chunk。
         """
         # include_usage 让 provider 在流末尾回一个 usage（部分兼容实现不认，
         # 抛错就退回到不带该参数重试一次）。usage 用于上下文用量锚点估算。
-        try:
-            stream = self._openai_client.chat.completions.create(
-                model=self._model,
-                messages=self.state.messages,
-                tools=AGENT_TOOLS,
-                tool_choice="auto",
-                stream=True,
-                stream_options={"include_usage": True},
-            )
-        except Exception as exc:  # noqa: BLE001 - 只对「不认该参数」做回退
-            # 其它错误（网络/限流/5xx）必须抛给上层重试循环，否则会在这里再悄悄发
-            # 一次请求——既让用户看不到重试，又把请求次数翻倍。
-            if not _is_unsupported_param_error(exc):
-                raise
-            _log("  ⚠ provider 不支持 stream_options，退回不带 usage 的请求")
-            stream = self._openai_client.chat.completions.create(
-                model=self._model,
-                messages=self.state.messages,
-                tools=AGENT_TOOLS,
-                tool_choice="auto",
-                stream=True,
-            )
+        stream = self._open_stream(include_usage=True)
 
         content_parts: list[str] = []  # 「说」：模型回复正文
         reasoning_parts: list[str] = []  # 「想」：思考内容，只展示不进历史
@@ -994,12 +1063,24 @@ class AgentRunner:
                 finish_reason = str(choice.finish_reason)
             delta = choice.delta
             # 思考内容：直接属性 / model_extra 里的 reasoning_content 或
-            # reasoning（OpenRouter 等平台用后者），逐个都试一遍。
+            # reasoning（OpenRouter 等平台用后者），逐个都试一遍。命中的字段名要记下来：
+            # thinking 模式下同样的字段要跟着 assistant 消息回传（见 _messages_for_request）。
             extra = getattr(delta, "model_extra", None) or {}
             reasoning_piece = getattr(delta, "reasoning_content", None)
+            reasoning_field = REASONING_FIELD_NAMES[0] if reasoning_piece else ""
             if not reasoning_piece and isinstance(extra, dict):
-                reasoning_piece = extra.get("reasoning_content") or extra.get("reasoning")
+                for candidate in REASONING_FIELD_NAMES:
+                    value = extra.get(candidate)
+                    if isinstance(value, str) and value:
+                        reasoning_piece, reasoning_field = value, candidate
+                        break
             if isinstance(reasoning_piece, str) and reasoning_piece:
+                if not reasoning_field:
+                    reasoning_field = REASONING_FIELD_NAMES[0]
+                if not self._reasoning_field:
+                    self._reasoning_field = reasoning_field
+                if self._stream_acc is not None:
+                    self._stream_acc["reasoning_field"] = reasoning_field
                 if open_kind != "reasoning":
                     if open_kind == "content":
                         _end_stream_segment("content")  # 说→想 切换：先收掉说的一段
@@ -1037,7 +1118,7 @@ class AgentRunner:
         _flush_stream("content", pending_content, len(content_parts), force=True)
         _flush_stream("reasoning", pending_reasoning, len(reasoning_parts), force=True)
         if reasoning_parts:
-            _log(f"  🧠 思考内容 {len(''.join(reasoning_parts))} 字（已并入思考展示流，不进对话历史）")
+            _log(f"  🧠 思考内容 {len(''.join(reasoning_parts))} 字（展示流 + thinking 模式下随 assistant 消息回传）")
         # 收掉还开着的最后一段（切换发生时上一段已当场收掉）。前端据此
         # 撤掉打字机光标、记下耗时；停止信号弃流时也要走到这里，否则光标残留。
         if open_kind is not None:
@@ -1345,6 +1426,20 @@ def _estimate_message_tokens(message: dict[str, Any]) -> int:
             total_chars += len(str(fn.get("arguments") or ""))
     # 每条消息的固定开销（role/分隔符等）
     return total_chars // CHARS_PER_TOKEN + 4
+
+
+def _reasoning_echo(acc: dict[str, Any] | None) -> dict[str, str]:
+    """这一轮的思考内容 → 要随 assistant 消息回传给 provider 的键值对。
+
+    用流里出现过的原字段名（reasoning_content / reasoning）回传；provider 没给过思考
+    就返回空 dict——不往消息里塞它不认识的字段。
+    """
+    if not acc:
+        return {}
+    text = "".join(acc.get("reasoning") or [])
+    if not text:
+        return {}
+    return {str(acc.get("reasoning_field") or REASONING_FIELD_NAMES[0]): text}
 
 
 def _assistant_parts(acc: dict[str, Any] | None) -> list[dict[str, Any]]:
