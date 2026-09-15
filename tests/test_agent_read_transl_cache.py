@@ -50,31 +50,39 @@ class _Runner:
 
 
 class CacheEntryProjectionTests(unittest.TestCase):
-    def test_default_drops_redundant_and_empty(self) -> None:
+    def test_default_is_lean(self) -> None:
+        """默认一条只回：谁说的 + 原文一列 + 译文一列 + 问题。"""
         item = _project_cache_entries([ENTRY], None)[0]
         self.assertEqual(
             sorted(item),
-            sorted(["index", "name", "pre_src", "pre_dst", "problem", "trans_by"]),
+            sorted(["index", "name", "post_src", "pre_dst", "problem"]),
         )
+        # 原文不再发两遍（pre_src 默认不给）、译者是噪音（trans_by 默认不给）
+        self.assertNotIn("pre_src", item)
+        self.assertNotIn("trans_by", item)
         # post_dst_preview 与 pre_dst 相同 → 不占位置
         self.assertNotIn("post_dst_preview", item)
-        # 空的校对字段不返回；trans_by 有内容才带上
+        # 空的校对字段不返回
         self.assertNotIn("proofread_dst", item)
         self.assertNotIn("proofread_by", item)
-        self.assertEqual(item["trans_by"], "ForGal-json")
 
     def test_post_dst_preview_only_when_it_differs(self) -> None:
         changed = {**ENTRY, "post_dst_preview": "您好（替换后）"}
         item = _project_cache_entries([changed], None)[0]
         self.assertEqual(item["post_dst_preview"], "您好（替换后）")
 
-    def test_post_src_only_when_it_differs(self) -> None:
-        """post_src 与原文不同 = 译前字典动过，这时才值得带上。"""
-        self.assertNotIn("post_src", _project_cache_entries([ENTRY], None)[0])
-        changed = {**ENTRY, "post_src": "こんにちは（替换后）"}
-        self.assertEqual(
-            _project_cache_entries([changed], None)[0]["post_src"], "こんにちは（替换后）"
-        )
+    def test_default_keeps_post_src_even_when_it_equals_pre_src(self) -> None:
+        """post_src 是默认的原文列：与 pre_src 相同也要给（否则这条就没有原文了）。"""
+        item = _project_cache_entries([ENTRY], None)[0]
+        self.assertEqual(ENTRY["pre_src"], ENTRY["post_src"])
+        self.assertEqual(item["post_src"], "こんにちは")
+
+    def test_fields_can_ask_for_pre_src_and_trans_by(self) -> None:
+        """想对照原始原文/看译者，显式传 fields 还是拿得到。"""
+        item = _project_cache_entries([ENTRY], ["pre_src", "trans_by", "pre_dst"])[0]
+        self.assertEqual(item["pre_src"], "こんにちは")
+        self.assertEqual(item["trans_by"], "ForGal-json")
+        self.assertEqual(item["pre_dst"], "你好")
 
     def test_proofread_fields_returned_when_filled(self) -> None:
         proofread = {**ENTRY, "proofread_dst": "你好呀", "proofread_by": "proofreader"}
@@ -103,7 +111,9 @@ class ReadTranslCacheToolTests(unittest.TestCase):
         self.assertIn("fields_note", out)
         entry = out["entries"][0]
         self.assertEqual(entry["pre_dst"], "你好")
-        self.assertNotIn("post_src", entry)
+        # 默认只给一列原文（post_src），不再同时带 pre_src
+        self.assertEqual(entry["post_src"], "こんにちは")
+        self.assertNotIn("pre_src", entry)
 
     def test_fields_param_controls_the_columns(self) -> None:
         out = _tool_read_transl_cache(
@@ -145,7 +155,17 @@ class ReadTranslCacheToolTests(unittest.TestCase):
         out = _tool_read_transl_cache(_Runner(entries), {"filename": "01.json"})
         self.assertEqual(out["count"], 39)
         self.assertEqual(out["returned"], 30)
-        self.assertNotIn("post_src", out["entries"][0])
+        self.assertNotIn("trans_by", out["entries"][0])
+
+    def test_old_cache_keys_are_read(self) -> None:
+        """老项目缓存里是 pre_jp/post_jp/pre_zh 那套旧键名，读的时候要认。"""
+        old = {"index": 1, "name": "少女", "pre_jp": "こんにちは", "post_jp": "こんにちは", "pre_zh": "你好"}
+        entry = _project_cache_entries([old], None)[0]
+        self.assertEqual(entry["post_src"], "こんにちは")
+        self.assertEqual(entry["pre_dst"], "你好")
+        # 显式指定字段时同样认旧键名
+        picked = _project_cache_entries([old], ["pre_src", "pre_dst"])[0]
+        self.assertEqual(picked["pre_src"], "こんにちは")
 
     def test_unknown_field_is_rejected(self) -> None:
         for bad in ({"fields": ["nope"]}, {"fields": []}, {"fields": "pre_dst"}):

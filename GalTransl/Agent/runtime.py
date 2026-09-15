@@ -1318,7 +1318,8 @@ def _cache_fields_section() -> str:
         lines.append(f"- {name}：{description}")
     lines.append(
         "看译文时以 proofread_dst ＞ pre_dst 的顺序取（前者为空才用后者）；"
-        "post_src 只在它与 pre_src 不同、post_dst_preview 只在它与 pre_dst 不同时才随默认返回。"
+        "默认每条只回一列原文（post_src：真正送去翻译的那版）与一列译文（pre_dst），"
+        "post_dst_preview 只在它与 pre_dst 不同（译后字典替换过）时才带上。"
     )
     lines.append(
         f"读缓存默认只回精简列（{' / '.join(CACHE_ENTRY_FIELDS_DEFAULT)}，以及有值的附加列），"
@@ -1963,8 +1964,8 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                             "可选。每条要返回哪些字段：index、name（说话人）、pre_src（原句）、pre_dst（译文）、"
                             "post_src、post_dst_preview（译后字典替换后的预览）、proofread_dst、proofread_by、"
                             "trans_by、problem。"
-                            "不传 = 默认精简集（pre_src/pre_dst/name/problem，post_dst_preview 仅在与 pre_dst 不同时给，"
-                            "空值省略）；传 [\"pre_dst\",\"problem\"] 这类只要某几列。"
+                            "不传 = 默认精简集（index/name/post_src/pre_dst/problem；post_dst_preview 仅在与 pre_dst 不同时给，"
+                            "空值省略；要看 pre_src/trans_by 等列得显式传 fields）；传 [\"pre_dst\",\"problem\"] 这类只要某几列。"
                         ),
                     },
                 },
@@ -3355,31 +3356,50 @@ CACHE_ENTRY_FIELDS: tuple[str, ...] = (
     "trans_by",
     "problem",
 )
-# 默认精简集：判断语意 + 定位问题真正需要的几列。原来每条固定返回 7 个字段，
-# 但 post_dst_preview 基本等于 pre_dst、post_src 约等于 pre_src、proofread_* 常年为空，
-# 一次读几十条时一半以上是重复或空值——这部分不该占模型的上下文。
-CACHE_ENTRY_FIELDS_DEFAULT: tuple[str, ...] = ("index", "name", "pre_src", "pre_dst", "problem")
+# 默认精简集：一条只回「谁说的 + 原文 + 译文 + 问题」。
+# 原文只给一列——post_src（真正送去翻译的那版），不再同时带 pre_src：两列在多数条目上
+# 只差对话符号/译前字典替换，一次读几十条就是双份原文，白占上下文（要看 pre_src 传 fields）。
+# trans_by 同理默认不给（它是"哪个模型翻的"，读译文时基本用不上）。
+CACHE_ENTRY_FIELDS_DEFAULT: tuple[str, ...] = ("index", "name", "post_src", "pre_dst", "problem")
 # 每个字段的含义（拼进 system prompt，见 _cache_fields_section）。
 # 命名来源见 GalTransl/CSentense.py：pre_src=前原、post_src=前润（送去翻译的原文）、
 # pre_dst=后原（模型原始译文）、post_dst=后润（最终译文）。
 CACHE_ENTRY_FIELD_DESCRIPTIONS: dict[str, str] = {
     "index": "条目序号（1 起、按文件顺序）；改译文/删条目/读上下文都用它定位",
     "name": "说话人；旁白为空",
-    "pre_src": "原始原文（前原），管道最开始的句子",
+    "pre_src": "原始原文（前原），管道最开始的句子；默认不返回（要看它传 fields）",
     "post_src": "真正送去翻译的原文（前润）：对话符号处理 + 译前字典替换之后的文本",
     "pre_dst": "模型返回的译文（后原），未经译后字典替换",
     "post_dst_preview": "最终译文的缓存快照（后润）：译后字典替换 + 对话符号恢复之后的形态",
     "proofread_dst": "校对/润色稿；有内容时它就是这条的最终译文（优先于 pre_dst）",
     "proofread_by": "校对者标记（校对失败的会带 Fail）；未校对为空",
-    "trans_by": "译者标记：模型名或引擎名；被 Agent/manual 手改过的也会标在这里",
+    "trans_by": "译者标记：模型名或引擎名；被 Agent/manual 手改过的也会标在这里；默认不返回（要看它传 fields）",
     "problem": "自动问题分析写入的问题标签，可能多条（以「, 」分隔）；list_problems 的统计与下钻都基于它",
 }
 # 默认模式下"有内容才带上"的附加字段（空值一律省略）
 CACHE_ENTRY_FIELDS_IF_PRESENT: tuple[str, ...] = (
     "proofread_dst",
     "proofread_by",
-    "trans_by",
 )
+
+
+# 缓存 JSON 的旧键名（与 GalTransl/Cache.py 的 _CACHE_KEY_COMPAT 一致）：老项目里存的
+# 是 pre_jp/post_jp/pre_zh 那一套，读取时按新名取不到，得回退到旧名。
+_CACHE_ENTRY_OLD_KEYS: dict[str, str] = {
+    "pre_src": "pre_jp",
+    "post_src": "post_jp",
+    "pre_dst": "pre_zh",
+    "proofread_dst": "proofread_zh",
+    "post_dst_preview": "post_zh_preview",
+}
+
+
+def _cache_field_value(entry: dict[str, Any], name: str) -> Any:
+    """按字段名取缓存条目的值，兼容旧缓存的旧键名（取不到返回 None）。"""
+    if name in entry:
+        return entry[name]
+    old_key = _CACHE_ENTRY_OLD_KEYS.get(name)
+    return entry.get(old_key) if old_key else None
 
 
 def _normalize_cache_fields(args: dict[str, Any]) -> list[str] | None:
@@ -3413,30 +3433,34 @@ def _project_cache_entries(
     """按 fields 裁条目；fields=None 时用默认精简集并省略空值。
 
     index 永远带上（定位/后续 patch 都靠它），即使调用方没写。
+    取值走 _cache_field_value：老缓存里是 pre_jp/zh 那套旧键名也能读到。
     """
     out: list[dict[str, Any]] = []
     for entry in entries:
         if fields is None:
             item: dict[str, Any] = {}
             for key in CACHE_ENTRY_FIELDS_DEFAULT:
-                value = entry.get(key)
+                value = _cache_field_value(entry, key)
                 if key != "index" and value in (None, "", 0):
                     continue
                 item[key] = value
-            # 译前/译后字典替换过才有意义：只有与源/译文不同才值得占位置
-            post_src = entry.get("post_src")
-            if post_src and post_src != entry.get("pre_src"):
-                item["post_src"] = post_src
-            post_dst = entry.get("post_dst_preview")
-            if post_dst and post_dst != entry.get("pre_dst"):
+            # 译后字典替换过才有意义：只在它与 pre_dst 不同时才值得占位置
+            post_dst = _cache_field_value(entry, "post_dst_preview")
+            if post_dst and post_dst != _cache_field_value(entry, "pre_dst"):
                 item["post_dst_preview"] = post_dst
             for key in CACHE_ENTRY_FIELDS_IF_PRESENT:
-                if entry.get(key):
-                    item[key] = entry[key]
+                value = _cache_field_value(entry, key)
+                if value:
+                    item[key] = value
             out.append(item)
             continue
         keys = ["index", *[key for key in fields if key != "index"]]
-        out.append({key: entry[key] for key in keys if key in entry})
+        picked: dict[str, Any] = {}
+        for key in keys:
+            value = _cache_field_value(entry, key)
+            if value is not None:
+                picked[key] = value
+        out.append(picked)
     return out
 
 
