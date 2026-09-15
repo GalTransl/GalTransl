@@ -147,6 +147,80 @@ class SessionStoreTests(unittest.TestCase):
         self.assertEqual(len(remaining), 1)
         self.assertEqual(remaining[0]["session_id"], sid1)
 
+    def test_meta_sidecar_is_written_and_kept_in_sync(self) -> None:
+        """列表用的 sidecar：写 meta 时同步维护，读的时候直接命中它。"""
+        sid = ss.create_session(self.project, "MyGame1")
+        store = ss.SessionStore(self.project, sid)
+        self.assertTrue(os.path.isfile(store.meta_path))
+
+        store.append_meta(goal="接着翻", running=True)
+        store.append_meta(running=False)
+
+        meta = ss._read_meta(store.path)
+        self.assertEqual(meta["title"], "MyGame1")
+        self.assertEqual(meta["goal"], "接着翻")
+        self.assertFalse(meta["running"])
+        # sidecar 不该被误认成一个会话
+        self.assertEqual(len(ss.list_sessions(self.project)), 1)
+
+    def test_legacy_session_without_sidecar_keeps_title(self) -> None:
+        """老会话第一次写 meta 时 sidecar 还不存在：必须先从文件补齐再合并。
+
+        否则 sidecar 里只剩这次写的 running=false，title/created_at 全丢——
+        会话列表的标题就退化成 session_id 了。
+        """
+        sid = ss.create_session(self.project, "MyGame1")
+        store = ss.SessionStore(self.project, sid)
+        created_at = ss._read_meta(store.path)["created_at"]
+        os.remove(store.meta_path)  # 模拟"本版本之前建的会话"
+
+        store.append_meta(running=False)
+
+        meta = ss._read_meta(store.path)
+        self.assertEqual(meta["title"], "MyGame1")
+        self.assertEqual(meta["created_at"], created_at)
+        self.assertEqual(ss.list_sessions(self.project)[0]["title"], "MyGame1")
+
+    def test_stale_sidecar_is_ignored(self) -> None:
+        """会话文件变了（size/mtime 对不上）就重新扫一遍，不认过期缓存。"""
+        sid = ss.create_session(self.project, "MyGame1")
+        store = ss.SessionStore(self.project, sid)
+        ss._read_meta(store.path)  # 先建出 sidecar
+
+        # 绕过 append_meta 直接追加一行 meta（模拟别处写了文件、sidecar 没跟上）
+        with open(store.path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"t": "meta", "at": 1.0, "goal": "外部写入"}, ensure_ascii=False) + "\n")
+
+        self.assertEqual(ss._read_meta(store.path)["goal"], "外部写入")
+
+    def test_meta_sidecar_survives_bulk_message_appends(self) -> None:
+        """会话跑起来后 message/event 一直在追加，标题不能因为"文件变了"就丢。
+
+        水位设计下只会读水位之后新追加的那一段；收尾写 running=false 之后再读
+        应当直接命中缓存（内容一致）。
+        """
+        sid = ss.create_session(self.project, "MyGame1")
+        store = ss.SessionStore(self.project, sid)
+        ss._read_meta(store.path)  # 先建出 sidecar，水位 = 当前文件大小
+        for i in range(200):
+            store.append_message({"role": "tool", "tool_call_id": f"c{i}", "content": "x" * 500})
+        store.append_meta(running=False)
+
+        meta = ss._read_meta(store.path)
+        self.assertEqual(meta["title"], "MyGame1")
+        self.assertFalse(meta["running"])
+        self.assertEqual(ss._read_meta(store.path), meta)
+        self.assertEqual(ss.list_sessions(self.project)[0]["title"], "MyGame1")
+
+    def test_clear_removes_sidecar_too(self) -> None:
+        """删会话要把 sidecar 一起删掉，不然会话没了它还留在目录里。"""
+        sid = ss.create_session(self.project, "t")
+        store = ss.SessionStore(self.project, sid)
+        self.assertTrue(os.path.isfile(store.meta_path))
+        store.clear()
+        self.assertFalse(os.path.isfile(store.path))
+        self.assertFalse(os.path.isfile(store.meta_path))
+
     def test_session_title_from_first_message(self) -> None:
         """标题取首条用户消息：折叠换行/空白，超长截断。"""
         self.assertEqual(ss.title_from_message("帮我翻译这个项目"), "帮我翻译这个项目")

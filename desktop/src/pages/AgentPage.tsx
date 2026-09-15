@@ -752,6 +752,11 @@ function formatDuration(ms: number | undefined): string {
    一个项目下可以有多个会话；这里负责新建、切换、删除。
    标题由后端生成：新建时是占位「新会话」，首条消息发出后变成这条消息。 */
 
+/** 一个项目下的会话再多也只先渲染这么多条：首次打开的开销与"会话总数"脱钩。
+ *  后端返回的列表仍是完整的（分组计数、状态灯都用全量），点「显示其余 N 个」
+ *  纯本地展开、不再请求。 */
+const SESSION_RENDER_LIMIT = 60;
+
 function AgentSessionSidebar({
   sessionsByProject,
   projects,
@@ -783,6 +788,8 @@ function AgentSessionSidebar({
   onSelectSession: (dir: string, sid: string) => void;
   onDeleteSession: (dir: string, session: AgentSessionMeta) => void;
 }) {
+  // 哪些项目分组已经点开过「显示其余 N 个」（纯本地状态，不涉及请求）
+  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   // 相对时间（刚刚 / N分钟前）要定时重算，否则页面静止时数字会一直停着不动
   const [, setTimeTick] = useState(0);
   useEffect(() => {
@@ -812,10 +819,20 @@ function AgentSessionSidebar({
           </div>
         ) : (
           projects.map((dir) => {
-            const list = sessionsByProject[dir] || [];
+            const raw = sessionsByProject[dir];
+            const list = raw || [];
+            // undefined = 这个项目还没拉过列表（非活动项目是展开时才按需拉的）
+            const loaded = raw !== undefined;
             const isCollapsed = collapsed[dir] ?? dir !== activeProject;
             const isGroupActive = dir === activeProject;
             const shortDir = shortName(dir);
+            // 只渲染前 N 条；但当前正在看的那个会话无论多老都要在列表里，
+            // 否则侧边栏上看不出"你在哪"，它的状态灯也没地方挂。
+            const visible = expandedProjects[dir] ? list : list.slice(0, SESSION_RENDER_LIMIT);
+            if (!expandedProjects[dir] && activeSessionId && !visible.some((s) => s.session_id === activeSessionId)) {
+              const active = list.find((s) => s.session_id === activeSessionId);
+              if (active) visible.push(active);
+            }
             return (
               <div
                 key={dir}
@@ -861,9 +878,9 @@ function AgentSessionSidebar({
                   <div className="agent-sessions__group-collapse-inner">
                     <div className="agent-sessions__group-list">
                       {list.length === 0 ? (
-                        <div className="agent-sessions__group-empty">暂无会话</div>
+                        <div className="agent-sessions__group-empty">{loaded ? '暂无会话' : '加载中…'}</div>
                       ) : (
-                        list.map((s) => {
+                        visible.map((s) => {
                           const isRowActive = isGroupActive && s.session_id === activeSessionId;
                           const isRowRunning = s.status === 'running' || (isRowActive && activeRunning);
                           // 灯：工作中蓝灯常亮；跑完但没被你点开看过亮绿灯/橙灯（橙=失败）；
@@ -920,6 +937,15 @@ function AgentSessionSidebar({
                           );
                         })
                       )}
+                      {list.length > visible.length ? (
+                        <button
+                          type="button"
+                          className="agent-sessions__show-more"
+                          onClick={() => setExpandedProjects((prev) => ({ ...prev, [dir]: true }))}
+                        >
+                          显示其余 {list.length - visible.length} 个会话
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -1150,7 +1176,9 @@ export function AgentPage() {
             justFinished[s.session_id] = status === 'failed' ? 'failed' : 'done';
           }
         }
-        prevSessionStatusRef.current = nextStatuses;
+        // 基线按会话 id 合并、而不是整份替换：现在会按需拉单个项目（展开时），
+        // 整份替换的话，拉 B 项目会把 A 项目的基线抹掉，A 那边"刚跑完"的灯就点不亮。
+        prevSessionStatusRef.current = { ...prevStatuses, ...nextStatuses };
         if (Object.keys(justFinished).length) {
           setUnseenLights((prev) => {
             const merged = { ...prev };
@@ -1719,18 +1747,34 @@ export function AgentPage() {
           setError(null);
           hasBackendSessionRef.current = false;
           lastStepRef.current = 0;
+        } else {
+          // 非活动项目：上面只是本地插了一条，而这个项目的列表可能根本没拉过
+          // （懒加载下是展开才拉）。补一次完整列表，免得那一列只剩刚建的会话。
+          void refreshSessions(dir, undefined, false);
         }
       } catch (err) {
         setError(normalizeError(err, '新建会话失败'));
       }
     },
-    [running, handleStop],
+    [running, handleStop, refreshSessions],
   );
 
-  /** 折叠/展开某项目分组（手风琴外的自由切换：点击只翻转这一个）。 */
+  /** 折叠/展开某项目分组（手风琴外的自由切换：点击只翻转这一个）。
+   *
+   *  展开时按需拉一次该项目的会话列表（懒加载）：只有活动项目会在打开页面时拉，
+   *  其余项目等到真正展开才请求——会话多的机器上，这一步能省掉大部分首屏请求。
+   *
+   *  判定要和渲染用同一套默认值（`collapsed[dir] ?? dir !== effectiveProject`）：
+   *  直接写 `!prev[dir]` 的话，没手动点过的非活动项目本来就是"默认收起"，第一次点
+   *  它只是往 map 里塞了个 true，看起来像点了没反应，得点两次才展开。 */
   const handleToggleProject = useCallback((dir: string) => {
-    setCollapsedProjects((prev) => ({ ...prev, [dir]: !prev[dir] }));
-  }, []);
+    const isCollapsed = collapsedProjects[dir] ?? dir !== effectiveProject;
+    if (isCollapsed && sessionsByProject[dir] === undefined) {
+      // allowAutoPick=false：只补列表，不因为"这个项目有会话"就把主区切过去
+      void refreshSessions(dir, undefined, false);
+    }
+    setCollapsedProjects((prev) => ({ ...prev, [dir]: !isCollapsed }));
+  }, [collapsedProjects, effectiveProject, sessionsByProject, refreshSessions]);
 
   /** 选中某项目下的某会话：停 SSE、清视图，切项目+会话；转录由 session effect 加载。 */
   const handleSelectSession = useCallback(

@@ -329,6 +329,30 @@
   opacity: 0.7;
 }
 
+/* 「显示其余 N 个会话」：项目下会话太多时只渲染前 N 条，这是唯一的展开入口。
+   虚线框让它读起来像"还有内容"，而不是一条会话。 */
+.agent-sessions__show-more {
+  display: block;
+  width: calc(100% - 10px);
+  margin: 2px 5px 4px;
+  padding: 4px 8px;
+  border: 1px dashed var(--agent-line-soft, var(--color-line));
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 11px;
+  text-align: center;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.agent-sessions__show-more:hover {
+  background: var(--agent-hover);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
 .agent-session-item {
   position: relative;
   display: flex;

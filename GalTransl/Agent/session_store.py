@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import time
 from base64 import urlsafe_b64encode
 from collections import deque
@@ -131,6 +132,7 @@ class SessionStore:
         self.session_id = session_id
         self.dir = project_dir_for(project_dir)
         self.path = os.path.join(self.dir, f"{session_id}.jsonl")
+        self.meta_path = f"{self.path}.meta.json"
 
     # ---- 写入 ----
     def _append(self, record: dict[str, Any]) -> None:
@@ -154,7 +156,15 @@ class SessionStore:
             _log(f"写入失败 {self.path}: {exc}")
 
     def append_meta(self, **fields: Any) -> None:
+        # 会话列表专用的 sidecar 缓存：列会话 / 轮询状态时不必把每份 JSONL 全扫一遍。
         self._append({"t": "meta", "at": time.time(), **fields})
+        # 从文件把水位补到最新（通常只读刚追加的这一行），再合并本次字段后写回。
+        # 不能只拿 sidecar 里的旧 meta 直接 merge fields：sidecar 缺失时（老会话在
+        # 本版本第一次写 meta）那样写会把 title/created_at 丢掉，列表里的标题就
+        # 退化成 session_id 了。中间那次写缓存关掉，最后只写一遍。
+        meta = _read_meta(self.path, write_cache=False)
+        meta.update(fields)
+        _write_meta_sidecar(self.meta_path, meta, _file_size(self.path))
 
     def append_message(self, message: dict[str, Any]) -> None:
         self._append({"t": "message", "at": time.time(), "msg": message})
@@ -215,40 +225,107 @@ class SessionStore:
         return out
 
     def clear(self) -> None:
-        """删除本会话文件（reset / delete 用）。"""
+        """删除本会话文件（reset / delete 用），连同它的 meta sidecar。"""
         try:
             if os.path.isfile(self.path):
                 os.remove(self.path)
         except Exception as exc:  # noqa: BLE001
             _log(f"删除失败 {self.path}: {exc}")
+        # sidecar 不删的话，会话文件已没了它还躺在那儿（列会话只认 .jsonl，
+        # 谁也不引用它），越删越多。
+        try:
+            if os.path.isfile(self.meta_path):
+                os.remove(self.meta_path)
+        except Exception as exc:  # noqa: BLE001
+            _log(f"删除失败 {self.meta_path}: {exc}")
 
 
 # ---- 项目级操作 ----
 
 
-def _read_meta(path: str) -> dict[str, Any]:
+def _read_meta(path: str, *, write_cache: bool = True) -> dict[str, Any]:
     """读会话的文件级 meta（标题/目标/配置/创建时间），后写的字段优先。
 
     meta 是增量追加的：新建只写占位标题，首条消息到达后才补写真正的标题，
     收尾再补 running=false。所以不能只认第一条 meta（否则列表里永远是新建
     时的占位标题），要像 load() 那样按顺序合并。为兼顾大会话，只解析形如
     meta 的行，message/event 大行直接跳过。
+
+    结果缓存在 <会话文件>.meta.json（sidecar），里面记着"已经扫到第几个字节"，
+    所以每次只会读水位之后新追加的那一小段——列会话 / 状态轮询不再重读整份
+    JSONL。水位用字节位移而不是 size+mtime：会话在跑的时候 message/event 一直
+    在追加，按"文件变了就整份重扫"的做法，每 4 秒一次的轮询都会把整份重读一遍。
     """
-    meta: dict[str, Any] = {}
+    sidecar = f"{path}.meta.json"
+    meta, scanned = _read_meta_sidecar(sidecar)
+    size = _file_size(path)
+    if scanned > size:
+        # 文件被截断 / 被别的路径重写过：水位失效，从头扫
+        meta, scanned = {}, 0
+    if scanned == size:
+        return meta  # 没有新内容（含"文件不存在"），直接用缓存
+    try:
+        with open(path, "rb") as f:
+            f.seek(scanned)
+            tail = f.read()
+    except OSError:
+        return meta
+    # 实际消费到的位置（读的这段时间里文件可能又长了，别按旧 size 记水位）
+    reached = scanned + len(tail)
+    for line in tail.decode("utf-8", "replace").splitlines():
+        if '"meta"' not in line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(rec, dict) and rec.get("t") == "meta":
+            meta.update({k: v for k, v in rec.items() if k != "t"})
+    if write_cache:
+        _write_meta_sidecar(sidecar, meta, reached)
+    return meta
+
+
+def _file_size(path: str) -> int:
+    try:
+        return int(os.path.getsize(path))
+    except OSError:
+        return 0
+
+
+def _read_meta_sidecar(path: str) -> tuple[dict[str, Any], int]:
+    """读 meta sidecar，返回 (meta, 已扫描到的字节数)。坏文件/缺失都当没有。"""
     try:
         with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                if '"meta"' not in line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(rec, dict) and rec.get("t") == "meta":
-                    meta.update({k: v for k, v in rec.items() if k != "t"})
-    except Exception:  # noqa: BLE001
+            payload = json.load(f)
+        if not isinstance(payload, dict):
+            return {}, 0
+        meta = payload.get("meta")
+        return (dict(meta) if isinstance(meta, dict) else {}), max(0, int(payload.get("scanned_size") or 0))
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return {}, 0
+
+
+def _write_meta_sidecar(path: str, meta: dict[str, Any], scanned_size: int) -> None:
+    """原子写出 sidecar（失败一律忽略：它只是缓存，不能影响会话文件本身）。"""
+    try:
+        payload = {"scanned_size": int(scanned_size), "meta": meta}
+        directory = os.path.dirname(path)
+        os.makedirs(directory, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=".meta-", suffix=".tmp", dir=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+    except Exception:
         pass
-    return meta
 
 
 def list_sessions(project_dir: str) -> list[dict[str, Any]]:
