@@ -629,7 +629,26 @@ const TOOL_META: Record<string, ToolMeta> = {
   update_project_config: { action: '修改项目配置', running: '修改项目配置', verb: '', icon: 'sliders', summary: () => '调整翻译参数/规范等设置' },
   list_input_files: { action: '查看原文文件清单', running: '查看原文文件清单', verb: '', icon: 'archive', summary: () => '列出待翻译文件与句数' },
   read_input_file: { action: '读取原文', running: '读取原文', verb: '', icon: 'file-text', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
-  read_guideline: { action: '读取翻译规范', running: '读取翻译规范', verb: '', icon: 'bookmark', summary: (a) => str(a?.name) },
+  read_guideline: {
+    action: '读取翻译规范',
+    running: '读取翻译规范',
+    verb: '',
+    icon: 'bookmark',
+    summary: (a) => (str(a?.scope) === 'project' ? '项目规范' : str(a?.name)),
+  },
+  write_project_guideline: {
+    action: '修改项目规范',
+    running: '修改项目规范',
+    verb: '',
+    icon: 'pencil',
+    summary: (a) => {
+      const mode = str(a?.mode);
+      if (mode === 'overwrite') return '整份覆写';
+      if (mode === 'append') return '增写';
+      if (mode === 'replace') return '替换一段';
+      return mode;
+    },
+  },
   list_dict_files: { action: '查看字典清单', running: '查看字典清单', verb: '', icon: 'books', summary: () => '列出项目字典文件' },
   read_dict: { action: '读取字典', running: '读取字典', verb: '', icon: 'book', summary: (a) => str(a?.file_key) },
   save_dict: { action: '保存字典', running: '保存字典', verb: '', icon: 'save', summary: (a) => str(a?.file_key) },
@@ -1936,7 +1955,7 @@ export function AgentPage() {
           <span className="agent-console__avatar" aria-hidden><Icon name="bot" /></span>
           <div className="agent-console__bar-copy">
             <div className="agent-console__bar-title">
-              <span className="agent-console__bar-name">翻译 Agent</span>
+              <span className="agent-console__bar-name">GalTransl Agent</span>
             </div>
             <div className="agent-console__project-static">
               {projectDir ? (

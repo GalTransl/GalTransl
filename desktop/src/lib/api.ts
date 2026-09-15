@@ -768,6 +768,44 @@ export async function fetchTranslationGuidelines() {
   return response.guidelines;
 }
 
+/** 项目翻译规范：项目目录里的一个文件（不是配置项），翻译时拼在全局规范之后。 */
+export type ProjectGuidelineResponse = {
+  filename: string;
+  path: string;
+  exists: boolean;
+  content: string;
+};
+
+export async function fetchProjectGuideline(projectId: string) {
+  return apiRequest<ProjectGuidelineResponse>(`/api/projects/${projectId}/guideline`);
+}
+
+/** 写项目规范。mode：overwrite 覆写 / append 增写 / replace 替换（old_text 需唯一命中）。 */
+export async function saveProjectGuideline(
+  projectId: string,
+  payload: {
+    mode: 'overwrite' | 'append' | 'replace';
+    content?: string;
+    old_text?: string;
+    new_text?: string;
+  },
+) {
+  return apiRequest<{
+    success: boolean;
+    filename: string;
+    path: string;
+    mode: string;
+    created: boolean;
+    length: number;
+  }>(`/api/projects/${projectId}/guideline`, {
+    body: JSON.stringify(payload),
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    method: 'PUT',
+  });
+}
+
 export async function fetchAppSettings() {
   return apiRequest<AppSettings>('/api/app-settings');
 }

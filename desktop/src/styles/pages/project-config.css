@@ -792,6 +792,97 @@
   font-size: 12px;
 }
 
+/* ── 项目翻译规范（配置编辑页的独立区块） ──
+   它是项目目录里的一个文件、不是配置项，所以自带保存按钮，也不参与
+   「保存配置」那条 YAML 的 dirty 状态。 */
+
+.project-guideline-section__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.project-guideline-section__hint {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+}
+
+.project-guideline-section__hint code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--color-neutral-soft);
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+/* 「文件还没建」的提示条 */
+.project-guideline-section__badge {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(234, 179, 8, 0.16);
+  color: var(--color-warning, #b45309);
+  font-size: 11px;
+}
+
+.project-guideline-section__editor {
+  width: 100%;
+  min-height: 420px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+  /* 规范是 markdown 手写文本，等宽字体对齐缩进/列表更好读 */
+  font-family: "Cascadia Code", "Consolas", ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  resize: vertical;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.project-guideline-section__editor:hover {
+  border-color: rgba(47, 111, 235, 0.28);
+}
+
+.project-guideline-section__editor:focus {
+  outline: none;
+  border-color: rgba(47, 111, 235, 0.65);
+  box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);
+}
+
+.project-guideline-section__editor::placeholder {
+  color: rgba(100, 116, 139, 0.88);
+}
+
+.project-guideline-section__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.project-guideline-section__status {
+  color: var(--color-success, #16a34a);
+}
+
+.project-guideline-section__status.is-dirty {
+  color: var(--color-warning, #b45309);
+}
+
+.project-guideline-section__count {
+  font-variant-numeric: tabular-nums;
+}
+
+.project-guideline-section__tip {
+  margin-left: auto;
+  opacity: 0.8;
+}
+
 /* ── Section Fade-in ── */
 
 .section-fade-in {

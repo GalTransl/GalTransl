@@ -18,6 +18,7 @@ from GalTransl.Agent.runtime import (
     _input_cache_matchers,
     _normalize_overview_include,
     _tool_get_project_overview,
+    _tool_update_project_config,
 )
 
 
@@ -105,6 +106,51 @@ class OverviewConfigTests(unittest.TestCase):
     def test_missing_or_malformed_config_is_empty(self) -> None:
         self.assertEqual(_config_for_overview(None), {})
         self.assertEqual(_config_for_overview("nope"), {})
+
+
+class LegacyPromptKeyTests(unittest.TestCase):
+    """已下线的旧 Prompt 键（common.gpt.change_prompt / prompt_content）：老工程的
+    配置文件里还留着、翻译流程仍认（BaseTranslate 的兼容分支），但对模型是
+    "看不见也改不了"——概览不返回，点名要改也直接跳过并指路新入口。"""
+
+    def test_overview_hides_legacy_prompt_keys(self) -> None:
+        raw = {
+            "common": {
+                "gpt.contextNum": 8,
+                "gpt.change_prompt": "AdditionalPrompt",
+                "gpt.prompt_content": "译名统一用XX",
+            }
+        }
+
+        config = _config_for_overview(raw)
+
+        self.assertEqual(config["common"], {"gpt.contextNum": 8})
+
+    def test_update_rejects_legacy_prompt_keys(self) -> None:
+        state = AgentState()
+        state.project_dir = r"C:\proj"
+        state.config_file_name = "config.yaml"
+        runner = AgentRunner(state)
+        writes = []
+
+        with patch.object(
+            AgentRunner,
+            "_http_get",
+            lambda self, path: {"config": {"common": {"gpt.change_prompt": "no"}}},
+        ), patch.object(
+            AgentRunner,
+            "_http_put",
+            lambda self, path, body: writes.append(body) or {"success": True},
+        ):
+            out = _tool_update_project_config(
+                runner,
+                {"updates": [{"key": "common.gpt.change_prompt", "value": "AdditionalPrompt"}]},
+            )
+
+        self.assertEqual(out["updated"], 0)
+        self.assertEqual(out["skipped"][0]["key"], "common.gpt.change_prompt")
+        self.assertIn("write_project_guideline", out["skipped"][0]["reason"])
+        self.assertEqual(writes, [])  # 没有任何请求写回配置文件
 
 
 class EffectiveBackendTests(unittest.TestCase):

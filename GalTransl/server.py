@@ -20,6 +20,12 @@ from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
 from GalTransl.AppSettings import load_app_settings, save_app_settings
 from GalTransl.DefaultProjectConfig import DEFAULT_PROJECT_CONFIG_YAML
 from GalTransl.ProblemFilter import filter_problem_text
+from GalTransl.ProjectGuideline import (
+    PROJECT_GUIDELINE_FILENAME,
+    apply_project_guideline_edit,
+    project_guideline_path,
+    read_project_guideline,
+)
 from GalTransl.Backend.Prompts import (
     FORGAL_JSON_SYSTEM_PROMPT,
     FORGAL_JSON_TRANS_PROMPT,
@@ -1076,6 +1082,19 @@ def build_handler(registry: JobRegistry):
                     self._send_json({"config": data, "project_dir": project_dir, "config_file_name": config_name})
                 except Exception as exc:
                     self._send_json({"error": f"failed to read config: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # GET /api/projects/:id/guideline — 项目翻译规范（项目目录里的那一个文件）
+            if sub_path == "/guideline":
+                path = project_guideline_path(project_dir)
+                content = read_project_guideline(project_dir)
+                self._send_json({
+                    "project_dir": project_dir,
+                    "filename": PROJECT_GUIDELINE_FILENAME,
+                    "path": path,
+                    "exists": os.path.isfile(path),
+                    "content": content,
+                })
                 return
 
             # GET /api/projects/:id/files[?counts=1]
@@ -2965,6 +2984,37 @@ def build_handler(registry: JobRegistry):
                     self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
                 except Exception as exc:
                     self._send_json({"error": f"failed to write profile: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # PUT /api/projects/:id/guideline — 写项目翻译规范（覆写 / 增写 / 替换）
+            if path.startswith("/api/projects/") and path.endswith("/guideline"):
+                parts = path.split("/")
+                if len(parts) < 5:
+                    self._send_json({"error": "invalid project path"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                try:
+                    project_dir = _safe_project_dir(parts[3])
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                try:
+                    payload = self._read_json_body()
+                    mode = str(payload.get("mode", "overwrite") or "overwrite").strip()
+                    result = apply_project_guideline_edit(
+                        project_dir,
+                        mode=mode,
+                        content=str(payload.get("content", "") or ""),
+                        old_text=str(payload.get("old_text", "") or ""),
+                        new_text=str(payload.get("new_text", "") or ""),
+                    )
+                    self._send_json({"success": True, "filename": PROJECT_GUIDELINE_FILENAME, **result})
+                except ValueError as exc:
+                    # 参数/内容不合法（模式不认识、replace 没命中或命中多处、超长…）
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to write guideline: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
             # PUT /api/projects/:id/config

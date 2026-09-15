@@ -17,6 +17,7 @@ from GalTransl.CSentense import CSentense, CTransList
 from GalTransl.Cache import save_transCache_to_json
 from GalTransl.Dictionary import CGptDict
 from GalTransl.Utils import load_guideline_file, fix_quotes2
+from GalTransl.ProjectGuideline import combine_guidelines, read_project_guideline
 from openai import RateLimitError, AsyncOpenAI, APIConnectionError, APITimeoutError
 from openai import DefaultAioHttpClient
 from openai._types import NOT_GIVEN
@@ -102,12 +103,18 @@ class BaseTranslate:
         self.eng_type = eng_type
         self.last_file_name = ""
         self.restore_context_mode = config.getKey("gpt.restoreContextMode", True)
-        # 翻译规范
+        # 翻译规范：全局规范（translation_guidelines/ 里选的那份）+ 项目规范
+        # （项目目录里的 translation_guideline.md，可能没有）。两份拼成一段塞进
+        # prompt 的 <translation_guidelines> 段：项目规范在后、冲突时以它为准。
+        # 这里只在翻译器初始化时读一次，所以改完规范要**下一次启动翻译**才生效。
         if val := config.getKey("gpt.translation_guideline"):
             guideline_file = val
         else:
             guideline_file = "Basic.md"
-        self.pj_config.translation_guideline=load_guideline_file(guideline_file)
+        self.pj_config.translation_guideline = combine_guidelines(
+            load_guideline_file(guideline_file),
+            read_project_guideline(config.getProjectDir()),
+        )
         
         # 保存间隔
         if val := config.getKey("save_steps"):
@@ -302,6 +309,10 @@ class BaseTranslate:
             backend_config.get("maxApiRetries", 6), 6
         )
 
+        # 旧项目的 Prompt 覆盖：gpt.change_prompt / gpt.prompt_content 这对键已下线
+        # （前端不再显示、Agent 读不到也改不了、新项目不再生成），这里只保留兼容：
+        # 老工程配置文件里还留着的话照样生效。新的自定义入口是项目翻译规范
+        # （见 ProjectGuideline / 「项目规范」页 / write_project_guideline 工具）。
         change_prompt = CProjectConfig.getProjectConfig(config)["common"].get(
             "gpt.change_prompt", "no"
         )

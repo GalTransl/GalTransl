@@ -258,7 +258,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
    c. 基于原文补充 GPT 字典：把抽读中遇到的人名、专有名词、常见口语用 save_dict(action="append") 收录进项目 GPT 字典（只发新增行，不重发整份字典）；
    d. 调用 start_translation(translator="<主翻译引擎>", files=["<一个代表性文件>"]) 只翻译这一个文件作为试译；
    e. 试译完成后用 read_transl_cache 阅读试译文件的译文，对照翻译规范评估文风、译名、语气是否达标；
-   f. 若不满意：继续完善字典（save_dict）；对全局性的文风问题，用 update_project_config 把 common.gpt.change_prompt 设为 "AdditionalPrompt" 并设置 common.gpt.prompt_content 写入额外的翻译要求（如「译名统一用XX」「口语化程度、敬称的处理方式」等），这些要求会追加到每次翻译请求的 Prompt 里；也可以用 update_project_config 切换 common.gpt.translation_guideline 换一份更合适的规范；
+   f. 若不满意：继续完善字典（save_dict）；对全局性的文风问题，用 write_project_guideline 把额外的翻译要求写进**项目规范**（如「译名统一用XX」「口语化程度、敬称的处理方式」等）——它会跟项目规范一起进每次翻译请求的 Prompt，下一次启动翻译就生效。写之前先 read_guideline(scope="project") 看已经写了什么：补充新要求用 append，改掉不合适的那条用 replace（旧那段原文要给全、确保唯一）；另外也可以用 update_project_config 切换 common.gpt.translation_guideline 换一份更合适的全局规范；
    g. 满意后，把试译结果告知用户并说明你的评估结论，然后用 ask_user 询问是否开始全量翻译（给出「开始全量」/「先再调一版规范」之类的候选选项），等用户回答后再进入下一步。
 4. **启动翻译（全量）**：调用 start_translation(translator="<主翻译引擎>")（不传 files 即翻译全部）。主翻译引擎从项目配置或 overview 中确认，常用值：ForGal-json / ForGal-tsv / ForNovel / sakura-v1.0 / galtransl-v3。一次只启动一个，项目已有运行中任务时不要重复提交。
 5. **跟进进度（wait 前后都要查状态）**：启动翻译后先调用 get_runtime 确认任务已在跑，再调用 wait 等待一段合理时间（翻译任务 wait minutes=1~3，短任务 wait seconds=30）。wait 结束后必须再调用 get_runtime 确认任务状态：completed 进入下一步；仍在 running 时看返回的 eta_seconds 估算剩余时间——eta 还很长（如 >10 分钟）就按其一半的时长继续 wait，快完了（如 <2 分钟）就 wait seconds=30 再查，不要连续空转轮询也不要一次等过头。等待期间界面会显示倒计时。（get_runtime 各字段与 recent_errors 的口径见该工具说明。）
@@ -269,6 +269,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 # 约束
 - 每一步只调用必要的工具；能在一次工具调用里拿到的信息不要拆成多次。重复查看同类信息时用工具的分段参数（如 get_project_overview 的 include）只取变化的部分，别把基本不变的配置/说明反复拉一遍。
 - 要把某条缓存（原文 + 译文，或几条）摆给用户看时，在回复里**单独一行**写 `$transl_cache("<缓存文件名>", <行号>)`：文件名来自 list_transl_cache，行号是缓存条目的 index，可写区间 `12-15` 或逗号列表 `12,20`。界面会把它渲染成那几行缓存的卡片，比自己把原文译文抄一遍清楚、也不会抄错。不要把它写进代码块，也不要加额外解释行。
+- 翻译规范有两份：全局规范（translation_guidelines 目录里选的那份，通用规则）和**项目规范**（项目目录里的 `translation_guideline.md`，本项目专属，跟项目一起走）。翻译时两份拼在一起、项目规范在后，冲突以项目规范为准。读项目规范用 read_guideline(scope="project")；用户提出新的术语/称呼/语气要求时，先看项目规范里是否已经写过，再用 write_project_guideline 改：新增要求用 append，旧规则要改成新的用 replace（把旧那段原文给全，确保唯一），整套重写才用 overwrite。改完在**下一次启动翻译**时生效，正在跑的翻译不受影响；别在同一份规范里堆互相矛盾的规则。
 - 不要在未准备字典的情况下直接启动主翻译。
 - 不要连续重复调用同一个工具相同参数（避免死循环）；若上一步结果不理想，换策略或总结收尾。
 - 工具返回的 error 要阅读并据此调整下一步，不要忽略。
@@ -1666,13 +1667,39 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_guideline",
-            "description": "读取翻译规范文件（translation_guidelines 目录，决定文风与措辞）。不带参数列出可选文件名；传 name（如 \"日译中_增强v2.md\"）返回规范全文。试译定稿前必读。",
+            "description": "读取翻译规范（决定文风与措辞）。scope=global（默认）读全局规范库：不带 name 列出可选文件名，传 name（如 \"日译中_增强v2.md\"）返回全文。scope=project 读**项目规范**——项目目录里的 translation_guideline.md，是这个项目专属的规则，翻译时拼在全局规范之后、冲突时以它为准。试译定稿前必读；要改文风/术语/称呼前，先看项目规范里已经写了什么。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "description": "可选。规范文件名，来自不带参数调用返回的列表。"},
+                    "name": {"type": "string", "description": "可选。scope=global 时的规范文件名，来自不带参数调用返回的列表。"},
+                    "scope": {
+                        "type": "string",
+                        "enum": ["global", "project"],
+                        "description": "可选。global（默认）读全局规范库；project 读本项目的项目规范。",
+                    },
                 },
                 "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_project_guideline",
+            "description": "写**项目规范**（项目目录里的 translation_guideline.md，跟项目一起走；翻译时拼在全局规范之后，冲突以它为准）。三种模式：overwrite=整份覆写；append=在末尾增写（新发现的要求）；replace=把 old_text 换成 new_text（只调其中几条时用，old_text 要原样来自规范全文、且只出现一次，否则会报错让你带上更多前后文）。改完在**下一次启动翻译**时生效，正在跑的翻译不受影响。规范是写给翻译模型的，要具体可执行（术语对照、称呼、语气、标点习惯、禁忌），别写「要地道」这类空话；写之前先用 read_guideline(scope=\"project\") 看当前内容，别把互相矛盾的规则堆在一起。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["overwrite", "append", "replace"],
+                        "description": "写入方式：overwrite 覆写整份 / append 末尾增写 / replace 替换某段。",
+                    },
+                    "content": {"type": "string", "description": "mode=overwrite / append 时的规范文本（markdown）。"},
+                    "old_text": {"type": "string", "description": "mode=replace 时要被替换的原文，连同前后文一起给，确保在规范里唯一。"},
+                    "new_text": {"type": "string", "description": "mode=replace 时替换成的内容；传空串表示删掉这一段。"},
+                },
+                "required": ["mode"],
             },
         },
     },
@@ -2130,10 +2157,8 @@ CONFIG_FIELD_DESCRIPTIONS: dict[str, str] = {
     "common.retranslKey": "重翻关键字列表：启动时命中缓存 problem 或原文关键字的句子会被重翻（如「翻译失败」「残留日文」）",
     "common.problemFilterKey": "问题过滤关键字列表：命中的问题项在问题统计与 list_problems 中被过滤掉",
     "common.gpt.contextNum": "每次请求附带的前文句数；值越大上下文越强、成本越高（常用 8）[0-32]",
-    "common.gpt.translation_guideline": "使用的翻译规范文件名（位于 translation_guidelines 文件夹），决定文风与措辞",
+    "common.gpt.translation_guideline": "使用的**全局**翻译规范文件名（位于 translation_guidelines 文件夹），决定文风与措辞；项目专属规范不是配置项，而是项目目录里的 translation_guideline.md（用 read_guideline/write_project_guideline 读改），翻译时拼在全局规范之后",
     "common.gpt.enhance_jailbreak": "是否启用「抗拒答」增强提示，降低模型拒答概率 [true/false]",
-    "common.gpt.change_prompt": "Prompt 修改模式：no 不改；AdditionalPrompt 追加；OverwritePrompt 覆盖默认提示词",
-    "common.gpt.prompt_content": "Prompt 自定义内容；仅在 change_prompt 为 AdditionalPrompt/OverwritePrompt 时生效",
     "common.gpt.token_limit": "(Sakura/GalTransl) 单轮 token 上限；0 表示不限制，用于避免上下文溢出",
     "common.loggingLevel": "日志输出级别：debug 详细，info 常规，warning 仅警告 [debug/info/warning]",
     "common.saveLog": "是否将运行日志写入文件 [true/false]",
@@ -2181,6 +2206,14 @@ def _annotate_config(config: dict[str, Any]) -> tuple[dict[str, Any], dict[str, 
         if isinstance(value, dict) and key in value:
             descriptions[dotted] = desc
     return config, descriptions
+
+
+# 已下线的旧 Prompt 键（common 下的展平键名）：只有老工程配置文件里还留着，
+# 翻译流程仍认它们（BaseTranslate 的兼容分支），但不再提供给前端与 Agent——
+# get_project_overview 不返回、update_project_config 直接拒掉，模型就不会去碰。
+# 现在的自定义入口是项目翻译规范（ProjectGuideline / write_project_guideline）。
+LEGACY_PROMPT_KEYS = ("gpt.change_prompt", "gpt.prompt_content")
+LEGACY_PROMPT_PATHS = frozenset(f"common.{key}" for key in LEGACY_PROMPT_KEYS)
 
 
 # 翻译进行中会在 <缓存>.json 旁并行写 <缓存>.json.append.jsonl 增量日志（见 GalTransl/Cache.py）
@@ -2234,14 +2267,21 @@ def _count_input_file_progress(input_files: list[str], progress_files: list[dict
 
 
 def _config_for_overview(raw: Any) -> dict[str, Any]:
-    """「了解项目」返回的配置快照：剔除 backendSpecific。
+    """「了解项目」返回的配置快照：剔除 backendSpecific 与已下线的旧键。
 
-    那一节是 API 令牌、端点等敏感信息（发给模型等于把密钥递出去），对"了解项目"
-    也没有价值——实际生效的后端见返回里的 backend 字段。
+    backendSpecific 那节是 API 令牌、端点等敏感信息（发给模型等于把密钥递出去），
+    对"了解项目"也没有价值——实际生效的后端见返回里的 backend 字段。
+
+    LEGACY_PROMPT_KEYS 同理不给模型看：它们只为老工程保留（翻译流程仍认），模型看不到
+    就不会去改；新项目不会再生成这两个键。
     """
     if not isinstance(raw, dict):
         return {}
-    return {k: v for k, v in raw.items() if k != "backendSpecific"}
+    out = {k: v for k, v in raw.items() if k != "backendSpecific"}
+    common = out.get("common")
+    if isinstance(common, dict):
+        out["common"] = {k: v for k, v in common.items() if k not in LEGACY_PROMPT_KEYS}
+    return out
 
 
 def _backend_summary(profile: Any, name: str = "") -> dict[str, str]:
@@ -2484,14 +2524,39 @@ def _tool_read_input_file(runner: AgentRunner, args: dict[str, Any]) -> Any:
 
 
 def _tool_read_guideline(runner: AgentRunner, args: dict[str, Any]) -> Any:
-    """读取翻译规范文件内容。不带参数列出可选的规范文件名。"""
+    """读取翻译规范：scope=global 读全局规范库（不带 name 列出文件名），scope=project 读项目规范。"""
+    scope = str(args.get("scope", "") or "global").strip().lower()
+    if scope == "project":
+        return runner._http_get(f"/api/projects/{runner._project_id()}/guideline")
     name = str(args.get("name", "") or "").strip()
     if not name:
         data = runner._http_get("/api/translation-guidelines")
         guidelines = data.get("guidelines", [])
         current = "（见 get_project_overview 配置 common.gpt.translation_guideline）"
-        return {"guidelines": guidelines, "note": f"当前项目使用的规范：{current}。传 name 读取内容。"}
+        return {
+            "guidelines": guidelines,
+            "note": (
+                f"当前项目使用的全局规范：{current}。传 name 读取全文；"
+                '本项目专属的项目规范用 scope="project" 读。'
+            ),
+        }
     return runner._http_get(f"/api/translation-guidelines/{urllib.parse.quote(name)}")
+
+
+def _tool_write_project_guideline(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """写项目规范（overwrite 覆写 / append 增写 / replace 替换）。
+
+    三种模式的实现都在后端（server → ProjectGuideline.apply_project_guideline_edit）：
+    replace 没命中或命中多处会返回 400，由 _http_json 转成工具错误原样给模型看，
+    这里不做二次加工，免得"到底改成了什么"有两套口径。
+    """
+    body = {
+        "mode": str(args.get("mode", "") or "").strip(),
+        "content": str(args.get("content", "") or ""),
+        "old_text": str(args.get("old_text", "") or ""),
+        "new_text": str(args.get("new_text", "") or ""),
+    }
+    return runner._http_put(f"/api/projects/{runner._project_id()}/guideline", body)
 
 
 def _tool_list_dict_files(runner: AgentRunner, _args: dict[str, Any]) -> Any:
@@ -2897,6 +2962,14 @@ def _tool_update_project_config(runner: AgentRunner, args: dict[str, Any]) -> An
             continue
         key = str(item.get("key", "")).strip()
         if not key:
+            continue
+        if key in LEGACY_PROMPT_PATHS:
+            # 旧工程里这两个键还在（翻译流程仍认），但已不对外提供：直接拒掉，
+            # 免得模型绕开 write_project_guideline 去改一份"看不见的"旧机制
+            skipped.append({
+                "key": key,
+                "reason": "该键已下线（仅为旧工程兼容保留），请改用 write_project_guideline 写项目规范",
+            })
             continue
         value = _parse_config_value(item.get("value"))
         before = _get_config_key(config, key)
@@ -3957,6 +4030,7 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "list_input_files": _tool_list_input_files,
     "read_input_file": _tool_read_input_file,
     "read_guideline": _tool_read_guideline,
+    "write_project_guideline": _tool_write_project_guideline,
     "list_dict_files": _tool_list_dict_files,
     "read_dict": _tool_read_dict,
     "save_dict": _tool_save_dict,

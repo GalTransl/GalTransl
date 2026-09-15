@@ -25,6 +25,7 @@ import {
   DictionarySettingsSection,
   ProblemAnalyzeSection,
   RetranslKeySection,
+  ProjectGuidelineSection,
   type ConfigSectionKey,
 } from './project-config';
 
@@ -40,7 +41,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   const [searchParams] = useSearchParams();
   const [activeSection, setActiveSection] = useState<ConfigSectionKey>(() => {
     const s = searchParams.get('section');
-    if (s && ['common', 'backendSpecific', 'plugin', 'dictionary', 'problemAnalyze', 'retranslKey', 'problemFilterKey'].includes(s)) return s as ConfigSectionKey;
+    if (s && ['common', 'backendSpecific', 'plugin', 'dictionary', 'problemAnalyze', 'retranslKey', 'problemFilterKey', 'projectGuideline'].includes(s)) return s as ConfigSectionKey;
     return 'common';
   });
   const [yamlView, setYamlView] = useState(false);
@@ -392,6 +393,10 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
                   }}
                   onDirty={() => { setSaveSuccess(false); setDirty(true); }}
                 />
+              )}
+
+              {activeSection === 'projectGuideline' && (
+                <ProjectGuidelineSection projectId={projectId} projectDir={projectDir} />
               )}
 
               {(activeSection === 'retranslKey' || activeSection === 'problemFilterKey') && (

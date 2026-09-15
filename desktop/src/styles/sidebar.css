@@ -65,6 +65,9 @@
 .sidebar__top-nav {
   padding: var(--space-3) 0 var(--space-1);
   flex-shrink: 0;
+  /* 与下面的项目列表分开：上面是固定入口（首页 / Agent），下面是可滚动的项目，
+     和底部导航那条 border-top 用同一种线 */
+  border-bottom: 1px solid var(--color-line);
 }
 
 .sidebar__nav {

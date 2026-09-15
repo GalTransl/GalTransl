@@ -6,4 +6,5 @@ export { PluginSettingsSection } from './PluginSettingsSection';
 export { DictionarySettingsSection } from './DictionarySettingsSection';
 export { ProblemAnalyzeSection } from './ProblemAnalyzeSection';
 export { RetranslKeySection } from './RetranslKeySection';
+export { ProjectGuidelineSection } from './ProjectGuidelineSection';
 export { ConfigFieldRow, ConfigFieldGroup } from './ConfigFieldRow';
