@@ -18,10 +18,18 @@ import tempfile
 import unittest
 
 from GalTransl.Agent.runtime import (
+    AGENT_TOOLS,
     RUNTIME_ERRORS_PER_QUERY,
     AgentState,
     _tool_get_runtime,
 )
+
+
+def _runtime_description() -> str:
+    for tool in AGENT_TOOLS:
+        if tool["function"]["name"] == "get_runtime":
+            return str(tool["function"]["description"])
+    raise AssertionError("get_runtime 不在工具表里")
 
 
 def _err(
@@ -147,8 +155,6 @@ class IncrementalRecentErrorsTests(unittest.TestCase):
         out = _tool_get_runtime(_Runner([_err("e1")]), {})
         self.assertEqual([g["count"] for g in out["recent_errors"]], [1])
         self.assertNotIn("recent_errors_pending", out)
-        self.assertIn("新出现", out["recent_errors_note"])
-        self.assertIn("count", out["recent_errors_note"])
 
     def test_repeated_queries_do_not_repeat_the_same_error(self) -> None:
         """用户遇到的场景：同一条 warning 在连续 5 次查询里反复出现。"""
@@ -158,7 +164,23 @@ class IncrementalRecentErrorsTests(unittest.TestCase):
         for _ in range(4):
             again = _tool_get_runtime(runner, {})
             self.assertEqual(again["recent_errors"], [])
-            self.assertIn("只代表没有新错误", again["recent_errors_note"])
+
+    def test_return_body_carries_no_static_notes(self) -> None:
+        """口径说明只在工具 description 里，返回体不再每次带回（等待循环里会调很多次）。"""
+        out = _tool_get_runtime(_Runner([_err("e1")]), {})
+        self.assertNotIn("recent_errors_note", out)
+        self.assertNotIn("summary_note", out)
+        # 字段本身照旧
+        self.assertEqual(sorted(out), ["current_file", "job_status", "job_translator", "recent_errors", "stage", "summary"])
+
+        description = _runtime_description()
+        self.assertIn("新出现", description)  # 增量
+        self.assertIn("已合并", description)  # 同类合并
+        self.assertIn("count 是本次新增次数", description)
+        self.assertIn(str(RUNTIME_ERRORS_PER_QUERY), description)  # 单次上限与常量一致
+        self.assertIn("recent_errors_pending", description)
+        self.assertIn("list_problems", description)  # 整体问题去哪查
+        self.assertIn("只代表没有新错误", description)
 
     def test_group_count_only_counts_new_occurrences(self) -> None:
         """第二页重复出现的同一类：count 是本次新增，不重复累计。"""
@@ -190,11 +212,12 @@ class IncrementalRecentErrorsTests(unittest.TestCase):
         again = _tool_get_runtime(runner, {})
         self.assertEqual(again["recent_errors"], [])
 
-    def test_summary_scale_note_still_present(self) -> None:
-        """顺带确认口径说明没被这次改动挤掉。"""
+    def test_summary_scale_explained_in_description(self) -> None:
+        """summary 的口径说明同样只在工具 description 里。"""
         out = _tool_get_runtime(_Runner([_err("e1")]), {})
-        self.assertIn("两个 total 分母不同", out["summary_note"])
         self.assertEqual(out["summary"]["total"], 100)
+        self.assertIn("两个 total 分母不同", _runtime_description())
+        self.assertIn("get_project_overview", _runtime_description())
 
 
 class RealRuntimePayloadTests(unittest.TestCase):

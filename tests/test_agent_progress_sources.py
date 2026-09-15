@@ -8,7 +8,9 @@
 这里锁两件事：
 
 1. get_progress 已合并（工具表与 schema 里都不再有它），进度统一从 overview 的 progress 拿；
-2. 两套口径的说明都随返回给出，互相点明"分母不同、不要为了对齐多查一轮"。
+2. 两套口径互相点明"分母不同、不要为了对齐多查一轮"——get_runtime 那份写在它的工具
+   说明里（它在等待循环里被反复调用，静态说明不该每次跟着返回），overview 那份跟着
+   progress 一起给（只在要进度时返回）。
 """
 
 import unittest
@@ -20,6 +22,13 @@ from GalTransl.Agent.runtime import (
     _tool_get_project_overview,
     _tool_get_runtime,
 )
+
+
+def _runtime_tool_description() -> str:
+    for tool in AGENT_TOOLS:
+        if tool["function"]["name"] == "get_runtime":
+            return str(tool["function"]["description"])
+    raise AssertionError("get_runtime 不在工具表里")
 
 
 class _Runner:
@@ -81,13 +90,15 @@ class ProgressScaleNotesTests(unittest.TestCase):
         self.assertIn("get_runtime", note)  # 另一套去哪看
         self.assertIn("两个分母不同", note)
 
-    def test_runtime_summary_note_points_back_at_overview(self) -> None:
+    def test_runtime_scale_explained_in_tool_description(self) -> None:
         out = _tool_get_runtime(_Runner(), {})
         self.assertEqual(out["summary"]["total"], 2627)  # 任务计划口径，原样报出
-        note = out["summary_note"]
-        self.assertIn("本轮任务", note)
-        self.assertIn("get_project_overview", note)
-        self.assertIn("不要为了对齐", note)
+        self.assertNotIn("summary_note", out)  # 静态说明不随返回走
+
+        description = _runtime_tool_description()
+        self.assertIn("本轮任务", description)
+        self.assertIn("get_project_overview", description)
+        self.assertIn("不要为了对齐", description)
 
     def test_both_scales_are_reported_without_reconciling(self) -> None:
         """同一时刻两个 total 可以不等——工具不做"抹平"，只把口径讲清楚。"""

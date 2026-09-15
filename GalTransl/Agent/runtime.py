@@ -36,6 +36,8 @@ DEFAULT_CONFIG_FILE = "config.yaml"
 # 正常长任务（几十上百轮：等待-查进度-修复的循环）根本碰不到它。
 MAX_STEPS = 1000
 RUNTIME_EVENT_KEEP = 500
+# 单次 get_runtime 最多报几"类"新错误（同类会合并；发过的被水位线记住，不再重复报）
+RUNTIME_ERRORS_PER_QUERY = 10
 # 瞬态事件：只进当前回合的 SSE 流，不进内存 events deque（也不落盘）。
 # 两类：一类是流式增量（一次请求几十条，进 deque 会把 user_message/tool_call
 # 等长期事件挤出 maxlen 窗口，前端刷新后就丢内容）；一类是能从状态快照重建的
@@ -238,7 +240,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
    f. 若不满意：继续完善字典（save_dict）；对全局性的文风问题，用 update_project_config 把 common.gpt.change_prompt 设为 "AdditionalPrompt" 并设置 common.gpt.prompt_content 写入额外的翻译要求（如「译名统一用XX」「口语化程度、敬称的处理方式」等），这些要求会追加到每次翻译请求的 Prompt 里；也可以用 update_project_config 切换 common.gpt.translation_guideline 换一份更合适的规范；
    g. 满意后，把试译结果告知用户并说明你的评估结论，然后用 ask_user 询问是否开始全量翻译（给出「开始全量」/「先再调一版规范」之类的候选选项），等用户回答后再进入下一步。
 4. **启动翻译（全量）**：调用 start_translation(translator="<主翻译引擎>")（不传 files 即翻译全部）。主翻译引擎从项目配置或 overview 中确认，常用值：ForGal-json / ForGal-tsv / ForNovel / sakura-v1.0 / galtransl-v3。一次只启动一个，项目已有运行中任务时不要重复提交。
-5. **跟进进度（wait 前后都要查状态）**：启动翻译后先调用 get_runtime 确认任务已在跑，再调用 wait 等待一段合理时间（翻译任务 wait minutes=1~3，短任务 wait seconds=30）。wait 结束后必须再调用 get_runtime 确认任务状态：completed 进入下一步；仍在 running 时看返回的 eta_seconds 估算剩余时间——eta 还很长（如 >10 分钟）就按其一半的时长继续 wait，快完了（如 <2 分钟）就 wait seconds=30 再查，不要连续空转轮询也不要一次等过头。get_runtime 的 total/percent 是**本轮任务**的口径（含尚未落盘的文件）；想按已落盘缓存看进度（含文件级完成度）用 get_project_overview 的 progress——两者分母不同，数字不一致是正常的，不要为了对齐它们多查一轮。get_runtime 的 recent_errors 只给上次查询之后**新出现**的错误，同类会合并成一条（count = 本次新增次数，text 是一行摘要）——同一批错误不会重复出现，要判断错误整体情况用 list_problems，不要因为某次查询没有新错误就认为问题已修好。等待期间界面会显示倒计时。
+5. **跟进进度（wait 前后都要查状态）**：启动翻译后先调用 get_runtime 确认任务已在跑，再调用 wait 等待一段合理时间（翻译任务 wait minutes=1~3，短任务 wait seconds=30）。wait 结束后必须再调用 get_runtime 确认任务状态：completed 进入下一步；仍在 running 时看返回的 eta_seconds 估算剩余时间——eta 还很长（如 >10 分钟）就按其一半的时长继续 wait，快完了（如 <2 分钟）就 wait seconds=30 再查，不要连续空转轮询也不要一次等过头。等待期间界面会显示倒计时。（get_runtime 各字段与 recent_errors 的口径见该工具说明。）
 6. **复核结果**：调用 list_problems（不带参数）先看类型统计，了解哪类问题最多；再传 problem_type（如 problem_type="残留日文"）+ limit/offset 分页查看该类型的具体条目。用 read_transl_cache 的 index 参数精确读取有问题的条目（如 list_problems 返回的 index，可直接 `index="33-40,50-60"` 一次取多条）浏览实际译文；判断语意是否连贯时传 context（如 context=3）把前后各几句一起带上。要查某个词/译名在全项目的所有出现处、判断译法是否统一（如「ドルード」该统一成哪个写法），用 search_transl_cache(query="ドルード", context=3) 一次看遍所有出现处及其上下文。它默认只返回必要字段（说话人/原文/译文/问题，空值与未变化的字段会省略），要看译后字典替换结果或校对稿再传 fields。需要看缓存文件全貌（文件、条数）时用 list_transl_cache；注意返回里标注 translating / .append.jsonl 后缀的文件正在翻译中，此时读到的是旧快照，等任务 completed 再操作。
 7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。对确认无需处理的系统性问题类型（如字典使用提示、纯语气词提示），可用 manage_problem_filter(action="add", keyword=["…"]) 加入问题过滤清单（keyword 可传数组一次加多个），让统计聚焦真问题；过滤后统计会明显下降，属于预期效果。
 8. **完成**：收尾前先调用 get_project_overview 确认项目真的翻完——只有 files_translated == files_total 且没有 running 任务才算整体完成（total==translated 可能只代表已缓存的部分翻完，不要据此收尾）；若还有文件没翻，回到流程 4 继续 start_translation 翻剩余文件。问题数可控、整体完成后，用 read_output 抽查最终输出文件（交付物；输出与缓存不完全一致，译后字典替换只在输出生效），确认无误后用一段自然语言总结本次操作（做了什么、翻译进度、剩余问题建议），不要调用工具，直接输出总结即可结束。
@@ -1730,7 +1732,16 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_runtime",
-            "description": "查询运行时状态：当前任务状态(running/completed/failed)、阶段、本轮任务的计数与 ETA、新出现的错误。summary 里的 total/percent 是**本轮任务**的口径（含正在翻译、缓存尚未落盘的文件）；已落盘缓存的进度与文件级完成度看 get_project_overview 的 progress，两者分母不同、不必互相校对。recent_errors 只返回**上次查询之后新出现**的错误，且同类（同 kind/同原因）已合并为一条：count 是本次新增次数、text 是可读摘要、files 是涉及的缓存文件，单次最多 10 类；已发过的不会重复出现——列表为空只代表没有新错误，不要据此认为之前的问题已解决。",
+            "description": (
+                "查询运行时状态：当前任务状态(running/completed/failed)、阶段、本轮任务计数与 ETA、本轮新出现的错误。"
+                "summary.total/percent 是**本轮任务**的口径（按任务计划统计，含正在翻译、缓存尚未落盘的文件）；"
+                "已落盘缓存的口径与文件级完成度看 get_project_overview 的 progress——两个 total 分母不同，"
+                "数字不一致是正常的，不要为了对齐它们多查一轮。"
+                "recent_errors 是**上次查询之后新出现**的错误，同类（同 kind/同原因）已合并为一条："
+                "count 是本次新增次数、text 是可直接读的一行、files 是涉及的缓存文件（最多列 5 个），"
+                f"单次最多 {RUNTIME_ERRORS_PER_QUERY} 类；已发过的不再重复，另有 recent_errors_pending 表示还没发完的新错误数。"
+                "列表为空只代表没有新错误，不代表之前的问题已消失——整体问题情况用 list_problems 查。"
+            ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -2855,8 +2866,6 @@ def _tool_stop_translation(runner: AgentRunner, _args: dict[str, Any]) -> Any:
 
 WAIT_SECONDS_MAX = 1800  # 单次等待上限 30 分钟，避免 Agent 卡死在一次无限等待里
 WAIT_TICK = 0.5  # 倒计时刷新步长（秒），兼顾界面流畅与轮询开销
-# 单次 get_runtime 最多报几条"新出现的"错误（发过的会被水位线记住，不再重复报）
-RUNTIME_ERRORS_PER_QUERY = 10
 
 
 def _tool_wait(runner: AgentRunner, args: dict[str, Any]) -> Any:
@@ -3025,9 +3034,13 @@ def _take_fresh_errors(
 def _tool_get_runtime(runner: AgentRunner, _args: dict[str, Any]) -> Any:
     """运行时状态：任务状态 / 阶段 / 本轮计数 / ETA / 新出现的错误。
 
+    只返回数据本身——口径说明（summary 是本轮任务口径、recent_errors 是增量且已同类
+    合并）都写在工具的 description 里：这个工具在等待循环里被反复调用，静态说明每次
+    跟着返回只是白占上下文。
+
     summary 是**本轮任务自己的**计数（按任务计划统计，含正在翻译、缓存还没落盘的
-    文件）；「了解项目」里的 progress 是**已落盘缓存**的口径。两者分母不同，同一次
-    查询下数字本来就会差一截，不需要互相校对（说明随返回一起给出）。
+    文件）；「了解项目」里的 progress 是**已落盘缓存**的口径，两者分母不同，同一次
+    查询下数字本来就会差一截，不需要互相校对。
 
     recent_errors 只给"上次查询之后新出现的"（水位线记在 state 上），避免同一条
     parse warning 在连续几次查询里反复出现、逼模型重新判断。
@@ -3054,18 +3067,7 @@ def _tool_get_runtime(runner: AgentRunner, _args: dict[str, Any]) -> Any:
             "eta_seconds": summary.get("eta_seconds"),
             "workers_active": summary.get("workers_active", 0),
         },
-        "summary_note": (
-            "summary 是**本轮任务**的计数：total 按任务计划统计，包含正在翻译、缓存尚未"
-            "落盘的文件。已落盘缓存的口径（含文件级完成度）看 get_project_overview 的 "
-            "progress——两个 total 分母不同，数字不一样是正常的，不要为了对齐它们多查一轮。"
-        ),
         "recent_errors": fresh_errors,
-        "recent_errors_note": (
-            "recent_errors 只列**上次查询之后新出现**的错误，同类已合并：每项的 count 是"
-            f"本次新增的次数（text 是可直接读的一行，files 是涉及的缓存文件，最多列 5 个），"
-            f"单次最多 {RUNTIME_ERRORS_PER_QUERY} 类。发过的不会重复出现，所以列表为空只代表"
-            "没有新错误，不代表之前的问题已消失（整体问题情况用 list_problems 查）。"
-        ),
     }
     if pending_errors:
         # 还有没发完的新错误：说明这次报错很密集，下次查询继续给
