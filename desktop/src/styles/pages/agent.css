@@ -1462,6 +1462,220 @@
   border-bottom: 0;
 }
 
+/* ── 启动翻译卡片（翻译工作台顶部卡的迷你版） ──
+   翻译期间是一张带实时进度的卡片（每秒刷新一次），跑完自动折成一行。 */
+
+.agent-tjob {
+  margin: 4px 0 6px;
+  border: 1px solid var(--agent-line-soft);
+  border-radius: var(--radius-card);
+  background: var(--agent-tile);
+  overflow: hidden;
+}
+
+.agent-tjob.is-live {
+  border-color: rgba(47, 111, 235, 0.32);
+}
+
+.agent-tjob__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 0;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.84rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.agent-tjob__header:hover {
+  background: var(--agent-hover);
+}
+
+.agent-tjob__icon {
+  flex: none;
+  font-size: 0.86rem;
+}
+
+.agent-tjob__action {
+  flex: none;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.agent-tjob.is-live .agent-tjob__action {
+  color: var(--color-primary);
+}
+
+.agent-tjob__summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--agent-mono);
+  font-size: 0.74rem;
+  opacity: 0.9;
+}
+
+.agent-tjob__count {
+  flex: none;
+  font-family: var(--agent-mono);
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-tjob__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  margin-left: auto;
+  font-size: 0.72rem;
+}
+
+.agent-tjob__state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.agent-tjob__state.is-running {
+  color: var(--color-primary);
+}
+
+.agent-tjob__state.is-running .agent-tjob__state-dot {
+  animation: agent-pulse 1.1s ease-in-out infinite;
+}
+
+.agent-tjob__state.is-done {
+  color: var(--color-success);
+}
+
+.agent-tjob__state.is-error {
+  color: var(--color-danger);
+}
+
+.agent-tjob__caret {
+  flex: none;
+  margin-left: 2px;
+  transition: transform var(--dur-fast) var(--ease-default);
+}
+
+.agent-tjob.is-open .agent-tjob__caret {
+  transform: rotate(90deg);
+}
+
+.agent-tjob__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.agent-tjob__gauge {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.agent-tjob__percent {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--color-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-tjob__percent-sign {
+  margin-left: 1px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.agent-tjob__frac {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.76rem;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-tjob__frac b {
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.agent-tjob__frac-remain {
+  padding-left: 8px;
+  border-left: 1px solid var(--agent-line-soft);
+}
+
+.agent-tjob__bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(47, 111, 235, 0.12);
+  overflow: hidden;
+}
+
+.agent-tjob__bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #2f6feb, #22d3ee);
+  transition: width 0.4s var(--ease-default);
+}
+
+.agent-tjob__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+}
+
+.agent-tjob__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.agent-tjob__stat b {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-tjob__stat i {
+  font-style: normal;
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+}
+
+.agent-tjob__raw-toggle {
+  align-self: flex-start;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.agent-tjob__raw-toggle:hover {
+  background: var(--agent-hover);
+  color: var(--color-text);
+}
+
 /* ── Tool row ── */
 
 .agent-tool {
