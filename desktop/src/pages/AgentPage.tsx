@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -1838,7 +1839,11 @@ export function AgentPage() {
     pendingAskIdRef.current = askId;
     setAskError(null);
     setAskSubmitting(false);
-  }, [askId]);
+    // 提问卡片在转录里，可能落在视口外（用户正翻前面的内容时尤其容易）。新问题一到
+    // 就带到最底部：Agent 正卡在这儿等答复，让用户自己发现"要回答"比轻微打断更糟。
+    // 钉在输入框上方时不会有这个问题。
+    if (askId) handleJumpToBottom();
+  }, [askId, handleJumpToBottom]);
   const handleAskSubmit = useCallback(
     async (answers: Array<string[] | null>) => {
       const target = pendingAskIdRef.current;
@@ -1995,13 +2000,29 @@ export function AgentPage() {
           ) : (
             <>
               {timeline.map((group, index) => (
-                <AgentGroupView
-                  key={group.id}
-                  group={group}
-                  isLive={running && index === timeline.length - 1}
-                  projectDir={effectiveProject}
-                  persistKey={`${effectiveProject}::${activeSessionId}`}
-                />
+                <Fragment key={group.id}>
+                  <AgentGroupView
+                    group={group}
+                    isLive={running && index === timeline.length - 1}
+                    projectDir={effectiveProject}
+                    persistKey={`${effectiveProject}::${activeSessionId}`}
+                  />
+                  {/* ask_user 的提问卡片就摆在那个工具行下面（同一回合内），不钉在输入框
+                      上方——"在什么上下文里问了什么"一眼对得上。key 用 askId，换一题就重挂，
+                      免得上一题的草稿被带到下一题。 */}
+                  {group.type === 'activity' &&
+                  pendingAsk &&
+                  askId !== answeredAskId &&
+                  group.items.some((it) => it.id === askId) ? (
+                    <AskUserCard
+                      key={askId}
+                      item={pendingAsk}
+                      submitting={askSubmitting}
+                      error={askError}
+                      onSubmit={(answers) => void handleAskSubmit(answers)}
+                    />
+                  ) : null}
+                </Fragment>
               ))}
 
               {running ? (
@@ -2135,16 +2156,6 @@ export function AgentPage() {
               })}
             </div>
           </div>
-        ) : null}
-        {/* Agent 的提问：钉在输入框上方，不让它埋进转录里被折叠掉 */}
-        {pendingAsk && askId !== answeredAskId ? (
-          <AskUserCard
-            key={askId}
-            item={pendingAsk}
-            submitting={askSubmitting}
-            error={askError}
-            onSubmit={(answers) => void handleAskSubmit(answers)}
-          />
         ) : null}
         <div className={`agent-composer${running ? ' is-running' : ''}${queued.length ? ' has-queue' : ''}`}>
           <textarea
@@ -2951,7 +2962,7 @@ function translationJobId(item: ActivityItem): string {
 }
 
 /* ── 询问用户卡片（ask_user）──
-   卡片**钉在输入框上方**、不埋进转录（转录里只留一行工具结果），
+   卡片**就在转录里**、紧跟在那个 ask_user 工具行下面（由外层按 group 渲染），
    一题一步、选项按钮 + 固定的「自己填」入口，可以跳过单题或全部跳过。
    **没有倒计时**：后端那个工具不设超时，会一直等着；不想答就点全部跳过，
    或者干脆点停止让 Agent 自己判断。 */
@@ -3013,7 +3024,7 @@ function AskUserCard({
       return;
     }
     // 单选：点一下就选中并直接进下一题（最后一题即提交），不必再点「下一题」。
-    // 「自己填…」不走这里——它只是展开输入框，填完回车或点下一题才走。
+    // 「自己填…」不走这里——它是那一行就地变成输入框，填完回车或点下一题才走。
     const list = drafts.map((d, i) => (i === index ? { ...d, values: [option], custom: false } : d));
     setDrafts(list);
     goNext(list);
@@ -3086,39 +3097,53 @@ function AskUserCard({
             </button>
           );
         })}
-        <button
-          type="button"
-          role={current.multiSelect ? 'checkbox' : 'radio'}
-          aria-checked={draft.custom}
-          className={`agent-ask__option${draft.custom ? ' is-selected' : ''}`}
-          onClick={() =>
-            update({
-              custom: !draft.custom,
-              // 单选选中「自己填」要把已选选项让开；多选则各自独立
-              ...(draft.custom || current.multiSelect ? {} : { values: [] }),
-            })
-          }
-          disabled={submitting}
-        >
-          <span className="agent-ask__mark" aria-hidden>{draft.custom ? '✓' : ''}</span>
-          <span>自己填…</span>
-        </button>
         {draft.custom ? (
-          <input
-            className="agent-ask__input"
-            autoFocus
-            value={draft.text}
-            placeholder="输入你的答案，回车继续"
-            onChange={(e) => update({ text: e.target.value })}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.nativeEvent.isComposing && draft.text.trim()) {
-                e.preventDefault();
-                goNext(drafts);
-              }
-            }}
+          /* 「自己填」就地变输入框：点开的是这一行本身，不再在下面另起一个浮出的
+             输入框。整行包在 label 里，点行的空白处也能聚焦到输入。 */
+          <label className="agent-ask__option agent-ask__option--editing is-selected">
+            <span className="agent-ask__mark" aria-hidden>✓</span>
+            <input
+              className="agent-ask__option-input"
+              autoFocus
+              value={draft.text}
+              placeholder="自己填…"
+              aria-label="自己填"
+              onChange={(e) => update({ text: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing && draft.text.trim()) {
+                  e.preventDefault();
+                  goNext(drafts);
+                }
+                // Esc 退出编辑：与再点一下「自己填…」对称，填的内容一并丢掉
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  update({ custom: false, text: '' });
+                }
+              }}
+              // 空着离开就退回未选中的「自己填…」，不留一个空输入框挂在列表里
+              onBlur={() => { if (!draft.text.trim()) update({ custom: false }); }}
+              disabled={submitting}
+            />
+          </label>
+        ) : (
+          <button
+            type="button"
+            role={current.multiSelect ? 'checkbox' : 'radio'}
+            aria-checked={false}
+            className="agent-ask__option"
+            onClick={() =>
+              update({
+                custom: true,
+                // 单选选中「自己填」要把已选选项让开；多选则各自独立
+                ...(current.multiSelect ? {} : { values: [] }),
+              })
+            }
             disabled={submitting}
-          />
-        ) : null}
+          >
+            <span className="agent-ask__mark" aria-hidden />
+            <span>自己填…</span>
+          </button>
+        )}
       </div>
 
       {error ? <div className="agent-ask__error">{error}</div> : null}

@@ -2,10 +2,12 @@
 
 模型在输出里写 $transl_cache(文件名, 行号)（行号支持 12 / 12-15 / 12,20），
 这里把它渲染成"某条缓存"的只读卡片——设计与「缓存与问题」页的 cache-card 一致
-（同一套样式类 + 说话人配色 + 问题标签），只是不可编辑、去掉了删除/展开按钮。
+（同一套样式类 + 说话人配色 + 问题标签 + 人名字典替换），只是不可编辑、去掉了
+删除/展开按钮。
 
 卡片要自己去读缓存文件（接口 /cache/:filename 一次给整个文件的条目），所以做了
-两层节流：同一个文件只请求一次（Promise 复用），条目按 index 取（不是数组下标）。 */
+两层节流：同一个文件只请求一次（Promise 复用），条目按 index 取（不是数组下标）。
+引用一长串行号（如 20-31）时卡片区定高滚动，不撑高对话气泡。 */
 
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -16,7 +18,13 @@ import {
 } from '../lib/api';
 import { splitProblemItems } from '../lib/problemFilter';
 import { speakerStyle } from '../lib/speaker';
-import { parseCacheRefIndexes, renderMarkdown, splitMarkdownSegments } from '../lib/markdown';
+import { resolveSpeakerName, useNameDict } from '../lib/useNameDict';
+import {
+  parseCacheRefIndexes,
+  renderMarkdown,
+  splitMarkdownSegments,
+  type MarkdownSegment,
+} from '../lib/markdown';
 
 /** 同一项目 + 文件的读取共享一个 Promise：一条回复里引用同一文件多次也只请求一次。 */
 const cacheFilePromises = new Map<string, Promise<CacheFileResponse>>();
@@ -45,10 +53,21 @@ function speakerOf(entry: CacheEntry): string {
   return raw || '';
 }
 
-/** 只读的缓存条目卡片：沿用「缓存与问题」页的 cache-card 设计。 */
-function CacheEntryCard({ entry }: { entry: CacheEntry }) {
+/** 只读的缓存条目卡片：沿用「缓存与问题」页的 cache-card 设计。
+   说话人 pill 跟缓存页一样过人名替换字典——显示译名，但配色仍按原名 hash
+   （与缓存页同一角色同色），不然同一个角色两处颜色对不上。 */
+function CacheEntryCard({
+  entry,
+  nameDict,
+}: {
+  entry: CacheEntry;
+  nameDict: Map<string, string>;
+}) {
   const problems = splitProblemItems(entry.problem);
-  const speaker = speakerOf(entry);
+  const rawSpeaker = speakerOf(entry);
+  const speaker = Array.isArray(entry.name)
+    ? entry.name.filter(Boolean).map((n) => resolveSpeakerName(n, nameDict)).join('/')
+    : resolveSpeakerName(rawSpeaker, nameDict);
   const engine = entry.trans_by || '';
 
   return (
@@ -56,7 +75,7 @@ function CacheEntryCard({ entry }: { entry: CacheEntry }) {
       <div className="cache-card__row">
         <span className="cache-card__field-label">#{entry.index}</span>
         {speaker ? (
-          <span className="cache-card__pill cache-card__pill--speaker" style={speakerStyle(speaker)}>
+          <span className="cache-card__pill cache-card__pill--speaker" style={speakerStyle(rawSpeaker)}>
             {speaker}
           </span>
         ) : null}
@@ -103,31 +122,23 @@ function DatabaseIcon() {
   );
 }
 
-/** 一条 $transl_cache(文件名, 行号) 引用：取数据 → 卡片列表。 */
-const COLLAPSED_COUNT = 5;
+/** 一条 $transl_cache(文件名, 行号) 引用：取数据 → 卡片列表。
 
-/** 已展开的引用（模块级）：切页面会导致组件卸载重建，展开状态放 useState 会丢，
- *  这里按 引用key 记住，重挂时恢复。 */
-const expandedRefs = new Set<string>();
-
+    条目多时不折成「展开其余 N 条」再点一下，而是把卡片区做成定高滚动区：引用
+    连续区间时，直接滚比"先截断再展开"更接近翻缓存的手感，也不用记住展开态。 */
 function CacheRefCard({
   projectDir,
   filename,
   indexSpec,
+  nameDict,
 }: {
   projectDir: string;
   filename: string;
   indexSpec: string;
+  nameDict: Map<string, string>;
 }) {
   const [entries, setEntries] = useState<CacheEntry[] | null>(null);
   const [error, setError] = useState<string>('');
-  const refKey = `${projectDir}::${filename}::${indexSpec}`;
-  const [expanded, setExpandedState] = useState(() => expandedRefs.has(refKey));
-  const setExpanded = (next: boolean) => {
-    if (next) expandedRefs.add(refKey);
-    else expandedRefs.delete(refKey);
-    setExpandedState(next);
-  };
   const wanted = useMemo(() => parseCacheRefIndexes(indexSpec), [indexSpec]);
 
   useEffect(() => {
@@ -157,10 +168,6 @@ function CacheRefCard({
 
   const found = entries ?? [];
   const missing = wanted.length - found.length;
-  // 条目多时默认折叠，避免一条回复被引用刷满整屏
-  const collapsed = found.length > COLLAPSED_COUNT && !expanded;
-  const visible = collapsed ? found.slice(0, COLLAPSED_COUNT) : found;
-  const hidden = found.length - visible.length;
 
   return (
     <section className="agent-cache-ref" aria-label={`缓存引用 ${filename} ${indexSpec}`}>
@@ -188,25 +195,20 @@ function CacheRefCard({
         </div>
       ) : (
         <>
-          <div className="agent-cache-ref__cards">
-            {visible.map((entry) => (
-              <CacheEntryCard key={`${filename}#${entry.index}`} entry={entry} />
+          {/* 定高滚动区：条目多时在这里滚，不撑高对话气泡；tabIndex 让键盘也能滚 */}
+          <div
+            className="agent-cache-ref__cards"
+            tabIndex={0}
+            role="group"
+            aria-label={`${filename} 第 ${indexSpec} 行，共 ${found.length} 条`}
+          >
+            {found.map((entry) => (
+              <CacheEntryCard key={`${filename}#${entry.index}`} entry={entry} nameDict={nameDict} />
             ))}
           </div>
-          {hidden > 0 || missing > 0 ? (
+          {missing > 0 ? (
             <div className="agent-cache-ref__foot">
-              {hidden > 0 ? (
-                <button
-                  type="button"
-                  className="agent-cache-ref__more"
-                  onClick={() => setExpanded(true)}
-                >
-                  展开其余 {hidden} 条
-                </button>
-              ) : null}
-              {missing > 0 ? (
-                <span className="agent-cache-ref__missing">另有 {missing} 条未找到</span>
-              ) : null}
+              <span className="agent-cache-ref__missing">另有 {missing} 条未找到</span>
             </div>
           ) : null}
         </>
@@ -217,8 +219,8 @@ function CacheRefCard({
 
 /** 渲染一段 Agent 文本：普通 markdown + 其中的缓存引用卡片。
 
-    没有引用时走原来的一条 innerHTML（行为与样式完全不变）；有引用时按片段切开，
-    文本片段各自渲染 markdown，引用片段渲染卡片。流式输出时行末光标只加在最后一段。 */
+    没有引用时走原来的一条 innerHTML（行为与样式完全不变）；有引用时交给
+    CacheRefSegments——它要多取一份人名替换字典，没引用就不必挂这份开销。 */
 export function AgentMarkdown({
   text,
   projectDir,
@@ -237,7 +239,32 @@ export function AgentMarkdown({
     return <div className={cls} dangerouslySetInnerHTML={{ __html: renderMarkdown(text, { cursor }) }} />;
   }
   return (
-    <div className={`${cls} agent-md--segmented`}>
+    <CacheRefSegments
+      segments={segments}
+      projectDir={projectDir}
+      cursor={cursor}
+      className={`${cls} agent-md--segmented`}
+    />
+  );
+}
+
+/** 带缓存引用的那段文本：按片段切开，文本片段各自渲染 markdown，引用片段渲染卡片。
+    人名替换字典只在这里取——说话人 pill 要跟「缓存与问题」页显示同一个译名。
+    流式输出时行末光标只加在最后一段。 */
+function CacheRefSegments({
+  segments,
+  projectDir,
+  cursor,
+  className,
+}: {
+  segments: MarkdownSegment[];
+  projectDir: string;
+  cursor?: boolean;
+  className: string;
+}) {
+  const { nameDict } = useNameDict(encodeProjectDir(projectDir));
+  return (
+    <div className={className}>
       {segments.map((seg, i) =>
         seg.kind === 'text' ? (
           <div
@@ -253,6 +280,7 @@ export function AgentMarkdown({
             projectDir={projectDir}
             filename={seg.filename}
             indexSpec={seg.indexSpec}
+            nameDict={nameDict}
           />
         ),
       )}

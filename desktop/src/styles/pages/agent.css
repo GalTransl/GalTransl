@@ -1533,9 +1533,9 @@
   border: 1px solid var(--agent-line-soft, var(--color-line));
   border-left: 3px solid var(--agent-ref-line);
   border-radius: var(--radius-card);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--color-primary) 5%, transparent), transparent 42%),
-    var(--agent-tile, rgba(16, 24, 40, 0.04));
+  /* 气泡底色本来就浅，再铺一层 tint 会糊成"灰一块"；这里不填色，只用外框与
+     左侧主色条圈定范围，卡片就落在气泡自身的背景上。 */
+  background: transparent;
   overflow: hidden;
 }
 
@@ -1545,7 +1545,7 @@
   gap: 7px;
   padding: 5px 10px;
   border-bottom: 1px solid var(--agent-line-soft, var(--color-line));
-  background: var(--agent-tile, rgba(16, 24, 40, 0.03));
+  background: transparent;
   font-size: 0.72rem;
   color: var(--color-text-muted);
 }
@@ -1599,11 +1599,48 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 卡片区：定高滚动。条目多时不撑高气泡，滚比"先截断再点展开"更接近翻缓存的手感。
+   滚动条平时隐形、悬停/聚焦才显色，与侧边栏、首页列表同一套做法。
+   不要加 overscroll-behavior: contain：条目少（没溢出）时它同样会切断滚动链条，
+   鼠标停在卡片上滚轮就滚不动外面的对话区了。保持默认的"滚到底再接力给父级"。 */
 .agent-cache-ref__cards {
   display: flex;
   flex-direction: column;
   gap: 5px;
   padding: 7px 9px 8px;
+  max-height: 420px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.agent-cache-ref__cards:focus-visible {
+  outline: 2px solid var(--agent-ref-line);
+  outline-offset: -2px;
+}
+
+.agent-cache-ref__cards:hover,
+.agent-cache-ref__cards:focus-visible {
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+
+.agent-cache-ref__cards::-webkit-scrollbar {
+  width: 6px;
+}
+
+.agent-cache-ref__cards::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.agent-cache-ref__cards::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: transparent;
+}
+
+.agent-cache-ref__cards:hover::-webkit-scrollbar-thumb,
+.agent-cache-ref__cards:focus-visible::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
 }
 
 .agent-cache-ref__state {
@@ -1641,23 +1678,25 @@
   to { background-position: -60% 0; }
 }
 
-/* 气泡里是只读展示：内嵌条目收成扁平 tint 块（去掉缓存页的白卡边框感），
-   卡片比缓存页再收一档（内边距/行距），别抢正文的戏 */
+/* 气泡里是只读展示：内嵌条目不填色（外框已经圈好了范围，条目再铺一层会叠出
+   深浅不一的一摞灰块），但描边要留着——没有底色再没有线框，条目之间就糊成一片
+   连读不出是几条。内边距/行距比缓存页收一档，别抢正文的戏；悬停加重描边，
+   问题条目靠警告色描边 + 问题标签示警。 */
 .agent-cache-ref .cache-card {
   padding: 4px 8px 5px;
   gap: 2px;
-  border-color: transparent;
+  border-color: var(--agent-line-soft, var(--color-line));
   border-radius: 8px;
-  background: var(--agent-tile-strong, rgba(16, 24, 40, 0.06));
+  background: transparent;
 }
 
 .agent-cache-ref .cache-card:hover {
-  border-color: var(--agent-line-soft, var(--color-line));
+  border-color: var(--agent-ref-line);
 }
 
 .agent-cache-ref .cache-card--problem {
   border-color: color-mix(in srgb, var(--color-warning) 32%, transparent);
-  background: color-mix(in srgb, var(--color-warning-soft) 26%, transparent);
+  background: transparent;
 }
 
 .agent-cache-ref .cache-card__fields {
@@ -1675,7 +1714,7 @@
   overflow-wrap: anywhere;
 }
 
-/* 底部操作行：展开更多 / 未找到提示 */
+/* 底行：只提示「有引用没找到」——行号写错或条目被删时才会出现 */
 .agent-cache-ref__foot {
   display: flex;
   align-items: center;
@@ -1685,46 +1724,18 @@
   color: var(--color-text-muted);
 }
 
-.agent-cache-ref__more {
-  border: 1px solid var(--agent-line-soft, var(--color-line));
-  border-radius: 999px;
-  padding: 1px 9px;
-  background: var(--agent-tile, rgba(16, 24, 40, 0.04));
-  color: var(--color-primary);
-  font: inherit;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-  transition: background var(--transition-fast, 0.15s), border-color var(--transition-fast, 0.15s);
-}
-
-.agent-cache-ref__more:hover {
-  background: var(--agent-hover, rgba(16, 24, 40, 0.07));
-  border-color: var(--agent-ref-line);
-}
-
 .agent-cache-ref__missing {
   color: var(--color-warning);
 }
 
+/* 深色下同样不填色，只把描边换成深色主题的线（浅色主题的淡蓝线在深底上太亮）。 */
 :root[data-theme='dark'] .agent-console .agent-cache-ref {
   border-color: var(--agent-line-soft);
-  background:
-    linear-gradient(180deg, rgba(67, 129, 255, 0.08), transparent 42%),
-    rgba(28, 40, 58, 0.42);
-}
-
-:root[data-theme='dark'] .agent-console .agent-cache-ref__head {
-  background: rgba(255, 255, 255, 0.03);
-}
-
-:root[data-theme='dark'] .agent-console .agent-cache-ref .cache-card {
-  background: rgba(255, 255, 255, 0.055);
+  background: transparent;
 }
 
 :root[data-theme='dark'] .agent-console .agent-cache-ref .cache-card--problem {
   border-color: rgba(245, 158, 11, 0.35);
-  background: rgba(245, 158, 11, 0.09);
 }
 
 /* ── 启动翻译卡片（翻译工作台顶部卡的迷你版） ──
@@ -2482,14 +2493,13 @@
    钉在输入框上方，一题一步；没有倒计时——后端那个工具不设超时。 */
 
 .agent-ask {
-  /* 与输入框同宽：输入区那层是 align-items:center，不写宽度就会按内容收缩，
-     于是"问题长一点卡片就宽一点"——每题宽度都不同（.agent-composer / .agent-queue
-     都是这么定的）。 */
-  width: min(100%, 840px);
+  /* 就在转录里、紧跟对应的 ask_user 工具行。宽度不用写：它是 .agent-thread（840px
+     居中、左右各 5px 内缩）的 flex 子项，拉伸到正文列宽度即可，跟正文块左右对齐。 */
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 8px;
+  /* 转录的行间隙只有 2px，这里自己给一点上下呼吸，跟上面的工具行分开 */
+  margin: 4px 0 2px;
   padding: 10px 12px;
   border: 1px solid rgba(47, 111, 235, 0.28);
   border-radius: var(--radius-card);
@@ -2581,6 +2591,11 @@
   gap: 4px;
   max-height: min(320px, 36dvh);
   overflow-y: auto;
+  /* 选中/聚焦那一行有 3px 外发光，而 overflow 是按 padding 边裁的：容器一点内边距
+     都不留就会把左右两侧的光晕切平（顶部/底部同理）。留 4px 空间给自己、再用负外边距
+     补回去，选项仍然和上面的题干左对齐。 */
+  margin: 0 -4px;
+  padding: 4px;
 }
 
 .agent-ask__option {
@@ -2622,22 +2637,35 @@
   font-weight: 700;
 }
 
-.agent-ask__input {
-  width: 100%;
-  min-height: 32px;
-  padding: 4px 9px;
-  border: 1px solid var(--agent-line-soft);
-  border-radius: 10px;
-  background: var(--color-surface-strong);
+/* 「自己填」点开就地变输入：这一行本身就是编辑区（外框/内边距沿用 .agent-ask__option），
+   下面不再浮出第二个输入框。 */
+.agent-ask__option--editing {
+  cursor: text;
+}
+
+.agent-ask__option--editing:focus-within {
+  border-color: rgba(47, 111, 235, 0.65);
+  box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.12);
+}
+
+.agent-ask__option-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--color-text);
   font: inherit;
   font-size: 0.82rem;
+  outline: none;
 }
 
-.agent-ask__input:focus {
-  outline: none;
-  border-color: rgba(47, 111, 235, 0.65);
-  box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.12);
+.agent-ask__option-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.agent-ask__option-input:disabled {
+  cursor: default;
 }
 
 .agent-ask__error {
