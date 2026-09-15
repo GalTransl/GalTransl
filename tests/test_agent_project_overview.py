@@ -5,15 +5,18 @@ from unittest.mock import patch
 
 from GalTransl.Agent import session_store as ss
 from GalTransl.Agent.runtime import (
+    OVERVIEW_SECTIONS,
     AgentRunner,
     AgentRuntime,
     AgentState,
+    AgentToolError,
     _annotate_config,
     _backend_overview,
     _backend_summary,
     _config_for_overview,
     _count_input_file_progress,
     _input_cache_matchers,
+    _normalize_overview_include,
     _tool_get_project_overview,
 )
 
@@ -232,6 +235,73 @@ class OverviewToolReturnTests(unittest.TestCase):
         self.assertNotIn("sk-secret", str(out))
         self.assertNotIn("sk-trans", str(out))
         self.assertNotIn("api.deepseek.com", str(out))
+
+
+class OverviewIncludeTests(unittest.TestCase):
+    """按 include 分段返回：开局拿全，之后只取变化的部分。
+
+    分段的关键不只是返回体变小，还在于**没要的分区不发那条 HTTP**——否则省不下来。
+    """
+
+    @staticmethod
+    def _runner() -> AgentRunner:
+        state = AgentState()
+        state.project_dir = r"C:\proj"
+        state.backend_profile_data = {"OpenAI-Compatible": {"tokens": [{"modelName": "m"}]}}
+        return AgentRunner(state)
+
+    @staticmethod
+    def _fake_get(paths: list[str]):
+        def fake_get(path: str) -> dict:
+            paths.append(path)
+            if "/progress" in path:
+                return {"total": 10, "translated": 4, "problems": 1, "failed": 0, "files": []}
+            if path.endswith("/files"):
+                return {"input_files": [{"name": "01.json", "is_file": True}]}
+            if "/config" in path:
+                return {"config": {"common": {"language": "zh-cn"}}}
+            raise AssertionError(f"未预期的请求: {path}")
+
+        return fake_get
+
+    def _call(self, args: dict) -> tuple[dict, list[str]]:
+        paths: list[str] = []
+        fake = self._fake_get(paths)
+        with patch.object(AgentRunner, "_http_get", lambda _self, path: fake(path)):
+            return _tool_get_project_overview(self._runner(), args), paths
+
+    def test_default_returns_everything_without_note(self) -> None:
+        out, _ = self._call({})
+        self.assertEqual(sorted(out), sorted(OVERVIEW_SECTIONS))
+        self.assertNotIn("note", out)  # 全量返回时不加"本次只返回了…"的提示
+
+    def test_progress_only_skips_the_config_request(self) -> None:
+        out, paths = self._call({"include": ["progress"]})
+        self.assertEqual(sorted(out), ["note", "progress"])
+        self.assertEqual(out["progress"]["total"], 10)
+        self.assertFalse([p for p in paths if "/config" in p])
+
+    def test_progress_and_backend_order_is_fixed(self) -> None:
+        out, _ = self._call({"include": ["backend", "progress"]})
+        # 返回顺序按固定顺序（progress 在前），与 include 的书写顺序无关
+        self.assertEqual(list(out), ["progress", "backend", "note"])
+
+    def test_config_without_descriptions(self) -> None:
+        out, _ = self._call({"include": ["config"]})
+        self.assertIn("config", out)
+        self.assertNotIn("config_field_descriptions", out)
+
+    def test_normalize_dedupes_and_orders(self) -> None:
+        self.assertEqual(
+            _normalize_overview_include({"include": ["config", "progress", "config"]}),
+            ["progress", "config"],
+        )
+        self.assertEqual(_normalize_overview_include({}), list(OVERVIEW_SECTIONS))
+
+    def test_bad_include_is_rejected(self) -> None:
+        for bad in ({"include": ["progress", "nope"]}, {"include": []}, {"include": "progress"}):
+            with self.assertRaises(AgentToolError):
+                _normalize_overview_include(bad)
 
 
 class BackendContextPlumbingTests(unittest.TestCase):

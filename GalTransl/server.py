@@ -461,25 +461,17 @@ def _list_translation_guidelines() -> list[str]:
     return result
 
 
-def _load_input_file_entries(project_dir: str, config_file_name: str, filename: str, folder: str | None = None) -> list[dict[str, Any]]:
-    """Parse a project input/output file into normalized entries via its file plugin.
+def _open_project_file_plugin(project_dir: str, config_file_name: str):
+    """定位并初始化项目的文件插件，返回 (插件对象, 文件名)。
 
-    Mirrors how the translation pipeline reads input (fplugins_load_file) so
-    the Agent sees exactly what would be translated. Entries carry an `index`
-    (1-based position in file unless the plugin supplies an explicit index)
-    for range reads. `folder` defaults to the input dir;
-    pass OUTPUT_FOLDERNAME to read a delivered output file instead.
+    一个项目只用一个文件插件，但定位插件（PluginManager.locatePlugins + loadPlugins）
+    本身不便宜；批量解析多个文件时只做一次，之后逐个 load_file 即可。
     """
     from GalTransl.ConfigHelper import CProjectConfig
     from GalTransl.GTPlugin import GTextPlugin, GFilePlugin
     from GalTransl.yapsy.PluginManager import PluginManager
 
-    target_folder = folder or INPUT_FOLDERNAME
     cfg = CProjectConfig(project_dir, config_file_name or "config.yaml")
-    file_path = os.path.join(project_dir, target_folder, filename)
-    if not os.path.isfile(file_path):
-        raise FileNotFoundError(f"file not found in {target_folder}: {filename}")
-
     plugin_manager = PluginManager(
         {"GTextPlugin": GTextPlugin, "GFilePlugin": GFilePlugin},
         ["plugins", os.path.join(project_dir, "plugins")],
@@ -500,8 +492,7 @@ def _load_input_file_entries(project_dir: str, config_file_name: str, filename: 
         raise RuntimeError(f"未找到文件插件: {fname}")
     plugin_manager.setPluginCandidates([candidate])
     plugin_manager.loadPlugins()
-    file_plugins = plugin_manager.getPluginsOfCategory("GFilePlugin")
-    for plugin in file_plugins:
+    for plugin in plugin_manager.getPluginsOfCategory("GFilePlugin"):
         plugin_conf = plugin.yaml_dict
         project_plugin_conf = cfg.getPluginConfigSection()
         plugin_module = plugin_conf["Core"]["Module"]
@@ -509,41 +500,88 @@ def _load_input_file_entries(project_dir: str, config_file_name: str, filename: 
             plugin_conf["Settings"].update(project_plugin_conf[plugin_module])
         plugin_conf["Settings"]["project_dir"] = project_dir
         plugin.plugin_object.gtp_init(plugin_conf, cfg.getCommonConfigSection())
-        result = plugin.plugin_object.load_file(file_path)
-        if isinstance(result, tuple):
-            result = result[0]
-        if not isinstance(result, list):
-            raise RuntimeError(f"文件插件 {fname} 返回了非列表结果")
-        entries: list[dict[str, Any]] = []
-        for i, item in enumerate(result):
-            # 文件插件返回原始条目：正文键是 message（GalTransl JSON 约定），
-            # 说话人键是 name。pre_src/post_jp 是管道后段 CSentense 的字段名，
-            # 这里一并兼容，映射成统一的 {index, name, pre_src} 给 Agent。
-            if isinstance(item, dict):
-                text = (
-                    str(item.get("message", "") or "")
-                    or str(item.get("pre_src", "") or "")
-                    or str(item.get("post_jp", "") or "")
-                    or str(item.get("src_msg", "") or "")
-                )
-                speaker = str(item.get("name", "") or "")
-                # Loader/translation cache use 1-based indexes when the
-                # source item does not provide one.  Preserve an explicit
-                # source index (some plugins emit it) and otherwise use the
-                # same 1-based fallback for both input and output parsing.
-                raw_index = item.get("index", i + 1)
-                try:
-                    entry_index = int(raw_index)
-                except (TypeError, ValueError):
-                    entry_index = i + 1
-                entry = {"index": entry_index, "name": speaker, "pre_src": text}
-                if speaker:
-                    entry["speaker"] = speaker
-                entries.append(entry)
-            else:
-                entries.append({"index": i + 1, "name": "", "pre_src": str(item)})
-        return entries
+        return plugin.plugin_object, fname
     raise RuntimeError(f"文件插件 {fname} 加载失败")
+
+
+def _normalize_input_entries(result: Any, fname: str) -> list[dict[str, Any]]:
+    """把文件插件 load_file 的结果规整成 [{index, name, pre_src, ...}]。"""
+    if isinstance(result, tuple):
+        result = result[0]
+    if not isinstance(result, list):
+        raise RuntimeError(f"文件插件 {fname} 返回了非列表结果")
+    entries: list[dict[str, Any]] = []
+    for i, item in enumerate(result):
+        # 文件插件返回原始条目：正文键是 message（GalTransl JSON 约定），
+        # 说话人键是 name。pre_src/post_jp 是管道后段 CSentense 的字段名，
+        # 这里一并兼容，映射成统一的 {index, name, pre_src} 给 Agent。
+        if isinstance(item, dict):
+            text = (
+                str(item.get("message", "") or "")
+                or str(item.get("pre_src", "") or "")
+                or str(item.get("post_jp", "") or "")
+                or str(item.get("src_msg", "") or "")
+            )
+            speaker = str(item.get("name", "") or "")
+            # Loader/translation cache use 1-based indexes when the
+            # source item does not provide one.  Preserve an explicit
+            # source index (some plugins emit it) and otherwise use the
+            # same 1-based fallback for both input and output parsing.
+            raw_index = item.get("index", i + 1)
+            try:
+                entry_index = int(raw_index)
+            except (TypeError, ValueError):
+                entry_index = i + 1
+            entry = {"index": entry_index, "name": speaker, "pre_src": text}
+            if speaker:
+                entry["speaker"] = speaker
+            entries.append(entry)
+        else:
+            entries.append({"index": i + 1, "name": "", "pre_src": str(item)})
+    return entries
+
+
+def _load_input_file_entries(project_dir: str, config_file_name: str, filename: str, folder: str | None = None) -> list[dict[str, Any]]:
+    """Parse a project input/output file into normalized entries via its file plugin.
+
+    Mirrors how the translation pipeline reads input (fplugins_load_file) so
+    the Agent sees exactly what would be translated. Entries carry an `index`
+    (1-based position in file unless the plugin supplies an explicit index)
+    for range reads. `folder` defaults to the input dir;
+    pass OUTPUT_FOLDERNAME to read a delivered output file instead.
+    """
+    target_folder = folder or INPUT_FOLDERNAME
+    file_path = os.path.join(project_dir, target_folder, filename)
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError(f"file not found in {target_folder}: {filename}")
+
+    plugin_object, fname = _open_project_file_plugin(project_dir, config_file_name)
+    return _normalize_input_entries(plugin_object.load_file(file_path), fname)
+
+
+def _count_input_file_sentences(
+    project_dir: str, config_file_name: str, filenames: list[str]
+) -> dict[str, int | None]:
+    """统计每个输入文件解析后的条数（GET /files?counts=1 用；失败给 None）。
+
+    这里的条数是文件插件解析出的**原始条目数**——文本插件（如 skipNoJP 跳过没有
+    日文的句子）还没跑，所以它通常**大于**真正会送去翻译的句数。只作工作量估计用；
+    已经有缓存的文件由调用方（Agent）改用缓存条数（与进度/ETA 同口径）。
+    """
+    counts: dict[str, int | None] = {name: None for name in filenames}
+    try:
+        plugin_object, _fname = _open_project_file_plugin(project_dir, config_file_name)
+    except Exception:
+        return counts
+    for name in filenames:
+        try:
+            result = plugin_object.load_file(os.path.join(project_dir, INPUT_FOLDERNAME, name))
+            if isinstance(result, tuple):
+                result = result[0]
+            counts[name] = len(result) if isinstance(result, list) else None
+        except Exception:
+            counts[name] = None
+    return counts
 
 
 def _scan_plugins() -> list[dict[str, Any]]:
@@ -1040,17 +1078,31 @@ def build_handler(registry: JobRegistry):
                     self._send_json({"error": f"failed to read config: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
-            # GET /api/projects/:id/files
+            # GET /api/projects/:id/files[?counts=1]
             if sub_path == "/files":
                 input_dir = os.path.join(project_dir, INPUT_FOLDERNAME)
                 output_dir = os.path.join(project_dir, OUTPUT_FOLDERNAME)
                 cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+                input_entries = _list_dir_entries(input_dir)
+                # counts=1：额外给每个输入文件附上句数（要解析原文，稍慢）。
+                # 界面不需要，所以做成可选参数：只有 Agent 的 list_input_files 用。
+                want_counts = parse_qs(urlparse(self.path).query).get("counts", ["0"])[0].lower() not in {
+                    "", "0", "false",
+                }
+                if want_counts:
+                    counts = _count_input_file_sentences(
+                        project_dir,
+                        config_name_from_query(self),
+                        [str(e.get("name") or "") for e in input_entries if e.get("is_file", True)],
+                    )
+                    for entry in input_entries:
+                        entry["sentences"] = counts.get(str(entry.get("name") or ""))
                 self._send_json({
                     "project_dir": project_dir,
                     "input_dir": input_dir,
                     "output_dir": output_dir,
                     "cache_dir": cache_dir,
-                    "input_files": _list_dir_entries(input_dir),
+                    "input_files": input_entries,
                     "output_files": _list_dir_entries(output_dir),
                     "cache_files": _list_dir_entries(cache_dir, count_json_entries=True),
                 })
@@ -1347,8 +1399,19 @@ def build_handler(registry: JobRegistry):
                         return
 
                     cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+                    # context=N：命中条目前后各带 N 句。判断"这个译名该用哪个写法"要看
+                    # 上下文，只看命中行常常不够（与 read_transl_cache 的 context 同一语义）。
+                    try:
+                        context = max(0, min(int(payload.get("context", 0) or 0), 20))
+                    except (TypeError, ValueError):
+                        self._send_json(
+                            {"error": "context must be an integer 0-20"},
+                            status=HTTPStatus.BAD_REQUEST,
+                        )
+                        return
                     results = []
                     total_matches = 0
+                    hits_included = 0
                     if os.path.isdir(cache_dir):
                         for name in sorted(os.listdir(cache_dir)):
                             if not name.endswith(".json"):
@@ -1362,7 +1425,9 @@ def build_handler(registry: JobRegistry):
                                 import orjson
                                 with open(fp, "rb") as f:
                                     entries = orjson.loads(f.read())
-                                for e in entries:
+                                matched_positions: list[int] = []
+                                match_flags: dict[int, dict[str, bool]] = {}
+                                for pos, e in enumerate(entries):
                                     if not isinstance(e, dict):
                                         continue
                                     src_text = e.get("post_src", "") or e.get("post_jp", "") or e.get("pre_src", "") or e.get("pre_jp", "")
@@ -1386,22 +1451,53 @@ def build_handler(registry: JobRegistry):
                                     if field == "all" and not match_src and not match_dst and not match_problem:
                                         continue
                                     total_matches += 1
-                                    if len(results) < max_results:
-                                        results.append({
-                                            "filename": name,
-                                            "index": e.get("index", 0),
-                                            "speaker": e.get("name", ""),
-                                            "post_src": src_text,
-                                            "pre_dst": dst_text,
+                                    # 命中上限只算命中本身（前后文是搭着给的，不占配额），
+                                    # 否则稠密命中下上下文会把后面的命中挤掉。
+                                    if hits_included + len(matched_positions) < max_results:
+                                        matched_positions.append(pos)
+                                        match_flags[pos] = {
                                             "match_src": match_src,
                                             "match_dst": match_dst,
                                             "match_problem": match_problem,
-                                            "problem": problem_text,
-                                            "trans_by": e.get("trans_by", ""),
-                                        })
+                                        }
+                                if not matched_positions:
+                                    continue
+                                # 命中本身 False，扩展出来的前后文 True —— 与 read_transl_cache
+                                # 同一套标注，模型不必猜哪条是命中。
+                                wanted: dict[int, bool] = {pos: False for pos in matched_positions}
+                                if context > 0:
+                                    for pos in matched_positions:
+                                        for j in range(pos - context, pos + context + 1):
+                                            if 0 <= j < len(entries):
+                                                wanted.setdefault(j, True)
+                                for pos in sorted(wanted):
+                                    entry = entries[pos]
+                                    if not isinstance(entry, dict):
+                                        continue
+                                    item = {
+                                        "filename": name,
+                                        "index": entry.get("index", 0),
+                                        "speaker": entry.get("name", ""),
+                                        "post_src": entry.get("post_src", "") or entry.get("post_jp", "") or entry.get("pre_src", "") or entry.get("pre_jp", ""),
+                                        "pre_dst": entry.get("pre_dst", "") or entry.get("pre_zh", "") or entry.get("proofread_dst", "") or entry.get("proofread_zh", ""),
+                                        "problem": filter_problem_text(entry.get("problem", ""), filter_keys),
+                                        "trans_by": entry.get("trans_by", ""),
+                                        **match_flags.get(pos, {"match_src": False, "match_dst": False, "match_problem": False}),
+                                    }
+                                    if context > 0:
+                                        item["in_context"] = wanted[pos]
+                                    results.append(item)
+                                hits_included += len(matched_positions)
                             except Exception:
                                 continue
-                    self._send_json({"results": results, "total": total_matches})
+                    payload_out: dict[str, Any] = {"results": results, "total": total_matches}
+                    if context > 0:
+                        payload_out.update({
+                            "context": context,
+                            "returned_hits": hits_included,
+                            "returned": len(results),
+                        })
+                    self._send_json(payload_out)
                 except json.JSONDecodeError:
                     self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
                 except Exception as exc:

@@ -223,7 +223,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 - 你可以也应该在调用工具的同时用自然语言说明你的决策与思考（这一段会实时展示给用户）。
 
 # 标准翻译流程（必须按此顺序推进）
-1. **了解项目**：先调用 get_project_overview 看翻译进度与项目配置。注意进度里的 total/translated 是「句数」且只统计已生成缓存的文件，translated==total 不等于整个项目翻完，整体是否翻完看 files_translated/files_total。再确认返回的 backend（agent = 本会话在用的后端，translator = 翻译任务会用的后端，各含配置名/类型/模型名）、项目确有输入文件（输入文件清单用 list_input_files 查），然后继续。
+1. **了解项目**：先调用 get_project_overview 看翻译进度与项目配置（不传 include，一次拿全）。注意进度里的 total/translated 是「句数」且只统计已生成缓存的文件，translated==total 不等于整个项目翻完，整体是否翻完看 files_translated/files_total。再确认返回的 backend（agent = 本会话在用的后端，translator = 翻译任务会用的后端，各含配置名/类型/模型名）、项目确有输入文件（输入文件清单用 list_input_files 查），然后继续。之后再看进度时只传 include=["progress"]（必要时加 "backend"）：配置与配置键说明基本不变，不必重复拉。
 2. **字典准备（在启动翻译前必须完成）**：
    a. 调用 list_dict_files 查看项目已配置的译前/GPT/译后字典文件；
    b. 调用 read_dict 读取现有内容，判断人名、专有名词是否已收录；
@@ -231,20 +231,20 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
    d. 若 GPT 字典为空且项目较大，可调用 start_translation(translator="GenDic") 自动生成 GPT 字典，并在该任务 completed 后通过 list_dict_files/read_dict 确认生成结果。
 3. **试译定稿（全量翻译前必做，除非项目已有大量缓存）**：
    a. 调用 read_guideline 读取项目当前使用的翻译规范（配置 common.gpt.translation_guideline），理解文风要求；
-   b. 调用 list_input_files + read_input_file 抽样了解原文：挑 1-2 个有代表性的文件，各读几十句（index 使用 1-based，区间如 "1-50"），掌握角色、语气、专有名词、场景类型；
+   b. 调用 list_input_files 拿到文件清单与每个文件的待翻译句数（sentences：已有缓存的是准确值，标注 input 的原文条数估计偏大），据此估整体工作量、挑 1-2 个有代表性的文件；再用 read_input_file 各读几十句（index 使用 1-based，区间如 "1-50"），掌握角色、语气、专有名词、场景类型；
    c. 基于原文补充 GPT 字典：把抽读中遇到的人名、专有名词、常见口语用 save_dict(action="append") 收录进项目 GPT 字典（只发新增行，不重发整份字典）；
    d. 调用 start_translation(translator="<主翻译引擎>", files=["<一个代表性文件>"]) 只翻译这一个文件作为试译；
    e. 试译完成后用 read_transl_cache 阅读试译文件的译文，对照翻译规范评估文风、译名、语气是否达标；
    f. 若不满意：继续完善字典（save_dict）；对全局性的文风问题，用 update_project_config 把 common.gpt.change_prompt 设为 "AdditionalPrompt" 并设置 common.gpt.prompt_content 写入额外的翻译要求（如「译名统一用XX」「口语化程度、敬称的处理方式」等），这些要求会追加到每次翻译请求的 Prompt 里；也可以用 update_project_config 切换 common.gpt.translation_guideline 换一份更合适的规范；
    g. 满意后，把试译结果告知用户并说明你的评估结论，然后用 ask_user 询问是否开始全量翻译（给出「开始全量」/「先再调一版规范」之类的候选选项），等用户回答后再进入下一步。
 4. **启动翻译（全量）**：调用 start_translation(translator="<主翻译引擎>")（不传 files 即翻译全部）。主翻译引擎从项目配置或 overview 中确认，常用值：ForGal-json / ForGal-tsv / ForNovel / sakura-v1.0 / galtransl-v3。一次只启动一个，项目已有运行中任务时不要重复提交。
-5. **跟进进度（wait 前后都要查状态）**：启动翻译后先调用 get_runtime 确认任务已在跑，再调用 wait 等待一段合理时间（翻译任务 wait minutes=1~3，短任务 wait seconds=30）。wait 结束后必须再调用 get_runtime 确认任务状态：completed 进入下一步；仍在 running 时看返回的 eta_seconds 估算剩余时间——eta 还很长（如 >10 分钟）就按其一半的时长继续 wait，快完了（如 <2 分钟）就 wait seconds=30 再查，不要连续空转轮询也不要一次等过头。等待期间界面会显示倒计时。
-6. **复核结果**：调用 list_problems（不带参数）先看类型统计，了解哪类问题最多；再传 problem_type（如 problem_type="残留日文"）+ limit/offset 分页查看该类型的具体条目。用 read_transl_cache 的 index 参数精确读取有问题的条目（如 list_problems 返回的 index，可直接 `index="33-40,50-60"` 一次取多条）浏览实际译文；判断语意是否连贯时传 context（如 context=3）把前后各几句一起带上。需要看缓存文件全貌（文件、条数）时用 list_transl_cache；注意返回里标注 translating / .append.jsonl 后缀的文件正在翻译中，此时读到的是旧快照，等任务 completed 再操作。
+5. **跟进进度（wait 前后都要查状态）**：启动翻译后先调用 get_runtime 确认任务已在跑，再调用 wait 等待一段合理时间（翻译任务 wait minutes=1~3，短任务 wait seconds=30）。wait 结束后必须再调用 get_runtime 确认任务状态：completed 进入下一步；仍在 running 时看返回的 eta_seconds 估算剩余时间——eta 还很长（如 >10 分钟）就按其一半的时长继续 wait，快完了（如 <2 分钟）就 wait seconds=30 再查，不要连续空转轮询也不要一次等过头。get_runtime 的 total/percent 是**本轮任务**的口径（含尚未落盘的文件）；想按已落盘缓存看进度（含文件级完成度）用 get_project_overview 的 progress——两者分母不同，数字不一致是正常的，不要为了对齐它们多查一轮。get_runtime 的 recent_errors 只给上次查询之后**新出现**的错误，同类会合并成一条（count = 本次新增次数，text 是一行摘要）——同一批错误不会重复出现，要判断错误整体情况用 list_problems，不要因为某次查询没有新错误就认为问题已修好。等待期间界面会显示倒计时。
+6. **复核结果**：调用 list_problems（不带参数）先看类型统计，了解哪类问题最多；再传 problem_type（如 problem_type="残留日文"）+ limit/offset 分页查看该类型的具体条目。用 read_transl_cache 的 index 参数精确读取有问题的条目（如 list_problems 返回的 index，可直接 `index="33-40,50-60"` 一次取多条）浏览实际译文；判断语意是否连贯时传 context（如 context=3）把前后各几句一起带上。要查某个词/译名在全项目的所有出现处、判断译法是否统一（如「ドルード」该统一成哪个写法），用 search_transl_cache(query="ドルード", context=3) 一次看遍所有出现处及其上下文。它默认只返回必要字段（说话人/原文/译文/问题，空值与未变化的字段会省略），要看译后字典替换结果或校对稿再传 fields。需要看缓存文件全貌（文件、条数）时用 list_transl_cache；注意返回里标注 translating / .append.jsonl 后缀的文件正在翻译中，此时读到的是旧快照，等任务 completed 再操作。
 7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。对确认无需处理的系统性问题类型（如字典使用提示、纯语气词提示），可用 manage_problem_filter(action="add", keyword=["…"]) 加入问题过滤清单（keyword 可传数组一次加多个），让统计聚焦真问题；过滤后统计会明显下降，属于预期效果。
 8. **完成**：收尾前先调用 get_project_overview 确认项目真的翻完——只有 files_translated == files_total 且没有 running 任务才算整体完成（total==translated 可能只代表已缓存的部分翻完，不要据此收尾）；若还有文件没翻，回到流程 4 继续 start_translation 翻剩余文件。问题数可控、整体完成后，用 read_output 抽查最终输出文件（交付物；输出与缓存不完全一致，译后字典替换只在输出生效），确认无误后用一段自然语言总结本次操作（做了什么、翻译进度、剩余问题建议），不要调用工具，直接输出总结即可结束。
 
 # 约束
-- 每一步只调用必要的工具；能在一次工具调用里拿到的信息不要拆成多次。
+- 每一步只调用必要的工具；能在一次工具调用里拿到的信息不要拆成多次。重复查看同类信息时用工具的分段参数（如 get_project_overview 的 include）只取变化的部分，别把基本不变的配置/说明反复拉一遍。
 - 不要在未准备字典的情况下直接启动主翻译。
 - 不要连续重复调用同一个工具相同参数（避免死循环）；若上一步结果不理想，换策略或总结收尾。
 - 工具返回的 error 要阅读并据此调整下一步，不要忽略。
@@ -368,6 +368,10 @@ class AgentState:
     context_window: int = DEFAULT_CONTEXT_WINDOW
     # 从磁盘恢复的会话标记（本次进程内还没跑过回合）
     restored: bool = False
+    # 已经发给过模型的 recent_errors 事件 id（get_runtime 的水位线）：同一个错误不该在
+    # 每次查询里反复出现、逼模型重新判断"是不是新错误"。只记内存——错误事件本身也在
+    # 后端内存里，进程重启后两边一起清空，不会出现"重启后又重复报旧错误"。
+    seen_error_ids: set[str] = field(default_factory=set)
 
 
 class AgentToolError(Exception):
@@ -1212,6 +1216,40 @@ class AgentRunner:
         return _http_json("PUT", url, body)
 
 
+def _cache_fields_section() -> str:
+    """缓存字段说明块（拼进 system prompt）。
+
+    字段清单与含义都从 CACHE_ENTRY_FIELDS / CACHE_ENTRY_FIELD_DESCRIPTIONS 生成，免得
+    加了字段却没在提示里说明。只讲"看缓存时要懂什么"：每个字段是什么、哪个才是最终
+    译文、哪些改得了——具体的读/改用法在各工具的 description 里。
+    """
+    lines = [
+        "\n\n# 缓存（transl_cache）字段说明",
+        "缓存文件 transl_cache/*.json 里每条就是「原文一句 → 译文一句」，字段含义：",
+    ]
+    for name in CACHE_ENTRY_FIELDS:
+        description = CACHE_ENTRY_FIELD_DESCRIPTIONS.get(name)
+        if not description:
+            continue
+        lines.append(f"- {name}：{description}")
+    lines.append(
+        "看译文时以 proofread_dst ＞ pre_dst 的顺序取（前者为空才用后者）；"
+        "post_src 只在它与 pre_src 不同、post_dst_preview 只在它与 pre_dst 不同时才随默认返回。"
+    )
+    lines.append(
+        f"读缓存默认只回精简列（{' / '.join(CACHE_ENTRY_FIELDS_DEFAULT)}，以及有值的附加列），"
+        "要看别的列传 fields（fields=[\"*\"] 全要）。改译文用 patch_transl_cache，只能改 "
+        f"{_patchable_fields_text()}；"
+        "problem 与 post_* 是后端算出来的派生字段，改不动——改完译文跑 rebuilda（或重翻）"
+        "它们才会跟着更新。"
+    )
+    lines.append(
+        "另外注意：缓存 ≠ 交付物。最终的 gt_output 文件是缓存经译后字典替换、控制符还原后的形态，"
+        "验收交付物要用 read_output，不要拿缓存当输出。"
+    )
+    return "\n".join(lines)
+
+
 def _build_system_prompt(state: "AgentState", summary: str | None = None) -> str:
     """构造 system prompt：基础约束 + 当前项目环境 +（可选）对话压缩摘要。
 
@@ -1221,7 +1259,9 @@ def _build_system_prompt(state: "AgentState", summary: str | None = None) -> str
     「基础约束 + 环境信息 + 摘要」三段结构，环境上下文不丢。
     """
     goal = state.goal or "按标准流程完成本项目的翻译"
-    parts: list[str] = [AGENT_SYSTEM_PROMPT + AGENT_TURN_PROMPT]
+    # 缓存字段说明跟着 system prompt 走：压缩会话后 _build_system_prompt 会重建整条
+    # system 消息，这段说明也就跟着保留下来（不会被摘要吃掉）。
+    parts: list[str] = [AGENT_SYSTEM_PROMPT + AGENT_TURN_PROMPT, _cache_fields_section()]
     parts.append(
         "\n\n# 当前项目环境\n"
         f"- 项目目录：{state.project_dir}\n"
@@ -1483,7 +1523,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "list_input_files",
-            "description": "列出待翻译的输入文件（原文），供试译时挑选代表性文件。",
+            "description": "列出待翻译的输入文件（原文）与每个文件的待翻译句数，供估工作量与挑选代表性文件（不必再逐个 read_input_file 数句子）。sentences_source=cache 是已有缓存文件的准确句数（与进度/ETA 同口径），=input 是尚未翻译文件的原文条数估计（未过文本插件过滤，可能偏大）；句数只用于估工作量，不代表进度。",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -1523,8 +1563,26 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_project_overview",
-            "description": "了解项目：查看翻译进度与项目配置。进度含句数 total/translated/problems/failed 和文件级 files_total/files_translated/files_untranslated；total/translated 只统计已生成缓存的文件，未翻译的文件不计入分母，translated==total 不代表整个项目翻完，整体进度看 files_translated/files_total。配置附带 config_field_descriptions（每个键的作用与取值说明）；backend 里是两份实际生效的后端（各含 name 配置名 / type 后端类型 / model 模型名，不含地址与密钥）：agent 是本会话在用的，translator 是翻译任务会用的。流程第一步，调用它确认项目可用。输入文件清单本身用 list_input_files / list_transl_cache 单独查询。",
-            "parameters": {"type": "object", "properties": {}, "required": []},
+            "description": "了解项目：查看翻译进度、实际生效的后端与项目配置。进度含句数 total/translated/problems/failed 和文件级 files_total/files_translated/files_untranslated；total/translated 只统计已生成缓存的文件，未翻译的文件不计入分母，translated==total 不代表整个项目翻完，整体进度看 files_translated/files_total。backend 里是两份实际生效的后端（各含 name 配置名 / type 后端类型 / model 模型名，不含地址与密钥）：agent 是本会话在用的，translator 是翻译任务会用的。流程第一步调用它确认项目可用；配置与配置键说明基本不变，之后再查进度只传 include=[\"progress\"] 即可，别重复拉。输入文件清单本身用 list_input_files / list_transl_cache 单独查询。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "include": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["progress", "backend", "config", "config_field_descriptions"],
+                        },
+                        "description": (
+                            "可选。只返回这几部分（名字即返回体的键），用于避免重复拉取基本不变的内容："
+                            "progress=进度；backend=实际生效的两份后端；config=项目配置；"
+                            "config_field_descriptions=每个配置键的作用与取值说明（约 40 条，基本不变，"
+                            "看过一次就不用再取）。留空返回全部。"
+                        ),
+                    },
+                },
+                "required": [],
+            },
         },
     },
     {
@@ -1671,16 +1729,8 @@ AGENT_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "get_progress",
-            "description": "查询当前翻译进度（已翻译/总句数、问题数、失败数、各缓存文件进度）。注意 total/translated 是句数且只统计已生成缓存的文件，未翻译的文件不计入，translated==total 不代表整个项目翻完。",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "get_runtime",
-            "description": "查询运行时状态：当前任务状态(running/completed/failed)、阶段、最近错误与成功、ETA。",
+            "description": "查询运行时状态：当前任务状态(running/completed/failed)、阶段、本轮任务的计数与 ETA、新出现的错误。summary 里的 total/percent 是**本轮任务**的口径（含正在翻译、缓存尚未落盘的文件）；已落盘缓存的进度与文件级完成度看 get_project_overview 的 progress，两者分母不同、不必互相校对。recent_errors 只返回**上次查询之后新出现**的错误，且同类（同 kind/同原因）已合并为一条：count 是本次新增次数、text 是可读摘要、files 是涉及的缓存文件，单次最多 10 类；已发过的不会重复出现——列表为空只代表没有新错误，不要据此认为之前的问题已解决。",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -1771,7 +1821,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_transl_cache",
-            "description": "读取某个缓存文件的条目（译文）。filename 来自 list_transl_cache 的缓存文件列表。留空 index 返回前 30 条；指定 index 只返回指定的条目。修问题/润色判断语意连贯时传 context 让目标条目前后各多带几句上下文。不要读取 .append.jsonl 增量文件（翻译中旧快照），读对应的 .json 文件。",
+            "description": "读取某个缓存文件的条目（译文）。filename 来自 list_transl_cache 的缓存文件列表。留空 index 返回前 30 条；指定 index 只返回指定的条目。修问题/润色判断语意连贯时传 context 让目标条目前后各多带几句上下文。默认只返回必要字段（index/说话人/原文/译文/问题，以及确实非空或与原文不同的附加字段），要看别的字段再传 fields。不要读取 .append.jsonl 增量文件（翻译中旧快照），读对应的 .json 文件。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1783,6 +1833,17 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     "context": {
                         "type": "integer",
                         "description": "可选。上下文句数（0-20）：目标条目前后各多返回 N 句，前后文条目标注 in_context=true。如 index=\"205-206\" context=3 返回 202~209。修问题判断语意时建议 2-4。",
+                    },
+                    "fields": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "可选。每条要返回哪些字段：index、name（说话人）、pre_src（原句）、pre_dst（译文）、"
+                            "post_src、post_dst_preview（译后字典替换后的预览）、proofread_dst、proofread_by、"
+                            "trans_by、problem。"
+                            "不传 = 默认精简集（pre_src/pre_dst/name/problem，post_dst_preview 仅在与 pre_dst 不同时给，"
+                            "空值省略）；传 [\"pre_dst\",\"problem\"] 这类只要某几列。"
+                        ),
                     },
                 },
                 "required": ["filename"],
@@ -1832,13 +1893,17 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "search_transl_cache",
-            "description": "在缓存中搜索译文/原文/问题。query 为关键词，field 取 all/src/dst/problem。传 filename 只搜某个缓存文件（来自 list_transl_cache），修单文件问题时用，如 search_transl_cache(query=\"アクメ\", field=\"src\", filename=\"sc_2_st01.txt.json\")。",
+            "description": "在缓存中搜索译文/原文/问题。query 为关键词，field 取 all/src/dst/problem。只看命中行往往不够判断（如查「ドルード」要决定译成「多鲁德」还是「杜罗德」），传 context=N 让每条命中再带上前后各 N 句（in_context=true 的是上下文，不是命中），用法同 read_transl_cache 的 context。传 filename 只搜某个缓存文件（来自 list_transl_cache），修单文件问题时用，如 search_transl_cache(query=\"アクメ\", field=\"src\", filename=\"sc_2_st01.txt.json\")。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
                     "field": {"type": "string", "enum": ["all", "src", "dst", "problem"]},
                     "filename": {"type": "string", "description": "可选。只在这个缓存文件里搜（来自 list_transl_cache）。留空搜全项目。"},
+                    "context": {
+                        "type": "integer",
+                        "description": "可选，0-20（默认 0）。每条命中再带上前后各 N 句上下文，用于判断译名/语气/语意连贯。带上下文时命中上限会收紧（如 context=3 → 最多 40 条命中），命中很多时可配合 filename 缩小范围。",
+                    },
                 },
                 "required": ["query"],
             },
@@ -1862,9 +1927,6 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                                 "pre_dst": {"type": "string", "description": "可选。新译文（机翻结果）"},
                                 "proofread_dst": {"type": "string", "description": "可选。新校对译文（校对/润色结果，优先于 pre_dst）"},
                                 "trans_by": {"type": "string", "description": "可选。标记译者，如 'manual' 或 'agent'"},
-                                "trans_conf": {"type": "integer", "description": "可选。译文置信度 0-100"},
-                                "doub_content": {"type": "string", "description": "可选。存疑内容备注"},
-                                "unknown_proper_noun": {"type": "string", "description": "可选。未知专有名词备注"},
                             },
                             "required": ["index"],
                         },
@@ -2090,22 +2152,61 @@ def _backend_overview(runner: AgentRunner) -> dict[str, Any]:
     }
 
 
-def _tool_get_project_overview(runner: AgentRunner, _args: dict[str, Any]) -> Any:
+# 「了解项目」可分段返回。名字与返回体的键一一对应（include 里写什么，回来就是什么键），
+# 顺序即返回顺序；不传 include 就是全部（保持老行为）。
+OVERVIEW_SECTIONS: tuple[str, ...] = (
+    "progress",
+    "backend",
+    "config",
+    "config_field_descriptions",
+)
+
+
+def _normalize_overview_include(args: dict[str, Any]) -> list[str]:
+    """校验 include：不传 = 全部；传了就去重并按标准顺序返回，未知名字直接报错。"""
+    raw = args.get("include")
+    if raw is None:
+        return list(OVERVIEW_SECTIONS)
+    if not isinstance(raw, list) or not raw:
+        raise AgentToolError("include 必须是非空数组（不传表示返回全部）")
+    wanted: set[str] = set()
+    for item in raw:
+        name = str(item or "").strip()
+        if not name:
+            continue
+        if name not in OVERVIEW_SECTIONS:
+            raise AgentToolError(
+                f"include 里有未知的部分：{name}（可选：{'、'.join(OVERVIEW_SECTIONS)}）"
+            )
+        wanted.add(name)
+    if not wanted:
+        raise AgentToolError(f"include 里没有有效部分（可选：{'、'.join(OVERVIEW_SECTIONS)}）")
+    return [section for section in OVERVIEW_SECTIONS if section in wanted]
+
+
+def _tool_get_project_overview(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """了解项目。按 include 分块返回（不传 = 全部）。
+
+    分块的意义：config 与 config_field_descriptions（约 40 个键的说明）基本是静态的，
+    开局拿全看过一次之后，再查进度时没有理由原样重发一遍。只取需要的部分，没要配置
+    就**连那条 HTTP 都不发**（省一次本机往返），返回体也不会被那份静态说明撑大。
+    """
+    include = _normalize_overview_include(args)
     pid = runner._project_id()
     config_name = runner.state.config_file_name or DEFAULT_CONFIG_FILE
     cfg_name = urllib.parse.quote(config_name)
-    progress = runner._http_get(f"/api/projects/{pid}/progress?config={cfg_name}")
-    cfg = runner._http_get(f"/api/projects/{pid}/config?config={cfg_name}")
-    files = runner._http_get(f"/api/projects/{pid}/files")
-    config, descriptions = _annotate_config(_config_for_overview(cfg.get("config")))
-    input_files = [
-        str(entry.get("name", ""))
-        for entry in files.get("input_files", [])
-        if isinstance(entry, dict) and entry.get("is_file", True) and entry.get("name")
-    ]
-    file_counts = _count_input_file_progress(input_files, progress.get("files", []))
-    return {
-        "progress": {
+    out: dict[str, Any] = {}
+
+    if "progress" in include:
+        progress = runner._http_get(f"/api/projects/{pid}/progress?config={cfg_name}")
+        files = runner._http_get(f"/api/projects/{pid}/files")
+        input_files = [
+            str(entry.get("name", ""))
+            for entry in files.get("input_files", [])
+            if isinstance(entry, dict) and entry.get("is_file", True) and entry.get("name")
+        ]
+        file_counts = _count_input_file_progress(input_files, progress.get("files", []))
+        out["progress"] = {
             "total": progress.get("total", 0),
             "translated": progress.get("translated", 0),
             "problems": progress.get("problems", 0),
@@ -2115,31 +2216,104 @@ def _tool_get_project_overview(runner: AgentRunner, _args: dict[str, Any]) -> An
                 "total/translated 是句数，且只统计已生成缓存的文件；未开始翻译的文件不计入分母，"
                 "所以 translated==total 只说明「已有缓存的部分翻完了」，不代表整个项目翻完。"
                 "整体进度请结合 files_translated/files_total 判断。"
+                "这里是**已落盘缓存**的口径（扫缓存目录得到）；本轮任务自身的计数与 ETA 见 "
+                "get_runtime 的 summary（按任务计划统计，含正在翻译、尚未落盘的文件，"
+                "total 通常比这里大）——两个分母不同，别拿它们互相校对。"
             ),
-        },
-        "backend": {
+        }
+
+    if "backend" in include:
+        out["backend"] = {
             **_backend_overview(runner),
             "note": (
                 "实际生效的后端（各自含 name 配置名 / type 后端类型 / model 模型名）："
                 "agent 是本 Agent 会话在用的；translator 是翻译任务会用的"
             ),
-        },
-        "config": config,
-        "config_field_descriptions": descriptions,
-    }
+        }
+
+    if "config" in include or "config_field_descriptions" in include:
+        cfg = runner._http_get(f"/api/projects/{pid}/config?config={cfg_name}")
+        config, descriptions = _annotate_config(_config_for_overview(cfg.get("config")))
+        if "config" in include:
+            out["config"] = config
+        if "config_field_descriptions" in include:
+            out["config_field_descriptions"] = descriptions
+
+    if len(include) < len(OVERVIEW_SECTIONS):
+        out["note"] = (
+            f"本次只返回了{'、'.join(include)}；需要其它部分时再调用一次并带上对应的 include"
+            f"（可选：{'、'.join(OVERVIEW_SECTIONS)}）。"
+        )
+    return out
 
 
 def _tool_list_input_files(runner: AgentRunner, _args: dict[str, Any]) -> Any:
-    """列出待翻译文件（原文件，输入目录）。带每个文件的句数（读文件解析后统计），
-    供试译时挑选文件。"""
+    """列出待翻译文件（原文件，输入目录），带每个文件的待翻译句数。
+
+    句数供估工作量、挑试译文件用，两个来源按可靠性优先：
+
+    - 已经有缓存的文件 → **缓存条数**（准确，与进度/ETA 同一口径）；
+    - 尚未翻译的文件 → 文件插件解析原文的条数（**未过文本插件过滤**，如「跳过无日文句」
+      会丢掉一部分句子，所以通常偏大），标注 sentences_source=input。
+
+    这样调用方不必再逐个 read_input_file 去数句子，也不会把未过滤的条数
+    （偏大）误当成与进度同口径的总句数。
+    """
     pid = runner._project_id()
-    files = runner._http_get(f"/api/projects/{pid}/files")
-    input_files = [
-        {"name": f["name"], "size": f.get("size", 0)}
-        for f in files.get("input_files", [])
-        if f.get("is_file", True)
-    ]
-    return {"input_files": input_files, "count": len(input_files)}
+    cfg = urllib.parse.quote(runner.state.config_file_name or "config.yaml")
+    files = runner._http_get(f"/api/projects/{pid}/files?counts=1&config={cfg}")
+    # 缓存文件的条数（/files 的 cache_files 带 entry_count）
+    cache_counts = {
+        str(item.get("name")): int(item.get("entry_count") or 0)
+        for item in files.get("cache_files", [])
+        if isinstance(item, dict) and item.get("name") and item.get("entry_count")
+    }
+    input_files: list[dict[str, Any]] = []
+    exact_files = 0
+    estimated_files = 0
+    for item in files.get("input_files", []):
+        if not isinstance(item, dict) or not item.get("is_file", True):
+            continue
+        name = str(item.get("name") or "")
+        singles, chunk_re = _input_cache_matchers(name)
+        cached_sentences = sum(
+            count
+            for cache_name, count in cache_counts.items()
+            if cache_name in singles or chunk_re.match(cache_name)
+        )
+        parsed = item.get("sentences")
+        sentences: int | None = None
+        source = ""
+        if cached_sentences > 0:
+            sentences, source = cached_sentences, "cache"
+            exact_files += 1
+        elif isinstance(parsed, int):
+            sentences, source = parsed, "input"
+            estimated_files += 1
+        input_files.append({
+            "name": name,
+            "size": item.get("size", 0),
+            "sentences": sentences,
+            "sentences_source": source,
+        })
+
+    note = (
+        "sentences 是该文件的待翻译句数，用来估工作量（别拿它当进度）："
+        "sentences_source=cache 表示该文件已有缓存、取缓存条数（准确，与进度/ETA 同口径）；"
+        "=input 表示尚未翻译、按文件插件解析原文的条数估计"
+        "（未过文本插件过滤，如「跳过无日文句」会少掉一部分，因此可能偏大）；"
+        "null 表示解析失败。"
+    )
+    if input_files:
+        note += f"本次 {exact_files} 个文件是准确值，{estimated_files} 个是估计值。"
+    return {
+        "input_files": input_files,
+        "count": len(input_files),
+        "sentences_total": sum(
+            f["sentences"] for f in input_files if isinstance(f["sentences"], int)
+        ),
+        "note": note,
+    }
 
 
 def _entry_index(entry: Any) -> int:
@@ -2681,6 +2855,8 @@ def _tool_stop_translation(runner: AgentRunner, _args: dict[str, Any]) -> Any:
 
 WAIT_SECONDS_MAX = 1800  # 单次等待上限 30 分钟，避免 Agent 卡死在一次无限等待里
 WAIT_TICK = 0.5  # 倒计时刷新步长（秒），兼顾界面流畅与轮询开销
+# 单次 get_runtime 最多报几条"新出现的"错误（发过的会被水位线记住，不再重复报）
+RUNTIME_ERRORS_PER_QUERY = 10
 
 
 def _tool_wait(runner: AgentRunner, args: dict[str, Any]) -> Any:
@@ -2747,17 +2923,124 @@ def _tool_wait(runner: AgentRunner, args: dict[str, Any]) -> Any:
     }
 
 
-def _tool_get_progress(runner: AgentRunner, _args: dict[str, Any]) -> Any:
-    pid = runner._project_id()
-    return runner._http_get(f"/api/projects/{pid}/progress")
+def _error_key(err: dict[str, Any]) -> str:
+    """错误的去重键：后端 id + 内容指纹。
+
+    后端 id 只精确到毫秒（同毫秒内两条同类型错误会撞成同一个 id），所以再拼上内容；
+    缺 id 时就只用内容。同一条事件（id 与内容都不变）在快照窗口里待多久都只对应一个
+    键——这正是"同一条 warning 不再反复报"的依据。
+    """
+    return "|".join(
+        str(err.get(field) or "")
+        for field in ("id", "kind", "filename", "index_range", "message", "ts")
+    )
+
+
+def _error_group_key(err: dict[str, Any]) -> tuple[str, str, str]:
+    """归并键：同一类原因的报错算一组。
+
+    按 kind + level + message 归并——真实报错（如 kind=parse 的「未解析到有效句子」）
+    会横跨很多文件、很多条目反复出现，逐条发只会刷屏。message 里若嵌了本条自己的
+    文件名，换成 {file} 占位，免得同一个原因被文件名拆成十几组。
+    """
+    kind = str(err.get("kind") or "")
+    message = str(err.get("message") or "")
+    filename = str(err.get("filename") or "")
+    if filename and filename in message:
+        message = message.replace(filename, "{file}")
+    return kind, str(err.get("level") or ""), message
+
+
+def _group_text(kind: str, level: str, message: str, count: int, files: list[str]) -> str:
+    """一行可读的摘要：「parse 警告 × 23 次：未解析到有效句子（涉及 12 个文件…）」。"""
+    label = "警告" if level == "warning" else "错误"
+    text = f"{kind or '未知'} {label} × {count} 次：{message or '(无描述)'}"
+    if files:
+        listed = "、".join(files[:3])
+        more = f" 等 {len(files)} 个" if len(files) > 3 else ""
+        text += f"（涉及文件：{listed}{more}）"
+    return text
+
+
+def _summarize_group(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """把同一类的一批报错压成一条：次数 / 涉及文件 / 时间范围 / 可读摘要。"""
+    first = events[0]
+    kind, level, message = _error_group_key(first)
+    files: list[str] = []
+    for err in events:
+        name = str(err.get("filename") or "")
+        if name and name not in files:
+            files.append(name)
+    timestamps = [str(err.get("ts") or "") for err in events if err.get("ts")]
+    count = len(events)
+    return {
+        "kind": kind,
+        "level": level,
+        "message": message,
+        "count": count,
+        "files": files[:5],
+        "files_total": len(files),
+        "first_ts": min(timestamps) if timestamps else "",
+        "last_ts": max(timestamps) if timestamps else "",
+        "text": _group_text(kind, level, message, count, files),
+    }
+
+
+def _group_errors(
+    events: list[dict[str, Any]],
+) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
+    """同类归并并按"报得多、最近报过"排序，返回（摘要, 该组的事件）。"""
+    buckets: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for err in events:
+        buckets.setdefault(_error_group_key(err), []).append(err)
+    grouped = [(_summarize_group(group), group) for group in buckets.values()]
+    grouped.sort(key=lambda item: str(item[0]["last_ts"]), reverse=True)  # 先按最近出现
+    grouped.sort(key=lambda item: item[0]["count"], reverse=True)  # 次数多的在前（稳定排序）
+    return grouped
+
+
+def _take_fresh_errors(
+    state: AgentState, errors: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], int]:
+    """挑出"还没发给过模型"的报错、同类归并，返回（本次要发的组, 还没发的事件数）。
+
+    水位线（state.seen_error_ids）只保留仍在快照里的键——滚出快照的错误不会再回来，
+    不必长期记着。归并后单次最多发 RUNTIME_ERRORS_PER_QUERY **组**；没轮到的组**不标记
+    为已发**，留到下次查询，既不会一次刷屏，也不会把错误吞掉。
+    """
+    keys = [_error_key(err) for err in errors]
+    live = set(keys)
+    seen = {key for key in state.seen_error_ids if key in live}
+    fresh_events = [err for key, err in zip(keys, errors) if key not in seen]
+    grouped = _group_errors(fresh_events)
+    reported = grouped[:RUNTIME_ERRORS_PER_QUERY]
+    for _group, group_events in reported:  # 只把真发出去的记为已发
+        for err in group_events:
+            seen.add(_error_key(err))
+    state.seen_error_ids = seen
+    pending = sum(len(group) for _, group in grouped[RUNTIME_ERRORS_PER_QUERY:])
+    return [group for group, _ in reported], pending
 
 
 def _tool_get_runtime(runner: AgentRunner, _args: dict[str, Any]) -> Any:
+    """运行时状态：任务状态 / 阶段 / 本轮计数 / ETA / 新出现的错误。
+
+    summary 是**本轮任务自己的**计数（按任务计划统计，含正在翻译、缓存还没落盘的
+    文件）；「了解项目」里的 progress 是**已落盘缓存**的口径。两者分母不同，同一次
+    查询下数字本来就会差一截，不需要互相校对（说明随返回一起给出）。
+
+    recent_errors 只给"上次查询之后新出现的"（水位线记在 state 上），避免同一条
+    parse warning 在连续几次查询里反复出现、逼模型重新判断。
+    """
     pid = runner._project_id()
     data = runner._http_get(f"/api/projects/{pid}/runtime")
     job = data.get("job") or {}
     summary = data.get("summary") or {}
-    return {
+    raw_errors = data.get("recent_errors") or []
+    fresh_errors, pending_errors = _take_fresh_errors(
+        runner.state, [err for err in raw_errors if isinstance(err, dict)]
+    )
+    result: dict[str, Any] = {
         "job_status": job.get("status"),
         "job_translator": job.get("translator"),
         "stage": data.get("stage"),
@@ -2771,8 +3054,23 @@ def _tool_get_runtime(runner: AgentRunner, _args: dict[str, Any]) -> Any:
             "eta_seconds": summary.get("eta_seconds"),
             "workers_active": summary.get("workers_active", 0),
         },
-        "recent_errors": data.get("recent_errors", [])[:5],
+        "summary_note": (
+            "summary 是**本轮任务**的计数：total 按任务计划统计，包含正在翻译、缓存尚未"
+            "落盘的文件。已落盘缓存的口径（含文件级完成度）看 get_project_overview 的 "
+            "progress——两个 total 分母不同，数字不一样是正常的，不要为了对齐它们多查一轮。"
+        ),
+        "recent_errors": fresh_errors,
+        "recent_errors_note": (
+            "recent_errors 只列**上次查询之后新出现**的错误，同类已合并：每项的 count 是"
+            f"本次新增的次数（text 是可直接读的一行，files 是涉及的缓存文件，最多列 5 个），"
+            f"单次最多 {RUNTIME_ERRORS_PER_QUERY} 类。发过的不会重复出现，所以列表为空只代表"
+            "没有新错误，不代表之前的问题已消失（整体问题情况用 list_problems 查）。"
+        ),
     }
+    if pending_errors:
+        # 还有没发完的新错误：说明这次报错很密集，下次查询继续给
+        result["recent_errors_pending"] = pending_errors
+    return result
 
 
 def _change(path: str, before: Any, after: Any, kind: str = "replace") -> dict[str, Any]:
@@ -2911,21 +3209,128 @@ def _tool_list_transl_cache(runner: AgentRunner, _args: dict[str, Any]) -> Any:
     return result
 
 
+# 缓存条目可选的字段（名字即返回体里的键），与缓存 JSON 的字段一致。
+CACHE_ENTRY_FIELDS: tuple[str, ...] = (
+    "index",
+    "name",
+    "pre_src",
+    "post_src",
+    "pre_dst",
+    "post_dst_preview",
+    "proofread_dst",
+    "proofread_by",
+    "trans_by",
+    "problem",
+)
+# 默认精简集：判断语意 + 定位问题真正需要的几列。原来每条固定返回 7 个字段，
+# 但 post_dst_preview 基本等于 pre_dst、post_src 约等于 pre_src、proofread_* 常年为空，
+# 一次读几十条时一半以上是重复或空值——这部分不该占模型的上下文。
+CACHE_ENTRY_FIELDS_DEFAULT: tuple[str, ...] = ("index", "name", "pre_src", "pre_dst", "problem")
+# 每个字段的含义（拼进 system prompt，见 _cache_fields_section）。
+# 命名来源见 GalTransl/CSentense.py：pre_src=前原、post_src=前润（送去翻译的原文）、
+# pre_dst=后原（模型原始译文）、post_dst=后润（最终译文）。
+CACHE_ENTRY_FIELD_DESCRIPTIONS: dict[str, str] = {
+    "index": "条目序号（1 起、按文件顺序）；改译文/删条目/读上下文都用它定位",
+    "name": "说话人；旁白为空",
+    "pre_src": "原始原文（前原），管道最开始的句子",
+    "post_src": "真正送去翻译的原文（前润）：对话符号处理 + 译前字典替换之后的文本",
+    "pre_dst": "模型返回的译文（后原），未经译后字典替换",
+    "post_dst_preview": "最终译文的缓存快照（后润）：译后字典替换 + 对话符号恢复之后的形态",
+    "proofread_dst": "校对/润色稿；有内容时它就是这条的最终译文（优先于 pre_dst）",
+    "proofread_by": "校对者标记（校对失败的会带 Fail）；未校对为空",
+    "trans_by": "译者标记：模型名或引擎名；被 Agent/manual 手改过的也会标在这里",
+    "problem": "自动问题分析写入的问题标签，可能多条（以「, 」分隔）；list_problems 的统计与下钻都基于它",
+}
+# 默认模式下"有内容才带上"的附加字段（空值一律省略）
+CACHE_ENTRY_FIELDS_IF_PRESENT: tuple[str, ...] = (
+    "proofread_dst",
+    "proofread_by",
+    "trans_by",
+)
+
+
+def _normalize_cache_fields(args: dict[str, Any]) -> list[str] | None:
+    """解析 fields：None = 用默认精简集；给了就校验去重（"*"/"all" 表示全字段）。"""
+    raw = args.get("fields")
+    if raw is None:
+        return None
+    if not isinstance(raw, list) or not raw:
+        raise AgentToolError("fields 必须是非空数组（不传表示用默认精简字段）")
+    wanted: list[str] = []
+    for item in raw:
+        name = str(item or "").strip()
+        if not name:
+            continue
+        if name in ("*", "all"):
+            return list(CACHE_ENTRY_FIELDS)
+        if name not in CACHE_ENTRY_FIELDS:
+            raise AgentToolError(
+                f"fields 里有未知字段：{name}（可选：{'、'.join(CACHE_ENTRY_FIELDS)}）"
+            )
+        if name not in wanted:
+            wanted.append(name)
+    if not wanted:
+        raise AgentToolError(f"fields 里没有有效字段（可选：{'、'.join(CACHE_ENTRY_FIELDS)}）")
+    return wanted
+
+
+def _project_cache_entries(
+    entries: list[dict[str, Any]], fields: list[str] | None
+) -> list[dict[str, Any]]:
+    """按 fields 裁条目；fields=None 时用默认精简集并省略空值。
+
+    index 永远带上（定位/后续 patch 都靠它），即使调用方没写。
+    """
+    out: list[dict[str, Any]] = []
+    for entry in entries:
+        if fields is None:
+            item: dict[str, Any] = {}
+            for key in CACHE_ENTRY_FIELDS_DEFAULT:
+                value = entry.get(key)
+                if key != "index" and value in (None, "", 0):
+                    continue
+                item[key] = value
+            # 译前/译后字典替换过才有意义：只有与源/译文不同才值得占位置
+            post_src = entry.get("post_src")
+            if post_src and post_src != entry.get("pre_src"):
+                item["post_src"] = post_src
+            post_dst = entry.get("post_dst_preview")
+            if post_dst and post_dst != entry.get("pre_dst"):
+                item["post_dst_preview"] = post_dst
+            for key in CACHE_ENTRY_FIELDS_IF_PRESENT:
+                if entry.get(key):
+                    item[key] = entry[key]
+            out.append(item)
+            continue
+        keys = ["index", *[key for key in fields if key != "index"]]
+        out.append({key: entry[key] for key in keys if key in entry})
+    return out
+
+
 def _tool_read_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     filename = str(args.get("filename", "")).strip()
     if not filename:
         raise AgentToolError("filename is required")
+    fields = _normalize_cache_fields(args)
     pid = runner._project_id()
     data = runner._http_get(f"/api/projects/{pid}/cache/{urllib.parse.quote(filename)}")
-    entries = data.get("entries", [])
+    raw_entries = [e for e in data.get("entries", []) if isinstance(e, dict)]
+    entries = _project_cache_entries(raw_entries, fields)
     result_extra: dict[str, Any] = {}
     # 正在翻译中的增量缓存：读到的是旧快照，明确告诉模型而不是让它误判
     if filename.endswith(".append.jsonl"):
         result_extra["warning"] = "这是翻译中的增量缓存文件，读到的是旧快照；请等任务 completed 后用同名 .json 文件读取。"
+    result_extra["fields"] = list(fields) if fields is not None else list(CACHE_ENTRY_FIELDS_DEFAULT)
+    if fields is None:
+        result_extra["fields_note"] = (
+            "默认精简字段：post_dst_preview 只在它与 pre_dst 不同（存在译后字典替换）时返回，"
+            "proofread_* / trans_by / 备注等空值已省略；要看其它字段传 fields。"
+        )
     index_spec = str(args.get("index", "") or "").strip()
     # 不指定 index：返回前 30 条，供 Agent 通览
     if not index_spec:
-        return {"filename": filename, "count": len(entries), "returned": len(entries[:30]), "entries": entries[:30], **result_extra}
+        picked = entries[:30]
+        return {"filename": filename, "count": len(entries), "returned": len(picked), "entries": picked, **result_extra}
 
     wanted = _parse_index_spec(index_spec)
     if not wanted:
@@ -3053,33 +3458,58 @@ def _parse_index_spec(spec: str) -> set[int]:
 
 
 def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """在缓存里搜译文/原文/问题；context=N 时每条命中再带上前后各 N 句。
+
+    只给命中行常常不够判断——比如查「ドルード」，要决定该译成「多鲁德」还是「杜罗德」，
+    得看这句前后的对话与说话人，和 read_transl_cache 的 context 是同一个用途。
+    """
     query = str(args.get("query", "")).strip()
     field = str(args.get("field", "all")).strip() or "all"
     if not query:
         raise AgentToolError("query is required")
     filename = str(args.get("filename", "") or "").strip()
+    raw_context = args.get("context", 0)
+    try:
+        context = max(0, min(int(raw_context or 0), 20))
+    except (TypeError, ValueError):
+        raise AgentToolError(f"context 必须是 0-20 的整数（收到 {raw_context!r}）")
+    # 带上下文时收紧命中上限：命中 × (2N+1) 行一起返回，总量控制在 ~300 行内，
+    # 否则"命中上百条 × 前后各几句"会直接把返回体撑爆。total 不受影响（仍报全部命中数）。
+    max_hits = 100 if context == 0 else max(1, 300 // (2 * context + 1))
     pid = runner._project_id()
     body: dict[str, Any] = {
         "query": query,
         "field": field,
         "options": {"re": False},
-        "max_results": 100,
+        "max_results": max_hits,
         "config_file_name": runner.state.config_file_name,
     }
+    if context:
+        body["context"] = context
     if filename:
         body["filename"] = filename
     result = runner._http_post(f"/api/projects/{pid}/cache/search", body)
+    notes: list[str] = []
+    if isinstance(result, dict) and context:
+        result["context"] = context  # 服务端已回；这里兜底，保证调用方一定看得到
+        notes.append(
+            f"已带上下文：每条命中前后各 {context} 句（in_context=true 的是上下文、不是命中）；"
+            f"带上下文时命中上限收紧为 {max_hits} 条以免返回体过大，total 仍是全部命中数——"
+            "命中很多时可用 filename 缩小范围或换更具体的关键词。"
+        )
     # 指定了文件但 0 命中：确认一下该文件是否存在，避免模型误以为关键词不匹配
     if isinstance(result, dict) and not result.get("total") and filename:
         try:
             listing = runner._http_get(f"/api/projects/{pid}/cache")
             if not any(f.get("name") == filename for f in listing.get("files", [])):
-                result = {
-                    **result,
-                    "note": f"缓存文件 {filename} 不存在（检查 list_transl_cache 的文件名拼写）；这是全项目搜索的 0 命中。",
-                }
+                notes.append(
+                    f"缓存文件 {filename} 不存在（检查 list_transl_cache 的文件名拼写）；这是全项目搜索的 0 命中。"
+                )
         except AgentToolError:
             pass
+    if notes and isinstance(result, dict):
+        existing = str(result.get("note") or "")
+        result = {**result, "note": "；".join([part for part in [existing, *notes] if part])}
     return result
 
 
@@ -3088,10 +3518,15 @@ _PATCHABLE_FIELDS = {
     "pre_dst",
     "proofread_dst",
     "trans_by",
-    "trans_conf",
-    "doub_content",
-    "unknown_proper_noun",
 }
+
+
+def _patchable_fields_text() -> str:
+    """可改字段的一行文本（按 CACHE_ENTRY_FIELDS 的顺序，输出稳定）。
+
+    system prompt 的字段说明与 patch 工具的报错都用它，避免两处各写一份再漂移。
+    """
+    return " / ".join(name for name in CACHE_ENTRY_FIELDS if name in _PATCHABLE_FIELDS)
 
 
 def _tool_patch_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
@@ -3139,7 +3574,7 @@ def _tool_patch_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
             continue
         updates = {k: v for k, v in p.items() if k in _PATCHABLE_FIELDS and v is not None}
         if not updates:
-            skipped.append({"index": idx_i, "reason": "无可更新字段（只允许 pre_dst/proofread_dst/trans_by/trans_conf/doub_content/unknown_proper_noun）"})
+            skipped.append({"index": idx_i, "reason": f"无可更新字段（只允许 {_patchable_fields_text()}）"})
             continue
         for f, v in updates.items():
             changes.append(_change(f"#{idx_i}.{f}", entry.get(f), v, "replace"))
@@ -3371,7 +3806,6 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "start_translation": _tool_start_translation,
     "stop_translation": _tool_stop_translation,
     "wait": _tool_wait,
-    "get_progress": _tool_get_progress,
     "get_runtime": _tool_get_runtime,
     "list_problems": _tool_list_problems,
     "manage_problem_filter": _tool_manage_problem_filter,

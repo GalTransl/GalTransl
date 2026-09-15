@@ -587,9 +587,19 @@ type ToolMeta = {
 };
 
 const TOOL_META: Record<string, ToolMeta> = {
-  get_project_overview: { action: '了解项目', running: '了解项目', verb: '', icon: '📂', summary: () => '读取项目概况' },
+  get_project_overview: {
+    action: '了解项目',
+    running: '了解项目',
+    verb: '',
+    icon: '📂',
+    // 带了 include 就亮出来，界面上一眼看出这次只取了哪几段
+    summary: (a) =>
+      Array.isArray(a?.include) && a.include.length
+        ? `按需：${a.include.map((s) => str(s)).join('、')}`
+        : '读取项目概况',
+  },
   update_project_config: { action: '修改项目配置', running: '修改项目配置', verb: '', icon: '🛠️', summary: () => '调整翻译参数/规范等设置' },
-  list_input_files: { action: '查看原文文件清单', running: '查看原文文件清单', verb: '', icon: '🗃️', summary: () => '列出待翻译文件' },
+  list_input_files: { action: '查看原文文件清单', running: '查看原文文件清单', verb: '', icon: '🗃️', summary: () => '列出待翻译文件与句数' },
   read_input_file: { action: '读取原文', running: '读取原文', verb: '', icon: '📄', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
   read_guideline: { action: '读取翻译规范', running: '读取翻译规范', verb: '', icon: '📜', summary: (a) => str(a?.name) },
   list_dict_files: { action: '查看字典清单', running: '查看字典清单', verb: '', icon: '📚', summary: () => '列出项目字典文件' },
@@ -620,7 +630,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   manage_problem_filter: { action: '管理问题过滤', running: '管理问题过滤', verb: '', icon: '🧹', summary: (a) => [str(a?.action), Array.isArray(a?.keyword) ? a.keyword.map((k) => str(k)).join('、') : str(a?.keyword)].filter(Boolean).join(' · ') },
   list_transl_cache: { action: '查看缓存清单', running: '查看缓存清单', verb: '', icon: '🗃️', summary: () => '列出缓存文件' },
   read_transl_cache: { action: '读取缓存', running: '读取缓存', verb: '', icon: '📄', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
-  search_transl_cache: { action: '搜索缓存', running: '搜索缓存', verb: '', icon: '🔎', summary: (a) => str(a?.query) },
+  search_transl_cache: { action: '搜索缓存', running: '搜索缓存', verb: '', icon: '🔎', summary: (a) => [str(a?.query), a?.context ? `±${a.context} 句上下文` : ''].filter(Boolean).join(' · ') },
   patch_transl_cache: { action: '修改译文', running: '修改译文', verb: '', icon: '✏️', summary: (a) => (Array.isArray(a?.patches) ? `${a.patches.length} 条` : str(a?.filename)) },
   delete_transl_cache: { action: '删除缓存', running: '删除缓存', verb: '', icon: '🗑️', summary: (a) => [str(a?.filename), str(a?.indexes)].filter(Boolean).join(' · ') },
 };
