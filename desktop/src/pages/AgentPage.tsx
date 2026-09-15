@@ -32,6 +32,7 @@ import {
   getAgentTranslatorBackendContext,
   updateAgentQueued,
   sendAgentQueuedNow,
+  answerAgentAsk,
   encodeProjectDir,
   fetchProjectRuntime,
   fetchJobs,
@@ -598,6 +599,19 @@ const TOOL_META: Record<string, ToolMeta> = {
   get_name_table: { action: '读取人名表', running: '读取人名表', verb: '', icon: '👤', summary: () => 'name替换表' },
   save_name_table: { action: '保存人名表', running: '保存人名表', verb: '', icon: '👥', summary: (a) => (Array.isArray(a?.names) ? `${a.names.length} 条` : '') },
   start_translation: { action: '启动翻译', running: '启动翻译', verb: '', icon: '▶️', summary: (a) => [str(a?.translator), ...(Array.isArray(a?.files) ? [`仅 ${a.files.length} 个文件`] : [])].filter(Boolean).join(' · ') },
+  ask_user: {
+    action: '询问用户',
+    running: '等你回答',
+    verb: '',
+    icon: '❓',
+    summary: (a) => {
+      const questions = Array.isArray(a?.questions) ? a.questions : [];
+      const first = questions[0] && typeof questions[0] === 'object'
+        ? str((questions[0] as Record<string, unknown>).question)
+        : '';
+      return [first, questions.length > 1 ? `共 ${questions.length} 题` : ''].filter(Boolean).join(' · ');
+    },
+  },
   stop_translation: { action: '停止翻译', running: '停止翻译', verb: '', icon: '⏹️', summary: () => '' },
   wait: { action: '等待', running: '等待中', verb: '', icon: '⏳', summary: (a) => waitSummary(a) },
   get_progress: { action: '查询进度', running: '查询进度', verb: '', icon: '📊', summary: () => '' },
@@ -1723,6 +1737,49 @@ export function AgentPage() {
   const timeline = useMemo(() => buildTimeline(events), [events]);
   const hasSession = events.length > 0;
   const canSend = Boolean(projectDir) && Boolean(backendProfileName) && goal.trim().length > 0 && !sending;
+  // 正在等用户回答的 ask_user：这条工具调用**还没有结果**，说明后端那个工具
+  // 正阻塞着等这一下（结果一到就说明答过了/被跳过了）。从后往前找最新的那条。
+  const pendingAsk = useMemo(() => {
+    for (let gi = timeline.length - 1; gi >= 0; gi -= 1) {
+      const group = timeline[gi];
+      if (group.type !== 'activity') continue;
+      for (let i = group.items.length - 1; i >= 0; i -= 1) {
+        const it = group.items[i];
+        if (it.kind === 'tool' && it.name === 'ask_user' && it.result === undefined && it.error === undefined) {
+          return it;
+        }
+      }
+    }
+    return null;
+  }, [timeline]);
+  const [askSubmitting, setAskSubmitting] = useState(false);
+  const [askError, setAskError] = useState<string | null>(null);
+  // 提交成功后先把卡片收起来（工具结果马上就到，避免卡片闪一下再消失）
+  const [answeredAskId, setAnsweredAskId] = useState('');
+  const pendingAskIdRef = useRef('');
+  const askId = pendingAsk?.id || '';
+  useEffect(() => {
+    pendingAskIdRef.current = askId;
+    setAskError(null);
+    setAskSubmitting(false);
+  }, [askId]);
+  const handleAskSubmit = useCallback(
+    async (answers: Array<string[] | null>) => {
+      const target = pendingAskIdRef.current;
+      if (!target) return;
+      setAskSubmitting(true);
+      setAskError(null);
+      try {
+        await answerAgentAsk(effectiveProject, answers, activeSessionRef.current || undefined);
+        setAnsweredAskId(target);
+      } catch (err) {
+        setAskError(normalizeError(err, '回答提交失败'));
+      } finally {
+        setAskSubmitting(false);
+      }
+    },
+    [effectiveProject],
+  );
   // 展示「后端配置文件名/模型名」：模型名从当前配置里取，与「模型设置」页同一口径
   const backendProfileLabel = useMemo(
     () => (backendProfileName ? formatProfileLabel(backendProfileName, getBackendProfile(backendProfileName)) : ''),
@@ -1977,6 +2034,16 @@ export function AgentPage() {
               })}
             </div>
           </div>
+        ) : null}
+        {/* Agent 的提问：钉在输入框上方（照 pi 的 asktool），不让它埋进转录里被折叠掉 */}
+        {pendingAsk && askId !== answeredAskId ? (
+          <AskUserCard
+            key={askId}
+            item={pendingAsk}
+            submitting={askSubmitting}
+            error={askError}
+            onSubmit={(answers) => void handleAskSubmit(answers)}
+          />
         ) : null}
         <div className={`agent-composer${running ? ' is-running' : ''}${queued.length ? ' has-queue' : ''}`}>
           <textarea
@@ -2716,6 +2783,197 @@ function translationJobId(item: ActivityItem): string {
   return str((r as Record<string, unknown>).job_id);
 }
 
+/* ── 询问用户卡片（ask_user）──
+   照 pi 的 asktool：卡片**钉在输入框上方**、不埋进转录（转录里只留一行工具结果），
+   一题一步、选项按钮 + 固定的「自己填」入口，可以跳过单题或全部跳过。
+   **没有倒计时**：后端那个工具不设超时，会一直等着；不想答就点全部跳过，
+   或者干脆点停止让 Agent 自己判断。 */
+
+type AskDraft = { values: string[]; custom: boolean; text: string; skipped: boolean };
+type AskQuestion = { question: string; options: string[]; multiSelect: boolean };
+
+function AskUserCard({
+  item,
+  submitting,
+  error,
+  onSubmit,
+}: {
+  item: ActivityItem;
+  submitting: boolean;
+  error: string | null;
+  onSubmit: (answers: Array<string[] | null>) => void;
+}) {
+  const argQuestions = asArgs(item.arguments)?.questions;
+  const questions: AskQuestion[] = (Array.isArray(argQuestions) ? argQuestions : [])
+    .filter((q): q is Record<string, unknown> => Boolean(q) && typeof q === 'object' && !Array.isArray(q))
+    .map((q) => ({
+      question: str(q.question),
+      options: Array.isArray(q.options) ? q.options.map((o) => str(o)).filter(Boolean) : [],
+      multiSelect: q.multiSelect === true,
+    }));
+
+  const [index, setIndex] = useState(0);
+  const [drafts, setDrafts] = useState<AskDraft[]>(() =>
+    questions.map(() => ({ values: [], custom: false, text: '', skipped: false })),
+  );
+
+  if (!questions.length) return null;
+  const current = questions[Math.min(index, questions.length - 1)];
+  const draft = drafts[Math.min(index, drafts.length - 1)];
+  const last = index === questions.length - 1;
+
+  // 一题的答案 = 勾选的选项 + 自己填的内容（都为空 = 跳过）
+  const answerOf = (d: AskDraft): string[] => {
+    const values = [...d.values];
+    const text = d.text.trim();
+    if (d.custom && text && !values.includes(text)) values.push(text);
+    return values;
+  };
+  const update = (patch: Partial<AskDraft>) =>
+    setDrafts((prev) => prev.map((d, i) => (i === index ? { ...d, ...patch } : d)));
+  const goNext = (list: AskDraft[]) => {
+    if (last) onSubmit(list.map(answerOf));
+    else setIndex((v) => v + 1);
+  };
+  const toggleOption = (option: string) => {
+    // 多选：点几个勾几个，改完自己点「下一题」（点了就走就没法多选了）
+    if (current.multiSelect) {
+      update({
+        values: draft.values.includes(option)
+          ? draft.values.filter((v) => v !== option)
+          : [...draft.values, option],
+      });
+      return;
+    }
+    // 单选：点一下就选中并直接进下一题（最后一题即提交），不必再点「下一题」。
+    // 「自己填…」不走这里——它只是展开输入框，填完回车或点下一题才走。
+    const list = drafts.map((d, i) => (i === index ? { ...d, values: [option], custom: false } : d));
+    setDrafts(list);
+    goNext(list);
+  };
+  const skipCurrent = () => {
+    const list = drafts.map((d, i) =>
+      i === index ? { values: [], custom: false, text: '', skipped: true } : d,
+    );
+    setDrafts(list);
+    goNext(list);
+  };
+
+  return (
+    <div className="agent-ask" role="form" aria-label="Agent 提问">
+      <div className="agent-ask__head">
+        <span className="agent-ask__icon" aria-hidden>❓</span>
+        <span className="agent-ask__title">Agent 想先问你</span>
+        {questions.length > 1 ? (
+          <span className="agent-ask__progress">
+            第 {index + 1} / {questions.length} 题
+          </span>
+        ) : null}
+        <button
+          type="button"
+          className="agent-ask__decline"
+          onClick={() => onSubmit(questions.map(() => null))}
+          disabled={submitting}
+          title="全部跳过，让 Agent 按自己的判断继续"
+        >
+          全部跳过
+        </button>
+      </div>
+
+      {questions.length > 1 ? (
+        <div className="agent-ask__dots">
+          {questions.map((q, i) => {
+            const d = drafts[i];
+            const state = answerOf(d).length ? 'is-answered' : d.skipped ? 'is-skipped' : '';
+            return (
+              <button
+                key={`${i}-${q.question}`}
+                type="button"
+                className={`agent-ask__dot ${state}${i === index ? ' is-current' : ''}`}
+                onClick={() => setIndex(i)}
+                title={`第 ${i + 1} 题：${q.question}`}
+                aria-label={`第 ${i + 1} 题`}
+              />
+            );
+          })}
+        </div>
+      ) : null}
+
+      <h4 className="agent-ask__question">{current.question}</h4>
+
+      <div className="agent-ask__options" role={current.multiSelect ? 'group' : 'radiogroup'}>
+        {current.options.map((option) => {
+          const selected = draft.values.includes(option);
+          return (
+            <button
+              key={option}
+              type="button"
+              role={current.multiSelect ? 'checkbox' : 'radio'}
+              aria-checked={selected}
+              className={`agent-ask__option${selected ? ' is-selected' : ''}`}
+              onClick={() => toggleOption(option)}
+              disabled={submitting}
+            >
+              <span className="agent-ask__mark" aria-hidden>{selected ? '✓' : ''}</span>
+              <span>{option}</span>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          role={current.multiSelect ? 'checkbox' : 'radio'}
+          aria-checked={draft.custom}
+          className={`agent-ask__option${draft.custom ? ' is-selected' : ''}`}
+          onClick={() =>
+            update({
+              custom: !draft.custom,
+              // 单选选中「自己填」要把已选选项让开；多选则各自独立
+              ...(draft.custom || current.multiSelect ? {} : { values: [] }),
+            })
+          }
+          disabled={submitting}
+        >
+          <span className="agent-ask__mark" aria-hidden>{draft.custom ? '✓' : ''}</span>
+          <span>自己填…</span>
+        </button>
+        {draft.custom ? (
+          <input
+            className="agent-ask__input"
+            autoFocus
+            value={draft.text}
+            placeholder="输入你的答案，回车继续"
+            onChange={(e) => update({ text: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing && draft.text.trim()) {
+                e.preventDefault();
+                goNext(drafts);
+              }
+            }}
+            disabled={submitting}
+          />
+        ) : null}
+      </div>
+
+      {error ? <div className="agent-ask__error">{error}</div> : null}
+
+      <div className="agent-ask__foot">
+        <button type="button" className="agent-ask__btn" onClick={skipCurrent} disabled={submitting}>
+          跳过
+        </button>
+        <button
+          type="button"
+          className="agent-ask__btn is-primary"
+          onClick={() => goNext(drafts)}
+          disabled={submitting}
+        >
+          {submitting ? '提交中…' : last ? '提交' : '下一题'}
+        </button>
+        <span className="agent-ask__note">Agent 正等着这条回答；不想答就跳过或点停止。</span>
+      </div>
+    </div>
+  );
+}
+
 /* ── Tool row (disclosure, not a boxed card) ── */
 
 function ToolRow({ item, live }: { item: ActivityItem; live: boolean }) {
@@ -2738,7 +2996,12 @@ function ToolRow({ item, live }: { item: ActivityItem; live: boolean }) {
   const waitTotal = item.waitTotalMs || 0;
   const waitRemaining = item.waitRemainingMs ?? waitTotal;
 
-  const resultText = formatPayload(ok ? item.result : item.error);
+  // 询问用户的结果：后端已经给出「问题：答案」的可读文本，转录里别再甩一坨 JSON
+  const askSummary =
+    item.name === 'ask_user' && ok
+      ? str((item.result as Record<string, unknown> | undefined)?.summary)
+      : '';
+  const resultText = askSummary || formatPayload(ok ? item.result : item.error);
   const hasDetails = Boolean(summary || resultText || item.arguments || changeList);
   const longResult = resultText.length > 400;
 

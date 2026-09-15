@@ -231,7 +231,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
    d. 调用 start_translation(translator="<主翻译引擎>", files=["<一个代表性文件>"]) 只翻译这一个文件作为试译；
    e. 试译完成后用 read_transl_cache 阅读试译文件的译文，对照翻译规范评估文风、译名、语气是否达标；
    f. 若不满意：继续完善字典（save_dict）；对全局性的文风问题，用 update_project_config 把 common.gpt.change_prompt 设为 "AdditionalPrompt" 并设置 common.gpt.prompt_content 写入额外的翻译要求（如「译名统一用XX」「口语化程度、敬称的处理方式」等），这些要求会追加到每次翻译请求的 Prompt 里；也可以用 update_project_config 切换 common.gpt.translation_guideline 换一份更合适的规范；
-   g. 满意后，把试译结果告知用户并说明你的评估结论，询问是否开始全量翻译。用户确认后进入下一步。
+   g. 满意后，把试译结果告知用户并说明你的评估结论，然后用 ask_user 询问是否开始全量翻译（给出「开始全量」/「先再调一版规范」之类的候选选项），等用户回答后再进入下一步。
 4. **启动翻译（全量）**：调用 start_translation(translator="<主翻译引擎>")（不传 files 即翻译全部）。主翻译引擎从项目配置或 overview 中确认，常用值：ForGal-json / ForGal-tsv / ForNovel / sakura-v1.0 / galtransl-v3。一次只启动一个，项目已有运行中任务时不要重复提交。
 5. **跟进进度（wait 前后都要查状态）**：启动翻译后先调用 get_runtime 确认任务已在跑，再调用 wait 等待一段合理时间（翻译任务 wait minutes=1~3，短任务 wait seconds=30）。wait 结束后必须再调用 get_runtime 确认任务状态：completed 进入下一步；仍在 running 时看返回的 eta_seconds 估算剩余时间——eta 还很长（如 >10 分钟）就按其一半的时长继续 wait，快完了（如 <2 分钟）就 wait seconds=30 再查，不要连续空转轮询也不要一次等过头。等待期间界面会显示倒计时。
 6. **复核结果**：调用 list_problems（不带参数）先看类型统计，了解哪类问题最多；再传 problem_type（如 problem_type="残留日文"）+ limit/offset 分页查看该类型的具体条目。用 read_transl_cache 的 index 参数精确读取有问题的条目（如 list_problems 返回的 index，可直接 `index="33-40,50-60"` 一次取多条）浏览实际译文；判断语意是否连贯时传 context（如 context=3）把前后各几句一起带上。需要看缓存文件全貌（文件、条数）时用 list_transl_cache；注意返回里标注 translating / .append.jsonl 后缀的文件正在翻译中，此时读到的是旧快照，等任务 completed 再操作。
@@ -243,6 +243,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 - 不要在未准备字典的情况下直接启动主翻译。
 - 不要连续重复调用同一个工具相同参数（避免死循环）；若上一步结果不理想，换策略或总结收尾。
 - 工具返回的 error 要阅读并据此调整下一步，不要忽略。
+- 不确定该不该做（要不要动这个文件、要不要重翻）、或不确定该怎么翻译（用词/称谓/语气取舍）时，用 ask_user 提问并等回答，别自己猜；能直接从项目配置、字典或原文里判断出来的不要问。
 - 你无法关闭程序、无法修改项目目录以外的文件、无法访问网络。只做翻译相关工作。
 - 在启动全量翻译前，必须先完成试译定稿（流程 3），并把试译评估结论告知用户、确认后再全量启动。
 """
@@ -393,6 +394,10 @@ class AgentRunner:
         # 正在执行的工具调用 id（工具事件带上它，界面才能挂到对应行上）
         self._active_tool_call_id = ""
         self._emit_lock = threading.Lock()
+        # ask_user 的挂起询问：{request_id, tool_call_id, questions, answers, event}。
+        # HTTP 线程（answer_ask）会写 answers 并 set(event)，回合线程在这里等。
+        self._ask_lock = threading.Lock()
+        self._pending_ask: dict[str, Any] | None = None
         # 会话落盘器：state 里没有 session_id（理论上不该发生）时退化为内存态
         self._store = SessionStore(state.project_dir, state.session_id) if state.session_id else None
 
@@ -1129,6 +1134,61 @@ class AgentRunner:
             raise AgentToolError(f"未知工具：{name}")
         return handler(self, args)
 
+    # ---- 询问用户（ask_user）----
+    def ask_user(
+        self, request_id: str, tool_call_id: str, questions: list[dict[str, Any]]
+    ) -> list[list[str] | None]:
+        """发起一次询问并**阻塞**等用户作答，返回每题答案（跳过为 None）。
+
+        照 pi 的 asktool：**没有超时**，只有两种情况会收尾——用户点了停止/会话被删
+        （stop_event 置位），或前端把答案送了进来（AgentRuntime.answer_ask）。
+        被中断时每题按"跳过"返回空答案，工具本身仍算成功：模型据此继续，而不是整个
+        回合报错。这样"我问了但没人理"不会把会话卡死成错误态。
+        """
+        event = threading.Event()
+        holder: dict[str, Any] = {
+            "request_id": request_id,
+            "tool_call_id": tool_call_id,
+            "questions": questions,
+            "answers": None,
+            "event": event,
+        }
+        with self._ask_lock:
+            self._pending_ask = holder
+        _log(f"  ❓ 等待用户回答 {len(questions)} 个问题（{request_id[:8]}）")
+        try:
+            while not event.wait(ASK_WAIT_TICK):
+                if self.stop_event.is_set():
+                    _log("  ❓ 回合被停止，未答的问题按跳过处理")
+                    break
+            answers = holder["answers"]
+        finally:
+            with self._ask_lock:
+                if self._pending_ask is holder:
+                    self._pending_ask = None
+        if answers is None:
+            return [None for _ in questions]
+        return answers
+
+    def resolve_ask(self, answers: Any) -> dict[str, Any]:
+        """把用户在卡片上选好的答案送进来，唤醒挂起的 ask_user（HTTP 线程调用）。"""
+        with self._ask_lock:
+            holder = self._pending_ask
+        if holder is None:
+            raise ValueError("当前没有等待回答的问题（可能已作答、已跳过或回合已结束）")
+        try:
+            clean = _normalize_ask_answers(answers, holder["questions"])
+        except AgentToolError as exc:
+            # HTTP 层按 ValueError → 409 处理，把校验原因原样返给界面
+            raise ValueError(str(exc)) from exc
+        with self._ask_lock:
+            if self._pending_ask is not holder:
+                raise ValueError("这道题刚刚已经结束了")
+            holder["answers"] = clean
+        holder["event"].set()
+        _log(f"  ❓ 收到用户回答（{holder['request_id'][:8]}）")
+        return {"ok": True, "answers": clean}
+
     # ---- 工具实现（调本机 HTTP） ----
     def _project_id(self) -> str:
         return _encode_project_id(self.state.project_dir)
@@ -1805,6 +1865,48 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["filename", "patches"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ask_user",
+            "description": (
+                "当你不确定该不该做（要不要动这个文件、要不要重翻）、或不确定该怎么翻译"
+                "（用词、称谓、语气、风格取舍）时，向用户提问并等待回答，不要自己猜。每题给出"
+                "2-6 个候选选项，用户还可以自己填；一次最多 4 题。用户跳过某题会以空答案返回"
+                "（不算失败），你按自己的最佳判断继续即可。能从项目配置、字典或原文里判断出来的"
+                "不要问——只有真的需要人来定夺时才用。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "questions": {
+                        "type": "array",
+                        "description": "要问的问题（1-4 个）",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "question": {
+                                    "type": "string",
+                                    "description": "问题本身。写清背景与各选项的差别，让用户不必再看别处就能决定。",
+                                },
+                                "options": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "候选答案（2-6 个）；用户在卡片里还可以自己填。",
+                                },
+                                "multiSelect": {
+                                    "type": "boolean",
+                                    "description": "可选。true 表示可以多选，默认单选。",
+                                },
+                            },
+                            "required": ["question", "options"],
+                        },
+                    },
+                },
+                "required": ["questions"],
             },
         },
     },
@@ -3166,6 +3268,89 @@ def _tool_delete_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     return result
 
 
+# ---- 询问用户（ask_user）----
+# 语义照 pi 的 asktool：工具阻塞等回答、**不设超时**；用户跳过或回合被停止时，
+# 该题以空答案返回（工具仍算成功，模型据此继续，而不是让整个回合报错）。
+ASK_MAX_QUESTIONS = 4  # 一次最多问几题（界面一题一步，问太多就成了审讯）
+ASK_MAX_OPTIONS = 6  # 每题最多几个候选项（用户永远还能自己填）
+ASK_WAIT_TICK = 0.2  # 等待回答的轮询步长（秒）：只为尽快响应停止信号
+
+
+def _normalize_ask_questions(args: dict[str, Any]) -> list[dict[str, Any]]:
+    """校验并归一 ask_user 的问题：题干非空、选项去重后至少一个、题数与选项数有上限。"""
+    raw = args.get("questions")
+    if not isinstance(raw, list) or not raw:
+        raise AgentToolError("questions 必须是非空数组")
+    if len(raw) > ASK_MAX_QUESTIONS:
+        raise AgentToolError(f"一次最多问 {ASK_MAX_QUESTIONS} 个问题（收到 {len(raw)} 个）")
+    questions: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise AgentToolError("questions 里每一项都必须是一个对象")
+        text = str(item.get("question") or "").strip()
+        if not text:
+            raise AgentToolError("每个问题都要有非空的 question")
+        raw_options = item.get("options")
+        if not isinstance(raw_options, list):
+            raise AgentToolError(f"问题「{text}」缺少 options 数组")
+        options: list[str] = []
+        for option in raw_options:
+            label = str(option or "").strip()
+            if label and label not in options:
+                options.append(label)
+        if not options:
+            raise AgentToolError(f"问题「{text}」至少要有一个非空选项")
+        questions.append(
+            {
+                "question": text,
+                "options": options[:ASK_MAX_OPTIONS],
+                "multiSelect": item.get("multiSelect") is True,
+            }
+        )
+    return questions
+
+
+def _normalize_ask_answers(raw: Any, questions: list[dict[str, Any]]) -> list[list[str] | None]:
+    """校验前端送回的答案：题数要对上、单选不许给多个值；空值 = 跳过（None）。"""
+    if not isinstance(raw, list) or len(raw) != len(questions):
+        raise AgentToolError(f"答案数量必须与问题数量一致（需要 {len(questions)} 个）")
+    answers: list[list[str] | None] = []
+    for idx, (item, question) in enumerate(zip(raw, questions), start=1):
+        if item is None:
+            answers.append(None)
+            continue
+        if not isinstance(item, list):
+            raise AgentToolError(f"第 {idx} 题的答案必须是字符串数组或 null")
+        values: list[str] = []
+        for value in item:
+            text = str(value or "").strip()
+            if text and text not in values:
+                values.append(text)
+        if len(values) > 1 and not question.get("multiSelect"):
+            raise AgentToolError(f"第 {idx} 题是单选，只能给一个答案")
+        answers.append(values or None)
+    return answers
+
+
+def _format_ask_answers(questions: list[dict[str, Any]], answers: list[list[str] | None]) -> str:
+    """给模型看的答案文本（口径照 pi）：`问题：答案1、答案2`，多题用 --- 分隔。"""
+    lines = []
+    for question, answer in zip(questions, answers):
+        lines.append(f"{question['question']}：{'、'.join(answer) if answer else '（跳过）'}")
+    return "\n---\n".join(lines)
+
+
+def _tool_ask_user(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """问用户：阻塞当前回合直到用户作答（或回合被停止，此时按跳过返回）。"""
+    questions = _normalize_ask_questions(args)
+    answers = runner.ask_user(os.urandom(8).hex(), runner._active_tool_call_id, questions)
+    return {
+        "summary": _format_ask_answers(questions, answers),
+        "questions": [question["question"] for question in questions],
+        "answers": answers,
+    }
+
+
 _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "get_project_overview": _tool_get_project_overview,
     "update_project_config": _tool_update_project_config,
@@ -3191,6 +3376,7 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "delete_transl_cache": _tool_delete_transl_cache,
     "search_transl_cache": _tool_search_transl_cache,
     "patch_transl_cache": _tool_patch_transl_cache,
+    "ask_user": _tool_ask_user,
 }
 
 
@@ -3622,6 +3808,20 @@ class AgentRuntime:
             thread.start()
             _log(f"Agent 继续回合: session={sid} msg={text[:60]}")
             return self.status(project_dir, sid)
+
+    def answer_ask(self, project_dir: str, session_id: str | None, answers: Any) -> dict[str, Any]:
+        """把用户对 ask_user 提问的回答送回去，唤醒正在等待的那个回合。
+
+        校验（题数一致、单选不许给多个值）在回合线程里的 resolve_ask 做；这里只
+        负责找到对应的 runner——没有在等待的询问时报 ValueError，界面据此提示。
+        """
+        key = self._key(project_dir)
+        sid = self._resolve_session_id(project_dir, session_id)
+        with self._lock:
+            runner = self._runners.get(key, {}).get(sid) if sid else None
+        if runner is None:
+            raise ValueError("该会话没有正在等待回答的问题")
+        return runner.resolve_ask(answers)
 
     def stop(self, project_dir: str, session_id: str | None = None) -> dict[str, Any]:
         """用户点停止：置位信号 + 打断在途请求，收尾仍由回合线程自己做。"""

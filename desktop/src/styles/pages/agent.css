@@ -2213,6 +2213,215 @@
 /* ── 排队中的消息（运行中发的）────────────────────────────
    贴在 composer 上方、和它连成一张卡片：消息先排队不直接进聊天框，
    点「立即」才打断模型马上发，也可以就地编辑/删除。 */
+/* ── 询问用户卡片（ask_user）──
+   钉在输入框上方（照 pi 的 asktool），一题一步；没有倒计时——后端那个工具不设超时。 */
+
+.agent-ask {
+  /* 与输入框同宽：输入区那层是 align-items:center，不写宽度就会按内容收缩，
+     于是"问题长一点卡片就宽一点"——每题宽度都不同（.agent-composer / .agent-queue
+     都是这么定的）。 */
+  width: min(100%, 840px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(47, 111, 235, 0.28);
+  border-radius: var(--radius-card);
+  background: var(--agent-tile);
+}
+
+.agent-ask__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-ask__icon {
+  flex: none;
+  font-size: 0.9rem;
+}
+
+.agent-ask__title {
+  flex: none;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.agent-ask__progress {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-ask__decline {
+  margin-left: auto;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.agent-ask__decline:hover:not(:disabled) {
+  background: var(--agent-hover);
+  color: var(--color-text);
+}
+
+.agent-ask__dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-ask__dot {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--agent-tile-strong);
+  cursor: pointer;
+}
+
+.agent-ask__dot.is-answered {
+  background: var(--color-success);
+}
+
+.agent-ask__dot.is-skipped {
+  background: var(--color-text-muted);
+  opacity: 0.45;
+}
+
+.agent-ask__dot.is-current {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.agent-ask__question {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+.agent-ask__options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: min(320px, 36dvh);
+  overflow-y: auto;
+}
+
+.agent-ask__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 1px solid var(--agent-line-soft);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.agent-ask__option:hover:not(:disabled) {
+  background: var(--agent-hover);
+}
+
+.agent-ask__option.is-selected {
+  border-color: rgba(47, 111, 235, 0.5);
+  background: rgba(47, 111, 235, 0.08);
+}
+
+.agent-ask__option:disabled,
+.agent-ask__dot:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.agent-ask__mark {
+  flex: none;
+  width: 14px;
+  text-align: center;
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.agent-ask__input {
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 9px;
+  border: 1px solid var(--agent-line-soft);
+  border-radius: 10px;
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.agent-ask__input:focus {
+  outline: none;
+  border-color: rgba(47, 111, 235, 0.65);
+  box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.12);
+}
+
+.agent-ask__error {
+  font-size: 0.74rem;
+  color: var(--color-danger);
+}
+
+.agent-ask__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agent-ask__btn {
+  padding: 5px 12px;
+  border: 1px solid var(--agent-line-soft);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.agent-ask__btn:hover:not(:disabled) {
+  background: var(--agent-hover);
+}
+
+.agent-ask__btn.is-primary {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.agent-ask__btn.is-primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.agent-ask__btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.agent-ask__note {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+
 .agent-queue {
   width: min(100%, 840px);
   border: 1px solid var(--agent-line);

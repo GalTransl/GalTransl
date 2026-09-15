@@ -2508,6 +2508,26 @@ def build_handler(registry: JobRegistry):
                     self._send_json({"error": f"failed to delete agent session: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
+            # POST /api/agent/answer — 回答 Agent 的 ask_user 提问（唤醒挂起的回合）
+            if path == "/api/agent/answer":
+                try:
+                    payload = self._read_json_body()
+                    project_dir = str(payload.get("project_dir", "")).strip()
+                    session_id = str(payload.get("session_id", "") or "") or None
+                    answers = payload.get("answers")
+                    if not project_dir:
+                        self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    if not isinstance(answers, list):
+                        self._send_json({"error": "answers must be an array"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    self._send_json(AGENT_REGISTRY.answer_ask(project_dir, session_id, answers))
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.CONFLICT)
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": f"failed to answer agent question: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
             # POST /api/agent/message — send a user message to the project's
             # agent session: queues as an interjection while running, or starts
             # a new turn on the persistent conversation when idle.

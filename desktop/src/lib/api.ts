@@ -1714,6 +1714,22 @@ export async function startAgent(payload: AgentStartPayload) {
 }
 
 /**
+ * 回答 Agent 的 ask_user 提问（后端那个工具正阻塞着等这一下）。
+ * answers 与提问一一对应：选项数组；null / 空数组 = 跳过该题。
+ */
+export async function answerAgentAsk(
+  projectDir: string,
+  answers: Array<string[] | null>,
+  sessionId?: string,
+) {
+  return apiRequest<{ ok: boolean; answers: Array<string[] | null> }>('/api/agent/answer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_dir: projectDir, session_id: sessionId, answers }),
+  });
+}
+
+/**
  * Send a user message to the project's agent session. While the agent is
  * running the message is queued as an interjection; otherwise it starts a
  * new turn continuing the same conversation.
