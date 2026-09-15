@@ -104,6 +104,31 @@ function saveActiveSessionId(projectDir: string, sessionId: string): void {
   }
 }
 
+/** 每个会话自己绑定的后端配置：projectDir -> sessionId -> 配置名。
+ *  后端配置的选择此前是页面级状态——切到别的会话改一下再回来，原会话就跟着变了。
+ *  绑到会话上之后，改配置只影响当前会话。sessionId 为 '' 的是「新会话草稿」：
+ *  还没发出第一条消息时选的，建会话后迁移到新 sid。 */
+const SESSION_BACKENDS_KEY = 'galtransl-agent-session-backends';
+
+type SessionBackendMap = Record<string, Record<string, string>>;
+
+function loadSessionBackends(): SessionBackendMap {
+  try {
+    const raw = localStorage.getItem(SESSION_BACKENDS_KEY);
+    return raw ? (JSON.parse(raw) as SessionBackendMap) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveSessionBackends(map: SessionBackendMap): void {
+  try {
+    localStorage.setItem(SESSION_BACKENDS_KEY, JSON.stringify(map));
+  } catch {
+    // 存储不可用不影响主流程
+  }
+}
+
 function loadSession(projectDir: string, sessionId: string): TranscriptSession | null {
   if (!sessionId) return null;
   try {
@@ -956,20 +981,19 @@ export function AgentPage() {
     return () => window.removeEventListener(OPEN_PROJECTS_CHANGE_EVENT, sync);
   }, [mergeProjects]);
 
-  // 跟随 Agent 默认后端配置：默认标签变化时同步过来；但用户在⚙下拉里
-  // 临时改过的本次会话不再覆盖（profileTouchedRef），切会话时重置该标记。
+  // 「模型设置」里的 Agent 默认后端：没自己绑定过的会话都跟随它。默认变化时只改
+  // 这个"默认值"，绑定过的会话各自跟自己的配置走，互不影响。
+  const [defaultProfileName, setDefaultProfileName] = useState<string>(
+    () => getAgentDefaultBackendProfile() || getBackendProfileNames()[0] || '',
+  );
   useEffect(() => {
     const sync = (e: Event) => {
-      if (profileTouchedRef.current) return;
       const next = (e as CustomEvent<string>).detail || '';
-      if (next) setBackendProfileName(next);
+      if (next) setDefaultProfileName(next);
     };
     window.addEventListener(AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, sync as EventListener);
-    // 进入页面时也对齐一次当前 Agent 默认（若本次会话还没临时改过）
-    if (!profileTouchedRef.current) {
-      const cur = getAgentDefaultBackendProfile();
-      if (cur) setBackendProfileName(cur);
-    }
+    const cur = getAgentDefaultBackendProfile();
+    if (cur) setDefaultProfileName(cur);
     return () => window.removeEventListener(AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, sync as EventListener);
   }, []);
 
@@ -978,9 +1002,6 @@ export function AgentPage() {
     projectOptions[0] ? readConfigFileName(projectOptions[0]) : 'config.yaml',
   );
   const [backendProfileNames] = useState<string[]>(() => getBackendProfileNames());
-  const [backendProfileName, setBackendProfileName] = useState<string>(
-    () => getAgentDefaultBackendProfile() || getBackendProfileNames()[0] || '',
-  );
   const [goal, setGoal] = useState('');
 
   const [events, setEvents] = useState<AgentEvent[]>([]);
@@ -1013,6 +1034,26 @@ export function AgentPage() {
     const first = projectOptions[0];
     return first ? loadActiveSessionId(first) : '';
   });
+  // 每会话绑定的后端配置（'' 键 = 新会话还没发出第一条消息时选的草稿）
+  const [sessionBackends, setSessionBackends] = useState<SessionBackendMap>(() => loadSessionBackends());
+  const setSessionBackend = useCallback(
+    (project: string, sessionId: string, name: string | null) => {
+      setSessionBackends((prev) => {
+        const bySession = { ...(prev[project] || {}) };
+        if (name === null) delete bySession[sessionId];
+        else bySession[sessionId] = name;
+        const next = { ...prev, [project]: bySession };
+        saveSessionBackends(next);
+        return next;
+      });
+    },
+    [],
+  );
+  // 当前会话生效的后端配置：自己绑定过用绑定的，空态用草稿，否则跟随 Agent 默认
+  const boundBackendProfile = activeSessionId
+    ? sessionBackends[projectDir]?.[activeSessionId] || ''
+    : sessionBackends[projectDir]?.[''] || '';
+  const backendProfileName = boundBackendProfile || defaultProfileName || getBackendProfileNames()[0] || '';
   // 本地已乐观追加的 user_message 的临时 id 集合，SSE 回放时据此去重，
   // 避免同一条消息渲染两次（发送时本地先显示，后端确认后回放同一条）
   const localMsgIdsRef = useRef<Set<string>>(new Set());
@@ -1036,9 +1077,6 @@ export function AgentPage() {
   // 是否已在后端建立会话（首条消息 startAgent 成功后置 true；reset 清空）。
   // 不能用 events.length 判断：乐观追加后它立即 >0，但会话可能还没建好。
   const hasBackendSessionRef = useRef(false);
-  // 用户在⚙下拉里临时改过后端配置，则本次会话内 Agent 默认标签的变更不再覆盖。
-  // 新建/切换会话时重置，恢复跟随 Agent 默认。
-  const profileTouchedRef = useRef(false);
   // 从 hero 选择项目 / 顶部＋新建空会话：切项目后不应自动加载该项目上次
   // 记忆的会话，而要保持空态等用户发消息创建新会话。置位后项目 effect
   // 会把 activeSessionId 清空而非取 remembered，随后清掉一次性标志。
@@ -1050,8 +1088,8 @@ export function AgentPage() {
   const statusSyncVersionRef = useRef(0);
   useEffect(() => {
     activeSessionRef.current = activeSessionId;
-    // 切会话时重置"已临时改过"标记，让后端配置回到跟随 Agent 默认
-    profileTouchedRef.current = false;
+    // 后端配置绑定在会话上：切会话时 chip 自动切到该会话绑定的那份（没有就跟随
+    // Agent 默认），不需要也没有"重置"动作。
     // 点开（激活）这个会话 → 它的状态灯熄灭（"跑完了，等你回来看"的信号已经送达）
     setUnseenLights((prev) => {
       if (!(activeSessionId in prev)) return prev;
@@ -1449,6 +1487,17 @@ export function AgentPage() {
         activeSessionRef.current = sid;
         setActiveSessionId(sid);
         saveActiveSessionId(effectiveProject, sid);
+        // 空态时选的后端是「新会话草稿」：会话建好了，把它迁移绑到这个 sid 上
+        setSessionBackends((prev) => {
+          const bySession = { ...(prev[effectiveProject] || {}) };
+          const draft = bySession[''];
+          if (draft === undefined) return prev;
+          delete bySession[''];
+          bySession[sid] = draft;
+          const next = { ...prev, [effectiveProject]: bySession };
+          saveSessionBackends(next);
+          return next;
+        });
       }
       // 后端上下文：配置名只存在前端 localStorage，后端拿不到；而「了解项目」要
       // 如实报出"本会话在用的后端"和"翻译任务会用的后端"，所以随消息一起送过去。
@@ -2132,7 +2181,13 @@ export function AgentPage() {
                   disabled={running}
                   aria-haspopup="menu"
                   aria-expanded={profileMenuOpen}
-                  title={running ? 'Agent 运行中，暂不能切换后端配置' : backendProfileLabel ? `${backendProfileLabel} · 点击切换后端配置` : '选择后端配置'}
+                  title={
+                    running
+                      ? 'Agent 运行中，暂不能切换后端配置'
+                      : `${backendProfileLabel || '未配置后端'}${
+                          boundBackendProfile ? ' · 已绑定到本会话' : ' · 跟随 Agent 默认'
+                        } · 点击切换（只影响当前会话）`
+                  }
                 >
                   <span className="agent-composer__chip-icon">⚙</span>
                   <span className="agent-composer__chip-label">{backendProfileLabel || '未配置后端'}</span>
@@ -2142,27 +2197,46 @@ export function AgentPage() {
                     {backendProfileNames.length === 0 ? (
                       <div className="agent-profile-menu__empty">还没有后端配置</div>
                     ) : (
-                      backendProfileNames.map((name) => (
-                        <button
-                          key={name}
-                          type="button"
-                          role="menuitemradio"
-                          aria-checked={name === backendProfileName}
-                          className="agent-profile-menu__item"
-                          onClick={() => {
-                            setBackendProfileName(name);
-                            profileTouchedRef.current = true;
-                            setProfileMenuOpen(false);
-                          }}
-                        >
-                          <span className="agent-profile-menu__label">
-                            {formatProfileLabel(name, getBackendProfile(name))}
-                          </span>
-                          {name === backendProfileName ? (
-                            <span className="agent-profile-menu__check" aria-hidden>✓</span>
-                          ) : null}
-                        </button>
-                      ))
+                      <>
+                        {boundBackendProfile ? (
+                          <button
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={false}
+                            className="agent-profile-menu__item agent-profile-menu__item--action"
+                            onClick={() => {
+                              // 解除本会话的绑定，回到跟随 Agent 默认
+                              setSessionBackend(effectiveProject, activeSessionId, null);
+                              setProfileMenuOpen(false);
+                            }}
+                          >
+                            <span className="agent-profile-menu__label">
+                              跟随 Agent 默认（{formatProfileLabel(defaultProfileName, getBackendProfile(defaultProfileName))}）
+                            </span>
+                          </button>
+                        ) : null}
+                        {backendProfileNames.map((name) => (
+                          <button
+                            key={name}
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={name === backendProfileName}
+                            className="agent-profile-menu__item"
+                            onClick={() => {
+                              // 只改当前会话绑定的配置（空态则是新会话草稿），不影响别的会话
+                              setSessionBackend(effectiveProject, activeSessionId, name);
+                              setProfileMenuOpen(false);
+                            }}
+                          >
+                            <span className="agent-profile-menu__label">
+                              {formatProfileLabel(name, getBackendProfile(name))}
+                            </span>
+                            {name === backendProfileName ? (
+                              <span className="agent-profile-menu__check" aria-hidden>✓</span>
+                            ) : null}
+                          </button>
+                        ))}
+                      </>
                     )}
                     <div className="agent-profile-menu__sep" />
                     <button
