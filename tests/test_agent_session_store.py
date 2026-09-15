@@ -4,6 +4,7 @@
 以及"标题取首条用户消息"的生成逻辑。
 """
 
+import json
 import os
 import tempfile
 import unittest
@@ -46,6 +47,54 @@ class SessionStoreTests(unittest.TestCase):
         store.append_event({"type": "wait_tick", "step": 2, "remaining_ms": 1})
         store.append_event({"type": "content", "step": 3, "content": "kept"})
         self.assertEqual(len(store.load()["events"]), 1)
+
+    def test_tool_result_payload_is_stored_once_and_restored(self) -> None:
+        sid = ss.create_session(self.project, "t")
+        store = ss.SessionStore(self.project, sid)
+        result = {"filename": "scene.json", "entries": [{"index": 1, "pre_src": "很长的内容"}]}
+        store.append_message({
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "content": json.dumps(result, ensure_ascii=False),
+        })
+        store.append_event({
+            "type": "tool_result",
+            "step": 2,
+            "id": "call-1",
+            "name": "read_input_file",
+            "ok": True,
+            "result": result,
+            "duration_ms": 20,
+        })
+
+        with open(store.path, encoding="utf-8") as f:
+            raw = f.read()
+        # 外层 JSON 会转义 message.content 内层 JSON 的引号；按记录解析后确认
+        # 大结果只存在于 tool message，event 本身不再带 result。
+        records = [json.loads(line) for line in raw.splitlines()]
+        message_record = next(rec for rec in records if rec.get("t") == "message")
+        event_record = next(rec for rec in records if rec.get("t") == "event")
+        self.assertEqual(json.loads(message_record["msg"]["content"]), result)
+        self.assertNotIn("result", event_record["event"])
+        event = store.load()["events"][0]
+        self.assertEqual(event["result"], result)
+
+    def test_tool_error_is_restored_from_tool_message(self) -> None:
+        sid = ss.create_session(self.project, "t")
+        store = ss.SessionStore(self.project, sid)
+        store.append_message({"role": "tool", "tool_call_id": "call-2", "content": '{"error":"boom"}'})
+        store.append_event({"type": "tool_result", "step": 2, "id": "call-2", "ok": False})
+        event = store.load()["events"][0]
+        self.assertEqual(event["error"], "boom")
+        self.assertFalse(event["ok"])
+
+    def test_tool_error_without_message_is_kept(self) -> None:
+        """截断等没有对应 tool message 的事件仍保留错误文本。"""
+        sid = ss.create_session(self.project, "t")
+        store = ss.SessionStore(self.project, sid)
+        store.append_event({"type": "tool_result", "step": 2, "id": "truncated", "ok": False, "error": "响应被截断"})
+        event = store.load()["events"][0]
+        self.assertEqual(event["error"], "响应被截断")
 
     def test_meta_records_are_merged(self) -> None:
         """收尾写入 running=false 不能覆盖首条 meta 的会话信息。"""

@@ -42,6 +42,63 @@ _SKIP_TRANSCRIPT_TYPES = frozenset({"content_delta", "reasoning_delta", "wait_ti
 TRANSCRIPT_MAX_EVENTS = 2000
 
 
+def _compact_event_for_storage(event: dict[str, Any]) -> dict[str, Any]:
+    """避免 tool_result 在 event + message 两条记录中重复保存大结果。
+
+    tool message 是模型续聊所需的权威结果；event 只保留前端转录所需的
+    调用标识、状态和耗时。读取时再从对应 tool message 补回 result。
+    """
+    if event.get("type") != "tool_result":
+        return event
+    # 成功结果通常是体积最大的字段，必须避免和 role=tool message 重复落盘。
+    # error 一般很短，而且某些异常路径（例如响应被截断）没有对应的 tool
+    # message；保留它可避免这类事件在重启后丢失诊断信息。
+    return {key: value for key, value in event.items() if key != "result"}
+
+
+def _restore_tool_results(
+    events: list[dict[str, Any]], messages: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """从 tool message 恢复被压缩掉的 tool_result.result 字段。"""
+    results: dict[str, tuple[Any, str | None]] = {}
+    for message in messages:
+        if not isinstance(message, dict) or message.get("role") != "tool":
+            continue
+        call_id = str(message.get("tool_call_id") or "")
+        if not call_id:
+            continue
+        raw = message.get("content")
+        try:
+            payload = json.loads(raw) if isinstance(raw, str) else raw
+        except (TypeError, json.JSONDecodeError):
+            payload = raw
+        if isinstance(payload, dict) and "error" in payload:
+            results[call_id] = (None, str(payload.get("error") or ""))
+        else:
+            results[call_id] = (payload, None)
+
+    restored: list[dict[str, Any]] = []
+    for event in events:
+        if event.get("type") != "tool_result" or "result" in event or "error" in event:
+            restored.append(event)
+            continue
+        call_id = str(event.get("id") or "")
+        payload = results.get(call_id)
+        if payload is None:
+            restored.append(event)
+            continue
+        result, error = payload
+        enriched = dict(event)
+        if error is not None:
+            enriched["error"] = error
+            enriched["ok"] = False
+        else:
+            enriched["result"] = result
+            enriched["ok"] = True
+        restored.append(enriched)
+    return restored
+
+
 def _log(msg: str, *args: object) -> None:
     try:
         import time as _t
@@ -105,7 +162,7 @@ class SessionStore:
     def append_event(self, event: dict[str, Any]) -> None:
         if event.get("type") in _SKIP_EVENT_TYPES:
             return
-        self._append({"t": "event", "at": time.time(), "event": event})
+        self._append({"t": "event", "at": time.time(), "event": _compact_event_for_storage(event)})
 
     def append_compact(self, *, removed: int, summary_chars: int, tokens_before: int) -> None:
         self._append({
@@ -154,6 +211,7 @@ class SessionStore:
                         out["compactions"].append(rec)
         except Exception as exc:  # noqa: BLE001
             _log(f"读取失败 {self.path}: {exc}")
+        out["events"] = _restore_tool_results(out["events"], out["messages"])
         return out
 
     def clear(self) -> None:
@@ -286,17 +344,22 @@ def read_transcript(project_dir: str, session_id: str, limit: int = TRANSCRIPT_M
     if not os.path.isfile(path):
         return []
     tail: deque[dict[str, Any]] = deque(maxlen=max(1, limit))
+    messages: list[dict[str, Any]] = []
     first_user: dict[str, Any] | None = None
     try:
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
-                if '"event"' not in line:
+                if '"event"' not in line and '"message"' not in line:
                     continue
                 try:
                     rec = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if not isinstance(rec, dict) or rec.get("t") != "event":
+                if not isinstance(rec, dict):
+                    continue
+                if rec.get("t") != "event":
+                    if rec.get("t") == "message" and isinstance(rec.get("msg"), dict):
+                        messages.append(rec["msg"])
                     continue
                 ev = rec.get("event")
                 if not isinstance(ev, dict) or ev.get("type") in _SKIP_TRANSCRIPT_TYPES:
@@ -307,7 +370,7 @@ def read_transcript(project_dir: str, session_id: str, limit: int = TRANSCRIPT_M
     except Exception as exc:  # noqa: BLE001
         _log(f"读取转录失败 {path}: {exc}")
         return []
-    events = list(tail)
+    events = _restore_tool_results(list(tail), messages)
     if first_user is not None and (not events or events[0] is not first_user):
         events.insert(0, first_user)
     return events

@@ -129,6 +129,13 @@ class ReadTranscriptTests(unittest.TestCase):
         types = [ev["type"] for ev in ss.read_transcript(self.project, store.session_id)]
         self.assertEqual(types, ["user_message", "assistant_message", "tool_call"])
 
+    def test_tool_result_transcript_restores_payload_from_message(self):
+        store = self._store()
+        store.append_message({"role": "tool", "tool_call_id": "c1", "content": '{"count": 3}'})
+        store.append_event({"type": "tool_result", "step": 2, "id": "c1", "name": "read", "ok": True})
+        events = ss.read_transcript(self.project, store.session_id)
+        self.assertEqual(events[-1]["result"], {"count": 3})
+
     def test_keeps_first_user_message_when_truncated(self):
         """超长会话只留最近 limit 条，但首条用户消息（会话锚点）必须留住。"""
         store = self._store()
