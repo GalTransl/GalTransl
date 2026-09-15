@@ -28,10 +28,14 @@ import {
   listAgentSessions,
   createAgentSession,
   deleteAgentSession,
+  deleteAgentQueued,
+  updateAgentQueued,
+  sendAgentQueuedNow,
   type AgentContextUsage,
   type AgentEvent,
   type AgentSession as AgentSessionMeta,
   type AgentStreamingMessage,
+  type QueuedMessage,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 import { renderMarkdown } from '../lib/markdown';
@@ -125,6 +129,8 @@ const TRANSIENT_EVENT_TYPES = new Set<AgentEvent['type']>([
   'wait_tick',
   // 上下文用量只驱动指示器，不进转录、也不该进浏览器缓存（刷新后由状态快照给）
   'context_usage',
+  // 队列快照（排队消息的实时变更）同理：不进转录、不进缓存
+  'queue',
 ]);
 
 function persistedTranscriptEvents(events: AgentEvent[]): AgentEvent[] {
@@ -272,8 +278,14 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
   };
 
   for (const ev of events) {
-    // status/close/context_usage 是控制与指标事件，不进对话转录
-    if (ev.type === 'status' || ev.type === 'close' || ev.type === 'context_usage') continue;
+    // status/close/context_usage/queue 是控制与指标事件，不进对话转录
+    if (
+      ev.type === 'status' ||
+      ev.type === 'close' ||
+      ev.type === 'context_usage' ||
+      ev.type === 'queue'
+    )
+      continue;
 
     // 用户消息独立成行（右对齐气泡），并打断当前活动组。
     if (ev.type === 'user_message') {
@@ -509,7 +521,12 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
         traceback: ev.traceback,
       });
     } else if (ev.type === 'stopped') {
-      groups.push({ type: 'stopped', id: `s-${ev.step}`, step: ev.step, reason: ev.reason || '用户停止' });
+      groups.push({
+        type: 'stopped',
+        id: `s-${ev.step}`,
+        step: ev.step,
+        reason: ev.reason || '用户停止',
+      });
     }
   }
 
@@ -755,8 +772,15 @@ function AgentSessionSidebar({
                       e.stopPropagation();
                       onCreateInProject(dir);
                     }}
-                    disabled={disabled}
-                    title={disabled ? 'Agent 运行中' : `在「${shortDir}」下新建会话`}
+                    // 只有"当前正在跑的那个项目"要拦：在它下面新建会切走当前会话
+                    // （并停掉正在跑的回合）。别的项目互不干扰——后端按 (项目, 会话)
+                    // 各自独立运行，随时可以在它们下面新建会话、甚至同时各跑一个 Agent。
+                    disabled={disabled && dir === activeProject}
+                    title={
+                      disabled && dir === activeProject
+                        ? '该项目的 Agent 正在运行，请先停止或等待'
+                        : `在「${shortDir}」下新建会话`
+                    }
                     aria-label={`在 ${shortDir} 新建会话`}
                   >
                     ＋
@@ -904,6 +928,11 @@ export function AgentPage() {
   // 已用上下文/上下文窗口（composer 右下角指示器）：
   // 基线来自会话状态快照，运行中由 context_usage 事件实时更新。
   const [contextUsage, setContextUsage] = useState<AgentContextUsage | null>(null);
+  // 排队中的消息（运行中发的）：显示在 composer 上方的队列面板里，不进聊天框。
+  // 后端是权威来源：状态快照 snap.queued + 实时 queue 事件都整份推送。
+  const [queued, setQueued] = useState<QueuedMessage[]>([]);
+  // 正在就地编辑的队列条目（id + 草稿文本）
+  const [editingQueued, setEditingQueued] = useState<{ id: string; text: string } | null>(null);
   // 会话列表按项目分组：projectDir -> 该项目的会话列表
   const [sessionsByProject, setSessionsByProject] = useState<Record<string, AgentSessionMeta[]>>({});
   // 侧边栏每个项目分组的折叠态（默认当前活动项目展开，其余折叠）
@@ -1062,6 +1091,7 @@ export function AgentPage() {
       setRunning(false);
       setStatus('idle');
       setContextUsage(null);
+      setQueued([]);
       return;
     }
     // 先用 localStorage 的缓存立刻渲染，避免切换时闪白
@@ -1102,6 +1132,8 @@ export function AgentPage() {
         setRunning(snapRunning);
         // 上下文用量以快照为准（切会话/刷新后不用等下一次 LLM 请求）
         setContextUsage(snap.context || null);
+        // 队列面板同理：切会话/刷新后直接把当前队列摆出来
+        setQueued(snap.queued || []);
         if (snapRunning) subscribeStream(effectiveProject, activeSessionId);
       })
       .catch(() => {
@@ -1168,12 +1200,21 @@ export function AgentPage() {
           if (ev.status) setStatus(ev.status);
           // 订阅到一个已在运行的会话时，首帧快照里就带着上下文用量
           if (ev.context) setContextUsage(ev.context);
+          // 后端说在跑就一定给停止按钮（自愈：万一前面某条事件把运行态打回去了，
+          // 这里能把界面拉回来）
+          if (ev.status === 'running') setRunning(true);
           // status 快照绝不主动 abort：订阅时回合可能已结束（首帧即终态），
           // 但事件还在流里没发完，掐流会吞掉全部内容。流的关闭交给 close 帧
           // 或 finish/stopped/error 事件。
           if (ev.status && isTerminal(ev.status)) {
             setRunning(false);
           }
+          return;
+        }
+        // 队列快照：队列面板的权威数据（发送/被消费/删除/编辑都会推一份整表）。
+        // 是控制事件，和 status 一样放在去重之前处理，保证不会漏。
+        if (ev.type === 'queue') {
+          setQueued(ev.queued || []);
           return;
         }
         // 兜底去重：SSE 重放/竞态下 step 已见过的事件直接丢弃
@@ -1209,9 +1250,12 @@ export function AgentPage() {
         }
         setEvents((prev) => [...prev, ev]);
         if (ev.type === 'finish' || ev.type === 'error' || ev.type === 'stopped') {
-          setRunning(false);
-          // 不主动 abort：后端若因滞留插话自动开 followup 回合，
-          // 同一条流会继续推后续事件；流的关闭由后端 close 帧决定。
+          // 后端若已安排好 followup 回合（点「立即」发送、或滞留插话转新回合），
+          // 下一步马上又在跑：这里绝不能把运行态打回 false——否则停止按钮会消失、
+          // 顶栏还会因为 running=false 显示成"空闲"，而后端其实在跑。
+          if (!ev.followup) setRunning(false);
+          // 不主动 abort：followup 回合的后续事件会走同一条流；
+          // 流的关闭由后端 close 帧决定。
         }
       },
       (err) => {
@@ -1238,13 +1282,17 @@ export function AgentPage() {
       return;
     }
 
-    // 像聊天一样：发送时本地立刻把这条消息显示成气泡，不等后端确认
-    const localId = `local:${text}`;
-    localMsgIdsRef.current.add(localId);
-    setEvents((prev) => [
-      ...prev,
-      { type: 'user_message', step: -1, message: text },
-    ]);
+    // 运行中发的消息不进聊天框：后端把它放进队列，显示在 composer 上方的队列
+    // 面板里（想马上发就点「立即」）。空闲时才是普通对话气泡——本地立刻显示，
+    // 不等后端确认。
+    if (!running) {
+      const localId = `local:${text}`;
+      localMsgIdsRef.current.add(localId);
+      setEvents((prev) => [
+        ...prev,
+        { type: 'user_message', step: -1, message: text },
+      ]);
+    }
     setGoal('');
     setSending(true);
     sendingRef.current = true;
@@ -1286,8 +1334,10 @@ export function AgentPage() {
           saveActiveSessionId(effectiveProject, sid);
         }
       } else {
-        // 已有会话：运行中→插话排队；已结束→同会话继续下一回合
-        await sendAgentMessage(effectiveProject, text, sid);
+        // 已有会话：运行中→进队列（面板显示）；已结束→同会话继续下一回合。
+        // 返回值就是最新状态快照，队列面板据此立刻更新。
+        const snap = await sendAgentMessage(effectiveProject, text, sid);
+        setQueued(snap.queued || []);
       }
       void refreshSessions(effectiveProject, sid);
       subscribeStream(effectiveProject, sid);
@@ -1301,16 +1351,93 @@ export function AgentPage() {
       statusSyncVersionRef.current += 1;
       sendTransitionRef.current = null;
     }
-  }, [effectiveProject, backendProfileName, configFileName, goal, subscribeStream, refreshSessions]);
+  }, [
+    effectiveProject,
+    backendProfileName,
+    configFileName,
+    goal,
+    running,
+    subscribeStream,
+    refreshSessions,
+  ]);
+
+  /** 队列面板「立即」：打断当前回合，马上把这条发出去。 */
+  const handleQueuedSendNow = useCallback(
+    async (id: string) => {
+      if (!effectiveProject) return;
+      try {
+        const snap = await sendAgentQueuedNow(
+          effectiveProject,
+          id,
+          activeSessionRef.current || undefined,
+        );
+        setQueued(snap.queued || []);
+        setEditingQueued(null);
+        // 「立即」= 打断当前回合 + 马上发这条。打断那一瞬间后端可能正好读成
+        // stopped（回合刚收尾、followup 还没接上），所以这里只往"运行中"推，
+        // 绝不打回停止——否则停止按钮会消失而 Agent 其实还在跑。
+        setStatus('running');
+        setRunning(true);
+        // 立即发送 = 打断再重启回合。流通常没断（后端收尾后立刻又 running），
+        // 但万一已经关了，这里补一次订阅，别让新回合的事件没人收。
+        if (!abortRef.current && snap.status === 'running') {
+          subscribeStream(effectiveProject, activeSessionRef.current || undefined);
+        }
+      } catch (err) {
+        setError(normalizeError(err, '立即发送失败'));
+      }
+    },
+    [effectiveProject, subscribeStream],
+  );
+
+  /** 队列面板「删除」：这条不发了。 */
+  const handleQueuedDelete = useCallback(
+    async (id: string) => {
+      if (!effectiveProject) return;
+      try {
+        const snap = await deleteAgentQueued(
+          effectiveProject,
+          id,
+          activeSessionRef.current || undefined,
+        );
+        setQueued(snap.queued || []);
+        if (editingQueued?.id === id) setEditingQueued(null);
+      } catch (err) {
+        setError(normalizeError(err, '删除排队消息失败'));
+      }
+    },
+    [effectiveProject, editingQueued],
+  );
+
+  /** 队列面板「保存」：提交就地编辑。 */
+  const handleQueuedSaveEdit = useCallback(async () => {
+    if (!effectiveProject || !editingQueued) return;
+    const text = editingQueued.text.trim();
+    if (!text) return;
+    try {
+      const snap = await updateAgentQueued(
+        effectiveProject,
+        editingQueued.id,
+        text,
+        activeSessionRef.current || undefined,
+      );
+      setQueued(snap.queued || []);
+      setEditingQueued(null);
+    } catch (err) {
+      setError(normalizeError(err, '修改排队消息失败'));
+    }
+  }, [effectiveProject, editingQueued]);
 
   const handleStop = useCallback(async () => {
     if (!effectiveProject) return;
     try {
       await stopAgent(effectiveProject, activeSessionRef.current || undefined);
+      // 先给出即时反馈；收尾事件随后由流补上。
       setStatus('stopped');
       setRunning(false);
-      abortRef.current?.();
-      abortRef.current = null;
+      // 这里**不能**掐断 SSE：收尾事件（队列快照、stopped、close）还在流里，
+      // 而流是 0.5s 轮询的——一掐就全丢了。后端收尾后会自己发 close。
+      // 点了「立即」的排队消息也一样：它要等回合收尾才发 user_message。
     } catch (err) {
       setError(normalizeError(err, '停止 Agent 失败'));
     }
@@ -1479,6 +1606,8 @@ export function AgentPage() {
     setStatus('idle');
     setError(null);
     setContextUsage(null);
+    setQueued([]);
+    setEditingQueued(null);
     localMsgIdsRef.current.clear();
     hasBackendSessionRef.current = false;
     lastStepRef.current = 0;
@@ -1667,14 +1796,95 @@ export function AgentPage() {
       </div>
 
       <div className="agent-console__composer">
-        <div className={`agent-composer${running ? ' is-running' : ''}`}>
+        {/* 排队中的消息：运行中发的消息先落到这里（不进聊天框）。
+            每条可以「立即」打断模型马上发，也可以就地编辑或删掉。 */}
+        {queued.length ? (
+          <div className="agent-queue">
+            <div className="agent-queue__list">
+              {queued.map((item) => {
+                const editing = editingQueued?.id === item.id;
+                return (
+                  <div className="agent-queue__item" key={item.id}>
+                    {editing ? (
+                      <>
+                        <input
+                          className="agent-queue__input"
+                          value={editingQueued?.text ?? ''}
+                          autoFocus
+                          onChange={(e) => setEditingQueued({ id: item.id, text: e.target.value })}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') {
+                              setEditingQueued(null);
+                              return;
+                            }
+                            if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                              e.preventDefault();
+                              void handleQueuedSaveEdit();
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="agent-queue__act is-primary"
+                          onClick={() => void handleQueuedSaveEdit()}
+                        >
+                          保存
+                        </button>
+                        <button
+                          type="button"
+                          className="agent-queue__act"
+                          onClick={() => setEditingQueued(null)}
+                        >
+                          取消
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="agent-queue__text" title={item.text}>
+                          {item.text}
+                        </span>
+                        <button
+                          type="button"
+                          className="agent-queue__act is-primary"
+                          title="打断 Agent，马上发送这条"
+                          onClick={() => void handleQueuedSendNow(item.id)}
+                        >
+                          <span className="agent-queue__act-icon">⤒</span>立即
+                        </button>
+                        <button
+                          type="button"
+                          className="agent-queue__act"
+                          title="编辑这条"
+                          aria-label="编辑这条"
+                          onClick={() => setEditingQueued({ id: item.id, text: item.text })}
+                        >
+                          ✎
+                        </button>
+                        <button
+                          type="button"
+                          className="agent-queue__act"
+                          title="删除这条"
+                          aria-label="删除这条"
+                          onClick={() => void handleQueuedDelete(item.id)}
+                        >
+                          🗑
+                        </button>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+        <div className={`agent-composer${running ? ' is-running' : ''}${queued.length ? ' has-queue' : ''}`}>
           <textarea
             className="agent-composer__input"
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
             placeholder={
               running
-                ? 'Agent 正在工作中，输入消息插话或留空等待；也可以点右侧 ■ 停止。'
+                ? '继续输入以排队后续消息，本轮做完自动发出；想提前发就点队列里的「立即」。'
                 : hasSession
                   ? '给 Agent 下一步指令，它会接着当前进度继续。'
                   : '描述你希望 Agent 完成的任务，例如：按标准流程完成本项目的翻译。'
@@ -2447,14 +2657,14 @@ function ErrorNotice({ group }: { group: Extract<TimelineGroup, { type: 'error' 
   );
 }
 
+/** 回合停止：一条灰线 + 一行说明就够了，不用整块提示卡片（太重、还抢眼）。
+ *  后端文案原样保留（runtime 不动）：只有"用户点停止"那条按界面口径显示成
+ *  「用户已停止」，其他原因（如「立即」打断）原样展示。 */
 function StoppedNotice({ group }: { group: Extract<TimelineGroup, { type: 'stopped' }> }) {
+  const text = group.reason === '用户停止' ? '用户已停止' : group.reason;
   return (
-    <div className="agent-notice agent-notice--stopped">
-      <span className="agent-notice__icon">⏹</span>
-      <div className="agent-notice__body">
-        <div className="agent-notice__title">已停止</div>
-        <div className="agent-notice__text">{group.reason}</div>
-      </div>
+    <div className="agent-stopped">
+      <span className="agent-stopped__text">{text}</span>
     </div>
   );
 }

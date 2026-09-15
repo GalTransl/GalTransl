@@ -2548,6 +2548,39 @@ def build_handler(registry: JobRegistry):
                     self._send_json({"error": f"failed to stop agent: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
+            # POST /api/agent/queue/delete — 删掉一条排队消息
+            # POST /api/agent/queue/update — 就地改一条排队消息
+            # POST /api/agent/queue/send   — 「立即」：打断当前回合，马上发这条
+            if path in ("/api/agent/queue/delete", "/api/agent/queue/update", "/api/agent/queue/send"):
+                try:
+                    payload = self._read_json_body()
+                    project_dir = str(payload.get("project_dir", "")).strip()
+                    session_id = str(payload.get("session_id", "") or "") or None
+                    item_id = str(payload.get("id", "") or "").strip()
+                    if not project_dir:
+                        self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    if not item_id:
+                        self._send_json({"error": "id is required"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    if path.endswith("/delete"):
+                        status = AGENT_REGISTRY.queue_delete(project_dir, item_id, session_id)
+                    elif path.endswith("/update"):
+                        status = AGENT_REGISTRY.queue_update(
+                            project_dir, item_id, str(payload.get("message", "") or ""), session_id
+                        )
+                    else:
+                        status = AGENT_REGISTRY.queue_send(project_dir, item_id, session_id)
+                    self._send_json(status)
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json(
+                        {"error": f"failed to handle agent queue: {exc}"},
+                        status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    )
+                return
+
 
             if path == "/api/openai-models":
                 try:

@@ -1544,6 +1544,7 @@ export type AgentEventType =
   | 'llm_retry_end'
   | 'compacted'
   | 'context_usage'
+  | 'queue'
   | 'assistant_message'
   | 'finish'
   | 'error'
@@ -1555,6 +1556,12 @@ export type AgentEventType =
 export type AgentContextUsage = {
   used_tokens: number;
   window_tokens: number;
+};
+
+/** 排队中的用户消息（模型还没看到）：显示在 composer 上方的队列面板里。 */
+export type QueuedMessage = {
+  id: string;
+  text: string;
 };
 
 /**
@@ -1614,8 +1621,12 @@ export type AgentEvent = {
   // finish
   summary?: string;
   total_steps?: number;
+  /** 收尾事件专用：后端已安排好 followup 回合，马上又会跑起来（别把运行态打回停止） */
+  followup?: boolean;
   // context_usage 事件 / status 快照里的上下文用量
   context?: AgentContextUsage;
+  /** queue 事件 / status 快照：排队中的消息（整份，顺序即发送顺序） */
+  queued?: QueuedMessage[];
   // assistant_message：助手消息的有序段落（思考/正文/工具调用）
   parts?: AgentMessagePart[];
   /** true 表示这是"进行中"的段落快照（由 status().streaming 合成，非持久化事件） */
@@ -1641,6 +1652,8 @@ export type AgentStatus = {
   error?: string;
   /** 已用上下文/窗口（界面指示器用；会话为空时 used_tokens 为 0） */
   context?: AgentContextUsage;
+  /** 排队中的消息（队列面板的数据源；内存态，重启即空） */
+  queued?: QueuedMessage[];
   /** 正在生成的助手消息（没有进行中的响应时为 null/缺省） */
   streaming?: AgentStreamingMessage | null;
   events?: AgentEvent[];
@@ -1698,6 +1711,38 @@ export async function stopAgent(projectDir: string, sessionId?: string) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_dir: projectDir, session_id: sessionId }),
+  });
+}
+
+/** 删掉一条排队消息（模型还没看到的那条）。 */
+export async function deleteAgentQueued(projectDir: string, id: string, sessionId?: string) {
+  return apiRequest<AgentStatus>('/api/agent/queue/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_dir: projectDir, id, session_id: sessionId }),
+  });
+}
+
+/** 就地改一条排队消息的文本（位置不变）。 */
+export async function updateAgentQueued(
+  projectDir: string,
+  id: string,
+  message: string,
+  sessionId?: string,
+) {
+  return apiRequest<AgentStatus>('/api/agent/queue/update', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_dir: projectDir, id, message, session_id: sessionId }),
+  });
+}
+
+/** 「立即」：打断当前回合，把这条排队消息马上发出去。 */
+export async function sendAgentQueuedNow(projectDir: string, id: string, sessionId?: string) {
+  return apiRequest<AgentStatus>('/api/agent/queue/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_dir: projectDir, id, session_id: sessionId }),
   });
 }
 

@@ -423,9 +423,15 @@
   color: #dc2626;
 }
 
+/* 禁用（所属会话正在跑等）：默认仍旧隐藏——不能因为 :disabled 的优先级更高
+   就把整列 ✕ 全冒出来；悬停时淡淡显示，提示"现在删不了"。 */
 .agent-session-item__delete:disabled {
   cursor: not-allowed;
-  opacity: 0.3;
+}
+
+.agent-session-item:hover .agent-session-item__delete:disabled,
+.agent-session-item__delete:disabled:focus-visible {
+  opacity: 0.35;
 }
 
 /* 压缩上下文提示行 */
@@ -1859,8 +1865,27 @@
   background: var(--color-danger-soft);
 }
 
-.agent-notice--stopped {
-  background: var(--color-warning-soft);
+/* 回合停止（用户点停止 / 被「立即」打断）：不用卡片，一条灰线 + 一行说明 */
+.agent-stopped {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+}
+
+.agent-stopped::before,
+.agent-stopped::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--agent-line);
+}
+
+.agent-stopped__text {
+  flex: none;
+  letter-spacing: 0.2px;
 }
 
 .agent-notice__icon {
@@ -1942,6 +1967,114 @@
 
 .agent-composer.is-running {
   opacity: 0.92;
+}
+
+/* ── 排队中的消息（运行中发的）────────────────────────────
+   贴在 composer 上方、和它连成一张卡片：消息先排队不直接进聊天框，
+   点「立即」才打断模型马上发，也可以就地编辑/删除。 */
+.agent-queue {
+  width: min(100%, 840px);
+  border: 1px solid var(--agent-line);
+  border-bottom: 0;
+  border-radius: 16px 16px 0 0;
+  background: rgba(255, 255, 255, 0.72);
+  /* 盖掉 composer 容器的 5px gap，让两块贴成一体（接缝只留 composer 的上边框） */
+  margin-bottom: -6px;
+}
+
+:root[data-theme='dark'] .agent-queue {
+  background: rgba(28, 40, 58, 0.6);
+}
+
+/* 下面接着队列面板时，圆角只保留下方 */
+.agent-composer.has-queue {
+  border-radius: 0 0 16px 16px;
+}
+
+.agent-queue__list {
+  display: flex;
+  flex-direction: column;
+  /* 大约 3 行，再多就滚动（队列可能排很长） */
+  max-height: 132px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.agent-queue__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 2px 4px 2px 10px;
+  border-radius: 9px;
+}
+
+.agent-queue__item:hover {
+  background: var(--agent-tile);
+}
+
+.agent-queue__text {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text);
+  font-size: 0.86rem;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-queue__input {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--agent-line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.86rem;
+  outline: none;
+}
+
+.agent-queue__input:focus {
+  border-color: rgba(47, 111, 235, 0.55);
+}
+
+.agent-queue__act {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.agent-queue__act:hover {
+  background: var(--agent-tile-strong);
+  color: var(--color-text);
+}
+
+/* 「立即」：主动作，蓝字提示它是打断动作 */
+.agent-queue__act.is-primary {
+  color: var(--color-primary);
+}
+
+.agent-queue__act-icon {
+  font-size: 0.82rem;
+  line-height: 1;
 }
 
 .agent-composer__input {
@@ -2251,8 +2384,13 @@
     display: none;
   }
 
+  /* 窄屏没有悬停，✕ 常显；禁用态仍淡化以示"暂时删不了" */
   .agent-session-item__delete {
     opacity: 1;
+  }
+
+  .agent-session-item__delete:disabled {
+    opacity: 0.35;
   }
 
   .agent-console__bar {

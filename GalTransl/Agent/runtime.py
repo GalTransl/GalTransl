@@ -35,7 +35,13 @@ RUNTIME_EVENT_KEEP = 500
 # 两类：一类是流式增量（一次请求几十条，进 deque 会把 user_message/tool_call
 # 等长期事件挤出 maxlen 窗口，前端刷新后就丢内容）；一类是能从状态快照重建的
 # 实时指标（context_usage），刷新后由 status() 重新给出即可，不必占转录。
-_TRANSIENT_EVENT_TYPES = frozenset({"content_delta", "reasoning_delta", "wait_tick", "context_usage"})
+_TRANSIENT_EVENT_TYPES = frozenset({
+    "content_delta",
+    "reasoning_delta",
+    "wait_tick",
+    "context_usage",
+    "queue",
+})
 
 # ---- 上下文预算 ----
 # 后端配置未指定 contextWindow 时的默认窗口（token）
@@ -59,6 +65,11 @@ CHARS_PER_TOKEN = 4
 LLM_MAX_RETRIES = 10
 LLM_RETRY_INITIAL_DELAY_MS = 1_000
 LLM_RETRY_MAX_DELAY_MS = 8_000
+# 单次请求的「静默」上限（秒）。SDK 默认 600s：一条挂死的连接会让"停止"最多等
+# 10 分钟才生效——回合线程阻塞在 read 上时，主循环没有任何机会去看停止信号。
+# 收到 3 分钟：流式期间每个 chunk 都会重置 read 计时，正常生成不受影响；真挂死
+# 了就尽快失败，上层随即看到停止信号按"用户停止"收尾（或按可重试错误退避重试）。
+LLM_SILENCE_TIMEOUT = 180.0
 
 
 def _log(msg: str, *args: object) -> None:
@@ -289,6 +300,21 @@ class AgentEvent:
 
 
 @dataclass(slots=True)
+class PendingMessage:
+    """排队中的用户消息（模型还没看到）。
+
+    带 id 是为了让界面上的队列面板能精确地"立即发送/编辑/删除"某一条——
+    文本可能重复，不能靠内容定位。队列只在内存里（与 pi 一致）：重启即清空。
+    """
+
+    id: str
+    text: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"id": self.id, "text": self.text}
+
+
+@dataclass(slots=True)
 class AgentState:
     status: str = "idle"  # idle | running | awaiting_input | stopped | failed
     goal: str = ""
@@ -308,10 +334,14 @@ class AgentState:
     step: int = 0
     # 持久的多轮对话历史（OpenAI messages），跨回合保留，reset 才清空
     messages: list[dict[str, Any]] = field(default_factory=list)
-    # 运行中收到的新消息先排队，Agent 在安全点（每次 LLM 调用前）取走；
-    # 若滞留到回合收尾，pending_followup 置位由注册表开新回合消费
-    pending_messages: deque[str] = field(default_factory=deque)
+    # 运行中收到的新消息先排队（界面上显示为 composer 上方的队列面板，不进聊天
+    # 转录）。语义是"等本轮工作做完再发"：本轮收尾时由 _close_turn 写进历史并
+    # 开新回合续跑；用户主动停止则留在队列里等用户决定（不代跑）。
+    pending_messages: deque[PendingMessage] = field(default_factory=deque)
     pending_followup: bool = False
+    # 「立即」发送的排队消息（用户要求打断当前回合、马上把这条发出去）。
+    # 回合收尾时它被当成新回合的第一条消息（其余排队项继续等它们自己的时机）。
+    immediate_message: str = ""
     # 本回合的收尾类型，SSE stream 据此判断是否还有后续（awaiting_input 不算终态）
     turn_end: str = ""
     # 会话身份：一个项目下可以有多个会话，互不干扰
@@ -378,6 +408,15 @@ class AgentRunner:
         if self._store is not None:
             self._store.append_message(message)
 
+    # ---- 排队消息（界面上的队列面板）----
+    def emit_queue(self) -> None:
+        """把当前队列整份推给界面。
+
+        整份推送而不是增量：队列很小，整份最不容易出错，前端也不用做对账。
+        走瞬态事件（刷新后由 status().queued 兜底）。
+        """
+        self._emit("queue", {"queued": [m.to_dict() for m in self.state.pending_messages]})
+
     # ---- OpenAI 客户端 ----
     def _resolve_llm(self) -> None:
         """从 backend_profile_data 解析出 OpenAI 客户端与模型名。"""
@@ -411,9 +450,33 @@ class AgentRunner:
             raise RuntimeError("openai 包未安装，Agent 无法运行") from exc
         # max_retries=0：关掉 SDK 的静默重试，改由 _stream_llm_response 自己按
         # 退避重试，这样每一次重试都能作为事件推给界面（否则用户只看到长时间卡住）。
-        self._openai_client = OpenAI(api_key=token, base_url=base_url, max_retries=0)
+        # timeout：默认 600s 的静默上限太长，停止要等这么久才生效（见 LLM_SILENCE_TIMEOUT）。
+        # 客户端是"每回合一份"：run() 第一步都会走到这里重建。上一回合若被停止打断，
+        # 那份已被 abort_in_flight() 关掉，复用会直接抛 RuntimeError（见该方法注释）。
+        self._openai_client = OpenAI(
+            api_key=token, base_url=base_url, max_retries=0, timeout=_llm_timeout()
+        )
         self._model = model
         _log("OpenAI 客户端就绪")
+
+    def abort_in_flight(self) -> None:
+        """打断在途的 LLM 请求：等价于 pi 的 AbortController.abort()。
+
+        pi 把 AbortSignal 一路传进 fetch，所以「停止」能真实中断在途 HTTP 连接。
+        Python 的 OpenAI SDK 没有可传的 signal，等价手段是关掉这份客户端：httpx 会让
+        阻塞在 socket read 上的请求立刻抛 APIConnectionError（本地用"黑洞"服务实测：
+        close() 0ms 返回、在途读立即被打断）。主循环随即看到停止信号、按「用户停止」
+        收尾，不必干等 read 超时（以前是 600s，现在 LLM_SILENCE_TIMEOUT 兜底）。
+
+        只关当前这一份，且 close() 不阻塞，可以在 HTTP 处理线程里同步调用。
+        """
+        client = self._openai_client
+        if client is None:
+            return
+        try:
+            client.close()
+        except Exception as exc:  # noqa: BLE001 - 关不掉不影响停止语义（仍有静默超时兜底）
+            _log(f"关闭 LLM 客户端失败（忽略，仍按停止收尾）: {exc}")
 
     # ---- 主循环 ----
     def run(self) -> None:
@@ -441,10 +504,11 @@ class AgentRunner:
                 if self.stop_event.is_set():
                     self._end_turn("stopped", {"reason": "用户停止"})
                     return
-                # 运行中用户插话：在这里注入，模型下一步就能看到
-                injected = self._drain_pending_messages()
-                if injected:
-                    self._persist_message({"role": "user", "content": "\n".join(injected)})
+                # 排队消息**不在这里注入**：它们的语义是"等本轮工作做完再发"——
+                # 模型给出最终回复、不再调工具（turn_end=done）之后才轮到它们。
+                # 消费点只有两处：本轮收尾（_close_turn）与「立即」发送（queue_send）。
+                # 以前在这里按"安全点"注入，结果模型刚跑完第一个工具调用就被插进
+                # 一条新消息，把一轮任务劈成两半。
 
                 # 历史过长先压缩，避免下一步请求撑爆上下文窗口
                 self._maybe_compact()
@@ -597,8 +661,9 @@ class AgentRunner:
                 },
             )
         except AgentStopRequested:
-            # 重试退避等待期间用户点了停止：按正常停止收尾，不报错
-            _log("退避重试期间收到停止信号，按用户停止收尾")
+            # 用户点了停止（可能在流式中、退避等待中、工具边界或请求刚被打断）：
+            # 一律按正常停止收尾，不报错。具体是哪一处先看到信号由上面各自的日志说明。
+            _log("收到停止信号，按用户停止收尾")
             self._end_turn("stopped", {"reason": "用户停止"})
         except Exception as exc:  # noqa: BLE001 - 顶层守护
             tb = traceback.format_exc()
@@ -622,18 +687,63 @@ class AgentRunner:
     def _end_turn(self, kind: str, data: dict[str, Any]) -> None:
         """收尾一个回合：发终态事件并落状态。awaiting_input 表示会话还活着。
 
-        排队中的插话在收尾前冲进历史：回合线程已停止，不再有安全点消费它们，
-        直接追加为 user 消息并通知调用方立即开新回合。
+        排队中的消息由 _close_turn 分两种处置：用户主动停止→留在队列面板里等
+        用户决定（不代跑）；其他收尾→写进历史并开新回合消费。
         """
-        queued = self._drain_pending_messages()
-        for msg in queued:
-            self._persist_message({"role": "user", "content": msg})
-        self.state.pending_followup = bool(queued)
+        # 「取插话 → 置 pending_followup → 落终态」必须与 message() 的
+        # 「看状态 → 入队」互斥（共用注册表锁），否则用户恰好在收尾这几毫秒里发的
+        # 消息会被当成"运行中插话"排队（那时状态还是 running），却错过了下面的
+        # drain——消息既没进历史、也没人开新回合，界面上只剩一个孤零零的气泡。
+        registry = getattr(self, "_registry", None)
+        if registry is not None:
+            with registry._lock:
+                self._close_turn(kind, data)
+        else:
+            self._close_turn(kind, data)
+
+    def _close_turn(self, kind: str, data: dict[str, Any]) -> None:
+        """在注册表锁内完成的原子收尾：取插话 + 发终态事件 + 落终态。
+
+        事件与状态的先后沿用原顺序（先事件后状态）：SSE 那条循环是「先取事件、
+        再看状态」，状态若先落终态，它可能在终态事件还没入队时就判定收流。
+        """
+        queued: list[PendingMessage] = []
+        if kind == "stopped":
+            # 照 pi：用户主动停止时不代跑排队消息，它们留在队列面板里等用户决定
+            # （立即发送 / 编辑 / 删除，或直接再发一条）。一个字都不进历史。
+            # 例外是用户点了「立即」的那条：它已被摘出队列、暂存在 immediate_message，
+            # 这里把它作为新回合的第一条消息发出去（见 queue_send）。
+            immediate = self.state.immediate_message
+            self.state.immediate_message = ""
+            if immediate:
+                self._persist_message({"role": "user", "content": immediate})
+                self._emit("user_message", {"message": immediate})
+                # 这次"停止"是「立即」触发的，不是用户按了停止：文案要说清，
+                # 否则界面上看着像"用户把回合停了"
+                data = {**data, "reason": "已按「立即」打断本轮，马上发送这条消息"}
+            self.state.pending_followup = bool(immediate)
+            self.emit_queue()
+        else:
+            # 普通收尾（跑完/出错）：本轮工作已结束，排队的消息现在写进历史并开新
+            # 回合续跑——这正是"等本轮做完再发"的落点。事件先记着、稍后再发
+            # （见函数末尾：要排在 finish 之后，界面上才读得顺）。
+            queued = self._drain_pending_messages()
+            for msg in queued:
+                self._persist_message({"role": "user", "content": msg.text})
+            self.state.pending_followup = bool(queued)
+            # 兜底：drain 之后队列里又冒出消息（锁能挡住 message() 的正常路径，这里防呆）
+            # ——留着让下一回合取走，绝不能把它丢在队列里没人管。
+            if not self.state.pending_followup and self.state.pending_messages:
+                self.state.pending_followup = True
         # 回合结束就把压缩标记清掉，下一回合重新评估上下文用量
         self._compacted_this_turn = False
         # 清掉落盘里的 running 标记：否则下次启动会误判"上次被中断"
         if self._store is not None:
             self._store.append_meta(running=False)
+        # 紧接着就会开 followup 回合（「立即」发送 / 滞留插话）：告诉前端别把运行态
+        # 打回停止——否则停止按钮消失、顶栏显示成"空闲"，而后端其实还在跑。
+        if self.state.pending_followup:
+            data = {**data, "followup": True}
         if kind == "stopped":
             self._emit("stopped", data)
             self.state.status = "stopped"
@@ -641,15 +751,21 @@ class AgentRunner:
             self._emit("finish", data)
             self.state.status = "awaiting_input"
         self.state.turn_end = kind
+        # 排队消息的 user_message 事件排在收尾事件之后：界面上才是
+        # 「本轮最终回复 → 你发的新消息 → 下一轮」。反过来的话，本轮最终回复会
+        # 渲染在你这条新消息的下面（其实是本轮先说的）。
+        for msg in queued:
+            self._emit("user_message", {"message": msg.text})
 
-    def _drain_pending_messages(self) -> list[str]:
-        """取走运行期间用户插话（无插话返回空列表）。"""
+    def _drain_pending_messages(self) -> list[PendingMessage]:
+        """取走队列里等待被模型看到的消息（无则返回空列表），并同步界面面板。"""
         if not self.state.pending_messages:
             return []
-        msgs: list[str] = []
+        msgs: list[PendingMessage] = []
         while self.state.pending_messages:
             msgs.append(self.state.pending_messages.popleft())
         _log(f"  💬 注入用户插话 x{len(msgs)}")
+        self.emit_queue()  # 面板上这几条要撤掉（它们已进转录）
         return msgs
 
     # ---- 助手消息（转录里思考/正文的唯一来源）----
@@ -706,7 +822,10 @@ class AgentRunner:
             except Exception as exc:  # noqa: BLE001 - 按分类决定是否重试
                 info = _classify_llm_error(exc)
                 if self.stop_event.is_set():
-                    # 请求失败的同时用户在停止：按停止收尾，不要当成错误弹给用户
+                    # 请求失败的同时用户已请求停止：按停止收尾，不要当成错误弹给用户。
+                    # 注意这条路径没有退避重试——停止优先于重试，日志也如实区分
+                    # （以前复用"退避重试期间收到停止信号"的文案，容易让人以为没重试）。
+                    _log("请求失败且已收到停止信号，按用户停止收尾（不重试）")
                     raise AgentStopRequested() from exc
                 if not info["retriable"] or attempt >= LLM_MAX_RETRIES:
                     if attempt > 0:
@@ -1065,6 +1184,20 @@ def _parse_context_window(raw: Any) -> int:
     if value < 1000:
         return DEFAULT_CONTEXT_WINDOW
     return value
+
+
+def _llm_timeout() -> Any:
+    """单次 LLM 请求的超时（连接/写入/池收紧，读用静默上限）。
+
+    用 SDK 自己的 Timeout 类构造：openai>=2 起它不再是 `httpx.Timeout` 的别名
+    （内部换成 httpx2），直接传 httpx.Timeout 虽然运行时能用、但跨版本不保证。
+    老版本 SDK 没有这个类时退化成秒数（四档同值，仍有兜底作用）。
+    """
+    try:
+        from openai import Timeout
+    except ImportError:  # pragma: no cover - 老版本 SDK
+        return LLM_SILENCE_TIMEOUT
+    return Timeout(connect=10.0, read=LLM_SILENCE_TIMEOUT, write=30.0, pool=10.0)
 
 
 def _profile_context_window(profile: dict[str, Any] | None) -> int:
@@ -3034,6 +3167,8 @@ class AgentRuntime:
         self._runners: dict[str, dict[str, AgentRunner]] = {}
         self._stop_events: dict[str, dict[str, threading.Event]] = {}
         self._lock = threading.RLock()  # 可重入锁：允许在持锁时调用本类其它方法
+        # 排队消息的 id 序号（界面按 id 定位某一条做"立即/编辑/删除"）
+        self._queue_seq = 0
 
     @staticmethod
     def _key(project_dir: str) -> str:
@@ -3070,6 +3205,9 @@ class AgentRuntime:
             event = self._stop_events.get(key, {}).get(session_id)
             if event:
                 event.set()
+            runner = self._runners.get(key, {}).get(session_id)
+            if runner is not None:
+                runner.abort_in_flight()  # 在途请求要立刻断，否则线程还挂在 read 上
             self._states.get(key, {}).pop(session_id, None)
             self._runners.get(key, {}).pop(session_id, None)
             self._stop_events.get(key, {}).pop(session_id, None)
@@ -3090,6 +3228,87 @@ class AgentRuntime:
             store = SessionStore(project_dir, session_id)
             store.append_meta(title=clean, project_dir=project_dir)
         return {"status": "ok", "session_id": session_id, "title": clean}
+
+    # ---- 排队消息（界面队列面板的操作）----
+    def _new_pending(self, text: str) -> PendingMessage:
+        """生成带唯一 id 的排队条目。id 只需进程内唯一（队列只在内存里）。"""
+        self._queue_seq += 1
+        return PendingMessage(id=f"q{self._queue_seq}", text=text)
+
+    @staticmethod
+    def _pop_queued(state: AgentState, item_id: str) -> PendingMessage | None:
+        """按 id 从队列里摘出一条（不存在返回 None）。"""
+        for i, item in enumerate(state.pending_messages):
+            if item.id == item_id:
+                del state.pending_messages[i]
+                return item
+        return None
+
+    def _queue_ctx(
+        self, project_dir: str, session_id: str | None
+    ) -> tuple[str, str | None, AgentState | None, AgentRunner | None]:
+        """队列操作共用的上下文（state/runner 可能为 None）。"""
+        key = self._key(project_dir)
+        sid = self._resolve_session_id(project_dir, session_id)
+        state: AgentState | None = None
+        runner: AgentRunner | None = None
+        if sid:
+            state = self._states.get(key, {}).get(sid)
+            runner = self._runners.get(key, {}).get(sid)
+        return key, sid, state, runner
+
+    def queue_delete(self, project_dir: str, item_id: str, session_id: str | None = None) -> dict[str, Any]:
+        """删掉一条排队消息（模型还没看到的那条）。"""
+        with self._lock:
+            _key, sid, state, runner = self._queue_ctx(project_dir, session_id)
+            if state is not None and self._pop_queued(state, item_id) is not None:
+                _log(f"删除排队消息: session={sid} id={item_id}")
+                if runner is not None:
+                    runner.emit_queue()
+            return self.status(project_dir, sid)
+
+    def queue_update(
+        self, project_dir: str, item_id: str, text: str, session_id: str | None = None
+    ) -> dict[str, Any]:
+        """就地改一条排队消息的文本（位置不变，仍排在原来的次序上）。"""
+        clean = (text or "").strip()
+        if not clean:
+            raise ValueError("排队消息不能为空")
+        with self._lock:
+            _key, sid, state, runner = self._queue_ctx(project_dir, session_id)
+            if state is not None:
+                for item in state.pending_messages:
+                    if item.id == item_id:
+                        item.text = clean
+                        if runner is not None:
+                            runner.emit_queue()
+                        break
+            return self.status(project_dir, sid)
+
+    def queue_send(self, project_dir: str, item_id: str, session_id: str | None = None) -> dict[str, Any]:
+        """「立即」：打断当前回合，把这条排队消息马上发出去。
+
+        回合在跑 → 摘出队列存进 immediate_message 再 stop()（顺带打断在途请求），
+        回合线程收尾时把它作为新回合的第一条消息落历史、发 user_message；
+        其余排队项继续排队，等它们自己的时机（下次本轮收尾）。
+        回合已结束 → 直接当普通消息开新回合。
+        """
+        with self._lock:
+            _key, sid, state, runner = self._queue_ctx(project_dir, session_id)
+            if state is None:
+                return self.status(project_dir, sid)
+            item = self._pop_queued(state, item_id)
+            if item is None:
+                return self.status(project_dir, sid)
+            _log(f"立即发送排队消息: session={sid} id={item_id} msg={item.text[:60]}")
+            if state.status == "running":
+                state.immediate_message = item.text
+                if runner is not None:
+                    runner.emit_queue()
+                self.stop(project_dir, sid)
+            else:
+                self.message(project_dir, item.text, sid)
+            return self.status(project_dir, sid)
 
     def _resolve_session_id(self, project_dir: str, session_id: str | None) -> str | None:
         """缺省 session_id 时取最近活跃的会话（兼容旧前端只传项目）。"""
@@ -3259,8 +3478,10 @@ class AgentRuntime:
         """向会话追加一条用户消息。
 
         - 会话不存在（内存与磁盘都没有）：报错（前端应先 start/create）。
-        - 正在运行：发 user_message 事件 + 插话排队，Agent 在下一个 LLM 调用前
-          读到；若回合恰好正在收尾，插话转成 followup，自动开新回合消费。
+        - 正在运行：进队列（界面显示在 composer 上方的队列面板里），**不发**
+          user_message 事件；等本轮工作做完（模型不再调工具、给出最终回复）由
+          收尾流程写进历史并开新回合。想提前发就用 queue_send（「立即」，会打断
+          当前回合）。
         - 已结束（awaiting_input / stopped / failed 等旧状态，含重启恢复的）：
           追加历史并开新回合继续跑。
         """
@@ -3273,12 +3494,17 @@ class AgentRuntime:
                 state = self._restore(project_dir, sid) if sid else None
             if state is None or not state.messages:
                 raise ValueError("该项目还没有 Agent 会话，请先发送第一条消息启动")
+            # 会话存在说明 sid 必然有值（state 就是按 sid 取到的），这里显式收窄
+            assert sid is not None
 
             if state.status == "running":
-                state.pending_messages.append(text)
+                # 排队期间只算"待发"：不进历史、也不发 user_message 事件——界面上
+                # 显示在 composer 上方的队列面板里（emit_queue）。真正被模型看到时
+                # 才由消费点补发事件（run 的注入点 / _close_turn）。
+                state.pending_messages.append(self._new_pending(text))
                 runner = self._runners.get(key, {}).get(sid)
                 if runner is not None:
-                    runner._emit("user_message", {"message": text})
+                    runner.emit_queue()
                 _log(f"Agent 运行中，消息已排队: session={sid} msg={text[:60]}")
                 return self.status(project_dir, sid)
 
@@ -3309,15 +3535,23 @@ class AgentRuntime:
             return self.status(project_dir, sid)
 
     def stop(self, project_dir: str, session_id: str | None = None) -> dict[str, Any]:
+        """用户点停止：置位信号 + 打断在途请求，收尾仍由回合线程自己做。"""
         key = self._key(project_dir)
         with self._lock:
             sid = self._resolve_session_id(project_dir, session_id)
             event = self._stop_events.get(key, {}).get(sid) if sid else None
             if event:
                 event.set()
-            # 不直接改状态：回合线程（可能正阻塞在一次 LLM/工具调用里）稍后
-            # 自己收尾落 stopped，并消费排队中的插话。期间 status 保持 running，
-            # 此时到达的 message() 会走插话路径，最终由 followup 消费。
+            # 只置位事件不够：请求可能正阻塞在 socket read 上，主循环根本没机会看
+            # 信号（这正是以前"点了停止要等 1-2 分钟才收尾"的原因）。照 pi 的做法
+            # 主动打断在途请求，停止才能秒级生效。
+            state = self._states.get(key, {}).get(sid) if sid else None
+            runner = self._runners.get(key, {}).get(sid) if sid else None
+            if runner is not None and (state is None or state.status == "running"):
+                runner.abort_in_flight()
+            # 不直接改状态：回合线程自己收尾落 stopped，并消费排队中的插话。
+            # 期间 status 保持 running，此时到达的 message() 会走插话路径，
+            # 最终由 followup 消费。
         return self.status(project_dir, sid)
 
     def reset(self, project_dir: str, session_id: str | None = None) -> dict[str, Any]:
@@ -3329,6 +3563,9 @@ class AgentRuntime:
             if event:
                 event.set()
             if sid:
+                runner = self._runners.get(key, {}).get(sid)
+                if runner is not None:
+                    runner.abort_in_flight()  # 同 stop()：在途请求要立刻断
                 self._states.get(key, {}).pop(sid, None)
                 self._runners.get(key, {}).pop(sid, None)
                 self._stop_events.get(key, {}).pop(sid, None)
@@ -3389,6 +3626,8 @@ class AgentRuntime:
                     ),
                     "window_tokens": state.context_window,
                 },
+                # 排队中的消息：队列面板的数据源（实时变更走 queue 事件）
+                "queued": [m.to_dict() for m in state.pending_messages],
                 "events": [e.to_dict() for e in state.events],
             }
 
