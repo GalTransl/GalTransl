@@ -145,7 +145,6 @@
 .app-layout--custom-background .field textarea,
 .app-layout--custom-background .settings-number-row__control input,
 .app-layout--custom-background .settings-number-row__control select,
-.app-layout--custom-background .sidebar__project-close,
 .app-layout--custom-background .sidebar__project-confirm-no,
 .app-layout--custom-background .sidebar__toggle-btn {
   background: rgba(255, 255, 255, calc(var(--custom-bg-surface-opacity-resolved) + 0.18));
@@ -321,7 +320,6 @@
 :root[data-theme='dark'] .app-layout--custom-background .field textarea,
 :root[data-theme='dark'] .app-layout--custom-background .settings-number-row__control input,
 :root[data-theme='dark'] .app-layout--custom-background .settings-number-row__control select,
-:root[data-theme='dark'] .app-layout--custom-background .sidebar__project-close,
 :root[data-theme='dark'] .app-layout--custom-background .sidebar__project-confirm-no,
 :root[data-theme='dark'] .app-layout--custom-background .sidebar__toggle-btn {
   background: rgba(20, 30, 43, calc(var(--custom-bg-surface-opacity-resolved) + 0.2));
