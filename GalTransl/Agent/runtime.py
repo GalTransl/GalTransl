@@ -672,11 +672,12 @@ class AgentRunner:
                         self._persist_message({"role": "tool", "tool_call_id": call_id, "content": json.dumps({"error": err}, ensure_ascii=False)})
                         continue
 
-                    args_preview = json.dumps(args, ensure_ascii=False)
+                    safe_args = _sanitize_tool_args(args)
+                    args_preview = json.dumps(safe_args, ensure_ascii=False)
                     if len(args_preview) > 160:
                         args_preview = args_preview[:157] + "…"
                     _log(f"  🔧 工具调用: {name}({args_preview})")
-                    self._emit("tool_call", {"id": call_id, "name": name, "arguments": args})
+                    self._emit("tool_call", {"id": call_id, "name": name, "arguments": safe_args})
                     started = time.time()
                     # 让工具（wait 等）在事件里带上本次调用的 id：界面据此把倒计时挂到
                     # 对应的那一行上。不能靠"找第一个 wait 行"——同一个活动组里等过几次
@@ -1428,6 +1429,21 @@ def _estimate_message_tokens(message: dict[str, Any]) -> int:
     return total_chars // CHARS_PER_TOKEN + 4
 
 
+# 工具参数里"含密钥"的键：emit 成事件/写日志前换成占位。模型自己仍能传真实值
+# （它需要真配置才能起任务），但界面上的工具卡片与会话文件不该出现明文 token。
+_SECRET_TOOL_ARGS = ("backend_profile_data",)
+
+
+def _sanitize_tool_args(args: dict[str, Any]) -> dict[str, Any]:
+    """工具参数 → 可展示/落盘的副本（含密钥的字段换成占位）。"""
+    if not any(name in args for name in _SECRET_TOOL_ARGS):
+        return args
+    return {
+        **args,
+        **{name: "<含 token 的后端配置，已省略>" for name in _SECRET_TOOL_ARGS if name in args},
+    }
+
+
 def _reasoning_echo(acc: dict[str, Any] | None) -> dict[str, str]:
     """这一轮的思考内容 → 要随 assistant 消息回传给 provider 的键值对。
 
@@ -1769,7 +1785,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "start_translation",
-            "description": "提交一个翻译任务。translator 取值：ForGal-json/ForGal-tsv/ForNovel（主翻译）；GenDic（生成GPT字典）；dump-name（导出人名表）；rebuilda（用字典重建缓存+结果，跳过翻译，复核时用这个才能在 list_problems 看到变化）；rebuildr（只重建结果 json，不更新缓存，一般不用）。会复用当前选定的后端配置。传 files 只翻译指定的输入文件（试译时用：只翻一两个文件验证文风）。",
+            "description": "提交一个翻译任务。translator 取值：ForGal-json/ForGal-tsv/ForNovel（主翻译）；GenDic（生成GPT字典）；dump-name（导出人名表）；rebuilda（用字典重建缓存+结果，跳过翻译，复核时用这个才能在 list_problems 看到变化）；rebuildr（只重建结果 json，不更新缓存，一般不用）。任务用的是「翻译任务会用」的那份后端（项目选择 → 否则全局「翻译器默认」），不是本 Agent 会话自己那份；返回里的 backend 会写明实际用的模型。传 files 只翻译指定的输入文件（试译时用：只翻一两个文件验证文风）。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2246,8 +2262,9 @@ def _backend_overview(runner: AgentRunner) -> dict[str, Any]:
 
     项目配置文件里的 backendSpecific 常是旧值（后端还会被全局后端配置覆盖），
     所以两份都以"真正会被使用"的配置为准：
-    - agent：runner 手里那份（点「开始翻译」时发出去的就是它）；
-    - translator：前端送来的项目选择（没有项目选择时就是全局"翻译器默认"）。
+    - agent：runner 手里那份（Agent 自己这一会话用的）；
+    - translator：前端送来的项目选择（没有项目选择时就是全局"翻译器默认"）——
+      启动翻译任务用的就是它（见 _tool_start_translation）。
     """
     state = runner.state
     return {
@@ -2929,14 +2946,23 @@ def _tool_save_name_table(runner: AgentRunner, args: dict[str, Any]) -> Any:
 
 
 def _tool_start_translation(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """启动翻译任务。
+
+    后端必须用**翻译任务会用的那份**（前端按「项目选择 → 否则全局『翻译器默认』」送来，
+    见 state.translator_profile_data），不能用 Agent 自己那份——否则任务会拿着 Agent 的
+    模型跑，可用性检测也跟着测错模型（用户就是这么发现的）。只有前端没送来时才回落到
+    Agent 那份，并在返回里说明。
+    """
     translator = str(args.get("translator", "")).strip()
     if not translator:
         raise AgentToolError("translator is required")
+    state = runner.state
+    profile = state.translator_profile_data or state.backend_profile_data
     body = {
-        "project_dir": runner.state.project_dir,
-        "config_file_name": runner.state.config_file_name,
+        "project_dir": state.project_dir,
+        "config_file_name": state.config_file_name,
         "translator": translator,
-        "backend_profile_data": runner.state.backend_profile_data,
+        "backend_profile_data": profile,
     }
     files = args.get("files")
     if files is not None:
@@ -2946,12 +2972,22 @@ def _tool_start_translation(runner: AgentRunner, args: dict[str, Any]) -> Any:
         if not body["input_files"]:
             raise AgentToolError("files 里没有有效的文件名")
     result = runner._http_post("/api/jobs", body)
-    return {
+    used = _backend_summary(profile, state.translator_profile_name)
+    out: dict[str, Any] = {
         "job_id": result.get("job_id"),
         "status": result.get("status"),
         "translator": translator,
+        # 实际用哪份后端起任务（名字/类型/模型），出问题时一眼能对上
+        "backend": used,
         **({"files": body["input_files"]} if files is not None else {}),
     }
+    if not state.translator_profile_data:
+        out["note"] = (
+            "没拿到「翻译任务会用」的后端配置（前端没随消息送 translator_profile_data，"
+            "通常是项目选择或全局「翻译器默认」那份），"
+            f"本次用的是 Agent 自己的后端（{used['name'] or used['type'] or '未知'}）。"
+        )
+    return out
 
 
 def _tool_stop_translation(runner: AgentRunner, _args: dict[str, Any]) -> Any:
