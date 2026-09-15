@@ -2,7 +2,7 @@
  *
  *  配置文件结构可能是 OpenAI-Compatible（tokens[0].endpoint / modelName）或
  *  SakuraLLM（endpoints[0] / rewriteModelName），这里统一取出来给 UI 展示。
- *  与「翻译后端配置」页的卡片口径保持一致。
+ *  与「模型设置」页的卡片口径保持一致。
  */
 
 const MISSING_PROFILE_META = '—';

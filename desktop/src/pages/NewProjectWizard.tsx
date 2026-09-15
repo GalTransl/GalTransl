@@ -525,8 +525,8 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
         <span className="field__hint">
           {selectedBackend === '__default__'
             ? defaultBackendName
-              ? `当前默认配置为「${defaultBackendName}」，可在「翻译后端配置」页面修改`
-              : '尚未设置默认配置，请在「翻译后端配置」页面设置'
+              ? `当前默认配置为「${defaultBackendName}」，可在「模型设置」页面修改`
+              : '尚未设置默认配置，请在「模型设置」页面设置'
             : selectedBackend
               ? `翻译时将使用全局配置「${selectedBackend}」覆盖项目后端设置`
               : '将忽略全局配置，使用项目自身后端设置'}
@@ -534,7 +534,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
       </div>
       <div className="wizard-tip-card">
         <strong>推荐策略</strong>
-        <span>如果没有翻译后端可以先去翻译后端配置设置中新建。</span>
+        <span>如果没有翻译后端可以先去模型设置中新建。</span>
       </div>
     </Panel>
   );

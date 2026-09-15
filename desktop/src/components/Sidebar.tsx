@@ -728,11 +728,11 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
           className={({ isActive }) =>
             `sidebar__nav-item${!hasBackendProfiles ? ' sidebar__nav-item--notice' : ''} ${isActive ? 'sidebar__nav-item--active' : ''}`
           }
-          title="翻译后端配置"
+          title="模型设置"
         >
           <span className="sidebar__nav-icon">🤖</span>
-          {expanded && <span className="sidebar__nav-label">翻译后端配置</span>}
-          {!hasBackendProfiles && <span className="sidebar__nav-notice-dot" aria-label="尚未配置翻译后端" />}
+          {expanded && <span className="sidebar__nav-label">模型设置</span>}
+          {!hasBackendProfiles && <span className="sidebar__nav-notice-dot" aria-label="尚未配置模型设置" />}
         </NavLink>
 
         <NavLink

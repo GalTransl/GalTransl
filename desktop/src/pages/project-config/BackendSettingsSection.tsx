@@ -49,8 +49,8 @@ export function BackendSettingsSection({
           <span className="field__hint">
             {selectedProfile === '__default__'
               ? defaultProfileName
-                ? `当前默认配置为「${defaultProfileName}」，可在「翻译后端配置」页面修改`
-                : '尚未设置默认配置，请在「翻译后端配置」页面设置'
+                ? `当前默认配置为「${defaultProfileName}」，可在「模型设置」页面修改`
+                : '尚未设置默认配置，请在「模型设置」页面设置'
               : selectedProfile
                 ? `翻译时将使用全局配置「${selectedProfile}」覆盖项目后端设置`
                 : '将忽略全局配置，使用项目自身的后端设置'}
@@ -61,7 +61,7 @@ export function BackendSettingsSection({
           <InlineFeedback
             tone="info"
             title={`当前使用全局配置：${resolvedProfile}`}
-            description="翻译时将使用该配置覆盖项目后端设置。如需修改配置内容，请前往「翻译后端配置」页面。"
+            description="翻译时将使用该配置覆盖项目后端设置。如需修改配置内容，请前往「模型设置」页面。"
           />
         ) : (
           <BackendConfigEditor
