@@ -358,6 +358,44 @@
   background: var(--color-primary);
 }
 
+/* 侧边栏状态灯（常亮、不闪）：运行中=蓝灯，跑完没看过=绿灯，出错=橙灯。
+   位置就在行尾 ✕ 那个点上——✕ 平时是隐形的（悬停才显形），所以那里平时是灯；
+   悬停时灯让位给 ✕（两个换班，不叠在一起）。点开该会话即熄灭；运行中的那一行
+   同时会禁用它自己的 ✕。 */
+.agent-session-item__light {
+  position: absolute;
+  right: 12px; /* 与 ✕ 中心对齐 */
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+/* 键盘 Tab 聚焦到该行的 ✕ 时也要让位（✕ 此时是显形的） */
+.agent-session-item:hover .agent-session-item__light,
+.agent-session-item:focus-within .agent-session-item__light {
+  opacity: 0;
+}
+
+.agent-session-item__light.is-running {
+  background: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.16);
+}
+
+.agent-session-item__light.is-done {
+  background: var(--color-success);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.16);
+}
+
+.agent-session-item__light.is-failed {
+  background: var(--color-warning);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.16);
+}
+
 .agent-session-item__main {
   display: flex;
   align-items: center;
@@ -606,18 +644,7 @@
   white-space: nowrap;
 }
 
-/* 顶栏里的当前会话标题：次要信息，长了省略 */
-.agent-console__bar-session {
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-text-muted);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-/* 项目路径 tick 行（对标 ptv2-cockpit__tick：等宽 + 圆点） */
+/* 项目路径 tick 行（等宽字：项目名 + 完整路径） */
 .agent-console__project-static {
   display: flex;
   align-items: center;
@@ -627,16 +654,6 @@
   font-family: var(--agent-mono);
   font-size: 11px;
   cursor: default;
-}
-
-.agent-console__project-static::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  flex: none;
-  border-radius: 50%;
-  background: rgba(148, 163, 184, 0.6);
-  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
 }
 
 .agent-console__project-name {
@@ -700,7 +717,9 @@
 .agent-status-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  /* 固定一个够放下最长文案（「等待指令」）的宽度：状态变化时右侧图标不跟着左右跳 */
+  min-width: 64px;
   padding: 2px 9px;
   border-radius: 999px;
   background: var(--agent-tile);
@@ -711,21 +730,9 @@
   flex: none;
 }
 
-.agent-status-pill__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  flex: none;
-}
-
 .agent-status-pill--running {
   color: var(--color-primary);
   background: var(--color-primary-soft);
-}
-
-.agent-status-pill--running .agent-status-pill__dot {
-  animation: agent-pulse 1.1s ease-in-out infinite;
 }
 
 .agent-status-pill--done {
@@ -2409,6 +2416,12 @@
     opacity: 1;
   }
 
+  /* ✕ 常显了，状态灯就挪到它左边，别叠在一起（这里也不会触发 hover 让位） */
+  .agent-session-item__light {
+    right: 30px;
+    opacity: 1;
+  }
+
   .agent-session-item__delete:disabled {
     opacity: 0.35;
   }
@@ -2443,7 +2456,6 @@
 @media (prefers-reduced-motion: reduce) {
   .agent-hero__mark,
   .agent-working__dots span,
-  .agent-status-pill--running .agent-status-pill__dot,
   .agent-activity__label.is-running::after,
   .agent-reasoning__label.is-running::after,
   .agent-tool__state.is-running .agent-tool__state-dot,

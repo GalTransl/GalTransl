@@ -29,6 +29,7 @@ import {
   createAgentSession,
   deleteAgentSession,
   deleteAgentQueued,
+  getAgentTranslatorBackendContext,
   updateAgentQueued,
   sendAgentQueuedNow,
   type AgentContextUsage,
@@ -694,6 +695,8 @@ function AgentSessionSidebar({
   activeSessionId,
   collapsed,
   disabled,
+  activeRunning,
+  unseenLights,
   onCreateBlank,
   onCreateInProject,
   onToggleProject,
@@ -706,6 +709,10 @@ function AgentSessionSidebar({
   activeSessionId: string;
   collapsed: Record<string, boolean>;
   disabled: boolean;
+  /** 当前活动会话自己的回合是否在跑（本地状态，比后端列表快一拍） */
+  activeRunning: boolean;
+  /** 跑完但还没被点开看过的会话：session_id -> done / failed */
+  unseenLights: Record<string, 'done' | 'failed'>;
   onCreateBlank: () => void;
   onCreateInProject: (dir: string) => void;
   onToggleProject: (dir: string) => void;
@@ -792,39 +799,62 @@ function AgentSessionSidebar({
                       {list.length === 0 ? (
                         <div className="agent-sessions__group-empty">暂无会话</div>
                       ) : (
-                        list.map((s) => (
-                          <div
-                            key={s.session_id}
-                            className={`agent-session-item${
-                              isGroupActive && s.session_id === activeSessionId ? ' is-active' : ''
-                            }`}
-                          >
-                            <button
-                              type="button"
-                              className="agent-session-item__main"
-                              onClick={() => onSelectSession(dir, s.session_id)}
-                              title={s.title}
+                        list.map((s) => {
+                          const isRowActive = isGroupActive && s.session_id === activeSessionId;
+                          const isRowRunning = s.status === 'running' || (isRowActive && activeRunning);
+                          // 灯：工作中蓝灯常亮；跑完但没被你点开看过亮绿灯/橙灯（橙=失败）；
+                          // 正看着的那一行不亮灯（点开即熄灭，见 AgentPage 的 unseenLights）
+                          const light = isRowRunning
+                            ? 'running'
+                            : isRowActive
+                              ? ''
+                              : unseenLights[s.session_id] || '';
+                          return (
+                            <div
+                              key={s.session_id}
+                              className={`agent-session-item${isRowActive ? ' is-active' : ''}`}
                             >
-                              <span className="agent-session-item__title">{s.title}</span>
-                              <span className="agent-session-item__time">
-                                {formatSessionTime(s.updated_at)}
-                              </span>
-                            </button>
-                            <button
-                              type="button"
-                              className="agent-session-item__delete"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onDeleteSession(dir, s);
-                              }}
-                              disabled={disabled}
-                              title="删除该会话"
-                              aria-label={`删除会话 ${s.title}`}
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        ))
+                              <button
+                                type="button"
+                                className="agent-session-item__main"
+                                onClick={() => onSelectSession(dir, s.session_id)}
+                                title={s.title}
+                              >
+                                <span className="agent-session-item__title">{s.title}</span>
+                                <span className="agent-session-item__time">
+                                  {formatSessionTime(s.updated_at)}
+                                </span>
+                              </button>
+                              {light ? (
+                                <span
+                                  className={`agent-session-item__light is-${light}`}
+                                  title={
+                                    light === 'running'
+                                      ? '正在运行'
+                                      : light === 'failed'
+                                        ? '已结束：出错'
+                                        : '已结束'
+                                  }
+                                  aria-hidden
+                                />
+                              ) : null}
+                              <button
+                                type="button"
+                                className="agent-session-item__delete"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onDeleteSession(dir, s);
+                                }}
+                                // 正在跑的那个会话不能删（灯亮着）：先停止再删
+                                disabled={isRowRunning}
+                                title={isRowRunning ? '正在运行，停止后才能删除' : '删除该会话'}
+                                aria-label={`删除会话 ${s.title}`}
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          );
+                        })
                       )}
                     </div>
                   </div>
@@ -937,6 +967,12 @@ export function AgentPage() {
   const [sessionsByProject, setSessionsByProject] = useState<Record<string, AgentSessionMeta[]>>({});
   // 侧边栏每个项目分组的折叠态（默认当前活动项目展开，其余折叠）
   const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
+  // 侧边栏状态灯里"跑完了但还没点开看过"的那些：session_id -> done（绿）/ failed（橙）。
+  // 工作中的会话不在这里——它的蓝灯直接由后端 status（或本会话的 running）推出来。
+  // 用户点开该会话（激活）就把它清掉，灯随之消失。
+  const [unseenLights, setUnseenLights] = useState<Record<string, 'done' | 'failed'>>({});
+  // 上一次看到的各会话状态：用来发现"刚才还在跑、现在不跑了"的那个收尾瞬间
+  const prevSessionStatusRef = useRef<Record<string, string>>({});
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
     const first = projectOptions[0];
     return first ? loadActiveSessionId(first) : '';
@@ -978,6 +1014,13 @@ export function AgentPage() {
     activeSessionRef.current = activeSessionId;
     // 切会话时重置"已临时改过"标记，让后端配置回到跟随 Agent 默认
     profileTouchedRef.current = false;
+    // 点开（激活）这个会话 → 它的状态灯熄灭（"跑完了，等你回来看"的信号已经送达）
+    setUnseenLights((prev) => {
+      if (!(activeSessionId in prev)) return prev;
+      const next = { ...prev };
+      delete next[activeSessionId];
+      return next;
+    });
   }, [activeSessionId]);
   // 当前活动项目，供回调读取（refreshSessions 判断是否接管 activeSessionId）
   const effectiveProjectRef = useRef(projectDir);
@@ -1016,6 +1059,29 @@ export function AgentPage() {
       try {
         const list = await listAgentSessions(dir);
         setSessionsByProject((prev) => ({ ...prev, [dir]: list }));
+        // 状态灯：和后端状态比对，找出"刚跑完"的会话（上一次 running、这次不是了）。
+        // 你正看着它（当前项目 + 当前会话）就当作已读，不亮灯。
+        const prevStatuses = prevSessionStatusRef.current;
+        const nextStatuses: Record<string, string> = {};
+        const justFinished: Record<string, 'done' | 'failed'> = {};
+        for (const s of list) {
+          const status = s.status || '';
+          nextStatuses[s.session_id] = status;
+          if (prevStatuses[s.session_id] === 'running' && status !== 'running') {
+            justFinished[s.session_id] = status === 'failed' ? 'failed' : 'done';
+          }
+        }
+        prevSessionStatusRef.current = nextStatuses;
+        if (Object.keys(justFinished).length) {
+          setUnseenLights((prev) => {
+            const merged = { ...prev };
+            for (const [sid, light] of Object.entries(justFinished)) {
+              if (dir === effectiveProjectRef.current && sid === activeSessionRef.current) delete merged[sid];
+              else merged[sid] = light;
+            }
+            return merged;
+          });
+        }
         // 仅当 dir 恰好是当前活动项目时才接管 activeSessionId 选择，
         // 否则（点别的项目的 + / 删了另一项目的会话）不强改主区。
         if (dir === effectiveProjectRef.current) {
@@ -1038,6 +1104,22 @@ export function AgentPage() {
     },
     [],
   );
+
+  /* 有会话在跑时轻量轮询会话列表：侧边栏的蓝灯要跟着后端的实际状态走——切到别的会话
+     （或别的项目）后，原来那个会话跑完了也得收到，灯才能从蓝转绿/橙。没有会话在跑
+     就停掉轮询，不做无谓请求。 */
+  useEffect(() => {
+    const dirs = Object.keys(sessionsByProject).filter((dir) =>
+      (sessionsByProject[dir] || []).some((s) => s.status === 'running'),
+    );
+    // 当前活动会话自己的 running 也要算上：它刚开跑、列表里可能还没反映出来
+    if (running && effectiveProject && !dirs.includes(effectiveProject)) dirs.push(effectiveProject);
+    if (!dirs.length) return;
+    const timer = window.setInterval(() => {
+      for (const dir of dirs) void refreshSessions(dir, undefined, false);
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [running, sessionsByProject, effectiveProject, refreshSessions]);
 
   /* Project change: adopt the remembered session for this project, load its
      session list into the grouped map (without clobbering other projects),
@@ -1277,7 +1359,7 @@ export function AgentPage() {
     }
     const profile = getBackendProfile(backendProfileName);
     if (!profile) {
-      setError('请先选择一个翻译后端配置（并在「翻译后端配置」页填写 token/模型）');
+      setError('请先选择一个翻译后端配置（并在「模型设置」页填写 token/模型）');
       setProfileMenuOpen(true);
       return;
     }
@@ -1316,6 +1398,12 @@ export function AgentPage() {
         setActiveSessionId(sid);
         saveActiveSessionId(effectiveProject, sid);
       }
+      // 后端上下文：配置名只存在前端 localStorage，后端拿不到；而「了解项目」要
+      // 如实报出"本会话在用的后端"和"翻译任务会用的后端"，所以随消息一起送过去。
+      const backendContext = {
+        ...(backendProfileName ? { backend_profile_name: backendProfileName } : {}),
+        ...getAgentTranslatorBackendContext(effectiveProject),
+      };
       if (!hasBackendSessionRef.current) {
         // 空会话：第一条消息启动首个回合
         const snap = await startAgent({
@@ -1324,6 +1412,7 @@ export function AgentPage() {
           backend_profile_data: profile,
           goal: text,
           session_id: sid,
+          ...backendContext,
         });
         hasBackendSessionRef.current = true;
         if (snap.session_id) {
@@ -1336,7 +1425,7 @@ export function AgentPage() {
       } else {
         // 已有会话：运行中→进队列（面板显示）；已结束→同会话继续下一回合。
         // 返回值就是最新状态快照，队列面板据此立刻更新。
-        const snap = await sendAgentMessage(effectiveProject, text, sid);
+        const snap = await sendAgentMessage(effectiveProject, text, sid, backendContext);
         setQueued(snap.queued || []);
       }
       void refreshSessions(effectiveProject, sid);
@@ -1622,9 +1711,7 @@ export function AgentPage() {
   const timeline = useMemo(() => buildTimeline(events), [events]);
   const hasSession = events.length > 0;
   const canSend = Boolean(projectDir) && Boolean(backendProfileName) && goal.trim().length > 0 && !sending;
-  const activeTitle =
-    (sessionsByProject[effectiveProject] || []).find((s) => s.session_id === activeSessionId)?.title || '';
-  // 展示「后端配置文件名/模型名」：模型名从当前配置里取，与「翻译后端配置」页同一口径
+  // 展示「后端配置文件名/模型名」：模型名从当前配置里取，与「模型设置」页同一口径
   const backendProfileLabel = useMemo(
     () => (backendProfileName ? formatProfileLabel(backendProfileName, getBackendProfile(backendProfileName)) : ''),
     [backendProfileName],
@@ -1639,6 +1726,8 @@ export function AgentPage() {
         activeSessionId={activeSessionId}
         collapsed={collapsedProjects}
         disabled={running}
+        activeRunning={running}
+        unseenLights={unseenLights}
         onCreateBlank={() => void handleCreateBlankSession()}
         onCreateInProject={(dir) => void handleCreateSessionInProject(dir)}
         onToggleProject={handleToggleProject}
@@ -1652,7 +1741,6 @@ export function AgentPage() {
           <div className="agent-console__bar-copy">
             <div className="agent-console__bar-title">
               <span className="agent-console__bar-name">翻译 Agent</span>
-              {activeTitle ? <span className="agent-console__bar-session">{activeTitle}</span> : null}
             </div>
             <div className="agent-console__project-static">
               {projectDir ? (
@@ -1665,10 +1753,10 @@ export function AgentPage() {
               )}
             </div>
           </div>
-          <StatusPill status={status} running={running} />
         </div>
 
         <div className="agent-console__bar-right">
+          <StatusPill status={status} running={running} />
           <button
             type="button"
             className="agent-console__icon-btn"
@@ -2092,10 +2180,7 @@ function StatusPill({ status, running }: { status: string; running: boolean }) {
           ? '出错'
           : '空闲';
   return (
-    <span className={`agent-status-pill agent-status-pill--${tone}`}>
-      <span className="agent-status-pill__dot" />
-      {label}
-    </span>
+    <span className={`agent-status-pill agent-status-pill--${tone}`}>{label}</span>
   );
 }
 

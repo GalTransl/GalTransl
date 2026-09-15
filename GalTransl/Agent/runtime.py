@@ -218,7 +218,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 - 你可以也应该在调用工具的同时用自然语言说明你的决策与思考（这一段会实时展示给用户）。
 
 # 标准翻译流程（必须按此顺序推进）
-1. **了解项目**：先调用 get_project_overview 看翻译进度与项目配置。注意进度里的 total/translated 是「句数」且只统计已生成缓存的文件，translated==total 不等于整个项目翻完，整体是否翻完看 files_translated/files_total。再确认配置里已设翻译引擎、项目确有输入文件（输入文件清单用 list_input_files 查），然后继续。
+1. **了解项目**：先调用 get_project_overview 看翻译进度与项目配置。注意进度里的 total/translated 是「句数」且只统计已生成缓存的文件，translated==total 不等于整个项目翻完，整体是否翻完看 files_translated/files_total。再确认返回的 backend（agent = 本会话在用的后端，translator = 翻译任务会用的后端，各含配置名/类型/模型名）、项目确有输入文件（输入文件清单用 list_input_files 查），然后继续。
 2. **字典准备（在启动翻译前必须完成）**：
    a. 调用 list_dict_files 查看项目已配置的译前/GPT/译后字典文件；
    b. 调用 read_dict 读取现有内容，判断人名、专有名词是否已收录；
@@ -321,6 +321,13 @@ class AgentState:
     project_dir: str = ""
     config_file_name: str = ""
     backend_profile_data: dict[str, Any] = field(default_factory=dict)
+    # 后端配置名（只存在前端 localStorage，故随 start/message 一起送过来）：
+    # backend_profile_name = 本会话在用的那份（Agent 页选中的默认）；
+    # translator_* = 翻译任务实际会用的那份（项目选择 → 否则全局默认）。
+    # 只用于「了解项目」如实报出实际后端；不落盘，重启后由下一次 message 补上。
+    backend_profile_name: str = ""
+    translator_profile_name: str = ""
+    translator_profile_data: dict[str, Any] = field(default_factory=dict)
     started_at: float = 0.0
     finished_at: float = 0.0
     error: str = ""
@@ -1450,7 +1457,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_project_overview",
-            "description": "了解项目：查看翻译进度与项目配置。进度含句数 total/translated/problems/failed 和文件级 files_total/files_translated/files_untranslated；total/translated 只统计已生成缓存的文件，未翻译的文件不计入分母，translated==total 不代表整个项目翻完，整体进度看 files_translated/files_total。配置附带 config_field_descriptions（每个键的作用与取值说明）。流程第一步，调用它确认项目可用。输入文件清单本身用 list_input_files / list_transl_cache 单独查询。",
+            "description": "了解项目：查看翻译进度与项目配置。进度含句数 total/translated/problems/failed 和文件级 files_total/files_translated/files_untranslated；total/translated 只统计已生成缓存的文件，未翻译的文件不计入分母，translated==total 不代表整个项目翻完，整体进度看 files_translated/files_total。配置附带 config_field_descriptions（每个键的作用与取值说明）；backend 里是两份实际生效的后端（各含 name 配置名 / type 后端类型 / model 模型名，不含地址与密钥）：agent 是本会话在用的，translator 是翻译任务会用的（项目选择 → 否则全局「翻译器默认」）。流程第一步，调用它确认项目可用。输入文件清单本身用 list_input_files / list_transl_cache 单独查询。",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -1848,9 +1855,6 @@ CONFIG_FIELD_DESCRIPTIONS: dict[str, str] = {
     "dictionary.preDict": "译前字典文件列表（每行一个；前缀 (project_dir) 代表在项目目录下）。译前字典在送入模型前直接替换原文",
     "dictionary.gpt.dict": "GPT 字典文件列表。随 Prompt 发给模型，约束人名/术语译法（Agent 应主要维护这层）",
     "dictionary.postDict": "译后字典文件列表。翻译完成后对译文做替换（符号矫正等）",
-    # ---- backendSpecific ----
-    "backendSpecific.OpenAI-Compatible": "OpenAI 兼容接口配置（ForGal/ForNovel/GenDic 引擎用）：tokens 令牌列表、tokenStrategy 轮询策略、stream 流式、apiTimeout 超时秒数、maxApiRetries 单批次最大重试",
-    "backendSpecific.SakuraLLM": "Sakura 本地模型配置（Sakura/GalTransl 引擎用）：endpoints 端点列表",
     # ---- plugin ----
     "plugin.filePlugin": "文件插件（决定输入/输出格式）：file_galtransl_json；字幕 file_subtitle_srt_lrc_vtt；小说 file_epub_epub / file_plaintext_txt；Mtool json 用 file_i18n_json",
     "plugin.textPlugins": "文本处理插件列表（按顺序执行）：如 text_common_normalfix 常规修复、text_common_skipNoJP 跳过无日文句",
@@ -1866,7 +1870,6 @@ def _annotate_config(config: dict[str, Any]) -> tuple[dict[str, Any], dict[str, 
         "common": "通用程序设置",
         "problemAnalyze": "自动问题分析配置",
         "dictionary": "字典设置",
-        "backendSpecific": "翻译后端引擎配置（实际生效值可能被全局后端配置覆盖）",
         "plugin": "文件/文本插件配置",
         "proxy": "代理设置",
     }
@@ -1934,6 +1937,51 @@ def _count_input_file_progress(input_files: list[str], progress_files: list[dict
     }
 
 
+def _config_for_overview(raw: Any) -> dict[str, Any]:
+    """「了解项目」返回的配置快照：剔除 backendSpecific。
+
+    那一节是 API 令牌、端点等敏感信息（发给模型等于把密钥递出去），对"了解项目"
+    也没有价值——实际生效的后端见返回里的 backend 字段。
+    """
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if k != "backendSpecific"}
+
+
+def _backend_summary(profile: Any, name: str = "") -> dict[str, str]:
+    """一份后端配置 → {name, type, model}：只给名字与模型名，不含地址与密钥。"""
+    section = ""
+    model = ""
+    if isinstance(profile, dict):
+        for key, conf in profile.items():
+            if not isinstance(conf, dict):
+                continue
+            section = str(key)
+            if key == "OpenAI-Compatible":
+                tokens = conf.get("tokens")
+                if isinstance(tokens, list) and tokens and isinstance(tokens[0], dict):
+                    model = str(tokens[0].get("modelName") or "")
+            break
+    return {"name": name or section, "type": section, "model": model}
+
+
+def _backend_overview(runner: AgentRunner) -> dict[str, Any]:
+    """实际生效的两份后端：本会话（Agent）用的 + 翻译任务会用的。
+
+    项目配置文件里的 backendSpecific 常是旧值（后端还会被全局后端配置覆盖），
+    所以两份都以"真正会被使用"的配置为准：
+    - agent：runner 手里那份（点「开始翻译」时发出去的就是它）；
+    - translator：前端送来的项目选择（没有项目选择时就是全局"翻译器默认"）。
+    """
+    state = runner.state
+    return {
+        "agent": _backend_summary(state.backend_profile_data, state.backend_profile_name),
+        "translator": _backend_summary(
+            state.translator_profile_data, state.translator_profile_name
+        ),
+    }
+
+
 def _tool_get_project_overview(runner: AgentRunner, _args: dict[str, Any]) -> Any:
     pid = runner._project_id()
     config_name = runner.state.config_file_name or DEFAULT_CONFIG_FILE
@@ -1941,7 +1989,7 @@ def _tool_get_project_overview(runner: AgentRunner, _args: dict[str, Any]) -> An
     progress = runner._http_get(f"/api/projects/{pid}/progress?config={cfg_name}")
     cfg = runner._http_get(f"/api/projects/{pid}/config?config={cfg_name}")
     files = runner._http_get(f"/api/projects/{pid}/files")
-    config, descriptions = _annotate_config(cfg.get("config", {}))
+    config, descriptions = _annotate_config(_config_for_overview(cfg.get("config")))
     input_files = [
         str(entry.get("name", ""))
         for entry in files.get("input_files", [])
@@ -1959,6 +2007,14 @@ def _tool_get_project_overview(runner: AgentRunner, _args: dict[str, Any]) -> An
                 "total/translated 是句数，且只统计已生成缓存的文件；未开始翻译的文件不计入分母，"
                 "所以 translated==total 只说明「已有缓存的部分翻完了」，不代表整个项目翻完。"
                 "整体进度请结合 files_translated/files_total 判断。"
+            ),
+        },
+        "backend": {
+            **_backend_overview(runner),
+            "note": (
+                "实际生效的后端（各自含 name 配置名 / type 后端类型 / model 模型名）："
+                "agent 是本 Agent 会话在用的；translator 是翻译任务会用的"
+                "（项目选择 → 否则全局「翻译器默认」）。地址与密钥不返回。"
             ),
         },
         "config": config,
@@ -3177,8 +3233,19 @@ class AgentRuntime:
     # ---- 会话管理 ----
 
     def list_sessions(self, project_dir: str) -> list[dict[str, Any]]:
-        """列出项目下的会话。内存里有状态的优先（可能还没落盘）。"""
-        return session_store.list_sessions(project_dir)
+        """列出项目下的会话。内存里有状态的优先（可能还没落盘）。
+
+        每项附一个 `status`（无状态时为空串），供侧边栏那个状态灯用：running 亮蓝灯、
+        awaiting_input/stopped 亮绿灯、failed 亮橙灯。**只认内存**——落盘的 running
+        标记在进程重启后是过期的（没有 runner 在跑了），拿它当"运行中"会让灯一直蓝着。
+        """
+        items = session_store.list_sessions(project_dir)
+        with self._lock:
+            states = self._states.get(self._key(project_dir), {})
+            for item in items:
+                state = states.get(str(item.get("session_id") or ""))
+                item["status"] = state.status if state is not None else ""
+        return items
 
     def create_session(self, project_dir: str, title: str = "") -> dict[str, Any]:
         """新建一个空会话（不启动回合）。
@@ -3422,6 +3489,9 @@ class AgentRuntime:
         session_id: str | None = None,
         host: str = DEFAULT_BACKEND_HOST,
         port: int = DEFAULT_BACKEND_PORT,
+        backend_profile_name: str = "",
+        translator_profile_name: str = "",
+        translator_profile_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """启动一个回合。session_id 为空时新建会话；标题取用户第一条消息。"""
         key = self._key(project_dir)
@@ -3447,6 +3517,9 @@ class AgentRuntime:
                 project_dir=project_dir,
                 config_file_name=config_file_name or DEFAULT_CONFIG_FILE,
                 backend_profile_data=backend_profile_data or {},
+                backend_profile_name=backend_profile_name,
+                translator_profile_name=translator_profile_name,
+                translator_profile_data=translator_profile_data or {},
                 started_at=time.time(),
                 session_id=sid,
                 title=title,
@@ -3474,7 +3547,15 @@ class AgentRuntime:
             _log(f"Agent 回合已启动: project={key} session={sid} config={config_file_name} goal={goal[:60]}")
             return self.status(project_dir, sid)
 
-    def message(self, project_dir: str, message: str, session_id: str | None = None) -> dict[str, Any]:
+    def message(
+        self,
+        project_dir: str,
+        message: str,
+        session_id: str | None = None,
+        backend_profile_name: str = "",
+        translator_profile_name: str = "",
+        translator_profile_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """向会话追加一条用户消息。
 
         - 会话不存在（内存与磁盘都没有）：报错（前端应先 start/create）。
@@ -3496,6 +3577,14 @@ class AgentRuntime:
                 raise ValueError("该项目还没有 Agent 会话，请先发送第一条消息启动")
             # 会话存在说明 sid 必然有值（state 就是按 sid 取到的），这里显式收窄
             assert sid is not None
+            # 后端上下文跟着最新一次的 start/message 走：用户可能中途改了默认配置
+            # （名字只在前端 localStorage，后端只能这样拿到）。
+            if backend_profile_name:
+                state.backend_profile_name = backend_profile_name
+            if translator_profile_name:
+                state.translator_profile_name = translator_profile_name
+            if translator_profile_data:
+                state.translator_profile_data = translator_profile_data
 
             if state.status == "running":
                 # 排队期间只算"待发"：不进历史、也不发 user_message 事件——界面上

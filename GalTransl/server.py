@@ -2448,6 +2448,11 @@ def build_handler(registry: JobRegistry):
                     backend_profile_data = payload.get("backend_profile_data")
                     goal = str(payload.get("goal", "") or "")
                     session_id = str(payload.get("session_id", "") or "") or None
+                    # 两份后端配置的"名字"与（翻译器那份的）内容：名字只存在前端
+                    # localStorage，后端只能随请求拿到，供「了解项目」如实报出实际后端。
+                    backend_profile_name = str(payload.get("backend_profile_name", "") or "")
+                    translator_profile_name = str(payload.get("translator_profile_name", "") or "")
+                    translator_profile_data = payload.get("translator_profile_data")
                     if not project_dir:
                         self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
                         return
@@ -2460,6 +2465,13 @@ def build_handler(registry: JobRegistry):
                         backend_profile_data=backend_profile_data,
                         goal=goal,
                         session_id=session_id,
+                        backend_profile_name=backend_profile_name,
+                        translator_profile_name=translator_profile_name,
+                        translator_profile_data=(
+                            translator_profile_data
+                            if isinstance(translator_profile_data, dict)
+                            else None
+                        ),
                     )
                     self._send_json(status)
                 except ValueError as exc:
@@ -2511,7 +2523,20 @@ def build_handler(registry: JobRegistry):
                     if not message.strip():
                         self._send_json({"error": "message is required"}, status=HTTPStatus.BAD_REQUEST)
                         return
-                    status = AGENT_REGISTRY.message(project_dir, message, session_id)
+                    # 同 start：顺带刷新两份后端配置的名字/内容（用户可能中途改了默认）
+                    translator_profile_data = payload.get("translator_profile_data")
+                    status = AGENT_REGISTRY.message(
+                        project_dir,
+                        message,
+                        session_id,
+                        backend_profile_name=str(payload.get("backend_profile_name", "") or ""),
+                        translator_profile_name=str(payload.get("translator_profile_name", "") or ""),
+                        translator_profile_data=(
+                            translator_profile_data
+                            if isinstance(translator_profile_data, dict)
+                            else None
+                        ),
+                    )
                     self._send_json(status)
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, status=HTTPStatus.CONFLICT)

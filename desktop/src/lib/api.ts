@@ -1665,6 +1665,9 @@ export type AgentSession = {
   title: string;
   created_at: number;
   updated_at: number;
+  /** 后端内存里的实时状态：running / awaiting_input / stopped / failed；无状态时为空串。
+   *  侧边栏的状态灯据此显示（running 蓝灯亮着、跑完亮绿灯或橙灯）。 */
+  status?: string;
 };
 
 export type AgentStartPayload = {
@@ -1674,7 +1677,33 @@ export type AgentStartPayload = {
   goal?: string;
   /** Omit to let the backend create a fresh session. */
   session_id?: string;
+} & AgentBackendContext;
+
+/**
+ * Agent 会话要带上的「后端上下文」：配置名＋翻译器那份的配置内容。
+ *
+ * 后端拿不到配置名（配置存在前端 localStorage），而「了解项目」要如实报出
+ * 实际生效的两份后端（本会话在用的 + 翻译任务会用的），所以随 start/message
+ * 一起送过去。地址与密钥不在返回里出现，这里送的是原名与内容。
+ */
+export type AgentBackendContext = {
+  /** 本会话在用的后端配置名（Agent 页选中的那份）。 */
+  backend_profile_name?: string;
+  /** 翻译任务会用的后端配置名（项目选择 → 否则全局「翻译器默认」）。 */
+  translator_profile_name?: string;
+  translator_profile_data?: Record<string, unknown>;
 };
+
+/** 取「翻译任务会用的后端」：优先项目自己的选择，没有则回落到全局「翻译器默认」。 */
+export function getAgentTranslatorBackendContext(
+  projectDir: string,
+): Pick<AgentBackendContext, 'translator_profile_name' | 'translator_profile_data'> {
+  const { name, profile } = resolveSelectedBackendProfile(projectDir);
+  return {
+    ...(name ? { translator_profile_name: name } : {}),
+    ...(profile ? { translator_profile_data: profile } : {}),
+  };
+}
 
 export async function startAgent(payload: AgentStartPayload) {
   return apiRequest<AgentStatus>('/api/agent/start', {
@@ -1689,11 +1718,21 @@ export async function startAgent(payload: AgentStartPayload) {
  * running the message is queued as an interjection; otherwise it starts a
  * new turn continuing the same conversation.
  */
-export async function sendAgentMessage(projectDir: string, message: string, sessionId?: string) {
+export async function sendAgentMessage(
+  projectDir: string,
+  message: string,
+  sessionId?: string,
+  backendContext?: AgentBackendContext,
+) {
   return apiRequest<AgentStatus>('/api/agent/message', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_dir: projectDir, message, session_id: sessionId }),
+    body: JSON.stringify({
+      project_dir: projectDir,
+      message,
+      session_id: sessionId,
+      ...backendContext,
+    }),
   });
 }
 
