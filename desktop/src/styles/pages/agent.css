@@ -2161,6 +2161,75 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 「原始参数/结果」折叠菜单的标题行（写入类调用：变更卡已经展开，原始数据默认折起）。
+   折叠时整块只剩这一行（› + 标题 + 字符数），展开后里面顺序铺参数、结果两块。 */
+.agent-toolblock__head.is-toggle {
+  width: 100%;
+  /* 与 .agent-tool__header 同一种做法：左右各借 4px，hover 底色不贴边、文字仍对齐 */
+  padding: 2px 4px;
+  margin: 0 -4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.agent-toolblock__head.is-toggle:hover {
+  background: var(--agent-hover);
+}
+
+.agent-toolblock__head.is-toggle:hover .agent-toolblock__title {
+  color: var(--color-text);
+}
+
+.agent-toolblock__head.is-toggle:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.agent-toolblock__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.agent-toolblock__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.agent-toolblock__caret {
+  flex: none;
+  width: 9px;
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  line-height: 1;
+  transition: transform var(--transition-fast);
+}
+
+.agent-toolblock__head.is-toggle[aria-expanded='true'] .agent-toolblock__caret {
+  transform: rotate(90deg);
+}
+
+.agent-toolblock__len {
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 折叠菜单本体：标题行 + 展开后的参数/结果块。间距比块内的 4px 大一点——两块都是
+   带边框的代码块，贴太紧会看成一块 */
+.agent-rawdata {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
 .agent-toolblock__pre {
   margin: 0;
   max-height: 300px;

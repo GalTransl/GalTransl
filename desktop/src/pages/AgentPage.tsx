@@ -3248,7 +3248,19 @@ function ToolRow({
   persistKey: string;
 }) {
   const stateKey = `${persistKey}::tool-${item.id || item.step}`;
-  const [open, setOpenRaw] = useState(() => manualOpenState.get(stateKey) === true);
+
+  // 写入类工具的变更卡片数据（后端在结果里带回）：
+  // - changes: [{path, before, after, kind}] 键值级 before→after
+  // - line_diff: {rows: [{op: add|del, line}], truncated} 行级 diff（save_dict）
+  // - deleted_preview: [{index, text}] 被删条目（delete_transl_cache）
+  const changeList = extractChangeList(item.result);
+
+  // 带变更的行**默认展开**：改了什么是这次调用的重点，diff 该直接看得见，不该藏在
+  // 一次点击后面。manualOpenState 里只记"用户手动点过"的选择——记过就听用户的，
+  // 没记过才用这个默认值（重挂/刷新后同一规则）。
+  const [open, setOpenRaw] = useState(
+    () => manualOpenState.get(stateKey) ?? Boolean(changeList),
+  );
   const setOpen = (value: boolean | ((prev: boolean) => boolean)) => {
     setOpenRaw((prev) => {
       const next = typeof value === 'function' ? value(prev) : value;
@@ -3256,17 +3268,24 @@ function ToolRow({
       return next;
     });
   };
+  // 结果比行晚到（正在跑的那次调用就是如此）：变更一到就展开。用户手动点过就不抢，
+  // 否则会跟"刚点开又自己收起/展开"打架。
+  const autoOpenedRef = useRef(Boolean(changeList));
+  useEffect(() => {
+    if (!changeList || autoOpenedRef.current) return;
+    autoOpenedRef.current = true;
+    if (!manualOpenState.has(stateKey)) setOpenRaw(true);
+  }, [changeList, stateKey]);
+
   const meta = toolMeta(item.name);
   const summary = meta.summary(asArgs(item.arguments));
   const ok = item.ok !== false;
   const pending = item.ok === undefined && item.result === undefined && !item.error;
   const isRunning = live && pending;
 
-  // 写入类工具的变更卡片数据（后端在结果里带回）：
-  // - changes: [{path, before, after, kind}] 键值级 before→after
-  // - line_diff: {rows: [{op: add|del, line}], truncated} 行级 diff（save_dict）
-  // - deleted_preview: [{index, text}] 被删条目（delete_transl_cache）
-  const changeList = extractChangeList(item.result);
+  // 有变更就把原始参数/结果收进一个折叠菜单（变更卡自己会展开）：写入调用要看的通常是
+  // diff，JSON 参数与整份结果只是证据，要看再点开。失败时例外——错误全文要直接可见。
+  const foldRaw = Boolean(changeList) && !pending && ok;
 
   // wait 行：等待期间显示倒计时（只出秒数，不画进度条）。
   const isWait = item.name === 'wait';
@@ -3316,25 +3335,39 @@ function ToolRow({
       {open ? (
         <div className="agent-tool__body">
           {changeList ? <ChangeListCard data={changeList} /> : null}
-          {item.arguments !== undefined ? (
-            <ToolBlock title="参数" content={formatPayload(item.arguments)} mono />
-          ) : null}
-          {resultText ? (
-            <ToolBlock
-              title={ok ? '结果' : '错误'}
-              content={resultText}
-              mono
-              truncate={longResult ? 1200 : 0}
+          {foldRaw ? (
+            <RawToolData
+              args={item.arguments}
+              resultText={resultText}
+              resultTitle={ok ? '结果' : '错误'}
               tone={ok ? 'default' : 'error'}
               durationMs={item.durationMs}
+              truncate={longResult ? 1200 : 0}
             />
-          ) : null}
+          ) : (
+            <>
+              {item.arguments !== undefined ? (
+                <ToolBlock title="参数" content={formatPayload(item.arguments)} mono />
+              ) : null}
+              {resultText ? (
+                <ToolBlock
+                  title={ok ? '结果' : '错误'}
+                  content={resultText}
+                  mono
+                  truncate={longResult ? 1200 : 0}
+                  tone={ok ? 'default' : 'error'}
+                  durationMs={item.durationMs}
+                />
+              ) : null}
+            </>
+          )}
         </div>
       ) : null}
     </div>
   );
 }
 
+/** 参数 / 结果块：一行标题 + 一块等宽正文（内容被截断时给「展开全部」）。 */
 function ToolBlock({
   title,
   content,
@@ -3366,6 +3399,66 @@ function ToolBlock({
         <button type="button" className="agent-toolblock__toggle" onClick={() => setExpanded((v) => !v)}>
           {expanded ? '收起' : `展开全部（${content.length} 字符）`}
         </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** 写入类调用的「原始参数/结果」：合成一个折叠菜单，默认折起。
+
+    变更卡已经说清改了什么，原始 JSON 与整份结果只是证据——要看再展开。折成两行
+    （参数一行、结果一行）点起来目标太小、还容易点错，合成一行开门更像"翻原始数据"；
+    折叠态右侧给总字符数，一眼知道里面有多少东西。 */
+function RawToolData({
+  args,
+  resultText,
+  resultTitle,
+  tone,
+  durationMs,
+  truncate,
+}: {
+  args: unknown;
+  resultText: string;
+  resultTitle: string;
+  tone: 'default' | 'error';
+  durationMs?: number;
+  truncate?: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const argsText = args === undefined ? '' : formatPayload(args);
+  if (!argsText && !resultText) return null;
+  return (
+    <div className="agent-rawdata">
+      <button
+        type="button"
+        className="agent-toolblock__head is-toggle"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <span className="agent-toolblock__label">
+          <span className="agent-toolblock__caret" aria-hidden>›</span>
+          <span className="agent-toolblock__title">原始参数/结果</span>
+        </span>
+        <span className="agent-toolblock__meta">
+          {open ? null : (
+            <span className="agent-toolblock__len">{argsText.length + resultText.length} 字符</span>
+          )}
+        </span>
+      </button>
+      {open ? (
+        <>
+          {argsText ? <ToolBlock title="参数" content={argsText} mono /> : null}
+          {resultText ? (
+            <ToolBlock
+              title={resultTitle}
+              content={resultText}
+              mono
+              truncate={truncate}
+              tone={tone}
+              durationMs={durationMs}
+            />
+          ) : null}
+        </>
       ) : null}
     </div>
   );
