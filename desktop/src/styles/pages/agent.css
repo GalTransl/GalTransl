@@ -1507,6 +1507,226 @@
   border-bottom: 0;
 }
 
+/* ── 缓存引用卡片（模型输出里的 $transl_cache(文件, 行号)） ──
+   条目卡片直接复用「缓存与问题」页的 .cache-card 样式，这里只加外框与文件头。 */
+
+.agent-md--segmented {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+}
+
+.agent-md__chunk > *:last-child {
+  margin-bottom: 0;
+}
+
+.agent-cache-ref {
+  /* cache-card 的字号全部走 --cache-font-* 变量，而那套变量只定义在缓存页的
+     .project-cache-page 上——这里不补一套的话变量失效，pill/正文会继承气泡字号，
+     卡片看起来比旁边的文字还大。整体比缓存页再小一档，贴近正文密度。 */
+  --cache-font-base: 12.5px;
+  --cache-font-sm: 12px;
+  --cache-font-xs: 11px;
+  --cache-font-xxs: 10.5px;
+  --agent-ref-line: color-mix(in srgb, var(--color-primary) 42%, transparent);
+  margin: 0.35em 0 0.5em;
+  border: 1px solid var(--agent-line-soft, var(--color-line));
+  border-left: 3px solid var(--agent-ref-line);
+  border-radius: var(--radius-card);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-primary) 5%, transparent), transparent 42%),
+    var(--agent-tile, rgba(16, 24, 40, 0.04));
+  overflow: hidden;
+}
+
+.agent-cache-ref__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--agent-line-soft, var(--color-line));
+  background: var(--agent-tile, rgba(16, 24, 40, 0.03));
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+
+.agent-cache-ref__icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.agent-cache-ref__icon svg {
+  width: 11px;
+  height: 11px;
+  display: block;
+}
+
+.agent-cache-ref__file {
+  min-width: 0;
+  font-family: var(--agent-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-cache-ref__lines {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: var(--cache-font-xxs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.agent-cache-ref__count {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--cache-font-xxs);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-cache-ref__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 9px 8px;
+}
+
+.agent-cache-ref__state {
+  padding: 5px 10px 7px;
+  font-size: var(--cache-font-sm);
+  color: var(--color-text-muted);
+}
+
+.agent-cache-ref__state--error {
+  color: var(--color-danger, #d64545);
+}
+
+/* 加载骨架：比一行「读取中…」更稳（流式输出时卡片高度基本不变） */
+.agent-cache-ref__state--loading {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.agent-cache-ref__skeleton {
+  height: 14px;
+  border-radius: 5px;
+  background: linear-gradient(
+    90deg,
+    var(--agent-tile, rgba(16, 24, 40, 0.05)) 32%,
+    var(--agent-tile-strong, rgba(16, 24, 40, 0.1)) 50%,
+    var(--agent-tile, rgba(16, 24, 40, 0.05)) 68%
+  );
+  background-size: 220% 100%;
+  animation: agentCacheShimmer 1.3s ease-in-out infinite;
+}
+
+@keyframes agentCacheShimmer {
+  from { background-position: 160% 0; }
+  to { background-position: -60% 0; }
+}
+
+/* 气泡里是只读展示：内嵌条目收成扁平 tint 块（去掉缓存页的白卡边框感），
+   卡片比缓存页再收一档（内边距/行距），别抢正文的戏 */
+.agent-cache-ref .cache-card {
+  padding: 4px 8px 5px;
+  gap: 2px;
+  border-color: transparent;
+  border-radius: 8px;
+  background: var(--agent-tile-strong, rgba(16, 24, 40, 0.06));
+}
+
+.agent-cache-ref .cache-card:hover {
+  border-color: var(--agent-line-soft, var(--color-line));
+}
+
+.agent-cache-ref .cache-card--problem {
+  border-color: color-mix(in srgb, var(--color-warning) 32%, transparent);
+  background: color-mix(in srgb, var(--color-warning-soft) 26%, transparent);
+}
+
+.agent-cache-ref .cache-card__fields {
+  gap: 2px;
+}
+
+.agent-cache-ref .cache-card__row {
+  gap: var(--space-2, 6px);
+}
+
+.agent-cache-ref .cache-card__readonly-input {
+  padding: 1px 6px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 底部操作行：展开更多 / 未找到提示 */
+.agent-cache-ref__foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 7px;
+  font-size: var(--cache-font-xxs);
+  color: var(--color-text-muted);
+}
+
+.agent-cache-ref__more {
+  border: 1px solid var(--agent-line-soft, var(--color-line));
+  border-radius: 999px;
+  padding: 1px 9px;
+  background: var(--agent-tile, rgba(16, 24, 40, 0.04));
+  color: var(--color-primary);
+  font: inherit;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--transition-fast, 0.15s), border-color var(--transition-fast, 0.15s);
+}
+
+.agent-cache-ref__more:hover {
+  background: var(--agent-hover, rgba(16, 24, 40, 0.07));
+  border-color: var(--agent-ref-line);
+}
+
+.agent-cache-ref__missing {
+  color: var(--color-warning);
+}
+
+:root[data-theme='dark'] .agent-console .agent-cache-ref {
+  border-color: var(--agent-line-soft);
+  background:
+    linear-gradient(180deg, rgba(67, 129, 255, 0.08), transparent 42%),
+    rgba(28, 40, 58, 0.42);
+}
+
+:root[data-theme='dark'] .agent-console .agent-cache-ref__head {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+:root[data-theme='dark'] .agent-console .agent-cache-ref .cache-card {
+  background: rgba(255, 255, 255, 0.055);
+}
+
+:root[data-theme='dark'] .agent-console .agent-cache-ref .cache-card--problem {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.09);
+}
+
 /* ── 启动翻译卡片（翻译工作台顶部卡的迷你版） ──
    翻译期间是一张带实时进度的卡片（每秒刷新一次），跑完自动折成一行。 */
 

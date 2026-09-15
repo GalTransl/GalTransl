@@ -1689,6 +1689,8 @@ export type AgentStartPayload = {
 export type AgentBackendContext = {
   /** 本会话在用的后端配置名（Agent 页选中的那份）。 */
   backend_profile_name?: string;
+  /** 本会话实际使用的配置内容。token 不落盘，重启后继续历史会话时必须重新随请求提供。 */
+  backend_profile_data?: Record<string, unknown>;
   /** 翻译任务会用的后端配置名（项目选择 → 否则全局「翻译器默认」）。 */
   translator_profile_name?: string;
   translator_profile_data?: Record<string, unknown>;

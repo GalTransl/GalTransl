@@ -2633,6 +2633,7 @@ def build_handler(registry: JobRegistry):
                     project_dir = str(payload.get("project_dir", "")).strip()
                     message = str(payload.get("message", "") or "")
                     session_id = str(payload.get("session_id", "") or "") or None
+                    backend_profile_data = payload.get("backend_profile_data")
                     if not project_dir:
                         self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
                         return
@@ -2646,6 +2647,11 @@ def build_handler(registry: JobRegistry):
                         message,
                         session_id,
                         backend_profile_name=str(payload.get("backend_profile_name", "") or ""),
+                        backend_profile_data=(
+                            backend_profile_data
+                            if isinstance(backend_profile_data, dict)
+                            else None
+                        ),
                         translator_profile_name=str(payload.get("translator_profile_name", "") or ""),
                         translator_profile_data=(
                             translator_profile_data

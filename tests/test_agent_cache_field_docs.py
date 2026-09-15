@@ -9,6 +9,7 @@ Agent 判断"这句译文为什么长这样、该改哪个字段、能不能改"
 import unittest
 
 from GalTransl.Agent.runtime import (
+    AGENT_TOOLS,
     CACHE_ENTRY_FIELDS,
     CACHE_ENTRY_FIELDS_DEFAULT,
     CACHE_ENTRY_FIELD_DESCRIPTIONS,
@@ -26,6 +27,13 @@ def _state() -> AgentState:
     state.project_dir = r"C:\proj\MyGame"
     state.config_file_name = "config.yaml"
     return state
+
+
+def _tool_description(name: str) -> str:
+    for tool in AGENT_TOOLS:
+        if tool["function"]["name"] == name:
+            return str(tool["function"]["description"])
+    raise AssertionError(f"{name} 不在工具表里")
 
 
 class CacheFieldCoverageTests(unittest.TestCase):
@@ -97,6 +105,26 @@ class CacheFieldsSectionTests(unittest.TestCase):
         self.assertIn("派生字段", section)  # 哪些改不动
         self.assertIn("缓存 ≠ 交付物", section)  # 别拿缓存当输出
         self.assertIn("read_output", section)
+
+
+class CacheRefSyntaxTests(unittest.TestCase):
+    """回复里的缓存引用写法 $transl_cache(文件名, 行号) 要写在提示里。
+
+    模型不会凭空知道这个语法——提示词里没写它就永远用不上；而提示词与工具说明
+    两处都写，是为了它在"读缓存"的场景里正好看得到。
+    """
+
+    def test_system_prompt_documents_the_syntax(self) -> None:
+        prompt = _build_system_prompt(_state())
+        self.assertIn("$transl_cache(", prompt)
+        self.assertIn("行号", prompt)
+        self.assertIn("单独一行", prompt)  # 单独成行才会渲染成卡片
+        self.assertIn("不要把它写进代码块", prompt)
+
+    def test_read_cache_tool_mentions_it(self) -> None:
+        description = _tool_description("read_transl_cache")
+        self.assertIn("$transl_cache(", description)
+        self.assertIn("卡片", description)
 
 
 class SystemPromptInclusionTests(unittest.TestCase):

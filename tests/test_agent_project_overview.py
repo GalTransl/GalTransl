@@ -358,12 +358,52 @@ class BackendContextPlumbingTests(unittest.TestCase):
 
             # 用户中途改了默认配置 → 下一条消息把新的名字带过来
             state.status = "awaiting_input"
-            rt.message(self.project, "继续", sid, backend_profile_name="Agent 新默认")
+            refreshed_agent_profile = {
+                "OpenAI-Compatible": {"tokens": [{"token": "sk-new", "modelName": "new-model"}]}
+            }
+            rt.message(
+                self.project,
+                "继续",
+                sid,
+                backend_profile_name="Agent 新默认",
+                backend_profile_data=refreshed_agent_profile,
+            )
 
         self.assertEqual(state.backend_profile_name, "Agent 新默认")
+        self.assertIs(state.backend_profile_data, refreshed_agent_profile)
+        self.assertEqual(
+            state.backend_profile_data["OpenAI-Compatible"]["tokens"][0]["modelName"],
+            "new-model",
+        )
         # 这次没送翻译器信息 → 保留上一次的，不该被清空
         self.assertEqual(state.translator_profile_name, "翻译器默认")
         self.assertTrue(state.translator_profile_data)
+
+    def test_restored_session_refreshes_profile_without_persisting_token(self) -> None:
+        profile = {
+            "OpenAI-Compatible": {
+                "tokens": [{"token": "sk-restart", "modelName": "restart-model"}]
+            }
+        }
+        rt = AgentRuntime()
+        sid = rt.create_session(self.project)["session_id"]
+        with patch.object(AgentRunner, "run", lambda self: None):
+            rt.start(self.project, "config.yaml", profile, goal="第一轮", session_id=sid)
+            ss.SessionStore(self.project, sid).append_message({"role": "user", "content": "第一轮"})
+            ss.SessionStore(self.project, sid).append_meta(running=False)
+
+            with open(ss.SessionStore(self.project, sid).path, encoding="utf-8") as f:
+                self.assertNotIn("sk-restart", f.read())
+
+            restarted = AgentRuntime()
+            restored = restarted._get_state(self.project, sid)
+            assert restored is not None
+            self.assertEqual(restored.backend_profile_data, {})
+            restarted.message(self.project, "继续", sid, backend_profile_data=profile)
+
+        self.assertIs(restored.backend_profile_data, profile)
+        runner = restarted._runners[restarted._key(self.project)][sid]
+        self.assertEqual(runner.state.backend_profile_data["OpenAI-Compatible"]["tokens"], profile["OpenAI-Compatible"]["tokens"])
 
 
 if __name__ == "__main__":

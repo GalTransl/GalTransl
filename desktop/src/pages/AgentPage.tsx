@@ -45,7 +45,7 @@ import {
   type RuntimeJob,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
-import { renderMarkdown } from '../lib/markdown';
+import { AgentMarkdown } from '../components/AgentCacheRef';
 import { formatProfileLabel } from '../lib/backendProfile';
 import {
   clampPercent,
@@ -1501,17 +1501,18 @@ export function AgentPage() {
       }
       // 后端上下文：配置名只存在前端 localStorage，后端拿不到；而「了解项目」要
       // 如实报出"本会话在用的后端"和"翻译任务会用的后端"，所以随消息一起送过去。
+      // token 不落盘，重启后继续历史会话也必须重新提供本会话的配置内容。
       const backendContext = {
         ...(backendProfileName ? { backend_profile_name: backendProfileName } : {}),
+        backend_profile_data: profile,
         ...getAgentTranslatorBackendContext(effectiveProject),
       };
       if (!hasBackendSessionRef.current) {
         // 空会话：第一条消息启动首个回合
-        const snap = await startAgent({
-          project_dir: effectiveProject,
-          config_file_name: configFileName || 'config.yaml',
-          backend_profile_data: profile,
-          goal: text,
+          const snap = await startAgent({
+            project_dir: effectiveProject,
+            config_file_name: configFileName || 'config.yaml',
+            goal: text,
           session_id: sid,
           ...backendContext,
         });
@@ -1999,6 +2000,7 @@ export function AgentPage() {
                   group={group}
                   isLive={running && index === timeline.length - 1}
                   projectDir={effectiveProject}
+                  persistKey={`${effectiveProject}::${activeSessionId}`}
                 />
               ))}
 
@@ -2390,14 +2392,21 @@ function StatusPill({ status, running }: { status: string; running: boolean }) {
 
 /* ── Activity group (thinking + tool calls collapsed into one row) ── */
 
+/** 用户手动开合过的折叠状态（模块级）：切页面/切会话会把组件卸载重建，
+ *  useState 里的展开状态会丢。这里按 persistKey（项目::会话::组/条目）记住，
+ *  重挂时恢复。只记「用户点过」的，自动跟随逻辑不受影响。 */
+const manualOpenState = new Map<string, boolean>();
+
 function AgentGroupView({
   group,
   isLive,
   projectDir,
+  persistKey,
 }: {
   group: TimelineGroup;
   isLive: boolean;
   projectDir: string;
+  persistKey: string;
 }) {
   // Terminal groups render as notices and hold no disclosure state; dispatch
   // them before the activity component so its hooks never run conditionally.
@@ -2408,20 +2417,18 @@ function AgentGroupView({
     return (
       <>
         {group.items.length > 0 ? (
-          <AgentActivityGroup group={group} isLive={isLive} projectDir={projectDir} />
+          <AgentActivityGroup group={group} isLive={isLive} projectDir={projectDir} persistKey={persistKey} />
         ) : null}
-        <FinalMessage item={group.finalContent} />
+        <FinalMessage item={group.finalContent} projectDir={projectDir} />
       </>
     );
   }
-  return <AgentActivityGroup group={group} isLive={isLive} projectDir={projectDir} />;
+  return <AgentActivityGroup group={group} isLive={isLive} projectDir={projectDir} persistKey={persistKey} />;
 }
 
 /** 回合收尾回复：顶层普通消息，像聊天里最后一条回答。 */
-function FinalMessage({ item }: { item: ActivityItem }) {
-  return (
-    <div className="agent-final agent-md" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.content || '') }} />
-  );
+function FinalMessage({ item, projectDir }: { item: ActivityItem; projectDir: string }) {
+  return <AgentMarkdown text={item.content || ''} projectDir={projectDir} className="agent-final" />;
 }
 
 function UserMessageRow({ message }: { message: string }) {
@@ -2439,20 +2446,36 @@ function AgentActivityGroup({
   group,
   isLive,
   projectDir,
+  persistKey,
 }: {
   group: Extract<TimelineGroup, { type: 'activity' }>;
   isLive: boolean;
   projectDir: string;
+  persistKey: string;
 }) {
-  const [open, setOpen] = useState(isLive);
-  const userToggledRef = useRef(false);
+  const stateKey = `${persistKey}::${group.id}`;
+  const [open, setOpenRaw] = useState(() => {
+    const saved = manualOpenState.get(stateKey);
+    return saved === undefined ? isLive : saved;
+  });
+  // 恢复过用户选择的组从挂载之初就属于“手动控制”。否则下面的 effect 会在
+  // 历史回合 isLive=false 时立刻把刚恢复的展开态重新收起。
+  const userToggledRef = useRef(manualOpenState.has(stateKey));
+  const setManualOpen = (value: boolean | ((prev: boolean) => boolean)) => {
+    setOpenRaw((prev) => {
+      const next = typeof value === 'function' ? value(prev) : value;
+      manualOpenState.set(stateKey, next);
+      return next;
+    });
+  };
   const items = group.items;
 
   // Follow the live run: auto-expand while working, auto-collapse when settled,
   // unless the user took manual control of this group.
   useEffect(() => {
     if (userToggledRef.current) return;
-    setOpen(isLive);
+    // 自动状态不写入 manualOpenState；只有用户点击才应取得永久控制权。
+    setOpenRaw(isLive);
   }, [isLive]);
 
   // 运行中墙钟计时：live 时每秒跳动，结束冻结在最后值。
@@ -2515,7 +2538,7 @@ function AgentActivityGroup({
         className="agent-activity__header"
         onClick={() => {
           userToggledRef.current = true;
-          setOpen((v) => !v);
+          setManualOpen((v) => !v);
         }}
         aria-expanded={open}
       >
@@ -2530,9 +2553,9 @@ function AgentActivityGroup({
           <div className="agent-activity__body">
             {items.map((item, i) =>
               item.kind === 'content' ? (
-                <ContentRow key={`t-${i}`} item={item} />
+                <ContentRow key={`t-${i}`} item={item} projectDir={projectDir} />
               ) : item.kind === 'reasoning' ? (
-                <ReasoningRow key={`r-${i}`} item={item} />
+                <ReasoningRow key={`r-${i}`} item={item} projectDir={projectDir} persistKey={persistKey} />
               ) : item.kind === 'compact' ? (
                 <CompactRow key={`c-${i}`} item={item} />
               ) : item.kind === 'retry' ? (
@@ -2541,7 +2564,7 @@ function AgentActivityGroup({
                 // 启动翻译换成工作台顶部卡的迷你版（带实时进度），不再是一坨 JSON
                 <TranslationJobCard key={`j-${item.id || i}`} item={item} projectDir={projectDir} />
               ) : (
-                <ToolRow key={`x-${item.id || i}`} item={item} live={isLive && i === items.length - 1} />
+                <ToolRow key={`x-${item.id || i}`} item={item} live={isLive && i === items.length - 1} persistKey={persistKey} />
               ),
             )}
           </div>
@@ -2571,16 +2594,18 @@ function asArgs(args: unknown): Record<string, unknown> | undefined {
   return undefined;
 }
 
-function ContentRow({ item }: { item: ActivityItem }) {
+function ContentRow({ item, projectDir }: { item: ActivityItem; projectDir: string }) {
   // 模型「说」的回复：直接渲染为普通黑体纯文本，不再用可折叠卡片包裹。
   const text = item.content || '';
   const streaming = Boolean(item.streaming);
 
   return (
     <div className={`agent-content${streaming ? ' is-streaming' : ''}`}>
-      <div
-        className="agent-content__text agent-md"
-        dangerouslySetInnerHTML={{ __html: renderMarkdown(text, { cursor: streaming }) }}
+      <AgentMarkdown
+        text={text}
+        projectDir={projectDir}
+        cursor={streaming}
+        className="agent-content__text"
       />
     </div>
   );
@@ -2617,10 +2642,26 @@ function reasoningOneLiner(text: string): string {
     .slice(-REASONING_MARQUEE_CHARS);
 }
 
-function ReasoningRow({ item }: { item: ActivityItem }) {
+function ReasoningRow({
+  item,
+  projectDir,
+  persistKey,
+}: {
+  item: ActivityItem;
+  projectDir: string;
+  persistKey: string;
+}) {
   const streaming = Boolean(item.streaming);
-  // 默认折叠，且不跟随流式自动展开（用户手动开过就一直是开的）
-  const [open, setOpen] = useState(false);
+  // 默认折叠，且不跟随流式自动展开（用户手动开过就一直是开的——包括切页面重挂后）
+  const stateKey = `${persistKey}::r-${item.step}-${item.id || ''}`;
+  const [open, setOpenRaw] = useState(() => manualOpenState.get(stateKey) === true);
+  const setOpen = (value: boolean | ((prev: boolean) => boolean)) => {
+    setOpenRaw((prev) => {
+      const next = typeof value === 'function' ? value(prev) : value;
+      manualOpenState.set(stateKey, next);
+      return next;
+    });
+  };
 
   const text = item.content || '';
   const label = streaming ? '思考中' : item.durationMs ? `已思考 ${formatDuration(item.durationMs)}` : '已思考';
@@ -2647,9 +2688,11 @@ function ReasoningRow({ item }: { item: ActivityItem }) {
       </button>
       <div className="agent-reasoning__collapse">
         <div className="agent-reasoning__collapse-inner">
-          <div
-            className="agent-reasoning__text agent-md"
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(text, { cursor: streaming }) }}
+          <AgentMarkdown
+            text={text}
+            projectDir={projectDir}
+            cursor={streaming}
+            className="agent-reasoning__text"
           />
         </div>
       </div>
@@ -3100,8 +3143,24 @@ function AskUserCard({
 
 /* ── Tool row (disclosure, not a boxed card) ── */
 
-function ToolRow({ item, live }: { item: ActivityItem; live: boolean }) {
-  const [open, setOpen] = useState(false);
+function ToolRow({
+  item,
+  live,
+  persistKey,
+}: {
+  item: ActivityItem;
+  live: boolean;
+  persistKey: string;
+}) {
+  const stateKey = `${persistKey}::tool-${item.id || item.step}`;
+  const [open, setOpenRaw] = useState(() => manualOpenState.get(stateKey) === true);
+  const setOpen = (value: boolean | ((prev: boolean) => boolean)) => {
+    setOpenRaw((prev) => {
+      const next = typeof value === 'function' ? value(prev) : value;
+      manualOpenState.set(stateKey, next);
+      return next;
+    });
+  };
   const meta = toolMeta(item.name);
   const summary = meta.summary(asArgs(item.arguments));
   const ok = item.ok !== false;

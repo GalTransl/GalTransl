@@ -268,6 +268,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 
 # 约束
 - 每一步只调用必要的工具；能在一次工具调用里拿到的信息不要拆成多次。重复查看同类信息时用工具的分段参数（如 get_project_overview 的 include）只取变化的部分，别把基本不变的配置/说明反复拉一遍。
+- 要把某条缓存（原文 + 译文，或几条）摆给用户看时，在回复里**单独一行**写 `$transl_cache("<缓存文件名>", <行号>)`：文件名来自 list_transl_cache，行号是缓存条目的 index，可写区间 `12-15` 或逗号列表 `12,20`。界面会把它渲染成那几行缓存的卡片，比自己把原文译文抄一遍清楚、也不会抄错。不要把它写进代码块，也不要加额外解释行。
 - 不要在未准备字典的情况下直接启动主翻译。
 - 不要连续重复调用同一个工具相同参数（避免死循环）；若上一步结果不理想，换策略或总结收尾。
 - 工具返回的 error 要阅读并据此调整下一步，不要忽略。
@@ -1327,6 +1328,8 @@ def _cache_fields_section() -> str:
         f"{_patchable_fields_text()}；"
         "problem 与 post_* 是后端算出来的派生字段，改不动——改完译文跑 rebuilda（或重翻）"
         "它们才会跟着更新。"
+        "要在回复里把某条缓存展示给用户，单独一行写 $transl_cache(\"<缓存文件名>\", <行号>)"
+        "（行号 = 条目 index，区间 12-15 / 列表 12,20 均可），界面会渲染成卡片。"
     )
     lines.append(
         "另外注意：缓存 ≠ 交付物。最终的 gt_output 文件是缓存经译后字典替换、控制符还原后的形态，"
@@ -1944,7 +1947,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_transl_cache",
-            "description": "读取某个缓存文件的条目（译文）。filename 来自 list_transl_cache 的缓存文件列表。留空 index 返回前 30 条；指定 index 只返回指定的条目。修问题/润色判断语意连贯时传 context 让目标条目前后各多带几句上下文。默认只返回必要字段（index/说话人/原文/译文/问题，以及确实非空或与原文不同的附加字段），要看别的字段再传 fields。不要读取 .append.jsonl 增量文件（翻译中旧快照），读对应的 .json 文件。",
+            "description": "读取某个缓存文件的条目（译文）。filename 来自 list_transl_cache 的缓存文件列表。留空 index 返回前 30 条；指定 index 只返回指定的条目。修问题/润色判断语意连贯时传 context 让目标条目前后各多带几句上下文。默认只返回必要字段（index/说话人/原文/译文/问题，以及确实非空或与原文不同的附加字段），要看别的字段再传 fields。不要读取 .append.jsonl 增量文件（翻译中旧快照），读对应的 .json 文件。要把某条缓存展示给用户时，在回复里单独一行写 $transl_cache(\"<缓存文件名>\", <行号>)（行号 = 条目 index，区间 12-15 / 列表 12,20 均可），界面会把它渲染成那几行缓存的卡片。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -4335,6 +4338,7 @@ class AgentRuntime:
         message: str,
         session_id: str | None = None,
         backend_profile_name: str = "",
+        backend_profile_data: dict[str, Any] | None = None,
         translator_profile_name: str = "",
         translator_profile_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -4363,6 +4367,8 @@ class AgentRuntime:
             # （名字只在前端 localStorage，后端只能这样拿到）。
             if backend_profile_name:
                 state.backend_profile_name = backend_profile_name
+            if backend_profile_data:
+                state.backend_profile_data = backend_profile_data
             if translator_profile_name:
                 state.translator_profile_name = translator_profile_name
             if translator_profile_data:

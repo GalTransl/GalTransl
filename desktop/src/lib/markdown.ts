@@ -1,7 +1,55 @@
-/* 轻量 Markdown 渲染器（供 Agent 对话气泡使用）。
+/* 轻量 Markdown 渲染器 + 缓存引用指令（供 Agent 对话气泡使用）。
    覆盖 LLM 常见输出：标题 / 粗斜体 / 行内代码 / 围栏代码块 / 无序有序列表 /
    引用 / 段落。所有文本先 HTML 转义再做替换，不产生注入面；链接降级为
-   纯文本 + 原始 URL（桌面端 WebView 不外跳）。 */
+   纯文本 + 原始 URL（桌面端 WebView 不外跳）。
+
+   另外解析模型用的缓存引用指令 $transl_cache(文件名, 行号)：它会被切成独立片段，
+   由界面渲染成"某条缓存"的卡片（见 components/AgentCacheRef）。 */
+
+/** $transl_cache("a.json", 12) / $transl_cache(a.json, 12-15) / (a.json, 12,20)。
+ *  文件名可以有引号也可以没有，行号允许逗号与区间。 */
+const CACHE_REF_RE =
+  /\$transl_cache\(\s*(?:"([^"]+)"|'([^']+)'|([^,)]+?))\s*,\s*([0-9][0-9,\-\s]*)\s*\)/g;
+
+export type MarkdownSegment =
+  | { kind: 'text'; text: string }
+  | { kind: 'cacheRef'; filename: string; indexSpec: string };
+
+/** 行号写法 -> 条目 index 列表：12 / 12-15 / 12,20 / 12-14,20。去重排序，最多 limit 条。 */
+export function parseCacheRefIndexes(spec: string, limit = 50): number[] {
+  const out: number[] = [];
+  for (const part of spec.split(',')) {
+    const token = part.trim();
+    if (!token) continue;
+    const range = /^(\d+)\s*-\s*(\d+)$/.exec(token);
+    if (range) {
+      const lo = Number(range[1]);
+      const hi = Number(range[2]);
+      for (let i = Math.min(lo, hi); i <= Math.max(lo, hi); i += 1) out.push(i);
+      continue;
+    }
+    if (/^\d+$/.test(token)) out.push(Number(token));
+  }
+  return [...new Set(out)].sort((a, b) => a - b).slice(0, limit);
+}
+
+/** 把文本切成「普通文本 / 缓存引用」片段；没有引用时返回单段文本（渲染路径不变）。 */
+export function splitMarkdownSegments(text: string): MarkdownSegment[] {
+  const segments: MarkdownSegment[] = [];
+  let last = 0;
+  CACHE_REF_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = CACHE_REF_RE.exec(text)) !== null) {
+    if (m.index > last) segments.push({ kind: 'text', text: text.slice(last, m.index) });
+    const filename = (m[1] || m[2] || m[3] || '').trim();
+    const indexSpec = (m[4] || '').trim();
+    if (filename && indexSpec) segments.push({ kind: 'cacheRef', filename, indexSpec });
+    else segments.push({ kind: 'text', text: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) segments.push({ kind: 'text', text: text.slice(last) });
+  return segments.length ? segments : [{ kind: 'text', text }];
+}
 
 function escapeHtml(text: string): string {
   return text
