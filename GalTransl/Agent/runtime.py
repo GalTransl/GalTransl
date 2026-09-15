@@ -245,7 +245,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 - 你通过调用工具完成所有操作，工具背后调用的是和图形界面完全相同的后端 API，你不会绕过校验。
 - 你可以也应该在调用工具的同时用自然语言说明你的决策与思考（这一段会实时展示给用户）。
 
-# 标准翻译流程（必须按此顺序推进）
+# 标准翻译流程
 1. **了解项目**：先调用 get_project_overview 看翻译进度与项目配置（不传 include，一次拿全）。注意进度里的 total/translated 是「句数」且只统计已生成缓存的文件，translated==total 不等于整个项目翻完，整体是否翻完看 files_translated/files_total。再确认返回的 backend（agent = 本会话在用的后端，translator = 翻译任务会用的后端，各含配置名/类型/模型名）、项目确有输入文件（输入文件清单用 list_input_files 查），然后继续。之后再看进度时只传 include=["progress"]（必要时加 "backend"）：配置与配置键说明基本不变，不必重复拉。
 2. **字典准备（在启动翻译前必须完成）**：
    a. 调用 list_dict_files 查看项目已配置的译前/GPT/译后字典文件；
@@ -1686,7 +1686,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "write_project_guideline",
-            "description": "写**项目规范**（项目目录里的 translation_guideline.md，跟项目一起走；翻译时拼在全局规范之后，冲突以它为准）。三种模式：overwrite=整份覆写；append=在末尾增写（新发现的要求）；replace=把 old_text 换成 new_text（只调其中几条时用，old_text 要原样来自规范全文、且只出现一次，否则会报错让你带上更多前后文）。改完在**下一次启动翻译**时生效，正在跑的翻译不受影响。规范是写给翻译模型的，要具体可执行（术语对照、称呼、语气、标点习惯、禁忌），别写「要地道」这类空话；写之前先用 read_guideline(scope=\"project\") 看当前内容，别把互相矛盾的规则堆在一起。",
+            "description": "写**项目规范**（项目目录里的 translation_guideline.md，跟项目一起走；翻译时拼在全局规范之后，冲突以它为准）。三种模式：overwrite=整份覆写；append=在末尾增写（新发现的要求）；replace=把 old_text 换成 new_text（只调其中几条时用，old_text 要原样来自规范全文、且只出现一次，否则会报错让你带上更多前后文）。改完在**下一次启动翻译**时生效，正在跑的翻译不受影响。规范是写给翻译模型的，要具体可执行（术语对照、称呼、语气、标点习惯、禁忌），别写「要地道」这类空话；写之前先用 read_guideline(scope=\"project\") 看当前内容，别把互相矛盾的规则堆在一起。返回里带这一次改动的行级 diff（新增/删除的行、增删计数），不用再读一遍文件确认。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2066,7 +2066,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "patch_transl_cache",
-            "description": "批量修改某个缓存文件中若干条目的译文/校对等字段。只更新 patches 里指定的条目与字段，其它条目原样保留。返回 updated（改动条目数）、changes（逐字段 before→after 的变更）与 problems（被改条目重建后仍存在的问题，没有则不返回）；改了什么一目了然、有没有引入新问题当场可验，不必再 read_transl_cache。适合发现问题后改译文、再配合 rebuilda 重建的复核循环。",
+            "description": "批量修改某个缓存文件中若干条目的译文（pre_dst / proofread_dst 两列）。只更新 patches 里指定的条目与字段，其它条目原样保留。返回 updated（改动条目数）、changes（逐字段 before→after 的变更）与 problems（被改条目重建后仍存在的问题，没有则不返回）；改了什么一目了然、有没有引入新问题当场可验，不必再 read_transl_cache。适合发现问题后改译文、再配合 rebuilda 重建的复核循环。被改条目的 trans_by（译者标记）由工具自动记成本会话 Agent 的模型名，不需要也不能手动指定。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2079,7 +2079,6 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                                 "index": {"type": "integer", "description": "要修改的条目 index"},
                                 "pre_dst": {"type": "string", "description": "可选。新译文（机翻结果）"},
                                 "proofread_dst": {"type": "string", "description": "可选。新校对译文（校对/润色结果，优先于 pre_dst）"},
-                                "trans_by": {"type": "string", "description": "可选。标记译者，如 'manual' 或 'agent'"},
                             },
                             "required": ["index"],
                         },
@@ -2549,14 +2548,37 @@ def _tool_write_project_guideline(runner: AgentRunner, args: dict[str, Any]) -> 
     三种模式的实现都在后端（server → ProjectGuideline.apply_project_guideline_edit）：
     replace 没命中或命中多处会返回 400，由 _http_json 转成工具错误原样给模型看，
     这里不做二次加工，免得"到底改成了什么"有两套口径。
+
+    行级 diff（前端渲染「变更」卡的依据）也按同一原则来：**写前、写后各读一次文件**，
+    diff 的是真正落盘的内容，而不是在本地按三种模式重算一遍编辑结果——后者等于把
+    "改成什么样"的逻辑实现第二遍，早晚跟后端那份对不上。
     """
+    endpoint = f"/api/projects/{runner._project_id()}/guideline"
+    before = str((runner._http_get(endpoint) or {}).get("content") or "")
     body = {
         "mode": str(args.get("mode", "") or "").strip(),
         "content": str(args.get("content", "") or ""),
         "old_text": str(args.get("old_text", "") or ""),
         "new_text": str(args.get("new_text", "") or ""),
     }
-    return runner._http_put(f"/api/projects/{runner._project_id()}/guideline", body)
+    result = runner._http_put(endpoint, body)
+    after = str((runner._http_get(endpoint) or {}).get("content") or "")
+
+    diff = _diff_lines(before, after)
+    added = sum(1 for r in diff["rows"] if r["op"] == "add")
+    removed = sum(1 for r in diff["rows"] if r["op"] == "del")
+    out: dict[str, Any] = dict(result) if isinstance(result, dict) else {}
+    out.update(
+        {
+            "changed": before != after,
+            "lines_before": len(before.splitlines()),
+            "lines_after": len(after.splitlines()),
+            "lines_added": added,
+            "lines_removed": removed,
+            "line_diff": diff,
+        }
+    )
+    return out
 
 
 def _tool_list_dict_files(runner: AgentRunner, _args: dict[str, Any]) -> Any:
@@ -3292,11 +3314,12 @@ def _change(path: str, before: Any, after: Any, kind: str = "replace") -> dict[s
     return {"path": path, "before": before, "after": after, "kind": kind}
 
 
-def _diff_lines(before_text: str, after_text: str, *, context: int = 0, max_lines: int = 200) -> list[dict[str, Any]]:
+def _diff_lines(before_text: str, after_text: str, *, context: int = 0, max_lines: int = 200) -> dict[str, Any]:
     """整文本替换时的逐行 diff（新增行/删除行），给前端渲染行级 diff。
 
-    用最长公共行序列近似（对字典这种逐行 KV 文本足够准确）；超过 max_lines
-    时截断并标记 truncated，避免整本小说级 diff 刷屏。"""
+    返回 {"rows": [{"op": "add"|"del", "line": str}], "truncated": bool}——与前端
+    extractChangeList 认的 line_diff 结构一致。用最长公共行序列近似（对字典、规范这类
+    逐行文本足够准确）；超过 max_lines 时截断并标记 truncated，避免整本小说级 diff 刷屏。"""
     import difflib
 
     before_lines = before_text.splitlines()
@@ -3449,7 +3472,7 @@ CACHE_ENTRY_FIELD_DESCRIPTIONS: dict[str, str] = {
     "post_dst_preview": "最终译文的缓存快照（后润）：译后字典替换 + 对话符号恢复之后的形态",
     "proofread_dst": "校对/润色稿；有内容时它就是这条的最终译文（优先于 pre_dst）",
     "proofread_by": "校对者标记（校对失败的会带 Fail）；未校对为空",
-    "trans_by": "译者标记：模型名或引擎名；被 Agent/manual 手改过的也会标在这里；默认不返回（要看它传 fields）",
+    "trans_by": "译者标记：翻译引擎名或模型名；被 Agent 用 patch_transl_cache 改过的条目会记成本会话 Agent 的模型名；默认不返回（要看它传 fields）",
     "problem": "自动问题分析写入的问题标签，可能多条（以「, 」分隔）；list_problems 的统计与下钻都基于它",
 }
 # 默认模式下"有内容才带上"的附加字段（空值一律省略）
@@ -3746,11 +3769,12 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     return result
 
 
-# patch_transl_cache 允许更新的条目字段白名单（其余字段一律不动，避免误改 problem/preview 等派生字段）
+# patch_transl_cache 允许更新的条目字段白名单（其余字段一律不动，避免误改 problem/preview
+# 等派生字段）。trans_by 不在这里：它是"谁改的"标记，由工具自动填成本会话的模型名，
+# 不能让模型自己声明（写 "manual" 这种会把"翻译引擎翻的"和"Agent 改的"混起来）。
 _PATCHABLE_FIELDS = {
     "pre_dst",
     "proofread_dst",
-    "trans_by",
 }
 
 
@@ -3760,6 +3784,22 @@ def _patchable_fields_text() -> str:
     system prompt 的字段说明与 patch 工具的报错都用它，避免两处各写一份再漂移。
     """
     return " / ".join(name for name in CACHE_ENTRY_FIELDS if name in _PATCHABLE_FIELDS)
+
+
+def _agent_model_name(runner: AgentRunner) -> str:
+    """本会话 Agent 后端的模型名：patch 改过的条目用它写 trans_by。
+
+    优先取本回合实际在跑的模型名（_resolve_llm 解析出的 _model），拿不到时退回 state
+    里那份后端配置（「了解项目」报的就是它）；都没有就返回空串——宁可不写标记，
+    也不要瞎填一个模型名。
+    """
+    model = str(getattr(runner, "_model", "") or "").strip()
+    if model:
+        return model
+    state = runner.state
+    profile = getattr(state, "backend_profile_data", None) or {}
+    name = getattr(state, "backend_profile_name", "") or ""
+    return str(_backend_summary(profile, name).get("model") or "")
 
 
 def _tool_patch_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
@@ -3819,6 +3859,13 @@ def _tool_patch_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
             f"没有条目被更新（updated=0, skipped={len(skipped)}, not_found={len(not_found)}）"
         )
 
+    # 被改过的条目一律标上本会话的模型名（trans_by 不在 _PATCHABLE_FIELDS 里，模型指定不了）：
+    # 用户与后续复核才分得清"这句是 Agent 手改的"还是"翻译引擎翻的"。
+    agent_model = _agent_model_name(runner)
+    if agent_model:
+        for idx_i in applied_indexes:
+            by_index[idx_i]["trans_by"] = agent_model
+
     save_body = {
         "filename": filename,
         "entries": entries,
@@ -3834,6 +3881,8 @@ def _tool_patch_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
         "updated": len(applied_indexes),
         "changes": changes,
     }
+    if agent_model:
+        result["trans_by"] = agent_model
     if not_found:
         result["not_found_indexes"] = sorted(not_found)
     if skipped:

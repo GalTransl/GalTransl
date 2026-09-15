@@ -59,8 +59,8 @@ class CacheFieldCoverageTests(unittest.TestCase):
             # 读：fields 里带它会被当成未知字段拒掉
             with self.assertRaises(AgentToolError):
                 _normalize_cache_fields({"fields": [name]})
-        # 写：可改字段只剩这三个
-        self.assertEqual(_patchable_fields_text(), "pre_dst / proofread_dst / trans_by")
+        # 写：可改字段只剩这两个（trans_by 由 patch_transl_cache 自动打标记，模型指定不了）
+        self.assertEqual(_patchable_fields_text(), "pre_dst / proofread_dst")
 
     def test_removed_fields_are_not_in_the_prompt(self) -> None:
         prompt = _build_system_prompt(_state())
