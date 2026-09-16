@@ -3175,6 +3175,18 @@
   color: var(--color-text);
 }
 
+/* 纯标签形态（会话开始后的项目 chip）：不可点，所以指针与 hover 底色都要收掉——
+   否则一个没有任何反应的东西看着像按钮。选择器带上 .agent-composer__chip 是为了
+   压过上面那条 :hover:not(:disabled)。 */
+.agent-composer__chip.agent-composer__chip--static {
+  cursor: default;
+}
+
+.agent-composer__chip.agent-composer__chip--static:hover {
+  background: var(--agent-tile);
+  color: var(--color-text-muted);
+}
+
 .agent-profile-menu {
   position: absolute;
   left: 0;

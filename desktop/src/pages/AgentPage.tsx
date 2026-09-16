@@ -1108,6 +1108,9 @@ export function AgentPage() {
   const [error, setError] = useState<string | null>(null);
   // 后端配置/模型选择小菜单（点 composer 的 chip 打开）
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  // 项目 chip 的小菜单：只有"会话还没开始"时它才可点（选完项目、首条消息之前），
+  // 那时换项目没成本；一旦开聊，项目就是这次会话的锚点，chip 退化成纯标签。
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   // 界面上的「发送中」乐观态：消息已发出但后端尚未确认
   const [sending, setSending] = useState(false);
   // 已用上下文/上下文窗口（composer 右下角指示器）：
@@ -1181,6 +1184,8 @@ export function AgentPage() {
   const skipRememberedSessionRef = useRef(false);
   // 后端配置小菜单的容器：点外面要能关掉
   const profilePickerRef = useRef<HTMLDivElement | null>(null);
+  // 项目 chip 小菜单的容器：同上
+  const projectPickerRef = useRef<HTMLDivElement | null>(null);
   // 当前激活的会话 id，供回调读取（避免闭包读到旧值）
   const activeSessionRef = useRef('');
   const statusSyncVersionRef = useRef(0);
@@ -1218,6 +1223,23 @@ export function AgentPage() {
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [profileMenuOpen]);
+
+  // 项目 chip 的小菜单：同样点外部 / Esc 关闭
+  useEffect(() => {
+    if (!projectMenuOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (!projectPickerRef.current?.contains(e.target as Node)) setProjectMenuOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setProjectMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [projectMenuOpen]);
 
   useEffect(() => {
     if (running) setProfileMenuOpen(false);
@@ -1549,6 +1571,8 @@ export function AgentPage() {
     const text = goal.trim();
     if (!text) return;
     setError(null);
+    // 发出去就等于会话开始：项目 chip 马上要变成不可点的纯标签，菜单顺手收掉
+    setProjectMenuOpen(false);
     if (!effectiveProject) {
       setError('请先选择一个项目');
       return;
@@ -1772,6 +1796,18 @@ export function AgentPage() {
     setProjectDir(dir);
     setConfigFileName(cfg);
     setGoal('');
+    addOpenProject(dir, cfg);
+  }, []);
+
+  /** 会话开始前从 composer 的 chip 换项目：与 chooseProject 同一套，但**不动已输入的指令**。
+   *  这个动作发生在"项目已选、还没开聊"的窗口里，用户很可能已经把任务描述写好了——
+   *  换个项目接着用同一条指令是常态，清掉反而要重打。 */
+  const switchProjectBeforeSession = useCallback((dir: string) => {
+    if (!dir) return;
+    const cfg = readConfigFileName(dir);
+    skipRememberedSessionRef.current = true;
+    setProjectDir(dir);
+    setConfigFileName(cfg);
     addOpenProject(dir, cfg);
   }, []);
 
@@ -2409,10 +2445,72 @@ export function AgentPage() {
           />
           <div className="agent-composer__toolbar">
             <div className="agent-composer__left">
-              <span className="agent-composer__chip agent-composer__chip--static" title={projectDir || '未选择项目'}>
-                <span className="agent-composer__chip-icon"><Icon name="folder" /></span>
-                <span className="agent-composer__chip-label">{projectDir ? shortName(projectDir) : '未选择项目'}</span>
-              </span>
+              {hasSession ? (
+                // 会话已经开聊：项目是这次会话的锚点，换它等于换会话——chip 退化成纯标签，
+                // 光标与 hover 底色一并收掉（见 .agent-composer__chip--static），别看着能点
+                <span
+                  className="agent-composer__chip agent-composer__chip--static"
+                  title={`${projectDir || '未选择项目'}（会话已开始；要换项目请从侧边栏新建会话）`}
+                >
+                  <span className="agent-composer__chip-icon"><Icon name="folder" /></span>
+                  <span className="agent-composer__chip-label">{projectDir ? shortName(projectDir) : '未选择项目'}</span>
+                </span>
+              ) : (
+                // 项目已选、还没开聊：这时换项目零成本，chip 就是入口（菜单与旁边两个 chip 同款）
+                <div className="agent-profile-picker" ref={projectPickerRef}>
+                  <button
+                    type="button"
+                    className={`agent-composer__chip${projectMenuOpen ? ' is-open' : ''}`}
+                    onClick={() => setProjectMenuOpen((v) => !v)}
+                    aria-haspopup="menu"
+                    aria-expanded={projectMenuOpen}
+                    title={`${projectDir || '未选择项目'} · 点击换一个项目（会话开始后就固定了）`}
+                  >
+                    <span className="agent-composer__chip-icon"><Icon name="folder" /></span>
+                    <span className="agent-composer__chip-label">{projectDir ? shortName(projectDir) : '未选择项目'}</span>
+                  </button>
+                  {projectMenuOpen ? (
+                    <div className="agent-profile-menu" role="menu">
+                      {projectOptions.length === 0 ? (
+                        <div className="agent-profile-menu__empty">还没有打开的项目</div>
+                      ) : (
+                        projectOptions.map((dir) => (
+                          <button
+                            key={dir}
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={dir === projectDir}
+                            className="agent-profile-menu__item"
+                            onClick={() => {
+                              switchProjectBeforeSession(dir);
+                              setProjectMenuOpen(false);
+                            }}
+                            title={dir}
+                          >
+                            <span className="agent-profile-menu__label">{shortName(dir)}</span>
+                            {dir === projectDir ? (
+                              <span className="agent-profile-menu__check" aria-hidden><Icon name="check" /></span>
+                            ) : null}
+                          </button>
+                        ))
+                      )}
+                      <div className="agent-profile-menu__sep" />
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="agent-profile-menu__item agent-profile-menu__item--action"
+                        onClick={() => {
+                          setProjectMenuOpen(false);
+                          void handleOpenProject();
+                        }}
+                      >
+                        <span className="agent-profile-menu__label">打开其它项目…</span>
+                        <span className="agent-profile-menu__chev" aria-hidden>›</span>
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              )}
               <div className="agent-profile-picker" ref={profilePickerRef}>
                 <button
                   type="button"
