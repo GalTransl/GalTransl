@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 
+import type { PermissionDecision, PermissionMode } from './permissionMode';
+
 const DEFAULT_BACKEND_URL = 'http://127.0.0.1:12333';
 let runtimeBackendBaseUrl: string | null = null;
 
@@ -1578,6 +1580,7 @@ export type AgentEventType =
   | 'user_message'
   | 'tool_call'
   | 'tool_result'
+  | 'permission_request'
   | 'wait_start'
   | 'wait_tick'
   | 'wait_end'
@@ -1642,6 +1645,12 @@ export type AgentEvent = {
   result?: unknown;
   error?: string;
   duration_ms?: number;
+  // permission_request（写操作执行前请用户批准）
+  tool_call_id?: string;
+  label?: string;
+  risk?: string;
+  mode?: string;
+  timeout_s?: number;
   // wait_start / wait_tick / wait_end
   seconds?: number;
   total_ms?: number;
@@ -1718,7 +1727,7 @@ export type AgentStartPayload = {
   goal?: string;
   /** Omit to let the backend create a fresh session. */
   session_id?: string;
-} & AgentBackendContext;
+} & AgentRequestContext;
 
 /**
  * Agent 会话要带上的「后端上下文」：配置名＋翻译器那份的配置内容。
@@ -1735,6 +1744,12 @@ export type AgentBackendContext = {
   /** 翻译任务会用的后端配置名（项目选择 → 否则全局「翻译器默认」）。 */
   translator_profile_name?: string;
   translator_profile_data?: Record<string, unknown>;
+};
+
+/** start / message 的请求上下文：后端上下文 + 权限模式（见 lib/permissionMode）。 */
+export type AgentRequestContext = AgentBackendContext & {
+  /** 权限模式：后端据此决定每次工具调用是直接放行还是先请用户批准。 */
+  permission_mode?: PermissionMode;
 };
 
 /** 取「翻译任务会用的后端」：优先项目自己的选择，没有则回落到全局「翻译器默认」。 */
@@ -1773,6 +1788,46 @@ export async function answerAgentAsk(
 }
 
 /**
+ * 回答权限确认卡（后端那个工具调用正阻塞着等这一下）。
+ * decision：allow-once 只批这一次 / allow-session 本会话都批这个工具 / deny 拒绝。
+ */
+export async function answerAgentPermission(
+  projectDir: string,
+  decision: PermissionDecision,
+  sessionId?: string,
+) {
+  return apiRequest<{ ok: boolean; decision: string; name: string }>('/api/agent/permission', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_dir: projectDir, session_id: sessionId, decision }),
+  });
+}
+
+/**
+ * 改权限模式。回合跑着也能改：后端下一次工具调用就按新档判；如果正好有一张权限卡在等，
+ * 新档本来就会放行它的话会自动放行（相当于替你点了「允许一次」）。
+ * 空闲会话也允许（下次 start/message 照样会带，两边一致）。
+ */
+export async function setAgentPermissionMode(
+  projectDir: string,
+  permissionMode: PermissionMode,
+  sessionId?: string,
+) {
+  return apiRequest<{ ok: boolean; permission_mode: string; session_id: string }>(
+    '/api/agent/permission-mode',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_dir: projectDir,
+        session_id: sessionId,
+        permission_mode: permissionMode,
+      }),
+    },
+  );
+}
+
+/**
  * Send a user message to the project's agent session. While the agent is
  * running the message is queued as an interjection; otherwise it starts a
  * new turn continuing the same conversation.
@@ -1781,7 +1836,7 @@ export async function sendAgentMessage(
   projectDir: string,
   message: string,
   sessionId?: string,
-  backendContext?: AgentBackendContext,
+  backendContext?: AgentRequestContext,
 ) {
   return apiRequest<AgentStatus>('/api/agent/message', {
     method: 'POST',

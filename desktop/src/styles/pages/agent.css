@@ -2825,7 +2825,8 @@
   flex-wrap: wrap;
 }
 
-.agent-ask__btn {
+.agent-ask__btn,
+.agent-perm__btn {
   padding: 5px 12px;
   border: 1px solid var(--agent-line-soft);
   border-radius: 8px;
@@ -2836,27 +2837,139 @@
   cursor: pointer;
 }
 
-.agent-ask__btn:hover:not(:disabled) {
+.agent-ask__btn:hover:not(:disabled),
+.agent-perm__btn:hover:not(:disabled) {
   background: var(--agent-hover);
 }
 
-.agent-ask__btn.is-primary {
+.agent-ask__btn.is-primary,
+.agent-perm__btn.is-primary {
   border-color: var(--color-primary);
   background: var(--color-primary);
   color: #fff;
 }
 
-.agent-ask__btn.is-primary:hover:not(:disabled) {
+.agent-ask__btn.is-primary:hover:not(:disabled),
+.agent-perm__btn.is-primary:hover:not(:disabled) {
   filter: brightness(1.06);
 }
 
-.agent-ask__btn:disabled {
+.agent-ask__btn:disabled,
+.agent-perm__btn:disabled {
   opacity: 0.55;
   cursor: default;
 }
 
 .agent-ask__note {
   font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+
+/* ── 权限确认卡片（工具执行前）──
+   与询问卡片同一种摆法：就在那次工具调用下面。区别是它有倒计时（超时按拒绝）、
+   三个按钮对应后端三种答复，而且按风险分色——改译文数据（可自动放行那类）用中性的
+   灰底标签，改设置/规范/启动任务用警告色，风险一眼分得开。 */
+
+.agent-perm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0 2px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 34%, transparent);
+  border-radius: var(--radius-card);
+  background: var(--agent-tile);
+}
+
+.agent-perm__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agent-perm__icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--color-warning);
+  font-size: 0.9rem;
+}
+
+.agent-perm__title {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.agent-perm__risk {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-warning) 18%, transparent);
+  color: var(--color-warning);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.agent-perm__risk.is-edit {
+  background: var(--agent-tile-strong);
+  color: var(--color-text-muted);
+}
+
+/* 审批倒计时（贴在标题行右侧）：120 秒到点后端就按拒绝处理，剩多少得看得见。
+   最后一刻钟转成危险色——"再不动就要超时了"。数字用等宽数字，秒数跳动时不抖。 */
+.agent-perm__timer {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--agent-tile-strong);
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-perm__timer.is-urgent {
+  background: color-mix(in srgb, var(--color-danger) 16%, transparent);
+  color: var(--color-danger);
+}
+
+.agent-perm__lead {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.agent-perm__reason {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.agent-perm__error {
+  font-size: 0.74rem;
+  color: var(--color-danger);
+}
+
+.agent-perm__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 正文第二行：参数摘要 + 当前档位（都是短标签）。压在提问行下面、比它小一号，
+   扫一眼就知道"这次要动什么、为什么现在问" */
+.agent-perm__meta {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.45;
   color: var(--color-text-muted);
 }
 
@@ -3131,6 +3244,30 @@
   padding: 8px 10px;
   color: var(--color-text-muted);
   font-size: 0.82rem;
+}
+
+/* 权限模式菜单：选项名下面跟一句代价说明，所以这一项允许换行（默认是单行省略） */
+.agent-profile-menu__item--stacked .agent-profile-menu__label {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.agent-profile-menu__hint {
+  display: block;
+  margin-top: 1px;
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+/* 权限模式菜单底部那句提醒（换档会清空「本会话允许」）：切档的代价就摆在切档的地方，
+   比事后再弹一条提示及时。样式与选项下的 hint 同一档，但要跟着菜单的 6px 内边距缩进 */
+.agent-profile-menu__note {
+  padding: 2px 10px 4px;
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
 }
 
 @keyframes agent-profile-menu-in {

@@ -34,6 +34,8 @@ import {
   updateAgentQueued,
   sendAgentQueuedNow,
   answerAgentAsk,
+  answerAgentPermission,
+  setAgentPermissionMode,
   encodeProjectDir,
   fetchProjectRuntime,
   fetchJobs,
@@ -46,6 +48,16 @@ import {
   type RuntimeJob,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
+import {
+  PERMISSION_MODE_HINTS,
+  PERMISSION_MODE_LABELS,
+  PERMISSION_MODES,
+  loadPermissionMode,
+  normalizePermissionMode,
+  savePermissionMode,
+  type PermissionDecision,
+  type PermissionMode,
+} from '../lib/permissionMode';
 import { AgentMarkdown, invalidateCacheFilesForToolResult } from '../components/AgentCacheRef';
 import { Icon, type IconName } from '../components/Icon';
 import { formatProfileLabel } from '../lib/backendProfile';
@@ -218,6 +230,18 @@ type ActivityItem = {
   result?: unknown;
   error?: string;
   durationMs?: number;
+  // 权限审批：后端在这个工具调用执行前挂起等用户点（见 PermissionCard）
+  permission?: {
+    id: string;
+    name: string;
+    label: string;
+    risk: string;
+    mode: string;
+    arguments?: Record<string, unknown>;
+    timeoutS: number;
+    /** 发起审批的时刻（epoch 秒）；0 = 老记录没有这个字段，倒计时退化成"从挂载起算" */
+    startedAt: number;
+  };
   // 流式 content/reasoning：正在收 delta、还没收到对应的 *_end
   streaming?: boolean;
   // 回合的收尾回复：渲染时提升为顶层普通消息（不折进活动组）
@@ -452,6 +476,32 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
           durationMs: ev.duration_ms,
         });
       }
+      continue;
+    }
+
+    // 权限审批：挂到**本次工具调用**那一行上（不单独成行），卡片就摆在那行下面。
+    // 后端在真正执行写操作前发这条事件并挂起，等用户点允许/拒绝。
+    if (ev.type === 'permission_request') {
+      if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
+      const target = ev.tool_call_id
+        ? current.items.find((it) => it.kind === 'tool' && it.id === ev.tool_call_id)
+        : undefined;
+      const item: ActivityItem =
+        target ?? { kind: 'tool', step: ev.step, id: ev.tool_call_id, name: ev.name };
+      if (!target) current.items.push(item);
+      item.permission = {
+        id: ev.id || '',
+        name: ev.name || item.name || '',
+        label: ev.label || '',
+        risk: ev.risk || '',
+        mode: ev.mode || '',
+        arguments:
+          ev.arguments && typeof ev.arguments === 'object' && !Array.isArray(ev.arguments)
+            ? (ev.arguments as Record<string, unknown>)
+            : undefined,
+        timeoutS: typeof ev.timeout_s === 'number' ? ev.timeout_s : 0,
+        startedAt: typeof ev.started_at === 'number' ? ev.started_at : 0,
+      };
       continue;
     }
 
@@ -1562,6 +1612,8 @@ export function AgentPage() {
         ...(backendProfileName ? { backend_profile_name: backendProfileName } : {}),
         backend_profile_data: profile,
         ...getAgentTranslatorBackendContext(effectiveProject),
+        // 权限模式同理只存在前端，随请求送过去（后端每次工具调用前按它判定）
+        permission_mode: permissionMode,
       };
       if (!hasBackendSessionRef.current) {
         // 空会话：第一条消息启动首个回合
@@ -1932,6 +1984,92 @@ export function AgentPage() {
     },
     [effectiveProject],
   );
+  // 正在等用户点批准的权限请求：那条工具调用还没结果（结果一到就说明批过了、拒了或
+  // 超时了）。与 pendingAsk 同一套推导——从后往前找最新的那条。
+  const pendingPermission = useMemo(() => {
+    for (let gi = timeline.length - 1; gi >= 0; gi -= 1) {
+      const group = timeline[gi];
+      if (group.type !== 'activity') continue;
+      for (let i = group.items.length - 1; i >= 0; i -= 1) {
+        const it = group.items[i];
+        if (it.kind === 'tool' && it.permission && it.result === undefined && it.error === undefined) {
+          return it;
+        }
+      }
+    }
+    return null;
+  }, [timeline]);
+  const [permissionSubmitting, setPermissionSubmitting] = useState(false);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+  // 同上：提交后先把卡片收起来，工具结果一到就自然消失
+  const [answeredPermissionId, setAnsweredPermissionId] = useState('');
+  const pendingPermissionIdRef = useRef('');
+  const permissionId = pendingPermission?.permission?.id || '';
+  useEffect(() => {
+    pendingPermissionIdRef.current = permissionId;
+    setPermissionError(null);
+    setPermissionSubmitting(false);
+    // 审批卡同样摆在转录里：Agent 正卡在这儿等一个点击，带到最底部
+    if (permissionId) handleJumpToBottom();
+  }, [permissionId, handleJumpToBottom]);
+  const handlePermissionDecide = useCallback(
+    async (decision: PermissionDecision) => {
+      const target = pendingPermissionIdRef.current;
+      if (!target) return;
+      setPermissionSubmitting(true);
+      setPermissionError(null);
+      try {
+        await answerAgentPermission(
+          effectiveProject,
+          decision,
+          activeSessionRef.current || undefined,
+        );
+        setAnsweredPermissionId(target);
+      } catch (err) {
+        setPermissionError(normalizeError(err, '提交失败'));
+      } finally {
+        setPermissionSubmitting(false);
+      }
+    },
+    [effectiveProject],
+  );
+
+  // 权限模式：本地存一份（下次打开还是这个档），同时立刻推给后端——
+  // 跑着也能改，下一次工具调用就按新档判。选择器参考「后端配置」那个 chip：点开是菜单。
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => loadPermissionMode());
+  const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
+  const permissionPickerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!permissionMenuOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (!permissionPickerRef.current?.contains(e.target as Node)) setPermissionMenuOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPermissionMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [permissionMenuOpen]);
+  const handlePickPermissionMode = useCallback(
+    (mode: PermissionMode) => {
+      setPermissionMode(mode);
+      savePermissionMode(mode);
+      setPermissionMenuOpen(false);
+      // 立刻推给后端：回合跑着也能改，下一次工具调用就按新档判。没有会话时不用推——
+      // 本地已经存了，首条消息的 start（以及后续 message）会带上，两边一致。
+      if (!effectiveProject || !hasBackendSessionRef.current) return;
+      void setAgentPermissionMode(
+        effectiveProject,
+        mode,
+        activeSessionRef.current || undefined,
+      ).catch((err) => setError(normalizeError(err, '权限模式修改失败')));
+    },
+    [effectiveProject],
+  );
   // 展示「后端配置文件名/模型名」：模型名从当前配置里取，与「模型设置」页同一口径
   const backendProfileLabel = useMemo(
     () => (backendProfileName ? formatProfileLabel(backendProfileName, getBackendProfile(backendProfileName)) : ''),
@@ -2096,6 +2234,19 @@ export function AgentPage() {
                       submitting={askSubmitting}
                       error={askError}
                       onSubmit={(answers) => void handleAskSubmit(answers)}
+                    />
+                  ) : null}
+                  {/* 权限确认卡：与提问卡同一套摆法——就在那次工具调用下面（同一回合内） */}
+                  {group.type === 'activity' &&
+                  pendingPermission &&
+                  permissionId !== answeredPermissionId &&
+                  group.items.some((it) => it.id === pendingPermission.id) ? (
+                    <PermissionCard
+                      key={permissionId}
+                      item={pendingPermission}
+                      submitting={permissionSubmitting}
+                      error={permissionError}
+                      onDecide={(decision) => void handlePermissionDecide(decision)}
                     />
                   ) : null}
                 </Fragment>
@@ -2340,6 +2491,48 @@ export function AgentPage() {
                       <span className="agent-profile-menu__label">管理后端配置</span>
                       <span className="agent-profile-menu__chev" aria-hidden>›</span>
                     </button>
+                  </div>
+                ) : null}
+              </div>
+              {/* 权限模式：跟「后端配置」同一个 chip 样子，三档直接选 */}
+              <div className="agent-profile-picker" ref={permissionPickerRef}>
+                <button
+                  type="button"
+                  className={`agent-composer__chip${permissionMenuOpen ? ' is-open' : ''}`}
+                  onClick={() => setPermissionMenuOpen((v) => !v)}
+                  aria-haspopup="menu"
+                  aria-expanded={permissionMenuOpen}
+                  title={`权限模式：${PERMISSION_MODE_LABELS[permissionMode]} —— ${PERMISSION_MODE_HINTS[permissionMode]}${
+                    running ? '（运行中改也会立刻生效：下一次工具调用就按新档判）' : ''
+                  }`}
+                >
+                  <span className="agent-composer__chip-icon"><Icon name="shield" /></span>
+                  <span className="agent-composer__chip-label">{PERMISSION_MODE_LABELS[permissionMode]}</span>
+                </button>
+                {permissionMenuOpen ? (
+                  <div className="agent-profile-menu" role="menu">
+                    {PERMISSION_MODES.map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={mode === permissionMode}
+                        className="agent-profile-menu__item agent-profile-menu__item--stacked"
+                        onClick={() => handlePickPermissionMode(mode)}
+                      >
+                        <span className="agent-profile-menu__label">
+                          {PERMISSION_MODE_LABELS[mode]}
+                          <span className="agent-profile-menu__hint">{PERMISSION_MODE_HINTS[mode]}</span>
+                        </span>
+                        {mode === permissionMode ? (
+                          <span className="agent-profile-menu__check" aria-hidden><Icon name="check" /></span>
+                        ) : null}
+                      </button>
+                    ))}
+                    <div className="agent-profile-menu__sep" />
+                    <div className="agent-profile-menu__note">
+                      换档会清空本会话「允许」过的工具，之后会重新询问。
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -2618,6 +2811,9 @@ function AgentActivityGroup({
   // 预览小字：只在折叠且回合仍在跑时显示（展开时内容全可见，无需预览）
   const tail = isLive && !open ? liveTail(items) : '';
 
+  // 每个工具行"轮到哪一步"（在跑 / 等批准 / 排队 / 断了）：见 toolRowPhases 的说明
+  const phases = toolRowPhases(items, isLive);
+
   return (
     <div className={`agent-activity${open ? ' is-open' : ''}${isLive ? ' is-live' : ''}`}>
       <button
@@ -2651,7 +2847,7 @@ function AgentActivityGroup({
                 // 启动翻译换成工作台顶部卡的迷你版（带实时进度），不再是一坨 JSON
                 <TranslationJobCard key={`j-${item.id || i}`} item={item} projectDir={projectDir} />
               ) : (
-                <ToolRow key={`x-${item.id || i}`} item={item} live={isLive && i === items.length - 1} persistKey={persistKey} />
+                <ToolRow key={`x-${item.id || i}`} item={item} phase={phases[i]} persistKey={persistKey} />
               ),
             )}
           </div>
@@ -3242,15 +3438,160 @@ function AskUserCard({
   );
 }
 
+/* ── 权限确认卡片 ──
+   写操作执行前，后端会挂起并推一条 permission_request；卡片就摆在那次工具调用下面
+   （与 ask_user 同一套位置）。三个动作对应后端的三种答复：允许一次 / 本会话允许
+   （只对这个工具、只在这个会话）/ 拒绝。不点会在 timeoutS 秒后自动拒绝（fail closed）；
+   拒绝与超时都会让模型收到一条"用户拒绝权限"的工具错误，它据此换策略——而不是把
+   "没执行"当成"执行成功"。 */
+/* ── 审批倒计时 hook（上面那张卡用）──
+   剩余时间（毫秒），每 500ms 重算一次。事件里带了 started_at（后端发起审批的时刻）
+   就按它算：刷新页面、切走再回来，倒计时接着真实剩余时间走，不会重置回满值；极旧的
+   记录没有该字段时退化成"从卡片挂载那一刻起算"（只有读老会话才遇到）。到 0 就是后端
+   要按拒绝处理了。单独放这里是因为 Hooks 必须在组件最前面无条件调用——卡片里那句
+   `if (!perm) return null` 之前不能有分支，拿不到 perm 时传 0 让它直接不动。 */
+function usePermissionCountdown(startedAt: number, timeoutS: number): number {
+  const fallbackRef = useRef(Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!timeoutS) return;
+    setNow(Date.now());
+    const id = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(id);
+  }, [startedAt, timeoutS]);
+  if (!timeoutS) return 0;
+  const origin = startedAt > 0 ? startedAt * 1000 : fallbackRef.current;
+  return Math.max(0, origin + timeoutS * 1000 - now);
+}
+
+function PermissionCard({
+  item,
+  submitting,
+  error,
+  onDecide,
+}: {
+  item: ActivityItem;
+  submitting: boolean;
+  error: string | null;
+  onDecide: (decision: PermissionDecision) => void;
+}) {
+  const perm = item.permission;
+  const leftMs = usePermissionCountdown(perm?.startedAt ?? 0, perm?.timeoutS ?? 0);
+  if (!perm) return null;
+  const meta = toolMeta(perm.name || item.name || '');
+  const args = perm.arguments;
+  const summary = meta.summary(args);
+  const reason = typeof args?.reason === 'string' ? args.reason.trim() : '';
+  const toolLabel = perm.label || meta.action;
+  const editable = perm.risk === 'edit';
+  // 徽标只留最要紧的几个字（会改什么），完整解释挪进 tooltip——照 PI-Desktop 那张卡：
+  // 标题行一行说完，正文只留"允许什么 + 为什么"，说明性长句不再铺在卡面上。
+  const riskLabel = editable ? '改译文数据' : '改设置 / 启动任务';
+  const riskHint = editable
+    ? '改动译文数据（缓存 / 字典 / 人名表）'
+    : '改动项目设置 / 规范，或启动翻译任务';
+  // 正文第二行的细节：参数摘要 + 当前档位（为什么现在要问）。都是短标签，逗号分不开的
+  // 那种长句就省了——用户要的是"这次要动什么"，不是复述一遍权限模型。
+  const detail = [PERMISSION_MODE_LABELS[normalizePermissionMode(perm.mode)], summary]
+    .filter(Boolean)
+    .join(' · ');
+  // 到点后端就按拒绝处理了：按钮一并禁掉，免得点下去只换来一句 409
+  const expired = perm.timeoutS > 0 && leftMs <= 0;
+
+  return (
+    <section className="agent-perm" aria-label={`权限请求：${toolLabel}`}>
+      <header className="agent-perm__head">
+        <span className="agent-perm__icon"><Icon name="shield" /></span>
+        <span className="agent-perm__title" role="status" aria-live="polite">{toolLabel}</span>
+        <span
+          className={`agent-perm__risk${editable ? ' is-edit' : ''}`}
+          title={riskHint}
+        >
+          {riskLabel}
+        </span>
+        {perm.timeoutS > 0 ? (
+          <span
+            className={`agent-perm__timer${leftMs <= 15000 ? ' is-urgent' : ''}`}
+            title={`超过 ${perm.timeoutS} 秒未回答会按拒绝处理`}
+          >
+            <Icon name="hourglass" />
+            {expired ? '已超时' : `${formatCountdown(leftMs)} 后拒绝`}
+          </span>
+        ) : null}
+      </header>
+      <p className="agent-perm__lead">允许「{toolLabel}」运行吗？</p>
+      <p className="agent-perm__meta">{detail}</p>
+      {reason ? <p className="agent-perm__reason">原因：{reason}</p> : null}
+      {error ? <div className="agent-perm__error">{error}</div> : null}
+      <div className="agent-perm__foot">
+        <button
+          type="button"
+          className="agent-perm__btn is-primary"
+          onClick={() => onDecide('allow-once')}
+          disabled={submitting || expired}
+          title="只批准这一次调用"
+        >
+          允许一次
+        </button>
+        <button
+          type="button"
+          className="agent-perm__btn"
+          onClick={() => onDecide('allow-session')}
+          disabled={submitting || expired}
+          title={`本会话内不再询问「${toolLabel}」，会话结束即失效`}
+        >
+          本会话允许
+        </button>
+        <button
+          type="button"
+          className="agent-perm__btn"
+          onClick={() => onDecide('deny')}
+          disabled={submitting || expired}
+          title="这次调用不执行，Agent 会收到「用户拒绝」并换策略"
+        >
+          拒绝
+        </button>
+      </div>
+    </section>
+  );
+}
+
 /* ── Tool row (disclosure, not a boxed card) ── */
+
+/** 工具行的"轮到哪一步"。一批工具调用在后端是**挨个执行**的（runtime 里
+    `for tc in tool_calls`），但助手消息的 parts 会先把整批一次性画成行——所以"哪一行在跑"
+    不能看是不是最后一行，得看谁还没有结果：
+
+    - running：第一个还没有结果的行，正在执行；
+    - awaiting：它卡在权限门禁上等用户批准（那张审批卡就画在这行下面）；
+    - queued：排在它后面、还没轮到的（后端还没轮到它们，界面上不该显示成"进行中"）；
+    - stale：不在运行中的组里却也没有结果——历史里断在半路的那次调用（进程被杀等）。
+
+    返回数组与 items 下标对齐；非工具行、已有结果的行都是 undefined。 */
+type ToolPhase = 'running' | 'awaiting' | 'queued' | 'stale';
+
+function toolRowPhases(items: ActivityItem[], isLive: boolean): (ToolPhase | undefined)[] {
+  const phases: (ToolPhase | undefined)[] = items.map(() => undefined);
+  let isFirstPending = true;
+  items.forEach((it, i) => {
+    if (it.kind !== 'tool') return;
+    if (it.ok !== undefined || it.result !== undefined || it.error !== undefined) return;
+    if (!isLive) phases[i] = 'stale';
+    else if (isFirstPending) phases[i] = it.permission ? 'awaiting' : 'running';
+    else phases[i] = 'queued';
+    isFirstPending = false;
+  });
+  return phases;
+}
 
 function ToolRow({
   item,
-  live,
+  phase,
   persistKey,
 }: {
   item: ActivityItem;
-  live: boolean;
+  /** 这一行在本次执行里轮到哪一步（见 toolRowPhases） */
+  phase?: ToolPhase;
   persistKey: string;
 }) {
   const stateKey = `${persistKey}::tool-${item.id || item.step}`;
@@ -3263,13 +3604,21 @@ function ToolRow({
   // 写类工具的可选入参 reason（模型说明"为什么改"）：有变更卡就画在卡里，没有
   // （如 create_dict_file 的返回不含 changes）就在正文里单独给一行。
   const reason = extractReason(item.result);
+  const ok = item.ok !== false;
+  const pending = item.ok === undefined && item.result === undefined && !item.error;
+  const awaiting = phase === 'awaiting';
+  const isRunning = phase === 'running';
 
-  // 带变更（或填了原因）的行**默认展开**：改了什么是这次调用的重点，diff 该直接看得见，
-  // 不该藏在一次点击后面。manualOpenState 里只记"用户手动点过"的选择——记过就听用户的，
-  // 没记过才用这个默认值（重挂/刷新后同一规则）。
-  const [open, setOpenRaw] = useState(
-    () => manualOpenState.get(stateKey) ?? Boolean(changeList || reason),
-  );
+  // 行**默认展开**的三种情形：
+  // 1) 已有变更卡 —— 改了什么是这次调用的重点，diff 不该藏在一次点击后面；
+  // 2) 有 reason 却没有变更卡（create_dict_file 之类不产生 changes）——理由也该直接可见；
+  // 3) **正等着批准的调用** —— 这时还没有结果、也没有变更卡，用户要看的恰恰是"它准备改什么"，
+  //    参数就在这一行里。批完之后结果一到，diff 卡出现、原始参数收进折叠菜单，这一行自然
+  //    回到"只看 diff"（见 foldRaw）。
+  // manualOpenState 里只记"用户手动点过"的选择——记过就听用户的，没记过才用这个默认值
+  // （重挂/刷新后同一规则）。
+  const autoOpen = Boolean(changeList || reason) || awaiting;
+  const [open, setOpenRaw] = useState(() => manualOpenState.get(stateKey) ?? autoOpen);
   const setOpen = (value: boolean | ((prev: boolean) => boolean)) => {
     setOpenRaw((prev) => {
       const next = typeof value === 'function' ? value(prev) : value;
@@ -3277,20 +3626,17 @@ function ToolRow({
       return next;
     });
   };
-  // 结果比行晚到（正在跑的那次调用就是如此）：变更/原因一到就展开。用户手动点过就不抢，
+  // 状态比行晚到（结果比行晚到、批准请求也可能晚一拍）：该展开了就展开。用户手动点过就不抢，
   // 否则会跟"刚点开又自己收起/展开"打架。
-  const autoOpenedRef = useRef(Boolean(changeList || reason));
+  const autoOpenedRef = useRef(autoOpen);
   useEffect(() => {
-    if ((!changeList && !reason) || autoOpenedRef.current) return;
+    if (!autoOpen || autoOpenedRef.current) return;
     autoOpenedRef.current = true;
     if (!manualOpenState.has(stateKey)) setOpenRaw(true);
-  }, [changeList, reason, stateKey]);
+  }, [autoOpen, stateKey]);
 
   const meta = toolMeta(item.name);
   const summary = meta.summary(asArgs(item.arguments));
-  const ok = item.ok !== false;
-  const pending = item.ok === undefined && item.result === undefined && !item.error;
-  const isRunning = live && pending;
 
   // 有变更就把原始参数/结果收进一个折叠菜单（变更卡自己会展开）：写入调用要看的通常是
   // diff，JSON 参数与整份结果只是证据，要看再点开。失败时例外——错误全文要直接可见。
@@ -3311,16 +3657,29 @@ function ToolRow({
   const hasDetails = Boolean(summary || resultText || item.arguments || changeList);
   const longResult = resultText.length > 400;
 
-  const stateLabel = waiting
-    ? formatCountdown(waitRemaining)
-    : isRunning
-      ? '进行中'
-      : isWait && item.waitInterrupted
-        ? '已中断'
-        : ok
-          ? '完成'
-          : '失败';
-  const stateTone = waiting || isRunning ? 'running' : ok ? 'done' : 'error';
+  // 权限被拒不是故障，是用户的决定：状态标签说"已拒绝"，免得看着像系统出错
+  const denied =
+    !ok && typeof item.error === 'string' && /^(用户拒绝权限|用户没有在|回合被停止)/.test(item.error);
+  // 状态标签以**这一行自己的进度**为准（见 toolRowPhases）：没有结果就不是"完成"。
+  // 以前按"是不是最后一行"判断，整批里等在中间的那行会写成完成——最刺眼的就是
+  // "还在等你批准，却已经显示完成"。排队中/未完成走默认的灰，不给"在跑"那种蓝色呼吸点。
+  const state = waiting
+    ? { label: formatCountdown(waitRemaining), tone: 'running', countdown: true }
+    : awaiting
+      ? { label: '待批准', tone: 'running', countdown: false }
+      : isRunning
+        ? { label: '进行中', tone: 'running', countdown: false }
+        : phase === 'queued'
+          ? { label: '排队中', tone: '', countdown: false }
+          : phase === 'stale'
+            ? { label: '未完成', tone: '', countdown: false }
+            : isWait && item.waitInterrupted
+              ? { label: '已中断', tone: '', countdown: false }
+              : denied
+                ? { label: '已拒绝', tone: 'error', countdown: false }
+                : ok
+                  ? { label: '完成', tone: 'done', countdown: false }
+                  : { label: '失败', tone: 'error', countdown: false };
 
   return (
     <div className={`agent-tool${open ? ' is-open' : ''}`}>
@@ -3332,12 +3691,12 @@ function ToolRow({
         aria-expanded={open}
       >
         <span className="agent-tool__icon"><Icon name={meta.icon} /></span>
-        <span className={`agent-tool__name${waiting || isRunning ? ' is-running' : ''}`}>{meta.action}</span>
+        <span className={`agent-tool__name${state.tone === 'running' ? ' is-running' : ''}`}>{meta.action}</span>
         {summary ? <span className="agent-tool__summary">{summary}</span> : null}
         {changeList ? <span className="agent-tool__diffbadge">±{changeList.total}</span> : null}
-        <span className={`agent-tool__state is-${stateTone}${waiting ? ' is-countdown' : ''}`}>
+        <span className={`agent-tool__state${state.tone ? ` is-${state.tone}` : ''}${state.countdown ? ' is-countdown' : ''}`}>
           <span className="agent-tool__state-dot" />
-          {stateLabel}
+          {state.label}
         </span>
         <span className="agent-tool__caret">›</span>
       </button>
