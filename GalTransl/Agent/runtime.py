@@ -270,6 +270,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 - 每一步只调用必要的工具；能在一次工具调用里拿到的信息不要拆成多次。重复查看同类信息时用工具的分段参数（如 get_project_overview 的 include）只取变化的部分，别把基本不变的配置/说明反复拉一遍。
 - 要把某条缓存（原文 + 译文，或几条）摆给用户看时，在回复里**单独一行**写 `$transl_cache("<缓存文件名>", <行号>)`：文件名来自 list_transl_cache，行号是缓存条目的 index，可写区间 `12-15` 或逗号列表 `12,20`。界面会把它渲染成那几行缓存的卡片，比自己把原文译文抄一遍清楚、也不会抄错。不要把它写进代码块，也不要加额外解释行。
 - 翻译规范有两份：全局规范（translation_guidelines 目录里选的那份，通用规则）和**项目规范**（项目目录里的 `translation_guideline.md`，本项目专属，跟项目一起走）。翻译时两份拼在一起、项目规范在后，冲突以项目规范为准。读项目规范用 read_guideline(scope="project")；用户提出新的术语/称呼/语气要求时，先看项目规范里是否已经写过，再用 write_project_guideline 改：新增要求用 append，旧规则要改成新的用 replace（把旧那段原文给全，确保唯一），整套重写才用 overwrite。改完在**下一次启动翻译**时生效，正在跑的翻译不受影响；别在同一份规范里堆互相矛盾的规则。
+- 写类工具（改配置 / 项目规范 / 字典 / 人名表 / 缓存、管问题过滤）都带一个可选参数 `reason`：**尽量填**一句"为什么改"（依据或要解决的问题，如「第 33 句残留日文：按人名表统一为『多鲁德』」）。界面会把它显示在那条改动的变更卡里给用户复核；不用再重复改了哪些内容，changes / diff 已经列出了。
 - 不要在未准备字典的情况下直接启动主翻译。
 - 不要连续重复调用同一个工具相同参数（避免死循环）；若上一步结果不理想，换策略或总结收尾。
 - 工具返回的 error 要阅读并据此调整下一步，不要忽略。
@@ -1228,7 +1229,9 @@ class AgentRunner:
         handler = _TOOL_HANDLERS.get(name)
         if handler is None:
             raise AgentToolError(f"未知工具：{name}")
-        return handler(self, args)
+        # 写类工具的可选 reason（模型说明"为什么改"）集中在这里搬到结果上，而不是让
+        # 八个 handler 各自拼一遍——它们的结果结构各不相同，漏一个就是"填了却看不见"。
+        return _attach_reason(name, args, handler(self, args))
 
     # ---- 询问用户（ask_user）----
     def ask_user(
@@ -1321,7 +1324,8 @@ def _cache_fields_section() -> str:
     lines.append(
         "看译文时以 proofread_dst ＞ pre_dst 的顺序取（前者为空才用后者）；"
         "默认每条只回一列原文（post_src：真正送去翻译的那版）与一列译文（pre_dst），"
-        "post_dst_preview 只在它与 pre_dst 不同（译后字典替换过）时才带上。"
+        "post_dst_preview 只在译后处理真的改了内容时才带上——只差补回来的首尾「」不算"
+        "（那几乎是所有对话条目），要看它一律传 fields。"
     )
     lines.append(
         f"读缓存默认只回精简列（{' / '.join(CACHE_ENTRY_FIELDS_DEFAULT)}，以及有值的附加列），"
@@ -1636,6 +1640,16 @@ def _http_json(method: str, url: str, body: dict[str, Any] | None = None) -> Any
 
 
 # ---- Agent 工具的 OpenAI function schema ----
+
+# 写类工具（改配置/规范/字典/缓存的那几个）共用的可选参数：让模型自己交代"为什么改这次"。
+# **怎么填、填了显示在哪里，只在 system prompt 的约束里写一份**（见 AGENT_SYSTEM_PROMPT），
+# 这里只说明"这是什么"，八个工具引用同一个 dict，既不重复解释也不各写一遍。
+# 哪些工具带这个参数见 _WRITE_TOOLS_WITH_REASON（_attach_reason 按它把 reason 挂回结果）。
+_REASON_PROPERTY: dict[str, Any] = {
+    "type": "string",
+    "description": "可选。这次修改的原因（怎么填、显示在哪见系统提示词的写类工具约束）。",
+}
+
 AGENT_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
@@ -1686,7 +1700,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "write_project_guideline",
-            "description": "写**项目规范**（项目目录里的 translation_guideline.md，跟项目一起走；翻译时拼在全局规范之后，冲突以它为准）。三种模式：overwrite=整份覆写；append=在末尾增写（新发现的要求）；replace=把 old_text 换成 new_text（只调其中几条时用，old_text 要原样来自规范全文、且只出现一次，否则会报错让你带上更多前后文）。改完在**下一次启动翻译**时生效，正在跑的翻译不受影响。规范是写给翻译模型的，要具体可执行（术语对照、称呼、语气、标点习惯、禁忌），别写「要地道」这类空话；写之前先用 read_guideline(scope=\"project\") 看当前内容，别把互相矛盾的规则堆在一起。返回里带这一次改动的行级 diff（新增/删除的行、增删计数），不用再读一遍文件确认。",
+            "description": "写**项目规范**（项目目录里的 translation_guideline.md）。三种模式：overwrite=整份覆写；append=末尾增写；replace=把 old_text 换成 new_text（old_text 要原样来自规范全文、且只出现一次，否则会报错让你带上更多前后文）。规范是写给翻译模型的，要具体可执行（术语对照、称呼、语气、标点习惯、禁忌），别写「要地道」这类空话。返回里带这一次改动的行级 diff（新增/删除的行、增删计数），不用再读一遍文件确认。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1698,6 +1712,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     "content": {"type": "string", "description": "mode=overwrite / append 时的规范文本（markdown）。"},
                     "old_text": {"type": "string", "description": "mode=replace 时要被替换的原文，连同前后文一起给，确保在规范里唯一。"},
                     "new_text": {"type": "string", "description": "mode=replace 时替换成的内容；传空串表示删掉这一段。"},
+                    "reason": _REASON_PROPERTY,
                 },
                 "required": ["mode"],
             },
@@ -1764,6 +1779,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                         "enum": ["overwrite", "replace", "append", "delete"],
                         "description": "overwrite=全量覆盖（默认）；replace=按 key 部分替换已有词条；append=追加到末尾（重复 key 跳过）；delete=按 key 删除词条。",
                     },
+                    "reason": _REASON_PROPERTY,
                 },
                 "required": ["file_key", "content"],
             },
@@ -1779,6 +1795,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "category": {"type": "string", "enum": ["pre", "gpt", "post"], "description": "pre=译前, gpt=GPT, post=译后"},
                     "filename": {"type": "string", "description": "字典文件名，如 项目GPT字典.txt"},
+                    "reason": _REASON_PROPERTY,
                 },
                 "required": ["category", "filename"],
             },
@@ -1806,7 +1823,8 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                             "type": "object",
                             "properties": {"src_name": {"type": "string"}, "dst_name": {"type": "string"}, "count": {"type": "integer"}},
                         },
-                    }
+                    },
+                    "reason": _REASON_PROPERTY,
                 },
                 "required": ["names"],
             },
@@ -1907,6 +1925,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                             "required": ["key", "value"],
                         },
                     },
+                    "reason": _REASON_PROPERTY,
                 },
                 "required": ["updates"],
             },
@@ -1957,6 +1976,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                         ],
                         "description": "add/remove 必填。要操作的关键字（如 \"使用了GPT词典\"、\"正文直出\"），精确匹配、区分大小写。可传单个字符串，也可传数组一次操作多个。",
                     },
+                    "reason": _REASON_PROPERTY,
                 },
                 "required": ["action"],
             },
@@ -1994,7 +2014,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                             "可选。每条要返回哪些字段：index、name（说话人）、pre_src（原句）、pre_dst（译文）、"
                             "post_src、post_dst_preview（译后字典替换后的预览）、proofread_dst、proofread_by、"
                             "trans_by、problem。"
-                            "不传 = 默认精简集（index/name/post_src/pre_dst/problem；post_dst_preview 仅在与 pre_dst 不同时给，"
+                            "不传 = 默认精简集（index/name/post_src/pre_dst/problem；post_dst_preview 仅在译后处理真的改了内容时给，"
                             "空值省略；要看 pre_src/trans_by 等列得显式传 fields）；传 [\"pre_dst\",\"problem\"] 这类只要某几列。"
                         ),
                     },
@@ -2037,6 +2057,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                         "type": "string",
                         "description": "可选。要删除的条目 index 列表，支持逗号和区间（如 \"33-40,50-60\"，index 来自 read_transl_cache/list_problems）。留空则删除整个文件。",
                     },
+                    "reason": _REASON_PROPERTY,
                 },
                 "required": ["filename"],
             },
@@ -2066,7 +2087,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "patch_transl_cache",
-            "description": "批量修改某个缓存文件中若干条目的译文（pre_dst / proofread_dst 两列）。只更新 patches 里指定的条目与字段，其它条目原样保留。返回 updated（改动条目数）、changes（逐字段 before→after 的变更）与 problems（被改条目重建后仍存在的问题，没有则不返回）；改了什么一目了然、有没有引入新问题当场可验，不必再 read_transl_cache。适合发现问题后改译文、再配合 rebuilda 重建的复核循环。被改条目的 trans_by（译者标记）由工具自动记成本会话 Agent 的模型名，不需要也不能手动指定。",
+            "description": "批量修改某个缓存文件中若干条目的译文（pre_dst / proofread_dst 两列）。只更新 patches 里指定的条目与字段，其它条目原样保留。返回 updated（改动条目数）、changes（逐字段 before→after 的变更）与 problems（被改条目重建后仍存在的问题，没有则不返回）；改了什么一目了然、有没有引入新问题当场可验，不必再 read_transl_cache。适合发现问题后改译文、再配合 rebuilda 重建的复核循环。trans_by 由工具自动标记，不用手动指定。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2083,6 +2104,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                             "required": ["index"],
                         },
                     },
+                    "reason": _REASON_PROPERTY,
                 },
                 "required": ["filename", "patches"],
             },
@@ -3469,7 +3491,7 @@ CACHE_ENTRY_FIELD_DESCRIPTIONS: dict[str, str] = {
     "pre_src": "原始原文（前原），管道最开始的句子；默认不返回（要看它传 fields）",
     "post_src": "真正送去翻译的原文（前润）：对话符号处理 + 译前字典替换之后的文本",
     "pre_dst": "模型返回的译文（后原），未经译后字典替换",
-    "post_dst_preview": "最终译文的缓存快照（后润）：译后字典替换 + 对话符号恢复之后的形态",
+    "post_dst_preview": "最终译文的缓存快照（后润）：译后字典替换 + 对话符号恢复之后的形态；默认只在它与译文实质不同（不只差首尾对话符号）时返回",
     "proofread_dst": "校对/润色稿；有内容时它就是这条的最终译文（优先于 pre_dst）",
     "proofread_by": "校对者标记（校对失败的会带 Fail）；未校对为空",
     "trans_by": "译者标记：翻译引擎名或模型名；被 Agent 用 patch_transl_cache 改过的条目会记成本会话 Agent 的模型名；默认不返回（要看它传 fields）",
@@ -3499,6 +3521,20 @@ def _cache_field_value(entry: dict[str, Any], name: str) -> Any:
         return entry[name]
     old_key = _CACHE_ENTRY_OLD_KEYS.get(name)
     return entry.get(old_key) if old_key else None
+
+
+# 译文首尾成对出现的对话符号：翻译前由 CSentense.analyse_dialogue 摘掉、译后再由
+# recover_dialogue_symbol 补回来（见 GalTransl/CSentense.py）。所以 post_dst_preview
+# 与译文几乎总是差这么一对括号——那不算"译后处理改了内容"，别因此把它带出来。
+_DIALOGUE_BRACKETS = "「『」』"
+
+
+def _same_ignoring_dialogue_brackets(left: Any, right: Any) -> bool:
+    """两段译文是否只差首尾的对话符号（与首尾空白）。"""
+    def norm(text: Any) -> str:
+        return str(text or "").strip().strip(_DIALOGUE_BRACKETS).strip()
+
+    return norm(left) == norm(right)
 
 
 def _normalize_cache_fields(args: dict[str, Any]) -> list[str] | None:
@@ -3543,9 +3579,13 @@ def _project_cache_entries(
                 if key != "index" and value in (None, "", 0):
                     continue
                 item[key] = value
-            # 译后字典替换过才有意义：只在它与 pre_dst 不同时才值得占位置
+            # 译后处理真的改了内容才有意义（译后字典替换、引号矫正…）。不能只比字符串：
+            # 译后处理会把首尾「」补回来，几乎所有对话条目的预览都会"不同"。跟最终译文
+            # （有校对稿就是校对稿，与看译文时 proofread_dst ＞ pre_dst 的口径一致）比，
+            # 只差对话符号就不占位置。
             post_dst = _cache_field_value(entry, "post_dst_preview")
-            if post_dst and post_dst != _cache_field_value(entry, "pre_dst"):
+            base_dst = _cache_field_value(entry, "proofread_dst") or _cache_field_value(entry, "pre_dst")
+            if post_dst and not _same_ignoring_dialogue_brackets(post_dst, base_dst):
                 item["post_dst_preview"] = post_dst
             for key in CACHE_ENTRY_FIELDS_IF_PRESENT:
                 value = _cache_field_value(entry, key)
@@ -3579,8 +3619,8 @@ def _tool_read_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     result_extra["fields"] = list(fields) if fields is not None else list(CACHE_ENTRY_FIELDS_DEFAULT)
     if fields is None:
         result_extra["fields_note"] = (
-            "默认精简字段：post_dst_preview 只在它与 pre_dst 不同（存在译后字典替换）时返回，"
-            "proofread_* / trans_by / 备注等空值已省略；要看其它字段传 fields。"
+            "默认精简字段：post_dst_preview 只在译后处理真的改了内容时返回（只差首尾「」这类"
+            "对话符号不算），proofread_* / trans_by / 备注等空值已省略；要看其它字段传 fields。"
         )
     index_spec = str(args.get("index", "") or "").strip()
     # 不指定 index：返回前 30 条，供 Agent 通览
@@ -4100,6 +4140,36 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "patch_transl_cache": _tool_patch_transl_cache,
     "ask_user": _tool_ask_user,
 }
+
+
+# 带 reason 入参的写类工具（改配置/规范/字典/缓存）。读类工具没有这个参数、模型也不会传，
+# 这里再列一次是为了在分发时确认"这次调用确实能填原因"，而不是只靠 schema 声明。
+_WRITE_TOOLS_WITH_REASON: frozenset[str] = frozenset({
+    "update_project_config",
+    "write_project_guideline",
+    "save_dict",
+    "create_dict_file",
+    "save_name_table",
+    "manage_problem_filter",
+    "patch_transl_cache",
+    "delete_transl_cache",
+})
+
+
+def _attach_reason(name: str, args: dict[str, Any], result: Any) -> Any:
+    """把入参里的 reason 原样挂到工具结果上，供界面渲染在变更卡里。
+
+    模型不传（空串 / 只有空白）就什么都不加；结果不是 dict（读类工具可能返回列表）
+    也不改形；结果里本来就有 reason 的以工具自己写的为准。
+    """
+    if name not in _WRITE_TOOLS_WITH_REASON or not isinstance(result, dict):
+        return result
+    if "reason" in result:
+        return result
+    reason = str(args.get("reason") or "").strip()
+    if not reason:
+        return result
+    return {**result, "reason": reason}
 
 
 def _initial_session_title(project_dir: str, session_id: str, goal: str, current: str) -> str:

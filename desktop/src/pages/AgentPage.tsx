@@ -46,7 +46,7 @@ import {
   type RuntimeJob,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
-import { AgentMarkdown } from '../components/AgentCacheRef';
+import { AgentMarkdown, invalidateCacheFilesForToolResult } from '../components/AgentCacheRef';
 import { Icon, type IconName } from '../components/Icon';
 import { formatProfileLabel } from '../lib/backendProfile';
 import {
@@ -1438,6 +1438,12 @@ export function AgentPage() {
         if (ev.type === 'queue') {
           setQueued(ev.queued || []);
           return;
+        }
+        // 写类工具可能改了缓存文件（结果里带 filename / deleted_files）：清掉引用卡片的
+        // 取数记忆并让它重拉。不做的话，回复里现渲染的 $transl_cache 卡片、以及已经挂在
+        // 屏幕上的旧卡片，拿到的都是改动前那份快照——模型明明改了，界面还是旧译文。
+        if (ev.type === 'tool_result' && ev.ok) {
+          invalidateCacheFilesForToolResult(ev.result);
         }
         // 兜底去重：SSE 重放/竞态下 step 已见过的事件直接丢弃
         // （本地乐观的 user_message 用 step=-1，不参与该判断）
@@ -3254,12 +3260,15 @@ function ToolRow({
   // - line_diff: {rows: [{op: add|del, line}], truncated} 行级 diff（save_dict）
   // - deleted_preview: [{index, text}] 被删条目（delete_transl_cache）
   const changeList = extractChangeList(item.result);
+  // 写类工具的可选入参 reason（模型说明"为什么改"）：有变更卡就画在卡里，没有
+  // （如 create_dict_file 的返回不含 changes）就在正文里单独给一行。
+  const reason = extractReason(item.result);
 
-  // 带变更的行**默认展开**：改了什么是这次调用的重点，diff 该直接看得见，不该藏在
-  // 一次点击后面。manualOpenState 里只记"用户手动点过"的选择——记过就听用户的，
+  // 带变更（或填了原因）的行**默认展开**：改了什么是这次调用的重点，diff 该直接看得见，
+  // 不该藏在一次点击后面。manualOpenState 里只记"用户手动点过"的选择——记过就听用户的，
   // 没记过才用这个默认值（重挂/刷新后同一规则）。
   const [open, setOpenRaw] = useState(
-    () => manualOpenState.get(stateKey) ?? Boolean(changeList),
+    () => manualOpenState.get(stateKey) ?? Boolean(changeList || reason),
   );
   const setOpen = (value: boolean | ((prev: boolean) => boolean)) => {
     setOpenRaw((prev) => {
@@ -3268,14 +3277,14 @@ function ToolRow({
       return next;
     });
   };
-  // 结果比行晚到（正在跑的那次调用就是如此）：变更一到就展开。用户手动点过就不抢，
+  // 结果比行晚到（正在跑的那次调用就是如此）：变更/原因一到就展开。用户手动点过就不抢，
   // 否则会跟"刚点开又自己收起/展开"打架。
-  const autoOpenedRef = useRef(Boolean(changeList));
+  const autoOpenedRef = useRef(Boolean(changeList || reason));
   useEffect(() => {
-    if (!changeList || autoOpenedRef.current) return;
+    if ((!changeList && !reason) || autoOpenedRef.current) return;
     autoOpenedRef.current = true;
     if (!manualOpenState.has(stateKey)) setOpenRaw(true);
-  }, [changeList, stateKey]);
+  }, [changeList, reason, stateKey]);
 
   const meta = toolMeta(item.name);
   const summary = meta.summary(asArgs(item.arguments));
@@ -3334,7 +3343,11 @@ function ToolRow({
       </button>
       {open ? (
         <div className="agent-tool__body">
-          {changeList ? <ChangeListCard data={changeList} /> : null}
+          {changeList ? (
+            <ChangeListCard data={changeList} />
+          ) : reason ? (
+            <ChangeReason text={reason} />
+          ) : null}
           {foldRaw ? (
             <RawToolData
               args={item.arguments}
@@ -3478,8 +3491,17 @@ type ChangeData = {
   changes?: ChangeEntry[];
   line_diff?: { rows?: DiffRow[]; truncated?: boolean };
   deleted_preview?: { index: number; text: string }[];
+  /** 模型填的「为什么改」（写类工具的可选入参 reason，后端原样回传） */
+  reason?: string;
   total: number;
 };
+
+/** 写类工具结果里模型交代的原因（可选）。空/非字符串都当没填。 */
+function extractReason(result: unknown): string {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return '';
+  const value = (result as Record<string, unknown>).reason;
+  return typeof value === 'string' ? value.trim() : '';
+}
 
 function extractChangeList(result: unknown): ChangeData | null {
   if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
@@ -3495,7 +3517,13 @@ function extractChangeList(result: unknown): ChangeData | null {
     (lineDiff?.rows?.length || 0) +
     (deletedPreview?.length || 0);
   if (!total) return null;
-  return { changes, line_diff: lineDiff, deleted_preview: deletedPreview, total };
+  return {
+    changes,
+    line_diff: lineDiff,
+    deleted_preview: deletedPreview,
+    reason: extractReason(result) || undefined,
+    total,
+  };
 }
 
 function fmtChangeValue(v: unknown): string {
@@ -3506,6 +3534,17 @@ function fmtChangeValue(v: unknown): string {
   } catch {
     return String(v);
   }
+}
+
+/** 模型填的「为什么改」：变更卡顶部一行，没有变更卡时（如 create_dict_file 不产生
+    changes）在工具正文里单独显示，不然填了原因却没地方看。 */
+function ChangeReason({ text }: { text: string }) {
+  return (
+    <div className="agent-changes__reason">
+      <span className="agent-changes__reason-label">原因</span>
+      <span className="agent-changes__reason-text">{text}</span>
+    </div>
+  );
 }
 
 function ChangeListCard({ data }: { data: ChangeData }) {
@@ -3575,6 +3614,7 @@ function ChangeListCard({ data }: { data: ChangeData }) {
         <span className="agent-changes__title">变更</span>
         <span className="agent-changes__count">±{data.total}</span>
       </div>
+      {data.reason ? <ChangeReason text={data.reason} /> : null}
       {rows.length ? <div className="agent-changes__body">{rows}</div> : null}
     </div>
   );

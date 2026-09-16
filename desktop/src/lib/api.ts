@@ -523,8 +523,11 @@ export async function fetchProjectCache(projectId: string) {
 }
 
 export async function fetchCacheFile(projectId: string, filename: string) {
+  // no-store：缓存文件会被 Agent 的 patch/delete 工具改写，读它必须拿到磁盘上的当前内容。
+  // 后端没给缓存头，浏览器/Electron 的 HTTP 缓存没有可用的过期与校验信息，不让它插手最稳。
   return apiRequest<CacheFileResponse>(
     `/api/projects/${projectId}/cache/${encodeURIComponent(filename)}`,
+    { cache: 'no-store' },
   );
 }
 

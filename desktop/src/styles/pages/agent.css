@@ -2304,6 +2304,32 @@
   font-size: 0.7rem;
 }
 
+/* 模型交代的「为什么改」（写类工具的可选入参 reason）：一行说明，摆在那组改动上方。
+   用左侧一段主色竖线跟 diff 行分开——它是解释，不是改动内容，别混成一排。 */
+.agent-changes__reason {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 8px 2px 7px;
+  border-left: 2px solid color-mix(in srgb, var(--color-primary) 45%, transparent);
+  color: var(--color-text-muted);
+  font-size: 0.76rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.agent-changes__reason-label {
+  flex: none;
+  color: var(--color-primary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.agent-changes__reason-text {
+  min-width: 0;
+}
+
 .agent-changes__body {
   display: flex;
   flex-direction: column;

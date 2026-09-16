@@ -6,7 +6,8 @@ pre_src、proofread_* 常年为空——一次读几十条时一半以上是重�
 这里锁住三件事：
 
 1. 不传 fields = 默认精简集（原文/译文/说话人/问题），空值省略；
-2. post_dst_preview 只在真的与 pre_dst 不同（存在译后字典替换）时才返回；
+2. post_dst_preview 只在译后处理真的改了内容时才返回——只差补回来的首尾「」不算，
+   而那是"对话条目几乎必然不同"的原因，不排掉这个字段就等于默认都带上；
 3. 传 fields 就只给这几列（index 永远在，定位要用），未知字段直接报错。
 """
 
@@ -70,6 +71,25 @@ class CacheEntryProjectionTests(unittest.TestCase):
         changed = {**ENTRY, "post_dst_preview": "您好（替换后）"}
         item = _project_cache_entries([changed], None)[0]
         self.assertEqual(item["post_dst_preview"], "您好（替换后）")
+
+    def test_post_dst_preview_ignored_when_only_brackets_differ(self) -> None:
+        """译后处理会把首尾「」补回来：只差这一对括号不算改过内容，别占上下文。"""
+        bracketed = {**ENTRY, "post_dst_preview": "「你好」"}
+        item = _project_cache_entries([bracketed], None)[0]
+        self.assertNotIn("post_dst_preview", item)
+
+    def test_post_dst_preview_kept_when_brackets_hide_a_real_change(self) -> None:
+        """括号之外还有改动（如译后字典替换）→ 照旧带上。"""
+        bracketed = {**ENTRY, "post_dst_preview": "「您好」"}
+        item = _project_cache_entries([bracketed], None)[0]
+        self.assertEqual(item["post_dst_preview"], "「您好」")
+
+    def test_post_dst_preview_compares_against_proofread_when_present(self) -> None:
+        """有校对稿时最终译文是校对稿（与"proofread_dst ＞ pre_dst"同口径）：
+        预览与校对稿只差括号，同样不返回。"""
+        entry = {**ENTRY, "proofread_dst": "你好呀", "post_dst_preview": "「你好呀」"}
+        item = _project_cache_entries([entry], None)[0]
+        self.assertNotIn("post_dst_preview", item)
 
     def test_default_keeps_post_src_even_when_it_equals_pre_src(self) -> None:
         """post_src 是默认的原文列：与 pre_src 相同也要给（否则这条就没有原文了）。"""

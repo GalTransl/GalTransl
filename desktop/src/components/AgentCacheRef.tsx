@@ -29,6 +29,49 @@ import {
 /** 同一项目 + 文件的读取共享一个 Promise：一条回复里引用同一文件多次也只请求一次。 */
 const cacheFilePromises = new Map<string, Promise<CacheFileResponse>>();
 
+/** 缓存文件被改过（写类工具）时的广播：已挂载的卡片据此重拉。没有它，卡片会一直显示
+    这个页面里第一次拉到的那份快照——模型明明改了缓存，回复里的引用还是旧译文。 */
+const cacheFileListeners = new Set<() => void>();
+
+function subscribeCacheFiles(listener: () => void): () => void {
+  cacheFileListeners.add(listener);
+  return () => {
+    cacheFileListeners.delete(listener);
+  };
+}
+
+/** 工具结果 → 作废受影响缓存文件的取数记忆，并让已挂载的卡片重新拉。
+
+    写类工具的结果形态各不相同：patch_transl_cache / 按条目删除的 delete_transl_cache
+    给 filename；整文件删除给 deleted_files（全部删除时是 "*"，没有单个文件名可对）；
+    写配置/规范/字典的结果里没有缓存文件名，认不出就什么都不做——所以这个函数可以
+    无脑对每个成功的工具结果调一次。 */
+export function invalidateCacheFilesForToolResult(result: unknown): void {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return;
+  const r = result as Record<string, unknown>;
+  const raw = typeof r.filename === 'string' ? r.filename.trim() : '';
+  let hit = false;
+  if (raw === '*' || raw === 'all') {
+    hit = cacheFilePromises.size > 0;
+    cacheFilePromises.clear();
+  } else {
+    const names = [
+      raw,
+      ...(Array.isArray(r.deleted_files) ? r.deleted_files : []),
+    ]
+      .map((name) => (typeof name === 'string' ? name.trim() : ''))
+      .filter(Boolean);
+    if (!names.length) return;
+    for (const key of [...cacheFilePromises.keys()]) {
+      if (!names.some((name) => key.endsWith(`::${name}`))) continue;
+      cacheFilePromises.delete(key);
+      hit = true;
+    }
+  }
+  if (!hit) return; // 没有作废任何东西（如写的是项目规范）：不必惊动卡片
+  for (const listener of [...cacheFileListeners]) listener();
+}
+
 function loadCacheFile(projectId: string, filename: string): Promise<CacheFileResponse> {
   const key = `${projectId}::${filename}`;
   const hit = cacheFilePromises.get(key);
@@ -139,7 +182,11 @@ function CacheRefCard({
 }) {
   const [entries, setEntries] = useState<CacheEntry[] | null>(null);
   const [error, setError] = useState<string>('');
+  // 写类工具改过缓存后 invalidateCacheFilesForToolResult 会广播一次，这里跟着重拉
+  const [reloadToken, setReloadToken] = useState(0);
   const wanted = useMemo(() => parseCacheRefIndexes(indexSpec), [indexSpec]);
+
+  useEffect(() => subscribeCacheFiles(() => setReloadToken((n) => n + 1)), []);
 
   useEffect(() => {
     let alive = true;
@@ -164,7 +211,7 @@ function CacheRefCard({
     return () => {
       alive = false;
     };
-  }, [projectDir, filename, wanted.join(',')]);
+  }, [projectDir, filename, wanted.join(','), reloadToken]);
 
   const found = entries ?? [];
   const missing = wanted.length - found.length;
