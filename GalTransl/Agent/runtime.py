@@ -19,7 +19,7 @@ import time
 import traceback
 import urllib.parse
 import urllib.request
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -49,6 +49,138 @@ _TRANSIENT_EVENT_TYPES = frozenset({
     "context_usage",
     "queue",
 })
+
+# ---- 权限（工具执行前的审批）----
+# 三档模式，对应输入区那个选择器。审批在**后端**做：模型不知道当前是什么模式
+# （也不会被告知），它只会在被拒绝时收到一条工具错误。
+# - ask（每次询问，默认）：写操作一律先问；
+# - accept-edits（允许编辑）：只自动放行"改译文数据"（缓存 / 字典 / 人名表），
+#   改项目配置、改项目规范、启动翻译仍然要问；
+# - auto（全自动）：全部放行。
+PERMISSION_MODES: tuple[str, ...] = ("ask", "accept-edits", "auto")
+DEFAULT_PERMISSION_MODE = "ask"
+PERMISSION_MODE_LABELS: dict[str, str] = {
+    "ask": "每次询问",
+    "accept-edits": "允许编辑",
+    "auto": "全自动",
+}
+# 审批的三种答复（前端按钮）：只批这一次 / 本会话都批这个工具 / 拒绝
+PERMISSION_DECISIONS: tuple[str, ...] = ("allow-once", "allow-session", "deny")
+# 审批超时（秒）：到点自动拒绝。fail closed——没人理就当拒绝，不把回合永远挂住。
+PERMISSION_TIMEOUT = 120.0
+# 等待答复的轮询步长（秒）：只为尽快响应停止信号
+PERMISSION_WAIT_TICK = 0.2
+
+# 风险分级（只分三档，够上面三种模式用）：
+# - read：不改任何东西，任何模式都直接放行；
+# - edit：改译文数据（缓存 / 字典 / 人名表）——"允许编辑"档自动放行的就是这些；
+# - high：改项目设置 / 项目规范 / 启动任务——只有"全自动"放行。
+PERMISSION_READ = "read"
+PERMISSION_EDIT = "edit"
+PERMISSION_HIGH = "high"
+
+PERMISSION_TOOL_RISK: dict[str, str] = {
+    "save_dict": PERMISSION_EDIT,
+    "create_dict_file": PERMISSION_EDIT,
+    "save_name_table": PERMISSION_EDIT,
+    "patch_transl_cache": PERMISSION_EDIT,
+    "delete_transl_cache": PERMISSION_EDIT,
+    "update_project_config": PERMISSION_HIGH,
+    "manage_problem_filter": PERMISSION_HIGH,
+    "write_project_guideline": PERMISSION_HIGH,
+    "start_translation": PERMISSION_HIGH,
+}
+# 只读类工具：读 / 检索 / 等待 / 询问，外加"停止任务"——停止是安全方向的动作，
+# 要停下来还得先点确认是最糟的设计，所以任何模式都直接放行。
+PERMISSION_READ_TOOLS: frozenset[str] = frozenset({
+    "get_project_overview",
+    "list_input_files",
+    "read_input_file",
+    "read_guideline",
+    "list_dict_files",
+    "read_dict",
+    "get_name_table",
+    "list_problems",
+    "list_transl_cache",
+    "read_transl_cache",
+    "read_output",
+    "search_transl_cache",
+    "get_runtime",
+    "wait",
+    "ask_user",
+    "stop_translation",
+})
+# 审批卡上显示的工具名（前端有自己的 TOOL_META，这里只需要一个可读的名字）
+PERMISSION_TOOL_LABELS: dict[str, str] = {
+    "save_dict": "保存字典",
+    "create_dict_file": "新建字典",
+    "save_name_table": "保存人名表",
+    "patch_transl_cache": "修改译文",
+    "delete_transl_cache": "删除缓存",
+    "update_project_config": "修改项目配置",
+    "manage_problem_filter": "管理问题过滤",
+    "write_project_guideline": "修改项目规范",
+    "start_translation": "启动翻译",
+}
+
+
+def _tool_risk(name: str) -> str:
+    """工具的风险档。没登记的工具按 high 处理（fail closed）：新增写类工具忘了
+    登记时宁可多问一次，也不要默默改掉用户的项目。"""
+    if name in PERMISSION_TOOL_RISK:
+        return PERMISSION_TOOL_RISK[name]
+    if name in PERMISSION_READ_TOOLS:
+        return PERMISSION_READ
+    return PERMISSION_HIGH
+
+
+def _permission_tool_label(name: str) -> str:
+    return PERMISSION_TOOL_LABELS.get(name, name)
+
+
+def _normalize_permission_mode(value: Any) -> str:
+    """前端送来的模式：不认识的（含空值）一律回落到默认的「每次询问」。"""
+    mode = str(value or "").strip()
+    return mode if mode in PERMISSION_MODES else DEFAULT_PERMISSION_MODE
+
+
+def _apply_permission_mode(state: AgentState, mode: Any) -> bool:
+    """换档：改掉档位并**清空本会话的放行记录**，返回是否真的换了。
+
+    换档等于换一套信任级别，之前点过的「本会话允许」不再作数——从「每次询问」切到
+    「允许编辑」再切回来时，旧放行还留着会让人以为档位没生效。反过来，**同档重复设置
+    不算换档**（前端每回合都会带上当前档位），否则「本会话允许」活不过一个回合。
+    """
+    clean = _normalize_permission_mode(mode)
+    if clean == state.permission_mode:
+        return False
+    state.permission_mode = clean
+    if state.permission_grants:
+        _log(f"换档为 {clean}，清空 {len(state.permission_grants)} 条本会话放行记录")
+        state.permission_grants.clear()
+    return True
+
+
+def _permission_needed(risk: str, mode: str) -> bool:
+    """这次调用要不要先请用户批准。读类永远不用；其余按模式矩阵判断。"""
+    if risk == PERMISSION_READ:
+        return False
+    if mode == "auto":
+        return False
+    if mode == "accept-edits":
+        # 只自动放行"改译文数据"，配置/规范/启动任务仍要确认
+        return risk != PERMISSION_EDIT
+    return True
+
+
+def _permission_denied_reason(name: str, decision: str) -> str:
+    """没批准时给模型看的那句话：说清"没执行"，并区分拒绝 / 超时 / 回合被停。"""
+    label = _permission_tool_label(name)
+    if decision == "timeout":
+        return f"用户没有在 {int(PERMISSION_TIMEOUT)} 秒内批准「{label}」，本次调用没有执行。"
+    if decision == "stopped":
+        return f"回合被停止，本次「{label}」调用没有执行。"
+    return f"用户拒绝权限：本次「{label}」调用没有执行。"
 
 # ---- 上下文预算 ----
 # 后端配置未指定 contextWindow 时的默认窗口（token）
@@ -270,10 +402,10 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 - 每一步只调用必要的工具；能在一次工具调用里拿到的信息不要拆成多次。重复查看同类信息时用工具的分段参数（如 get_project_overview 的 include）只取变化的部分，别把基本不变的配置/说明反复拉一遍。
 - 要把某条缓存（原文 + 译文，或几条）摆给用户看时，在回复里**单独一行**写 `$transl_cache("<缓存文件名>", <行号>)`：文件名来自 list_transl_cache，行号是缓存条目的 index，可写区间 `12-15` 或逗号列表 `12,20`。界面会把它渲染成那几行缓存的卡片，比自己把原文译文抄一遍清楚、也不会抄错。不要把它写进代码块，也不要加额外解释行。
 - 翻译规范有两份：全局规范（translation_guidelines 目录里选的那份，通用规则）和**项目规范**（项目目录里的 `translation_guideline.md`，本项目专属，跟项目一起走）。翻译时两份拼在一起、项目规范在后，冲突以项目规范为准。读项目规范用 read_guideline(scope="project")；用户提出新的术语/称呼/语气要求时，先看项目规范里是否已经写过，再用 write_project_guideline 改：新增要求用 append，旧规则要改成新的用 replace（把旧那段原文给全，确保唯一），整套重写才用 overwrite。改完在**下一次启动翻译**时生效，正在跑的翻译不受影响；别在同一份规范里堆互相矛盾的规则。
-- 写类工具（改配置 / 项目规范 / 字典 / 人名表 / 缓存、管问题过滤）都带一个可选参数 `reason`：**尽量填**一句"为什么改"（依据或要解决的问题，如「第 33 句残留日文：按人名表统一为『多鲁德』」）。界面会把它显示在那条改动的变更卡里给用户复核；不用再重复改了哪些内容，changes / diff 已经列出了。
+- 写类工具（改配置 / 项目规范 / 字典 / 人名表 / 缓存、管问题过滤）和 start_translation 都带一个可选参数 `reason`：**尽量填**一句"为什么这么做"（依据或要解决的问题，如「第 33 句残留日文：按人名表统一为『多鲁德』」「试译已定稿，开始全量」）。界面会把它显示在那条改动的变更卡里给用户复核；启动翻译的还会出现在权限审批卡上——全量启动这类动作，用户在批之前要先看到理由。不用再重复改了哪些内容，changes / diff 已经列出了。
 - 不要在未准备字典的情况下直接启动主翻译。
 - 不要连续重复调用同一个工具相同参数（避免死循环）；若上一步结果不理想，换策略或总结收尾。
-- 工具返回的 error 要阅读并据此调整下一步，不要忽略。
+- 工具返回的 error 要阅读并据此调整下一步，不要忽略。其中「用户拒绝权限：…」不是故障，是用户的决定：不要反复重试同一个调用，换一个不需要动它的做法，或说明情况收尾。
 - 不确定该不该做（要不要动这个文件、要不要重翻）、或不确定该怎么翻译（用词/称谓/语气取舍）时，用 ask_user 提问并等回答，别自己猜；能直接从项目配置、字典或原文里判断出来的不要问。
 - 你无法关闭程序、无法修改项目目录以外的文件、无法访问网络。只做翻译相关工作。
 - 在启动全量翻译前，必须先完成试译定稿（流程 3），并把试译评估结论告知用户、确认后再全量启动。
@@ -360,6 +492,11 @@ class AgentState:
     backend_profile_name: str = ""
     translator_profile_name: str = ""
     translator_profile_data: dict[str, Any] = field(default_factory=dict)
+    # 权限模式（同样只存在前端 localStorage，随 start/message 送过来）：见 PERMISSION_MODES。
+    # 不落盘，重启后由下一次 start/message 补上；拿不到就是默认的「每次询问」。
+    permission_mode: str = DEFAULT_PERMISSION_MODE
+    # 本会话里用户点过「本会话允许」的工具名（按工具名放行，不跨会话、不落盘）
+    permission_grants: set[str] = field(default_factory=set)
     started_at: float = 0.0
     finished_at: float = 0.0
     error: str = ""
@@ -437,6 +574,10 @@ class AgentRunner:
         # HTTP 线程（answer_ask）会写 answers 并 set(event)，回合线程在这里等。
         self._ask_lock = threading.Lock()
         self._pending_ask: dict[str, Any] | None = None
+        # 权限审批的挂起请求：{request_id, tool_call_id, name, risk, arguments, decision, event}。
+        # 与 ask_user 同一套「回合线程挂起、HTTP 线程唤醒」，区别是有超时（见 PERMISSION_TIMEOUT）。
+        self._perm_lock = threading.Lock()
+        self._pending_permission: dict[str, Any] | None = None
         # 会话落盘器：state 里没有 session_id（理论上不该发生）时退化为内存态
         self._store = SessionStore(state.project_dir, state.session_id) if state.session_id else None
 
@@ -1229,8 +1370,12 @@ class AgentRunner:
         handler = _TOOL_HANDLERS.get(name)
         if handler is None:
             raise AgentToolError(f"未知工具：{name}")
-        # 写类工具的可选 reason（模型说明"为什么改"）集中在这里搬到结果上，而不是让
-        # 八个 handler 各自拼一遍——它们的结果结构各不相同，漏一个就是"填了却看不见"。
+        # 权限门禁：按当前模式放行 / 先请用户批准（拒绝时抛 AgentToolError，由主循环
+        # 转成工具错误给模型看——见 _require_permission）。
+        self._require_permission(name, args)
+        # 带 reason 的工具（写类 + 启动翻译）的可选 reason（模型说明"为什么"）集中在这里
+        # 搬到结果上，而不是让各自的 handler 都拼一遍——它们的结果结构各不相同，漏一个
+        # 就是"填了却看不见"。
         return _attach_reason(name, args, handler(self, args))
 
     # ---- 询问用户（ask_user）----
@@ -1287,6 +1432,128 @@ class AgentRunner:
         holder["event"].set()
         _log(f"  ❓ 收到用户回答（{holder['request_id'][:8]}）")
         return {"ok": True, "answers": clean}
+
+    # ---- 权限审批（工具执行前的门禁）----
+    def _require_permission(self, name: str, args: dict[str, Any]) -> None:
+        """按权限模式决定这次调用放不放行；要审批就阻塞等用户点。
+
+        三种放行：模式本来就允许（见 _permission_needed）、本会话已勾过"本会话允许"、
+        用户这次点了允许。被拒绝时抛 AgentToolError——模型因此收到一条"用户拒绝权限"
+        的工具错误，可以换策略；不抛错就会把"没执行"当成"执行成功"。
+        """
+        risk = _tool_risk(name)
+        mode = _normalize_permission_mode(self.state.permission_mode)
+        if not _permission_needed(risk, mode):
+            return
+        if name in self.state.permission_grants:
+            _log(f"  🔐 权限：{name} 本会话已放行，直接执行")
+            return
+        decision = self.request_permission(
+            os.urandom(8).hex(), self._active_tool_call_id, name, args, mode
+        )
+        if decision == "allow-once":
+            return
+        if decision == "allow-session":
+            self.state.permission_grants.add(name)
+            return
+        _log(f"  🔐 权限被拒（{decision}）：{name}")
+        raise AgentToolError(_permission_denied_reason(name, decision))
+
+    def request_permission(
+        self, request_id: str, tool_call_id: str, name: str, args: dict[str, Any], mode: str
+    ) -> str:
+        """发起一次审批并**阻塞**等用户点，返回 allow-once / allow-session / deny / timeout / stopped。
+
+        与 ask_user 同一套「回合线程挂起、HTTP 线程唤醒（resolve_permission）」，两点不同：
+        - **有超时**（PERMISSION_TIMEOUT）：到点当拒绝，fail closed，不把回合永远挂住；
+        - 回合被停止时当拒绝（"停下"的意思就是别做了），而不是像 ask_user 那样按跳过继续。
+        """
+        risk = _tool_risk(name)
+        safe_args = _sanitize_tool_args(args)
+        event = threading.Event()
+        holder: dict[str, Any] = {
+            "request_id": request_id,
+            "tool_call_id": tool_call_id,
+            "name": name,
+            "risk": risk,
+            "arguments": safe_args,
+            "decision": "",
+            "event": event,
+        }
+        with self._perm_lock:
+            self._pending_permission = holder
+        self._emit("permission_request", {
+            "id": request_id,
+            "tool_call_id": tool_call_id,
+            "name": name,
+            "label": _permission_tool_label(name),
+            "risk": risk,
+            "mode": mode,
+            "arguments": safe_args,
+            "timeout_s": int(PERMISSION_TIMEOUT),
+            # 起始时刻（epoch 秒）：界面据此显示"还剩多少"的倒计时。带上它，刷新页面、
+            # 切走再回来倒计时也接着真实剩余时间走，不会重置回满值。
+            "started_at": time.time(),
+        })
+        _log(f"  🔐 等待用户批准 {name}（模式 {mode}，{int(PERMISSION_TIMEOUT)}s 超时）")
+        deadline = time.monotonic() + PERMISSION_TIMEOUT
+        try:
+            while not event.wait(PERMISSION_WAIT_TICK):
+                if self.stop_event.is_set():
+                    _log("  🔐 回合被停止，权限请求按拒绝处理")
+                    break
+                if time.monotonic() >= deadline:
+                    _log(f"  🔐 权限请求超时（{int(PERMISSION_TIMEOUT)}s），按拒绝处理")
+                    break
+            decision = str(holder.get("decision") or "")
+        finally:
+            with self._perm_lock:
+                if self._pending_permission is holder:
+                    self._pending_permission = None
+        if decision:
+            return decision
+        return "stopped" if self.stop_event.is_set() else "timeout"
+
+    def apply_permission_mode(self, mode: Any) -> None:
+        """改档（HTTP 线程调用）：下一次工具调用按新档判。
+
+        常见情形是"卡已经弹出来了，用户这时才想起该切全自动"：那张卡按新档本来就会放行，
+        让它自己作废比逼用户再点一次合理——记成 allow-once（不写本会话放行），与用户点了
+        「允许一次」完全等价。更严格的档位则不动那张卡（用户还得回答一次，语义也没错）。
+
+        换档同时清空本会话放行记录（见 _apply_permission_mode）：档位是信任级别，
+        旧档下点过的「本会话允许」不该跨档沿用。
+        """
+        _apply_permission_mode(self.state, mode)
+        with self._perm_lock:
+            holder = self._pending_permission
+        if holder is None:
+            return
+        name = str(holder.get("name") or "")
+        if _permission_needed(_tool_risk(name), self.state.permission_mode):
+            return
+        holder["decision"] = "allow-once"
+        holder["event"].set()
+        _log(f"  🔐 模式改为 {self.state.permission_mode}，在等的 {name} 直接放行")
+
+    def resolve_permission(self, decision: Any) -> dict[str, Any]:
+        """把用户在审批卡上的选择送进来，唤醒挂起的请求（HTTP 线程调用）。"""
+        clean = str(decision or "").strip()
+        if clean not in PERMISSION_DECISIONS:
+            raise ValueError(
+                f"未知的权限答复：{decision!r}（可选：{'、'.join(PERMISSION_DECISIONS)}）"
+            )
+        with self._perm_lock:
+            holder = self._pending_permission
+        if holder is None:
+            raise ValueError("当前没有等待批准的权限请求（可能已批准、已拒绝或回合已结束）")
+        with self._perm_lock:
+            if self._pending_permission is not holder:
+                raise ValueError("这个权限请求刚刚已经结束了")
+            holder["decision"] = clean
+        holder["event"].set()
+        _log(f"  🔐 收到权限答复 {clean}（{holder['request_id'][:8]}）")
+        return {"ok": True, "decision": clean, "name": holder["name"]}
 
     # ---- 工具实现（调本机 HTTP） ----
     def _project_id(self) -> str:
@@ -1641,13 +1908,14 @@ def _http_json(method: str, url: str, body: dict[str, Any] | None = None) -> Any
 
 # ---- Agent 工具的 OpenAI function schema ----
 
-# 写类工具（改配置/规范/字典/缓存的那几个）共用的可选参数：让模型自己交代"为什么改这次"。
+# 带 reason 入参的工具（写类：改配置/规范/字典/缓存，加上启动翻译）共用的可选参数：
+# 让模型自己交代"为什么这么做"。
 # **怎么填、填了显示在哪里，只在 system prompt 的约束里写一份**（见 AGENT_SYSTEM_PROMPT），
-# 这里只说明"这是什么"，八个工具引用同一个 dict，既不重复解释也不各写一遍。
-# 哪些工具带这个参数见 _WRITE_TOOLS_WITH_REASON（_attach_reason 按它把 reason 挂回结果）。
+# 这里只说明"这是什么"，九个工具引用同一个 dict，既不重复解释也不各写一遍。
+# 哪些工具带这个参数见 _TOOLS_WITH_REASON（_attach_reason 按它把 reason 挂回结果）。
 _REASON_PROPERTY: dict[str, Any] = {
     "type": "string",
-    "description": "可选。这次修改的原因（怎么填、显示在哪见系统提示词的写类工具约束）。",
+    "description": "可选。这次操作的原因（怎么填、显示在哪见系统提示词里那条约束）。",
 }
 
 AGENT_TOOLS: list[dict[str, Any]] = [
@@ -1844,6 +2112,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                         "items": {"type": "string"},
                         "description": "可选。只翻译这些输入文件（文件名来自 list_input_files），如试译只翻第一个文件。留空翻译全部。",
                     },
+                    "reason": _REASON_PROPERTY,
                 },
                 "required": ["translator"],
             },
@@ -2016,6 +2285,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                             "trans_by、problem。"
                             "不传 = 默认精简集（index/name/post_src/pre_dst/problem；post_dst_preview 仅在译后处理真的改了内容时给，"
                             "空值省略；要看 pre_src/trans_by 等列得显式传 fields）；传 [\"pre_dst\",\"problem\"] 这类只要某几列。"
+                            "trans_by 逐条只给少数派（多数派 = 这批里出现最多的那个模型，通常就是引擎翻的；它记在返回的 majority_trans_by 里）。"
                         ),
                     },
                 },
@@ -2067,7 +2337,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "search_transl_cache",
-            "description": "在缓存中搜索译文/原文/问题。query 为关键词，field 取 all/src/dst/problem。只看命中行往往不够判断（如查「ドルード」要决定译成「多鲁德」还是「杜罗德」），传 context=N 让每条命中再带上前后各 N 句（in_context=true 的是上下文，不是命中），用法同 read_transl_cache 的 context。传 filename 只搜某个缓存文件（来自 list_transl_cache），修单文件问题时用，如 search_transl_cache(query=\"アクメ\", field=\"src\", filename=\"sc_2_st01.txt.json\")。",
+            "description": "在缓存中搜索译文/原文/问题。query 为关键词，field 取 all/src/dst/problem。只看命中行往往不够判断（如查「ドルード」要决定译成「多鲁德」还是「杜罗德」），传 context=N 让每条命中再带上前后各 N 句（in_context=true 的是顺带带出来的上下文行，命中行不带这个字段），用法同 read_transl_cache 的 context。field=all 时顶层 matched_in 汇总命中在哪一侧（src/dst/problem），不再逐行重复标注；trans_by 逐行只给少数派——整批命中里出现最多的那个模型（多数派，通常就是翻译引擎翻的）过滤掉并记在顶层 majority_trans_by，其余少数派逐行保留。传 filename 只搜某个缓存文件（来自 list_transl_cache），修单文件问题时用，如 search_transl_cache(query=\"アクメ\", field=\"src\", filename=\"sc_2_st01.txt.json\")。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -3494,7 +3764,7 @@ CACHE_ENTRY_FIELD_DESCRIPTIONS: dict[str, str] = {
     "post_dst_preview": "最终译文的缓存快照（后润）：译后字典替换 + 对话符号恢复之后的形态；默认只在它与译文实质不同（不只差首尾对话符号）时返回",
     "proofread_dst": "校对/润色稿；有内容时它就是这条的最终译文（优先于 pre_dst）",
     "proofread_by": "校对者标记（校对失败的会带 Fail）；未校对为空",
-    "trans_by": "译者标记：翻译引擎名或模型名；被 Agent 用 patch_transl_cache 改过的条目会记成本会话 Agent 的模型名；默认不返回（要看它传 fields）",
+    "trans_by": "译者标记：翻译引擎的模型名，或被别的来源改过时的那个名字（本会话 Agent 用 patch_transl_cache 改过的条目记的是 Agent 的模型名）；读缓存时逐条只报少数派——这批里出现最多的那个（多数派，通常就是引擎翻的）与空值都不逐条给，多数派记在顶层 majority_trans_by；默认不返回（要看它传 fields）",
     "problem": "自动问题分析写入的问题标签，可能多条（以「, 」分隔）；list_problems 的统计与下钻都基于它",
 }
 # 默认模式下"有内容才带上"的附加字段（空值一律省略）
@@ -3613,6 +3883,14 @@ def _tool_read_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     raw_entries = [e for e in data.get("entries", []) if isinstance(e, dict)]
     entries = _project_cache_entries(raw_entries, fields)
     result_extra: dict[str, Any] = {}
+    # trans_by 与 search 同一套规则（见 _dominant_trans_by）：逐条只给少数派，多数派与空值
+    # 删掉、改记在顶层 majority_trans_by。默认精简集里没有这列，只有 fields 点名要时才处理。
+    if fields is not None and "trans_by" in fields:
+        dominant = _dominant_trans_by(entries)
+        for entry in entries:
+            _strip_dominant_trans_by(entry, dominant)
+        if dominant:
+            result_extra["majority_trans_by"] = dominant
     # 正在翻译中的增量缓存：读到的是旧快照，明确告诉模型而不是让它误判
     if filename.endswith(".append.jsonl"):
         result_extra["warning"] = "这是翻译中的增量缓存文件，读到的是旧快照；请等任务 completed 后用同名 .json 文件读取。"
@@ -3669,7 +3947,10 @@ def _tool_read_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
             if e is None:
                 continue
             copy = dict(e)
-            copy["in_context"] = i not in wanted
+            # 只标上下文行：命中行不带这个字段（每行挂一个 in_context=false 是纯噪音，
+            # 命中的是 wanted 里点名要的那些，模型自己清楚）
+            if i not in wanted:
+                copy["in_context"] = True
             picked_ctx.append(copy)
         result["returned"] = len(picked_ctx)
         result["entries"] = picked_ctx
@@ -3753,6 +4034,51 @@ def _parse_index_spec(spec: str) -> set[int]:
     return result
 
 
+# /cache/search 返回体里逐行的命中标记（服务端给界面用的：缓存页拿它画「原文/译文/问题」
+# 小徽标）。逐行丢给模型纯属噪音——命中的位置从行内容（post_src / pre_dst / problem）直接
+# 看得到。这里收成顶层一条汇总（见 _slim_search_results）。
+_SEARCH_MATCH_KEYS: dict[str, str] = {
+    "match_src": "src",
+    "match_dst": "dst",
+    "match_problem": "problem",
+}
+
+
+def _slim_search_results(result: dict[str, Any], field: str, context: int) -> None:
+    """就地精简 /cache/search 的返回（模型看到的那份）。
+
+    - 逐行的 match_src / match_dst / match_problem 去掉，改成顶层 matched_in 汇总一次
+      （只在 field="all" 时给：指定 field 的搜索本来就只有那一侧会命中，汇总没有信息量）；
+    - context>0 时逐行的 in_context 只保留 true——那是"顺带带出来的上下文行"，命中行不带
+      这个字段，免得每行都挂一个 in_context=false；
+    - trans_by 逐条只给**少数派**（见 _dominant_trans_by）：逐条的多数派与空值都删掉，多数派
+      放顶层 majority_trans_by 记一次——这批"大头是谁翻的、哪几条是别人改的"一目了然。
+    """
+    rows = result.get("results")
+    if not isinstance(rows, list):
+        return
+    dominant = _dominant_trans_by(rows)
+    counts: dict[str, int] = {}
+    slimmed: list[Any] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            slimmed.append(row)
+            continue
+        for key, label in _SEARCH_MATCH_KEYS.items():
+            if row.get(key):
+                counts[label] = counts.get(label, 0) + 1
+        clean = {k: v for k, v in row.items() if k not in _SEARCH_MATCH_KEYS}
+        if not clean.get("in_context"):
+            clean.pop("in_context", None)
+        _strip_dominant_trans_by(clean, dominant)
+        slimmed.append(clean)
+    result["results"] = slimmed
+    if field == "all" and counts:
+        result["matched_in"] = counts
+    if dominant:
+        result["majority_trans_by"] = dominant
+
+
 def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """在缓存里搜译文/原文/问题；context=N 时每条命中再带上前后各 N 句。
 
@@ -3785,11 +4111,14 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     if filename:
         body["filename"] = filename
     result = runner._http_post(f"/api/projects/{pid}/cache/search", body)
+    if isinstance(result, dict):
+        _slim_search_results(result, field, context)
     notes: list[str] = []
     if isinstance(result, dict) and context:
         result["context"] = context  # 服务端已回；这里兜底，保证调用方一定看得到
         notes.append(
-            f"已带上下文：每条命中前后各 {context} 句（in_context=true 的是上下文、不是命中）；"
+            f"已带上下文：每条命中前后各 {context} 句（in_context=true 的是顺带带出来的"
+            f"上下文行、不是命中，命中行不带这个字段）；"
             f"带上下文时命中上限收紧为 {max_hits} 条以免返回体过大，total 仍是全部命中数——"
             "命中很多时可用 filename 缩小范围或换更具体的关键词。"
         )
@@ -3824,6 +4153,32 @@ def _patchable_fields_text() -> str:
     system prompt 的字段说明与 patch 工具的报错都用它，避免两处各写一份再漂移。
     """
     return " / ".join(name for name in CACHE_ENTRY_FIELDS if name in _PATCHABLE_FIELDS)
+
+
+def _dominant_trans_by(rows: list[Any]) -> str:
+    """这批条目里出现最多的 trans_by 值（= 这批的"正常情况"，多半就是翻译引擎翻的）。
+
+    逐条重复报它没有信息量，所以调用方把它删掉、改在顶层 majority_trans_by 记一次；少数派
+    （Agent 用 patch_transl_cache 改过的、手工改的）才逐条留在 trans_by 上。空值不参与统计，
+    一个值都没有时返回空串，调用方据此不做任何过滤。
+
+    按**数据本身**判，而不是跟配置里「翻译任务会用」那份模型名比：项目当初是哪个模型翻的
+    只有条目自己知道，用户换过「翻译器默认」之后按配置比会把老条目全当成异常来源显示。
+    """
+    counts: Counter[str] = Counter(
+        str(row.get("trans_by") or "").strip() for row in rows if isinstance(row, dict)
+    )
+    counts.pop("", None)
+    return counts.most_common(1)[0][0] if counts else ""
+
+
+def _strip_dominant_trans_by(row: dict[str, Any], dominant: str) -> None:
+    """就地删掉这一行的 trans_by：空值、或正好是多数派那个值。
+
+    dominant 为空串（这批一个标记都没有）时只删空值——判不出"正常值"就别动，宁可多显示。
+    """
+    if str(row.get("trans_by") or "").strip() in ("", dominant):
+        row.pop("trans_by", None)
 
 
 def _agent_model_name(runner: AgentRunner) -> str:
@@ -4142,9 +4497,11 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
 }
 
 
-# 带 reason 入参的写类工具（改配置/规范/字典/缓存）。读类工具没有这个参数、模型也不会传，
-# 这里再列一次是为了在分发时确认"这次调用确实能填原因"，而不是只靠 schema 声明。
-_WRITE_TOOLS_WITH_REASON: frozenset[str] = frozenset({
+# 带 reason 入参的工具：写类（改配置/规范/字典/缓存）+ start_translation。读类工具没有这个
+# 参数、模型也不会传，这里再列一次是为了在分发时确认"这次调用确实能填原因"，而不是只靠
+# schema 声明。start_translation 的 reason 还多一个用处：启动翻译是要审批的动作，理由会跟着
+# arguments 一起进那张权限卡（见 request_permission），用户批之前先看到为什么。
+_TOOLS_WITH_REASON: frozenset[str] = frozenset({
     "update_project_config",
     "write_project_guideline",
     "save_dict",
@@ -4153,16 +4510,17 @@ _WRITE_TOOLS_WITH_REASON: frozenset[str] = frozenset({
     "manage_problem_filter",
     "patch_transl_cache",
     "delete_transl_cache",
+    "start_translation",
 })
 
 
 def _attach_reason(name: str, args: dict[str, Any], result: Any) -> Any:
-    """把入参里的 reason 原样挂到工具结果上，供界面渲染在变更卡里。
+    """把入参里的 reason 原样挂到工具结果上，供界面渲染（变更卡 / 启动翻译那一行）。
 
     模型不传（空串 / 只有空白）就什么都不加；结果不是 dict（读类工具可能返回列表）
     也不改形；结果里本来就有 reason 的以工具自己写的为准。
     """
-    if name not in _WRITE_TOOLS_WITH_REASON or not isinstance(result, dict):
+    if name not in _TOOLS_WITH_REASON or not isinstance(result, dict):
         return result
     if "reason" in result:
         return result
@@ -4470,6 +4828,7 @@ class AgentRuntime:
         backend_profile_name: str = "",
         translator_profile_name: str = "",
         translator_profile_data: dict[str, Any] | None = None,
+        permission_mode: str = "",
     ) -> dict[str, Any]:
         """启动一个回合。session_id 为空时新建会话；标题取用户第一条消息。"""
         key = self._key(project_dir)
@@ -4498,6 +4857,8 @@ class AgentRuntime:
                 backend_profile_name=backend_profile_name,
                 translator_profile_name=translator_profile_name,
                 translator_profile_data=translator_profile_data or {},
+                # 权限模式只在前端 localStorage，随 start/message 送过来（拿不到就是默认档）
+                permission_mode=_normalize_permission_mode(permission_mode),
                 started_at=time.time(),
                 session_id=sid,
                 title=title,
@@ -4534,6 +4895,7 @@ class AgentRuntime:
         backend_profile_data: dict[str, Any] | None = None,
         translator_profile_name: str = "",
         translator_profile_data: dict[str, Any] | None = None,
+        permission_mode: str = "",
     ) -> dict[str, Any]:
         """向会话追加一条用户消息。
 
@@ -4566,6 +4928,10 @@ class AgentRuntime:
                 state.translator_profile_name = translator_profile_name
             if translator_profile_data:
                 state.translator_profile_data = translator_profile_data
+            # 权限模式同理：前端改了选择就跟着走，下一次工具调用按新模式判；
+            # 与选择器那条路径（set_permission_mode）共用一套规则，真换了档就清空放行记录
+            if permission_mode:
+                _apply_permission_mode(state, permission_mode)
 
             if state.status == "running":
                 # 排队期间只算"待发"：不进历史、也不发 user_message 事件——界面上
@@ -4617,6 +4983,51 @@ class AgentRuntime:
         if runner is None:
             raise ValueError("该会话没有正在等待回答的问题")
         return runner.resolve_ask(answers)
+
+    def answer_permission(
+        self, project_dir: str, session_id: str | None, decision: Any
+    ) -> dict[str, Any]:
+        """把用户对权限审批卡的答复送回去，唤醒正在等待的那个回合。
+
+        decision 只有 allow-once / allow-session / deny 三种；校验在
+        resolve_permission 里做，这里只负责找到对应的 runner——没有在等待的审批时
+        报 ValueError（卡片留到超时之后才点、或回合已经结束，界面据此提示）。
+        """
+        key = self._key(project_dir)
+        sid = self._resolve_session_id(project_dir, session_id)
+        with self._lock:
+            runner = self._runners.get(key, {}).get(sid) if sid else None
+        if runner is None:
+            raise ValueError("该会话没有正在等待批准的权限请求")
+        return runner.resolve_permission(decision)
+
+    def set_permission_mode(
+        self, project_dir: str, session_id: str | None, mode: Any
+    ) -> dict[str, Any]:
+        """随时改权限模式：回合跑着也能改，下一次工具调用就按新档判。
+
+        与 answer_* 不同，这里不要求"有东西在等"——空闲会话也能改（前端改完本地也存了，
+        下次 start/message 照样带上，两边一致）；只在会话根本不存在时报 ValueError。
+        顺带处理掉"已经弹出来的那张卡"：新档本来就会放行它的话直接放行（见
+        AgentRunner.apply_permission_mode），用户不必再点一次。
+
+        换档会清空「本会话允许」的放行记录（_apply_permission_mode）。
+        """
+        key = self._key(project_dir)
+        sid = self._resolve_session_id(project_dir, session_id)
+        # 内存优先、没有则从磁盘恢复（刚打开的历史会话）：改档不值得逼用户先发一条消息。
+        # 没有任何会话（连文件都没有）时 _get_state 给 None，按错误返回。
+        state = self._get_state(project_dir, sid)
+        if state is None:
+            raise ValueError("该项目还没有 Agent 会话")
+        with self._lock:
+            runner = self._runners.get(key, {}).get(sid) if sid else None
+        if runner is not None:
+            runner.apply_permission_mode(mode)  # state 是同一份，顺带看有没有在等的卡
+        else:
+            _apply_permission_mode(state, mode)
+        _log(f"权限模式改为 {state.permission_mode}（session={sid}）")
+        return {"ok": True, "permission_mode": state.permission_mode, "session_id": sid or ""}
 
     def stop(self, project_dir: str, session_id: str | None = None) -> dict[str, Any]:
         """用户点停止：置位信号 + 打断在途请求，收尾仍由回合线程自己做。"""

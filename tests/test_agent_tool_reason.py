@@ -1,7 +1,9 @@
-"""写类工具的可选入参 reason：模型交代"为什么改这次"，随结果回传给界面。
+"""带 reason 入参的工具（写类 + start_translation）的可选 reason：模型交代"为什么"，
+随结果回传给界面。
 
-schema 声明 + 分发时搬到结果上（_attach_reason）。这里锁住三件事：写类工具填了要能
-带出来、没填不能出现空键（否则界面会画一行空的「原因」）、读类工具一律不动。
+schema 声明 + 分发时搬到结果上（_attach_reason）。这里锁住四件事：声明了 reason 的工具
+填了要能带出来、没填不能出现空键（否则界面会画一行空的「原因」）、读类工具一律不动、
+声明与常量不漂移。
 """
 
 import unittest
@@ -9,7 +11,7 @@ import unittest
 from GalTransl.Agent.runtime import (
     AGENT_TOOLS,
     _REASON_PROPERTY,
-    _WRITE_TOOLS_WITH_REASON,
+    _TOOLS_WITH_REASON,
     _attach_reason,
 )
 
@@ -22,10 +24,10 @@ def _tool_schema(name: str) -> dict:
 
 
 class ReasonSchemaTests(unittest.TestCase):
-    def test_write_tools_declare_reason_as_optional(self) -> None:
-        for name in sorted(_WRITE_TOOLS_WITH_REASON):
+    def test_reason_tools_declare_it_as_optional(self) -> None:
+        for name in sorted(_TOOLS_WITH_REASON):
             schema = _tool_schema(name)
-            # 同一份描述对象，八个工具不各写一遍
+            # 同一份描述对象，九个工具不各写一遍
             self.assertIs(schema["parameters"]["properties"].get("reason"), _REASON_PROPERTY, name)
             self.assertNotIn("reason", schema["parameters"].get("required") or [], name)
 
@@ -35,17 +37,17 @@ class ReasonSchemaTests(unittest.TestCase):
             self.assertNotIn("reason", properties, name)
 
     def test_declared_reason_tools_match_the_constant(self) -> None:
-        """工具表里声明了 reason 的集合必须与常量一致：加了写类工具忘了登记，这里会红。
+        """工具表里声明了 reason 的集合必须与常量一致：加了工具忘了登记，这里会红。
 
-        wait 除外——它的 reason 是"为什么等"（显示在那一行的倒计时后面），跟写类工具的
-        "为什么改"无关，也不在 _WRITE_TOOLS_WITH_REASON 里。
+        wait 除外——它的 reason 是"为什么等"（显示在那一行的倒计时后面），跟"为什么做这件事"
+        无关，也不在 _TOOLS_WITH_REASON 里。
         """
         declared = {
             tool["function"]["name"]
             for tool in AGENT_TOOLS
             if "reason" in tool["function"]["parameters"].get("properties", {})
         }
-        self.assertEqual(declared - {"wait"}, set(_WRITE_TOOLS_WITH_REASON))
+        self.assertEqual(declared - {"wait"}, set(_TOOLS_WITH_REASON))
 
 
 class AttachReasonTests(unittest.TestCase):
@@ -71,6 +73,16 @@ class AttachReasonTests(unittest.TestCase):
     def test_tool_own_reason_wins(self) -> None:
         out = _attach_reason("save_dict", {"reason": "模型填的"}, {"reason": "工具自己写的"})
         self.assertEqual(out["reason"], "工具自己写的")
+
+    def test_start_translation_reason_reaches_the_result(self) -> None:
+        """启动翻译也吃 reason：结果里带上它，界面就在那一行显示"为什么现在启动"。"""
+        out = _attach_reason(
+            "start_translation",
+            {"translator": "ForGal-json", "reason": "  试译已定稿，开始全量  "},
+            {"job_id": "job-1", "status": "pending"},
+        )
+        self.assertEqual(out["reason"], "试译已定稿，开始全量")
+        self.assertEqual(out["job_id"], "job-1")
 
 
 if __name__ == "__main__":

@@ -106,6 +106,9 @@ class ToolArgSanitizingTests(unittest.TestCase):
         """跑一个回合：工具调用事件里不能出现明文 token（界面卡片 + 会话文件都会存它）。"""
         state = AgentState()
         state.session_id = ""  # 不落盘
+        # 权限：这里测的是 token 不进事件，不是审批流程——用全自动档，否则 start_translation
+        # 会先挂起等批准（默认档是"每次询问"，测试里没人点，120 秒后按拒绝处理）
+        state.permission_mode = "auto"
         state.messages = [{"role": "user", "content": "开始翻译"}]
         state.backend_profile_data = AGENT_PROFILE
         state.translator_profile_data = TRANSLATOR_PROFILE

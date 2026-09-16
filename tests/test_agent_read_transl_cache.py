@@ -149,6 +149,9 @@ class ReadTranslCacheToolTests(unittest.TestCase):
         )
         self.assertIn("post_src", out["entries"][0])
         self.assertIn("proofread_by", out["entries"][0])
+        # trans_by 是个例外：逐条只给少数派，多数派挪到顶层报一次（见 test_agent_trans_by_filter）
+        self.assertNotIn("trans_by", out["entries"][0])
+        self.assertEqual(out["majority_trans_by"], "ForGal-json")
 
     def test_pipeline_only_fields_are_not_exposed(self) -> None:
         """缓存里由管道写入、Agent 用不到的字段（trans_conf/doub_content/
@@ -160,7 +163,8 @@ class ReadTranslCacheToolTests(unittest.TestCase):
         for name in ("trans_conf", "doub_content", "unknown_proper_noun"):
             self.assertNotIn(name, out["entries"][0])
 
-    def test_context_entries_keep_in_context_flag(self) -> None:
+    def test_only_context_entries_are_flagged(self) -> None:
+        """in_context 只标在上下文行上：命中行不带这个字段（每行挂一个 false 是纯噪音）。"""
         entries = [
             {**ENTRY, "index": i, "pre_dst": f"译{i}", "problem": ""} for i in range(1, 6)
         ]
@@ -168,7 +172,9 @@ class ReadTranslCacheToolTests(unittest.TestCase):
             _Runner(entries), {"filename": "01.json", "index": "3", "context": 1}
         )
         self.assertEqual([e["index"] for e in out["entries"]], [2, 3, 4])
-        self.assertEqual([e["in_context"] for e in out["entries"]], [True, False, True])
+        self.assertIs(out["entries"][0]["in_context"], True)
+        self.assertNotIn("in_context", out["entries"][1])  # 点名的第 3 条
+        self.assertIs(out["entries"][2]["in_context"], True)
 
     def test_no_index_returns_first_30_projected(self) -> None:
         entries = [{**ENTRY, "index": i, "problem": ""} for i in range(1, 40)]

@@ -2568,6 +2568,8 @@ def build_handler(registry: JobRegistry):
                     backend_profile_name = str(payload.get("backend_profile_name", "") or "")
                     translator_profile_name = str(payload.get("translator_profile_name", "") or "")
                     translator_profile_data = payload.get("translator_profile_data")
+                    # 权限模式（ask / accept-edits / auto）同样只存在前端 localStorage
+                    permission_mode = str(payload.get("permission_mode", "") or "")
                     if not project_dir:
                         self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
                         return
@@ -2587,6 +2589,7 @@ def build_handler(registry: JobRegistry):
                             if isinstance(translator_profile_data, dict)
                             else None
                         ),
+                        permission_mode=permission_mode,
                     )
                     self._send_json(status)
                 except ValueError as exc:
@@ -2643,6 +2646,41 @@ def build_handler(registry: JobRegistry):
                     self._send_json({"error": f"failed to answer agent question: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
+            # POST /api/agent/permission — 回答权限审批卡（allow-once / allow-session / deny）
+            if path == "/api/agent/permission":
+                try:
+                    payload = self._read_json_body()
+                    project_dir = str(payload.get("project_dir", "")).strip()
+                    session_id = str(payload.get("session_id", "") or "") or None
+                    decision = str(payload.get("decision", "") or "")
+                    if not project_dir:
+                        self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    self._send_json(AGENT_REGISTRY.answer_permission(project_dir, session_id, decision))
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.CONFLICT)
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": f"failed to answer agent permission: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # POST /api/agent/permission-mode — 改权限模式（回合跑着也能改：下一次工具调用
+            # 就按新档判，在等的那张卡若已无必要会自动放行）
+            if path == "/api/agent/permission-mode":
+                try:
+                    payload = self._read_json_body()
+                    project_dir = str(payload.get("project_dir", "")).strip()
+                    session_id = str(payload.get("session_id", "") or "") or None
+                    mode = str(payload.get("permission_mode", "") or "")
+                    if not project_dir:
+                        self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    self._send_json(AGENT_REGISTRY.set_permission_mode(project_dir, session_id, mode))
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.CONFLICT)
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": f"failed to set agent permission mode: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
             # POST /api/agent/message — send a user message to the project's
             # agent session: queues as an interjection while running, or starts
             # a new turn on the persistent conversation when idle.
@@ -2677,6 +2715,7 @@ def build_handler(registry: JobRegistry):
                             if isinstance(translator_profile_data, dict)
                             else None
                         ),
+                        permission_mode=str(payload.get("permission_mode", "") or ""),
                     )
                     self._send_json(status)
                 except ValueError as exc:
