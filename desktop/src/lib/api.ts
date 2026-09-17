@@ -1590,6 +1590,12 @@ export type AgentEventType =
   | 'context_usage'
   | 'queue'
   | 'assistant_message'
+  // 子代理（run_subagents）：start/done 持久（重建界面用），中间三条是瞬态的逐步活动
+  | 'subagent_start'
+  | 'subagent_message'
+  | 'subagent_tool_call'
+  | 'subagent_tool_result'
+  | 'subagent_done'
   | 'finish'
   | 'error'
   | 'stopped'
@@ -1688,6 +1694,22 @@ export type AgentEvent = {
   started_at?: number;
   finished_at?: number;
   goal?: string;
+  // 子代理事件（subagent_*）：id 是本次派发的 id，parent_id 指向发起它的那次工具调用
+  parent_id?: string;
+  agent?: string;
+  file?: string;
+  indexes?: string;
+  brief?: string;
+  model?: string;
+  /** subagent_message：这一轮子代理说了什么 */
+  round?: number;
+  text?: string;
+  /** subagent_done：子代理的收尾报告与统计 */
+  report?: string;
+  turns?: number;
+  tool_calls?: number;
+  /** subagent_done：写了几条校对意见（数字）；工具结果里的 tasks[].doubts 是 index 数组 */
+  doubts?: number | number[];
 };
 
 export type AgentStatus = {

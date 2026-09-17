@@ -5,7 +5,7 @@ pre_src、proofread_* 常年为空——一次读几十条时一半以上是重�
 
 这里锁住三件事：
 
-1. 不传 fields = 默认精简集（原文/译文/说话人/问题），空值省略；
+1. 不传 fields = 默认精简集（原文/译文/说话人/问题/存疑内容），空值省略；
 2. post_dst_preview 只在译后处理真的改了内容时才返回——只差补回来的首尾「」不算，
    而那是"对话条目几乎必然不同"的原因，不排掉这个字段就等于默认都带上；
 3. 传 fields 就只给这几列（index 永远在，定位要用），未知字段直接报错。
@@ -119,7 +119,8 @@ class CacheEntryProjectionTests(unittest.TestCase):
         self.assertEqual(sorted(item), ["index", "pre_dst", "problem"])
 
     def test_default_field_list_is_lean(self) -> None:
-        item = _project_cache_entries([ENTRY], list(CACHE_ENTRY_FIELDS_DEFAULT))[0]
+        entry = {**ENTRY, "doub_content": "存疑：这句像漏译"}  # 默认列里也有存疑内容
+        item = _project_cache_entries([entry], list(CACHE_ENTRY_FIELDS_DEFAULT))[0]
         self.assertEqual(sorted(item), sorted(CACHE_ENTRY_FIELDS_DEFAULT))
 
 
@@ -154,14 +155,16 @@ class ReadTranslCacheToolTests(unittest.TestCase):
         self.assertEqual(out["majority_trans_by"], "ForGal-json")
 
     def test_pipeline_only_fields_are_not_exposed(self) -> None:
-        """缓存里由管道写入、Agent 用不到的字段（trans_conf/doub_content/
-        unknown_proper_noun）不该出现在返回里——连 fields=["*"] 也不给。"""
+        """缓存里由管道写入、Agent 用不到的字段（trans_conf/unknown_proper_noun）
+        不该出现在返回里——连 fields=["*"] 也不给。"""
         entry = {**ENTRY, "doub_content": "存疑内容", "unknown_proper_noun": "某名词"}
         out = _tool_read_transl_cache(
             _Runner([entry]), {"filename": "01.json", "index": "7", "fields": ["*"]}
         )
-        for name in ("trans_conf", "doub_content", "unknown_proper_noun"):
+        for name in ("trans_conf", "unknown_proper_noun"):
             self.assertNotIn(name, out["entries"][0])
+        # doub_content 例外：它是校对子代理的产物，主 Agent 要读它才知道改哪儿
+        self.assertEqual(out["entries"][0]["doub_content"], "存疑内容")
 
     def test_only_context_entries_are_flagged(self) -> None:
         """in_context 只标在上下文行上：命中行不带这个字段（每行挂一个 false 是纯噪音）。"""

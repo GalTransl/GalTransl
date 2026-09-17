@@ -48,7 +48,31 @@ _TRANSIENT_EVENT_TYPES = frozenset({
     "wait_tick",
     "context_usage",
     "queue",
+    # 子代理的逐步活动：一次派 16 个、每个十几轮，事件量能到上千条，进长期窗口会把主 Agent
+    # 的转录挤出去。只走实时流（界面照常显示），刷新后由子代理的 start/done 两个事件重建
+    # （那两条是持久的，带着状态、耗时与报告——够界面还原出"跑过谁、结果如何"）。
+    "subagent_message",
+    "subagent_tool_call",
+    "subagent_tool_result",
 })
+
+# ---- 子代理（subagent）的常量 ----
+# 概念、实现与取舍见下面「子代理」那一节（在 _TOOL_HANDLERS 之前）。常量放在这里是因为
+# AGENT_TOOLS 里的 run_subagents schema 要引用它们（MAX_TASKS 与角色清单要出现在工具描述里）。
+SUBAGENT_AGENT_PROOFREAD = "proofread"
+SUBAGENT_AGENTS: tuple[str, ...] = (SUBAGENT_AGENT_PROOFREAD,)
+# 一次最多派几个（上限 16），同时也是并发上限
+SUBAGENT_MAX_TASKS = 16
+# 单个子代理的 LLM 轮数上限：防呆。正常校对十几轮足够，真跑满也算"干了活"，把已有报告交回去。
+SUBAGENT_MAX_ROUNDS = 24
+# 单个子代理回给主 Agent 的报告上限（字符）：一批 16 份报告不能把主 Agent 的上下文塞爆
+SUBAGENT_REPORT_CHARS = 800
+# 子代理一次工具结果的回传上限（字符）：读缓存动辄几十条，超了截断并提示它分段读
+SUBAGENT_TOOL_RESULT_CHARS = 24_000
+# 父回合等待子代理时的进度打印间隔（秒）
+SUBAGENT_PROGRESS_TICK = 5.0
+
+SUBAGENT_LABELS: dict[str, str] = {SUBAGENT_AGENT_PROOFREAD: "校对"}
 
 # ---- 权限（工具执行前的审批）----
 # 三档模式，对应输入区那个选择器。审批在**后端**做：模型不知道当前是什么模式
@@ -89,6 +113,8 @@ PERMISSION_TOOL_RISK: dict[str, str] = {
     "manage_problem_filter": PERMISSION_HIGH,
     "write_project_guideline": PERMISSION_HIGH,
     "start_translation": PERMISSION_HIGH,
+    # 派子代理：它写的是缓存里的"存疑内容"（doub_content），改不了译文，按 edit 档
+    "run_subagents": PERMISSION_EDIT,
 }
 # 只读类工具：读 / 检索 / 等待 / 询问，外加"停止任务"——停止是安全方向的动作，
 # 要停下来还得先点确认是最糟的设计，所以任何模式都直接放行。
@@ -121,6 +147,7 @@ PERMISSION_TOOL_LABELS: dict[str, str] = {
     "manage_problem_filter": "管理问题过滤",
     "write_project_guideline": "修改项目规范",
     "start_translation": "启动翻译",
+    "run_subagents": "派校对子代理",
 }
 
 
@@ -395,6 +422,8 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 4. **启动翻译（全量）**：调用 start_translation(translator="<主翻译引擎>")（不传 files 即翻译全部）。主翻译引擎从项目配置或 overview 中确认，常用值：ForGal-json / ForGal-tsv / ForNovel / sakura-v1.0 / galtransl-v3。一次只启动一个，项目已有运行中任务时不要重复提交。
 5. **跟进进度（wait 前后都要查状态）**：启动翻译后先调用 get_runtime 确认任务已在跑，再调用 wait 等待一段合理时间（翻译任务 wait minutes=1~3，短任务 wait seconds=30）。wait 结束后必须再调用 get_runtime 确认任务状态：completed 进入下一步；仍在 running 时看返回的 eta_seconds 估算剩余时间——eta 还很长（如 >10 分钟）就按其一半的时长继续 wait，快完了（如 <2 分钟）就 wait seconds=30 再查，不要连续空转轮询也不要一次等过头。等待期间界面会显示倒计时。（get_runtime 各字段与 recent_errors 的口径见该工具说明。）
 6. **复核结果**：调用 list_problems（不带参数）先看类型统计，了解哪类问题最多；再传 problem_type（如 problem_type="残留日文"）+ limit/offset 分页查看该类型的具体条目。用 read_transl_cache 的 index 参数精确读取有问题的条目（如 list_problems 返回的 index，可直接 `index="33-40,50-60"` 一次取多条）浏览实际译文；判断语意是否连贯时传 context（如 context=3）把前后各几句一起带上。要查某个词/译名在全项目的所有出现处、判断译法是否统一（如「ドルード」该统一成哪个写法），用 search_transl_cache(query="ドルード", context=3) 一次看遍所有出现处及其上下文。它默认只返回必要字段（说话人/原文/译文/问题，空值与未变化的字段会省略），要看译后字典替换结果或校对稿再传 fields。需要看缓存文件全貌（文件、条数）时用 list_transl_cache；注意返回里标注 translating / .append.jsonl 后缀的文件正在翻译中，此时读到的是旧快照，等任务 completed 再操作。
+7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。对确认无需处理的系统性问题类型（如字典使用提示、纯语气词提示），可用 manage_problem_filter(action="add", keyword=["…"]) 加入问题过滤清单（keyword 可传数组一次加多个），让统计聚焦真问题；过滤后统计会明显下降，属于预期效果。
+6.5 **派校对子代理（可选，推荐在修复前跑一遍）**：用 run_subagents 一次派多个**校对子代理**并行逐文件校对——每个锁定一个缓存文件（大文件用 indexes 切区间），一次最多 16 个。它们只能读 + 写缓存条目的 doub_content（存疑内容），**改不了译文**：返回的 tasks[].doubts 是它们写下的疑问所在 index，报告是各自的总结（含"拿不准"的点）。拿到后按 7 的流程处理——读那些 index 的 doub_content，改完译文把该条的 doub_content 清空。派之前先想清楚要它们重点看什么，写进 brief 比它们自己发挥准。
 7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。对确认无需处理的系统性问题类型（如字典使用提示、纯语气词提示），可用 manage_problem_filter(action="add", keyword=["…"]) 加入问题过滤清单（keyword 可传数组一次加多个），让统计聚焦真问题；过滤后统计会明显下降，属于预期效果。
 8. **完成**：收尾前先调用 get_project_overview 确认项目真的翻完——只有 files_translated == files_total 且没有 running 任务才算整体完成（total==translated 可能只代表已缓存的部分翻完，不要据此收尾）；若还有文件没翻，回到流程 4 继续 start_translation 翻剩余文件。问题数可控、整体完成后，用 read_output 抽查最终输出文件（交付物；输出与缓存不完全一致，译后字典替换只在输出生效），确认无误后用一段自然语言总结本次操作（做了什么、翻译进度、剩余问题建议），不要调用工具，直接输出总结即可结束。
 
@@ -2370,6 +2399,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                                 "index": {"type": "integer", "description": "要修改的条目 index"},
                                 "pre_dst": {"type": "string", "description": "可选。新译文（机翻结果）"},
                                 "proofread_dst": {"type": "string", "description": "可选。新校对译文（校对/润色结果，优先于 pre_dst）"},
+                                "doub_content": {"type": "string", "description": "可选。存疑内容（校对子代理写下的意见）。按它改完译文后传空串清掉，表示这条已处理"},
                             },
                             "required": ["index"],
                         },
@@ -2377,6 +2407,53 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     "reason": _REASON_PROPERTY,
                 },
                 "required": ["filename", "patches"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_subagents",
+            "description": (
+                "派一批**校对子代理**并行干活，等它们全部跑完，把每份报告收回来。子代理有自己的"
+                "上下文与受限工具：只能读（缓存/人名表/规范/问题清单）和写缓存条目的「存疑内容」"
+                "（doub_content），**改不了译文**——改译文仍然是你的事。适合翻译完成后做逐文件校对："
+                f"一次最多 {SUBAGENT_MAX_TASKS} 个，每个锁定一个缓存文件（大文件可用 indexes 切区间），"
+                "要它重点看什么就写进 brief。返回每个子代理的状态、报告，以及它写了哪些 index 的疑问；"
+                "接着用 read_transl_cache 读这些 index 的 doub_content，改完译文再用 patch_transl_cache 清空它。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tasks": {
+                        "type": "array",
+                        "description": f"要派的任务，1-{SUBAGENT_MAX_TASKS} 个（并行跑）。",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "agent": {
+                                    "type": "string",
+                                    "enum": list(SUBAGENT_AGENTS),
+                                    "description": "子代理角色，目前只有 proofread（校对）",
+                                },
+                                "file": {
+                                    "type": "string",
+                                    "description": "这个子代理负责的缓存文件（来自 list_transl_cache）。一个文件一个子代理——别让两个子代理写同一个文件",
+                                },
+                                "indexes": {
+                                    "type": "string",
+                                    "description": "可选。只校对这个区间（写法同 read_transl_cache 的 index，如 \"1-200\"）；留空=整个文件",
+                                },
+                                "brief": {
+                                    "type": "string",
+                                    "description": "可选。给这个子代理的额外要求：重点核对什么、注意哪些角色/术语",
+                                },
+                            },
+                            "required": ["agent", "file"],
+                        },
+                    },
+                },
+                "required": ["tasks"],
             },
         },
     },
@@ -3744,6 +3821,7 @@ CACHE_ENTRY_FIELDS: tuple[str, ...] = (
     "post_dst_preview",
     "proofread_dst",
     "proofread_by",
+    "doub_content",
     "trans_by",
     "problem",
 )
@@ -3751,7 +3829,16 @@ CACHE_ENTRY_FIELDS: tuple[str, ...] = (
 # 原文只给一列——post_src（真正送去翻译的那版），不再同时带 pre_src：两列在多数条目上
 # 只差对话符号/译前字典替换，一次读几十条就是双份原文，白占上下文（要看 pre_src 传 fields）。
 # trans_by 同理默认不给（它是"哪个模型翻的"，读译文时基本用不上）。
-CACHE_ENTRY_FIELDS_DEFAULT: tuple[str, ...] = ("index", "name", "post_src", "pre_dst", "problem")
+CACHE_ENTRY_FIELDS_DEFAULT: tuple[str, ...] = (
+    "index",
+    "name",
+    "post_src",
+    "pre_dst",
+    "problem",
+    # 校对子代理的产物（存疑内容）：主 Agent 复核时要看它，默认就得带上；没写过则是空值，
+    # 走默认精简集的"空值省略"，不会给普通条目添噪音
+    "doub_content",
+)
 # 每个字段的含义（拼进 system prompt，见 _cache_fields_section）。
 # 命名来源见 GalTransl/CSentense.py：pre_src=前原、post_src=前润（送去翻译的原文）、
 # pre_dst=后原（模型原始译文）、post_dst=后润（最终译文）。
@@ -3764,6 +3851,7 @@ CACHE_ENTRY_FIELD_DESCRIPTIONS: dict[str, str] = {
     "post_dst_preview": "最终译文的缓存快照（后润）：译后字典替换 + 对话符号恢复之后的形态；默认只在它与译文实质不同（不只差首尾对话符号）时返回",
     "proofread_dst": "校对/润色稿；有内容时它就是这条的最终译文（优先于 pre_dst）",
     "proofread_by": "校对者标记（校对失败的会带 Fail）；未校对为空",
+    "doub_content": "存疑内容：校对子代理（run_subagents）看过后写下的校对意见（错译/漏译/事实错误等），一条一句；没疑问的条目为空。要修这一条就按它的说法改 pre_dst，改完用 patch_transl_cache 把 doub_content 清空表示已处理",
     "trans_by": "译者标记：翻译引擎的模型名，或被别的来源改过时的那个名字（本会话 Agent 用 patch_transl_cache 改过的条目记的是 Agent 的模型名）；读缓存时逐条只报少数派——这批里出现最多的那个（多数派，通常就是引擎翻的）与空值都不逐条给，多数派记在顶层 majority_trans_by；默认不返回（要看它传 fields）",
     "problem": "自动问题分析写入的问题标签，可能多条（以「, 」分隔）；list_problems 的统计与下钻都基于它",
 }
@@ -4144,15 +4232,22 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
 _PATCHABLE_FIELDS = {
     "pre_dst",
     "proofread_dst",
+    # 存疑内容也算可改：校对子代理写下意见、主 Agent 改完译文后要能把它清掉（或改写）
+    "doub_content",
 }
 
+# "改了译文"的那两个字段：只有它们被改过才给条目盖 trans_by（谁改的）；只写校对意见不算
+_TRANSLATION_FIELDS: frozenset[str] = frozenset({"pre_dst", "proofread_dst"})
 
-def _patchable_fields_text() -> str:
+
+def _patchable_fields_text(allowed: frozenset[str] | None = None) -> str:
     """可改字段的一行文本（按 CACHE_ENTRY_FIELDS 的顺序，输出稳定）。
 
     system prompt 的字段说明与 patch 工具的报错都用它，避免两处各写一份再漂移。
+    allowed 给校对子代理那样的窄白名单用（见 SUBAGENT_PATCHABLE_FIELDS）。
     """
-    return " / ".join(name for name in CACHE_ENTRY_FIELDS if name in _PATCHABLE_FIELDS)
+    fields = allowed if allowed is not None else _PATCHABLE_FIELDS
+    return " / ".join(name for name in CACHE_ENTRY_FIELDS if name in fields)
 
 
 def _dominant_trans_by(rows: list[Any]) -> str:
@@ -4197,7 +4292,16 @@ def _agent_model_name(runner: AgentRunner) -> str:
     return str(_backend_summary(profile, name).get("model") or "")
 
 
-def _tool_patch_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
+def _tool_patch_transl_cache(
+    runner: AgentRunner, args: dict[str, Any], allowed_fields: frozenset[str] | None = None
+) -> Any:
+    """改缓存条目的字段（主 Agent 可改 pre_dst / proofread_dst / doub_content）。
+
+    allowed_fields 是"这次调用最多能改哪些字段"的窄白名单，给校对子代理用：它拿同一个工具，
+    但只放得住 doub_content——**改不了译文是靠这张白名单 + 子代理的入参 schema 双保险**，
+    不是靠提示词自觉（见 _subagent_handlers / _subagent_patch_schema）。
+    """
+    allowed = allowed_fields if allowed_fields is not None else _PATCHABLE_FIELDS
     filename = str(args.get("filename", "")).strip()
     if not filename:
         raise AgentToolError("filename is required")
@@ -4223,6 +4327,7 @@ def _tool_patch_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
                 continue
 
     applied_indexes: list[int] = []
+    retranslated_indexes: list[int] = []
     skipped: list[dict[str, Any]] = []
     not_found: list[int] = []
     changes: list[dict[str, Any]] = []
@@ -4240,25 +4345,35 @@ def _tool_patch_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
         if entry is None:
             not_found.append(idx_i)
             continue
-        updates = {k: v for k, v in p.items() if k in _PATCHABLE_FIELDS and v is not None}
+        updates = {k: v for k, v in p.items() if k in allowed and v is not None}
         if not updates:
-            skipped.append({"index": idx_i, "reason": f"无可更新字段（只允许 {_patchable_fields_text()}）"})
+            skipped.append(
+                {"index": idx_i, "reason": f"无可更新字段（只允许 {_patchable_fields_text(allowed)}）"}
+            )
             continue
         for f, v in updates.items():
             changes.append(_change(f"#{idx_i}.{f}", entry.get(f), v, "replace"))
         entry.update(updates)
         applied_indexes.append(idx_i)
+        if updates.keys() & _TRANSLATION_FIELDS:
+            retranslated_indexes.append(idx_i)
 
     if not applied_indexes:
+        # 把跳过原因带上：否则模型只看到"没有条目被更新"，不知道是字段不许改还是 index 写错了
+        # （校对子代理硬塞译文字段时也靠这条说清"只允许 doub_content"）
+        reasons = "；".join(str(s.get("reason") or "") for s in skipped if s.get("reason"))
         raise AgentToolError(
             f"没有条目被更新（updated=0, skipped={len(skipped)}, not_found={len(not_found)}）"
+            + (f"：{reasons}" if reasons else "")
         )
 
-    # 被改过的条目一律标上本会话的模型名（trans_by 不在 _PATCHABLE_FIELDS 里，模型指定不了）：
+    # 译文被改过的条目标上本会话的模型名（trans_by 不在 _PATCHABLE_FIELDS 里，模型指定不了）：
     # 用户与后续复核才分得清"这句是 Agent 手改的"还是"翻译引擎翻的"。
+    # 只写校对意见（doub_content）的条目**不盖章**——译文一个字没动，盖了会把"谁翻的"弄错，
+    # 也会让 trans_by 的少数派统计多出一堆假来源。
     agent_model = _agent_model_name(runner)
     if agent_model:
-        for idx_i in applied_indexes:
+        for idx_i in retranslated_indexes:
             by_index[idx_i]["trans_by"] = agent_model
 
     save_body = {
@@ -4468,6 +4583,485 @@ def _tool_ask_user(runner: AgentRunner, args: dict[str, Any]) -> Any:
     }
 
 
+# ---- 子代理（subagent）----
+#
+# 概念与 PI-Desktop 的一致：主 Agent 把"一份可以独立完成的工作"交给子代理——子代理有自己的
+# system prompt、自己的消息历史、**受限的工具集**（拿不到委派工具，所以不会递归），跑完只交回
+# 一份报告。它中间的思考与工具调用不进主 Agent 的上下文（省 token），但会作为事件推给界面
+# （见 subagent_* 事件），所以用户看得到它在干什么。
+#
+# 与 PI-Desktop 的一处刻意差异：那边一个 Task 调用只起一个子代理、**立即返回** delegationId，
+# 再由 TaskWait／自动 resume 收口；我们这里**一次调用带一批任务、阻塞到全部跑完**。原因是
+# 我们的回合里工具是串行执行的（见 run() 的 for tc in tool_calls），没有 resume 那套机制，
+# 阻塞式最省事也最不容易出错；并发一点没少——同一批里的子代理是真并行跑的。
+
+# 校对子代理的 system prompt：只盯"事实错误与常规翻译错误"，而且**只能提意见**。
+SUBAGENT_PROOFREAD_PROMPT = """你是 GalTransl 的**校对子代理**，只干一件事：读完分配给你的缓存，找出**事实错误与常规翻译错误**，把意见写进缓存条目的 doub_content。
+
+# 权力边界（越界即失败）
+- 你**只能读**（缓存、人名表、翻译规范、问题清单），以及用 patch_transl_cache **写 doub_content** 这一个字段；
+- 你的 patch_transl_cache 里只有 index 与 doub_content 两个入参：**译文字段（pre_dst / proofread_dst）根本不存在**，也没有委派、启动任务、改配置的权力；
+- 发现错误就写意见，改由主 Agent 做——不要试图绕路。
+
+# 只报这四类问题
+1. **错译**：意思翻错、主客颠倒、否定/时态/数量弄反；
+2. **漏译**：原文有的信息译文里没有（整句漏掉、半句被吞、人称/称谓被省掉）；
+3. **事实错误**：人名/地名/专有名词/设定的译法与项目既有译法或原文设定冲突（先查人名表与其它出现处）；
+4. **明显不通**：中文不成句、指代错乱、说话人张冠李戴（结合 speaker 判断）。
+**不要报风格偏好**（要不要口语化、语气词够不够、标点习惯、个别用词美不美）——那不是你的事，主 Agent 会按项目规范统一处理。宁可少报，也不要拿风格问题把真正的错误淹掉。
+
+# 怎么干
+1. 先 read_transl_cache 读你负责的区间（默认列就够：原文 post_src、译文 pre_dst、机翻自查 problem，以及别人写过的 doub_content）；
+2. 要判断译名一致性：search_transl_cache 搜同一个词的其它出现处、get_name_table 看人名表；判断取舍时 read_guideline 看项目规范；
+3. 有疑问就用 patch_transl_cache 写进去，一条一个问题、写清"错在哪 + 该怎么改"。可以一次多条：
+   patch_transl_cache(filename="<你的文件>", patches=[
+     {"index": 33, "doub_content": "漏译：原文「おっぱい」在译文里没有对应词，建议补为「欧派」"},
+     {"index": 41, "doub_content": "错译：原文是「否定」，译文翻成了肯定"},
+   ])
+   没问题的条目不要写；同一个 index 只写一次（再写会覆盖）。
+4. problem 里的机翻提示可以参考，但那是统计标签，**只写你核对过的**，不要照抄。
+5. 读不完就分段读（index 支持区间），不要为了省事跳过没读的条目——你没读的部分等于没校对。
+
+# 收尾
+不再调用工具后，输出一份**简短**报告（这是主 Agent 唯一会看到的你的输出）：
+- 负责的文件与区间、读了多少条；
+- 写了几条意见、分别是哪类问题（错译/漏译/事实错误/不通）；
+- 拿不准但值得人看一眼的点。
+不要在报告里复述每条意见的全文（doub_content 里已经有了），也不要贴原文译文。"""
+
+# 子代理的 user 消息（任务说明）：文件是任务的天然边界——不同子代理写不同文件的 doub_content，
+# 互不打架；同一个人也能只领一个区间。
+_SUBAGENT_BRIEF_TEMPLATE = """# 你的任务
+
+- 角色：{label}
+- 负责的缓存文件：{file}
+- 负责的区间：{indexes}
+- 主 Agent 的额外要求：{brief}
+
+读完你负责的区间，把发现的问题写进对应条目的 doub_content，然后交报告。"""
+
+
+# 子代理唯一能写的字段：存疑内容。它用的就是主 Agent 那个 patch_transl_cache，只是入参 schema
+# 被摘得只剩 doub_content、handler 那头也只放得住这一个字段（双保险）。
+SUBAGENT_PATCHABLE_FIELDS: frozenset[str] = frozenset({"doub_content"})
+
+# 子代理能用的工具名：读类直接复用主 Agent 的 handler，写只有 patch_transl_cache（收窄版）。
+# 刻意**不含**委派工具（不会递归）、不含任何能改译文的工具。
+SUBAGENT_TOOL_NAMES: tuple[str, ...] = (
+    "read_transl_cache",
+    "search_transl_cache",
+    "list_problems",
+    "get_name_table",
+    "read_guideline",
+    "patch_transl_cache",
+)
+
+
+def _subagent_patch_schema() -> dict[str, Any]:
+    """子代理版的 patch_transl_cache：**把 pre_dst / proofread_dst 两个入参摘掉**，只留 doub_content。
+
+    与 handler 侧的窄白名单（SUBAGENT_PATCHABLE_FIELDS）一起构成"改不了译文"的双保险——
+    这件事由代码保证，不靠提示词自觉。schema 从主 Agent 那份深拷贝再改，避免哪天主 Agent
+    换了描述、子代理这份漂移。
+    """
+    for tool in AGENT_TOOLS:
+        function = tool.get("function") or {}
+        if function.get("name") != "patch_transl_cache":
+            continue
+        copy: dict[str, Any] = json.loads(json.dumps(tool, ensure_ascii=False))
+        properties = copy["function"]["parameters"]["properties"]["patches"]["items"]["properties"]
+        for field in ("pre_dst", "proofread_dst"):
+            properties.pop(field, None)
+        copy["function"]["description"] = (
+            "把你的校对意见写进缓存条目的 doub_content（存疑内容），一条一个具体问题，"
+            "写清错在哪、该怎么改。可以一次传多条 patches。"
+            "**你是校对子代理，只能写 doub_content**——译文字段不在你的入参里，改由主 Agent 做；"
+            "同一个 index 写第二次会覆盖上一次。"
+        )
+        return copy
+    raise RuntimeError("AGENT_TOOLS 里找不到 patch_transl_cache")
+
+
+def _subagent_tools() -> list[dict[str, Any]]:
+    """子代理的工具表：从主 Agent 的工具表里按白名单挑，patch_transl_cache 换成收窄版。
+
+    白名单是"能不能干这件事"的唯一依据（不是提示词）：将来加角色，就是换一张白名单。
+    """
+    picked: list[dict[str, Any]] = []
+    for tool in AGENT_TOOLS:
+        name = str((tool.get("function") or {}).get("name") or "")
+        if name not in SUBAGENT_TOOL_NAMES:
+            continue
+        picked.append(_subagent_patch_schema() if name == "patch_transl_cache" else tool)
+    return picked
+
+
+def _subagent_handlers() -> dict[str, Callable[[AgentRunner, dict[str, Any]], Any]]:
+    """子代理可用的 handler（按白名单从主 Agent 那张表里取）。
+
+    - patch_transl_cache 包一层窄白名单：只放得住 doub_content（译文字段即使模型硬塞也会被
+      当成"无可更新字段"跳过，并被回一条只允许 doub_content 的工具错误）；
+    - 调用**不过权限门禁**：子代理的工具集本身就是白名单（只有读 + 写意见），一批 16 个逐条弹
+      审批卡会把界面淹掉。改译文的权力仍然只在主 Agent 手上——那才是要审批的事。
+    """
+    handlers: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
+        name: _TOOL_HANDLERS[name] for name in SUBAGENT_TOOL_NAMES if name in _TOOL_HANDLERS
+    }
+    handlers["patch_transl_cache"] = lambda runner, args: _tool_patch_transl_cache(
+        runner, args, SUBAGENT_PATCHABLE_FIELDS
+    )
+    return handlers
+
+
+def _subagent_chat(
+    client: Any, model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+) -> tuple[str, list[Any], str, str]:
+    """子代理的一次请求（**非流式**）：返回（正文, 工具调用, 思考字段名, 思考内容）。
+
+    非流式是刻意的简化：子代理的中间输出不需要逐字上屏，一轮一次拿全更简单。代价是"停止"
+    要等当前这次请求回来才生效（父回合的停止仍会立刻终止它后续的轮次）。
+    思考字段的约定与主 Agent 一致（见 REASONING_FIELD_NAMES）：带 tools 的多轮对话里，
+    DeepSeek 这类 provider 要求把上一轮的 reasoning 原样回传，不回就 400。
+    """
+    resp = client.chat.completions.create(
+        model=model,
+        messages=messages,
+        tools=tools,
+        stream=False,
+        timeout=_llm_timeout(),
+    )
+    choices = getattr(resp, "choices", None) or []
+    message = getattr(choices[0], "message", None) if choices else None
+    if message is None:
+        return "", [], REASONING_FIELD_NAMES[0], ""
+    content = str(getattr(message, "content", "") or "")
+    tool_calls = list(getattr(message, "tool_calls", None) or [])
+    field, reasoning = "", ""
+    for name in REASONING_FIELD_NAMES:
+        value = getattr(message, name, None)
+        if value:
+            field, reasoning = name, str(value)
+            break
+    return content, tool_calls, field, reasoning
+
+
+def _truncate_text(text: str, limit: int, hint: str = "") -> str:
+    """超长截断（给子代理的上下文用）：截断要明说，否则它会以为读全了。"""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + (hint or f"…（已截断，共 {len(text)} 字符）")
+
+
+class SubAgentRunner:
+    """一个子代理实例：自己的消息、自己的工具表，跑完交一份报告。
+
+    一个实例只被一个线程跑（见 _tool_run_subagents 的线程池），所以内部不需要加锁。
+    """
+
+    def __init__(
+        self,
+        parent: AgentRunner,
+        *,
+        agent: str,
+        file: str,
+        indexes: str,
+        brief: str,
+        delegation_id: str,
+    ) -> None:
+        self.parent = parent
+        self.agent = agent
+        self.file = file
+        self.indexes = indexes
+        self.brief = brief
+        self.id = delegation_id
+        self.messages: list[dict[str, Any]] = []
+        self.turns = 0
+        self.tool_calls = 0
+        self.doubts: list[dict[str, Any]] = []
+        self.started_at = time.time()
+
+    def _emit(self, event_type: str, data: dict[str, Any]) -> None:
+        """子代理事件：一律带自己的 id，界面据此挂到发起它的那行下面。"""
+        self.parent._emit(event_type, {"id": self.id, **data})
+
+    def _finish(self, status: str, report: str, error: str = "") -> dict[str, Any]:
+        text = report.strip()
+        if len(text) > SUBAGENT_REPORT_CHARS:
+            text = text[:SUBAGENT_REPORT_CHARS] + "…（报告已截断）"
+        result: dict[str, Any] = {
+            "id": self.id,
+            "agent": self.agent,
+            "label": SUBAGENT_LABELS.get(self.agent, self.agent),
+            "file": self.file,
+            "indexes": self.indexes,
+            "status": status,
+            "report": text,
+            "turns": self.turns,
+            "tool_calls": self.tool_calls,
+            # 只回 index：意见全文在缓存里，主 Agent 需要细节就读那几条
+            "doubts": [d.get("index") for d in self.doubts],
+            "duration_ms": int((time.time() - self.started_at) * 1000),
+        }
+        if error:
+            result["error"] = error
+        self._emit(
+            "subagent_done",
+            {
+                "status": status,
+                "report": text,
+                "turns": self.turns,
+                "tool_calls": self.tool_calls,
+                "doubts": len(self.doubts),
+                "duration_ms": result["duration_ms"],
+                "error": error,
+            },
+        )
+        return result
+
+    def run(self) -> dict[str, Any]:
+        """跑到自然收尾（不再调工具）、轮数上限、失败或被停止。"""
+        client = getattr(self.parent, "_openai_client", None)
+        model = str(getattr(self.parent, "_model", "") or "")
+        label = SUBAGENT_LABELS.get(self.agent, self.agent)
+        self._emit(
+            "subagent_start",
+            {
+                "parent_id": self.parent._active_tool_call_id,
+                "agent": self.agent,
+                "label": label,
+                "file": self.file,
+                "indexes": self.indexes,
+                "brief": self.brief,
+                "model": model,
+            },
+        )
+        if client is None or not model:
+            return self._finish("failed", "", error="主 Agent 的后端还没就绪，子代理起不来")
+        base_prompt = SUBAGENT_PROOFREAD_PROMPT if self.agent == SUBAGENT_AGENT_PROOFREAD else ""
+        self.messages = [
+            {"role": "system", "content": base_prompt},
+            {
+                "role": "user",
+                "content": _SUBAGENT_BRIEF_TEMPLATE.format(
+                    label=label,
+                    file=self.file,
+                    indexes=self.indexes or "全部",
+                    brief=self.brief or "（无）",
+                ),
+            },
+        ]
+        tools = _subagent_tools()
+        handlers = _subagent_handlers()
+        last_text = ""
+        for round_i in range(1, SUBAGENT_MAX_ROUNDS + 1):
+            self.turns = round_i
+            if self.parent.stop_event.is_set():
+                return self._finish("stopped", last_text, error="父回合被停止，子代理提前收尾")
+            try:
+                content, tool_calls, reasoning_field, reasoning = _subagent_chat(
+                    client, model, self.messages, tools
+                )
+            except Exception as exc:  # noqa: BLE001 - 子代理失败不该拖垮父回合
+                _log(f"  🧑‍🎓 子代理 {self.id} 第 {round_i} 轮请求失败: {exc}")
+                return self._finish("failed", last_text, error=f"请求失败：{exc}")
+            if content.strip():
+                last_text = content
+                self._emit("subagent_message", {"round": round_i, "text": content[:2000]})
+            if not tool_calls:
+                return self._finish("done", content or last_text)
+            assistant: dict[str, Any] = {"role": "assistant", "content": content or ""}
+            if reasoning:
+                assistant[reasoning_field] = reasoning
+            assistant["tool_calls"] = tool_calls
+            self.messages.append(assistant)
+            for tool_call in tool_calls:
+                self.messages.append(self._run_tool(tool_call, handlers))
+        return self._finish(
+            "max_rounds", last_text, error=f"轮数到上限（{SUBAGENT_MAX_ROUNDS}），按已有结果收尾"
+        )
+
+    def _run_tool(self, tool_call: Any, handlers: dict[str, Any]) -> dict[str, Any]:
+        """执行一次工具调用（白名单之外一律拒绝），返回要塞回消息历史的那条 tool 消息。"""
+        call_id = str(getattr(tool_call, "id", "") or "")
+        fn = getattr(tool_call, "function", None)
+        name = str(getattr(fn, "name", "") or "")
+        raw = str(getattr(fn, "arguments", "") or "")
+        self.tool_calls += 1
+        try:
+            parsed = json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            parsed = {}
+        args = parsed if isinstance(parsed, dict) else {}
+        self._emit(
+            "subagent_tool_call",
+            {"tool_call_id": call_id, "name": name, "arguments": _sanitize_tool_args(args)},
+        )
+        handler = handlers.get(name)
+        started = time.time()
+        ok = True
+        result: Any = None
+        try:
+            if handler is None:
+                raise AgentToolError(
+                    f"子代理没有这个工具：{name}（只能用 {'、'.join(SUBAGENT_TOOL_NAMES)}）"
+                )
+            result = handler(self.parent, args)
+            payload = json.dumps(result, ensure_ascii=False)
+        except AgentToolError as exc:
+            payload, ok = str(exc), False
+        except Exception as exc:  # noqa: BLE001
+            payload, ok = f"{type(exc).__name__}: {exc}", False
+        duration_ms = int((time.time() - started) * 1000)
+        if ok and name == "patch_transl_cache":
+            self._remember_doubts(result)
+        # 事件里只给预览（读缓存动辄几万字符，界面用不上）；消息历史里给全文（有上限兜底）
+        self._emit(
+            "subagent_tool_result",
+            {
+                "tool_call_id": call_id,
+                "name": name,
+                "ok": ok,
+                "result": payload[:400] if ok else None,
+                "error": None if ok else payload[:400],
+                "duration_ms": duration_ms,
+            },
+        )
+        return {
+            "role": "tool",
+            "tool_call_id": call_id,
+            "content": _truncate_text(
+                payload,
+                SUBAGENT_TOOL_RESULT_CHARS,
+                "…（结果过长已截断：请用 index 区间分段读，别跳过没读的条目）",
+            ),
+        }
+
+    def _remember_doubts(self, result: Any) -> None:
+        """从 patch_transl_cache 的变更里挑出 doub_content 那几条，记进报告用的小结。
+
+        认的是返回的 changes（path 形如 `#33.doub_content`）而不是模型传的参数：它到底写了什么、
+        写没写成功，以工具的返回为准。
+        """
+        if not isinstance(result, dict):
+            return
+        for change in result.get("changes") or []:
+            if not isinstance(change, dict):
+                continue
+            path = str(change.get("path") or "")
+            if not path.endswith(".doub_content"):
+                continue
+            raw = path.split(".")[0].lstrip("#")
+            try:
+                index: Any = int(raw)
+            except ValueError:
+                index = raw
+            self.doubts.append({"index": index, "content": str(change.get("after") or "")})
+
+
+def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """派一批子代理并行干活，等它们全部跑完，把每份报告收回来。
+
+    每个任务必须给 agent 与 file：文件是任务的天然边界——不同子代理写不同文件的 doub_content，
+    不会互相覆盖（真要拆一个文件就用 indexes 切区间，但两边别碰同一条）。
+    """
+    tasks_raw = args.get("tasks")
+    if not isinstance(tasks_raw, list) or not tasks_raw:
+        raise AgentToolError("tasks 必须是非空数组")
+    if len(tasks_raw) > SUBAGENT_MAX_TASKS:
+        raise AgentToolError(
+            f"一次最多派 {SUBAGENT_MAX_TASKS} 个子代理（收到 {len(tasks_raw)} 个）：拆成两次调用。"
+        )
+    tasks: list[dict[str, str]] = []
+    for i, item in enumerate(tasks_raw, start=1):
+        if not isinstance(item, dict):
+            raise AgentToolError(f"第 {i} 个任务不是对象")
+        agent = str(item.get("agent", "") or "").strip()
+        if agent not in SUBAGENT_AGENTS:
+            raise AgentToolError(
+                f"第 {i} 个任务的 agent 不认识：{agent!r}（可用：{'、'.join(SUBAGENT_AGENTS)}）"
+            )
+        file_name = str(item.get("file", "") or "").strip()
+        if not file_name:
+            raise AgentToolError(f"第 {i} 个任务缺 file：每个子代理要锁定一个缓存文件")
+        tasks.append(
+            {
+                "agent": agent,
+                "file": file_name,
+                "indexes": str(item.get("indexes", "") or "").strip(),
+                "brief": str(item.get("brief", "") or "").strip(),
+            }
+        )
+    if getattr(runner, "_openai_client", None) is None or not str(getattr(runner, "_model", "") or ""):
+        raise AgentToolError("本回合的后端还没就绪，子代理跑不起来")
+
+    slots: list[dict[str, Any] | None] = [None] * len(tasks)
+    lock = threading.Lock()
+    base = os.urandom(8).hex()
+
+    def work(slot: int, task: dict[str, str]) -> None:
+        sub = SubAgentRunner(
+            runner,
+            agent=task["agent"],
+            file=task["file"],
+            indexes=task["indexes"],
+            brief=task["brief"],
+            delegation_id=f"{base}-{slot + 1:02d}",
+        )
+        out = sub.run()
+        with lock:
+            slots[slot] = out
+
+    threads = [
+        threading.Thread(target=work, args=(i, task), name=f"subagent-{base}-{i + 1}", daemon=True)
+        for i, task in enumerate(tasks)
+    ]
+    _log(f"  🧑‍🎓 派出 {len(threads)} 个子代理：{'、'.join(t['file'] for t in tasks)}")
+    for thread in threads:
+        thread.start()
+    started = time.time()
+    while any(thread.is_alive() for thread in threads):
+        time.sleep(SUBAGENT_PROGRESS_TICK)
+        alive = sum(1 for thread in threads if thread.is_alive())
+        _log(f"  🧑‍🎓 子代理并行中：还剩 {alive}/{len(threads)} 个（已 {int(time.time() - started)}s）")
+        if runner.stop_event.is_set():
+            # 停止信号：各子代理在自己的轮次边界退出，这里不再死等
+            _log("  🧑‍🎓 父回合被停止，等待子代理收尾")
+            for thread in threads:
+                thread.join(timeout=2.0)
+            break
+
+    results: list[dict[str, Any]] = []
+    for task, out in zip(tasks, slots):
+        if out is None:
+            out = {
+                "agent": task["agent"],
+                "label": SUBAGENT_LABELS.get(task["agent"], task["agent"]),
+                "file": task["file"],
+                "indexes": task["indexes"],
+                "status": "stopped",
+                "report": "",
+                "turns": 0,
+                "tool_calls": 0,
+                "doubts": [],
+                "duration_ms": 0,
+                "error": "父回合被停止，这个子代理没跑完",
+            }
+        results.append(out)
+    total_doubts = sum(len(row.get("doubts") or []) for row in results)
+    note = (
+        "子代理的校对意见已写进各条缓存的 doub_content：用 read_transl_cache 读上面列出的 index，"
+        "改完译文（pre_dst）后再用 patch_transl_cache 把该条的 doub_content 清空，表示已处理。"
+    )
+    if total_doubts == 0:
+        note = "这批子代理没有提出任何疑问（没有条目被写入 doub_content）。"
+    return {
+        "tasks": results,
+        "total": len(results),
+        "total_doubts": total_doubts,
+        "note": note,
+    }
+
+
 _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "get_project_overview": _tool_get_project_overview,
     "update_project_config": _tool_update_project_config,
@@ -4494,6 +5088,7 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "search_transl_cache": _tool_search_transl_cache,
     "patch_transl_cache": _tool_patch_transl_cache,
     "ask_user": _tool_ask_user,
+    "run_subagents": _tool_run_subagents,
 }
 
 

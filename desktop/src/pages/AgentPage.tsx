@@ -184,6 +184,11 @@ const TRANSIENT_EVENT_TYPES = new Set<AgentEvent['type']>([
   'context_usage',
   // 队列快照（排队消息的实时变更）同理：不进转录、不进缓存
   'queue',
+  // 子代理的逐步活动：一次派 16 个、每个十几轮，存进缓存会把转录撑爆。只走实时流，
+  // 刷新后由子代理的 start/done 两个事件重建（那两条是持久的）
+  'subagent_message',
+  'subagent_tool_call',
+  'subagent_tool_result',
 ]);
 
 function persistedTranscriptEvents(events: AgentEvent[]): AgentEvent[] {
@@ -261,6 +266,46 @@ type ActivityItem = {
   retryCode?: string;
   retryReason?: string;
   retryDone?: boolean;
+  // 子代理：发起它的那次 run_subagents 调用下面挂的子代理行（见 SubagentList）
+  subagents?: SubagentRun[];
+};
+
+/** 子代理自己的一步（工具调用或一句说明），只在对它展开时显示。 */
+type SubagentStep =
+  | { kind: 'text'; round: number; text: string }
+  | {
+      kind: 'tool';
+      id: string;
+      name: string;
+      args?: unknown;
+      ok?: boolean;
+      result?: unknown;
+      error?: string;
+      durationMs?: number;
+      at: number;
+    };
+
+/** 一个子代理的运行状态（由 subagent_* 事件累积出来）。 */
+type SubagentRun = {
+  id: string;
+  agent: string;
+  /** 角色中文名（校对） */
+  label: string;
+  file: string;
+  indexes: string;
+  brief: string;
+  parentId?: string;
+  status: 'running' | 'done' | 'failed' | 'stopped' | 'max_rounds';
+  steps: SubagentStep[];
+  startedAt?: number;
+  finishedAt?: number;
+  durationMs?: number;
+  turns?: number;
+  toolCalls?: number;
+  /** 写了几条校对意见 */
+  doubts?: number;
+  report?: string;
+  error?: string;
 };
 
 type TimelineGroup =
@@ -587,6 +632,67 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
       continue;
     }
 
+    // 子代理（run_subagents）：挂到发起它的那次工具调用下面，一层就够——子代理没有子代理。
+    // 事件带 id（本次派发）与 parent_id（那次工具调用），据此定位到行与具体哪个子代理。
+    if (ev.type.startsWith('subagent_')) {
+      if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
+      const host =
+        current.items.find((it) => it.kind === 'tool' && it.id === ev.parent_id) ??
+        // 老记录/事件乱序时的兜底：本组最后一次 run_subagents 调用
+        [...current.items].reverse().find((it) => it.kind === 'tool' && it.name === 'run_subagents');
+      if (!host) {
+        continue;
+      }
+      if (!host.subagents) host.subagents = [];
+      let run = host.subagents.find((item) => item.id === ev.id);
+      if (!run) {
+        run = {
+          id: ev.id || '',
+          agent: ev.agent || '',
+          label: ev.label || '子代理',
+          file: ev.file || '',
+          indexes: ev.indexes || '',
+          brief: ev.brief || '',
+          status: 'running',
+          steps: [],
+          startedAt: Date.now(),
+        };
+        host.subagents.push(run);
+      }
+      if (ev.type === 'subagent_message') {
+        if (ev.text) run.steps.push({ kind: 'text', round: ev.round || 0, text: ev.text });
+      } else if (ev.type === 'subagent_tool_call') {
+        run.steps.push({
+          kind: 'tool',
+          id: ev.tool_call_id || '',
+          name: ev.name || '',
+          args: ev.arguments,
+          at: Date.now(),
+        });
+      } else if (ev.type === 'subagent_tool_result') {
+        const step = [...run.steps]
+          .reverse()
+          .find((item): item is Extract<SubagentStep, { kind: 'tool' }> =>
+            item.kind === 'tool' && item.id === ev.tool_call_id);
+        if (step) {
+          step.ok = ev.ok !== false;
+          step.result = ev.result;
+          step.error = ev.error || '';
+          step.durationMs = ev.duration_ms;
+        }
+      } else if (ev.type === 'subagent_done') {
+        run.status = (ev.status as SubagentRun['status']) || 'done';
+        run.report = ev.report || '';
+        run.turns = ev.turns;
+        run.toolCalls = ev.tool_calls;
+        run.doubts = typeof ev.doubts === 'number' ? ev.doubts : 0;
+        run.durationMs = ev.duration_ms;
+        run.error = ev.error || '';
+        run.finishedAt = Date.now();
+      }
+      continue;
+    }
+
     // finish 是回合的收尾回复：作为活动组的 final 消息，渲染时提升为
     // 顶层普通文本（不折进折叠区），像对话里最后一条普通消息。
     if (ev.type === 'finish') {
@@ -706,6 +812,23 @@ const TOOL_META: Record<string, ToolMeta> = {
   get_name_table: { action: '读取人名表', running: '读取人名表', verb: '', icon: 'user', summary: () => 'name替换表' },
   save_name_table: { action: '保存人名表', running: '保存人名表', verb: '', icon: 'users', summary: (a) => (Array.isArray(a?.names) ? `${a.names.length} 条` : '') },
   start_translation: { action: '启动翻译', running: '启动翻译', verb: '', icon: 'play', summary: (a) => [str(a?.translator), ...(Array.isArray(a?.files) ? [`仅 ${a.files.length} 个文件`] : [])].filter(Boolean).join(' · ') },
+  run_subagents: {
+    // 子代理：一次调用带一批任务，界面上每个子代理一行（见 SubagentList）
+    action: '派子代理',
+    running: '子代理并行中',
+    verb: '',
+    icon: 'users',
+    summary: (a) => {
+      const tasks = Array.isArray(a?.tasks) ? a.tasks : [];
+      if (!tasks.length) return '';
+      const files = tasks
+        .map((task) => str((task as Record<string, unknown> | undefined)?.file))
+        .filter(Boolean);
+      const head = files.slice(0, 2).join('、');
+      const rest = files.length > 2 ? ` 等 ${files.length} 个文件` : '';
+      return `${tasks.length} 个 · ${head}${rest}`;
+    },
+  },
   ask_user: {
     action: '询问用户',
     running: '等你回答',
@@ -3656,6 +3779,181 @@ function PermissionCard({
 
 /* ── Tool row (disclosure, not a boxed card) ── */
 
+/** 一批子代理：挂在发起它们的那次 run_subagents 调用下面，一行一个。
+
+    参考 PI-Desktop 的 topology（一条主线 + 若干子行），这里只做一层——子代理没有子代理。
+    每行能展开看它自己的工具调用与报告：跑着的时候默认展开（要看它在干什么），跑完自动收起
+    （报告在行摘要的下一层，点开就能读）；用户手动点过就听用户的。 */
+function SubagentList({ runs }: { runs: SubagentRun[] }) {
+  const running = runs.filter((run) => run.status === 'running').length;
+  return (
+    <div className="agent-subagents">
+      <div className="agent-subagents__head">
+        <span className="agent-subagents__title">子代理</span>
+        <span className="agent-subagents__meta">
+          {running > 0 ? `${running}/${runs.length} 个在跑` : `${runs.length} 个已完成`}
+        </span>
+      </div>
+      {runs.map((run) => (
+        <SubagentRow key={run.id} run={run} />
+      ))}
+    </div>
+  );
+}
+
+function SubagentRow({ run }: { run: SubagentRun }) {
+  // **默认折叠**：一次派 16 个时是一行一个子代理，全铺开会把父行撑得很长；要看细节点开。
+  // 折叠态不丢信息——"最新动作"就挂在行上（见 subagentLatest），在干什么一眼能扫到。
+  const [open, setOpen] = useState(false);
+  const state = subagentState(run);
+  // 跑着的时候没有 duration_ms（那是完成时给的）：先按起始时间算，事件一到就会刷新
+  const durationMs = run.durationMs ?? (run.startedAt ? Date.now() - run.startedAt : 0);
+  const latest = subagentLatest(run);
+
+  return (
+    <div className={`agent-subagent is-${run.status}`}>
+      <button
+        type="button"
+        className="agent-subagent__head"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <span className="agent-subagent__caret" aria-hidden>›</span>
+        <span className="agent-subagent__label">{run.label}</span>
+        <span className="agent-subagent__file" title={run.file}>
+          {run.file}
+          {run.indexes ? ` · ${run.indexes}` : ''}
+        </span>
+        {latest ? (
+          <span
+            className={`agent-subagent__latest${latest.tone === 'error' ? ' is-error' : ''}`}
+            title={latest.full}
+          >
+            {latest.short}
+          </span>
+        ) : null}
+        {run.toolCalls ? <span className="agent-subagent__badge">{run.toolCalls} 次工具</span> : null}
+        {run.doubts ? <span className="agent-subagent__badge is-doubt">意见 {run.doubts}</span> : null}
+        <span className={`agent-subagent__state is-${state.tone}`}>{state.label}</span>
+        {durationMs > 0 ? <span className="agent-subagent__time">{formatDuration(durationMs)}</span> : null}
+      </button>
+      {open ? (
+        <div className="agent-subagent__body">
+          {run.brief ? <div className="agent-subagent__brief">额外要求：{run.brief}</div> : null}
+          {run.steps.map((step, i) =>
+            step.kind === 'text' ? (
+              <div key={`t-${i}`} className="agent-subagent__text">{step.text}</div>
+            ) : (
+              <SubagentStepRow key={step.id || `s-${i}`} step={step} />
+            ),
+          )}
+          {run.report ? (
+            <div className="agent-subagent__report">
+              <span className="agent-subagent__report-label">报告</span>
+              <span className="agent-subagent__report-text">{run.report}</span>
+            </div>
+          ) : null}
+          {run.error ? <div className="agent-subagent__error">{run.error}</div> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** 子代理写下的校对意见：从 patch_transl_cache 的入参里读（它写的就是 doub_content）。 */
+function stepDoubts(args: unknown): { index: number; text: string }[] {
+  const patches = (args as Record<string, unknown> | undefined)?.patches;
+  if (!Array.isArray(patches)) return [];
+  return patches.flatMap((patch) => {
+    const item = patch as Record<string, unknown> | undefined;
+    const text = typeof item?.doub_content === 'string' ? item.doub_content.trim() : '';
+    if (!text) return [];
+    const index = Number(item?.index);
+    return [{ index: Number.isFinite(index) ? index : -1, text }];
+  });
+}
+
+/** 折叠态显示的那句"最新动作"：最后一步是什么（说了什么 / 调了什么工具）。
+
+    读类工具给参数摘要（读哪个文件、哪几行），写意见那步给条数；失败给错误首句。
+    跑完且一步都没有（刷新过：逐步活动是瞬态的、不落盘）就退回报告首行，至少还剩一句总结。 */
+function subagentLatest(run: SubagentRun): { short: string; full: string; tone?: 'error' } | null {
+  const step = run.steps[run.steps.length - 1];
+  if (step?.kind === 'text') {
+    const text = step.text.trim().replace(/\s+/g, ' ');
+    return text ? { short: clipText(text, 68), full: text } : null;
+  }
+  if (step?.kind === 'tool') {
+    if (step.ok === false) {
+      const error = (step.error || '失败').trim();
+      return { short: `失败：${clipText(error, 40)}`, full: error, tone: 'error' };
+    }
+    const doubts = stepDoubts(step.args);
+    if (step.name === 'patch_transl_cache' && doubts.length) {
+      return {
+        short: `写下 ${doubts.length} 条校对意见`,
+        full: doubts.map((doubt) => `#${doubt.index} ${doubt.text}`).join('\n'),
+      };
+    }
+    const meta = toolMeta(step.name);
+    const detail = meta.summary(asArgs(step.args));
+    return {
+      short: detail ? `${meta.action} · ${detail}` : meta.action,
+      full: detail ? `${meta.action}：${detail}` : meta.action,
+    };
+  }
+  const report = (run.report || '').trim().replace(/\s+/g, ' ');
+  return report ? { short: clipText(report, 68), full: report } : null;
+}
+
+/** 截断到 max 个字符，超出补省略号。 */
+function clipText(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/** 子代理的一步工具调用。写意见那一步特殊处理：把每条意见都摊出来——那才是用户要看的产出，
+    只显示"修改译文 · 3 条"等于让他自己去翻缓存文件。 */
+function SubagentStepRow({ step }: { step: Extract<SubagentStep, { kind: 'tool' }> }) {
+  const doubts = stepDoubts(step.args);
+  if (step.name === 'patch_transl_cache' && doubts.length) {
+    return (
+      <div className="agent-subagent__step is-doubt">
+        <span className="agent-subagent__step-name">写校对意见</span>
+        <div className="agent-subagent__doubts">
+          {doubts.map((doubt) => (
+            <div key={doubt.index} className="agent-subagent__doubt">
+              <span className="agent-subagent__doubt-index">#{doubt.index}</span>
+              <span className="agent-subagent__doubt-text">{doubt.text}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className={`agent-subagent__step${step.ok === false ? ' is-error' : ''}`}>
+      <span className="agent-subagent__step-name">{toolMeta(step.name).action}</span>
+      <span className="agent-subagent__step-detail">
+        {step.ok === false
+          ? step.error || '失败'
+          : toolMeta(step.name).summary(asArgs(step.args)) || '完成'}
+      </span>
+    </div>
+  );
+}
+
+/** 子代理的状态标签与配色。 */
+function subagentState(run: SubagentRun): {
+  label: string;
+  tone: 'running' | 'done' | 'error' | 'muted';
+} {
+  if (run.status === 'running') return { label: '进行中', tone: 'running' };
+  if (run.status === 'done') return { label: '完成', tone: 'done' };
+  if (run.status === 'failed') return { label: '失败', tone: 'error' };
+  if (run.status === 'stopped') return { label: '已停止', tone: 'muted' };
+  return { label: '轮数到顶', tone: 'muted' };
+}
+
 /** 工具行的"轮到哪一步"。一批工具调用在后端是**挨个执行**的（runtime 里
     `for tc in tool_calls`），但助手消息的 parts 会先把整批一次性画成行——所以"哪一行在跑"
     不能看是不是最后一行，得看谁还没有结果：
@@ -3706,6 +4004,8 @@ function ToolRow({
   const pending = item.ok === undefined && item.result === undefined && !item.error;
   const awaiting = phase === 'awaiting';
   const isRunning = phase === 'running';
+  const subagents = item.subagents ?? [];
+  const hasSubagents = subagents.length > 0;
 
   // 行**默认展开**的三种情形：
   // 1) 已有变更卡 —— 改了什么是这次调用的重点，diff 不该藏在一次点击后面；
@@ -3715,7 +4015,7 @@ function ToolRow({
   //    回到"只看 diff"（见 foldRaw）。
   // manualOpenState 里只记"用户手动点过"的选择——记过就听用户的，没记过才用这个默认值
   // （重挂/刷新后同一规则）。
-  const autoOpen = Boolean(changeList || reason) || awaiting;
+  const autoOpen = Boolean(changeList || reason) || awaiting || hasSubagents;
   const [open, setOpenRaw] = useState(() => manualOpenState.get(stateKey) ?? autoOpen);
   const setOpen = (value: boolean | ((prev: boolean) => boolean)) => {
     setOpenRaw((prev) => {
@@ -3736,9 +4036,10 @@ function ToolRow({
   const meta = toolMeta(item.name);
   const summary = meta.summary(asArgs(item.arguments));
 
-  // 有变更就把原始参数/结果收进一个折叠菜单（变更卡自己会展开）：写入调用要看的通常是
-  // diff，JSON 参数与整份结果只是证据，要看再点开。失败时例外——错误全文要直接可见。
-  const foldRaw = Boolean(changeList) && !pending && ok;
+  // 把原始参数/结果收进折叠菜单：写入调用要看的通常是 diff，JSON 参数与整份结果只是证据；
+  // 派子代理的调用同理想——任务清单和各份报告已经在子代理行里逐条显示了，那串 JSON 是重复的。
+  // 失败时例外：错误全文要直接可见（那时子代理行也未必建得起来）。
+  const foldRaw = ok && (hasSubagents || (Boolean(changeList) && !pending));
 
   // wait 行：等待期间显示倒计时（只出秒数，不画进度条）。
   const isWait = item.name === 'wait';
@@ -3800,6 +4101,7 @@ function ToolRow({
       </button>
       {open ? (
         <div className="agent-tool__body">
+          {hasSubagents ? <SubagentList runs={subagents} /> : null}
           {changeList ? (
             <ChangeListCard data={changeList} />
           ) : reason ? (

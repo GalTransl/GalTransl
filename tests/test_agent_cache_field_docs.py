@@ -49,9 +49,9 @@ class CacheFieldCoverageTests(unittest.TestCase):
         self.assertNotIn("post_zh_preview", CACHE_ENTRY_FIELDS)  # 旧名由后端兼容，不在 Agent 口径里
 
     def test_removed_fields_are_gone_from_the_agent_surface(self) -> None:
-        """trans_conf / doub_content / unknown_proper_noun：先不暴露给 Agent
+        """trans_conf / unknown_proper_noun：管道内部字段，不暴露给 Agent
         （管道仍会写进缓存，只是 Agent 读不到、也改不了）。"""
-        removed = ("trans_conf", "doub_content", "unknown_proper_noun")
+        removed = ("trans_conf", "unknown_proper_noun")
         for name in removed:
             self.assertNotIn(name, CACHE_ENTRY_FIELDS)
             self.assertNotIn(name, CACHE_ENTRY_FIELDS_DEFAULT)
@@ -59,12 +59,20 @@ class CacheFieldCoverageTests(unittest.TestCase):
             # 读：fields 里带它会被当成未知字段拒掉
             with self.assertRaises(AgentToolError):
                 _normalize_cache_fields({"fields": [name]})
-        # 写：可改字段只剩这两个（trans_by 由 patch_transl_cache 自动打标记，模型指定不了）
-        self.assertEqual(_patchable_fields_text(), "pre_dst / proofread_dst")
+        # 写：可改 pre_dst / proofread_dst + 校对意见（trans_by 由 patch_transl_cache 自动打标记，
+        # 模型指定不了）
+        self.assertEqual(_patchable_fields_text(), "pre_dst / proofread_dst / doub_content")
+
+    def test_doub_content_is_part_of_the_agent_surface(self) -> None:
+        """doub_content 是校对子代理的产物，主 Agent 必须读得到、也要能改（写过之后清掉）。"""
+        self.assertIn("doub_content", CACHE_ENTRY_FIELDS)
+        self.assertIn("doub_content", CACHE_ENTRY_FIELDS_DEFAULT)
+        self.assertIn("doub_content", CACHE_ENTRY_FIELD_DESCRIPTIONS)
+        self.assertIn("doub_content", _normalize_cache_fields({"fields": ["doub_content"]}))
 
     def test_removed_fields_are_not_in_the_prompt(self) -> None:
         prompt = _build_system_prompt(_state())
-        for name in ("trans_conf", "doub_content", "unknown_proper_noun"):
+        for name in ("trans_conf", "unknown_proper_noun"):
             self.assertNotIn(name, prompt)
 
 
@@ -91,7 +99,6 @@ class CacheFieldsSectionTests(unittest.TestCase):
             "index",
             "name",
             "trans_conf",
-            "doub_content",
             "unknown_proper_noun",
         ):
             self.assertNotIn(derived, patchable_sentence)
