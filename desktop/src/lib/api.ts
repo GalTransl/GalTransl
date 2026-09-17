@@ -1659,6 +1659,9 @@ export type AgentEvent = {
   risk?: string;
   mode?: string;
   timeout_s?: number;
+  // 编辑类工具挂起前的「将要变更」预览（后端只读算出来，结构同工具结果的 changes /
+  // line_diff / deleted_preview）：审批卡据此提前显示 diff，不必等执行完才有。
+  preview?: unknown;
   // wait_start / wait_tick / wait_end
   seconds?: number;
   total_ms?: number;

@@ -3064,6 +3064,10 @@ def build_handler(registry: JobRegistry):
                         content=str(payload.get("content", "") or ""),
                         old_text=str(payload.get("old_text", "") or ""),
                         new_text=str(payload.get("new_text", "") or ""),
+                        # dry_run=1：只算不写，把"会落盘的那份全文"回给调用方（Agent 的
+                        # 审批卡据此提前显示 diff，见 runtime._preview_guideline_write）。
+                        # 走同一个入口是有意的——三种 mode 的拼接规则只有这一份实现。
+                        dry_run=bool(payload.get("dry_run")),
                     )
                     self._send_json({"success": True, "filename": PROJECT_GUIDELINE_FILENAME, **result})
                 except ValueError as exc:

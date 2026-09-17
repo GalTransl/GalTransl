@@ -11,6 +11,7 @@ Agent 是一个持久的多轮会话：用户的第一条消息启动会话，�
 """
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -38,25 +39,35 @@ MAX_STEPS = 1000
 RUNTIME_EVENT_KEEP = 500
 # 单次 get_runtime 最多报几"类"新错误（同类会合并；发过的被水位线记住，不再重复报）
 RUNTIME_ERRORS_PER_QUERY = 10
-# 瞬态事件：只进当前回合的 SSE 流，不进内存 events deque（也不落盘）。
+# 瞬态事件：只进当前回合的 SSE 流，不进内存 events deque。
 # 两类：一类是流式增量（一次请求几十条，进 deque 会把 user_message/tool_call
 # 等长期事件挤出 maxlen 窗口，前端刷新后就丢内容）；一类是能从状态快照重建的
 # 实时指标（context_usage），刷新后由 status() 重新给出即可，不必占转录。
+# 例外：子代理的逐步活动虽然也不进内存窗口，但要落盘 —— 见 _SUBAGENT_STEP_EVENTS。
 _TRANSIENT_EVENT_TYPES = frozenset({
     "content_delta",
     "reasoning_delta",
     "wait_tick",
     "context_usage",
     "queue",
-    # 子代理的逐步活动：一次派 16 个、每个十几轮，事件量能到上千条，进长期窗口会把主 Agent
-    # 的转录挤出去。只走实时流（界面照常显示），刷新后由子代理的 start/done 两个事件重建
-    # （那两条是持久的，带着状态、耗时与报告——够界面还原出"跑过谁、结果如何"）。
+    # 子代理的逐步活动：一次派 16 个、每个十几轮，事件量能到上千条，进内存长期窗口会把
+    # 主 Agent 的转录挤出去。所以只走实时流 + 落盘（见 _SUBAGENT_STEP_EVENTS）。
     "subagent_message",
     "subagent_tool_call",
     "subagent_tool_result",
     # 压缩的开始/结束只是过程指示：终态有 compacted（持久），刷新后由它重建即可。
     "compacting",
     # 子代理的退避重试只是过程指示：终态由 subagent_done 给出。
+    "subagent_retry",
+})
+
+# 瞬态但**要落盘**的事件：子代理的逐步活动。它们不进内存 events 窗口（量太大，会把
+# 主转录挤出去），但写进会话 JSONL——read_transcript 会一并回放，这样切页/刷新后
+# 展开子代理还能看到它读了哪些文件、说了什么，而不是只剩 start/done 两条。
+_SUBAGENT_STEP_EVENTS = frozenset({
+    "subagent_message",
+    "subagent_tool_call",
+    "subagent_tool_result",
     "subagent_retry",
 })
 
@@ -754,6 +765,10 @@ class AgentRunner:
             if event_type in _TRANSIENT_EVENT_TYPES:
                 # 瞬态事件只给实时流（SSE drain 即取即弃），不进长期窗口
                 self.state.transient_events.append(event)
+                # 子代理的逐步活动是例外：不进内存窗口，但要落盘——切页/刷新后
+                # 前端重建转录时要靠它还原子代理的动作（见 _SUBAGENT_STEP_EVENTS）。
+                if event_type in _SUBAGENT_STEP_EVENTS and self._store is not None:
+                    self._store.append_event(event.to_dict())
                 return
             self.state.events.append(event)
             if self._store is not None:
@@ -1887,6 +1902,9 @@ class AgentRunner:
         与 ask_user 同一套「回合线程挂起、HTTP 线程唤醒（resolve_permission）」，都**不设
         超时**：没人答就一直挂着，卡片一直在转录里等着（刷新、切走再回来都还在）。唯一差别
         是回合被停止时这里按拒绝收尾（"停下"的意思就是别做了），而 ask_user 按跳过继续。
+
+        挂起前会顺手把「这次会改成什么」算一遍塞进事件（preview，见 _preview_tool_changes）：
+        写类工具的那份 before→after 就这么提前摆到卡上。
         """
         risk = _tool_risk(name)
         safe_args = _sanitize_tool_args(args)
@@ -1902,7 +1920,11 @@ class AgentRunner:
         }
         with self._perm_lock:
             self._pending_permission = holder
-        self._emit("permission_request", {
+        # 挂起之前先把「这次会改成什么」算出来（只读，算不出就当没有）：写类工具把
+        # before→after 直接摆到卡上，用户不必先展开工具行的原始参数才敢点允许。
+        # 用**原始 args** 而不是展示用的 safe_args——预览要的是真数据（见 _preview_tool_changes）。
+        preview = _preview_tool_changes(self, name, args)
+        payload: dict[str, Any] = {
             "id": request_id,
             "tool_call_id": tool_call_id,
             "name": name,
@@ -1910,7 +1932,10 @@ class AgentRunner:
             "risk": risk,
             "mode": mode,
             "arguments": safe_args,
-        })
+        }
+        if preview:
+            payload["preview"] = preview
+        self._emit("permission_request", payload)
         _log(f"  🔐 等待用户批准 {name}（模式 {mode}，不设超时）")
         try:
             while not event.wait(PERMISSION_WAIT_TICK):
@@ -3478,6 +3503,9 @@ def _tool_write_project_guideline(runner: AgentRunner, args: dict[str, Any]) -> 
     行级 diff（前端渲染「变更」卡的依据）也按同一原则来：**写前、写后各读一次文件**，
     diff 的是真正落盘的内容，而不是在本地按三种模式重算一遍编辑结果——后者等于把
     "改成什么样"的逻辑实现第二遍，早晚跟后端那份对不上。
+
+    审批卡上的提前预览同理，只是那次带 dry_run（见 _preview_guideline_write）：同一个入口，
+    服务端算完就走。所以"批准前看到的 diff"和"批准后落盘的内容"来自同一段拼接逻辑。
     """
     endpoint = f"/api/projects/{runner._project_id()}/guideline"
     before = str((runner._http_get(endpoint) or {}).get("content") or "")
@@ -3651,6 +3679,17 @@ def _merge_dict_lines(before_lines: list[str], incoming: list[str], action: str)
     return new_lines, extra
 
 
+def _dict_new_lines(before_lines: list[str], content: str, action: str) -> tuple[list[str], dict[str, Any]]:
+    """按 action 算出写入后的整份字典行（**只算不写**），返回（新行, 附带的明细）。
+
+    save_dict 与审批卡上的「将要变更」预览共用这一份合并规则：卡上给用户看的 diff 就是
+    真执行会写下去的东西（append 跳过重复 key、replace 只改命中的 key 这些细节都一致）。
+    """
+    if action == "overwrite":
+        return content.replace("\r\n", "\n").replace("\r", "\n").split("\n"), {}
+    return _merge_dict_lines(before_lines, _split_dict_incoming(content), action)
+
+
 def _tool_save_dict(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """写入项目字典。action 决定写入方式：
 
@@ -3679,11 +3718,7 @@ def _tool_save_dict(runner: AgentRunner, args: dict[str, Any]) -> Any:
     if isinstance(old, dict):
         before_lines = [str(x) for x in old.get("lines", [])]
 
-    if action == "overwrite":
-        new_lines = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-        extra: dict[str, Any] = {}
-    else:
-        new_lines, extra = _merge_dict_lines(before_lines, _split_dict_incoming(content), action)
+    new_lines, extra = _dict_new_lines(before_lines, content, action)
 
     before_text = "\n".join(before_lines)
     new_text = "\n".join(new_lines)
@@ -3723,6 +3758,57 @@ def _tool_create_dict_file(runner: AgentRunner, args: dict[str, Any]) -> Any:
     return runner._http_post(f"/api/projects/{pid}/dictionary/project/create", body)
 
 
+def _parse_filter_keywords(raw: Any) -> list[str]:
+    """关键字入参（单个字符串 / 字符串数组 / 配置里那串）→ 去空白、去重保序的列表。
+
+    manage_problem_filter 与审批卡上的「将要变更」预览共用：字符串既可能是单个关键字，
+    也可能是换行分隔的一串（模型两种都爱写）。
+    """
+    items = raw.split("\n") if isinstance(raw, str) else raw
+    if not isinstance(items, list):
+        return []
+    cleaned = [k.strip() for k in items if isinstance(k, str) and k.strip()]
+    return list(dict.fromkeys(cleaned))  # 去重保序
+
+
+def _load_problem_filter_keys(
+    runner: AgentRunner, pid: str, config_name: str
+) -> tuple[dict[str, Any], list[str]]:
+    """读配置里的 common.problemFilterKey：返回（整份 config, 去重保序的关键字清单）。
+
+    manage_problem_filter 的 list/add/remove 三支与预览都走它——"现在的清单是什么"
+    只能有一处口径。
+    """
+    data = runner._http_get(f"/api/projects/{pid}/config?config={urllib.parse.quote(config_name)}")
+    config = data.get("config") if isinstance(data, dict) else None
+    if not isinstance(config, dict):
+        raise AgentToolError("项目配置读取失败")
+    common = config.get("common")
+    if not isinstance(common, dict):
+        common = {}
+        config["common"] = common
+    return config, _parse_filter_keywords(common.get("problemFilterKey", []))
+
+
+def _plan_problem_filter(
+    keys: list[str], action: str, keywords: list[str]
+) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+    """算出这次 add/remove 实际会动到哪些关键字（**只读**）：返回（命中, 未命中, changes）。
+
+    与 _tool_manage_problem_filter 共用：卡上列出的增删就是真执行会写进去的那些。
+    """
+    existing = set(keys)
+    if action == "add":
+        hit = [k for k in keywords if k not in existing]  # 实际新增
+        miss = [k for k in keywords if k in existing]  # 本来就有
+        changes = [_change("problemFilterKey", None, k, "add") for k in hit]
+    else:  # remove
+        hit = [k for k in keywords if k in existing]  # 实际移除
+        miss = [k for k in keywords if k not in existing]  # 本来就没有
+        changes = [_change("problemFilterKey", k, None, "remove") for k in hit]
+    return hit, miss, changes
+
+
 def _tool_manage_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """增/删/查项目配置 common.problemFilterKey（问题过滤关键字）。
 
@@ -3734,52 +3820,20 @@ def _tool_manage_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> An
     pid = runner._project_id()
     config_name = runner.state.config_file_name or DEFAULT_CONFIG_FILE
 
-    def _normalize(raw: Any) -> list[str]:
-        items = raw.split("\n") if isinstance(raw, str) else raw
-        if not isinstance(items, list):
-            return []
-        return [k.strip() for k in items if isinstance(k, str) and k.strip()]
-
-    def _load() -> tuple[dict[str, Any], list[str]]:
-        data = runner._http_get(f"/api/projects/{pid}/config?config={urllib.parse.quote(config_name)}")
-        config = data.get("config")
-        if not isinstance(config, dict):
-            raise AgentToolError("项目配置读取失败")
-        common = config.get("common")
-        if not isinstance(common, dict):
-            common = {}
-            config["common"] = common
-        keys = _normalize(common.get("problemFilterKey", []))
-        # 去重保序
-        return config, list(dict.fromkeys(keys))
-
     if action == "list":
-        _, keys = _load()
+        _, keys = _load_problem_filter_keys(runner, pid, config_name)
         return {"filter_keys": keys, "count": len(keys)}
 
     # keyword 支持单个字符串或字符串数组（一次增删多个）：去重保序、忽略空串
-    raw_keyword = args.get("keyword")
-    if isinstance(raw_keyword, str):
-        keywords = [raw_keyword.strip()]
-    elif isinstance(raw_keyword, list):
-        keywords = [k.strip() for k in raw_keyword if isinstance(k, str)]
-    else:
-        keywords = []
-    keywords = [k for k in dict.fromkeys(keywords) if k]
+    keywords = _parse_filter_keywords(args.get("keyword"))
     if not keywords:
         raise AgentToolError("keyword is required for add/remove（字符串或字符串数组）")
 
-    config, keys = _load()
-    existing = set(keys)
+    config, keys = _load_problem_filter_keys(runner, pid, config_name)
+    hit, miss, changes = _plan_problem_filter(keys, action, keywords)
     if action == "add":
-        hit = [k for k in keywords if k not in existing]  # 实际新增
-        miss = [k for k in keywords if k in existing]  # 本来就有
-        changes = [_change("problemFilterKey", None, k, "add") for k in hit]
         hit_key, miss_key, miss_note = "added", "already_present", "已在列表中"
     else:  # remove
-        hit = [k for k in keywords if k in existing]  # 实际移除
-        miss = [k for k in keywords if k not in existing]  # 本来就没有
-        changes = [_change("problemFilterKey", k, None, "remove") for k in hit]
         hit_key, miss_key, miss_note = "removed", "not_found", "不在列表中"
 
     if not hit:
@@ -3887,21 +3941,18 @@ def _get_config_key(config: dict[str, Any], dotted: str) -> Any:
     return cur
 
 
-def _tool_update_project_config(runner: AgentRunner, args: dict[str, Any]) -> Any:
-    """修改项目配置：读-改-写回（与桌面端「项目配置」页同一通道）。
+def _plan_config_updates(
+    config: dict[str, Any], updates: list[Any]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """把 updates 解析成「要改哪些键、改成什么」（**只读**：在副本上算，不动传入的 config）。
 
-    只允许改已存在的键，防止模型凭空捏造配置项；键名与
-    get_project_overview 返回的 config/config_field_descriptions 一致。"""
-    updates = args.get("updates")
-    if not isinstance(updates, list) or not updates:
-        raise AgentToolError("updates must be a non-empty array of {key, value}")
-    pid = runner._project_id()
-    config_name = runner.state.config_file_name or DEFAULT_CONFIG_FILE
-    data = runner._http_get(f"/api/projects/{pid}/config?config={urllib.parse.quote(config_name)}")
-    config = data.get("config")
-    if not isinstance(config, dict):
-        raise AgentToolError("项目配置读取失败")
-
+    update_project_config 的落盘与审批卡上的「将要变更」预览共用这一份判断：卡上显示的
+    before→after 就是真执行会写下去的东西。在**副本**上跑一遍 _set_config_key，而不是另写
+    一套"这个键存不存在"的判断——展开的点号键 / 短键 / 真嵌套（见 _set_config_key）那套
+    匹配顺序只有一处实现，连"同一个键被改两次时第二条的 before"这种细节也一致。
+    返回（applied, skipped, changes）。
+    """
+    probe = copy.deepcopy(config)
     applied: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     changes: list[dict[str, Any]] = []
@@ -3920,13 +3971,36 @@ def _tool_update_project_config(runner: AgentRunner, args: dict[str, Any]) -> An
             })
             continue
         value = _parse_config_value(item.get("value"))
-        before = _get_config_key(config, key)
-        if _set_config_key(config, key, value):
+        before = _get_config_key(probe, key)
+        if _set_config_key(probe, key, value):
             applied.append({"key": key, "value": value})
             kind = "add" if before is _MISSING else "replace"
             changes.append(_change(key, before if before is not _MISSING else None, value, kind))
         else:
             skipped.append({"key": key, "reason": "配置里不存在该键；只能修改已存在的键"})
+    return applied, skipped, changes
+
+
+def _tool_update_project_config(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """修改项目配置：读-改-写回（与桌面端「项目配置」页同一通道）。
+
+    只允许改已存在的键，防止模型凭空捏造配置项；键名与
+    get_project_overview 返回的 config/config_field_descriptions 一致。"""
+    updates = args.get("updates")
+    if not isinstance(updates, list) or not updates:
+        raise AgentToolError("updates must be a non-empty array of {key, value}")
+    pid = runner._project_id()
+    config_name = runner.state.config_file_name or DEFAULT_CONFIG_FILE
+    data = runner._http_get(f"/api/projects/{pid}/config?config={urllib.parse.quote(config_name)}")
+    config = data.get("config")
+    if not isinstance(config, dict):
+        raise AgentToolError("项目配置读取失败")
+
+    # 先在一份副本上算出「哪些键、改成什么」（与审批卡上的预览同一份判断），
+    # 再把同一批改动打到真 config 上——同一个 _set_config_key、同样顺序。
+    applied, skipped, changes = _plan_config_updates(config, updates)
+    for item in applied:
+        _set_config_key(config, item["key"], item["value"])
 
     if not applied:
         return {"updated": 0, "applied": [], "skipped": skipped or [{"key": "", "reason": "updates 为空"}]}
@@ -3946,14 +4020,14 @@ def _tool_get_name_table(runner: AgentRunner, _args: dict[str, Any]) -> Any:
     return runner._http_get(f"/api/projects/{pid}/name-table")
 
 
-def _tool_save_name_table(runner: AgentRunner, args: dict[str, Any]) -> Any:
-    names = args.get("names", [])
-    if not isinstance(names, list):
-        raise AgentToolError("names must be an array")
-    pid = runner._project_id()
-    old = runner._http_get(f"/api/projects/{pid}/name-table")
-    old_names = [n.get("name") if isinstance(n, dict) else n for n in old.get("names", [])]
-    result = runner._http_post(f"/api/projects/{pid}/name-table/save", {"names": names})
+def _name_table_changes(
+    old_names: list[Any], names: list[Any]
+) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+    """人名表的增删明细（**只算不写**）：返回（新增, 移除, changes）。
+
+    save_name_table 与审批预览共用——整表覆写的写法下，"改了哪几个名字"只有拿旧表比对
+    才看得出来，这份比对只能有一处。
+    """
     old_set = set(map(str, old_names))
     new_set = set(map(str, names))
     added = sorted(new_set - old_set)
@@ -3962,6 +4036,18 @@ def _tool_save_name_table(runner: AgentRunner, args: dict[str, Any]) -> Any:
         *(_change("人名表", None, n, "add") for n in added),
         *(_change("人名表", n, None, "remove") for n in removed),
     ]
+    return added, removed, changes
+
+
+def _tool_save_name_table(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    names = args.get("names", [])
+    if not isinstance(names, list):
+        raise AgentToolError("names must be an array")
+    pid = runner._project_id()
+    old = runner._http_get(f"/api/projects/{pid}/name-table")
+    old_names = [n.get("name") if isinstance(n, dict) else n for n in old.get("names", [])]
+    result = runner._http_post(f"/api/projects/{pid}/name-table/save", {"names": names})
+    added, removed, changes = _name_table_changes(old_names, names)
     return {
         **(result if isinstance(result, dict) else {}),
         "names_added": added,
@@ -4270,6 +4356,210 @@ def _diff_lines(before_text: str, after_text: str, *, context: int = 0, max_line
                 break
             rows.append({"op": "add", "line": line})
     return {"rows": rows, "truncated": truncated}
+
+
+# ---- 审批卡的「将要变更」预览 ----
+# 写类工具真正执行前会挂起等用户批准。那张卡以前只有一句参数摘要，要看"它准备改成什么"
+# 就得先展开工具行的原始 JSON；现在在挂起之前就把 before→after 算出来摆到卡上——用户点的，
+# 就是自己看到的那份 diff。
+#
+# **只读**：只算不写，绝不落盘（写由获批后的 handler 做）。为此每个工具都走"先算出结果、
+# 再决定写"的路子：缓存/字典/人名表在只读计划函数上算，配置在副本上算，项目规范让后端
+# 带 dry_run 算（见 _preview_guideline_write）。也因此预览和真执行是两次独立取数：中间
+# 用户自己改了文件、两条 patch 打同一个 index 这类情况都由真执行那份计划重新算，结果里的
+# changes 才是最终事实。
+#
+# 覆盖范围＝所有"改完有 diff 可看"的写类工具（含 high 档的改配置 / 写规范 / 改问题过滤——
+# 它们同样要用户点允许，同样该看到要改什么）。不在列的都是没有可比对 diff 的：整文件删缓存
+# （delete_transl_cache 不传 indexes 时没有单个文件名可对）、启动翻译、派子代理。
+PREVIEW_TOOLS: frozenset[str] = frozenset({
+    "patch_transl_cache",
+    "delete_transl_cache",
+    "save_dict",
+    "save_name_table",
+    "update_project_config",
+    "manage_problem_filter",
+    "write_project_guideline",
+})
+
+
+def _preview_tool_changes(runner: AgentRunner, name: str, args: dict[str, Any]) -> dict[str, Any] | None:
+    """算「这次调用将要改成什么」（只读），给审批卡提前显示 diff。
+
+    返回的结构与工具结果里那份一致（changes / line_diff / deleted_preview），前端用同一个
+    ChangeListCard 渲染。没有可预览的改动（工具不在 PREVIEW_TOOLS、入参不全、index 没命中、
+    内容其实没变）时返回 None——卡上就只剩摘要，别拿一个空 diff 骗用户。
+    取数失败同样返回 None：预览只是锦上添花，绝不能因此挡住审批。
+    """
+    if name not in PREVIEW_TOOLS:
+        return None
+    try:
+        if name == "patch_transl_cache":
+            return _preview_cache_patch(runner, args)
+        if name == "delete_transl_cache":
+            return _preview_cache_delete(runner, args)
+        if name == "save_dict":
+            return _preview_dict_write(runner, args)
+        if name == "update_project_config":
+            return _preview_config_update(runner, args)
+        if name == "manage_problem_filter":
+            return _preview_problem_filter(runner, args)
+        if name == "write_project_guideline":
+            return _preview_guideline_write(runner, args)
+        return _preview_name_table(runner, args)
+    except Exception as exc:  # noqa: BLE001 - 预览拿不到数据不影响审批流程
+        _log(f"  ⚠ 变更预览失败（{name}）：{exc}")
+        return None
+
+
+def _preview_cache_patch(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
+    """patch_transl_cache 的预览：读条目（不改），按同一份判断算出 before→after。"""
+    filename = str(args.get("filename", "")).strip()
+    patches_raw = args.get("patches")
+    if not filename or not isinstance(patches_raw, list) or not patches_raw:
+        return None
+    pid = runner._project_id()
+    data = runner._http_get(f"/api/projects/{pid}/cache/{urllib.parse.quote(filename)}")
+    entries = data.get("entries", []) if isinstance(data, dict) else []
+    if not isinstance(entries, list):
+        return None
+    planned = _plan_cache_patches(entries, patches_raw, _PATCHABLE_FIELDS)
+    changes = planned["changes"]
+    if not changes:
+        return None
+    out: dict[str, Any] = {"filename": filename, "changes": changes}
+    if planned["not_found"]:
+        out["not_found_indexes"] = sorted(planned["not_found"])
+    return out
+
+
+def _preview_cache_delete(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
+    """delete_transl_cache 的预览（只覆盖"按 index 删条目"；整文件删除没有 diff 可看）。"""
+    filename = str(args.get("filename", "")).strip()
+    index_spec = str(args.get("indexes", "") or "").strip()
+    if not filename or not index_spec:
+        return None
+    wanted = _parse_index_spec(index_spec)
+    if not wanted:
+        return None
+    pid = runner._project_id()
+    data = runner._http_get(f"/api/projects/{pid}/cache/{urllib.parse.quote(filename)}")
+    entries = data.get("entries", []) if isinstance(data, dict) else []
+    if not isinstance(entries, list):
+        return None
+    _, deleted_indexes, previews = _plan_cache_delete(entries, wanted)
+    if not deleted_indexes:
+        return None
+    return {
+        "filename": filename,
+        "deleted_indexes": deleted_indexes,
+        "deleted_preview": previews[:50],
+    }
+
+
+def _preview_dict_write(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
+    """save_dict 的预览：读旧内容 + 按同一份合并规则算新内容，做行级 diff。"""
+    file_key = str(args.get("file_key", "")).strip()
+    if not file_key:
+        return None
+    action = str(args.get("action", "") or "overwrite").strip().lower() or "overwrite"
+    if action not in ("overwrite", "replace", "append", "delete"):
+        return None
+    content = str(args.get("content", ""))
+    if action == "delete" and not _split_dict_incoming(content):
+        return None
+    pid = runner._project_id()
+    cfg = urllib.parse.quote(runner.state.config_file_name)
+    data = runner._http_get(f"/api/projects/{pid}/dictionary/project?config={cfg}")
+    old = (data.get("dict_contents", {}) if isinstance(data, dict) else {}).get(file_key)
+    before_lines = [str(x) for x in old.get("lines", [])] if isinstance(old, dict) else []
+    new_lines, _ = _dict_new_lines(before_lines, content, action)
+    before_text = "\n".join(before_lines)
+    new_text = "\n".join(new_lines)
+    if new_text == before_text:
+        return None
+    return {
+        "file_key": file_key,
+        "action": action,
+        "line_diff": _diff_lines(before_text, new_text),
+    }
+
+
+def _preview_config_update(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
+    """update_project_config 的预览：读配置 + 在副本上算一遍改完的结果（一行都不写回）。"""
+    updates = args.get("updates")
+    if not isinstance(updates, list) or not updates:
+        return None
+    pid = runner._project_id()
+    config_name = runner.state.config_file_name or DEFAULT_CONFIG_FILE
+    data = runner._http_get(f"/api/projects/{pid}/config?config={urllib.parse.quote(config_name)}")
+    config = data.get("config") if isinstance(data, dict) else None
+    if not isinstance(config, dict):
+        return None
+    _, _, changes = _plan_config_updates(config, updates)
+    if not changes:
+        return None
+    return {"changes": changes}
+
+
+def _preview_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
+    """manage_problem_filter 的预览：读现在的清单，算出这次会加/删哪几个关键字。
+
+    只覆盖 add / remove：list 不改任何东西，没有 diff 可看。
+    """
+    action = str(args.get("action", "")).strip()
+    if action not in ("add", "remove"):
+        return None
+    keywords = _parse_filter_keywords(args.get("keyword"))
+    if not keywords:
+        return None
+    pid = runner._project_id()
+    config_name = runner.state.config_file_name or DEFAULT_CONFIG_FILE
+    _, keys = _load_problem_filter_keys(runner, pid, config_name)
+    _, _, changes = _plan_problem_filter(keys, action, keywords)
+    if not changes:
+        return None  # 全都在清单里（或本来就不在）：这次调用不会改变什么
+    return {"changes": changes}
+
+
+def _preview_guideline_write(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
+    """write_project_guideline 的预览：让后端按 dry_run 算一遍"写完会是什么样"，再和现在比。
+
+    三种 mode 的拼接规则（overwrite / append 的空行与结尾换行 / replace 的命中唯一性）只在
+    ProjectGuideline.apply_project_guideline_edit 那一份实现里——在 Agent 侧重算一遍就是
+    第二份，早晚对不上。所以预览也走那个入口，只是带 dry_run（服务端算完就走，不落盘）：
+    连 replace 没命中、超长这类校验结果都跟真执行一致。
+    """
+    mode = str(args.get("mode", "") or "").strip()
+    if mode not in ("overwrite", "append", "replace"):
+        return None
+    endpoint = f"/api/projects/{runner._project_id()}/guideline"
+    before = str((runner._http_get(endpoint) or {}).get("content") or "")
+    preview = runner._http_put(endpoint, {
+        "mode": mode,
+        "content": str(args.get("content", "") or ""),
+        "old_text": str(args.get("old_text", "") or ""),
+        "new_text": str(args.get("new_text", "") or ""),
+        "dry_run": True,
+    })
+    after = str((preview or {}).get("content") or "") if isinstance(preview, dict) else ""
+    if not after or after == before:
+        return None  # 内容没变（如 append 一段已有的文字）：没有 diff 可显示
+    return {"changed": True, "line_diff": _diff_lines(before, after)}
+
+
+def _preview_name_table(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
+    """save_name_table 的预览：拿旧表比出增删（整表覆写，不比对就看不出改了什么）。"""
+    names = args.get("names", [])
+    if not isinstance(names, list):
+        return None
+    pid = runner._project_id()
+    old = runner._http_get(f"/api/projects/{pid}/name-table")
+    old_names = [n.get("name") if isinstance(n, dict) else n for n in old.get("names", [])]
+    _, _, changes = _name_table_changes(old_names, names)
+    if not changes:
+        return None
+    return {"changes": changes}
 
 
 def _split_problem_types(problem: str) -> list[str]:
@@ -4786,12 +5076,12 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
 # patch_transl_cache 允许更新的条目字段白名单（其余字段一律不动，避免误改 problem/preview
 # 等派生字段）。trans_by 不在这里：它是"谁改的"标记，由工具自动填成本会话的模型名，
 # 不能让模型自己声明（写 "manual" 这种会把"翻译引擎翻的"和"Agent 改的"混起来）。
-_PATCHABLE_FIELDS = {
+_PATCHABLE_FIELDS: frozenset[str] = frozenset({
     "pre_dst",
     "proofread_dst",
     # 存疑内容也算可改：校对子代理写下意见、主 Agent 改完译文后要能把它清掉（或改写）
     "doub_content",
-}
+})
 
 # "改了译文"的那两个字段：只有它们被改过才给条目盖 trans_by（谁改的）；只写校对意见不算
 _TRANSLATION_FIELDS: frozenset[str] = frozenset({"pre_dst", "proofread_dst"})
@@ -4849,6 +5139,68 @@ def _agent_model_name(runner: AgentRunner) -> str:
     return str(_backend_summary(profile, name).get("model") or "")
 
 
+def _plan_cache_patches(
+    entries: list[Any], patches_raw: list[Any], allowed: frozenset[str]
+) -> dict[str, Any]:
+    """把 patches 解析成「要改哪些条目的哪些字段」（**只读**，不动 entries）。
+
+    patch_transl_cache 的落盘与审批卡上的「将要变更」预览共用这一份判断：卡上给用户看的
+    before→after 就是真执行会写下去的东西，不会两边各算一遍再漂移。调用方拿到 plan 后
+    自己逐条 entry.update(updates) 才算写。返回：
+    - by_index：index → 条目（handler 盖章 trans_by 时要用）
+    - plan：[{entry, index, updates}]，按顺序应用
+    - changes / skipped / not_found：与原来逐条累积出来的字段一致
+    """
+    by_index: dict[int, dict[str, Any]] = {}
+    for e in entries:
+        idx = e.get("index")
+        if idx is not None:
+            try:
+                by_index[int(idx)] = e
+            except (TypeError, ValueError):
+                continue
+
+    plan: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    not_found: list[int] = []
+    changes: list[dict[str, Any]] = []
+    # 同一个 index 被两条 patch 命中时，第二条的 before 要看见第一条的结果（真执行是逐条
+    # entry.update），所以在影子副本上模拟同样的链式修改，算出来的 diff 才一致。
+    shadow: dict[int, dict[str, Any]] = {}
+    for p in patches_raw:
+        if not isinstance(p, dict):
+            skipped.append({"index": None, "reason": "patch 不是对象"})
+            continue
+        idx = p.get("index")
+        try:
+            idx_i = int(idx)
+        except (TypeError, ValueError):
+            skipped.append({"index": idx, "reason": "index 不是整数"})
+            continue
+        entry = by_index.get(idx_i)
+        if entry is None:
+            not_found.append(idx_i)
+            continue
+        updates = {k: v for k, v in p.items() if k in allowed and v is not None}
+        if not updates:
+            skipped.append(
+                {"index": idx_i, "reason": f"无可更新字段（只允许 {_patchable_fields_text(allowed)}）"}
+            )
+            continue
+        now = shadow.setdefault(idx_i, dict(entry))
+        for f, v in updates.items():
+            changes.append(_change(f"#{idx_i}.{f}", now.get(f), v, "replace"))
+            now[f] = v
+        plan.append({"entry": entry, "index": idx_i, "updates": updates})
+    return {
+        "by_index": by_index,
+        "plan": plan,
+        "changes": changes,
+        "skipped": skipped,
+        "not_found": not_found,
+    }
+
+
 def _tool_patch_transl_cache(
     runner: AgentRunner, args: dict[str, Any], allowed_fields: frozenset[str] | None = None
 ) -> Any:
@@ -4874,46 +5226,19 @@ def _tool_patch_transl_cache(
     entries = data.get("entries", [])
     if not isinstance(entries, list):
         raise AgentToolError("缓存文件 entries 非数组，无法 patch")
-    by_index: dict[int, dict[str, Any]] = {}
-    for e in entries:
-        idx = e.get("index")
-        if idx is not None:
-            try:
-                by_index[int(idx)] = e
-            except (TypeError, ValueError):
-                continue
 
+    planned = _plan_cache_patches(entries, patches_raw, allowed)
+    by_index = planned["by_index"]
+    skipped = planned["skipped"]
+    not_found = planned["not_found"]
+    changes = planned["changes"]
     applied_indexes: list[int] = []
     retranslated_indexes: list[int] = []
-    skipped: list[dict[str, Any]] = []
-    not_found: list[int] = []
-    changes: list[dict[str, Any]] = []
-    for p in patches_raw:
-        if not isinstance(p, dict):
-            skipped.append({"index": None, "reason": "patch 不是对象"})
-            continue
-        idx = p.get("index")
-        try:
-            idx_i = int(idx)
-        except (TypeError, ValueError):
-            skipped.append({"index": idx, "reason": "index 不是整数"})
-            continue
-        entry = by_index.get(idx_i)
-        if entry is None:
-            not_found.append(idx_i)
-            continue
-        updates = {k: v for k, v in p.items() if k in allowed and v is not None}
-        if not updates:
-            skipped.append(
-                {"index": idx_i, "reason": f"无可更新字段（只允许 {_patchable_fields_text(allowed)}）"}
-            )
-            continue
-        for f, v in updates.items():
-            changes.append(_change(f"#{idx_i}.{f}", entry.get(f), v, "replace"))
-        entry.update(updates)
-        applied_indexes.append(idx_i)
-        if updates.keys() & _TRANSLATION_FIELDS:
-            retranslated_indexes.append(idx_i)
+    for item in planned["plan"]:
+        item["entry"].update(item["updates"])
+        applied_indexes.append(item["index"])
+        if item["updates"].keys() & _TRANSLATION_FIELDS:
+            retranslated_indexes.append(item["index"])
 
     if not applied_indexes:
         # 把跳过原因带上：否则模型只看到"没有条目被更新"，不知道是字段不许改还是 index 写错了
@@ -4979,6 +5304,34 @@ def _tool_patch_transl_cache(
     return result
 
 
+def _plan_cache_delete(
+    entries: list[Any], wanted: set[int]
+) -> tuple[list[Any], list[int], list[dict[str, Any]]]:
+    """按 index 挑出要删的条目（**只读**）：返回（保留的条目、命中的 index、被删条目的预览）。
+
+    delete_transl_cache 的落盘与审批卡上的「将要变更」预览共用这一份挑选：卡上列出的
+    "会删掉哪几条、删的是什么"就是真执行会删的那些。
+    """
+    kept: list[Any] = []
+    deleted_indexes: list[int] = []
+    previews: list[dict[str, Any]] = []
+    for e in entries:
+        try:
+            idx = int(e.get("index"))
+        except (TypeError, ValueError):
+            kept.append(e)
+            continue
+        if idx in wanted:
+            deleted_indexes.append(idx)
+            preview = str(e.get("pre_dst", "") or e.get("post_dst", "") or "")
+            if len(preview) > 60:
+                preview = preview[:57] + "…"
+            previews.append({"index": idx, "text": preview})
+        else:
+            kept.append(e)
+    return kept, deleted_indexes, previews
+
+
 def _tool_delete_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """删除缓存：物理删除条目后，重启翻译时这些句子会 cache 未命中而重新翻译。
 
@@ -5016,23 +5369,7 @@ def _tool_delete_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     if not isinstance(entries, list):
         raise AgentToolError("缓存文件 entries 非数组，无法删除")
 
-    kept: list[dict[str, Any]] = []
-    deleted_indexes: list[int] = []
-    deleted_previews: list[dict[str, Any]] = []
-    for e in entries:
-        try:
-            idx = int(e.get("index"))
-        except (TypeError, ValueError):
-            kept.append(e)
-            continue
-        if idx in wanted:
-            deleted_indexes.append(idx)
-            preview = str(e.get("pre_dst", "") or e.get("post_dst", "") or "")
-            if len(preview) > 60:
-                preview = preview[:57] + "…"
-            deleted_previews.append({"index": idx, "text": preview})
-        else:
-            kept.append(e)
+    kept, deleted_indexes, deleted_previews = _plan_cache_delete(entries, wanted)
 
     if not deleted_indexes:
         raise AgentToolError(f"没有命中的条目（文件共 {len(entries)} 条，请求 index：{sorted(wanted)}）")

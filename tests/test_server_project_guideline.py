@@ -109,6 +109,25 @@ class ProjectGuidelineApiTests(unittest.TestCase):
         error = self._put_expect_400({"mode": "prepend", "content": "x"})
         self.assertIn("mode", error)
 
+    def test_dry_run_returns_the_new_text_without_writing(self) -> None:
+        """dry_run=1 是给 Agent 审批卡提前看 diff 用的：算出"会落盘的那份"就返回，不写文件。"""
+        self._put({"mode": "overwrite", "content": "原有"})
+
+        out = self._put({"mode": "append", "content": "新增", "dry_run": True})
+
+        self.assertTrue(out["dry_run"])
+        self.assertIn("原有", out["content"])
+        self.assertIn("新增", out["content"])
+        self.assertEqual(self._get()["content"], "原有")  # 文件一个字都没变
+
+    def test_dry_run_still_validates(self) -> None:
+        """校验照走：dry_run 下 replace 没命中一样 400，也不会留下文件。"""
+        error = self._put_expect_400(
+            {"mode": "replace", "old_text": "不存在", "new_text": "x", "dry_run": True}
+        )
+        self.assertIn("没有找到", error)
+        self.assertFalse(self._get()["exists"])
+
 
 if __name__ == "__main__":
     unittest.main()

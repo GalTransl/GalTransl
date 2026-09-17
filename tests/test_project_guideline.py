@@ -102,6 +102,36 @@ class ProjectGuidelineTests(unittest.TestCase):
             apply_project_guideline_edit(self.project, mode="replace", old_text="a", new_text="b")
         self.assertFalse(os.path.isfile(project_guideline_path(self.project)))
 
+    # ---- dry_run：只算不写（Agent 审批卡提前看 diff 用） ----
+
+    def test_dry_run_returns_the_new_text_and_writes_nothing(self) -> None:
+        apply_project_guideline_edit(self.project, mode="overwrite", content="原有")
+
+        res = apply_project_guideline_edit(self.project, mode="append", content="新增", dry_run=True)
+
+        self.assertTrue(res["dry_run"])
+        self.assertIn("原有", res["content"])
+        self.assertIn("新增", res["content"])
+        self.assertEqual(res["length"], len(res["content"]))
+        # 文件一个字都没动（真写的下一次才发生）
+        self.assertEqual(read_project_guideline(self.project), "原有")
+
+    def test_dry_run_creates_no_file_when_there_was_none(self) -> None:
+        res = apply_project_guideline_edit(self.project, mode="overwrite", content="新建", dry_run=True)
+
+        self.assertTrue(res["created"])
+        self.assertEqual(res["content"], "新建")
+        self.assertFalse(os.path.isfile(project_guideline_path(self.project)))
+
+    def test_dry_run_still_validates(self) -> None:
+        apply_project_guideline_edit(self.project, mode="overwrite", content="哥哥 … 哥哥")
+        with self.assertRaises(ValueError) as ctx:
+            apply_project_guideline_edit(
+                self.project, mode="replace", old_text="哥哥", new_text="兄长", dry_run=True
+            )
+        self.assertIn("2 次", str(ctx.exception))
+        self.assertEqual(read_project_guideline(self.project), "哥哥 … 哥哥")
+
     def test_bad_mode_and_empty_append_and_size_guard(self) -> None:
         with self.assertRaises(ValueError):
             apply_project_guideline_edit(self.project, mode="prepend", content="x")

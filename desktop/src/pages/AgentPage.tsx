@@ -186,12 +186,9 @@ const TRANSIENT_EVENT_TYPES = new Set<AgentEvent['type']>([
   'compacting',
   // 队列快照（排队消息的实时变更）同理：不进转录、不进缓存
   'queue',
-  // 子代理的逐步活动：一次派 16 个、每个十几轮，存进缓存会把转录撑爆。只走实时流，
-  // 刷新后由子代理的 start/done 两个事件重建（那两条是持久的）
-  'subagent_message',
-  'subagent_tool_call',
-  'subagent_tool_result',
-  'subagent_retry',
+  // 子代理的逐步活动**不在这里**：它们同样是瞬态的（后端不进内存 events 窗口），但后端
+  // 会把它落盘、转录回放时会带上（见后端 _SUBAGENT_STEP_EVENTS）。放进这个集合就等于
+  // 重建时把它们全过滤掉——切页/刷新后展开子代理就只剩 start/done 两条了。
 ]);
 
 function persistedTranscriptEvents(events: AgentEvent[]): AgentEvent[] {
@@ -248,6 +245,9 @@ type ActivityItem = {
     risk: string;
     mode: string;
     arguments?: Record<string, unknown>;
+    // 「将要变更」预览：后端在挂起前算好的 before→after（只读算出来的，不是执行结果）。
+    // 结构与工具结果里那份一致，交给 extractChangeList 认（见 PermissionCard）。
+    preview?: unknown;
   };
   // 流式 content/reasoning：正在收 delta、还没收到对应的 *_end
   streaming?: boolean;
@@ -548,6 +548,8 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
           ev.arguments && typeof ev.arguments === 'object' && !Array.isArray(ev.arguments)
             ? (ev.arguments as Record<string, unknown>)
             : undefined,
+        // 后端算好的「将要变更」（编辑类工具才有；算不出就没有这个键）
+        preview: ev.preview,
       };
       continue;
     }
@@ -3703,7 +3705,13 @@ function AskUserCard({
    （只对这个工具、只在这个会话）/ 拒绝。**没有倒计时、也不会自动拒绝**：后端不设超时，
    不点就一直等着（刷新、切走再回来卡片都还在）；要收场就点三个按钮之一，或者点停止
    让整个回合收尾。拒绝会让模型收到一条"用户拒绝权限"的工具错误（可附你填的原因），
-   它据此换策略——而不是把"没执行"当成"执行成功"。 */
+   它据此换策略——而不是把"没执行"当成"执行成功"。
+
+   卡上还会带上「将要变更」：后端在挂起前就用同一套规则把 before→after 算好了
+   （见后端的 _preview_tool_changes，只读、不落盘），写类工具（改译文数据、改项目配置、
+   改问题过滤、写项目规范）因此不必先展开工具行的原始参数才敢点允许——你看到的就是这次
+   要写下去的东西。算不出来（整文件删缓存、启动翻译、派子代理这些没有可比对的 diff）
+   就没有这块，卡片只给摘要。 */
 
 function PermissionCard({
   item,
@@ -3745,6 +3753,8 @@ function PermissionCard({
   const detail = [PERMISSION_MODE_LABELS[normalizePermissionMode(perm.mode)], summary]
     .filter(Boolean)
     .join(' · ');
+  // 「将要变更」（后端只读算出来的 diff）：认不出来就是没有——卡上不给空壳。
+  const preview = extractChangeList(perm.preview);
 
   return (
     <section className="agent-perm" aria-label={`权限请求：${toolLabel}`}>
@@ -3761,6 +3771,8 @@ function PermissionCard({
       <p className="agent-perm__lead">允许「{toolLabel}」运行吗？</p>
       <p className="agent-perm__meta">{detail}</p>
       {reason ? <p className="agent-perm__reason">原因：{reason}</p> : null}
+      {/* 将要变更：摆在这一屏里而不是藏在工具行的展开里——用户要点的就是这个 */}
+      {preview ? <ChangeListCard data={preview} title="将要变更" /> : null}
       {error ? <div className="agent-perm__error">{error}</div> : null}
       <div className="agent-perm__foot">
         <button
@@ -4064,16 +4076,19 @@ function ToolRow({
   const isRunning = phase === 'running';
   const subagents = item.subagents ?? [];
   const hasSubagents = subagents.length > 0;
+  // 正等批准时后端已经算好的「将要变更」（审批卡上摆的那份，见 PermissionCard）：
+  // 有它就不必为了"它准备改什么"把这一行撑开去铺原始 JSON。
+  const permPreview = awaiting ? extractChangeList(item.permission?.preview) : null;
 
   // 行**默认展开**的三种情形：
   // 1) 已有变更卡 —— 改了什么是这次调用的重点，diff 不该藏在一次点击后面；
   // 2) 有 reason 却没有变更卡（create_dict_file 之类不产生 changes）——理由也该直接可见；
-  // 3) **正等着批准的调用** —— 这时还没有结果、也没有变更卡，用户要看的恰恰是"它准备改什么"，
-  //    参数就在这一行里。批完之后结果一到，diff 卡出现、原始参数收进折叠菜单，这一行自然
-  //    回到"只看 diff"（见 foldRaw）。
+  // 3) **正等着批准、但算不出 diff 的调用** —— 整文件删缓存、启动翻译、派子代理这类没有
+  //    可比对的 before→after，用户要判断就只能看原始参数，那还是替它铺开（能算 diff 的
+  //    都摆在审批卡上了，这一行不必再展开一次）。
   // manualOpenState 里只记"用户手动点过"的选择——记过就听用户的，没记过才用这个默认值
   // （重挂/刷新后同一规则）。
-  const autoOpen = Boolean(changeList || reason) || awaiting || hasSubagents;
+  const autoOpen = Boolean(changeList || reason) || hasSubagents || (awaiting && !permPreview);
   const [open, setOpenRaw] = useState(() => manualOpenState.get(stateKey) ?? autoOpen);
   const setOpen = (value: boolean | ((prev: boolean) => boolean)) => {
     setOpenRaw((prev) => {
@@ -4301,7 +4316,10 @@ function RawToolData({
    - changes: [{path, before, after, kind}] —— update_project_config、
      manage_problem_filter、patch_transl_cache、save_name_table
    - line_diff: {rows, truncated} —— save_dict 的整文本行级 diff
-   - deleted_preview: [{index, text}] —— delete_transl_cache 被删条目 */
+   - deleted_preview: [{index, text}] —— delete_transl_cache 被删条目
+
+   审批卡上的「将要变更」用的是**同一份结构**（后端在挂起前只读算出来，见
+   _preview_tool_changes），所以两处共用这一个渲染，没有第二套 diff 视图。 */
 
 type ChangeEntry = { path: string; before?: unknown; after?: unknown; kind?: string };
 type DiffRow = { op: 'add' | 'del'; line: string };
@@ -4366,14 +4384,15 @@ function ChangeReason({ text }: { text: string }) {
   );
 }
 
-function ChangeListCard({ data }: { data: ChangeData }) {
-  const [showAll, setShowAll] = useState(false);
+/** 变更卡。title 只有审批卡会换（那边的同一份数据是"将要变更"，还没真写）。 */
+function ChangeListCard({ data, title = '变更' }: { data: ChangeData; title?: string }) {
   const rows: ReactNode[] = [];
 
   if (data.line_diff?.rows?.length) {
+    // diff 全量渲染、不再折叠：容器限高 + 内部滚动（见 .agent-changes__body 的
+    // max-height）。改了什么应当一眼看完，不该先点一次"展开全部"。
     const diffRows = data.line_diff.rows;
-    const shown = showAll ? diffRows : diffRows.slice(0, 40);
-    for (const [i, r] of shown.entries()) {
+    for (const [i, r] of diffRows.entries()) {
       rows.push(
         <div key={`d-${i}`} className={`agent-changes__dline agent-changes__dline--${r.op}`}>
           <span className="agent-changes__sign">{r.op === 'add' ? '+' : '−'}</span>
@@ -4381,15 +4400,9 @@ function ChangeListCard({ data }: { data: ChangeData }) {
         </div>,
       );
     }
-    if (data.line_diff.truncated && showAll) {
+    if (data.line_diff.truncated) {
+      // 后端生成 diff 时就截断过（总行数上限），如实说明，不是界面的折叠
       rows.push(<div key="d-trunc" className="agent-changes__more">diff 过长已截断</div>);
-    }
-    if (diffRows.length > 40 && !showAll) {
-      rows.push(
-        <button key="d-more" type="button" className="agent-changes__morebtn" onClick={() => setShowAll(true)}>
-          展开全部 {diffRows.length} 行 diff
-        </button>,
-      );
     }
   }
 
@@ -4430,7 +4443,7 @@ function ChangeListCard({ data }: { data: ChangeData }) {
   return (
     <div className="agent-changes">
       <div className="agent-changes__head">
-        <span className="agent-changes__title">变更</span>
+        <span className="agent-changes__title">{title}</span>
         <span className="agent-changes__count">±{data.total}</span>
       </div>
       {data.reason ? <ChangeReason text={data.reason} /> : null}

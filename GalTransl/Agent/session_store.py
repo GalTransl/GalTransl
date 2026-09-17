@@ -39,6 +39,17 @@ TITLE_MAX_CHARS = 30
 # 转录回放时跳过的事件类型：瞬态数据（流式增量、等待倒计时、上下文用量指标），
 # 它们不进 events deque 也不该出现在重建出来的转录里
 _SKIP_TRANSCRIPT_TYPES = frozenset({"content_delta", "reasoning_delta", "wait_tick", "context_usage"})
+# 子代理的逐步活动（与 runtime._SUBAGENT_STEP_EVENTS 对应；这里不 import runtime——
+# 那个模块 import 本模块）。它们虽然落盘，但回放时**不占主转录窗口**：一次派 16 个、
+# 每个十几轮能占上千条，塞进 tail 会把对话挤出 maxlen，回放出来只剩子代理动作。
+_SUBAGENT_STEP_TYPES = frozenset({
+    "subagent_message",
+    "subagent_tool_call",
+    "subagent_tool_result",
+    "subagent_retry",
+})
+# 回放时每个子代理最多保留多少步（够展开看它干了什么，又不至于撑爆转录）
+SUBAGENT_STEP_REPLAY_LIMIT = 60
 # 一次最多回放多少条转录事件（超出只保留最早的 user_message + 最近这段）
 TRANSCRIPT_MAX_EVENTS = 2000
 
@@ -506,6 +517,8 @@ def read_transcript(project_dir: str, session_id: str, limit: int = TRANSCRIPT_M
     if not os.path.isfile(path):
         return []
     tail: deque[dict[str, Any]] = deque(maxlen=max(1, limit))
+    # 子代理的逐步活动单独攒、每行限流：它们不占主转录窗口（见 _SUBAGENT_STEP_TYPES）
+    sub_steps: dict[str, deque[dict[str, Any]]] = {}
     messages: list[dict[str, Any]] = []
     first_user: dict[str, Any] | None = None
     try:
@@ -528,11 +541,24 @@ def read_transcript(project_dir: str, session_id: str, limit: int = TRANSCRIPT_M
                     continue
                 if ev.get("type") == "user_message" and first_user is None:
                     first_user = ev
+                if ev.get("type") in _SUBAGENT_STEP_TYPES:
+                    key = str(ev.get("id") or "")
+                    bucket = sub_steps.get(key)
+                    if bucket is None:
+                        bucket = deque(maxlen=SUBAGENT_STEP_REPLAY_LIMIT)
+                        sub_steps[key] = bucket
+                    bucket.append(ev)
+                    continue
                 tail.append(ev)
     except Exception as exc:  # noqa: BLE001
         _log(f"读取转录失败 {path}: {exc}")
         return []
     events = _restore_tool_results(list(tail), messages)
+    if sub_steps:
+        # 按 step 把子代理的步骤插回原来的时间位置（start/done 仍在 tail 里）
+        merged = events + [step for bucket in sub_steps.values() for step in bucket]
+        merged.sort(key=lambda item: item.get("step") or 0)
+        events = merged
     if first_user is not None and (not events or events[0] is not first_user):
         events.insert(0, first_user)
     return events

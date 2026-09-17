@@ -55,20 +55,23 @@ def run_gate(
     *,
     dispatch: bool = False,
     reason: str | None = None,
+    args: dict | None = None,
 ) -> dict:
     """子线程里跑一次门禁（或整条 _dispatch_tool），等它挂起后作答。
 
     decision=None 表示只等挂起、不作答（用于测校验分支）。reason 是"拒绝原因"，
-    跟着答复一起送（见 resolve_permission）。返回 {ok/error/alive}。
+    跟着答复一起送（见 resolve_permission）。args 换掉默认入参（要触发预览的用例
+    得给全 patches / content 这些）。返回 {ok/error/alive}。
     """
     out: dict = {}
+    call_args = args if args is not None else {"filename": "a.json", "reason": "试试"}
 
     def target() -> None:
         try:
             if dispatch:
-                runner._dispatch_tool(name, {"filename": "a.json", "reason": "试试"})
+                runner._dispatch_tool(name, call_args)
             else:
-                runner._require_permission(name, {"filename": "a.json", "reason": "试试"})
+                runner._require_permission(name, call_args)
             out["ok"] = True
         except Exception as exc:  # noqa: BLE001
             out["error"] = exc
@@ -530,6 +533,316 @@ class PermissionDispatchTests(unittest.TestCase):
             out2 = run_gate(runner, "patch_transl_cache", "allow-once", dispatch=True)
             self.assertTrue(out2["ok"], out2.get("error"))
             self.assertEqual(called, ["ran"])
+
+
+class _PreviewRunner:
+    """预览用的只读替身：给 `_http_get` 备好缓存/字典/人名表/配置/规范，并记录有没有人写过。
+
+    预览必须只读——`_http_post` 与不带 dry_run 的 `_http_put` 只会被记下来（测试断言它们
+    一直是空的），落盘与否由获批后的 handler 决定。唯一的例外是项目规范：预览也走那个
+    PUT 入口，靠服务端 dry_run 保证不落盘，所以这里单独记 dry_runs（并回一份预设的
+    "会写成什么样"）。
+    """
+
+    def __init__(self, *, cache=None, dict_contents=None, names=None, config=None, guideline="", guideline_after=""):
+        self.state = SimpleNamespace(config_file_name="config.yaml", project_dir=r"C:\proj")
+        self.cache = cache or {}
+        self.dict_contents = dict_contents or {}
+        self.names = names or []
+        self.config = config if config is not None else {}
+        self.guideline = guideline
+        # 真服务端由 apply_project_guideline_edit(dry_run) 算出这份文本，替身里直接给
+        self.guideline_after = guideline_after
+        self.writes: list[str] = []
+        self.dry_runs: list[str] = []
+
+    def _project_id(self) -> str:
+        return "proj"
+
+    def _http_get(self, url: str):
+        if url.endswith("/name-table"):
+            return {"names": self.names}
+        if url.endswith("/guideline"):
+            return {"content": self.guideline}
+        if "/dictionary/project" in url:
+            return {"dict_contents": self.dict_contents}
+        if "?config=" in url:  # /config?config=...（字典那条也带 config 查询，所以放它后面）
+            return {"config": self.config}
+        for name, entries in self.cache.items():
+            if url.endswith(f"/cache/{name}"):
+                return {"entries": [dict(e) for e in entries]}
+        raise AssertionError(f"预览不该读这个地址：{url}")
+
+    def _http_post(self, url: str, _body):
+        self.writes.append(url)
+        return {}
+
+    def _http_put(self, url: str, body):
+        if body.get("dry_run"):
+            self.dry_runs.append(url)
+            return {"dry_run": True, "content": self.guideline_after}
+        self.writes.append(url)
+        return {}
+
+
+class PermissionPreviewTests(unittest.TestCase):
+    """审批卡的「将要变更」：挂起前只读算出 before→after，且绝不落盘。
+
+    预览与真执行**共用同一批计划函数**（_plan_cache_patches / _plan_cache_delete /
+    _dict_new_lines / _name_table_changes），所以这里钉的是"两边口径完全一致"，
+    而不是另写一份 diff 算法去对答案。
+    """
+
+    # ---- 缓存：patch ----
+
+    def test_patch_preview_shows_before_after_without_writing(self) -> None:
+        runner = _PreviewRunner(cache={"a.json": [{"index": 33, "pre_dst": "旧译文"}]})
+
+        preview = rt._preview_tool_changes(
+            runner, "patch_transl_cache", {"filename": "a.json", "patches": [{"index": 33, "pre_dst": "新译文"}]}
+        )
+
+        self.assertEqual(preview["filename"], "a.json")
+        self.assertEqual(preview["changes"][0]["path"], "#33.pre_dst")
+        self.assertEqual(preview["changes"][0]["before"], "旧译文")
+        self.assertEqual(preview["changes"][0]["after"], "新译文")
+        self.assertEqual(runner.writes, [])  # 只读：一个字都没写
+
+    def test_patch_preview_matches_what_the_real_run_writes(self) -> None:
+        """同一条 index 被两条 patch 命中时，第二条的 before 也要是第一条的 after。"""
+        args = {
+            "filename": "a.json",
+            "patches": [{"index": 7, "pre_dst": "B"}, {"index": 7, "pre_dst": "C"}],
+        }
+        preview = rt._preview_tool_changes(
+            _PreviewRunner(cache={"a.json": [{"index": 7, "pre_dst": "A"}]}), "patch_transl_cache", args
+        )
+        real = rt._tool_patch_transl_cache(
+            _PreviewRunner(cache={"a.json": [{"index": 7, "pre_dst": "A"}]}), args
+        )
+
+        self.assertEqual([c["before"] for c in preview["changes"]], ["A", "B"])
+        self.assertEqual([c["after"] for c in preview["changes"]], ["B", "C"])
+        self.assertEqual(preview["changes"], real["changes"])
+
+    def test_patch_preview_skipped_when_nothing_would_change(self) -> None:
+        runner = _PreviewRunner(cache={"a.json": [{"index": 1, "pre_dst": "x"}]})
+        # index 不存在 / 字段不在白名单 / 工具没给 patches：都没有 diff 可显示
+        for args in (
+            {"filename": "a.json", "patches": [{"index": 99, "pre_dst": "y"}]},
+            {"filename": "a.json", "patches": [{"index": 1, "trans_by": "我"}]},
+            {"filename": "a.json"},
+        ):
+            self.assertIsNone(rt._preview_tool_changes(runner, "patch_transl_cache", args), args)
+
+    # ---- 缓存：按 index 删除 ----
+
+    def test_delete_preview_lists_the_entries_that_go_away(self) -> None:
+        runner = _PreviewRunner(
+            cache={"a.json": [{"index": 1, "pre_dst": "留下"}, {"index": 2, "pre_dst": "删掉我"}]}
+        )
+
+        preview = rt._preview_tool_changes(
+            runner, "delete_transl_cache", {"filename": "a.json", "indexes": "2"}
+        )
+
+        self.assertEqual(preview["deleted_indexes"], [2])
+        self.assertEqual(preview["deleted_preview"], [{"index": 2, "text": "删掉我"}])
+        self.assertEqual(runner.writes, [])
+
+    def test_delete_preview_absent_for_whole_file_delete(self) -> None:
+        runner = _PreviewRunner(cache={"a.json": [{"index": 1, "pre_dst": "x"}]})
+        # 整文件删除没有可比对的 diff：卡上退回摘要，也不去读缓存
+        self.assertIsNone(
+            rt._preview_tool_changes(runner, "delete_transl_cache", {"filename": "a.json"})
+        )
+
+    # ---- 字典 ----
+
+    def test_dict_preview_diffs_lines_and_matches_the_real_run(self) -> None:
+        before = ["旧词\told", "重复\tdup"]
+        args = {"file_key": "pre.json", "action": "append", "content": "重复\tdup\n新词\tnew"}
+        contents = {"pre.json": {"lines": before}}
+
+        preview = rt._preview_tool_changes(_PreviewRunner(dict_contents=contents), "save_dict", args)
+        real = rt._tool_save_dict(_PreviewRunner(dict_contents=contents), args)
+
+        self.assertEqual([r["op"] for r in preview["line_diff"]["rows"]], ["add"])
+        self.assertEqual(preview["line_diff"], real["line_diff"])
+        # 已存在的 key 不重复追加（append 的合并规则与真执行同一份）
+        self.assertIn("新词\tnew", preview["line_diff"]["rows"][0]["line"])
+
+    def test_dict_preview_absent_when_content_is_unchanged(self) -> None:
+        runner = _PreviewRunner(dict_contents={"pre.json": {"lines": ["同\tsame"]}})
+        self.assertIsNone(
+            rt._preview_tool_changes(
+                runner, "save_dict", {"file_key": "pre.json", "action": "overwrite", "content": "同\tsame"}
+            )
+        )
+
+    # ---- 人名表 ----
+
+    def test_name_table_preview_lists_added_and_removed(self) -> None:
+        runner = _PreviewRunner(names=[{"name": "旧名"}, {"name": "留着"}])
+
+        preview = rt._preview_tool_changes(
+            runner, "save_name_table", {"names": ["留着", "新名"]}
+        )
+
+        self.assertEqual(
+            [(c["kind"], c["before"], c["after"]) for c in preview["changes"]],
+            [("add", None, "新名"), ("remove", "旧名", None)],
+        )
+        self.assertEqual(runner.writes, [])
+
+    # ---- 项目配置（high 档也要提前看 diff） ----
+
+    def test_config_preview_shows_key_before_after_and_matches_the_real_run(self) -> None:
+        config = {"common": {"gpt": {"contextNum": 8}}}
+        args = {"updates": [{"key": "common.gpt.contextNum", "value": 12}]}
+
+        preview = rt._preview_tool_changes(_PreviewRunner(config=config), "update_project_config", args)
+        real = rt._tool_update_project_config(_PreviewRunner(config=config), args)
+
+        self.assertEqual(
+            [(c["path"], c["before"], c["after"]) for c in preview["changes"]],
+            [("common.gpt.contextNum", 8, 12)],
+        )
+        self.assertEqual(preview["changes"], real["changes"])
+
+    def test_config_preview_chains_two_updates_on_the_same_key(self) -> None:
+        """同一个键改两次：第二条的 before 要是第一条的 after（真执行是逐条写下去的）。"""
+        config = {"common": {"gpt": {"contextNum": 8}}}
+        args = {
+            "updates": [
+                {"key": "common.gpt.contextNum", "value": 12},
+                {"key": "common.gpt.contextNum", "value": 16},
+            ]
+        }
+
+        preview = rt._preview_tool_changes(_PreviewRunner(config=config), "update_project_config", args)
+
+        self.assertEqual([(c["before"], c["after"]) for c in preview["changes"]], [(8, 12), (12, 16)])
+
+    def test_config_preview_absent_when_no_key_would_change(self) -> None:
+        config = {"common": {"gpt": {"contextNum": 8}}}
+        runner = _PreviewRunner(config=config)
+        for updates in (
+            [{"key": "common.gpt.madeUpKey", "value": 1}],  # 配置里不存在
+            [],  # 空 updates
+        ):
+            self.assertIsNone(
+                rt._preview_tool_changes(runner, "update_project_config", {"updates": updates}), updates
+            )
+
+    # ---- 问题过滤 ----
+
+    def test_problem_filter_preview_lists_added_keys_and_matches_the_real_run(self) -> None:
+        config = {"common": {"problemFilterKey": ["残留日文"]}}
+        args = {"action": "add", "keyword": ["残留日文", "标点错漏"]}
+
+        preview = rt._preview_tool_changes(_PreviewRunner(config=config), "manage_problem_filter", args)
+        real = rt._tool_manage_problem_filter(_PreviewRunner(config=config), args)
+
+        # 已在清单里的那个不算改动，卡上只列真正会加进去的
+        self.assertEqual([(c["kind"], c["after"]) for c in preview["changes"]], [("add", "标点错漏")])
+        self.assertEqual(preview["changes"], real["changes"])
+
+    def test_problem_filter_preview_lists_removed_keys(self) -> None:
+        config = {"common": {"problemFilterKey": ["残留日文", "标点错漏"]}}
+
+        preview = rt._preview_tool_changes(
+            _PreviewRunner(config=config), "manage_problem_filter", {"action": "remove", "keyword": "标点错漏"}
+        )
+
+        self.assertEqual([(c["kind"], c["before"]) for c in preview["changes"]], [("remove", "标点错漏")])
+
+    def test_problem_filter_preview_absent_when_nothing_would_change(self) -> None:
+        runner = _PreviewRunner(config={"common": {"problemFilterKey": ["残留日文"]}})
+        for args in (
+            {"action": "list"},  # 查清单不改东西
+            {"action": "add", "keyword": "残留日文"},  # 本来就有
+            {"action": "remove", "keyword": "不在清单里"},  # 本来就没有
+            {"action": "add"},  # 没给 keyword（真执行会报错，卡上不必先闪一下）
+        ):
+            self.assertIsNone(rt._preview_tool_changes(runner, "manage_problem_filter", args), args)
+
+    # ---- 项目规范（dry_run 走服务端同一份拼接逻辑） ----
+
+    def test_guideline_preview_diffs_what_the_server_would_write(self) -> None:
+        runner = _PreviewRunner(guideline="原有\n", guideline_after="原有\n新增\n")
+
+        preview = rt._preview_tool_changes(
+            runner, "write_project_guideline", {"mode": "append", "content": "新增"}
+        )
+
+        self.assertEqual(
+            [(r["op"], r["line"]) for r in preview["line_diff"]["rows"]],
+            [("add", "新增")],
+        )
+        self.assertEqual(runner.dry_runs, ["/api/projects/proj/guideline"])  # 走的是 dry_run 那一发
+        self.assertEqual(runner.writes, [])  # 真写没有发生
+
+    def test_guideline_preview_absent_when_content_is_unchanged(self) -> None:
+        runner = _PreviewRunner(guideline="同样的一段", guideline_after="同样的一段")
+        self.assertIsNone(
+            rt._preview_tool_changes(runner, "write_project_guideline", {"mode": "append", "content": "x"})
+        )
+
+    def test_guideline_preview_absent_for_unknown_mode(self) -> None:
+        runner = _PreviewRunner(guideline="a", guideline_after="b")
+        # 模式不认识就不去问后端（真执行会拿到 400，卡片没必要先闪一下）
+        self.assertIsNone(rt._preview_tool_changes(runner, "write_project_guideline", {"mode": "prepend"}))
+        self.assertEqual(runner.dry_runs, [])
+
+    # ---- 不适用 / 取数失败 ----
+
+    def test_tools_without_a_diff_have_no_preview(self) -> None:
+        runner = _PreviewRunner()
+        for name in ("start_translation", "run_subagents", "create_dict_file"):
+            # 连读都不读：不在 PREVIEW_TOOLS 里就直接返回（_PreviewRunner 会对意外读操作报错）
+            self.assertIsNone(rt._preview_tool_changes(runner, name, {"filename": "a.json"}), name)
+
+    def test_read_failure_never_raises_and_yields_no_preview(self) -> None:
+        def boom(_url: str):
+            raise RuntimeError("后端不可达")
+
+        runner = _PreviewRunner()
+        runner._http_get = boom
+
+        self.assertIsNone(
+            rt._preview_tool_changes(
+                runner,
+                "patch_transl_cache",
+                {"filename": "a.json", "patches": [{"index": 1, "pre_dst": "x"}]},
+            )
+        )
+
+    # ---- 与门禁接起来 ----
+
+    def test_gate_emits_the_preview_with_the_request(self) -> None:
+        runner = make_runner("ask")
+        runner._http_get = lambda _url: {"entries": [{"index": 33, "pre_dst": "旧译文"}]}
+
+        out = run_gate(
+            runner,
+            "patch_transl_cache",
+            "allow-once",
+            args={"filename": "a.json", "patches": [{"index": 33, "pre_dst": "新译文"}]},
+        )
+
+        self.assertTrue(out["ok"], out.get("error"))
+        data = [e for e in runner.state.events if e.type == "permission_request"][0].data
+        self.assertEqual(data["preview"]["changes"][0]["after"], "新译文")
+
+    def test_gate_omits_the_preview_key_when_there_is_nothing_to_show(self) -> None:
+        runner = make_runner("ask")
+
+        out = run_gate(runner, "save_dict", "allow-once")
+
+        self.assertTrue(out["ok"], out.get("error"))
+        data = [e for e in runner.state.events if e.type == "permission_request"][0].data
+        self.assertNotIn("preview", data)  # 空预览不如不给：界面会当成没有
 
 
 if __name__ == "__main__":

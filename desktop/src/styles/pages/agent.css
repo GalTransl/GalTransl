@@ -2334,6 +2334,7 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
+  /* diff 始终全量渲染（不再折叠）、高度在这里兜底：限高 + 内部滚动。 */
   max-height: 320px;
   overflow-y: auto;
   border-radius: 8px;
@@ -2435,23 +2436,10 @@
   color: var(--color-success);
 }
 
-.agent-changes__more,
-.agent-changes__morebtn {
+.agent-changes__more {
   padding: 2px 4px;
   color: var(--color-text-muted);
   font-size: 0.72rem;
-}
-
-.agent-changes__morebtn {
-  border: 0;
-  background: none;
-  font: inherit;
-  cursor: pointer;
-}
-
-.agent-changes__morebtn:hover {
-  color: var(--color-primary);
-  text-decoration: underline;
 }
 
 /* 折叠头部上的 ±N 徽标：一眼看出这个写入动作改了多少处 */
@@ -2994,6 +2982,14 @@
   font-size: 0.74rem;
   line-height: 1.45;
   color: var(--color-text-muted);
+}
+
+/* 审批卡里的「将要变更」（同一份 ChangeListCard）：像子代理行那样加一层浅底，把
+   "这次要写下去的东西"从标题/按钮里圈出来——它是这张卡的证据，不是卡面文案。 */
+.agent-perm .agent-changes {
+  padding: 6px 8px 7px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--agent-tile-strong) 60%, transparent);
 }
 
 .agent-queue {

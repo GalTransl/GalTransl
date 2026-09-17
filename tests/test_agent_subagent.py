@@ -14,6 +14,7 @@ LLM 是脚本化的（patch `_subagent_chat`），HTTP 走内存里的假缓存�
 """
 
 import json
+import tempfile
 import threading
 import unittest
 import urllib.parse
@@ -21,6 +22,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from GalTransl.Agent import runtime as rt
+from GalTransl.Agent import session_store as ss
 from GalTransl.Agent.runtime import (
     SUBAGENT_AGENT_EXPLORE,
     SUBAGENT_AGENT_PROOFREAD,
@@ -349,6 +351,70 @@ class SubagentRetryTests(unittest.TestCase):
         out = self._run_one(parent, timeout_and_stop)
 
         self.assertEqual(out["tasks"][0]["status"], "stopped")
+
+
+class SubagentStepPersistenceTests(unittest.TestCase):
+    """子代理的逐步活动要落盘。
+
+    它们量太大、不能进内存 events 窗口（否则把主转录挤出去），但必须写进会话 JSONL：
+    切页/刷新后前端重建转录时要靠它还原子代理的动作，否则展开只剩 start/done 两条。
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp(prefix="agent-sub-persist-root-")
+        patcher = patch.object(ss, "SESSIONS_ROOT", self.tmp)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_steps_are_persisted_but_stay_out_of_the_memory_window(self) -> None:
+        project = tempfile.mkdtemp(prefix="agent-sub-persist-proj-")
+        state = rt.AgentState(project_dir=project, session_id="sess-sub")
+        runner = rt.AgentRunner(state)
+
+        runner._emit("subagent_message", {"id": "d1", "round": 1, "text": "在读原文"})
+        runner._emit("subagent_tool_result", {"id": "d1", "name": "read_input_file", "ok": True})
+        runner._emit("content_delta", {"delta": "x"})  # 对照组：纯瞬态，不该落盘
+
+        # 内存窗口里都没有（都是瞬态事件）
+        self.assertEqual(list(state.events), [])
+        # 落盘：子代理步骤写进去了，流式增量没有
+        with open(runner._store.path, encoding="utf-8") as handle:
+            raw = handle.read()
+        self.assertIn("subagent_message", raw)
+        self.assertIn("subagent_tool_result", raw)
+        self.assertNotIn("content_delta", raw)
+        # 转录回放能读回来——切页/刷新后界面就是走这条路重建的
+        types = [event["type"] for event in ss.read_transcript(project, "sess-sub")]
+        self.assertIn("subagent_message", types)
+        self.assertIn("subagent_tool_result", types)
+
+    def test_replay_caps_steps_per_subagent_without_crowding_out_the_chat(self) -> None:
+        """每个子代理回放最多 SUBAGENT_STEP_REPLAY_LIMIT 步，且不挤占主转录窗口。"""
+        project = tempfile.mkdtemp(prefix="agent-sub-persist-cap-")
+        state = rt.AgentState(project_dir=project, session_id="sess-cap")
+        runner = rt.AgentRunner(state)
+
+        runner._emit("user_message", {"message": "开始"})
+        runner._emit(
+            "subagent_start",
+            {"id": "d1", "agent": "proofread", "label": "校对", "file": "a.json"},
+        )
+        for i in range(ss.SUBAGENT_STEP_REPLAY_LIMIT + 20):
+            runner._emit(
+                "subagent_tool_call",
+                {"id": "d1", "name": "read_transl_cache", "tool_call_id": f"c{i}"},
+            )
+        runner._emit("subagent_done", {"id": "d1", "status": "done", "report": "好了"})
+
+        types = [event["type"] for event in ss.read_transcript(project, "sess-cap")]
+
+        self.assertEqual(types.count("subagent_tool_call"), ss.SUBAGENT_STEP_REPLAY_LIMIT)
+        # start/done 与主转录都在（它们占主窗口，不该被子代理步骤挤出去）
+        self.assertIn("subagent_start", types)
+        self.assertIn("subagent_done", types)
+        self.assertIn("user_message", types)
+        # 步骤按 step 插回原位置：done 最大，排最后
+        self.assertEqual(types[-1], "subagent_done")
 
 
 class SubagentToolScopeTests(unittest.TestCase):

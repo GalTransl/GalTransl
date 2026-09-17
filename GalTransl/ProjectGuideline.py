@@ -65,6 +65,7 @@ def apply_project_guideline_edit(
     content: str = "",
     old_text: str = "",
     new_text: str = "",
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """按 mode 修改项目规范，返回 {mode, path, existed, created, length}。
 
@@ -77,6 +78,10 @@ def apply_project_guideline_edit(
       默默替换掉一处（或全部）比报错更糟。
 
     参数不合法一律抛 ValueError（调用方转成 400 / 工具报错），不替调用方猜意图。
+
+    dry_run=True 只算不写：返回里多一个 "content"（这次会落盘的那份全文），供 Agent 在
+    审批卡上提前显示 diff（见 runtime._preview_guideline_write）。校验（模式、replace 命中
+    次数、长度上限）照走一遍——预览能出 diff 就意味着这一步真做也做得成。
     """
     if mode not in WRITE_MODES:
         raise ValueError(f"mode 必须是 {'/'.join(WRITE_MODES)} 之一，收到：{mode!r}")
@@ -114,6 +119,18 @@ def apply_project_guideline_edit(
             f"项目规范过长（{len(text)} 字符，上限 {MAX_PROJECT_GUIDELINE_CHARS}）——"
             "规范全文每次请求都会进 prompt，请精简后再写"
         )
+
+    if dry_run:
+        # 只算不写：把"这次会落盘的那份全文"交给调用方去 diff
+        return {
+            "mode": mode,
+            "path": path,
+            "existed": existed,
+            "created": not existed,
+            "length": len(text),
+            "content": text,
+            "dry_run": True,
+        }
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
