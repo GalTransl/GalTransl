@@ -50,15 +50,17 @@ export function ProblemFilterSection({ config, onChange, onDirty }: ProblemFilte
       {tab === 'filter' ? (
         <div className="problem-filter-section__group">
           <p className="problem-filter-section__desc">
-            按问题项<strong>精准匹配</strong>：输入的必须与一条问题项逐字一致
-            （如「残留日文：おはよう」；在「缓存与问题」页点问题项后面的 - 号可自动填入）。
-            不做子串/大类匹配，因此写「残留日文」不会滤掉「残留日文：おはよう」。
+            按<strong>正则</strong>过滤：每项是一条正则，命中问题项（任意位置）的那条就被丢掉。
+            如 <code>缺失.*标点</code>、<code>^残留日文：♪</code>。
+            <strong>原则上只过滤小类</strong>：<code>残留日文</code>、<code>^残留日文：</code>
+            这类整类写法会把大类里的真问题一起藏起来，不建议用。
+            想只按字面过滤某一条，把特殊字符转义（在「缓存与问题」页点问题项后面的 - 号会自动转义）。
           </p>
           <KeyListEditor
             keys={filterKeys}
             onChange={(keys) => onChange('problemFilterKey', keys)}
             onDirty={onDirty}
-            placeholder="输入完整问题项（如 残留日文：おはよう）"
+            placeholder="输入正则（如 ^残留日文：）"
             emptyText="暂无过滤关键字"
           />
         </div>

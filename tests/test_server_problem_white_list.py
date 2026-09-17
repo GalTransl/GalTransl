@@ -1,8 +1,8 @@
-"""白名单在服务端三个出口的表现：/problems、/progress、缓存重建（skip_check 合流）。
+"""白名单在服务端各出口的表现：/problems、/progress、/problem_filter_stats、缓存重建。
 
-/problems 与 /progress 是只读统计，必须即时排除白名单条目；缓存重建那支由
-_cache_entries_to_trans_list 把白名单合流成 skip_check，这里直接测该函数
-（避开起完整 find_problems 配置的成本）。
+/problems、/progress 与 /problem_filter_stats 都是只读统计，必须即时排除白名单条目
+（过滤统计里白名单条目也不参与计数）；缓存重建那支由 _cache_entries_to_trans_list 把
+白名单合流成 skip_check，这里直接测该函数（避开起完整 find_problems 配置的成本）。
 """
 
 import json
@@ -90,9 +90,13 @@ class HttpTests(unittest.TestCase):
         cls.project = os.path.join(cls.root, "proj")
         os.makedirs(os.path.join(cls.project, CACHE_FOLDERNAME), exist_ok=True)
         with open(os.path.join(cls.project, "config.yaml"), "w", encoding="utf-8") as f:
-            f.write('common:\n  language: ja\n  problemWhiteList:\n    - "a.json:1"\n')
+            f.write(
+                'common:\n  language: ja\n  problemFilterKey:\n    - "^残留日文："\n    - "位置错乱"\n'
+                '  problemWhiteList:\n    - "a.json:1"\n'
+            )
         with open(os.path.join(cls.project, CACHE_FOLDERNAME, "a.json"), "wb") as f:
-            f.write(orjson.dumps([_entry(1, "残留日文"), _entry(2, "残留日文")]))
+            # index1 在白名单里（不计），index2 带两个问题项：一个被过滤、一个留在清单里
+            f.write(orjson.dumps([_entry(1, "残留日文"), _entry(2, "残留日文, 位置错乱")]))
 
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(JobRegistry()))
         cls.base = (
@@ -116,6 +120,22 @@ class HttpTests(unittest.TestCase):
     def test_progress_endpoint_excludes_whitelisted_problem(self):
         out = self._get("/progress?config=config.yaml")
         self.assertEqual(out["problems"], 1)
+
+    def test_problem_filter_stats_counts_hits_per_key(self):
+        # 每条过滤项各挡住了多少条问题：口径与 /problems 一致（白名单条目先排除）
+        out = self._get("/problem_filter_stats?config=config.yaml")
+
+        self.assertEqual(out["filter_keys"], ["^残留日文：", "位置错乱"])
+        self.assertEqual(
+            out["filters"],
+            [
+                {"key": "^残留日文：", "problems": 0},  # 条目里的问题是「残留日文」，锚点带冒号不命中
+                {"key": "位置错乱", "problems": 1},
+            ],
+        )
+        # index1 在白名单里 → 不计入问题条目总数，也就不给任何过滤项计数
+        self.assertEqual(out["problem_entries"], 1)
+        self.assertEqual(out["visible_entries"], 1)
 
 
 if __name__ == "__main__":

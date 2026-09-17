@@ -31,7 +31,7 @@ import {
   getCacheBrowserFontSizePreference,
   updateProjectConfig } from '../lib/api';
 import { normalizeError } from '../lib/errors';
-import { filterProblemText, normalizeKeywordList, splitProblemItems, splitProblemTypes } from '../lib/problemFilter';
+import { escapeProblemFilterPattern, filterProblemText, normalizeKeywordList, splitProblemItems, splitProblemTypes } from '../lib/problemFilter';
 
 /** 兼容读取缓存字段：优先新key，回退旧key */
 function src(e: CacheEntry): string { return e.post_src || e.post_jp || ''; }
@@ -130,7 +130,8 @@ function CacheEntryCard({
                   aria-label={`过滤「${problemItem}」`}
                   onClick={(event) => {
                     event.stopPropagation();
-                    onAddProblemFilter(problemItem);
+                    // 过滤项是正则：这一条按字面过滤，先转义（否则 ( ) . * 这些会被当元字符）
+                    onAddProblemFilter(escapeProblemFilterPattern(problemItem));
                   }}
                 >
                   -
@@ -1080,15 +1081,6 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     return Object.entries(stats).sort((a, b) => b[1].length - a[1].length) as [string, ProblemEntry[]][];
   }, [problems]);
 
-  // 精准匹配用：当前问题清单里的「整条问题项」集合（过滤只能逐字命中其中一条）
-  const problemItemSet = useMemo(() => {
-    const items = new Set<string>();
-    for (const p of problems) {
-      for (const item of splitProblemItems(p.problem)) items.add(item);
-    }
-    return items;
-  }, [problems]);
-
   // Jump from problem to search tab
   const handleProblemClick = useCallback((problemType: string) => {
     setSidebarTab('search');
@@ -1099,14 +1091,6 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   const handleAddProblemKeyword = useCallback(async (keyword: string, field: 'retranslKey' | 'problemFilterKey') => {
     if (!projectId || !configFileName || savingKeyword) return;
     const label = field === 'problemFilterKey' ? '问题过滤' : '重翻关键字';
-    // 问题过滤是精准匹配（见 lib/problemFilter.filterProblemText）：只接受与某条问题项
-    // 逐字一致的值，否则加进去也永远匹配不上——直接挡下来并说明原因。
-    if (field === 'problemFilterKey' && !problemItemSet.has(keyword)) {
-      setLocalError(
-        `「${keyword}」不是一条完整问题项：问题过滤需与问题清单里某条逐字一致（如「残留日文：おはよう」），不能填大类名或子串。`,
-      );
-      return;
-    }
     setSavingKeyword(true);
     setLocalError(null);
     try {
@@ -1131,7 +1115,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     } finally {
       setSavingKeyword(false);
     }
-  }, [projectId, configFileName, savingKeyword, problemItemSet, loadProblems, runGlobalSearch]);
+  }, [projectId, configFileName, savingKeyword, loadProblems, runGlobalSearch]);
 
   const submitProblemKeywordEditor = useCallback((editor: NonNullable<typeof retranslEditor>) => {
     const keyword = editor.draft.trim();
@@ -1678,7 +1662,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
           {/* Tab: Problems */}
           {sidebarTab === 'problems' && (
             <div className="cache-problems-panel">
-              <div className="cache-problems-hint">点击 + 号加入重翻关键字；点 - 号按条精准过滤问题（需整条问题项）</div>
+              <div className="cache-problems-hint">点击 + 号加入重翻关键字；点 - 号按条过滤问题（该条会转义成正则，只匹配它自己）</div>
               {loadingProblems ? (
                 <div className="cache-problems-loading">加载问题中…</div>
               ) : problems.length === 0 ? (
@@ -1751,7 +1735,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                           >
                             <div className="retransl-popover__arrow" aria-hidden="true" />
                             <label className="retransl-popover__label">
-                              {retranslEditor.action === 'filter' ? '加入问题过滤（整条问题项）' : '加入重翻关键字'}
+                              {retranslEditor.action === 'filter' ? '加入问题过滤（支持正则）' : '加入重翻关键字'}
                             </label>
                             <input
                               ref={retranslInputRef}
@@ -1768,7 +1752,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                                   setRetranslEditor(null);
                                 }
                               }}
-                              placeholder={retranslEditor.action === 'filter' ? '完整问题项（如 残留日文：おはよう）' : '关键字'}
+                              placeholder={retranslEditor.action === 'filter' ? '正则，如 ^残留日文： 或 残留日文：おはよう' : '关键字'}
                               autoFocus
                             />
                             <div className="retransl-popover__actions">

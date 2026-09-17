@@ -507,7 +507,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
    - **校对（proofread）**：每个负责一个（或一组）缓存文件，一次最多 16 个。file 填具体文件名就是点名；填 `"*"` 则**自动均分**——同批的 `"*"` 任务平分全部缓存文件（如派 16 个 `"*"`、256 个缓存文件 → 每个 16 个），要一次覆盖全部文件时用它，不用自己去数文件再逐个点名。大文件还能用 indexes 切区间。它们只能读 + 写缓存条目的 proofread_comment（校对批注：校对建议、润色建议都写这里），**改不了译文**：返回的 tasks[].doubts 带文件名与 index，报告是各自的总结（含"拿不准"的点）。拿到后按 7 的流程处理——读那些 index 的 proofread_comment，改完译文把该条的 proofread_comment 清空。**推荐在修复前跑一遍**。
    **派之前先用 ask_user 问清意见类型**：这一遍要它们写哪一类——「只写校对建议（错译/漏译/事实错误/不通这些硬伤）」「只写润色建议（没硬伤但中文能更好：翻译腔、口语不自然、用词单调、节奏拖沓）」「两者都要」——再把答案写进 brief（如 brief="本次只写润色建议，每条给具体改法；对话读起来要像人话"）。brief 里不写这句时它们默认只写校对建议；两类意见都写进 proofread_comment，同一条目只留一条，所以"两者都要"时要交代它们**硬伤优先**。
    派之前先想清楚要它们重点看什么，写进 brief 比它们自己发挥准。
-7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。问题过滤关键字是**精准匹配**：用 manage_problem_filter(action="add", keyword=["<与 list_problems 里某条问题项逐字一致的整条>"]) 只丢掉这一条具体问题（如「残留日文：おはよう」）；不能写大类名（如「残留日文」）或子串，那样什么也过滤不掉。若某几条反复误报、不值得再改，用 manage_problem_white_list(action="add", entry=["<文件名>:<index>", …]) 按位置豁免（entry 支持 "01.json:12" 与 "01.json:12-15" 区间，可传数组），效果等同于给这几条勾上 skip_check：不再检测、不计入统计。
+7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。问题过滤关键字是**正则**，但**原则上不要过滤大类、只过滤小类**：用 manage_problem_filter(action="add", keyword=["<正则>"]) 命中问题项即过滤——要写具体样式（如 `缺失.*标点`、`^残留日文：♪`），不要用 `残留日文`、`^残留日文：` 这类把整个大类藏起来的写法（大类里往往混着真问题，整类过滤等于放弃复核）；想按字面过滤某条，就把特殊字符转义。若某几条反复误报、不值得再改，用 manage_problem_white_list(action="add", entry=["<文件名>:<index>", …]) 按位置豁免（entry 支持 "01.json:12" 与 "01.json:12-15" 区间，可传数组），效果等同于给这几条勾上 skip_check：不再检测、不计入统计。
 8. **完成**：收尾前先调用 get_project_overview 确认项目真的翻完——只有 files_translated == files_total 且没有 running 任务才算整体完成（total==translated 可能只代表已缓存的部分翻完，不要据此收尾）；若还有文件没翻，回到流程 4 继续 start_translation 翻剩余文件。若 list_problems 的统计里有**翻译失败**（失败的批次会把 problem 标成「翻译失败」、译文带 "(Failed)" 标记）：确认项目配置 `common.retranslKey` 里有没有「翻译失败」（get_project_overview 的 config 能看到，没有就 update_project_config 加上）：有的话**再启动一次 start_translation** 即可把这些句子重翻一遍。问题数可控、整体完成后，用 read_output 抽查最终输出文件（交付物；输出与缓存不完全一致，译后字典替换只在输出生效），确认无误后用一段自然语言总结本次操作（做了什么、翻译进度、剩余问题建议），不要调用工具，直接输出总结即可结束。
 
 # 译前 / 译后字典（替换类字典）的用法
@@ -2896,7 +2896,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "manage_problem_filter",
-            "description": "管理问题过滤关键字（项目配置 common.problemFilterKey，与「缓存与问题」页同一套配置）。**精准匹配**：keyword 必须与 list_problems 返回的某条问题项**逐字一致**（整条，如「残留日文：おはよう」「缺控制符：<...>」），命中的那一条才会被 list_problems 与进度统计过滤掉。不支持按大类或子串过滤——写「残留日文」不会匹配「残留日文：おはよう」，也就无法用一个词滤掉整个大类。要豁免整类问题请改用 manage_problem_white_list 按条目豁免，或直接修译文。keyword 可传字符串或数组，一次增删多个。",
+            "description": "管理问题过滤关键字（项目配置 common.problemFilterKey，与「缓存与问题」页同一套配置）。**正则匹配**：keyword 是一条正则，按 re.search 命中问题项的那一项会被 list_problems 与进度统计过滤掉（如 `缺失.*标点` 按样式、`比日文长：1\\.5倍` 精确到某条；正则里的特殊字符要转义，写坏的正则会被拒）。**原则上只过滤小类，不要过滤大类**：像 `残留日文`、`^残留日文：` 这种把整个问题大类藏起来的写法不要用——大类里通常混着真问题，整类过滤等于不再复核；确实个别条目不用再处理时用 manage_problem_white_list 按条目豁免。list 会给出每条过滤项当前各挡住了多少条问题（problems 为 0 说明它已经一条也挡不到，可考虑 remove）。keyword 可传字符串或数组，一次增删多个。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2910,7 +2910,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                             {"type": "string"},
                             {"type": "array", "items": {"type": "string"}},
                         ],
-                        "description": "add/remove 必填。要操作的过滤项：必须与某条问题项**逐字一致**（整条，如 \"残留日文：おはよう\"），区分大小写。不做子串/大类匹配（\"残留日文\" 匹配不到 \"残留日文：おはよう\"）。可传单个字符串，也可传数组一次操作多个。",
+                        "description": "add/remove 必填。要操作的过滤项（**正则**，如 \"缺失.*标点\"、\"^残留日文：♪\"）；命中问题项的任意位置即过滤，特殊字符需转义（\\. \\( \\[ \\*）。原则上只过滤小类：整类写法（如 \"残留日文\"）禁止使用。可传单个字符串，也可传数组一次操作多个。",
                     },
                     "reason": _REASON_PROPERTY,
                 },
@@ -3263,7 +3263,7 @@ CONFIG_FIELD_DESCRIPTIONS: dict[str, str] = {
     "common.smartRetry": "解析失败时自动缩小批次并重置上下文，减少无效重试 [true/false]",
     "common.retranslFail": "程序重启时是否自动重翻标记为 (Failed) 的句子 [true/false]",
     "common.retranslKey": "重翻关键字列表：启动时命中缓存 problem 或原文关键字的句子会被重翻（如「翻译失败」「残留日文」）",
-    "common.problemFilterKey": "问题过滤关键字列表：按问题项精准匹配（需与整条问题项逐字一致，如「残留日文：おはよう」），命中项在问题统计与 list_problems 中被过滤掉；不支持按大类/子串过滤",
+    "common.problemFilterKey": "问题过滤关键字列表：**正则列表**，每项是一条正则，命中的问题项在问题统计与 list_problems 中被过滤掉。原则上只过滤小类（如 `缺失.*标点`、`^残留日文：♪`），不要用 `残留日文` 这类整类写法",
     "common.problemWhiteList": "问题白名单：按「缓存文件名:index」（如 a.json:12，区间写 a.json:12-15）豁免指定缓存条目的问题，等价于给该条勾选 skip_check",
     "common.gpt.contextNum": "每次请求附带的前文句数；值越大上下文越强、成本越高（常用 8）[0-32]",
     "common.gpt.translation_guideline": "使用的**全局**翻译规范文件名（位于 translation_guidelines 文件夹），决定文风与措辞；项目专属规范不是配置项，而是项目目录里的 translation_guideline.md（用 read_guideline/write_project_guideline 读改），翻译时拼在全局规范之后",
@@ -4110,6 +4110,33 @@ def _load_problem_filter_keys(
     return config, _parse_filter_keywords(common.get("problemFilterKey", []))
 
 
+def _load_problem_filter_stats(
+    runner: AgentRunner, pid: str, keys: list[str], config_name: str
+) -> dict[str, Any]:
+    """list 的结果：过滤清单 + 每条当前各挡住了多少条问题。
+
+    条数由服务端扫缓存算（/problem_filter_stats），与 list_problems / 进度统计同一口径
+    （白名单命中的条目不算）。数字是「现在」的快照：0 说明这条过滤项当前一条也挡不到，
+    多半已经没用了。统计取不到（老服务端/接口异常）时退回只有清单的结果——list 是只读查询，
+    不该因为统计挂掉。
+    """
+    result: dict[str, Any] = {"filter_keys": keys, "count": len(keys)}
+    if not keys:
+        return result
+    try:
+        data = runner._http_get(
+            f"/api/projects/{pid}/problem_filter_stats?config={urllib.parse.quote(config_name)}"
+        )
+    except Exception:  # noqa: BLE001
+        return result
+    if not isinstance(data, dict):
+        return result
+    for key in ("filters", "problem_entries", "visible_entries"):
+        if data.get(key) is not None:
+            result[key] = data[key]
+    return result
+
+
 def _plan_problem_filter(
     keys: list[str], action: str, keywords: list[str], field: str = "problemFilterKey"
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
@@ -4130,13 +4157,24 @@ def _plan_problem_filter(
     return hit, miss, changes
 
 
+def _is_valid_regex(pattern: str) -> bool:
+    """过滤项是正则：写坏的模式在 add 时就拒掉（并提示转义），别留到过滤时才发现。"""
+    try:
+        re.compile(pattern)
+    except re.error:
+        return False
+    return True
+
+
 def _tool_manage_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """增/删/查项目配置 common.problemFilterKey（问题过滤关键字）。
 
-    与桌面端「缓存与问题」页同一套配置。**精准匹配**：关键字必须与某条问题项逐字
-    一致（整条，如「残留日文：おはよう」），该条才会在 list_problems / 进度统计里
-    被过滤掉；不做子串匹配，因而无法用大类名（如「残留日文」）滤掉整类问题。
-    add/remove 都是对关键字的精确匹配（区分大小写）。"""
+    与桌面端「缓存与问题」页同一套配置。**正则匹配**：keyword 是一条正则，按 re.search
+    命中问题项的那一项才会在 list_problems / 进度统计里被过滤掉（如 `缺失.*标点`）。
+    **原则上只过滤小类、不过滤大类**（`残留日文`、`^残留日文：` 这类整类写法等于放弃复核，
+    要在提示里挡住）。add/remove 是对清单里字符串的精确增删（区分大小写）；
+    add 时校验正则可编译，写坏了直接报错并提示转义。
+    """
     action = str(args.get("action", "")).strip()
     if action not in ("list", "add", "remove"):
         raise AgentToolError("action must be one of: list, add, remove")
@@ -4145,12 +4183,20 @@ def _tool_manage_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> An
 
     if action == "list":
         _, keys = _load_problem_filter_keys(runner, pid, config_name)
-        return {"filter_keys": keys, "count": len(keys)}
+        # 每条过滤项当前各挡住了多少条问题：判断哪条已经没用了（problems 为 0）
+        return _load_problem_filter_stats(runner, pid, keys, config_name)
 
     # keyword 支持单个字符串或字符串数组（一次增删多个）：去重保序、忽略空串
     keywords = _parse_filter_keywords(args.get("keyword"))
     if not keywords:
         raise AgentToolError("keyword is required for add/remove（字符串或字符串数组）")
+    if action == "add":
+        invalid = [k for k in keywords if not _is_valid_regex(k)]
+        if invalid:
+            raise AgentToolError(
+                "这些过滤项不是合法正则：" + "、".join(invalid)
+                + "。过滤项按正则匹配；想按字面过滤请转义特殊字符（\\. \\( \\[ \\*）。"
+            )
 
     config, keys = _load_problem_filter_keys(runner, pid, config_name)
     hit, miss, changes = _plan_problem_filter(keys, action, keywords)
@@ -5226,6 +5272,8 @@ def _preview_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> dict[s
     keywords = _parse_filter_keywords(args.get("keyword"))
     if not keywords:
         return None
+    if action == "add" and any(not _is_valid_regex(k) for k in keywords):
+        return None  # 真执行会因正则不合法报错，卡上不必先画一份不会发生的变更
     pid = runner._project_id()
     config_name = runner.state.config_file_name or DEFAULT_CONFIG_FILE
     _, keys = _load_problem_filter_keys(runner, pid, config_name)
@@ -5377,11 +5425,13 @@ def _md_render_list_input_files(result: dict[str, Any]) -> str:
 
 
 def _md_render_list_problems(result: dict[str, Any]) -> str:
+    note = result.get("note")
+    note_line = f"备注：{note}" if note else ""
     if result.get("mode") == "stats":
         head = f"共 {result.get('total')} 个问题，类型统计如下"
         table = _md_table(["type", "count"], result.get("types"))
         hint = result.get("hint")
-        return _md_doc(head, table, f"提示：{hint}" if hint else "")
+        return _md_doc(head, table, f"提示：{hint}" if hint else "", note_line)
 
     head_parts: list[str] = []
     if result.get("problem_type") is not None:
@@ -5400,7 +5450,7 @@ def _md_render_list_problems(result: dict[str, Any]) -> str:
         ["filename", "index", "speaker", "post_src", "pre_dst", "problem", "trans_by"],
         result.get("problems"),
     )
-    return _md_doc("；".join(head_parts), table)
+    return _md_doc("；".join(head_parts), table, note_line)
 
 
 def _md_render_read_input_file(result: dict[str, Any]) -> str:
@@ -5447,6 +5497,30 @@ def _md_render_read_transl_cache(result: dict[str, Any]) -> str:
     return _md_doc("，".join(head_parts), missing_text, *notes, table)
 
 
+def _md_render_manage_problem_filter(result: dict[str, Any]) -> str | None:
+    """list 的过滤清单渲染成表：每条过滤项当前挡住了多少条问题。
+
+    add/remove 的结果是变更 diff（changes），没有可表格化的清单——返回 None 让它照旧走 JSON。
+    """
+    filters = result.get("filters")
+    if not isinstance(filters, list) or not filters:
+        return None
+    parts = [
+        f"共 {result.get('count')} 条过滤项",
+        _md_table(["key", "problems"], filters),
+    ]
+    entries = result.get("problem_entries")
+    visible = result.get("visible_entries")
+    if isinstance(entries, int) and isinstance(visible, int):
+        parts.append(
+            f"当前共 {entries} 条问题，其中 {entries - visible} 条被过滤项挡住，"
+            f"list_problems 可见 {visible} 条"
+        )
+    if any(isinstance(f, dict) and not f.get("problems") for f in filters):
+        parts.append("problems 为 0 的过滤项当前一条也挡不到，可考虑 remove")
+    return _md_doc(*parts)
+
+
 # 工具名 → 渲染器。渲染只对这里列出的工具生效，其余工具维持 JSON。
 _MD_RENDERERS: dict[str, Any] = {
     "list_transl_cache": _md_render_list_transl_cache,
@@ -5454,6 +5528,7 @@ _MD_RENDERERS: dict[str, Any] = {
     "list_problems": _md_render_list_problems,
     "read_input_file": _md_render_read_input_file,
     "read_transl_cache": _md_render_read_transl_cache,
+    "manage_problem_filter": _md_render_manage_problem_filter,
 }
 
 
@@ -5553,11 +5628,29 @@ def _merge_problem_context(
     return merged
 
 
-def _tool_list_problems(runner: AgentRunner, args: dict[str, Any]) -> Any:
+def _tool_list_problems(
+    runner: AgentRunner, args: dict[str, Any], allowed_files: Sequence[str] | None = None
+) -> Any:
+    """查问题清单。
+
+    allowed_files（校对子代理按派活锁定）：只列这几份文件的问题——统计、命中数、分页与
+    context 取的前后文一并收窄，免得别人文件的问题混进来带偏"我这份还剩什么"。
+    """
     pid = runner._project_id()
     cfg = urllib.parse.quote(runner.state.config_file_name)
     data = runner._http_get(f"/api/projects/{pid}/problems?config={cfg}")
     problems = data.get("problems", [])
+    total = data.get("total", len(problems))
+    scope_note = ""
+    if allowed_files is not None:
+        allowed = tuple(str(name).strip() for name in allowed_files if str(name).strip())
+        allowed_set = set(allowed)
+        problems = [p for p in problems if str(p.get("filename") or "") in allowed_set]
+        total = len(problems)
+        if len(allowed) == 1:
+            scope_note = f"本次只派你看「{allowed[0]}」这一个文件，这里只列它的问题。"
+        else:
+            scope_note = f"本次只派你看这 {len(allowed)} 个文件，这里只列它们的问题。"
 
     # 不带 problem_type：先给类型统计（大项目问题上千条，全量列出没有意义），
     # Agent 据此决定看哪一类。
@@ -5568,12 +5661,15 @@ def _tool_list_problems(runner: AgentRunner, args: dict[str, Any]) -> Any:
             for t in _split_problem_types(p.get("problem", "")):
                 stats[t] = stats.get(t, 0) + 1
         ranked = sorted(stats.items(), key=lambda kv: -kv[1])
-        return {
-            "total": data.get("total", len(problems)),
+        out: dict[str, Any] = {
+            "total": total,
             "mode": "stats",
             "types": [{"type": t, "count": c} for t, c in ranked],
             "hint": "默认只返回类型统计。用 problem_type 指定类型查看具体条目（配合 limit/offset 分页），problem_type 传 \"*\" 列出全部类型的具体条目。",
         }
+        if scope_note:
+            out["note"] = scope_note
+        return out
 
     # 指定类型：过滤出问题里含该类型的条目（子串匹配，与统计口径对齐）
     if problem_type != "*":
@@ -5607,7 +5703,7 @@ def _tool_list_problems(runner: AgentRunner, args: dict[str, Any]) -> Any:
     except (TypeError, ValueError):
         raise AgentToolError(f"context 必须是 0-5 的整数（收到 {raw_context!r}）")
     result = {
-        "total": data.get("total", len(problems)),
+        "total": total,
         "matched": matched,
         "problem_type": problem_type,
         "offset": offset,
@@ -5615,6 +5711,8 @@ def _tool_list_problems(runner: AgentRunner, args: dict[str, Any]) -> Any:
         "has_more": offset + limit < matched,
         "problems": page,
     }
+    if scope_note:
+        result["note"] = scope_note
     if context > 0 and page:
         result["problems"] = _merge_problem_context(runner, page, context)
     if dominant:
@@ -6838,7 +6936,7 @@ SUBAGENT_PROOFREAD_PROMPT = """你是 GalTransl 的**校对子代理**，只干�
 # 权力边界（越界即失败）
 - 你**只能读**（缓存、人名表、翻译规范、问题清单），以及用 patch_transl_cache **写 proofread_comment** 这一个字段；
 - 你的 patch_transl_cache 里只有 index 与 proofread_comment 两个入参：**译文字段（pre_dst / proofread_dst）根本不存在**，也没有委派、启动任务、改配置的权力；
-- **你只负责这一次派给你的那些文件**（可能是一个，也可能是自动均分出来的一组）：read_transl_cache / patch_transl_cache 的 filename 只接受它们，范围外会被直接拒掉；要核对某个词在别处的译法，用 search_transl_cache（它是全项目范围）；
+- **你只负责这一次派给你的那些文件**（可能是一个，也可能是自动均分出来的一组）：read_transl_cache / patch_transl_cache 的 filename 只接受它们，范围外会被直接拒掉；list_problems 也只会列这些文件的问题；要核对某个词在别处的译法，用 search_transl_cache（它是全项目范围）；
 - 发现问题就写意见，改由主 Agent 做——不要试图绕路。
 
 # 写哪一类意见：以任务说明为准
@@ -7039,8 +7137,9 @@ def _subagent_tools(agent: str) -> list[dict[str, Any]]:
 
 
 # 认"锁定文件"的工具：任务里给了 file 时，这些工具的 filename 入参被限制在派给它的那些文件里。
-# 搜索类（search_transl_cache / search_input）与 list_problems / get_name_table 本来就是
-# 跨文件/跨项目的，不在其中——子代理要核对"这个词在别处怎么翻的/原文里怎么说"，正是它们的用途。
+# 搜索类（search_transl_cache / search_input）与 get_name_table 本来就是跨文件/跨项目的，不在
+# 其中——子代理要核对"这个词在别处怎么翻的/原文里怎么说"，正是它们的用途。list_problems 没有
+# filename 入参，改由 _subagent_handlers 传 allowed_files 收窄（见 _tool_list_problems）。
 _LOCKED_FILENAME_TOOLS: tuple[str, ...] = (
     "read_transl_cache",
     "patch_transl_cache",
@@ -7178,8 +7277,9 @@ def _subagent_handlers(
       当成"无可更新字段"跳过，并被回一条只允许 proofread_comment 的工具错误）；
     - **锁定文件**（locked_files 非空，来自任务里的 file；自动均分时是一组）：read_transl_cache /
       patch_transl_cache / read_input_file 的 filename 被限制在这一组里，list_input_files 也只列
-      这些——"一份文件只归一个子代理"由工具层保证，模型串到范围外会被拒（省 token，也避免两个
-      子代理写同一条）。跨文件的 search_transl_cache / list_problems / get_name_table 不受影响；
+      这些，list_problems 也只列这些文件的问题——"一份文件只归一个子代理"由工具层保证，模型串到
+      范围外会被拒（省 token，也避免两个子代理写同一条）。要核对"这个词在别处怎么翻的"，仍走
+      跨文件的 search_transl_cache / get_name_table；
     - 调用**不过权限门禁**：子代理的工具集本身就是白名单（只有读，加校对那一支写意见），
       一批 16 个逐条弹审批卡会把界面淹掉。改译文的权力仍然只在主 Agent 手上——那才是要审批的事。
     """
@@ -7200,6 +7300,8 @@ def _subagent_handlers(
                 handlers[name] = _lock_to_filenames(handlers[name], locked)
         if "list_input_files" in handlers:
             handlers["list_input_files"] = _lock_input_listing(locked)
+        if "list_problems" in handlers:
+            handlers["list_problems"] = lambda runner, args: _tool_list_problems(runner, args, locked)
     return handlers
 
 

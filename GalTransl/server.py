@@ -20,7 +20,7 @@ from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
 from GalTransl.AppSettings import load_app_settings, save_app_settings
 from GalTransl.Cache import CACHE_TEMP_SUFFIX
 from GalTransl.DefaultProjectConfig import DEFAULT_PROJECT_CONFIG_YAML
-from GalTransl.ProblemFilter import filter_problem_text
+from GalTransl.ProblemFilter import filter_problem_text, summarize_problem_filter_hits
 from GalTransl.ProblemWhiteList import build_problem_white_list_index, is_problem_whitelisted
 from GalTransl.ProjectGuideline import (
     PROJECT_GUIDELINE_FILENAME,
@@ -1186,6 +1186,35 @@ def _cache_entries_to_trans_list(entries, filename, white_index):
         )
         trans_list.append(s)
     return trans_list
+
+
+def _iter_problem_cache_entries(project_dir, white_index):
+    """扫缓存目录，逐个产出未被问题白名单豁免的条目 (缓存文件名, 条目 dict)。
+
+    /problems 与 /problem_filter_stats 共用同一个扫描口径：白名单命中的条目等价于给该条
+    勾了 skip_check，任何「问题」出口都不该再看到它——两处各写一遍迟早会走偏。
+    读不动的缓存文件直接跳过（文件刚被删/正在写），不因此让整次扫描失败。
+    """
+    import orjson
+
+    cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+    if not os.path.isdir(cache_dir):
+        return
+    for name in sorted(os.listdir(cache_dir)):
+        fp = os.path.join(cache_dir, name)
+        if not os.path.isfile(fp) or not fp.endswith(".json"):
+            continue
+        try:
+            with open(fp, "rb") as f:
+                entries = orjson.loads(f.read())
+        except Exception:
+            continue
+        for e in entries:
+            if not isinstance(e, dict):
+                continue
+            if is_problem_whitelisted(white_index, name, e.get("index", "")):
+                continue
+            yield name, e
 
 
 def build_handler(registry: JobRegistry):
@@ -2517,37 +2546,43 @@ def build_handler(registry: JobRegistry):
                 white_index = build_problem_white_list_index(
                     RUNTIME_PROGRESS_CACHE.get_problem_white_list(project_dir, config_name)
                 )
-                cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
                 all_problems = []
-                if os.path.isdir(cache_dir):
-                    for name in sorted(os.listdir(cache_dir)):
-                        fp = os.path.join(cache_dir, name)
-                        if not os.path.isfile(fp) or not fp.endswith(".json"):
-                            continue
-                        try:
-                            import orjson
-                            with open(fp, "rb") as f:
-                                entries = orjson.loads(f.read())
-                            for e in entries:
-                                if not isinstance(e, dict):
-                                    continue
-                                # 白名单命中的条目等价于勾了 skip_check：不出现在问题清单
-                                if is_problem_whitelisted(white_index, name, e.get("index", "")):
-                                    continue
-                                problem_text = filter_problem_text(e.get("problem", ""), filter_keys)
-                                if problem_text:
-                                    all_problems.append({
-                                        "filename": name,
-                                        "index": e.get("index", 0),
-                                        "speaker": e.get("name", ""),
-                                        "post_src": e.get("post_src", "") or e.get("post_jp", ""),
-                                        "pre_dst": e.get("pre_dst", "") or e.get("pre_zh", ""),
-                                        "problem": problem_text,
-                                        "trans_by": e.get("trans_by", ""),
-                                    })
-                        except Exception:
-                            continue
+                # 扫描已排除白名单命中的条目（等价于勾了 skip_check）
+                for name, e in _iter_problem_cache_entries(project_dir, white_index):
+                    problem_text = filter_problem_text(e.get("problem", ""), filter_keys)
+                    if problem_text:
+                        all_problems.append({
+                            "filename": name,
+                            "index": e.get("index", 0),
+                            "speaker": e.get("name", ""),
+                            "post_src": e.get("post_src", "") or e.get("post_jp", ""),
+                            "pre_dst": e.get("pre_dst", "") or e.get("pre_zh", ""),
+                            "problem": problem_text,
+                            "trans_by": e.get("trans_by", ""),
+                        })
                 self._send_json({"project_dir": project_dir, "problems": all_problems, "total": len(all_problems), "filter_keys": filter_keys})
+                return
+
+            # GET /api/projects/:id/problem_filter_stats
+            # 每条过滤项各挡住了多少条问题（manage_problem_filter 的 list 用）：
+            # 口径与 /problems 一致——先排白名单，再看过滤项命中，只是这里不把问题文本过滤掉，
+            # 而是逐项计数。problem_entries 是当前有问题的条目总数，visible_entries 是过滤后
+            # 仍会出现在问题清单里的条数。
+            if sub_path == "/problem_filter_stats":
+                config_name = parse_qs(urlparse(self.path).query).get("config", ["config.yaml"])[0]
+                filter_keys = RUNTIME_PROGRESS_CACHE.get_problem_filter_keys(project_dir, config_name)
+                white_index = build_problem_white_list_index(
+                    RUNTIME_PROGRESS_CACHE.get_problem_white_list(project_dir, config_name)
+                )
+                problems = [
+                    str(e.get("problem", "") or "")
+                    for _, e in _iter_problem_cache_entries(project_dir, white_index)
+                ]
+                self._send_json({
+                    "project_dir": project_dir,
+                    "filter_keys": filter_keys,
+                    **summarize_problem_filter_hits(problems, filter_keys),
+                })
                 return
 
             # GET /api/projects/:id/logs

@@ -202,6 +202,49 @@ class ReadTranslCacheMdTests(unittest.TestCase):
         self.assertIn("字段说明：默认精简字段", text)
 
 
+class ManageProblemFilterMdTests(unittest.TestCase):
+    """过滤清单的 list 结果：每条过滤项挡住了多少条问题。"""
+
+    def test_list_shows_hits_per_key(self):
+        result = {
+            "filter_keys": ["缺失.*标点", "残留日文"],
+            "count": 2,
+            "filters": [
+                {"key": "缺失.*标点", "problems": 12},
+                {"key": "残留日文", "problems": 0},
+            ],
+            "problem_entries": 40,
+            "visible_entries": 28,
+        }
+
+        text = _render_tool_result_table("manage_problem_filter", result)
+
+        self.assertIn("共 2 条过滤项", text)
+        self.assertIn("当前共 40 条问题，其中 12 条被过滤项挡住，list_problems 可见 28 条", text)
+        self.assertEqual(_table_rows(text, "key"), [["缺失.*标点", "12"], ["残留日文", "0"]])
+        self.assertIn("problems 为 0 的过滤项当前一条也挡不到，可考虑 remove", text)
+
+    def test_all_keys_hit_has_no_zero_hint(self):
+        result = {
+            "filter_keys": ["缺失.*标点"],
+            "count": 1,
+            "filters": [{"key": "缺失.*标点", "problems": 3}],
+        }
+
+        text = _render_tool_result_table("manage_problem_filter", result)
+
+        self.assertNotIn("problems 为 0", text)
+
+    def test_add_remove_results_stay_json(self):
+        # changes 是变更 diff、不是清单：没有可表格化的数据行 → 返回 None 走 JSON
+        self.assertIsNone(
+            _render_tool_result_table(
+                "manage_problem_filter",
+                {"filter_keys": ["a"], "count": 1, "added": ["a"]},
+            )
+        )
+
+
 class HandlerPipelineTests(unittest.TestCase):
     """handler 仍返回 dict，Markdown 渲染接在后面：真实调用走一遍。"""
 
@@ -233,10 +276,17 @@ class DispatcherTests(unittest.TestCase):
         self.assertIsNone(_render_tool_result_table("search_transl_cache", {"results": []}))
         self.assertIsNone(_render_tool_result_table("list_problems", "不是 dict"))
 
-    def test_active_renderer_set_covers_exactly_the_five_tools(self):
+    def test_active_renderer_set_covers_exactly_the_listed_tools(self):
         self.assertEqual(
             set(rt._MD_RENDERERS),
-            {"list_transl_cache", "list_input_files", "list_problems", "read_input_file", "read_transl_cache"},
+            {
+                "list_transl_cache",
+                "list_input_files",
+                "list_problems",
+                "read_input_file",
+                "read_transl_cache",
+                "manage_problem_filter",
+            },
         )
         # ISON 渲染层已删：确认没有残留的旧渲染注册表
         self.assertFalse(any("ISON" in name or "ison" in name for name in dir(rt)))
