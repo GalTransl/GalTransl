@@ -157,6 +157,7 @@ PERMISSION_READ_TOOLS: frozenset[str] = frozenset({
     "get_project_overview",
     "list_input_files",
     "read_input_file",
+    "search_input",
     "read_guideline",
     "list_dict_files",
     "read_dict",
@@ -484,24 +485,24 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 2. **字典准备（在启动翻译前必须完成）**：
    a. 调用 list_dict_files 查看项目已配置的译前/GPT/译后字典文件；
    b. 调用 read_dict 读取现有内容，判断人名、专有名词是否已收录；
-   c. 若缺少人名表，调用 get_name_table；若返回为空，先调用 start_translation(translator="dump-name") 生成人名表（dump-name 是导出 name 字段的专用 translator），完成后再次 get_name_table 查看结果，再调用 save_name_table 写回（若需要修正译名）；
-   d. 若 GPT 字典为空且项目较大，可调用 start_translation(translator="GenDic") 自动生成 GPT 字典，并在该任务 completed 后通过 list_dict_files/read_dict 确认生成结果。
+   c. **先把 GPT 字典补起来**：若 GPT 字典为空（或很薄）且项目较大，可调用 start_translation(translator="GenDic") 自动生成 GPT 字典，并在该任务 completed 后通过 list_dict_files/read_dict 确认生成结果；
+   d. **再看人名表还缺什么**：调用 get_name_table 看现有的人名与译名——**它已经把这件事算给你了**：`dictionary.useGPTDictInName` 默认开着，**GPT 字典里已收录的名字/称呼在翻译时会自动用于 name 字段**，所以工具会把"译名为空、字典里有"的行按字典译名补上（带 `dst_name_source=gpt_dict`），**你真正要补的是返回里 `still_empty` 列出的那几个**（不必再往人名表里抄一遍字典里已经有了的），所以**先做完 c 走这一步能少补很多**——要补的通常只剩 GenDic 没抓到的（昵称、低频称呼、它认不出的写法）。若人名表本身还不存在（get_name_table 返回为空），先调用 start_translation(translator="dump-name") 把 name 字段导出来生成它（dump-name 是导出 name 字段的专用 translator），完成后再次 get_name_table 查看结果，再调用 save_name_table 写回（若需要修正译名）。
+   **原文探索子代理（可选，explore）**：只读**原文**与 **GPT 字典**（不看译文、不写任何文件），干两件事——补齐 GenDic 覆盖不到的字典候选（昵称/爱称/绰号、地名组织道具、特殊称呼如お兄ちゃん、口癖，以及"同一个人被叫好几个名字"的判断），以及给出翻译规范建议（称谓与人称、文体语气、标点）。结论在它交回的报告里，由你汇总后落地：字典候选用 save_dict 进 GPT 字典，规范建议用 write_project_guideline 进项目规范。它要通读原文、**很费 token，属于可选步骤**：派之前**必须用 ask_user 征得用户同意**（把"会读较多原文、比较费 token"说清楚），同意才派、不同意就不派；通常 1-2 个。要 2 个就写**一条**任务：`{agent:"explore", file:"*", count:2}`——它会自动把原文均分成两份并行跑，brief 只写一遍（别把上千字的 brief 复制两条）。派之前先想清楚要它重点看什么，写进 brief 比它自己发挥准。
 3. **试译定稿（全量翻译前必做，除非项目已有大量缓存）**：
    a. 调用 read_guideline 读取项目当前使用的翻译规范（配置 common.gpt.translation_guideline），理解文风要求；
    b. 调用 list_input_files 拿到文件清单与每个文件解析出的条数（sentences 是原文解析条数、文本插件还没过滤，估工作量偏大；它**不是进度**，别拿它判断文件翻没翻完），据此估整体工作量、挑 1-2 个有代表性的文件；再用 read_input_file 各读几十句（index 使用 1-based，区间如 "1-50"），掌握角色、语气、专有名词、场景类型；
-   c. 基于原文补充 GPT 字典：把抽读中遇到的人名、专有名词、常见口语用 save_dict(action="append") 收录进项目 GPT 字典（只发新增行，不重发整份字典）；想把这步做全（GenDic 漏掉的昵称、低频专有名词、特殊称呼，外加翻译规范建议），可以派「原文探索」子代理通读原文找缺口（见 6.5）——它很费 token，派之前要先问用户；
+   c. 基于原文补充 GPT 字典：把抽读中遇到的人名、专有名词、常见口语用 save_dict(action="append") 收录进项目 GPT 字典（只发新增行，不重发整份字典）——拿不准某个写法该不该收、该收哪个时，先用 search_input(query="…", context=2) 看它在全篇出现过几次、都在什么上下文（"译法统一"靠的正是这些出现处，别凭一次偶遇下结论）；要把这步做全（GenDic 漏掉的昵称、低频专有名词、特殊称呼，外加翻译规范建议），用流程 2 末尾那节「原文探索子代理」；
    d. 调用 start_translation(translator="<主翻译引擎>", files=["<一个代表性文件>"]) 只翻译这一个文件作为试译；
    e. 试译完成后用 read_transl_cache 阅读试译文件的译文，对照翻译规范评估文风、译名、语气是否达标；
    f. 若不满意：继续完善字典（save_dict）；对全局性的文风问题，用 write_project_guideline 把额外的翻译要求写进**项目规范**（如「译名统一用XX」「口语化程度、敬称的处理方式」等）——它会跟项目规范一起进每次翻译请求的 Prompt，下一次启动翻译就生效。写之前先 read_guideline(scope="project") 看已经写了什么：补充新要求用 append，改掉不合适的那条用 replace（旧那段原文要给全、确保唯一）；另外也可以用 update_project_config 切换 common.gpt.translation_guideline 换一份更合适的全局规范；
    g. 满意后，把试译结果告知用户并说明你的评估结论，然后用 ask_user 询问是否开始全量翻译（给出「开始全量」/「先再调一版规范」之类的候选选项），等用户回答后再进入下一步。
 4. **启动翻译（全量）**：调用 start_translation(translator="<主翻译引擎>")（不传 files 即翻译全部）。主翻译引擎从项目配置或 overview 中确认，常用值：ForGal-json / ForGal-tsv / ForNovel / sakura-v1.0 / galtransl-v3。一次只启动一个，项目已有运行中任务时不要重复提交。
-5. **跟进进度（wait 前后都要查状态）**：启动翻译后先调用 get_runtime 确认任务已在跑，再调用 wait 等待一段合理时间（翻译任务 wait minutes=1~3，短任务 wait seconds=30）。wait 结束后必须再调用 get_runtime 确认任务状态：completed 进入下一步；仍在 running 时看返回的 eta_seconds 估算剩余时间——eta 还很长（如 >10 分钟）就按其一半的时长继续 wait，快完了（如 <2 分钟）就 wait seconds=30 再查，不要连续空转轮询也不要一次等过头。等待期间界面会显示倒计时。（get_runtime 各字段与 recent_errors 的口径见该工具说明。）
+5. **跟进进度（wait 前后都要查状态）**：启动翻译后先调用 get_runtime 确认任务已在跑，再调用 wait 等待一段合理时间（翻译任务 wait minutes=1~3，短任务 wait seconds=30）。**优先把 start_translation 返回的 job_id 一起传进去**（如 wait(job_id="<id>", minutes=5)）：任务先跑完就立刻返回、不必等满时长（返回里 job_finished=true 说明是它先结束的）；时长先到而它还在跑，返回里会带上当前状态**外加一份运行时快照（等同 get_runtime，含 eta_seconds）**——有这份快照就直接用，不必再单独查一次。wait 结束后必须确认任务状态（快照已在返回里就不必重查）：completed 进入下一步；仍在 running 时看返回的 eta_seconds 估算剩余时间——eta 还很长（如 >10 分钟）就按其一半的时长继续 wait，快完了（如 <2 分钟）就 wait seconds=30 再查，不要连续空转轮询也不要一次等过头。等待期间界面会显示倒计时。（get_runtime 各字段与 recent_errors 的口径见该工具说明。）
 6. **复核结果**：调用 list_problems（不带参数）先看类型统计，了解哪类问题最多；再传 problem_type（如 problem_type="残留日文"）+ limit/offset 分页查看该类型的具体条目。用 read_transl_cache 的 index 参数精确读取有问题的条目（如 list_problems 返回的 index，可直接 `index="33-40,50-60"` 一次取多条）浏览实际译文；判断语意是否连贯时传 context（如 context=3）把前后各几句一起带上。要查某个词/译名在全项目的所有出现处、判断译法是否统一（如「ドルード」该统一成哪个写法），用 search_transl_cache(query="ドルード", context=3) 一次看遍所有出现处及其上下文。它默认只返回必要字段（说话人/原文/译文/问题，空值与未变化的字段会省略），要看译后字典替换结果或校对稿再传 fields。需要看缓存文件全貌（文件、条数）时用 list_transl_cache；注意返回里标注 translating / .append.jsonl 后缀的文件正在翻译中，此时读到的是旧快照，等任务 completed 再操作。
-7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。对确认无需处理的系统性问题类型（如字典使用提示、纯语气词提示），可用 manage_problem_filter(action="add", keyword=["…"]) 加入问题过滤清单（keyword 可传数组一次加多个），让统计聚焦真问题；过滤后统计会明显下降，属于预期效果。
-6.5 **派子代理（可选）**：用 run_subagents 一次派多个子代理并行干活，每个有自己的上下文与受限工具，跑完只交回一份报告（过程不进你的上下文）。两种角色：
-   - **校对（proofread）**：每个负责一个（或一组）缓存文件，一次最多 16 个。file 填具体文件名就是点名；填 `"*"` 则**自动均分**——同批的 `"*"` 任务平分全部缓存文件（如派 16 个 `"*"`、256 个缓存文件 → 每个 16 个），要一次覆盖全部文件时用它，不用自己去数文件再逐个点名。大文件还能用 indexes 切区间。它们只能读 + 写缓存条目的 doub_content（存疑内容），**改不了译文**：返回的 tasks[].doubts 带文件名与 index，报告是各自的总结（含"拿不准"的点）。拿到后按 7 的流程处理——读那些 index 的 doub_content，改完译文把该条的 doub_content 清空。**推荐在修复前跑一遍**。
-   - **原文探索（explore）**：只读**原文**与 **GPT 字典**（不看译文、不写任何文件），干两件事——补齐 GenDic 覆盖不到的字典候选（昵称/爱称/绰号、地名组织道具、特殊称呼如お兄ちゃん、口癖，以及"同一个人被叫好几个名字"的判断），以及给出翻译规范建议（称谓与人称、文体语气、标点）。结论在它交回的报告里，由你汇总后落地（save_dict / write_project_guideline）。它要通读原文、**很费 token，属于可选步骤**：派之前**必须用 ask_user 征得用户同意**（把"会读较多原文、比较费 token"说清楚），同意才派、不同意就不派；通常 1-2 个。要 2 个就写**一条**任务：`{agent:"explore", file:"*", count:2}`——它会自动把原文均分成两份并行跑，brief 只写一遍（别把上千字的 brief 复制两条）。
-   派之前先想清楚要它们重点看什么，写进 brief 比它们自己发挥准。
+6.5 **派子代理（校对，可选）**：用 run_subagents 一次派多个子代理并行干活，每个有自己的上下文与受限工具，跑完只交回一份报告（过程不进你的上下文）。这个阶段用的是**校对子代理（proofread）**：
+   - **校对（proofread）**：每个负责一个（或一组）缓存文件，一次最多 16 个。file 填具体文件名就是点名；填 `"*"` 则**自动均分**——同批的 `"*"` 任务平分全部缓存文件（如派 16 个 `"*"`、256 个缓存文件 → 每个 16 个），要一次覆盖全部文件时用它，不用自己去数文件再逐个点名。大文件还能用 indexes 切区间。它们只能读 + 写缓存条目的 doub_content（存疑内容：校对建议、润色建议都写这里），**改不了译文**：返回的 tasks[].doubts 带文件名与 index，报告是各自的总结（含"拿不准"的点）。拿到后按 7 的流程处理——读那些 index 的 doub_content，改完译文把该条的 doub_content 清空。**推荐在修复前跑一遍**。
+   **派之前先用 ask_user 问清意见类型**：这一遍要它们写哪一类——「只写校对建议（错译/漏译/事实错误/不通这些硬伤）」「只写润色建议（没硬伤但中文能更好：翻译腔、口语不自然、用词单调、节奏拖沓）」「两者都要」——再把答案写进 brief（如 brief="本次只写润色建议，每条给具体改法；对话读起来要像人话"）。brief 里不写这句时它们默认只写校对建议；两类意见都写进 doub_content，同一条目只留一条，所以"两者都要"时要交代它们**硬伤优先**。
+   派之前先想清楚要它们重点看什么，写进 brief 比它们自己发挥准。（另一个角色「原文探索」属于准备阶段，见流程 2 末尾那节；到这一步才发现字典/规范有缺口时，也随时可以回头补。）
 7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。对确认无需处理的系统性问题类型（如字典使用提示、纯语气词提示），可用 manage_problem_filter(action="add", keyword=["…"]) 加入问题过滤清单（keyword 可传数组一次加多个），让统计聚焦真问题；过滤后统计会明显下降，属于预期效果。
 8. **完成**：收尾前先调用 get_project_overview 确认项目真的翻完——只有 files_translated == files_total 且没有 running 任务才算整体完成（total==translated 可能只代表已缓存的部分翻完，不要据此收尾）；若还有文件没翻，回到流程 4 继续 start_translation 翻剩余文件。问题数可控、整体完成后，用 read_output 抽查最终输出文件（交付物；输出与缓存不完全一致，译后字典替换只在输出生效），确认无误后用一段自然语言总结本次操作（做了什么、翻译进度、剩余问题建议），不要调用工具，直接输出总结即可结束。
 
@@ -2553,6 +2554,26 @@ AGENT_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "search_input",
+            "description": "在**待翻译原文**里搜关键词或说话人（search_transl_cache 的原文侧对应工具：那边搜缓存=原文+译文+问题，这边只搜还没翻译的原文全文）。query 为关键词，field 取 all/src（原文正文）/name（说话人）；传 context=N 让每条命中再带上前后各 N 句（in_context=true 的是顺带带出来的上下文行，命中行不带这个字段）。field=all 时顶层 matched_in 汇总命中在原文还是说话人。典型用途：定译法/收字典前先查某个称呼或专有名词在全篇出现过几次、都出现在哪些上下文（出现次数与说话人是「该不该收、收哪个写法」的依据），以及比 read_input_file 逐段读更省 token 地定位语境；命中的 filename+index 可直接交给 read_input_file 精读。传 filename 只搜某个输入文件（来自 list_input_files），留空搜全部输入文件——**每次搜索都要把涉及的输入文件过一遍文件插件（比搜缓存慢），要缩小范围就传 filename**。注意译文侧的问题（漏译/残留日文/译名是否统一）不在原文里，那些用 search_transl_cache。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "field": {"type": "string", "enum": ["all", "src", "name"]},
+                    "filename": {"type": "string", "description": "可选。只在这个输入文件里搜（来自 list_input_files）。留空搜全部输入文件。"},
+                    "context": {
+                        "type": "integer",
+                        "description": "可选，0-20（默认 0）。每条命中再带上前后各 N 句上下文，用于判断语意与称呼用法。带上下文时命中上限会收紧（如 context=3 → 最多 40 条命中），命中很多时可配合 filename 缩小范围。",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "read_guideline",
             "description": "读取翻译规范（决定文风与措辞）。scope=global（默认）读全局规范库：不带 name 列出可选文件名，传 name（如 \"日译中_增强v2.md\"）返回全文。scope=project 读**项目规范**——项目目录里的 translation_guideline.md，是这个项目专属的规则，翻译时拼在全局规范之后、冲突时以它为准。试译定稿前必读；要改文风/术语/称呼前，先看项目规范里已经写了什么。",
             "parameters": {
@@ -2678,7 +2699,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_name_table",
-            "description": "读取 name替换表（人名表），返回 src_name/dst_name/count 列表。为空说明尚未生成。",
+            "description": "读取 name替换表（人名表），返回 src_name/dst_name/count 列表。为空说明尚未生成。配置 dictionary.useGPTDictInName 开着时（默认开），译名为空而 GPT 字典已收录的行会按字典译名补上（带 dst_name_source=gpt_dict），并额外返回 filled_from_gpt_dict 与 still_empty 两份清单——**还缺哪些名字看 still_empty**。",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -2737,8 +2758,10 @@ AGENT_TOOLS: list[dict[str, Any]] = [
             "name": "wait",
             "description": (
                 "等待一段时间后继续。用于翻译/GenDic 等后台任务还在跑、需要隔一会儿再看进度的场景。"
+                "两种用法：① 只给时长——纯等这么久；② 时长 + job_id——**盯着这个任务等：它先结束就立刻返回，"
+                "时长先到就照常返回**（例：「等这个任务完成，或最多等 5 分钟再看看」= job_id 给任务 id、minutes=5）。"
                 "用法：先 get_runtime 确认任务在跑 → wait → wait 结束后再 get_runtime 查状态（completed / 仍在跑看 eta_seconds 决定下一轮等多久）。"
-                "注意：wait 结束只是计时到了，不代表后台任务完成，必须查任务状态确认。"
+                "注意：没给 job_id 时 wait 结束只代表计时到了，不代表后台任务完成，必须查任务状态确认。"
                 "等待期间界面会显示倒计时；若用户期间点了停止，会立即中断等待。"
                 "单次最多等待 1800 秒（30 分钟）。"
             ),
@@ -2752,6 +2775,10 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     "minutes": {
                         "type": "number",
                         "description": "等待的分钟数。适合等待较久的翻译任务。",
+                    },
+                    "job_id": {
+                        "type": "string",
+                        "description": "可选。要等哪个任务（start_translation 返回的 job_id）。给了它就盯着这个任务：它先跑完（completed / failed / cancelled）就立刻返回，不必等满时长；时长先到而它还在跑，则照常返回并带上它当前的状态 + 一份运行时快照（等同 get_runtime，含 summary.eta_seconds，不必再单独查一次）。仍然必须给一个时长（那是兜底上限）。",
                     },
                     "reason": {
                         "type": "string",
@@ -2975,7 +3002,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                                 "index": {"type": "integer", "description": "要修改的条目 index"},
                                 "pre_dst": {"type": "string", "description": "可选。新译文（机翻结果）"},
                                 "proofread_dst": {"type": "string", "description": "可选。新校对译文（校对/润色结果，优先于 pre_dst）"},
-                                "doub_content": {"type": "string", "description": "可选。存疑内容（校对子代理写下的意见）。按它改完译文后传空串清掉，表示这条已处理"},
+                                "doub_content": {"type": "string", "description": "可选。存疑内容（校对子代理写下的意见：校对建议或润色建议，见 run_subagents）。按它改完译文后传空串清掉，表示这条已处理"},
                             },
                             "required": ["index"],
                         },
@@ -2994,8 +3021,8 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                 "派一批子代理并行干活，等它们全部跑完，把每份报告收回来。子代理有自己的上下文与"
                 "受限工具集，干活过程不进你的上下文，返回给你的只有每份报告。两种角色："
                 "**proofread（校对）**——只能读缓存/人名表/规范/问题清单，加写缓存条目的「存疑内容」"
-                "（doub_content），改不了译文；适合翻译完成后逐文件校对，返回它写了哪些 index 的疑问，"
-                "你用 read_transl_cache 读那些 doub_content、改完译文再清空它。"
+                "（doub_content，校对建议与润色建议都写这里），改不了译文；适合翻译完成后逐文件校对，"
+                "返回它写了哪些 index 的疑问，你用 read_transl_cache 读那些 doub_content、改完译文再清空它。"
                 "**explore（原文探索）**——只读原文与 GPT 字典、不写任何文件；用来补 GenDic 覆盖不到的"
                 "昵称/专有名词/称呼，以及给翻译规范提建议，结论在你的报告里由你汇总落地"
                 "（save_dict / write_project_guideline）。explore 要通读原文、**很费 token**，"
@@ -3032,7 +3059,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                                 },
                                 "brief": {
                                     "type": "string",
-                                    "description": "可选。给这个子代理的额外要求：重点核对什么、注意哪些角色/术语。count > 1 时这一份 brief 由展开出来的每个子代理共用（不用重复写）",
+                                    "description": "可选。给这个子代理的额外要求：重点核对什么、注意哪些角色/术语；**校对子代理还要在这里写明这一遍写哪一类意见**（只写校对建议 / 只写润色建议 / 两者都要，先 ask_user 问用户，见流程 6.5），没写就默认只写校对建议。count > 1 时这一份 brief 由展开出来的每个子代理共用（不用重复写）",
                                 },
                             },
                             "required": ["agent"],
@@ -4035,9 +4062,152 @@ def _tool_update_project_config(runner: AgentRunner, args: dict[str, Any]) -> An
     return result
 
 
-def _tool_get_name_table(runner: AgentRunner, _args: dict[str, Any]) -> Any:
+# ---- GPT 字典用于 name 字段（dictionary.useGPTDictInName）----
+# 翻译时（GalTransl/Name.py 的 load_name_table）会拿 GPT 字典里同名的词条去补 name 字段，
+# 而且这个开关默认就是开的（见 DefaultProjectConfig）。也就是说人名表里"译名空着、字典里
+# 有"的行其实早已生效——get_name_table 若不体现这一点，模型会去补一整批字典里早就有的名字。
+# 下面这套就是按同一口径把字典里的译名补进返回值（前端人名页的 overlayGptDictOntoNames
+# 是同一套规则的另一份实现：都只补空译名，不覆盖表里已有的）。
+
+
+def _gpt_dict_line(raw: str) -> tuple[str, str]:
+    """GPT 字典的一行 →（查找词, 替换词）；不是词条行则返回两个空串。
+
+    照抄 GalTransl/Dictionary.py 的 CGptDict.load_dic：跳过空行/注释行，4 个空格当 Tab，
+    兼容 `src->dst #note` 写法，至少两列才算词条。**不做 strip**——字典的命中判定是全等
+    比较（CGptDict.get_dst），把空白修掉会让"其实查不到"的行看起来像命中了。
+    """
+    if not raw or raw.startswith("\n"):
+        return "", ""
+    if raw.lstrip().startswith(("//", "\\\\")):  # 注释行
+        return "", ""
+    line = raw.replace("    ", "\t")
+    if "->" in line:
+        line = line.replace("->", "\t").replace("#", "\t")
+    parts = line.rstrip("\r\n").split("\t")
+    if len(parts) < 2:
+        return "", ""
+    return parts[0], parts[1]
+
+
+def _gpt_dict_name_map(runner: AgentRunner) -> dict[str, str]:
+    """项目 GPT 字典 → {查找词: 替换词}（只读）。
+
+    同一查找词出现多次时取**首次**出现的那条：CGptDict.get_dst 返回的就是第一个 search_word
+    全等的词条（字典里"后写的覆盖先写的"在这里不成立）。
+    """
     pid = runner._project_id()
-    return runner._http_get(f"/api/projects/{pid}/name-table")
+    cfg = urllib.parse.quote(runner.state.config_file_name or DEFAULT_CONFIG_FILE)
+    data = runner._http_get(f"/api/projects/{pid}/dictionary/project?config={cfg}")
+    if not isinstance(data, dict):
+        return {}
+    contents = data.get("dict_contents", {})
+    if not isinstance(contents, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key in data.get("gpt_dict_files", []) or []:
+        entry = contents.get(str(key))
+        if not isinstance(entry, dict):
+            continue
+        for raw in entry.get("lines", []) or []:
+            src, dst = _gpt_dict_line(str(raw))
+            if src and dst:
+                out.setdefault(src, dst)
+    return out
+
+
+def _use_gpt_dict_in_name(runner: AgentRunner) -> bool:
+    """配置里 dictionary.useGPTDictInName 是否开着。
+
+    取值口径与 Name.py 一致（**缺键 = 没开**）：配置里没写就意味着翻译时不会拿字典补 name
+    字段，这时在 get_name_table 里补上译名等于骗模型——它会以为这些名字已经有人管了。
+    配置读不到也按"没开"处理：这只是附加信息，不值得为一个可选展示把工具弄失败。
+    """
+    try:
+        pid = runner._project_id()
+        cfg = urllib.parse.quote(runner.state.config_file_name or DEFAULT_CONFIG_FILE)
+        data = runner._http_get(f"/api/projects/{pid}/config?config={cfg}")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"  ⚠ 读项目配置失败，get_name_table 不补 GPT 字典译名：{exc}")
+        return False
+    config = data.get("config") if isinstance(data, dict) else None
+    if not isinstance(config, dict):
+        return False
+    value = _get_config_key(config, "dictionary.useGPTDictInName")
+    return value is not _MISSING and bool(value)
+
+
+def _fill_names_from_gpt_dict(
+    names: list[Any], gpt_map: dict[str, str]
+) -> tuple[list[Any], list[str], list[str]]:
+    """把 GPT 字典里的译名补到**译名为空**的人名行上（只算不写）。
+
+    与人名翻译页的 overlayGptDictOntoNames 同一套规则：只补空的，不覆盖表里已有的译名——
+    表里写下的译名是用户（或 Agent）的决定，字典只回答"这行其实已经有出处了"。
+    返回（补好的人名行, 由字典补上的 src_name, 仍然没有译名的 src_name）。
+    """
+    out: list[Any] = []
+    filled: list[str] = []
+    still_empty: list[str] = []
+    for item in names:
+        if not isinstance(item, dict):
+            out.append(item)
+            continue
+        src = str(item.get("src_name") or item.get("name") or "").strip()
+        dst = str(item.get("dst_name") or "")
+        if dst.strip() or not src:
+            out.append(item)
+            continue
+        mapped = gpt_map.get(src)
+        if not mapped:
+            out.append(item)
+            still_empty.append(src)
+            continue
+        filled.append(src)
+        # 盖上出处：这行的译名不在表里，是字典在翻译时给 name 字段补的
+        out.append({**item, "dst_name": mapped, "dst_name_source": "gpt_dict"})
+    return out, filled, still_empty
+
+
+def _tool_get_name_table(runner: AgentRunner, _args: dict[str, Any]) -> Any:
+    """读人名替换表；useGPTDictInName 开着时，顺带把 GPT 字典里已有的译名补进返回值。
+
+    为什么要补：翻译时 name 字段会吃 GPT 字典里同名的词条，表里译名空着而字典里有人的行
+    **其实已经生效**。不体现这一点，模型会去补一整批"字典里早就写过"的名字。补上之后
+    still_empty 才是真正要它动手的那几个。
+
+    补的是**空译名**的行（与前端人名页同一套规则）：表里已有的译名不动，字典只作补充说明；
+    这些行在返回里带 dst_name_source="gpt_dict"——要固定住某行的译名得写进表（save_name_table），
+    要改它则得改字典。
+
+    **只读**：一个字节都不写回；配置/字典读不到就退回原样返回，绝不因此把工具弄失败。
+    """
+    pid = runner._project_id()
+    data = runner._http_get(f"/api/projects/{pid}/name-table")
+    names = data.get("names") if isinstance(data, dict) else None
+    if not isinstance(names, list) or not names:
+        return data
+    if not _use_gpt_dict_in_name(runner):
+        return data
+    try:
+        gpt_map = _gpt_dict_name_map(runner)
+    except Exception as exc:  # noqa: BLE001 - 字典读不到就少补一块，表本身照常返回
+        _log(f"  ⚠ 读 GPT 字典失败，get_name_table 返回原始人名表：{exc}")
+        return data
+    overlaid, filled, still_empty = _fill_names_from_gpt_dict(names, gpt_map)
+    return {
+        **data,
+        "names": overlaid,
+        "use_gpt_dict_in_name": True,
+        "filled_from_gpt_dict": filled,
+        "still_empty": still_empty,
+        "note": (
+            "dictionary.useGPTDictInName 开着：names 里译名为空、而 GPT 字典收录了的行，"
+            "已经按字典的译名补上（带 dst_name_source=gpt_dict，翻译时真的会生效），"
+            "它们也列在 filled_from_gpt_dict 里。**still_empty 才是表与字典都没有、需要你补的**；"
+            "要把某个译名固定下来（不再依赖字典）用 save_name_table 写进表里。"
+        ),
+    }
 
 
 def _name_table_entries(raw: Any) -> dict[str, str]:
@@ -4156,13 +4326,36 @@ def _tool_stop_translation(runner: AgentRunner, _args: dict[str, Any]) -> Any:
 
 WAIT_SECONDS_MAX = 1800  # 单次等待上限 30 分钟，避免 Agent 卡死在一次无限等待里
 WAIT_TICK = 0.5  # 倒计时刷新步长（秒），兼顾界面流畅与轮询开销
+# 带 job_id 时查任务状态的间隔（秒）：0.5s 那是给界面倒计时用的，查后端别这么勤
+WAIT_JOB_POLL_SECONDS = 3.0
+# 任务已经结束的状态（见 Service.JobState.status）：等到其中之一就不必再等了
+WAIT_JOB_DONE_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
+
+def _find_job(runner: AgentRunner, job_id: str) -> dict[str, Any] | None:
+    """在任务列表里按 id 找一个任务：**列表里没有这个 id 返回 None**。
+
+    用列表接口而不是 /api/jobs/{id}：后者对未知 id 直接 404（`_http_json` 会抛错），
+    而"这个 id 不在列表里"对等待来说是个正常结局（id 写错/任务已被清掉），不该跟
+    "查询失败"混在一起。列表本身拿不到（网络/格式不对）时抛错，由调用方当查询失败处理
+    ——继续等，别把一次抖动当成"任务不见了"。
+    """
+    data = runner._http_get("/api/jobs")
+    jobs = data.get("jobs") if isinstance(data, dict) else None
+    if not isinstance(jobs, list):
+        raise AgentToolError("任务列表读取失败：/api/jobs 没有返回 jobs 数组")
+    for job in jobs:
+        if isinstance(job, dict) and str(job.get("job_id") or "") == job_id:
+            return job
+    return None
 
 
 def _tool_wait(runner: AgentRunner, args: dict[str, Any]) -> Any:
-    """等待指定时长。期间持续推 wait_tick 事件供界面显示倒计时。
+    """等待指定时长；给了 job_id 就"它先结束，或时长先到"，谁先到算谁。
 
-    等待可被停止信号立即打断：先等满则 normal，被打断则 interrupted。无论哪种
-    都以工具成功返回，把状态交给模型判断下一步，而不是抛错中断整个循环。
+    期间持续推 wait_tick 事件供界面显示倒计时。等待可被停止信号立即打断：
+    先等满则 normal，被打断则 interrupted。无论哪种都以工具成功返回，
+    把状态交给模型判断下一步，而不是抛错中断整个循环。
     """
     raw_seconds = args.get("seconds")
     raw_minutes = args.get("minutes")
@@ -4176,23 +4369,62 @@ def _tool_wait(runner: AgentRunner, args: dict[str, Any]) -> Any:
 
     total = seconds + minutes * 60
     if total <= 0:
-        raise AgentToolError("未指定等待时长：请给出 seconds 或 minutes")
+        raise AgentToolError(
+            "未指定等待时长：请给出 seconds 或 minutes"
+            "（带 job_id 时也要给——它是兜底：任务先结束就提前返回）"
+        )
     total = min(total, WAIT_SECONDS_MAX)
+
+    # 要盯的任务（可选）：给了它就不用非等满时长——任务先结束就立刻收尾
+    job_id = str(args.get("job_id", "") or "").strip()
 
     reason = str(args.get("reason", "") or "").strip()
     total_ms = int(total * 1000)
     started = time.monotonic()
     # 事件带上本次工具调用 id：界面据此把倒计时挂到这一行（多次等待各挂各行）
     call_id = runner._active_tool_call_id
-    _log(f"  ⏳ 开始等待 {total:g}s" + (f"（{reason}）" if reason else ""))
-    runner._emit("wait_start", {"id": call_id, "seconds": round(total, 1), "total_ms": total_ms, "reason": reason})
+    _log(
+        f"  ⏳ 开始等待 {total:g}s"
+        + (f"（或任务 {job_id} 先结束）" if job_id else "")
+        + (f"（{reason}）" if reason else "")
+    )
+    runner._emit("wait_start", {
+        "id": call_id,
+        "seconds": round(total, 1),
+        "total_ms": total_ms,
+        "reason": reason,
+        **({"job_id": job_id} if job_id else {}),
+    })
 
     interrupted = False
+    job_status = ""
+    job_success: bool | None = None
+    job_error = ""
+    job_found = True
+    next_poll = 0.0  # 先立刻查一次，之后每 WAIT_JOB_POLL_SECONDS 一次
     while True:
         if runner.stop_event.is_set():
             interrupted = True
             break
         elapsed = time.monotonic() - started
+        if job_id and elapsed >= next_poll:
+            next_poll = elapsed + WAIT_JOB_POLL_SECONDS
+            found: dict[str, Any] | None = None
+            query_ok = True
+            try:
+                found = _find_job(runner, job_id)
+            except Exception as exc:  # noqa: BLE001 - 一次查询失败当"还在跑"，时间到了照样收尾
+                query_ok = False
+                _log(f"  ⏳ 查询任务 {job_id} 状态失败（{exc}），继续等")
+            if query_ok and found is None:
+                job_found = False  # id 写错或任务已被清掉：再等下去没意义
+                break
+            if found is not None:
+                job_status = str(found.get("status") or "")
+                if job_status in WAIT_JOB_DONE_STATUSES:
+                    job_success = bool(found.get("success"))
+                    job_error = str(found.get("error") or "")
+                    break
         if elapsed >= total:
             break
         remaining_ms = max(0, total_ms - int(elapsed * 1000))
@@ -4201,25 +4433,99 @@ def _tool_wait(runner: AgentRunner, args: dict[str, Any]) -> Any:
 
     elapsed_ms = int((time.monotonic() - started) * 1000)
     remaining_ms = 0 if interrupted else max(0, total_ms - elapsed_ms)
-    runner._emit(
-        "wait_end",
-        {
-            "id": call_id,
-            "interrupted": interrupted,
-            "elapsed_ms": elapsed_ms,
-            "remaining_ms": remaining_ms,
-            "total_ms": total_ms,
-        },
-    )
+    end_data: dict[str, Any] = {
+        "id": call_id,
+        "interrupted": interrupted,
+        "elapsed_ms": elapsed_ms,
+        "remaining_ms": remaining_ms,
+        "total_ms": total_ms,
+    }
+    if job_id:
+        # 为什么结束的：done=任务先结束 / timeout=时长先到 / missing=任务不在列表里
+        end_data["job_status"] = job_status
+        end_data["job_end_reason"] = (
+            "interrupted" if interrupted
+            else "missing" if not job_found
+            else "done" if job_status in WAIT_JOB_DONE_STATUSES
+            else "timeout"
+        )
+    runner._emit("wait_end", end_data)
+
+    waited = round(elapsed_ms / 1000, 1)
     if interrupted:
         _log(f"  ⏳ 等待被停止信号打断，已等 {elapsed_ms / 1000:.1f}s")
-        return {"waited_seconds": round(elapsed_ms / 1000, 1), "wait_interrupted": True, "note": "等待被用户停止打断"}
+        return {"waited_seconds": waited, "wait_interrupted": True, "note": "等待被用户停止打断"}
+    if job_id and not job_found:
+        _log(f"  ⏳ 任务 {job_id} 不在任务列表里，提前结束等待")
+        return {
+            "waited_seconds": waited,
+            "job_id": job_id,
+            "job_found": False,
+            "note": (
+                f"任务列表里找不到 {job_id}：id 可能写错，或这个任务已经不在列表里。"
+                "用 get_runtime 看当前项目的任务状态再决定下一步。"
+            ),
+        }
+    if job_id and job_status in WAIT_JOB_DONE_STATUSES:
+        _log(f"  ⏳ 任务 {job_id} 已结束（{job_status}），等待提前收尾，共 {elapsed_ms / 1000:.1f}s")
+        out: dict[str, Any] = {
+            "waited_seconds": waited,
+            "job_id": job_id,
+            "job_status": job_status,
+            "job_success": job_success,
+            "wait_completed": True,
+            "job_finished": True,
+            "note": f"任务已经结束（{job_status}）——比等待时长先到，不用再等了，按流程处理结果（查进度/问题清单）。",
+        }
+        if job_error:
+            out["job_error"] = job_error
+        return out
     _log(f"  ⏳ 等待结束，共 {elapsed_ms / 1000:.1f}s")
+    if job_id:
+        # 时长先到：这一刻模型要的就是进度与 eta_seconds（下一步一定是 get_runtime），
+        # 顺手取一份快照带上，省它一个来回。
+        snapshot = _runtime_snapshot(runner)
+        out: dict[str, Any] = {
+            "waited_seconds": waited,
+            "job_id": job_id,
+            "job_status": job_status or "running",
+            "job_finished": False,
+            "wait_completed": True,
+        }
+        if snapshot is not None:
+            out["runtime"] = snapshot
+            out["note"] = (
+                f"等待时长到了，任务 {job_id} 还在跑（{job_status or 'running'}）："
+                "下面附了当前运行时快照（等同 get_runtime，含 summary.eta_seconds），"
+                "据此决定下一轮等多久——eta 还长就再 wait 一次同一个 job_id，快完了就把时长调短盯着。"
+            )
+        else:
+            out["note"] = (
+                f"等待时长到了，任务 {job_id} 还在跑（{job_status or 'running'}）："
+                "调用 get_runtime 看进度与 eta_seconds 再决定下一轮等多久"
+                "（也可以再 wait 一次同一个 job_id）。"
+            )
+        return out
     return {
-        "waited_seconds": round(elapsed_ms / 1000, 1),
+        "waited_seconds": waited,
         "wait_completed": True,
         "note": "这只是计时结束，不代表后台任务完成。如果是翻译任务，请调用 get_runtime 确认任务状态后再决定下一步。",
     }
+
+
+def _runtime_snapshot(runner: AgentRunner) -> dict[str, Any] | None:
+    """顺手取一份运行时快照（等同模型再调一次 get_runtime），取不到就返回 None。
+
+    放在 wait 的"时长先到、任务还在跑"分支里：那一刻模型正需要进度与 eta_seconds 来决定
+    下一轮等多久，直接带上就不必再多跑一个来回。副作用（错误水位线 seen_error_ids）与
+    模型自己调 get_runtime 一致，所以不会造成同一条报错被重复发。
+    快照只是顺手带的，取不到（后端抖了/项目读不到）不该影响 wait 本身的结论。
+    """
+    try:
+        return _tool_get_runtime(runner, {})
+    except Exception as exc:  # noqa: BLE001
+        _log(f"  ⚠ wait 结束时取运行时快照失败：{exc}")
+        return None
 
 
 def _error_key(err: dict[str, Any]) -> str:
@@ -4749,7 +5055,7 @@ CACHE_ENTRY_FIELD_DESCRIPTIONS: dict[str, str] = {
     "post_dst_preview": "最终译文的缓存快照（后润）：译后字典替换 + 对话符号恢复之后的形态；默认只在它与译文实质不同（不只差首尾对话符号）时返回",
     "proofread_dst": "校对/润色稿；有内容时它就是这条的最终译文（优先于 pre_dst）",
     "proofread_by": "校对者标记（校对失败的会带 Fail）；未校对为空",
-    "doub_content": "存疑内容：校对子代理（run_subagents）看过后写下的校对意见（错译/漏译/事实错误等），一条一句；没疑问的条目为空。要修这一条就按它的说法改 pre_dst，改完用 patch_transl_cache 把 doub_content 清空表示已处理",
+    "doub_content": "存疑内容：校对子代理（run_subagents）看过后写下的意见——校对建议（错译/漏译/事实错误等）或润色建议（翻译腔、口语不自然等表达改进），一条一句；没疑问的条目为空。要修这一条就按它的说法改 pre_dst，改完用 patch_transl_cache 把 doub_content 清空表示已处理",
     "trans_by": "译者标记：翻译引擎的模型名，或被别的来源改过时的那个名字（本会话 Agent 用 patch_transl_cache 改过的条目记的是 Agent 的模型名）；读缓存时逐条只报少数派——这批里出现最多的那个（多数派，通常就是引擎翻的）与空值都不逐条给，多数派记在顶层 majority_trans_by；默认不返回（要看它传 fields）",
     "problem": "自动问题分析写入的问题标签，可能多条（以「, 」分隔）；list_problems 的统计与下钻都基于它",
 }
@@ -5029,17 +5335,31 @@ _SEARCH_MATCH_KEYS: dict[str, str] = {
     "match_problem": "problem",
 }
 
+# /input/search 同样有逐行命中标记，只是原文侧可搜的只有两列：正文与说话人。
+_INPUT_SEARCH_MATCH_KEYS: dict[str, str] = {
+    "match_src": "src",
+    "match_name": "name",
+}
 
-def _slim_search_results(result: dict[str, Any], field: str, context: int) -> None:
-    """就地精简 /cache/search 的返回（模型看到的那份）。
 
-    - 逐行的 match_src / match_dst / match_problem 去掉，改成顶层 matched_in 汇总一次
-      （只在 field="all" 时给：指定 field 的搜索本来就只有那一侧会命中，汇总没有信息量）；
+def _slim_search_results(
+    result: dict[str, Any],
+    field: str,
+    context: int,
+    match_keys: dict[str, str] | None = None,
+) -> None:
+    """就地精简搜索接口的返回（模型看到的那份）：/cache/search 与 /input/search 共用。
+
+    - 逐行的命中标记（缓存是 match_src/match_dst/match_problem，原文是 match_src/match_name）
+      去掉，改成顶层 matched_in 汇总一次（只在 field="all" 时给：指定 field 的搜索本来就只有
+      那一侧会命中，汇总没有信息量）；
     - context>0 时逐行的 in_context 只保留 true——那是"顺带带出来的上下文行"，命中行不带
       这个字段，免得每行都挂一个 in_context=false；
-    - trans_by 逐条只给**少数派**（见 _dominant_trans_by）：逐条的多数派与空值都删掉，多数派
-      放顶层 majority_trans_by 记一次——这批"大头是谁翻的、哪几条是别人改的"一目了然。
+    - trans_by（只有缓存条目有）逐条只给**少数派**（见 _dominant_trans_by）：逐条的多数派与
+      空值都删掉，多数派放顶层 majority_trans_by 记一次——这批"大头是谁翻的、哪几条是别人改的"
+      一目了然。
     """
+    keys = match_keys if match_keys is not None else _SEARCH_MATCH_KEYS
     rows = result.get("results")
     if not isinstance(rows, list):
         return
@@ -5050,10 +5370,10 @@ def _slim_search_results(result: dict[str, Any], field: str, context: int) -> No
         if not isinstance(row, dict):
             slimmed.append(row)
             continue
-        for key, label in _SEARCH_MATCH_KEYS.items():
+        for key, label in keys.items():
             if row.get(key):
                 counts[label] = counts.get(label, 0) + 1
-        clean = {k: v for k, v in row.items() if k not in _SEARCH_MATCH_KEYS}
+        clean = {k: v for k, v in row.items() if k not in keys}
         if not clean.get("in_context"):
             clean.pop("in_context", None)
         _strip_dominant_trans_by(clean, dominant)
@@ -5115,6 +5435,87 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
             if not any(f.get("name") == filename for f in listing.get("files", [])):
                 notes.append(
                     f"缓存文件 {filename} 不存在（检查 list_transl_cache 的文件名拼写）；这是全项目搜索的 0 命中。"
+                )
+        except AgentToolError:
+            pass
+    if notes and isinstance(result, dict):
+        existing = str(result.get("note") or "")
+        result = {**result, "note": "；".join([part for part in [existing, *notes] if part])}
+    return result
+
+
+def _tool_search_input(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """在待翻译原文里搜关键词/说话人；context=N 时每条命中再带上前后各 N 句。
+
+    与 search_transl_cache 是一套用法，区别只在搜的对象：那边搜**缓存**（原文 + 译文 + 问题，
+    含已翻的部分），这边搜**输入文件**（还没翻译的原文全文）。用途也由此分工——
+    - 定译法/收字典前，查某个称呼、口头禅、专有名词在全篇出现过多少次、都出现在什么上下文里
+      （出现次数与说话人是"该不该收进字典、收哪个写法"的依据）；
+    - 拿不准某句原文的语境时，比 read_input_file 逐段读更省 token；
+    - 命中的 filename + index 可直接交给 read_input_file 精读。
+
+    搜的是原文，所以**译文侧的问题（漏译/残留日文）不在这里**，那些用 search_transl_cache。
+    每次搜索都要把涉及的输入文件过一遍文件插件（比搜缓存慢），要缩小范围就传 filename。
+    """
+    query = str(args.get("query", "")).strip()
+    if not query:
+        raise AgentToolError("query is required")
+    field = str(args.get("field", "all") or "all").strip() or "all"
+    if field not in ("all", "src", "name"):
+        raise AgentToolError("field must be one of: all, src, name")
+    filename = str(args.get("filename", "") or "").strip()
+    raw_context = args.get("context", 0)
+    try:
+        context = max(0, min(int(raw_context or 0), 20))
+    except (TypeError, ValueError):
+        raise AgentToolError(f"context 必须是 0-20 的整数（收到 {raw_context!r}）")
+    # 与 search_transl_cache 同一套收紧规则：命中 × (2N+1) 行一起返回，总量控制在 ~300 行内。
+    # total 不受影响（仍是全部命中数）。
+    max_hits = 100 if context == 0 else max(1, 300 // (2 * context + 1))
+    pid = runner._project_id()
+    body: dict[str, Any] = {
+        "query": query,
+        "field": field,
+        "options": {"re": False},
+        "max_results": max_hits,
+        "config_file_name": runner.state.config_file_name,
+    }
+    if context:
+        body["context"] = context
+    if filename:
+        body["filename"] = filename
+    result = runner._http_post(f"/api/projects/{pid}/input/search", body)
+    if isinstance(result, dict):
+        _slim_search_results(result, field, context, _INPUT_SEARCH_MATCH_KEYS)
+    notes: list[str] = []
+    # 解析不了的文件（插件/格式问题）被跳过了：明说，否则"这个文件里没有"和"这个文件没读"
+    # 看起来一模一样。要诊断那个文件用 read_input_file。
+    if isinstance(result, dict) and result.get("files_failed"):
+        notes.append(
+            f"这些输入文件解析失败、没参与搜索：{'、'.join(str(n) for n in result['files_failed'])}"
+            "（文件插件/格式问题，用 read_input_file 试读该文件可看到具体报错）；"
+            "它们里面有没有命中是未知的。"
+        )
+    if isinstance(result, dict) and context:
+        result["context"] = context  # 服务端已回；这里兜底，保证调用方一定看得到
+        notes.append(
+            f"已带上下文：每条命中前后各 {context} 句（in_context=true 的是顺带带出来的"
+            f"上下文行、不是命中，命中行不带这个字段）；"
+            f"带上下文时命中上限收紧为 {max_hits} 条以免返回体过大，total 仍是全部命中数。"
+        )
+    # 指定了文件但 0 命中：确认一下该输入文件是否存在，避免模型误以为关键词不匹配
+    if isinstance(result, dict) and not result.get("total") and filename:
+        try:
+            listing = runner._http_get(f"/api/projects/{pid}/files")
+            available = [
+                str(f.get("name") or "")
+                for f in listing.get("input_files", [])
+                if isinstance(f, dict) and f.get("is_file", True)
+            ]
+            if filename not in available:
+                notes.append(
+                    f"输入文件 {filename} 不存在（检查 list_input_files 的文件名拼写）；"
+                    "这是全项目搜索的 0 命中。"
                 )
         except AgentToolError:
             pass
@@ -5647,29 +6048,47 @@ def _tool_ask_user(runner: AgentRunner, args: dict[str, Any]) -> Any:
 # 我们的回合里工具是串行执行的（见 run() 的 for tc in tool_calls），没有 resume 那套机制，
 # 阻塞式最省事也最不容易出错；并发一点没少——同一批里的子代理是真并行跑的。
 
-# 校对子代理的 system prompt：只盯"事实错误与常规翻译错误"，而且**只能提意见**。
-SUBAGENT_PROOFREAD_PROMPT = """你是 GalTransl 的**校对子代理**，只干一件事：读完分配给你的缓存，找出**事实错误与常规翻译错误**，把意见写进缓存条目的 doub_content。
+# 校对子代理的 system prompt：**只能提意见**（写 doub_content），不能改译文。
+# 写"校对建议"还是"润色建议"由主 Agent 问过用户后写在任务说明里（见 _SUBAGENT_BRIEF_TEMPLATE），
+# 这里只把两类意见的定义、写法与优先级讲清楚；任务说明没提时默认只写校对建议。
+SUBAGENT_PROOFREAD_PROMPT = """你是 GalTransl 的**校对子代理**，只干一件事：读完分配给你的缓存，把意见写进缓存条目的 doub_content。
 
 # 权力边界（越界即失败）
 - 你**只能读**（缓存、人名表、翻译规范、问题清单），以及用 patch_transl_cache **写 doub_content** 这一个字段；
 - 你的 patch_transl_cache 里只有 index 与 doub_content 两个入参：**译文字段（pre_dst / proofread_dst）根本不存在**，也没有委派、启动任务、改配置的权力；
 - **你只负责这一次派给你的那些文件**（可能是一个，也可能是自动均分出来的一组）：read_transl_cache / patch_transl_cache 的 filename 只接受它们，范围外会被直接拒掉；要核对某个词在别处的译法，用 search_transl_cache（它是全项目范围）；
-- 发现错误就写意见，改由主 Agent 做——不要试图绕路。
+- 发现问题就写意见，改由主 Agent 做——不要试图绕路。
 
-# 只报这四类问题
+# 写哪一类意见：以任务说明为准
+你的意见分两类，**这一遍写哪一类由任务说明（"主 Agent 的额外要求"）指定**——那里面已经写明用户要的是什么：
+- 只要求「校对建议」→ 只挑硬伤，不要顺带报风格偏好；
+- 只要求「润色建议」→ 只提表达上的改进，别去纠结对错（顺手看到明显硬伤也可以带上一条）；
+- 两类都要求 → 都写，但**硬伤优先**：先保证错译漏译都被抓出来，再谈润色。
+任务说明没提这件事时，默认**只写校对建议**。
+
+**校对建议（硬伤，四类）**
 1. **错译**：意思翻错、主客颠倒、否定/时态/数量弄反；
 2. **漏译**：原文有的信息译文里没有（整句漏掉、半句被吞、人称/称谓被省掉）；
 3. **事实错误**：人名/地名/专有名词/设定的译法与项目既有译法或原文设定冲突（先查人名表与其它出现处）；
 4. **明显不通**：中文不成句、指代错乱、说话人张冠李戴（结合 speaker 判断）。
-**不要报风格偏好**（要不要口语化、语气词够不够、标点习惯、个别用词美不美）——那不是你的事，主 Agent 会按项目规范统一处理。宁可少报，也不要拿风格问题把真正的错误淹掉。
+
+**润色建议（没硬伤，但中文能更好）**
+- 读起来别扭、有翻译腔：词序拗口、修饰语堆叠、一连串"的"；
+- 口语不自然：对话像书面语，语气与角色设定（傲娇 / 冷淡 / 大小姐 / 死党…）对不上；
+- 用词单调或不准：同一段反复用同一个词，拟声词、感叹处理得生硬；
+- 节奏问题：该断句的地方拖成一长串，或该一口气说完的被拆得很碎。
+写润色建议必须**给出具体改法**（"建议改成……"）——只说"不够好""可以更自然"等于没写；也不要为了凑数硬提，一条条目最多一条润色意见，优先挑真正影响阅读的。
+
+**两类共同的三条规矩**：一条条目只写一次（再写会覆盖）；没问题的条目不要写；每条都要写清"问题是什么 + 该怎么改"，必要时给出原文依据。宁可少报，也不要拿噪音把真正的硬伤淹掉。
 
 # 怎么干
 1. 先 read_transl_cache 读你负责的区间（默认列就够：原文 post_src、译文 pre_dst、机翻自查 problem，以及别人写过的 doub_content）；
-2. 要判断译名一致性：search_transl_cache 搜同一个词的其它出现处、get_name_table 看人名表；判断取舍时 read_guideline 看项目规范；
-3. 有疑问就用 patch_transl_cache 写进去，一条一个问题、写清"错在哪 + 该怎么改"。可以一次多条：
+2. 要判断译名一致性：search_transl_cache 搜同一个词的其它出现处、get_name_table 看人名表；判断取舍时 read_guideline 看项目规范（润色建议尤其要以项目规范为准，别跟规范里定下的文风打架）；
+3. 有疑问就用 patch_transl_cache 写进去，一条一个问题、写清"问题是什么 + 该怎么改"。可以一次多条：
    patch_transl_cache(filename="<你的文件>", patches=[
      {"index": 33, "doub_content": "漏译：原文「おっぱい」在译文里没有对应词，建议补为「欧派」"},
      {"index": 41, "doub_content": "错译：原文是「否定」，译文翻成了肯定"},
+     {"index": 58, "doub_content": "润色：直译得比较生硬，建议改成「我才不是特意为你做的呢！」"},
    ])
    没问题的条目不要写；同一个 index 只写一次（再写会覆盖）。
 4. problem 里的机翻提示可以参考，但那是统计标签，**只写你核对过的**，不要照抄。
@@ -5678,7 +6097,7 @@ SUBAGENT_PROOFREAD_PROMPT = """你是 GalTransl 的**校对子代理**，只干�
 # 收尾
 不再调用工具后，输出一份**简短**报告（这是主 Agent 唯一会看到的你的输出）：
 - 负责的文件与区间、读了多少条；
-- 写了几条意见、分别是哪类问题（错译/漏译/事实错误/不通）；
+- 写了几条意见、分别是哪一类（校对：错译/漏译/事实错误/不通；润色：表达/语气/用词/节奏）；
 - 拿不准但值得人看一眼的点。
 不要在报告里复述每条意见的全文（doub_content 里已经有了），也不要贴原文译文。"""
 
@@ -5689,10 +6108,10 @@ _SUBAGENT_BRIEF_TEMPLATE = """# 你的任务
 - 角色：{label}
 - 负责的缓存文件：{file}
 - 负责的区间：{indexes}
-- 主 Agent 的额外要求：{brief}
+- 主 Agent 的额外要求（**里面会写明这一遍写哪一类意见：校对建议 / 润色建议 / 两者都要**）：{brief}
 
 负责的文件可能不止一个（自动均分出来的），逐个文件处理，别漏；读完你负责的区间，把发现的
-问题写进对应条目的 doub_content，然后交报告。"""
+问题写进对应条目的 doub_content，然后交报告。上面没写意见类型时，默认只写校对建议。"""
 
 # 原文探索的任务说明：它不写文件，交的只有报告。
 _SUBAGENT_EXPLORE_BRIEF = """# 你的任务
@@ -5710,7 +6129,7 @@ _SUBAGENT_EXPLORE_BRIEF = """# 你的任务
 SUBAGENT_EXPLORE_PROMPT = """你是 GalTransl 的**原文探索子代理**，只干两件事：读**原文**、对照 **GPT 字典**，找出「字典里还缺什么」与「翻译规范该注意什么」，把结论写进最后那份报告。
 
 # 权力边界（越界即失败）
-- 你**只能读**两样东西：输入目录里的原文（list_input_files / read_input_file）与项目 GPT 字典（list_dict_files / read_dict）；
+- 你**只能读**两样东西：输入目录里的原文（list_input_files / read_input_file / search_input）与项目 GPT 字典（list_dict_files / read_dict）；
 - 你**不写任何文件**，也看不到译文：字典与项目规范由主 Agent 汇总后落地。你的价值在"读得广、找得准"，不在动手改；
 - 任务里点名了原文文件的话，你就**只负责点名给你的那些**（可能不止一个，自动均分出来的，逐个处理别漏）：list_input_files 只会列出它们，读别的文件会被拒；没点名才由你自己挑。
 
@@ -5725,8 +6144,9 @@ SUBAGENT_EXPLORE_PROMPT = """你是 GalTransl 的**原文探索子代理**，只
 # 怎么干
 1. 先 list_input_files 看有哪些原文文件，挑代表性的读——**别试图读完整个项目**，预算用完就停，按文件顺序来；
 2. 用 read_input_file 读原文（index 从 1 开始，支持区间如 "1-100"）；判断只能基于原文本身与字典，你没有译文可参考；
-3. 用 list_dict_files / read_dict 看 GPT 字典里**已经有什么**：只报没有的或写得不好的，重复的建议是噪音；
-4. 提到一个词时把信息给准：原文写法、出现处（文件 / index）、大约出现多少次、为什么该收进字典。
+3. 用 **search_input** 核对"某个词/称呼全篇出现过多少次、都在什么上下文、是不是同一个角色在用"（context=2~3 一起看上下文）——收不收进字典、收哪个写法，靠的是这些次数与场景，别凭一次偶遇下结论；
+4. 用 list_dict_files / read_dict 看 GPT 字典里**已经有什么**：只报没有的或写得不好的，重复的建议是噪音；
+5. 提到一个词时把信息给准：原文写法、出现处（文件 / index）、大约出现多少次（search_input 的 total 就是）、为什么该收进字典。
 
 # 收尾
 不再调用工具后，输出一份**紧凑的结构化报告**（这是主 Agent 唯一会看到的你的输出，有长度上限）：
@@ -5780,8 +6200,9 @@ SUBAGENT_ROLES: dict[str, SubAgentRole] = {
         prompt=SUBAGENT_EXPLORE_PROMPT,
         brief=_SUBAGENT_EXPLORE_BRIEF,
         # 只有原文与 GPT 字典：不碰缓存（它看的是原文）、不碰规范（建议由主 Agent 合并时取舍），
-        # 更没有任何写工具。
-        tools=("list_input_files", "read_input_file", "list_dict_files", "read_dict"),
+        # 更没有任何写工具。search_input 给它"某个称呼全篇出现过几次、都在什么上下文"这类
+        # 判断用——它要的正是"读得广"。
+        tools=("list_input_files", "read_input_file", "search_input", "list_dict_files", "read_dict"),
         report_chars=SUBAGENT_EXPLORE_REPORT_CHARS,
     ),
 }
@@ -5813,8 +6234,9 @@ def _subagent_patch_schema() -> dict[str, Any]:
         for field in ("pre_dst", "proofread_dst"):
             properties.pop(field, None)
         copy["function"]["description"] = (
-            "把你的校对意见写进缓存条目的 doub_content（存疑内容），一条一个具体问题，"
-            "写清错在哪、该怎么改。可以一次传多条 patches。"
+            "把你的意见写进缓存条目的 doub_content（存疑内容），一条一个具体问题，"
+            "写清问题在哪、该怎么改。可以一次传多条 patches。"
+            "**写校对建议还是润色建议以任务说明为准**（没说明就默认只写校对建议）。"
             "**你是校对子代理，只能写 doub_content**——译文字段不在你的入参里，改由主 Agent 做；"
             "同一个 index 写第二次会覆盖上一次。"
         )
@@ -5835,7 +6257,8 @@ def _subagent_tools(agent: str) -> list[dict[str, Any]]:
 
 
 # 认"锁定文件"的工具：任务里给了 file 时，这些工具的 filename 入参被限制在派给它的那些文件里。
-# search_transl_cache / list_problems / get_name_table 本来就是跨文件/跨项目的，不在其中。
+# 搜索类（search_transl_cache / search_input）与 list_problems / get_name_table 本来就是
+# 跨文件/跨项目的，不在其中——子代理要核对"这个词在别处怎么翻的/原文里怎么说"，正是它们的用途。
 _LOCKED_FILENAME_TOOLS: tuple[str, ...] = (
     "read_transl_cache",
     "patch_transl_cache",
@@ -5995,7 +6418,7 @@ def _subagent_handlers(
 
 
 def _subagent_chat(
-    client: Any, model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    client: Any, model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
 ) -> tuple[str, list[Any], str, str]:
     """子代理的一次请求（**非流式**）：返回（正文, 工具调用, 思考字段名, 思考内容）。
 
@@ -6003,14 +6426,19 @@ def _subagent_chat(
     要等当前这次请求回来才生效（父回合的停止仍会立刻终止它后续的轮次）。
     思考字段的约定与主 Agent 一致（见 REASONING_FIELD_NAMES）：带 tools 的多轮对话里，
     DeepSeek 这类 provider 要求把上一轮的 reasoning 原样回传，不回就 400。
+
+    tools=None 用于压缩那一轮：整个字段不发出（而不是发 null——有些兼容端点不认），
+    模型因此没有"接着调工具"的选项（见 SubAgentRunner._begin_compaction）。
     """
-    resp = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        tools=tools,
-        stream=False,
-        timeout=_llm_timeout(),
-    )
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "timeout": _llm_timeout(),
+    }
+    if tools is not None:
+        kwargs["tools"] = tools
+    resp = client.chat.completions.create(**kwargs)
     choices = getattr(resp, "choices", None) or []
     message = getattr(choices[0], "message", None) if choices else None
     if message is None:
@@ -6033,12 +6461,32 @@ def _truncate_text(text: str, limit: int, hint: str = "") -> str:
     return text[:limit] + (hint or f"…（已截断，共 {len(text)} 字符）")
 
 
+# 子代理的压缩指令（Insert-then-Compress 的那条瞬时消息，见 SubAgentRunner._begin_compaction）。
+# 与主 Agent 那份（COMPACT_INSTRUCTION_PROMPT）的差别：子代理任务单一，而且压缩那一轮**不带
+# tools**——它没有"接着调工具"的余地，所以不必像主 Agent 那样反复强调"不要执行上面的请求"。
+# 输出同样用 <summary> 包住，与主 Agent 共用 _parse_compact_summary 解析。
+SUBAGENT_COMPACT_INSTRUCTION_PROMPT = """[记忆压缩模式] 上面的工作已经告一段落。现在不要继续任务，把它压缩成一份摘要，供你在后续（换了一段上下文之后）接着做同一件事。严格执行：
+1. 只输出摘要，不要调用工具、不要接着干活；
+2. 正文用 <summary>…</summary> 包住，按下面的骨架写：
+<summary>
+## 任务与范围
+（你负责的文件 / index 区间、目标）
+## 已完成
+（读过哪些区间、做了什么、写下了哪些意见或发现）
+## 关键发现
+（逐条列：文件名 / index / 原文写法 / 译名 / 结论——这些硬信息必须原样保留，不要概括掉）
+## 待办
+（还没读的区间、需要复查或拿不准的点）
+</summary>
+3. 用中文，简洁但不丢信息。"""
+
+
 class SubAgentRunner:
     """一个子代理实例：自己的消息、自己的工具表，跑完交一份报告。
 
     一个实例只被一个线程跑（见 _tool_run_subagents 的线程池），所以内部不需要加锁。
-    消息历史超窗口时按父 Agent 的预算与摘要模型压缩（见 _maybe_compact），避免 24 轮
-    工具往返把上下文撑爆。
+    消息历史超窗口时与父 Agent 走同一套压缩（Insert-then-Compress：挂上压缩指令、用下一轮
+    请求把摘要拿回来，见 _begin_compaction），避免 24 轮工具往返把上下文撑爆。
     """
 
     def __init__(
@@ -6064,6 +6512,11 @@ class SubAgentRunner:
         self.tool_calls = 0
         self.doubts: list[dict[str, Any]] = []
         self.started_at = time.time()
+        # 正在进行的一次压缩：{cut, head_keep, estimated, limit}。挂上压缩指令后置上，
+        # 收尾（_finish_compaction）或回滚（_abort_compaction）时清空。
+        self._pending_compaction: dict[str, Any] | None = None
+        # 压缩整条路子都失败过（插入式 + 独立请求都没压成）：不再重试，否则每轮都白跑一次
+        self._compact_failed = False
 
     @property
     def file_label(self) -> str:
@@ -6138,28 +6591,101 @@ class SubAgentRunner:
         """估算当前历史占用的 token（子代理无 usage 锚点，纯字符估算；见 _estimate_usage_tokens）。"""
         return _estimate_usage_tokens(self.messages)
 
-    def _maybe_compact(self) -> None:
-        """历史过长时把早期工具往返压成摘要，复用父 Agent 的窗口预算、切点规则与摘要模型。
+    def _begin_compaction(self) -> bool:
+        """历史超窗口就挂上压缩指令，让**下一轮请求**顺带把摘要拿回来（Insert-then-Compress）。
 
-        与父 Agent 的差别：头部 2 条（system 提示词 + 任务说明）永远保留——子代理没有别的
-        途径知道"我是谁、负责哪些文件"；摘要走父 Agent 的 _summarize_messages（同一份
-        COMPACT_SUMMARY_PROMPT、同一个模型），失败降级 _local_fallback_summary。切点仍由
-        _find_compaction_cut 保证 assistant.tool_calls 与 tool 响应成对，不会切出非法请求。
+        与父 Agent 同一机制、同一套阈值（父的窗口 + COMPACT_TRIGGER_RATIO + 尾部预留），
+        差别只有三处：
+        - 头部 2 条（system 提示词 + 任务说明）永远保留——子代理没有别的途径知道"我是谁、
+          负责哪些文件"；
+        - 保留尾部取 SUBAGENT_COMPACT_KEEP_RECENT（8，只有父会话的一半）；
+        - 压缩那一轮**不带 tools**，它没有"接着调工具"的余地，也就没有父 Agent 那条
+          "模型回了工具调用就判失败"的分支。
         """
+        if self._pending_compaction is not None or self._compact_failed:
+            return False
         window = self._parent_context_window()
         limit = int(window * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
         if limit <= 0:
-            return
+            return False
         estimated = self._estimate_context_tokens()
         if estimated <= limit:
-            return
+            return False
         head_keep = 2
         cut = _find_compaction_cut(self.messages[head_keep:], SUBAGENT_COMPACT_KEEP_RECENT)
         if cut <= 0:
-            return
+            # 找不到安全切点：别每轮都重算一遍（父 Agent 的 _compact_failed_this_turn 同理）
+            self._compact_failed = True
+            return False
         cut += head_keep
+        # 指令只进内存、不落盘；它也**不会**被写进摘要或报告（收尾时弹掉）
+        self.messages.append({"role": "user", "content": SUBAGENT_COMPACT_INSTRUCTION_PROMPT})
+        self._pending_compaction = {
+            "cut": cut,
+            "head_keep": head_keep,
+            "estimated": estimated,
+            "limit": limit,
+        }
+        return True
+
+    def _abort_compaction(self) -> None:
+        """压缩没成：把那条瞬时指令弹掉，历史回到原样。"""
+        if self._pending_compaction is None:
+            return
+        self._pending_compaction = None
+        if self.messages:
+            self.messages.pop()
+
+    def _run_compaction_request(self, client: Any, model: str) -> None:
+        """发出带压缩指令的那轮请求、收下摘要；失败退回独立摘要请求。
+
+        这轮**不带 tools**（见 _begin_compaction），拿到的正文按 <summary> 解析。整条路子
+        （插入式 → 独立请求 → 本地兜底）都不会让子代理卡死。
+        """
+        pending = self._pending_compaction or {}
+        cut = pending.get("cut")
+        try:
+            content, _, _, _ = self._chat_with_retry(client, model, None)
+        except AgentStopRequested:
+            self._abort_compaction()  # 父回合被停止：历史不必留着那条指令
+            raise
+        except Exception as exc:  # noqa: BLE001 - 压缩失败不能拖垮子代理
+            _log(f"  ⚠ 子代理 {self.id} 压缩请求失败（{exc}），回退独立摘要请求")
+            self._abort_compaction()
+            self._compact_via_separate_request(cut)
+            return
+        if not self._finish_compaction(content):
+            _log(f"  ⚠ 子代理 {self.id} 压缩响应里没有摘要，回退独立摘要请求")
+            self._compact_via_separate_request(cut)
+
+    def _finish_compaction(self, content: str) -> bool:
+        """摘要到手 → 弹掉指令、按切点重建消息列表。"""
+        pending = self._pending_compaction
+        if pending is None:
+            return False
+        summary = _parse_compact_summary(content)
+        if not summary.strip():
+            self._abort_compaction()
+            return False
+        self._pending_compaction = None
+        self.messages.pop()  # 那条压缩指令不是历史
+        self._apply_summary(int(pending["head_keep"]), int(pending["cut"]), summary)
+        return True
+
+    def _compact_via_separate_request(self, cut: int | None = None) -> None:
+        """降级路径：另发一次独立摘要请求（复用父 Agent 的 _summarize_messages，不带 tools）。
+
+        插入式那轮请求失败、或模型没给出摘要时走它；摘要再失败还有 _local_fallback_summary
+        收底。切点仍由 _find_compaction_cut 保证 tool_calls 与 tool 响应成对，不会切出非法请求。
+        """
+        head_keep = 2
+        if cut is None:
+            cut = _find_compaction_cut(self.messages[head_keep:], SUBAGENT_COMPACT_KEEP_RECENT)
+            if cut <= 0:
+                self._compact_failed = True
+                return
+            cut += head_keep
         head = self.messages[head_keep:cut]
-        tail = self.messages[cut:]
         summary = ""
         summarizer = getattr(self.parent, "_summarize_messages", None)
         if callable(summarizer):
@@ -6169,6 +6695,16 @@ class SubAgentRunner:
                 _log(f"  ⚠ 子代理 {self.id} 摘要失败，回退本地截断: {exc}")
         if not summary.strip():
             summary = _local_fallback_summary(head)
+        self._apply_summary(head_keep, cut, summary)
+
+    def _apply_summary(self, head_keep: int, cut: int, summary: str) -> None:
+        """按切点重建消息列表：头部 head_keep 条 + 一条摘要 + 尾部原文。
+
+        被裁掉的旧消息直接丢掉——子代理跑完只交一份报告，中间过程不需要召回（与主 Agent
+        的 read_history_archive 不同，它没有"回头查旧账"的需求）。
+        """
+        dropped = cut - head_keep
+        tail = self.messages[cut:]
         self.messages = [
             *self.messages[:head_keep],
             {
@@ -6181,13 +6717,16 @@ class SubAgentRunner:
             },
             *tail,
         ]
-        _log(
-            f"  📦 子代理 {self.id} 上下文估算 {estimated} > {limit}，"
-            f"压缩 {len(head)} 条，摘要 {len(summary)} 字符"
-        )
+        # 子代理的每一步都会推给界面（subagent_message 渲染成一步说明）：压缩这种状态变化
+        # 也让它看得见，否则展开子代理会发现步数突然对不上
+        self._emit("subagent_message", {
+            "round": self.turns,
+            "text": f"[上下文压缩] 早前的 {dropped} 条消息已压成摘要（{len(summary)} 字符），从摘要继续。",
+        })
+        _log(f"  📦 子代理 {self.id} 压缩 {dropped} 条为 {len(summary)} 字符摘要")
 
     def _chat_with_retry(
-        self, client: Any, model: str, tools: list[dict[str, Any]]
+        self, client: Any, model: str, tools: list[dict[str, Any]] | None
     ) -> tuple[str, list[Any], str, str]:
         """一次请求 + 与主 Agent 同规则的重试（分类 / 退避 / 可被停止打断）。
 
@@ -6195,6 +6734,7 @@ class SubAgentRunner:
         用量比主请求小得多，重试代价低。规则与主 Agent 一致：只重试瞬态错误（超时 /
         限流 / 5xx / 流连接断了）；鉴权、参数、上下文超限重试多少次都一样，直接失败。
         退避期间父回合被停止就立刻收尾（抛 AgentStopRequested，由 run 转成 stopped）。
+        tools=None 是压缩那一轮：不带工具，只求一段文字摘要（见 _begin_compaction）。
         """
         attempt = 0
         while True:
@@ -6265,8 +6805,11 @@ class SubAgentRunner:
             self.turns = round_i
             if self.parent.stop_event.is_set():
                 return self._finish("stopped", last_text, error="父回合被停止，子代理提前收尾")
-            # 每轮请求前判一次：工具往返堆太多就把早期部分压成摘要（复用父 Agent 的窗口与摘要模型）
-            self._maybe_compact()
+            # 每轮请求前判一次：工具往返堆太多就先压缩——挂上压缩指令、这一轮专门拿摘要
+            # （Insert-then-Compress，与父 Agent 同一机制），下一轮带着摘要继续干活。
+            if self._begin_compaction():
+                self._run_compaction_request(client, model)
+                continue
             try:
                 content, tool_calls, reasoning_field, reasoning = self._chat_with_retry(
                     client, model, tools
@@ -6617,6 +7160,7 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "update_project_config": _tool_update_project_config,
     "list_input_files": _tool_list_input_files,
     "read_input_file": _tool_read_input_file,
+    "search_input": _tool_search_input,
     "read_guideline": _tool_read_guideline,
     "write_project_guideline": _tool_write_project_guideline,
     "list_dict_files": _tool_list_dict_files,

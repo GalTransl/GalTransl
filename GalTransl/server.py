@@ -578,6 +578,102 @@ def _load_input_file_entries(project_dir: str, config_file_name: str, filename: 
     return _normalize_input_entries(plugin_object.load_file(file_path), fname)
 
 
+def _search_input_dir(
+    project_dir: str,
+    config_file_name: str,
+    *,
+    query: str,
+    field: str = "all",
+    filename: str = "",
+    context: int = 0,
+    max_results: int = 500,
+    pattern: Any = None,
+) -> dict[str, Any]:
+    """在待翻译原文里搜关键词（Agent 的 search_input 用）。
+
+    与 /cache/search 同一套语义：命中上限只算命中本身（前后文是搭着给的，不占配额）、
+    context 是"顺带带出来的前后文"（命中行 in_context=false、扩展行 true）、total 照实报
+    全部命中数。区别只在搜的对象——原文要过文件插件解析（见 _load_input_file_entries），
+    每次搜索都得把涉及的输入文件读一遍，所以比搜缓存慢，这也正是 filename 参数的意义。
+
+    field：all | src（原文正文）| name（说话人）。pattern 非空时按正则匹配，
+    否则按大小写不敏感的子串匹配（与缓存搜索一致）。
+    """
+
+    def _hit(text: str) -> bool:
+        if pattern is not None:
+            return bool(pattern.search(text))
+        return query.lower() in text.lower()
+
+    input_dir = os.path.join(project_dir, INPUT_FOLDERNAME)
+    results: list[dict[str, Any]] = []
+    total_matches = 0
+    hits_included = 0
+    files_failed: list[str] = []
+    if os.path.isdir(input_dir):
+        for name in sorted(os.listdir(input_dir)):
+            if filename and name != filename:
+                continue
+            if not os.path.isfile(os.path.join(input_dir, name)):
+                continue
+            try:
+                entries = _load_input_file_entries(project_dir, config_file_name, name)
+            except Exception:
+                # 单个文件解析不了（插件/格式问题）不影响其它文件：搜索是只读的辅助手段，
+                # 尽量给出能给的，别整个失败。但**必须报上去**——静默跳过会让"这个文件里
+                # 没有"和"这个文件根本没读"看起来一样。要诊断它用 GET /input/:filename。
+                files_failed.append(name)
+                continue
+            matched_positions: list[int] = []
+            match_flags: dict[int, dict[str, bool]] = {}
+            for pos, entry in enumerate(entries):
+                if not isinstance(entry, dict):
+                    continue
+                src_text = str(entry.get("pre_src", "") or "")
+                name_text = str(entry.get("name", "") or "")
+                match_src = _hit(src_text)
+                match_name = bool(name_text) and _hit(name_text)
+                if field == "src" and not match_src:
+                    continue
+                if field == "name" and not match_name:
+                    continue
+                if field == "all" and not match_src and not match_name:
+                    continue
+                total_matches += 1
+                if hits_included + len(matched_positions) < max_results:
+                    matched_positions.append(pos)
+                    match_flags[pos] = {"match_src": match_src, "match_name": match_name}
+            if not matched_positions:
+                continue
+            wanted: dict[int, bool] = {pos: False for pos in matched_positions}
+            if context > 0:
+                for pos in matched_positions:
+                    for j in range(pos - context, pos + context + 1):
+                        if 0 <= j < len(entries):
+                            wanted.setdefault(j, True)
+            for pos in sorted(wanted):
+                entry = entries[pos]
+                if not isinstance(entry, dict):
+                    continue
+                item = {
+                    "filename": name,
+                    "index": entry.get("index", 0),
+                    "speaker": entry.get("name", ""),
+                    "src": entry.get("pre_src", ""),
+                    **match_flags.get(pos, {"match_src": False, "match_name": False}),
+                }
+                if context > 0:
+                    item["in_context"] = wanted[pos]
+                results.append(item)
+            hits_included += len(matched_positions)
+    out: dict[str, Any] = {"results": results, "total": total_matches}
+    if context > 0:
+        out.update({"context": context, "returned_hits": hits_included, "returned": len(results)})
+    if files_failed:
+        out["files_failed"] = files_failed
+    return out
+
+
 def _count_input_file_sentences(
     project_dir: str, config_file_name: str, filenames: list[str]
 ) -> dict[str, int | None]:
@@ -1140,6 +1236,69 @@ def build_handler(registry: JobRegistry):
                         cache_dir, count_json_entries=True, skip_suffixes=(CACHE_TEMP_SUFFIX,)
                     ),
                 })
+                return
+
+            # POST /api/projects/:id/input/search — 在待翻译原文里搜（Agent 的 search_input 用）
+            # **必须排在下面的 /input/:filename 之前**：那条是按前缀匹配的，放在它后面这里
+            # 会被当成"读一个名叫 search 的输入文件"。也因此这里多带一个 POST 判断——GET
+            # 落到前缀分支去，读同名文件仍然走得通。
+            if sub_path == "/input/search" and self.command == "POST":
+                try:
+                    import re as _re
+
+                    payload = self._read_json_body()
+                    query = str(payload.get("query", "")).strip()
+                    if not query:
+                        self._send_json({"results": [], "total": 0})
+                        return
+                    # field：all | src（原文正文）| name（说话人）——原文侧只有这两列可搜
+                    field = str(payload.get("field", "all")).strip() or "all"
+                    if field not in ("all", "src", "name"):
+                        self._send_json(
+                            {"error": "field must be one of: all, src, name"},
+                            status=HTTPStatus.BAD_REQUEST,
+                        )
+                        return
+                    options = payload.get("options", {})
+                    if not isinstance(options, dict):
+                        self._send_json({"error": "options must be an object"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    pattern = None
+                    if bool(options.get("re", False)):
+                        try:
+                            pattern = _re.compile(query)
+                        except _re.error as exc:
+                            self._send_json(
+                                {"error": f"invalid regular expression: {exc}"},
+                                status=HTTPStatus.BAD_REQUEST,
+                            )
+                            return
+                    try:
+                        context = max(0, min(int(payload.get("context", 0) or 0), 20))
+                    except (TypeError, ValueError):
+                        self._send_json(
+                            {"error": "context must be an integer 0-20"},
+                            status=HTTPStatus.BAD_REQUEST,
+                        )
+                        return
+                    result = _search_input_dir(
+                        project_dir,
+                        str(payload.get("config_file_name", "config.yaml") or "config.yaml"),
+                        query=query,
+                        field=field,
+                        filename=str(payload.get("filename", "")).strip(),
+                        context=context,
+                        max_results=min(int(payload.get("max_results", 500) or 500), 2000),
+                        pattern=pattern,
+                    )
+                    self._send_json(result)
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json(
+                        {"error": f"failed to search input files: {exc}"},
+                        status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    )
                 return
 
             # GET /api/projects/:id/input/:filename — 用文件插件解析待翻译原文

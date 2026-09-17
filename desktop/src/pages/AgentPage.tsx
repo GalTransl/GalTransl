@@ -868,6 +868,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   manage_problem_filter: { action: '管理问题过滤', running: '管理问题过滤', verb: '', icon: 'filter', summary: (a) => [str(a?.action), Array.isArray(a?.keyword) ? a.keyword.map((k) => str(k)).join('、') : str(a?.keyword)].filter(Boolean).join(' · ') },
   list_transl_cache: { action: '查看缓存清单', running: '查看缓存清单', verb: '', icon: 'archive', summary: () => '列出缓存文件' },
   read_transl_cache: { action: '读取缓存', running: '读取缓存', verb: '', icon: 'file-text', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
+  search_input: { action: '搜索原文', running: '搜索原文', verb: '', icon: 'search-plus', summary: (a) => [str(a?.query), str(a?.filename), a?.context ? `±${a.context} 句上下文` : ''].filter(Boolean).join(' · ') },
   search_transl_cache: { action: '搜索缓存', running: '搜索缓存', verb: '', icon: 'search-plus', summary: (a) => [str(a?.query), a?.context ? `±${a.context} 句上下文` : ''].filter(Boolean).join(' · ') },
   patch_transl_cache: { action: '修改译文', running: '修改译文', verb: '', icon: 'pencil', summary: (a) => (Array.isArray(a?.patches) ? `${a.patches.length} 条` : str(a?.filename)) },
   delete_transl_cache: { action: '删除缓存', running: '删除缓存', verb: '', icon: 'trash', summary: (a) => [str(a?.filename), str(a?.indexes)].filter(Boolean).join(' · ') },
@@ -888,16 +889,21 @@ function str(v: unknown): string {
   return typeof v === 'string' ? v : JSON.stringify(v);
 }
 
-/** wait 工具的参数摘要：把 seconds/minutes 归一成"等待 2 分钟"。 */
+/** wait 工具的参数摘要：把 seconds/minutes 归一成"等待 2 分钟"。
+ *  带了 job_id（等某个任务，任务先结束就提前返回）时把这一点说清楚。 */
 function waitSummary(args: Record<string, unknown> | undefined): string {
   const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
   const totalSeconds = num(args?.seconds) + num(args?.minutes) * 60;
   const reason = typeof args?.reason === 'string' ? args.reason.trim() : '';
+  const jobId = typeof args?.job_id === 'string' ? args.job_id.trim() : '';
   if (totalSeconds <= 0) return reason;
   const duration = totalSeconds % 60 === 0 && totalSeconds >= 60
     ? `${totalSeconds / 60} 分钟`
     : `${totalSeconds} 秒`;
-  return reason ? `${duration} · ${reason}` : duration;
+  const head = jobId
+    ? `等任务 ${jobId.length > 8 ? `${jobId.slice(0, 6)}…` : jobId} 结束或 ${duration}`
+    : duration;
+  return reason ? `${head} · ${reason}` : head;
 }
 
 /** 倒计时显示：mm:ss，超过一小时用 h:mm:ss。 */

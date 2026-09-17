@@ -494,7 +494,10 @@ class ExploreAgentTests(unittest.TestCase):
             str((tool.get("function") or {}).get("name") or "")
             for tool in _subagent_tools(SUBAGENT_AGENT_EXPLORE)
         }
-        self.assertEqual(names, {"list_input_files", "read_input_file", "list_dict_files", "read_dict"})
+        self.assertEqual(
+            names,
+            {"list_input_files", "read_input_file", "search_input", "list_dict_files", "read_dict"},
+        )
         for forbidden in ("patch_transl_cache", "read_transl_cache", "run_subagents", "start_translation"):
             self.assertNotIn(forbidden, names)
 
@@ -996,11 +999,13 @@ class RunSubagentsValidationTests(unittest.TestCase):
 
 
 class SubagentCompactionTests(unittest.TestCase):
-    """子代理复用父 Agent 的上下文窗口与压缩：工具往返堆过头就把早期部分压成摘要。
+    """子代理走与父 Agent 同一套压缩：**Insert-then-Compress**。
 
-    与主会话同一套规则——窗口取自 parent._context_window、阈值走 COMPACT_TRIGGER_RATIO、
-    切点走 _find_compaction_cut（保证 tool_calls/tool 成对）、摘要走 parent._summarize_messages。
-    区别只有一处：头部 2 条（system + 任务说明）永远保留。
+    窗口取自 parent._context_window、阈值走 COMPACT_TRIGGER_RATIO、切点走
+    _find_compaction_cut（保证 tool_calls/tool 成对）；头部 2 条（system + 任务说明）
+    永远保留，保留尾部取 SUBAGENT_COMPACT_KEEP_RECENT。压缩那一轮**不带 tools**。
+    插入式失败或没拿到摘要时，退回独立摘要请求（复用 parent._summarize_messages），
+    再兜本地摘要——整条路都不该把子代理卡死。
     """
 
     def _parent(self, window: int, summarizer=None) -> _Parent:
@@ -1048,45 +1053,92 @@ class SubagentCompactionTests(unittest.TestCase):
             rt.DEFAULT_CONTEXT_WINDOW,
         )
 
-    def test_compacts_early_rounds_keeping_head_and_recent_tail(self) -> None:
-        seen: list[list[dict]] = []
-
-        def summarize(head: list[dict]) -> str:
-            seen.append(head)
-            return "## 目标\n已校对 8 轮。"
-
-        parent = self._parent(20_000, summarizer=summarize)  # 阈值 7808
-        sub = self._sub(parent)
+    def test_begin_appends_the_instruction_and_abort_rolls_back(self) -> None:
+        sub = self._sub(self._parent(20_000))  # 阈值 7808
         sub.messages = self._history(12)
+        before = [dict(m) for m in sub.messages]
 
         self.assertGreater(sub._estimate_context_tokens(), 7808)  # 前提：确实超了
-        sub._maybe_compact()
+        self.assertTrue(sub._begin_compaction())
 
-        # 头部 2 条原样保留，随后一条摘要，尾部保留最近 8 条
-        self.assertEqual(sub.messages[0], {"role": "system", "content": "SYS"})
-        self.assertEqual(sub.messages[1], {"role": "user", "content": "BRIEF"})
-        self.assertIn("压缩摘要", sub.messages[2]["content"])
-        self.assertIn("已校对 8 轮", sub.messages[2]["content"])
-        self.assertEqual(len(sub.messages), 2 + 1 + 8)
-        self.assertEqual(sub.messages[-1]["content"], "x" * 4000)
-        # 摘要只吃被压缩掉的那段（8 轮 16 条），不是整份历史
-        self.assertEqual(len(seen), 1)
-        self.assertEqual(len(seen[0]), 16)
+        # 指令是挂在末尾的一条瞬时消息（下一轮请求带着它一起发出去）
+        self.assertEqual(sub.messages[-1]["content"], rt.SUBAGENT_COMPACT_INSTRUCTION_PROMPT)
+        self.assertIsNotNone(sub._pending_compaction)
+
+        sub._abort_compaction()  # 压缩没成：历史回到原样，指令不留下
+        self.assertEqual(sub.messages, before)
+        self.assertIsNone(sub._pending_compaction)
 
     def test_below_threshold_history_is_untouched(self) -> None:
         sub = self._sub(self._parent(1_000_000))
         sub.messages = self._history(3)
         before = [dict(m) for m in sub.messages]
 
-        sub._maybe_compact()
-
+        self.assertFalse(sub._begin_compaction())
         self.assertEqual(sub.messages, before)
+
+    def test_finish_rebuilds_head_summary_and_tail(self) -> None:
+        sub = self._sub(self._parent(20_000))
+        sub.messages = self._history(12)
+        sub._begin_compaction()
+
+        self.assertTrue(
+            sub._finish_compaction("前言\n<summary>## 目标\n已校对 8 轮。</summary>\n后记")
+        )
+
+        # 头部 2 条原样保留，随后一条摘要，尾部保留最近 8 条；指令不留在历史里
+        self.assertEqual(sub.messages[0], {"role": "system", "content": "SYS"})
+        self.assertEqual(sub.messages[1], {"role": "user", "content": "BRIEF"})
+        self.assertIn("压缩摘要", sub.messages[2]["content"])
+        self.assertIn("已校对 8 轮", sub.messages[2]["content"])
+        self.assertNotIn("前言", sub.messages[2]["content"])  # <summary> 之外的不进历史
+        self.assertEqual(len(sub.messages), 2 + 1 + 8)
+        self.assertEqual(sub.messages[-1]["content"], "x" * 4000)
+        self.assertNotIn(
+            rt.SUBAGENT_COMPACT_INSTRUCTION_PROMPT, [m.get("content") for m in sub.messages]
+        )
+        self.assertIsNone(sub._pending_compaction)
+
+    def test_finish_without_a_summary_falls_back_to_a_separate_request(self) -> None:
+        seen: list[list[dict]] = []
+
+        def summarize(head: list[dict]) -> str:
+            seen.append(head)
+            return "## 目标\n独立摘要。"
+
+        parent = self._parent(20_000, summarizer=summarize)
+        sub = self._sub(parent)
+        sub.messages = self._history(12)
+        sub._begin_compaction()
+
+        with patch.object(rt, "_subagent_chat", _make_chat([("", [])])):  # 回了个空正文
+            sub._run_compaction_request(None, "fake-model")
+
+        # 摘要只吃被压缩掉的那段（8 轮 16 条），不是整份历史
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(len(seen[0]), 16)
+        self.assertIn("独立摘要", sub.messages[2]["content"])
+        self.assertIsNone(sub._pending_compaction)
+
+    def test_compaction_request_failure_falls_back_to_a_separate_request(self) -> None:
+        def boom(_client, _model, _messages, _tools):
+            raise RuntimeError("compaction down")
+
+        parent = self._parent(20_000, summarizer=lambda head: "## 目标\n独立摘要。")
+        sub = self._sub(parent)
+        sub.messages = self._history(12)
+        sub._begin_compaction()
+
+        with patch.object(rt, "_subagent_chat", boom):
+            sub._run_compaction_request(None, "fake-model")
+
+        self.assertIn("独立摘要", sub.messages[2]["content"])
 
     def test_falls_back_to_local_summary_without_parent_summarizer(self) -> None:
         sub = self._sub(self._parent(20_000))  # 不给 _summarize_messages
         sub.messages = self._history(12)
 
-        sub._maybe_compact()
+        sub._compact_via_separate_request()
 
         self.assertIn("因上下文超限被压缩", sub.messages[2]["content"])
 
@@ -1097,28 +1149,90 @@ class SubagentCompactionTests(unittest.TestCase):
         sub = self._sub(self._parent(20_000, summarizer=boom))
         sub.messages = self._history(12)
 
-        sub._maybe_compact()
+        sub._compact_via_separate_request()
 
         self.assertIn("因上下文超限被压缩", sub.messages[2]["content"])
 
-    def test_run_compacts_before_every_llm_round(self) -> None:
+    def test_run_compresses_with_the_current_conversation_and_without_tools(self) -> None:
+        """整条路：挂指令 → 那一轮**不带 tools**把摘要拿回来 → 历史被压 → 下一轮继续干活。"""
         parent = self._parent(rt.DEFAULT_CONTEXT_WINDOW)
-        seen: list[int] = []
+        calls: list[tuple[list[dict], object]] = []
         script = [
             ("", [_Call("c1", "read_transl_cache", '{"filename": "a.json", "index": "1"}')]),
+            ("", [_Call("c2", "read_transl_cache", '{"filename": "a.json", "index": "1"}')]),
+            ("<summary>## 已完成\n读过 #1。</summary>", []),  # 压缩那一轮
             ("报告：没问题。", []),
         ]
+        base = _make_chat(script)
+
+        def recording(client, model, messages, tools):
+            calls.append(([dict(m) for m in messages], tools))
+            return base(client, model, messages, tools)
+
+        def fake_estimate(sub: rt.SubAgentRunner) -> int:
+            # 第 3 轮开始算"超阈值"（真阈值判定见 _begin_compaction 的用例）
+            return 99_999 if len(sub.messages) >= 6 else 10
 
         with (
-            patch.object(rt.SubAgentRunner, "_maybe_compact", lambda self: seen.append(1)),
-            patch.object(rt, "_subagent_chat", _make_chat(script)),
+            patch.object(rt, "_subagent_chat", recording),
+            patch.object(rt.SubAgentRunner, "_estimate_context_tokens", fake_estimate),
+            patch.object(rt, "SUBAGENT_COMPACT_KEEP_RECENT", 2),  # 6 条历史就能切出安全切点
         ):
-            _tool_run_subagents(
+            out = _tool_run_subagents(
                 parent, {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD, "file": "a.json"}]}
             )
 
-        # 两次 LLM 请求（读缓存那轮 + 收尾那轮）前各判一次
-        self.assertEqual(len(seen), 2)
+        self.assertEqual(out["tasks"][0]["status"], "done")
+        self.assertEqual(out["tasks"][0]["report"], "报告：没问题。")
+        # 4 次请求：两轮干活 → 一轮压缩（不带 tools）→ 一轮收尾
+        self.assertEqual([tools is None for _, tools in calls], [False, False, True, False])
+        # 压缩那一轮发出去的是"当前会话 + 那条指令"（复用前缀，不是另开一份输入）
+        self.assertEqual(calls[2][0][-1]["content"], rt.SUBAGENT_COMPACT_INSTRUCTION_PROMPT)
+        # 收尾那轮的上下文里已经是摘要 + 尾部，指令不留在历史里
+        last = calls[3][0]
+        self.assertTrue(any("# 早前工作的压缩摘要" in str(m.get("content") or "") for m in last))
+        self.assertNotIn(rt.SUBAGENT_COMPACT_INSTRUCTION_PROMPT, [m.get("content") for m in last])
+        # 界面上看得见这次压缩（子代理的每一步都作为一个事件推出去）
+        notes = [data["text"] for kind, data in parent.events if kind == "subagent_message"]
+        self.assertTrue(any("上下文压缩" in text for text in notes), notes)
+
+
+class ProofreadSuggestionModeTests(unittest.TestCase):
+    """校对子代理写哪一类意见（校对 / 润色 / 两者）**由主 Agent 问过用户后写进任务说明**。
+
+    提示词这层钉三件事：子代理知道自己能写两类、写哪类以任务说明为准、任务说明没提时
+    默认只写校对建议（保守，不会拿风格噪音淹掉硬伤）；任务说明模板里必须给这句话留位置；
+    主 Agent 的流程里必须写明"先 ask_user 问用户，再把答案写进 brief"。
+    """
+
+    def test_subagent_prompt_covers_both_kinds_and_defers_to_the_brief(self) -> None:
+        prompt = rt.SUBAGENT_PROOFREAD_PROMPT
+
+        self.assertIn("校对建议", prompt)
+        self.assertIn("润色建议", prompt)
+        self.assertIn("以任务说明为准", prompt)
+        self.assertIn("硬伤优先", prompt)  # 两类都要时先保证硬伤被抓出来
+        self.assertIn("给出具体改法", prompt)  # 润色建议不许只说"不够好"
+        self.assertNotIn("不要报风格偏好", prompt)  # 旧的"一律不许提风格"已被任务说明取代
+
+    def test_brief_template_reminds_where_the_kind_goes(self) -> None:
+        brief = rt._SUBAGENT_BRIEF_TEMPLATE
+
+        self.assertIn("校对建议 / 润色建议 / 两者都要", brief)
+        self.assertIn("默认只写校对建议", brief)
+
+    def test_subagent_patch_tool_points_back_at_the_brief(self) -> None:
+        tools = rt._subagent_tools(SUBAGENT_AGENT_PROOFREAD)
+        schema = next(t for t in tools if t["function"]["name"] == "patch_transl_cache")
+
+        self.assertIn("以任务说明为准", schema["function"]["description"])
+
+    def test_main_agent_asks_the_user_before_delegating(self) -> None:
+        prompt = rt.AGENT_SYSTEM_PROMPT
+
+        self.assertIn("ask_user 问清意见类型", prompt)
+        self.assertIn("只写润色建议", prompt)
+        self.assertIn("再把答案写进 brief", prompt)
 
 
 if __name__ == "__main__":
