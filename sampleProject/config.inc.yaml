@@ -5,6 +5,7 @@ backendSpecific:
       - token: sk-example-key1
         endpoint: https://api.deepseek.com # 请求地址，加不加v1都可以
         modelName: deepseek-chat
+        contextWindow: 128000 # 模型上下文窗口(token)，Agent 用它判断何时压缩上下文与用量指示；留空按128000
       - token: sk-example-key2
         endpoint: https://openrouter.ai/api/v1/chat/completions # /chat/completions结尾则不自动补v1
         modelName: deepseek/deepseek-chat-v3-0324:free

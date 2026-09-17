@@ -8,7 +8,27 @@ type TokenEntry = {
   endpoint: string;
   modelName: string;
   stream?: boolean;
+  /** 模型上下文窗口（token）：数字，或后端能解析的写法（如 "128k"）；留空表示用默认窗口 */
+  contextWindow?: number | string;
 };
+
+/**
+ * 留空时的上下文窗口，与后端 DEFAULT_CONTEXT_WINDOW（GalTransl/Agent/runtime.py）保持一致。
+ * 这里只是把"留空等于多少"显示给人看，真正的默认值由后端兜底。
+ */
+const DEFAULT_CONTEXT_WINDOW = 128000;
+
+/**
+ * 「上下文大小」输入 → 配置值。
+ *
+ * 纯数字写成 number（配置文件里就是 `contextWindow: 200000`）；`128k` 这类带单位的写法原样交给
+ * 后端解析（Agent 侧 _parse_context_window 认 k 后缀）；清空则删掉这个键，让后端用默认窗口。
+ */
+function parseContextWindowInput(raw: string): number | string | undefined {
+  const text = raw.trim();
+  if (!text) return undefined;
+  return /^\d+$/.test(text) ? Number(text) : text;
+}
 
 type BackendConfigEditorProps = {
   config: Record<string, unknown>;
@@ -97,7 +117,8 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
   // Tokens list operations
   const addToken = useCallback(() => {
     if (readOnly) return;
-    const next = [...tokens, { token: '', endpoint: '', modelName: '' }];
+    // 新令牌带上默认上下文窗口（128000），免得留空让人以为没生效
+    const next = [...tokens, { token: '', endpoint: '', modelName: '', contextWindow: DEFAULT_CONTEXT_WINDOW }];
     updateOai('tokens', next);
   }, [tokens, updateOai, readOnly]);
 
@@ -107,7 +128,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
     updateOai('tokens', next);
   }, [tokens, updateOai, readOnly]);
 
-  const updateToken = useCallback((index: number, field: keyof TokenEntry, value: string | boolean) => {
+  const updateToken = useCallback((index: number, field: keyof TokenEntry, value: string | number | boolean | undefined) => {
     if (readOnly) return;
     const next = tokens.map((t, i) => i === index ? { ...t, [field]: value } : t);
     updateOai('tokens', next);
@@ -329,7 +350,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
                     disabled={readOnly}
                     value={t.stream == null ? '' : String(t.stream)}
                     onChange={(e) => {
-                      if (e.target.value === '') updateToken(idx, 'stream', undefined as unknown as boolean);
+                      if (e.target.value === '') updateToken(idx, 'stream', undefined);
                       else updateToken(idx, 'stream', e.target.value === 'true');
                     }}
                   >
@@ -337,6 +358,22 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
                     <option value="true">是</option>
                     <option value="false">否</option>
                   </CustomSelect>
+                </label>
+                <label className="field field--inline">
+                  <span>上下文大小</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    disabled={readOnly}
+                    value={t.contextWindow == null ? '' : String(t.contextWindow)}
+                    onChange={(e) => updateToken(idx, 'contextWindow', parseContextWindowInput(e.target.value))}
+                    placeholder={`${DEFAULT_CONTEXT_WINDOW}（默认）`}
+                  />
+                  <span className="field__hint">
+                    模型上下文窗口（token）：Agent 用它判断何时压缩上下文，以及用量指示器的分母；
+                    留空按 {DEFAULT_CONTEXT_WINDOW} 处理，也可写 200000、128k 这类写法。
+                    Agent 只使用第一个令牌的模型与窗口。
+                  </span>
                 </label>
               </div>
               );

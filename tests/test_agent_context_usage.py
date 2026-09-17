@@ -41,6 +41,20 @@ class ProfileContextWindowTests(unittest.TestCase):
         ):
             self.assertEqual(_profile_context_window(profile), DEFAULT_CONTEXT_WINDOW)
 
+    def test_only_first_token_window_counts(self):
+        """Agent 只拿 tokens[0] 发请求，窗口也只认它：配在第二个令牌上不算数。"""
+        profile = {
+            "OpenAI-Compatible": {"tokens": [{"modelName": "m"}, {"contextWindow": 200000}]}
+        }
+        self.assertEqual(_profile_context_window(profile), DEFAULT_CONTEXT_WINDOW)
+
+    def test_default_window_matches_the_backend_editor_default(self):
+        """桌面端「上下文大小」留空即按 128000 处理（常量写在 BackendConfigEditor.tsx）。
+
+        两处是同一个默认值：改这里就得同步改那边，否则界面提示与 Agent 实际窗口对不上。
+        """
+        self.assertEqual(DEFAULT_CONTEXT_WINDOW, 128_000)
+
 
 class EstimateUsageTokensTests(unittest.TestCase):
     def test_without_anchor_sums_all_messages(self):
