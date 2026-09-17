@@ -2,7 +2,7 @@
 缓存机制
 """
 
-from GalTransl.CSentense import CTransList
+from GalTransl.CSentense import CSentense, CTransList
 from GalTransl.ProblemFilter import filter_problem_text, normalize_problem_filter_keys
 from GalTransl import LOGGER
 from typing import List
@@ -38,6 +38,25 @@ def _cache_has(cache_obj: dict, key: str) -> bool:
     if old_key and old_key in cache_obj:
         return True
     return False
+
+
+# 未命中缓存的原因码：查缓存时写在 tran.cache_miss_reason 上。
+# 重建（rebuilda/rebuildr）不翻译、只能按现有缓存重刷译文与结果，一旦有未命中就整个失败
+# （见 Backend/RebuildTranslate）；带上原因码，那里才能报出"哪几句、为什么"，而不是一句
+# 笼统的「缓存不完整」——最容易被误读成"这个文件还没翻"。
+MISS_KEY_NOT_FOUND = "key_not_found"
+MISS_POST_SRC_CHANGED = "post_src_changed"
+MISS_PRE_DST_EMPTY = "pre_dst_empty"
+MISS_TRANSLATE_FAILED = "translate_failed"
+MISS_RETRAN_KEY = "retran_key"
+MISS_RETRAN_PROBLEM = "retran_problem"
+MISS_PROOFREAD_MISSING = "proofread_missing"
+
+
+def _mark_cache_miss(tran: CSentense, reason: str) -> None:
+    """记下这句没命中缓存的原因（只记第一个：后面的检查都是在前一个没过之后才跑的）。"""
+    if not tran.cache_miss_reason:
+        tran.cache_miss_reason = reason
 
 
 _CACHE_APPEND_SUFFIX = ".append.jsonl"
@@ -403,6 +422,7 @@ async def get_transCache_from_json(
 
 
     for tran in trans_list:
+        tran.cache_miss_reason = ""  # 每句只记本次查询的结果，别留着上一轮的
         # 忽略jp为空的句子
         if tran.pre_src == "" or tran.post_src == "":
             tran.pre_dst, tran.post_dst = "", ""
@@ -435,18 +455,25 @@ async def get_transCache_from_json(
 
         # cache_key不在缓存
         if cache_key not in cache_dict:
+            _mark_cache_miss(tran, MISS_KEY_NOT_FOUND)
             translist_unhit.append(tran)
             LOGGER.debug(f"[cache]message未命中缓存: {line_now}")
             if "rebuild" in eng_type:
                 LOGGER.error(f"[cache]message未命中缓存: {line_now}")
             continue
 
-        no_proofread = _cache_get(cache_dict[cache_key], "proofread_dst") == ""
+        # 有校对稿就等于有最终稿：既然校对过，原文后来改没改都不再影响这条的译文，
+        # 下面那几项检查（post_src / pre_dst / 翻译失败）整段跳过。
+        # 取默认 "" 而不是 None：字段整个缺失（很老的缓存、手改过的缓存）应当作"没校对过"，
+        # 该走的检查一步都不能少——否则 `None == ""` 是 False，会把这类缓存当成有校对稿，
+        # 原文早已改过的旧缓存也照样算命中。
+        no_proofread = _cache_get(cache_dict[cache_key], "proofread_dst", "") == ""
 
         if no_proofread:
             # post_src被改变
             if load_post_src == ignr_post_src == False:
                 if tran.post_src != _cache_get(cache_dict[cache_key], "post_src"):
+                    _mark_cache_miss(tran, MISS_POST_SRC_CHANGED)
                     translist_unhit.append(tran)
                     LOGGER.debug(f"[cache]post_src被改变: \npost_src_before{_cache_get(cache_dict[cache_key], 'post_src')}\npost_src_now{tran.post_src}")
                     if "rebuild" in eng_type:
@@ -458,31 +485,31 @@ async def get_transCache_from_json(
                     not _cache_has(cache_dict[cache_key], "pre_dst")
                     or _cache_get(cache_dict[cache_key], "pre_dst") == ""
                 ):
+                    _mark_cache_miss(tran, MISS_PRE_DST_EMPTY)
                     translist_unhit.append(tran)
                     LOGGER.debug(f"[cache]pre_dst为空: {line_now}")
                     if "rebuild" in eng_type:
                         LOGGER.error(f"[cache]pre_dst为空: {line_now}")
                     continue
-            # 重试失败的
+            # 重试失败的（走到这里的本来就已经是"没校对稿"的了）
             if (
                 retry_failed
                 and filter_problem_text("翻译失败", problem_filter_keys)
                 and "(Failed)" in _cache_get(cache_dict[cache_key], "pre_dst")
             ):
-                if (
-                    no_proofread or "Fail" in cache_dict[cache_key]["proofread_by"]
-                ):  # 且未校对
-                    translist_unhit.append(tran)
-                    LOGGER.debug(f"[cache]Failed translation: {line_now}")
-                    if "rebuild" in eng_type:
-                        LOGGER.error(f"[cache]Failed translation: {line_now}")
-                    continue
+                _mark_cache_miss(tran, MISS_TRANSLATE_FAILED)
+                translist_unhit.append(tran)
+                LOGGER.debug(f"[cache]Failed translation: {line_now}")
+                if "rebuild" in eng_type:
+                    LOGGER.error(f"[cache]Failed translation: {line_now}")
+                continue
 
             # retran_key在pre_src中
             if retran_key and check_retran_key(
                 retran_key, _cache_get(cache_dict[cache_key], "pre_src")
             ):
                 if "rebuild" not in eng_type:
+                    _mark_cache_miss(tran, MISS_RETRAN_KEY)
                     translist_unhit.append(tran)
                     LOGGER.info(f"[cache]retran_key in 'pre_src' message: {line_now}")
                     continue
@@ -490,6 +517,7 @@ async def get_transCache_from_json(
             if retran_key and "problem" in cache_dict[cache_key]:
                 if check_retran_key(retran_key, filter_problem_text(cache_dict[cache_key]["problem"], problem_filter_keys)):
                     if "rebuild" not in eng_type:
+                        _mark_cache_miss(tran, MISS_RETRAN_PROBLEM)
                         translist_unhit.append(tran)
                         LOGGER.info(f"[cache]retran_key in 'problem' message: {line_now}")
                         continue
@@ -516,6 +544,7 @@ async def get_transCache_from_json(
 
         # 校对模式下，未校对的
         if proofread and tran.proofread_zh == "":
+            _mark_cache_miss(tran, MISS_PROOFREAD_MISSING)
             translist_unhit.append(tran)
             continue
 

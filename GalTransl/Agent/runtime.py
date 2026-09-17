@@ -413,7 +413,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
    d. 若 GPT 字典为空且项目较大，可调用 start_translation(translator="GenDic") 自动生成 GPT 字典，并在该任务 completed 后通过 list_dict_files/read_dict 确认生成结果。
 3. **试译定稿（全量翻译前必做，除非项目已有大量缓存）**：
    a. 调用 read_guideline 读取项目当前使用的翻译规范（配置 common.gpt.translation_guideline），理解文风要求；
-   b. 调用 list_input_files 拿到文件清单与每个文件的待翻译句数（sentences：已有缓存的是准确值，标注 input 的原文条数估计偏大），据此估整体工作量、挑 1-2 个有代表性的文件；再用 read_input_file 各读几十句（index 使用 1-based，区间如 "1-50"），掌握角色、语气、专有名词、场景类型；
+   b. 调用 list_input_files 拿到文件清单与每个文件解析出的条数（sentences 是原文解析条数、文本插件还没过滤，估工作量偏大；它**不是进度**，别拿它判断文件翻没翻完），据此估整体工作量、挑 1-2 个有代表性的文件；再用 read_input_file 各读几十句（index 使用 1-based，区间如 "1-50"），掌握角色、语气、专有名词、场景类型；
    c. 基于原文补充 GPT 字典：把抽读中遇到的人名、专有名词、常见口语用 save_dict(action="append") 收录进项目 GPT 字典（只发新增行，不重发整份字典）；
    d. 调用 start_translation(translator="<主翻译引擎>", files=["<一个代表性文件>"]) 只翻译这一个文件作为试译；
    e. 试译完成后用 read_transl_cache 阅读试译文件的译文，对照翻译规范评估文风、译名、语气是否达标；
@@ -1952,7 +1952,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "list_input_files",
-            "description": "列出待翻译的输入文件（原文）与每个文件的待翻译句数，供估工作量与挑选代表性文件（不必再逐个 read_input_file 数句子）。sentences_source=cache 是已有缓存文件的准确句数（与进度/ETA 同口径），=input 是尚未翻译文件的原文条数估计（未过文本插件过滤，可能偏大）；句数只用于估工作量，不代表进度。",
+            "description": "列出待翻译的输入文件（原文）与每个文件解析出的条数，供估工作量与挑选代表性文件（不必再逐个 read_input_file 数句子）。条数是原文解析出的条数（文本插件如「跳过无日文句」还没跑，可能偏大）；**只用于估工作量，不代表进度**（不管这个文件有没有缓存）——进度看 get_project_overview 的 files_translated/files_total。",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -2783,64 +2783,39 @@ def _tool_get_project_overview(runner: AgentRunner, args: dict[str, Any]) -> Any
 
 
 def _tool_list_input_files(runner: AgentRunner, _args: dict[str, Any]) -> Any:
-    """列出待翻译文件（原文件，输入目录），带每个文件的待翻译句数。
+    """列出待翻译文件（原文件，输入目录），带每个文件**解析出的条数**。
 
-    句数供估工作量、挑试译文件用，两个来源按可靠性优先：
+    口径一律是输入文件本身：`/files?counts=1` 让后端用文件插件解析原文数一遍。
 
-    - 已经有缓存的文件 → **缓存条数**（准确，与进度/ETA 同一口径）；
-    - 尚未翻译的文件 → 文件插件解析原文的条数（**未过文本插件过滤**，如「跳过无日文句」
-      会丢掉一部分句子，所以通常偏大），标注 sentences_source=input。
+    以前这里对"已有缓存的文件"改报**缓存条数**（理由是它与进度/ETA 同口径、更准），
+    实际是个陷阱：缓存条数只说明缓存里存了多少条，一旦和别处的数字相等，读的人就会
+    以为整个文件翻完了。句数是拿来看工作量的，不该兼职当进度——进度去看
+    get_project_overview 的 files_translated / progress，那里才有真正翻到哪了。
 
-    这样调用方不必再逐个 read_input_file 去数句子，也不会把未过滤的条数
-    （偏大）误当成与进度同口径的总句数。
+    注意口径：这是文件插件解析出的**原始条目数**，文本插件（如「跳过无日文句」）
+    还没跑，因此通常**大于**最终会送去翻译的句数（估工作量偏大是已知的取舍）。
     """
     pid = runner._project_id()
     cfg = urllib.parse.quote(runner.state.config_file_name or "config.yaml")
     files = runner._http_get(f"/api/projects/{pid}/files?counts=1&config={cfg}")
-    # 缓存文件的条数（/files 的 cache_files 带 entry_count）
-    cache_counts = {
-        str(item.get("name")): int(item.get("entry_count") or 0)
-        for item in files.get("cache_files", [])
-        if isinstance(item, dict) and item.get("name") and item.get("entry_count")
-    }
     input_files: list[dict[str, Any]] = []
-    exact_files = 0
-    estimated_files = 0
     for item in files.get("input_files", []):
         if not isinstance(item, dict) or not item.get("is_file", True):
             continue
-        name = str(item.get("name") or "")
-        singles, chunk_re = _input_cache_matchers(name)
-        cached_sentences = sum(
-            count
-            for cache_name, count in cache_counts.items()
-            if cache_name in singles or chunk_re.match(cache_name)
-        )
         parsed = item.get("sentences")
-        sentences: int | None = None
-        source = ""
-        if cached_sentences > 0:
-            sentences, source = cached_sentences, "cache"
-            exact_files += 1
-        elif isinstance(parsed, int):
-            sentences, source = parsed, "input"
-            estimated_files += 1
         input_files.append({
-            "name": name,
+            "name": str(item.get("name") or ""),
             "size": item.get("size", 0),
-            "sentences": sentences,
-            "sentences_source": source,
+            # 解析失败给 null，不要编造成 0：0 会被读成"这个文件不用翻"
+            "sentences": parsed if isinstance(parsed, int) else None,
         })
 
     note = (
-        "sentences 是该文件的待翻译句数，用来估工作量（别拿它当进度）："
-        "sentences_source=cache 表示该文件已有缓存、取缓存条数（准确，与进度/ETA 同口径）；"
-        "=input 表示尚未翻译、按文件插件解析原文的条数估计"
-        "（未过文本插件过滤，如「跳过无日文句」会少掉一部分，因此可能偏大）；"
-        "null 表示解析失败。"
+        "sentences 是输入文件解析出的条数，只用来估工作量：文本插件（如「跳过无日文句」）"
+        "还没跑，真正要翻的句数通常比它少，所以按它估总时长会略偏大；null 表示解析失败。"
+        "**它不是进度**——某文件缓存里有多少条与这个数无关，"
+        "整体翻没翻完看 get_project_overview 的 files_translated/files_total。"
     )
-    if input_files:
-        note += f"本次 {exact_files} 个文件是准确值，{estimated_files} 个是估计值。"
     return {
         "input_files": input_files,
         "count": len(input_files),

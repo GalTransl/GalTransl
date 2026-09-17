@@ -1,14 +1,18 @@
-"""list_input_files 要给每个文件的待翻译句数，并且标明这个数是怎么来的。
+"""list_input_files 报的句数一律取**输入文件解析出的条数**，且不带"这个数从哪来"的字段。
 
 背景：为了估工作量，Agent 以前得逐个 read_input_file 去数句子；而且文件插件解析出的
 是**原文条数**（文本插件如「跳过无日文句」还没跑），通常比真正要翻的句数大——于是出现
 "估成 4000+，实际 2627"式的误判，直接影响 ETA。
 
-现在的口径（按可靠性优先）：
+后来有一版按"可靠性优先"分了两种来源：已有缓存的文件报缓存条数。那是个坑——缓存条数
+只说明缓存里存了多少条，跟别处的数字一相等，读的人（Agent）就会以为整个文件翻完了；
+而"条目数相等"恰恰是最容易被误读成"翻译完成"的形状。所以口径收成一个：
 
-- 已有缓存的文件 → 缓存条数（sentences_source=cache，与进度/ETA 同口径，准确）；
-- 尚未翻译的文件 → 原文解析条数（=input，估计值，可能偏大）；
-- 解析失败 → null。
+- 一律 → 原文解析条数（文本插件还没跑，估工作量偏大）；
+- 解析失败 → null；
+- 进度不在这里看（get_project_overview 的 files_translated/files_total 才算）。
+
+顺带锁住 sentences_source 这个字段被删干净——留着它，模型就会去比较两种来源。
 """
 
 import os
@@ -20,7 +24,7 @@ from GalTransl.Agent.runtime import AgentRunner, AgentState, _tool_list_input_fi
 
 
 class _Runner:
-    """最小 runner：/files?counts=1 返回输入文件与缓存条数。"""
+    """最小 runner：/files?counts=1 返回输入文件（附解析条数）。"""
 
     def __init__(self, payload: dict) -> None:
         self.state = AgentState(config_file_name="config.yaml")
@@ -51,22 +55,22 @@ def _cache(name: str, entry_count: int) -> dict:
 
 
 class ListInputFilesSentencesTests(unittest.TestCase):
-    def test_cached_file_uses_cache_count_not_parsed(self) -> None:
-        """已有缓存 → 用缓存条数（准确），压掉偏大的原文条数。"""
+    def test_cached_file_still_reports_the_parsed_count(self) -> None:
+        """有缓存的文件也报原文解析条数——缓存条数是"存了多少条"，不是"翻了多少"。"""
         runner = _Runner(
             _payload(
                 [_infile("sc_2_st10.json", sentences=130)],
-                [_cache("sc_2_st10.json", 120)],
+                [_cache("sc_2_st10.json", 120)],  # 缓存里有 120 条：不参与句数
             )
         )
         out = _tool_list_input_files(runner, {})
         item = out["input_files"][0]
-        self.assertEqual(item["sentences"], 120)
-        self.assertEqual(item["sentences_source"], "cache")
+        self.assertEqual(item["sentences"], 130)
+        self.assertNotIn("sentences_source", item)
         self.assertEqual(item["size"], 100)  # 大小仍然保留（挑小文件试译用）
 
-    def test_multi_chunk_cache_is_summed(self) -> None:
-        """多分块缓存的句数要相加（与进度统计同一个归属规则）。"""
+    def test_cache_chunking_never_leaks_into_the_count(self) -> None:
+        """不管缓存怎么分块、有没有 .append，句数都只认输入文件。"""
         runner = _Runner(
             _payload(
                 [_infile("sc_2_st11.json", sentences=999)],
@@ -78,11 +82,11 @@ class ListInputFilesSentencesTests(unittest.TestCase):
             )
         )
         item = _tool_list_input_files(runner, {})["input_files"][0]
-        self.assertEqual(item["sentences"], 55)
-        self.assertEqual(item["sentences_source"], "cache")
+        self.assertEqual(item["sentences"], 999)
+        self.assertNotIn("sentences_source", item)
 
-    def test_path_separator_naming_is_matched(self) -> None:
-        """输入文件带目录时，缓存名会把分隔符换成 -}。"""
+    def test_nested_input_file_is_counted_from_the_file_itself(self) -> None:
+        """输入文件带目录（缓存名会把分隔符换成 -}）也只数原文件。"""
         runner = _Runner(
             _payload(
                 [_infile("chapter/scene.json", sentences=10)],
@@ -90,23 +94,24 @@ class ListInputFilesSentencesTests(unittest.TestCase):
             )
         )
         item = _tool_list_input_files(runner, {})["input_files"][0]
-        self.assertEqual(item["sentences"], 42)
-        self.assertEqual(item["sentences_source"], "cache")
+        self.assertEqual(item["sentences"], 10)
 
-    def test_uncached_file_falls_back_to_parsed_count(self) -> None:
+    def test_parse_failure_is_null_not_zero(self) -> None:
+        """解析失败给 null：0 会被读成"这个文件不用翻"。"""
         runner = _Runner(
             _payload(
                 [
-                    _infile("a.json", sentences=145),  # 没缓存 → 用解析条数（估计）
-                    _infile("b.json", sentences=None),  # 解析失败 → null
+                    _infile("a.json", sentences=145),
+                    _infile("b.json", sentences=None),
                 ],
                 [],
             )
         )
         out = _tool_list_input_files(runner, {})
         first, second = out["input_files"]
-        self.assertEqual((first["sentences"], first["sentences_source"]), (145, "input"))
-        self.assertEqual((second["sentences"], second["sentences_source"]), (None, ""))
+        self.assertEqual(first["sentences"], 145)
+        self.assertIsNone(second["sentences"])
+        self.assertNotIn("sentences_source", first)
 
     def test_directories_are_skipped(self) -> None:
         runner = _Runner(
@@ -122,7 +127,7 @@ class ListInputFilesSentencesTests(unittest.TestCase):
         self.assertEqual([f["name"] for f in out["input_files"]], ["a.json"])
         self.assertEqual(out["count"], 1)
 
-    def test_total_and_note_explain_the_two_scales(self) -> None:
+    def test_total_and_note_are_all_from_the_input_files(self) -> None:
         runner = _Runner(
             _payload(
                 [
@@ -130,18 +135,17 @@ class ListInputFilesSentencesTests(unittest.TestCase):
                     _infile("fresh.json", sentences=145),
                     _infile("broken.json", sentences=None),
                 ],
-                [_cache("cached.json", 120)],
+                [_cache("cached.json", 120)],  # 有缓存也不改变总数
             )
         )
         out = _tool_list_input_files(runner, {})
 
-        self.assertEqual(out["sentences_total"], 120 + 145)  # 只累加已知的
+        self.assertEqual(out["sentences_total"], 130 + 145)  # 只累加已知的
         note = out["note"]
-        self.assertIn("sentences_source=cache", note)
-        self.assertIn("=input", note)
+        self.assertIn("偏大", note)  # 明确提示这是解析条数、估工作量偏大
         self.assertIn("null", note)
-        self.assertIn("偏大", note)  # 明确提示 input 是估计值
-        self.assertIn("1 个文件是准确值，1 个是估计值", note)
+        self.assertIn("不是进度", note)  # 明确否掉"拿它当进度"的用法
+        self.assertNotIn("sentences_source", note)  # 字段既然删了，说明里也不该再提
 
     def test_no_total_when_nothing_known(self) -> None:
         runner = _Runner(_payload([_infile("a.json", sentences=None)], []))

@@ -46,6 +46,10 @@ class CSentense:
         self.prev_tran: CSentense = None  # 指向上一个tran
         self.next_tran: CSentense = None  # 指向下一个tran
 
+        # 本次查缓存为什么没命中（原因码，见 Cache.MISS_*）；命中或还没查过时为空串。
+        # rebuilda/rebuildr 拿它把失败原因说清楚（哪几句、为什么），正常翻译用不到。
+        self.cache_miss_reason = ""
+
     @property
     def pre_src(self):
         return self._pre_src
