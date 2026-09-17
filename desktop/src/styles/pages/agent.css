@@ -922,18 +922,55 @@
   margin-top: var(--space-2);
 }
 
-.agent-hero__steps span {
+/* 推荐提示词：点一下把这句话填进输入框（不是直接发送）。胶囊造型沿用原来的静态版本，
+   补上 cursor 与 hover/按下反馈——它现在是按钮，得看得出来能点。 */
+.agent-hero__step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 5px 12px;
   border-radius: 999px;
   border: 1px solid var(--agent-line-soft);
   background: rgba(255, 255, 255, 0.55);
   color: var(--color-text-muted);
+  font: inherit;
   font-size: 0.76rem;
   font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
-:root[data-theme='dark'] .agent-hero__steps span {
+.agent-hero__step:hover {
+  background: rgba(47, 111, 235, 0.08);
+  border-color: rgba(47, 111, 235, 0.45);
+  color: var(--color-primary);
+  transform: translateY(-1px);
+}
+
+.agent-hero__step:active {
+  transform: translateY(0);
+}
+
+.agent-hero__step:focus-visible {
+  outline: 2px solid rgba(47, 111, 235, 0.55);
+  outline-offset: 2px;
+}
+
+.agent-hero__step-icon {
+  flex: none;
+  display: inline-flex;
+  font-size: 0.85rem;
+  color: rgba(47, 111, 235, 0.75);
+}
+
+:root[data-theme='dark'] .agent-hero__step {
   background: rgba(28, 40, 58, 0.55);
+}
+
+:root[data-theme='dark'] .agent-hero__step:hover {
+  background: rgba(47, 111, 235, 0.22);
+  border-color: rgba(91, 142, 245, 0.6);
+  color: #a9c6ff;
 }
 
 .agent-hero__project-panel {

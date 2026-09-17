@@ -1016,6 +1016,16 @@ function formatDuration(ms: number | undefined): string {
  *  纯本地展开、不再请求。 */
 const SESSION_RENDER_LIMIT = 60;
 
+/* ── 顶部空态的推荐提示词 ──
+   不是操作按钮：点一下只是把这句话填进输入框（不直接发送），用户还能补两句再发。
+   条目写成"能直接当第一条消息发出"的口气，所以文案本身就是提示词。 */
+const AGENT_PROMPT_SUGGESTIONS = [
+  '做一下翻译前准备',
+  '通过子agent探索全文补齐字典',
+  '做一下译后流程',
+  '修一下问题',
+];
+
 function AgentSessionSidebar({
   sessionsByProject,
   projects,
@@ -1291,6 +1301,22 @@ export function AgentPage() {
   );
   const [backendProfileNames] = useState<string[]>(() => getBackendProfileNames());
   const [goal, setGoal] = useState('');
+
+  // 输入框本体：点推荐提示词后要把焦点还回去（用户接着改两个字就能直接回车发出）
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+
+  /** 空态的推荐提示词：填进输入框并聚焦到末尾，**不直接发送**（用户还能改）。
+   *  输入框里已经有字时追加成新的一行——点了没反应或者把写了一半的话冲掉都很难受。 */
+  const applyPromptSuggestion = useCallback((text: string) => {
+    setGoal((prev) => (prev.trim() ? `${prev.trimEnd()}\n${text}` : text));
+    // 等 React 把新的 value 提交到 DOM 再定位光标，否则量到的还是旧长度
+    requestAnimationFrame(() => {
+      const el = composerRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+  }, []);
 
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [status, setStatus] = useState<string>('idle');
@@ -2385,10 +2411,18 @@ export function AgentPage() {
                 发送第一条消息启动会话，它会自主了解项目、准备字典、启动翻译、跟进进度，并复核修复发现的问题。运行中你可以随时插话或点停止打断，之后继续发消息它会在原会话上接着干。
               </p>
               <div className="agent-hero__steps">
-                <span>① 了解项目</span>
-                <span>② 准备字典</span>
-                <span>③ 启动翻译</span>
-                <span>④ 复核修复</span>
+                {AGENT_PROMPT_SUGGESTIONS.map((text) => (
+                  <button
+                    key={text}
+                    type="button"
+                    className="agent-hero__step"
+                    onClick={() => applyPromptSuggestion(text)}
+                    title="点击填入输入框"
+                  >
+                    <span className="agent-hero__step-icon"><Icon name="sparkle" /></span>
+                    {text}
+                  </button>
+                ))}
               </div>
               <div className="agent-hero__project-panel">
                 {projectOptions.length > 0 ? (
@@ -2616,6 +2650,7 @@ export function AgentPage() {
         ) : null}
         <div className={`agent-composer${running ? ' is-running' : ''}${queued.length ? ' has-queue' : ''}`}>
           <textarea
+            ref={composerRef}
             className="agent-composer__input"
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
@@ -2975,6 +3010,12 @@ function StatusPill({ status, running }: { status: string; running: boolean }) {
  *  重挂时恢复。只记「用户点过」的，自动跟随逻辑不受影响。 */
 const manualOpenState = new Map<string, boolean>();
 
+/** 运行中回合的墙钟起点（模块级，key 同 stateKey）：切页面/切会话会把组件卸载重建，
+ *  useRef 里的起点随之丢失；重挂时若直接拿 Date.now() 当起点，"处理中 · Ns"的计时
+ *  就从 0 重走。起点按组记住，重挂后接着上次的时刻继续走。回合结束即删，表不会积大。
+ *  （整个应用重启后表是空的，退回"从当下重计"；结束的回合本就走事件耗时之和的兜底。） */
+const liveStartedState = new Map<string, number>();
+
 function AgentGroupView({
   group,
   isLive,
@@ -3066,16 +3107,22 @@ function AgentActivityGroup({
     // 「还没有起点」这一支——否则新建的活动组永远拿不到起点，头部会一直显示
     // 0ms（重试这类没有 durationMs 的活动尤其明显）。
     if (isLive) {
-      if (liveStartedRef.current == null || !wasLiveRef.current) liveStartedRef.current = Date.now();
+      // 起点优先取模块级缓存：重挂（切页面回来）时接着上次的时刻走，而不是重新计时
+      if (liveStartedRef.current == null) {
+        liveStartedRef.current = liveStartedState.get(stateKey) ?? Date.now();
+      }
+      liveStartedState.set(stateKey, liveStartedRef.current);
     } else if (wasLiveRef.current && liveStartedRef.current != null) {
       setFrozenSec(Math.max(0, Math.floor((Date.now() - liveStartedRef.current) / 1000)));
+      // 回合已结束：起点没有保留价值，别让这张表越积越大
+      liveStartedState.delete(stateKey);
     }
     wasLiveRef.current = isLive;
     if (!isLive) return;
     setNow(Date.now());
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, [isLive]);
+  }, [isLive, stateKey]);
   // 结束后展示用「事件耗时之和」兜底：恢复会话/刷新后没有墙钟起点。
   const totalMs = items.reduce((sum, it) => sum + (it.durationMs || 0), 0);
   const wallSec = liveStartedRef.current != null ? Math.max(0, Math.floor((now - liveStartedRef.current) / 1000)) : 0;
