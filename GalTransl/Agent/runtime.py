@@ -27,6 +27,7 @@ from typing import Any, Callable, Sequence
 
 from GalTransl.Agent import session_store
 from GalTransl.Agent.session_store import SessionStore
+from GalTransl.ProblemWhiteList import parse_problem_white_list_entry
 
 DEFAULT_BACKEND_HOST = "127.0.0.1"
 DEFAULT_BACKEND_PORT = 12333
@@ -144,6 +145,7 @@ PERMISSION_TOOL_RISK: dict[str, str] = {
     "delete_transl_cache": PERMISSION_EDIT,
     "update_project_config": PERMISSION_HIGH,
     "manage_problem_filter": PERMISSION_HIGH,
+    "manage_problem_white_list": PERMISSION_HIGH,
     "write_project_guideline": PERMISSION_HIGH,
     "start_translation": PERMISSION_HIGH,
     # 派子代理：虽然它写的只是缓存里的"存疑内容"（doub_content，改不了译文），但这是
@@ -183,6 +185,7 @@ PERMISSION_TOOL_LABELS: dict[str, str] = {
     "delete_transl_cache": "删除缓存",
     "update_project_config": "修改项目配置",
     "manage_problem_filter": "管理问题过滤",
+    "manage_problem_white_list": "管理问题白名单",
     "write_project_guideline": "修改项目规范",
     "start_translation": "启动翻译",
     "run_subagents": "派子代理",
@@ -504,7 +507,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
    - **校对（proofread）**：每个负责一个（或一组）缓存文件，一次最多 16 个。file 填具体文件名就是点名；填 `"*"` 则**自动均分**——同批的 `"*"` 任务平分全部缓存文件（如派 16 个 `"*"`、256 个缓存文件 → 每个 16 个），要一次覆盖全部文件时用它，不用自己去数文件再逐个点名。大文件还能用 indexes 切区间。它们只能读 + 写缓存条目的 doub_content（存疑内容：校对建议、润色建议都写这里），**改不了译文**：返回的 tasks[].doubts 带文件名与 index，报告是各自的总结（含"拿不准"的点）。拿到后按 7 的流程处理——读那些 index 的 doub_content，改完译文把该条的 doub_content 清空。**推荐在修复前跑一遍**。
    **派之前先用 ask_user 问清意见类型**：这一遍要它们写哪一类——「只写校对建议（错译/漏译/事实错误/不通这些硬伤）」「只写润色建议（没硬伤但中文能更好：翻译腔、口语不自然、用词单调、节奏拖沓）」「两者都要」——再把答案写进 brief（如 brief="本次只写润色建议，每条给具体改法；对话读起来要像人话"）。brief 里不写这句时它们默认只写校对建议；两类意见都写进 doub_content，同一条目只留一条，所以"两者都要"时要交代它们**硬伤优先**。
    派之前先想清楚要它们重点看什么，写进 brief 比它们自己发挥准。
-7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。对确认无需处理的系统性问题类型（如字典使用提示、纯语气词提示），可用 manage_problem_filter(action="add", keyword=["…"]) 加入问题过滤清单（keyword 可传数组一次加多个），让统计聚焦真问题；过滤后统计会明显下降，属于预期效果。
+7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。问题过滤关键字是**精准匹配**：用 manage_problem_filter(action="add", keyword=["<与 list_problems 里某条问题项逐字一致的整条>"]) 只丢掉这一条具体问题（如「残留日文：おはよう」）；不能写大类名（如「残留日文」）或子串，那样什么也过滤不掉。若某几条反复误报、不值得再改，用 manage_problem_white_list(action="add", entry=["<文件名>:<index>", …]) 按位置豁免（entry 支持 "01.json:12" 与 "01.json:12-15" 区间，可传数组），效果等同于给这几条勾上 skip_check：不再检测、不计入统计。
 8. **完成**：收尾前先调用 get_project_overview 确认项目真的翻完——只有 files_translated == files_total 且没有 running 任务才算整体完成（total==translated 可能只代表已缓存的部分翻完，不要据此收尾）；若还有文件没翻，回到流程 4 继续 start_translation 翻剩余文件。若 list_problems 的统计里有**翻译失败**（失败的批次会把 problem 标成「翻译失败」、译文带 "(Failed)" 标记）：确认项目配置 `common.retranslKey` 里有没有「翻译失败」（get_project_overview 的 config 能看到，没有就 update_project_config 加上）：有的话**再启动一次 start_translation** 即可把这些句子重翻一遍。问题数可控、整体完成后，用 read_output 抽查最终输出文件（交付物；输出与缓存不完全一致，译后字典替换只在输出生效），确认无误后用一段自然语言总结本次操作（做了什么、翻译进度、剩余问题建议），不要调用工具，直接输出总结即可结束。
 
 # 译前 / 译后字典（替换类字典）的用法
@@ -2530,7 +2533,7 @@ def _http_json(method: str, url: str, body: dict[str, Any] | None = None) -> Any
 # 带 reason 入参的工具（写类：改配置/规范/字典/缓存，加上启动翻译）共用的可选参数：
 # 让模型自己交代"为什么这么做"。
 # **怎么填、填了显示在哪里，只在 system prompt 的约束里写一份**（见 AGENT_SYSTEM_PROMPT），
-# 这里只说明"这是什么"，九个工具引用同一个 dict，既不重复解释也不各写一遍。
+# 这里只说明"这是什么"，这些工具引用同一个 dict，既不重复解释也不各写一遍。
 # 哪些工具带这个参数见 _TOOLS_WITH_REASON（_attach_reason 按它把 reason 挂回结果）。
 _REASON_PROPERTY: dict[str, Any] = {
     "type": "string",
@@ -2890,7 +2893,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "manage_problem_filter",
-            "description": "管理问题过滤关键字（项目配置 common.problemFilterKey，与「缓存与问题」页同一套配置）。命中的问题项会被 list_problems 和进度统计过滤掉。适合在确认某类问题（如字典使用提示、纯语气词提示）不需要处理后，将其加入过滤清单让统计聚焦真问题；也可移除误过滤的关键字。keyword 可传字符串或数组，一次增删多个。",
+            "description": "管理问题过滤关键字（项目配置 common.problemFilterKey，与「缓存与问题」页同一套配置）。**精准匹配**：keyword 必须与 list_problems 返回的某条问题项**逐字一致**（整条，如「残留日文：おはよう」「缺控制符：<...>」），命中的那一条才会被 list_problems 与进度统计过滤掉。不支持按大类或子串过滤——写「残留日文」不会匹配「残留日文：おはよう」，也就无法用一个词滤掉整个大类。要豁免整类问题请改用 manage_problem_white_list 按条目豁免，或直接修译文。keyword 可传字符串或数组，一次增删多个。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2904,7 +2907,33 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                             {"type": "string"},
                             {"type": "array", "items": {"type": "string"}},
                         ],
-                        "description": "add/remove 必填。要操作的关键字（如 \"使用了GPT词典\"、\"正文直出\"），精确匹配、区分大小写。可传单个字符串，也可传数组一次操作多个。",
+                        "description": "add/remove 必填。要操作的过滤项：必须与某条问题项**逐字一致**（整条，如 \"残留日文：おはよう\"），区分大小写。不做子串/大类匹配（\"残留日文\" 匹配不到 \"残留日文：おはよう\"）。可传单个字符串，也可传数组一次操作多个。",
+                    },
+                    "reason": _REASON_PROPERTY,
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_problem_white_list",
+            "description": "管理问题白名单（项目配置 common.problemWhiteList）。白名单是「缓存文件 + 条目 index」的名单，命中的条目等价于勾选了 skip_check：不再检测/展示问题，也不计入问题统计。适合确认某几条译文无需再处理时按位置精确豁免（如个别专有名词、语气词导致的反复误报）。entry 传 \"文件名:index\"（如 \"01.json:12\"，区间写 \"01.json:12-15\"），可传字符串或数组一次增删多个。与 manage_problem_filter 的区别：filter 按问题文本子串整类过滤，白名单按具体条目豁免。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "add", "remove"],
+                        "description": "list 查看当前白名单；add 添加；remove 移除。",
+                    },
+                    "entry": {
+                        "anyOf": [
+                            {"type": "string"},
+                            {"type": "array", "items": {"type": "string"}},
+                        ],
+                        "description": "add/remove 必填。要操作的条目，格式 \"<缓存文件名>:<index>\"（如 \"01.json:12\"；闭区间写 \"01.json:12-15\"）。可传单个字符串，也可传数组一次操作多条。",
                     },
                     "reason": _REASON_PROPERTY,
                 },
@@ -3218,7 +3247,8 @@ CONFIG_FIELD_DESCRIPTIONS: dict[str, str] = {
     "common.smartRetry": "解析失败时自动缩小批次并重置上下文，减少无效重试 [true/false]",
     "common.retranslFail": "程序重启时是否自动重翻标记为 (Failed) 的句子 [true/false]",
     "common.retranslKey": "重翻关键字列表：启动时命中缓存 problem 或原文关键字的句子会被重翻（如「翻译失败」「残留日文」）",
-    "common.problemFilterKey": "问题过滤关键字列表：命中的问题项在问题统计与 list_problems 中被过滤掉",
+    "common.problemFilterKey": "问题过滤关键字列表：按问题项精准匹配（需与整条问题项逐字一致，如「残留日文：おはよう」），命中项在问题统计与 list_problems 中被过滤掉；不支持按大类/子串过滤",
+    "common.problemWhiteList": "问题白名单：按「缓存文件名:index」（如 a.json:12，区间写 a.json:12-15）豁免指定缓存条目的问题，等价于给该条勾选 skip_check",
     "common.gpt.contextNum": "每次请求附带的前文句数；值越大上下文越强、成本越高（常用 8）[0-32]",
     "common.gpt.translation_guideline": "使用的**全局**翻译规范文件名（位于 translation_guidelines 文件夹），决定文风与措辞；项目专属规范不是配置项，而是项目目录里的 translation_guideline.md（用 read_guideline/write_project_guideline 读改），翻译时拼在全局规范之后",
     "common.gpt.enhance_jailbreak": "是否启用「抗拒答」增强提示，降低模型拒答概率 [true/false]",
@@ -4033,10 +4063,10 @@ def _tool_create_dict_file(runner: AgentRunner, args: dict[str, Any]) -> Any:
 
 
 def _parse_filter_keywords(raw: Any) -> list[str]:
-    """关键字入参（单个字符串 / 字符串数组 / 配置里那串）→ 去空白、去重保序的列表。
+    """字符串列表入参（单个字符串 / 字符串数组 / 配置里那串）→ 去空白、去重保序的列表。
 
-    manage_problem_filter 与审批卡上的「将要变更」预览共用：字符串既可能是单个关键字，
-    也可能是换行分隔的一串（模型两种都爱写）。
+    manage_problem_filter / manage_problem_white_list 与审批卡上的「将要变更」预览共用：
+    字符串既可能是单个项，也可能是换行分隔的一串（模型两种都爱写）。
     """
     items = raw.split("\n") if isinstance(raw, str) else raw
     if not isinstance(items, list):
@@ -4065,29 +4095,32 @@ def _load_problem_filter_keys(
 
 
 def _plan_problem_filter(
-    keys: list[str], action: str, keywords: list[str]
+    keys: list[str], action: str, keywords: list[str], field: str = "problemFilterKey"
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
-    """算出这次 add/remove 实际会动到哪些关键字（**只读**）：返回（命中, 未命中, changes）。
+    """算出这次 add/remove 实际会动到哪些项（**只读**）：返回（命中, 未命中, changes）。
 
-    与 _tool_manage_problem_filter 共用：卡上列出的增删就是真执行会写进去的那些。
+    与 _tool_manage_problem_filter / _tool_manage_problem_white_list 共用：卡上列出的
+    增删就是真执行会写进去的那些；field 决定变更卡上显示的是哪个配置键。
     """
     existing = set(keys)
     if action == "add":
         hit = [k for k in keywords if k not in existing]  # 实际新增
         miss = [k for k in keywords if k in existing]  # 本来就有
-        changes = [_change("problemFilterKey", None, k, "add") for k in hit]
+        changes = [_change(field, None, k, "add") for k in hit]
     else:  # remove
         hit = [k for k in keywords if k in existing]  # 实际移除
         miss = [k for k in keywords if k not in existing]  # 本来就没有
-        changes = [_change("problemFilterKey", k, None, "remove") for k in hit]
+        changes = [_change(field, k, None, "remove") for k in hit]
     return hit, miss, changes
 
 
 def _tool_manage_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """增/删/查项目配置 common.problemFilterKey（问题过滤关键字）。
 
-    与桌面端「缓存与问题」页同一套配置：命中的问题项会在 list_problems /
-    进度统计里被过滤掉。add/remove 都是对关键字的精确匹配（区分大小写）。"""
+    与桌面端「缓存与问题」页同一套配置。**精准匹配**：关键字必须与某条问题项逐字
+    一致（整条，如「残留日文：おはよう」），该条才会在 list_problems / 进度统计里
+    被过滤掉；不做子串匹配，因而无法用大类名（如「残留日文」）滤掉整类问题。
+    add/remove 都是对关键字的精确匹配（区分大小写）。"""
     action = str(args.get("action", "")).strip()
     if action not in ("list", "add", "remove"):
         raise AgentToolError("action must be one of: list, add, remove")
@@ -4130,6 +4163,86 @@ def _tool_manage_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> An
     )
     # 配置已写回：进度缓存按 mtime 自动失效，后续 list_problems 立即用新过滤
     result: dict[str, Any] = {"filter_keys": keys, "count": len(keys), hit_key: hit, "changes": changes}
+    if miss:
+        result[miss_key] = miss
+    return result
+
+
+def _load_problem_white_list(
+    runner: AgentRunner, pid: str, config_name: str
+) -> tuple[dict[str, Any], list[str]]:
+    """读配置里的 common.problemWhiteList：返回（整份 config, 去重保序的条目清单）。
+
+    manage_problem_white_list 的 list/add/remove 三支与审批卡预览都走它——"现在的
+    白名单是什么"只能有一处口径。
+    """
+    data = runner._http_get(f"/api/projects/{pid}/config?config={urllib.parse.quote(config_name)}")
+    config = data.get("config") if isinstance(data, dict) else None
+    if not isinstance(config, dict):
+        raise AgentToolError("项目配置读取失败")
+    common = config.get("common")
+    if not isinstance(common, dict):
+        common = {}
+        config["common"] = common
+    return config, _parse_filter_keywords(common.get("problemWhiteList", []))
+
+
+_WHITE_LIST_ENTRY_HINT = '条目格式为 "<缓存文件名>:<index>"（如 "01.json:12"），区间写 "01.json:12-15"'
+
+
+def _tool_manage_problem_white_list(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """增/删/查项目配置 common.problemWhiteList（问题白名单）。
+
+    白名单是「缓存文件 + 条目 index」的名单，命中的条目等价于勾了 skip_check：
+    list_problems / 进度统计不再显示它的问题，缓存重建时也不再检测。与
+    manage_problem_filter（按问题文本子串整类过滤）互补：白名单按具体位置豁免。
+    """
+    action = str(args.get("action", "")).strip()
+    if action not in ("list", "add", "remove"):
+        raise AgentToolError("action must be one of: list, add, remove")
+    pid = runner._project_id()
+    config_name = runner.state.config_file_name or DEFAULT_CONFIG_FILE
+
+    if action == "list":
+        _, entries = _load_problem_white_list(runner, pid, config_name)
+        return {"white_list": entries, "count": len(entries)}
+
+    entries = _parse_filter_keywords(args.get("entry"))
+    if not entries:
+        raise AgentToolError(f"entry is required for add/remove（{_WHITE_LIST_ENTRY_HINT}）")
+    if action == "add":
+        invalid = [e for e in entries if parse_problem_white_list_entry(e) is None]
+        if invalid:
+            raise AgentToolError(f"这些条目格式不对：{'、'.join(invalid)}；{_WHITE_LIST_ENTRY_HINT}")
+
+    config, current = _load_problem_white_list(runner, pid, config_name)
+    hit, miss, changes = _plan_problem_filter(current, action, entries, field="problemWhiteList")
+    if action == "add":
+        hit_key, miss_key, miss_note = "added", "already_present", "已在白名单里"
+    else:  # remove
+        hit_key, miss_key, miss_note = "removed", "not_found", "不在白名单里"
+
+    if not hit:
+        return {
+            "white_list": current,
+            "count": len(current),
+            "note": f"这些条目{miss_note}，白名单未变化",
+        }
+
+    if action == "add":
+        current.extend(hit)
+    else:
+        removing = set(hit)
+        current = [k for k in current if k not in removing]
+
+    config["common"]["problemWhiteList"] = current
+    runner._http_put(
+        f"/api/projects/{pid}/config",
+        {"config": config, "config_file_name": config_name},
+    )
+    result: dict[str, Any] = {
+        "white_list": current, "count": len(current), hit_key: hit, "changes": changes
+    }
     if miss:
         result[miss_key] = miss
     return result
@@ -4960,6 +5073,7 @@ PREVIEW_TOOLS: frozenset[str] = frozenset({
     "save_name_table",
     "update_project_config",
     "manage_problem_filter",
+    "manage_problem_white_list",
     "write_project_guideline",
 })
 
@@ -4985,6 +5099,8 @@ def _preview_tool_changes(runner: AgentRunner, name: str, args: dict[str, Any]) 
             return _preview_config_update(runner, args)
         if name == "manage_problem_filter":
             return _preview_problem_filter(runner, args)
+        if name == "manage_problem_white_list":
+            return _preview_problem_white_list(runner, args)
         if name == "write_project_guideline":
             return _preview_guideline_write(runner, args)
         return _preview_name_table(runner, args)
@@ -5100,6 +5216,26 @@ def _preview_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> dict[s
     _, _, changes = _plan_problem_filter(keys, action, keywords)
     if not changes:
         return None  # 全都在清单里（或本来就不在）：这次调用不会改变什么
+    return {"changes": changes}
+
+
+def _preview_problem_white_list(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
+    """manage_problem_white_list 的预览：读现在的白名单，算出这次会加/删哪几条。
+
+    只覆盖 add / remove：list 不改任何东西，没有 diff 可看。
+    """
+    action = str(args.get("action", "")).strip()
+    if action not in ("add", "remove"):
+        return None
+    entries = _parse_filter_keywords(args.get("entry"))
+    if not entries:
+        return None
+    pid = runner._project_id()
+    config_name = runner.state.config_file_name or DEFAULT_CONFIG_FILE
+    _, current = _load_problem_white_list(runner, pid, config_name)
+    _, _, changes = _plan_problem_filter(current, action, entries, field="problemWhiteList")
+    if not changes:
+        return None  # 全都在白名单里（或本来就不在）：这次调用不会改变什么
     return {"changes": changes}
 
 
@@ -7735,6 +7871,7 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "get_runtime": _tool_get_runtime,
     "list_problems": _tool_list_problems,
     "manage_problem_filter": _tool_manage_problem_filter,
+    "manage_problem_white_list": _tool_manage_problem_white_list,
     "list_transl_cache": _tool_list_transl_cache,
     "read_transl_cache": _tool_read_transl_cache,
     "read_output": _tool_read_output,
@@ -7758,6 +7895,7 @@ _TOOLS_WITH_REASON: frozenset[str] = frozenset({
     "create_dict_file",
     "save_name_table",
     "manage_problem_filter",
+    "manage_problem_white_list",
     "patch_transl_cache",
     "delete_transl_cache",
     "start_translation",

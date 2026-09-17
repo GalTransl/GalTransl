@@ -904,6 +904,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   get_runtime: { action: '查询运行时', running: '查询运行时', verb: '', icon: 'settings', summary: () => '' },
   list_problems: { action: '检查问题清单', running: '检查问题清单', verb: '', icon: 'search', summary: (a) => str(a?.problem_type) || '问题类型统计' },
   manage_problem_filter: { action: '管理问题过滤', running: '管理问题过滤', verb: '', icon: 'filter', summary: (a) => [str(a?.action), Array.isArray(a?.keyword) ? a.keyword.map((k) => str(k)).join('、') : str(a?.keyword)].filter(Boolean).join(' · ') },
+  manage_problem_white_list: { action: '管理问题白名单', running: '管理问题白名单', verb: '', icon: 'filter', summary: (a) => [str(a?.action), Array.isArray(a?.entry) ? a.entry.map((k) => str(k)).join('、') : str(a?.entry)].filter(Boolean).join(' · ') },
   list_transl_cache: { action: '查看缓存清单', running: '查看缓存清单', verb: '', icon: 'archive', summary: () => '列出缓存文件' },
   read_transl_cache: { action: '读取缓存', running: '读取缓存', verb: '', icon: 'file-text', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
   search_input: { action: '搜索原文', running: '搜索原文', verb: '', icon: 'search-plus', summary: (a) => [str(a?.query), str(a?.filename), a?.context ? `±${a.context} 句上下文` : ''].filter(Boolean).join(' · ') },

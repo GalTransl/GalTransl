@@ -27,7 +27,7 @@ class ReasonSchemaTests(unittest.TestCase):
     def test_reason_tools_declare_it_as_optional(self) -> None:
         for name in sorted(_TOOLS_WITH_REASON):
             schema = _tool_schema(name)
-            # 同一份描述对象，九个工具不各写一遍
+            # 同一份描述对象，这些工具不各写一遍
             self.assertIs(schema["parameters"]["properties"].get("reason"), _REASON_PROPERTY, name)
             self.assertNotIn("reason", schema["parameters"].get("required") or [], name)
 

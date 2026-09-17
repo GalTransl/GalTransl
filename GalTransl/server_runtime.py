@@ -16,6 +16,11 @@ from yaml import safe_load
 
 from GalTransl import CACHE_FOLDERNAME
 from GalTransl.ProblemFilter import filter_problem_text, normalize_problem_filter_keys
+from GalTransl.ProblemWhiteList import (
+    build_problem_white_list_index,
+    is_problem_whitelisted,
+    normalize_problem_white_list,
+)
 
 def _utcnow_text() -> str:
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
@@ -349,6 +354,7 @@ class _CacheProgressFileStat:
     retran_terms_signature: tuple[str, ...] = field(default_factory=tuple)
     retran_hit_keys: dict[str, frozenset[str]] = field(default_factory=dict)
     problem_filter_signature: tuple[str, ...] = field(default_factory=tuple)
+    problem_white_signature: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(slots=True)
@@ -357,6 +363,7 @@ class _RetranConfigStat:
     size: int
     retran_key: str | list[str]
     problem_filter_keys: list[str] = field(default_factory=list)
+    problem_white_list: list[str] = field(default_factory=list)
 
 
 def _normalize_retran_key(value: Any) -> str | list[str]:
@@ -435,12 +442,14 @@ class RuntimeProgressCache:
 
         retran_key: str | list[str] = ""
         problem_filter_keys = []
+        problem_white_list = []
         try:
             with open(config_path, "rb") as cfg_file:
                 cfg = safe_load(cfg_file.read()) or {}
             common = cfg.get("common", {}) if isinstance(cfg, dict) else {}
             retran_key = _normalize_retran_key(common.get("retranslKey", ""))
             problem_filter_keys = normalize_problem_filter_keys(common.get("problemFilterKey", []))
+            problem_white_list = normalize_problem_white_list(common.get("problemWhiteList", []))
         except Exception:
             retran_key = ""
 
@@ -450,6 +459,7 @@ class RuntimeProgressCache:
                 size=int(stat.st_size),
                 retran_key=retran_key,
                 problem_filter_keys=problem_filter_keys,
+                problem_white_list=problem_white_list,
             )
 
         return retran_key
@@ -461,6 +471,13 @@ class RuntimeProgressCache:
             cached = self._retran_config_cache.get(config_path)
             return list(cached.problem_filter_keys) if cached else []
 
+    def get_problem_white_list(self, project_dir: str, config_file_name: str = "config.yaml") -> list[str]:
+        self.get_retran_key(project_dir, config_file_name)
+        config_path = str(Path(project_dir, config_file_name or "config.yaml").resolve())
+        with self._lock:
+            cached = self._retran_config_cache.get(config_path)
+            return list(cached.problem_white_list) if cached else []
+
     def get_progress(
         self,
         project_dir: str,
@@ -470,6 +487,7 @@ class RuntimeProgressCache:
         retran_terms: list[str] | None = None,
         current_job_started_at_ns: int | None = None,
         problem_filter_keys=None,
+        problem_white_list=None,
     ) -> dict[str, Any]:
         normalized = _normalize_project_dir(project_dir)
         cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
@@ -477,6 +495,9 @@ class RuntimeProgressCache:
         retran_terms_signature = tuple(retran_terms)
         problem_filter_keys = normalize_problem_filter_keys(problem_filter_keys)
         problem_filter_signature = tuple(problem_filter_keys)
+        problem_white_list = normalize_problem_white_list(problem_white_list)
+        problem_white_signature = tuple(problem_white_list)
+        problem_white_index = build_problem_white_list_index(problem_white_list)
 
         with self._lock:
             project_stats = self._project_files.setdefault(normalized, {})
@@ -507,6 +528,7 @@ class RuntimeProgressCache:
                         and cached.size == int(stat.st_size)
                         and cached.retran_terms_signature == retran_terms_signature
                         and cached.problem_filter_signature == problem_filter_signature
+                        and cached.problem_white_signature == problem_white_signature
                     ):
                         continue
 
@@ -604,6 +626,9 @@ class RuntimeProgressCache:
 
                         is_translated = bool(item.get("pre_dst", "") or item.get("pre_zh", ""))
                         problem_text = filter_problem_text(item.get("problem", ""), problem_filter_keys)
+                        # 白名单命中：等价于该条勾了 skip_check，问题整体不算
+                        if is_problem_whitelisted(problem_white_index, entry.name, item.get("index", "")):
+                            problem_text = ""
                         is_problem = bool(problem_text)
                         is_failed = (
                             "翻译失败" in problem_text
@@ -660,6 +685,7 @@ class RuntimeProgressCache:
                         failed_keys=frozenset(failed_keys),
                         retran_terms_signature=retran_terms_signature,
                         problem_filter_signature=problem_filter_signature,
+                        problem_white_signature=problem_white_signature,
                         retran_hit_keys={
                             term: frozenset(hit_keys)
                             for term, hit_keys in retran_hit_keys.items()

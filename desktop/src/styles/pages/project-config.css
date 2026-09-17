@@ -792,6 +792,87 @@
   font-size: 12px;
 }
 
+/* 编辑态：输入框 + 校验错误占同一列（错误另起一行，不挤乱右侧按钮） */
+.retransl-key-section__edit {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.retransl-key-section__hint {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.6;
+}
+
+.retransl-key-section__error {
+  font-size: 12px;
+  color: #c53030;
+  line-height: 1.5;
+}
+
+/* ── 问题过滤（过滤关键字 / 白名单两个 tab） ── */
+
+.problem-filter-tabs {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  flex-shrink: 0;
+}
+
+.problem-filter-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-line);
+  background: var(--color-surface-strong);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--color-text-muted);
+  transition: all var(--transition-fast);
+}
+
+.problem-filter-tab:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.problem-filter-tab--active {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.problem-filter-tab__count {
+  font-size: 12px;
+  background: var(--color-neutral-soft);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.problem-filter-tab--active .problem-filter-tab__count {
+  background: var(--color-primary);
+  color: white;
+}
+
+.problem-filter-section__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.problem-filter-section__desc {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
 /* ── 项目翻译规范（配置编辑页的独立区块） ──
    它是项目目录里的一个文件、不是配置项，所以自带保存按钮，也不参与
    「保存配置」那条 YAML 的 dirty 状态。 */

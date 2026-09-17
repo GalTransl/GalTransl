@@ -2,6 +2,8 @@
 分析问题
 """
 
+import re
+
 from GalTransl.CSentense import CTransList
 from GalTransl.ConfigHelper import CProjectConfig, CProblemType
 from GalTransl.Utils import (
@@ -47,6 +49,10 @@ def find_problems(
         find_type = projectConfig.getProblemAnalyzeConfig("GPT35")  # 兼容旧版
 
     for tran in trans_list:
+        if getattr(tran, "skip_check", False):
+            tran.problem = ""
+            continue
+
         pre_src = tran.pre_src
         post_src = tran.post_src
         pre_dst = tran.pre_dst
@@ -176,4 +182,17 @@ def find_problems(
             problem_list.append("翻译失败")
 
         if problem_list:
-            tran.problem += ", ".join(problem_list)
+            # tran.problem 可能已经有内容：失败批次会先把「翻译失败」写进去（见 BaseTranslate
+            # 的 _merge_problem_message）。以前的 `+=` 只在新串内部有分隔符、与已有内容之间没有，
+            # 于是会黏成「翻译失败残留日文：…」。这里带 ", " 合并，并按问题项去重
+            #（「翻译失败」两边都会加），且不改写已有文本。
+            existing = {p.strip() for p in re.split(r",\s*", tran.problem) if p.strip()} if tran.problem else set()
+            additions: list[str] = []
+            for item in problem_list:
+                item = item.strip()
+                if item and item not in existing:
+                    existing.add(item)
+                    additions.append(item)
+            if additions:
+                extra = ", ".join(additions)
+                tran.problem = f"{tran.problem}, {extra}" if tran.problem else extra

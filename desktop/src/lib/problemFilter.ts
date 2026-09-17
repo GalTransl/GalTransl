@@ -20,9 +20,30 @@ export function splitProblemTypes(problem: string | undefined): string[] {
     .filter(Boolean))];
 }
 
+/**
+ * 按「问题项」精准匹配过滤：只丢掉与某个 key 逐字相同的那一项（与后端
+ * ProblemFilter.filter_problem_text 同口径）。不做子串匹配，因此无法用一个词滤掉整个大类。
+ */
 export function filterProblemText(problem: string | undefined, keys: string[]): string {
   const text = problem || '';
   if (keys.length === 0) return text;
+  const wanted = new Set(keys.map((key) => key.trim()).filter(Boolean));
+  if (wanted.size === 0) return text;
   return text.split(/,\s*/).map((part) => part.trim())
-    .filter((part) => part && !keys.some((key) => part.includes(key))).join(', ');
+    .filter((part) => part && !wanted.has(part)).join(', ');
+}
+
+/**
+ * 校验问题白名单条目：必须是「缓存文件名:index」，index 为数字或闭区间。
+ * 返回错误文案；合法返回 null。与后端 ProblemWhiteList.parse_problem_white_list_entry 同口径。
+ */
+export function validateProblemWhiteListEntry(value: string): string | null {
+  const text = value.trim();
+  const sep = text.lastIndexOf(':');
+  if (sep <= 0) return '格式应为「缓存文件名:index」，如 01.json:12';
+  if (!text.slice(0, sep).trim()) return '缺少缓存文件名';
+  const token = text.slice(sep + 1).trim();
+  if (/^\d+$/.test(token)) return null;
+  if (/^(\d+)\s*-\s*(\d+)$/.test(token)) return null;
+  return 'index 应为数字或区间（如 12 或 12-15）';
 }

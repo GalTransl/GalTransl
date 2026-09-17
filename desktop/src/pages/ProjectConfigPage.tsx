@@ -25,6 +25,7 @@ import {
   DictionarySettingsSection,
   ProblemAnalyzeSection,
   RetranslKeySection,
+  ProblemFilterSection,
   ProjectGuidelineSection,
   type ConfigSectionKey,
 } from './project-config';
@@ -399,18 +400,35 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
                 <ProjectGuidelineSection projectId={projectId} projectDir={projectDir} />
               )}
 
-              {(activeSection === 'retranslKey' || activeSection === 'problemFilterKey') && (
+              {activeSection === 'retranslKey' && (
                 <RetranslKeySection
-                  key={activeSection}
-                  field={activeSection}
+                  key="retranslKey"
                   config={config}
                   onChange={(keys) => {
                     setConfig((prev) => {
                       if (!prev) return prev;
                       const common = { ...((prev.common as Record<string, unknown>) || {}) };
-                      common[activeSection] = keys;
+                      common.retranslKey = keys;
                       return { ...prev, common };
                     });
+                  }}
+                  onDirty={() => { setSaveSuccess(false); setDirty(true); }}
+                />
+              )}
+
+              {activeSection === 'problemFilterKey' && (
+                <ProblemFilterSection
+                  key="problemFilterKey"
+                  config={config}
+                  onChange={(field, keys) => {
+                    setConfig((prev) => {
+                      if (!prev) return prev;
+                      const common = { ...((prev.common as Record<string, unknown>) || {}) };
+                      common[field] = keys;
+                      return { ...prev, common };
+                    });
+                    setSaveSuccess(false);
+                    setDirty(true);
                   }}
                   onDirty={() => { setSaveSuccess(false); setDirty(true); }}
                 />

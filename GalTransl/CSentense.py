@@ -39,6 +39,7 @@ class CSentense:
         self.proofread_by = ""  # 校对记录
 
         self.problem = ""  # 问题记录
+        self.skip_check = False  # 跳过问题检查
         self.trans_conf = 0.0  # 翻译可信度 For GPT4
         self.doub_content = ""  # 用于记录疑问句的内容 For GPT4
         self.unknown_proper_noun = ""  # 用于记录未知的专有名词 For GPT4

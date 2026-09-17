@@ -21,6 +21,7 @@ from GalTransl.AppSettings import load_app_settings, save_app_settings
 from GalTransl.Cache import CACHE_TEMP_SUFFIX
 from GalTransl.DefaultProjectConfig import DEFAULT_PROJECT_CONFIG_YAML
 from GalTransl.ProblemFilter import filter_problem_text
+from GalTransl.ProblemWhiteList import build_problem_white_list_index, is_problem_whitelisted
 from GalTransl.ProjectGuideline import (
     PROJECT_GUIDELINE_FILENAME,
     apply_project_guideline_edit,
@@ -1150,6 +1151,43 @@ class JobRegistry:
             self.clear_project_stop(spec.project_dir)
 
 
+def _cache_entries_to_trans_list(entries, filename, white_index):
+    """把缓存条目转成 CSentense 列表，供问题检测使用。
+
+    两个跳过检查的来源在这里合流：条目自己存的 skip_check，以及项目白名单
+    （common.problemWhiteList）里点名了 (filename, index) 的条目——白名单等价于
+    给该条勾上 skip_check，find_problems 会清空其 problem。
+    """
+    from GalTransl.CSentense import CSentense
+
+    trans_list = []
+    for e in entries:
+        speaker = e.get("name", "")
+        if isinstance(speaker, list):
+            speaker = "/".join(speaker)
+        pre_src = e.get("pre_src", "") or e.get("pre_jp", "")
+        post_src = e.get("post_src", "") or e.get("post_jp", "")
+        pre_dst = e.get("pre_dst", "") or e.get("pre_zh", "")
+        proofread_dst = e.get("proofread_dst", "") or e.get("proofread_zh", "")
+        if post_src == "":
+            continue
+        s = CSentense(pre_src, speaker if speaker else "", e.get("index", 0))
+        s.post_src = pre_src
+        s.pre_dst = pre_dst
+        s.proofread_zh = proofread_dst
+        s.post_dst = proofread_dst if proofread_dst else pre_dst
+        s.trans_by = e.get("trans_by", "")
+        s.proofread_by = e.get("proofread_by", "")
+        s.trans_conf = e.get("trans_conf", 0)
+        s.doub_content = e.get("doub_content", "")
+        s.unknown_proper_noun = e.get("unknown_proper_noun", "")
+        s.skip_check = bool(e.get("skip_check", False)) or is_problem_whitelisted(
+            white_index, filename, e.get("index", "")
+        )
+        trans_list.append(s)
+    return trans_list
+
+
 def build_handler(registry: JobRegistry):
     class RequestHandler(BaseHTTPRequestHandler):
         def end_headers(self) -> None:
@@ -1372,7 +1410,6 @@ def build_handler(registry: JobRegistry):
 
                     # Rebuild: re-derive problem and post_dst_preview fields
                     try:
-                        from GalTransl.CSentense import CSentense
                         from GalTransl.Problem import find_problems
                         from GalTransl.Frontend.LLMTranslate import preprocess_trans_list, postprocess_trans_list
 
@@ -1413,28 +1450,11 @@ def build_handler(registry: JobRegistry):
                             pass  # If config loading fails, skip dict processing
 
                         # Build CSentense list from saved entries
-                        trans_list = []
-                        for e in entries:
-                            speaker = e.get("name", "")
-                            if isinstance(speaker, list):
-                                speaker = "/".join(speaker)
-                            pre_src = e.get("pre_src", "") or e.get("pre_jp", "")
-                            post_src = e.get("post_src", "") or e.get("post_jp", "")
-                            pre_dst = e.get("pre_dst", "") or e.get("pre_zh", "")
-                            proofread_dst = e.get("proofread_dst", "") or e.get("proofread_zh", "")
-                            if post_src == "":
-                                continue
-                            s = CSentense(pre_src, speaker if speaker else "", e.get("index", 0))
-                            s.post_src = pre_src
-                            s.pre_dst = pre_dst
-                            s.proofread_zh = proofread_dst
-                            s.post_dst = proofread_dst if proofread_dst else pre_dst
-                            s.trans_by = e.get("trans_by", "")
-                            s.proofread_by = e.get("proofread_by", "")
-                            s.trans_conf = e.get("trans_conf", 0)
-                            s.doub_content = e.get("doub_content", "")
-                            s.unknown_proper_noun = e.get("unknown_proper_noun", "")
-                            trans_list.append(s)
+                        # 白名单命中的条目等价于勾了 skip_check：重建问题时不检测、并清掉旧 problem
+                        white_index = build_problem_white_list_index(
+                            RUNTIME_PROGRESS_CACHE.get_problem_white_list(project_dir, config_name)
+                        )
+                        trans_list = _cache_entries_to_trans_list(entries, filename, white_index)
 
                         # Link prev/next
                         for i, s in enumerate(trans_list):
@@ -1798,6 +1818,9 @@ def build_handler(registry: JobRegistry):
             if sub_path == "/progress":
                 config_name = parse_qs(urlparse(self.path).query).get("config", ["config.yaml"])[0]
                 filter_keys = RUNTIME_PROGRESS_CACHE.get_problem_filter_keys(project_dir, config_name)
+                white_index = build_problem_white_list_index(
+                    RUNTIME_PROGRESS_CACHE.get_problem_white_list(project_dir, config_name)
+                )
                 cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
                 total = 0
                 translated = 0
@@ -1815,8 +1838,14 @@ def build_handler(registry: JobRegistry):
                                 entries = orjson.loads(f.read())
                             f_total = len(entries)
                             f_translated = sum(1 for e in entries if isinstance(e, dict) and (e.get("pre_dst", "") or e.get("pre_zh", "")))
-                            f_problems = sum(1 for e in entries if isinstance(e, dict) and filter_problem_text(e.get("problem", ""), filter_keys))
-                            f_failed = sum(1 for e in entries if isinstance(e, dict) and "(Failed)" in str(e.get("problem", "")))
+                            # 白名单命中的条目等价于勾了 skip_check：问题与失败都不计
+                            live = [
+                                e for e in entries
+                                if isinstance(e, dict)
+                                and not is_problem_whitelisted(white_index, name, e.get("index", ""))
+                            ]
+                            f_problems = sum(1 for e in live if filter_problem_text(e.get("problem", ""), filter_keys))
+                            f_failed = sum(1 for e in live if "(Failed)" in str(e.get("problem", "")))
                             total += f_total
                             translated += f_translated
                             problems += f_problems
@@ -1864,6 +1893,7 @@ def build_handler(registry: JobRegistry):
                     retran_terms=retran_terms,
                     current_job_started_at_ns=current_job_started_at_ns,
                     problem_filter_keys=RUNTIME_PROGRESS_CACHE.get_problem_filter_keys(project_dir, config_file_name),
+                    problem_white_list=RUNTIME_PROGRESS_CACHE.get_problem_white_list(project_dir, config_file_name),
                 )
                 total = progress_payload["total"]
                 translated = progress_payload["translated"]
@@ -2484,6 +2514,9 @@ def build_handler(registry: JobRegistry):
             if sub_path == "/problems":
                 config_name = parse_qs(urlparse(self.path).query).get("config", ["config.yaml"])[0]
                 filter_keys = RUNTIME_PROGRESS_CACHE.get_problem_filter_keys(project_dir, config_name)
+                white_index = build_problem_white_list_index(
+                    RUNTIME_PROGRESS_CACHE.get_problem_white_list(project_dir, config_name)
+                )
                 cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
                 all_problems = []
                 if os.path.isdir(cache_dir):
@@ -2496,7 +2529,12 @@ def build_handler(registry: JobRegistry):
                             with open(fp, "rb") as f:
                                 entries = orjson.loads(f.read())
                             for e in entries:
-                                problem_text = filter_problem_text(e.get("problem", ""), filter_keys) if isinstance(e, dict) else ""
+                                if not isinstance(e, dict):
+                                    continue
+                                # 白名单命中的条目等价于勾了 skip_check：不出现在问题清单
+                                if is_problem_whitelisted(white_index, name, e.get("index", "")):
+                                    continue
+                                problem_text = filter_problem_text(e.get("problem", ""), filter_keys)
                                 if problem_text:
                                     all_problems.append({
                                         "filename": name,
