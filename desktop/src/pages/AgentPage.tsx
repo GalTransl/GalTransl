@@ -3598,6 +3598,8 @@ type AskQuestion = {
   recommended: string;
 };
 
+const emptyAskDraft = (): AskDraft => ({ values: [], custom: false, text: '', skipped: false });
+
 function AskUserCard({
   item,
   submitting,
@@ -3620,13 +3622,16 @@ function AskUserCard({
     }));
 
   const [index, setIndex] = useState(0);
-  const [drafts, setDrafts] = useState<AskDraft[]>(() =>
-    questions.map(() => ({ values: [], custom: false, text: '', skipped: false })),
-  );
+  // 草稿不能在 useState 初始化器里按 questions 一次成型：ask_user 的参数是**流式到达**的，
+  // 首渲染时 questions 往往还空着，参数到齐后 questions 变长、初始化好的旧数组却不会跟着长
+  // ——drafts[i] 一越界就是读取 undefined 的白屏（整棵 React 树崩掉）。这里只存"用户
+  // 碰过的部分"，渲染时按 questions 长度补齐空草稿。
+  const [touchedDrafts, setTouchedDrafts] = useState<AskDraft[]>([]);
+  const drafts: AskDraft[] = questions.map((_, i) => touchedDrafts[i] ?? emptyAskDraft());
 
   if (!questions.length) return null;
   const current = questions[Math.min(index, questions.length - 1)];
-  const draft = drafts[Math.min(index, drafts.length - 1)];
+  const draft = drafts[index] ?? emptyAskDraft();
   const last = index === questions.length - 1;
 
   // 一题的答案 = 勾选的选项 + 自己填的内容（都为空 = 跳过）
@@ -3637,7 +3642,11 @@ function AskUserCard({
     return values;
   };
   const update = (patch: Partial<AskDraft>) =>
-    setDrafts((prev) => prev.map((d, i) => (i === index ? { ...d, ...patch } : d)));
+    setTouchedDrafts((prev) => {
+      const next = questions.map((_, i) => prev[i] ?? emptyAskDraft());
+      next[index] = { ...next[index], ...patch };
+      return next;
+    });
   const goNext = (list: AskDraft[]) => {
     if (last) onSubmit(list.map(answerOf));
     else setIndex((v) => v + 1);
@@ -3655,14 +3664,14 @@ function AskUserCard({
     // 单选：点一下就选中并直接进下一题（最后一题即提交），不必再点「下一题」。
     // 「自己填…」不走这里——它是那一行就地变成输入框，填完回车或点下一题才走。
     const list = drafts.map((d, i) => (i === index ? { ...d, values: [option], custom: false } : d));
-    setDrafts(list);
+    setTouchedDrafts(list);
     goNext(list);
   };
   const skipCurrent = () => {
     const list = drafts.map((d, i) =>
       i === index ? { values: [], custom: false, text: '', skipped: true } : d,
     );
-    setDrafts(list);
+    setTouchedDrafts(list);
     goNext(list);
   };
 

@@ -14,6 +14,7 @@ import {
   saveConfigFileName,
 } from '../lib/api';
 import { Sidebar } from '../components/Sidebar';
+import { RenderErrorBoundary } from '../components/RenderErrorBoundary';
 import { ConnectionProvider } from '../features/connection/ConnectionContext';
 import { HomePage, addProjectToHistory } from '../pages/HomePage';
 
@@ -373,7 +374,9 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
                 path="/agent"
                 element={(
                   <Suspense fallback={<RouteLoadingFallback />}>
-                    <AgentPage />
+                    <RenderErrorBoundary>
+                      <AgentPage />
+                    </RenderErrorBoundary>
                   </Suspense>
                 )}
               />
