@@ -518,7 +518,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
    - 效果：模型全程按"张三"翻译（称谓、语气、上下文都自然），而缓存与交付文件里仍然是脚本要的 `$name`，变量不会被翻坏或翻丢。
    - 注意别误伤：译后把中文名换回变量时，如果这个中文名在别处也会作为普通词出现，就不建议用这个词。
 2. **全篇反复出现的长控制符**（例如每句都挂着同一大串 `<...>` 之类的标记）：
-   - 译前把它换成一个**又短又独特**的占位符（如 `[[C1]]`，先确认原文里不会自然出现这种写法），译后再把占位符换回原来那串。
+   - 译前把它换成一个**又短又独特**的占位符（如 `<C1>`，先确认原文里不会自然出现这种写法），译后再把占位符换回原来那串。
    - 好处：模型不必每次照抄那一长串东西，既省 token，也少一次抄错/漏字的机会；交付文件里仍是原始标记。
    - 占位符要"独特"：别用会被模型顺手翻译或改写的常见词、中文词；同一个占位符全篇固定对应同一段控制符，不要一号多用。
 
@@ -528,6 +528,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 - `name`（说话人）字段默认**不吃**译前/译后字典：要让人名在 name 字段里也跟着替换，用 update_project_config 打开 `dictionary.usePreDictInName` / `dictionary.usePostDictInName`（GPT 字典对 name 默认是开的，见 `useGPTDictInName`）。
 
 # 约束
+- list_transl_cache / list_input_files / list_problems / read_input_file / read_transl_cache 的返回是 **Markdown 表格 + 文字说明**：开头一段文字是计数与提示（共多少、是否采样、缺哪些 index 等），随后的表格第一行是列名、每行一条数据；单元格里的换行写作 `<br>`、竖线转义为 `\\|`，空单元格就是没值。单元格里的 `<br>` 就是换行——与翻译管线送翻时的写法一致；用 patch_transl_cache 写回时写 `<br>`、真换行或字面 \\n 都可以，落盘前会统一成该条目原有的换行形式。
 - 每一步只调用必要的工具；能在一次工具调用里拿到的信息不要拆成多次。重复查看同类信息时用工具的分段参数（如 get_project_overview 的 include）只取变化的部分，别把基本不变的配置/说明反复拉一遍。
 - 要把某条缓存（原文 + 译文，或几条）摆给用户看时，在回复里**单独一行**写 `$transl_cache("<缓存文件名>", <行号>)`：文件名来自 list_transl_cache，行号是缓存条目的 index，可写区间 `12-15` 或逗号列表 `12,20`。界面会把它渲染成那几行缓存的卡片，比自己把原文译文抄一遍清楚、也不会抄错。不要把它写进代码块，也不要加额外解释行。
 - 翻译规范有两份：全局规范（translation_guidelines 目录里选的那份，通用规则）和**项目规范**（项目目录里的 `translation_guideline.md`，本项目专属，跟项目一起走）。翻译时两份拼在一起、项目规范在后，冲突以项目规范为准。读项目规范用 read_guideline(scope="project")；用户提出新的术语/称呼/语气要求时，先看项目规范里是否已经写过，再用 write_project_guideline 改：新增要求用 append，旧规则要改成新的用 replace（把旧那段原文给全，确保唯一），整套重写才用 overwrite。改完在**下一次启动翻译**时生效，正在跑的翻译不受影响；别在同一份规范里堆互相矛盾的规则。
@@ -1056,8 +1057,19 @@ class AgentRunner:
                         ok = True
                         duration_ms = int((time.time() - started) * 1000)
                         _log(f"  ✅ 工具结果: {name} 耗时 {duration_ms}ms")
-                        self._emit("tool_result", {"id": call_id, "name": name, "ok": True, "result": result, "duration_ms": duration_ms})
-                        content_str = json.dumps(result, ensure_ascii=False)
+                        # 大清单工具：事件与模型消息给同一段 Markdown 文本（前端 formatPayload 对字符串原样显示）
+                        rendered = _render_tool_result_table(name, result)
+                        self._emit(
+                            "tool_result",
+                            {
+                                "id": call_id,
+                                "name": name,
+                                "ok": True,
+                                "result": rendered if rendered is not None else result,
+                                "duration_ms": duration_ms,
+                            },
+                        )
+                        content_str = rendered if rendered is not None else json.dumps(result, ensure_ascii=False)
                     except AgentToolError as exc:
                         duration_ms = int((time.time() - started) * 1000)
                         _log(f"  ❌ 工具失败: {name} 耗时 {duration_ms}ms -> {exc}")
@@ -2530,7 +2542,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "list_input_files",
-            "description": "列出待翻译的输入文件（原文）与每个文件解析出的条数，供估工作量与挑选代表性文件（不必再逐个 read_input_file 数句子）。条数是原文解析出的条数（文本插件如「跳过无日文句」还没跑，可能偏大）；**只用于估工作量，不代表进度**（不管这个文件有没有缓存）——进度看 get_project_overview 的 files_translated/files_total。文件很多时默认只返回 100 个（order=even：**均匀采样**，含首尾、等距摊满整个清单，不是前 100 个；sentences_total 仍是整份清单的合计），要缩小范围用 grep（文件名子串），换挑选方式用 order。",
+            "description": "列出待翻译的输入文件（原文）与每个文件解析出的条数，供估工作量与挑选代表性文件（不必再逐个 read_input_file 数句子）。条数是原文解析出的条数（文本插件如「跳过无日文句」还没跑，可能偏大）；**只用于估工作量，不代表进度**（不管这个文件有没有缓存）——进度看 get_project_overview 的 files_translated/files_total。文件很多时默认只返回 100 个（order=even：**均匀采样**，含首尾、等距摊满整个清单，不是前 100 个；sentences_total 仍是整份清单的合计），要缩小范围用 grep（文件名子串），换挑选方式用 order。返回 Markdown 表格 + 文字说明（格式见系统提示）。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2550,7 +2562,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_input_file",
-            "description": "读取待翻译原文内容（文件插件解析后的条目：说话人+原文）。index 统一从 1 开始；留空 index 返回前 30 条；指定 index 支持区间，如 \"1-100\"。试译前用它了解原文文风、角色、专有名词。",
+            "description": "读取待翻译原文内容（文件插件解析后的条目：说话人+原文）。index 统一从 1 开始；留空 index 返回前 30 条；指定 index 支持区间，如 \"1-100\"。试译前用它了解原文文风、角色、专有名词。返回 Markdown 表格 + 文字说明（格式见系统提示）。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2568,7 +2580,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "search_input",
-            "description": "在**待翻译原文**里搜关键词或说话人（search_transl_cache 的原文侧对应工具：那边搜缓存=原文+译文+问题，这边只搜还没翻译的原文全文）。query 为关键词，field 取 all/src（原文正文）/name（说话人）；传 context=N 让每条命中再带上前后各 N 句（in_context=true 的是顺带带出来的上下文行，命中行不带这个字段）。field=all 时顶层 matched_in 汇总命中在原文还是说话人。典型用途：定译法/收字典前先查某个称呼或专有名词在全篇出现过几次、都出现在哪些上下文（出现次数与说话人是「该不该收、收哪个写法」的依据），以及比 read_input_file 逐段读更省 token 地定位语境；命中的 filename+index 可直接交给 read_input_file 精读。传 filename 只搜某个输入文件（来自 list_input_files），留空搜全部输入文件——**每次搜索都要把涉及的输入文件过一遍文件插件（比搜缓存慢），要缩小范围就传 filename**。注意译文侧的问题（漏译/残留日文/译名是否统一）不在原文里，那些用 search_transl_cache。",
+            "description": "在**待翻译原文**里搜关键词或说话人（search_transl_cache 的原文侧对应工具：那边搜缓存=原文+译文+问题，这边只搜还没翻译的原文全文）。query 为关键词，field 取 all/src（原文正文）/name（说话人）；传 context=N 让每条命中再带上前后各 N 句。field=all 时顶层 matched_in 汇总命中在原文还是说话人。典型用途：定译法/收字典前先查某个称呼或专有名词在全篇出现过几次、都出现在哪些上下文（出现次数与说话人是「该不该收、收哪个写法」的依据），以及比 read_input_file 逐段读更省 token 地定位语境；命中的 filename+index 可直接交给 read_input_file 精读。传 filename 只搜某个输入文件（来自 list_input_files），留空搜全部输入文件——**每次搜索都要把涉及的输入文件过一遍文件插件（比搜缓存慢），要缩小范围就传 filename**。注意译文侧的问题（漏译/残留日文/译名是否统一）不在原文里，那些用 search_transl_cache。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2849,7 +2861,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "list_problems",
-            "description": "查询自动检测到的翻译问题（残留日文、字典使用、过长等）。默认返回类型统计（各类型问题数）；传 problem_type 查看该类型的具体条目，支持分页。",
+            "description": "查询自动检测到的翻译问题（残留日文、字典使用、过长等）。默认返回类型统计（各类型问题数）；传 problem_type 查看该类型的具体条目，支持分页。传 context=N 让每条问题在表里前后各并 N 句上下文——判断\"这句到底哪里有问题、该怎么改\"通常直接看这张表就够了，不必再逐条 read_transl_cache。trans_by 与 read_transl_cache 同一套：逐行只给少数派（本会话改过的、手工改的），多数派记在顶层 majority_trans_by。返回 Markdown 表格 + 文字说明（格式见系统提示）。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2859,11 +2871,15 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "可选。单次返回条目数，默认 50，最大 200。",
+                        "description": "可选。单次返回条目数，默认 10，最大 20。",
                     },
                     "offset": {
                         "type": "integer",
                         "description": "可选。分页偏移，默认 0。配合 has_more 翻页。",
+                    },
+                    "context": {
+                        "type": "integer",
+                        "description": "可选，0-5（默认 0）。每条问题在表里前后各并 N 句上下文；相邻问题的窗口会合并、重复行只给一份。需要判断语意/改法时建议 2-3。",
                     },
                 },
                 "required": [],
@@ -2900,7 +2916,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "list_transl_cache",
-            "description": "列出缓存文件（译文）与各 .json 文件的条目数（.append.jsonl 增量日志不统计条目数）。注意：后缀为 .append.jsonl 的文件表示对应文件正在翻译中，此时读取缓存读到的是旧快照，应等任务 completed 后再读取/修改。文件很多时默认只返回 100 个（order=even：**均匀采样**，含首尾、等距摊满整个清单，不是前 100 个），要缩小范围用 grep（文件名子串，如 grep=\"sc_2\"），换挑选方式用 order（文件名顺序 / 随机采样 / 按大小从大到小或从小到大），要看更多把 limit 调大（上限 500）。",
+            "description": "列出缓存文件（译文）与各 .json 文件的条目数（.append.jsonl 增量日志不统计条目数）。注意：后缀为 .append.jsonl 的文件表示对应文件正在翻译中，此时读取缓存读到的是旧快照，应等任务 completed 后再读取/修改。文件很多时默认只返回 100 个（order=even：**均匀采样**，含首尾、等距摊满整个清单，不是前 100 个），要缩小范围用 grep（文件名子串，如 grep=\"sc_2\"），换挑选方式用 order（文件名顺序 / 随机采样 / 按大小从大到小或从小到大），要看更多把 limit 调大（上限 500）。返回 Markdown 表格 + 文字说明（格式见系统提示）。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2920,7 +2936,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_transl_cache",
-            "description": "读取某个缓存文件的条目（译文）。filename 来自 list_transl_cache 的缓存文件列表。留空 index 返回前 30 条；指定 index 只返回指定的条目。修问题/润色判断语意连贯时传 context 让目标条目前后各多带几句上下文。默认只返回必要字段（index/说话人/原文/译文/问题，以及确实非空或与原文不同的附加字段），要看别的字段再传 fields。不要读取 .append.jsonl 增量文件（翻译中旧快照），读对应的 .json 文件。要把某条缓存展示给用户时，在回复里单独一行写 $transl_cache(\"<缓存文件名>\", <行号>)（行号 = 条目 index，区间 12-15 / 列表 12,20 均可），界面会把它渲染成那几行缓存的卡片。",
+            "description": "读取某个缓存文件的条目（译文）。filename 来自 list_transl_cache 的缓存文件列表。留空 index 返回前 30 条；指定 index 只返回指定的条目。修问题/润色判断语意连贯时传 context 让目标条目前后各多带几句上下文。默认只返回必要字段（index/说话人/原文/译文/问题，以及确实非空或与原文不同的附加字段），要看别的字段再传 fields。不要读取 .append.jsonl 增量文件（翻译中旧快照），读对应的 .json 文件。返回 Markdown 表格 + 文字说明（格式见系统提示）。要把某条缓存展示给用户时，在回复里单独一行写 $transl_cache(\"<缓存文件名>\", <行号>)（行号 = 条目 index，区间 12-15 / 列表 12,20 均可），界面会把它渲染成那几行缓存的卡片。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2931,7 +2947,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     },
                     "context": {
                         "type": "integer",
-                        "description": "可选。上下文句数（0-20）：目标条目前后各多返回 N 句，前后文条目标注 in_context=true。如 index=\"205-206\" context=3 返回 202~209。修问题判断语意时建议 2-4。",
+                        "description": "可选。上下文句数（0-20）：目标条目前后各多返回 N 句，如 index=\"205-206\" context=3 返回 202~209。修问题判断语意时建议 2-4。",
                     },
                     "fields": {
                         "type": "array",
@@ -2994,7 +3010,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "search_transl_cache",
-            "description": "在缓存中搜索译文/原文/问题。query 为关键词，field 取 all/src/dst/problem。只看命中行往往不够判断（如查「ドルード」要决定译成「多鲁德」还是「杜罗德」），传 context=N 让每条命中再带上前后各 N 句（in_context=true 的是顺带带出来的上下文行，命中行不带这个字段），用法同 read_transl_cache 的 context。field=all 时顶层 matched_in 汇总命中在哪一侧（src/dst/problem），不再逐行重复标注；trans_by 逐行只给少数派——整批命中里出现最多的那个模型（多数派，通常就是翻译引擎翻的）过滤掉并记在顶层 majority_trans_by，其余少数派逐行保留。传 filename 只搜某个缓存文件（来自 list_transl_cache），修单文件问题时用，如 search_transl_cache(query=\"アクメ\", field=\"src\", filename=\"sc_2_st01.txt.json\")。",
+            "description": "在缓存中搜索译文/原文/问题。query 为关键词，field 取 all/src/dst/problem。只看命中行往往不够判断（如查「ドルード」要决定译成「多鲁德」还是「杜罗德」），传 context=N 让每条命中再带上前后各 N 句，用法同 read_transl_cache 的 context。field=all 时顶层 matched_in 汇总命中在哪一侧（src/dst/problem），不再逐行重复标注；trans_by 逐行只给少数派——整批命中里出现最多的那个模型（多数派，通常就是翻译引擎翻的）过滤掉并记在顶层 majority_trans_by，其余少数派逐行保留。传 filename 只搜某个缓存文件（来自 list_transl_cache），修单文件问题时用，如 search_transl_cache(query=\"アクメ\", field=\"src\", filename=\"sc_2_st01.txt.json\")。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -5145,6 +5161,244 @@ def _split_problem_types(problem: str) -> list[str]:
     return types
 
 
+# ---- Markdown 表格输出（当前启用）----
+# 可表格化的部分（数据行）用 Markdown 表格：第一行列名、第二行分隔线、每行一条——模型
+# 最熟的形状；计数 / 提示 / 警告这些杂项不用硬塞进表格，按文字写在表格前后。
+# 单元格规则只有一条：竖线转义、换行折成 <br>（Markdown 表格单元格不能有真换行），
+# None/缺失就是空单元格——不再需要 ION 那套 ~ 与位置对齐。
+def _md_cell(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    s = str(value)
+    return (
+        s.replace("|", "\\|")
+        .replace("\r\n", "<br>")
+        .replace("\n", "<br>")
+        .replace("\r", "<br>")
+    )
+
+
+def _md_table(columns: list[str], rows: Any) -> str:
+    """Markdown 表格；没有数据行就返回空串（调用方拼文档时自动略过）。"""
+    if not isinstance(rows, list) or not rows:
+        return ""
+    lines = [
+        "| " + " | ".join(columns) + " |",
+        "| " + " | ".join(["---"] * len(columns)) + " |",
+    ]
+    for row in rows:
+        row = row if isinstance(row, dict) else {}
+        lines.append("| " + " | ".join(_md_cell(row.get(col)) for col in columns) + " |")
+    return "\n".join(lines)
+
+
+def _md_doc(*parts: str) -> str:
+    return "\n\n".join(part for part in parts if part)
+
+
+def _md_render_list_transl_cache(result: dict[str, Any]) -> str:
+    head_parts: list[str] = []
+    if result.get("count") is not None:
+        head_parts.append(f"共 {result['count']} 个缓存文件")
+    if result.get("sampled"):
+        head_parts.append(f"下面只列其中 {result.get('returned')} 个（均匀采样，不是前几名）")
+    if result.get("translating"):
+        head_parts.append(f"{result['translating']} 个正在翻译")
+    table = _md_table(["name", "size", "entries", "status"], result.get("cache_files"))
+    note = result.get("note")
+    return _md_doc("，".join(head_parts), table, f"备注：{note}" if note else "")
+
+
+def _md_render_list_input_files(result: dict[str, Any]) -> str:
+    head_parts: list[str] = []
+    if result.get("count") is not None:
+        head_parts.append(f"共 {result['count']} 个输入文件")
+    if result.get("sampled"):
+        head_parts.append(f"下面只列其中 {result.get('returned')} 个（均匀采样，不是前几名）")
+    if result.get("sentences_total") is not None:
+        head_parts.append(f"句数合计 {result['sentences_total']}（含没列出来的文件）")
+    table = _md_table(["name", "size", "sentences"], result.get("input_files"))
+    note = result.get("note")
+    return _md_doc("，".join(head_parts), table, f"备注：{note}" if note else "")
+
+
+def _md_render_list_problems(result: dict[str, Any]) -> str:
+    if result.get("mode") == "stats":
+        head = f"共 {result.get('total')} 个问题，类型统计如下"
+        table = _md_table(["type", "count"], result.get("types"))
+        hint = result.get("hint")
+        return _md_doc(head, table, f"提示：{hint}" if hint else "")
+
+    head_parts: list[str] = []
+    if result.get("problem_type") is not None:
+        head_parts.append(f"问题类型：{result['problem_type']}")
+    if result.get("matched") is not None:
+        head_parts.append(f"命中 {result['matched']} 条")
+    if result.get("has_more"):
+        head_parts.append(f"本页显示 {result.get('returned')} 条、还有更多（用 offset 翻页）")
+    else:
+        head_parts.append(f"本页显示 {result.get('returned')} 条")
+    if result.get("majority_trans_by"):
+        head_parts.append(
+            f"多数派模型 {result['majority_trans_by']}（表里已省略，只留少数派/改过的来源）"
+        )
+    table = _md_table(
+        ["filename", "index", "speaker", "post_src", "pre_dst", "problem", "trans_by"],
+        result.get("problems"),
+    )
+    return _md_doc("；".join(head_parts), table)
+
+
+def _md_render_read_input_file(result: dict[str, Any]) -> str:
+    head_parts: list[str] = []
+    if result.get("filename") is not None:
+        head_parts.append(f"文件 {result['filename']}")
+    if result.get("count") is not None:
+        head_parts.append(f"共 {result['count']} 条，显示 {result.get('returned')} 条")
+    missing = result.get("missing_indexes")
+    missing_text = (
+        "缺失 index：" + ",".join(str(i) for i in missing) if isinstance(missing, list) and missing else ""
+    )
+    table = _md_table(["index", "name", "pre_src"], result.get("entries"))
+    return _md_doc("，".join(head_parts), missing_text, table)
+
+
+def _md_render_read_transl_cache(result: dict[str, Any]) -> str:
+    head_parts: list[str] = []
+    if result.get("filename") is not None:
+        head_parts.append(f"文件 {result['filename']}")
+    if result.get("count") is not None:
+        head_parts.append(f"共 {result['count']} 条，显示 {result.get('returned')} 条")
+    if result.get("context"):
+        head_parts.append(f"含上下文（点名的条目前后各 {result['context']} 句）")
+    if result.get("majority_trans_by"):
+        head_parts.append(
+            f"多数派模型 {result['majority_trans_by']}（表里已省略，只留少数派/改过的来源）"
+        )
+    warning = result.get("warning")
+    fields_note = result.get("fields_note")
+    missing = result.get("missing_indexes")
+    missing_text = (
+        "缺失 index：" + ",".join(str(i) for i in missing) if isinstance(missing, list) and missing else ""
+    )
+    fields = [str(f) for f in result.get("fields") or []]
+    if not fields:
+        entries = result.get("entries")
+        if isinstance(entries, list) and entries and isinstance(entries[0], dict):
+            fields = list(entries[0].keys())
+    table = _md_table(fields, result.get("entries"))
+    notes = [p for p in (f"警告：{warning}" if warning else "", f"字段说明：{fields_note}" if fields_note else "") if p]
+    return _md_doc("，".join(head_parts), missing_text, *notes, table)
+
+
+# 工具名 → 渲染器。渲染只对这里列出的工具生效，其余工具维持 JSON。
+_MD_RENDERERS: dict[str, Any] = {
+    "list_transl_cache": _md_render_list_transl_cache,
+    "list_input_files": _md_render_list_input_files,
+    "list_problems": _md_render_list_problems,
+    "read_input_file": _md_render_read_input_file,
+    "read_transl_cache": _md_render_read_transl_cache,
+}
+
+
+def _render_tool_result_table(name: str, result: Any) -> str | None:
+    """把大清单工具的结果 dict 渲染成 Markdown（表格化数据 + 文字化杂项）。
+
+    不在名单 / 不是 dict / 渲染失败时返回 None——调用方退回 JSON，绝不能因为格式丢数据。
+    """
+    render = _MD_RENDERERS.get(name)
+    if render is None or not isinstance(result, dict):
+        return None
+    try:
+        return render(result)
+    except Exception as exc:  # noqa: BLE001
+        _log(f"  ⚠ Markdown 渲染失败（{name}），退回 JSON：{exc}")
+        return None
+
+
+def _merge_problem_context(
+    runner: AgentRunner, page: list[dict[str, Any]], context: int
+) -> list[dict[str, Any]]:
+    """给问题行并上前后文（list_problems 的 context，与 read_transl_cache 同一语义）。
+
+    问题行自己往往看不出"为什么有问题"——修「残留日文」「译名不一致」要看着前后文才敢动手，
+    逐条 read_transl_cache 又太碎，所以把前后文直接并进这张表。上下文行与问题行**不做任何
+    标注区分**：上下文行的 problem 列为空，一眼即知，不需要提示。
+    - 同一文件里相邻问题的窗口**合并**（重叠的上下文行只给一份）；
+    - 上下文按每个文件取一次缓存，取不到（文件被删/翻写中）只少带一块：该文件的问题行照给，
+      绝不因此把整次列表弄失败。
+    """
+    merged: list[dict[str, Any]] = []
+    # 按文件分组（保持首次出现顺序）：跨文件的问题行不能混进同一个窗口
+    order: list[str] = []
+    by_file: dict[str, list[dict[str, Any]]] = {}
+    for row in page:
+        fname = str(row.get("filename") or "")
+        if fname not in by_file:
+            by_file[fname] = []
+            order.append(fname)
+        by_file[fname].append(row)
+    pid = runner._project_id()
+    for fname in order:
+        rows = by_file[fname]
+        try:
+            data = runner._http_get(f"/api/projects/{pid}/cache/{urllib.parse.quote(fname)}")
+            entries = [e for e in (data.get("entries") or []) if isinstance(e, dict)]
+        except Exception:  # noqa: BLE001 - 上下文只是附加信息，取不到就只给问题行
+            entries = []
+        if not entries:
+            merged.extend(rows)
+            continue
+        problem_by_index: dict[int, dict[str, Any]] = {}
+        for r in rows:
+            raw_idx = r.get("index")
+            if raw_idx is None:
+                continue
+            try:
+                problem_by_index[int(raw_idx)] = r
+            except (TypeError, ValueError):
+                continue
+        spans: set[int] = set()
+        for idx in problem_by_index:
+            spans.update(range(idx - context, idx + context + 1))
+        file_rows: list[dict[str, Any]] = []
+        emitted: set[int] = set()
+        for e in entries:
+            raw_idx = e.get("index")
+            if raw_idx is None:
+                continue
+            try:
+                idx = int(raw_idx)
+            except (TypeError, ValueError):
+                continue
+            if idx in problem_by_index:
+                file_rows.append(problem_by_index[idx])
+                emitted.add(idx)
+            elif idx in spans:
+                # 上下文行只要「谁说的 + 原文 + 译文」，problem 列空着——这就是它的标记
+                file_rows.append({
+                    "filename": fname,
+                    "index": idx,
+                    "speaker": str(_cache_field_value(e, "name") or ""),
+                    "post_src": str(_cache_field_value(e, "post_src") or ""),
+                    "pre_dst": str(_cache_field_value(e, "pre_dst") or ""),
+                })
+        # 缓存里找不到的问题行（缓存与问题清单不同步）：原样保留，别把问题弄丢
+        for idx, row in problem_by_index.items():
+            if idx not in emitted:
+                file_rows.append(row)
+
+        def _row_sort_index(row: dict[str, Any]) -> int:
+            idx = row.get("index")
+            return idx if isinstance(idx, int) else 0
+
+        file_rows.sort(key=_row_sort_index)
+        merged.extend(file_rows)
+    return merged
+
+
 def _tool_list_problems(runner: AgentRunner, args: dict[str, Any]) -> Any:
     pid = runner._project_id()
     cfg = urllib.parse.quote(runner.state.config_file_name)
@@ -5172,26 +5426,46 @@ def _tool_list_problems(runner: AgentRunner, args: dict[str, Any]) -> Any:
         wanted = [t.strip() for t in problem_type.split(",") if t.strip()]
         problems = [p for p in problems if any(w in _split_problem_types(p.get("problem", "")) for w in wanted)]
 
-    limit = args.get("limit", 50)
+    limit = args.get("limit", 10)
     offset = args.get("offset", 0)
     try:
-        limit = max(1, min(int(limit), 200))
+        limit = max(1, min(int(limit), 20))
     except (TypeError, ValueError):
-        limit = 50
+        limit = 10
     try:
         offset = max(0, int(offset))
     except (TypeError, ValueError):
         offset = 0
     matched = len(problems)
-    return {
+    page = problems[offset : offset + limit]
+    # trans_by 与 read_transl_cache / search_transl_cache 同一套（见 _dominant_trans_by）：
+    # 这批里出现最多的那个模型（多数派，通常就是翻译引擎翻的）逐条删掉、记在顶层一次，
+    # 少数派（Agent 改过的、手工改的）逐条保留——列表里真正要看的是异常来源。
+    dominant = _dominant_trans_by(page)
+    for row in page:
+        _strip_dominant_trans_by(row, dominant)
+    # context=N：每条问题前后各并 N 句上下文（语义同 read_transl_cache 的 context）。
+    # 上限比 read/search 的 20 收得更紧：这里一行就是"问题行 + 2N 句前后文"，一页最多
+    # 20 条问题，N=5 时返回体就已经不小了。
+    raw_context = args.get("context", 0)
+    try:
+        context = max(0, min(int(raw_context), 5))
+    except (TypeError, ValueError):
+        raise AgentToolError(f"context 必须是 0-5 的整数（收到 {raw_context!r}）")
+    result = {
         "total": data.get("total", len(problems)),
         "matched": matched,
         "problem_type": problem_type,
         "offset": offset,
-        "returned": len(problems[offset : offset + limit]),
+        "returned": len(page),
         "has_more": offset + limit < matched,
-        "problems": problems[offset : offset + limit],
+        "problems": page,
     }
+    if context > 0 and page:
+        result["problems"] = _merge_problem_context(runner, page, context)
+    if dominant:
+        result["majority_trans_by"] = dominant
+    return result
 
 
 def _tool_list_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
@@ -5441,7 +5715,7 @@ def _tool_read_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     by_index = {int(e.get("index", -1)): e for e in entries if e.get("index") is not None}
 
     # context=N：目标条目前后各多带 N 句（修问题/润色时需要前后文判断语意连贯）。
-    # 按文件顺序连续取，扩展 index 标注 in_context=true，与目标条目区分。
+    # 按文件顺序连续取，扩展出来的前后文与点名条目混排、不做任何标注。
     raw_context = args.get("context", 0)
     try:
         context = max(0, min(int(raw_context), 20))
@@ -5468,19 +5742,7 @@ def _tool_read_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
         for a, b in spans:
             for j in range(max(0, a - context), b + context + 1):
                 wanted_ctx.add(j)
-        # 浅拷贝再标注 in_context（不污染共享条目）；目标条目 False，扩展
-        # 出来的前后文 True，让模型聚焦目标条目
-        picked_ctx: list[dict[str, Any]] = []
-        for i in sorted(wanted_ctx):
-            e = by_index.get(i)
-            if e is None:
-                continue
-            copy = dict(e)
-            # 只标上下文行：命中行不带这个字段（每行挂一个 in_context=false 是纯噪音，
-            # 命中的是 wanted 里点名要的那些，模型自己清楚）
-            if i not in wanted:
-                copy["in_context"] = True
-            picked_ctx.append(copy)
+        picked_ctx = [by_index[i] for i in sorted(wanted_ctx) if i in by_index]
         result["returned"] = len(picked_ctx)
         result["entries"] = picked_ctx
         missing = sorted(i for i in wanted if i not in by_index)
@@ -5590,8 +5852,8 @@ def _slim_search_results(
     - 逐行的命中标记（缓存是 match_src/match_dst/match_problem，原文是 match_src/match_name）
       去掉，改成顶层 matched_in 汇总一次（只在 field="all" 时给：指定 field 的搜索本来就只有
       那一侧会命中，汇总没有信息量）；
-    - context>0 时逐行的 in_context 只保留 true——那是"顺带带出来的上下文行"，命中行不带
-      这个字段，免得每行都挂一个 in_context=false；
+    - 逐行的 in_context（服务端标注的上下文行）删掉——带没带上下文、哪行是命中，模型从
+      query 与行内容自己看得出来，不需要一个标注字段；
     - trans_by（只有缓存条目有）逐条只给**少数派**（见 _dominant_trans_by）：逐条的多数派与
       空值都删掉，多数派放顶层 majority_trans_by 记一次——这批"大头是谁翻的、哪几条是别人改的"
       一目了然。
@@ -5611,8 +5873,7 @@ def _slim_search_results(
             if row.get(key):
                 counts[label] = counts.get(label, 0) + 1
         clean = {k: v for k, v in row.items() if k not in keys}
-        if not clean.get("in_context"):
-            clean.pop("in_context", None)
+        clean.pop("in_context", None)
         _strip_dominant_trans_by(clean, dominant)
         slimmed.append(clean)
     result["results"] = slimmed
@@ -5660,8 +5921,7 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     if isinstance(result, dict) and context:
         result["context"] = context  # 服务端已回；这里兜底，保证调用方一定看得到
         notes.append(
-            f"已带上下文：每条命中前后各 {context} 句（in_context=true 的是顺带带出来的"
-            f"上下文行、不是命中，命中行不带这个字段）；"
+            f"已带上下文：每条命中前后各 {context} 句（包含关键词的那行是命中，其余是前后文）；"
             f"带上下文时命中上限收紧为 {max_hits} 条以免返回体过大，total 仍是全部命中数——"
             "命中很多时可用 filename 缩小范围或换更具体的关键词。"
         )
@@ -5736,8 +5996,7 @@ def _tool_search_input(runner: AgentRunner, args: dict[str, Any]) -> Any:
     if isinstance(result, dict) and context:
         result["context"] = context  # 服务端已回；这里兜底，保证调用方一定看得到
         notes.append(
-            f"已带上下文：每条命中前后各 {context} 句（in_context=true 的是顺带带出来的"
-            f"上下文行、不是命中，命中行不带这个字段）；"
+            f"已带上下文：每条命中前后各 {context} 句（包含关键词的那行是命中，其余是前后文）；"
             f"带上下文时命中上限收紧为 {max_hits} 条以免返回体过大，total 仍是全部命中数。"
         )
     # 指定了文件但 0 命中：确认一下该输入文件是否存在，避免模型误以为关键词不匹配
@@ -5828,6 +6087,57 @@ def _agent_model_name(runner: AgentRunner) -> str:
     return str(_backend_summary(profile, name).get("model") or "")
 
 
+# ---- 换行归一化（patch_transl_cache 写回前）----
+# 模型在 Markdown 表格里看到的换行是 <br>——这不是渲染器的发明：翻译管线送翻时，原文里的
+# 换行（真 \r\n、真 \n、乃至字面两字符 \r\n/\n）本来就全部替换成 <br> 再发给模型
+# （ForGalJsonTranslate.py:72-83），模型输出的 <br> 在落盘前又会被换回真换行
+# （_normalize_parsed_translation_text）。所以模型写 <br> 是管线内的标准写法。
+# 真正的缺口在 patch 的写路径：正常翻译有"模型输出 → 缓存"的归一化，patch 没有——
+# 模型照着表格写 <br> 就原样进了缓存，译文里的真换行变成了字面 <br>。
+# 下面把这条补上：写回前把 <br> / 真换行 / 字面 \n 全部统一成**该条目自己的换行形式**。
+
+def _infer_linebreak_symbol(*texts: str) -> str:
+    """从参考文本里推断"这条数据用的换行符"（优先级照抄翻译管线，ForGalJsonTranslate.py:72-79）：
+
+    字面 \\r\\n > 真 \\r\\n > 字面 \\n > 真 \\n；都没有返回空串。给多条参考文本时取**第一个
+    有换行的**——patch 归一化里先给字段现值（正在编辑的那份，风格以它为准）、再给 post_src。
+    """
+    for text in texts:
+        if not text:
+            continue
+        if "\\r\\n" in text:
+            return "\\r\\n"
+        if "\r\n" in text:
+            return "\r\n"
+        if "\\n" in text:
+            return "\\n"
+        if "\n" in text:
+            return "\n"
+    return ""
+
+
+def _normalize_linebreaks_like(value: str, *reference_texts: str) -> str:
+    """把 value 里的各种换行形态统一成参考文本所用的那种。
+
+    参考文本推断不出换行（整条没有换行）时**原样返回**——管线在 n_symbol 为空时同样不动
+    模型输出的 <br>，保持同一口径。
+    """
+    if not value:
+        return value
+    symbol = _infer_linebreak_symbol(*reference_texts)
+    if not symbol:
+        return value
+    # 先把所有形态折成真 \n：<br>（宽松大小写与自闭合）、真 \r\n / \r、
+    # 字面两字符 \r\n / \n / \r（模型双重转义时会出现）
+    v = re.sub(r"(?i)<br\s*/?>", "\n", value)
+    v = v.replace("\r\n", "\n").replace("\r", "\n")
+    v = v.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
+    # 再展开成该条目的换行形式
+    if symbol != "\n":
+        v = v.replace("\n", symbol)
+    return v
+
+
 def _plan_cache_patches(
     entries: list[Any], patches_raw: list[Any], allowed: frozenset[str]
 ) -> dict[str, Any]:
@@ -5877,7 +6187,14 @@ def _plan_cache_patches(
             )
             continue
         now = shadow.setdefault(idx_i, dict(entry))
-        for f, v in updates.items():
+        for f, v in list(updates.items()):
+            if isinstance(v, str):
+                # 换行归一化：字段现值（正在编辑的那份）的风格优先，其次该条 post_src 的风格。
+                # 归一化后的值就是真执行会写下去的东西，变更卡的 before→after 也用它——所见即所得。
+                v = _normalize_linebreaks_like(
+                    v, str(now.get(f) or ""), str(entry.get("post_src") or "")
+                )
+                updates[f] = v
             changes.append(_change(f"#{idx_i}.{f}", now.get(f), v, "replace"))
             now[f] = v
         plan.append({"entry": entry, "index": idx_i, "updates": updates})
@@ -7104,7 +7421,9 @@ class SubAgentRunner:
                     f"子代理没有这个工具：{name}（只能用 {'、'.join(self.role.tools)}）"
                 )
             result = handler(self.parent, args)
-            payload = json.dumps(result, ensure_ascii=False)
+            # 子代理读缓存是大头（校对一批 16 个、每个几十条）：同样走 Markdown 渲染
+            rendered = _render_tool_result_table(name, result)
+            payload = rendered if rendered is not None else json.dumps(result, ensure_ascii=False)
         except AgentToolError as exc:
             payload, ok = str(exc), False
         except Exception as exc:  # noqa: BLE001

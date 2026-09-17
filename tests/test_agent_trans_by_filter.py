@@ -2,7 +2,8 @@
 
 整本缓存的 trans_by 多半都是同一个模型的（翻译引擎那份），逐条给出来等于每次读缓存都白带
 一列；真正要看的是异常来源——本会话 Agent 用 patch_transl_cache 改过的（记的是 Agent 的
-模型名）、手工改的。两个读缓存的工具（read_transl_cache / search_transl_cache）同一套规则：
+模型名）、手工改的。三个会带这列的工具（read_transl_cache / search_transl_cache /
+list_problems）同一套规则：
 
 - **多数派**（这批里出现最多的那个值）逐条删掉，值本身记在顶层 `majority_trans_by` 一次；
 - **少数派**逐条保留在条目的 `trans_by` 上；
@@ -21,6 +22,7 @@ from GalTransl.Agent.runtime import (
     AgentState,
     _dominant_trans_by,
     _strip_dominant_trans_by,
+    _tool_list_problems,
     _tool_read_transl_cache,
     _tool_search_transl_cache,
 )
@@ -185,6 +187,54 @@ class ReadToolTransByTests(unittest.TestCase):
 
         out = _tool_read_transl_cache(runner, {"filename": "01.json", "index": "1"})
 
+        self.assertNotIn("majority_trans_by", out)
+
+
+class ListProblemsTransByTests(unittest.TestCase):
+    """list_problems 的具体条目也带 trans_by（后端 /problems 每行硬塞的）：同一套规则。"""
+
+    class _ProblemsRunner:
+        def __init__(self, problems) -> None:
+            self.state = AgentState(project_dir=r"C:\proj", config_file_name="config.yaml")
+            self._problems = problems
+
+        def _project_id(self):
+            return "proj"
+
+        def _http_get(self, url):
+            assert "/problems" in url
+            return {"problems": [dict(p) for p in self._problems], "total": len(self._problems), "filter_keys": []}
+
+    def test_majority_is_hidden_and_reported_once(self) -> None:
+        runner = self._ProblemsRunner([
+            {"filename": "a.json", "index": 1, "problem": "残留日文", "trans_by": ENGINE_MODEL},
+            {"filename": "a.json", "index": 2, "problem": "残留日文", "trans_by": ENGINE_MODEL},
+            {"filename": "a.json", "index": 3, "problem": "残留日文", "trans_by": AGENT_MODEL},
+        ])
+
+        out = _tool_list_problems(runner, {"problem_type": "残留日文"})
+
+        self.assertEqual(out["majority_trans_by"], ENGINE_MODEL)
+        self.assertNotIn("trans_by", out["problems"][0])
+        self.assertEqual(out["problems"][2]["trans_by"], AGENT_MODEL)
+
+    def test_blank_only_batch_reports_no_majority(self) -> None:
+        runner = self._ProblemsRunner([
+            {"filename": "a.json", "index": 1, "problem": "残留日文"},
+        ])
+
+        out = _tool_list_problems(runner, {"problem_type": "残留日文"})
+
+        self.assertNotIn("majority_trans_by", out)
+
+    def test_stats_mode_is_not_affected(self) -> None:
+        runner = self._ProblemsRunner([
+            {"filename": "a.json", "index": 1, "problem": "残留日文", "trans_by": ENGINE_MODEL},
+        ])
+
+        out = _tool_list_problems(runner, {})
+
+        self.assertEqual(out["mode"], "stats")
         self.assertNotIn("majority_trans_by", out)
 
 

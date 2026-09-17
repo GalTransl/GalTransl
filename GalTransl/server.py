@@ -592,9 +592,9 @@ def _search_input_dir(
     """在待翻译原文里搜关键词（Agent 的 search_input 用）。
 
     与 /cache/search 同一套语义：命中上限只算命中本身（前后文是搭着给的，不占配额）、
-    context 是"顺带带出来的前后文"（命中行 in_context=false、扩展行 true）、total 照实报
-    全部命中数。区别只在搜的对象——原文要过文件插件解析（见 _load_input_file_entries），
-    每次搜索都得把涉及的输入文件读一遍，所以比搜缓存慢，这也正是 filename 参数的意义。
+    context 是"顺带带出来的前后文"、total 照实报全部命中数。区别只在搜的对象——原文要过
+    文件插件解析（见 _load_input_file_entries），每次搜索都得把涉及的输入文件读一遍，
+    所以比搜缓存慢，这也正是 filename 参数的意义。
 
     field：all | src（原文正文）| name（说话人）。pattern 非空时按正则匹配，
     否则按大小写不敏感的子串匹配（与缓存搜索一致）。
@@ -645,12 +645,12 @@ def _search_input_dir(
                     match_flags[pos] = {"match_src": match_src, "match_name": match_name}
             if not matched_positions:
                 continue
-            wanted: dict[int, bool] = {pos: False for pos in matched_positions}
+            wanted: set[int] = set(matched_positions)
             if context > 0:
                 for pos in matched_positions:
                     for j in range(pos - context, pos + context + 1):
                         if 0 <= j < len(entries):
-                            wanted.setdefault(j, True)
+                            wanted.add(j)
             for pos in sorted(wanted):
                 entry = entries[pos]
                 if not isinstance(entry, dict):
@@ -662,8 +662,6 @@ def _search_input_dir(
                     "src": entry.get("pre_src", ""),
                     **match_flags.get(pos, {"match_src": False, "match_name": False}),
                 }
-                if context > 0:
-                    item["in_context"] = wanted[pos]
                 results.append(item)
             hits_included += len(matched_positions)
     out: dict[str, Any] = {"results": results, "total": total_matches}
@@ -1657,14 +1655,12 @@ def build_handler(registry: JobRegistry):
                                         }
                                 if not matched_positions:
                                     continue
-                                # 命中本身 False，扩展出来的前后文 True —— 与 read_transl_cache
-                                # 同一套标注，模型不必猜哪条是命中。
-                                wanted: dict[int, bool] = {pos: False for pos in matched_positions}
+                                wanted: set[int] = set(matched_positions)
                                 if context > 0:
                                     for pos in matched_positions:
                                         for j in range(pos - context, pos + context + 1):
                                             if 0 <= j < len(entries):
-                                                wanted.setdefault(j, True)
+                                                wanted.add(j)
                                 for pos in sorted(wanted):
                                     entry = entries[pos]
                                     if not isinstance(entry, dict):
@@ -1679,8 +1675,6 @@ def build_handler(registry: JobRegistry):
                                         "trans_by": entry.get("trans_by", ""),
                                         **match_flags.get(pos, {"match_src": False, "match_dst": False, "match_problem": False}),
                                     }
-                                    if context > 0:
-                                        item["in_context"] = wanted[pos]
                                     results.append(item)
                                 hits_included += len(matched_positions)
                             except Exception:

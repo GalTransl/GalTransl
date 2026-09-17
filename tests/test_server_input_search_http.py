@@ -74,8 +74,8 @@ class InputSearchHttpTests(unittest.TestCase):
 
         self.assertEqual(out["context"], 1)
         self.assertEqual([r["index"] for r in out["results"]], [1, 2, 3])
-        self.assertTrue(out["results"][0]["in_context"])  # 顺带带出来的上下文行
-        self.assertFalse(out["results"][1]["in_context"])  # 命中行
+        for row in out["results"]:
+            self.assertNotIn("in_context", row)  # 上下文行不做任何标注
 
     def test_search_by_speaker(self):
         out = self._post({"query": "少女", "field": "name"})

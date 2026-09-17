@@ -90,11 +90,9 @@ class CacheSearchContextTests(unittest.TestCase):
         self.assertEqual([r["index"] for r in out["results"]], [2, 3, 4, 5, 6, 7])
         self.assertEqual(out["returned"], 6)
         by_index = {r["index"]: r for r in out["results"]}
-        self.assertFalse(by_index[4]["in_context"])
-        self.assertFalse(by_index[5]["in_context"])
-        self.assertTrue(by_index[2]["in_context"])
-        self.assertTrue(by_index[7]["in_context"])
-        # 上下文行不该被误标成命中
+        for item in out["results"]:
+            self.assertNotIn("in_context", item)  # 上下文行不做任何标注
+        # 上下文行不是命中：match_src 只在命中行上
         self.assertFalse(by_index[2]["match_src"])
         self.assertTrue(by_index[4]["match_src"])
         self.assertEqual(out["total"], 2)  # total 仍是命中数
@@ -102,7 +100,6 @@ class CacheSearchContextTests(unittest.TestCase):
     def test_context_clipped_at_file_edges(self) -> None:
         out = self._search(query="JP1", context=3)
         self.assertEqual([r["index"] for r in out["results"]], [1, 2, 3, 4])
-        self.assertFalse(out["results"][0]["in_context"])
 
     def test_hit_cap_counts_hits_only(self) -> None:
         """前后文不占命中配额：max_results=1 时给第 1 条命中 + 它的上下文。"""

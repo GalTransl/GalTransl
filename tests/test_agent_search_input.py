@@ -104,7 +104,7 @@ class SearchInputArgumentTests(unittest.TestCase):
 
 
 class SearchInputSlimmingTests(unittest.TestCase):
-    """返回体按与 search_transl_cache 同一套规则收拾：命中标记收顶层、in_context 只留 true。"""
+    """返回体按与 search_transl_cache 同一套规则收拾：命中标记收顶层、in_context 删掉。"""
 
     def test_match_flags_collapse_into_matched_in(self):
         runner = _SearchRunner(
@@ -135,7 +135,8 @@ class SearchInputSlimmingTests(unittest.TestCase):
 
         self.assertNotIn("matched_in", result)
 
-    def test_in_context_is_only_kept_when_true(self):
+    def test_in_context_is_stripped(self):
+        """上下文行不做标注：服务端即便还发 in_context 也一律删掉。"""
         runner = _SearchRunner(
             response={
                 "results": [
@@ -149,9 +150,10 @@ class SearchInputSlimmingTests(unittest.TestCase):
 
         result = _tool_search_input(runner, {"query": "x", "context": 1})
 
-        self.assertNotIn("in_context", result["results"][0])  # 命中行不带这个字段
-        self.assertTrue(result["results"][1]["in_context"])
+        for row in result["results"]:
+            self.assertNotIn("in_context", row)
         self.assertEqual(result["context"], 1)
+        self.assertIn("包含关键词的那行是命中", result["note"])
         self.assertIn("带上下文时命中上限收紧", result["note"])
 
     def test_no_context_means_no_context_note(self):

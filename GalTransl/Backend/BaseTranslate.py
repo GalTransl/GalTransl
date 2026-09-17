@@ -1094,8 +1094,11 @@ class BaseTranslate:
                 api_try_count += 1
                 api_attempts += 1
                 if max_retry_count is not None and api_attempts >= max_retry_count:
+                    # 把最后一次的真实错误带上：调用方（_batch_translate_common / 运行时错误
+                    # 记录）只看得到这一句，不带上原因就还得回上游日志翻为什么
+                    last_error = str(e).strip() or type(e).__name__
                     raise RuntimeError(
-                        f"ask_chatbot reached attempt limit ({max_retry_count})"
+                        f"API请求达到重试上限 ({max_retry_count})，最后一次错误：{last_error}"
                     ) from e
 
                 # gemini no_candidates

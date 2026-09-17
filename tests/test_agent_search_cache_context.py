@@ -2,7 +2,7 @@
 
 背景：查「ドルード」时只给命中行，无法判断该统一译成「多鲁德」还是「杜罗德」——译名
 一致性恰恰要看每处出现的前后对话。所以 search 增加 context=N（语义与 read 的一致：
-命中条目 in_context=false，扩展出来的前后文 true）。
+点名的命中条目前后各多带 N 句，不做任何标注）。
 
 带上下文会让返回体变成 命中 × (2N+1) 行，所以命中上限要跟着收紧（total 不受影响）。
 """
@@ -35,7 +35,7 @@ class _SearchRunner:
 
 
 class SearchResultSlimmingTests(unittest.TestCase):
-    """/cache/search 的返回给模型前先瘦身：逐行 match_* 收成一条汇总，in_context 只标上下文行。
+    """/cache/search 的返回给模型前先瘦身：逐行 match_* 收成一条汇总，in_context 删掉。
 
     服务端那份是给界面用的（缓存页拿 match_* 画「原文/译文/问题」小徽标），逐行丢给模型
     只是把每行都撑长一截——命中的位置从行内容（post_src / pre_dst / problem）直接看得到。
@@ -65,7 +65,8 @@ class SearchResultSlimmingTests(unittest.TestCase):
 
         self.assertNotIn("matched_in", out)
 
-    def test_in_context_is_only_marked_on_context_rows(self) -> None:
+    def test_in_context_is_stripped(self) -> None:
+        """上下文行不做标注：服务端即便还发 in_context 也一律删掉。"""
         runner = _SearchRunner({
             "results": [{"index": 3, "in_context": True}, {"index": 4, "in_context": False}],
             "total": 1,
@@ -73,8 +74,8 @@ class SearchResultSlimmingTests(unittest.TestCase):
 
         out = _tool_search_transl_cache(runner, {"query": "x", "context": 1})
 
-        self.assertIs(out["results"][0]["in_context"], True)
-        self.assertNotIn("in_context", out["results"][1])
+        for row in out["results"]:
+            self.assertNotIn("in_context", row)
 
 
 class SearchContextForwardingTests(unittest.TestCase):
@@ -107,13 +108,13 @@ class SearchContextForwardingTests(unittest.TestCase):
             _tool_search_transl_cache(runner, {"query": "x", "context": "abc"})
         self.assertIn("context", str(ctx.exception))
 
-    def test_note_explains_in_context_and_cap(self) -> None:
-        runner = _SearchRunner({"results": [{"index": 4, "in_context": False}], "total": 1})
+    def test_note_explains_context_and_cap(self) -> None:
+        runner = _SearchRunner({"results": [{"index": 4}], "total": 1})
         out = _tool_search_transl_cache(runner, {"query": "ドルード", "context": 2})
 
         self.assertEqual(out["context"], 2)
         note = out["note"]
-        self.assertIn("in_context=true", note)
+        self.assertIn("包含关键词的那行是命中", note)
         self.assertIn("命中上限收紧为", note)
         self.assertIn("total 仍是全部命中数", note)
 
@@ -126,7 +127,7 @@ class SearchContextForwardingTests(unittest.TestCase):
 
         note = out["note"]
         self.assertIn("不存在", note)
-        self.assertIn("in_context=true", note)
+        self.assertIn("包含关键词的那行是命中", note)
 
     def test_no_note_without_context(self) -> None:
         runner = _SearchRunner({"results": [{"index": 1}], "total": 1})

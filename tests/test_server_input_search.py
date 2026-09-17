@@ -114,7 +114,7 @@ class InputSearchTests(unittest.TestCase):
 
     # ---- 上下文 ----
 
-    def test_context_expands_and_marks_the_extra_rows(self):
+    def test_context_expands_around_hits_without_marking(self):
         out = self._search(field="src", context=1)
         self.assertEqual(out["context"], 1)
         # a.json 命中 2、3 → 扩成 1~4；b.json 命中 1 → 只有 1
@@ -123,9 +123,10 @@ class InputSearchTests(unittest.TestCase):
             [("a.json", 1), ("a.json", 2), ("a.json", 3), ("a.json", 4), ("b.json", 1)],
         )
         by_key = {(r["filename"], r["index"]): r for r in out["results"]}
-        self.assertFalse(by_key[("a.json", 2)]["in_context"])  # 命中行不带 in_context=true
-        self.assertTrue(by_key[("a.json", 1)]["in_context"])
+        for row in out["results"]:
+            self.assertNotIn("in_context", row)  # 上下文行不做任何标注
         self.assertFalse(by_key[("a.json", 1)]["match_src"])  # 上下文行不是命中
+        self.assertTrue(by_key[("a.json", 2)]["match_src"])
         self.assertEqual(out["returned_hits"], 3)
         self.assertEqual(out["returned"], 5)
 

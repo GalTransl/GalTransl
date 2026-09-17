@@ -166,8 +166,8 @@ class ReadTranslCacheToolTests(unittest.TestCase):
         # doub_content 例外：它是校对子代理的产物，主 Agent 要读它才知道改哪儿
         self.assertEqual(out["entries"][0]["doub_content"], "存疑内容")
 
-    def test_only_context_entries_are_flagged(self) -> None:
-        """in_context 只标在上下文行上：命中行不带这个字段（每行挂一个 false 是纯噪音）。"""
+    def test_context_rows_carry_no_marking(self) -> None:
+        """上下文行与点名条目不做任何标注，混排返回。"""
         entries = [
             {**ENTRY, "index": i, "pre_dst": f"译{i}", "problem": ""} for i in range(1, 6)
         ]
@@ -175,9 +175,8 @@ class ReadTranslCacheToolTests(unittest.TestCase):
             _Runner(entries), {"filename": "01.json", "index": "3", "context": 1}
         )
         self.assertEqual([e["index"] for e in out["entries"]], [2, 3, 4])
-        self.assertIs(out["entries"][0]["in_context"], True)
-        self.assertNotIn("in_context", out["entries"][1])  # 点名的第 3 条
-        self.assertIs(out["entries"][2]["in_context"], True)
+        for e in out["entries"]:
+            self.assertNotIn("in_context", e)
 
     def test_no_index_returns_first_30_projected(self) -> None:
         entries = [{**ENTRY, "index": i, "problem": ""} for i in range(1, 40)]
