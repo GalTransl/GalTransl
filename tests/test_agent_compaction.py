@@ -284,6 +284,32 @@ class MaybeCompactTests(unittest.TestCase):
         self.assertIsNone(runner._pending_compaction)
         self.assertEqual(len(state.messages), 42)  # 历史原样，指令没挂上去
 
+    def test_anchor_units_do_not_trip_the_tail_guard(self):
+        """usage 锚点远大于本地字符估算时（中文场景常见），保留段须折算回锚点口径再比。
+
+        直接拿锚点估算减本地估算，"保留段"会被放大好几倍，守卫每回合都误触发、
+        压缩永远不跑（"爆上下文 157k/128k 却不压缩"的事故就是它）。
+        """
+        msgs = [_msg("user", "word " * 1250) for _ in range(60)]  # 每条约 1.5k 本地 token
+        runner, state = _make_runner(msgs, window=DEFAULT_CONTEXT_WINDOW)
+        # 锚点盖住除最后 4 条外的全部历史，且数值约为本地估算的 2.7 倍（模拟 CJK 低估）
+        state.last_prompt_tokens = 250_000
+        state.anchored_message_count = len(msgs) - 4
+
+        self.assertTrue(runner._begin_compaction())
+        self.assertIsNotNone(runner._pending_compaction)
+
+    def test_giant_tail_still_skips_with_anchor_units(self):
+        """折算只是把单位对齐：真·巨无霸尾部（折算后仍到触发线）照样跳过。"""
+        msgs = [_msg("user", "word " * 1250) for _ in range(60)]
+        msgs.append(_msg("tool", "结果" * 200_000))  # 约 10 万本地 token 的单条巨无霸
+        runner, state = _make_runner(msgs, window=DEFAULT_CONTEXT_WINDOW)
+        state.last_prompt_tokens = 250_000
+        state.anchored_message_count = len(msgs) - 1
+
+        self.assertFalse(runner._begin_compaction())
+        self.assertIsNone(runner._pending_compaction)
+
     def test_force_compaction_ignores_the_tail_hits_the_line_guard(self):
         """溢出恢复（force）不走这条：那时只有压缩一条路，压不动也得上。"""
         msgs = [_msg("user", "hello") for _ in range(40)]

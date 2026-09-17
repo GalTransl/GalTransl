@@ -1630,8 +1630,20 @@ class AgentRunner:
         # 结果），压缩救不回来——别白花一次摘要请求，更别把摘要本身再摘要一遍。
         # force（溢出恢复）不走这里：那时只有压缩这一条路。
         if not force and limit > 0:
-            head_tokens = sum(_estimate_message_tokens(m) for m in messages[:cut])
-            if estimated - head_tokens >= limit:
+            # estimated 走锚点法（provider 真实 prompt_tokens + 锚点后新增消息的本地估算），
+            # 下面这仓名是纯本地字符估算——两套单位不能直接相减：中文场景本地估算偏低好几倍，
+            # 一相减"保留段"就被放大到远超实际，守卫每回合都误触发、压缩永远不跑
+            # （"爆上下文 157k/128k 却不压缩"的事故就是它）。按 estimated/total 的比例把
+            # 保留段折算回 estimated 的口径再比；无锚点时两者同单位，比例恒为 1，行为不变。
+            full = list(messages) + list(pulled)  # pull_back 摘下的尾部也计入总量
+            total_local = sum(_estimate_message_tokens(m) for m in full)
+            head_local = sum(_estimate_message_tokens(m) for m in messages[:cut])
+            tail_local = total_local - head_local
+            if total_local > 0 and estimated > 0:
+                tail_est = int(tail_local * estimated / total_local)
+            else:
+                tail_est = tail_local
+            if tail_est >= limit:
                 messages.extend(pulled)
                 _log("  ⚠ 保留段自身已到触发线（尾部有压不掉的大结果），压缩无益，跳过")
                 return False
