@@ -14,6 +14,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import random
 import re
 import threading
 import time
@@ -2529,8 +2530,20 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "list_input_files",
-            "description": "列出待翻译的输入文件（原文）与每个文件解析出的条数，供估工作量与挑选代表性文件（不必再逐个 read_input_file 数句子）。条数是原文解析出的条数（文本插件如「跳过无日文句」还没跑，可能偏大）；**只用于估工作量，不代表进度**（不管这个文件有没有缓存）——进度看 get_project_overview 的 files_translated/files_total。",
-            "parameters": {"type": "object", "properties": {}, "required": []},
+            "description": "列出待翻译的输入文件（原文）与每个文件解析出的条数，供估工作量与挑选代表性文件（不必再逐个 read_input_file 数句子）。条数是原文解析出的条数（文本插件如「跳过无日文句」还没跑，可能偏大）；**只用于估工作量，不代表进度**（不管这个文件有没有缓存）——进度看 get_project_overview 的 files_translated/files_total。文件很多时默认只返回 100 个（order=even：**均匀采样**，含首尾、等距摊满整个清单，不是前 100 个；sentences_total 仍是整份清单的合计），要缩小范围用 grep（文件名子串），换挑选方式用 order。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "grep": {"type": "string", "description": "可选。按文件名过滤（子串、大小写不敏感），如 \"sc_2\"、\"pr00\"。"},
+                    "limit": {"type": "integer", "description": "可选。最多返回多少个文件（默认 100，上限 500）；超出时按 order 挑选。"},
+                    "order": {
+                        "type": "string",
+                        "enum": ["even", "name", "random", "size_desc", "size_asc"],
+                        "description": "可选。清单的排列与采样方式（默认 even）：even=按文件名顺序均匀采样（含首尾、等距摊满整个清单）；name=按文件名顺序取前 limit 个；random=随机采样 limit 个（每次调用可能不同）；size_desc=按文件大小从大到小取前 limit 个；size_asc=按文件大小从小到大取前 limit 个。",
+                    },
+                },
+                "required": [],
+            },
         },
     },
     {
@@ -2887,8 +2900,20 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "list_transl_cache",
-            "description": "列出缓存文件（译文）与各 .json 文件的条目数（.append.jsonl 增量日志不统计条目数）。注意：后缀为 .append.jsonl 的文件表示对应文件正在翻译中，此时读取缓存读到的是旧快照，应等任务 completed 后再读取/修改。",
-            "parameters": {"type": "object", "properties": {}, "required": []},
+            "description": "列出缓存文件（译文）与各 .json 文件的条目数（.append.jsonl 增量日志不统计条目数）。注意：后缀为 .append.jsonl 的文件表示对应文件正在翻译中，此时读取缓存读到的是旧快照，应等任务 completed 后再读取/修改。文件很多时默认只返回 100 个（order=even：**均匀采样**，含首尾、等距摊满整个清单，不是前 100 个），要缩小范围用 grep（文件名子串，如 grep=\"sc_2\"），换挑选方式用 order（文件名顺序 / 随机采样 / 按大小从大到小或从小到大），要看更多把 limit 调大（上限 500）。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "grep": {"type": "string", "description": "可选。按文件名过滤（子串、大小写不敏感），如 \"sc_2\"、\"pr00\"。"},
+                    "limit": {"type": "integer", "description": "可选。最多返回多少个文件（默认 100，上限 500）；超出时按 order 挑选。"},
+                    "order": {
+                        "type": "string",
+                        "enum": ["even", "name", "random", "size_desc", "size_asc"],
+                        "description": "可选。清单的排列与采样方式（默认 even）：even=按文件名顺序均匀采样（含首尾、等距摊满整个清单）；name=按文件名顺序取前 limit 个；random=随机采样 limit 个（每次调用可能不同）；size_desc=按文件大小从大到小取前 limit 个；size_asc=按文件大小从小到大取前 limit 个。",
+                    },
+                },
+                "required": [],
+            },
         },
     },
     {
@@ -3436,18 +3461,164 @@ def _tool_get_project_overview(runner: AgentRunner, args: dict[str, Any]) -> Any
     return out
 
 
-def _tool_list_input_files(runner: AgentRunner, _args: dict[str, Any]) -> Any:
-    """列出待翻译文件（原文件，输入目录），带每个文件**解析出的条数**。
+# ---- 清单类工具的公共入参（grep + limit + order）----
+# list_transl_cache / list_input_files 都是一行一个文件的清单：大项目动辄几百上千行，全量
+# 倒给模型既费 token 也淹掉重点，只给前 N 行又会让它以为"项目就这些文件"——后面的文件它
+# 根本不会去查。所以按 limit（默认 100）截取，**怎么截由 order 决定**（见下面的模式表）；
+# 要精确定位某个文件用 grep（文件名子串，大小写不敏感）。
+LIST_ITEMS_DEFAULT_LIMIT = 100
+LIST_ITEMS_MAX_LIMIT = 500
 
-    口径一律是输入文件本身：`/files?counts=1` 让后端用文件插件解析原文数一遍。
+# order：清单的排列与采样方式。默认 even（均匀采样）——它保证整个范围都有代表，是"先看看
+# 项目里都有些什么"的默认姿势；其余几种各有明确用途，都是模型自己点名才会用：
+# - even：按文件名排好后均匀采样（含首尾、等距取）；
+# - name：按文件名顺序取前 limit 个（挨着看某一批，配合 grep 用）；
+# - random：随机采样 limit 个（每次调用可能不同，避免永远只看同一段）；
+# - size_desc / size_asc：按文件大小从大到小 / 从小到大取前 limit 个（找大文件优先处理，
+#   或先扫小文件）。size 模式的"顺序"本身就是它要表达的东西，所以截断取的是最大/最小的那些。
+LIST_ORDER_MODES: tuple[str, ...] = ("even", "name", "random", "size_desc", "size_asc")
+LIST_ORDER_DEFAULT = "even"
+LIST_ORDER_LABELS: dict[str, str] = {
+    "even": "均匀采样",
+    "name": "文件名顺序",
+    "random": "随机采样",
+    "size_desc": "按文件大小从大到小",
+    "size_asc": "按文件大小从小到大",
+}
 
-    以前这里对"已有缓存的文件"改报**缓存条数**（理由是它与进度/ETA 同口径、更准），
-    实际是个陷阱：缓存条数只说明缓存里存了多少条，一旦和别处的数字相等，读的人就会
-    以为整个文件翻完了。句数是拿来看工作量的，不该兼职当进度——进度去看
-    get_project_overview 的 files_translated / progress，那里才有真正翻到哪了。
 
-    注意口径：这是文件插件解析出的**原始条目数**，文本插件（如「跳过无日文句」）
-    还没跑，因此通常**大于**最终会送去翻译的句数（估工作量偏大是已知的取舍）。
+def _list_limit(args: dict[str, Any]) -> int:
+    """清单工具的 limit：默认 100，夹到 1-500。"""
+    raw = args.get("limit", LIST_ITEMS_DEFAULT_LIMIT)
+    if raw is None or raw == "":
+        return LIST_ITEMS_DEFAULT_LIMIT
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise AgentToolError(f"limit 必须是整数（收到 {raw!r}）")
+    return max(1, min(value, LIST_ITEMS_MAX_LIMIT))
+
+
+def _list_grep(args: dict[str, Any]) -> str:
+    """清单工具的 grep：文件名过滤词（空串 = 不过滤）。"""
+    return str(args.get("grep", "") or "").strip()
+
+
+def _grep_items(items: list[Any], grep: str) -> list[Any]:
+    """按 name 过滤清单（子串、大小写不敏感）。"""
+    if not grep:
+        return list(items)
+    needle = grep.lower()
+    return [item for item in items if needle in str(item.get("name", "")).lower()]
+
+
+def _sample_evenly(items: list[Any], limit: int) -> list[Any]:
+    """从长清单里均匀采样 limit 条（含首尾，等距取）。
+
+    与"取前 limit 条"的区别就是这个函数存在的理由：清单按文件名排序，截断会把后半段
+    整个藏起来（模型据此以为项目里没有那些文件），采样则每一段都留代表。
+    """
+    n = len(items)
+    if n <= 0:
+        return []
+    if limit >= n:
+        return list(items)
+    if limit <= 1:
+        return [items[0]]
+    return [items[(i * (n - 1)) // (limit - 1)] for i in range(limit)]
+
+
+def _list_order(args: dict[str, Any]) -> str:
+    """清单工具的 order：排列 / 采样方式，默认 even（不当的值直接报错，别静默退回默认）。"""
+    raw = str(args.get("order", "") or "").strip().lower()
+    if not raw:
+        return LIST_ORDER_DEFAULT
+    if raw not in LIST_ORDER_MODES:
+        raise AgentToolError(f"order 必须是 {'/'.join(LIST_ORDER_MODES)} 之一（收到 {raw!r}）")
+    return raw
+
+
+def _item_size(item: Any) -> tuple[int, str]:
+    """大小排序键：（size, name）——size 拿不到当 0，第二关键字用文件名，同尺寸时输出稳定。"""
+    size = item.get("size", 0) if isinstance(item, dict) else 0
+    try:
+        size_i = int(size)
+    except (TypeError, ValueError):
+        size_i = 0
+    name = str(item.get("name", "")) if isinstance(item, dict) else ""
+    return (size_i, name)
+
+
+def _item_name(item: Any) -> str:
+    return str(item.get("name", "")) if isinstance(item, dict) else ""
+
+
+def _select_list_items(items: list[Any], limit: int, order: str) -> list[Any]:
+    """按 order 从清单里挑出最多 limit 条（各模式唯一的实现，两个清单工具共用）。"""
+    if order in ("size_desc", "size_asc"):
+        desc = order == "size_desc"
+        # 主键是大小；同尺寸一律按文件名升序（连第二关键字一起 reverse 会让输出不可预期）
+        def _key(item: Any) -> tuple[int, str]:
+            size, name = _item_size(item)
+            return (-size, name) if desc else (size, name)
+
+        return sorted(items, key=_key)[:limit]
+    if len(items) <= limit:
+        return list(items)  # 用不着截断：原顺序（按文件名）直接给
+    if order == "name":
+        return list(items[:limit])
+    if order == "random":
+        # 采样后按文件名排回去：随机的只是"挑中哪些"，清单读起来仍是有序的
+        return sorted(random.sample(items, limit), key=_item_name)
+    return _sample_evenly(items, limit)  # even
+
+
+def _list_notes(
+    *, matched: int, grep: str, returned: int, limit: int, order: str, unit: str
+) -> list[str]:
+    """过滤 / 截取的说明（各清单工具拼进返回体的 note）。"""
+    notes: list[str] = []
+    if grep:
+        notes.append(f'已按 grep="{grep}" 过滤文件名：命中 {matched} 个{unit}。')
+    if returned < matched:
+        tail = f"要看更多把 limit 调大（当前 {limit}，上限 {LIST_ITEMS_MAX_LIMIT}）。"
+        if order == "name":
+            notes.append(
+                f"{matched} 个{unit}超过上限，已按**文件名顺序**取前 {returned} 个（后面的没列）："
+                "找具体文件用 grep 缩小范围，想看到整个范围就换 order=\"even\"（均匀采样）；" + tail
+            )
+        elif order == "random":
+            notes.append(
+                f"{matched} 个{unit}超过上限，已**随机采样** {returned} 个"
+                "（每次调用挑中的可能不同，这是这个模式的本意）：要多看几批就再调一次，"
+                "或用 grep / order=\"size_desc\" 缩小范围；" + tail
+            )
+        elif order in ("size_desc", "size_asc"):
+            notes.append(
+                f"{matched} 个{unit}超过上限，已按文件大小**{LIST_ORDER_LABELS[order]}**"
+                f"取前 {returned} 个（只列了最大/最小的那批）：" + tail
+            )
+        else:
+            notes.append(
+                f"{matched} 个{unit}超过上限，已从整个清单里**均匀采样** {returned} 个"
+                f"（含首尾、等距取，不是前 {returned} 个）："
+                "要定位具体文件用 grep 缩小范围；" + tail
+            )
+    return notes
+
+
+def _list_input_payload(
+    runner: AgentRunner,
+    *,
+    grep: str = "",
+    limit: int = LIST_ITEMS_DEFAULT_LIMIT,
+    order: str = LIST_ORDER_DEFAULT,
+    names: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    """列输入文件（grep / limit / order 都在这一层做），供工具与子代理的锁定包装共用。
+
+    names 只给子代理的"文件锁定"用：**先按锁定名单过滤、再按 order 截取**，顺序不能反——
+    反过来的话采样可能把属于它的文件摇掉，看起来就像"这些文件不在清单里"。
     """
     pid = runner._project_id()
     cfg = urllib.parse.quote(runner.state.config_file_name or "config.yaml")
@@ -3464,20 +3635,60 @@ def _tool_list_input_files(runner: AgentRunner, _args: dict[str, Any]) -> Any:
             "sentences": parsed if isinstance(parsed, int) else None,
         })
 
-    note = (
+    matched = _grep_items(input_files, grep)
+    if names is not None:
+        locked = set(names)
+        matched = [f for f in matched if f["name"] in locked]
+    shown = _select_list_items(matched, limit, order)
+    notes = [
         "sentences 是输入文件解析出的条数，只用来估工作量：文本插件（如「跳过无日文句」）"
         "还没跑，真正要翻的句数通常比它少，所以按它估总时长会略偏大；null 表示解析失败。"
         "**它不是进度**——某文件缓存里有多少条与这个数无关，"
         "整体翻没翻完看 get_project_overview 的 files_translated/files_total。"
+    ]
+    notes.extend(
+        _list_notes(
+            matched=len(matched),
+            grep=grep,
+            returned=len(shown),
+            limit=limit,
+            order=order,
+            unit="输入文件",
+        )
     )
     return {
-        "input_files": input_files,
-        "count": len(input_files),
+        "input_files": shown,
+        "count": len(matched),
+        "returned": len(shown),
+        "sampled": len(shown) < len(matched),
         "sentences_total": sum(
-            f["sentences"] for f in input_files if isinstance(f["sentences"], int)
+            f["sentences"] for f in matched if isinstance(f["sentences"], int)
         ),
-        "note": note,
+        "note": "；".join(notes),
     }
+
+
+def _tool_list_input_files(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """列出待翻译文件（原文件，输入目录），带每个文件**解析出的条数**。
+
+    口径一律是输入文件本身：`/files?counts=1` 让后端用文件插件解析原文数一遍。
+
+    以前这里对"已有缓存的文件"改报**缓存条数**（理由是它与进度/ETA 同口径、更准），
+    实际是个陷阱：缓存条数只说明缓存里存了多少条，一旦和别处的数字相等，读的人就会
+    以为整个文件翻完了。句数是拿来看工作量的，不该兼职当进度——进度去看
+    get_project_overview 的 files_translated / progress，那里才有真正翻到哪了。
+
+    注意口径：这是文件插件解析出的**原始条目数**，文本插件（如「跳过无日文句」）
+    还没跑，因此通常**大于**最终会送去翻译的句数（估工作量偏大是已知的取舍）。
+
+    清单支持 grep（文件名子串）、limit（默认 100）与 order（怎么挑这 100 个：均匀采样 /
+    文件名顺序 / 随机采样 / 按大小从大到小 / 从小到大，见 LIST_ORDER_MODES）。
+    sentences_total 是**过滤后整份清单**的合计（含被截取省略的那些文件）：它是工作量估计，
+    不能因为少显示了几行就变小。
+    """
+    return _list_input_payload(
+        runner, grep=_list_grep(args), limit=_list_limit(args), order=_list_order(args)
+    )
 
 
 def _entry_index(entry: Any) -> int:
@@ -4983,16 +5194,23 @@ def _tool_list_problems(runner: AgentRunner, args: dict[str, Any]) -> Any:
     }
 
 
-def _tool_list_transl_cache(runner: AgentRunner, _args: dict[str, Any]) -> Any:
+def _tool_list_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """列出缓存文件（译文）。带每个文件的条目数。
 
     .append.jsonl 后缀 = 增量缓存，说明该文件正在翻译中（快照+增量并行写）：
     此时缓存还没合并，read_transl_cache / patch_transl_cache / delete_transl_cache 读到的可能是
-    旧快照，操作前先确认翻译任务已结束。"""
+    旧快照，操作前先确认翻译任务已结束。
+
+    清单支持 grep（文件名子串）、limit（默认 100）与 order（怎么挑这 100 个：均匀采样 /
+    文件名顺序 / 随机采样 / 按大小从大到小 / 从小到大，见 LIST_ORDER_MODES）：缓存文件是按
+    名字排的，成百上千个文件时"只看前 100 个"会把后半段整个藏起来（默认的 even 就是为这个）。
+    """
+    limit = _list_limit(args)
+    grep = _list_grep(args)
+    order = _list_order(args)
     pid = runner._project_id()
     data = runner._http_get(f"/api/projects/{pid}/cache")
     files = []
-    translating = 0
     for f in data.get("files", []):
         name = str(f.get("name", ""))
         if not name:
@@ -5006,12 +5224,31 @@ def _tool_list_transl_cache(runner: AgentRunner, _args: dict[str, Any]) -> Any:
             entry["entries"] = entry_count
         if name.endswith(".append.jsonl"):
             entry["status"] = "translating"
-            translating += 1
         files.append(entry)
-    result: dict[str, Any] = {"cache_files": files, "count": len(files)}
+
+    matched = _grep_items(files, grep)
+    shown = _select_list_items(matched, limit, order)
+    translating = sum(1 for f in matched if f.get("status") == "translating")
+    result: dict[str, Any] = {
+        "cache_files": shown,
+        "count": len(matched),
+        "returned": len(shown),
+        "sampled": len(shown) < len(matched),
+    }
+    notes: list[str] = []
     if translating:
         result["translating"] = translating
-        result["note"] = f"有 {translating} 个 .append.jsonl 增量缓存文件，说明对应文件正在翻译中；此时读取缓存会读到旧快照，等任务 completed 后再操作。"
+        notes.append(
+            f"有 {translating} 个 .append.jsonl 增量缓存文件，说明对应文件正在翻译中；"
+            "此时读取缓存会读到旧快照，等任务 completed 后再操作。"
+        )
+    notes.extend(
+        _list_notes(
+            matched=len(matched), grep=grep, returned=len(shown), limit=limit, order=order, unit="缓存文件"
+        )
+    )
+    if notes:
+        result["note"] = "；".join(notes)
     return result
 
 
@@ -6344,18 +6581,28 @@ def _lock_to_filenames(
 
 
 def _lock_input_listing(
-    fn: Callable[[AgentRunner, dict[str, Any]], Any], allowed: tuple[str, ...]
+    allowed: tuple[str, ...],
 ) -> Callable[[AgentRunner, dict[str, Any]], Any]:
     """list_input_files 在锁定模式下只列自己负责的那几份原文；一个都对不上就照实说。"""
 
     def wrapped(runner: AgentRunner, args: dict[str, Any]) -> Any:
-        out = fn(runner, args)
-        files = [f for f in out.get("input_files", []) if str(f.get("name") or "") in allowed]
-        if not files:
+        # 过滤交给 _list_input_payload 的 names（**先过滤再采样**）：自己过滤采样后的结果，
+        # 会把"本来属于它、但被采样摇掉"的文件误判成"不在原文清单里"。
+        out = _list_input_payload(
+            runner,
+            grep=_list_grep(args),
+            limit=_list_limit(args),
+            order=_list_order(args),
+            names=allowed,
+        )
+        if not out.get("input_files"):
             # 锁定的名字一个都不在原文清单里（多半是文件名写错了）：照旧全列，但把话说清楚，
             # 免得它对着空清单发懵
+            full = _list_input_payload(
+                runner, grep=_list_grep(args), limit=_list_limit(args), order=_list_order(args)
+            )
             return {
-                **out,
+                **full,
                 "note": (
                     "注意：本次任务锁定的文件都不在原文清单里（检查一下文件名），"
                     "下面是全部原文文件。"
@@ -6367,18 +6614,12 @@ def _lock_input_listing(
                 "（要处理别的文件，让主 Agent 重新派任务）。"
             )
         else:
+            # 报的是**职责范围**（count）而不是这一屏显示了几行（returned）：采样只管显示
             note = (
-                f"本次只派你看这 {len(files)} 个文件，其余文件不在你的范围里"
+                f"本次只派你看这 {out['count']} 个文件，其余文件不在你的范围里"
                 "（要处理别的文件，让主 Agent 重新派任务）。"
             )
-        return {
-            "input_files": files,
-            "count": len(files),
-            "sentences_total": sum(
-                f["sentences"] for f in files if isinstance(f.get("sentences"), int)
-            ),
-            "note": note,
-        }
+        return {**out, "note": "；".join([out["note"], note]) if out.get("note") else note}
 
     return wrapped
 
@@ -6413,7 +6654,7 @@ def _subagent_handlers(
             if name in handlers:
                 handlers[name] = _lock_to_filenames(handlers[name], locked)
         if "list_input_files" in handlers:
-            handlers["list_input_files"] = _lock_input_listing(handlers["list_input_files"], locked)
+            handlers["list_input_files"] = _lock_input_listing(locked)
     return handlers
 
 
