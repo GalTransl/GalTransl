@@ -91,6 +91,15 @@ class CRebuildTranslate(BaseTranslate):
         """
         pass
 
+    async def shutdown(self) -> None:
+        """空操作：重建引擎不翻译、不持有模型客户端，没有要关的东西。
+
+        流程收尾会对 gptapi 统一调 shutdown，而本类整个覆写了 __init__（不跑基类那套客户端
+        初始化），基类实现里的 _shutdown_done 等属性并不存在——不覆写的话每次重建结束都会
+        记一条 `'CRebuildTranslate' object has no attribute '_shutdown_done'` 的假警告。
+        """
+        return
+
     async def asyncTranslate(self, content: CTransList, gptdict="") -> CTransList:
         """
         translate with async requests

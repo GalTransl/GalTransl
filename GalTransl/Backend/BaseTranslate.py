@@ -1176,12 +1176,15 @@ class BaseTranslate:
         pass
 
     async def shutdown(self):
-        if self._shutdown_done:
+        # 用 getattr 兜底：子类可以整个覆写 __init__（如 CRebuildTranslate 不持有模型客户端），
+        # 那样基类这套标记就不存在——关闭是收尾动作，不该因为"没跑过基类构造"抛异常。
+        if getattr(self, "_shutdown_done", False):
             return
         self._shutdown_done = True
 
         clients = [client for client, _ in getattr(self, "client_list", [])]
-        clients.extend(getattr(self, "_retired_clients", []))
+        retired_clients = getattr(self, "_retired_clients", [])
+        clients.extend(retired_clients)
         seen_clients: set[int] = set()
         for client in clients:
             if id(client) in seen_clients:
@@ -1214,7 +1217,7 @@ class BaseTranslate:
                             pass
                 except Exception:
                     pass
-        self._retired_clients.clear()
+        retired_clients.clear()
 
     def translate(self, trans_list: CTransList, gptdict=""):
         pass
