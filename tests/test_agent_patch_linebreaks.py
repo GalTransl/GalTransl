@@ -137,11 +137,11 @@ class PlanPatchNormalizationTests(unittest.TestCase):
         )
         self.assertEqual(planned["plan"][0]["updates"]["pre_dst"], "台词\\n第二行")
 
-    def test_doub_content_is_normalized_too(self):
+    def test_proofread_comment_is_normalized_too(self):
         planned = _plan_cache_patches(
-            self._entries(), [{"index": 40, "doub_content": "语气<br>和原文不对应"}], _PATCHABLE_FIELDS
+            self._entries(), [{"index": 40, "proofread_comment": "语气<br>和原文不对应"}], _PATCHABLE_FIELDS
         )
-        self.assertEqual(planned["plan"][0]["updates"]["doub_content"], "语气\\n和原文不对应")
+        self.assertEqual(planned["plan"][0]["updates"]["proofread_comment"], "语气\\n和原文不对应")
 
     def test_entry_without_linebreaks_is_left_alone(self):
         planned = _plan_cache_patches(

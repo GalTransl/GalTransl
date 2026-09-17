@@ -5,7 +5,7 @@ pre_src、proofread_* 常年为空——一次读几十条时一半以上是重�
 
 这里锁住三件事：
 
-1. 不传 fields = 默认精简集（原文/译文/说话人/问题/存疑内容），空值省略；
+1. 不传 fields = 默认精简集（原文/译文/说话人/问题/批注内容），空值省略；
 2. post_dst_preview 只在译后处理真的改了内容时才返回——只差补回来的首尾「」不算，
    而那是"对话条目几乎必然不同"的原因，不排掉这个字段就等于默认都带上；
 3. 传 fields 就只给这几列（index 永远在，定位要用），未知字段直接报错。
@@ -119,7 +119,7 @@ class CacheEntryProjectionTests(unittest.TestCase):
         self.assertEqual(sorted(item), ["index", "pre_dst", "problem"])
 
     def test_default_field_list_is_lean(self) -> None:
-        entry = {**ENTRY, "doub_content": "存疑：这句像漏译"}  # 默认列里也有存疑内容
+        entry = {**ENTRY, "proofread_comment": "批注：这句像漏译"}  # 默认列里也有批注内容
         item = _project_cache_entries([entry], list(CACHE_ENTRY_FIELDS_DEFAULT))[0]
         self.assertEqual(sorted(item), sorted(CACHE_ENTRY_FIELDS_DEFAULT))
 
@@ -157,14 +157,14 @@ class ReadTranslCacheToolTests(unittest.TestCase):
     def test_pipeline_only_fields_are_not_exposed(self) -> None:
         """缓存里由管道写入、Agent 用不到的字段（trans_conf/unknown_proper_noun）
         不该出现在返回里——连 fields=["*"] 也不给。"""
-        entry = {**ENTRY, "doub_content": "存疑内容", "unknown_proper_noun": "某名词"}
+        entry = {**ENTRY, "proofread_comment": "批注内容", "unknown_proper_noun": "某名词"}
         out = _tool_read_transl_cache(
             _Runner([entry]), {"filename": "01.json", "index": "7", "fields": ["*"]}
         )
         for name in ("trans_conf", "unknown_proper_noun"):
             self.assertNotIn(name, out["entries"][0])
-        # doub_content 例外：它是校对子代理的产物，主 Agent 要读它才知道改哪儿
-        self.assertEqual(out["entries"][0]["doub_content"], "存疑内容")
+        # proofread_comment 例外：它是校对子代理的产物，主 Agent 要读它才知道改哪儿
+        self.assertEqual(out["entries"][0]["proofread_comment"], "批注内容")
 
     def test_context_rows_carry_no_marking(self) -> None:
         """上下文行与点名条目不做任何标注，混排返回。"""
@@ -203,6 +203,81 @@ class ReadTranslCacheToolTests(unittest.TestCase):
     def test_missing_indexes_still_reported(self) -> None:
         out = _tool_read_transl_cache(_Runner([ENTRY]), {"filename": "01.json", "index": "7,99"})
         self.assertEqual(out["missing_indexes"], [99])
+
+
+class ReadTranslCacheGrepTests(unittest.TestCase):
+    """grep：字符串按字段内容搜索；数组按字段非空过滤。"""
+
+    @staticmethod
+    def _entries():
+        return [
+            {**ENTRY, "index": 1, "problem": "残留日文", "proofread_comment": "批注A"},
+            {**ENTRY, "index": 2, "problem": "残留日文"},
+            {**ENTRY, "index": 3, "problem": "", "proofread_comment": "批注B"},
+            {**ENTRY, "index": 4, "problem": ""},
+        ]
+
+    def test_string_grep_searches_default_fields(self) -> None:
+        out = _tool_read_transl_cache(_Runner(self._entries()), {"filename": "01.json", "grep": "残留日文"})
+        self.assertEqual([e["index"] for e in out["entries"]], [1, 2])
+        self.assertEqual(out["count"], 2)  # count 是命中数
+        self.assertIn("文件共 4 条", out["grep_note"])
+
+    def test_string_grep_is_case_insensitive(self) -> None:
+        entries = [
+            {**ENTRY, "index": 1, "pre_dst": "Hello world", "problem": ""},
+            {**ENTRY, "index": 2, "pre_dst": "こんにちは", "problem": ""},
+        ]
+        out = _tool_read_transl_cache(_Runner(entries), {"filename": "01.json", "grep": "HELLO"})
+        self.assertEqual([e["index"] for e in out["entries"]], [1])
+
+    def test_string_grep_only_searches_the_selected_fields(self) -> None:
+        # pre_src 与 post_src 不同：默认精简集不含 pre_src，搜不到；显式传 fields 才搜得到
+        entries = [{**ENTRY, "index": 1, "pre_src": "特別な言葉", "post_src": "普通の言葉", "problem": ""}]
+        default_out = _tool_read_transl_cache(_Runner(entries), {"filename": "01.json", "grep": "特別"})
+        self.assertEqual(default_out["returned"], 0)
+        fields_out = _tool_read_transl_cache(
+            _Runner(entries), {"filename": "01.json", "grep": "特別", "fields": ["pre_src"]}
+        )
+        self.assertEqual([e["index"] for e in fields_out["entries"]], [1])
+
+    def test_array_grep_keeps_entries_where_all_named_fields_are_non_empty(self) -> None:
+        out = _tool_read_transl_cache(
+            _Runner(self._entries()), {"filename": "01.json", "grep": ["problem", "proofread_comment"]}
+        )
+        self.assertEqual([e["index"] for e in out["entries"]], [1])
+        self.assertIn("grep 非空：problem、proofread_comment", out["grep_note"])
+
+    def test_array_grep_checks_raw_fields_even_if_not_selected(self) -> None:
+        # problem 没被 fields 选中，但数组模式仍按原始条目判定非空
+        out = _tool_read_transl_cache(
+            _Runner(self._entries()),
+            {"filename": "01.json", "grep": ["problem"], "fields": ["pre_dst"]},
+        )
+        self.assertEqual([e["index"] for e in out["entries"]], [1, 2])
+
+    def test_grep_then_index(self) -> None:
+        out = _tool_read_transl_cache(
+            _Runner(self._entries()), {"filename": "01.json", "grep": "残留日文", "index": "2"}
+        )
+        self.assertEqual([e["index"] for e in out["entries"]], [2])
+        self.assertNotIn("missing_indexes", out)
+        out2 = _tool_read_transl_cache(
+            _Runner(self._entries()), {"filename": "01.json", "grep": "残留日文", "index": "4"}
+        )
+        self.assertEqual(out2["returned"], 0)
+        self.assertEqual(out2["missing_indexes"], [4])  # 被 grep 过滤掉的也算缺
+
+    def test_empty_grep_is_a_noop(self) -> None:
+        for grep in ("", "   ", []):
+            out = _tool_read_transl_cache(_Runner(self._entries()), {"filename": "01.json", "grep": grep})
+            self.assertEqual(out["count"], 4)
+            self.assertNotIn("grep_note", out)
+
+    def test_bad_grep_is_rejected(self) -> None:
+        for bad in (["nope"], 123, {"a": 1}):
+            with self.assertRaises(AgentToolError):
+                _tool_read_transl_cache(_Runner(self._entries()), {"filename": "01.json", "grep": bad})
 
 
 if __name__ == "__main__":

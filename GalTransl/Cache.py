@@ -24,6 +24,8 @@ _CACHE_KEY_COMPAT = {
     "pre_dst": "pre_zh",
     "proofread_dst": "proofread_zh",
     "post_dst_preview": "post_zh_preview",
+    # 旧名「存疑内容」→ 新名「校对批注」：只读兼容，写回一律用新键
+    "proofread_comment": "doub_content",
 }
 
 def _cache_get(cache_obj: dict, key: str, default=None):
@@ -204,8 +206,8 @@ def _build_cache_obj(tran, post_save: bool = False):
 
     if tran.trans_conf != 0:
         cache_obj["trans_conf"] = tran.trans_conf
-    if tran.doub_content != "":
-        cache_obj["doub_content"] = tran.doub_content
+    if tran.proofread_comment != "":
+        cache_obj["proofread_comment"] = tran.proofread_comment
     if tran.unknown_proper_noun != "":
         cache_obj["unknown_proper_noun"] = tran.unknown_proper_noun
     if post_save:
@@ -577,8 +579,9 @@ async def get_transCache_from_json(
             tran.proofread_by = cache_dict[cache_key]["proofread_by"]
         if "trans_conf" in cache_dict[cache_key]:
             tran.trans_conf = cache_dict[cache_key]["trans_conf"]
-        if "doub_content" in cache_dict[cache_key]:
-            tran.doub_content = cache_dict[cache_key]["doub_content"]
+        # 校对批注：新键 proofread_comment，旧缓存里是 doub_content（见 _CACHE_KEY_COMPAT）
+        if _cache_has(cache_dict[cache_key], "proofread_comment"):
+            tran.proofread_comment = _cache_get(cache_dict[cache_key], "proofread_comment") or ""
         if "unknown_proper_noun" in cache_dict[cache_key]:
             tran.unknown_proper_noun = cache_dict[cache_key]["unknown_proper_noun"]
         if "skip_check" in cache_dict[cache_key]:

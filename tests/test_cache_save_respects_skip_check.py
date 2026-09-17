@@ -44,7 +44,7 @@ def rebuild_entries(entries, config):
         s.trans_by = e.get("trans_by", "")
         s.proofread_by = e.get("proofread_by", "")
         s.trans_conf = e.get("trans_conf", 0)
-        s.doub_content = e.get("doub_content", "")
+        s.proofread_comment = e.get("proofread_comment", e.get("doub_content", "")) or ""
         s.unknown_proper_noun = e.get("unknown_proper_noun", "")
         s.skip_check = bool(e.get("skip_check", False))
         trans_list.append(s)

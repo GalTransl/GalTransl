@@ -1,8 +1,8 @@
 """子代理：并行派发、按角色受限的工具集、报告回传。
 
 两个角色（见 runtime.SUBAGENT_ROLES）：
-- **校对（proofread）**：读缓存 → 写 doub_content → 交报告；**改不了译文**（patch_transl_cache
-  换成收窄版，入参里没有 pre_dst/proofread_dst，handler 那层也只放得住 doub_content）；
+- **校对（proofread）**：读缓存 → 写 proofread_comment → 交报告；**改不了译文**（patch_transl_cache
+  换成收窄版，入参里没有 pre_dst/proofread_dst，handler 那层也只放得住 proofread_comment）；
 - **原文探索（explore）**：只读原文与 GPT 字典、**不写任何文件**，报告里给字典候选与规范建议，
   由主 Agent 汇总后落地。
 
@@ -162,7 +162,7 @@ class ProofreadAgentFlowTests(unittest.TestCase):
                         json.dumps(
                             {
                                 "filename": "a.json",
-                                "patches": [{"index": 1, "doub_content": "漏译：原文缺了「欧派」"}],
+                                "patches": [{"index": 1, "proofread_comment": "漏译：原文缺了「欧派」"}],
                             }
                         ),
                     )
@@ -182,7 +182,7 @@ class ProofreadAgentFlowTests(unittest.TestCase):
         self.assertIn("1 条漏译", task["report"])
         self.assertEqual(task["turns"], 3)
         # 意见真的写进了缓存
-        self.assertEqual(parent.files["a.json"][0]["doub_content"], "漏译：原文缺了「欧派」")
+        self.assertEqual(parent.files["a.json"][0]["proofread_comment"], "漏译：原文缺了「欧派」")
         # 只写意见不算"改了译文"：不盖 trans_by 章
         self.assertNotIn("trans_by", parent.files["a.json"][0])
         # 事件：开始/结束 + 逐步活动（界面据此把子代理挂到发起它的那行下）
@@ -201,7 +201,7 @@ class ProofreadAgentFlowTests(unittest.TestCase):
         self.assertGreaterEqual(done["finished_at"], start["started_at"])
 
     def test_translation_edits_are_refused_and_nothing_is_written(self) -> None:
-        """子代理硬塞 pre_dst：工具层拒掉（只允许 doub_content），一个字都不落盘。"""
+        """子代理硬塞 pre_dst：工具层拒掉（只允许 proofread_comment），一个字都不落盘。"""
         parent = _Parent({"a.json": [ENTRY]})
         script = [
             (
@@ -230,7 +230,7 @@ class ProofreadAgentFlowTests(unittest.TestCase):
             if event_type == "subagent_tool_result" and data["ok"] is False
         ]
         self.assertEqual(len(failures), 1)
-        self.assertIn("doub_content", failures[0]["error"])
+        self.assertIn("proofread_comment", failures[0]["error"])
 
     def test_unknown_tool_is_refused(self) -> None:
         parent = _Parent({"a.json": [ENTRY]})
@@ -423,8 +423,8 @@ class SubagentToolScopeTests(unittest.TestCase):
     def test_patch_schema_has_no_translation_fields(self) -> None:
         schema = _subagent_patch_schema()
         patches = schema["function"]["parameters"]["properties"]["patches"]["items"]["properties"]
-        self.assertEqual(set(patches), {"index", "doub_content"})
-        self.assertIn("只能写 doub_content", schema["function"]["description"])
+        self.assertEqual(set(patches), {"index", "proofread_comment"})
+        self.assertIn("只能写 proofread_comment", schema["function"]["description"])
 
     def test_tool_table_has_no_delegation_or_write_tools(self) -> None:
         names = {
@@ -440,18 +440,18 @@ class SubagentToolScopeTests(unittest.TestCase):
         for forbidden in ("run_subagents", "save_dict", "update_project_config", "start_translation"):
             self.assertNotIn(forbidden, names)
 
-    def test_handler_whitelist_only_allows_doub_content(self) -> None:
+    def test_handler_whitelist_only_allows_proofread_comment(self) -> None:
         parent = _Parent({"a.json": [ENTRY]})
         handler = _subagent_handlers(SUBAGENT_AGENT_PROOFREAD)["patch_transl_cache"]
 
         with self.assertRaises(AgentToolError) as ctx:
             handler(parent, {"filename": "a.json", "patches": [{"index": 1, "pre_dst": "改"}]})
-        self.assertIn("只允许 doub_content", str(ctx.exception))
+        self.assertIn("只允许 proofread_comment", str(ctx.exception))
         self.assertEqual(parent.saves, [])
 
     def test_patchable_text_for_subagents(self) -> None:
-        self.assertEqual(_patchable_fields_text(SUBAGENT_PATCHABLE_FIELDS), "doub_content")
-        self.assertEqual(_patchable_fields_text(), "pre_dst / proofread_dst / doub_content")
+        self.assertEqual(_patchable_fields_text(SUBAGENT_PATCHABLE_FIELDS), "proofread_comment")
+        self.assertEqual(_patchable_fields_text(), "pre_dst / proofread_dst / proofread_comment")
 
     def test_main_agent_can_still_write_translations(self) -> None:
         """同一个 handler 在主 Agent 那边不受收窄影响。"""
@@ -546,7 +546,7 @@ class ExploreAgentTests(unittest.TestCase):
         # 用的是原文探索那套提示词与任务说明（不是校对那套）
         self.assertIn("原文探索子代理", captured[0][0]["content"])
         self.assertIn("负责的原文", captured[0][1]["content"])
-        self.assertNotIn("doub_content", captured[0][1]["content"])
+        self.assertNotIn("proofread_comment", captured[0][1]["content"])
         failures = [
             data for kind, data in parent.events if kind == "subagent_tool_result" and not data["ok"]
         ]
@@ -563,7 +563,7 @@ class ExploreAgentTests(unittest.TestCase):
                         "c1",
                         "patch_transl_cache",
                         json.dumps(
-                            {"filename": "a.json", "patches": [{"index": 1, "doub_content": "顺手写一条"}]}
+                            {"filename": "a.json", "patches": [{"index": 1, "proofread_comment": "顺手写一条"}]}
                         ),
                     )
                 ],
@@ -635,7 +635,7 @@ class LockedFileTests(unittest.TestCase):
             handlers["read_transl_cache"](parent, {"filename": "b.json"})
         with self.assertRaises(AgentToolError):
             handlers["patch_transl_cache"](
-                parent, {"filename": "b.json", "patches": [{"index": 1, "doub_content": "越界"}]}
+                parent, {"filename": "b.json", "patches": [{"index": 1, "proofread_comment": "越界"}]}
             )
         self.assertEqual(parent.saves, [])  # 一个字都没写进别的文件
 
@@ -850,7 +850,7 @@ class AutoSplitTests(unittest.TestCase):
                         "c1",
                         "patch_transl_cache",
                         json.dumps(
-                            {"filename": "b.json", "patches": [{"index": 1, "doub_content": "漏译"}]}
+                            {"filename": "b.json", "patches": [{"index": 1, "proofread_comment": "漏译"}]}
                         ),
                     )
                 ],
@@ -877,7 +877,7 @@ class SubagentPermissionTests(unittest.TestCase):
     """子代理不受权限模式约束：白名单里的工具一律直接执行（连 ask 档也不问）。
 
     这是刻意的（见 runtime._subagent_handlers 的说明）：一批 16 个子代理逐条弹审批卡会把
-    界面淹掉，而它们能写的只有 doub_content（改不了译文）。主 Agent 那道门禁仍然管着
+    界面淹掉，而它们能写的只有 proofread_comment（改不了译文）。主 Agent 那道门禁仍然管着
     「派子代理」这件事本身——ask 档下用户批的是这次委派，卡上能看到派给谁、看哪个文件，
     不是子代理的每一次读写。
     """
@@ -897,7 +897,7 @@ class SubagentPermissionTests(unittest.TestCase):
         call = _Call(
             "c1",
             "patch_transl_cache",
-            json.dumps({"filename": "a.json", "patches": [{"index": 1, "doub_content": "漏译"}]}),
+            json.dumps({"filename": "a.json", "patches": [{"index": 1, "proofread_comment": "漏译"}]}),
         )
 
         sub = self._subagent(parent)
@@ -905,7 +905,7 @@ class SubagentPermissionTests(unittest.TestCase):
 
         # 写进去了（结果直接回给子代理，没有"等批准"这回事）
         self.assertEqual(json.loads(out["content"])["updated"], 1)
-        self.assertEqual(parent.files["a.json"][0]["doub_content"], "漏译")
+        self.assertEqual(parent.files["a.json"][0]["proofread_comment"], "漏译")
         # 门禁一次都没被问过，也没发审批事件
         self.assertEqual(parent.permission_checks, [])
         self.assertNotIn("permission_request", parent.types())
@@ -919,7 +919,7 @@ class SubagentPermissionTests(unittest.TestCase):
                     _Call(
                         "c1",
                         "patch_transl_cache",
-                        json.dumps({"filename": "a.json", "patches": [{"index": 1, "doub_content": "漏译"}]}),
+                        json.dumps({"filename": "a.json", "patches": [{"index": 1, "proofread_comment": "漏译"}]}),
                     )
                 ],
             ),
@@ -929,7 +929,7 @@ class SubagentPermissionTests(unittest.TestCase):
         out = _run(parent, {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD, "file": "a.json"}]}, script)
 
         self.assertEqual(out["tasks"][0]["status"], "done")
-        self.assertEqual(parent.files["a.json"][0]["doub_content"], "漏译")
+        self.assertEqual(parent.files["a.json"][0]["proofread_comment"], "漏译")
         self.assertEqual(parent.permission_checks, [])
         self.assertNotIn("permission_request", parent.types())
 

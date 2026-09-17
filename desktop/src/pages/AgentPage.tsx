@@ -3986,13 +3986,15 @@ function SubagentRow({ run }: { run: SubagentRun }) {
   );
 }
 
-/** 子代理写下的校对意见：从 patch_transl_cache 的入参里读（它写的就是 doub_content）。 */
+/** 子代理写下的校对批注：从 patch_transl_cache 的入参里读（它写的就是 proofread_comment；
+ *  历史会话里是旧名 doub_content，一并认）。 */
 function stepDoubts(args: unknown): { index: number; text: string }[] {
   const patches = (args as Record<string, unknown> | undefined)?.patches;
   if (!Array.isArray(patches)) return [];
   return patches.flatMap((patch) => {
     const item = patch as Record<string, unknown> | undefined;
-    const text = typeof item?.doub_content === 'string' ? item.doub_content.trim() : '';
+    const raw = item?.proofread_comment ?? item?.doub_content;
+    const text = typeof raw === 'string' ? raw.trim() : '';
     if (!text) return [];
     const index = Number(item?.index);
     return [{ index: Number.isFinite(index) ? index : -1, text }];

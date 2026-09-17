@@ -108,7 +108,7 @@ export type CacheEntry = {
   problem?: string;
   skip_check?: boolean;
   trans_conf?: number;
-  doub_content?: string;
+  proofread_comment?: string;
   unknown_proper_noun?: string;
   // 旧key名兼容字段（读取旧缓存时可能存在）
   pre_jp?: string;

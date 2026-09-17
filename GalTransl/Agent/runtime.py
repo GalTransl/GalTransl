@@ -148,7 +148,7 @@ PERMISSION_TOOL_RISK: dict[str, str] = {
     "manage_problem_white_list": PERMISSION_HIGH,
     "write_project_guideline": PERMISSION_HIGH,
     "start_translation": PERMISSION_HIGH,
-    # 派子代理：虽然它写的只是缓存里的"存疑内容"（doub_content，改不了译文），但这是
+    # 派子代理：虽然它写的只是缓存里的"校对批注"（proofread_comment，改不了译文），但这是
     # 「要不要开始干这件事」——一次最多 16 个并行跑起来、每个都要调大模型、都会写缓存，
     # 让用户在派之前批一次（卡上能看到派给谁、看哪些文件）比事后发现跑歪了强。所以按
     # high 走：ask 与 accept-edits 都要问，只有两个全自动档直接放行。
@@ -504,8 +504,8 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 5. **跟进进度（wait 前后都要查状态）**：启动翻译后先调用 get_runtime 确认任务已在跑，再调用 wait 等待一段合理时间（翻译任务 wait minutes=1~3，短任务 wait seconds=30）。**优先把 start_translation 返回的 job_id 一起传进去**（如 wait(job_id="<id>", minutes=5)）：任务先跑完就立刻返回、不必等满时长（返回里 job_finished=true 说明是它先结束的）；时长先到而它还在跑，返回里会带上当前状态**外加一份运行时快照（等同 get_runtime，含 eta_seconds）**——有这份快照就直接用，不必再单独查一次。wait 结束后必须确认任务状态（快照已在返回里就不必重查）：completed 进入下一步；仍在 running 时看返回的 eta_seconds 估算剩余时间——eta 还很长（如 >10 分钟）就按其一半的时长继续 wait，快完了（如 <2 分钟）就 wait seconds=30 再查，不要连续空转轮询也不要一次等过头。等待期间界面会显示倒计时。（get_runtime 各字段与 recent_errors 的口径见该工具说明。）
 6. **复核结果**：调用 list_problems（不带参数）先看类型统计，了解哪类问题最多；再传 problem_type（如 problem_type="残留日文"）+ limit/offset 分页查看该类型的具体条目。用 read_transl_cache 的 index 参数精确读取有问题的条目（如 list_problems 返回的 index，可直接 `index="33-40,50-60"` 一次取多条）浏览实际译文；判断语意是否连贯时传 context（如 context=3）把前后各几句一起带上。要查某个词/译名在全项目的所有出现处、判断译法是否统一（如「ドルード」该统一成哪个写法），用 search_transl_cache(query="ドルード", context=3) 一次看遍所有出现处及其上下文。它默认只返回必要字段（说话人/原文/译文/问题，空值与未变化的字段会省略），要看译后字典替换结果或校对稿再传 fields。需要看缓存文件全貌（文件、条数）时用 list_transl_cache；注意返回里标注 translating / .append.jsonl 后缀的文件正在翻译中，此时读到的是旧快照，等任务 completed 再操作。
 6.5 **派子代理（校对与润色，可选）**：**很费 token，属于可选步骤**：派之前**必须用 ask_user 征得用户同意**（把"会读较多原文、比较费 token"说清楚），同意才派、不同意就不派；用 run_subagents 一次派多个子代理并行干活，每个有自己的上下文与受限工具，跑完只交回一份报告（过程不进你的上下文）。这个阶段用的是**校对子代理（proofread）**：
-   - **校对（proofread）**：每个负责一个（或一组）缓存文件，一次最多 16 个。file 填具体文件名就是点名；填 `"*"` 则**自动均分**——同批的 `"*"` 任务平分全部缓存文件（如派 16 个 `"*"`、256 个缓存文件 → 每个 16 个），要一次覆盖全部文件时用它，不用自己去数文件再逐个点名。大文件还能用 indexes 切区间。它们只能读 + 写缓存条目的 doub_content（存疑内容：校对建议、润色建议都写这里），**改不了译文**：返回的 tasks[].doubts 带文件名与 index，报告是各自的总结（含"拿不准"的点）。拿到后按 7 的流程处理——读那些 index 的 doub_content，改完译文把该条的 doub_content 清空。**推荐在修复前跑一遍**。
-   **派之前先用 ask_user 问清意见类型**：这一遍要它们写哪一类——「只写校对建议（错译/漏译/事实错误/不通这些硬伤）」「只写润色建议（没硬伤但中文能更好：翻译腔、口语不自然、用词单调、节奏拖沓）」「两者都要」——再把答案写进 brief（如 brief="本次只写润色建议，每条给具体改法；对话读起来要像人话"）。brief 里不写这句时它们默认只写校对建议；两类意见都写进 doub_content，同一条目只留一条，所以"两者都要"时要交代它们**硬伤优先**。
+   - **校对（proofread）**：每个负责一个（或一组）缓存文件，一次最多 16 个。file 填具体文件名就是点名；填 `"*"` 则**自动均分**——同批的 `"*"` 任务平分全部缓存文件（如派 16 个 `"*"`、256 个缓存文件 → 每个 16 个），要一次覆盖全部文件时用它，不用自己去数文件再逐个点名。大文件还能用 indexes 切区间。它们只能读 + 写缓存条目的 proofread_comment（校对批注：校对建议、润色建议都写这里），**改不了译文**：返回的 tasks[].doubts 带文件名与 index，报告是各自的总结（含"拿不准"的点）。拿到后按 7 的流程处理——读那些 index 的 proofread_comment，改完译文把该条的 proofread_comment 清空。**推荐在修复前跑一遍**。
+   **派之前先用 ask_user 问清意见类型**：这一遍要它们写哪一类——「只写校对建议（错译/漏译/事实错误/不通这些硬伤）」「只写润色建议（没硬伤但中文能更好：翻译腔、口语不自然、用词单调、节奏拖沓）」「两者都要」——再把答案写进 brief（如 brief="本次只写润色建议，每条给具体改法；对话读起来要像人话"）。brief 里不写这句时它们默认只写校对建议；两类意见都写进 proofread_comment，同一条目只留一条，所以"两者都要"时要交代它们**硬伤优先**。
    派之前先想清楚要它们重点看什么，写进 brief 比它们自己发挥准。
 7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。问题过滤关键字是**精准匹配**：用 manage_problem_filter(action="add", keyword=["<与 list_problems 里某条问题项逐字一致的整条>"]) 只丢掉这一条具体问题（如「残留日文：おはよう」）；不能写大类名（如「残留日文」）或子串，那样什么也过滤不掉。若某几条反复误报、不值得再改，用 manage_problem_white_list(action="add", entry=["<文件名>:<index>", …]) 按位置豁免（entry 支持 "01.json:12" 与 "01.json:12-15" 区间，可传数组），效果等同于给这几条勾上 skip_check：不再检测、不计入统计。
 8. **完成**：收尾前先调用 get_project_overview 确认项目真的翻完——只有 files_translated == files_total 且没有 running 任务才算整体完成（total==translated 可能只代表已缓存的部分翻完，不要据此收尾）；若还有文件没翻，回到流程 4 继续 start_translation 翻剩余文件。若 list_problems 的统计里有**翻译失败**（失败的批次会把 problem 标成「翻译失败」、译文带 "(Failed)" 标记）：确认项目配置 `common.retranslKey` 里有没有「翻译失败」（get_project_overview 的 config 能看到，没有就 update_project_config 加上）：有的话**再启动一次 start_translation** 即可把这些句子重翻一遍。问题数可控、整体完成后，用 read_output 抽查最终输出文件（交付物；输出与缓存不完全一致，译后字典替换只在输出生效），确认无误后用一段自然语言总结本次操作（做了什么、翻译进度、剩余问题建议），不要调用工具，直接输出总结即可结束。
@@ -2078,7 +2078,10 @@ def _cache_fields_section() -> str:
     )
     lines.append(
         f"读缓存默认只回精简列（{' / '.join(CACHE_ENTRY_FIELDS_DEFAULT)}，以及有值的附加列），"
-        "要看别的列传 fields（fields=[\"*\"] 全要）。改译文用 patch_transl_cache，只能改 "
+        "要看别的列传 fields（fields=[\"*\"] 全要）。只想看命中的条目就传 grep：字符串 = 在"
+        "所选字段内容里搜文本（大小写不敏感）；数组 = 把这些元素当字段名、只留有内容的条目"
+        "（如 grep=[\"problem\",\"proofread_comment\"] 取「有问题、且有校对批注」的条目）。"
+        "改译文用 patch_transl_cache，只能改 "
         f"{_patchable_fields_text()}；"
         "problem 与 post_* 是后端算出来的派生字段，改不动——改完译文跑 rebuilda（或重翻）"
         "它们才会跟着更新。"
@@ -2965,7 +2968,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_transl_cache",
-            "description": "读取某个缓存文件的条目（译文）。filename 来自 list_transl_cache 的缓存文件列表。留空 index 返回前 30 条；指定 index 只返回指定的条目。修问题/润色判断语意连贯时传 context 让目标条目前后各多带几句上下文。默认只返回必要字段（index/说话人/原文/译文/问题，以及确实非空或与原文不同的附加字段），要看别的字段再传 fields。不要读取 .append.jsonl 增量文件（翻译中旧快照），读对应的 .json 文件。返回 Markdown 表格 + 文字说明（格式见系统提示）。要把某条缓存展示给用户时，在回复里单独一行写 $transl_cache(\"<缓存文件名>\", <行号>)（行号 = 条目 index，区间 12-15 / 列表 12,20 均可），界面会把它渲染成那几行缓存的卡片。",
+            "description": "读取某个缓存文件的条目（译文）。filename 来自 list_transl_cache 的缓存文件列表。留空 index 返回前 30 条；指定 index 只返回指定的条目。修问题/润色判断语意连贯时传 context 让目标条目前后各多带几句上下文。默认只返回必要字段（index/说话人/原文/译文/问题，以及确实非空或与原文不同的附加字段），要看别的字段再传 fields。要只看命中的条目传 grep：字符串 = 在 fields 选中的字段内容里搜文本（大小写不敏感），数组 = 把这些元素当字段名、只留有内容的条目（如 [\"problem\",\"proofread_comment\"]）。不要读取 .append.jsonl 增量文件（翻译中旧快照），读对应的 .json 文件。返回 Markdown 表格 + 文字说明（格式见系统提示）。要把某条缓存展示给用户时，在回复里单独一行写 $transl_cache(\"<缓存文件名>\", <行号>)（行号 = 条目 index，区间 12-15 / 列表 12,20 均可），界面会把它渲染成那几行缓存的卡片。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2977,6 +2980,19 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     "context": {
                         "type": "integer",
                         "description": "可选。上下文句数（0-20）：目标条目前后各多返回 N 句，如 index=\"205-206\" context=3 返回 202~209。修问题判断语意时建议 2-4。",
+                    },
+                    "grep": {
+                        "anyOf": [
+                            {"type": "string"},
+                            {"type": "array", "items": {"type": "string"}},
+                        ],
+                        "description": (
+                            "可选。只返回命中的条目。①字符串 = 在 fields 选中的字段（不传 fields 则默认精简集）"
+                            "内容里做大小写不敏感的子串搜索，命中任一字段即保留，如 grep=\"残留日文\"；"
+                            "②字符串数组 = 每个元素当字段名，只保留这些字段都不为空的条目，"
+                            "如 grep=[\"problem\",\"proofread_comment\"] 取「有问题、且有校对批注」的条目。"
+                            "与 index 同用时先按 grep 过滤，再按 index 取。"
+                        ),
                     },
                     "fields": {
                         "type": "array",
@@ -3072,7 +3088,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                                 "index": {"type": "integer", "description": "要修改的条目 index"},
                                 "pre_dst": {"type": "string", "description": "可选。新译文（机翻结果）"},
                                 "proofread_dst": {"type": "string", "description": "可选。新校对译文（校对/润色结果，优先于 pre_dst）"},
-                                "doub_content": {"type": "string", "description": "可选。存疑内容（校对子代理写下的意见：校对建议或润色建议，见 run_subagents）。按它改完译文后传空串清掉，表示这条已处理"},
+                                "proofread_comment": {"type": "string", "description": "可选。校对批注（校对子代理写下的意见：校对建议或润色建议，见 run_subagents）。按它改完译文后传空串清掉，表示这条已处理"},
                             },
                             "required": ["index"],
                         },
@@ -3090,9 +3106,9 @@ AGENT_TOOLS: list[dict[str, Any]] = [
             "description": (
                 "派一批子代理并行干活，等它们全部跑完，把每份报告收回来。子代理有自己的上下文与"
                 "受限工具集，干活过程不进你的上下文，返回给你的只有每份报告。两种角色："
-                "**proofread（校对）**——只能读缓存/人名表/规范/问题清单，加写缓存条目的「存疑内容」"
-                "（doub_content，校对建议与润色建议都写这里），改不了译文；适合翻译完成后逐文件校对，"
-                "返回它写了哪些 index 的疑问，你用 read_transl_cache 读那些 doub_content、改完译文再清空它。"
+                "**proofread（校对）**——只能读缓存/人名表/规范/问题清单，加写缓存条目的「校对批注」"
+                "（proofread_comment，校对建议与润色建议都写这里），改不了译文；适合翻译完成后逐文件校对，"
+                "返回它写了哪些 index 的疑问，你用 read_transl_cache 读那些 proofread_comment、改完译文再清空它。"
                 "**explore（原文探索）**——只读原文与 GPT 字典、不写任何文件；用来补 GenDic 覆盖不到的"
                 "昵称/专有名词/称呼，以及给翻译规范提建议，结论在你的报告里由你汇总落地"
                 "（save_dict / write_project_guideline）。explore 要通读原文、**很费 token**，"
@@ -5405,6 +5421,8 @@ def _md_render_read_transl_cache(result: dict[str, Any]) -> str:
     head_parts: list[str] = []
     if result.get("filename") is not None:
         head_parts.append(f"文件 {result['filename']}")
+    if result.get("grep_note"):
+        head_parts.append(str(result["grep_note"]))
     if result.get("count") is not None:
         head_parts.append(f"共 {result['count']} 条，显示 {result.get('returned')} 条")
     if result.get("context"):
@@ -5672,7 +5690,7 @@ CACHE_ENTRY_FIELDS: tuple[str, ...] = (
     "post_dst_preview",
     "proofread_dst",
     "proofread_by",
-    "doub_content",
+    "proofread_comment",
     "trans_by",
     "problem",
 )
@@ -5686,9 +5704,9 @@ CACHE_ENTRY_FIELDS_DEFAULT: tuple[str, ...] = (
     "post_src",
     "pre_dst",
     "problem",
-    # 校对子代理的产物（存疑内容）：主 Agent 复核时要看它，默认就得带上；没写过则是空值，
+    # 校对子代理的产物（校对批注）：主 Agent 复核时要看它，默认就得带上；没写过则是空值，
     # 走默认精简集的"空值省略"，不会给普通条目添噪音
-    "doub_content",
+    "proofread_comment",
 )
 # 每个字段的含义（拼进 system prompt，见 _cache_fields_section）。
 # 命名来源见 GalTransl/CSentense.py：pre_src=前原、post_src=前润（送去翻译的原文）、
@@ -5702,7 +5720,7 @@ CACHE_ENTRY_FIELD_DESCRIPTIONS: dict[str, str] = {
     "post_dst_preview": "最终译文的缓存快照（后润）：译后字典替换 + 对话符号恢复之后的形态；默认只在它与译文实质不同（不只差首尾对话符号）时返回",
     "proofread_dst": "校对/润色稿；有内容时它就是这条的最终译文（优先于 pre_dst）",
     "proofread_by": "校对者标记（校对失败的会带 Fail）；未校对为空",
-    "doub_content": "存疑内容：校对子代理（run_subagents）看过后写下的意见——校对建议（错译/漏译/事实错误等）或润色建议（翻译腔、口语不自然等表达改进），一条一句；没疑问的条目为空。要修这一条就按它的说法改 pre_dst，改完用 patch_transl_cache 把 doub_content 清空表示已处理",
+    "proofread_comment": "校对批注：校对子代理（run_subagents）看过后在条目上留下的批注——校对建议（错译/漏译/事实错误等）或润色建议（翻译腔、口语不自然等表达改进），一条一句；没写过的条目为空。要处理这条就按批注改 pre_dst，改完用 patch_transl_cache 把 proofread_comment 清空表示已处理",
     "trans_by": "译者标记：翻译引擎的模型名，或被别的来源改过时的那个名字（本会话 Agent 用 patch_transl_cache 改过的条目记的是 Agent 的模型名）；读缓存时逐条只报少数派——这批里出现最多的那个（多数派，通常就是引擎翻的）与空值都不逐条给，多数派记在顶层 majority_trans_by；默认不返回（要看它传 fields）",
     "problem": "自动问题分析写入的问题标签，可能多条（以「, 」分隔）；list_problems 的统计与下钻都基于它",
 }
@@ -5721,6 +5739,8 @@ _CACHE_ENTRY_OLD_KEYS: dict[str, str] = {
     "pre_dst": "pre_zh",
     "proofread_dst": "proofread_zh",
     "post_dst_preview": "post_zh_preview",
+    # 校对批注的旧名（只读兼容旧缓存；写回一律用新名，见 GalTransl/Cache.py 的 _CACHE_KEY_COMPAT）
+    "proofread_comment": "doub_content",
 }
 
 
@@ -5812,6 +5832,71 @@ def _project_cache_entries(
     return out
 
 
+def _grep_field_text(entry: dict[str, Any], name: str) -> str:
+    """取字段的可搜索文本（认老缓存的旧键名；name 这类列表拼成一段）。"""
+    value = _cache_field_value(entry, name)
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        return " ".join(str(v) for v in value if v is not None)
+    return str(value)
+
+
+def _grep_field_present(entry: dict[str, Any], name: str) -> bool:
+    """字段是否有内容：字符串非空白；列表/字典非空；数字等非 None 即算。"""
+    value = _cache_field_value(entry, name)
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip() != ""
+    if isinstance(value, (list, tuple, dict, set)):
+        return len(value) > 0
+    return True
+
+
+def _grep_cache_entries(
+    entries: list[dict[str, Any]], grep: Any, fields: list[str] | None
+) -> list[dict[str, Any]]:
+    """read_transl_cache 的 grep 过滤（只读）。
+
+    - grep 是字符串：在 fields（不传则默认精简集）的字段内容里做大小写不敏感的子串搜索，
+      命中任一字段的条目保留；
+    - grep 是字符串数组：每个元素当字段名，只保留这些字段**都不为空**的条目
+      （如 ["problem", "proofread_comment"] = 既有问题、又有校对批注的条目）。
+    """
+    if grep is None:
+        return entries
+    if isinstance(grep, str):
+        needle = grep.strip()
+        if not needle:
+            return entries
+        keys = list(fields) if fields is not None else list(CACHE_ENTRY_FIELDS_DEFAULT)
+        folded = needle.casefold()
+        return [e for e in entries if any(folded in _grep_field_text(e, k).casefold() for k in keys)]
+    if isinstance(grep, list):
+        names = [str(x).strip() for x in grep if str(x).strip()]
+        if not names:
+            return entries
+        for name in names:
+            if name not in CACHE_ENTRY_FIELDS:
+                raise AgentToolError(
+                    f"grep 数组里不是有效的字段名：{name}（可选：{'、'.join(CACHE_ENTRY_FIELDS)}）"
+                )
+        return [e for e in entries if all(_grep_field_present(e, name) for name in names)]
+    raise AgentToolError("grep 必须是字符串（按内容搜索）或字符串数组（按字段非空过滤）")
+
+
+def _cache_grep_note(grep: Any, total: int) -> str | None:
+    """给渲染层的一句话说明；grep 没实际生效（空串/空数组）时返回 None。"""
+    if isinstance(grep, str) and grep.strip():
+        return f"grep「{grep.strip()}」（文件共 {total} 条）"
+    if isinstance(grep, list):
+        names = [str(x).strip() for x in grep if str(x).strip()]
+        if names:
+            return f"grep 非空：{'、'.join(names)}（文件共 {total} 条）"
+    return None
+
+
 def _tool_read_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     filename = str(args.get("filename", "")).strip()
     if not filename:
@@ -5820,8 +5905,15 @@ def _tool_read_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     pid = runner._project_id()
     data = runner._http_get(f"/api/projects/{pid}/cache/{urllib.parse.quote(filename)}")
     raw_entries = [e for e in data.get("entries", []) if isinstance(e, dict)]
-    entries = _project_cache_entries(raw_entries, fields)
+    total_entries = len(raw_entries)
+    # grep 在原始条目上过滤（数组模式要判任意字段是否非空，投影之后就看不到没选中的列了），
+    # 之后再按 fields 裁剪。
+    grep_arg = args.get("grep")
+    entries = _project_cache_entries(_grep_cache_entries(raw_entries, grep_arg, fields), fields)
     result_extra: dict[str, Any] = {}
+    grep_note = _cache_grep_note(grep_arg, total_entries)
+    if grep_note:
+        result_extra["grep_note"] = grep_note
     # trans_by 与 search 同一套规则（见 _dominant_trans_by）：逐条只给少数派，多数派与空值
     # 删掉、改记在顶层 majority_trans_by。默认精简集里没有这列，只有 fields 点名要时才处理。
     if fields is not None and "trans_by" in fields:
@@ -6163,8 +6255,8 @@ def _tool_search_input(runner: AgentRunner, args: dict[str, Any]) -> Any:
 _PATCHABLE_FIELDS: frozenset[str] = frozenset({
     "pre_dst",
     "proofread_dst",
-    # 存疑内容也算可改：校对子代理写下意见、主 Agent 改完译文后要能把它清掉（或改写）
-    "doub_content",
+    # 校对批注也算可改：校对子代理写下意见、主 Agent 改完译文后要能把它清掉（或改写）
+    "proofread_comment",
 })
 
 # "改了译文"的那两个字段：只有它们被改过才给条目盖 trans_by（谁改的）；只写校对意见不算
@@ -6346,10 +6438,10 @@ def _plan_cache_patches(
 def _tool_patch_transl_cache(
     runner: AgentRunner, args: dict[str, Any], allowed_fields: frozenset[str] | None = None
 ) -> Any:
-    """改缓存条目的字段（主 Agent 可改 pre_dst / proofread_dst / doub_content）。
+    """改缓存条目的字段（主 Agent 可改 pre_dst / proofread_dst / proofread_comment）。
 
     allowed_fields 是"这次调用最多能改哪些字段"的窄白名单，给校对子代理用：它拿同一个工具，
-    但只放得住 doub_content——**改不了译文是靠这张白名单 + 子代理的入参 schema 双保险**，
+    但只放得住 proofread_comment——**改不了译文是靠这张白名单 + 子代理的入参 schema 双保险**，
     不是靠提示词自觉（见 _subagent_handlers / _subagent_patch_schema）。
     """
     allowed = allowed_fields if allowed_fields is not None else _PATCHABLE_FIELDS
@@ -6384,7 +6476,7 @@ def _tool_patch_transl_cache(
 
     if not applied_indexes:
         # 把跳过原因带上：否则模型只看到"没有条目被更新"，不知道是字段不许改还是 index 写错了
-        # （校对子代理硬塞译文字段时也靠这条说清"只允许 doub_content"）
+        # （校对子代理硬塞译文字段时也靠这条说清"只允许 proofread_comment"）
         reasons = "；".join(str(s.get("reason") or "") for s in skipped if s.get("reason"))
         raise AgentToolError(
             f"没有条目被更新（updated=0, skipped={len(skipped)}, not_found={len(not_found)}）"
@@ -6393,7 +6485,7 @@ def _tool_patch_transl_cache(
 
     # 译文被改过的条目标上本会话的模型名（trans_by 不在 _PATCHABLE_FIELDS 里，模型指定不了）：
     # 用户与后续复核才分得清"这句是 Agent 手改的"还是"翻译引擎翻的"。
-    # 只写校对意见（doub_content）的条目**不盖章**——译文一个字没动，盖了会把"谁翻的"弄错，
+    # 只写校对意见（proofread_comment）的条目**不盖章**——译文一个字没动，盖了会把"谁翻的"弄错，
     # 也会让 trans_by 的少数派统计多出一堆假来源。
     agent_model = _agent_model_name(runner)
     if agent_model:
@@ -6738,14 +6830,14 @@ def _tool_ask_user(runner: AgentRunner, args: dict[str, Any]) -> Any:
 # 我们的回合里工具是串行执行的（见 run() 的 for tc in tool_calls），没有 resume 那套机制，
 # 阻塞式最省事也最不容易出错；并发一点没少——同一批里的子代理是真并行跑的。
 
-# 校对子代理的 system prompt：**只能提意见**（写 doub_content），不能改译文。
+# 校对子代理的 system prompt：**只能提意见**（写 proofread_comment），不能改译文。
 # 写"校对建议"还是"润色建议"由主 Agent 问过用户后写在任务说明里（见 _SUBAGENT_BRIEF_TEMPLATE），
 # 这里只把两类意见的定义、写法与优先级讲清楚；任务说明没提时默认只写校对建议。
-SUBAGENT_PROOFREAD_PROMPT = """你是 GalTransl 的**校对子代理**，只干一件事：读完分配给你的缓存，把意见写进缓存条目的 doub_content。
+SUBAGENT_PROOFREAD_PROMPT = """你是 GalTransl 的**校对子代理**，只干一件事：读完分配给你的缓存，把意见写进缓存条目的 proofread_comment。
 
 # 权力边界（越界即失败）
-- 你**只能读**（缓存、人名表、翻译规范、问题清单），以及用 patch_transl_cache **写 doub_content** 这一个字段；
-- 你的 patch_transl_cache 里只有 index 与 doub_content 两个入参：**译文字段（pre_dst / proofread_dst）根本不存在**，也没有委派、启动任务、改配置的权力；
+- 你**只能读**（缓存、人名表、翻译规范、问题清单），以及用 patch_transl_cache **写 proofread_comment** 这一个字段；
+- 你的 patch_transl_cache 里只有 index 与 proofread_comment 两个入参：**译文字段（pre_dst / proofread_dst）根本不存在**，也没有委派、启动任务、改配置的权力；
 - **你只负责这一次派给你的那些文件**（可能是一个，也可能是自动均分出来的一组）：read_transl_cache / patch_transl_cache 的 filename 只接受它们，范围外会被直接拒掉；要核对某个词在别处的译法，用 search_transl_cache（它是全项目范围）；
 - 发现问题就写意见，改由主 Agent 做——不要试图绕路。
 
@@ -6772,13 +6864,13 @@ SUBAGENT_PROOFREAD_PROMPT = """你是 GalTransl 的**校对子代理**，只干�
 **两类共同的三条规矩**：一条条目只写一次（再写会覆盖）；没问题的条目不要写；每条都要写清"问题是什么 + 该怎么改"，必要时给出原文依据。宁可少报，也不要拿噪音把真正的硬伤淹掉。
 
 # 怎么干
-1. 先 read_transl_cache 读你负责的区间（默认列就够：原文 post_src、译文 pre_dst、机翻自查 problem，以及别人写过的 doub_content）；
+1. 先 read_transl_cache 读你负责的区间（默认列就够：原文 post_src、译文 pre_dst、机翻自查 problem，以及别人写过的 proofread_comment）；
 2. 要判断译名一致性：search_transl_cache 搜同一个词的其它出现处、get_name_table 看人名表；判断取舍时 read_guideline 看项目规范（润色建议尤其要以项目规范为准，别跟规范里定下的文风打架）；
 3. 有疑问就用 patch_transl_cache 写进去，一条一个问题、写清"问题是什么 + 该怎么改"。可以一次多条：
    patch_transl_cache(filename="<你的文件>", patches=[
-     {"index": 33, "doub_content": "漏译：原文「おっぱい」在译文里没有对应词，建议补为「欧派」"},
-     {"index": 41, "doub_content": "错译：原文是「否定」，译文翻成了肯定"},
-     {"index": 58, "doub_content": "润色：直译得比较生硬，建议改成「我才不是特意为你做的呢！」"},
+     {"index": 33, "proofread_comment": "漏译：原文「おっぱい」在译文里没有对应词，建议补为「欧派」"},
+     {"index": 41, "proofread_comment": "错译：原文是「否定」，译文翻成了肯定"},
+     {"index": 58, "proofread_comment": "润色：直译得比较生硬，建议改成「我才不是特意为你做的呢！」"},
    ])
    没问题的条目不要写；同一个 index 只写一次（再写会覆盖）。
 4. problem 里的机翻提示可以参考，但那是统计标签，**只写你核对过的**，不要照抄。
@@ -6789,10 +6881,10 @@ SUBAGENT_PROOFREAD_PROMPT = """你是 GalTransl 的**校对子代理**，只干�
 - 负责的文件与区间、读了多少条；
 - 写了几条意见、分别是哪一类（校对：错译/漏译/事实错误/不通；润色：表达/语气/用词/节奏）；
 - 拿不准但值得人看一眼的点。
-不要在报告里复述每条意见的全文（doub_content 里已经有了），也不要贴原文译文。"""
+不要在报告里复述每条意见的全文（proofread_comment 里已经有了），也不要贴原文译文。"""
 
 # 子代理的 user 消息（任务说明）。校对：文件是任务的天然边界——不同子代理写不同文件的
-# doub_content，互不打架；同一个人也能只领一个区间（或自动均分出来的一组文件）。
+# proofread_comment，互不打架；同一个人也能只领一个区间（或自动均分出来的一组文件）。
 _SUBAGENT_BRIEF_TEMPLATE = """# 你的任务
 
 - 角色：{label}
@@ -6801,7 +6893,7 @@ _SUBAGENT_BRIEF_TEMPLATE = """# 你的任务
 - 主 Agent 的额外要求（**里面会写明这一遍写哪一类意见：校对建议 / 润色建议 / 两者都要**）：{brief}
 
 负责的文件可能不止一个（自动均分出来的），逐个文件处理，别漏；读完你负责的区间，把发现的
-问题写进对应条目的 doub_content，然后交报告。上面没写意见类型时，默认只写校对建议。"""
+问题写进对应条目的 proofread_comment，然后交报告。上面没写意见类型时，默认只写校对建议。"""
 
 # 原文探索的任务说明：它不写文件，交的只有报告。
 _SUBAGENT_EXPLORE_BRIEF = """# 你的任务
@@ -6850,9 +6942,9 @@ SUBAGENT_EXPLORE_PROMPT = """你是 GalTransl 的**原文探索子代理**，只
 不要复述原文成段内容，不要写剧情概述，不要提议与字典和规范无关的东西。"""
 
 
-# 子代理唯一能写的字段：存疑内容。它用的就是主 Agent 那个 patch_transl_cache，只是入参 schema
-# 被摘得只剩 doub_content、handler 那头也只放得住这一个字段（双保险）。
-SUBAGENT_PATCHABLE_FIELDS: frozenset[str] = frozenset({"doub_content"})
+# 子代理唯一能写的字段：校对批注。它用的就是主 Agent 那个 patch_transl_cache，只是入参 schema
+# 被摘得只剩 proofread_comment、handler 那头也只放得住这一个字段（双保险）。
+SUBAGENT_PATCHABLE_FIELDS: frozenset[str] = frozenset({"proofread_comment"})
 
 
 @dataclass(frozen=True)
@@ -6909,7 +7001,7 @@ def _subagent_role(agent: str) -> SubAgentRole:
 
 
 def _subagent_patch_schema() -> dict[str, Any]:
-    """子代理版的 patch_transl_cache：**把 pre_dst / proofread_dst 两个入参摘掉**，只留 doub_content。
+    """子代理版的 patch_transl_cache：**把 pre_dst / proofread_dst 两个入参摘掉**，只留 proofread_comment。
 
     与 handler 侧的窄白名单（SUBAGENT_PATCHABLE_FIELDS）一起构成"改不了译文"的双保险——
     这件事由代码保证，不靠提示词自觉。schema 从主 Agent 那份深拷贝再改，避免哪天主 Agent
@@ -6924,10 +7016,10 @@ def _subagent_patch_schema() -> dict[str, Any]:
         for field in ("pre_dst", "proofread_dst"):
             properties.pop(field, None)
         copy["function"]["description"] = (
-            "把你的意见写进缓存条目的 doub_content（存疑内容），一条一个具体问题，"
+            "把你的意见写进缓存条目的 proofread_comment（校对批注），一条一个具体问题，"
             "写清问题在哪、该怎么改。可以一次传多条 patches。"
             "**写校对建议还是润色建议以任务说明为准**（没说明就默认只写校对建议）。"
-            "**你是校对子代理，只能写 doub_content**——译文字段不在你的入参里，改由主 Agent 做；"
+            "**你是校对子代理，只能写 proofread_comment**——译文字段不在你的入参里，改由主 Agent 做；"
             "同一个 index 写第二次会覆盖上一次。"
         )
         return copy
@@ -7082,8 +7174,8 @@ def _subagent_handlers(
 ) -> dict[str, Callable[[AgentRunner, dict[str, Any]], Any]]:
     """某个角色可用的 handler（按它的白名单从主 Agent 那张表里取）。
 
-    - patch_transl_cache 包一层窄白名单：只放得住 doub_content（译文字段即使模型硬塞也会被
-      当成"无可更新字段"跳过，并被回一条只允许 doub_content 的工具错误）；
+    - patch_transl_cache 包一层窄白名单：只放得住 proofread_comment（译文字段即使模型硬塞也会被
+      当成"无可更新字段"跳过，并被回一条只允许 proofread_comment 的工具错误）；
     - **锁定文件**（locked_files 非空，来自任务里的 file；自动均分时是一组）：read_transl_cache /
       patch_transl_cache / read_input_file 的 filename 被限制在这一组里，list_input_files 也只列
       这些——"一份文件只归一个子代理"由工具层保证，模型串到范围外会被拒（省 token，也避免两个
@@ -7240,7 +7332,7 @@ class SubAgentRunner:
             "agent": self.agent,
             "label": SUBAGENT_LABELS.get(self.agent, self.agent),
             # file 是给人看的一行（一组时是「首个 等 N 个」），files 是完整清单——
-            # 主 Agent 后面要按文件去读/清 doub_content，必须有准名字
+            # 主 Agent 后面要按文件去读/清 proofread_comment，必须有准名字
             "file": self.file_label,
             "files": list(self.files),
             "indexes": self.indexes,
@@ -7590,9 +7682,9 @@ class SubAgentRunner:
         }
 
     def _remember_doubts(self, result: Any, filename: str) -> None:
-        """从 patch_transl_cache 的变更里挑出 doub_content 那几条，记进报告用的小结。
+        """从 patch_transl_cache 的变更里挑出 proofread_comment 那几条，记进报告用的小结。
 
-        认的是返回的 changes（path 形如 `#33.doub_content`）而不是模型传的参数：它到底写了什么、
+        认的是返回的 changes（path 形如 `#33.proofread_comment`）而不是模型传的参数：它到底写了什么、
         写没写成功，以工具的返回为准。filename 一并记下：一个子代理可能负责一组文件，只留 index
         的话主 Agent 认不出这条意见在哪份文件里。
         """
@@ -7602,7 +7694,7 @@ class SubAgentRunner:
             if not isinstance(change, dict):
                 continue
             path = str(change.get("path") or "")
-            if not path.endswith(".doub_content"):
+            if not path.endswith(".proofread_comment"):
                 continue
             raw = path.split(".")[0].lstrip("#")
             try:
@@ -7631,7 +7723,7 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
 
     文件怎么分：
     - 写具体文件名：这个任务就锁定这一份（或一组）。文件是任务的天然边界——不同子代理写不同
-      文件的 doub_content 不会互相覆盖；同一个文件要拆就用 indexes 切区间，但两边别碰同一条。
+      文件的 proofread_comment 不会互相覆盖；同一个文件要拆就用 indexes 切区间，但两边别碰同一条。
     - 写 "*"（SUBAGENT_FILE_ALL）：**自动均分**——本批里同角色的每个 "*" 任务平分该角色的全部
       文件（校对=缓存文件，原文探索=原文文件）。派 16 个 "*"、项目 256 个缓存文件 → 每个 16 个；
       除不尽时前面的多一个。已经在别处点名过的文件不会再分给 "*"。
@@ -7832,12 +7924,12 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
         results.append(out)
     total_doubts = sum(len(row.get("doubts") or []) for row in results)
     note = (
-        "子代理的校对意见已写进各条缓存的 doub_content：按上面每项的 file 与 index 用 "
+        "子代理的校对意见已写进各条缓存的 proofread_comment：按上面每项的 file 与 index 用 "
         "read_transl_cache 读那些条目，改完译文（pre_dst）后再用 patch_transl_cache 把该条的 "
-        "doub_content 清空，表示已处理。"
+        "proofread_comment 清空，表示已处理。"
     )
     if total_doubts == 0:
-        note = "这批子代理没有提出任何疑问（没有条目被写入 doub_content）。"
+        note = "这批子代理没有提出任何疑问（没有条目被写入 proofread_comment）。"
     if skipped:
         note += f" 另有 {skipped} 个任务因文件不够分被跳过，实际派出 {len(results)} 个。"
     if split_notes:

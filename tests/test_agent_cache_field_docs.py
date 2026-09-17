@@ -61,14 +61,14 @@ class CacheFieldCoverageTests(unittest.TestCase):
                 _normalize_cache_fields({"fields": [name]})
         # 写：可改 pre_dst / proofread_dst + 校对意见（trans_by 由 patch_transl_cache 自动打标记，
         # 模型指定不了）
-        self.assertEqual(_patchable_fields_text(), "pre_dst / proofread_dst / doub_content")
+        self.assertEqual(_patchable_fields_text(), "pre_dst / proofread_dst / proofread_comment")
 
-    def test_doub_content_is_part_of_the_agent_surface(self) -> None:
-        """doub_content 是校对子代理的产物，主 Agent 必须读得到、也要能改（写过之后清掉）。"""
-        self.assertIn("doub_content", CACHE_ENTRY_FIELDS)
-        self.assertIn("doub_content", CACHE_ENTRY_FIELDS_DEFAULT)
-        self.assertIn("doub_content", CACHE_ENTRY_FIELD_DESCRIPTIONS)
-        self.assertIn("doub_content", _normalize_cache_fields({"fields": ["doub_content"]}))
+    def test_proofread_comment_is_part_of_the_agent_surface(self) -> None:
+        """proofread_comment 是校对子代理的产物，主 Agent 必须读得到、也要能改（写过之后清掉）。"""
+        self.assertIn("proofread_comment", CACHE_ENTRY_FIELDS)
+        self.assertIn("proofread_comment", CACHE_ENTRY_FIELDS_DEFAULT)
+        self.assertIn("proofread_comment", CACHE_ENTRY_FIELD_DESCRIPTIONS)
+        self.assertIn("proofread_comment", _normalize_cache_fields({"fields": ["proofread_comment"]}))
 
     def test_removed_fields_are_not_in_the_prompt(self) -> None:
         prompt = _build_system_prompt(_state())
