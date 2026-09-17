@@ -3,10 +3,11 @@
 Agent 侧的 search_transl_cache 带 context 后，真正拼上下文的是服务端——这里起一个真的
 ThreadingHTTPServer，用真缓存文件走 HTTP，把这几条锁住：
 
-- context=0（默认）返回体与老版本一致（不带 in_context/context/returned 字段）；
+- context=0（默认）不带 in_context/context/returned 字段（offset 除外：翻页是独立维度）；
 - context=N 时命中 in_context=false、扩展出来的前后文 true，且重叠区间去重；
+- preceding_only=true 时只扩展命中**上面**的句子（Agent 默认；界面不传，仍给两边）；
 - 命中上限只算命中本身（前后文不占配额），total 始终是全部命中数；
-- context 非法 → 400。
+- offset 跳过前 N 条命中（翻页），total 照实报；context/offset 非法 → 400。
 """
 
 import json
@@ -81,6 +82,7 @@ class CacheSearchContextTests(unittest.TestCase):
             self.assertNotIn("in_context", item)
         self.assertNotIn("context", out)
         self.assertNotIn("returned", out)
+        self.assertEqual(out["offset"], 0)  # 翻页字段与 context 无关，默认就有
 
     def test_context_expands_around_hits_and_dedupes(self) -> None:
         out = self._search(context=2)
@@ -97,6 +99,17 @@ class CacheSearchContextTests(unittest.TestCase):
         self.assertTrue(by_index[4]["match_src"])
         self.assertEqual(out["total"], 2)  # total 仍是命中数
 
+    def test_preceding_only_gives_the_lines_above(self) -> None:
+        """preceding_only=true：只带命中上面的句子（Agent 默认这么用，省 token）。"""
+        out = self._search(context=2, preceding_only=True)
+
+        self.assertEqual(out["context"], 2)
+        self.assertEqual(out["returned_hits"], 2)
+        # 命中 4、5，各取上文 2 句 → 2~5 去重后 4 行
+        self.assertEqual([r["index"] for r in out["results"]], [2, 3, 4, 5])
+        self.assertEqual(out["returned"], 4)
+        self.assertEqual(out["total"], 2)
+
     def test_context_clipped_at_file_edges(self) -> None:
         out = self._search(query="JP1", context=3)
         self.assertEqual([r["index"] for r in out["results"]], [1, 2, 3, 4])
@@ -107,6 +120,23 @@ class CacheSearchContextTests(unittest.TestCase):
         self.assertEqual(out["returned_hits"], 1)
         self.assertEqual(out["total"], 2)  # 总命中数照实报
         self.assertEqual([r["index"] for r in out["results"]], [3, 4, 5])
+
+    def test_offset_skips_hits_and_total_stays_honest(self) -> None:
+        """翻页：offset=1 跳过第 1 条命中，本页给第 2 条（含它的上下文），total 不变。"""
+        out = self._search(context=1, max_results=1, offset=1)
+
+        self.assertEqual(out["offset"], 1)
+        self.assertEqual(out["total"], 2)
+        self.assertEqual(out["returned_hits"], 1)
+        self.assertEqual([r["index"] for r in out["results"]], [4, 5, 6])
+
+    def test_offset_defaults_to_zero(self) -> None:
+        self.assertEqual(self._search()["offset"], 0)
+
+    def test_invalid_offset_is_rejected(self) -> None:
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._search(offset="abc")
+        self.assertEqual(ctx.exception.code, 400)
 
     def test_invalid_context_is_rejected(self) -> None:
         with self.assertRaises(urllib.error.HTTPError) as ctx:

@@ -1,8 +1,8 @@
 """search_input 工具：在待翻译原文里搜关键词/说话人（search_transl_cache 的原文侧对应）。
 
-与 search_transl_cache 共用一套用法与精简规则（context 收紧上限、逐行命中标记收成顶层
-matched_in、in_context 只留 true），所以这里钉的是"发出去的请求对不对、回来的东西有没有
-被按同一套规则收拾过"，以及参数校验与 0 命中的兜底提示。
+与 search_transl_cache 共用一套用法与精简规则（context 收紧上限且默认只给上文、逐行命中
+标记收成顶层 matched_in、in_context 删掉改成上下文行 index 带 *），所以这里钉的是"发出去的
+请求对不对、回来的东西有没有被按同一套规则收拾过"，以及参数校验与 0 命中的兜底提示。
 """
 
 import unittest
@@ -66,10 +66,19 @@ class SearchInputRequestTests(unittest.TestCase):
         _, body = runner.posts[0]
         self.assertEqual(body["context"], 2)
         self.assertEqual(body["filename"], "a.json")
+        self.assertTrue(body["preceding_only"])  # 默认只给上文（省 token）
+
+    def test_only_preceding_false_omits_the_flag(self):
+        runner = _SearchRunner()
+
+        _tool_search_input(runner, {"query": "アリス", "context": 2, "only_preceding": False})
+
+        _, body = runner.posts[0]
+        self.assertNotIn("preceding_only", body)  # 服务端默认两边都给
 
     def test_hit_cap_tightens_with_context(self):
-        """命中 × (2N+1) 行一起返回：带上下文时收紧上限，没带时给 100 条。"""
-        for context, expected in ((0, 100), (1, 100), (3, 42), (20, 7)):
+        """每条命中搭 N 行上文：整页压在 200 行内，没带上下文时给 100 条。"""
+        for context, expected in ((0, 100), (1, 100), (3, 50), (20, 9)):
             runner = _SearchRunner()
             args = {"query": "x"}
             if context:
@@ -81,6 +90,32 @@ class SearchInputRequestTests(unittest.TestCase):
         runner = _SearchRunner()
         _tool_search_input(runner, {"query": "x"})
         self.assertEqual(runner.posts[0][1]["field"], "all")
+
+
+class SearchInputPagingTests(unittest.TestCase):
+    """与 search_transl_cache 同一套分页：limit 是本页命中数、offset 跳过前 N 条命中。"""
+
+    def test_limit_and_offset_are_forwarded_and_reported(self):
+        runner = _SearchRunner(response={"results": [_row(match_src=True)], "total": 7})
+
+        result = _tool_search_input(runner, {"query": "x", "limit": 3, "offset": 2})
+
+        _, body = runner.posts[0]
+        self.assertEqual(body["max_results"], 3)
+        self.assertEqual(body["offset"], 2)
+        self.assertEqual(result["offset"], 2)
+        self.assertEqual(result["returned"], 1)  # 本页命中数
+        self.assertTrue(result["has_more"])
+
+    def test_default_page_stays_100_without_offset_key(self):
+        runner = _SearchRunner(response={"results": [_row(match_src=True)], "total": 1})
+
+        result = _tool_search_input(runner, {"query": "x"})
+
+        _, body = runner.posts[0]
+        self.assertEqual(body["max_results"], 100)
+        self.assertNotIn("offset", body)  # 不翻页就不发这个键
+        self.assertFalse(result["has_more"])
 
 
 class SearchInputArgumentTests(unittest.TestCase):

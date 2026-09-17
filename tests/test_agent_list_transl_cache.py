@@ -36,17 +36,14 @@ class ListTranslCacheEntriesTests(unittest.TestCase):
         # 真实的空缓存要如实报 0，而不是把字段整个丢掉
         self.assertEqual(result["cache_files"][0]["entries"], 0)
 
-    def test_incremental_log_has_no_entries_field(self) -> None:
+    def test_incremental_log_is_not_listed(self) -> None:
         runner = _Runner([
             {"name": "a.json", "is_file": True, "size": 10, "entry_count": 5},
-            {"name": "a.json.append.jsonl", "is_file": True, "size": 20},  # 后端不统计条目数
+            {"name": "a.json.append.jsonl", "is_file": True, "size": 20},  # 后端照旧会返回它
         ])
         result = _tool_list_transl_cache(runner, {})
-        by_name = {f["name"]: f for f in result["cache_files"]}
-        # .append.jsonl 没有条目数，不能伪装成 entries: 0
-        self.assertNotIn("entries", by_name["a.json.append.jsonl"])
-        self.assertEqual(by_name["a.json.append.jsonl"]["status"], "translating")
-        self.assertEqual(result["translating"], 1)
+        # 增量日志不是可读的缓存：不进清单（模型看不到它，也就不会去读）
+        self.assertEqual([f["name"] for f in result["cache_files"]], ["a.json"])
 
 
 if __name__ == "__main__":

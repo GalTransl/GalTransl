@@ -13,6 +13,7 @@ from GalTransl.Agent.runtime import (
     _render_tool_result_table,
     _tool_list_input_files,
     _tool_read_transl_cache,
+    _tool_search_transl_cache,
 )
 
 
@@ -38,23 +39,21 @@ class ListTranslCacheMdTests(unittest.TestCase):
         result = {
             "cache_files": [
                 {"name": "a.json", "size": 10, "entries": 45},
-                {"name": "b.append.jsonl", "size": 20, "status": "translating"},  # 增量日志没有 entries
+                {"name": "b.json", "size": 20},  # 没有 entries 的只有 size 一列
             ],
             "count": 2,
             "returned": 2,
             "sampled": False,
-            "translating": 1,
-            "note": "有 1 个 .append.jsonl 增量缓存文件，说明对应文件正在翻译中。",
+            "note": "清单按名字均匀采样。",
         }
 
         text = _render_tool_result_table("list_transl_cache", result)
 
         self.assertIn("共 2 个缓存文件", text)
-        self.assertIn("1 个正在翻译", text)
-        self.assertIn("备注：有 1 个 .append.jsonl", text)
+        self.assertIn("备注：清单按名字均匀采样。", text)
         rows = _table_rows(text, "name")
-        self.assertEqual(rows[0], ["a.json", "10", "45", ""])  # 没有的列就是空单元格
-        self.assertEqual(rows[1], ["b.append.jsonl", "20", "", "translating"])
+        self.assertEqual(rows[0], ["a.json", "10", "45"])
+        self.assertEqual(rows[1], ["b.json", "20", ""])  # 没有的列就是空单元格
 
     def test_sampled_state_is_said_in_words(self):
         result = {
@@ -165,6 +164,7 @@ class ReadTranslCacheMdTests(unittest.TestCase):
             "count": 3,
             "returned": 3,
             "context": 2,
+            "only_preceding": True,
             "majority_trans_by": "demo-model",
             "fields": ["index", "post_src", "pre_dst", "trans_by"],
             "entries": [
@@ -178,19 +178,19 @@ class ReadTranslCacheMdTests(unittest.TestCase):
 
         self.assertIn("文件 a.json", text)
         self.assertIn("共 3 条，显示 3 条", text)
-        self.assertIn("含上下文（点名的条目前后各 2 句）", text)
+        self.assertIn("含上文（点名条目前面 2 句", text)
+        self.assertIn("index 带 * 的是上下文行", text)
         self.assertIn("多数派模型 demo-model", text)
         rows = _table_rows(text, "index")
         # trans_by 多数派已删（空单元格），少数派逐行保留
         self.assertEqual(rows[0][3], "")
         self.assertEqual(rows[1][3], "deepseek-chat")
 
-    def test_warning_and_fields_note_are_written_as_text(self):
+    def test_fields_note_is_written_as_text(self):
         result = {
-            "filename": "a.append.jsonl",
+            "filename": "a.json",
             "count": 1,
             "returned": 1,
-            "warning": "这是翻译中的增量缓存文件",
             "fields_note": "默认精简字段",
             "fields": ["index", "pre_dst"],
             "entries": [{"index": 1, "pre_dst": "x"}],
@@ -198,8 +198,91 @@ class ReadTranslCacheMdTests(unittest.TestCase):
 
         text = _render_tool_result_table("read_transl_cache", result)
 
-        self.assertIn("警告：这是翻译中的增量缓存文件", text)
         self.assertIn("字段说明：默认精简字段", text)
+
+
+class SearchMdTests(unittest.TestCase):
+    """搜索类工具（search_transl_cache / search_input）：命中数、上下文、命中分布写成文字，
+    命中行进表格（两侧列不一样）；上下文行靠 index 上的 * 区分（表头里说明一句）。"""
+
+    def test_cache_search_table_matched_in_and_majority(self):
+        result = {
+            "results": [
+                {"filename": "a.json", "index": 12, "speaker": "少女", "post_src": "ドルードだ", "pre_dst": "多鲁德", "problem": ""},
+                {"filename": "a.json", "index": 13, "speaker": "", "post_src": "ドルード？", "pre_dst": "杜罗德？", "problem": "残留日文"},
+            ],
+            "total": 2,
+            "matched_in": {"src": 2, "dst": 1},
+            "majority_trans_by": "demo-model",
+            "note": "已带上下文：每条命中前后各 1 句。",
+        }
+
+        text = _render_tool_result_table("search_transl_cache", result)
+
+        self.assertIn("共 2 条命中", text)
+        self.assertIn("命中分布：src 2、dst 1", text)
+        self.assertIn("多数派模型 demo-model（表里已省略，只留少数派/改过的来源）", text)
+        self.assertIn("备注：已带上下文", text)
+        rows = _table_rows(text, "filename")
+        self.assertEqual(rows[0], ["a.json", "12", "少女", "ドルードだ", "多鲁德", "", ""])
+        self.assertEqual(rows[1][5], "残留日文")
+
+    def test_cache_search_context_and_paging_are_said_in_words(self):
+        result = {
+            "results": [
+                {"filename": "a.json", "index": "1*", "speaker": "", "post_src": "行1", "pre_dst": "", "problem": ""},
+                {"filename": "a.json", "index": 2, "speaker": "", "post_src": "行2", "pre_dst": "", "problem": ""},
+            ],
+            "total": 30,
+            "context": 1,
+            "only_preceding": True,
+            "offset": 0,
+            "returned": 1,  # 命中数
+            "returned_rows": 2,  # 1 条命中 + 上文 1 句
+            "has_more": True,
+        }
+
+        text = _render_tool_result_table("search_transl_cache", result)
+
+        self.assertIn("含上文（每条命中前面 1 句", text)
+        self.assertIn("本页 1 条命中、含前后文共 2 行、还有更多（用 offset 翻页）", text)
+        self.assertEqual([row[1] for row in _table_rows(text, "filename")], ["1*", "2"])
+
+    def test_second_page_says_where_it_starts(self):
+        result = {
+            "results": [{"filename": "a.json", "index": 9, "speaker": "", "post_src": "行9", "pre_dst": "", "problem": ""}],
+            "total": 30,
+            "offset": 100,
+            "returned": 1,
+            "has_more": False,
+        }
+
+        text = _render_tool_result_table("search_transl_cache", result)
+
+        self.assertIn("本页 1 条命中（offset=100）", text)
+        self.assertNotIn("还有更多", text)
+
+    def test_input_search_uses_src_column_and_reports_failed_files(self):
+        result = {
+            "results": [{"filename": "a.txt", "index": 3, "speaker": "少女", "src": "おはよう"}],
+            "total": 1,
+            "files_failed": ["b.txt"],
+        }
+
+        text = _render_tool_result_table("search_input", result)
+
+        self.assertIn("共 1 条命中", text)
+        self.assertIn("这些输入文件解析失败、没参与搜索：b.txt", text)
+        self.assertEqual(_table_rows(text, "filename"), [["a.txt", "3", "少女", "おはよう"]])
+
+    def test_zero_hits_still_says_zero(self):
+        # 0 命中也要留下一行文字：渲染出空串会让工具结果整个变空
+        text = _render_tool_result_table(
+            "search_transl_cache", {"results": [], "total": 0, "returned": 0, "has_more": False}
+        )
+
+        self.assertIn("共 0 条命中", text)
+        self.assertIn("本页 0 条命中", text)
 
 
 class ManageProblemFilterMdTests(unittest.TestCase):
@@ -270,10 +353,41 @@ class HandlerPipelineTests(unittest.TestCase):
         self.assertIn("| index |", text)
         self.assertIn("| 1 | 少女 | ドルードだ | 多鲁德 |", text)
 
+    def test_search_transl_cache_end_to_end(self):
+        class _Runner:
+            state = SimpleNamespace(config_file_name="config.yaml", project_dir=r"C:\proj")
+
+            def _project_id(self):
+                return "proj"
+
+            def _http_post(self, _url, _body):
+                return {
+                    "results": [
+                        {
+                            "filename": "a.json",
+                            "index": 7,
+                            "speaker": "少女",
+                            "post_src": "ドルード",
+                            "pre_dst": "多鲁德",
+                            "trans_by": "demo-model",
+                        }
+                    ],
+                    "total": 1,
+                }
+
+        result = _tool_search_transl_cache(_Runner(), {"query": "ドルード"})
+
+        self.assertIsInstance(result, dict)
+        text = _render_tool_result_table("search_transl_cache", result)
+        self.assertIn("共 1 条命中", text)
+        # 唯一的 trans_by 就是多数派：整列省略，只在表头记一次
+        self.assertIn("多数派模型 demo-model", text)
+        self.assertIn("| a.json | 7 | 少女 | ドルード | 多鲁德 |  |  |", text)
+
 
 class DispatcherTests(unittest.TestCase):
     def test_unknown_tool_and_non_dict_fall_back_to_json(self):
-        self.assertIsNone(_render_tool_result_table("search_transl_cache", {"results": []}))
+        self.assertIsNone(_render_tool_result_table("get_name_table", {"results": []}))
         self.assertIsNone(_render_tool_result_table("list_problems", "不是 dict"))
 
     def test_active_renderer_set_covers_exactly_the_listed_tools(self):
@@ -285,6 +399,8 @@ class DispatcherTests(unittest.TestCase):
                 "list_problems",
                 "read_input_file",
                 "read_transl_cache",
+                "search_transl_cache",
+                "search_input",
                 "manage_problem_filter",
             },
         )

@@ -579,6 +579,18 @@ def _load_input_file_entries(project_dir: str, config_file_name: str, filename: 
     return _normalize_input_entries(plugin_object.load_file(file_path), fname)
 
 
+def _parse_search_offset(payload: dict[str, Any]) -> int:
+    """搜索翻页的 offset：跳过前 N 条命中（前后文行不算）。
+
+    非法值抛 ValueError 由调用方转 400——与 context 的校验风格一致：翻页跳错位置会静默
+    丢掉一批命中，宁可当场报错。
+    """
+    try:
+        return max(0, int(payload.get("offset", 0) or 0))
+    except (TypeError, ValueError):
+        raise ValueError("offset must be a non-negative integer")
+
+
 def _search_input_dir(
     project_dir: str,
     config_file_name: str,
@@ -588,12 +600,16 @@ def _search_input_dir(
     filename: str = "",
     context: int = 0,
     max_results: int = 500,
+    offset: int = 0,
+    only_preceding: bool = False,
     pattern: Any = None,
 ) -> dict[str, Any]:
     """在待翻译原文里搜关键词（Agent 的 search_input 用）。
 
     与 /cache/search 同一套语义：命中上限只算命中本身（前后文是搭着给的，不占配额）、
-    context 是"顺带带出来的前后文"、total 照实报全部命中数。区别只在搜的对象——原文要过
+    context 是"顺带带出来的前后文"、only_preceding 只给上文（Agent 默认开，省 token；
+    界面那边不传，仍给两边）、total 照实报全部命中数、offset 是跳过的命中数
+    （翻页用，跳过的那几条命中连同它们的上下文都不带）。区别只在搜的对象——原文要过
     文件插件解析（见 _load_input_file_entries），每次搜索都得把涉及的输入文件读一遍，
     所以比搜缓存慢，这也正是 filename 参数的意义。
 
@@ -641,6 +657,10 @@ def _search_input_dir(
                 if field == "all" and not match_src and not match_name:
                     continue
                 total_matches += 1
+                if total_matches <= offset:
+                    # 翻页：跳过前 offset 条命中——它们不再作为"命中"出现（相邻命中的
+                    # 上下文窗口里仍可能把它当上下文带出来，这种行没有命中标记）
+                    continue
                 if hits_included + len(matched_positions) < max_results:
                     matched_positions.append(pos)
                     match_flags[pos] = {"match_src": match_src, "match_name": match_name}
@@ -648,8 +668,9 @@ def _search_input_dir(
                 continue
             wanted: set[int] = set(matched_positions)
             if context > 0:
+                after = 0 if only_preceding else context
                 for pos in matched_positions:
-                    for j in range(pos - context, pos + context + 1):
+                    for j in range(pos - context, pos + after + 1):
                         if 0 <= j < len(entries):
                             wanted.add(j)
             for pos in sorted(wanted):
@@ -665,7 +686,7 @@ def _search_input_dir(
                 }
                 results.append(item)
             hits_included += len(matched_positions)
-    out: dict[str, Any] = {"results": results, "total": total_matches}
+    out: dict[str, Any] = {"results": results, "total": total_matches, "offset": offset}
     if context > 0:
         out.update({"context": context, "returned_hits": hits_included, "returned": len(results)})
     if files_failed:
@@ -1346,6 +1367,11 @@ def build_handler(registry: JobRegistry):
                             status=HTTPStatus.BAD_REQUEST,
                         )
                         return
+                    try:
+                        offset = _parse_search_offset(payload)
+                    except ValueError as exc:
+                        self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                        return
                     result = _search_input_dir(
                         project_dir,
                         str(payload.get("config_file_name", "config.yaml") or "config.yaml"),
@@ -1354,6 +1380,8 @@ def build_handler(registry: JobRegistry):
                         filename=str(payload.get("filename", "")).strip(),
                         context=context,
                         max_results=min(int(payload.get("max_results", 500) or 500), 2000),
+                        offset=offset,
+                        only_preceding=bool(payload.get("preceding_only", False)),
                         pattern=pattern,
                     )
                     self._send_json(result)
@@ -1651,6 +1679,13 @@ def build_handler(registry: JobRegistry):
                             status=HTTPStatus.BAD_REQUEST,
                         )
                         return
+                    try:
+                        offset = _parse_search_offset(payload)
+                    except ValueError as exc:
+                        self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    # preceding_only：只带上文（Agent 默认开，省 token）；不传/给 false 就两边都给
+                    only_preceding = bool(payload.get("preceding_only", False))
                     results = []
                     total_matches = 0
                     hits_included = 0
@@ -1693,6 +1728,10 @@ def build_handler(registry: JobRegistry):
                                     if field == "all" and not match_src and not match_dst and not match_problem:
                                         continue
                                     total_matches += 1
+                                    if total_matches <= offset:
+                                        # 翻页：跳过前 offset 条命中——它们不再作为"命中"
+                                        # 出现（相邻命中的上下文窗口里仍可能带出，那种行没标记）
+                                        continue
                                     # 命中上限只算命中本身（前后文是搭着给的，不占配额），
                                     # 否则稠密命中下上下文会把后面的命中挤掉。
                                     if hits_included + len(matched_positions) < max_results:
@@ -1706,8 +1745,9 @@ def build_handler(registry: JobRegistry):
                                     continue
                                 wanted: set[int] = set(matched_positions)
                                 if context > 0:
+                                    after = 0 if only_preceding else context
                                     for pos in matched_positions:
-                                        for j in range(pos - context, pos + context + 1):
+                                        for j in range(pos - context, pos + after + 1):
                                             if 0 <= j < len(entries):
                                                 wanted.add(j)
                                 for pos in sorted(wanted):
@@ -1728,7 +1768,9 @@ def build_handler(registry: JobRegistry):
                                 hits_included += len(matched_positions)
                             except Exception:
                                 continue
-                    payload_out: dict[str, Any] = {"results": results, "total": total_matches}
+                    payload_out: dict[str, Any] = {
+                        "results": results, "total": total_matches, "offset": offset,
+                    }
                     if context > 0:
                         payload_out.update({
                             "context": context,

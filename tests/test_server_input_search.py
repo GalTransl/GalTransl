@@ -130,6 +130,18 @@ class InputSearchTests(unittest.TestCase):
         self.assertEqual(out["returned_hits"], 3)
         self.assertEqual(out["returned"], 5)
 
+    def test_preceding_only_gives_the_lines_above(self):
+        """only_preceding=True：只带命中上面的句子（Agent 默认这么用，省 token）。"""
+        out = self._search(field="src", context=1, only_preceding=True)
+
+        self.assertEqual(out["returned_hits"], 3)
+        # 命中 a.json#2、a.json#3、b.json#1：各带上一句；b.json 只有一条，前面没有
+        self.assertEqual(
+            [(r["filename"], r["index"]) for r in out["results"]],
+            [("a.json", 1), ("a.json", 2), ("a.json", 3), ("b.json", 1)],
+        )
+        self.assertEqual(out["total"], 3)
+
     def test_context_is_clipped_at_file_edges(self):
         out = self._search(field="src", filename="b.json", context=3)
         self.assertEqual([r["index"] for r in out["results"]], [1])  # b.json 只有一条
@@ -157,6 +169,37 @@ class InputSearchTests(unittest.TestCase):
         self.assertEqual(
             [(r["filename"], r["index"]) for r in out["results"]], [("a.json", 1), ("a.json", 2), ("a.json", 3)]
         )
+
+    # ---- 翻页 ----
+
+    def test_offset_skips_hits_and_total_stays_honest(self):
+        out = self._search(field="src", max_results=1, offset=1)
+
+        self.assertEqual(out["offset"], 1)
+        self.assertEqual(out["total"], 3)  # 全部命中数照实报
+        # 跳过第 1 条命中（a.json#2），本页给第 2 条（a.json#3）
+        self.assertEqual([(r["filename"], r["index"]) for r in out["results"]], [("a.json", 3)])
+
+    def test_skipped_hit_is_not_marked_as_a_hit(self):
+        """被跳过的命中不再作为命中出现；相邻命中的上下文窗口里它可能作为上下文行再来一次。"""
+        out = self._search(field="src", context=1, max_results=1, offset=1)
+
+        self.assertEqual(out["offset"], 1)
+        self.assertEqual(out["returned_hits"], 1)  # 本页只有第 2 条命中
+        by_key = {(r["filename"], r["index"]): r for r in out["results"]}
+        self.assertFalse(by_key[("a.json", 2)]["match_src"])  # 第 1 条命中已被跳过
+        self.assertTrue(by_key[("a.json", 3)]["match_src"])
+
+    def test_offset_beyond_the_last_hit_gives_an_empty_page(self):
+        out = self._search(field="src", offset=99)
+
+        self.assertEqual(out["results"], [])
+        self.assertEqual(out["offset"], 99)  # 页码照实回，便于判断翻过头了
+        self.assertEqual(out["total"], 3)
+
+    def test_offset_defaults_to_zero_and_is_always_reported(self):
+        out = self._search(field="src")
+        self.assertEqual(out["offset"], 0)
 
 
 if __name__ == "__main__":

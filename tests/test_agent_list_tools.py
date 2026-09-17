@@ -121,7 +121,7 @@ class ListTranslCacheTests(unittest.TestCase):
         for item in result["cache_files"]:
             self.assertTrue(item["name"].startswith("sc_1"))
 
-    def test_entry_counts_and_translating_status_survive(self):
+    def test_entry_counts_survive_and_incremental_logs_are_filtered(self):
         runner = _ListRunner(
             cache_files=[
                 {"name": "a.json", "size": 1, "entry_count": 0},
@@ -132,23 +132,19 @@ class ListTranslCacheTests(unittest.TestCase):
         result = _tool_list_transl_cache(runner, {})
 
         by_name = {f["name"]: f for f in result["cache_files"]}
+        self.assertEqual(list(by_name), ["a.json"])  # 增量日志不进清单
+        self.assertEqual(result["count"], 1)
         self.assertEqual(by_name["a.json"]["entries"], 0)  # 0 条也要如实给
-        self.assertNotIn("entries", by_name["b.append.jsonl"])  # 增量日志不统计条目数
-        self.assertEqual(by_name["b.append.jsonl"]["status"], "translating")
-        self.assertEqual(result["translating"], 1)
-        self.assertIn("正在翻译中", result["note"])
+        self.assertNotIn("status", by_name["a.json"])
+        self.assertNotIn("translating", result)
 
-    def test_translating_count_follows_the_grep_filter(self):
-        runner = _ListRunner(
-            cache_files=[
-                {"name": "sc_1.json", "size": 1, "entry_count": 1},
-                {"name": "sc_2.append.jsonl", "size": 1},
-            ]
-        )
+    def test_grep_cannot_bring_back_incremental_logs(self):
+        runner = _ListRunner(cache_files=[{"name": "sc_2.append.jsonl", "size": 1}])
 
-        result = _tool_list_transl_cache(runner, {"grep": "sc_1"})
+        result = _tool_list_transl_cache(runner, {"grep": "sc_2"})
 
-        self.assertNotIn("translating", result)  # 命中的那个不是增量文件
+        self.assertEqual(result["cache_files"], [])
+        self.assertEqual(result["count"], 0)
 
     def test_limit_is_clamped_and_validated(self):
         runner = _ListRunner(cache_files=_cache_files(600))

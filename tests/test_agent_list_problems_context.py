@@ -1,9 +1,10 @@
-"""list_problems 的 context：每条问题在表里并上前后文（语义同 read_transl_cache）。
+"""list_problems 的 context：每条问题在表里并上 N 句上文（语义同 read_transl_cache）。
 
-问题行自己往往看不出"为什么有问题"——修「残留日文」「译名不一致」要看着前后文才敢动手，
-逐条 read_transl_cache 又太碎。上下文行与问题行**不做任何标注**：上下文行的 problem 列
-空着，一眼即知；同一文件相邻问题的窗口合并；returned 只数问题行；缓存取不到的文件只少带
-上下文、问题行照给。
+问题行自己往往看不出"为什么有问题"——修「残留日文」「译名不一致」要看着上文才敢动手，
+逐条 read_transl_cache 又太碎。默认只给上文（only_preceding，省 token），传 false 才前后
+都给。上下文行的 index 带 *（如 4*）：它没有 problem 字段，又和问题行混排在同一张表里，
+得有个一眼认得出的标记。同一文件相邻问题的窗口合并；returned 只数问题行；缓存取不到的
+文件只少带上下文、问题行照给。
 """
 
 import unittest
@@ -69,7 +70,7 @@ def _entry(index, name="雪菜", src=None, dst=None):
 
 
 class ContextMergeTests(unittest.TestCase):
-    def test_context_rows_are_merged_around_problem_rows(self):
+    def test_context_rows_come_from_above_and_carry_a_star(self):
         runner = _Runner(
             [_problem("a.json", 5)],
             {"a.json": [_entry(i) for i in range(1, 9)]},
@@ -79,18 +80,28 @@ class ContextMergeTests(unittest.TestCase):
 
         self.assertEqual(out["returned"], 1)  # 只数问题行
         rows = out["problems"]
-        self.assertEqual([r["index"] for r in rows], [3, 4, 5, 6, 7])
-        # 区分方式只有一个：上下文行没有 problem 字段
+        # 默认只给上文：5 前面 2 句 → 3、4；上下文行的 index 带 *
+        self.assertEqual([r["index"] for r in rows], ["3*", "4*", 5])
         self.assertEqual(rows[2]["problem"], "残留日文")
-        for r in (rows[0], rows[1], rows[3], rows[4]):
+        for r in rows[:2]:
             self.assertNotIn("problem", r)
             self.assertNotIn("trans_by", r)
-        # 返回里没有任何上下文相关的标注/提示
-        for gone in ("context", "context_rows", "note", "in_context"):
-            self.assertNotIn(gone, out)
+        self.assertEqual(out["context"], 2)
+        self.assertTrue(out["only_preceding"])
+        self.assertNotIn("in_context", out)
+
+    def test_only_preceding_false_gives_both_sides(self):
+        runner = _Runner([_problem("a.json", 5)], {"a.json": [_entry(i) for i in range(1, 9)]})
+
+        out = _tool_list_problems(
+            runner, {"problem_type": "残留日文", "context": 2, "only_preceding": False}
+        )
+
+        self.assertFalse(out["only_preceding"])
+        self.assertEqual([r["index"] for r in out["problems"]], ["3*", "4*", 5, "6*", "7*"])
 
     def test_overlapping_windows_are_merged(self):
-        # 相邻两条问题（5、6）：窗口 3-7 与 4-8 合并成 3-8，上下文行不重复
+        # 相邻两条问题（5、6）：上文窗口 3-5 与 4-6 合并成 3-6，上下文行不重复
         runner = _Runner(
             [_problem("a.json", 5), _problem("a.json", 6)],
             {"a.json": [_entry(i) for i in range(1, 11)]},
@@ -99,7 +110,7 @@ class ContextMergeTests(unittest.TestCase):
         out = _tool_list_problems(runner, {"problem_type": "残留日文", "context": 2})
 
         self.assertEqual(out["returned"], 2)
-        self.assertEqual([r["index"] for r in out["problems"]], [3, 4, 5, 6, 7, 8])
+        self.assertEqual([r["index"] for r in out["problems"]], ["3*", "4*", 5, 6])
         problem_rows = [r["index"] for r in out["problems"] if r.get("problem")]
         self.assertEqual(problem_rows, [5, 6])
 
@@ -115,8 +126,10 @@ class ContextMergeTests(unittest.TestCase):
         out = _tool_list_problems(runner, {"problem_type": "残留日文", "context": 1})
 
         rows = out["problems"]
-        self.assertEqual([(r["filename"], r["index"]) for r in rows][:2], [("a.json", 4), ("a.json", 5)])
-        self.assertEqual([(r["filename"], r["index"]) for r in rows][-2:], [("b.json", 20), ("b.json", 21)])
+        self.assertEqual(
+            [(r["filename"], r["index"]) for r in rows],
+            [("a.json", "4*"), ("a.json", 5), ("b.json", "19*"), ("b.json", 20)],
+        )
         self.assertEqual(runner.cache_calls, ["a.json", "b.json"])  # 每个文件只取一次
 
     def test_context_rows_fall_back_to_old_cache_keys(self):
@@ -172,13 +185,13 @@ class ContextMergeTests(unittest.TestCase):
 
     def test_oversized_context_is_clamped(self):
         # 超上限不是报错而是收到 5（比 read/search 的 20 收得更紧：一页最多 20 条问题，
-        # 每条再带 2N 句前后文，返回体得收得住）
+        # 每条再带上文，返回体得收得住）
         runner = _Runner([_problem("a.json", 5)], {"a.json": [_entry(i) for i in range(1, 9)]})
 
         out = _tool_list_problems(runner, {"problem_type": "残留日文", "context": 99})
 
         rows = out["problems"]
-        self.assertEqual([r["index"] for r in rows], [1, 2, 3, 4, 5, 6, 7, 8])  # 整个缓存都成了上下文
+        self.assertEqual([r["index"] for r in rows], ["1*", "2*", "3*", "4*", 5])  # 收到的 5 句上文
         self.assertEqual(sum(1 for r in rows if r.get("problem")), 1)
 
     def test_default_limit_is_10_capped_at_20(self):
@@ -212,9 +225,11 @@ class MarkdownRenderTests(unittest.TestCase):
 
         rendered = _md_render_list_problems(out)
 
-        self.assertIn("| a.json | 4 | 雪菜 | 原文4 | 译文4 |  |  |", rendered)  # 上下文行：problem 列为空
+        # 上下文行：index 带 *、problem 列为空
+        self.assertIn("| a.json | 4* | 雪菜 | 原文4 | 译文4 |  |  |", rendered)
         self.assertIn("| a.json | 5 | 雪菜 | 原文5 | 译文5 | 残留日文 |  |", rendered)
-        self.assertNotIn("含上下文", rendered)  # 不加任何说明
+        self.assertIn("含上文（每条问题前面 1 句", rendered)
+        self.assertIn("index 带 * 的是上下文行", rendered)
         self.assertNotIn("备注", rendered)
 
     def test_rendered_without_context_has_no_context_head(self):
@@ -224,6 +239,7 @@ class MarkdownRenderTests(unittest.TestCase):
         rendered = _md_render_list_problems(out)
 
         self.assertNotIn("含上下文", rendered)
+        self.assertNotIn("含上文", rendered)
 
 
 if __name__ == "__main__":
