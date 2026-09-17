@@ -308,8 +308,8 @@ type SubagentRun = {
   retry?: { attempt: number; maxAttempts: number; code?: string; reason?: string };
   turns?: number;
   toolCalls?: number;
-  /** 写了几条校对意见 */
-  doubts?: number;
+  /** 写了几条校对批注（proofread_comment） */
+  proofreadComment?: number;
   report?: string;
   error?: string;
 };
@@ -735,7 +735,9 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
         run.report = ev.report || '';
         run.turns = ev.turns;
         run.toolCalls = ev.tool_calls;
-        run.doubts = typeof ev.doubts === 'number' ? ev.doubts : 0;
+        // 新事件用 proofread_comment；旧会话落盘的是 doubts，切页重放时兜底认一下
+        const comments = ev.proofread_comment ?? ev.doubts;
+        run.proofreadComment = typeof comments === 'number' ? comments : 0;
         run.durationMs = ev.duration_ms;
         run.error = ev.error || '';
         run.finishedAt = typeof ev.finished_at === 'number' ? ev.finished_at * 1000 : Date.now();
@@ -4012,7 +4014,7 @@ function SubagentRow({ run }: { run: SubagentRun }) {
           </span>
         ) : null}
         {run.toolCalls ? <span className="agent-subagent__badge">{run.toolCalls} 次工具</span> : null}
-        {run.doubts ? <span className="agent-subagent__badge is-doubt">意见 {run.doubts}</span> : null}
+        {run.proofreadComment ? <span className="agent-subagent__badge is-doubt">意见 {run.proofreadComment}</span> : null}
         <span className={`agent-subagent__state is-${state.tone}`}>{state.label}</span>
         {run.retry ? (
           <span

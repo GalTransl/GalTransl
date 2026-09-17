@@ -12,6 +12,7 @@ Agent 是一个持久的多轮会话：用户的第一条消息启动会话，�
 from __future__ import annotations
 
 import copy
+import fnmatch
 import json
 import os
 import random
@@ -496,7 +497,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
    b. 调用 read_dict 读取现有内容，判断人名、专有名词是否已收录；
    c. **先把 GPT 字典补起来**：若 GPT 字典为空（或很薄）且项目较大，可调用 start_translation(translator="GenDic") 自动生成 GPT 字典，并在该任务 completed 后通过 list_dict_files/read_dict 确认生成结果；
    d. **再看人名表还缺什么**：调用 get_name_table 看现有的人名与译名——**它已经把这件事算给你了**：`dictionary.useGPTDictInName` 默认开着，**GPT 字典里已收录的名字/称呼在翻译时会自动用于 name 字段**，所以工具会把"译名为空、字典里有"的行按字典译名补上（带 `dst_name_source=gpt_dict`），**你真正要补的是返回里 `still_empty` 列出的那几个**（不必再往人名表里抄一遍字典里已经有了的），所以**先做完 c 走这一步能少补很多**——要补的通常只剩 GenDic 没抓到的（昵称、低频称呼、它认不出的写法）。若人名表本身还不存在（get_name_table 返回为空），先调用 start_translation(translator="dump-name") 把 name 字段导出来生成它（dump-name 是导出 name 字段的专用 translator），完成后再次 get_name_table 查看结果，再调用 save_name_table 写回（若需要修正译名）。
-   **原文探索子代理（可选，explore）**：**很费 token，属于可选步骤**：派之前**必须用 ask_user 征得用户同意**（把"会读较多原文、比较费 token"说清楚），同意才派、不同意就不派；只读**原文**与 **GPT 字典**（不看译文、不写任何文件），干两件事——补齐 GenDic 覆盖不到的字典候选（昵称/爱称/绰号、地名组织道具、特殊称呼如お兄ちゃん、口癖，以及"同一个人被叫好几个名字"的判断），以及给出翻译规范建议（称谓与人称、文体语气、标点）。结论在它交回的报告里，由你汇总后落地：字典候选用 save_dict 进 GPT 字典，规范建议用 write_project_guideline 进项目规范。它要通读原文、通常 1-2 个。要 2 个就写**一条**任务：`{agent:"explore", file:"*", count:2}`——它会自动把原文均分成两份并行跑，brief 只写一遍（别把上千字的 brief 复制两条）。派之前先想清楚要它重点看什么，写进 brief 比它自己发挥准。
+   **原文探索子代理（可选，explore）**：**很费 token，属于可选步骤**：派之前**必须用 ask_user 征得用户同意**（把"会读较多原文、比较费 token"说清楚），同意才派、不同意就不派；只读**原文**与 **GPT 字典**（不看译文、不写任何文件），干两件事——补齐 GenDic 覆盖不到的字典候选（昵称/爱称/绰号、地名组织道具、特殊称呼如お兄ちゃん、口癖，以及"同一个人被叫好几个名字"的判断），以及给出翻译规范建议（称谓与人称、文体语气、标点）。结论在它交回的报告里，由你汇总后落地：字典候选用 save_dict 进 GPT 字典，规范建议用 write_project_guideline 进项目规范。它要通读原文、通常 1-2 个。要 2 个就写**一条**任务：`{agent:"explore", file:"*", count:2}`——它会自动把原文均分成两份并行跑，brief 只写一遍（别把上千字的 brief 复制两条）。`file` 也支持选择器，想让它随机挑几个原文试读就写 `file:"random:5"`（随机 5 个文件）。派之前先想清楚要它重点看什么，写进 brief 比它自己发挥准。
 3. **试译定稿（全量翻译前必做，除非项目已有大量缓存）**：
    a. 调用 read_guideline 读取项目当前使用的翻译规范（配置 common.gpt.translation_guideline），理解文风要求；
    b. 调用 list_input_files 拿到文件清单与每个文件解析出的条数（sentences 是原文解析条数、文本插件还没过滤，估工作量偏大；它**不是进度**，别拿它判断文件翻没翻完），据此估整体工作量、挑 1-2 个有代表性的文件；再用 read_input_file 各读几十句（index 使用 1-based，区间如 "1-50"），掌握角色、语气、专有名词、场景类型；
@@ -509,7 +510,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 5. **跟进进度（wait 前后都要查状态）**：启动翻译后先调用 get_runtime 确认任务已在跑，再调用 wait 等待一段合理时间（翻译任务 wait minutes=1~3，短任务 wait seconds=30）。**优先把 start_translation 返回的 job_id 一起传进去**（如 wait(job_id="<id>", minutes=5)）：任务先跑完就立刻返回、不必等满时长（返回里 job_finished=true 说明是它先结束的）；时长先到而它还在跑，返回里会带上当前状态**外加一份运行时快照（等同 get_runtime，含 eta_seconds）**——有这份快照就直接用，不必再单独查一次。wait 结束后必须确认任务状态（快照已在返回里就不必重查）：completed 进入下一步；仍在 running 时看返回的 eta_seconds 估算剩余时间——eta 还很长（如 >10 分钟）就按其一半的时长继续 wait，快完了（如 <2 分钟）就 wait seconds=30 再查，不要连续空转轮询也不要一次等过头。等待期间界面会显示倒计时。（get_runtime 各字段与 recent_errors 的口径见该工具说明。）
 6. **复核结果**：调用 list_problems（不带参数）先看类型统计，了解哪类问题最多；再传 problem_type（如 problem_type="残留日文"）+ limit/offset 分页查看该类型的具体条目。用 read_transl_cache 的 index 参数精确读取有问题的条目（如 list_problems 返回的 index，可直接 `index="33-40,50-60"` 一次取多条）浏览实际译文；判断语意是否连贯时传 context（如 context=3）把它上文的几句一起带上（带 context 的工具默认只给上文，要前后都给传 only_preceding=false；上下文行的 index 带 *，别拿它当本页要找的条目）。要查某个词/译名在全项目的所有出现处、判断译法是否统一（如「ドルード」该统一成哪个写法），用 search_transl_cache(query="ドルード", context=3) 一次看遍所有出现处及其上文。它默认只返回必要字段（说话人/原文/译文/问题，空值与未变化的字段会省略），要看译后字典替换结果或校对稿再传 fields。需要看缓存文件全貌（文件、条数）时用 list_transl_cache。
 6.5 **派子代理（校对与润色，可选）**：**很费 token，属于可选步骤**：派之前**必须用 ask_user 征得用户同意**（把"会读较多原文、比较费 token"说清楚），同意才派、不同意就不派；用 run_subagents 一次派多个子代理并行干活，每个有自己的上下文与受限工具，跑完只交回一份报告（过程不进你的上下文）。这个阶段用的是**校对子代理（proofread）**：
-   - **校对（proofread）**：每个负责一个（或一组）缓存文件，一次最多 16 个。file 填具体文件名就是点名；填 `"*"` 则**自动均分**——同批的 `"*"` 任务平分全部缓存文件（如派 16 个 `"*"`、256 个缓存文件 → 每个 16 个），要一次覆盖全部文件时用它，不用自己去数文件再逐个点名。大文件还能用 indexes 切区间。它们只能读 + 写缓存条目的 proofread_comment（校对批注：校对建议、润色建议都写这里），**改不了译文**：返回的 tasks[].doubts 带文件名与 index，报告是各自的总结（含"拿不准"的点）。拿到后按 7 的流程处理——读那些 index 的 proofread_comment，改完译文把该条的 proofread_comment 清空。**推荐在修复前跑一遍**。
+   - **校对（proofread）**：每个负责一个（或一组）缓存文件，一次最多 16 个。**`file` 是"选谁"**，支持选择器：具体文件名（点名）、`"*"`（全部缓存文件，自动均分）、`"list:a.json,b.json"`（清单）、`"glob:SW_01_*"`（通配）、`"regex:^0[12]_"`（正则）、`"select:has_problem"` 或 `"select:problem_type=残留日文"`（直接吃 list_problems 的结果集——"只把有问题的文件分下去"就用它）、`"random:N"`（随机 N 个）。**`count` 是"切几份"**，对任何 file 都生效：选中的文件够分就按文件均分（`{file:"*", count:16}`、`{file:"select:has_problem", count:16}`），文件不够就把大文件按 index 切成 count 段并行（`{file:"03_RE13.json", count:4}` 把一个 400+ 条的文件切给 4 个代理）。**`indexes` 是"取哪段"**：`{file:"03_RE13.json", indexes:"1-200", count:4}` 只在前 200 条里切 4 段。三者正交、可自由组合。它们只能读 + 写缓存条目的 proofread_comment（校对批注：校对建议、润色建议都写这里），**改不了译文**：返回是一篇 Markdown，每个子代理一个小节，其中 tasks[].proofread_comment 是一张「file × index」批注表，报告是各自的总结（含"拿不准"的点）。拿到后按 7 的流程处理——读那些 index 的 proofread_comment，改完译文把该条的 proofread_comment 清空。**推荐在修复前跑一遍**。
    **派之前先用 ask_user 问清意见类型**：这一遍要它们写哪一类——「只写校对建议（错译/漏译/事实错误/不通这些硬伤）」「只写润色建议（没硬伤但中文能更好：翻译腔、口语不自然、用词单调、节奏拖沓）」「两者都要」——再把答案写进 brief（如 brief="本次只写润色建议，每条给具体改法；对话读起来要像人话"）。brief 里不写这句时它们默认只写校对建议；两类意见都写进 proofread_comment，同一条目只留一条，所以"两者都要"时要交代它们**硬伤优先**。
    派之前先想清楚要它们重点看什么，写进 brief 比它们自己发挥准。
 7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。问题过滤关键字是**正则**，但**原则上不要过滤大类、只过滤小类**：用 manage_problem_filter(action="add", keyword=["<正则>"]) 命中问题项即过滤——要写具体样式（如 `缺失.*标点`、`^残留日文：♪`），不要用 `残留日文`、`^残留日文：` 这类把整个大类藏起来的写法（大类里往往混着真问题，整类过滤等于放弃复核）；想按字面过滤某条，就把特殊字符转义。若某几条反复误报、不值得再改，用 manage_problem_white_list(action="add", entry=["<文件名>:<index>", …]) 按位置豁免（entry 支持 "01.json:12" 与 "01.json:12-15" 区间，可传数组），效果等同于给这几条勾上 skip_check：不再检测、不计入统计。
@@ -2216,11 +2217,23 @@ def _profile_context_window(profile: dict[str, Any] | None) -> int:
 
 
 def _estimate_message_tokens(message: dict[str, Any]) -> int:
-    """单条消息的 token 粗估：正文 + tool_calls 的参数 JSON，按字符数/4。"""
+    """单条消息的 token 粗估：正文 + 回传的思考 + tool_calls 的参数 JSON，按字符数/4。
+
+    思考（reasoning_content / reasoning）必须算进去：thinking 模式下它会跟着 assistant
+    消息一起回传给 provider（见 _messages_for_request 与 _reasoning_echo），是这份请求真实
+    占用的一部分。漏掉它，纯本地估算就系统性偏低（实测一条会话 22 万字符的思考全被忽略），
+    而 estimated 走锚点法（provider 真实 prompt_tokens + 锚点后新增消息的本地估算）并不偏低
+    ——两套口径对不上，压缩的"保留段"判定就被带歪：尾部明明能压，却被判成"压不掉的大结果"，
+    压缩永远不跑（见 _begin_compaction 的守卫）。
+    """
     total_chars = 0
     content = message.get("content")
     if isinstance(content, str):
         total_chars += len(content)
+    for name in REASONING_FIELD_NAMES:
+        reasoning = message.get(name)
+        if isinstance(reasoning, str):
+            total_chars += len(reasoning)
     for tc in message.get("tool_calls") or []:
         if not isinstance(tc, dict):
             continue
@@ -3218,6 +3231,8 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                 f"一次最多 {SUBAGENT_MAX_TASKS} 个，要它们重点看什么就写进 brief。"
                 '要并行多个又不想写多条任务：一条任务写 file:"*" + count:N 就展开成 N 个'
                 "（brief 只写一遍）。"
+                "file / count / indexes 三个维度互相独立、任意组合：file 选谁（支持选择器）、"
+                "count 切几份（对任何 file 都生效）、indexes 取哪段。"
             ),
             "parameters": {
                 "type": "object",
@@ -3235,15 +3250,15 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                                 },
                                 "file": {
                                     "type": "string",
-                                    "description": '要负责的文件。proofread 必填：缓存文件名（来自 list_transl_cache）；explore 可选：原文文件名，留空则由它自己按 list_input_files 挑。填 "*" 表示**自动均分**：本批里同角色的每个 "*" 任务平分该角色的全部文件（proofread=缓存文件，explore=原文文件）——例如派 16 个 "*" 任务、项目有 256 个缓存文件，就每个 16 个；除不尽时前面的多一个；本批里已具体点名的文件不会再分给 "*"。除单个文件名和 "*" 外不支持其他写法：要手动分组就一个任务写一个文件名。锁定是工具层强制的：子代理只能读写派给它的那些文件，范围外会被拒。**要并行 N 个不必写 N 条任务**：写一条 file:"*" + count:N 即可（brief 只写一遍）',
+                                    "description": '要负责的文件（"选谁"）。proofread 必填；explore 可留空（自己按 list_input_files 挑）。支持选择器：具体文件名（"01.json"）；"*"=该角色全部文件（自动均分）；"list:a.json,b.json"=清单；"glob:SW_01_*"=通配；"regex:^0[12]_"=正则；"select:has_problem"=有问题的文件，"select:problem_type=残留日文"=含某类问题的文件（直接吃 list_problems 的结果集）；"random:N"=从候选里随机挑 N 个（前期探索用）。本批里已具体选中的文件不会再分给 "*"（点名优先）。锁定是工具层强制的：子代理只能读写派给它的那些文件，范围外会被拒',
                                 },
                                 "count": {
                                     "type": "integer",
-                                    "description": '可选。把这一条任务展开成 N 个子代理并行跑（默认 1，上限同批任务数）。只有 file 填 "*" 时可用——它们平分这批文件。要派 2 个 explore 通读原文，就写一条 {agent:"explore", file:"*", count:2}，别把长 brief 复制两遍',
+                                    "description": '可选。把这一条任务"切几份"（默认 1，上限同批任务数），对任何 file 都生效：选中的文件数 >= count 就按文件均分；文件数 < count 就把大文件按 index 切成 count 段并行。例：{file:"*", count:16} 全项目均分给 16 个；{file:"select:has_problem", count:16} 把有问题的文件均分给 16 个；{file:"03_RE13.json", count:4} 把一个大文件切 4 段。brief 只写一遍、由展开出的子代理共用',
                                 },
                                 "indexes": {
                                     "type": "string",
-                                    "description": "可选。只处理这个区间（写法同 read_transl_cache 的 index，如 \"1-200\"）；留空=整个文件",
+                                    "description": '可选。"取哪段"：只处理这个区间（写法同 read_transl_cache 的 index，如 "1-200" 或 "1-200,300-400"）；留空=整个文件。与 count 组合时在区间内再切段（只对单个文件有意义）：{file:"03_RE13.json", indexes:"1-200", count:4} = 只在前 200 条里切 4 段并行',
                                 },
                                 "brief": {
                                     "type": "string",
@@ -5685,6 +5700,60 @@ def _md_render_manage_problem_filter(result: dict[str, Any]) -> str | None:
     return _md_doc(*parts)
 
 
+def _md_render_run_subagents(result: dict[str, Any]) -> str:
+    """子代理批次结果 → 一篇 Markdown：开头顶部统计，随后每个子代理一个小节。
+
+    JSON 版很长（十几份报告 + 每份的批注清单），而批注清单就是「文件 × index」的规整数据，
+    用表格最省、也最好认；报告本身是子代理写的 Markdown，原样贴。
+    """
+    tasks = [row for row in (result.get("tasks") or []) if isinstance(row, dict)]
+    if not tasks:
+        return ""
+    status_labels = {"done": "完成", "failed": "失败", "stopped": "中止"}
+    counts = Counter(str(row.get("status") or "") for row in tasks)
+    status_text = "、".join(
+        f"{status_labels.get(status, status or '未知')} {count}"
+        for status, count in counts.items()
+        if count
+    )
+    comments_total = sum(len(row.get("proofread_comment") or []) for row in tasks)
+    head = f"共派出 {len(tasks)} 个子代理（{status_text}），合计 {comments_total} 条校对批注"
+    skipped = result.get("skipped")
+    if skipped:
+        head += f"；另有 {skipped} 个任务因文件不够分被跳过"
+    parts: list[str] = [head + "。"]
+    note = result.get("note")
+    if note:
+        parts.append(str(note))
+    for i, row in enumerate(tasks, start=1):
+        label = str(row.get("label") or row.get("agent") or "子代理")
+        name = str(row.get("file") or "、".join(row.get("files") or []) or "（不锁定文件）")
+        parts.append(f"## {i}. {label} · {name}")
+        meta = [f"状态 {status_labels.get(str(row.get('status') or ''), row.get('status'))}"]
+        if row.get("indexes"):
+            meta.append(f"区间 {row['indexes']}")
+        if row.get("turns") is not None:
+            meta.append(f"轮数 {row['turns']}")
+        if row.get("tool_calls") is not None:
+            meta.append(f"工具调用 {row['tool_calls']} 次")
+        if row.get("duration_ms") is not None:
+            meta.append(f"耗时 {int(row['duration_ms']) / 1000:.1f}s")
+        if row.get("error"):
+            meta.append(f"错误：{row['error']}")
+        parts.append(" ｜ ".join(str(item) for item in meta))
+        comments = row.get("proofread_comment")
+        if isinstance(comments, list) and comments:
+            table = _md_table(["file", "index"], comments)
+            parts.append(
+                f"写下的校对批注 {len(comments)} 条（全文在对应缓存的 proofread_comment 里）："
+                f"\n\n{table}"
+            )
+        report = str(row.get("report") or "").strip()
+        if report:
+            parts.append(report)
+    return _md_doc(*parts)
+
+
 # 工具名 → 渲染器。渲染只对这里列出的工具生效，其余工具维持 JSON。
 _MD_RENDERERS: dict[str, Any] = {
     "list_transl_cache": _md_render_list_transl_cache,
@@ -5695,6 +5764,7 @@ _MD_RENDERERS: dict[str, Any] = {
     "search_transl_cache": _md_render_search_transl_cache,
     "search_input": _md_render_search_input,
     "manage_problem_filter": _md_render_manage_problem_filter,
+    "run_subagents": _md_render_run_subagents,
 }
 
 
@@ -7449,18 +7519,32 @@ _LOCKED_FILENAME_TOOLS: tuple[str, ...] = (
 # （校对=缓存文件，原文探索=原文文件）。例如派 16 个 "*"、项目有 256 个缓存文件 → 每个 16 个。
 SUBAGENT_FILE_ALL = "*"
 
+# file 的选择器前缀：把"选谁"从"单个文件名 / *"两档扩成一层（选择器 → 有序文件清单）：
+#   list:   清单（list:a.json,b.json）
+#   glob:   通配（glob:SW_01_*）
+#   regex:  正则（regex:^0[12]_）
+#   select: 吃 list_problems 的结果集：select:has_problem / select:problem_type=<类型>
+#   random: 从候选里随机挑 N 个（random:5）——前期探索用
+# 认不出的写法按"单个文件名"处理（向后兼容）。选择器解析出的是"选谁"，与 count/indexes 正交。
+SUBAGENT_FILE_LIST = "list:"
+SUBAGENT_FILE_GLOB = "glob:"
+SUBAGENT_FILE_REGEX = "regex:"
+SUBAGENT_FILE_SELECT = "select:"
+SUBAGENT_FILE_RANDOM = "random:"
 
-def _subagent_candidate_files(runner: AgentRunner, agent: str) -> list[str]:
-    """某个角色"可分派的文件"清单（按名字排序：顺序稳定，均分结果可复现）。
+
+def _subagent_file_counts(runner: AgentRunner, agent: str) -> dict[str, int]:
+    """某个角色"可分派的文件" → 条数（按名字排序：顺序稳定，均分/切片结果可复现）。
 
     - 校对：缓存目录里的缓存文件（只认 `.json`）——跳过条目数为 0 的（没什么可校对，
       派过去等于白烧一个 agent 的 token）；
-    - 原文探索：输入目录里的原文文件。
+    - 原文探索：输入目录里的原文文件（条数取解析出的 sentences，未知算 0）。
+    条数只在"文件比 count 少、要把大文件按 index 切开"时用得到。
     """
     pid = runner._project_id()
+    counts: dict[str, int] = {}
     if agent == SUBAGENT_AGENT_PROOFREAD:
         data = runner._http_get(f"/api/projects/{pid}/cache")
-        names: list[str] = []
         for item in data.get("files", []):
             if not isinstance(item, dict):
                 continue
@@ -7470,15 +7554,88 @@ def _subagent_candidate_files(runner: AgentRunner, agent: str) -> list[str]:
             count = item.get("entry_count")
             if isinstance(count, int) and count <= 0:
                 continue
-            names.append(name)
-        return sorted(names)
+            counts[name] = count if isinstance(count, int) else 0
+    else:
+        cfg = urllib.parse.quote(runner.state.config_file_name or "config.yaml")
+        data = runner._http_get(f"/api/projects/{pid}/files?counts=1&config={cfg}")
+        for item in data.get("input_files", []):
+            if not isinstance(item, dict) or not item.get("is_file", True):
+                continue
+            name = str(item.get("name") or "")
+            if name:
+                counts[name] = int(item.get("sentences") or 0)
+    return dict(sorted(counts.items()))
+
+
+def _subagent_problem_files(runner: AgentRunner, problem_type: str = "") -> set[str]:
+    """有问题（或含指定问题类型）的文件集合——直接吃 list_problems 的结果集。
+
+    problem_type 为空 = 只要有问题的文件；给了则按类型过滤（口径同 list_problems：
+    英文逗号分隔、取「类型：详情」的类型前缀做子串匹配）。
+    """
+    pid = runner._project_id()
     cfg = urllib.parse.quote(runner.state.config_file_name or "config.yaml")
-    data = runner._http_get(f"/api/projects/{pid}/files?counts=1&config={cfg}")
-    return sorted(
-        str(item.get("name") or "")
-        for item in data.get("input_files", [])
-        if isinstance(item, dict) and item.get("is_file", True) and item.get("name")
-    )
+    data = runner._http_get(f"/api/projects/{pid}/problems?config={cfg}")
+    wanted = [t.strip() for t in problem_type.split(",") if t.strip()]
+    files: set[str] = set()
+    for item in data.get("problems", []):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("filename") or "")
+        if not name:
+            continue
+        if wanted and not any(w in _split_problem_types(item.get("problem", "")) for w in wanted):
+            continue
+        files.add(name)
+    return files
+
+
+def _resolve_subagent_files(
+    runner: AgentRunner, agent: str, spec: str, pool: list[str]
+) -> list[str]:
+    """把 file 的选择器解析成有序文件清单；具体文件名原样返回（向后兼容）。
+
+    - pool 是该角色的全部候选文件，"*"/glob/regex/select/random 都在它里面挑；
+    - "list:" 直接照单全收（点名优先，允许写出候选之外的名字，锁定那层会兜底）。
+    """
+    text = spec.strip()
+    if text == SUBAGENT_FILE_ALL:
+        return list(pool)
+    if text.startswith(SUBAGENT_FILE_LIST):
+        names: list[str] = []
+        for name in (part.strip() for part in text[len(SUBAGENT_FILE_LIST):].split(",")):
+            if name and name not in names:
+                names.append(name)
+        return names
+    if text.startswith(SUBAGENT_FILE_GLOB):
+        pattern = text[len(SUBAGENT_FILE_GLOB):].strip()
+        return [name for name in pool if fnmatch.fnmatch(name, pattern)]
+    if text.startswith(SUBAGENT_FILE_REGEX):
+        pattern = text[len(SUBAGENT_FILE_REGEX):]
+        try:
+            compiled = re.compile(pattern)
+        except re.error as exc:
+            raise AgentToolError(f"file 的 regex 选择器写错了：{exc}") from exc
+        return [name for name in pool if compiled.search(name)]
+    if text.startswith(SUBAGENT_FILE_SELECT):
+        arg = text[len(SUBAGENT_FILE_SELECT):].strip()
+        if arg in ("", "has_problem", "*"):
+            problem_type = ""
+        elif arg.startswith("problem_type="):
+            problem_type = arg.split("=", 1)[1].strip()
+        else:
+            raise AgentToolError(
+                "file 的 select 选择器只支持 select:has_problem 与 "
+                f"select:problem_type=<类型>（收到 {text!r}）"
+            )
+        hit = _subagent_problem_files(runner, problem_type)
+        return [name for name in pool if name in hit]
+    if text.startswith(SUBAGENT_FILE_RANDOM):
+        arg = text[len(SUBAGENT_FILE_RANDOM):].strip()
+        if not arg.isdigit() or int(arg) < 1:
+            raise AgentToolError(f'file 的 random 选择器要写个数，如 "random:5"（收到 {text!r}）')
+        return random.sample(pool, min(int(arg), len(pool)))
+    return [text]
 
 
 def _split_files_evenly(files: list[str], parts: int) -> list[list[str]]:
@@ -7497,6 +7654,140 @@ def _split_files_evenly(files: list[str], parts: int) -> list[list[str]]:
         groups.append(files[start : start + size])
         start += size
     return groups
+
+
+def _split_sizes(total: int, parts: int) -> list[int]:
+    """把 total 条均分成 parts 份，除不尽时前面几份多一条（口径同 _split_files_evenly）。"""
+    if parts <= 0:
+        return []
+    base, extra = divmod(total, parts)
+    return [base + (1 if i < extra else 0) for i in range(parts)]
+
+
+def _parse_index_ranges(spec: str) -> list[tuple[int, int]]:
+    """把 "1-200,300-400" / "5" 解析成 [(1,200),(300,400)]（口径同 _parse_index_spec）。"""
+    ranges: list[tuple[int, int]] = []
+    for part in spec.split(","):
+        token = part.strip().replace("*", "")
+        if not token:
+            continue
+        if "-" in token:
+            bounds = token.split("-", 1)
+            try:
+                lo, hi = int(bounds[0]), int(bounds[1])
+            except ValueError:
+                continue
+            if lo > hi:
+                lo, hi = hi, lo
+            ranges.append((lo, hi))
+        else:
+            try:
+                value = int(token)
+            except ValueError:
+                continue
+            ranges.append((value, value))
+    return ranges
+
+
+def _slice_ranges(ranges: list[tuple[int, int]], parts: int) -> list[str]:
+    """把若干区间按条数整体切成 parts 段，返回区间字符串（如 ["1-103","104-206"]）。
+
+    用于"一个大文件切给 N 个代理并行"：每个子代理只处理自己那一段。
+    """
+    total = sum(hi - lo + 1 for lo, hi in ranges)
+    if parts <= 0 or total <= 0:
+        return []
+    sizes = _split_sizes(total, parts)
+    out: list[str] = []
+    ri = 0
+    cursor = ranges[0][0]
+    for size in sizes:
+        if size <= 0:
+            continue
+        pieces: list[str] = []
+        need = size
+        while need > 0 and ri < len(ranges):
+            lo, hi = ranges[ri]
+            take = min(need, hi - cursor + 1)
+            start, end = cursor, cursor + take - 1
+            pieces.append(str(start) if take == 1 else f"{start}-{end}")
+            cursor += take
+            need -= take
+            if cursor > hi:
+                ri += 1
+                if ri < len(ranges):
+                    cursor = ranges[ri][0]
+        if pieces:
+            out.append(",".join(pieces))
+    return out
+
+
+def _expand_subagent_file_selection(
+    files: list[str], indexes: str, count: int, counts: dict[str, int]
+) -> list[tuple[list[str], str]]:
+    """把（选谁 × 切几份 × 取哪段）展开成一组子代理任务：[(文件清单, indexes), ...]。
+
+    三个维度互相独立：
+    - count<=1：一个任务，indexes 原样带上（indexes 只对单个文件有意义）；
+    - count>1 且给了 indexes：必须只选中一个文件，在区间内再切成 count 段；
+    - count>1 且没给 indexes：文件够分就按文件均分；文件不够就把大文件按条数切成
+      index 段，凑够 count 个任务（如一个大文件切 4 段并行）。
+    """
+    if count <= 1:
+        if indexes and len(files) > 1:
+            raise AgentToolError(
+                "indexes 只能用于单个文件（选中的文件有多个，分不清区间属于哪一份）："
+                "给 indexes 时请让 file 只选中一个文件。"
+            )
+        return [(list(files), indexes)]
+
+    if indexes:
+        if len(files) != 1:
+            raise AgentToolError(
+                f"file 选中的文件有 {len(files)} 个，同时给 indexes 与 count 时分不清区间属于哪个文件："
+                "请让 file 只选中一个文件，或去掉 indexes 让它按文件均分。"
+            )
+        ranges = _parse_index_ranges(indexes)
+        total = sum(hi - lo + 1 for lo, hi in ranges)
+        if total <= 0:
+            raise AgentToolError(f"indexes 解析不出有效区间：{indexes!r}")
+        if count > total:
+            raise AgentToolError(f"indexes 只覆盖 {total} 条，切不成 {count} 段：调小 count。")
+        return [([files[0]], seg) for seg in _slice_ranges(ranges, count)]
+
+    if len(files) >= count:
+        return [(group, "") for group in _split_files_evenly(files, count) if group]
+
+    # 文件不够分：把每个文件按条数切成 index 段，凑够 count 个任务
+    per_file, extra = divmod(count, len(files))
+    out: list[tuple[list[str], str]] = []
+    for i, name in enumerate(files):
+        parts = per_file + (1 if i < extra else 0)
+        if parts <= 1:
+            out.append(([name], ""))
+            continue
+        total = int(counts.get(name) or 0)
+        if total <= 0:
+            raise AgentToolError(
+                f"「{name}」的条数未知，没法按 count 切成 {parts} 段：改用多个文件，或减少 count。"
+            )
+        if parts > total:
+            raise AgentToolError(f"「{name}」只有 {total} 条，切不成 {parts} 段：调小 count。")
+        out.extend(([name], seg) for seg in _slice_ranges([(1, total)], parts))
+    return out
+
+
+def _selection_split_note(
+    agent: str, files: list[str], expansions: list[tuple[list[str], str]], parts: int
+) -> str:
+    """非 "*" 选择器并行展开后给主 Agent 的一句交代（分了多少、按什么分的）。"""
+    label = SUBAGENT_LABELS.get(agent, agent)
+    if len(files) >= parts:
+        sizes = [len(group) for group, _ in expansions]
+        non_empty = [size for size in sizes if size]
+        span = str(non_empty[0]) if len(set(non_empty)) == 1 else f"{min(non_empty)}-{max(non_empty)}"
+        return f"已把选中的 {len(files)} 个文件均分给 {parts} 个「{label}」子代理（每个 {span} 个）。"
+    return f"已把选中的 {len(files)} 个文件按 index 切成 {parts} 段并行。"
 
 
 def _lock_to_filenames(
@@ -7696,7 +7987,9 @@ class SubAgentRunner:
         self.messages: list[dict[str, Any]] = []
         self.turns = 0
         self.tool_calls = 0
-        self.doubts: list[dict[str, Any]] = []
+        # 它写进缓存的那几条校对批注（{file, index, content}）：字段名跟缓存里的
+        # proofread_comment 对齐，报告里只回 file + index，全文在缓存里
+        self.proofread_comments: list[dict[str, Any]] = []
         self.started_at = time.time()
         # 正在进行的一次压缩：{cut, head_keep, estimated, limit}。挂上压缩指令后置上，
         # 收尾（_finish_compaction）或回滚（_abort_compaction）时清空。
@@ -7742,7 +8035,11 @@ class SubAgentRunner:
             "tool_calls": self.tool_calls,
             # 只回 文件 + index：意见全文在缓存里，主 Agent 需要细节就读那几条。
             # 带上 file 是因为一个子代理可能负责一组文件，只给 index 认不出是哪一份里的。
-            "doubts": [{"file": d.get("file", ""), "index": d.get("index")} for d in self.doubts],
+            # 字段名与缓存里的批注字段一致（proofread_comment）。
+            "proofread_comment": [
+                {"file": d.get("file", ""), "index": d.get("index")}
+                for d in self.proofread_comments
+            ],
             "duration_ms": int((time.time() - self.started_at) * 1000),
         }
         if error:
@@ -7754,7 +8051,7 @@ class SubAgentRunner:
                 "report": text,
                 "turns": self.turns,
                 "tool_calls": self.tool_calls,
-                "doubts": len(self.doubts),
+                "proofread_comment": len(self.proofread_comments),
                 "duration_ms": result["duration_ms"],
                 # 结束时间戳（Unix 秒）：与 started_at 配对，界面重放后也能还原区间
                 "finished_at": time.time(),
@@ -8061,7 +8358,7 @@ class SubAgentRunner:
             payload, ok = f"{type(exc).__name__}: {exc}", False
         duration_ms = int((time.time() - started) * 1000)
         if ok and name == "patch_transl_cache":
-            self._remember_doubts(result, str(args.get("filename", "") or ""))
+            self._remember_proofread_comments(result, str(args.get("filename", "") or ""))
         # 事件里只给预览（读缓存动辄几万字符，界面用不上）；消息历史里给全文（有上限兜底）
         self._emit(
             "subagent_tool_result",
@@ -8084,7 +8381,7 @@ class SubAgentRunner:
             ),
         }
 
-    def _remember_doubts(self, result: Any, filename: str) -> None:
+    def _remember_proofread_comments(self, result: Any, filename: str) -> None:
         """从 patch_transl_cache 的变更里挑出 proofread_comment 那几条，记进报告用的小结。
 
         认的是返回的 changes（path 形如 `#33.proofread_comment`）而不是模型传的参数：它到底写了什么、
@@ -8104,7 +8401,7 @@ class SubAgentRunner:
                 index: Any = int(raw)
             except ValueError:
                 index = raw
-            self.doubts.append(
+            self.proofread_comments.append(
                 {"file": filename, "index": index, "content": str(change.get("after") or "")}
             )
 
@@ -8124,13 +8421,16 @@ def _split_summary(agent: str, total: int, parts: int, sizes: list[int]) -> str:
 def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """派一批子代理并行干活，等它们全部跑完，把每份报告收回来。
 
-    文件怎么分：
-    - 写具体文件名：这个任务就锁定这一份（或一组）。文件是任务的天然边界——不同子代理写不同
-      文件的 proofread_comment 不会互相覆盖；同一个文件要拆就用 indexes 切区间，但两边别碰同一条。
-    - 写 "*"（SUBAGENT_FILE_ALL）：**自动均分**——本批里同角色的每个 "*" 任务平分该角色的全部
-      文件（校对=缓存文件，原文探索=原文文件）。派 16 个 "*"、项目 256 个缓存文件 → 每个 16 个；
-      除不尽时前面的多一个。已经在别处点名过的文件不会再分给 "*"。
-    - 原文探索的 file 可以留空（自己按 list_input_files 挑）：它只读、不写文件。
+    三个维度互相独立（正交），任意组合：
+    - **选谁（file）**：选择器 → 有序文件清单。具体文件名 / "*"（全部，自动均分）/
+      "list:a.json,b.json" / "glob:SW_01_*" / "regex:^0[12]_" / "select:has_problem" /
+      "select:problem_type=残留日文"（吃 list_problems 的结果集）/ "random:N"（随机 N 个）。
+    - **切几份（count）**：对任何选择器都生效——文件够就按文件均分；文件不够就把大文件按
+      index 切成 count 段（一个大文件切给 N 个代理并行）。
+    - **取哪段（indexes）**：单文件 + count>1 时在区间内再切段；多文件 + indexes 判为歧义。
+    文件是任务的天然边界——不同子代理写不同文件的 proofread_comment 不会互相覆盖；同一个
+    文件要拆就用切片（count>1 或 indexes），但两边别碰同一条。
+    原文探索的 file 可以留空（自己按 list_input_files 挑）：它只读、不写文件。
     """
     tasks_raw = args.get("tasks")
     if not isinstance(tasks_raw, list) or not tasks_raw:
@@ -8139,7 +8439,9 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
         raise AgentToolError(
             f"一次最多派 {SUBAGENT_MAX_TASKS} 个子代理（收到 {len(tasks_raw)} 个）：拆成两次调用。"
         )
-    tasks: list[dict[str, Any]] = []
+
+    # 第一遍：只校验入参、把每条任务解析成（选择器 × count × indexes），暂不展开
+    parsed: list[dict[str, Any]] = []
     for i, item in enumerate(tasks_raw, start=1):
         if not isinstance(item, dict):
             raise AgentToolError(f"第 {i} 个任务不是对象")
@@ -8148,13 +8450,12 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
             raise AgentToolError(
                 f"第 {i} 个任务的 agent 不认识：{agent!r}（可用：{'、'.join(SUBAGENT_AGENTS)}）"
             )
-        file_name = str(item.get("file", "") or "").strip()
-        if SUBAGENT_ROLES[agent].needs_file and not file_name:
+        spec = str(item.get("file", "") or "").strip()
+        if SUBAGENT_ROLES[agent].needs_file and not spec:
             raise AgentToolError(
                 f"第 {i} 个任务缺 file：{SUBAGENT_LABELS.get(agent, agent)} 要锁定一个缓存文件"
                 f'（也可以填 "{SUBAGENT_FILE_ALL}" 让它自动均分一批）'
             )
-        is_auto = file_name == SUBAGENT_FILE_ALL
         # count：把这一条任务展开成几个子代理并行跑。brief 只写一遍——不让模型为了并行
         # 把上千字的 brief 复制 N 份，否则它宁可只派一个（真实踩过：要求派 2 个 explore，
         # 模型因为不想重复长 brief 只写了一条 task）。
@@ -8171,44 +8472,54 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
             raise AgentToolError(
                 f"第 {i} 个任务的 count 最多 {SUBAGENT_MAX_TASKS}（收到 {count}）"
             )
-        if count > 1 and not is_auto:
+        if not spec and count > 1:
             raise AgentToolError(
-                f"第 {i} 个任务的 file 是具体文件名（{file_name}），没法平分给 {count} 个子代理："
-                f'要并行就把 file 填 "{SUBAGENT_FILE_ALL}" 交给自动均分，或者拆成几条各写一个文件名'
+                f"第 {i} 个任务的 file 是空的（让子代理自己挑），没法平分给 {count} 个子代理："
+                "给 file 一个选择器，或把 count 去掉。"
             )
-        for _ in range(count):
-            tasks.append(
-                {
-                    "agent": agent,
-                    "file": file_name,
-                    # 解析后的实际范围：具体文件名 → 就它一个；"*" → 下面均分填进来
-                    "files": [] if is_auto else ([file_name] if file_name else []),
-                    "auto": is_auto,
-                    "indexes": str(item.get("indexes", "") or "").strip(),
-                    "brief": str(item.get("brief", "") or "").strip(),
-                }
-            )
-    if len(tasks) > SUBAGENT_MAX_TASKS:
-        raise AgentToolError(
-            f"展开 count 后一次要派 {len(tasks)} 个子代理，超过上限 {SUBAGENT_MAX_TASKS}："
-            "调小 count，或分两次调用。"
+        parsed.append(
+            {
+                "index": i,
+                "agent": agent,
+                "spec": spec,
+                "count": count,
+                "indexes": str(item.get("indexes", "") or "").strip(),
+                "brief": str(item.get("brief", "") or "").strip(),
+            }
         )
 
-    # 自动均分：候选 = 该角色全部文件 - 本批里已点名过的（点名优先，避免两个子代理抢同一份）
-    auto_slots: dict[str, list[int]] = {}
+    counts_cache: dict[str, dict[str, int]] = {}
+
+    def _counts(agent: str) -> dict[str, int]:
+        if agent not in counts_cache:
+            counts_cache[agent] = _subagent_file_counts(runner, agent)
+        return counts_cache[agent]
+
+    # 先解析"具体清单"类选择器：它们选中的文件记下来，供 "*" 排除（点名优先，避免抢同一份）
     named: dict[str, set[str]] = {}
-    for idx, task in enumerate(tasks):
-        if task["auto"]:
-            auto_slots.setdefault(task["agent"], []).append(idx)
-        elif task["files"]:
-            named.setdefault(task["agent"], set()).add(task["files"][0])
+    for task in parsed:
+        spec = task["spec"]
+        if spec == "" or spec == SUBAGENT_FILE_ALL:
+            continue
+        task["files"] = _resolve_subagent_files(
+            runner, task["agent"], spec, list(_counts(task["agent"]))
+        )
+        if not task["files"]:
+            raise AgentToolError(
+                f"第 {task['index']} 个任务的 file 选择器（{spec}）一个文件都没选中："
+                "先用 list_transl_cache / list_problems 看看有哪些文件。"
+            )
+        named.setdefault(task["agent"], set()).update(task["files"])
+
+    # "*"：本批里同角色所有 "*"（含 count 展开的份数）平分"全部候选 - 已点名"
+    auto_slots: dict[str, list[dict[str, Any]]] = {}
+    for task in parsed:
+        if task["spec"] == SUBAGENT_FILE_ALL:
+            auto_slots.setdefault(task["agent"], []).append(task)
     split_notes: list[str] = []
-    for agent, idxs in auto_slots.items():
-        pool = [
-            name
-            for name in _subagent_candidate_files(runner, agent)
-            if name not in named.get(agent, set())
-        ]
+    auto_groups: dict[str, list[list[str]]] = {}
+    for agent, slots in auto_slots.items():
+        pool = [name for name in _counts(agent) if name not in named.get(agent, set())]
         if not pool:
             hint = (
                 "缓存里还没有可校对的文件（条目为空或还没跑翻译）：先用 list_transl_cache 看看，"
@@ -8217,10 +8528,49 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
                 else "输入目录里没有可分派的原文文件：先用 list_input_files 看看。"
             )
             raise AgentToolError(f"「{SUBAGENT_LABELS.get(agent, agent)}」自动均分拿不到文件：{hint}")
-        groups = _split_files_evenly(pool, len(idxs))
-        for idx, group in zip(idxs, groups):
-            tasks[idx]["files"] = group
-        split_notes.append(_split_summary(agent, len(pool), len(idxs), [len(g) for g in groups]))
+        total_slots = sum(task["count"] for task in slots)
+        groups = _split_files_evenly(pool, total_slots)
+        auto_groups[agent] = groups
+        split_notes.append(_split_summary(agent, len(pool), total_slots, [len(g) for g in groups]))
+
+    # 第二遍：按模型写的顺序逐条展开成最终任务（顺序稳定，方便对账）
+    tasks: list[dict[str, Any]] = []
+
+    def _emit_task(source: dict[str, Any], files: list[str], indexes: str) -> None:
+        tasks.append(
+            {
+                "agent": source["agent"],
+                "files": list(files),
+                "auto": source["spec"] == SUBAGENT_FILE_ALL,
+                "indexes": indexes,
+                "brief": source["brief"],
+            }
+        )
+
+    for task in parsed:
+        spec = task["spec"]
+        if spec == SUBAGENT_FILE_ALL:
+            groups = auto_groups[task["agent"]]
+            for _ in range(task["count"]):
+                _emit_task(task, groups.pop(0), task["indexes"])
+        elif spec == "":
+            _emit_task(task, [], "")
+        else:
+            expansions = _expand_subagent_file_selection(
+                task["files"], task["indexes"], task["count"], _counts(task["agent"])
+            )
+            if task["count"] > 1:
+                split_notes.append(
+                    _selection_split_note(task["agent"], task["files"], expansions, task["count"])
+                )
+            for files, indexes in expansions:
+                _emit_task(task, files, indexes)
+
+    if len(tasks) > SUBAGENT_MAX_TASKS:
+        raise AgentToolError(
+            f"展开 count 后一次要派 {len(tasks)} 个子代理，超过上限 {SUBAGENT_MAX_TASKS}："
+            "调小 count，或分两次调用。"
+        )
 
     # 没分到文件的任务直接丢掉（空跑一轮照样烧 token），但"file 留空"的探索任务照旧派出
     scheduled = [task for task in tasks if task["files"] or not task["auto"]]
@@ -8259,7 +8609,7 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
                 "report": "",
                 "turns": 0,
                 "tool_calls": 0,
-                "doubts": [],
+                "proofread_comment": [],
                 "duration_ms": 0,
                 "error": f"{type(exc).__name__}: {exc}",
             }
@@ -8320,28 +8670,26 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
                 "report": "",
                 "turns": 0,
                 "tool_calls": 0,
-                "doubts": [],
+                "proofread_comment": [],
                 "duration_ms": 0,
                 "error": "父回合被停止，这个子代理没跑完",
             }
         results.append(out)
-    total_doubts = sum(len(row.get("doubts") or []) for row in results)
+    total_comments = sum(len(row.get("proofread_comment") or []) for row in results)
     note = (
-        "子代理的校对意见已写进各条缓存的 proofread_comment：按上面每项的 file 与 index 用 "
-        "read_transl_cache 读那些条目，改完译文（pre_dst）后再用 patch_transl_cache 把该条的 "
+        "子代理的校对意见已写进各条缓存的 proofread_comment：按各子代理批注表里的 file 与 index "
+        "用 read_transl_cache 读那些条目，改完译文（pre_dst）后再用 patch_transl_cache 把该条的 "
         "proofread_comment 清空，表示已处理。"
     )
-    if total_doubts == 0:
+    if total_comments == 0:
         note = "这批子代理没有提出任何疑问（没有条目被写入 proofread_comment）。"
-    if skipped:
-        note += f" 另有 {skipped} 个任务因文件不够分被跳过，实际派出 {len(results)} 个。"
     if split_notes:
         note = " ".join(split_notes) + " " + note
     return {
         "tasks": results,
         "total": len(results),
         "skipped": skipped,
-        "total_doubts": total_doubts,
+        "total_proofread_comment": total_comments,
         "note": note,
     }
 

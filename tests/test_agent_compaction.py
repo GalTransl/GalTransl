@@ -215,6 +215,15 @@ class EstimateMessageTokensHelperTests(unittest.TestCase):
         est = _estimate_message_tokens(m)
         self.assertGreater(est, len("go") // 4 + 4)
 
+    def test_includes_reasoning_that_gets_sent_back(self):
+        """思考内容会随 assistant 消息回传给 provider，必须计入估算（否则本地口径系统性偏低）。"""
+        plain = _msg("assistant", "ok")
+        with_reasoning = {"role": "assistant", "content": "ok", "reasoning_content": "R" * 4000}
+        self.assertGreater(
+            _estimate_message_tokens(with_reasoning),
+            _estimate_message_tokens(plain) + 900,
+        )
+
 
 # ---- 3. 压缩执行 ----
 
@@ -295,6 +304,28 @@ class MaybeCompactTests(unittest.TestCase):
         # 锚点盖住除最后 4 条外的全部历史，且数值约为本地估算的 2.7 倍（模拟 CJK 低估）
         state.last_prompt_tokens = 250_000
         state.anchored_message_count = len(msgs) - 4
+
+        self.assertTrue(runner._begin_compaction())
+        self.assertIsNotNone(runner._pending_compaction)
+
+    def test_reasoning_heavy_tail_does_not_trip_the_guard(self):
+        """思考内容也是真实占用：算进估算后，思考密集的保留段不再被误判为"压不掉的大结果"。
+
+        回归背景（"157k/128k 却不压缩"）：本地估算漏算 reasoning_content，而它 thinking 模式下
+        会随 assistant 消息回传给 provider、被真实计入 prompt_tokens。于是 estimated（锚点法，
+        含思考）与本地口径对不上，守卫按比例折算后把保留段放大，每回合都判"到触发线"、压缩
+        永远不跑。修好估算后同一条历史应正常压缩。
+        """
+        msgs = [_msg("system", "SYS")]
+        for _ in range(24):
+            msgs.append(_msg("user", "w" * 4000))  # 头部实打实的内容，撑过保留预算
+        for _ in range(12):
+            msgs.append(_msg("user", "u"))
+            msgs.append({"role": "assistant", "content": "", "reasoning_content": "R" * 40000})
+        runner, state = _make_runner(msgs, window=DEFAULT_CONTEXT_WINDOW)
+        # 锚点盖住全部历史：用量以 provider 真实口径为准（157k，同事故场景）
+        state.last_prompt_tokens = 157_000
+        state.anchored_message_count = len(msgs)
 
         self.assertTrue(runner._begin_compaction())
         self.assertIsNotNone(runner._pending_compaction)

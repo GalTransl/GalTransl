@@ -1716,7 +1716,9 @@ export type AgentEvent = {
   report?: string;
   turns?: number;
   tool_calls?: number;
-  /** subagent_done：写了几条校对意见（数字）；工具结果里的 tasks[].doubts 是 index 数组 */
+  /** subagent_done：写了几条校对批注（proofread_comment 的条数） */
+  proofread_comment?: number | number[];
+  /** @deprecated 旧字段名（doubts）：仅用于重放改名之前落盘的旧会话 */
   doubts?: number | number[];
 };
 
