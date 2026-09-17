@@ -3699,7 +3699,8 @@ function PermissionCard({
   const riskLabel = { edit: '改译文数据', delegate: '派子代理', high: '改设置 / 启动任务' }[riskKind];
   const riskHint = {
     edit: '改动译文数据（缓存 / 字典 / 人名表）',
-    delegate: '派一批校对子代理并行跑：每个都会调模型、并往缓存里写校对意见',
+    delegate:
+      '派一批子代理并行跑：每个都会调模型（校对子代理还会往缓存里写意见，原文探索会通读原文、很费 token）',
     high: '改动项目设置 / 规范，或启动翻译任务',
   }[riskKind];
   // 正文第二行的细节：参数摘要 + 当前档位（为什么现在要问）。都是短标签，逗号分不开的

@@ -1,13 +1,16 @@
-"""校对子代理：并行派发、受限工具集、报告回传。
+"""子代理：并行派发、按角色受限的工具集、报告回传。
 
-锁住四件事：
-1. 一个子代理能"读缓存 → 写 doub_content → 交报告"，写进去的是缓存条目的 doub_content；
-2. **它改不了译文**：patch_transl_cache 换成收窄版（入参里没有 pre_dst/proofread_dst），
-   handler 那层也只放得住 doub_content——模型硬塞译文字段会被跳过，且一个字都不会落盘；
-3. 一批可以有多个子代理并行跑，各自锁自己的文件，互不干扰；失败不影响别人；
-4. 上限 16、角色/文件/后端就绪这些入参校验。
+两个角色（见 runtime.SUBAGENT_ROLES）：
+- **校对（proofread）**：读缓存 → 写 doub_content → 交报告；**改不了译文**（patch_transl_cache
+  换成收窄版，入参里没有 pre_dst/proofread_dst，handler 那层也只放得住 doub_content）；
+- **原文探索（explore）**：只读原文与 GPT 字典、**不写任何文件**，报告里给字典候选与规范建议，
+  由主 Agent 汇总后落地。
 
-LLM 是脚本化的（patch `_subagent_chat`），HTTP 走内存里的假缓存——不打真网络。
+锁住的事：一个子代理能按角色干完活并交报告；越权（改译文、写文件、用白名单外的工具）一个字都
+落不了盘；一批可以多个并行、各自锁自己的文件、失败互不影响；上限 16、角色/文件/后端就绪这些
+入参校验；子代理调用不过权限门禁；file="*" 的自动均分（按角色把全部文件平分给同批任务）。
+
+LLM 是脚本化的（patch `_subagent_chat`），HTTP 走内存里的假缓存与假字典——不打真网络。
 """
 
 import json
@@ -19,10 +22,11 @@ from unittest.mock import patch
 
 from GalTransl.Agent import runtime as rt
 from GalTransl.Agent.runtime import (
+    SUBAGENT_AGENT_EXPLORE,
     SUBAGENT_AGENT_PROOFREAD,
     SUBAGENT_MAX_TASKS,
     SUBAGENT_PATCHABLE_FIELDS,
-    SUBAGENT_TOOL_NAMES,
+    SUBAGENT_ROLES,
     AgentToolError,
     _patchable_fields_text,
     _subagent_handlers,
@@ -58,7 +62,12 @@ class _Parent:
     （见 SubagentPermissionTests）。档位固定成最严的 ask——子代理照样直接执行。
     """
 
-    def __init__(self, files: dict[str, list[dict]] | None = None) -> None:
+    def __init__(
+        self,
+        files: dict[str, list[dict]] | None = None,
+        inputs: dict[str, list[dict]] | None = None,
+        dicts: dict[str, dict] | None = None,
+    ) -> None:
         self.state = SimpleNamespace(
             config_file_name="config.yaml", project_dir=r"C:\proj", permission_mode="ask"
         )
@@ -67,6 +76,9 @@ class _Parent:
         self.stop_event = threading.Event()
         self._active_tool_call_id = "call-1"
         self.files = {name: [dict(e) for e in entries] for name, entries in (files or {}).items()}
+        # 原文（输入目录）与 GPT 字典：原文探索子代理要这两样
+        self.inputs = {name: [dict(e) for e in entries] for name, entries in (inputs or {}).items()}
+        self.dicts = dict(dicts or {})
         self.saves: list[dict] = []
         self.events: list[tuple[str, dict]] = []
         self.permission_checks: list[str] = []
@@ -80,7 +92,24 @@ class _Parent:
 
     def _http_get(self, path: str):
         if path.endswith("/cache"):
-            return {"files": [{"name": name} for name in self.files]}
+            return {
+                "files": [
+                    {"name": name, "entry_count": len(entries)} for name, entries in self.files.items()
+                ]
+            }
+        if "/dictionary/project" in path:
+            return {"dict_contents": self.dicts, "gpt_dict_files": list(self.dicts)}
+        if "/files?" in path:
+            return {
+                "input_files": [
+                    {"name": name, "is_file": True, "size": 10, "sentences": len(entries)}
+                    for name, entries in self.inputs.items()
+                ],
+                "cache_files": [{"name": name} for name in self.files],
+            }
+        if "/input/" in path:
+            name = urllib.parse.unquote(path.split("/input/")[1].split("?")[0])
+            return {"entries": [dict(e) for e in self.inputs.get(name, [])]}
         name = urllib.parse.unquote(path.rsplit("/", 1)[-1])
         return {"entries": [dict(e) for e in self.files.get(name, [])]}
 
@@ -146,7 +175,8 @@ class ProofreadAgentFlowTests(unittest.TestCase):
         self.assertEqual(out["total_doubts"], 1)
         task = out["tasks"][0]
         self.assertEqual(task["status"], "done")
-        self.assertEqual(task["doubts"], [1])
+        self.assertEqual(task["doubts"], [{"file": "a.json", "index": 1}])
+        self.assertEqual(task["files"], ["a.json"])
         self.assertIn("1 条漏译", task["report"])
         self.assertEqual(task["turns"], 3)
         # 意见真的写进了缓存
@@ -248,7 +278,10 @@ class SubagentToolScopeTests(unittest.TestCase):
         self.assertIn("只能写 doub_content", schema["function"]["description"])
 
     def test_tool_table_has_no_delegation_or_write_tools(self) -> None:
-        names = {str((tool.get("function") or {}).get("name") or "") for tool in _subagent_tools()}
+        names = {
+            str((tool.get("function") or {}).get("name") or "")
+            for tool in _subagent_tools(SUBAGENT_AGENT_PROOFREAD)
+        }
         self.assertEqual(
             names,
             {"read_transl_cache", "search_transl_cache", "list_problems", "get_name_table",
@@ -260,7 +293,7 @@ class SubagentToolScopeTests(unittest.TestCase):
 
     def test_handler_whitelist_only_allows_doub_content(self) -> None:
         parent = _Parent({"a.json": [ENTRY]})
-        handler = _subagent_handlers()["patch_transl_cache"]
+        handler = _subagent_handlers(SUBAGENT_AGENT_PROOFREAD)["patch_transl_cache"]
 
         with self.assertRaises(AgentToolError) as ctx:
             handler(parent, {"filename": "a.json", "patches": [{"index": 1, "pre_dst": "改"}]})
@@ -287,6 +320,346 @@ class SubagentToolScopeTests(unittest.TestCase):
         self.assertEqual(out["entries"][0]["pre_dst"], "译文")
 
 
+class ExploreAgentTests(unittest.TestCase):
+    """原文探索子代理：只看原文与 GPT 字典，不写任何文件，产出只有报告。
+
+    定位是 GenDic 的补充（昵称 / 低频专有名词 / 特殊称呼）+ 翻译规范建议；报告回到主 Agent 后
+    由主 Agent 落地（save_dict / write_project_guideline）。它很费 token，属于可选步骤——
+    "派之前先用 ask_user 征得用户同意"是提示词行为，这里只钉代码侧的边界。
+    """
+
+    def _parent(self) -> _Parent:
+        return _Parent(
+            {"a.json": [ENTRY]},
+            inputs={
+                "src_a.json": [
+                    {"index": 1, "post_src": "「お兄ちゃん」と妹が呼んだ。"},
+                    {"index": 2, "post_src": "「兄貴、また負けたの？」"},
+                ]
+            },
+            dicts={"gpt_dict": {"lines": ["多鲁德,ドルード"], "count": 1}},
+        )
+
+    def test_tool_table_is_read_only(self) -> None:
+        names = {
+            str((tool.get("function") or {}).get("name") or "")
+            for tool in _subagent_tools(SUBAGENT_AGENT_EXPLORE)
+        }
+        self.assertEqual(names, {"list_input_files", "read_input_file", "list_dict_files", "read_dict"})
+        for forbidden in ("patch_transl_cache", "read_transl_cache", "run_subagents", "start_translation"):
+            self.assertNotIn(forbidden, names)
+
+    def test_file_is_optional_unlike_proofread(self) -> None:
+        parent = self._parent()
+        with self.assertRaises(AgentToolError) as ctx:
+            _tool_run_subagents(parent, {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD}]})
+        self.assertIn("缺 file", str(ctx.exception))
+
+        out = _run(parent, {"tasks": [{"agent": SUBAGENT_AGENT_EXPLORE}]}, [("报告：字典没缺口。", [])])
+
+        self.assertEqual(out["tasks"][0]["status"], "done")
+        self.assertEqual(out["tasks"][0]["agent"], SUBAGENT_AGENT_EXPLORE)
+        self.assertEqual(out["tasks"][0]["label"], "原文探索")
+        self.assertEqual(out["tasks"][0]["doubts"], [])
+
+    def test_reads_source_and_dict_then_reports_candidates(self) -> None:
+        parent = self._parent()
+        report = (
+            "## 字典候选\n"
+            "お兄ちゃん → 哥哥 ｜ src_a.json#1 ｜ 妹妹对兄长的称呼，GenDic 多半不会收\n"
+            "兄貴 → 大哥 ｜ src_a.json#2 ｜ 同上，语气更随便\n"
+            "## 规范建议\n- 称呼：原文的「」保留到译文\n"
+        )
+        script = [
+            ("", [_Call("c1", "list_dict_files", "{}")]),
+            ("", [_Call("c2", "read_input_file", '{"filename": "src_a.json", "index": "1-2"}')]),
+            (report, []),
+        ]
+        captured: list[list[dict]] = []
+        base = _make_chat(script)
+
+        def fake_chat(client, model, messages, tools):
+            captured.append(messages)
+            return base(client, model, messages, tools)
+
+        with patch.object(rt, "_subagent_chat", fake_chat):
+            out = _tool_run_subagents(parent, {"tasks": [{"agent": SUBAGENT_AGENT_EXPLORE}]})
+
+        task = out["tasks"][0]
+        self.assertIn("お兄ちゃん → 哥哥", task["report"])
+        self.assertIn("规范建议", task["report"])
+        self.assertEqual(task["tool_calls"], 2)
+        # 一个文件都没写：字典与项目规范由主 Agent 汇总后落地
+        self.assertEqual(parent.saves, [])
+        # 用的是原文探索那套提示词与任务说明（不是校对那套）
+        self.assertIn("原文探索子代理", captured[0][0]["content"])
+        self.assertIn("负责的原文", captured[0][1]["content"])
+        self.assertNotIn("doub_content", captured[0][1]["content"])
+        failures = [
+            data for kind, data in parent.events if kind == "subagent_tool_result" and not data["ok"]
+        ]
+        self.assertEqual(failures, [])
+
+    def test_it_cannot_write_even_if_it_tries(self) -> None:
+        """模型硬要写：白名单外一律拒，而且什么都落不了盘。"""
+        parent = self._parent()
+        script = [
+            (
+                "",
+                [
+                    _Call(
+                        "c1",
+                        "patch_transl_cache",
+                        json.dumps(
+                            {"filename": "a.json", "patches": [{"index": 1, "doub_content": "顺手写一条"}]}
+                        ),
+                    )
+                ],
+            ),
+            ("写不了，交报告。", []),
+        ]
+
+        out = _run(parent, {"tasks": [{"agent": SUBAGENT_AGENT_EXPLORE}]}, script)
+
+        self.assertEqual(parent.saves, [])
+        self.assertEqual(out["tasks"][0]["doubts"], [])
+        refused = [
+            data for kind, data in parent.events if kind == "subagent_tool_result" and not data["ok"]
+        ]
+        self.assertIn("子代理没有这个工具", refused[0]["error"])
+
+    def test_report_cap_is_larger_than_proofread(self) -> None:
+        """它交回来的就是字典候选清单，800 字符装不下（但仍有上限）。"""
+        self.assertGreater(
+            SUBAGENT_ROLES[SUBAGENT_AGENT_EXPLORE].report_chars,
+            SUBAGENT_ROLES[SUBAGENT_AGENT_PROOFREAD].report_chars,
+        )
+
+
+class LockedFileTests(unittest.TestCase):
+    """锁定文件（任务里的 file）由**工具层**保证，不只是提示词里的一句。
+
+    校对：read/patch 只能碰自己那份缓存（否则两个子代理可能写同一条）；
+    原文探索：list_input_files 只列它、read_input_file 只能读它。
+    跨文件的 search_transl_cache / list_problems / get_name_table 不受影响，file 留空则照旧放开。
+    """
+
+    def _parent(self) -> _Parent:
+        return _Parent(
+            {"a.json": [ENTRY], "b.json": [ENTRY]},
+            inputs={
+                "src_a.json": [{"index": 1, "post_src": "原文 A"}],
+                "src_b.json": [{"index": 1, "post_src": "原文 B"}],
+            },
+        )
+
+    def test_explore_listing_only_shows_the_locked_file(self) -> None:
+        parent = self._parent()
+        handler = _subagent_handlers(SUBAGENT_AGENT_EXPLORE, "src_a.json")["list_input_files"]
+
+        out = handler(parent, {})
+
+        self.assertEqual([f["name"] for f in out["input_files"]], ["src_a.json"])
+        self.assertEqual(out["count"], 1)
+        self.assertIn("只派你看", out["note"])
+
+    def test_explore_cannot_read_another_file(self) -> None:
+        parent = self._parent()
+        handler = _subagent_handlers(SUBAGENT_AGENT_EXPLORE, "src_a.json")["read_input_file"]
+
+        self.assertEqual(
+            handler(parent, {"filename": "src_a.json"})["entries"][0]["post_src"], "原文 A"
+        )
+        with self.assertRaises(AgentToolError) as ctx:
+            handler(parent, {"filename": "src_b.json"})
+        self.assertIn("只负责「src_a.json」", str(ctx.exception))
+
+    def test_proofread_cannot_touch_another_cache_file(self) -> None:
+        parent = self._parent()
+        handlers = _subagent_handlers(SUBAGENT_AGENT_PROOFREAD, "a.json")
+
+        handlers["read_transl_cache"](parent, {"filename": "a.json"})  # 自己那份没问题
+        with self.assertRaises(AgentToolError):
+            handlers["read_transl_cache"](parent, {"filename": "b.json"})
+        with self.assertRaises(AgentToolError):
+            handlers["patch_transl_cache"](
+                parent, {"filename": "b.json", "patches": [{"index": 1, "doub_content": "越界"}]}
+            )
+        self.assertEqual(parent.saves, [])  # 一个字都没写进别的文件
+
+    def test_unknown_locked_name_is_reported_not_silently_empty(self) -> None:
+        """锁定的名字不在清单里（多半是文件名写错）：照旧全列，但要说清。"""
+        parent = self._parent()
+        handler = _subagent_handlers(SUBAGENT_AGENT_EXPLORE, "nope.json")["list_input_files"]
+
+        out = handler(parent, {})
+
+        self.assertEqual(len(out["input_files"]), 2)
+        self.assertIn("不在原文清单里", out["note"])
+
+    def test_unlocked_subagent_keeps_the_wide_view(self) -> None:
+        """file 留空 = 不锁定，行为与以前一样（校对仍可读任意缓存文件）。"""
+        parent = self._parent()
+        handlers = _subagent_handlers(SUBAGENT_AGENT_PROOFREAD)
+
+        handlers["read_transl_cache"](parent, {"filename": "b.json"})
+
+    def test_locked_run_rejects_out_of_scope_reads_end_to_end(self) -> None:
+        """整条链路：任务带 file → 子代理串到别的文件时拿到的是工具错误（不是静默读到）。"""
+        parent = self._parent()
+        script = [
+            ("", [_Call("c1", "read_input_file", '{"filename": "src_b.json"}')]),
+            ("报告：范围外读不到，按锁定的文件交。", []),
+        ]
+
+        out = _run(parent, {"tasks": [{"agent": SUBAGENT_AGENT_EXPLORE, "file": "src_a.json"}]}, script)
+
+        self.assertEqual(out["tasks"][0]["status"], "done")
+        refused = [
+            data for kind, data in parent.events if kind == "subagent_tool_result" and not data["ok"]
+        ]
+        self.assertIn("只负责「src_a.json」", refused[0]["error"])
+
+
+class AutoSplitTests(unittest.TestCase):
+    """file="*" 的自动均分：同批**同角色**的 "*" 任务平分该角色的全部文件。
+
+    - proofread 的候选是缓存文件（跳过条目为 0 的；.append.jsonl 本来就不是 .json）；
+      explore 的候选是原文文件；
+    - 本批里已具体点名的文件不会再分给 "*"（点名优先，避免两个子代理抢同一份）；
+    - 文件比任务少时，没分到文件的任务直接跳过（空跑一轮照样烧 token），note 里要说清；
+    - 一个任务可能领到一组文件：锁定范围跟着变一组，doubts 也要带上文件名。
+    """
+
+    def test_split_files_evenly(self) -> None:
+        # 256 个文件 16 份 → 每个 16 个（不重不漏、顺序不乱）
+        files = [f"f{i:03d}.json" for i in range(256)]
+        groups = rt._split_files_evenly(files, 16)
+        self.assertEqual([len(group) for group in groups], [16] * 16)
+        self.assertEqual([name for group in groups for name in group], files)
+        # 除不尽：前面的多一个（10 个文件 3 份 → 4/3/3）
+        self.assertEqual([len(g) for g in rt._split_files_evenly(files[:10], 3)], [4, 3, 3])
+        # 文件比份数少：后面几份是空的（调用方据此跳过这些任务）
+        self.assertEqual(rt._split_files_evenly(["a.json", "b.json"], 4), [["a.json"], ["b.json"], [], []])
+
+    def test_star_splits_cache_files_among_proofread_tasks(self) -> None:
+        parent = _Parent({f"c{i}.json": [ENTRY] for i in range(4)})
+        captured: list[list[dict]] = []
+        base = _make_chat([("报告：没问题。", [])])
+
+        def fake_chat(client, model, messages, tools):
+            captured.append(messages)
+            return base(client, model, messages, tools)
+
+        with patch.object(rt, "_subagent_chat", fake_chat):
+            out = _tool_run_subagents(
+                parent, {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD, "file": "*"}] * 2}
+            )
+
+        self.assertEqual(out["total"], 2)
+        first, second = out["tasks"]
+        self.assertEqual(first["files"], ["c0.json", "c1.json"])
+        self.assertEqual(second["files"], ["c2.json", "c3.json"])
+        self.assertEqual(first["file"], "c0.json 等 2 个文件")  # 展示用的一行
+        self.assertIn("自动均分", out["note"])
+        self.assertIn("每个 2 个", out["note"])
+        # 任务说明里是完整清单：子代理没有列表类工具，只能从这里知道自己负责哪些
+        briefs = " | ".join(msgs[1]["content"] for msgs in captured)
+        self.assertIn("c0.json、c1.json", briefs)
+        self.assertIn("c2.json、c3.json", briefs)
+
+    def test_star_respects_named_files(self) -> None:
+        """点名优先：b.json 已具体派给一个任务，"*" 只分剩下的。"""
+        parent = _Parent({name: [ENTRY] for name in ("a.json", "b.json", "c.json")})
+        out = _run(
+            parent,
+            {
+                "tasks": [
+                    {"agent": SUBAGENT_AGENT_PROOFREAD, "file": "b.json"},
+                    {"agent": SUBAGENT_AGENT_PROOFREAD, "file": "*"},
+                ]
+            },
+            [("报告。", [])],
+        )
+        self.assertEqual(out["tasks"][0]["files"], ["b.json"])
+        self.assertEqual(out["tasks"][1]["files"], ["a.json", "c.json"])
+
+    def test_star_with_more_tasks_than_files_skips_the_extras(self) -> None:
+        parent = _Parent({"a.json": [ENTRY]})
+        out = _run(
+            parent,
+            {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD, "file": "*"}] * 3},
+            [("报告。", [])],
+        )
+        self.assertEqual(out["total"], 1)
+        self.assertEqual(out["skipped"], 2)
+        self.assertEqual(out["tasks"][0]["files"], ["a.json"])
+        self.assertIn("没分到文件", out["note"])
+
+    def test_star_with_no_candidates_is_an_error(self) -> None:
+        parent = _Parent()  # 一个缓存文件都没有
+        with self.assertRaises(AgentToolError) as ctx:
+            _tool_run_subagents(parent, {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD, "file": "*"}]})
+        self.assertIn("自动均分拿不到文件", str(ctx.exception))
+
+    def test_star_ignores_empty_cache_files(self) -> None:
+        """条目数为 0 的缓存文件不参与分派：派过去也没东西可校对。"""
+        parent = _Parent({"a.json": [ENTRY], "empty.json": []})
+        out = _run(
+            parent,
+            {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD, "file": "*"}] * 2},
+            [("报告。", [])],
+        )
+        self.assertEqual(out["tasks"][0]["files"], ["a.json"])
+        self.assertEqual(out["skipped"], 1)
+
+    def test_star_splits_input_files_for_explore(self) -> None:
+        parent = _Parent(
+            {},
+            inputs={f"src_{i}.json": [{"index": 1, "post_src": "原文"}] for i in range(3)},
+        )
+        out = _run(
+            parent,
+            {"tasks": [{"agent": SUBAGENT_AGENT_EXPLORE, "file": "*"}] * 2},
+            [("报告。", [])],
+        )
+        self.assertEqual(out["tasks"][0]["files"], ["src_0.json", "src_1.json"])
+        self.assertEqual(out["tasks"][1]["files"], ["src_2.json"])
+
+    def test_multi_file_doubts_carry_the_filename(self) -> None:
+        """一组文件里写的意见要能认出在哪份里——只给 index，主 Agent 没法定位。"""
+        parent = _Parent({"a.json": [ENTRY], "b.json": [ENTRY]})
+        script = [
+            (
+                "",
+                [
+                    _Call(
+                        "c1",
+                        "patch_transl_cache",
+                        json.dumps(
+                            {"filename": "b.json", "patches": [{"index": 1, "doub_content": "漏译"}]}
+                        ),
+                    )
+                ],
+            ),
+            ("报告：1 条。", []),
+        ]
+        out = _run(parent, {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD, "file": "*"}]}, script)
+        self.assertEqual(out["tasks"][0]["files"], ["a.json", "b.json"])
+        self.assertEqual(out["tasks"][0]["doubts"], [{"file": "b.json", "index": 1}])
+
+    def test_multi_file_lock_scope_message(self) -> None:
+        """一组的锁定：范围内的放行，范围外的报错把整组范围列出来。"""
+        parent = _Parent({"a.json": [ENTRY], "b.json": [ENTRY], "c.json": [ENTRY]})
+        handlers = _subagent_handlers(SUBAGENT_AGENT_PROOFREAD, ["a.json", "b.json"])
+
+        handlers["read_transl_cache"](parent, {"filename": "b.json"})  # 自己那组没问题
+        with self.assertRaises(AgentToolError) as ctx:
+            handlers["read_transl_cache"](parent, {"filename": "c.json"})
+        self.assertIn("2 个文件", str(ctx.exception))
+        self.assertIn("「a.json」", str(ctx.exception))
+
+
 class SubagentPermissionTests(unittest.TestCase):
     """子代理不受权限模式约束：白名单里的工具一律直接执行（连 ask 档也不问）。
 
@@ -300,7 +673,7 @@ class SubagentPermissionTests(unittest.TestCase):
         return rt.SubAgentRunner(
             parent,
             agent=SUBAGENT_AGENT_PROOFREAD,
-            file="a.json",
+            files=["a.json"],
             indexes="",
             brief="",
             delegation_id="d1",
@@ -315,7 +688,7 @@ class SubagentPermissionTests(unittest.TestCase):
         )
 
         sub = self._subagent(parent)
-        out = sub._run_tool(call, _subagent_handlers())
+        out = sub._run_tool(call, _subagent_handlers(SUBAGENT_AGENT_PROOFREAD))
 
         # 写进去了（结果直接回给子代理，没有"等批准"这回事）
         self.assertEqual(json.loads(out["content"])["updated"], 1)
@@ -362,15 +735,19 @@ class SubagentPermissionTests(unittest.TestCase):
     def test_the_whitelist_is_the_security_boundary(self) -> None:
         """白名单是唯一的边界：子代理不过门禁，所以塞进去的高风险工具等于全自动放行。
 
-        所以钉住"除 patch_transl_cache（改译文数据级）外一律是读类"——哪天往
-        SUBAGENT_TOOL_NAMES 里加了个改配置/启动翻译的工具，这里会红。
+        钉住三件事：① 白名单里的名字都真实存在（写错一个名字 = 给了个空工具，模型会一直撞墙）；
+        ② 除校对那支的 patch_transl_cache（改译文数据级）外，所有角色的工具都是读类；
+        ③ 原文探索那支连 patch 都没有。
         """
-        risks = {name: rt._tool_risk(name) for name in SUBAGENT_TOOL_NAMES}
-        self.assertEqual(risks["patch_transl_cache"], rt.PERMISSION_EDIT)
-        self.assertEqual(
-            {name for name, risk in risks.items() if risk != rt.PERMISSION_READ},
-            {"patch_transl_cache"},
-        )
+        non_read: set[str] = set()
+        for agent, role in SUBAGENT_ROLES.items():
+            for name in role.tools:
+                self.assertIn(name, rt._TOOL_HANDLERS, f"{agent} 的白名单里有不存在的工具：{name}")
+                if rt._tool_risk(name) != rt.PERMISSION_READ:
+                    non_read.add(name)
+        self.assertEqual(non_read, {"patch_transl_cache"})
+        self.assertIn("patch_transl_cache", SUBAGENT_ROLES[SUBAGENT_AGENT_PROOFREAD].tools)
+        self.assertNotIn("patch_transl_cache", SUBAGENT_ROLES[SUBAGENT_AGENT_EXPLORE].tools)
 
 
 class RunSubagentsValidationTests(unittest.TestCase):
