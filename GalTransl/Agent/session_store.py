@@ -133,6 +133,9 @@ class SessionStore:
         self.dir = project_dir_for(project_dir)
         self.path = os.path.join(self.dir, f"{session_id}.jsonl")
         self.meta_path = f"{self.path}.meta.json"
+        # 上下文压缩的归档目录：被压掉的历史按 chunk 落盘，Agent 需要细节时
+        # 用 read_history_archive 工具回查（见 runtime 的 Insert-then-Compress）。
+        self.chunks_dir = f"{self.path}.chunks"
 
     # ---- 写入 ----
     def _append(self, record: dict[str, Any]) -> None:
@@ -182,6 +185,77 @@ class SessionStore:
             "summary_chars": summary_chars,
             "tokens_before": tokens_before,
         })
+
+    # ---- 压缩归档（chunk）----
+    def write_chunk(self, name: str, content: str) -> str | None:
+        """原子写一个归档文件，成功返回文件名。
+
+        文件名由调用方给定（chunk-0001.md 这种），这里只管落盘：先写临时文件再
+        os.replace，进程被强杀也不会留下半截归档。
+        """
+        try:
+            os.makedirs(self.chunks_dir, exist_ok=True)
+            path = os.path.join(self.chunks_dir, name)
+            fd, tmp = tempfile.mkstemp(prefix=".chunk-", suffix=".tmp", dir=self.chunks_dir)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(content)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, path)
+            finally:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+            return name
+        except Exception as exc:  # noqa: BLE001 - 归档失败不影响压缩本身
+            _log(f"写归档失败 {name}: {exc}")
+            return None
+
+    def read_chunk(self, name: str) -> str | None:
+        """读一个归档文件的全文；不存在或读取失败返回 None。"""
+        path = os.path.join(self.chunks_dir, os.path.basename(str(name or "")))
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read()
+        except OSError:
+            return None
+
+    def list_chunks(self) -> list[dict[str, Any]]:
+        """列出本会话的归档，按文件名（即时间）升序。
+
+        topics/archived_at 取自文件头部的 front matter，解析失败就只给文件名——
+        归档只是给模型回查用的辅助信息，不能因为一条坏 front matter 就整份不可用。
+        """
+        if not os.path.isdir(self.chunks_dir):
+            return []
+        items: list[dict[str, Any]] = []
+        try:
+            for name in sorted(os.listdir(self.chunks_dir)):
+                if not name.endswith(".md"):
+                    continue
+                info: dict[str, Any] = {"name": name, "topics": "", "archived_at": 0.0}
+                try:
+                    with open(os.path.join(self.chunks_dir, name), "r", encoding="utf-8") as f:
+                        for _ in range(12):
+                            line = f.readline()
+                            if not line:
+                                break
+                            if line.startswith("topics:"):
+                                info["topics"] = line.split(":", 1)[1].strip()
+                            elif line.startswith("archived_at:"):
+                                try:
+                                    info["archived_at"] = float(line.split(":", 1)[1].strip())
+                                except ValueError:
+                                    pass
+                except OSError:
+                    pass
+                items.append(info)
+        except Exception as exc:  # noqa: BLE001
+            _log(f"列归档失败 {self.chunks_dir}: {exc}")
+            return []
+        return items
 
     # ---- 读取 ----
     def load(self) -> dict[str, Any]:
@@ -238,6 +312,17 @@ class SessionStore:
                 os.remove(self.meta_path)
         except Exception as exc:  # noqa: BLE001
             _log(f"删除失败 {self.meta_path}: {exc}")
+        # 压缩归档目录一并删掉：会话都没了，归档留着只会占空间。
+        if os.path.isdir(self.chunks_dir):
+            try:
+                for name in os.listdir(self.chunks_dir):
+                    try:
+                        os.remove(os.path.join(self.chunks_dir, name))
+                    except OSError:
+                        pass
+                os.rmdir(self.chunks_dir)
+            except OSError as exc:
+                _log(f"删除失败 {self.chunks_dir}: {exc}")
 
 
 # ---- 项目级操作 ----

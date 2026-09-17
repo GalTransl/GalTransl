@@ -1587,6 +1587,7 @@ export type AgentEventType =
   | 'llm_retry_start'
   | 'llm_retry_end'
   | 'compacted'
+  | 'compacting'
   | 'context_usage'
   | 'queue'
   | 'assistant_message'

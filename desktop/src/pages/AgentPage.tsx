@@ -182,6 +182,8 @@ const TRANSIENT_EVENT_TYPES = new Set<AgentEvent['type']>([
   'wait_tick',
   // 上下文用量只驱动指示器，不进转录、也不该进浏览器缓存（刷新后由状态快照给）
   'context_usage',
+  // 压缩的开始/结束只是过程指示：终态有持久事件 compacted，刷新后由它重建
+  'compacting',
   // 队列快照（排队消息的实时变更）同理：不进转录、不进缓存
   'queue',
   // 子代理的逐步活动：一次派 16 个、每个十几轮，存进缓存会把转录撑爆。只走实时流，

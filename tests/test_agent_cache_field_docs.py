@@ -144,12 +144,12 @@ class SystemPromptInclusionTests(unittest.TestCase):
         self.assertIn("# 当前项目环境", prompt)
         self.assertIn("标准翻译流程", prompt)
 
-    def test_section_survives_compaction(self) -> None:
-        """压缩后 system prompt 会重建：字段说明必须跟着回来（不能被摘要吃掉）。"""
-        prompt = _build_system_prompt(_state(), summary="早前干了很多事……")
+    def test_section_is_stable_across_compaction(self) -> None:
+        """压缩不再改写 system prompt（摘要单独成条）：字段说明自然一直在——
+        这正是压缩后前缀缓存还能命中的前提。"""
+        prompt = _build_system_prompt(_state())
         self.assertIn("# 缓存（transl_cache）字段说明", prompt)
-        self.assertIn("# 会话摘要（早前对话已压缩）", prompt)
-        self.assertIn("早前干了很多事……", prompt)
+        self.assertIn("# 当前项目环境", prompt)
 
 
 if __name__ == "__main__":

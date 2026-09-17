@@ -54,6 +54,8 @@ _TRANSIENT_EVENT_TYPES = frozenset({
     "subagent_message",
     "subagent_tool_call",
     "subagent_tool_result",
+    # 压缩的开始/结束只是过程指示：终态有 compacted（持久），刷新后由它重建即可。
+    "compacting",
 })
 
 # ---- 子代理（subagent）的常量 ----
@@ -73,6 +75,9 @@ SUBAGENT_REPORT_CHARS = 800
 SUBAGENT_EXPLORE_REPORT_CHARS = 6_000
 # 子代理一次工具结果的回传上限（字符）：读缓存动辄几十条，超了截断并提示它分段读
 SUBAGENT_TOOL_RESULT_CHARS = 24_000
+# 子代理自己的历史压缩：保留最近 N 条消息原文不动。子代理历史比主会话短得多、任务也单一，
+# keep_recent 取得比父会话（COMPACT_KEEP_RECENT_MSGS）小一半。
+SUBAGENT_COMPACT_KEEP_RECENT = 8
 # 父回合等待子代理时的进度打印间隔（秒）
 SUBAGENT_PROGRESS_TICK = 5.0
 
@@ -147,6 +152,7 @@ PERMISSION_READ_TOOLS: frozenset[str] = frozenset({
     "read_transl_cache",
     "read_output",
     "search_transl_cache",
+    "read_history_archive",
     "get_runtime",
     "wait",
     "ask_user",
@@ -257,6 +263,18 @@ CONTEXT_RESERVE_TOKENS = 8_192
 SUMMARY_MAX_TOKENS = 2_048
 # 粗略字符->token 换算系数（无 tokenizer 时的估算）
 CHARS_PER_TOKEN = 4
+# 压缩归档（chunk）里单条工具结果的上限（字符）：归档是给模型回查细节用的，
+# 一条几万字符的缓存读取原样存进去只会让回查本身又撑爆上下文。
+COMPACT_ARCHIVE_TOOL_RESULT_CHARS = 2_000
+# 摘要消息里最多列几个历史归档（更早的只报数量）
+COMPACT_ARCHIVE_MAX_LISTED = 10
+# 压缩归档文件名模板
+COMPACT_ARCHIVE_NAME = "chunk-{index:04d}.md"
+# 一次 read_history_archive 最多回传多少字符（超长截断，提示改用关键词检索）
+COMPACT_ARCHIVE_READ_CHARS = 8_000
+# 消息上的内部标记：`_` 开头的键只在内存里用（压缩指令 / 摘要 / 归档标记），
+# 发请求前一律剥掉——第三方 OpenAI 兼容端点收到陌生字段可能直接 400。
+_INTERNAL_MSG_PREFIX = "_"
 
 # ---- LLM 请求重试 ----
 # 失败自动重试的上限（不含首次请求）与退避参数。重试由 runtime 自己掌控，
@@ -286,6 +304,14 @@ def _log(msg: str, *args: object) -> None:
 
 class AgentStopRequested(Exception):
     """重试退避等待期间收到停止信号：交给主循环按「用户停止」收尾。"""
+
+
+class _ContextOverflow(Exception):
+    """请求被 provider 判为超出上下文窗口（400 context too long）。
+
+    不在原地重试——历史长度没变，重试多少次都一样。抛给主循环做一次强制压缩
+    （含弹出尾部腾空间）后再重试原请求，见 run()。
+    """
 
 
 # 网络层关键词：SDK/网关把原因藏在文案里时的兜底识别
@@ -514,6 +540,60 @@ COMPACT_SUMMARY_PROMPT = """你在为一个 Galgame 翻译项目的 AI 助手压
 
 请输出摘要："""
 
+# Insert-then-Compress 用的指令（见 _begin_compaction）。
+# 它不单独发一次「摘要请求」，而是作为一条**瞬时消息**拼在当前会话末尾，让下一轮
+# 正常请求带着它一起发出去——system prompt / tools / 历史前缀全部复用，摘要调用
+# 本身也能命中提示缓存。代价是必须把话说死：模型手上的上下文里全是"继续干活"的
+# 暗示，稍微含糊一点它就会接着调工具，而不是老实压缩。
+COMPACT_INSTRUCTION_PROMPT = """═══════════════════════════════════════════════
+任务切换：记忆压缩模式（IMPORTANT）
+═══════════════════════════════════════════════
+上面的对话**已经结束**，你现在处于记忆压缩模式。严格执行：
+
+1. 这不是继续对话；
+2. **不要**执行上面提到的任何请求；
+3. **不要**调用任何工具（tool_calls 必须为空）；
+4. 你的回复必须是**纯文本**。
+
+你唯一的任务：把上面的对话压缩成一份摘要。
+
+输出格式（严格遵守）：
+先输出一行 <topics>3-6 个关键主题短语，逗号分隔</topics>
+再用 <summary></summary> 包住摘要正文。
+
+摘要必须保留"接着干下去"所需的硬信息，按下面的骨架写：
+## 目标
+## 已完成的工作
+## 关键决策
+## 当前进度与项目状态
+## 待办与注意事项
+
+必须原样保留、不要概括掉：文件路径、字典文件名、翻译引擎名（如 ForGal-json）、任务 id、问题条目 index 或区间、具体的译名修正。
+用中文写，简洁但不丢信息。现在开始，直接输出 <topics> 与 <summary>。"""
+
+
+def _parse_compact_summary(content: str) -> str:
+    """从压缩响应里取摘要正文。
+
+    优先取 <summary>…</summary>；模型没按格式走时退而用整段文本（除了 <topics> 行），
+    总比因为格式瑕疵白压一次强。
+    """
+    text = str(content or "").strip()
+    if not text:
+        return ""
+    match = re.search(r"<summary>(.*?)</summary>", text, re.DOTALL | re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    text = re.sub(r"<topics>.*?</topics>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+    text = re.sub(r"</?summary>", "", text, flags=re.IGNORECASE).strip()
+    return text
+
+
+def _parse_compact_topics(content: str) -> str:
+    match = re.search(r"<topics>(.*?)</topics>", str(content or ""), re.DOTALL | re.IGNORECASE)
+    return " ".join(match.group(1).split())[:200] if match else ""
+
+
 @dataclass(slots=True)
 class AgentEvent:
     """单条 Agent 事件，会原样推给前端 SSE。"""
@@ -627,6 +707,20 @@ class AgentRunner:
         self._model: str = ""
         self._context_window = DEFAULT_CONTEXT_WINDOW
         self._compacted_this_turn = False
+        # 进行中的压缩（Insert-then-Compress）：指令已挂在历史末尾、等这一轮请求
+        # 回摘要。字段见 _begin_compaction，收尾后置空。
+        self._pending_compaction: dict[str, Any] | None = None
+        # 溢出恢复（400 context too long → 强制压缩 + 重试）每回合只做一次，
+        # 压完还超限说明是别的问题（比如工具 schema 本身太长），别再空转。
+        self._overflow_recovery_used = False
+        # 本回合压缩失败过（两条路径都没成）就不再重试：否则主循环每轮都会
+        # "注入指令 → 失败 → 回滚 → 再注入"，一路空转到 MAX_STEPS。
+        self._compact_failed_this_turn = False
+        # 是否给请求注入 cache_control 断点（见 _apply_prompt_cache）：
+        # Anthropic 系需要显式断点，OpenAI 兼容的多数实现是服务端自动前缀缓存。
+        self._prompt_caching = False
+        # 压缩请求期间把流式增量静音：摘要内容不该以"助手正文"的形式刷到界面上。
+        self._stream_quiet = False
         # thinking 模式（DeepSeek 等）下要回传给 provider 的思考字段名：流里见到过就记下来，
         # 之后每条 assistant 消息都带回去（带 tools 的请求不回传会 400）。空 = 还没见过，
         # 这时不往历史里塞这个字段，免得给不认它的 provider 添乱。
@@ -702,8 +796,16 @@ class AgentRunner:
         self._context_window = _profile_context_window(profile)
         self.state.context_window = self._context_window
         base_url = _normalize_endpoint(endpoint)
+        # 提示缓存断点：后端配置里可选（auto/on/off），缺省 auto——只在 Anthropic 系
+        # 的端点上注入 cache_control，其余（DeepSeek 等）靠服务端自动前缀缓存。
+        self._prompt_caching = _resolve_prompt_caching(
+            openai_section.get("promptCaching"), model, base_url
+        )
         masked = (token[:4] + "…" + token[-4:]) if len(token) > 8 else "***"
-        _log(f"LLM 配置: model={model} endpoint={base_url} token={masked} context_window={self._context_window}")
+        _log(
+            f"LLM 配置: model={model} endpoint={base_url} token={masked} "
+            f"context_window={self._context_window} prompt_caching={self._prompt_caching}"
+        )
         try:
             from openai import OpenAI
         except ImportError as exc:  # pragma: no cover - 依赖缺失
@@ -771,8 +873,12 @@ class AgentRunner:
                 # 以前在这里按"安全点"注入，结果模型刚跑完第一个工具调用就被插进
                 # 一条新消息，把一轮任务劈成两半。
 
-                # 历史过长先压缩，避免下一步请求撑爆上下文窗口
-                self._maybe_compact()
+                # 历史过长先压缩（Insert-then-Compress）：挂上压缩指令，用一轮
+                # "复用当前会话"的请求拿摘要，再继续正常干活。
+                if self._begin_compaction():
+                    self._run_compaction_request()
+                    turns += 1
+                    continue
 
                 # 上下文用量（界面指示器）：压缩之后再报，界面上立即看到回落
                 self._emit_context_usage()
@@ -783,6 +889,16 @@ class AgentRunner:
                 req_started = time.time()
                 try:
                     content, tool_calls, finish_reason = self._stream_llm_response()
+                except _ContextOverflow:
+                    # 400 上下文超限：强制压缩一次再重试。先弹掉尾部一条腾空间
+                    # （历史可能已经大到连压缩指令都塞不进去），压完再接回去。
+                    # 每回合只做一次，仍超限说明问题不在历史长度，交给外层报错。
+                    _log("  ⚠ 请求超出上下文窗口，强制压缩后重试")
+                    if not self._begin_compaction(force=True, pull_back=1):
+                        raise
+                    self._run_compaction_request()
+                    turns += 1
+                    continue
                 finally:
                     # 响应已落定（或抛错）：不再对外暴露"进行中的消息"
                     acc = self._take_stream_acc()
@@ -1001,6 +1117,10 @@ class AgentRunner:
                 self.state.pending_followup = True
         # 回合结束就把压缩标记清掉，下一回合重新评估上下文用量
         self._compacted_this_turn = False
+        # 溢出恢复同理：新回合可以再用一次（同一回合内只恢复一次，避免空转）
+        self._overflow_recovery_used = False
+        # 压缩失败标记也只在回合内有效：下个回合重新给一次机会
+        self._compact_failed_this_turn = False
         # 清掉落盘里的 running 标记：否则下次启动会误判"上次被中断"
         if self._store is not None:
             self._store.append_meta(running=False)
@@ -1092,6 +1212,17 @@ class AgentRunner:
                     _log("请求失败且已收到停止信号，按用户停止收尾（不重试）")
                     raise AgentStopRequested() from exc
                 if not info["retriable"] or attempt >= LLM_MAX_RETRIES:
+                    # 上下文超限：原地重试没有意义（历史长度没变），抛给主循环做一次
+                    # 强制压缩后再重试原请求。压缩请求自己（quiet）不参与这次恢复，
+                    # 否则会把唯一一次恢复机会消耗在压缩上。
+                    if (
+                        not self._stream_quiet
+                        and info["code"] == "CONTEXT_TOO_LARGE"
+                        and not self._overflow_recovery_used
+                    ):
+                        self._overflow_recovery_used = True
+                        _log("  ⚠ 上下文超限：交给主循环强制压缩后重试")
+                        raise _ContextOverflow() from exc
                     if attempt > 0:
                         _log(f"  ❌ 重试 {attempt} 次后仍失败：{info['code']} {info['message']}")
                         raise RuntimeError(
@@ -1124,10 +1255,16 @@ class AgentRunner:
 
     def _create_stream(self, *, include_usage: bool) -> Any:
         """发一次流式请求（不做重试，重试由外层的 _stream_llm_attempt 与重试循环负责）。"""
+        messages = self._messages_for_request()
+        tools = AGENT_TOOLS
+        if self._prompt_caching:
+            # 只对认这套断点的后端注入（见 _resolve_prompt_caching）：Anthropic 系
+            # 需要显式 cache_control，OpenAI 兼容的多数实现是服务端自动前缀缓存。
+            messages, tools = _apply_prompt_cache(messages, tools)
         kwargs: dict[str, Any] = {
             "model": self._model,
-            "messages": self._messages_for_request(),
-            "tools": AGENT_TOOLS,
+            "messages": messages,
+            "tools": tools,
             "tool_choice": "auto",
             "stream": True,
         }
@@ -1136,14 +1273,17 @@ class AgentRunner:
         return self._openai_client.chat.completions.create(**kwargs)
 
     def _messages_for_request(self) -> list[dict[str, Any]]:
-        """发请求前的消息列表：按需给 assistant 消息补齐 thinking 模式的思考字段。
+        """发请求前的消息列表：剥掉内部标记，并按需补齐 thinking 模式的思考字段。
+
+        内部标记（`_compact_instruction` / `_compact_summary` 这些 `_` 开头的键）只在
+        内存里用，第三方 OpenAI 兼容端点收到陌生字段可能直接 400，必须剥掉。
 
         DeepSeek（及同类 thinking 模式）要求：只要请求带了 tools，历史里每条 assistant
         消息都必须把当初的 reasoning_content 回传——**即使该轮模型没有实际进行工具调用**，
         少一条就 400「The `reasoning_content` in the thinking mode must be passed back to
         the API」。本方法负责：这场会话是 thinking 会话时（流里见过该字段，或历史里已有），
         给缺的那些补空串；老会话（本修复之前存的 assistant 消息还没带这个字段）靠这一步
-        救回来。不是 thinking 会话就原样返回，不给不认它的 provider 塞陌生字段。
+        救回来。不是 thinking 会话就不补，不给不认它的 provider 塞陌生字段。
         """
         field = self._reasoning_field
         if not field:
@@ -1153,14 +1293,12 @@ class AgentRunner:
                 field = next((name for name in REASONING_FIELD_NAMES if name in message), "")
                 if field:
                     break
-        if not field:
-            return list(self.state.messages)
         messages: list[dict[str, Any]] = []
         for message in self.state.messages:
-            if message.get("role") == "assistant" and field not in message:
-                messages.append({**message, field: ""})
-            else:
-                messages.append(message)
+            clean = _strip_internal_fields(message)
+            if field and message.get("role") == "assistant" and field not in message:
+                clean = {**clean, field: ""}
+            messages.append(clean)
         return messages
 
     def _open_stream(self, *, include_usage: bool) -> Any:
@@ -1240,21 +1378,26 @@ class AgentRunner:
                 _flush_stream("content", pending_content, len(content_parts), force=True)
             else:
                 _flush_stream("reasoning", pending_reasoning, len(reasoning_parts), force=True)
-            started = segment_started[kind]
-            parts = content_parts if kind == "content" else reasoning_parts
-            self._emit(f"{kind}_end", {
-                "length": len("".join(parts)),
-                "duration_ms": int((time.time() - (started if started is not None else stream_started)) * 1000),
-            })
+            if not self._stream_quiet:
+                started = segment_started[kind]
+                parts = content_parts if kind == "content" else reasoning_parts
+                self._emit(f"{kind}_end", {
+                    "length": len("".join(parts)),
+                    "duration_ms": int((time.time() - (started if started is not None else stream_started)) * 1000),
+                })
             segment_started[kind] = None
 
         def _flush_stream(kind: str, pending: list[str], total: int, force: bool = False) -> None:
-            """节流冲刷增量：最多 25ms 一条，避免 step 计数被 delta 刷爆。"""
+            """节流冲刷增量：最多 25ms 一条，避免 step 计数被 delta 刷爆。
+
+            压缩请求（_stream_quiet）只静音 emit，缓冲照常清空——不清会越攒越大。
+            """
             if not pending:
                 return
             now = time.monotonic()
             if force or now - throttle[kind] >= 0.025:
-                self._emit(f"{kind}_delta", {"delta": "".join(pending), "index": total})
+                if not self._stream_quiet:
+                    self._emit(f"{kind}_delta", {"delta": "".join(pending), "index": total})
                 pending.clear()
                 throttle[kind] = now
 
@@ -1370,52 +1513,254 @@ class AgentRunner:
         })
 
     def _maybe_compact(self) -> None:
-        """历史过长时压缩早期对话。每次回合最多压一次，失败降级为本地截断。
+        """同步压缩入口（降级路径）：直接另发一次摘要请求，压完重建。
 
+        正式路径是 Insert-then-Compress（_begin_compaction + _run_compaction_request，
+        复用当前会话前缀）；这里是它的兜底——压缩请求失败、模型不按指令走时可以调用。
         触发线：估算用量 > 窗口的 COMPACT_TRIGGER_RATIO。
         """
-        if self._compacted_this_turn:
+        if self._compacted_this_turn or self._pending_compaction is not None:
             return
         window = self._context_window
         limit = int(window * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
-        estimated = self._estimate_context_tokens()
-        if estimated <= limit:
+        if self._estimate_context_tokens() <= limit:
             return
-
         cut = _find_compaction_cut(self.state.messages, COMPACT_KEEP_RECENT_MSGS)
         if cut <= 0:
-            _log(f"  ⚠ 上下文估算 {estimated} 超阈值 {limit}，但找不到安全切点，跳过压缩")
+            _log("  ⚠ 上下文超阈值但找不到安全切点，跳过压缩")
             return
+        self._compact_via_separate_request(cut)
 
-        _log(f"  📦 上下文估算 {estimated} > {limit}，压缩前 {cut} 条消息")
-        head = self.state.messages[:cut]
-        tail = self.state.messages[cut:]
+    def _begin_compaction(self, *, force: bool = False, pull_back: int = 0) -> bool:
+        """判断要不要压缩；要就把压缩指令挂到当前历史末尾，返回 True。
 
+        **Insert-then-Compress**（不另开摘要请求）：指令作为一条**不落盘**的瞬时
+        消息拼在会话尾部，由下一轮正常请求带着它一起发出去——system prompt、tools、
+        历史前缀全部复用，摘要调用本身也能命中提示缓存；压完只产生一次前缀失效。
+        对照：另发独立摘要请求的共享前缀为 0，压完主会话还要冷 4~5 轮。
+
+        pull_back > 0 用于溢出恢复：历史已经超过窗口、连指令都塞不进去时，先弹出
+        尾部 K 条腾空间（由 _rebuild_after_compaction 接回重建后的尾部，不会丢）。
+        """
+        if self._pending_compaction is not None or self._compact_failed_this_turn:
+            return False
+        estimated = self._estimate_context_tokens()
+        if not force:
+            if self._compacted_this_turn:
+                return False
+            window = self._context_window
+            limit = int(window * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
+            if estimated <= limit:
+                return False
+
+        messages = self.state.messages
+        pulled: list[dict[str, Any]] = []
+        if pull_back > 0:
+            count = min(pull_back, max(0, len(messages) - 1))  # 永不弹 system
+            if count > 0:
+                pulled = messages[-count:]
+                del messages[-count:]
+
+        cut = _find_compaction_cut(messages, COMPACT_KEEP_RECENT_MSGS)
+        if cut <= 0:
+            messages.extend(pulled)  # 找不到安全切点：把弹出的放回去
+            _log("  ⚠ 上下文超限但找不到安全切点，跳过本次压缩")
+            return False
+
+        instruction = {
+            "role": "user",
+            "content": COMPACT_INSTRUCTION_PROMPT,
+            "_compact_instruction": True,
+        }
+        messages.append(instruction)  # 只进内存：失败回滚时才不会污染落盘历史
+        self._pending_compaction = {
+            "cut": cut,
+            "pulled": pulled,
+            "estimated": estimated,
+            "instruction": instruction,
+        }
+        _log(f"  📦 准备压缩：将移除 {cut} 条（估算 {estimated} tokens，复用当前会话前缀）")
+        return True
+
+    def _abort_compaction(self) -> None:
+        """放弃本次压缩：摘掉指令消息，把弹出的消息放回原位。"""
+        ctx = self._pending_compaction
+        self._pending_compaction = None
+        if ctx is None:
+            return
+        messages = self.state.messages
+        instruction = ctx.get("instruction")
+        if instruction is not None and messages and messages[-1] is instruction:
+            messages.pop()
+        pulled = ctx.get("pulled") or []
+        if pulled:
+            messages.extend(pulled)
+
+    def _run_compaction_request(self) -> None:
+        """发出携带压缩指令的请求并收下摘要；失败回退独立摘要请求。
+
+        这条请求走的是正常流式通道，但把增量静音（quiet）——摘要内容不该以
+        「助手正文」的形式刷到界面上。模型不按指令走（返回工具调用）或响应无法
+        解析时，一律回退到旧的独立摘要路径，保证"压不了"不会演变成"回合失败"。
+        """
+        self._emit("compacting", {"phase": "start", "tokens_before": int((self._pending_compaction or {}).get("estimated") or 0)})
+        previous_quiet = self._stream_quiet
+        self._stream_quiet = True  # 摘要内容不该以助手正文的形式上屏
+        try:
+            content, tool_calls, _finish = self._stream_llm_response()
+        except AgentStopRequested:
+            self._abort_compaction()
+            raise
+        except Exception as exc:  # noqa: BLE001 - 压缩失败不能拖垮整回合
+            _log(f"  ⚠ 压缩请求失败（{exc}），回退独立摘要请求")
+            self._abort_compaction()
+            self._compact_via_separate_request()
+            return
+        finally:
+            self._stream_quiet = previous_quiet
+            # 压缩请求也走流式通道，会留下"进行中消息"快照；摘要内容不该以
+            # 助手正文的形式挂到界面上，这里直接丢掉。
+            self._stream_acc = None
+        if tool_calls:
+            _log("  ⚠ 压缩请求返回了工具调用（没按指令走），回退独立摘要请求")
+            self._abort_compaction()
+            self._compact_via_separate_request()
+            return
+        if not self._finish_compaction(content):
+            _log("  ⚠ 压缩响应解析失败，回退独立摘要请求")
+            self._compact_via_separate_request()
+
+    def _finish_compaction(self, content: str) -> bool:
+        """摘要到手 → 归档被裁历史 → 重建消息列表。"""
+        if self._pending_compaction is None:
+            return False
+        summary = _parse_compact_summary(content)
+        if not summary.strip():
+            self._abort_compaction()
+            return False
+        topics = _parse_compact_topics(content)
+        return self._rebuild_after_compaction(summary, topics)
+
+    def _compact_via_separate_request(self, cut: int | None = None) -> None:
+        """降级路径：另发一次非流式摘要请求（共享前缀为 0，但一定能拿到摘要）。"""
+        messages = self.state.messages
+        if cut is None:
+            cut = _find_compaction_cut(messages, COMPACT_KEEP_RECENT_MSGS)
+        if cut <= 0:
+            self._compact_failed_this_turn = True
+            return
+        head = messages[:cut]
+        estimated = self._estimate_context_tokens()
         summary = ""
         try:
             summary = self._summarize_messages(head)
-        except Exception as exc:  # noqa: BLE001 - 摘要失败必须降级，不能卡死会话
-            _log(f"  ⚠ 摘要生成失败，回退本地截断: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            _log(f"  ⚠ 独立摘要请求也失败（{exc}），改用本地兜底摘要")
         if not summary.strip():
             summary = _local_fallback_summary(head)
+        self._pending_compaction = {
+            "cut": cut,
+            "pulled": [],
+            "estimated": estimated,
+            "instruction": None,
+        }
+        if not self._rebuild_after_compaction(summary, ""):
+            self._abort_compaction()
+            self._compact_failed_this_turn = True
 
-        self.state.messages = [
-            {"role": "system", "content": _build_system_prompt(self.state, summary=summary)},
-            {"role": "user", "content": "以上是之前对话的压缩摘要。请在此基础上继续，不要重复已完成的工作。"},
-            *tail,
-        ]
+    def _rebuild_after_compaction(self, summary: str, topics: str) -> bool:
+        """用摘要替换被裁掉的那段历史：system 原样保留，摘要单独成条。
+
+        刻意**不改 system prompt**：把摘要拼进 system 会让整个前缀（含 tools）
+        从第一条起失效；摘要作为 system 之后的一条独立消息，system + tools 这段
+        前缀还能继续命中缓存。
+        """
+        ctx = self._pending_compaction
+        self._pending_compaction = None
+        if ctx is None:
+            return False
+        messages = self.state.messages
+        instruction = ctx.get("instruction")
+        if instruction is not None and messages and messages[-1] is instruction:
+            messages.pop()
+        cut = int(ctx.get("cut") or 0)
+        if cut <= 0 or cut > len(messages):
+            pulled = list(ctx.get("pulled") or [])
+            if pulled:
+                messages.extend(pulled)
+            return False
+        system = messages[0] if messages and messages[0].get("role") == "system" else None
+        head, tail = messages[:cut], messages[cut:]
+        archive_name = self._archive_compacted(head, topics)
+        summary_msg = self._build_summary_message(summary, archive_name)
+        # system 原样保留（前缀稳定的关键）；历史里没有 system 的异常情况才补一条，
+        # 保证压缩后仍是「system 打头」的合法结构。
+        if system is None:
+            system = {"role": "system", "content": _build_system_prompt(self.state)}
+        self.state.messages = [system, summary_msg, *tail, *list(ctx.get("pulled") or [])]
         # 压缩后旧的 usage 锚点失效，重置避免继续用错误的估算
         self.state.last_prompt_tokens = 0
         self.state.anchored_message_count = 0
         self._compacted_this_turn = True
+        removed = len(head)
+        tokens_before = int(ctx.get("estimated") or 0)
         if self._store is not None:
-            self._store.append_compact(removed=cut, summary_chars=len(summary), tokens_before=estimated)
+            self._store.append_compact(removed=removed, summary_chars=len(summary), tokens_before=tokens_before)
         self._emit("compacted", {
-            "removed": cut,
+            "removed": removed,
             "summary_chars": len(summary),
-            "tokens_before": estimated,
+            "tokens_before": tokens_before,
+            "archive": archive_name or "",
         })
-        _log(f"  📦 压缩完成：移除 {cut} 条，摘要 {len(summary)} 字符")
+        self._emit("compacting", {"phase": "done"})
+        tail_note = f"，归档 {archive_name}" if archive_name else ""
+        _log(f"  📦 压缩完成：移除 {removed} 条，摘要 {len(summary)} 字符{tail_note}")
+        return True
+
+    def _build_summary_message(self, summary: str, archive_name: str) -> dict[str, Any]:
+        """摘要消息：模型认得的历史卡，外加归档索引（细节靠 read_history_archive 回查）。"""
+        lines = ["[早前对话的压缩摘要 —— 原对话已归档]", "", summary.strip()]
+        chunks: list[dict[str, Any]] = []
+        if self._store is not None:
+            chunks = self._store.list_chunks()
+        if chunks:
+            lines += ["", "---", "📁 已归档的早期对话（需要细节时用 read_history_archive 回查）："]
+            for item in chunks[-COMPACT_ARCHIVE_MAX_LISTED:]:
+                suffix = f" — {item['topics']}" if item.get("topics") else ""
+                lines.append(f"- {item['name']}{suffix}")
+            if len(chunks) > COMPACT_ARCHIVE_MAX_LISTED:
+                lines.append(f"- ……另有 {len(chunks) - COMPACT_ARCHIVE_MAX_LISTED} 个更早的归档")
+        return {"role": "user", "content": "\n".join(lines), "_compact_summary": True}
+
+    def _archive_compacted(self, head: list[dict[str, Any]], topics: str) -> str:
+        """把被裁掉的历史写成一份归档文件，返回文件名（失败不影响压缩本身）。"""
+        if self._store is None:
+            return ""
+        body = [
+            m for m in head
+            if isinstance(m, dict) and m.get("role") != "system" and not _is_internal_message(m)
+        ]
+        if not body:
+            return ""
+        name = COMPACT_ARCHIVE_NAME.format(index=len(self._store.list_chunks()) + 1)
+        lines = [
+            "---",
+            f"session_id: {self.state.session_id}",
+            f"archived_at: {time.time():.0f}",
+            f"message_count: {len(body)}",
+        ]
+        if topics:
+            lines.append(f"topics: {topics}")
+        lines += [
+            "---",
+            "",
+            "# 会话归档",
+            "",
+            "> 这是上下文压缩时归档下来的原始对话。用 read_history_archive 读它。",
+            "",
+        ]
+        lines.extend(_render_archive_messages(body))
+        return self._store.write_chunk(name, "\n".join(lines)) or ""
 
     def _summarize_messages(self, messages: list[dict[str, Any]]) -> str:
         """调 LLM 把一段历史压成结构化摘要（独立请求，非流式）。"""
@@ -1694,17 +2039,18 @@ AUTO_QUIET_PROMPT = (
 )
 
 
-def _build_system_prompt(state: "AgentState", summary: str | None = None) -> str:
-    """构造 system prompt：基础约束 + 当前项目环境 +（可选）对话压缩摘要。
+def _build_system_prompt(state: "AgentState") -> str:
+    """构造 system prompt：基础约束 + 当前项目环境。
 
     始终作为会话顶部唯一一条 system 消息。环境信息（项目目录/配置文件/目标）
     集中注入到 system prompt，对应的 user 消息只放用户的原始输入，避免重复。
-    长会话压缩后调用方把摘要传进来，摘要块拼到末尾，这样压缩后仍能保持
-    「基础约束 + 环境信息 + 摘要」三段结构，环境上下文不丢。
+
+    **压缩摘要不在这里**：它作为 system 之后的一条独立消息（见
+    AgentRunner._build_summary_message）。摘要是会随压缩变化的内容，拼进 system
+    会让整个前缀（含 tools）从第一条起失效；单独成条，system + tools 这段前缀
+    在压缩后依然能命中提示缓存。
     """
     goal = state.goal or "按标准流程完成本项目的翻译"
-    # 缓存字段说明跟着 system prompt 走：压缩会话后 _build_system_prompt 会重建整条
-    # system 消息，这段说明也就跟着保留下来（不会被摘要吃掉）。
     parts: list[str] = [AGENT_SYSTEM_PROMPT + AGENT_TURN_PROMPT, _cache_fields_section()]
     parts.append(
         "\n\n# 当前项目环境\n"
@@ -1712,12 +2058,11 @@ def _build_system_prompt(state: "AgentState", summary: str | None = None) -> str
         f"- 配置文件：{state.config_file_name or DEFAULT_CONFIG_FILE}\n"
         f"- 本次目标：{goal}"
     )
-    # 只有「全自动-减少问询」会告诉模型当前档位（为了让它少问）。每回合都按当前 state
-    # 重建 system prompt，所以运行中切到这一档，下一次请求就带上这句。
+    # 只有「全自动-减少问询」会告诉模型当前档位（为了让它少问）。system prompt 在
+    # 会话建立时构造一次、之后字节冻结（压缩也不再重建它）——这是"前缀能一直命中缓存"
+    # 的前提；运行中切换档位不会改写已建立的 system prompt，新建/重启会话才生效。
     if _normalize_permission_mode(state.permission_mode) == AUTO_QUIET_MODE:
         parts.append(AUTO_QUIET_PROMPT)
-    if summary and summary.strip():
-        parts.append("\n\n# 会话摘要（早前对话已压缩）\n\n" + summary.strip())
     return "".join(parts)
 
 
@@ -1943,6 +2288,144 @@ def _local_fallback_summary(messages: list[dict[str, Any]]) -> str:
         "## 待办与注意事项\n"
         "如不确定之前的进展，先查一次项目状态再继续，避免重复已完成的操作。"
     )
+
+
+def _is_internal_message(message: Any) -> bool:
+    """是否带内部标记（`_` 开头的键）：压缩指令 / 摘要消息。
+
+    这类消息只在内存里用（回滚、缓存断点跳过、是否已完成压缩的判断），
+    发请求前必须剥掉标记而不是整条丢弃。
+    """
+    return isinstance(message, dict) and any(
+        isinstance(key, str) and key.startswith(_INTERNAL_MSG_PREFIX) for key in message
+    )
+
+
+def _content_text(content: Any) -> str:
+    """取消息正文文本（content 可能是字符串，也可能是多段 block 数组）。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [
+            block["text"]
+            for block in content
+            if isinstance(block, dict) and isinstance(block.get("text"), str)
+        ]
+        return "\n".join(parts)
+    return "" if content is None else str(content)
+
+
+def _render_archive_messages(messages: list[dict[str, Any]]) -> list[str]:
+    """把一段消息渲染成归档正文（Markdown）。
+
+    工具结果要截断：归档是给模型"想不起来时回查"用的，一条几万字符的缓存读取
+    原样存进去，回查一次又把上下文撑爆，等于没压。
+    """
+    lines: list[str] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "?")
+        if role == "user":
+            lines += ["## 用户", "", _content_text(message.get("content")), ""]
+        elif role == "assistant":
+            lines += ["## 助手", ""]
+            calls = message.get("tool_calls") or []
+            if calls:
+                names = []
+                for tc in calls:
+                    fn = tc.get("function") or {} if isinstance(tc, dict) else {}
+                    names.append(str(fn.get("name") or "?"))
+                lines += [f"_工具调用：{', '.join(names)}_", ""]
+            text = _content_text(message.get("content"))
+            if text:
+                lines += [text, ""]
+        else:
+            name = str(message.get("name") or "tool")
+            text = _truncate_text(_content_text(message.get("content")), COMPACT_ARCHIVE_TOOL_RESULT_CHARS)
+            lines += [f"### 工具结果：{name}", "", "```", text, "```", ""]
+    return lines
+
+
+def _strip_internal_fields(message: dict[str, Any]) -> dict[str, Any]:
+    """去掉 `_` 开头的内部键（压缩指令 / 摘要标记），发给 provider 前必须剥掉。
+
+    没有内部键时原样返回，省一次整条消息的拷贝。
+    """
+    if not _is_internal_message(message):
+        return message
+    return {
+        key: value
+        for key, value in message.items()
+        if not (isinstance(key, str) and key.startswith(_INTERNAL_MSG_PREFIX))
+    }
+
+
+def _with_cache_control(message: dict[str, Any]) -> dict[str, Any]:
+    """给一条消息的正文末尾挂 cache_control（Anthropic 的断点语法）。
+
+    content 是纯字符串时包成单块数组——这是走 OpenAI 兼容接口表达 Anthropic 断点
+    的唯一方式。只有 tool_calls、没有正文的 assistant 消息，断点挂在 tool_calls 上。
+    """
+    content = message.get("content")
+    if isinstance(content, str):
+        if not content:
+            return message
+        return {
+            **message,
+            "content": [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}],
+        }
+    if isinstance(content, list) and content:
+        blocks = list(content)
+        last = blocks[-1]
+        if isinstance(last, dict):
+            blocks[-1] = {**last, "cache_control": {"type": "ephemeral"}}
+            return {**message, "content": blocks}
+    if message.get("tool_calls"):
+        return {**message, "cache_control": {"type": "ephemeral"}}
+    return message
+
+
+def _apply_prompt_cache(
+    messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """给尾部最近 2 条真实消息 + 工具表末尾打 cache_control 断点（滚动双 marker）。
+
+    为什么是 2 个：本轮的第 2 个断点就是下一轮的"读"断点，历史单调增长也能命中；
+    工具调用失败、回滚掉最后一条消息时，倒数第二个断点还在，单步回滚依然命中。
+    只打 1 个的经典失败是——本轮标记最后一条，下一轮它变成倒数第二条、带 marker 的
+    位置整体前移，服务端看到的前缀不同，整段 miss。
+    """
+    out = list(messages)
+    marked = 0
+    for index in range(len(out) - 1, -1, -1):
+        if marked >= 2:
+            break
+        message = out[index]
+        if _is_internal_message(message):
+            continue  # 瞬时注入的消息下一轮不会以同样形式出现，标记它等于白写
+        out[index] = _with_cache_control(message)
+        marked += 1
+    cached_tools = list(tools)
+    if cached_tools:
+        cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
+    return out, cached_tools
+
+
+def _resolve_prompt_caching(raw: Any, model: str, base_url: str) -> bool:
+    """是否注入 cache_control 断点。配置取值：auto（默认）/ on / off。
+
+    Anthropic 系（含经网关转发的 Claude）需要显式断点；OpenAI 兼容的多数实现
+    （DeepSeek 等）由服务端做自动前缀缓存，注入既无收益、还可能因陌生字段被拒。
+    auto 因此只在 base_url / 模型名看得出是 Anthropic 系时才开。
+    """
+    value = str(raw or "").strip().lower()
+    if value in ("on", "true", "1", "yes"):
+        return True
+    if value in ("off", "false", "0", "no"):
+        return False
+    lowered = f"{base_url or ''} {model or ''}".lower()
+    return any(hint in lowered for hint in ("anthropic", "claude", "openrouter"))
 
 
 def _normalize_endpoint(endpoint: str) -> str:
@@ -2517,6 +3000,37 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["tasks"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_history_archive",
+            "description": (
+                "读本次会话被上下文压缩归档下来的早期对话（压缩摘要消息里列出的 chunk 文件）。"
+                "不带参数：列出所有归档及主题，供你判断该查哪一份。带 chunk：返回该归档全文"
+                "（超长会截断）。带 query：在所有归档里检索关键词，返回命中行及上下文，用来"
+                "找回具体细节（早前定下的术语、某个文件的处理结论等）。只在摘要信息不够时"
+                "才查，不要为了「确认一下」逐个通读归档。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "chunk": {
+                        "type": "string",
+                        "description": "归档文件名（如 chunk-0001.md）或序号（如 1）。留空 = 列出全部归档。",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "可选。关键词，在各归档里检索并返回命中行及上下文。",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "可选。最多返回多少条命中/多少行，默认 30。",
+                    },
+                },
+                "required": [],
             },
         },
     },
@@ -4610,6 +5124,72 @@ def _format_ask_answers(questions: list[dict[str, Any]], answers: list[list[str]
     return "\n---\n".join(lines)
 
 
+def _tool_read_history_archive(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """读上下文压缩归档（会话目录里的 chunk 文件）。
+
+    三种用法：不带参数列出归档；带 chunk 取全文；带 query 在全部归档里检索。
+    归档只是"想不起来时回查"的兜底，所以单次回传有字符上限——超了就让模型
+    改用关键词检索，而不是把整份归档塞回上下文（那就白压了）。
+    """
+    store = getattr(runner, "_store", None)
+    if store is None:
+        return {"archives": [], "note": "本会话没有落盘，压缩归档不可用"}
+    chunks = store.list_chunks()
+    if not chunks:
+        return {"archives": [], "note": "本次会话还没有压缩归档（历史还没触发过上下文压缩）"}
+
+    raw_chunk = str(args.get("chunk", "") or "").strip()
+    query = str(args.get("query", "") or "").strip()
+    limit = args.get("limit")
+    if not isinstance(limit, int) or limit <= 0:
+        limit = 30
+    limit = min(limit, 200)
+
+    if query:
+        hits: list[dict[str, Any]] = []
+        truncated = False
+        for item in chunks:
+            text = store.read_chunk(item["name"]) or ""
+            for lineno, line in enumerate(text.splitlines(), 1):
+                if query.lower() in line.lower():
+                    hits.append({
+                        "chunk": item["name"],
+                        "line": lineno,
+                        "text": _truncate_text(line.strip(), 300),
+                    })
+                    if len(hits) >= limit:
+                        truncated = True
+                        break
+            if truncated:
+                break
+        return {"query": query, "hits": hits, "truncated": truncated}
+
+    if not raw_chunk:
+        return {
+            "archives": [
+                {"name": item["name"], "topics": item.get("topics") or ""} for item in chunks
+            ],
+            "note": "用 chunk 参数读其中一份，或用 query 关键词检索细节",
+        }
+
+    names = [item["name"] for item in chunks]
+    name = raw_chunk if raw_chunk in names else ""
+    if not name and raw_chunk.isdigit():
+        index = int(raw_chunk)
+        if 1 <= index <= len(names):
+            name = names[index - 1]
+    if not name:
+        raise AgentToolError(f"没有这个归档：{raw_chunk}（可用：{'、'.join(names)}）")
+    text = store.read_chunk(name) or ""
+    truncated = len(text) > COMPACT_ARCHIVE_READ_CHARS
+    return {
+        "chunk": name,
+        "content": text[:COMPACT_ARCHIVE_READ_CHARS] if truncated else text,
+        "truncated": truncated,
+        "note": "内容过长已截断，可用 query 检索关键词" if truncated else "",
+    }
+
+
 def _tool_ask_user(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """问用户：阻塞当前回合直到用户作答（或回合被停止，此时按跳过返回）。"""
     questions = _normalize_ask_questions(args)
@@ -4627,6 +5207,10 @@ def _tool_ask_user(runner: AgentRunner, args: dict[str, Any]) -> Any:
 # system prompt、自己的消息历史、**受限的工具集**（拿不到委派工具，所以不会递归），跑完只交回
 # 一份报告。它中间的思考与工具调用不进主 Agent 的上下文（省 token），但会作为事件推给界面
 # （见 subagent_* 事件），所以用户看得到它在干什么。
+#
+# 子代理也有自己的上下文预算：工具往返堆超窗口时按父 Agent 的同一套规则压缩——窗口取自父
+# Agent 的 contextWindow、切点复用 _find_compaction_cut、摘要复用 _summarize_messages。
+# 压缩发生在子代理自己的消息里，主 Agent 拿到的仍是那份最终报告。
 #
 # 与 PI-Desktop 的一处刻意差异：那边一个 Task 调用只起一个子代理、**立即返回** delegationId，
 # 再由 TaskWait／自动 resume 收口；我们这里**一次调用带一批任务、阻塞到全部跑完**。原因是
@@ -5023,6 +5607,8 @@ class SubAgentRunner:
     """一个子代理实例：自己的消息、自己的工具表，跑完交一份报告。
 
     一个实例只被一个线程跑（见 _tool_run_subagents 的线程池），所以内部不需要加锁。
+    消息历史超窗口时按父 Agent 的预算与摘要模型压缩（见 _maybe_compact），避免 24 轮
+    工具往返把上下文撑爆。
     """
 
     def __init__(
@@ -5106,6 +5692,68 @@ class SubAgentRunner:
         )
         return result
 
+    # ---- 上下文窗口复用与压缩 ----
+
+    def _parent_context_window(self) -> int:
+        """复用父 Agent 解析出的上下文窗口：同一个后端配置，子代理没理由再解析一遍。"""
+        try:
+            window = int(getattr(self.parent, "_context_window", 0) or 0)
+        except (TypeError, ValueError):
+            window = 0
+        return window or DEFAULT_CONTEXT_WINDOW
+
+    def _estimate_context_tokens(self) -> int:
+        """估算当前历史占用的 token（子代理无 usage 锚点，纯字符估算；见 _estimate_usage_tokens）。"""
+        return _estimate_usage_tokens(self.messages)
+
+    def _maybe_compact(self) -> None:
+        """历史过长时把早期工具往返压成摘要，复用父 Agent 的窗口预算、切点规则与摘要模型。
+
+        与父 Agent 的差别：头部 2 条（system 提示词 + 任务说明）永远保留——子代理没有别的
+        途径知道"我是谁、负责哪些文件"；摘要走父 Agent 的 _summarize_messages（同一份
+        COMPACT_SUMMARY_PROMPT、同一个模型），失败降级 _local_fallback_summary。切点仍由
+        _find_compaction_cut 保证 assistant.tool_calls 与 tool 响应成对，不会切出非法请求。
+        """
+        window = self._parent_context_window()
+        limit = int(window * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
+        if limit <= 0:
+            return
+        estimated = self._estimate_context_tokens()
+        if estimated <= limit:
+            return
+        head_keep = 2
+        cut = _find_compaction_cut(self.messages[head_keep:], SUBAGENT_COMPACT_KEEP_RECENT)
+        if cut <= 0:
+            return
+        cut += head_keep
+        head = self.messages[head_keep:cut]
+        tail = self.messages[cut:]
+        summary = ""
+        summarizer = getattr(self.parent, "_summarize_messages", None)
+        if callable(summarizer):
+            try:
+                summary = str(summarizer(head) or "")
+            except Exception as exc:  # noqa: BLE001 - 摘要失败必须降级，不能卡死子代理
+                _log(f"  ⚠ 子代理 {self.id} 摘要失败，回退本地截断: {exc}")
+        if not summary.strip():
+            summary = _local_fallback_summary(head)
+        self.messages = [
+            *self.messages[:head_keep],
+            {
+                "role": "user",
+                "content": (
+                    "# 早前工作的压缩摘要\n"
+                    f"{summary}\n\n"
+                    "以上是之前工作的压缩摘要，请在此基础上继续，不要重复已完成的工作。"
+                ),
+            },
+            *tail,
+        ]
+        _log(
+            f"  📦 子代理 {self.id} 上下文估算 {estimated} > {limit}，"
+            f"压缩 {len(head)} 条，摘要 {len(summary)} 字符"
+        )
+
     def run(self) -> dict[str, Any]:
         """跑到自然收尾（不再调工具）、轮数上限、失败或被停止。"""
         client = getattr(self.parent, "_openai_client", None)
@@ -5145,6 +5793,8 @@ class SubAgentRunner:
             self.turns = round_i
             if self.parent.stop_event.is_set():
                 return self._finish("stopped", last_text, error="父回合被停止，子代理提前收尾")
+            # 每轮请求前判一次：工具往返堆太多就把早期部分压成摘要（复用父 Agent 的窗口与摘要模型）
+            self._maybe_compact()
             try:
                 content, tool_calls, reasoning_field, reasoning = _subagent_chat(
                     client, model, self.messages, tools
@@ -5475,6 +6125,7 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "delete_transl_cache": _tool_delete_transl_cache,
     "search_transl_cache": _tool_search_transl_cache,
     "patch_transl_cache": _tool_patch_transl_cache,
+    "read_history_archive": _tool_read_history_archive,
     "ask_user": _tool_ask_user,
     "run_subagents": _tool_run_subagents,
 }

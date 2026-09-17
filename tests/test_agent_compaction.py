@@ -216,11 +216,13 @@ class MaybeCompactTests(unittest.TestCase):
         before = len(state.messages)
         runner._maybe_compact()
         self.assertTrue(runner._compacted_this_turn)
-        # 压缩后：1 system + 1 user + 尾部保留 >= 3，且总条数减少
+        # 压缩后：system（原样）+ 摘要消息 + 尾部保留，且总条数减少
         self.assertLess(len(state.messages), before)
         self.assertEqual(state.messages[0]["role"], "system")
-        self.assertIn("摘要", state.messages[0]["content"])
+        # 摘要单独成条：system 保持稳定，system + tools 这段前缀缓存才不会被一次压缩全废掉
+        self.assertNotIn("我是摘要", state.messages[0]["content"])
         self.assertEqual(state.messages[1]["role"], "user")
+        self.assertIn("我是摘要", state.messages[1]["content"])
         # 锚点重置（旧 usage 失效）
         self.assertEqual(state.last_prompt_tokens, 0)
         self.assertEqual(state.anchored_message_count, 0)
@@ -266,8 +268,9 @@ class MaybeCompactTests(unittest.TestCase):
         )
         runner._maybe_compact()
         self.assertTrue(runner._compacted_this_turn)
-        # 回退后首条是 system 摘要（本地兜底）
+        # 回退后仍是合法结构：system 打头 + 本地兜底摘要消息
         self.assertEqual(state.messages[0]["role"], "system")
+        self.assertIn("[早前对话的压缩摘要", state.messages[1]["content"])
         # 没有任何 tool 响应缺少前导的 assistant.tool_calls（孤儿检测）
         for i, m in enumerate(state.messages):
             if m.get("role") == "tool":
@@ -283,7 +286,7 @@ class MaybeCompactTests(unittest.TestCase):
         runner, state = _make_runner(msgs, window=2000, summary_text="   ")
         runner._maybe_compact()
         self.assertTrue(runner._compacted_this_turn)
-        self.assertGreater(len(state.messages[0]["content"]), 10)
+        self.assertGreater(len(state.messages[1]["content"]), 10)
 
     def test_compacted_emits_event(self):
         """压缩成功后发 compacted 事件，带 removed/summary_chars/tokens_before。"""

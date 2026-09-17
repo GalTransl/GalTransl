@@ -785,5 +785,131 @@ class RunSubagentsValidationTests(unittest.TestCase):
         self.assertIn("停止", out["tasks"][0]["error"])
 
 
+class SubagentCompactionTests(unittest.TestCase):
+    """子代理复用父 Agent 的上下文窗口与压缩：工具往返堆过头就把早期部分压成摘要。
+
+    与主会话同一套规则——窗口取自 parent._context_window、阈值走 COMPACT_TRIGGER_RATIO、
+    切点走 _find_compaction_cut（保证 tool_calls/tool 成对）、摘要走 parent._summarize_messages。
+    区别只有一处：头部 2 条（system + 任务说明）永远保留。
+    """
+
+    def _parent(self, window: int, summarizer=None) -> _Parent:
+        parent = _Parent({"a.json": [ENTRY]})
+        parent._context_window = window
+        if summarizer is not None:
+            parent._summarize_messages = summarizer
+        return parent
+
+    def _sub(self, parent: _Parent) -> rt.SubAgentRunner:
+        return rt.SubAgentRunner(
+            parent,
+            agent=SUBAGENT_AGENT_PROOFREAD,
+            files=["a.json"],
+            indexes="",
+            brief="",
+            delegation_id="d1",
+        )
+
+    @staticmethod
+    def _history(rounds: int, chars: int = 4000) -> list[dict]:
+        """构造 rounds 轮合法的 assistant(tool_calls) + tool 往返，每轮工具结果很长。"""
+        messages: list[dict] = [
+            {"role": "system", "content": "SYS"},
+            {"role": "user", "content": "BRIEF"},
+        ]
+        for i in range(rounds):
+            messages.append({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": f"c{i}",
+                    "type": "function",
+                    "function": {"name": "read_transl_cache", "arguments": "{}"},
+                }],
+            })
+            messages.append({"role": "tool", "tool_call_id": f"c{i}", "content": "x" * chars})
+        return messages
+
+    def test_reuses_parent_window_with_default_fallback(self) -> None:
+        self.assertEqual(self._sub(self._parent(50_000))._parent_context_window(), 50_000)
+        # 父 Agent 还没解析出窗口（或替身没有这个属性）时不炸：退回默认窗口
+        self.assertEqual(
+            self._sub(_Parent({"a.json": [ENTRY]}))._parent_context_window(),
+            rt.DEFAULT_CONTEXT_WINDOW,
+        )
+
+    def test_compacts_early_rounds_keeping_head_and_recent_tail(self) -> None:
+        seen: list[list[dict]] = []
+
+        def summarize(head: list[dict]) -> str:
+            seen.append(head)
+            return "## 目标\n已校对 8 轮。"
+
+        parent = self._parent(20_000, summarizer=summarize)  # 阈值 7808
+        sub = self._sub(parent)
+        sub.messages = self._history(12)
+
+        self.assertGreater(sub._estimate_context_tokens(), 7808)  # 前提：确实超了
+        sub._maybe_compact()
+
+        # 头部 2 条原样保留，随后一条摘要，尾部保留最近 8 条
+        self.assertEqual(sub.messages[0], {"role": "system", "content": "SYS"})
+        self.assertEqual(sub.messages[1], {"role": "user", "content": "BRIEF"})
+        self.assertIn("压缩摘要", sub.messages[2]["content"])
+        self.assertIn("已校对 8 轮", sub.messages[2]["content"])
+        self.assertEqual(len(sub.messages), 2 + 1 + 8)
+        self.assertEqual(sub.messages[-1]["content"], "x" * 4000)
+        # 摘要只吃被压缩掉的那段（8 轮 16 条），不是整份历史
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(len(seen[0]), 16)
+
+    def test_below_threshold_history_is_untouched(self) -> None:
+        sub = self._sub(self._parent(1_000_000))
+        sub.messages = self._history(3)
+        before = [dict(m) for m in sub.messages]
+
+        sub._maybe_compact()
+
+        self.assertEqual(sub.messages, before)
+
+    def test_falls_back_to_local_summary_without_parent_summarizer(self) -> None:
+        sub = self._sub(self._parent(20_000))  # 不给 _summarize_messages
+        sub.messages = self._history(12)
+
+        sub._maybe_compact()
+
+        self.assertIn("因上下文超限被压缩", sub.messages[2]["content"])
+
+    def test_falls_back_to_local_summary_when_summarizer_raises(self) -> None:
+        def boom(_head):
+            raise RuntimeError("summarizer down")
+
+        sub = self._sub(self._parent(20_000, summarizer=boom))
+        sub.messages = self._history(12)
+
+        sub._maybe_compact()
+
+        self.assertIn("因上下文超限被压缩", sub.messages[2]["content"])
+
+    def test_run_compacts_before_every_llm_round(self) -> None:
+        parent = self._parent(rt.DEFAULT_CONTEXT_WINDOW)
+        seen: list[int] = []
+        script = [
+            ("", [_Call("c1", "read_transl_cache", '{"filename": "a.json", "index": "1"}')]),
+            ("报告：没问题。", []),
+        ]
+
+        with (
+            patch.object(rt.SubAgentRunner, "_maybe_compact", lambda self: seen.append(1)),
+            patch.object(rt, "_subagent_chat", _make_chat(script)),
+        ):
+            _tool_run_subagents(
+                parent, {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD, "file": "a.json"}]}
+            )
+
+        # 两次 LLM 请求（读缓存那轮 + 收尾那轮）前各判一次
+        self.assertEqual(len(seen), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

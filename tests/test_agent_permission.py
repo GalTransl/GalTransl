@@ -118,12 +118,12 @@ class AutoQuietModePromptTests(unittest.TestCase):
 
         self.assertIn("请提高自主性", _build_system_prompt(state))
 
-    def test_the_note_survives_compaction(self) -> None:
-        """压缩会话会重建整条 system 消息：摘要进来了，这句档位说明也不能丢。"""
+    def test_compaction_does_not_rewrite_the_system_prompt(self) -> None:
+        """压缩不再重建 system prompt：摘要单独成条（见 _build_summary_message），
+        system 保持稳定，system + tools 这段前缀才能继续命中提示缓存。"""
         state = AgentState(project_dir=r"C:\proj", permission_mode=AUTO_QUIET_MODE)
-        prompt = _build_system_prompt(state, summary="早前做了什么什么")
+        prompt = _build_system_prompt(state)
         self.assertIn("请提高自主性", prompt)
-        self.assertIn("早前做了什么什么", prompt)
 
 
 class PermissionMatrixTests(unittest.TestCase):
