@@ -1,4 +1,4 @@
-/** Agent 权限模式：三档，与后端 runtime.py 的 PERMISSION_MODES 一一对应。
+/** Agent 权限模式：四档，与后端 runtime.py 的 PERMISSION_MODES 一一对应。
  *
  * 只存在前端 localStorage（与后端配置名同一套做法），随 start / message 一起送过去；
  * 后端在**每次工具调用前**按它决定放行还是先问用户——模型不知道当前是什么模式，
@@ -7,10 +7,12 @@
  * - ask（每次询问，默认）：所有写操作都先弹确认卡；
  * - accept-edits（允许编辑）：只自动放行"改译文数据"（缓存 / 字典 / 人名表），
  *   改项目配置、改项目规范、启动翻译仍然要确认；
- * - auto（全自动）：不再确认。
+ * - auto（全自动）：不再确认；
+ * - auto-quiet（全自动-减少问询）：放行规则与 auto 相同，差别只在后端会**把档位写进
+ *   system prompt**，要求 Agent 更自主、少调用 ask_user（唯一一档告诉模型的）。
  */
 
-export const PERMISSION_MODES = ['ask', 'accept-edits', 'auto'] as const;
+export const PERMISSION_MODES = ['ask', 'accept-edits', 'auto', 'auto-quiet'] as const;
 
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
 
@@ -23,6 +25,7 @@ export const PERMISSION_MODE_LABELS: Record<PermissionMode, string> = {
   ask: '每次询问',
   'accept-edits': '允许编辑',
   auto: '全自动',
+  'auto-quiet': '全自动-减少问询',
 };
 
 /** 每档的一句话说明（菜单里跟在名字下面，选择时看得见代价）。 */
@@ -30,6 +33,7 @@ export const PERMISSION_MODE_HINTS: Record<PermissionMode, string> = {
   ask: '每个改动都先问你',
   'accept-edits': '缓存与字典直接改；改设置、规范、启动翻译要先问',
   auto: '不再确认，Agent 自主改缓存、设置与启动翻译',
+  'auto-quiet': '同「全自动」，并要求 Agent 更自主、尽量不问',
 };
 
 const STORAGE_KEY = 'galtransl.agent.permissionMode';

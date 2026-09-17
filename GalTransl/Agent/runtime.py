@@ -75,18 +75,23 @@ SUBAGENT_PROGRESS_TICK = 5.0
 SUBAGENT_LABELS: dict[str, str] = {SUBAGENT_AGENT_PROOFREAD: "校对"}
 
 # ---- 权限（工具执行前的审批）----
-# 三档模式，对应输入区那个选择器。审批在**后端**做：模型不知道当前是什么模式
+# 四档模式，对应输入区那个选择器。审批在**后端**做：模型不知道当前是什么模式
 # （也不会被告知），它只会在被拒绝时收到一条工具错误。
 # - ask（每次询问，默认）：写操作一律先问；
 # - accept-edits（允许编辑）：只自动放行"改译文数据"（缓存 / 字典 / 人名表），
 #   改项目配置、改项目规范、启动翻译仍然要问；
-# - auto（全自动）：全部放行。
-PERMISSION_MODES: tuple[str, ...] = ("ask", "accept-edits", "auto")
+# - auto（全自动）：全部放行；
+# - auto-quiet（全自动-减少问询）：放行规则与 auto 一模一样，差别只有一处——**这一档会
+#   在 system prompt 里告诉模型当前档位**（见 AUTO_QUIET_PROMPT），要求它更自主、少用
+#   ask_user。其余档位照旧不告诉模型（它只会在被拒绝时收到一条工具错误）。
+AUTO_QUIET_MODE = "auto-quiet"
+PERMISSION_MODES: tuple[str, ...] = ("ask", "accept-edits", "auto", AUTO_QUIET_MODE)
 DEFAULT_PERMISSION_MODE = "ask"
 PERMISSION_MODE_LABELS: dict[str, str] = {
     "ask": "每次询问",
     "accept-edits": "允许编辑",
     "auto": "全自动",
+    AUTO_QUIET_MODE: "全自动-减少问询",
 }
 # 审批的三种答复（前端按钮）：只批这一次 / 本会话都批这个工具 / 拒绝
 PERMISSION_DECISIONS: tuple[str, ...] = ("allow-once", "allow-session", "deny")
@@ -192,7 +197,7 @@ def _permission_needed(risk: str, mode: str) -> bool:
     """这次调用要不要先请用户批准。读类永远不用；其余按模式矩阵判断。"""
     if risk == PERMISSION_READ:
         return False
-    if mode == "auto":
+    if mode in ("auto", AUTO_QUIET_MODE):
         return False
     if mode == "accept-edits":
         # 只自动放行"改译文数据"，配置/规范/启动任务仍要确认
@@ -1639,6 +1644,18 @@ def _cache_fields_section() -> str:
     return "\n".join(lines)
 
 
+# 「全自动-减少问询」档位额外拼进 system prompt 的一段——这一档跟「全自动」的**唯一**差别
+# 就是它。其余档位不注入任何档位说明：模型不知道自己被拦了几次，只会在被拒绝时收到一条
+# 工具错误（见 _permission_denied_reason）。
+AUTO_QUIET_PROMPT = (
+    "\n\n# 权限模式\n"
+    "用户选择的权限模式是「全自动-减少问询」：请提高自主性，并尽量减少调用 ask_user。"
+    "凡是能自己查清、自己判断的（读文档、读缓存、查配置、按已有规范和上下文推断）就直接做，"
+    "不要为了确认而确认；只有确实非常犹豫，需要用户拿主意时才问——比如有多个都合理的方案要用户挑一个，"
+    "或者要用户提供只有他知道的信息。"
+)
+
+
 def _build_system_prompt(state: "AgentState", summary: str | None = None) -> str:
     """构造 system prompt：基础约束 + 当前项目环境 +（可选）对话压缩摘要。
 
@@ -1657,6 +1674,10 @@ def _build_system_prompt(state: "AgentState", summary: str | None = None) -> str
         f"- 配置文件：{state.config_file_name or DEFAULT_CONFIG_FILE}\n"
         f"- 本次目标：{goal}"
     )
+    # 只有「全自动-减少问询」会告诉模型当前档位（为了让它少问）。每回合都按当前 state
+    # 重建 system prompt，所以运行中切到这一档，下一次请求就带上这句。
+    if _normalize_permission_mode(state.permission_mode) == AUTO_QUIET_MODE:
+        parts.append(AUTO_QUIET_PROMPT)
     if summary and summary.strip():
         parts.append("\n\n# 会话摘要（早前对话已压缩）\n\n" + summary.strip())
     return "".join(parts)

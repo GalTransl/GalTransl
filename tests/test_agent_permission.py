@@ -1,10 +1,10 @@
 """Agent 的权限门禁：模式 × 风险矩阵、审批阻塞、三种答复的后果。
 
 对照参考实现（PI-Desktop 的 permission mode）：
-- 三档模式 ask / accept-edits / auto，默认 ask；
+- 四档模式 ask / accept-edits / auto / auto-quiet（全自动-减少问询），默认 ask；
 - 工具分 read / edit / high 三档风险，**没登记的按 high**（fail closed）；
 - ask：写操作一律先问；accept-edits：只自动放行"改译文数据"（缓存/字典/人名表）；
-  auto：全放行；
+  auto：全放行；auto-quiet 放行规则同 auto，另把档位写进 system prompt 要求少问；
 - 答复只有 allow-once / allow-session（按工具名，本会话有效）/ deny；
 - 超时当拒绝（fail closed），拒绝时给模型一条"用户拒绝权限"的工具错误。
 """
@@ -17,9 +17,11 @@ from unittest.mock import patch
 from GalTransl.Agent import runtime as rt
 from GalTransl.Agent.runtime import (
     AGENT_TOOLS,
+    AUTO_QUIET_MODE,
     DEFAULT_PERMISSION_MODE,
     PERMISSION_EDIT,
     PERMISSION_HIGH,
+    PERMISSION_MODE_LABELS,
     PERMISSION_MODES,
     PERMISSION_READ,
     PERMISSION_READ_TOOLS,
@@ -28,6 +30,7 @@ from GalTransl.Agent.runtime import (
     AgentRuntime,
     AgentState,
     AgentToolError,
+    _build_system_prompt,
     _normalize_permission_mode,
     _permission_denied_reason,
     _permission_needed,
@@ -75,9 +78,46 @@ def run_gate(runner: AgentRunner, name: str, decision: str | None, *, dispatch: 
     return out
 
 
+class AutoQuietModePromptTests(unittest.TestCase):
+    """「全自动-减少问询」：放行规则同「全自动」，差别是把档位写进 system prompt 要求少问。
+
+    这是唯一一档会告诉模型当前档位的——其余档位模型不知情（只会在被拒时收到工具错误），
+    所以"只有这一档注入"这件事要钉住：一旦注入给所有档位，其它档位的行为会跟着变。
+    """
+
+    def _prompt(self, mode: str) -> str:
+        state = AgentState(project_dir=r"C:\proj", permission_mode=mode)
+        return _build_system_prompt(state)
+
+    def test_only_this_mode_injects_the_note(self) -> None:
+        note = self._prompt(AUTO_QUIET_MODE)
+        self.assertIn("全自动-减少问询", note)
+        self.assertIn("请提高自主性", note)
+        self.assertIn("ask_user", note)
+        for mode in ("ask", "accept-edits", "auto"):
+            self.assertNotIn("全自动-减少问询", self._prompt(mode), mode)
+            self.assertNotIn("请提高自主性", self._prompt(mode), mode)
+
+    def test_switching_to_it_takes_effect_on_the_next_request(self) -> None:
+        """system prompt 每回合按当前档位重建：跑着切到这一档，下次请求就带上这句。"""
+        state = AgentState(project_dir=r"C:\proj", permission_mode="auto")
+        self.assertNotIn("请提高自主性", _build_system_prompt(state))
+
+        rt._apply_permission_mode(state, AUTO_QUIET_MODE)
+
+        self.assertIn("请提高自主性", _build_system_prompt(state))
+
+    def test_the_note_survives_compaction(self) -> None:
+        """压缩会话会重建整条 system 消息：摘要进来了，这句档位说明也不能丢。"""
+        state = AgentState(project_dir=r"C:\proj", permission_mode=AUTO_QUIET_MODE)
+        prompt = _build_system_prompt(state, summary="早前做了什么什么")
+        self.assertIn("请提高自主性", prompt)
+        self.assertIn("早前做了什么什么", prompt)
+
+
 class PermissionMatrixTests(unittest.TestCase):
     def test_matrix(self) -> None:
-        """读永远放行；编辑在 ask 要问、其余档放行；高风险只有 auto 放行。"""
+        """读永远放行；编辑在 ask 要问、其余档放行；高风险只有两个全自动档放行。"""
         cases = {
             (PERMISSION_READ, "ask"): False,
             (PERMISSION_READ, "accept-edits"): False,
@@ -88,9 +128,17 @@ class PermissionMatrixTests(unittest.TestCase):
             (PERMISSION_HIGH, "ask"): True,
             (PERMISSION_HIGH, "accept-edits"): True,
             (PERMISSION_HIGH, "auto"): False,
+            # 「全自动-减少问询」的放行规则与「全自动」完全一致（差别在 system prompt）
+            (PERMISSION_READ, AUTO_QUIET_MODE): False,
+            (PERMISSION_EDIT, AUTO_QUIET_MODE): False,
+            (PERMISSION_HIGH, AUTO_QUIET_MODE): False,
         }
         for (risk, mode), expected in cases.items():
             self.assertEqual(_permission_needed(risk, mode), expected, f"{risk}/{mode}")
+
+    def test_every_mode_has_a_label(self) -> None:
+        """档位与菜单文案一一对应：加了档位忘了写标签，这里会红。"""
+        self.assertEqual(set(PERMISSION_MODE_LABELS), set(PERMISSION_MODES))
 
     def test_risk_classification(self) -> None:
         # 改译文数据：缓存 / 字典 / 人名表 —— "允许编辑"档放行的就是这些

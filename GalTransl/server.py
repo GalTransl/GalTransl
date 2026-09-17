@@ -2568,7 +2568,7 @@ def build_handler(registry: JobRegistry):
                     backend_profile_name = str(payload.get("backend_profile_name", "") or "")
                     translator_profile_name = str(payload.get("translator_profile_name", "") or "")
                     translator_profile_data = payload.get("translator_profile_data")
-                    # 权限模式（ask / accept-edits / auto）同样只存在前端 localStorage
+                    # 权限模式（档位清单见 Agent/runtime.PERMISSION_MODES）同样只存在前端 localStorage
                     permission_mode = str(payload.get("permission_mode", "") or "")
                     if not project_dir:
                         self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
