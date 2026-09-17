@@ -95,8 +95,9 @@ PERMISSION_MODE_LABELS: dict[str, str] = {
 }
 # 审批的三种答复（前端按钮）：只批这一次 / 本会话都批这个工具 / 拒绝
 PERMISSION_DECISIONS: tuple[str, ...] = ("allow-once", "allow-session", "deny")
-# 审批超时（秒）：到点自动拒绝。fail closed——没人理就当拒绝，不把回合永远挂住。
-PERMISSION_TIMEOUT = 120.0
+# **不设超时**：没人答就一直挂着（与 ask_user 一致），只有回合被停止才算拒绝。
+# 以前是 120 秒到点自动拒绝（fail closed），但"离开一会儿回来发现已经被自动拒了、Agent
+# 还顺着换了策略"比多等一会儿更糟——审批是该由人决定的事，不该由时钟决定。
 # 等待答复的轮询步长（秒）：只为尽快响应停止信号
 PERMISSION_WAIT_TICK = 0.2
 
@@ -223,14 +224,12 @@ def _normalize_permission_reason(value: Any) -> str:
 
 
 def _permission_denied_reason(name: str, decision: str, reason: str = "") -> str:
-    """没批准时给模型看的那句话：说清"没执行"，并区分拒绝 / 超时 / 回合被停。
+    """没批准时给模型看的那句话：说清"没执行"，并区分拒绝 / 回合被停。
 
     reason 是用户在拒绝时填的原因（可选，卡上那个输入框）：原样带上，模型据此换策略，
-    不用去猜"用户为什么不要"。只有拒绝才有原因——超时和"回合被停"时人根本没在答。
+    不用去猜"用户为什么不要"。只有拒绝才有原因——"回合被停"时人根本没在答。
     """
     label = _permission_tool_label(name)
-    if decision == "timeout":
-        return f"用户没有在 {int(PERMISSION_TIMEOUT)} 秒内批准「{label}」，本次调用没有执行。"
     if decision == "stopped":
         return f"回合被停止，本次「{label}」调用没有执行。"
     text = f"用户拒绝权限：本次「{label}」调用没有执行。"
@@ -633,7 +632,8 @@ class AgentRunner:
         self._ask_lock = threading.Lock()
         self._pending_ask: dict[str, Any] | None = None
         # 权限审批的挂起请求：{request_id, tool_call_id, name, risk, arguments, decision, event}。
-        # 与 ask_user 同一套「回合线程挂起、HTTP 线程唤醒」，区别是有超时（见 PERMISSION_TIMEOUT）。
+        # 与 ask_user 同一套「回合线程挂起、HTTP 线程唤醒」，都不设超时；唯一差别是回合被
+        # 停止时这里按拒绝收尾（"停下"就是别做了），而 ask_user 按跳过返回。
         self._perm_lock = threading.Lock()
         self._pending_permission: dict[str, Any] | None = None
         # 会话落盘器：state 里没有 session_id（理论上不该发生）时退化为内存态
@@ -1522,13 +1522,13 @@ class AgentRunner:
     ) -> tuple[str, str]:
         """发起一次审批并**阻塞**等用户点，返回（答复, 拒绝原因）。
 
-        答复 ∈ allow-once / allow-session / deny / timeout / stopped。第二个值是用户在卡上
-        填的拒绝原因，只有 deny 且填了才非空——它会被拼进给模型的那句工具结果
+        答复 ∈ allow-once / allow-session / deny / stopped。第二个值是用户在卡上填的拒绝
+        原因，只有 deny 且填了才非空——它会被拼进给模型的那句工具结果
         （见 _permission_denied_reason），所以"用户说不要"和"用户说不要、因为 X"是两回事。
 
-        与 ask_user 同一套「回合线程挂起、HTTP 线程唤醒（resolve_permission）」，两点不同：
-        - **有超时**（PERMISSION_TIMEOUT）：到点当拒绝，fail closed，不把回合永远挂住；
-        - 回合被停止时当拒绝（"停下"的意思就是别做了），而不是像 ask_user 那样按跳过继续。
+        与 ask_user 同一套「回合线程挂起、HTTP 线程唤醒（resolve_permission）」，都**不设
+        超时**：没人答就一直挂着，卡片一直在转录里等着（刷新、切走再回来都还在）。唯一差别
+        是回合被停止时这里按拒绝收尾（"停下"的意思就是别做了），而 ask_user 按跳过继续。
         """
         risk = _tool_risk(name)
         safe_args = _sanitize_tool_args(args)
@@ -1552,20 +1552,12 @@ class AgentRunner:
             "risk": risk,
             "mode": mode,
             "arguments": safe_args,
-            "timeout_s": int(PERMISSION_TIMEOUT),
-            # 起始时刻（epoch 秒）：界面据此显示"还剩多少"的倒计时。带上它，刷新页面、
-            # 切走再回来倒计时也接着真实剩余时间走，不会重置回满值。
-            "started_at": time.time(),
         })
-        _log(f"  🔐 等待用户批准 {name}（模式 {mode}，{int(PERMISSION_TIMEOUT)}s 超时）")
-        deadline = time.monotonic() + PERMISSION_TIMEOUT
+        _log(f"  🔐 等待用户批准 {name}（模式 {mode}，不设超时）")
         try:
             while not event.wait(PERMISSION_WAIT_TICK):
                 if self.stop_event.is_set():
                     _log("  🔐 回合被停止，权限请求按拒绝处理")
-                    break
-                if time.monotonic() >= deadline:
-                    _log(f"  🔐 权限请求超时（{int(PERMISSION_TIMEOUT)}s），按拒绝处理")
                     break
             decision = str(holder.get("decision") or "")
         finally:
@@ -1574,7 +1566,8 @@ class AgentRunner:
                     self._pending_permission = None
         if decision:
             return decision, str(holder.get("reason") or "")
-        return ("stopped" if self.stop_event.is_set() else "timeout"), ""
+        # 走到这里只有一种可能：回合被停止（否则 event 被 set 时必然带上了 decision）
+        return "stopped", ""
 
     def apply_permission_mode(self, mode: Any) -> None:
         """改档（HTTP 线程调用）：下一次工具调用按新档判。
@@ -5617,8 +5610,8 @@ class AgentRuntime:
 
         decision 只有 allow-once / allow-session / deny 三种；reason 是拒绝时可选的
         一句话（随工具结果给模型看）。校验在 resolve_permission 里做，这里只负责找到
-        对应的 runner——没有在等待的审批时报 ValueError（卡片留到超时之后才点、或回合
-        已经结束，界面据此提示）。
+        对应的 runner——没有在等待的审批时报 ValueError（卡片对应的回合已经结束、或这次
+        审批已经答过了，界面据此提示）。
         """
         key = self._key(project_dir)
         sid = self._resolve_session_id(project_dir, session_id)

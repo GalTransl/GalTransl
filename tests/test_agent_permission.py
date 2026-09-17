@@ -6,7 +6,8 @@
 - ask：写操作一律先问；accept-edits：只自动放行"改译文数据"（缓存/字典/人名表）；
   auto：全放行；auto-quiet 放行规则同 auto，另把档位写进 system prompt 要求少问；
 - 答复只有 allow-once / allow-session（按工具名，本会话有效）/ deny；
-- 超时当拒绝（fail closed），拒绝时给模型一条"用户拒绝权限"的工具错误。
+- **不设超时**：没人答就一直挂着（与 ask_user 一致），只有回合被停止才按拒绝收尾；
+  拒绝时给模型一条"用户拒绝权限"的工具错误（可附用户填的拒绝原因）。
 """
 
 import threading
@@ -186,17 +187,15 @@ class PermissionMatrixTests(unittest.TestCase):
 
     def test_denied_reason_distinguishes_cause(self) -> None:
         self.assertIn("用户拒绝权限", _permission_denied_reason("save_dict", "deny"))
-        self.assertIn("没有在", _permission_denied_reason("save_dict", "timeout"))
         self.assertIn("回合被停止", _permission_denied_reason("save_dict", "stopped"))
         self.assertIn("保存字典", _permission_denied_reason("save_dict", "deny"))  # 用人话的工具名
 
     def test_denied_reason_carries_the_note_from_the_user(self) -> None:
-        """用户填的拒绝原因原样进那句话；他没填、或不是拒绝（超时/被停）时不该冒出来。"""
+        """用户填的拒绝原因原样进那句话；他没填、或不是拒绝（回合被停）时不该冒出来。"""
         with_note = _permission_denied_reason("save_dict", "deny", "这本字典我自己维护")
         self.assertIn("用户填写的拒绝原因：这本字典我自己维护", with_note)
 
         self.assertNotIn("原因", _permission_denied_reason("save_dict", "deny"))
-        self.assertNotIn("不该出现", _permission_denied_reason("save_dict", "timeout", "不该出现"))
         self.assertNotIn("不该出现", _permission_denied_reason("save_dict", "stopped", "不该出现"))
 
     def test_reason_normalization(self) -> None:
@@ -256,9 +255,10 @@ class PermissionGateTests(unittest.TestCase):
         # 模型填的 reason 跟着 arguments 原样进审批卡：用户在批之前能看到"为什么要做这件事"
         # （启动翻译、改配置这类动作全靠它）
         self.assertEqual(data["arguments"]["reason"], "试试")
-        self.assertEqual(data["timeout_s"], int(rt.PERMISSION_TIMEOUT))
-        # 起始时刻：界面倒计时按它算，刷新后也接着真实剩余时间走（不是从满值重来）
-        self.assertLessEqual(abs(time.time() - float(data["started_at"])), 30)
+        # 不设超时，所以事件里不带任何"还剩多少"的字段：界面那张卡没有倒计时，
+        # 也不会到点自己收尾（老会话事件里可能还带着，界面已不读）
+        self.assertNotIn("timeout_s", data)
+        self.assertNotIn("started_at", data)
 
     def test_allow_once_does_not_grant_the_session(self) -> None:
         runner = make_runner("ask")
@@ -316,12 +316,23 @@ class PermissionGateTests(unittest.TestCase):
         self.assertTrue(out["ok"], out.get("error"))
         self.assertEqual(runner.state.permission_grants, set())
 
-    def test_timeout_is_denied(self) -> None:
+    def test_no_answer_keeps_waiting(self) -> None:
+        """不设超时：没人答就一直挂着，不自己替用户作决定（以前 120 秒到点自动拒绝）。"""
         runner = make_runner("ask")
-        with patch.object(rt, "PERMISSION_TIMEOUT", 0.2):
-            with self.assertRaises(AgentToolError) as ctx:
-                runner._require_permission("save_dict", {})
-        self.assertIn("没有在", str(ctx.exception))
+        out = run_gate(runner, "save_dict", None)  # 只等挂起，不作答
+
+        time.sleep(0.5)
+        self.assertTrue(out["alive"])  # 回合线程仍挂在这次审批上
+        with runner._perm_lock:
+            self.assertIsNotNone(runner._pending_permission)
+            self.assertEqual(runner._pending_permission["decision"], "")
+
+        runner.resolve_permission("deny")  # 收拾掉：作答之后它才继续
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and "error" not in out:
+            time.sleep(0.01)
+        self.assertIsInstance(out["error"], AgentToolError)
+        self.assertIn("用户拒绝权限", str(out["error"]))
 
     def test_stop_event_denies(self) -> None:
         runner = make_runner("ask")

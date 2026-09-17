@@ -235,7 +235,9 @@ type ActivityItem = {
   result?: unknown;
   error?: string;
   durationMs?: number;
-  // 权限审批：后端在这个工具调用执行前挂起等用户点（见 PermissionCard）
+  // 权限审批：后端在这个工具调用执行前挂起等用户点（见 PermissionCard）。
+  // 没有超时字段——后端不设超时，卡片会一直等着（老会话事件里可能还带着 timeout_s /
+  // started_at，这里不读、也不用）。
   permission?: {
     id: string;
     name: string;
@@ -243,9 +245,6 @@ type ActivityItem = {
     risk: string;
     mode: string;
     arguments?: Record<string, unknown>;
-    timeoutS: number;
-    /** 发起审批的时刻（epoch 秒）；0 = 老记录没有这个字段，倒计时退化成"从挂载起算" */
-    startedAt: number;
   };
   // 流式 content/reasoning：正在收 delta、还没收到对应的 *_end
   streaming?: boolean;
@@ -544,8 +543,6 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
           ev.arguments && typeof ev.arguments === 'object' && !Array.isArray(ev.arguments)
             ? (ev.arguments as Record<string, unknown>)
             : undefined,
-        timeoutS: typeof ev.timeout_s === 'number' ? ev.timeout_s : 0,
-        startedAt: typeof ev.started_at === 'number' ? ev.started_at : 0,
       };
       continue;
     }
@@ -3666,28 +3663,10 @@ function AskUserCard({
 /* ── 权限确认卡片 ──
    写操作执行前，后端会挂起并推一条 permission_request；卡片就摆在那次工具调用下面
    （与 ask_user 同一套位置）。三个动作对应后端的三种答复：允许一次 / 本会话允许
-   （只对这个工具、只在这个会话）/ 拒绝。不点会在 timeoutS 秒后自动拒绝（fail closed）；
-   拒绝与超时都会让模型收到一条"用户拒绝权限"的工具错误，它据此换策略——而不是把
-   "没执行"当成"执行成功"。 */
-/* ── 审批倒计时 hook（上面那张卡用）──
-   剩余时间（毫秒），每 500ms 重算一次。事件里带了 started_at（后端发起审批的时刻）
-   就按它算：刷新页面、切走再回来，倒计时接着真实剩余时间走，不会重置回满值；极旧的
-   记录没有该字段时退化成"从卡片挂载那一刻起算"（只有读老会话才遇到）。到 0 就是后端
-   要按拒绝处理了。单独放这里是因为 Hooks 必须在组件最前面无条件调用——卡片里那句
-   `if (!perm) return null` 之前不能有分支，拿不到 perm 时传 0 让它直接不动。 */
-function usePermissionCountdown(startedAt: number, timeoutS: number): number {
-  const fallbackRef = useRef(Date.now());
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!timeoutS) return;
-    setNow(Date.now());
-    const id = window.setInterval(() => setNow(Date.now()), 500);
-    return () => window.clearInterval(id);
-  }, [startedAt, timeoutS]);
-  if (!timeoutS) return 0;
-  const origin = startedAt > 0 ? startedAt * 1000 : fallbackRef.current;
-  return Math.max(0, origin + timeoutS * 1000 - now);
-}
+   （只对这个工具、只在这个会话）/ 拒绝。**没有倒计时、也不会自动拒绝**：后端不设超时，
+   不点就一直等着（刷新、切走再回来卡片都还在）；要收场就点三个按钮之一，或者点停止
+   让整个回合收尾。拒绝会让模型收到一条"用户拒绝权限"的工具错误（可附你填的原因），
+   它据此换策略——而不是把"没执行"当成"执行成功"。 */
 
 function PermissionCard({
   item,
@@ -3701,7 +3680,6 @@ function PermissionCard({
   onDecide: (decision: PermissionDecision, reason?: string) => void;
 }) {
   const perm = item.permission;
-  const leftMs = usePermissionCountdown(perm?.startedAt ?? 0, perm?.timeoutS ?? 0);
   // 拒绝原因（可选，输入框里那份）：只有点「拒绝」才送出去，会随那条工具结果一起给模型看。
   // 别和下面那个 `reason`（模型填在入参里的"为什么做这件事"）搞混，那个是只读展示用的。
   const [denyReason, setDenyReason] = useState('');
@@ -3729,8 +3707,6 @@ function PermissionCard({
   const detail = [PERMISSION_MODE_LABELS[normalizePermissionMode(perm.mode)], summary]
     .filter(Boolean)
     .join(' · ');
-  // 到点后端就按拒绝处理了：按钮一并禁掉，免得点下去只换来一句 409
-  const expired = perm.timeoutS > 0 && leftMs <= 0;
 
   return (
     <section className="agent-perm" aria-label={`权限请求：${toolLabel}`}>
@@ -3743,15 +3719,6 @@ function PermissionCard({
         >
           {riskLabel}
         </span>
-        {perm.timeoutS > 0 ? (
-          <span
-            className={`agent-perm__timer${leftMs <= 15000 ? ' is-urgent' : ''}`}
-            title={`超过 ${perm.timeoutS} 秒未回答会按拒绝处理`}
-          >
-            <Icon name="hourglass" />
-            {expired ? '已超时' : `${formatCountdown(leftMs)} 后拒绝`}
-          </span>
-        ) : null}
       </header>
       <p className="agent-perm__lead">允许「{toolLabel}」运行吗？</p>
       <p className="agent-perm__meta">{detail}</p>
@@ -3762,7 +3729,7 @@ function PermissionCard({
           type="button"
           className="agent-perm__btn is-primary"
           onClick={() => onDecide('allow-once')}
-          disabled={submitting || expired}
+          disabled={submitting}
           title="只批准这一次调用"
         >
           允许一次
@@ -3771,7 +3738,7 @@ function PermissionCard({
           type="button"
           className="agent-perm__btn"
           onClick={() => onDecide('allow-session')}
-          disabled={submitting || expired}
+          disabled={submitting}
           title={`本会话内不再询问「${toolLabel}」，会话结束即失效`}
         >
           本会话允许
@@ -3780,7 +3747,7 @@ function PermissionCard({
           type="button"
           className="agent-perm__btn"
           onClick={() => onDecide('deny', denyReason.trim())}
-          disabled={submitting || expired}
+          disabled={submitting}
           title="这次调用不执行，Agent 会收到「用户拒绝」并换策略"
         >
           拒绝
@@ -3793,7 +3760,7 @@ function PermissionCard({
           value={denyReason}
           onChange={(e) => setDenyReason(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key !== 'Enter' || submitting || expired) return;
+            if (e.key !== 'Enter' || submitting) return;
             e.preventDefault();
             onDecide('deny', denyReason.trim());
           }}
@@ -3801,7 +3768,7 @@ function PermissionCard({
           aria-label="拒绝原因（可选）"
           title="填了会在点「拒绝」时一起送给 Agent（显示在那次调用的结果里）"
           maxLength={500}
-          disabled={submitting || expired}
+          disabled={submitting}
         />
       </div>
     </section>
@@ -4087,7 +4054,9 @@ function ToolRow({
   const hasDetails = Boolean(summary || resultText || item.arguments || changeList);
   const longResult = resultText.length > 400;
 
-  // 权限被拒不是故障，是用户的决定：状态标签说"已拒绝"，免得看着像系统出错
+  // 权限被拒不是故障，是用户的决定：状态标签说"已拒绝"，免得看着像系统出错。
+  // 「用户没有在」是旧会话里"审批到点自动拒绝"留下的文案——现在没有超时了，留着这句
+  // 只是为了让老转录仍显示成"已拒绝"而不是"失败"。
   const denied =
     !ok && typeof item.error === 'string' && /^(用户拒绝权限|用户没有在|回合被停止)/.test(item.error);
   // 状态标签以**这一行自己的进度**为准（见 toolRowPhases）：没有结果就不是"完成"。

@@ -2915,26 +2915,8 @@
   color: var(--color-text-muted);
 }
 
-/* 审批倒计时（贴在标题行右侧）：120 秒到点后端就按拒绝处理，剩多少得看得见。
-   最后一刻钟转成危险色——"再不动就要超时了"。数字用等宽数字，秒数跳动时不抖。 */
-.agent-perm__timer {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: var(--agent-tile-strong);
-  color: var(--color-text-muted);
-  font-size: 0.7rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.agent-perm__timer.is-urgent {
-  background: color-mix(in srgb, var(--color-danger) 16%, transparent);
-  color: var(--color-danger);
-}
+/* 审批卡没有倒计时：后端不设超时，不点就一直等着（见 PermissionCard 的注释）。
+   以前这里有个 .agent-perm__timer（120 秒到点自动拒绝），已随机制一起移除。 */
 
 .agent-perm__lead {
   margin: 0;
