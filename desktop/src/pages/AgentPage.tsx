@@ -191,6 +191,7 @@ const TRANSIENT_EVENT_TYPES = new Set<AgentEvent['type']>([
   'subagent_message',
   'subagent_tool_call',
   'subagent_tool_result',
+  'subagent_retry',
 ]);
 
 function persistedTranscriptEvents(events: AgentEvent[]): AgentEvent[] {
@@ -301,6 +302,8 @@ type SubagentRun = {
   startedAt?: number;
   finishedAt?: number;
   durationMs?: number;
+  /** 正在退避重试（subagent_retry，瞬态）：拿到下一次成功的响应就清掉 */
+  retry?: { attempt: number; maxAttempts: number; code?: string; reason?: string };
   turns?: number;
   toolCalls?: number;
   /** 写了几条校对意见 */
@@ -654,10 +657,24 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
           brief: ev.brief || '',
           status: 'running',
           steps: [],
-          startedAt: Date.now(),
+          // 用后端给的时间戳：subagent_start 是持久事件，刷新/切页会重放它，
+          // 拿"事件到达时间"会让进行中的计时每次重建都归零。
+          startedAt: typeof ev.started_at === 'number' ? ev.started_at * 1000 : Date.now(),
         };
         host.subagents.push(run);
       }
+      // 重试期间后端会插一条 subagent_retry（瞬态）：标出来让用户知道它在退避，
+      // 不是卡住了。任何后续动静都说明这次重试成功了，标记就地清掉。
+      if (ev.type === 'subagent_retry') {
+        run.retry = {
+          attempt: typeof ev.attempt === 'number' ? ev.attempt : 1,
+          maxAttempts: typeof ev.max_attempts === 'number' ? ev.max_attempts : 0,
+          code: ev.code || '',
+          reason: ev.reason || '',
+        };
+        continue;
+      }
+      run.retry = undefined;
       if (ev.type === 'subagent_message') {
         if (ev.text) run.steps.push({ kind: 'text', round: ev.round || 0, text: ev.text });
       } else if (ev.type === 'subagent_tool_call') {
@@ -687,7 +704,7 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
         run.doubts = typeof ev.doubts === 'number' ? ev.doubts : 0;
         run.durationMs = ev.duration_ms;
         run.error = ev.error || '';
-        run.finishedAt = Date.now();
+        run.finishedAt = typeof ev.finished_at === 'number' ? ev.finished_at * 1000 : Date.now();
       }
       continue;
     }
@@ -2873,7 +2890,13 @@ function workingLabel(timeline: TimelineGroup[]): string {
       return max > 0 ? `重试中（第 ${attempt}/${max} 次）` : '重试中';
     }
     if (item.kind === 'compact') return '整理上下文';
-    return `${toolMeta(item.name).running}…`;
+    // 工具行只有在**还没结果**时才代表"正在做这件事"（判定同 toolRowPhases）。
+    // 结果一到这行就完成了——继续挂它的 running 文案会让"等你回答…"一直亮着，
+    // 明明已经答完、后端都开始请求下一轮了。
+    if (item.ok === undefined && item.result === undefined && item.error === undefined) {
+      return `${toolMeta(item.name).running}…`;
+    }
+    return '处理中';
   }
   return '正在开始';
 }
@@ -3464,7 +3487,13 @@ function translationJobId(item: ActivityItem): string {
    或者干脆点停止让 Agent 自己判断。 */
 
 type AskDraft = { values: string[]; custom: boolean; text: string; skipped: boolean };
-type AskQuestion = { question: string; options: string[]; multiSelect: boolean };
+type AskQuestion = {
+  question: string;
+  options: string[];
+  multiSelect: boolean;
+  /** 模型推荐的选项（后端「全自动-零打断」档位下会直接采用它代答） */
+  recommended: string;
+};
 
 function AskUserCard({
   item,
@@ -3484,6 +3513,7 @@ function AskUserCard({
       question: str(q.question),
       options: Array.isArray(q.options) ? q.options.map((o) => str(o)).filter(Boolean) : [],
       multiSelect: q.multiSelect === true,
+      recommended: str(q.recommended),
     }));
 
   const [index, setIndex] = useState(0);
@@ -3590,6 +3620,11 @@ function AskUserCard({
             >
               <span className="agent-ask__mark" aria-hidden>{selected ? <Icon name="check" /> : null}</span>
               <span>{option}</span>
+              {option === current.recommended ? (
+                <span className="agent-ask__tag" title="Agent 推荐这一项（零打断档位会直接选它）">
+                  推荐
+                </span>
+              ) : null}
             </button>
           );
         })}
@@ -3806,9 +3841,19 @@ function SubagentRow({ run }: { run: SubagentRun }) {
   // **默认折叠**：一次派 16 个时是一行一个子代理，全铺开会把父行撑得很长；要看细节点开。
   // 折叠态不丢信息——"最新动作"就挂在行上（见 subagentLatest），在干什么一眼能扫到。
   const [open, setOpen] = useState(false);
+  // 跑着的时候没有 duration_ms（那是完成时给的）：按起始时间 + 本地 tick 算。
+  // 起始时间来自后端的 started_at，所以切页/刷新重建后不会归零；tick 保证没有新
+  // 事件时秒数也在走（否则一行"5.0s"会一直不动，看着像卡住）。
+  const running = run.status === 'running';
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running) return undefined;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(timer);
+  }, [running]);
   const state = subagentState(run);
-  // 跑着的时候没有 duration_ms（那是完成时给的）：先按起始时间算，事件一到就会刷新
-  const durationMs = run.durationMs ?? (run.startedAt ? Date.now() - run.startedAt : 0);
+  const durationMs = run.durationMs ?? (run.startedAt ? now - run.startedAt : 0);
   const latest = subagentLatest(run);
 
   return (
@@ -3836,6 +3881,18 @@ function SubagentRow({ run }: { run: SubagentRun }) {
         {run.toolCalls ? <span className="agent-subagent__badge">{run.toolCalls} 次工具</span> : null}
         {run.doubts ? <span className="agent-subagent__badge is-doubt">意见 {run.doubts}</span> : null}
         <span className={`agent-subagent__state is-${state.tone}`}>{state.label}</span>
+        {run.retry ? (
+          <span
+            className="agent-subagent__badge is-retry"
+            title={
+              run.retry.reason
+                ? `${run.retry.code || '请求失败'}：${run.retry.reason}`
+                : '请求失败，正在自动重试'
+            }
+          >
+            重试 {run.retry.attempt}/{run.retry.maxAttempts || '…'}
+          </span>
+        ) : null}
         {durationMs > 0 ? <span className="agent-subagent__time">{formatDuration(durationMs)}</span> : null}
       </button>
       {open ? (

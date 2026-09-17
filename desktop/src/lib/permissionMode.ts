@@ -8,8 +8,8 @@
  * - accept-edits（允许编辑）：只自动放行"改译文数据"（缓存 / 字典 / 人名表），
  *   改项目配置、改项目规范、启动翻译仍然要确认；
  * - auto（全自动）：不再确认；
- * - auto-quiet（全自动-减少问询）：放行规则与 auto 相同，差别只在后端会**把档位写进
- *   system prompt**，要求 Agent 更自主、少调用 ask_user（唯一一档告诉模型的）。
+ * - auto-quiet（全自动-零打断）：放行规则与 auto 相同，差别只在 ask_user 不会真的停下
+ *   来等人——后端按模型给的「推荐选项」直接代答，用户完全不被打断。
  */
 
 export const PERMISSION_MODES = ['ask', 'accept-edits', 'auto', 'auto-quiet'] as const;
@@ -25,7 +25,7 @@ export const PERMISSION_MODE_LABELS: Record<PermissionMode, string> = {
   ask: '每次询问',
   'accept-edits': '允许编辑',
   auto: '全自动',
-  'auto-quiet': '全自动-减少问询',
+  'auto-quiet': '全自动-零打断',
 };
 
 /** 每档的一句话说明（菜单里跟在名字下面，选择时看得见代价）。 */
@@ -33,7 +33,7 @@ export const PERMISSION_MODE_HINTS: Record<PermissionMode, string> = {
   ask: '每个改动都先问你',
   'accept-edits': '缓存与字典直接改；改设置、规范、启动翻译、派子代理要先问',
   auto: '不再确认，Agent 自主改缓存、设置与启动翻译',
-  'auto-quiet': '同「全自动」，并要求 Agent 更自主、尽量不问',
+  'auto-quiet': '同「全自动」；问题也由系统按推荐项代答，不打断你',
 };
 
 const STORAGE_KEY = 'galtransl.agent.permissionMode';

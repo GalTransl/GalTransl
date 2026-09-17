@@ -191,6 +191,12 @@ class ProofreadAgentFlowTests(unittest.TestCase):
         self.assertEqual(start["parent_id"], "call-1")
         self.assertEqual(start["file"], "a.json")
         self.assertEqual(start["label"], "校对")
+        # 绝对时间戳：start/done 是持久事件，界面刷新/切页重放后要按它还原耗时区间——
+        # 拿"事件到达时间"会让进行中的计时每次重建都归零。
+        self.assertIsInstance(start["started_at"], float)
+        done = next(data for event_type, data in parent.events if event_type == "subagent_done")
+        self.assertIsInstance(done["finished_at"], float)
+        self.assertGreaterEqual(done["finished_at"], start["started_at"])
 
     def test_translation_edits_are_refused_and_nothing_is_written(self) -> None:
         """子代理硬塞 pre_dst：工具层拒掉（只允许 doub_content），一个字都不落盘。"""
@@ -266,6 +272,83 @@ class ProofreadAgentFlowTests(unittest.TestCase):
         statuses = {row["file"]: row["status"] for row in out["tasks"]}
         self.assertEqual(statuses, {"a.json": "failed", "b.json": "done"})
         self.assertIn("boom", out["tasks"][0]["error"])
+
+
+class SubagentRetryTests(unittest.TestCase):
+    """子代理与主 Agent 同规则重试：一次网络抖动不该让整份报告作废。
+
+    只重试瞬态错误（超时/限流/5xx/连接断），鉴权、参数、上下文超限不重试；
+    退避期间父回合被停止则立刻收尾。退避时长在测试里 patch 成 0，不真等。
+    """
+
+    def _run_one(self, parent: _Parent, chat) -> dict:
+        with (
+            patch.object(rt, "_subagent_chat", chat),
+            patch.object(rt, "_llm_retry_delay_ms", lambda attempt, info: 0),
+        ):
+            return _tool_run_subagents(
+                parent, {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD, "file": "a.json"}]}
+            )
+
+    def test_transient_error_is_retried_until_it_succeeds(self) -> None:
+        parent = _Parent({"a.json": [ENTRY]})
+        calls = {"n": 0}
+
+        def flaky(_client, _model, _messages, _tools):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise TimeoutError("Request timed out.")
+            return "报告：没问题。", [], rt.REASONING_FIELD_NAMES[0], ""
+
+        out = self._run_one(parent, flaky)
+
+        self.assertEqual(out["tasks"][0]["status"], "done")
+        self.assertEqual(calls["n"], 2)
+        # 界面上能看到它在退避重试（瞬态事件，不进长期窗口）
+        retry = next(data for kind, data in parent.events if kind == "subagent_retry")
+        self.assertEqual(retry["attempt"], 1)
+        self.assertEqual(retry["max_attempts"], rt.LLM_MAX_RETRIES)
+
+    def test_non_retriable_error_fails_immediately(self) -> None:
+        """鉴权/参数这类错误重试多少次都一样，一次就收。"""
+        parent = _Parent({"a.json": [ENTRY]})
+        calls = {"n": 0}
+
+        def boom(_client, _model, _messages, _tools):
+            calls["n"] += 1
+            raise PermissionError("invalid api key")
+
+        out = self._run_one(parent, boom)
+
+        self.assertEqual(out["tasks"][0]["status"], "failed")
+        self.assertEqual(calls["n"], 1)
+        self.assertNotIn("subagent_retry", parent.types())
+
+    def test_gives_up_after_the_retry_budget(self) -> None:
+        parent = _Parent({"a.json": [ENTRY]})
+        calls = {"n": 0}
+
+        def always_timeout(_client, _model, _messages, _tools):
+            calls["n"] += 1
+            raise TimeoutError("Request timed out.")
+
+        out = self._run_one(parent, always_timeout)
+
+        self.assertEqual(out["tasks"][0]["status"], "failed")
+        self.assertEqual(calls["n"], rt.LLM_MAX_RETRIES + 1)  # 首次 + 重试
+        self.assertIn("已重试", out["tasks"][0]["error"])
+
+    def test_stop_during_backoff_stops_the_subagent(self) -> None:
+        """父回合被停止时不继续重试，按 stopped 收尾（别在无人值守时干等）。"""
+        parent = _Parent({"a.json": [ENTRY]})
+
+        def timeout_and_stop(_client, _model, _messages, _tools):
+            parent.stop_event.set()  # 失败的同时用户点了停止
+            raise TimeoutError("Request timed out.")
+
+        out = self._run_one(parent, timeout_and_stop)
+
+        self.assertEqual(out["tasks"][0]["status"], "stopped")
 
 
 class SubagentToolScopeTests(unittest.TestCase):
@@ -625,6 +708,67 @@ class AutoSplitTests(unittest.TestCase):
         )
         self.assertEqual(out["tasks"][0]["files"], ["src_0.json", "src_1.json"])
         self.assertEqual(out["tasks"][1]["files"], ["src_2.json"])
+
+    def test_count_expands_one_task_into_several(self) -> None:
+        """少写几条任务：一条 file:"*" + count:N 展开成 N 个子代理，brief 只写一遍。
+
+        真实踩过：要求派 2 个 explore，模型因为不想把上千字的 brief 复制两份，只写了一条
+        task、结果只派出去 1 个。count 就是给这种情况准备的。
+        """
+        parent = _Parent({f"c{i}.json": [ENTRY] for i in range(4)})
+
+        out = _run(
+            parent,
+            {
+                "tasks": [
+                    {
+                        "agent": SUBAGENT_AGENT_PROOFREAD,
+                        "file": "*",
+                        "count": 2,
+                        "brief": "重点看漏译",
+                    }
+                ]
+            },
+            [("报告：没问题。", [])],
+        )
+
+        self.assertEqual(out["total"], 2)
+        first, second = out["tasks"]
+        self.assertEqual(first["files"], ["c0.json", "c1.json"])
+        self.assertEqual(second["files"], ["c2.json", "c3.json"])
+        self.assertIn("每个 2 个", out["note"])
+        # 一份 brief 由展开出来的两个子代理共用（模型不用重复写）
+        starts = [data for kind, data in parent.events if kind == "subagent_start"]
+        self.assertEqual(len(starts), 2)
+        self.assertTrue(all("重点看漏译" in data["brief"] for data in starts))
+
+    def test_count_requires_the_star_placeholder(self) -> None:
+        parent = _Parent({"a.json": [ENTRY]})
+        with self.assertRaises(AgentToolError) as ctx:
+            _tool_run_subagents(
+                parent,
+                {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD, "file": "a.json", "count": 2}]},
+            )
+        self.assertIn("没法平分", str(ctx.exception))
+
+    def test_rejects_bad_count_values(self) -> None:
+        parent = _Parent({"a.json": [ENTRY]})
+        for bad in (0, -1, "x", 2.5, True, SUBAGENT_MAX_TASKS + 1):
+            with self.assertRaises(AgentToolError):
+                _tool_run_subagents(
+                    parent,
+                    {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD, "file": "*", "count": bad}]},
+                )
+
+    def test_expanded_total_respects_the_task_cap(self) -> None:
+        """单条 count 合法、但展开后总量超上限时要拦下来。"""
+        parent = _Parent({"a.json": [ENTRY]})
+        with self.assertRaises(AgentToolError) as ctx:
+            _tool_run_subagents(
+                parent,
+                {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD, "file": "*", "count": 9}] * 2},
+            )
+        self.assertIn(str(SUBAGENT_MAX_TASKS), str(ctx.exception))
 
     def test_multi_file_doubts_carry_the_filename(self) -> None:
         """一组文件里写的意见要能认出在哪份里——只给 index，主 Agent 没法定位。"""

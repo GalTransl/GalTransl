@@ -2782,6 +2782,19 @@
   font-weight: 700;
 }
 
+/* 模型推荐的选项（recommended）。它不只是个提示：「全自动-零打断」档位下后端会
+   直接采用这一项代答、不弹卡片——这个标记等于预告"系统会替你选哪个"。 */
+.agent-ask__tag {
+  flex: none;
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(47, 111, 235, 0.12);
+  color: var(--color-primary);
+  font-size: 0.68rem;
+  line-height: 1.6;
+}
+
 /* 「自己填」点开就地变输入：这一行本身就是编辑区（外框/内边距沿用 .agent-ask__option），
    下面不再浮出第二个输入框。 */
 .agent-ask__option--editing {
@@ -3608,6 +3621,12 @@
 /* 校对意见数：它才是这次子代理的产出，给个警示色 */
 .agent-subagent__badge.is-doubt {
   color: var(--color-warning);
+}
+
+/* 退避重试中（subagent_retry）：说明它在自动重试，不是卡住了 */
+.agent-subagent__badge.is-retry {
+  color: var(--color-warning);
+  font-variant-numeric: tabular-nums;
 }
 
 .agent-subagent__state {

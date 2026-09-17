@@ -56,6 +56,8 @@ _TRANSIENT_EVENT_TYPES = frozenset({
     "subagent_tool_result",
     # 压缩的开始/结束只是过程指示：终态有 compacted（持久），刷新后由它重建即可。
     "compacting",
+    # 子代理的退避重试只是过程指示：终态由 subagent_done 给出。
+    "subagent_retry",
 })
 
 # ---- 子代理（subagent）的常量 ----
@@ -93,9 +95,10 @@ SUBAGENT_LABELS: dict[str, str] = {
 # - accept-edits（允许编辑）：只自动放行"改译文数据"（缓存 / 字典 / 人名表），
 #   改项目配置、改项目规范、启动翻译仍然要问；
 # - auto（全自动）：全部放行；
-# - auto-quiet（全自动-减少问询）：放行规则与 auto 一模一样，差别只有一处——**这一档会
-#   在 system prompt 里告诉模型当前档位**（见 AUTO_QUIET_PROMPT），要求它更自主、少用
-#   ask_user。其余档位照旧不告诉模型（它只会在被拒绝时收到一条工具错误）。
+# - auto-quiet（全自动-零打断）：放行规则与 auto 一模一样，差别只有一处——**ask_user
+#   不再真的拦下来等人**：后端直接按模型给的「推荐选项」代答（见 _tool_ask_user），
+#   用户完全不被打断。其余档位照旧：不把档位写进 system prompt，模型只会在被拒绝时
+#   收到一条工具错误。
 AUTO_QUIET_MODE = "auto-quiet"
 PERMISSION_MODES: tuple[str, ...] = ("ask", "accept-edits", "auto", AUTO_QUIET_MODE)
 DEFAULT_PERMISSION_MODE = "ask"
@@ -103,7 +106,7 @@ PERMISSION_MODE_LABELS: dict[str, str] = {
     "ask": "每次询问",
     "accept-edits": "允许编辑",
     "auto": "全自动",
-    AUTO_QUIET_MODE: "全自动-减少问询",
+    AUTO_QUIET_MODE: "全自动-零打断",
 }
 # 审批的三种答复（前端按钮）：只批这一次 / 本会话都批这个工具 / 拒绝
 PERMISSION_DECISIONS: tuple[str, ...] = ("allow-once", "allow-session", "deny")
@@ -486,7 +489,7 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。对确认无需处理的系统性问题类型（如字典使用提示、纯语气词提示），可用 manage_problem_filter(action="add", keyword=["…"]) 加入问题过滤清单（keyword 可传数组一次加多个），让统计聚焦真问题；过滤后统计会明显下降，属于预期效果。
 6.5 **派子代理（可选）**：用 run_subagents 一次派多个子代理并行干活，每个有自己的上下文与受限工具，跑完只交回一份报告（过程不进你的上下文）。两种角色：
    - **校对（proofread）**：每个负责一个（或一组）缓存文件，一次最多 16 个。file 填具体文件名就是点名；填 `"*"` 则**自动均分**——同批的 `"*"` 任务平分全部缓存文件（如派 16 个 `"*"`、256 个缓存文件 → 每个 16 个），要一次覆盖全部文件时用它，不用自己去数文件再逐个点名。大文件还能用 indexes 切区间。它们只能读 + 写缓存条目的 doub_content（存疑内容），**改不了译文**：返回的 tasks[].doubts 带文件名与 index，报告是各自的总结（含"拿不准"的点）。拿到后按 7 的流程处理——读那些 index 的 doub_content，改完译文把该条的 doub_content 清空。**推荐在修复前跑一遍**。
-   - **原文探索（explore）**：只读**原文**与 **GPT 字典**（不看译文、不写任何文件），干两件事——补齐 GenDic 覆盖不到的字典候选（昵称/爱称/绰号、地名组织道具、特殊称呼如お兄ちゃん、口癖，以及"同一个人被叫好几个名字"的判断），以及给出翻译规范建议（称谓与人称、文体语气、标点）。结论在它交回的报告里，由你汇总后落地（save_dict / write_project_guideline）。它要通读原文、**很费 token，属于可选步骤**：派之前**必须用 ask_user 征得用户同意**（把"会读较多原文、比较费 token"说清楚），同意才派、不同意就不派；通常 1-2 个，文件多时同样可用 `"*"` 自动均分。
+   - **原文探索（explore）**：只读**原文**与 **GPT 字典**（不看译文、不写任何文件），干两件事——补齐 GenDic 覆盖不到的字典候选（昵称/爱称/绰号、地名组织道具、特殊称呼如お兄ちゃん、口癖，以及"同一个人被叫好几个名字"的判断），以及给出翻译规范建议（称谓与人称、文体语气、标点）。结论在它交回的报告里，由你汇总后落地（save_dict / write_project_guideline）。它要通读原文、**很费 token，属于可选步骤**：派之前**必须用 ask_user 征得用户同意**（把"会读较多原文、比较费 token"说清楚），同意才派、不同意就不派；通常 1-2 个。要 2 个就写**一条**任务：`{agent:"explore", file:"*", count:2}`——它会自动把原文均分成两份并行跑，brief 只写一遍（别把上千字的 brief 复制两条）。
    派之前先想清楚要它们重点看什么，写进 brief 比它们自己发挥准。
 7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。对确认无需处理的系统性问题类型（如字典使用提示、纯语气词提示），可用 manage_problem_filter(action="add", keyword=["…"]) 加入问题过滤清单（keyword 可传数组一次加多个），让统计聚焦真问题；过滤后统计会明显下降，属于预期效果。
 8. **完成**：收尾前先调用 get_project_overview 确认项目真的翻完——只有 files_translated == files_total 且没有 running 任务才算整体完成（total==translated 可能只代表已缓存的部分翻完，不要据此收尾）；若还有文件没翻，回到流程 4 继续 start_translation 翻剩余文件。问题数可控、整体完成后，用 read_output 抽查最终输出文件（交付物；输出与缓存不完全一致，译后字典替换只在输出生效），确认无误后用一段自然语言总结本次操作（做了什么、翻译进度、剩余问题建议），不要调用工具，直接输出总结即可结束。
@@ -2027,18 +2030,6 @@ def _cache_fields_section() -> str:
     return "\n".join(lines)
 
 
-# 「全自动-减少问询」档位额外拼进 system prompt 的一段——这一档跟「全自动」的**唯一**差别
-# 就是它。其余档位不注入任何档位说明：模型不知道自己被拦了几次，只会在被拒绝时收到一条
-# 工具错误（见 _permission_denied_reason）。
-AUTO_QUIET_PROMPT = (
-    "\n\n# 权限模式\n"
-    "用户选择的权限模式是「全自动-减少问询」：请提高自主性，并尽量减少调用 ask_user。"
-    "凡是能自己查清、自己判断的（读文档、读缓存、查配置、按已有规范和上下文推断）就直接做，"
-    "不要为了确认而确认；只有确实非常犹豫，需要用户拿主意时才问——比如有多个都合理的方案要用户挑一个，"
-    "或者要用户提供只有他知道的信息。"
-)
-
-
 def _build_system_prompt(state: "AgentState") -> str:
     """构造 system prompt：基础约束 + 当前项目环境。
 
@@ -2058,11 +2049,9 @@ def _build_system_prompt(state: "AgentState") -> str:
         f"- 配置文件：{state.config_file_name or DEFAULT_CONFIG_FILE}\n"
         f"- 本次目标：{goal}"
     )
-    # 只有「全自动-减少问询」会告诉模型当前档位（为了让它少问）。system prompt 在
-    # 会话建立时构造一次、之后字节冻结（压缩也不再重建它）——这是"前缀能一直命中缓存"
-    # 的前提；运行中切换档位不会改写已建立的 system prompt，新建/重启会话才生效。
-    if _normalize_permission_mode(state.permission_mode) == AUTO_QUIET_MODE:
-        parts.append(AUTO_QUIET_PROMPT)
+    # 档位一律不写进 system prompt：permission_mode 是动态的，写进去会让前缀随档位切换
+    # 失效，也不符合"system 建立后字节冻结"的约定。「全自动-零打断」的"不打断"由后端
+    # 直接代答 ask_user 实现（见 _tool_ask_user），跟提示词无关。
     return "".join(parts)
 
 
@@ -2967,6 +2956,8 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                 "（save_dict / write_project_guideline）。explore 要通读原文、**很费 token**，"
                 "属于可选项：派之前先用 ask_user 征得用户同意。"
                 f"一次最多 {SUBAGENT_MAX_TASKS} 个，要它们重点看什么就写进 brief。"
+                '要并行多个又不想写多条任务：一条任务写 file:"*" + count:N 就展开成 N 个'
+                "（brief 只写一遍）。"
             ),
             "parameters": {
                 "type": "object",
@@ -2984,7 +2975,11 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                                 },
                                 "file": {
                                     "type": "string",
-                                    "description": '要负责的文件。proofread 必填：缓存文件名（来自 list_transl_cache）；explore 可选：原文文件名，留空则由它自己按 list_input_files 挑。填 "*" 表示**自动均分**：本批里同角色的每个 "*" 任务平分该角色的全部文件（proofread=缓存文件，explore=原文文件）——例如派 16 个 "*" 任务、项目有 256 个缓存文件，就每个 16 个；除不尽时前面的多一个；本批里已具体点名的文件不会再分给 "*"。除单个文件名和 "*" 外不支持其他写法：要手动分组就一个任务写一个文件名。锁定是工具层强制的：子代理只能读写派给它的那些文件，范围外会被拒',
+                                    "description": '要负责的文件。proofread 必填：缓存文件名（来自 list_transl_cache）；explore 可选：原文文件名，留空则由它自己按 list_input_files 挑。填 "*" 表示**自动均分**：本批里同角色的每个 "*" 任务平分该角色的全部文件（proofread=缓存文件，explore=原文文件）——例如派 16 个 "*" 任务、项目有 256 个缓存文件，就每个 16 个；除不尽时前面的多一个；本批里已具体点名的文件不会再分给 "*"。除单个文件名和 "*" 外不支持其他写法：要手动分组就一个任务写一个文件名。锁定是工具层强制的：子代理只能读写派给它的那些文件，范围外会被拒。**要并行 N 个不必写 N 条任务**：写一条 file:"*" + count:N 即可（brief 只写一遍）',
+                                },
+                                "count": {
+                                    "type": "integer",
+                                    "description": '可选。把这一条任务展开成 N 个子代理并行跑（默认 1，上限同批任务数）。只有 file 填 "*" 时可用——它们平分这批文件。要派 2 个 explore 通读原文，就写一条 {agent:"explore", file:"*", count:2}，别把长 brief 复制两遍',
                                 },
                                 "indexes": {
                                     "type": "string",
@@ -2992,7 +2987,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                                 },
                                 "brief": {
                                     "type": "string",
-                                    "description": "可选。给这个子代理的额外要求：重点核对什么、注意哪些角色/术语",
+                                    "description": "可选。给这个子代理的额外要求：重点核对什么、注意哪些角色/术语。count > 1 时这一份 brief 由展开出来的每个子代理共用（不用重复写）",
                                 },
                             },
                             "required": ["agent"],
@@ -3041,9 +3036,11 @@ AGENT_TOOLS: list[dict[str, Any]] = [
             "description": (
                 "当你不确定该不该做（要不要动这个文件、要不要重翻）、或不确定该怎么翻译"
                 "（用词、称谓、语气、风格取舍）时，向用户提问并等待回答，不要自己猜。每题给出"
-                "2-6 个候选选项，用户还可以自己填；一次最多 4 题。用户跳过某题会以空答案返回"
-                "（不算失败），你按自己的最佳判断继续即可。能从项目配置、字典或原文里判断出来的"
-                "不要问——只有真的需要人来定夺时才用。"
+                "2-6 个候选选项，用户还可以自己填；一次最多 4 题。每题都要填 recommended——"
+                "你推荐的那个选项：「全自动-零打断」档位下后端会直接采用它替你作答、不打扰用户，"
+                "其余档位只把它标成卡片上的「推荐」。用户跳过某题会以空答案返回（不算失败），"
+                "你按自己的最佳判断继续即可。能从项目配置、字典或原文里判断出来的不要问——"
+                "只有真的需要人来定夺时才用。"
             ),
             "parameters": {
                 "type": "object",
@@ -3066,6 +3063,14 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                                 "multiSelect": {
                                     "type": "boolean",
                                     "description": "可选。true 表示可以多选，默认单选。",
+                                },
+                                "recommended": {
+                                    "type": "string",
+                                    "description": (
+                                        "你推荐的那个选项，必须与 options 里的某一项一字不差。"
+                                        "建议每题都填：「全自动-零打断」档位下后端直接采用它代答，"
+                                        "不填就退而取第一个选项。"
+                                    ),
                                 },
                             },
                             "required": ["question", "options"],
@@ -5084,11 +5089,19 @@ def _normalize_ask_questions(args: dict[str, Any]) -> list[dict[str, Any]]:
                 options.append(label)
         if not options:
             raise AgentToolError(f"问题「{text}」至少要有一个非空选项")
+        capped = options[:ASK_MAX_OPTIONS]
+        recommended = str(item.get("recommended") or "").strip()
+        if recommended and recommended not in capped:
+            # 让它改而不是默默丢掉：零打断档位要靠这个值代答，写错就等于没推荐
+            raise AgentToolError(
+                f"问题「{text}」的 recommended（{recommended}）必须是 options 里的一项"
+            )
         questions.append(
             {
                 "question": text,
-                "options": options[:ASK_MAX_OPTIONS],
+                "options": capped,
                 "multiSelect": item.get("multiSelect") is True,
+                "recommended": recommended,
             }
         )
     return questions
@@ -5190,9 +5203,38 @@ def _tool_read_history_archive(runner: AgentRunner, args: dict[str, Any]) -> Any
     }
 
 
+def _auto_ask_answers(questions: list[dict[str, Any]]) -> list[list[str] | None]:
+    """「全自动-零打断」的自动作答：每题取推荐项，没给推荐就退而取第一个选项。
+
+    取第一个是刻意的兜底——模型列选项时通常把首选放最前面，而这一档的语义就是
+    "别停下来问我"：卡在等人作答上，比偶尔选歪一次更糟。多选问题也只给这一项。
+    """
+    answers: list[list[str] | None] = []
+    for question in questions:
+        recommended = str(question.get("recommended") or "").strip()
+        options = list(question.get("options") or [])
+        pick = recommended if recommended in options else (options[0] if options else "")
+        answers.append([pick] if pick else None)
+    return answers
+
+
 def _tool_ask_user(runner: AgentRunner, args: dict[str, Any]) -> Any:
-    """问用户：阻塞当前回合直到用户作答（或回合被停止，此时按跳过返回）。"""
+    """问用户：阻塞当前回合直到用户作答（或回合被停止，此时按跳过返回）。
+
+    **全自动-零打断**档位不阻塞：直接按每题的 recommended 代答（没填推荐就取第一个
+    选项），用户完全不会被打断。模型仍照常"问"，只是拿到的是系统代选的答案。
+    """
     questions = _normalize_ask_questions(args)
+    if _normalize_permission_mode(runner.state.permission_mode) == AUTO_QUIET_MODE:
+        answers = _auto_ask_answers(questions)
+        _log(f"  🤖 零打断档位：按推荐项代答 {len(questions)} 个问题，不等用户")
+        return {
+            "summary": _format_ask_answers(questions, answers)
+            + "\n（当前是「全自动-零打断」档位：以上答案由系统按推荐项自动选择，用户未被打断）",
+            "questions": [question["question"] for question in questions],
+            "answers": answers,
+            "auto_answered": True,
+        }
     answers = runner.ask_user(os.urandom(8).hex(), runner._active_tool_call_id, questions)
     return {
         "summary": _format_ask_answers(questions, answers),
@@ -5687,6 +5729,8 @@ class SubAgentRunner:
                 "tool_calls": self.tool_calls,
                 "doubts": len(self.doubts),
                 "duration_ms": result["duration_ms"],
+                # 结束时间戳（Unix 秒）：与 started_at 配对，界面重放后也能还原区间
+                "finished_at": time.time(),
                 "error": error,
             },
         )
@@ -5754,6 +5798,43 @@ class SubAgentRunner:
             f"压缩 {len(head)} 条，摘要 {len(summary)} 字符"
         )
 
+    def _chat_with_retry(
+        self, client: Any, model: str, tools: list[dict[str, Any]]
+    ) -> tuple[str, list[Any], str, str]:
+        """一次请求 + 与主 Agent 同规则的重试（分类 / 退避 / 可被停止打断）。
+
+        子代理的一次请求就是它整份报告的全部依赖，一次网络抖动就作废太亏，而且这里的
+        用量比主请求小得多，重试代价低。规则与主 Agent 一致：只重试瞬态错误（超时 /
+        限流 / 5xx / 流连接断了）；鉴权、参数、上下文超限重试多少次都一样，直接失败。
+        退避期间父回合被停止就立刻收尾（抛 AgentStopRequested，由 run 转成 stopped）。
+        """
+        attempt = 0
+        while True:
+            try:
+                return _subagent_chat(client, model, self.messages, tools)
+            except Exception as exc:  # noqa: BLE001 - 按分类决定是否重试
+                info = _classify_llm_error(exc)
+                if self.parent.stop_event.is_set():
+                    raise AgentStopRequested() from exc
+                if not info["retriable"] or attempt >= LLM_MAX_RETRIES:
+                    raise
+                attempt += 1
+                delay_ms = _llm_retry_delay_ms(attempt, info)
+                _log(
+                    f"  🧑‍🎓 子代理 {self.id} 请求失败（{info['code']}: {info['message']}），"
+                    f"{delay_ms / 1000:g}s 后重试 {attempt}/{LLM_MAX_RETRIES}"
+                )
+                self._emit("subagent_retry", {
+                    "attempt": attempt,
+                    "max_attempts": LLM_MAX_RETRIES,
+                    "delay_ms": delay_ms,
+                    "code": info["code"],
+                    "reason": info["message"],
+                    "status": info["status"],
+                })
+                if self.parent.stop_event.wait(delay_ms / 1000):
+                    raise AgentStopRequested() from exc
+
     def run(self) -> dict[str, Any]:
         """跑到自然收尾（不再调工具）、轮数上限、失败或被停止。"""
         client = getattr(self.parent, "_openai_client", None)
@@ -5769,6 +5850,9 @@ class SubAgentRunner:
                 "indexes": self.indexes,
                 "brief": self.brief,
                 "model": model,
+                # 开始时间戳（Unix 秒）：subagent_start 是持久事件，刷新/切页后会重放，
+                # 界面必须按它算"进行中耗时"，不能拿事件到达时间——否则每次重建都归零。
+                "started_at": self.started_at,
             },
         )
         if client is None or not model:
@@ -5796,12 +5880,16 @@ class SubAgentRunner:
             # 每轮请求前判一次：工具往返堆太多就把早期部分压成摘要（复用父 Agent 的窗口与摘要模型）
             self._maybe_compact()
             try:
-                content, tool_calls, reasoning_field, reasoning = _subagent_chat(
-                    client, model, self.messages, tools
+                content, tool_calls, reasoning_field, reasoning = self._chat_with_retry(
+                    client, model, tools
                 )
+            except AgentStopRequested:
+                return self._finish("stopped", last_text, error="父回合被停止，子代理提前收尾")
             except Exception as exc:  # noqa: BLE001 - 子代理失败不该拖垮父回合
-                _log(f"  🧑‍🎓 子代理 {self.id} 第 {round_i} 轮请求失败: {exc}")
-                return self._finish("failed", last_text, error=f"请求失败：{exc}")
+                _log(f"  🧑‍🎓 子代理 {self.id} 第 {round_i} 轮请求失败（已重试到上限）: {exc}")
+                return self._finish(
+                    "failed", last_text, error=f"请求失败（已重试 {LLM_MAX_RETRIES} 次）：{exc}"
+                )
             if content.strip():
                 last_text = content
                 self._emit("subagent_message", {"round": round_i, "text": content[:2000]})
@@ -5945,16 +6033,43 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
                 f'（也可以填 "{SUBAGENT_FILE_ALL}" 让它自动均分一批）'
             )
         is_auto = file_name == SUBAGENT_FILE_ALL
-        tasks.append(
-            {
-                "agent": agent,
-                "file": file_name,
-                # 解析后的实际范围：具体文件名 → 就它一个；"*" → 下面均分填进来
-                "files": [] if is_auto else ([file_name] if file_name else []),
-                "auto": is_auto,
-                "indexes": str(item.get("indexes", "") or "").strip(),
-                "brief": str(item.get("brief", "") or "").strip(),
-            }
+        # count：把这一条任务展开成几个子代理并行跑。brief 只写一遍——不让模型为了并行
+        # 把上千字的 brief 复制 N 份，否则它宁可只派一个（真实踩过：要求派 2 个 explore，
+        # 模型因为不想重复长 brief 只写了一条 task）。
+        count_raw = item.get("count", 1)
+        if isinstance(count_raw, bool) or not isinstance(count_raw, (int, str)):
+            raise AgentToolError(f"第 {i} 个任务的 count 必须是整数")
+        try:
+            count = int(count_raw)
+        except ValueError as exc:
+            raise AgentToolError(f"第 {i} 个任务的 count 必须是整数（收到 {count_raw!r}）") from exc
+        if count < 1:
+            raise AgentToolError(f"第 {i} 个任务的 count 至少是 1")
+        if count > SUBAGENT_MAX_TASKS:
+            raise AgentToolError(
+                f"第 {i} 个任务的 count 最多 {SUBAGENT_MAX_TASKS}（收到 {count}）"
+            )
+        if count > 1 and not is_auto:
+            raise AgentToolError(
+                f"第 {i} 个任务的 file 是具体文件名（{file_name}），没法平分给 {count} 个子代理："
+                f'要并行就把 file 填 "{SUBAGENT_FILE_ALL}" 交给自动均分，或者拆成几条各写一个文件名'
+            )
+        for _ in range(count):
+            tasks.append(
+                {
+                    "agent": agent,
+                    "file": file_name,
+                    # 解析后的实际范围：具体文件名 → 就它一个；"*" → 下面均分填进来
+                    "files": [] if is_auto else ([file_name] if file_name else []),
+                    "auto": is_auto,
+                    "indexes": str(item.get("indexes", "") or "").strip(),
+                    "brief": str(item.get("brief", "") or "").strip(),
+                }
+            )
+    if len(tasks) > SUBAGENT_MAX_TASKS:
+        raise AgentToolError(
+            f"展开 count 后一次要派 {len(tasks)} 个子代理，超过上限 {SUBAGENT_MAX_TASKS}："
+            "调小 count，或分两次调用。"
         )
 
     # 自动均分：候选 = 该角色全部文件 - 本批里已点名过的（点名优先，避免两个子代理抢同一份）
@@ -6049,15 +6164,24 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
         thread.start()
     started = time.time()
     while any(thread.is_alive() for thread in threads):
-        time.sleep(SUBAGENT_PROGRESS_TICK)
-        alive = sum(1 for thread in threads if thread.is_alive())
-        _log(f"  🧑‍🎓 子代理并行中：还剩 {alive}/{len(threads)} 个（已 {int(time.time() - started)}s）")
         if runner.stop_event.is_set():
             # 停止信号：各子代理在自己的轮次边界退出，这里不再死等
             _log("  🧑‍🎓 父回合被停止，等待子代理收尾")
             for thread in threads:
                 thread.join(timeout=2.0)
             break
+        # 以 0.1s 为步长轮询，而不是直接 sleep(5)：子代理一跑完就收尾，别让父回合
+        # 白等一个 tick——只派一个、或最后一个刚跑完时，那 5 秒是纯浪费。
+        # SUBAGENT_PROGRESS_TICK 只用来控制进度日志的节奏。
+        deadline = time.time() + SUBAGENT_PROGRESS_TICK
+        while time.time() < deadline and any(t.is_alive() for t in threads):
+            if runner.stop_event.is_set():
+                break
+            time.sleep(0.1)
+        if not any(thread.is_alive() for thread in threads):
+            break
+        alive = sum(1 for thread in threads if thread.is_alive())
+        _log(f"  🧑‍🎓 子代理并行中：还剩 {alive}/{len(threads)} 个（已 {int(time.time() - started)}s）")
 
     results: list[dict[str, Any]] = []
     for task, out in zip(tasks, slots):

@@ -18,6 +18,7 @@ from GalTransl.Agent import session_store as ss
 from GalTransl.Agent.runtime import (
     AGENT_TOOLS,
     ASK_MAX_QUESTIONS,
+    AUTO_QUIET_MODE,
     AgentRunner,
     AgentRuntime,
     AgentState,
@@ -46,16 +47,33 @@ def _wait_pending(runner: AgentRunner, timeout: float = 2.0) -> None:
 class AskQuestionValidationTests(unittest.TestCase):
     def test_normalizes_trims_and_dedupes(self) -> None:
         questions = _normalize_ask_questions(
-            {"questions": [{"question": "  用哪种译法？  ", "options": ["A", " A ", "B", ""], "multiSelect": True}]}
+            {
+                "questions": [
+                    {
+                        "question": "  用哪种译法？  ",
+                        "options": ["A", " A ", "B", ""],
+                        "multiSelect": True,
+                        "recommended": " B ",
+                    }
+                ]
+            }
         )
         self.assertEqual(
             questions,
-            [{"question": "用哪种译法？", "options": ["A", "B"], "multiSelect": True}],
+            [
+                {
+                    "question": "用哪种译法？",
+                    "options": ["A", "B"],
+                    "multiSelect": True,
+                    "recommended": "B",
+                }
+            ],
         )
 
-    def test_multi_select_defaults_false(self) -> None:
+    def test_multi_select_defaults_false_and_recommended_defaults_empty(self) -> None:
         questions = _normalize_ask_questions({"questions": [{"question": "Q", "options": ["A"]}]})
         self.assertFalse(questions[0]["multiSelect"])
+        self.assertEqual(questions[0]["recommended"], "")
 
     def test_rejects_bad_shapes(self) -> None:
         bad_cases = [
@@ -67,6 +85,8 @@ class AskQuestionValidationTests(unittest.TestCase):
             {"questions": [{"question": "Q"}]},
             {"questions": [{"question": "Q", "options": []}]},
             {"questions": [{"question": "Q", "options": ["", " "]}]},
+            # recommended 给了但不在 options 里：让它改，别默默丢掉（零打断档位靠它代答）
+            {"questions": [{"question": "Q", "options": ["A", "B"], "recommended": "C"}]},
         ]
         for bad in bad_cases:
             with self.assertRaises(AgentToolError):
@@ -245,6 +265,73 @@ class RegistryAnswerAskTests(unittest.TestCase):
             rt.answer_ask(self.project, None, [["A"]])
 
 
+class AutoQuietAutoAnswerTests(unittest.TestCase):
+    """「全自动-零打断」：ask_user 不再阻塞等人，后端按每题的推荐项代答。
+
+    推荐项缺失时退而取第一个选项——这一档的语义就是"别停下来问我"，卡在等人作答上
+    比偶尔选歪一次更糟。其余档位照常阻塞（回归见 AskUserBlockingTests）。
+    """
+
+    @staticmethod
+    def _runner(mode: str) -> AgentRunner:
+        state = AgentState()
+        state.session_id = ""  # 不落盘
+        state.permission_mode = mode
+        return AgentRunner(state)
+
+    def test_picks_the_recommended_option_without_blocking(self) -> None:
+        runner = self._runner(AUTO_QUIET_MODE)
+
+        out = _tool_ask_user(
+            runner,
+            {"questions": [{"question": "用哪种？", "options": ["A", "B"], "recommended": "B"}]},
+        )
+
+        self.assertEqual(out["answers"], [["B"]])
+        self.assertTrue(out["auto_answered"])
+        self.assertIsNone(runner._pending_ask)  # 从未挂起
+        self.assertIn("零打断", out["summary"])
+
+    def test_falls_back_to_the_first_option(self) -> None:
+        runner = self._runner(AUTO_QUIET_MODE)
+
+        out = _tool_ask_user(runner, {"questions": [{"question": "Q", "options": ["A", "B"]}]})
+
+        self.assertEqual(out["answers"], [["A"]])
+        self.assertIsNone(runner._pending_ask)
+
+    def test_answers_every_question_of_a_multi_question_ask(self) -> None:
+        runner = self._runner(AUTO_QUIET_MODE)
+
+        out = _tool_ask_user(
+            runner,
+            {
+                "questions": [
+                    {"question": "Q1", "options": ["A", "B"], "recommended": "B"},
+                    {"question": "Q2", "options": ["X", "Y"], "recommended": "Y"},
+                ]
+            },
+        )
+
+        self.assertEqual(out["answers"], [["B"], ["Y"]])
+
+    def test_other_modes_still_block(self) -> None:
+        """零打断是唯一代答的档位：其余档位照旧阻塞，等人作答。"""
+        for mode in ("ask", "accept-edits", "auto"):
+            runner = self._runner(mode)
+            done = threading.Event()
+
+            def worker(r: AgentRunner = runner) -> None:
+                _tool_ask_user(r, {"questions": [dict(SINGLE)]})
+                done.set()
+
+            threading.Thread(target=worker, daemon=True).start()
+            _wait_pending(runner)  # 挂起来了 = 没有自动作答
+            runner.resolve_ask([["A"]])
+
+            self.assertTrue(done.wait(2), mode)
+
+
 class AskToolExposureTests(unittest.TestCase):
     def test_tool_is_offered_to_the_model(self) -> None:
         names = {tool["function"]["name"] for tool in AGENT_TOOLS}
@@ -252,7 +339,7 @@ class AskToolExposureTests(unittest.TestCase):
         self.assertIn("ask_user", _TOOL_HANDLERS)
         schema = next(t["function"] for t in AGENT_TOOLS if t["function"]["name"] == "ask_user")
         props = schema["parameters"]["properties"]["questions"]["items"]["properties"]
-        self.assertEqual(set(props), {"question", "options", "multiSelect"})
+        self.assertEqual(set(props), {"question", "options", "multiSelect", "recommended"})
 
 
 if __name__ == "__main__":

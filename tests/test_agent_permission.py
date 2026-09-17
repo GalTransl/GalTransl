@@ -1,10 +1,10 @@
 """Agent 的权限门禁：模式 × 风险矩阵、审批阻塞、三种答复的后果。
 
 对照参考实现（PI-Desktop 的 permission mode）：
-- 四档模式 ask / accept-edits / auto / auto-quiet（全自动-减少问询），默认 ask；
+- 四档模式 ask / accept-edits / auto / auto-quiet（全自动-零打断），默认 ask；
 - 工具分 read / edit / high 三档风险，**没登记的按 high**（fail closed）；
 - ask：写操作一律先问；accept-edits：只自动放行"改译文数据"（缓存/字典/人名表）；
-  auto：全放行；auto-quiet 放行规则同 auto，另把档位写进 system prompt 要求少问；
+  auto：全放行；auto-quiet 放行规则同 auto，另把 ask_user 改成按推荐项代答（不打断用户）；
 - 答复只有 allow-once / allow-session（按工具名，本会话有效）/ deny；
 - **不设超时**：没人答就一直挂着（与 ask_user 一致），只有回合被停止才按拒绝收尾；
   拒绝时给模型一条"用户拒绝权限"的工具错误（可附用户填的拒绝原因）。
@@ -89,41 +89,35 @@ def run_gate(
     return out
 
 
-class AutoQuietModePromptTests(unittest.TestCase):
-    """「全自动-减少问询」：放行规则同「全自动」，差别是把档位写进 system prompt 要求少问。
+class NoModeInSystemPromptTests(unittest.TestCase):
+    """档位一律不写进 system prompt。
 
-    这是唯一一档会告诉模型当前档位的——其余档位模型不知情（只会在被拒时收到工具错误），
-    所以"只有这一档注入"这件事要钉住：一旦注入给所有档位，其它档位的行为会跟着变。
+    permission_mode 可以随时切，写进 system 就等于把整段前缀缓存钉死在某个档位上；
+    「全自动-零打断」的"不打断"改由后端代答 ask_user 实现（见 test_agent_ask_user 的
+    AutoQuietAutoAnswerTests），跟提示词无关。这里钉住"任何档位都不注入档位说明"。
     """
 
     def _prompt(self, mode: str) -> str:
         state = AgentState(project_dir=r"C:\proj", permission_mode=mode)
         return _build_system_prompt(state)
 
-    def test_only_this_mode_injects_the_note(self) -> None:
-        note = self._prompt(AUTO_QUIET_MODE)
-        self.assertIn("全自动-减少问询", note)
-        self.assertIn("请提高自主性", note)
-        self.assertIn("ask_user", note)
-        for mode in ("ask", "accept-edits", "auto"):
-            self.assertNotIn("全自动-减少问询", self._prompt(mode), mode)
-            self.assertNotIn("请提高自主性", self._prompt(mode), mode)
+    def test_no_mode_is_mentioned_in_the_prompt(self) -> None:
+        for mode in PERMISSION_MODES:
+            prompt = self._prompt(mode)
+            for fragment in ("请提高自主性", "全自动-零打断", "全自动-减少问询"):
+                self.assertNotIn(fragment, prompt, f"{mode} 的 system prompt 不该出现 {fragment}")
 
-    def test_switching_to_it_takes_effect_on_the_next_request(self) -> None:
-        """system prompt 每回合按当前档位重建：跑着切到这一档，下次请求就带上这句。"""
+    def test_every_mode_yields_the_same_prompt(self) -> None:
+        """字节级一致：切档位不会让前缀失效，缓存能一直命中。"""
+        self.assertEqual(len({self._prompt(mode) for mode in PERMISSION_MODES}), 1)
+
+    def test_switching_mode_keeps_the_prompt_stable(self) -> None:
         state = AgentState(project_dir=r"C:\proj", permission_mode="auto")
-        self.assertNotIn("请提高自主性", _build_system_prompt(state))
+        before = _build_system_prompt(state)
 
         rt._apply_permission_mode(state, AUTO_QUIET_MODE)
 
-        self.assertIn("请提高自主性", _build_system_prompt(state))
-
-    def test_compaction_does_not_rewrite_the_system_prompt(self) -> None:
-        """压缩不再重建 system prompt：摘要单独成条（见 _build_summary_message），
-        system 保持稳定，system + tools 这段前缀才能继续命中提示缓存。"""
-        state = AgentState(project_dir=r"C:\proj", permission_mode=AUTO_QUIET_MODE)
-        prompt = _build_system_prompt(state)
-        self.assertIn("请提高自主性", prompt)
+        self.assertEqual(_build_system_prompt(state), before)
 
 
 class PermissionMatrixTests(unittest.TestCase):
@@ -139,7 +133,7 @@ class PermissionMatrixTests(unittest.TestCase):
             (PERMISSION_HIGH, "ask"): True,
             (PERMISSION_HIGH, "accept-edits"): True,
             (PERMISSION_HIGH, "auto"): False,
-            # 「全自动-减少问询」的放行规则与「全自动」完全一致（差别在 system prompt）
+            # 「全自动-零打断」的放行规则与「全自动」完全一致（差别在 ask_user 是否代答）
             (PERMISSION_READ, AUTO_QUIET_MODE): False,
             (PERMISSION_EDIT, AUTO_QUIET_MODE): False,
             (PERMISSION_HIGH, AUTO_QUIET_MODE): False,

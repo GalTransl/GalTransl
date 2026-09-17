@@ -1591,11 +1591,12 @@ export type AgentEventType =
   | 'context_usage'
   | 'queue'
   | 'assistant_message'
-  // 子代理（run_subagents）：start/done 持久（重建界面用），中间三条是瞬态的逐步活动
+  // 子代理（run_subagents）：start/done 持久（重建界面用），中间几条是瞬态的逐步活动/重试
   | 'subagent_start'
   | 'subagent_message'
   | 'subagent_tool_call'
   | 'subagent_tool_result'
+  | 'subagent_retry'
   | 'subagent_done'
   | 'finish'
   | 'error'
