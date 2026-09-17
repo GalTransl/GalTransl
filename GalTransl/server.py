@@ -18,6 +18,7 @@ from yaml import safe_load, safe_dump
 from GalTransl import TRANSLATOR_SUPPORTED, INPUT_FOLDERNAME, OUTPUT_FOLDERNAME, CACHE_FOLDERNAME, GALTRANSL_VERSION, new_version
 from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
 from GalTransl.AppSettings import load_app_settings, save_app_settings
+from GalTransl.Cache import CACHE_TEMP_SUFFIX
 from GalTransl.DefaultProjectConfig import DEFAULT_PROJECT_CONFIG_YAML
 from GalTransl.ProblemFilter import filter_problem_text
 from GalTransl.ProjectGuideline import (
@@ -76,12 +77,24 @@ def _write_yaml_file(path: str, data: dict) -> None:
     os.replace(tmp, path)
 
 
-def _list_dir_entries(dir_path: str, *, count_json_entries: bool = False) -> list[dict[str, Any]]:
-    """List files in a directory with basic metadata."""
+def _list_dir_entries(
+    dir_path: str,
+    *,
+    count_json_entries: bool = False,
+    skip_suffixes: tuple[str, ...] = (),
+) -> list[dict[str, Any]]:
+    """List files in a directory with basic metadata.
+
+    skip_suffixes 用于过滤掉不该露面的中间文件：缓存目录传 (CACHE_TEMP_SUFFIX,)，
+    免得界面与 Agent 把 `<缓存>.json.tmp` 这种快照残留当成一个缓存文件
+    （它既没有条目数、也读不出完整内容）。
+    """
     entries = []
     if not os.path.isdir(dir_path):
         return entries
     for name in sorted(os.listdir(dir_path)):
+        if skip_suffixes and name.endswith(tuple(skip_suffixes)):
+            continue
         full = os.path.join(dir_path, name)
         stat = os.stat(full) if os.path.isfile(full) else None
         entry = {
@@ -1123,7 +1136,9 @@ def build_handler(registry: JobRegistry):
                     "cache_dir": cache_dir,
                     "input_files": input_entries,
                     "output_files": _list_dir_entries(output_dir),
-                    "cache_files": _list_dir_entries(cache_dir, count_json_entries=True),
+                    "cache_files": _list_dir_entries(
+                        cache_dir, count_json_entries=True, skip_suffixes=(CACHE_TEMP_SUFFIX,)
+                    ),
                 })
                 return
 
@@ -1167,7 +1182,9 @@ def build_handler(registry: JobRegistry):
                 self._send_json({
                     "project_dir": project_dir,
                     "cache_dir": cache_dir,
-                    "files": _list_dir_entries(cache_dir, count_json_entries=True),
+                    "files": _list_dir_entries(
+                        cache_dir, count_json_entries=True, skip_suffixes=(CACHE_TEMP_SUFFIX,)
+                    ),
                 })
                 return
 

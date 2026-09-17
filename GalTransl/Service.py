@@ -8,7 +8,7 @@ import traceback
 from typing import Any
 
 from GalTransl import LOGGER, DEBUG_LEVEL
-from GalTransl.Cache import compact_cache_append_logs
+from GalTransl.Cache import cleanup_stale_cache_temp_files, compact_cache_append_logs
 from GalTransl.ConfigHelper import CProjectConfig
 from GalTransl.Runner import run_galtransl
 from GalTransl.i18n import get_text, GT_LANG
@@ -240,6 +240,14 @@ async def run_job_async(
 
     try:
         update_runtime_status(spec.project_dir, workers_active=0, workers_configured=int(cfg.getKey("workersPerProject") or 1))
+        # 启动前扫掉上次中断留下的 <缓存>.json.tmp：这一刻本项目确定没有写入者
+        # （server 保证一个项目同时只有一个任务），残留只会误导缓存列表。
+        try:
+            stale = cleanup_stale_cache_temp_files(cfg.getCachePath())
+            if stale:
+                LOGGER.info(f"[cache]启动前清理了 {stale} 个残留临时文件（*.json.tmp）")
+        except Exception as ex:  # noqa: BLE001 - 清理失败不该挡住翻译
+            LOGGER.warning(f"[cache]清理残留临时文件失败：{str(ex)}")
         await run_galtransl(cfg, spec.translator, stop_event=stop_event)
         current_state.status = "completed"
         current_state.success = True
