@@ -118,8 +118,11 @@ PERMISSION_TOOL_RISK: dict[str, str] = {
     "manage_problem_filter": PERMISSION_HIGH,
     "write_project_guideline": PERMISSION_HIGH,
     "start_translation": PERMISSION_HIGH,
-    # 派子代理：它写的是缓存里的"存疑内容"（doub_content），改不了译文，按 edit 档
-    "run_subagents": PERMISSION_EDIT,
+    # 派子代理：虽然它写的只是缓存里的"存疑内容"（doub_content，改不了译文），但这是
+    # 「要不要开始干这件事」——一次最多 16 个并行跑起来、每个都要调大模型、都会写缓存，
+    # 让用户在派之前批一次（卡上能看到派给谁、看哪些文件）比事后发现跑歪了强。所以按
+    # high 走：ask 与 accept-edits 都要问，只有两个全自动档直接放行。
+    "run_subagents": PERMISSION_HIGH,
 }
 # 只读类工具：读 / 检索 / 等待 / 询问，外加"停止任务"——停止是安全方向的动作，
 # 要停下来还得先点确认是最糟的设计，所以任何模式都直接放行。
@@ -205,14 +208,35 @@ def _permission_needed(risk: str, mode: str) -> bool:
     return True
 
 
-def _permission_denied_reason(name: str, decision: str) -> str:
-    """没批准时给模型看的那句话：说清"没执行"，并区分拒绝 / 超时 / 回合被停。"""
+# 用户填的「拒绝原因」长度上限：一句话够模型换策略了，太长会把工具结果挤成一大段
+PERMISSION_REASON_MAX = 500
+
+
+def _normalize_permission_reason(value: Any) -> str:
+    """用户填的拒绝原因：折行压成空格、去掉首尾空白、限长。没填（或不是字符串）给空串。"""
+    if not isinstance(value, str):
+        return ""
+    text = " ".join(value.split())
+    if len(text) > PERMISSION_REASON_MAX:
+        text = text[: PERMISSION_REASON_MAX - 1] + "…"
+    return text
+
+
+def _permission_denied_reason(name: str, decision: str, reason: str = "") -> str:
+    """没批准时给模型看的那句话：说清"没执行"，并区分拒绝 / 超时 / 回合被停。
+
+    reason 是用户在拒绝时填的原因（可选，卡上那个输入框）：原样带上，模型据此换策略，
+    不用去猜"用户为什么不要"。只有拒绝才有原因——超时和"回合被停"时人根本没在答。
+    """
     label = _permission_tool_label(name)
     if decision == "timeout":
         return f"用户没有在 {int(PERMISSION_TIMEOUT)} 秒内批准「{label}」，本次调用没有执行。"
     if decision == "stopped":
         return f"回合被停止，本次「{label}」调用没有执行。"
-    return f"用户拒绝权限：本次「{label}」调用没有执行。"
+    text = f"用户拒绝权限：本次「{label}」调用没有执行。"
+    if reason:
+        text += f"用户填写的拒绝原因：{reason}"
+    return text
 
 # ---- 上下文预算 ----
 # 后端配置未指定 contextWindow 时的默认窗口（token）
@@ -1482,7 +1506,7 @@ class AgentRunner:
         if name in self.state.permission_grants:
             _log(f"  🔐 权限：{name} 本会话已放行，直接执行")
             return
-        decision = self.request_permission(
+        decision, deny_reason = self.request_permission(
             os.urandom(8).hex(), self._active_tool_call_id, name, args, mode
         )
         if decision == "allow-once":
@@ -1490,13 +1514,17 @@ class AgentRunner:
         if decision == "allow-session":
             self.state.permission_grants.add(name)
             return
-        _log(f"  🔐 权限被拒（{decision}）：{name}")
-        raise AgentToolError(_permission_denied_reason(name, decision))
+        _log(f"  🔐 权限被拒（{decision}）：{name}" + (f"（原因：{deny_reason}）" if deny_reason else ""))
+        raise AgentToolError(_permission_denied_reason(name, decision, deny_reason))
 
     def request_permission(
         self, request_id: str, tool_call_id: str, name: str, args: dict[str, Any], mode: str
-    ) -> str:
-        """发起一次审批并**阻塞**等用户点，返回 allow-once / allow-session / deny / timeout / stopped。
+    ) -> tuple[str, str]:
+        """发起一次审批并**阻塞**等用户点，返回（答复, 拒绝原因）。
+
+        答复 ∈ allow-once / allow-session / deny / timeout / stopped。第二个值是用户在卡上
+        填的拒绝原因，只有 deny 且填了才非空——它会被拼进给模型的那句工具结果
+        （见 _permission_denied_reason），所以"用户说不要"和"用户说不要、因为 X"是两回事。
 
         与 ask_user 同一套「回合线程挂起、HTTP 线程唤醒（resolve_permission）」，两点不同：
         - **有超时**（PERMISSION_TIMEOUT）：到点当拒绝，fail closed，不把回合永远挂住；
@@ -1545,8 +1573,8 @@ class AgentRunner:
                 if self._pending_permission is holder:
                     self._pending_permission = None
         if decision:
-            return decision
-        return "stopped" if self.stop_event.is_set() else "timeout"
+            return decision, str(holder.get("reason") or "")
+        return ("stopped" if self.stop_event.is_set() else "timeout"), ""
 
     def apply_permission_mode(self, mode: Any) -> None:
         """改档（HTTP 线程调用）：下一次工具调用按新档判。
@@ -1570,13 +1598,18 @@ class AgentRunner:
         holder["event"].set()
         _log(f"  🔐 模式改为 {self.state.permission_mode}，在等的 {name} 直接放行")
 
-    def resolve_permission(self, decision: Any) -> dict[str, Any]:
-        """把用户在审批卡上的选择送进来，唤醒挂起的请求（HTTP 线程调用）。"""
+    def resolve_permission(self, decision: Any, reason: Any = "") -> dict[str, Any]:
+        """把用户在审批卡上的选择送进来，唤醒挂起的请求（HTTP 线程调用）。
+
+        reason 是卡上那个输入框里的"拒绝原因"（可选）：只有拒绝用得上，别的答复一律忽略
+        （批准时说原因没意义）。它会随那条工具结果回给模型，见 _permission_denied_reason。
+        """
         clean = str(decision or "").strip()
         if clean not in PERMISSION_DECISIONS:
             raise ValueError(
                 f"未知的权限答复：{decision!r}（可选：{'、'.join(PERMISSION_DECISIONS)}）"
             )
+        note = _normalize_permission_reason(reason) if clean == "deny" else ""
         with self._perm_lock:
             holder = self._pending_permission
         if holder is None:
@@ -1585,9 +1618,11 @@ class AgentRunner:
             if self._pending_permission is not holder:
                 raise ValueError("这个权限请求刚刚已经结束了")
             holder["decision"] = clean
+            if note:
+                holder["reason"] = note
         holder["event"].set()
-        _log(f"  🔐 收到权限答复 {clean}（{holder['request_id'][:8]}）")
-        return {"ok": True, "decision": clean, "name": holder["name"]}
+        _log(f"  🔐 收到权限答复 {clean}（{holder['request_id'][:8]}）" + (f"，原因：{note}" if note else ""))
+        return {"ok": True, "decision": clean, "name": holder["name"], "reason": note}
 
     # ---- 工具实现（调本机 HTTP） ----
     def _project_id(self) -> str:
@@ -5576,13 +5611,14 @@ class AgentRuntime:
         return runner.resolve_ask(answers)
 
     def answer_permission(
-        self, project_dir: str, session_id: str | None, decision: Any
+        self, project_dir: str, session_id: str | None, decision: Any, reason: Any = ""
     ) -> dict[str, Any]:
         """把用户对权限审批卡的答复送回去，唤醒正在等待的那个回合。
 
-        decision 只有 allow-once / allow-session / deny 三种；校验在
-        resolve_permission 里做，这里只负责找到对应的 runner——没有在等待的审批时
-        报 ValueError（卡片留到超时之后才点、或回合已经结束，界面据此提示）。
+        decision 只有 allow-once / allow-session / deny 三种；reason 是拒绝时可选的
+        一句话（随工具结果给模型看）。校验在 resolve_permission 里做，这里只负责找到
+        对应的 runner——没有在等待的审批时报 ValueError（卡片留到超时之后才点、或回合
+        已经结束，界面据此提示）。
         """
         key = self._key(project_dir)
         sid = self._resolve_session_id(project_dir, session_id)
@@ -5590,7 +5626,7 @@ class AgentRuntime:
             runner = self._runners.get(key, {}).get(sid) if sid else None
         if runner is None:
             raise ValueError("该会话没有正在等待批准的权限请求")
-        return runner.resolve_permission(decision)
+        return runner.resolve_permission(decision, reason)
 
     def set_permission_mode(
         self, project_dir: str, session_id: str | None, mode: Any

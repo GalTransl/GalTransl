@@ -2172,7 +2172,7 @@ export function AgentPage() {
     if (permissionId) handleJumpToBottom();
   }, [permissionId, handleJumpToBottom]);
   const handlePermissionDecide = useCallback(
-    async (decision: PermissionDecision) => {
+    async (decision: PermissionDecision, reason?: string) => {
       const target = pendingPermissionIdRef.current;
       if (!target) return;
       setPermissionSubmitting(true);
@@ -2182,6 +2182,8 @@ export function AgentPage() {
           effectiveProject,
           decision,
           activeSessionRef.current || undefined,
+          // 拒绝原因只在拒绝时送（后端也只认拒绝那条）
+          decision === 'deny' ? reason : undefined,
         );
         setAnsweredPermissionId(target);
       } catch (err) {
@@ -2405,7 +2407,9 @@ export function AgentPage() {
                       item={pendingPermission}
                       submitting={permissionSubmitting}
                       error={permissionError}
-                      onDecide={(decision) => void handlePermissionDecide(decision)}
+                      onDecide={(decision, reason) =>
+                        void handlePermissionDecide(decision, reason)
+                      }
                     />
                   ) : null}
                 </Fragment>
@@ -3694,10 +3698,13 @@ function PermissionCard({
   item: ActivityItem;
   submitting: boolean;
   error: string | null;
-  onDecide: (decision: PermissionDecision) => void;
+  onDecide: (decision: PermissionDecision, reason?: string) => void;
 }) {
   const perm = item.permission;
   const leftMs = usePermissionCountdown(perm?.startedAt ?? 0, perm?.timeoutS ?? 0);
+  // 拒绝原因（可选，输入框里那份）：只有点「拒绝」才送出去，会随那条工具结果一起给模型看。
+  // 别和下面那个 `reason`（模型填在入参里的"为什么做这件事"）搞混，那个是只读展示用的。
+  const [denyReason, setDenyReason] = useState('');
   if (!perm) return null;
   const meta = toolMeta(perm.name || item.name || '');
   const args = perm.arguments;
@@ -3707,10 +3714,16 @@ function PermissionCard({
   const editable = perm.risk === 'edit';
   // 徽标只留最要紧的几个字（会改什么），完整解释挪进 tooltip——照 PI-Desktop 那张卡：
   // 标题行一行说完，正文只留"允许什么 + 为什么"，说明性长句不再铺在卡面上。
-  const riskLabel = editable ? '改译文数据' : '改设置 / 启动任务';
-  const riskHint = editable
-    ? '改动译文数据（缓存 / 字典 / 人名表）'
-    : '改动项目设置 / 规范，或启动翻译任务';
+  // 派子代理单独一档说法：它既不改设置、也不是改译文，但「允许编辑」档照样要问它
+  // （见后端 PERMISSION_TOOL_RISK），归进"改设置 / 启动任务"会让人看不懂为什么要问。
+  const riskKind: 'edit' | 'delegate' | 'high' =
+    perm.name === 'run_subagents' ? 'delegate' : editable ? 'edit' : 'high';
+  const riskLabel = { edit: '改译文数据', delegate: '派子代理', high: '改设置 / 启动任务' }[riskKind];
+  const riskHint = {
+    edit: '改动译文数据（缓存 / 字典 / 人名表）',
+    delegate: '派一批校对子代理并行跑：每个都会调模型、并往缓存里写校对意见',
+    high: '改动项目设置 / 规范，或启动翻译任务',
+  }[riskKind];
   // 正文第二行的细节：参数摘要 + 当前档位（为什么现在要问）。都是短标签，逗号分不开的
   // 那种长句就省了——用户要的是"这次要动什么"，不是复述一遍权限模型。
   const detail = [PERMISSION_MODE_LABELS[normalizePermissionMode(perm.mode)], summary]
@@ -3766,12 +3779,30 @@ function PermissionCard({
         <button
           type="button"
           className="agent-perm__btn"
-          onClick={() => onDecide('deny')}
+          onClick={() => onDecide('deny', denyReason.trim())}
           disabled={submitting || expired}
           title="这次调用不执行，Agent 会收到「用户拒绝」并换策略"
         >
           拒绝
         </button>
+        {/* 拒绝原因（可选）：「不要」和「不要，因为 X」对模型是两回事——后者能让它
+            直接换对方向，省掉一轮来回。留空就是单纯拒绝；填了按回车等于点「拒绝」。 */}
+        <input
+          type="text"
+          className="agent-perm__reason-input"
+          value={denyReason}
+          onChange={(e) => setDenyReason(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' || submitting || expired) return;
+            e.preventDefault();
+            onDecide('deny', denyReason.trim());
+          }}
+          placeholder="拒绝原因（可选）"
+          aria-label="拒绝原因（可选）"
+          title="填了会在点「拒绝」时一起送给 Agent（显示在那次调用的结果里）"
+          maxLength={500}
+          disabled={submitting || expired}
+        />
       </div>
     </section>
   );

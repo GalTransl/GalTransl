@@ -2647,16 +2647,18 @@ def build_handler(registry: JobRegistry):
                 return
 
             # POST /api/agent/permission — 回答权限审批卡（allow-once / allow-session / deny）
+            # reason：拒绝时可选的"为什么不要"，随那条工具结果一起回给模型
             if path == "/api/agent/permission":
                 try:
                     payload = self._read_json_body()
                     project_dir = str(payload.get("project_dir", "")).strip()
                     session_id = str(payload.get("session_id", "") or "") or None
                     decision = str(payload.get("decision", "") or "")
+                    reason = str(payload.get("reason", "") or "")
                     if not project_dir:
                         self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
                         return
-                    self._send_json(AGENT_REGISTRY.answer_permission(project_dir, session_id, decision))
+                    self._send_json(AGENT_REGISTRY.answer_permission(project_dir, session_id, decision, reason))
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, status=HTTPStatus.CONFLICT)
                 except Exception as exc:  # noqa: BLE001

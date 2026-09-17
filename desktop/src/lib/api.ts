@@ -1812,17 +1812,28 @@ export async function answerAgentAsk(
 /**
  * 回答权限确认卡（后端那个工具调用正阻塞着等这一下）。
  * decision：allow-once 只批这一次 / allow-session 本会话都批这个工具 / deny 拒绝。
+ * reason：拒绝时可选的一句话（"为什么不要"），后端会把它拼进那条工具结果给模型看；
+ * 批准时传了也会被忽略。
  */
 export async function answerAgentPermission(
   projectDir: string,
   decision: PermissionDecision,
   sessionId?: string,
+  reason?: string,
 ) {
-  return apiRequest<{ ok: boolean; decision: string; name: string }>('/api/agent/permission', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_dir: projectDir, session_id: sessionId, decision }),
-  });
+  return apiRequest<{ ok: boolean; decision: string; name: string; reason?: string }>(
+    '/api/agent/permission',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_dir: projectDir,
+        session_id: sessionId,
+        decision,
+        reason: reason || undefined,
+      }),
+    },
+  );
 }
 
 /**

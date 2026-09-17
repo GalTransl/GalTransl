@@ -2964,6 +2964,34 @@
   flex-wrap: wrap;
 }
 
+/* 拒绝原因输入框：跟在「拒绝」后面，吃掉那一行剩下的宽度（窄了就换行，由 foot 的
+   flex-wrap 处理）。样式跟按钮同高同圆角，读起来像一个可填可不填的附加项。 */
+.agent-perm__reason-input {
+  flex: 1 1 160px;
+  min-width: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--agent-line-soft);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.agent-perm__reason-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.agent-perm__reason-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.agent-perm__reason-input:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 /* 正文第二行：参数摘要 + 当前档位（都是短标签）。压在提问行下面、比它小一号，
    扫一眼就知道"这次要动什么、为什么现在问" */
 .agent-perm__meta {

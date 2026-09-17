@@ -22,6 +22,7 @@ from GalTransl.Agent.runtime import (
     SUBAGENT_AGENT_PROOFREAD,
     SUBAGENT_MAX_TASKS,
     SUBAGENT_PATCHABLE_FIELDS,
+    SUBAGENT_TOOL_NAMES,
     AgentToolError,
     _patchable_fields_text,
     _subagent_handlers,
@@ -51,10 +52,16 @@ class _Call:
 
 
 class _Parent:
-    """主 Agent 的最小替身：子代理要的东西只有这几样（HTTP 走内存里的假缓存）。"""
+    """主 Agent 的最小替身：子代理要的东西只有这几样（HTTP 走内存里的假缓存）。
+
+    permission_checks 记「主 Agent 的门禁被问过几次」：子代理的工具调用不该走到那里
+    （见 SubagentPermissionTests）。档位固定成最严的 ask——子代理照样直接执行。
+    """
 
     def __init__(self, files: dict[str, list[dict]] | None = None) -> None:
-        self.state = SimpleNamespace(config_file_name="config.yaml", project_dir=r"C:\proj")
+        self.state = SimpleNamespace(
+            config_file_name="config.yaml", project_dir=r"C:\proj", permission_mode="ask"
+        )
         self._openai_client = object()  # 子代理只判空
         self._model = "agent-model"
         self.stop_event = threading.Event()
@@ -62,9 +69,14 @@ class _Parent:
         self.files = {name: [dict(e) for e in entries] for name, entries in (files or {}).items()}
         self.saves: list[dict] = []
         self.events: list[tuple[str, dict]] = []
+        self.permission_checks: list[str] = []
 
     def _project_id(self) -> str:
         return "proj"
+
+    def _require_permission(self, name: str, _args: dict) -> None:
+        """真 AgentRunner 在这里可能挂起等用户点；子代理不该碰它，碰了就记一笔。"""
+        self.permission_checks.append(name)
 
     def _http_get(self, path: str):
         if path.endswith("/cache"):
@@ -273,6 +285,92 @@ class SubagentToolScopeTests(unittest.TestCase):
         parent = _Parent({"a.json": [ENTRY]})
         out = _tool_read_transl_cache(parent, {"filename": "a.json", "index": "1"})
         self.assertEqual(out["entries"][0]["pre_dst"], "译文")
+
+
+class SubagentPermissionTests(unittest.TestCase):
+    """子代理不受权限模式约束：白名单里的工具一律直接执行（连 ask 档也不问）。
+
+    这是刻意的（见 runtime._subagent_handlers 的说明）：一批 16 个子代理逐条弹审批卡会把
+    界面淹掉，而它们能写的只有 doub_content（改不了译文）。主 Agent 那道门禁仍然管着
+    「派子代理」这件事本身——ask 档下用户批的是这次委派，卡上能看到派给谁、看哪个文件，
+    不是子代理的每一次读写。
+    """
+
+    def _subagent(self, parent: _Parent) -> rt.SubAgentRunner:
+        return rt.SubAgentRunner(
+            parent,
+            agent=SUBAGENT_AGENT_PROOFREAD,
+            file="a.json",
+            indexes="",
+            brief="",
+            delegation_id="d1",
+        )
+
+    def test_patch_is_not_gated_even_in_ask_mode(self) -> None:
+        parent = _Parent({"a.json": [ENTRY]})
+        call = _Call(
+            "c1",
+            "patch_transl_cache",
+            json.dumps({"filename": "a.json", "patches": [{"index": 1, "doub_content": "漏译"}]}),
+        )
+
+        sub = self._subagent(parent)
+        out = sub._run_tool(call, _subagent_handlers())
+
+        # 写进去了（结果直接回给子代理，没有"等批准"这回事）
+        self.assertEqual(json.loads(out["content"])["updated"], 1)
+        self.assertEqual(parent.files["a.json"][0]["doub_content"], "漏译")
+        # 门禁一次都没被问过，也没发审批事件
+        self.assertEqual(parent.permission_checks, [])
+        self.assertNotIn("permission_request", parent.types())
+
+    def test_a_whole_delegation_never_asks(self) -> None:
+        parent = _Parent({"a.json": [ENTRY]})
+        script = [
+            (
+                "",
+                [
+                    _Call(
+                        "c1",
+                        "patch_transl_cache",
+                        json.dumps({"filename": "a.json", "patches": [{"index": 1, "doub_content": "漏译"}]}),
+                    )
+                ],
+            ),
+            ("报告：1 条漏译。", []),
+        ]
+
+        out = _run(parent, {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD, "file": "a.json"}]}, script)
+
+        self.assertEqual(out["tasks"][0]["status"], "done")
+        self.assertEqual(parent.files["a.json"][0]["doub_content"], "漏译")
+        self.assertEqual(parent.permission_checks, [])
+        self.assertNotIn("permission_request", parent.types())
+
+    def test_the_delegation_itself_is_gated_for_the_parent(self) -> None:
+        """子代理内部不问，但「派子代理」这件事本身要问——连「允许编辑」档也要问。
+
+        派活是「要不要开始干这件事」：一次最多 16 个并行跑、每个都调模型、都会写缓存，
+        所以它按 high 归类（同改配置 / 启动翻译），不是"改译文数据"那种自动放行。
+        """
+        self.assertEqual(rt._tool_risk("run_subagents"), rt.PERMISSION_HIGH)
+        self.assertTrue(rt._permission_needed(rt.PERMISSION_HIGH, "ask"))
+        self.assertTrue(rt._permission_needed(rt.PERMISSION_HIGH, "accept-edits"))
+        self.assertFalse(rt._permission_needed(rt.PERMISSION_HIGH, "auto"))
+        self.assertFalse(rt._permission_needed(rt.PERMISSION_HIGH, "auto-quiet"))
+
+    def test_the_whitelist_is_the_security_boundary(self) -> None:
+        """白名单是唯一的边界：子代理不过门禁，所以塞进去的高风险工具等于全自动放行。
+
+        所以钉住"除 patch_transl_cache（改译文数据级）外一律是读类"——哪天往
+        SUBAGENT_TOOL_NAMES 里加了个改配置/启动翻译的工具，这里会红。
+        """
+        risks = {name: rt._tool_risk(name) for name in SUBAGENT_TOOL_NAMES}
+        self.assertEqual(risks["patch_transl_cache"], rt.PERMISSION_EDIT)
+        self.assertEqual(
+            {name for name, risk in risks.items() if risk != rt.PERMISSION_READ},
+            {"patch_transl_cache"},
+        )
 
 
 class RunSubagentsValidationTests(unittest.TestCase):

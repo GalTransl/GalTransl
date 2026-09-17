@@ -31,7 +31,7 @@ export const PERMISSION_MODE_LABELS: Record<PermissionMode, string> = {
 /** 每档的一句话说明（菜单里跟在名字下面，选择时看得见代价）。 */
 export const PERMISSION_MODE_HINTS: Record<PermissionMode, string> = {
   ask: '每个改动都先问你',
-  'accept-edits': '缓存与字典直接改；改设置、规范、启动翻译要先问',
+  'accept-edits': '缓存与字典直接改；改设置、规范、启动翻译、派子代理要先问',
   auto: '不再确认，Agent 自主改缓存、设置与启动翻译',
   'auto-quiet': '同「全自动」，并要求 Agent 更自主、尽量不问',
 };

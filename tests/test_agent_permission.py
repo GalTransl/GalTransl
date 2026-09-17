@@ -12,6 +12,7 @@
 import threading
 import time
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from GalTransl.Agent import runtime as rt
@@ -32,6 +33,7 @@ from GalTransl.Agent.runtime import (
     AgentToolError,
     _build_system_prompt,
     _normalize_permission_mode,
+    _normalize_permission_reason,
     _permission_denied_reason,
     _permission_needed,
     _tool_risk,
@@ -45,10 +47,18 @@ def make_runner(mode: str = "ask", grants: tuple[str, ...] = ()) -> AgentRunner:
     return AgentRunner(state)
 
 
-def run_gate(runner: AgentRunner, name: str, decision: str | None, *, dispatch: bool = False) -> dict:
+def run_gate(
+    runner: AgentRunner,
+    name: str,
+    decision: str | None,
+    *,
+    dispatch: bool = False,
+    reason: str | None = None,
+) -> dict:
     """子线程里跑一次门禁（或整条 _dispatch_tool），等它挂起后作答。
 
-    decision=None 表示只等挂起、不作答（用于测校验分支）。返回 {ok/error/alive}。
+    decision=None 表示只等挂起、不作答（用于测校验分支）。reason 是"拒绝原因"，
+    跟着答复一起送（见 resolve_permission）。返回 {ok/error/alive}。
     """
     out: dict = {}
 
@@ -71,7 +81,7 @@ def run_gate(runner: AgentRunner, name: str, decision: str | None, *, dispatch: 
                 break
         time.sleep(0.01)
     if decision is not None:
-        runner.resolve_permission(decision)
+        runner.resolve_permission(decision, reason or "")
     # 作答了才值得等它跑完；只等挂起的那些（decision=None）别把 3 秒白等掉
     thread.join(timeout=3 if decision is not None else 0.05)
     out["alive"] = thread.is_alive()
@@ -144,8 +154,14 @@ class PermissionMatrixTests(unittest.TestCase):
         # 改译文数据：缓存 / 字典 / 人名表 —— "允许编辑"档放行的就是这些
         for name in ("patch_transl_cache", "delete_transl_cache", "save_dict", "create_dict_file", "save_name_table"):
             self.assertEqual(_tool_risk(name), PERMISSION_EDIT, name)
-        # 改设置 / 规范、启动任务：只有全自动放行
-        for name in ("update_project_config", "manage_problem_filter", "write_project_guideline", "start_translation"):
+        # 改设置 / 规范、启动任务、派子代理：只有全自动放行（「允许编辑」档也要问）
+        for name in (
+            "update_project_config",
+            "manage_problem_filter",
+            "write_project_guideline",
+            "start_translation",
+            "run_subagents",
+        ):
             self.assertEqual(_tool_risk(name), PERMISSION_HIGH, name)
         # 读 / 检索 / 等待 / 询问，以及"停止任务"（安全方向，不拦）
         for name in ("read_transl_cache", "get_runtime", "wait", "ask_user", "stop_translation"):
@@ -173,6 +189,24 @@ class PermissionMatrixTests(unittest.TestCase):
         self.assertIn("没有在", _permission_denied_reason("save_dict", "timeout"))
         self.assertIn("回合被停止", _permission_denied_reason("save_dict", "stopped"))
         self.assertIn("保存字典", _permission_denied_reason("save_dict", "deny"))  # 用人话的工具名
+
+    def test_denied_reason_carries_the_note_from_the_user(self) -> None:
+        """用户填的拒绝原因原样进那句话；他没填、或不是拒绝（超时/被停）时不该冒出来。"""
+        with_note = _permission_denied_reason("save_dict", "deny", "这本字典我自己维护")
+        self.assertIn("用户填写的拒绝原因：这本字典我自己维护", with_note)
+
+        self.assertNotIn("原因", _permission_denied_reason("save_dict", "deny"))
+        self.assertNotIn("不该出现", _permission_denied_reason("save_dict", "timeout", "不该出现"))
+        self.assertNotIn("不该出现", _permission_denied_reason("save_dict", "stopped", "不该出现"))
+
+    def test_reason_normalization(self) -> None:
+        self.assertEqual(_normalize_permission_reason(None), "")
+        self.assertEqual(_normalize_permission_reason(123), "")
+        self.assertEqual(_normalize_permission_reason("  a\n b  "), "a b")  # 折行压成空格
+        long_text = "字" * (rt.PERMISSION_REASON_MAX + 50)
+        clipped = _normalize_permission_reason(long_text)
+        self.assertEqual(len(clipped), rt.PERMISSION_REASON_MAX)
+        self.assertTrue(clipped.endswith("…"))
 
 
 class PermissionGateTests(unittest.TestCase):
@@ -261,6 +295,27 @@ class PermissionGateTests(unittest.TestCase):
             ["write_project_guideline"],
         )
 
+    def test_deny_reason_reaches_the_model(self) -> None:
+        """卡上填的拒绝原因随工具结果回给模型：它会出现在那次调用的结果里。"""
+        runner = make_runner("ask")
+        out = run_gate(runner, "save_dict", "deny", reason="这本字典我自己维护，别动")
+
+        err = str(out["error"])
+        self.assertIn("用户拒绝权限", err)
+        self.assertIn("用户填写的拒绝原因：这本字典我自己维护，别动", err)
+
+    def test_deny_reason_is_cleaned_up(self) -> None:
+        runner = make_runner("ask")
+        out = run_gate(runner, "save_dict", "deny", reason="  先说不要\n\n再说原因  ")
+        self.assertIn("先说不要 再说原因", str(out["error"]))
+
+    def test_reason_is_ignored_when_allowing(self) -> None:
+        """批准时填的原因没意义：不拦放行、不进结果、也不落任何状态。"""
+        runner = make_runner("ask")
+        out = run_gate(runner, "save_dict", "allow-once", reason="顺手写点什么")
+        self.assertTrue(out["ok"], out.get("error"))
+        self.assertEqual(runner.state.permission_grants, set())
+
     def test_timeout_is_denied(self) -> None:
         runner = make_runner("ask")
         with patch.object(rt, "PERMISSION_TIMEOUT", 0.2):
@@ -309,6 +364,26 @@ class AnswerPermissionTests(unittest.TestCase):
         registry = AgentRuntime()
         with self.assertRaises(ValueError):
             registry.answer_permission(self.NO_SESSION_PROJECT, None, "allow-once")
+
+    def test_registry_forwards_the_reason_to_the_runner(self) -> None:
+        """HTTP 层把 reason 一路送到 runner（不然界面上填了也白填）。"""
+        registry = AgentRuntime()
+        received: list[tuple[str, str]] = []
+        fake = SimpleNamespace(
+            resolve_permission=lambda decision, reason="": (
+                received.append((decision, reason)) or {"ok": True}
+            )
+        )
+        key = registry._key(r"C:\proj")
+        registry._states.setdefault(key, {})["s1"] = AgentState(
+            project_dir=r"C:\proj", session_id="s1"
+        )
+        registry._runners.setdefault(key, {})["s1"] = fake
+
+        out = registry.answer_permission(r"C:\proj", "s1", "deny", "别动字典")
+
+        self.assertEqual(received, [("deny", "别动字典")])
+        self.assertEqual(out, {"ok": True})
 
     def test_set_mode_without_session(self) -> None:
         registry = AgentRuntime()
