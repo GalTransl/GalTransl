@@ -155,15 +155,15 @@ def find_problems(
                         problem_list.append(f"语言不通-非GBK：{non_gbk_chars}")
         if CProblemType.缺控制符 in find_type:
             control_list_src = extract_control_substrings(pre_src)
-            control_list_pre_dst = extract_control_substrings(pre_dst)
-            control_list_post_dst = extract_control_substrings(post_dst)
-            lost_list=[]
-            for control_src in control_list_src:
-                if (
-                    control_src not in control_list_pre_dst
-                    and control_src not in control_list_post_dst
-                ):
-                    lost_list.append(control_src)
+            # 用「子串包含」而不是「token 精确相等」判断是否保留：extract_control_substrings
+            # 是按 ASCII 连续段切词的，源文 `[石浦城跡/いしうらじょうあと]`（括号内是日文，
+            # 非 ASCII）切出 ['[', '/', ']']，译文 `[石浦城迹/shipuchengji]`（括号内是罗马字，
+            # `]` 又在允许字符集里）会把它们并成一个 token `/shipuchengji]`——精确比较就会
+            # 误报「缺控制符：/ ]」。真正的控制符（如 `<color=red>`）丢没丢，子串包含同样判得出来。
+            lost_list = [
+                control_src for control_src in control_list_src
+                if control_src not in pre_dst and control_src not in post_dst
+            ]
             if lost_list:
                 problem_list.append(f"缺控制符：{' '.join(lost_list)}")
         if CProblemType.独白男他 in find_type:
