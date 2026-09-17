@@ -1086,13 +1086,18 @@ class SubagentCompactionTests(unittest.TestCase):
             sub._finish_compaction("前言\n<summary>## 目标\n已校对 8 轮。</summary>\n后记")
         )
 
-        # 头部 2 条原样保留，随后一条摘要，尾部保留最近 8 条；指令不留在历史里
+        # 头部 2 条原样保留，随后一条摘要；尾部按 token 预算挑（来自原文尾部、配对完整）
         self.assertEqual(sub.messages[0], {"role": "system", "content": "SYS"})
         self.assertEqual(sub.messages[1], {"role": "user", "content": "BRIEF"})
         self.assertIn("压缩摘要", sub.messages[2]["content"])
         self.assertIn("已校对 8 轮", sub.messages[2]["content"])
         self.assertNotIn("前言", sub.messages[2]["content"])  # <summary> 之外的不进历史
-        self.assertEqual(len(sub.messages), 2 + 1 + 8)
+        tail = sub.messages[3:]
+        original = self._history(12)
+        self.assertTrue(tail)
+        self.assertEqual(tail, original[-len(tail):])  # 保留段就是原文的末尾一段
+        budget = rt._keep_recent_tokens(7808, rt.SUBAGENT_COMPACT_KEEP_RECENT_RATIO)
+        self.assertLessEqual(sum(rt._estimate_message_tokens(m) for m in tail), budget)
         self.assertEqual(sub.messages[-1]["content"], "x" * 4000)
         self.assertNotIn(
             rt.SUBAGENT_COMPACT_INSTRUCTION_PROMPT, [m.get("content") for m in sub.messages]
@@ -1109,14 +1114,16 @@ class SubagentCompactionTests(unittest.TestCase):
         parent = self._parent(20_000, summarizer=summarize)
         sub = self._sub(parent)
         sub.messages = self._history(12)
-        sub._begin_compaction()
+        self.assertTrue(sub._begin_compaction())
+        head_len = int(sub._pending_compaction["cut"]) - 2  # 头部 2 条不进摘要
 
         with patch.object(rt, "_subagent_chat", _make_chat([("", [])])):  # 回了个空正文
             sub._run_compaction_request(None, "fake-model")
 
-        # 摘要只吃被压缩掉的那段（8 轮 16 条），不是整份历史
+        # 摘要只吃被压缩掉的那段（切点之前的部分），不是整份历史
         self.assertEqual(len(seen), 1)
-        self.assertEqual(len(seen[0]), 16)
+        self.assertEqual(len(seen[0]), head_len)
+        self.assertGreater(head_len, 0)
         self.assertIn("独立摘要", sub.messages[2]["content"])
         self.assertIsNone(sub._pending_compaction)
 
@@ -1176,7 +1183,8 @@ class SubagentCompactionTests(unittest.TestCase):
         with (
             patch.object(rt, "_subagent_chat", recording),
             patch.object(rt.SubAgentRunner, "_estimate_context_tokens", fake_estimate),
-            patch.object(rt, "SUBAGENT_COMPACT_KEEP_RECENT", 2),  # 6 条历史就能切出安全切点
+            # 保留段预算压到 1 token：6 条历史也能切出安全切点（只留最后那次工具往返）
+            patch.object(rt, "_keep_recent_tokens", lambda _limit, _ratio=None: 1),
         ):
             out = _tool_run_subagents(
                 parent, {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD, "file": "a.json"}]}

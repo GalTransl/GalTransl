@@ -163,6 +163,9 @@ class InsertThenCompressTests(_TempSessions):
         self.assertIn("术语", chunks[0]["topics"])
         self.assertIn(chunks[0]["name"], state.messages[1]["content"])
         self.assertIn("compacted", [event.type for event in state.events])
+        # 压缩后的大小是重建后现场估的（不是摘要长度）：事件里要能拿到
+        ev = [event for event in state.events if event.type == "compacted"][0]
+        self.assertEqual(ev.data["tokens_after"], runner._estimate_context_tokens())
 
     def test_empty_summary_rolls_back_instead_of_breaking_history(self) -> None:
         state = _state()

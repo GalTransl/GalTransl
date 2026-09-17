@@ -90,9 +90,9 @@ SUBAGENT_REPORT_CHARS = 800
 SUBAGENT_EXPLORE_REPORT_CHARS = 6_000
 # 子代理一次工具结果的回传上限（字符）：读缓存动辄几十条，超了截断并提示它分段读
 SUBAGENT_TOOL_RESULT_CHARS = 24_000
-# 子代理自己的历史压缩：保留最近 N 条消息原文不动。子代理历史比主会话短得多、任务也单一，
-# keep_recent 取得比父会话（COMPACT_KEEP_RECENT_MSGS）小一半。
-SUBAGENT_COMPACT_KEEP_RECENT = 8
+# 子代理自己的历史压缩：保留段同样按 token 预算挑（见 _keep_recent_tokens）。子代理历史比
+# 父会话短得多、任务也单一，预算取父会话（COMPACT_KEEP_RECENT_RATIO）的一半。
+SUBAGENT_COMPACT_KEEP_RECENT_RATIO = 0.1
 # 父回合等待子代理时的进度打印间隔（秒）
 SUBAGENT_PROGRESS_TICK = 5.0
 
@@ -274,8 +274,13 @@ def _permission_denied_reason(name: str, decision: str, reason: str = "") -> str
 DEFAULT_CONTEXT_WINDOW = 128_000
 # 用量超过窗口的该比例就触发压缩
 COMPACT_TRIGGER_RATIO = 0.80
-# 压缩时保留最近 N 条消息原文不动
-COMPACT_KEEP_RECENT_MSGS = 16
+# 压缩时保留的最近上下文按 **token 预算**挑（不是"最近 N 条"）：从尾部往前累加，装到装不下
+# 为止。按条数挑的毛病是——最近 16 条里只要压着一条几万字符的工具结果，压缩就几乎降不下来，
+# 界面上还会看着像"压完只剩摘要那么大"。对齐 PI-Desktop 的 keepRecentTokens：由触发线派生、
+# 约两成、夹在 8K~64K 之间。
+COMPACT_KEEP_RECENT_RATIO = 0.2
+COMPACT_KEEP_RECENT_MIN_TOKENS = 8_000
+COMPACT_KEEP_RECENT_MAX_TOKENS = 64_000
 # 尾部预留：当前轮新增消息 + 模型输出
 CONTEXT_RESERVE_TOKENS = 8_192
 # 摘要生成的最大输出 token
@@ -1580,7 +1585,7 @@ class AgentRunner:
         limit = int(window * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
         if self._estimate_context_tokens() <= limit:
             return
-        cut = _find_compaction_cut(self.state.messages, COMPACT_KEEP_RECENT_MSGS)
+        cut = _find_compaction_cut(self.state.messages, _keep_recent_tokens(limit))
         if cut <= 0:
             _log("  ⚠ 上下文超阈值但找不到安全切点，跳过压缩")
             return
@@ -1599,12 +1604,12 @@ class AgentRunner:
         """
         if self._pending_compaction is not None or self._compact_failed_this_turn:
             return False
+        window = self._context_window
+        limit = int(window * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
         estimated = self._estimate_context_tokens()
         if not force:
             if self._compacted_this_turn:
                 return False
-            window = self._context_window
-            limit = int(window * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
             if estimated <= limit:
                 return False
 
@@ -1616,11 +1621,20 @@ class AgentRunner:
                 pulled = messages[-count:]
                 del messages[-count:]
 
-        cut = _find_compaction_cut(messages, COMPACT_KEEP_RECENT_MSGS)
+        cut = _find_compaction_cut(messages, _keep_recent_tokens(limit))
         if cut <= 0:
             messages.extend(pulled)  # 找不到安全切点：把弹出的放回去
             _log("  ⚠ 上下文超限但找不到安全切点，跳过本次压缩")
             return False
+        # 摘掉头部后仍在触发线以上：问题出在**保留段自身**（典型是尾部压着一条超大工具
+        # 结果），压缩救不回来——别白花一次摘要请求，更别把摘要本身再摘要一遍。
+        # force（溢出恢复）不走这里：那时只有压缩这一条路。
+        if not force and limit > 0:
+            head_tokens = sum(_estimate_message_tokens(m) for m in messages[:cut])
+            if estimated - head_tokens >= limit:
+                messages.extend(pulled)
+                _log("  ⚠ 保留段自身已到触发线（尾部有压不掉的大结果），压缩无益，跳过")
+                return False
 
         instruction = {
             "role": "user",
@@ -1700,7 +1714,8 @@ class AgentRunner:
         """降级路径：另发一次非流式摘要请求（共享前缀为 0，但一定能拿到摘要）。"""
         messages = self.state.messages
         if cut is None:
-            cut = _find_compaction_cut(messages, COMPACT_KEEP_RECENT_MSGS)
+            limit = int(self._context_window * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
+            cut = _find_compaction_cut(messages, _keep_recent_tokens(limit))
         if cut <= 0:
             self._compact_failed_this_turn = True
             return
@@ -1759,17 +1774,30 @@ class AgentRunner:
         self._compacted_this_turn = True
         removed = len(head)
         tokens_before = int(ctx.get("estimated") or 0)
+        # 压缩后的大小按**重建出来的真实消息列表**再估一次（锚点刚重置，这里是纯字符估算）：
+        # 保留的尾部、尤其是里面体积很大的工具结果，必须一起算进去——只报摘要大小会让人
+        # 以为"压完就剩这么点"，而实际下一轮请求可能还是贴着上限。
+        tokens_after = self._estimate_context_tokens()
         if self._store is not None:
-            self._store.append_compact(removed=removed, summary_chars=len(summary), tokens_before=tokens_before)
+            self._store.append_compact(
+                removed=removed,
+                summary_chars=len(summary),
+                tokens_before=tokens_before,
+                tokens_after=tokens_after,
+            )
         self._emit("compacted", {
             "removed": removed,
             "summary_chars": len(summary),
             "tokens_before": tokens_before,
+            "tokens_after": tokens_after,
             "archive": archive_name or "",
         })
         self._emit("compacting", {"phase": "done"})
         tail_note = f"，归档 {archive_name}" if archive_name else ""
-        _log(f"  📦 压缩完成：移除 {removed} 条，摘要 {len(summary)} 字符{tail_note}")
+        _log(
+            f"  📦 压缩完成：移除 {removed} 条，摘要 {len(summary)} 字符{tail_note}"
+            f"（估算 {tokens_before} → {tokens_after} tokens）"
+        )
         return True
 
     def _build_summary_message(self, summary: str, archive_name: str) -> dict[str, Any]:
@@ -2271,8 +2299,27 @@ def _message_has_tool_calls(message: dict[str, Any]) -> bool:
     return bool(message.get("tool_calls"))
 
 
-def _find_compaction_cut(messages: list[dict[str, Any]], keep_recent: int) -> int:
-    """找出压缩切点：保留尾部 keep_recent 条，返回前缀长度。
+def _keep_recent_tokens(limit: int, ratio: float = COMPACT_KEEP_RECENT_RATIO) -> int:
+    """保留段的 token 预算：触发线的一个零头，夹在上下限之间。
+
+    对齐 PI-Desktop 的 keepRecentTokens（由 hardLimit 派生、约两成、夹在 8K~64K）：窗口配得
+    很小（触发线不为正）时按下限走，至少留一点现场给模型。
+    """
+    if limit <= 0:
+        return COMPACT_KEEP_RECENT_MIN_TOKENS
+    return max(
+        COMPACT_KEEP_RECENT_MIN_TOKENS,
+        min(int(limit * ratio), COMPACT_KEEP_RECENT_MAX_TOKENS),
+    )
+
+
+def _find_compaction_cut(messages: list[dict[str, Any]], keep_recent_tokens: int) -> int:
+    """找出压缩切点：从尾部往前凑够保留预算，返回前缀长度。
+
+    保留段按 **token 预算**挑，不是"最近 N 条"：一条几万字符的工具结果就能吃掉整个预算，
+    按条数挑会把它连同十几条无关消息一起扣在上下文里，压缩等于没压。最后一条消息永远保留
+    ——否则没有可压的头部，压缩根本启动不了；单条就超预算的大结果会独占保留段，这是"不截断
+    消息内容"的代价（要更狠就得截断它，PI-Desktop 走的是截断那条路）。
 
     切点必须落在"安全位置"，否则会切断 assistant.tool_calls 与后续 tool 响应
     的配对，导致请求非法。具体规则：
@@ -2281,9 +2328,17 @@ def _find_compaction_cut(messages: list[dict[str, Any]], keep_recent: int) -> in
     找不到安全位置就往前退，退到 0 表示放弃本次压缩。
     """
     total = len(messages)
-    if total <= keep_recent + 1:
+    if total <= 1:
         return 0
-    cut = total - keep_recent
+    budget = max(1, int(keep_recent_tokens))
+    cut = total
+    used = 0
+    while cut > 0:
+        cost = _estimate_message_tokens(messages[cut - 1])
+        if cut < total and used + cost > budget:
+            break  # 再往前就装不下了（最后一条不设限：总得留一条）
+        used += cost
+        cut -= 1
     # 我们要保留 [cut:]，所以被裁掉的是 [0:cut]
     while cut > 0:
         prev = messages[cut - 1] if cut - 1 >= 0 else None
@@ -2298,7 +2353,10 @@ def _find_compaction_cut(messages: list[dict[str, Any]], keep_recent: int) -> in
             continue
         break
     # 至少要有内容被裁掉，且尾部保留完整
-    if cut <= 0:
+    if cut <= 0 or cut >= total:
+        return 0
+    # 头部只装得下 system（其余都进了保留段）：没有可摘的内容，别为它白跑一次摘要请求
+    if not any(m.get("role") != "system" for m in messages[:cut]):
         return 0
     return cut
 
@@ -7714,7 +7772,7 @@ class SubAgentRunner:
         差别只有三处：
         - 头部 2 条（system 提示词 + 任务说明）永远保留——子代理没有别的途径知道"我是谁、
           负责哪些文件"；
-        - 保留尾部取 SUBAGENT_COMPACT_KEEP_RECENT（8，只有父会话的一半）；
+        - 保留段按 token 预算挑，预算取父会话的一半（SUBAGENT_COMPACT_KEEP_RECENT_RATIO）；
         - 压缩那一轮**不带 tools**，它没有"接着调工具"的余地，也就没有父 Agent 那条
           "模型回了工具调用就判失败"的分支。
         """
@@ -7728,7 +7786,8 @@ class SubAgentRunner:
         if estimated <= limit:
             return False
         head_keep = 2
-        cut = _find_compaction_cut(self.messages[head_keep:], SUBAGENT_COMPACT_KEEP_RECENT)
+        keep_recent = _keep_recent_tokens(limit, SUBAGENT_COMPACT_KEEP_RECENT_RATIO)
+        cut = _find_compaction_cut(self.messages[head_keep:], keep_recent)
         if cut <= 0:
             # 找不到安全切点：别每轮都重算一遍（父 Agent 的 _compact_failed_this_turn 同理）
             self._compact_failed = True
@@ -7796,7 +7855,9 @@ class SubAgentRunner:
         """
         head_keep = 2
         if cut is None:
-            cut = _find_compaction_cut(self.messages[head_keep:], SUBAGENT_COMPACT_KEEP_RECENT)
+            limit = int(self._parent_context_window() * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
+            keep_recent = _keep_recent_tokens(limit, SUBAGENT_COMPACT_KEEP_RECENT_RATIO)
+            cut = _find_compaction_cut(self.messages[head_keep:], keep_recent)
             if cut <= 0:
                 self._compact_failed = True
                 return

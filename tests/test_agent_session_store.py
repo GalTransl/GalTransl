@@ -30,7 +30,7 @@ class SessionStoreTests(unittest.TestCase):
         store.append_message({"role": "user", "content": "你好"})
         store.append_message({"role": "assistant", "content": "hi"})
         store.append_event({"type": "content", "step": 1, "content": "x"})
-        store.append_compact(removed=5, summary_chars=100, tokens_before=900)
+        store.append_compact(removed=5, summary_chars=100, tokens_before=900, tokens_after=320)
 
         data = store.load()
         self.assertEqual(data["meta"]["title"], "MyGame1")
@@ -38,6 +38,9 @@ class SessionStoreTests(unittest.TestCase):
         self.assertEqual(data["messages"][0]["content"], "你好")
         self.assertEqual(len(data["events"]), 1)
         self.assertEqual(len(data["compactions"]), 1)
+        # 压缩记录带上压缩前后两个估算值（tokens_after 含保留的尾部）
+        self.assertEqual(data["compactions"][0]["tokens_before"], 900)
+        self.assertEqual(data["compactions"][0]["tokens_after"], 320)
 
     def test_high_frequency_events_are_not_persisted(self) -> None:
         """content_delta / wait_tick 是高频增量，落盘会被丢弃。"""

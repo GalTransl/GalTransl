@@ -1,9 +1,9 @@
 """上下文压缩（compaction）与会话生命周期的单元测试。
 
 覆盖三类逻辑：
-1. 切点安全 —— `_find_compaction_cut` 永远不会切断 assistant.tool_calls 与后续
-   tool 响应的配对（否则发给 LLM 的 messages 会因孤儿 tool_calls / 孤儿 tool 响应
-   而被拒）。
+1. 切点安全 —— `_find_compaction_cut` 按 **token 预算**挑保留段，且永远不会切断
+   assistant.tool_calls 与后续 tool 响应的配对（否则发给 LLM 的 messages 会因孤儿
+   tool_calls / 孤儿 tool 响应而被拒）。
 2. 用量估算 —— 有 usage 锚点时只估锚点之后的增量，无锚点时整体按字符数估算。
 3. 压缩执行 —— 超阈值触发、消息被替换为摘要、每回合最多一次；LLM 摘要失败时
    回退本地截断且 messages 仍合法（无孤儿 tool 响应）。
@@ -23,7 +23,6 @@ from GalTransl.Agent import session_store as ss
 from GalTransl.Agent.runtime import (
     AgentRunner,
     AgentState,
-    COMPACT_KEEP_RECENT_MSGS,
     COMPACT_TRIGGER_RATIO,
     CONTEXT_RESERVE_TOKENS,
     DEFAULT_CONTEXT_WINDOW,
@@ -98,47 +97,70 @@ def _tool_call(tid="call_1", name="get_runtime", args="{}"):
 # ---- 1. 切点安全 ----
 
 class FindCompactionCutTests(unittest.TestCase):
+    """切点：保留段按 token 预算从尾部往前凑，永远不切断 tool 配对。"""
+
+    def test_keeps_the_tail_that_fits_the_budget(self):
+        """保留段装到装不下为止（每条 ~104 tokens，预算 500 → 只留最后几条）。"""
+        msgs = [_msg("user", "w" * 400) for _ in range(20)]
+
+        cut = _find_compaction_cut(msgs, 500)
+
+        self.assertGreater(cut, 0)
+        kept = sum(_estimate_message_tokens(m) for m in msgs[cut:])
+        self.assertLessEqual(kept, 500)
+        # 再往前一条就超预算：说明切点取的是"装得下"的最前位置
+        self.assertGreater(kept + _estimate_message_tokens(msgs[cut - 1]), 500)
+
+    def test_history_that_fits_the_budget_has_nothing_to_cut(self):
+        msgs = [_msg("user", "hi") for _ in range(20)]
+        self.assertEqual(_find_compaction_cut(msgs, 10_000), 0)
+
+    def test_last_message_is_kept_even_if_it_blows_the_budget(self):
+        """单条就超预算（几万字符的工具结果）：整条留下，不截断内容，压缩仍要能启动。"""
+        msgs = [_msg("user", "w" * 400) for _ in range(5)]
+        msgs.append(_msg("assistant", "call", tool_calls=[_tool_call()]))
+        msgs.append(_msg("tool", "A" * 40_000))
+
+        cut = _find_compaction_cut(msgs, 500)
+
+        # 保留段 = 那次调用 + 结果（配对完整），前面 5 条进摘要
+        self.assertEqual(cut, 5)
+        self.assertEqual(msgs[cut]["role"], "assistant")
+        self.assertEqual(msgs[cut + 1]["content"], "A" * 40_000)
+
     def test_cut_never_splits_tool_call_and_tool_response(self):
         """结尾一段 assistant(tool_calls) + tool 响应必须整体保留。"""
         # 20 条普通消息后跟 assistant.tool_calls + 对应 tool 响应
         msgs = [_msg("user", "hello") for _ in range(20)]
         msgs.append(_msg("assistant", "调用工具", tool_calls=[_tool_call()]))
         msgs.append(_msg("tool", "结果"))
-        cut = _find_compaction_cut(msgs, COMPACT_KEEP_RECENT_MSGS)
-        self.assertGreater(cut, 0)
+
+        # 预算只够最后一条：切点会往前退到 assistant 之前，pair 整体保留
+        cut = _find_compaction_cut(msgs, 6)
+
+        self.assertEqual(cut, 20)
         # 切点前一条绝不能是带 tool_calls 的 assistant
         self.assertNotEqual(msgs[cut - 1].get("role") + str(bool(msgs[cut - 1].get("tool_calls"))),
                             "assistantTrue")
         # 切点本身（保留段第一条）绝不能是 tool 响应
         self.assertNotEqual(msgs[cut].get("role"), "tool")
 
-    def test_cut_backs_off_when_only_tool_pairs_at_tail(self):
-        """尾部恰好全是 tool 配对时，切点会往前退到安全位置。"""
-        msgs = [_msg("user", str(i)) for i in range(8)]
-        # 把最近 16 条全部塞成 tool 配对，逼切点退到普通消息区
-        for i in range(20):
-            msgs.append(_msg("assistant", f"call{i}", tool_calls=[_tool_call()]))
-            msgs.append(_msg("tool", f"res{i}"))
-        cut = _find_compaction_cut(msgs, COMPACT_KEEP_RECENT_MSGS)
-        if cut > 0:
-            # 退出的安全位置不能落在 tool 配对中间
-            self.assertNotEqual(msgs[cut - 1].get("role") + str(bool(msgs[cut - 1].get("tool_calls"))),
-                                "assistantTrue")
-            self.assertNotEqual(msgs[cut].get("role"), "tool")
+    def test_only_system_in_the_head_means_nothing_to_summarize(self):
+        """预算只够留下 system 之后的内容：没东西可摘，返回 0（别白跑一次摘要请求）。"""
+        msgs = [_msg("system", "SYS"), _msg("user", "a")]
+        self.assertEqual(_find_compaction_cut(msgs, 4), 0)
 
-    def test_too_few_messages_returns_zero(self):
-        """消息数 <= keep_recent + 1 时没有可裁的，返回 0。"""
-        msgs = [_msg("user", "x") for _ in range(COMPACT_KEEP_RECENT_MSGS)]
-        self.assertEqual(_find_compaction_cut(msgs, COMPACT_KEEP_RECENT_MSGS), 0)
+    def test_single_message_returns_zero(self):
+        self.assertEqual(_find_compaction_cut([_msg("user", "x")], 10), 0)
 
     def test_alternating_tool_pairs_still_find_safe_cut_between_pairs(self):
         """全是 assistant(tool)+tool 交替配对时，切点落在两对之间（tool 之后、
         下一个 assistant 之前），仍属安全位置。"""
         msgs = []
         for _ in range(40):
-            msgs.append(_msg("assistant", "c", tool_calls=[_tool_call()]))
-            msgs.append(_msg("tool", "r"))
-        cut = _find_compaction_cut(msgs, COMPACT_KEEP_RECENT_MSGS)
+            msgs.append(_msg("assistant", "c" * 2000, tool_calls=[_tool_call()]))
+            msgs.append(_msg("tool", "r" * 2000))
+        cut = _find_compaction_cut(msgs, 3_000)
         self.assertGreater(cut, 0)
         # 切点前一条不是带 tool_calls 的 assistant，切点后第一条不是 tool 响应
         self.assertFalse(msgs[cut - 1].get("tool_calls"))
@@ -238,12 +260,46 @@ class MaybeCompactTests(unittest.TestCase):
         runner._maybe_compact()
         self.assertEqual(len(state.messages), first_count + 40)
 
+    def test_history_within_the_keep_budget_is_not_compacted(self):
+        """整份历史都装得进保留预算：压了只会把摘要再摘要一遍，直接跳过。"""
+        msgs = [_msg("user", "w" * 400) for _ in range(10)]  # 约 1k tokens，预算 8k
+        runner, state = _make_runner(msgs, window=2000)
+
+        runner._maybe_compact()
+
+        self.assertFalse(runner._compacted_this_turn)
+        self.assertEqual(len(state.messages), 10)
+
+    def test_tail_that_alone_hits_the_line_skips_compaction(self):
+        """尾部压着一条压不掉的大结果（保留段自身就到触发线）：压缩救不了，别白压一次。
+
+        （PI-Desktop 在同样的情形下直接判 oversized 失败；这里选择跳过。）
+        """
+        msgs = [_msg("user", "hello") for _ in range(40)]
+        msgs.append(_msg("assistant", "call", tool_calls=[_tool_call()]))
+        msgs.append(_msg("tool", "A" * 400_000))  # ~100k tokens
+        runner, state = _make_runner(msgs, window=DEFAULT_CONTEXT_WINDOW)  # 阈值 94208
+
+        self.assertFalse(runner._begin_compaction())
+        self.assertIsNone(runner._pending_compaction)
+        self.assertEqual(len(state.messages), 42)  # 历史原样，指令没挂上去
+
+    def test_force_compaction_ignores_the_tail_hits_the_line_guard(self):
+        """溢出恢复（force）不走这条：那时只有压缩一条路，压不动也得上。"""
+        msgs = [_msg("user", "hello") for _ in range(40)]
+        msgs.append(_msg("assistant", "call", tool_calls=[_tool_call()]))
+        msgs.append(_msg("tool", "A" * 400_000))
+        runner, state = _make_runner(msgs, window=DEFAULT_CONTEXT_WINDOW)
+
+        self.assertTrue(runner._begin_compaction(force=True))
+        self.assertIsNotNone(runner._pending_compaction)
+
     def test_tool_pairs_compacted_safely_without_orphans(self):
         """前缀全是 assistant(tool)+tool 配对时也能压缩，且压缩后尾部无孤儿 tool 响应。"""
         msgs = []
         for _ in range(40):
-            msgs.append(_msg("assistant", "c", tool_calls=[_tool_call()]))
-            msgs.append(_msg("tool", "r"))
+            msgs.append(_msg("assistant", "c" * 2000, tool_calls=[_tool_call()]))
+            msgs.append(_msg("tool", "r" * 2000))
         runner, state = _make_runner(msgs, window=2000)
         runner._maybe_compact()
         self.assertTrue(runner._compacted_this_turn)
@@ -260,7 +316,7 @@ class MaybeCompactTests(unittest.TestCase):
     def test_llm_summary_failure_falls_back_and_keeps_messages_valid(self):
         """摘要 LLM 抛异常时回退本地截断，且 messages 无孤儿 tool 响应。"""
         # 前缀里混入 tool 配对，回退后尾部保留必须仍成对
-        msgs = [_msg("user", "w" * 800) for _ in range(30)]
+        msgs = [_msg("user", "w" * 4000) for _ in range(30)]
         msgs.append(_msg("assistant", "call", tool_calls=[_tool_call()]))
         msgs.append(_msg("tool", "res"))
         runner, state = _make_runner(
@@ -289,7 +345,7 @@ class MaybeCompactTests(unittest.TestCase):
         self.assertGreater(len(state.messages[1]["content"]), 10)
 
     def test_compacted_emits_event(self):
-        """压缩成功后发 compacted 事件，带 removed/summary_chars/tokens_before。"""
+        """压缩成功后发 compacted 事件，带 removed/summary_chars/tokens_before/tokens_after。"""
         msgs = self._oversized_messages(40)
         runner, state = _make_runner(msgs, window=2000)
         # 不通过 _store 落盘，但事件应进 state.events
@@ -300,6 +356,31 @@ class MaybeCompactTests(unittest.TestCase):
         self.assertIn("removed", ev.data)
         self.assertIn("summary_chars", ev.data)
         self.assertIn("tokens_before", ev.data)
+        self.assertIn("tokens_after", ev.data)
+
+    def test_tokens_after_estimates_the_rebuilt_history_not_just_the_summary(self):
+        """压缩后的大小 = 在重建出来的真实历史上估算（含保留尾部的大工具结果）。
+
+        回归背景：界面上曾用「摘要字符数 / 4」当压缩后的大小，于是"尾部还压着一条几万
+        字符的工具结果"这种情形看起来像压完只剩摘要那么大——实际下一轮请求可能仍贴着上限。
+        """
+        huge = "A" * 40000  # 约 10k tokens，落在保留的尾部里（压不掉）
+        msgs = [_msg("user", "word " * 200) for _ in range(30)]
+        msgs.append(_msg("assistant", "call", tool_calls=[_tool_call()]))
+        msgs.append(_msg("tool", huge))
+        runner, state = _make_runner(msgs, window=2000, summary_text="摘要")
+
+        runner._maybe_compact()
+
+        ev = [e for e in state.events if e.type == "compacted"][0]
+        tokens_after = ev.data["tokens_after"]
+        # 摘要只有两个字：after 必须远大于"只算摘要"，且至少覆盖那条工具结果本身
+        self.assertGreaterEqual(tokens_after, len(huge) // 4)
+        self.assertGreater(tokens_after, ev.data["summary_chars"] * 100)
+        # 与重建后的现场估算一致（同一个函数、同一份历史）
+        self.assertEqual(tokens_after, runner._estimate_context_tokens())
+        # 大结果没被压掉：压缩后仍与压缩前同量级
+        self.assertGreater(tokens_after, ev.data["tokens_before"] // 2)
 
 
 class LocalFallbackSummaryTests(unittest.TestCase):

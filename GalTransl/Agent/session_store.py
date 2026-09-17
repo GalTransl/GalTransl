@@ -188,13 +188,17 @@ class SessionStore:
             return
         self._append({"t": "event", "at": time.time(), "event": _compact_event_for_storage(event)})
 
-    def append_compact(self, *, removed: int, summary_chars: int, tokens_before: int) -> None:
+    def append_compact(
+        self, *, removed: int, summary_chars: int, tokens_before: int, tokens_after: int
+    ) -> None:
         self._append({
             "t": "compact",
             "at": time.time(),
             "removed": removed,
             "summary_chars": summary_chars,
+            # tokens_after 是压缩后**重建出来的真实历史**的估算（含保留的尾部，含大工具结果）
             "tokens_before": tokens_before,
+            "tokens_after": tokens_after,
         })
 
     # ---- 压缩归档（chunk）----

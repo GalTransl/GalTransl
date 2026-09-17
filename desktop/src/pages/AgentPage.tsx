@@ -257,9 +257,11 @@ type ActivityItem = {
   waitTotalMs?: number;
   waitRemainingMs?: number;
   waitInterrupted?: boolean;
-  // compact: 上下文压缩提示
+  // compact: 上下文压缩提示（前后都是估算 token；tokensAfter 含保留下来的尾部）
   removed?: number;
   summaryChars?: number;
+  tokensBefore?: number;
+  tokensAfter?: number;
   // retry: LLM 请求失败自动重试（倒计时 + 第 N/M 次）
   attempt?: number;
   maxAttempts?: number;
@@ -619,6 +621,8 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
         step: ev.step,
         removed: ev.removed,
         summaryChars: ev.summary_chars,
+        tokensBefore: ev.tokens_before,
+        tokensAfter: ev.tokens_after,
       });
       continue;
     }
@@ -3282,13 +3286,18 @@ function ReasoningRow({
 
 function CompactRow({ item }: { item: ActivityItem }) {
   const removed = item.removed || 0;
-  const tokens = item.summaryChars ? Math.round(item.summaryChars / 4) : 0;
+  const before = item.tokensBefore || 0;
+  const after = item.tokensAfter || 0;
+  // 压缩后的大小是后端在**重建出来的真实历史**上估的：保留的尾部（可能带着很大的工具
+  // 结果）都算在内。所以这里显示 before → after，别拿摘要长度当"压缩后的大小"。
+  const size = after > 0
+    ? `（估算 ${before > 0 ? formatTokenCount(before) : '?'} → ${formatTokenCount(after)} tokens）`
+    : '';
   return (
     <div className="agent-compact-note" title="早期对话已被摘要压缩，以腾出上下文空间">
       <span className="agent-compact-note__icon"><Icon name="compress" /></span>
       <span className="agent-compact-note__text">
-        已压缩上下文 · 摘要 {removed} 条早期消息
-        {tokens > 0 ? `（约 ${tokens} 字）` : ''}
+        已压缩上下文 · 摘要 {removed} 条早期消息{size}
       </span>
     </div>
   );
