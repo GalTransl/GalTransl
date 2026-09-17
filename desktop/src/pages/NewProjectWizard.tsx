@@ -295,7 +295,12 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
         setGuidelines(list);
         setTranslationGuideline((prev) => {
           if (prev) return prev;
-          if (list.includes('日译中_增强')) return '日译中_增强';
+          // 默认挑「日译中_增强v2」：先把首选、再退到上一代增强、最后才退到列表首位。
+          // 名字要带 .md——接口给的是文件名，少写扩展名会一个都匹配不上，静默落到 list[0]
+          // （按 Unicode 排序多半是 Basic.md），看起来就像"默认值没生效"。
+          for (const preferred of ['日译中_增强v2.md', '日译中_增强.md']) {
+            if (list.includes(preferred)) return preferred;
+          }
           return list[0] || '';
         });
       })
