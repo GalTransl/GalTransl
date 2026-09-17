@@ -902,6 +902,8 @@
 /* Dropdown items: consistent blue-tinted ghost buttons */
 .ptv2-cockpit__folder-inline .project-translate-page__folder-menu-item {
   justify-content: flex-start;
+  /* 比全局 .button 的 6px 再宽一档：菜单行读起来更松 */
+  gap: 8px;
   width: 100%;
   padding: 8px 10px;
   min-height: 32px;

@@ -318,6 +318,33 @@ type TimelineGroup =
   | { type: 'error'; id: string; step: number; message: string; traceback?: string }
   | { type: 'stopped'; id: string; step: number; reason: string };
 
+/** run_subagents 的结果一到，就按结果里的 tasks 把子代理状态对齐一遍。
+
+    结果是最终名单：父回合被停止时，没跑完的子代理等不到自己的 subagent_done 事件
+    （后端把它们的终态直接写进了结果的 tasks，status=stopped）。不对齐的话这些行会
+    永远停在"进行中"，头部就一直挂着一个假的「N/16 个在跑」。 */
+function reconcileSubagentStatuses(target: ActivityItem) {
+  if (target.kind !== 'tool' || target.name !== 'run_subagents') return;
+  const runs = target.subagents;
+  if (!runs?.length || typeof target.result !== 'object' || target.result === null) return;
+  const tasks = (target.result as Record<string, unknown>).tasks;
+  if (!Array.isArray(tasks)) return;
+  for (const run of runs) {
+    if (run.status !== 'running') continue; // 已有终态的（done 事件先到）听事件的
+    const task = tasks.find(
+      (task): task is Record<string, unknown> =>
+        typeof task === 'object' && task !== null && (task as Record<string, unknown>).id === run.id,
+    );
+    if (!task) continue;
+    const status = String(task.status || '');
+    if (!status || status === 'running') continue;
+    run.status = status as SubagentRun['status'];
+    if (typeof task.error === 'string' && task.error) run.error = task.error;
+    if (typeof task.report === 'string' && task.report) run.report = task.report;
+    if (typeof task.duration_ms === 'number') run.durationMs = task.duration_ms;
+  }
+}
+
 function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
   const groups: TimelineGroup[] = [];
   let current: Extract<TimelineGroup, { type: 'activity' }> | null = null;
@@ -513,6 +540,7 @@ function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
         target.result = ev.result;
         target.error = ev.error;
         target.durationMs = ev.duration_ms;
+        reconcileSubagentStatuses(target);
       } else {
         current.items.push({
           kind: 'tool',
@@ -839,12 +867,22 @@ const TOOL_META: Record<string, ToolMeta> = {
     summary: (a) => {
       const tasks = Array.isArray(a?.tasks) ? a.tasks : [];
       if (!tasks.length) return '';
+      // `file:"*" + count:N` 的展开发生在**后端**：入参里只有 1 个任务，实际会派 N 个。
+      // 摘要要按展开后的数量说，否则"派子代理 1 个"和下面 16 行子代理对不上。
+      const total = tasks.reduce((sum, task) => {
+        const raw = (task as Record<string, unknown> | undefined)?.count;
+        const n = typeof raw === 'number' && Number.isFinite(raw) ? Math.floor(raw) : 1;
+        return sum + Math.max(1, n);
+      }, 0);
       const files = tasks
-        .map((task) => str((task as Record<string, unknown> | undefined)?.file))
+        .map((task) => {
+          const file = str((task as Record<string, unknown> | undefined)?.file);
+          return file === '*' ? '自动均分' : file; // "*" 是"全部均分"的写法，照抄出来没人看得懂
+        })
         .filter(Boolean);
       const head = files.slice(0, 2).join('、');
-      const rest = files.length > 2 ? ` 等 ${files.length} 个文件` : '';
-      return `${tasks.length} 个 · ${head}${rest}`;
+      const rest = files.length > 2 ? ` 等 ${files.length} 项` : '';
+      return `${total} 个 · ${head}${rest}`;
     },
   },
   ask_user: {
@@ -3840,13 +3878,24 @@ function PermissionCard({
     （报告在行摘要的下一层，点开就能读）；用户手动点过就听用户的。 */
 function SubagentList({ runs }: { runs: SubagentRun[] }) {
   const running = runs.filter((run) => run.status === 'running').length;
+  const done = runs.filter((run) => run.status === 'done').length;
+  const failed = runs.filter((run) => run.status === 'failed').length;
+  const stopped = runs.length - running - done - failed;
+  // 有在跑的就报"几个在跑"；全停了就按结局分账——中止/失败不算"已完成"
+  let meta: string;
+  if (running > 0) {
+    meta = `${running}/${runs.length} 个在跑`;
+  } else if (stopped > 0 || failed > 0) {
+    const parts = [done > 0 ? `${done} 个完成` : '', failed > 0 ? `${failed} 个失败` : '', stopped > 0 ? `${stopped} 个中止` : ''];
+    meta = parts.filter(Boolean).join('、');
+  } else {
+    meta = `${runs.length} 个已完成`;
+  }
   return (
     <div className="agent-subagents">
       <div className="agent-subagents__head">
         <span className="agent-subagents__title">子代理</span>
-        <span className="agent-subagents__meta">
-          {running > 0 ? `${running}/${runs.length} 个在跑` : `${runs.length} 个已完成`}
-        </span>
+        <span className="agent-subagents__meta">{meta}</span>
       </div>
       {runs.map((run) => (
         <SubagentRow key={run.id} run={run} />
