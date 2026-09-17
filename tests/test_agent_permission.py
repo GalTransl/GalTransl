@@ -682,18 +682,64 @@ class PermissionPreviewTests(unittest.TestCase):
 
     # ---- 人名表 ----
 
-    def test_name_table_preview_lists_added_and_removed(self) -> None:
-        runner = _PreviewRunner(names=[{"name": "旧名"}, {"name": "留着"}])
+    def test_name_table_preview_lists_added_removed_and_renamed(self) -> None:
+        old = [
+            {"src_name": "ウェアウルフ", "dst_name": "狼人", "count": 2},
+            {"src_name": "ゴブリン", "dst_name": "哥布林", "count": 2},
+        ]
+        new = [
+            {"src_name": "ウェアウルフ", "dst_name": "狼人族", "count": 2},  # 改译名
+            {"src_name": "ゴブリン", "dst_name": "哥布林", "count": 2},  # 原样回传
+            {"src_name": "ドラゴン", "dst_name": "龙", "count": 1},  # 新增
+        ]
+        runner = _PreviewRunner(names=old)
 
-        preview = rt._preview_tool_changes(
-            runner, "save_name_table", {"names": ["留着", "新名"]}
-        )
+        preview = rt._preview_tool_changes(runner, "save_name_table", {"names": new})
 
+        # 路径是 src_name、值是 dst_name：改译名是 replace，不是"加一条删一条"
         self.assertEqual(
-            [(c["kind"], c["before"], c["after"]) for c in preview["changes"]],
-            [("add", None, "新名"), ("remove", "旧名", None)],
+            [(c["path"], c["kind"], c["before"], c["after"]) for c in preview["changes"]],
+            [("ドラゴン", "add", None, "龙"), ("ウェアウルフ", "replace", "狼人", "狼人族")],
         )
         self.assertEqual(runner.writes, [])
+
+    def test_name_table_preview_matches_the_real_run(self) -> None:
+        old = [{"src_name": "A", "dst_name": "甲", "count": 1}]
+        new = [
+            {"src_name": "A", "dst_name": "甲2", "count": 1},
+            {"src_name": "B", "dst_name": "", "count": 0},  # 译名还空着
+        ]
+        args = {"names": new}
+
+        preview = rt._preview_tool_changes(_PreviewRunner(names=old), "save_name_table", args)
+        real = rt._tool_save_name_table(_PreviewRunner(names=old), args)
+
+        self.assertEqual(preview["changes"], real["changes"])
+        self.assertEqual(real["names_added"], ["B"])
+        self.assertEqual(real["names_removed"], [])
+
+    def test_name_table_preview_lists_removed_names_with_their_old_dst(self) -> None:
+        old = [{"src_name": "A", "dst_name": "甲", "count": 1}]
+
+        preview = rt._preview_tool_changes(_PreviewRunner(names=old), "save_name_table", {"names": []})
+
+        self.assertEqual(
+            [(c["path"], c["kind"], c["before"], c["after"]) for c in preview["changes"]],
+            [("A", "remove", "甲", None)],
+        )
+
+    def test_name_table_preview_is_quiet_when_only_counts_change(self) -> None:
+        """回归：原样回传同一张表（只有 count 动过）不该冒出「+ {'src_name': ...}」「− None」那种行。
+
+        接口的 entry 是 {src_name, dst_name, count}，早先这里拿整条 entry 去比对、旧值还读错了
+        字段（读的是不存在的 name），于是"保存"这样一张没改过的表会显示成一堆新增 + 一行 None。
+        """
+        old = [{"src_name": "ゴブリン", "dst_name": "哥布林", "count": 2}]
+        new = [{"src_name": "ゴブリン", "dst_name": "哥布林", "count": 9}]
+
+        self.assertIsNone(
+            rt._preview_tool_changes(_PreviewRunner(names=old), "save_name_table", {"names": new})
+        )
 
     # ---- 项目配置（high 档也要提前看 diff） ----
 

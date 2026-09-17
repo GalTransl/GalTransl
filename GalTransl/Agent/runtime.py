@@ -4020,22 +4020,50 @@ def _tool_get_name_table(runner: AgentRunner, _args: dict[str, Any]) -> Any:
     return runner._http_get(f"/api/projects/{pid}/name-table")
 
 
-def _name_table_changes(
-    old_names: list[Any], names: list[Any]
-) -> tuple[list[str], list[str], list[dict[str, Any]]]:
-    """人名表的增删明细（**只算不写**）：返回（新增, 移除, changes）。
+def _name_table_entries(raw: Any) -> dict[str, str]:
+    """人名表 entries → {src_name: dst_name}（按出现顺序）。
 
-    save_name_table 与审批预览共用——整表覆写的写法下，"改了哪几个名字"只有拿旧表比对
-    才看得出来，这份比对只能有一处。
+    接口两个方向都是这个结构（get_name_table 返回、save_name_table 入参）：
+    [{src_name, dst_name, count}]，对应 CSV 的 SRC_Name / DST_Name / Count 三列。
+    顺带认下老会话里可能还留着的 {"name": ...} 与裸字符串写法（当成只有 src）。
     """
-    old_set = set(map(str, old_names))
-    new_set = set(map(str, names))
-    added = sorted(new_set - old_set)
-    removed = sorted(old_set - new_set)
-    changes: list[dict[str, Any]] = [
-        *(_change("人名表", None, n, "add") for n in added),
-        *(_change("人名表", n, None, "remove") for n in removed),
-    ]
+    out: dict[str, str] = {}
+    if not isinstance(raw, list):
+        return out
+    for item in raw:
+        if isinstance(item, dict):
+            src = str(item.get("src_name") or item.get("name") or "").strip()
+            dst = str(item.get("dst_name") or "")
+        else:
+            src, dst = str(item).strip(), ""
+        if src:
+            out[src] = dst
+    return out
+
+
+def _name_table_changes(
+    old_raw: Any, new_raw: Any
+) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+    """人名表的增删改明细（**只算不写**）：返回（新增的 src_name, 移除的 src_name, changes）。
+
+    save_name_table 与审批预览共用。**按 src_name 逐条比 dst_name**，而不是把整条 entry
+    拿去比对：CSV 的键是 SRC_Name，值才是 DST_Name，count 只是出现次数统计——整条比会让
+    "count 变了"也算成加一条删一条，卡上就会冒出「+ {'src_name': ...}」和「− None」这种
+    噪音（字段名一换更是整表都成了新增）。count 不在比对范围内。
+    """
+    old_map = _name_table_entries(old_raw)
+    new_map = _name_table_entries(new_raw)
+    added = [src for src in new_map if src not in old_map]
+    removed = [src for src in old_map if src not in new_map]
+    changes: list[dict[str, Any]] = []
+    changes.extend(_change(src, None, new_map[src] or None, "add") for src in added)
+    changes.extend(_change(src, old_map[src] or None, None, "remove") for src in removed)
+    # 译名改动（同一个 src_name、dst_name 变了）：这才是这个工具最常干的事
+    changes.extend(
+        _change(src, old_map[src], dst, "replace")
+        for src, dst in new_map.items()
+        if src in old_map and old_map[src] != dst
+    )
     return added, removed, changes
 
 
@@ -4044,10 +4072,10 @@ def _tool_save_name_table(runner: AgentRunner, args: dict[str, Any]) -> Any:
     if not isinstance(names, list):
         raise AgentToolError("names must be an array")
     pid = runner._project_id()
+    # 先读旧表（算 changes 的基底），再整表覆写
     old = runner._http_get(f"/api/projects/{pid}/name-table")
-    old_names = [n.get("name") if isinstance(n, dict) else n for n in old.get("names", [])]
     result = runner._http_post(f"/api/projects/{pid}/name-table/save", {"names": names})
-    added, removed, changes = _name_table_changes(old_names, names)
+    added, removed, changes = _name_table_changes(old.get("names", []), names)
     return {
         **(result if isinstance(result, dict) else {}),
         "names_added": added,
@@ -4549,14 +4577,17 @@ def _preview_guideline_write(runner: AgentRunner, args: dict[str, Any]) -> dict[
 
 
 def _preview_name_table(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
-    """save_name_table 的预览：拿旧表比出增删（整表覆写，不比对就看不出改了什么）。"""
+    """save_name_table 的预览：拿旧表按 src_name 比出新增/移除/改译名。
+
+    整表覆写的写法下"改了哪几个名字"只能比对才看得出来（见 _name_table_changes）；
+    原样回传同一张表时不产生任何 changes，卡上就不显示这块。
+    """
     names = args.get("names", [])
     if not isinstance(names, list):
         return None
     pid = runner._project_id()
     old = runner._http_get(f"/api/projects/{pid}/name-table")
-    old_names = [n.get("name") if isinstance(n, dict) else n for n in old.get("names", [])]
-    _, _, changes = _name_table_changes(old_names, names)
+    _, _, changes = _name_table_changes(old.get("names", []), names)
     if not changes:
         return None
     return {"changes": changes}
