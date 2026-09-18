@@ -22,6 +22,7 @@ from unittest.mock import patch
 from GalTransl.Agent import session_store as ss
 from GalTransl.Agent.runtime import (
     AgentRunner,
+    AgentRuntime,
     AgentState,
     COMPACT_TRIGGER_RATIO,
     CONTEXT_RESERVE_TOKENS,
@@ -489,6 +490,116 @@ class MaybeCompactTests(unittest.TestCase):
         self.assertEqual(tokens_after, runner._estimate_context_tokens())
         # 大结果没被压掉：压缩后仍与压缩前同量级
         self.assertGreater(tokens_after, ev.data["tokens_before"] // 2)
+
+
+class CompactionSurvivesRestartTests(unittest.TestCase):
+    """压缩的成果要跨重启：摘要落盘，恢复时按它重建历史。
+
+    回归背景（实测）：压缩只在内存里换掉了那份历史，摘要消息从没落盘，而历史文件是只追加的
+    （被裁掉的那些消息不会从文件里消失）——于是重启后 load() 拿回来的是压缩**前**的全量
+    （98 条 / 167k tokens，触发线才 94k），压缩白做，而且一开回合立刻又压一次、归档越堆越多。
+    """
+
+    def setUp(self) -> None:
+        self._root = tempfile.mkdtemp(prefix="agent-compact-root-")
+        self._orig_root = ss.SESSIONS_ROOT
+        ss.SESSIONS_ROOT = self._root
+        self.project = os.path.join(tempfile.mkdtemp(prefix="agent-compact-proj-"), "MyGame")
+        os.makedirs(self.project, exist_ok=True)
+        self.sid = ss.create_session(self.project)
+        self.store = ss.SessionStore(self.project, self.sid)
+
+    def tearDown(self) -> None:
+        ss.SESSIONS_ROOT = self._orig_root
+
+    def _history(self, n: int, unit: str) -> list[dict]:
+        """n 条普通消息 + 一次工具往返（尾部留着，检查它有没有被一起接回来）。"""
+        return [
+            _msg("system", "SYS"),
+            *[_msg("user", unit) for _ in range(n)],
+            _msg("assistant", "call", tool_calls=[_tool_call()]),
+            _msg("tool", "结果"),
+        ]
+
+    def _compact(self, messages: list[dict], *, window: int) -> tuple[AgentRunner, AgentState]:
+        """按"真实发生顺序"把历史写进会话文件，然后压一次（摘要应该落盘）。"""
+        for message in messages:
+            self.store.append_message(message)
+        state = AgentState(session_id=self.sid, project_dir=self.project)
+        state.messages = list(messages)
+        runner = AgentRunner(state)
+        runner._openai_client = FakeOpenAI(summary_text="我是摘要")
+        runner._model = "fake-model"
+        runner._context_window = window
+        runner._maybe_compact()
+        self.assertTrue(runner._compacted_this_turn)  # 测试前提：这一轮确实压了
+        return runner, state
+
+    def _restart(self) -> tuple:
+        """换个注册表重新读会话：等价于进程重启后第一次打开它。"""
+        runtime = AgentRuntime()
+        state = runtime._get_state(self.project, self.sid)
+        assert state is not None
+        return runtime, state
+
+    def test_summary_is_persisted_with_the_kept_tail(self) -> None:
+        self._compact(self._history(40, "word " * 200), window=2_000)
+
+        stored = self.store.load()["messages"]
+        summaries = [m for m in stored if m.get("_compact_summary")]
+
+        self.assertEqual(len(summaries), 1)  # 摘要进了会话文件
+        self.assertGreater(summaries[0]["_compact_kept"], 0)  # 且记着当时留了多少条现场
+
+    def test_restore_rebuilds_the_compacted_history_not_the_full_one(self) -> None:
+        _, state = self._compact(self._history(40, "word " * 200), window=2_000)
+        files = self.store.load()["messages"]
+        # 压缩之后这一轮还在继续：又落下一次工具往返（这些要接在现场之后）
+        self.store.append_message(_msg("assistant", "继续", tool_calls=[_tool_call()]))
+        self.store.append_message(_msg("tool", "新结果"))
+
+        _, restored = self._restart()
+
+        # 重建出来的是压缩后那份（system + 摘要 + 现场 + 其后的新消息），不是文件里的全量
+        self.assertLess(len(restored.messages), len(files))
+        self.assertEqual(
+            [m.get("role") for m in restored.messages[: len(state.messages)]],
+            [m.get("role") for m in state.messages],
+        )
+        self.assertIn("我是摘要", restored.messages[1]["content"])
+        self.assertEqual(restored.messages[-2]["role"], "assistant")  # 现场之后的新消息也在
+        self.assertEqual(restored.messages[-1]["content"], "新结果")
+
+    def test_second_compaction_leaves_only_the_latest_summary(self) -> None:
+        """连压两次后恢复：只认最后一次摘要，上一轮的摘要不该混进"现场"。"""
+        runner, state = self._compact(self._history(40, "word " * 200), window=2_000)
+        for _ in range(20):
+            runner._persist_message(_msg("user", "word " * 200))
+        runner._compacted_this_turn = False  # 新回合才能再压
+        runner._maybe_compact()
+        self.assertTrue(runner._compacted_this_turn, "测试前提：第二次也压了")
+
+        _, restored = self._restart()
+
+        summaries = [m for m in restored.messages if m.get("_compact_summary")]
+        self.assertEqual(len(summaries), 1)  # 上一轮的摘要被这次的概括掉了，不再出现
+        self.assertEqual(
+            [m.get("role") for m in restored.messages],
+            [m.get("role") for m in state.messages],
+        )
+        self.assertEqual(len(restored.messages), len(state.messages))
+
+    def test_restored_history_is_below_the_trigger_line(self) -> None:
+        """压缩后重启不该"立刻又压一次"：恢复出来的用量必须落在触发线以下。"""
+        self._compact(self._history(40, "w" * 10_000), window=DEFAULT_CONTEXT_WINDOW)
+        limit = int(DEFAULT_CONTEXT_WINDOW * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
+
+        runtime, restored = self._restart()
+
+        used = runtime.status(self.project, self.sid)["context"]["used_tokens"]
+        self.assertLessEqual(used, limit)
+        # 也不是把历史压没了：摘要之外还留着那段现场
+        self.assertGreater(len(restored.messages), 2)
 
 
 class LocalFallbackSummaryTests(unittest.TestCase):

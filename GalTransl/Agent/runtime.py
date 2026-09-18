@@ -1828,6 +1828,10 @@ class AgentRunner:
         刻意**不改 system prompt**：把摘要拼进 system 会让整个前缀（含 tools）
         从第一条起失效；摘要作为 system 之后的一条独立消息，system + tools 这段
         前缀还能继续命中缓存。
+
+        摘要消息同时写进会话文件（见下面 append_message）：历史文件只追加，被裁掉的
+        那些消息不会从文件里消失，恢复会话时只能靠这条摘要知道"压缩后的历史长什么样"
+        （见 _restore_compacted_history）。
         """
         ctx = self._pending_compaction
         self._pending_compaction = None
@@ -1845,13 +1849,21 @@ class AgentRunner:
             return False
         system = messages[0] if messages and messages[0].get("role") == "system" else None
         head, tail = messages[:cut], messages[cut:]
+        kept = [*tail, *list(ctx.get("pulled") or [])]
         archive_name = self._archive_compacted(head, topics)
         summary_msg = self._build_summary_message(summary, archive_name)
+        # 保留了多少条**真消息**记在摘要上：恢复时靠它把这段现场一起接回来（上一轮的摘要
+        # 不是消息，不计——它已经被这次的摘要概括掉了）。
+        summary_msg["_compact_kept"] = sum(1 for m in kept if not _is_internal_message(m))
         # system 原样保留（前缀稳定的关键）；历史里没有 system 的异常情况才补一条，
         # 保证压缩后仍是「system 打头」的合法结构。
         if system is None:
             system = {"role": "system", "content": _build_system_prompt(self.state)}
-        self.state.messages = [system, summary_msg, *tail, *list(ctx.get("pulled") or [])]
+        self.state.messages = [system, summary_msg, *kept]
+        # 摘要落盘。不能走 _persist_message：它会把这条再往 state.messages 末尾塞一份，
+        # 而这条在内存里的位置是 system 之后。
+        if self._store is not None:
+            self._store.append_message(summary_msg)
         # 压缩后旧的 usage 锚点失效，重置避免继续用错误的估算
         self.state.last_prompt_tokens = 0
         self.state.anchored_message_count = 0
@@ -2509,6 +2521,39 @@ def _find_compaction_cut(messages: list[dict[str, Any]], keep_recent_tokens: int
     if not any(m.get("role") != "system" for m in messages[:cut]):
         return 0
     return cut
+
+
+def _restore_compacted_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """恢复会话时重建「压缩之后的历史」：system + 摘要 + 当时的现场 + 其后的消息。
+
+    历史文件是**只追加**的：压缩不会把被裁掉的那些消息从文件里删掉（它们早就写在那儿了），
+    所以 load() 拿回来的是压缩**前**的全量。不看摘要重建的话，重启后模型看到的是把摘要又
+    摊开一遍的全量历史（实测 98 条 / 167k tokens，触发线才 94k）——压缩白做，而且一开回合
+    立刻又压一次、归档越堆越多。
+
+    摘要自己记着「当时保留了多少条真消息」（`_compact_kept`），据此从摘要往前找回那段现场；
+    往前扫时跳过内部消息（上一轮的摘要不是消息）。老会话没有这条摘要记录，原样返回。
+    """
+    last = -1
+    for index, message in enumerate(messages):
+        if isinstance(message, dict) and message.get("_compact_summary"):
+            last = index
+    if last < 0:
+        return list(messages)
+    try:
+        kept = max(0, int(messages[last].get("_compact_kept") or 0))
+    except (TypeError, ValueError):
+        kept = 0
+    tail: list[dict[str, Any]] = []
+    index = last - 1
+    while index > 0 and len(tail) < kept:  # 不碰 messages[0]：那是 system
+        message = messages[index]
+        if not _is_internal_message(message):
+            tail.append(message)
+        index -= 1
+    tail.reverse()
+    system = messages[0] if messages and messages[0].get("role") == "system" else None
+    return ([system] if system is not None else []) + [messages[last]] + tail + messages[last + 1 :]
 
 
 def _serialize_for_summary(messages: list[dict[str, Any]]) -> str:
@@ -9220,6 +9265,8 @@ class AgentRuntime:
         events = data.get("events") or []
         if not messages and not events:
             return None
+        # 文件里带的是压缩**前**的全量（只追加），按最后一次压缩的摘要重建出真正在用的那份
+        history = _restore_compacted_history(messages)
         # 事件按 step 重建 deque（保留最近 RUNTIME_EVENT_KEEP 条）
         ev_deque: deque[AgentEvent] = deque(maxlen=RUNTIME_EVENT_KEEP)
         max_step = 0
@@ -9267,7 +9314,7 @@ class AgentRuntime:
             backend_profile_data=meta.get("backend_profile_data") or {},
             started_at=float(meta.get("created_at") or 0.0),
             error="上次运行被应用重启中断" if was_running else "",
-            messages=list(messages),
+            messages=history,
             step=max_step,
             session_id=session_id,
             title=str(meta.get("title") or session_id),
@@ -9286,7 +9333,11 @@ class AgentRuntime:
         key = self._key(project_dir)
         with self._lock:
             self._states.setdefault(key, {})[session_id] = state
-        _log(f"从磁盘恢复会话: project={key} session={session_id} messages={len(messages)} events={len(ev_deque)}")
+        compacted_note = "" if len(history) == len(messages) else f"（另有 {len(messages) - len(history)} 条已压缩）"
+        _log(
+            f"从磁盘恢复会话: project={key} session={session_id} "
+            f"messages={len(history)}{compacted_note} events={len(ev_deque)}"
+        )
         return state
 
     def _get_state(self, project_dir: str, session_id: str | None) -> AgentState | None:
