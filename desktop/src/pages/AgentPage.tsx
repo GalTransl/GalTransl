@@ -907,17 +907,34 @@ const TOOL_META: Record<string, ToolMeta> = {
   },
   stop_translation: { action: '停止翻译', running: '停止翻译', verb: '', icon: 'stop', summary: () => '' },
   wait: { action: '等待', running: '等待中', verb: '', icon: 'hourglass', summary: (a) => waitSummary(a) },
-  get_progress: { action: '查询进度', running: '查询进度', verb: '', icon: 'chart', summary: () => '' },
   get_runtime: { action: '查询运行时', running: '查询运行时', verb: '', icon: 'settings', summary: () => '' },
   list_problems: { action: '检查问题清单', running: '检查问题清单', verb: '', icon: 'search', summary: (a) => str(a?.problem_type) || '问题类型统计' },
   manage_problem_filter: { action: '管理问题过滤', running: '管理问题过滤', verb: '', icon: 'filter', summary: (a) => [str(a?.action), Array.isArray(a?.keyword) ? a.keyword.map((k) => str(k)).join('、') : str(a?.keyword)].filter(Boolean).join(' · ') },
   manage_problem_white_list: { action: '管理问题白名单', running: '管理问题白名单', verb: '', icon: 'filter', summary: (a) => [str(a?.action), Array.isArray(a?.entry) ? a.entry.map((k) => str(k)).join('、') : str(a?.entry)].filter(Boolean).join(' · ') },
   list_transl_cache: { action: '查看缓存清单', running: '查看缓存清单', verb: '', icon: 'archive', summary: () => '列出缓存文件' },
   read_transl_cache: { action: '读取缓存', running: '读取缓存', verb: '', icon: 'file-text', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
+  read_output: { action: '读取输出', running: '读取输出', verb: '', icon: 'file-text', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
   search_input: { action: '搜索原文', running: '搜索原文', verb: '', icon: 'search-plus', summary: (a) => [str(a?.query), str(a?.filename), a?.context ? `±${a.context} 句上下文` : ''].filter(Boolean).join(' · ') },
   search_transl_cache: { action: '搜索缓存', running: '搜索缓存', verb: '', icon: 'search-plus', summary: (a) => [str(a?.query), a?.context ? `±${a.context} 句上下文` : ''].filter(Boolean).join(' · ') },
-  patch_transl_cache: { action: '修改译文', running: '修改译文', verb: '', icon: 'pencil', summary: (a) => (Array.isArray(a?.patches) ? `${a.patches.length} 条` : str(a?.filename)) },
+  patch_transl_cache: {
+    action: '修改译文',
+    running: '修改译文',
+    verb: '',
+    icon: 'pencil',
+    // 一次调用可以跨多个文件（patches 每条带 file）：跨了就报文件数，
+    // 只改一个文件时只报条数（文件名在参数里，不必重复）。
+    // clear_comment 是"顺带清批注"，列出来：一次改动里它是容易被忽略的那半个动作。
+    summary: (a) => {
+      const patches = Array.isArray(a?.patches) ? (a.patches as Record<string, unknown>[]) : [];
+      const files = new Set(patches.map((p) => str(p?.file) || str(a?.filename)).filter(Boolean));
+      const head = files.size > 1 ? `${files.size} 个文件` : '';
+      return [head, patches.length ? `${patches.length} 条` : '', a?.clear_comment ? '清空批注' : '']
+        .filter(Boolean)
+        .join(' · ') || str(a?.filename);
+    },
+  },
   delete_transl_cache: { action: '删除缓存', running: '删除缓存', verb: '', icon: 'trash', summary: (a) => [str(a?.filename), str(a?.indexes)].filter(Boolean).join(' · ') },
+  read_history_archive: { action: '回查归档', running: '回查归档', verb: '', icon: 'archive', summary: (a) => [str(a?.chunk), str(a?.query)].filter(Boolean).join(' · ') || '列出归档' },
 };
 
 const DEFAULT_TOOL_META: ToolMeta = { action: '调用工具', running: '调用工具', verb: '', icon: 'tool', summary: () => '' };
