@@ -602,11 +602,37 @@ class PermissionPreviewTests(unittest.TestCase):
             runner, "patch_transl_cache", {"filename": "a.json", "patches": [{"index": 33, "pre_dst": "新译文"}]}
         )
 
-        self.assertEqual(preview["filename"], "a.json")
+        self.assertEqual(preview["files"], ["a.json"])
         self.assertEqual(preview["changes"][0]["path"], "#33.pre_dst")
+        self.assertEqual(preview["changes"][0]["file"], "a.json")
         self.assertEqual(preview["changes"][0]["before"], "旧译文")
         self.assertEqual(preview["changes"][0]["after"], "新译文")
         self.assertEqual(runner.writes, [])  # 只读：一个字都没写
+
+    def test_patch_preview_covers_every_file_of_a_batch(self) -> None:
+        """跨文件批量的预览：一份卡上把要改的每个文件都列出来（不然用户是"盲批"）。"""
+        runner = _PreviewRunner(
+            cache={"a.json": [{"index": 1, "pre_dst": "小贤"}], "b.json": [{"index": 2, "pre_dst": "小贤"}]}
+        )
+
+        preview = rt._preview_tool_changes(
+            runner,
+            "patch_transl_cache",
+            {
+                "patches": [
+                    {"file": "a.json", "index": 1, "pre_dst": "贤酱"},
+                    {"file": "b.json", "index": 2, "pre_dst": "贤酱"},
+                ]
+            },
+        )
+
+        self.assertEqual(preview["files"], ["a.json", "b.json"])
+        # 跨文件时路径带文件名，卡上分得清哪条改的是哪份
+        self.assertEqual(
+            [c["path"] for c in preview["changes"]],
+            ["a.json#1.pre_dst", "b.json#2.pre_dst"],
+        )
+        self.assertEqual(runner.writes, [])
 
     def test_patch_preview_matches_what_the_real_run_writes(self) -> None:
         """同一条 index 被两条 patch 命中时，第二条的 before 也要是第一条的 after。"""

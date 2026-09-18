@@ -430,7 +430,12 @@ class SubagentToolScopeTests(unittest.TestCase):
     def test_patch_schema_has_no_translation_fields(self) -> None:
         schema = _subagent_patch_schema()
         patches = schema["function"]["parameters"]["properties"]["patches"]["items"]["properties"]
-        self.assertEqual(set(patches), {"index", "proofread_comment"})
+        # file 留着：负责一组文件时一次把意见写完（跨文件批量），译文两列照旧摘掉
+        self.assertEqual(set(patches), {"file", "index", "proofread_comment"})
+        self.assertNotIn("pre_dst", schema["function"]["parameters"]["properties"])
+        # 顶层 clear_comment 也摘掉：那是主 Agent 复核完清批注用的，子代理只写意见
+        # （它若能把成批批注清空，等于把别人刚写下、还没处理的意见抹了）
+        self.assertNotIn("clear_comment", schema["function"]["parameters"]["properties"])
         self.assertIn("只能写 proofread_comment", schema["function"]["description"])
 
     def test_tool_table_has_no_delegation_or_write_tools(self) -> None:
@@ -1131,8 +1136,9 @@ class SubagentPermissionTests(unittest.TestCase):
         sub = self._subagent(parent)
         out = sub._run_tool(call, _subagent_handlers(SUBAGENT_AGENT_PROOFREAD))
 
-        # 写进去了（结果直接回给子代理，没有"等批准"这回事）
-        self.assertEqual(json.loads(out["content"])["updated"], 1)
+        # 写进去了（结果直接回给子代理，没有"等批准"这回事）；给模型看的是 Markdown
+        self.assertIn("共改动 1 条", out["content"])
+        self.assertIn("#1.proofread_comment", out["content"])
         self.assertEqual(parent.files["a.json"][0]["proofread_comment"], "漏译")
         # 门禁一次都没被问过，也没发审批事件
         self.assertEqual(parent.permission_checks, [])

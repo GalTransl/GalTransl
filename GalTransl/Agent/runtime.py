@@ -517,10 +517,10 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 5. **跟进进度（wait 前后都要查状态）**：启动翻译后先调用 get_runtime 确认任务已在跑，再调用 wait 等待一段合理时间（翻译任务 wait minutes=1~3，短任务 wait seconds=30）。**优先把 start_translation 返回的 job_id 一起传进去**（如 wait(job_id="<id>", minutes=5)）：任务先跑完就立刻返回、不必等满时长（返回里 job_finished=true 说明是它先结束的）；时长先到而它还在跑，返回里会带上当前状态**外加一份运行时快照（等同 get_runtime，含 eta_seconds）**——有这份快照就直接用，不必再单独查一次。wait 结束后必须确认任务状态（快照已在返回里就不必重查）：completed 进入下一步；仍在 running 时看返回的 eta_seconds 估算剩余时间——eta 还很长（如 >10 分钟）就按其一半的时长继续 wait，快完了（如 <2 分钟）就 wait seconds=30 再查，不要连续空转轮询也不要一次等过头。等待期间界面会显示倒计时。（get_runtime 各字段与 recent_errors 的口径见该工具说明。）
 6. **复核结果**：调用 list_problems（不带参数）先看类型统计，了解哪类问题最多；再传 problem_type（如 problem_type="残留日文"）+ limit/offset 分页查看该类型的具体条目。用 read_transl_cache 的 index 参数精确读取有问题的条目（如 list_problems 返回的 index，可直接 `index="33-40,50-60"` 一次取多条）浏览实际译文；判断语意是否连贯时传 context（如 context=3）把它上文的几句一起带上（带 context 的工具默认只给上文，要前后都给传 only_preceding=false；上下文行的 index 带 *，别拿它当本页要找的条目）。要查某个词/译名在全项目的所有出现处、判断译法是否统一（如「ドルード」该统一成哪个写法），用 search_transl_cache(query="ドルード", context=3) 一次看遍所有出现处及其上文。它默认只返回必要字段（说话人/原文/译文/问题，空值与未变化的字段会省略），要看译后字典替换结果或校对稿再传 fields。需要看缓存文件全貌（文件、条数）时用 list_transl_cache。
 6.5 **派子代理（校对与润色，可选）**：**很费 token，属于可选步骤**：派之前**必须用 ask_user 征得用户同意**（把"会读较多原文、比较费 token"说清楚），同意才派、不同意就不派；用 run_subagents 一次派多个子代理并行干活，每个有自己的上下文与受限工具，跑完只交回一份报告（过程不进你的上下文）。这个阶段用的是**校对子代理（proofread）**：
-   - **校对（proofread）**：每个负责一个（或一组）缓存文件，一次最多 16 个。**`file` 是"选谁"**，支持选择器：具体文件名（点名）、`"*"`（全部缓存文件，自动均分）、`"list:a.json,b.json"`（清单）、`"glob:SW_01_*"`（通配）、`"regex:^0[12]_"`（正则）、`"select:has_problem"` 或 `"select:problem_type=残留日文"`（直接吃 list_problems 的结果集——"只把有问题的文件分下去"就用它）、`"random:N"`（随机 N 个）。**`count` 是"切几份"**，对任何 file 都生效：选中的文件够分就按文件均分（`{file:"*", count:16}`、`{file:"select:has_problem", count:16}`），文件不够就把大文件按 index 切成 count 段并行（`{file:"03_RE13.json", count:4}` 把一个 400+ 条的文件切给 4 个代理）。**`indexes` 是"取哪段"**：`{file:"03_RE13.json", indexes:"1-200", count:4}` 只在前 200 条里切 4 段。三者正交、可自由组合。它们只能读 + 写缓存条目的 proofread_comment（校对批注：校对建议、润色建议都写这里），**改不了译文**：返回是一篇 Markdown，每个子代理一个小节，其中 tasks[].proofread_comment 是一张「file × index」批注表，报告是各自的总结（含"拿不准"的点）。拿到后按 7 的流程处理——读那些 index 的 proofread_comment，改完译文把该条的 proofread_comment 清空。**推荐在修复前跑一遍**。
+   - **校对（proofread）**：每个负责一个（或一组）缓存文件，一次最多 16 个。**`file` 是"选谁"**，支持选择器：具体文件名（点名）、`"*"`（全部缓存文件，自动均分）、`"list:a.json,b.json"`（清单）、`"glob:SW_01_*"`（通配）、`"regex:^0[12]_"`（正则）、`"select:has_problem"` 或 `"select:problem_type=残留日文"`（直接吃 list_problems 的结果集——"只把有问题的文件分下去"就用它）、`"random:N"`（随机 N 个）。**`count` 是"切几份"**，对任何 file 都生效：选中的文件够分就按文件均分（`{file:"*", count:16}`、`{file:"select:has_problem", count:16}`），文件不够就把大文件按 index 切成 count 段并行（`{file:"03_RE13.json", count:4}` 把一个 400+ 条的文件切给 4 个代理）。**`indexes` 是"取哪段"**：`{file:"03_RE13.json", indexes:"1-200", count:4}` 只在前 200 条里切 4 段。三者正交、可自由组合。它们只能读 + 写缓存条目的 proofread_comment（校对批注：校对建议、润色建议都写这里），**改不了译文**：返回是一篇 Markdown，每个子代理一个小节，其中 tasks[].proofread_comment 是一张「file × index」批注表，报告是各自的总结（含"拿不准"的点）。拿到后按 7 的流程处理——读那些 index 的 proofread_comment，改完译文后用 patch_transl_cache(clear_comment=true) 把这些条目的批注一次清空（一批一起清，不必逐条写空串）。**推荐在修复前跑一遍**。
    **派之前先用 ask_user 问清意见类型**：这一遍要它们写哪一类——「只写校对建议（错译/漏译/事实错误/不通这些硬伤）」「只写润色建议（没硬伤但中文能更好：翻译腔、口语不自然、用词单调、节奏拖沓）」「两者都要」——再把答案写进 brief（如 brief="本次只写润色建议，每条给具体改法；对话读起来要像人话"）。brief 里不写这句时它们默认只写校对建议；两类意见都写进 proofread_comment，同一条目只留一条，所以"两者都要"时要交代它们**硬伤优先**。
    派之前先想清楚要它们重点看什么，写进 brief 比它们自己发挥准。
-7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst），适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。问题过滤关键字是**正则**，但**原则上不要过滤大类、只过滤小类**：用 manage_problem_filter(action="add", keyword=["<正则>"]) 命中问题项即过滤——要写具体样式（如 `缺失.*标点`、`^残留日文：♪`），不要用 `残留日文`、`^残留日文：` 这类把整个大类藏起来的写法（大类里往往混着真问题，整类过滤等于放弃复核）；想按字面过滤某条，就把特殊字符转义。若某几条反复误报、不值得再改，用 manage_problem_white_list(action="add", entry=["<文件名>:<index>", …]) 按位置豁免（entry 支持 "01.json:12" 与 "01.json:12-15" 区间，可传数组），效果等同于给这几条勾上 skip_check：不再检测、不计入统计。
+7. **问题修复循环**：对能直接改译文的条目，用 patch_transl_cache 一次批量修改多条（传 patches 数组，每条给 index 和要改的字段，如 pre_dst/proofread_dst）；**按校对批注（proofread_comment）改过的那批，同一次调用带上 clear_comment=true**——点名的条目的批注一并清空（表示这些意见已处理），不必逐条写空串；**要动的文件不止一个时，每条 patch 再带上 file**（`{"file": "05_SA16.json", "index": 168, "pre_dst": "…"}`）——一次调用就把所有文件改完，别一个文件调一次（统一一个译名往往要动十几个文件，逐个调用一旦被停止，剩下的还得自己记住改到哪了；工具的返回按文件分组，改了什么、哪条没落地一目了然）。适合修正残留日文、明显错译；对需要字典约束的系统性问题，先 save_dict 补字典，再 start_translation(translator="rebuilda") 用更新后的字典重建（rebuilda 会跳过翻译、用译前/译后字典刷写缓存+结果 json；不要用 rebuildr，它只刷结果 json 不更新缓存，list_problems 看不到变化）。patch_transl_cache 与 rebuilda 可配合使用：先 patch 掉个别硬错，再 rebuilda 统一刷一遍字典相关的问题。对译文质量差、patch 也救不回来的句子，可用 delete_transl_cache 按条目删除缓存（indexes 支持区间），再 start_translation 让这些句子重翻。重建/修改后再 list_problems 复核（同样先看统计、再按类型下钻），直到问题数量显著下降。问题过滤关键字是**正则**，但**原则上不要过滤大类、只过滤小类**：用 manage_problem_filter(action="add", keyword=["<正则>"]) 命中问题项即过滤——要写具体样式（如 `缺失.*标点`、`^残留日文：♪`），不要用 `残留日文`、`^残留日文：` 这类把整个大类藏起来的写法（大类里往往混着真问题，整类过滤等于放弃复核）；想按字面过滤某条，就把特殊字符转义。若某几条反复误报、不值得再改，用 manage_problem_white_list(action="add", entry=["<文件名>:<index>", …]) 按位置豁免（entry 支持 "01.json:12" 与 "01.json:12-15" 区间，可传数组），效果等同于给这几条勾上 skip_check：不再检测、不计入统计。
 8. **完成**：收尾前先调用 get_project_overview 确认项目真的翻完——只有 files_translated == files_total 且没有 running 任务才算整体完成（total==translated 可能只代表已缓存的部分翻完，不要据此收尾）；若还有文件没翻，回到流程 4 继续 start_translation 翻剩余文件。若 list_problems 的统计里有**翻译失败**（失败的批次会把 problem 标成「翻译失败」、译文带 "(Failed)" 标记）：确认项目配置 `common.retranslKey` 里有没有「翻译失败」（get_project_overview 的 config 能看到，没有就 update_project_config 加上）：有的话**再启动一次 start_translation** 即可把这些句子重翻一遍。问题数可控、整体完成后，用 read_output 抽查最终输出文件（交付物；输出与缓存不完全一致，译后字典替换只在输出生效），确认无误后用一段自然语言总结本次操作（做了什么、翻译进度、剩余问题建议），不要调用工具，直接输出总结即可结束。
 
 # 译前 / 译后字典（替换类字典）的用法
@@ -2206,7 +2206,7 @@ def _cache_fields_section() -> str:
         "所选字段内容里搜文本（大小写不敏感）；数组 = 把这些元素当字段名、只留有内容的条目"
         "（如 grep=[\"problem\",\"proofread_comment\"] 取「有问题、且有校对批注」的条目）。"
         "改译文用 patch_transl_cache，只能改 "
-        f"{_patchable_fields_text()}；"
+        f"{_patchable_fields_text()}（一次调用可以跨多个文件：patches 里每条带上 file）；"
         "problem 与 post_* 是后端算出来的派生字段，改不动——改完译文跑 rebuilda（或重翻）"
         "它们才会跟着更新。"
         "要在回复里把某条缓存展示给用户，单独一行写 $transl_cache(\"<缓存文件名>\", <行号>)"
@@ -3485,27 +3485,33 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "patch_transl_cache",
-            "description": "批量修改某个缓存文件中若干条目的译文（pre_dst / proofread_dst 两列）。只更新 patches 里指定的条目与字段，其它条目原样保留。返回 updated（改动条目数）、changes（逐字段 before→after 的变更）与 problems（被改条目重建后仍存在的问题，没有则不返回）；改了什么一目了然、有没有引入新问题当场可验，不必再 read_transl_cache。适合发现问题后改译文、再配合 rebuilda 重建的复核循环。trans_by 由工具自动标记，不用手动指定。",
+            "description": "批量修改缓存条目的译文（pre_dst / proofread_dst 两列）。**一次调用可以跨多个缓存文件**（统一译名/术语这类活一次就交完）：patches 里每条自带 file；只改一个文件时用顶层 filename、patches 不带 file。只更新 patches 里点名的条目与字段，其它条目原样保留。**按校对批注改完一批译文后，顶层带 clear_comment=true**：点名的条目的 proofread_comment 一并清空（表示这些意见已处理），不必在每条 patch 里各写一遍空串。返回是一篇**按文件分组的 Markdown**：每个文件一节，先列「改了什么」（每条 before→after），再列没落地的条目（index 不存在 / 字段不许改及原因）与「改完仍存在的问题」（只列被改过的条目——没列到的就是消掉了）；改了什么一目了然、有没有引入新问题当场可验，不必再 read_transl_cache。适合发现问题后改译文、再配合 rebuilda 重建的复核循环。trans_by 由工具自动标记，不用手动指定。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "filename": {"type": "string", "description": "缓存文件名，来自 list_transl_cache 的缓存文件列表"},
+                    "filename": {"type": "string", "description": "可选。默认缓存文件名（来自 list_transl_cache）：patches 里没写 file 的都改它。**只改一个文件就写它**；要一次改多个文件，就每条 patch 都写 file，这里可以不写"},
                     "patches": {
                         "type": "array",
+                        "description": "要改的条目，按顺序应用；跨文件时每条带上 file",
                         "items": {
                             "type": "object",
                             "properties": {
+                                "file": {"type": "string", "description": "可选。这条改哪个缓存文件；不写就用顶层 filename。一次要改多个文件就每条都写它"},
                                 "index": {"type": "integer", "description": "要修改的条目 index"},
                                 "pre_dst": {"type": "string", "description": "可选。新译文（机翻结果）"},
                                 "proofread_dst": {"type": "string", "description": "可选。新校对译文（校对/润色结果，优先于 pre_dst）"},
-                                "proofread_comment": {"type": "string", "description": "可选。校对批注（校对子代理写下的意见：校对建议或润色建议，见 run_subagents）。按它改完译文后传空串清掉，表示这条已处理"},
+                                "proofread_comment": {"type": "string", "description": "可选。校对批注（校对子代理写下的意见：校对建议或润色建议，见 run_subagents）。按它改完译文后传空串清掉，表示这条已处理；一批都要清就用顶层 clear_comment=true，不必每条各写一遍"},
                             },
                             "required": ["index"],
                         },
                     },
+                    "clear_comment": {
+                        "type": "boolean",
+                        "description": "可选（只写一次，对所有 patch 生效）。true = 把这次点名条目的校对批注（proofread_comment）一并清空——按批注改完译文、这条已处理时用它，省得在每条 patch 里各写一遍空串。某条 patch 自己写了 proofread_comment 的以它为准；本来就没有批注的条目不会产生变更。",
+                    },
                     "reason": _REASON_PROPERTY,
                 },
-                "required": ["filename", "patches"],
+                "required": ["patches"],
             },
         },
     },
@@ -5584,23 +5590,39 @@ def _preview_tool_changes(runner: AgentRunner, name: str, args: dict[str, Any]) 
 
 
 def _preview_cache_patch(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
-    """patch_transl_cache 的预览：读条目（不改），按同一份判断算出 before→after。"""
-    filename = str(args.get("filename", "")).strip()
-    patches_raw = args.get("patches")
-    if not filename or not isinstance(patches_raw, list) or not patches_raw:
-        return None
+    """patch_transl_cache 的预览：读条目（不改），按同一份判断算出 before→after（支持跨文件）。
+
+    changes 与真执行那份逐条一致（同一个 _plan_cache_patches、同一条前缀规则，clear_comment 也
+    照传），所以卡上看到的 before→after 就是获批后会写下去的东西——包括要清掉的那些批注。
+    """
+    targets = _group_cache_patches_by_file(args)
+    qualify = len(targets) > 1
+    clear_comment = bool(args.get("clear_comment"))
     pid = runner._project_id()
-    data = runner._http_get(f"/api/projects/{pid}/cache/{urllib.parse.quote(filename)}")
-    entries = data.get("entries", []) if isinstance(data, dict) else []
-    if not isinstance(entries, list):
-        return None
-    planned = _plan_cache_patches(entries, patches_raw, _PATCHABLE_FIELDS)
-    changes = planned["changes"]
+    files: list[str] = []
+    changes: list[dict[str, Any]] = []
+    not_found: list[dict[str, Any]] = []
+    for filename, patches in targets:
+        data = runner._http_get(f"/api/projects/{pid}/cache/{urllib.parse.quote(filename)}")
+        entries = data.get("entries", []) if isinstance(data, dict) else []
+        if not isinstance(entries, list):
+            continue
+        planned = _plan_cache_patches(
+            entries, patches, _PATCHABLE_FIELDS, clear_comment=clear_comment
+        )
+        files.append(filename)
+        for change in planned["changes"]:
+            row = {**change, "file": filename}
+            if qualify and isinstance(row.get("path"), str):
+                # path 本来就以 `#` 开头（`#33.pre_dst`），前缀只补文件名
+                row["path"] = f"{filename}{row['path']}"
+            changes.append(row)
+        not_found += [{"file": filename, "index": idx} for idx in sorted(planned["not_found"])]
     if not changes:
         return None
-    out: dict[str, Any] = {"filename": filename, "changes": changes}
-    if planned["not_found"]:
-        out["not_found_indexes"] = sorted(planned["not_found"])
+    out: dict[str, Any] = {"files": files, "changes": changes}
+    if not_found:
+        out["not_found"] = not_found
     return out
 
 
@@ -6049,6 +6071,57 @@ def _md_render_run_subagents(result: dict[str, Any]) -> str:
     return _md_doc(*parts)
 
 
+def _md_render_patch_transl_cache(result: dict[str, Any]) -> str:
+    """改缓存的结果 → 一篇 Markdown：开头顶部一句总计，随后每个文件一个小节。
+
+    按文件分节是因为一次调用可以跨多个文件（统一译名/术语这类活）：每节先列「改了什么」
+    （before→after 表格），再列没落地的条目与"改完仍存在的问题"——剩下的问题当场可验，
+    不必再 read_transl_cache 兜一圈。
+    """
+    files = [row for row in (result.get("files") or []) if isinstance(row, dict)]
+    if not files:
+        return ""
+    total = sum(int(row.get("updated") or 0) for row in files)
+    failed = [row for row in files if row.get("error")]
+    head = f"共改动 {total} 条，涉及 {len(files)} 个缓存文件"
+    if failed:
+        head += f"；其中 {len(failed)} 个文件没有改动"
+    parts: list[str] = [head + "。"]
+    if result.get("trans_by"):
+        parts.append(
+            f"被改条目的 trans_by 已标成 {result['trans_by']}（与翻译引擎翻的区分开）。"
+        )
+    for index, row in enumerate(files, start=1):
+        parts.append(f"## {index}. {row.get('filename')}（改 {int(row.get('updated') or 0)} 条）")
+        if row.get("error"):
+            parts.append(f"⚠ {row['error']}")
+        block: list[str] = []
+        table = _md_table(
+            ["path", "before", "after"],
+            [c for c in (row.get("changes") or []) if isinstance(c, dict)],
+        )
+        if table:
+            block.append(table)
+        not_found = [n for n in (row.get("not_found") or []) if isinstance(n, dict)]
+        if not_found:
+            block.append("没找到这些 index：" + "、".join(str(n.get("index")) for n in not_found))
+        skipped = [s for s in (row.get("skipped") or []) if isinstance(s, dict)]
+        if skipped:
+            block.append(
+                "跳过这些条目：\n"
+                + "\n".join(f"- #{s.get('index')}：{s.get('reason')}" for s in skipped)
+            )
+        problems = [p for p in (row.get("problems") or []) if isinstance(p, dict)]
+        if problems:
+            block.append(
+                f"改完仍存在的问题 {len(problems)} 条（没列出来的就是已经消掉了）：\n"
+                + "\n".join(f"- #{p.get('index')}：{p.get('problem')}" for p in problems)
+            )
+        if block:
+            parts.append("\n\n".join(block))
+    return _md_doc(*parts)
+
+
 # 工具名 → 渲染器。渲染只对这里列出的工具生效，其余工具维持 JSON。
 _MD_RENDERERS: dict[str, Any] = {
     "list_transl_cache": _md_render_list_transl_cache,
@@ -6060,6 +6133,7 @@ _MD_RENDERERS: dict[str, Any] = {
     "search_input": _md_render_search_input,
     "manage_problem_filter": _md_render_manage_problem_filter,
     "run_subagents": _md_render_run_subagents,
+    "patch_transl_cache": _md_render_patch_transl_cache,
 }
 
 
@@ -6390,7 +6464,7 @@ CACHE_ENTRY_FIELD_DESCRIPTIONS: dict[str, str] = {
     "post_dst_preview": "最终译文的缓存快照（后润）：译后字典替换 + 对话符号恢复之后的形态；默认只在它与译文实质不同（不只差首尾对话符号）时返回",
     "proofread_dst": "校对/润色稿；有内容时它就是这条的最终译文（优先于 pre_dst）",
     "proofread_by": "校对者标记（校对失败的会带 Fail）；未校对为空",
-    "proofread_comment": "校对批注：校对子代理（run_subagents）看过后在条目上留下的批注——校对建议（错译/漏译/事实错误等）或润色建议（翻译腔、口语不自然等表达改进），一条一句；没写过的条目为空。要处理这条就按批注改 pre_dst，改完用 patch_transl_cache 把 proofread_comment 清空表示已处理",
+    "proofread_comment": "校对批注：校对子代理（run_subagents）看过后在条目上留下的批注——校对建议（错译/漏译/事实错误等）或润色建议（翻译腔、口语不自然等表达改进），一条一句；没写过的条目为空。要处理这条就按批注改 pre_dst，改完在 patch_transl_cache 里带 clear_comment=true 把这些条目的批注一次清空表示已处理（只清某几条就逐条传 proofread_comment 空串）",
     "trans_by": "译者标记：翻译引擎的模型名，或被别的来源改过时的那个名字（本会话 Agent 用 patch_transl_cache 改过的条目记的是 Agent 的模型名）；读缓存时逐条只报少数派——这批里出现最多的那个（多数派，通常就是引擎翻的）与空值都不逐条给，多数派记在顶层 majority_trans_by；默认不返回（要看它传 fields）",
     "problem": "自动问题分析写入的问题标签，可能多条（以「, 」分隔）；list_problems 的统计与下钻都基于它",
 }
@@ -7128,14 +7202,55 @@ def _normalize_linebreaks_like(value: str, *reference_texts: str) -> str:
     return v
 
 
+def _group_cache_patches_by_file(args: dict[str, Any]) -> list[tuple[str, list[Any]]]:
+    """把这次调用的 patches 按缓存文件分组（**按文件首次出现的顺序**）。
+
+    两种写法都认、也能混着写（见 patch_transl_cache 的 schema）：
+
+    - 顶层 filename + patches（每条不带 file）：老写法，一次一个文件；
+    - patches 里每条自带 file：跨文件一次提交——统一译名/术语这类活不必"一个文件一次调用"，
+      也就不会出现"点了停止、11 个文件只落了 2 个、剩下 9 个还得自己记住改到哪"。
+
+    顶层 filename 是"没写 file 的那些 patch"的默认文件。两边都没给就直接报错——与其猜一个
+    文件改错地方，不如让模型补一个入参。
+    """
+    patches_raw = args.get("patches")
+    if not isinstance(patches_raw, list) or not patches_raw:
+        raise AgentToolError("patches must be a non-empty array")
+    default = str(args.get("filename", "") or "").strip()
+    groups: dict[str, list[Any]] = {}
+    for position, patch in enumerate(patches_raw, start=1):
+        name = default
+        if isinstance(patch, dict):
+            name = str(patch.get("file", "") or "").strip() or default
+        if not name:
+            raise AgentToolError(
+                f"第 {position} 条 patch 没写 file，顶层也没给 filename："
+                "只改一个文件就给顶层 filename，要一次改多个文件就每条 patch 都写 file。"
+            )
+        groups.setdefault(name, []).append(patch)
+    return list(groups.items())
+
+
 def _plan_cache_patches(
-    entries: list[Any], patches_raw: list[Any], allowed: frozenset[str]
+    entries: list[Any],
+    patches_raw: list[Any],
+    allowed: frozenset[str],
+    *,
+    clear_comment: bool = False,
 ) -> dict[str, Any]:
     """把 patches 解析成「要改哪些条目的哪些字段」（**只读**，不动 entries）。
 
     patch_transl_cache 的落盘与审批卡上的「将要变更」预览共用这一份判断：卡上给用户看的
     before→after 就是真执行会写下去的东西，不会两边各算一遍再漂移。调用方拿到 plan 后
-    自己逐条 entry.update(updates) 才算写。返回：
+    自己逐条 entry.update(updates) 才算写。
+
+    clear_comment=True 时，**点名的条目**（落进 plan 的那些）顺带把 proofread_comment 清空——按
+    批注改完一批译文后，不必再在每条 patch 里各写一遍 `"proofread_comment": ""`（意见几十条时，
+    重复的键名本身就要占不少输出）。两条边界：本来就空的批注不产生变更（免得刷出一堆 `"" → ""`
+    的噪音行）；某条 patch 自己带了 proofread_comment（含空串）就以它为准，不被这个开关覆盖。
+
+    返回：
     - by_index：index → 条目（handler 盖章 trans_by 时要用）
     - plan：[{entry, index, updates}]，按顺序应用
     - changes / skipped / not_found：与原来逐条累积出来的字段一致
@@ -7171,12 +7286,23 @@ def _plan_cache_patches(
             not_found.append(idx_i)
             continue
         updates = {k: v for k, v in p.items() if k in allowed and v is not None}
-        if not updates:
-            skipped.append(
-                {"index": idx_i, "reason": f"无可更新字段（只允许 {_patchable_fields_text(allowed)}）"}
-            )
-            continue
         now = shadow.setdefault(idx_i, dict(entry))
+        # 顶层 clear_comment：把点名条目的批注一并清掉。看的是 now（影子副本）而不是 entry——同一个
+        # index 被前面那条 patch 写过批注时，要清的是"当前那份"，与真执行的链式修改一致。
+        # 某条 patch 自己带了 proofread_comment（含空串）就不插手：显式写的以它为准。
+        if (
+            clear_comment
+            and "proofread_comment" not in updates
+            and "proofread_comment" in allowed
+            and now.get("proofread_comment")
+        ):
+            updates["proofread_comment"] = ""
+        if not updates:
+            reason = f"无可更新字段（只允许 {_patchable_fields_text(allowed)}）"
+            if clear_comment and "proofread_comment" in allowed:
+                reason += "，这条本来也没有校对批注可清"
+            skipped.append({"index": idx_i, "reason": reason})
+            continue
         for f, v in list(updates.items()):
             if isinstance(v, str):
                 # 换行归一化：字段现值（正在编辑的那份）的风格优先，其次该条 post_src 的风格。
@@ -7197,37 +7323,36 @@ def _plan_cache_patches(
     }
 
 
-def _tool_patch_transl_cache(
-    runner: AgentRunner, args: dict[str, Any], allowed_fields: frozenset[str] | None = None
-) -> Any:
-    """改缓存条目的字段（主 Agent 可改 pre_dst / proofread_dst / proofread_comment）。
+def _patch_one_cache_file(
+    runner: AgentRunner,
+    pid: str,
+    filename: str,
+    patches: list[Any],
+    allowed: frozenset[str],
+    *,
+    qualify: bool,
+    clear_comment: bool = False,
+) -> dict[str, Any]:
+    """改一个缓存文件里的若干条目：读全量 → 计划 → 写全量 → 回「改了什么、还剩什么问题」。
 
-    allowed_fields 是"这次调用最多能改哪些字段"的窄白名单，给校对子代理用：它拿同一个工具，
-    但只放得住 proofread_comment——**改不了译文是靠这张白名单 + 子代理的入参 schema 双保险**，
-    不是靠提示词自觉（见 _subagent_handlers / _subagent_patch_schema）。
+    qualify=True 时给每条变更的 path 加「文件名#」前缀：一次调用跨了多个文件时，变更卡与
+    结果里得看得出这一条改的是哪份文件（只改一个文件时省掉，保持原来的短路径）。
+    clear_comment=True 时点名条目的 proofread_comment 一并清空（见 _plan_cache_patches）。
+    一条都没落地时**不抛异常**，把原因放进 `error` 返回——跨文件批量时别的文件还要改
+    （部分成功），整次算不算失败由 _tool_patch_transl_cache 汇总判定。
     """
-    allowed = allowed_fields if allowed_fields is not None else _PATCHABLE_FIELDS
-    filename = str(args.get("filename", "")).strip()
-    if not filename:
-        raise AgentToolError("filename is required")
-    patches_raw = args.get("patches")
-    if not isinstance(patches_raw, list) or not patches_raw:
-        raise AgentToolError("patches must be a non-empty array")
-    pid = runner._project_id()
-
     # 读现有条目，按 index 建索引，只为命中的条目应用补丁，再整体写回。
     # /cache/save 会整体覆盖文件并由后端重建 problem/post_dst_preview，
     # 所以这里必须读全量 -> 改 -> 写全量，而非只写补过的几条。
     data = runner._http_get(f"/api/projects/{pid}/cache/{urllib.parse.quote(filename)}")
     entries = data.get("entries", [])
     if not isinstance(entries, list):
-        raise AgentToolError("缓存文件 entries 非数组，无法 patch")
+        raise AgentToolError(f"「{filename}」的 entries 非数组，无法 patch")
 
-    planned = _plan_cache_patches(entries, patches_raw, allowed)
+    planned = _plan_cache_patches(entries, patches, allowed, clear_comment=clear_comment)
     by_index = planned["by_index"]
     skipped = planned["skipped"]
     not_found = planned["not_found"]
-    changes = planned["changes"]
     applied_indexes: list[int] = []
     retranslated_indexes: list[int] = []
     for item in planned["plan"]:
@@ -7235,24 +7360,43 @@ def _tool_patch_transl_cache(
         applied_indexes.append(item["index"])
         if item["updates"].keys() & _TRANSLATION_FIELDS:
             retranslated_indexes.append(item["index"])
+    changes: list[dict[str, Any]] = []
+    for change in planned["changes"]:
+        row = {**change, "file": filename}
+        if qualify and isinstance(row.get("path"), str):
+            # path 本来就以 `#` 开头（`#33.pre_dst`），前缀只补文件名
+            row["path"] = f"{filename}{row['path']}"
+        changes.append(row)
 
+    result: dict[str, Any] = {
+        "filename": filename,
+        "updated": len(applied_indexes),
+        "changes": changes,
+    }
     if not applied_indexes:
         # 把跳过原因带上：否则模型只看到"没有条目被更新"，不知道是字段不许改还是 index 写错了
         # （校对子代理硬塞译文字段时也靠这条说清"只允许 proofread_comment"）
         reasons = "；".join(str(s.get("reason") or "") for s in skipped if s.get("reason"))
-        raise AgentToolError(
-            f"没有条目被更新（updated=0, skipped={len(skipped)}, not_found={len(not_found)}）"
+        result["error"] = (
+            f"没有条目被更新（skipped={len(skipped)}, not_found={len(not_found)}）"
             + (f"：{reasons}" if reasons else "")
         )
+    if not_found:
+        result["not_found"] = [{"file": filename, "index": idx} for idx in sorted(not_found)]
+    if skipped:
+        result["skipped"] = [{**s, "file": filename} for s in skipped]
+    if not applied_indexes:
+        return result  # 没有要写的东西：别白跑一次 /cache/save（它还会重建 problem）
 
     # 译文被改过的条目标上本会话的模型名（trans_by 不在 _PATCHABLE_FIELDS 里，模型指定不了）：
     # 用户与后续复核才分得清"这句是 Agent 手改的"还是"翻译引擎翻的"。
     # 只写校对意见（proofread_comment）的条目**不盖章**——译文一个字没动，盖了会把"谁翻的"弄错，
     # 也会让 trans_by 的少数派统计多出一堆假来源。
     agent_model = _agent_model_name(runner)
-    if agent_model:
+    if agent_model and retranslated_indexes:
         for idx_i in retranslated_indexes:
             by_index[idx_i]["trans_by"] = agent_model
+        result["trans_by"] = agent_model
 
     save_body = {
         "filename": filename,
@@ -7264,17 +7408,6 @@ def _tool_patch_transl_cache(
     # 作为轻量校验信号——没引入新问题的条目不出现在 problems 里；改了什么由
     # changes 的 before→after 表达，不重复回传最终译文，不必再 read_transl_cache。
     save_result = runner._http_post(f"/api/projects/{pid}/cache/save", save_body)
-    result: dict[str, Any] = {
-        "filename": filename,
-        "updated": len(applied_indexes),
-        "changes": changes,
-    }
-    if agent_model:
-        result["trans_by"] = agent_model
-    if not_found:
-        result["not_found_indexes"] = sorted(not_found)
-    if skipped:
-        result["skipped"] = skipped
     saved_entries = save_result.get("entries") if isinstance(save_result, dict) else None
     if isinstance(saved_entries, list):
         wanted = set(applied_indexes)
@@ -7292,11 +7425,78 @@ def _tool_patch_transl_cache(
             if not problem:
                 continue
             problems.append({
+                "file": filename,
                 "index": idx_i,
                 "problem": problem[:120] + ("…" if len(problem) > 120 else ""),
             })
         if problems:
             result["problems"] = problems
+    return result
+
+
+def _tool_patch_transl_cache(
+    runner: AgentRunner, args: dict[str, Any], allowed_fields: frozenset[str] | None = None
+) -> Any:
+    """改缓存条目的字段（主 Agent 可改 pre_dst / proofread_dst / proofread_comment）。
+
+    **一次调用可以跨多个缓存文件**：patches 里每条自带 file，或只改一个文件时用顶层 filename
+    （见 _group_cache_patches_by_file）。落盘仍是"一个文件一次 /cache/save"（后端接口本来就按
+    文件整体覆盖、重建 problem），但工具调用只有一次——统一译名这类活一次交完，中断时模型也
+    不必自己记"改到哪个文件了"：结果按文件给出改了什么、哪条没落地。
+
+    顶层 clear_comment=true 让**点名条目的校对批注一并清空**：按批注改完一批译文后，不必在每条
+    patch 里各写一遍 `"proofread_comment": ""`（见 _plan_cache_patches）。它只对主 Agent 生效，
+    见下面 allowed_fields 那段。
+
+    allowed_fields 是"这次调用最多能改哪些字段"的窄白名单，给校对子代理用：它拿同一个工具，
+    但只放得住 proofread_comment——**改不了译文是靠这张白名单 + 子代理的入参 schema 双保险**，
+    不是靠提示词自觉（见 _subagent_handlers / _subagent_patch_schema）。
+    """
+    allowed = allowed_fields if allowed_fields is not None else _PATCHABLE_FIELDS
+    # clear_comment 只让主 Agent 用：子代理是**写**批注的那一方，顺手清批注对它没有意义——它负责的
+    # 那一段里可能正躺着上一轮留下、还没处理完的意见，清掉等于把待办抹了。双保险：子代理的入参
+    # schema 里根本没有这个参数（见 _subagent_patch_schema），这里再按"传了白名单就是子代理"忽略一次。
+    clear_comment = bool(args.get("clear_comment")) and allowed_fields is None
+    targets = _group_cache_patches_by_file(args)
+    pid = runner._project_id()
+    qualify = len(targets) > 1  # 跨文件才给 path 加文件名前缀
+    files: list[dict[str, Any]] = []
+    for filename, patches in targets:
+        try:
+            files.append(
+                _patch_one_cache_file(
+                    runner,
+                    pid,
+                    filename,
+                    patches,
+                    allowed,
+                    qualify=qualify,
+                    clear_comment=clear_comment,
+                )
+            )
+        except AgentToolError as exc:
+            # 单个文件没改成（文件名写错 / 接口报错）不该带走整批：一次改十几个文件时，
+            # 其中一个出错不该让另外那些白做。记在这份文件上，下面汇总时统一交代。
+            files.append({"filename": filename, "updated": 0, "changes": [], "error": str(exc)})
+
+    updated = sum(int(item.get("updated") or 0) for item in files)
+    if not updated:
+        detail = "；".join(
+            f"{item['filename']}：{item.get('error') or '没有条目被更新'}" for item in files
+        )
+        raise AgentToolError(f"没有条目被更新（{detail}）")
+
+    result: dict[str, Any] = {
+        "updated": updated,
+        # files：按文件分组的结果（Markdown 就是按它分节的）
+        "files": files,
+        # changes：跨文件汇总一份——前端变更卡认的是顶层 changes（见 extractChangeList），
+        # 跨文件时 path 带「文件名#」前缀，一眼看得出改的是哪份。
+        "changes": [change for item in files for change in item.get("changes") or []],
+    }
+    trans_by = next((str(item["trans_by"]) for item in files if item.get("trans_by")), "")
+    if trans_by:
+        result["trans_by"] = trans_by
     return result
 
 
@@ -7599,8 +7799,8 @@ SUBAGENT_PROOFREAD_PROMPT = """你是 GalTransl 的**校对子代理**，只干�
 
 # 权力边界（越界即失败）
 - 你**只能读**（缓存、人名表、翻译规范、问题清单），以及用 patch_transl_cache **写 proofread_comment** 这一个字段；
-- 你的 patch_transl_cache 里只有 index 与 proofread_comment 两个入参：**译文字段（pre_dst / proofread_dst）根本不存在**，也没有委派、启动任务、改配置的权力；
-- **你只负责这一次派给你的那些文件**（可能是一个，也可能是自动均分出来的一组）：read_transl_cache / patch_transl_cache 的 filename 只接受它们，范围外会被直接拒掉；list_problems 也只会列这些文件的问题；要核对某个词在别处的译法，用 search_transl_cache（它是全项目范围）；
+- 你的 patch_transl_cache 里只有 index + proofread_comment（加一个 file）三个入参：**译文字段（pre_dst / proofread_dst）根本不存在**，也没有委派、启动任务、改配置的权力；
+- **你只负责这一次派给你的那些文件**（可能是一个，也可能是自动均分出来的一组）：read_transl_cache / patch_transl_cache 的 filename 只接受它们（patch 支持每条带 file，一样只认这一组），范围外会被直接拒掉；list_problems 也只会列这些文件的问题；要核对某个词在别处的译法，用 search_transl_cache（它是全项目范围）；
 - 发现问题就写意见，改由主 Agent 做——不要试图绕路。
 
 # 写哪一类意见：以任务说明为准
@@ -7765,6 +7965,9 @@ def _subagent_role(agent: str) -> SubAgentRole:
 def _subagent_patch_schema() -> dict[str, Any]:
     """子代理版的 patch_transl_cache：**把 pre_dst / proofread_dst 两个入参摘掉**，只留 proofread_comment。
 
+    顶层 clear_comment 同样摘掉：那是"复核完的人"成批清批注用的，子代理只写意见（它不看这些
+    意见处理没处理），留着只会让它把别人刚写下、还没处理的批注误清掉。
+
     与 handler 侧的窄白名单（SUBAGENT_PATCHABLE_FIELDS）一起构成"改不了译文"的双保险——
     这件事由代码保证，不靠提示词自觉。schema 从主 Agent 那份深拷贝再改，避免哪天主 Agent
     换了描述、子代理这份漂移。
@@ -7777,6 +7980,7 @@ def _subagent_patch_schema() -> dict[str, Any]:
         properties = copy["function"]["parameters"]["properties"]["patches"]["items"]["properties"]
         for field in ("pre_dst", "proofread_dst"):
             properties.pop(field, None)
+        copy["function"]["parameters"]["properties"].pop("clear_comment", None)
         copy["function"]["description"] = (
             "把你的意见写进缓存条目的 proofread_comment（校对批注），一条一个具体问题，"
             "写清问题在哪、该怎么改。可以一次传多条 patches。"
@@ -8088,7 +8292,11 @@ def _selection_split_note(
 def _lock_to_filenames(
     fn: Callable[[AgentRunner, dict[str, Any]], Any], allowed: tuple[str, ...]
 ) -> Callable[[AgentRunner, dict[str, Any]], Any]:
-    """把工具的 filename 入参限制在 allowed 里：范围外一律拒绝，并说清这是本次派活的锁定范围。"""
+    """把工具引用的文件名限制在 allowed 里：范围外一律拒绝，并说清这是本次派活的锁定范围。
+
+    引用的文件不只有顶层 filename：patch_transl_cache 支持每条 patch 自带 file（跨文件批量，
+    见 _group_cache_patches_by_file），那也得逐条查——否则子代理靠 patches[].file 就绕过了锁定。
+    """
 
     def scope_text() -> str:
         if len(allowed) == 1:
@@ -8097,13 +8305,29 @@ def _lock_to_filenames(
         more = f" 等 {len(allowed)} 个文件" if len(allowed) > 6 else ""
         return f"你只负责这 {len(allowed)} 个文件（本次派活的锁定范围）：{shown}{more}"
 
+    def referenced(args: dict[str, Any]) -> list[str]:
+        names: list[str] = []
+        top = str(args.get("filename", "") or "").strip()
+        if top:
+            names.append(top)
+        for patch in args.get("patches") or []:
+            if not isinstance(patch, dict):
+                continue
+            name = str(patch.get("file", "") or "").strip()
+            if name:
+                names.append(name)
+        return list(dict.fromkeys(names))
+
     def wrapped(runner: AgentRunner, args: dict[str, Any]) -> Any:
-        asked = str(args.get("filename", "") or "").strip()
-        if asked in allowed:
-            return fn(runner, args)
+        asked = referenced(args)
         if not asked:
             raise AgentToolError(f"{scope_text()}：这次没给 filename。")
-        raise AgentToolError(f"{scope_text()}：「{asked}」不在范围里。要看别的文件，让主 Agent 重新派任务。")
+        outside = [name for name in asked if name not in allowed]
+        if not outside:
+            return fn(runner, args)
+        raise AgentToolError(
+            f"{scope_text()}：「{'」「'.join(outside)}」不在范围里。要看别的文件，让主 Agent 重新派任务。"
+        )
 
     return wrapped
 
@@ -8683,9 +8907,9 @@ class SubAgentRunner:
     def _remember_proofread_comments(self, result: Any, filename: str) -> None:
         """从 patch_transl_cache 的变更里挑出 proofread_comment 那几条，记进报告用的小结。
 
-        认的是返回的 changes（path 形如 `#33.proofread_comment`）而不是模型传的参数：它到底写了什么、
-        写没写成功，以工具的返回为准。filename 一并记下：一个子代理可能负责一组文件，只留 index
-        的话主 Agent 认不出这条意见在哪份文件里。
+        认的是返回的 changes 而不是模型传的参数：它到底写了什么、写没写成功，以工具的返回为准。
+        文件取变更行上的 file（一次调用可以跨文件，见 _patch_one_cache_file），取不到才退回
+        调用方给的 filename——一个子代理可能负责一组文件，只留 index 主 Agent 认不出在哪份文件里。
         """
         if not isinstance(result, dict):
             return
@@ -8695,13 +8919,19 @@ class SubAgentRunner:
             path = str(change.get("path") or "")
             if not path.endswith(".proofread_comment"):
                 continue
-            raw = path.split(".")[0].lstrip("#")
+            # path 形如 `#33.proofread_comment`，跨文件批量时带「文件名#」前缀——
+            # 所以从后往前取，别被文件名里的点切错。
+            raw = path.rsplit(".", 1)[0].rsplit("#", 1)[-1]
             try:
                 index: Any = int(raw)
             except ValueError:
                 index = raw
             self.proofread_comments.append(
-                {"file": filename, "index": index, "content": str(change.get("after") or "")}
+                {
+                    "file": str(change.get("file") or filename),
+                    "index": index,
+                    "content": str(change.get("after") or ""),
+                }
             )
 
 
