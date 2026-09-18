@@ -170,17 +170,33 @@ class FindCompactionCutTests(unittest.TestCase):
 # ---- 2. 用量估算 ----
 
 class EstimateContextTokensTests(unittest.TestCase):
-    def test_no_anchor_estimates_all_messages(self):
-        """无锚点时按全部消息字符数估算。"""
+    def test_no_anchor_estimates_all_messages_plus_tools(self):
+        """无锚点：全部消息字符估算 + tools schema 那笔固定开销。"""
         msgs = [
             _msg("user", "a" * 400),   # 100 + 4
             _msg("assistant", "b" * 800),  # 200 + 4
         ]
         runner, _ = _make_runner(msgs)
-        # 无锚点：totally char-based
         est = runner._estimate_context_tokens()
-        expected = (400 + 800) // 4 + 8
+        expected = runner._request_overhead_tokens() + (400 // 4 + 4) + (800 // 4 + 4)
         self.assertEqual(est, expected)
+
+    def test_tools_schema_is_a_measurable_part_of_the_request(self):
+        """tools schema 每次请求都带：它是请求的一部分，且不是个可以忽略的小数。"""
+        runner, _ = _make_runner([_msg("user", "hi")])
+        overhead = runner._request_overhead_tokens()
+
+        self.assertGreater(overhead, 1_000)
+        # "hi" 两个字符向上取整成 1 个 token，再加每条消息的固定开销
+        self.assertEqual(runner._estimate_context_tokens(), overhead + 1 + 4)
+
+    def test_anchored_estimate_does_not_add_the_overhead_twice(self):
+        """锚点就是 provider 报的真实 prompt_tokens（已含 tools）：有锚点时不能再加一遍。"""
+        runner, state = _make_runner([_msg("user", "hi")])
+        state.last_prompt_tokens = 12_345
+        state.anchored_message_count = 1
+
+        self.assertEqual(runner._estimate_context_tokens(), 12_345)
 
     def test_with_anchor_only_estimates_tail(self):
         """有锚点时：anchor + 锚点之后新增消息的字符估算。"""
@@ -203,7 +219,7 @@ class EstimateContextTokensTests(unittest.TestCase):
         state.last_prompt_tokens = 500
         state.anchored_message_count = 99  # 越界
         est = runner._estimate_context_tokens()
-        self.assertEqual(est, 400 // 4 + 4)
+        self.assertEqual(est, runner._request_overhead_tokens() + 400 // 4 + 4)
 
 
 class EstimateMessageTokensHelperTests(unittest.TestCase):
@@ -223,6 +239,41 @@ class EstimateMessageTokensHelperTests(unittest.TestCase):
             _estimate_message_tokens(with_reasoning),
             _estimate_message_tokens(plain) + 900,
         )
+
+    def test_multibyte_text_costs_more_than_ascii(self):
+        """一个汉字基本就是一个 token：中文只按 字符/4 算会低估两三倍。"""
+        cjk = _estimate_message_tokens(_msg("user", "中" * 300))
+        ascii_only = _estimate_message_tokens(_msg("user", "w" * 300))
+
+        self.assertEqual(cjk, 200 + 4)  # 300 / 1.5 + 固定开销
+        self.assertEqual(ascii_only, 75 + 4)  # 300 / 4 + 固定开销
+
+
+class KeepBudgetUnitTests(unittest.TestCase):
+    """保留段预算必须和"真实 token"同一口径——中文按多字节折算。
+
+    回归背景（"压缩估算太不准，实际保留的过去轮次偏大"）：估算一刀切按 字符/4 算，中文
+    被低估两三倍，而保留段预算是按这个偏小的单位量的，于是实际留下来的历史远超预算
+    （实测一条会话压完报 21.7k、真实请求 48k）。
+    """
+
+    def test_multibyte_history_keeps_fewer_messages(self):
+        msgs = [_msg("user", "中" * 300) for _ in range(20)]  # 每条 200 token + 4
+
+        cut = _find_compaction_cut(msgs, 1_000)
+        kept = msgs[cut:]
+
+        self.assertLessEqual(sum(_estimate_message_tokens(m) for m in kept), 1_000)
+        # 老口径（300/4+4=79）装得下 12 条，新口径只装得下 4 条——这就是"保留段偏大"的修正
+        self.assertEqual(len(kept), 4)
+
+    def test_ascii_history_budget_is_unchanged(self):
+        """纯 ASCII/代码仍是 4 字符一个 token：英文场景的保留量不该跟着变。"""
+        msgs = [_msg("user", "w" * 400) for _ in range(20)]  # 每条 104
+
+        cut = _find_compaction_cut(msgs, 1_000)
+
+        self.assertEqual(len(msgs[cut:]), 9)
 
 
 # ---- 3. 压缩执行 ----

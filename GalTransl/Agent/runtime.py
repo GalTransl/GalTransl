@@ -286,8 +286,15 @@ COMPACT_KEEP_RECENT_MAX_TOKENS = 64_000
 CONTEXT_RESERVE_TOKENS = 8_192
 # 摘要生成的最大输出 token
 SUMMARY_MAX_TOKENS = 2_048
-# 粗略字符->token 换算系数（无 tokenizer 时的估算）
-CHARS_PER_TOKEN = 4
+# 粗略字符 -> token 换算系数（没有 tokenizer 时的估算），分两档：
+#   可打印 ASCII / 代码 ~ 4 字符一个 token；中日韩等多字节 ~ 1.5 字符一个 token
+#   （一个汉字基本就是一个 token）。只按 /4 一刀切会系统性偏低两三倍——压缩的"保留段预算"
+#   就是按这个偏小的单位量的，于是实际留下来的历史远超预算（"压完还是很大"）。
+#   口径对齐 openclacky 的 estimate_content_tokens（ASCII/4 + 多字节/1.5）。
+ASCII_CHARS_PER_TOKEN = 4
+MULTIBYTE_CHARS_PER_TOKEN = 1.5
+# 每条消息的固定开销（role、分隔符等）
+MESSAGE_OVERHEAD_TOKENS = 4
 # 压缩归档（chunk）里单条工具结果的上限（字符）：归档是给模型回查细节用的，
 # 一条几万字符的缓存读取原样存进去只会让回查本身又撑爆上下文。
 COMPACT_ARCHIVE_TOOL_RESULT_CHARS = 2_000
@@ -1596,12 +1603,17 @@ class AgentRunner:
         return "".join(content_parts), tool_calls, finish_reason
 
     # ---- 上下文用量估算与压缩 ----
+    def _request_overhead_tokens(self) -> int:
+        """这次请求里 messages 之外的固定开销：tools schema（见 _tools_overhead_tokens）。"""
+        return _tools_overhead_tokens(AGENT_TOOLS)
+
     def _estimate_context_tokens(self) -> int:
-        """估算当前历史占用的 token 数（锚点法，见 _estimate_usage_tokens）。"""
+        """估算当前请求占用的 token 数（锚点法，见 _estimate_usage_tokens）。"""
         return _estimate_usage_tokens(
             self.state.messages,
             self.state.last_prompt_tokens,
             self.state.anchored_message_count,
+            self._request_overhead_tokens(),
         )
 
     def _emit_context_usage(self) -> None:
@@ -1675,19 +1687,22 @@ class AgentRunner:
         # 结果），压缩救不回来——别白花一次摘要请求，更别把摘要本身再摘要一遍。
         # force（溢出恢复）不走这里：那时只有压缩这一条路。
         if not force and limit > 0:
-            # estimated 走锚点法（provider 真实 prompt_tokens + 锚点后新增消息的本地估算），
-            # 下面这仓名是纯本地字符估算——两套单位不能直接相减：中文场景本地估算偏低好几倍，
-            # 一相减"保留段"就被放大到远超实际，守卫每回合都误触发、压缩永远不跑
-            # （"爆上下文 157k/128k 却不压缩"的事故就是它）。按 estimated/total 的比例把
-            # 保留段折算回 estimated 的口径再比；无锚点时两者同单位，比例恒为 1，行为不变。
+            # estimated 走锚点法（provider 真实 prompt_tokens + 锚点后新增消息的本地估算，
+            # 里面已经含 tools schema 那笔固定开销），下面这仓名是纯本地字符估算——两套单位
+            # 不能直接相减：中文场景本地估算偏低好几倍，一相减"保留段"就被放大到远超实际，
+            # 守卫每回合都误触发、压缩永远不跑（"爆上下文 157k/128k 却不压缩"的事故就是它）。
+            # 正确做法：把 estimated 里 messages 那一部分换算成比例，只按它折算保留段，
+            # 再把 tools 固定开销加回来一次——算出来的才是"压完那次请求"的真实大小。
+            overhead = self._request_overhead_tokens()
             full = list(messages) + list(pulled)  # pull_back 摘下的尾部也计入总量
             total_local = sum(_estimate_message_tokens(m) for m in full)
             head_local = sum(_estimate_message_tokens(m) for m in messages[:cut])
             tail_local = total_local - head_local
-            if total_local > 0 and estimated > 0:
-                tail_est = int(tail_local * estimated / total_local)
+            message_est = max(0, estimated - overhead)
+            if total_local > 0 and message_est > 0:
+                tail_est = int(tail_local * message_est / total_local) + overhead
             else:
-                tail_est = tail_local
+                tail_est = tail_local + overhead
             if tail_est >= limit:
                 messages.extend(pulled)
                 _log("  ⚠ 保留段自身已到触发线（尾部有压不掉的大结果），压缩无益，跳过")
@@ -2260,33 +2275,66 @@ def _profile_context_window(profile: dict[str, Any] | None) -> int:
     return DEFAULT_CONTEXT_WINDOW
 
 
-def _estimate_message_tokens(message: dict[str, Any]) -> int:
-    """单条消息的 token 粗估：正文 + 回传的思考 + tool_calls 的参数 JSON，按字符数/4。
+def _printable_ascii_chars(text: str) -> int:
+    """可打印 ASCII（空格 ~ `~`）的字符数；换行、控制符、中日韩都不算。"""
+    return sum(1 for ch in text if " " <= ch <= "~")
 
-    思考（reasoning_content / reasoning）必须算进去：thinking 模式下它会跟着 assistant
-    消息一起回传给 provider（见 _messages_for_request 与 _reasoning_echo），是这份请求真实
-    占用的一部分。漏掉它，纯本地估算就系统性偏低（实测一条会话 22 万字符的思考全被忽略），
-    而 estimated 走锚点法（provider 真实 prompt_tokens + 锚点后新增消息的本地估算）并不偏低
-    ——两套口径对不上，压缩的"保留段"判定就被带歪：尾部明明能压，却被判成"压不掉的大结果"，
-    压缩永远不跑（见 _begin_compaction 的守卫）。
-    """
-    total_chars = 0
+
+def _chars_to_tokens(ascii_chars: int, multibyte_chars: int) -> int:
+    """按字符构成折算 token（系数见 ASCII_CHARS_PER_TOKEN / MULTIBYTE_CHARS_PER_TOKEN）。"""
+    return int(
+        ascii_chars / ASCII_CHARS_PER_TOKEN
+        + multibyte_chars / MULTIBYTE_CHARS_PER_TOKEN
+        + 0.999  # 向上取整
+    )
+
+
+def _estimate_text_tokens(text: str) -> int:
+    """一段文本的 token 粗估。"""
+    ascii_chars = _printable_ascii_chars(text)
+    return _chars_to_tokens(ascii_chars, len(text) - ascii_chars)
+
+
+def _message_text_parts(message: dict[str, Any]) -> list[str]:
+    """一条消息里**真的会发给 provider** 的文本：正文 + 回传的思考 + tool_calls 的名字与参数。"""
+    parts: list[str] = []
     content = message.get("content")
     if isinstance(content, str):
-        total_chars += len(content)
+        parts.append(content)
     for name in REASONING_FIELD_NAMES:
         reasoning = message.get(name)
         if isinstance(reasoning, str):
-            total_chars += len(reasoning)
-    for tc in message.get("tool_calls") or []:
-        if not isinstance(tc, dict):
+            parts.append(reasoning)
+    for call in message.get("tool_calls") or []:
+        if not isinstance(call, dict):
             continue
-        fn = tc.get("function") or {}
-        if isinstance(fn, dict):
-            total_chars += len(str(fn.get("name") or ""))
-            total_chars += len(str(fn.get("arguments") or ""))
-    # 每条消息的固定开销（role/分隔符等）
-    return total_chars // CHARS_PER_TOKEN + 4
+        function = call.get("function") or {}
+        if isinstance(function, dict):
+            parts.append(str(function.get("name") or ""))
+            parts.append(str(function.get("arguments") or ""))
+    return parts
+
+
+def _estimate_message_tokens(message: dict[str, Any]) -> int:
+    """单条消息的 token 粗估：正文 + 回传的思考 + tool_calls 的参数 JSON。
+
+    两件必须算进去的东西：
+
+    - **思考**（reasoning_content / reasoning）：thinking 模式下它会跟着 assistant 消息一起
+      回传给 provider（见 _messages_for_request 与 _reasoning_echo），是这份请求真实占用的
+      一部分。漏掉它，纯本地估算就系统性偏低（实测一条会话 22 万字符的思考被当成免费），而
+      estimated 走锚点法（provider 真实 prompt_tokens + 锚点后新增消息的本地估算）并不偏低
+      ——两套口径对不上，压缩的"保留段"判定就被带歪。
+    - **中文按多字节折算**（见 _chars_to_tokens）：一刀切按 /4 算，中文内容会再低两三倍，
+      保留段预算就形同虚设——按这个偏小的单位量预算，实际留下来的历史远超预算。
+    """
+    ascii_chars = 0
+    multibyte_chars = 0
+    for part in _message_text_parts(message):
+        part_ascii = _printable_ascii_chars(part)
+        ascii_chars += part_ascii
+        multibyte_chars += len(part) - part_ascii
+    return _chars_to_tokens(ascii_chars, multibyte_chars) + MESSAGE_OVERHEAD_TOKENS
 
 
 # 工具参数里"含密钥"的键：emit 成事件/写日志前换成占位。模型自己仍能传真实值
@@ -2348,15 +2396,36 @@ def _assistant_parts(acc: dict[str, Any] | None) -> list[dict[str, Any]]:
     return parts
 
 
-def _estimate_usage_tokens(messages: list[dict[str, Any]], anchor: int = 0, anchored: int = 0) -> int:
-    """估算一段历史占用的 token 数（供压缩判断与界面用量指示共用）。
+_TOOLS_OVERHEAD_CACHE: dict[str, int] = {}
 
-    用法锚定法：有上一次响应的 prompt_tokens 作锚点时，只对锚点之后
-    新增的消息按字符数估算；没有锚点就整体估算。不引入 tokenizer 依赖。
+
+def _tools_overhead_tokens(tools: Any) -> int:
+    """请求里 tools schema 的固定开销（token 粗估）。
+
+    它不在 messages 里，却每次都随请求发出去——本地估算只算 messages 的话，界面上的"用量"
+    和日志里的"压缩后大小"会比真实 prompt_tokens 小一截（实测差约 9k），看着就像"估算不准"。
+    schema 是常量，按 JSON 串缓存，不必每回合重新序列化。
+    """
+    schema = json.dumps(tools, ensure_ascii=False)
+    cached = _TOOLS_OVERHEAD_CACHE.get(schema)
+    if cached is None:
+        cached = _estimate_text_tokens(schema)
+        _TOOLS_OVERHEAD_CACHE[schema] = cached
+    return cached
+
+
+def _estimate_usage_tokens(
+    messages: list[dict[str, Any]], anchor: int = 0, anchored: int = 0, overhead: int = 0
+) -> int:
+    """估算一次请求占用的 token 数（供压缩判断与界面用量指示共用）。
+
+    用法锚定法：有上一次响应的 prompt_tokens 作锚点时，只对锚点之后新增的消息按字符估算
+    ——锚点里已经含了 system/tools 那部分静态开销，不能再加一遍；没有锚点就整体估算，
+    这时要把 tools schema 的固定开销（overhead）算上，否则整体偏低约 9k。
     """
     if anchor > 0 and 0 <= anchored <= len(messages):
         return anchor + sum(_estimate_message_tokens(m) for m in messages[anchored:])
-    return sum(_estimate_message_tokens(m) for m in messages)
+    return overhead + sum(_estimate_message_tokens(m) for m in messages)
 
 
 def _is_tool_call_anchor(message: dict[str, Any]) -> bool:
@@ -8239,9 +8308,13 @@ class SubAgentRunner:
             window = 0
         return window or DEFAULT_CONTEXT_WINDOW
 
+    def _request_overhead_tokens(self) -> int:
+        """这次请求里 messages 之外的固定开销：它自己那套（收窄过的）tools schema。"""
+        return _tools_overhead_tokens(_subagent_tools(self.agent))
+
     def _estimate_context_tokens(self) -> int:
-        """估算当前历史占用的 token（子代理无 usage 锚点，纯字符估算；见 _estimate_usage_tokens）。"""
-        return _estimate_usage_tokens(self.messages)
+        """估算当前请求占用的 token（子代理无 usage 锚点，纯字符估算；见 _estimate_usage_tokens）。"""
+        return _estimate_usage_tokens(self.messages, overhead=self._request_overhead_tokens())
 
     def _begin_compaction(self) -> bool:
         """历史超窗口就挂上压缩指令，让**下一轮请求**顺带把摘要拿回来（Insert-then-Compress）。
@@ -9639,11 +9712,14 @@ class AgentRuntime:
                 "streaming": runner.live_streaming() if runner is not None else None,
                 # 上下文用量：界面指示器的兜底来源（实时更新走 context_usage 事件）。
                 # 打开页面/刷新时按当前历史现场估算，不依赖历史事件回放。
+                # 口径必须和 _emit_context_usage 一致（都含 tools schema 那笔固定开销），
+                # 否则刷新前后指示器会跳一下。
                 "context": {
                     "used_tokens": _estimate_usage_tokens(
                         state.messages,
                         state.last_prompt_tokens,
                         state.anchored_message_count,
+                        _tools_overhead_tokens(AGENT_TOOLS),
                     ),
                     "window_tokens": state.context_window,
                 },

@@ -13,12 +13,14 @@ import unittest
 
 from GalTransl.Agent import session_store as ss
 from GalTransl.Agent.runtime import (
+    AGENT_TOOLS,
     AgentRunner,
     AgentState,
     DEFAULT_CONTEXT_WINDOW,
     _TRANSIENT_EVENT_TYPES,
     _estimate_usage_tokens,
     _profile_context_window,
+    _tools_overhead_tokens,
 )
 
 
@@ -100,7 +102,8 @@ class ContextUsageStatusTests(unittest.TestCase):
 
         ctx = rt.status(self.project, session["session_id"])["context"]
         self.assertEqual(ctx["window_tokens"], 1_000_000)
-        self.assertEqual(ctx["used_tokens"], 400 // 4 + 4)
+        # 消息估算 + tools schema 的固定开销（它也是这次请求的一部分）
+        self.assertEqual(ctx["used_tokens"], _tools_overhead_tokens(AGENT_TOOLS) + 400 // 4 + 4)
 
     def test_status_without_persisted_window_uses_default(self):
         from GalTransl.Agent.runtime import AgentRuntime
@@ -139,7 +142,11 @@ class ContextUsageEventTests(unittest.TestCase):
         ev = list(state.transient_events)[-1]
         self.assertEqual(ev.type, "context_usage")
         self.assertEqual(ev.data["context"]["window_tokens"], 1_000_000)
-        self.assertEqual(ev.data["context"]["used_tokens"], 400 // 4 + 4)
+        # 与 status() 的快照同口径：都要带上 tools schema 那笔固定开销
+        self.assertEqual(
+            ev.data["context"]["used_tokens"],
+            _tools_overhead_tokens(AGENT_TOOLS) + 400 // 4 + 4,
+        )
 
     def test_event_uses_anchor_for_estimation(self):
         runner, state = self._runner([
