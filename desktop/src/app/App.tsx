@@ -38,6 +38,11 @@ const PromptTemplatesPage = lazy(async () => {
   return { default: mod.PromptTemplatesPage };
 });
 
+const CommonGuidelinesPage = lazy(async () => {
+  const mod = await import('../pages/CommonGuidelinesPage');
+  return { default: mod.CommonGuidelinesPage };
+});
+
 const CommonDictionaryPage = lazy(async () => {
   const mod = await import('../pages/CommonDictionaryPage');
   return { default: mod.CommonDictionaryPage };
@@ -359,6 +364,14 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
                 element={(
                   <Suspense fallback={<RouteLoadingFallback />}>
                     <PromptTemplatesPage />
+                  </Suspense>
+                )}
+              />
+              <Route
+                path="/settings/common-guidelines"
+                element={(
+                  <Suspense fallback={<RouteLoadingFallback />}>
+                    <CommonGuidelinesPage />
                   </Suspense>
                 )}
               />

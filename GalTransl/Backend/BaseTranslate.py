@@ -9,6 +9,7 @@ from threading import Lock
 from GalTransl.COpenAI import COpenAITokenPool, COpenAIToken
 from GalTransl.ConfigHelper import CProxyPool, build_httpx_proxy_kwargs
 from GalTransl import LOGGER, LANG_SUPPORTED, TRANSLATOR_DEFAULT_ENGINE
+from GalTransl import DEFAULT_GUIDELINE_NAME
 from GalTransl.i18n import get_text, GT_LANG
 from GalTransl.ConfigHelper import (
     CProjectConfig,
@@ -110,7 +111,7 @@ class BaseTranslate:
         if val := config.getKey("gpt.translation_guideline"):
             guideline_file = val
         else:
-            guideline_file = "Basic.md"
+            guideline_file = DEFAULT_GUIDELINE_NAME
         self.pj_config.translation_guideline = combine_guidelines(
             load_guideline_file(guideline_file),
             read_project_guideline(config.getProjectDir()),

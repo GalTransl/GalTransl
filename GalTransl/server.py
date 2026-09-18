@@ -16,6 +16,7 @@ from datetime import datetime
 from yaml import safe_load, safe_dump
 
 from GalTransl import TRANSLATOR_SUPPORTED, INPUT_FOLDERNAME, OUTPUT_FOLDERNAME, CACHE_FOLDERNAME, GALTRANSL_VERSION, new_version
+from GalTransl import GUIDELINES_FOLDERNAME, DEFAULT_GUIDELINE_NAME
 from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
 from GalTransl.AppSettings import load_app_settings, save_app_settings
 from GalTransl.Cache import CACHE_TEMP_SUFFIX
@@ -465,9 +466,40 @@ def _list_problem_types() -> list[dict[str, str]]:
     return list(_PROBLEM_TYPE_CATALOG)
 
 
+def _guidelines_dir() -> str:
+    """全局翻译规范目录（程序根目录下的 translation_guidelines）。
+
+    各项目的 config `common.gpt.translation_guideline` 从这里选一份；翻译时它拼在
+    项目规范之前（项目规范冲突时以项目规范为准）。
+    """
+    return os.path.abspath(GUIDELINES_FOLDERNAME)
+
+
+def _is_safe_guideline_filename(name: str) -> bool:
+    """规范文件名校验：单层文件名、不是隐藏文件、后缀只认 .md/.txt。
+
+    挡的是"往自己不该写的地方写"（`../x.md`、子目录、`.gitignore` 这类），所以宁严勿松。
+    """
+    if not name or name != os.path.basename(name) or name.startswith("."):
+        return False
+    return name.lower().endswith((".md", ".txt"))
+
+
+def _normalize_new_guideline_filename(raw: Any) -> str:
+    """新建时的文件名：没写后缀就补 .md（输入「MyStyle」得到「MyStyle.md」）。"""
+    name = str(raw or "").strip()
+    if not name:
+        raise ValueError("filename is required")
+    if not name.lower().endswith((".md", ".txt")):
+        name += ".md"
+    if not _is_safe_guideline_filename(name):
+        raise ValueError("invalid guideline filename")
+    return name
+
+
 def _list_translation_guidelines() -> list[str]:
     """List translation guideline filenames under the ``translation_guidelines`` folder."""
-    guidelines_dir = os.path.abspath("translation_guidelines")
+    guidelines_dir = _guidelines_dir()
     if not os.path.isdir(guidelines_dir):
         return []
     result: list[str] = []
@@ -475,10 +507,114 @@ def _list_translation_guidelines() -> list[str]:
         full = os.path.join(guidelines_dir, name)
         if not os.path.isfile(full):
             continue
-        lower = name.lower()
-        if lower.endswith(".md") or lower.endswith(".txt"):
+        if _is_safe_guideline_filename(name):
             result.append(name)
     return result
+
+
+def _list_translation_guideline_files() -> list[dict[str, Any]]:
+    """规范文件清单（含大小/修改时间/是否内置兜底），给「通用翻译规范管理」页用。"""
+    directory = _guidelines_dir()
+    if not os.path.isdir(directory):
+        return []
+    files: list[dict[str, Any]] = []
+    for name in sorted(os.listdir(directory)):
+        if not _is_safe_guideline_filename(name):
+            continue
+        full = os.path.join(directory, name)
+        if not os.path.isfile(full):
+            continue
+        try:
+            stat = os.stat(full)
+        except OSError:
+            continue
+        files.append({
+            "name": name,
+            "size": int(stat.st_size),
+            "mtime": float(stat.st_mtime),
+            "builtin": name == DEFAULT_GUIDELINE_NAME,
+        })
+    return files
+
+
+# ---- 全局翻译规范的写操作（三个 POST 路由的处理函数）----
+# 都是「(响应体, 状态码)」的纯函数：请求体解析（_read_json_body）留在 handler 里，
+# 逻辑放这儿——do_POST 本身已经很长，再往里堆就超过静态分析的可分析规模了。
+
+
+def _create_guideline_from_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], HTTPStatus]:
+    """新建一份全局规范（重名报 409，**不覆盖**：覆盖该走 save）。"""
+    try:
+        filename = _normalize_new_guideline_filename(payload.get("filename"))
+        directory = _guidelines_dir()
+        os.makedirs(directory, exist_ok=True)
+        file_path = os.path.join(directory, filename)
+        if os.path.exists(file_path):
+            return {"error": f"「{filename}」已存在，换个文件名或直接编辑它"}, HTTPStatus.CONFLICT
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(str(payload.get("content", "")))
+        return {"success": True, "filename": filename, "path": file_path}, HTTPStatus.OK
+    except ValueError as exc:
+        return {"error": str(exc)}, HTTPStatus.BAD_REQUEST
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"failed to create guideline: {exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+def _save_guideline_from_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], HTTPStatus]:
+    """覆写一份全局规范；文件不存在报 404——不做"顺手新建"，文件名打错时宁可报错，
+    也别悄悄多出一份空规范。"""
+    filename = str(payload.get("filename", "")).strip()
+    if not _is_safe_guideline_filename(filename):
+        return {"error": "invalid guideline filename"}, HTTPStatus.BAD_REQUEST
+    file_path = os.path.join(_guidelines_dir(), filename)
+    if not os.path.isfile(file_path):
+        return (
+            {"error": f"guideline not found: {filename}", "available": _list_translation_guidelines()},
+            HTTPStatus.NOT_FOUND,
+        )
+    try:
+        content = str(payload.get("content", ""))
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return {"success": True, "filename": filename, "length": len(content)}, HTTPStatus.OK
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"failed to save guideline: {exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+def _delete_guideline_from_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], HTTPStatus]:
+    """删除一份全局规范。
+
+    兜底那份（DEFAULT_GUIDELINE_NAME）不许删：没配规范的项目翻译时会读它，删掉等于那些
+    项目直接报「读不到规范」。别的文件若正被某个项目配置引用，删了要用户自己去那份配置里
+    换一份——所以前端会二次确认（这里不猜、也不静默改别人的配置）。
+    """
+    filename = str(payload.get("filename", "")).strip()
+    if not _is_safe_guideline_filename(filename):
+        return {"error": "invalid guideline filename"}, HTTPStatus.BAD_REQUEST
+    if filename == DEFAULT_GUIDELINE_NAME:
+        return (
+            {"error": f"「{DEFAULT_GUIDELINE_NAME}」是未配置规范时的兜底文件，不能删除"},
+            HTTPStatus.BAD_REQUEST,
+        )
+    file_path = os.path.join(_guidelines_dir(), filename)
+    if not os.path.isfile(file_path):
+        return (
+            {"error": f"guideline not found: {filename}", "available": _list_translation_guidelines()},
+            HTTPStatus.NOT_FOUND,
+        )
+    try:
+        os.remove(file_path)
+        return {"success": True, "filename": filename}, HTTPStatus.OK
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"failed to delete guideline: {exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+# 全局翻译规范的写路由 → 处理函数（do_POST 里按这张表分派）
+_GUIDELINE_WRITE_ROUTES: dict[str, Any] = {
+    "/api/translation-guidelines/create": _create_guideline_from_payload,
+    "/api/translation-guidelines/save": _save_guideline_from_payload,
+    "/api/translation-guidelines/delete": _delete_guideline_from_payload,
+}
 
 
 def _open_project_file_plugin(project_dir: str, config_file_name: str):
@@ -2729,18 +2865,25 @@ def build_handler(registry: JobRegistry):
                 self._send_json({"problem_types": _list_problem_types()})
                 return
 
+            # GET /api/translation-guidelines — 全局规范清单。
+            # guidelines 是纯文件名数组（项目配置的下拉、Agent 的 read_guideline 一直在用，保持原样）；
+            # files/dir/default 是「通用翻译规范管理」页要的细节（大小/修改时间/哪份是兜底）。
             if path == "/api/translation-guidelines":
-                self._send_json({"guidelines": _list_translation_guidelines()})
+                self._send_json({
+                    "guidelines": _list_translation_guidelines(),
+                    "files": _list_translation_guideline_files(),
+                    "dir": _guidelines_dir(),
+                    "default": DEFAULT_GUIDELINE_NAME,
+                })
                 return
 
             # GET /api/translation-guidelines/:name — 读规范文件内容
-            if path.startswith("/api/translation-guidelines/"):
+            if path.startswith("/api/translation-guidelines/") and self.command == "GET":
                 name = unquote(path.split("/", 3)[-1])
-                if not name or name != os.path.basename(name):
+                if not _is_safe_guideline_filename(name):
                     self._send_json({"error": "invalid guideline name"}, status=HTTPStatus.BAD_REQUEST)
                     return
-                guidelines_dir = os.path.abspath("translation_guidelines")
-                file_path = os.path.join(guidelines_dir, name)
+                file_path = os.path.join(_guidelines_dir(), name)
                 if not os.path.isfile(file_path):
                     self._send_json({"error": f"guideline not found: {name}", "available": _list_translation_guidelines()}, status=HTTPStatus.NOT_FOUND)
                     return
@@ -2837,6 +2980,18 @@ def build_handler(registry: JobRegistry):
                 project_id = parts[3]
                 sub_path = "/" + "/".join(parts[4:]) if len(parts) > 4 else "/"
                 self._route_project_api(project_id, sub_path)
+                return
+
+            # POST /api/translation-guidelines/create | save | delete — 「通用翻译规范管理」页在用。
+            # 逻辑在模块级的 _*_guideline_from_payload 里（do_POST 已经很长，别再往里堆）。
+            if path in _GUIDELINE_WRITE_ROUTES:
+                try:
+                    payload = self._read_json_body()
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                body, status = _GUIDELINE_WRITE_ROUTES[path](payload)
+                self._send_json(body, status=status)
                 return
 
             # POST /api/agent/start — start an agent run for a project

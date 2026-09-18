@@ -774,6 +774,76 @@ export async function fetchTranslationGuidelines() {
   return response.guidelines;
 }
 
+/** 全局翻译规范文件（translation_guidelines 目录里的一份 .md/.txt）。 */
+export type TranslationGuidelineFile = {
+  name: string;
+  size: number;
+  mtime: number;
+  /** 未配置全局规范时的兜底文件（Basic.md）：界面上不允许删 */
+  builtin: boolean;
+};
+
+export type TranslationGuidelineManagerResponse = {
+  /** 纯文件名数组（项目配置下拉、Agent 的 read_guideline 用同一份） */
+  guidelines: string[];
+  files: TranslationGuidelineFile[];
+  /** 规范目录的绝对路径（只用于展示） */
+  dir: string;
+  default: string;
+};
+
+export async function fetchTranslationGuidelineManager() {
+  return apiRequest<TranslationGuidelineManagerResponse>('/api/translation-guidelines');
+}
+
+export async function fetchTranslationGuidelineContent(name: string) {
+  return apiRequest<{ name: string; content: string }>(
+    `/api/translation-guidelines/${encodeURIComponent(name)}`,
+  );
+}
+
+/** 新建一份全局规范。文件名没写后缀时后端会补 .md；重名报错（不会覆盖）。 */
+export async function createTranslationGuideline(payload: { filename: string; content?: string }) {
+  return apiRequest<{ success: boolean; filename: string; path: string }>(
+    '/api/translation-guidelines/create',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** 覆写一份全局规范（文件不存在会报错，不做"顺手新建"）。 */
+export async function saveTranslationGuideline(payload: { filename: string; content: string }) {
+  return apiRequest<{ success: boolean; filename: string; length: number }>(
+    '/api/translation-guidelines/save',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** 删除一份全局规范。兜底文件（Basic.md）后端会拒绝。 */
+export async function deleteTranslationGuideline(payload: { filename: string }) {
+  return apiRequest<{ success: boolean; filename: string }>(
+    '/api/translation-guidelines/delete',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 /** 项目翻译规范：项目目录里的一个文件（不是配置项），翻译时拼在全局规范之后。 */
 export type ProjectGuidelineResponse = {
   filename: string;

@@ -59,6 +59,11 @@ CONFIG_FILENAME = "config.yaml"
 INPUT_FOLDERNAME = "gt_input"
 OUTPUT_FOLDERNAME = "gt_output"
 CACHE_FOLDERNAME = "transl_cache"
+# 全局翻译规范目录名（程序根目录下）：各项目的 common.gpt.translation_guideline 从这里选一份
+GUIDELINES_FOLDERNAME = "translation_guidelines"
+# 项目没配置全局规范时兜底读的那一份（见 Backend/BaseTranslate.py）：
+# 界面上不允许删它，否则那些项目的翻译会直接报"读不到规范"。
+DEFAULT_GUIDELINE_NAME = "Basic.md"
 TRANSLATOR_SUPPORTED = {
     "ForGal-json": {
         "zh-cn": "(openai接口)翻译Gal时使用，json格式输入，兼容性好。",

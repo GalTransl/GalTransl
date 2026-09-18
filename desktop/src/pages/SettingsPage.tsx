@@ -541,6 +541,29 @@ export function SettingsPage() {
         <section className="panel">
           <header className="panel__header">
             <div>
+              <h2>通用翻译规范管理</h2>
+              <p>
+                管理全局翻译规范文件（程序根目录 translation_guidelines/ 下的 .md/.txt）：
+                各项目在配置里选用其中一份，翻译时它拼在项目规范之前。
+              </p>
+            </div>
+          </header>
+          <div className="settings-action-row">
+            <button
+              type="button"
+              className="button button--secondary"
+              onClick={() => {
+                navigate('/settings/common-guidelines');
+              }}
+            >
+              管理通用翻译规范
+            </button>
+          </div>
+        </section>
+
+        <section className="panel">
+          <header className="panel__header">
+            <div>
               <h2>关于</h2>
               <p>查看项目基础信息与版本更新状态。</p>
             </div>
