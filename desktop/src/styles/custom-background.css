@@ -382,3 +382,43 @@
   background: var(--custom-bg-fill-strong) !important;
 }
 
+/* ── Agent 页面 ──
+   Agent 的两个大面板（主对话 cockpit / 会话栏）自带纯白（暗色下是近似不透明的深蓝）渐变，
+   又没在上面的名单里，自定义背景下就是整块挡掉壁纸。这里照首页面板那套换成半透明 + 模糊，
+   各自右上角那团品牌光晕保留——没了它这两块就不是 Agent 页了。
+   同时把输入框 / 「回到最新」/ 下发配置菜单按其它页的 fill-strong 档处理。 */
+
+.app-layout--custom-background .agent-cockpit,
+.app-layout--custom-background .agent-sessions {
+  background:
+    radial-gradient(circle at 92% -18%, rgba(47, 111, 235, 0.14), transparent 46%),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, calc(var(--custom-bg-surface-opacity-resolved) + 0.22)),
+      rgba(248, 251, 255, calc(var(--custom-bg-surface-opacity-resolved) + 0.1))
+    ),
+    rgba(255, 255, 255, var(--custom-bg-surface-opacity-resolved));
+  backdrop-filter: blur(var(--custom-bg-surface-blur));
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur));
+}
+
+.app-layout--custom-background .agent-composer,
+.app-layout--custom-background .agent-jump-bottom,
+.app-layout--custom-background .agent-profile-menu {
+  background: var(--custom-bg-fill-strong) !important;
+  backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+}
+
+:root[data-theme='dark'] .app-layout--custom-background .agent-cockpit,
+:root[data-theme='dark'] .app-layout--custom-background .agent-sessions {
+  background:
+    radial-gradient(circle at 92% -18%, rgba(67, 129, 255, 0.2), transparent 48%),
+    linear-gradient(
+      180deg,
+      rgba(24, 34, 48, calc(var(--custom-bg-surface-opacity-resolved) + 0.24)),
+      rgba(14, 22, 32, calc(var(--custom-bg-surface-opacity-resolved) + 0.12))
+    ),
+    rgba(14, 22, 32, var(--custom-bg-surface-opacity-resolved));
+}
+
