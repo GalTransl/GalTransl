@@ -8,6 +8,8 @@ type ConnectionContextValue = {
   backendUrl: string;
   connectionPhase: ConnectionPhase;
   connectionMessage: string;
+  /** 启动流程进行到第几步（1 起；0 = 未开始）。启动界面据此显示步骤清单。 */
+  connectionStep: number;
   translators: TranslatorOption[];
   loadingInitialData: boolean;
   refreshingJobs: boolean;
@@ -28,6 +30,7 @@ export function useConnection(): ConnectionContextValue {
 export function ConnectionProvider({ children }: { children: React.ReactNode }) {
   const [connectionPhase, setConnectionPhase] = useState<ConnectionPhase>('connecting');
   const [connectionMessage, setConnectionMessage] = useState('正在连接本地翻译后端…');
+  const [connectionStep, setConnectionStep] = useState(1);
   const [translators, setTranslators] = useState<TranslatorOption[]>([]);
   const [loadingInitialData, setLoadingInitialData] = useState(true);
   const [refreshingJobs, setRefreshingJobs] = useState(false);
@@ -60,16 +63,22 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   const loadInitialData = useCallback(async () => {
     setLoadingInitialData(true);
     setConnectionPhase('connecting');
+    setConnectionStep(1);
     setConnectionMessage('正在准备本地翻译服务…');
 
     try {
       setConnectionMessage('正在启动并检查本地翻译服务…');
       await ensureDesktopBackendReady({ timeoutMs: 20_000 });
-      setConnectionMessage('本地翻译服务已就绪，正在加载能力信息…');
-      const nextTranslators = await fetchTranslators();
+
+      setConnectionStep(2);
+      setConnectionMessage('本地翻译服务已就绪，正在加载模板与版本信息…');
+      // 两个请求互不依赖，并行发出去，省掉一次串行往返
+      const [nextTranslators, version] = await Promise.all([fetchTranslators(), fetchVersion()]);
       setTranslators(nextTranslators);
 
-      const version = await fetchVersion();
+      setConnectionStep(3);
+      setConnectionMessage('正在准备主界面…');
+
       const applyWindowTitle = async (title: string) => {
         if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
           try {
@@ -114,13 +123,24 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       backendUrl,
       connectionPhase,
       connectionMessage,
+      connectionStep,
       translators,
       loadingInitialData,
       refreshingJobs,
       loadInitialData,
       loadJobs,
     }),
-    [backendUrl, connectionPhase, connectionMessage, translators, loadingInitialData, refreshingJobs, loadInitialData, loadJobs],
+    [
+      backendUrl,
+      connectionPhase,
+      connectionMessage,
+      connectionStep,
+      translators,
+      loadingInitialData,
+      refreshingJobs,
+      loadInitialData,
+      loadJobs,
+    ],
   );
 
   return <ConnectionContext.Provider value={value}>{children}</ConnectionContext.Provider>;

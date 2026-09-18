@@ -1,14 +1,17 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::path::PathBuf;
 use std::sync::{Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
+
+use tauri::Manager;
 
 const BACKEND_HOST: &str = "127.0.0.1";
 const BACKEND_PORT: u16 = 12333;
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const BACKEND_STARTUP_TIMEOUT_MS: u64 = 20_000;
-const BACKEND_CONNECT_CHECK_INTERVAL_MS: u64 = 250;
+const BACKEND_CONNECT_CHECK_INTERVAL_MS: u64 = 100;
 
 #[allow(dead_code)]
 struct ManagedBackend {
@@ -275,6 +278,37 @@ fn ensure_backend_ready(hide_console: Option<bool>, timeout_ms: Option<u64>) -> 
     ensure_backend_ready_inner(hide_console.unwrap_or(true), timeout_ms)
 }
 
+/// 「隐藏服务端控制台」这个偏好的落盘位置。
+///
+/// 前端把它存在 localStorage 里，Rust 读不到；但预热发生在窗口刚创建、
+/// 网页还没加载完的时候（那时前端还没机会开口），所以让前端每次改这个
+/// 开关时顺手同步一份过来，下次启动的预热就能沿用同样的窗口策略。
+fn console_preference_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join("backend-console-preference"))
+}
+
+fn read_console_preference(app: &tauri::AppHandle) -> bool {
+    console_preference_path(app)
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .map(|value| !matches!(value.trim(), "false" | "0"))
+        .unwrap_or(true)
+}
+
+/// 由前端在切换「隐藏服务端控制台」时调用；写盘失败无所谓（只影响下次预热的窗口策略）。
+#[tauri::command]
+fn set_backend_console_preference(app: tauri::AppHandle, hide_console: bool) {
+    let Some(path) = console_preference_path(&app) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, if hide_console { "true" } else { "false" });
+}
+
 #[cfg(target_os = "windows")]
 /// 使用 Windows Shell API 打开 Explorer：
 /// - 当 path 指向目录时：打开该目录（若已有同路径 Explorer 窗口则复用并激活）
@@ -424,6 +458,7 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             ensure_backend_ready,
+            set_backend_console_preference,
             open_folder,
             reveal_file,
             create_dir,
@@ -435,7 +470,15 @@ fn main() {
                 let _ = shutdown_managed_backend_inner();
             }
         })
-        .setup(|_app| {
+        .setup(|app| {
+            // 预热：窗口还在加载网页时就把 Python 后端拉起来。前端的启动界面
+            // 会一直盖着，等这里跑完再淡出——于是 Python 的启动时间被藏进了
+            // 加载动画里，而不是等网页加载完才开始倒数。
+            // 前端稍后调 ensure_backend_ready 时会直接复用这个进程。
+            let hide_console = read_console_preference(app.handle());
+            std::thread::spawn(move || {
+                let _ = ensure_backend_ready_inner(hide_console, None);
+            });
             Ok(())
         })
         .run(tauri::generate_context!())

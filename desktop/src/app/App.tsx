@@ -16,6 +16,7 @@ import {
 import { Sidebar } from '../components/Sidebar';
 import { RenderErrorBoundary } from '../components/RenderErrorBoundary';
 import { ConnectionProvider } from '../features/connection/ConnectionContext';
+import { BootstrapGate } from '../features/connection/BootstrapGate';
 import { HomePage, addProjectToHistory } from '../pages/HomePage';
 
 const ProjectLayout = lazy(async () => {
@@ -168,13 +169,15 @@ export function App() {
   return (
     <HashRouter>
       <ConnectionProvider>
-        <AppInner
-          openProjects={openProjects}
-          onOpenProject={handleOpenProject}
-          onCloseProject={handleCloseProject}
-          onCloseOtherProjects={handleCloseOtherProjects}
-          onCloseAllProjects={handleCloseAllProjects}
-        />
+        <BootstrapGate>
+          <AppInner
+            openProjects={openProjects}
+            onOpenProject={handleOpenProject}
+            onCloseProject={handleCloseProject}
+            onCloseOtherProjects={handleCloseOtherProjects}
+            onCloseAllProjects={handleCloseAllProjects}
+          />
+        </BootstrapGate>
       </ConnectionProvider>
     </HashRouter>
   );

@@ -1483,6 +1483,11 @@ export function setHideBackendConsolePreference(enabled: boolean): boolean {
   } catch {
     // ignore storage errors
   }
+  // 同步给 Rust：下次启动会在窗口加载网页之前预热后端，那时读不到 localStorage，
+  // 只能靠这份落盘的副本决定要不要给后端开控制台窗口。
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    void invoke('set_backend_console_preference', { hideConsole: normalized }).catch(() => undefined);
+  }
   return normalized;
 }
 
