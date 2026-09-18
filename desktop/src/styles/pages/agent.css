@@ -290,6 +290,39 @@
   opacity: 0.3;
 }
 
+/* 关闭分组：与 ＋ 同款 hover 才现身；hover 用危险色提示这是"收起/移除"而非新建 */
+.agent-sessions__group-close {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.agent-sessions__group-head:hover .agent-sessions__group-close,
+.agent-sessions__group-close:focus-visible {
+  opacity: 1;
+}
+
+.agent-sessions__group-close:hover:not(:disabled) {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.agent-sessions__group-close:disabled {
+  cursor: not-allowed;
+  opacity: 0.3;
+}
+
 .agent-sessions__group-list {
   display: flex;
   flex-direction: column;

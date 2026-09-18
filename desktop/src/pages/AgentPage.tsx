@@ -19,6 +19,7 @@ import {
   loadOpenProjects,
   OPEN_PROJECTS_CHANGE_EVENT,
   readConfigFileName,
+  saveOpenProjects,
   stopAgent,
   startAgent,
   sendAgentMessage,
@@ -69,6 +70,7 @@ import {
   formatPercentDisplay,
   formatSpeed,
 } from './translateRuntimeShared';
+import { removeProjectFromHistory } from './HomePage';
 
 const HISTORY_KEY = 'galtransl-project-history';
 
@@ -1058,6 +1060,7 @@ function AgentSessionSidebar({
   onCreateBlank,
   onCreateInProject,
   onToggleProject,
+  onCloseProjectGroup,
   onSelectSession,
   onDeleteSession,
 }: {
@@ -1074,6 +1077,8 @@ function AgentSessionSidebar({
   onCreateBlank: () => void;
   onCreateInProject: (dir: string) => void;
   onToggleProject: (dir: string) => void;
+  /** 关闭一个项目分组（收起来，不删会话；见 AgentPage.handleCloseProjectGroup） */
+  onCloseProjectGroup: (dir: string) => void;
   onSelectSession: (dir: string, sid: string) => void;
   onDeleteSession: (dir: string, session: AgentSessionMeta) => void;
 }) {
@@ -1115,6 +1120,8 @@ function AgentSessionSidebar({
             const isCollapsed = collapsed[dir] ?? dir !== activeProject;
             const isGroupActive = dir === activeProject;
             const shortDir = shortName(dir);
+            // 该组里还有会话在跑就不给关：收起来就看不到那个蓝灯了，容易忘了它还在跑
+            const hasRunning = list.some((s) => s.status === 'running') || (isGroupActive && activeRunning);
             // 只渲染前 N 条；但当前正在看的那个会话无论多老都要在列表里，
             // 否则侧边栏上看不出"你在哪"，它的状态灯也没地方挂。
             const visible = expandedProjects[dir] ? list : list.slice(0, SESSION_RENDER_LIMIT);
@@ -1132,7 +1139,7 @@ function AgentSessionSidebar({
                     type="button"
                     className="agent-sessions__group-toggle"
                     onClick={() => onToggleProject(dir)}
-                    title={dir}
+                    title={`${dir}\n点击展开 / 收起`}
                   >
                     <span className="agent-sessions__group-icon" aria-hidden>
                       <Icon name={isCollapsed ? 'folder' : 'folder-open'} />
@@ -1141,6 +1148,23 @@ function AgentSessionSidebar({
                     <span className="agent-sessions__group-count">
                       {list.length > 0 ? list.length : ''}
                     </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="agent-sessions__group-close"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseProjectGroup(dir);
+                    }}
+                    disabled={hasRunning}
+                    title={
+                      hasRunning
+                        ? '该项目下有会话正在运行，先停止再关闭'
+                        : `关闭「${shortDir}」分组（会话记录保留，可从首页重新打开）`
+                    }
+                    aria-label={`关闭项目分组 ${shortDir}`}
+                  >
+                    <Icon name="close" />
                   </button>
                   <button
                     type="button"
@@ -2125,6 +2149,54 @@ export function AgentPage() {
     setCollapsedProjects((prev) => ({ ...prev, [dir]: !isCollapsed }));
   }, [collapsedProjects, effectiveProject, sessionsByProject, refreshSessions]);
 
+  /** 项目分组 ✕：把这个项目从 Agent 的会话列里收起（**不删任何会话与文件**）。
+   *
+   *  会话列的项目来自两处（打开的项目 ∪ 首页最近项目），所以"关闭"也分两种，
+   *  各自沿用已有的同款入口，不另造第三种语义：
+   *  - 打开中的项目 → 从"已打开项目"里移除（与左侧栏项目行的 ✕ 同一件事；
+   *    写盘 + 广播 OPEN_PROJECTS_CHANGE_EVENT，App 的侧栏会同步收起）；
+   *  - 只在首页最近项目里的 → 从最近项目里移除（与首页历史行的 ✕ 同一件事）。
+   *  该项目下还有会话在跑时不允许关：收起来就看不到那个蓝灯了，容易忘了它还在跑；
+   *  关掉的是当前正在看的项目时，主区回空态（与顶部 ＋ 同款收尾）。 */
+  const handleCloseProjectGroup = useCallback(
+    (dir: string) => {
+      if (!dir) return;
+      const shortDir = shortName(dir);
+      const list = sessionsByProject[dir] || [];
+      const hasRunning =
+        list.some((s) => s.status === 'running') || (dir === effectiveProjectRef.current && running);
+      if (hasRunning) {
+        setError(`「${shortDir}」下还有会话正在运行，请先停止再关闭。`);
+        return;
+      }
+      const isOpen = loadOpenProjects().includes(dir);
+      const ok = window.confirm(
+        isOpen
+          ? `关闭项目「${shortDir}」？\n它会从左侧项目列表与这里一起收起；会话记录全部保留，随时可以在首页重新打开。`
+          : `把「${shortDir}」从最近项目里移除？\n只移除这条最近记录，会话与项目文件都保留。`,
+      );
+      if (!ok) return;
+      if (isOpen) {
+        saveOpenProjects(loadOpenProjects().filter((d) => d !== dir));
+      } else {
+        removeProjectFromHistory(dir);
+      }
+      if (dir === effectiveProjectRef.current) {
+        void handleCreateBlankSession();
+      }
+      // 分组从列表里消失；会话缓存一并清掉（下次打开该项目时会重新拉）
+      setSessionsByProject((prev) => {
+        if (!(dir in prev)) return prev;
+        const next = { ...prev };
+        delete next[dir];
+        return next;
+      });
+      // 打开列表那条路径靠 OPEN_PROJECTS_CHANGE_EVENT 已同步；历史那条没有事件，这里补一次
+      setProjectOptions(mergeProjects());
+    },
+    [sessionsByProject, running, handleCreateBlankSession, mergeProjects],
+  );
+
   /** 选中某项目下的某会话：停 SSE、清视图，切项目+会话；转录由 session effect 加载。 */
   const handleSelectSession = useCallback(
     (dir: string, sessionId: string) => {
@@ -2415,6 +2487,7 @@ export function AgentPage() {
         onCreateBlank={() => void handleCreateBlankSession()}
         onCreateInProject={(dir) => void handleCreateSessionInProject(dir)}
         onToggleProject={handleToggleProject}
+        onCloseProjectGroup={handleCloseProjectGroup}
         onSelectSession={handleSelectSession}
         onDeleteSession={(dir, s) => void handleDeleteSession(dir, s)}
       />
