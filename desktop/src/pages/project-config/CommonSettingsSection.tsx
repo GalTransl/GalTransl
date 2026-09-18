@@ -15,7 +15,7 @@ const PRIMARY_FIELDS: ConfigFieldDef[] = [
   { key: 'splitFile', label: '文件分割', description: '单文件分片模式：no 关闭，Num 按句数切片，Equal 按份数均分。', type: 'select', options: ['no', 'Num', 'Equal'] },
   { key: 'splitFileNum', label: '分割数量', description: 'Num 模式下表示每片句数；Equal 模式下表示分片总数。', type: 'number', placeholder: '2048' },
   { key: 'gpt.contextNum', label: '上下文句数', description: '每次请求附带的前文句数，常用 8。', type: 'number', placeholder: '8' },
-  { key: 'gpt.translation_guideline', label: '翻译规范', description: '使用的翻译规范文件（位于 translation_guidelines 文件夹）。', type: 'select', options: [] },
+  { key: 'gpt.translation_guideline', label: '翻译规范', description: '全局翻译规范文件（位于 translation_guidelines 文件夹）。本项目的专属规范在左侧「项目规范」页，翻译时会拼在这份之后、冲突时以项目规范为准。', type: 'select', options: [] },
 ];
 
 // ── Advanced (low-frequency) fields ──
@@ -28,8 +28,6 @@ const ADVANCED_FIELDS: ConfigFieldDef[] = [
   { key: 'smartRetry', label: '智能重试', description: '解析失败时自动缩小批次并重置上下文，减少无效重试。', type: 'select', options: ['true', 'false'] },
   { key: 'retranslFail', label: '重翻失败句', description: '启动时是否自动重翻标记为 (Failed) 的句子。', type: 'select', options: ['true', 'false'] },
   { key: 'gpt.enhance_jailbreak', label: '改善拒答', description: '启用后可降低模型拒答概率。', type: 'select', options: ['true', 'false'] },
-  { key: 'gpt.change_prompt', label: '修改Prompt', description: 'no 不改；AdditionalPrompt 追加；OverwritePrompt 覆盖默认提示词。', type: 'select', options: ['no', 'AdditionalPrompt', 'OverwritePrompt'] },
-  { key: 'gpt.prompt_content', label: '额外Prompt内容', description: '仅在"修改Prompt"非 no 时生效。', type: 'text' },
   { key: 'gpt.token_limit', label: 'Token限制(Sakura)', description: 'Sakura 场景下单轮 token 上限；0 表示不限制。', type: 'number', placeholder: '0' },
   { key: 'loggingLevel', label: '日志级别', description: 'debug 详细，info 常规，warning 仅警告。', type: 'select', options: ['debug', 'info', 'warning'] },
   { key: 'saveLog', label: '保存日志到文件', description: '是否将运行日志写入文件。', type: 'select', options: ['true', 'false'] },

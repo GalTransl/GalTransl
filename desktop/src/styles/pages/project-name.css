@@ -68,8 +68,22 @@
 }
 
 .name-page__save-btn--saved::before {
-  content: '✓ ';
-  font-weight: 700;
+  /* 勾用 Icon 集里的图形（--icon-check 是同一 path 的 mask），不再用勾号字符 */
+  content: '';
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 5px;
+  vertical-align: -0.125em;
+  background-color: currentColor;
+  -webkit-mask-image: var(--icon-check);
+  mask-image: var(--icon-check);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
 }
 
 .name-page__save-btn--dirty {
@@ -186,9 +200,18 @@
 }
 
 .name-page__row--translated .name-page__td--jp::after {
-  content: '✓';
-  color: var(--color-success, #22c55e);
-  font-size: 10px;
+  content: '';
+  width: 10px;
+  height: 10px;
+  background-color: var(--color-success, #22c55e);
+  -webkit-mask-image: var(--icon-check);
+  mask-image: var(--icon-check);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
   position: absolute;
   top: 2px;
   left: 2px;

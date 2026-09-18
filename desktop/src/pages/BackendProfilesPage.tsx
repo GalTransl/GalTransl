@@ -1,17 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BackendConfigEditor } from '../components/BackendConfigEditor';
 import { Button } from '../components/Button';
+import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
 import { EmptyState, InlineFeedback, LoadingState } from '../components/page-state';
 import { ProxyConfigEditor } from '../components/ProxyConfigEditor';
 import {
+  AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
+  DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
   createBackendProfile,
   deleteBackendProfile,
   fetchBackendProfiles,
+  getAgentDefaultBackendProfile,
   getDefaultBackendProfile,
+  setAgentDefaultBackendProfile,
   setDefaultBackendProfile } from '../lib/api';
 import { normalizeError } from '../lib/errors';
+import { getProfileMeta } from '../lib/backendProfile';
 
 type ProfileEntry = {
   name: string;
@@ -19,47 +25,6 @@ type ProfileEntry = {
 };
 
 const DEFAULT_BACKEND_CONFIG: Record<string, unknown> = {};
-const MISSING_PROFILE_META = '—';
-
-function getRecord(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-}
-
-function getFirstArrayRecord(value: unknown): Record<string, unknown> | null {
-  if (!Array.isArray(value) || value.length === 0) return null;
-  return getRecord(value[0]);
-}
-
-function getFirstArrayString(value: unknown): string | null {
-  if (!Array.isArray(value) || value.length === 0) return null;
-  return getNonEmptyString(value[0]);
-}
-
-function getNonEmptyString(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function getProfileMeta(config: Record<string, unknown>) {
-  const openAiCompatible = getRecord(config['OpenAI-Compatible']);
-  const firstOpenAiToken = getFirstArrayRecord(openAiCompatible?.tokens);
-  const sakuraLlm = getRecord(config.SakuraLLM);
-  const firstSakuraEndpoint = getFirstArrayString(sakuraLlm?.endpoints);
-
-  const baseUrl =
-    getNonEmptyString(firstOpenAiToken?.endpoint) ??
-    firstSakuraEndpoint ??
-    MISSING_PROFILE_META;
-
-  const modelName =
-    getNonEmptyString(firstOpenAiToken?.modelName) ??
-    getNonEmptyString(sakuraLlm?.rewriteModelName) ??
-    MISSING_PROFILE_META;
-
-  return { baseUrl, modelName };
-}
 
 
 export function BackendProfilesPage() {
@@ -67,6 +32,7 @@ export function BackendProfilesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [defaultProfile, setDefaultProfileState] = useState(getDefaultBackendProfile());
+  const [agentDefaultProfile, setAgentDefaultState] = useState(getAgentDefaultBackendProfile());
 
   // Editor state
   const [editingName, setEditingName] = useState('');
@@ -90,6 +56,7 @@ export function BackendProfilesPage() {
       );
       setProfiles(entries);
       setDefaultProfileState(getDefaultBackendProfile());
+      setAgentDefaultState(getAgentDefaultBackendProfile());
     } catch (err) {
       setError(normalizeError(err, '加载后端配置失败'));
     } finally {
@@ -100,6 +67,18 @@ export function BackendProfilesPage() {
   useEffect(() => {
     void loadProfiles();
   }, [loadProfiles]);
+
+  // 默认标签可能从别处改动（将来留口子），监听两个事件保持 badge 实时同步
+  useEffect(() => {
+    const onTranslatorDefault = (e: Event) => setDefaultProfileState((e as CustomEvent<string>).detail || '');
+    const onAgentDefault = (e: Event) => setAgentDefaultState((e as CustomEvent<string>).detail || '');
+    window.addEventListener(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, onTranslatorDefault as EventListener);
+    window.addEventListener(AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, onAgentDefault as EventListener);
+    return () => {
+      window.removeEventListener(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, onTranslatorDefault as EventListener);
+      window.removeEventListener(AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, onAgentDefault as EventListener);
+    };
+  }, []);
 
   const openNewDialog = useCallback(() => {
     setNewProfileName('');
@@ -199,7 +178,7 @@ export function BackendProfilesPage() {
     <div className="backend-profiles-page">
       <PageHeader
         className="backend-profiles-page__header"
-        title="🤖 翻译后端配置"
+        title={<><Icon name="bot" /> 模型设置</>}
         description="管理全局翻译后端配置，可在项目中直接选用，避免每个项目都重复配置。"
         status={
           <>
@@ -238,7 +217,10 @@ export function BackendProfilesPage() {
                       <div className="profile-card__name">
                         {entry.name}
                         {defaultProfile === entry.name && (
-                          <span className="profile-card__badge">默认</span>
+                          <span className="profile-card__badge">翻译器默认</span>
+                        )}
+                        {agentDefaultProfile === entry.name && (
+                          <span className="profile-card__badge profile-card__badge--agent">Agent 默认</span>
                         )}
                       </div>
                       <div className="profile-card__meta">Base URL：{baseUrl}</div>
@@ -253,7 +235,7 @@ export function BackendProfilesPage() {
                             setDefaultProfileState(entry.name);
                           }}
                         >
-                          设为默认
+                          设为翻译器默认
                         </Button>
                       ) : (
                         <Button
@@ -263,7 +245,28 @@ export function BackendProfilesPage() {
                             setDefaultProfileState('');
                           }}
                         >
-                          取消默认
+                          取消翻译器默认
+                        </Button>
+                      )}
+                      {agentDefaultProfile !== entry.name ? (
+                        <Button
+                          variant="secondary"
+                          onClick={() => {
+                            setAgentDefaultBackendProfile(entry.name);
+                            setAgentDefaultState(entry.name);
+                          }}
+                        >
+                          设为 Agent 默认
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="secondary"
+                          onClick={() => {
+                            setAgentDefaultBackendProfile('');
+                            setAgentDefaultState('');
+                          }}
+                        >
+                          取消 Agent 默认
                         </Button>
                       )}
                       <Button

@@ -10,11 +10,14 @@ useful_tools/GalTransl_DumpInjector/config.ini
 useful_tools/GalTransl_DumpInjector/VNTextPatch/names.xml
 *.log
 /.qoder
+/.zcode
 desktop/node_modules/
 desktop/dist/
 desktop/src-tauri/target/
 /plans
 app_settings.json
+# Agent 会话持久化运行时数据（一个项目一个 base64url 子目录）
+/agent_sessions/
 /release/
 /.venv-build/
 /.venv/

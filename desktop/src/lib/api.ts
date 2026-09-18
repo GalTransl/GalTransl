@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 
+import type { PermissionDecision, PermissionMode } from './permissionMode';
+
 const DEFAULT_BACKEND_URL = 'http://127.0.0.1:12333';
 let runtimeBackendBaseUrl: string | null = null;
 
@@ -106,7 +108,7 @@ export type CacheEntry = {
   problem?: string;
   skip_check?: boolean;
   trans_conf?: number;
-  doub_content?: string;
+  proofread_comment?: string;
   unknown_proper_noun?: string;
   // 旧key名兼容字段（读取旧缓存时可能存在）
   pre_jp?: string;
@@ -524,8 +526,11 @@ export async function fetchProjectCache(projectId: string) {
 }
 
 export async function fetchCacheFile(projectId: string, filename: string) {
+  // no-store：缓存文件会被 Agent 的 patch/delete 工具改写，读它必须拿到磁盘上的当前内容。
+  // 后端没给缓存头，浏览器/Electron 的 HTTP 缓存没有可用的过期与校验信息，不让它插手最稳。
   return apiRequest<CacheFileResponse>(
     `/api/projects/${projectId}/cache/${encodeURIComponent(filename)}`,
+    { cache: 'no-store' },
   );
 }
 
@@ -769,6 +774,114 @@ export async function fetchTranslationGuidelines() {
   return response.guidelines;
 }
 
+/** 全局翻译规范文件（translation_guidelines 目录里的一份 .md/.txt）。 */
+export type TranslationGuidelineFile = {
+  name: string;
+  size: number;
+  mtime: number;
+  /** 未配置全局规范时的兜底文件（Basic.md）：界面上不允许删 */
+  builtin: boolean;
+};
+
+export type TranslationGuidelineManagerResponse = {
+  /** 纯文件名数组（项目配置下拉、Agent 的 read_guideline 用同一份） */
+  guidelines: string[];
+  files: TranslationGuidelineFile[];
+  /** 规范目录的绝对路径（只用于展示） */
+  dir: string;
+  default: string;
+};
+
+export async function fetchTranslationGuidelineManager() {
+  return apiRequest<TranslationGuidelineManagerResponse>('/api/translation-guidelines');
+}
+
+export async function fetchTranslationGuidelineContent(name: string) {
+  return apiRequest<{ name: string; content: string }>(
+    `/api/translation-guidelines/${encodeURIComponent(name)}`,
+  );
+}
+
+/** 新建一份全局规范。文件名没写后缀时后端会补 .md；重名报错（不会覆盖）。 */
+export async function createTranslationGuideline(payload: { filename: string; content?: string }) {
+  return apiRequest<{ success: boolean; filename: string; path: string }>(
+    '/api/translation-guidelines/create',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** 覆写一份全局规范（文件不存在会报错，不做"顺手新建"）。 */
+export async function saveTranslationGuideline(payload: { filename: string; content: string }) {
+  return apiRequest<{ success: boolean; filename: string; length: number }>(
+    '/api/translation-guidelines/save',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** 删除一份全局规范。兜底文件（Basic.md）后端会拒绝。 */
+export async function deleteTranslationGuideline(payload: { filename: string }) {
+  return apiRequest<{ success: boolean; filename: string }>(
+    '/api/translation-guidelines/delete',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** 项目翻译规范：项目目录里的一个文件（不是配置项），翻译时拼在全局规范之后。 */
+export type ProjectGuidelineResponse = {
+  filename: string;
+  path: string;
+  exists: boolean;
+  content: string;
+};
+
+export async function fetchProjectGuideline(projectId: string) {
+  return apiRequest<ProjectGuidelineResponse>(`/api/projects/${projectId}/guideline`);
+}
+
+/** 写项目规范。mode：overwrite 覆写 / append 增写 / replace 替换（old_text 需唯一命中）。 */
+export async function saveProjectGuideline(
+  projectId: string,
+  payload: {
+    mode: 'overwrite' | 'append' | 'replace';
+    content?: string;
+    old_text?: string;
+    new_text?: string;
+  },
+) {
+  return apiRequest<{
+    success: boolean;
+    filename: string;
+    path: string;
+    mode: string;
+    created: boolean;
+    length: number;
+  }>(`/api/projects/${projectId}/guideline`, {
+    body: JSON.stringify(payload),
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    method: 'PUT',
+  });
+}
+
 export async function fetchAppSettings() {
   return apiRequest<AppSettings>('/api/app-settings');
 }
@@ -885,7 +998,9 @@ export async function createBackendProfile(name: string, profile: Record<string,
   profiles[trimmedName] = cloneBackendProfile(profile);
   writeBackendProfilesStorage(profiles);
   if (isFirstProfile) {
+    // 首个配置：同时设为翻译器默认 + Agent 默认（两者独立，新装好都给它最省心）
     setDefaultBackendProfile(trimmedName);
+    setAgentDefaultBackendProfile(trimmedName);
   }
   return { success: true, name: trimmedName };
 }
@@ -905,8 +1020,12 @@ export async function deleteBackendProfile(name: string) {
   }
   delete profiles[trimmedName];
   writeBackendProfilesStorage(profiles);
+  // 删配置时：若它是翻译器默认就清翻译器默认、若是 Agent 默认就清 Agent 默认（互不影响）
   if (getDefaultBackendProfile() === trimmedName) {
     setDefaultBackendProfile('');
+  }
+  if (getAgentDefaultBackendProfile() === trimmedName) {
+    setAgentDefaultBackendProfile('');
   }
   return { success: true, name: trimmedName };
 }
@@ -971,6 +1090,72 @@ export const THEME_MODE_CHANGE_EVENT = 'galtransl:theme-mode-change';
 export const CUSTOM_BACKGROUND_CHANGE_EVENT = 'galtransl:custom-background-change';
 export const HIDE_BACKEND_CONSOLE_CHANGE_EVENT = 'galtransl:hide-backend-console-change';
 export const CACHE_BROWSER_FONT_SIZE_CHANGE_EVENT = 'galtransl:cache-browser-font-size-change';
+
+/* ── 已打开项目（open projects）的共享读写 + 广播 ──
+ * 翻译器（App.tsx）和 Agent 页面都用这一套，保证两边的"已打开项目"列表
+ * 始终同步：任一处 addOpenProject 都会写 localStorage 并广播，另一处监听
+ * 后更新自己的 state。单一数据源 = localStorage，单一写入路径 = addOpenProject。 */
+export const OPEN_PROJECTS_KEY = 'galtransl-open-projects';
+export const OPEN_PROJECTS_CHANGE_EVENT = 'galtransl:open-projects-change';
+const CONFIG_FILE_KEY = 'galtransl-config-file';
+
+export function loadOpenProjects(): string[] {
+  try {
+    const raw = localStorage.getItem(OPEN_PROJECTS_KEY);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveOpenProjects(projects: string[]): void {
+  try {
+    localStorage.setItem(OPEN_PROJECTS_KEY, JSON.stringify(projects));
+    window.dispatchEvent(new CustomEvent(OPEN_PROJECTS_CHANGE_EVENT, { detail: projects }));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function persistOpenProjects(projects: string[]): void {
+  // 静默写盘（不广播）：App 在自己 state 变更后调它做持久化，
+  // 避免与 OPEN_PROJECTS_CHANGE 监听器形成自回环。外部写入路径
+  // （addOpenProject）用 saveOpenProjects，会广播通知监听方。
+  try {
+    localStorage.setItem(OPEN_PROJECTS_KEY, JSON.stringify(projects));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function readConfigFileName(projectDir: string): string {
+  try {
+    const map = JSON.parse(localStorage.getItem(CONFIG_FILE_KEY) || '{}');
+    return map[projectDir] || 'config.yaml';
+  } catch {
+    return 'config.yaml';
+  }
+}
+
+export function saveConfigFileName(projectDir: string, configFileName: string): void {
+  try {
+    const map = JSON.parse(localStorage.getItem(CONFIG_FILE_KEY) || '{}');
+    map[projectDir] = configFileName;
+    localStorage.setItem(CONFIG_FILE_KEY, JSON.stringify(map));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+/** 注册一个已打开项目（幂等）。已存在则只刷新其 config 文件名、保持原顺序；
+ *  不存在则前插。写后广播 OPEN_PROJECTS_CHANGE_EVENT，监听方据此同步。 */
+export function addOpenProject(projectDir: string, configFileName = 'config.yaml'): void {
+  if (!projectDir) return;
+  saveConfigFileName(projectDir, configFileName || 'config.yaml');
+  const prev = loadOpenProjects();
+  if (prev.includes(projectDir)) return;
+  saveOpenProjects([projectDir, ...prev]);
+}
 
 const dirtyProjectConfigDirs = new Set<string>();
 
@@ -1083,6 +1268,37 @@ export function setDefaultBackendProfile(name: string) {
       localStorage.removeItem(DEFAULT_BACKEND_PROFILE_KEY);
     }
     window.dispatchEvent(new CustomEvent(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, { detail: name }));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+/* ── Agent 默认后端配置（与翻译器默认各自独立） ──
+ * 同一配置可同时是翻译器默认 + Agent 默认，也可只占其一；两者互不影响。
+ * Agent 页用这套；翻译器页继续用上面的 getDefaultBackendProfile（翻译器默认）。 */
+const AGENT_DEFAULT_BACKEND_PROFILE_KEY = 'galtransl-agent-default-backend-profile';
+
+/** Custom event dispatched when the Agent default backend profile changes. */
+export const AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT = 'galtransl:agent-default-backend-profile-change';
+
+/** Get the Agent default backend profile name (independent of translator default). */
+export function getAgentDefaultBackendProfile(): string {
+  try {
+    return localStorage.getItem(AGENT_DEFAULT_BACKEND_PROFILE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+/** Set the Agent default backend profile name. Pass empty to clear. */
+export function setAgentDefaultBackendProfile(name: string) {
+  try {
+    if (name) {
+      localStorage.setItem(AGENT_DEFAULT_BACKEND_PROFILE_KEY, name);
+    } else {
+      localStorage.removeItem(AGENT_DEFAULT_BACKEND_PROFILE_KEY);
+    }
+    window.dispatchEvent(new CustomEvent(AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, { detail: name }));
   } catch {
     // ignore storage errors
   }
@@ -1422,6 +1638,512 @@ export function clearCustomBackgroundPreference(): CustomBackgroundPreference {
     // ignore storage errors
   }
   return cleared;
+}
+
+// ---- Agent API ----
+
+export type AgentEventType =
+  | 'content'
+  | 'content_delta'
+  | 'content_end'
+  | 'reasoning_delta'
+  | 'reasoning_end'
+  | 'user_message'
+  | 'tool_call'
+  | 'tool_result'
+  | 'permission_request'
+  | 'wait_start'
+  | 'wait_tick'
+  | 'wait_end'
+  | 'llm_retry_start'
+  | 'llm_retry_end'
+  | 'compacted'
+  | 'compacting'
+  | 'context_usage'
+  | 'queue'
+  | 'assistant_message'
+  // 子代理（run_subagents）：start/done 持久（重建界面用），中间几条是瞬态的逐步活动/重试
+  | 'subagent_start'
+  | 'subagent_message'
+  | 'subagent_tool_call'
+  | 'subagent_tool_result'
+  | 'subagent_retry'
+  | 'subagent_done'
+  | 'finish'
+  | 'error'
+  | 'stopped'
+  | 'status'
+  | 'close';
+
+/** 已用上下文 / 上下文窗口（token）。used_tokens 为估算值（含系统提示与对话历史）。 */
+export type AgentContextUsage = {
+  used_tokens: number;
+  window_tokens: number;
+};
+
+/** 排队中的用户消息（模型还没看到）：显示在 composer 上方的队列面板里。 */
+export type QueuedMessage = {
+  id: string;
+  text: string;
+};
+
+/**
+ * 助手消息的有序段落（助手消息的 content 模型）。
+ * 思考与正文随消息一起持久化，所以刷新/切会话/重连后仍能重建出卡片；
+ * 流式增量只是实时打字机效果，不是转录的来源。
+ */
+export type AgentMessagePart =
+  | { type: 'reasoning'; text: string }
+  | { type: 'text'; text: string }
+  | { type: 'tool_call'; id?: string; name?: string; arguments?: string };
+
+/** 正在生成的助手消息（进行中）：重连时据此把"那半条消息"照原样补出来。 */
+export type AgentStreamingMessage = {
+  /** 快照覆盖到的事件序号，客户端据此续订 SSE（避免重复补增量） */
+  step: number;
+  parts: AgentMessagePart[];
+};
+
+export type AgentEvent = {
+  type: AgentEventType;
+  step: number;
+  // content
+  content?: string;
+  // content_delta（流式增量）/ content_end（一段流式文本结束）/ reasoning_*（思考流同构）
+  delta?: string;
+  index?: number;
+  length?: number;
+  // user_message
+  message?: string;
+  // tool_call
+  id?: string;
+  name?: string;
+  arguments?: unknown;
+  // tool_result
+  ok?: boolean;
+  result?: unknown;
+  error?: string;
+  duration_ms?: number;
+  // permission_request（写操作执行前请用户批准）
+  tool_call_id?: string;
+  label?: string;
+  risk?: string;
+  mode?: string;
+  timeout_s?: number;
+  // 编辑类工具挂起前的「将要变更」预览（后端只读算出来，结构同工具结果的 changes /
+  // line_diff / deleted_preview）：审批卡据此提前显示 diff，不必等执行完才有。
+  preview?: unknown;
+  // wait_start / wait_tick / wait_end
+  seconds?: number;
+  total_ms?: number;
+  remaining_ms?: number;
+  elapsed_ms?: number;
+  interrupted?: boolean;
+  // compacted（上下文压缩）：tokens_after 是压缩后重建出来的真实历史的估算
+  // （含保留的尾部，所以可能远大于摘要本身）；老会话可能没有这个字段。
+  removed?: number;
+  summary_chars?: number;
+  tokens_before?: number;
+  tokens_after?: number;
+  // llm_retry_start / llm_retry_end（LLM 请求失败自动重试）
+  attempt?: number;
+  max_attempts?: number;
+  delay_ms?: number;
+  code?: string;
+  ts?: number;
+  aborted?: boolean;
+  // finish
+  summary?: string;
+  total_steps?: number;
+  /** 收尾事件专用：后端已安排好 followup 回合，马上又会跑起来（别把运行态打回停止） */
+  followup?: boolean;
+  // context_usage 事件 / status 快照里的上下文用量
+  context?: AgentContextUsage;
+  /** queue 事件 / status 快照：排队中的消息（整份，顺序即发送顺序） */
+  queued?: QueuedMessage[];
+  // assistant_message：助手消息的有序段落（思考/正文/工具调用）
+  parts?: AgentMessagePart[];
+  /** true 表示这是"进行中"的段落快照（由 status().streaming 合成，非持久化事件） */
+  streaming?: boolean;
+  // status
+  status?: string;
+  traceback?: string;
+  reason?: string;
+  started_at?: number;
+  finished_at?: number;
+  goal?: string;
+  // 子代理事件（subagent_*）：id 是本次派发的 id，parent_id 指向发起它的那次工具调用
+  parent_id?: string;
+  agent?: string;
+  file?: string;
+  indexes?: string;
+  brief?: string;
+  model?: string;
+  /** subagent_message：这一轮子代理说了什么 */
+  round?: number;
+  text?: string;
+  /** subagent_done：子代理的收尾报告与统计 */
+  report?: string;
+  turns?: number;
+  tool_calls?: number;
+  /** subagent_done：写了几条校对批注（proofread_comment 的条数） */
+  proofread_comment?: number | number[];
+  /** @deprecated 旧字段名（doubts）：仅用于重放改名之前落盘的旧会话 */
+  doubts?: number | number[];
+};
+
+export type AgentStatus = {
+  status: string;
+  project_dir: string;
+  session_id?: string;
+  title?: string;
+  goal?: string;
+  step: number;
+  started_at?: number;
+  finished_at?: number;
+  error?: string;
+  /** 已用上下文/窗口（界面指示器用；会话为空时 used_tokens 为 0） */
+  context?: AgentContextUsage;
+  /** 排队中的消息（队列面板的数据源；内存态，重启即空） */
+  queued?: QueuedMessage[];
+  /** 正在生成的助手消息（没有进行中的响应时为 null/缺省） */
+  streaming?: AgentStreamingMessage | null;
+  events?: AgentEvent[];
+};
+
+/** A conversation under a project. One project can hold many. */
+export type AgentSession = {
+  session_id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  /** 后端内存里的实时状态：running / awaiting_input / stopped / failed；无状态时为空串。
+   *  侧边栏的状态灯据此显示（running 蓝灯亮着、跑完亮绿灯或橙灯）。 */
+  status?: string;
+};
+
+export type AgentStartPayload = {
+  project_dir: string;
+  config_file_name?: string;
+  backend_profile_data: Record<string, unknown>;
+  goal?: string;
+  /** Omit to let the backend create a fresh session. */
+  session_id?: string;
+} & AgentRequestContext;
+
+/**
+ * Agent 会话要带上的「后端上下文」：配置名＋翻译器那份的配置内容。
+ *
+ * 后端拿不到配置名（配置存在前端 localStorage），而「了解项目」要如实报出
+ * 实际生效的两份后端（本会话在用的 + 翻译任务会用的），所以随 start/message
+ * 一起送过去。地址与密钥不在返回里出现，这里送的是原名与内容。
+ */
+export type AgentBackendContext = {
+  /** 本会话在用的后端配置名（Agent 页选中的那份）。 */
+  backend_profile_name?: string;
+  /** 本会话实际使用的配置内容。token 不落盘，重启后继续历史会话时必须重新随请求提供。 */
+  backend_profile_data?: Record<string, unknown>;
+  /** 翻译任务会用的后端配置名（项目选择 → 否则全局「翻译器默认」）。 */
+  translator_profile_name?: string;
+  translator_profile_data?: Record<string, unknown>;
+};
+
+/** start / message 的请求上下文：后端上下文 + 权限模式（见 lib/permissionMode）。 */
+export type AgentRequestContext = AgentBackendContext & {
+  /** 权限模式：后端据此决定每次工具调用是直接放行还是先请用户批准。 */
+  permission_mode?: PermissionMode;
+};
+
+/** 取「翻译任务会用的后端」：优先项目自己的选择，没有则回落到全局「翻译器默认」。 */
+export function getAgentTranslatorBackendContext(
+  projectDir: string,
+): Pick<AgentBackendContext, 'translator_profile_name' | 'translator_profile_data'> {
+  const { name, profile } = resolveSelectedBackendProfile(projectDir);
+  return {
+    ...(name ? { translator_profile_name: name } : {}),
+    ...(profile ? { translator_profile_data: profile } : {}),
+  };
+}
+
+export async function startAgent(payload: AgentStartPayload) {
+  return apiRequest<AgentStatus>('/api/agent/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * 回答 Agent 的 ask_user 提问（后端那个工具正阻塞着等这一下）。
+ * answers 与提问一一对应：选项数组；null / 空数组 = 跳过该题。
+ * backendContext：与 sendAgentMessage 同一份前端上下文。后端那边如果已经没在等这道题
+ * （卡在提问上时被关了程序），会把这次选择当成一条用户消息另起回合——token 只在
+ * localStorage，必须随请求带上，否则新回合起不来。
+ */
+export async function answerAgentAsk(
+  projectDir: string,
+  answers: Array<string[] | null>,
+  sessionId?: string,
+  backendContext?: Record<string, unknown>,
+) {
+  return apiRequest<{ ok: boolean; answers: Array<string[] | null>; resumed_as_message?: boolean }>(
+    '/api/agent/answer',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_dir: projectDir,
+        session_id: sessionId,
+        answers,
+        ...(backendContext || {}),
+      }),
+    },
+  );
+}
+
+/**
+ * 回答权限确认卡（后端那个工具调用正阻塞着等这一下）。
+ * decision：allow-once 只批这一次 / allow-session 本会话都批这个工具 / deny 拒绝。
+ * reason：拒绝时可选的一句话（"为什么不要"），后端会把它拼进那条工具结果给模型看；
+ * 批准时传了也会被忽略。
+ * backendContext：同 answerAgentAsk——没在等的审批也会被兜底成一条用户消息。
+ */
+export async function answerAgentPermission(
+  projectDir: string,
+  decision: PermissionDecision,
+  sessionId?: string,
+  reason?: string,
+  backendContext?: Record<string, unknown>,
+) {
+  return apiRequest<{ ok: boolean; decision: string; name: string; reason?: string }>(
+    '/api/agent/permission',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_dir: projectDir,
+        session_id: sessionId,
+        decision,
+        reason: reason || undefined,
+        ...(backendContext || {}),
+      }),
+    },
+  );
+}
+
+/**
+ * 改权限模式。回合跑着也能改：后端下一次工具调用就按新档判；如果正好有一张权限卡在等，
+ * 新档本来就会放行它的话会自动放行（相当于替你点了「允许一次」）。
+ * 空闲会话也允许（下次 start/message 照样会带，两边一致）。
+ */
+export async function setAgentPermissionMode(
+  projectDir: string,
+  permissionMode: PermissionMode,
+  sessionId?: string,
+) {
+  return apiRequest<{ ok: boolean; permission_mode: string; session_id: string }>(
+    '/api/agent/permission-mode',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_dir: projectDir,
+        session_id: sessionId,
+        permission_mode: permissionMode,
+      }),
+    },
+  );
+}
+
+/**
+ * Send a user message to the project's agent session. While the agent is
+ * running the message is queued as an interjection; otherwise it starts a
+ * new turn continuing the same conversation.
+ */
+export async function sendAgentMessage(
+  projectDir: string,
+  message: string,
+  sessionId?: string,
+  backendContext?: AgentRequestContext,
+) {
+  return apiRequest<AgentStatus>('/api/agent/message', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      project_dir: projectDir,
+      message,
+      session_id: sessionId,
+      ...backendContext,
+    }),
+  });
+}
+
+/** Stop any running turn and drop the session history. */
+export async function resetAgent(projectDir: string, sessionId?: string) {
+  return apiRequest<AgentStatus>('/api/agent/reset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_dir: projectDir, session_id: sessionId }),
+  });
+}
+
+export async function stopAgent(projectDir: string, sessionId?: string) {
+  return apiRequest<AgentStatus>('/api/agent/stop', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_dir: projectDir, session_id: sessionId }),
+  });
+}
+
+/** 删掉一条排队消息（模型还没看到的那条）。 */
+export async function deleteAgentQueued(projectDir: string, id: string, sessionId?: string) {
+  return apiRequest<AgentStatus>('/api/agent/queue/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_dir: projectDir, id, session_id: sessionId }),
+  });
+}
+
+/** 就地改一条排队消息的文本（位置不变）。 */
+export async function updateAgentQueued(
+  projectDir: string,
+  id: string,
+  message: string,
+  sessionId?: string,
+) {
+  return apiRequest<AgentStatus>('/api/agent/queue/update', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_dir: projectDir, id, message, session_id: sessionId }),
+  });
+}
+
+/** 「立即」：打断当前回合，把这条排队消息马上发出去。 */
+export async function sendAgentQueuedNow(projectDir: string, id: string, sessionId?: string) {
+  return apiRequest<AgentStatus>('/api/agent/queue/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_dir: projectDir, id, session_id: sessionId }),
+  });
+}
+
+export async function fetchAgentStatus(projectDir: string, sessionId?: string) {
+  const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : '';
+  return apiRequest<AgentStatus>(
+    `/api/agent/status?project_dir=${encodeURIComponent(projectDir)}${sid}`,
+  );
+}
+
+/** List all conversation sessions belonging to a project. */
+export async function listAgentSessions(projectDir: string) {
+  const res = await apiRequest<{ sessions: AgentSession[] }>(
+    `/api/agent/sessions?project_dir=${encodeURIComponent(projectDir)}`,
+  );
+  return res.sessions || [];
+}
+
+/**
+ * 回放某会话的已提交转录（后端从会话日志读，不受内存事件窗口限制）。
+ * 这是界面重建转录的权威历史来源；status().events 只当补充。
+ */
+export async function fetchAgentTranscript(projectDir: string, sessionId?: string, limit?: number) {
+  const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : '';
+  const lim = limit ? `&limit=${limit}` : '';
+  const res = await apiRequest<{ events: AgentEvent[] }>(
+    `/api/agent/transcript?project_dir=${encodeURIComponent(projectDir)}${sid}${lim}`,
+  );
+  return res.events || [];
+}
+
+/** Create an empty session (no turn started). Title defaults to 占位「新会话」，
+ * 首条消息发出后由后端改成这条消息的内容（见 startAgent 的 goal）。 */
+export async function createAgentSession(projectDir: string, title?: string) {
+  return apiRequest<AgentSession>('/api/agent/sessions/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_dir: projectDir, title }),
+  });
+}
+
+/** Delete a session and its persisted history. */
+export async function deleteAgentSession(projectDir: string, sessionId: string) {
+  return apiRequest<{ status: string; session_id: string }>('/api/agent/sessions/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_dir: projectDir, session_id: sessionId }),
+  });
+}
+
+/**
+ * Subscribe to an agent's SSE event stream. Calls `onEvent` for every agent
+ * event (content / tool_call / tool_result / finish / error / stopped / status / close).
+ * `afterStep`: skip replayed events with step <= afterStep (resume without duplicates).
+ * Returns an abort function that closes the stream.
+ */
+export function subscribeAgentStream(
+  projectDir: string,
+  onEvent: (event: AgentEvent) => void,
+  onError?: (err: Error) => void,
+  afterStep?: number,
+  sessionId?: string,
+): () => void {
+  const baseUrl = getBackendBaseUrl();
+  const url =
+    `${baseUrl}/api/agent/stream?project_dir=${encodeURIComponent(projectDir)}` +
+    (typeof afterStep === 'number' ? `&after_step=${afterStep}` : '') +
+    (sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : '');
+  const controller = new AbortController();
+
+  (async () => {
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: { Accept: 'text/event-stream' },
+      });
+      if (!response.ok || !response.body) {
+        throw new Error(`agent stream 请求失败：${response.status}`);
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // SSE frames separated by "\n\n"
+        let sep: number;
+        while ((sep = buffer.indexOf('\n\n')) >= 0) {
+          const frame = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          parseAgentFrame(frame, onEvent);
+        }
+      }
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      onError?.(err instanceof Error ? err : new Error(String(err)));
+    }
+  })();
+
+  return () => controller.abort();
+}
+
+function parseAgentFrame(frame: string, onEvent: (event: AgentEvent) => void) {
+  // frame format: "event: agent\ndata: {...}"
+  const lines = frame.split('\n');
+  let dataLine = '';
+  for (const line of lines) {
+    if (line.startsWith('data:')) {
+      dataLine = line.slice(5).trim();
+    }
+  }
+  if (!dataLine) return;
+  try {
+    const payload = JSON.parse(dataLine) as AgentEvent;
+    onEvent(payload);
+  } catch {
+    // ignore malformed frame
+  }
 }
 
 // ---- Internal ----

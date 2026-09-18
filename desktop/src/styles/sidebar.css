@@ -65,10 +65,15 @@
 .sidebar__top-nav {
   padding: var(--space-3) 0 var(--space-1);
   flex-shrink: 0;
+  /* 与下面的项目列表分开：上面是固定入口（首页 / Agent），下面是可滚动的项目。
+     线自己只留 space-1：导航项自带 12px 内边距，加起来就是「文字到线 16px」，
+     与头部那条线（logo 下方 16px）同一种呼吸感，线不额外撑一圈空白。 */
+  border-bottom: 1px solid var(--color-line);
 }
 
 .sidebar__nav {
   flex: 1;
+  /* 与上下两条线各留 space-1（导航项/项目行自带内边距，见 .sidebar__top-nav 注释） */
   padding: var(--space-1) 0;
   display: flex;
   flex-direction: column;
@@ -135,6 +140,49 @@
 .sidebar__project-config-notice-dot {
   top: 50%;
   transform: translateY(-50%);
+}
+
+/* ── 「翻译工作台」正在跑任务的呼吸蓝点（与 Agent 页「运行中」同款） ── */
+.sidebar__project-child-running-dot,
+.sidebar__nav-running-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  pointer-events: none;
+  animation: sidebar-running-pulse 1.1s ease-in-out infinite;
+}
+
+/* 展开态：跟在「翻译工作台」文字后面靠右，与配置未保存红点同位 */
+.sidebar__project-child-running-dot {
+  flex: 0 0 7px;
+  margin-left: auto;
+}
+
+/* 收起态 60px 窄栏：贴在导航项右上角（与 .sidebar__nav-notice-dot 同几何） */
+.sidebar__nav-running-dot {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+}
+
+@keyframes sidebar-running-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar__project-child-running-dot,
+  .sidebar__nav-running-dot {
+    animation: none;
+    opacity: 1;
+  }
 }
 
 .sidebar__nav-item:hover {
@@ -285,7 +333,9 @@
   height: 22px;
   border: none;
   border-radius: 6px;
-  background: var(--color-surface-strong);
+  /* 透明的关闭按钮：默认不铺底色（以前是白色圆角块，压在行尾很显眼）。
+     悬停时才给一点淡红底（见下），保留"这是个能点的按钮"的可读性。 */
+  background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
   font-size: 11px;
@@ -554,7 +604,9 @@
 }
 
 .sidebar__bottom-nav {
-  padding: var(--space-3) 0;
+  /* 上方 space-1 与顶部分割线对齐（两面都是"文字到线 16px"）；下方保留 space-3，
+     那是与底部按钮那条线之间的距离 */
+  padding: var(--space-1) 0 var(--space-3);
   display: flex;
   flex-direction: column;
   gap: var(--space-1);

@@ -3,6 +3,7 @@ import type { ProjectPageContext } from '../components/ProjectLayout';
 import { Button } from '../components/Button';
 import { CustomSelect } from '../components/CustomSelect';
 import { PageHeader } from '../components/PageHeader';
+import { Icon } from '../components/Icon';
 import { Panel } from '../components/Panel';
 import { EmptyState, InlineFeedback, LoadingState } from '../components/page-state';
 import {
@@ -779,7 +780,7 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
                           onClick={() => handleDeleteRow(originalIndex)}
                           title="删除此行"
                         >
-                          ✕
+                          <Icon name="close" />
                         </button>
                       </td>
                     </tr>

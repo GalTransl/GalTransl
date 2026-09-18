@@ -1,0 +1,167 @@
+/* ── Common Guidelines Page（设置 → 通用翻译规范管理） ──
+   与「项目翻译规范」区块同一套编辑口径（等宽编辑器、dirty 状态、Ctrl+S），
+   这里多一层"多文件"的选/建/删。 */
+
+.common-guidelines-page {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.common-guidelines-page__header {
+  margin-bottom: var(--space-7);
+}
+
+.common-guidelines-page__content {
+  display: grid;
+  gap: var(--space-6);
+}
+
+.common-guidelines-page__dir {
+  margin-bottom: var(--space-4);
+  font-size: 12px;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.common-guidelines-page__dir code,
+.common-guidelines-page__tip code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--color-neutral-soft);
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+.common-guidelines-page__select .custom-select {
+  width: min(320px, 82vw);
+}
+
+.common-guidelines-page__select .custom-select .custom-select__trigger {
+  min-height: 36px;
+  padding: 0 var(--space-2);
+  font-size: 13px;
+}
+
+.common-guidelines-page__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.common-guidelines-page__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-4) 0 var(--space-3);
+}
+
+.common-guidelines-page__editor {
+  width: 100%;
+  min-height: 400px;
+  padding: 12px 14px;
+  resize: vertical;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+  /* 规范是 markdown 手写文本，等宽字体对齐缩进/列表更好读 */
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.common-guidelines-page__editor:hover {
+  border-color: rgba(47, 111, 235, 0.28);
+}
+
+.common-guidelines-page__editor:focus {
+  outline: none;
+  border-color: rgba(47, 111, 235, 0.65);
+  box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);
+}
+
+.common-guidelines-page__editor::placeholder {
+  color: rgba(100, 116, 139, 0.88);
+}
+
+.common-guidelines-page__foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.common-guidelines-page__status {
+  color: var(--color-success, #16a34a);
+}
+
+.common-guidelines-page__status.is-dirty {
+  color: var(--color-warning, #b45309);
+}
+
+.common-guidelines-page__create {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px dashed var(--color-line);
+}
+
+.common-guidelines-page__create-field {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.common-guidelines-page__create-field input {
+  width: min(260px, 70vw);
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.common-guidelines-page__create-field input:focus {
+  outline: none;
+  border-color: rgba(47, 111, 235, 0.65);
+  box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.12);
+}
+
+.common-guidelines-page__create-tip {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.common-guidelines-page__error {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-control);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  font-size: 12.5px;
+}
+
+.common-guidelines-page__feedback {
+  margin-top: var(--space-3);
+  font-size: 12.5px;
+  color: var(--color-success);
+}
+
+.common-guidelines-page__tip {
+  margin-top: var(--space-2);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}

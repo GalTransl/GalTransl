@@ -8,7 +8,7 @@ import traceback
 from typing import Any
 
 from GalTransl import LOGGER, DEBUG_LEVEL
-from GalTransl.Cache import compact_cache_append_logs
+from GalTransl.Cache import cleanup_stale_cache_temp_files, compact_cache_append_logs
 from GalTransl.ConfigHelper import CProjectConfig
 from GalTransl.Runner import run_galtransl
 from GalTransl.i18n import get_text, GT_LANG
@@ -112,6 +112,9 @@ class JobSpec:
     backend_profile: str = ""
     backend_profile_data: dict[str, Any] = field(default_factory=dict)
     prompt_template_overrides: dict[str, dict[str, str]] = field(default_factory=dict)
+    # 只翻译输入目录下这些文件（相对输入目录的文件名）。空 = 全部文件。
+    # 用于试译：只翻一两个文件验证文风，再全量启动。
+    input_files: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -218,6 +221,15 @@ async def run_job_async(
             if isinstance(system_prompt_override, str) or isinstance(user_prompt_override, str):
                 LOGGER.info("Applied prompt template override from job spec: %s", spec.translator)
 
+        # 只翻译指定文件子集（试译场景）；空列表 = 全部
+        if spec.input_files:
+            valid_files = [f for f in spec.input_files if isinstance(f, str) and f.strip()]
+            if valid_files:
+                cfg.runtime_input_files = [f.strip() for f in valid_files]
+                LOGGER.info("Job restricted to input files: %s", ", ".join(cfg.runtime_input_files))
+            else:
+                spec.input_files = []
+
     except Exception as ex:
         _append_error_log(spec, ex, phase="load_config")
         current_state.status = "failed"
@@ -228,6 +240,14 @@ async def run_job_async(
 
     try:
         update_runtime_status(spec.project_dir, workers_active=0, workers_configured=int(cfg.getKey("workersPerProject") or 1))
+        # 启动前扫掉上次中断留下的 <缓存>.json.tmp：这一刻本项目确定没有写入者
+        # （server 保证一个项目同时只有一个任务），残留只会误导缓存列表。
+        try:
+            stale = cleanup_stale_cache_temp_files(cfg.getCachePath())
+            if stale:
+                LOGGER.info(f"[cache]启动前清理了 {stale} 个残留临时文件（*.json.tmp）")
+        except Exception as ex:  # noqa: BLE001 - 清理失败不该挡住翻译
+            LOGGER.warning(f"[cache]清理残留临时文件失败：{str(ex)}")
         await run_galtransl(cfg, spec.translator, stop_event=stop_event)
         current_state.status = "completed"
         current_state.success = True

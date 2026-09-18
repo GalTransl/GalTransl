@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Icon } from '../Icon';
 
 type LoadingStateProps = {
   title?: string;
@@ -17,7 +18,7 @@ export function LoadingState({
 
   return (
     <div className={classes} role="status" aria-live="polite">
-      <div className="page-state__icon" aria-hidden="true">⏳</div>
+      <div className="page-state__icon" aria-hidden="true"><Icon name="hourglass" /></div>
       <div className="page-state__body">
         <strong>{title}</strong>
         {description ? <span>{description}</span> : null}

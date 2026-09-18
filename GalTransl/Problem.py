@@ -2,6 +2,8 @@
 分析问题
 """
 
+import re
+
 from GalTransl.CSentense import CTransList
 from GalTransl.ConfigHelper import CProjectConfig, CProblemType
 from GalTransl.Utils import (
@@ -153,15 +155,15 @@ def find_problems(
                         problem_list.append(f"语言不通-非GBK：{non_gbk_chars}")
         if CProblemType.缺控制符 in find_type:
             control_list_src = extract_control_substrings(pre_src)
-            control_list_pre_dst = extract_control_substrings(pre_dst)
-            control_list_post_dst = extract_control_substrings(post_dst)
-            lost_list=[]
-            for control_src in control_list_src:
-                if (
-                    control_src not in control_list_pre_dst
-                    and control_src not in control_list_post_dst
-                ):
-                    lost_list.append(control_src)
+            # 用「子串包含」而不是「token 精确相等」判断是否保留：extract_control_substrings
+            # 是按 ASCII 连续段切词的，源文 `[石浦城跡/いしうらじょうあと]`（括号内是日文，
+            # 非 ASCII）切出 ['[', '/', ']']，译文 `[石浦城迹/shipuchengji]`（括号内是罗马字，
+            # `]` 又在允许字符集里）会把它们并成一个 token `/shipuchengji]`——精确比较就会
+            # 误报「缺控制符：/ ]」。真正的控制符（如 `<color=red>`）丢没丢，子串包含同样判得出来。
+            lost_list = [
+                control_src for control_src in control_list_src
+                if control_src not in pre_dst and control_src not in post_dst
+            ]
             if lost_list:
                 problem_list.append(f"缺控制符：{' '.join(lost_list)}")
         if CProblemType.独白男他 in find_type:
@@ -180,4 +182,17 @@ def find_problems(
             problem_list.append("翻译失败")
 
         if problem_list:
-            tran.problem += ", ".join(problem_list)
+            # tran.problem 可能已经有内容：失败批次会先把「翻译失败」写进去（见 BaseTranslate
+            # 的 _merge_problem_message）。以前的 `+=` 只在新串内部有分隔符、与已有内容之间没有，
+            # 于是会黏成「翻译失败残留日文：…」。这里带 ", " 合并，并按问题项去重
+            #（「翻译失败」两边都会加），且不改写已有文本。
+            existing = {p.strip() for p in re.split(r",\s*", tran.problem) if p.strip()} if tran.problem else set()
+            additions: list[str] = []
+            for item in problem_list:
+                item = item.strip()
+                if item and item not in existing:
+                    existing.add(item)
+                    additions.append(item)
+            if additions:
+                extra = ", ".join(additions)
+                tran.problem = f"{tran.problem}, {extra}" if tran.problem else extra

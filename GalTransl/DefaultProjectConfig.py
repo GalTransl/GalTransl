@@ -5,6 +5,7 @@ backendSpecific:
       - token: sk-example-key1
         endpoint: https://api.deepseek.com # 请求地址，加不加v1都可以
         modelName: deepseek-chat
+        contextWindow: 128000 # 模型上下文窗口(token)，Agent 用它判断何时压缩上下文与用量指示；留空按128000
       - token: sk-example-key2
         endpoint: https://openrouter.ai/api/v1/chat/completions # /chat/completions结尾则不自动补v1
         modelName: deepseek/deepseek-chat-v3-0324:free
@@ -59,16 +60,15 @@ common:
   smartRetry: True # 解析失败时自动缩小批次并重置上下文，减少无效重试。[True/False]
   retranslFail: false # 程序重启时是否自动重翻标记为"(Failed)"的句子。[True/False]
   retranslKey: # 在下方添加需要重翻的关键字，匹配原文/译文/problem 中的子串；留空不重翻。
-    #- "翻译失败" # 启动时重翻命中“翻译失败”的句子
+    - "翻译失败" # 启动时重翻命中“翻译失败”的句子（默认带上：失败句不重翻就一直烂在缓存里）
     #- "残留日文" # 启动时重翻命中“残留日文”的句子
-  problemFilterKey: [] # 按子串过滤问题；匹配的问题不展示，也不触发问题关键字重翻。
+  problemFilterKey: [] # 问题过滤（正则）：每项是一条正则，命中的问题项不展示、不计入统计，也不触发按 problem 的重翻。原则上只过滤小类（如 "^残留日文：♪"），不要整类过滤；按字面过滤需转义特殊字符。
+  problemWhiteList: [] # 问题白名单：按「缓存文件名:index」（如 a.json:12，区间写 a.json:12-15）豁免指定条目，等价于给该条勾选 skip_check。
 
   gpt.contextNum: 8 # 每次请求附带的前文句数；值越大上下文更强、成本更高（常用8）。[0-32]
   # ForGal/ForGal-json/ForNovel
   gpt.translation_guideline: "Basic.md" # 使用的翻译规范文件名（位于translation_guidelines），会影响文风与措辞。
   gpt.enhance_jailbreak: False # 是否启用“抗拒答”增强提示，降低模型拒答概率。[True/False]
-  gpt.change_prompt: "no" # Prompt修改模式：no不改；AdditionalPrompt追加；OverwritePrompt覆盖默认提示词。[no/AdditionalPrompt/OverwritePrompt]
-  gpt.prompt_content: "翻译结果使用文言文" # Prompt自定义内容；仅在change_prompt为AdditionalPrompt/OverwritePrompt时生效。
   # Sakura/GalTransl
   gpt.token_limit: 0 # (Sakura/GalTransl) 单轮token上限；0表示不限制。用于避免上下文溢出。
   # 调试日志

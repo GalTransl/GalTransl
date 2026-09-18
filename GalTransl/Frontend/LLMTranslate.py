@@ -13,7 +13,7 @@
 """
 
 from typing import List, Dict, Any, Optional, Union, Tuple
-from os import makedirs, cpu_count, sep as os_sep,listdir
+from os import makedirs, cpu_count, sep as os_sep,listdir, path as os_path
 from os.path import join as joinpath, exists as isPathExists, dirname
 from venv import logger
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -364,6 +364,18 @@ async def doLLMTranslate(
             )
             return True
         raise RuntimeError(f"{projectConfig.getInputPath()}中没有待翻译的文件")
+
+    # 只翻译指定文件子集（试译/部分重翻场景）。按文件名（basename）匹配，
+    # 兼容嵌套目录；指定了但一个都不存在时报错，避免静默全量翻译。
+    runtime_input_files = getattr(projectConfig, "runtime_input_files", None)
+    if runtime_input_files:
+        wanted = {os_path.basename(f) for f in runtime_input_files}
+        file_list = [f for f in file_list if os_path.basename(f) in wanted]
+        if not file_list:
+            raise RuntimeError(
+                f"指定的输入文件 {sorted(wanted)} 在 {projectConfig.getInputPath()} 中都不存在"
+            )
+        LOGGER.info(f"本次只翻译指定的 {len(file_list)} 个文件: {sorted(os_path.basename(f) for f in file_list)}")
 
     # 按文件名自然排序（处理数字部分）
     import re

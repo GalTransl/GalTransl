@@ -41,11 +41,15 @@ class CSentense:
         self.problem = ""  # 问题记录
         self.skip_check = False  # 跳过问题检查
         self.trans_conf = 0.0  # 翻译可信度 For GPT4
-        self.doub_content = ""  # 用于记录疑问句的内容 For GPT4
+        self.proofread_comment = ""  # 校对批注：校对子代理写下的意见
         self.unknown_proper_noun = ""  # 用于记录未知的专有名词 For GPT4
 
         self.prev_tran: CSentense = None  # 指向上一个tran
         self.next_tran: CSentense = None  # 指向下一个tran
+
+        # 本次查缓存为什么没命中（原因码，见 Cache.MISS_*）；命中或还没查过时为空串。
+        # rebuilda/rebuildr 拿它把失败原因说清楚（哪几句、为什么），正常翻译用不到。
+        self.cache_miss_reason = ""
 
     @property
     def pre_src(self):

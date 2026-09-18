@@ -557,6 +557,12 @@
   flex-shrink: 0;
 }
 
+.cache-card__pill--skip-check {
+  background: var(--color-neutral-soft);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
 .cache-card__pill--speaker {
   /* colors set via inline style from speakerHue() */
   border: 1px solid transparent;

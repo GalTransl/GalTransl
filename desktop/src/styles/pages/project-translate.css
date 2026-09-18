@@ -121,6 +121,8 @@
 
 .project-translate-page__folder-menu-item {
   justify-content: flex-start;
+  /* 全局 .button 已有 6px 的图标/文案间距；这里是清单式菜单行，故意再宽一档 */
+  gap: 8px;
   width: 100%;
   border-radius: calc(var(--radius-control) - 4px);
   transition: background var(--transition-fast);

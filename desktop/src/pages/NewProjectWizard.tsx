@@ -7,6 +7,7 @@ import { Button } from '../components/Button';
 import { CustomSelect } from '../components/CustomSelect';
 import { Panel } from '../components/Panel';
 import { PageHeader } from '../components/PageHeader';
+import { Icon } from '../components/Icon';
 import { InlineFeedback } from '../components/page-state';
 import {
   BACKEND_PROFILES_CHANGE_EVENT,
@@ -294,7 +295,12 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
         setGuidelines(list);
         setTranslationGuideline((prev) => {
           if (prev) return prev;
-          if (list.includes('日译中_增强')) return '日译中_增强';
+          // 默认挑「日译中_增强v2」：先把首选、再退到上一代增强、最后才退到列表首位。
+          // 名字要带 .md——接口给的是文件名，少写扩展名会一个都匹配不上，静默落到 list[0]
+          // （按 Unicode 排序多半是 Basic.md），看起来就像"默认值没生效"。
+          for (const preferred of ['日译中_增强v2.md', '日译中_增强.md']) {
+            if (list.includes(preferred)) return preferred;
+          }
           return list[0] || '';
         });
       })
@@ -426,7 +432,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
           key={i}
           className={`wizard-step${i === currentStep ? ' wizard-step--active' : ''}${i < currentStep ? ' wizard-step--completed' : ''}`}
         >
-          <span className="wizard-step__number">{i < currentStep ? '✓' : i + 1}</span>
+          <span className="wizard-step__number">{i < currentStep ? <Icon name="check" /> : i + 1}</span>
           <span className="wizard-step__label">{label}</span>
         </li>
       ))}
@@ -471,7 +477,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
       </div>
       <div className="wizard-actions">
         <Button disabled={projectCreated || !parentDir || !projectName} onClick={() => void handleCreateProject()}>
-          {projectCreated ? '已创建 ✓' : '创建项目'}
+          {projectCreated ? <>已创建 <Icon name="check" /></> : '创建项目'}
         </Button>
       </div>
     </Panel>
@@ -489,7 +495,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
         onDragLeave={(e) => { e.currentTarget.classList.remove('drop-zone--over'); }}
         onDrop={(e) => void handleFileDrop(e)}
       >
-        <div className="drop-zone__icon">📁</div>
+        <div className="drop-zone__icon"><Icon name="folder" /></div>
         <div className="drop-zone__text">拖放文件到此处导入</div>
       </div>
       <div className="wizard-actions">
@@ -525,8 +531,8 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
         <span className="field__hint">
           {selectedBackend === '__default__'
             ? defaultBackendName
-              ? `当前默认配置为「${defaultBackendName}」，可在「翻译后端配置」页面修改`
-              : '尚未设置默认配置，请在「翻译后端配置」页面设置'
+              ? `当前默认配置为「${defaultBackendName}」，可在「模型设置」页面修改`
+              : '尚未设置默认配置，请在「模型设置」页面设置'
             : selectedBackend
               ? `翻译时将使用全局配置「${selectedBackend}」覆盖项目后端设置`
               : '将忽略全局配置，使用项目自身后端设置'}
@@ -534,7 +540,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
       </div>
       <div className="wizard-tip-card">
         <strong>推荐策略</strong>
-        <span>如果没有翻译后端可以先去翻译后端配置设置中新建。</span>
+        <span>如果没有翻译后端可以先去模型设置中新建。</span>
       </div>
     </Panel>
   );
@@ -637,7 +643,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
       </div>
       <div className="wizard-actions">
         <Button disabled={settingsSaved} onClick={() => void handleSaveSettings()}>
-          {settingsSaved ? '已保存 ✓' : '保存设置'}
+          {settingsSaved ? <>已保存 <Icon name="check" /></> : '保存设置'}
         </Button>
       </div>
     </Panel>

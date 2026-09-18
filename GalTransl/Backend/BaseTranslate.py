@@ -9,6 +9,7 @@ from threading import Lock
 from GalTransl.COpenAI import COpenAITokenPool, COpenAIToken
 from GalTransl.ConfigHelper import CProxyPool, build_httpx_proxy_kwargs
 from GalTransl import LOGGER, LANG_SUPPORTED, TRANSLATOR_DEFAULT_ENGINE
+from GalTransl import DEFAULT_GUIDELINE_NAME
 from GalTransl.i18n import get_text, GT_LANG
 from GalTransl.ConfigHelper import (
     CProjectConfig,
@@ -17,6 +18,7 @@ from GalTransl.CSentense import CSentense, CTransList
 from GalTransl.Cache import save_transCache_to_json
 from GalTransl.Dictionary import CGptDict
 from GalTransl.Utils import load_guideline_file, fix_quotes2
+from GalTransl.ProjectGuideline import combine_guidelines, read_project_guideline
 from openai import RateLimitError, AsyncOpenAI, APIConnectionError, APITimeoutError
 from openai import DefaultAioHttpClient
 from openai._types import NOT_GIVEN
@@ -102,12 +104,18 @@ class BaseTranslate:
         self.eng_type = eng_type
         self.last_file_name = ""
         self.restore_context_mode = config.getKey("gpt.restoreContextMode", True)
-        # 翻译规范
+        # 翻译规范：全局规范（translation_guidelines/ 里选的那份）+ 项目规范
+        # （项目目录里的 translation_guideline.md，可能没有）。两份拼成一段塞进
+        # prompt 的 <translation_guidelines> 段：项目规范在后、冲突时以它为准。
+        # 这里只在翻译器初始化时读一次，所以改完规范要**下一次启动翻译**才生效。
         if val := config.getKey("gpt.translation_guideline"):
             guideline_file = val
         else:
-            guideline_file = "Basic.md"
-        self.pj_config.translation_guideline=load_guideline_file(guideline_file)
+            guideline_file = DEFAULT_GUIDELINE_NAME
+        self.pj_config.translation_guideline = combine_guidelines(
+            load_guideline_file(guideline_file),
+            read_project_guideline(config.getProjectDir()),
+        )
         
         # 保存间隔
         if val := config.getKey("save_steps"):
@@ -302,6 +310,10 @@ class BaseTranslate:
             backend_config.get("maxApiRetries", 6), 6
         )
 
+        # 旧项目的 Prompt 覆盖：gpt.change_prompt / gpt.prompt_content 这对键已下线
+        # （前端不再显示、Agent 读不到也改不了、新项目不再生成），这里只保留兼容：
+        # 老工程配置文件里还留着的话照样生效。新的自定义入口是项目翻译规范
+        # （见 ProjectGuideline / 「项目规范」页 / write_project_guideline 工具）。
         change_prompt = CProjectConfig.getProjectConfig(config)["common"].get(
             "gpt.change_prompt", "no"
         )
@@ -1083,8 +1095,11 @@ class BaseTranslate:
                 api_try_count += 1
                 api_attempts += 1
                 if max_retry_count is not None and api_attempts >= max_retry_count:
+                    # 把最后一次的真实错误带上：调用方（_batch_translate_common / 运行时错误
+                    # 记录）只看得到这一句，不带上原因就还得回上游日志翻为什么
+                    last_error = str(e).strip() or type(e).__name__
                     raise RuntimeError(
-                        f"ask_chatbot reached attempt limit ({max_retry_count})"
+                        f"API请求达到重试上限 ({max_retry_count})，最后一次错误：{last_error}"
                     ) from e
 
                 # gemini no_candidates
@@ -1162,12 +1177,15 @@ class BaseTranslate:
         pass
 
     async def shutdown(self):
-        if self._shutdown_done:
+        # 用 getattr 兜底：子类可以整个覆写 __init__（如 CRebuildTranslate 不持有模型客户端），
+        # 那样基类这套标记就不存在——关闭是收尾动作，不该因为"没跑过基类构造"抛异常。
+        if getattr(self, "_shutdown_done", False):
             return
         self._shutdown_done = True
 
         clients = [client for client, _ in getattr(self, "client_list", [])]
-        clients.extend(getattr(self, "_retired_clients", []))
+        retired_clients = getattr(self, "_retired_clients", [])
+        clients.extend(retired_clients)
         seen_clients: set[int] = set()
         for client in clients:
             if id(client) in seen_clients:
@@ -1200,7 +1218,7 @@ class BaseTranslate:
                             pass
                 except Exception:
                     pass
-        self._retired_clients.clear()
+        retired_clients.clear()
 
     def translate(self, trans_list: CTransList, gptdict=""):
         pass
