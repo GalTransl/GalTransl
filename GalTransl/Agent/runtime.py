@@ -830,9 +830,21 @@ class AgentRunner:
         卡片还原样挂着，用户点提交只会被后端告知"没有在等的问题"。这里补一条 tool_result 事件，
         卡片就此收掉（事件会落盘，刷新/重开也不会再冒出来）。
 
-        同一进程里每条调用只补一次；重启后集合是空的会再补一次，代价只是重复一条事件。
+        同一条调用只补一次。集合记在 runner 上，但重启后 runner 是新的、集合是空的——这时
+        先去落盘事件里认一下"这条是不是上个进程已经收过了"（见 SessionStore.reported_tool_calls）：
+        历史里它永远是残缺的（占位结果只补在请求侧、不写回历史），光看历史分不出"还没来得及收"
+        和"已经收过、事件也落盘了"。不认的话重启后每开一个新回合都会再补一条——而这条会落在
+        新用户消息**之后**，前端找不到原来的工具行，只能新建一段挂在最后，看着像刚刚出错
+        （实际是几轮前的老账）。
         """
-        for item in _dangling_tool_calls(self.state.messages):
+        dangling = _dangling_tool_calls(self.state.messages)
+        if not dangling:
+            return
+        if not self._closed_tool_calls and self._store is not None:
+            self._closed_tool_calls |= self._store.reported_tool_calls(
+                {str(item["id"]) for item in dangling}
+            )
+        for item in dangling:
             call_id = str(item["id"])
             if call_id in self._closed_tool_calls:
                 continue
@@ -9430,6 +9442,11 @@ class AgentRuntime:
                 stop_event = threading.Event()
                 runner.stop_event = stop_event
                 self._stop_events.setdefault(key, {})[sid] = stop_event
+            # 上一轮在工具执行中途退出（进程被杀 / 用户点了停止）会留下"没结果"的卡片：
+            # 先收掉，而且**必须排在 user_message 前面**——反过来的话前端在转录里找不到
+            # 原来的工具行，只能新建一段挂到新消息后面，看着像刚刚出错（同一处说明见
+            # _close_dangling_before_message；那条路径在锁外，这里已经在锁里，直接叫 runner）。
+            runner._close_dangling_tool_calls()
             runner._persist_message({"role": "user", "content": text})
 
             state.status = "running"

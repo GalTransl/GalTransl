@@ -414,6 +414,82 @@ class DanglingToolCallTests(unittest.TestCase):
         )
 
 
+class DanglingToolCallAcrossTurnsTests(unittest.TestCase):
+    """残缺调用要"只补一次"且要补在用户消息**之前**——重启也算同一条。
+
+    回归背景（实测）：那条 ask_user 在历史里永远是残缺的（占位结果只补在请求侧、不写回
+    历史），重启后 runner 换了实例、已收集合是空的，于是每开一个新回合都把它再判一次
+    "这一步没有执行完"；而这条 tool_result 落在 user_message **之后**，前端找不到原来的
+    工具行，只能新建一段挂到最后——用户点「继续」看到的就是这张"刚失败"的旧卡。
+    """
+
+    def setUp(self) -> None:
+        self._root = tempfile.mkdtemp(prefix="agent-dangling-root-")
+        self._orig_root = ss.SESSIONS_ROOT
+        ss.SESSIONS_ROOT = self._root
+        self.project = os.path.join(tempfile.mkdtemp(prefix="agent-dangling-proj-"), "MyGame")
+        os.makedirs(self.project, exist_ok=True)
+        self.sid = ss.create_session(self.project)
+        # 历史停在那次 ask_user 上：tool_calls 有、tool 响应没有（进程就是在这儿被杀的）
+        ss.SessionStore(self.project, self.sid).append_message(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {
+                            "name": "ask_user",
+                            "arguments": json.dumps(
+                                {"questions": [{"question": "用哪种？", "options": ["A", "B"]}]},
+                                ensure_ascii=False,
+                            ),
+                        },
+                    }
+                ],
+            }
+        )
+
+    def tearDown(self) -> None:
+        ss.SESSIONS_ROOT = self._orig_root
+
+    def _restarted_runner(self) -> AgentRunner:
+        """按落盘历史造一个 runner：等价于（重）启动后恢复出来的那份状态。"""
+        state = AgentState(session_id=self.sid, project_dir=self.project)
+        state.messages = ss.SessionStore(self.project, self.sid).load()["messages"]
+        return AgentRunner(state)
+
+    @staticmethod
+    def _results(runner: AgentRunner) -> list:
+        return [event for event in runner.state.events if event.type == "tool_result"]
+
+    def test_restart_does_not_announce_the_same_call_again(self) -> None:
+        first = self._restarted_runner()
+        first._close_dangling_tool_calls()
+        self.assertEqual(len(self._results(first)), 1)  # 第一次收：事件落盘
+
+        again = self._restarted_runner()  # 重启：新 runner、已收集合空的、历史依旧残缺
+        again._close_dangling_tool_calls()
+
+        self.assertEqual(self._results(again), [])  # 认回落盘的那条，不再重复判失败
+
+    def test_stale_card_is_closed_before_the_new_user_message(self) -> None:
+        runtime = AgentRuntime()
+        runner = self._restarted_runner()
+        key = runtime._key(self.project)
+        with runtime._lock:
+            runtime._states.setdefault(key, {})[self.sid] = runner.state
+            runtime._runners.setdefault(key, {})[self.sid] = runner
+            runtime._stop_events.setdefault(key, {})[self.sid] = threading.Event()
+
+        with patch.object(AgentRunner, "run", lambda self: None):  # 不起真回合
+            runtime.message(self.project, "继续", self.sid)
+
+        types = [event["type"] for event in ss.SessionStore(self.project, self.sid).load()["events"]]
+        self.assertLess(types.index("tool_result"), types.index("user_message"))
+
+
 class AutoQuietAutoAnswerTests(unittest.TestCase):
     """「全自动-零打断」：ask_user 不再阻塞等人，后端按每题的推荐项代答。
 

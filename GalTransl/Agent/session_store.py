@@ -273,6 +273,40 @@ class SessionStore:
         return items
 
     # ---- 读取 ----
+    def reported_tool_calls(self, call_ids: set[str]) -> set[str]:
+        """这批工具调用里，哪些**在落盘事件中已经有 tool_result**。
+
+        用来认回"上一个进程已经收过的残缺调用"（见 runtime._close_dangling_tool_calls）。
+        那种调用在消息历史里永远是残缺的——占位结果只补在请求侧、不写回历史——所以光看历史
+        分不出"还没收"和"已经收过、事件也落盘了"。事件里的 tool_result 恰好是权威凭证：
+        它虽然剥掉了 result 大字段（见 _compact_event_for_storage），id 与 error 都在。
+        """
+        if not call_ids:
+            return set()
+        found: set[str] = set()
+        try:
+            with open(self.path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if '"tool_result"' not in line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(rec, dict) or rec.get("t") != "event":
+                        continue
+                    event = rec.get("event")
+                    if not isinstance(event, dict) or event.get("type") != "tool_result":
+                        continue
+                    call_id = str(event.get("id") or "")
+                    if call_id in call_ids:
+                        found.add(call_id)
+                        if found == call_ids:
+                            break
+        except OSError:
+            return found
+        return found
+
     def load(self) -> dict[str, Any]:
         """读回整个会话。文件不存在或全损坏时返回空结构。
 
