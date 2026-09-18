@@ -1806,17 +1806,29 @@ export async function startAgent(payload: AgentStartPayload) {
 /**
  * 回答 Agent 的 ask_user 提问（后端那个工具正阻塞着等这一下）。
  * answers 与提问一一对应：选项数组；null / 空数组 = 跳过该题。
+ * backendContext：与 sendAgentMessage 同一份前端上下文。后端那边如果已经没在等这道题
+ * （卡在提问上时被关了程序），会把这次选择当成一条用户消息另起回合——token 只在
+ * localStorage，必须随请求带上，否则新回合起不来。
  */
 export async function answerAgentAsk(
   projectDir: string,
   answers: Array<string[] | null>,
   sessionId?: string,
+  backendContext?: Record<string, unknown>,
 ) {
-  return apiRequest<{ ok: boolean; answers: Array<string[] | null> }>('/api/agent/answer', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_dir: projectDir, session_id: sessionId, answers }),
-  });
+  return apiRequest<{ ok: boolean; answers: Array<string[] | null>; resumed_as_message?: boolean }>(
+    '/api/agent/answer',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_dir: projectDir,
+        session_id: sessionId,
+        answers,
+        ...(backendContext || {}),
+      }),
+    },
+  );
 }
 
 /**
@@ -1824,12 +1836,14 @@ export async function answerAgentAsk(
  * decision：allow-once 只批这一次 / allow-session 本会话都批这个工具 / deny 拒绝。
  * reason：拒绝时可选的一句话（"为什么不要"），后端会把它拼进那条工具结果给模型看；
  * 批准时传了也会被忽略。
+ * backendContext：同 answerAgentAsk——没在等的审批也会被兜底成一条用户消息。
  */
 export async function answerAgentPermission(
   projectDir: string,
   decision: PermissionDecision,
   sessionId?: string,
   reason?: string,
+  backendContext?: Record<string, unknown>,
 ) {
   return apiRequest<{ ok: boolean; decision: string; name: string; reason?: string }>(
     '/api/agent/permission',
@@ -1841,6 +1855,7 @@ export async function answerAgentPermission(
         session_id: sessionId,
         decision,
         reason: reason || undefined,
+        ...(backendContext || {}),
       }),
     },
   );

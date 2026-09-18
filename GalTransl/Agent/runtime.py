@@ -788,6 +788,9 @@ class AgentRunner:
         self._pending_permission: dict[str, Any] | None = None
         # 会话落盘器：state 里没有 session_id（理论上不该发生）时退化为内存态
         self._store = SessionStore(state.project_dir, state.session_id) if state.session_id else None
+        # 本进程里已经补过失败事件的"没结果的工具调用"（见 _close_dangling_tool_calls）：
+        # 避免每个回合开跑都重复补一遍
+        self._closed_tool_calls: set[str] = set()
 
     # ---- 事件 ----
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
@@ -811,6 +814,32 @@ class AgentRunner:
         self.state.messages.append(message)
         if self._store is not None:
             self._store.append_message(message)
+
+    def _close_dangling_tool_calls(self) -> None:
+        """给"没等到结果"的工具调用补一条失败事件，把界面上那张卡片收掉。
+
+        典型场景：卡在 ask_user / 权限审批上时用户关掉了程序。历史里那个 tool_calls 是残缺的
+        （见 _dangling_tool_calls）——请求侧会给它补占位结果让 provider 收下，但**界面**上那张
+        卡片还原样挂着，用户点提交只会被后端告知"没有在等的问题"。这里补一条 tool_result 事件，
+        卡片就此收掉（事件会落盘，刷新/重开也不会再冒出来）。
+
+        同一进程里每条调用只补一次；重启后集合是空的会再补一次，代价只是重复一条事件。
+        """
+        for item in _dangling_tool_calls(self.state.messages):
+            call_id = str(item["id"])
+            if call_id in self._closed_tool_calls:
+                continue
+            self._closed_tool_calls.add(call_id)
+            self._emit(
+                "tool_result",
+                {
+                    "id": call_id,
+                    "name": str(item["name"]),
+                    "ok": False,
+                    "error": _DANGLING_TOOL_NOTE,
+                    "duration_ms": 0,
+                },
+            )
 
     # ---- 排队消息（界面上的队列面板）----
     def emit_queue(self) -> None:
@@ -900,6 +929,9 @@ class AgentRunner:
         """
         turns = 0  # 本回合真实 LLM 请求次数；state.step 是事件计数（含流式 delta），不代表轮数
         try:
+            # 上一轮在工具执行中途退出（进程被杀/崩溃）时，界面上还挂着"没结果"的卡片：
+            # 先补一条失败事件把它收掉（请求侧的合法性见 _messages_with_tool_placeholders）
+            self._close_dangling_tool_calls()
             self._resolve_llm()
             if not self.state.messages:
                 self._persist_message({"role": "system", "content": _build_system_prompt(self.state)})
@@ -1022,14 +1054,24 @@ class AgentRunner:
 
                 def _fill_tool_placeholders() -> None:
                     """为未执行的工具补占位结果：OpenAI 要求 assistant.tool_calls
-                    后必须紧跟对应的 tool 消息，否则下一回合的请求不合法。"""
+                    后必须紧跟对应的 tool 消息，否则下一回合的请求不合法。
+
+                    顺带补一条失败事件，把界面上那行"没结果"的卡片收掉——它不会再执行了，
+                    留着只会让用户以为还能操作（点了会被后端告知"没有在等的问题"）。
+                    """
                     for tc2 in tool_calls:
-                        if tc2["id"] not in responded:
-                            self._persist_message({
-                                "role": "tool",
-                                "tool_call_id": tc2["id"],
-                                "content": json.dumps({"error": "回合被用户停止", "status": "stopped"}, ensure_ascii=False),
-                            })
+                        if tc2["id"] in responded:
+                            continue
+                        note = "回合被用户停止，这一步没有执行"
+                        self._persist_message({
+                            "role": "tool",
+                            "tool_call_id": tc2["id"],
+                            "content": json.dumps({"error": note, "status": "stopped"}, ensure_ascii=False),
+                        })
+                        self._emit("tool_result", {
+                            "id": tc2["id"], "name": tc2["name"], "ok": False,
+                            "error": note, "duration_ms": 0,
+                        })
 
                 for tc in tool_calls:
                     call_id = tc["id"]
@@ -1355,7 +1397,9 @@ class AgentRunner:
                 if field:
                     break
         messages: list[dict[str, Any]] = []
-        for message in self.state.messages:
+        # 中途退出的回合会留下"有 tool_calls、缺 tool 响应"的残缺历史：补占位结果后再发，
+        # 否则整份请求不合法（provider 直接 400，见 _messages_with_tool_placeholders）
+        for message in _messages_with_tool_placeholders(self.state.messages):
             clean = _strip_internal_fields(message)
             if field and message.get("role") == "assistant" and field not in message:
                 clean = {**clean, field: ""}
@@ -2496,6 +2540,131 @@ def _strip_internal_fields(message: dict[str, Any]) -> dict[str, Any]:
         for key, value in message.items()
         if not (isinstance(key, str) and key.startswith(_INTERNAL_MSG_PREFIX))
     }
+
+
+# ---- 残缺历史（进程在工具执行中途被杀）----
+# 界面与请求两侧同一句话：两边都给用户/模型一个能对上的说法
+_DANGLING_TOOL_NOTE = "这一步没有执行完（应用中途退出，工具结果缺失）"
+
+
+def _dangling_tool_calls(messages: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """找出"assistant 调了工具、却没有对应 tool 响应"的调用（按出现顺序）。
+
+    进程在工具执行中途退出便会留下这种残缺历史——最典型的就是**卡在 ask_user 或权限
+    审批上时用户直接关了程序**：assistant.tool_calls 已经落盘，每个调用的 tool 消息还没写。
+    """
+    dangling: list[dict[str, Any]] = []
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        if message.get("role") != "assistant" or not message.get("tool_calls"):
+            index += 1
+            continue
+        # 这一批 tool 响应一直到哪：中间不能夹别的角色
+        cursor = index + 1
+        answered: set[str] = set()
+        while cursor < len(messages) and messages[cursor].get("role") == "tool":
+            answered.add(str(messages[cursor].get("tool_call_id") or ""))
+            cursor += 1
+        for call in message.get("tool_calls") or []:
+            call_id = str((call or {}).get("id") or "")
+            if not call_id or call_id in answered:
+                continue
+            function = (call or {}).get("function") or {}
+            dangling.append(
+                {
+                    "id": call_id,
+                    "name": str(function.get("name") or ""),
+                    "arguments": str(function.get("arguments") or ""),
+                    # 占位结果该插在哪：这一批 tool 响应之后（保持 tool 消息连续）
+                    "at": cursor,
+                }
+            )
+        index = max(cursor, index + 1)
+    return dangling
+
+
+def _tool_placeholder_message(call_id: str) -> dict[str, Any]:
+    """给残缺调用补的占位 tool 消息。"""
+    return {
+        "role": "tool",
+        "tool_call_id": call_id,
+        "content": json.dumps(
+            {"status": "interrupted", "error": _DANGLING_TOOL_NOTE}, ensure_ascii=False
+        ),
+    }
+
+
+def _messages_with_tool_placeholders(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """补上缺失的 tool 占位响应，返回一份**合法**的消息列表（不动原历史）。
+
+    provider 要求带 tool_calls 的 assistant 后面必须紧跟每个调用的 tool 响应，缺一条整份
+    请求就非法——"重启之后接着聊"的第一句会被 400 挡回来。补在**请求这一侧**、不写回历史：
+    会话是追加式落盘的，往中间插一条会让内存顺序与磁盘顺序对不上（重启重放时又变回残缺）。
+    """
+    dangling = _dangling_tool_calls(messages)
+    if not dangling:
+        return messages
+    merged = list(messages)
+    # 从后往前插：前面的位置不会漂；同一个 assistant 的多个缺失调用插在同一位置，
+    # 倒序插入后顺序与 tool_calls 一致
+    for item in reversed(dangling):
+        merged.insert(min(int(item["at"]), len(merged)), _tool_placeholder_message(str(item["id"])))
+    return merged
+
+
+def _dangling_ask_question_texts(messages: Sequence[dict[str, Any]]) -> list[str]:
+    """从残缺历史里取回最近一次 ask_user 的题目文本（取不回来就返回空表）。"""
+    for item in reversed(_dangling_tool_calls(messages)):
+        if item["name"] != "ask_user":
+            continue
+        try:
+            args = json.loads(item["arguments"] or "{}")
+        except json.JSONDecodeError:
+            return []
+        raw = args.get("questions")
+        if not isinstance(raw, list):
+            return []
+        return [
+            str(q.get("question") or "").strip()
+            for q in raw
+            if isinstance(q, dict) and str(q.get("question") or "").strip()
+        ]
+    return []
+
+
+def _answers_for_text(answers: Any) -> list[list[str] | None]:
+    """HTTP 传来的答案（数组套数组，空/null = 跳过）归一成 _format_ask_answers 要的形状。"""
+    if not isinstance(answers, list):
+        return []
+    picked: list[list[str] | None] = []
+    for item in answers:
+        if isinstance(item, list):
+            values = [str(v).strip() for v in item if str(v).strip()]
+            picked.append(values or None)
+        else:
+            picked.append(None)
+    return picked
+
+
+def _permission_decision_text(decision: str, name: str, reason: str) -> str:
+    """审批卡的选择 → 一条用户消息（审批对应的回合已经没了时用）。"""
+    target = f"「{name}」" if name else "上面那步操作"
+    if decision == "deny":
+        text = f"我不同意执行{target}，这一步别做了。"
+        note = reason.strip()
+        if note:
+            text += f"原因：{note}"
+        return text
+    return f"我同意执行{target}，请继续。"
+
+
+def _resume_context(**kwargs: Any) -> dict[str, Any]:
+    """重启后"接着聊"要重放的前端上下文（token 不落盘，只能由请求带上）。
+
+    字段与 /api/agent/message 同一套；只带非空项——空值让 message() 沿用会话里已有的。
+    """
+    return {key: value for key, value in kwargs.items() if value}
 
 
 def _with_cache_control(message: dict[str, Any]) -> dict[str, Any]:
@@ -9201,37 +9370,162 @@ class AgentRuntime:
             _log(f"Agent 继续回合: session={sid} msg={text[:60]}")
             return self.status(project_dir, sid)
 
-    def answer_ask(self, project_dir: str, session_id: str | None, answers: Any) -> dict[str, Any]:
+    def answer_ask(
+        self,
+        project_dir: str,
+        session_id: str | None,
+        answers: Any,
+        backend_profile_name: str = "",
+        backend_profile_data: dict[str, Any] | None = None,
+        translator_profile_name: str = "",
+        translator_profile_data: dict[str, Any] | None = None,
+        permission_mode: str = "",
+    ) -> dict[str, Any]:
         """把用户对 ask_user 提问的回答送回去，唤醒正在等待的那个回合。
 
-        校验（题数一致、单选不许给多个值）在回合线程里的 resolve_ask 做；这里只
-        负责找到对应的 runner——没有在等待的询问时报 ValueError，界面据此提示。
+        校验（题数一致、单选不许给多个值）在回合线程里的 resolve_ask 做；这里只负责
+        找到对应的 runner。
+
+        **找不到在等的询问时不报错**：最常见的成因是"卡在提问上时用户关了程序再打开"
+        ——后端那个回合已经没了（内存里的 runner 没有了），卡片却还在转录里（前端从落盘
+        事件重建出来的），照直报错等于让用户白选一次。这时把这次选择当成一条**用户消息**
+        接着聊（见 _answer_ask_as_message），行为与用户自己把选择打出来一样。
+
+        重启后这条路上要**另起一个回合**，而 token 只在请求里（内存里的会话状态不落盘），
+        所以前端上下文要随这次答复一起带上来（同 /api/agent/message）。
         """
+        context = _resume_context(
+            backend_profile_name=backend_profile_name,
+            backend_profile_data=backend_profile_data,
+            translator_profile_name=translator_profile_name,
+            translator_profile_data=translator_profile_data,
+            permission_mode=permission_mode,
+        )
         key = self._key(project_dir)
         sid = self._resolve_session_id(project_dir, session_id)
         with self._lock:
             runner = self._runners.get(key, {}).get(sid) if sid else None
-        if runner is None:
-            raise ValueError("该会话没有正在等待回答的问题")
-        return runner.resolve_ask(answers)
+        if runner is not None:
+            try:
+                return runner.resolve_ask(answers)
+            except ValueError:
+                # 没有在等的询问（已作答 / 回合已结束 / 重启后重建的卡片）
+                _log(f"❓ ask_user 没有在等的询问，改为按用户消息继续: session={sid}")
+        else:
+            _log(f"❓ ask_user 对应的回合不在内存里（多半是重启过），改为按用户消息继续: session={sid}")
+        return self._answer_ask_as_message(project_dir, sid, answers, context)
+
+    def _answer_ask_as_message(
+        self, project_dir: str, sid: str | None, answers: Any, context: dict[str, Any]
+    ) -> dict[str, Any]:
+        """没有在等的 ask_user：把这次选择拼成一条用户消息，开新回合继续。
+
+        题目从历史里那次残缺的 ask_user 调用上取回（取不到就用「第 N 题」占位），
+        渲染口径与工具结果一致（见 _format_ask_answers）。
+        """
+        state = self._get_state(project_dir, sid) if sid else None
+        if state is None:
+            raise ValueError("该项目还没有 Agent 会话，请先发送第一条消息启动")
+        self._close_dangling_before_message(project_dir, state)
+        picked = _answers_for_text(answers)
+        questions = [{"question": text} for text in _dangling_ask_question_texts(state.messages)] or [
+            {"question": f"第 {index + 1} 题"} for index in range(len(picked))
+        ]
+        body = _format_ask_answers(questions, picked)
+        status = self.message(project_dir, f"回答上面的提问：\n{body}", sid, **context)
+        return {**status, "ok": True, "answers": answers, "resumed_as_message": True}
+
+    def _close_dangling_before_message(self, project_dir: str, state: AgentState) -> None:
+        """先把界面上那些"没结果"的工具卡片收掉，再发用户消息。
+
+        顺序要紧：user_message 在转录里会另起一段（前端 closeActivity），反过来的话这条
+        tool_result 就找不到原来的工具行、只能新建一段挂到最后面去了。
+        """
+        if not _dangling_tool_calls(state.messages):
+            return
+        self._runner_for_state(project_dir, state)._close_dangling_tool_calls()
+
+    def _runner_for_state(self, project_dir: str, state: AgentState) -> AgentRunner:
+        """取本会话的 runner（没有就建一个）。**不**动 stop_event——这里只是要发事件，
+        真正的回合由随后的 message() 启动（它会换一个新的 stop_event）。"""
+        key = self._key(project_dir)
+        sid = state.session_id
+        with self._lock:
+            runner = self._runners.get(key, {}).get(sid)
+            if runner is None:
+                runner = AgentRunner(state, registry=self)
+                self._runners.setdefault(key, {})[sid] = runner
+        return runner
 
     def answer_permission(
-        self, project_dir: str, session_id: str | None, decision: Any, reason: Any = ""
+        self,
+        project_dir: str,
+        session_id: str | None,
+        decision: Any,
+        reason: Any = "",
+        backend_profile_name: str = "",
+        backend_profile_data: dict[str, Any] | None = None,
+        translator_profile_name: str = "",
+        translator_profile_data: dict[str, Any] | None = None,
+        permission_mode: str = "",
     ) -> dict[str, Any]:
         """把用户对权限审批卡的答复送回去，唤醒正在等待的那个回合。
 
         decision 只有 allow-once / allow-session / deny 三种；reason 是拒绝时可选的
         一句话（随工具结果给模型看）。校验在 resolve_permission 里做，这里只负责找到
-        对应的 runner——没有在等待的审批时报 ValueError（卡片对应的回合已经结束、或这次
-        审批已经答过了，界面据此提示）。
+        对应的 runner。
+
+        与 answer_ask 同一套兜底：**没有在等的审批时不报错**，而是把这次决定当成一条
+        用户消息接着聊（卡片对应的回合已经结束、或重启后只剩一张重建出来的卡片）。
+        前端上下文同理要一起带上来——那条路要另起回合。
         """
+        context = _resume_context(
+            backend_profile_name=backend_profile_name,
+            backend_profile_data=backend_profile_data,
+            translator_profile_name=translator_profile_name,
+            translator_profile_data=translator_profile_data,
+            permission_mode=permission_mode,
+        )
         key = self._key(project_dir)
         sid = self._resolve_session_id(project_dir, session_id)
         with self._lock:
             runner = self._runners.get(key, {}).get(sid) if sid else None
-        if runner is None:
-            raise ValueError("该会话没有正在等待批准的权限请求")
-        return runner.resolve_permission(decision, reason)
+        if runner is not None:
+            try:
+                return runner.resolve_permission(decision, reason)
+            except ValueError:
+                _log(f"🔐 审批没有在等的请求，改为按用户消息继续: session={sid}")
+        else:
+            _log(f"🔐 审批对应的回合不在内存里（多半是重启过），改为按用户消息继续: session={sid}")
+        return self._answer_permission_as_message(project_dir, sid, decision, reason, context)
+
+    def _answer_permission_as_message(
+        self,
+        project_dir: str,
+        sid: str | None,
+        decision: Any,
+        reason: Any,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """没有在等的审批：把这次决定拼成一条用户消息，开新回合继续。"""
+        state = self._get_state(project_dir, sid) if sid else None
+        if state is None:
+            raise ValueError("该项目还没有 Agent 会话，请先发送第一条消息启动")
+        self._close_dangling_before_message(project_dir, state)
+        name = ""
+        for item in reversed(_dangling_tool_calls(state.messages)):
+            name = str(item["name"])
+            break
+        text = _permission_decision_text(str(decision or ""), name, str(reason or ""))
+        status = self.message(project_dir, text, sid, **context)
+        return {
+            **status,
+            "ok": True,
+            "decision": str(decision or ""),
+            "name": name,
+            "reason": str(reason or ""),
+            "resumed_as_message": True,
+        }
 
     def set_permission_mode(
         self, project_dir: str, session_id: str | None, mode: Any

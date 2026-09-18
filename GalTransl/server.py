@@ -2924,7 +2924,27 @@ def build_handler(registry: JobRegistry):
                     if not isinstance(answers, list):
                         self._send_json({"error": "answers must be an array"}, status=HTTPStatus.BAD_REQUEST)
                         return
-                    self._send_json(AGENT_REGISTRY.answer_ask(project_dir, session_id, answers))
+                    # 后端那边可能已经没在等这道题了（卡在提问上时被关了程序）：兜底会把
+                    # 这次选择当成一条用户消息、**另起一个回合**，所以前端上下文（token 只
+                    # 存在前端，不落盘）要一起带上——同 /api/agent/message。
+                    backend_profile_data = payload.get("backend_profile_data")
+                    translator_profile_data = payload.get("translator_profile_data")
+                    self._send_json(AGENT_REGISTRY.answer_ask(
+                        project_dir,
+                        session_id,
+                        answers,
+                        backend_profile_name=str(payload.get("backend_profile_name", "") or ""),
+                        backend_profile_data=(
+                            backend_profile_data if isinstance(backend_profile_data, dict) else None
+                        ),
+                        translator_profile_name=str(payload.get("translator_profile_name", "") or ""),
+                        translator_profile_data=(
+                            translator_profile_data
+                            if isinstance(translator_profile_data, dict)
+                            else None
+                        ),
+                        permission_mode=str(payload.get("permission_mode", "") or ""),
+                    ))
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, status=HTTPStatus.CONFLICT)
                 except Exception as exc:  # noqa: BLE001
@@ -2943,7 +2963,27 @@ def build_handler(registry: JobRegistry):
                     if not project_dir:
                         self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
                         return
-                    self._send_json(AGENT_REGISTRY.answer_permission(project_dir, session_id, decision, reason))
+                    # 同 /api/agent/answer：没在等的审批会被兜底成一条用户消息（另起回合），
+                    # 前端上下文要一起带上。
+                    backend_profile_data = payload.get("backend_profile_data")
+                    translator_profile_data = payload.get("translator_profile_data")
+                    self._send_json(AGENT_REGISTRY.answer_permission(
+                        project_dir,
+                        session_id,
+                        decision,
+                        reason,
+                        backend_profile_name=str(payload.get("backend_profile_name", "") or ""),
+                        backend_profile_data=(
+                            backend_profile_data if isinstance(backend_profile_data, dict) else None
+                        ),
+                        translator_profile_name=str(payload.get("translator_profile_name", "") or ""),
+                        translator_profile_data=(
+                            translator_profile_data
+                            if isinstance(translator_profile_data, dict)
+                            else None
+                        ),
+                        permission_mode=str(payload.get("permission_mode", "") or ""),
+                    ))
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, status=HTTPStatus.CONFLICT)
                 except Exception as exc:  # noqa: BLE001

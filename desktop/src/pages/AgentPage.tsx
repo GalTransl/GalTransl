@@ -48,6 +48,7 @@ import {
   type RuntimeJob,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
+import { notifyNeedsAttention } from '../lib/desktopNotify';
 import {
   PERMISSION_MODE_HINTS,
   PERMISSION_MODE_LABELS,
@@ -2219,8 +2220,30 @@ export function AgentPage() {
     // 提问卡片在转录里，可能落在视口外（用户正翻前面的内容时尤其容易）。新问题一到
     // 就带到最底部：Agent 正卡在这儿等答复，让用户自己发现"要回答"比轻微打断更糟。
     // 钉在输入框上方时不会有这个问题。
-    if (askId) handleJumpToBottom();
+    if (askId) {
+      handleJumpToBottom();
+      // Agent 卡在提问上，用户多半已经切到别的窗口了：弹条系统通知把他叫回来
+      // （窗口在前台就不弹，见 desktopNotify）
+      void notifyNeedsAttention(`ask:${askId}`, 'Agent 需要你的回答', askNotifyBody(pendingAsk));
+    }
   }, [askId, handleJumpToBottom]);
+  // 权限模式：本地存一份（下次打开还是这个档），同时立刻推给后端——跑着也能改，下一次
+  // 工具调用就按新档判。声明在答复回调之前：答复要把它一起带上（见 answerBackendContext）。
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => loadPermissionMode());
+  /** 答复 ask_user / 审批卡时捎带的前端上下文（与 handleSend 同一份）。
+   *  后端那边如果已经没在等这道题（卡片是重启后从落盘事件重建出来的），会把这次答复当成
+   *  一条用户消息、另起一个回合；而 token 只在 localStorage、不落盘，必须随请求带上——
+   *  否则新回合起不来（报 "backend profile ... tokens is empty"）。 */
+  const answerBackendContext = useCallback(() => {
+    const profile = getBackendProfile(backendProfileName);
+    if (!profile) return undefined;
+    return {
+      ...(backendProfileName ? { backend_profile_name: backendProfileName } : {}),
+      backend_profile_data: profile,
+      ...getAgentTranslatorBackendContext(effectiveProject),
+      permission_mode: permissionMode,
+    };
+  }, [backendProfileName, effectiveProject, permissionMode]);
   const handleAskSubmit = useCallback(
     async (answers: Array<string[] | null>) => {
       const target = pendingAskIdRef.current;
@@ -2228,15 +2251,28 @@ export function AgentPage() {
       setAskSubmitting(true);
       setAskError(null);
       try {
-        await answerAgentAsk(effectiveProject, answers, activeSessionRef.current || undefined);
+        await answerAgentAsk(
+          effectiveProject,
+          answers,
+          activeSessionRef.current || undefined,
+          answerBackendContext(),
+        );
         setAnsweredAskId(target);
+        // 后端可能把这次答复当成用户消息另起了一个回合：空闲会话的 SSE 流早在上轮结束时
+        // 就关了，补一次订阅才看得到新回合的事件（否则界面永远停在"等待指令"）。
+        if (!running) {
+          setStatus('running');
+          setRunning(true);
+          startRef.current = Date.now();
+        }
+        subscribeStream(effectiveProject, activeSessionRef.current || undefined);
       } catch (err) {
         setAskError(normalizeError(err, '回答提交失败'));
       } finally {
         setAskSubmitting(false);
       }
     },
-    [effectiveProject],
+    [effectiveProject, running, answerBackendContext, subscribeStream],
   );
   // 正在等用户点批准的权限请求：那条工具调用还没结果（结果一到就说明批过了、拒了或
   // 超时了）。与 pendingAsk 同一套推导——从后往前找最新的那条。
@@ -2264,7 +2300,17 @@ export function AgentPage() {
     setPermissionError(null);
     setPermissionSubmitting(false);
     // 审批卡同样摆在转录里：Agent 正卡在这儿等一个点击，带到最底部
-    if (permissionId) handleJumpToBottom();
+    if (permissionId) {
+      handleJumpToBottom();
+      // 同 ask_user：被权限拦下来时也在后台等着，弹系统通知（前台不弹，见 desktopNotify）
+      const label = pendingPermission?.permission?.label || pendingPermission?.name || '这一步操作';
+      const name = pendingPermission?.name || '';
+      void notifyNeedsAttention(
+        `permission:${permissionId}`,
+        'Agent 等待你的批准',
+        name && name !== label ? `${label}（${name}）需要你确认` : `${label}需要你确认`,
+      );
+    }
   }, [permissionId, handleJumpToBottom]);
   const handlePermissionDecide = useCallback(
     async (decision: PermissionDecision, reason?: string) => {
@@ -2279,20 +2325,26 @@ export function AgentPage() {
           activeSessionRef.current || undefined,
           // 拒绝原因只在拒绝时送（后端也只认拒绝那条）
           decision === 'deny' ? reason : undefined,
+          answerBackendContext(),
         );
         setAnsweredPermissionId(target);
+        // 同 ask_user：没在等的审批会被兜底成一条用户消息、另起回合，补订阅才看得到
+        if (!running) {
+          setStatus('running');
+          setRunning(true);
+          startRef.current = Date.now();
+        }
+        subscribeStream(effectiveProject, activeSessionRef.current || undefined);
       } catch (err) {
         setPermissionError(normalizeError(err, '提交失败'));
       } finally {
         setPermissionSubmitting(false);
       }
     },
-    [effectiveProject],
+    [effectiveProject, running, answerBackendContext, subscribeStream],
   );
 
-  // 权限模式：本地存一份（下次打开还是这个档），同时立刻推给后端——
-  // 跑着也能改，下一次工具调用就按新档判。选择器参考「后端配置」那个 chip：点开是菜单。
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => loadPermissionMode());
+  // 选择器参考「后端配置」那个 chip：点开是菜单。
   const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
   const permissionPickerRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -3222,6 +3274,17 @@ function liveTail(items: ActivityItem[]): string {
 function asArgs(args: unknown): Record<string, unknown> | undefined {
   if (args && typeof args === 'object' && !Array.isArray(args)) return args as Record<string, unknown>;
   return undefined;
+}
+
+/** 系统通知里显示的提问摘要：第一题的内容（多题时带上题数）；拿不到就兜一句。 */
+function askNotifyBody(item: { arguments?: unknown } | null): string {
+  const questions = asArgs(item?.arguments)?.questions;
+  const list = Array.isArray(questions) ? questions : [];
+  const first = list[0] && typeof list[0] === 'object' && !Array.isArray(list[0])
+    ? str((list[0] as Record<string, unknown>).question).trim()
+    : '';
+  const suffix = list.length > 1 ? `（共 ${list.length} 题）` : '';
+  return (first || 'Agent 提了一个问题，需要你选择') + suffix;
 }
 
 function ContentRow({ item, projectDir }: { item: ActivityItem; projectDir: string }) {

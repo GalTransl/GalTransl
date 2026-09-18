@@ -402,6 +402,7 @@ class DispatcherTests(unittest.TestCase):
                 "search_transl_cache",
                 "search_input",
                 "manage_problem_filter",
+                "run_subagents",
             },
         )
         # ISON 渲染层已删：确认没有残留的旧渲染注册表

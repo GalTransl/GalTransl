@@ -160,6 +160,7 @@ class MessagesForRequestTests(unittest.TestCase):
             {"role": "user", "content": "hi"},
             {"role": "assistant", "content": "答"},
             {"role": "assistant", "tool_calls": [{"id": "c1", "type": "function", "function": {}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "{}"},
         ]
         runner = _runner([dict(m) for m in history])
         messages = runner._messages_for_request()

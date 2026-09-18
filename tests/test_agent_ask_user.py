@@ -5,14 +5,20 @@
 - 工具**阻塞**等回答，没有超时；
 - 用户跳过、或回合被停止时，该题以空答案返回——工具本身仍算成功，模型据此继续，
   而不是让整个回合报错；
-- 答案要校验：题数必须一致、单选不许给多个值、trim + 去重。
+- 答案要校验：题数必须一致、单选不许给多个值、trim + 去重；
+- **没有在等的询问时不报错**：进程在提问上被杀（用户关了程序再打开）会留下"有
+  tool_calls、缺 tool 响应"的残缺历史，卡片却还在转录里。这时把用户的选择当成一条
+  用户消息继续（见 AgentRuntime._answer_ask_as_message），并给残缺调用补上占位响应
+  / 失败事件（见 DanglingToolCallTests）。
 """
 
+import json
 import os
 import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 from GalTransl.Agent import session_store as ss
 from GalTransl.Agent.runtime import (
@@ -24,9 +30,12 @@ from GalTransl.Agent.runtime import (
     AgentState,
     AgentToolError,
     _TOOL_HANDLERS,
+    _dangling_tool_calls,
     _format_ask_answers,
+    _messages_with_tool_placeholders,
     _normalize_ask_answers,
     _normalize_ask_questions,
+    _permission_decision_text,
     _tool_ask_user,
 )
 
@@ -253,16 +262,156 @@ class RegistryAnswerAskTests(unittest.TestCase):
         self.assertEqual(holder["answers"], [["A"]])
         self.assertTrue(holder["event"].is_set())
 
-    def test_answer_without_pending_ask_raises(self) -> None:
+    def test_answer_without_pending_ask_resumes_as_a_user_message(self) -> None:
+        """重启后只剩一张重建出来的卡片：这次选择当成用户消息继续，不再报错。"""
+        rt = AgentRuntime()
+        sid = rt.create_session(self.project)["session_id"]
+        # 历史停在一次 ask_user 上（进程就是在这儿被杀掉的）：tool_calls 有、tool 响应没有
+        ss.SessionStore(self.project, sid).append_message(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {
+                            "name": "ask_user",
+                            "arguments": json.dumps(
+                                {"questions": [{"question": "用哪种？", "options": ["A", "B"]}]},
+                                ensure_ascii=False,
+                            ),
+                        },
+                    }
+                ],
+            }
+        )
+
+        with patch.object(AgentRunner, "run", lambda self: None):  # 不起真回合
+            out = rt.answer_ask(
+                self.project, sid, [["A"]], backend_profile_data={"tokens": "t"}
+            )
+
+        self.assertTrue(out["ok"])
+        self.assertTrue(out["resumed_as_message"])
+        # 另起回合要靠请求里的 token（会话状态不落盘）：前端上下文要跟着这次答复过来
+        self.assertEqual(rt._get_state(self.project, sid).backend_profile_data, {"tokens": "t"})
+        messages = ss.SessionStore(self.project, sid).load()["messages"]
+        self.assertEqual(messages[-1]["role"], "user")
+        # 题目从残缺的 ask_user 调用里取回，渲染口径与工具结果一致
+        self.assertIn("用哪种？：A", messages[-1]["content"])
+        # 收卡片的 tool_result 必须排在 user_message 之前：反过来的话前端会把它挂到
+        # 新开的那一段上去（user_message 会另起一段）。用 load() 看落盘顺序——
+        # read_transcript 会把"首条 user_message"提到最前当身份锚点，看不出真实先后。
+        types = [event["type"] for event in ss.SessionStore(self.project, sid).load()["events"]]
+        self.assertLess(types.index("tool_result"), types.index("user_message"))
+
+    def test_answer_on_an_empty_session_still_errors(self) -> None:
+        """会话连一条消息都没有：没有历史可续，照旧报错（前端应先发第一条消息）。"""
         rt = AgentRuntime()
         sid = rt.create_session(self.project)["session_id"]
         with self.assertRaises(ValueError):
             rt.answer_ask(self.project, sid, [["A"]])
 
-    def test_answer_without_runner_raises(self) -> None:
+    def test_answer_without_any_session_errors(self) -> None:
         rt = AgentRuntime()
         with self.assertRaises(ValueError):
             rt.answer_ask(self.project, None, [["A"]])
+
+
+class DanglingToolCallTests(unittest.TestCase):
+    """进程在工具执行中途被杀留下的残缺历史：请求侧补占位、界面侧补失败事件。
+
+    不补的话：请求发给 provider 直接 400（带 tool_calls 的 assistant 后面必须紧跟
+    每个调用的 tool 响应），而界面上那张 ask_user / 审批卡永远挂着、点了就被后端告知
+    "没有在等的问题"。
+    """
+
+    @staticmethod
+    def _runner(messages: list[dict]) -> AgentRunner:
+        state = AgentState()
+        state.session_id = ""  # 不落盘
+        state.messages = list(messages)
+        return AgentRunner(state)
+
+    @staticmethod
+    def _assistant(*call_ids: str) -> dict:
+        return {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": call_id, "type": "function", "function": {"name": "ask_user", "arguments": "{}"}}
+                for call_id in call_ids
+            ],
+        }
+
+    def test_detects_calls_without_a_tool_response(self) -> None:
+        dangling = _dangling_tool_calls([self._assistant("c1")])
+
+        self.assertEqual([item["id"] for item in dangling], ["c1"])
+        self.assertEqual(dangling[0]["name"], "ask_user")
+        self.assertEqual(dangling[0]["at"], 1)  # 占位该插的位置：紧随这条 assistant
+
+    def test_answered_calls_are_not_dangling(self) -> None:
+        messages = [
+            self._assistant("c1"),
+            {"role": "tool", "tool_call_id": "c1", "content": "{}"},
+            {"role": "user", "content": "继续"},
+        ]
+
+        self.assertEqual(_dangling_tool_calls(messages), [])
+        # 没有残缺就原样返回（省一次整份拷贝）
+        self.assertIs(_messages_with_tool_placeholders(messages), messages)
+
+    def test_placeholders_go_after_the_existing_tool_batch(self) -> None:
+        """两个调用只答了一个：占位插在已有 tool 响应之后，保持 tool 消息连续。"""
+        messages = [
+            self._assistant("c1", "c2"),
+            {"role": "tool", "tool_call_id": "c1", "content": "{}"},
+            {"role": "user", "content": "继续"},
+        ]
+
+        patched = _messages_with_tool_placeholders(messages)
+
+        self.assertEqual([m["role"] for m in patched], ["assistant", "tool", "tool", "user"])
+        self.assertEqual(patched[2]["tool_call_id"], "c2")
+        self.assertEqual(len(messages), 3)  # 原历史一份不动（落盘是追加式的）
+
+    def test_messages_for_request_gets_the_placeholder(self) -> None:
+        """发给 provider 的那份必须合法：残缺调用在请求里补上占位 tool 消息。"""
+        runner = self._runner([self._assistant("c1"), {"role": "user", "content": "继续"}])
+
+        messages = runner._messages_for_request()
+
+        self.assertEqual([m["role"] for m in messages], ["assistant", "tool", "user"])
+        self.assertEqual(messages[1]["tool_call_id"], "c1")
+        self.assertEqual(len(runner.state.messages), 2)  # 原历史一份不动
+
+    def test_close_dangling_tool_calls_emits_once(self) -> None:
+        runner = self._runner([self._assistant("c1")])
+
+        runner._close_dangling_tool_calls()
+        runner._close_dangling_tool_calls()  # 同一进程里只补一次
+
+        results = [event for event in runner.state.events if event.type == "tool_result"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].data["id"], "c1")
+        self.assertFalse(results[0].data["ok"])
+        self.assertIn("没有执行完", results[0].data["error"])
+
+    def test_permission_decision_text(self) -> None:
+        self.assertEqual(
+            _permission_decision_text("deny", "start_translation", "现在不要动"),
+            "我不同意执行「start_translation」，这一步别做了。原因：现在不要动",
+        )
+        self.assertEqual(
+            _permission_decision_text("allow-once", "start_translation", ""),
+            "我同意执行「start_translation」，请继续。",
+        )
+        self.assertEqual(
+            _permission_decision_text("allow-once", "", ""),
+            "我同意执行上面那步操作，请继续。",
+        )
 
 
 class AutoQuietAutoAnswerTests(unittest.TestCase):
