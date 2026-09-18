@@ -35,6 +35,7 @@
 @import './styles/components/page-header.css';
 @import './styles/components/stats-grid.css';
 @import './styles/components/startup-splash.css';
+@import './styles/components/update-notice.css';
 
 /* ── 7. Page styles ── */
 @import './styles/pages/home.css';

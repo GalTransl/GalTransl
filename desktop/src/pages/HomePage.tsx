@@ -19,10 +19,10 @@ import {
 } from '../lib/api';
 import { formatTimestamp } from '../lib/format';
 import { normalizeError } from '../lib/errors';
+import { PROJECT_HOMEPAGE, RELEASE_LATEST_URL } from '../lib/externalLink';
 const HISTORY_KEY = 'galtransl-project-history';
 const JOB_MEMORY_KEY = 'galtransl-home-jobs-memory';
 const JOB_CLEARED_KEY = 'galtransl-home-jobs-cleared';
-const PROJECT_HOMEPAGE = 'https://github.com/GalTransl/GalTransl';
 const MIN_REFRESH_SPIN_MS = 420;
 const REFRESH_SPIN_CYCLE_MS = 500;
 
@@ -493,7 +493,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
               {updateAvailable && latestVersion ? (
                 <a
                   className="home-hero__chip home-hero__chip--update"
-                  href={PROJECT_HOMEPAGE + '/releases/latest'}
+                  href={RELEASE_LATEST_URL}
                   target="_blank"
                   rel="noreferrer noopener"
                 >

@@ -34,8 +34,8 @@ import {
   setThemeModePreference,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
+import { PROJECT_HOMEPAGE, RELEASE_LATEST_URL } from '../lib/externalLink';
 
-const PROJECT_HOMEPAGE = 'https://github.com/GalTransl/GalTransl';
 const PROJECT_AUTHOR = 'xd2333';
 
 
@@ -603,7 +603,7 @@ export function SettingsPage() {
                 <span className="settings-about-list__label">更新下载</span>
                 <a
                   className="settings-about-list__value settings-about-list__value--link"
-                  href={PROJECT_HOMEPAGE + '/releases/latest'}
+                  href={RELEASE_LATEST_URL}
                   target="_blank"
                   rel="noreferrer noopener"
                 >

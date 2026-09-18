@@ -455,6 +455,30 @@ export async function fetchVersionCheck() {
   return apiRequest<VersionCheckResponse>('/api/version/check');
 }
 
+/* ── 更新提示的「忽略本次更新」 ──
+ * 存的是被忽略的那个版本号：同一个版本不再弹窗，等更新的版本出现还会再提醒。 */
+const IGNORED_UPDATE_VERSION_KEY = 'galtransl-ignored-update-version';
+
+export function getIgnoredUpdateVersion(): string {
+  try {
+    return localStorage.getItem(IGNORED_UPDATE_VERSION_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setIgnoredUpdateVersion(version: string): void {
+  try {
+    if (version) {
+      localStorage.setItem(IGNORED_UPDATE_VERSION_KEY, version);
+    } else {
+      localStorage.removeItem(IGNORED_UPDATE_VERSION_KEY);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export async function ensureDesktopBackendReady(options?: { hideConsole?: boolean; timeoutMs?: number }) {
   if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window) || !shouldUseManagedDesktopBackend()) {
     return null;

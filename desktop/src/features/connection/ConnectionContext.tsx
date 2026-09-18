@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import type { ConnectionPhase, TranslatorOption } from '../../lib/api';
+import type { ConnectionPhase, TranslatorOption, VersionCheckResponse } from '../../lib/api';
 import { ensureDesktopBackendReady, fetchJobs, fetchTranslators, fetchVersion, fetchVersionCheck } from '../../lib/api';
 import { normalizeError } from '../../lib/errors';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -10,6 +10,8 @@ type ConnectionContextValue = {
   connectionMessage: string;
   /** 启动流程进行到第几步（1 起；0 = 未开始）。启动界面据此显示步骤清单。 */
   connectionStep: number;
+  /** 版本检查结果（检查未回来 / 失败时为 null）；更新提示弹窗据此判断。 */
+  versionInfo: VersionCheckResponse | null;
   translators: TranslatorOption[];
   loadingInitialData: boolean;
   refreshingJobs: boolean;
@@ -31,6 +33,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   const [connectionPhase, setConnectionPhase] = useState<ConnectionPhase>('connecting');
   const [connectionMessage, setConnectionMessage] = useState('正在连接本地翻译后端…');
   const [connectionStep, setConnectionStep] = useState(1);
+  const [versionInfo, setVersionInfo] = useState<VersionCheckResponse | null>(null);
   const [translators, setTranslators] = useState<TranslatorOption[]>([]);
   const [loadingInitialData, setLoadingInitialData] = useState(true);
   const [refreshingJobs, setRefreshingJobs] = useState(false);
@@ -93,8 +96,11 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
 
       await applyWindowTitle(`GalTransl Desktop - v${version}`);
 
+      // 更新检查不阻塞启动（外网请求可能慢）：结果存进 context，
+      // 更新提示弹窗监听它，有新版本时自己弹出来。
       fetchVersionCheck()
         .then(async (result) => {
+          setVersionInfo(result);
           if (!result.update_available) {
             return;
           }
@@ -124,6 +130,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       connectionPhase,
       connectionMessage,
       connectionStep,
+      versionInfo,
       translators,
       loadingInitialData,
       refreshingJobs,
@@ -135,6 +142,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       connectionPhase,
       connectionMessage,
       connectionStep,
+      versionInfo,
       translators,
       loadingInitialData,
       refreshingJobs,

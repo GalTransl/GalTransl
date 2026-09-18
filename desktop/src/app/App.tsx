@@ -17,6 +17,7 @@ import { Sidebar } from '../components/Sidebar';
 import { RenderErrorBoundary } from '../components/RenderErrorBoundary';
 import { ConnectionProvider } from '../features/connection/ConnectionContext';
 import { BootstrapGate } from '../features/connection/BootstrapGate';
+import { UpdateNotice } from '../features/update/UpdateNotice';
 import { HomePage, addProjectToHistory } from '../pages/HomePage';
 
 const ProjectLayout = lazy(async () => {
@@ -405,7 +406,8 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
                 )}
               />
         </Routes>
-      </main>
-    </div>
-  );
-}
+        </main>
+        <UpdateNotice />
+        </div>
+        );
+        }
