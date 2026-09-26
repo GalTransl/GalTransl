@@ -1037,6 +1037,29 @@ function formatDuration(ms: number | undefined): string {
  *  后端返回的列表仍是完整的（分组计数、状态灯都用全量），点「显示其余 N 个」
  *  纯本地展开、不再请求。 */
 const SESSION_RENDER_LIMIT = 60;
+// 事件流意外断开后的自动重连次数（退避 1s、2s、4s… 封顶 10s）
+const STREAM_MAX_RECONNECTS = 5;
+// 流事件批量进 state 的间隔（ms）
+const EVENT_FLUSH_MS = 50;
+
+/** 把一批流事件接到转录末尾；相邻的同类增量（content/reasoning delta）合并成一条，
+ *  拼接顺序不变，所以 buildTimeline 的结果与逐条追加一致，但数组不再按 token 增长。 */
+function appendStreamEvents(prev: AgentEvent[], batch: AgentEvent[]): AgentEvent[] {
+  const next = prev.slice();
+  for (const ev of batch) {
+    const last = next[next.length - 1];
+    if (
+      (ev.type === 'content_delta' || ev.type === 'reasoning_delta') &&
+      last &&
+      last.type === ev.type
+    ) {
+      next[next.length - 1] = { ...last, delta: (last.delta || '') + (ev.delta || '') };
+    } else {
+      next.push(ev);
+    }
+  }
+  return next;
+}
 
 /* ── 顶部空态的推荐提示词 ──
    不是操作按钮：点一下只是把这句话填进输入框（不直接发送），用户还能补两句再发。
@@ -1417,7 +1440,8 @@ export function AgentPage() {
   const backendProfileName = boundBackendProfile || defaultProfileName || getBackendProfileNames()[0] || '';
   // 本地已乐观追加的 user_message 的临时 id 集合，SSE 回放时据此去重，
   // 避免同一条消息渲染两次（发送时本地先显示，后端确认后回放同一条）
-  const localMsgIdsRef = useRef<Set<string>>(new Set());
+  // 本地乐观显示、还等后端确认的用户消息：文本 → 条数（同样的文字连发两条也要一一对上）
+  const localMsgIdsRef = useRef<Map<string, number>>(new Map());
   // 发送流程自身的会话过渡：首条消息 create→start→subscribe 期间
   // activeSessionId 从空变到新会话，会触发会话切换 effect；它的恢复/对账
   // 逻辑会清掉乐观气泡并把 running 打回 false（fetch 先于 startAgent 完成，
@@ -1426,7 +1450,48 @@ export function AgentPage() {
   const sendingRef = useRef(false);
   const sendTransitionRef = useRef<string | null>(null);
 
+  // 权限模式：本地存一份（下次打开还是这个档），同时立刻推给后端——跑着也能改，下一次
+  // 工具调用就按新档判。声明放在最前：handleSend 和答复回调都要把它一起带上（见 answerBackendContext）。
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => loadPermissionMode());
   const abortRef = useRef<(() => void) | null>(null);
+  // 流的代号：每次订阅/关闭都 +1。旧流迟到的回调、排着的重连定时器看到代号变了就作废，
+  // 不会把事件写进（或重连回）已经切走的会话。
+  const streamGenRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  // 流事件先攒一小会儿再批量进 state：流式输出每个 token 一条事件，逐条 setEvents
+  // 会让整段时间线（buildTimeline）按 token 重建。
+  const pendingEventsRef = useRef<AgentEvent[]>([]);
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flushEvents = useCallback(() => {
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    const batch = pendingEventsRef.current;
+    if (!batch.length) return;
+    pendingEventsRef.current = [];
+    setEvents((prev) => appendStreamEvents(prev, batch));
+  }, []);
+  const queueEvent = useCallback(
+    (ev: AgentEvent) => {
+      pendingEventsRef.current.push(ev);
+      if (!flushTimerRef.current) flushTimerRef.current = setTimeout(flushEvents, EVENT_FLUSH_MS);
+    },
+    [flushEvents],
+  );
+  const closeStream = useCallback(() => {
+    // 已收到但还没进 state 的事件先落进去：重订阅从已见 step 之后续拉，这批不会再来
+    flushEvents();
+    streamGenRef.current += 1;
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    reconnectAttemptsRef.current = 0;
+    abortRef.current?.();
+    abortRef.current = null;
+  }, [flushEvents]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
   // 与 stickToBottomRef 同义，但"回到最新"按钮要随滚动出现/消失，得能触发渲染
@@ -1621,8 +1686,7 @@ export function AgentPage() {
     if (sendingRef.current && activeSessionId === sendTransitionRef.current) {
       return;
     }
-    abortRef.current?.();
-    abortRef.current = null;
+    closeStream();
     localMsgIdsRef.current.clear();
     if (!effectiveProject || !activeSessionId) {
       // 项目下还没有任何会话：显示空态，等用户发第一条消息
@@ -1690,7 +1754,17 @@ export function AgentPage() {
   }, [projectDir]);
 
   // Persist transcript whenever it settles.
+  // 只在可回放的事件变了时才写 localStorage：流式增量不落缓存，按 token 触发
+  // 一次 filter + JSON.stringify + 同步写盘会把界面拖卡。
+  const persistKey = useMemo(() => {
+    const replayable = persistedTranscriptEvents(events);
+    const last = replayable[replayable.length - 1];
+    return `${replayable.length}:${last ? `${last.type}@${last.step}` : ''}`;
+  }, [events]);
+  const eventsRef = useRef(events);
+  eventsRef.current = events;
   useEffect(() => {
+    const events = eventsRef.current;
     if (!effectiveProject || !activeSessionId || !events.length) return;
     saveSession({
       projectDir: effectiveProject,
@@ -1701,7 +1775,7 @@ export function AgentPage() {
       startedAt: startRef.current,
       finishedAt: status === 'running' ? 0 : Date.now(),
     });
-  }, [events, status, effectiveProject, activeSessionId]);
+  }, [persistKey, status, effectiveProject, activeSessionId]);
 
   // Follow the tail unless the user scrolled away.
   useEffect(() => {
@@ -1733,20 +1807,33 @@ export function AgentPage() {
 
   useEffect(() => {
     return () => {
-      abortRef.current?.();
-      abortRef.current = null;
+      closeStream();
     };
   }, []);
 
   const subscribeStream = useCallback((dir: string, sessionId?: string) => {
-    abortRef.current?.();
+    closeStream();
+    const gen = streamGenRef.current;
     // 续订时从本地已见的最大 step 之后开始拉，避免后端重放旧回合的事件
     const afterStep = lastStepRef.current;
-    abortRef.current = subscribeAgentStream(
+    let abort: (() => void) | null = null;
+    // 本条流结束了：只清自己的引用（abortRef 可能已被新订阅占用）。
+    // 不清的话，「立即」发送时判断"流已断、要补订阅"的条件永远不成立。
+    const release = () => {
+      if (abortRef.current === abort) abortRef.current = null;
+    };
+    abort = subscribeAgentStream(
       dir,
       (ev) => {
+        if (streamGenRef.current !== gen) return;
+        if (reconnectAttemptsRef.current > 0) {
+          // 重连成功：收掉"正在重连"的提示
+          reconnectAttemptsRef.current = 0;
+          setError(null);
+        }
         if (ev.type === 'close') {
           // 后端明确关流才收尾（可能整段回放完才到）
+          release();
           setRunning(false);
           return;
         }
@@ -1793,9 +1880,12 @@ export function AgentPage() {
           // 后端已收录这条消息：用真实事件替换本地乐观的占位（step=-1），
           // 保持顺序正确且刷新后可完整回放
           const localId = `local:${ev.message}`;
-          if (localMsgIdsRef.current.has(localId)) {
-            localMsgIdsRef.current.delete(localId);
+          const pendingCount = localMsgIdsRef.current.get(localId) || 0;
+          if (pendingCount > 0) {
+            if (pendingCount > 1) localMsgIdsRef.current.set(localId, pendingCount - 1);
+            else localMsgIdsRef.current.delete(localId);
             const text = ev.message;
+            flushEvents();
             setEvents((prev) => {
               const idx = prev.findIndex(
                 (it) => it.type === 'user_message' && it.step === -1 && it.message === text,
@@ -1808,7 +1898,7 @@ export function AgentPage() {
             return;
           }
         }
-        setEvents((prev) => [...prev, ev]);
+        queueEvent(ev);
         if (ev.type === 'finish' || ev.type === 'error' || ev.type === 'stopped') {
           // 后端若已安排好 followup 回合（点「立即」发送、或滞留插话转新回合），
           // 下一步马上又在跑：这里绝不能把运行态打回 false——否则停止按钮会消失、
@@ -1819,13 +1909,31 @@ export function AgentPage() {
         }
       },
       (err) => {
+        if (streamGenRef.current !== gen) return;
+        release();
+        // 连接断了（后端重启、代理掐线…）：按指数退避自动重连，从已见的 step 之后续拉。
+        // 后端那边回合早就结束的话，重连拿到的首帧就是终态 + close，自然收尾。
+        const attempt = reconnectAttemptsRef.current;
+        if (attempt < STREAM_MAX_RECONNECTS) {
+          reconnectAttemptsRef.current = attempt + 1;
+          setError(`Agent 事件流中断，正在重连…（${attempt + 1}/${STREAM_MAX_RECONNECTS}）`);
+          reconnectTimerRef.current = setTimeout(() => {
+            reconnectTimerRef.current = null;
+            if (streamGenRef.current !== gen) return;
+            subscribeStream(dir, sessionId);
+            // subscribeStream 开头的 closeStream 会把计数清零，这里接回去
+            reconnectAttemptsRef.current = attempt + 1;
+          }, Math.min(1000 * 2 ** attempt, 10000));
+          return;
+        }
         setError(normalizeError(err, 'Agent 事件流中断'));
         setRunning(false);
       },
       afterStep,
       sessionId,
     );
-  }, []);
+    abortRef.current = abort;
+  }, [closeStream, flushEvents, queueEvent]);
 
   const handleSend = useCallback(async () => {
     const text = goal.trim();
@@ -1849,7 +1957,8 @@ export function AgentPage() {
     // 不等后端确认。
     if (!running) {
       const localId = `local:${text}`;
-      localMsgIdsRef.current.add(localId);
+      localMsgIdsRef.current.set(localId, (localMsgIdsRef.current.get(localId) || 0) + 1);
+      flushEvents();
       setEvents((prev) => [
         ...prev,
         { type: 'user_message', step: -1, message: text },
@@ -1940,6 +2049,7 @@ export function AgentPage() {
     configFileName,
     goal,
     running,
+    permissionMode,
     subscribeStream,
     refreshSessions,
   ]);
@@ -2076,8 +2186,7 @@ export function AgentPage() {
    *  不会被清掉（不再清空 sessionsByProject）。 */
   const handleCreateBlankSession = useCallback(async () => {
     if (running) await handleStop();
-    abortRef.current?.();
-    abortRef.current = null;
+    closeStream();
     localMsgIdsRef.current.clear();
     hasBackendSessionRef.current = false;
     lastStepRef.current = 0;
@@ -2109,8 +2218,7 @@ export function AgentPage() {
         if (dir === effectiveProjectRef.current) {
           // 当前项目：切到新会话，主区随之加载（空会话 → 等首条消息）
           if (running) await handleStop();
-          abortRef.current?.();
-          abortRef.current = null;
+          closeStream();
           activeSessionRef.current = created.session_id;
           setActiveSessionId(created.session_id);
           saveActiveSessionId(dir, created.session_id);
@@ -2201,8 +2309,7 @@ export function AgentPage() {
   const handleSelectSession = useCallback(
     (dir: string, sessionId: string) => {
       if (sessionId === activeSessionRef.current && dir === effectiveProjectRef.current) return;
-      abortRef.current?.();
-      abortRef.current = null;
+      closeStream();
       setEvents([]);
       setError(null);
       activeSessionRef.current = sessionId;
@@ -2238,8 +2345,7 @@ export function AgentPage() {
       }
       // 删的是当前主区的活动会话 → 切到该分组剩下的第一个，没有则回空态
       if (dir === effectiveProjectRef.current && session.session_id === activeSessionRef.current) {
-        abortRef.current?.();
-        abortRef.current = null;
+        closeStream();
         const next = remaining[0]?.session_id || '';
         setActiveSessionId(next);
         activeSessionRef.current = next;
@@ -2255,6 +2361,7 @@ export function AgentPage() {
 
   const handleClear = useCallback(async () => {
     if (!effectiveProject || !activeSessionRef.current) return;
+    if (!window.confirm('清空当前会话？运行中的任务会被停止，对话记录会被一并删除。')) return;
     try {
       // 清空 = 重置当前会话：停掉运行中的回合并丢弃后端历史
       await resetAgent(effectiveProject, activeSessionRef.current);
@@ -2316,9 +2423,6 @@ export function AgentPage() {
       void notifyNeedsAttention(`ask:${askId}`, 'Agent 需要你的回答', askNotifyBody(pendingAsk));
     }
   }, [askId, handleJumpToBottom]);
-  // 权限模式：本地存一份（下次打开还是这个档），同时立刻推给后端——跑着也能改，下一次
-  // 工具调用就按新档判。声明在答复回调之前：答复要把它一起带上（见 answerBackendContext）。
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => loadPermissionMode());
   /** 答复 ask_user / 审批卡时捎带的前端上下文（与 handleSend 同一份）。
    *  后端那边如果已经没在等这道题（卡片是重启后从落盘事件重建出来的），会把这次答复当成
    *  一条用户消息、另起一个回合；而 token 只在 localStorage、不落盘，必须随请求带上——

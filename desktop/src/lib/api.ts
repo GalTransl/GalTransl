@@ -2122,6 +2122,9 @@ export async function deleteAgentSession(projectDir: string, sessionId: string) 
  * Subscribe to an agent's SSE event stream. Calls `onEvent` for every agent
  * event (content / tool_call / tool_result / finish / error / stopped / status / close).
  * `afterStep`: skip replayed events with step <= afterStep (resume without duplicates).
+ * The stream ending without a `close` frame (backend restarted, proxy dropped the
+ * connection…) is reported through `onError`, so callers can reconnect instead of
+ * showing "running" forever.
  * Returns an abort function that closes the stream.
  */
 export function subscribeAgentStream(
@@ -2151,6 +2154,11 @@ export function subscribeAgentStream(
       const reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
+      let closed = false;
+      const handle = (event: AgentEvent) => {
+        if (event.type === 'close') closed = true;
+        onEvent(event);
+      };
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -2160,8 +2168,11 @@ export function subscribeAgentStream(
         while ((sep = buffer.indexOf('\n\n')) >= 0) {
           const frame = buffer.slice(0, sep);
           buffer = buffer.slice(sep + 2);
-          parseAgentFrame(frame, onEvent);
+          parseAgentFrame(frame, handle);
         }
+      }
+      if (!closed && !controller.signal.aborted) {
+        throw new Error('Agent 事件流意外结束');
       }
     } catch (err) {
       if (controller.signal.aborted) return;

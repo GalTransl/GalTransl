@@ -11,6 +11,7 @@ Agent 是一个持久的多轮会话：用户的第一条消息启动会话，�
 """
 from __future__ import annotations
 
+import contextlib
 import copy
 import fnmatch
 import json
@@ -707,6 +708,9 @@ class AgentState:
     # 单走旁路队列，SSE drain 拉走即弃，不占长期 deque 的 maxlen 窗口——
     # 否则一次长流式就会把 user_message 挤出窗口，刷新后首条消息消失。
     transient_events: deque[AgentEvent] = field(default_factory=lambda: deque(maxlen=512))
+    # 保护 events / transient_events / step：回合线程在 _emit 里写，HTTP 线程在
+    # status / drain_events 里读。deque 边遍历边追加会抛 "mutated during iteration"。
+    event_lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
     step: int = 0
     # 持久的多轮对话历史（OpenAI messages），跨回合保留，reset 才清空
     messages: list[dict[str, Any]] = field(default_factory=list)
@@ -783,7 +787,6 @@ class AgentRunner:
         self._stream_acc: dict[str, Any] | None = None
         # 正在执行的工具调用 id（工具事件带上它，界面才能挂到对应行上）
         self._active_tool_call_id = ""
-        self._emit_lock = threading.Lock()
         # ask_user 的挂起询问：{request_id, tool_call_id, questions, answers, event}。
         # HTTP 线程（answer_ask）会写 answers 并 set(event)，回合线程在这里等。
         self._ask_lock = threading.Lock()
@@ -799,9 +802,28 @@ class AgentRunner:
         # 避免每个回合开跑都重复补一遍
         self._closed_tool_calls: set[str] = set()
 
+    def _write_running_meta(self, running: bool) -> None:
+        """在注册表锁内写 running 标记。
+
+        清标记（False）时若状态已是 running，说明收尾之后用户马上发了消息、新回合
+        已经开跑——旧线程这次迟到的写入会把新回合的标记盖掉，所以跳过。
+        """
+        if self._store is None:
+            return
+        registry = getattr(self, "_registry", None)
+        with registry._lock if registry is not None else contextlib.nullcontext():
+            if not running and self.state.status == "running":
+                return
+            self._store.append_meta(running=running)
+
+    def close_store(self) -> None:
+        """会话被删除/重置：本 runner 之后不再落盘。"""
+        if self._store is not None:
+            self._store.close()
+
     # ---- 事件 ----
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
-        with self._emit_lock:
+        with self.state.event_lock:
             self.state.step += 1
             event = AgentEvent(type=event_type, step=self.state.step, data=data)
             if event_type in _TRANSIENT_EVENT_TYPES:
@@ -947,6 +969,8 @@ class AgentRunner:
         发消息触发下一回合。
         """
         turns = 0  # 本回合真实 LLM 请求次数；state.step 是事件计数（含流式 delta），不代表轮数
+        # 每个回合（不只是首回合）都记下 running：重启后据此判断"上次被中断"
+        self._write_running_meta(True)
         try:
             # 上一轮在工具执行中途退出（进程被杀/崩溃）时，界面上还挂着"没结果"的卡片：
             # 先补一条失败事件把它收掉（请求侧的合法性见 _messages_with_tool_placeholders）
@@ -1176,9 +1200,8 @@ class AgentRunner:
             self.state.turn_end = "failed"
         finally:
             self.state.finished_at = time.time()
-            # 无论正常收尾还是异常退出，都要清掉落盘里的 running 标记
-            if self._store is not None:
-                self._store.append_meta(running=False)
+            # 异常退出不经过 _close_turn，这里兜底清掉落盘里的 running 标记
+            self._write_running_meta(False)
             _log(f"Agent 回合结束，状态={self.state.status}，共 {turns} 轮（事件 {self.state.step} 个）")
             if self.state.pending_followup:
                 # 插话滞留到收尾（回合已停止消费），开新回合处理
@@ -7323,7 +7346,39 @@ def _plan_cache_patches(
     }
 
 
+# 缓存文件的读-改-写锁：/cache/save 是整文件覆盖，并行子代理切同一个文件的不同
+# index 段同时 patch 时，不加锁后存的会把先存的改动整个盖掉。按 (项目, 文件) 分锁。
+_CACHE_FILE_LOCKS: dict[tuple[str, str], threading.Lock] = {}
+_CACHE_FILE_LOCKS_GUARD = threading.Lock()
+
+
+def _cache_file_lock(runner: AgentRunner, filename: str) -> threading.Lock:
+    project_dir = str(getattr(runner.state, "project_dir", "") or "")
+    key = (os.path.normcase(os.path.abspath(project_dir)) if project_dir else "", filename)
+    with _CACHE_FILE_LOCKS_GUARD:
+        lock = _CACHE_FILE_LOCKS.get(key)
+        if lock is None:
+            lock = _CACHE_FILE_LOCKS[key] = threading.Lock()
+        return lock
+
+
 def _patch_one_cache_file(
+    runner: AgentRunner,
+    pid: str,
+    filename: str,
+    patches: list[Any],
+    allowed: frozenset[str],
+    *,
+    qualify: bool,
+    clear_comment: bool = False,
+) -> dict[str, Any]:
+    with _cache_file_lock(runner, filename):
+        return _patch_one_cache_file_locked(
+            runner, pid, filename, patches, allowed, qualify=qualify, clear_comment=clear_comment
+        )
+
+
+def _patch_one_cache_file_locked(
     runner: AgentRunner,
     pid: str,
     filename: str,
@@ -7560,22 +7615,23 @@ def _tool_delete_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     wanted = _parse_index_spec(index_spec)
     if not wanted:
         raise AgentToolError(f"无法解析 indexes：{index_spec!r}（示例：33-40,50-60）")
-    data = runner._http_get(f"/api/projects/{pid}/cache/{urllib.parse.quote(filename)}")
-    entries = data.get("entries", [])
-    if not isinstance(entries, list):
-        raise AgentToolError("缓存文件 entries 非数组，无法删除")
+    with _cache_file_lock(runner, filename):
+        data = runner._http_get(f"/api/projects/{pid}/cache/{urllib.parse.quote(filename)}")
+        entries = data.get("entries", [])
+        if not isinstance(entries, list):
+            raise AgentToolError("缓存文件 entries 非数组，无法删除")
 
-    kept, deleted_indexes, deleted_previews = _plan_cache_delete(entries, wanted)
+        kept, deleted_indexes, deleted_previews = _plan_cache_delete(entries, wanted)
 
-    if not deleted_indexes:
-        raise AgentToolError(f"没有命中的条目（文件共 {len(entries)} 条，请求 index：{sorted(wanted)}）")
+        if not deleted_indexes:
+            raise AgentToolError(f"没有命中的条目（文件共 {len(entries)} 条，请求 index：{sorted(wanted)}）")
 
-    save_body = {
-        "filename": filename,
-        "entries": kept,
-        "config_file_name": runner.state.config_file_name,
-    }
-    runner._http_post(f"/api/projects/{pid}/cache/save", save_body)
+        save_body = {
+            "filename": filename,
+            "entries": kept,
+            "config_file_name": runner.state.config_file_name,
+        }
+        runner._http_post(f"/api/projects/{pid}/cache/save", save_body)
     missing = sorted(i for i in wanted if i not in deleted_indexes)
     result: dict[str, Any] = {
         "filename": filename,
@@ -9371,6 +9427,7 @@ class AgentRuntime:
             runner = self._runners.get(key, {}).get(session_id)
             if runner is not None:
                 runner.abort_in_flight()  # 在途请求要立刻断，否则线程还挂在 read 上
+                runner.close_store()  # 回合线程收尾时的写入不能把会话文件又建回来
             self._states.get(key, {}).pop(session_id, None)
             self._runners.get(key, {}).pop(session_id, None)
             self._stop_events.get(key, {}).pop(session_id, None)
@@ -9958,6 +10015,7 @@ class AgentRuntime:
                 runner = self._runners.get(key, {}).get(sid)
                 if runner is not None:
                     runner.abort_in_flight()  # 同 stop()：在途请求要立刻断
+                    runner.close_store()  # 同 delete_session：别让收尾写入复活会话文件
                 self._states.get(key, {}).pop(sid, None)
                 self._runners.get(key, {}).pop(sid, None)
                 self._stop_events.get(key, {}).pop(sid, None)
@@ -10023,8 +10081,13 @@ class AgentRuntime:
                 },
                 # 排队中的消息：队列面板的数据源（实时变更走 queue 事件）
                 "queued": [m.to_dict() for m in state.pending_messages],
-                "events": [e.to_dict() for e in state.events],
+                "events": self._snapshot_events(state),
             }
+
+    @staticmethod
+    def _snapshot_events(state: AgentState) -> list[dict[str, Any]]:
+        with state.event_lock:
+            return [e.to_dict() for e in state.events]
 
     def transcript(self, project_dir: str, session_id: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
         """会话转录：已提交事件的完整回放（从会话日志读）。
@@ -10057,7 +10120,7 @@ class AgentRuntime:
         state = self._get_state(project_dir, sid)
         if state is None:
             return []
-        with self._lock:
+        with self._lock, state.event_lock:
             out: list[dict[str, Any]] = []
             keep_transient: deque[AgentEvent] = deque(maxlen=512)
             while state.transient_events:

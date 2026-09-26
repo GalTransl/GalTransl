@@ -147,9 +147,18 @@ class SessionStore:
         # 上下文压缩的归档目录：被压掉的历史按 chunk 落盘，Agent 需要细节时
         # 用 read_history_archive 工具回查（见 runtime 的 Insert-then-Compress）。
         self.chunks_dir = f"{self.path}.chunks"
+        # 会话被删除/重置后置 True：回合线程收尾时还会写 meta/事件，不拦住的话
+        # _append 会把刚删掉的文件重新建出来（列表里冒出只有 meta 的幽灵会话）。
+        self.closed = False
+
+    def close(self) -> None:
+        """之后的所有写入都丢弃（只影响本实例；同 id 的新会话用新实例照常写）。"""
+        self.closed = True
 
     # ---- 写入 ----
     def _append(self, record: dict[str, Any]) -> None:
+        if self.closed:
+            return
         try:
             os.makedirs(self.dir, exist_ok=True)
             line = json.dumps(record, ensure_ascii=False) + "\n"
@@ -170,6 +179,8 @@ class SessionStore:
             _log(f"写入失败 {self.path}: {exc}")
 
     def append_meta(self, **fields: Any) -> None:
+        if self.closed:
+            return
         # 会话列表专用的 sidecar 缓存：列会话 / 轮询状态时不必把每份 JSONL 全扫一遍。
         self._append({"t": "meta", "at": time.time(), **fields})
         # 从文件把水位补到最新（通常只读刚追加的这一行），再合并本次字段后写回。
@@ -208,6 +219,8 @@ class SessionStore:
         文件名由调用方给定（chunk-0001.md 这种），这里只管落盘：先写临时文件再
         os.replace，进程被强杀也不会留下半截归档。
         """
+        if self.closed:
+            return None
         try:
             os.makedirs(self.chunks_dir, exist_ok=True)
             path = os.path.join(self.chunks_dir, name)
