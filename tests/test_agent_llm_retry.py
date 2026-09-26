@@ -2,6 +2,8 @@ import unittest
 from types import SimpleNamespace
 
 from GalTransl.Agent import runtime as rt
+# 重试退避常量由 core._llm_retry_delay_ms 读取，要改得改 core 模块上的
+from GalTransl.Agent import core as agent_core
 
 
 def _chunk(text: str):
@@ -67,15 +69,15 @@ def _retry_events(runner) -> list[rt.AgentEvent]:
 class LLMRetryTests(unittest.TestCase):
     def setUp(self) -> None:
         # 退避时长压到毫秒级，别让测试真的等 1s/2s/4s
-        self._orig_initial = rt.LLM_RETRY_INITIAL_DELAY_MS
-        self._orig_max = rt.LLM_RETRY_MAX_DELAY_MS
-        rt.LLM_RETRY_INITIAL_DELAY_MS = 1
-        rt.LLM_RETRY_MAX_DELAY_MS = 2
+        self._orig_initial = agent_core.LLM_RETRY_INITIAL_DELAY_MS
+        self._orig_max = agent_core.LLM_RETRY_MAX_DELAY_MS
+        agent_core.LLM_RETRY_INITIAL_DELAY_MS = 1
+        agent_core.LLM_RETRY_MAX_DELAY_MS = 2
         self.addCleanup(self._restore_delays)
 
     def _restore_delays(self) -> None:
-        rt.LLM_RETRY_INITIAL_DELAY_MS = self._orig_initial
-        rt.LLM_RETRY_MAX_DELAY_MS = self._orig_max
+        agent_core.LLM_RETRY_INITIAL_DELAY_MS = self._orig_initial
+        agent_core.LLM_RETRY_MAX_DELAY_MS = self._orig_max
 
     def test_transient_failure_is_retried_and_visible(self) -> None:
         runner = _runner([ConnectionError("connection reset by peer"), [_chunk("hi")]])
@@ -171,7 +173,7 @@ class ClassifyLLMErrorTests(unittest.TestCase):
         info = {"retry_after_ms": None}
         delays = [rt._llm_retry_delay_ms(n, info) for n in (1, 2, 3)]
         self.assertEqual(delays, [1_000, 2_000, 4_000])
-        self.assertEqual(rt._llm_retry_delay_ms(10, info), rt.LLM_RETRY_MAX_DELAY_MS)
+        self.assertEqual(rt._llm_retry_delay_ms(10, info), agent_core.LLM_RETRY_MAX_DELAY_MS)
 
 
 if __name__ == "__main__":

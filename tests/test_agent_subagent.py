@@ -23,6 +23,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from GalTransl.Agent import runtime as rt
+# patch 要打在名字被使用的模块上（runtime 只是重新导出的兼容入口）
+from GalTransl.Agent import subagent as subagent_mod
 from GalTransl.Agent import session_store as ss
 from GalTransl.Agent.runtime import (
     SUBAGENT_AGENT_EXPLORE,
@@ -151,7 +153,7 @@ def _make_chat(script: list[tuple[str, list[_Call]]]):
 
 
 def _run(parent: _Parent, args: dict, script: list[tuple[str, list[_Call]]]) -> dict:
-    with patch.object(rt, "_subagent_chat", _make_chat(script)):
+    with patch.object(subagent_mod, "_subagent_chat", _make_chat(script)):
         return _tool_run_subagents(parent, args)
 
 
@@ -267,7 +269,7 @@ class ProofreadAgentFlowTests(unittest.TestCase):
                 raise RuntimeError("boom")
             return "报告：没问题。", [], rt.REASONING_FIELD_NAMES[0], ""
 
-        with patch.object(rt, "_subagent_chat", flaky):
+        with patch.object(subagent_mod, "_subagent_chat", flaky):
             out = _tool_run_subagents(
                 parent,
                 {
@@ -292,8 +294,8 @@ class SubagentRetryTests(unittest.TestCase):
 
     def _run_one(self, parent: _Parent, chat) -> dict:
         with (
-            patch.object(rt, "_subagent_chat", chat),
-            patch.object(rt, "_llm_retry_delay_ms", lambda attempt, info: 0),
+            patch.object(subagent_mod, "_subagent_chat", chat),
+            patch.object(subagent_mod, "_llm_retry_delay_ms", lambda attempt, info: 0),
         ):
             return _tool_run_subagents(
                 parent, {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD, "file": "a.json"}]}
@@ -546,7 +548,7 @@ class ExploreAgentTests(unittest.TestCase):
             captured.append(messages)
             return base(client, model, messages, tools)
 
-        with patch.object(rt, "_subagent_chat", fake_chat):
+        with patch.object(subagent_mod, "_subagent_chat", fake_chat):
             out = _tool_run_subagents(parent, {"tasks": [{"agent": SUBAGENT_AGENT_EXPLORE}]})
 
         task = out["tasks"][0]
@@ -715,7 +717,7 @@ class AutoSplitTests(unittest.TestCase):
             captured.append(messages)
             return base(client, model, messages, tools)
 
-        with patch.object(rt, "_subagent_chat", fake_chat):
+        with patch.object(subagent_mod, "_subagent_chat", fake_chat):
             out = _tool_run_subagents(
                 parent, {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD, "file": "*"}] * 2}
             )
@@ -1351,7 +1353,7 @@ class SubagentCompactionTests(unittest.TestCase):
         self.assertTrue(sub._begin_compaction())
         head_len = int(sub._pending_compaction["cut"]) - 2  # 头部 2 条不进摘要
 
-        with patch.object(rt, "_subagent_chat", _make_chat([("", [])])):  # 回了个空正文
+        with patch.object(subagent_mod, "_subagent_chat", _make_chat([("", [])])):  # 回了个空正文
             sub._run_compaction_request(None, "fake-model")
 
         # 摘要只吃被压缩掉的那段（切点之前的部分），不是整份历史
@@ -1370,7 +1372,7 @@ class SubagentCompactionTests(unittest.TestCase):
         sub.messages = self._history(12)
         sub._begin_compaction()
 
-        with patch.object(rt, "_subagent_chat", boom):
+        with patch.object(subagent_mod, "_subagent_chat", boom):
             sub._run_compaction_request(None, "fake-model")
 
         self.assertIn("独立摘要", sub.messages[2]["content"])
@@ -1415,10 +1417,10 @@ class SubagentCompactionTests(unittest.TestCase):
             return 99_999 if len(sub.messages) >= 6 else 10
 
         with (
-            patch.object(rt, "_subagent_chat", recording),
+            patch.object(subagent_mod, "_subagent_chat", recording),
             patch.object(rt.SubAgentRunner, "_estimate_context_tokens", fake_estimate),
             # 保留段预算压到 1 token：6 条历史也能切出安全切点（只留最后那次工具往返）
-            patch.object(rt, "_keep_recent_tokens", lambda _limit, _ratio=None: 1),
+            patch.object(subagent_mod, "_keep_recent_tokens", lambda _limit, _ratio=None: 1),
         ):
             out = _tool_run_subagents(
                 parent, {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD, "file": "a.json"}]}

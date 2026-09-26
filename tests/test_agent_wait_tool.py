@@ -10,6 +10,8 @@ import unittest
 from unittest.mock import patch
 
 from GalTransl.Agent import runtime as rt
+# patch 要打在名字被使用的模块上（runtime 只是重新导出的兼容入口）
+from GalTransl.Agent.tools import jobs as jobs_mod
 from GalTransl.Agent.runtime import AgentRunner, AgentState, AgentToolError, _tool_wait
 
 
@@ -88,8 +90,8 @@ class WaitForJobTests(unittest.TestCase):
     def _fast(self):
         """轮询与倒计时都快一点，测试别真等秒。"""
         return (
-            patch.object(rt, "WAIT_JOB_POLL_SECONDS", 0.01),
-            patch.object(rt, "WAIT_TICK", 0.01),
+            patch.object(jobs_mod, "WAIT_JOB_POLL_SECONDS", 0.01),
+            patch.object(jobs_mod, "WAIT_TICK", 0.01),
         )
 
     def _wait_end(self, runner: AgentRunner) -> dict:
@@ -196,7 +198,7 @@ class WaitForJobTests(unittest.TestCase):
         runner = self._runner()
         runner._http_get = self._jobs_getter(["completed"])
 
-        with patch.object(rt, "WAIT_JOB_POLL_SECONDS", 0.01):
+        with patch.object(jobs_mod, "WAIT_JOB_POLL_SECONDS", 0.01):
             _tool_wait(runner, {"job_id": "j1", "seconds": 30})
 
         start = [e for e in runner.state.events if e.type == "wait_start"][0].data
