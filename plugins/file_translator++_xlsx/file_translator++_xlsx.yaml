@@ -2,6 +2,7 @@ Core:
   Name: Translator++ xlsx文件
   Type: file
   Module: file_translator++_xlsx
+  Extensions: [".xlsx"] # 自动识别文件插件时按扩展名匹配
 
 Documentation:
   Author: PiDanShouRouZhou

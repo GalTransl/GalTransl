@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
@@ -23,7 +23,9 @@ import {
   submitJob,
   fetchJob,
   encodeProjectDir,
+  detectFilePlugin,
 } from '../lib/api';
+import type { FilePluginDetection } from '../lib/api';
 import { addProjectToHistory } from './HomePage';
 
 const STEPS = ['项目位置', '导入文件', '翻译后端', '常用设置', '提取人名'];
@@ -61,6 +63,9 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
   // Step 4 state
   const [filePlugins, setFilePlugins] = useState<PluginInfo[]>([]);
   const [selectedFilePlugin, setSelectedFilePlugin] = useState('file_galtransl_json');
+  const [fileDetection, setFileDetection] = useState<FilePluginDetection | null>(null);
+  // 用户手动选过插件后，重新进入这一步不再用识别结果覆盖
+  const filePluginTouchedRef = useRef(false);
   const [workersPerProject, setWorkersPerProject] = useState(16);
   const [numPerRequest, setNumPerRequest] = useState(16);
   const [dynamicNumPerRequest, setDynamicNumPerRequest] = useState(false);
@@ -290,6 +295,16 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
         setFilePlugins(plugins.filter((p) => p.type === 'file'));
       })
       .catch(() => {});
+    if (projectDir) {
+      detectFilePlugin(encodeProjectDir(projectDir))
+        .then((detection) => {
+          setFileDetection(detection);
+          if (detection.suggested && !filePluginTouchedRef.current) {
+            setSelectedFilePlugin(detection.suggested);
+          }
+        })
+        .catch(() => setFileDetection(null));
+    }
     fetchTranslationGuidelines()
       .then((list) => {
         setGuidelines(list);
@@ -305,7 +320,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
         });
       })
       .catch(() => {});
-  }, [currentStep]);
+  }, [currentStep, projectDir]);
 
   const handleSaveSettings = useCallback(async () => {
     if (!projectDir) return;
@@ -551,16 +566,23 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
       <div className="wizard-settings-grid">
       <div className="field wizard-settings-grid__full">
         <span className="field__label">文件插件</span>
-        <CustomSelect value={selectedFilePlugin} onChange={(e) => setSelectedFilePlugin(e.target.value)}>
+        <CustomSelect
+          value={selectedFilePlugin}
+          onChange={(e) => {
+            filePluginTouchedRef.current = true;
+            setSelectedFilePlugin(e.target.value);
+          }}
+        >
+          <option value="auto">自动识别 (auto)</option>
           {filePlugins.length > 0 ? (
             filePlugins.map((p) => (
               <option key={p.name} value={p.name}>{p.display_name} ({p.name})</option>
             ))
-          ) : (
+          ) : selectedFilePlugin !== 'auto' ? (
             <option value={selectedFilePlugin}>{selectedFilePlugin}</option>
-          )}
+          ) : null}
         </CustomSelect>
-        <span className="field__hint">用于识别与解析源文件格式。</span>
+        <span className="field__hint">{describeFileDetection(fileDetection, filePlugins)}</span>
       </div>
       <div className="field">
         <span className="field__label">并发文件数</span>
@@ -725,4 +747,22 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
       </div>
     </div>
   );
+}
+
+function describeFileDetection(detection: FilePluginDetection | null, plugins: PluginInfo[]) {
+  if (!detection || (Object.keys(detection.counts).length === 0 && detection.unknown.length === 0)) {
+    return '用于识别与解析源文件格式；选「自动识别」会按每个文件的类型分别选择插件。';
+  }
+  const label = (name: string) => plugins.find((p) => p.name === name)?.display_name || name;
+  const parts = Object.entries(detection.counts).map(([name, n]) => `${label(name)} ×${n}`);
+  let text = `已识别 gt_input：${parts.join('、') || '无'}`;
+  if (detection.unknown.length > 0) {
+    text += `；${detection.unknown.length} 个文件无法识别（将被跳过）`;
+  }
+  if (detection.suggested === 'auto') {
+    text += '。检测到多种格式，已选择「自动识别」，每个文件使用各自的插件。';
+  } else if (detection.suggested) {
+    text += `。已自动选择「${label(detection.suggested)}」。`;
+  }
+  return text;
 }

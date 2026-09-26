@@ -2,6 +2,7 @@ Core:
   Name: srt,lrc,vtt字幕文件读取
   Type: file
   Module: file_subtitle_srt_lrc_vtt
+  Extensions: [".srt", ".lrc", ".vtt"] # 自动识别文件插件时按扩展名匹配
 
 Documentation:
   Author: cx2333, PiDanShouRouZhou

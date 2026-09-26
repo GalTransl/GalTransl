@@ -28,7 +28,7 @@ backendSpecific:
 
 # 插件，插件列表可在启动程序后选择show-plugs查看，或在plugins目录内查看
 plugin:
-  filePlugin: file_galtransl_json # 用于支持更多格式，字幕file_subtitle_srt_lrc_vtt，小说file_epub_epub或file_plaintext_txt，mtooljson用file_i18n_json
+  filePlugin: file_galtransl_json # 填 auto 则按每个输入文件自动识别（可混放多种格式）；用于支持更多格式，字幕file_subtitle_srt_lrc_vtt，小说file_epub_epub或file_plaintext_txt，mtooljson用file_i18n_json
   textPlugins: # 文本处理插件列表，可以设置多个，按顺序执行
     - text_common_normalfix # 常规文本修复插件
     #- text_common_skipNoJP # 跳过无日语句子插件

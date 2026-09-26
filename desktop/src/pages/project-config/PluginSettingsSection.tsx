@@ -31,19 +31,22 @@ export function PluginSettingsSection({
               value={String((config?.plugin as Record<string, unknown>)?.filePlugin ?? 'file_galtransl_json')}
               onChange={(e) => onFilePluginChange(e.target.value)}
             >
+              <option value="auto">自动识别 (auto)</option>
               {filePlugins.length > 0 ? (
                 filePlugins.map((p) => (
                   <option key={p.name} value={p.name}>
                     {p.display_name} ({p.name})
                   </option>
                 ))
-              ) : (
+              ) : String((config?.plugin as Record<string, unknown>)?.filePlugin) === 'auto' ? null : (
                 <option value={String((config?.plugin as Record<string, unknown>)?.filePlugin ?? 'file_galtransl_json')}>
                   {String((config?.plugin as Record<string, unknown>)?.filePlugin ?? 'file_galtransl_json')}
                 </option>
               )}
             </CustomSelect>
-            <span className="field__hint">从全局插件管理中获取可用文件插件</span>
+            <span className="field__hint">
+              从全局插件管理中获取可用文件插件；「自动识别」按每个输入文件的类型分别选择插件，gt_input 可混放多种格式
+            </span>
           </label>
           {/* 文件插件设置项 */}
           {(() => {

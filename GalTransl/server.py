@@ -617,26 +617,20 @@ _GUIDELINE_WRITE_ROUTES: dict[str, Any] = {
 }
 
 
-def _open_project_file_plugin(project_dir: str, config_file_name: str):
-    """定位并初始化项目的文件插件，返回 (插件对象, 文件名)。
+def _init_file_plugin(project_dir: str, cfg, fname: str):
+    """定位并初始化单个文件插件，返回插件对象。
 
-    一个项目只用一个文件插件，但定位插件（PluginManager.locatePlugins + loadPlugins）
-    本身不便宜；批量解析多个文件时只做一次，之后逐个 load_file 即可。
+    定位插件（PluginManager.locatePlugins + loadPlugins）本身不便宜；批量解析多个
+    文件时每个插件只初始化一次，之后逐个 load_file 即可（见 _ProjectFilePlugins）。
     """
-    from GalTransl.ConfigHelper import CProjectConfig
     from GalTransl.GTPlugin import GTextPlugin, GFilePlugin
     from GalTransl.yapsy.PluginManager import PluginManager
 
-    cfg = CProjectConfig(project_dir, config_file_name or "config.yaml")
     plugin_manager = PluginManager(
         {"GTextPlugin": GTextPlugin, "GFilePlugin": GFilePlugin},
         ["plugins", os.path.join(project_dir, "plugins")],
     )
     plugin_manager.locatePlugins()
-
-    fname = cfg.getFilePlugin()
-    if not fname:
-        raise RuntimeError("项目配置没有设置文件插件（plugin.filePlugin），无法解析输入文件")
     if "(project_dir)" in fname:
         fname = fname.replace("(project_dir)", "")
     info_path = os.path.join(project_dir, "plugins", fname, f"{fname}.yaml")
@@ -650,14 +644,47 @@ def _open_project_file_plugin(project_dir: str, config_file_name: str):
     plugin_manager.loadPlugins()
     for plugin in plugin_manager.getPluginsOfCategory("GFilePlugin"):
         plugin_conf = plugin.yaml_dict
+        if not isinstance(plugin_conf.get("Settings"), dict):  # 有的插件 yaml 没有 Settings 段
+            plugin_conf["Settings"] = {}
         project_plugin_conf = cfg.getPluginConfigSection()
         plugin_module = plugin_conf["Core"]["Module"]
         if plugin_module in project_plugin_conf:
             plugin_conf["Settings"].update(project_plugin_conf[plugin_module])
         plugin_conf["Settings"]["project_dir"] = project_dir
         plugin.plugin_object.gtp_init(plugin_conf, cfg.getCommonConfigSection())
-        return plugin.plugin_object, fname
+        return plugin.plugin_object
     raise RuntimeError(f"文件插件 {fname} 加载失败")
+
+
+class _ProjectFilePlugins:
+    """按文件取项目的文件插件：固定插件直接用它；filePlugin: auto 时逐个文件识别，
+    同一个插件只初始化一次。"""
+
+    def __init__(self, project_dir: str, config_file_name: str):
+        from GalTransl.ConfigHelper import CProjectConfig
+        from GalTransl.FilePluginDetect import is_auto, scan_extension_map
+
+        self.project_dir = project_dir
+        self.cfg = CProjectConfig(project_dir, config_file_name or "config.yaml")
+        self.fname = self.cfg.getFilePlugin()
+        if not self.fname:
+            raise RuntimeError("项目配置没有设置文件插件（plugin.filePlugin），无法解析输入文件")
+        self.auto = is_auto(self.fname)
+        self._ext_map = scan_extension_map(project_dir) if self.auto else None
+        self._objects: dict[str, Any] = {}
+
+    def get(self, file_path: str):
+        """返回 (插件对象, 插件名)。"""
+        from GalTransl.FilePluginDetect import detect_file_plugin
+
+        fname = self.fname
+        if self.auto:
+            fname = detect_file_plugin(file_path, self._ext_map)
+            if not fname:
+                raise RuntimeError(f"无法自动识别 {os.path.basename(file_path)} 的格式，没有可用的文件插件")
+        if fname not in self._objects:
+            self._objects[fname] = _init_file_plugin(self.project_dir, self.cfg, fname)
+        return self._objects[fname], fname
 
 
 def _normalize_input_entries(result: Any, fname: str) -> list[dict[str, Any]]:
@@ -711,7 +738,7 @@ def _load_input_file_entries(project_dir: str, config_file_name: str, filename: 
     if not os.path.isfile(file_path):
         raise FileNotFoundError(f"file not found in {target_folder}: {filename}")
 
-    plugin_object, fname = _open_project_file_plugin(project_dir, config_file_name)
+    plugin_object, fname = _ProjectFilePlugins(project_dir, config_file_name).get(file_path)
     return _normalize_input_entries(plugin_object.load_file(file_path), fname)
 
 
@@ -841,12 +868,14 @@ def _count_input_file_sentences(
     """
     counts: dict[str, int | None] = {name: None for name in filenames}
     try:
-        plugin_object, _fname = _open_project_file_plugin(project_dir, config_file_name)
+        plugins = _ProjectFilePlugins(project_dir, config_file_name)
     except Exception:
         return counts
     for name in filenames:
         try:
-            result = plugin_object.load_file(os.path.join(project_dir, INPUT_FOLDERNAME, name))
+            file_path = os.path.join(project_dir, INPUT_FOLDERNAME, name)
+            plugin_object, _fname = plugins.get(file_path)
+            result = plugin_object.load_file(file_path)
             if isinstance(result, tuple):
                 result = result[0]
             counts[name] = len(result) if isinstance(result, list) else None
@@ -1426,6 +1455,22 @@ def build_handler(registry: JobRegistry):
                     "exists": os.path.isfile(path),
                     "content": content,
                 })
+                return
+
+            # GET /api/projects/:id/detect-file-plugin — 按 gt_input 里的文件推荐文件插件
+            if sub_path == "/detect-file-plugin":
+                from GalTransl.Utils import get_file_list
+                from GalTransl.FilePluginDetect import detect_file_plugins, summarize_detection
+
+                input_dir = os.path.join(project_dir, INPUT_FOLDERNAME)
+                files = get_file_list(input_dir) if os.path.isdir(input_dir) else []
+                detected = detect_file_plugins(files, project_dir)
+                result = summarize_detection(detected)
+                result["files"] = {
+                    os.path.relpath(path, input_dir).replace(os.sep, "/"): plugin
+                    for path, plugin in detected.items()
+                }
+                self._send_json(result)
                 return
 
             # GET /api/projects/:id/files[?counts=1]

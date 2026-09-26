@@ -2,6 +2,7 @@ Core:
   Name: txt文本文件读取
   Type: file
   Module: file_plaintext_txt
+  Extensions: [".txt"] # 自动识别文件插件时按扩展名匹配
 
 Documentation:
   Author: PiDanShouRouZhou

@@ -2,6 +2,7 @@ Core:
   Name: Epub 文件
   Type: file
   Module: file_epub_epub
+  Extensions: [".epub", ".html", ".xhtml"] # 自动识别文件插件时按扩展名匹配（html/xhtml 是拆分模式解出来的章节）
 
 Documentation:
   Author: PiDanShouRouZhou

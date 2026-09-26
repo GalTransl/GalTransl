@@ -788,6 +788,21 @@ export async function fetchPlugins() {
   return response.plugins;
 }
 
+export interface FilePluginDetection {
+  /** 推荐的 filePlugin：单一格式时是那个插件，混合格式时是 'auto'，都识别不了时为 null */
+  suggested: string | null;
+  /** 插件名 → 识别到的文件数 */
+  counts: Record<string, number>;
+  /** 识别不了格式的文件名 */
+  unknown: string[];
+  files: Record<string, string | null>;
+}
+
+/** 按项目 gt_input 里的文件自动识别应使用的文件插件。 */
+export async function detectFilePlugin(projectId: string) {
+  return apiRequest<FilePluginDetection>(`/api/projects/${projectId}/detect-file-plugin`);
+}
+
 export async function fetchProblemTypes() {
   const response = await apiRequest<ProblemTypesResponse>('/api/problem-types');
   return response.problem_types;

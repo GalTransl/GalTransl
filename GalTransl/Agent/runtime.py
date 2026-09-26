@@ -3704,7 +3704,7 @@ CONFIG_FIELD_DESCRIPTIONS: dict[str, str] = {
     "dictionary.gpt.dict": "GPT 字典文件列表。随 Prompt 发给模型，约束人名/术语译法（Agent 应主要维护这层）",
     "dictionary.postDict": "译后字典文件列表。翻译完成后对译文做替换（符号矫正等）",
     # ---- plugin ----
-    "plugin.filePlugin": "文件插件（决定输入/输出格式）：file_galtransl_json；字幕 file_subtitle_srt_lrc_vtt；小说 file_epub_epub / file_plaintext_txt；Mtool json 用 file_i18n_json",
+    "plugin.filePlugin": "文件插件（决定输入/输出格式）：auto 按每个文件自动识别（gt_input 可混放多种格式）；file_galtransl_json；字幕 file_subtitle_srt_lrc_vtt；小说 file_epub_epub / file_plaintext_txt；Mtool json 用 file_i18n_json",
     "plugin.textPlugins": "文本处理插件列表（按顺序执行）：如 text_common_normalfix 常规修复、text_common_skipNoJP 跳过无日文句",
     # ---- proxy ----
     "proxy.enableProxy": "是否启用代理 [true/false]，使用中转供应商时一般不用开",

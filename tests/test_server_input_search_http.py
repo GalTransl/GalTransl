@@ -29,7 +29,7 @@ class InputSearchHttpTests(unittest.TestCase):
         cls.project = os.path.join(cls.root, "proj")
         os.makedirs(os.path.join(cls.project, INPUT_FOLDERNAME), exist_ok=True)
         with open(os.path.join(cls.project, "config.yaml"), "w", encoding="utf-8") as f:
-            # plugin 段是读输入文件的前提（_open_project_file_plugin 要用它初始化插件）
+            # plugin 段是读输入文件的前提（_ProjectFilePlugins 要用它初始化插件）
             f.write("common:\n  language: ja\nplugin:\n  filePlugin: file_galtransl_json\n  textPlugins: []\n")
         entries = [
             {"name": "少女", "message": "おはよう"},

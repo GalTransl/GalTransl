@@ -392,9 +392,16 @@ async def doLLMTranslate(
     # ---- 2. 读取所有文件并切分为 chunk ----
     # 使用线程池并发读文件（IO 密集型），同时通过 fPlugins 解析为 json_list
     file_loader_workers = max(1, min(cpu_count() or 1, 8))
+    if getattr(projectConfig, "fPluginAuto", False):
+        # filePlugin: auto —— 每个文件只交给识别出的那个插件（例如 txt 插件会把
+        # 任何文件都当纯文本读，不能让它去“试” json）；识别不了的文件跳过
+        file_plugin_routes = route_file_plugins(file_list, fPlugins, projectConfig.getProjectDir())
+        file_list = [f for f in file_list if file_plugin_routes.get(f)]
+    else:
+        file_plugin_routes = {f: fPlugins for f in file_list}
     with ThreadPoolExecutor(max_workers=file_loader_workers) as executor:
         future_to_file = {
-            executor.submit(fplugins_load_file, file_path, fPlugins): file_path
+            executor.submit(fplugins_load_file, file_path, file_plugin_routes[file_path]): file_path
             for file_path in file_list
         }
         for future in as_completed(future_to_file):
@@ -852,6 +859,26 @@ async def init_gptapi(
             return GenDic(projectConfig, eng_type, proxyPool, tokenPool)
         case _:
             raise ValueError(f"不支持的翻译引擎类型 {eng_type}")
+
+
+def route_file_plugins(file_list: List[str], fPlugins: list, project_dir: str) -> Dict[str, list]:
+    """filePlugin: auto 时给每个文件挑插件，返回 {file_path: [plugin]}（识别不了的是空列表）。"""
+    from GalTransl.FilePluginDetect import detect_file_plugins
+
+    by_name = {}
+    for plugin in fPlugins:
+        if isinstance(plugin, str):
+            continue
+        by_name[plugin.yaml_dict["Core"]["Module"]] = plugin
+    routes = {}
+    for file_path, name in detect_file_plugins(file_list, project_dir).items():
+        plugin = by_name.get((name or "").replace("(project_dir)", ""))
+        if plugin is None:
+            LOGGER.warning(f"自动识别文件插件：{file_path} 没有匹配的文件插件，已跳过")
+        else:
+            LOGGER.debug(f"自动识别文件插件：{file_path} -> {plugin.name}")
+        routes[file_path] = [plugin] if plugin else []
+    return routes
 
 
 def fplugins_load_file(file_path: str, fPlugins: list) -> Tuple[List[Dict], Any]:

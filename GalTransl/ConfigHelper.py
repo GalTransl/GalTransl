@@ -154,6 +154,7 @@ class CProjectConfig:
         self.name_replaceDict = {}  # 名字替换字典
         self.tPlugins = []  # 文本插件列表
         self.fPlugins = []  # 文件插件列表
+        self.fPluginAuto = False  # filePlugin: auto 时按文件逐个识别插件
         self.tokenPool = None  # 令牌池
         self.proxyPool = None  # 代理池
         self.endpointQueue = None  # 端点队列
