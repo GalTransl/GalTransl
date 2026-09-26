@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BackendConfigEditor } from '../components/BackendConfigEditor';
 import { Button } from '../components/Button';
+import { CustomSelect } from '../components/CustomSelect';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
@@ -199,94 +200,87 @@ export function BackendProfilesPage() {
             </Button>
           )}
         >
-          {loading ? (
-            <LoadingState title="加载配置列表中…" description="正在读取全局翻译后端配置。" />
-          ) : profiles.length === 0 ? (
-            <EmptyState
-              title="暂无配置"
-              description="点击右上角「新建配置」按钮创建一个翻译后端配置。"
-            />
-          ) : (
-            <div className="profile-list">
-              {profiles.map((entry) => {
-                const { baseUrl, modelName } = getProfileMeta(entry.config);
+          <div className="default-selectors">
+            <label className="field">
+              <span>翻译器默认</span>
+              <CustomSelect
+                value={defaultProfile}
+                onChange={(e) => {
+                  setDefaultBackendProfile(e.target.value);
+                  setDefaultProfileState(e.target.value);
+                }}
+              >
+                {profiles.map((entry) => (
+                  <option key={entry.name} value={entry.name}>{entry.name}</option>
+                ))}
+              </CustomSelect>
+            </label>
 
-                return (
-                  <div key={entry.name} className="profile-card">
-                    <div className="profile-card__info">
-                      <div className="profile-card__name">
-                        {entry.name}
-                        {defaultProfile === entry.name && (
-                          <span className="profile-card__badge">翻译器默认</span>
-                        )}
-                        {agentDefaultProfile === entry.name && (
-                          <span className="profile-card__badge profile-card__badge--agent">Agent 默认</span>
-                        )}
+            <label className="field">
+              <span>Agent 默认</span>
+              <CustomSelect
+                value={agentDefaultProfile}
+                onChange={(e) => {
+                  setAgentDefaultBackendProfile(e.target.value);
+                  setAgentDefaultState(e.target.value);
+                }}
+              >
+                {profiles.map((entry) => (
+                  <option key={entry.name} value={entry.name}>{entry.name}</option>
+                ))}
+              </CustomSelect>
+            </label>
+          </div>
+          <div className="backend-profiles-page__divider" />
+
+          <div className="backend-profiles-page__list-scroll">
+            {loading ? (
+              <LoadingState title="加载配置列表中…" description="正在读取全局翻译后端配置。" />
+            ) : profiles.length === 0 ? (
+              <EmptyState
+                title="暂无配置"
+                description="点击右上角「新建配置」按钮创建一个翻译后端配置。"
+              />
+            ) : (
+              <div className="profile-list">
+                {profiles.map((entry) => {
+                  const { baseUrl, modelName } = getProfileMeta(entry.config);
+
+                  return (
+                    <div key={entry.name} className="profile-card">
+                      <div className="profile-card__info">
+                        <div className="profile-card__name">
+                          {entry.name}
+                          {defaultProfile === entry.name && (
+                            <span className="profile-card__badge">翻译器默认</span>
+                          )}
+                          {agentDefaultProfile === entry.name && (
+                            <span className="profile-card__badge profile-card__badge--agent">Agent 默认</span>
+                          )}
+                        </div>
+                        <div className="profile-card__meta">Base URL：{baseUrl}</div>
+                        <div className="profile-card__meta">模型：{modelName}</div>
                       </div>
-                      <div className="profile-card__meta">Base URL：{baseUrl}</div>
-                      <div className="profile-card__meta">模型：{modelName}</div>
+                      <div className="profile-card__actions">
+                        <Button
+                          variant="secondary"
+                          onClick={() => handleEdit(entry)}
+                        >
+                          编辑
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={() => void handleDelete(entry.name)}
+                        >
+                          删除
+                        </Button>
+                      </div>
                     </div>
-                    <div className="profile-card__actions">
-                      {defaultProfile !== entry.name ? (
-                        <Button
-                          variant="secondary"
-                          onClick={() => {
-                            setDefaultBackendProfile(entry.name);
-                            setDefaultProfileState(entry.name);
-                          }}
-                        >
-                          设为翻译器默认
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="secondary"
-                          onClick={() => {
-                            setDefaultBackendProfile('');
-                            setDefaultProfileState('');
-                          }}
-                        >
-                          取消翻译器默认
-                        </Button>
-                      )}
-                      {agentDefaultProfile !== entry.name ? (
-                        <Button
-                          variant="secondary"
-                          onClick={() => {
-                            setAgentDefaultBackendProfile(entry.name);
-                            setAgentDefaultState(entry.name);
-                          }}
-                        >
-                          设为 Agent 默认
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="secondary"
-                          onClick={() => {
-                            setAgentDefaultBackendProfile('');
-                            setAgentDefaultState('');
-                          }}
-                        >
-                          取消 Agent 默认
-                        </Button>
-                      )}
-                      <Button
-                        variant="secondary"
-                        onClick={() => handleEdit(entry)}
-                      >
-                        编辑
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        onClick={() => void handleDelete(entry.name)}
-                      >
-                        删除
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </Panel>
 
       </div>

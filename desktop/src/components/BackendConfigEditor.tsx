@@ -55,7 +55,8 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
         onChange({
           ...config,
           'OpenAI-Compatible': {
-            tokens: [],
+            // 勾选后端类型时自动预置一条令牌，相当于替用户点了一次「添加令牌」
+            tokens: [{ token: '', endpoint: '', modelName: '', contextWindow: DEFAULT_CONTEXT_WINDOW }],
             tokenStrategy: 'random',
             checkAvailable: true,
             globalRequestRPM: 0,
@@ -67,7 +68,8 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
         onChange({
           ...config,
           SakuraLLM: {
-            endpoints: [],
+            // 勾选后端类型时自动预置一个端点，相当于替用户点了一次「添加端点」
+            endpoints: [''],
             rewriteModelName: '',
           },
         });

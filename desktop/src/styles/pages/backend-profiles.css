@@ -50,7 +50,35 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  /* 顶部默认配置固定，滚动交给内部列表容器 */
+  overflow: hidden;
+}
+
+/* 只有列表区域滚动，顶部「翻译器默认 / Agent 默认」保持不动 */
+.backend-profiles-page__list-scroll {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+}
+
+/* 默认配置（翻译器默认 / Agent 默认）下拉区：并入配置列表面板顶部 */
+.default-selectors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4) var(--space-5);
+  flex-shrink: 0;
+}
+
+.backend-profiles-page__divider {
+  border-top: 1px solid var(--color-line);
+  margin: var(--space-4) 0;
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  .default-selectors {
+    grid-template-columns: 1fr;
+  }
 }
 
 .profile-list {
