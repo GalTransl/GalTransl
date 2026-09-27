@@ -51,6 +51,12 @@ const CONTINUOUS_RETRANSL_STORAGE_KEY = 'galtransl-continuous-retransl-by-projec
 
 const HIDDEN_TRANSLATORS = new Set(['rebuilda', 'rebuildr', 'show-plugs', 'dump-name']);
 
+// 不该占用工作台「翻译模板」下拉的流程：内部辅助流程（重建/导出人名/插件列表），
+// 以及 GenDic（生成 GPT 字典，通常是从「项目字典」页启动的）。
+// 以前 GenDic 会被选中并持久化，跑完一次后工作台就一直停在 GenDic 上，
+// 下次要正式翻译还得手动把模板改回来——现在既不采纳、也不恢复被它污染的历史值。
+const TEMPLATE_SELECTION_IGNORED = new Set([...HIDDEN_TRANSLATORS, 'GenDic']);
+
 // Module-level cache shared across remounts of this page. Switching project tabs
 // unmounts/remounts the component; without this cache the first render would see
 // empty state and flash the "启动翻译" (blue) button before fetches complete,
@@ -131,7 +137,9 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
       return;
     }
     const persisted = getSelectedTranslatorTemplate(projectDir);
-    const hasPersisted = translators.some((item) => item.name === persisted);
+    // 被 GenDic 这类流程写进去的历史值不算有效选择，回落到默认模板（列表第一个，通常是 ForGal-json）
+    const hasPersisted = translators.some((item) => item.name === persisted)
+      && !TEMPLATE_SELECTION_IGNORED.has(persisted);
     const nextTranslator = hasPersisted ? persisted : translators[0].name;
     setSelectedTranslator((current) => (current === nextTranslator ? current : nextTranslator));
     if (!hasPersisted) {
@@ -271,9 +279,18 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     [projectDir, runningJobs],
   );
   const runtimeMatchesProject = runtime?.project_dir === projectDir;
-  const currentJob = runtimeMatchesProject
+  const jobCandidate = runtimeMatchesProject
     ? (runtime?.job ?? (currentProjectJobFallback ? toRuntimeJob(currentProjectJobFallback) : null))
     : (currentProjectJobFallback ? toRuntimeJob(currentProjectJobFallback) : null);
+  // 跑完的辅助流程（提取人名 / 构建输出 / 插件列表）不算「这个项目的任务」：新项目刚建好就显示
+  // 「已完成」很莫名其妙，打开项目应当是「空闲」。运行期间照旧认它，否则进度条和「停止翻译」会失灵。
+  const auxiliaryFlowFinished = Boolean(
+    jobCandidate
+    && HIDDEN_TRANSLATORS.has(jobCandidate.translator)
+    && jobCandidate.status !== 'pending'
+    && jobCandidate.status !== 'running',
+  );
+  const currentJob = auxiliaryFlowFinished ? null : jobCandidate;
   const shouldPollRuntime = currentJob?.status === 'pending' || currentJob?.status === 'running';
   const isSelectedTranslatorValid = translators.some((item) => item.name === selectedTranslator);
 
@@ -316,10 +333,10 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
 
   useEffect(() => {
     if (!projectDir || !runtimeMatchesProject || !currentJob?.translator) return;
-    // Auxiliary flows like 构建输出 (rebuilda/rebuildr) and 提取人名表 (dump-name)
-    // reuse the job pipeline but must not hijack the user's translator template
-    // selection in the cockpit dropdown.
-    if (HIDDEN_TRANSLATORS.has(currentJob.translator)) return;
+    // Auxiliary flows like 构建输出 (rebuilda/rebuildr)、提取人名表 (dump-name) 和
+    // 生成字典 (GenDic) reuse the job pipeline but must not hijack the user's translator
+    // template selection in the cockpit dropdown.
+    if (TEMPLATE_SELECTION_IGNORED.has(currentJob.translator)) return;
     setSelectedTranslator((current) => (current === currentJob.translator ? current : currentJob.translator));
     setSelectedTranslatorTemplate(projectDir, currentJob.translator);
   }, [currentJob?.translator, projectDir, runtimeMatchesProject]);
