@@ -226,10 +226,57 @@
   min-width: 0;
 }
 
-/* 类目筛选和搜索框挤在同一行，不额外占用条目列表的高度 */
-.dict-toolbar .dict-section-filter {
-  flex: none;
-  width: 9.5rem;
+/* 类目筛选：一排胶囊挂在卡片头部，跟「GPT 216条」同一行，点击即筛选 */
+.dict-section-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  /* 紧跟在「GPT 216条」后面，不推到行尾 */
+  justify-content: flex-start;
+  margin-right: auto;
+}
+
+.dict-section-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface-strong);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    border-color 160ms ease;
+}
+
+.dict-section-pill:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.dict-section-pill--active,
+.dict-section-pill--active:hover {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
+.dict-section-pill__count {
+  font-weight: 500;
+  opacity: 0.72;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 筛不出任何条目时卡片不渲染，胶囊单独占一行 */
+.dict-card--filters {
+  margin-bottom: var(--space-3);
 }
 
 .dict-empty-actions {
@@ -286,18 +333,15 @@
 
 /* ── Dictionary Card Mode ── */
 
+/* 列表本身不滚动：滚动条交给卡片内部的表格，跟卡片边框贴在一起 */
 .dict-card-list {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: var(--space-3);
   flex: 1;
-  align-content: start;
-  grid-auto-rows: max-content;
   min-width: 0;
   min-height: 0;
-  max-height: none;
-  padding-right: var(--space-2);
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .dict-card {
@@ -396,6 +440,14 @@
   background: rgba(160, 175, 190, 0.7);
 }
 
+/* 分组卡片：头部（类型/条数/类目胶囊）固定，表格区域自己滚。
+   高度不够时卡片按比例收缩（min-height: 0 允许缩到内容以下），于是滚动条落在卡片内部 */
+.dict-card--grouped {
+  flex: 0 1 auto;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 /* ── Card header (badges + delete) ── */
 
 .dict-card__header {
@@ -403,6 +455,8 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
+  /* 类目胶囊多的时候让它换行，别把「GPT 216条」挤走 */
+  flex-wrap: wrap;
 }
 
 .dict-card__badges {
@@ -481,7 +535,9 @@
   border: 1px solid rgba(191, 208, 226, 0.58);
   border-radius: 12px;
   overflow-x: auto;
-  overflow-y: hidden;
+  /* 竖向滚动条也归表格：出现在卡片内部（表格右边框那一列） */
+  overflow-y: auto;
+  min-height: 0;
   background: rgba(255, 255, 255, 0.9);
 }
 
@@ -499,9 +555,13 @@
   min-width: max(100%, calc(58px + 108px + (4 * 140px)));
 }
 
+/* 滚动条在卡片里，列名要吸顶跟着看；吸顶元素必须不透明，否则行会从底下透出来 */
 .dict-card__table-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   border-bottom: 1px solid rgba(191, 208, 226, 0.56);
-  background: linear-gradient(180deg, rgba(245, 249, 255, 0.95), rgba(238, 245, 255, 0.9));
+  background: linear-gradient(180deg, #f5f9ff, #eef5ff);
 }
 
 .dict-card__table-row {
@@ -763,7 +823,8 @@
 
 :root[data-theme='dark'] .dict-card__table-head {
   border-bottom-color: rgba(65, 83, 111, 0.58);
-  background: linear-gradient(180deg, rgba(29, 41, 58, 0.96), rgba(22, 33, 48, 0.92));
+  /* 不透明：吸顶表头下面有行滚过 */
+  background: linear-gradient(180deg, #1d293a, #162130);
 }
 
 :root[data-theme='dark'] .dict-card__table-row {

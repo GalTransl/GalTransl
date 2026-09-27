@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from './Button';
-import { CustomSelect } from './CustomSelect';
 import { Icon } from './Icon';
 import { Panel } from './Panel';
 import { EmptyState, ErrorState, InlineFeedback, LoadingState } from './page-state';
@@ -141,12 +140,15 @@ function getFieldLabels(type: DictRowType, _tab: DictTab): string[] {
 function DictEntryGroupCard({
   group,
   tab,
+  headerExtra,
   onCellChange,
   onDelete,
   onAddRow,
 }: {
   group: DictRowGroup;
   tab: DictTab;
+  /** 挂在卡片头部、跟「GPT 216条」同一行的额外内容（类目筛选胶囊） */
+  headerExtra?: ReactNode;
   onCellChange: (rowIndex: number, cellIndex: number, value: string) => void;
   onDelete: (rowIndex: number) => void;
   onAddRow: (rowType: DictRowType, insertAfterRowIndex: number) => void;
@@ -163,6 +165,7 @@ function DictEntryGroupCard({
           </span>
           <span className="dict-card__pill dict-card__pill--index">{group.items.length}条</span>
         </div>
+        {headerExtra}
       </div>
 
       <div className="dict-card__table" style={tableStyle}>
@@ -311,6 +314,36 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     }
     return groups;
   }, [filteredRows]);
+
+  // 类目筛选：一排胶囊挂在卡片头部（跟「GPT 216条」同一行），点当前项退回全部
+  const sectionPills = sections.length > 0 ? (
+    <div className="dict-section-pills" role="group" aria-label="按类目筛选">
+      <button
+        type="button"
+        className={`dict-section-pill${activeSection ? '' : ' dict-section-pill--active'}`}
+        onClick={() => setSectionFilter('')}
+        title="显示全部类目"
+      >
+        全部
+        <span className="dict-section-pill__count">{sections.reduce((sum, item) => sum + item.count, 0)}</span>
+      </button>
+      {sections.map((section) => {
+        const isActive = activeSection === section.name;
+        return (
+          <button
+            key={section.name}
+            type="button"
+            className={`dict-section-pill${isActive ? ' dict-section-pill--active' : ''}`}
+            onClick={() => setSectionFilter(isActive ? '' : section.name)}
+            title={isActive ? '取消筛选，显示全部类目' : `只看「${section.name}」`}
+          >
+            {section.name}
+            <span className="dict-section-pill__count">{section.count}</span>
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
 
   const handleReload = async () => {
     if (refreshing) return;
@@ -699,20 +732,6 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="dict-search"
                   />
-                  {sections.length > 0 && (
-                    <CustomSelect
-                      compact
-                      className="dict-section-filter"
-                      value={activeSection}
-                      onChange={(e) => setSectionFilter(e.target.value)}
-                      title="按类目筛选"
-                    >
-                      <option value="">全部类目</option>
-                      {sections.map((s) => (
-                        <option key={s.name} value={s.name}>{`${s.name}（${s.count}）`}</option>
-                      ))}
-                    </CustomSelect>
-                  )}
                   {mode === 'card' && (
                     activeTab === 'gpt' ? (
                       <Button variant="secondary" onClick={() => addRow('gpt')}>
@@ -745,12 +764,19 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                   />
                 ) : (
                   <div className="dict-card-mode">
+                    {/* 一条都没筛出来时卡片不渲染，胶囊单独占一行——否则筛选没法取消 */}
+                    {groupedRows.length === 0 && sectionPills ? (
+                      <div className="dict-card dict-card--filters">
+                        <div className="dict-card__header">{sectionPills}</div>
+                      </div>
+                    ) : null}
                     <div className="dict-card-list">
                       {groupedRows.map((group, groupIndex) => (
                         <DictEntryGroupCard
                           key={`${groupIndex}-${group.type}-${group.items[0]?.rowIndex ?? 0}`}
                           group={group}
                           tab={activeTab}
+                          headerExtra={groupIndex === 0 ? sectionPills : undefined}
                           onCellChange={updateRowCell}
                           onDelete={deleteRow}
                           onAddRow={addRow}
