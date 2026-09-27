@@ -940,6 +940,17 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
         </div>
       </section>
 
+      {backendUsageSummary.backend === '未配置后端' && !isCurrentProjectActive ? (
+        <InlineFeedback
+          className="ptv2-alert"
+          tone="warning"
+          title="还没有可用的翻译模型"
+          description="本项目跟随全局默认模型，但尚未设置默认模型配置，直接开始翻译会失败。请先在「模型设置」中新建配置（第一个配置会自动设为默认）。"
+          autoDismiss={0}
+          dedupeKey={null}
+          action={<Button variant="secondary" onClick={() => navigate('/backend-profiles')}>前往模型设置</Button>}
+        />
+      ) : null}
       {submitError ? <InlineFeedback tone="error" title="启动翻译失败" description={submitError} className="ptv2-alert inline-alert--floating" /> : null}
       {runtimeError ? <InlineFeedback tone="error" title="运行时状态异常" description={runtimeError} className="ptv2-alert inline-alert--floating" /> : null}
       {currentJob?.status === 'failed' && currentJobError ? (

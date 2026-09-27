@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
+import { GettingStarted } from '../components/GettingStarted';
 import { InlineFeedback } from '../components/page-state';
 import {
   encodeProjectDir,
@@ -535,13 +536,19 @@ export function HomePage({ onOpenProject }: HomePageProps) {
         <div className="home-hero__glow" aria-hidden="true" />
       </div>
 
+      <GettingStarted
+        hasProject={history.length > 0}
+        hasCompletedJob={completedJobsCount > 0}
+        onOpenLatestProject={history[0] ? () => handleHistoryClick(history[0]) : undefined}
+      />
+
       {/* ── Main Content Grid ── */}
       <div className="home-grid">
         {/* Left: Open Project */}
         <section className="home-open">
           <div className="home-open__header">
             <h2>打开项目</h2>
-            <p>打开或新建翻译项目</p>
+            <p>打开已有项目的 config.yaml，或用向导新建项目</p>
           </div>
           <div className="home-open__form">
             <div className="home-open__actions">

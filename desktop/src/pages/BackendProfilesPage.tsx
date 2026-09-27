@@ -109,6 +109,16 @@ export function BackendProfilesPage() {
     try {
       const newConfig = JSON.parse(JSON.stringify(DEFAULT_BACKEND_CONFIG));
       await createBackendProfile(name, newConfig);
+      // 还没有默认配置时（通常是第一次使用），新建的配置直接当默认，
+      // 否则「跟随全局默认」的项目仍然是「未配置后端」。
+      if (!getDefaultBackendProfile()) {
+        setDefaultBackendProfile(name);
+        setDefaultProfileState(name);
+      }
+      if (!getAgentDefaultBackendProfile()) {
+        setAgentDefaultBackendProfile(name);
+        setAgentDefaultState(name);
+      }
       setSaveSuccess(true);
       setShowNewDialog(false);
       setNewProfileName('');
@@ -239,7 +249,8 @@ export function BackendProfilesPage() {
             ) : profiles.length === 0 ? (
               <EmptyState
                 title="暂无配置"
-                description="点击右上角「新建配置」按钮创建一个翻译后端配置。"
+                description="翻译前需要至少一个模型配置：新建后填写 API 地址、API Key 和模型名即可。第一个配置会自动设为默认。"
+                action={<Button onClick={openNewDialog}><Icon name="file-plus" /> 新建第一个配置</Button>}
               />
             ) : (
               <div className="profile-list">

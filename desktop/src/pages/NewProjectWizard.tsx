@@ -179,10 +179,18 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
     }
   }, []);
 
-  const handleCreateProject = useCallback(async () => {
+  const handleCreateProject = useCallback(async (): Promise<boolean> => {
     if (!projectDir) {
       setFeedback({ type: 'error', message: '请选择目录并输入项目名称' });
-      return;
+      return false;
+    }
+    // 目标目录里已有 config.yaml 时不覆盖，避免把已有项目的配置冲掉
+    const alreadyExists = await fetchProjectConfig(encodeProjectDir(projectDir), 'config.yaml')
+      .then(() => true)
+      .catch(() => false);
+    if (alreadyExists) {
+      setFeedback({ type: 'error', message: '该目录下已存在 config.yaml，请换一个项目名称，或回到首页用「打开项目」打开它。' });
+      return false;
     }
     try {
       const sep = projectDir.includes('/') ? '/' : '\\';
@@ -193,9 +201,13 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
       await invoke('create_dir', { path: `${projectDir}${sep}transl_cache` });
       await invoke('write_text_file', { path: `${projectDir}${sep}config.yaml`, content: configYaml });
       setProjectCreated(true);
+      // 先记入历史：中途离开向导（比如去模型设置）也能从首页找回这个项目
+      addProjectToHistory(projectDir, 'config.yaml');
       setFeedback({ type: 'success', message: '项目创建成功！' });
+      return true;
     } catch (err) {
       setFeedback({ type: 'error', message: `创建失败: ${err instanceof Error ? err.message : String(err)}` });
+      return false;
     }
   }, [projectDir]);
 
@@ -322,8 +334,8 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
       .catch(() => {});
   }, [currentStep, projectDir]);
 
-  const handleSaveSettings = useCallback(async () => {
-    if (!projectDir) return;
+  const handleSaveSettings = useCallback(async (): Promise<boolean> => {
+    if (!projectDir) return false;
     try {
       const projectId = encodeProjectDir(projectDir);
       const res = await fetchProjectConfig(projectId, 'config.yaml');
@@ -362,8 +374,10 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
 
       setSettingsSaved(true);
       setFeedback({ type: 'success', message: '设置已保存' });
+      return true;
     } catch (err) {
       setFeedback({ type: 'error', message: `保存失败: ${err instanceof Error ? err.message : String(err)}` });
+      return false;
     }
   }, [projectDir, workersPerProject, language, numPerRequest, dynamicNumPerRequest, dynamicNumPerRequestMin, dynamicNumPerRequestMax, selectedFilePlugin, selectedBackend, translationGuideline]);
 
@@ -421,13 +435,14 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
     navigate(`/project/${projectId}/translate`);
   }, [projectDir, navigate, onOpenProject]);
 
+  // 「下一步」本身会完成创建项目 / 保存设置，不再要求先点单独的按钮
   const canNext = useMemo(() => {
-    if (currentStep === 0) return projectCreated;
+    if (currentStep === 0) return projectCreated || Boolean(parentDir.trim() && projectName.trim());
     if (currentStep === 1) return true; // file import is optional
     if (currentStep === 2) return true; // backend selection is optional
-    if (currentStep === 3) return settingsSaved;
+    if (currentStep === 3) return true;
     return false;
-  }, [currentStep, projectCreated, settingsSaved]);
+  }, [currentStep, projectCreated, parentDir, projectName]);
 
   const stepProgress = useMemo(
     () => Math.round(((currentStep + 1) / STEPS.length) * 100),
@@ -490,11 +505,12 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
           <div className="wizard-path-preview__meta">包含 `gt_input` / `gt_output` / `transl_cache` 与 `config.yaml`</div>
         </div>
       </div>
-      <div className="wizard-actions">
-        <Button disabled={projectCreated || !parentDir || !projectName} onClick={() => void handleCreateProject()}>
-          {projectCreated ? <>已创建 <Icon name="check" /></> : '创建项目'}
-        </Button>
-      </div>
+      {projectCreated ? (
+        <div className="wizard-tip-card">
+          <strong><Icon name="check" /> 项目已创建</strong>
+          <span>点击「下一步」继续导入文件。</span>
+        </div>
+      ) : null}
     </Panel>
   );
 
@@ -553,10 +569,23 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
               : '将忽略全局配置，使用项目自身后端设置'}
         </span>
       </div>
-      <div className="wizard-tip-card">
-        <strong>推荐策略</strong>
-        <span>如果没有翻译后端可以先去模型设置中新建。</span>
-      </div>
+      {backendProfileNames.length === 0 ? (
+        <div className="wizard-tip-card wizard-tip-card--warning">
+          <strong><Icon name="warning" /> 还没有任何模型配置</strong>
+          <span>
+            没有模型就无法翻译。可以先继续完成向导，之后在「模型设置」中新建配置（第一个配置会自动设为默认）；
+            项目已保存在首页的历史项目中，随时可以回来。
+          </span>
+          <div>
+            <Button variant="secondary" onClick={() => navigate('/backend-profiles')}>前往模型设置</Button>
+          </div>
+        </div>
+      ) : (
+        <div className="wizard-tip-card">
+          <strong>推荐策略</strong>
+          <span>一般保持「跟随全局默认」即可；需要为这个项目单独换模型时再选择具体配置。</span>
+        </div>
+      )}
     </Panel>
   );
 
@@ -663,11 +692,6 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
         <span className="field__hint">选择使用的翻译规范文件（位于 translation_guidelines 文件夹），高端模型日译中推荐"增强"规范</span>
       </div>
       </div>
-      <div className="wizard-actions">
-        <Button disabled={settingsSaved} onClick={() => void handleSaveSettings()}>
-          {settingsSaved ? <>已保存 <Icon name="check" /></> : '保存设置'}
-        </Button>
-      </div>
     </Panel>
   );
 
@@ -704,10 +728,25 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
     setCurrentStep((s) => Math.max(0, s - 1));
   }, []);
 
-  const handleNextStep = useCallback(() => {
-    setStepDirection('forward');
-    setCurrentStep((s) => Math.min(STEPS.length - 1, s + 1));
-  }, []);
+  const [advancing, setAdvancing] = useState(false);
+  const handleNextStep = useCallback(async () => {
+    if (advancing) return;
+    setAdvancing(true);
+    try {
+      if (currentStep === 0 && !projectCreated && !(await handleCreateProject())) return;
+      if (currentStep === 3 && !settingsSaved && !(await handleSaveSettings())) return;
+      setStepDirection('forward');
+      setCurrentStep((s) => Math.min(STEPS.length - 1, s + 1));
+    } finally {
+      setAdvancing(false);
+    }
+  }, [advancing, currentStep, projectCreated, settingsSaved, handleCreateProject, handleSaveSettings]);
+
+  const nextLabel = currentStep === 0 && !projectCreated
+    ? '创建项目并继续'
+    : currentStep === 3
+      ? '保存设置并继续'
+      : '下一步';
 
   return (
     <div className="wizard-page">
@@ -736,8 +775,8 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
           上一步
         </Button>
         {currentStep < 4 ? (
-          <Button onClick={handleNextStep} disabled={!canNext}>
-            下一步
+          <Button onClick={() => void handleNextStep()} disabled={!canNext || advancing}>
+            {advancing ? '处理中…' : nextLabel}
           </Button>
         ) : (
           <Button onClick={handleFinish}>

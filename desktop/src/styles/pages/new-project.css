@@ -585,3 +585,16 @@
     animation: none;
   }
 }
+
+.wizard-tip-card--warning,
+:root[data-theme='dark'] .wizard-tip-card--warning {
+  border-color: var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+.wizard-tip-card--warning strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-warning);
+}
