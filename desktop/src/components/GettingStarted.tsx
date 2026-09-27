@@ -11,6 +11,7 @@ import { Icon } from './Icon';
 
 const DISMISSED_KEY = 'galtransl-onboarding-dismissed';
 const FIRST_TRANSLATION_KEY = 'galtransl-onboarding-first-translation';
+const FIRST_DICT_KEY = 'galtransl-onboarding-first-dict';
 
 function readFlag(key: string): boolean {
   try {
@@ -31,17 +32,27 @@ function writeFlag(key: string) {
 type GettingStartedProps = {
   hasProject: boolean;
   hasCompletedJob: boolean;
+  /** 用 GenDic 生成过 GPT 字典（任务列表里有过跑完的 GenDic 任务） */
+  hasGeneratedDict: boolean;
   /** 最近打开的项目，用于「开始翻译」一步直接跳过去 */
   onOpenLatestProject?: () => void;
+  /** 最近打开的项目 → 项目字典页，用「AI生成GPT字典」先生成一份术语表 */
+  onOpenProjectDictionary?: () => void;
 };
 
-/** 首页「快速上手」清单：三步走完（或手动关闭）后不再显示。 */
-export function GettingStarted({ hasProject, hasCompletedJob, onOpenLatestProject }: GettingStartedProps) {
+/** 首页「快速上手」清单：走完（或手动关闭）后不再显示。 */
+export function GettingStarted({
+  hasProject,
+  hasCompletedJob,
+  hasGeneratedDict,
+  onOpenLatestProject,
+  onOpenProjectDictionary }: GettingStartedProps) {
   const navigate = useNavigate();
   const [dismissed, setDismissed] = useState(() => readFlag(DISMISSED_KEY));
   const [hasProfile, setHasProfile] = useState(() => getBackendProfileNames().length > 0);
   const [hasDefault, setHasDefault] = useState(() => Boolean(getDefaultBackendProfile()));
   const [translatedOnce, setTranslatedOnce] = useState(() => readFlag(FIRST_TRANSLATION_KEY));
+  const [dictGenerated, setDictGenerated] = useState(() => readFlag(FIRST_DICT_KEY));
 
   useEffect(() => {
     const sync = () => {
@@ -56,13 +67,20 @@ export function GettingStarted({ hasProject, hasCompletedJob, onOpenLatestProjec
     };
   }, []);
 
-  // 任务列表可能被清空，所以「翻译过一次」单独记下来
+  // 任务列表可能被清空，所以「翻译过一次」「生成过字典」单独记下来
   useEffect(() => {
     if (hasCompletedJob && !translatedOnce) {
       writeFlag(FIRST_TRANSLATION_KEY);
       setTranslatedOnce(true);
     }
   }, [hasCompletedJob, translatedOnce]);
+
+  useEffect(() => {
+    if (hasGeneratedDict && !dictGenerated) {
+      writeFlag(FIRST_DICT_KEY);
+      setDictGenerated(true);
+    }
+  }, [hasGeneratedDict, dictGenerated]);
 
   const modelReady = hasProfile && hasDefault;
   const steps = [
@@ -79,6 +97,21 @@ export function GettingStarted({ hasProject, hasCompletedJob, onOpenLatestProjec
       description: '跟随向导选择项目位置，导入从游戏中提取出的脚本文件（json 等），并选择翻译规范。',
       done: hasProject,
       action: <Button variant={hasProject || !modelReady ? 'secondary' : 'primary'} onClick={() => navigate('/new-project')}>新建项目</Button>,
+    },
+    {
+      title: '先用 AI 生成 GPT 字典',
+      description: '在项目的「项目字典」里点「AI生成GPT字典」：GenDic 读原文提取人名、地名与专有名词并统一译名，正式翻译时术语才前后一致（跳过也能翻译，但译名容易漂）。',
+      // 已经开始翻译就算这步过去了：它只是「建议先做」，不该拖住引导
+      done: dictGenerated || translatedOnce,
+      action: (
+        <Button
+          variant={hasProject && modelReady && !dictGenerated ? 'primary' : 'secondary'}
+          disabled={!hasProject || !onOpenProjectDictionary}
+          onClick={onOpenProjectDictionary}
+        >
+          去生成字典
+        </Button>
+      ),
     },
     {
       title: '开始第一次翻译',
@@ -112,7 +145,7 @@ export function GettingStarted({ hasProject, hasCompletedJob, onOpenLatestProjec
       <div className="home-onboarding__header">
         <div>
           <h2><Icon name="sparkle" /> 快速上手</h2>
-          <p>第一次使用？按下面三步即可完成一次翻译（{doneCount}/{steps.length}）。也可以进入「Agent 模式」，用自然语言让 AI 帮你完成这些操作。</p>
+          <p>第一次使用？按下面几步即可完成一次翻译（{doneCount}/{steps.length}）。也可以进入「Agent 模式」，用自然语言让 AI 帮你完成这些操作。</p>
         </div>
         <button type="button" className="home-onboarding__dismiss" onClick={handleDismiss} title="不再显示" aria-label="不再显示快速上手">
           <Icon name="close" />

@@ -403,10 +403,10 @@ export function HomePage({ onOpenProject }: HomePageProps) {
   }, [onOpenProject, navigate]);
 
   const handleHistoryClick = useCallback(
-    (entry: ProjectHistoryEntry) => {
+    (entry: ProjectHistoryEntry, section: 'translate' | 'dictionary' = 'translate') => {
       onOpenProject(entry.projectDir, entry.configFileName);
       const projectId = encodeProjectDir(entry.projectDir);
-      navigate(`/project/${projectId}/translate`);
+      navigate(`/project/${projectId}/${section}`);
     },
     [onOpenProject, navigate],
   );
@@ -477,6 +477,11 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     [jobs],
   );
   const completedJobsCount = useMemo(() => jobs.filter((job) => job.status === 'completed').length, [jobs]);
+  // 「快速上手」用它判断字典那一步做没做（任务列表里有过跑完的 GenDic 任务）
+  const generatedDictOnce = useMemo(
+    () => jobs.some((job) => job.translator === 'GenDic' && job.status === 'completed'),
+    [jobs],
+  );
   const failedJobsCount = useMemo(() => jobs.filter((job) => job.status === 'failed').length, [jobs]);
 
   return (
@@ -539,7 +544,9 @@ export function HomePage({ onOpenProject }: HomePageProps) {
       <GettingStarted
         hasProject={history.length > 0}
         hasCompletedJob={completedJobsCount > 0}
+        hasGeneratedDict={generatedDictOnce}
         onOpenLatestProject={history[0] ? () => handleHistoryClick(history[0]) : undefined}
+        onOpenProjectDictionary={history[0] ? () => handleHistoryClick(history[0], 'dictionary') : undefined}
       />
 
       {/* ── Main Content Grid ── */}

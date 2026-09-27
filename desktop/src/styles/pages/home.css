@@ -1564,7 +1564,8 @@
 
 .home-onboarding__steps {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* 步数不固定（现在 4 步），按可用宽度自动排，别写死 3 列 */
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: var(--space-3);
   margin: 0;
   padding: 0;
