@@ -116,6 +116,47 @@ class RuntimeState:
     # 这一段抽出的一个个术语（一段几十个），两者不是一个单位，拿成功事件算 ETA 会小一个数量级，
     # 所以它自己按「完成项数/耗时」报上来（见 GenDic._progress_speed_lpm）。
     progress_speed_lpm: float | None = None
+    # 正在流式输出的文件：{显示名: _StreamActivity}。「文件进度」那一行据此点亮
+    # 思考中(蓝)/翻译中(绿)的小灯，闪烁快慢跟着输出的字/秒走。
+    streams: dict[str, "_StreamActivity"] = field(default_factory=dict)
+
+
+# 流式状态多旧就算过期：超过这个时间没有新 chunk（模型卡住、请求结束）就不再点亮，
+# 免得灯一直闪着一个其实没在动的文件。
+STREAM_ACTIVITY_TTL_SECONDS = 2.5
+# 算「字/秒」的滑动窗口
+_STREAM_RATE_WINDOW_SECONDS = 3.0
+
+
+@dataclass(slots=True)
+class _StreamActivity:
+    """某个文件当前的流式输出状态（思考 / 翻译 + 最近的字/秒）。"""
+
+    phase: str = ""
+    samples: deque[tuple[float, int]] = field(default_factory=deque)
+    updated_at: float = 0.0
+
+    def note(self, phase: str, chars: int, now: float) -> None:
+        if phase != self.phase:
+            # 换阶段（思考→翻译，或反过来）就重新起窗：两个阶段的输出速度不是一回事
+            self.samples.clear()
+            self.phase = phase
+        self.samples.append((now, max(0, int(chars))))
+        self.updated_at = now
+        cutoff = now - _STREAM_RATE_WINDOW_SECONDS
+        while self.samples and self.samples[0][0] < cutoff:
+            self.samples.popleft()
+
+    def rate_per_second(self, now: float) -> float:
+        if not self.samples:
+            return 0.0
+        chars = sum(count for _, count in self.samples)
+        # 起点取第一个样本、并且至少按 0.5s 算：只来了一两个 chunk 时别报出个天文数字
+        span = max(now - self.samples[0][0], 0.5)
+        return round(chars / span, 1)
+
+    def is_fresh(self, now: float) -> bool:
+        return bool(self.phase) and now - self.updated_at <= STREAM_ACTIVITY_TTL_SECONDS
 
 
 class RuntimeRegistry:
@@ -172,6 +213,34 @@ class RuntimeRegistry:
             if progress_speed_lpm is not None:
                 state.progress_speed_lpm = max(0.0, float(progress_speed_lpm))
             state.updated_at = _utcnow_text()
+
+    def note_stream_activity(self, project_dir: str, *, filename: str, phase: str, chars: int) -> None:
+        """记一次「这个文件正在流式输出」：phase 是 thinking / writing，chars 是这批新增字数。
+
+        工作台的「文件进度」用它给那一行点小灯（思考中蓝、翻译中绿，闪得快慢跟着字/秒）。
+        引擎传过来的名字常带行号区间（ForGalJson 那几个是 `f"{filename}:{idx_tip}"`），
+        所以先按原样认，认不出再掐掉冒号后面那截；两处都认不出就不记——宁可没有灯，
+        也别把灯点到别的文件上。
+        """
+        now = datetime.utcnow().timestamp()
+        with self._lock:
+            state = self._states.get(_normalize_project_dir(project_dir))
+            if state is None:
+                return
+            display = self._resolve_display_filename_locked(state, filename)
+            if display not in state.file_totals:
+                head, sep, _ = filename.rpartition(":")
+                candidate = self._resolve_display_filename_locked(state, head) if sep and head else ""
+                if candidate in state.file_totals:
+                    display = candidate
+                else:
+                    # 认不出这是本次任务登记过的哪一行：不记。宁可没有灯，也别点到别的文件上
+                    return
+            activity = state.streams.get(display)
+            if activity is None:
+                activity = _StreamActivity()
+                state.streams[display] = activity
+            activity.note(phase, chars, now)
 
     def append_success(
         self,
@@ -307,12 +376,14 @@ class RuntimeRegistry:
                     "translation_speed_lpm": 0,
                     "file_totals": {},
                     "cache_file_display_map": {},
+                    "streams": {},
                     "recent_errors": [],
                     "recent_successes": [],
                     "updated_at": _utcnow_text(),
                 }
             now = datetime.utcnow().timestamp()
             self._trim_speed_window_locked(state, now)
+            streams = self._stream_snapshot_locked(state, now)
             speed = round((len(state.success_timestamps) / 60) * 60, 1) if state.success_timestamps else 0
             if state.progress_speed_lpm is not None:
                 # 引擎自报的速度优先：它的单位与进度计数一致，前端的「实时速度/预计剩余」
@@ -335,6 +406,7 @@ class RuntimeRegistry:
                 "translation_speed_lpm": speed,
                 "file_totals": dict(state.file_totals),
                 "cache_file_display_map": dict(state.cache_file_display_map),
+                "streams": streams,
                 "recent_errors": [event.to_dict() for event in state.recent_errors],
                 "recent_successes": [event.to_dict() for event in merged_successes],
                 "updated_at": state.updated_at,
@@ -344,6 +416,20 @@ class RuntimeRegistry:
     def _trim_speed_window_locked(state: RuntimeState, now: float) -> None:
         while state.success_timestamps and now - state.success_timestamps[0] > 60:
             state.success_timestamps.popleft()
+
+    @staticmethod
+    def _stream_snapshot_locked(state: RuntimeState, now: float) -> dict[str, dict[str, Any]]:
+        """{显示名: {phase, cps}}，只给「还在动」的文件；顺手把过期的清掉。"""
+        snapshot: dict[str, dict[str, Any]] = {}
+        for filename, activity in list(state.streams.items()):
+            if not activity.is_fresh(now):
+                del state.streams[filename]
+                continue
+            snapshot[filename] = {
+                "phase": activity.phase,
+                "cps": activity.rate_per_second(now),
+            }
+        return snapshot
 
 
 def _trim_preview(value: str, limit: int = 140) -> str:
@@ -859,6 +945,22 @@ def record_runtime_error(
         model=model,
         sleep_seconds=sleep_seconds,
         level=level,
+    )
+
+
+def record_runtime_stream(
+    project_dir: str,
+    *,
+    filename: str,
+    phase: str,
+    chars: int,
+) -> None:
+    """「这个文件正在流式输出」的一次上报：phase 取 thinking / writing，chars 是本批新增字数。
+
+    工作台的「文件进度」用它点小灯（思考中蓝、翻译中绿，闪得快慢跟着字/秒走）。
+    """
+    RUNTIME_REGISTRY.note_stream_activity(
+        project_dir, filename=filename, phase=phase, chars=chars
     )
 
 

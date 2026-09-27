@@ -356,7 +356,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
                       else updateToken(idx, 'stream', e.target.value === 'true');
                     }}
                   >
-                    <option value="">默认</option>
+                    <option value="">跟随全局设置</option>
                     <option value="true">是</option>
                     <option value="false">否</option>
                   </CustomSelect>
@@ -393,6 +393,21 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
               <option value="fallback">优先降级</option>
             </CustomSelect>
             <span className="field__hint">random 随机轮询；fallback 优先第一个，出错时使用下一个</span>
+          </label>
+          <label className="field">
+            <span>流式请求</span>
+            <CustomSelect
+              disabled={readOnly}
+              value={String(oaiConfig.stream ?? true)}
+              onChange={(e) => updateOai('stream', e.target.value === 'true')}
+            >
+              <option value="true">开启（默认）</option>
+              <option value="false">关闭</option>
+            </CustomSelect>
+            <span className="field__hint">
+              默认开启。工作台的文件进度小灯、实时速度与预计剩余都来自流式输出（边生成边回报），
+              关掉后只剩按缓存算的静态进度；接口或中转不支持流式时再关。
+            </span>
           </label>
           <label className="field">
             <span>测试模型可用性</span>

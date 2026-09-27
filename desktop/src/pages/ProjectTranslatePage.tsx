@@ -1009,6 +1009,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                       <FileProgressRow
                         key={file.filename}
                         file={file}
+                        isRunning={shouldPollRuntime}
                         isSuccessFileFilterActive={selectedSuccessFileSet.has(file.filename)}
                         onToggleSuccessFileFilter={handleToggleSuccessFileFilter}
                       />

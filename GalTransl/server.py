@@ -60,6 +60,7 @@ from GalTransl.server_runtime import (
     decode_project_dir,
     encode_project_dir,
     record_runtime_error,
+    record_runtime_stream,
     record_runtime_success,
     reset_runtime_project,
     update_runtime_status,
@@ -856,11 +857,17 @@ def _cache_name_bases(cache_names: set[str]) -> set[str]:
     这样 foo.json（整篇）、foo.json.append.jsonl（增量）、foo.json_1.json（切块，见
     LLMTranslate._build_runtime_file_maps：切块后缀插在 .json 之后）都归到 foo.json，
     与输入文件一一对得上，判断「有没有缓存」就只是一次集合查询。
+
+    原名必须一起收：输入文件名本身就可能是 foo_1.json / OPEV_YUU_12_25.json 这种
+    「看着像切块」的名字（缓存也就叫这个名），只收剥掉 `_<n>` 的那个写法会把它们判成
+    「还没缓存」——同一个名字于是同时出现在缓存列表与未翻译列表里（界面按 key 渲染就重复了）。
     """
     bases: set[str] = set()
     for name in cache_names:
         base = name[: -len(_CACHE_APPEND_SUFFIX)] if name.endswith(_CACHE_APPEND_SUFFIX) else name
-        # 剥掉 .json，再剥掉切块后缀 _<n>，最后按输入文件的规则补回 .json
+        # ① 原名：输入文件就叫这个名字（含以 `_<n>` 结尾的情况）
+        bases.add(base if base.endswith(".json") else f"{base}.json")
+        # ② 剥掉 .json，再剥掉切块后缀 _<n>，最后按输入文件的规则补回 .json
         # （切块名是 foo.json_1.json：`_1` 夹在原来那个 .json 与补上的 .json 之间）
         if base.endswith(".json"):
             base = base[: -len(".json")]
@@ -998,7 +1005,9 @@ def _list_uncached_input_files(
         if relative.startswith("..") or "__MACOSX" in relative:
             continue
         cache_key = _cache_key_for_input_name(relative)
-        if cache_key in bases:
+        # bases 认切块/增量，cache_names 是缓存目录里的原名：两边都不认才叫「还没缓存」。
+        # 认原名是最后一道保险——同一个名字同时出现在两个列表里，界面就会重复渲染。
+        if cache_key in bases or cache_key in cache_names:
             continue
         pending.append((relative, cache_key, file_path))
     if not pending:
@@ -2432,6 +2441,7 @@ def build_handler(registry: JobRegistry):
                 runtime = RUNTIME_REGISTRY.get_runtime_snapshot(project_dir)
                 file_totals = runtime.get("file_totals", {})
                 cache_file_display_map = runtime.get("cache_file_display_map", {})
+                streams = runtime.get("streams", {})
                 config_file_name = "config.yaml"
                 job = registry.get_project_job(project_dir)
                 if job:
@@ -2489,7 +2499,14 @@ def build_handler(registry: JobRegistry):
                     "recent_errors": runtime["recent_errors"],
                     "recent_successes": runtime["recent_successes"],
                     "retransl_stats": progress_payload["retransl_stats"],
-                    "files": progress_payload["files"],
+                    # files 是缓存算出来的静态进度，这里给「正在流式输出」的那几行补上实时状态
+                    # （{phase: thinking|writing, cps: 字/秒}），界面拿它点那颗小灯
+                    "files": [
+                        {**row, "stream": streams[row["filename"]]}
+                        if row.get("filename") in streams
+                        else row
+                        for row in progress_payload["files"]
+                    ],
                 })
                 return
 

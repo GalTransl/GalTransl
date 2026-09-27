@@ -638,6 +638,7 @@ class GenDic(BaseTranslate):
                     file_name=self.progress_display_name,
                     max_retry_count=self.gendic_max_api_retries,
                     reasoning_holder=reasoning,
+                    progress_file=self.progress_display_name,
                 )
             except asyncio.CancelledError:
                 raise

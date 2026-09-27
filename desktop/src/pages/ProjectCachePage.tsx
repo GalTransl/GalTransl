@@ -410,6 +410,24 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   } as CSSProperties;
   const bucketsRef = useRef<Map<string, ProjectBucket>>(new Map());
   const lastProjectIdRef = useRef<string>('');
+  /**
+   * 「现在在看哪个项目」的同步镜像，切项目时由下面的状态桶 effect 更新。
+   *
+   * 本页是 keep-alive 的（切项目不重新挂载）：一个请求发出去之后用户可能已经切到别的项目了，
+   * 而这时 state 与 entriesMapRef 都换成了新项目的。所以每个 await 回来、要写项目相关数据的
+   * 地方都先问一句「还在看这个项目吗」，不在就整段丢掉——否则上个项目的文件列表会被写进当前
+   * 项目（B 的文件出现在 A 里），条目更会串进 A 的 entriesMap。
+   */
+  const viewingProjectIdRef = useRef(projectId);
+  /**
+   * 切项目时的「选中项接力」。
+   *
+   * state 里的 selectedFile 要等下一拍才换成新项目的，而读条目的 effect 在切项目这一拍就带着
+   * 新 projectId 跑了：直接用 state 那份，就是拿「新项目 + 上一个项目的文件名」去读文件——
+   * 别的项目里没有同名文件就是 404（控制台里那条），同名则读到别人的内容。
+   * 桶 effect 先于它运行，把新项目真正的选中项放这里交给它。
+   */
+  const pendingSelectionRef = useRef<{ projectId: string; file: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshingFiles, setRefreshingFiles] = useState(false);
   const [loadingEntries, setLoadingEntries] = useState(false);
@@ -562,17 +580,26 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setError(null);
       try {
         const res = await fetchProjectCache(projectId);
+        // 已经切到别的项目：回来的是上一个项目的列表，写下去就是「B 的文件出现在 A 里」
+        if (viewingProjectIdRef.current !== projectId) return;
         const cached = res.files.filter((f) => f.is_file && f.name.endsWith('.json'));
         // 还没翻译的文件（Cache/ 里没有对应缓存）也列进来：后端打开这类文件时回落读原文，
-        // 不然刚建好项目的人在缓存页上什么都看不到
-        const uncached = (res.uncached_files ?? []).filter((f) => f.is_file);
+        // 不然刚建好项目的人在缓存页上什么都看不到。
+        // 同名要去重：界面按 name 做 key，两个列表一旦重叠就是一串重复 key（后端也拦了，
+        // 这里是最后一道）
+        const cachedNames = new Set(cached.map((f) => f.name));
+        const uncached = (res.uncached_files ?? []).filter(
+          (f) => f.is_file && !cachedNames.has(f.name),
+        );
         const files = [...cached, ...uncached].sort((a, b) => a.name.localeCompare(b.name));
         setCacheFiles(files);
         setUncachedFiles(new Set(uncached.map((f) => f.name)));
         setCacheDir(res.cache_dir || '');
         setSelectedFile((prev) => (prev && files.some((file) => file.name === prev) ? prev : null));
       } catch (err) {
-        setError(normalizeError(err, '加载缓存列表失败'));
+        if (viewingProjectIdRef.current === projectId) {
+          setError(normalizeError(err, '加载缓存列表失败'));
+        }
       } finally {
         if (showPageLoading) {
           setLoading(false);
@@ -610,6 +637,12 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   // 该 effect 是本页跨项目状态保留的核心入口。
   useEffect(() => {
     if (!projectId) return;
+    // 先记下"现在在看哪个项目"：下面所有按项目发的请求都拿它判断自己是否已经过期
+    viewingProjectIdRef.current = projectId;
+    // 多选与右键菜单是「屏幕上这些文件」的临时状态，不跟着项目走：切项目后若留着上个项目
+    // 的文件名，「删除」就会拿这些名字去删新项目里的同名缓存
+    setSelectedFiles(new Set());
+    setContextMenu(null);
     const prev = lastProjectIdRef.current;
     if (prev && prev !== projectId) {
       // snapshot 旧项目（此时 state 闭包仍是旧项目的数据，刚好用于写回）
@@ -708,6 +741,11 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setReplacePreviewTotal(0);
       void loadCacheFiles(true);
     }
+    // 交给下面的读条目 effect：它这一拍读到的 state 还是上一个项目的选中项
+    pendingSelectionRef.current = {
+      projectId,
+      file: bucketsRef.current.get(projectId)?.selectedFile ?? null,
+    };
     // 仅在 projectId 变化时运行；state 的 stale closure 正是我们需要快照的"旧值"
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
@@ -736,9 +774,14 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   }, [searchParams]);
 
   useEffect(() => {
-    if (!projectId || !selectedFile) return;
+    if (!projectId) return;
+    // 切项目这一拍用桶 effect 交接过来的选中项（state 里那份还停在旧项目，见 pendingSelectionRef）
+    const handoff = pendingSelectionRef.current;
+    pendingSelectionRef.current = null;
+    const file = handoff && handoff.projectId === projectId ? handoff.file : selectedFile;
+    if (!file) return;
     // 如果 entriesMap 中有缓存（含未保存修改），直接使用
-    const cached = entriesMapRef.current.get(selectedFile);
+    const cached = entriesMapRef.current.get(file);
     if (cached) {
       setEntries(cached);
       setLoadingEntries(false);
@@ -746,13 +789,13 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     }
     let cancelled = false;
     setLoadingEntries(true);
-    fetchCacheFile(projectId, selectedFile)
+    fetchCacheFile(projectId, file)
       .then((res) => {
         if (!cancelled) {
-          noteCachePresence(selectedFile, res.has_cache !== false);
+          noteCachePresence(file, res.has_cache !== false);
           setEntries(res.entries);
-          entriesMapRef.current.set(selectedFile, res.entries);
-          cleanEntriesMapRef.current.set(selectedFile, cloneEntries(res.entries));
+          entriesMapRef.current.set(file, res.entries);
+          cleanEntriesMapRef.current.set(file, cloneEntries(res.entries));
         }
       })
       .catch((err) => {
@@ -774,6 +817,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     setSearching(true);
     try {
       const res = await searchCache(projectId, searchQuery.trim(), searchField, searchOptions, 500, configFileName);
+      // 搜索期间切了项目：这一份结果是上一个项目的，别摆到新项目的搜索 tab 里
+      if (viewingProjectIdRef.current !== projectId) return;
       setSearchResults(res.results);
       setSearchTotal(res.total);
       setSelectedSearchIdx(-1);
@@ -791,6 +836,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     setLoadingEntries(true);
     try {
       const res = await fetchCacheFile(projectId, selectedFile);
+      // entriesMapRef 早换成新项目的表了：这时候写进去等于把 B 的条目塞进 A
+      if (viewingProjectIdRef.current !== projectId) return;
       noteCachePresence(selectedFile, res.has_cache !== false);
       entriesMapRef.current.set(selectedFile, res.entries);
       cleanEntriesMapRef.current.set(selectedFile, cloneEntries(res.entries));
@@ -975,6 +1022,9 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         });
 
       const res = await saveCacheFile(projectId, targetFile, entriesToSave, configFileName);
+      // 保存期间切了项目：写下去会串进新项目的条目表与 dirty 标记，直接收手
+      //（后端已经存好了，之后回到这个项目再存一次即可，不会丢内容）
+      if (viewingProjectIdRef.current !== projectId) return;
       const savedEntries = res.entries || entriesToSave;
 
       entriesMapRef.current.set(targetFile, savedEntries);
@@ -1007,6 +1057,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
 
     try {
       const res = await fetchCacheFile(projectId, targetFile);
+      if (viewingProjectIdRef.current !== projectId) return;
       const recoveredEntries = res.entries;
       noteCachePresence(targetFile, res.has_cache !== false);
 
@@ -1052,6 +1103,11 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         });
 
         const res = await saveCacheFile(projectId, file, entriesToSave, configFileName);
+        if (viewingProjectIdRef.current !== projectId) {
+          // 保存期间切了项目：别再往新项目的条目表/dirty 标记里写，只把转圈关掉
+          setSavingAll(false);
+          return;
+        }
         const savedEntries = res.entries || entriesToSave;
 
         entriesMapRef.current.set(file, savedEntries);
@@ -1229,6 +1285,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     if (!confirm(msg)) return;
     try {
       const res = await deleteCacheFiles(projectId, targets);
+      // 删除期间切了项目：别在新项目的表里删同名条目、也别清它的 dirty 标记
+      if (viewingProjectIdRef.current !== projectId) return;
       // 清除已删除文件的 entriesMap 和 dirtyFiles
       for (const f of res.deleted_files) {
         entriesMapRef.current.delete(f);
@@ -1343,6 +1401,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     setLocalError(null);
     try {
       const res = await replaceCache(projectId, replaceQuery.trim(), replaceWith, replaceField, true);
+      // 预览期间切了项目：新项目的替换面板不该摆着上一个项目的预览
+      if (viewingProjectIdRef.current !== projectId) return;
       setReplacePreview(res.file_details);
       setReplacePreviewTotal(res.total_matches);
     } catch (err) {
@@ -1362,6 +1422,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     setLocalError(null);
     try {
       const res = await replaceCache(projectId, replaceQuery.trim(), replaceWith, replaceField, false);
+      // 替换期间切了项目：不能把上一个项目的替换结果写进新项目的条目表（后端已经改好了）
+      if (viewingProjectIdRef.current !== projectId) return;
       setReplacePreview(null);
       setReplacePreviewTotal(0);
       setShowReplace(false);

@@ -177,6 +177,12 @@ export type FileProgress = {
   translated: number;
   problems: number;
   failed: number;
+  /**
+   * 这个文件正在流式输出时的实时状态（后端只在「还在动」时给，停下来就没了）：
+   * phase=thinking 表示只吐思考内容、writing 表示已经在出正文，cps 是最近的字/秒。
+   * 「文件进度」那行用它点那颗小灯。
+   */
+  stream?: { phase: 'thinking' | 'writing'; cps: number };
 };
 
 export type ProjectProgressResponse = {

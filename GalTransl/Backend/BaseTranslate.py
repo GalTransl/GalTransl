@@ -47,6 +47,10 @@ _CHATBOT_STATE: ContextVar[tuple[bool, str] | None] = ContextVar(
 # （「The `reasoning_content` in the thinking mode must be passed back to the API」）。
 REASONING_FIELD_NAMES = ("reasoning_content", "reasoning")
 
+# 流式输出期间给工作台报「思考中/翻译中 + 输出速度」的间隔（秒）：逐 chunk 报太密，
+# 报太稀又看不出快慢，0.2s 大概是一次界面轮询的五分之一
+_STREAM_PROGRESS_REPORT_INTERVAL = 0.2
+
 
 def _extract_reasoning(message_or_delta) -> tuple[str, str]:
     """从流式 delta / 非流式 message 上取思考内容，返回 (文本, 命中的字段名)。
@@ -909,6 +913,24 @@ class BaseTranslate:
         except Exception:
             return
 
+    def _report_stream_progress(self, filename: str, phase: str, chars: int) -> None:
+        """把「这个文件正在流式输出」报给工作台（见 server_runtime.record_runtime_stream）。
+
+        phase 取 thinking / writing，chars 是这批新增的字数。这只是界面上的一颗小灯，
+        出错一律吞掉，不能因此影响翻译本身。
+        """
+        try:
+            from GalTransl.server import record_runtime_stream
+
+            record_runtime_stream(
+                getattr(self.pj_config, "runtime_project_dir", self.pj_config.getProjectDir()),
+                filename=filename,
+                phase=phase,
+                chars=chars,
+            )
+        except Exception:
+            return
+
     async def ask_chatbot(
         self,
         prompt="",
@@ -925,11 +947,15 @@ class BaseTranslate:
         stream_line_callback=None,
         max_retry_count: Optional[int] = None,
         reasoning_holder: Optional[dict] = None,
+        progress_file: str = "",
     ):
         """发一次请求并返回 (正文, token)。
 
         传了 reasoning_holder 时，把这次响应的思考内容填进去：{"field": 字段名, "text": 思考全文}。
         多轮对话的调用方要拿它跟着 assistant 消息回传给 provider（见 REASONING_FIELD_NAMES）。
+
+        progress_file 是这次请求属于哪个文件（工作台的「文件进度」用它点小灯：思考中蓝、
+        翻译中绿，闪得快慢跟着输出速度）。留空就不报——不传的引擎（如 Sakura）不会有灯。
         """
         if max_retry_count is None:
             max_retry_count = getattr(self, "max_api_retries", None)
@@ -1026,6 +1052,11 @@ class BaseTranslate:
                     stream_abort_requested = False
                     stream_line_buffer = ""
                     stream_completed = False
+                    # 「文件进度」那行的小灯：攒够一点字数就报一次阶段与字数（逐 chunk 报太密，
+                    # 报太稀又看不出速度），phase 空表示这一轮还没吐出东西
+                    progress_phase = ""
+                    progress_chars = 0
+                    progress_last_report = 0.0
                     try:
                         async for chunk in response:
                             # Check stop in the middle of streaming so we don't
@@ -1051,6 +1082,12 @@ class BaseTranslate:
                                 result = result + content_piece
                                 lastline = lastline + content_piece
                                 stream_line_buffer += content_piece
+                                if progress_file and content_piece:
+                                    # 正文一来就是「翻译中」：不再解析 <think> 标签——标签会被
+                                    # 流式切成两半，靠它判阶段不可靠（思考写在正文里的接口，
+                                    # 引擎侧最后会把那一段剥掉，见 ForGalJsonTranslate）
+                                    progress_phase = "writing"
+                                    progress_chars += len(content_piece)
                                 if stream_line_callback and "\n" in stream_line_buffer:
                                     line_parts = stream_line_buffer.split("\n")
                                     finished_lines = line_parts[:-1]
@@ -1064,6 +1101,17 @@ class BaseTranslate:
                                             break
                                     except Exception:
                                         pass
+                            if progress_file:
+                                if reasoning_piece:
+                                    progress_chars += len(reasoning_piece)
+                                    if not progress_phase:
+                                        # 只吐思考、还没出正文 = 思考中（蓝灯）
+                                        progress_phase = "thinking"
+                                now_ts = time.monotonic()
+                                if progress_phase and now_ts - progress_last_report >= _STREAM_PROGRESS_REPORT_INTERVAL:
+                                    self._report_stream_progress(progress_file, progress_phase, progress_chars)
+                                    progress_last_report = now_ts
+                                    progress_chars = 0
                             if "\n" in lastline:
                                 if should_print_translation_logs(self.pj_config) and self.pj_config.active_workers == 1:
                                     lastline_sp = lastline.split("\n")

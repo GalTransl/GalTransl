@@ -1169,6 +1169,53 @@
   height: 5px;
 }
 
+/* ── 「文件进度」里的状态灯：正在被线程翻译的那一行 ──
+   思考中=蓝、翻译中=绿，呼吸快慢跟着输出速度（animation-duration 由行内样式给）。
+   刻意做得克制：7px 小点、只做透明度呼吸（不硬闪、不变色块），
+   系统开了「减少动态效果」就常亮——一眼能看到，但不会一直拽着注意力。 */
+.file-progress-row__led {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: file-progress-led-pulse 1.1s ease-in-out infinite;
+}
+
+.file-progress-row__led--thinking {
+  background: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-soft);
+}
+
+.file-progress-row__led--writing {
+  background: var(--color-success);
+  box-shadow: 0 0 0 2px var(--color-success-soft);
+}
+
+/* 处理中：这一行在翻、但模型此刻没在吐字（解析/写缓存/下一次请求排队的空隙）。
+   有这盏黄灯，进行中的行灯就不会一亮一灭——蓝(思考)→绿(翻译)→黄(处理中)只是换阶段。 */
+.file-progress-row__led--busy {
+  background: var(--color-warning);
+  box-shadow: 0 0 0 2px var(--color-warning-soft);
+}
+
+@keyframes file-progress-led-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.32;
+    transform: scale(0.82);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .file-progress-row__led {
+    animation: none;
+  }
+}
+
 .ptv2-eventlist {
   flex: 1;
   min-height: 0;

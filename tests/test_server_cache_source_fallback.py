@@ -55,7 +55,17 @@ class CacheNameMappingTests(unittest.TestCase):
 
     def test_cache_bases_fold_append_and_chunks(self):
         bases = _cache_name_bases({"a.json", "a.json.append.jsonl", "long.json_1.json", "long.json_2.json"})
-        self.assertEqual(bases, {"a.json", "long.json"})
+        # 剥掉切块后缀的 long.json 与原名都要收：long.json_1.json 自己也可能就是某个输入文件的缓存名
+        self.assertEqual(bases, {"a.json", "long.json", "long.json_1.json", "long.json_2.json"})
+
+    def test_cache_bases_keep_names_that_only_look_like_chunks(self):
+        """输入文件名本身就带 `_<n>`（OPEV_YUU_12_25.json 这种）时，它得算「已有缓存」。
+
+        只收「剥掉 _<n>」的写法会把这类文件判成还没翻译，同一个名字于是同时出现在
+        缓存列表与未翻译列表里（实测某项目 762 个缓存里 50 个中招）。
+        """
+        self.assertIn("OPEV_YUU_12_25.json", _cache_name_bases({"OPEV_YUU_12_25.json"}))
+        self.assertIn("04_SA01_1.json", _cache_name_bases({"04_SA01_1.json"}))
 
 
 class CacheSourceFallbackHttpTests(unittest.TestCase):
@@ -167,6 +177,24 @@ class CacheSourceFallbackHttpTests(unittest.TestCase):
             self.assertNotIn("chapter-}b.json", self._uncached_by_name(self._get("/cache")))
         finally:
             os.remove(os.path.join(self.project, CACHE_FOLDERNAME, "chapter-}b.json_1.json"))
+
+    def test_input_name_that_looks_like_a_chunk_is_not_listed_twice(self):
+        """输入文件名本身就叫 xxx_1.json 时，不能既算「已有缓存」又算「未翻译」。
+
+        否则前端把两个列表一合并，同一个名字出现两次 → React 报重复 key。
+        """
+        self._write_input("04_SA01_1.json", [{"message": "やあ"}])
+        self._write_cache("04_SA01_1.json", [{"index": 1, "post_src": "やあ", "pre_dst": "呀"}])
+        try:
+            payload = self._get("/cache")
+            cache_names = {str(f.get("name") or "") for f in payload["files"]}
+            uncached = self._uncached_by_name(payload)
+            self.assertIn("04_SA01_1.json", cache_names)
+            self.assertNotIn("04_SA01_1.json", uncached)
+            self.assertEqual(cache_names & set(uncached), set())
+        finally:
+            os.remove(os.path.join(self.project, INPUT_FOLDERNAME, "04_SA01_1.json"))
+            os.remove(os.path.join(self.project, CACHE_FOLDERNAME, "04_SA01_1.json"))
 
     def test_unknown_file_without_cache_is_still_404(self):
         with self.assertRaises(urllib.error.HTTPError) as ctx:
