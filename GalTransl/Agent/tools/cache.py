@@ -1,4 +1,4 @@
-"""翻译缓存类工具：列出、读取、修改、删除缓存条目，以及读取输出文件。"""
+"""翻译缓存类工具：read_transl_cache（列文件 / 读条目 / 搜索）、修改、删除缓存条目，以及读取输出文件。"""
 
 from __future__ import annotations
 
@@ -36,13 +36,16 @@ from GalTransl.Agent.tools.listing import (
     _select_list_items,
 )
 from GalTransl.Agent.tools.project import _APPEND_CACHE_SUFFIX, _backend_summary
+from GalTransl.Agent.tools.search import _tool_search_transl_cache
 
 if TYPE_CHECKING:
     from GalTransl.Agent.runner import AgentRunner
 
 
-def _tool_list_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
-    """列出缓存文件（译文）。带每个文件的条目数。
+def _tool_list_transl_cache(
+    runner: AgentRunner, args: dict[str, Any], names: tuple[str, ...] | None = None
+) -> Any:
+    """read_transl_cache(action="list")：列出缓存文件（译文）。带每个文件的条目数。
 
     只列 .json 快照：翻译过程中并行写的增量日志不是可读的缓存，直接不出现在清单里——
     模型看不到它，也就不会去读它。
@@ -50,6 +53,9 @@ def _tool_list_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     清单支持 grep（文件名子串）、limit（默认 100）与 order（怎么挑这 100 个：均匀采样 /
     文件名顺序 / 随机采样 / 按大小从大到小 / 从小到大，见 LIST_ORDER_MODES）：缓存文件是按
     名字排的，成百上千个文件时"只看前 100 个"会把后半段整个藏起来（默认的 even 就是为这个）。
+
+    names 非空时只列这些文件（子代理的锁定范围）：**先过滤再采样**，免得本属于它的文件被
+    采样摇掉、看起来像不存在。
     """
     limit = _list_limit(args)
     grep = _list_grep(args)
@@ -68,6 +74,9 @@ def _tool_list_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
         if isinstance(entry_count, int):
             entry["entries"] = entry_count
         files.append(entry)
+    if names is not None:
+        wanted = set(names)
+        files = [f for f in files if f["name"] in wanted]
 
     matched = _grep_items(files, grep)
     shown = _select_list_items(matched, limit, order)
@@ -230,10 +239,11 @@ def _cache_grep_note(grep: Any, total: int) -> str | None:
     return None
 
 
-def _tool_read_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
+def _read_transl_cache_entries(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """read_transl_cache(action="read")：读某个缓存文件的条目。"""
     filename = str(args.get("filename", "")).strip()
     if not filename:
-        raise AgentToolError("filename is required")
+        raise AgentToolError("action=read 需要 filename（缓存文件名，来自 action=list 的清单）")
     fields = _normalize_cache_fields(args)
     pid = runner._project_id()
     data = runner._http_get(f"/api/projects/{pid}/cache/{urllib.parse.quote(filename)}")
@@ -381,6 +391,42 @@ def _agent_model_name(runner: AgentRunner) -> str:
     profile = getattr(state, "backend_profile_data", None) or {}
     name = getattr(state, "backend_profile_name", "") or ""
     return str(_backend_summary(profile, name).get("model") or "")
+
+
+# read_transl_cache 一个工具管三件读缓存的事（原来是 list/read/search_transl_cache 三个工具）。
+CACHE_READ_ACTIONS: tuple[str, ...] = ("list", "read", "search")
+
+
+def _cache_read_action(args: dict[str, Any]) -> str:
+    """read_transl_cache 的 action：显式给了就校验；没给按参数推断——
+    有 query 是 search，有 filename 是 read，都没有就是 list（先看有哪些文件）。"""
+    action = str(args.get("action", "") or "").strip().lower()
+    if action:
+        if action not in CACHE_READ_ACTIONS:
+            raise AgentToolError(f"action 只能是 {' / '.join(CACHE_READ_ACTIONS)}，收到 {action!r}")
+        return action
+    if str(args.get("query", "") or "").strip():
+        return "search"
+    if str(args.get("filename", "") or "").strip():
+        return "read"
+    return "list"
+
+
+def _tool_read_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """读缓存：list=列缓存文件，read=读某个文件的条目，search=在缓存里搜。
+
+    结果带上 action，渲染器（_md_render_transl_cache）据此选表格样式。
+    """
+    action = _cache_read_action(args)
+    if action == "list":
+        result = _tool_list_transl_cache(runner, args)
+    elif action == "search":
+        if not str(args.get("query", "") or "").strip():
+            raise AgentToolError("action=search 需要 query（要搜的关键词）")
+        result = _tool_search_transl_cache(runner, args)
+    else:
+        result = _read_transl_cache_entries(runner, args)
+    return {"action": action, **result} if isinstance(result, dict) else result
 
 
 # ---- 换行归一化（patch_transl_cache 写回前）----

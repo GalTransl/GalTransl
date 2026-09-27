@@ -189,7 +189,7 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
             listing = runner._http_get(f"/api/projects/{pid}/cache")
             if not any(f.get("name") == filename for f in listing.get("files", [])):
                 notes.append(
-                    f"缓存文件 {filename} 不存在（检查 list_transl_cache 的文件名拼写）；这是全项目搜索的 0 命中。"
+                    f"缓存文件 {filename} 不存在（检查 read_transl_cache（action=list）清单里的文件名拼写）；这是全项目搜索的 0 命中。"
                 )
         except AgentToolError:
             pass
@@ -202,14 +202,14 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
 def _tool_search_input(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """在待翻译原文里搜关键词/说话人；context=N 时每条命中再带上 N 句上文（默认只给上文）。
 
-    与 search_transl_cache 是一套用法，区别只在搜的对象：那边搜**缓存**（原文 + 译文 + 问题，
+    与 read_transl_cache(action="search") 是一套用法，区别只在搜的对象：那边搜**缓存**（原文 + 译文 + 问题，
     含已翻的部分），这边搜**输入文件**（还没翻译的原文全文）。用途也由此分工——
     - 定译法/收字典前，查某个称呼、口头禅、专有名词在全篇出现过多少次、都出现在什么上下文里
       （出现次数与说话人是"该不该收进字典、收哪个写法"的依据）；
     - 拿不准某句原文的语境时，比 read_input_file 逐段读更省 token；
     - 命中的 filename + index 可直接交给 read_input_file 精读。
 
-    搜的是原文，所以**译文侧的问题（漏译/残留日文）不在这里**，那些用 search_transl_cache。
+    搜的是原文，所以**译文侧的问题（漏译/残留日文）不在这里**，那些用 read_transl_cache(action="search")。
     每次搜索都要把涉及的输入文件过一遍文件插件（比搜缓存慢），要缩小范围就传 filename。
     """
     query = str(args.get("query", "")).strip()
@@ -224,7 +224,7 @@ def _tool_search_input(runner: AgentRunner, args: dict[str, Any]) -> Any:
         context = max(0, min(int(raw_context or 0), 20))
     except (TypeError, ValueError):
         raise AgentToolError(f"context 必须是 0-20 的整数（收到 {raw_context!r}）")
-    # 与 search_transl_cache 同一套收紧规则：命中 × 每条搭的行数一起返回，整页压在
+    # 与缓存搜索（_tool_search_transl_cache）同一套收紧规则：命中 × 每条搭的行数一起返回，整页压在
     # _SEARCH_ROW_BUDGET 行内。total 不受影响（仍是全部命中数）。
     only_preceding = _only_preceding_arg(args)
     limit, offset = _search_paging_args(args)

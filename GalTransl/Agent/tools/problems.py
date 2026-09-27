@@ -405,7 +405,7 @@ def _tool_list_problems(
         offset = 0
     matched = len(problems)
     page = problems[offset : offset + limit]
-    # trans_by 与 read_transl_cache / search_transl_cache 同一套（见 _dominant_trans_by）：
+    # trans_by 与 read_transl_cache（read / search）同一套（见 _dominant_trans_by）：
     # 这批里出现最多的那个模型（多数派，通常就是翻译引擎翻的）逐条删掉、记在顶层一次，
     # 少数派（Agent 改过的、手工改的）逐条保留——列表里真正要看的是异常来源。
     dominant = _dominant_trans_by(page)

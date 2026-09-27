@@ -47,7 +47,7 @@ class ListTranslCacheMdTests(unittest.TestCase):
             "note": "清单按名字均匀采样。",
         }
 
-        text = _render_tool_result_table("list_transl_cache", result)
+        text = _render_tool_result_table("read_transl_cache", result)
 
         self.assertIn("共 2 个缓存文件", text)
         self.assertIn("备注：清单按名字均匀采样。", text)
@@ -63,7 +63,7 @@ class ListTranslCacheMdTests(unittest.TestCase):
             "sampled": True,
         }
 
-        text = _render_tool_result_table("list_transl_cache", result)
+        text = _render_tool_result_table("read_transl_cache", result)
 
         self.assertIn("共 250 个缓存文件", text)
         self.assertIn("均匀采样", text)
@@ -217,7 +217,7 @@ class SearchMdTests(unittest.TestCase):
             "note": "已带上下文：每条命中前后各 1 句。",
         }
 
-        text = _render_tool_result_table("search_transl_cache", result)
+        text = _render_tool_result_table("read_transl_cache", result)
 
         self.assertIn("共 2 条命中", text)
         self.assertIn("命中分布：src 2、dst 1", text)
@@ -242,7 +242,7 @@ class SearchMdTests(unittest.TestCase):
             "has_more": True,
         }
 
-        text = _render_tool_result_table("search_transl_cache", result)
+        text = _render_tool_result_table("read_transl_cache", result)
 
         self.assertIn("含上文（每条命中前面 1 句", text)
         self.assertIn("本页 1 条命中、含前后文共 2 行、还有更多（用 offset 翻页）", text)
@@ -257,7 +257,7 @@ class SearchMdTests(unittest.TestCase):
             "has_more": False,
         }
 
-        text = _render_tool_result_table("search_transl_cache", result)
+        text = _render_tool_result_table("read_transl_cache", result)
 
         self.assertIn("本页 1 条命中（offset=100）", text)
         self.assertNotIn("还有更多", text)
@@ -278,7 +278,7 @@ class SearchMdTests(unittest.TestCase):
     def test_zero_hits_still_says_zero(self):
         # 0 命中也要留下一行文字：渲染出空串会让工具结果整个变空
         text = _render_tool_result_table(
-            "search_transl_cache", {"results": [], "total": 0, "returned": 0, "has_more": False}
+            "read_transl_cache", {"results": [], "total": 0, "returned": 0, "has_more": False}
         )
 
         self.assertIn("共 0 条命中", text)
@@ -378,7 +378,7 @@ class HandlerPipelineTests(unittest.TestCase):
         result = _tool_search_transl_cache(_Runner(), {"query": "ドルード"})
 
         self.assertIsInstance(result, dict)
-        text = _render_tool_result_table("search_transl_cache", result)
+        text = _render_tool_result_table("read_transl_cache", result)
         self.assertIn("共 1 条命中", text)
         # 唯一的 trans_by 就是多数派：整列省略，只在表头记一次
         self.assertIn("多数派模型 demo-model", text)
@@ -394,12 +394,10 @@ class DispatcherTests(unittest.TestCase):
         self.assertEqual(
             set(rt._MD_RENDERERS),
             {
-                "list_transl_cache",
                 "list_input_files",
                 "list_problems",
                 "read_input_file",
                 "read_transl_cache",
-                "search_transl_cache",
                 "search_input",
                 "manage_problem_filter",
                 "run_subagents",

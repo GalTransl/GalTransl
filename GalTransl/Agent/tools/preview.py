@@ -13,7 +13,8 @@ from GalTransl.Agent.tools.cache import (
 )
 from GalTransl.Agent.tools.cache_fields import _PATCHABLE_FIELDS
 from GalTransl.Agent.tools.common import _diff_lines, _parse_index_spec
-from GalTransl.Agent.tools.dicts import _dict_new_lines, _split_dict_incoming
+from GalTransl.Agent.models import AgentToolError
+from GalTransl.Agent.tools.dicts import _dict_new_lines, _dict_save_plan
 from GalTransl.Agent.tools.names import _name_table_changes
 from GalTransl.Agent.tools.problems import (
     _is_valid_regex,
@@ -147,31 +148,29 @@ def _preview_cache_delete(runner: AgentRunner, args: dict[str, Any]) -> dict[str
 
 
 def _preview_dict_write(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
-    """save_dict 的预览：读旧内容 + 按同一份合并规则算新内容，做行级 diff。"""
-    file_key = str(args.get("file_key", "")).strip()
-    if not file_key:
-        return None
-    action = str(args.get("action", "") or "overwrite").strip().lower() or "overwrite"
-    if action not in ("overwrite", "replace", "append", "delete"):
-        return None
-    content = str(args.get("content", ""))
-    if action == "delete" and not _split_dict_incoming(content):
-        return None
+    """save_dict 的预览：读旧内容 + 按同一份合并规则算新内容，做行级 diff。
+
+    文件还不存在（带 category 新建）时按空文件算 diff，并在预览里标出要新建。
+    """
     pid = runner._project_id()
     cfg = urllib.parse.quote(runner.state.config_file_name)
     data = runner._http_get(f"/api/projects/{pid}/dictionary/project?config={cfg}")
-    old = (data.get("dict_contents", {}) if isinstance(data, dict) else {}).get(file_key)
-    before_lines = [str(x) for x in old.get("lines", [])] if isinstance(old, dict) else []
-    new_lines, _ = _dict_new_lines(before_lines, content, action)
-    before_text = "\n".join(before_lines)
+    contents = data.get("dict_contents", {}) if isinstance(data, dict) else {}
+    try:
+        plan = _dict_save_plan(contents, args)
+    except AgentToolError:
+        return None  # 入参本身有问题：真执行时会报错，这里不画预览
+    new_lines, _ = _dict_new_lines(plan["before_lines"], plan["content"], plan["action"])
+    before_text = "\n".join(plan["before_lines"])
     new_text = "\n".join(new_lines)
-    if new_text == before_text:
+    if new_text == before_text and not plan["create"]:
         return None
-    return {
-        "file_key": file_key,
-        "action": action,
-        "line_diff": _diff_lines(before_text, new_text),
-    }
+    preview: dict[str, Any] = {"file_key": plan["file_key"], "action": plan["action"]}
+    if plan["create"]:
+        preview["create"] = {"category": plan["category"]}
+    if new_text != before_text:
+        preview["line_diff"] = _diff_lines(before_text, new_text)
+    return preview
 
 
 def _preview_config_update(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:

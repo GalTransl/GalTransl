@@ -336,14 +336,25 @@ def _md_render_patch_transl_cache(result: dict[str, Any]) -> str:
     return _md_doc(*parts)
 
 
+def _md_render_transl_cache(result: dict[str, Any]) -> str | None:
+    """read_transl_cache 的三种 action 各用各的表：看结果里的 action；没有（直接拿内部函数的
+    结果来渲染）就按形状认——列文件有 cache_files，搜索有 results，其余是读条目。"""
+    action = result.get("action")
+    if action is None:
+        action = "list" if "cache_files" in result else "search" if "results" in result else "read"
+    if action == "list":
+        return _md_render_list_transl_cache(result)
+    if action == "search":
+        return _md_render_search_transl_cache(result)
+    return _md_render_read_transl_cache(result)
+
+
 # 工具名 → 渲染器。渲染只对这里列出的工具生效，其余工具维持 JSON。
 _MD_RENDERERS: dict[str, Any] = {
-    "list_transl_cache": _md_render_list_transl_cache,
     "list_input_files": _md_render_list_input_files,
     "list_problems": _md_render_list_problems,
     "read_input_file": _md_render_read_input_file,
-    "read_transl_cache": _md_render_read_transl_cache,
-    "search_transl_cache": _md_render_search_transl_cache,
+    "read_transl_cache": _md_render_transl_cache,
     "search_input": _md_render_search_input,
     "manage_problem_filter": _md_render_manage_problem_filter,
     "run_subagents": _md_render_run_subagents,

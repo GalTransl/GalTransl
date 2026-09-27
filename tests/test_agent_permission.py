@@ -150,7 +150,7 @@ class PermissionMatrixTests(unittest.TestCase):
 
     def test_risk_classification(self) -> None:
         # 改译文数据：缓存 / 字典 / 人名表 —— "允许编辑"档放行的就是这些
-        for name in ("patch_transl_cache", "delete_transl_cache", "save_dict", "create_dict_file", "save_name_table"):
+        for name in ("patch_transl_cache", "delete_transl_cache", "save_dict", "save_name_table"):
             self.assertEqual(_tool_risk(name), PERMISSION_EDIT, name)
         # 改设置 / 规范、启动任务、派子代理：只有全自动放行（「允许编辑」档也要问）
         for name in (
@@ -871,7 +871,7 @@ class PermissionPreviewTests(unittest.TestCase):
 
     def test_tools_without_a_diff_have_no_preview(self) -> None:
         runner = _PreviewRunner()
-        for name in ("start_translation", "run_subagents", "create_dict_file"):
+        for name in ("start_translation", "run_subagents", "read_transl_cache"):
             # 连读都不读：不在 PREVIEW_TOOLS 里就直接返回（_PreviewRunner 会对意外读操作报错）
             self.assertIsNone(rt._preview_tool_changes(runner, name, {"filename": "a.json"}), name)
 

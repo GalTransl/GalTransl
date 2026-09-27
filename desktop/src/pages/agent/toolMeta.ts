@@ -51,8 +51,17 @@ const TOOL_META: Record<string, ToolMeta> = {
   },
   list_dict_files: { action: '查看字典清单', running: '查看字典清单', verb: '', icon: 'books', summary: () => '列出项目字典文件' },
   read_dict: { action: '读取字典', running: '读取字典', verb: '', icon: 'book', summary: (a) => str(a?.file_key) },
-  save_dict: { action: '保存字典', running: '保存字典', verb: '', icon: 'save', summary: (a) => str(a?.file_key) },
-  create_dict_file: { action: '新建字典', running: '新建字典', verb: '', icon: 'file-plus', summary: (a) => str(a?.filename) },
+  save_dict: {
+    action: '保存字典',
+    running: '保存字典',
+    verb: '',
+    icon: 'save',
+    // 带 category = 文件不存在时顺带新建（原 create_dict_file）
+    summary: (a) =>
+      [str(a?.file_key), a?.category ? `新建${DICT_CATEGORY_LABELS[str(a.category)] || str(a.category)}字典` : '']
+        .filter(Boolean)
+        .join(' · '),
+  },
   get_name_table: { action: '读取人名表', running: '读取人名表', verb: '', icon: 'user', summary: () => 'name替换表' },
   save_name_table: { action: '保存人名表', running: '保存人名表', verb: '', icon: 'users', summary: (a) => (Array.isArray(a?.names) ? `${a.names.length} 条` : '') },
   start_translation: { action: '启动翻译', running: '启动翻译', verb: '', icon: 'play', summary: (a) => [str(a?.translator), ...(Array.isArray(a?.files) ? [`仅 ${a.files.length} 个文件`] : [])].filter(Boolean).join(' · ') },
@@ -102,11 +111,9 @@ const TOOL_META: Record<string, ToolMeta> = {
   list_problems: { action: '检查问题清单', running: '检查问题清单', verb: '', icon: 'search', summary: (a) => str(a?.problem_type) || '问题类型统计' },
   manage_problem_filter: { action: '管理问题过滤', running: '管理问题过滤', verb: '', icon: 'filter', summary: (a) => [str(a?.action), Array.isArray(a?.keyword) ? a.keyword.map((k) => str(k)).join('、') : str(a?.keyword)].filter(Boolean).join(' · ') },
   manage_problem_white_list: { action: '管理问题白名单', running: '管理问题白名单', verb: '', icon: 'filter', summary: (a) => [str(a?.action), Array.isArray(a?.entry) ? a.entry.map((k) => str(k)).join('、') : str(a?.entry)].filter(Boolean).join(' · ') },
-  list_transl_cache: { action: '查看缓存清单', running: '查看缓存清单', verb: '', icon: 'archive', summary: () => '列出缓存文件' },
-  read_transl_cache: { action: '读取缓存', running: '读取缓存', verb: '', icon: 'file-text', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
+  read_transl_cache: { action: '查阅缓存', running: '查阅缓存', verb: '', icon: 'file-text', summary: translCacheSummary },
   read_output: { action: '读取输出', running: '读取输出', verb: '', icon: 'file-text', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
   search_input: { action: '搜索原文', running: '搜索原文', verb: '', icon: 'search-plus', summary: (a) => [str(a?.query), str(a?.filename), a?.context ? `±${a.context} 句上下文` : ''].filter(Boolean).join(' · ') },
-  search_transl_cache: { action: '搜索缓存', running: '搜索缓存', verb: '', icon: 'search-plus', summary: (a) => [str(a?.query), a?.context ? `±${a.context} 句上下文` : ''].filter(Boolean).join(' · ') },
   patch_transl_cache: {
     action: '修改译文',
     running: '修改译文',
@@ -128,6 +135,14 @@ const TOOL_META: Record<string, ToolMeta> = {
   read_history_archive: { action: '回查归档', running: '回查归档', verb: '', icon: 'archive', summary: (a) => [str(a?.chunk), str(a?.query)].filter(Boolean).join(' · ') || '列出归档' },
 };
 
+// 已并入别的工具的旧名字：旧会话的转录里还有这些调用，按合并后的工具显示（参数换成新工具的口径）。
+// 不放进 TOOL_META：那张表要和后端现有工具一一对应（见 tests/test_agent_tool_meta_labels.py）。
+const RETIRED_TOOL_ALIASES: Record<string, { name: string; args: (a: Record<string, unknown> | undefined) => Record<string, unknown> }> = {
+  list_transl_cache: { name: 'read_transl_cache', args: (a) => ({ ...a, action: 'list' }) },
+  search_transl_cache: { name: 'read_transl_cache', args: (a) => ({ ...a, action: 'search' }) },
+  create_dict_file: { name: 'save_dict', args: (a) => ({ file_key: a?.filename, category: a?.category }) },
+};
+
 const DEFAULT_TOOL_META: ToolMeta = { action: '调用工具', running: '调用工具', verb: '', icon: 'tool', summary: () => '' };
 
 /** 未收录进 TOOL_META 的工具：至少把原始工具名亮出来，不再只显示「调用工具」。 */
@@ -135,7 +150,34 @@ export function toolMeta(name: string | undefined): ToolMeta {
   if (!name) return DEFAULT_TOOL_META;
   const meta = TOOL_META[name];
   if (meta) return meta;
+  const alias = RETIRED_TOOL_ALIASES[name];
+  const base = alias && TOOL_META[alias.name];
+  if (alias && base) return { ...base, summary: (a) => base.summary(alias.args(a)) };
   return { ...DEFAULT_TOOL_META, action: name, running: name };
+}
+
+const DICT_CATEGORY_LABELS: Record<string, string> = { pre: '译前', gpt: 'GPT', post: '译后' };
+
+/** read_transl_cache 的 action（与后端 _cache_read_action 同一推断：有 query 是 search，有 filename 是 read）。 */
+function translCacheAction(a: Record<string, unknown> | undefined): string {
+  const action = str(a?.action);
+  if (action) return action;
+  if (str(a?.query)) return 'search';
+  if (str(a?.filename)) return 'read';
+  return 'list';
+}
+
+function translCacheSummary(a: Record<string, unknown> | undefined): string {
+  const action = translCacheAction(a);
+  if (action === 'list') return ['缓存清单', str(a?.grep)].filter(Boolean).join(' · ');
+  if (action === 'search') {
+    return [
+      `搜索「${str(a?.query)}」`,
+      str(a?.filename),
+      a?.context ? `±${a.context} 句上下文` : '',
+    ].filter(Boolean).join(' · ');
+  }
+  return [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ');
 }
 
 export function str(v: unknown): string {

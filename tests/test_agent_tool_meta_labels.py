@@ -4,7 +4,7 @@
 （旁边别的工具都是「搜索缓存」「读取缓存」这种中文动作），看着就像"没翻译"。
 缺条目时 toolMeta() 会退回显示原始工具名——那是给"还没收录的新工具"留的兜底，不该成为常态。
 
-前端没有测试框架，所以这里从 AgentPage.tsx 里读出 TOOL_META 的键与 action 来对账
+前端没有测试框架，所以这里从 pages/agent/toolMeta.ts 里读出 TOOL_META 的键与 action 来对账
 （跨语言的契约测试，和 test_agent_markdown_output 那类"口径一致性"测试同一路数）。
 """
 
@@ -19,7 +19,8 @@ _PAGE = os.path.join(
     "desktop",
     "src",
     "pages",
-    "AgentPage.tsx",
+    "agent",
+    "toolMeta.ts",
 )
 # TOOL_META 的对象字面量：每条键缩进两个空格
 _ENTRY = re.compile(r"^\s{2}([a-z_][a-z0-9_]*):\s*\{", re.M)

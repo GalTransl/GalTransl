@@ -447,7 +447,7 @@ class SubagentToolScopeTests(unittest.TestCase):
         }
         self.assertEqual(
             names,
-            {"read_transl_cache", "search_transl_cache", "list_problems", "get_name_table",
+            {"read_transl_cache", "list_problems", "get_name_table",
              "read_guideline", "patch_transl_cache"},
         )
         # 不会递归、也拿不到改配置/字典/启动任务的工具
@@ -607,7 +607,7 @@ class LockedFileTests(unittest.TestCase):
 
     校对：read/patch 只能碰自己那份缓存（否则两个子代理可能写同一条）；
     原文探索：list_input_files 只列它、read_input_file 只能读它。
-    跨文件的 search_transl_cache / list_problems / get_name_table 不受影响，file 留空则照旧放开。
+    跨文件的 read_transl_cache(action=search) / list_problems / get_name_table 不受影响，file 留空则照旧放开。
     """
 
     def _parent(self) -> _Parent:

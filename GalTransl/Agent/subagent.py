@@ -48,7 +48,12 @@ from GalTransl.Agent.core import (
 from GalTransl.Agent.models import AgentToolError
 from GalTransl.Agent.prompts import _parse_compact_summary
 from GalTransl.Agent.tool_schemas import AGENT_TOOLS
-from GalTransl.Agent.tools.cache import _tool_patch_transl_cache
+from GalTransl.Agent.tools.cache import (
+    _cache_read_action,
+    _tool_list_transl_cache,
+    _tool_patch_transl_cache,
+    _tool_read_transl_cache,
+)
 from GalTransl.Agent.tools.common import _split_problem_types
 from GalTransl.Agent.tools.input import _list_input_payload
 from GalTransl.Agent.tools.listing import _list_grep, _list_limit, _list_order
@@ -83,7 +88,7 @@ SUBAGENT_PROOFREAD_PROMPT = """你是 GalTransl 的**校对子代理**，只干�
 # 权力边界（越界即失败）
 - 你**只能读**（缓存、人名表、翻译规范、问题清单），以及用 patch_transl_cache **写 proofread_comment** 这一个字段；
 - 你的 patch_transl_cache 里只有 index + proofread_comment（加一个 file）三个入参：**译文字段（pre_dst / proofread_dst）根本不存在**，也没有委派、启动任务、改配置的权力；
-- **你只负责这一次派给你的那些文件**（可能是一个，也可能是自动均分出来的一组）：read_transl_cache / patch_transl_cache 的 filename 只接受它们（patch 支持每条带 file，一样只认这一组），范围外会被直接拒掉；list_problems 也只会列这些文件的问题；要核对某个词在别处的译法，用 search_transl_cache（它是全项目范围）；
+- **你只负责这一次派给你的那些文件**（可能是一个，也可能是自动均分出来的一组）：read_transl_cache / patch_transl_cache 的 filename 只接受它们（patch 支持每条带 file，一样只认这一组），范围外会被直接拒掉；list_problems 也只会列这些文件的问题；要核对某个词在别处的译法，用 read_transl_cache(action="search")（搜索是全项目范围）；
 - 发现问题就写意见，改由主 Agent 做——不要试图绕路。
 
 # 写哪一类意见：以任务说明为准
@@ -110,7 +115,7 @@ SUBAGENT_PROOFREAD_PROMPT = """你是 GalTransl 的**校对子代理**，只干�
 
 # 怎么干
 1. 先 read_transl_cache 读你负责的区间（默认列就够：原文 post_src、译文 pre_dst、机翻自查 problem，以及别人写过的 proofread_comment）；
-2. 要判断译名一致性：search_transl_cache 搜同一个词的其它出现处、get_name_table 看人名表；判断取舍时 read_guideline 看项目规范（润色建议尤其要以项目规范为准，别跟规范里定下的文风打架）；
+2. 要判断译名一致性：read_transl_cache(action="search") 搜同一个词的其它出现处、get_name_table 看人名表；判断取舍时 read_guideline 看项目规范（润色建议尤其要以项目规范为准，别跟规范里定下的文风打架）；
 3. 有疑问就用 patch_transl_cache 写进去，一条一个问题、写清"问题是什么 + 该怎么改"。可以一次多条：
    patch_transl_cache(filename="<你的文件>", patches=[
      {"index": 33, "proofread_comment": "漏译：原文「おっぱい」在译文里没有对应词，建议补为「欧派」"},
@@ -215,7 +220,6 @@ SUBAGENT_ROLES: dict[str, SubAgentRole] = {
         brief=_SUBAGENT_BRIEF_TEMPLATE,
         tools=(
             "read_transl_cache",
-            "search_transl_cache",
             "list_problems",
             "get_name_table",
             "read_guideline",
@@ -288,11 +292,11 @@ def _subagent_tools(agent: str) -> list[dict[str, Any]]:
 
 
 # 认"锁定文件"的工具：任务里给了 file 时，这些工具的 filename 入参被限制在派给它的那些文件里。
-# 搜索类（search_transl_cache / search_input）与 get_name_table 本来就是跨文件/跨项目的，不在
-# 其中——子代理要核对"这个词在别处怎么翻的/原文里怎么说"，正是它们的用途。list_problems 没有
+# 搜索（read_transl_cache 的 action=search / search_input）与 get_name_table 本来就是跨文件/
+# 跨项目的，不锁——子代理要核对"这个词在别处怎么翻的/原文里怎么说"，正是它们的用途。
+# read_transl_cache 只锁 action=read（list 只列锁定的文件），见 _lock_cache_reader。list_problems 没有
 # filename 入参，改由 _subagent_handlers 传 allowed_files 收窄（见 _tool_list_problems）。
 _LOCKED_FILENAME_TOOLS: tuple[str, ...] = (
-    "read_transl_cache",
     "patch_transl_cache",
     "read_input_file",
 )
@@ -615,6 +619,30 @@ def _lock_to_filenames(
     return wrapped
 
 
+def _lock_cache_reader(allowed: tuple[str, ...]) -> Callable[[AgentRunner, dict[str, Any]], Any]:
+    """read_transl_cache 在锁定模式下：read 只认派给它的文件；list 只列这些文件；
+    search 照旧全项目（核对别处译法正是它的用途）。"""
+    read_locked = _lock_to_filenames(
+        lambda runner, args: _tool_read_transl_cache(runner, {**args, "action": "read"}), allowed
+    )
+
+    def wrapped(runner: AgentRunner, args: dict[str, Any]) -> Any:
+        action = _cache_read_action(args)
+        if action == "read":
+            return read_locked(runner, args)
+        if action == "list":
+            out = _tool_list_transl_cache(runner, args, names=allowed)
+            scope = "、".join(f"「{name}」" for name in allowed[:6]) + (
+                f" 等 {len(allowed)} 个文件" if len(allowed) > 6 else ""
+            )
+            note = f"本次只派你看 {scope}，其余文件不在你的范围里（要处理别的文件，让主 Agent 重新派任务）。"
+            merged = "；".join([out["note"], note]) if out.get("note") else note
+            return {"action": "list", **out, "note": merged}
+        return _tool_read_transl_cache(runner, args)
+
+    return wrapped
+
+
 def _lock_input_listing(
     allowed: tuple[str, ...],
 ) -> Callable[[AgentRunner, dict[str, Any]], Any]:
@@ -666,11 +694,11 @@ def _subagent_handlers(
 
     - patch_transl_cache 包一层窄白名单：只放得住 proofread_comment（译文字段即使模型硬塞也会被
       当成"无可更新字段"跳过，并被回一条只允许 proofread_comment 的工具错误）；
-    - **锁定文件**（locked_files 非空，来自任务里的 file；自动均分时是一组）：read_transl_cache /
-      patch_transl_cache / read_input_file 的 filename 被限制在这一组里，list_input_files 也只列
-      这些，list_problems 也只列这些文件的问题——"一份文件只归一个子代理"由工具层保证，模型串到
+    - **锁定文件**（locked_files 非空，来自任务里的 file；自动均分时是一组）：read_transl_cache 的
+      read、patch_transl_cache / read_input_file 的 filename 被限制在这一组里，read_transl_cache 的
+      list 与 list_input_files 也只列这些，list_problems 也只列这些文件的问题——"一份文件只归一个子代理"由工具层保证，模型串到
       范围外会被拒（省 token，也避免两个子代理写同一条）。要核对"这个词在别处怎么翻的"，仍走
-      跨文件的 search_transl_cache / get_name_table；
+      跨文件的 read_transl_cache(action="search") / get_name_table；
     - 调用**不过权限门禁**：子代理的工具集本身就是白名单（只有读，加校对那一支写意见），
       一批 16 个逐条弹审批卡会把界面淹掉。改译文的权力仍然只在主 Agent 手上——那才是要审批的事。
     """
@@ -692,6 +720,8 @@ def _subagent_handlers(
         for name in _LOCKED_FILENAME_TOOLS:
             if name in handlers:
                 handlers[name] = _lock_to_filenames(handlers[name], locked)
+        if "read_transl_cache" in handlers:
+            handlers["read_transl_cache"] = _lock_cache_reader(locked)
         if "list_input_files" in handlers:
             handlers["list_input_files"] = _lock_input_listing(locked)
         if "list_problems" in handlers:
@@ -1315,7 +1345,7 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
         if not task["files"]:
             raise AgentToolError(
                 f"第 {task['index']} 个任务的 file 选择器（{spec}）一个文件都没选中："
-                "先用 list_transl_cache / list_problems 看看有哪些文件。"
+                "先用 read_transl_cache（action=list）/ list_problems 看看有哪些文件。"
             )
         named.setdefault(task["agent"], set()).update(task["files"])
 
@@ -1330,7 +1360,7 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
         pool = [name for name in _counts(agent) if name not in named.get(agent, set())]
         if not pool:
             hint = (
-                "缓存里还没有可校对的文件（条目为空或还没跑翻译）：先用 list_transl_cache 看看，"
+                "缓存里还没有可校对的文件（条目为空或还没跑翻译）：先用 read_transl_cache（action=list）看看，"
                 "或先把具体文件名写出来。"
                 if agent == SUBAGENT_AGENT_PROOFREAD
                 else "输入目录里没有可分派的原文文件：先用 list_input_files 看看。"

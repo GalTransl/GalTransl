@@ -49,7 +49,7 @@ export function ToolRow({
   // - deleted_preview: [{index, text}] 被删条目（delete_transl_cache）
   const changeList = extractChangeList(item.result);
   // 写类工具的可选入参 reason（模型说明"为什么改"）：有变更卡就画在卡里，没有
-  // （如 create_dict_file 的返回不含 changes）就在正文里单独给一行。
+  // （如 save_dict 只新建空文件时的返回不含 changes）就在正文里单独给一行。
   const reason = extractReason(item.result);
   const ok = item.ok !== false;
   const pending = item.ok === undefined && item.result === undefined && !item.error;
@@ -63,7 +63,7 @@ export function ToolRow({
 
   // 行**默认展开**的三种情形：
   // 1) 已有变更卡 —— 改了什么是这次调用的重点，diff 不该藏在一次点击后面；
-  // 2) 有 reason 却没有变更卡（create_dict_file 之类不产生 changes）——理由也该直接可见；
+  // 2) 有 reason 却没有变更卡（save_dict 只新建空文件之类不产生 changes）——理由也该直接可见；
   // 3) **正等着批准、但算不出 diff 的调用** —— 整文件删缓存、启动翻译、派子代理这类没有
   //    可比对的 before→after，用户要判断就只能看原始参数，那还是替它铺开（能算 diff 的
   //    都摆在审批卡上了，这一行不必再展开一次）。
@@ -355,7 +355,7 @@ function fmtChangeValue(v: unknown): string {
   }
 }
 
-/** 模型填的「为什么改」：变更卡顶部一行，没有变更卡时（如 create_dict_file 不产生
+/** 模型填的「为什么改」：变更卡顶部一行，没有变更卡时（如 save_dict 只新建空文件时不产生
     changes）在工具正文里单独显示，不然填了原因却没地方看。 */
 function ChangeReason({ text }: { text: string }) {
   return (

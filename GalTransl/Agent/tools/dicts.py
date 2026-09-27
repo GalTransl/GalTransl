@@ -1,4 +1,4 @@
-"""字典类工具：列出、读取、保存与新建字典文件。"""
+"""字典类工具：列出、读取与保存字典文件（save_dict 带 category 时顺带新建）。"""
 
 from __future__ import annotations
 
@@ -167,13 +167,23 @@ def _dict_new_lines(before_lines: list[str], content: str, action: str) -> tuple
     return _merge_dict_lines(before_lines, _split_dict_incoming(content), action)
 
 
-def _tool_save_dict(runner: AgentRunner, args: dict[str, Any]) -> Any:
-    """写入项目字典。action 决定写入方式：
+# save_dict 的 category：文件还不存在时新建并登记到哪一类字典（原 create_dict_file 的职责）
+DICT_CATEGORIES: tuple[str, ...] = ("pre", "gpt", "post")
+_DICT_CATEGORY_LABELS = {"pre": "译前", "gpt": "GPT", "post": "译后"}
+_DICT_PROJECT_MARKER = "(project_dir)"
+# 能在新文件上执行的 action：replace/delete 需要已有词条，对新文件没有意义
+_DICT_CREATE_ACTIONS = ("overwrite", "append")
 
-    - overwrite（默认）：整文件覆盖，等价于旧行为；
-    - replace：按每行的 key 替换已有词条，未匹配的 key 不新增；
-    - append：把行追加到末尾，key 已存在的行跳过；
-    - delete：按 key 删除词条（content 传要删的词条，可整行粘贴或只写 key）。
+
+def _dict_new_file_key(file_key: str) -> str:
+    """新建时 file_key 可以只写文件名：补上项目字典的 (project_dir) 前缀。"""
+    return file_key if file_key.startswith(_DICT_PROJECT_MARKER) else _DICT_PROJECT_MARKER + file_key
+
+
+def _dict_save_plan(contents: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
+    """解析 save_dict 的入参并对照现有字典，定下写哪个文件、要不要先新建（只算不写）。
+
+    save_dict 与审批卡预览共用：返回 {file_key, action, content, category, create, before_lines}。
     """
     file_key = str(args.get("file_key", "")).strip()
     if not file_key:
@@ -184,23 +194,72 @@ def _tool_save_dict(runner: AgentRunner, args: dict[str, Any]) -> Any:
     content = str(args.get("content", ""))
     if action == "delete" and not _split_dict_incoming(content):
         raise AgentToolError("delete 需要 content（要删除的词条，每行一个 key）")
-    pid = runner._project_id()
+    category = str(args.get("category", "") or "").strip().lower()
+    if category and category not in DICT_CATEGORIES:
+        raise AgentToolError("category must be one of: pre, gpt, post")
 
+    create = False
+    if file_key not in contents and category:
+        file_key = _dict_new_file_key(file_key)
+        create = file_key not in contents
+    if file_key not in contents and not create:
+        raise AgentToolError(
+            f"字典文件不存在：{file_key}。已有：{list(contents)}。"
+            "要新建就带上 category（pre=译前 / gpt=GPT / post=译后），file_key 写文件名（如 项目GPT字典2.txt）。"
+        )
+    if create and action not in _DICT_CREATE_ACTIONS:
+        raise AgentToolError(f"{file_key} 还不存在，{action} 没有可改的词条：新建时用 overwrite 或 append。")
+    old = contents.get(file_key)
+    before_lines = [str(x) for x in old.get("lines", [])] if isinstance(old, dict) else []
+    return {
+        "file_key": file_key,
+        "action": action,
+        "content": content,
+        "category": category,
+        "create": create,
+        "before_lines": before_lines,
+    }
+
+
+def _tool_save_dict(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """写入项目字典。action 决定写入方式：
+
+    - overwrite（默认）：整文件覆盖，等价于旧行为；
+    - replace：按每行的 key 替换已有词条，未匹配的 key 不新增；
+    - append：把行追加到末尾，key 已存在的行跳过；
+    - delete：按 key 删除词条（content 传要删的词条，可整行粘贴或只写 key）。
+
+    带 category（pre/gpt/post）且文件还不存在时，先新建并登记到对应的字典清单，再写入。
+    """
+    pid = runner._project_id()
     # 先读旧内容（算行级 diff + 作为 append/replace 的基底），写完后随结果返回
     cfg = urllib.parse.quote(runner.state.config_file_name)
-    before_lines: list[str] = []
     data = runner._http_get(f"/api/projects/{pid}/dictionary/project?config={cfg}")
-    contents = data.get("dict_contents", {})
-    old = contents.get(file_key)
-    if isinstance(old, dict):
-        before_lines = [str(x) for x in old.get("lines", [])]
+    plan = _dict_save_plan(data.get("dict_contents", {}), args)
+    file_key, action, before_lines = plan["file_key"], plan["action"], plan["before_lines"]
 
-    new_lines, extra = _dict_new_lines(before_lines, content, action)
+    created: dict[str, Any] = {}
+    if plan["create"]:
+        body = {
+            "config_file_name": runner.state.config_file_name,
+            "category": plan["category"],
+            "filename": file_key[len(_DICT_PROJECT_MARKER):],
+        }
+        res = runner._http_post(f"/api/projects/{pid}/dictionary/project/create", body)
+        file_key = str((res or {}).get("file_key") or file_key)
+        created = {"created": True, "category": plan["category"]}
+
+    new_lines, extra = _dict_new_lines(before_lines, plan["content"], action)
 
     before_text = "\n".join(before_lines)
     new_text = "\n".join(new_lines)
     if new_text == before_text:
-        return {"file_key": file_key, "action": action, "note": "内容没有变化，未写入", **extra}
+        note = (
+            f"已新建空字典文件，并登记为{_DICT_CATEGORY_LABELS[plan['category']]}字典"
+            if created
+            else "内容没有变化，未写入"
+        )
+        return {"file_key": file_key, "action": action, **created, "note": note, **extra}
 
     body = {
         "config_file_name": runner.state.config_file_name,
@@ -214,6 +273,7 @@ def _tool_save_dict(runner: AgentRunner, args: dict[str, Any]) -> Any:
     return {
         "file_key": file_key,
         "action": action,
+        **created,
         "line_count_before": len(before_lines),
         "line_count_after": len(new_lines),
         "lines_added": added,
@@ -221,15 +281,3 @@ def _tool_save_dict(runner: AgentRunner, args: dict[str, Any]) -> Any:
         "line_diff": diff,
         **extra,
     }
-
-
-def _tool_create_dict_file(runner: AgentRunner, args: dict[str, Any]) -> Any:
-    category = str(args.get("category", "")).strip()
-    filename = str(args.get("filename", "")).strip()
-    if category not in ("pre", "gpt", "post"):
-        raise AgentToolError("category must be one of: pre, gpt, post")
-    if not filename:
-        raise AgentToolError("filename is required")
-    pid = runner._project_id()
-    body = {"config_file_name": runner.state.config_file_name, "category": category, "filename": filename}
-    return runner._http_post(f"/api/projects/{pid}/dictionary/project/create", body)

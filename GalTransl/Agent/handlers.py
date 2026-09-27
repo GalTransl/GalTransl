@@ -8,13 +8,11 @@ from GalTransl.Agent.subagent import _tool_run_subagents
 from GalTransl.Agent.tools.ask import _tool_ask_user, _tool_read_history_archive
 from GalTransl.Agent.tools.cache import (
     _tool_delete_transl_cache,
-    _tool_list_transl_cache,
     _tool_patch_transl_cache,
     _tool_read_output,
     _tool_read_transl_cache,
 )
 from GalTransl.Agent.tools.dicts import (
-    _tool_create_dict_file,
     _tool_list_dict_files,
     _tool_read_dict,
     _tool_save_dict,
@@ -38,7 +36,7 @@ from GalTransl.Agent.tools.project import (
     _tool_update_project_config,
     _tool_write_project_guideline,
 )
-from GalTransl.Agent.tools.search import _tool_search_input, _tool_search_transl_cache
+from GalTransl.Agent.tools.search import _tool_search_input
 
 if TYPE_CHECKING:
     from GalTransl.Agent.runner import AgentRunner
@@ -55,7 +53,6 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "list_dict_files": _tool_list_dict_files,
     "read_dict": _tool_read_dict,
     "save_dict": _tool_save_dict,
-    "create_dict_file": _tool_create_dict_file,
     "get_name_table": _tool_get_name_table,
     "save_name_table": _tool_save_name_table,
     "start_translation": _tool_start_translation,
@@ -65,15 +62,22 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "list_problems": _tool_list_problems,
     "manage_problem_filter": _tool_manage_problem_filter,
     "manage_problem_white_list": _tool_manage_problem_white_list,
-    "list_transl_cache": _tool_list_transl_cache,
     "read_transl_cache": _tool_read_transl_cache,
     "read_output": _tool_read_output,
     "delete_transl_cache": _tool_delete_transl_cache,
-    "search_transl_cache": _tool_search_transl_cache,
     "patch_transl_cache": _tool_patch_transl_cache,
     "read_history_archive": _tool_read_history_archive,
     "ask_user": _tool_ask_user,
     "run_subagents": _tool_run_subagents,
+}
+
+
+# 已合并掉的旧工具名 → 现在该怎么调。旧会话的历史里还留着这些调用，模型可能照着历史再调一次：
+# 回一句明确的改法，比"未知工具"好接得多。
+_RETIRED_TOOLS: dict[str, str] = {
+    "list_transl_cache": 'list_transl_cache 已并入 read_transl_cache：改用 read_transl_cache(action="list", ...)。',
+    "search_transl_cache": 'search_transl_cache 已并入 read_transl_cache：改用 read_transl_cache(action="search", query=..., ...)。',
+    "create_dict_file": 'create_dict_file 已并入 save_dict：改用 save_dict(file_key="<文件名>", category="pre|gpt|post", content=...)，文件不存在时会先新建并登记。',
 }
 
 
@@ -85,7 +89,6 @@ _TOOLS_WITH_REASON: frozenset[str] = frozenset({
     "update_project_config",
     "write_project_guideline",
     "save_dict",
-    "create_dict_file",
     "save_name_table",
     "manage_problem_filter",
     "manage_problem_white_list",

@@ -9,7 +9,7 @@ from GalTransl.Agent.models import AgentToolError
 
 
 # ---- 清单类工具的公共入参（grep + limit + order）----
-# list_transl_cache / list_input_files 都是一行一个文件的清单：大项目动辄几百上千行，全量
+# read_transl_cache(action=list) / list_input_files 都是一行一个文件的清单：大项目动辄几百上千行，全量
 # 倒给模型既费 token 也淹掉重点，只给前 N 行又会让它以为"项目就这些文件"——后面的文件它
 # 根本不会去查。所以按 limit（默认 100）截取，**怎么截由 order 决定**（见下面的模式表）；
 # 要精确定位某个文件用 grep（文件名子串，大小写不敏感）。

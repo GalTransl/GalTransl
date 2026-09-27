@@ -1,4 +1,4 @@
-"""清单类工具（list_transl_cache / list_input_files）的 grep 与 limit。
+"""清单类工具（read_transl_cache 的 list / list_input_files）的 grep 与 limit。
 
 回归背景：两个工具原本把整份文件清单倒给模型。大项目几百上千个文件，既费 token 又淹掉
 重点；而"只给前 N 个"更糟——清单按名字排序，后半段等于不存在，模型会以为项目里没有那些
@@ -355,10 +355,11 @@ class ListSchemaTests(unittest.TestCase):
     """schema 里得真有这些入参，否则模型不会传。"""
 
     def test_both_list_tools_advertise_grep_limit_order(self):
-        for name in ("list_transl_cache", "list_input_files"):
+        for name in ("read_transl_cache", "list_input_files"):
             schema = next(t for t in rt.AGENT_TOOLS if t["function"]["name"] == name)
             props = schema["function"]["parameters"]["properties"]
-            self.assertEqual(sorted(props), ["grep", "limit", "order"], name)
+            # read_transl_cache 还管 read/search，入参更多；清单这三个必须都在
+            self.assertTrue({"grep", "limit", "order"} <= set(props), name)
             self.assertEqual(
                 props["order"]["enum"], ["even", "name", "random", "size_desc", "size_asc"], name
             )

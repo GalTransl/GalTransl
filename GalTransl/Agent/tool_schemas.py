@@ -62,7 +62,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "search_input",
-            "description": "在**待翻译原文**里搜关键词或说话人（search_transl_cache 的原文侧对应工具：那边搜缓存=原文+译文+问题，这边只搜还没翻译的原文全文）。query 为关键词，field 取 all/src（原文正文）/name（说话人）；传 context=N 让每条命中再带上 N 句上文（默认只给上文，要前后都给传 only_preceding=false；上下文行的 index 带 *）。field=all 时顶层 matched_in 汇总命中在原文还是说话人。典型用途：定译法/收字典前先查某个称呼或专有名词在全篇出现过几次、都出现在哪些上下文（出现次数与说话人是「该不该收、收哪个写法」的依据），以及比 read_input_file 逐段读更省 token 地定位语境；命中的 filename+index 可直接交给 read_input_file 精读。传 filename 只搜某个输入文件（来自 list_input_files），留空搜全部输入文件——**每次搜索都要把涉及的输入文件过一遍文件插件（比搜缓存慢），要缩小范围就传 filename**。注意译文侧的问题（漏译/残留日文/译名是否统一）不在原文里，那些用 search_transl_cache。命中多时分页看：整页最多 200 行，limit 是本页最多几条命中（默认 100、最大 200；带 context 时命中上限按行数换算，如 context=3 → 最多 28 条），offset 是跳过前几条命中；结果里的 returned 是本页命中数、has_more 表示还有下一批，还有就把 offset 加上 returned 再查一次。",
+            "description": "在**待翻译原文**里搜关键词或说话人（read_transl_cache 搜索（action=search）的原文侧对应工具：那边搜缓存=原文+译文+问题，这边只搜还没翻译的原文全文）。query 为关键词，field 取 all/src（原文正文）/name（说话人）；传 context=N 让每条命中再带上 N 句上文（默认只给上文，要前后都给传 only_preceding=false；上下文行的 index 带 *）。field=all 时顶层 matched_in 汇总命中在原文还是说话人。典型用途：定译法/收字典前先查某个称呼或专有名词在全篇出现过几次、都出现在哪些上下文（出现次数与说话人是「该不该收、收哪个写法」的依据），以及比 read_input_file 逐段读更省 token 地定位语境；命中的 filename+index 可直接交给 read_input_file 精读。传 filename 只搜某个输入文件（来自 list_input_files），留空搜全部输入文件——**每次搜索都要把涉及的输入文件过一遍文件插件（比搜缓存慢），要缩小范围就传 filename**。注意译文侧的问题（漏译/残留日文/译名是否统一）不在原文里，那些用 read_transl_cache 的 action=search。命中多时分页看：整页最多 200 行，limit 是本页最多几条命中（默认 100、最大 200；带 context 时命中上限按行数换算，如 context=3 → 最多 28 条），offset 是跳过前几条命中；结果里的 returned 是本页命中数、has_more 表示还有下一批，还有就把 offset 加上 returned 再查一次。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -135,7 +135,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_project_overview",
-            "description": "了解项目：查看翻译进度、实际生效的后端与项目配置。进度含句数 total/translated/problems/failed 和文件级 files_total/files_translated/files_untranslated；total/translated 只统计已生成缓存的文件，未翻译的文件不计入分母，translated==total 不代表整个项目翻完，整体进度看 files_translated/files_total。backend 里是两份实际生效的后端（各含 name 配置名 / type 后端类型 / model 模型名，不含地址与密钥）：agent 是本会话在用的，translator 是翻译任务会用的。流程第一步调用它确认项目可用；配置与配置键说明基本不变，之后再查进度只传 include=[\"progress\"] 即可，别重复拉。输入文件清单本身用 list_input_files / list_transl_cache 单独查询。",
+            "description": "了解项目：查看翻译进度、实际生效的后端与项目配置。进度含句数 total/translated/problems/failed 和文件级 files_total/files_translated/files_untranslated；total/translated 只统计已生成缓存的文件，未翻译的文件不计入分母，translated==total 不代表整个项目翻完，整体进度看 files_translated/files_total。backend 里是两份实际生效的后端（各含 name 配置名 / type 后端类型 / model 模型名，不含地址与密钥）：agent 是本会话在用的，translator 是翻译任务会用的。流程第一步调用它确认项目可用；配置与配置键说明基本不变，之后再查进度只传 include=[\"progress\"] 即可，别重复拉。输入文件清单本身用 list_input_files / read_transl_cache（action=list）单独查询。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -181,12 +181,17 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "save_dict",
-            "description": "写入/维护某个项目字典文件。file_key 必须来自 list_dict_files；content 为 tab 分隔文本（格式：日文<Tab>中文[<Tab>解释]）。action 决定操作：overwrite（默认，整文件覆盖）、replace（按 key 替换已有词条，未匹配的 key 不新增）、append（追加到末尾，重复 key 跳过）、delete（按 key 删除词条）。补充新词条优先用 append，避免重发整份字典；delete 的 content 可整行粘贴，也可只写 key。",
+            "description": "写入/维护某个项目字典文件。file_key 必须来自 list_dict_files；content 为 tab 分隔文本（格式：日文<Tab>中文[<Tab>解释]）。action 决定操作：overwrite（默认，整文件覆盖）、replace（按 key 替换已有词条，未匹配的 key 不新增）、append（追加到末尾，重复 key 跳过）、delete（按 key 删除词条）。补充新词条优先用 append，避免重发整份字典；delete 的 content 可整行粘贴，也可只写 key。新建字典文件也用它：带上 category（pre=译前 / gpt=GPT / post=译后），file_key 写新文件名（如 项目GPT字典2.txt），文件不存在时会先新建并登记到对应的字典清单再写入（新建时 action 用 overwrite 或 append；content 可为空，只建空文件）。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "file_key": {"type": "string"},
+                    "file_key": {"type": "string", "description": "字典文件 key（来自 list_dict_files，形如 (project_dir)项目GPT字典.txt）；新建时写新文件名即可"},
                     "content": {"type": "string", "description": "要写入的字典内容（tab 分隔文本）；delete 时传要删除的词条（每行一个，可整行或只写 key）"},
+                    "category": {
+                        "type": "string",
+                        "enum": ["pre", "gpt", "post"],
+                        "description": "可选。文件还不存在时新建到哪一类：pre=译前，gpt=GPT，post=译后。已存在的文件忽略它。",
+                    },
                     "action": {
                         "type": "string",
                         "enum": ["overwrite", "replace", "append", "delete"],
@@ -195,22 +200,6 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     "reason": _REASON_PROPERTY,
                 },
                 "required": ["file_key", "content"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "create_dict_file",
-            "description": "在项目里新建一个字典文件并登记到配置（pre/gpt/post 三类之一）。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "category": {"type": "string", "enum": ["pre", "gpt", "post"], "description": "pre=译前, gpt=GPT, post=译后"},
-                    "filename": {"type": "string", "description": "字典文件名，如 项目GPT字典.txt"},
-                    "reason": _REASON_PROPERTY,
-                },
-                "required": ["category", "filename"],
             },
         },
     },
@@ -439,43 +428,60 @@ AGENT_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "list_transl_cache",
-            "description": "列出缓存文件（译文）与各文件的条目数。文件很多时默认只返回 100 个（order=even：**均匀采样**，含首尾、等距摊满整个清单，不是前 100 个），要缩小范围用 grep（文件名子串，如 grep=\"sc_2\"），换挑选方式用 order（文件名顺序 / 随机采样 / 按大小从大到小或从小到大），要看更多把 limit 调大（上限 500）。返回 Markdown 表格 + 文字说明（格式见系统提示）。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "grep": {"type": "string", "description": "可选。按文件名过滤（子串、大小写不敏感），如 \"sc_2\"、\"pr00\"。"},
-                    "limit": {"type": "integer", "description": "可选。最多返回多少个文件（默认 100，上限 500）；超出时按 order 挑选。"},
-                    "order": {
-                        "type": "string",
-                        "enum": ["even", "name", "random", "size_desc", "size_asc"],
-                        "description": "可选。清单的排列与采样方式（默认 even）：even=按文件名顺序均匀采样（含首尾、等距摊满整个清单）；name=按文件名顺序取前 limit 个；random=随机采样 limit 个（每次调用可能不同）；size_desc=按文件大小从大到小取前 limit 个；size_asc=按文件大小从小到大取前 limit 个。",
-                    },
-                },
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "read_transl_cache",
-            "description": "读取某个缓存文件的条目（译文）。filename 来自 list_transl_cache 的缓存文件列表。留空 index 返回前 30 条；指定 index 只返回指定的条目。修问题/润色判断语意连贯时传 context 让目标条目带上几句上文（默认只给上文，要前后都给传 only_preceding=false；上下文行的 index 带 *）。默认只返回必要字段（index/说话人/原文/译文/问题，以及确实非空或与原文不同的附加字段），要看别的字段再传 fields。要只看命中的条目传 grep：字符串 = 在 fields 选中的字段内容里搜文本（大小写不敏感），数组 = 把这些元素当字段名、只留有内容的条目（如 [\"problem\",\"proofread_comment\"]）。返回 Markdown 表格 + 文字说明（格式见系统提示）。要把某条缓存展示给用户时，在回复里单独一行写 $transl_cache(\"<缓存文件名>\", <行号>)（行号 = 条目 index，区间 12-15 / 列表 12,20 均可），界面会把它渲染成那几行缓存的卡片。",
+            "description": (
+                "读翻译缓存（译文）的唯一入口，action 分三种："
+                "①list = 列出缓存文件与各文件条目数（文件很多时默认只给 100 个，order=even 是**均匀采样**、含首尾，"
+                "不是前 100 个；grep 按文件名过滤，limit 调数量，上限 500）；"
+                "②read = 读某个缓存文件（filename）的条目：留空 index 返回前 30 条，指定 index 只返回那些条目；"
+                "默认只返回必要字段（index/说话人/原文/译文/问题，以及确实非空或与原文不同的附加字段），要看别的传 fields；"
+                "grep 只留命中的条目（字符串 = 在所选字段里搜文本，数组 = 这些字段都非空）；"
+                "③search = 在缓存里搜 query（field 选 all/src/dst/problem；filename 可选，只搜某个文件），"
+                "命中多时分页：整页最多 200 行，limit 是本页最多几条命中（默认 100、最大 200），offset 跳过前几条，"
+                "has_more 表示还有，下一页 offset 加上 returned；field=all 时 matched_in 汇总命中在哪一侧。"
+                "read 和 search 都可以传 context=N 给目标条目/每条命中带 N 句上文（默认只给上文，前后都要传 only_preceding=false；"
+                "上下文行的 index 带 *，那不是点名/命中的条目）；trans_by 逐条只给少数派，多数派记在 majority_trans_by。"
+                "不传 action 时按参数推断：有 query 是 search，有 filename 是 read，否则是 list。"
+                "返回 Markdown 表格 + 文字说明（格式见系统提示）。"
+                "要把某条缓存展示给用户时，在回复里单独一行写 $transl_cache(\"<缓存文件名>\", <行号>)"
+                "（行号 = 条目 index，区间 12-15 / 列表 12,20 均可），界面会把它渲染成那几行缓存的卡片。"
+                "例：read_transl_cache(action=\"list\", grep=\"sc_2\")；"
+                "read_transl_cache(action=\"read\", filename=\"sc_2_st01.txt.json\", index=\"33-40\", context=3)；"
+                "read_transl_cache(action=\"search\", query=\"ドルード\", field=\"src\", context=3)。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "filename": {"type": "string"},
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "read", "search"],
+                        "description": "list=列缓存文件；read=读某个文件的条目；search=在缓存里搜。不传则按参数推断（有 query→search，有 filename→read，否则 list）。",
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": "缓存文件名（来自 action=list 的清单）。read 必填；search 可选，只在这个文件里搜（留空搜全项目）；list 不用。",
+                    },
                     "index": {
                         "type": "string",
-                        "description": "可选。要读取的条目 index 列表，支持逗号和区间，如 \"33-40,50-60\"、\"5,9,12\"、\"100-105\"。留空返回前 30 条。",
+                        "description": "read 用，可选。要读取的条目 index 列表，支持逗号和区间，如 \"33-40,50-60\"、\"5,9,12\"。留空返回前 30 条。",
+                    },
+                    "query": {"type": "string", "description": "search 必填：要搜的关键词。"},
+                    "field": {
+                        "type": "string",
+                        "enum": ["all", "src", "dst", "problem"],
+                        "description": "search 用：在哪一侧搜（默认 all）。src=原文，dst=译文，problem=问题描述。",
                     },
                     "context": {
                         "type": "integer",
-                        "description": "可选。上下文句数（0-20）：目标条目向上多返回 N 句（见 only_preceding），如 index=\"205-206\" context=3 返回 202~206（only_preceding=false 时 202~209）。修问题判断语意时建议 2-4。上下文行的 index 带 *（如 205*），那不是点名的条目。",
+                        "description": (
+                            "read/search 用，可选，0-20。目标条目（read）/每条命中（search）向上多返回 N 句（见 only_preceding），"
+                            "如 read 的 index=\"205-206\" context=3 返回 202~206。修问题、判断译名/语意时建议 2-4。"
+                            "search 带 context 时整页最多 200 行，命中上限按行数换算（如 context=3 → 最多 28 条命中）。"
+                        ),
                     },
                     "only_preceding": {
                         "type": "boolean",
-                        "description": "可选，默认 true：带 context 时只返回上文（修问题看上文通常就够，还省 token）；要前后都给传 false。",
+                        "description": "read/search 用，可选，默认 true：带 context 时只返回上文（通常就够，还省 token）；要前后都给传 false。",
                     },
                     "grep": {
                         "anyOf": [
@@ -483,18 +489,17 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                             {"type": "array", "items": {"type": "string"}},
                         ],
                         "description": (
-                            "可选。只返回命中的条目。①字符串 = 在 fields 选中的字段（不传 fields 则默认精简集）"
-                            "内容里做大小写不敏感的子串搜索，命中任一字段即保留，如 grep=\"残留日文\"；"
-                            "②字符串数组 = 每个元素当字段名，只保留这些字段都不为空的条目，"
-                            "如 grep=[\"problem\",\"proofread_comment\"] 取「有问题、且有校对批注」的条目。"
-                            "与 index 同用时先按 grep 过滤，再按 index 取。"
+                            "可选。list：按文件名过滤（子串、大小写不敏感），如 \"sc_2\"。"
+                            "read：只返回命中的条目——①字符串 = 在 fields 选中的字段（不传 fields 则默认精简集）内容里"
+                            "做大小写不敏感的子串搜索，如 grep=\"残留日文\"；②字符串数组 = 每个元素当字段名，只保留这些字段都不为空的条目，"
+                            "如 grep=[\"problem\",\"proofread_comment\"]。与 index 同用时先按 grep 过滤，再按 index 取。"
                         ),
                     },
                     "fields": {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": (
-                            "可选。每条要返回哪些字段：index、name（说话人）、pre_src（原句）、pre_dst（译文）、"
+                            "read 用，可选。每条要返回哪些字段：index、name（说话人）、pre_src（原句）、pre_dst（译文）、"
                             "post_src、post_dst_preview（译后字典替换后的预览）、proofread_dst、proofread_by、"
                             "trans_by、problem。"
                             "不传 = 默认精简集（index/name/post_src/pre_dst/problem；post_dst_preview 仅在译后处理真的改了内容时给，"
@@ -502,8 +507,21 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                             "trans_by 逐条只给少数派（多数派 = 这批里出现最多的那个模型，通常就是引擎翻的；它记在返回的 majority_trans_by 里）。"
                         ),
                     },
+                    "limit": {
+                        "type": "integer",
+                        "description": "可选。list：最多返回多少个文件（默认 100，上限 500）；search：本页最多几条命中（默认 100，最大 200，带 context 时还会按行数收紧）。",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "search 用，可选。分页偏移：跳过前 N 条命中（默认 0，前后文行不算数）。配合 has_more 翻页。",
+                    },
+                    "order": {
+                        "type": "string",
+                        "enum": ["even", "name", "random", "size_desc", "size_asc"],
+                        "description": "list 用，可选（默认 even）：even=按文件名顺序均匀采样（含首尾）；name=按文件名顺序取前 limit 个；random=随机采样；size_desc/size_asc=按文件大小从大到小/从小到大取前 limit 个。",
+                    },
                 },
-                "required": ["filename"],
+                "required": [],
             },
         },
     },
@@ -550,44 +568,12 @@ AGENT_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "search_transl_cache",
-            "description": "在缓存中搜索译文/原文/问题。query 为关键词，field 取 all/src/dst/problem。只看命中行往往不够判断（如查「ドルード」要决定译成「多鲁德」还是「杜罗德」），传 context=N 让每条命中再带上 N 句上文，用法同 read_transl_cache 的 context（默认也只给上文，要前后都给传 only_preceding=false；上下文行的 index 带 *）。field=all 时顶层 matched_in 汇总命中在哪一侧（src/dst/problem），不再逐行重复标注；trans_by 逐行只给少数派——整批命中里出现最多的那个模型（多数派，通常就是翻译引擎翻的）过滤掉并记在顶层 majority_trans_by，其余少数派逐行保留。传 filename 只搜某个缓存文件（来自 list_transl_cache），修单文件问题时用，如 search_transl_cache(query=\"アクメ\", field=\"src\", filename=\"sc_2_st01.txt.json\")。命中多时分页看：整页最多 200 行，limit 是本页最多几条命中（默认 100、最大 200；带 context 时命中上限按行数换算，如 context=3 → 最多 28 条），offset 是跳过前几条命中；结果里的 returned 是本页命中数、has_more 表示还有下一批，还有就把 offset 加上 returned 再查一次。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                    "field": {"type": "string", "enum": ["all", "src", "dst", "problem"]},
-                    "filename": {"type": "string", "description": "可选。只在这个缓存文件里搜（来自 list_transl_cache）。留空搜全项目。"},
-                    "context": {
-                        "type": "integer",
-                        "description": "可选，0-20（默认 0）。每条命中再带上文（见 only_preceding），用于判断译名/语气/语意连贯。带上下文时整页最多 200 行，命中上限按行数换算、会明显收紧（如 context=3 → 最多 28 条命中），命中很多时可配合 limit/offset 翻页或 filename 缩小范围。上下文行的 index 带 *（如 12*），那不是命中行。",
-                    },
-                    "only_preceding": {
-                        "type": "boolean",
-                        "description": "可选，默认 true：带 context 时只返回上文（判断这处译名怎么定通常看上文就够，还省 token）；要前后两边都给传 false。",
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "可选。本页最多返回几条命中，默认 100，最大 200（带 context 时还会按行数预算再收紧，整页最多 200 行）。total 始终是全部命中数。",
-                    },
-                    "offset": {
-                        "type": "integer",
-                        "description": "可选。分页偏移：跳过前 N 条命中（默认 0，前后文行不算数）。配合 has_more 翻页。",
-                    },
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "patch_transl_cache",
             "description": "批量修改缓存条目的译文（pre_dst / proofread_dst 两列）。**一次调用可以跨多个缓存文件**（统一译名/术语这类活一次就交完）：patches 里每条自带 file；只改一个文件时用顶层 filename、patches 不带 file。只更新 patches 里点名的条目与字段，其它条目原样保留。**按校对批注改完一批译文后，顶层带 clear_comment=true**：点名的条目的 proofread_comment 一并清空（表示这些意见已处理），不必在每条 patch 里各写一遍空串。返回是一篇**按文件分组的 Markdown**：每个文件一节，先列「改了什么」（每条 before→after），再列没落地的条目（index 不存在 / 字段不许改及原因）与「改完仍存在的问题」（只列被改过的条目——没列到的就是消掉了）；改了什么一目了然、有没有引入新问题当场可验，不必再 read_transl_cache。适合发现问题后改译文、再配合 rebuilda 重建的复核循环。trans_by 由工具自动标记，不用手动指定。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "filename": {"type": "string", "description": "可选。默认缓存文件名（来自 list_transl_cache）：patches 里没写 file 的都改它。**只改一个文件就写它**；要一次改多个文件，就每条 patch 都写 file，这里可以不写"},
+                    "filename": {"type": "string", "description": "可选。默认缓存文件名（来自 read_transl_cache 的 list 清单）：patches 里没写 file 的都改它。**只改一个文件就写它**；要一次改多个文件，就每条 patch 都写 file，这里可以不写"},
                     "patches": {
                         "type": "array",
                         "description": "要改的条目，按顺序应用；跨文件时每条带上 file",

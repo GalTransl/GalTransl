@@ -48,7 +48,6 @@ PERMISSION_HIGH = "high"
 
 PERMISSION_TOOL_RISK: dict[str, str] = {
     "save_dict": PERMISSION_EDIT,
-    "create_dict_file": PERMISSION_EDIT,
     "save_name_table": PERMISSION_EDIT,
     "patch_transl_cache": PERMISSION_EDIT,
     "delete_transl_cache": PERMISSION_EDIT,
@@ -75,10 +74,8 @@ PERMISSION_READ_TOOLS: frozenset[str] = frozenset({
     "read_dict",
     "get_name_table",
     "list_problems",
-    "list_transl_cache",
     "read_transl_cache",
     "read_output",
-    "search_transl_cache",
     "read_history_archive",
     "get_runtime",
     "wait",
@@ -88,7 +85,6 @@ PERMISSION_READ_TOOLS: frozenset[str] = frozenset({
 # 审批卡上显示的工具名（前端有自己的 TOOL_META，这里只需要一个可读的名字）
 PERMISSION_TOOL_LABELS: dict[str, str] = {
     "save_dict": "保存字典",
-    "create_dict_file": "新建字典",
     "save_name_table": "保存人名表",
     "patch_transl_cache": "修改译文",
     "delete_transl_cache": "删除缓存",

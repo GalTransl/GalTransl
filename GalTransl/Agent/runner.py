@@ -56,7 +56,7 @@ from GalTransl.Agent.core import (
     _log,
     _requested_reasoning_field,
 )
-from GalTransl.Agent.handlers import _TOOL_HANDLERS, _attach_reason
+from GalTransl.Agent.handlers import _RETIRED_TOOLS, _TOOL_HANDLERS, _attach_reason
 from GalTransl.Agent.models import AgentEvent, AgentToolError
 from GalTransl.Agent.permissions import (
     PERMISSION_DECISIONS,
@@ -1325,7 +1325,7 @@ class AgentRunner:
     def _dispatch_tool(self, name: str, args: dict[str, Any]) -> Any:
         handler = _TOOL_HANDLERS.get(name)
         if handler is None:
-            raise AgentToolError(f"未知工具：{name}")
+            raise AgentToolError(_RETIRED_TOOLS.get(name) or f"未知工具：{name}")
         # 权限门禁：按当前模式放行 / 先请用户批准（拒绝时抛 AgentToolError，由主循环
         # 转成工具错误给模型看——见 _require_permission）。
         self._require_permission(name, args)
