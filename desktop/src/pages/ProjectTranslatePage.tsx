@@ -19,11 +19,10 @@ import {
   fetchProjectRuntime,
   getSelectedTranslatorTemplate,
   getSelectedBackendProfileJobPayload,
-  getSelectedBackendProfileDisplay,
-  resolveSelectedBackendProfile,
   setSelectedTranslatorTemplate,
   stopProjectTranslation,
   submitJob } from '../lib/api';
+import { summarizeBackendUsage } from '../lib/backendUsage';
 import { normalizeError } from '../lib/errors';
 import { usePrefersReducedMotion, LAUNCH, STRIP_BOOT, BAR_SURGE, COMPLETE, FRESH_HIGHLIGHT_MS } from '../lib/motion';
 import {
@@ -64,78 +63,6 @@ type RetranslListItem = {
   count: number;
 };
 
-type BackendUsageSummary = {
-  backend: string;
-  model: string;
-  profile: string;
-};
-
-function stringifyConfigValue(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function toModelDisplayName(modelName: string): string {
-  const trimmed = modelName.trim();
-  return trimmed.split('/').filter(Boolean).pop() ?? trimmed;
-}
-
-function uniqueNonEmpty(values: string[]): string[] {
-  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
-}
-
-function collectBackendModels(config: Record<string, unknown> | null): { backend: string; model: string } {
-  if (!config) {
-    return { backend: '未配置后端类型', model: '未填写模型' };
-  }
-
-  const enabledBackends: string[] = [];
-  const models: string[] = [];
-
-  const openAiConfig = config['OpenAI-Compatible'];
-  if (openAiConfig && typeof openAiConfig === 'object') {
-    enabledBackends.push('OpenAI-Compatible');
-    const tokens = Array.isArray((openAiConfig as Record<string, unknown>).tokens)
-      ? (openAiConfig as Record<string, unknown>).tokens as Array<Record<string, unknown>>
-      : [];
-    models.push(...tokens.map((token) => toModelDisplayName(stringifyConfigValue(token.modelName))));
-  }
-
-  const sakuraConfig = config.SakuraLLM;
-  if (sakuraConfig && typeof sakuraConfig === 'object') {
-    enabledBackends.push('SakuraLLM');
-    const rewriteModelName = stringifyConfigValue((sakuraConfig as Record<string, unknown>).rewriteModelName);
-    if (rewriteModelName) models.push(toModelDisplayName(rewriteModelName));
-  }
-
-  return {
-    backend: uniqueNonEmpty(enabledBackends).join(' / ') || '未配置后端类型',
-    model: uniqueNonEmpty(models).join(' / ') || '未填写模型',
-  };
-}
-
-function summarizeBackendUsage(projectDir: string, projectBackendConfig: Record<string, unknown> | null): BackendUsageSummary {
-  const { name, profile } = resolveSelectedBackendProfile(projectDir);
-  const selectedProfileDisplay = getSelectedBackendProfileDisplay(projectDir);
-
-  // Following an empty global default means no backend is configured. The
-  // project config is only used when the project explicitly opts out of the
-  // global profile with "不使用（使用项目自身配置）".
-  if (!profile && selectedProfileDisplay === '__default__') {
-    return {
-      backend: '未配置后端',
-      model: '',
-      profile: '',
-    };
-  }
-
-  const activeConfig = profile ?? projectBackendConfig;
-  const { model } = collectBackendModels(activeConfig);
-  return {
-    backend: profile ? name : '自定义后端',
-    model,
-    profile: name,
-  };
-}
 
 function readContinuousRetranslEnabled(projectDir: string): boolean {
   try {

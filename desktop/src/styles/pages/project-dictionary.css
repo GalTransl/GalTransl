@@ -279,6 +279,115 @@
   margin-bottom: var(--space-3);
 }
 
+/* ── 「AI 生成 GPT 字典」二次确认 ── */
+
+.dict-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: rgba(16, 24, 40, 0.35);
+  backdrop-filter: blur(4px);
+  z-index: 50;
+  animation: dictDialogFadeIn 160ms var(--ease-default, ease-out);
+}
+
+.dict-dialog {
+  width: 100%;
+  max-width: 460px;
+  max-height: 100%;
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+  box-shadow: 0 20px 50px rgba(16, 24, 40, 0.18);
+  animation: dictDialogPopIn 180ms var(--ease-default, ease-out);
+}
+
+.dict-dialog__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.dict-dialog__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.dict-dialog__subtitle {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.dict-dialog__subtitle strong {
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.dict-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--color-text-muted);
+}
+
+.dict-dialog__body p {
+  margin: 0;
+}
+
+.dict-dialog__warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 32%, transparent);
+  border-radius: var(--radius-card);
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.dict-dialog__warning .icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.dict-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+@keyframes dictDialogFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes dictDialogPopIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dict-dialog-overlay,
+  .dict-dialog {
+    animation: none;
+  }
+}
+
 .dict-empty-actions {
   display: flex;
   gap: var(--space-2);

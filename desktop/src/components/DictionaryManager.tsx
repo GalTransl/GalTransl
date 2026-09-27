@@ -5,6 +5,7 @@ import { Button } from './Button';
 import { Icon } from './Icon';
 import { Panel } from './Panel';
 import { EmptyState, ErrorState, InlineFeedback, LoadingState } from './page-state';
+import { formatBackendUsage, type BackendUsageSummary } from '../lib/backendUsage';
 import type { DictFileContent, DictionaryCategory } from '../lib/api';
 
 type DictTab = DictionaryCategory;
@@ -44,6 +45,8 @@ type DictionaryManagerProps = {
   onSaveFile: (fileKey: string, content: string) => Promise<void>;
   onDeleteFile: (fileKey: string) => Promise<void>;
   onGenerateGptDict?: () => Promise<void>;
+  /** 「AI 生成 GPT 字典」二次确认里要说明用哪个后端（与翻译工作台同一口径） */
+  gendicBackend?: BackendUsageSummary | null;
 };
 
 type DictContextMenuState = {
@@ -226,6 +229,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     onSaveFile,
     onDeleteFile,
     onGenerateGptDict,
+    gendicBackend,
     title,
     description,
   } = props;
@@ -241,6 +245,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [generatingGptDict, setGeneratingGptDict] = useState(false);
+  const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [newFilename, setNewFilename] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
@@ -413,6 +418,12 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     } finally {
       setGeneratingGptDict(false);
     }
+  };
+
+  // 启动前先确认：任务会调用模型、消耗额度，得让用户看清楚用的是哪个后端
+  const confirmGenerateGptDict = () => {
+    setShowGenerateConfirm(false);
+    void handleGenerateGptDict();
   };
 
   const ensureSelection = (nextFiles: string[]) => {
@@ -622,6 +633,12 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     );
   }
 
+  // 二次确认里写清楚用的是哪个后端：项目没单独指定就是全局默认，跟翻译工作台同一口径
+  const gendicBackendText = formatBackendUsage(
+    gendicBackend ?? { backend: '当前项目的后端配置', model: '', profile: '' },
+  );
+  const gendicBackendMissing = gendicBackend?.backend === '未配置后端';
+
   return (
     <div className="project-dictionary-page">
       <div className="project-dictionary-page__header">
@@ -648,9 +665,11 @@ export function DictionaryManager(props: DictionaryManagerProps) {
           {activeTab === 'gpt' && onGenerateGptDict ? (
             <Button
               variant="secondary"
-              onClick={() => void handleGenerateGptDict()}
+              onClick={() => setShowGenerateConfirm(true)}
               disabled={generatingGptDict}
+              title="用 AI（GenDic）从原文提取术语生成 GPT 字典"
             >
+              <Icon name="bot" />
               {generatingGptDict ? '启动中…' : 'AI生成GPT字典'}
             </Button>
           ) : null}
@@ -808,6 +827,50 @@ export function DictionaryManager(props: DictionaryManagerProps) {
           </div>
         </div>
       </div>
+      {showGenerateConfirm ? (
+        <div
+          className="dict-dialog-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="gendic-confirm-title"
+          onClick={() => setShowGenerateConfirm(false)}
+        >
+          <div className="dict-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="dict-dialog__header">
+              <h3 className="dict-dialog__title" id="gendic-confirm-title">
+                <Icon name="bot" />
+                AI 生成 GPT 字典
+              </h3>
+              <p className="dict-dialog__subtitle">
+                将使用 <strong>{gendicBackendText}</strong> 启动 GenDic 生成 GPT 字典。
+              </p>
+            </div>
+            <div className="dict-dialog__body">
+              <p>
+                后端跟随当前项目的后端配置；项目没有单独指定时用全局默认配置，与翻译工作台的「当前后端」一致。
+              </p>
+              <p>
+                GenDic 会先给说话人名定译名，再逐段提取专有名词并整体审校，最后并入项目目录下的
+                「项目GPT字典-生成.txt」。整个过程会调用模型、消耗 API 额度，启动后可在翻译工作台查看阶段与进度。
+              </p>
+              {gendicBackendMissing ? (
+                <p className="dict-dialog__warning">
+                  <Icon name="warning" />
+                  当前还没有可用的模型配置，直接启动会失败。请先去「模型设置」新建配置（第一个配置会自动设为默认）。
+                </p>
+              ) : null}
+            </div>
+            <div className="dict-dialog__actions">
+              <Button variant="secondary" onClick={() => setShowGenerateConfirm(false)}>取消</Button>
+              <Button onClick={confirmGenerateGptDict} disabled={generatingGptDict}>
+                <Icon name="play" />
+                确认启动
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {contextMenu && createPortal(
         <div
           ref={contextMenuRef}
