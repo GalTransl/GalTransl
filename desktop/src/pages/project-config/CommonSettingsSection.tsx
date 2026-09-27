@@ -18,6 +18,12 @@ const PRIMARY_FIELDS: ConfigFieldDef[] = [
   { key: 'gpt.translation_guideline', label: '翻译规范', description: '全局翻译规范文件（位于 translation_guidelines 文件夹）。本项目的专属规范在左侧「项目规范」页，翻译时会拼在这份之后、冲突时以项目规范为准。', type: 'select', options: [] },
 ];
 
+// 只在「动态句数调整」开启时才有意义的两个字段：关闭时从常用设置里隐去
+const DYNAMIC_RANGE_KEYS = new Set([
+  'gpt.dynamicNumPerRequestTranslate.min',
+  'gpt.dynamicNumPerRequestTranslate.max',
+]);
+
 // ── Advanced (low-frequency) fields ──
 const ADVANCED_FIELDS: ConfigFieldDef[] = [
   { key: 'splitFileCrossNum', label: '分割交叉句数', description: '分片间重叠句数，可提升片段衔接质量（常用 0 或 10）。', type: 'number', placeholder: '0' },
@@ -56,11 +62,16 @@ export function CommonSettingsSection({ commonConfig, onFieldChange, onListField
     if (currentGuideline && !merged.includes(currentGuideline)) {
       merged.unshift(currentGuideline);
     }
-    return PRIMARY_FIELDS.map((field) =>
-      field.key === 'gpt.translation_guideline'
-        ? { ...field, options: merged }
-        : field,
-    );
+    // 动态句数调整关闭时，上下限没人用，不显示
+    const dynamicRaw = getFieldValue(commonConfig, 'gpt.dynamicNumPerRequestTranslate');
+    const dynamicEnabled = dynamicRaw === true || String(dynamicRaw ?? '').trim().toLowerCase() === 'true';
+    return PRIMARY_FIELDS
+      .filter((field) => dynamicEnabled || !DYNAMIC_RANGE_KEYS.has(field.key))
+      .map((field) =>
+        field.key === 'gpt.translation_guideline'
+          ? { ...field, options: merged }
+          : field,
+      );
   }, [commonConfig, guidelines]);
 
   return (
