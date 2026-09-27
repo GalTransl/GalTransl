@@ -78,6 +78,10 @@ export type FileEntry = {
   size: number;
   modified: string;
   entry_count?: number;
+  /** false = 还没有缓存文件的输入文件（界面标记成未翻译，打开时后端回落读原文） */
+  has_cache?: boolean;
+  /** 未翻译文件在 gt_input 里的相对路径（它的 name 是缓存键，这里是原文路径） */
+  input_name?: string;
 };
 
 export type ProjectFilesResponse = {
@@ -94,6 +98,10 @@ export type CacheFileResponse = {
   project_dir: string;
   filename: string;
   entries: CacheEntry[];
+  /** false = 没有缓存文件，entries 是从原文回落的（只有 pre_src/post_src，译文为空） */
+  has_cache?: boolean;
+  /** 回落时读到的是哪个输入文件（gt_input 里的相对路径） */
+  input_name?: string;
 };
 
 export type CacheEntry = {
@@ -134,6 +142,8 @@ export type CacheSearchResult = {
   match_problem: boolean;
   problem: string;
   trans_by: string;
+  /** false = 这条来自还没翻译的原文件（原文命中），没有译文与问题 */
+  has_cache?: boolean;
 };
 
 export type CacheSearchResponse = {
@@ -550,9 +560,13 @@ export async function fetchProjectFiles(projectId: string) {
 }
 
 export async function fetchProjectCache(projectId: string) {
-  return apiRequest<{ project_dir: string; cache_dir: string; files: FileEntry[] }>(
-    `/api/projects/${projectId}/cache`,
-  );
+  return apiRequest<{
+    project_dir: string;
+    cache_dir: string;
+    files: FileEntry[];
+    /** gt_input 里还没有缓存的输入文件（Cache/ 目录里看不到它们） */
+    uncached_files?: FileEntry[];
+  }>(`/api/projects/${projectId}/cache`);
 }
 
 export async function fetchCacheFile(projectId: string, filename: string) {
@@ -604,13 +618,22 @@ export async function searchCache(
   options: CacheSearchOptions = { re: false },
   maxResults = 500,
   configFileName = 'config.yaml',
+  /** 连还没翻译的原文件一起搜（界面默认开；Agent 的 search_transl_cache 有专门的原文搜索工具，不开） */
+  includeUncached = true,
 ) {
   return apiRequest<CacheSearchResponse>(
     `/api/projects/${projectId}/cache/search`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, field, options, max_results: maxResults, config_file_name: configFileName }),
+      body: JSON.stringify({
+        query,
+        field,
+        options,
+        max_results: maxResults,
+        config_file_name: configFileName,
+        include_uncached: includeUncached,
+      }),
     },
   );
 }

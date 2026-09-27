@@ -441,6 +441,8 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                 "has_more 表示还有，下一页 offset 加上 returned；field=all 时 matched_in 汇总命中在哪一侧。"
                 "read 和 search 都可以传 context=N 给目标条目/每条命中带 N 句上文（默认只给上文，前后都要传 only_preceding=false；"
                 "上下文行的 index 带 *，那不是点名/命中的条目）；trans_by 逐条只给少数派，多数派记在 majority_trans_by。"
+                "read 的文件**还没翻译过（没有缓存文件）时不会报错，而是回落到原文**：返回的条目只有原文（pre_src/post_src 同一份），译文与问题为空——"
+                "想看某篇还没翻的原文可以直接读它，不必换 read_input_file；反过来，读到译文为空就说明这个文件还没翻，别当成漏译。"
                 "不传 action 时按参数推断：有 query 是 search，有 filename 是 read，否则是 list。"
                 "返回 Markdown 表格 + 文字说明（格式见系统提示）。"
                 "要把某条缓存展示给用户时，在回复里单独一行写 $transl_cache(\"<缓存文件名>\", <行号>)"

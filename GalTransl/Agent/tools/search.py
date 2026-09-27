@@ -188,9 +188,16 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
         try:
             listing = runner._http_get(f"/api/projects/{pid}/cache")
             if not any(f.get("name") == filename for f in listing.get("files", [])):
-                notes.append(
-                    f"缓存文件 {filename} 不存在（检查 read_transl_cache（action=list）清单里的文件名拼写）；这是全项目搜索的 0 命中。"
-                )
+                # 文件确实存在、只是还没翻译：缓存里当然搜不到，要搜它的原文得换 search_input
+                if any(f.get("name") == filename for f in listing.get("uncached_files", [])):
+                    notes.append(
+                        f"{filename} 还没翻译（没有缓存文件），这里是缓存搜索的 0 命中；"
+                        f"要搜它的原文用 search_input（filename={filename}）。"
+                    )
+                else:
+                    notes.append(
+                        f"缓存文件 {filename} 不存在（检查 read_transl_cache（action=list）清单里的文件名拼写）；这是全项目搜索的 0 命中。"
+                    )
         except AgentToolError:
             pass
     if notes and isinstance(result, dict):

@@ -752,6 +752,15 @@
   padding-right: 34px;
 }
 
+/* 带「→」（去缓存搜索）的条目：最后一列要给两个按钮让位。
+   注释行没有箭头，不用让 */
+.dict-card--gpt .dict-card__table-row .dict-card__cell:last-child,
+.dict-card--normal .dict-card__table-row .dict-card__cell:last-child,
+.dict-card--conditional .dict-card__table-row .dict-card__cell:last-child,
+.dict-card--situation .dict-card__table-row .dict-card__cell:last-child {
+  padding-right: 60px;
+}
+
 .dict-card__cell--index {
   font-size: 11px;
   font-weight: 700;
@@ -790,6 +799,48 @@
   background: var(--color-danger-soft);
   color: var(--color-danger);
   border-color: rgba(217, 48, 37, 0.35);
+}
+
+/* 条目行上的「→」：拿这一行的日文词去「缓存与问题」搜一下。与删除按钮同一套：
+   平时藏着，鼠标进这一行（或行内有焦点）才浮出来，位置在删除按钮左边 */
+.dict-card__row-open-cache {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 50%;
+  right: 34px;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border: 1px solid rgba(47, 111, 235, 0.24);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--color-text-muted);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.dict-card__table-row:hover .dict-card__row-open-cache,
+.dict-card__table-row:focus-within .dict-card__row-open-cache {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dict-card__row-open-cache:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  border-color: rgba(47, 111, 235, 0.4);
+}
+
+/* 还没填原文的空行：箭头留着（位置不跳）但点不动 */
+.dict-card__table-row:hover .dict-card__row-open-cache:disabled,
+.dict-card__table-row:focus-within .dict-card__row-open-cache:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 /* ── Card body / fields ── */
@@ -970,6 +1021,11 @@
 :root[data-theme='dark'] .dict-card__row-delete {
   background: rgba(26, 38, 55, 0.92);
   border-color: rgba(220, 94, 94, 0.28);
+}
+
+:root[data-theme='dark'] .dict-card__row-open-cache {
+  background: rgba(26, 38, 55, 0.92);
+  border-color: rgba(94, 140, 220, 0.28);
 }
 
 :root[data-theme='dark'] .dict-card__input {

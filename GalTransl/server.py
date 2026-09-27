@@ -12,6 +12,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 from uuid import uuid4
 
 import os
+import re
 import sys
 from datetime import datetime
 from yaml import safe_load, safe_dump
@@ -770,6 +771,259 @@ def _load_input_file_entries(project_dir: str, config_file_name: str, filename: 
 
     plugin_object, fname = _ProjectFilePlugins(project_dir, config_file_name).get(file_path)
     return _normalize_input_entries(plugin_object.load_file(file_path), fname)
+
+
+def _cache_key_for_input_name(input_name: str) -> str:
+    """输入文件（相对 gt_input、用 '/' 分隔）对应的缓存文件名。
+
+    与 Frontend/LLMTranslate._build_runtime_file_maps 的规则一致：'/' 换成 '-}'，
+    没有 .json 后缀的补一个（foo.ks → foo.ks.json）。长文件运行时还会切块成 foo_1.json，
+    列目录时看不出来，所以判断「有没有缓存」时按同名 + `_<n>` 一起认（见 _cache_name_bases）。
+    """
+    cache_key = str(input_name or "").replace("/", "-}")
+    if cache_key and not cache_key.endswith(".json"):
+        cache_key += ".json"
+    return cache_key
+
+
+def _input_name_candidates(cache_filename: str) -> list[str]:
+    """缓存文件名反推回可能的输入文件相对路径，按可能性从高到低。
+
+    反向走一遍命名规则：去掉 .append.jsonl 与 .json、`-}` 还原成 '/'、切块后缀 `_<n>` 去掉；
+    每剥一层都留一个候选，因为输入文件本身可能就叫 foo.json（缓存也叫 foo.json），
+    也可能叫 foo.ks（缓存是 foo.ks.json）。
+    """
+    base = str(cache_filename or "")
+    if base.endswith(_CACHE_APPEND_SUFFIX):
+        base = base[: -len(_CACHE_APPEND_SUFFIX)]
+    if base.endswith(".json"):
+        base = base[: -len(".json")]
+
+    variants = [base, f"{base}.json"]
+    chunk_base = re.sub(r"_\d+$", "", base)
+    if chunk_base != base:
+        variants += [chunk_base, f"{chunk_base}.json"]
+
+    names: list[str] = []
+    for variant in variants:
+        name = variant.replace("-}", "/")
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def _resolve_input_file_for_cache_name(project_dir: str, cache_filename: str) -> str | None:
+    """缓存文件名 → gt_input 里的相对路径；找不到返回 None。
+
+    只认落在 gt_input 里的相对路径：跳过绝对路径与带 `..` 的候选，避免读到项目外面去。
+    """
+    input_dir = os.path.join(project_dir, INPUT_FOLDERNAME)
+    if not os.path.isdir(input_dir):
+        return None
+    for name in _input_name_candidates(cache_filename):
+        if os.path.isabs(name) or ".." in name.split("/"):
+            continue
+        if os.path.isfile(os.path.join(input_dir, name)):
+            return name
+    return None
+
+
+def _input_entries_as_cache_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """把原文条目套成缓存条目的字段：只有 pre_src/post_src，译文与问题留空。
+
+    界面与 Agent 都按缓存条目的字段名取值（原文取 post_src || post_jp、译文取 pre_dst || pre_zh），
+    所以原文同时填进 pre_src 与 post_src——post_src 本来是送翻译前的润色文本，还没翻译就没有它，
+    拿原文顶上；pre_dst 给空串，明确表示「还没译文」。
+    """
+    converted: list[dict[str, Any]] = []
+    for entry in entries:
+        text = str(entry.get("pre_src", "") or "")
+        converted.append(
+            {
+                "index": int(entry.get("index", 0) or 0),
+                "name": entry.get("name", ""),
+                "pre_src": text,
+                "post_src": text,
+                "pre_dst": "",
+            }
+        )
+    return converted
+
+
+def _cache_name_bases(cache_names: set[str]) -> set[str]:
+    """把缓存文件名归一成「输入文件的缓存键」：去掉 .append.jsonl 与切块后缀 `_<n>`。
+
+    这样 foo.json（整篇）、foo.json.append.jsonl（增量）、foo.json_1.json（切块，见
+    LLMTranslate._build_runtime_file_maps：切块后缀插在 .json 之后）都归到 foo.json，
+    与输入文件一一对得上，判断「有没有缓存」就只是一次集合查询。
+    """
+    bases: set[str] = set()
+    for name in cache_names:
+        base = name[: -len(_CACHE_APPEND_SUFFIX)] if name.endswith(_CACHE_APPEND_SUFFIX) else name
+        # 剥掉 .json，再剥掉切块后缀 _<n>，最后按输入文件的规则补回 .json
+        # （切块名是 foo.json_1.json：`_1` 夹在原来那个 .json 与补上的 .json 之间）
+        if base.endswith(".json"):
+            base = base[: -len(".json")]
+        base = re.sub(r"_\d+$", "", base)
+        bases.add(base if base.endswith(".json") else f"{base}.json")
+    return bases
+
+
+def _search_cache_entries_in_file(
+    entries: list[Any],
+    filename: str,
+    *,
+    has_cache: bool,
+    query: str,
+    pattern: Any,
+    field: str,
+    filter_keys: list[str],
+    context: int,
+    only_preceding: bool,
+    max_results: int,
+    offset: int,
+    total_matches: int,
+    hits_included: int,
+) -> tuple[list[dict[str, Any]], int, int]:
+    """在一个文件的条目列表里搜，返回 (结果行, 累计命中数, 累计已返回命中数)。
+
+    缓存文件与「还没翻译的原文」（回落条目）走同一套匹配：原文列取 post_src、译文列取 pre_dst、
+    问题列取 problem——原文条目后两者是空的，所以 field=dst / problem 时它不会命中（没翻译就没有
+    译文可搜，符合直觉）。context 只在本文件内前后展开，翻页与命中上限由调用方跨文件累计。
+    """
+    query_lower = query.lower()
+    matched_positions: list[int] = []
+    match_flags: dict[int, dict[str, bool]] = {}
+
+    for pos, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            continue
+        src_text = (
+            entry.get("post_src", "") or entry.get("post_jp", "")
+            or entry.get("pre_src", "") or entry.get("pre_jp", "")
+        )
+        dst_text = (
+            entry.get("pre_dst", "") or entry.get("pre_zh", "")
+            or entry.get("proofread_dst", "") or entry.get("proofread_zh", "")
+        )
+        problem_text = filter_problem_text(entry.get("problem", ""), filter_keys)
+        if pattern is not None:
+            match_src = bool(pattern.search(src_text))
+            match_dst = bool(pattern.search(dst_text))
+            match_problem = bool(pattern.search(problem_text))
+        else:
+            match_src = query_lower in src_text.lower()
+            match_dst = query_lower in dst_text.lower()
+            match_problem = query_lower in problem_text.lower()
+        if field == "src" and not match_src:
+            continue
+        if field == "dst" and not match_dst:
+            continue
+        if field == "problem" and not match_problem:
+            continue
+        if field == "all" and not match_src and not match_dst and not match_problem:
+            continue
+        total_matches += 1
+        if total_matches <= offset:
+            # 翻页：跳过前 offset 条命中——它们不再作为"命中"出现
+            # （相邻命中的上下文窗口里仍可能带出，那种行没标记）
+            continue
+        # 命中上限只算命中本身（前后文是搭着给的，不占配额），
+        # 否则稠密命中下上下文会把后面的命中挤掉。
+        if hits_included + len(matched_positions) < max_results:
+            matched_positions.append(pos)
+            match_flags[pos] = {
+                "match_src": match_src,
+                "match_dst": match_dst,
+                "match_problem": match_problem,
+            }
+
+    if not matched_positions:
+        return [], total_matches, hits_included
+
+    wanted: set[int] = set(matched_positions)
+    if context > 0:
+        after = 0 if only_preceding else context
+        for pos in matched_positions:
+            for j in range(pos - context, pos + after + 1):
+                if 0 <= j < len(entries):
+                    wanted.add(j)
+
+    rows: list[dict[str, Any]] = []
+    for pos in sorted(wanted):
+        entry = entries[pos]
+        if not isinstance(entry, dict):
+            continue
+        rows.append({
+            "filename": filename,
+            "index": entry.get("index", 0),
+            "speaker": entry.get("name", ""),
+            "post_src": (
+                entry.get("post_src", "") or entry.get("post_jp", "")
+                or entry.get("pre_src", "") or entry.get("pre_jp", "")
+            ),
+            "pre_dst": (
+                entry.get("pre_dst", "") or entry.get("pre_zh", "")
+                or entry.get("proofread_dst", "") or entry.get("proofread_zh", "")
+            ),
+            "problem": filter_problem_text(entry.get("problem", ""), filter_keys),
+            "trans_by": entry.get("trans_by", ""),
+            # false = 这条来自还没翻译的原文（界面据此标一下），它没有译名/问题
+            "has_cache": has_cache,
+            **match_flags.get(pos, {"match_src": False, "match_dst": False, "match_problem": False}),
+        })
+    return rows, total_matches, hits_included + len(matched_positions)
+
+
+def _list_uncached_input_files(
+    project_dir: str, config_file_name: str, cache_names: set[str]
+) -> list[dict[str, Any]]:
+    """gt_input 里还没有缓存的输入文件（只列文件插件认得的）。
+
+    「缓存与问题」页要能看还没翻译的文件，而这些文件在 Cache/ 里根本没有对应缓存，光看缓存目录
+    是发现不了的。缓存键按运行时的命名规则算（'/' → '-}'、补 .json），切块与增量缓存一并算作
+    「已有缓存」，所以真正列出来的是「一篇都没翻过」的文件。
+    """
+    input_dir = os.path.join(project_dir, INPUT_FOLDERNAME)
+    if not os.path.isdir(input_dir):
+        return []
+
+    from GalTransl.FilePluginDetect import detect_file_plugins
+    from GalTransl.Utils import get_file_list
+
+    bases = _cache_name_bases(cache_names)
+    pending: list[tuple[str, str, str]] = []
+    for file_path in get_file_list(input_dir):
+        relative = os.path.relpath(file_path, input_dir).replace(os.sep, "/")
+        if relative.startswith("..") or "__MACOSX" in relative:
+            continue
+        cache_key = _cache_key_for_input_name(relative)
+        if cache_key in bases:
+            continue
+        pending.append((relative, cache_key, file_path))
+    if not pending:
+        return []
+
+    # 认不出格式的文件（没有文件插件的 txt、缩略图之类）当不了输入文件，别列进界面
+    detected = detect_file_plugins([path for _, _, path in pending], project_dir)
+
+    files: list[dict[str, Any]] = []
+    for relative, cache_key, file_path in pending:
+        if not detected.get(file_path):
+            continue
+        stat = os.stat(file_path)
+        files.append(
+            {
+                # name 用缓存键（界面左侧列的一直是缓存名，保持一致），input_name 是 gt_input 里的路径
+                "name": cache_key,
+                "input_name": relative,
+                "is_file": True,
+                "size": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "has_cache": False,
+            }
+        )
+    return files
 
 
 def _parse_search_offset(payload: dict[str, Any]) -> int:
@@ -1642,11 +1896,18 @@ def build_handler(registry: JobRegistry):
             # GET /api/projects/:id/cache
             if sub_path == "/cache":
                 cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+                files = _list_dir_entries(
+                    cache_dir, count_json_entries=True, skip_suffixes=(CACHE_TEMP_SUFFIX,)
+                )
+                cache_names = {str(entry.get("name") or "") for entry in files if entry.get("is_file")}
                 self._send_json({
                     "project_dir": project_dir,
                     "cache_dir": cache_dir,
-                    "files": _list_dir_entries(
-                        cache_dir, count_json_entries=True, skip_suffixes=(CACHE_TEMP_SUFFIX,)
+                    "files": files,
+                    # 还没翻译的输入文件：Cache/ 里没有它们的缓存，单独一列给界面用
+                    # （打开时读原文，见下面的 /cache/:filename 回落）
+                    "uncached_files": _list_uncached_input_files(
+                        project_dir, config_name_from_query(self), cache_names
                     ),
                 })
                 return
@@ -1862,8 +2123,9 @@ def build_handler(registry: JobRegistry):
                         self._send_json({"error": "options must be an object"}, status=HTTPStatus.BAD_REQUEST)
                         return
                     option_re = bool(options.get("re", False))
+                    config_name = str(payload.get("config_file_name", "config.yaml")) or "config.yaml"
                     filter_keys = RUNTIME_PROGRESS_CACHE.get_problem_filter_keys(
-                        project_dir, str(payload.get("config_file_name", "config.yaml"))
+                        project_dir, config_name
                     )
 
                     pattern = None
@@ -1897,88 +2159,74 @@ def build_handler(registry: JobRegistry):
                         return
                     # preceding_only：只带上文（Agent 默认开，省 token）；不传/给 false 就两边都给
                     only_preceding = bool(payload.get("preceding_only", False))
-                    results = []
-                    total_matches = 0
-                    hits_included = 0
+                    # include_uncached：把「还没翻译的输入文件」的原文也搜进来（界面默认开）。
+                    # Agent 的 search_transl_cache 不传它——那边有 search_input 专门搜原文，
+                    # 混进来的原文命中只会稀释译文/问题侧的结果。
+                    include_uncached = bool(payload.get("include_uncached", False))
+
+                    targets: list[tuple[str, list[Any], bool]] = []
+                    cache_names: set[str] = set()
                     if os.path.isdir(cache_dir):
-                        for name in sorted(os.listdir(cache_dir)):
-                            if not name.endswith(".json"):
+                        for name in os.listdir(cache_dir):
+                            if os.path.isfile(os.path.join(cache_dir, name)):
+                                cache_names.add(name)
+                    for name in sorted(cache_names):
+                        if not name.endswith(".json"):
+                            continue
+                        if search_filename and name != search_filename:
+                            continue
+                        try:
+                            import orjson
+                            with open(os.path.join(cache_dir, name), "rb") as f:
+                                file_entries = orjson.loads(f.read())
+                        except Exception:
+                            continue
+                        if isinstance(file_entries, list):
+                            targets.append((name, file_entries, True))
+                    if include_uncached:
+                        # 原文条目的 filename 用它「本该有的缓存键」：点开结果时前端就是按这个名字
+                        # 读的，读缓存接口会回落到读原文（见 /cache/:filename）
+                        for meta in _list_uncached_input_files(project_dir, config_name, cache_names):
+                            cache_key = str(meta.get("name") or "")
+                            input_name = str(meta.get("input_name") or "")
+                            if not cache_key:
                                 continue
-                            if search_filename and name != search_filename:
-                                continue
-                            fp = os.path.join(cache_dir, name)
-                            if not os.path.isfile(fp):
+                            # 指名搜某个文件时，缓存键与原文路径都认（界面给的是缓存键）
+                            if search_filename and search_filename not in (cache_key, input_name):
                                 continue
                             try:
-                                import orjson
-                                with open(fp, "rb") as f:
-                                    entries = orjson.loads(f.read())
-                                matched_positions: list[int] = []
-                                match_flags: dict[int, dict[str, bool]] = {}
-                                for pos, e in enumerate(entries):
-                                    if not isinstance(e, dict):
-                                        continue
-                                    src_text = e.get("post_src", "") or e.get("post_jp", "") or e.get("pre_src", "") or e.get("pre_jp", "")
-                                    dst_text = e.get("pre_dst", "") or e.get("pre_zh", "") or e.get("proofread_dst", "") or e.get("proofread_zh", "")
-                                    problem_text = filter_problem_text(e.get("problem", ""), filter_keys)
-                                    if pattern is not None:
-                                        match_src = bool(pattern.search(src_text))
-                                        match_dst = bool(pattern.search(dst_text))
-                                        match_problem = bool(pattern.search(problem_text))
-                                    else:
-                                        query_lower = query.lower()
-                                        match_src = query_lower in src_text.lower()
-                                        match_dst = query_lower in dst_text.lower()
-                                        match_problem = query_lower in problem_text.lower()
-                                    if field == "src" and not match_src:
-                                        continue
-                                    if field == "dst" and not match_dst:
-                                        continue
-                                    if field == "problem" and not match_problem:
-                                        continue
-                                    if field == "all" and not match_src and not match_dst and not match_problem:
-                                        continue
-                                    total_matches += 1
-                                    if total_matches <= offset:
-                                        # 翻页：跳过前 offset 条命中——它们不再作为"命中"
-                                        # 出现（相邻命中的上下文窗口里仍可能带出，那种行没标记）
-                                        continue
-                                    # 命中上限只算命中本身（前后文是搭着给的，不占配额），
-                                    # 否则稠密命中下上下文会把后面的命中挤掉。
-                                    if hits_included + len(matched_positions) < max_results:
-                                        matched_positions.append(pos)
-                                        match_flags[pos] = {
-                                            "match_src": match_src,
-                                            "match_dst": match_dst,
-                                            "match_problem": match_problem,
-                                        }
-                                if not matched_positions:
-                                    continue
-                                wanted: set[int] = set(matched_positions)
-                                if context > 0:
-                                    after = 0 if only_preceding else context
-                                    for pos in matched_positions:
-                                        for j in range(pos - context, pos + after + 1):
-                                            if 0 <= j < len(entries):
-                                                wanted.add(j)
-                                for pos in sorted(wanted):
-                                    entry = entries[pos]
-                                    if not isinstance(entry, dict):
-                                        continue
-                                    item = {
-                                        "filename": name,
-                                        "index": entry.get("index", 0),
-                                        "speaker": entry.get("name", ""),
-                                        "post_src": entry.get("post_src", "") or entry.get("post_jp", "") or entry.get("pre_src", "") or entry.get("pre_jp", ""),
-                                        "pre_dst": entry.get("pre_dst", "") or entry.get("pre_zh", "") or entry.get("proofread_dst", "") or entry.get("proofread_zh", ""),
-                                        "problem": filter_problem_text(entry.get("problem", ""), filter_keys),
-                                        "trans_by": entry.get("trans_by", ""),
-                                        **match_flags.get(pos, {"match_src": False, "match_dst": False, "match_problem": False}),
-                                    }
-                                    results.append(item)
-                                hits_included += len(matched_positions)
+                                source_entries = _load_input_file_entries(
+                                    project_dir, config_name, input_name
+                                )
                             except Exception:
                                 continue
+                            targets.append((cache_key, _input_entries_as_cache_entries(source_entries), False))
+                    # 缓存与原文混在一张表里按文件名排：与左侧文件列表同一个顺序
+                    targets.sort(key=lambda item: item[0])
+
+                    results: list[dict[str, Any]] = []
+                    total_matches = 0
+                    hits_included = 0
+                    for name, file_entries, has_cache in targets:
+                        try:
+                            rows, total_matches, hits_included = _search_cache_entries_in_file(
+                                file_entries,
+                                name,
+                                has_cache=has_cache,
+                                query=query,
+                                pattern=pattern,
+                                field=field,
+                                filter_keys=filter_keys,
+                                context=context,
+                                only_preceding=only_preceding,
+                                max_results=max_results,
+                                offset=offset,
+                                total_matches=total_matches,
+                                hits_included=hits_included,
+                            )
+                        except Exception:
+                            continue
+                        results.extend(rows)
                     payload_out: dict[str, Any] = {
                         "results": results, "total": total_matches, "offset": offset,
                     }
@@ -2084,16 +2332,44 @@ def build_handler(registry: JobRegistry):
                     return
                 cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
                 file_path = os.path.join(cache_dir, filename)
-                if not os.path.isfile(file_path):
+                if os.path.isfile(file_path):
+                    try:
+                        import orjson
+                        with open(file_path, "rb") as f:
+                            data = orjson.loads(f.read())
+                        self._send_json({
+                            "project_dir": project_dir,
+                            "filename": filename,
+                            "entries": data,
+                            "has_cache": True,
+                        })
+                    except Exception as exc:
+                        self._send_json({"error": f"failed to read cache: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                    return
+
+                # 没有缓存文件：这是还没翻译的文件，回落去读它的原文。条目按缓存条目的形状给
+                # （pre_src/post_src 是原文、译文为空），界面和 Agent 的读取工具都能照旧渲染。
+                input_name = _resolve_input_file_for_cache_name(project_dir, filename)
+                if not input_name:
                     self._send_json({"error": f"cache file not found: {filename}"}, status=HTTPStatus.NOT_FOUND)
                     return
                 try:
-                    import orjson
-                    with open(file_path, "rb") as f:
-                        data = orjson.loads(f.read())
-                    self._send_json({"project_dir": project_dir, "filename": filename, "entries": data})
+                    source_entries = _load_input_file_entries(
+                        project_dir, config_name_from_query(self), input_name
+                    )
                 except Exception as exc:
-                    self._send_json({"error": f"failed to read cache: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                    self._send_json(
+                        {"error": f"failed to read source file {input_name}: {exc}"},
+                        status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    )
+                    return
+                self._send_json({
+                    "project_dir": project_dir,
+                    "filename": filename,
+                    "input_name": input_name,
+                    "entries": _input_entries_as_cache_entries(source_entries),
+                    "has_cache": False,
+                })
                 return
 
             # GET /api/projects/:id/progress

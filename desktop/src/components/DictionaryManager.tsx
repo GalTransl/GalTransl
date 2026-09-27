@@ -47,6 +47,12 @@ type DictionaryManagerProps = {
   onGenerateGptDict?: () => Promise<void>;
   /** 「AI 生成 GPT 字典」二次确认里要说明用哪个后端（与翻译工作台同一口径） */
   gendicBackend?: BackendUsageSummary | null;
+  /**
+   * 条目行上的「→」：拿着这一行的日文词（GPT 取原文列、普通/条件/场景条目取「搜索」列）
+   * 跳到「缓存与问题」里搜一下，看它实际出现在哪。
+   * 不传就不显示这个按钮（全局字典页没有所属项目，传不了）。
+   */
+  onOpenInCache?: (sourceWord: string) => void;
 };
 
 type DictContextMenuState = {
@@ -139,6 +145,19 @@ function getFieldLabels(type: DictRowType, _tab: DictTab): string[] {
   return [];
 }
 
+/**
+ * 这一行里「要拿去搜的日文词」在第几列（条目行上的「→」用它跳到缓存搜索）。
+ * 目标/条件这类前置列不是词本身，所以按类型点名：条件条目的搜索词在第 3 列、场景条目在第 2 列。
+ * 注释行没有词，返回 -1（不显示箭头）。
+ */
+function getSourceCellIndex(type: DictRowType): number {
+  if (type === 'gpt') return 0;         // 原文
+  if (type === 'normal') return 0;      // 搜索
+  if (type === 'conditional') return 2; // 目标 / 条件 / 搜索 / 替换 / 备注
+  if (type === 'situation') return 1;   // 场景 / 搜索 / 替换
+  return -1;
+}
+
 /* ── Grouped dict entries card ── */
 function DictEntryGroupCard({
   group,
@@ -147,6 +166,7 @@ function DictEntryGroupCard({
   onCellChange,
   onDelete,
   onAddRow,
+  onOpenInCache,
 }: {
   group: DictRowGroup;
   tab: DictTab;
@@ -155,6 +175,7 @@ function DictEntryGroupCard({
   onCellChange: (rowIndex: number, cellIndex: number, value: string) => void;
   onDelete: (rowIndex: number) => void;
   onAddRow: (rowType: DictRowType, insertAfterRowIndex: number) => void;
+  onOpenInCache?: (sourceWord: string) => void;
 }) {
   const labels = getFieldLabels(group.type, tab);
   const tableStyle = { '--dict-column-count': labels.length } as CSSProperties;
@@ -179,29 +200,46 @@ function DictEntryGroupCard({
           ))}
         </div>
 
-        {group.items.map(({ row, rowIndex }) => (
-          <div key={`${rowIndex}`} className="dict-card__table-row">
-            <div className="dict-card__cell dict-card__cell--index">#{rowIndex + 1}</div>
-            {labels.map((label, ci) => (
-              <div key={ci} className="dict-card__cell">
-                <input
-                  className="dict-card__input"
-                  value={row.values[ci] ?? ''}
-                  onChange={(e) => onCellChange(rowIndex, ci, e.target.value)}
-                  placeholder={label || `列${ci + 1}`}
-                />
-              </div>
-            ))}
-            <button
-              type="button"
-              className="dict-card__row-delete"
-              onClick={() => onDelete(rowIndex)}
-              title="删除此条"
-            >
-              <Icon name="close" />
-            </button>
-          </div>
-        ))}
+        {group.items.map(({ row, rowIndex }) => {
+          // 「→」搜的是这一行的日文词：GPT 条目取原文列，其他类型取「搜索」列
+          const sourceCellIndex = getSourceCellIndex(group.type);
+          const sourceWord = sourceCellIndex >= 0 ? String(row.values[sourceCellIndex] ?? '').trim() : '';
+          return (
+            <div key={`${rowIndex}`} className="dict-card__table-row">
+              <div className="dict-card__cell dict-card__cell--index">#{rowIndex + 1}</div>
+              {labels.map((label, ci) => (
+                <div key={ci} className="dict-card__cell">
+                  <input
+                    className="dict-card__input"
+                    value={row.values[ci] ?? ''}
+                    onChange={(e) => onCellChange(rowIndex, ci, e.target.value)}
+                    placeholder={label || `列${ci + 1}`}
+                  />
+                </div>
+              ))}
+              {/* 拿这一行的日文词去「缓存与问题」搜它出现在哪（注释行没有词，不显示） */}
+              {onOpenInCache && sourceCellIndex >= 0 ? (
+                <button
+                  type="button"
+                  className="dict-card__row-open-cache"
+                  onClick={() => onOpenInCache(sourceWord)}
+                  disabled={!sourceWord}
+                  title="在「缓存与问题」里搜索这个词"
+                >
+                  <Icon name="arrow-right" />
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="dict-card__row-delete"
+                onClick={() => onDelete(rowIndex)}
+                title="删除此条"
+              >
+                <Icon name="close" />
+              </button>
+            </div>
+          );
+        })}
 
         <div className="dict-card__table-add-row">
           <button
@@ -230,6 +268,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     onDeleteFile,
     onGenerateGptDict,
     gendicBackend,
+    onOpenInCache,
     title,
     description,
   } = props;
@@ -799,6 +838,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                           onCellChange={updateRowCell}
                           onDelete={deleteRow}
                           onAddRow={addRow}
+                          onOpenInCache={onOpenInCache}
                         />
                       ))}
                       {groupedRows.length === 0 && (
@@ -847,11 +887,11 @@ export function DictionaryManager(props: DictionaryManagerProps) {
             </div>
             <div className="dict-dialog__body">
               <p>
-                后端跟随当前项目的后端配置；项目没有单独指定时用全局默认配置，与翻译工作台的「当前后端」一致。
+                后端跟随当前项目的后端配置；项目没有单独指定时用全局默认配置，与「翻译工作台」的「当前后端」一致。
               </p>
               <p>
                 GenDic 会先给说话人名定译名，再逐段提取专有名词并整体审校，最后并入项目目录下的
-                「项目GPT字典-生成.txt」。整个过程会调用模型、消耗 API 额度，启动后可在翻译工作台查看阶段与进度。
+                「项目GPT字典-生成.txt」。整个过程会调用模型、消耗 API 额度，启动后可在「翻译工作台」查看阶段与进度。
               </p>
               {gendicBackendMissing ? (
                 <p className="dict-dialog__warning">

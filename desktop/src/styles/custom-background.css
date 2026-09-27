@@ -121,6 +121,7 @@
  .app-layout--custom-background .project-dictionary-page .dict-card__cell--index,
  .app-layout--custom-background .project-dictionary-page .dict-card__add-row-btn,
  .app-layout--custom-background .project-dictionary-page .dict-card__row-delete,
+ .app-layout--custom-background .project-dictionary-page .dict-card__row-open-cache,
  .app-layout--custom-background .name-page .name-page__th {
   background: var(--custom-bg-fill-strong) !important;
   backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
@@ -302,6 +303,7 @@
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__cell--index,
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__add-row-btn,
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__row-delete,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__row-open-cache,
 :root[data-theme='dark'] .app-layout--custom-background .name-page .name-page__th {
   background: var(--custom-bg-fill-strong) !important;
   backdrop-filter: blur(var(--custom-bg-surface-blur-soft));

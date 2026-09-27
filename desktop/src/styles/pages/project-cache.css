@@ -228,6 +228,15 @@
   margin-left: var(--space-2);
 }
 
+/* 还没有缓存的输入文件：列出来是为了能读原文，标一下别让人以为它翻过了 */
+.cache-file-item__size--uncached {
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--color-line);
+  background: var(--color-neutral-soft);
+  font-weight: 600;
+}
+
 .cache-file-item--selected {
   background: var(--color-primary-soft);
   box-shadow: inset 0 0 0 1px var(--color-primary);
@@ -762,6 +771,16 @@
   font-weight: 500;
 }
 
+/* 只读（还没有缓存文件，看到的是原文）：禁用的输入框别淡到看不清内容 */
+.cache-card__input:disabled,
+.cache-card__textarea:disabled,
+.cache-card__delete:disabled {
+  opacity: 1;
+  color: var(--color-text-muted);
+  background: var(--color-surface-strong);
+  cursor: default;
+}
+
 .cache-card__readonly-input {
   display: block;
   width: 100%;
@@ -1219,6 +1238,13 @@
 .search-result-card__badge--problem {
   background: rgba(239, 68, 68, 0.12);
   color: #dc2626;
+}
+
+/* 命中来自还没翻译的原文件（不是缓存）：标一下，省得当成"这条译文里有" */
+.search-result-card__badge--uncached {
+  background: var(--color-neutral-soft);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
 }
 
 .search-result-card__line {

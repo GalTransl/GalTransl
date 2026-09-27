@@ -200,6 +200,12 @@ export function ProjectDictionaryPage({
           delete_file: true });
       }}
       gendicBackend={gendicBackend}
+      // 条目行的「→」：拿着这个原文词去「缓存与问题」搜它出现在哪。
+      // 带一个 nonce（n）：同一个词连点两次时 URL 不变，缓存页拿不到新事件（那边按 n 去重）
+      onOpenInCache={(sourceWord) => {
+        if (!projectId || !sourceWord) return;
+        navigate(`/project/${projectId}/cache?q=${encodeURIComponent(sourceWord)}&n=${Date.now()}`);
+      }}
       onGenerateGptDict={async () => {
         if (!projectId || !projectDir) {
           throw new Error('项目信息缺失，无法启动任务');

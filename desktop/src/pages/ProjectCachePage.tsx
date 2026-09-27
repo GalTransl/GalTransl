@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
+import { useSearchParams } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '../components/Button';
 import { CustomSelect } from '../components/CustomSelect';
@@ -92,7 +93,8 @@ function CacheEntryCard({
   onDelete,
   onAddProblemFilter,
   highlightQuery,
-  nameDict }: {
+  nameDict,
+  readOnly = false }: {
   entry: CacheEntry;
   filename: string;
   projectId: string;
@@ -101,6 +103,8 @@ function CacheEntryCard({
   onAddProblemFilter: (keyword: string) => void;
   highlightQuery?: string;
   nameDict: Map<string, string>;
+  /** 没有缓存文件（读的是原文）时只读：改了也没地方存，后端保存时会报缓存文件不存在 */
+  readOnly?: boolean;
 }) {
   const hasProblem = !!entry.problem;
   const rawSpeaker = Array.isArray(entry.name) ? entry.name.join('/') : entry.name || '—';
@@ -159,7 +163,8 @@ function CacheEntryCard({
           type="button"
           className="cache-card__delete"
           onClick={() => onDelete(!entry.deleted, entry.index)}
-          title={entry.deleted ? "撤销删除" : "删除此条"}
+          disabled={readOnly}
+          title={readOnly ? '还没有缓存文件，不能删除条目' : (entry.deleted ? "撤销删除" : "删除此条")}
         >
           {entry.deleted ? <Icon name="undo" /> : <Icon name="close" />}
         </button>
@@ -186,8 +191,9 @@ function CacheEntryCard({
                   className="cache-card__input cache-card__input--zh"
                   value={escapeControlChars(dst(entry))}
                   onChange={(e) => onEntryChange(entry.index, 'pre_dst', unescapeControlChars(e.target.value))}
-                  placeholder="译文"
-                  title={escapeControlChars(dst(entry))}
+                  placeholder={readOnly ? '未翻译' : '译文'}
+                  title={readOnly ? '还没有缓存文件，显示的是原文' : escapeControlChars(dst(entry))}
+                  disabled={readOnly}
                 />
                 {highlightQuery && (
                   <span className="cache-card__input-overlay cache-card__input-overlay--zh">
@@ -223,6 +229,7 @@ function CacheEntryCard({
                 onChange={(e) => onEntryChange(entry.index, 'pre_dst', unescapeControlChars(e.target.value))}
                 placeholder="预翻译"
                 rows={3}
+                disabled={readOnly}
               />
             </div>
             <div className="cache-card__field cache-card__field--textarea">
@@ -233,6 +240,7 @@ function CacheEntryCard({
                 onChange={(e) => onEntryChange(entry.index, 'proofread_dst', unescapeControlChars(e.target.value))}
                 placeholder="校对"
                 rows={3}
+                disabled={readOnly}
               />
             </div>
             <div className="cache-card__field cache-card__field--textarea">
@@ -247,6 +255,7 @@ function CacheEntryCard({
                   type="checkbox"
                   checked={!!entry.skip_check}
                   onChange={(e) => onEntryChange(entry.index, 'skip_check', e.target.checked)}
+                  disabled={readOnly}
                 />
                 <span>跳过检查（skip_check）</span>
               </label>
@@ -306,6 +315,9 @@ function SearchResultCard({
           </span>
         )}
         <span className="search-result-card__file">{result.filename}</span>
+        {result.has_cache === false ? (
+          <span className="search-result-card__badge search-result-card__badge--uncached" title="这个文件还没翻译，命中的是原文">未翻译</span>
+        ) : null}
       </div>
       {(result.index !== undefined || speaker !== '—' || result.problem) && (
         <div className="search-result-card__tags">
@@ -341,6 +353,11 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   const [cacheFiles, setCacheFiles] = useState<FileEntry[]>([]);
   const [cacheDir, setCacheDir] = useState<string>('');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  /**
+   * 还没有缓存的输入文件（名单里的名字是它们「本该有」的缓存键）。
+   * 这些文件在后端是按原文回落的：只有 pre_src/post_src、译文为空，所以界面里不让编辑。
+   */
+  const [uncachedFiles, setUncachedFiles] = useState<Set<string>>(new Set());
   const [entries, setEntries] = useState<CacheEntry[]>([]);
   /** 每个文件的条目缓存（含未保存修改），mount 后指向当前项目桶中的 Map */
   const entriesMapRef = useRef<Map<string, CacheEntry[]>>(new Map());
@@ -355,6 +372,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
    */
   type ProjectBucket = {
     cacheFiles: FileEntry[];
+    uncachedFiles: Set<string>;
     cacheDir: string;
     selectedFile: string | null;
     dirtyFiles: Set<string>;
@@ -420,6 +438,9 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
 
   // Tab state
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files');
+  /** ?q=xxx 带进来的搜索词（GPT 字典条目行的「→」），已经应用过的那次靠 ref 去重 */
+  const [searchParams] = useSearchParams();
+  const appliedCacheSearchRef = useRef('');
 
   // Sidebar width (draggable) with persistence
   const SIDEBAR_WIDTH_KEY = 'galtransl.cache.sidebarWidth';
@@ -514,6 +535,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
 
   /** 当前文件是否dirty */
   const dirty = selectedFile != null && dirtyFiles.has(selectedFile);
+  /** 当前文件还没有缓存：后端给的是原文（只有 pre_src/post_src），只能看不能改 */
+  const selectedHasNoCache = selectedFile != null && uncachedFiles.has(selectedFile);
 
   const rememberCurrentScrollPosition = useCallback(() => {
     if (!selectedFile || !listRef.current) return;
@@ -539,8 +562,13 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setError(null);
       try {
         const res = await fetchProjectCache(projectId);
-        const files = res.files.filter((f) => f.is_file && f.name.endsWith('.json'));
+        const cached = res.files.filter((f) => f.is_file && f.name.endsWith('.json'));
+        // 还没翻译的文件（Cache/ 里没有对应缓存）也列进来：后端打开这类文件时回落读原文，
+        // 不然刚建好项目的人在缓存页上什么都看不到
+        const uncached = (res.uncached_files ?? []).filter((f) => f.is_file);
+        const files = [...cached, ...uncached].sort((a, b) => a.name.localeCompare(b.name));
         setCacheFiles(files);
+        setUncachedFiles(new Set(uncached.map((f) => f.name)));
         setCacheDir(res.cache_dir || '');
         setSelectedFile((prev) => (prev && files.some((file) => file.name === prev) ? prev : null));
       } catch (err) {
@@ -563,6 +591,21 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     [projectId],
   );
 
+  /**
+   * 记录某个文件到底有没有缓存文件。
+   * 列表接口给的是当时的快照，而缓存可能被 Agent（或别的工具）在页面打开期间删掉/建出来，
+   * 所以每次读到文件内容都以后端这次实际给的结果为准。
+   */
+  const noteCachePresence = useCallback((filename: string, hasCache: boolean) => {
+    setUncachedFiles((prev) => {
+      if (prev.has(filename) === !hasCache) return prev;
+      const next = new Set(prev);
+      if (hasCache) next.delete(filename);
+      else next.add(filename);
+      return next;
+    });
+  }, []);
+
   // 按 projectId 切换状态桶：先 snapshot 旧项目，再恢复或新建新项目的桶。
   // 该 effect 是本页跨项目状态保留的核心入口。
   useEffect(() => {
@@ -572,6 +615,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       // snapshot 旧项目（此时 state 闭包仍是旧项目的数据，刚好用于写回）
       const prevBucket: ProjectBucket = bucketsRef.current.get(prev) ?? {
         cacheFiles: [],
+        uncachedFiles: new Set(),
         cacheDir: '',
         selectedFile: null,
         dirtyFiles: new Set(),
@@ -590,6 +634,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         showReplace: false,
       };
       prevBucket.cacheFiles = cacheFiles;
+      prevBucket.uncachedFiles = uncachedFiles;
       prevBucket.cacheDir = cacheDir;
       prevBucket.selectedFile = selectedFile;
       prevBucket.dirtyFiles = dirtyFiles;
@@ -617,6 +662,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       cleanEntriesMapRef.current = existing.cleanEntries;
       scrollPositionsRef.current = existing.scrollPositions;
       setCacheFiles(existing.cacheFiles);
+      setUncachedFiles(existing.uncachedFiles);
       setCacheDir(existing.cacheDir);
       setSelectedFile(existing.selectedFile);
       setDirtyFiles(existing.dirtyFiles);
@@ -642,6 +688,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       cleanEntriesMapRef.current = new Map();
       scrollPositionsRef.current = new Map();
       setCacheFiles([]);
+      setUncachedFiles(new Set());
       setCacheDir('');
       setSelectedFile(null);
       setDirtyFiles(new Set());
@@ -665,6 +712,29 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  /**
+   * 从别处带搜索词跳进来（GPT 字典条目行的「→」）：切到搜索 tab 并预填那个词。
+   *
+   * 这个页面是 keep-alive 的（切走再回来不重新挂载），所以不能用 state 初值接参数；
+   * 而且这个 effect 必须排在上面「按 projectId 切状态桶」之后——否则会被桶里恢复的
+   * 旧 tab / 旧查询词盖掉。同一个词连点两次时 URL 不变，靠 nonce（n）分辨是新的一次点击。
+   */
+  useEffect(() => {
+    const query = searchParams.get('q');
+    if (query === null) return;
+    const signature = `${searchParams.get('n') ?? ''}|${query}`;
+    if (appliedCacheSearchRef.current === signature) return;
+    appliedCacheSearchRef.current = signature;
+    setSelectedFiles(new Set());
+    setSidebarTab('search');
+    setSearchQuery(query);
+    // 词来自字典的原文列，但要不要只看原文列交给上面的下拉框；正则开关一并复位，
+    // 免得上次留下的 re:true 把这个词当正则去解
+    setSearchField('all');
+    setSearchOptions({ re: false });
+    // 不用手动搜：搜索自己的 debounce effect 盯着 searchQuery，改完会自动搜一次
+  }, [searchParams]);
+
   useEffect(() => {
     if (!projectId || !selectedFile) return;
     // 如果 entriesMap 中有缓存（含未保存修改），直接使用
@@ -679,6 +749,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     fetchCacheFile(projectId, selectedFile)
       .then((res) => {
         if (!cancelled) {
+          noteCachePresence(selectedFile, res.has_cache !== false);
           setEntries(res.entries);
           entriesMapRef.current.set(selectedFile, res.entries);
           cleanEntriesMapRef.current.set(selectedFile, cloneEntries(res.entries));
@@ -691,7 +762,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         if (!cancelled) setLoadingEntries(false);
       });
     return () => { cancelled = true; };
-  }, [projectId, selectedFile]);
+  }, [projectId, selectedFile, noteCachePresence]);
 
   const runGlobalSearch = useCallback(async () => {
     if (!projectId || !searchQuery.trim()) {
@@ -720,6 +791,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     setLoadingEntries(true);
     try {
       const res = await fetchCacheFile(projectId, selectedFile);
+      noteCachePresence(selectedFile, res.has_cache !== false);
       entriesMapRef.current.set(selectedFile, res.entries);
       cleanEntriesMapRef.current.set(selectedFile, cloneEntries(res.entries));
       setEntries(res.entries);
@@ -728,7 +800,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     } finally {
       setLoadingEntries(false);
     }
-  }, [dirtyFiles, projectId, selectedFile]);
+  }, [dirtyFiles, projectId, selectedFile, noteCachePresence]);
 
   useEffect(() => {
     if (!selectedFile) {
@@ -936,6 +1008,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     try {
       const res = await fetchCacheFile(projectId, targetFile);
       const recoveredEntries = res.entries;
+      noteCachePresence(targetFile, res.has_cache !== false);
 
       entriesMapRef.current.set(targetFile, recoveredEntries);
       cleanEntriesMapRef.current.set(targetFile, cloneEntries(recoveredEntries));
@@ -1147,13 +1220,15 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
 
   /** 删除选中的缓存文件 */
   const handleDeleteSelectedFiles = useCallback(async (filenames: string[]) => {
-    if (!projectId || filenames.length === 0) return;
-    const msg = filenames.length === 1
-      ? `确定要删除缓存文件「${filenames[0]}」吗？此操作不可撤销。`
-      : `确定要删除 ${filenames.length} 个缓存文件吗？此操作不可撤销。`;
+    // 还没有缓存的输入文件没什么可删的（后端会回 not_found），先滤掉
+    const targets = filenames.filter((name) => !uncachedFiles.has(name));
+    if (!projectId || targets.length === 0) return;
+    const msg = targets.length === 1
+      ? `确定要删除缓存文件「${targets[0]}」吗？此操作不可撤销。`
+      : `确定要删除 ${targets.length} 个缓存文件吗？此操作不可撤销。`;
     if (!confirm(msg)) return;
     try {
-      const res = await deleteCacheFiles(projectId, filenames);
+      const res = await deleteCacheFiles(projectId, targets);
       // 清除已删除文件的 entriesMap 和 dirtyFiles
       for (const f of res.deleted_files) {
         entriesMapRef.current.delete(f);
@@ -1180,7 +1255,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     } catch (err) {
       setLocalError(normalizeError(err, '删除缓存文件失败'));
     }
-  }, [projectId, selectedFile, loadCacheFiles]);
+  }, [projectId, selectedFile, loadCacheFiles, uncachedFiles]);
 
   // Close context menu on outside click / Escape
   useEffect(() => {
@@ -1328,7 +1403,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     return (
       <div className="project-cache-page" style={cacheBrowserFontStyle}>
         <PageHeader className="project-cache-page__header" title="缓存与问题" />
-        <LoadingState title="加载缓存列表中…" description="正在读取项目缓存文件。" />
+        <LoadingState title="加载文件列表中…" description="正在读取项目文件。" />
       </div>
     );
   }
@@ -1386,7 +1461,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
           {sidebarTab === 'files' && (
             <div className="cache-sidebar-tab-content">
               <div className="cache-layout__sidebar-header">
-                <h3>缓存文件</h3>
+                <h3>文件</h3>
                 <div className="cache-layout__sidebar-header-actions">
                   {dirtyFiles.size > 0 && (
                     <Button
@@ -1405,8 +1480,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                     className={`icon-btn icon-btn--refresh${refreshingFiles ? ' icon-btn--spinning' : ''}`}
                     onClick={() => void loadCacheFiles()}
                     disabled={refreshingFiles}
-                    title="刷新缓存文件列表"
-                    aria-label="刷新缓存文件列表"
+                    title="刷新文件列表"
+                    aria-label="刷新文件列表"
                   >
                     <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
                       <path d="M13.5 8a5.5 5.5 0 11-1.4-3.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -1485,15 +1560,21 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                           x: e.clientX,
                           y: e.clientY,
                           filenames: targetFiles,
-                          showDelete: true,
+                          // 没有缓存文件的条目没什么可删的（后端会报 not_found）
+                          showDelete: file.has_cache !== false,
                         });
                       }}
+                      title={file.input_name ? `原文：${file.input_name}` : undefined}
                     >
                       <span className="cache-file-item__name">
                         {dirtyFiles.has(file.name) && <span className="cache-file-item__dot" title="有未保存修改" />}
                         {file.name}
                       </span>
-                      <span className="cache-file-item__size">{file.entry_count != null ? `${file.entry_count} 行` : formatSize(file.size)}</span>
+                      {file.has_cache === false ? (
+                        <span className="cache-file-item__size cache-file-item__size--uncached" title="还没有缓存文件，打开看到的是原文">未翻译</span>
+                      ) : (
+                        <span className="cache-file-item__size">{file.entry_count != null ? `${file.entry_count} 行` : formatSize(file.size)}</span>
+                      )}
                     </button>
                   );
                 })}
@@ -1800,10 +1881,18 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
               description={`${total} 句 · ${translated} 已翻译 · ${withProblems} 有问题`}
               actions={(
                 <div className="cache-panel-actions">
-                  <Button onClick={() => void handleRecover()} disabled={loadingEntries || !dirty}>
+                  <Button
+                    onClick={() => void handleRecover()}
+                    disabled={loadingEntries || !dirty || selectedHasNoCache}
+                    title={selectedHasNoCache ? '还没有缓存文件，没有可撤销的修改' : undefined}
+                  >
                     {loadingEntries ? '撤销中…' : '撤销'}
                   </Button>
-                  <Button onClick={() => void handleSave()} disabled={saving || !dirty}>
+                  <Button
+                    onClick={() => void handleSave()}
+                    disabled={saving || !dirty || selectedHasNoCache}
+                    title={selectedHasNoCache ? '还没有缓存文件，翻译过之后才能在这里改' : undefined}
+                  >
                     {saving ? '保存中…' : '保存'}
                   </Button>
                 </div>
@@ -1849,6 +1938,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                       onAddProblemFilter={(keyword) => { void handleAddProblemKeyword(keyword, 'problemFilterKey'); }}
                       highlightQuery={searchTerm || searchQuery}
                       nameDict={nameDict}
+                      readOnly={selectedHasNoCache}
                     />
                   ))}
                   {filteredEntries.length === 0 && !loadingEntries && (
@@ -1858,7 +1948,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
               </div>
             </Panel>
           ) : (
-            <EmptyState className="cache-layout__empty" title="选择一个缓存文件" description="从左侧选择缓存文件查看翻译内容，或使用全局搜索。" />
+            <EmptyState className="cache-layout__empty" title="选择一个文件" description="从左侧选择文件查看原文与译文，或使用全局搜索。" />
           )}
         </div>
       </div>
