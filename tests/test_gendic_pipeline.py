@@ -633,6 +633,35 @@ class CategorySectionTests(unittest.TestCase):
             ],
         )
 
+    def test_file_entry_count_matches_what_the_card_shows(self):
+        """文件列表/标题里的「N 条」必须等于卡片里能看到的条目数。
+
+        表头注释（`# 格式为日文[Tab]...`）以前被算成一条，于是出现「216 条有效条目」而卡片只有
+        215 条（GPT 215 / 全部 215）这种对不上的情况。
+        """
+        import os
+        import tempfile
+
+        from GalTransl.server import _read_dict_file_payload
+
+        lines = [
+            "# 格式为日文[Tab]中文[Tab]解释(可不写)，参考项目wiki",
+            "",
+            "----------↓人名↓----------",
+            "瑠那\t瑠那\t人名，女性",
+            "萌美奈\t萌美奈\t人名，女性",
+            "",
+            "----------↓地名↓----------",
+            "白鷺市\t白鹭市\t地名",
+            "// 注释行\t注释",
+            "没有 Tab 的行",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "项目GPT字典-生成.txt")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+            self.assertEqual(_read_dict_file_payload(path)["count"], 3)
+
     def test_section_lines_are_not_loaded_as_entries(self):
         import os
         import tempfile

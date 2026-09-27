@@ -173,6 +173,21 @@ def _dict_category_config_key(category: str) -> str:
     raise ValueError(f"invalid dictionary category: {category}")
 
 
+def _is_dict_entry_line(line_item: str) -> bool:
+    """一行是不是有效词条。
+
+    口径与桌面端字典页的解析（parseRows）严格一致：注释（`//`、`#`、`\\\\`）、GenDic 写的
+    分区标题（----------↓人名↓----------）、空行、以及没有 Tab 的行都不算词条。否则文件列表里
+    的「N 条」会和卡片里实际显示的条目数对不上（比如 `# 格式为...` 这种表头注释被算成一条）。
+    """
+    if not line_item.strip() or "\t" not in line_item:
+        return False
+    if line_item.startswith(("\\\\", "//", "#")):
+        return False
+    # GenDic 生成字典的分区标题行（----------↓人名↓----------）不是词条
+    return not (line_item.startswith("---") and "↓" in line_item)
+
+
 def _read_dict_file_payload(file_path: str) -> dict[str, Any]:
     if not os.path.isfile(file_path):
         return {
@@ -189,13 +204,7 @@ def _read_dict_file_payload(file_path: str) -> dict[str, Any]:
         return {
             "path": file_path,
             "lines": lines,
-            "count": len([
-                line_item
-                for line_item in lines
-                if line_item.strip() and not line_item.startswith("\\\\") and not line_item.startswith("//")
-                # GenDic 生成字典的分区标题行（----------↓人名↓----------）不是词条
-                and not (line_item.startswith("---") and "↓" in line_item)
-            ]),
+            "count": len([line_item for line_item in lines if _is_dict_entry_line(line_item)]),
             "mtime": mtime,
         }
     except Exception:
