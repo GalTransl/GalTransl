@@ -451,6 +451,12 @@ export async function fetchVersion() {
   return response.version;
 }
 
+/** 程序所在目录（后端进程所在位置）：新建项目向导把「父目录」默认成它 */
+export async function fetchProgramDir(): Promise<string> {
+  const response = await apiRequest<{ path?: string }>('/api/program-dir');
+  return (response.path || '').trim();
+}
+
 export async function fetchVersionCheck() {
   return apiRequest<VersionCheckResponse>('/api/version/check');
 }

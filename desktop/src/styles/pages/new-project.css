@@ -257,6 +257,62 @@
   background: linear-gradient(180deg, rgba(237, 243, 255, 0.72), rgba(237, 243, 255, 0.45));
 }
 
+/* ── 「完成」步骤里的后续流程清单 ── */
+
+.wizard-flow {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wizard-flow__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  background: var(--color-surface-strong);
+}
+
+.wizard-flow__index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.wizard-flow__body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wizard-flow__body strong {
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.wizard-flow__body span {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
+:root[data-theme='dark'] .wizard-flow__item {
+  background: rgba(24, 35, 50, 0.72);
+  border-color: rgba(65, 83, 111, 0.72);
+}
+
 .wizard-tip-card strong {
   font-size: 13px;
   color: var(--color-primary);

@@ -22,14 +22,40 @@ import {
   updateProjectConfig,
   submitJob,
   fetchJob,
+  fetchProgramDir,
+  fetchProjectFiles,
   encodeProjectDir,
   detectFilePlugin,
 } from '../lib/api';
 import type { FilePluginDetection } from '../lib/api';
 import { addProjectToHistory } from './HomePage';
 
-const STEPS = ['项目位置', '导入文件', '翻译后端', '常用设置', '提取人名'];
+const STEPS = ['项目位置', '导入文件', '翻译后端', '常用设置', '提取人名', '完成'];
 const LAST_PARENT_DIR_KEY = 'galtransl-new-project-last-parent-dir';
+
+// 最后一步的后续流程指引：从生成字典到取回译文的正经顺序
+const FLOW_STEPS: { title: string; description: string }[] = [
+  {
+    title: '先生成 GPT 字典',
+    description: '在项目的「项目字典」里点「AI生成GPT字典」：GenDic 读原文提取人名、地名与专有名词并统一译名（结果并入项目GPT字典-生成.txt）。',
+  },
+  {
+    title: '检查字典',
+    description: '核对译名、删掉不该收的普通词。字典按类目分区、可在卡片里直接改，改完记得保存。',
+  },
+  {
+    title: '启动翻译',
+    description: '回到「翻译工作台」选好模板启动。正式全量前建议先试译一两个文件，确认文风与术语没问题。',
+  },
+  {
+    title: '查看结果与翻译问题',
+    description: '在「缓存与问题」里看译文和检测出的问题句（残留日文、缺控制符、比日文长等），据此补字典或改译文。',
+  },
+  {
+    title: '构建输出',
+    description: '改完字典后点「构建输出」（rebuilda）用字典重刷缓存与结果，最终译文在 gt_output 文件夹取回。',
+  },
+];
 
 type NewProjectWizardProps = {
   onOpenProject: (projectDir: string, config: string) => void;
@@ -51,6 +77,8 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
   });
   const [projectName, setProjectName] = useState('');
   const [projectCreated, setProjectCreated] = useState(false);
+  // 只有用户自己填/挑过的父目录才记进「上次用的目录」：默认值不该被当成他的选择记下来
+  const [parentDirTouched, setParentDirTouched] = useState(false);
 
   // Step 2 state
   const [importedFiles, setImportedFiles] = useState<string[]>([]);
@@ -161,13 +189,45 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
 
   useEffect(() => {
     try {
-      if (parentDir.trim()) {
+      if (parentDirTouched && parentDir.trim()) {
         localStorage.setItem(LAST_PARENT_DIR_KEY, parentDir);
       }
     } catch {
       // ignore storage errors
     }
-  }, [parentDir]);
+  }, [parentDir, parentDirTouched]);
+
+  // 进「导入文件」时以 gt_input 里的实际文件为准刷新列表：文件可能是用户直接打开目录粘贴进去的，
+  // 这种不经向导导入的文件本地状态里没有，会让列表和后面的判断都误以为"没有文件"
+  useEffect(() => {
+    if (currentStep !== 1 || !projectDir) return;
+    let cancelled = false;
+    fetchProjectFiles(encodeProjectDir(projectDir))
+      .then((res) => {
+        if (cancelled) return;
+        setImportedFiles(
+          (res.input_files || []).filter((entry) => entry.is_file).map((entry) => entry.name),
+        );
+      })
+      .catch(() => {
+        // 列不出来就沿用本地记录（导入过的那些）
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentStep, projectDir]);
+
+  // 没记过上次用过的目录时，「父目录」默认填程序所在目录（只填空着的，不覆盖已有值）
+  useEffect(() => {
+    let cancelled = false;
+    void fetchProgramDir().then((dir) => {
+      if (cancelled || !dir) return;
+      setParentDir((current) => (current.trim() ? current : dir));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ── Step 1: Create project ──
   const handleSelectParentDir = useCallback(async () => {
@@ -176,6 +236,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
       // Normalize to backslash on Windows
       const path = typeof selected === 'string' ? selected.replace(/\//g, '\\') : selected;
       setParentDir(path);
+      setParentDirTouched(true);
     }
   }, []);
 
@@ -385,16 +446,24 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
   useEffect(() => {
     if (currentStep !== 4 || nameJobStatus !== 'idle' || !projectDir) return;
 
-    // 空输入目录：不提交 dump-name 任务，直接给出友好提示
-    if (importedFiles.length === 0) {
-      setNameJobStatus('completed');
-      setNameJobMessage('gt_input 中没有文件，已跳过人名提取。可返回上一步导入文件，或稍后手动添加。');
-      return;
-    }
-
     const run = async () => {
       try {
         setNameJobStatus('running');
+        // 空输入目录就直接给友好提示，不提交 dump-name 任务。判断以 gt_input 里的实际文件为准：
+        // 文件可能是用户直接打开目录粘贴进去的（不经向导导入），只看 importedFiles 会误判成空
+        let hasInputFiles = true; // 列目录失败时不拦，交给 dump-name 自己处理
+        try {
+          const res = await fetchProjectFiles(encodeProjectDir(projectDir));
+          hasInputFiles = (res.input_files || []).some((entry) => entry.is_file);
+        } catch {
+          hasInputFiles = true;
+        }
+        if (!hasInputFiles) {
+          setNameJobStatus('completed');
+          setNameJobMessage('gt_input 中没有文件，已跳过人名提取。可返回上一步导入文件，或稍后手动添加。');
+          return;
+        }
+
         const job = await submitJob({
           project_dir: projectDir,
           config_file_name: 'config.yaml',
@@ -441,6 +510,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
     if (currentStep === 1) return true; // file import is optional
     if (currentStep === 2) return true; // backend selection is optional
     if (currentStep === 3) return true;
+    if (currentStep === 4) return true; // 人名提取是后台任务，不拦着往后走
     return false;
   }, [currentStep, projectCreated, parentDir, projectName]);
 
@@ -474,22 +544,6 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
     <Panel title="项目位置" description="选择项目文件夹的保存位置和项目名称，然后创建项目结构。">
       <div className="wizard-form-grid">
         <div className="field">
-          <span className="field__label">父目录</span>
-          <div className="field__row">
-            <input
-              className="field__input"
-              autoComplete="off"
-              value={parentDir}
-              onChange={(e) => { setParentDir(e.target.value); setProjectCreated(false); }}
-              placeholder="例如：E:\GalTransl\projects"
-            />
-            <Button className="field__browse-button" variant="secondary" onClick={() => void handleSelectParentDir()}>
-              浏览
-            </Button>
-          </div>
-          <span className="field__hint">建议选择英文路径，避免空格与特殊字符。</span>
-        </div>
-        <div className="field">
           <span className="field__label">项目名称</span>
           <input
             className="field__input"
@@ -498,6 +552,22 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
             onChange={(e) => { setProjectName(e.target.value); setProjectCreated(false); }}
             placeholder="例如：MyProject"
           />
+        </div>
+        <div className="field">
+          <span className="field__label">父目录</span>
+          <div className="field__row">
+            <input
+              className="field__input"
+              autoComplete="off"
+              value={parentDir}
+              onChange={(e) => { setParentDir(e.target.value); setParentDirTouched(true); setProjectCreated(false); }}
+              placeholder="例如：E:\GalTransl\projects"
+            />
+            <Button className="field__browse-button" variant="secondary" onClick={() => void handleSelectParentDir()}>
+              浏览
+            </Button>
+          </div>
+          <span className="field__hint">默认是程序所在目录；建议用英文路径，避免空格与特殊字符。</span>
         </div>
         <div className="wizard-path-preview">
           <span className="wizard-path-preview__label">将创建目录</span>
@@ -643,26 +713,31 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
         </CustomSelect>
         <span className="field__hint">根据解析错误自动降低句数，稳定后逐步提升。</span>
       </div>
-      <div className="field">
-        <span className="field__label">动态最小句数</span>
-        <input
-          className="field__input"
-          type="number"
-          min={1}
-          value={dynamicNumPerRequestMin}
-          onChange={(e) => setDynamicNumPerRequestMin(Number(e.target.value))}
-        />
-      </div>
-      <div className="field">
-        <span className="field__label">动态最大句数</span>
-        <input
-          className="field__input"
-          type="number"
-          min={1}
-          value={dynamicNumPerRequestMax}
-          onChange={(e) => setDynamicNumPerRequestMax(Number(e.target.value))}
-        />
-      </div>
+      {/* 关掉动态句数调整后，上下限没人用，收起来免得占地方、也免得误以为在生效 */}
+      {dynamicNumPerRequest ? (
+        <>
+          <div className="field">
+            <span className="field__label">动态最小句数</span>
+            <input
+              className="field__input"
+              type="number"
+              min={1}
+              value={dynamicNumPerRequestMin}
+              onChange={(e) => setDynamicNumPerRequestMin(Number(e.target.value))}
+            />
+          </div>
+          <div className="field">
+            <span className="field__label">动态最大句数</span>
+            <input
+              className="field__input"
+              type="number"
+              min={1}
+              value={dynamicNumPerRequestMax}
+              onChange={(e) => setDynamicNumPerRequestMax(Number(e.target.value))}
+            />
+          </div>
+        </>
+      ) : null}
       <div className="field wizard-settings-grid__full">
         <span className="field__label">目标语言</span>
         <CustomSelect value={language} onChange={(e) => setLanguage(e.target.value)}>
@@ -721,7 +796,28 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
     </Panel>
   );
 
-  const stepRenderers = [renderStep1, renderStep2, renderStep3, renderStep4, renderStep5];
+  // ── Step 6: 完成（后续翻译流程指引） ──
+  const renderStep6 = () => (
+    <Panel title="项目已就绪，接下来这样走" description="按这个顺序走完一轮翻译；每一步都能在项目左侧菜单里随时进去，中途改字典不用重建项目。">
+      <ol className="wizard-flow">
+        {FLOW_STEPS.map((step, index) => (
+          <li key={step.title} className="wizard-flow__item">
+            <span className="wizard-flow__index" aria-hidden="true">{index + 1}</span>
+            <span className="wizard-flow__body">
+              <strong>{step.title}</strong>
+              <span>{step.description}</span>
+            </span>
+          </li>
+        ))}
+      </ol>
+      <div className="wizard-tip-card">
+        <strong>提示</strong>
+        <span>点「完成并打开项目」会打开「翻译工作台」；想先把名字定下来，也可以先去「人名翻译」用 AI 译人名。</span>
+      </div>
+    </Panel>
+  );
+
+  const stepRenderers = [renderStep1, renderStep2, renderStep3, renderStep4, renderStep5, renderStep6];
 
   const handlePrevStep = useCallback(() => {
     setStepDirection('backward');
@@ -774,7 +870,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
         <Button variant="secondary" onClick={handlePrevStep} disabled={currentStep === 0}>
           上一步
         </Button>
-        {currentStep < 4 ? (
+        {currentStep < STEPS.length - 1 ? (
           <Button onClick={() => void handleNextStep()} disabled={!canNext || advancing}>
             {advancing ? '处理中…' : nextLabel}
           </Button>

@@ -12,6 +12,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 from uuid import uuid4
 
 import os
+import sys
 from datetime import datetime
 from yaml import safe_load, safe_dump
 
@@ -171,6 +172,24 @@ def _dict_category_config_key(category: str) -> str:
     if category == "post":
         return "postDict"
     raise ValueError(f"invalid dictionary category: {category}")
+
+
+def _program_dir() -> str:
+    """程序所在目录：新建项目向导「父目录」的默认值。
+
+    打包后（PyInstaller）后端可执行文件在 <程序目录>/backend/ 下，往上一层才是程序目录；
+    开发时后端是从仓库根目录启动的（run_backend.py），进程工作目录就是它。
+    """
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        if os.path.basename(exe_dir).lower() == "backend":
+            return os.path.dirname(exe_dir)
+        return exe_dir
+    cwd = os.getcwd()
+    if cwd and os.path.isdir(cwd):
+        return cwd
+    # 兜底：本文件在 <程序目录>/GalTransl/ 下
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _is_dict_entry_line(line_item: str) -> bool:
@@ -2852,6 +2871,9 @@ def build_handler(registry: JobRegistry):
                 return
             if path == "/api/version":
                 self._send_json({"version": GALTRANSL_VERSION})
+                return
+            if path == "/api/program-dir":
+                self._send_json({"path": _program_dir()})
                 return
             if path == "/api/version/check":
                 latest_version = new_version[0] if new_version else None
