@@ -18,7 +18,7 @@ import { ToolBlock } from './ToolRow';
 import type { ActivityItem } from '../timeline';
 import { asArgs, formatPayload, str } from '../toolMeta';
 
-/* ── 启动翻译卡片（翻译工作台顶部卡的迷你版） ──
+/* ── 启动翻译卡片（开始翻译顶部卡的迷你版） ──
    原本这里是「启动翻译 · ForGal-json · 仅 1 个文件」加一段原始参数/结果 JSON。
    现在换成工作台那张顶部卡的瘦身版：百分比 + 进度条 + 已译/总数，外加实时速度、
    预计剩余、已用时长三个关键数字。翻译期间每秒拉一次运行时快照并保持展开，

@@ -142,7 +142,7 @@
   transform: translateY(-50%);
 }
 
-/* ── 「翻译工作台」正在跑任务的呼吸蓝点（与 Agent 页「运行中」同款） ── */
+/* ── 「开始翻译」正在跑任务的呼吸蓝点（与 Agent 页「运行中」同款） ── */
 .sidebar__project-child-running-dot,
 .sidebar__nav-running-dot {
   width: 7px;
@@ -153,7 +153,7 @@
   animation: sidebar-running-pulse 1.1s ease-in-out infinite;
 }
 
-/* 展开态：跟在「翻译工作台」文字后面靠右，与配置未保存红点同位 */
+/* 展开态：跟在「开始翻译」文字后面靠右，与配置未保存红点同位 */
 .sidebar__project-child-running-dot {
   flex: 0 0 7px;
   margin-left: auto;

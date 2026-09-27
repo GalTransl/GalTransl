@@ -45,11 +45,11 @@ type DictionaryManagerProps = {
   onSaveFile: (fileKey: string, content: string) => Promise<void>;
   onDeleteFile: (fileKey: string) => Promise<void>;
   onGenerateGptDict?: () => Promise<void>;
-  /** 「AI 生成 GPT 字典」二次确认里要说明用哪个后端（与翻译工作台同一口径） */
+  /** 「AI 生成 GPT 字典」二次确认里要说明用哪个后端（与开始翻译同一口径） */
   gendicBackend?: BackendUsageSummary | null;
   /**
    * 条目行上的「→」：拿着这一行的日文词（GPT 取原文列、普通/条件/场景条目取「搜索」列）
-   * 跳到「缓存与问题」里搜一下，看它实际出现在哪。
+   * 跳到「浏览文本」里搜一下，看它实际出现在哪。
    * 不传就不显示这个按钮（全局字典页没有所属项目，传不了）。
    */
   onOpenInCache?: (sourceWord: string) => void;
@@ -217,14 +217,14 @@ function DictEntryGroupCard({
                   />
                 </div>
               ))}
-              {/* 拿这一行的日文词去「缓存与问题」搜它出现在哪（注释行没有词，不显示） */}
+              {/* 拿这一行的日文词去「浏览文本」搜它出现在哪（注释行没有词，不显示） */}
               {onOpenInCache && sourceCellIndex >= 0 ? (
                 <button
                   type="button"
                   className="dict-card__row-open-cache"
                   onClick={() => onOpenInCache(sourceWord)}
                   disabled={!sourceWord}
-                  title="在「缓存与问题」里搜索这个词"
+                  title="在「浏览文本」里搜索这个词"
                 >
                   <Icon name="arrow-right" />
                 </button>
@@ -672,7 +672,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     );
   }
 
-  // 二次确认里写清楚用的是哪个后端：项目没单独指定就是全局默认，跟翻译工作台同一口径
+  // 二次确认里写清楚用的是哪个后端：项目没单独指定就是全局默认，跟开始翻译同一口径
   const gendicBackendText = formatBackendUsage(
     gendicBackend ?? { backend: '当前项目的后端配置', model: '', profile: '' },
   );
@@ -887,11 +887,11 @@ export function DictionaryManager(props: DictionaryManagerProps) {
             </div>
             <div className="dict-dialog__body">
               <p>
-                后端跟随当前项目的后端配置；项目没有单独指定时用全局默认配置，与「翻译工作台」的「当前后端」一致。
+                后端跟随当前项目的后端配置；项目没有单独指定时用全局默认配置，与「开始翻译」的「当前后端」一致。
               </p>
               <p>
                 GenDic 会先给说话人名定译名，再逐段提取专有名词并整体审校，最后并入项目目录下的
-                「项目GPT字典-生成.txt」。整个过程会调用模型、消耗 API 额度，启动后可在「翻译工作台」查看阶段与进度。
+                「项目GPT字典-生成.txt」。整个过程会调用模型、消耗 API 额度，启动后可在「开始翻译」查看阶段与进度。
               </p>
               {gendicBackendMissing ? (
                 <p className="dict-dialog__warning">

@@ -48,7 +48,7 @@ export function ProjectDictionaryPage({
   const [projectBackendConfig, setProjectBackendConfig] = useState<Record<string, unknown> | null>(null);
   const currentSnapshot = useMemo(() => buildDictionarySnapshot(data), [data]);
 
-  // GenDic 用的是项目选择的那个后端（没单独指定就跟随全局默认），跟翻译工作台同一套口径：
+  // GenDic 用的是项目选择的那个后端（没单独指定就跟随全局默认），跟开始翻译同一套口径：
   // 二次确认里要如实写出来用的是哪个后端
   useEffect(() => {
     if (!projectId) {
@@ -200,7 +200,7 @@ export function ProjectDictionaryPage({
           delete_file: true });
       }}
       gendicBackend={gendicBackend}
-      // 条目行的「→」：拿着这个原文词去「缓存与问题」搜它出现在哪。
+      // 条目行的「→」：拿着这个原文词去「浏览文本」搜它出现在哪。
       // 带一个 nonce（n）：同一个词连点两次时 URL 不变，缓存页拿不到新事件（那边按 n 去重）
       onOpenInCache={(sourceWord) => {
         if (!projectId || !sourceWord) return;

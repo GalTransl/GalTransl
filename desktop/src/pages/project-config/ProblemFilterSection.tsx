@@ -54,7 +54,7 @@ export function ProblemFilterSection({ config, onChange, onDirty }: ProblemFilte
             如 <code>缺失.*标点</code>、<code>^残留日文：♪</code>。
             <strong>原则上只过滤小类</strong>：<code>残留日文</code>、<code>^残留日文：</code>
             这类整类写法会把大类里的真问题一起藏起来，不建议用。
-            想只按字面过滤某一条，把特殊字符转义（在「缓存与问题」页点问题项后面的 - 号会自动转义）。
+            想只按字面过滤某一条，把特殊字符转义（在「浏览文本」页点问题项后面的 - 号会自动转义）。
           </p>
           <KeyListEditor
             keys={filterKeys}

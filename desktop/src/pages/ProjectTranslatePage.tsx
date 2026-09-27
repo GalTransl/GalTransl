@@ -735,7 +735,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
             <span className="ptv2-cockpit__eyebrow">Translation Cockpit</span>
             <div className="ptv2-cockpit__title-row">
               <h1 className="ptv2-cockpit__title">
-                翻译工作台
+                开始翻译
                 {projectName ? (
                   <>
                     <span className="ptv2-cockpit__title-sep">·</span>

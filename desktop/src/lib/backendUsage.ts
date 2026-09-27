@@ -1,7 +1,7 @@
 /**
  * 「这次任务会用哪个后端」的统一口径。
  *
- * 翻译工作台顶部显示当前后端用它，字典页「AI 生成 GPT 字典」的二次确认也用它——
+ * 开始翻译顶部显示当前后端用它，字典页「AI 生成 GPT 字典」的二次确认也用它——
  * 两处必须给出同一句话，否则用户会以为换了个地方启动就换了后端。
  */
 import { getSelectedBackendProfileDisplay, resolveSelectedBackendProfile } from './api';

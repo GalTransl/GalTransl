@@ -479,7 +479,7 @@ export function SettingsPage() {
           </label>
 
           <label className="settings-number-row">
-            <span className="settings-number-row__label">缓存与问题字号</span>
+            <span className="settings-number-row__label">浏览文本字号</span>
             <div className="settings-number-row__control settings-opacity-control">
               <input
                 type="range"

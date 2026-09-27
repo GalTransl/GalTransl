@@ -49,14 +49,14 @@ function loadLastActiveProject(): string | null {
 }
 
 const PROJECT_TABS: Array<{ path: string; label: string; icon: IconName }> = [
-  { path: 'translate', label: '翻译工作台', icon: 'globe' },
-  { path: 'cache', label: '缓存与问题', icon: 'database' },
+  { path: 'translate', label: '开始翻译', icon: 'globe' },
+  { path: 'cache', label: '浏览文本', icon: 'database' },
   { path: 'dictionary', label: '项目字典', icon: 'book' },
   { path: 'names', label: '人名翻译', icon: 'user' },
   { path: 'config', label: '配置编辑', icon: 'settings' },
 ];
 
-/** 「翻译工作台」正在跑任务时的呼吸蓝点（与 Agent 页「运行中」指示同款）。
+/** 「开始翻译」正在跑任务时的呼吸蓝点（与 Agent 页「运行中」指示同款）。
  *  child = 展开态子项行（跟在文字后面靠右）；rail = 收起态只剩图标的导航项。 */
 function RunningDot({ variant }: { variant: 'child' | 'rail' }) {
   return (

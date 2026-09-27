@@ -114,7 +114,7 @@ def _is_valid_regex(pattern: str) -> bool:
 def _tool_manage_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """增/删/查项目配置 common.problemFilterKey（问题过滤关键字）。
 
-    与桌面端「缓存与问题」页同一套配置。**正则匹配**：keyword 是一条正则，按 re.search
+    与桌面端「浏览文本」页同一套配置。**正则匹配**：keyword 是一条正则，按 re.search
     命中问题项的那一项才会在 list_problems / 进度统计里被过滤掉（如 `缺失.*标点`）。
     **原则上只过滤小类、不过滤大类**（`残留日文`、`^残留日文：` 这类整类写法等于放弃复核，
     要在提示里挡住）。add/remove 是对清单里字符串的精确增删（区分大小写）；
@@ -325,7 +325,7 @@ def _merge_problem_context(
                     "post_src": str(_cache_field_value(e, "post_src") or ""),
                     "pre_dst": str(_cache_field_value(e, "pre_dst") or ""),
                 }))
-        # 缓存里找不到的问题行（缓存与问题清单不同步）：原样保留，别把问题弄丢
+        # 缓存里找不到的问题行（浏览文本清单不同步）：原样保留，别把问题弄丢
         for idx, row in problem_by_index.items():
             if idx not in emitted:
                 file_rows.append(row)

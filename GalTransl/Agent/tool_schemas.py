@@ -377,7 +377,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "manage_problem_filter",
-            "description": "管理问题过滤关键字（项目配置 common.problemFilterKey，与「缓存与问题」页同一套配置）。**正则匹配**：keyword 是一条正则，按 re.search 命中问题项的那一项会被 list_problems 与进度统计过滤掉（如 `缺失.*标点` 按样式、`比日文长：1\\.5倍` 精确到某条；正则里的特殊字符要转义，写坏的正则会被拒）。**原则上只过滤小类，不要过滤大类**：像 `残留日文`、`^残留日文：` 这种把整个问题大类藏起来的写法不要用——大类里通常混着真问题，整类过滤等于不再复核；确实个别条目不用再处理时用 manage_problem_white_list 按条目豁免。list 会给出每条过滤项当前各挡住了多少条问题（problems 为 0 说明它已经一条也挡不到，可考虑 remove）。keyword 可传字符串或数组，一次增删多个。",
+            "description": "管理问题过滤关键字（项目配置 common.problemFilterKey，与「浏览文本」页同一套配置）。**正则匹配**：keyword 是一条正则，按 re.search 命中问题项的那一项会被 list_problems 与进度统计过滤掉（如 `缺失.*标点` 按样式、`比日文长：1\\.5倍` 精确到某条；正则里的特殊字符要转义，写坏的正则会被拒）。**原则上只过滤小类，不要过滤大类**：像 `残留日文`、`^残留日文：` 这种把整个问题大类藏起来的写法不要用——大类里通常混着真问题，整类过滤等于不再复核；确实个别条目不用再处理时用 manage_problem_white_list 按条目豁免。list 会给出每条过滤项当前各挡住了多少条问题（problems 为 0 说明它已经一条也挡不到，可考虑 remove）。keyword 可传字符串或数组，一次增删多个。",
             "parameters": {
                 "type": "object",
                 "properties": {

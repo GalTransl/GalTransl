@@ -60,7 +60,7 @@ def _diff_lines(before_text: str, after_text: str, *, context: int = 0, max_line
 def _split_problem_types(problem: str) -> list[str]:
     """问题文本按英文逗号拆项，取每项「类型：详情」的类型前缀去重。
 
-    与桌面端「缓存与问题」统计 tab 的归类口径一致（problemFilter.ts）。"""
+    与桌面端「浏览文本」统计 tab 的归类口径一致（problemFilter.ts）。"""
     types: list[str] = []
     for part in str(problem or "").split(","):
         token = part.strip()

@@ -45,11 +45,11 @@ const FLOW_STEPS: { title: string; description: string }[] = [
   },
   {
     title: '启动翻译',
-    description: '回到「翻译工作台」选好模板启动。正式全量前建议先试译一两个文件，确认文风与术语没问题。',
+    description: '回到「开始翻译」选好模板启动。正式全量前建议先试译一两个文件，确认文风与术语没问题。',
   },
   {
     title: '查看结果与翻译问题',
-    description: '在「缓存与问题」里看译文和检测出的问题句（残留日文、缺控制符、比日文长等），据此补字典或改译文。',
+    description: '在「浏览文本」里看译文和检测出的问题句（残留日文、缺控制符、比日文长等），据此补字典或改译文。',
   },
   {
     title: '构建输出',
@@ -812,7 +812,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
       </ol>
       <div className="wizard-tip-card">
         <strong>提示</strong>
-        <span>点「完成并打开项目」会打开「翻译工作台」；想先把名字定下来，也可以先去「人名翻译」用 AI 译人名。</span>
+        <span>点「完成并打开项目」会打开「开始翻译」；想先把名字定下来，也可以先去「人名翻译」用 AI 译人名。</span>
       </div>
     </Panel>
   );

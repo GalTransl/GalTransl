@@ -1402,7 +1402,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   if (loading && cacheFiles.length === 0) {
     return (
       <div className="project-cache-page" style={cacheBrowserFontStyle}>
-        <PageHeader className="project-cache-page__header" title="缓存与问题" />
+        <PageHeader className="project-cache-page__header" title="浏览文本" />
         <LoadingState title="加载文件列表中…" description="正在读取项目文件。" />
       </div>
     );
@@ -1411,7 +1411,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     <div className="project-cache-page" style={cacheBrowserFontStyle}>
       <PageHeader
         className="project-cache-page__header"
-        title="缓存与问题"
+        title="浏览文本"
         description="在这里可以浏览翻译问题、手动润色，或通过删除缓存句触发部分重翻。最终结果将基于这些缓存来构建。"
         actions={cacheDir ? (
           <Button variant="secondary" onClick={() => void invoke('open_folder', { path: cacheDir })} title={cacheDir}>

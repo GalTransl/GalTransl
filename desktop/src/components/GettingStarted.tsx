@@ -115,7 +115,7 @@ export function GettingStarted({
     },
     {
       title: '开始第一次翻译',
-      description: '在项目的「翻译工作台」点击开始翻译，完成后在 gt_output 文件夹取回译文。',
+      description: '在项目的「开始翻译」页启动翻译，完成后在 gt_output 文件夹取回译文。',
       done: translatedOnce,
       action: (
         <Button

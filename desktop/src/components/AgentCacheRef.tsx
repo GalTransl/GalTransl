@@ -1,7 +1,7 @@
 /* Agent 回复里的缓存引用卡片。
 
 模型在输出里写 $transl_cache(文件名, 行号)（行号支持 12 / 12-15 / 12,20），
-这里把它渲染成"某条缓存"的只读卡片——设计与「缓存与问题」页的 cache-card 一致
+这里把它渲染成"某条缓存"的只读卡片——设计与「浏览文本」页的 cache-card 一致
 （同一套样式类 + 说话人配色 + 问题标签 + 人名字典替换），只是不可编辑、去掉了
 删除/展开按钮。
 
@@ -96,7 +96,7 @@ function speakerOf(entry: CacheEntry): string {
   return raw || '';
 }
 
-/** 只读的缓存条目卡片：沿用「缓存与问题」页的 cache-card 设计。
+/** 只读的缓存条目卡片：沿用「浏览文本」页的 cache-card 设计。
    说话人 pill 跟缓存页一样过人名替换字典——显示译名，但配色仍按原名 hash
    （与缓存页同一角色同色），不然同一个角色两处颜色对不上。 */
 function CacheEntryCard({
@@ -296,7 +296,7 @@ export function AgentMarkdown({
 }
 
 /** 带缓存引用的那段文本：按片段切开，文本片段各自渲染 markdown，引用片段渲染卡片。
-    人名替换字典只在这里取——说话人 pill 要跟「缓存与问题」页显示同一个译名。
+    人名替换字典只在这里取——说话人 pill 要跟「浏览文本」页显示同一个译名。
     流式输出时行末光标只加在最后一段。 */
 function CacheRefSegments({
   segments,
