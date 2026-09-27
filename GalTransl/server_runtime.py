@@ -110,6 +110,12 @@ class RuntimeState:
     recent_successes_by_file: dict[str, deque[RuntimeSentenceEvent]] = field(default_factory=dict)
     recent_errors: deque[RuntimeErrorEvent] = field(default_factory=lambda: deque(maxlen=RUNTIME_RECENT_EVENT_LIMIT))
     success_timestamps: deque[float] = field(default_factory=deque)
+    # 引擎自报的速度（单位与它上报的进度计数一致，即「完成项/分」），None 表示没报。
+    # 默认的实时速度是「最近一分钟的成功事件数」，对普通翻译来说一个成功事件正好是一句话，
+    # 与进度计数（句）同口径，所以引擎不用报；GenDic 的进度单位是分片/批次，而成功事件是
+    # 这一段抽出的一个个术语（一段几十个），两者不是一个单位，拿成功事件算 ETA 会小一个数量级，
+    # 所以它自己按「完成项数/耗时」报上来（见 GenDic._progress_speed_lpm）。
+    progress_speed_lpm: float | None = None
 
 
 class RuntimeRegistry:
@@ -144,6 +150,7 @@ class RuntimeRegistry:
         workers_configured: int | None = None,
         file_totals: dict[str, int] | None = None,
         cache_file_display_map: dict[str, str] | None = None,
+        progress_speed_lpm: float | None = None,
     ) -> None:
         with self._lock:
             state = self._states.get(_normalize_project_dir(project_dir))
@@ -162,6 +169,8 @@ class RuntimeRegistry:
                 state.file_totals = dict(file_totals)
             if cache_file_display_map is not None:
                 state.cache_file_display_map = dict(cache_file_display_map)
+            if progress_speed_lpm is not None:
+                state.progress_speed_lpm = max(0.0, float(progress_speed_lpm))
             state.updated_at = _utcnow_text()
 
     def append_success(
@@ -305,6 +314,10 @@ class RuntimeRegistry:
             now = datetime.utcnow().timestamp()
             self._trim_speed_window_locked(state, now)
             speed = round((len(state.success_timestamps) / 60) * 60, 1) if state.success_timestamps else 0
+            if state.progress_speed_lpm is not None:
+                # 引擎自报的速度优先：它的单位与进度计数一致，前端的「实时速度/预计剩余」
+                # 以及下面按它算的 eta_seconds 才跟 x/y 项的进度对得上
+                speed = state.progress_speed_lpm
             # Flatten per-file success deques (each newest-first) and re-order
             # globally by timestamp desc so the snapshot list remains newest-first
             # for existing clients.
@@ -789,6 +802,7 @@ def update_runtime_status(
     workers_configured: int | None = None,
     file_totals: dict[str, int] | None = None,
     cache_file_display_map: dict[str, str] | None = None,
+    progress_speed_lpm: float | None = None,
 ) -> None:
     RUNTIME_REGISTRY.update_status(
         project_dir,
@@ -798,6 +812,7 @@ def update_runtime_status(
         workers_configured=workers_configured,
         file_totals=file_totals,
         cache_file_display_map=cache_file_display_map,
+        progress_speed_lpm=progress_speed_lpm,
     )
 
 

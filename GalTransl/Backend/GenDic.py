@@ -1,4 +1,4 @@
-import json, asyncio, os, re, bisect
+import json, asyncio, os, re, bisect, time
 import collections
 from typing import List, Set, Dict, Optional, Tuple
 from threading import Lock
@@ -367,6 +367,9 @@ class GenDic(BaseTranslate):
         self.progress_display_name = "GenDic 术语提取"
         self.progress_cache_key = "gendic_progress"
         self.progress_append_path = ""
+        # 本轮进度：完成的项数（分片/批次）与开始时刻，用来算与进度同口径的速度（项/分）
+        self.progress_done = 0
+        self.progress_started_at = 0.0
         self.trans_prompt = ""
         self.init_chatbot(eng_type, config)
         backend_cfg = config.getBackendConfigSection("OpenAI-Compatible")
@@ -535,6 +538,8 @@ class GenDic(BaseTranslate):
         except Exception:
             pass
 
+        self.progress_done = 0
+        self.progress_started_at = time.monotonic()
         self._update_runtime(
             stage="GenDic 术语提取中",
             current_file="准备提取任务",
@@ -543,6 +548,20 @@ class GenDic(BaseTranslate):
             file_totals={self.progress_display_name: int(total_tasks)},
             cache_file_display_map={self.progress_cache_key: self.progress_display_name},
         )
+
+    def _progress_speed_lpm(self) -> float:
+        """本轮到现在的平均速度，单位是「完成项/分」——与 x/130 项的进度同一个口径。
+
+        runtime 默认的实时速度是「最近一分钟的成功事件数」：普通翻译一个成功事件正好是一句话，
+        与进度（句）同单位；GenDic 的成功事件是抽出来的术语（一段就能抽出几十个），拿它算
+        「预计剩余」会把 130 项分片的活算成还剩两分钟。所以这里自己报。
+        """
+        if self.progress_done <= 0 or self.progress_started_at <= 0:
+            return 0.0
+        elapsed = time.monotonic() - self.progress_started_at
+        if elapsed <= 0:
+            return 0.0
+        return round(self.progress_done * 60 / elapsed, 1)
 
     def _append_runtime_progress(self, cache_key: str, success: bool, message: str = ""):
         if not self.progress_append_path:
@@ -557,8 +576,17 @@ class GenDic(BaseTranslate):
             with open(self.progress_append_path, "a", encoding="utf-8") as fp:
                 fp.write(line)
                 fp.write("\n")
+            self.progress_done += 1
+        # 每完成一项就把速度报上去：工作台的「实时速度 / 预计剩余」都按它算（见 server_runtime
+        # 的 progress_speed_lpm），这一步与各阶段自己的 current_file 计数是两回事
+        self._update_runtime(progress_speed_lpm=self._progress_speed_lpm())
 
     def _cleanup_runtime_progress(self):
+        """收尾：删掉进度用的假缓存文件，并把速度清零。
+
+        速度不清零的话，跑完（或被停止）之后工作台还会按最后那次平均速度算「预计剩余」——
+        停在 38/130 的被停止任务会一直显示一个其实不会再动的倒计时。
+        """
         if not self.progress_append_path:
             return
         try:
@@ -568,6 +596,9 @@ class GenDic(BaseTranslate):
             pass
         finally:
             self.progress_append_path = ""
+            self.progress_done = 0
+            self.progress_started_at = 0.0
+        self._update_runtime(progress_speed_lpm=0)
 
     def _record_runtime_success(self, index: int, source_preview: str, translation_preview: str):
         try:

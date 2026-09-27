@@ -12,11 +12,17 @@
 5. 每个分片都单独开一次会话，说明、格式、已有词条反反复复地发——现在连续的几个分片交给同一个
    会话多轮对话：说明只发一次，后面只发新片段并只要求输出新词，译名也更一致；
 6. 多轮对话的历史里，assistant 消息要带上当初的思考内容（thinking 模式下少一条
-   reasoning_content，下一次请求会被判 400）。
+   reasoning_content，下一次请求会被判 400）；
+7. 工作台的「实时速度/预计剩余」按「最近一分钟的成功事件数」算，而 GenDic 的成功事件是
+   抽出来的术语（一段几十个），拿它估 130 项分片会说「还剩 2 分钟」——现在按完成项数/耗时
+   报一个与进度同口径的速度（项/分），收尾清零。
 """
 
 import asyncio
 import collections
+import os
+import tempfile
+import time
 import unittest
 from threading import Lock
 from types import SimpleNamespace
@@ -76,6 +82,10 @@ def _make_engine():
     engine.name_decisions = {}
     engine.counter_lock = Lock()
     engine.progress_display_name = "GenDic 术语提取"
+    engine.progress_lock = Lock()
+    engine.progress_append_path = ""
+    engine.progress_done = 0
+    engine.progress_started_at = 0.0
     engine.gendic_max_api_retries = 2
     engine._record_runtime_error = lambda **kwargs: None
     engine._record_runtime_success = lambda **kwargs: None
@@ -457,6 +467,53 @@ class MultiTurnSessionTests(unittest.IsolatedAsyncioTestCase):
         # 第二轮没有思考也要补空串：这场会话是 thinking 会话，历史里少一条就 400
         assistant_messages = [m for m in session.messages if m["role"] == "assistant"]
         self.assertEqual([m["reasoning"] for m in assistant_messages], ["思考一", ""])
+
+
+class ProgressSpeedTests(unittest.TestCase):
+    """「实时速度/预计剩余」必须与 x/130 项的进度同口径（见文件头第 7 条）。"""
+
+    def _engine(self):
+        engine = _make_engine()
+        engine.progress_append_path = os.path.join(
+            tempfile.mkdtemp(), "gendic_progress.append.jsonl"
+        )
+        engine.progress_started_at = time.monotonic()
+        return engine
+
+    def test_reports_items_per_minute_after_each_item(self):
+        engine = self._engine()
+        updates = []
+        engine._update_runtime = lambda **kwargs: updates.append(kwargs)
+        engine.progress_started_at = time.monotonic() - 120  # 两分钟前开工
+
+        for index in range(4):
+            engine._append_runtime_progress(f"gendic-task-{index}", True)
+
+        # 4 项 / 2 分钟 = 2 项/分，而不是「抽到了多少个术语/分」
+        self.assertEqual(engine.progress_done, 4)
+        self.assertTrue(all("progress_speed_lpm" in update for update in updates))
+        self.assertAlmostEqual(updates[-1]["progress_speed_lpm"], 2.0, delta=0.3)
+
+    def test_speed_is_zero_before_the_first_item(self):
+        engine = self._engine()
+        self.assertEqual(engine._progress_speed_lpm(), 0.0)  # 一项都没完成
+        engine.progress_done = 5
+        engine.progress_started_at = 0.0  # 没有开始时刻
+        self.assertEqual(engine._progress_speed_lpm(), 0.0)
+
+    def test_cleanup_clears_speed(self):
+        engine = self._engine()
+        updates = []
+        engine._update_runtime = lambda **kwargs: updates.append(kwargs)
+        engine.progress_done = 7
+
+        engine._cleanup_runtime_progress()
+
+        # 停止/跑完之后不能拿着最后一次的平均速度继续倒计时
+        self.assertEqual(updates[-1]["progress_speed_lpm"], 0)
+        self.assertEqual(engine.progress_done, 0)
+        self.assertEqual(engine.progress_started_at, 0.0)
+        self.assertEqual(engine.progress_append_path, "")
 
 
 class ReasoningCaptureTests(unittest.TestCase):

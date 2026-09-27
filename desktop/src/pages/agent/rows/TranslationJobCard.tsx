@@ -109,6 +109,8 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
         ? '已取消'
         : '已完成';
   const resultText = formatPayload(item.ok === false ? item.error : item.result);
+  // GenDic 跑的是分片/批次而不是句子：进度与速度的单位都跟着它换（与工作台一致）
+  const progressUnit = translator === 'GenDic' || (runtime?.stage ?? '').startsWith('GenDic') ? '项' : '句';
 
   return (
     <div className={`agent-tjob${open ? ' is-open' : ''}${isRunning ? ' is-live' : ''}`}>
@@ -128,7 +130,7 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
         </span>
         {total > 0 ? (
           <span className="agent-tjob__count">
-            {translated} / {total} 句
+            {translated} / {total} {progressUnit}
           </span>
         ) : null}
         <span className={`agent-tjob__state is-${tone}`}>
@@ -157,7 +159,7 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
 
           <div className="agent-tjob__stats">
             <span className="agent-tjob__stat">
-              <b>{formatSpeed(summary?.translation_speed_lpm ?? 0)}</b>
+              <b>{formatSpeed(summary?.translation_speed_lpm ?? 0, progressUnit)}</b>
               <i>实时速度</i>
             </span>
             <span className="agent-tjob__stat">

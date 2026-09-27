@@ -329,9 +329,10 @@ export function formatTime(isoString: string): string {
   }
 }
 
-export function formatSpeed(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return '0 行/分';
-  return `${value.toFixed(value >= 10 ? 0 : 1)} 行/分`;
+/** unit 是速度的单位，跟进度同一口径：普通翻译是「句」，GenDic（分片/批次）是「项」 */
+export function formatSpeed(value: number, unit = '行'): string {
+  if (!Number.isFinite(value) || value <= 0) return `0 ${unit}/分`;
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${unit}/分`;
 }
 
 export function formatEta(seconds: number): string {

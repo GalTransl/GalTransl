@@ -574,7 +574,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const remainingCount = Math.max(totalCount - translatedCount, 0);
   const workersActive = summary?.workers_active ?? 0;
   const workersConfigured = summary?.workers_configured ?? 0;
-  const speedText = formatSpeed(summary?.translation_speed_lpm ?? 0);
+  const speedText = formatSpeed(summary?.translation_speed_lpm ?? 0, progressUnit);
   const etaText = formatEta(summary?.eta_seconds ?? 0);
   const elapsedText = formatElapsedTime(currentJob, nowMs);
   const updatedAtText = summary?.updated_at ? formatDate(summary.updated_at) : '等待首次快照';
