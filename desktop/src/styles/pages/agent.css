@@ -554,7 +554,7 @@
 /* LLM 请求失败自动重试提示行：等待中走警告色 + 呼吸，定格后回落成普通灰字 */
 .agent-retry-note {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-2);
   padding: var(--space-1) 0;
   font-size: 12px;
@@ -565,10 +565,33 @@
   color: var(--color-warning);
 }
 
+/* 旋转的是这个外壳：必须做成正好 1em 的方块，让盒中心与图标中心重合。
+   若用 inline-block，盒高由 line-height 撑开、图标又按基线(-0.125em)下沉，
+   旋转中心就落在图标上方，看起来像在绕圈乱晃。 */
 .agent-retry-note__icon {
   flex: none;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1em;
+  height: 1em;
+  margin-top: 1px;
+  line-height: 1;
   opacity: 0.9;
+  transform-origin: center;
+}
+
+.agent-retry-note__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-retry-note__reason {
+  opacity: 0.8;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .agent-retry-note.is-live .agent-retry-note__icon {

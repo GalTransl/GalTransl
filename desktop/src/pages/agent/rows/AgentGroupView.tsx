@@ -312,7 +312,7 @@ function CompactRow({ item }: { item: ActivityItem }) {
 /* ── Retry row (LLM 请求失败自动重试) ──
    退避等待期间每秒刷新剩余秒数，读起来像「3 秒后重试 · 第 1/3 次」；
    退避结束（llm_retry_end）后定格成「已重试」，不再跳动。
-   失败原因挂在 title 上，鼠标悬停可看。 */
+   同一次请求的多次重试共用这一行，只有计数在变；失败原因写在下方一行。 */
 
 const RETRY_CODE_LABELS: Record<string, string> = {
   NETWORK_ERROR: '连接失败',
@@ -339,15 +339,18 @@ function RetryRow({ item }: { item: ActivityItem }) {
   const maxAttempts = item.maxAttempts ?? 0;
   const attemptText = maxAttempts > 0 ? `第 ${attempt}/${maxAttempts} 次` : `第 ${attempt} 次`;
   const cause = item.retryCode ? RETRY_CODE_LABELS[item.retryCode] || '请求失败' : '请求失败';
-  const title = item.retryReason ? `${cause}：${item.retryReason}` : cause;
+  const detail = item.retryReason ? `${cause}：${item.retryReason}` : cause;
 
   return (
-    <div className={`agent-retry-note${live ? ' is-live' : ''}`} title={title}>
+    <div className={`agent-retry-note${live ? ' is-live' : ''}`} title={detail}>
       <span className="agent-retry-note__icon"><Icon name="refresh" /></span>
-      <span className="agent-retry-note__text">
-        {live ? `${cause}，${remainingSec} 秒后重试` : '已重试'}
-        <span className="agent-retry-note__count"> · {attemptText}</span>
-      </span>
+      <div className="agent-retry-note__body">
+        <span className="agent-retry-note__text">
+          {live ? `${cause}，${remainingSec} 秒后重试` : '已重试'}
+          <span className="agent-retry-note__count"> · {attemptText}</span>
+        </span>
+        <span className="agent-retry-note__reason">{detail}</span>
+      </div>
     </div>
   );
 }

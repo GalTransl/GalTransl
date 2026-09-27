@@ -412,6 +412,8 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
 
     // LLM 请求失败自动重试：先在活动组里放一条带倒计时的重试提示行，
     // 并丢掉上一次尝试已经流出的半截内容（那次请求已作废，重试会整段重发）。
+    // 同一次请求的多次重试共用一行：只有 attempt 从 1 开始才算新一轮请求、另起一行
+    //（attempt 递增说明是同一请求的第 N 次退避，就地更新计数与原因）。
     if (ev.type === 'llm_retry_start') {
       if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
       // 从末尾往前清掉本次失败尝试流出的 content/reasoning；遇到工具/压缩/重试行
@@ -424,16 +426,28 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
         }
         break;
       }
-      current.items.push({
-        kind: 'retry',
-        step: ev.step,
-        attempt: ev.attempt,
-        maxAttempts: ev.max_attempts,
-        retryDelayMs: ev.delay_ms,
-        retryStartedAtMs: typeof ev.ts === 'number' ? ev.ts * 1000 : Date.now(),
-        retryCode: ev.code,
-        retryReason: ev.reason,
-      });
+      let retryItem: ActivityItem | undefined;
+      if ((ev.attempt ?? 1) > 1) {
+        for (let i = current.items.length - 1; i >= 0; i -= 1) {
+          const it = current.items[i];
+          if (it.kind === 'retry') {
+            retryItem = it;
+            break;
+          }
+        }
+      }
+      if (!retryItem) {
+        retryItem = { kind: 'retry', step: ev.step };
+        current.items.push(retryItem);
+      }
+      retryItem.step = ev.step;
+      retryItem.attempt = ev.attempt;
+      retryItem.maxAttempts = ev.max_attempts;
+      retryItem.retryDelayMs = ev.delay_ms;
+      retryItem.retryStartedAtMs = typeof ev.ts === 'number' ? ev.ts * 1000 : Date.now();
+      retryItem.retryCode = ev.code;
+      retryItem.retryReason = ev.reason;
+      retryItem.retryDone = false;
       continue;
     }
 
