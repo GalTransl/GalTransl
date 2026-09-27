@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type Keyboard
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from './Button';
+import { CustomSelect } from './CustomSelect';
 import { Icon } from './Icon';
 import { Panel } from './Panel';
 import { EmptyState, ErrorState, InlineFeedback, LoadingState } from './page-state';
@@ -73,11 +74,17 @@ function getFilesByTab(data: DictionaryManagerData | null, tab: DictTab): string
   });
 }
 
+// GenDic 生成的 GPT 字典按类目分区：----------↓人名↓----------
+const SECTION_LINE_RE = /^-{3,}↓(.+?)↓-{3,}\s*$/;
+// 第一个分区标题之前的词条（旧格式、手加的）归到这一类
+const UNSECTIONED_LABEL = '未分类';
+
 function parseRows(text: string, tab: DictTab): DictRow[] {
   const lines = text.split('\n');
   return lines.map((line) => {
     if (!line.trim() && !line.includes('\t')) return { type: 'blank', values: [], raw: line };
-    if (line.startsWith('//') || line.startsWith('#') || line.startsWith('\\\\')) {
+    // GenDic 生成的字典用 ----------↓人名↓---------- 这样的行分区，也当注释显示
+    if (line.startsWith('//') || line.startsWith('#') || line.startsWith('\\\\') || SECTION_LINE_RE.test(line)) {
       return { type: 'comment', values: [line], raw: line };
     }
     const parts = line.split('\t');
@@ -223,6 +230,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   const [activeTab, setActiveTab] = useState<DictTab>('gpt');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [sectionFilter, setSectionFilter] = useState('');
   const [mode, setMode] = useState<'card' | 'text'>('card');
   const [draftText, setDraftText] = useState<string>('');
   const [dirty, setDirty] = useState(false);
@@ -246,22 +254,50 @@ export function DictionaryManager(props: DictionaryManagerProps) {
 
   const parsedRows = useMemo(() => parseRows(draftText, activeTab), [draftText, activeTab]);
 
+  // 每行所属的类目（最近的分区标题），以及各类目的条目数；文件没有分区时 sections 为空，不显示类目筛选
+  const { rowSections, sections } = useMemo(() => {
+    const owner: string[] = [];
+    const counts = new Map<string, number>();
+    let current = UNSECTIONED_LABEL;
+    let hasSection = false;
+    for (const row of parsedRows) {
+      const match = SECTION_LINE_RE.exec(row.raw);
+      if (match) {
+        current = match[1];
+        hasSection = true;
+        if (!counts.has(current)) counts.set(current, 0);
+      } else if (row.raw.includes('\t') && row.type !== 'comment' && row.type !== 'blank') {
+        counts.set(current, (counts.get(current) ?? 0) + 1);
+      }
+      owner.push(current);
+    }
+    if (!hasSection) return { rowSections: owner, sections: [] as { name: string; count: number }[] };
+    const list = [...counts.entries()]
+      .filter(([name, count]) => name !== UNSECTIONED_LABEL || count > 0)
+      .map(([name, count]) => ({ name, count }));
+    return { rowSections: owner, sections: list };
+  }, [parsedRows]);
+
+  // 选中的类目在当前文件里不存在（换了文件、分区被删）时视为「全部」
+  const activeSection = sections.some((s) => s.name === sectionFilter) ? sectionFilter : '';
+
   const filteredRows = useMemo(() => {
     const visible = parsedRows
       .map((row, rowIndex) => ({ row, rowIndex }))
-      .filter(({ row }) => {
+      .filter(({ row, rowIndex }) => {
         // 过滤掉注释行（// 或 # 开头）
         if (row.type === 'comment') return false;
         // 过滤掉空行
         if (row.type === 'blank') return false;
         // 过滤掉少于 1 个 tab 分隔的行（即没有 tab 的行）
         if (!row.raw.includes('\t')) return false;
+        if (activeSection && rowSections[rowIndex] !== activeSection) return false;
         return true;
       });
     if (!searchTerm.trim()) return visible;
     const needle = searchTerm.toLowerCase();
     return visible.filter(({ row }) => row.values.join('\t').toLowerCase().includes(needle));
-  }, [parsedRows, searchTerm]);
+  }, [parsedRows, searchTerm, activeSection, rowSections]);
 
   const groupedRows = useMemo(() => {
     const groups: DictRowGroup[] = [];
@@ -379,6 +415,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
       return;
     }
     setSelectedFile(file);
+    setSectionFilter('');
     const next = data?.dict_contents[file]?.lines.join('\n') ?? '';
     setDraftText(next);
     setDirty(false);
@@ -392,6 +429,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     }
     setActiveTab(tab);
     setSearchTerm('');
+    setSectionFilter('');
     const files = getFilesByTab(data, tab);
     ensureSelection(files);
     if (files.length > 0 && data) {
@@ -431,7 +469,13 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   const addRow = (rowType?: DictRowType, insertAfterRowIndex?: number) => {
     const targetType = rowType ?? (activeTab === 'gpt' ? 'gpt' : 'normal');
     const base = buildRowByType(targetType);
-    const insertIndex = typeof insertAfterRowIndex === 'number' ? Math.max(0, insertAfterRowIndex + 1) : parsedRows.length;
+    let insertIndex = typeof insertAfterRowIndex === 'number' ? Math.max(0, insertAfterRowIndex + 1) : parsedRows.length;
+    if (typeof insertAfterRowIndex !== 'number' && activeSection) {
+      // 正在看某个类目：新条目加到该分区末尾（跳过分区末尾的空行），否则加到文件末尾就看不到了
+      let last = rowSections.lastIndexOf(activeSection);
+      while (last > 0 && parsedRows[last].type === 'blank' && rowSections[last - 1] === activeSection) last -= 1;
+      insertIndex = last + 1;
+    }
     const next = [...parsedRows.slice(0, insertIndex), base, ...parsedRows.slice(insertIndex)];
     setDraftText(rowsToText(next));
     setDirty(true);
@@ -655,6 +699,20 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="dict-search"
                   />
+                  {sections.length > 0 && (
+                    <CustomSelect
+                      compact
+                      className="dict-section-filter"
+                      value={activeSection}
+                      onChange={(e) => setSectionFilter(e.target.value)}
+                      title="按类目筛选"
+                    >
+                      <option value="">全部类目</option>
+                      {sections.map((s) => (
+                        <option key={s.name} value={s.name}>{`${s.name}（${s.count}）`}</option>
+                      ))}
+                    </CustomSelect>
+                  )}
                   {mode === 'card' && (
                     activeTab === 'gpt' ? (
                       <Button variant="secondary" onClick={() => addRow('gpt')}>
@@ -700,8 +758,8 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                       ))}
                       {groupedRows.length === 0 && (
                         <EmptyState
-                          title={searchTerm.trim() ? '无匹配条目' : '字典为空'}
-                          description={searchTerm.trim() ? '尝试更换搜索关键词或新增条目。' : '点击下方按钮添加第一条字典条目。'}
+                          title={searchTerm.trim() || activeSection ? '无匹配条目' : '字典为空'}
+                          description={searchTerm.trim() || activeSection ? '尝试更换搜索关键词、类目或新增条目。' : '点击下方按钮添加第一条字典条目。'}
                           action={(
                             activeTab === 'gpt' ? (
                               <Button variant="secondary" onClick={() => addRow('gpt')}>+ 新增条目</Button>

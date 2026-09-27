@@ -593,6 +593,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     ? `${backendUsageSummary.backend}:${backendUsageSummary.model}`
     : backendUsageSummary.backend;
   const runtimeStage = (runtimeMatchesProject ? (runtime?.stage ?? '') : '').trim();
+  const runtimeStageDetail = (runtimeMatchesProject ? (runtime?.current_file ?? '') : '').trim();
   const runtimeRetranslPendingCount = useMemo(
     () => (runtimeMatchesProject
       ? (runtime?.retransl_stats ?? []).reduce(
@@ -603,7 +604,10 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     [runtimeMatchesProject, runtime?.retransl_stats],
   );
   const statusTone = runtimeStage === '检查模型可用性' ? 'checking-availability' : (currentJob?.status ?? 'pending');
-  const statusLabel = runtimeStage === '检查模型可用性' ? '测试模型可用性' : getStatusLabel(currentJob?.status);
+  // 后端报了阶段就直接显示阶段：只写「翻译中」看不出任务跑到哪一步（GenDic 的分词/人名/提取/审校尤其明显）
+  const statusLabel = runtimeStage
+    ? (runtimeStage === '检查模型可用性' ? '测试模型可用性' : runtimeStage)
+    : getStatusLabel(currentJob?.status);
   const currentJobError = currentJob?.error?.trim() ?? '';
   const cancelledToastTitle = currentJob?.translator === 'GenDic' ? 'GenDic 已停止' : '任务已取消';
   const cancelledToastDescription = useMemo(() => {
@@ -616,6 +620,9 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     }
     return currentJobError;
   }, [currentJob, currentJobError]);
+  // GenDic 跑的是分片/批次而不是句子：进度单位不能跟着普通翻译叫「句」
+  const isGendicJob = currentJob?.translator === 'GenDic' || runtimeStage.startsWith('GenDic');
+  const progressUnit = isGendicJob ? '项' : '句';
   const progressPercent = clampPercent(summary?.percent ?? 0);
   const progressPercentText = formatPercentDisplay(summary?.percent ?? 0);
   const translatedCount = summary?.translated ?? 0;
@@ -825,6 +832,11 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
           </div>
           <div className="ptv2-cockpit__statusline">
             <StatusBadge label={statusLabel} tone={statusTone} celebrate={justCompleted} />
+            {runtimeStageDetail ? (
+              <span className="ptv2-cockpit__stage-detail" title={`${runtimeStage}${runtimeStage ? ' · ' : ''}${runtimeStageDetail}`}>
+                {runtimeStageDetail}
+              </span>
+            ) : null}
             <span className="ptv2-cockpit__tick" title={updatedAtText}>
               <span className="ptv2-cockpit__tick-dot" aria-hidden="true" />
               {updatedAtText}
@@ -842,7 +854,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
               <span className="ptv2-gauge__fraction-done">{translatedCount}</span>
               <span className="ptv2-gauge__fraction-sep">/</span>
               <span className="ptv2-gauge__fraction-total">{totalCount}</span>
-              <span className="ptv2-gauge__fraction-unit">句</span>
+              <span className="ptv2-gauge__fraction-unit">{progressUnit}</span>
               <span className="ptv2-gauge__fraction-divider" aria-hidden="true" />
               <span className="ptv2-gauge__fraction-remain">剩余 {remainingCount}</span>
             </div>

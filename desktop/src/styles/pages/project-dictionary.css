@@ -226,6 +226,12 @@
   min-width: 0;
 }
 
+/* 类目筛选和搜索框挤在同一行，不额外占用条目列表的高度 */
+.dict-toolbar .dict-section-filter {
+  flex: none;
+  width: 9.5rem;
+}
+
 .dict-empty-actions {
   display: flex;
   gap: var(--space-2);

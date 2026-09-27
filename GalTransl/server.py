@@ -193,6 +193,8 @@ def _read_dict_file_payload(file_path: str) -> dict[str, Any]:
                 line_item
                 for line_item in lines
                 if line_item.strip() and not line_item.startswith("\\\\") and not line_item.startswith("//")
+                # GenDic 生成字典的分区标题行（----------↓人名↓----------）不是词条
+                and not (line_item.startswith("---") and "↓" in line_item)
             ]),
             "mtime": mtime,
         }

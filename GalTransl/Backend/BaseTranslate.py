@@ -41,6 +41,28 @@ _CHATBOT_STATE: ContextVar[tuple[bool, str] | None] = ContextVar(
     "galtransl_chatbot_state", default=None
 )
 
+# 思考内容的字段名：不同平台不一样（DeepSeek 用 reasoning_content，OpenRouter 等用 reasoning）。
+# 与 GalTransl/Agent/core.py 的 REASONING_FIELD_NAMES 同一套约定：多轮对话里拿到思考内容后
+# 必须按命中的原名跟着 assistant 消息带回去，thinking 模式下少一条下一次请求就会被判 400
+# （「The `reasoning_content` in the thinking mode must be passed back to the API」）。
+REASONING_FIELD_NAMES = ("reasoning_content", "reasoning")
+
+
+def _extract_reasoning(message_or_delta) -> tuple[str, str]:
+    """从流式 delta / 非流式 message 上取思考内容，返回 (文本, 命中的字段名)。
+
+    位置因平台而异：有的在直接属性（delta.reasoning_content）上，有的被 OpenAI SDK
+    收进 model_extra（部分平台直接用 reasoning）。两个名字、两处都试一遍。
+    """
+    extra = getattr(message_or_delta, "model_extra", None) or {}
+    for name in REASONING_FIELD_NAMES:
+        piece = getattr(message_or_delta, name, None)
+        if not isinstance(piece, str) or not piece:
+            piece = extra.get(name) if isinstance(extra, dict) else None
+        if isinstance(piece, str) and piece:
+            return piece, name
+    return "", ""
+
 
 class RequestHealthMetrics:
     def __init__(self) -> None:
@@ -902,7 +924,13 @@ class BaseTranslate:
         base_try_count=0,
         stream_line_callback=None,
         max_retry_count: Optional[int] = None,
+        reasoning_holder: Optional[dict] = None,
     ):
+        """发一次请求并返回 (正文, token)。
+
+        传了 reasoning_holder 时，把这次响应的思考内容填进去：{"field": 字段名, "text": 思考全文}。
+        多轮对话的调用方要拿它跟着 assistant 消息回传给 provider（见 REASONING_FIELD_NAMES）。
+        """
         if max_retry_count is None:
             max_retry_count = getattr(self, "max_api_retries", None)
         if max_retry_count is not None:
@@ -992,6 +1020,8 @@ class BaseTranslate:
                 response = api_task.result()
                 result = ""
                 lastline = ""
+                reasoning_parts: List[str] = []
+                reasoning_field = ""
                 if is_stream:
                     stream_abort_requested = False
                     stream_line_buffer = ""
@@ -1006,10 +1036,16 @@ class BaseTranslate:
                                 raise JobCancelledError()
                             if not chunk.choices:
                                 continue
-                            if hasattr(chunk.choices[0].delta, "reasoning_content"):
-                                lastline = lastline + (
-                                    chunk.choices[0].delta.reasoning_content or ""
-                                )
+                            reasoning_piece, hit_field = _extract_reasoning(
+                                chunk.choices[0].delta
+                            )
+                            if reasoning_piece:
+                                # 思考内容照旧打进 lastline 供终端打印，同时攒起来交给
+                                # 多轮对话的调用方回传（不回传下一次请求会被判 400）
+                                if not reasoning_field:
+                                    reasoning_field = hit_field
+                                reasoning_parts.append(reasoning_piece)
+                                lastline = lastline + reasoning_piece
                             if hasattr(chunk.choices[0].delta, "content"):
                                 content_piece = chunk.choices[0].delta.content or ""
                                 result = result + content_piece
@@ -1062,11 +1098,20 @@ class BaseTranslate:
                         raise ValueError(
                             "response.choices[0].message.content is empty"
                         )
+                    reasoning_piece, hit_field = _extract_reasoning(
+                        response.choices[0].message
+                    )
+                    if reasoning_piece:
+                        reasoning_field = reasoning_field or hit_field
+                        reasoning_parts.append(reasoning_piece)
                 self._record_request_health(
                     time.monotonic() - request_started,
                     is_rate_limited=False,
                 )
                 getattr(self, "_client_failure_counts", {}).pop(id(client), None)
+                if reasoning_holder is not None:
+                    reasoning_holder["field"] = reasoning_field or REASONING_FIELD_NAMES[0]
+                    reasoning_holder["text"] = "".join(reasoning_parts)
                 return result, token
             except Exception as e:
                 is_rate_limited = isinstance(e, RateLimitError)
