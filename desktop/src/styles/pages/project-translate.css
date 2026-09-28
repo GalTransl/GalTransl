@@ -1044,9 +1044,32 @@
   border-bottom: none;
 }
 
-.file-progress-row__identity {
-  display: grid;
-  gap: 2px;
+/* 状态行只剩状态灯和状态文字了（进度交给文件名那行的圆环，见下面 .file-progress-row__meter）：
+   状态不参与伸缩，别被挤变形 */
+.file-progress-row__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-progress-row__status .file-progress-row__state {
+  flex: none;
+}
+
+/* 圆环＋计数：绑成一个右对齐的整体；环放在最右，这样「186/186」和「86/86」的环都在同一条
+   垂线上（环若在计数左边，计数越长环越往左跑）。圆环占的这 24px 从文件名那边让出来 */
+.file-progress-row__meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  /* 原本是计数自带 8px 右内边距；它现在不是最后一个元素了，留白挪到容器上、由环去贴边 */
+  padding-right: var(--space-2);
+}
+
+/* 不摘掉计数自己那 8px 的话，计数和环之间会多出一截（容器 gap 6px + 计数右内边距 8px） */
+.file-progress-row__meter .file-progress-row__count {
+  padding-right: 0;
 }
 
 .file-progress-row__state {
@@ -1689,6 +1712,19 @@
 
 .file-progress-row {
   padding: var(--space-2) 0;
+}
+
+/* 行排成「左列两行文字 + 右列圆环组」：圆环与进度计数作为一整块在行里垂直居中，
+   不再吊在文件名那一行上（左列仍是文件名 / 状态两行） */
+.file-progress-row--runtime {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.file-progress-row--runtime .file-progress-row__main {
+  flex: 1;
+  min-width: 0;
 }
 
 .file-progress-row__info {

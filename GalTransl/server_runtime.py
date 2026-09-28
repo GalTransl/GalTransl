@@ -119,12 +119,14 @@ class RuntimeState:
     # 所以它自己按「完成项数/耗时」报上来（见 GenDic._progress_speed_lpm）。
     progress_speed_lpm: float | None = None
     # 此刻在跑的请求：{请求编号: _RequestActivity}。「文件进度」那一行据此点小灯
-    # （请求中黄 / 思考中蓝 / 翻译中绿 / 重试中红，光晕的呼吸快慢跟着输出的字/秒走）。
+    # （请求中黄 / 思考中蓝 / 翻译中绿 / 重试中红，光晕的呼吸快慢跟着输出的字/秒走，
+    # 停住的请求标成 stalled，灯放慢但阶段不变）。
     requests: dict[int, "_RequestActivity"] = field(default_factory=dict)
 
 
-# 在出字的请求多久没有新输出就算停住了：灯从蓝/绿退回「请求中」，字/秒也归零。
-# 流式里两个 chunk 之间正常隔不了这么久
+# 在出字的请求多久没有新输出就算「停住」：阶段不变（思考中/翻译中），只把这一行标成
+# stalled、字/秒归零，界面据此把灯放慢。别退回「请求中」——思考型模型两个思考块之间隔上
+# 几秒很正常，一退回那颗灯就在「思考中/请求中」之间反复横跳
 REQUEST_STALL_SECONDS = 3.0
 # 算「字/秒」的滑动窗口：与上面一样长，停住的请求窗口里正好没有样本，速度自然是 0
 _REQUEST_RATE_WINDOW_SECONDS = 3.0
@@ -164,11 +166,17 @@ class _RequestActivity:
             self.last_output_at = now
         self.updated_at = now
 
-    def shown_phase(self, now: float) -> str:
-        """界面上显示的阶段：在出字的请求停住超过 REQUEST_STALL_SECONDS，就退回「请求中」。"""
-        if self.phase in ("thinking", "writing") and now - self.last_output_at > REQUEST_STALL_SECONDS:
-            return "waiting"
-        return self.phase
+    def is_stalled(self, now: float) -> bool:
+        """是不是「停住了」：在出字（thinking / writing）却超过 REQUEST_STALL_SECONDS 没有新输出。
+
+        阶段本身不动，界面拿这个标记把灯放慢就行：思考型模型两个思考块之间隔几秒是常态，
+        退回「请求中」只会让灯在「思考中/请求中」之间来回跳。waiting（还没出首字）、
+        retrying（在退避）本来就不出字，不算停住。
+        """
+        return (
+            self.phase in ("thinking", "writing")
+            and now - self.last_output_at > REQUEST_STALL_SECONDS
+        )
 
     def rate_per_second(self, now: float) -> float:
         cutoff = now - _REQUEST_RATE_WINDOW_SECONDS
@@ -457,28 +465,34 @@ class RuntimeRegistry:
             state.success_timestamps.popleft()
 
     def _activity_snapshot_locked(self, state: RuntimeState, now: float) -> dict[str, dict[str, Any]]:
-        """{显示名: {phase, cps, requests}}，只给此刻有请求在跑的文件；顺手摘掉丢了的请求。
+        """{显示名: {phase, cps, requests, stalled}}，只给此刻有请求在跑的文件；顺手摘掉丢了的请求。
 
         同一个文件可能同时有几个请求（切块并发、GenDic 多线程）：阶段取最往前的那个
         （见 _REQUEST_PHASE_RANK），字/秒加总，requests 是请求数——分开报的话那一行会
-        在几个请求的阶段之间来回跳。
+        在几个请求的阶段之间来回跳。stalled 表示这一行有请求在跑却都没出新字（见
+        _RequestActivity.is_stalled）：阶段照旧，界面把灯放慢。
         """
         snapshot: dict[str, dict[str, Any]] = {}
+        groups: dict[str, list[_RequestActivity]] = {}
         for request_id, activity in list(state.requests.items()):
             if now - activity.updated_at > _REQUEST_ABANDON_SECONDS:
                 del state.requests[request_id]
                 self._request_owners.pop(request_id, None)
                 continue
-            phase = activity.shown_phase(now)
-            entry = snapshot.get(activity.filename)
-            if entry is None:
-                entry = snapshot[activity.filename] = {"phase": phase, "cps": 0.0, "requests": 0}
-            elif _REQUEST_PHASE_RANK[phase] > _REQUEST_PHASE_RANK[entry["phase"]]:
-                entry["phase"] = phase
-            entry["cps"] += activity.rate_per_second(now)
-            entry["requests"] += 1
-        for entry in snapshot.values():
-            entry["cps"] = round(entry["cps"], 1)
+            groups.setdefault(activity.filename, []).append(activity)
+        for filename, activities in groups.items():
+            snapshot[filename] = {
+                # 取最靠前的阶段：几个请求同时在跑时那一行才不会在它们之间来回跳
+                "phase": max(
+                    activities, key=lambda item: _REQUEST_PHASE_RANK[item.phase]
+                ).phase,
+                "cps": round(
+                    sum(activity.rate_per_second(now) for activity in activities), 1
+                ),
+                "requests": len(activities),
+                # 只要还有一个请求在出新字，这一行就没停住
+                "stalled": all(activity.is_stalled(now) for activity in activities),
+            }
         return snapshot
 
 

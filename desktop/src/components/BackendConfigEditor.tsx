@@ -405,7 +405,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
               <option value="false">关闭</option>
             </CustomSelect>
             <span className="field__hint">
-              默认开启。开启时译好的句子边生成边出现在句流里，文件进度的小灯能分出思考中/翻译中、跟着输出速度呼吸；
+              默认开启。开启时译好的句子边生成边出现在「最近译文」里，文件进度的小灯能分出思考中/翻译中、跟着输出速度呼吸；
               关闭后要等整批返回才一次出结果，小灯只显示「请求中」。接口或中转不支持流式时再关。
             </span>
           </label>

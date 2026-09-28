@@ -141,11 +141,11 @@ export function RuntimeSuccessRow({
           >
             {filterFilename ? (
               <button
-                aria-label="筛选句流"
+                aria-label="筛选译文"
                 aria-pressed={isSuccessFileFilterActive}
                 className="runtime-event__file-name-btn"
                 onClick={() => onToggleSuccessFileFilter(filterFilename)}
-                title="筛选句流"
+                title="筛选译文"
                 type="button"
               >
                 {entryFilename}
@@ -176,7 +176,8 @@ export function RuntimeSuccessRow({
   );
 }
 
-/** 小灯各阶段的文案：请求已发出、等第一个字 / 吐思考 / 出正文 / 上一次失败、退避等重试 */
+/** 小灯各阶段的文案：请求已发出、等第一个字 / 吐思考 / 出正文 / 上一次失败、退避等重试。
+ *  停住（stalled）不改阶段文字：思考中还是思考中，只有灯的呼吸慢下来。 */
 const LIVE_PHASE_LABEL: Record<FileActivity['phase'], string> = {
   waiting: '请求中',
   thinking: '思考中',
@@ -198,10 +199,13 @@ const LIVE_PHASE_LABEL: Record<FileActivity['phase'], string> = {
  * 5 字/秒以下（含 0）都按最慢档算：没怎么出字，本来就该慢慢呼吸。
  */
 const LED_SLOWEST_RATE = 0.45; // 请求中/重试中：没在出字，比出字的最慢档（0.5）再慢一点
+const LED_STALLED_RATE = 0.3; // 停住：阶段照旧（思考中/翻译中），灯再放慢一档（1.2/0.3 = 4s 一次呼吸）
 const LED_FASTEST_RATE = 2.8;
 const LED_ANCHOR_CPS = 5; // 到这个速度才脱离最慢档
 
 function ledPulseRate(activity: FileActivity): number {
+  // 停住优先：后端说这一行有请求却没出新字，就只放慢灯，不把阶段退回「请求中」
+  if (activity.stalled) return LED_STALLED_RATE;
   if (activity.phase === 'waiting' || activity.phase === 'retrying') return LED_SLOWEST_RATE;
   const cps = Number.isFinite(activity.cps) && activity.cps > 0 ? activity.cps : 0;
   const rate = Math.min(
@@ -218,6 +222,9 @@ function liveActivityTitle(activity: FileActivity): string {
     parts.push('请求已发出，等模型开始输出');
   } else if (activity.phase === 'retrying') {
     parts.push('上一次请求失败，稍后重试（原因见「错误」）');
+  } else if (activity.stalled) {
+    // 阶段仍是思考中/翻译中，只是这一阵没出新字：说明白，别让人以为卡死了
+    parts.push('这一阵没有新输出，灯已放慢');
   } else {
     const cps = Number.isFinite(activity.cps) && activity.cps > 0 ? activity.cps : 0;
     parts.push(`${cps.toFixed(cps >= 10 ? 0 : 1)} 字/秒`);
@@ -250,6 +257,65 @@ function FileProgressLed({ phase, rate }: { phase: FileActivity['phase']; rate: 
   );
 }
 
+/** 圆环进度的直径与线宽：窄面板里 10 来行排下来，一根横杠太吵，换成一个小环只占 18px。 */
+const RING_SIZE = 18;
+const RING_STROKE = 2;
+const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+/** 环的颜色语义（见 project-translate-v2.css）：没在跑=灰、在跑=蓝、重试中=红、已完成=绿。
+ *  环只表达「翻到哪了」，阶段（思考中/翻译中…）由旁边那颗会呼吸的状态灯表达——环要是也跟
+ *  阶段换色，批与批之间就会在琥珀/蓝/绿之间闪。 */
+type RingTone = 'idle' | 'active' | 'retrying' | 'done';
+
+function ringToneOf(isComplete: boolean, live: FileActivity | null): RingTone {
+  // 有请求在跑就一律按「在跑」画，哪怕计数已经满了：那种时候画成绿环说「已完成」是骗人的
+  if (live) return live.phase === 'retrying' ? 'retrying' : 'active';
+  return isComplete ? 'done' : 'idle';
+}
+
+/**
+ * 「文件进度」里的圆环进度：一圈走完表示这个文件翻完了。
+ *
+ * 弧长直接由百分比算成 stroke-dashoffset（不做动画重算），过渡交给 CSS；0% 时 dashoffset
+ * 等于整个周长、弧不可见，只剩底圈，所以「一点没翻」和「翻完了」一眼能分开。
+ */
+function FileProgressRing({ percent, tone }: { percent: number; tone: RingTone }) {
+  const ratio = Math.max(0, Math.min(100, percent)) / 100;
+  const center = RING_SIZE / 2;
+  return (
+    <svg
+      className={`file-progress-row__ring file-progress-row__ring--${tone}`}
+      width={RING_SIZE}
+      height={RING_SIZE}
+      viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`}
+      aria-hidden="true"
+    >
+      <circle
+        className="file-progress-row__ring-track"
+        cx={center}
+        cy={center}
+        r={RING_RADIUS}
+        fill="none"
+        strokeWidth={RING_STROKE}
+      />
+      <circle
+        className="file-progress-row__ring-arc"
+        cx={center}
+        cy={center}
+        r={RING_RADIUS}
+        fill="none"
+        strokeWidth={RING_STROKE}
+        strokeLinecap="round"
+        strokeDasharray={RING_CIRCUMFERENCE}
+        strokeDashoffset={RING_CIRCUMFERENCE * (1 - ratio)}
+        // 转 -90° 让弧从 12 点开始顺时针长
+        transform={`rotate(-90 ${center} ${center})`}
+      />
+    </svg>
+  );
+}
+
 /** 两批之间（上一批写完缓存、下一批刚要发）会有一小段没有请求在跑，轮询正好落在这里时灯会灭一下、
  *  标签掉回「未完成」。刚才还亮着的话，就沿用上一个状态这么久。 */
 const LIVE_HOLD_MS = 2000;
@@ -268,8 +334,10 @@ export function FileProgressRow({
   const percent = file.total > 0 ? Math.round((file.translated / file.total) * 100) : 0;
   const isComplete = file.translated === file.total && file.total > 0;
   const hasFailed = file.failed > 0;
-  // 这个文件此刻有没有请求在跑（后端按请求登记/注销给的）。任务停了、文件已完成就不再认
-  const active = isRunning && !isComplete;
+  // 这个文件此刻有没有请求在跑（后端按请求登记/注销给的）。任务停了就不再认。
+  // 注意别拿 isComplete 去按它：那个计数是「缓存里已经有多少句有译文」的口径（含上一轮跑出来的、
+  // 也含正在被重翻的），完全可能出现 422/422 却还有请求在跑——那正是这一行最该说「翻译中」的时候。
+  const active = isRunning;
   const lastLiveRef = useRef<{ activity: FileActivity; at: number } | null>(null);
   const now = Date.now();
   if (active && file.activity) lastLiveRef.current = { activity: file.activity, at: now };
@@ -277,48 +345,57 @@ export function FileProgressRow({
   const live = active
     ? file.activity ?? (held && now - held.at <= LIVE_HOLD_MS ? held.activity : null)
     : null;
-  // 状态文案：有请求在跑就是它的阶段（几个请求同时在跑时带上 ×n）；没在跑的未完成文件只是
-  // 「未完成」（在等线程，或者这一轮不会再碰它），一点没翻的在任务里是「排队中」
-  const stateLabel = isComplete
-    ? '已完成'
-    : live
-      ? `${LIVE_PHASE_LABEL[live.phase]}${live.requests > 1 ? ` ×${live.requests}` : ''}`
+  // 状态文案：**有请求在跑就先说它的阶段**（几个请求同时在跑时带上 ×n）——哪怕计数已经满了，
+  // 这一行也还在动，不能报「已完成」；没在跑才轮到「已完成 / 未完成」（在等线程，或者这一轮
+  // 不会再碰它），一点没翻的在任务里是「排队中」
+  const stateLabel = live
+    ? `${LIVE_PHASE_LABEL[live.phase]}${live.requests > 1 ? ` ×${live.requests}` : ''}`
+    : isComplete
+      ? '已完成'
       : percent > 0
         ? '未完成'
         : isRunning ? '排队中' : '未开始';
 
   return (
-    <div className="file-progress-row file-progress-row--runtime">
-      <div className="file-progress-row__info">
-        <div className="file-progress-row__identity">
+    <div
+      className={`file-progress-row file-progress-row--runtime${live ? ' file-progress-row--live' : isComplete ? ' file-progress-row--done' : ''}`}
+    >
+      {/* 左列是两行文字（文件名 / 状态），右列是圆环组：它在整行里垂直居中，不挂在文件名那一行上 */}
+      <div className="file-progress-row__main">
+        <div className="file-progress-row__info">
           <span className="file-progress-row__name-wrap">
             <span className="file-progress-row__name">{file.filename}</span>
             <button
-              aria-label="筛选句流"
+              aria-label="筛选译文"
               aria-pressed={isSuccessFileFilterActive}
               className={`file-progress-row__filter-toggle${isSuccessFileFilterActive ? ' file-progress-row__filter-toggle--active' : ''}`}
               onClick={() => onToggleSuccessFileFilter(file.filename)}
-              title="筛选句流"
+              title="筛选译文"
               type="button"
             >
               <FilterFunnelIcon className="file-progress-row__filter-icon" />
-              <span className="file-progress-row__filter-tooltip">筛选句流</span>
+              <span className="file-progress-row__filter-tooltip">筛选译文</span>
               {isSuccessFileFilterActive ? <span className="file-progress-row__filter-check"><Icon name="check" /></span> : null}
             </button>
           </span>
+        </div>
+        {/* 状态行只剩灯与状态文字：进度收进右边那个圆环了，窄面板里不再铺一根横杠 */}
+        <div className="file-progress-row__status">
           <span className="file-progress-row__state" title={live ? liveActivityTitle(live) : undefined}>
             {live ? <FileProgressLed phase={live.phase} rate={ledPulseRate(live)} /> : null}
             {stateLabel}
           </span>
         </div>
+      </div>
+      {/* 圆环＋计数绑一起：环放最右、贴齐行的右边缘，所以「186/186」和「86/86」的环都在同一条
+          垂线上；计数在它左边，长短不一时只影响自己的左边缘 */}
+      <span className="file-progress-row__meter">
         <span className="file-progress-row__count">
           {file.translated}/{file.total}
           {hasFailed ? <span className="file-progress-row__failed"> · {file.failed}失败</span> : null}
         </span>
-      </div>
-      <div className="progress-bar progress-bar--small">
-        <div className="progress-bar__fill" style={{ width: `${percent}%` }} />
-      </div>
+        <FileProgressRing percent={percent} tone={ringToneOf(isComplete, live)} />
+      </span>
     </div>
   );
 }

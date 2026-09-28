@@ -1,10 +1,11 @@
 """「文件进度」那颗小灯的数据源：某个文件此刻有没有请求在跑、跑到哪个阶段、出字多快。
 
 一次 ask_chatbot 进门登记、出门注销（BaseTranslate._FileRequestProgress →
-begin/note/end_runtime_request → RuntimeRegistry），快照里按文件合并成
-{显示名: {phase, cps, requests}}：
+begin/note/end_request → RuntimeRegistry），快照里按文件合并成
+{显示名: {phase, cps, requests, stalled}}：
 - 同一个文件同时几个请求（切块并发、GenDic 多线程）合成一行，不在几个阶段之间来回跳；
-- 在出字的请求停住超过 REQUEST_STALL_SECONDS 就退回「请求中」；
+- 在出字的请求停住超过 REQUEST_STALL_SECONDS 只标记 stalled（阶段不变，界面把灯放慢）——
+  退回「请求中」会让那颗灯在「思考中/请求中」之间反复横跳；
 - 注销了就不再给——灯不会挂在一个已经不在跑的文件上。
 """
 
@@ -14,6 +15,7 @@ import tempfile
 import threading
 import unittest
 import urllib.request
+from collections import deque
 from http.server import ThreadingHTTPServer
 
 from GalTransl import INPUT_FOLDERNAME
@@ -27,7 +29,7 @@ from GalTransl.server_runtime import (
 
 
 class RequestActivityTests(unittest.TestCase):
-    """_RequestActivity 本身：速度按滑动窗口算、换阶段重起窗、停住退回请求中。"""
+    """_RequestActivity 本身：速度按滑动窗口算、换阶段重起窗、停住只加标记不换阶段。"""
 
     @staticmethod
     def _activity(now: float = 100.0) -> _RequestActivity:
@@ -56,19 +58,22 @@ class RequestActivityTests(unittest.TestCase):
         # 10s 前那一笔早出了 3s 窗口；这一阶段开始得早，分母就是整个窗口
         self.assertEqual(activity.rate_per_second(110.0), 10.0)
 
-    def test_stalled_output_falls_back_to_waiting(self):
+    def test_stalled_output_keeps_phase_and_only_raises_the_flag(self):
         activity = self._activity()
         activity.note("writing", 5, 100.0)
-        self.assertEqual(activity.shown_phase(100.0 + REQUEST_STALL_SECONDS), "writing")
+        self.assertFalse(activity.is_stalled(100.0 + REQUEST_STALL_SECONDS))
         stalled = 100.0 + REQUEST_STALL_SECONDS + 0.1
-        self.assertEqual(activity.shown_phase(stalled), "waiting")
+        self.assertTrue(activity.is_stalled(stalled))
+        # 停住不再退回「请求中」：阶段照旧，界面拿 stalled 把灯放慢就行
+        self.assertEqual(activity.phase, "writing")
         self.assertEqual(activity.rate_per_second(stalled), 0.0)
 
     def test_waiting_and_retrying_never_count_as_stalled(self):
         activity = self._activity()
-        self.assertEqual(activity.shown_phase(1000.0), "waiting")
+        # 还没出首字 / 在退避等重试：本来就不出字，不算停住（灯本来就慢）
+        self.assertFalse(activity.is_stalled(1000.0))
         activity.note("retrying", 0, 100.0)
-        self.assertEqual(activity.shown_phase(1000.0), "retrying")
+        self.assertFalse(activity.is_stalled(1000.0))
 
 
 class RequestRegistryTests(unittest.TestCase):
@@ -95,7 +100,8 @@ class RequestRegistryTests(unittest.TestCase):
         request_id = self.registry.begin_request(self.project_dir, filename="sc_0.txt.json")
         # 刚发出去、还没出字：请求中
         self.assertEqual(
-            self._activity(), {"sc_0.txt.json": {"phase": "waiting", "cps": 0.0, "requests": 1}}
+            self._activity(),
+            {"sc_0.txt.json": {"phase": "waiting", "cps": 0.0, "requests": 1, "stalled": False}},
         )
         self.registry.note_request(request_id, phase="thinking", chars=10)
         self.assertEqual(self._activity()["sc_0.txt.json"]["phase"], "thinking")
@@ -116,10 +122,34 @@ class RequestRegistryTests(unittest.TestCase):
         self.registry.note_request(second, phase="writing", chars=20)
         row = self._activity()["big.json"]
         # 有一个在出正文就是「翻译中」，字/秒加总（各自刚起步，都按 0.5s 算），两个请求
-        self.assertEqual(row, {"phase": "writing", "cps": 100.0, "requests": 2})
+        self.assertEqual(row, {"phase": "writing", "cps": 100.0, "requests": 2, "stalled": False})
         self.registry.end_request(second)
         self.assertEqual(self._activity()["big.json"]["phase"], "thinking")
         self.assertEqual(self._activity()["big.json"]["requests"], 1)
+
+    def test_stalled_request_keeps_its_phase_on_the_row(self):
+        request_id = self.registry.begin_request(self.project_dir, filename="sc_0.txt.json")
+        self.registry.note_request(request_id, phase="thinking", chars=10)
+        activity = self.registry.ensure_project(self.project_dir).requests[request_id]
+        # 把这最后一次出字连同那几笔速度样本一起推远：超过 REQUEST_STALL_SECONDS 没动静
+        shift = REQUEST_STALL_SECONDS + 1
+        activity.last_output_at -= shift
+        activity.samples = deque((ts - shift, chars) for ts, chars in activity.samples)
+        row = self._activity()["sc_0.txt.json"]
+        # 不回退成 waiting，只多一个 stalled：界面据此把灯放慢，文字仍是「思考中」
+        self.assertEqual(row["phase"], "thinking")
+        self.assertTrue(row["stalled"])
+        self.assertEqual(row["cps"], 0.0)
+
+    def test_row_is_not_stalled_while_any_request_is_still_outputting(self):
+        first = self.registry.begin_request(self.project_dir, filename="big.json_0")
+        second = self.registry.begin_request(self.project_dir, filename="big.json_1")
+        self.registry.note_request(first, phase="thinking", chars=10)
+        self.registry.note_request(second, phase="thinking", chars=10)
+        state = self.registry.ensure_project(self.project_dir)
+        # 只让其中一个停住：还有一个在出新字，这一行就不算停住
+        state.requests[first].last_output_at -= REQUEST_STALL_SECONDS + 1
+        self.assertFalse(self._activity()["big.json"]["stalled"])
 
     def test_retrying_only_when_every_request_is_backing_off(self):
         first = self.registry.begin_request(self.project_dir, filename="big.json_0")
@@ -197,6 +227,7 @@ class RuntimeActivityPayloadTests(unittest.TestCase):
             self.assertEqual(activity["phase"], "thinking")
             self.assertEqual(activity["requests"], 1)
             self.assertGreater(activity["cps"], 0)
+            self.assertFalse(activity["stalled"])
             # 没有请求在跑的行不带这个字段
             self.assertNotIn("activity", rows["other.json"])
         finally:

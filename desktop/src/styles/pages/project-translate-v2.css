@@ -1151,22 +1151,167 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   overflow-y: auto;
-  padding-right: 4px;
+  /* 上下留 2px：卡片 hover 时的阴影别被滚动容器裁掉 */
+  padding: 2px 4px 2px 0;
 }
 
+/* 每个文件一张浅色小卡，与「重翻词条」列表、顶部驾驶舱同一套语言：淡蓝描边、白→浅蓝渐变、
+   hover 时描边加深。有请求在跑的行在左缘亮一条蓝色细条（与驾驶舱进度条同色），
+   已完成的行整体退一档，让视线落在还在动的行上。 */
 .ptv2-filelist .file-progress-row {
-  padding: 4px 0;
-  border-bottom: 1px solid rgba(191, 208, 226, 0.5);
+  position: relative;
+  flex-shrink: 0;
+  padding: 7px 4px 7px 10px;
+  border: 1px solid rgba(191, 208, 226, 0.55);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 251, 255, 0.8));
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 }
 
-.ptv2-filelist .file-progress-row:last-child {
-  border-bottom: none;
+.ptv2-filelist .file-progress-row:hover {
+  border-color: rgba(47, 111, 235, 0.32);
+  background: linear-gradient(180deg, #ffffff, rgba(238, 244, 255, 0.92));
+  box-shadow: 0 4px 12px -8px rgba(47, 111, 235, 0.35);
 }
 
-.ptv2-filelist .progress-bar {
-  height: 5px;
+.ptv2-filelist .file-progress-row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(180deg, #2f6feb, #38bdf8);
+  opacity: 0;
+  transform: scaleY(0.4);
+  transition: opacity 240ms ease, transform 240ms cubic-bezier(0.22, 0.85, 0.35, 1);
+}
+
+.ptv2-filelist .file-progress-row--live {
+  border-color: rgba(47, 111, 235, 0.3);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(47, 111, 235, 0.08), transparent 60%),
+    linear-gradient(180deg, #ffffff, rgba(244, 248, 255, 0.95));
+}
+
+.ptv2-filelist .file-progress-row--live::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+.ptv2-filelist .file-progress-row--done .file-progress-row__name {
+  color: var(--color-text-muted);
+}
+
+.ptv2-filelist .file-progress-row__info {
+  margin-bottom: 2px;
+}
+
+.ptv2-filelist .file-progress-row__name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 状态文字对齐驾驶舱的小标签：10px 粗体大字距 */
+.ptv2-filelist .file-progress-row__state {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.ptv2-filelist .file-progress-row--live .file-progress-row__state {
+  color: var(--color-primary);
+}
+
+/* 计数与驾驶舱大数字同一套等宽数字 */
+.ptv2-filelist .file-progress-row__count {
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ptv2-filelist .file-progress-row__meter {
+  padding-right: 6px;
+}
+
+/* 筛选按钮：原样式是深色底＋青色，放在浅色页面里很突兀；改成与标题旁文件夹按钮一致的浅蓝幽灵按钮 */
+.ptv2-filelist .file-progress-row__filter-toggle {
+  border-color: rgba(47, 111, 235, 0.22);
+  background: rgba(255, 255, 255, 0.8);
+  color: rgba(47, 111, 235, 0.7);
+}
+
+.ptv2-filelist .file-progress-row__filter-toggle:hover,
+.ptv2-filelist .file-progress-row__filter-toggle:focus-visible {
+  border-color: rgba(47, 111, 235, 0.42);
+  background: rgba(47, 111, 235, 0.12);
+  color: var(--color-primary);
+}
+
+.ptv2-filelist .file-progress-row__filter-toggle--active {
+  border-color: rgba(47, 111, 235, 0.5);
+  background: rgba(47, 111, 235, 0.14);
+  color: var(--color-primary);
+}
+
+.ptv2-filelist .file-progress-row__filter-check {
+  border-color: #ffffff;
+  background: var(--color-primary);
+  color: #ffffff;
+}
+
+.ptv2-filelist .file-progress-row__filter-tooltip {
+  background: rgba(255, 255, 255, 0.98);
+  border-color: rgba(47, 111, 235, 0.22);
+  color: var(--color-text);
+  box-shadow: 0 8px 20px -10px rgba(47, 111, 235, 0.35);
+}
+
+:root[data-theme='dark'] .ptv2-filelist .file-progress-row__filter-tooltip {
+  background: rgba(15, 23, 42, 0.96);
+  border-color: rgba(111, 160, 255, 0.28);
+  color: #e2e8f0;
+}
+
+:root[data-theme='dark'] .ptv2-filelist .file-progress-row {
+  border-color: rgba(65, 83, 111, 0.68);
+  background: rgba(23, 33, 48, 0.8);
+}
+
+:root[data-theme='dark'] .ptv2-filelist .file-progress-row:hover {
+  border-color: rgba(111, 160, 255, 0.45);
+  background: rgba(29, 43, 63, 0.9);
+  box-shadow: none;
+}
+
+:root[data-theme='dark'] .ptv2-filelist .file-progress-row--live {
+  border-color: rgba(111, 160, 255, 0.4);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(67, 129, 255, 0.16), transparent 60%),
+    rgba(26, 38, 56, 0.9);
+}
+
+:root[data-theme='dark'] .ptv2-filelist .file-progress-row__filter-toggle {
+  border-color: rgba(111, 160, 255, 0.34);
+  background: rgba(28, 40, 58, 0.78);
+  color: #8fb6ff;
+}
+
+:root[data-theme='dark'] .ptv2-filelist .file-progress-row__filter-toggle:hover,
+:root[data-theme='dark'] .ptv2-filelist .file-progress-row__filter-toggle:focus-visible,
+:root[data-theme='dark'] .ptv2-filelist .file-progress-row__filter-toggle--active {
+  border-color: rgba(111, 160, 255, 0.6);
+  background: rgba(111, 160, 255, 0.18);
+  color: #a8c3ff;
+}
+
+:root[data-theme='dark'] .ptv2-filelist .file-progress-row__filter-check {
+  border-color: rgba(18, 27, 40, 0.96);
 }
 
 /* ── 「文件进度」里的状态灯：这一行此刻有请求在跑，跟在状态文字前面 ──
@@ -1180,11 +1325,13 @@
    要顺手把光晕的 alpha 反向补一下，否则一改整盏灯的动静就没了。
    颜色不用 --color-*-soft：那几个是给底色用的浅色，浅色主题下光晕几乎看不见。
    与本页其它动效一样不跟随系统的「减少动态效果」（见 lib/motion.ts）。 */
+
+/* 状态灯与状态文字。以前这里钉了 5.5em 最小宽度，是为了灯一亮一灭时别把右边那条横杠
+   推来推去；横杠已经换成文件名行的圆环，不再有「谁被推开」的问题，就不钉了 */
 .file-progress-row__state {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  justify-self: start;
 }
 
 .file-progress-row__led {
@@ -1200,6 +1347,7 @@
   transition: background-color 240ms ease;
 }
 
+/* 状态灯的阶段色：请求中=琥珀（基础色）／思考中=蓝／翻译中=绿／重试中=红 */
 .file-progress-row__led--thinking {
   --led-rgb: 59 130 246;
 }
@@ -1210,6 +1358,40 @@
 
 .file-progress-row__led--retrying {
   --led-rgb: 239 68 68;
+}
+
+/* ── 圆环进度：这一行文件的完成度，跟在计数后面（代替原来铺满一行的横杠）──
+   环走的是「进度」语义，不跟阶段换色：在跑=蓝（请求中/思考中/翻译中都算「正在翻这一行」）、
+   重试中=红、已完成=绿、没在跑=灰。阶段语义交给旁边那颗会呼吸的状态灯；环要是也跟阶段换色，
+   批与批之间就会在琥珀/蓝/绿之间闪。
+   ⚠️ 修饰类必须写在基础类**之后**：两者特异性相同（都是单个类），写在前面会被基础类统统盖掉。
+   已完成压暗一档：一屏里完成的行一大片，不压暗整列都在发光，反而看不出哪一行在跑。 */
+.file-progress-row__ring {
+  --led-rgb: 148 163 184;
+  flex-shrink: 0;
+}
+
+.file-progress-row__ring--active {
+  --led-rgb: 59 130 246;
+}
+
+.file-progress-row__ring--retrying {
+  --led-rgb: 239 68 68;
+}
+
+.file-progress-row__ring--done {
+  --led-rgb: 34 197 94;
+  opacity: 0.6;
+}
+
+.file-progress-row__ring-track {
+  stroke: rgba(148, 163, 184, 0.3);
+}
+
+.file-progress-row__ring-arc {
+  stroke: rgb(var(--led-rgb));
+  /* 过渡弧长与颜色：每秒轮询的百分比变化跟得上，也不跳 */
+  transition: stroke-dashoffset 320ms ease, stroke 240ms ease;
 }
 
 @keyframes file-progress-led-halo {

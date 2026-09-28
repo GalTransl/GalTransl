@@ -118,7 +118,8 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const seenSuccessIdsRef = useRef<Set<string>>(new Set());
   const successListRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
-  const [rightTab, setRightTab] = useState<'errors' | 'files' | 'retransl'>('errors');
+  // 默认落在「文件进度」：任务在跑的时候最常看的是它，错误只在出问题时才关心
+  const [rightTab, setRightTab] = useState<'errors' | 'files' | 'retransl'>('files');
   const [retranslKeys, setRetranslKeys] = useState<RetranslListItem[]>([]);
   const [continuousRetranslEnabled, setContinuousRetranslEnabled] = useState(false);
   const [launchPhase, setLaunchPhase] = useState<'idle' | 'charging' | 'blasting'>('idle');
@@ -792,7 +793,9 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
           </div>
           <div className="ptv2-cockpit__statusline">
             <StatusBadge label={statusLabel} tone={statusTone} celebrate={justCompleted} />
-            {runtimeStageDetail ? (
+            {/* 阶段内进度只给 GenDic（「人名 3/10」「审校 0/8」）：普通翻译的 current_file 是
+                「正在翻哪个文件」，最近译文里已经带了文件名，再挂一颗胶囊只是噪音 */}
+            {isGendicJob && runtimeStageDetail ? (
               <span className="ptv2-cockpit__stage-detail" title={`${runtimeStage}${runtimeStage ? ' · ' : ''}${runtimeStageDetail}`}>
                 {runtimeStageDetail}
               </span>
@@ -930,7 +933,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
       {/* Main area: success stream (wide) + recent errors (narrower) */}
       <div className="ptv2-main">
         <div className="ptv2-main__success">
-          <Panel title="成功句流">
+          <Panel title="最近译文">
             {hasSelectedSuccessFileFilter ? (
               <div className="runtime-success-filter-hint" role="status">
                 <span className="runtime-success-filter-hint__text" title={selectedSuccessFiles.join('\n')}>
@@ -959,7 +962,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                 ))}
               </div>
             ) : (
-              <EmptyState title="还没有成功句流" description="任务开始输出后，最近成功的句子会滚动显示在这里。" />
+              <EmptyState title="还没有译文" description="任务开始输出后，最近译好的句子会滚动显示在这里。" />
             )}
           </Panel>
         </div>
@@ -971,18 +974,6 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={rightTab === 'errors'}
-                  className={`ptv2-tab${rightTab === 'errors' ? ' ptv2-tab--active' : ''}`}
-                  onClick={() => setRightTab('errors')}
-                >
-                  <span className="ptv2-tab__label">最近错误</span>
-                  {recentErrors.length > 0 ? (
-                    <span className="ptv2-tab__badge ptv2-tab__badge--danger">{recentErrors.length}</span>
-                  ) : null}
-                </button>
-                <button
-                  type="button"
-                  role="tab"
                   aria-selected={rightTab === 'files'}
                   className={`ptv2-tab${rightTab === 'files' ? ' ptv2-tab--active' : ''}`}
                   onClick={() => setRightTab('files')}
@@ -990,6 +981,18 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                   <span className="ptv2-tab__label">文件进度</span>
                   {unfinishedRuntimeFilesCount > 0 ? (
                     <span className="ptv2-tab__badge" title="未完成的文件数量">{unfinishedRuntimeFilesCount}</span>
+                  ) : null}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={rightTab === 'errors'}
+                  className={`ptv2-tab${rightTab === 'errors' ? ' ptv2-tab--active' : ''}`}
+                  onClick={() => setRightTab('errors')}
+                >
+                  <span className="ptv2-tab__label">最近错误</span>
+                  {recentErrors.length > 0 ? (
+                    <span className="ptv2-tab__badge ptv2-tab__badge--danger">{recentErrors.length}</span>
                   ) : null}
                 </button>
                 <button

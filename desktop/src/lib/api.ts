@@ -190,6 +190,12 @@ export type FileActivity = {
   phase: 'waiting' | 'thinking' | 'writing' | 'retrying';
   cps: number;
   requests: number;
+  /**
+   * 有请求在跑、但超过 REQUEST_STALL_SECONDS（后端 3s）没有新输出。
+   * phase 不回退——还是「思考中/翻译中」，只是界面把灯放慢；思考型模型两个思考块之间
+   * 隔几秒是常态，回退会让那颗灯在「思考中/请求中」之间反复横跳。
+   */
+  stalled: boolean;
 };
 
 export type ProjectProgressResponse = {
