@@ -185,15 +185,29 @@ const LIVE_PHASE_LABEL: Record<FileActivity['phase'], string> = {
 };
 
 /**
- * 小灯光晕的呼吸速度：CSS 里一个周期 1.2s 的倍数，跟着输出的字/秒走。
- * 按对数取——实际输出从每秒几个字到几百字都有，线性映射要么全挤在最快一档、要么看不出差别：
- * 出字时 0 字/秒 0.6× → 30 字/秒 1.3× → 150 字/秒 2× → 封顶 2.2×（约 0.55s 一个周期，再快就成频闪了）；
- * 请求中/重试中没有字，慢慢呼吸（0.5×，2.4s 一个周期）。
+ * 小灯的呼吸速度：CSS 里一个周期 1.2s 的倍数（倍率越大闪得越快）。
+ *
+ * 光晕幅度只决定「看不看得见」，快慢感知靠的是周期差，所以映射得让**常用速度区间**拉得开——
+ * 一秒几十个字才是常态。之前用 0.6×+0.35×log2(1+cps/10)，10~80 字/秒的周期只从 1.26s 变到
+ * 0.71s（1.8 倍），再叠上那点几乎看不见的光晕，看上去就是个不动的点。
+ *
+ * 现在取「倍率 ∝ 字/秒的开方」：0.5×√(cps/5)，封顶 2.8×，10~80 字/秒的周期差拉到 2.9 倍：
+ *   5 字/秒 → 0.50×（2.40s）    10 字/秒 → 0.70×（1.71s）   20 字/秒 → 1.00×（1.20s）
+ *   40 字/秒 → 1.40×（0.86s）   80 字/秒 → 2.00×（0.60s）   120 字/秒 → 2.45×（0.49s）
+ *   ≈157 字/秒往上封顶 2.8×（0.43s）——再快就成频闪了
+ * 5 字/秒以下（含 0）都按最慢档算：没怎么出字，本来就该慢慢呼吸。
  */
+const LED_SLOWEST_RATE = 0.45; // 请求中/重试中：没在出字，比出字的最慢档（0.5）再慢一点
+const LED_FASTEST_RATE = 2.8;
+const LED_ANCHOR_CPS = 5; // 到这个速度才脱离最慢档
+
 function ledPulseRate(activity: FileActivity): number {
-  if (activity.phase === 'waiting' || activity.phase === 'retrying') return 0.5;
+  if (activity.phase === 'waiting' || activity.phase === 'retrying') return LED_SLOWEST_RATE;
   const cps = Number.isFinite(activity.cps) && activity.cps > 0 ? activity.cps : 0;
-  const rate = Math.min(2.2, 0.6 + 0.35 * Math.log2(1 + cps / 10));
+  const rate = Math.min(
+    LED_FASTEST_RATE,
+    0.5 * Math.sqrt(Math.max(cps, LED_ANCHOR_CPS) / LED_ANCHOR_CPS),
+  );
   // 取到 0.05 一档：字/秒每次轮询都在小幅抖动，没必要次次去改动画
   return Math.round(rate * 20) / 20;
 }

@@ -1170,9 +1170,11 @@
 }
 
 /* ── 「文件进度」里的状态灯：这一行此刻有请求在跑，跟在状态文字前面 ──
-   请求中=琥珀、思考中=蓝、翻译中=绿、重试中=红。做法跟驾驶舱那颗「运行中」的点一样：点本身常亮
-   （颜色随时认得清，换阶段时淡过去），只有外圈光晕在呼吸；呼吸快慢跟着输出速度，由脚本经
-   Web Animations 的 playbackRate 调（改 animation-duration 会让正在跑的动画跳一下）。
+   请求中=琥珀、思考中=蓝、翻译中=绿、重试中=红。以「亮度＋光晕」一起呼吸来表现速度：点最亮时
+   满色＋一圈收拢的光晕，最暗时压到 0.4（颜色仍认得出是哪个阶段）＋光晕铺开变淡；呼吸快慢由脚本
+   经 Web Animations 的 playbackRate 调（改 animation-duration 会让正在跑的动画跳一下）。
+   幅度必须给足：之前只有 1px→4px、峰值透明度 0.06，白底上等于没有，点又是常亮的，
+   整盏灯看着就是个静止的圆点，快慢完全看不出来。
    颜色不用 --color-*-soft：那几个是给底色用的浅色，浅色主题下光晕几乎看不见。
    与本页其它动效一样不跟随系统的「减少动态效果」（见 lib/motion.ts）。 */
 .file-progress-row__state {
@@ -1187,7 +1189,7 @@
   width: 7px;
   height: 7px;
   /* 给光晕留位置：文件列表是滚动容器、左边没有内边距，贴边的光晕会被裁掉一半 */
-  margin-left: 4px;
+  margin-left: 6px;
   border-radius: 50%;
   flex-shrink: 0;
   background: rgb(var(--led-rgb));
@@ -1210,10 +1212,12 @@
 @keyframes file-progress-led-halo {
   0%,
   100% {
-    box-shadow: 0 0 0 1px rgb(var(--led-rgb) / 0.3);
+    opacity: 1;
+    box-shadow: 0 0 0 1.5px rgb(var(--led-rgb) / 0.5);
   }
   50% {
-    box-shadow: 0 0 0 4px rgb(var(--led-rgb) / 0.06);
+    opacity: 0.4;
+    box-shadow: 0 0 0 5px rgb(var(--led-rgb) / 0.12);
   }
 }
 
