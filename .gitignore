@@ -18,6 +18,8 @@ desktop/src-tauri/target/
 app_settings.json
 # Agent 会话持久化运行时数据（一个项目一个 base64url 子目录）
 /agent_sessions/
+# 本地 Agent 工作数据（记忆、技能等），跟 agent_sessions 一样不入库
+/.workbuddy/
 /release/
 /.venv-build/
 /.venv/
