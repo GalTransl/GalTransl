@@ -121,11 +121,13 @@ class ProjectGuidelineApiTests(unittest.TestCase):
         self.assertEqual(self._get()["content"], "原有")  # 文件一个字都没变
 
     def test_dry_run_still_validates(self) -> None:
-        """校验照走：dry_run 下 replace 没命中一样 400，也不会留下文件。"""
+        """校验照走：dry_run 下 replace 照样 400，也不会把规范文件建出来。"""
         error = self._put_expect_400(
             {"mode": "replace", "old_text": "不存在", "new_text": "x", "dry_run": True}
         )
-        self.assertIn("没有找到", error)
+        # 文件还不存在时 replace 走的是「还不存在，请先用 overwrite 创建」这条，
+        # 不是「old_text 没有找到」（那是文件已存在、没命中时的话）
+        self.assertIn("还不存在", error)
         self.assertFalse(self._get()["exists"])
 
 
