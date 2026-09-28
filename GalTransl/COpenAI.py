@@ -96,12 +96,12 @@ class COpenAITokenPool:
         self.force_eng_name = config.getBackendConfigSection(section_name).get(
             "rewriteModelName", ""
         )
-        # 流式请求默认开启。工作台的「文件进度」小灯、实时速度、预计剩余都是从流式输出里
-        # 攒出来的（见 Backend/BaseTranslate._report_stream_progress），非流式请求一次性返回，
-        # 这些实时信息就没了，界面只能显示按缓存算的静态进度。这里以前默认 False，而前端那份
-        # 后端配置档（整段替换 backendSpecific，见 Service.py）默认不写 stream，于是新建的配置
-        # 全是非流式——工作台永远停在「处理中」。接口/中转不支持流式时，在单个令牌上写
-        # stream: false 覆盖即可。
+        # 流式请求默认开启。流式时译好的句子边生成边进句流、坏行当场中止省 token，「文件进度」的
+        # 小灯也才分得出思考中/翻译中并跟着输出速度呼吸（见 Backend/BaseTranslate._FileRequestProgress）；
+        # 非流式要等整批返回才一次出结果，小灯从头到尾只有「请求中」（实时速度、预计剩余按成功句数算，
+        # 两种都有）。这里以前默认 False，而前端那份后端配置档（整段替换 backendSpecific，见
+        # Service.py）默认不写 stream，于是新建的配置全是非流式。接口/中转不支持流式时，
+        # 在单个令牌上写 stream: false 覆盖即可。
         self.stream = config.getBackendConfigSection(section_name).get("stream", True)
         self.timeout = config.getBackendConfigSection(section_name).get(
             "apiTimeout", 300

@@ -57,10 +57,12 @@ from GalTransl.server_runtime import (
     _parse_runtime_job_started_at_ns,
     _safe_project_dir,
     _trim_preview,
+    begin_runtime_request,
     decode_project_dir,
     encode_project_dir,
+    end_runtime_request,
+    note_runtime_request,
     record_runtime_error,
-    record_runtime_stream,
     record_runtime_success,
     reset_runtime_project,
     update_runtime_status,
@@ -2441,7 +2443,7 @@ def build_handler(registry: JobRegistry):
                 runtime = RUNTIME_REGISTRY.get_runtime_snapshot(project_dir)
                 file_totals = runtime.get("file_totals", {})
                 cache_file_display_map = runtime.get("cache_file_display_map", {})
-                streams = runtime.get("streams", {})
+                activity = runtime.get("activity", {})
                 config_file_name = "config.yaml"
                 job = registry.get_project_job(project_dir)
                 if job:
@@ -2499,11 +2501,12 @@ def build_handler(registry: JobRegistry):
                     "recent_errors": runtime["recent_errors"],
                     "recent_successes": runtime["recent_successes"],
                     "retransl_stats": progress_payload["retransl_stats"],
-                    # files 是缓存算出来的静态进度，这里给「正在流式输出」的那几行补上实时状态
-                    # （{phase: thinking|writing, cps: 字/秒}），界面拿它点那颗小灯
+                    # files 是缓存算出来的静态进度，这里给此刻有请求在跑的那几行补上实时状态
+                    # （{phase: waiting|thinking|writing|retrying, cps: 字/秒, requests: 请求数}），
+                    # 界面拿它点那颗小灯
                     "files": [
-                        {**row, "stream": streams[row["filename"]]}
-                        if row.get("filename") in streams
+                        {**row, "activity": activity[row["filename"]]}
+                        if row.get("filename") in activity
                         else row
                         for row in progress_payload["files"]
                     ],

@@ -3,6 +3,7 @@ import { Icon } from '../components/Icon';
 import { speakerStyle } from '../lib/speaker';
 import { resolveSpeakerName } from '../lib/useNameDict';
 import type {
+  FileActivity,
   FileProgress,
   Job,
   ProjectRuntimeErrorEntry,
@@ -175,19 +176,69 @@ export function RuntimeSuccessRow({
   );
 }
 
+/** 小灯各阶段的文案：请求已发出、等第一个字 / 吐思考 / 出正文 / 上一次失败、退避等重试 */
+const LIVE_PHASE_LABEL: Record<FileActivity['phase'], string> = {
+  waiting: '请求中',
+  thinking: '思考中',
+  writing: '翻译中',
+  retrying: '重试中',
+};
+
 /**
- * 「文件进度」那颗小灯的呼吸周期：输出越快闪得越快，但给了下限，别变成频闪。
- * 0 字/秒 → 1.4s（慢慢呼吸），40 字/秒 → 0.45s（明显在跑）。
+ * 小灯光晕的呼吸速度：CSS 里一个周期 1.2s 的倍数，跟着输出的字/秒走。
+ * 按对数取——实际输出从每秒几个字到几百字都有，线性映射要么全挤在最快一档、要么看不出差别：
+ * 出字时 0 字/秒 0.6× → 30 字/秒 1.3× → 150 字/秒 2× → 封顶 2.2×（约 0.55s 一个周期，再快就成频闪了）；
+ * 请求中/重试中没有字，慢慢呼吸（0.5×，2.4s 一个周期）。
  */
-function ledPulseDurationMs(cps: number): number {
-  const speed = Number.isFinite(cps) && cps > 0 ? cps : 0;
-  return Math.round(Math.max(450, Math.min(1400, 1400 - speed * 24)));
+function ledPulseRate(activity: FileActivity): number {
+  if (activity.phase === 'waiting' || activity.phase === 'retrying') return 0.5;
+  const cps = Number.isFinite(activity.cps) && activity.cps > 0 ? activity.cps : 0;
+  const rate = Math.min(2.2, 0.6 + 0.35 * Math.log2(1 + cps / 10));
+  // 取到 0.05 一档：字/秒每次轮询都在小幅抖动，没必要次次去改动画
+  return Math.round(rate * 20) / 20;
 }
 
-/** 流式状态断了之后还认多久。两批之间总有一段没有字出来的空隙（模型收尾、解析、写缓存、
- *  下一次请求排队），要是立刻掉回「请求中」，标签就在 思考中↔请求中 之间来回翻。
- *  沿用期间字/秒按 0 算，灯的呼吸会慢下来，能看出「这一行在等模型，而不是在疯狂输出」。 */
-const STREAM_HOLD_MS = 2000;
+function liveActivityTitle(activity: FileActivity): string {
+  const parts = [LIVE_PHASE_LABEL[activity.phase]];
+  if (activity.phase === 'waiting') {
+    parts.push('请求已发出，等模型开始输出');
+  } else if (activity.phase === 'retrying') {
+    parts.push('上一次请求失败，稍后重试（原因见「错误」）');
+  } else {
+    const cps = Number.isFinite(activity.cps) && activity.cps > 0 ? activity.cps : 0;
+    parts.push(`${cps.toFixed(cps >= 10 ? 0 : 1)} 字/秒`);
+  }
+  if (activity.requests > 1) parts.push(`${activity.requests} 个请求同时在跑`);
+  return parts.join(' · ');
+}
+
+/**
+ * 「文件进度」里的状态灯：点常亮、外圈光晕呼吸（样式见 project-translate-v2.css）。
+ * 呼吸快慢用 Web Animations 的 playbackRate 调，而不是改 animation-duration——后者会让正在跑的
+ * 动画按新时长重算进度，每次轮询（1s）灯都会跳一下；playbackRate 从当前进度接着走，只是变快变慢。
+ */
+function FileProgressLed({ phase, rate }: { phase: FileActivity['phase']; rate: number }) {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof el.getAnimations !== 'function') return;
+    for (const animation of el.getAnimations()) {
+      if (typeof animation.updatePlaybackRate === 'function') animation.updatePlaybackRate(rate);
+      else animation.playbackRate = rate;
+    }
+  }, [phase, rate]);
+  return (
+    <span
+      ref={ref}
+      className={`file-progress-row__led file-progress-row__led--${phase}`}
+      aria-hidden="true"
+    />
+  );
+}
+
+/** 两批之间（上一批写完缓存、下一批刚要发）会有一小段没有请求在跑，轮询正好落在这里时灯会灭一下、
+ *  标签掉回「未完成」。刚才还亮着的话，就沿用上一个状态这么久。 */
+const LIVE_HOLD_MS = 2000;
 
 export function FileProgressRow({
   file,
@@ -195,7 +246,7 @@ export function FileProgressRow({
   isSuccessFileFilterActive,
   onToggleSuccessFileFilter }: {
   file: FileProgress;
-  /** 任务是否还在跑（pending/running）：没在跑就别再说「处理中」 */
+  /** 任务是否还在跑（pending/running）：没在跑就不再亮灯、也不说「排队中」 */
   isRunning: boolean;
   isSuccessFileFilterActive: boolean;
   onToggleSuccessFileFilter: (filename: string) => void;
@@ -203,51 +254,30 @@ export function FileProgressRow({
   const percent = file.total > 0 ? Math.round((file.translated / file.total) * 100) : 0;
   const isComplete = file.translated === file.total && file.total > 0;
   const hasFailed = file.failed > 0;
+  // 这个文件此刻有没有请求在跑（后端按请求登记/注销给的）。任务停了、文件已完成就不再认
   const active = isRunning && !isComplete;
-  // 正在流式输出的文件：小灯 + 「思考中/翻译中」。任务已经停下时不再认这盏灯：
-  // 残留在快照里的流式状态会让停了的一行继续闪。
-  const stream = active ? file.stream ?? null : null;
-  // 短暂断流时沿用上一段的阶段，过了保持期才是真的没在输出
-  const lastStreamRef = useRef<{ phase: 'thinking' | 'writing'; at: number } | null>(null);
-  if (stream) lastStreamRef.current = { phase: stream.phase, at: Date.now() };
-  const heldPhase =
-    !stream && active && lastStreamRef.current && Date.now() - lastStreamRef.current.at <= STREAM_HOLD_MS
-      ? lastStreamRef.current.phase
-      : null;
-  const streamPhase = stream?.phase ?? heldPhase ?? null;
-  const streamLabel = streamPhase === 'thinking' ? '思考中' : streamPhase === 'writing' ? '翻译中' : '';
-  const cps = stream?.cps ?? 0;
-  // 「请求中」也有灯（黄色）：翻译进行中的行灯就该一直亮着，蓝/绿/黄只是阶段不同——
-  // 否则批与批之间的空隙里灯灭一下，看起来像这一行掉线了
-  const lampPhase = streamPhase ?? (active && percent > 0 ? 'busy' : null);
-  const lampTitle = lampPhase === 'busy'
-    ? '请求中 · 等待模型响应'
-    : streamLabel
-      ? `${streamLabel} · ${cps > 0 ? cps.toFixed(1) : '0'} 字/秒`
-      : '';
-  // 状态文案：只有任务在跑才是「排队中/请求中」。没在出字的空隙大多是在等接口返回，
-  // 所以叫「请求中」而不是「处理中」。停了（已取消/已结束）或还没开始时，
-  // 按缓存算出来的部分进度并不是「正在处理」——一个已取消的任务里每行都写「请求中」，
-  // 看着像还在翻。
+  const lastLiveRef = useRef<{ activity: FileActivity; at: number } | null>(null);
+  const now = Date.now();
+  if (active && file.activity) lastLiveRef.current = { activity: file.activity, at: now };
+  const held = lastLiveRef.current;
+  const live = active
+    ? file.activity ?? (held && now - held.at <= LIVE_HOLD_MS ? held.activity : null)
+    : null;
+  // 状态文案：有请求在跑就是它的阶段（几个请求同时在跑时带上 ×n）；没在跑的未完成文件只是
+  // 「未完成」（在等线程，或者这一轮不会再碰它），一点没翻的在任务里是「排队中」
   const stateLabel = isComplete
     ? '已完成'
-    : isRunning
-      ? streamLabel || (percent > 0 ? '请求中' : '排队中')
-      : (percent > 0 ? '未完成' : '未开始');
+    : live
+      ? `${LIVE_PHASE_LABEL[live.phase]}${live.requests > 1 ? ` ×${live.requests}` : ''}`
+      : percent > 0
+        ? '未完成'
+        : isRunning ? '排队中' : '未开始';
 
   return (
     <div className="file-progress-row file-progress-row--runtime">
       <div className="file-progress-row__info">
         <div className="file-progress-row__identity">
           <span className="file-progress-row__name-wrap">
-            {lampPhase ? (
-              <span
-                className={`file-progress-row__led file-progress-row__led--${lampPhase}`}
-                style={{ animationDuration: `${ledPulseDurationMs(cps)}ms` }}
-                title={lampTitle}
-                aria-hidden="true"
-              />
-            ) : null}
             <span className="file-progress-row__name">{file.filename}</span>
             <button
               aria-label="筛选句流"
@@ -262,7 +292,8 @@ export function FileProgressRow({
               {isSuccessFileFilterActive ? <span className="file-progress-row__filter-check"><Icon name="check" /></span> : null}
             </button>
           </span>
-          <span className="file-progress-row__state">
+          <span className="file-progress-row__state" title={live ? liveActivityTitle(live) : undefined}>
+            {live ? <FileProgressLed phase={live.phase} rate={ledPulseRate(live)} /> : null}
             {stateLabel}
           </span>
         </div>

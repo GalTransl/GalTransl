@@ -178,11 +178,18 @@ export type FileProgress = {
   problems: number;
   failed: number;
   /**
-   * 这个文件正在流式输出时的实时状态（后端只在「还在动」时给，停下来就没了）：
-   * phase=thinking 表示只吐思考内容、writing 表示已经在出正文，cps 是最近的字/秒。
-   * 「文件进度」那行用它点那颗小灯。
+   * 这个文件此刻有请求在跑时的实时状态（后端只在有请求在跑时给，请求结束就没了）：
+   * phase=waiting 请求已发出、还没出字 / thinking 在吐思考内容 / writing 在出正文 /
+   * retrying 上一次失败、正在退避等重试；cps 是这几个请求合计的字/秒，requests 是同时在跑的
+   * 请求数（切块并发、GenDic 多线程时会大于 1）。「文件进度」那行用它点那颗小灯。
    */
-  stream?: { phase: 'thinking' | 'writing'; cps: number };
+  activity?: FileActivity;
+};
+
+export type FileActivity = {
+  phase: 'waiting' | 'thinking' | 'writing' | 'retrying';
+  cps: number;
+  requests: number;
 };
 
 export type ProjectProgressResponse = {

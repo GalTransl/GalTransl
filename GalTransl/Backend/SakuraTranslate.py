@@ -181,6 +181,7 @@ class CSakuraTranslate(BaseTranslate):
                 frequency_penalty=self.frequency_penalty,
                 top_p=self.top_p,
                 max_tokens=len(input_str) * 2,
+                progress_file=filename,
             )
 
             result_list = resp.strip("\n").split("\n")

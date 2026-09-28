@@ -48,7 +48,7 @@ _CHATBOT_STATE: ContextVar[tuple[bool, str] | None] = ContextVar(
 REASONING_FIELD_NAMES = ("reasoning_content", "reasoning")
 
 # 流式输出期间给工作台报「思考中/翻译中 + 输出速度」的间隔（秒）：逐 chunk 报太密，
-# 报太稀又看不出快慢，0.2s 大概是一次界面轮询的五分之一
+# 报太稀又看不出快慢，0.2s 大概是一次界面轮询的五分之一。换阶段不等这个间隔，立刻报
 _STREAM_PROGRESS_REPORT_INTERVAL = 0.2
 
 
@@ -66,6 +66,134 @@ def _extract_reasoning(message_or_delta) -> tuple[str, str]:
         if isinstance(piece, str) and piece:
             return piece, name
     return "", ""
+
+
+class _InlineThinkDetector:
+    """判断流式正文此刻还在不在开头那段 <think>…</think> 里。
+
+    有的接口（本地 llama.cpp、部分中转）不走 reasoning_content，而是把思考直接写进正文开头，
+    引擎最后按 </think> 剥掉（见 ForGalJsonTranslate）。只盯累计的正文、不看单个 chunk：
+    标签会被流式切成两半（`</thi` + `nk>`），逐 chunk 找必然漏。
+    """
+
+    _OPEN = "<think>"
+    _CLOSE = "</think>"
+
+    def __init__(self) -> None:
+        self._state = "head"  # head 还没出现非空白 / think 在思考段里 / body 正文
+        self._buffer = ""
+
+    def feed(self, piece: str) -> Optional[str]:
+        """喂一段正文，返回它算 thinking 还是 writing；只有空白、还判断不了时返回 None。"""
+        if self._state == "body":
+            return "writing" if piece.strip() else None
+        self._buffer += piece
+        if self._state == "head":
+            head = self._buffer.lstrip()
+            if not head:
+                self._buffer = ""
+                return None
+            if head.startswith(self._OPEN):
+                self._state = "think"
+                self._buffer = head[len(self._OPEN):]
+            elif self._OPEN.startswith(head):
+                return "thinking"  # 「<thi」：多半是标签被切开了，先按思考算
+            else:
+                self._state = "body"
+                self._buffer = ""
+                return "writing"
+        end = self._buffer.find(self._CLOSE)
+        if end < 0:
+            # 留一截尾巴，拼下一段时能认出被切开的 </think>
+            self._buffer = self._buffer[-(len(self._CLOSE) - 1):]
+            return "thinking"
+        rest = self._buffer[end + len(self._CLOSE):]
+        self._state = "body"
+        self._buffer = ""
+        return "writing" if rest.strip() else "thinking"
+
+
+class _FileRequestProgress:
+    """一次 ask_chatbot 报给工作台「文件进度」的状态：那一行的小灯就是它点的。
+
+    进门登记（请求中），每次尝试发出前回到「请求中」，流式输出时按阶段报字数（思考中 / 翻译中），
+    失败退避时报「重试中」，出门注销——注销在 ask_chatbot 的 finally 里，正常返回、重试到上限、
+    取消都会走到，不会留下一盏一直亮着的灯。非流式请求从头到尾都是「请求中」。
+    progress_file 留空就什么都不做。这只是界面上的一颗灯：出错一律吞掉，不能影响翻译本身。
+    """
+
+    def __init__(self, pj_config, progress_file: str) -> None:
+        self._request_id = None
+        self._phase = "waiting"
+        self._pending_chars = 0
+        self._last_report = 0.0
+        if not progress_file:
+            return
+        try:
+            from GalTransl.server import begin_runtime_request
+
+            self._request_id = begin_runtime_request(
+                getattr(pj_config, "runtime_project_dir", pj_config.getProjectDir()),
+                filename=progress_file,
+            )
+        except Exception:
+            self._request_id = None
+
+    def attempt(self) -> None:
+        """又要发一次请求了（首发或重试）：回到「请求中」，等第一个字。"""
+        self._switch("waiting")
+
+    def retrying(self) -> None:
+        """这一次失败了，正在退避等下一次。"""
+        self._switch("retrying")
+
+    def output(self, phase: Optional[str], chars: int) -> None:
+        """流式里新到一段输出。phase 取 thinking / writing；None 表示只是空白，不改阶段。"""
+        if self._request_id is None:
+            return
+        if phase is not None and phase != self._phase:
+            self._switch(phase, chars)
+            return
+        if self._phase not in ("thinking", "writing"):
+            return
+        self._pending_chars += chars
+        now = time.monotonic()
+        if now - self._last_report >= _STREAM_PROGRESS_REPORT_INTERVAL:
+            self._report(now)
+
+    def close(self) -> None:
+        if self._request_id is None:
+            return
+        request_id, self._request_id = self._request_id, None
+        try:
+            from GalTransl.server import end_runtime_request
+
+            end_runtime_request(request_id)
+        except Exception:
+            pass
+
+    def _switch(self, phase: str, chars: int = 0) -> None:
+        if self._request_id is None:
+            return
+        if phase == self._phase and not chars and not self._pending_chars:
+            return
+        now = time.monotonic()
+        if self._pending_chars:
+            # 上一阶段攒着的字先记到上一阶段名下，再换
+            self._report(now)
+        self._phase = phase
+        self._pending_chars = chars
+        self._report(now)
+
+    def _report(self, now: float) -> None:
+        chars, self._pending_chars = self._pending_chars, 0
+        self._last_report = now
+        try:
+            from GalTransl.server import note_runtime_request
+
+            note_runtime_request(self._request_id, phase=self._phase, chars=chars)
+        except Exception:
+            pass
 
 
 class RequestHealthMetrics:
@@ -913,24 +1041,6 @@ class BaseTranslate:
         except Exception:
             return
 
-    def _report_stream_progress(self, filename: str, phase: str, chars: int) -> None:
-        """把「这个文件正在流式输出」报给工作台（见 server_runtime.record_runtime_stream）。
-
-        phase 取 thinking / writing，chars 是这批新增的字数。这只是界面上的一颗小灯，
-        出错一律吞掉，不能因此影响翻译本身。
-        """
-        try:
-            from GalTransl.server import record_runtime_stream
-
-            record_runtime_stream(
-                getattr(self.pj_config, "runtime_project_dir", self.pj_config.getProjectDir()),
-                filename=filename,
-                phase=phase,
-                chars=chars,
-            )
-        except Exception:
-            return
-
     async def ask_chatbot(
         self,
         prompt="",
@@ -954,9 +1064,53 @@ class BaseTranslate:
         传了 reasoning_holder 时，把这次响应的思考内容填进去：{"field": 字段名, "text": 思考全文}。
         多轮对话的调用方要拿它跟着 assistant 消息回传给 provider（见 REASONING_FIELD_NAMES）。
 
-        progress_file 是这次请求属于哪个文件（工作台的「文件进度」用它点小灯：思考中蓝、
-        翻译中绿，闪得快慢跟着输出速度）。留空就不报——不传的引擎（如 Sakura）不会有灯。
+        progress_file 是这次请求属于哪个文件：工作台「文件进度」那一行的小灯靠它点（请求中黄、
+        思考中蓝、翻译中绿、重试中红，见 _FileRequestProgress）。留空就不报。
         """
+        progress = _FileRequestProgress(self.pj_config, progress_file)
+        try:
+            # 按类取而不是 self._ask_chatbot：测试里常拿一个只挂了几个属性的替身当 self 调
+            return await BaseTranslate._ask_chatbot(
+                self,
+                prompt=prompt,
+                system=system,
+                messages=messages,
+                temperature=temperature,
+                frequency_penalty=frequency_penalty,
+                top_p=top_p,
+                stream=stream,
+                max_tokens=max_tokens,
+                reasoning_effort=reasoning_effort,
+                file_name=file_name,
+                base_try_count=base_try_count,
+                stream_line_callback=stream_line_callback,
+                max_retry_count=max_retry_count,
+                reasoning_holder=reasoning_holder,
+                progress=progress,
+            )
+        finally:
+            progress.close()
+
+    async def _ask_chatbot(
+        self,
+        *,
+        prompt,
+        system,
+        messages,
+        temperature,
+        frequency_penalty,
+        top_p,
+        stream,
+        max_tokens,
+        reasoning_effort,
+        file_name,
+        base_try_count,
+        stream_line_callback,
+        max_retry_count: Optional[int],
+        reasoning_holder: Optional[dict],
+        progress: _FileRequestProgress,
+    ):
+        """ask_chatbot 的本体：带重试地发请求，边收边报 progress。"""
         if max_retry_count is None:
             max_retry_count = getattr(self, "max_api_retries", None)
         if max_retry_count is not None:
@@ -987,6 +1141,7 @@ class BaseTranslate:
                 from GalTransl.Service import JobCancelledError
                 raise JobCancelledError()
 
+            progress.attempt()
             request_started = time.monotonic()
             try:
                 if self.tokenStrategy == "random":
@@ -1052,11 +1207,8 @@ class BaseTranslate:
                     stream_abort_requested = False
                     stream_line_buffer = ""
                     stream_completed = False
-                    # 「文件进度」那行的小灯：攒够一点字数就报一次阶段与字数（逐 chunk 报太密，
-                    # 报太稀又看不出速度），phase 空表示这一轮还没吐出东西
-                    progress_phase = ""
-                    progress_chars = 0
-                    progress_last_report = 0.0
+                    # 正文开头若是 <think>…</think>（思考写在正文里的接口），那一段也算「思考中」
+                    think_detector = _InlineThinkDetector()
                     try:
                         async for chunk in response:
                             # Check stop in the middle of streaming so we don't
@@ -1077,17 +1229,16 @@ class BaseTranslate:
                                     reasoning_field = hit_field
                                 reasoning_parts.append(reasoning_piece)
                                 lastline = lastline + reasoning_piece
+                                progress.output("thinking", len(reasoning_piece))
                             if hasattr(chunk.choices[0].delta, "content"):
                                 content_piece = chunk.choices[0].delta.content or ""
                                 result = result + content_piece
                                 lastline = lastline + content_piece
                                 stream_line_buffer += content_piece
-                                if progress_file and content_piece:
-                                    # 正文一来就是「翻译中」：不再解析 <think> 标签——标签会被
-                                    # 流式切成两半，靠它判阶段不可靠（思考写在正文里的接口，
-                                    # 引擎侧最后会把那一段剥掉，见 ForGalJsonTranslate）
-                                    progress_phase = "writing"
-                                    progress_chars += len(content_piece)
+                                if content_piece:
+                                    progress.output(
+                                        think_detector.feed(content_piece), len(content_piece)
+                                    )
                                 if stream_line_callback and "\n" in stream_line_buffer:
                                     line_parts = stream_line_buffer.split("\n")
                                     finished_lines = line_parts[:-1]
@@ -1101,17 +1252,6 @@ class BaseTranslate:
                                             break
                                     except Exception:
                                         pass
-                            if progress_file:
-                                if reasoning_piece:
-                                    progress_chars += len(reasoning_piece)
-                                    if not progress_phase:
-                                        # 只吐思考、还没出正文 = 思考中（蓝灯）
-                                        progress_phase = "thinking"
-                                now_ts = time.monotonic()
-                                if progress_phase and now_ts - progress_last_report >= _STREAM_PROGRESS_REPORT_INTERVAL:
-                                    self._report_stream_progress(progress_file, progress_phase, progress_chars)
-                                    progress_last_report = now_ts
-                                    progress_chars = 0
                             if "\n" in lastline:
                                 if should_print_translation_logs(self.pj_config) and self.pj_config.active_workers == 1:
                                     lastline_sp = lastline.split("\n")
@@ -1264,6 +1404,7 @@ class BaseTranslate:
                     except Exception:
                         pass
 
+                progress.retrying()
                 await self._interruptible_sleep(sleep_time)
 
     def clean_up(self):

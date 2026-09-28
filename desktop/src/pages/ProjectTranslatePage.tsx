@@ -11,6 +11,7 @@ import { EmptyState, InlineFeedback } from '../components/page-state';
 import { useConnection } from '../features/connection/ConnectionContext';
 import { useNameDict } from '../lib/useNameDict';
 import {
+  type FileProgress,
   type Job,
   type ProjectRuntimeResponse,
   type SubmitJobPayload,
@@ -40,6 +41,8 @@ import {
 
 const JOB_POLL_INTERVAL_MS = 2000;
 const RUNTIME_POLL_INTERVAL_MS = 1000;
+// 「文件进度」里有请求在跑的行排在最上面；请求结束后再在上面待这么久（见 prioritizedRuntimeFiles）
+const LIVE_ROW_STICKY_MS = 10_000;
 const SUCCESS_STICK_BOTTOM_THRESHOLD_PX = 24;
 // Backend keeps up to 100 success cards per translating file, but the UI only
 // renders the newest 100 cards (after filtering) to keep scrolling performant.
@@ -508,18 +511,31 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
 
   const summary = runtimeMatchesProject ? (runtime?.summary ?? null) : null;
   const runtimeFiles = runtimeMatchesProject ? (runtime?.files ?? []) : [];
+  // 刚才还有请求在跑的文件（文件名 → 最近一次看到的时刻）。排序把它们顶到最上面，小灯才看得见——
+  // 不然刚开始翻的文件（0%）要等第一批写进缓存才挪上来，最热闹的那段一直埋在列表下面。
+  // 留 LIVE_ROW_STICKY_MS 的余量：批与批之间短暂没有请求，行也不会上下跳
+  const liveSeenAtRef = useRef<Map<string, number>>(new Map());
   const prioritizedRuntimeFiles = useMemo(() => {
+    const now = Date.now();
+    const liveSeenAt = liveSeenAtRef.current;
+    if (!shouldPollRuntime) liveSeenAt.clear();
+    const rank = (file: FileProgress) => {
+      const isComplete = file.total > 0 && file.translated >= file.total;
+      if (shouldPollRuntime && !isComplete) {
+        if (file.activity) {
+          liveSeenAt.set(file.filename, now);
+          return 0;
+        }
+        const seenAt = liveSeenAt.get(file.filename);
+        if (seenAt !== undefined && now - seenAt <= LIVE_ROW_STICKY_MS) return 0;
+      }
+      return file.translated > 0 && file.translated < file.total ? 1 : 2;
+    };
     return runtimeFiles
-      .map((file, index) => ({
-        file,
-        index,
-        isTranslating: file.translated > 0 && file.translated < file.total }))
-      .sort((a, b) => {
-        if (a.isTranslating !== b.isTranslating) return a.isTranslating ? -1 : 1;
-        return a.index - b.index;
-      })
+      .map((file, index) => ({ file, index, rank: rank(file) }))
+      .sort((a, b) => a.rank - b.rank || a.index - b.index)
       .map((item) => item.file);
-  }, [runtimeFiles]);
+  }, [runtimeFiles, shouldPollRuntime]);
 
   const unfinishedRuntimeFilesCount = useMemo(
     () => runtimeFiles.filter((file) => file.translated < file.total).length,

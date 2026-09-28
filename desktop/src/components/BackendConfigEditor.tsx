@@ -405,8 +405,8 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
               <option value="false">关闭</option>
             </CustomSelect>
             <span className="field__hint">
-              默认开启。工作台的文件进度小灯、实时速度与预计剩余都来自流式输出（边生成边回报），
-              关掉后只剩按缓存算的静态进度；接口或中转不支持流式时再关。
+              默认开启。开启时译好的句子边生成边出现在句流里，文件进度的小灯能分出思考中/翻译中、跟着输出速度呼吸；
+              关闭后要等整批返回才一次出结果，小灯只显示「请求中」。接口或中转不支持流式时再关。
             </span>
           </label>
           <label className="field">

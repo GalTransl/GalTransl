@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import re
 import threading
+import time
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from collections import deque
 from dataclasses import asdict, dataclass, field
@@ -116,52 +118,75 @@ class RuntimeState:
     # 这一段抽出的一个个术语（一段几十个），两者不是一个单位，拿成功事件算 ETA 会小一个数量级，
     # 所以它自己按「完成项数/耗时」报上来（见 GenDic._progress_speed_lpm）。
     progress_speed_lpm: float | None = None
-    # 正在流式输出的文件：{显示名: _StreamActivity}。「文件进度」那一行据此点亮
-    # 思考中(蓝)/翻译中(绿)的小灯，闪烁快慢跟着输出的字/秒走。
-    streams: dict[str, "_StreamActivity"] = field(default_factory=dict)
+    # 此刻在跑的请求：{请求编号: _RequestActivity}。「文件进度」那一行据此点小灯
+    # （请求中黄 / 思考中蓝 / 翻译中绿 / 重试中红，光晕的呼吸快慢跟着输出的字/秒走）。
+    requests: dict[int, "_RequestActivity"] = field(default_factory=dict)
 
 
-# 流式状态多旧就算过期：超过这个时间没有新 chunk（模型卡住、请求结束）就不再点亮，
-# 免得灯一直闪着一个其实没在动的文件。
-STREAM_ACTIVITY_TTL_SECONDS = 2.5
-# 算「字/秒」的滑动窗口
-_STREAM_RATE_WINDOW_SECONDS = 3.0
+# 在出字的请求多久没有新输出就算停住了：灯从蓝/绿退回「请求中」，字/秒也归零。
+# 流式里两个 chunk 之间正常隔不了这么久
+REQUEST_STALL_SECONDS = 3.0
+# 算「字/秒」的滑动窗口：与上面一样长，停住的请求窗口里正好没有样本，速度自然是 0
+_REQUEST_RATE_WINDOW_SECONDS = 3.0
+# 兜底：登记后这么久既没动静也没注销，就当它丢了。正常路径都会注销（ask_chatbot 的 finally），
+# 这只防万一、别让一盏灯永远亮着；比任何接口超时都宽裕，不会误摘一个还在等响应的请求
+_REQUEST_ABANDON_SECONDS = 30 * 60
+# 同一个文件同时有几个请求（切块并发、GenDic 多线程）时那一行显示哪个阶段：有一个在出正文就是
+# 「翻译中」，其次「思考中」「请求中」，全都在退避才是「重试中」
+_REQUEST_PHASE_RANK = {"retrying": 0, "waiting": 1, "thinking": 2, "writing": 3}
+# 请求编号全局递增：项目重置（新任务开始）后，上一轮还没收尾的请求报上来也对不上号，直接忽略
+_REQUEST_IDS = itertools.count(1)
 
 
 @dataclass(slots=True)
-class _StreamActivity:
-    """某个文件当前的流式输出状态（思考 / 翻译 + 最近的字/秒）。"""
+class _RequestActivity:
+    """一次请求（某个文件的一批句子，含重试）从发出到返回的状态。
 
-    phase: str = ""
+    phase：waiting 请求已发出、还没出字 / thinking 在吐思考内容 / writing 在出正文 /
+    retrying 上一次失败了、正在退避等下一次。时间一律是 time.monotonic()。
+    """
+
+    filename: str
+    phase: str
+    updated_at: float
+    phase_started_at: float
+    last_output_at: float = 0.0
     samples: deque[tuple[float, int]] = field(default_factory=deque)
-    updated_at: float = 0.0
 
     def note(self, phase: str, chars: int, now: float) -> None:
         if phase != self.phase:
-            # 换阶段（思考→翻译，或反过来）就重新起窗：两个阶段的输出速度不是一回事
-            self.samples.clear()
+            # 换阶段就重新起窗：思考和出正文的速度不是一回事，别让思考的字数把绿灯一上来就撑得飞快
             self.phase = phase
-        self.samples.append((now, max(0, int(chars))))
+            self.phase_started_at = now
+            self.samples.clear()
+        if chars > 0:
+            self.samples.append((now, chars))
+            self.last_output_at = now
         self.updated_at = now
-        cutoff = now - _STREAM_RATE_WINDOW_SECONDS
-        while self.samples and self.samples[0][0] < cutoff:
-            self.samples.popleft()
+
+    def shown_phase(self, now: float) -> str:
+        """界面上显示的阶段：在出字的请求停住超过 REQUEST_STALL_SECONDS，就退回「请求中」。"""
+        if self.phase in ("thinking", "writing") and now - self.last_output_at > REQUEST_STALL_SECONDS:
+            return "waiting"
+        return self.phase
 
     def rate_per_second(self, now: float) -> float:
+        cutoff = now - _REQUEST_RATE_WINDOW_SECONDS
+        while self.samples and self.samples[0][0] < cutoff:
+            self.samples.popleft()
         if not self.samples:
             return 0.0
-        chars = sum(count for _, count in self.samples)
-        # 起点取第一个样本、并且至少按 0.5s 算：只来了一两个 chunk 时别报出个天文数字
-        span = max(now - self.samples[0][0], 0.5)
-        return round(chars / span, 1)
-
-    def is_fresh(self, now: float) -> bool:
-        return bool(self.phase) and now - self.updated_at <= STREAM_ACTIVITY_TTL_SECONDS
+        # 分母取「这一阶段开始到现在」与窗口长度里短的那个，且至少按 0.5s 算：
+        # 刚开始出字时只有一两笔样本，别报出个天文数字
+        span = max(min(now - self.phase_started_at, _REQUEST_RATE_WINDOW_SECONDS), 0.5)
+        return sum(chars for _, chars in self.samples) / span
 
 
 class RuntimeRegistry:
     def __init__(self) -> None:
         self._states: dict[str, RuntimeState] = {}
+        # 请求编号 → 它登记在哪个项目的状态上：上报/注销只带编号，不必每次都去解析项目路径
+        self._request_owners: dict[int, RuntimeState] = {}
         self._lock = threading.Lock()
 
     def ensure_project(self, project_dir: str) -> RuntimeState:
@@ -179,6 +204,11 @@ class RuntimeRegistry:
     def reset_project(self, project_dir: str) -> None:
         with self._lock:
             normalized = _normalize_project_dir(project_dir)
+            previous = self._states.get(normalized)
+            if previous is not None:
+                # 上一轮还没收尾的请求：之后再报上来/注销都对不上号，按忽略处理
+                for request_id in previous.requests:
+                    self._request_owners.pop(request_id, None)
             self._states[normalized] = RuntimeState(project_dir=project_dir)
 
     def update_status(
@@ -214,33 +244,42 @@ class RuntimeRegistry:
                 state.progress_speed_lpm = max(0.0, float(progress_speed_lpm))
             state.updated_at = _utcnow_text()
 
-    def note_stream_activity(self, project_dir: str, *, filename: str, phase: str, chars: int) -> None:
-        """记一次「这个文件正在流式输出」：phase 是 thinking / writing，chars 是这批新增字数。
+    def begin_request(self, project_dir: str, *, filename: str) -> int | None:
+        """登记「这个文件有一个请求开始跑了」（阶段是请求中），返回请求编号，交给 note_request / end_request。
 
-        工作台的「文件进度」用它给那一行点小灯（思考中蓝、翻译中绿，闪得快慢跟着字/秒）。
-        引擎传过来的名字常带行号区间（ForGalJson 那几个是 `f"{filename}:{idx_tip}"`），
-        所以先按原样认，认不出再掐掉冒号后面那截；两处都认不出就不记——宁可没有灯，
-        也别把灯点到别的文件上。
+        引擎报的是它自己的文件名（切块的带 `_<n>`、多级目录用 `-}` 拼），这里换成「文件进度」那一行的
+        显示名；认不出是本次任务登记过的哪一行就返回 None、不登记——宁可没有灯，也别点到别的文件上。
         """
-        now = datetime.utcnow().timestamp()
+        now = time.monotonic()
         with self._lock:
             state = self._states.get(_normalize_project_dir(project_dir))
             if state is None:
-                return
+                return None
             display = self._resolve_display_filename_locked(state, filename)
             if display not in state.file_totals:
-                head, sep, _ = filename.rpartition(":")
-                candidate = self._resolve_display_filename_locked(state, head) if sep and head else ""
-                if candidate in state.file_totals:
-                    display = candidate
-                else:
-                    # 认不出这是本次任务登记过的哪一行：不记。宁可没有灯，也别点到别的文件上
-                    return
-            activity = state.streams.get(display)
-            if activity is None:
-                activity = _StreamActivity()
-                state.streams[display] = activity
-            activity.note(phase, chars, now)
+                return None
+            request_id = next(_REQUEST_IDS)
+            state.requests[request_id] = _RequestActivity(
+                filename=display, phase="waiting", updated_at=now, phase_started_at=now
+            )
+            self._request_owners[request_id] = state
+            return request_id
+
+    def note_request(self, request_id: int, *, phase: str, chars: int = 0) -> None:
+        """这个请求换了阶段 / 又出了 chars 个字（phase 取 waiting / thinking / writing / retrying）。"""
+        now = time.monotonic()
+        with self._lock:
+            state = self._request_owners.get(request_id)
+            activity = state.requests.get(request_id) if state is not None else None
+            if activity is not None:
+                activity.note(phase, max(0, int(chars)), now)
+
+    def end_request(self, request_id: int) -> None:
+        """请求结束（成功、重试到上限、取消都算）：这一行不再因为它亮灯。"""
+        with self._lock:
+            state = self._request_owners.pop(request_id, None)
+            if state is not None:
+                state.requests.pop(request_id, None)
 
     def append_success(
         self,
@@ -376,14 +415,14 @@ class RuntimeRegistry:
                     "translation_speed_lpm": 0,
                     "file_totals": {},
                     "cache_file_display_map": {},
-                    "streams": {},
+                    "activity": {},
                     "recent_errors": [],
                     "recent_successes": [],
                     "updated_at": _utcnow_text(),
                 }
             now = datetime.utcnow().timestamp()
             self._trim_speed_window_locked(state, now)
-            streams = self._stream_snapshot_locked(state, now)
+            activity = self._activity_snapshot_locked(state, time.monotonic())
             speed = round((len(state.success_timestamps) / 60) * 60, 1) if state.success_timestamps else 0
             if state.progress_speed_lpm is not None:
                 # 引擎自报的速度优先：它的单位与进度计数一致，前端的「实时速度/预计剩余」
@@ -406,7 +445,7 @@ class RuntimeRegistry:
                 "translation_speed_lpm": speed,
                 "file_totals": dict(state.file_totals),
                 "cache_file_display_map": dict(state.cache_file_display_map),
-                "streams": streams,
+                "activity": activity,
                 "recent_errors": [event.to_dict() for event in state.recent_errors],
                 "recent_successes": [event.to_dict() for event in merged_successes],
                 "updated_at": state.updated_at,
@@ -417,18 +456,29 @@ class RuntimeRegistry:
         while state.success_timestamps and now - state.success_timestamps[0] > 60:
             state.success_timestamps.popleft()
 
-    @staticmethod
-    def _stream_snapshot_locked(state: RuntimeState, now: float) -> dict[str, dict[str, Any]]:
-        """{显示名: {phase, cps}}，只给「还在动」的文件；顺手把过期的清掉。"""
+    def _activity_snapshot_locked(self, state: RuntimeState, now: float) -> dict[str, dict[str, Any]]:
+        """{显示名: {phase, cps, requests}}，只给此刻有请求在跑的文件；顺手摘掉丢了的请求。
+
+        同一个文件可能同时有几个请求（切块并发、GenDic 多线程）：阶段取最往前的那个
+        （见 _REQUEST_PHASE_RANK），字/秒加总，requests 是请求数——分开报的话那一行会
+        在几个请求的阶段之间来回跳。
+        """
         snapshot: dict[str, dict[str, Any]] = {}
-        for filename, activity in list(state.streams.items()):
-            if not activity.is_fresh(now):
-                del state.streams[filename]
+        for request_id, activity in list(state.requests.items()):
+            if now - activity.updated_at > _REQUEST_ABANDON_SECONDS:
+                del state.requests[request_id]
+                self._request_owners.pop(request_id, None)
                 continue
-            snapshot[filename] = {
-                "phase": activity.phase,
-                "cps": activity.rate_per_second(now),
-            }
+            phase = activity.shown_phase(now)
+            entry = snapshot.get(activity.filename)
+            if entry is None:
+                entry = snapshot[activity.filename] = {"phase": phase, "cps": 0.0, "requests": 0}
+            elif _REQUEST_PHASE_RANK[phase] > _REQUEST_PHASE_RANK[entry["phase"]]:
+                entry["phase"] = phase
+            entry["cps"] += activity.rate_per_second(now)
+            entry["requests"] += 1
+        for entry in snapshot.values():
+            entry["cps"] = round(entry["cps"], 1)
         return snapshot
 
 
@@ -948,20 +998,22 @@ def record_runtime_error(
     )
 
 
-def record_runtime_stream(
-    project_dir: str,
-    *,
-    filename: str,
-    phase: str,
-    chars: int,
-) -> None:
-    """「这个文件正在流式输出」的一次上报：phase 取 thinking / writing，chars 是本批新增字数。
+def begin_runtime_request(project_dir: str, *, filename: str) -> int | None:
+    """某个文件的一次请求开始了（ask_chatbot 进门）：返回请求编号，认不出这个文件时返回 None。
 
-    工作台的「文件进度」用它点小灯（思考中蓝、翻译中绿，闪得快慢跟着字/秒走）。
+    工作台的「文件进度」用它给那一行点小灯，见 RuntimeRegistry.begin_request。
     """
-    RUNTIME_REGISTRY.note_stream_activity(
-        project_dir, filename=filename, phase=phase, chars=chars
-    )
+    return RUNTIME_REGISTRY.begin_request(project_dir, filename=filename)
+
+
+def note_runtime_request(request_id: int, *, phase: str, chars: int = 0) -> None:
+    """请求换阶段 / 新出了 chars 个字：phase 取 waiting / thinking / writing / retrying。"""
+    RUNTIME_REGISTRY.note_request(request_id, phase=phase, chars=chars)
+
+
+def end_runtime_request(request_id: int) -> None:
+    """请求结束（ask_chatbot 出门，不管成功失败）。"""
+    RUNTIME_REGISTRY.end_request(request_id)
 
 
 # ---------------------------------------------------------------------------

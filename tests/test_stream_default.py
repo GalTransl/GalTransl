@@ -1,12 +1,10 @@
 """流式开关的默认值：配置里没写 stream 时要按「开启」处理。
 
-工作台的「文件进度」小灯、实时速度、预计剩余都是从流式输出里攒出来的（见
-BaseTranslate._report_stream_progress）。非流式请求一次性返回，这些实时信息就没有了，
-界面只能显示按缓存算的静态进度。
+流式时译好的句子边生成边进句流，「文件进度」的小灯也才分得出思考中/翻译中、跟着输出速度
+呼吸（见 BaseTranslate._FileRequestProgress）；非流式要等整批返回才一次出结果，小灯只有「请求中」。
 
 默认值以前是 False，而真正生效的那份后端配置是前端送来的配置档（整段替换
-backendSpecific，见 Service.py 的 run_job），它默认不写 stream——于是新建的配置全是
-非流式，工作台永远停在「处理中」。
+backendSpecific，见 Service.py 的 run_job），它默认不写 stream——于是新建的配置全是非流式。
 """
 
 import unittest
