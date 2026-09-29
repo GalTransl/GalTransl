@@ -19,6 +19,7 @@ AUTO_FILE_PLUGIN = "auto"
 
 JSON_GALTRANSL = "file_galtransl_json"
 JSON_I18N = "file_i18n_json"
+MSGTOOL_SCRIPT = "file_msgtool_script"
 
 # 插件 yaml 没写 Extensions 时的兜底（老版本自带插件）
 _BUILTIN_EXTENSIONS: dict[str, list[str]] = {
@@ -91,6 +92,17 @@ def detect_file_plugin(file_path: str, ext_map: Optional[dict[str, str]] = None)
         return sniff_json_plugin(file_path)
     if ext_map is None:
         ext_map = scan_extension_map()
+    if not ext:
+        # BGI 脚本常无扩展名，只接受已知文件头，不能把任意无后缀文件当脚本。
+        msgtool = next((name for name in ext_map.values()
+                        if name.removeprefix("(project_dir)") == MSGTOOL_SCRIPT), None)
+        if msgtool:
+            try:
+                with open(file_path, "rb") as source:
+                    if source.read(28) == b"BurikoCompiledScriptVer1.00\x00":
+                        return msgtool
+            except OSError:
+                pass
     return ext_map.get(ext)
 
 

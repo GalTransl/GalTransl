@@ -26,7 +26,15 @@ backendSpecific:
 
 # 插件，插件列表可在启动程序后选择show-plugs查看，或在plugins目录内查看
 plugin:
-  filePlugin: file_galtransl_json # 用于支持更多格式，字幕file_subtitle_srt_lrc_vtt，小说file_epub_epub或file_plaintext_txt，mtooljson用file_i18n_json
+  filePlugin: file_galtransl_json # 用于支持更多格式，字幕file_subtitle_srt_lrc_vtt，小说file_epub_epub或file_plaintext_txt，mtooljson用file_i18n_json，galgame脚本用file_msgtool_script
+  # 也可以填 auto：按扩展名/内容为每个输入文件自动挑选文件插件，gt_input 内混放多种格式也能各走各的插件
+  # 使用 file_msgtool_script 读写 galgame 脚本（依赖 res/msg_tool.exe）时的示例设置：
+  # file_msgtool_script:
+  #   script_type: "" # 留空时 .ks 使用 kirikiri，其余自动探测；歧义后缀需指定，如 bgi / circus / yuris-ystb
+  #   source_encoding: "" # kirikiri 默认自动探测；可显式指定 cp932 / utf8 / gb2312
+  #   read_cache: true # 重复读取复用项目 .galtransl-cache/msgtool 内的提取结果；false 可禁用
+  #   extra_args: [] # 追加给 msg-tool 的参数，如 ["--bgi-disable-append"]
+  #   patched_encoding: "" # 留空用脚本默认编码；字符丢失会停止写出，请指定游戏支持的 gb2312 / utf8 等编码
   textPlugins: # 文本处理插件列表，可以设置多个，按顺序执行
     - text_common_normalfix # 常规文本修复插件
     #- text_common_skipNoJP # 跳过无日语句子插件

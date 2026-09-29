@@ -1,0 +1,161 @@
+Core:
+  Name: Galgame脚本文件
+  Type: file
+  Module: file_msgtool_script
+  # 只登记不会与其他文件插件冲突的脚本后缀。
+  # .txt / .bin / .mes 这类后缀在多个引擎间存在歧义（且 .txt 与 file_plaintext_txt 冲突），
+  # 故意不登记；需要时请在项目 config.yaml 里显式写 filePlugin: file_msgtool_script
+  # 并用 Settings.script_type 指定引擎。
+  Extensions: [".ast", ".asb", ".iet", "._bp", "._bsi", ".cst", ".cstl", ".srcxml", ".csx", ".rld", ".hcb", ".ks", ".soc", ".scn", ".tjs", ".pbd", ".sc", ".s", ".src", ".ws2", ".ybn"]
+
+Documentation:
+  Author: cx2333
+  Version: 1.0
+  Description: >-
+    通过 res/msg_tool.exe（lifegpc/msg-tool）直接读取和写入 galgame 脚本文件。
+    msg-tool 的 json 输出即为 GalTransl 的 [{"name"?, "message"}] 格式，因此无需中间转换。
+    支持 kirikiri、BGI/Ethornell、Yu-Ris、Artemis、CatSystem2、Circus、Musica、QLIE、
+    Softpal、WillPlus/AdvHD、ExHibit、Favorite、Escu:de、Entis GLS 等引擎。
+
+Settings: # 这里存放插件的设置
+  msg_tool_path: "" # msg-tool 可执行文件路径，留空则使用程序目录下的 res/msg_tool.exe
+  script_type: "" # 同 -t；留空时 .ks 使用 kirikiri，其他格式由 msg-tool 自动探测
+  source_encoding: "" # 同 -e；留空时 kirikiri 自动探测，其余使用工具默认值；可指定 cp932/utf8/gb2312
+  patched_encoding: "" # 同 -p；留空保留默认编码；出现字符丢失会停止写出，请指定游戏支持的 utf8/gb2312 等编码
+  extra_args: [] # 追加给 msg-tool 的额外参数，例如 ["--bgi-disable-append"]；放在文件路径参数之前
+  keep_bilingual: false # 回填时是否把原文一并写回脚本（译文 + 分隔符 + 原文）
+  bilingual_sep: "\n" # keep_bilingual 为 true 时，译文与原文之间的分隔符
+  timeout: 300 # 单个文件的处理超时时间（秒）
+  read_cache: true # 持久缓存提取结果；源文件/解析配置/工具/同目录依赖变化时失效。extra_args 非空时绕过缓存
+
+SettingsSchema:
+  msg_tool_path:
+    label: 工具路径
+    description: 留空使用程序自带的 msg_tool.exe。仅在需要更换工具版本时填写可执行文件路径。
+    advanced: true
+  script_type:
+    label: 脚本引擎
+    description: 通常选择自动识别。无后缀 BGI 可选择 BGI / Ethornell；手动选择会应用于此插件处理的所有脚本。
+    advanced: false
+    options:
+    - value: ''
+      label: 自动识别（推荐）
+    - value: bgi
+      label: BGI / Ethornell（含无后缀脚本）
+    - value: bgi-bsi
+      label: BGI BSI（._bsi）
+    - value: bgi-bp
+      label: BGI BP（._bp）
+    - value: kirikiri
+      label: 吉里吉里 KAG（.ks）
+    - value: kirikiri-scn
+      label: 吉里吉里 SCN（.scn）
+    - value: kirikiri-simple-crypt
+      label: 吉里吉里 SimpleCrypt 文本
+    - value: kirikiri-tjs2
+      label: 吉里吉里编译 TJS2
+    - value: kirikiri-tjs-ns0
+      label: 吉里吉里 TJS NS0
+    - value: artemis
+      label: Artemis AST
+    - value: artemis-asb
+      label: Artemis ASB / IET
+    - value: artemis-txt
+      label: Artemis 通用 TXT
+    - value: artemis-panmimisoft-txt
+      label: Artemis ぱんみみそふと TXT
+    - value: cat-system
+      label: CatSystem2 CST
+    - value: cat-system-cstl
+      label: CatSystem2 CSTL
+    - value: circus
+      label: Circus MES
+    - value: entis-gls
+      label: Entis GLS SRCXML
+    - value: entis-gls-csx
+      label: Entis GLS CSX
+    - value: escude
+      label: Escu:de BIN
+    - value: escude-list
+      label: Escu:de 列表脚本
+    - value: ex-hibit
+      label: ExHibit RLD
+    - value: favorite
+      label: Favorite HCB
+    - value: hexen-haus
+      label: HexenHaus BIN
+    - value: musica
+      label: Musica SC
+    - value: qlie
+      label: QLIE S
+    - value: silky
+      label: Silky MES
+    - value: silky-map
+      label: Silky MAP
+    - value: softpal
+      label: Softpal SRC
+    - value: will-plus-ws2
+      label: WillPlus / AdvHD WS2
+    - value: yaneurao-itufuru
+      label: Yaneurao Itufuru
+    - value: yuris-txt
+      label: Yu-Ris 场景 TXT
+    - value: yuris-ystb
+      label: Yu-Ris 编译脚本 YSTB
+    - value: yuris-yscm
+      label: Yu-Ris 操作码元数据 YSCM
+    - value: yuris-yser
+      label: Yu-Ris 错误信息 YSER
+    - value: yuris-yscfg
+      label: Yu-Ris 配置 YSCFG
+    - value: yuris-ystl
+      label: Yu-Ris 文件列表 YSTL
+    - value: yuris-yslb
+      label: Yu-Ris 标签 YSLB
+    - value: yuris-ysvr
+      label: Yu-Ris 变量 YSVR
+    - value: yuris-ystd
+      label: Yu-Ris 计数 YSTD
+  source_encoding:
+    label: 原文编码
+    description: 读取源脚本使用的编码。默认对 KAG 脚本自动探测，其他引擎使用工具默认值；出现乱码时再指定。
+    advanced: false
+    options: &id001
+    - value: ''
+      label: 使用默认编码
+    - value: auto
+      label: 自动探测
+    - value: utf8
+      label: UTF-8
+    - value: cp932
+      label: 日文 Shift-JIS（CP932）
+    - value: gb2312
+      label: 简体中文 GB2312
+  patched_encoding:
+    label: 输出编码
+    description: 回填译文使用的编码。请按游戏引擎支持的编码选择；无法表示的字符会导致停止写出，避免生成损坏文本。
+    advanced: false
+    options: *id001
+  extra_args:
+    label: 额外工具参数
+    description: 传给 msg-tool 的命令行参数，每行一个参数或参数值。填写后会绕过读取缓存。
+    advanced: true
+  keep_bilingual:
+    label: 保留原文
+    description: 回填时在译文后追加原文。游戏可能有字数和排版限制，启用后请检查游戏内显示。
+    advanced: false
+  bilingual_sep:
+    label: 双语分隔符
+    description: 译文与原文之间的分隔内容，仅在保留原文时生效。默认是一处换行。
+    advanced: true
+    multiline: true
+  timeout:
+    label: 处理超时（秒）
+    description: 单个文件调用工具的最长等待时间，超时会停止该次处理。大型脚本可适当增加。
+    advanced: true
+    min: 1
+    step: 1
+  read_cache:
+    label: 启用读取缓存
+    description: 复用已提取的文本以加快浏览和重复读取。源文件、配置或工具变化后自动重新提取。
+    advanced: true
