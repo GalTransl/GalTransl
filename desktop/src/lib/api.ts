@@ -528,15 +528,29 @@ export function setIgnoredUpdateVersion(version: string): void {
   }
 }
 
+export type DesktopBackendConnection = { url: string };
+let desktopBackendStartup: Promise<DesktopBackendConnection> | null = null;
+
 export async function ensureDesktopBackendReady(options?: { hideConsole?: boolean; timeoutMs?: number }) {
   if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window) || !shouldUseManagedDesktopBackend()) {
     return null;
   }
 
-  return invoke<string>('ensure_backend_ready', {
-    hideConsole: options?.hideConsole ?? getHideBackendConsolePreference(),
-    timeoutMs: options?.timeoutMs,
-  });
+  if (!desktopBackendStartup) {
+    desktopBackendStartup = invoke<DesktopBackendConnection>('ensure_backend_ready', {
+      hideConsole: options?.hideConsole ?? getHideBackendConsolePreference(),
+      timeoutMs: options?.timeoutMs,
+    }).then((connection) => {
+      setRuntimeBackendBaseUrl(connection.url);
+      return connection;
+    }).catch((error) => {
+      setRuntimeBackendBaseUrl(null);
+      throw error;
+    }).finally(() => {
+      desktopBackendStartup = null;
+    });
+  }
+  return desktopBackendStartup;
 }
 
 export async function fetchTranslators() {
@@ -831,7 +845,7 @@ export async function saveNameTable(projectId: string, names: NameEntry[]) {
 }
 
 export function getAiTranslateUrl(projectId: string) {
-  const baseUrl = getBackendBaseUrl();
+  const baseUrl = requireBackendBaseUrl();
   return `${baseUrl}/api/projects/${projectId}/name-table/ai-translate`;
 }
 
@@ -2201,15 +2215,15 @@ export function subscribeAgentStream(
   afterStep?: number,
   sessionId?: string,
 ): () => void {
-  const baseUrl = getBackendBaseUrl();
-  const url =
-    `${baseUrl}/api/agent/stream?project_dir=${encodeURIComponent(projectDir)}` +
-    (typeof afterStep === 'number' ? `&after_step=${afterStep}` : '') +
-    (sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : '');
   const controller = new AbortController();
 
   (async () => {
     try {
+      const baseUrl = requireBackendBaseUrl();
+      const url =
+        `${baseUrl}/api/agent/stream?project_dir=${encodeURIComponent(projectDir)}` +
+        (typeof afterStep === 'number' ? `&after_step=${afterStep}` : '') +
+        (sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : '');
       const response = await fetch(url, {
         method: 'GET',
         signal: controller.signal,
@@ -2271,7 +2285,7 @@ function parseAgentFrame(frame: string, onEvent: (event: AgentEvent) => void) {
 // ---- Internal ----
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const baseUrl = getBackendBaseUrl();
+  const baseUrl = requireBackendBaseUrl();
 
   let response: Response;
   try {
@@ -2288,12 +2302,23 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
-function getBackendBaseUrl() {
+export function getBackendBaseUrl() {
   if (runtimeBackendBaseUrl) {
     return runtimeBackendBaseUrl;
   }
+  // A packaged instance must never fall back to another instance on 12333,
+  // including when startup failed and the user skipped the splash screen.
+  if (!import.meta.env.DEV && typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window && shouldUseManagedDesktopBackend()) {
+    return '';
+  }
   const configured = import.meta.env.VITE_BACKEND_URL?.trim();
   return configured ? configured.replace(/\/$/, '') : DEFAULT_BACKEND_URL;
+}
+
+function requireBackendBaseUrl() {
+  const url = getBackendBaseUrl();
+  if (!url) throw new ApiError('本地后端尚未就绪，请在设置中重新连接。', 0);
+  return url;
 }
 
 export function setRuntimeBackendBaseUrl(url: string | null) {
@@ -2301,7 +2326,9 @@ export function setRuntimeBackendBaseUrl(url: string | null) {
 }
 
 function shouldUseManagedDesktopBackend() {
-  const baseUrl = getBackendBaseUrl();
+  // Decide ownership from configuration, not the dynamically assigned port.
+  const configured = import.meta.env.VITE_BACKEND_URL?.trim();
+  const baseUrl = configured ? configured.replace(/\/$/, '') : DEFAULT_BACKEND_URL;
 
   if (baseUrl === DEFAULT_BACKEND_URL) {
     return true;

@@ -4,6 +4,7 @@ import { CustomSelect } from '../../components/CustomSelect';
 import { Panel } from '../../components/Panel';
 import { InlineFeedback } from '../../components/page-state/InlineFeedback';
 import type { SubmitJobPayload, TranslatorOption } from '../../lib/api';
+import { useConnection } from '../connection/ConnectionContext';
 
 type JobSubmitFormProps = {
   disabled: boolean;
@@ -14,6 +15,7 @@ type JobSubmitFormProps = {
 };
 
 export function JobSubmitForm({ disabled, isSubmitting, onSubmit, submitError, translators }: JobSubmitFormProps) {
+  const { backendUrl } = useConnection();
   const [projectDir, setProjectDir] = useState('');
   const [configFileName, setConfigFileName] = useState('config.yaml');
   const [translator, setTranslator] = useState('');
@@ -98,8 +100,7 @@ export function JobSubmitForm({ disabled, isSubmitting, onSubmit, submitError, t
           <InlineFeedback tone="error" title="启动任务失败" description={activeError} />
         ) : (
           <InlineFeedback tone="info" title="连接提示">
-            后端默认地址来自 <code>VITE_BACKEND_URL</code>，未设置时回退到{' '}
-            <code>http://127.0.0.1:12333</code>。
+            {backendUrl ? <>当前后端地址：<code>{backendUrl}</code>。</> : '本地后端尚未就绪，请先重新连接。'}
           </InlineFeedback>
         )}
 

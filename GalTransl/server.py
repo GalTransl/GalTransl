@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import json
+import socket
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from http import HTTPStatus
@@ -4051,38 +4053,77 @@ def build_handler(registry: JobRegistry):
     return RequestHandler
 
 
-def serve(host: str = "127.0.0.1", port: int = 12333) -> None:
+class BackendHTTPServer(ThreadingHTTPServer):
+    # Windows SO_REUSEADDR permits multiple live listeners on the same port.
+    # Keep POSIX restart behavior, but require an exclusive listener on Windows.
+    allow_reuse_address = os.name != "nt"
+    allow_reuse_port = False
+
+    def server_bind(self) -> None:
+        if os.name == "nt":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
+def serve(host: str = "127.0.0.1", port: int = 12333, *, ready_file: str | None = None) -> None:
     registry = JobRegistry()
     try:
-        server = ThreadingHTTPServer((host, port), build_handler(registry))
+        server = BackendHTTPServer((host, port), build_handler(registry))
     except OSError as exc:
-        # WinError 10048 / errno 98 (EADDRINUSE) / errno 13 (EACCES on Windows for occupied ports)
         errno_val = getattr(exc, "errno", None)
         winerror = getattr(exc, "winerror", None)
-        if errno_val in (48, 98, 10048, 13) or winerror == 10048:
+        if errno_val in (errno.EADDRINUSE, 10048) or winerror == 10048:
             print(
                 f"[错误] 端口 {port} 已被占用，无法启动 GalTransl 后端服务。\n"
                 f"       请先关闭占用该端口的程序，或使用 --port 指定其他端口，例如：\n"
                 f"       python run_backend.py --host {host} --port {port + 1}"
             )
             raise SystemExit(1)
+        if errno_val in (errno.EACCES, 10013) or winerror == 10013:
+            # Windows can return WSAEACCES when another socket owns the port
+            # exclusively; reserved ports and access restrictions also use it.
+            print(
+                f"[错误] 无法绑定 {host}:{port}：端口已被其他程序独占或被系统限制访问。\n"
+                f"       请检查已有后端实例和系统端口限制，或使用 --port 指定其他端口。\n"
+                f"       系统错误：{exc}"
+            )
+            raise SystemExit(1)
         print(f"[错误] 无法绑定 {host}:{port} —— {exc}")
         raise SystemExit(1)
-    print(f"GalTransl backend mode listening at http://{host}:{port}")
     try:
+        # Agent tool calls (including restored sessions) must stay on this backend.
+        AGENT_REGISTRY.host = "127.0.0.1" if host == "0.0.0.0" else host
+        AGENT_REGISTRY.port = server.server_port
+        if ready_file:
+            ready_path = Path(ready_file)
+            temporary_path = ready_path.with_name(ready_path.name + ".tmp")
+            try:
+                temporary_path.write_text(json.dumps({
+                    "host": host, "port": server.server_port, "pid": os.getpid(),
+                }), encoding="utf-8")
+                os.replace(temporary_path, ready_path)
+            except OSError as exc:
+                print(f"[错误] 无法通知桌面端后端地址：{exc}", flush=True)
+                raise SystemExit(1)
+            finally:
+                temporary_path.unlink(missing_ok=True)
+        print(f"GalTransl backend mode listening at http://{host}:{server.server_port}", flush=True)
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
+        if ready_file:
+            Path(ready_file).unlink(missing_ok=True)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser("GalTransl backend mode")
     parser.add_argument("--host", default="127.0.0.1", help="bind host")
-    parser.add_argument("--port", type=int, default=12333, help="bind port")
+    parser.add_argument("--port", type=int, default=12333, help="bind port (0 selects an available port)")
+    parser.add_argument("--ready-file", help="write the bound address as JSON for the desktop launcher")
     args = parser.parse_args()
-    serve(args.host, args.port)
+    serve(args.host, args.port, ready_file=args.ready_file)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ConnectionPhase, TranslatorOption, VersionCheckResponse } from '../../lib/api';
-import { ensureDesktopBackendReady, fetchJobs, fetchTranslators, fetchVersion, fetchVersionCheck } from '../../lib/api';
+import { ensureDesktopBackendReady, fetchJobs, fetchTranslators, fetchVersion, fetchVersionCheck, getBackendBaseUrl } from '../../lib/api';
 import { normalizeError } from '../../lib/errors';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
@@ -38,10 +38,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   const [loadingInitialData, setLoadingInitialData] = useState(true);
   const [refreshingJobs, setRefreshingJobs] = useState(false);
 
-  const backendUrl = useMemo(() => {
-    const configured = import.meta.env.VITE_BACKEND_URL?.trim();
-    return configured ? configured.replace(/\/$/, '') : 'http://127.0.0.1:12333';
-  }, []);
+  const [backendUrl, setBackendUrl] = useState(getBackendBaseUrl);
 
   const loadJobs = useCallback(async (silent = false) => {
     if (!silent) {
@@ -72,6 +69,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     try {
       setConnectionMessage('正在启动并检查本地翻译服务…');
       await ensureDesktopBackendReady({ timeoutMs: 20_000 });
+      setBackendUrl(getBackendBaseUrl());
 
       setConnectionStep(2);
       setConnectionMessage('本地翻译服务已就绪，正在加载模板与版本信息…');
@@ -112,6 +110,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       setConnectionMessage('后端在线，可以立即提交本地翻译任务。');
     } catch (error) {
       const message = normalizeError(error, '无法连接到本地后端');
+      setBackendUrl(getBackendBaseUrl());
       setTranslators([]);
       setConnectionPhase('offline');
       setConnectionMessage(message);

@@ -59,7 +59,9 @@ class AgentRuntime:
     会按需从磁盘懒加载恢复，所以关掉应用再打开还能接着聊，不用清空重来。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, host: str = DEFAULT_BACKEND_HOST, port: int = DEFAULT_BACKEND_PORT) -> None:
+        self.host = host
+        self.port = port
         # project_dir -> session_id -> state / runner / stop_event
         self._states: dict[str, dict[str, AgentState]] = {}
         self._runners: dict[str, dict[str, AgentRunner]] = {}
@@ -336,8 +338,8 @@ class AgentRuntime:
         backend_profile_data: dict[str, Any],
         goal: str = "",
         session_id: str | None = None,
-        host: str = DEFAULT_BACKEND_HOST,
-        port: int = DEFAULT_BACKEND_PORT,
+        host: str | None = None,
+        port: int | None = None,
         backend_profile_name: str = "",
         translator_profile_name: str = "",
         translator_profile_data: dict[str, Any] | None = None,
@@ -378,7 +380,10 @@ class AgentRuntime:
                 # 窗口在建会话时就定下来：界面指示器不用等第一轮请求
                 context_window=_profile_context_window(backend_profile_data),
             )
-            runner = AgentRunner(state, host=host, port=port, stop_event=stop_event, registry=self)
+            runner = AgentRunner(
+                state, host=host if host is not None else self.host,
+                port=port if port is not None else self.port, stop_event=stop_event, registry=self,
+            )
             self._states.setdefault(key, {})[sid] = state
             self._runners.setdefault(key, {})[sid] = runner
             self._stop_events.setdefault(key, {})[sid] = stop_event
@@ -463,7 +468,7 @@ class AgentRuntime:
             runner = self._runners.get(key, {}).get(sid)
             if runner is None:
                 stop_event = threading.Event()
-                runner = AgentRunner(state, stop_event=stop_event, registry=self)
+                runner = AgentRunner(state, host=self.host, port=self.port, stop_event=stop_event, registry=self)
                 self._runners.setdefault(key, {})[sid] = runner
                 self._stop_events.setdefault(key, {})[sid] = stop_event
             else:
@@ -571,7 +576,7 @@ class AgentRuntime:
         with self._lock:
             runner = self._runners.get(key, {}).get(sid)
             if runner is None:
-                runner = AgentRunner(state, registry=self)
+                runner = AgentRunner(state, host=self.host, port=self.port, registry=self)
                 self._runners.setdefault(key, {})[sid] = runner
         return runner
 

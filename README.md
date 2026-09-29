@@ -46,7 +46,7 @@
 
 ## 环境准备
   * **桌面版（推荐）**   
-  从 [Release](https://github.com/XD2333/GalTransl/releases/) 下载最新版压缩包，解压后双击 `GalTransl Desktop.exe` 即可使用，**无需安装Python或任何依赖**。桌面端会自动启动后端服务。
+  从 [Release](https://github.com/XD2333/GalTransl/releases/) 下载最新版压缩包，解压后双击 `GalTransl Desktop.exe` 即可使用，**无需安装Python或任何依赖**。桌面端会为每个实例自动启动独立后端并分配空闲端口，关闭一个窗口只会停止它自己的后端，其他窗口继续运行。
    
 
 <details>
@@ -98,6 +98,7 @@ npm.cmd --prefix desktop ci
 - `.venv` 和依赖只需首次创建、安装。更新源码后，如果依赖有变化，重新执行上面的 Python 依赖安装命令和 `npm.cmd --prefix desktop ci`。
 - 如果出现 `ModuleNotFoundError`，检查是否已将依赖安装到仓库的 `.venv` 中；启动脚本不会自动安装 Python 依赖。
 - 启动前确保 `12333` 和 `1420` 端口未被其他实例占用。退出时在后端、前端两个开发控制台分别按 `Ctrl+C` 停止服务，再关闭控制台；只关闭桌面窗口不会停止单独运行的 Python 后端。
+- 后端会独占监听端口；重复启动时，新后端会提示端口占用并退出，已有后端继续运行。应用此修复后，请先停止之前启动的所有旧后端，再重新运行启动脚本。
 
 </details>
 
