@@ -197,6 +197,19 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
   const location = useLocation();
   const contentRef = useRef<HTMLElement | null>(null);
   const [displayLocation, setDisplayLocation] = useState(location);
+  const [wizardOpen, setWizardOpen] = useState(location.pathname === '/new-project');
+  const [wizardProjectName, setWizardProjectName] = useState('');
+  const wizardVisible = displayLocation.pathname === '/new-project';
+
+  useEffect(() => {
+    if (location.pathname === '/new-project') setWizardOpen(true);
+  }, [location.pathname]);
+
+  const handleFinishWizard = useCallback((projectDir: string, config: string) => {
+    onOpenProject(projectDir, config);
+    setWizardOpen(false);
+    setWizardProjectName('');
+  }, [onOpenProject]);
   const [transitionStage, setTransitionStage] = useState<'fadeIn' | 'fadeOut'>('fadeIn');
   const [customBackground, setCustomBackground] = useState<CustomBackgroundPreference>(() => getCustomBackgroundPreference());
 
@@ -325,6 +338,8 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
       />
       <Sidebar
         openProjects={openProjects}
+        wizardOpen={wizardOpen}
+        wizardProjectName={wizardProjectName}
         onCloseProject={handleCloseProjectAndNavigate}
         onCloseOtherProjects={handleCloseOtherProjectsAndNavigate}
         onCloseAllProjects={handleCloseAllProjectsAndNavigate}
@@ -334,6 +349,18 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
         className={`app-layout__content page-transition-${transitionStage}`}
         onAnimationEnd={handleTransitionEnd}
       >
+        {/* Keep the draft mounted across navigation so forms, imports and jobs survive. */}
+        {wizardOpen && (
+          <div hidden={!wizardVisible}>
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <NewProjectWizard
+                active={wizardVisible && location.pathname === '/new-project'}
+                onProjectNameChange={setWizardProjectName}
+                onOpenProject={handleFinishWizard}
+              />
+            </Suspense>
+          </div>
+        )}
         <Routes location={displayLocation}>
               <Route
                 path="/"
@@ -381,11 +408,7 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
               />
               <Route
                 path="/new-project"
-                element={(
-                  <Suspense fallback={<RouteLoadingFallback />}>
-                    <NewProjectWizard onOpenProject={onOpenProject} />
-                  </Suspense>
-                )}
+                element={null}
               />
               <Route
                 path="/agent"

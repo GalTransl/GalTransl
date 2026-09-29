@@ -19,6 +19,7 @@ import { loadLastProjectTab } from '../lib/projectTabMemory';
 import { Icon, type IconName } from './Icon';
 import { InlineFeedback } from './page-state/InlineFeedback';
 import logoUrl from '../assets/logo.png';
+import { ProjectFolderPopover } from './ProjectFolderPopover';
 
 const CONFIG_FILE_KEY = 'galtransl-config-file';
 const LAST_ACTIVE_PROJECT_KEY = 'galtransl-last-active-project';
@@ -70,6 +71,8 @@ function RunningDot({ variant }: { variant: 'child' | 'rail' }) {
 
 type SidebarProps = {
   openProjects: string[];
+  wizardOpen: boolean;
+  wizardProjectName: string;
   onCloseProject: (projectDir: string) => void;
   onCloseOtherProjects: (projectDir: string) => void;
   onCloseAllProjects: () => void;
@@ -106,7 +109,7 @@ function buildInitialExpandedProjects(openProjects: string[], pathname: string):
   return result;
 }
 
-export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, onCloseAllProjects }: SidebarProps) {
+export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseProject, onCloseOtherProjects, onCloseAllProjects }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [expanded, setExpanded] = useState(true);
@@ -270,7 +273,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
   }, []);
 
   // Use compact project headers when many projects are open
-  const compactProjectHeaders = openProjects.length > 6;
+  const compactProjectHeaders = openProjects.length + Number(wizardOpen) > 6;
 
   useEffect(() => {
     setRenderedProjectChildren((prev) => {
@@ -570,6 +573,26 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
       </div>
 
       <nav className="sidebar__nav">
+        {wizardOpen && (
+          <div className="sidebar__project-group">
+            <NavLink
+              to="/new-project"
+              className={({ isActive }) =>
+                expanded
+                  ? `sidebar__project-header sidebar__wizard-header${compactProjectHeaders ? ' sidebar__project-header--compact' : ''}${isActive ? ' sidebar__wizard-header--active' : ''}`
+                  : `sidebar__nav-item ${isActive ? 'sidebar__nav-item--active' : ''}`
+              }
+              title={wizardProjectName ? `继续新建项目：${wizardProjectName}` : '继续新建项目向导'}
+            >
+              <span className={`sidebar__nav-icon${expanded ? ' sidebar__project-icon' : ''}`}><Icon name="file-plus" /></span>
+              {expanded && (
+                <span className="sidebar__project-name">
+                  {wizardProjectName ? `${wizardProjectName} · 新建中` : '新建项目向导'}
+                </span>
+              )}
+            </NavLink>
+          </div>
+        )}
         {openProjects.map((projectDir) => {
           const projectName = projectDir.replace(/[/\\\\]/g, '/').split('/').filter(Boolean).pop() || projectDir;
           const projectId = encodeProjectDir(projectDir);
@@ -589,16 +612,12 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                     onClick={() => toggleProjectExpanded(projectDir)}
                     onContextMenu={(e) => handleProjectContextMenu(e, projectDir)}
                   >
-                    <span
+                    <ProjectFolderPopover
+                      projectDir={projectDir}
+                      expanded={isProjectExpanded}
                       className={`sidebar__nav-icon sidebar__project-icon sidebar__project-icon--link${isProjectExpanded ? ' sidebar__project-icon--open' : ''}${compactProjectHeaders ? ' sidebar__project-icon--compact' : ''}`}
-                      role="button"
-                      tabIndex={0}
-                      title="打开项目文件夹"
-                      onClick={(e) => { e.stopPropagation(); void invoke('open_folder', { path: projectDir }); }}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); e.preventDefault(); void invoke('open_folder', { path: projectDir }); } }}
-                    >
-                      <Icon name={isProjectExpanded ? 'folder-open' : 'folder'} />
-                    </span>
+                      onError={(description) => pushRebuildToast({ tone: 'error', title: '打开文件夹失败', description })}
+                    />
                     <span className="sidebar__project-name">{projectName}</span>
                     <button
                       className="sidebar__project-close"
@@ -681,7 +700,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                     }
                     title={projectName}
                   >
-                    <span className="sidebar__nav-icon"><Icon name="folder" /></span>
+                    <ProjectFolderPopover projectDir={projectDir} className="sidebar__nav-icon" onError={(description) => pushRebuildToast({ tone: 'error', title: '打开文件夹失败', description })} />
                   </NavLink>
                   {PROJECT_TABS.map((tab) => (
                     <NavLink
@@ -719,7 +738,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                   }
                   title={projectName}
                 >
-                  <span className="sidebar__nav-icon"><Icon name="folder" /></span>
+                  <ProjectFolderPopover projectDir={projectDir} className="sidebar__nav-icon" onError={(description) => pushRebuildToast({ tone: 'error', title: '打开文件夹失败', description })} />
                 </NavLink>
               )}
             </div>

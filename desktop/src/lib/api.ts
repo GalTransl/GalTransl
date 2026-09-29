@@ -1497,6 +1497,11 @@ export function setSelectedTranslatorTemplate(projectDir: string, translatorName
 }
 
 function normalizeHomeListLimit(value: unknown, fallback: number): number {
+  // Missing localStorage entries and blank values must use the default;
+  // Number(null) and Number('') would otherwise become 0 and clamp to 1.
+  if (value == null || (typeof value === 'string' && value.trim() === '')) {
+    return fallback;
+  }
   const numeric = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(numeric)) {
     return fallback;

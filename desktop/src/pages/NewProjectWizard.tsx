@@ -59,10 +59,12 @@ const FLOW_STEPS: { title: string; description: string }[] = [
 ];
 
 type NewProjectWizardProps = {
+  active: boolean;
+  onProjectNameChange: (name: string) => void;
   onOpenProject: (projectDir: string, config: string) => void;
 };
 
-export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
+export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }: NewProjectWizardProps) {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(0);
   const [stepDirection, setStepDirection] = useState<'forward' | 'backward'>('forward');
@@ -77,6 +79,9 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
     }
   });
   const [projectName, setProjectName] = useState('');
+  useEffect(() => {
+    onProjectNameChange(projectName.trim());
+  }, [projectName, onProjectNameChange]);
   const [projectCreated, setProjectCreated] = useState(false);
   // 只有用户自己填/挑过的父目录才记进「上次用的目录」：默认值不该被当成他的选择记下来
   const [parentDirTouched, setParentDirTouched] = useState(false);
@@ -165,11 +170,12 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
   );
 
   useEffect(() => {
+    if (!active || currentStep !== 1) return;
     const currentWindow = getCurrentWebviewWindow();
     let disposed = false;
 
     const unlistenPromise = currentWindow.onDragDropEvent((event: unknown) => {
-      if (currentStep !== 1) return;
+      if (disposed) return;
       const payload = (event as { payload?: { type?: string; paths?: string[] } })?.payload;
       if (payload?.type !== 'drop') return;
       const paths = Array.isArray(payload.paths) ? payload.paths : [];
@@ -187,7 +193,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
         unlisten();
       });
     };
-  }, [currentStep, importPathsToInput]);
+  }, [active, currentStep, importPathsToInput]);
 
   useEffect(() => {
     try {
@@ -202,7 +208,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
   // 进「导入文件」时以 gt_input 里的实际文件为准刷新列表：文件可能是用户直接打开目录粘贴进去的，
   // 这种不经向导导入的文件本地状态里没有，会让列表和后面的判断都误以为"没有文件"
   useEffect(() => {
-    if (currentStep !== 1 || !projectDir) return;
+    if (!active || currentStep !== 1 || !projectDir) return;
     let cancelled = false;
     fetchProjectFiles(encodeProjectDir(projectDir))
       .then((res) => {
@@ -217,7 +223,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
     return () => {
       cancelled = true;
     };
-  }, [currentStep, projectDir]);
+  }, [active, currentStep, projectDir]);
 
   // 没记过上次用过的目录时，「父目录」默认填程序所在目录（只填空着的，不覆盖已有值）
   useEffect(() => {
