@@ -12,3 +12,18 @@ Documentation:
 Settings: # 这里存放插件的设置
   保存双语字幕: false # 是否保存双语字幕[true|false]
   上下双语1左右双语2: 1 # 双语字幕类型，1表示上下双语，2表示左右双语
+
+SettingsSchema:
+  保存双语字幕:
+    label: 保存双语字幕
+    description: 在同一字幕条目中保留原文与译文。
+    advanced: false
+  上下双语1左右双语2:
+    label: 双语排版
+    description: 双语字幕中原文与译文的排列方式。
+    advanced: false
+    options:
+    - value: 1
+      label: 上下排列
+    - value: 2
+      label: 左右排列

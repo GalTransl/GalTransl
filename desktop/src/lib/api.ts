@@ -376,6 +376,19 @@ export type ProjectLogsResponse = {
   lines: string[];
 };
 
+export type PluginSettingSchema = {
+  label?: string;
+  description?: string;
+  placeholder?: string;
+  advanced?: boolean;
+  multiline?: boolean;
+  secret?: boolean;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: { value: string | number | boolean; label: string }[];
+};
+
 export type PluginInfo = {
   name: string;
   display_name: string;
@@ -385,6 +398,7 @@ export type PluginInfo = {
   type: string;
   module: string;
   settings: Record<string, unknown>;
+  settings_schema?: Record<string, PluginSettingSchema>;
 };
 
 export type AppSettings = {

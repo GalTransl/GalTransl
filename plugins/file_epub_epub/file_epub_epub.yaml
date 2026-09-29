@@ -17,3 +17,36 @@ Settings: # 这里存放插件的设置
   原文颜色: "#808080" #默认灰色
   缩小比例: 0.8  # 默认缩小到原始大小的80%
   是否拆分文件以支持单文件多线程: False  # 单文件拆分功能，用于支持单文件多线程翻译，默认关闭。
+
+SettingsSchema:
+  是否自动识别名称:
+    label: 自动识别人名
+    description: 从段落中按正则表达式提取说话人和正文。
+    advanced: false
+  名称识别正则表达式:
+    label: 人名识别规则
+    description: 正则表达式需包含 name 和 message 两个命名分组，分别匹配人名和正文。
+    advanced: true
+  名称识别拼接方案:
+    label: 人名与正文拼接格式
+    description: 将识别后的人名和译文重新拼接；{name} 表示人名，{message} 表示正文。
+    advanced: true
+    multiline: true
+  双语显示:
+    label: 双语显示
+    description: 在输出电子书中同时显示译文和原文。
+    advanced: false
+  原文颜色:
+    label: 原文颜色
+    description: '双语显示时原文的 CSS 颜色，例如 #808080 为灰色。'
+    advanced: true
+  缩小比例:
+    label: 原文字号比例
+    description: 双语显示时原文字号相对于正常字号的比例，0.8 表示 80%。
+    advanced: true
+    min: 0.1
+    step: 0.1
+  是否拆分文件以支持单文件多线程:
+    label: 拆分章节并发翻译
+    description: 将 EPUB 拆分为章节以便并发处理，完成后合并为电子书。
+    advanced: true

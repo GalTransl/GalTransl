@@ -13,3 +13,21 @@ Settings: # 这里存放插件的设置
   set_string: "aaa" # string建议双引号包裹 
   set_bool: True
   设置样例4: False # 可以用中文
+
+SettingsSchema:
+  set_int:
+    label: 整数设置示例
+    description: 演示插件如何接收整数值；此示例插件不应在实际翻译项目中启用。
+    advanced: true
+  set_string:
+    label: 文本设置示例
+    description: 演示插件如何接收字符串值；不影响任何实际翻译功能。
+    advanced: true
+  set_bool:
+    label: 布尔开关示例
+    description: 演示英文配置键对应的开关控件。
+    advanced: true
+  设置样例4:
+    label: 中文配置键示例
+    description: 演示使用中文配置键的开关控件。
+    advanced: true

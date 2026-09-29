@@ -20,6 +20,9 @@ export function PluginSettingsSection({
   onPluginSettingChange,
   onToggleTextPlugin,
 }: PluginSettingsSectionProps) {
+  const selectedFilePlugin = filePlugins.find(
+    (p) => p.name === String((config?.plugin as Record<string, unknown>)?.filePlugin ?? 'file_galtransl_json')
+  );
   return (
     <Panel title="插件设置" description="文件插件和文本插件配置。">
       <div className="config-form">
@@ -44,15 +47,15 @@ export function PluginSettingsSection({
                 </option>
               )}
             </CustomSelect>
+            {selectedFilePlugin?.description && (
+              <span className="field__hint" style={{ whiteSpace: 'pre-line' }}>{selectedFilePlugin.description}</span>
+            )}
             <span className="field__hint">
               从全局插件管理中获取可用文件插件；「自动识别」按每个输入文件的类型分别选择插件，gt_input 可混放多种格式
             </span>
           </label>
           {/* 文件插件设置项 */}
           {(() => {
-            const selectedFilePlugin = filePlugins.find(
-              (p) => p.name === String((config?.plugin as Record<string, unknown>)?.filePlugin ?? 'file_galtransl_json')
-            );
             if (!selectedFilePlugin || Object.keys(selectedFilePlugin.settings || {}).length === 0) return null;
             return (
               <PluginSettingsEditor

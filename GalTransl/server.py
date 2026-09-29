@@ -1181,6 +1181,7 @@ def _count_input_file_sentences(
 
 def _scan_plugins() -> list[dict[str, Any]]:
     """Scan the plugins directory and return plugin metadata."""
+    from GalTransl.PluginSettings import normalize_settings_schema
     plugins_dir = os.path.abspath("plugins")
     result = []
     if not os.path.isdir(plugins_dir):
@@ -1192,16 +1193,18 @@ def _scan_plugins() -> list[dict[str, Any]]:
         try:
             info = _read_yaml_file(yaml_path)
             core = info.get("Core", {})
+            documentation = info.get("Documentation") or {}
             settings = info.get("Settings", {})
             result.append({
                 "name": name,
                 "display_name": core.get("Name", name),
                 "version": core.get("Version", ""),
                 "author": core.get("Author", ""),
-                "description": core.get("Description", ""),
+                "description": documentation.get("Description", core.get("Description", "")),
                 "type": core.get("Type", "unknown").lower(),
                 "module": core.get("Module", name),
                 "settings": settings,
+                "settings_schema": normalize_settings_schema(settings, info.get("SettingsSchema")),
             })
         except Exception:
             continue

@@ -14,3 +14,22 @@ Settings: # 这里存放插件的设置
   名称识别正则表达式: ^(?P<name>.*?)(?P<message>「.*?」)$ # 用于识别名称的正则表达式，两个part分别标识name和message
   名称识别拼接方案: "{name}\n{message}" # 用于拼接名称的格式化字符串（f-string），{name}和{message}分别表示name和message
   清除换行符: False # 是否清除导出的xlsx文件中的换行符
+
+SettingsSchema:
+  是否自动识别名称:
+    label: 自动识别人名
+    description: 按规则将文本中的说话人和正文分开。
+    advanced: false
+  名称识别正则表达式:
+    label: 人名识别规则
+    description: 正则表达式需包含 name 和 message 两个命名分组。
+    advanced: true
+  名称识别拼接方案:
+    label: 人名与正文拼接格式
+    description: 使用 {name} 和 {message} 将人名与译文重新拼接。
+    advanced: true
+    multiline: true
+  清除换行符:
+    label: 清除换行符
+    description: 输出到 Translator++ 表格时清除文本中的换行。
+    advanced: false

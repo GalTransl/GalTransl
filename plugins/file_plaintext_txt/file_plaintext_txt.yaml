@@ -28,3 +28,26 @@ Settings: # 这里存放插件的设置
   上下双语1左右双语2: 1 # 1表示上下双语，2表示左右双语
   txt读取编码: utf-8 # txt文件读取编码
   txt写入编码: utf-8 # txt文件写入编码
+
+SettingsSchema:
+  保存双语txt文件:
+    label: 保存双语文本
+    description: 在输出文本中同时保存译文和原文。
+    advanced: false
+  上下双语1左右双语2:
+    label: 双语排版
+    description: 双语输出时原文与译文的排列方式。
+    advanced: false
+    options:
+    - value: 1
+      label: 上下排列
+    - value: 2
+      label: 左右排列
+  txt读取编码:
+    label: 原文编码
+    description: 读取 TXT 文件的字符编码。乱码或读取失败时请检查源文件编码。
+    advanced: false
+  txt写入编码:
+    label: 输出编码
+    description: 保存 TXT 文件的字符编码，默认 UTF-8。
+    advanced: false
