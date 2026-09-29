@@ -8,6 +8,7 @@ import { CustomSelect } from '../components/CustomSelect';
 import { Panel } from '../components/Panel';
 import { PageHeader } from '../components/PageHeader';
 import { Icon } from '../components/Icon';
+import { PluginSettingsEditor } from '../components/PluginSettingsEditor';
 import { InlineFeedback } from '../components/page-state';
 import {
   BACKEND_PROFILES_CHANGE_EVENT,
@@ -91,6 +92,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
   // Step 4 state
   const [filePlugins, setFilePlugins] = useState<PluginInfo[]>([]);
   const [selectedFilePlugin, setSelectedFilePlugin] = useState('file_galtransl_json');
+  const [pluginOverrides, setPluginOverrides] = useState<Record<string, Record<string, unknown>>>({});
   const [fileDetection, setFileDetection] = useState<FilePluginDetection | null>(null);
   // 用户手动选过插件后，重新进入这一步不再用识别结果覆盖
   const filePluginTouchedRef = useRef(false);
@@ -364,8 +366,21 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
   useEffect(() => {
     if (currentStep !== 3) return;
     fetchPlugins()
-      .then((plugins) => {
+      .then(async (plugins) => {
         setFilePlugins(plugins.filter((p) => p.type === 'file'));
+        if (!projectDir) return;
+        const { config } = await fetchProjectConfig(encodeProjectDir(projectDir), 'config.yaml');
+        const configured = (config.plugin as Record<string, unknown>) || {};
+        setPluginOverrides((previous) => {
+          const next = { ...previous };
+          for (const plugin of plugins.filter((p) => p.type === 'file')) {
+            const saved = configured[plugin.module || plugin.name.replace('(project_dir)', '')];
+            if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+              next[plugin.name] = { ...(saved as Record<string, unknown>), ...previous[plugin.name] };
+            }
+          }
+          return next;
+        });
       })
       .catch(() => {});
     if (projectDir) {
@@ -425,6 +440,11 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
       if (!Array.isArray(plugin.textPlugins)) {
         plugin.textPlugins = [];
       }
+      for (const [name, overrides] of Object.entries(pluginOverrides)) {
+        const info = filePlugins.find((p) => p.name === name);
+        const module = info?.module || name.replace('(project_dir)', '');
+        plugin[module] = { ...((plugin[module] as Record<string, unknown>) || {}), ...overrides };
+      }
       config.plugin = plugin;
 
       await updateProjectConfig(projectId, { config, config_file_name: 'config.yaml' });
@@ -440,7 +460,7 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
       setFeedback({ type: 'error', message: `保存失败: ${err instanceof Error ? err.message : String(err)}` });
       return false;
     }
-  }, [projectDir, workersPerProject, language, numPerRequest, dynamicNumPerRequest, dynamicNumPerRequestMin, dynamicNumPerRequestMax, selectedFilePlugin, selectedBackend, translationGuideline]);
+  }, [projectDir, workersPerProject, language, numPerRequest, dynamicNumPerRequest, dynamicNumPerRequestMin, dynamicNumPerRequestMax, selectedFilePlugin, selectedBackend, translationGuideline, pluginOverrides, filePlugins]);
 
   // ── Step 5: Auto-extract names on entry ──
   useEffect(() => {
@@ -588,32 +608,53 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
   const renderStep2 = () => (
     <Panel title="导入文件" description="将待翻译的文件导入到项目的 gt_input 目录中，也可以跳过此步骤稍后手动添加。">
       <div
-        className="drop-zone"
+        className={`drop-zone${importedFiles.length > 0 ? ' drop-zone--filled' : ''}`}
         onDragOver={(e) => {
           e.preventDefault();
           e.currentTarget.classList.add('drop-zone--over');
         }}
-        onDragLeave={(e) => { e.currentTarget.classList.remove('drop-zone--over'); }}
+        onDragLeave={(e) => {
+          if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
+          e.currentTarget.classList.remove('drop-zone--over');
+        }}
         onDrop={(e) => void handleFileDrop(e)}
       >
-        <div className="drop-zone__icon"><Icon name="folder" /></div>
-        <div className="drop-zone__text">拖放文件到此处导入</div>
+        {importedFiles.length > 0 ? (
+          <>
+            <div className="drop-zone__files-header">
+              <strong className="drop-zone__text">已导入 {importedFiles.length} 个文件</strong>
+              <span>可继续拖放文件到此处添加</span>
+            </div>
+            <ul className="wizard-file-list" aria-label="已导入文件">
+              {importedFiles.map((file) => (
+                <li key={file} className="wizard-file-list__item">{file}</li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <>
+            <div className="drop-zone__icon"><Icon name="folder" /></div>
+            <div className="drop-zone__text">拖放文件到此处导入</div>
+          </>
+        )}
       </div>
       <div className="wizard-actions">
         <Button variant="secondary" onClick={() => void handleFilePick()}>选择文件</Button>
         <Button variant="secondary" onClick={() => void handleOpenInputFolder()} disabled={!gtInputDir}>打开输入文件夹</Button>
       </div>
       <div className="wizard-tip-card">
-        <strong>导入提示</strong>
-        <span>支持拖拽多个文件；若暂时跳过，可后续手动复制到 `gt_input` 目录。</span>
+        <strong>支持的文件类型</strong>
+        <span>文本与电子书：TXT、EPUB；字幕：SRT、LRC、VTT。</span>
+        <span>翻译数据：GalTransl / Mtool JSON、Translator++ XLSX。</span>
+        <span>Galgame 脚本直接提取：.ks、.scn、.ast、.asb、bgi、.cst、.cstl、.srcxml、.csx、.rld、.hcb、.soc、.tjs、.pbd、.sc、.s、.src、.ws2、.ybn。</span>
+        <span>部分脚本（如 .bin、.mes、.txt）需在文件插件设置中指定对应引擎。</span>
+        <span>无后缀的 BGI 脚本支持按文件头识别；若未识别，可在「常用设置」选择 msg-tool，并将脚本引擎设为 bgi。</span>
+        <span>支持拖拽多个文件；若暂时跳过，可后续手动复制到 <code>gt_input</code> 目录。</span>
       </div>
-      {importedFiles.length > 0 && (
-        <ul className="wizard-file-list">
-          {importedFiles.map((f, i) => (
-            <li key={i} className="wizard-file-list__item">{f}</li>
-          ))}
-        </ul>
-      )}
+      <div className="wizard-tip-card">
+        <strong>Galgame 脚本兼容性提示</strong>
+        <span>游戏脚本格式多变，自动提取不一定兼容所有游戏。建议导入并完成项目创建后，在「浏览文本」中确认文本与人名是否正确、是否有遗漏，再开始翻译。</span>
+      </div>
     </Panel>
   );
 
@@ -681,8 +722,26 @@ export function NewProjectWizard({ onOpenProject }: NewProjectWizardProps) {
             <option value={selectedFilePlugin}>{selectedFilePlugin}</option>
           ) : null}
         </CustomSelect>
+        {filePlugins.filter((p) => p.name === selectedFilePlugin && p.description).map((plugin) => (
+          <span key={plugin.name} className="field__hint" style={{ whiteSpace: 'pre-line' }}>{plugin.description}</span>
+        ))}
         <span className="field__hint">{describeFileDetection(fileDetection, filePlugins)}</span>
       </div>
+      {filePlugins.filter((p) => p.name === selectedFilePlugin && Object.keys(p.settings || {}).length > 0).map((plugin) => (
+        <div key={plugin.name} className="wizard-settings-grid__full">
+          <PluginSettingsEditor
+            plugin={plugin}
+            overrides={pluginOverrides[plugin.name] || {}}
+            onChange={(name, key, value) => {
+              setPluginOverrides((previous) => ({
+                ...previous,
+                [name]: { ...(previous[name] || {}), [key]: value },
+              }));
+              setSettingsSaved(false);
+            }}
+          />
+        </div>
+      ))}
       <div className="field">
         <span className="field__label">并发文件数</span>
         <input
