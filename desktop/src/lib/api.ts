@@ -606,21 +606,21 @@ export async function fetchProjectFiles(projectId: string) {
   return apiRequest<ProjectFilesResponse>(`/api/projects/${projectId}/files`);
 }
 
-export async function fetchProjectCache(projectId: string) {
+export async function fetchProjectCache(projectId: string, configFileName = 'config.yaml') {
   return apiRequest<{
     project_dir: string;
     cache_dir: string;
     files: FileEntry[];
     /** gt_input 里还没有缓存的输入文件（Cache/ 目录里看不到它们） */
     uncached_files?: FileEntry[];
-  }>(`/api/projects/${projectId}/cache`);
+  }>(`/api/projects/${projectId}/cache?config=${encodeURIComponent(configFileName)}`, { cache: 'no-store' });
 }
 
-export async function fetchCacheFile(projectId: string, filename: string) {
+export async function fetchCacheFile(projectId: string, filename: string, configFileName = 'config.yaml', refreshInput = false) {
   // no-store：缓存文件会被 Agent 的 patch/delete 工具改写，读它必须拿到磁盘上的当前内容。
   // 后端没给缓存头，浏览器/Electron 的 HTTP 缓存没有可用的过期与校验信息，不让它插手最稳。
   return apiRequest<CacheFileResponse>(
-    `/api/projects/${projectId}/cache/${encodeURIComponent(filename)}`,
+    `/api/projects/${projectId}/cache/${encodeURIComponent(filename)}?config=${encodeURIComponent(configFileName)}${refreshInput ? '&refresh_input=1' : ''}`,
     { cache: 'no-store' },
   );
 }
@@ -634,6 +634,21 @@ export async function saveCacheFile(projectId: string, filename: string, entries
       body: JSON.stringify({ filename, entries, config_file_name: configFileName || 'config.yaml' }),
     },
   );
+}
+
+export interface InputReextractResult {
+  refreshed: { filename: string; entries: number }[];
+  errors: { filename: string; error: string }[];
+  skipped: number;
+  total_entries: number;
+}
+
+export async function reextractMsgtoolInput(projectId: string, configFileName: string) {
+  return apiRequest<InputReextractResult>(`/api/projects/${projectId}/plugins/file_msgtool_script/reextract`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ config_file_name: configFileName }),
+  });
 }
 
 export async function deleteCacheEntry(projectId: string, filename: string, index: number) {

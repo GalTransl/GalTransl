@@ -351,11 +351,13 @@ class MsgToolCacheTests(unittest.TestCase):
             self.plugin().load_file(str(self.src))
             plugin = self.plugin(source_encoding="utf8")
             plugin.load_file(str(self.src))
+            plugin = self.plugin(source_encoding="utf8", script_type="cat-system")
+            plugin.load_file(str(self.src))
             self.tool.write_bytes(b"new tool version")
             plugin.load_file(str(self.src))
             (self.src.parent / "metadata.bin").write_bytes(b"metadata")
             plugin.load_file(str(self.src))
-            self.assertEqual(export.call_count, 4)
+            self.assertEqual(export.call_count, 5)
 
     def test_corrupt_cache_is_rebuilt(self):
         plugin = self.plugin()
@@ -369,6 +371,19 @@ class MsgToolCacheTests(unittest.TestCase):
             cached.write_text(json.dumps(payload), encoding="utf-8")
             self.assertEqual(plugin.load_file(str(self.src)), self.rows)
             self.assertEqual(export.call_count, 3)
+
+    def test_reload_replaces_persistent_result_and_failure_keeps_last_good_cache(self):
+        plugin = self.plugin()
+        refreshed = [{"message": "new source", "org_message": "new source", "index": 1}]
+        with patch.object(file_plugin, "_load_uncached", side_effect=[self.rows, refreshed, RuntimeError("bad engine")]) as export:
+            self.assertEqual(plugin.load_file(str(self.src)), self.rows)
+            self.assertEqual(plugin.reload_file(str(self.src)), refreshed)
+            self.assertEqual(self.plugin().load_file(str(self.src)), refreshed)
+            with self.assertRaisesRegex(RuntimeError, "bad engine"):
+                plugin.reload_file(str(self.src))
+            self.assertEqual(self.plugin().load_file(str(self.src)), refreshed)
+            self.assertEqual(export.call_count, 3)
+        self.assertEqual(self.src.read_bytes(), b"source")
 
     def test_disable_and_extra_args_bypass_cache(self):
         with patch.object(file_plugin, "_load_uncached", side_effect=lambda _: copy.deepcopy(self.rows)) as export:

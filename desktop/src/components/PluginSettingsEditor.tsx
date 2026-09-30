@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { Fragment, useEffect, useId, useState, type ReactNode } from 'react';
 import type { PluginInfo, PluginSettingSchema } from '../lib/api';
 import { CustomSelect } from './CustomSelect';
 
@@ -6,10 +6,11 @@ interface PluginSettingsEditorProps {
   plugin: PluginInfo;
   overrides: Record<string, unknown>;
   onChange: (pluginName: string, key: string, value: unknown) => void;
+  afterField?: { key: string; content: ReactNode };
 }
 
 /** Settings 保持运行时默认值，SettingsSchema 仅描述如何展示和编辑。 */
-export function PluginSettingsEditor({ plugin, overrides, onChange }: PluginSettingsEditorProps) {
+export function PluginSettingsEditor({ plugin, overrides, onChange, afterField }: PluginSettingsEditorProps) {
   const settings = plugin.settings || {};
   const keys = Object.keys(settings);
   const schema = plugin.settings_schema || {};
@@ -18,10 +19,13 @@ export function PluginSettingsEditor({ plugin, overrides, onChange }: PluginSett
   const renderFields = (fields: string[]) => (
     <div className="plugin-settings-panel__fields">
       {fields.map((key) => (
-        <PluginSettingRow key={key} settingKey={key} schema={schema[key] || {}}
-          defaultValue={settings[key]}
-          value={overrides[key] !== undefined ? overrides[key] : settings[key]}
-          onChange={(value) => onChange(plugin.name, key, value)} />
+        <Fragment key={key}>
+          <PluginSettingRow settingKey={key} schema={schema[key] || {}}
+            defaultValue={settings[key]}
+            value={overrides[key] !== undefined ? overrides[key] : settings[key]}
+            onChange={(value) => onChange(plugin.name, key, value)} />
+          {afterField?.key === key && afterField.content}
+        </Fragment>
       ))}
     </div>
   );
@@ -30,6 +34,7 @@ export function PluginSettingsEditor({ plugin, overrides, onChange }: PluginSett
     <div className="plugin-settings-panel">
       <div className="plugin-settings-panel__title">{plugin.display_name} 设置</div>
       {renderFields(common)}
+      {afterField && !keys.includes(afterField.key) && afterField.content}
       {advanced.length > 0 && (
         <details key={plugin.name} className="plugin-settings-advanced">
           <summary>高级设置（{advanced.length} 项）</summary>

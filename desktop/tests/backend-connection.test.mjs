@@ -21,6 +21,7 @@ const { outputText } = ts.transpileModule(source, {
 
 function loadApi({ native = true, dev = false, configured, invoke } = {}) {
   const requests = [];
+  const requestOptions = [];
   const exports = {};
   vm.runInNewContext(outputText, {
     exports,
@@ -32,21 +33,49 @@ function loadApi({ native = true, dev = false, configured, invoke } = {}) {
       return { invoke: invoke ?? (() => Promise.resolve({ url: 'http://127.0.0.1:45678' })) };
     },
     URL, AbortController, TextDecoder, setTimeout, clearTimeout,
-    fetch: async (url) => {
+    fetch: async (url, options) => {
       requests.push(url);
+      requestOptions.push(options);
       return url.includes('/api/agent/stream')
         ? new Response('event: agent\ndata: {"type":"close"}\n\n')
         : new Response(JSON.stringify({ jobs: [], version: 'test' }));
     },
   });
-  return { api: exports, requests };
+  return { api: exports, requests, requestOptions };
 }
+
+test('plugin settings can save and re-extract within the same project', async () => {
+  const { api, requests, requestOptions } = loadApi({ native: false });
+  const config = { plugin: { filePlugin: 'file_msgtool_script', file_msgtool_script: { source_encoding: 'utf8' } } };
+  await api.updateProjectConfig('project', { config, config_file_name: 'extract.yaml' });
+  await api.reextractMsgtoolInput('project', 'extract.yaml');
+  assert.equal(requestOptions[0].method, 'PUT');
+  assert.deepEqual(JSON.parse(requestOptions[0].body), { config, config_file_name: 'extract.yaml' });
+  assert.equal(new URL(requests[1]).pathname, '/api/projects/project/plugins/file_msgtool_script/reextract');
+  assert.equal(requestOptions[1].method, 'POST');
+  assert.deepEqual(JSON.parse(requestOptions[1].body), { config_file_name: 'extract.yaml' });
+});
 
 test('packaged startup cannot fall back to an unrelated backend on 12333', async () => {
   const { api, requests } = loadApi();
   assert.equal(api.getBackendBaseUrl(), '');
   await assert.rejects(api.fetchJobs(), /尚未就绪/);
   assert.equal(requests.length, 0);
+});
+
+test('input browsing and re-extraction use the selected configuration', async () => {
+  const { api, requests } = loadApi({ native: false });
+  await api.fetchProjectCache('project', '提取 & cp932.yaml');
+  await api.fetchCacheFile('project', 'chapter-}scene.ks.json', '提取 & cp932.yaml', true);
+  const listing = new URL(requests[0]);
+  const reload = new URL(requests[1]);
+  assert.equal(listing.searchParams.get('config'), '提取 & cp932.yaml');
+  assert.equal(reload.searchParams.get('config'), '提取 & cp932.yaml');
+  assert.equal(reload.searchParams.get('refresh_input'), '1');
+  assert.equal(decodeURIComponent(reload.pathname), '/api/projects/project/cache/chapter-}scene.ks.json');
+  await api.fetchCacheFile('project', 'scene.ks.json');
+  assert.equal(new URL(requests[2]).searchParams.get('config'), 'config.yaml');
+  assert.equal(new URL(requests[2]).searchParams.has('refresh_input'), false);
 });
 
 test('HTTP, AI translation, and Agent streams use the assigned port', async () => {

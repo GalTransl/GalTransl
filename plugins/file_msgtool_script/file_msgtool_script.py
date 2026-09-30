@@ -487,7 +487,7 @@ class file_plugin(GFilePlugin):
             for index, row in enumerate(rows, 1)
         )
 
-    def _load_cached(self, file_path: str) -> list:
+    def _load_cached(self, file_path: str, force_reload: bool = False) -> list:
         # extra_args 可以引用外部文件/目录或要求导出附加文件；这时必须实际调用工具。
         if not self.read_cache or self.extra_args:
             return self._load_uncached(file_path)
@@ -501,7 +501,7 @@ class file_plugin(GFilePlugin):
             try:
                 with open(cache_path, "r", encoding="utf-8") as cache:
                     payload = json.load(cache)
-                if (isinstance(payload, dict) and payload.get("fingerprint") == fingerprint
+                if (not force_reload and isinstance(payload, dict) and payload.get("fingerprint") == fingerprint
                         and self._valid_cached_rows(payload.get("rows"))):
                     LOGGER.debug(f"[{self.pname}] 提取缓存命中：{file_path}")
                     return payload["rows"]
@@ -531,11 +531,15 @@ class file_plugin(GFilePlugin):
                         pass
             return rows
 
-    def load_file(self, file_path: str) -> list:
+    def reload_file(self, file_path: str) -> list:
+        """忽略旧提取结果，成功后原子更新缓存；失败时保留上次结果。"""
+        return self.load_file(file_path, force_reload=True)
+
+    def load_file(self, file_path: str, force_reload: bool = False) -> list:
         """默认复用持久化提取缓存，每次返回独立列表供翻译流程修改。"""
         if not os.path.isfile(file_path):
             raise TypeError(f"文件不存在：{file_path}")
-        rows = self._load_cached(file_path)
+        rows = self._load_cached(file_path, force_reload=force_reload)
         out_path = self._output_path_for(file_path)
         if out_path:
             self._src_by_out[out_path] = os.path.abspath(file_path)

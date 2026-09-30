@@ -431,6 +431,9 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   const [loading, setLoading] = useState(true);
   const [refreshingFiles, setRefreshingFiles] = useState(false);
   const [loadingEntries, setLoadingEntries] = useState(false);
+  const entriesRequestRef = useRef(0);
+  const viewingFileRef = useRef(selectedFile);
+  viewingFileRef.current = selectedFile;
   const [error, setError] = useState<string | null>(null);
   const activeRef = useRef(active);
   const [searchTerm, setSearchTerm] = useState('');
@@ -579,7 +582,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       }
       setError(null);
       try {
-        const res = await fetchProjectCache(projectId);
+        const res = await fetchProjectCache(projectId, configFileName);
         // 已经切到别的项目：回来的是上一个项目的列表，写下去就是「B 的文件出现在 A 里」
         if (viewingProjectIdRef.current !== projectId) return;
         const cached = res.files.filter((f) => f.is_file && f.name.endsWith('.json'));
@@ -615,7 +618,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         }
       }
     },
-    [projectId],
+    [projectId, configFileName],
   );
 
   /**
@@ -776,10 +779,14 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   useEffect(() => {
     if (!projectId) return;
     // 切项目这一拍用桶 effect 交接过来的选中项（state 里那份还停在旧项目，见 pendingSelectionRef）
+    const request = ++entriesRequestRef.current;
     const handoff = pendingSelectionRef.current;
     pendingSelectionRef.current = null;
     const file = handoff && handoff.projectId === projectId ? handoff.file : selectedFile;
-    if (!file) return;
+    if (!file) {
+      setLoadingEntries(false);
+      return;
+    }
     // 如果 entriesMap 中有缓存（含未保存修改），直接使用
     const cached = entriesMapRef.current.get(file);
     if (cached) {
@@ -789,9 +796,9 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     }
     let cancelled = false;
     setLoadingEntries(true);
-    fetchCacheFile(projectId, file)
+    fetchCacheFile(projectId, file, configFileName)
       .then((res) => {
-        if (!cancelled) {
+        if (!cancelled && request === entriesRequestRef.current) {
           noteCachePresence(file, res.has_cache !== false);
           setEntries(res.entries);
           entriesMapRef.current.set(file, res.entries);
@@ -799,13 +806,13 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         }
       })
       .catch((err) => {
-        if (!cancelled) setError(normalizeError(err, '加载缓存内容失败'));
+        if (!cancelled && request === entriesRequestRef.current) setError(normalizeError(err, '加载缓存内容失败'));
       })
       .finally(() => {
-        if (!cancelled) setLoadingEntries(false);
+        if (!cancelled && request === entriesRequestRef.current) setLoadingEntries(false);
       });
     return () => { cancelled = true; };
-  }, [projectId, selectedFile, noteCachePresence]);
+  }, [projectId, selectedFile, configFileName, noteCachePresence]);
 
   const runGlobalSearch = useCallback(async () => {
     if (!projectId || !searchQuery.trim()) {
@@ -833,21 +840,30 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
 
   const refreshCurrentFile = useCallback(async () => {
     if (!projectId || !selectedFile || dirtyFiles.has(selectedFile)) return;
+    const request = ++entriesRequestRef.current;
+    const isCurrent = () => viewingProjectIdRef.current === projectId
+      && viewingFileRef.current === selectedFile && request === entriesRequestRef.current;
+    entriesMapRef.current.delete(selectedFile);
+    cleanEntriesMapRef.current.delete(selectedFile);
     setLoadingEntries(true);
+    setLocalError(null);
     try {
-      const res = await fetchCacheFile(projectId, selectedFile);
+      const res = await fetchCacheFile(projectId, selectedFile, configFileName);
       // entriesMapRef 早换成新项目的表了：这时候写进去等于把 B 的条目塞进 A
-      if (viewingProjectIdRef.current !== projectId) return;
+      if (!isCurrent()) return;
       noteCachePresence(selectedFile, res.has_cache !== false);
       entriesMapRef.current.set(selectedFile, res.entries);
       cleanEntriesMapRef.current.set(selectedFile, cloneEntries(res.entries));
       setEntries(res.entries);
+      setError(null);
     } catch (err) {
-      setLocalError(normalizeError(err, '刷新缓存内容失败'));
+      if (isCurrent()) setLocalError(normalizeError(err, '刷新缓存内容失败'));
     } finally {
-      setLoadingEntries(false);
+      if (isCurrent()) {
+        setLoadingEntries(false);
+      }
     }
-  }, [dirtyFiles, projectId, selectedFile, noteCachePresence]);
+  }, [dirtyFiles, projectId, configFileName, selectedFile, noteCachePresence]);
 
   useEffect(() => {
     if (!selectedFile) {
@@ -1056,7 +1072,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     setInfo(null);
 
     try {
-      const res = await fetchCacheFile(projectId, targetFile);
+      const res = await fetchCacheFile(projectId, targetFile, configFileName);
       if (viewingProjectIdRef.current !== projectId) return;
       const recoveredEntries = res.entries;
       noteCachePresence(targetFile, res.has_cache !== false);
@@ -1160,13 +1176,21 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
 
   const refreshVisibleData = useCallback(async () => {
     if (!projectId) return;
+    // 配置可能刚被修改：丢弃页面内的旧快照，下次打开其他文件也要重新读取。
+    // 未保存的译文继续保留在内存里。
+    for (const filename of entriesMapRef.current.keys()) {
+      if (!dirtyFiles.has(filename)) {
+        entriesMapRef.current.delete(filename);
+        cleanEntriesMapRef.current.delete(filename);
+      }
+    }
     await Promise.allSettled([
       loadCacheFiles(),
       runGlobalSearch(),
       loadProblems(),
       refreshCurrentFile(),
     ]);
-  }, [loadCacheFiles, loadProblems, projectId, refreshCurrentFile, runGlobalSearch]);
+  }, [dirtyFiles, loadCacheFiles, loadProblems, projectId, refreshCurrentFile, runGlobalSearch]);
 
   useEffect(() => {
     const wasActive = activeRef.current;
@@ -1256,7 +1280,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   const handleSelectFile = (file: string) => {
     if (file === selectedFile) return;
     // 先保存当前文件的修改到 entriesMap
-    if (selectedFile) {
+    if (selectedFile && dirtyFiles.has(selectedFile)) {
       entriesMapRef.current.set(selectedFile, entries);
     }
     prepareFileSwitch(file);
@@ -1375,7 +1399,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setScrollToIndex(index);
       return;
     }
-    if (selectedFile) {
+    if (selectedFile && dirtyFiles.has(selectedFile)) {
       entriesMapRef.current.set(selectedFile, entries);
     }
     prepareFileSwitch(filename);
@@ -1540,10 +1564,10 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                   <button
                     type="button"
                     className={`icon-btn icon-btn--refresh${refreshingFiles ? ' icon-btn--spinning' : ''}`}
-                    onClick={() => void loadCacheFiles()}
-                    disabled={refreshingFiles}
-                    title="刷新文件列表"
-                    aria-label="刷新文件列表"
+                    onClick={() => void refreshVisibleData()}
+                    disabled={refreshingFiles || loadingEntries}
+                    title="刷新文件列表与内容"
+                    aria-label="刷新文件列表与内容"
                   >
                     <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
                       <path d="M13.5 8a5.5 5.5 0 11-1.4-3.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />

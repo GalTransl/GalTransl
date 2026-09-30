@@ -178,6 +178,17 @@
   color: var(--color-text-muted);
 }
 
+.button.plugin-reextract-button {
+  align-self: flex-start;
+  width: fit-content;
+  min-height: 32px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
 .plugin-setting-choice {
   display: flex;
   align-items: center;

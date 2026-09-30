@@ -14,6 +14,7 @@ import os
 import tempfile
 import threading
 import unittest
+from unittest.mock import Mock, patch
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
@@ -152,6 +153,50 @@ class CacheSourceFallbackHttpTests(unittest.TestCase):
                 {"index": 2, "name": "", "pre_src": "ドルード、待って", "post_src": "ドルード、待って", "pre_dst": ""},
             ],
         )
+
+    def test_refresh_uses_selected_config_and_current_encoding(self):
+        # 默认配置是 JSON 插件，另一个配置选择 TXT + CP932，刷新必须使用所选配置。
+        source = os.path.join(self.project, INPUT_FOLDERNAME, "refresh.txt")
+        config = os.path.join(self.project, "extract.yaml")
+        self.addCleanup(os.remove, source)
+        self.addCleanup(os.remove, config)
+        with open(source, "w", encoding="cp932") as f:
+            f.write("日本語\n")
+        with open(config, "w", encoding="utf-8") as f:
+            f.write("common:\n  language: ja\nplugin:\n  filePlugin: file_plaintext_txt\n  file_plaintext_txt:\n    txt读取编码: cp932\n")
+        result = self._get("/cache/refresh.txt.json?config=extract.yaml&refresh_input=1")
+        self.assertFalse(result["has_cache"])
+        self.assertEqual([e["pre_src"] for e in result["entries"]], ["日本語"])
+        self.assertFalse(os.path.exists(os.path.join(self.project, CACHE_FOLDERNAME, "refresh.txt.json")))
+
+    def test_refresh_calls_plugin_reload_and_reports_extraction_failure(self):
+        with patch("GalTransl.server._ProjectFilePlugins") as plugins:
+            plugin = Mock()
+            plugins.return_value.get.return_value = (plugin, "file_msgtool_script")
+            plugin.reload_file.return_value = [{"message": "refreshed", "index": 1}]
+            result = self._get("/cache/a.json?refresh_input=1")
+            self.assertEqual(result["entries"][0]["pre_src"], "refreshed")
+            plugin.load_file.assert_not_called()
+            plugin.reload_file.assert_called_once()
+            plugin.reload_file.side_effect = RuntimeError("wrong engine")
+            with self.assertRaises(urllib.error.HTTPError) as raised:
+                self._get("/cache/a.json?refresh_input=1")
+            self.assertEqual(raised.exception.code, 500)
+            self.assertIn("wrong engine", json.load(raised.exception)["error"])
+
+    def test_refresh_preserves_existing_translation_cache(self):
+        self._write_cache("a.json", [{"index": 1, "pre_src": "old", "pre_dst": "译文"}])
+        target = os.path.join(self.project, CACHE_FOLDERNAME, "a.json")
+        self.addCleanup(os.remove, target)
+        with open(target, "rb") as f:
+            before = f.read()
+        with patch("GalTransl.server._load_input_file_entries") as extract:
+            result = self._get("/cache/a.json?refresh_input=1")
+            self.assertTrue(result["has_cache"])
+            self.assertEqual(result["entries"][0]["pre_dst"], "译文")
+            extract.assert_not_called()
+        with open(target, "rb") as f:
+            self.assertEqual(f.read(), before)
 
     def test_nested_input_file_is_found_through_the_escaped_cache_key(self):
         payload = self._read_cache_file("chapter-}b.json")

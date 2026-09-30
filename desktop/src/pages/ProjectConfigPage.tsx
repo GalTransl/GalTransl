@@ -2,12 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ProjectPageContext } from '../components/ProjectLayout';
 import { Panel } from '../components/Panel';
+import { Button } from '../components/Button';
 import { PageHeader } from '../components/PageHeader';
 import { EmptyState, ErrorState, InlineFeedback, LoadingState } from '../components/page-state';
 import {
   type PluginInfo,
+  type InputReextractResult,
   fetchProjectConfig,
   updateProjectConfig,
+  reextractMsgtoolInput,
   fetchPlugins,
   getBackendProfileNames,
   getDefaultBackendProfile,
@@ -41,6 +44,15 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   const [error, setError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [reextracting, setReextracting] = useState(false);
+  const [reextractResult, setReextractResult] = useState<InputReextractResult | null>(null);
+  const [reextractError, setReextractError] = useState<string | null>(null);
+  const reextractRequestRef = useRef(0);
+  const reextractBusyRef = useRef(false);
+  const configRef = useRef(config);
+  configRef.current = config;
+  const contextRef = useRef('');
+  contextRef.current = `${projectId}:${configFileName}`;
   const [searchParams] = useSearchParams();
   const [activeSection, setActiveSection] = useState<ConfigSectionKey>(() => {
     const s = searchParams.get('section');
@@ -71,6 +83,12 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   // Load config
   useEffect(() => {
     if (!projectId) return;
+    reextractRequestRef.current += 1;
+    reextractBusyRef.current = false;
+    setReextracting(false);
+    setReextractResult(null);
+    setReextractError(null);
+    setSaving(false);
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -231,7 +249,8 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   }, []);
 
   const handleSave = useCallback(async () => {
-    if (!projectId || !config) return;
+    if (!projectId || !config) return false;
+    const context = `${projectId}:${configFileName}`;
     setSaving(true);
     setError(null);
     setSaveSuccess(false);
@@ -239,14 +258,45 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
       await updateProjectConfig(projectId, {
         config,
         config_file_name: configFileName });
-      setSaveSuccess(true);
-      setDirty(false);
+      if (contextRef.current === context && configRef.current === config) {
+        setSaveSuccess(true);
+        setDirty(false);
+      }
+      return true;
     } catch (err) {
-      setError(normalizeError(err, '保存配置失败'));
+      if (contextRef.current === context) setError(normalizeError(err, '保存配置失败'));
+      return false;
     } finally {
-      setSaving(false);
+      if (contextRef.current === context) setSaving(false);
     }
   }, [projectId, config, configFileName]);
+
+  const handleReextract = useCallback(async () => {
+    if (!projectId || !config || saving || reextractBusyRef.current) return;
+    reextractBusyRef.current = true;
+    const request = ++reextractRequestRef.current;
+    const isCurrent = () => request === reextractRequestRef.current;
+    setReextracting(true);
+    setReextractResult(null);
+    setReextractError(null);
+    try {
+      const saved = await handleSave();
+      if (!isCurrent()) return;
+      if (!saved) {
+        setReextractError('配置保存失败，未开始重新提取。');
+        return;
+      }
+      const result = await reextractMsgtoolInput(projectId, configFileName);
+      if (isCurrent()) setReextractResult(result);
+    } catch (err) {
+      if (isCurrent()) setReextractError(normalizeError(err, '重新提取原文失败'));
+    } finally {
+      if (isCurrent()) {
+        reextractBusyRef.current = false;
+        setReextracting(false);
+      }
+    }
+  }, [projectId, config, configFileName, saving, handleSave]);
 
   // Scroll to active section
   const handleSectionChange = useCallback((section: ConfigSectionKey) => {
@@ -291,7 +341,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
           onSave={() => void handleSave()}
           saving={saving}
           dirty={dirty}
-          disabled={!config}
+          disabled={!config || reextracting}
         />
 
         <div className="project-config-page__main" ref={mainRef}>
@@ -302,7 +352,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
             <InlineFeedback className="inline-alert--floating" tone="success" title="配置已保存" description="当前项目配置已成功写入磁盘。" onDismiss={() => setSaveSuccess(false)} />
           )}
 
-          <div key={yamlView ? 'yaml' : activeSection} className="section-fade-in">
+          <fieldset key={yamlView ? 'yaml' : activeSection} className="section-fade-in project-config-fields" disabled={saving || reextracting}>
           {yamlView ? (
             <Panel title="YAML源码" description="直接编辑YAML配置源码（只读预览，修改请使用上方表单）">
               <pre className="yaml-preview">
@@ -363,6 +413,32 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
                     setDirty(true);
                   }}
                   onPluginSettingChange={handlePluginSettingChange}
+                  reextractAction={(
+                    <div className="plugin-setting-row">
+                      <span className="plugin-setting-row__label">原文提取</span>
+                      <div className="plugin-setting-row__control">
+                        <Button type="button" variant="secondary" className="plugin-reextract-button"
+                          onClick={() => void handleReextract()} disabled={saving || reextracting}>
+                          {reextracting ? (saving ? '正在保存配置…' : '正在重新提取…') : '重新提取原文'}
+                        </Button>
+                        <span className="plugin-setting-row__hint">保存当前配置，并重新提取此插件处理的全部输入文件。已有翻译缓存会保留。</span>
+                        {reextractError && <p role="alert">{reextractError}</p>}
+                        {reextractResult && (
+                          <div role="status">
+                            {reextractResult.refreshed.length === 0 && reextractResult.errors.length === 0
+                              ? '未找到由此插件处理的输入文件。'
+                              : `重新提取完成：成功 ${reextractResult.refreshed.length} 个文件，共 ${reextractResult.total_entries} 句；失败 ${reextractResult.errors.length} 个文件。`}
+                            {reextractResult.errors.length > 0 && (
+                              <details open>
+                                <summary>失败文件及原因</summary>
+                                {reextractResult.errors.map((item) => <p key={item.filename}>{item.filename}：{item.error}</p>)}
+                              </details>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 />
               )}
 
@@ -446,7 +522,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
               )}
             </>
           )}
-          </div>
+          </fieldset>
 
         </div>
       </div>

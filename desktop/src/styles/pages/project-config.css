@@ -978,3 +978,9 @@
 @media (prefers-reduced-motion: no-preference) and (prefers-reduced-motion: reduce) {
   .section-fade-in { animation: none; }
 }
+.project-config-fields {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
