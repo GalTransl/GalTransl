@@ -66,6 +66,7 @@ PERMISSION_TOOL_RISK: dict[str, str] = {
 # 要停下来还得先点确认是最糟的设计，所以任何模式都直接放行。
 PERMISSION_READ_TOOLS: frozenset[str] = frozenset({
     "get_project_overview",
+    "get_plugin_settings",
     "list_input_files",
     "read_input_file",
     "search_input",

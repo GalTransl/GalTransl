@@ -10,6 +10,7 @@ from typing import Any, TYPE_CHECKING
 from GalTransl.Agent.core import DEFAULT_CONFIG_FILE
 from GalTransl.Agent.models import AgentToolError
 from GalTransl.Agent.tools.common import _change, _diff_lines
+from GalTransl.Agent.tools.plugin_settings import catalog_for_updates, set_plugin_value, validate_plugin_value
 
 if TYPE_CHECKING:
     from GalTransl.Agent.runner import AgentRunner
@@ -439,7 +440,7 @@ def _get_config_key(config: dict[str, Any], dotted: str) -> Any:
 
 
 def _plan_config_updates(
-    config: dict[str, Any], updates: list[Any]
+    config: dict[str, Any], updates: list[Any], plugin_catalog: dict | None = None
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """把 updates 解析成「要改哪些键、改成什么」（**只读**：在副本上算，不动传入的 config）。
 
@@ -468,6 +469,19 @@ def _plan_config_updates(
             })
             continue
         value = _parse_config_value(item.get("value"))
+        if key == "plugin" or (key.startswith("plugin.") and key not in ("plugin.filePlugin", "plugin.textPlugins")):
+            reason = validate_plugin_value(probe, key, value, plugin_catalog or {})
+            if reason:
+                skipped.append({"key": key, "reason": reason})
+                continue
+            _, module, setting = key.split(".", 2)
+            current = probe.get("plugin", {}).get(module, {})
+            before = current.get(setting, _MISSING)
+            set_plugin_value(probe, key, value)
+            applied.append({"key": key, "value": value})
+            changes.append(_change(key, None if before is _MISSING else before, value,
+                                   "add" if before is _MISSING else "replace"))
+            continue
         before = _get_config_key(probe, key)
         if _set_config_key(probe, key, value):
             applied.append({"key": key, "value": value})
@@ -481,8 +495,7 @@ def _plan_config_updates(
 def _tool_update_project_config(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """修改项目配置：读-改-写回（与桌面端「项目配置」页同一通道）。
 
-    只允许改已存在的键，防止模型凭空捏造配置项；键名与
-    get_project_overview 返回的 config/config_field_descriptions 一致。"""
+    普通键必须已存在；插件设置允许新增声明过的键，并验证类型与选项。"""
     updates = args.get("updates")
     if not isinstance(updates, list) or not updates:
         raise AgentToolError("updates must be a non-empty array of {key, value}")
@@ -495,9 +508,12 @@ def _tool_update_project_config(runner: AgentRunner, args: dict[str, Any]) -> An
 
     # 先在一份副本上算出「哪些键、改成什么」（与审批卡上的预览同一份判断），
     # 再把同一批改动打到真 config 上——同一个 _set_config_key、同样顺序。
-    applied, skipped, changes = _plan_config_updates(config, updates)
+    applied, skipped, changes = _plan_config_updates(config, updates, catalog_for_updates(runner, updates))
     for item in applied:
-        _set_config_key(config, item["key"], item["value"])
+        if item["key"].startswith("plugin.") and item["key"] not in ("plugin.filePlugin", "plugin.textPlugins"):
+            set_plugin_value(config, item["key"], item["value"])
+        else:
+            _set_config_key(config, item["key"], item["value"])
 
     if not applied:
         return {"updated": 0, "applied": [], "skipped": skipped or [{"key": "", "reason": "updates 为空"}]}

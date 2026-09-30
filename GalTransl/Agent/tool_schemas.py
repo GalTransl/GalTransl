@@ -23,6 +23,16 @@ AGENT_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "get_plugin_settings",
+            "description": "发现当前项目可用的文件/文本插件设置（项目内同名插件优先）。返回 Settings 默认值、项目覆盖后的生效值、SettingsSchema 中文说明/选项/范围及可写完整路径。敏感值隐藏且不可通过 Agent 修改。调整插件前先调用；可用 update_project_config 新增插件声明的缺省键。",
+            "parameters": {"type": "object", "properties": {
+                "plugin_name": {"type": "string", "description": "可选插件模块名，例如 file_msgtool_script；省略时列出全部插件。"}
+            }},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "list_input_files",
             "description": "列出待翻译的输入文件（原文）与每个文件解析出的条数，供估工作量与挑选代表性文件（不必再逐个 read_input_file 数句子）。条数是原文解析出的条数（文本插件如「跳过无日文句」还没跑，可能偏大）；**只用于估工作量，不代表进度**（不管这个文件有没有缓存）——进度看 get_project_overview 的 files_translated/files_total。文件很多时默认只返回 100 个（order=even：**均匀采样**，含首尾、等距摊满整个清单，不是前 100 个；sentences_total 仍是整份清单的合计），要缩小范围用 grep（文件名子串），换挑选方式用 order。返回 Markdown 表格 + 文字说明（格式见系统提示）。",
             "parameters": {
@@ -318,7 +328,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "update_project_config",
-            "description": "修改项目配置（与桌面端「项目配置」页同一通道）。键名与 get_project_overview 返回的 config/config_field_descriptions 一致（如 \"common.gpt.contextNum\"、\"common.language\"、\"common.gpt.translation_guideline\"），只允许改已存在的键。适合调整翻译参数、切换翻译规范文件、启停问题检测项等；改完对新启动的翻译任务生效。",
+            "description": "修改项目配置（与桌面端「项目配置」页同一通道）。键名与 get_project_overview 返回的 config/config_field_descriptions 一致（如 \"common.gpt.contextNum\"、\"common.language\"、\"common.gpt.translation_guideline\"），普通配置只允许改已存在的键；插件设置先用 get_plugin_settings 查看，可新增 Settings 声明的非敏感键，并验证类型、选项和范围。适合调整翻译参数、切换翻译规范文件、启停问题检测项等；改完对新启动的翻译任务生效。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -328,7 +338,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                         "items": {
                             "type": "object",
                             "properties": {
-                                "key": {"type": "string", "description": "配置键的点号路径，如 \"common.gpt.contextNum\"。说明见 get_project_overview 的 config_field_descriptions。"},
+                                "key": {"type": "string", "description": "配置键的点号路径，如 \"common.gpt.contextNum\"。普通配置说明见 get_project_overview 的 config_field_descriptions；插件键如 plugin.file_msgtool_script.jis_substitution，声明见 get_plugin_settings。"},
                                 "value": {"description": "新值，类型跟随配置原值（数字/布尔/字符串/列表）。"},
                             },
                             "required": ["key", "value"],

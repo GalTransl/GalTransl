@@ -15,6 +15,10 @@ type ToolMeta = {
 };
 
 const TOOL_META: Record<string, ToolMeta> = {
+  get_plugin_settings: {
+    action: '查看插件设置', running: '正在查看插件设置', verb: '查看', icon: 'plug',
+    summary: (args) => String(args?.plugin_name || '全部插件'),
+  },
   get_project_overview: {
     action: '了解项目',
     running: '了解项目',

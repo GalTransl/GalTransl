@@ -1181,17 +1181,22 @@ def _count_input_file_sentences(
     return counts
 
 
-def _scan_plugins() -> list[dict[str, Any]]:
+def _scan_plugins(project_dir: str = "") -> list[dict[str, Any]]:
     """Scan the plugins directory and return plugin metadata."""
     from GalTransl.PluginSettings import normalize_settings_schema
     plugins_dir = os.path.abspath("plugins")
     result = []
-    if not os.path.isdir(plugins_dir):
-        return result
-    for name in sorted(os.listdir(plugins_dir)):
-        yaml_path = os.path.join(plugins_dir, name, f"{name}.yaml")
-        if not os.path.isfile(yaml_path):
-            continue
+    candidates = {}
+    roots = [plugins_dir]
+    if project_dir:
+        roots.append(os.path.join(project_dir, "plugins"))
+    for root in roots:
+        if os.path.isdir(root):
+            for name in os.listdir(root):
+                path = os.path.join(root, name, f"{name}.yaml")
+                if os.path.isfile(path):
+                    candidates[name] = path
+    for name, yaml_path in sorted(candidates.items()):
         try:
             info = _read_yaml_file(yaml_path)
             core = info.get("Core", {})
@@ -1731,6 +1736,10 @@ def build_handler(registry: JobRegistry):
                 return parse_qs(urlparse(handler.path).query).get("config", ["config.yaml"])[0]
 
             # GET /api/projects/:id/config
+            if sub_path == "/plugins":
+                self._send_json({"plugins": _scan_plugins(project_dir)})
+                return
+
             if sub_path == "/config":
                 config_name = parse_qs(urlparse(self.path).query).get("config", ["config.yaml"])[0]
                 config_path = os.path.join(project_dir, config_name)

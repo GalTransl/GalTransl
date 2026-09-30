@@ -8,6 +8,7 @@ from typing import Any, TYPE_CHECKING
 from GalTransl.Agent.core import RUNTIME_ERRORS_PER_QUERY, _log
 from GalTransl.Agent.models import AgentToolError
 from GalTransl.Agent.tools.project import _backend_summary
+from GalTransl.Agent.tools.plugin_settings import encoding_recovery
 
 if TYPE_CHECKING:
     from GalTransl.Agent.models import AgentState
@@ -219,6 +220,9 @@ def _tool_wait(runner: AgentRunner, args: dict[str, Any]) -> Any:
         }
         if job_error:
             out["job_error"] = job_error
+            recovery = encoding_recovery(job_error)
+            if recovery:
+                out["recovery"] = recovery
         return out
     _log(f"  ⏳ 等待结束，共 {elapsed_ms / 1000:.1f}s")
     if job_id:
@@ -405,6 +409,11 @@ def _tool_get_runtime(runner: AgentRunner, _args: dict[str, Any]) -> Any:
         },
         "recent_errors": fresh_errors,
     }
+    if job.get("error"):
+        result["job_error"] = str(job["error"])
+        recovery = encoding_recovery(result["job_error"])
+        if recovery:
+            result["recovery"] = recovery
     if pending_errors:
         # 还有没发完的新错误：说明这次报错很密集，下次查询继续给
         result["recent_errors_pending"] = pending_errors

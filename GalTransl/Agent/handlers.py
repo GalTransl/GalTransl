@@ -37,6 +37,7 @@ from GalTransl.Agent.tools.project import (
     _tool_write_project_guideline,
 )
 from GalTransl.Agent.tools.search import _tool_search_input
+from GalTransl.Agent.tools.plugin_settings import _tool_get_plugin_settings
 
 if TYPE_CHECKING:
     from GalTransl.Agent.runner import AgentRunner
@@ -44,6 +45,7 @@ if TYPE_CHECKING:
 
 _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "get_project_overview": _tool_get_project_overview,
+    "get_plugin_settings": _tool_get_plugin_settings,
     "update_project_config": _tool_update_project_config,
     "list_input_files": _tool_list_input_files,
     "read_input_file": _tool_read_input_file,

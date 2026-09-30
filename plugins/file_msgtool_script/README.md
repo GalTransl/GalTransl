@@ -27,6 +27,12 @@
 
 关闭 JIS 替换后恢复原有回填流程，不生成或更新 UIF 配置。
 
+## Agent 调整设置
+
+Agent 可调用 `get_plugin_settings(plugin_name="file_msgtool_script")` 查看默认值、项目生效值、中文选项说明和完整配置路径。即使项目 YAML 尚未包含某项，也可通过 `update_project_config` 新增插件声明的设置，例如 `plugin.file_msgtool_script.jis_substitution: true`；未知键、错误类型和无效选项会被拒绝，写入仍遵循当前 Agent 权限模式及审批预览。
+
+回填编码失败时，`wait` 和 `get_runtime` 会返回完整错误及结构化修复指引：先查询设置，再依据游戏兼容性选择 JIS 替换或调整 `plugin.file_msgtool_script.patched_encoding`。只改回填配置后可调用 `start_translation(translator="rebuildr")` 从缓存重新构建，并等待任务成功；使用 JIS 时仍须部署 UIF/对应字体。
+
 ## 字典来源
 
 `subs_cn_jp.json`（2,999 组映射）与 `uif_config.json` 模板复制自 [SExtractor](https://github.com/satan53x/SExtractor)，版本 `8d8d976fd04ae54e7c677705af937273d04a376a` 的 `src/subs_cn_jp.json`、`src/uif_config.json`。替换规则参考 `src/helper_text.py` 的 `generateSubsJis` / `generateSubsConfig`，字典由 SExtractor 注明最初来自 GalTransl_DumpInjector。SExtractor 和本项目均使用 GPL-3.0 许可证，详见仓库根目录的 `LICENSE`。

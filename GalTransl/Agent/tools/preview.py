@@ -24,6 +24,7 @@ from GalTransl.Agent.tools.problems import (
     _plan_problem_filter,
 )
 from GalTransl.Agent.tools.project import _plan_config_updates
+from GalTransl.Agent.tools.plugin_settings import catalog_for_updates
 
 if TYPE_CHECKING:
     from GalTransl.Agent.runner import AgentRunner
@@ -184,7 +185,7 @@ def _preview_config_update(runner: AgentRunner, args: dict[str, Any]) -> dict[st
     config = data.get("config") if isinstance(data, dict) else None
     if not isinstance(config, dict):
         return None
-    _, _, changes = _plan_config_updates(config, updates)
+    _, _, changes = _plan_config_updates(config, updates, catalog_for_updates(runner, updates))
     if not changes:
         return None
     return {"changes": changes}
