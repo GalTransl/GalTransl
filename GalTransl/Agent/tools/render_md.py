@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from typing import Any
 
 from GalTransl.Agent.core import _log
 from GalTransl.Agent.tools.common import _context_phrase
+
+
+def _tool_result_json(result: Any) -> str:
+    """模型消息的 JSON fallback：只去掉结构空白，正文、字段和 Unicode 原样保留。"""
+    return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
 
 
 # ---- Markdown 表格输出（当前启用）----

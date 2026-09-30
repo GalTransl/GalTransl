@@ -574,12 +574,10 @@ def _with_cache_control(message: dict[str, Any]) -> dict[str, Any]:
     """给一条消息的正文末尾挂 cache_control（Anthropic 的断点语法）。
 
     content 是纯字符串时包成单块数组——这是走 OpenAI 兼容接口表达 Anthropic 断点
-    的唯一方式。只有 tool_calls、没有正文的 assistant 消息，断点挂在 tool_calls 上。
+    的唯一方式。只有 tool_calls、没有正文的 assistant 消息，使用消息级断点。
     """
     content = message.get("content")
-    if isinstance(content, str):
-        if not content:
-            return message
+    if isinstance(content, str) and content:
         return {
             **message,
             "content": [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}],
@@ -613,7 +611,10 @@ def _apply_prompt_cache(
         message = out[index]
         if _is_internal_message(message):
             continue  # 瞬时注入的消息下一轮不会以同样形式出现，标记它等于白写
-        out[index] = _with_cache_control(message)
+        cached = _with_cache_control(message)
+        if cached is message:
+            continue  # 空消息没有可标记内容，不消耗断点名额
+        out[index] = cached
         marked += 1
     cached_tools = list(tools)
     if cached_tools:

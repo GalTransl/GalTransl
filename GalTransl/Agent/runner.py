@@ -79,7 +79,7 @@ from GalTransl.Agent.prompts import (
 from GalTransl.Agent.tool_schemas import AGENT_TOOLS
 from GalTransl.Agent.tools.ask import ASK_WAIT_TICK, _normalize_ask_answers
 from GalTransl.Agent.tools.preview import _preview_tool_changes
-from GalTransl.Agent.tools.render_md import _render_tool_result_table
+from GalTransl.Agent.tools.render_md import _render_tool_result_table, _tool_result_json
 
 if TYPE_CHECKING:
     from GalTransl.Agent.models import AgentState, PendingMessage
@@ -450,7 +450,7 @@ class AgentRunner:
                         self._persist_message({
                             "role": "tool",
                             "tool_call_id": tc2["id"],
-                            "content": json.dumps({"error": note, "status": "stopped"}, ensure_ascii=False),
+                            "content": _tool_result_json({"error": note, "status": "stopped"}),
                         })
                         self._emit("tool_result", {
                             "id": tc2["id"], "name": tc2["name"], "ok": False,
@@ -473,7 +473,7 @@ class AgentRunner:
                         self._emit("tool_call", {"id": call_id, "name": name, "arguments": tc["arguments"]})
                         err = f"参数 JSON 解析失败：{exc}"
                         self._emit("tool_result", {"id": call_id, "name": name, "ok": False, "error": err, "duration_ms": 0})
-                        self._persist_message({"role": "tool", "tool_call_id": call_id, "content": json.dumps({"error": err}, ensure_ascii=False)})
+                        self._persist_message({"role": "tool", "tool_call_id": call_id, "content": _tool_result_json({"error": err})})
                         continue
 
                     safe_args = _sanitize_tool_args(args)
@@ -504,12 +504,12 @@ class AgentRunner:
                                 "duration_ms": duration_ms,
                             },
                         )
-                        content_str = rendered if rendered is not None else json.dumps(result, ensure_ascii=False)
+                        content_str = rendered if rendered is not None else _tool_result_json(result)
                     except AgentToolError as exc:
                         duration_ms = int((time.time() - started) * 1000)
                         _log(f"  ❌ 工具失败: {name} 耗时 {duration_ms}ms -> {exc}")
                         self._emit("tool_result", {"id": call_id, "name": name, "ok": False, "error": str(exc), "duration_ms": duration_ms})
-                        content_str = json.dumps({"error": str(exc)}, ensure_ascii=False)
+                        content_str = _tool_result_json({"error": str(exc)})
                     finally:
                         self._active_tool_call_id = ""
                     self._persist_message({"role": "tool", "tool_call_id": call_id, "content": content_str})
@@ -741,12 +741,14 @@ class AgentRunner:
 
     def _create_stream(self, *, include_usage: bool) -> Any:
         """发一次流式请求（不做重试，重试由外层的 _stream_llm_attempt 与重试循环负责）。"""
-        messages = self._messages_for_request()
+        messages = self._messages_for_request(strip_internal=False)
         tools = AGENT_TOOLS
         if self._prompt_caching:
             # 只对认这套断点的后端注入（见 _resolve_prompt_caching）：Anthropic 系
             # 需要显式 cache_control，OpenAI 兼容的多数实现是服务端自动前缀缓存。
             messages, tools = _apply_prompt_cache(messages, tools)
+        # 断点选择依赖内部标记；选择后再剥掉，不能提前丢失临时消息的身份。
+        messages = [_strip_internal_fields(message) for message in messages]
         kwargs: dict[str, Any] = {
             "model": self._model,
             "messages": messages,
@@ -758,11 +760,12 @@ class AgentRunner:
             kwargs["stream_options"] = {"include_usage": True}
         return self._openai_client.chat.completions.create(**kwargs)
 
-    def _messages_for_request(self) -> list[dict[str, Any]]:
+    def _messages_for_request(self, *, strip_internal: bool = True) -> list[dict[str, Any]]:
         """发请求前的消息列表：剥掉内部标记，并按需补齐 thinking 模式的思考字段。
 
         内部标记（`_compact_instruction` / `_compact_summary` 这些 `_` 开头的键）只在
         内存里用，第三方 OpenAI 兼容端点收到陌生字段可能直接 400，必须剥掉。
+        strip_internal=False 仅供缓存断点选择使用，_create_stream 会在发送前统一剥除。
 
         DeepSeek（及同类 thinking 模式）要求：只要请求带了 tools，历史里每条 assistant
         消息都必须把当初的 reasoning_content 回传——**即使该轮模型没有实际进行工具调用**，
@@ -783,7 +786,7 @@ class AgentRunner:
         # 中途退出的回合会留下"有 tool_calls、缺 tool 响应"的残缺历史：补占位结果后再发，
         # 否则整份请求不合法（provider 直接 400，见 _messages_with_tool_placeholders）
         for message in _messages_with_tool_placeholders(self.state.messages):
-            clean = _strip_internal_fields(message)
+            clean = _strip_internal_fields(message) if strip_internal else message
             if field and message.get("role") == "assistant" and field not in message:
                 clean = {**clean, field: ""}
             messages.append(clean)

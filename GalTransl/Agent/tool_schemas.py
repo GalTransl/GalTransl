@@ -62,7 +62,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "search_input",
-            "description": "在**待翻译原文**里搜关键词或说话人（read_transl_cache 搜索（action=search）的原文侧对应工具：那边搜缓存=原文+译文+问题，这边只搜还没翻译的原文全文）。query 为关键词，field 取 all/src（原文正文）/name（说话人）；传 context=N 让每条命中再带上 N 句上文（默认只给上文，要前后都给传 only_preceding=false；上下文行的 index 带 *）。field=all 时顶层 matched_in 汇总命中在原文还是说话人。典型用途：定译法/收字典前先查某个称呼或专有名词在全篇出现过几次、都出现在哪些上下文（出现次数与说话人是「该不该收、收哪个写法」的依据），以及比 read_input_file 逐段读更省 token 地定位语境；命中的 filename+index 可直接交给 read_input_file 精读。传 filename 只搜某个输入文件（来自 list_input_files），留空搜全部输入文件——**每次搜索都要把涉及的输入文件过一遍文件插件（比搜缓存慢），要缩小范围就传 filename**。注意译文侧的问题（漏译/残留日文/译名是否统一）不在原文里，那些用 read_transl_cache 的 action=search。命中多时分页看：整页最多 200 行，limit 是本页最多几条命中（默认 100、最大 200；带 context 时命中上限按行数换算，如 context=3 → 最多 28 条），offset 是跳过前几条命中；结果里的 returned 是本页命中数、has_more 表示还有下一批，还有就把 offset 加上 returned 再查一次。",
+            "description": "在待翻译原文中搜索关键词或说话人（field=all/src/name），用于定位语境与统计称呼出现次数；译文/问题用 read_transl_cache(action=search)。filename 留空搜全项目，指定可减少文件插件解析开销。返回 filename+index 可交给 read_input_file 精读；field=all 的 matched_in 汇总原文/说话人命中。context 默认只加上文，only_preceding=false 加前后文，上下文 index 带 *。整页最多 200 行；total 为总命中数，returned 为本页命中数（不含上下文行）；has_more 时下一页 offset += returned。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -430,26 +430,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "read_transl_cache",
             "description": (
-                "读翻译缓存（译文）的唯一入口，action 分三种："
-                "①list = 列出缓存文件与各文件条目数（文件很多时默认只给 100 个，order=even 是**均匀采样**、含首尾，"
-                "不是前 100 个；grep 按文件名过滤，limit 调数量，上限 500）；"
-                "②read = 读某个缓存文件（filename）的条目：留空 index 返回前 30 条，指定 index 只返回那些条目；"
-                "默认只返回必要字段（index/说话人/原文/译文/问题，以及确实非空或与原文不同的附加字段），要看别的传 fields；"
-                "grep 只留命中的条目（字符串 = 在所选字段里搜文本，数组 = 这些字段都非空）；"
-                "③search = 在缓存里搜 query（field 选 all/src/dst/problem；filename 可选，只搜某个文件），"
-                "命中多时分页：整页最多 200 行，limit 是本页最多几条命中（默认 100、最大 200），offset 跳过前几条，"
-                "has_more 表示还有，下一页 offset 加上 returned；field=all 时 matched_in 汇总命中在哪一侧。"
-                "read 和 search 都可以传 context=N 给目标条目/每条命中带 N 句上文（默认只给上文，前后都要传 only_preceding=false；"
-                "上下文行的 index 带 *，那不是点名/命中的条目）；trans_by 逐条只给少数派，多数派记在 majority_trans_by。"
-                "read 的文件**还没翻译过（没有缓存文件）时不会报错，而是回落到原文**：返回的条目只有原文（pre_src/post_src 同一份），译文与问题为空——"
-                "想看某篇还没翻的原文可以直接读它，不必换 read_input_file；反过来，读到译文为空就说明这个文件还没翻，别当成漏译。"
-                "不传 action 时按参数推断：有 query 是 search，有 filename 是 read，否则是 list。"
-                "返回 Markdown 表格 + 文字说明（格式见系统提示）。"
-                "要把某条缓存展示给用户时，在回复里单独一行写 $transl_cache(\"<缓存文件名>\", <行号>)"
-                "（行号 = 条目 index，区间 12-15 / 列表 12,20 均可），界面会把它渲染成那几行缓存的卡片。"
-                "例：read_transl_cache(action=\"list\", grep=\"sc_2\")；"
-                "read_transl_cache(action=\"read\", filename=\"sc_2_st01.txt.json\", index=\"33-40\", context=3)；"
-                "read_transl_cache(action=\"search\", query=\"ドルード\", field=\"src\", context=3)。"
+                "翻译缓存的统一入口：list 列文件与条数，read 按 filename/index 读条目，search 搜原文/译文/问题。省略 action 时有 query→search，有 filename→read，否则 list。list 默认均匀采样而非前100个。read 默认精简字段，其它列用 fields；无缓存时回落到原文，译文/问题为空不代表漏译。read/search 的 context 默认只给上文，only_preceding=false 给前后文；上下文 index 带 *。search 整页最多200行，returned 仅计命中，has_more 时下一页 offset += returned；field=all 的 matched_in 汇总命中侧，majority_trans_by 记录逐行省略的多数派模型。返回 Markdown 表格与计数/提示。向用户展示缓存可单独一行写 $transl_cache(\"<缓存文件名>\", <index>)，支持区间/列表，界面会渲染为缓存卡片。"
             ),
             "parameters": {
                 "type": "object",
@@ -606,20 +587,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "run_subagents",
             "description": (
-                "派一批子代理并行干活，等它们全部跑完，把每份报告收回来。子代理有自己的上下文与"
-                "受限工具集，干活过程不进你的上下文，返回给你的只有每份报告。两种角色："
-                "**proofread（校对）**——只能读缓存/人名表/规范/问题清单，加写缓存条目的「校对批注」"
-                "（proofread_comment，校对建议与润色建议都写这里），改不了译文；适合翻译完成后逐文件校对，"
-                "返回它写了哪些 index 的疑问，你用 read_transl_cache 读那些 proofread_comment、改完译文再清空它。"
-                "**explore（原文探索）**——只读原文与 GPT 字典、不写任何文件；用来补 GenDic 覆盖不到的"
-                "昵称/专有名词/称呼，以及给翻译规范提建议，结论在你的报告里由你汇总落地"
-                "（save_dict / write_project_guideline）。explore 要通读原文、**很费 token**，"
-                "属于可选项：派之前先用 ask_user 征得用户同意。"
-                f"一次最多 {SUBAGENT_MAX_TASKS} 个，要它们重点看什么就写进 brief。"
-                '要并行多个又不想写多条任务：一条任务写 file:"*" + count:N 就展开成 N 个'
-                "（brief 只写一遍）。"
-                "file / count / indexes 三个维度互相独立、任意组合：file 选谁（支持选择器）、"
-                "count 切几份（对任何 file 都生效）、indexes 取哪段。"
+                f"并行派发独立上下文、受限工具的子代理，等待全部结束，只回报告与批注位置，不回中间过程。proofread 只读缓存/人名表/规范/问题并写 proofread_comment（校对或润色意见），不能改译文；主代理按批注复核、修改译文后清空批注。explore 只读原文与 GPT 字典、不写文件，报告中的字典候选与规范建议由主代理汇总落地。两类均为费 token 的可选步骤，派前必须 ask_user 征得同意；proofread 还需确认意见类型并写入 brief。一次最多{SUBAGENT_MAX_TASKS}个；file 选文件，count 切份，indexes 限区间，三者可组合；一条任务可用 count 展开并共用 brief，不必重复任务说明。"
             ),
             "parameters": {
                 "type": "object",

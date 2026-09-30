@@ -14,12 +14,14 @@ from dataclasses import dataclass
 from typing import Any, Callable, Sequence, TYPE_CHECKING
 
 from GalTransl.Agent.context import (
+    _apply_prompt_cache,
     _estimate_usage_tokens,
     _find_compaction_cut,
     _keep_recent_tokens,
     _llm_timeout,
     _local_fallback_summary,
     _sanitize_tool_args,
+    _strip_internal_fields,
     _tools_overhead_tokens,
 )
 from GalTransl.Agent.core import (
@@ -58,7 +60,7 @@ from GalTransl.Agent.tools.common import _split_problem_types
 from GalTransl.Agent.tools.input import _list_input_payload
 from GalTransl.Agent.tools.listing import _list_grep, _list_limit, _list_order
 from GalTransl.Agent.tools.problems import _tool_list_problems
-from GalTransl.Agent.tools.render_md import _render_tool_result_table
+from GalTransl.Agent.tools.render_md import _render_tool_result_table, _tool_result_json
 
 if TYPE_CHECKING:
     from GalTransl.Agent.runner import AgentRunner
@@ -731,8 +733,8 @@ def _subagent_handlers(
 
 def _subagent_chat(
     client: Any, model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
-) -> tuple[str, list[Any], str, str]:
-    """子代理的一次请求（**非流式**）：返回（正文, 工具调用, 思考字段名, 思考内容）。
+) -> tuple[str, list[Any], str, str, int]:
+    """子代理的一次请求（**非流式**）：返回（正文, 工具调用, 思考字段名, 思考内容, 输入 token）。
 
     非流式是刻意的简化：子代理的中间输出不需要逐字上屏，一轮一次拿全更简单。代价是"停止"
     要等当前这次请求回来才生效（父回合的停止仍会立刻终止它后续的轮次）。
@@ -751,10 +753,13 @@ def _subagent_chat(
     if tools is not None:
         kwargs["tools"] = tools
     resp = client.chat.completions.create(**kwargs)
+    usage = getattr(resp, "usage", None)
+    raw_tokens = usage.get("prompt_tokens") if isinstance(usage, dict) else getattr(usage, "prompt_tokens", None)
+    prompt_tokens = raw_tokens if type(raw_tokens) is int and raw_tokens > 0 else 0
     choices = getattr(resp, "choices", None) or []
     message = getattr(choices[0], "message", None) if choices else None
     if message is None:
-        return "", [], REASONING_FIELD_NAMES[0], ""
+        return "", [], REASONING_FIELD_NAMES[0], "", prompt_tokens
     content = str(getattr(message, "content", "") or "")
     tool_calls = list(getattr(message, "tool_calls", None) or [])
     field, reasoning = "", ""
@@ -763,7 +768,7 @@ def _subagent_chat(
         if value:
             field, reasoning = name, str(value)
             break
-    return content, tool_calls, field, reasoning
+    return content, tool_calls, field, reasoning, prompt_tokens
 
 
 # 子代理的压缩指令（Insert-then-Compress 的那条瞬时消息，见 SubAgentRunner._begin_compaction）。
@@ -824,6 +829,8 @@ class SubAgentRunner:
         self._pending_compaction: dict[str, Any] | None = None
         # 压缩整条路子都失败过（插入式 + 独立请求都没压成）：不再重试，否则每轮都白跑一次
         self._compact_failed = False
+        self._last_prompt_tokens = 0
+        self._anchored_message_count = 0
 
     @property
     def file_label(self) -> str:
@@ -903,8 +910,13 @@ class SubAgentRunner:
         return _tools_overhead_tokens(_subagent_tools(self.agent))
 
     def _estimate_context_tokens(self) -> int:
-        """估算当前请求占用的 token（子代理无 usage 锚点，纯字符估算；见 _estimate_usage_tokens）。"""
-        return _estimate_usage_tokens(self.messages, overhead=self._request_overhead_tokens())
+        """与父 Agent 一样用 provider 输入用量作锚点，仅估算其后新增的消息。"""
+        return _estimate_usage_tokens(
+            self.messages,
+            self._last_prompt_tokens,
+            self._anchored_message_count,
+            self._request_overhead_tokens(),
+        )
 
     def _begin_compaction(self) -> bool:
         """历史超窗口就挂上压缩指令，让**下一轮请求**顺带把摘要拿回来（Insert-then-Compress）。
@@ -935,7 +947,10 @@ class SubAgentRunner:
             return False
         cut += head_keep
         # 指令只进内存、不落盘；它也**不会**被写进摘要或报告（收尾时弹掉）
-        self.messages.append({"role": "user", "content": SUBAGENT_COMPACT_INSTRUCTION_PROMPT})
+        self.messages.append({
+            "role": "user", "content": SUBAGENT_COMPACT_INSTRUCTION_PROMPT,
+            "_compact_instruction": True,
+        })
         self._pending_compaction = {
             "cut": cut,
             "head_keep": head_keep,
@@ -1035,6 +1050,9 @@ class SubAgentRunner:
             },
             *tail,
         ]
+        # 重建了历史，旧请求的 token 锚点不再对应当前前缀。
+        self._last_prompt_tokens = 0
+        self._anchored_message_count = 0
         # 子代理的每一步都会推给界面（subagent_message 渲染成一步说明）：压缩这种状态变化
         # 也让它看得见，否则展开子代理会发现步数突然对不上
         self._emit("subagent_message", {
@@ -1057,7 +1075,21 @@ class SubAgentRunner:
         attempt = 0
         while True:
             try:
-                return _subagent_chat(client, model, self.messages, tools)
+                messages = self.messages
+                request_tools = tools
+                if getattr(self.parent, "_prompt_caching", False):
+                    messages, cached_tools = _apply_prompt_cache(messages, tools or [])
+                    request_tools = cached_tools if tools is not None else None
+                messages = [_strip_internal_fields(message) for message in messages]
+                anchored_count = len(messages)
+                content, calls, field, reasoning, prompt_tokens = _subagent_chat(
+                    client, model, messages, request_tools
+                )
+                # 摘要请求省略了 tools，且即将替换历史，不能拿它校准正常请求。
+                if tools is not None and prompt_tokens > 0:
+                    self._last_prompt_tokens = prompt_tokens
+                    self._anchored_message_count = anchored_count
+                return content, calls, field, reasoning
             except Exception as exc:  # noqa: BLE001 - 按分类决定是否重试
                 info = _classify_llm_error(exc)
                 if self.parent.stop_event.is_set():
@@ -1147,7 +1179,15 @@ class SubAgentRunner:
             assistant: dict[str, Any] = {"role": "assistant", "content": content or ""}
             if reasoning:
                 assistant[reasoning_field] = reasoning
-            assistant["tool_calls"] = tool_calls
+            # 历史只存 wire 形状的字典：SDK 对象既不能归档，也会被 token 计数器漏掉。
+            assistant["tool_calls"] = [
+                {
+                    "id": call.id,
+                    "type": "function",
+                    "function": {"name": call.function.name, "arguments": call.function.arguments},
+                }
+                for call in tool_calls
+            ]
             self.messages.append(assistant)
             for tool_call in tool_calls:
                 self.messages.append(self._run_tool(tool_call, handlers))
@@ -1183,7 +1223,9 @@ class SubAgentRunner:
             result = handler(self.parent, args)
             # 子代理读缓存是大头（校对一批 16 个、每个几十条）：同样走 Markdown 渲染
             rendered = _render_tool_result_table(name, result)
-            payload = rendered if rendered is not None else json.dumps(result, ensure_ascii=False)
+            payload = rendered if rendered is not None else _tool_result_json(result)
+            # UI 预览仍用原格式；节省的是随模型历史重复发送的结构空白。
+            preview = rendered if rendered is not None else json.dumps(result, ensure_ascii=False)
         except AgentToolError as exc:
             payload, ok = str(exc), False
         except Exception as exc:  # noqa: BLE001
@@ -1198,7 +1240,7 @@ class SubAgentRunner:
                 "tool_call_id": call_id,
                 "name": name,
                 "ok": ok,
-                "result": payload[:400] if ok else None,
+                "result": preview[:400] if ok else None,
                 "error": None if ok else payload[:400],
                 "duration_ms": duration_ms,
             },

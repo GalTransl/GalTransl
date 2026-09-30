@@ -147,7 +147,7 @@ def _make_chat(script: list[tuple[str, list[_Call]]]):
         idx = min(calls["n"], len(script) - 1)
         calls["n"] += 1
         content, tool_calls = script[idx]
-        return content, tool_calls, rt.REASONING_FIELD_NAMES[0], ""
+        return content, tool_calls, rt.REASONING_FIELD_NAMES[0], "", 0
 
     return fake
 
@@ -267,7 +267,7 @@ class ProofreadAgentFlowTests(unittest.TestCase):
             calls["n"] += 1
             if "a.json" in json.dumps(messages, ensure_ascii=False):
                 raise RuntimeError("boom")
-            return "报告：没问题。", [], rt.REASONING_FIELD_NAMES[0], ""
+            return "报告：没问题。", [], rt.REASONING_FIELD_NAMES[0], "", 0
 
         with patch.object(subagent_mod, "_subagent_chat", flaky):
             out = _tool_run_subagents(
@@ -309,7 +309,7 @@ class SubagentRetryTests(unittest.TestCase):
             calls["n"] += 1
             if calls["n"] == 1:
                 raise TimeoutError("Request timed out.")
-            return "报告：没问题。", [], rt.REASONING_FIELD_NAMES[0], ""
+            return "报告：没问题。", [], rt.REASONING_FIELD_NAMES[0], "", 0
 
         out = self._run_one(parent, flaky)
 
