@@ -126,6 +126,186 @@ class MsgToolScriptTests(unittest.TestCase):
         self.assertEqual(src.read_bytes(), original)
 
 
+class MsgToolJisTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        (self.root / "gt_input").mkdir()
+
+    def plugin(self, **settings):
+        plugin = file_plugin()
+        plugin.gtp_init(
+            {"Core": {}, "Settings": {"jis_substitution": True, **settings}},
+            {"project_dir": str(self.root)},
+        )
+        return plugin
+
+    def save(self, plugin, relative, rows):
+        src = Path(plugin.input_dir) / relative
+        src.parent.mkdir(parents=True, exist_ok=True)
+        src.write_bytes(b"source")
+        dst = Path(plugin.output_dir) / relative
+        captured = {}
+
+        def fake_import(args):
+            captured["args"] = args
+            captured["rows"] = json.loads(Path(args[-2]).read_text(encoding="utf-8"))
+            Path(args[-1]).write_bytes(b"patched")
+
+        with patch.object(plugin, "_run", side_effect=fake_import):
+            plugin.save_file(str(dst), rows)
+        self.assertEqual(src.read_bytes(), b"source")
+        self.assertEqual(dst.read_bytes(), b"patched")
+        return captured
+
+    def config(self, plugin):
+        return json.loads((Path(plugin.output_dir) / "uif_config.json").read_text(encoding="utf-8"))
+
+    def test_substitution_names_bilingual_and_uif_direction(self):
+        plugin = self.plugin(keep_bilingual=True, patched_encoding="utf8")
+        rows = [{"name": ["", "你"], "message": "这ABCこんにちは。", "org_message": "日本語"}]
+        original = copy.deepcopy(rows)
+        result = self.save(plugin, "nested/test.ks", rows)
+        self.assertEqual(rows, original)
+        self.assertEqual(result["rows"], [{"name": "凜", "message": "這ABCこんにちは。\n日本語"}])
+        self.assertEqual(result["args"][:3], ["import", "-p", "cp932"])
+        sub = self.config(plugin)["character_substitution"]
+        self.assertTrue(sub["enable"])
+        self.assertEqual(dict(zip(sub["source_characters"], sub["target_characters"])), {"凜": "你", "這": "这"})
+        self.assertNotIn("remain", sub)
+        self.assertEqual(sub["repeat"], ["語"])
+        self.assertFalse((self.root / "gt_output/nested/uif_config.json").exists())
+
+    def test_aggregates_files_and_updates_rebuilt_file(self):
+        plugin = self.plugin()
+        self.save(plugin, "one.ks", [{"message": "你"}])
+        config = self.config(plugin)
+        config["font_manager"]["enable"] = True
+        (Path(plugin.output_dir) / "uif_config.json").write_text(json.dumps(config), encoding="utf-8")
+        self.save(plugin, "nested/two.ks", [{"message": "这"}])
+        self.assertEqual(set(self.config(plugin)["character_substitution"]["target_characters"]), set("你这"))
+        self.save(plugin, "one.ks", [{"message": "她"}])
+        config = self.config(plugin)
+        self.assertEqual(set(config["character_substitution"]["target_characters"]), set("她这"))
+        self.assertTrue(config["font_manager"]["enable"])
+        plugin.gtp_final()
+        self.assertEqual(self.config(plugin), config)
+
+    def test_unmapped_error_preserves_existing_output_and_config(self):
+        plugin = self.plugin()
+        self.save(plugin, "one.ks", [{"message": "你"}])
+        dst = Path(plugin.output_dir) / "one.ks"
+        config = self.config(plugin)
+        with patch.object(plugin, "_run") as run:
+            with self.assertRaisesRegex(RuntimeError, "JIS 替换字典未覆盖"):
+                plugin.save_file(str(dst), [{"message": "🙂"}])
+            run.assert_not_called()
+        self.assertEqual(dst.read_bytes(), b"patched")
+        self.assertEqual(self.config(plugin), config)
+
+    def test_sextractor_space_fallback_and_repeat_diagnostics(self):
+        plugin = self.plugin(jis_unmapped="space")
+        with self.assertLogs("GalTransl", level="WARNING"):
+            result = self.save(plugin, "one.ks", [{"message": "你凜🙂🙂―"}])
+        self.assertEqual(result["rows"][0]["message"], "凜凜　　―")
+        sub = self.config(plugin)["character_substitution"]
+        self.assertEqual(sub["remain"], ["🙂"])
+        self.assertEqual(sub["repeat"], ["凜"])
+        self.save(plugin, "one.ks", [{"message": "日本"}])
+        sub = self.config(plugin)["character_substitution"]
+        self.assertEqual(sub["source_characters"], "")
+        self.assertNotIn("remain", sub)
+        self.assertNotIn("repeat", sub)
+
+    def test_failed_import_does_not_publish_mapping(self):
+        plugin = self.plugin()
+        self.save(plugin, "one.ks", [{"message": "你"}])
+        config = self.config(plugin)
+        with patch.object(plugin, "_run", side_effect=RuntimeError("import failed")):
+            with self.assertRaisesRegex(RuntimeError, "import failed"):
+                plugin.save_file(str(Path(plugin.output_dir) / "one.ks"), [{"message": "她"}])
+        self.assertEqual(self.config(plugin), config)
+
+    def test_resumed_run_preserves_other_existing_scripts_mappings(self):
+        plugin = self.plugin()
+        self.save(plugin, "one.ks", [{"message": "你"}])
+        plugin.gtp_final()
+        plugin = self.plugin()
+        self.save(plugin, "two.ks", [{"message": "她"}])
+        self.assertEqual(set(self.config(plugin)["character_substitution"]["target_characters"]), set("你她"))
+
+    def test_invalid_existing_config_preserves_script(self):
+        plugin = self.plugin()
+        self.save(plugin, "one.ks", [{"message": "你"}])
+        dst = Path(plugin.output_dir) / "one.ks"
+        dst.write_bytes(b"previous output")
+        config_path = Path(plugin.output_dir) / "uif_config.json"
+        config_path.write_bytes(b"{broken")
+        with self.assertRaises(ValueError):
+            self.save(plugin, "one.ks", [{"message": "她"}])
+        self.assertEqual(dst.read_bytes(), b"previous output")
+        self.assertEqual(config_path.read_bytes(), b"{broken")
+
+    def test_disabled_does_not_touch_uif_or_translate_characters(self):
+        plugin = self.plugin(jis_substitution=False, patched_encoding="utf8")
+        result = self.save(plugin, "one.ks", [{"message": "你🙂"}])
+        self.assertEqual(result["rows"], [{"message": "你🙂"}])
+        self.assertFalse((Path(plugin.output_dir) / "uif_config.json").exists())
+        path = Path(plugin.output_dir) / "uif_config.json"
+        path.write_bytes(b"existing config")
+        self.save(plugin, "one.ks", [{"message": "你"}])
+        self.assertEqual(path.read_bytes(), b"existing config")
+
+    def test_legacy_output_directory(self):
+        (self.root / "json_cn").mkdir()
+        plugin = self.plugin()
+        self.save(plugin, "nested/one.ks", [{"message": "你"}])
+        self.assertTrue((self.root / "json_cn/uif_config.json").is_file())
+        self.assertFalse((self.root / "gt_output").exists())
+
+    def test_encoding_override_and_invalid_policy_rejected(self):
+        for args in (["-p", "utf8"], ["--patched-encoding=cp932"], ["-P932"], ["--patched-code-page", "936"]):
+            with self.subTest(args=args), self.assertRaisesRegex(ValueError, "extra_args"):
+                self.plugin(extra_args=args)
+        with self.assertRaisesRegex(ValueError, "jis_unmapped"):
+            self.plugin(jis_unmapped="invalid")
+
+    def test_parallel_saves_keep_all_mappings(self):
+        plugin = self.plugin()
+        characters = list("你这她们时过对么还现发种样见经")
+        for index in range(len(characters)):
+            (self.root / "gt_input" / f"{index}.ks").write_bytes(b"source")
+
+        def fake_import(args):
+            Path(args[-1]).write_bytes(b"patched")
+
+        with patch.object(plugin, "_run", side_effect=fake_import):
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                list(pool.map(lambda item: plugin.save_file(
+                    str(self.root / "gt_output" / f"{item[0]}.ks"), [{"message": item[1]}]
+                ), enumerate(characters)))
+        sub = self.config(plugin)["character_substitution"]
+        self.assertEqual(set(sub["target_characters"]), set(characters))
+        self.assertEqual(len(sub["source_characters"]), len(set(sub["source_characters"])))
+
+    @unittest.skipUnless(os.name == "nt" and TOOL.is_file(), "requires bundled Windows msg-tool")
+    def test_real_cp932_roundtrip_with_uif_restores_chinese(self):
+        src = self.root / "gt_input/test.ks"
+        src.write_text(SCRIPT, encoding="cp932")
+        original = src.read_bytes()
+        plugin = self.plugin()
+        rows = plugin.load_file(str(src))
+        rows[0]["message"] = "你好，这是简体中文。"
+        dst = self.root / "gt_output/test.ks"
+        plugin.save_file(str(dst), rows)
+        dst.read_bytes().decode("cp932")
+        message = plugin.load_file(str(dst))[0]["message"]
+        sub = self.config(plugin)["character_substitution"]
+        self.assertEqual(message.translate(str.maketrans(sub["source_characters"], sub["target_characters"])), rows[0]["message"])
+        self.assertEqual(src.read_bytes(), original)
+
+
 class MsgToolCacheTests(unittest.TestCase):
     # 单独的缓存行为测试使用假的提取器，不依赖 Windows 工具。
     def setUp(self):

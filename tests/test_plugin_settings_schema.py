@@ -81,6 +81,9 @@ class PluginSettingsSchemaTests(unittest.TestCase):
         self.assertIn("bgi", [o["value"] for o in msgtool["settings_schema"]["script_type"]["options"]])
         self.assertTrue(msgtool["settings_schema"]["msg_tool_path"]["advanced"])
         self.assertFalse(msgtool["settings_schema"]["script_type"]["advanced"])
+        self.assertIs(msgtool["settings"]["jis_substitution"], False)
+        self.assertFalse(msgtool["settings_schema"]["jis_substitution"]["advanced"])
+        self.assertEqual([o["value"] for o in msgtool["settings_schema"]["jis_unmapped"]["options"]], ["error", "space"])
         self.assertEqual(plugins["file_i18n_json"]["settings_schema"], {})
 
 

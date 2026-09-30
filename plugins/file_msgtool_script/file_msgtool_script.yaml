@@ -10,18 +10,21 @@ Core:
 
 Documentation:
   Author: cx2333
-  Version: 1.0
+  Version: 1.1
   Description: >-
     通过 res/msg_tool.exe（lifegpc/msg-tool）直接读取和写入 galgame 脚本文件。
     msg-tool 的 json 输出即为 GalTransl 的 [{"name"?, "message"}] 格式，因此无需中间转换。
     支持 kirikiri、BGI/Ethornell、Yu-Ris、Artemis、CatSystem2、Circus、Musica、QLIE、
     Softpal、WillPlus/AdvHD、ExHibit、Favorite、Escu:de、Entis GLS 等引擎。
+    可启用 SExtractor 兼容的 JIS 替换，并在输出目录生成 uif_config.json。
 
 Settings: # 这里存放插件的设置
   msg_tool_path: "" # msg-tool 可执行文件路径，留空则使用程序目录下的 res/msg_tool.exe
   script_type: "" # 同 -t；留空时 .ks 使用 kirikiri，其他格式由 msg-tool 自动探测
   source_encoding: "" # 同 -e；留空时 kirikiri 自动探测，其余使用工具默认值；可指定 cp932/utf8/gb2312
-  patched_encoding: "" # 同 -p；留空保留默认编码；出现字符丢失会停止写出，请指定游戏支持的 utf8/gb2312 等编码
+  patched_encoding: "" # 同 -p；留空使用引擎默认回填编码（不跟随 source_encoding）；日文编码无法写入部分中文时可启用 JIS 替换，或选择游戏支持的 utf8/gb2312
+  jis_substitution: false # 使用 SExtractor 字典替换 CP932 不支持的字符；开启后输出编码固定为 CP932，并生成 uif_config.json
+  jis_unmapped: error # 字典未覆盖的字符：error 阻止写出；space 与 SExtractor 一致，替换为全角空格并记录 remain
   extra_args: [] # 追加给 msg-tool 的额外参数，例如 ["--bgi-disable-append"]；放在文件路径参数之前
   keep_bilingual: false # 回填时是否把原文一并写回脚本（译文 + 分隔符 + 原文）
   bilingual_sep: "\n" # keep_bilingual 为 true 时，译文与原文之间的分隔符
@@ -118,7 +121,7 @@ SettingsSchema:
       label: Yu-Ris 计数 YSTD
   source_encoding:
     label: 原文编码
-    description: 读取源脚本使用的编码。默认对 KAG 脚本自动探测，其他引擎使用工具默认值；出现乱码时再指定。
+    description: 读取源脚本使用的编码，不改变回填编码。默认对 KAG 脚本自动探测，其他引擎使用工具默认值；出现乱码时再指定。
     advanced: false
     options: &id001
     - value: ''
@@ -133,9 +136,22 @@ SettingsSchema:
       label: 简体中文 GB2312
   patched_encoding:
     label: 输出编码
-    description: 回填译文使用的编码。请按游戏引擎支持的编码选择；无法表示的字符会导致停止写出，避免生成损坏文本。
+    description: 留空使用引擎默认回填编码，不跟随原文编码。CP932 无法表示部分中文；游戏需要日文编码时可开启 JIS 替换，支持其他编码时可选择 GB2312 或 UTF-8。回填前会检查可确定的编码，失败时提示字符和处理方式。开启 JIS 替换后此项不生效。
     advanced: false
     options: *id001
+  jis_substitution:
+    label: JIS 替换
+    description: 使用 SExtractor 字典将 CP932 无法表示的中文替换为日文字符，以 CP932 回填，并在输出根目录生成 uif_config.json。需配合 UIF 或对应替换字体还原显示。
+    advanced: false
+  jis_unmapped:
+    label: JIS 未匹配字符处理
+    description: 仅在 JIS 替换开启时生效。默认阻止写出；选择全角空格与 SExtractor 行为一致，并将丢失的字符记录到 uif_config.json 的 remain 中。
+    advanced: true
+    options:
+    - value: error
+      label: 报错并停止写出（推荐）
+    - value: space
+      label: 替换为全角空格并记录
   extra_args:
     label: 额外工具参数
     description: 传给 msg-tool 的命令行参数，每行一个参数或参数值。填写后会绕过读取缓存。

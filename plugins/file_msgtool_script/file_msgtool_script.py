@@ -46,6 +46,8 @@ class file_plugin(GFilePlugin):
         self.script_type = str(settings.get("script_type") or "").strip()
         self.source_encoding = str(settings.get("source_encoding") or "").strip()
         self.patched_encoding = str(settings.get("patched_encoding") or "").strip()
+        self.jis_substitution = bool(settings.get("jis_substitution", False))
+        self.jis_unmapped = str(settings.get("jis_unmapped", "error"))
         self.extra_args = [str(a) for a in (settings.get("extra_args") or [])]
         self.keep_bilingual = bool(settings.get("keep_bilingual", False))
         self.bilingual_sep = str(settings.get("bilingual_sep", "\n"))
@@ -66,11 +68,27 @@ class file_plugin(GFilePlugin):
 
         # load_file 时记录「gt_output 路径 -> gt_input 原始脚本路径」，供 save_file 找回原文件
         self._src_by_out: dict[str, str] = {}
+        self._jis_lock = threading.Lock()
+        self._jis_files: dict[str, dict] = {}
+        self._jis_previous: dict | None = None
+        self._jis_dictionary = {}
+        self._jis_targets = set()
+        if self.jis_substitution:
+            if self.jis_unmapped not in ("error", "space"):
+                raise ValueError("jis_unmapped 必须为 error 或 space")
+            if self._has_extra_option("-p", "--patched-encoding", "-P", "--patched-code-page"):
+                raise ValueError(
+                    "JIS 替换固定使用 CP932，请移除 extra_args 中的输出编码参数 "
+                    "-p/--patched-encoding/-P/--patched-code-page"
+                )
+            with open(self._jis_resource("subs_cn_jp.json"), encoding="utf-8") as resource:
+                self._jis_dictionary = json.load(resource)
+            self._jis_targets = set(self._jis_dictionary.values())
 
         LOGGER.debug(
             f"[{self.pname}] msg_tool={self.msg_tool} "
             f"script_type={self.script_type or 'auto'} "
-            f"patched_encoding={self.patched_encoding or 'default'} "
+            f"patched_encoding={'cp932 (JIS)' if self.jis_substitution else self.patched_encoding or 'default'} "
             f"extra_args={self.extra_args}"
         )
 
@@ -158,20 +176,40 @@ class file_plugin(GFilePlugin):
 
         stdout = proc.stdout.decode("utf-8", errors="replace")
         stderr = proc.stderr.decode("utf-8", errors="replace")
+        diagnostic = "\n".join(part.strip() for part in (stdout, stderr) if part.strip())
+        encoding_warning = re.search(r"(?im)^\s*Warning:.*could not be encoded", diagnostic)
+        # CST 等格式严格编码时直接返回 Error；KAG 等格式可能只给 Warning。
+        # 两种情况都必须在复制临时输出之前失败，且同时检查 stdout / stderr。
+        encoding_error = re.search(
+            r"(?i)(?:Failed to encode|Some characters could not be encoded in)\s+"
+            r"(Shift[- ]JIS|CP932|GB2312|GBK|UTF-?\d+(?:LE|BE)?|code page\s+\d+)",
+            diagnostic,
+        )
+        if args and args[0] == "import" and (proc.returncode != 0 or encoding_warning) and encoding_error:
+            encoding = self._encoding_codec(encoding_error.group(1))
+            samples = []
+            source_path = args[-3] if len(args) >= 4 else "（未知文件）"
+            if encoding and len(args) >= 4:
+                try:
+                    with open(args[-2], encoding="utf-8") as resource:
+                        samples = self._encoding_samples(json.load(resource), encoding)
+                except (OSError, ValueError):
+                    pass
+            raise RuntimeError(self._encoding_failure(
+                source_path, encoding or encoding_error.group(1), samples,
+                diagnostic=f"msg-tool exit={proc.returncode}\n{diagnostic[:4000]}",
+            ))
         if proc.returncode != 0:
-            detail = (stderr.strip() or stdout.strip() or "(无输出)").replace("\n", " ")
             raise RuntimeError(
-                f"msg-tool 执行失败（exit={proc.returncode}）：{detail}"
+                f"msg-tool 执行失败（exit={proc.returncode}）：{diagnostic or '(无输出)'}"
             )
-        diagnostic = stdout + "\n" + stderr
-        # msg-tool 的编码丢失只产生 Warning，退出码仍为 0。
-        # 必须在复制临时输出之前失败，保留原脚本和已有译文。
-        if re.search(r"(?im)^\s*Warning:.*could not be encoded", diagnostic):
-            raise RuntimeError(
-                "msg-tool 回填发生编码丢失，已阻止写出；请将 patched_encoding "
-                "设置为游戏支持的编码（如 gb2312 或 utf8）后重建输出。\n"
-                + diagnostic.strip()
-            )
+        if encoding_warning:
+            if not args or args[0] != "import":
+                raise RuntimeError("msg-tool 导出文本时发生编码丢失：\n" + diagnostic[:4000])
+            raise RuntimeError(self._encoding_failure(
+                args[-3] if len(args) >= 4 else "（未知文件）", "工具指定编码", [],
+                diagnostic=diagnostic[:4000],
+            ))
         if re.search(r"(?im)^\s*Warning:", diagnostic):
             LOGGER.warning(f"[{self.pname}] {diagnostic.strip()}")
         return diagnostic
@@ -195,6 +233,224 @@ class file_plugin(GFilePlugin):
             args += ["-e", encoding]
         args += self.extra_args
         return args
+
+    @staticmethod
+    def _option_value(args: list[str], *options: str) -> str | None:
+        for index, arg in enumerate(args):
+            for option in options:
+                if arg == option:
+                    return args[index + 1] if index + 1 < len(args) else None
+                if arg.startswith(option + "="):
+                    return arg[len(option) + 1:]
+                if len(option) == 2 and arg.startswith(option) and len(arg) > 2:
+                    return arg[2:]
+        return None
+
+    @staticmethod
+    def _encoding_codec(value: str) -> str | None:
+        # msg-tool 的 gb2312 实际使用 GBK；不能用 Python 的 gb2312 子集预检。
+        return {
+            "cp932": "cp932", "shift-jis": "cp932", "shift jis": "cp932",
+            "code page 932": "cp932", "gb2312": "gbk", "gbk": "gbk",
+            "code page 936": "gbk", "utf8": "utf-8", "utf-8": "utf-8",
+            "auto": "utf-8", "code page 65001": "utf-8",
+        }.get(value.lower())
+
+    def _preflight_encoding(self, source_path: str, rows: list, import_args: list):
+        """只对已确认编码规则的 CST/KAG 预检；其他格式以工具的诊断为准。"""
+        # 工具内置的替换表/人名表可能先把中文改成可编码文本，不能提前拦截。
+        if self._option_value(import_args, "--replacement-json", "--name-csv") is not None:
+            return
+        script_type = self._option_value(import_args, "-t", "--script-type")
+        with open(source_path, "rb") as source:
+            header = source.read(8)
+        if not script_type and header == b"CatScene":
+            script_type = "cat-system"
+        if script_type not in ("cat-system", "kirikiri"):
+            return
+        if script_type == "kirikiri":
+            # KAG 会保留 Unicode BOM；SimpleCrypt / MDF 的内部编码由工具处理。
+            if header.startswith((b"\xff\xfe", b"\xfe\xff", b"\xef\xbb\xbf", b"\xfe\xfe", b"mdf\0")):
+                return
+        value = self._option_value(import_args, "-p", "--patched-encoding")
+        code_page = self._option_value(import_args, "-P", "--patched-code-page")
+        # Windows 代码页允许 best-fit 转换，不用 Python 严格编码去拦截它。
+        if code_page is not None:
+            return
+        codec = self._encoding_codec(value or "cp932") if value != "default" else "cp932"
+        if codec in ("cp932", "gbk"):
+            samples = self._encoding_samples(rows, codec)
+            if samples:
+                raise RuntimeError(self._encoding_failure(source_path, codec, samples, preflight=True))
+
+    @staticmethod
+    def _encoding_samples(rows: list, codec: str) -> list[str]:
+        samples = []
+        if not isinstance(rows, list):
+            return samples
+        # Rust encoding 的兼容映射比 Python 略宽；这些字符由工具继续验证。
+        compatible = {"cp932": {"¥", "‾"}, "gbk": {"€"}}.get(codec, set())
+        for index, row in enumerate(rows, 1):
+            if not isinstance(row, dict):
+                continue
+            for field, label in (("name", "人名"), ("message", "正文")):
+                text = row.get(field)
+                if not isinstance(text, str):
+                    continue
+                try:
+                    text.encode(codec)
+                except UnicodeEncodeError:
+                    bad = []
+                    for char in dict.fromkeys(text):
+                        if char in compatible:
+                            continue
+                        try:
+                            char.encode(codec)
+                        except UnicodeEncodeError:
+                            bad.append(f"{char!r} (U+{ord(char):04X})")
+                        if len(bad) == 8:
+                            break
+                    if bad:
+                        samples.append(f"第 {index} 条{label}（{field}）：" + "、".join(bad))
+                        if len(samples) == 5:
+                            return samples
+        return samples
+
+    def _encoding_failure(self, source_path: str, encoding: str, samples: list[str], *,
+                          preflight: bool = False, diagnostic: str = "") -> str:
+        label = {"cp932": "CP932 / Shift-JIS", "gbk": "GBK（msg-tool 的 gb2312）"}.get(encoding, encoding)
+        lines = [
+            f"{'回填前编码检查未通过' if preflight else '脚本回填编码失败'}：{source_path}",
+            f"输出编码 {label} 无法表示待写入的部分字符，已阻止写出，原脚本和已有输出未修改。",
+        ]
+        if samples:
+            lines.append("无法编码的字符示例（最多 5 处，每处 8 种字符）：")
+            lines.extend(samples)
+        if encoding == "cp932" and not self.jis_substitution:
+            lines.append(
+                "游戏需要保持日文编码时：在「Galgame脚本文件」插件设置中开启「JIS 替换」"
+                "（jis_substitution），并配合生成的 uif_config.json 与 UIF 或对应替换字体还原显示。"
+            )
+        elif self.jis_substitution:
+            lines.append("当前已开启 JIS 替换；请检查上述字符、脚本保留内容及额外工具参数是否仍引入不可编码字符。")
+        lines.extend([
+            "游戏支持其他编码时：修改插件的「输出编码」（patched_encoding），例如简体中文 GB2312"
+            "（gb2312）或 UTF-8（utf8），需与游戏支持的编码一致。",
+            "仅修改「原文编码」（source_encoding）不会改变回填编码；若 extra_args 中设置了 "
+            "-p/--patched-encoding 或 -P/--patched-code-page，请同步修改或移除。",
+            "也可修改提示中的字符。保存设置或译文后重新构建结果即可，无需重新翻译。",
+        ])
+        if diagnostic:
+            lines.append("原始诊断：\n" + diagnostic)
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------ #
+    # SExtractor 兼容的 JIS 替换（字典和 UIF 模板随插件分发）
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _jis_resource(name: str) -> str:
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
+
+    def _substitute_jis(self, rows: list) -> dict:
+        """只转换回填副本，保留翻译缓存中的中文；映射方向为中文 -> JIS。"""
+        used = {}
+        remain = set()
+        repeat = set()
+        for row in rows:
+            for key in ("name", "message"):
+                if key not in row:
+                    continue
+                converted = []
+                for char in row[key]:
+                    if char in self._jis_targets and char != "―":
+                        repeat.add(char)
+                    try:
+                        char.encode("cp932")
+                    except UnicodeEncodeError:
+                        replacement = self._jis_dictionary.get(char)
+                        if replacement is None:
+                            remain.add(char)
+                            replacement = "　"
+                        else:
+                            used[char] = replacement
+                        converted.append(replacement)
+                    else:
+                        converted.append(char)
+                row[key] = "".join(converted)
+        if remain and self.jis_unmapped == "error":
+            raise RuntimeError(
+                "JIS 替换字典未覆盖以下字符，已阻止写出：" + "".join(sorted(remain))
+                + "。请修改译文，或将 jis_unmapped 设置为 space（替换为全角空格）。"
+            )
+        return {"used": used, "remain": remain, "repeat": repeat}
+
+    def _save_jis_output(self, patched_path: str, output_path: str, stats: dict):
+        """每个成功回填的文件都更新根目录配置；同实例多文件写出互斥。"""
+        config_path = os.path.join(self.output_dir, "uif_config.json")
+        with self._jis_lock:
+            files = {**self._jis_files, output_path: stats}
+            # 保留用户对字体、注入等模块的设置，只更新字符替换部分。
+            template = config_path if os.path.isfile(config_path) else self._jis_resource("uif_config.json")
+            with open(template, encoding="utf-8") as resource:
+                config = json.load(resource)
+            substitution = config.setdefault("character_substitution", {})
+            previous = self._jis_previous
+            if previous is None:
+                # 续跑/单文件重建可能没有加载其他已输出脚本，保留上次任务的映射。
+                sources = substitution.get("source_characters", "")
+                targets = substitution.get("target_characters", "")
+                if len(sources) != len(targets):
+                    raise RuntimeError(f"UIF 字符替换映射长度不一致：{config_path}")
+                previous = {
+                    "used": dict(zip(targets, sources)),
+                    "remain": set(substitution.get("remain", [])),
+                    "repeat": set(substitution.get("repeat", [])),
+                }
+            used, remain, repeat = {}, set(), set()
+            for entry in [previous, *files.values()]:
+                used.update(entry["used"])
+                remain.update(entry["remain"])
+                repeat.update(entry["repeat"])
+            if len(set(used.values())) != len(used):
+                raise RuntimeError(f"已有 UIF 映射与 JIS 替换字典冲突：{config_path}")
+            characters = sorted(used)
+            substitution.update({
+                "enable": True,
+                "source_characters": "".join(used[char] for char in characters),
+                "target_characters": "".join(characters),
+            })
+            for key, values in (("remain", remain), ("repeat", repeat)):
+                if values:
+                    substitution[key] = sorted(values)
+                else:
+                    substitution.pop(key, None)
+
+            temporary = None
+            try:
+                # 先准备配置，再发布脚本；避免配置无法序列化/写入时覆盖已有脚本。
+                with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", dir=self.output_dir, suffix=".tmp", delete=False,
+                ) as resource:
+                    temporary = resource.name
+                    json.dump(config, resource, ensure_ascii=False, indent=2)
+                    resource.write("\n")
+                shutil.copyfile(patched_path, output_path)
+                os.replace(temporary, config_path)
+                self._jis_files = files
+                self._jis_previous = previous
+            finally:
+                if temporary and os.path.exists(temporary):
+                    os.unlink(temporary)
+        if stats["remain"]:
+            LOGGER.warning(
+                f"[{self.pname}] JIS 替换未匹配字符已替换为全角空格："
+                + "".join(sorted(stats["remain"])) + f"；详见 {config_path} 中的 remain"
+            )
+        if stats["repeat"]:
+            LOGGER.warning(
+                f"[{self.pname}] 原文/译文含有 JIS 替换目标字符，请检查游戏内显示："
+                + "".join(sorted(stats["repeat"])) + f"；详见 {config_path} 中的 repeat"
+            )
 
     # ------------------------------------------------------------------ #
     # GalTransl 文件插件接口
@@ -357,6 +613,13 @@ class file_plugin(GFilePlugin):
             row["message"] = message
             rows.append(row)
 
+        jis_stats = self._substitute_jis(rows) if self.jis_substitution else None
+        import_args = ["import"]
+        patched_encoding = "cp932" if self.jis_substitution else self.patched_encoding
+        if patched_encoding and not self._has_extra_option("-p", "--patched-encoding", "-P", "--patched-code-page"):
+            import_args += ["-p", patched_encoding]
+        import_args += self._common_args(source_path)
+        self._preflight_encoding(source_path, rows, import_args)
         with tempfile.TemporaryDirectory(prefix="gt_msgtool_") as tmp_dir:
             trans_json = os.path.join(tmp_dir, "trans.json")
             with open(trans_json, "w", encoding="utf-8") as f:
@@ -365,10 +628,6 @@ class file_plugin(GFilePlugin):
             suffix = os.path.splitext(source_path)[1]
             patched_path = os.path.join(tmp_dir, "patched" + suffix)
 
-            import_args = ["import"]
-            if self.patched_encoding:
-                import_args += ["-p", self.patched_encoding]
-            import_args += self._common_args(source_path)
             import_args += [source_path, trans_json, patched_path]
             self._run(import_args)
 
@@ -378,8 +637,12 @@ class file_plugin(GFilePlugin):
             out_dir = os.path.dirname(output_path)
             if out_dir:
                 os.makedirs(out_dir, exist_ok=True)
-            shutil.copyfile(patched_path, output_path)
+            if jis_stats is not None:
+                self._save_jis_output(patched_path, output_path, jis_stats)
+            else:
+                shutil.copyfile(patched_path, output_path)
 
     def gtp_final(self):
         """所有文件翻译完成之后的动作。"""
         self._src_by_out.clear()
+        self._jis_files.clear()
