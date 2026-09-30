@@ -19,9 +19,11 @@ import {
 import { normalizeError } from '../lib/errors';
 import {
   ConfigSectionNav,
-  CommonSettingsSection,
+  CONFIG_SECTIONS,
+  TranslationSettingsSection,
   BackendSettingsSection,
-  PluginSettingsSection,
+  FileIOSettingsSection,
+  TextProcessingSettingsSection,
   DictionarySettingsSection,
   ProblemAnalyzeSection,
   RetranslKeySection,
@@ -42,8 +44,9 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   const [searchParams] = useSearchParams();
   const [activeSection, setActiveSection] = useState<ConfigSectionKey>(() => {
     const s = searchParams.get('section');
-    if (s && ['common', 'backendSpecific', 'plugin', 'dictionary', 'problemAnalyze', 'retranslKey', 'problemFilterKey', 'projectGuideline'].includes(s)) return s as ConfigSectionKey;
-    return 'common';
+    // 兼容原来的插件设置链接，默认进入排在首位的文件读写。
+    if (s === 'plugin') return 'fileIO';
+    return CONFIG_SECTIONS.find((section) => section.key === s)?.key ?? 'fileIO';
   });
   const [yamlView, setYamlView] = useState(false);
 
@@ -309,7 +312,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
           ) : (
             <>
               {activeSection === 'common' && (
-                <CommonSettingsSection
+                <TranslationSettingsSection
                   commonConfig={commonConfig}
                   onFieldChange={handleFieldChange}
                   onListFieldChange={handleListFieldChange}
@@ -345,11 +348,11 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
                 />
               )}
 
-              {activeSection === 'plugin' && (
-                <PluginSettingsSection
+              {activeSection === 'fileIO' && (
+                <FileIOSettingsSection
                   config={config}
                   filePlugins={filePlugins}
-                  textPlugins={textPlugins}
+                  onFieldChange={handleFieldChange}
                   onFilePluginChange={(value) => {
                     setConfig((prev) => {
                       const plugin = { ...((prev?.plugin as Record<string, unknown>) || {}) };
@@ -359,6 +362,14 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
                     setSaveSuccess(false);
                     setDirty(true);
                   }}
+                  onPluginSettingChange={handlePluginSettingChange}
+                />
+              )}
+
+              {activeSection === 'textProcessing' && (
+                <TextProcessingSettingsSection
+                  config={config}
+                  textPlugins={textPlugins}
                   onPluginSettingChange={handlePluginSettingChange}
                   onToggleTextPlugin={handleToggleTextPlugin}
                 />

@@ -1,30 +1,55 @@
 import { Panel } from '../../components/Panel';
 import { CustomSelect } from '../../components/CustomSelect';
 import { PluginSettingsEditor } from '../../components/PluginSettingsEditor';
+import { ConfigFieldRow, ConfigFieldGroup, type ConfigFieldDef } from './ConfigFieldRow';
 import type { PluginInfo } from '../../lib/api';
 
-interface PluginSettingsSectionProps {
+const FILE_FIELD_GROUPS: { title: string; fields: ConfigFieldDef[] }[] = [
+  {
+    title: '文件分割',
+    fields: [
+      { key: 'splitFile', label: '文件分割', description: '单文件分片模式：no 关闭，Num 按句数切片，Equal 按份数均分。', type: 'select', options: ['no', 'Num', 'Equal'] },
+      { key: 'splitFileNum', label: '分割数量', description: 'Num 模式下表示每片句数；Equal 模式下表示分片总数。', type: 'number', placeholder: '2048' },
+      { key: 'splitFileCrossNum', label: '分割交叉句数', description: '分片间重叠句数，可提升片段衔接质量（常用 0 或 10）。', type: 'number', placeholder: '0' },
+    ],
+  },
+  {
+    title: '文本格式',
+    fields: [
+      { key: 'linebreakSymbol', label: '换行符', description: 'JSON 内换行符类型，供问题检测/自动修复使用。', type: 'text', placeholder: 'auto' },
+    ],
+  },
+  {
+    title: '缓存与日志',
+    fields: [
+      { key: 'save_steps', label: '缓存保存频率', description: '每处理 N 个批次保存一次缓存。', type: 'number', placeholder: '1' },
+      { key: 'loggingLevel', label: '日志级别', description: 'debug 详细，info 常规，warning 仅警告。', type: 'select', options: ['debug', 'info', 'warning'] },
+      { key: 'saveLog', label: '保存日志到文件', description: '是否将运行日志写入文件。', type: 'select', options: ['true', 'false'] },
+    ],
+  },
+];
+
+interface FileIOSettingsSectionProps {
   config: Record<string, unknown> | null;
   filePlugins: PluginInfo[];
-  textPlugins: PluginInfo[];
   onFilePluginChange: (value: string) => void;
   onPluginSettingChange: (pluginName: string, key: string, value: unknown) => void;
-  onToggleTextPlugin: (pluginName: string) => void;
+  onFieldChange: (path: string, value: string) => void;
 }
 
-export function PluginSettingsSection({
+export function FileIOSettingsSection({
   config,
   filePlugins,
-  textPlugins,
   onFilePluginChange,
   onPluginSettingChange,
-  onToggleTextPlugin,
-}: PluginSettingsSectionProps) {
+  onFieldChange,
+}: FileIOSettingsSectionProps) {
+  const commonConfig = (config?.common as Record<string, unknown>) || {};
   const selectedFilePlugin = filePlugins.find(
     (p) => p.name === String((config?.plugin as Record<string, unknown>)?.filePlugin ?? 'file_galtransl_json')
   );
   return (
-    <Panel title="插件设置" description="文件插件和文本插件配置。">
+    <Panel title="文件读写" description="配置文件插件、文件分割、文本格式及缓存与日志保存方式。">
       <div className="config-form">
         {/* ── 文件插件 ── */}
         <div className="plugin-section">
@@ -67,60 +92,19 @@ export function PluginSettingsSection({
           })()}
         </div>
 
-        {/* ── 文本插件 ── */}
-        <div className="plugin-section">
-          <div className="plugin-section__title">文本插件</div>
-          {textPlugins.length > 0 ? (
-            <div className="plugin-check-list">
-              {textPlugins.map((plugin) => {
-                const enabledTextPlugins = new Set(
-                  Array.isArray((config?.plugin as Record<string, unknown>)?.textPlugins)
-                    ? ((config?.plugin as Record<string, unknown>).textPlugins as string[])
-                    : []
-                );
-                const isChecked = enabledTextPlugins.has(plugin.name);
-                const hasSettings = Object.keys(plugin.settings || {}).length > 0;
-
-                return (
-                  <div key={plugin.name} className="plugin-check-item">
-                    <label className="plugin-check-item__header">
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => onToggleTextPlugin(plugin.name)}
-                      />
-                      <span className="plugin-check-item__name">
-                        {plugin.display_name}
-                      </span>
-                      <span className="plugin-check-item__module">
-                        ({plugin.name})
-                      </span>
-                      {plugin.version && (
-                        <span className="plugin-check-item__version">
-                          v{plugin.version}
-                        </span>
-                      )}
-                    </label>
-                    {plugin.description && (
-                      <div className="plugin-check-item__desc">{plugin.description}</div>
-                    )}
-                    {isChecked && hasSettings && (
-                      <div className="plugin-check-item__settings">
-                        <PluginSettingsEditor
-                          plugin={plugin}
-                          overrides={((config?.plugin as Record<string, unknown>)?.[plugin.name] as Record<string, unknown>) || {}}
-                          onChange={onPluginSettingChange}
-                        />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="plugin-check-empty">未找到可用的文本插件</div>
-          )}
-        </div>
+        {FILE_FIELD_GROUPS.map((group) => (
+          <ConfigFieldGroup key={group.title} title={group.title}>
+            {group.fields.map((field) => (
+              <ConfigFieldRow
+                key={field.key}
+                field={field}
+                value={commonConfig[field.key]}
+                onChange={onFieldChange}
+                pathPrefix="common"
+              />
+            ))}
+          </ConfigFieldGroup>
+        ))}
       </div>
     </Panel>
   );
