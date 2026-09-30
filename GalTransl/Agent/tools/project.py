@@ -342,8 +342,8 @@ def _tool_write_project_guideline(runner: AgentRunner, args: dict[str, Any]) -> 
     after = str((runner._http_get(endpoint) or {}).get("content") or "")
 
     diff = _diff_lines(before, after)
-    added = sum(1 for r in diff["rows"] if r["op"] == "add")
-    removed = sum(1 for r in diff["rows"] if r["op"] == "del")
+    added = diff["added"]
+    removed = diff["removed"]
     out: dict[str, Any] = dict(result) if isinstance(result, dict) else {}
     out.update(
         {

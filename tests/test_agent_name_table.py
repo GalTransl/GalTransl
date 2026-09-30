@@ -122,7 +122,11 @@ class NameTableGptDictTests(unittest.TestCase):
 
         self.assertEqual(result["names"][0]["dst_name"], "多鲁德")
         self.assertEqual(result["names"][0]["dst_name_source"], "gpt_dict")
-        self.assertEqual(result["filled_from_gpt_dict"], ["ドルード"])
+        # 补了哪些看行上的 dst_name_source；清单字段只剩 still_empty
+        self.assertEqual(
+            list(result.keys()),
+            ["source_file", "names", "use_gpt_dict_in_name", "still_empty", "note"],
+        )
         self.assertEqual(result["still_empty"], [])
         self.assertTrue(result["use_gpt_dict_in_name"])
         self.assertEqual(runner.writes, [])  # 只读：一个字节都不写
@@ -140,7 +144,7 @@ class NameTableGptDictTests(unittest.TestCase):
 
         self.assertEqual(result["names"][0]["dst_name"], "杜鲁德")
         self.assertNotIn("dst_name_source", result["names"][0])
-        self.assertEqual(result["filled_from_gpt_dict"], [])
+        self.assertNotIn("filled_from_gpt_dict", result)
 
     def test_names_missing_everywhere_land_in_still_empty(self):
         runner = _NameRunner(
@@ -156,7 +160,6 @@ class NameTableGptDictTests(unittest.TestCase):
 
         result = _tool_get_name_table(runner, {})
 
-        self.assertEqual(result["filled_from_gpt_dict"], ["ドルード"])
         self.assertEqual(result["still_empty"], ["アリス"])  # 只有它要动手补
         self.assertEqual(
             [n["dst_name"] for n in result["names"]], ["", "多鲁德", "鲍勃"]
@@ -253,7 +256,7 @@ class GptDictToggleTests(unittest.TestCase):
 
         result = _tool_get_name_table(runner, {})
 
-        self.assertNotIn("filled_from_gpt_dict", result)
+        self.assertEqual(list(result.keys()), ["source_file", "names"])
 
     def test_flat_and_expanded_config_key_both_work(self):
         """配置里既有 useGPTDictInName，也可能写成 dictionary.useGPTDictInName。"""
@@ -307,7 +310,6 @@ class NameTableDegradationTests(unittest.TestCase):
 
         result = _tool_get_name_table(runner, {})
 
-        self.assertEqual(result["filled_from_gpt_dict"], [])
         self.assertEqual(result["still_empty"], ["アリス"])
 
 

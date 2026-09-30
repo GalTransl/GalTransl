@@ -268,8 +268,8 @@ def _tool_save_dict(runner: AgentRunner, args: dict[str, Any]) -> Any:
     }
     runner._http_post(f"/api/projects/{pid}/dictionary/project/save", body)
     diff = _diff_lines(before_text, new_text)
-    added = sum(1 for r in diff["rows"] if r["op"] == "add")
-    removed = sum(1 for r in diff["rows"] if r["op"] == "del")
+    added = diff["added"]
+    removed = diff["removed"]
     return {
         "file_key": file_key,
         "action": action,

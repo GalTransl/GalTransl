@@ -91,15 +91,14 @@ def _use_gpt_dict_in_name(runner: AgentRunner) -> bool:
 
 def _fill_names_from_gpt_dict(
     names: list[Any], gpt_map: dict[str, str]
-) -> tuple[list[Any], list[str], list[str]]:
+) -> tuple[list[Any], list[str]]:
     """把 GPT 字典里的译名补到**译名为空**的人名行上（只算不写）。
 
     与人名翻译页的 overlayGptDictOntoNames 同一套规则：只补空的，不覆盖表里已有的译名——
     表里写下的译名是用户（或 Agent）的决定，字典只回答"这行其实已经有出处了"。
-    返回（补好的人名行, 由字典补上的 src_name, 仍然没有译名的 src_name）。
+    返回（补好的人名行, 仍然没有译名的 src_name）。
     """
     out: list[Any] = []
-    filled: list[str] = []
     still_empty: list[str] = []
     for item in names:
         if not isinstance(item, dict):
@@ -115,10 +114,9 @@ def _fill_names_from_gpt_dict(
             out.append(item)
             still_empty.append(src)
             continue
-        filled.append(src)
         # 盖上出处：这行的译名不在表里，是字典在翻译时给 name 字段补的
         out.append({**item, "dst_name": mapped, "dst_name_source": "gpt_dict"})
-    return out, filled, still_empty
+    return out, still_empty
 
 
 def _tool_get_name_table(runner: AgentRunner, _args: dict[str, Any]) -> Any:
@@ -146,17 +144,16 @@ def _tool_get_name_table(runner: AgentRunner, _args: dict[str, Any]) -> Any:
     except Exception as exc:  # noqa: BLE001 - 字典读不到就少补一块，表本身照常返回
         _log(f"  ⚠ 读 GPT 字典失败，get_name_table 返回原始人名表：{exc}")
         return data
-    overlaid, filled, still_empty = _fill_names_from_gpt_dict(names, gpt_map)
+    overlaid, still_empty = _fill_names_from_gpt_dict(names, gpt_map)
     return {
         **data,
         "names": overlaid,
         "use_gpt_dict_in_name": True,
-        "filled_from_gpt_dict": filled,
         "still_empty": still_empty,
         "note": (
             "dictionary.useGPTDictInName 开着：names 里译名为空、而 GPT 字典收录了的行，"
-            "已经按字典的译名补上（带 dst_name_source=gpt_dict，翻译时真的会生效），"
-            "它们也列在 filled_from_gpt_dict 里。**still_empty 才是表与字典都没有、需要你补的**；"
+            "已经按字典的译名补上（带 dst_name_source=gpt_dict，翻译时真的会生效）。"
+            "**still_empty 才是表与字典都没有、需要你补的**；"
             "要把某个译名固定下来（不再依赖字典）用 save_name_table 写进表里。"
         ),
     }

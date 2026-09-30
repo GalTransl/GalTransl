@@ -492,15 +492,18 @@ class AgentRunner:
                         ok = True
                         duration_ms = int((time.time() - started) * 1000)
                         _log(f"  ✅ 工具结果: {name} 耗时 {duration_ms}ms")
-                        # 大清单工具：事件与模型消息给同一段 Markdown 文本（前端 formatPayload 对字符串原样显示）
+                        # 写入工具的模型消息只带有限 Markdown 预览，前端保留原始变更明细。
                         rendered = _render_tool_result_table(name, result)
+                        has_changes = isinstance(result, dict) and any(
+                            key in result for key in ("changes", "line_diff", "deleted_preview")
+                        )
                         self._emit(
                             "tool_result",
                             {
                                 "id": call_id,
                                 "name": name,
                                 "ok": True,
-                                "result": rendered if rendered is not None else result,
+                                "result": result if has_changes or rendered is None else rendered,
                                 "duration_ms": duration_ms,
                             },
                         )

@@ -204,11 +204,13 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
   };
 
   for (const ev of events) {
-    // status/close/context_usage/queue 是控制与指标事件，不进对话转录
+    // 控制与指标事件不进对话转录，也不打断当前活动组。
+    // compacting 的 start/done 只是压缩进度；压缩结果由 compacted 在组内展示。
     if (
       ev.type === 'status' ||
       ev.type === 'close' ||
       ev.type === 'context_usage' ||
+      ev.type === 'compacting' ||
       ev.type === 'queue'
     )
       continue;

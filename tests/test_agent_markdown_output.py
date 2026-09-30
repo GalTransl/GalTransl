@@ -318,14 +318,13 @@ class ManageProblemFilterMdTests(unittest.TestCase):
 
         self.assertNotIn("problems 为 0", text)
 
-    def test_add_remove_results_stay_json(self):
-        # changes 是变更 diff、不是清单：没有可表格化的数据行 → 返回 None 走 JSON
-        self.assertIsNone(
-            _render_tool_result_table(
-                "manage_problem_filter",
-                {"filter_keys": ["a"], "count": 1, "added": ["a"]},
-            )
+    def test_add_remove_results_use_markdown_summary(self):
+        text = _render_tool_result_table(
+            "manage_problem_filter",
+            {"filter_keys": ["a"], "count": 1, "added": ["a"]},
         )
+        self.assertIn("### 写入结果", text)
+        self.assertIn("新增：1", text)
 
 
 class HandlerPipelineTests(unittest.TestCase):
@@ -385,6 +384,47 @@ class HandlerPipelineTests(unittest.TestCase):
         self.assertIn("| a.json | 7 | 少女 | ドルード | 多鲁德 |  |  |", text)
 
 
+class GetNameTableMdTests(unittest.TestCase):
+    """人名表：来源/条数写成文字，行进表格，仍缺译名的单独点一句。"""
+
+    def test_table_head_still_empty_and_note(self):
+        result = {
+            "source_file": "name替换表.csv",
+            "names": [
+                {"src_name": "ドルード", "dst_name": "多鲁德", "count": 12, "dst_name_source": "gpt_dict"},
+                {"src_name": "アリス", "dst_name": "", "count": 5},
+            ],
+            "use_gpt_dict_in_name": True,
+            "still_empty": ["アリス"],
+            "note": "dictionary.useGPTDictInName 开着：译名为空而字典收录的行已补上。",
+        }
+
+        text = _render_tool_result_table("get_name_table", result)
+
+        self.assertIn("name替换表.csv：共 2 条人名", text)
+        self.assertIn("需要补的有 1 个：アリス", text)
+        self.assertIn("备注：dictionary.useGPTDictInName 开着", text)
+        rows = _table_rows(text, "src_name")
+        self.assertEqual(rows[0], ["ドルード", "多鲁德", "12", "gpt_dict"])
+        self.assertEqual(rows[1], ["アリス", "", "5", ""])
+
+    def test_dst_name_source_column_only_when_some_row_has_it(self):
+        result = {"names": [{"src_name": "アリス", "dst_name": "", "count": 1}]}
+
+        text = _render_tool_result_table("get_name_table", result)
+
+        self.assertNotIn("dst_name_source", text)
+        self.assertEqual(_table_rows(text, "src_name"), [["アリス", "", "1"]])
+
+    def test_empty_table_stays_json(self):
+        # 表为空 = 还没生成，模型要看到"空"这件事：不渲染，退回 JSON 原样返回
+        self.assertIsNone(
+            _render_tool_result_table(
+                "get_name_table", {"source_file": "name替换表.csv", "names": []}
+            )
+        )
+
+
 class DispatcherTests(unittest.TestCase):
     def test_unknown_tool_and_non_dict_fall_back_to_json(self):
         self.assertIsNone(_render_tool_result_table("get_name_table", {"results": []}))
@@ -394,6 +434,10 @@ class DispatcherTests(unittest.TestCase):
         self.assertEqual(
             set(rt._MD_RENDERERS),
             {
+                "get_project_overview",
+                "list_dict_files",
+                "read_dict",
+                "read_output",
                 "list_input_files",
                 "list_problems",
                 "read_input_file",
@@ -402,6 +446,13 @@ class DispatcherTests(unittest.TestCase):
                 "manage_problem_filter",
                 "run_subagents",
                 "patch_transl_cache",
+                "get_name_table",
+                "save_dict",
+                "save_name_table",
+                "write_project_guideline",
+                "update_project_config",
+                "manage_problem_white_list",
+                "delete_transl_cache",
             },
         )
         # ISON 渲染层已删：确认没有残留的旧渲染注册表

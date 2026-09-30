@@ -113,7 +113,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "write_project_guideline",
-            "description": "写**项目规范**（项目目录里的 translation_guideline.md）。三种模式：overwrite=整份覆写；append=末尾增写；replace=把 old_text 换成 new_text（old_text 要原样来自规范全文、且只出现一次，否则会报错让你带上更多前后文）。规范是写给翻译模型的，要具体可执行（术语对照、称呼、语气、标点习惯、禁忌），别写「要地道」这类空话。返回里带这一次改动的行级 diff（新增/删除的行、增删计数），不用再读一遍文件确认。",
+            "description": "写**项目规范**（项目目录里的 translation_guideline.md）。三种模式：overwrite=整份覆写；append=末尾增写；replace=把 old_text 换成 new_text（old_text 要原样来自规范全文、且只出现一次，否则会报错让你带上更多前后文）。规范是写给翻译模型的，要具体可执行（术语对照、称呼、语气、标点习惯、禁忌），别写「要地道」这类空话。返回 Markdown 摘要、完整增删计数和最多 10 行 diff 预览（超出会标记省略），不用再读一遍文件确认。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -135,7 +135,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_project_overview",
-            "description": "了解项目：查看翻译进度、实际生效的后端与项目配置。进度含句数 total/translated/problems/failed 和文件级 files_total/files_translated/files_untranslated；total/translated 只统计已生成缓存的文件，未翻译的文件不计入分母，translated==total 不代表整个项目翻完，整体进度看 files_translated/files_total。backend 里是两份实际生效的后端（各含 name 配置名 / type 后端类型 / model 模型名，不含地址与密钥）：agent 是本会话在用的，translator 是翻译任务会用的。流程第一步调用它确认项目可用；配置与配置键说明基本不变，之后再查进度只传 include=[\"progress\"] 即可，别重复拉。输入文件清单本身用 list_input_files / read_transl_cache（action=list）单独查询。",
+            "description": "了解项目：以 Markdown 分节返回翻译进度、实际生效的后端与项目配置；配置值与键说明合并在同一表格，key 是可交给 update_project_config 的完整点号路径。进度含句数 total/translated/problems/failed 和文件级 files_total/files_translated/files_untranslated；total/translated 只统计已生成缓存的文件，未翻译的文件不计入分母，translated==total 不代表整个项目翻完，整体进度看 files_translated/files_total。backend 里是两份实际生效的后端（各含 name 配置名 / type 后端类型 / model 模型名，不含地址与密钥）：agent 是本会话在用的，translator 是翻译任务会用的。流程第一步调用它确认项目可用；配置与配置键说明基本不变，之后再查进度只传 include=[\"progress\"] 即可，别重复拉。输入文件清单本身用 list_input_files / read_transl_cache（action=list）单独查询。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -146,7 +146,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                             "enum": ["progress", "backend", "config", "config_field_descriptions"],
                         },
                         "description": (
-                            "可选。只返回这几部分（名字即返回体的键），用于避免重复拉取基本不变的内容："
+                            "可选。只返回这几部分，用于避免重复拉取基本不变的内容："
                             "progress=进度；backend=实际生效的两份后端；config=项目配置；"
                             "config_field_descriptions=每个配置键的作用与取值说明（约 40 条，基本不变，"
                             "看过一次就不用再取）。留空返回全部。"
@@ -161,7 +161,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "list_dict_files",
-            "description": "列出项目配置的译前字典(preDict)、GPT字典(gpt.dict)、译后字典(postDict)文件与各文件行数（不含内容，读内容用 read_dict）。准备字典阶段使用。",
+            "description": "列出项目字典，返回 category / file_key / lines 的 Markdown 表格：pre=译前字典，gpt=GPT字典，post=译后字典；同类文件按配置中的加载顺序排列。file_key 可直接交给 read_dict/save_dict。只含文件清单与行数，内容用 read_dict 读取。",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -169,7 +169,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_dict",
-            "description": "读取某个项目字典文件的完整内容（按 file_key，来自 list_dict_files 返回的 pre_dict_files / gpt_dict_files / post_dict_files）。",
+            "description": "读取某个项目字典文件的完整内容，file_key 来自 list_dict_files 表格的 file_key 列。返回 Markdown：文件与行数说明 + 原文代码块，Tab、空行和注释原样保留。",
             "parameters": {
                 "type": "object",
                 "properties": {"file_key": {"type": "string", "description": "字典文件 key，形如 (project_dir)项目GPT字典.txt"}},
@@ -207,7 +207,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_name_table",
-            "description": "读取 name替换表（人名表），返回 src_name/dst_name/count 列表。为空说明尚未生成。配置 dictionary.useGPTDictInName 开着时（默认开），译名为空而 GPT 字典已收录的行会按字典译名补上（带 dst_name_source=gpt_dict），并额外返回 filled_from_gpt_dict 与 still_empty 两份清单——**还缺哪些名字看 still_empty**。",
+            "description": "读取 name替换表（人名表），返回 src_name/dst_name/count 列表。为空说明尚未生成。配置 dictionary.useGPTDictInName 开着时（默认开），译名为空而 GPT 字典已收录的行会按字典译名补上（带 dst_name_source=gpt_dict），并额外返回 still_empty 清单——**还缺哪些名字看 still_empty**。",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -512,7 +512,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_output",
-            "description": "读取最终输出文件（gt_output，交付物）。输出是缓存经译后字典替换、控制符处理后的最终形态，与缓存可能不完全一致——验收交付物、确认 postDict 替换效果用这个，而不是 read_transl_cache。文件名通常与输入文件同名。留空 index 返回前 30 条。",
+            "description": "读取最终输出文件（gt_output，交付物）。输出是缓存经译后字典替换、控制符处理后的最终形态，与缓存可能不完全一致——验收交付物、确认 postDict 替换效果用这个，而不是 read_transl_cache。文件名通常与输入文件同名。留空 index 返回前 30 条。返回 index / name / message 的 Markdown 表格，并说明总条数、返回条数和缺失的 index。",
             "parameters": {
                 "type": "object",
                 "properties": {

@@ -28,7 +28,7 @@ def _change(path: str, before: Any, after: Any, kind: str = "replace") -> dict[s
 def _diff_lines(before_text: str, after_text: str, *, context: int = 0, max_lines: int = 200) -> dict[str, Any]:
     """整文本替换时的逐行 diff（新增行/删除行），给前端渲染行级 diff。
 
-    返回 {"rows": [{"op": "add"|"del", "line": str}], "truncated": bool}——与前端
+    返回 rows、truncated 和全量 added/removed 计数——与前端
     extractChangeList 认的 line_diff 结构一致。用最长公共行序列近似（对字典、规范这类
     逐行文本足够准确）；超过 max_lines 时截断并标记 truncated，避免整本小说级 diff 刷屏。"""
     import difflib
@@ -37,24 +37,17 @@ def _diff_lines(before_text: str, after_text: str, *, context: int = 0, max_line
     after_lines = after_text.splitlines()
     sm = difflib.SequenceMatcher(a=before_lines, b=after_lines, autojunk=False)
     rows: list[dict[str, Any]] = []
-    truncated = False
+    added = removed = 0
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
         if tag == "equal":
             continue
-        if len(rows) >= max_lines:
-            truncated = True
-            break
-        for line in before_lines[i1:i2]:
-            if len(rows) >= max_lines:
-                truncated = True
-                break
+        removed += i2 - i1
+        added += j2 - j1
+        for line in before_lines[i1:min(i2, i1 + max(0, max_lines - len(rows)))]:
             rows.append({"op": "del", "line": line})
-        for line in after_lines[j1:j2]:
-            if len(rows) >= max_lines:
-                truncated = True
-                break
+        for line in after_lines[j1:min(j2, j1 + max(0, max_lines - len(rows)))]:
             rows.append({"op": "add", "line": line})
-    return {"rows": rows, "truncated": truncated}
+    return {"rows": rows, "truncated": added + removed > len(rows), "added": added, "removed": removed}
 
 
 def _split_problem_types(problem: str) -> list[str]:

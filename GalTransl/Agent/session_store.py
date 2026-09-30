@@ -57,10 +57,13 @@ TRANSCRIPT_MAX_EVENTS = 2000
 def _compact_event_for_storage(event: dict[str, Any]) -> dict[str, Any]:
     """避免 tool_result 在 event + message 两条记录中重复保存大结果。
 
-    tool message 是模型续聊所需的权威结果；event 只保留前端转录所需的
-    调用标识、状态和耗时。读取时再从对应 tool message 补回 result。
+    普通结果从对应 tool message 补回。写入工具的模型消息仅有有限 Markdown
+    预览，无法恢复原始 diff，因此这类 event 必须保留前端变更数据。
     """
     if event.get("type") != "tool_result":
+        return event
+    result = event.get("result")
+    if isinstance(result, dict) and any(key in result for key in ("changes", "line_diff", "deleted_preview")):
         return event
     # 成功结果通常是体积最大的字段，必须避免和 role=tool message 重复落盘。
     # error 一般很短，而且某些异常路径（例如响应被截断）没有对应的 tool
