@@ -132,7 +132,7 @@ export function AgentPage() {
     projectOptions[0] ? readConfigFileName(projectOptions[0]) : 'config.yaml',
   );
   const [backendProfileNames] = useState<string[]>(() => getBackendProfileNames());
-  const [goal, setGoal] = useState('');
+  const [messageDraft, setMessageDraft] = useState('');
 
   // 输入框本体：点推荐提示词后要把焦点还回去（用户接着改两个字就能直接回车发出）
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -140,7 +140,7 @@ export function AgentPage() {
   /** 空态的推荐提示词：填进输入框并聚焦到末尾，**不直接发送**（用户还能改）。
    *  输入框里已经有字时追加成新的一行——点了没反应或者把写了一半的话冲掉都很难受。 */
   const applyPromptSuggestion = useCallback((text: string) => {
-    setGoal((prev) => (prev.trim() ? `${prev.trimEnd()}\n${text}` : text));
+    setMessageDraft((prev) => (prev.trim() ? `${prev.trimEnd()}\n${text}` : text));
     // 等 React 把新的 value 提交到 DOM 再定位光标，否则量到的还是旧长度
     requestAnimationFrame(() => {
       const el = composerRef.current;
@@ -497,7 +497,7 @@ export function AgentPage() {
       sessionId: activeSessionId,
       events,
       status,
-      goal: '',
+      first_prompt: events.find((event) => event.type === 'user_message')?.message ?? '',
       startedAt: startRef.current,
       finishedAt: status === 'running' ? 0 : Date.now(),
     });
@@ -626,7 +626,7 @@ export function AgentPage() {
   const closeStream = stream.close;
 
   const handleSend = useCallback(async () => {
-    const text = goal.trim();
+    const text = messageDraft.trim();
     if (!text) return;
     setError(null);
     // 发出去就等于会话开始：项目 chip 马上要变成不可点的纯标签，菜单顺手收掉
@@ -654,7 +654,7 @@ export function AgentPage() {
         { type: 'user_message', step: -1, message: text },
       ]);
     }
-    setGoal('');
+    setMessageDraft('');
     setSending(true);
     sendingRef.current = true;
     sendTransitionRef.current = activeSessionRef.current;
@@ -703,7 +703,7 @@ export function AgentPage() {
           const snap = await startAgent({
             project_dir: effectiveProject,
             config_file_name: configFileName || 'config.yaml',
-            goal: text,
+            first_prompt: text,
           session_id: sid,
           ...backendContext,
         });
@@ -737,7 +737,7 @@ export function AgentPage() {
     effectiveProject,
     backendProfileName,
     configFileName,
-    goal,
+    messageDraft,
     running,
     permissionMode,
     subscribeStream,
@@ -836,7 +836,7 @@ export function AgentPage() {
         skipRememberedSessionRef.current = true;
         setProjectDir(selected);
         setConfigFileName(cfg);
-        setGoal('');
+        setMessageDraft('');
         // 同步进翻译器的"已打开项目"列表（写盘 + 广播），让全局侧边栏
         // 和 Agent 自己的侧边栏分组都出现这个项目。
         addOpenProject(selected, cfg);
@@ -855,7 +855,7 @@ export function AgentPage() {
     skipRememberedSessionRef.current = true;
     setProjectDir(dir);
     setConfigFileName(cfg);
-    setGoal('');
+    setMessageDraft('');
     addOpenProject(dir, cfg);
   }, []);
 
@@ -888,7 +888,7 @@ export function AgentPage() {
     setError(null);
     // 只清当前主区项目/目标/活动会话；不动 sessionsByProject，侧边栏保留历史
     setProjectDir('');
-    setGoal('');
+    setMessageDraft('');
   }, [running, handleStop]);
 
   /** 项目分组行 ＋：在指定项目下新建一个会话。
@@ -1077,7 +1077,7 @@ export function AgentPage() {
 
   const timeline = useMemo(() => buildTimeline(events), [events]);
   const hasSession = events.length > 0;
-  const canSend = Boolean(projectDir) && Boolean(backendProfileName) && goal.trim().length > 0 && !sending;
+  const canSend = Boolean(projectDir) && Boolean(backendProfileName) && messageDraft.trim().length > 0 && !sending;
   // 正在等用户回答的 ask_user：这条工具调用**还没有结果**，说明后端那个工具
   // 正阻塞着等这一下（结果一到就说明答过了/被跳过了）。从后往前找最新的那条。
   const pendingAsk = useMemo(() => {
@@ -1590,14 +1590,14 @@ export function AgentPage() {
           <textarea
             ref={composerRef}
             className="agent-composer__input"
-            value={goal}
-            onChange={(e) => setGoal(e.target.value)}
+            value={messageDraft}
+            onChange={(e) => setMessageDraft(e.target.value)}
             placeholder={
               running
                 ? '继续输入以排队后续消息，本轮做完自动发出；想提前发就点队列里的「立即」。'
                 : hasSession
                   ? '给 Agent 下一步指令，它会接着当前进度继续。'
-                  : '描述你希望 Agent 完成的任务，例如：按标准流程完成本项目的翻译。'
+                  : '描述你希望 Agent 完成的任务。'
             }
             rows={2}
             onKeyDown={(e) => {

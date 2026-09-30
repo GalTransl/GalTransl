@@ -63,6 +63,14 @@ test('packaged startup cannot fall back to an unrelated backend on 12333', async
   assert.equal(requests.length, 0);
 });
 
+test('Agent start sends the first user prompt without a goal field', async () => {
+  const { api, requestOptions } = loadApi({ native: false });
+  await api.startAgent({ project_dir: 'project', first_prompt: '仅检查原文' });
+  const payload = JSON.parse(requestOptions[0].body);
+  assert.equal(payload.first_prompt, '仅检查原文');
+  assert.equal('goal' in payload, false);
+});
+
 test('input browsing and re-extraction use the selected configuration', async () => {
   const { api, requests } = loadApi({ native: false });
   await api.fetchProjectCache('project', '提取 & cp932.yaml');

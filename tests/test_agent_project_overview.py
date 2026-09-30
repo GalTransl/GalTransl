@@ -382,7 +382,7 @@ class BackendContextPlumbingTests(unittest.TestCase):
                 self.project,
                 "config.yaml",
                 agent_profile,
-                goal="第一轮",
+                first_prompt="第一轮",
                 session_id=sid,
                 backend_profile_name="Agent 默认",
                 translator_profile_name="翻译器默认",
@@ -434,7 +434,7 @@ class BackendContextPlumbingTests(unittest.TestCase):
         rt = AgentRuntime()
         sid = rt.create_session(self.project)["session_id"]
         with patch.object(AgentRunner, "run", lambda self: None):
-            rt.start(self.project, "config.yaml", profile, goal="第一轮", session_id=sid)
+            rt.start(self.project, "config.yaml", profile, first_prompt="第一轮", session_id=sid)
             ss.SessionStore(self.project, sid).append_message({"role": "user", "content": "第一轮"})
             ss.SessionStore(self.project, sid).append_meta(running=False)
 

@@ -18,7 +18,7 @@ type TranscriptSession = {
   sessionId: string;
   events: AgentEvent[];
   status: string;
-  goal: string;
+  first_prompt: string;
   startedAt: number;
   finishedAt: number;
 };
@@ -79,13 +79,14 @@ export function loadSession(projectDir: string, sessionId: string): TranscriptSe
   try {
     const raw = localStorage.getItem(sessionsKey(projectDir, sessionId));
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as TranscriptSession;
+    const parsed = JSON.parse(raw) as TranscriptSession & { goal?: string };
     if (!parsed || !Array.isArray(parsed.events)) return null;
     // Delta/tick events are a real-time-only SSE side channel.  They are not
     // persisted by the backend and therefore must never contribute to the
     // resume cursor after a restart.  Filter them here as well as in
     // mergeTranscriptEvents so caches written by older versions are safe.
-    return { ...parsed, events: persistedTranscriptEvents(parsed.events) };
+    const { goal: legacyFirstPrompt, ...session } = parsed;
+    return { ...session, first_prompt: session.first_prompt ?? legacyFirstPrompt ?? '', events: persistedTranscriptEvents(session.events) };
   } catch {
     return null;
   }

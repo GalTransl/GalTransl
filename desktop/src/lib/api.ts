@@ -1911,7 +1911,7 @@ export type AgentEvent = {
   reason?: string;
   started_at?: number;
   finished_at?: number;
-  goal?: string;
+  first_prompt?: string;
   // 子代理事件（subagent_*）：id 是本次派发的 id，parent_id 指向发起它的那次工具调用
   parent_id?: string;
   agent?: string;
@@ -1937,7 +1937,7 @@ export type AgentStatus = {
   project_dir: string;
   session_id?: string;
   title?: string;
-  goal?: string;
+  first_prompt?: string;
   step: number;
   started_at?: number;
   finished_at?: number;
@@ -1966,7 +1966,7 @@ export type AgentStartPayload = {
   project_dir: string;
   config_file_name?: string;
   backend_profile_data: Record<string, unknown>;
-  goal?: string;
+  first_prompt?: string;
   /** Omit to let the backend create a fresh session. */
   session_id?: string;
 } & AgentRequestContext;
@@ -2196,7 +2196,7 @@ export async function fetchAgentTranscript(projectDir: string, sessionId?: strin
 }
 
 /** Create an empty session (no turn started). Title defaults to 占位「新会话」，
- * 首条消息发出后由后端改成这条消息的内容（见 startAgent 的 goal）。 */
+ * 首条消息发出后由后端改成这条消息的内容（见 startAgent 的 first_prompt）。 */
 export async function createAgentSession(projectDir: string, title?: string) {
   return apiRequest<AgentSession>('/api/agent/sessions/create', {
     method: 'POST',

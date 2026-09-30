@@ -103,12 +103,12 @@ class SessionStoreTests(unittest.TestCase):
         """收尾写入 running=false 不能覆盖首条 meta 的会话信息。"""
         sid = ss.create_session(self.project, "MyGame1")
         store = ss.SessionStore(self.project, sid)
-        store.append_meta(goal="首条用户输入", config_file_name="config.yaml", running=True)
+        store.append_meta(first_prompt="首条用户输入", config_file_name="config.yaml", running=True)
         store.append_meta(running=False)
 
         meta = store.load()["meta"]
         self.assertEqual(meta["title"], "MyGame1")
-        self.assertEqual(meta["goal"], "首条用户输入")
+        self.assertEqual(meta["first_prompt"], "首条用户输入")
         self.assertEqual(meta["config_file_name"], "config.yaml")
         self.assertFalse(meta["running"])
 
@@ -156,12 +156,12 @@ class SessionStoreTests(unittest.TestCase):
         store = ss.SessionStore(self.project, sid)
         self.assertTrue(os.path.isfile(store.meta_path))
 
-        store.append_meta(goal="接着翻", running=True)
+        store.append_meta(first_prompt="接着翻", running=True)
         store.append_meta(running=False)
 
         meta = ss._read_meta(store.path)
         self.assertEqual(meta["title"], "MyGame1")
-        self.assertEqual(meta["goal"], "接着翻")
+        self.assertEqual(meta["first_prompt"], "接着翻")
         self.assertFalse(meta["running"])
         # sidecar 不该被误认成一个会话
         self.assertEqual(len(ss.list_sessions(self.project)), 1)
@@ -192,9 +192,9 @@ class SessionStoreTests(unittest.TestCase):
 
         # 绕过 append_meta 直接追加一行 meta（模拟别处写了文件、sidecar 没跟上）
         with open(store.path, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"t": "meta", "at": 1.0, "goal": "外部写入"}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"t": "meta", "at": 1.0, "first_prompt": "外部写入"}, ensure_ascii=False) + "\n")
 
-        self.assertEqual(ss._read_meta(store.path)["goal"], "外部写入")
+        self.assertEqual(ss._read_meta(store.path)["first_prompt"], "外部写入")
 
     def test_meta_sidecar_survives_bulk_message_appends(self) -> None:
         """会话跑起来后 message/event 一直在追加，标题不能因为"文件变了"就丢。

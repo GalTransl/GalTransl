@@ -45,7 +45,7 @@ class SessionListStatusTests(unittest.TestCase):
         self.assertEqual(self._status(rt, sid), "")  # 还没跑过 → 不亮灯
 
         with patch.object(AgentRunner, "run", lambda self: None):
-            rt.start(self.project, "config.yaml", PROFILE, goal="跑一轮", session_id=sid)
+            rt.start(self.project, "config.yaml", PROFILE, first_prompt="跑一轮", session_id=sid)
             self.assertEqual(self._status(rt, sid), "running")  # 蓝灯
             state = rt._get_state(self.project, sid)
             assert state is not None
@@ -68,7 +68,7 @@ class SessionListStatusTests(unittest.TestCase):
         idle_sid = rt.create_session(self.project)["session_id"]
 
         with patch.object(AgentRunner, "run", lambda self: None):
-            rt.start(self.project, "config.yaml", PROFILE, goal="跑一轮", session_id=running_sid)
+            rt.start(self.project, "config.yaml", PROFILE, first_prompt="跑一轮", session_id=running_sid)
 
         self.assertEqual(self._status(rt, running_sid), "running")
         self.assertEqual(self._status(rt, idle_sid), "")

@@ -30,7 +30,7 @@ class AgentBackendAddressTests(unittest.TestCase):
 
     def test_new_turn_uses_runtime_address(self):
         runtime = AgentRuntime(host="127.0.0.1", port=42123)
-        result = runtime.start(self.project, "config.yaml", {}, goal="test")
+        result = runtime.start(self.project, "config.yaml", {}, first_prompt="test")
         runner = runtime._runners[runtime._key(self.project)][result["session_id"]]
         self.assertEqual(runner.base_url, "http://127.0.0.1:42123")
 

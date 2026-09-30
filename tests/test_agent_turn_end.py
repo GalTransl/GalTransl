@@ -196,7 +196,7 @@ class QueuedMessageEventTests(unittest.TestCase):
         rt = AgentRuntime()
         sid = rt.create_session(self.project)["session_id"]
         with patch.object(AgentRunner, "run", lambda self: None):
-            rt.start(self.project, "config.yaml", PROFILE, goal="第一轮", session_id=sid)
+            rt.start(self.project, "config.yaml", PROFILE, first_prompt="第一轮", session_id=sid)
             state = self._state(rt, sid)
             # run() 被打桩，不会自己写历史；补一条让它像跑过一轮的会话
             state.messages.append({"role": "user", "content": "第一轮"})
@@ -316,7 +316,7 @@ class MessageAfterTurnEndTests(unittest.TestCase):
         rt = AgentRuntime()
         sid = rt.create_session(self.project)["session_id"]
         with patch.object(AgentRunner, "run", lambda self: None):
-            rt.start(self.project, "config.yaml", PROFILE, goal="第一轮", session_id=sid)
+            rt.start(self.project, "config.yaml", PROFILE, first_prompt="第一轮", session_id=sid)
             state = rt._get_state(self.project, sid)
             assert state is not None
             state.status = "stopped"  # 模拟"用户点了停止、回合已收尾"
@@ -362,7 +362,7 @@ class StopSignalResetTests(unittest.TestCase):
         rt = AgentRuntime()
         sid = rt.create_session(self.project)["session_id"]
         with patch.object(AgentRunner, "run", lambda self: None):
-            rt.start(self.project, "config.yaml", PROFILE, goal="第一轮", session_id=sid)
+            rt.start(self.project, "config.yaml", PROFILE, first_prompt="第一轮", session_id=sid)
             state = rt._get_state(self.project, sid)
             assert state is not None
             state.messages.append({"role": "user", "content": "第一轮"})
@@ -384,7 +384,7 @@ class StopSignalResetTests(unittest.TestCase):
         rt = AgentRuntime()
         sid = rt.create_session(self.project)["session_id"]
         with patch.object(AgentRunner, "run", lambda self: None):
-            rt.start(self.project, "config.yaml", PROFILE, goal="第一轮", session_id=sid)
+            rt.start(self.project, "config.yaml", PROFILE, first_prompt="第一轮", session_id=sid)
             state = rt._get_state(self.project, sid)
             assert state is not None
             state.status = "stopped"
@@ -408,7 +408,7 @@ class StopSignalResetTests(unittest.TestCase):
         rt = AgentRuntime()
         sid = rt.create_session(self.project)["session_id"]
         with patch.object(AgentRunner, "run", lambda self: None):
-            rt.start(self.project, "config.yaml", PROFILE, goal="第一轮", session_id=sid)
+            rt.start(self.project, "config.yaml", PROFILE, first_prompt="第一轮", session_id=sid)
             state = rt._get_state(self.project, sid)
             assert state is not None
             state.messages.append({"role": "user", "content": "第一轮"})

@@ -6,7 +6,7 @@
 
 每行一条 JSON 记录，`t` 字段区分类型：
 
-- meta    —— 会话元信息（标题、配置文件、后端配置、目标、创建时间）
+- meta    —— 会话元信息（标题、配置文件、后端配置、首条输入、创建时间）
 - message —— 一条 OpenAI 格式的对话消息（角色/内容/tool_calls）
 - event   —— 一条 AgentEvent（前端转录用；content_delta 不落盘，高频且可重建）
 - compact —— 上下文压缩发生点的标记
@@ -346,7 +346,7 @@ class SessionStore:
                     kind = rec.get("t")
                     if kind == "meta":
                         # meta 记录是增量写入的（例如收尾只写 running=false），
-                        # 不能用最新一条覆盖早先的 goal/title/config 等字段。
+                        # 不能用最新一条覆盖早先的 first_prompt/title/config 等字段。
                         out["meta"].update({k: v for k, v in rec.items() if k not in ("t", "at")})
                     elif kind == "message":
                         msg = rec.get("msg")
@@ -394,7 +394,7 @@ class SessionStore:
 
 
 def _read_meta(path: str, *, write_cache: bool = True) -> dict[str, Any]:
-    """读会话的文件级 meta（标题/目标/配置/创建时间），后写的字段优先。
+    """读会话的文件级 meta（标题/首条输入/配置/创建时间），后写的字段优先。
 
     meta 是增量追加的：新建只写占位标题，首条消息到达后才补写真正的标题，
     收尾再补 running=false。所以不能只认第一条 meta（否则列表里永远是新建
@@ -547,8 +547,13 @@ def title_from_message(text: str, fallback: str = DEFAULT_TITLE) -> str:
 
 
 def read_meta(project_dir: str, session_id: str) -> dict[str, Any]:
-    """读会话 meta（标题/目标/配置文件/创建时间等）。"""
+    """读会话 meta（标题/首条输入/配置文件/创建时间等）。"""
     return _read_meta(SessionStore(project_dir, session_id).path)
+
+
+def first_prompt_from_meta(meta: dict[str, Any]) -> str:
+    """兼容旧会话的 goal 字段；新字段存在时始终以新字段为准。"""
+    return str(meta.get("first_prompt", meta.get("goal", "")) or "")
 
 
 def session_title(project_dir: str, session_id: str, fallback: str = "") -> str:

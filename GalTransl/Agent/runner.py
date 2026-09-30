@@ -316,12 +316,14 @@ class AgentRunner:
             # 上一轮在工具执行中途退出（进程被杀/崩溃）时，界面上还挂着"没结果"的卡片：
             # 先补一条失败事件把它收掉（请求侧的合法性见 _messages_with_tool_placeholders）
             self._close_dangling_tool_calls()
+            if not self.state.messages and not self.state.first_prompt.strip():
+                self._end_turn("done", {})
+                return
             self._resolve_llm()
             if not self.state.messages:
                 self._persist_message({"role": "system", "content": _build_system_prompt(self.state)})
-                # user 消息只放用户的原始输入；项目目录/配置文件/目标这些环境
-                # 上下文已经拼进上面的 system prompt，这里不再重复塞。
-                first_user_text = self.state.goal or "按标准流程完成本项目的翻译。"
+                # 首条消息只使用用户的实际输入。
+                first_user_text = self.state.first_prompt
                 self._persist_message({"role": "user", "content": first_user_text})
                 # 首条用户消息也进事件流：SSE 全量回放（重开页面/状态对账）时
                 # 气泡不丢。前端发送时已乐观显示，收到会按内容去重。

@@ -36,25 +36,25 @@ class CrossProjectConcurrencyTests(unittest.TestCase):
         # run() 打桩：不真的跑回合，只验证"允不允许起第二个"
         with patch.object(AgentRunner, "run", lambda self: None):
             sid_a = rt.create_session(self.proj_a)["session_id"]
-            a = rt.start(self.proj_a, "config.yaml", PROFILE, goal="A 项目", session_id=sid_a)
+            a = rt.start(self.proj_a, "config.yaml", PROFILE, first_prompt="A 项目", session_id=sid_a)
             sid_b = rt.create_session(self.proj_b)["session_id"]
-            b = rt.start(self.proj_b, "config.yaml", PROFILE, goal="B 项目", session_id=sid_b)
+            b = rt.start(self.proj_b, "config.yaml", PROFILE, first_prompt="B 项目", session_id=sid_b)
 
         self.assertEqual(a["status"], "running")
         self.assertEqual(b["status"], "running")
         # 两个会话各有各的状态，互不覆盖
         self.assertNotEqual(a["session_id"], b["session_id"])
-        self.assertEqual(rt.status(self.proj_a, sid_a)["goal"], "A 项目")
-        self.assertEqual(rt.status(self.proj_b, sid_b)["goal"], "B 项目")
+        self.assertEqual(rt.status(self.proj_a, sid_a)["first_prompt"], "A 项目")
+        self.assertEqual(rt.status(self.proj_b, sid_b)["first_prompt"], "B 项目")
 
     def test_same_session_refuses_second_turn(self):
         """同一个会话同时只能跑一个回合：第二次 start 必须被拒。"""
         rt = AgentRuntime()
         sid = rt.create_session(self.proj_a)["session_id"]
         with patch.object(AgentRunner, "run", lambda self: None):
-            rt.start(self.proj_a, "config.yaml", PROFILE, goal="第一次", session_id=sid)
+            rt.start(self.proj_a, "config.yaml", PROFILE, first_prompt="第一次", session_id=sid)
             with self.assertRaises(ValueError):
-                rt.start(self.proj_a, "config.yaml", PROFILE, goal="第二次", session_id=sid)
+                rt.start(self.proj_a, "config.yaml", PROFILE, first_prompt="第二次", session_id=sid)
 
     def test_second_session_in_same_project_is_independent(self):
         """同一项目下另一个会话也能起：并发限制是按会话算的，不是按项目。"""
@@ -62,12 +62,12 @@ class CrossProjectConcurrencyTests(unittest.TestCase):
         with patch.object(AgentRunner, "run", lambda self: None):
             sid_1 = rt.create_session(self.proj_a)["session_id"]
             sid_2 = rt.create_session(self.proj_a)["session_id"]
-            rt.start(self.proj_a, "config.yaml", PROFILE, goal="会话一", session_id=sid_1)
-            second = rt.start(self.proj_a, "config.yaml", PROFILE, goal="会话二", session_id=sid_2)
+            rt.start(self.proj_a, "config.yaml", PROFILE, first_prompt="会话一", session_id=sid_1)
+            second = rt.start(self.proj_a, "config.yaml", PROFILE, first_prompt="会话二", session_id=sid_2)
 
         self.assertEqual(second["status"], "running")
-        self.assertEqual(rt.status(self.proj_a, sid_1)["goal"], "会话一")
-        self.assertEqual(rt.status(self.proj_a, sid_2)["goal"], "会话二")
+        self.assertEqual(rt.status(self.proj_a, sid_1)["first_prompt"], "会话一")
+        self.assertEqual(rt.status(self.proj_a, sid_2)["first_prompt"], "会话二")
 
 
 if __name__ == "__main__":

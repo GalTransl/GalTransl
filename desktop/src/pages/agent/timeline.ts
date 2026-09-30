@@ -4,7 +4,7 @@ import { asArgs, toolMeta } from './toolMeta';
 /* ── Timeline model ──
    Raw SSE events are folded into render groups: runs of thinking/tool activity
    collapse into one summary row ("工作 6 秒 · 4 步"), while terminal moments
-   (finish / error / stopped) and the initial user goal stay as their own rows.
+   (finish / error / stopped) and the initial user message stay as their own rows.
    This mirrors how modern agent clients avoid a wall of one-line cards. */
 
 export type ActivityItem = {

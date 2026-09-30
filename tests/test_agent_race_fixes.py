@@ -36,7 +36,7 @@ class _RuntimeCase(unittest.TestCase):
     def _start(self, rt: AgentRuntime, run=lambda self: None) -> tuple[str, AgentRunner]:
         with patch.object(AgentRunner, "run", run):
             sid = rt.create_session(self.project)["session_id"]
-            rt.start(self.project, "config.yaml", PROFILE, goal="翻译", session_id=sid)
+            rt.start(self.project, "config.yaml", PROFILE, first_prompt="翻译", session_id=sid)
         return sid, rt._runners[rt._key(self.project)][sid]
 
 

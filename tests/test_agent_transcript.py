@@ -162,14 +162,14 @@ class RuntimeTranscriptTests(unittest.TestCase):
     def tearDown(self) -> None:
         ss.SESSIONS_ROOT = self._orig_root
 
-    def test_synthesizes_first_user_message_from_meta_goal(self):
-        """异常退出可能没落下首条 user_message 事件：用 meta.goal 补一条。"""
+    def test_synthesizes_first_user_message_from_meta_first_prompt(self):
+        """异常退出可能没落下首条 user_message 事件：用 meta.first_prompt 补一条。"""
         from GalTransl.Agent.runtime import AgentRuntime
 
         rt = AgentRuntime()
         session = rt.create_session(self.project)
         store = ss.SessionStore(self.project, session["session_id"])
-        store.append_meta(project_dir=self.project, title="t", goal="把第一章翻完")
+        store.append_meta(project_dir=self.project, title="t", first_prompt="把第一章翻完")
         store.append_event({"type": "assistant_message", "step": 2, "parts": [{"type": "text", "text": "好的"}]})
 
         events = rt.transcript(self.project, session["session_id"])
@@ -222,7 +222,7 @@ class ReloadAfterTurnTests(unittest.TestCase):
 
         state = AgentState(
             status="running",
-            goal="跑一个回合",
+            first_prompt="跑一个回合",
             project_dir=self.project,
             session_id=sid,
             config_file_name="config.yaml",

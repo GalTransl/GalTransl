@@ -92,15 +92,6 @@ wait 或 get_runtime 返回 job_error 时先处理失败；若带 recovery，先
 """
 
 
-# 系统提示词附加的多轮会话说明：Agent 可能被用户中途打断或在回合结束后
-# 收到新指令，需要告诉它这是同一个会话里的交互，而不是全新任务。
-AGENT_TURN_PROMPT = """
-# 会话交互
-- 这是一个多轮会话：用户可能中途打断你、也可能在你收尾后补充新指令。收到新消息时，接着当前的项目状态继续干，不要把已经完成的工作重来一遍。
-- 用户打断（stopped）后你收到的新消息，先确认现场（ get_runtime 看任务是否还在跑），再决定从哪里继续。
-- 一次回复里把当前这轮指令做完：该调工具就调工具，做完用自然语言小结。除非用户另有要求，不要主动无限制地等待轮询。"""
-
-
 # 压缩会话历史时用于生成摘要的提示词。摘要要保留"接着干下去"所需的硬信息，
 # 而不是复述对话：文件路径、字典名、任务 id、问题条目 index 这些丢了就找不回来。
 COMPACT_SUMMARY_PROMPT = """你在为一个 Galgame 翻译项目的 AI 助手压缩对话历史。下面是这个助手之前的工作记录，请把它压缩成一份摘要，供助手在后续对话中继续工作时参考。
@@ -225,21 +216,19 @@ def _cache_fields_section() -> str:
 def _build_system_prompt(state: "AgentState") -> str:
     """构造 system prompt：基础约束 + 当前项目环境。
 
-    始终作为会话顶部唯一一条 system 消息。环境信息（项目目录/配置文件/目标）
-    集中注入到 system prompt，对应的 user 消息只放用户的原始输入，避免重复。
+    始终作为会话顶部唯一一条 system 消息，只注入项目目录与配置文件信息。
+    用户的任务要求保留在 user 消息中。
 
     **压缩摘要不在这里**：它作为 system 之后的一条独立消息（见
     AgentRunner._build_summary_message）。摘要是会随压缩变化的内容，拼进 system
     会让整个前缀（含 tools）从第一条起失效；单独成条，system + tools 这段前缀
     在压缩后依然能命中提示缓存。
     """
-    goal = state.goal or "按标准流程完成本项目的翻译"
-    parts: list[str] = [AGENT_SYSTEM_PROMPT + AGENT_TURN_PROMPT, _cache_fields_section()]
+    parts: list[str] = [AGENT_SYSTEM_PROMPT, _cache_fields_section()]
     parts.append(
         "\n\n# 当前项目环境\n"
         f"- 项目目录：{state.project_dir}\n"
-        f"- 配置文件：{state.config_file_name or DEFAULT_CONFIG_FILE}\n"
-        f"- 本次目标：{goal}"
+        f"- 配置文件：{state.config_file_name or DEFAULT_CONFIG_FILE}"
     )
     # 档位一律不写进 system prompt：permission_mode 是动态的，写进去会让前缀随档位切换
     # 失效，也不符合"system 建立后字节冻结"的约定。「全自动-零打断」的"不打断"由后端

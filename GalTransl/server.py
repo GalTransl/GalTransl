@@ -3441,7 +3441,8 @@ def build_handler(registry: JobRegistry):
                     project_dir = str(payload.get("project_dir", "")).strip()
                     config_file_name = str(payload.get("config_file_name", "config.yaml") or "config.yaml")
                     backend_profile_data = payload.get("backend_profile_data")
-                    goal = str(payload.get("goal", "") or "")
+                    # 接受旧客户端的字段名，新客户端只发送 first_prompt。
+                    first_prompt = str(payload.get("first_prompt", payload.get("goal", "")) or "")
                     session_id = str(payload.get("session_id", "") or "") or None
                     # 两份后端配置的"名字"与（翻译器那份的）内容：名字只存在前端
                     # localStorage，后端只能随请求拿到，供「了解项目」如实报出实际后端。
@@ -3460,7 +3461,7 @@ def build_handler(registry: JobRegistry):
                         project_dir=project_dir,
                         config_file_name=config_file_name,
                         backend_profile_data=backend_profile_data,
-                        goal=goal,
+                        first_prompt=first_prompt,
                         session_id=session_id,
                         backend_profile_name=backend_profile_name,
                         translator_profile_name=translator_profile_name,

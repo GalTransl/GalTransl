@@ -725,7 +725,7 @@ class SessionLifecycleTests(unittest.TestCase):
         rt = AgentRuntime()
         s = rt.create_session(self.project)
         store = ss.SessionStore(self.project, s["session_id"])
-        store.append_meta(project_dir=self.project, title=s["title"], goal="首条用户输入")
+        store.append_meta(project_dir=self.project, title=s["title"], first_prompt="首条用户输入")
         store.append_message({"role": "system", "content": "system"})
         store.append_message({"role": "user", "content": "首条用户输入"})
         # 模拟旧版本/异常退出：只有后续事件，没有首条 user_message 事件。

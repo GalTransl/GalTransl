@@ -83,7 +83,7 @@ class StopAbortsInFlightTests(unittest.TestCase):
             runner._model = "fake"
 
         with patch.object(AgentRunner, "_resolve_llm", fake_resolve):
-            rt.start(self.project, "config.yaml", PROFILE, goal="第一轮", session_id=sid)
+            rt.start(self.project, "config.yaml", PROFILE, first_prompt="第一轮", session_id=sid)
             self.assertTrue(client.entered.wait(5), "请求没有进到阻塞读")
 
             started = time.monotonic()
@@ -159,7 +159,7 @@ class RealHttpStopTests(unittest.TestCase):
         }
         rt = AgentRuntime()
         sid = rt.create_session(self.project)["session_id"]
-        rt.start(self.project, "config.yaml", profile, goal="你好", session_id=sid)
+        rt.start(self.project, "config.yaml", profile, first_prompt="你好", session_id=sid)
         time.sleep(1.0)  # 让请求真正挂到 socket read 上
 
         started = time.monotonic()

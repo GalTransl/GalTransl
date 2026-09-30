@@ -36,14 +36,14 @@ from GalTransl.Agent.tool_schemas import AGENT_TOOLS
 from GalTransl.Agent.tools.ask import _format_ask_answers
 
 
-def _initial_session_title(project_dir: str, session_id: str, goal: str, current: str) -> str:
+def _initial_session_title(project_dir: str, session_id: str, first_prompt: str, current: str) -> str:
     """首个回合的会话标题：取用户第一条消息；已有用户消息则保留 current。
 
     新建会话时用户还没输入，create_session 只能给占位标题（「新会话」），
     真正的标题在首条消息到达（start）时才定下来。续聊（会话里已有用户消息）
     不重算，避免把标题改成后续某条消息。
     """
-    text = (goal or "").strip()
+    text = (first_prompt or "").strip()
     if not text or session_store.has_user_message(project_dir, session_id):
         return current
     return session_store.title_from_message(text)
@@ -259,11 +259,11 @@ class AgentRuntime:
             ev_deque.append(AgentEvent(type=etype, step=step, data=data_fields))
             max_step = max(max_step, step)
 
-        # 首条用户输入同时存在于 meta.goal / messages 和 user_message 事件中。
+        # 首条用户输入同时存在于 meta.first_prompt / messages 和 user_message 事件中。
         # 旧版本、异常退出或事件窗口裁剪可能只留下前两者；恢复时补一条内存事件，
         # 否则模型回答能恢复，用户的第一条气泡却会消失。step 放在现有事件之前，
         # 不改变后续事件编号，也不写回磁盘，避免恢复过程重复追加记录。
-        initial_text = str(meta.get("goal") or "").strip()
+        initial_text = session_store.first_prompt_from_meta(meta).strip()
         if not initial_text:
             for message in messages:
                 if isinstance(message, dict) and message.get("role") == "user":
@@ -287,7 +287,7 @@ class AgentRuntime:
         was_running = bool(meta.get("running"))
         state = AgentState(
             status="stopped" if was_running else "awaiting_input",
-            goal=str(meta.get("goal") or ""),
+            first_prompt=session_store.first_prompt_from_meta(meta) or initial_text,
             project_dir=project_dir,
             config_file_name=str(meta.get("config_file_name") or DEFAULT_CONFIG_FILE),
             backend_profile_data=meta.get("backend_profile_data") or {},
@@ -336,7 +336,7 @@ class AgentRuntime:
         project_dir: str,
         config_file_name: str,
         backend_profile_data: dict[str, Any],
-        goal: str = "",
+        first_prompt: str = "",
         session_id: str | None = None,
         host: str | None = None,
         port: int | None = None,
@@ -360,12 +360,12 @@ class AgentRuntime:
                     raise ValueError("该会话已有回合在运行")
                 title = existing.title if existing else session_store.session_title(project_dir, sid)
             # 会话标题 = 用户第一条消息（新建的空会话此时才拿到）
-            title = _initial_session_title(project_dir, sid, goal, title)
+            title = _initial_session_title(project_dir, sid, first_prompt, title)
 
             stop_event = threading.Event()
             state = AgentState(
                 status="running",
-                goal=goal,
+                first_prompt=first_prompt,
                 project_dir=project_dir,
                 config_file_name=config_file_name or DEFAULT_CONFIG_FILE,
                 backend_profile_data=backend_profile_data or {},
@@ -393,7 +393,7 @@ class AgentRuntime:
                 runner._store.append_meta(
                     project_dir=project_dir,
                     title=title,
-                    goal=goal,
+                    first_prompt=first_prompt,
                     config_file_name=state.config_file_name,
                     context_window=state.context_window,
                     created_at=state.started_at,
@@ -401,7 +401,7 @@ class AgentRuntime:
                 )
             thread = threading.Thread(target=runner.run, name=f"agent-{os.path.basename(key)}", daemon=True)
             thread.start()
-            _log(f"Agent 回合已启动: project={key} session={sid} config={config_file_name} goal={goal[:60]}")
+            _log(f"Agent 回合已启动: project={key} session={sid} config={config_file_name} first_prompt={first_prompt[:60]}")
             return self.status(project_dir, sid)
 
     def message(
@@ -486,7 +486,6 @@ class AgentRuntime:
             state.error = ""
             state.finished_at = 0.0
             state.turn_end = ""
-            state.goal = state.goal or text  # 保留初始目标；为空时用首条后续消息补上
             runner._emit("user_message", {"message": text})
             thread = threading.Thread(target=runner.run, name=f"agent-{os.path.basename(key)}", daemon=True)
             thread.start()
@@ -753,7 +752,7 @@ class AgentRuntime:
                 "project_dir": state.project_dir,
                 "session_id": state.session_id,
                 "title": state.title,
-                "goal": state.goal,
+                "first_prompt": state.first_prompt,
                 "step": state.step,
                 "started_at": state.started_at,
                 "finished_at": state.finished_at,
@@ -796,12 +795,12 @@ class AgentRuntime:
         events = session_store.read_transcript(
             project_dir, sid, limit or session_store.TRANSCRIPT_MAX_EVENTS
         )
-        # 旧版本/异常退出可能没落下首条 user_message 事件：用 meta.goal 补一条，
+        # 旧版本/异常退出可能没落下首条 user_message 事件：用 meta.first_prompt 补一条，
         # 否则刷新后用户的第一句就没了（与 _restore 的补救口径一致）。
         if not any(ev.get("type") == "user_message" for ev in events):
-            goal = str((session_store.read_meta(project_dir, sid).get("goal") or "")).strip()
-            if goal:
-                events.insert(0, {"type": "user_message", "step": 0, "message": goal})
+            first_prompt = session_store.first_prompt_from_meta(session_store.read_meta(project_dir, sid)).strip()
+            if first_prompt:
+                events.insert(0, {"type": "user_message", "step": 0, "message": first_prompt})
         return events
 
     def drain_events(self, project_dir: str, after_step: int = 0, session_id: str | None = None) -> list[dict[str, Any]]:

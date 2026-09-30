@@ -46,7 +46,7 @@ class PendingMessage:
 @dataclass(slots=True)
 class AgentState:
     status: str = "idle"  # idle | running | awaiting_input | stopped | failed
-    goal: str = ""
+    first_prompt: str = ""  # 用户首条输入；仅用于消息初始化及会话信息。
     project_dir: str = ""
     config_file_name: str = ""
     backend_profile_data: dict[str, Any] = field(default_factory=dict)
