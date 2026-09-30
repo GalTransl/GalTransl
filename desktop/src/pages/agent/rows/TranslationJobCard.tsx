@@ -189,6 +189,7 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
                 <ToolBlock
                   title={item.ok === false ? '错误' : '结果'}
                   content={resultText}
+                  markdown={item.ok !== false && typeof item.result === 'string'}
                   mono
                   truncate={1200}
                   tone={item.ok === false ? 'error' : 'default'}

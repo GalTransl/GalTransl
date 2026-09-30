@@ -1,4 +1,4 @@
-/* 轻量 Markdown 渲染器 + 缓存引用指令（供 Agent 对话气泡使用）。
+/* 轻量 Markdown 渲染器 + 缓存引用指令（供 Agent 对话和工具结果使用）。
    覆盖 LLM 常见输出：标题 / 粗斜体 / 行内代码 / 围栏代码块 / 无序有序列表 /
    引用 / 段落。所有文本先 HTML 转义再做替换，不产生注入面；链接降级为
    纯文本 + 原始 URL（桌面端 WebView 不外跳）。
@@ -102,8 +102,13 @@ function splitTableRow(line: string): string[] {
   const cells = inner.replace(/\\\|/g, '\u0000').split('|');
   return cells.map((c) => c.trim().replace(/\u0000/g, '|'));
 }
+function renderTableCell(cell: string): string {
+  // 表格中的 <br> 等 HTML 标签按原文显示，不转换为换行。
+  return renderInline(escapeHtml(cell));
+}
+
 function renderTable(header: string, splitLine: string, bodyRows: string[]): string {
-  const headerCells = splitTableRow(header).map((c) => renderInline(escapeHtml(c)));
+  const headerCells = splitTableRow(header).map(renderTableCell);
   const aligns = splitTableRow(splitLine).map((c) => {
     const l = c.startsWith(':');
     const r = c.endsWith(':');
@@ -123,7 +128,7 @@ function renderTable(header: string, splitLine: string, bodyRows: string[]): str
     for (const row of bodyRows) {
       html.push('<tr>');
       splitTableRow(row)
-        .map((c) => renderInline(escapeHtml(c)))
+        .map(renderTableCell)
         .forEach((c, i) => html.push(`<td${align(i)}>${c}</td>`));
       html.push('</tr>');
     }
@@ -170,7 +175,7 @@ export function renderMarkdown(markdown: string, options?: { cursor?: boolean })
   const lines = markdown.replace(/\r\n/g, '\n').split('\n');
   const html: string[] = [];
 
-  let inCode = false;
+  let codeFenceLength = 0;
   let codeLines: string[] = [];
   let listType: 'ul' | 'ol' | null = null;
   let quoteLines: string[] = [];
@@ -222,20 +227,22 @@ export function renderMarkdown(markdown: string, options?: { cursor?: boolean })
   for (const raw of lines) {
     const line = raw.trimEnd();
 
-    // 围栏代码块
-    if (/^\s*```/.test(line)) {
-      if (inCode) {
+    // 字典原文可能含有较短的围栏，只用不少于开头长度的独立围栏闭合。
+    if (codeFenceLength) {
+      const closingFence = /^\s*(`{3,})\s*$/.exec(line);
+      if (closingFence && closingFence[1].length >= codeFenceLength) {
         html.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
         codeLines = [];
-        inCode = false;
+        codeFenceLength = 0;
       } else {
-        closeAll();
-        inCode = true;
+        codeLines.push(raw);
       }
       continue;
     }
-    if (inCode) {
-      codeLines.push(raw);
+    const openingFence = /^\s*(`{3,})[^`]*$/.exec(line);
+    if (openingFence) {
+      closeAll();
+      codeFenceLength = openingFence[1].length;
       continue;
     }
 
@@ -342,7 +349,7 @@ export function renderMarkdown(markdown: string, options?: { cursor?: boolean })
   }
 
   // 收尾：未闭合的代码块/列表/段落
-  if (inCode && codeLines.length) {
+  if (codeFenceLength && codeLines.length) {
     html.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
   }
   closeAll();

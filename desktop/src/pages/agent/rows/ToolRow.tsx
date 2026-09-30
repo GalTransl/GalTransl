@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Icon } from '../../../components/Icon';
+import { Markdown } from '../../../components/Markdown';
 import { SubagentList } from './SubagentList';
 import type { ActivityItem } from '../timeline';
 import { asArgs, formatCountdown, formatDuration, formatPayload, str, toolMeta } from '../toolMeta';
@@ -107,6 +108,7 @@ export function ToolRow({
       ? str((item.result as Record<string, unknown> | undefined)?.summary)
       : '';
   const resultText = askSummary || formatPayload(ok ? item.result : item.error);
+  const resultMarkdown = ok && typeof item.result === 'string';
   const hasDetails = Boolean(summary || resultText || item.arguments || changeList);
   const longResult = resultText.length > 400;
 
@@ -167,6 +169,7 @@ export function ToolRow({
             <RawToolData
               args={item.arguments}
               resultText={resultText}
+              markdown={resultMarkdown}
               resultTitle={ok ? '结果' : '错误'}
               tone={ok ? 'default' : 'error'}
               durationMs={item.durationMs}
@@ -181,6 +184,7 @@ export function ToolRow({
                 <ToolBlock
                   title={ok ? '结果' : '错误'}
                   content={resultText}
+                  markdown={resultMarkdown}
                   mono
                   truncate={longResult ? 1200 : 0}
                   tone={ok ? 'default' : 'error'}
@@ -195,11 +199,12 @@ export function ToolRow({
   );
 }
 
-/** 参数 / 结果块：一行标题 + 一块等宽正文（内容被截断时给「展开全部」）。 */
+/** 参数 / 结果块：Markdown 结果复用对话渲染，原始参数和错误保留等宽正文。 */
 export function ToolBlock({
   title,
   content,
   mono,
+  markdown = false,
   truncate = 0,
   tone = 'default',
   durationMs,
@@ -207,6 +212,7 @@ export function ToolBlock({
   title: string;
   content: string;
   mono?: boolean;
+  markdown?: boolean;
   truncate?: number;
   tone?: 'default' | 'error';
   durationMs?: number;
@@ -222,9 +228,14 @@ export function ToolBlock({
           <span className="agent-toolblock__duration">{formatDuration(durationMs)}</span>
         ) : null}
       </div>
-      <pre className={`agent-toolblock__pre${mono ? ' is-mono' : ''}`}>{shown}</pre>
+      {markdown ? (
+        // 完整解析后按高度折叠，避免截在表格或代码围栏中间破坏结构。
+        <Markdown text={content} className={`agent-toolblock__markdown${expanded ? ' is-expanded' : ''}`} />
+      ) : (
+        <pre className={`agent-toolblock__pre${mono ? ' is-mono' : ''}`}>{shown}</pre>
+      )}
       {truncate > 0 && content.length > truncate ? (
-        <button type="button" className="agent-toolblock__toggle" onClick={() => setExpanded((v) => !v)}>
+        <button type="button" className="agent-toolblock__toggle" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}>
           {expanded ? '收起' : `展开全部（${content.length} 字符）`}
         </button>
       ) : null}
@@ -241,6 +252,7 @@ function RawToolData({
   args,
   resultText,
   resultTitle,
+  markdown,
   tone,
   durationMs,
   truncate,
@@ -248,6 +260,7 @@ function RawToolData({
   args: unknown;
   resultText: string;
   resultTitle: string;
+  markdown?: boolean;
   tone: 'default' | 'error';
   durationMs?: number;
   truncate?: number;
@@ -280,6 +293,7 @@ function RawToolData({
             <ToolBlock
               title={resultTitle}
               content={resultText}
+              markdown={markdown}
               mono
               truncate={truncate}
               tone={tone}

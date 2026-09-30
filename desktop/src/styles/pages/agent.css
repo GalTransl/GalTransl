@@ -2323,7 +2323,8 @@
   gap: var(--space-2);
 }
 
-.agent-toolblock__pre {
+.agent-toolblock__pre,
+.agent-toolblock__markdown {
   margin: 0;
   max-height: 300px;
   overflow: auto;
@@ -2338,13 +2339,23 @@
   overflow-wrap: anywhere;
 }
 
-:root[data-theme='dark'] .agent-toolblock__pre {
+:root[data-theme='dark'] .agent-toolblock__pre,
+:root[data-theme='dark'] .agent-toolblock__markdown {
   background: rgba(15, 22, 33, 0.55);
 }
 
 .agent-toolblock__pre.is-mono {
   font-family: var(--agent-mono);
   font-size: 0.74rem;
+}
+
+.agent-toolblock__markdown {
+  min-width: 0;
+  white-space: normal;
+}
+
+.agent-toolblock__markdown.is-expanded {
+  max-height: none;
 }
 
 .agent-toolblock.is-error .agent-toolblock__pre {

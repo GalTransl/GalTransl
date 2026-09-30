@@ -10,6 +10,7 @@
 引用一长串行号（如 20-31）时卡片区定高滚动，不撑高对话气泡。 */
 
 import { useEffect, useMemo, useState } from 'react';
+import { Markdown } from './Markdown';
 import {
   encodeProjectDir,
   fetchCacheFile,
@@ -283,7 +284,7 @@ export function AgentMarkdown({
   const hasRef = segments.some((s) => s.kind === 'cacheRef');
   const cls = ['agent-md', className].filter(Boolean).join(' ');
   if (!hasRef) {
-    return <div className={cls} dangerouslySetInnerHTML={{ __html: renderMarkdown(text, { cursor }) }} />;
+    return <Markdown text={text} cursor={cursor} className={className} />;
   }
   return (
     <CacheRefSegments
