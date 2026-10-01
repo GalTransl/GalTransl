@@ -3,8 +3,8 @@
 设置页的「通用翻译规范管理」和 Agent 的 read_guideline(scope="global") 都打这几个路由，
 这里起一个真的 ThreadingHTTPServer 走 HTTP，把读写、重名、路径穿越与"兜底文件不许删"锁住。
 
-规范目录是**相对程序根目录**的（server._guidelines_dir 用 abspath），所以每个用例都在
-一个临时目录里跑：chdir 过去，结束再回来。
+规范目录按**资源目录**解析（RuntimePaths.get_translation_guidelines_dir），所以每个
+用例都把 GALTRANSL_RESOURCE_DIR 指到一个临时目录里，互不污染。
 """
 
 import json
@@ -15,6 +15,7 @@ import unittest
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
+from unittest.mock import patch
 
 
 class CommonGuidelineApiTests(unittest.TestCase):
@@ -36,11 +37,14 @@ class CommonGuidelineApiTests(unittest.TestCase):
         cls.httpd.shutdown()
 
     def setUp(self) -> None:
-        # 规范目录按 CWD 解析：每个用例在自己的临时目录里跑，互不污染
+        # 规范目录按资源目录解析：每个用例在自己的临时目录里跑，互不污染
         self._cwd = os.getcwd()
         self.root = tempfile.mkdtemp(prefix="galtransl-guidelines-")
         os.chdir(self.root)
+        self._resource_env = patch.dict(os.environ, {"GALTRANSL_RESOURCE_DIR": self.root})
+        self._resource_env.start()
         self.guidelines_dir = os.path.join(self.root, "translation_guidelines")
+        self.addCleanup(self._resource_env.stop)
         self.addCleanup(self._restore_cwd)
 
     def _restore_cwd(self) -> None:

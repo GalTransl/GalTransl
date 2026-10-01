@@ -27,6 +27,57 @@ try:  # 开发解释器可能没装后端依赖（重建客户端那条用例需
 except ImportError:  # pragma: no cover - 取决于解释器
     _HAS_OPENAI = False
 
+
+def _httpx_close_interrupts_inflight() -> bool:
+    """探测当前 httpx 的 close() 是否还能立刻打断阻塞中的请求。
+
+    RealHttpStopTests 的前提是"关掉客户端 = 打断在途请求"；httpx 0.28 起 close()
+    不再关闭在途连接（openai SDK 的 SyncHttpxClientWrapper 同理），依赖这一行为的
+    实测用例就失去前提，此时跳过而不是把它误报成回归。运行时的停止仍由
+    LLM_SILENCE_TIMEOUT 兜底（见 AgentRunner.abort_in_flight 的说明）。
+    """
+    try:
+        import httpx
+    except ImportError:  # pragma: no cover - 取决于解释器
+        return False
+
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    conns: list[socket.socket] = []
+
+    def _accept() -> None:
+        try:
+            conn, _ = server.accept()  # 留着引用：回收会把连接关掉，就不是"挂死"了
+            conns.append(conn)
+        except OSError:
+            return
+
+    threading.Thread(target=_accept, daemon=True).start()
+    client = httpx.Client(timeout=2.0)
+    finished = threading.Event()
+
+    def _request() -> None:
+        try:
+            client.get(f"http://127.0.0.1:{server.getsockname()[1]}/probe")
+        except Exception:  # noqa: BLE001 - 探测只需要"是否被叫醒"
+            pass
+        finally:
+            finished.set()
+
+    threading.Thread(target=_request, daemon=True).start()
+    time.sleep(0.2)
+    try:
+        client.close()
+    except Exception:  # noqa: BLE001
+        pass
+    aborted = finished.wait(1.0)
+    server.close()
+    return aborted
+
+
+_CLOSE_INTERRUPTS_INFLIGHT = _HAS_OPENAI and _httpx_close_interrupts_inflight()
+
 PROFILE = {
     "OpenAI-Compatible": {
         "tokens": [{"modelName": "fake", "token": "fake", "endpoint": "https://example.com/v1"}],
@@ -110,7 +161,10 @@ class StopAbortsInFlightTests(unittest.TestCase):
         runner.abort_in_flight()
 
 
-@unittest.skipUnless(_HAS_OPENAI, "需要 openai 包（后端运行环境）")
+@unittest.skipUnless(
+    _CLOSE_INTERRUPTS_INFLIGHT,
+    "当前 httpx/openai 的 close() 不再中断在途请求（httpx>=0.28），停止由静默超时兜底",
+)
 class RealHttpStopTests(unittest.TestCase):
     """用真实 httpx 证一遍：客户端被关掉时，挂在 read 上的请求确实会立刻失败。
 
