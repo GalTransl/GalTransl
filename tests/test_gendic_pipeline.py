@@ -26,6 +26,7 @@ import time
 import unittest
 from threading import Lock
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from GalTransl.Backend.BaseTranslate import _extract_reasoning
 from GalTransl.Backend.GenDic import (
@@ -484,15 +485,18 @@ class ProgressSpeedTests(unittest.TestCase):
         engine = self._engine()
         updates = []
         engine._update_runtime = lambda **kwargs: updates.append(kwargs)
-        engine.progress_started_at = time.monotonic() - 120  # 两分钟前开工
+        # 固定 monotonic 基准：直接写 monotonic() - 120 时，若机器开机不足 120 秒，
+        # 结果会变成负数，撞上「未开始（<=0）」的保护值而得到 0.0（CI runner 偶发）
+        base = 10_000.0
+        with patch("GalTransl.Backend.GenDic.time.monotonic", return_value=base):
+            engine.progress_started_at = base - 120  # 两分钟前开工
+            for index in range(4):
+                engine._append_runtime_progress(f"gendic-task-{index}", True)
 
-        for index in range(4):
-            engine._append_runtime_progress(f"gendic-task-{index}", True)
-
-        # 4 项 / 2 分钟 = 2 项/分，而不是「抽到了多少个术语/分」
-        self.assertEqual(engine.progress_done, 4)
-        self.assertTrue(all("progress_speed_lpm" in update for update in updates))
-        self.assertAlmostEqual(updates[-1]["progress_speed_lpm"], 2.0, delta=0.3)
+            # 4 项 / 2 分钟 = 2 项/分，而不是「抽到了多少个术语/分」
+            self.assertEqual(engine.progress_done, 4)
+            self.assertTrue(all("progress_speed_lpm" in update for update in updates))
+            self.assertAlmostEqual(updates[-1]["progress_speed_lpm"], 2.0, delta=0.3)
 
     def test_speed_is_zero_before_the_first_item(self):
         engine = self._engine()
