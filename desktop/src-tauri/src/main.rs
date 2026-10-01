@@ -245,8 +245,9 @@ fn main() {
             // 加载动画里，而不是等网页加载完才开始倒数。
             // 前端稍后调 ensure_backend_ready 时会直接复用这个进程。
             let hide_console = read_console_preference(app.handle());
+            let resource_dir = app.path().resource_dir().ok();
             std::thread::spawn(move || {
-                let _ = ensure_backend_ready_inner(hide_console, None);
+                let _ = ensure_backend_ready_inner(resource_dir, hide_console, None);
             });
             Ok(())
         })
