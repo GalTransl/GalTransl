@@ -73,6 +73,10 @@ class GFilePlugin(IPlugin):
         """
         raise NotImplementedError("This method must be implemented by the plugin.")
 
+    def reload_file(self, file_path: str) -> list:
+        """重新提取原文；持有提取缓存的插件应覆盖此方法并刷新自己的缓存。"""
+        return self.load_file(file_path)
+
     def save_file(self, file_path: str, transl_json: list):
         """
         This method is called to save a file.

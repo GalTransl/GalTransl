@@ -131,6 +131,14 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* 滚动口（padding box）正好等于内容宽度：控件那圈 4px 的焦点光晕是画在边框外的
+     box-shadow，于是被滚动口沿左右齐平切掉（输入框/下拉框/文本域都中招）。
+     这里向外各扩 6px、再用等量内边距把内容推回原位——内容位置分毫不动，
+     光晕有了容身之处，不再被切。 */
+  margin-left: -6px;
+  margin-right: -6px;
+  padding-left: 6px;
+  padding-right: 6px;
 }
 
 /* ── Dark mode overrides ── */

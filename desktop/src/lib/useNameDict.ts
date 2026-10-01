@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchNameDict } from './api';
 
 /**
@@ -8,6 +8,12 @@ import { fetchNameDict } from './api';
 export function useNameDict(projectId: string) {
   const [nameDict, setNameDict] = useState<Map<string, string>>(new Map());
   const [loaded, setLoaded] = useState(false);
+  /**
+   * 最近一次请求是发给哪个项目的：响应回来对不上就丢掉。
+   * 用它的页面（浏览文本等）是 keep-alive 的，切项目后旧请求才回来的话，
+   * 会把上一个项目的名字表盖到当前项目上（切过去看着一切正常，其实高亮的是别人的名字）。
+   */
+  const pendingProjectRef = useRef('');
 
   const reload = useCallback(async () => {
     if (!projectId) {
@@ -15,12 +21,14 @@ export function useNameDict(projectId: string) {
       setLoaded(true);
       return;
     }
+    pendingProjectRef.current = projectId;
     try {
       const res = await fetchNameDict(projectId);
+      if (pendingProjectRef.current !== projectId) return;
       setNameDict(new Map(Object.entries(res.name_dict)));
     } catch {
       // Non-critical: if name dict fails to load, just use empty map
-      setNameDict(new Map());
+      if (pendingProjectRef.current === projectId) setNameDict(new Map());
     } finally {
       setLoaded(true);
     }

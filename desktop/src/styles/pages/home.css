@@ -1498,3 +1498,149 @@
     var(--color-surface);
   box-shadow: inset 0 1px 0 rgba(141, 170, 212, 0.14);
 }
+
+/* ── Onboarding checklist (首次使用) ── */
+
+.home-onboarding {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-panel);
+  background:
+    linear-gradient(135deg, var(--color-primary-soft), transparent 70%),
+    var(--color-surface);
+  box-shadow: var(--shadow-panel);
+}
+
+.home-onboarding__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.home-onboarding__header h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.home-onboarding__header h2 .icon {
+  color: var(--color-primary);
+}
+
+.home-onboarding__header p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.home-onboarding__dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.home-onboarding__dismiss:hover {
+  background: var(--color-neutral-soft);
+  color: var(--color-text);
+}
+
+.home-onboarding__steps {
+  display: grid;
+  /* 步数不固定（现在 4 步），按可用宽度自动排，别写死 3 列 */
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-onboarding__step {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  background: var(--color-surface-strong);
+}
+
+.home-onboarding__step.is-current {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
+}
+
+.home-onboarding__step.is-done {
+  opacity: 0.72;
+}
+
+.home-onboarding__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--color-neutral-soft);
+  color: var(--color-text-muted);
+}
+
+.home-onboarding__step.is-current .home-onboarding__badge {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.home-onboarding__step.is-done .home-onboarding__badge {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.home-onboarding__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.home-onboarding__body strong {
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.home-onboarding__body span {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.home-onboarding__done {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-success);
+}
+
+@media (max-width: 1000px) {
+  .home-onboarding__steps {
+    grid-template-columns: 1fr;
+  }
+}

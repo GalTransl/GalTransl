@@ -32,7 +32,7 @@ export function ConnectionStatusCard({
     >
       <div className="connection-card__status-row">
         <StatusBadge label={getPhaseLabel(connectionPhase)} tone={connectionPhase} />
-        <span className="connection-card__url">{backendUrl}</span>
+        <span className="connection-card__url">{backendUrl || '等待分配本地端口'}</span>
       </div>
 
       <p className="connection-card__message">{connectionMessage}</p>

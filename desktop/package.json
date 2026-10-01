@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test:backend-connection": "node --test tests/backend-connection.test.mjs",
     "preview": "vite preview",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
@@ -13,6 +14,7 @@
   },
   "dependencies": {
     "@tauri-apps/plugin-dialog": "^2.7.0",
+    "@tauri-apps/plugin-notification": "^2.4.0",
     "@tauri-apps/plugin-shell": "^2.3.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

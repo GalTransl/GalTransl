@@ -41,8 +41,8 @@ function loadConfigFileName(projectDir: string): string {
 
 /** Tab path → component mapping */
 const TAB_MAP: { path: string; label: string }[] = [
-  { path: 'translate', label: '翻译工作台' },
-  { path: 'cache', label: '缓存与问题' },
+  { path: 'translate', label: '开始翻译' },
+  { path: 'cache', label: '浏览文本' },
   { path: 'config', label: '配置编辑' },
   { path: 'dictionary', label: '项目字典' },
   { path: 'names', label: '人名翻译' },
@@ -94,7 +94,7 @@ export function ProjectLayout() {
     }
   }, [projectDir, activeTab]);
 
-  // 对"缓存与问题"页、人名翻译页、项目字典页：一旦访问过就保持挂载，
+  // 对"浏览文本"页、人名翻译页、项目字典页：一旦访问过就保持挂载，
   // 避免重复加载，并让页内长任务在切换标签后继续运行。
   const [cacheVisited, setCacheVisited] = useState(() => activeTab === 'cache');
   const [dictionaryVisited, setDictionaryVisited] = useState(() => activeTab === 'dictionary');

@@ -139,6 +139,7 @@ class ForGalTsvTranslate(BaseTranslate):
                 base_try_count=retry_count,
                 stream_line_callback=_parse_stream_lines,
                 max_retry_count=self.max_api_retries,
+                progress_file=filename,
             )
 
             result_text = resp or ""

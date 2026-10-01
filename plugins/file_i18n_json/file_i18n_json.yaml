@@ -1,5 +1,5 @@
 Core:
-  Name: i18n_json
+  Name: Key-Value格式json文件
   Type: file
   Module: file_i18n_json
 

@@ -64,3 +64,50 @@ Settings:
 # 原文: "This is a long text without line breaks."
 # 译文: "这是一段没有换行符的长文本。"
 # 处理后: "这是一段没有换行符的[r]长文本。"
+
+SettingsSchema:
+  换行符:
+    label: 脚本换行符
+    description: 填写脚本使用的换行标记，例如 [r]，也可填写实际换行。默认是 Windows 换行（CRLF）。
+    advanced: false
+    multiline: true
+  换行模式:
+    label: 换行方式
+    description: 保持位置按原文相对位置换行；平均等分文本；切最长逐次拆分最长片段；前置或后置集中放置换行；固定字数按阈值换行。
+    advanced: false
+    options:
+    - value: 保持位置
+      label: 保持位置
+    - value: 平均
+      label: 平均
+    - value: 切最长
+      label: 切最长
+    - value: 前置
+      label: 前置
+    - value: 后置
+      label: 后置
+    - value: 固定字数
+      label: 固定字数
+  分段字数阈值:
+    label: 每段字数
+    description: 仅在固定字数模式下生效，达到此字数时插入换行标记。
+    advanced: false
+    min: 1
+    step: 1
+  强制修复:
+    label: 强制重新排版
+    description: 即使译文与原文的换行数量相同，也按选定方式重新处理。
+    advanced: true
+  分词器:
+    label: 中文分词器
+    description: 用于尽量避免在词语中间断行。BudouX 最轻量；其他选项需要对应依赖，HanLP 还可能下载较大的模型。
+    advanced: true
+    options:
+    - value: budoux
+      label: BudouX（轻量，推荐）
+    - value: jieba
+      label: 结巴分词
+    - value: pkuseg
+      label: 北京大学分词工具（PKUSEG）
+    - value: hanlp
+      label: HanLP 分词

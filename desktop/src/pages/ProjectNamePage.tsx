@@ -3,6 +3,7 @@ import type { ProjectPageContext } from '../components/ProjectLayout';
 import { Button } from '../components/Button';
 import { CustomSelect } from '../components/CustomSelect';
 import { PageHeader } from '../components/PageHeader';
+import { Icon } from '../components/Icon';
 import { Panel } from '../components/Panel';
 import { EmptyState, InlineFeedback, LoadingState } from '../components/page-state';
 import {
@@ -690,7 +691,7 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
 
   return (
     <div className="page name-page">
-      <PageHeader title="人名翻译" description="用于翻译输入文件中的“name”字段，是直接替换模式。注意正文中的人名应使用“GPT字典”让模型翻译。" />
+      <PageHeader title="人名翻译" description="用于翻译输入文件中的“name”字段，也就是Gal中显示人名的区域，是直接替换模式。一般直接勾选“GPT字典用于人名”并在“项目字典”中处理即可。" />
 
       {error ? (
         <InlineFeedback
@@ -779,7 +780,7 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
                           onClick={() => handleDeleteRow(originalIndex)}
                           title="删除此行"
                         >
-                          ✕
+                          <Icon name="close" />
                         </button>
                       </td>
                     </tr>

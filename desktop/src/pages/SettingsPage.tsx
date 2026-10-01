@@ -34,8 +34,8 @@ import {
   setThemeModePreference,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
+import { PROJECT_HOMEPAGE, RELEASE_LATEST_URL } from '../lib/externalLink';
 
-const PROJECT_HOMEPAGE = 'https://github.com/GalTransl/GalTransl';
 const PROJECT_AUTHOR = 'xd2333';
 
 
@@ -479,7 +479,7 @@ export function SettingsPage() {
           </label>
 
           <label className="settings-number-row">
-            <span className="settings-number-row__label">缓存与问题字号</span>
+            <span className="settings-number-row__label">浏览文本字号</span>
             <div className="settings-number-row__control settings-opacity-control">
               <input
                 type="range"
@@ -541,6 +541,29 @@ export function SettingsPage() {
         <section className="panel">
           <header className="panel__header">
             <div>
+              <h2>通用翻译规范管理</h2>
+              <p>
+                管理全局翻译规范文件（程序根目录 translation_guidelines/ 下的 .md/.txt）：
+                各项目在配置里选用其中一份，翻译时它拼在项目规范之前。
+              </p>
+            </div>
+          </header>
+          <div className="settings-action-row">
+            <button
+              type="button"
+              className="button button--secondary"
+              onClick={() => {
+                navigate('/settings/common-guidelines');
+              }}
+            >
+              管理通用翻译规范
+            </button>
+          </div>
+        </section>
+
+        <section className="panel">
+          <header className="panel__header">
+            <div>
               <h2>关于</h2>
               <p>查看项目基础信息与版本更新状态。</p>
             </div>
@@ -580,7 +603,7 @@ export function SettingsPage() {
                 <span className="settings-about-list__label">更新下载</span>
                 <a
                   className="settings-about-list__value settings-about-list__value--link"
-                  href={PROJECT_HOMEPAGE + '/releases/latest'}
+                  href={RELEASE_LATEST_URL}
                   target="_blank"
                   rel="noreferrer noopener"
                 >

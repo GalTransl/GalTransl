@@ -62,6 +62,8 @@ class TranslateRefactorRegressionTests(unittest.IsolatedAsyncioTestCase):
             tokenStrategy="random",
             api_timeout=1,
             apiErrorWait=0,
+            # 替身只挂几个属性的老做法：ask_chatbot 会用到它们，缺一个就 AttributeError
+            _coerce_positive_int=BaseTranslate._coerce_positive_int,
             pj_config=SimpleNamespace(
                 bar=DummyBar(),
                 active_workers=1,
@@ -110,6 +112,7 @@ class TranslateRefactorRegressionTests(unittest.IsolatedAsyncioTestCase):
             api_timeout=1,
             apiErrorWait=0,
             max_api_retries=2,
+            _coerce_positive_int=BaseTranslate._coerce_positive_int,
             pj_config=SimpleNamespace(
                 bar=DummyBar(),
                 active_workers=1,
@@ -157,6 +160,7 @@ class TranslateRefactorRegressionTests(unittest.IsolatedAsyncioTestCase):
             apiErrorWait=0,
             _client_failure_counts={},
             _recycle_failed_client=recycle,
+            _coerce_positive_int=BaseTranslate._coerce_positive_int,
             pj_config=SimpleNamespace(
                 bar=DummyBar(),
                 active_workers=1,
@@ -207,6 +211,8 @@ class TranslateRefactorRegressionTests(unittest.IsolatedAsyncioTestCase):
             tokenStrategy="random",
             api_timeout=1,
             apiErrorWait=0,
+            # 替身只挂几个属性的老做法：ask_chatbot 会用到它们，缺一个就 AttributeError
+            _coerce_positive_int=BaseTranslate._coerce_positive_int,
             pj_config=SimpleNamespace(
                 bar=DummyBar(),
                 active_workers=1,
@@ -339,6 +345,9 @@ class TranslateRefactorRegressionTests(unittest.IsolatedAsyncioTestCase):
         translator.target_lang = "English"
         translator.source_lang = "Japanese"
         translator.smartRetry = False
+        # translate() 会把 self.max_api_retries 作为 max_retry_count 传下去；这里用 __new__
+        # 跳过了 __init__，属性得自己补（正常实例由 BaseTranslate.__init__ 赋，默认 6）
+        translator.max_api_retries = 6
         translator._SIGCHARS = "a"
         translator._last_chatbot_was_stream = False
         translator._last_chatbot_model_name = ""
@@ -373,20 +382,17 @@ class TranslateRefactorRegressionTests(unittest.IsolatedAsyncioTestCase):
             skipH = False
             save_steps = 999
             dynamic_num_per_request = False
+            # _batch_translate_common 会按「动态句数」折算每批句数，失败兜底还要拼 problem 文案：
+            # 替身补齐它用到的这几个辅助方法（staticmethod 要重新包一层，直接取会绑成实例方法）
             _coerce_positive_int = staticmethod(BaseTranslate._coerce_positive_int)
+            _merge_problem_message = staticmethod(BaseTranslate._merge_problem_message)
+            _get_effective_num_per_request = BaseTranslate._get_effective_num_per_request
 
             def __init__(self) -> None:
                 self.pj_config = SimpleNamespace(bar=DummyBar(), stop_event=None)
 
             def _check_stop_requested(self) -> None:
                 return None
-
-            def _get_effective_num_per_request(self, configured_value: int, proofread: bool = False) -> int:
-                return BaseTranslate._get_effective_num_per_request(self, configured_value, proofread)
-
-            _build_idx_tip = staticmethod(BaseTranslate._build_idx_tip)
-            _merge_problem_message = staticmethod(BaseTranslate._merge_problem_message)
-            _append_parse_failure_fallback_results = BaseTranslate._append_parse_failure_fallback_results
 
             def _update_dynamic_num_per_request(self, *args, **kwargs) -> None:
                 return None
@@ -421,7 +427,11 @@ class TranslateRefactorRegressionTests(unittest.IsolatedAsyncioTestCase):
             skipH = False
             save_steps = 999
             dynamic_num_per_request = False
+            # _batch_translate_common 会按「动态句数」折算每批句数，失败兜底还要拼 problem 文案：
+            # 替身补齐它用到的这几个辅助方法（staticmethod 要重新包一层，直接取会绑成实例方法）
             _coerce_positive_int = staticmethod(BaseTranslate._coerce_positive_int)
+            _merge_problem_message = staticmethod(BaseTranslate._merge_problem_message)
+            _get_effective_num_per_request = BaseTranslate._get_effective_num_per_request
 
             def __init__(self) -> None:
                 self.pj_config = SimpleNamespace(bar=DummyBar(), stop_event=None)
@@ -430,11 +440,7 @@ class TranslateRefactorRegressionTests(unittest.IsolatedAsyncioTestCase):
                 return None
 
             _build_idx_tip = staticmethod(BaseTranslate._build_idx_tip)
-            _merge_problem_message = staticmethod(BaseTranslate._merge_problem_message)
             _append_parse_failure_fallback_results = BaseTranslate._append_parse_failure_fallback_results
-
-            def _get_effective_num_per_request(self, configured_value: int, proofread: bool = False) -> int:
-                return BaseTranslate._get_effective_num_per_request(self, configured_value, proofread)
 
             def _update_dynamic_num_per_request(self, *args, **kwargs) -> None:
                 return None

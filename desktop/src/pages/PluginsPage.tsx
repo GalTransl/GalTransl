@@ -102,12 +102,35 @@ export function PluginsPage() {
               {Object.keys(plugin.settings).length > 0 && (
                 <div className="plugin-card__settings">
                   <h4>设置项</h4>
-                  {Object.entries(plugin.settings).map(([key, value]) => (
-                    <div key={key} className="plugin-setting-item">
-                      <span className="plugin-setting-item__key">{key}:</span>
-                      <span className="plugin-setting-item__value">{String(value)}</span>
-                    </div>
-                  ))}
+                  {(() => {
+                    const entries = Object.entries(plugin.settings);
+                    const renderSettings = (advanced: boolean) => entries
+                      .filter(([key]) => Boolean(plugin.settings_schema?.[key]?.advanced) === advanced)
+                      .map(([key, value]) => {
+                        const schema = plugin.settings_schema?.[key];
+                        const format = (item: unknown): string => schema?.options?.find((option) => option.value === item)?.label
+                          ?? (typeof item === 'boolean' ? (item ? '开启' : '关闭')
+                            : typeof item === 'object' ? JSON.stringify(item) : item === '' || item == null ? '（空）' : String(item));
+                        const displayValue = schema?.secret ? (value ? '已设置' : '未设置')
+                          : Array.isArray(value) ? value.map(format).join('、') || '未选择' : format(value);
+                        return <div key={key}>
+                          <div className="plugin-setting-item">
+                            <span className="plugin-setting-item__key">{schema?.label || key}:</span>
+                            <span className="plugin-setting-item__value">{displayValue}</span>
+                          </div>
+                          {schema?.description && <p className="plugin-setting-row__hint">{schema.description}</p>}
+                        </div>;
+                      });
+                    return <>
+                      {renderSettings(false)}
+                      {entries.some(([key]) => plugin.settings_schema?.[key]?.advanced) && (
+                        <details className="plugin-settings-advanced">
+                          <summary>高级设置</summary>
+                          {renderSettings(true)}
+                        </details>
+                      )}
+                    </>;
+                  })()}
                 </div>
               )}
             </div>

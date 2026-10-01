@@ -14,3 +14,38 @@ Settings: # 这里存放插件的设置
   chrf_beta: 2
   comet_model_name: "Unbabel/wmt22-comet-da"
   comet_batch_size: 8
+
+SettingsSchema:
+  task:
+    label: 评估指标
+    description: 选择译文质量评估方法；COMET 需要加载模型，截断率用于检查译文是否截断。
+    advanced: false
+    options:
+    - value: chrf
+      label: chrF 字符匹配
+    - value: comet
+      label: COMET 模型评分
+    - value: cutoff_rate
+      label: 截断率
+  chrf_ngram:
+    label: chrF 最大 n-gram
+    description: chrF 计算使用的最大字符片段长度，仅在 chrF 模式生效。
+    advanced: true
+    min: 1
+    step: 1
+  chrf_beta:
+    label: chrF 召回率权重
+    description: chrF 中召回率的相对权重，值越大越重视召回率。
+    advanced: true
+    min: 0.1
+    step: 0.1
+  comet_model_name:
+    label: COMET 模型
+    description: COMET 使用的模型名称或路径，仅在 COMET 模式生效。
+    advanced: true
+  comet_batch_size:
+    label: COMET 批量大小
+    description: 每批评估的条目数，调大可能增加显存占用。
+    advanced: true
+    min: 1
+    step: 1

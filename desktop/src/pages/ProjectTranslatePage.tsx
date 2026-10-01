@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ProjectPageContext } from '../components/ProjectLayout';
 import { Button } from '../components/Button';
+import { Icon } from '../components/Icon';
 import { CustomSelect } from '../components/CustomSelect';
 import { Panel } from '../components/Panel';
 import { StatusBadge } from '../components/StatusBadge';
@@ -10,6 +11,7 @@ import { EmptyState, InlineFeedback } from '../components/page-state';
 import { useConnection } from '../features/connection/ConnectionContext';
 import { useNameDict } from '../lib/useNameDict';
 import {
+  type FileProgress,
   type Job,
   type ProjectRuntimeResponse,
   type SubmitJobPayload,
@@ -18,11 +20,10 @@ import {
   fetchProjectRuntime,
   getSelectedTranslatorTemplate,
   getSelectedBackendProfileJobPayload,
-  getSelectedBackendProfileDisplay,
-  resolveSelectedBackendProfile,
   setSelectedTranslatorTemplate,
   stopProjectTranslation,
   submitJob } from '../lib/api';
+import { summarizeBackendUsage } from '../lib/backendUsage';
 import { normalizeError } from '../lib/errors';
 import { basenamePath, joinPath } from '../lib/paths';
 import { usePrefersReducedMotion, LAUNCH, STRIP_BOOT, BAR_SURGE, COMPLETE, FRESH_HIGHLIGHT_MS } from '../lib/motion';
@@ -41,6 +42,8 @@ import {
 
 const JOB_POLL_INTERVAL_MS = 2000;
 const RUNTIME_POLL_INTERVAL_MS = 1000;
+// 「文件进度」里有请求在跑的行排在最上面；请求结束后再在上面待这么久（见 prioritizedRuntimeFiles）
+const LIVE_ROW_STICKY_MS = 10_000;
 const SUCCESS_STICK_BOTTOM_THRESHOLD_PX = 24;
 // Backend keeps up to 100 success cards per translating file, but the UI only
 // renders the newest 100 cards (after filtering) to keep scrolling performant.
@@ -51,6 +54,12 @@ const CACHE_FOLDER_NAME = 'transl_cache';
 const CONTINUOUS_RETRANSL_STORAGE_KEY = 'galtransl-continuous-retransl-by-project';
 
 const HIDDEN_TRANSLATORS = new Set(['rebuilda', 'rebuildr', 'show-plugs', 'dump-name']);
+
+// 不该占用工作台「翻译模板」下拉的流程：内部辅助流程（重建/导出人名/插件列表），
+// 以及 GenDic（生成 GPT 字典，通常是从「项目字典」页启动的）。
+// 以前 GenDic 会被选中并持久化，跑完一次后工作台就一直停在 GenDic 上，
+// 下次要正式翻译还得手动把模板改回来——现在既不采纳、也不恢复被它污染的历史值。
+const TEMPLATE_SELECTION_IGNORED = new Set([...HIDDEN_TRANSLATORS, 'GenDic']);
 
 // Module-level cache shared across remounts of this page. Switching project tabs
 // unmounts/remounts the component; without this cache the first render would see
@@ -64,78 +73,6 @@ type RetranslListItem = {
   count: number;
 };
 
-type BackendUsageSummary = {
-  backend: string;
-  model: string;
-  profile: string;
-};
-
-function stringifyConfigValue(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function toModelDisplayName(modelName: string): string {
-  const trimmed = modelName.trim();
-  return trimmed.split('/').filter(Boolean).pop() ?? trimmed;
-}
-
-function uniqueNonEmpty(values: string[]): string[] {
-  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
-}
-
-function collectBackendModels(config: Record<string, unknown> | null): { backend: string; model: string } {
-  if (!config) {
-    return { backend: '未配置后端类型', model: '未填写模型' };
-  }
-
-  const enabledBackends: string[] = [];
-  const models: string[] = [];
-
-  const openAiConfig = config['OpenAI-Compatible'];
-  if (openAiConfig && typeof openAiConfig === 'object') {
-    enabledBackends.push('OpenAI-Compatible');
-    const tokens = Array.isArray((openAiConfig as Record<string, unknown>).tokens)
-      ? (openAiConfig as Record<string, unknown>).tokens as Array<Record<string, unknown>>
-      : [];
-    models.push(...tokens.map((token) => toModelDisplayName(stringifyConfigValue(token.modelName))));
-  }
-
-  const sakuraConfig = config.SakuraLLM;
-  if (sakuraConfig && typeof sakuraConfig === 'object') {
-    enabledBackends.push('SakuraLLM');
-    const rewriteModelName = stringifyConfigValue((sakuraConfig as Record<string, unknown>).rewriteModelName);
-    if (rewriteModelName) models.push(toModelDisplayName(rewriteModelName));
-  }
-
-  return {
-    backend: uniqueNonEmpty(enabledBackends).join(' / ') || '未配置后端类型',
-    model: uniqueNonEmpty(models).join(' / ') || '未填写模型',
-  };
-}
-
-function summarizeBackendUsage(projectDir: string, projectBackendConfig: Record<string, unknown> | null): BackendUsageSummary {
-  const { name, profile } = resolveSelectedBackendProfile(projectDir);
-  const selectedProfileDisplay = getSelectedBackendProfileDisplay(projectDir);
-
-  // Following an empty global default means no backend is configured. The
-  // project config is only used when the project explicitly opts out of the
-  // global profile with "不使用（使用项目自身配置）".
-  if (!profile && selectedProfileDisplay === '__default__') {
-    return {
-      backend: '未配置后端',
-      model: '',
-      profile: '',
-    };
-  }
-
-  const activeConfig = profile ?? projectBackendConfig;
-  const { model } = collectBackendModels(activeConfig);
-  return {
-    backend: profile ? name : '自定义后端',
-    model,
-    profile: name,
-  };
-}
 
 function readContinuousRetranslEnabled(projectDir: string): boolean {
   try {
@@ -182,7 +119,8 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const seenSuccessIdsRef = useRef<Set<string>>(new Set());
   const successListRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
-  const [rightTab, setRightTab] = useState<'errors' | 'files' | 'retransl'>('errors');
+  // 默认落在「文件进度」：任务在跑的时候最常看的是它，错误只在出问题时才关心
+  const [rightTab, setRightTab] = useState<'errors' | 'files' | 'retransl'>('files');
   const [retranslKeys, setRetranslKeys] = useState<RetranslListItem[]>([]);
   const [continuousRetranslEnabled, setContinuousRetranslEnabled] = useState(false);
   const [launchPhase, setLaunchPhase] = useState<'idle' | 'charging' | 'blasting'>('idle');
@@ -204,7 +142,9 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
       return;
     }
     const persisted = getSelectedTranslatorTemplate(projectDir);
-    const hasPersisted = translators.some((item) => item.name === persisted);
+    // 被 GenDic 这类流程写进去的历史值不算有效选择，回落到默认模板（列表第一个，通常是 ForGal-json）
+    const hasPersisted = translators.some((item) => item.name === persisted)
+      && !TEMPLATE_SELECTION_IGNORED.has(persisted);
     const nextTranslator = hasPersisted ? persisted : translators[0].name;
     setSelectedTranslator((current) => (current === nextTranslator ? current : nextTranslator));
     if (!hasPersisted) {
@@ -344,9 +284,18 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     [projectDir, runningJobs],
   );
   const runtimeMatchesProject = runtime?.project_dir === projectDir;
-  const currentJob = runtimeMatchesProject
+  const jobCandidate = runtimeMatchesProject
     ? (runtime?.job ?? (currentProjectJobFallback ? toRuntimeJob(currentProjectJobFallback) : null))
     : (currentProjectJobFallback ? toRuntimeJob(currentProjectJobFallback) : null);
+  // 跑完的辅助流程（提取人名 / 构建输出 / 插件列表）不算「这个项目的任务」：新项目刚建好就显示
+  // 「已完成」很莫名其妙，打开项目应当是「空闲」。运行期间照旧认它，否则进度条和「停止翻译」会失灵。
+  const auxiliaryFlowFinished = Boolean(
+    jobCandidate
+    && HIDDEN_TRANSLATORS.has(jobCandidate.translator)
+    && jobCandidate.status !== 'pending'
+    && jobCandidate.status !== 'running',
+  );
+  const currentJob = auxiliaryFlowFinished ? null : jobCandidate;
   const shouldPollRuntime = currentJob?.status === 'pending' || currentJob?.status === 'running';
   const isSelectedTranslatorValid = translators.some((item) => item.name === selectedTranslator);
 
@@ -389,10 +338,10 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
 
   useEffect(() => {
     if (!projectDir || !runtimeMatchesProject || !currentJob?.translator) return;
-    // Auxiliary flows like 构建输出 (rebuilda/rebuildr) and 提取人名表 (dump-name)
-    // reuse the job pipeline but must not hijack the user's translator template
-    // selection in the cockpit dropdown.
-    if (HIDDEN_TRANSLATORS.has(currentJob.translator)) return;
+    // Auxiliary flows like 构建输出 (rebuilda/rebuildr)、提取人名表 (dump-name) 和
+    // 生成字典 (GenDic) reuse the job pipeline but must not hijack the user's translator
+    // template selection in the cockpit dropdown.
+    if (TEMPLATE_SELECTION_IGNORED.has(currentJob.translator)) return;
     setSelectedTranslator((current) => (current === currentJob.translator ? current : currentJob.translator));
     setSelectedTranslatorTemplate(projectDir, currentJob.translator);
   }, [currentJob?.translator, projectDir, runtimeMatchesProject]);
@@ -564,18 +513,31 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
 
   const summary = runtimeMatchesProject ? (runtime?.summary ?? null) : null;
   const runtimeFiles = runtimeMatchesProject ? (runtime?.files ?? []) : [];
+  // 刚才还有请求在跑的文件（文件名 → 最近一次看到的时刻）。排序把它们顶到最上面，小灯才看得见——
+  // 不然刚开始翻的文件（0%）要等第一批写进缓存才挪上来，最热闹的那段一直埋在列表下面。
+  // 留 LIVE_ROW_STICKY_MS 的余量：批与批之间短暂没有请求，行也不会上下跳
+  const liveSeenAtRef = useRef<Map<string, number>>(new Map());
   const prioritizedRuntimeFiles = useMemo(() => {
+    const now = Date.now();
+    const liveSeenAt = liveSeenAtRef.current;
+    if (!shouldPollRuntime) liveSeenAt.clear();
+    const rank = (file: FileProgress) => {
+      const isComplete = file.total > 0 && file.translated >= file.total;
+      if (shouldPollRuntime && !isComplete) {
+        if (file.activity) {
+          liveSeenAt.set(file.filename, now);
+          return 0;
+        }
+        const seenAt = liveSeenAt.get(file.filename);
+        if (seenAt !== undefined && now - seenAt <= LIVE_ROW_STICKY_MS) return 0;
+      }
+      return file.translated > 0 && file.translated < file.total ? 1 : 2;
+    };
     return runtimeFiles
-      .map((file, index) => ({
-        file,
-        index,
-        isTranslating: file.translated > 0 && file.translated < file.total }))
-      .sort((a, b) => {
-        if (a.isTranslating !== b.isTranslating) return a.isTranslating ? -1 : 1;
-        return a.index - b.index;
-      })
+      .map((file, index) => ({ file, index, rank: rank(file) }))
+      .sort((a, b) => a.rank - b.rank || a.index - b.index)
       .map((item) => item.file);
-  }, [runtimeFiles]);
+  }, [runtimeFiles, shouldPollRuntime]);
 
   const unfinishedRuntimeFilesCount = useMemo(
     () => runtimeFiles.filter((file) => file.translated < file.total).length,
@@ -593,6 +555,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     ? `${backendUsageSummary.backend}:${backendUsageSummary.model}`
     : backendUsageSummary.backend;
   const runtimeStage = (runtimeMatchesProject ? (runtime?.stage ?? '') : '').trim();
+  const runtimeStageDetail = (runtimeMatchesProject ? (runtime?.current_file ?? '') : '').trim();
   const runtimeRetranslPendingCount = useMemo(
     () => (runtimeMatchesProject
       ? (runtime?.retransl_stats ?? []).reduce(
@@ -603,7 +566,10 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     [runtimeMatchesProject, runtime?.retransl_stats],
   );
   const statusTone = runtimeStage === '检查模型可用性' ? 'checking-availability' : (currentJob?.status ?? 'pending');
-  const statusLabel = runtimeStage === '检查模型可用性' ? '测试模型可用性' : getStatusLabel(currentJob?.status);
+  // 后端报了阶段就直接显示阶段：只写「翻译中」看不出任务跑到哪一步（GenDic 的分词/人名/提取/审校尤其明显）
+  const statusLabel = runtimeStage
+    ? (runtimeStage === '检查模型可用性' ? '测试模型可用性' : runtimeStage)
+    : getStatusLabel(currentJob?.status);
   const currentJobError = currentJob?.error?.trim() ?? '';
   const cancelledToastTitle = currentJob?.translator === 'GenDic' ? 'GenDic 已停止' : '任务已取消';
   const cancelledToastDescription = useMemo(() => {
@@ -616,6 +582,9 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     }
     return currentJobError;
   }, [currentJob, currentJobError]);
+  // GenDic 跑的是分片/批次而不是句子：进度单位不能跟着普通翻译叫「句」
+  const isGendicJob = currentJob?.translator === 'GenDic' || runtimeStage.startsWith('GenDic');
+  const progressUnit = isGendicJob ? '项' : '句';
   const progressPercent = clampPercent(summary?.percent ?? 0);
   const progressPercentText = formatPercentDisplay(summary?.percent ?? 0);
   const translatedCount = summary?.translated ?? 0;
@@ -623,7 +592,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const remainingCount = Math.max(totalCount - translatedCount, 0);
   const workersActive = summary?.workers_active ?? 0;
   const workersConfigured = summary?.workers_configured ?? 0;
-  const speedText = formatSpeed(summary?.translation_speed_lpm ?? 0);
+  const speedText = formatSpeed(summary?.translation_speed_lpm ?? 0, progressUnit);
   const etaText = formatEta(summary?.eta_seconds ?? 0);
   const elapsedText = formatElapsedTime(currentJob, nowMs);
   const updatedAtText = summary?.updated_at ? formatDate(summary.updated_at) : '等待首次快照';
@@ -783,7 +752,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
             <span className="ptv2-cockpit__eyebrow">Translation Cockpit</span>
             <div className="ptv2-cockpit__title-row">
               <h1 className="ptv2-cockpit__title">
-                翻译工作台
+                开始翻译
                 {projectName ? (
                   <>
                     <span className="ptv2-cockpit__title-sep">·</span>
@@ -813,10 +782,10 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                     </svg>
                   </button>
                   <div className="project-translate-page__folder-menu-dropdown" role="menu">
-                    <Button className="project-translate-page__folder-menu-item" disabled={!projectDir} onClick={() => handleOpenFolder(projectDir)} title={projectDir} variant="secondary">📂 项目文件夹</Button>
-                    <Button className="project-translate-page__folder-menu-item" disabled={!projectDir} onClick={() => handleOpenFolder(inputFolderPath)} title={inputFolderPath} variant="secondary">📥 输入文件夹</Button>
-                    <Button className="project-translate-page__folder-menu-item" disabled={!projectDir} onClick={() => handleOpenFolder(outputFolderPath)} title={outputFolderPath} variant="secondary">📤 输出文件夹</Button>
-                    <Button className="project-translate-page__folder-menu-item" disabled={!projectDir} onClick={() => handleOpenFolder(cacheFolderPath)} title={cacheFolderPath} variant="secondary">💾 缓存文件夹</Button>
+                    <Button className="project-translate-page__folder-menu-item" disabled={!projectDir} onClick={() => handleOpenFolder(projectDir)} title={projectDir} variant="secondary"><Icon name="folder-open" /> 项目文件夹</Button>
+                    <Button className="project-translate-page__folder-menu-item" disabled={!projectDir} onClick={() => handleOpenFolder(inputFolderPath)} title={inputFolderPath} variant="secondary"><Icon name="inbox" /> 输入文件夹</Button>
+                    <Button className="project-translate-page__folder-menu-item" disabled={!projectDir} onClick={() => handleOpenFolder(outputFolderPath)} title={outputFolderPath} variant="secondary"><Icon name="upload" /> 输出文件夹</Button>
+                    <Button className="project-translate-page__folder-menu-item" disabled={!projectDir} onClick={() => handleOpenFolder(cacheFolderPath)} title={cacheFolderPath} variant="secondary"><Icon name="database" /> 缓存文件夹</Button>
                   </div>
                 </div>
               ) : null}
@@ -824,6 +793,13 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
           </div>
           <div className="ptv2-cockpit__statusline">
             <StatusBadge label={statusLabel} tone={statusTone} celebrate={justCompleted} />
+            {/* 阶段内进度只给 GenDic（「人名 3/10」「审校 0/8」）：普通翻译的 current_file 是
+                「正在翻哪个文件」，最近译文里已经带了文件名，再挂一颗胶囊只是噪音 */}
+            {isGendicJob && runtimeStageDetail ? (
+              <span className="ptv2-cockpit__stage-detail" title={`${runtimeStage}${runtimeStage ? ' · ' : ''}${runtimeStageDetail}`}>
+                {runtimeStageDetail}
+              </span>
+            ) : null}
             <span className="ptv2-cockpit__tick" title={updatedAtText}>
               <span className="ptv2-cockpit__tick-dot" aria-hidden="true" />
               {updatedAtText}
@@ -841,7 +817,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
               <span className="ptv2-gauge__fraction-done">{translatedCount}</span>
               <span className="ptv2-gauge__fraction-sep">/</span>
               <span className="ptv2-gauge__fraction-total">{totalCount}</span>
-              <span className="ptv2-gauge__fraction-unit">句</span>
+              <span className="ptv2-gauge__fraction-unit">{progressUnit}</span>
               <span className="ptv2-gauge__fraction-divider" aria-hidden="true" />
               <span className="ptv2-gauge__fraction-remain">剩余 {remainingCount}</span>
             </div>
@@ -894,7 +870,9 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                 disabled={primaryActionDisabled}
                 onClick={handlePrimaryAction}
               >
-                <span className="ptv2-launch-btn__glyph" aria-hidden="true">{isCurrentProjectActive ? '■' : '▶'}</span>
+                <span className="ptv2-launch-btn__glyph" aria-hidden="true">
+                  <Icon name={isCurrentProjectActive ? 'stop' : 'play'} />
+                </span>
                 <span className="ptv2-launch-btn__label">{primaryActionLabel}</span>
               </Button>
             </div>
@@ -925,6 +903,17 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
         </div>
       </section>
 
+      {backendUsageSummary.backend === '未配置后端' && !isCurrentProjectActive ? (
+        <InlineFeedback
+          className="ptv2-alert"
+          tone="warning"
+          title="还没有可用的翻译模型"
+          description="本项目跟随全局默认模型，但尚未设置默认模型配置，直接开始翻译会失败。请先在「模型设置」中新建配置（第一个配置会自动设为默认）。"
+          autoDismiss={0}
+          dedupeKey={null}
+          action={<Button variant="secondary" onClick={() => navigate('/backend-profiles')}>前往模型设置</Button>}
+        />
+      ) : null}
       {submitError ? <InlineFeedback tone="error" title="启动翻译失败" description={submitError} className="ptv2-alert inline-alert--floating" /> : null}
       {runtimeError ? <InlineFeedback tone="error" title="运行时状态异常" description={runtimeError} className="ptv2-alert inline-alert--floating" /> : null}
       {currentJob?.status === 'failed' && currentJobError ? (
@@ -944,7 +933,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
       {/* Main area: success stream (wide) + recent errors (narrower) */}
       <div className="ptv2-main">
         <div className="ptv2-main__success">
-          <Panel title="成功句流">
+          <Panel title="最近译文">
             {hasSelectedSuccessFileFilter ? (
               <div className="runtime-success-filter-hint" role="status">
                 <span className="runtime-success-filter-hint__text" title={selectedSuccessFiles.join('\n')}>
@@ -973,7 +962,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                 ))}
               </div>
             ) : (
-              <EmptyState title="还没有成功句流" description="任务开始输出后，最近成功的句子会滚动显示在这里。" />
+              <EmptyState title="还没有译文" description="任务开始输出后，最近译好的句子会滚动显示在这里。" />
             )}
           </Panel>
         </div>
@@ -985,18 +974,6 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={rightTab === 'errors'}
-                  className={`ptv2-tab${rightTab === 'errors' ? ' ptv2-tab--active' : ''}`}
-                  onClick={() => setRightTab('errors')}
-                >
-                  <span className="ptv2-tab__label">最近错误</span>
-                  {recentErrors.length > 0 ? (
-                    <span className="ptv2-tab__badge ptv2-tab__badge--danger">{recentErrors.length}</span>
-                  ) : null}
-                </button>
-                <button
-                  type="button"
-                  role="tab"
                   aria-selected={rightTab === 'files'}
                   className={`ptv2-tab${rightTab === 'files' ? ' ptv2-tab--active' : ''}`}
                   onClick={() => setRightTab('files')}
@@ -1004,6 +981,18 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                   <span className="ptv2-tab__label">文件进度</span>
                   {unfinishedRuntimeFilesCount > 0 ? (
                     <span className="ptv2-tab__badge" title="未完成的文件数量">{unfinishedRuntimeFilesCount}</span>
+                  ) : null}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={rightTab === 'errors'}
+                  className={`ptv2-tab${rightTab === 'errors' ? ' ptv2-tab--active' : ''}`}
+                  onClick={() => setRightTab('errors')}
+                >
+                  <span className="ptv2-tab__label">最近错误</span>
+                  {recentErrors.length > 0 ? (
+                    <span className="ptv2-tab__badge ptv2-tab__badge--danger">{recentErrors.length}</span>
                   ) : null}
                 </button>
                 <button
@@ -1039,6 +1028,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                       <FileProgressRow
                         key={file.filename}
                         file={file}
+                        isRunning={shouldPollRuntime}
                         isSuccessFileFilterActive={selectedSuccessFileSet.has(file.filename)}
                         onToggleSuccessFileFilter={handleToggleSuccessFileFilter}
                       />

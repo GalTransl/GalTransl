@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
+import { GettingStarted } from '../components/GettingStarted';
 import { InlineFeedback } from '../components/page-state';
 import {
   encodeProjectDir,
@@ -20,10 +21,10 @@ import {
 import { formatTimestamp } from '../lib/format';
 import { normalizeError } from '../lib/errors';
 import { basenamePath, dirnamePath } from '../lib/paths';
+import { PROJECT_HOMEPAGE, RELEASE_LATEST_URL } from '../lib/externalLink';
 const HISTORY_KEY = 'galtransl-project-history';
 const JOB_MEMORY_KEY = 'galtransl-home-jobs-memory';
 const JOB_CLEARED_KEY = 'galtransl-home-jobs-cleared';
-const PROJECT_HOMEPAGE = 'https://github.com/GalTransl/GalTransl';
 const MIN_REFRESH_SPIN_MS = 420;
 const REFRESH_SPIN_CYCLE_MS = 500;
 
@@ -401,10 +402,10 @@ export function HomePage({ onOpenProject }: HomePageProps) {
   }, [onOpenProject, navigate]);
 
   const handleHistoryClick = useCallback(
-    (entry: ProjectHistoryEntry) => {
+    (entry: ProjectHistoryEntry, section: 'translate' | 'dictionary' = 'translate') => {
       onOpenProject(entry.projectDir, entry.configFileName);
       const projectId = encodeProjectDir(entry.projectDir);
-      navigate(`/project/${projectId}/translate`);
+      navigate(`/project/${projectId}/${section}`);
     },
     [onOpenProject, navigate],
   );
@@ -475,6 +476,11 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     [jobs],
   );
   const completedJobsCount = useMemo(() => jobs.filter((job) => job.status === 'completed').length, [jobs]);
+  // 「快速上手」用它判断字典那一步做没做（任务列表里有过跑完的 GenDic 任务）
+  const generatedDictOnce = useMemo(
+    () => jobs.some((job) => job.translator === 'GenDic' && job.status === 'completed'),
+    [jobs],
+  );
   const failedJobsCount = useMemo(() => jobs.filter((job) => job.status === 'failed').length, [jobs]);
 
   return (
@@ -492,7 +498,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
               {updateAvailable && latestVersion ? (
                 <a
                   className="home-hero__chip home-hero__chip--update"
-                  href={PROJECT_HOMEPAGE + '/releases/latest'}
+                  href={RELEASE_LATEST_URL}
                   target="_blank"
                   rel="noreferrer noopener"
                 >
@@ -534,13 +540,21 @@ export function HomePage({ onOpenProject }: HomePageProps) {
         <div className="home-hero__glow" aria-hidden="true" />
       </div>
 
+      <GettingStarted
+        hasProject={history.length > 0}
+        hasCompletedJob={completedJobsCount > 0}
+        hasGeneratedDict={generatedDictOnce}
+        onOpenLatestProject={history[0] ? () => handleHistoryClick(history[0]) : undefined}
+        onOpenProjectDictionary={history[0] ? () => handleHistoryClick(history[0], 'dictionary') : undefined}
+      />
+
       {/* ── Main Content Grid ── */}
       <div className="home-grid">
         {/* Left: Open Project */}
         <section className="home-open">
           <div className="home-open__header">
             <h2>打开项目</h2>
-            <p>打开或新建翻译项目</p>
+            <p>打开已有项目的 config.yaml，或用向导新建项目</p>
           </div>
           <div className="home-open__form">
             <div className="home-open__actions">

@@ -273,7 +273,7 @@ export function PromptTemplatesPage() {
                     <ul>
                       <li><code>[SourceLang]</code>：源语言名称。</li>
                       <li><code>[TargetLang]</code>：目标语言名称。</li>
-                      <li><code>[translation_guideline]</code>：当前翻译规范内容。</li>
+                      <li><code>[translation_guideline]</code>：当前翻译规范内容（全局规范 + 项目规范拼接后的结果）。</li>
                       <li><code>[Glossary]</code>：本批次术语表提示词。</li>
                       <li><code>[Input]</code>：本批次待翻译原文内容。</li>
                       <li><code>[history_result]</code>：上下文历史翻译结果（无则为 None）。</li>

@@ -7,11 +7,13 @@ import {
   createProjectDictionaryFile,
   deleteProjectDictionaryFile,
   fetchProjectDictionaryManager,
+  fetchProjectConfig,
   getSelectedBackendProfileJobPayload,
   saveProjectDictionaryFile,
   submitJob,
   type DictionaryCategory
 } from '../lib/api';
+import { summarizeBackendUsage } from '../lib/backendUsage';
 import { normalizeError } from '../lib/errors';
 
 const DICT_POLL_INTERVAL_MS = 3000;
@@ -43,7 +45,39 @@ export function ProjectDictionaryPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isDocumentVisible, setIsDocumentVisible] = useState(() => document.visibilityState === 'visible');
+  const [projectBackendConfig, setProjectBackendConfig] = useState<Record<string, unknown> | null>(null);
   const currentSnapshot = useMemo(() => buildDictionarySnapshot(data), [data]);
+
+  // GenDic 用的是项目选择的那个后端（没单独指定就跟随全局默认），跟开始翻译同一套口径：
+  // 二次确认里要如实写出来用的是哪个后端
+  useEffect(() => {
+    if (!projectId) {
+      setProjectBackendConfig(null);
+      return;
+    }
+    let cancelled = false;
+    fetchProjectConfig(projectId, configFileName || 'config.yaml')
+      .then((res) => {
+        if (cancelled) return;
+        const backendSpecific = res.config?.backendSpecific;
+        setProjectBackendConfig(
+          backendSpecific && typeof backendSpecific === 'object'
+            ? backendSpecific as Record<string, unknown>
+            : null,
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setProjectBackendConfig(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, configFileName]);
+
+  const gendicBackend = useMemo(
+    () => (projectDir ? summarizeBackendUsage(projectDir, projectBackendConfig) : null),
+    [projectDir, projectBackendConfig],
+  );
 
   const loadData = useCallback(async (options?: { silent?: boolean }) => {
     if (!projectId) return;
@@ -136,7 +170,7 @@ export function ProjectDictionaryPage({
   return (
     <DictionaryManager
       title="项目字典"
-      description="仅管理项目目录下的字典文件，支持卡片编辑与纯文本编辑。"
+      description="管理项目目录下的字典文件，“GPT字典”是发给大模型的字典，“译前、译后字典”是对应的直接替换字典。"
       data={data}
       loading={loading}
       error={error}
@@ -164,6 +198,13 @@ export function ProjectDictionaryPage({
           config_file_name: configFileName,
           file_key: fileKey,
           delete_file: true });
+      }}
+      gendicBackend={gendicBackend}
+      // 条目行的「→」：拿着这个原文词去「浏览文本」搜它出现在哪。
+      // 带一个 nonce（n）：同一个词连点两次时 URL 不变，缓存页拿不到新事件（那边按 n 去重）
+      onOpenInCache={(sourceWord) => {
+        if (!projectId || !sourceWord) return;
+        navigate(`/project/${projectId}/cache?q=${encodeURIComponent(sourceWord)}&n=${Date.now()}`);
       }}
       onGenerateGptDict={async () => {
         if (!projectId || !projectDir) {
