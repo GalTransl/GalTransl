@@ -86,7 +86,7 @@ python build_linux_x64.py
 
 Build release packages on Ubuntu 22.04 or an equivalent glibc baseline for wider compatibility. Settings are stored under `$XDG_CONFIG_HOME/GalTransl`; editable common dictionaries live under `$XDG_DATA_HOME/GalTransl/Dict`, with bundled dictionaries used only as initial seeds.
 
-GitHub Actions builds Linux x86_64 packages on updates to `main` or manual runs and publishes the latest artifacts to the repository's `linux` branch.
+GitHub Actions builds Linux x86_64 packages on updates to `main` or manual runs and uploads them as downloadable artifacts of the workflow run.
 
 
 ## Practical Tools

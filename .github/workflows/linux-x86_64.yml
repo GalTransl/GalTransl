@@ -1,4 +1,4 @@
-name: Build Linux x86_64 and publish to linux branch
+name: Build Linux x86_64
 
 on:
   push:
@@ -108,32 +108,3 @@ jobs:
             release/*.AppImage.xz.part-*
             release/*.tar.gz
           if-no-files-found: error
-
-  publish:
-    needs: build
-    permissions:
-      contents: write
-    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
-    runs-on: ubuntu-22.04
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout automation scripts
-        uses: actions/checkout@v4
-
-      - name: Download Linux artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: GalTransl-linux-x86_64
-          path: artifacts
-
-      - name: Publish artifacts to linux branch
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_SHA: ${{ github.sha }}
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
-          GITHUB_REF_NAME: ${{ github.ref_name }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-          LINUX_BRANCH: linux
-        run: bash .github/scripts/publish-linux-branch.sh artifacts

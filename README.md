@@ -148,7 +148,7 @@ python build_linux_x64.py
 
 正式发布包应在 Ubuntu 22.04 或同等 glibc 基线的环境中构建。应用设置写入 `$XDG_CONFIG_HOME/GalTransl`，用户通用字典写入 `$XDG_DATA_HOME/GalTransl/Dict`；安装目录中的字典只作为初始种子。
 
-GitHub Actions 会在 `main` 分支更新或手动触发时编译 Linux x86_64 安装包，并将最新产物推送到仓库的 `linux` 分支。
+GitHub Actions 会在 `main` 分支更新或手动触发时编译 Linux x86_64 安装包，并上传为本次工作流的可下载产物（Actions artifacts）。
 
 </details>
 
