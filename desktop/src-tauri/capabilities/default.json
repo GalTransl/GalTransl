@@ -9,6 +9,7 @@
     "shell:default",
     "shell:allow-open",
     "dialog:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "notification:default"
   ]
 }

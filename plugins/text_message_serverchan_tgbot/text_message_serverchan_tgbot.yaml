@@ -28,3 +28,78 @@ Settings:
   OpenAI_API_Key: ""
   OpenAI_API_Base_URL: "https://api.openai.com/v1"
   OpenAI_TTS_Voice: "onyx" # 可选 alloy, echo, fable, onyx, nova, shimmer
+
+SettingsSchema:
+  推送渠道:
+    label: 完成通知渠道
+    description: 选择翻译完成后接收通知的渠道，可多选；取消全部渠道则不发送网络通知。
+    advanced: false
+    options:
+    - value: ServerChan
+      label: Server酱
+    - value: Telegram Bot
+      label: Telegram 机器人
+  Telegram_Bot_API_URL:
+    label: Telegram 接口地址
+    description: 默认使用 Telegram 官方接口；使用自建接口或代理服务时再修改。
+    advanced: true
+  Telegram_Bot_Token:
+    label: Telegram 机器人令牌
+    description: 由 BotFather 提供的机器人令牌，仅在启用 Telegram 通知时使用。
+    advanced: false
+    secret: true
+  Telegram_Bot_ChatID:
+    label: Telegram 接收会话 ID
+    description: 接收通知的用户或群组会话 ID，需要机器人有权限向该会话发送消息。
+    advanced: false
+  ServerChan_SendKey:
+    label: Server酱推送密钥
+    description: Server酱账户提供的 SendKey，仅在启用 Server酱通知时使用。
+    advanced: false
+    secret: true
+  启用声音通知:
+    label: 播放完成提示音
+    description: 翻译结束后播放成功或失败提示音。
+    advanced: false
+  使用自定义音频:
+    label: 使用自定义提示音
+    description: 开启后使用下方指定的音频文件，需同时启用声音通知。
+    advanced: true
+  成功音频路径:
+    label: 成功提示音路径
+    description: 翻译成功时播放的音频文件路径，仅在启用自定义提示音时生效。
+    advanced: true
+  失败音频路径:
+    label: 失败提示音路径
+    description: 翻译失败时播放的音频文件路径，仅在启用自定义提示音时生效。
+    advanced: true
+  使用OpenAI TTS:
+    label: 使用语音合成播报
+    description: 通过 OpenAI 兼容语音合成接口生成播报；需启用声音通知并配置接口密钥，可能产生接口费用。
+    advanced: true
+  OpenAI_API_Key:
+    label: 语音合成接口密钥
+    description: 语音合成服务的 API 密钥，仅在开启语音合成时使用。
+    advanced: true
+    secret: true
+  OpenAI_API_Base_URL:
+    label: 语音合成接口地址
+    description: OpenAI 兼容服务的接口基础地址，通常以 /v1 结尾。
+    advanced: true
+  OpenAI_TTS_Voice:
+    label: 播报音色
+    description: 选择语音合成的音色，实际可用音色取决于所用服务。
+    advanced: true
+    options:
+    - value: alloy
+      label: 中性（Alloy）
+    - value: echo
+      label: 沉稳（Echo）
+    - value: fable
+      label: 叙述（Fable）
+    - value: onyx
+      label: 低沉（Onyx）
+    - value: nova
+      label: 明亮（Nova）
+    - value: shimmer
+      label: 柔和（Shimmer）

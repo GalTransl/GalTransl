@@ -10,3 +10,9 @@ Documentation:
 
 Settings: # 这里存放插件的设置
   output_with_src: False # 输出到gt_output时是否保留原文
+
+SettingsSchema:
+  output_with_src:
+    label: 输出时保留原文
+    description: 在输出 JSON 中保留原文，便于对照译文。
+    advanced: false

@@ -156,6 +156,7 @@ class CProjectConfig:
         self.name_replaceDict = {}  # 名字替换字典
         self.tPlugins = []  # 文本插件列表
         self.fPlugins = []  # 文件插件列表
+        self.fPluginAuto = False  # filePlugin: auto 时按文件逐个识别插件
         self.tokenPool = None  # 令牌池
         self.proxyPool = None  # 代理池
         self.endpointQueue = None  # 端点队列
@@ -165,6 +166,9 @@ class CProjectConfig:
         self.translation_guideline=""
         self.non_interactive: bool = False  # 非交互模式（前端启动时为True）
         self.runtime_project_dir: str = projectPath
+        # 只翻译这些输入文件（文件名匹配）；空 = 全部。试译/部分重翻场景由
+        # JobSpec.input_files 注入，run_job 阶段设置，翻译流程读取。
+        self.runtime_input_files: list = []
         
 
     def getProjectConfig(self) -> dict:

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import re
 import threading
+import time
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from collections import deque
 from dataclasses import asdict, dataclass, field
@@ -16,6 +18,11 @@ from yaml import safe_load
 
 from GalTransl import CACHE_FOLDERNAME
 from GalTransl.ProblemFilter import filter_problem_text, normalize_problem_filter_keys
+from GalTransl.ProblemWhiteList import (
+    build_problem_white_list_index,
+    is_problem_whitelisted,
+    normalize_problem_white_list,
+)
 
 def _utcnow_text() -> str:
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
@@ -105,11 +112,89 @@ class RuntimeState:
     recent_successes_by_file: dict[str, deque[RuntimeSentenceEvent]] = field(default_factory=dict)
     recent_errors: deque[RuntimeErrorEvent] = field(default_factory=lambda: deque(maxlen=RUNTIME_RECENT_EVENT_LIMIT))
     success_timestamps: deque[float] = field(default_factory=deque)
+    # 引擎自报的速度（单位与它上报的进度计数一致，即「完成项/分」），None 表示没报。
+    # 默认的实时速度是「最近一分钟的成功事件数」，对普通翻译来说一个成功事件正好是一句话，
+    # 与进度计数（句）同口径，所以引擎不用报；GenDic 的进度单位是分片/批次，而成功事件是
+    # 这一段抽出的一个个术语（一段几十个），两者不是一个单位，拿成功事件算 ETA 会小一个数量级，
+    # 所以它自己按「完成项数/耗时」报上来（见 GenDic._progress_speed_lpm）。
+    progress_speed_lpm: float | None = None
+    # 此刻在跑的请求：{请求编号: _RequestActivity}。「文件进度」那一行据此点小灯
+    # （请求中黄 / 思考中蓝 / 翻译中绿 / 重试中红，光晕的呼吸快慢跟着输出的字/秒走，
+    # 停住的请求标成 stalled，灯放慢但阶段不变）。
+    requests: dict[int, "_RequestActivity"] = field(default_factory=dict)
+
+
+# 在出字的请求多久没有新输出就算「停住」：阶段不变（思考中/翻译中），只把这一行标成
+# stalled、字/秒归零，界面据此把灯放慢。别退回「请求中」——思考型模型两个思考块之间隔上
+# 几秒很正常，一退回那颗灯就在「思考中/请求中」之间反复横跳
+REQUEST_STALL_SECONDS = 3.0
+# 算「字/秒」的滑动窗口：与上面一样长，停住的请求窗口里正好没有样本，速度自然是 0
+_REQUEST_RATE_WINDOW_SECONDS = 3.0
+# 兜底：登记后这么久既没动静也没注销，就当它丢了。正常路径都会注销（ask_chatbot 的 finally），
+# 这只防万一、别让一盏灯永远亮着；比任何接口超时都宽裕，不会误摘一个还在等响应的请求
+_REQUEST_ABANDON_SECONDS = 30 * 60
+# 同一个文件同时有几个请求（切块并发、GenDic 多线程）时那一行显示哪个阶段：有一个在出正文就是
+# 「翻译中」，其次「思考中」「请求中」，全都在退避才是「重试中」
+_REQUEST_PHASE_RANK = {"retrying": 0, "waiting": 1, "thinking": 2, "writing": 3}
+# 请求编号全局递增：项目重置（新任务开始）后，上一轮还没收尾的请求报上来也对不上号，直接忽略
+_REQUEST_IDS = itertools.count(1)
+
+
+@dataclass(slots=True)
+class _RequestActivity:
+    """一次请求（某个文件的一批句子，含重试）从发出到返回的状态。
+
+    phase：waiting 请求已发出、还没出字 / thinking 在吐思考内容 / writing 在出正文 /
+    retrying 上一次失败了、正在退避等下一次。时间一律是 time.monotonic()。
+    """
+
+    filename: str
+    phase: str
+    updated_at: float
+    phase_started_at: float
+    last_output_at: float = 0.0
+    samples: deque[tuple[float, int]] = field(default_factory=deque)
+
+    def note(self, phase: str, chars: int, now: float) -> None:
+        if phase != self.phase:
+            # 换阶段就重新起窗：思考和出正文的速度不是一回事，别让思考的字数把绿灯一上来就撑得飞快
+            self.phase = phase
+            self.phase_started_at = now
+            self.samples.clear()
+        if chars > 0:
+            self.samples.append((now, chars))
+            self.last_output_at = now
+        self.updated_at = now
+
+    def is_stalled(self, now: float) -> bool:
+        """是不是「停住了」：在出字（thinking / writing）却超过 REQUEST_STALL_SECONDS 没有新输出。
+
+        阶段本身不动，界面拿这个标记把灯放慢就行：思考型模型两个思考块之间隔几秒是常态，
+        退回「请求中」只会让灯在「思考中/请求中」之间来回跳。waiting（还没出首字）、
+        retrying（在退避）本来就不出字，不算停住。
+        """
+        return (
+            self.phase in ("thinking", "writing")
+            and now - self.last_output_at > REQUEST_STALL_SECONDS
+        )
+
+    def rate_per_second(self, now: float) -> float:
+        cutoff = now - _REQUEST_RATE_WINDOW_SECONDS
+        while self.samples and self.samples[0][0] < cutoff:
+            self.samples.popleft()
+        if not self.samples:
+            return 0.0
+        # 分母取「这一阶段开始到现在」与窗口长度里短的那个，且至少按 0.5s 算：
+        # 刚开始出字时只有一两笔样本，别报出个天文数字
+        span = max(min(now - self.phase_started_at, _REQUEST_RATE_WINDOW_SECONDS), 0.5)
+        return sum(chars for _, chars in self.samples) / span
 
 
 class RuntimeRegistry:
     def __init__(self) -> None:
         self._states: dict[str, RuntimeState] = {}
+        # 请求编号 → 它登记在哪个项目的状态上：上报/注销只带编号，不必每次都去解析项目路径
+        self._request_owners: dict[int, RuntimeState] = {}
         self._lock = threading.Lock()
 
     def ensure_project(self, project_dir: str) -> RuntimeState:
@@ -127,6 +212,11 @@ class RuntimeRegistry:
     def reset_project(self, project_dir: str) -> None:
         with self._lock:
             normalized = _normalize_project_dir(project_dir)
+            previous = self._states.get(normalized)
+            if previous is not None:
+                # 上一轮还没收尾的请求：之后再报上来/注销都对不上号，按忽略处理
+                for request_id in previous.requests:
+                    self._request_owners.pop(request_id, None)
             self._states[normalized] = RuntimeState(project_dir=project_dir)
 
     def update_status(
@@ -139,6 +229,7 @@ class RuntimeRegistry:
         workers_configured: int | None = None,
         file_totals: dict[str, int] | None = None,
         cache_file_display_map: dict[str, str] | None = None,
+        progress_speed_lpm: float | None = None,
     ) -> None:
         with self._lock:
             state = self._states.get(_normalize_project_dir(project_dir))
@@ -157,7 +248,46 @@ class RuntimeRegistry:
                 state.file_totals = dict(file_totals)
             if cache_file_display_map is not None:
                 state.cache_file_display_map = dict(cache_file_display_map)
+            if progress_speed_lpm is not None:
+                state.progress_speed_lpm = max(0.0, float(progress_speed_lpm))
             state.updated_at = _utcnow_text()
+
+    def begin_request(self, project_dir: str, *, filename: str) -> int | None:
+        """登记「这个文件有一个请求开始跑了」（阶段是请求中），返回请求编号，交给 note_request / end_request。
+
+        引擎报的是它自己的文件名（切块的带 `_<n>`、多级目录用 `-}` 拼），这里换成「文件进度」那一行的
+        显示名；认不出是本次任务登记过的哪一行就返回 None、不登记——宁可没有灯，也别点到别的文件上。
+        """
+        now = time.monotonic()
+        with self._lock:
+            state = self._states.get(_normalize_project_dir(project_dir))
+            if state is None:
+                return None
+            display = self._resolve_display_filename_locked(state, filename)
+            if display not in state.file_totals:
+                return None
+            request_id = next(_REQUEST_IDS)
+            state.requests[request_id] = _RequestActivity(
+                filename=display, phase="waiting", updated_at=now, phase_started_at=now
+            )
+            self._request_owners[request_id] = state
+            return request_id
+
+    def note_request(self, request_id: int, *, phase: str, chars: int = 0) -> None:
+        """这个请求换了阶段 / 又出了 chars 个字（phase 取 waiting / thinking / writing / retrying）。"""
+        now = time.monotonic()
+        with self._lock:
+            state = self._request_owners.get(request_id)
+            activity = state.requests.get(request_id) if state is not None else None
+            if activity is not None:
+                activity.note(phase, max(0, int(chars)), now)
+
+    def end_request(self, request_id: int) -> None:
+        """请求结束（成功、重试到上限、取消都算）：这一行不再因为它亮灯。"""
+        with self._lock:
+            state = self._request_owners.pop(request_id, None)
+            if state is not None:
+                state.requests.pop(request_id, None)
 
     def append_success(
         self,
@@ -293,13 +423,19 @@ class RuntimeRegistry:
                     "translation_speed_lpm": 0,
                     "file_totals": {},
                     "cache_file_display_map": {},
+                    "activity": {},
                     "recent_errors": [],
                     "recent_successes": [],
                     "updated_at": _utcnow_text(),
                 }
             now = datetime.utcnow().timestamp()
             self._trim_speed_window_locked(state, now)
+            activity = self._activity_snapshot_locked(state, time.monotonic())
             speed = round((len(state.success_timestamps) / 60) * 60, 1) if state.success_timestamps else 0
+            if state.progress_speed_lpm is not None:
+                # 引擎自报的速度优先：它的单位与进度计数一致，前端的「实时速度/预计剩余」
+                # 以及下面按它算的 eta_seconds 才跟 x/y 项的进度对得上
+                speed = state.progress_speed_lpm
             # Flatten per-file success deques (each newest-first) and re-order
             # globally by timestamp desc so the snapshot list remains newest-first
             # for existing clients.
@@ -317,6 +453,7 @@ class RuntimeRegistry:
                 "translation_speed_lpm": speed,
                 "file_totals": dict(state.file_totals),
                 "cache_file_display_map": dict(state.cache_file_display_map),
+                "activity": activity,
                 "recent_errors": [event.to_dict() for event in state.recent_errors],
                 "recent_successes": [event.to_dict() for event in merged_successes],
                 "updated_at": state.updated_at,
@@ -326,6 +463,37 @@ class RuntimeRegistry:
     def _trim_speed_window_locked(state: RuntimeState, now: float) -> None:
         while state.success_timestamps and now - state.success_timestamps[0] > 60:
             state.success_timestamps.popleft()
+
+    def _activity_snapshot_locked(self, state: RuntimeState, now: float) -> dict[str, dict[str, Any]]:
+        """{显示名: {phase, cps, requests, stalled}}，只给此刻有请求在跑的文件；顺手摘掉丢了的请求。
+
+        同一个文件可能同时有几个请求（切块并发、GenDic 多线程）：阶段取最往前的那个
+        （见 _REQUEST_PHASE_RANK），字/秒加总，requests 是请求数——分开报的话那一行会
+        在几个请求的阶段之间来回跳。stalled 表示这一行有请求在跑却都没出新字（见
+        _RequestActivity.is_stalled）：阶段照旧，界面把灯放慢。
+        """
+        snapshot: dict[str, dict[str, Any]] = {}
+        groups: dict[str, list[_RequestActivity]] = {}
+        for request_id, activity in list(state.requests.items()):
+            if now - activity.updated_at > _REQUEST_ABANDON_SECONDS:
+                del state.requests[request_id]
+                self._request_owners.pop(request_id, None)
+                continue
+            groups.setdefault(activity.filename, []).append(activity)
+        for filename, activities in groups.items():
+            snapshot[filename] = {
+                # 取最靠前的阶段：几个请求同时在跑时那一行才不会在它们之间来回跳
+                "phase": max(
+                    activities, key=lambda item: _REQUEST_PHASE_RANK[item.phase]
+                ).phase,
+                "cps": round(
+                    sum(activity.rate_per_second(now) for activity in activities), 1
+                ),
+                "requests": len(activities),
+                # 只要还有一个请求在出新字，这一行就没停住
+                "stalled": all(activity.is_stalled(now) for activity in activities),
+            }
+        return snapshot
 
 
 def _trim_preview(value: str, limit: int = 140) -> str:
@@ -349,6 +517,7 @@ class _CacheProgressFileStat:
     retran_terms_signature: tuple[str, ...] = field(default_factory=tuple)
     retran_hit_keys: dict[str, frozenset[str]] = field(default_factory=dict)
     problem_filter_signature: tuple[str, ...] = field(default_factory=tuple)
+    problem_white_signature: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(slots=True)
@@ -357,6 +526,7 @@ class _RetranConfigStat:
     size: int
     retran_key: str | list[str]
     problem_filter_keys: list[str] = field(default_factory=list)
+    problem_white_list: list[str] = field(default_factory=list)
 
 
 def _normalize_retran_key(value: Any) -> str | list[str]:
@@ -435,12 +605,14 @@ class RuntimeProgressCache:
 
         retran_key: str | list[str] = ""
         problem_filter_keys = []
+        problem_white_list = []
         try:
             with open(config_path, "rb") as cfg_file:
                 cfg = safe_load(cfg_file.read()) or {}
             common = cfg.get("common", {}) if isinstance(cfg, dict) else {}
             retran_key = _normalize_retran_key(common.get("retranslKey", ""))
             problem_filter_keys = normalize_problem_filter_keys(common.get("problemFilterKey", []))
+            problem_white_list = normalize_problem_white_list(common.get("problemWhiteList", []))
         except Exception:
             retran_key = ""
 
@@ -450,6 +622,7 @@ class RuntimeProgressCache:
                 size=int(stat.st_size),
                 retran_key=retran_key,
                 problem_filter_keys=problem_filter_keys,
+                problem_white_list=problem_white_list,
             )
 
         return retran_key
@@ -461,6 +634,13 @@ class RuntimeProgressCache:
             cached = self._retran_config_cache.get(config_path)
             return list(cached.problem_filter_keys) if cached else []
 
+    def get_problem_white_list(self, project_dir: str, config_file_name: str = "config.yaml") -> list[str]:
+        self.get_retran_key(project_dir, config_file_name)
+        config_path = str(Path(project_dir, config_file_name or "config.yaml").resolve())
+        with self._lock:
+            cached = self._retran_config_cache.get(config_path)
+            return list(cached.problem_white_list) if cached else []
+
     def get_progress(
         self,
         project_dir: str,
@@ -470,6 +650,7 @@ class RuntimeProgressCache:
         retran_terms: list[str] | None = None,
         current_job_started_at_ns: int | None = None,
         problem_filter_keys=None,
+        problem_white_list=None,
     ) -> dict[str, Any]:
         normalized = _normalize_project_dir(project_dir)
         cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
@@ -477,6 +658,9 @@ class RuntimeProgressCache:
         retran_terms_signature = tuple(retran_terms)
         problem_filter_keys = normalize_problem_filter_keys(problem_filter_keys)
         problem_filter_signature = tuple(problem_filter_keys)
+        problem_white_list = normalize_problem_white_list(problem_white_list)
+        problem_white_signature = tuple(problem_white_list)
+        problem_white_index = build_problem_white_list_index(problem_white_list)
 
         with self._lock:
             project_stats = self._project_files.setdefault(normalized, {})
@@ -507,6 +691,7 @@ class RuntimeProgressCache:
                         and cached.size == int(stat.st_size)
                         and cached.retran_terms_signature == retran_terms_signature
                         and cached.problem_filter_signature == problem_filter_signature
+                        and cached.problem_white_signature == problem_white_signature
                     ):
                         continue
 
@@ -604,6 +789,9 @@ class RuntimeProgressCache:
 
                         is_translated = bool(item.get("pre_dst", "") or item.get("pre_zh", ""))
                         problem_text = filter_problem_text(item.get("problem", ""), problem_filter_keys)
+                        # 白名单命中：等价于该条勾了 skip_check，问题整体不算
+                        if is_problem_whitelisted(problem_white_index, entry.name, item.get("index", "")):
+                            problem_text = ""
                         is_problem = bool(problem_text)
                         is_failed = (
                             "翻译失败" in problem_text
@@ -660,6 +848,7 @@ class RuntimeProgressCache:
                         failed_keys=frozenset(failed_keys),
                         retran_terms_signature=retran_terms_signature,
                         problem_filter_signature=problem_filter_signature,
+                        problem_white_signature=problem_white_signature,
                         retran_hit_keys={
                             term: frozenset(hit_keys)
                             for term, hit_keys in retran_hit_keys.items()
@@ -763,6 +952,7 @@ def update_runtime_status(
     workers_configured: int | None = None,
     file_totals: dict[str, int] | None = None,
     cache_file_display_map: dict[str, str] | None = None,
+    progress_speed_lpm: float | None = None,
 ) -> None:
     RUNTIME_REGISTRY.update_status(
         project_dir,
@@ -772,6 +962,7 @@ def update_runtime_status(
         workers_configured=workers_configured,
         file_totals=file_totals,
         cache_file_display_map=cache_file_display_map,
+        progress_speed_lpm=progress_speed_lpm,
     )
 
 
@@ -819,6 +1010,24 @@ def record_runtime_error(
         sleep_seconds=sleep_seconds,
         level=level,
     )
+
+
+def begin_runtime_request(project_dir: str, *, filename: str) -> int | None:
+    """某个文件的一次请求开始了（ask_chatbot 进门）：返回请求编号，认不出这个文件时返回 None。
+
+    工作台的「文件进度」用它给那一行点小灯，见 RuntimeRegistry.begin_request。
+    """
+    return RUNTIME_REGISTRY.begin_request(project_dir, filename=filename)
+
+
+def note_runtime_request(request_id: int, *, phase: str, chars: int = 0) -> None:
+    """请求换阶段 / 新出了 chars 个字：phase 取 waiting / thinking / writing / retrying。"""
+    RUNTIME_REGISTRY.note_request(request_id, phase=phase, chars=chars)
+
+
+def end_runtime_request(request_id: int) -> None:
+    """请求结束（ask_chatbot 出门，不管成功失败）。"""
+    RUNTIME_REGISTRY.end_request(request_id)
 
 
 # ---------------------------------------------------------------------------

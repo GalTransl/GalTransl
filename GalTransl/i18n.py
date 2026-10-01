@@ -206,6 +206,55 @@ UI_TEXT = {
     "cache_incomplete": {
         "zh-cn": "{0} 缓存不完整，无法重构",
         "en": "{0} cache incomplete, cannot rebuild"
+    },
+    # 重建失败时把"哪几句、为什么"说清楚（见 Backend/RebuildTranslate）
+    "cache_incomplete_detail": {
+        "zh-cn": "共 {0} 句，{1} 句没命中缓存（重建不翻译，只能用现有缓存重刷译文与结果）：",
+        "en": "{0} sentences in total, {1} not found in cache (rebuild does not translate; it can only re-apply dictionaries using the existing cache):"
+    },
+    "cache_incomplete_reason_line": {
+        "zh-cn": "- {0} 句：{1}",
+        "en": "- {0} sentence(s): {1}"
+    },
+    "cache_incomplete_examples": {
+        "zh-cn": "例：{0}",
+        "en": "e.g. {0}"
+    },
+    "cache_incomplete_miss_key_not_found": {
+        "zh-cn": "缓存里没有这一条（说话人 + 原文 + 上下句拼出的键对不上：原文被改过，或缓存是按分块写的）",
+        "en": "not present in cache (the speaker+source+neighbour key does not match: source edited, or cache written per chunk)"
+    },
+    "cache_incomplete_miss_post_src_changed": {
+        "zh-cn": "原文经译前字典替换后与缓存里记录的不一致（译前字典改过 → 这条缓存已过期）",
+        "en": "source after pre-dictionary differs from the cached one (pre-dictionary changed → stale cache)"
+    },
+    "cache_incomplete_miss_pre_dst_empty": {
+        "zh-cn": "缓存里这条的译文是空的（上次没翻成功，或没写进缓存）",
+        "en": "cached translation is empty (last run failed or never wrote it)"
+    },
+    "cache_incomplete_miss_translate_failed": {
+        "zh-cn": "缓存里这条是翻译失败（(Failed)），且配置开着「重试失败句」",
+        "en": "cached entry is a failed translation and retranslFail is enabled"
+    },
+    "cache_incomplete_miss_retran_key": {
+        "zh-cn": "原文命中重译关键字（配置 retranslKey）",
+        "en": "source matches retranslKey"
+    },
+    "cache_incomplete_miss_retran_problem": {
+        "zh-cn": "问题描述命中重译关键字（配置 retranslKey）",
+        "en": "problem text matches retranslKey"
+    },
+    "cache_incomplete_miss_proofread_missing": {
+        "zh-cn": "还没有校对稿（本次按校对模式查缓存）",
+        "en": "no proofread result yet (cache queried in proofread mode)"
+    },
+    "cache_incomplete_miss_unknown": {
+        "zh-cn": "未命中缓存（原因码：{0}）",
+        "en": "not found in cache (reason code: {0})"
+    },
+    "cache_incomplete_hint": {
+        "zh-cn": "处理：给这些句子补上译文（patch_transl_cache）后重跑重建；或删掉它们重翻（delete_transl_cache → start_translation）。",
+        "en": "How to fix: write translations for these entries (patch_transl_cache) and rebuild again, or delete them and retranslate (delete_transl_cache → start_translation)."
     }
 }
 

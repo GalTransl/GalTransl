@@ -4,6 +4,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* 图标 + 文案的按钮（`<Icon /> 文案`）靠它留出间距：flex 里那个空格是空白文本节点，
+     不会渲染。纯文字按钮只有单个子元素，gap 不生效，所以全局加上是安全的 */
+  gap: 6px;
   min-height: 44px;
   padding: 0 var(--space-4);
   border: 1px solid transparent;

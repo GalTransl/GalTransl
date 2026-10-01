@@ -1,0 +1,31 @@
+{
+  "injector": {
+    "enable": true,
+    "print_loaded_modules": false
+  },
+  "allocate_console": false,
+  "tunnel_decoder": {
+    "enable": false,
+    "mapping": ""
+  },
+    "character_substitution": {
+    "enable": false,
+    "source_characters":"",
+    "target_characters":""
+  },
+  "font_manager": {
+    "enable": false,
+    "resource_files": [ "MSGothic_WenQuanYi_cnjp.ttf" ],
+    "spoof_enumeration": {
+      "enable": false,
+      "filter_pitch_and_family": 0,
+      "filter_charset": 1,
+      "spoof_charset": 128
+    },
+    "spoof_creation": {
+      "enable": false,
+      "override_face": "WenQuanYi",
+      "override_charset": 0
+    }
+  }
+}

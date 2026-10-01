@@ -7,6 +7,10 @@
 .field {
   display: grid;
   gap: var(--space-2);
+  /* 被外层多列网格拉伸时，别把多出来的高度摊到自己的行上：默认的 stretch 会顺带把
+     输入框一起拉高（向导里「动态最小句数」旁边那格带提示文字，它就比同排的框高一截）。
+     多出来的空间留在格子底部，label → 输入框的间距保持原样。 */
+  align-content: start;
 }
 
 .field span {

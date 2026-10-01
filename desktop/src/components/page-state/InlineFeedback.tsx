@@ -9,7 +9,7 @@ type InlineFeedbackProps = {
   action?: ReactNode;
   tone?: InlineFeedbackTone;
   className?: string;
-  /** 自动消失延迟(ms)，设置后到时间会淡出并触发 onDismiss；success/info 默认 2200，warning/error 默认 4200 */
+  /** 自动消失延迟(ms)，设置后到时间会淡出并触发 onDismiss；success/info 默认 2200，warning/error 默认 4200；传 0 表示常驻不自动消失 */
   autoDismiss?: number;
   /** 淡出动画结束后回调，通常用来清除父组件的 info/error 状态 */
   onDismiss?: () => void;
@@ -120,7 +120,7 @@ export function InlineFeedback({
 
   useEffect(() => {
     if (alreadySeen) return;
-    if (dismissMs == null) return;
+    if (dismissMs == null || dismissMs <= 0) return;
     timerRef.current = setTimeout(startDismiss, dismissMs);
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);

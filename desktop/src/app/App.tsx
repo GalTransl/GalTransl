@@ -2,15 +2,22 @@ import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useRef, useSta
 import { HashRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import {
   CUSTOM_BACKGROUND_CHANGE_EVENT,
+  OPEN_PROJECTS_CHANGE_EVENT,
   THEME_MODE_CHANGE_EVENT,
   type CustomBackgroundPreference,
   decodeProjectDir,
   encodeProjectDir,
   getCustomBackgroundPreference,
   getThemeModePreference,
+  loadOpenProjects,
+  persistOpenProjects,
+  saveConfigFileName,
 } from '../lib/api';
 import { Sidebar } from '../components/Sidebar';
+import { RenderErrorBoundary } from '../components/RenderErrorBoundary';
 import { ConnectionProvider } from '../features/connection/ConnectionContext';
+import { BootstrapGate } from '../features/connection/BootstrapGate';
+import { UpdateNotice } from '../features/update/UpdateNotice';
 import { HomePage, addProjectToHistory } from '../pages/HomePage';
 
 const ProjectLayout = lazy(async () => {
@@ -33,6 +40,11 @@ const PromptTemplatesPage = lazy(async () => {
   return { default: mod.PromptTemplatesPage };
 });
 
+const CommonGuidelinesPage = lazy(async () => {
+  const mod = await import('../pages/CommonGuidelinesPage');
+  return { default: mod.CommonGuidelinesPage };
+});
+
 const CommonDictionaryPage = lazy(async () => {
   const mod = await import('../pages/CommonDictionaryPage');
   return { default: mod.CommonDictionaryPage };
@@ -43,39 +55,15 @@ const NewProjectWizard = lazy(async () => {
   return { default: mod.NewProjectWizard };
 });
 
-const CONFIG_FILE_KEY = 'galtransl-config-file';
-const OPEN_PROJECTS_KEY = 'galtransl-open-projects';
-const LAST_ACTIVE_PROJECT_KEY = 'galtransl-last-active-project';
+const AgentPage = lazy(async () => {
+  const mod = await import('../pages/AgentPage');
+  return { default: mod.AgentPage };
+});
 
-function saveConfigFileName(projectDir: string, configFileName: string) {
-  try {
-    const map = JSON.parse(localStorage.getItem(CONFIG_FILE_KEY) || '{}');
-    map[projectDir] = configFileName;
-    localStorage.setItem(CONFIG_FILE_KEY, JSON.stringify(map));
-  } catch {
-    // ignore storage errors
-  }
-}
+const LAST_ACTIVE_PROJECT_KEY = 'galtransl-last-active-project';
 
 function RouteLoadingFallback() {
   return <div className="inline-feedback">页面加载中…</div>;
-}
-
-function loadOpenProjects(): string[] {
-  try {
-    const raw = localStorage.getItem(OPEN_PROJECTS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveOpenProjects(projects: string[]) {
-  try {
-    localStorage.setItem(OPEN_PROJECTS_KEY, JSON.stringify(projects));
-  } catch {
-    // ignore storage errors
-  }
 }
 
 function loadLastActiveProject(): string | null {
@@ -136,10 +124,26 @@ export function App() {
     };
   }, []);
 
-  // Persist open projects to localStorage whenever the list changes
+  // Persist open projects to localStorage whenever the list changes (silent —
+  // no broadcast, to avoid a self-loop with the OPEN_PROJECTS_CHANGE listener).
   useEffect(() => {
-    saveOpenProjects(openProjects);
+    persistOpenProjects(openProjects);
   }, [openProjects]);
+
+  // Listen for open-projects changed elsewhere (e.g. Agent page calling
+  // addOpenProject) and sync App's state so the global sidebar updates too.
+  useEffect(() => {
+    const sync = (e: Event) => {
+      const next = (e as CustomEvent<string[]>).detail;
+      if (!Array.isArray(next)) return;
+      setOpenProjects((prev) => {
+        if (prev.length === next.length && prev.every((d, i) => d === next[i])) return prev;
+        return next;
+      });
+    };
+    window.addEventListener(OPEN_PROJECTS_CHANGE_EVENT, sync as EventListener);
+    return () => window.removeEventListener(OPEN_PROJECTS_CHANGE_EVENT, sync as EventListener);
+  }, []);
 
   const handleOpenProject = useCallback((projectDir: string, config: string) => {
     const cfg = config || 'config.yaml';
@@ -166,13 +170,15 @@ export function App() {
   return (
     <HashRouter>
       <ConnectionProvider>
-        <AppInner
-          openProjects={openProjects}
-          onOpenProject={handleOpenProject}
-          onCloseProject={handleCloseProject}
-          onCloseOtherProjects={handleCloseOtherProjects}
-          onCloseAllProjects={handleCloseAllProjects}
-        />
+        <BootstrapGate>
+          <AppInner
+            openProjects={openProjects}
+            onOpenProject={handleOpenProject}
+            onCloseProject={handleCloseProject}
+            onCloseOtherProjects={handleCloseOtherProjects}
+            onCloseAllProjects={handleCloseAllProjects}
+          />
+        </BootstrapGate>
       </ConnectionProvider>
     </HashRouter>
   );
@@ -191,6 +197,19 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
   const location = useLocation();
   const contentRef = useRef<HTMLElement | null>(null);
   const [displayLocation, setDisplayLocation] = useState(location);
+  const [wizardOpen, setWizardOpen] = useState(location.pathname === '/new-project');
+  const [wizardProjectName, setWizardProjectName] = useState('');
+  const wizardVisible = displayLocation.pathname === '/new-project';
+
+  useEffect(() => {
+    if (location.pathname === '/new-project') setWizardOpen(true);
+  }, [location.pathname]);
+
+  const handleFinishWizard = useCallback((projectDir: string, config: string) => {
+    onOpenProject(projectDir, config);
+    setWizardOpen(false);
+    setWizardProjectName('');
+  }, [onOpenProject]);
   const [transitionStage, setTransitionStage] = useState<'fadeIn' | 'fadeOut'>('fadeIn');
   const [customBackground, setCustomBackground] = useState<CustomBackgroundPreference>(() => getCustomBackgroundPreference());
 
@@ -319,6 +338,8 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
       />
       <Sidebar
         openProjects={openProjects}
+        wizardOpen={wizardOpen}
+        wizardProjectName={wizardProjectName}
         onCloseProject={handleCloseProjectAndNavigate}
         onCloseOtherProjects={handleCloseOtherProjectsAndNavigate}
         onCloseAllProjects={handleCloseAllProjectsAndNavigate}
@@ -328,6 +349,18 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
         className={`app-layout__content page-transition-${transitionStage}`}
         onAnimationEnd={handleTransitionEnd}
       >
+        {/* Keep the draft mounted across navigation so forms, imports and jobs survive. */}
+        {wizardOpen && (
+          <div hidden={!wizardVisible}>
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <NewProjectWizard
+                active={wizardVisible && location.pathname === '/new-project'}
+                onProjectNameChange={setWizardProjectName}
+                onOpenProject={handleFinishWizard}
+              />
+            </Suspense>
+          </div>
+        )}
         <Routes location={displayLocation}>
               <Route
                 path="/"
@@ -366,10 +399,24 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
                 )}
               />
               <Route
-                path="/new-project"
+                path="/settings/common-guidelines"
                 element={(
                   <Suspense fallback={<RouteLoadingFallback />}>
-                    <NewProjectWizard onOpenProject={onOpenProject} />
+                    <CommonGuidelinesPage />
+                  </Suspense>
+                )}
+              />
+              <Route
+                path="/new-project"
+                element={null}
+              />
+              <Route
+                path="/agent"
+                element={(
+                  <Suspense fallback={<RouteLoadingFallback />}>
+                    <RenderErrorBoundary>
+                      <AgentPage />
+                    </RenderErrorBoundary>
                   </Suspense>
                 )}
               />
@@ -382,7 +429,8 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
                 )}
               />
         </Routes>
-      </main>
-    </div>
-  );
-}
+        </main>
+        <UpdateNotice />
+        </div>
+        );
+        }

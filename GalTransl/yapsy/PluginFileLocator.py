@@ -188,6 +188,9 @@ class PluginFileAnalyzerWithInfoFile(IPluginFileAnalyzer):
         except yaml.YAMLError as exc:
             pass
         if yaml_dict:
+            # YAML 的说明、正则和模板允许字面量 %，不能套用 INI 插值规则。
+            # 仅关闭 YAML 分支的插值，保留旧 INI 文件的解析行为。
+            config_parser = ConfigParser(interpolation=None)
             config_parser.read_dict(yaml_dict)
             self.yaml_dict = yaml_dict
         else:

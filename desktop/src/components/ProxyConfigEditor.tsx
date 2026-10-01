@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { CustomSelect } from './CustomSelect';
+import { Icon } from './Icon';
 
 type ProxyEntry = {
   address: string;
@@ -84,7 +85,7 @@ export function ProxyConfigEditor({ proxyConfig, onChange, readOnly = false }: P
                     onClick={() => removeProxy(idx)}
                     title="删除此代理"
                   >
-                    ✕
+                    <Icon name="close" />
                   </button>
                 )}
               </div>

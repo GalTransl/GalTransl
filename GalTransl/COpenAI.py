@@ -14,6 +14,16 @@ import re
 import httpx
 from GalTransl.TerminalOutput import should_print_translation_logs, terminal_progress
 
+# 可用性检测的输出上限：小到几乎不生成，但不能取 1——有的家对 max_tokens 有下限
+# （「max_tokens must be greater than 2」），取 1 会把一个本来能用的后端判成不可用。
+AVAILABILITY_CHECK_MAX_TOKENS = 16
+
+
+def _rejects_max_tokens(exc: BaseException) -> bool:
+    """provider 是否在抱怨 max_tokens 这个参数（下限/上限/不认识）。"""
+    text = str(exc).lower()
+    return "max_tokens" in text or "max tokens" in text
+
 
 def normalize_sakura_endpoints(section: dict, fallback_endpoint: str = "") -> list[str]:
     raw_endpoints = section.get("endpoints", section.get("endpoint", []))
@@ -86,7 +96,13 @@ class COpenAITokenPool:
         self.force_eng_name = config.getBackendConfigSection(section_name).get(
             "rewriteModelName", ""
         )
-        self.stream = config.getBackendConfigSection(section_name).get("stream", False)
+        # 流式请求默认开启。流式时译好的句子边生成边进「最近译文」、坏行当场中止省 token，「文件进度」的
+        # 小灯也才分得出思考中/翻译中并跟着输出速度呼吸（见 Backend/BaseTranslate._FileRequestProgress）；
+        # 非流式要等整批返回才一次出结果，小灯从头到尾只有「请求中」（实时速度、预计剩余按成功句数算，
+        # 两种都有）。这里以前默认 False，而前端那份后端配置档（整段替换 backendSpecific，见
+        # Service.py）默认不写 stream，于是新建的配置全是非流式。接口/中转不支持流式时，
+        # 在单个令牌上写 stream: false 覆盖即可。
+        self.stream = config.getBackendConfigSection(section_name).get("stream", True)
         self.timeout = config.getBackendConfigSection(section_name).get(
             "apiTimeout", 300
         )
@@ -189,34 +205,45 @@ class COpenAITokenPool:
                 base_url=token.domain,
                 http_client=httpx.Client(**proxy_kwargs) if proxy_kwargs else None,
             )
-            # 可用性检测只关心"能否成功返回一个响应"，
-            # 用极简 prompt + max_tokens=1 避免模型做无谓生成，大幅缩短检测耗时。
+            # 可用性检测只关心"能否成功返回一个响应"：给个很小的输出上限避免模型做无谓生成。
+            # 但不能取 1——有的家对 max_tokens 有下限（「max_tokens must be greater than 2」），
+            # 那样会把一个本来能用的后端整条判死；下面还有一道"摘掉该参数"的兜底。
             create_kwargs = dict(
                 model=token.model_name,
                 messages=[{"role": "user", "content": "1+1="}],
                 timeout=self.timeout,
                 stream=token.stream,
-                max_tokens=1,
+                max_tokens=AVAILABILITY_CHECK_MAX_TOKENS,
             )
+
+            def _attempt(**kwargs) -> Tuple[bool, COpenAIToken]:
+                """发一次请求并判断"有没有拿到响应"（流式看首个 chunk 有没有 choices）。"""
+                response = client.chat.completions.create(**kwargs)
+                if token.stream == False:
+                    return len(response.choices) > 0, token
+                for chunk in response:
+                    return len(chunk.choices) > 0, token
+                # 如果流响应为空，返回False
+                return False, token
+
             try:
-                response = client.chat.completions.create(**create_kwargs)
+                return _attempt(**create_kwargs)
             except TypeError:
                 # 少数兼容实现不接受 max_tokens 参数，回退一次
                 create_kwargs.pop("max_tokens", None)
-                response = client.chat.completions.create(**create_kwargs)
-            if token.stream == False:
-                if len(response.choices) > 0:
-                    return True, token
-                else:
-                    return False, token
-            else:
-                for chunk in response:
-                    if len(chunk.choices) > 0:
-                        return True, token
-                    else:
-                        return False, token
-                # 如果流响应为空，返回False
-                return False, token
+                return _attempt(**create_kwargs)
+            except Exception as exc:
+                # 有的家嫌 max_tokens 不合规（下限/上限）——检测本身不需要这个可选参数，
+                # 摘掉再来一次，别让一个能用的后端因为一个参数被判不可用。
+                if "max_tokens" not in create_kwargs or not _rejects_max_tokens(exc):
+                    raise
+                LOGGER.warning(
+                    "可用性检测：provider 不接受 max_tokens=%s（%s），改为不带该参数重试",
+                    create_kwargs["max_tokens"],
+                    str(exc).strip()[:120],
+                )
+                create_kwargs.pop("max_tokens", None)
+                return _attempt(**create_kwargs)
         except Exception as e:
             exception_text = str(e).strip()
             if exception_text:

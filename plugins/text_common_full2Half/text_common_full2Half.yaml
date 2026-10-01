@@ -32,3 +32,30 @@ Settings: # 这里存放插件的设置
 #     '〇': '0',  # 汉字零
 #     '￥': '¥', '￠': '¢', '￡': '£', '€': 'E',  # 货币符号
 # }
+
+SettingsSchema:
+  是否替换标点:
+    label: 同时转换标点
+    description: 除数字和英文字母外，也转换默认替换表中的标点。
+    advanced: false
+  替换时机:
+    label: 执行阶段
+    description: 选择处理原文还是译文，以及在对应文本处理流程之前或之后执行。
+    advanced: false
+    options:
+    - value: before_src_processed
+      label: 原文预处理之前
+    - value: after_src_processed
+      label: 原文预处理之后
+    - value: before_dst_processed
+      label: 译文后处理之前
+    - value: after_dst_processed
+      label: 译文后处理之后
+  反向替换:
+    label: 半角转全角
+    description: 关闭时将全角转为半角，开启时反向转换为全角。
+    advanced: false
+  自定义替换表:
+    label: 自定义字符替换表
+    description: 填写 JSON 对象，例如 {"Ａ":"A"}。始终按“全角字符：半角字符”填写；反向转换时自动交换方向。
+    advanced: true

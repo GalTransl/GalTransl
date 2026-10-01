@@ -18,18 +18,6 @@
   margin-bottom: var(--space-1);
 }
 
-.wizard-page::before {
-  content: '';
-  position: absolute;
-  top: 12px;
-  right: 24px;
-  width: 240px;
-  height: 240px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(47, 111, 235, 0.14) 0%, rgba(47, 111, 235, 0.06) 42%, transparent 74%);
-  pointer-events: none;
-}
-
 /* ── Step indicator ── */
 
 .wizard-steps {
@@ -269,6 +257,62 @@
   background: linear-gradient(180deg, rgba(237, 243, 255, 0.72), rgba(237, 243, 255, 0.45));
 }
 
+/* ── 「完成」步骤里的后续流程清单 ── */
+
+.wizard-flow {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wizard-flow__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  background: var(--color-surface-strong);
+}
+
+.wizard-flow__index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.wizard-flow__body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wizard-flow__body strong {
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.wizard-flow__body span {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
+:root[data-theme='dark'] .wizard-flow__item {
+  background: rgba(24, 35, 50, 0.72);
+  border-color: rgba(65, 83, 111, 0.72);
+}
+
 .wizard-tip-card strong {
   font-size: 13px;
   color: var(--color-primary);
@@ -347,10 +391,28 @@
 
 /* ── File list (Step 2) ── */
 
+.drop-zone--filled {
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: var(--space-4);
+  text-align: left;
+  cursor: default;
+}
+
+.drop-zone__files-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  font-size: 12px;
+}
+
 .wizard-file-list {
   list-style: none;
   padding: 0;
-  margin: var(--space-3) 0 0;
+  margin: 0;
+  min-width: 0;
   display: grid;
   gap: var(--space-2);
   max-height: 210px;
@@ -358,6 +420,7 @@
 }
 
 .wizard-file-list__item {
+  overflow-wrap: anywhere;
   padding: var(--space-2) var(--space-3);
   background: var(--color-surface-strong);
   border: 1px solid var(--color-line);
@@ -525,13 +588,6 @@
     padding-bottom: var(--space-4);
   }
 
-  .wizard-page::before {
-    width: 170px;
-    height: 170px;
-    right: 0;
-    top: 42px;
-  }
-
   .wizard-steps {
     display: flex;
     gap: var(--space-2);
@@ -584,4 +640,17 @@
   .wizard-progress__fill {
     animation: none;
   }
+}
+
+.wizard-tip-card--warning,
+:root[data-theme='dark'] .wizard-tip-card--warning {
+  border-color: var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+.wizard-tip-card--warning strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-warning);
 }

@@ -40,6 +40,7 @@ PLUGINS_DIR = ROOT / "plugins"
 DICT_DIR = ROOT / "Dict"
 GUIDELINES_DIR = ROOT / "translation_guidelines"
 RES_DIR = ROOT / "res"
+AGENT_DIR = ROOT / "GalTransl" / "Agent"
 
 
 def get_version() -> str:
@@ -73,6 +74,17 @@ ARCHIVE_NAME = f"{BUILD_NAME}{'.zip' if sys.platform == 'win32' else '.tar.gz'}"
 ZIP_NAME = ARCHIVE_NAME
 
 BACKEND_ENTRY = ROOT / "run_backend.py"
+
+
+# Windows 控制台默认是 GBK，脚本里最后那句 ✅ 会让 print 抛 UnicodeEncodeError——构建其实
+# 已经成功，却以一段 traceback 收尾，看着像失败了。保留控制台原有的编码（中文才不乱码），
+# 只把编不出的字符降级成 '?'，任何一行 print 都不再能中断构建。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, OSError, ValueError):
+        pass
+
 BACKEND_DIST_NAME = "galtransl_backend"
 VENV_DIR = ROOT / ".venv-build"  # 构建用虚拟环境（不提交到 git）
 
@@ -181,6 +193,36 @@ def scan_plugin_hidden_imports() -> list[str]:
     return sorted(discovered)
 
 
+def scan_package_hidden_imports(package: str, package_dir: Path) -> list[str]:
+    """列出一个包目录下的所有模块名（含包自身），用于 hidden-import。"""
+    if not package_dir.exists():
+        return []
+
+    discovered: set[str] = set()
+    for py_file in package_dir.rglob("*.py"):
+        rel = py_file.relative_to(package_dir)
+        parts = list(rel.with_suffix("").parts)
+        if any(part.startswith(".") for part in parts):
+            continue
+        if parts[-1] == "__init__":
+            parts.pop()
+        discovered.add(".".join([package, *parts]) if parts else package)
+
+    return sorted(discovered)
+
+
+def scan_agent_hidden_imports() -> list[str]:
+    """扫描 GalTransl/Agent 下的模块，用于 hidden-import。
+
+    GalTransl/Agent/runtime.py 是按模块名动态 import 一批子模块、再把它们的名字重导出的
+    （见它顶部的 _MODULES），PyInstaller 的静态分析看不见这些字符串，只会顺着
+    server.py -> Agent/__init__.py -> Agent/runtime.py 的静态引用把它们之外的东西打进去，
+    于是打包出来的 exe 一启动就报 ModuleNotFoundError: No module named 'GalTransl.Agent.core'。
+    这里直接扫目录补进 hidden-import，以后往 Agent 里加模块不用再手改清单。
+    """
+    return scan_package_hidden_imports("GalTransl.Agent", AGENT_DIR)
+
+
 # ─── 构建步骤 ───────────────────────────────────────────
 
 def clean():
@@ -281,8 +323,13 @@ def build_backend(onefile: bool = False):
     if auto_plugin_imports:
         print(f"  自动扫描插件依赖: {', '.join(auto_plugin_imports)}")
 
+    agent_imports = scan_agent_hidden_imports()
+    if agent_imports:
+        print(f"  自动扫描 Agent 模块: {len(agent_imports)} 个")
+
     hidden_imports.extend(plugin_runtime_imports)
     hidden_imports.extend(auto_plugin_imports)
+    hidden_imports.extend(agent_imports)
     hidden_imports = sorted(set(hidden_imports))
 
     hidden_args = " ".join(f'--hidden-import="{m}"' for m in hidden_imports)

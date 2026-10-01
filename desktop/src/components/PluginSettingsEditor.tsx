@@ -1,209 +1,154 @@
-import { useCallback } from 'react';
-import type { PluginInfo } from '../lib/api';
-
-/**
- * 通用插件设置编辑器组件。
- * 根据插件 YAML Settings 中每个键的值类型自动渲染对应的输入控件：
- * - boolean → checkbox 开关
- * - number  → 数字输入框
- * - string  → 文本输入框
- * - array   → 多行文本框（每行一项）
- */
+import { Fragment, useEffect, useId, useState, type ReactNode } from 'react';
+import type { PluginInfo, PluginSettingSchema } from '../lib/api';
+import { CustomSelect } from './CustomSelect';
 
 interface PluginSettingsEditorProps {
-  /** 插件信息（用于显示名称等） */
   plugin: PluginInfo;
-  /** 项目配置中该插件的覆盖值 (config.plugin[pluginName]) */
   overrides: Record<string, unknown>;
-  /** 设置变更回调 */
   onChange: (pluginName: string, key: string, value: unknown) => void;
+  afterField?: { key: string; content: ReactNode };
 }
 
-/** 计算设置项的有效值：项目覆盖 > 插件默认 */
-function getEffectiveValue(
-  defaultValue: unknown,
-  overrideValue: unknown | undefined,
-): unknown {
-  return overrideValue !== undefined ? overrideValue : defaultValue;
-}
-
-/** 判断值是否为"简单"数组（元素都是 string/number） */
-function isSimpleArray(v: unknown): v is (string | number)[] {
-  if (!Array.isArray(v)) return false;
-  return v.every((item) => typeof item === 'string' || typeof item === 'number');
-}
-
-export function PluginSettingsEditor({ plugin, overrides, onChange }: PluginSettingsEditorProps) {
+/** Settings 保持运行时默认值，SettingsSchema 仅描述如何展示和编辑。 */
+export function PluginSettingsEditor({ plugin, overrides, onChange, afterField }: PluginSettingsEditorProps) {
   const settings = plugin.settings || {};
-  const settingKeys = Object.keys(settings);
-
-  // 无设置项
-  if (settingKeys.length === 0) {
-    return <div className="plugin-settings-empty">此插件无可配置的设置项</div>;
-  }
-
+  const keys = Object.keys(settings);
+  const schema = plugin.settings_schema || {};
+  const common = keys.filter((key) => !schema[key]?.advanced);
+  const advanced = keys.filter((key) => schema[key]?.advanced);
+  const renderFields = (fields: string[]) => (
+    <div className="plugin-settings-panel__fields">
+      {fields.map((key) => (
+        <Fragment key={key}>
+          <PluginSettingRow settingKey={key} schema={schema[key] || {}}
+            defaultValue={settings[key]}
+            value={overrides[key] !== undefined ? overrides[key] : settings[key]}
+            onChange={(value) => onChange(plugin.name, key, value)} />
+          {afterField?.key === key && afterField.content}
+        </Fragment>
+      ))}
+    </div>
+  );
+  if (!keys.length) return <div className="plugin-settings-empty">此插件无可配置的设置项</div>;
   return (
     <div className="plugin-settings-panel">
-      <div className="plugin-settings-panel__title">
-        {plugin.display_name} 设置
-      </div>
-      <div className="plugin-settings-panel__fields">
-        {settingKeys.map((key) => {
-          const defaultValue = settings[key];
-          const overrideValue = overrides[key];
-          const effectiveValue = getEffectiveValue(defaultValue, overrideValue);
+      <div className="plugin-settings-panel__title">{plugin.display_name} 设置</div>
+      {renderFields(common)}
+      {afterField && !keys.includes(afterField.key) && afterField.content}
+      {advanced.length > 0 && (
+        <details key={plugin.name} className="plugin-settings-advanced">
+          <summary>高级设置（{advanced.length} 项）</summary>
+          {renderFields(advanced)}
+        </details>
+      )}
+    </div>
+  );
+}
 
-          return (
-            <PluginSettingRow
-              key={key}
-              settingKey={key}
-              defaultValue={defaultValue}
-              effectiveValue={effectiveValue}
-              pluginName={plugin.name}
-              onChange={onChange}
-            />
-          );
-        })}
+function PluginSettingRow({ settingKey, schema, defaultValue, value, onChange }: {
+  settingKey: string;
+  schema: PluginSettingSchema;
+  defaultValue: unknown;
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const id = useId();
+  const hintId = `${id}-hint`;
+  const label = schema.label || settingKey;
+  const describedBy = schema.description ? hintId : undefined;
+  const options = schema.options || [];
+  let control;
+  if (options.length && Array.isArray(defaultValue)) {
+    const selected = Array.isArray(value) ? value : [];
+    const allOptions = [...options, ...selected.filter((item) => !options.some((option) => option.value === item))
+      .map((item) => ({ value: item, label: `当前值：${String(item)}（自定义）` }))];
+    control = <div role="group" aria-label={label} aria-describedby={describedBy}>
+      {allOptions.map((option, index) => <label key={index} className="plugin-setting-choice">
+        <input type="checkbox" checked={selected.includes(option.value)}
+          onChange={(event) => onChange(event.target.checked
+            ? [...selected, option.value] : selected.filter((item) => item !== option.value))} />
+        <span>{option.label}</span>
+      </label>)}
+    </div>;
+  } else if (options.length) {
+    // 选项使用序号作为 DOM value，保留数字/布尔类型及空字符串。
+    const selected = options.findIndex((option) => option.value === value);
+    control = (
+      <CustomSelect id={id} aria-label={label} aria-describedby={describedBy}
+        value={selected < 0 ? 'custom' : String(selected)}
+        onChange={(event) => {
+          const option = options[Number(event.target.value)];
+          if (option) onChange(option.value);
+        }}>
+        {selected < 0 && <option value="custom">当前值：{String(value ?? '')}（自定义）</option>}
+        {options.map((option, index) => <option key={index} value={String(index)}>{option.label}</option>)}
+      </CustomSelect>
+    );
+  } else if (typeof defaultValue === 'boolean') {
+    control = (
+      <label className="toggle-switch">
+        <input id={id} aria-describedby={describedBy} type="checkbox" checked={Boolean(value)}
+          onChange={(event) => onChange(event.target.checked)} />
+        <span className="toggle-switch__slider" />
+      </label>
+    );
+  } else if (typeof defaultValue === 'number') {
+    control = <input id={id} aria-describedby={describedBy} type="number"
+      className="plugin-setting-input plugin-setting-input--number" value={String(value ?? '')}
+      min={schema.min} max={schema.max} step={schema.step ?? 'any'}
+      onChange={(event) => {
+        const raw = event.target.value;
+        onChange(raw === '' || raw === '-' ? raw : Number(raw));
+      }} />;
+  } else if (defaultValue !== null && typeof defaultValue === 'object' && !Array.isArray(defaultValue)) {
+    control = <ObjectSettingInput id={id} describedBy={describedBy} value={value} onChange={onChange} />;
+  } else if (Array.isArray(defaultValue) || schema.multiline) {
+    const isArray = Array.isArray(defaultValue);
+    const text = isArray && Array.isArray(value)
+      ? value.every((item) => typeof item === 'string' || typeof item === 'number')
+        ? value.join('\n') : JSON.stringify(value, null, 2)
+      : String(value ?? '');
+    control = <>
+      <textarea id={id} aria-describedby={describedBy} className="plugin-setting-textarea"
+        rows={Math.min(Math.max(text.split('\n').length, 2), 6)} value={text} placeholder={schema.placeholder}
+        onChange={(event) => onChange(isArray ? (event.target.value === '' ? [] : event.target.value.split('\n')) : event.target.value)} />
+      {isArray && <span className="plugin-setting-row__hint">每行一项</span>}
+    </>;
+  } else {
+    control = <input id={id} aria-describedby={describedBy} type={schema.secret ? 'password' : 'text'} className="plugin-setting-input"
+      value={String(value ?? '')} placeholder={schema.placeholder} onChange={(event) => onChange(event.target.value)} />;
+  }
+  return (
+    <div className="plugin-setting-row">
+      <label htmlFor={id} className="plugin-setting-row__label">{label}</label>
+      <div className="plugin-setting-row__control">
+        {control}
+        {schema.description && <span id={hintId} className="plugin-setting-row__hint">{schema.description}</span>}
       </div>
     </div>
   );
 }
 
-// ── 单个设置行 ──
-
-interface PluginSettingRowProps {
-  settingKey: string;
-  defaultValue: unknown;
-  effectiveValue: unknown;
-  pluginName: string;
-  onChange: (pluginName: string, key: string, value: unknown) => void;
-}
-
-function PluginSettingRow({
-  settingKey,
-  defaultValue,
-  effectiveValue,
-  pluginName,
-  onChange,
-}: PluginSettingRowProps) {
-  // 根据默认值类型决定渲染控件
-  const valueType = getSettingType(defaultValue);
-
-  const handleBooleanChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      onChange(pluginName, settingKey, e.target.checked);
-    },
-    [pluginName, settingKey, onChange],
-  );
-
-  const handleNumberChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const raw = e.target.value;
-      if (raw === '' || raw === '-') {
-        onChange(pluginName, settingKey, raw);
-      } else {
-        const num = Number(raw);
-        onChange(pluginName, settingKey, isNaN(num) ? raw : num);
-      }
-    },
-    [pluginName, settingKey, onChange],
-  );
-
-  const handleStringChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      onChange(pluginName, settingKey, e.target.value);
-    },
-    [pluginName, settingKey, onChange],
-  );
-
-  const handleArrayChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const lines = e.target.value.split('\n');
-      onChange(pluginName, settingKey, lines);
-    },
-    [pluginName, settingKey, onChange],
-  );
-
-  // 布尔值 → 开关
-  if (valueType === 'boolean') {
-    return (
-      <label className="plugin-setting-row plugin-setting-row--boolean">
-        <span className="plugin-setting-row__label">{settingKey}</span>
-        <div className="plugin-setting-row__control">
-          <label className="toggle-switch">
-            <input
-              type="checkbox"
-              checked={Boolean(effectiveValue)}
-              onChange={handleBooleanChange}
-            />
-            <span className="toggle-switch__slider" />
-          </label>
-        </div>
-      </label>
-    );
-  }
-
-  // 数字 → 数字输入框
-  if (valueType === 'number') {
-    return (
-      <label className="plugin-setting-row">
-        <span className="plugin-setting-row__label">{settingKey}</span>
-        <div className="plugin-setting-row__control">
-          <input
-            type="number"
-            value={effectiveValue == null ? '' : String(effectiveValue)}
-            onChange={handleNumberChange}
-            className="plugin-setting-input plugin-setting-input--number"
-          />
-        </div>
-      </label>
-    );
-  }
-
-  // 数组 → 多行文本框
-  if (valueType === 'array') {
-    const arrayValue = isSimpleArray(effectiveValue)
-      ? (effectiveValue as (string | number)[]).join('\n')
-      : Array.isArray(effectiveValue)
-        ? JSON.stringify(effectiveValue, null, 2)
-        : String(effectiveValue ?? '');
-    return (
-      <label className="plugin-setting-row plugin-setting-row--array">
-        <span className="plugin-setting-row__label">{settingKey}</span>
-        <div className="plugin-setting-row__control">
-          <textarea
-            rows={Math.min(Math.max((arrayValue.split('\n').length), 2), 6)}
-            value={arrayValue}
-            onChange={handleArrayChange}
-            className="plugin-setting-textarea"
-          />
-          <span className="plugin-setting-row__hint">每行一项</span>
-        </div>
-      </label>
-    );
-  }
-
-  // 字符串 → 文本输入框（默认）
-  return (
-    <label className="plugin-setting-row">
-      <span className="plugin-setting-row__label">{settingKey}</span>
-      <div className="plugin-setting-row__control">
-        <input
-          type="text"
-          value={effectiveValue == null ? '' : String(effectiveValue)}
-          onChange={handleStringChange}
-          className="plugin-setting-input"
-        />
-      </div>
-    </label>
-  );
-}
-
-// ── 类型检测工具 ──
-
-function getSettingType(defaultValue: unknown): 'boolean' | 'number' | 'array' | 'string' {
-  if (typeof defaultValue === 'boolean') return 'boolean';
-  if (typeof defaultValue === 'number') return 'number';
-  if (Array.isArray(defaultValue)) return 'array';
-  return 'string';
+function ObjectSettingInput({ id, describedBy, value, onChange }: {
+  id: string; describedBy?: string; value: unknown; onChange: (value: unknown) => void;
+}) {
+  const serialized = JSON.stringify(value ?? {}, null, 2);
+  const [draft, setDraft] = useState(serialized);
+  const [error, setError] = useState(false);
+  useEffect(() => { setDraft(serialized); setError(false); }, [serialized]);
+  return <>
+    <textarea id={id} className="plugin-setting-textarea" rows={5} value={draft}
+      aria-invalid={error} aria-describedby={[describedBy, error ? `${id}-error` : null].filter(Boolean).join(' ')}
+      onChange={(event) => {
+        const text = event.target.value;
+        setDraft(text);
+        try {
+          const parsed = JSON.parse(text);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+          setError(false);
+          onChange(parsed);
+        } catch { setError(true); }
+      }} />
+    {error && <span id={`${id}-error`} role="alert" className="plugin-setting-row__hint">请输入有效的 JSON 对象；当前编辑未应用，将保留上次有效设置。</span>}
+  </>;
 }

@@ -1,9 +1,13 @@
-export { ConfigSectionNav } from './ConfigSectionNav';
+export { ConfigSectionNav, CONFIG_SECTIONS } from './ConfigSectionNav';
 export type { ConfigSectionKey, ConfigSectionDef } from './ConfigSectionNav';
-export { CommonSettingsSection } from './CommonSettingsSection';
+export { TranslationSettingsSection } from './TranslationSettingsSection';
 export { BackendSettingsSection } from './BackendSettingsSection';
-export { PluginSettingsSection } from './PluginSettingsSection';
+export { FileIOSettingsSection } from './FileIOSettingsSection';
+export { TextProcessingSettingsSection } from './TextProcessingSettingsSection';
 export { DictionarySettingsSection } from './DictionarySettingsSection';
 export { ProblemAnalyzeSection } from './ProblemAnalyzeSection';
 export { RetranslKeySection } from './RetranslKeySection';
+export { ProblemFilterSection } from './ProblemFilterSection';
+export type { ProblemFilterListField } from './ProblemFilterSection';
+export { ProjectGuidelineSection } from './ProjectGuidelineSection';
 export { ConfigFieldRow, ConfigFieldGroup } from './ConfigFieldRow';

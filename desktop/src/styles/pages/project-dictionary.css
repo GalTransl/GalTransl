@@ -226,6 +226,168 @@
   min-width: 0;
 }
 
+/* 类目筛选：一排胶囊挂在卡片头部，跟「GPT 216条」同一行，点击即筛选 */
+.dict-section-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  /* 紧跟在「GPT 216条」后面，不推到行尾 */
+  justify-content: flex-start;
+  margin-right: auto;
+}
+
+.dict-section-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface-strong);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    border-color 160ms ease;
+}
+
+.dict-section-pill:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.dict-section-pill--active,
+.dict-section-pill--active:hover {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
+.dict-section-pill__count {
+  font-weight: 500;
+  opacity: 0.72;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 筛不出任何条目时卡片不渲染，胶囊单独占一行 */
+.dict-card--filters {
+  margin-bottom: var(--space-3);
+}
+
+/* ── 「AI 生成 GPT 字典」二次确认 ── */
+
+.dict-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: rgba(16, 24, 40, 0.35);
+  backdrop-filter: blur(4px);
+  z-index: 50;
+  animation: dictDialogFadeIn 160ms var(--ease-default, ease-out);
+}
+
+.dict-dialog {
+  width: 100%;
+  max-width: 460px;
+  max-height: 100%;
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+  box-shadow: 0 20px 50px rgba(16, 24, 40, 0.18);
+  animation: dictDialogPopIn 180ms var(--ease-default, ease-out);
+}
+
+.dict-dialog__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.dict-dialog__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.dict-dialog__subtitle {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.dict-dialog__subtitle strong {
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.dict-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--color-text-muted);
+}
+
+.dict-dialog__body p {
+  margin: 0;
+}
+
+.dict-dialog__warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 32%, transparent);
+  border-radius: var(--radius-card);
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.dict-dialog__warning .icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.dict-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+@keyframes dictDialogFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes dictDialogPopIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dict-dialog-overlay,
+  .dict-dialog {
+    animation: none;
+  }
+}
+
 .dict-empty-actions {
   display: flex;
   gap: var(--space-2);
@@ -280,18 +442,15 @@
 
 /* ── Dictionary Card Mode ── */
 
+/* 列表本身不滚动：滚动条交给卡片内部的表格，跟卡片边框贴在一起 */
 .dict-card-list {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: var(--space-3);
   flex: 1;
-  align-content: start;
-  grid-auto-rows: max-content;
   min-width: 0;
   min-height: 0;
-  max-height: none;
-  padding-right: var(--space-2);
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .dict-card {
@@ -390,6 +549,14 @@
   background: rgba(160, 175, 190, 0.7);
 }
 
+/* 分组卡片：头部（类型/条数/类目胶囊）固定，表格区域自己滚。
+   高度不够时卡片按比例收缩（min-height: 0 允许缩到内容以下），于是滚动条落在卡片内部 */
+.dict-card--grouped {
+  flex: 0 1 auto;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 /* ── Card header (badges + delete) ── */
 
 .dict-card__header {
@@ -397,6 +564,8 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
+  /* 类目胶囊多的时候让它换行，别把「GPT 216条」挤走 */
+  flex-wrap: wrap;
 }
 
 .dict-card__badges {
@@ -475,7 +644,9 @@
   border: 1px solid rgba(191, 208, 226, 0.58);
   border-radius: 12px;
   overflow-x: auto;
-  overflow-y: hidden;
+  /* 竖向滚动条也归表格：出现在卡片内部（表格右边框那一列） */
+  overflow-y: auto;
+  min-height: 0;
   background: rgba(255, 255, 255, 0.9);
 }
 
@@ -493,9 +664,13 @@
   min-width: max(100%, calc(58px + 108px + (4 * 140px)));
 }
 
+/* 滚动条在卡片里，列名要吸顶跟着看；吸顶元素必须不透明，否则行会从底下透出来 */
 .dict-card__table-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   border-bottom: 1px solid rgba(191, 208, 226, 0.56);
-  background: linear-gradient(180deg, rgba(245, 249, 255, 0.95), rgba(238, 245, 255, 0.9));
+  background: linear-gradient(180deg, #f5f9ff, #eef5ff);
 }
 
 .dict-card__table-row {
@@ -577,6 +752,15 @@
   padding-right: 34px;
 }
 
+/* 带「→」（去缓存搜索）的条目：最后一列要给两个按钮让位。
+   注释行没有箭头，不用让 */
+.dict-card--gpt .dict-card__table-row .dict-card__cell:last-child,
+.dict-card--normal .dict-card__table-row .dict-card__cell:last-child,
+.dict-card--conditional .dict-card__table-row .dict-card__cell:last-child,
+.dict-card--situation .dict-card__table-row .dict-card__cell:last-child {
+  padding-right: 60px;
+}
+
 .dict-card__cell--index {
   font-size: 11px;
   font-weight: 700;
@@ -615,6 +799,48 @@
   background: var(--color-danger-soft);
   color: var(--color-danger);
   border-color: rgba(217, 48, 37, 0.35);
+}
+
+/* 条目行上的「→」：拿这一行的日文词去「浏览文本」搜一下。与删除按钮同一套：
+   平时藏着，鼠标进这一行（或行内有焦点）才浮出来，位置在删除按钮左边 */
+.dict-card__row-open-cache {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 50%;
+  right: 34px;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border: 1px solid rgba(47, 111, 235, 0.24);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--color-text-muted);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.dict-card__table-row:hover .dict-card__row-open-cache,
+.dict-card__table-row:focus-within .dict-card__row-open-cache {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dict-card__row-open-cache:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  border-color: rgba(47, 111, 235, 0.4);
+}
+
+/* 还没填原文的空行：箭头留着（位置不跳）但点不动 */
+.dict-card__table-row:hover .dict-card__row-open-cache:disabled,
+.dict-card__table-row:focus-within .dict-card__row-open-cache:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 /* ── Card body / fields ── */
@@ -757,7 +983,8 @@
 
 :root[data-theme='dark'] .dict-card__table-head {
   border-bottom-color: rgba(65, 83, 111, 0.58);
-  background: linear-gradient(180deg, rgba(29, 41, 58, 0.96), rgba(22, 33, 48, 0.92));
+  /* 不透明：吸顶表头下面有行滚过 */
+  background: linear-gradient(180deg, #1d293a, #162130);
 }
 
 :root[data-theme='dark'] .dict-card__table-row {
@@ -794,6 +1021,11 @@
 :root[data-theme='dark'] .dict-card__row-delete {
   background: rgba(26, 38, 55, 0.92);
   border-color: rgba(220, 94, 94, 0.28);
+}
+
+:root[data-theme='dark'] .dict-card__row-open-cache {
+  background: rgba(26, 38, 55, 0.92);
+  border-color: rgba(94, 140, 220, 0.28);
 }
 
 :root[data-theme='dark'] .dict-card__input {

@@ -15,3 +15,26 @@ Settings: # 这里存放插件的设置
   auto_correct: true
   # 修改过的文本输出时的日志级别
   process_log_level: debug
+
+SettingsSchema:
+  remove_incorrect:
+    label: 移除错误注音标签
+    description: 清理译文中不完整、未配对或内容为空的 BGI ruby 注音标签。
+    advanced: false
+  auto_correct:
+    label: 修正着重符号数量
+    description: 将注音位置的着重符号（・或…）修正为与正文长度一致的点号。
+    advanced: false
+  process_log_level:
+    label: 修复日志级别
+    description: 每条被修改文本的日志级别；通常保留调试，排查问题时可改为信息。
+    advanced: true
+    options:
+    - value: debug
+      label: 调试
+    - value: info
+      label: 信息
+    - value: warning
+      label: 警告
+    - value: error
+      label: 错误

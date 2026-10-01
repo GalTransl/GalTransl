@@ -17,8 +17,10 @@ import {
 } from '../lib/api';
 import { loadLastProjectTab } from '../lib/projectTabMemory';
 import { basenamePath, joinPath } from '../lib/paths';
+import { Icon, type IconName } from './Icon';
 import { InlineFeedback } from './page-state/InlineFeedback';
 import logoUrl from '../assets/logo.png';
+import { ProjectFolderPopover } from './ProjectFolderPopover';
 
 const CONFIG_FILE_KEY = 'galtransl-config-file';
 const LAST_ACTIVE_PROJECT_KEY = 'galtransl-last-active-project';
@@ -48,16 +50,30 @@ function loadLastActiveProject(): string | null {
   }
 }
 
-const PROJECT_TABS = [
-  { path: 'translate', label: '翻译工作台', icon: '🌐' },
-  { path: 'cache', label: '缓存与问题', icon: '💾' },
-  { path: 'dictionary', label: '项目字典', icon: '📖' },
-  { path: 'names', label: '人名翻译', icon: '👤' },
-  { path: 'config', label: '配置编辑', icon: '⚙️' },
+const PROJECT_TABS: Array<{ path: string; label: string; icon: IconName }> = [
+  { path: 'translate', label: '开始翻译', icon: 'globe' },
+  { path: 'cache', label: '浏览文本', icon: 'database' },
+  { path: 'dictionary', label: '项目字典', icon: 'book' },
+  { path: 'names', label: '人名翻译', icon: 'user' },
+  { path: 'config', label: '配置编辑', icon: 'settings' },
 ];
+
+/** 「开始翻译」正在跑任务时的呼吸蓝点（与 Agent 页「运行中」指示同款）。
+ *  child = 展开态子项行（跟在文字后面靠右）；rail = 收起态只剩图标的导航项。 */
+function RunningDot({ variant }: { variant: 'child' | 'rail' }) {
+  return (
+    <span
+      className={variant === 'child' ? 'sidebar__project-child-running-dot' : 'sidebar__nav-running-dot'}
+      title="正在翻译"
+      aria-label="正在翻译"
+    />
+  );
+}
 
 type SidebarProps = {
   openProjects: string[];
+  wizardOpen: boolean;
+  wizardProjectName: string;
   onCloseProject: (projectDir: string) => void;
   onCloseOtherProjects: (projectDir: string) => void;
   onCloseAllProjects: () => void;
@@ -94,7 +110,7 @@ function buildInitialExpandedProjects(openProjects: string[], pathname: string):
   return result;
 }
 
-export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, onCloseAllProjects }: SidebarProps) {
+export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseProject, onCloseOtherProjects, onCloseAllProjects }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [expanded, setExpanded] = useState(true);
@@ -258,7 +274,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
   }, []);
 
   // Use compact project headers when many projects are open
-  const compactProjectHeaders = openProjects.length > 6;
+  const compactProjectHeaders = openProjects.length + Number(wizardOpen) > 6;
 
   useEffect(() => {
     setRenderedProjectChildren((prev) => {
@@ -541,12 +557,42 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
           }
           title="首页"
         >
-          <span className="sidebar__nav-icon">🏠</span>
+          <span className="sidebar__nav-icon"><Icon name="home" /></span>
           {expanded && <span className="sidebar__nav-label">首页</span>}
+        </NavLink>
+        <NavLink
+          to="/agent"
+          className={({ isActive }) =>
+            `sidebar__nav-item ${isActive ? 'sidebar__nav-item--active' : ''}`
+          }
+          title="Agent 模式"
+        >
+          <span className="sidebar__nav-icon"><Icon name="bot" /></span>
+          {expanded && <span className="sidebar__nav-label">Agent 模式</span>}
         </NavLink>
       </div>
 
       <nav className="sidebar__nav">
+        {wizardOpen && (
+          <div className="sidebar__project-group">
+            <NavLink
+              to="/new-project"
+              className={({ isActive }) =>
+                expanded
+                  ? `sidebar__project-header sidebar__wizard-header${compactProjectHeaders ? ' sidebar__project-header--compact' : ''}${isActive ? ' sidebar__wizard-header--active' : ''}`
+                  : `sidebar__nav-item ${isActive ? 'sidebar__nav-item--active' : ''}`
+              }
+              title={wizardProjectName ? `继续新建项目：${wizardProjectName}` : '继续新建项目向导'}
+            >
+              <span className={`sidebar__nav-icon${expanded ? ' sidebar__project-icon' : ''}`}><Icon name="file-plus" /></span>
+              {expanded && (
+                <span className="sidebar__project-name">
+                  {wizardProjectName ? `${wizardProjectName} · 新建中` : '新建项目向导'}
+                </span>
+              )}
+            </NavLink>
+          </div>
+        )}
         {openProjects.map((projectDir) => {
           const projectName = basenamePath(projectDir) || projectDir;
           const projectId = encodeProjectDir(projectDir);
@@ -566,16 +612,12 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                     onClick={() => toggleProjectExpanded(projectDir)}
                     onContextMenu={(e) => handleProjectContextMenu(e, projectDir)}
                   >
-                    <span
+                    <ProjectFolderPopover
+                      projectDir={projectDir}
+                      expanded={isProjectExpanded}
                       className={`sidebar__nav-icon sidebar__project-icon sidebar__project-icon--link${isProjectExpanded ? ' sidebar__project-icon--open' : ''}${compactProjectHeaders ? ' sidebar__project-icon--compact' : ''}`}
-                      role="button"
-                      tabIndex={0}
-                      title="打开项目文件夹"
-                      onClick={(e) => { e.stopPropagation(); void invoke('open_folder', { path: projectDir }); }}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); e.preventDefault(); void invoke('open_folder', { path: projectDir }); } }}
-                    >
-                      {isProjectExpanded ? '📂' : '📁'}
-                    </span>
+                      onError={(description) => pushRebuildToast({ tone: 'error', title: '打开文件夹失败', description })}
+                    />
                     <span className="sidebar__project-name">{projectName}</span>
                     <button
                       className="sidebar__project-close"
@@ -583,7 +625,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                       onClick={(e) => { e.stopPropagation(); handleRequestClose(projectDir); }}
                       title="关闭项目"
                     >
-                      ✕
+                      <Icon name="close" />
                     </button>
                     {isConfirming && (
                       <div
@@ -623,8 +665,11 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                             `sidebar__project-child ${isActive ? 'sidebar__project-child--active' : ''}`
                           }
                         >
-                          <span className="sidebar__project-child-icon">{tab.icon}</span>
+                          <span className="sidebar__project-child-icon"><Icon name={tab.icon} /></span>
                           <span className="sidebar__project-child-label">{tab.label}</span>
+                          {tab.path === 'translate' && translatingDirs[projectDir] && (
+                            <RunningDot variant="child" />
+                          )}
                           {tab.path === 'config' && dirtyConfigProjects[projectDir] && (
                             <span className="sidebar__project-child-notice-dot" aria-label="配置有未保存的修改" />
                           )}
@@ -638,7 +683,9 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                         title={translatingDirs[projectDir] ? '项目正在翻译中，无法构建输出' : '重建输出文件并打开文件夹'}
                         style={(rebuildingDirs[projectDir] || translatingDirs[projectDir]) ? { opacity: 0.6, pointerEvents: 'none' } : undefined}
                       >
-                        <span className="sidebar__project-child-icon">{rebuildingDirs[projectDir] ? '⏳' : translatingDirs[projectDir] ? '🚫' : '📤'}</span>
+                        <span className="sidebar__project-child-icon">
+                          <Icon name={rebuildingDirs[projectDir] ? 'hourglass' : translatingDirs[projectDir] ? 'ban' : 'upload'} />
+                        </span>
                         <span className="sidebar__project-child-label">构建输出</span>
                       </NavLink>
                     </div>
@@ -653,7 +700,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                     }
                     title={projectName}
                   >
-                    <span className="sidebar__nav-icon">📁</span>
+                    <ProjectFolderPopover projectDir={projectDir} className="sidebar__nav-icon" onError={(description) => pushRebuildToast({ tone: 'error', title: '打开文件夹失败', description })} />
                   </NavLink>
                   {PROJECT_TABS.map((tab) => (
                     <NavLink
@@ -664,7 +711,8 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                       }
                       title={tab.label}
                     >
-                      <span className="sidebar__nav-icon">{tab.icon}</span>
+                      <span className="sidebar__nav-icon"><Icon name={tab.icon} /></span>
+                      {tab.path === 'translate' && translatingDirs[projectDir] && <RunningDot variant="rail" />}
                       {tab.path === 'config' && dirtyConfigProjects[projectDir] && (
                         <span className="sidebar__nav-notice-dot sidebar__project-config-notice-dot" aria-label="配置有未保存的修改" />
                       )}
@@ -677,7 +725,9 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                     title={translatingDirs[projectDir] ? '项目正在翻译中' : '构建输出'}
                     style={(rebuildingDirs[projectDir] || translatingDirs[projectDir]) ? { opacity: 0.6, pointerEvents: 'none' } : undefined}
                   >
-                    <span className="sidebar__nav-icon">{rebuildingDirs[projectDir] ? '⏳' : translatingDirs[projectDir] ? '🚫' : '📤'}</span>
+                    <span className="sidebar__nav-icon">
+                      <Icon name={rebuildingDirs[projectDir] ? 'hourglass' : translatingDirs[projectDir] ? 'ban' : 'upload'} />
+                    </span>
                   </NavLink>
                 </>
               ) : (
@@ -688,7 +738,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
                   }
                   title={projectName}
                 >
-                  <span className="sidebar__nav-icon">📁</span>
+                  <ProjectFolderPopover projectDir={projectDir} className="sidebar__nav-icon" onError={(description) => pushRebuildToast({ tone: 'error', title: '打开文件夹失败', description })} />
                 </NavLink>
               )}
             </div>
@@ -702,11 +752,11 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
           className={({ isActive }) =>
             `sidebar__nav-item${!hasBackendProfiles ? ' sidebar__nav-item--notice' : ''} ${isActive ? 'sidebar__nav-item--active' : ''}`
           }
-          title="翻译后端配置"
+          title="模型设置"
         >
-          <span className="sidebar__nav-icon">🤖</span>
-          {expanded && <span className="sidebar__nav-label">翻译后端配置</span>}
-          {!hasBackendProfiles && <span className="sidebar__nav-notice-dot" aria-label="尚未配置翻译后端" />}
+          <span className="sidebar__nav-icon"><Icon name="bot" /></span>
+          {expanded && <span className="sidebar__nav-label">模型设置</span>}
+          {!hasBackendProfiles && <span className="sidebar__nav-notice-dot" aria-label="尚未配置模型设置" />}
         </NavLink>
 
         <NavLink
@@ -716,7 +766,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
           }
           title="通用字典管理"
         >
-          <span className="sidebar__nav-icon">📚</span>
+          <span className="sidebar__nav-icon"><Icon name="books" /></span>
           {expanded && <span className="sidebar__nav-label">通用字典管理</span>}
         </NavLink>
 
@@ -727,7 +777,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
           }
           title="设置"
         >
-          <span className="sidebar__nav-icon">⚙️</span>
+          <span className="sidebar__nav-icon"><Icon name="settings" /></span>
           {expanded && <span className="sidebar__nav-label">设置</span>}
         </NavLink>
       </nav>
@@ -740,7 +790,7 @@ export function Sidebar({ openProjects, onCloseProject, onCloseOtherProjects, on
           title={expanded ? '收起侧边栏' : '展开侧边栏'}
         >
           <span className={`sidebar__toggle-icon ${expanded ? 'sidebar__toggle-icon--flip' : ''}`}>
-            ▶
+            <Icon name="chevron-right" />
           </span>
           {expanded && <span className="sidebar__toggle-label">收起</span>}
         </button>
