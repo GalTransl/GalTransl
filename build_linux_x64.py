@@ -158,24 +158,7 @@ def compress_appimage() -> None:
         return
     run(["xz", "-T0", "-6", "-k", "-f", str(appimage)])
     compressed = appimage.with_suffix(appimage.suffix + ".xz")
-    if compressed.stat().st_size >= 100 * 1024 * 1024:
-        run(
-            [
-                "split",
-                "-b",
-                "90M",
-                "-d",
-                "-a",
-                "2",
-                str(compressed),
-                f"{compressed}.part-",
-            ]
-        )
-        compressed.unlink()
-        parts = sorted(RELEASE_DIR.glob(f"{compressed.name}.part-*"))
-        print("split AppImage into:", ", ".join(part.name for part in parts))
-    else:
-        print(f"compressed AppImage: {compressed}")
+    print(f"compressed AppImage: {compressed}")
 
 
 def copy_portable_frontend() -> Path:

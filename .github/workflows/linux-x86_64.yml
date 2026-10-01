@@ -105,6 +105,5 @@ jobs:
             release/*.rpm
             release/*.AppImage
             release/*.AppImage.xz
-            release/*.AppImage.xz.part-*
             release/*.tar.gz
           if-no-files-found: error
