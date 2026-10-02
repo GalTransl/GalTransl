@@ -388,6 +388,19 @@ After finding problems, they are stored in the translation cache. You can use Em
 
 ## Configuration and Engine Settings
 
+ForGal-json, ForGal-tsv, and ForNovel use multi-turn translation by default. Consecutive batches within each file chunk share a conversation: the first turn sends the full instructions, and later turns send new text and the current glossary. Reasoning returned by streaming or non-streaming APIs is preserved in assistant history. Sakura/GalTransl local models keep their existing behavior.
+
+Use the desktop translation settings or these keys under `common` in the project configuration:
+
+```yaml
+gpt.multiTurn: true
+gpt.multiTurn.maxTurns: 8
+gpt.multiTurn.maxChars: 24000
+gpt.contextNum: 8
+```
+
+A new conversation starts at the turn or character limit (including reasoning), seeded with the latest `gpt.contextNum` translated lines. The budget limits history and does not truncate a single batch; reduce the batch size for models with smaller context windows. Gaps caused by cache hits also restart context at the corresponding position. Set `gpt.multiTurn: false` to restore single-turn requests. Setting `gpt.contextNum: 0` disables the seed context only. Each request still sends the full conversation, so costs depend on the provider's context caching.
+
 The desktop GUI manages translation backend configuration through the graphical interface (the "Backend Profiles" page on the left sidebar), no manual YAML editing required. Project-level configuration can be modified in the "Config Editor" page.
 
 For the command-line version, detailed settings can be found directly in the `config.yaml` file comments, which are now quite comprehensive.

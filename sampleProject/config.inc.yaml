@@ -67,8 +67,11 @@ common:
     - "翻译失败" # 启动时重翻命中“翻译失败”的句子
     #- "残留日文" # 启动时重翻命中“残留日文”的句子
 
-  gpt.contextNum: 8 # 每次请求附带的前文句数；值越大上下文更强、成本更高（常用8）。[0-32]
+  gpt.contextNum: 8 # 多轮会话首轮/重置时补充的前文句数；关闭多轮时每次请求携带。0不补充前文。[0-32]
   # ForGal/ForGal-json/ForNovel
+  gpt.multiTurn: true # 连续批次使用多轮对话；首轮发完整规则，后续发新文本与词表。关闭则使用原单轮方式。
+  gpt.multiTurn.maxTurns: 8 # 每个会话最多请求轮数，达到后新开会话。[1及以上]
+  gpt.multiTurn.maxChars: 24000 # 历史消息（含思考）与新请求的字符预算，超限时新开会话；不截断单个批次。
   gpt.translation_guideline: "Basic.md" # 使用的翻译规范文件名（位于translation_guidelines），会影响文风与措辞。
   gpt.enhance_jailbreak: False # 是否启用“抗拒答”增强提示，降低模型拒答概率。[True/False]
   # Sakura/GalTransl
