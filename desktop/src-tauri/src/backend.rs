@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -83,6 +84,19 @@ impl ManagedBackend {
                 return Err(format!("停止本实例后端失败（PID {}）", self.child.id()));
             }
         }
+        #[cfg(unix)]
+        {
+            // 后端会 fork 出子进程（插件、外部工具等），只杀直接子进程会留下孤儿。
+            // 以进程组为单位清理：先 TERM，稍等后再 KILL。
+            let process_group = format!("-{}", self.child.id());
+            let _ = Command::new("kill")
+                .args(["-TERM", "--", process_group.as_str()])
+                .status();
+            std::thread::sleep(Duration::from_millis(150));
+            let _ = Command::new("kill")
+                .args(["-KILL", "--", process_group.as_str()])
+                .status();
+        }
         #[cfg(not(target_os = "windows"))]
         self.child.kill().map_err(|e| e.to_string())?;
         self.child.wait().map_err(|e| e.to_string())?;
@@ -105,16 +119,26 @@ pub struct BackendManager {
 impl BackendManager {
     pub fn ensure(
         &self,
+        resource_dir: Option<&Path>,
         hide_console: bool,
         timeout: Duration,
     ) -> Result<BackendConnection, String> {
         self.ensure_with(hide_console, timeout, || {
-            let path = backend_executable_candidates()
+            let path = backend_executable_candidates(resource_dir)
                 .into_iter()
                 .find(|candidate| candidate.is_file())
-                .ok_or("未找到可用的服务端可执行文件 galtransl_backend.exe")?;
+                .ok_or_else(|| {
+                    format!(
+                        "未找到可用的服务端可执行文件 {}",
+                        backend_executable_name()
+                    )
+                })?;
             let mut command = Command::new(&path);
-            if let Some(parent) = path.parent() {
+            let resource_root = resolve_backend_resource_root(&path, resource_dir);
+            if let Some(root) = resource_root.as_deref() {
+                command.current_dir(root);
+                command.env("GALTRANSL_RESOURCE_DIR", root);
+            } else if let Some(parent) = path.parent() {
                 let working_dir = if parent.file_name().is_some_and(|name| name == "backend") {
                     parent.parent().unwrap_or(parent)
                 } else {
@@ -163,6 +187,12 @@ impl BackendManager {
         }
         #[cfg(not(target_os = "windows"))]
         let _ = hide_console;
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            // Apply to every launch, including test commands and startup retries.
+            command.process_group(0);
+        }
         let child = command
             .spawn()
             .map_err(|e| format!("启动服务端失败: {e}"))?;
@@ -219,19 +249,96 @@ impl BackendManager {
     }
 }
 
-fn backend_executable_candidates() -> Vec<PathBuf> {
+fn backend_executable_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "galtransl_backend.exe"
+    } else {
+        "galtransl_backend"
+    }
+}
+
+fn push_candidate(candidates: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, candidate: PathBuf) {
+    if seen.insert(candidate.clone()) {
+        candidates.push(candidate);
+    }
+}
+
+fn has_runtime_resources(dir: &Path) -> bool {
+    ["plugins", "Dict", "translation_guidelines", "res"]
+        .iter()
+        .any(|name| dir.join(name).exists())
+}
+
+fn resolve_backend_resource_root(
+    backend_path: &Path,
+    resource_dir: Option<&Path>,
+) -> Option<PathBuf> {
+    if let Some(configured) = std::env::var_os("GALTRANSL_RESOURCE_DIR") {
+        let path = PathBuf::from(configured);
+        if has_runtime_resources(&path) {
+            return Some(path);
+        }
+    }
+
+    if let Some(resource_dir) = resource_dir {
+        if has_runtime_resources(resource_dir) {
+            return Some(resource_dir.to_path_buf());
+        }
+    }
+
+    let backend_dir = backend_path.parent()?;
+    for dir in backend_dir.ancestors() {
+        if has_runtime_resources(dir) {
+            return Some(dir.to_path_buf());
+        }
+    }
+
+    None
+}
+
+fn backend_executable_candidates(resource_dir: Option<&Path>) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    let names = [backend_executable_name(), "galtransl_backend-x86_64-unknown-linux-gnu"];
+    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+    let names = [backend_executable_name()];
+
+    if let Some(configured) = std::env::var_os("GALTRANSL_BACKEND_PATH") {
+        push_candidate(&mut candidates, &mut seen, PathBuf::from(configured));
+    }
+
+    if let Some(resource_dir) = resource_dir {
+        for name in &names {
+            for candidate in [
+                resource_dir.join(name),
+                resource_dir.join("backend").join(name),
+                resource_dir.join("binaries").join(name),
+            ] {
+                push_candidate(&mut candidates, &mut seen, candidate);
+            }
+        }
+    }
+
     let Ok(current_exe) = std::env::current_exe() else {
-        return Vec::new();
+        return candidates;
     };
     let Some(exe_dir) = current_exe.parent() else {
-        return Vec::new();
+        return candidates;
     };
-    let mut candidates = Vec::new();
     for dir in exe_dir.ancestors() {
-        candidates.push(dir.join("backend/galtransl_backend.exe"));
-        candidates.push(dir.join("dist/galtransl_backend/galtransl_backend.exe"));
-        candidates.push(dir.join("dist/galtransl_backend.exe"));
-        candidates.push(dir.join("galtransl_backend.exe"));
+        for name in &names {
+            for candidate in [
+                dir.join("backend").join(name),
+                dir.join("binaries").join(name),
+                dir.join("dist").join(name),
+                dir.join("dist").join("galtransl_backend").join(name),
+                dir.join(name),
+            ] {
+                push_candidate(&mut candidates, &mut seen, candidate);
+            }
+        }
     }
     candidates
 }

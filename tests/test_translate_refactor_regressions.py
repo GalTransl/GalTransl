@@ -305,6 +305,7 @@ class TranslateRefactorRegressionTests(unittest.IsolatedAsyncioTestCase):
                 non_interactive=True,
                 getProjectDir=lambda: "",
             ),
+            _coerce_positive_int=staticmethod(BaseTranslate._coerce_positive_int),
             _is_stop_requested=lambda _: False,
             _wait_for_global_rpm_slot=AsyncMock(return_value=None),
             _interruptible_sleep=AsyncMock(return_value=None),
@@ -349,6 +350,7 @@ class TranslateRefactorRegressionTests(unittest.IsolatedAsyncioTestCase):
         translator.restore_context = lambda trans_list, num_pre_request, filename="": None
         translator._check_stop_requested = lambda: None
         translator._record_runtime_success = lambda filename, trans: None
+        translator.max_api_retries = 6
 
         async def fake_ask_chatbot(**kwargs):
             translator._last_chatbot_model_name = "stream-model"

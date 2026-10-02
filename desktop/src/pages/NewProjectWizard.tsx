@@ -30,6 +30,7 @@ import {
 } from '../lib/api';
 import type { FilePluginDetection } from '../lib/api';
 import { addProjectToHistory } from './HomePage';
+import { basenamePath, isAbsolutePath, joinPath, normalizeFileUriPath } from '../lib/paths';
 
 const STEPS = ['项目位置', '导入文件', '翻译后端', '常用设置', '提取人名', '完成'];
 const LAST_PARENT_DIR_KEY = 'galtransl-new-project-last-parent-dir';
@@ -117,14 +118,12 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
 
   const projectDir = useMemo(() => {
     if (!parentDir || !projectName) return '';
-    const sep = parentDir.includes('/') ? '/' : '\\';
-    return `${parentDir}${sep}${projectName}`;
+    return joinPath(parentDir, projectName);
   }, [parentDir, projectName]);
 
   const gtInputDir = useMemo(() => {
     if (!projectDir) return '';
-    const sep = projectDir.includes('/') ? '/' : '\\';
-    return `${projectDir}${sep}gt_input`;
+    return joinPath(projectDir, 'gt_input');
   }, [projectDir]);
 
   const importPathsToInput = useCallback(
@@ -137,7 +136,7 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
       const acceptedNames: string[] = [];
 
       for (const p of paths) {
-        const name = p.split(/[/\\]/).pop() || p;
+        const name = basenamePath(p) || p;
         const key = name.toLowerCase();
         if (existingNames.has(key) || namesInBatch.has(key)) {
           continue;
@@ -240,10 +239,8 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
   // ── Step 1: Create project ──
   const handleSelectParentDir = useCallback(async () => {
     const selected = await open({ directory: true });
-    if (selected) {
-      // Normalize to backslash on Windows
-      const path = typeof selected === 'string' ? selected.replace(/\//g, '\\') : selected;
-      setParentDir(path);
+    if (selected && typeof selected === 'string') {
+      setParentDir(selected);
       setParentDirTouched(true);
     }
   }, []);
@@ -262,13 +259,12 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
       return false;
     }
     try {
-      const sep = projectDir.includes('/') ? '/' : '\\';
       const configYaml = await fetchDefaultProjectConfigTemplate();
       await invoke('create_dir', { path: projectDir });
-      await invoke('create_dir', { path: `${projectDir}${sep}gt_input` });
-      await invoke('create_dir', { path: `${projectDir}${sep}gt_output` });
-      await invoke('create_dir', { path: `${projectDir}${sep}transl_cache` });
-      await invoke('write_text_file', { path: `${projectDir}${sep}config.yaml`, content: configYaml });
+      await invoke('create_dir', { path: joinPath(projectDir, 'gt_input') });
+      await invoke('create_dir', { path: joinPath(projectDir, 'gt_output') });
+      await invoke('create_dir', { path: joinPath(projectDir, 'transl_cache') });
+      await invoke('write_text_file', { path: joinPath(projectDir, 'config.yaml'), content: configYaml });
       setProjectCreated(true);
       // 先记入历史：中途离开向导（比如去模型设置）也能从首页找回这个项目
       addProjectToHistory(projectDir, 'config.yaml');
@@ -301,20 +297,8 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
           .split(/\r?\n/)
           .map((line) => line.trim())
           .filter((line) => line && !line.startsWith('#'))
-          .map((line) => {
-            try {
-              if (line.startsWith('file://')) {
-                const url = new URL(line);
-                const decoded = decodeURIComponent(url.pathname || '');
-                const normalized = /^\/[A-Za-z]:/.test(decoded) ? decoded.slice(1) : decoded;
-                return normalized.replace(/\//g, '\\');
-              }
-              return decodeURIComponent(line).replace(/\//g, '\\');
-            } catch {
-              return line.replace(/\//g, '\\');
-            }
-          })
-          .filter((p) => /^[A-Za-z]:\\/.test(p) || p.startsWith('\\\\'));
+          .map(normalizeFileUriPath)
+          .filter(isAbsolutePath);
       };
 
       const droppedPaths = directPaths.length > 0 ? directPaths : parseDroppedUriList();
@@ -587,7 +571,7 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
               autoComplete="off"
               value={parentDir}
               onChange={(e) => { setParentDir(e.target.value); setParentDirTouched(true); setProjectCreated(false); }}
-              placeholder="例如：E:\GalTransl\projects"
+              placeholder="例如：/home/user/GalTransl/projects 或 E:\GalTransl\projects"
             />
             <Button className="field__browse-button" variant="secondary" onClick={() => void handleSelectParentDir()}>
               浏览

@@ -21,6 +21,7 @@ from GalTransl.Backend.Prompts import (
     H_WORDS_LIST,
 )
 from GalTransl.TerminalOutput import should_print_translation_logs, terminal_progress
+from GalTransl.RuntimePaths import get_res_dir
 
 # 正则补充层：连续片假名字串（含・）
 _KATAKANA_SEQ_RE = re.compile(r"[ァ-ヶー・]{2,}")
@@ -1070,7 +1071,7 @@ class GenDic(BaseTranslate):
                 tmp_dir = tempfile.gettempdir()
                 model_path = os.path.join(tmp_dir, "bccwj-suw+unidic_pos+pron.model")
                 if not os.path.exists(model_path):
-                    zst_path = "./res/bccwj-suw+unidic_pos+pron.model.xz"
+                    zst_path = str(get_res_dir() / "bccwj-suw+unidic_pos+pron.model.xz")
                     decompress_file_lzma(zst_path, model_path)
                 bar()
                 import vaporetto

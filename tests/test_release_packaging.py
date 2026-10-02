@@ -12,6 +12,7 @@ import ast
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import build_release
 
@@ -44,6 +45,19 @@ class AgentHiddenImportsTests(unittest.TestCase):
 
 
 class PackageScanTests(unittest.TestCase):
+    def test_single_file_build_does_not_select_stale_directory_build(self):
+        with TemporaryDirectory() as tmp, patch.object(build_release, "ROOT", Path(tmp)):
+            name = build_release.backend_executable_name()
+            old = Path(tmp) / "dist" / build_release.BACKEND_DIST_NAME / name
+            old.parent.mkdir(parents=True)
+            old.write_bytes(b"old directory build")
+            current = Path(tmp) / "dist" / name
+            current.write_bytes(b"new single file build")
+            self.assertEqual(build_release.find_backend_executable(onefile=True), current)
+            self.assertEqual(build_release.find_backend_executable(onefile=False), old)
+            current.unlink()
+            self.assertIsNone(build_release.find_backend_executable(onefile=True))
+
     def test_scan_maps_init_to_package_and_skips_hidden_files(self):
         with TemporaryDirectory() as tmp:
             package_dir = Path(tmp) / "pkg"

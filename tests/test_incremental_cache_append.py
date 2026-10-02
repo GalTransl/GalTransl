@@ -30,6 +30,9 @@ class IncrementalCacheAppendTests(unittest.IsolatedAsyncioTestCase):
             def reset_conversation(self):
                 return None
 
+            def getProjectDir(self):
+                return ""
+
             async def translate(self, trans_list_split, dic_prompt, proofread=False):
                 return len(trans_list_split), trans_list_split
 

@@ -15,6 +15,8 @@ from typing import Optional
 import orjson
 import yaml
 
+from GalTransl.RuntimePaths import get_plugins_dir
+
 AUTO_FILE_PLUGIN = "auto"
 
 JSON_GALTRANSL = "file_galtransl_json"
@@ -35,7 +37,7 @@ def is_auto(fname: Optional[str]) -> bool:
 
 
 def _plugin_dirs(project_dir: str = "") -> list[str]:
-    dirs = [os.path.abspath("plugins")]
+    dirs = [str(get_plugins_dir())]
     if project_dir:
         dirs.append(os.path.join(project_dir, "plugins"))
     return dirs
@@ -47,7 +49,7 @@ def scan_extension_map(project_dir: str = "") -> dict[str, str]:
     for plugin_dir in _plugin_dirs(project_dir):
         if not os.path.isdir(plugin_dir):
             continue
-        prefix = "(project_dir)" if plugin_dir != os.path.abspath("plugins") else ""
+        prefix = "(project_dir)" if plugin_dir != str(get_plugins_dir()) else ""
         for name in sorted(os.listdir(plugin_dir)):
             yaml_path = os.path.join(plugin_dir, name, f"{name}.yaml")
             if not os.path.isfile(yaml_path):

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-GalTransl Windows 发布版构建脚本 (Python)
+GalTransl 发布版构建脚本 (Python)
 
-建议在 Windows 上使用 PowerShell 脚本 build_release.ps1 构建。
-此 Python 脚本适用于 WSL/Linux 环境，可以单独构建后端部分。
+支持 Windows x64 和 Linux x86_64。Linux 正式构建建议在 Ubuntu 22.04
+或兼容的较旧 glibc 环境中执行，以扩大发行包兼容范围。
 
 用法:
   python build_release.py           # 构建全部
@@ -14,12 +14,12 @@ GalTransl Windows 发布版构建脚本 (Python)
 
 产出目录:
   release/
-    GalTransl_{version}_win/
-      GalTransl Desktop.exe          # Tauri 前端可执行文件
-      backend/galtransl_backend.exe  # Python 后端 (PyInstaller)
-      plugins/                       # 插件目录
-      res/                           # 运行时资源目录
-    GalTransl_{version}_win.zip
+    GalTransl_{version}_{platform}/
+      GalTransl Desktop.exe 或 galtransl-desktop
+      backend/galtransl_backend[.exe]
+      plugins/
+      res/
+    GalTransl_{version}_{platform}.zip 或 .tar.gz
 """
 
 import argparse
@@ -53,9 +53,25 @@ def get_version() -> str:
 
 
 VERSION = get_version()
-BUILD_NAME = f"GalTransl_{VERSION}_win"
+
+
+def get_platform_tag() -> str:
+    if sys.platform == "win32":
+        return "win"
+    if sys.platform.startswith("linux"):
+        machine = os.uname().machine.lower()
+        if machine in {"x86_64", "amd64"}:
+            return "linux_x86_64"
+        return f"linux_{machine}"
+    return sys.platform
+
+
+PLATFORM_TAG = get_platform_tag()
+BUILD_NAME = f"GalTransl_{VERSION}_{PLATFORM_TAG}"
 BUILD_DIR = RELEASE_DIR / BUILD_NAME
-ZIP_NAME = f"{BUILD_NAME}.zip"
+ARCHIVE_NAME = f"{BUILD_NAME}{'.zip' if sys.platform == 'win32' else '.tar.gz'}"
+# Backwards-compatible name for callers importing the old constant.
+ZIP_NAME = ARCHIVE_NAME
 
 BACKEND_ENTRY = ROOT / "run_backend.py"
 
@@ -94,11 +110,17 @@ def copy_dir_filtered(src: Path, dst: Path):
     )
 
 
+def frontend_executable_name() -> str:
+    return "GalTransl Desktop.exe" if sys.platform == "win32" else "galtransl-desktop"
+
+
 def find_frontend_exe() -> Path | None:
     """查找前端可执行文件路径（兼容不同构建命名）"""
     candidates = [
+        TAURI_DIR / "target" / "release" / frontend_executable_name(),
         TAURI_DIR / "target" / "release" / "GalTransl Desktop.exe",
         TAURI_DIR / "target" / "release" / "galtransl-desktop.exe",
+        TAURI_DIR / "target" / "release" / "galtransl-desktop",
     ]
     for exe_path in candidates:
         if exe_path.exists():
@@ -111,11 +133,13 @@ def backend_executable_name() -> str:
     return f"{BACKEND_DIST_NAME}{ext}"
 
 
-def find_backend_executable() -> Path | None:
+def find_backend_executable(onefile: bool | None = None) -> Path | None:
     candidates = [
         ROOT / "dist" / BACKEND_DIST_NAME / backend_executable_name(),
         ROOT / "dist" / backend_executable_name(),
     ]
+    if onefile is not None:
+        candidates = [candidates[1] if onefile else candidates[0]]
     for exe_path in candidates:
         if exe_path.exists():
             return exe_path
@@ -226,26 +250,26 @@ def clean():
 
 
 def build_frontend():
-    """构建 Tauri 前端 (需要 Windows 环境 + Rust 工具链)"""
+    """构建当前平台的 Tauri 前端 (需要 Rust 和对应系统依赖)"""
     print("\n\033[32m═══ 构建前端 (Tauri Desktop) ═══\033[0m")
 
     if not (DESKTOP_DIR / "node_modules").exists():
         print("  安装前端依赖...")
-        run("npm install", cwd=DESKTOP_DIR)
+        run("npm ci --no-audit --no-fund", cwd=DESKTOP_DIR)
 
     print("  执行 tauri build（不生成安装包）...")
     run("npx tauri build --no-bundle", cwd=DESKTOP_DIR)
 
     exe_path = find_frontend_exe()
     if not exe_path:
-        print("\033[31m前端 exe 未找到: target/release 下不存在可识别的前端可执行文件\033[0m")
+        print("\033[31m前端可执行文件未找到: target/release 下不存在可识别产物\033[0m")
         sys.exit(1)
 
-    print(f"\033[32m  前端 exe 构建成功: {exe_path}\033[0m")
+    print(f"\033[32m  前端构建成功: {exe_path}\033[0m")
     return exe_path
 
 
-def build_backend():
+def build_backend(onefile: bool = False):
     """构建 Python 后端 (PyInstaller 打包，在虚拟环境中)"""
     print("\n\033[32m═══ 构建后端 (PyInstaller) ═══\033[0m")
 
@@ -318,15 +342,16 @@ def build_backend():
         f"--noconfirm "
         f"--clean "
         f"--name {BACKEND_DIST_NAME} "
+        f"{'--onefile ' if onefile else ''}"
         f"{hidden_args} "
         f'--collect-data="GalTransl" '
         f"--distpath dist "
         f"--workpath build "
-        f"{BACKEND_ENTRY}"
+        f'"{BACKEND_ENTRY}"'
     )
     run(cmd)
 
-    backend_exe = find_backend_executable()
+    backend_exe = find_backend_executable(onefile=onefile)
 
     if not backend_exe or not backend_exe.exists():
         expected_path = ROOT / "dist" / BACKEND_DIST_NAME / backend_executable_name()
@@ -345,13 +370,17 @@ def assemble_release(frontend_exe: Path | None, backend_exe: Path):
     """组装发布目录"""
     print("\n\033[32m═══ 组装发布包 ═══\033[0m")
 
+    if BUILD_DIR.exists():
+        shutil.rmtree(BUILD_DIR)
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 1. 复制前端 exe（如果有）
+    # 1. 复制前端可执行文件（如果有）
     if frontend_exe and frontend_exe.exists():
-        dst_exe = BUILD_DIR / "GalTransl Desktop.exe"
+        dst_exe = BUILD_DIR / frontend_executable_name()
         shutil.copy2(frontend_exe, dst_exe)
-        print(f"  复制前端 exe -> {dst_exe}")
+        if sys.platform != "win32":
+            dst_exe.chmod(dst_exe.stat().st_mode | 0o111)
+        print(f"  复制前端可执行文件 -> {dst_exe}")
 
     # 2. 复制后端
     dst_backend_dir = BUILD_DIR / "backend"
@@ -391,33 +420,36 @@ def assemble_release(frontend_exe: Path | None, backend_exe: Path):
     print(f"\n\033[32m发布包组装完成: {BUILD_DIR}\033[0m")
 
 
-def create_zip():
-    """创建 zip 压缩包"""
+def create_archive():
+    """创建平台压缩包，Linux 使用 tar.gz 以保留可执行权限。"""
     print("\n\033[32m═══ 创建压缩包 ═══\033[0m")
-    zip_path = RELEASE_DIR / ZIP_NAME
-    if zip_path.exists():
-        zip_path.unlink()
+    archive_path = RELEASE_DIR / ARCHIVE_NAME
+    if archive_path.exists():
+        archive_path.unlink()
 
+    archive_format = "zip" if sys.platform == "win32" else "gztar"
+    archive_base = RELEASE_DIR / BUILD_NAME
     shutil.make_archive(
-        str(zip_path.with_suffix("")),
-        "zip",
+        str(archive_base),
+        archive_format,
         root_dir=str(RELEASE_DIR),
         base_dir=BUILD_NAME,
     )
-    print(f"  压缩包已创建: {zip_path}")
+    print(f"  压缩包已创建: {archive_path}")
 
 
 # ─── 主流程 ─────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="GalTransl Windows 发布版构建脚本")
-    parser.add_argument("--skip-fe", action="store_true", help="跳过前端构建（WSL 下推荐）")
+    parser = argparse.ArgumentParser(description="GalTransl 平台发布版构建脚本")
+    parser.add_argument("--skip-fe", action="store_true", help="跳过 Tauri 前端构建")
     parser.add_argument("--skip-be", action="store_true", help="跳过后端构建")
     parser.add_argument("--clean", action="store_true", help="构建前清理旧产物")
-    parser.add_argument("--no-zip", action="store_true", help="不创建 zip 压缩包")
+    parser.add_argument("--no-archive", "--no-zip", dest="no_archive", action="store_true", help="不创建发布压缩包")
+    parser.add_argument("--onefile", action="store_true", help="将 Python 后端打包为单文件 sidecar")
     args = parser.parse_args()
 
-    print(f"\033[1mGalTransl v{VERSION} Windows 发布版构建\033[0m")
+    print(f"\033[1mGalTransl v{VERSION} {PLATFORM_TAG} 发布版构建\033[0m")
     print(f"输出目录: {RELEASE_DIR}\n")
 
     if args.clean:
@@ -434,13 +466,13 @@ def main():
         candidate = find_frontend_exe()
         if candidate:
             frontend_exe = candidate
-            print(f"跳过前端构建，使用已有 exe: {frontend_exe}")
+            print(f"跳过前端构建，使用已有可执行文件: {frontend_exe}")
         else:
-            print("跳过前端构建（无已有 exe，最终发布包将不含前端）")
+            print("跳过前端构建（无已有可执行文件，最终发布包将不含前端）")
 
     # 后端构建
     if not args.skip_be:
-        backend_exe = build_backend()
+        backend_exe = build_backend(onefile=args.onefile)
     else:
         candidate = find_backend_executable()
         if candidate:
@@ -454,12 +486,12 @@ def main():
     assemble_release(frontend_exe, backend_exe)
 
     # 压缩
-    if not args.no_zip:
-        create_zip()
+    if not args.no_archive:
+        create_archive()
 
     print(f"\n\033[32m✅ 构建完成！发布包位于: {BUILD_DIR}\033[0m")
-    if not args.no_zip:
-        print(f"   压缩包: {RELEASE_DIR / ZIP_NAME}")
+    if not args.no_archive:
+        print(f"   压缩包: {RELEASE_DIR / ARCHIVE_NAME}")
 
     # 清理构建临时目录
     dist_dir = ROOT / "dist"

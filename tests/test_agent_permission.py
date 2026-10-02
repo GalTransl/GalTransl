@@ -345,7 +345,8 @@ class PermissionGateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             runner.resolve_permission("allow-once")
 
-    def test_resolve_rejects_unknown_decision_and_keeps_the_request_pending(self) -> None:
+    @patch("GalTransl.Agent.runner._preview_tool_changes", return_value=None)
+    def test_resolve_rejects_unknown_decision_and_keeps_the_request_pending(self, _preview) -> None:
         runner = make_runner("ask")
         run_gate(runner, "save_dict", None)  # 只等挂起，不答
         with self.assertRaises(ValueError):

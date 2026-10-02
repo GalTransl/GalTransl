@@ -65,7 +65,7 @@ export function JobSubmitForm({ disabled, isSubmitting, onSubmit, submitError, t
             autoComplete="off"
             disabled={disabled || isSubmitting}
             onChange={(event) => setProjectDir(event.target.value)}
-            placeholder="例如：E:\\GalTransl\\sampleProject"
+            placeholder="例如：/home/user/GalTransl/sampleProject"
             value={projectDir}
           />
         </label>

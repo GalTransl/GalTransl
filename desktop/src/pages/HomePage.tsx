@@ -20,6 +20,7 @@ import {
 } from '../lib/api';
 import { formatTimestamp } from '../lib/format';
 import { normalizeError } from '../lib/errors';
+import { basenamePath, dirnamePath } from '../lib/paths';
 import { PROJECT_HOMEPAGE, RELEASE_LATEST_URL } from '../lib/externalLink';
 const HISTORY_KEY = 'galtransl-project-history';
 const JOB_MEMORY_KEY = 'galtransl-home-jobs-memory';
@@ -390,10 +391,8 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     });
     if (!selected) return;
     const filePath = selected as string;
-    const normalized = filePath.replace(/\\/g, '/');
-    const lastSlash = normalized.lastIndexOf('/');
-    const dir = (lastSlash >= 0 ? normalized.substring(0, lastSlash) : '').replace(/\//g, '\\');
-    const config = (lastSlash >= 0 ? normalized.substring(lastSlash + 1) : normalized).trim() || 'config.yaml';
+    const dir = dirnamePath(filePath);
+    const config = basenamePath(filePath).trim() || 'config.yaml';
 
     if (!dir.trim()) return;
     addProjectToHistory(dir, config);
@@ -731,7 +730,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
 }
 
 function projectName(projectDir: string): string {
-  return projectDir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || projectDir;
+  return basenamePath(projectDir) || projectDir;
 }
 
 function formatDate(isoString: string): string {

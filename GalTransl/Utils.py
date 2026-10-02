@@ -4,11 +4,13 @@
 
 import os
 import codecs
+from pathlib import Path
 from typing import Tuple, List
 from collections import Counter
 from re import compile
 import requests
 import re
+from GalTransl.RuntimePaths import get_active_translation_guidelines_dir
 
 PATTERN_CODE_BLOCK = compile(r"```([\w]*)\n([\s\S]*?)\n```")
 whitespace = " \t\n\r\v\f"
@@ -22,14 +24,22 @@ punctuation = r"""!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"""
 punctuation_zh = "。？！…（）；：《》「」『』【】"
 printable = digits + ascii_letters + punctuation + whitespace
 
+def _resolve_guideline_path(file_path: str) -> Path:
+    candidate = Path(file_path).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    if candidate.parts and candidate.parts[0] == "translation_guidelines":
+        candidate = Path(*candidate.parts[1:])
+    return get_active_translation_guidelines_dir() / candidate
+
+
 def load_guideline_file(file_path: str) -> str:
+    resolved_path = _resolve_guideline_path(file_path)
     try:
-        if "translation_guidelines" not in file_path:
-            file_path=os.path.join( "translation_guidelines",file_path)
-        with open(file_path, "r", encoding="utf-8") as file:
+        with open(resolved_path, "r", encoding="utf-8") as file:
             return file.read()
     except Exception as e:
-        print(f"Error reading translation_guideline file {file_path}: {e}")
+        print(f"Error reading translation_guideline file {resolved_path}: {e}")
         raise e
     
 def extract_control_substrings(text: str) -> list[str]:

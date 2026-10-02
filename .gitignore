@@ -27,3 +27,5 @@ galtransl_backend.spec
 /build
 /dist
 /.claude
+desktop/src-tauri/binaries/
+desktop/src-tauri/.tauri-linux-build.json

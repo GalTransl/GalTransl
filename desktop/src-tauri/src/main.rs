@@ -17,7 +17,7 @@ fn backend_manager() -> &'static BackendManager {
     MANAGER.get_or_init(BackendManager::default)
 }
 
-fn ensure_backend_ready_inner(hide_console: bool, timeout_ms: Option<u64>) -> Result<BackendConnection, String> {
+fn ensure_backend_ready_inner(resource_dir: Option<PathBuf>, hide_console: bool, timeout_ms: Option<u64>) -> Result<BackendConnection, String> {
     let timeout = Duration::from_millis(timeout_ms.unwrap_or(BACKEND_STARTUP_TIMEOUT_MS).min(120_000));
     if cfg!(debug_assertions) {
         // Development uses the Python process owned by run_desktop_dev.bat.
@@ -34,13 +34,14 @@ fn ensure_backend_ready_inner(hide_console: bool, timeout_ms: Option<u64>) -> Re
             std::thread::sleep(Duration::from_millis(100));
         }
     }
-    backend_manager().ensure(hide_console, timeout)
+    backend_manager().ensure(resource_dir.as_deref(), hide_console, timeout)
 }
 
 #[tauri::command]
-async fn ensure_backend_ready(hide_console: Option<bool>, timeout_ms: Option<u64>) -> Result<BackendConnection, String> {
+async fn ensure_backend_ready(app: tauri::AppHandle, hide_console: Option<bool>, timeout_ms: Option<u64>) -> Result<BackendConnection, String> {
+    let resource_dir = app.path().resource_dir().ok();
     tauri::async_runtime::spawn_blocking(move || {
-        ensure_backend_ready_inner(hide_console.unwrap_or(true), timeout_ms)
+        ensure_backend_ready_inner(resource_dir, hide_console.unwrap_or(true), timeout_ms)
     })
     .await
     .map_err(|e| format!("后端启动任务失败: {e}"))?
@@ -244,8 +245,9 @@ fn main() {
             // 加载动画里，而不是等网页加载完才开始倒数。
             // 前端稍后调 ensure_backend_ready 时会直接复用这个进程。
             let hide_console = read_console_preference(app.handle());
+            let resource_dir = app.path().resource_dir().ok();
             std::thread::spawn(move || {
-                let _ = ensure_backend_ready_inner(hide_console, None);
+                let _ = ensure_backend_ready_inner(resource_dir, hide_console, None);
             });
             Ok(())
         })

@@ -56,6 +56,38 @@
   3. Install Python dependencies: double-click `安装、更新依赖.bat`, or run `pip install -r requirements.txt`
   4. (Desktop development) Install Node.js, run `npm install` in the `desktop` directory, then run `run_desktop_dev.bat`
 
+### Linux x86_64 development
+
+Linux support targets x86_64 only. ARM is not included in the supported scope.
+
+Install the required WebKitGTK and packaging dependencies on Ubuntu/Debian:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential curl file libssl-dev patchelf rpm \
+  libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+Set up and start the desktop development environment:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+npm --prefix desktop ci
+./run_desktop_dev.sh
+```
+
+Build Linux release artifacts (`.deb`, `.rpm`, `.AppImage`, and a portable `.tar.gz`):
+
+```bash
+python build_linux_x64.py
+```
+
+Build release packages on Ubuntu 22.04 or an equivalent glibc baseline for wider compatibility. Settings are stored under `$XDG_CONFIG_HOME/GalTransl`; editable common dictionaries live under `$XDG_DATA_HOME/GalTransl/Dict`, with bundled dictionaries used only as initial seeds. Editable guidelines and Agent sessions live under `$XDG_DATA_HOME/GalTransl/translation_guidelines` and `$XDG_DATA_HOME/GalTransl/agent_sessions`. XDG roots default to `~/.config` and `~/.local/share`. Windows retains settings and dictionaries in the program directory.
+
+GitHub Actions builds Linux x86_64 packages on updates to `main` or manual runs and uploads them as downloadable artifacts of the workflow run.
+
 
 ## Practical Tools
 | Name | Description |

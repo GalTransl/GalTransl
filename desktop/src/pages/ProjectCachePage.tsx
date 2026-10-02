@@ -33,6 +33,7 @@ import {
   updateProjectConfig } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 import { escapeProblemFilterPattern, filterProblemText, normalizeKeywordList, splitProblemItems, splitProblemTypes } from '../lib/problemFilter';
+import { joinPath } from '../lib/paths';
 
 /** 兼容读取缓存字段：优先新key，回退旧key */
 function src(e: CacheEntry): string { return e.post_src || e.post_jp || ''; }
@@ -445,12 +446,11 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
 
   const handleRevealCacheFiles = useCallback(async (filenames: string[]) => {
     if (!cacheDir || filenames.length === 0) return;
-    const baseDir = cacheDir.replace(/[\\/]+$/, '');
     setLocalError(null);
 
     try {
       for (const filename of filenames) {
-        await invoke('reveal_file', { path: `${baseDir}\\${filename}` });
+        await invoke('reveal_file', { path: joinPath(cacheDir, filename) });
       }
     } catch (err) {
       setLocalError(normalizeError(err, '在文件管理器中浏览失败'));

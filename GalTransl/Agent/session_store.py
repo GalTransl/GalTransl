@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 import time
 from base64 import urlsafe_b64encode
@@ -25,9 +26,14 @@ from collections import deque
 from typing import Any
 from uuid import uuid4
 
-# 程序根 = app_settings.json 所在目录，与 AppSettings.py 保持一致
+from GalTransl.RuntimePaths import get_user_data_dir
+
+# 保留 Windows 的会话目录；Linux 使用持久的用户数据目录。
 _PROGRAM_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SESSIONS_ROOT = os.path.join(os.path.dirname(_PROGRAM_ROOT), "agent_sessions")
+if sys.platform != "win32":
+    # One-file bundles unpack __file__ into a temporary directory removed on exit.
+    SESSIONS_ROOT = str(get_user_data_dir() / "agent_sessions")
 
 # 不落盘的事件类型：流式增量高频且能由最终消息重建
 _SKIP_EVENT_TYPES = {"content_delta", "reasoning_delta", "wait_tick"}

@@ -10,6 +10,7 @@ from GalTransl import (
     CACHE_FOLDERNAME,
 )
 from GalTransl.Dictionary import CGptDict, CNormalDic
+from GalTransl.RuntimePaths import resolve_dict_dir
 from asyncio import gather
 from tenacity import retry, stop_after_attempt, wait_fixed
 import httpx
@@ -20,7 +21,8 @@ from time import time
 from typing import Optional
 from random import choice
 from yaml import safe_load
-from os import path, sep
+from os import path
+from pathlib import Path
 from enum import Enum
 from importlib.metadata import version
 import re
@@ -369,12 +371,16 @@ def initDictList(config: dict, dictDir: str, projectDir: str) -> Optional[list[s
     if not config:
         return []
     result: list[str] = []
+    project_root = Path(projectDir).expanduser().resolve()
+    configured_dict_dir = Path(dictDir or ".").expanduser()
+    resource_dict_dir = resolve_dict_dir(configured_dict_dir)
     for entry in config:
+        entry = str(entry)
         if entry.startswith("(project_dir)"):
-            entry = entry.replace("(project_dir)", "")
-            result.append(str(path.abspath(projectDir) + sep + entry))
+            entry = entry.removeprefix("(project_dir)").lstrip("/\\")
+            result.append(str((project_root / entry).resolve()))
         else:
-            result.append(str(path.abspath(dictDir) + sep + entry))
+            result.append(str((resource_dict_dir / entry).resolve()))
     return result
 
 

@@ -16,6 +16,7 @@ import {
   type ProjectRuntimeResponse,
 } from '../lib/api';
 import { loadLastProjectTab } from '../lib/projectTabMemory';
+import { basenamePath, joinPath } from '../lib/paths';
 import { Icon, type IconName } from './Icon';
 import { InlineFeedback } from './page-state/InlineFeedback';
 import logoUrl from '../assets/logo.png';
@@ -465,8 +466,7 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onClosePr
               });
             }
 
-            const normalizedDir = projectDir.replace(/[\\/]+$/, '');
-            const outputDir = `${normalizedDir}\\${OUTPUT_FOLDER_NAME}`;
+            const outputDir = joinPath(projectDir, OUTPUT_FOLDER_NAME);
             pushRebuildToast({
               tone: 'success',
               title: '构建完毕',
@@ -594,7 +594,7 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onClosePr
           </div>
         )}
         {openProjects.map((projectDir) => {
-          const projectName = projectDir.replace(/[/\\\\]/g, '/').split('/').filter(Boolean).pop() || projectDir;
+          const projectName = basenamePath(projectDir) || projectDir;
           const projectId = encodeProjectDir(projectDir);
           const isProjectExpanded = getProjectExpanded(projectDir);
           const shouldRenderProjectChildren = renderedProjectChildren[projectDir] ?? isProjectExpanded;

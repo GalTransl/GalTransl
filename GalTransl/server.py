@@ -25,6 +25,13 @@ from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
 from GalTransl.AppSettings import load_app_settings, save_app_settings
 from GalTransl.Cache import CACHE_TEMP_SUFFIX
 from GalTransl.DefaultProjectConfig import DEFAULT_PROJECT_CONFIG_YAML
+from GalTransl.RuntimePaths import (
+    BUNDLED_DICT_SEED_MARKER,
+    get_active_dict_dir,
+    get_plugins_dir,
+    resolve_dict_dir,
+    get_active_translation_guidelines_dir,
+)
 from GalTransl.ProblemFilter import filter_problem_text, summarize_problem_filter_hits
 from GalTransl.ProblemWhiteList import build_problem_white_list_index, is_problem_whitelisted
 from GalTransl.ProjectGuideline import (
@@ -295,7 +302,7 @@ def _collect_project_dict_payload(project_dir: str, config_name: str) -> dict[st
 
 
 def _common_dict_directory() -> str:
-    return os.path.abspath("Dict")
+    return str(get_active_dict_dir())
 
 
 def _ensure_project_dict_file_configured(project_dir: str, config_name: str, category: str, filename: str) -> None:
@@ -378,7 +385,8 @@ def _collect_common_dict_payload() -> dict[str, Any]:
     files = [
         name
         for name in sorted(os.listdir(dict_dir))
-        if os.path.isfile(os.path.join(dict_dir, name)) and name != COMMON_DICT_CATEGORY_MAP
+        if os.path.isfile(os.path.join(dict_dir, name))
+        and name not in {COMMON_DICT_CATEGORY_MAP, BUNDLED_DICT_SEED_MARKER}
     ]
 
     pre_files: list[str] = []
@@ -503,12 +511,12 @@ def _list_problem_types() -> list[dict[str, str]]:
 
 
 def _guidelines_dir() -> str:
-    """全局翻译规范目录（程序根目录下的 translation_guidelines）。
+    """全局翻译规范目录（Linux 使用可写的用户数据目录）。
 
     各项目的 config `common.gpt.translation_guideline` 从这里选一份；翻译时它拼在
     项目规范之前（项目规范冲突时以项目规范为准）。
     """
-    return os.path.abspath(GUIDELINES_FOLDERNAME)
+    return str(get_active_translation_guidelines_dir())
 
 
 def _is_safe_guideline_filename(name: str) -> bool:
@@ -664,7 +672,7 @@ def _init_file_plugin(project_dir: str, cfg, fname: str):
 
     plugin_manager = PluginManager(
         {"GTextPlugin": GTextPlugin, "GFilePlugin": GFilePlugin},
-        ["plugins", os.path.join(project_dir, "plugins")],
+        [str(get_plugins_dir()), os.path.join(project_dir, "plugins")],
     )
     plugin_manager.locatePlugins()
     if "(project_dir)" in fname:
@@ -672,7 +680,7 @@ def _init_file_plugin(project_dir: str, cfg, fname: str):
     info_path = os.path.join(project_dir, "plugins", fname, f"{fname}.yaml")
     candidate = plugin_manager.getPluginCandidateByInfoPath(info_path)
     if candidate is None:
-        info_path = os.path.join(os.path.abspath("plugins"), fname, f"{fname}.yaml")
+        info_path = os.path.join(str(get_plugins_dir()), fname, f"{fname}.yaml")
         candidate = plugin_manager.getPluginCandidateByInfoPath(info_path)
     if candidate is None:
         raise RuntimeError(f"未找到文件插件: {fname}")
@@ -1217,7 +1225,7 @@ def _count_input_file_sentences(
 def _scan_plugins(project_dir: str = "") -> list[dict[str, Any]]:
     """Scan the plugins directory and return plugin metadata."""
     from GalTransl.PluginSettings import normalize_settings_schema
-    plugins_dir = os.path.abspath("plugins")
+    plugins_dir = str(get_plugins_dir())
     result = []
     candidates = {}
     roots = [plugins_dir]
@@ -2614,10 +2622,7 @@ def build_handler(registry: JobRegistry):
                     data = _read_yaml_file(config_path)
                     dict_cfg = data.get("dictionary", {})
                     default_folder = dict_cfg.get("defaultDictFolder", "Dict")
-                    if os.path.isabs(default_folder):
-                        dict_base = default_folder
-                    else:
-                        dict_base = os.path.abspath(default_folder)
+                    dict_base = str(resolve_dict_dir(default_folder))
                     result = {
                         "project_dir": project_dir,
                         "default_dict_folder": default_folder,

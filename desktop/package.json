@@ -9,7 +9,8 @@
     "test:backend-connection": "node --test tests/backend-connection.test.mjs",
     "preview": "vite preview",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "build:linux": "cd .. && python3 build_linux_x64.py"
   },
   "dependencies": {
     "@tauri-apps/plugin-dialog": "^2.7.0",

@@ -25,6 +25,7 @@ import {
   submitJob } from '../lib/api';
 import { summarizeBackendUsage } from '../lib/backendUsage';
 import { normalizeError } from '../lib/errors';
+import { basenamePath, joinPath } from '../lib/paths';
 import { usePrefersReducedMotion, LAUNCH, STRIP_BOOT, BAR_SURGE, COMPLETE, FRESH_HIGHLIGHT_MS } from '../lib/motion';
 import {
   RuntimeErrorRow,
@@ -543,7 +544,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     [runtimeFiles],
   );
 
-  const projectName = projectDir ? projectDir.split(/[/\\]/).filter(Boolean).pop() || '' : '';
+  const projectName = projectDir ? basenamePath(projectDir) : '';
   const backendUsageSummary = useMemo(
     () => projectDir
       ? summarizeBackendUsage(projectDir, projectBackendConfig)
@@ -726,10 +727,9 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     if (!path) return;
     void invoke('open_folder', { path });
   }, []);
-  const normalizedProjectDir = projectDir.replace(/[\\/]+$/, '');
-  const inputFolderPath = projectDir ? `${normalizedProjectDir}\\${INPUT_FOLDER_NAME}` : '';
-  const outputFolderPath = projectDir ? `${normalizedProjectDir}\\${OUTPUT_FOLDER_NAME}` : '';
-  const cacheFolderPath = projectDir ? `${normalizedProjectDir}\\${CACHE_FOLDER_NAME}` : '';
+  const inputFolderPath = projectDir ? joinPath(projectDir, INPUT_FOLDER_NAME) : '';
+  const outputFolderPath = projectDir ? joinPath(projectDir, OUTPUT_FOLDER_NAME) : '';
+  const cacheFolderPath = projectDir ? joinPath(projectDir, CACHE_FOLDER_NAME) : '';
 
   const recentErrors = runtimeMatchesProject ? (runtime?.recent_errors ?? []) : [];
 
