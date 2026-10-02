@@ -258,7 +258,7 @@ def build_frontend():
         run("npm ci --no-audit --no-fund", cwd=DESKTOP_DIR)
 
     print("  执行 tauri build（不生成安装包）...")
-    run("npx tauri build --no-bundle", cwd=DESKTOP_DIR)
+    run("npx tauri build --no-bundle --ci", cwd=DESKTOP_DIR)
 
     exe_path = find_frontend_exe()
     if not exe_path:

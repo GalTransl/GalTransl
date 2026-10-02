@@ -60,7 +60,7 @@
 
 ## 环境准备
   * **桌面版（推荐）**   
-  从 [Release](https://github.com/XD2333/GalTransl/releases/) 下载最新版压缩包，解压后双击 `GalTransl Desktop.exe` 即可使用，**无需安装Python或任何依赖**。桌面端会为每个实例自动启动独立后端并分配空闲端口，关闭一个窗口只会停止它自己的后端，其他窗口继续运行。
+  从 [Release](https://github.com/GalTransl/GalTransl/releases/) 下载对应平台的桌面包。Windows 使用 `GalTransl_*_win.zip`，解压后双击 `GalTransl Desktop.exe`，**无需安装 Python**。Linux x86_64 可选择 `.deb`、`.rpm`、`.AppImage` 或 `.tar.gz`；便携包解压后运行 `./galtransl-desktop`，系统仍需具备 WebKitGTK 4.1 等运行库。桌面端会为每个实例自动启动独立后端并分配空闲端口，关闭一个窗口只会停止它自己的后端，其他窗口继续运行。
    
 
 <details>
@@ -159,12 +159,41 @@ python build_linux_x64.py
 - `GalTransl_*_linux_x86_64.deb`
 - `GalTransl_*_linux_x86_64.rpm`
 - `GalTransl_*_linux_x86_64.AppImage`
+- `GalTransl_*_linux_x86_64.AppImage.xz`（使用 `unxz` 解压后运行 AppImage）
 
 正式发布包应在 Ubuntu 22.04 或同等 glibc 基线的环境中构建。应用设置写入 `$XDG_CONFIG_HOME/GalTransl`，用户通用字典写入 `$XDG_DATA_HOME/GalTransl/Dict`；通用翻译规范和 Agent 会话分别写入 `$XDG_DATA_HOME/GalTransl/translation_guidelines` 与 `$XDG_DATA_HOME/GalTransl/agent_sessions`。未设置 XDG 环境变量时使用 `~/.config` 和 `~/.local/share`；安装目录中的字典和规范只作为初始种子。Windows 继续使用程序目录中的配置与字典。
 
-GitHub Actions 会在 `main` 分支更新或手动触发时编译 Linux x86_64 安装包，并上传为本次工作流的可下载产物（Actions artifacts）。
+Linux 支持不代表所有外部工具均已移植：例如 msg-tool 插件自带的 `res/msg_tool.exe` 是 Windows 程序，相关脚本格式的提取/回填不能直接在 Linux 上使用。
 
 </details>
+
+## 自动构建与发布
+
+[Build and draft release](https://github.com/GalTransl/GalTransl/actions/workflows/build-release.yml) 使用 Windows x64 和 Ubuntu 22.04 x86_64 原生 runner 编译桌面包，无需在本地准备两套编译环境。
+
+| 触发方式 | 结果 |
+| --- | --- |
+| 更新 `main`、提交 PR | 测试、构建两平台，并上传本次 Actions artifacts |
+| Actions → Build and draft release → Run workflow | 手动试打包；只生成 artifacts，不创建或修改 Release |
+| 推送版本 tag（`8.2.0` 或 `v8.2.0`） | 两平台全部测试、构建及打包后检查通过后，创建草稿 Release 并上传附件 |
+
+**下载试构建**：打开工作流运行详情，在 **Artifacts** 中下载 `GalTransl-windows-x64` 或 `GalTransl-linux-x86_64`（保留 14 天）。Actions 下载的是外层 ZIP，先解开它再使用里面的发布包；Linux 便携包必须继续解开 `.tar.gz`，以保留执行权限。
+
+**发布新版本（维护者）**：
+
+1. 更新 `GalTransl/__init__.py` 中的 `GALTRANSL_VERSION`，提交并推送包含此工作流的代码。
+2. 推送与源码版本一致的新 tag。下面以尚未发布的 `8.2.0` 为例，实际使用时替换为本次版本：
+   ```bash
+   git tag 8.2.0
+   git push origin 8.2.0
+   ```
+3. 等待工作流成功，在 **Releases** 检查自动生成的草稿，补充发布说明，然后手动点击 **Publish release**。上传过程中不要提前发布草稿。
+
+tag 支持 `X.Y.Z` 和 `vX.Y.Z`，必须与源码版本一致；不要移动或重新使用已有 tag（例如 `8.1.0`）。正式附件包括 Windows `.zip`、Linux `.deb`/`.rpm`/`.AppImage`/`.AppImage.xz`/`.tar.gz`，以及 `SHA256SUMS.txt`。下载全部附件后可用 `sha256sum -c SHA256SUMS.txt` 校验；Windows 可用 PowerShell `Get-FileHash <文件> -Algorithm SHA256` 对照清单。
+
+流程只使用 GitHub 内置的 `GITHUB_TOKEN`，不需要额外 PAT 或翻译 API 密钥。只有发布 job 申请 `contents: write`；如果组织策略禁止写入，需要管理员允许该仓库的 Release 写入权限。失败后可以重跑：现有草稿会更新自动构建的附件，保留手工编辑的标题和说明；已经正式发布的 Release 则拒绝覆盖。手动选择 tag 运行也只会生成 artifacts。
+
+构建后会解压最终便携包，在源码目录之外启动后端并检查版本和插件列表；这不替代完整桌面 GUI、各安装器及全部插件的功能测试。
 
 ## 实用工具
 | 名称 | 说明 |

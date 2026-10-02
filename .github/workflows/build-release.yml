@@ -1,0 +1,221 @@
+name: Build and draft release
+
+on:
+  push:
+    branches: [main]
+    tags: ['[0-9]*', 'v[0-9]*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+  PYTHONUTF8: '1'
+
+concurrency:
+  group: build-release-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  metadata:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Read version and validate release tag
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        shell: python
+        run: |
+          import os
+          import re
+          from build_release import get_version
+
+          version = get_version()
+          if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+              raise SystemExit(f"Invalid GALTRANSL_VERSION: {version!r}")
+          if os.environ["EVENT_NAME"] == "push" and os.environ["REF_TYPE"] == "tag":
+              tag = os.environ["REF_NAME"]
+              if tag not in (version, f"v{version}"):
+                  raise SystemExit(f"Tag {tag!r} does not match GALTRANSL_VERSION {version!r}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"version={version}\n")
+
+  build:
+    needs: metadata
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: win
+            artifact: GalTransl-windows-x64
+            extension: zip
+          - os: ubuntu-22.04
+            platform: linux_x86_64
+            artifact: GalTransl-linux-x86_64
+            extension: '*'
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11 x64
+        id: python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: x64
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl file libssl-dev patchelf rpm libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libfuse2
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+
+      - name: Run Python tests
+        run: python -m pytest -q
+
+      - name: Install frontend dependencies and build
+        working-directory: desktop
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          node --test tests/*.test.mjs
+
+      - name: Check Rust sources
+        working-directory: desktop/src-tauri
+        env:
+          GALTRANSL_TEST_PYTHON: ${{ steps.python.outputs.python-path }}
+        run: |
+          cargo check --locked
+          cargo test --locked backend::tests -- --include-ignored
+
+      - name: Build Windows portable archive
+        if: runner.os == 'Windows'
+        run: python build_release.py
+
+      - name: Build Linux bundles
+        if: runner.os == 'Linux'
+        run: python build_linux_x64.py
+
+      - name: Check final artifacts and smoke test extracted backend
+        run: python scripts/smoke_test_release.py --version "$RELEASE_VERSION" --platform "${{ matrix.platform }}"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release/GalTransl_${{ needs.metadata.outputs.version }}_${{ matrix.platform }}.${{ matrix.extension }}
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+          retention-days: 14
+
+  draft_release:
+    name: Create or update draft release
+    needs: [metadata, build]
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download this run's build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: GalTransl-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Check complete asset set and generate SHA256SUMS
+        shell: python
+        run: |
+          import hashlib
+          import os
+          from pathlib import Path
+          from scripts.smoke_test_release import FORMATS, expected_artifacts
+
+          directory = Path("release-assets")
+          assets = [path for platform in FORMATS
+                    for path in expected_artifacts(directory, os.environ["RELEASE_VERSION"], platform)]
+          checksums = directory / "SHA256SUMS.txt"
+          with checksums.open("w", encoding="utf-8", newline="\n") as output:
+              for path in sorted(assets):
+                  with path.open("rb") as source:
+                      digest = hashlib.file_digest(source, "sha256").hexdigest()
+                  output.write(f"{digest}  {path.name}\n")
+          assets.append(checksums)
+          manifest = Path(os.environ["RUNNER_TEMP"]) / "release-assets.txt"
+          manifest.write_text("".join(f"{path}\n" for path in assets), encoding="utf-8")
+
+      - name: Upload to draft only (never overwrite a published release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          releases=$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" --jq '.[] | {id, tag_name, draft}')
+          existing=$(printf '%s\n' "$releases" | jq -s --arg tag "$RELEASE_TAG" 'map(select(.tag_name == $tag)) | first // null')
+          if [[ "$existing" != "null" ]]; then
+            if [[ $(jq -r '.draft' <<< "$existing") != "true" ]]; then
+              printf 'Refusing to modify published release %s\n' "$RELEASE_TAG" >&2
+              exit 1
+            fi
+          else
+            gh release create "$RELEASE_TAG" --draft --verify-tag --title "v$RELEASE_VERSION" --generate-notes
+          fi
+          mapfile -t assets < "$RUNNER_TEMP/release-assets.txt"
+          for asset in "${assets[@]}"; do
+            # Recheck in case a maintainer published the draft while this run was uploading.
+            if [[ $(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft') != "true" ]]; then
+              printf 'Release is no longer a draft; stopping uploads.\n' >&2
+              exit 1
+            fi
+            gh release upload "$RELEASE_TAG" "$asset" --clobber
+          done
