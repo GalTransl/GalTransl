@@ -650,11 +650,10 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
       </div>
       <div className="wizard-tip-card">
         <strong>支持的文件类型</strong>
-        <span>文本与电子书：TXT、EPUB；字幕：SRT、LRC、VTT。</span>
-        <span>翻译数据：GalTransl / Mtool JSON、Translator++ XLSX。</span>
-        <span>Galgame 脚本直接提取：.ks、.scn、.ast、.asb、bgi、.cst、.cstl、.srcxml、.csx、.rld、.hcb、.soc、.tjs、.pbd、.sc、.s、.src、.ws2、.ybn。</span>
-        <span>部分脚本（如 .bin、.mes、.txt）需在文件插件设置中指定对应引擎。</span>
-        <span>无后缀的 BGI 脚本支持按文件头识别；若未识别，可在「常用设置」选择 msg-tool，并将脚本引擎设为 bgi。</span>
+        <span>提取工具结果：GalTransl / Mtool JSON、Translator++ XLSX。</span>
+        <span>文本与电子书：TXT、Markdown（.md、.markdown）、EPUB；字幕：SRT、LRC、VTT。</span>
+        <span>Galgame 脚本直接输入：.ks、.scn、.ast、.asb、bgi、.cst、.srcxml、.csx、.rld、.hcb、.soc、.sc、.s、.src、.ws2、.ybn等。</span>
+        <span>部分脚本（如 .bin、.mes、.txt、BGI）需在文件插件设置中指定对应引擎。</span>
         <span>支持拖拽多个文件；若暂时跳过，可后续手动复制到 <code>gt_input</code> 目录。</span>
       </div>
       <div className="wizard-tip-card">

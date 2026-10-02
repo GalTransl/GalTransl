@@ -1,13 +1,13 @@
 Core:
-  Name: txt文本文件读取
+  Name: TXT/Markdown文本文件读取
   Type: file
   Module: file_plaintext_txt
-  Extensions: [".txt"] # 自动识别文件插件时按扩展名匹配
+  Extensions: [".txt", ".md", ".markdown"] # 自动识别文件插件时按扩展名匹配
 
 Documentation:
   Author: PiDanShouRouZhou
-  Version: 1.1
-  Description: 可以直接处理.txt文本文件并翻译，但不应该用于翻译包含大量控制符的脚本。
+  Version: 1.2
+  Description: 可以直接处理.txt、.md和.markdown文本文件并逐行翻译。Markdown按纯文本处理，不保护Markdown语法、缩进或代码块；不应该用于翻译包含大量控制符的脚本。
   
 # 控制符是指任何游戏实际文本以外的内容，如控制立绘、音效、语音播放的脚本。示例如下：
 
@@ -45,9 +45,9 @@ SettingsSchema:
       label: 左右排列
   txt读取编码:
     label: 原文编码
-    description: 读取 TXT 文件的字符编码。乱码或读取失败时请检查源文件编码。
+    description: 读取 TXT/Markdown 文件的字符编码。乱码或读取失败时请检查源文件编码。
     advanced: false
   txt写入编码:
     label: 输出编码
-    description: 保存 TXT 文件的字符编码，默认 UTF-8。
+    description: 保存 TXT/Markdown 文件的字符编码，默认 UTF-8。
     advanced: false

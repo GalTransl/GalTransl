@@ -9,6 +9,11 @@
   
   GalTransl是一套将数个基础功能上的微小创新与对GPT提示工程（Prompt Engineering）的深度利用相结合的Galgame自动化翻译工具，用于制作内嵌式翻译补丁。现在提供**桌面端图形界面**，无需命令行操作即可完成翻译全流程。
    
+> [!TIP]
+> **想汉化 Galgame，却不知道怎么提取台词、把译文放回游戏？**
+>
+> 试试配套的 **[GalTransl-GalGameReverse-Skill](https://github.com/GalTransl/GalTransl-GalGameReverse-Skill)**：把工具包和游戏目录交给能操作本地文件的 AI 助手，让它帮你识别引擎、提取台词，再将 GalTransl 的翻译结果回写为游戏补丁。项目内附新手教程，建议先测试几句中文，再翻译整部游戏；具体支持范围以引擎和游戏版本为准。
+
    <img width="2044" height="1397" alt="image" src="https://github.com/user-attachments/assets/f85e4782-e53e-4b03-ae24-cd77b453c6e3" />
 
 ## 前言
