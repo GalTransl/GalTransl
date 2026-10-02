@@ -52,9 +52,13 @@ class PackageScanTests(unittest.TestCase):
             old.parent.mkdir(parents=True)
             old.write_bytes(b"old directory build")
             current = Path(tmp) / "dist" / name
+            self.assertEqual(build_release.find_backend_executable(onefile=False), old)
+            if current == old.parent:
+                self.assertIsNone(build_release.find_backend_executable(onefile=True))
+                old.unlink()
+                current.rmdir()
             current.write_bytes(b"new single file build")
             self.assertEqual(build_release.find_backend_executable(onefile=True), current)
-            self.assertEqual(build_release.find_backend_executable(onefile=False), old)
             current.unlink()
             self.assertIsNone(build_release.find_backend_executable(onefile=True))
 

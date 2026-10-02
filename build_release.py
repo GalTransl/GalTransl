@@ -141,7 +141,7 @@ def find_backend_executable(onefile: bool | None = None) -> Path | None:
     if onefile is not None:
         candidates = [candidates[1] if onefile else candidates[0]]
     for exe_path in candidates:
-        if exe_path.exists():
+        if exe_path.is_file():
             return exe_path
     return None
 

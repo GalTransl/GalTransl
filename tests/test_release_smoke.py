@@ -277,10 +277,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
             with self.subTest(state=state), TemporaryDirectory() as tmp:
                 directory = Path(tmp)
                 calls = directory / "calls.txt"
+                calls.touch()
                 (directory / "release-assets.txt").write_text("first.zip\nsecond.tar.gz\n", encoding="utf-8")
                 env = {
-                    **os.environ, "STATE": state, "CALLS": calls.as_posix(),
-                    "RUNNER_TEMP": directory.as_posix(), "RELEASE_TAG": VERSION,
+                    **os.environ, "STATE": state, "CALLS": calls.name,
+                    "RUNNER_TEMP": ".", "RELEASE_TAG": VERSION,
                     "RELEASE_VERSION": VERSION, "GH_REPO": "example/repo",
                 }
                 result = subprocess.run(["bash", "-c", stub + "\n" + script], cwd=directory, env=env,
