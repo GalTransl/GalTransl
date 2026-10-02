@@ -8,21 +8,31 @@
   [English](https://github.com/XD2333/GalTransl/blob/main/README_EN.md)
   
   GalTransl是一套将数个基础功能上的微小创新与对GPT提示工程（Prompt Engineering）的深度利用相结合的Galgame自动化翻译工具，用于制作内嵌式翻译补丁。现在提供**桌面端图形界面**，无需命令行操作即可完成翻译全流程。
+
+## 🤖 现已支持 Agent 模式
+
+> [!IMPORTANT]
+> **现在 GalTransl 支持 Agent 模式，可以自主完成整个翻译流程。**
+>
+> 在桌面端进入 **Agent 模式**，用自然语言告诉它你的翻译需求，即可让 Agent 自主推进翻译任务。
+
+![GalTransl Agent 模式：自主进行翻译前准备并启动试译](./img/agent-mode.png)
+
    
 > [!TIP]
-> **想汉化 Galgame，却不知道怎么提取台词、把译文放回游戏？**
+> **想翻译 Galgame，却不知道怎么提取台词、把译文放回游戏？**
 >
 > 试试配套的 **[GalTransl-GalGameReverse-Skill](https://github.com/GalTransl/GalTransl-GalGameReverse-Skill)**：把工具包和游戏目录交给能操作本地文件的 AI 助手，让它帮你识别引擎、提取台词，再将 GalTransl 的翻译结果回写为游戏补丁。项目内附新手教程，建议先测试几句中文，再翻译整部游戏；具体支持范围以引擎和游戏版本为准。
 
    <img width="2044" height="1397" alt="image" src="https://github.com/user-attachments/assets/f85e4782-e53e-4b03-ae24-cd77b453c6e3" />
 
 ## 前言
-&ensp;&ensp;&ensp;&ensp;GalTransl的核心是一组自动化翻译脚本，解决了使用ChatGPT自动化翻译Gal过程中已知的大部分问题，并提高了整体的翻译质量。同时，通过与其他项目的组合，打通了制作补丁的完整流程，一定程度降低了上手门槛。对此感兴趣的朋友可以通过本项目更容易的构建具有一定质量的机翻补丁，并(或许)可以尝试在此框架的基础上高效的构建更高质量的汉化补丁。  
+&ensp;&ensp;&ensp;&ensp;GalTransl的核心是一组自动化翻译流水线，解决了使用ChatGPT自动化翻译Gal过程中已知的大部分问题，并提高了整体的翻译质量。同时，通过与其他项目的组合，打通了制作补丁的完整流程，一定程度降低了上手门槛。对此感兴趣的朋友可以通过本项目更容易的构建具有一定质量的机翻补丁，并(或许)可以尝试在此框架的基础上高效的构建更高质量的汉化补丁。  
 
   * 特性：   
   1. 🖥️ **桌面端图形界面**——基于Tauri + React构建的现代桌面应用，无需命令行操作，支持深色模式、自定义背景、多项目管理等
-  2. 支持**GPT-4/Claude/Deepseek/Sakura**等大语言模型，并通过提示工程提高了GPT的翻译质量   
-  3. 首创**GPT字典**，让GPT了解人设，准确翻译人名、人称代词与生词   
+  2. 支持**GPT/Claude/Deepseek/Sakura**等大语言模型，并通过提示工程提高了GPT的翻译质量   
+  3. 支持**GPT字典**，让GPT了解人设，准确翻译人名、人称代词与生词   
   4. 通过译前、译后字典与条件字典实现灵活的自动化字典系统   
   5. 实时保存缓存、自动断点续翻   
   6. 结合其他项目支持多引擎脚本一键解包与注入，提供完整教程降低上手难度
@@ -30,9 +40,10 @@
   8. 🤗 [Galtransl-7B-v3.5](https://huggingface.co/SakuraLLM/GalTransl-7B-v2)是为视觉小说翻译任务专项优化的本地模型，可在6G VRAM以上显卡部署，由sakuraumi和xd2333共同构建
   9. 🤗 [GalTransl-14B-v3](https://huggingface.co/SakuraLLM/Sakura-GalTransl-14B-v3)是GalTransl-v3模型的14b版本，得益于更大的底模及改进的对齐训练，GalTransl-14B-v3整体质量好于GalTransl-7B-v3   
 
-<b>❗❗使用本工具翻译并在未做全文校对/润色的前提下发布时，请在最显眼的位置标注"GPT翻译/AI翻译补丁"，而不是"个人汉化"或"AI汉化"补丁。</b>
+<b>❗❗使用本工具翻译并在未做全文校对/润色的前提下发布时，请在显眼的位置标注"xx模型AI翻译补丁"，而不应是"个人汉化"补丁。</b>
 
 ## 近期更新
+* 2026.8: 更新v8，新增Agent模式，由AI自主完成翻译流程
 * 2026.4: 更新v7，新增**桌面端图形界面**（Tauri + React），支持深色模式、自定义背景、多项目管理、可视化翻译流程等
 * 2025.5: 更新v6，新增翻译模板ForGal、新增GalTransl-14B-v3模型
 * 2024.5：更新v5，新增GalTransl-7B模型，新增多种文件类型支持   
