@@ -245,7 +245,10 @@ class ReleaseWorkflowTests(unittest.TestCase):
             self.assertEqual({Path(path).name for path in manifest}, {*names, "SHA256SUMS.txt"})
             self.assertEqual(len(checksum_lines), 6)
 
-    @unittest.skipUnless(shutil.which("bash") and shutil.which("jq"), "bash and jq are needed for offline release workflow tests")
+    @unittest.skipUnless(
+        sys.platform != "win32" and shutil.which("bash") and shutil.which("jq"),
+        "POSIX bash and jq are needed for offline release workflow tests",
+    )
     def test_release_states_without_network(self):
         script = self.workflow["jobs"]["draft_release"]["steps"][-1]["run"]
         # gh is a shell function: these tests must never call GitHub or need a token.
