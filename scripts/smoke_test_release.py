@@ -105,7 +105,8 @@ def check_macos_app(app: Path, version: str, platform: str) -> tuple[Path, Path]
     check_resources(resources)
     architecture = "arm64" if platform == "macos_arm64" else "x86_64"
     for binary in (frontend, backend):
-        subprocess.run(["lipo", "-verify_arch", architecture, str(binary)], check=True)
+        # lipo takes the input file before the command: lipo <input_file> -verify_arch <arch>.
+        subprocess.run(["lipo", str(binary), "-verify_arch", architecture], check=True)
     return backend, resources
 
 

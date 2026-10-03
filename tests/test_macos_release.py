@@ -40,8 +40,8 @@ class MacOSReleaseTests(TestCase):
                     self.assertEqual(backend, app / "Contents/MacOS/galtransl_backend")
                     self.assertEqual(resources, app / "Contents/Resources")
                     self.assertEqual([call.args[0] for call in run.call_args_list], [
-                        ["lipo", "-verify_arch", architecture, str(app / "Contents/MacOS/galtransl-desktop")],
-                        ["lipo", "-verify_arch", architecture, str(backend)],
+                        ["lipo", str(app / "Contents/MacOS/galtransl-desktop"), "-verify_arch", architecture],
+                        ["lipo", str(backend), "-verify_arch", architecture],
                     ])
 
     def test_rejects_incorrect_app_version_missing_sidecar_and_empty_resources(self):
