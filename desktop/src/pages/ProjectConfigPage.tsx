@@ -1,3 +1,4 @@
+import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ProjectPageContext } from '../components/ProjectLayout';
@@ -36,17 +37,18 @@ import {
 } from './project-config';
 
 export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
+  useUiLanguage();
   const { projectDir, projectId, configFileName } = ctx;
 
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useMessageState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [reextracting, setReextracting] = useState(false);
   const [reextractResult, setReextractResult] = useState<InputReextractResult | null>(null);
-  const [reextractError, setReextractError] = useState<string | null>(null);
+  const [reextractError, setReextractError] = useMessageState<string | null>(null);
   const reextractRequestRef = useRef(0);
   const reextractBusyRef = useRef(false);
   const configRef = useRef(config);
@@ -100,7 +102,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
         }
       })
       .catch((err) => {
-        if (!cancelled) setError(normalizeError(err, '加载配置失败'));
+        if (!cancelled) setError(normalizeError(err, uiMessage("config:projectConfigPage.projectConfigPage_normalizeError_loadConfigFailed")));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -264,7 +266,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
       }
       return true;
     } catch (err) {
-      if (contextRef.current === context) setError(normalizeError(err, '保存配置失败'));
+      if (contextRef.current === context) setError(normalizeError(err, uiMessage("config:projectConfigPage.handleSave_normalizeError_saveConfigFailed")));
       return false;
     } finally {
       if (contextRef.current === context) setSaving(false);
@@ -283,13 +285,13 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
       const saved = await handleSave();
       if (!isCurrent()) return;
       if (!saved) {
-        setReextractError('配置保存失败，未开始重新提取。');
+        setReextractError(uiMessage("config:projectConfigPage.handleReextract_setReextractError_configSaveFailedNotStartExtract"));
         return;
       }
       const result = await reextractMsgtoolInput(projectId, configFileName);
       if (isCurrent()) setReextractResult(result);
     } catch (err) {
-      if (isCurrent()) setReextractError(normalizeError(err, '重新提取原文失败'));
+      if (isCurrent()) setReextractError(normalizeError(err, uiMessage("config:projectConfigPage.handleReextract_normalizeError_extractSourceFailed")));
     } finally {
       if (isCurrent()) {
         reextractBusyRef.current = false;
@@ -311,8 +313,8 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   if (loading) {
     return (
       <div className="project-config-page">
-        <PageHeader className="project-config-page__header" title="配置编辑" />
-        <LoadingState title="加载配置中…" description={`正在读取 ${configFileName}。`} />
+        <PageHeader className="project-config-page__header" title={translate("config:projectConfigPage.projectConfigPage_title_configEdit")} />
+        <LoadingState title={translate("config:projectConfigPage.projectConfigPage_title_loadConfig")} description={translate("config:projectConfigPage.projectConfigPage_description_pendingRead", { configFileName: configFileName })} />
       </div>
     );
   }
@@ -320,8 +322,8 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   if (error && !config) {
     return (
       <div className="project-config-page">
-        <PageHeader className="project-config-page__header" title="配置编辑" />
-        <ErrorState title="加载配置失败" description={error} />
+        <PageHeader className="project-config-page__header" title={translate("config:projectConfigPage.projectConfigPage_title_configEdit")} />
+        <ErrorState title={translate("config:projectConfigPage.projectConfigPage_title_loadConfigFailed")} description={error} />
       </div>
     );
   }
@@ -330,7 +332,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
 
   return (
     <div className="project-config-page">
-      <PageHeader className="project-config-page__header" title="配置编辑" description={`可视化编辑项目配置文件 ${configFileName}`} />
+      <PageHeader className="project-config-page__header" title={translate("config:projectConfigPage.projectConfigPage_title_configEdit")} description={translate("config:projectConfigPage.projectConfigPage_description_editProjectConfigFile", { configFileName: configFileName })} />
 
       <div className="project-config-page__content">
         <ConfigSectionNav
@@ -346,17 +348,17 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
 
         <div className="project-config-page__main" ref={mainRef}>
           {error && (
-            <InlineFeedback tone="error" title="配置保存失败" description={error} />
+            <InlineFeedback tone="error" title={translate("config:projectConfigPage.projectConfigPageMain_title_configSaveFailed")} description={error} />
           )}
           {saveSuccess && (
-            <InlineFeedback className="inline-alert--floating" tone="success" title="配置已保存" description="当前项目配置已成功写入磁盘。" onDismiss={() => setSaveSuccess(false)} />
+            <InlineFeedback className="inline-alert--floating" tone="success" title={translate("config:projectConfigPage.projectConfigPageMain_title_configDoneSave")} description={translate("config:projectConfigPage.projectConfigPageMain_description_currentProjectConfigDoneSuccess")} onDismiss={() => setSaveSuccess(false)} />
           )}
 
           <fieldset key={yamlView ? 'yaml' : activeSection} className="section-fade-in project-config-fields" disabled={saving || reextracting}>
           {yamlView ? (
-            <Panel title="YAML源码" description="直接编辑YAML配置源码（只读预览，修改请使用上方表单）">
+            <Panel title={translate("config:projectConfigPage.sectionFadeInProjectConfigFields_title_yAMLSource")} description={translate("config:projectConfigPage.sectionFadeInProjectConfigFields_description_editYAMLConfigSourcePreviewChange")}>
               <pre className="yaml-preview">
-                {config ? JSON.stringify(config, null, 2) : '无配置数据'}
+                {config ? JSON.stringify(config, null, 2) : translate("config:projectConfigPage.yamlPreview_message_config")}
               </pre>
             </Panel>
           ) : (
@@ -415,22 +417,22 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
                   onPluginSettingChange={handlePluginSettingChange}
                   reextractAction={(
                     <div className="plugin-setting-row">
-                      <span className="plugin-setting-row__label">原文提取</span>
+                      <span className="plugin-setting-row__label">{translate("config:projectConfigPage.pluginSettingRow_message_sourceExtract")}</span>
                       <div className="plugin-setting-row__control">
                         <Button type="button" variant="secondary" className="plugin-reextract-button"
                           onClick={() => void handleReextract()} disabled={saving || reextracting}>
-                          {reextracting ? (saving ? '正在保存配置…' : '正在重新提取…') : '重新提取原文'}
+                          {reextracting ? (saving ? translate("config:projectConfigPage.pluginReextractButton_message_pendingSaveConfig") : translate("config:projectConfigPage.pluginReextractButton_message_pendingExtract")) : translate("config:projectConfigPage.pluginReextractButton_message_extractSource")}
                         </Button>
-                        <span className="plugin-setting-row__hint">保存当前配置，并重新提取此插件处理的全部输入文件。已有翻译缓存会保留。</span>
+                        <span className="plugin-setting-row__hint">{translate("config:projectConfigPage.pluginSettingRowControl_message_saveCurrentConfigExtractPluginProcessAll")}</span>
                         {reextractError && <p role="alert">{reextractError}</p>}
                         {reextractResult && (
                           <div role="status">
                             {reextractResult.refreshed.length === 0 && reextractResult.errors.length === 0
-                              ? '未找到由此插件处理的输入文件。'
-                              : `重新提取完成：成功 ${reextractResult.refreshed.length} 个文件，共 ${reextractResult.total_entries} 句；失败 ${reextractResult.errors.length} 个文件。`}
+                              ? translate("config:projectConfigPage.pluginSettingRowControl_message_notPluginProcessFile")
+                              : translate("config:projectConfigPage.pluginSettingRowControl_message_extractCompleteSuccessCountFileSentenceFailed", { count: reextractResult.refreshed.length, total_entries: reextractResult.total_entries, count2: reextractResult.errors.length })}
                             {reextractResult.errors.length > 0 && (
                               <details open>
-                                <summary>失败文件及原因</summary>
+                                <summary>{translate("config:projectConfigPage.pluginSettingRowControl_message_failedFile")}</summary>
                                 {reextractResult.errors.map((item) => <p key={item.filename}>{item.filename}：{item.error}</p>)}
                               </details>
                             )}

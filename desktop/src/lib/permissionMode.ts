@@ -1,3 +1,4 @@
+import { t as translate } from "../i18n/core";
 /** Agent 权限模式：四档，与后端 runtime.py 的 PERMISSION_MODES 一一对应。
  *
  * 只存在前端 localStorage（与后端配置名同一套做法），随 start / message 一起送过去；
@@ -22,18 +23,18 @@ export const PERMISSION_DECISIONS = ['allow-once', 'allow-session', 'deny'] as c
 export type PermissionDecision = (typeof PERMISSION_DECISIONS)[number];
 
 export const PERMISSION_MODE_LABELS: Record<PermissionMode, string> = {
-  ask: '每次询问',
-  'accept-edits': '允许编辑',
-  auto: '全自动',
-  'auto-quiet': '全自动-零打断',
+  get ask() { return translate("agent:permissionMode.ask_ask_text"); },
+  get 'accept-edits'() { return translate("agent:permissionMode.acceptEdits_acceptEdits_allowEdit"); },
+  get auto() { return translate("agent:permissionMode.auto_auto_auto"); },
+  get 'auto-quiet'() { return translate("agent:permissionMode.autoQuiet_autoQuiet_auto"); },
 };
 
 /** 每档的一句话说明（菜单里跟在名字下面，选择时看得见代价）。 */
 export const PERMISSION_MODE_HINTS: Record<PermissionMode, string> = {
-  ask: '每个改动都先问你',
-  'accept-edits': '缓存与字典直接改；改设置、规范、启动翻译、派子代理要先问',
-  auto: '不再确认，Agent 自主改缓存、设置与启动翻译',
-  'auto-quiet': '同「全自动」；问题也由系统按推荐项代答，不打断你',
+  get ask() { return translate("agent:permissionMode.ask_ask_count"); },
+  get 'accept-edits'() { return translate("agent:permissionMode.acceptEdits_acceptEdits_cacheDictionarySettingsGuidelineTranslationProxy"); },
+  get auto() { return translate("agent:permissionMode.auto_auto_confirmAgentCacheSettingsTranslation"); },
+  get 'auto-quiet'() { return translate("agent:permissionMode.autoQuiet_autoQuiet_autoProblemItem"); },
 };
 
 const STORAGE_KEY = 'galtransl.agent.permissionMode';

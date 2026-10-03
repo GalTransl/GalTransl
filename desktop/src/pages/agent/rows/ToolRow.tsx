@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../../../i18n";
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { Markdown } from '../../../components/Markdown';
@@ -42,6 +43,7 @@ export function ToolRow({
   phase?: ToolPhase;
   persistKey: string;
 }) {
+  const uiLanguage = useUiLanguage();
   const stateKey = `${persistKey}::tool-${item.id || item.step}`;
 
   // 写入类工具的变更卡片数据（后端在结果里带回）：
@@ -123,20 +125,20 @@ export function ToolRow({
   const state = waiting
     ? { label: formatCountdown(waitRemaining), tone: 'running', countdown: true }
     : awaiting
-      ? { label: '待批准', tone: 'running', countdown: false }
+      ? { label: translate("agent:toolRow.label_label_approve"), tone: 'running', countdown: false }
       : isRunning
-        ? { label: '进行中', tone: 'running', countdown: false }
+        ? { label: translate("agent:toolRow.label_label_text"), tone: 'running', countdown: false }
         : phase === 'queued'
-          ? { label: '排队中', tone: '', countdown: false }
+          ? { label: translate("agent:toolRow.label_label_queue"), tone: '', countdown: false }
           : phase === 'stale'
-            ? { label: '未完成', tone: '', countdown: false }
+            ? { label: translate("agent:toolRow.label_label_notComplete"), tone: '', countdown: false }
             : isWait && item.waitInterrupted
-              ? { label: '已中断', tone: '', countdown: false }
+              ? { label: translate("agent:toolRow.label_label_done"), tone: '', countdown: false }
               : denied
-                ? { label: '已拒绝', tone: 'error', countdown: false }
+                ? { label: translate("agent:toolRow.label_label_doneDeny"), tone: 'error', countdown: false }
                 : ok
-                  ? { label: '完成', tone: 'done', countdown: false }
-                  : { label: '失败', tone: 'error', countdown: false };
+                  ? { label: translate("common:actions.completed"), tone: 'done', countdown: false }
+                  : { label: translate("common:actions.failed"), tone: 'error', countdown: false };
 
   return (
     <div className={`agent-tool${open ? ' is-open' : ''}`}>
@@ -170,7 +172,7 @@ export function ToolRow({
               args={item.arguments}
               resultText={resultText}
               markdown={resultMarkdown}
-              resultTitle={ok ? '结果' : '错误'}
+              resultTitle={ok ? translate("agent:toolRow.agentToolBody_resultTitle_text") : translate("agent:toolRow.agentToolBody_resultTitle_error")}
               tone={ok ? 'default' : 'error'}
               durationMs={item.durationMs}
               truncate={longResult ? 1200 : 0}
@@ -178,11 +180,11 @@ export function ToolRow({
           ) : (
             <>
               {item.arguments !== undefined ? (
-                <ToolBlock title="参数" content={formatPayload(item.arguments)} mono />
+                <ToolBlock title={translate("agent:toolRow.agentToolBody_title_text")} content={formatPayload(item.arguments)} mono />
               ) : null}
               {resultText ? (
                 <ToolBlock
-                  title={ok ? '结果' : '错误'}
+                  title={ok ? translate("agent:toolRow.agentToolBody_title_textVariant2") : translate("agent:toolRow.agentToolBody_title_error")}
                   content={resultText}
                   markdown={resultMarkdown}
                   mono
@@ -217,6 +219,7 @@ export function ToolBlock({
   tone?: 'default' | 'error';
   durationMs?: number;
 }) {
+  const uiLanguage = useUiLanguage();
   const [expanded, setExpanded] = useState(false);
   const clipped = truncate > 0 && content.length > truncate && !expanded;
   const shown = clipped ? content.slice(0, truncate) + '…' : content;
@@ -224,7 +227,7 @@ export function ToolBlock({
     <div className={`agent-toolblock${tone === 'error' ? ' is-error' : ''}`}>
       <div className="agent-toolblock__head">
         <span className="agent-toolblock__title">{title}</span>
-        {typeof durationMs === 'number' && title === '结果' ? (
+        {typeof durationMs === 'number' ? (
           <span className="agent-toolblock__duration">{formatDuration(durationMs)}</span>
         ) : null}
       </div>
@@ -236,7 +239,7 @@ export function ToolBlock({
       )}
       {truncate > 0 && content.length > truncate ? (
         <button type="button" className="agent-toolblock__toggle" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}>
-          {expanded ? '收起' : `展开全部（${content.length} 字符）`}
+          {expanded ? translate("agent:toolRow.agentToolblockToggle_message_text") : translate("agent:toolRow.agentToolblockToggle_message_all", { count: content.length })}
         </button>
       ) : null}
     </div>
@@ -265,6 +268,7 @@ function RawToolData({
   durationMs?: number;
   truncate?: number;
 }) {
+  const uiLanguage = useUiLanguage();
   const [open, setOpen] = useState(false);
   const argsText = args === undefined ? '' : formatPayload(args);
   if (!argsText && !resultText) return null;
@@ -278,17 +282,17 @@ function RawToolData({
       >
         <span className="agent-toolblock__label">
           <span className="agent-toolblock__caret" aria-hidden>›</span>
-          <span className="agent-toolblock__title">原始参数/结果</span>
+          <span className="agent-toolblock__title">{translate("agent:toolRow.agentToolblockLabel_message_text")}</span>
         </span>
         <span className="agent-toolblock__meta">
           {open ? null : (
-            <span className="agent-toolblock__len">{argsText.length + resultText.length} 字符</span>
+            <span className="agent-toolblock__len">{translate("agent:toolRow.agentToolblockMeta_message_text", { value: argsText.length + resultText.length })}</span>
           )}
         </span>
       </button>
       {open ? (
         <>
-          {argsText ? <ToolBlock title="参数" content={argsText} mono /> : null}
+          {argsText ? <ToolBlock title={translate("agent:toolRow.agentRawdata_title_text")} content={argsText} mono /> : null}
           {resultText ? (
             <ToolBlock
               title={resultTitle}
@@ -360,7 +364,7 @@ export function extractChangeList(result: unknown): ChangeData | null {
 }
 
 function fmtChangeValue(v: unknown): string {
-  if (v === null || v === undefined) return '（空）';
+  if (v === null || v === undefined) return translate("common:actions.empty");
   if (typeof v === 'string') return v.length > 80 ? v.slice(0, 77) + '…' : v;
   try {
     return JSON.stringify(v);
@@ -372,16 +376,18 @@ function fmtChangeValue(v: unknown): string {
 /** 模型填的「为什么改」：变更卡顶部一行，没有变更卡时（如 save_dict 只新建空文件时不产生
     changes）在工具正文里单独显示，不然填了原因却没地方看。 */
 function ChangeReason({ text }: { text: string }) {
+  const uiLanguage = useUiLanguage();
   return (
     <div className="agent-changes__reason">
-      <span className="agent-changes__reason-label">原因</span>
+      <span className="agent-changes__reason-label">{translate("agent:toolRow.agentChangesReason_message_text")}</span>
       <span className="agent-changes__reason-text">{text}</span>
     </div>
   );
 }
 
 /** 变更卡。title 只有审批卡会换（那边的同一份数据是"将要变更"，还没真写）。 */
-export function ChangeListCard({ data, title = '变更' }: { data: ChangeData; title?: string }) {
+export function ChangeListCard({ data, title = translate("agent:toolRow.changeListCard_message_text") }: { data: ChangeData; title?: string }) {
+  useUiLanguage();
   const rows: ReactNode[] = [];
 
   if (data.line_diff?.rows?.length) {
@@ -398,7 +404,7 @@ export function ChangeListCard({ data, title = '变更' }: { data: ChangeData; t
     }
     if (data.line_diff.truncated) {
       // 后端生成 diff 时就截断过（总行数上限），如实说明，不是界面的折叠
-      rows.push(<div key="d-trunc" className="agent-changes__more">diff 过长已截断</div>);
+      rows.push(<div key="d-trunc" className="agent-changes__more">{translate("agent:toolRow.changeListCard_push_diffDone")}</div>);
     }
   }
 
@@ -408,7 +414,7 @@ export function ChangeListCard({ data, title = '变更' }: { data: ChangeData; t
         <div key={`del-${p.index}`} className="agent-changes__dline agent-changes__dline--del">
           <span className="agent-changes__sign">−</span>
           <span className="agent-changes__path">#{p.index}</span>
-          <span className="agent-changes__dtext">{p.text || '（空译文）'}</span>
+          <span className="agent-changes__dtext">{p.text || translate("agent:toolRow.agentChangesDtext_message_translationText")}</span>
         </div>,
       );
     }

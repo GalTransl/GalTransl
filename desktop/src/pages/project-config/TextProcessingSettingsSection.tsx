@@ -1,3 +1,5 @@
+import { localizePlugin } from "../../i18n/plugins";
+import { t as translate, useUiLanguage } from "../../i18n";
 import { Panel } from '../../components/Panel';
 import { PluginSettingsEditor } from '../../components/PluginSettingsEditor';
 import type { PluginInfo } from '../../lib/api';
@@ -15,16 +17,17 @@ export function TextProcessingSettingsSection({
   onPluginSettingChange,
   onToggleTextPlugin,
 }: TextProcessingSettingsSectionProps) {
+  useUiLanguage();
   const pluginConfig = (config?.plugin as Record<string, unknown>) || {};
   const enabledTextPlugins = new Set(
     Array.isArray(pluginConfig.textPlugins) ? pluginConfig.textPlugins as string[] : []
   );
 
   return (
-    <Panel title="文本处理" description="启用文本插件，配置翻译前后的文本处理规则。">
+    <Panel title={translate("config:textProcessingSettingsSection.textProcessingSettingsSection_title_textProcess")} description={translate("config:textProcessingSettingsSection.textProcessingSettingsSection_description_enableTextPluginConfigTranslationTextProcess")}>
       <div className="config-form">
         <div className="plugin-section">
-          <div className="plugin-section__title">文本插件</div>
+          <div className="plugin-section__title">{translate("config:textProcessingSettingsSection.pluginSection_message_textPlugin")}</div>
           {textPlugins.length > 0 ? (
             <div className="plugin-check-list">
               {textPlugins.map((plugin) => {
@@ -40,19 +43,17 @@ export function TextProcessingSettingsSection({
                         onChange={() => onToggleTextPlugin(plugin.name)}
                       />
                       <span className="plugin-check-item__name">
-                        {plugin.display_name}
+                        {localizePlugin(plugin).display_name}
                       </span>
                       <span className="plugin-check-item__module">
                         ({plugin.name})
                       </span>
                       {plugin.version && (
-                        <span className="plugin-check-item__version">
-                          v{plugin.version}
-                        </span>
+                        <span className="plugin-check-item__version">{translate("config:textProcessingSettingsSection.pluginCheckItemHeader_message_v", { version: plugin.version })}</span>
                       )}
                     </label>
-                    {plugin.description && (
-                      <div className="plugin-check-item__desc">{plugin.description}</div>
+                    {localizePlugin(plugin).description && (
+                      <div className="plugin-check-item__desc">{localizePlugin(plugin).description}</div>
                     )}
                     {isChecked && hasSettings && (
                       <div className="plugin-check-item__settings">
@@ -68,7 +69,7 @@ export function TextProcessingSettingsSection({
               })}
             </div>
           ) : (
-            <div className="plugin-check-empty">未找到可用的文本插件</div>
+            <div className="plugin-check-empty">{translate("config:textProcessingSettingsSection.pluginSection_message_notTextPlugin")}</div>
           )}
         </div>
       </div>

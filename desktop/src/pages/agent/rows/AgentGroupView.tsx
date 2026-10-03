@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../../../i18n";
 import { useEffect, useRef, useState } from 'react';
 import { AgentMarkdown } from '../../../components/AgentCacheRef';
 import { Icon } from '../../../components/Icon';
@@ -23,6 +24,7 @@ export function AgentGroupView({
   projectDir: string;
   persistKey: string;
 }) {
+  const uiLanguage = useUiLanguage();
   // Terminal groups render as notices and hold no disclosure state; dispatch
   // them before the activity component so its hooks never run conditionally.
   if (group.type === 'user') return <UserMessageRow message={group.message} />;
@@ -43,14 +45,16 @@ export function AgentGroupView({
 
 /** 回合收尾回复：顶层普通消息，像聊天里最后一条回答。 */
 function FinalMessage({ item, projectDir }: { item: ActivityItem; projectDir: string }) {
+  const uiLanguage = useUiLanguage();
   return <AgentMarkdown text={item.content || ''} projectDir={projectDir} className="agent-final" />;
 }
 
 function UserMessageRow({ message }: { message: string }) {
+  const uiLanguage = useUiLanguage();
   return (
     <div className="agent-row agent-row--user">
       <div className="agent-bubble agent-bubble--user">
-        <div className="agent-bubble__label">我</div>
+        <div className="agent-bubble__label">{translate("agent:agentGroupView.agentBubbleAgentBubbleUser_message_text")}</div>
         <div className="agent-bubble__text">{message}</div>
       </div>
     </div>
@@ -68,6 +72,7 @@ function AgentActivityGroup({
   projectDir: string;
   persistKey: string;
 }) {
+  const uiLanguage = useUiLanguage();
   const stateKey = `${persistKey}::${group.id}`;
   const [open, setOpenRaw] = useState(() => {
     const saved = manualOpenState.get(stateKey);
@@ -139,15 +144,15 @@ function AgentActivityGroup({
 
   // 文案：运行中「思考中/处理中 · Ns」，结束「已思考/已处理 Ns」
   const label = isLive
-    ? `${hasContent && !toolCount ? '思考中' : '处理中'} · ${formatDuration(shownSec * 1000)}`
+    ? translate("agent:agentGroupView.label_message_text", { value: hasContent && !toolCount ? translate("agent:agentGroupView.interpolation_fallback_text") : translate("agent:agentGroupView.interpolation_fallback_processing"), value2: formatDuration(shownSec * 1000) })
     : hasContent && !toolCount
-      ? shownSec > 0 ? `已思考 ${formatDuration(shownSec * 1000)}` : '思考'
+      ? shownSec > 0 ? translate("agent:agentGroupView.label_message_done", { value: formatDuration(shownSec * 1000) }) : translate("agent:agentGroupView.label_message_textVariant2")
       : shownSec > 0
-        ? `已处理 ${formatDuration(shownSec * 1000)}`
-        : '工作';
+        ? translate("agent:agentGroupView.label_message_doneProcess", { value: formatDuration(shownSec * 1000) })
+        : translate("agent:agentGroupView.label_message_textVariant3");
 
   const parts: string[] = [];
-  if (visibleCount > 1) parts.push(`${visibleCount} 个步骤`);
+  if (visibleCount > 1) parts.push(translate("agent:agentGroupView.agentActivityGroup_push_count", { visibleCount: visibleCount }));
 
   // 预览小字：只在折叠且回合仍在跑时显示（展开时内容全可见，无需预览）
   const tail = isLive && !open ? liveTail(items) : '';
@@ -199,6 +204,7 @@ function AgentActivityGroup({
 }
 
 function ContentRow({ item, projectDir }: { item: ActivityItem; projectDir: string }) {
+  const uiLanguage = useUiLanguage();
   // 模型「说」的回复：直接渲染为普通黑体纯文本，不再用可折叠卡片包裹。
   const text = item.content || '';
   const streaming = Boolean(item.streaming);
@@ -238,6 +244,7 @@ function ReasoningRow({
   projectDir: string;
   persistKey: string;
 }) {
+  const uiLanguage = useUiLanguage();
   const streaming = Boolean(item.streaming);
   // 默认折叠，且不跟随流式自动展开（用户手动开过就一直是开的——包括切页面重挂后）
   const stateKey = `${persistKey}::r-${item.step}-${item.id || ''}`;
@@ -251,7 +258,7 @@ function ReasoningRow({
   };
 
   const text = item.content || '';
-  const label = streaming ? '思考中' : item.durationMs ? `已思考 ${formatDuration(item.durationMs)}` : '已思考';
+  const label = streaming ? translate("agent:agentGroupView.label_message_textVariant4") : item.durationMs ? translate("agent:agentGroupView.label_message_done", { value: formatDuration(item.durationMs) }) : translate("agent:agentGroupView.label_message_doneVariant2");
   // 只在「折叠 + 正在思考」时滚动最近内容；展开后不再显示
   const marquee = !open && streaming ? reasoningOneLiner(text) : '';
 
@@ -291,20 +298,19 @@ function ReasoningRow({
    压缩是后台维护动作，不是用户要读的内容，所以只做一行轻量提示。 */
 
 function CompactRow({ item }: { item: ActivityItem }) {
+  const uiLanguage = useUiLanguage();
   const removed = item.removed || 0;
   const before = item.tokensBefore || 0;
   const after = item.tokensAfter || 0;
   // 压缩后的大小是后端在**重建出来的真实历史**上估的：保留的尾部（可能带着很大的工具
   // 结果）都算在内。所以这里显示 before → after，别拿摘要长度当"压缩后的大小"。
   const size = after > 0
-    ? `（估算 ${before > 0 ? formatTokenCount(before) : '?'} → ${formatTokenCount(after)} tokens）`
+    ? translate("agent:agentGroupView.size_message_tokens", { value: before > 0 ? formatTokenCount(before) : '?', value2: formatTokenCount(after) })
     : '';
   return (
-    <div className="agent-compact-note" title="早期对话已被摘要压缩，以腾出上下文空间">
+    <div className="agent-compact-note" title={translate("agent:agentGroupView.agentCompactNote_title_doneContext")}>
       <span className="agent-compact-note__icon"><Icon name="compress" /></span>
-      <span className="agent-compact-note__text">
-        已压缩上下文 · 摘要 {removed} 条早期消息{size}
-      </span>
+      <span className="agent-compact-note__text">{translate("agent:agentGroupView.agentCompactNote_message_doneContextEntry", { removed: removed, size: size })}</span>
     </div>
   );
 }
@@ -315,14 +321,15 @@ function CompactRow({ item }: { item: ActivityItem }) {
    同一次请求的多次重试共用这一行，只有计数在变；失败原因写在下方一行。 */
 
 const RETRY_CODE_LABELS: Record<string, string> = {
-  NETWORK_ERROR: '连接失败',
-  TIMEOUT: '请求超时',
-  RATE_LIMITED: '被限流',
-  PROVIDER_ERROR: '服务端错误',
-  STREAM_FAILED: '响应中断',
+  get NETWORK_ERROR() { return translate("agent:agentGroupView.nETWORKERROR_nETWORKERROR_connectionFailed"); },
+  get TIMEOUT() { return translate("agent:agentGroupView.tIMEOUT_tIMEOUT_text"); },
+  get RATE_LIMITED() { return translate("agent:agentGroupView.rATELIMITED_rATELIMITED_text"); },
+  get PROVIDER_ERROR() { return translate("agent:agentGroupView.pROVIDERERROR_pROVIDERERROR_error"); },
+  get STREAM_FAILED() { return translate("agent:agentGroupView.sTREAMFAILED_sTREAMFAILED_text"); },
 };
 
 function RetryRow({ item }: { item: ActivityItem }) {
+  const uiLanguage = useUiLanguage();
   const live = !item.retryDone;
   const [now, setNow] = useState(() => Date.now());
 
@@ -337,8 +344,8 @@ function RetryRow({ item }: { item: ActivityItem }) {
   const remainingSec = Math.max(0, Math.ceil((delayMs - (now - startedAt)) / 1000));
   const attempt = item.attempt ?? 1;
   const maxAttempts = item.maxAttempts ?? 0;
-  const attemptText = maxAttempts > 0 ? `第 ${attempt}/${maxAttempts} 次` : `第 ${attempt} 次`;
-  const cause = item.retryCode ? RETRY_CODE_LABELS[item.retryCode] || '请求失败' : '请求失败';
+  const attemptText = maxAttempts > 0 ? translate("agent:agentGroupView.attemptText_message_text", { attempt: attempt, maxAttempts: maxAttempts }) : translate("agent:agentGroupView.attemptText_message_textVariant2", { attempt: attempt });
+  const cause = item.retryCode ? RETRY_CODE_LABELS[item.retryCode] || translate("agent:agentGroupView.cause_message_failed") : translate("agent:agentGroupView.cause_message_failed");
   const detail = item.retryReason ? `${cause}：${item.retryReason}` : cause;
 
   return (
@@ -346,7 +353,7 @@ function RetryRow({ item }: { item: ActivityItem }) {
       <span className="agent-retry-note__icon"><Icon name="refresh" /></span>
       <div className="agent-retry-note__body">
         <span className="agent-retry-note__text">
-          {live ? `${cause}，${remainingSec} 秒后重试` : '已重试'}
+          {live ? translate("agent:agentGroupView.agentRetryNoteText_message_secondsRetry", { cause: cause, remainingSec: remainingSec }) : translate("agent:agentGroupView.agentRetryNoteText_message_doneRetry")}
           <span className="agent-retry-note__count"> · {attemptText}</span>
         </span>
         <span className="agent-retry-note__reason">{detail}</span>
@@ -358,11 +365,12 @@ function RetryRow({ item }: { item: ActivityItem }) {
 /* ── Terminal notices ── */
 
 function ErrorNotice({ group }: { group: Extract<TimelineGroup, { type: 'error' }> }) {
+  const uiLanguage = useUiLanguage();
   return (
     <div className="agent-notice agent-notice--error">
       <span className="agent-notice__icon"><Icon name="warning" /></span>
       <div className="agent-notice__body">
-        <div className="agent-notice__title">执行出错</div>
+        <div className="agent-notice__title">{translate("agent:agentGroupView.agentNoticeBody_message_text")}</div>
         <div className="agent-notice__text">{group.message}</div>
       </div>
     </div>
@@ -373,7 +381,8 @@ function ErrorNotice({ group }: { group: Extract<TimelineGroup, { type: 'error' 
  *  后端文案原样保留（runtime 不动）：只有"用户点停止"那条按界面口径显示成
  *  「用户已停止」，其他原因（如「立即」打断）原样展示。 */
 function StoppedNotice({ group }: { group: Extract<TimelineGroup, { type: 'stopped' }> }) {
-  const text = group.reason === '用户停止' ? '用户已停止' : group.reason;
+  useUiLanguage();
+  const text = group.reason === '用户停止' ? translate("agent:agentGroupView.text_message_doneStop") : group.reason;
   return (
     <div className="agent-stopped">
       <span className="agent-stopped__text">{text}</span>

@@ -1,0 +1,489 @@
+{
+  "pluginSettingsEditor": {
+    "pluginSettingsEditor_message_pluginConfigSettingsItem": "此插件无可配置的设置项",
+    "pluginSettingsPanel_message_settings": "{{display_name}} 设置",
+    "pluginSettingsAdvanced_message_advancedSettingsItem": "高级设置（{{count}} 项）",
+    "pluginSettingsAdvanced_message_advancedSettingsItem_other": "高级设置（{{count}} 项）",
+    "label_label_currentCustom": "当前值：{{value}}（自定义）",
+    "pluginSettingRow_message_currentCustom": "当前值：{{value}}（自定义）",
+    "objectSettingInput_message_enterJSONCurrentEditNotKeepSettings": "请输入有效的 JSON 对象；当前编辑未应用，将保留上次有效设置。",
+    "pluginSettingsAdvanced_message_advancedSettingsItem_one": "高级设置（{{count}} 项）"
+  },
+  "pluginsPage": {
+    "pluginsPage_normalizeError_loadPluginFailed": "加载插件列表失败",
+    "pluginsPage_title_plugin": "插件管理",
+    "pluginsPage_title_loadPlugin": "加载插件中…",
+    "pluginsPage_description_pendingReadCurrentFilePluginTextPlugin": "正在读取当前可用的文件插件与文本插件。",
+    "pluginsPage_title_loadPluginFailed": "加载插件列表失败",
+    "pluginsPage_description_translationPluginCountPlugin": "查看和管理翻译插件，共 {{count}} 个插件。",
+    "pluginsPage_description_translationPluginCountPlugin_other": "查看和管理翻译插件，共 {{count}} 个插件。",
+    "pluginTabs_message_all": "全部 ({{count}})",
+    "pluginTabs_message_all_other": "全部 ({{count}})",
+    "pluginTabs_message_filePlugin": "文件插件 ({{count}})",
+    "pluginTabs_message_filePlugin_other": "文件插件 ({{count}})",
+    "pluginTabs_message_textPlugin": "文本插件 ({{count}})",
+    "pluginTabs_message_textPlugin_other": "文本插件 ({{count}})",
+    "pluginList_title_currentFilterEmptyPlugin": "当前筛选下没有插件",
+    "pluginList_title_emptyPlugin": "暂无插件",
+    "pluginList_description_pluginCheckBackendPluginDirectory": "试试切换到其他插件类型，或检查后端插件目录。",
+    "pluginList_description_backendNotBackPlugin": "后端暂未返回任何插件信息。",
+    "pluginCardHeader_message_v": "v{{version}}",
+    "pluginCardHeader_message_file": "文件",
+    "pluginCardHeader_message_text": "文本",
+    "pluginCardMeta_message_author": "作者: {{author}}",
+    "pluginCardMeta_message_module": "模块: {{module}}",
+    "pluginCardSettings_message_settingsItem": "设置项",
+    "pluginsPage_description_translationPluginCountPlugin_one": "查看和管理翻译插件，共 {{count}} 个插件。",
+    "pluginTabs_message_all_one": "全部 ({{count}})",
+    "pluginTabs_message_filePlugin_one": "文件插件 ({{count}})",
+    "pluginTabs_message_textPlugin_one": "文本插件 ({{count}})"
+  },
+  "builtin": {
+    "file_epub_epub": {
+      "name": "Epub 文件",
+      "description": "翻译 Epub 文件, 支持自动识别名称、双语显示、缩小比例、拆分文件以支持单文件多线程翻译等功能。部分代码和正则来自Ainiee。",
+      "settings": {
+        "autoDetectNames": {
+          "label": "自动识别人名",
+          "description": "从段落中按正则表达式提取说话人和正文。"
+        },
+        "namePattern": {
+          "label": "人名识别规则",
+          "description": "正则表达式需包含 name 和 message 两个命名分组，分别匹配人名和正文。"
+        },
+        "nameTemplate": {
+          "label": "人名与正文拼接格式",
+          "description": "将识别后的人名和译文重新拼接；{name} 表示人名，{message} 表示正文。"
+        },
+        "bilingual": {
+          "label": "双语显示",
+          "description": "在输出电子书中同时显示译文和原文。"
+        },
+        "sourceColor": {
+          "label": "原文颜色",
+          "description": "双语显示时原文的 CSS 颜色，例如 #808080 为灰色。"
+        },
+        "sourceScale": {
+          "label": "原文字号比例",
+          "description": "双语显示时原文字号相对于正常字号的比例，0.8 表示 80%。"
+        },
+        "splitChapters": {
+          "label": "拆分章节并发翻译",
+          "description": "将 EPUB 拆分为章节以便并发处理，完成后合并为电子书。"
+        }
+      }
+    },
+    "file_galtransl_json": {
+      "name": "GalTransl标准json",
+      "description": "标准的name(可选)-message格式json文件，有name效果更好",
+      "settings": {
+        "output_with_src": {
+          "label": "输出时保留原文",
+          "description": "在输出 JSON 中保留原文，便于对照译文。"
+        }
+      }
+    },
+    "file_i18n_json": {
+      "name": "Key-Value格式json文件",
+      "description": "可以处理任意字典格式的json文件。可以用来做一些i18n的翻译，或翻译mtool导出的结果（但此类工具提取的文本缺少人名，Gal请优先使用VNT或SE）"
+    },
+    "file_msgtool_script": {
+      "name": "Galgame脚本文件",
+      "description": "通过 res/msg_tool.exe（lifegpc/msg-tool）直接读取和写入 galgame 脚本文件。 msg-tool 的 json 输出即为 GalTransl 的 [{\"name\"?, \"message\"}] 格式，因此无需中间转换。 支持 kirikiri、BGI/Ethornell、Yu-Ris、Artemis、CatSystem2、Circus、Musica、QLIE、 Softpal、WillPlus/AdvHD、ExHibit、Favorite、Escu:de、Entis GLS 等引擎。 可启用 SExtractor 兼容的 JIS 替换，并在输出目录生成 uif_config.json。",
+      "settings": {
+        "msg_tool_path": {
+          "label": "工具路径",
+          "description": "留空使用程序自带的 msg_tool.exe。仅在需要更换工具版本时填写可执行文件路径。"
+        },
+        "script_type": {
+          "label": "脚本引擎",
+          "description": "通常选择自动识别。无后缀 BGI 可选择 BGI / Ethornell；手动选择会应用于此插件处理的所有脚本。",
+          "options": {
+            "default": "自动识别（推荐）",
+            "bgi": "BGI / Ethornell（含无后缀脚本）",
+            "bgi_bsi": "BGI BSI（._bsi）",
+            "bgi_bp": "BGI BP（._bp）",
+            "kirikiri": "吉里吉里 KAG（.ks）",
+            "kirikiri_scn": "吉里吉里 SCN（.scn）",
+            "kirikiri_simple_crypt": "吉里吉里 SimpleCrypt 文本",
+            "kirikiri_tjs2": "吉里吉里编译 TJS2",
+            "kirikiri_tjs_ns0": "吉里吉里 TJS NS0",
+            "artemis": "Artemis AST",
+            "artemis_asb": "Artemis ASB / IET",
+            "artemis_txt": "Artemis 通用 TXT",
+            "artemis_panmimisoft_txt": "Artemis ぱんみみそふと TXT",
+            "cat_system": "CatSystem2 CST",
+            "cat_system_cstl": "CatSystem2 CSTL",
+            "circus": "Circus MES",
+            "entis_gls": "Entis GLS SRCXML",
+            "entis_gls_csx": "Entis GLS CSX",
+            "escude": "Escu:de BIN",
+            "escude_list": "Escu:de 列表脚本",
+            "ex_hibit": "ExHibit RLD",
+            "favorite": "Favorite HCB",
+            "hexen_haus": "HexenHaus BIN",
+            "musica": "Musica SC",
+            "qlie": "QLIE S",
+            "silky": "Silky MES",
+            "silky_map": "Silky MAP",
+            "softpal": "Softpal SRC",
+            "will_plus_ws2": "WillPlus / AdvHD WS2",
+            "yaneurao_itufuru": "Yaneurao Itufuru",
+            "yuris_txt": "Yu-Ris 场景 TXT",
+            "yuris_ystb": "Yu-Ris 编译脚本 YSTB",
+            "yuris_yscm": "Yu-Ris 操作码元数据 YSCM",
+            "yuris_yser": "Yu-Ris 错误信息 YSER",
+            "yuris_yscfg": "Yu-Ris 配置 YSCFG",
+            "yuris_ystl": "Yu-Ris 文件列表 YSTL",
+            "yuris_yslb": "Yu-Ris 标签 YSLB",
+            "yuris_ysvr": "Yu-Ris 变量 YSVR",
+            "yuris_ystd": "Yu-Ris 计数 YSTD"
+          }
+        },
+        "source_encoding": {
+          "label": "原文编码",
+          "description": "读取源脚本使用的编码，不改变回填编码。默认对 KAG 脚本自动探测，其他引擎使用工具默认值；出现乱码时再指定。",
+          "options": {
+            "default": "使用默认编码",
+            "auto": "自动探测",
+            "utf8": "UTF-8",
+            "cp932": "日文 Shift-JIS（CP932）",
+            "gb2312": "简体中文 GB2312"
+          }
+        },
+        "patched_encoding": {
+          "label": "输出编码",
+          "description": "留空使用引擎默认回填编码，不跟随原文编码。CP932 无法表示部分中文；游戏需要日文编码时可开启 JIS 替换，支持其他编码时可选择 GB2312 或 UTF-8。回填前会检查可确定的编码，失败时提示字符和处理方式。开启 JIS 替换后此项不生效。",
+          "options": {
+            "default": "使用默认编码",
+            "auto": "自动探测",
+            "utf8": "UTF-8",
+            "cp932": "日文 Shift-JIS（CP932）",
+            "gb2312": "简体中文 GB2312"
+          }
+        },
+        "jis_substitution": {
+          "label": "JIS 替换",
+          "description": "使用 SExtractor 字典将 CP932 无法表示的中文替换为日文字符，以 CP932 回填，并在输出根目录生成 uif_config.json。需配合 UIF 或对应替换字体还原显示。"
+        },
+        "jis_unmapped": {
+          "label": "JIS 未匹配字符处理",
+          "description": "仅在 JIS 替换开启时生效。默认阻止写出；选择全角空格与 SExtractor 行为一致，并将丢失的字符记录到 uif_config.json 的 remain 中。",
+          "options": {
+            "error": "报错并停止写出（推荐）",
+            "space": "替换为全角空格并记录"
+          }
+        },
+        "extra_args": {
+          "label": "额外工具参数",
+          "description": "传给 msg-tool 的命令行参数，每行一个参数或参数值。填写后会绕过读取缓存。"
+        },
+        "keep_bilingual": {
+          "label": "保留原文",
+          "description": "回填时在译文后追加原文。游戏可能有字数和排版限制，启用后请检查游戏内显示。"
+        },
+        "bilingual_sep": {
+          "label": "双语分隔符",
+          "description": "译文与原文之间的分隔内容，仅在保留原文时生效。默认是一处换行。"
+        },
+        "timeout": {
+          "label": "处理超时（秒）",
+          "description": "单个文件调用工具的最长等待时间，超时会停止该次处理。大型脚本可适当增加。"
+        },
+        "read_cache": {
+          "label": "启用读取缓存",
+          "description": "复用已提取的文本以加快浏览和重复读取。源文件、配置或工具变化后自动重新提取。"
+        }
+      }
+    },
+    "file_mtbench_aio": {
+      "name": "机器翻译质量评估",
+      "description": "用于机器翻译质量评估。输入文件为name(可选)-message格式json文件再加上ref字段，ref字段为参考译文。",
+      "settings": {
+        "task": {
+          "label": "评估指标",
+          "description": "选择译文质量评估方法；COMET 需要加载模型，截断率用于检查译文是否截断。",
+          "options": {
+            "chrf": "chrF 字符匹配",
+            "comet": "COMET 模型评分",
+            "cutoff_rate": "截断率"
+          }
+        },
+        "chrf_ngram": {
+          "label": "chrF 最大 n-gram",
+          "description": "chrF 计算使用的最大字符片段长度，仅在 chrF 模式生效。"
+        },
+        "chrf_beta": {
+          "label": "chrF 召回率权重",
+          "description": "chrF 中召回率的相对权重，值越大越重视召回率。"
+        },
+        "comet_model_name": {
+          "label": "COMET 模型",
+          "description": "COMET 使用的模型名称或路径，仅在 COMET 模式生效。"
+        },
+        "comet_batch_size": {
+          "label": "COMET 批量大小",
+          "description": "每批评估的条目数，调大可能增加显存占用。"
+        }
+      }
+    },
+    "file_plaintext_txt": {
+      "name": "TXT/Markdown文本文件读取",
+      "description": "可以直接处理.txt、.md和.markdown文本文件并逐行翻译。Markdown按纯文本处理，不保护Markdown语法、缩进或代码块；不应该用于翻译包含大量控制符的脚本。",
+      "settings": {
+        "bilingual": {
+          "label": "保存双语文本",
+          "description": "在输出文本中同时保存译文和原文。"
+        },
+        "bilingualLayout": {
+          "label": "双语排版",
+          "description": "双语输出时原文与译文的排列方式。",
+          "options": {
+            "layout1": "上下排列",
+            "layout2": "左右排列"
+          }
+        },
+        "sourceEncoding": {
+          "label": "原文编码",
+          "description": "读取 TXT/Markdown 文件的字符编码。乱码或读取失败时请检查源文件编码。"
+        },
+        "outputEncoding": {
+          "label": "输出编码",
+          "description": "保存 TXT/Markdown 文件的字符编码，默认 UTF-8。"
+        }
+      }
+    },
+    "file_subtitle_srt_lrc_vtt": {
+      "name": "srt,lrc,vtt字幕文件读取",
+      "description": "可以直接处理.srt|.lrc|.vtt字幕文件并翻译。",
+      "settings": {
+        "bilingual": {
+          "label": "保存双语字幕",
+          "description": "在同一字幕条目中保留原文与译文。"
+        },
+        "bilingualLayout": {
+          "label": "双语排版",
+          "description": "双语字幕中原文与译文的排列方式。",
+          "options": {
+            "layout1": "上下排列",
+            "layout2": "左右排列"
+          }
+        }
+      }
+    },
+    "file_translator___xlsx": {
+      "name": "Translator++ xlsx文件",
+      "description": "Translator++ 导出的 xlsx 文件，将会写入到 Machine translation 栏目中。",
+      "settings": {
+        "autoDetectNames": {
+          "label": "自动识别人名",
+          "description": "按规则将文本中的说话人和正文分开。"
+        },
+        "namePattern": {
+          "label": "人名识别规则",
+          "description": "正则表达式需包含 name 和 message 两个命名分组。"
+        },
+        "nameTemplate": {
+          "label": "人名与正文拼接格式",
+          "description": "使用 {name} 和 {message} 将人名与译文重新拼接。"
+        },
+        "removeLineBreaks": {
+          "label": "清除换行符",
+          "description": "输出到 Translator++ 表格时清除文本中的换行。"
+        }
+      }
+    },
+    "text_bgi_fixruby": {
+      "name": "BGI 修复 ruby 标签插件",
+      "description": "支持移除不正确的 ruby 标签和自动修正着重符号（・）数量",
+      "settings": {
+        "remove_incorrect": {
+          "label": "移除错误注音标签",
+          "description": "清理译文中不完整、未配对或内容为空的 BGI ruby 注音标签。"
+        },
+        "auto_correct": {
+          "label": "修正着重符号数量",
+          "description": "将注音位置的着重符号（・或…）修正为与正文长度一致的点号。"
+        },
+        "process_log_level": {
+          "label": "修复日志级别",
+          "description": "每条被修改文本的日志级别；通常保留调试，排查问题时可改为信息。",
+          "options": {
+            "debug": "调试",
+            "info": "信息",
+            "warning": "警告",
+            "error": "错误"
+          }
+        }
+      }
+    },
+    "text_common_full2Half": {
+      "name": "通用-全角半角转换",
+      "description": "支持全角字符（数字、大小写字母、标点）与半角字符之间的转换。可自定义替换表，支持自定义替换时机。",
+      "settings": {
+        "replacePunctuation": {
+          "label": "同时转换标点",
+          "description": "除数字和英文字母外，也转换默认替换表中的标点。"
+        },
+        "stage": {
+          "label": "执行阶段",
+          "description": "选择处理原文还是译文，以及在对应文本处理流程之前或之后执行。",
+          "options": {
+            "before_src_processed": "原文预处理之前",
+            "after_src_processed": "原文预处理之后",
+            "before_dst_processed": "译文后处理之前",
+            "after_dst_processed": "译文后处理之后"
+          }
+        },
+        "reverse": {
+          "label": "半角转全角",
+          "description": "关闭时将全角转为半角，开启时反向转换为全角。"
+        },
+        "replacements": {
+          "label": "自定义字符替换表",
+          "description": "填写 JSON 对象，例如 {\"Ａ\":\"A\"}。始终按“全角字符：半角字符”填写；反向转换时自动交换方向。"
+        }
+      }
+    },
+    "text_common_lineBreakFix": {
+      "name": "行内换行修复",
+      "description": "对比翻译前后的文本，把翻译后的文本的行内换行符的数量补足/减少到相同数量。",
+      "settings": {
+        "lineBreak": {
+          "label": "脚本换行符",
+          "description": "填写脚本使用的换行标记，例如 [r]，也可填写实际换行。默认是 Windows 换行（CRLF）。"
+        },
+        "mode": {
+          "label": "换行方式",
+          "description": "保持位置按原文相对位置换行；平均等分文本；切最长逐次拆分最长片段；前置或后置集中放置换行；固定字数按阈值换行。",
+          "options": {
+            "choice1": "保持位置",
+            "choice2": "平均",
+            "choice3": "切最长",
+            "choice4": "前置",
+            "choice5": "后置",
+            "choice6": "固定字数"
+          }
+        },
+        "segmentLength": {
+          "label": "每段字数",
+          "description": "仅在固定字数模式下生效，达到此字数时插入换行标记。"
+        },
+        "force": {
+          "label": "强制重新排版",
+          "description": "即使译文与原文的换行数量相同，也按选定方式重新处理。"
+        },
+        "segmenter": {
+          "label": "中文分词器",
+          "description": "用于尽量避免在词语中间断行。BudouX 最轻量；其他选项需要对应依赖，HanLP 还可能下载较大的模型。",
+          "options": {
+            "budoux": "BudouX（轻量，推荐）",
+            "jieba": "结巴分词",
+            "pkuseg": "北京大学分词工具（PKUSEG）",
+            "hanlp": "HanLP 分词"
+          }
+        }
+      }
+    },
+    "text_common_normalfix": {
+      "name": "通用-文本常规修复",
+      "description": "通用文本修复，包括1.修复首尾标点符号多加 2.修复\\r\\n换行符翻成\\n的情况。"
+    },
+    "text_common_skipNoJP": {
+      "name": "跳过非日文行",
+      "description": "跳过不包含日文的行"
+    },
+    "text_example_nouse": {
+      "name": "样例文本插件",
+      "description": "这是个样例文本插件，任何项目都不应该使用本插件",
+      "settings": {
+        "set_int": {
+          "label": "整数设置示例",
+          "description": "演示插件如何接收整数值；此示例插件不应在实际翻译项目中启用。"
+        },
+        "set_string": {
+          "label": "文本设置示例",
+          "description": "演示插件如何接收字符串值；不影响任何实际翻译功能。"
+        },
+        "set_bool": {
+          "label": "布尔开关示例",
+          "description": "演示英文配置键对应的开关控件。"
+        },
+        "chineseKeyExample": {
+          "label": "中文配置键示例",
+          "description": "演示使用中文配置键的开关控件。"
+        }
+      }
+    },
+    "text_message_serverchan_tgbot": {
+      "name": "完成消息推送",
+      "description": "完成所有翻译后，推送完成消息到ServerChan / Telegram Bot，并支持声音通知",
+      "settings": {
+        "channel": {
+          "label": "完成通知渠道",
+          "description": "选择翻译完成后接收通知的渠道，可多选；取消全部渠道则不发送网络通知。",
+          "options": {
+            "ServerChan": "Server酱",
+            "choice2": "Telegram 机器人"
+          }
+        },
+        "Telegram_Bot_API_URL": {
+          "label": "Telegram 接口地址",
+          "description": "默认使用 Telegram 官方接口；使用自建接口或代理服务时再修改。"
+        },
+        "Telegram_Bot_Token": {
+          "label": "Telegram 机器人令牌",
+          "description": "由 BotFather 提供的机器人令牌，仅在启用 Telegram 通知时使用。"
+        },
+        "Telegram_Bot_ChatID": {
+          "label": "Telegram 接收会话 ID",
+          "description": "接收通知的用户或群组会话 ID，需要机器人有权限向该会话发送消息。"
+        },
+        "ServerChan_SendKey": {
+          "label": "Server酱推送密钥",
+          "description": "Server酱账户提供的 SendKey，仅在启用 Server酱通知时使用。"
+        },
+        "soundEnabled": {
+          "label": "播放完成提示音",
+          "description": "翻译结束后播放成功或失败提示音。"
+        },
+        "customAudio": {
+          "label": "使用自定义提示音",
+          "description": "开启后使用下方指定的音频文件，需同时启用声音通知。"
+        },
+        "successAudio": {
+          "label": "成功提示音路径",
+          "description": "翻译成功时播放的音频文件路径，仅在启用自定义提示音时生效。"
+        },
+        "failureAudio": {
+          "label": "失败提示音路径",
+          "description": "翻译失败时播放的音频文件路径，仅在启用自定义提示音时生效。"
+        },
+        "openaiTts": {
+          "label": "使用语音合成播报",
+          "description": "通过 OpenAI 兼容语音合成接口生成播报；需启用声音通知并配置接口密钥，可能产生接口费用。"
+        },
+        "OpenAI_API_Key": {
+          "label": "语音合成接口密钥",
+          "description": "语音合成服务的 API 密钥，仅在开启语音合成时使用。"
+        },
+        "OpenAI_API_Base_URL": {
+          "label": "语音合成接口地址",
+          "description": "OpenAI 兼容服务的接口基础地址，通常以 /v1 结尾。"
+        },
+        "OpenAI_TTS_Voice": {
+          "label": "播报音色",
+          "description": "选择语音合成的音色，实际可用音色取决于所用服务。",
+          "options": {
+            "alloy": "中性（Alloy）",
+            "echo": "沉稳（Echo）",
+            "fable": "叙述（Fable）",
+            "onyx": "低沉（Onyx）",
+            "nova": "明亮（Nova）",
+            "shimmer": "柔和（Shimmer）"
+          }
+        }
+      }
+    }
+  }
+}

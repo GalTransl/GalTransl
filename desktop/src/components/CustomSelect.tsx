@@ -297,12 +297,15 @@ export function CustomSelect({
   return (
     <div ref={containerRef} className={rootClass}>
       <button
+        id={rest.id}
         type="button"
         className="custom-select__trigger"
         disabled={!!disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-labelledby={rest['aria-labelledby'] as string | undefined}
+        aria-label={rest['aria-label']}
+        aria-describedby={rest['aria-describedby']}
         onClick={() => {
           if (disabled) return;
           // If label just forwarded a click after selecting an option, ignore

@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../i18n";
 import { Component, type ReactNode } from 'react';
 import { Button } from './Button';
 import { InlineFeedback } from './page-state/InlineFeedback';
@@ -23,11 +24,16 @@ export class RenderErrorBoundary extends Component<Props, State> {
   render() {
     const { error } = this.state;
     if (!error) return this.props.children;
-    return (
-      <div style={{ padding: 24, display: 'grid', gap: 12, justifyItems: 'start' }}>
-        <InlineFeedback tone="error" title="页面渲染出错" description={error.message || '未知错误'} />
-        <Button onClick={() => this.setState({ error: null })}>重试</Button>
-      </div>
-    );
+    return <RenderErrorFallback error={error} onRetry={() => this.setState({ error: null })} />;
   }
+}
+
+function RenderErrorFallback({ error, onRetry }: { error: Error; onRetry: () => void }) {
+  useUiLanguage();
+  return (
+    <div style={{ padding: 24, display: 'grid', gap: 12, justifyItems: 'start' }}>
+      <InlineFeedback tone="error" title={translate("common:renderErrorBoundary.message_title_text")} description={error.message || translate("common:actions.unknownError")} />
+      <Button onClick={onRetry}>{translate("common:actions.retry")}</Button>
+    </div>
+  );
 }

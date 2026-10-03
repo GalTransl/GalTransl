@@ -1,7 +1,10 @@
+import { t as translate, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CustomSelect } from './CustomSelect';
 import { Icon } from './Icon';
 import { fetchOpenAIModels } from '../lib/api';
+import { message, resolveMessage, type LocalizedText } from '../i18n/core';
+import { normalizeError } from '../lib/errors';
 
 type TokenEntry = {
   token: string;
@@ -39,6 +42,7 @@ type BackendConfigEditorProps = {
 };
 
 export function BackendConfigEditor({ config, onChange, readOnly = false, proxy = null }: BackendConfigEditorProps) {
+  useUiLanguage();
   const hasOai = 'OpenAI-Compatible' in config;
   const hasSakura = 'SakuraLLM' in config;
 
@@ -137,7 +141,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
   }, [tokens, updateOai, readOnly]);
 
   // Per-token model-list fetch state
-  type ModelsState = { loading: boolean; error: string | null; models: string[] };
+  type ModelsState = { loading: boolean; error: LocalizedText | null; models: string[] };
   const [modelsState, setModelsState] = useState<Record<number, ModelsState>>({});
   // Which token's model dropdown is currently open (null = none)
   const [openDropdownIdx, setOpenDropdownIdx] = useState<number | null>(null);
@@ -176,7 +180,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
         setOpenDropdownIdx(index);
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '请求失败';
+      const msg = normalizeError(err, message("common:backendConfigEditor.msg_message_failed"));
       setModelsState((prev) => ({
         ...prev,
         [index]: { loading: false, error: msg, models: prev[index]?.models ?? [] },
@@ -188,7 +192,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
     <>
       {/* Backend type selector */}
       <label className="field">
-        <span>后端类型</span>
+        <span>{translate("common:backendConfigEditor.field_message_backend")}</span>
         <div className="backend-type-toggle">
           <label className="toggle-checkbox">
             <input
@@ -197,7 +201,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
               checked={hasOai}
               onChange={(e) => toggleBackendType('OpenAI-Compatible', e.target.checked)}
             />
-            <span>OpenAI 兼容接口</span>
+            <span>{translate("common:backendConfigEditor.toggleCheckbox_message_openAI")}</span>
           </label>
           <label className="toggle-checkbox">
             <input
@@ -206,7 +210,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
               checked={hasSakura}
               onChange={(e) => toggleBackendType('SakuraLLM', e.target.checked)}
             />
-            <span>Sakura 本地模型</span>
+            <span>{translate("common:backendConfigEditor.toggleCheckbox_message_sakuraModel")}</span>
           </label>
         </div>
       </label>
@@ -214,23 +218,19 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
       {/* OpenAI-Compatible section */}
       {hasOai && (
         <>
-          <h3 className="config-section-title">OpenAI 兼容接口</h3>
+          <h3 className="config-section-title">{translate("common:backendConfigEditor.backendConfigEditor_message_openAI")}</h3>
 
           {/* Tokens list */}
           <div className="token-list">
             <div className="token-list__header">
-              <span className="token-list__title">API 令牌列表</span>
+              <span className="token-list__title">{translate("common:backendConfigEditor.tokenListHeader_message_aPIToken")}</span>
               {!readOnly && (
-                <button type="button" className="token-list__add-btn" onClick={addToken}>
-                  + 添加令牌
-                </button>
+                <button type="button" className="token-list__add-btn" onClick={addToken}>{translate("common:backendConfigEditor.tokenListHeader_message_addToken")}</button>
               )}
             </div>
 
             {tokens.length === 0 && (
-              <div className="token-list__empty">
-                暂无令牌，请点击「添加令牌」按钮添加。
-              </div>
+              <div className="token-list__empty">{translate("common:backendConfigEditor.tokenList_message_emptyTokenAddTokenButtonAdd")}</div>
             )}
 
             {tokens.map((t, idx) => {
@@ -238,40 +238,40 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
               return (
               <div key={idx} className="token-entry">
                 <div className="token-entry__header">
-                  <span className="token-entry__index">令牌 #{idx + 1}</span>
+                  <span className="token-entry__index">{translate("common:backendConfigEditor.tokenEntryHeader_message_token", { value: idx + 1 })}</span>
                   {!readOnly && (
                     <button
                       type="button"
                       className="token-entry__remove-btn"
                       onClick={() => removeToken(idx)}
-                      title="删除此令牌"
+                      title={translate("common:backendConfigEditor.tokenEntryRemoveBtn_title_deleteToken")}
                     >
                       <Icon name="close" />
                     </button>
                   )}
                 </div>
                 <label className="field field--inline">
-                  <span>API Key</span>
+                  <span>{translate("common:backendConfigEditor.fieldFieldInline_message_aPIKey")}</span>
                   <input
                     type="text"
                     disabled={readOnly}
                     value={t.token ?? ''}
                     onChange={(e) => updateToken(idx, 'token', e.target.value)}
-                    placeholder="sk-..."
+                    placeholder={translate("common:backendConfigEditor.fieldFieldInline_placeholder_sk")}
                   />
                 </label>
                 <label className="field field--inline">
-                  <span>Base URL</span>
+                  <span>{translate("common:backendConfigEditor.fieldFieldInline_message_baseURL")}</span>
                   <input
                     type="text"
                     disabled={readOnly}
                     value={t.endpoint ?? ''}
                     onChange={(e) => updateToken(idx, 'endpoint', e.target.value)}
-                    placeholder="http://127.0.0.1:8080"
+                    placeholder={translate("common:backendConfigEditor.fieldFieldInline_placeholder_http1270018080")}
                   />
                 </label>
                 <label className="field field--inline">
-                  <span>模型名称</span>
+                  <span>{translate("common:backendConfigEditor.fieldFieldInline_message_modelName")}</span>
                   <div className="model-name-row">
                     <div
                       className={`model-name-combo${openDropdownIdx === idx ? ' model-name-combo--open' : ''}`}
@@ -282,7 +282,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
                         disabled={readOnly}
                         value={t.modelName ?? ''}
                         onChange={(e) => updateToken(idx, 'modelName', e.target.value)}
-                        placeholder="gpt-4o-mini"
+                        placeholder={translate("common:backendConfigEditor.modelNameRow_placeholder_gpt4oMini")}
                         className="model-name-combo__input"
                         onFocus={() => {
                           if (ms && ms.models.length > 0) setOpenDropdownIdx(idx);
@@ -293,7 +293,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
                           type="button"
                           className="model-name-combo__arrow"
                           onClick={() => setOpenDropdownIdx((cur) => (cur === idx ? null : idx))}
-                          aria-label="展开模型列表"
+                          aria-label={translate("common:backendConfigEditor.modelNameComboArrow_ariaLabel_model")}
                           aria-expanded={openDropdownIdx === idx}
                           tabIndex={-1}
                         >
@@ -329,25 +329,21 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
                         className="model-name-row__fetch-btn"
                         onClick={() => handleFetchModels(idx)}
                         disabled={modelsState[idx]?.loading}
-                        title="通过当前 API Key 和 Base URL 获取模型列表"
+                        title={translate("common:backendConfigEditor.modelNameRowFetchBtn_title_currentAPIKeyBaseURLModel")}
                       >
-                        {modelsState[idx]?.loading ? '获取中…' : '拉取模型列表'}
+                        {modelsState[idx]?.loading ? translate("common:backendConfigEditor.modelNameRowFetchBtn_message_text") : translate("common:backendConfigEditor.modelNameRowFetchBtn_message_model")}
                       </button>
                     )}
                   </div>
                   {ms?.error && (
-                    <span className="field__hint field__hint--error">
-                      获取失败：{ms.error}
-                    </span>
+                    <span className="field__hint field__hint--error">{translate("common:backendConfigEditor.fieldFieldInline_message_failed", { error: resolveMessage(ms.error) })}</span>
                   )}
                   {ms && !ms.error && ms.models.length > 0 && (
-                    <span className="field__hint">
-                      已获取 {ms.models.length} 个模型，点击输入框右侧箭头可展开选择
-                    </span>
+                    <span className="field__hint">{translate("common:backendConfigEditor.fieldFieldInline_message_doneCountModelSelect", { count: ms.models.length })}</span>
                   )}
                 </label>
                 <label className="field field--inline">
-                  <span>流式请求</span>
+                  <span>{translate("common:backendConfigEditor.fieldFieldInline_message_text")}</span>
                   <CustomSelect
                     disabled={readOnly}
                     value={t.stream == null ? '' : String(t.stream)}
@@ -356,72 +352,64 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
                       else updateToken(idx, 'stream', e.target.value === 'true');
                     }}
                   >
-                    <option value="">跟随全局设置</option>
-                    <option value="true">是</option>
-                    <option value="false">否</option>
+                    <option value="">{translate("common:backendConfigEditor.fieldFieldInline_message_settings")}</option>
+                    <option value="true">{translate("common:backendConfigEditor.fieldFieldInline_message_textVariant2")}</option>
+                    <option value="false">{translate("common:backendConfigEditor.fieldFieldInline_message_textVariant3")}</option>
                   </CustomSelect>
                 </label>
                 <label className="field field--inline">
-                  <span>上下文大小</span>
+                  <span>{translate("common:backendConfigEditor.fieldFieldInline_message_context")}</span>
                   <input
                     type="text"
                     inputMode="numeric"
                     disabled={readOnly}
                     value={t.contextWindow == null ? '' : String(t.contextWindow)}
                     onChange={(e) => updateToken(idx, 'contextWindow', parseContextWindowInput(e.target.value))}
-                    placeholder={`${DEFAULT_CONTEXT_WINDOW}（默认）`}
+                    placeholder={translate("common:backendConfigEditor.fieldFieldInline_placeholder_default", { DEFAULT_CONTEXT_WINDOW: DEFAULT_CONTEXT_WINDOW })}
                   />
-                  <span className="field__hint">
-                    模型上下文窗口（token）：Agent 用它判断何时压缩上下文，以及用量指示器的分母；
-                    留空按 {DEFAULT_CONTEXT_WINDOW} 处理，也可写 200000、128k 这类写法。
-                    Agent 只使用第一个令牌的模型与窗口。
-                  </span>
+                  <span className="field__hint">{translate("common:backendConfigEditor.fieldFieldInline_message_modelContextTokenAgentContextUsageEmpty", { DEFAULT_CONTEXT_WINDOW: DEFAULT_CONTEXT_WINDOW })}</span>
                 </label>
               </div>
               );
             })}
           </div>
-
           <label className="field">
-            <span>令牌策略</span>
+            <span>{translate("common:backendConfigEditor.field_message_token")}</span>
             <CustomSelect
               disabled={readOnly}
               value={String(oaiConfig.tokenStrategy ?? 'random')}
               onChange={(e) => updateOai('tokenStrategy', e.target.value)}
             >
-              <option value="random">随机轮询</option>
-              <option value="fallback">优先降级</option>
+              <option value="random">{translate("common:backendConfigEditor.field_message_text")}</option>
+              <option value="fallback">{translate("common:backendConfigEditor.field_message_textVariant2")}</option>
             </CustomSelect>
-            <span className="field__hint">random 随机轮询；fallback 优先第一个，出错时使用下一个</span>
+            <span className="field__hint">{translate("common:backendConfigEditor.field_message_randomFallbackCountCount")}</span>
           </label>
           <label className="field">
-            <span>流式请求</span>
+            <span>{translate("common:backendConfigEditor.field_message_textVariant3")}</span>
             <CustomSelect
               disabled={readOnly}
               value={String(oaiConfig.stream ?? true)}
               onChange={(e) => updateOai('stream', e.target.value === 'true')}
             >
-              <option value="true">开启（默认）</option>
-              <option value="false">关闭</option>
+              <option value="true">{translate("common:backendConfigEditor.field_message_default")}</option>
+              <option value="false">{translate("common:actions.close")}</option>
             </CustomSelect>
-            <span className="field__hint">
-              默认开启。开启时译好的句子边生成边出现在「最近译文」里，文件进度的小灯能分出思考中/翻译中、跟着输出速度呼吸；
-              关闭后要等整批返回才一次出结果，小灯只显示「请求中」。接口或中转不支持流式时再关。
-            </span>
+            <span className="field__hint">{translate("common:backendConfigEditor.field_message_defaultSentenceTranslationTextFileProgressTranslationDisable")}</span>
           </label>
           <label className="field">
-            <span>测试模型可用性</span>
+            <span>{translate("common:backendConfigEditor.field_message_model")}</span>
             <CustomSelect
               disabled={readOnly}
               value={String(oaiConfig.checkAvailable ?? 'true')}
               onChange={(e) => updateOai('checkAvailable', e.target.value === 'true')}
             >
-              <option value="true">是</option>
-              <option value="false">否</option>
+              <option value="true">{translate("common:backendConfigEditor.field_message_textVariant4")}</option>
+              <option value="false">{translate("common:backendConfigEditor.field_message_textVariant5")}</option>
             </CustomSelect>
           </label>
           <label className="field">
-            <span>请求超时(秒)</span>
+            <span>{translate("common:backendConfigEditor.field_message_seconds")}</span>
             <input
               disabled={readOnly}
               type="number"
@@ -430,7 +418,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
             />
           </label>
           <label className="field">
-            <span>全局请求限速(RPM)</span>
+            <span>{translate("common:backendConfigEditor.field_message_rPM")}</span>
             <input
               disabled={readOnly}
               type="number"
@@ -438,17 +426,17 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
               value={String(oaiConfig.globalRequestRPM ?? 0)}
               onChange={(e) => updateOai('globalRequestRPM', Number(e.target.value))}
             />
-            <span className="field__hint">0 表示不限制；该限制在多任务间全局共享</span>
+            <span className="field__hint">{translate("common:backendConfigEditor.field_message_0Job")}</span>
           </label>
           <label className="field">
-            <span>API错误等待</span>
+            <span>{translate("common:backendConfigEditor.field_message_aPIErrorWait")}</span>
             <input
               disabled={readOnly}
               type="text"
               value={String(oaiConfig.apiErrorWait ?? 'auto')}
               onChange={(e) => updateOai('apiErrorWait', e.target.value)}
             />
-            <span className="field__hint">auto 或 0-120秒</span>
+            <span className="field__hint">{translate("common:backendConfigEditor.field_message_auto0120Seconds")}</span>
           </label>
         </>
       )}
@@ -456,41 +444,37 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
       {/* SakuraLLM section */}
       {hasSakura && (
         <>
-          <h3 className="config-section-title" style={{ marginTop: hasOai ? '24px' : undefined }}>Sakura 本地模型</h3>
-          
+          <h3 className="config-section-title" style={{ marginTop: hasOai ? '24px' : undefined }}>{translate("common:backendConfigEditor.backendConfigEditor_message_sakuraModel")}</h3>
+
           <div className="token-list">
             <div className="token-list__header">
-              <span className="token-list__title">端点列表</span>
+              <span className="token-list__title">{translate("common:backendConfigEditor.tokenListHeader_message_text")}</span>
               {!readOnly && (
-                <button type="button" className="token-list__add-btn" onClick={addSakuraEndpoint}>
-                  + 添加端点
-                </button>
+                <button type="button" className="token-list__add-btn" onClick={addSakuraEndpoint}>{translate("common:backendConfigEditor.tokenListHeader_message_add")}</button>
               )}
             </div>
 
             {sakuraEndpoints.length === 0 && (
-              <div className="token-list__empty">
-                暂无端点，请点击「添加端点」按钮添加。
-              </div>
+              <div className="token-list__empty">{translate("common:backendConfigEditor.tokenList_message_emptyAddButtonAdd")}</div>
             )}
 
             {sakuraEndpoints.map((ep, idx) => (
               <div key={idx} className="token-entry" style={{ marginBottom: '12px' }}>
                 <div className="token-entry__header">
-                  <span className="token-entry__index">端点 #{idx + 1}</span>
+                  <span className="token-entry__index">{translate("common:backendConfigEditor.tokenEntryHeader_message_text", { value: idx + 1 })}</span>
                   {!readOnly && (
                     <button
                       type="button"
                       className="token-entry__remove-btn"
                       onClick={() => removeSakuraEndpoint(idx)}
-                      title="删除此端点"
+                      title={translate("common:backendConfigEditor.tokenEntryRemoveBtn_title_delete")}
                     >
                       <Icon name="close" />
                     </button>
                   )}
                 </div>
                 <label className="field field--inline">
-                  <span>端点地址</span>
+                  <span>{translate("common:backendConfigEditor.fieldFieldInline_message_address")}</span>
                   <input
                     type="text"
                     disabled={readOnly}
@@ -502,7 +486,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
                         addSakuraEndpoint();
                       }
                     }}
-                    placeholder="http://127.0.0.1:8501"
+                    placeholder={translate("common:backendConfigEditor.fieldFieldInline_placeholder_http1270018501")}
                   />
                 </label>
               </div>
@@ -510,14 +494,14 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
           </div>
 
           <label className="field" style={{ marginTop: '12px' }}>
-            <span>自定义模型名称</span>
+            <span>{translate("common:backendConfigEditor.field_message_customModelName")}</span>
             <input
               disabled={readOnly}
               type="text"
               value={String(sakuraConfig.rewriteModelName ?? '')}
               onChange={(e) => updateSakura('rewriteModelName', e.target.value)}
             />
-            <span className="field__hint">使用 ollama 时需修改此项</span>
+            <span className="field__hint">{translate("common:backendConfigEditor.field_message_ollamaChangeItem")}</span>
           </label>
         </>
       )}

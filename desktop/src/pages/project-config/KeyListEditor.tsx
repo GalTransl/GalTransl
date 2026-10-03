@@ -1,4 +1,6 @@
+import { t as translate, useMessageState, useUiLanguage } from "../../i18n";
 import { useEffect, useRef, useState } from 'react';
+import type { LocalizedText } from '../../i18n/core';
 
 interface KeyListEditorProps {
   keys: string[];
@@ -9,7 +11,7 @@ interface KeyListEditorProps {
   /** 输入框下方的固定说明。 */
   hint?: string;
   /** 校验新增/编辑的值；返回错误文案则拒绝提交（不调用 onChange）。 */
-  validate?: (value: string) => string | null;
+  validate?: (value: string) => LocalizedText | null;
 }
 
 /**
@@ -20,16 +22,17 @@ export function KeyListEditor({
   keys,
   onChange,
   onDirty,
-  placeholder = '输入关键字后按回车或点击添加',
-  emptyText = '暂无条目',
+  placeholder = translate("config:keyListEditor.keyListEditor_message_add"),
+  emptyText = translate("config:keyListEditor.keyListEditor_message_emptyEntry"),
   hint,
   validate,
 }: KeyListEditorProps) {
+  useUiLanguage();
   const [draft, setDraft] = useState('');
-  const [addError, setAddError] = useState<string | null>(null);
+  const [addError, setAddError] = useMessageState<string | null>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingDraft, setEditingDraft] = useState('');
-  const [editError, setEditError] = useState<string | null>(null);
+  const [editError, setEditError] = useMessageState<string | null>(null);
   const editInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -44,7 +47,7 @@ export function KeyListEditor({
     onDirty();
   };
 
-  const check = (value: string): string | null => (validate ? validate(value) : null);
+  const check = (value: string): LocalizedText | null => (validate ? validate(value) : null);
 
   const handleAdd = () => {
     const value = draft.trim();
@@ -131,9 +134,7 @@ export function KeyListEditor({
           className="retransl-key-section__btn retransl-key-section__btn--primary"
           onClick={handleAdd}
           disabled={!draft.trim()}
-        >
-          添加
-        </button>
+        >{translate("common:actions.add")}</button>
       </div>
       {addError ? <div className="retransl-key-section__error">{addError}</div> : null}
       {hint ? <div className="retransl-key-section__hint">{hint}</div> : null}
@@ -184,16 +185,12 @@ export function KeyListEditor({
                         className="retransl-key-section__btn retransl-key-section__btn--primary"
                         onClick={handleSaveEdit}
                         disabled={!editingDraft.trim()}
-                      >
-                        保存
-                      </button>
+                      >{translate("common:actions.save")}</button>
                       <button
                         type="button"
                         className="retransl-key-section__btn retransl-key-section__btn--ghost"
                         onClick={handleCancelEdit}
-                      >
-                        取消
-                      </button>
+                      >{translate("common:actions.cancel")}</button>
                     </>
                   ) : (
                     <>
@@ -201,18 +198,14 @@ export function KeyListEditor({
                         type="button"
                         className="retransl-key-section__btn retransl-key-section__btn--ghost"
                         onClick={() => handleStartEdit(idx)}
-                        title="编辑"
-                      >
-                        编辑
-                      </button>
+                        title={translate("common:actions.edit")}
+                      >{translate("common:actions.edit")}</button>
                       <button
                         type="button"
                         className="retransl-key-section__btn retransl-key-section__btn--danger"
                         onClick={() => handleDelete(idx)}
-                        title="删除"
-                      >
-                        删除
-                      </button>
+                        title={translate("common:actions.delete")}
+                      >{translate("common:actions.delete")}</button>
                     </>
                   )}
                 </div>

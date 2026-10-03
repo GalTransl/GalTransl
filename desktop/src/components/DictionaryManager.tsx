@@ -1,3 +1,4 @@
+import { UiTrans, message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
@@ -85,7 +86,7 @@ function getFilesByTab(data: DictionaryManagerData | null, tab: DictTab): string
 // GenDic 生成的 GPT 字典按类目分区：----------↓人名↓----------
 const SECTION_LINE_RE = /^-{3,}↓(.+?)↓-{3,}\s*$/;
 // 第一个分区标题之前的词条（旧格式、手加的）归到这一类
-const UNSECTIONED_LABEL = '未分类';
+const UNSECTIONED_LABEL = '\0unsectioned';
 
 function parseRows(text: string, tab: DictTab): DictRow[] {
   const lines = text.split('\n');
@@ -126,22 +127,22 @@ function rowsToText(rows: DictRow[]): string {
 
 /** Column labels by tab & row type for the card's header pills */
 function getTypeLabel(type: DictRowType, tab: DictTab): string {
-  if (type === 'comment') return '注释';
-  if (type === 'blank') return '空行';
+  if (type === 'comment') return translate("projects:dictionaryManager.getTypeLabel_message_text");
+  if (type === 'blank') return translate("projects:dictionaryManager.getTypeLabel_message_textVariant2");
   if (type === 'gpt') return 'GPT';
-  if (type === 'normal') return '普通';
-  if (type === 'conditional') return '条件';
-  if (type === 'situation') return '场景';
+  if (type === 'normal') return translate("projects:dictionaryManager.getTypeLabel_message_textVariant3");
+  if (type === 'conditional') return translate("projects:dictionaryManager.getTypeLabel_message_entry");
+  if (type === 'situation') return translate("projects:dictionaryManager.getTypeLabel_message_textVariant4");
   return type;
 }
 
 /** Field labels for each row type */
 function getFieldLabels(type: DictRowType, _tab: DictTab): string[] {
-  if (type === 'gpt') return ['原文', '译文', '解释(可空)'];
-  if (type === 'normal') return ['搜索', '替换', '备注'];
-  if (type === 'conditional') return ['目标', '条件', '搜索', '替换', '备注'];
-  if (type === 'situation') return ['场景', '搜索', '替换'];
-  if (type === 'comment') return ['内容'];
+  if (type === 'gpt') return [translate("projects:dictionaryManager.getFieldLabels_message_source"), translate("projects:dictionaryManager.getFieldLabels_message_translationText"), translate("projects:dictionaryManager.getFieldLabels_message_text")];
+  if (type === 'normal') return [translate("common:actions.search"), translate("projects:dictionaryManager.getFieldLabels_message_replace"), translate("projects:dictionaryManager.getFieldLabels_message_textVariant2")];
+  if (type === 'conditional') return [translate("projects:dictionaryManager.getFieldLabels_message_target"), translate("projects:dictionaryManager.getFieldLabels_message_entry"), translate("common:actions.search"), translate("projects:dictionaryManager.getFieldLabels_message_replace"), translate("projects:dictionaryManager.getFieldLabels_message_textVariant2")];
+  if (type === 'situation') return [translate("projects:dictionaryManager.getFieldLabels_message_textVariant3"), translate("common:actions.search"), translate("projects:dictionaryManager.getFieldLabels_message_replace")];
+  if (type === 'comment') return [translate("projects:dictionaryManager.getFieldLabels_message_textVariant4")];
   return [];
 }
 
@@ -177,6 +178,7 @@ function DictEntryGroupCard({
   onAddRow: (rowType: DictRowType, insertAfterRowIndex: number) => void;
   onOpenInCache?: (sourceWord: string) => void;
 }) {
+  const uiLanguage = useUiLanguage();
   const labels = getFieldLabels(group.type, tab);
   const tableStyle = { '--dict-column-count': labels.length } as CSSProperties;
 
@@ -187,16 +189,16 @@ function DictEntryGroupCard({
           <span className={`dict-card__pill dict-card__pill--${group.type}`}>
             {getTypeLabel(group.type, tab)}
           </span>
-          <span className="dict-card__pill dict-card__pill--index">{group.items.length}条</span>
+          <span className="dict-card__pill dict-card__pill--index">{translate("projects:dictionaryManager.dictCardBadges_message_entry", { count: group.items.length })}</span>
         </div>
         {headerExtra}
       </div>
 
       <div className="dict-card__table" style={tableStyle}>
         <div className="dict-card__table-head">
-          <div className="dict-card__head-cell dict-card__head-cell--index">ID</div>
+          <div className="dict-card__head-cell dict-card__head-cell--index">{translate("projects:dictionaryManager.dictCardTableHead_message_iD")}</div>
           {labels.map((label, ci) => (
-            <div key={ci} className="dict-card__head-cell">{label || `列${ci + 1}`}</div>
+            <div key={ci} className="dict-card__head-cell">{label || translate("projects:dictionaryManager.dictCardHeadCell_message_text", { value: ci + 1 })}</div>
           ))}
         </div>
 
@@ -213,7 +215,7 @@ function DictEntryGroupCard({
                     className="dict-card__input"
                     value={row.values[ci] ?? ''}
                     onChange={(e) => onCellChange(rowIndex, ci, e.target.value)}
-                    placeholder={label || `列${ci + 1}`}
+                    placeholder={label || translate("projects:dictionaryManager.dictCardCell_placeholder_text", { value: ci + 1 })}
                   />
                 </div>
               ))}
@@ -224,7 +226,7 @@ function DictEntryGroupCard({
                   className="dict-card__row-open-cache"
                   onClick={() => onOpenInCache(sourceWord)}
                   disabled={!sourceWord}
-                  title="在「浏览文本」里搜索这个词"
+                  title={translate("projects:dictionaryManager.dictCardRowOpenCache_title_textSearchCount")}
                 >
                   <Icon name="arrow-right" />
                 </button>
@@ -233,7 +235,7 @@ function DictEntryGroupCard({
                 type="button"
                 className="dict-card__row-delete"
                 onClick={() => onDelete(rowIndex)}
-                title="删除此条"
+                title={translate("projects:dictionaryManager.dictCardRowDelete_title_deleteEntry")}
               >
                 <Icon name="close" />
               </button>
@@ -246,7 +248,7 @@ function DictEntryGroupCard({
             type="button"
             className="dict-card__add-row-btn"
             onClick={() => onAddRow(group.type, group.items[group.items.length - 1]?.rowIndex ?? -1)}
-            title="新增同类型条目"
+            title={translate("projects:dictionaryManager.dictCardAddRowBtn_title_entry")}
           >
             +
           </button>
@@ -258,6 +260,7 @@ function DictEntryGroupCard({
 
 /* ── Main component ── */
 export function DictionaryManager(props: DictionaryManagerProps) {
+  const uiLanguage = useUiLanguage();
   const {
     data,
     loading,
@@ -287,8 +290,8 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [newFilename, setNewFilename] = useState('');
-  const [localError, setLocalError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
+  const [localError, setLocalError] = useMessageState<string | null>(null);
+  const [info, setInfo] = useMessageState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<DictContextMenuState | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -361,27 +364,26 @@ export function DictionaryManager(props: DictionaryManagerProps) {
 
   // 类目筛选：一排胶囊挂在卡片头部（跟「GPT 216条」同一行），点当前项退回全部
   const sectionPills = sections.length > 0 ? (
-    <div className="dict-section-pills" role="group" aria-label="按类目筛选">
+    <div className="dict-section-pills" role="group" aria-label={translate("projects:dictionaryManager.dictSectionPills_ariaLabel_filter")}>
       <button
         type="button"
         className={`dict-section-pill${activeSection ? '' : ' dict-section-pill--active'}`}
         onClick={() => setSectionFilter('')}
-        title="显示全部类目"
-      >
-        全部
-        <span className="dict-section-pill__count">{sections.reduce((sum, item) => sum + item.count, 0)}</span>
+        title={translate("projects:dictionaryManager.dictSectionPills_title_all")}
+      >{translate("projects:dictionaryManager.dictSectionPills_button_all")}<span className="dict-section-pill__count">{sections.reduce((sum, item) => sum + item.count, 0)}</span>
       </button>
       {sections.map((section) => {
         const isActive = activeSection === section.name;
+        const label = section.name === UNSECTIONED_LABEL ? translate("projects:dictionaryManager.uNSECTIONEDLABEL_message_not") : section.name;
         return (
           <button
             key={section.name}
             type="button"
             className={`dict-section-pill${isActive ? ' dict-section-pill--active' : ''}`}
             onClick={() => setSectionFilter(isActive ? '' : section.name)}
-            title={isActive ? '取消筛选，显示全部类目' : `只看「${section.name}」`}
+            title={isActive ? translate("projects:dictionaryManager.dictSectionPills_title_cancelFilterAll") : translate("projects:dictionaryManager.dictSectionPills_title_text", { name: label })}
           >
-            {section.name}
+            {label}
             <span className="dict-section-pill__count">{section.count}</span>
           </button>
         );
@@ -431,7 +433,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   const handleRevealFile = async (file: string) => {
     const filePath = data?.dict_contents?.[file]?.path;
     if (!filePath) {
-      setLocalError(`无法定位字典文件「${stripProjectDirMarker(file)}」`);
+      setLocalError(uiMessage("projects:dictionaryManager.handleRevealFile_setLocalError_unableDictionaryFile", { value: stripProjectDirMarker(file) }));
       setInfo(null);
       return;
     }
@@ -441,7 +443,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     try {
       await invoke('reveal_file', { path: filePath });
     } catch (e) {
-      setLocalError(e instanceof Error ? e.message : `在文件管理器中浏览失败: ${String(e)}`);
+      setLocalError(e instanceof Error ? e.message : uiMessage("projects:dictionaryManager.handleRevealFile_setLocalError_fileFailed", { value: String(e) }));
     }
   };
 
@@ -453,7 +455,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     try {
       await onGenerateGptDict();
     } catch (e) {
-      setLocalError(e instanceof Error ? e.message : '启动 AI 生成 GPT 字典任务失败');
+      setLocalError(e instanceof Error ? e.message : uiMessage("projects:dictionaryManager.handleGenerateGptDict_setLocalError_aIGPTDictionaryJobFailed"));
     } finally {
       setGeneratingGptDict(false);
     }
@@ -494,7 +496,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   }, [selectedFile, selectedContent, dirty, draftText]);
 
   const handleSelectFile = (file: string) => {
-    if (dirty && !confirm('当前文件有未保存改动，切换会丢失改动，是否继续？')) {
+    if (dirty && !confirm(translate("projects:dictionaryManager.handleSelectFile_confirm_currentFileNotSave"))) {
       return;
     }
     setSelectedFile(file);
@@ -507,7 +509,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   };
 
   const handleTabChange = (tab: DictTab) => {
-    if (dirty && !confirm('当前文件有未保存改动，切换分类会丢失改动，是否继续？')) {
+    if (dirty && !confirm(translate("projects:dictionaryManager.handleTabChange_confirm_currentFileNotSave"))) {
       return;
     }
     setActiveTab(tab);
@@ -593,7 +595,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
           return !src || !dst;
         });
       if (invalidRow) {
-        setLocalError(`GPT字典第 ${invalidRow.index + 1} 行的原文和译文不能为空`);
+        setLocalError(uiMessage("projects:dictionaryManager.handleSave_setLocalError_gPTDictionarySourceTranslationTextRequired", { value: invalidRow.index + 1 }));
         setInfo(null);
         return;
       }
@@ -604,10 +606,10 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     try {
       await onSaveFile(selectedFile, draftText);
       setDirty(false);
-      setInfo('已保存');
+      setInfo(uiMessage("projects:dictionaryManager.handleSave_setInfo_doneSave"));
       await onReload();
     } catch (e) {
-      setLocalError(e instanceof Error ? e.message : '保存失败');
+      setLocalError(e instanceof Error ? e.message : uiMessage("projects:dictionaryManager.handleSave_setLocalError_saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -616,7 +618,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   const handleCreate = async () => {
     const raw = newFilename.trim();
     if (!raw) {
-      setLocalError('文件名不能为空');
+      setLocalError(uiMessage("projects:dictionaryManager.handleCreate_setLocalError_fileRequired"));
       return;
     }
     const name = /\.txt$/i.test(raw) ? raw : `${raw}.txt`;
@@ -628,9 +630,9 @@ export function DictionaryManager(props: DictionaryManagerProps) {
       setNewFilename('');
       setSelectedFile(createdFileKey);
       await onReload();
-      setInfo('已创建字典文件');
+      setInfo(uiMessage("projects:dictionaryManager.handleCreate_setInfo_doneCreateDictionaryFile"));
     } catch (e) {
-      setLocalError(e instanceof Error ? e.message : '创建失败');
+      setLocalError(e instanceof Error ? e.message : uiMessage("projects:dictionaryManager.handleCreate_setLocalError_createFailed"));
     } finally {
       setCreating(false);
     }
@@ -638,7 +640,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
 
   const handleDelete = async () => {
     if (!selectedFile) return;
-    if (!confirm(`确定删除字典文件「${stripProjectDirMarker(selectedFile)}」？`)) return;
+    if (!confirm(translate("projects:dictionaryManager.handleDelete_confirm_deleteDictionaryFile", { value: stripProjectDirMarker(selectedFile) }))) return;
     setDeleting(true);
     setLocalError(null);
     setInfo(null);
@@ -646,9 +648,9 @@ export function DictionaryManager(props: DictionaryManagerProps) {
       await onDeleteFile(selectedFile);
       setDirty(false);
       await onReload();
-      setInfo('已删除字典文件');
+      setInfo(uiMessage("projects:dictionaryManager.handleDelete_setInfo_doneDeleteDictionaryFile"));
     } catch (e) {
-      setLocalError(e instanceof Error ? e.message : '删除失败');
+      setLocalError(e instanceof Error ? e.message : uiMessage("projects:dictionaryManager.handleDelete_setLocalError_deleteFailed"));
     } finally {
       setDeleting(false);
     }
@@ -658,7 +660,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     return (
       <div className="project-dictionary-page">
         <div className="project-dictionary-page__header"><h1>{title}</h1></div>
-        <LoadingState title="加载字典中…" description="正在读取当前字典目录与文件内容。" />
+        <LoadingState title={translate("projects:dictionaryManager.projectDictionaryPage_title_loadDictionary")} description={translate("projects:dictionaryManager.projectDictionaryPage_description_pendingReadCurrentDictionaryDirectoryFile")} />
       </div>
     );
   }
@@ -667,16 +669,16 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     return (
       <div className="project-dictionary-page">
         <div className="project-dictionary-page__header"><h1>{title}</h1></div>
-        <ErrorState title="加载字典失败" description={error} />
+        <ErrorState title={translate("projects:dictionaryManager.projectDictionaryPage_title_loadDictionaryFailed")} description={error} />
       </div>
     );
   }
 
   // 二次确认里写清楚用的是哪个后端：项目没单独指定就是全局默认，跟开始翻译同一口径
   const gendicBackendText = formatBackendUsage(
-    gendicBackend ?? { backend: '当前项目的后端配置', model: '', profile: '' },
+    gendicBackend ?? { backend: translate("projects:dictionaryManager.backend_backend_currentProjectBackendConfig"), model: '', profile: '' },
   );
-  const gendicBackendMissing = gendicBackend?.backend === '未配置后端';
+  const gendicBackendMissing = gendicBackend?.missing === true;
 
   return (
     <div className="project-dictionary-page">
@@ -685,8 +687,8 @@ export function DictionaryManager(props: DictionaryManagerProps) {
         <p>{description}</p>
       </div>
 
-      {localError && <InlineFeedback tone="error" title="操作失败" description={localError} />}
-      {info && <InlineFeedback className="inline-alert--floating" tone="success" title="操作成功" description={info} />}
+      {localError && <InlineFeedback tone="error" title={translate("projects:dictionaryManager.projectDictionaryPage_title_failed")} description={localError} />}
+      {info && <InlineFeedback className="inline-alert--floating" tone="success" title={translate("projects:dictionaryManager.projectDictionaryPage_title_success")} description={info} />}
 
       <div className="project-dictionary-page__content">
         <div className="dict-tabs">
@@ -697,7 +699,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
               type="button"
               onClick={() => handleTabChange(tab)}
             >
-              {tab === 'pre' ? '译前字典' : tab === 'gpt' ? 'GPT字典' : '译后字典'}
+              {tab === 'pre' ? translate("projects:dictionaryManager.dictTabs_message_dictionary") : tab === 'gpt' ? translate("projects:dictionaryManager.dictTabs_message_gPTDictionary") : translate("projects:dictionaryManager.dictTabs_message_dictionaryVariant2")}
               <span className="dict-tab__count">{getFilesByTab(data, tab).length}</span>
             </button>
           ))}
@@ -706,10 +708,10 @@ export function DictionaryManager(props: DictionaryManagerProps) {
               variant="secondary"
               onClick={() => setShowGenerateConfirm(true)}
               disabled={generatingGptDict}
-              title="用 AI（GenDic）从原文提取术语生成 GPT 字典"
+              title={translate("projects:dictionaryManager.dictTabs_title_aIGenDicSourceExtractGPTDictionary")}
             >
               <Icon name="bot" />
-              {generatingGptDict ? '启动中…' : 'AI生成GPT字典'}
+              {generatingGptDict ? translate("projects:dictionaryManager.dictTabs_message_text") : translate("projects:dictionaryManager.dictTabs_message_aIGPTDictionary")}
             </Button>
           ) : null}
         </div>
@@ -717,14 +719,14 @@ export function DictionaryManager(props: DictionaryManagerProps) {
         <div className="dict-layout">
           <aside className="dict-layout__sidebar">
             <div className="dict-layout__sidebar-header">
-              <h3>字典文件</h3>
+              <h3>{translate("projects:dictionaryManager.dictLayoutSidebarHeader_message_dictionaryFile")}</h3>
               <button
                 type="button"
                 className={`icon-btn icon-btn--refresh${refreshing ? ' icon-btn--spinning' : ''}`}
                 onClick={() => void handleReload()}
                 disabled={refreshing}
-                title="刷新字典文件列表"
-                aria-label="刷新字典文件列表"
+                title={translate("projects:dictionaryManager.dictLayoutSidebarHeader_title_dictionaryFile")}
+                aria-label={translate("projects:dictionaryManager.dictLayoutSidebarHeader_ariaLabel_dictionaryFile")}
               >
                 <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
                   <path d="M13.5 8a5.5 5.5 0 11-1.4-3.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -735,11 +737,11 @@ export function DictionaryManager(props: DictionaryManagerProps) {
             <div className="dict-create-file">
               <input
                 type="text"
-                placeholder="新文件名，如 custom_pre.txt"
+                placeholder={translate("projects:dictionaryManager.dictCreateFile_placeholder_fileCustomPreTxt")}
                 value={newFilename}
                 onChange={(e) => setNewFilename(e.target.value)}
               />
-              <Button onClick={() => void handleCreate()} disabled={creating}>新建</Button>
+              <Button onClick={() => void handleCreate()} disabled={creating}>{translate("projects:dictionaryManager.dictCreateFile_message_new")}</Button>
             </div>
             <div className="dict-file-list">
               {activeFiles.map((file) => {
@@ -757,12 +759,12 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                     }}
                   >
                     <span className="dict-file-item__name">{stripProjectDirMarker(file)}</span>
-                    {content && <span className="dict-file-item__count">{content.count}条</span>}
+                    {content && <span className="dict-file-item__count">{translate("projects:dictionaryManager.dictFileList_message_entry", { count: content.count })}</span>}
                   </button>
                 );
               })}
               {activeFiles.length === 0 && (
-                <EmptyState title="当前分类无字典文件" description="请先创建一个字典文件。" />
+                <EmptyState title={translate("projects:dictionaryManager.dictFileList_title_currentDictionaryFile")} description={translate("projects:dictionaryManager.dictFileList_description_createCountDictionaryFile")} />
               )}
             </div>
           </aside>
@@ -771,38 +773,32 @@ export function DictionaryManager(props: DictionaryManagerProps) {
             {selectedFile ? (
               <Panel
                 title={stripProjectDirMarker(selectedFile)}
-                description={`${selectedContent?.count ?? 0} 条有效条目 · ${selectedContent?.path ?? ''}`}
+                description={translate("projects:dictionaryManager.dictLayoutMain_description_entryEntry", { value: selectedContent?.count ?? 0, value2: selectedContent?.path ?? '' })}
                 actions={(
                   <div className="dict-panel-actions">
                     <Button variant="secondary" onClick={() => setMode(mode === 'card' ? 'text' : 'card')}>
-                      {mode === 'card' ? '切换纯文本' : '切换卡片'}
+                      {mode === 'card' ? translate("projects:dictionaryManager.dictPanelActions_message_text") : translate("projects:dictionaryManager.dictPanelActions_message_textVariant2")}
                     </Button>
-                    <Button variant="secondary" onClick={() => void handleDelete()} disabled={deleting}>删除文件</Button>
-                    <Button onClick={() => void handleSave()} disabled={saving || !dirty}>保存</Button>
+                    <Button variant="secondary" onClick={() => void handleDelete()} disabled={deleting}>{translate("projects:dictionaryManager.dictPanelActions_message_deleteFile")}</Button>
+                    <Button onClick={() => void handleSave()} disabled={saving || !dirty}>{translate("common:actions.save")}</Button>
                   </div>
                 )}
               >
                 <div className="dict-toolbar">
                   <input
                     type="text"
-                    placeholder="搜索字典条目…"
+                    placeholder={translate("projects:dictionaryManager.dictToolbar_placeholder_searchDictionaryEntry")}
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="dict-search"
                   />
                   {mode === 'card' && (
                     activeTab === 'gpt' ? (
-                      <Button variant="secondary" onClick={() => addRow('gpt')}>
-                        + 新增条目
-                      </Button>
+                      <Button variant="secondary" onClick={() => addRow('gpt')}>{translate("projects:dictionaryManager.dictToolbar_message_entry")}</Button>
                     ) : (
                       <>
-                        <Button variant="secondary" onClick={() => addRow('normal')}>
-                          + 普通条目
-                        </Button>
-                        <Button variant="secondary" onClick={() => addRow('conditional')}>
-                          + 条件条目
-                        </Button>
+                        <Button variant="secondary" onClick={() => addRow('normal')}>{translate("projects:dictionaryManager.dictToolbar_message_entryVariant2")}</Button>
+                        <Button variant="secondary" onClick={() => addRow('conditional')}>{translate("projects:dictionaryManager.dictToolbar_message_entryEntry")}</Button>
                       </>
                     )
                   )}
@@ -843,15 +839,15 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                       ))}
                       {groupedRows.length === 0 && (
                         <EmptyState
-                          title={searchTerm.trim() || activeSection ? '无匹配条目' : '字典为空'}
-                          description={searchTerm.trim() || activeSection ? '尝试更换搜索关键词、类目或新增条目。' : '点击下方按钮添加第一条字典条目。'}
+                          title={searchTerm.trim() || activeSection ? translate("projects:dictionaryManager.dictCardList_title_matchEntry") : translate("projects:dictionaryManager.dictCardList_title_dictionary")}
+                          description={searchTerm.trim() || activeSection ? translate("projects:dictionaryManager.dictCardList_description_searchEntry") : translate("projects:dictionaryManager.dictCardList_description_buttonAddEntryDictionaryEntry")}
                           action={(
                             activeTab === 'gpt' ? (
-                              <Button variant="secondary" onClick={() => addRow('gpt')}>+ 新增条目</Button>
+                              <Button variant="secondary" onClick={() => addRow('gpt')}>{translate("projects:dictionaryManager.dictCardList_action_entry")}</Button>
                             ) : (
                               <div className="dict-empty-actions">
-                                <Button variant="secondary" onClick={() => addRow('normal')}>+ 普通条目</Button>
-                                <Button variant="secondary" onClick={() => addRow('conditional')}>+ 条件条目</Button>
+                                <Button variant="secondary" onClick={() => addRow('normal')}>{translate("projects:dictionaryManager.dictEmptyActions_message_entry")}</Button>
+                                <Button variant="secondary" onClick={() => addRow('conditional')}>{translate("projects:dictionaryManager.dictEmptyActions_message_entryEntry")}</Button>
                               </div>
                             )
                           )}
@@ -862,7 +858,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                 )}
               </Panel>
             ) : (
-              <EmptyState title="选择一个字典文件" description="从左侧选择字典文件开始编辑。" />
+              <EmptyState title={translate("projects:dictionaryManager.dictLayoutMain_title_selectCountDictionaryFile")} description={translate("projects:dictionaryManager.dictLayoutMain_description_selectDictionaryFileStartEdit")} />
             )}
           </div>
         </div>
@@ -878,34 +874,21 @@ export function DictionaryManager(props: DictionaryManagerProps) {
           <div className="dict-dialog" onClick={(e) => e.stopPropagation()}>
             <div className="dict-dialog__header">
               <h3 className="dict-dialog__title" id="gendic-confirm-title">
-                <Icon name="bot" />
-                AI 生成 GPT 字典
-              </h3>
-              <p className="dict-dialog__subtitle">
-                将使用 <strong>{gendicBackendText}</strong> 启动 GenDic 生成 GPT 字典。
-              </p>
+                <Icon name="bot" />{translate("projects:dictionaryManager.dictDialogTitle_h3_aIGPTDictionary")}</h3>
+              <p className="dict-dialog__subtitle"><UiTrans k="projects:dictionaryManager.dictDialogHeader_message_00GenDicGPTDictionary" values={{ gendicBackendText: gendicBackendText }} components={[<strong />]} /></p>
             </div>
             <div className="dict-dialog__body">
-              <p>
-                后端跟随当前项目的后端配置；项目没有单独指定时用全局默认配置，与「开始翻译」的「当前后端」一致。
-              </p>
-              <p>
-                GenDic 会先给说话人名定译名，再逐段提取专有名词并整体审校，最后并入项目目录下的
-                「项目GPT字典-生成.txt」。整个过程会调用模型、消耗 API 额度，启动后可在「开始翻译」查看阶段与进度。
-              </p>
+              <p>{translate("projects:dictionaryManager.dictDialogBody_message_backendCurrentProjectBackendConfigProjectEmpty")}</p>
+              <p>{translate("projects:dictionaryManager.dictDialogBody_message_genDicNameTableExtractProjectDirectoryProjectGPT")}</p>
               {gendicBackendMissing ? (
                 <p className="dict-dialog__warning">
-                  <Icon name="warning" />
-                  当前还没有可用的模型配置，直接启动会失败。请先去「模型设置」新建配置（第一个配置会自动设为默认）。
-                </p>
+                  <Icon name="warning" />{translate("projects:dictionaryManager.dictDialogWarning_p_currentEmptyModelConfigFailedModelSettings")}</p>
               ) : null}
             </div>
             <div className="dict-dialog__actions">
-              <Button variant="secondary" onClick={() => setShowGenerateConfirm(false)}>取消</Button>
+              <Button variant="secondary" onClick={() => setShowGenerateConfirm(false)}>{translate("common:actions.cancel")}</Button>
               <Button onClick={confirmGenerateGptDict} disabled={generatingGptDict}>
-                <Icon name="play" />
-                确认启动
-              </Button>
+                <Icon name="play" />{translate("projects:dictionaryManager.dictDialogActions_button_confirm")}</Button>
             </div>
           </div>
         </div>
@@ -928,7 +911,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
             }}
           >
             <span className="cache-context-menu__icon" aria-hidden="true"><Icon name="folder-open" /></span>
-            <span className="cache-context-menu__label">在文件管理器中浏览</span>
+            <span className="cache-context-menu__label">{translate("projects:dictionaryManager.cacheContextMenuItem_message_file")}</span>
           </button>
         </div>,
         document.body,

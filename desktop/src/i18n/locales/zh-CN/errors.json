@@ -1,0 +1,16 @@
+{
+  "api": {
+    "subscribeAgentStream_message_agentStreamFailed": "agent stream 请求失败：{{status}}",
+    "subscribeAgentStream_message_agent": "Agent 事件流意外结束",
+    "apiRequest_message_unableConnectionBackend": "无法连接到后端：{{baseUrl}}",
+    "apiRequest_message_failed": "请求失败：{{status}}",
+    "requireBackendBaseUrl_message_backendNotSettingsReconnect": "本地后端尚未就绪，请在设置中重新连接。"
+  },
+  "profiles": {
+    "notFound": "未找到后端配置：{{name}}",
+    "nameRequired": "配置名称不能为空"
+  },
+  "projects": {
+    "projectRequired": "请先选择一个项目"
+  }
+}

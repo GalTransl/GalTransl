@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../../i18n";
 import { Panel } from '../../components/Panel';
 import { CustomSelect } from '../../components/CustomSelect';
 
@@ -7,8 +8,9 @@ interface DictionarySettingsSectionProps {
 }
 
 export function DictionarySettingsSection({ dictConfig, onChange }: DictionarySettingsSectionProps) {
+  const uiLanguage = useUiLanguage();
   return (
-    <Panel title="字典设置" description="译前/GPT/译后字典文件配置。(project_dir)代表在项目目录下">
+    <Panel title={translate("config:dictionarySettingsSection.dictionarySettingsSection_title_dictionarySettings")} description={translate("config:dictionarySettingsSection.dictionarySettingsSection_description_gPTDictionaryFileConfigProjectDirProject")}>
       <DictConfigEditor dictConfig={dictConfig} onChange={onChange} />
     </Panel>
   );
@@ -22,10 +24,11 @@ function DictConfigEditor({
   dictConfig: Record<string, unknown>;
   onChange: (newConfig: Record<string, unknown>) => void;
 }) {
+  useUiLanguage();
   return (
     <>
       <label className="field">
-        <span>通用字典文件夹</span>
+        <span>{translate("config:dictionarySettingsSection.field_message_dictionaryFile")}</span>
         <input
           type="text"
           value={String(dictConfig.defaultDictFolder ?? 'Dict')}
@@ -33,70 +36,70 @@ function DictConfigEditor({
         />
       </label>
       <label className="field">
-        <span>译前字典</span>
+        <span>{translate("config:dictionarySettingsSection.field_message_dictionary")}</span>
         <textarea
           rows={4}
           value={Array.isArray(dictConfig.preDict) ? (dictConfig.preDict as string[]).join('\n') : String(dictConfig.preDict ?? '')}
           onChange={(e) => onChange({ ...dictConfig, preDict: e.target.value.split('\n').filter(Boolean) })}
         />
-        <span className="field__hint">每行一个字典文件名</span>
+        <span className="field__hint">{translate("config:dictionarySettingsSection.field_message_countDictionaryFile")}</span>
       </label>
       <label className="field">
-        <span>GPT字典</span>
+        <span>{translate("config:dictionarySettingsSection.field_message_gPTDictionary")}</span>
         <textarea
           rows={4}
           value={Array.isArray(dictConfig['gpt.dict']) ? (dictConfig['gpt.dict'] as string[]).join('\n') : String(dictConfig['gpt.dict'] ?? '')}
           onChange={(e) => onChange({ ...dictConfig, 'gpt.dict': e.target.value.split('\n').filter(Boolean) })}
         />
-        <span className="field__hint">每行一个字典文件名</span>
+        <span className="field__hint">{translate("config:dictionarySettingsSection.field_message_countDictionaryFile")}</span>
       </label>
       <label className="field">
-        <span>译后字典</span>
+        <span>{translate("config:dictionarySettingsSection.field_message_dictionaryVariant2")}</span>
         <textarea
           rows={4}
           value={Array.isArray(dictConfig.postDict) ? (dictConfig.postDict as string[]).join('\n') : String(dictConfig.postDict ?? '')}
           onChange={(e) => onChange({ ...dictConfig, postDict: e.target.value.split('\n').filter(Boolean) })}
         />
-        <span className="field__hint">每行一个字典文件名</span>
+        <span className="field__hint">{translate("config:dictionarySettingsSection.field_message_countDictionaryFile")}</span>
       </label>
       <label className="field">
-        <span>字典用在name字段(译前)</span>
+        <span>{translate("config:dictionarySettingsSection.field_message_dictionaryName")}</span>
         <CustomSelect
           value={String(dictConfig.usePreDictInName ?? 'false')}
           onChange={(e) => onChange({ ...dictConfig, usePreDictInName: e.target.value === 'true' })}
         >
-          <option value="true">是</option>
-          <option value="false">否</option>
+          <option value="true">{translate("config:dictionarySettingsSection.field_message_text")}</option>
+          <option value="false">{translate("config:dictionarySettingsSection.field_message_textVariant2")}</option>
         </CustomSelect>
       </label>
       <label className="field">
-        <span>字典用在name字段(GPT)</span>
+        <span>{translate("config:dictionarySettingsSection.field_message_dictionaryNameGPT")}</span>
         <CustomSelect
           value={String(dictConfig.useGPTDictInName ?? 'false')}
           onChange={(e) => onChange({ ...dictConfig, useGPTDictInName: e.target.value === 'true' })}
         >
-          <option value="true">是</option>
-          <option value="false">否</option>
+          <option value="true">{translate("config:dictionarySettingsSection.field_message_text")}</option>
+          <option value="false">{translate("config:dictionarySettingsSection.field_message_textVariant2")}</option>
         </CustomSelect>
       </label>
       <label className="field">
-        <span>字典用在name字段(译后)</span>
+        <span>{translate("config:dictionarySettingsSection.field_message_dictionaryNameVariant2")}</span>
         <CustomSelect
           value={String(dictConfig.usePostDictInName ?? 'false')}
           onChange={(e) => onChange({ ...dictConfig, usePostDictInName: e.target.value === 'true' })}
         >
-          <option value="true">是</option>
-          <option value="false">否</option>
+          <option value="true">{translate("config:dictionarySettingsSection.field_message_text")}</option>
+          <option value="false">{translate("config:dictionarySettingsSection.field_message_textVariant2")}</option>
         </CustomSelect>
       </label>
       <label className="field">
-        <span>字典排序</span>
+        <span>{translate("config:dictionarySettingsSection.field_message_dictionaryVariant3")}</span>
         <CustomSelect
           value={String(dictConfig.sortDict ?? 'true')}
           onChange={(e) => onChange({ ...dictConfig, sortDict: e.target.value === 'true' })}
         >
-          <option value="true">是</option>
-          <option value="false">否</option>
+          <option value="true">{translate("config:dictionarySettingsSection.field_message_text")}</option>
+          <option value="false">{translate("config:dictionarySettingsSection.field_message_textVariant2")}</option>
         </CustomSelect>
       </label>
     </>

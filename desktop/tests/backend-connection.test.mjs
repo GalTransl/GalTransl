@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import vm from 'node:vm';
 import ts from 'typescript';
+import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
+const i18n = createTypeScriptLoader()(new URL('../src/i18n/core.ts', import.meta.url));
 
 // Test the public API helpers with the Tauri bridge and HTTP transport replaced.
 // Transform only import.meta so each test can select Vite's runtime environment.
@@ -29,6 +31,7 @@ function loadApi({ native = true, dev = false, configured, invoke } = {}) {
     window: native ? { __TAURI_INTERNALS__: {} } : {},
     localStorage: { getItem: () => null },
     require: (name) => {
+      if (name === '../i18n/core') return i18n;
       assert.equal(name, '@tauri-apps/api/core');
       return { invoke: invoke ?? (() => Promise.resolve({ url: 'http://127.0.0.1:45678' })) };
     },

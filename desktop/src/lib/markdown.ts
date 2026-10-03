@@ -1,3 +1,4 @@
+import { t as translate } from "../i18n/core";
 /* 轻量 Markdown 渲染器 + 缓存引用指令（供 Agent 对话和工具结果使用）。
    覆盖 LLM 常见输出：标题 / 粗斜体 / 行内代码 / 围栏代码块 / 无序有序列表 /
    引用 / 段落。所有文本先 HTML 转义再做替换，不产生注入面；链接降级为
@@ -65,7 +66,8 @@ function renderInline(escaped: string): string {
   // 行内代码优先（内部不再解析其它标记）
   let out = escaped.replace(/`([^`]+)`/g, '<code>$1</code>');
   // 图片 ![alt](url) -> 「图片」alt
-  out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '「图片：$1」');
+  out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt: string) =>
+    escapeHtml(translate('common:markdown.imageLabel', { alt: '__GALTRANSL_IMAGE_ALT__' })).replace('__GALTRANSL_IMAGE_ALT__', () => alt));
   // 链接 [text](url) -> text（url）——不生成可点击链接
   out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '$1（$2）');
   // 加粗 + 斜体

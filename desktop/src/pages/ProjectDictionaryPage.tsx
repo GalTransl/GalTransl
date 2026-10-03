@@ -1,3 +1,4 @@
+import { UiError, message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ProjectPageContext } from '../components/ProjectLayout';
@@ -38,12 +39,13 @@ export function ProjectDictionaryPage({
   ctx: ProjectPageContext;
   active?: boolean;
 }) {
+  const uiLanguage = useUiLanguage();
   const { projectId, projectDir, configFileName } = ctx;
   const navigate = useNavigate();
 
   const [data, setData] = useState<ProjectDictionaryManagerResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useMessageState<string | null>(null);
   const [isDocumentVisible, setIsDocumentVisible] = useState(() => document.visibilityState === 'visible');
   const [projectBackendConfig, setProjectBackendConfig] = useState<Record<string, unknown> | null>(null);
   const currentSnapshot = useMemo(() => buildDictionarySnapshot(data), [data]);
@@ -76,7 +78,7 @@ export function ProjectDictionaryPage({
 
   const gendicBackend = useMemo(
     () => (projectDir ? summarizeBackendUsage(projectDir, projectBackendConfig) : null),
-    [projectDir, projectBackendConfig],
+    [uiLanguage, projectDir, projectBackendConfig],
   );
 
   const loadData = useCallback(async (options?: { silent?: boolean }) => {
@@ -98,7 +100,7 @@ export function ProjectDictionaryPage({
       }
     } catch (err) {
       if (!silent) {
-        setError(normalizeError(err, '加载项目字典失败'));
+        setError(normalizeError(err, uiMessage("projects:projectDictionaryPage.loadData_normalizeError_loadProjectDictionaryFailed")));
       }
     } finally {
       if (!silent) {
@@ -169,15 +171,15 @@ export function ProjectDictionaryPage({
 
   return (
     <DictionaryManager
-      title="项目字典"
-      description="管理项目目录下的字典文件，“GPT字典”是发给大模型的字典，“译前、译后字典”是对应的直接替换字典。"
+      title={translate("projects:projectDictionaryPage.projectDictionaryPage_title_projectDictionary")}
+      description={translate("projects:projectDictionaryPage.projectDictionaryPage_description_projectDirectoryDictionaryFileGPTDictionaryModel")}
       data={data}
       loading={loading}
       error={error}
       onReload={loadData}
       onCreateFile={async (category: DictionaryCategory, filename: string) => {
         if (!projectId) {
-          throw new Error('projectId is required');
+          throw new UiError(uiMessage('errors:projects.projectRequired'));
         }
         const result = await createProjectDictionaryFile(projectId, {
           config_file_name: configFileName,
@@ -208,7 +210,7 @@ export function ProjectDictionaryPage({
       }}
       onGenerateGptDict={async () => {
         if (!projectId || !projectDir) {
-          throw new Error('项目信息缺失，无法启动任务');
+          throw new UiError(uiMessage("projects:projectDictionaryPage.projectDictionaryPage_message_projectUnableJob"));
         }
         await submitJob({
           config_file_name: configFileName || 'config.yaml',

@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../../i18n";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 type InlineFeedbackTone = 'error' | 'info' | 'success' | 'warning';
@@ -74,6 +75,7 @@ export function InlineFeedback({
   onDismiss,
   dedupeKey,
 }: InlineFeedbackProps) {
+  useUiLanguage();
   const content = children ?? description;
   const classes = ['inline-alert', `inline-alert--${tone}`, className].filter(Boolean).join(' ');
   const role = tone === 'error' || tone === 'warning' ? 'alert' : 'status';
@@ -144,15 +146,15 @@ export function InlineFeedback({
       <div className="inline-alert__icon">{TONE_ICON[tone]}</div>
       <div className="page-state-feedback__body">
         <div className="inline-alert__meta">
-          <span className="inline-alert__app">GalTransl</span>
+          <span className="inline-alert__app">{translate("common:inlineFeedback.inlineAlertMeta_message_galTransl")}</span>
           <span className="inline-alert__dot" aria-hidden="true" />
-          <span className="inline-alert__time">刚刚</span>
+          <span className="inline-alert__time">{translate("common:inlineFeedback.inlineAlertMeta_message_text")}</span>
         </div>
         {title ? <strong className="page-state-feedback__title">{title}</strong> : null}
         {content ? <div className="page-state-feedback__description">{content}</div> : null}
       </div>
       {action ? <div className="page-state-feedback__action">{action}</div> : null}
-      <button type="button" className="inline-alert__close" aria-label="关闭提示" onClick={startDismiss}>
+      <button type="button" className="inline-alert__close" aria-label={translate("common:inlineFeedback.inlineAlertClose_ariaLabel_disableHint")} onClick={startDismiss}>
         ×
       </button>
     </div>

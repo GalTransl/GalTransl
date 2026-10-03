@@ -1,3 +1,5 @@
+import { getUiLanguage } from "../i18n/core";
+import { t as translate, useUiLanguage } from "../i18n";
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '../components/Icon';
 import { speakerStyle } from '../lib/speaker';
@@ -12,6 +14,7 @@ import type {
 } from '../lib/api';
 
 export function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) {
+  const uiLanguage = useUiLanguage();
   const [copied, setCopied] = useState(false);
   const [isMessageTruncated, setIsMessageTruncated] = useState(false);
   const messageRef = useRef<HTMLParagraphElement | null>(null);
@@ -58,7 +61,7 @@ export function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) 
       <div className="runtime-event__header">
         <div className="runtime-event__badges">
           <span className="runtime-event__pill runtime-event__pill--danger">{kindLabel}</span>
-          {(entry.retry_count ?? 0) > 0 ? <span className="runtime-event__pill">重试 {entry.retry_count}</span> : null}
+          {(entry.retry_count ?? 0) > 0 ? <span className="runtime-event__pill">{translate("projects:translateRuntimeShared.runtimeEventBadges_message_retry", { retry_count: entry.retry_count })}</span> : null}
         </div>
         <div className="runtime-event__header-right">
           <div className="runtime-event__error-time-action">
@@ -68,8 +71,8 @@ export function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) 
               className={`icon-btn runtime-event__copy-btn runtime-event__time-copy${copied ? ' runtime-event__copy-btn--copied' : ''}`}
               onClick={() => void handleCopyMessage()}
               disabled={!messageText}
-              title={!messageText ? '无可复制内容' : (copied ? '已复制' : '复制错误信息')}
-              aria-label={!messageText ? '无可复制内容' : '复制错误信息'}
+              title={!messageText ? translate("projects:translateRuntimeShared.runtimeEventErrorTimeAction_title_text") : (copied ? translate("projects:translateRuntimeShared.runtimeEventErrorTimeAction_title_done") : translate("projects:translateRuntimeShared.runtimeEventErrorTimeAction_title_error"))}
+              aria-label={!messageText ? translate("projects:translateRuntimeShared.runtimeEventErrorTimeAction_ariaLabel_text") : translate("projects:translateRuntimeShared.runtimeEventErrorTimeAction_ariaLabel_error")}
             >
               {copied ? (
                 <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
@@ -90,7 +93,7 @@ export function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) 
         className="runtime-event__message"
         title={isMessageTruncated && messageText ? messageText : undefined}
       >
-        {entry.message || '未提供错误详情。'}
+        {entry.message || translate("projects:translateRuntimeShared.runtimeEventMessage_message_notError")}
       </p>
       <dl className="runtime-event__meta">
         {entry.kind !== 'api' && (
@@ -101,7 +104,7 @@ export function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) 
         <div className="runtime-event__meta-model">
           <dd>{modelLabel || '—'}</dd>
         </div>
-        {(entry.sleep_seconds ?? 0) > 0 ? <span className="runtime-event__pill">退避 {Number(entry.sleep_seconds).toFixed(3)}s</span> : null}
+        {(entry.sleep_seconds ?? 0) > 0 ? <span className="runtime-event__pill">{translate("projects:translateRuntimeShared.runtimeEventMeta_message_s", { value: Number(entry.sleep_seconds).toFixed(3) })}</span> : null}
       </dl>
     </article>
   );
@@ -119,6 +122,7 @@ export function RuntimeSuccessRow({
   onToggleSuccessFileFilter: (filename: string) => void;
   nameDict: Map<string, string>;
 }) {
+  const uiLanguage = useUiLanguage();
   const rawSpeakerLabel = Array.isArray(entry.speaker) ? entry.speaker.join(' / ') : entry.speaker;
   const speakerLabel = rawSpeakerLabel
     ? (Array.isArray(entry.speaker)
@@ -126,7 +130,7 @@ export function RuntimeSuccessRow({
         : resolveSpeakerName(rawSpeakerLabel, nameDict))
     : rawSpeakerLabel;
   const speakerStyleVal = rawSpeakerLabel ? speakerStyle(rawSpeakerLabel) : undefined;
-  const entryFilename = entry.filename || '未命名文件';
+  const entryFilename = entry.filename || translate("projects:translateRuntimeShared.entryFilename_message_notFile");
   const filterFilename = entry.filename;
   const translatorLabel = compactModelLabel(entry.trans_by);
 
@@ -141,11 +145,11 @@ export function RuntimeSuccessRow({
           >
             {filterFilename ? (
               <button
-                aria-label="筛选译文"
+                aria-label={translate("projects:translateRuntimeShared.runtimeEventFileNameBtn_ariaLabel_filterTranslationText")}
                 aria-pressed={isSuccessFileFilterActive}
                 className="runtime-event__file-name-btn"
                 onClick={() => onToggleSuccessFileFilter(filterFilename)}
-                title="筛选译文"
+                title={translate("projects:translateRuntimeShared.runtimeEventFileNameBtn_title_filterTranslationText")}
                 type="button"
               >
                 {entryFilename}
@@ -162,12 +166,12 @@ export function RuntimeSuccessRow({
       </div>
       <div className="runtime-success-compact">
         <p className="runtime-success-compact__line">
-          <span className="runtime-success-compact__label">SRC</span>
+          <span className="runtime-success-compact__label">{translate("projects:translateRuntimeShared.runtimeSuccessCompactLine_message_sRC")}</span>
           {speakerLabel ? <span className="runtime-success-compact__speaker-inline" style={speakerStyleVal}>{speakerLabel}</span> : null}
           <span title={entry.source_preview || undefined}>{entry.source_preview || '—'}</span>
         </p>
         <p className="runtime-success-compact__line">
-          <span className="runtime-success-compact__label">DST</span>
+          <span className="runtime-success-compact__label">{translate("projects:translateRuntimeShared.runtimeSuccessCompactLine_message_dST")}</span>
           {speakerLabel ? <span className="runtime-success-compact__speaker-inline" style={speakerStyleVal}>{speakerLabel}</span> : null}
           <span title={entry.translation_preview || undefined}>{entry.translation_preview || '—'}</span>
         </p>
@@ -179,10 +183,10 @@ export function RuntimeSuccessRow({
 /** 小灯各阶段的文案：请求已发出、等第一个字 / 吐思考 / 出正文 / 上一次失败、退避等重试。
  *  停住（stalled）不改阶段文字：思考中还是思考中，只有灯的呼吸慢下来。 */
 const LIVE_PHASE_LABEL: Record<FileActivity['phase'], string> = {
-  waiting: '请求中',
-  thinking: '思考中',
-  writing: '翻译中',
-  retrying: '重试中',
+  get waiting() { return translate("projects:translateRuntimeShared.waiting_waiting_text"); },
+  get thinking() { return translate("projects:translateRuntimeShared.thinking_thinking_text"); },
+  get writing() { return translate("projects:translateRuntimeShared.writing_writing_translation"); },
+  get retrying() { return translate("projects:translateRuntimeShared.retrying_retrying_retry"); },
 };
 
 /**
@@ -219,17 +223,17 @@ function ledPulseRate(activity: FileActivity): number {
 function liveActivityTitle(activity: FileActivity): string {
   const parts = [LIVE_PHASE_LABEL[activity.phase]];
   if (activity.phase === 'waiting') {
-    parts.push('请求已发出，等模型开始输出');
+    parts.push(translate("projects:translateRuntimeShared.liveActivityTitle_push_doneModelStart"));
   } else if (activity.phase === 'retrying') {
-    parts.push('上一次请求失败，稍后重试（原因见「错误」）');
+    parts.push(translate("projects:translateRuntimeShared.liveActivityTitle_push_failedRetryError"));
   } else if (activity.stalled) {
     // 阶段仍是思考中/翻译中，只是这一阵没出新字：说明白，别让人以为卡死了
-    parts.push('这一阵没有新输出，灯已放慢');
+    parts.push(translate("projects:translateRuntimeShared.liveActivityTitle_push_emptyDone"));
   } else {
     const cps = Number.isFinite(activity.cps) && activity.cps > 0 ? activity.cps : 0;
-    parts.push(`${cps.toFixed(cps >= 10 ? 0 : 1)} 字/秒`);
+    parts.push(translate("projects:translateRuntimeShared.liveActivityTitle_push_seconds", { value: cps.toFixed(cps >= 10 ? 0 : 1) }));
   }
-  if (activity.requests > 1) parts.push(`${activity.requests} 个请求同时在跑`);
+  if (activity.requests > 1) parts.push(translate("projects:translateRuntimeShared.liveActivityTitle_push_count", { requests: activity.requests }));
   return parts.join(' · ');
 }
 
@@ -239,6 +243,7 @@ function liveActivityTitle(activity: FileActivity): string {
  * 动画按新时长重算进度，每次轮询（1s）灯都会跳一下；playbackRate 从当前进度接着走，只是变快变慢。
  */
 function FileProgressLed({ phase, rate }: { phase: FileActivity['phase']; rate: number }) {
+  const uiLanguage = useUiLanguage();
   const ref = useRef<HTMLSpanElement | null>(null);
   useEffect(() => {
     const el = ref.current;
@@ -281,6 +286,7 @@ function ringToneOf(isComplete: boolean, live: FileActivity | null): RingTone {
  * 等于整个周长、弧不可见，只剩底圈，所以「一点没翻」和「翻完了」一眼能分开。
  */
 function FileProgressRing({ percent, tone }: { percent: number; tone: RingTone }) {
+  const uiLanguage = useUiLanguage();
   const ratio = Math.max(0, Math.min(100, percent)) / 100;
   const center = RING_SIZE / 2;
   return (
@@ -331,6 +337,7 @@ export function FileProgressRow({
   isSuccessFileFilterActive: boolean;
   onToggleSuccessFileFilter: (filename: string) => void;
 }) {
+  const uiLanguage = useUiLanguage();
   const percent = file.total > 0 ? Math.round((file.translated / file.total) * 100) : 0;
   const isComplete = file.translated === file.total && file.total > 0;
   const hasFailed = file.failed > 0;
@@ -351,10 +358,10 @@ export function FileProgressRow({
   const stateLabel = live
     ? `${LIVE_PHASE_LABEL[live.phase]}${live.requests > 1 ? ` ×${live.requests}` : ''}`
     : isComplete
-      ? '已完成'
+      ? translate("projects:translateRuntimeShared.stateLabel_message_doneComplete")
       : percent > 0
-        ? '未完成'
-        : isRunning ? '排队中' : '未开始';
+        ? translate("projects:translateRuntimeShared.stateLabel_message_notComplete")
+        : isRunning ? translate("projects:translateRuntimeShared.stateLabel_message_queue") : translate("projects:translateRuntimeShared.stateLabel_message_notStart");
 
   return (
     <div
@@ -366,15 +373,15 @@ export function FileProgressRow({
           <span className="file-progress-row__name-wrap">
             <span className="file-progress-row__name">{file.filename}</span>
             <button
-              aria-label="筛选译文"
+              aria-label={translate("projects:translateRuntimeShared.fileProgressRowNameWrap_ariaLabel_filterTranslationText")}
               aria-pressed={isSuccessFileFilterActive}
               className={`file-progress-row__filter-toggle${isSuccessFileFilterActive ? ' file-progress-row__filter-toggle--active' : ''}`}
               onClick={() => onToggleSuccessFileFilter(file.filename)}
-              title="筛选译文"
+              title={translate("projects:translateRuntimeShared.fileProgressRowNameWrap_title_filterTranslationText")}
               type="button"
             >
               <FilterFunnelIcon className="file-progress-row__filter-icon" />
-              <span className="file-progress-row__filter-tooltip">筛选译文</span>
+              <span className="file-progress-row__filter-tooltip">{translate("projects:translateRuntimeShared.fileProgressRowNameWrap_message_filterTranslationText")}</span>
               {isSuccessFileFilterActive ? <span className="file-progress-row__filter-check"><Icon name="check" /></span> : null}
             </button>
           </span>
@@ -392,7 +399,7 @@ export function FileProgressRow({
       <span className="file-progress-row__meter">
         <span className="file-progress-row__count">
           {file.translated}/{file.total}
-          {hasFailed ? <span className="file-progress-row__failed"> · {file.failed}失败</span> : null}
+          {hasFailed ? <span className="file-progress-row__failed">{translate("projects:translateRuntimeShared.fileProgressRowCount_message_failed", { failed: file.failed })}</span> : null}
         </span>
         <FileProgressRing percent={percent} tone={ringToneOf(isComplete, live)} />
       </span>
@@ -401,6 +408,7 @@ export function FileProgressRow({
 }
 
 function FilterFunnelIcon({ className }: { className: string }) {
+  useUiLanguage();
   return (
     <svg aria-hidden="true" className={className} viewBox="0 0 24 24">
       <path d="M3 5h18l-7 8v5.5l-4 1.9V13L3 5z" fill="currentColor" />
@@ -425,24 +433,24 @@ export function toRuntimeJob(job: Job): RuntimeJob {
 export function getStatusLabel(status?: RuntimeJob['status']) {
   switch (status) {
     case 'running':
-      return '翻译中';
+      return translate("projects:translateRuntimeShared.getStatusLabel_message_translation");
     case 'pending':
-      return '等待中';
+      return translate("common:actions.waiting");
     case 'completed':
-      return '已完成';
+      return translate("projects:translateRuntimeShared.getStatusLabel_message_doneComplete");
     case 'failed':
-      return '失败';
+      return translate("common:actions.failed");
     case 'cancelled':
-      return '已取消';
+      return translate("projects:translateRuntimeShared.getStatusLabel_message_doneCancel");
     default:
-      return '空闲';
+      return translate("common:actions.idle");
   }
 }
 
 export function getErrorKindLabel(kind: string): string {
   const normalized = (kind || '').trim().toLowerCase();
-  if (normalized === 'parse') return '解析';
-  if (normalized === 'api') return '后端';
+  if (normalized === 'parse') return translate("projects:translateRuntimeShared.getErrorKindLabel_message_text");
+  if (normalized === 'api') return translate("projects:translateRuntimeShared.getErrorKindLabel_message_backend");
   return kind || 'error';
 }
 
@@ -485,7 +493,7 @@ export function formatDate(isoString: string): string {
   if (!isoString) return '—';
   try {
     const date = new Date(isoString);
-    return date.toLocaleString('zh-CN', {
+    return date.toLocaleString(getUiLanguage(), {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -500,7 +508,7 @@ export function formatDate(isoString: string): string {
 export function formatTime(isoString: string): string {
   if (!isoString) return '—';
   try {
-    return new Date(isoString).toLocaleTimeString('zh-CN', {
+    return new Date(isoString).toLocaleTimeString(getUiLanguage(), {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit' });
@@ -510,23 +518,23 @@ export function formatTime(isoString: string): string {
 }
 
 /** unit 是速度的单位，跟进度同一口径：普通翻译是「句」，GenDic（分片/批次）是「项」 */
-export function formatSpeed(value: number, unit = '行'): string {
-  if (!Number.isFinite(value) || value <= 0) return `0 ${unit}/分`;
-  return `${value.toFixed(value >= 10 ? 0 : 1)} ${unit}/分`;
+export function formatSpeed(value: number, unit = translate("projects:translateRuntimeShared.formatSpeed_message_text")): string {
+  if (!Number.isFinite(value) || value <= 0) return translate("projects:translateRuntimeShared.formatSpeed_message_0", { unit: unit });
+  return translate("projects:translateRuntimeShared.formatSpeed_message_textVariant2", { value: value.toFixed(value >= 10 ? 0 : 1), unit: unit });
 }
 
 export function formatEta(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '—';
-  if (seconds < 60) return `${Math.round(seconds)} 秒`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)} 分`;
+  if (seconds < 60) return translate("projects:translateRuntimeShared.formatEta_message_seconds", { value: Math.round(seconds) });
+  if (seconds < 3600) return translate("projects:translateRuntimeShared.formatEta_message_text", { value: Math.round(seconds / 60) });
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.round((seconds % 3600) / 60);
-  return `${hours} 时 ${minutes} 分`;
+  return translate("projects:translateRuntimeShared.formatEta_message_textVariant2", { hours: hours, minutes: minutes });
 }
 
 export function formatElapsedTime(job: RuntimeJob | null, nowMs: number): string {
   if (!job?.started_at) {
-    return job?.status === 'pending' ? '等待开始' : '—';
+    return job?.status === 'pending' ? translate("projects:translateRuntimeShared.formatElapsedTime_message_waitStart") : '—';
   }
 
   const startMs = Date.parse(job.started_at);
@@ -536,16 +544,16 @@ export function formatElapsedTime(job: RuntimeJob | null, nowMs: number): string
   const safeEndMs = Number.isNaN(endMs) ? nowMs : endMs;
   const elapsedSeconds = Math.max(0, Math.floor((safeEndMs - startMs) / 1000));
 
-  if (elapsedSeconds < 60) return `${elapsedSeconds} 秒`;
+  if (elapsedSeconds < 60) return translate("projects:translateRuntimeShared.formatElapsedTime_message_seconds", { elapsedSeconds: elapsedSeconds });
   if (elapsedSeconds < 3600) {
     const minutes = Math.floor(elapsedSeconds / 60);
     const seconds = elapsedSeconds % 60;
-    return `${minutes} 分 ${seconds} 秒`;
+    return translate("projects:translateRuntimeShared.formatElapsedTime_message_secondsVariant2", { minutes: minutes, seconds: seconds });
   }
 
   const hours = Math.floor(elapsedSeconds / 3600);
   const minutes = Math.floor((elapsedSeconds % 3600) / 60);
-  return `${hours} 时 ${minutes} 分`;
+  return translate("projects:translateRuntimeShared.formatElapsedTime_message_text", { hours: hours, minutes: minutes });
 }
 
 export function clampPercent(value: number): number {

@@ -1,3 +1,4 @@
+import { UiTrans, message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CustomSelect } from '../components/CustomSelect';
@@ -13,6 +14,7 @@ import {
 import { normalizeError } from '../lib/errors';
 
 export function PromptTemplatesPage() {
+  const uiLanguage = useUiLanguage();
   const navigate = useNavigate();
   const [templates, setTemplates] = useState<PromptTemplateInfo[]>([]);
   const [selectedName, setSelectedName] = useState('');
@@ -20,8 +22,8 @@ export function PromptTemplatesPage() {
   const [userPromptValue, setUserPromptValue] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<string | null>(null);
+  const [error, setError] = useMessageState<string | null>(null);
+  const [feedback, setFeedback] = useMessageState<string | null>(null);
 
   const selectedTemplate = useMemo(
     () => templates.find((item) => item.name === selectedName) ?? null,
@@ -69,7 +71,7 @@ export function PromptTemplatesPage() {
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(normalizeError(err, '加载默认提示词失败'));
+          setError(normalizeError(err, uiMessage("settings:promptTemplatesPage.promptTemplatesPage_normalizeError_loadDefaultPromptFailed")));
         }
       })
       .finally(() => {
@@ -129,9 +131,9 @@ export function PromptTemplatesPage() {
             : tpl,
         ),
       );
-      setFeedback('保存成功，后续该模板新任务会使用新的 system/user 提示词。');
+      setFeedback(uiMessage("settings:promptTemplatesPage.handleSave_setFeedback_saveSuccessJobSystemUserPrompt"));
     } catch (err) {
-      setError(normalizeError(err, '保存默认提示词失败'));
+      setError(normalizeError(err, uiMessage("settings:promptTemplatesPage.handleSave_normalizeError_saveDefaultPromptFailed")));
     } finally {
       setSaving(false);
     }
@@ -162,9 +164,9 @@ export function PromptTemplatesPage() {
       );
       setSystemPromptValue(selectedTemplate.default_system_prompt);
       setUserPromptValue(selectedTemplate.default_user_prompt);
-      setFeedback('已重置为内置默认提示词。');
+      setFeedback(uiMessage("settings:promptTemplatesPage.handleReset_setFeedback_doneResetDefaultPrompt"));
     } catch (err) {
-      setError(normalizeError(err, '重置默认提示词失败'));
+      setError(normalizeError(err, uiMessage("settings:promptTemplatesPage.handleReset_normalizeError_resetDefaultPromptFailed")));
     } finally {
       setSaving(false);
     }
@@ -174,29 +176,29 @@ export function PromptTemplatesPage() {
     <div className="prompt-templates-page">
       <PageHeader
         className="prompt-templates-page__header"
-        title="默认提示词"
-        description="按翻译模板维护默认提示词。保存后，对应模板的新翻译任务会自动使用更新后的 system/user 提示词。"
+        title={translate("settings:promptTemplatesPage.promptTemplatesPage_title_defaultPrompt")}
+        description={translate("settings:promptTemplatesPage.promptTemplatesPage_description_translationDefaultPromptSaveTranslationJobAuto")}
       />
 
       <div className="prompt-templates-page__content">
         <section className="panel">
           <header className="panel__header">
             <div>
-              <h2>模板编辑器</h2>
-              <p>可独立修改每个翻译模板的 system prompt 与 user prompt，并支持一键恢复内置默认。</p>
+              <h2>{translate("settings:promptTemplatesPage.panelHeader_message_edit")}</h2>
+              <p>{translate("settings:promptTemplatesPage.panelHeader_message_changeCountTranslationSystemPromptUserPrompt")}</p>
             </div>
           </header>
 
           {loading ? (
-            <LoadingState title="加载中…" description="正在获取当前可编辑的翻译模板提示词。" />
+            <LoadingState title={translate("common:actions.loading")} description={translate("settings:promptTemplatesPage.panel_description_pendingCurrentEditTranslationPrompt")} />
           ) : error ? (
-            <ErrorState title="加载失败" description={error} />
+            <ErrorState title={translate("settings:promptTemplatesPage.panel_title_loadFailed")} description={error} />
           ) : templates.length === 0 ? (
-            <EmptyState title="暂无可编辑模板" description="当前后端未返回可编辑的翻译模板提示词。" />
+            <EmptyState title={translate("settings:promptTemplatesPage.panel_title_emptyEdit")} description={translate("settings:promptTemplatesPage.panel_description_currentBackendNotBackEditTranslationPrompt")} />
           ) : (
             <>
               <label className="settings-number-row">
-                <span className="settings-number-row__label">翻译模板</span>
+                <span className="settings-number-row__label">{translate("settings:promptTemplatesPage.settingsNumberRow_message_translation")}</span>
                 <div className="settings-number-row__control prompt-templates-page__select">
                   <CustomSelect
                     value={selectedName}
@@ -224,7 +226,7 @@ export function PromptTemplatesPage() {
                         void handleSave();
                       }}
                     >
-                      {saving ? '保存中…' : '保存修改'}
+                      {saving ? translate("common:actions.saving") : translate("settings:promptTemplatesPage.buttonButtonPrimary_message_saveChange")}
                     </button>
                     <button
                       type="button"
@@ -233,9 +235,7 @@ export function PromptTemplatesPage() {
                       onClick={() => {
                         void handleReset();
                       }}
-                    >
-                      重置为默认提示词
-                    </button>
+                    >{translate("settings:promptTemplatesPage.promptTemplatesPageActions_message_resetDefaultPrompt")}</button>
                     <button
                       type="button"
                       className="button"
@@ -243,12 +243,10 @@ export function PromptTemplatesPage() {
                       onClick={() => {
                         navigate('/settings');
                       }}
-                    >
-                      返回设置
-                    </button>
+                    >{translate("settings:promptTemplatesPage.promptTemplatesPageActions_message_backSettings")}</button>
                   </div>
 
-                  <label className="prompt-templates-page__editor-label">System Prompt</label>
+                  <label className="prompt-templates-page__editor-label">{translate("settings:promptTemplatesPage.promptTemplatesPageEditorWrap_message_systemPrompt")}</label>
                   <textarea
                     className="prompt-templates-page__editor prompt-templates-page__editor--system"
                     value={systemPromptValue}
@@ -258,7 +256,7 @@ export function PromptTemplatesPage() {
                     }}
                   />
 
-                  <label className="prompt-templates-page__editor-label">User Prompt</label>
+                  <label className="prompt-templates-page__editor-label">{translate("settings:promptTemplatesPage.promptTemplatesPageEditorWrap_message_userPrompt")}</label>
                   <textarea
                     className="prompt-templates-page__editor"
                     value={userPromptValue}
@@ -269,25 +267,25 @@ export function PromptTemplatesPage() {
                   />
 
                   <div className="prompt-templates-page__placeholder-help">
-                    <div className="prompt-templates-page__placeholder-help-title">占位符说明</div>
+                    <div className="prompt-templates-page__placeholder-help-title">{translate("settings:promptTemplatesPage.promptTemplatesPagePlaceholderHelp_message_description")}</div>
                     <ul>
-                      <li><code>[SourceLang]</code>：源语言名称。</li>
-                      <li><code>[TargetLang]</code>：目标语言名称。</li>
-                      <li><code>[translation_guideline]</code>：当前翻译规范内容（全局规范 + 项目规范拼接后的结果）。</li>
-                      <li><code>[Glossary]</code>：本批次术语表提示词。</li>
-                      <li><code>[Input]</code>：本批次待翻译原文内容。</li>
-                      <li><code>[history_result]</code>：上下文历史翻译结果（无则为 None）。</li>
+                      <li><UiTrans k="settings:promptTemplatesPage.promptTemplatesPagePlaceholderHelp_message_0SourceLang0SourceLanguageName" components={[<code />]} /></li>
+                      <li><UiTrans k="settings:promptTemplatesPage.promptTemplatesPagePlaceholderHelp_message_0TargetLang0TargetLanguageName" components={[<code />]} /></li>
+                      <li><UiTrans k="settings:promptTemplatesPage.promptTemplatesPagePlaceholderHelp_message_0TranslationGuideline0CurrentTranslationGuideline" components={[<code />]} /></li>
+                      <li><UiTrans k="settings:promptTemplatesPage.promptTemplatesPagePlaceholderHelp_message_0Glossary0Prompt" components={[<code />]} /></li>
+                      <li><UiTrans k="settings:promptTemplatesPage.promptTemplatesPagePlaceholderHelp_message_0Input0TranslationSource" components={[<code />]} /></li>
+                      <li><UiTrans k="settings:promptTemplatesPage.promptTemplatesPagePlaceholderHelp_message_0HistoryResult0ContextTranslationNone" components={[<code />]} /></li>
                     </ul>
                   </div>
 
                   <div className="prompt-templates-page__meta">
                     <span>
-                      {selectedTemplate.system_overridden ? 'System：已覆盖默认值' : 'System：使用内置默认值'}
+                      {selectedTemplate.system_overridden ? translate("settings:promptTemplatesPage.promptTemplatesPageMeta_message_systemDoneDefaultValue") : translate("settings:promptTemplatesPage.promptTemplatesPageMeta_message_systemDefaultValue")}
                     </span>
                     <span>
-                      {selectedTemplate.user_overridden ? 'User：已覆盖默认值' : 'User：使用内置默认值'}
+                      {selectedTemplate.user_overridden ? translate("settings:promptTemplatesPage.promptTemplatesPageMeta_message_userDoneDefaultValue") : translate("settings:promptTemplatesPage.promptTemplatesPageMeta_message_userDefaultValue")}
                     </span>
-                    <span>{hasUnsavedChanges ? '有未保存修改' : '内容已保存'}</span>
+                    <span>{hasUnsavedChanges ? translate("settings:promptTemplatesPage.promptTemplatesPageMeta_message_notSaveChange") : translate("settings:promptTemplatesPage.promptTemplatesPageMeta_message_doneSave")}</span>
                   </div>
                 </div>
               ) : null}

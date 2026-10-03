@@ -1,3 +1,4 @@
+import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../../i18n";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ConnectionPhase, TranslatorOption, VersionCheckResponse } from '../../lib/api';
 import { ensureDesktopBackendReady, fetchJobs, fetchTranslators, fetchVersion, fetchVersionCheck, getBackendBaseUrl } from '../../lib/api';
@@ -30,10 +31,12 @@ export function useConnection(): ConnectionContextValue {
 }
 
 export function ConnectionProvider({ children }: { children: React.ReactNode }) {
+  const uiLanguage = useUiLanguage();
   const [connectionPhase, setConnectionPhase] = useState<ConnectionPhase>('connecting');
-  const [connectionMessage, setConnectionMessage] = useState('正在连接本地翻译后端…');
+  const [connectionMessage, setConnectionMessage] = useMessageState<string>(uiMessage("common:connectionContext.connectionMessageSetConnectionMessage_useState_pendingConnectionTranslationBackend"));
   const [connectionStep, setConnectionStep] = useState(1);
   const [versionInfo, setVersionInfo] = useState<VersionCheckResponse | null>(null);
+  const [windowVersion, setWindowVersion] = useState('');
   const [translators, setTranslators] = useState<TranslatorOption[]>([]);
   const [loadingInitialData, setLoadingInitialData] = useState(true);
   const [refreshingJobs, setRefreshingJobs] = useState(false);
@@ -48,9 +51,9 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     try {
       await fetchJobs();
       setConnectionPhase('online');
-      setConnectionMessage('已连接到本地后端，任务状态会自动轮询刷新。');
+      setConnectionMessage(uiMessage("common:connectionContext.loadJobs_setConnectionMessage_doneConnectionBackendJobStatusAuto"));
     } catch (error) {
-      const message = normalizeError(error, '读取任务列表失败');
+      const message = normalizeError(error, uiMessage("common:connectionContext.message_normalizeError_readJobFailed"));
       setConnectionPhase('offline');
       setConnectionMessage(message);
     } finally {
@@ -64,52 +67,36 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     setLoadingInitialData(true);
     setConnectionPhase('connecting');
     setConnectionStep(1);
-    setConnectionMessage('正在准备本地翻译服务…');
+    setConnectionMessage(uiMessage("common:connectionContext.loadInitialData_setConnectionMessage_pendingTranslation"));
 
     try {
-      setConnectionMessage('正在启动并检查本地翻译服务…');
+      setConnectionMessage(uiMessage("common:connectionContext.loadInitialData_setConnectionMessage_pendingCheckTranslation"));
       await ensureDesktopBackendReady({ timeoutMs: 20_000 });
       setBackendUrl(getBackendBaseUrl());
 
       setConnectionStep(2);
-      setConnectionMessage('本地翻译服务已就绪，正在加载模板与版本信息…');
+      setConnectionMessage(uiMessage("common:connectionContext.loadInitialData_setConnectionMessage_translationDonePendingLoadVersion"));
       // 两个请求互不依赖，并行发出去，省掉一次串行往返
       const [nextTranslators, version] = await Promise.all([fetchTranslators(), fetchVersion()]);
       setTranslators(nextTranslators);
 
       setConnectionStep(3);
-      setConnectionMessage('正在准备主界面…');
+      setConnectionMessage(uiMessage("common:connectionContext.loadInitialData_setConnectionMessage_pendingInterface"));
 
-      const applyWindowTitle = async (title: string) => {
-        if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-          try {
-            await getCurrentWindow().setTitle(title);
-          } catch {
-            // ignore window title errors
-          }
-        } else {
-          document.title = title;
-        }
-      };
-
-      await applyWindowTitle(`GalTransl Desktop - v${version}`);
+      setWindowVersion(version);
 
       // 更新检查不阻塞启动（外网请求可能慢）：结果存进 context，
       // 更新提示弹窗监听它，有新版本时自己弹出来。
       fetchVersionCheck()
-        .then(async (result) => {
+        .then((result) => {
           setVersionInfo(result);
-          if (!result.update_available) {
-            return;
-          }
-          await applyWindowTitle(`GalTransl Desktop - v${result.version}（有新版本）`);
         })
         .catch(() => undefined);
 
       setConnectionPhase('online');
-      setConnectionMessage('后端在线，可以立即提交本地翻译任务。');
+      setConnectionMessage(uiMessage("common:connectionContext.loadInitialData_setConnectionMessage_backendSubmitTranslationJob"));
     } catch (error) {
-      const message = normalizeError(error, '无法连接到本地后端');
+      const message = normalizeError(error, uiMessage("common:connectionContext.message_normalizeError_unableConnectionBackend"));
       setBackendUrl(getBackendBaseUrl());
       setTranslators([]);
       setConnectionPhase('offline');
@@ -122,6 +109,14 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     void loadInitialData();
   }, [loadInitialData]);
+
+  useEffect(() => {
+    const version = versionInfo?.version || windowVersion;
+    if (!version) return;
+    const title = translate(versionInfo?.update_available ? 'common:windowTitle.updateAvailable' : 'common:windowTitle.current', { version });
+    document.title = title;
+    if ('__TAURI_INTERNALS__' in window) void getCurrentWindow().setTitle(title).catch(() => undefined);
+  }, [uiLanguage, windowVersion, versionInfo]);
 
   const value = useMemo<ConnectionContextValue>(
     () => ({
@@ -136,8 +131,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       loadInitialData,
       loadJobs,
     }),
-    [
-      backendUrl,
+    [backendUrl,
       connectionPhase,
       connectionMessage,
       connectionStep,

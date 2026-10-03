@@ -1,3 +1,4 @@
+import { UiTrans, message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../../i18n";
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '../../components/Button';
 import { Panel } from '../../components/Panel';
@@ -33,13 +34,14 @@ export function ProjectGuidelineSection({
   /** 只用于展示（文件在项目目录下），实际读写都走后端接口 */
   projectDir: string;
 }) {
+  useUiLanguage();
   const [content, setContent] = useState('');
   const [savedContent, setSavedContent] = useState('');
   const [filename, setFilename] = useState('translation_guideline.md');
   const [exists, setExists] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useMessageState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
 
   const load = useCallback(async () => {
@@ -52,7 +54,7 @@ export function ProjectGuidelineSection({
       setFilename(res.filename);
       setExists(res.exists);
     } catch (err) {
-      setError(normalizeError(err, '读取项目规范失败'));
+      setError(normalizeError(err, uiMessage("config:projectGuidelineSection.load_normalizeError_readProjectGuidelineFailed")));
     } finally {
       setLoading(false);
     }
@@ -75,7 +77,7 @@ export function ProjectGuidelineSection({
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 2400);
     } catch (err) {
-      setError(normalizeError(err, '保存项目规范失败'));
+      setError(normalizeError(err, uiMessage("config:projectGuidelineSection.handleSave_normalizeError_saveProjectGuidelineFailed")));
     } finally {
       setSaving(false);
     }
@@ -84,40 +86,35 @@ export function ProjectGuidelineSection({
   return (
     <Panel
       className="project-guideline-section"
-      title="项目翻译规范"
-      description="针对这个项目的翻译要求：翻译时会拼在全局规范之后，与之冲突时以本规范为准。"
+      title={translate("config:projectGuidelineSection.projectGuidelineSection_title_projectTranslationGuideline")}
+      description={translate("config:projectGuidelineSection.projectGuidelineSection_description_countProjectTranslationTranslationGuidelineGuideline")}
       actions={
         <>
           <Button
             variant="secondary"
             onClick={() => void load()}
             disabled={loading || saving || !dirty}
-            title={dirty ? '放弃未保存的修改，从文件重新读取' : '当前没有未保存的修改'}
-          >
-            重新读取
-          </Button>
+            title={dirty ? translate("config:projectGuidelineSection.projectGuidelineSection_title_notSaveChangeFileRead") : translate("config:projectGuidelineSection.projectGuidelineSection_title_currentEmptyNotSaveChange")}
+          >{translate("config:projectGuidelineSection.projectGuidelineSection_actions_read")}</Button>
           <Button onClick={() => void handleSave()} disabled={loading || saving || !dirty}>
-            {saving ? '保存中…' : '保存规范'}
+            {saving ? translate("common:actions.saving") : translate("config:projectGuidelineSection.projectGuidelineSection_message_saveGuideline")}
           </Button>
         </>
       }
     >
       <div className="project-guideline-section__body">
-        {error ? <InlineFeedback tone="error" title="项目规范" description={error} /> : null}
+        {error ? <InlineFeedback tone="error" title={translate("config:projectGuidelineSection.projectGuidelineSectionBody_title_projectGuideline")} description={error} /> : null}
 
         <div className="project-guideline-section__hint">
-          <div>
-            文件：<code>{filename}</code>
-            <span className="project-guideline-section__path" title={projectDir}>
-              （位于项目目录内，跟项目一起走）
-            </span>
-            {!exists ? <span className="project-guideline-section__badge">尚未创建，保存后生成</span> : null}
+          <div>{translate("config:projectGuidelineSection.projectGuidelineSectionHint_div_file")}<code>{filename}</code>
+            <span className="project-guideline-section__path" title={projectDir}>{translate("config:projectGuidelineSection.projectGuidelineSectionHint_message_projectDirectoryProject")}</span>
+            {!exists ? <span className="project-guideline-section__badge">{translate("config:projectGuidelineSection.projectGuidelineSectionHint_message_notCreateSave")}</span> : null}
           </div>
-          <div>改完保存后，<strong>下一次启动翻译</strong>才生效；正在跑的翻译不受影响。</div>
+          <div><UiTrans k="config:projectGuidelineSection.projectGuidelineSectionHint_message_save0Translation0EffectivePendingTranslation" components={[<strong />]} /></div>
         </div>
 
         {loading ? (
-          <LoadingState title="正在读取项目规范…" />
+          <LoadingState title={translate("config:projectGuidelineSection.projectGuidelineSectionBody_title_pendingReadProjectGuideline")} />
         ) : (
           <textarea
             className="project-guideline-section__editor"
@@ -139,10 +136,10 @@ export function ProjectGuidelineSection({
           <span
             className={`project-guideline-section__status${dirty ? ' is-dirty' : ''}`}
           >
-            {dirty ? '有未保存的修改' : savedFlash ? '已保存' : '已是最新'}
+            {dirty ? translate("config:projectGuidelineSection.projectGuidelineSectionFoot_message_notSaveChange") : savedFlash ? translate("config:projectGuidelineSection.projectGuidelineSectionFoot_message_doneSave") : translate("config:projectGuidelineSection.projectGuidelineSectionFoot_message_done")}
           </span>
-          <span className="project-guideline-section__count">{content.length} 字符</span>
-          <span className="project-guideline-section__tip">Ctrl / Cmd + S 保存</span>
+          <span className="project-guideline-section__count">{translate("config:projectGuidelineSection.projectGuidelineSectionFoot_message_text", { count: content.length })}</span>
+          <span className="project-guideline-section__tip">{translate("config:projectGuidelineSection.projectGuidelineSectionFoot_message_ctrlCmdSSave")}</span>
         </div>
       </div>
     </Panel>

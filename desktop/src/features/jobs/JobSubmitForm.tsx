@@ -1,3 +1,4 @@
+import { UiTrans, message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../../i18n";
 import { useEffect, useState } from 'react';
 import { Button } from '../../components/Button';
 import { CustomSelect } from '../../components/CustomSelect';
@@ -15,11 +16,12 @@ type JobSubmitFormProps = {
 };
 
 export function JobSubmitForm({ disabled, isSubmitting, onSubmit, submitError, translators }: JobSubmitFormProps) {
+  useUiLanguage();
   const { backendUrl } = useConnection();
   const [projectDir, setProjectDir] = useState('');
   const [configFileName, setConfigFileName] = useState('config.yaml');
   const [translator, setTranslator] = useState('');
-  const [localError, setLocalError] = useState<string | null>(null);
+  const [localError, setLocalError] = useMessageState<string | null>(null);
   const activeError = localError ?? submitError;
 
   useEffect(() => {
@@ -30,8 +32,8 @@ export function JobSubmitForm({ disabled, isSubmitting, onSubmit, submitError, t
 
   return (
     <Panel
-      title="Submit Job"
-      description="填写本地项目目录、配置文件和翻译模板，然后将任务发送到 Python 后端。"
+      title={translate("common:jobSubmitForm.jobSubmitForm_title_submitJob")}
+      description={translate("common:jobSubmitForm.jobSubmitForm_description_projectDirectoryConfigFileTranslationJobSend")}
     >
       <form
         className="form-stack"
@@ -42,12 +44,12 @@ export function JobSubmitForm({ disabled, isSubmitting, onSubmit, submitError, t
           const normalizedConfig = configFileName.trim() || 'config.yaml';
 
           if (!normalizedProjectDir) {
-            setLocalError('请输入项目目录。');
+            setLocalError(uiMessage("common:jobSubmitForm.formStack_setLocalError_enterProjectDirectory"));
             return;
           }
 
           if (!translator) {
-            setLocalError('请选择翻译模板。');
+            setLocalError(uiMessage("common:jobSubmitForm.formStack_setLocalError_chooseTranslation"));
             return;
           }
 
@@ -60,18 +62,18 @@ export function JobSubmitForm({ disabled, isSubmitting, onSubmit, submitError, t
         }}
       >
         <label className="field">
-          <span>项目目录</span>
+          <span>{translate("common:jobSubmitForm.field_message_projectDirectory")}</span>
           <input
             autoComplete="off"
             disabled={disabled || isSubmitting}
             onChange={(event) => setProjectDir(event.target.value)}
-            placeholder="例如：/home/user/GalTransl/sampleProject"
+            placeholder={translate("common:jobSubmitForm.field_placeholder_homeUserGalTranslSampleProject")}
             value={projectDir}
           />
         </label>
 
         <label className="field">
-          <span>配置文件名</span>
+          <span>{translate("common:jobSubmitForm.field_message_configFile")}</span>
           <input
             autoComplete="off"
             disabled={disabled || isSubmitting}
@@ -81,13 +83,13 @@ export function JobSubmitForm({ disabled, isSubmitting, onSubmit, submitError, t
         </label>
 
         <label className="field">
-          <span>翻译模板</span>
+          <span>{translate("common:jobSubmitForm.field_message_translation")}</span>
           <CustomSelect
             disabled={disabled || isSubmitting || translators.length === 0}
             onChange={(event) => setTranslator(event.target.value)}
             value={translator}
           >
-            {translators.length === 0 ? <option value="">暂无可用模板</option> : null}
+            {translators.length === 0 ? <option value="">{translate("common:jobSubmitForm.field_message_empty")}</option> : null}
             {translators.map((item) => (
               <option key={item.name} value={item.name}>
                 {item.name} · {item.description}
@@ -97,16 +99,16 @@ export function JobSubmitForm({ disabled, isSubmitting, onSubmit, submitError, t
         </label>
 
         {activeError ? (
-          <InlineFeedback tone="error" title="启动任务失败" description={activeError} />
+          <InlineFeedback tone="error" title={translate("common:jobSubmitForm.formStack_title_jobFailed")} description={activeError} />
         ) : (
-          <InlineFeedback tone="info" title="连接提示">
-            {backendUrl ? <>当前后端地址：<code>{backendUrl}</code>。</> : '本地后端尚未就绪，请先重新连接。'}
+          <InlineFeedback tone="info" title={translate("common:jobSubmitForm.formStack_title_connectionHint")}>
+            {backendUrl ? <><UiTrans k="common:jobSubmitForm.formStack_message_currentBackendAddress00" values={{ backendUrl: backendUrl }} components={[<code />]} /></> : translate("common:jobSubmitForm.formStack_message_backendNotReconnect")}
           </InlineFeedback>
         )}
 
         <div className="form-actions">
           <Button disabled={disabled || isSubmitting} type="submit">
-            {isSubmitting ? '提交中…' : '启动任务'}
+            {isSubmitting ? translate("common:jobSubmitForm.formActions_message_submit") : translate("common:jobSubmitForm.formActions_message_job")}
           </Button>
         </div>
       </form>

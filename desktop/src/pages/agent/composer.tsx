@@ -1,9 +1,11 @@
+import { t as translate, useUiLanguage } from "../../i18n";
 import type { AgentContextUsage } from '../../lib/api';
 import { formatTokenCount } from './toolMeta';
 
 /** 发送/插话按钮的图标：上箭头。原来是一个箭头字符，字重/基线随字体走，
  *  改成 SVG 后与页面其它图标（开文件夹、上下文环）口径一致。 */
 export function SendIcon() {
+  const uiLanguage = useUiLanguage();
   return (
     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
       <path
@@ -20,6 +22,7 @@ export function SendIcon() {
 
 /** 停止按钮的图标：实心圆角方块（原来是 CSS 画的方块）。 */
 export function StopIcon() {
+  const uiLanguage = useUiLanguage();
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
       <rect x="6" y="6" width="12" height="12" rx="3" fill="currentColor" />
@@ -30,13 +33,14 @@ export function StopIcon() {
 /** 已用上下文/上下文窗口的环形指示器（悬停显示百分比与具体 token 数）。
  *  达到压缩触发线（80%）后转为警示色。 */
 export function ContextMeter({ usage }: { usage: AgentContextUsage }) {
+  const uiLanguage = useUiLanguage();
   const window = usage.window_tokens > 0 ? usage.window_tokens : 0;
   const used = Math.max(0, usage.used_tokens);
   const ratio = window > 0 ? Math.min(1, used / window) : 0;
   const percent = ratio * 100;
   const r = 7;
   const circumference = 2 * Math.PI * r;
-  const detail = `${percent.toFixed(1)}% · ${formatTokenCount(used)} / ${formatTokenCount(window)} 上下文已使用`;
+  const detail = translate("agent:composer.detail_message_contextDone", { value: percent.toFixed(1), value2: formatTokenCount(used), value3: formatTokenCount(window) });
   return (
     <span
       className={`agent-context-meter${percent >= 80 ? ' is-warn' : ''}`}
@@ -73,16 +77,17 @@ export const AGENT_PROMPT_SUGGESTIONS = [
 ];
 
 export function StatusPill({ status, running }: { status: string; running: boolean }) {
+  useUiLanguage();
   const tone = running ? 'running' : status;
   const label = running
-    ? '运行中'
+    ? translate("common:actions.running")
     : status === 'awaiting_input' || status === 'done'
-      ? '等待指令'
+      ? translate("agent:composer.label_message_wait")
       : status === 'stopped'
-        ? '已停止'
+        ? translate("agent:composer.label_message_doneStop")
         : status === 'failed'
-          ? '出错'
-          : '空闲';
+          ? translate("common:actions.error")
+          : translate("common:actions.idle");
   return (
     <span className={`agent-status-pill agent-status-pill--${tone}`}>{label}</span>
   );

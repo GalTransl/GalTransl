@@ -1,3 +1,4 @@
+import { message, type UiMessage } from "../i18n/core";
 export function normalizeKeywordList(value: unknown): string[] {
   const items = typeof value === 'string' ? value.split(/\r?\n/) : value;
   if (!Array.isArray(items)) return [];
@@ -58,13 +59,13 @@ export function filterProblemText(problem: string | undefined, keys: string[]): 
  * 校验问题白名单条目：必须是「缓存文件名:index」，index 为数字或闭区间。
  * 返回错误文案；合法返回 null。与后端 ProblemWhiteList.parse_problem_white_list_entry 同口径。
  */
-export function validateProblemWhiteListEntry(value: string): string | null {
+export function validateProblemWhiteListEntry(value: string): UiMessage | null {
   const text = value.trim();
   const sep = text.lastIndexOf(':');
-  if (sep <= 0) return '格式应为「缓存文件名:index」，如 01.json:12';
-  if (!text.slice(0, sep).trim()) return '缺少缓存文件名';
+  if (sep <= 0) return message("common:problemFilter.validateProblemWhiteListEntry_message_formatCacheFileIndex01Json12");
+  if (!text.slice(0, sep).trim()) return message("common:problemFilter.validateProblemWhiteListEntry_message_missingCacheFile");
   const token = text.slice(sep + 1).trim();
   if (/^\d+$/.test(token)) return null;
   if (/^(\d+)\s*-\s*(\d+)$/.test(token)) return null;
-  return 'index 应为数字或区间（如 12 或 12-15）';
+  return message("common:problemFilter.validateProblemWhiteListEntry_message_index121215");
 }

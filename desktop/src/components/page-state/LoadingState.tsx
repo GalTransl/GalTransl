@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../../i18n";
 import type { ReactNode } from 'react';
 import { Icon } from '../Icon';
 
@@ -9,11 +10,12 @@ type LoadingStateProps = {
 };
 
 export function LoadingState({
-  title = '加载中…',
+  title = translate("common:actions.loading"),
   description,
   action,
   className,
 }: LoadingStateProps) {
+  useUiLanguage();
   const classes = ['empty-state', 'page-state', 'page-state--loading', className].filter(Boolean).join(' ');
 
   return (

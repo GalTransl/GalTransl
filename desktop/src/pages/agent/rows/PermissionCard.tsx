@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../../../i18n";
 import { useState } from 'react';
 import {
   normalizePermissionMode,
@@ -34,6 +35,7 @@ export function PermissionCard({
   error: string | null;
   onDecide: (decision: PermissionDecision, reason?: string) => void;
 }) {
+  useUiLanguage();
   const perm = item.permission;
   // 拒绝原因（可选，输入框里那份）：只有点「拒绝」才送出去，会随那条工具结果一起给模型看。
   // 别和下面那个 `reason`（模型填在入参里的"为什么做这件事"）搞混，那个是只读展示用的。
@@ -51,12 +53,12 @@ export function PermissionCard({
   // （见后端 PERMISSION_TOOL_RISK），归进"改设置 / 启动任务"会让人看不懂为什么要问。
   const riskKind: 'edit' | 'delegate' | 'high' =
     perm.name === 'run_subagents' ? 'delegate' : editable ? 'edit' : 'high';
-  const riskLabel = { edit: '改译文数据', delegate: '派子代理', high: '改设置 / 启动任务' }[riskKind];
+  const riskLabel = { edit: translate("agent:permissionCard.edit_edit_translationText"), delegate: translate("agent:permissionCard.delegate_delegate_proxy"), high: translate("agent:permissionCard.high_high_settingsJob") }[riskKind];
   const riskHint = {
-    edit: '改动译文数据（缓存 / 字典 / 人名表）',
+    edit: translate("agent:permissionCard.edit_edit_translationTextCacheDictionaryNameTable"),
     delegate:
-      '派一批子代理并行跑：每个都会调模型（校对子代理还会往缓存里写意见，原文探索会通读原文、很费 token）',
-    high: '改动项目设置 / 规范，或启动翻译任务',
+      translate("agent:permissionCard.delegate_delegate_proxyCountModelProxyCacheSourceSource"),
+    high: translate("agent:permissionCard.high_high_projectSettingsGuidelineTranslationJob"),
   }[riskKind];
   // 正文第二行的细节：参数摘要 + 当前档位（为什么现在要问）。都是短标签，逗号分不开的
   // 那种长句就省了——用户要的是"这次要动什么"，不是复述一遍权限模型。
@@ -67,7 +69,7 @@ export function PermissionCard({
   const preview = extractChangeList(perm.preview);
 
   return (
-    <section className="agent-perm" aria-label={`权限请求：${toolLabel}`}>
+    <section className="agent-perm" aria-label={translate("agent:permissionCard.agentPerm_ariaLabel_permission", { toolLabel: toolLabel })}>
       <header className="agent-perm__head">
         <span className="agent-perm__icon"><Icon name="shield" /></span>
         <span className="agent-perm__title" role="status" aria-live="polite">{toolLabel}</span>
@@ -78,11 +80,11 @@ export function PermissionCard({
           {riskLabel}
         </span>
       </header>
-      <p className="agent-perm__lead">允许「{toolLabel}」运行吗？</p>
+      <p className="agent-perm__lead">{translate("agent:permissionCard.agentPerm_message_allowRunning", { toolLabel: toolLabel })}</p>
       <p className="agent-perm__meta">{detail}</p>
-      {reason ? <p className="agent-perm__reason">原因：{reason}</p> : null}
+      {reason ? <p className="agent-perm__reason">{translate("agent:permissionCard.agentPerm_message_text", { reason: reason })}</p> : null}
       {/* 将要变更：摆在这一屏里而不是藏在工具行的展开里——用户要点的就是这个 */}
-      {preview ? <ChangeListCard data={preview} title="将要变更" /> : null}
+      {preview ? <ChangeListCard data={preview} title={translate("agent:permissionCard.agentPerm_title_text")} /> : null}
       {error ? <div className="agent-perm__error">{error}</div> : null}
       <div className="agent-perm__foot">
         <button
@@ -90,28 +92,22 @@ export function PermissionCard({
           className="agent-perm__btn is-primary"
           onClick={() => onDecide('allow-once')}
           disabled={submitting}
-          title="只批准这一次调用"
-        >
-          允许一次
-        </button>
+          title={translate("agent:permissionCard.agentPermBtnIsPrimary_title_approve")}
+        >{translate("agent:permissionCard.agentPermFoot_message_allow")}</button>
         <button
           type="button"
           className="agent-perm__btn"
           onClick={() => onDecide('allow-session')}
           disabled={submitting}
-          title={`本会话内不再询问「${toolLabel}」，会话结束即失效`}
-        >
-          本会话允许
-        </button>
+          title={translate("agent:permissionCard.agentPermBtn_title_sessionSession", { toolLabel: toolLabel })}
+        >{translate("agent:permissionCard.agentPermFoot_message_sessionAllow")}</button>
         <button
           type="button"
           className="agent-perm__btn"
           onClick={() => onDecide('deny', denyReason.trim())}
           disabled={submitting}
-          title="这次调用不执行，Agent 会收到「用户拒绝」并换策略"
-        >
-          拒绝
-        </button>
+          title={translate("agent:permissionCard.agentPermBtn_title_agentDeny")}
+        >{translate("agent:permissionCard.agentPermFoot_message_deny")}</button>
         {/* 拒绝原因（可选）：「不要」和「不要，因为 X」对模型是两回事——后者能让它
             直接换对方向，省掉一轮来回。留空就是单纯拒绝；填了按回车等于点「拒绝」。 */}
         <input
@@ -124,9 +120,9 @@ export function PermissionCard({
             e.preventDefault();
             onDecide('deny', denyReason.trim());
           }}
-          placeholder="拒绝原因（可选）"
-          aria-label="拒绝原因（可选）"
-          title="填了会在点「拒绝」时一起送给 Agent（显示在那次调用的结果里）"
+          placeholder={translate("agent:permissionCard.agentPermFoot_placeholder_deny")}
+          aria-label={translate("agent:permissionCard.agentPermFoot_ariaLabel_deny")}
+          title={translate("agent:permissionCard.agentPermFoot_title_denyAgent")}
           maxLength={500}
           disabled={submitting}
         />

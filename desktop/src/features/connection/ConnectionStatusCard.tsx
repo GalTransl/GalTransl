@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../../i18n";
 import { Button } from '../../components/Button';
 import { Panel } from '../../components/Panel';
 import { StatusBadge } from '../../components/StatusBadge';
@@ -20,31 +21,32 @@ export function ConnectionStatusCard({
   onRefresh,
   translatorCount,
 }: ConnectionStatusCardProps) {
+  useUiLanguage();
   return (
     <Panel
-      title="后端连接"
-      description="检查本机 Python 服务是否可用，并展示当前可读取到的翻译模板数量。"
+      title={translate("common:connectionStatusCard.connectionStatusCard_title_backendConnection")}
+      description={translate("common:connectionStatusCard.connectionStatusCard_description_checkPythonCurrentReadTranslationCount")}
       actions={
         <Button disabled={isRefreshing} onClick={onRefresh} variant="secondary">
-          {isRefreshing ? '刷新中…' : '重新连接'}
+          {isRefreshing ? translate("common:connectionStatusCard.connectionStatusCard_message_text") : translate("common:connectionStatusCard.connectionStatusCard_message_reconnect")}
         </Button>
       }
     >
       <div className="connection-card__status-row">
         <StatusBadge label={getPhaseLabel(connectionPhase)} tone={connectionPhase} />
-        <span className="connection-card__url">{backendUrl || '等待分配本地端口'}</span>
+        <span className="connection-card__url">{backendUrl || translate("common:connectionStatusCard.connectionCardUrl_message_wait")}</span>
       </div>
 
       <p className="connection-card__message">{connectionMessage}</p>
 
       <dl className="meta-grid">
         <div>
-          <dt>翻译模板数</dt>
+          <dt>{translate("common:connectionStatusCard.metaGrid_message_translation")}</dt>
           <dd>{translatorCount}</dd>
         </div>
         <div>
-          <dt>轮询频率</dt>
-          <dd>每 2 秒</dd>
+          <dt>{translate("common:connectionStatusCard.metaGrid_message_text")}</dt>
+          <dd>{translate("common:connectionStatusCard.metaGrid_message_2Seconds")}</dd>
         </div>
       </dl>
     </Panel>
@@ -54,10 +56,10 @@ export function ConnectionStatusCard({
 function getPhaseLabel(phase: ConnectionPhase) {
   switch (phase) {
     case 'online':
-      return '已连接';
+      return translate("common:connectionStatusCard.getPhaseLabel_message_doneConnection");
     case 'offline':
-      return '离线';
+      return translate("common:connectionStatusCard.getPhaseLabel_message_text");
     default:
-      return '连接中';
+      return translate("common:connectionStatusCard.getPhaseLabel_message_connection");
   }
 }

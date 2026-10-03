@@ -1,3 +1,4 @@
+import { t as translate } from "../i18n/core";
 /**
  * 「这次任务会用哪个后端」的统一口径。
  *
@@ -10,6 +11,7 @@ export type BackendUsageSummary = {
   backend: string;
   model: string;
   profile: string;
+  missing?: boolean;
 };
 
 function stringifyConfigValue(value: unknown): string {
@@ -27,7 +29,7 @@ function uniqueNonEmpty(values: string[]): string[] {
 
 function collectBackendModels(config: Record<string, unknown> | null): { backend: string; model: string } {
   if (!config) {
-    return { backend: '未配置后端类型', model: '未填写模型' };
+    return { backend: translate("common:backendUsage.backend_backend_notConfiguredBackend"), model: translate("common:backendUsage.model_model_notModel") };
   }
 
   const enabledBackends: string[] = [];
@@ -50,8 +52,8 @@ function collectBackendModels(config: Record<string, unknown> | null): { backend
   }
 
   return {
-    backend: uniqueNonEmpty(enabledBackends).join(' / ') || '未配置后端类型',
-    model: uniqueNonEmpty(models).join(' / ') || '未填写模型',
+    backend: uniqueNonEmpty(enabledBackends).join(' / ') || translate("common:backendUsage.backend_message_notConfiguredBackend"),
+    model: uniqueNonEmpty(models).join(' / ') || translate("common:backendUsage.model_message_notModel"),
   };
 }
 
@@ -64,7 +66,8 @@ export function summarizeBackendUsage(projectDir: string, projectBackendConfig: 
   // global profile with "不使用（使用项目自身配置）".
   if (!profile && selectedProfileDisplay === '__default__') {
     return {
-      backend: '未配置后端',
+      missing: true,
+      backend: translate("common:backendUsage.backend_backend_notConfiguredBackendVariant2"),
       model: '',
       profile: '',
     };
@@ -73,7 +76,7 @@ export function summarizeBackendUsage(projectDir: string, projectBackendConfig: 
   const activeConfig = profile ?? projectBackendConfig;
   const { model } = collectBackendModels(activeConfig);
   return {
-    backend: profile ? name : '自定义后端',
+    backend: profile ? name : translate("common:backendUsage.backend_message_customBackend"),
     model,
     profile: name,
   };
@@ -81,6 +84,6 @@ export function summarizeBackendUsage(projectDir: string, projectBackendConfig: 
 
 /** 「配置名 · 模型名」这种一行文案，两处确认/展示都用它 */
 export function formatBackendUsage(summary: BackendUsageSummary): string {
-  if (!summary.backend) return '未配置后端';
+  if (!summary.backend) return translate("common:backendUsage.formatBackendUsage_message_notConfiguredBackend");
   return summary.model ? `${summary.backend} · ${summary.model}` : summary.backend;
 }

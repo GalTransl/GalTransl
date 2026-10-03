@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../../../i18n";
 import { useEffect, useRef, useState } from 'react';
 import {
   encodeProjectDir,
@@ -27,6 +28,7 @@ import { asArgs, formatPayload, str } from '../toolMeta';
 const JOB_CARD_POLL_MS = 1000;
 
 export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; projectDir: string }) {
+  useUiLanguage();
   const args = asArgs(item.arguments);
   const result =
     item.result && typeof item.result === 'object' ? (item.result as Record<string, unknown>) : {};
@@ -101,16 +103,16 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
   const tone = isRunning ? 'running' : failed ? 'error' : 'done';
   const stateLabel = isRunning
     ? status === 'pending'
-      ? '等待中'
-      : '翻译中'
+      ? translate("common:actions.waiting")
+      : translate("agent:translationJobCard.stateLabel_message_translation")
     : failed
-      ? '失败'
+      ? translate("common:actions.failed")
       : status === 'cancelled'
-        ? '已取消'
-        : '已完成';
+        ? translate("agent:translationJobCard.stateLabel_message_doneCancel")
+        : translate("agent:translationJobCard.stateLabel_message_doneComplete");
   const resultText = formatPayload(item.ok === false ? item.error : item.result);
   // GenDic 跑的是分片/批次而不是句子：进度与速度的单位都跟着它换（与工作台一致）
-  const progressUnit = translator === 'GenDic' || (runtime?.stage ?? '').startsWith('GenDic') ? '项' : '句';
+  const progressUnit = translator === 'GenDic' || (runtime?.stage ?? '').startsWith('GenDic') ? translate("agent:translationJobCard.progressUnit_message_item") : translate("agent:translationJobCard.progressUnit_message_sentence");
 
   return (
     <div className={`agent-tjob${open ? ' is-open' : ''}${isRunning ? ' is-live' : ''}`}>
@@ -124,9 +126,9 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
         aria-expanded={open}
       >
         <span className="agent-tjob__icon"><Icon name="play" /></span>
-        <span className="agent-tjob__action">启动翻译</span>
+        <span className="agent-tjob__action">{translate("agent:translationJobCard.agentTjobHeader_message_translation")}</span>
         <span className="agent-tjob__summary">
-          {[translator, fileCount ? `仅 ${fileCount} 个文件` : ''].filter(Boolean).join(' · ')}
+          {[translator, fileCount ? translate("agent:translationJobCard.agentTjobSummary_filter_countFile", { fileCount: fileCount }) : ''].filter(Boolean).join(' · ')}
         </span>
         {total > 0 ? (
           <span className="agent-tjob__count">
@@ -147,9 +149,7 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
               {formatPercentDisplay(summary?.percent ?? 0)}
               <span className="agent-tjob__percent-sign">%</span>
             </span>
-            <span className="agent-tjob__frac">
-              已译 <b>{translated}</b> / {total} 句
-              <span className="agent-tjob__frac-remain">剩余 {remaining}</span>
+            <span className="agent-tjob__frac">{translate("agent:translationJobCard.agentTjobFrac_span_done")}<b>{translated}</b> / {total}{translate("agent:translationJobCard.agentTjobFrac_span_sentence")}<span className="agent-tjob__frac-remain">{translate("agent:translationJobCard.agentTjobFrac_message_text", { remaining: remaining })}</span>
             </span>
           </div>
 
@@ -160,15 +160,15 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
           <div className="agent-tjob__stats">
             <span className="agent-tjob__stat">
               <b>{formatSpeed(summary?.translation_speed_lpm ?? 0, progressUnit)}</b>
-              <i>实时速度</i>
+              <i>{translate("agent:translationJobCard.agentTjobStat_message_text")}</i>
             </span>
             <span className="agent-tjob__stat">
               <b>{formatEta(summary?.eta_seconds ?? 0)}</b>
-              <i>预计剩余</i>
+              <i>{translate("agent:translationJobCard.agentTjobStat_message_textVariant2")}</i>
             </span>
             <span className="agent-tjob__stat">
               <b>{formatElapsedTime(snapJob, nowMs)}</b>
-              <i>已用时长</i>
+              <i>{translate("agent:translationJobCard.agentTjobStat_message_done")}</i>
             </span>
           </div>
 
@@ -178,16 +178,16 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
             onClick={() => setRawOpen((v) => !v)}
             aria-expanded={rawOpen}
           >
-            {rawOpen ? '收起原始数据' : '原始参数 / 结果'}
+            {rawOpen ? translate("agent:translationJobCard.agentTjobRawToggle_message_text") : translate("agent:translationJobCard.agentTjobRawToggle_message_textVariant2")}
           </button>
           {rawOpen ? (
             <>
               {item.arguments !== undefined ? (
-                <ToolBlock title="参数" content={formatPayload(item.arguments)} mono />
+                <ToolBlock title={translate("agent:translationJobCard.agentTjobBody_title_text")} content={formatPayload(item.arguments)} mono />
               ) : null}
               {resultText ? (
                 <ToolBlock
-                  title={item.ok === false ? '错误' : '结果'}
+                  title={item.ok === false ? translate("agent:translationJobCard.agentTjobBody_title_error") : translate("agent:translationJobCard.agentTjobBody_title_textVariant2")}
                   content={resultText}
                   markdown={item.ok !== false && typeof item.result === 'string'}
                   mono

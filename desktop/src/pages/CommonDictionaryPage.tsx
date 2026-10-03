@@ -1,3 +1,4 @@
+import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useState } from 'react';
 import { DictionaryManager } from '../components/DictionaryManager';
 import {
@@ -11,9 +12,10 @@ import { normalizeError } from '../lib/errors';
 
 
 export function CommonDictionaryPage() {
+  useUiLanguage();
   const [data, setData] = useState<CommonDictionaryManagerResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useMessageState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -22,7 +24,7 @@ export function CommonDictionaryPage() {
       const res = await fetchCommonDictionaryManager();
       setData(res);
     } catch (err) {
-      setError(normalizeError(err, '加载通用字典失败'));
+      setError(normalizeError(err, uiMessage("projects:commonDictionaryPage.loadData_normalizeError_loadDictionaryFailed")));
     } finally {
       setLoading(false);
     }
@@ -34,8 +36,8 @@ export function CommonDictionaryPage() {
 
   return (
     <DictionaryManager
-      title="通用字典管理"
-      description="仅管理程序根目录 Dict 下的通用字典文件，支持卡片编辑与纯文本编辑。"
+      title={translate("projects:commonDictionaryPage.commonDictionaryPage_title_dictionary")}
+      description={translate("projects:commonDictionaryPage.commonDictionaryPage_description_directoryDictDictionaryFileEditTextEdit")}
       data={data}
       loading={loading}
       error={error}

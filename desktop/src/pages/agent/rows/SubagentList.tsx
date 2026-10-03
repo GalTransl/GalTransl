@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../../../i18n";
 import { useEffect, useState } from 'react';
 import type { SubagentRun, SubagentStep } from '../timeline';
 import { asArgs, clipText, formatDuration, toolMeta } from '../toolMeta';
@@ -10,6 +11,7 @@ import { asArgs, clipText, formatDuration, toolMeta } from '../toolMeta';
     每行能展开看它自己的工具调用与报告：跑着的时候默认展开（要看它在干什么），跑完自动收起
     （报告在行摘要的下一层，点开就能读）；用户手动点过就听用户的。 */
 export function SubagentList({ runs }: { runs: SubagentRun[] }) {
+  const uiLanguage = useUiLanguage();
   const running = runs.filter((run) => run.status === 'running').length;
   const done = runs.filter((run) => run.status === 'done').length;
   const failed = runs.filter((run) => run.status === 'failed').length;
@@ -17,17 +19,17 @@ export function SubagentList({ runs }: { runs: SubagentRun[] }) {
   // 有在跑的就报"几个在跑"；全停了就按结局分账——中止/失败不算"已完成"
   let meta: string;
   if (running > 0) {
-    meta = `${running}/${runs.length} 个在跑`;
+    meta = translate("agent:subagentList.subagentList_message_count", { running: running, count: runs.length });
   } else if (stopped > 0 || failed > 0) {
-    const parts = [done > 0 ? `${done} 个完成` : '', failed > 0 ? `${failed} 个失败` : '', stopped > 0 ? `${stopped} 个中止` : ''];
+    const parts = [done > 0 ? translate("agent:subagentList.parts_message_countComplete", { done: done }) : '', failed > 0 ? translate("agent:subagentList.parts_message_countFailed", { failed: failed }) : '', stopped > 0 ? translate("agent:subagentList.parts_message_count", { stopped: stopped }) : ''];
     meta = parts.filter(Boolean).join('、');
   } else {
-    meta = `${runs.length} 个已完成`;
+    meta = translate("agent:subagentList.subagentList_message_countDoneComplete", { count: runs.length });
   }
   return (
     <div className="agent-subagents">
       <div className="agent-subagents__head">
-        <span className="agent-subagents__title">子代理</span>
+        <span className="agent-subagents__title">{translate("agent:subagentList.agentSubagentsHead_message_proxy")}</span>
         <span className="agent-subagents__meta">{meta}</span>
       </div>
       {runs.map((run) => (
@@ -38,6 +40,7 @@ export function SubagentList({ runs }: { runs: SubagentRun[] }) {
 }
 
 function SubagentRow({ run }: { run: SubagentRun }) {
+  const uiLanguage = useUiLanguage();
   // **默认折叠**：一次派 16 个时是一行一个子代理，全铺开会把父行撑得很长；要看细节点开。
   // 折叠态不丢信息——"最新动作"就挂在行上（见 subagentLatest），在干什么一眼能扫到。
   const [open, setOpen] = useState(false);
@@ -78,26 +81,24 @@ function SubagentRow({ run }: { run: SubagentRun }) {
             {latest.short}
           </span>
         ) : null}
-        {run.toolCalls ? <span className="agent-subagent__badge">{run.toolCalls} 次工具</span> : null}
-        {run.proofreadComment ? <span className="agent-subagent__badge is-doubt">意见 {run.proofreadComment}</span> : null}
+        {run.toolCalls ? <span className="agent-subagent__badge">{translate("agent:subagentList.agentSubagentHead_message_text", { toolCalls: run.toolCalls })}</span> : null}
+        {run.proofreadComment ? <span className="agent-subagent__badge is-doubt">{translate("agent:subagentList.agentSubagentHead_message_textVariant2", { proofreadComment: run.proofreadComment })}</span> : null}
         <span className={`agent-subagent__state is-${state.tone}`}>{state.label}</span>
         {run.retry ? (
           <span
             className="agent-subagent__badge is-retry"
             title={
               run.retry.reason
-                ? `${run.retry.code || '请求失败'}：${run.retry.reason}`
-                : '请求失败，正在自动重试'
+                ? translate("agent:subagentList.agentSubagentBadgeIsRetry_title_text", { value: run.retry.code || translate("agent:subagentList.interpolation_fallback_failed"), reason: run.retry.reason })
+                : translate("agent:subagentList.agentSubagentBadgeIsRetry_title_failedPendingAutoRetry")
             }
-          >
-            重试 {run.retry.attempt}/{run.retry.maxAttempts || '…'}
-          </span>
+          >{translate("agent:subagentList.agentSubagentHead_message_retry", { attempt: run.retry.attempt, value: run.retry.maxAttempts || '…' })}</span>
         ) : null}
         {durationMs > 0 ? <span className="agent-subagent__time">{formatDuration(durationMs)}</span> : null}
       </button>
       {open ? (
         <div className="agent-subagent__body">
-          {run.brief ? <div className="agent-subagent__brief">额外要求：{run.brief}</div> : null}
+          {run.brief ? <div className="agent-subagent__brief">{translate("agent:subagentList.agentSubagentBody_message_text", { brief: run.brief })}</div> : null}
           {run.steps.map((step, i) =>
             step.kind === 'text' ? (
               <div key={`t-${i}`} className="agent-subagent__text">{step.text}</div>
@@ -107,7 +108,7 @@ function SubagentRow({ run }: { run: SubagentRun }) {
           )}
           {run.report ? (
             <div className="agent-subagent__report">
-              <span className="agent-subagent__report-label">报告</span>
+              <span className="agent-subagent__report-label">{translate("agent:subagentList.agentSubagentReport_message_text")}</span>
               <span className="agent-subagent__report-text">{run.report}</span>
             </div>
           ) : null}
@@ -145,13 +146,13 @@ function subagentLatest(run: SubagentRun): { short: string; full: string; tone?:
   }
   if (step?.kind === 'tool') {
     if (step.ok === false) {
-      const error = (step.error || '失败').trim();
-      return { short: `失败：${clipText(error, 40)}`, full: error, tone: 'error' };
+      const error = (step.error || translate("common:actions.failed")).trim();
+      return { short: translate("agent:subagentList.short_short_failed", { value: clipText(error, 40) }), full: error, tone: 'error' };
     }
     const doubts = stepDoubts(step.args);
     if (step.name === 'patch_transl_cache' && doubts.length) {
       return {
-        short: `写下 ${doubts.length} 条校对意见`,
+        short: translate("agent:subagentList.short_short_entry", { count: doubts.length }),
         full: doubts.map((doubt) => `#${doubt.index} ${doubt.text}`).join('\n'),
       };
     }
@@ -169,11 +170,12 @@ function subagentLatest(run: SubagentRun): { short: string; full: string; tone?:
 /** 子代理的一步工具调用。写意见那一步特殊处理：把每条意见都摊出来——那才是用户要看的产出，
     只显示"修改译文 · 3 条"等于让他自己去翻缓存文件。 */
 function SubagentStepRow({ step }: { step: Extract<SubagentStep, { kind: 'tool' }> }) {
+  useUiLanguage();
   const doubts = stepDoubts(step.args);
   if (step.name === 'patch_transl_cache' && doubts.length) {
     return (
       <div className="agent-subagent__step is-doubt">
-        <span className="agent-subagent__step-name">写校对意见</span>
+        <span className="agent-subagent__step-name">{translate("agent:subagentList.agentSubagentStepIsDoubt_message_text")}</span>
         <div className="agent-subagent__doubts">
           {doubts.map((doubt) => (
             <div key={doubt.index} className="agent-subagent__doubt">
@@ -190,8 +192,8 @@ function SubagentStepRow({ step }: { step: Extract<SubagentStep, { kind: 'tool' 
       <span className="agent-subagent__step-name">{toolMeta(step.name).action}</span>
       <span className="agent-subagent__step-detail">
         {step.ok === false
-          ? step.error || '失败'
-          : toolMeta(step.name).summary(asArgs(step.args)) || '完成'}
+          ? step.error || translate("common:actions.failed")
+          : toolMeta(step.name).summary(asArgs(step.args)) || translate("common:actions.completed")}
       </span>
     </div>
   );
@@ -202,9 +204,9 @@ function subagentState(run: SubagentRun): {
   label: string;
   tone: 'running' | 'done' | 'error' | 'muted';
 } {
-  if (run.status === 'running') return { label: '进行中', tone: 'running' };
-  if (run.status === 'done') return { label: '完成', tone: 'done' };
-  if (run.status === 'failed') return { label: '失败', tone: 'error' };
-  if (run.status === 'stopped') return { label: '已停止', tone: 'muted' };
-  return { label: '轮数到顶', tone: 'muted' };
+  if (run.status === 'running') return { label: translate("agent:subagentList.label_label_text"), tone: 'running' };
+  if (run.status === 'done') return { label: translate("common:actions.completed"), tone: 'done' };
+  if (run.status === 'failed') return { label: translate("common:actions.failed"), tone: 'error' };
+  if (run.status === 'stopped') return { label: translate("agent:subagentList.label_label_doneStop"), tone: 'muted' };
+  return { label: translate("agent:subagentList.label_label_textVariant2"), tone: 'muted' };
 }

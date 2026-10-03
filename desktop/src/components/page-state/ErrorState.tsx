@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../../i18n";
 import type { ReactNode } from 'react';
 import { InlineFeedback } from './InlineFeedback';
 
@@ -9,11 +10,12 @@ type ErrorStateProps = {
 };
 
 export function ErrorState({
-  title = '加载失败',
+  title = translate("common:errorState.errorState_message_loadFailed"),
   description,
   action,
   className,
 }: ErrorStateProps) {
+  useUiLanguage();
   return (
     <InlineFeedback
       tone="error"
