@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -64,8 +65,18 @@ def save_app_settings(settings: dict[str, Any]) -> dict[str, Any]:
     normalized = _normalize_settings(settings)
     settings_path = get_app_settings_path()
     settings_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = settings_path.with_suffix(settings_path.suffix + ".tmp")
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(normalized, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_path, settings_path)
+    # Each backend instance owns its temporary file; the last completed save
+    # replaces the destination atomically without consuming another writer's file.
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=settings_path.parent,
+            prefix=f".{settings_path.name}.", suffix=".tmp", delete=False,
+        ) as f:
+            tmp_path = Path(f.name)
+            json.dump(normalized, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, settings_path)
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
     return normalized

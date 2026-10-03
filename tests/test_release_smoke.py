@@ -123,12 +123,21 @@ class BackendSmokeTests(unittest.TestCase):
         overrides = {name: "source-checkout" for name in (
             "PYTHONPATH", "PYTHONHOME", "GALTRANSL_RESOURCE_DIR", "GALTRANSL_DATA_DIR", "GALTRANSL_APP_SETTINGS_PATH",
         )}
-        with patch.dict(os.environ, overrides):
-            env = smoke.isolated_environment(Path("temporary"))
-            for name in overrides:
+        with TemporaryDirectory() as tmp, patch.dict(os.environ, overrides):
+            directory = Path(tmp).resolve()
+            env = smoke.isolated_environment(directory)
+            for name in ("PYTHONPATH", "PYTHONHOME", "GALTRANSL_RESOURCE_DIR"):
                 self.assertNotIn(name, env)
-            self.assertEqual(env["XDG_CONFIG_HOME"], str(Path("temporary/config")))
+            self.assertEqual(env["XDG_CONFIG_HOME"], str(directory / "config"))
+            self.assertEqual(env["GALTRANSL_DATA_DIR"], str(directory / "data"))
+            self.assertEqual(env["GALTRANSL_APP_SETTINGS_PATH"], str(directory / "config/app_settings.json"))
             self.assertEqual(os.environ["PYTHONPATH"], "source-checkout")
+            from GalTransl.RuntimePaths import get_user_data_dir, get_app_settings_path
+            with patch.dict(os.environ, env, clear=True):
+                for platform in ("win32", "linux", "darwin"):
+                    with self.subTest(platform=platform), patch.object(sys, "platform", platform):
+                        self.assertEqual(get_user_data_dir(), directory / "data")
+                        self.assertEqual(get_app_settings_path(), directory / "config/app_settings.json")
 
     def test_ready_file_uses_dynamic_loopback_port(self):
         with TemporaryDirectory() as tmp:
@@ -169,15 +178,18 @@ class BackendSmokeTests(unittest.TestCase):
                             smoke.check_api("http://127.0.0.1:34567", VERSION)
 
     def test_always_stops_backend_on_success_api_error_or_timeout(self):
-        for failure in (None, RuntimeError("wrong version"), TimeoutError("not ready")):
+        for failure in (None, RuntimeError("wrong version"), TimeoutError("not ready"), ValueError("plugin failed")):
             with self.subTest(failure=failure), TemporaryDirectory() as tmp:
                 process = Mock()
                 with patch.object(smoke.subprocess, "Popen", return_value=process) as start, \
                      patch.object(smoke, "wait_for_backend", return_value="http://127.0.0.1:34567") as ready, \
                      patch.object(smoke, "check_api") as check, \
+                     patch.object(smoke, "check_file_plugins") as plugins, \
                      patch.object(smoke, "stop_backend") as stop:
                     if isinstance(failure, TimeoutError):
                         ready.side_effect = failure
+                    elif isinstance(failure, ValueError):
+                        plugins.side_effect = failure
                     else:
                         check.side_effect = failure
                     if failure:
@@ -188,6 +200,20 @@ class BackendSmokeTests(unittest.TestCase):
                     stop.assert_called_once_with(process)
                     self.assertEqual(start.call_args.kwargs["cwd"], Path(tmp))
                     self.assertNotIn("PYTHONPATH", start.call_args.kwargs["env"])
+
+    def test_macos_backend_uses_bundle_resources_and_isolated_settings(self):
+        with TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            resources = directory / "app/Contents/Resources"
+            with patch.object(smoke.subprocess, "Popen") as start, \
+                 patch.object(smoke, "wait_for_backend", return_value="http://127.0.0.1:12345"), \
+                 patch.object(smoke, "check_api"), patch.object(smoke, "check_file_plugins"), \
+                 patch.object(smoke, "stop_backend"):
+                smoke.smoke_backend(directory / "app/Contents/MacOS/galtransl_backend",
+                                    directory / "smoke", VERSION, 1, resources)
+            env = start.call_args.kwargs["env"]
+            self.assertEqual(env["GALTRANSL_RESOURCE_DIR"], str(resources.resolve()))
+            self.assertEqual(env["GALTRANSL_DATA_DIR"], str((directory / "smoke/data").resolve()))
 
     def test_windows_cleanup_targets_only_its_process_tree(self):
         process = Mock(pid=123)
@@ -219,7 +245,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         matrix = jobs["build"]["strategy"]["matrix"]["include"]
         self.assertEqual(
             {entry["os"] for entry in matrix},
-            {"windows-2022", "ubuntu-22.04", "macos-13", "macos-14"},
+            {"windows-2022", "ubuntu-22.04", "macos-15-intel", "macos-15"},
         )
         self.assertEqual(jobs["build"]["strategy"]["fail-fast"], "false")
         release = jobs["draft_release"]

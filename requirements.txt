@@ -9,6 +9,7 @@ colorlog
 openpyxl
 orjson
 beautifulsoup4
+lxml
 playsound3
 fasttext-predict
 InquirerPy

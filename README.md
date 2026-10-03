@@ -177,7 +177,9 @@ python build_macos.py
 
 ## 自动构建与发布
 
-[Build and draft release](https://github.com/GalTransl/GalTransl/actions/workflows/build-release.yml) 使用 Windows x64 和 Ubuntu 22.04 x86_64 原生 runner 编译桌面包，无需在本地准备两套编译环境。
+[Build and draft release](https://github.com/GalTransl/GalTransl/actions/workflows/build-release.yml) 使用 Windows x64、Ubuntu 22.04 x86_64 和 macOS Intel/Apple Silicon 原生 runner 编译桌面包。
+
+发布验收会从独立目录启动解压后的后端，使用临时配置和用户数据目录，并实际解析 TXT、JSON、EPUB 文件。macOS 还会挂载 DMG、复制其中的 `.app`，校验版本、前后端架构和资源，再启动应用包内的后端完成同样的检查。
 
 | 触发方式 | 结果 |
 | --- | --- |

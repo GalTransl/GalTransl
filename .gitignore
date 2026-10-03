@@ -29,3 +29,4 @@ galtransl_backend.spec
 /.claude
 desktop/src-tauri/binaries/
 desktop/src-tauri/.tauri-linux-build.json
+desktop/src-tauri/.tauri-macos-build.json

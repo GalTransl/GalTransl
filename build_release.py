@@ -318,6 +318,8 @@ def build_backend(onefile: bool = False):
         "openpyxl",
         "orjson",
         "bs4",
+        # EPUB's vendored ebooklib imports this native extension at runtime.
+        "lxml.etree",
         "yaml",
     ]
 

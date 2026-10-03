@@ -109,6 +109,8 @@ Build outputs are written to `release/` and include an architecture-specific `.d
 | Actions → Build and draft release → Run workflow | Manual test build; artifacts only, no Release changes |
 | Push a version tag (`8.2.0` or `v8.2.0`) | Create a draft Release and attach packages only after Windows, Linux, and macOS pass tests, builds, and packaged-backend checks |
 
+Release checks launch the extracted backend from a separate directory with temporary settings and user data, and parse real TXT, JSON, and EPUB files. On macOS, they also mount the DMG, copy its `.app`, validate the version, both executable architectures and resources, then run the same checks against the backend inside the app bundle.
+
 **Download test builds:** open the workflow run and download `GalTransl-windows-x64`, `GalTransl-linux-x86_64-portable`, or the `dmg` / `portable` artifact for the desired macOS architecture (retained for 14 days). Each Actions artifact is still delivered as an outer ZIP; extract it to get the corresponding file. Linux and macOS portable artifacts also need their inner `.tar.gz` extracted to preserve executable permissions.
 
 **Publish a new version (maintainers):**

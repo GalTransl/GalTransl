@@ -695,7 +695,9 @@ def _init_file_plugin(project_dir: str, cfg, fname: str):
         if plugin_module in project_plugin_conf:
             plugin_conf["Settings"].update(project_plugin_conf[plugin_module])
         plugin_conf["Settings"]["project_dir"] = project_dir
-        plugin.plugin_object.gtp_init(plugin_conf, cfg.getCommonConfigSection())
+        project_conf = dict(cfg.getCommonConfigSection())
+        project_conf["project_dir"] = project_dir
+        plugin.plugin_object.gtp_init(plugin_conf, project_conf)
         return plugin.plugin_object
     raise RuntimeError(f"文件插件 {fname} 加载失败")
 
