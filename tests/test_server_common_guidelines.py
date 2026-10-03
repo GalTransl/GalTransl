@@ -101,7 +101,7 @@ class CommonGuidelineApiTests(unittest.TestCase):
 
         self.assertEqual(out["guidelines"], ["Basic.md", "MyStyle.md"])
         self.assertEqual([item["name"] for item in out["files"]], ["Basic.md", "MyStyle.md"])
-        self.assertEqual(out["dir"], os.path.abspath("translation_guidelines"))
+        self.assertTrue(os.path.samefile(out["dir"], self.guidelines_dir))
         self.assertEqual(out["default"], self.default_name)
         by_name = {item["name"]: item for item in out["files"]}
         # size 是**磁盘上的字节数**（不是字符数：中文一个字符占 3 字节，且 Windows 上写盘会把

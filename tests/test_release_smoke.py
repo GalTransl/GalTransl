@@ -304,12 +304,13 @@ class ReleaseWorkflowTests(unittest.TestCase):
           esac
         }
         '''
+        assets = ["first package.zip", r"second\package.tar.gz"]
         for state in ("new", "draft", "published", "api-error", "published-during-upload", "upload-error"):
             with self.subTest(state=state), TemporaryDirectory() as tmp:
                 directory = Path(tmp)
                 calls = directory / "calls.txt"
                 calls.touch()
-                (directory / "release-assets.txt").write_text("first.zip\nsecond.tar.gz\n", encoding="utf-8")
+                (directory / "release-assets.txt").write_text("\n".join(assets), encoding="utf-8", newline="\n")
                 env = {
                     **os.environ, "STATE": state, "CALLS": calls.name,
                     "RUNNER_TEMP": ".", "RELEASE_TAG": VERSION,
@@ -322,6 +323,10 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 if state in ("new", "draft"):
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(sum(line.startswith("release upload") for line in writes), 2)
+                    self.assertEqual(
+                        [line for line in writes if line.startswith("release upload")],
+                        [f"release upload {VERSION} {asset} --clobber" for asset in assets],
+                    )
                     self.assertEqual(sum(line.startswith("release create") for line in writes), int(state == "new"))
                     if state == "new":
                         self.assertIn("--draft --verify-tag", writes[0])

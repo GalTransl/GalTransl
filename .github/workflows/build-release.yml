@@ -253,12 +253,11 @@ jobs:
           else
             gh release create "$RELEASE_TAG" --draft --verify-tag --title "v$RELEASE_VERSION" --generate-notes
           fi
-          mapfile -t assets < "$RUNNER_TEMP/release-assets.txt"
-          for asset in "${assets[@]}"; do
+          while IFS= read -r asset || [[ -n "$asset" ]]; do
             # Recheck in case a maintainer published the draft while this run was uploading.
             if [[ $(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft') != "true" ]]; then
               printf 'Release is no longer a draft; stopping uploads.\n' >&2
               exit 1
             fi
             gh release upload "$RELEASE_TAG" "$asset" --clobber
-          done
+          done < "$RUNNER_TEMP/release-assets.txt"

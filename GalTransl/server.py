@@ -4129,6 +4129,15 @@ class BackendHTTPServer(ThreadingHTTPServer):
     def server_bind(self) -> None:
         if os.name == "nt":
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        if (os.name == "nt" or sys.platform == "darwin") and self.server_address[1]:
+            # macOS/legacy Windows listeners can overlap wildcard addresses.
+            # Probe fixed ports while retaining reuse for closed connections.
+            host, port = self.server_address
+            target = "127.0.0.1" if host in ("", "0.0.0.0") else host
+            with socket.socket(self.address_family, socket.SOCK_STREAM) as probe:
+                probe.settimeout(1)
+                if probe.connect_ex((target, port)) == 0:
+                    raise OSError(errno.EADDRINUSE, "Address already in use")
         super().server_bind()
 
 

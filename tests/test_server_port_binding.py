@@ -72,22 +72,24 @@ class ServerPortBindingTests(unittest.TestCase):
         self.assertEqual(created[0].socket.fileno(), -1)
 
     def test_duplicate_backend_exits_without_claiming_to_listen(self):
-        # Reject a second backend, including an exclusive wildcard listener
-        # and a legacy backend that reused the same loopback address.
+        # Reject overlapping loopback/wildcard listeners, including legacy
+        # backends with address reuse enabled.
         cases = (
-            (BackendHTTPServer, "127.0.0.1"),
-            (ThreadingHTTPServer, "127.0.0.1"),
-            (BackendHTTPServer, "0.0.0.0"),
+            (BackendHTTPServer, "127.0.0.1", "127.0.0.1"),
+            (ThreadingHTTPServer, "127.0.0.1", "127.0.0.1"),
+            (BackendHTTPServer, "0.0.0.0", "127.0.0.1"),
+            (ThreadingHTTPServer, "0.0.0.0", "127.0.0.1"),
+            (BackendHTTPServer, "127.0.0.1", "0.0.0.0"),
         )
-        for server_type, host in cases:
-            with self.subTest(server=server_type.__name__, host=host):
+        for server_type, host, duplicate_host in cases:
+            with self.subTest(server=server_type.__name__, host=host, duplicate_host=duplicate_host):
                 with server_type((host, 0), ProbeHandler) as first:
                     worker = threading.Thread(target=first.serve_forever, daemon=True)
                     worker.start()
                     try:
                         port = first.server_port
                         result = subprocess.run(
-                            [sys.executable, "run_backend.py", "--host", "127.0.0.1", "--port", str(port)],
+                            [sys.executable, "run_backend.py", "--host", duplicate_host, "--port", str(port)],
                             cwd=Path(__file__).resolve().parents[1],
                             env={**os.environ, "PYTHONIOENCODING": "utf-8"},
                             capture_output=True,
@@ -114,6 +116,18 @@ class ServerPortBindingTests(unittest.TestCase):
                     finally:
                         first.shutdown()
                         worker.join(timeout=5)
+
+    def test_macos_rejects_live_listener_before_binding(self):
+        for host in ("127.0.0.1", "0.0.0.0"):
+            with self.subTest(host=host):
+                with ThreadingHTTPServer(("0.0.0.0", 0), ProbeHandler) as first:
+                    with BackendHTTPServer((host, first.server_port), ProbeHandler, bind_and_activate=False) as second:
+                        with patch("GalTransl.server.sys.platform", "darwin"):
+                            with patch.object(ThreadingHTTPServer, "server_bind") as bind:
+                                with self.assertRaises(OSError) as caught:
+                                    second.server_bind()
+                                self.assertEqual(caught.exception.errno, errno.EADDRINUSE)
+                                bind.assert_not_called()
 
     def test_existing_backend_cannot_be_shared_by_legacy_reuse_listener(self):
         with BackendHTTPServer(("127.0.0.1", 0), ProbeHandler) as first:

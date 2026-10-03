@@ -73,7 +73,7 @@ class MsgToolEncodingTests(unittest.TestCase):
     def test_bilingual_original_and_separator_are_checked(self):
         plugin = self.plugin(keep_bilingual=True, bilingual_sep="🙂")
         with patch.object(plugin, "_run") as run:
-            with self.assertRaisesRegex(RuntimeError, "U\+1F642"):
+            with self.assertRaisesRegex(RuntimeError, r"U\+1F642"):
                 plugin.save_file(str(self.dst), [{"message": "日本", "org_message": "你"}])
             run.assert_not_called()
 
