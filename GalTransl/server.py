@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from socketserver import TCPServer
 from typing import Any
 from urllib.parse import urlparse, parse_qs, unquote
 from uuid import uuid4
@@ -4140,7 +4141,10 @@ class BackendHTTPServer(ThreadingHTTPServer):
                 probe.settimeout(1)
                 if probe.connect_ex((target, port)) == 0:
                     raise OSError(errno.EADDRINUSE, "Address already in use")
-        super().server_bind()
+        # HTTPServer resolves the host's FQDN here, which can block startup on
+        # macOS DNS. The API only needs the bound address and dynamic port.
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 def serve(host: str = "127.0.0.1", port: int = 12333, *, ready_file: str | None = None) -> None:

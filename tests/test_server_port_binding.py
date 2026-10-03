@@ -13,6 +13,7 @@ from contextlib import redirect_stdout
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from socketserver import TCPServer
 from unittest.mock import patch
 
 from GalTransl.Agent import AgentRuntime
@@ -46,12 +47,25 @@ class ServerPortBindingTests(unittest.TestCase):
                 self.assertFalse(ready_file.with_name("ready.json.tmp").exists())
                 raise KeyboardInterrupt
 
-            with patch("GalTransl.server.AGENT_REGISTRY", runtime):
+            with patch("GalTransl.server.AGENT_REGISTRY", runtime), patch(
+                "socket.getfqdn", side_effect=AssertionError("startup must not depend on DNS")
+            ):
                 with patch.object(BackendHTTPServer, "serve_forever", autospec=True, side_effect=inspect_started):
                     with redirect_stdout(io.StringIO()) as output:
                         serve(port=0, ready_file=str(ready_file))
             self.assertIn(f"http://127.0.0.1:{runtime.port}", output.getvalue())
             self.assertFalse(ready_file.exists())
+
+    def test_bind_uses_socket_address_without_reverse_dns(self):
+        for host in ("127.0.0.1", "0.0.0.0"):
+            with self.subTest(host=host), patch(
+                "socket.getfqdn", side_effect=AssertionError("startup must not depend on DNS")
+            ) as lookup:
+                with BackendHTTPServer((host, 0), ProbeHandler) as server:
+                    self.assertEqual(server.server_name, host)
+                    self.assertEqual(server.server_port, server.socket.getsockname()[1])
+                    self.assertGreater(server.server_port, 0)
+                lookup.assert_not_called()
 
     def test_ready_file_failure_closes_listener_without_claiming_success(self):
         created = []
@@ -123,7 +137,7 @@ class ServerPortBindingTests(unittest.TestCase):
                 with ThreadingHTTPServer(("0.0.0.0", 0), ProbeHandler) as first:
                     with BackendHTTPServer((host, first.server_port), ProbeHandler, bind_and_activate=False) as second:
                         with patch("GalTransl.server.sys.platform", "darwin"):
-                            with patch.object(ThreadingHTTPServer, "server_bind") as bind:
+                            with patch.object(TCPServer, "server_bind") as bind:
                                 with self.assertRaises(OSError) as caught:
                                     second.server_bind()
                                 self.assertEqual(caught.exception.errno, errno.EADDRINUSE)
