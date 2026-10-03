@@ -54,7 +54,7 @@ class ReleaseArchiveTests(unittest.TestCase):
                 for ext in formats:
                     (directory / f"GalTransl_{VERSION}_{platform}.{ext}").write_bytes(b"package")
                 self.assertEqual(len(smoke.expected_artifacts(directory, VERSION, platform)), len(formats))
-            missing = directory / f"GalTransl_{VERSION}_linux_x86_64.rpm"
+            missing = directory / f"GalTransl_{VERSION}_linux_x86_64.tar.gz"
             missing.unlink()
             with self.assertRaisesRegex(RuntimeError, "Missing or empty"):
                 smoke.expected_artifacts(directory, VERSION, "linux_x86_64")
@@ -217,13 +217,41 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertEqual(self.workflow["permissions"], {"contents": "read"})
         jobs = self.workflow["jobs"]
         matrix = jobs["build"]["strategy"]["matrix"]["include"]
-        self.assertEqual({entry["os"] for entry in matrix}, {"windows-2022", "ubuntu-22.04"})
+        self.assertEqual(
+            {entry["os"] for entry in matrix},
+            {"windows-2022", "ubuntu-22.04", "macos-13", "macos-14"},
+        )
         self.assertEqual(jobs["build"]["strategy"]["fail-fast"], "false")
         release = jobs["draft_release"]
         self.assertEqual(release["permissions"], {"contents": "write"})
         self.assertEqual(set(release["needs"]), {"metadata", "build"})
         self.assertEqual(release["if"], "github.event_name == 'push' && github.ref_type == 'tag'")
         self.assertIn("workflow_dispatch", self.workflow["on"])
+        linux_uploads = [
+            step for step in jobs["build"]["steps"]
+            if step.get("if") == "runner.os == 'Linux'"
+            and step.get("uses") == "actions/upload-artifact@v4"
+        ]
+        self.assertEqual(
+            {step["with"]["name"] for step in linux_uploads},
+            {"GalTransl-linux-x86_64-portable"},
+        )
+        linux_build = next(
+            step for step in jobs["build"]["steps"] if step.get("name") == "Build Linux bundles"
+        )
+        self.assertIn("--no-bundles", linux_build["run"])
+        mac_uploads = [
+            step for step in jobs["build"]["steps"]
+            if step.get("if") == "runner.os == 'macOS'"
+            and step.get("uses") == "actions/upload-artifact@v4"
+        ]
+        self.assertEqual(
+            {step["with"]["name"] for step in mac_uploads},
+            {
+                "GalTransl-${{ matrix.platform }}-dmg",
+                "GalTransl-${{ matrix.platform }}-portable",
+            },
+        )
 
     def test_checksum_manifest_only_includes_expected_assets(self):
         steps = self.workflow["jobs"]["draft_release"]["steps"]
@@ -243,7 +271,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
             self.assertEqual({line.split("  ")[1] for line in checksum_lines}, set(names))
             manifest = (directory / "release-assets.txt").read_text(encoding="utf-8").splitlines()
             self.assertEqual({Path(path).name for path in manifest}, {*names, "SHA256SUMS.txt"})
-            self.assertEqual(len(checksum_lines), 6)
+            self.assertEqual(len(checksum_lines), sum(len(formats) for formats in smoke.FORMATS.values()))
 
     @unittest.skipUnless(
         sys.platform != "win32" and shutil.which("bash") and shutil.which("jq"),

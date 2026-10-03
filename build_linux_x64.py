@@ -91,6 +91,7 @@ def build_backend_release() -> Path:
         [
             sys.executable,
             str(ROOT / "build_release.py"),
+            "--clean",
             "--skip-fe",
             "--no-archive",
             "--onefile",
@@ -216,6 +217,11 @@ def main() -> None:
     parser.add_argument("--no-bundles", action="store_true", help="skip deb/rpm/AppImage")
     parser.add_argument("--no-portable", action="store_true", help="skip tar.gz")
     parser.add_argument(
+        "--no-appimage-xz",
+        action="store_true",
+        help="skip the redundant compressed AppImage copy",
+    )
+    parser.add_argument(
         "--keep-staging",
         action="store_true",
         help="keep the staged Tauri sidecar after the build",
@@ -238,7 +244,7 @@ def main() -> None:
             build_tauri_bundles(formats)
             for artifact in copy_bundle_artifacts(formats):
                 print(f"bundle: {artifact}")
-            if "appimage" in formats:
+            if "appimage" in formats and not args.no_appimage_xz:
                 compress_appimage()
 
         copy_portable_frontend()

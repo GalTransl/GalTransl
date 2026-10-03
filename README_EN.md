@@ -45,7 +45,7 @@
 
 ## Environment Preparation
   * **Desktop Version (Recommended)**
-  Download the package for your platform from [Releases](https://github.com/GalTransl/GalTransl/releases/). On Windows, extract `GalTransl_*_win.zip` and double-click `GalTransl Desktop.exe`; **Python is not required**. On Linux x86_64, choose `.deb`, `.rpm`, `.AppImage`, or `.tar.gz`; extract the portable archive and run `./galtransl-desktop`. Linux still requires system libraries such as WebKitGTK 4.1. The desktop app automatically starts the backend service.
+  Download the package for your platform from [Releases](https://github.com/GalTransl/GalTransl/releases/). On Windows, extract `GalTransl_*_win.zip` and double-click `GalTransl Desktop.exe`; **Python is not required**. Linux x86_64 is distributed as a portable `.tar.gz`; extract it and run `./galtransl-desktop`. Linux still requires system libraries such as WebKitGTK 4.1. macOS releases include separate Intel and Apple Silicon DMGs plus portable `.tar.gz` archives. The desktop app automatically starts the backend service.
 
   * **Command-line Version (Developers / Advanced Users)**
   To use the command-line version or participate in development:
@@ -78,15 +78,26 @@ npm --prefix desktop ci
 ./run_desktop_dev.sh
 ```
 
-Build Linux release artifacts (`.deb`, `.rpm`, `.AppImage`, and a portable `.tar.gz`):
+Build the Linux portable release artifact:
 
 ```bash
-python build_linux_x64.py
+python build_linux_x64.py --no-bundles
 ```
 
 Build release packages on Ubuntu 22.04 or an equivalent glibc baseline for wider compatibility. Settings are stored under `$XDG_CONFIG_HOME/GalTransl`; editable common dictionaries live under `$XDG_DATA_HOME/GalTransl/Dict`, with bundled dictionaries used only as initial seeds. Editable guidelines and Agent sessions live under `$XDG_DATA_HOME/GalTransl/translation_guidelines` and `$XDG_DATA_HOME/GalTransl/agent_sessions`. XDG roots default to `~/.config` and `~/.local/share`. Windows retains settings and dictionaries in the program directory.
 
 Linux support does not imply that every external tool has been ported. For example, the msg-tool plugin's bundled `res/msg_tool.exe` is a Windows binary; extraction/reinsertion for those script formats cannot run directly on Linux.
+
+### macOS development and builds
+
+macOS builds cover both Intel (x86_64) and Apple Silicon (arm64). Install Xcode Command Line Tools, Python 3.11, Node.js, Rust, and the project dependencies:
+
+```bash
+npm --prefix desktop ci
+python build_macos.py
+```
+
+Build outputs are written to `release/` and include an architecture-specific `.dmg` and portable `.tar.gz`. Unsigned builds may be blocked by macOS Gatekeeper; configure Apple Developer signing and notarization for public distribution.
 
 ### Automated builds and releases
 
@@ -94,11 +105,11 @@ Linux support does not imply that every external tool has been ported. For examp
 
 | Trigger | Result |
 | --- | --- |
-| Push to `main` or open/update a PR | Test and build both platforms; upload Actions artifacts |
+| Push to `main` or open/update a PR | Test and build Windows, Linux, and macOS; upload Actions artifacts |
 | Actions → Build and draft release → Run workflow | Manual test build; artifacts only, no Release changes |
-| Push a version tag (`8.2.0` or `v8.2.0`) | Create a draft Release and attach packages only after both platforms pass tests, builds, and packaged-backend checks |
+| Push a version tag (`8.2.0` or `v8.2.0`) | Create a draft Release and attach packages only after Windows, Linux, and macOS pass tests, builds, and packaged-backend checks |
 
-**Download test builds:** open the workflow run and download `GalTransl-windows-x64` or `GalTransl-linux-x86_64` under **Artifacts** (retained for 14 days). Extract the outer Actions ZIP first. On Linux, also extract the enclosed `.tar.gz` to preserve executable permissions.
+**Download test builds:** open the workflow run and download `GalTransl-windows-x64`, `GalTransl-linux-x86_64-portable`, or the `dmg` / `portable` artifact for the desired macOS architecture (retained for 14 days). Each Actions artifact is still delivered as an outer ZIP; extract it to get the corresponding file. Linux and macOS portable artifacts also need their inner `.tar.gz` extracted to preserve executable permissions.
 
 **Publish a new version (maintainers):**
 
@@ -110,7 +121,7 @@ Linux support does not imply that every external tool has been ported. For examp
    ```
 3. Wait for the workflow to succeed, inspect the draft under **Releases**, edit the release notes, then click **Publish release**. Do not publish while assets are still uploading.
 
-Tags must be `X.Y.Z` or `vX.Y.Z` and match the source version. Never move or reuse existing tags such as `8.1.0`. Release assets include the Windows `.zip`, Linux `.deb`, `.rpm`, `.AppImage`, `.AppImage.xz`, `.tar.gz`, and `SHA256SUMS.txt`. Use `unxz` to decompress `.AppImage.xz` before running it. After downloading all assets, verify with `sha256sum -c SHA256SUMS.txt`; on Windows, compare PowerShell `Get-FileHash <file> -Algorithm SHA256` against the manifest.
+Tags must be `X.Y.Z` or `vX.Y.Z` and match the source version. Never move or reuse existing tags such as `8.1.0`. Release assets include the Windows `.zip`, Linux `.tar.gz`, macOS Intel/Apple Silicon `.dmg` and `.tar.gz` files, and `SHA256SUMS.txt`. After downloading all assets, verify with `sha256sum -c SHA256SUMS.txt`; on Windows, compare PowerShell `Get-FileHash <file> -Algorithm SHA256` against the manifest.
 
 Only the built-in `GITHUB_TOKEN` is used; no extra PAT or translation API keys are needed. Only the release job requests `contents: write`; organization policies must permit Release writes. Reruns replace generated assets on an existing draft while preserving its edited title and notes, and refuse to overwrite a published Release. Even manually running the workflow on a tag only produces artifacts.
 

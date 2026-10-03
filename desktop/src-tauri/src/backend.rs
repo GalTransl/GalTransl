@@ -301,8 +301,25 @@ fn backend_executable_candidates(resource_dir: Option<&Path>) -> Vec<PathBuf> {
     let mut seen = HashSet::new();
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    let names = [backend_executable_name(), "galtransl_backend-x86_64-unknown-linux-gnu"];
+    let names = [
+        backend_executable_name(),
+        "galtransl_backend-x86_64-unknown-linux-gnu",
+    ];
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    let names = [
+        backend_executable_name(),
+        "galtransl_backend-x86_64-apple-darwin",
+    ];
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    let names = [
+        backend_executable_name(),
+        "galtransl_backend-aarch64-apple-darwin",
+    ];
     #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+    #[cfg(not(any(
+        all(target_os = "macos", target_arch = "x86_64"),
+        all(target_os = "macos", target_arch = "aarch64"),
+    )))]
     let names = [backend_executable_name()];
 
     if let Some(configured) = std::env::var_os("GALTRANSL_BACKEND_PATH") {

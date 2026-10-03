@@ -18,7 +18,9 @@ from urllib.request import ProxyHandler, build_opener
 
 FORMATS = {
     "win": ("zip",),
-    "linux_x86_64": ("deb", "rpm", "AppImage", "AppImage.xz", "tar.gz"),
+    "linux_x86_64": ("tar.gz",),
+    "macos_x86_64": ("dmg", "tar.gz"),
+    "macos_arm64": ("dmg", "tar.gz"),
 }
 RESOURCE_DIRS = ("plugins", "Dict", "translation_guidelines", "res")
 
