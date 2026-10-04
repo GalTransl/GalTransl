@@ -7,7 +7,7 @@
 
   [English](https://github.com/XD2333/GalTransl/blob/main/README_EN.md)
   
-  GalTransl是一套将数个基础功能上的微小创新与对GPT提示工程（Prompt Engineering）的深度利用相结合的Galgame自动化翻译工具，用于制作内嵌式翻译补丁。现在提供**桌面端图形界面**，无需命令行操作即可完成翻译全流程。
+  GalTransl是一套将数个基础功能上的改进与对GPT提示工程（Prompt Engineering）的深度利用相结合的Galgame自动化翻译工具，用于制作内嵌式翻译补丁。现在提供**桌面端图形界面**，无需命令行操作即可完成翻译全流程。
 
 > [!TIP]
 > **想翻译 Galgame，却不知道怎么提取台词、把译文放回游戏？**
@@ -29,14 +29,17 @@
 
   * 特性：   
   1. 🖥️ **桌面端图形界面**——基于Tauri + React构建的现代桌面应用，无需命令行操作，支持深色模式、自定义背景、多项目管理等
-  2. 支持**GPT/Claude/Deepseek/Sakura**等大语言模型，并通过提示工程提高了GPT的翻译质量   
-  3. 支持**GPT字典**，让GPT了解人设，准确翻译人名、人称代词与生词   
-  4. 通过译前、译后字典与条件字典实现灵活的自动化字典系统   
-  5. 实时保存缓存、自动断点续翻   
-  6. 结合其他项目支持多引擎脚本一键解包与注入，提供完整教程降低上手难度
-  7. 支持直接翻译srt、lrc、vtt字幕文件，mtool json文件，t++ excel文件，epub文件
-  8. 🤗 [Galtransl-7B-v3.5](https://huggingface.co/SakuraLLM/GalTransl-7B-v2)是为视觉小说翻译任务专项优化的本地模型，可在6G VRAM以上显卡部署，由sakuraumi和xd2333共同构建
-  9. 🤗 [GalTransl-14B-v3](https://huggingface.co/SakuraLLM/Sakura-GalTransl-14B-v3)是GalTransl-v3模型的14b版本，得益于更大的底模及改进的对齐训练，GalTransl-14B-v3整体质量好于GalTransl-7B-v3   
+     
+<img width="2044" height="1397" alt="QQ20261003-110410" src="https://github.com/user-attachments/assets/25185c5b-7d5a-46d5-b4d1-0f3353ea67a0" />
+
+  3. 支持**GPT/Claude/Deepseek/Sakura**等大语言模型，并通过提示工程提高了GPT的翻译质量   
+  4. 支持**GPT字典**，让GPT了解人设，准确翻译人名、人称代词与生词   
+  5. 通过译前、译后字典与条件字典实现灵活的自动化字典系统   
+  6. 实时保存缓存、自动断点续翻   
+  7. 结合其他项目支持多引擎脚本一键解包与注入，提供完整教程降低上手难度
+  8. 支持直接翻译srt、lrc、vtt字幕文件，mtool json文件，t++ excel文件，epub文件
+  9. 🤗 [Galtransl-7B-v3.5](https://huggingface.co/SakuraLLM/GalTransl-7B-v2)是为视觉小说翻译任务专项优化的本地模型，可在6G VRAM以上显卡部署，由sakuraumi和xd2333共同构建
+  10. 🤗 [GalTransl-14B-v3](https://huggingface.co/SakuraLLM/Sakura-GalTransl-14B-v3)是GalTransl-v3模型的14b版本，得益于更大的底模及改进的对齐训练，GalTransl-14B-v3整体质量好于GalTransl-7B-v3   
 
 <b>❗❗使用本工具翻译并在未做全文校对/润色的前提下发布时，请在显眼的位置标注"xx模型AI翻译补丁"，而不应是"个人汉化"补丁。</b>
 
