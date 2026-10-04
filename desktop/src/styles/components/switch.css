@@ -1,0 +1,69 @@
+/* Toggle switch — 布尔字段的通用控件，替代「是/否」下拉框。
+   口径：40×22 胶囊，开启主色，圆点 16px，线宽/动效沿用 --transition-fast。 */
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  flex-shrink: 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* 绝对定位铺满整个开关，两点考虑：
+   1. 绕开 .field input 的 min-height: 48px / 边框 / 内边距，别把行撑高；
+   2. 整块区域都可点，不用精确命中 22px 高的圆点。 */
+.toggle-switch input[type='checkbox'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.toggle-switch__slider {
+  position: absolute;
+  inset: 0;
+  border-radius: 22px;
+  background-color: var(--color-line-strong);
+  /* 不吃点击事件：让事件落到 input 上（同时外层 label 的激活行为也照常） */
+  pointer-events: none;
+  transition: background-color var(--transition-fast);
+}
+
+.toggle-switch__slider::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  transition: transform var(--transition-fast);
+}
+
+.toggle-switch input:checked + .toggle-switch__slider {
+  background-color: var(--color-primary);
+}
+
+.toggle-switch input:checked + .toggle-switch__slider::before {
+  transform: translateX(18px);
+}
+
+.toggle-switch input:focus-visible + .toggle-switch__slider {
+  box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.25);
+}
+
+.toggle-switch--disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

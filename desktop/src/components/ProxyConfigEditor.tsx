@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { CustomSelect } from './CustomSelect';
+import { Switch } from './Switch';
 import { Icon } from './Icon';
 
 type ProxyEntry = {
@@ -44,16 +44,9 @@ export function ProxyConfigEditor({ proxyConfig, onChange, readOnly = false }: P
     <>
       <h3 className="config-section-title" style={{ marginTop: '24px' }}>代理设置</h3>
 
-      <label className="field">
+      <label className="field field--switch">
         <span>启用代理</span>
-        <CustomSelect
-          disabled={readOnly}
-          value={String(enableProxy)}
-          onChange={(e) => toggleEnableProxy(e.target.value === 'true')}
-        >
-          <option value="true">是</option>
-          <option value="false">否</option>
-        </CustomSelect>
+        <Switch checked={enableProxy} onChange={toggleEnableProxy} disabled={readOnly} />
         <span className="field__hint">使用中转供应商时一般不用开代理</span>
       </label>
 

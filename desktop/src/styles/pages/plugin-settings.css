@@ -221,58 +221,7 @@
   min-height: 64px;
 }
 
-/* ── Toggle Switch ── */
-
-.toggle-switch {
-  position: relative;
-  display: inline-block;
-  width: 40px;
-  height: 22px;
-  flex-shrink: 0;
-}
-
-.toggle-switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.toggle-switch__slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: var(--color-line-strong);
-  border-radius: 22px;
-  transition: background-color var(--transition-fast);
-}
-
-.toggle-switch__slider::before {
-  content: "";
-  position: absolute;
-  height: 16px;
-  width: 16px;
-  left: 3px;
-  bottom: 3px;
-  background-color: white;
-  border-radius: 50%;
-  transition: transform var(--transition-fast);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-}
-
-.toggle-switch input:checked + .toggle-switch__slider {
-  background-color: var(--color-primary);
-}
-
-.toggle-switch input:checked + .toggle-switch__slider::before {
-  transform: translateX(18px);
-}
-
-.toggle-switch input:focus + .toggle-switch__slider {
-  box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.15);
-}
+/* 开关（.toggle-switch）样式已提到 components/switch.css，由组件层统一维护。 */
 
 :root[data-theme='dark'] .plugin-settings-panel {
   border-color: rgba(65, 83, 111, 0.78);

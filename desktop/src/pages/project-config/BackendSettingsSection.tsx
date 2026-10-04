@@ -1,5 +1,6 @@
 import { Panel } from '../../components/Panel';
 import { CustomSelect } from '../../components/CustomSelect';
+import { Switch } from '../../components/Switch';
 import { BackendConfigEditor } from '../../components/BackendConfigEditor';
 import { InlineFeedback } from '../../components/page-state';
 import { ProxyConfigEditor } from '../../components/ProxyConfigEditor';
@@ -71,18 +72,15 @@ export function BackendSettingsSection({
           />
         )}
 
-        <label className="field">
+        <label className="field field--switch">
           <span>自动调节并发 Worker</span>
-          <CustomSelect
-            value={String(autoAdjustWorkers)}
-            onChange={(e) => {
-              onCommonChange({ ...commonConfig, autoAdjustWorkers: e.target.value === 'true' });
+          <Switch
+            checked={autoAdjustWorkers}
+            onChange={(next) => {
+              onCommonChange({ ...commonConfig, autoAdjustWorkers: next });
               onDirty();
             }}
-          >
-            <option value="true">开启</option>
-            <option value="false">关闭</option>
-          </CustomSelect>
+          />
           <span className="field__hint">根据近期 429 比例和响应延迟自动降/升 worker 并发</span>
         </label>
 

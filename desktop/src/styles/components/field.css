@@ -113,6 +113,53 @@
   box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);
 }
 
+/* 布尔字段：标题在左、开关靠右，说明文字回到左列的第二行（设置项列表版式）。
+   点整行文字/说明也能切换，开关是 label 的后代。
+   行列都显式指定：只给 grid-row 会让带确定行的项先于标题排版、被塞到第 1 列
+   （没有 grid-template-rows 时 -1 指的就是第 1 条线）。 */
+.field--switch {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  align-content: center;
+  /* 与同面板里 48px 高的输入框/下拉框对齐，行高保持一致 */
+  min-height: 48px;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-3) 0;
+  cursor: pointer;
+}
+
+.field--switch > span:first-child:not(.toggle-switch) {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+/* 说明文字占左列第二行，别把开关挤到右边 */
+.field--switch > .field__hint {
+  grid-column: 1;
+  grid-row: 2;
+  margin-top: 0;
+}
+
+/* 开关跨标题+说明两行，相对整行垂直居中 */
+.field--switch > .toggle-switch {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
+/* 面板里成组的设置项之间加分割线（组内第一项除外）。
+   向导里这些开关是表单的一项、不是设置列表，所以不带分割线。 */
+.config-form > .field--switch,
+.panel__body > .field--switch {
+  border-top: 1px solid var(--color-line);
+}
+
+.config-form > .field--switch:first-child,
+.panel__body > .field--switch:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
 .form-actions {
   display: flex;
   justify-content: flex-start;

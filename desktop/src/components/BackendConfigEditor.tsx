@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CustomSelect } from './CustomSelect';
 import { Icon } from './Icon';
+import { Switch } from './Switch';
 import { fetchOpenAIModels } from '../lib/api';
 
 type TokenEntry = {
@@ -348,6 +349,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
                 </label>
                 <label className="field field--inline">
                   <span>流式请求</span>
+                  {/* 三态（跟随全局/是/否），开关表达不了「跟随全局」，这里保留下拉框 */}
                   <CustomSelect
                     disabled={readOnly}
                     value={t.stream == null ? '' : String(t.stream)}
@@ -394,31 +396,25 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
             </CustomSelect>
             <span className="field__hint">random 随机轮询；fallback 优先第一个，出错时使用下一个</span>
           </label>
-          <label className="field">
+          <label className="field field--switch">
             <span>流式请求</span>
-            <CustomSelect
+            <Switch
+              checked={oaiConfig.stream !== false}
               disabled={readOnly}
-              value={String(oaiConfig.stream ?? true)}
-              onChange={(e) => updateOai('stream', e.target.value === 'true')}
-            >
-              <option value="true">开启（默认）</option>
-              <option value="false">关闭</option>
-            </CustomSelect>
+              onChange={(next) => updateOai('stream', next)}
+            />
             <span className="field__hint">
               默认开启。开启时译好的句子边生成边出现在「最近译文」里，文件进度的小灯能分出思考中/翻译中、跟着输出速度呼吸；
               关闭后要等整批返回才一次出结果，小灯只显示「请求中」。接口或中转不支持流式时再关。
             </span>
           </label>
-          <label className="field">
+          <label className="field field--switch">
             <span>测试模型可用性</span>
-            <CustomSelect
+            <Switch
+              checked={oaiConfig.checkAvailable !== false}
               disabled={readOnly}
-              value={String(oaiConfig.checkAvailable ?? 'true')}
-              onChange={(e) => updateOai('checkAvailable', e.target.value === 'true')}
-            >
-              <option value="true">是</option>
-              <option value="false">否</option>
-            </CustomSelect>
+              onChange={(next) => updateOai('checkAvailable', next)}
+            />
           </label>
           <label className="field">
             <span>请求超时(秒)</span>

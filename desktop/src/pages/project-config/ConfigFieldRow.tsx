@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { CustomSelect } from '../../components/CustomSelect';
+import { Switch } from '../../components/Switch';
 
 export type FieldValueType = 'number' | 'text' | 'select' | 'textarea' | 'list';
 
@@ -11,6 +12,15 @@ export interface ConfigFieldDef {
   options?: string[];
   placeholder?: string;
   rows?: number;
+}
+
+/** options 恰好是 true/false 的 select 就是布尔字段，用开关渲染。
+ *  schema 里加布尔项不用改这里，自动变开关。 */
+function isBooleanField(field: ConfigFieldDef): boolean {
+  const options = field.options ?? [];
+  return field.type === 'select'
+    && options.length > 0
+    && options.every((opt) => opt === 'true' || opt === 'false');
 }
 
 interface ConfigFieldRowProps {
@@ -27,9 +37,16 @@ export function ConfigFieldRow({ field, value, onChange, onListChange, pathPrefi
   const fieldId = `${pathPrefix}-${field.key.replace(/\./g, '-')}`;
   const displayValue = value == null ? '' : String(value);
   const fullPath = `${pathPrefix}.${field.key}`;
+  const isBoolean = isBooleanField(field);
 
   const inputElement =
-    field.type === 'select' ? (
+    isBoolean ? (
+      <Switch
+        id={fieldId}
+        checked={displayValue === 'true'}
+        onChange={(next) => onChange(fullPath, next ? 'true' : 'false')}
+      />
+    ) : field.type === 'select' ? (
       <CustomSelect
         id={fieldId}
         value={displayValue}
@@ -76,15 +93,18 @@ export function ConfigFieldRow({ field, value, onChange, onListChange, pathPrefi
     <div
       className={[
         'config-field-row',
+        isBoolean ? 'config-field-row--switch' : '',
         tier === 'advanced' ? 'config-field-row--advanced' : '',
         tier === 'primary' ? 'config-field-row--primary' : '',
       ].filter(Boolean).join(' ')}
     >
-      <label htmlFor={fieldId} className="config-field-row__label">{field.label}</label>
+      <div className="config-field-row__info">
+        <label htmlFor={fieldId} className="config-field-row__label">{field.label}</label>
+        {field.description ? (
+          <span className="config-field-row__hint">{field.description}</span>
+        ) : null}
+      </div>
       <div className="config-field-row__input">{inputElement}</div>
-      {field.description ? (
-        <span className="config-field-row__hint">{field.description}</span>
-      ) : null}
     </div>
   );
 }

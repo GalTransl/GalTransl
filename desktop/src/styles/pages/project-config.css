@@ -117,6 +117,25 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  container: project-config / inline-size;
+}
+
+.project-config-page__main .panel {
+  padding: 20px 24px;
+  border-radius: 12px;
+}
+
+.project-config-page__main .panel__header {
+  margin-bottom: 20px;
+}
+
+.project-config-page__main .panel__header h2 {
+  font-size: 18px;
+  margin-bottom: 6px;
+}
+
+.project-config-page__main .panel__header p {
+  font-size: 13px;
 }
 
 .project-config-page__main > .section-fade-in {
@@ -177,18 +196,37 @@
 
 .config-field-row {
   display: grid;
-  grid-template-columns: 160px 1fr;
-  gap: var(--space-2) var(--space-4);
-  align-items: start;
-  padding: var(--space-2) 0;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 24px;
+  align-items: center;
+  padding: 14px 0;
 }
 
-.config-field-row--advanced {
-  opacity: 0.85;
+.config-field-row__info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
-.config-field-row--primary {
-  /* primary fields are full opacity by default */
+.config-field-row--switch .config-field-row__label {
+  cursor: pointer;
+}
+
+.config-field-row--switch .config-field-row__input {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 38px;
+}
+
+/* 设置项之间的分割线：每行上方一条，组内第一行除外 */
+.config-field-group__fields > .config-field-row {
+  border-top: 1px solid var(--color-line);
+}
+
+.config-field-group__fields > .config-field-row:first-child {
+  border-top: none;
 }
 
 .config-field-row__label {
@@ -196,38 +234,38 @@
   font-weight: 500;
   color: var(--color-text);
   line-height: 1.5;
-  padding-top: 6px;
-  align-self: start;
 }
 
 .config-field-row__input {
   min-width: 0;
+  width: 100%;
 }
 
-.config-field-row__input input,
+.config-field-row__input > input,
 .config-field-row__input select,
 .config-field-row__input .custom-select {
   width: 100%;
-  max-width: 420px;
 }
 
-.config-field-row__input input,
-.config-field-row__input select {
-  min-height: 48px;
-  padding: 0 var(--space-4);
+.config-field-row__input > input,
+.config-field-row__input select,
+.config-field-row__input .custom-select__trigger {
+  height: 38px;
+  min-height: 38px;
+  padding: 0 12px;
   border: 1px solid var(--color-line);
-  border-radius: var(--radius-control);
+  border-radius: 8px;
   background-color: var(--color-surface-strong);
   color: var(--color-text);
+  font-size: 13px;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .config-field-row__input textarea {
   width: 100%;
-  max-width: 420px;
   padding: 11px 14px;
   border: 1px solid rgba(191, 208, 226, 0.92);
-  border-radius: calc(var(--radius-control) + 2px);
+  border-radius: 8px;
   background: var(--color-surface-strong);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   color: var(--color-text);
@@ -286,12 +324,10 @@
 }
 
 .config-field-row__hint {
-  grid-column: 1 / -1;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-muted);
-  margin-top: 2px;
-  font-family: "Cascadia Code", "Consolas", monospace;
-  line-height: 1.4;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 
 /* ── Config Field Group ── */
@@ -307,12 +343,9 @@
 .config-field-group__title {
   font-size: 12px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   color: var(--color-text-muted);
-  margin-bottom: var(--space-3);
-  padding-bottom: var(--space-2);
-  border-bottom: 1px solid var(--color-line);
+  margin-bottom: 2px;
 }
 
 .config-field-group--advanced .config-field-group__title {
@@ -323,20 +356,18 @@
 .config-field-group__fields {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 0;
 }
 
 /* ── Advanced Details (collapsible) ── */
 
 .config-advanced-details {
-  margin-top: var(--space-5);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-  background: var(--color-surface);
+  margin-top: 8px;
+  border-top: 1px solid var(--color-line);
 }
 
 .config-advanced-details__summary {
-  padding: var(--space-3) var(--space-4);
+  padding: 14px 0;
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
@@ -376,7 +407,30 @@
 }
 
 .config-advanced-details .config-field-group {
-  padding: 0 var(--space-4) var(--space-4);
+  padding: 0 0 8px;
+}
+
+@container project-config (max-width: 560px) {
+  .config-field-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .config-field-row--switch {
+    grid-template-columns: minmax(0, 1fr) 40px;
+    gap: 16px;
+  }
+
+  .project-config-page__main .panel {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .project-config-page__content {
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 16px;
+  }
 }
 
 /* ── Problem Analyze Section ── */

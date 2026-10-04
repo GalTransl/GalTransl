@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { Button } from '../components/Button';
 import { CustomSelect } from '../components/CustomSelect';
+import { Switch } from '../components/Switch';
 import { Panel } from '../components/Panel';
 import { PageHeader } from '../components/PageHeader';
 import { Icon } from '../components/Icon';
@@ -753,14 +754,11 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
         />
         <span className="field__hint">建议 8~20，兼顾质量和成本。</span>
       </div>
-      <div className="field">
+      <label className="field field--switch">
         <span className="field__label">动态句数调整</span>
-        <CustomSelect value={String(dynamicNumPerRequest)} onChange={(e) => setDynamicNumPerRequest(e.target.value === 'true')}>
-          <option value="false">关闭</option>
-          <option value="true">开启</option>
-        </CustomSelect>
+        <Switch checked={dynamicNumPerRequest} onChange={setDynamicNumPerRequest} />
         <span className="field__hint">根据解析错误自动降低句数，稳定后逐步提升。</span>
-      </div>
+      </label>
       {/* 关掉动态句数调整后，上下限没人用，收起来免得占地方、也免得误以为在生效 */}
       {dynamicNumPerRequest ? (
         <>

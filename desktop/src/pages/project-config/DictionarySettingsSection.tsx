@@ -1,5 +1,5 @@
 import { Panel } from '../../components/Panel';
-import { CustomSelect } from '../../components/CustomSelect';
+import { Switch } from '../../components/Switch';
 
 interface DictionarySettingsSectionProps {
   dictConfig: Record<string, unknown>;
@@ -59,45 +59,33 @@ function DictConfigEditor({
         />
         <span className="field__hint">每行一个字典文件名</span>
       </label>
-      <label className="field">
+      <label className="field field--switch">
         <span>字典用在name字段(译前)</span>
-        <CustomSelect
-          value={String(dictConfig.usePreDictInName ?? 'false')}
-          onChange={(e) => onChange({ ...dictConfig, usePreDictInName: e.target.value === 'true' })}
-        >
-          <option value="true">是</option>
-          <option value="false">否</option>
-        </CustomSelect>
+        <Switch
+          checked={dictConfig.usePreDictInName === true}
+          onChange={(next) => onChange({ ...dictConfig, usePreDictInName: next })}
+        />
       </label>
-      <label className="field">
+      <label className="field field--switch">
         <span>字典用在name字段(GPT)</span>
-        <CustomSelect
-          value={String(dictConfig.useGPTDictInName ?? 'false')}
-          onChange={(e) => onChange({ ...dictConfig, useGPTDictInName: e.target.value === 'true' })}
-        >
-          <option value="true">是</option>
-          <option value="false">否</option>
-        </CustomSelect>
+        <Switch
+          checked={dictConfig.useGPTDictInName === true}
+          onChange={(next) => onChange({ ...dictConfig, useGPTDictInName: next })}
+        />
       </label>
-      <label className="field">
+      <label className="field field--switch">
         <span>字典用在name字段(译后)</span>
-        <CustomSelect
-          value={String(dictConfig.usePostDictInName ?? 'false')}
-          onChange={(e) => onChange({ ...dictConfig, usePostDictInName: e.target.value === 'true' })}
-        >
-          <option value="true">是</option>
-          <option value="false">否</option>
-        </CustomSelect>
+        <Switch
+          checked={dictConfig.usePostDictInName === true}
+          onChange={(next) => onChange({ ...dictConfig, usePostDictInName: next })}
+        />
       </label>
-      <label className="field">
+      <label className="field field--switch">
         <span>字典排序</span>
-        <CustomSelect
-          value={String(dictConfig.sortDict ?? 'true')}
-          onChange={(e) => onChange({ ...dictConfig, sortDict: e.target.value === 'true' })}
-        >
-          <option value="true">是</option>
-          <option value="false">否</option>
-        </CustomSelect>
+        <Switch
+          checked={dictConfig.sortDict !== false}
+          onChange={(next) => onChange({ ...dictConfig, sortDict: next })}
+        />
       </label>
     </>
   );
