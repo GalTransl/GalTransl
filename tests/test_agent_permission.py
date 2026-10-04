@@ -14,7 +14,7 @@ import threading
 import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from GalTransl.Agent import runtime as rt
 from GalTransl.Agent.runtime import (
@@ -45,7 +45,11 @@ def make_runner(mode: str = "ask", grants: tuple[str, ...] = ()) -> AgentRunner:
     # 不给 session_id：AgentRunner 就不建 SessionStore，测试不会往磁盘写会话文件
     state = AgentState(project_dir=r"C:\proj", permission_mode=mode)
     state.permission_grants.update(grants)
-    return AgentRunner(state)
+    runner = AgentRunner(state)
+    # 权限单测的预览只读模拟数据，不依赖本机后端或连接超时。
+    runner._http_get = Mock(return_value={})
+    runner._http_put = Mock(return_value={})
+    return runner
 
 
 def run_gate(
@@ -57,7 +61,7 @@ def run_gate(
     reason: str | None = None,
     args: dict | None = None,
 ) -> dict:
-    """子线程里跑一次门禁（或整条 _dispatch_tool），等它挂起后作答。
+    """子线程里跑一次门禁（或整条 _dispatch_tool），等审批事件发出后作答。
 
     decision=None 表示只等挂起、不作答（用于测校验分支）。reason 是"拒绝原因"，
     跟着答复一起送（见 resolve_permission）。args 换掉默认入参（要触发预览的用例
@@ -79,11 +83,26 @@ def run_gate(
     thread = threading.Thread(target=target)
     thread.start()
     deadline = time.monotonic() + 3
+    ready = False
     while time.monotonic() < deadline:
         with runner._perm_lock:
-            if runner._pending_permission is not None:
+            pending = runner._pending_permission
+        if pending is not None:
+            with runner.state.event_lock:
+                ready = any(
+                    event.type == "permission_request"
+                    and event.data.get("id") == pending["request_id"]
+                    for event in runner.state.events
+                )
+            if ready:
                 break
+        if not thread.is_alive():
+            break
         time.sleep(0.01)
+    if not ready:
+        runner.stop_event.set()
+        thread.join(timeout=3)
+        raise AssertionError(f"Permission request was not emitted: {out!r}")
     if decision is not None:
         runner.resolve_permission(decision, reason or "")
     # 作答了才值得等它跑完；只等挂起的那些（decision=None）别把 3 秒白等掉
@@ -494,6 +513,7 @@ class LivePermissionModeTests(unittest.TestCase):
         while time.monotonic() < deadline and not out.get("ok") and "error" not in out:
             time.sleep(0.01)
         # 全自动档下，连高风险工具也不再问（也不该再发审批事件）
+        self.assertTrue(out.get("ok"), out.get("error"))
         runner._require_permission("update_project_config", {})
         self.assertEqual(len([e for e in runner.state.events if e.type == "permission_request"]), 1)
 
