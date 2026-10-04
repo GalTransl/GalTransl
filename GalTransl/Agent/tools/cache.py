@@ -609,7 +609,7 @@ _CACHE_FILE_LOCKS_GUARD = threading.Lock()
 
 def _cache_file_lock(runner: AgentRunner, filename: str) -> threading.Lock:
     project_dir = str(getattr(runner.state, "project_dir", "") or "")
-    key = (os.path.normcase(os.path.abspath(project_dir)) if project_dir else "", filename)
+    key = (os.path.normcase(os.path.abspath(project_dir)) if project_dir else "", os.path.normcase(filename))
     with _CACHE_FILE_LOCKS_GUARD:
         lock = _CACHE_FILE_LOCKS.get(key)
         if lock is None:
@@ -685,7 +685,7 @@ def _patch_one_cache_file_locked(
     }
     if not applied_indexes:
         # 把跳过原因带上：否则模型只看到"没有条目被更新"，不知道是字段不许改还是 index 写错了
-        # （校对子代理硬塞译文字段时也靠这条说清"只允许 proofread_comment"）
+        # （窄字段白名单也通过这里返回拒绝原因）
         reasons = "；".join(str(s.get("reason") or "") for s in skipped if s.get("reason"))
         result["error"] = (
             f"没有条目被更新（skipped={len(skipped)}, not_found={len(not_found)}）"
@@ -719,6 +719,9 @@ def _patch_one_cache_file_locked(
     # changes 的 before→after 表达，不重复回传最终译文，不必再 read_transl_cache。
     save_result = runner._http_post(f"/api/projects/{pid}/cache/save", save_body)
     saved_entries = save_result.get("entries") if isinstance(save_result, dict) else None
+    result["verification"] = (
+        "checked" if isinstance(saved_entries, list) and save_result.get("verification", "checked") == "checked" else "unknown"
+    )
     if isinstance(saved_entries, list):
         wanted = set(applied_indexes)
         problems: list[dict[str, Any]] = []
@@ -758,14 +761,11 @@ def _tool_patch_transl_cache(
     patch 里各写一遍 `"proofread_comment": ""`（见 _plan_cache_patches）。它只对主 Agent 生效，
     见下面 allowed_fields 那段。
 
-    allowed_fields 是"这次调用最多能改哪些字段"的窄白名单，给校对子代理用：它拿同一个工具，
-    但只放得住 proofread_comment——**改不了译文是靠这张白名单 + 子代理的入参 schema 双保险**，
-    不是靠提示词自觉（见 _subagent_handlers / _subagent_patch_schema）。
+    allowed_fields 是内部调用可选的字段白名单。校对子代理走 ProofreadFixer，复用单文件
+    patch 实现，并额外校验职责范围、读取快照、停止信号和修改记录。
     """
     allowed = allowed_fields if allowed_fields is not None else _PATCHABLE_FIELDS
-    # clear_comment 只让主 Agent 用：子代理是**写**批注的那一方，顺手清批注对它没有意义——它负责的
-    # 那一段里可能正躺着上一轮留下、还没处理完的意见，清掉等于把待办抹了。双保险：子代理的入参
-    # schema 里根本没有这个参数（见 _subagent_patch_schema），这里再按"传了白名单就是子代理"忽略一次。
+    # 显式窄白名单调用不启用批量清批注，避免顺手删除未处理意见。
     clear_comment = bool(args.get("clear_comment")) and allowed_fields is None
     targets = _group_cache_patches_by_file(args)
     pid = runner._project_id()

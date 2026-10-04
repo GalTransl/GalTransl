@@ -94,6 +94,10 @@ export type SubagentRun = {
   toolCalls?: number;
   /** 写了几条校对批注（proofread_comment） */
   proofreadComment?: number;
+  modifiedCount?: number;
+  needsReviewCount?: number;
+  unverifiedCount?: number;
+  failedFileCount?: number;
   report?: string;
   error?: string;
 };
@@ -128,6 +132,10 @@ function reconcileSubagentStatuses(target: ActivityItem) {
     if (typeof task.error === 'string' && task.error) run.error = task.error;
     if (typeof task.report === 'string' && task.report) run.report = task.report;
     if (typeof task.duration_ms === 'number') run.durationMs = task.duration_ms;
+    if (typeof task.needs_review_count === 'number') run.needsReviewCount = task.needs_review_count;
+    if (typeof task.modified_count === 'number') run.modifiedCount = task.modified_count;
+    if (typeof task.unverified_count === 'number') run.unverifiedCount = task.unverified_count;
+    if (typeof task.failed_file_count === 'number') run.failedFileCount = task.failed_file_count;
   }
 }
 
@@ -535,6 +543,10 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
         run.report = ev.report || '';
         run.turns = ev.turns;
         run.toolCalls = ev.tool_calls;
+        run.modifiedCount = ev.modified_count;
+        run.needsReviewCount = ev.needs_review_count;
+        run.unverifiedCount = ev.unverified_count;
+        run.failedFileCount = ev.failed_file_count;
         // 新事件用 proofread_comment；旧会话落盘的是 doubts，切页重放时兜底认一下
         const comments = ev.proofread_comment ?? ev.doubts;
         run.proofreadComment = typeof comments === 'number' ? comments : 0;

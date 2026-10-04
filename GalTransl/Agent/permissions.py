@@ -50,13 +50,14 @@ PERMISSION_TOOL_RISK: dict[str, str] = {
     "save_dict": PERMISSION_EDIT,
     "save_name_table": PERMISSION_EDIT,
     "patch_transl_cache": PERMISSION_EDIT,
+    "revert_proofread_changes": PERMISSION_EDIT,
     "delete_transl_cache": PERMISSION_EDIT,
     "update_project_config": PERMISSION_HIGH,
     "manage_problem_filter": PERMISSION_HIGH,
     "manage_problem_white_list": PERMISSION_HIGH,
     "write_project_guideline": PERMISSION_HIGH,
     "start_translation": PERMISSION_HIGH,
-    # 派子代理：虽然它写的只是缓存里的"校对批注"（proofread_comment，改不了译文），但这是
+    # 派子代理：校对默认直接修复任务范围内的译文并反馈需二次审查事项。这是
     # 「要不要开始干这件事」——一次最多 16 个并行跑起来、每个都要调大模型、都会写缓存，
     # 让用户在派之前批一次（卡上能看到派给谁、看哪些文件）比事后发现跑歪了强。所以按
     # high 走：ask 与 accept-edits 都要问，只有两个全自动档直接放行。
@@ -76,6 +77,7 @@ PERMISSION_READ_TOOLS: frozenset[str] = frozenset({
     "get_name_table",
     "list_problems",
     "read_transl_cache",
+    "read_proofread_changes",
     "read_output",
     "read_history_archive",
     "get_runtime",
@@ -88,6 +90,7 @@ PERMISSION_TOOL_LABELS: dict[str, str] = {
     "save_dict": "保存字典",
     "save_name_table": "保存人名表",
     "patch_transl_cache": "修改译文",
+    "revert_proofread_changes": "撤销校对修改",
     "delete_transl_cache": "删除缓存",
     "update_project_config": "修改项目配置",
     "manage_problem_filter": "管理问题过滤",

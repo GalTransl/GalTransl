@@ -2069,9 +2069,12 @@ def build_handler(registry: JobRegistry):
                             postprocess_trans_list(trans_list, proj_config, post_dic, tPlugins or None)
 
                         # Run find_problems
+                        verification = "unknown"
                         if trans_list:
                             try:
                                 find_problems(trans_list, proj_config, gpt_dic)
+                                if proj_config is not None:
+                                    verification = "checked"
                             except Exception:
                                 pass  # If problem detection fails, skip
                             finally:
@@ -2086,10 +2089,11 @@ def build_handler(registry: JobRegistry):
                                 continue
                             if idx < len(trans_list):
                                 tran = trans_list[idx]
-                                if tran.problem:
-                                    e["problem"] = tran.problem
-                                elif "problem" in e:
-                                    del e["problem"]
+                                if verification == "checked":
+                                    if tran.problem:
+                                        e["problem"] = tran.problem
+                                    elif "problem" in e:
+                                        del e["problem"]
                                 e["post_dst_preview"] = tran.post_dst
                                 idx += 1
 
@@ -2097,10 +2101,10 @@ def build_handler(registry: JobRegistry):
                         with open(file_path, "wb") as f:
                             f.write(orjson.dumps(entries, option=orjson.OPT_INDENT_2))
 
-                        self._send_json({"success": True, "filename": filename, "entries": entries})
+                        self._send_json({"success": True, "filename": filename, "entries": entries, "verification": verification})
                     except Exception:
                         # Rebuild failed, but original save succeeded
-                        self._send_json({"success": True, "filename": filename})
+                        self._send_json({"success": True, "filename": filename, "verification": "unknown"})
                 except json.JSONDecodeError:
                     self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
                 except Exception as exc:

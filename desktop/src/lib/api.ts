@@ -2029,6 +2029,10 @@ export type AgentEvent = {
   proofread_comment?: number | number[];
   /** @deprecated 旧字段名（doubts）：仅用于重放改名之前落盘的旧会话 */
   doubts?: number | number[];
+  modified_count?: number;
+  needs_review_count?: number;
+  unverified_count?: number;
+  failed_file_count?: number;
 };
 
 export type AgentStatus = {

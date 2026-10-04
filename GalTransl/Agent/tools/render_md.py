@@ -471,8 +471,10 @@ def _md_render_run_subagents(result: dict[str, Any]) -> str:
         for status, count in counts.items()
         if count
     )
-    comments_total = sum(len(row.get("proofread_comment") or []) for row in tasks)
+    comments_total = sum(row.get("comment_count", len(row.get("proofread_comment") or [])) for row in tasks)
     head = f"共派出 {len(tasks)} 个子代理（{status_text}），合计 {comments_total} 条校对批注"
+    if any("modified_count" in row for row in tasks):
+        head += f"，直接修改 {sum(row.get('modified_count', 0) for row in tasks)} 条译文"
     skipped = result.get("skipped")
     if skipped:
         head += f"；另有 {skipped} 个任务因文件不够分被跳过"
@@ -495,14 +497,33 @@ def _md_render_run_subagents(result: dict[str, Any]) -> str:
             meta.append(f"耗时 {int(row['duration_ms']) / 1000:.1f}s")
         if row.get("error"):
             meta.append(f"错误：{row['error']}")
+        if "modified_count" in row:
+            meta.extend([
+                f"读取 {row.get('read_count', 0)} 条（不等于已校对数）",
+                f"修改 {row.get('modified_count', 0)} 条",
+                f"需二次审查 {row.get('needs_review_count', 0)} 条",
+                f"未验证 {row.get('unverified_count', 0)} 条",
+                f"仍有问题 {row.get('remaining_problem_count', 0)} 条",
+                f"提交失败 {row.get('failed_file_count', 0)} 个文件",
+                f"修改记录 task_id={row.get('change_task_id', row.get('id', ''))}",
+            ])
         parts.append(" ｜ ".join(str(item) for item in meta))
+        review = row.get("needs_review")
+        if review:
+            parts.append("需二次审查的译文（包括已修改但仍待确认的条目）：\n\n" + _md_table(["file", "index", "reason"], review))
+        if row.get("review_truncated"):
+            parts.append('这里只展示前 20 条；用 read_proofread_changes(task_id="' + str(row.get("change_task_id", "")) + '", view="review") 分页查看完整清单。')
+        if row.get("review_record_error"):
+            parts.append("二次审查清单保存失败：" + str(row["review_record_error"]))
         comments = row.get("proofread_comment")
         if isinstance(comments, list) and comments:
             table = _md_table(["file", "index"], comments)
             parts.append(
-                f"写下的校对批注 {len(comments)} 条（全文在对应缓存的 proofread_comment 里）："
+                f"校对批注位置 {len(comments)} 条（全文在对应缓存的 proofread_comment 里）："
                 f"\n\n{table}"
             )
+        if row.get("comments_truncated"):
+            parts.append(f"共有 {row.get('comment_count')} 条待裁决批注，只展示前 20 条；请按文件用 read_transl_cache(grep=['proofread_comment']) 分段查看。")
         report = str(row.get("report") or "").strip()
         if report:
             parts.append(report)
@@ -534,6 +555,10 @@ def _md_render_patch_transl_cache(result: dict[str, Any]) -> str:
         parts.append(f"## {index}. {row.get('filename')}（改 {int(row.get('updated') or 0)} 条）")
         if row.get("error"):
             parts.append(f"⚠ {row['error']}")
+        if row.get("verification") == "unknown":
+            parts.append("检测状态：未验证，不能据此判断问题已消除。")
+        if row.get("audit_error"):
+            parts.append("修改已提交，但修改记录的完成状态写入失败；pending 记录保留修改前后内容。")
         block: list[str] = []
         changes = [c for c in (row.get("changes") or []) if isinstance(c, dict)]
         table = _md_changes(changes, remaining)

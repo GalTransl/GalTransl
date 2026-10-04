@@ -597,7 +597,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "run_subagents",
             "description": (
-                f"并行派发独立上下文、受限工具的子代理，等待全部结束，只回报告与批注位置，不回中间过程。proofread 只读缓存/人名表/规范/问题并写 proofread_comment（校对或润色意见），不能改译文；主代理按批注复核、修改译文后清空批注。explore 只读原文与 GPT 字典、不写文件，报告中的字典候选与规范建议由主代理汇总落地。两类均为费 token 的可选步骤，派前必须 ask_user 征得同意；proofread 还需确认意见类型并写入 brief。一次最多{SUBAGENT_MAX_TASKS}个；file 选文件，count 切份，indexes 限区间，三者可组合；一条任务可用 count 展开并共用 brief，不必重复任务说明。"
+                f"并行派发独立上下文、受限工具的子代理，等待全部结束。proofread 默认直接修复分配范围内的译文、复查并保存修改记录；把可能需要二次审查的译文留批注并回报。explore 只读原文与 GPT 字典、不写文件。派前需明确校对或润色范围及 token 成本，已有明确授权无需重复询问，否则用 ask_user；派发校对即授权范围内修复，权限由派发门禁统一处理。一次最多{SUBAGENT_MAX_TASKS}个；file 选文件，count 切份，indexes 限制可修改范围，重叠的校对任务会被拒绝；count 展开的任务共用 brief。"
             ),
             "parameters": {
                 "type": "object",
@@ -627,7 +627,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                                 },
                                 "brief": {
                                     "type": "string",
-                                    "description": "可选。给这个子代理的额外要求：重点核对什么、注意哪些角色/术语；**校对子代理还要在这里写明这一遍写哪一类意见**（只写校对建议 / 只写润色建议 / 两者都要，先 ask_user 问用户，见流程 6.5），没写就默认只写校对建议。count > 1 时这一份 brief 由展开出来的每个子代理共用（不用重复写）",
+                                    "description": "可选。重点核对什么、注意哪些角色/术语；校对范围是只修硬伤 / 只润色 / 两者都要，没写默认只修硬伤。已有用户授权无需重复询问，信息缺失才 ask_user。子代理直接修改有把握的句子，并反馈需二次审查的事项。count > 1 时 brief 由展开的任务共用。",
                                 },
                             },
                             "required": ["agent"],
@@ -636,6 +636,31 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                 },
                 "required": ["tasks"],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_proofread_changes",
+            "description": "查询本项目校对修复的持久修改记录。不带 task_id 列最近任务统计；带 task_id 按条目分页返回完整 before/after、change_id 和提交状态。pending/uncertain 表示未确认，不等于修改成功；只按需读取，避免把所有成功改句搬回主上下文。",
+            "parameters": {"type": "object", "properties": {
+                "task_id": {"type": "string"},
+                "view": {"type": "string", "enum": ["changes", "review"], "description": "changes 查看修改前后内容；review 分页查看该任务反馈的需二次审查的译文及原因"},
+                "offset": {"type": "integer", "minimum": 0},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+            }},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "revert_proofread_changes",
+            "description": "按 read_proofread_changes 返回的 change_id 撤销一次文件批量修改，可用 indexes 只撤销其中部分句子。当前原文、译文或批注与记录不符时拒绝整次撤销，保护后续编辑；撤销本身也保存记录。先查记录明确要撤销的内容，再调用。",
+            "parameters": {"type": "object", "properties": {
+                "change_id": {"type": "string"},
+                "indexes": {"type": "string", "description": "可选，如 1-5,9；默认撤销这份记录的全部条目"},
+                "reason": _REASON_PROPERTY,
+            }, "required": ["change_id"]},
         },
     },
     {

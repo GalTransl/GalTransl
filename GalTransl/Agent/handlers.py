@@ -38,6 +38,7 @@ from GalTransl.Agent.tools.project import (
 )
 from GalTransl.Agent.tools.search import _tool_search_input
 from GalTransl.Agent.tools.plugin_settings import _tool_get_plugin_settings
+from GalTransl.Agent.tools.proofread import _tool_read_proofread_changes, _tool_revert_proofread_changes
 
 if TYPE_CHECKING:
     from GalTransl.Agent.runner import AgentRunner
@@ -71,6 +72,8 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "read_history_archive": _tool_read_history_archive,
     "ask_user": _tool_ask_user,
     "run_subagents": _tool_run_subagents,
+    "read_proofread_changes": _tool_read_proofread_changes,
+    "revert_proofread_changes": _tool_revert_proofread_changes,
 }
 
 
@@ -95,6 +98,7 @@ _TOOLS_WITH_REASON: frozenset[str] = frozenset({
     "manage_problem_filter",
     "manage_problem_white_list",
     "patch_transl_cache",
+    "revert_proofread_changes",
     "delete_transl_cache",
     "start_translation",
 })

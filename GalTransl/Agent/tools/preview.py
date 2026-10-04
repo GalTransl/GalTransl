@@ -25,6 +25,7 @@ from GalTransl.Agent.tools.problems import (
 )
 from GalTransl.Agent.tools.project import _plan_config_updates
 from GalTransl.Agent.tools.plugin_settings import catalog_for_updates
+from GalTransl.Agent.tools.proofread import _tool_revert_proofread_changes
 
 if TYPE_CHECKING:
     from GalTransl.Agent.runner import AgentRunner
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
 # 它们同样要用户点允许，同样该看到要改什么）。不在列的都是没有可比对 diff 的：整文件删缓存
 # （delete_transl_cache 不传 indexes 时没有单个文件名可对）、启动翻译、派子代理。
 PREVIEW_TOOLS: frozenset[str] = frozenset({
+    "revert_proofread_changes",
     "patch_transl_cache",
     "delete_transl_cache",
     "save_dict",
@@ -67,6 +69,8 @@ def _preview_tool_changes(runner: AgentRunner, name: str, args: dict[str, Any]) 
     if name not in PREVIEW_TOOLS:
         return None
     try:
+        if name == "revert_proofread_changes":
+            return _tool_revert_proofread_changes(runner, args, preview=True)
         if name == "patch_transl_cache":
             return _preview_cache_patch(runner, args)
         if name == "delete_transl_cache":

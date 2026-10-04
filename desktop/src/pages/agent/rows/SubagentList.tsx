@@ -83,6 +83,10 @@ function SubagentRow({ run }: { run: SubagentRun }) {
         ) : null}
         {run.toolCalls ? <span className="agent-subagent__badge">{translate("agent:subagentList.agentSubagentHead_message_text", { toolCalls: run.toolCalls })}</span> : null}
         {run.proofreadComment ? <span className="agent-subagent__badge is-doubt">{translate("agent:subagentList.agentSubagentHead_message_textVariant2", { proofreadComment: run.proofreadComment })}</span> : null}
+        {run.needsReviewCount ? <span className="agent-subagent__badge is-doubt">{translate("agent:subagentList.needsReviewCount", { count: run.needsReviewCount })}</span> : null}
+        {run.modifiedCount ? <span className="agent-subagent__badge">{translate("agent:subagentList.modifiedCount", { count: run.modifiedCount })}</span> : null}
+        {run.unverifiedCount ? <span className="agent-subagent__badge is-doubt">{translate("agent:subagentList.unverifiedCount", { count: run.unverifiedCount })}</span> : null}
+        {run.failedFileCount ? <span className="agent-subagent__badge is-doubt">{translate("agent:subagentList.failedFileCount", { count: run.failedFileCount })}</span> : null}
         <span className={`agent-subagent__state is-${state.tone}`}>{state.label}</span>
         {run.retry ? (
           <span
@@ -149,8 +153,13 @@ function subagentLatest(run: SubagentRun): { short: string; full: string; tone?:
       const error = (step.error || translate("common:actions.failed")).trim();
       return { short: translate("agent:subagentList.short_short_failed", { value: clipText(error, 40) }), full: error, tone: 'error' };
     }
+    if (step.name === 'patch_transl_cache' && step.result && typeof step.result === 'object') {
+      const count = Number((step.result as Record<string, unknown>).updated) || 0;
+      const text = translate("agent:subagentList.appliedChanges", { count });
+      return { short: text, full: text };
+    }
     const doubts = stepDoubts(step.args);
-    if (step.name === 'patch_transl_cache' && doubts.length) {
+    if (step.name === 'patch_transl_cache' && doubts.length && step.ok === true) {
       return {
         short: translate("agent:subagentList.short_short_entry", { count: doubts.length }),
         full: doubts.map((doubt) => `#${doubt.index} ${doubt.text}`).join('\n'),
@@ -171,8 +180,32 @@ function subagentLatest(run: SubagentRun): { short: string; full: string; tone?:
     只显示"修改译文 · 3 条"等于让他自己去翻缓存文件。 */
 function SubagentStepRow({ step }: { step: Extract<SubagentStep, { kind: 'tool' }> }) {
   useUiLanguage();
+  const result = step.result && typeof step.result === 'object' ? step.result as Record<string, unknown> : undefined;
+  const changes = Array.isArray(result?.changes) ? result.changes as Record<string, unknown>[] : [];
+  const files = Array.isArray(result?.files) ? result.files as Record<string, unknown>[] : [];
+  if (step.name === 'patch_transl_cache' && result) {
+    return (
+      <div className="agent-subagent__step">
+        <span className="agent-subagent__step-name">{translate("agent:subagentList.appliedChanges", { count: Number(result.updated) || 0 })}</span>
+        <div className="agent-subagent__doubts">
+          {changes.map((change, i) => (
+            <div key={i} className="agent-subagent__doubt">
+              <span className="agent-subagent__doubt-index">{String(change.path || '')}</span>
+              <span className="agent-subagent__doubt-text">{String(change.before ?? '')} → {String(change.after ?? '')}</span>
+            </div>
+          ))}
+          {files.map((file, i) => (
+            <div key={i} className="agent-subagent__doubt-text">
+              {file.error ? `${String(file.filename)}: ${String(file.error)}` : null}
+              {file.verification === 'unknown' ? translate("agent:subagentList.verificationUnknown") : null}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
   const doubts = stepDoubts(step.args);
-  if (step.name === 'patch_transl_cache' && doubts.length) {
+  if (step.name === 'patch_transl_cache' && doubts.length && step.ok === true) {
     return (
       <div className="agent-subagent__step is-doubt">
         <span className="agent-subagent__step-name">{translate("agent:subagentList.agentSubagentStepIsDoubt_message_text")}</span>

@@ -1,8 +1,7 @@
 """子代理：并行派发、按角色受限的工具集、报告回传。
 
 两个角色（见 runtime.SUBAGENT_ROLES）：
-- **校对（proofread）**：读缓存 → 写 proofread_comment → 交报告；**改不了译文**（patch_transl_cache
-  换成收窄版，入参里没有 pre_dst/proofread_dst，handler 那层也只放得住 proofread_comment）；
+- **校对（proofread）**：读缓存 → 用 dst 修复译文 → 留下需二次审查的 proofread_comment → 交报告；
 - **原文探索（explore）**：只读原文与 GPT 字典、**不写任何文件**，报告里给字典候选与规范建议，
   由主 Agent 汇总后落地。
 
@@ -30,7 +29,6 @@ from GalTransl.Agent.runtime import (
     SUBAGENT_AGENT_EXPLORE,
     SUBAGENT_AGENT_PROOFREAD,
     SUBAGENT_MAX_TASKS,
-    SUBAGENT_PATCHABLE_FIELDS,
     SUBAGENT_ROLES,
     AgentToolError,
     _patchable_fields_text,
@@ -42,6 +40,22 @@ from GalTransl.Agent.runtime import (
     _tool_read_transl_cache,
     _tool_run_subagents,
 )
+
+_TEST_RECORDS = None
+_STORE_PATCH = None
+
+
+def setUpModule():
+    global _TEST_RECORDS, _STORE_PATCH
+    _TEST_RECORDS = tempfile.TemporaryDirectory()
+    _STORE_PATCH = patch.object(ss, "SESSIONS_ROOT", _TEST_RECORDS.name)
+    _STORE_PATCH.start()
+
+
+def tearDownModule():
+    _STORE_PATCH.stop()
+    _TEST_RECORDS.cleanup()
+
 
 ENTRY = {"index": 1, "post_src": "原文", "pre_dst": "译文", "problem": ""}
 
@@ -209,10 +223,11 @@ class ProofreadAgentFlowTests(unittest.TestCase):
         self.assertIsInstance(done["finished_at"], float)
         self.assertGreaterEqual(done["finished_at"], start["started_at"])
 
-    def test_translation_edits_are_refused_and_nothing_is_written(self) -> None:
-        """子代理硬塞 pre_dst：工具层拒掉（只允许 proofread_comment），一个字都不落盘。"""
+    def test_raw_translation_fields_are_refused_and_nothing_is_written(self) -> None:
+        """子代理硬塞 pre_dst：工具层拒掉（译文必须用 dst），一个字都不落盘。"""
         parent = _Parent({"a.json": [ENTRY]})
         script = [
+            ("read", [_Call("read-first", "read_transl_cache", '{"filename":"a.json","index":"1"}')]),
             (
                 "",
                 [
@@ -427,18 +442,18 @@ class SubagentStepPersistenceTests(unittest.TestCase):
 
 
 class SubagentToolScopeTests(unittest.TestCase):
-    """"改不了译文"是结构保证，不是提示词自觉。"""
+    """译文统一使用 dst，字段与工具边界由代码保证。"""
 
     def test_patch_schema_has_no_translation_fields(self) -> None:
         schema = _subagent_patch_schema()
         patches = schema["function"]["parameters"]["properties"]["patches"]["items"]["properties"]
-        # file 留着：负责一组文件时一次把意见写完（跨文件批量），译文两列照旧摘掉
-        self.assertEqual(set(patches), {"file", "index", "proofread_comment"})
+        # file 留着：负责一组文件时一次把意见写完（跨文件批量），底层译文两列不直接暴露，使用 dst
+        self.assertEqual(set(patches), {"file", "index", "proofread_comment", "dst"})
         self.assertNotIn("pre_dst", schema["function"]["parameters"]["properties"])
-        # 顶层 clear_comment 也摘掉：那是主 Agent 复核完清批注用的，子代理只写意见
+        # 顶层 clear_comment 也摘掉：子代理通过单条 patch 显式清除已处理的批注
         # （它若能把成批批注清空，等于把别人刚写下、还没处理的意见抹了）
         self.assertNotIn("clear_comment", schema["function"]["parameters"]["properties"])
-        self.assertIn("只能写 proofread_comment", schema["function"]["description"])
+        self.assertIn("index + dst", schema["function"]["description"])
 
     def test_tool_table_has_no_delegation_or_write_tools(self) -> None:
         names = {
@@ -454,17 +469,17 @@ class SubagentToolScopeTests(unittest.TestCase):
         for forbidden in ("run_subagents", "save_dict", "update_project_config", "start_translation"):
             self.assertNotIn(forbidden, names)
 
-    def test_handler_whitelist_only_allows_proofread_comment(self) -> None:
+    def test_handler_refuses_raw_translation_fields(self) -> None:
         parent = _Parent({"a.json": [ENTRY]})
-        handler = _subagent_handlers(SUBAGENT_AGENT_PROOFREAD)["patch_transl_cache"]
-
-        with self.assertRaises(AgentToolError) as ctx:
-            handler(parent, {"filename": "a.json", "patches": [{"index": 1, "pre_dst": "改"}]})
-        self.assertIn("只允许 proofread_comment", str(ctx.exception))
+        handlers = _subagent_handlers(SUBAGENT_AGENT_PROOFREAD, "a.json")
+        handlers["read_transl_cache"](parent, {"filename": "a.json", "index": "1"})
+        result = handlers["patch_transl_cache"](parent, {"filename": "a.json", "patches": [{"index": 1, "pre_dst": "改"}]})
+        self.assertEqual(result["updated"], 0)
+        self.assertIn("只允许 dst / proofread_comment", result["files"][0]["error"])
         self.assertEqual(parent.saves, [])
 
     def test_patchable_text_for_subagents(self) -> None:
-        self.assertEqual(_patchable_fields_text(SUBAGENT_PATCHABLE_FIELDS), "proofread_comment")
+        self.assertEqual(_patchable_fields_text(frozenset({"proofread_comment"})), "proofread_comment")
         self.assertEqual(_patchable_fields_text(), "pre_dst / proofread_dst / proofread_comment")
 
     def test_main_agent_can_still_write_translations(self) -> None:
@@ -893,6 +908,7 @@ class AutoSplitTests(unittest.TestCase):
         """一组文件里写的意见要能认出在哪份里——只给 index，主 Agent 没法定位。"""
         parent = _Parent({"a.json": [ENTRY], "b.json": [ENTRY]})
         script = [
+            ("read", [_Call("read-first", "read_transl_cache", '{"filename":"b.json","index":"1"}')]),
             (
                 "",
                 [
@@ -1041,6 +1057,7 @@ class RunSubagentsMarkdownTests(unittest.TestCase):
     def test_end_to_end_renders_article_and_comment_table(self) -> None:
         parent = _Parent({"a.json": [ENTRY]})
         script = [
+            ("read", [_Call("read-first", "read_transl_cache", '{"filename":"a.json","index":"1"}')]),
             (
                 "",
                 [
@@ -1112,7 +1129,7 @@ class SubagentPermissionTests(unittest.TestCase):
     """子代理不受权限模式约束：白名单里的工具一律直接执行（连 ask 档也不问）。
 
     这是刻意的（见 runtime._subagent_handlers 的说明）：一批 16 个子代理逐条弹审批卡会把
-    界面淹掉，而它们能写的只有 proofread_comment（改不了译文）。主 Agent 那道门禁仍然管着
+    界面淹掉，而它们只能修复分配范围内的译文并写批注。主 Agent 那道门禁仍然管着
     「派子代理」这件事本身——ask 档下用户批的是这次委派，卡上能看到派给谁、看哪个文件，
     不是子代理的每一次读写。
     """
@@ -1136,7 +1153,9 @@ class SubagentPermissionTests(unittest.TestCase):
         )
 
         sub = self._subagent(parent)
-        out = sub._run_tool(call, _subagent_handlers(SUBAGENT_AGENT_PROOFREAD))
+        handlers = _subagent_handlers(SUBAGENT_AGENT_PROOFREAD, "a.json", fixer=sub.fixer)
+        handlers["read_transl_cache"](parent, {"filename": "a.json", "index": "1"})
+        out = sub._run_tool(call, handlers)
 
         # 写进去了（结果直接回给子代理，没有"等批准"这回事）；给模型看的是 Markdown
         self.assertIn("共改动 1 条", out["content"])
@@ -1149,6 +1168,7 @@ class SubagentPermissionTests(unittest.TestCase):
     def test_a_whole_delegation_never_asks(self) -> None:
         parent = _Parent({"a.json": [ENTRY]})
         script = [
+            ("read", [_Call("read-first", "read_transl_cache", '{"filename":"a.json","index":"1"}')]),
             (
                 "",
                 [
@@ -1452,18 +1472,18 @@ class ProofreadSuggestionModeTests(unittest.TestCase):
     def test_subagent_prompt_covers_both_kinds_and_defers_to_the_brief(self) -> None:
         prompt = rt.SUBAGENT_PROOFREAD_PROMPT
 
-        self.assertIn("校对建议", prompt)
-        self.assertIn("润色建议", prompt)
-        self.assertIn("以任务说明为准", prompt)
+        self.assertIn("硬伤", prompt)
+        self.assertIn("润色", prompt)
+        self.assertIn("brief 明确要求", prompt)
         self.assertIn("硬伤优先", prompt)  # 两类都要时先保证硬伤被抓出来
-        self.assertIn("给出具体改法", prompt)  # 润色建议不许只说"不够好"
+        self.assertIn("直接改 dst", prompt)  # 润色建议不许只说"不够好"
         self.assertNotIn("不要报风格偏好", prompt)  # 旧的"一律不许提风格"已被任务说明取代
 
     def test_brief_template_reminds_where_the_kind_goes(self) -> None:
         brief = rt._SUBAGENT_BRIEF_TEMPLATE
 
-        self.assertIn("校对建议 / 润色建议 / 两者都要", brief)
-        self.assertIn("默认只写校对建议", brief)
+        self.assertIn("额外要求", brief)
+        self.assertIn("直接修复", brief)
 
     def test_subagent_patch_tool_points_back_at_the_brief(self) -> None:
         tools = rt._subagent_tools(SUBAGENT_AGENT_PROOFREAD)

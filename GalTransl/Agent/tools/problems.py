@@ -346,7 +346,8 @@ def _merge_problem_context(
 
 
 def _tool_list_problems(
-    runner: AgentRunner, args: dict[str, Any], allowed_files: Sequence[str] | None = None
+    runner: AgentRunner, args: dict[str, Any], allowed_files: Sequence[str] | None = None,
+    *, index_ranges: list[tuple[int, int]] | None = None,
 ) -> Any:
     """查问题清单。
 
@@ -363,6 +364,8 @@ def _tool_list_problems(
         allowed = tuple(str(name).strip() for name in allowed_files if str(name).strip())
         allowed_set = set(allowed)
         problems = [p for p in problems if str(p.get("filename") or "") in allowed_set]
+        if index_ranges:
+            problems = [p for p in problems if any(lo <= int(p.get("index", -1)) <= hi for lo, hi in index_ranges)]
         total = len(problems)
         if len(allowed) == 1:
             scope_note = f"本次只派你看「{allowed[0]}」这一个文件，这里只列它的问题。"

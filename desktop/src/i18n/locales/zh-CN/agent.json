@@ -151,7 +151,13 @@
     "label_label_textVariant2": "轮数到顶",
     "subagentList_message_count_one": "{{running}}/{{count}} 个在跑",
     "subagentList_message_countDoneComplete_one": "{{count}} 个已完成",
-    "short_short_entry_one": "写下 {{count}} 条校对意见"
+    "short_short_entry_one": "写下 {{count}} 条校对意见",
+    "modifiedCount": "已改 {{count}} 条",
+    "unverifiedCount": "未验证 {{count}} 条",
+    "failedFileCount": "提交失败 {{count}} 个文件",
+    "appliedChanges": "实际修改 {{count}} 条",
+    "verificationUnknown": "检测未验证",
+    "needsReviewCount": "需二次审查 {{count}} 条"
   },
   "toolRow": {
     "label_label_approve": "待批准",
@@ -443,6 +449,14 @@
     "read_history_archive": {
       "action": "回查归档",
       "running": "回查归档"
+    },
+    "read_proofread_changes": {
+      "action": "查询校对记录",
+      "running": "查询校对记录"
+    },
+    "revert_proofread_changes": {
+      "action": "撤销校对修改",
+      "running": "撤销校对修改"
     }
   }
 }

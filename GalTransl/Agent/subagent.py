@@ -53,13 +53,13 @@ from GalTransl.Agent.tool_schemas import AGENT_TOOLS
 from GalTransl.Agent.tools.cache import (
     _cache_read_action,
     _tool_list_transl_cache,
-    _tool_patch_transl_cache,
     _tool_read_transl_cache,
 )
 from GalTransl.Agent.tools.common import _split_problem_types
 from GalTransl.Agent.tools.input import _list_input_payload
 from GalTransl.Agent.tools.listing import _list_grep, _list_limit, _list_order
 from GalTransl.Agent.tools.problems import _tool_list_problems
+from GalTransl.Agent.tools.proofread import ProofreadFixer
 from GalTransl.Agent.tools.render_md import _render_tool_result_table, _tool_result_json
 
 if TYPE_CHECKING:
@@ -81,71 +81,6 @@ if TYPE_CHECKING:
 # 再由 TaskWait／自动 resume 收口；我们这里**一次调用带一批任务、阻塞到全部跑完**。原因是
 # 我们的回合里工具是串行执行的（见 run() 的 for tc in tool_calls），没有 resume 那套机制，
 # 阻塞式最省事也最不容易出错；并发一点没少——同一批里的子代理是真并行跑的。
-
-# 校对子代理的 system prompt：**只能提意见**（写 proofread_comment），不能改译文。
-# 写"校对建议"还是"润色建议"由主 Agent 问过用户后写在任务说明里（见 _SUBAGENT_BRIEF_TEMPLATE），
-# 这里只把两类意见的定义、写法与优先级讲清楚；任务说明没提时默认只写校对建议。
-SUBAGENT_PROOFREAD_PROMPT = """你是 GalTransl 的**校对子代理**，只干一件事：读完分配给你的缓存，把意见写进缓存条目的 proofread_comment。
-
-# 权力边界（越界即失败）
-- 你**只能读**（缓存、人名表、翻译规范、问题清单），以及用 patch_transl_cache **写 proofread_comment** 这一个字段；
-- 你的 patch_transl_cache 里只有 index + proofread_comment（加一个 file）三个入参：**译文字段（pre_dst / proofread_dst）根本不存在**，也没有委派、启动任务、改配置的权力；
-- **你只负责这一次派给你的那些文件**（可能是一个，也可能是自动均分出来的一组）：read_transl_cache / patch_transl_cache 的 filename 只接受它们（patch 支持每条带 file，一样只认这一组），范围外会被直接拒掉；list_problems 也只会列这些文件的问题；要核对某个词在别处的译法，用 read_transl_cache(action="search")（搜索是全项目范围）；
-- 发现问题就写意见，改由主 Agent 做——不要试图绕路。
-
-# 写哪一类意见：以任务说明为准
-你的意见分两类，**这一遍写哪一类由任务说明（"主 Agent 的额外要求"）指定**——那里面已经写明用户要的是什么：
-- 只要求「校对建议」→ 只挑硬伤，不要顺带报风格偏好；
-- 只要求「润色建议」→ 只提表达上的改进，别去纠结对错（顺手看到明显硬伤也可以带上一条）；
-- 两类都要求 → 都写，但**硬伤优先**：先保证错译漏译都被抓出来，再谈润色。
-任务说明没提这件事时，默认**只写校对建议**。
-
-**校对建议（硬伤，四类）**
-1. **错译**：意思翻错、主客颠倒、否定/时态/数量弄反；
-2. **漏译**：原文有的信息译文里没有（整句漏掉、半句被吞、人称/称谓被省掉）；
-3. **事实错误**：人名/地名/专有名词/设定的译法与项目既有译法或原文设定冲突（先查人名表与其它出现处）；
-4. **明显不通**：中文不成句、指代错乱、说话人张冠李戴（结合 speaker 判断）。
-
-**润色建议（没硬伤，但中文能更好）**
-- 读起来别扭、有翻译腔：词序拗口、修饰语堆叠、一连串"的"；
-- 口语不自然：对话像书面语，语气与角色设定（傲娇 / 冷淡 / 大小姐 / 死党…）对不上；
-- 用词单调或不准：同一段反复用同一个词，拟声词、感叹处理得生硬；
-- 节奏问题：该断句的地方拖成一长串，或该一口气说完的被拆得很碎。
-写润色建议必须**给出具体改法**（"建议改成……"）——只说"不够好""可以更自然"等于没写；也不要为了凑数硬提，一条条目最多一条润色意见，优先挑真正影响阅读的。
-
-**两类共同的三条规矩**：一条条目只写一次（再写会覆盖）；没问题的条目不要写；每条都要写清"问题是什么 + 该怎么改"，必要时给出原文依据。宁可少报，也不要拿噪音把真正的硬伤淹掉。
-
-# 怎么干
-1. 先 read_transl_cache 读你负责的区间（默认列就够：原文 post_src、译文 pre_dst、机翻自查 problem，以及别人写过的 proofread_comment）；
-2. 要判断译名一致性：read_transl_cache(action="search") 搜同一个词的其它出现处、get_name_table 看人名表；判断取舍时 read_guideline 看项目规范（润色建议尤其要以项目规范为准，别跟规范里定下的文风打架）；
-3. 有疑问就用 patch_transl_cache 写进去，一条一个问题、写清"问题是什么 + 该怎么改"。可以一次多条：
-   patch_transl_cache(filename="<你的文件>", patches=[
-     {"index": 33, "proofread_comment": "漏译：原文「おっぱい」在译文里没有对应词，建议补为「欧派」"},
-     {"index": 41, "proofread_comment": "错译：原文是「否定」，译文翻成了肯定"},
-     {"index": 58, "proofread_comment": "润色：直译得比较生硬，建议改成「我才不是特意为你做的呢！」"},
-   ])
-   没问题的条目不要写；同一个 index 只写一次（再写会覆盖）。
-4. problem 里的机翻提示可以参考，但那是统计标签，**只写你核对过的**，不要照抄。
-5. 读不完就分段读（index 支持区间），不要为了省事跳过没读的条目——你没读的部分等于没校对。
-
-# 收尾
-不再调用工具后，输出一份**简短**报告（这是主 Agent 唯一会看到的你的输出）：
-- 负责的文件与区间、读了多少条；
-- 写了几条意见、分别是哪一类（校对：错译/漏译/事实错误/不通；润色：表达/语气/用词/节奏）；
-- 拿不准但值得人看一眼的点。
-不要在报告里复述每条意见的全文（proofread_comment 里已经有了），也不要贴原文译文。"""
-
-# 子代理的 user 消息（任务说明）。校对：文件是任务的天然边界——不同子代理写不同文件的
-# proofread_comment，互不打架；同一个人也能只领一个区间（或自动均分出来的一组文件）。
-_SUBAGENT_BRIEF_TEMPLATE = """# 你的任务
-
-- 角色：{label}
-- 负责的缓存文件：{file}
-- 负责的区间：{indexes}
-- 主 Agent 的额外要求（**里面会写明这一遍写哪一类意见：校对建议 / 润色建议 / 两者都要**）：{brief}
-
-负责的文件可能不止一个（自动均分出来的），逐个文件处理，别漏；读完你负责的区间，把发现的
-问题写进对应条目的 proofread_comment，然后交报告。上面没写意见类型时，默认只写校对建议。"""
 
 # 原文探索的任务说明：它不写文件，交的只有报告。
 _SUBAGENT_EXPLORE_BRIEF = """# 你的任务
@@ -194,9 +129,29 @@ SUBAGENT_EXPLORE_PROMPT = """你是 GalTransl 的**原文探索子代理**，只
 不要复述原文成段内容，不要写剧情概述，不要提议与字典和规范无关的东西。"""
 
 
-# 子代理唯一能写的字段：校对批注。它用的就是主 Agent 那个 patch_transl_cache，只是入参 schema
-# 被摘得只剩 proofread_comment、handler 那头也只放得住这一个字段（双保险）。
-SUBAGENT_PATCHABLE_FIELDS: frozenset[str] = frozenset({"proofread_comment"})
+SUBAGENT_PROOFREAD_PROMPT = """你是 GalTransl 的校对修复子代理，负责读完分配的句子、直接修复并复查。
+- 先 read_transl_cache 显式读取目标句，结合 context 查看上下文；译文以 proofread_dst 优先、pre_dst 其次。
+- patch_transl_cache 用 dst 提交新译文，工具自动选择当前生效的字段。可以跨文件批量提交，
+  但只允许修改任务分配的 file + index。上下文和搜索命中只供参考，不能越界修改。
+- 修改会核对最近一次读取的内容；冲突时重新读取后再决定，禁止照搬旧补丁重试。
+- 默认只修错译、漏译、事实错误、明显不通等硬伤。只有 brief 明确要求润色时才润色；两者都要时硬伤优先。
+- 保留控制符、换行和项目文风。read_guideline / get_name_table / 全项目搜索用于核对已有规范。
+- 明确的问题直接改 dst；拿不准、需要全局译名或字典决策的事项写 proofread_comment，交主 Agent 裁决。
+  同条有多个疑问要合并成一条批注。修复了已有批注意见时，同一 patch 明确写 proofread_comment=""；
+  没处理的意见保留。不要改配置、字典、过滤规则或白名单，也没有委派/启动翻译的权限。
+- patch 的返回包含实际变更及剩余 problem。verification=unknown 表示检测未验证，不能说问题已消失。
+  核对修改没有引入格式问题；仍有明确可修的问题最多再修两轮，之后留下批注，不要循环修改同一句。
+- 无问题的句子不改。读不完如实说明未处理的区间；没写批注不代表已经读过。
+- 收尾只给简短总结：本次修复类别、尚需主 Agent 决定的共性事项、未完成范围。
+  不要复述全部改句或逐条 diff；修改记录已独立保存，主 Agent 会收到统计和查询入口。
+"""
+
+_SUBAGENT_BRIEF_TEMPLATE = """# 你的修复任务
+- 负责的缓存文件：{file}
+- 可修改的区间：{indexes}
+- 额外要求：{brief}
+完成阅读、直接修复、复查；不确定事项留批注，最后交简短报告。
+"""
 
 
 @dataclass(frozen=True)
@@ -252,32 +207,24 @@ def _subagent_role(agent: str) -> SubAgentRole:
 
 
 def _subagent_patch_schema() -> dict[str, Any]:
-    """子代理版的 patch_transl_cache：**把 pre_dst / proofread_dst 两个入参摘掉**，只留 proofread_comment。
-
-    顶层 clear_comment 同样摘掉：那是"复核完的人"成批清批注用的，子代理只写意见（它不看这些
-    意见处理没处理），留着只会让它把别人刚写下、还没处理的批注误清掉。
-
-    与 handler 侧的窄白名单（SUBAGENT_PATCHABLE_FIELDS）一起构成"改不了译文"的双保险——
-    这件事由代码保证，不靠提示词自觉。schema 从主 Agent 那份深拷贝再改，避免哪天主 Agent
-    换了描述、子代理这份漂移。
-    """
+    """Proofreaders edit the effective translation through dst, plus review comments."""
     for tool in AGENT_TOOLS:
-        function = tool.get("function") or {}
-        if function.get("name") != "patch_transl_cache":
+        if (tool.get("function") or {}).get("name") != "patch_transl_cache":
             continue
-        copy: dict[str, Any] = json.loads(json.dumps(tool, ensure_ascii=False))
-        properties = copy["function"]["parameters"]["properties"]["patches"]["items"]["properties"]
+        schema = json.loads(json.dumps(tool, ensure_ascii=False))
+        properties = schema["function"]["parameters"]["properties"]["patches"]["items"]["properties"]
         for field in ("pre_dst", "proofread_dst"):
             properties.pop(field, None)
-        copy["function"]["parameters"]["properties"].pop("clear_comment", None)
-        copy["function"]["description"] = (
-            "把你的意见写进缓存条目的 proofread_comment（校对批注），一条一个具体问题，"
-            "写清问题在哪、该怎么改。可以一次传多条 patches。"
-            "**写校对建议还是润色建议以任务说明为准**（没说明就默认只写校对建议）。"
-            "**你是校对子代理，只能写 proofread_comment**——译文字段不在你的入参里，改由主 Agent 做；"
-            "同一个 index 写第二次会覆盖上一次。"
+        schema["function"]["parameters"]["properties"].pop("clear_comment", None)
+        properties["dst"] = {"type": "string", "description": "新译文；工具自动更新当前生效的 pre_dst 或 proofread_dst，不能为空"}
+        properties["proofread_comment"]["description"] = "需要二次审查的事项；本次已修改译文并解决旧意见时传空串清除，否则保留"
+        schema["function"]["description"] = (
+            "批量校对修复任务范围内的句子。先显式 read_transl_cache，再传 index + dst；"
+            "内容已变化时拒绝该文件的提交，需重新读取。校对或润色以任务说明为准，默认只修硬伤。"
+            "用 proofread_comment 标记需要二次审查的译文，可与 dst 同时提交。"
+            "返回真实变更、检测状态与仍存在的问题。修改记录自动保存，不必在报告复述。"
         )
-        return copy
+        return schema
     raise RuntimeError("AGENT_TOOLS 里找不到 patch_transl_cache")
 
 
@@ -477,6 +424,68 @@ def _parse_index_ranges(spec: str) -> list[tuple[int, int]]:
     return ranges
 
 
+def _checked_ranges(spec: str) -> list[tuple[int, int]]:
+    if not spec:
+        return []
+    if not re.fullmatch(r"\s*[1-9]\d*(?:\s*-\s*[1-9]\d*)?(?:\s*,\s*[1-9]\d*(?:\s*-\s*[1-9]\d*)?)*\s*", spec):
+        raise AgentToolError(f"无效的 indexes：{spec!r}，请使用正整数或区间，如 1-20,33")
+    ranges: list[tuple[int, int]] = []
+    for lo, hi in sorted(_parse_index_ranges(spec)):
+        if ranges and lo <= ranges[-1][1] + 1:
+            ranges[-1] = (ranges[-1][0], max(hi, ranges[-1][1]))
+        else:
+            ranges.append((lo, hi))
+    return ranges
+
+
+def _index_in_ranges(index: int, ranges: list[tuple[int, int]]) -> bool:
+    return not ranges or any(lo <= index <= hi for lo, hi in ranges)
+
+
+def _index_values_spec(values: list[int]) -> str:
+    ranges: list[tuple[int, int]] = []
+    for value in sorted(set(values)):
+        if ranges and value == ranges[-1][1] + 1:
+            ranges[-1] = (ranges[-1][0], value)
+        else:
+            ranges.append((value, value))
+    return ",".join(str(lo) if lo == hi else f"{lo}-{hi}" for lo, hi in ranges)
+
+
+def _validate_task_scopes(tasks: list[dict[str, Any]]) -> None:
+    claimed: dict[str, list[list[tuple[int, int]]]] = {}
+    for task in tasks:
+        if task["agent"] != SUBAGENT_AGENT_PROOFREAD:
+            continue
+        ranges = _checked_ranges(task["indexes"])
+        if ranges and len(task["files"]) != 1:
+            raise AgentToolError("indexes 只能用于一个缓存文件")
+        for name in task["files"]:
+            # File names identify Windows files too; casing must not bypass ownership.
+            key = os.path.normcase(name)
+            for previous in claimed.get(key, []):
+                if not ranges or not previous or any(a <= d and c <= b for a, b in ranges for c, d in previous):
+                    raise AgentToolError(f"「{name}」的校对任务范围重叠；请分配互不重叠的 indexes")
+            claimed.setdefault(key, []).append(ranges)
+
+
+def _lock_patch_indexes(fn: Callable, ranges: list[tuple[int, int]], stop_event: threading.Event | None) -> Callable:
+    def wrapped(runner: AgentRunner, args: dict[str, Any]) -> Any:
+        if stop_event is not None and stop_event.is_set():
+            raise AgentStopRequested()
+        patches = args.get("patches")
+        if not isinstance(patches, list) or not patches:
+            raise AgentToolError("patches 必须是非空数组")
+        for patch in patches:
+            index = patch.get("index") if isinstance(patch, dict) else None
+            if isinstance(index, bool) or not isinstance(index, int) or index < 1:
+                raise AgentToolError("patch 的 index 必须为正整数，不能使用上下文行的 * 标记")
+            if not _index_in_ranges(index, ranges):
+                raise AgentToolError(f"#{index} 不在本次派活的 indexes 范围内；上下文只能读，不能改")
+        return fn(runner, args)
+    return wrapped
+
+
 def _slice_ranges(ranges: list[tuple[int, int]], parts: int) -> list[str]:
     """把若干区间按条数整体切成 parts 段，返回区间字符串（如 ["1-103","104-206"]）。
 
@@ -511,7 +520,8 @@ def _slice_ranges(ranges: list[tuple[int, int]], parts: int) -> list[str]:
 
 
 def _expand_subagent_file_selection(
-    files: list[str], indexes: str, count: int, counts: dict[str, int]
+    files: list[str], indexes: str, count: int, counts: dict[str, int],
+    index_values: dict[str, list[int]] | None = None,
 ) -> list[tuple[list[str], str]]:
     """把（选谁 × 切几份 × 取哪段）展开成一组子代理任务：[(文件清单, indexes), ...]。
 
@@ -521,6 +531,22 @@ def _expand_subagent_file_selection(
     - count>1 且没给 indexes：文件够分就按文件均分；文件不够就把大文件按条数切成
       index 段，凑够 count 个任务（如一个大文件切 4 段并行）。
     """
+    if index_values is not None and count > 1 and (indexes or len(files) < count):
+        if indexes and len(files) != 1:
+            raise AgentToolError("indexes 只能用于单个文件")
+        ranges = _checked_ranges(indexes)
+        per_file, extra = divmod(count, len(files))
+        out = []
+        for i, name in enumerate(files):
+            values = [v for v in index_values[name] if _index_in_ranges(v, ranges)]
+            parts = per_file + (1 if i < extra else 0)
+            if len(values) < parts:
+                raise AgentToolError(f"「{name}」范围内只有 {len(values)} 条，切不成 {parts} 段")
+            start = 0
+            for size in _split_sizes(len(values), parts):
+                out.append(([name], _index_values_spec(values[start:start + size])))
+                start += size
+        return out
     if count <= 1:
         if indexes and len(files) > 1:
             raise AgentToolError(
@@ -690,19 +716,19 @@ def _lock_input_listing(
 
 
 def _subagent_handlers(
-    agent: str, locked_files: str | Sequence[str] = ()
+    agent: str, locked_files: str | Sequence[str] = (), *, indexes: str = "",
+    fixer: ProofreadFixer | None = None,
+    stop_event: threading.Event | None = None,
 ) -> dict[str, Callable[[AgentRunner, dict[str, Any]], Any]]:
     """某个角色可用的 handler（按它的白名单从主 Agent 那张表里取）。
 
-    - patch_transl_cache 包一层窄白名单：只放得住 proofread_comment（译文字段即使模型硬塞也会被
-      当成"无可更新字段"跳过，并被回一条只允许 proofread_comment 的工具错误）；
+    - patch_transl_cache 只接受 dst / proofread_comment；显式读取、范围、旧值和停止检查由工具执行；
     - **锁定文件**（locked_files 非空，来自任务里的 file；自动均分时是一组）：read_transl_cache 的
       read、patch_transl_cache / read_input_file 的 filename 被限制在这一组里，read_transl_cache 的
       list 与 list_input_files 也只列这些，list_problems 也只列这些文件的问题——"一份文件只归一个子代理"由工具层保证，模型串到
       范围外会被拒（省 token，也避免两个子代理写同一条）。要核对"这个词在别处怎么翻的"，仍走
       跨文件的 read_transl_cache(action="search") / get_name_table；
-    - 调用**不过权限门禁**：子代理的工具集本身就是白名单（只有读，加校对那一支写意见），
-      一批 16 个逐条弹审批卡会把界面淹掉。改译文的权力仍然只在主 Agent 手上——那才是要审批的事。
+    - 派发门禁统一授权本次范围内的修复，批内不再逐条询问。配置、字典等全局写工具不开放。
     """
     # 延迟导入：注册表要登记 run_subagents（本模块），模块顶层互相导入会成环
     from GalTransl.Agent.handlers import _TOOL_HANDLERS
@@ -711,10 +737,15 @@ def _subagent_handlers(
     handlers: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
         name: _TOOL_HANDLERS[name] for name in role.tools if name in _TOOL_HANDLERS
     }
+    def get_fixer(runner: AgentRunner) -> ProofreadFixer:
+        nonlocal fixer
+        if fixer is None:
+            fixer = ProofreadFixer(runner, os.urandom(16).hex(), stop_event or runner.stop_event)
+        return fixer
+
     if "patch_transl_cache" in role.tools:
-        handlers["patch_transl_cache"] = lambda runner, args: _tool_patch_transl_cache(
-            runner, args, SUBAGENT_PATCHABLE_FIELDS
-        )
+        handlers["patch_transl_cache"] = lambda runner, args: get_fixer(runner).patch(runner, args)
+        handlers["read_transl_cache"] = lambda runner, args: get_fixer(runner).read(runner, args)
     # 裸字符串按"一个文件名"处理（Sequence[str] 会把字符串按字符拆开——那是陷阱不是功能）
     locked_names: Sequence[str] = (locked_files,) if isinstance(locked_files, str) else locked_files
     locked = tuple(str(name).strip() for name in locked_names if str(name).strip())
@@ -724,10 +755,23 @@ def _subagent_handlers(
                 handlers[name] = _lock_to_filenames(handlers[name], locked)
         if "read_transl_cache" in handlers:
             handlers["read_transl_cache"] = _lock_cache_reader(locked)
+            if agent == SUBAGENT_AGENT_PROOFREAD:
+                scoped_read = handlers["read_transl_cache"]
+                def read(runner: AgentRunner, args: dict[str, Any]) -> Any:
+                    if _cache_read_action(args) == "read":
+                        return _lock_to_filenames(get_fixer(runner).read, locked)(runner, {**args, "action": "read"})
+                    return scoped_read(runner, args)
+                handlers["read_transl_cache"] = read
         if "list_input_files" in handlers:
             handlers["list_input_files"] = _lock_input_listing(locked)
         if "list_problems" in handlers:
-            handlers["list_problems"] = lambda runner, args: _tool_list_problems(runner, args, locked)
+            handlers["list_problems"] = lambda runner, args: _tool_list_problems(
+                runner, args, locked, index_ranges=_checked_ranges(indexes)
+            )
+    if "patch_transl_cache" in handlers:
+        handlers["patch_transl_cache"] = _lock_patch_indexes(
+            handlers["patch_transl_cache"], _checked_ranges(indexes), stop_event
+        )
     return handlers
 
 
@@ -810,6 +854,7 @@ class SubAgentRunner:
         delegation_id: str,
     ) -> None:
         self.parent = parent
+        self.stop_event = parent.stop_event  # Keep the original turn's cancellation token.
         self.agent = agent
         self.role = _subagent_role(agent)  # 提示词 / 工具白名单 / 报告上限都从它取
         # 派给它的文件（一个或一组；自动均分时是一组）。工具层按它限范围，见 _subagent_handlers
@@ -817,12 +862,14 @@ class SubAgentRunner:
         self.indexes = indexes
         self.brief = brief
         self.id = delegation_id
+        self.fixer = ProofreadFixer(parent, delegation_id, self.stop_event) if agent == SUBAGENT_AGENT_PROOFREAD else None
         self.messages: list[dict[str, Any]] = []
         self.turns = 0
         self.tool_calls = 0
         # 它写进缓存的那几条校对批注（{file, index, content}）：字段名跟缓存里的
         # proofread_comment 对齐，报告里只回 file + index，全文在缓存里
         self.proofread_comments: list[dict[str, Any]] = []
+        self.patch_errors: dict[str, str] = {}
         self.started_at = time.time()
         # 正在进行的一次压缩：{cut, head_keep, estimated, limit}。挂上压缩指令后置上，
         # 收尾（_finish_compaction）或回滚（_abort_compaction）时清空。
@@ -850,7 +897,7 @@ class SubAgentRunner:
         """子代理事件：一律带自己的 id，界面据此挂到发起它的那行下面。"""
         self.parent._emit(event_type, {"id": self.id, **data})
 
-    def _finish(self, status: str, report: str, error: str = "") -> dict[str, Any]:
+    def _finish(self, status: str, report: str, error: str = "", *, emit: bool = True) -> dict[str, Any]:
         text = report.strip()
         limit = self.role.report_chars
         if len(text) > limit:
@@ -877,22 +924,43 @@ class SubAgentRunner:
             ],
             "duration_ms": int((time.time() - self.started_at) * 1000),
         }
+        if self.fixer is not None:
+            review = self.fixer.review_entries()
+            result.update({
+                "modified_count": len(self.fixer.modified),
+                "read_count": len(self.fixer.snapshots),
+                "comment_count": len(self.proofread_comments),
+                "unverified_count": len(self.fixer.unverified),
+                "remaining_problem_count": len(self.fixer.remaining),
+                "failed_file_count": len(self.patch_errors),
+                "change_task_id": self.id,
+                "proofread_comment": result["proofread_comment"][:20],
+                "comments_truncated": len(self.proofread_comments) > 20,
+                "needs_review_count": len(review),
+                "needs_review": [{**row, "reason": row["reason"][:240]} for row in review[:20]],
+                "review_truncated": len(review) > 20,
+            })
+            try:
+                if review or self.fixer.modified:
+                    self.fixer.save_report(result, review)
+            except OSError as exc:
+                result["review_record_error"] = str(exc)
         if error:
             result["error"] = error
-        self._emit(
-            "subagent_done",
-            {
-                "status": status,
-                "report": text,
-                "turns": self.turns,
-                "tool_calls": self.tool_calls,
-                "proofread_comment": len(self.proofread_comments),
-                "duration_ms": result["duration_ms"],
-                # 结束时间戳（Unix 秒）：与 started_at 配对，界面重放后也能还原区间
-                "finished_at": time.time(),
-                "error": error,
-            },
-        )
+        if emit:
+            self._emit(
+                "subagent_done",
+                {
+                    "status": status, "report": text, "turns": self.turns,
+                    "tool_calls": self.tool_calls,
+                    "proofread_comment": len(self.proofread_comments),
+                    "modified_count": result.get("modified_count", 0),
+                    "needs_review_count": result.get("needs_review_count", 0),
+                    "unverified_count": result.get("unverified_count", 0),
+                    "failed_file_count": result.get("failed_file_count", 0),
+                    "duration_ms": result["duration_ms"], "finished_at": time.time(), "error": error,
+                },
+            )
         return result
 
     # ---- 上下文窗口复用与压缩 ----
@@ -1092,7 +1160,7 @@ class SubAgentRunner:
                 return content, calls, field, reasoning
             except Exception as exc:  # noqa: BLE001 - 按分类决定是否重试
                 info = _classify_llm_error(exc)
-                if self.parent.stop_event.is_set():
+                if self.stop_event.is_set():
                     raise AgentStopRequested() from exc
                 if not info["retriable"] or attempt >= LLM_MAX_RETRIES:
                     raise
@@ -1110,7 +1178,7 @@ class SubAgentRunner:
                     "reason": info["message"],
                     "status": info["status"],
                 })
-                if self.parent.stop_event.wait(delay_ms / 1000):
+                if self.stop_event.wait(delay_ms / 1000):
                     raise AgentStopRequested() from exc
 
     def run(self) -> dict[str, Any]:
@@ -1149,11 +1217,12 @@ class SubAgentRunner:
         ]
         tools = _subagent_tools(self.agent)
         # 锁定文件：把它交给 handler，让"只能碰派给自己的那些"由工具层保证
-        handlers = _subagent_handlers(self.agent, self.files)
+        handlers = _subagent_handlers(self.agent, self.files, indexes=self.indexes,
+                                     fixer=self.fixer, stop_event=self.stop_event)
         last_text = ""
         for round_i in range(1, SUBAGENT_MAX_ROUNDS + 1):
             self.turns = round_i
-            if self.parent.stop_event.is_set():
+            if self.stop_event.is_set():
                 return self._finish("stopped", last_text, error="父回合被停止，子代理提前收尾")
             # 每轮请求前判一次：工具往返堆太多就先压缩——挂上压缩指令、这一轮专门拿摘要
             # （Insert-then-Compress，与父 Agent 同一机制），下一轮带着摘要继续干活。
@@ -1190,6 +1259,8 @@ class SubAgentRunner:
             ]
             self.messages.append(assistant)
             for tool_call in tool_calls:
+                if self.stop_event.is_set():
+                    return self._finish("stopped", last_text, error="父回合被停止，剩余工具不再执行")
                 self.messages.append(self._run_tool(tool_call, handlers))
         return self._finish(
             "max_rounds", last_text, error=f"轮数到上限（{SUBAGENT_MAX_ROUNDS}），按已有结果收尾"
@@ -1216,11 +1287,17 @@ class SubAgentRunner:
         ok = True
         result: Any = None
         try:
+            if self.stop_event.is_set():
+                raise AgentStopRequested()
             if handler is None:
                 raise AgentToolError(
                     f"子代理没有这个工具：{name}（只能用 {'、'.join(self.role.tools)}）"
                 )
             result = handler(self.parent, args)
+            if name == "patch_transl_cache" and isinstance(result, dict) and not result.get("updated"):
+                failures = [str(row["error"]) for row in result.get("files", []) if row.get("error")]
+                if failures:
+                    raise AgentToolError("；".join(failures))
             # 子代理读缓存是大头（校对一批 16 个、每个几十条）：同样走 Markdown 渲染
             rendered = _render_tool_result_table(name, result)
             payload = rendered if rendered is not None else _tool_result_json(result)
@@ -1231,8 +1308,14 @@ class SubAgentRunner:
         except Exception as exc:  # noqa: BLE001
             payload, ok = f"{type(exc).__name__}: {exc}", False
         duration_ms = int((time.time() - started) * 1000)
-        if ok and name == "patch_transl_cache":
-            self._remember_proofread_comments(result, str(args.get("filename", "") or ""))
+        if name == "patch_transl_cache" and isinstance(result, dict):
+            if ok:
+                self._remember_proofread_comments(result, str(args.get("filename", "") or ""))
+            for row in result.get("files", []):
+                if row.get("error"):
+                    self.patch_errors[row["filename"]] = row["error"]
+                else:
+                    self.patch_errors.pop(row["filename"], None)
         # 事件里只给预览（读缓存动辄几万字符，界面用不上）；消息历史里给全文（有上限兜底）
         self._emit(
             "subagent_tool_result",
@@ -1240,7 +1323,7 @@ class SubAgentRunner:
                 "tool_call_id": call_id,
                 "name": name,
                 "ok": ok,
-                "result": preview[:400] if ok else None,
+                "result": result if ok and self.fixer and name == "patch_transl_cache" else preview[:400] if ok else None,
                 "error": None if ok else payload[:400],
                 "duration_ms": duration_ms,
             },
@@ -1277,6 +1360,11 @@ class SubAgentRunner:
                 index: Any = int(raw)
             except ValueError:
                 index = raw
+            filename = str(change.get("file") or filename)
+            self.proofread_comments = [d for d in self.proofread_comments
+                                       if (d.get("file"), d.get("index")) != (filename, index)]
+            if not change.get("after"):
+                continue
             self.proofread_comments.append(
                 {
                     "file": str(change.get("file") or filename),
@@ -1308,8 +1396,7 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
     - **切几份（count）**：对任何选择器都生效——文件够就按文件均分；文件不够就把大文件按
       index 切成 count 段（一个大文件切给 N 个代理并行）。
     - **取哪段（indexes）**：单文件 + count>1 时在区间内再切段；多文件 + indexes 判为歧义。
-    文件是任务的天然边界——不同子代理写不同文件的 proofread_comment 不会互相覆盖；同一个
-    文件要拆就用切片（count>1 或 indexes），但两边别碰同一条。
+    文件与 index 共同构成写入范围；重叠任务在派发前拒绝，同文件不同区间通过文件锁串行提交。
     原文探索的 file 可以留空（自己按 list_input_files 挑）：它只读、不写文件。
     """
     tasks_raw = args.get("tasks")
@@ -1330,6 +1417,9 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
             raise AgentToolError(
                 f"第 {i} 个任务的 agent 不认识：{agent!r}（可用：{'、'.join(SUBAGENT_AGENTS)}）"
             )
+        if "mode" in item:
+            raise AgentToolError("mode 选项已移除；proofread 默认直接修复译文并反馈需二次审查的事项")
+        _checked_ranges(str(item.get("indexes", "") or "").strip())
         spec = str(item.get("file", "") or "").strip()
         if SUBAGENT_ROLES[agent].needs_file and not spec:
             raise AgentToolError(
@@ -1436,8 +1526,17 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
         elif spec == "":
             _emit_task(task, [], "")
         else:
+            index_values = None
+            if task["agent"] == SUBAGENT_AGENT_PROOFREAD and task["count"] > 1 and (
+                task["indexes"] or len(task["files"]) < task["count"]
+            ):
+                index_values = {}
+                for name in task["files"]:
+                    data = runner._http_get(f"/api/projects/{runner._project_id()}/cache/{urllib.parse.quote(name)}")
+                    index_values[name] = sorted({e["index"] for e in data.get("entries", [])
+                                                 if isinstance(e, dict) and type(e.get("index")) is int and e["index"] > 0})
             expansions = _expand_subagent_file_selection(
-                task["files"], task["indexes"], task["count"], _counts(task["agent"])
+                task["files"], task["indexes"], task["count"], _counts(task["agent"]), index_values
             )
             if task["count"] > 1:
                 split_notes.append(
@@ -1456,11 +1555,13 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
     scheduled = [task for task in tasks if task["files"] or not task["auto"]]
     skipped = len(tasks) - len(scheduled)
     tasks = scheduled
+    _validate_task_scopes(tasks)
 
     if getattr(runner, "_openai_client", None) is None or not str(getattr(runner, "_model", "") or ""):
         raise AgentToolError("本回合的后端还没就绪，子代理跑不起来")
 
     slots: list[dict[str, Any] | None] = [None] * len(tasks)
+    running: dict[int, SubAgentRunner] = {}
     lock = threading.Lock()
     base = os.urandom(8).hex()
 
@@ -1474,11 +1575,13 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
                 brief=task["brief"],
                 delegation_id=f"{base}-{slot + 1:02d}",
             )
+            running[slot] = sub
             out = sub.run()
         except Exception as exc:  # noqa: BLE001 - 子代理自己崩了只影响它这一格
             _log(f"  🧑‍🎓 子代理 {slot + 1} 起不来或崩了: {exc}")
             out = {
                 "agent": task["agent"],
+                "id": f"{base}-{slot + 1:02d}",
                 "label": SUBAGENT_LABELS.get(task["agent"], task["agent"]),
                 "file": "、".join(task["files"][:1]) + (
                     f" 等 {len(task['files'])} 个文件" if len(task["files"]) > 1 else ""
@@ -1536,10 +1639,14 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
         _log(f"  🧑‍🎓 子代理并行中：还剩 {alive}/{len(threads)} 个（已 {int(time.time() - started)}s）")
 
     results: list[dict[str, Any]] = []
-    for task, out in zip(tasks, slots):
+    for i, (task, out) in enumerate(zip(tasks, slots)):
         if out is None:
+            if i in running:
+                results.append(running[i]._finish("stopped", "", "父回合被停止，保留已提交的修改", emit=False))
+                continue
             out = {
                 "agent": task["agent"],
+                "id": f"{base}-{i + 1:02d}",
                 "label": SUBAGENT_LABELS.get(task["agent"], task["agent"]),
                 "file": "、".join(task["files"][:1]) + (
                     f" 等 {len(task['files'])} 个文件" if len(task["files"]) > 1 else ""
@@ -1555,14 +1662,16 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
                 "error": "父回合被停止，这个子代理没跑完",
             }
         results.append(out)
-    total_comments = sum(len(row.get("proofread_comment") or []) for row in results)
-    note = (
-        "子代理的校对意见已写进各条缓存的 proofread_comment：按各子代理批注表里的 file 与 index "
-        "用 read_transl_cache 读那些条目，改完译文（pre_dst）后再用 patch_transl_cache 把该条的 "
-        "proofread_comment 清空，表示已处理。"
-    )
-    if total_comments == 0:
-        note = "这批子代理没有提出任何疑问（没有条目被写入 proofread_comment）。"
+    total_comments = sum(row.get("comment_count", len(row.get("proofread_comment") or [])) for row in results)
+    total_modified = sum(row.get("modified_count", 0) for row in results)
+    note = "原文探索结果见各任务报告；字典与规范建议由主 Agent 汇总。"
+    if any(task["agent"] == SUBAGENT_AGENT_PROOFREAD for task in tasks):
+        note = (
+            "校对子代理直接修复译文，实际提交以修改数为准，无需按成功改句逐条重做。优先处理 needs_review，"
+            "用 read_proofread_changes(task_id=change_task_id, view='review') 分页查看需二次审查的译文。"
+            "完整修改记录用 read_proofread_changes(task_id=change_task_id) 分页查看，"
+            "必要时用 revert_proofread_changes 撤销。读取数不等于校对完成数；中止或轮数到限时请检查未完成范围。"
+        )
     if split_notes:
         note = " ".join(split_notes) + " " + note
     return {
@@ -1570,5 +1679,6 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
         "total": len(results),
         "skipped": skipped,
         "total_proofread_comment": total_comments,
+        "total_modified": total_modified,
         "note": note,
     }

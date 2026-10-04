@@ -3,7 +3,6 @@ import urllib.parse
 from types import SimpleNamespace
 
 from GalTransl.Agent.runtime import (
-    SUBAGENT_PATCHABLE_FIELDS,
     AgentToolError,
     _preview_cache_patch,
     _render_tool_result_table,
@@ -483,8 +482,8 @@ class ClearCommentTests(unittest.TestCase):
         self.assertIn("批注", str(ctx.exception))
         self.assertEqual(runner.saved, {})
 
-    def test_subagent_cannot_clear_comments(self) -> None:
-        """校对子代理拿同一个 handler：它只写批注，不该顺手清掉还没处理的意见。"""
+    def test_narrow_field_whitelist_does_not_enable_bulk_comment_clearing(self) -> None:
+        """显式传窄字段白名单时，通用 patch 的批量清理开关仍不生效。"""
         runner = self._runner()
 
         result = _tool_patch_transl_cache(
@@ -494,7 +493,7 @@ class ClearCommentTests(unittest.TestCase):
                 "clear_comment": True,
                 "patches": [{"index": 1, "proofread_comment": "新意见"}, {"index": 2}],
             },
-            SUBAGENT_PATCHABLE_FIELDS,
+            frozenset({"proofread_comment"}),
         )
 
         saved = {int(e["index"]): e for e in runner.saved["a.json"]}

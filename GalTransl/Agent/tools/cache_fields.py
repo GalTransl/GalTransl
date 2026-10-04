@@ -45,7 +45,7 @@ CACHE_ENTRY_FIELD_DESCRIPTIONS: dict[str, str] = {
     "post_dst_preview": "最终译文的缓存快照（后润）：译后字典替换 + 对话符号恢复之后的形态；默认只在它与译文实质不同（不只差首尾对话符号）时返回",
     "proofread_dst": "校对/润色稿；有内容时它就是这条的最终译文（优先于 pre_dst）",
     "proofread_by": "校对者标记（校对失败的会带 Fail）；未校对为空",
-    "proofread_comment": "校对批注：校对子代理（run_subagents）看过后在条目上留下的批注——校对建议（错译/漏译/事实错误等）或润色建议（翻译腔、口语不自然等表达改进），一条一句；没写过的条目为空。要处理这条就按批注改 pre_dst，改完在 patch_transl_cache 里带 clear_comment=true 把这些条目的批注一次清空表示已处理（只清某几条就逐条传 proofread_comment 空串）",
+    "proofread_comment": "校对批注：校对子代理（run_subagents）的批注：记录未解决或修复后仍需二次审查的事项——校对建议（错译/漏译/事实错误等）或润色建议（翻译腔、口语不自然等表达改进），一条一句；没写过的条目为空。要处理这条就按批注改当前生效的译文字段（proofread_dst 优先，否则 pre_dst），改完在 patch_transl_cache 里带 clear_comment=true 把这些条目的批注一次清空表示已处理（只清某几条就逐条传 proofread_comment 空串）",
     "trans_by": "译者标记：翻译引擎的模型名，或被别的来源改过时的那个名字（本会话 Agent 用 patch_transl_cache 改过的条目记的是 Agent 的模型名）；读缓存时逐条只报少数派——这批里出现最多的那个（多数派，通常就是引擎翻的）与空值都不逐条给，多数派记在顶层 majority_trans_by；默认不返回（要看它传 fields）",
     "problem": "自动问题分析写入的问题标签，可能多条（以「, 」分隔）；list_problems 的统计与下钻都基于它",
 }
@@ -95,7 +95,7 @@ def _patchable_fields_text(allowed: frozenset[str] | None = None) -> str:
     """可改字段的一行文本（按 CACHE_ENTRY_FIELDS 的顺序，输出稳定）。
 
     system prompt 的字段说明与 patch 工具的报错都用它，避免两处各写一份再漂移。
-    allowed 给校对子代理那样的窄白名单用（见 SUBAGENT_PATCHABLE_FIELDS）。
+    allowed 可为内部调用提供更窄的字段白名单。
     """
     fields = allowed if allowed is not None else _PATCHABLE_FIELDS
     return " / ".join(name for name in CACHE_ENTRY_FIELDS if name in fields)

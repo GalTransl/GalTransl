@@ -97,6 +97,8 @@ const TOOL_META: Record<string, ToolMeta> = {
       return translate("agent:toolMeta.summary_message_count", { total: total, head: head, rest: rest });
     },
   },
+  read_proofread_changes: { get action() { return translate("agent:tools.read_proofread_changes.action"); }, get running() { return translate("agent:tools.read_proofread_changes.running"); }, verb: '', icon: 'search', summary: (a) => str(a?.task_id) },
+  revert_proofread_changes: { get action() { return translate("agent:tools.revert_proofread_changes.action"); }, get running() { return translate("agent:tools.revert_proofread_changes.running"); }, verb: '', icon: 'repeat', summary: (a) => [str(a?.change_id), str(a?.indexes)].filter(Boolean).join(' · ') },
   ask_user: {
     get action() { return translate("agent:tools.ask_user.action"); },
     get running() { return translate("agent:tools.ask_user.running"); },

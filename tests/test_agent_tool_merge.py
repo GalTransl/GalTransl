@@ -8,6 +8,7 @@
 """
 
 import unittest
+import threading
 import urllib.parse
 from types import SimpleNamespace
 
@@ -25,6 +26,7 @@ class _CacheRunner:
 
     def __init__(self, files):
         self.state = SimpleNamespace(config_file_name="config.yaml", project_dir="/fake/project")
+        self.stop_event = threading.Event()
         self.files = files
         self.searches: list[dict] = []
 

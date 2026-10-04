@@ -151,7 +151,13 @@
     "label_label_textVariant2": "Turn limit reached",
     "subagentList_message_count_one": "{{running}}/{{count}} running",
     "subagentList_message_countDoneComplete_one": "{{count}} done",
-    "short_short_entry_one": "Wrote {{count}} proofreading comment"
+    "short_short_entry_one": "Wrote {{count}} proofreading comment",
+    "modifiedCount": "{{count}} edited",
+    "unverifiedCount": "{{count}} unverified",
+    "failedFileCount": "{{count}} files failed",
+    "appliedChanges": "{{count}} entries updated",
+    "verificationUnknown": "Checks unverified",
+    "needsReviewCount": "{{count}} need review"
   },
   "toolRow": {
     "label_label_approve": "Awaiting approval",
@@ -443,6 +449,14 @@
     "read_history_archive": {
       "action": "Look back through the archive",
       "running": "Looking back through the archive"
+    },
+    "read_proofread_changes": {
+      "action": "Read proofreading changes",
+      "running": "Read proofreading changes"
+    },
+    "revert_proofread_changes": {
+      "action": "Revert proofreading changes",
+      "running": "Revert proofreading changes"
     }
   }
 }
