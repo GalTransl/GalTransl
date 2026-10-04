@@ -1,3 +1,4 @@
+import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../../i18n";
 import { useEffect, useMemo, useState } from 'react';
 import { Panel } from '../../components/Panel';
 import { fetchProblemTypes, type ProblemTypeInfo } from '../../lib/api';
@@ -39,8 +40,9 @@ function resolveThreshold(config: Record<string, unknown> | null): number {
 }
 
 export function ProblemAnalyzeSection({ config, onProblemListChange, onThresholdChange, onDirty }: ProblemAnalyzeSectionProps) {
+  const uiLanguage = useUiLanguage();
   const [problemTypes, setProblemTypes] = useState<ProblemTypeInfo[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useMessageState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,7 +69,7 @@ export function ProblemAnalyzeSection({ config, onProblemListChange, onThreshold
   // 本地输入态：保留用户输入的原始字符串（含空串 / 非整数等中间态），
   // 以便对阈值类型做实时检测与提示，而不是直接吞掉非法输入。
   const [thresholdInput, setThresholdInput] = useState<string>(String(threshold));
-  const [thresholdError, setThresholdError] = useState<string | null>(null);
+  const [thresholdError, setThresholdError] = useMessageState<string | null>(null);
 
   // 依赖必须是 config 而非 threshold：阈值数值未变时（如两个项目都默认 17）
   // 依赖 threshold 会让上一项目的错误输入与提示残留到新项目。
@@ -80,12 +82,12 @@ export function ProblemAnalyzeSection({ config, onProblemListChange, onThreshold
     setThresholdInput(raw);
     const trimmed = raw.trim();
     if (trimmed === '') {
-      setThresholdError('阈值不能为空，请输入大于 0 的整数');
+      setThresholdError(uiMessage("config:problemAnalyzeSection.validateAndCommitThreshold_setThresholdError_thresholdRequiredEnter0"));
       return;
     }
     const v = Number(trimmed);
     if (!Number.isInteger(v) || v <= 0) {
-      setThresholdError('阈值类型无效：请输入大于 0 的整数');
+      setThresholdError(uiMessage("config:problemAnalyzeSection.validateAndCommitThreshold_setThresholdError_thresholdInvalidEnter0"));
       return;
     }
     setThresholdError(null);
@@ -135,41 +137,33 @@ export function ProblemAnalyzeSection({ config, onProblemListChange, onThreshold
 
   return (
     <Panel
-      title="问题分析"
-      description="选择启用的翻译质量问题检测项。翻译过程中命中的问题会写入缓存并展示在「浏览文本」页。"
+      title={translate("config:problemAnalyzeSection.problemAnalyzeSection_title_problem")}
+      description={translate("config:problemAnalyzeSection.problemAnalyzeSection_description_selectEnableTranslationProblemDetectItemTranslation")}
     >
       <div className="problem-analyze-section">
         {loadError && (
-          <div className="problem-analyze-section__error">
-            加载后端支持的问题项失败：{loadError}
-          </div>
+          <div className="problem-analyze-section__error">{translate("config:problemAnalyzeSection.problemAnalyzeSection_message_loadBackendProblemItemFailed", { loadError: loadError })}</div>
         )}
 
         {problemTypes === null && !loadError ? (
-          <div className="problem-analyze-section__loading">正在加载后端支持的问题项…</div>
+          <div className="problem-analyze-section__loading">{translate("config:problemAnalyzeSection.problemAnalyzeSection_message_pendingLoadBackendProblemItem")}</div>
         ) : (
           <>
             <div className="problem-analyze-section__toolbar">
-              <span className="problem-analyze-section__count">
-                已启用 {selectedSet.size} / {(problemTypes?.length ?? 0) + extras.length}
-              </span>
+              <span className="problem-analyze-section__count">{translate("config:problemAnalyzeSection.problemAnalyzeSectionToolbar_message_doneEnable", { count: selectedSet.size, value: (problemTypes?.length ?? 0) + extras.length })}</span>
               <div className="problem-analyze-section__toolbar-actions">
                 <button
                   type="button"
                   className="problem-analyze-section__btn"
                   onClick={selectAll}
                   disabled={!problemTypes || problemTypes.length === 0}
-                >
-                  全选
-                </button>
+                >{translate("common:actions.selectAll")}</button>
                 <button
                   type="button"
                   className="problem-analyze-section__btn"
                   onClick={clearAll}
                   disabled={selectedSet.size === 0}
-                >
-                  清空
-                </button>
+                >{translate("common:actions.clearAll")}</button>
               </div>
             </div>
 
@@ -213,9 +207,7 @@ export function ProblemAnalyzeSection({ config, onProblemListChange, onThreshold
                     />
                     <span className="problem-analyze-section__item-body">
                       <span className="problem-analyze-section__name">{name}</span>
-                      <span className="problem-analyze-section__desc problem-analyze-section__desc--warn">
-                        当前后端未声明此问题项，取消勾选将从配置中移除。
-                      </span>
+                      <span className="problem-analyze-section__desc problem-analyze-section__desc--warn">{translate("config:problemAnalyzeSection.problemAnalyzeSectionItemBody_message_currentBackendNotProblemItemCancelConfig")}</span>
                     </span>
                   </label>
                 </li>
@@ -224,7 +216,7 @@ export function ProblemAnalyzeSection({ config, onProblemListChange, onThreshold
 
             <div className="problem-analyze-section__threshold">
               <label className="problem-analyze-section__threshold-label">
-                <span>长句判定阈值（avgSentenceLengthThreshold）</span>
+                <span>{translate("config:problemAnalyzeSection.problemAnalyzeSectionThresholdLabel_message_sentenceThresholdAvgSentenceLengthThreshold")}</span>
                 <input
                   type="number"
                   className={`problem-analyze-section__threshold-input${thresholdError ? ' problem-analyze-section__threshold-input--error' : ''}`}
@@ -235,9 +227,7 @@ export function ProblemAnalyzeSection({ config, onProblemListChange, onThreshold
                   onBlur={(e) => validateAndCommitThreshold(e.target.value)}
                 />
               </label>
-              <span className="problem-analyze-section__threshold-desc">
-                译文平均分句长度超过此值时标记为"单句过长"。默认 17，建议范围 15~25。
-              </span>
+              <span className="problem-analyze-section__threshold-desc">{translate("config:problemAnalyzeSection.problemAnalyzeSectionThreshold_message_translationTextSentenceMarkSentenceDefault17Range")}</span>
               {thresholdError && (
                 <span className="problem-analyze-section__threshold-error">
                   {thresholdError}

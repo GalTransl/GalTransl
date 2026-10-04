@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../../../i18n";
 import { useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import type { ActivityItem } from '../timeline';
@@ -32,6 +33,7 @@ export function AskUserCard({
   error: string | null;
   onSubmit: (answers: Array<string[] | null>) => void;
 }) {
+  useUiLanguage();
   const argQuestions = asArgs(item.arguments)?.questions;
   const questions: AskQuestion[] = (Array.isArray(argQuestions) ? argQuestions : [])
     .filter((q): q is Record<string, unknown> => Boolean(q) && typeof q === 'object' && !Array.isArray(q))
@@ -97,24 +99,20 @@ export function AskUserCard({
   };
 
   return (
-    <div className="agent-ask" role="form" aria-label="Agent 提问">
+    <div className="agent-ask" role="form" aria-label={translate("agent:askUserCard.agentAsk_ariaLabel_agent")}>
       <div className="agent-ask__head">
         <span className="agent-ask__icon" aria-hidden><Icon name="help" /></span>
-        <span className="agent-ask__title">Agent 想先问你</span>
+        <span className="agent-ask__title">{translate("agent:askUserCard.agentAskHead_message_agent")}</span>
         {questions.length > 1 ? (
-          <span className="agent-ask__progress">
-            第 {index + 1} / {questions.length} 题
-          </span>
+          <span className="agent-ask__progress">{translate("agent:askUserCard.agentAskHead_message_text", { value: index + 1, count: questions.length })}</span>
         ) : null}
         <button
           type="button"
           className="agent-ask__decline"
           onClick={() => onSubmit(questions.map(() => null))}
           disabled={submitting}
-          title="全部跳过，让 Agent 按自己的判断继续"
-        >
-          全部跳过
-        </button>
+          title={translate("agent:askUserCard.agentAskDecline_title_allAgent")}
+        >{translate("agent:askUserCard.agentAskHead_message_all")}</button>
       </div>
 
       {questions.length > 1 ? (
@@ -128,8 +126,8 @@ export function AskUserCard({
                 type="button"
                 className={`agent-ask__dot ${state}${i === index ? ' is-current' : ''}`}
                 onClick={() => setIndex(i)}
-                title={`第 ${i + 1} 题：${q.question}`}
-                aria-label={`第 ${i + 1} 题`}
+                title={translate("agent:askUserCard.agentAskDots_title_text", { value: i + 1, question: q.question })}
+                aria-label={translate("agent:askUserCard.agentAskDots_ariaLabel_text", { value: i + 1 })}
               />
             );
           })}
@@ -154,9 +152,7 @@ export function AskUserCard({
               <span className="agent-ask__mark" aria-hidden>{selected ? <Icon name="check" /> : null}</span>
               <span>{option}</span>
               {option === current.recommended ? (
-                <span className="agent-ask__tag" title="Agent 推荐这一项（零打断档位会直接选它）">
-                  推荐
-                </span>
+                <span className="agent-ask__tag" title={translate("agent:askUserCard.agentAskTag_title_agentItem")}>{translate("agent:askUserCard.agentAskOptions_message_text")}</span>
               ) : null}
             </button>
           );
@@ -170,8 +166,8 @@ export function AskUserCard({
               className="agent-ask__option-input"
               autoFocus
               value={draft.text}
-              placeholder="自己填…"
-              aria-label="自己填"
+              placeholder={translate("agent:askUserCard.agentAskOptionAgentAskOptionEditingIsSelected_placeholder_text")}
+              aria-label={translate("agent:askUserCard.agentAskOptionAgentAskOptionEditingIsSelected_ariaLabel_text")}
               onChange={(e) => update({ text: e.target.value })}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.nativeEvent.isComposing && draft.text.trim()) {
@@ -205,7 +201,7 @@ export function AskUserCard({
             disabled={submitting}
           >
             <span className="agent-ask__mark" aria-hidden />
-            <span>自己填…</span>
+            <span>{translate("agent:askUserCard.agentAskOption_message_text")}</span>
           </button>
         )}
       </div>
@@ -213,18 +209,16 @@ export function AskUserCard({
       {error ? <div className="agent-ask__error">{error}</div> : null}
 
       <div className="agent-ask__foot">
-        <button type="button" className="agent-ask__btn" onClick={skipCurrent} disabled={submitting}>
-          跳过
-        </button>
+        <button type="button" className="agent-ask__btn" onClick={skipCurrent} disabled={submitting}>{translate("agent:askUserCard.agentAskFoot_message_text")}</button>
         <button
           type="button"
           className="agent-ask__btn is-primary"
           onClick={() => goNext(drafts)}
           disabled={submitting}
         >
-          {submitting ? '提交中…' : last ? '提交' : '下一题'}
+          {submitting ? translate("agent:askUserCard.agentAskBtnIsPrimary_message_submit") : last ? translate("agent:askUserCard.agentAskBtnIsPrimary_message_submitVariant2") : translate("agent:askUserCard.agentAskBtnIsPrimary_message_text")}
         </button>
-        <span className="agent-ask__note">Agent 正等着这条回答；不想答就跳过或点停止。</span>
+        <span className="agent-ask__note">{translate("agent:askUserCard.agentAskFoot_message_agentEntryAnswerStop")}</span>
       </div>
     </div>
   );

@@ -1,3 +1,5 @@
+import { getUiLanguage } from "../i18n/core";
+import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -187,12 +189,13 @@ type HomePageProps = {
 };
 
 export function HomePage({ onOpenProject }: HomePageProps) {
+  const uiLanguage = useUiLanguage();
   const navigate = useNavigate();
   const [historyLimit, setHistoryLimit] = useState(() => getHomeHistoryRetentionLimit());
   const [jobMemoryLimit, setJobMemoryLimit] = useState(() => getHomeJobRetentionLimit());
   const [history, setHistory] = useState<ProjectHistoryEntry[]>([]);
   const [jobs, setJobs] = useState<Job[]>(() => loadRememberedJobs(getHomeJobRetentionLimit()));
-  const [jobsError, setJobsError] = useState<string | null>(null);
+  const [jobsError, setJobsError] = useMessageState<string | null>(null);
   const [refreshingJobs, setRefreshingJobs] = useState(false);
   const [stoppingJobId, setStoppingJobId] = useState<string | null>(null);
   const [shouldLoadJobProgress, setShouldLoadJobProgress] = useState(false);
@@ -351,7 +354,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
         );
       }
     } catch (error) {
-      setJobsError(normalizeError(error, '读取全局任务列表失败'));
+      setJobsError(normalizeError(error, uiMessage("projects:homePage.refreshJobs_normalizeError_readJobFailed")));
     } finally {
       if (!silent) {
         const elapsedMs = Date.now() - startedAt;
@@ -385,8 +388,8 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     const selected = await open({
       multiple: false,
       filters: [
-        { name: '配置文件', extensions: ['yaml', 'yml', 'inc.yaml', 'inc.yml'] },
-        { name: '所有文件', extensions: ['*'] },
+        { name: translate('common:files.configFiles'), extensions: ['yaml', 'yml', 'inc.yaml', 'inc.yml'] },
+        { name: translate('common:files.allFiles'), extensions: ['*'] },
       ],
     });
     if (!selected) return;
@@ -440,7 +443,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
       );
       await refreshJobs(true);
     } catch (error) {
-      setJobsError(normalizeError(error, '停止任务失败'));
+      setJobsError(normalizeError(error, uiMessage("projects:homePage.handleStopJob_normalizeError_stopJobFailed")));
       void refreshJobs(true);
     } finally {
       setStoppingJobId(null);
@@ -489,27 +492,25 @@ export function HomePage({ onOpenProject }: HomePageProps) {
       <div className="home-hero">
         <div className="home-hero__brand">
           <div className="home-hero__text">
-            <span className="home-hero__eyebrow">Desktop Translation Console</span>
-            <h1 className="home-hero__title">GalTransl</h1>
-            <p className="home-hero__subtitle">Translate your favorite Galgame</p>
-            <p className="home-hero__description">基于AI大模型的galgame自动化翻译解决方案</p>
-            <div className="home-hero__chips" aria-label="首页信息">
-              <span className="home-hero__chip">版本 {coreVersion ? `v${coreVersion}` : '—'}</span>
+            <span className="home-hero__eyebrow">{translate("projects:homePage.homeHeroText_message_desktopTranslationConsole")}</span>
+            <h1 className="home-hero__title">{translate("projects:homePage.homeHeroText_message_galTransl")}</h1>
+            <p className="home-hero__subtitle">{translate("projects:homePage.homeHeroText_message_translateYourFavoriteGalgame")}</p>
+            <p className="home-hero__description">{translate("projects:homePage.homeHeroText_message_aIModelGalgameAutoTranslation")}</p>
+            <div className="home-hero__chips" aria-label={translate("projects:homePage.homeHeroChips_ariaLabel_text")}>
+              <span className="home-hero__chip">{translate("projects:homePage.homeHeroChip_span_version")}{coreVersion ? `v${coreVersion}` : '—'}</span>
               {updateAvailable && latestVersion ? (
                 <a
                   className="home-hero__chip home-hero__chip--update"
                   href={RELEASE_LATEST_URL}
                   target="_blank"
                   rel="noreferrer noopener"
-                >
-                  发现新版本 v{latestVersion}
-                </a>
+                >{translate("projects:homePage.homeHeroChips_message_versionV", { latestVersion: latestVersion })}</a>
               ) : null}
               <a className="home-hero__chip home-hero__chip--link" href={PROJECT_HOMEPAGE} target="_blank" rel="noreferrer noopener">
-                项目主页
+                {translate("projects:homePage.homeHeroChips_message_project")}
               </a>
               <a className="home-hero__chip home-hero__chip--link" href={RELEASE_LIST_URL} target="_blank" rel="noreferrer noopener">
-                更新日志
+                {translate("projects:homePage.changelog")}
               </a>
             </div>
           </div>
@@ -518,24 +519,24 @@ export function HomePage({ onOpenProject }: HomePageProps) {
         <div className="home-hero__stats">
           <div className="home-hero__stat">
             <span className="home-hero__stat-value">{history.length}</span>
-            <span className="home-hero__stat-label">历史项目</span>
+            <span className="home-hero__stat-label">{translate("projects:homePage.homeHeroStat_message_project")}</span>
           </div>
           <div className="home-hero__stat-divider" />
           <div className="home-hero__stat">
             <span className="home-hero__stat-value home-hero__stat-value--active">{activeJobsCount}</span>
-            <span className="home-hero__stat-label">活跃任务</span>
+            <span className="home-hero__stat-label">{translate("projects:homePage.homeHeroStat_message_job")}</span>
           </div>
           <div className="home-hero__stat-divider" />
           <div className="home-hero__stat">
             <span className="home-hero__stat-value">{completedJobsCount}</span>
-            <span className="home-hero__stat-label">已完成</span>
+            <span className="home-hero__stat-label">{translate("projects:homePage.homeHeroStat_message_doneComplete")}</span>
           </div>
           <div className="home-hero__stat-divider" />
           <div className="home-hero__stat">
             <span className={`home-hero__stat-value${failedJobsCount > 0 ? ' home-hero__stat-value--danger' : ''}`}>
               {failedJobsCount}
             </span>
-            <span className="home-hero__stat-label">失败</span>
+            <span className="home-hero__stat-label">{translate("common:actions.failed")}</span>
           </div>
         </div>
 
@@ -556,17 +557,13 @@ export function HomePage({ onOpenProject }: HomePageProps) {
         {/* Left: Open Project */}
         <section className="home-open">
           <div className="home-open__header">
-            <h2>打开项目</h2>
-            <p>打开已有项目的 config.yaml，或用向导新建项目</p>
+            <h2>{translate("projects:homePage.homeOpenHeader_message_openProject")}</h2>
+            <p>{translate("projects:homePage.homeOpenHeader_message_openDoneProjectConfigYamlNewProject")}</p>
           </div>
           <div className="home-open__form">
             <div className="home-open__actions">
-              <Button type="button" className="home-open__action-btn" onClick={() => void handleOpenProject()}>
-                打开项目
-              </Button>
-              <Button type="button" className="home-open__action-btn" variant="secondary" onClick={() => navigate('/new-project')}>
-                新建项目
-              </Button>
+              <Button type="button" className="home-open__action-btn" onClick={() => void handleOpenProject()}>{translate("projects:homePage.homeOpenActions_message_openProject")}</Button>
+              <Button type="button" className="home-open__action-btn" variant="secondary" onClick={() => navigate('/new-project')}>{translate("projects:homePage.homeOpenActions_message_newProject")}</Button>
             </div>
           </div>
         </section>
@@ -575,15 +572,15 @@ export function HomePage({ onOpenProject }: HomePageProps) {
         <section className="home-history">
           <div className="home-history__header">
             <div>
-              <h2>历史项目</h2>
-              <p>最近打开的项目</p>
+              <h2>{translate("projects:homePage.homeHistoryHeader_message_project")}</h2>
+              <p>{translate("projects:homePage.homeHistoryHeader_message_openProject")}</p>
             </div>
             <span className="home-history__count">{history.length}</span>
           </div>
           {history.length === 0 ? (
             <div className="home-history__empty">
-              <span>暂无历史</span>
-              <span>打开项目后自动出现在这里</span>
+              <span>{translate("projects:homePage.homeHistoryEmpty_message_empty")}</span>
+              <span>{translate("projects:homePage.homeHistoryEmpty_message_openProjectAuto")}</span>
             </div>
           ) : (
             <div className="home-history__list">
@@ -615,7 +612,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
                     type="button"
                     className="home-history__item-remove"
                     onClick={(e) => handleRemoveHistory(entry.projectDir, e)}
-                    title="从历史中移除"
+                    title={translate("projects:homePage.homeHistoryItemRemove_title_remove")}
                   >
                     <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
                       <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -631,27 +628,27 @@ export function HomePage({ onOpenProject }: HomePageProps) {
         <section className="home-jobs">
           <div className="home-jobs__header">
             <div>
-              <h2>翻译任务</h2>
-              <p>进度与状态汇总</p>
+              <h2>{translate("projects:homePage.homeJobsHeader_message_translationJob")}</h2>
+              <p>{translate("projects:homePage.homeJobsHeader_message_progressStatus")}</p>
             </div>
             <button
               type="button"
               className="icon-btn icon-btn--clear"
               disabled={jobs.every((job) => job.status === 'running' || job.status === 'pending')}
               onClick={handleClearFinishedJobs}
-              title="清空已完成/失败的任务"
-              aria-label="清空已完成/失败的任务"
+              title={translate("projects:homePage.iconBtnIconBtnClear_title_clearDoneCompleteFailedJob")}
+              aria-label={translate("projects:homePage.iconBtnIconBtnClear_ariaLabel_clearDoneCompleteFailedJob")}
             >
               <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
                 <path d="M2 4h12M5 4V2.5a.5.5 0 01.5-.5h5a.5.5 0 01.5.5V4M6 7v5M10 7v5M3 4l.8 9.1A1 1 0 004.8 14h6.4a1 1 0 001-.9L13 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
           </div>
-          {jobsError ? <InlineFeedback tone="error" title="加载失败" description={jobsError} /> : null}
+          {jobsError ? <InlineFeedback tone="error" title={translate("projects:homePage.homeJobs_title_loadFailed")} description={jobsError} /> : null}
           {jobs.length === 0 ? (
             <div className="home-jobs__empty">
-              <span>还没有翻译任务</span>
-              <span>启动翻译后，任务会汇总在这里</span>
+              <span>{translate("projects:homePage.homeJobsEmpty_message_emptyTranslationJob")}</span>
+              <span>{translate("projects:homePage.homeJobsEmpty_message_translationJob")}</span>
             </div>
           ) : (
             <div className="home-jobs__list">
@@ -687,10 +684,10 @@ export function HomePage({ onOpenProject }: HomePageProps) {
                               className={`home-job-row__stop-btn${isStoppingThisJob ? ' is-stopping' : ''}`}
                               onClick={(event) => void handleStopJob(job, event)}
                               disabled={Boolean(stoppingJobId) && !isStoppingThisJob}
-                              aria-label={isStoppingThisJob ? '正在停止任务' : `停止任务 ${projectName(job.project_dir)}`}
-                              title={isStoppingThisJob ? '正在停止任务' : '停止任务'}
+                              aria-label={isStoppingThisJob ? translate("projects:homePage.homeJobRowActions_ariaLabel_pendingStopJob") : translate("projects:homePage.homeJobRowActions_ariaLabel_stopJob", { value: projectName(job.project_dir) })}
+                              title={isStoppingThisJob ? translate("projects:homePage.homeJobRowActions_title_pendingStopJob") : translate("projects:homePage.homeJobRowActions_title_stopJob")}
                             >
-                              {isStoppingThisJob ? '停止中…' : '停止'}
+                              {isStoppingThisJob ? translate("projects:homePage.homeJobRowActions_message_stop") : translate("common:actions.stop")}
                             </button>
                           </div>
                         ) : (
@@ -739,7 +736,7 @@ function projectName(projectDir: string): string {
 function formatDate(isoString: string): string {
   try {
     const date = new Date(isoString);
-    return date.toLocaleDateString('zh-CN', {
+    return date.toLocaleDateString(getUiLanguage(), {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',

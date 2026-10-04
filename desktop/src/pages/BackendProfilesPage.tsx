@@ -1,3 +1,4 @@
+import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BackendConfigEditor } from '../components/BackendConfigEditor';
 import { Button } from '../components/Button';
@@ -58,9 +59,10 @@ function ProfileCardAction({
 
 
 export function BackendProfilesPage() {
+  useUiLanguage();
   const [profiles, setProfiles] = useState<ProfileEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useMessageState<string | null>(null);
   const [defaultProfile, setDefaultProfileState] = useState(getDefaultBackendProfile());
   const [agentDefaultProfile, setAgentDefaultState] = useState(getAgentDefaultBackendProfile());
 
@@ -79,7 +81,7 @@ export function BackendProfilesPage() {
   // 行内改名状态（鼠标悬停名字旁的铅笔图标进入）
   const [renamingName, setRenamingName] = useState('');
   const [renameDraft, setRenameDraft] = useState('');
-  const [renameError, setRenameError] = useState('');
+  const [renameError, setRenameError] = useMessageState<string>('');
   const renameInputRef = useRef<HTMLInputElement | null>(null);
 
   // silent：改名/复制后就地刷新，不进 loading 态把整张列表卸载掉
@@ -98,7 +100,7 @@ export function BackendProfilesPage() {
       setDefaultProfileState(getDefaultBackendProfile());
       setAgentDefaultState(getAgentDefaultBackendProfile());
     } catch (err) {
-      setError(normalizeError(err, '加载后端配置失败'));
+      setError(normalizeError(err, uiMessage("settings:backendProfilesPage.loadProfiles_normalizeError_loadBackendConfigFailed")));
     } finally {
       setLoading(false);
     }
@@ -136,11 +138,11 @@ export function BackendProfilesPage() {
   const handleCreate = useCallback(async () => {
     const name = newProfileName.trim();
     if (!name) {
-      setError('配置名称不能为空');
+      setError(uiMessage("settings:backendProfilesPage.handleCreate_setError_configNameRequired"));
       return;
     }
     if (profiles.some((p) => p.name === name)) {
-      setError(`配置「${name}」已存在`);
+      setError(uiMessage("settings:backendProfilesPage.handleCreate_setError_configDone", { name: name }));
       return;
     }
     setCreating(true);
@@ -167,7 +169,7 @@ export function BackendProfilesPage() {
       setEditingConfig(newConfig);
       setIsEditing(true);
     } catch (err) {
-      setError(normalizeError(err, '创建配置失败'));
+      setError(normalizeError(err, uiMessage("settings:backendProfilesPage.handleCreate_normalizeError_createConfigFailed")));
     } finally {
       setCreating(false);
     }
@@ -192,7 +194,7 @@ export function BackendProfilesPage() {
   const handleSave = useCallback(async () => {
     const name = editingName.trim();
     if (!name) {
-      setError('配置名称不能为空');
+      setError(uiMessage("settings:backendProfilesPage.handleSave_setError_configNameRequired"));
       return;
     }
     setSaving(true);
@@ -204,7 +206,7 @@ export function BackendProfilesPage() {
       setIsEditing(false);
       void loadProfiles();
     } catch (err) {
-      setError(normalizeError(err, '保存配置失败'));
+      setError(normalizeError(err, uiMessage("settings:backendProfilesPage.handleSave_normalizeError_saveConfigFailed")));
     } finally {
       setSaving(false);
     }
@@ -230,7 +232,7 @@ export function BackendProfilesPage() {
   }, [renamingName]);
 
   const handleDelete = useCallback(async (name: string) => {
-    if (!confirm(`确定要删除配置「${name}」吗？`)) return;
+    if (!confirm(translate("settings:backendProfilesPage.handleDelete_confirm_deleteConfig", { name: name }))) return;
     try {
       await deleteBackendProfile(name);
       // If we're editing this profile, close the editor
@@ -242,7 +244,7 @@ export function BackendProfilesPage() {
       }
       void loadProfiles();
     } catch (err) {
-      setError(normalizeError(err, '删除配置失败'));
+      setError(normalizeError(err, uiMessage("settings:backendProfilesPage.handleDelete_normalizeError_deleteConfigFailed")));
     }
   }, [editingName, handleCancel, loadProfiles, renamingName, cancelRename]);
 
@@ -250,7 +252,7 @@ export function BackendProfilesPage() {
     const from = renamingName;
     const to = renameDraft.trim();
     if (!to) {
-      setRenameError('配置名称不能为空');
+      setRenameError(uiMessage("settings:backendProfilesPage.handleSave_setError_configNameRequired"));
       return;
     }
     if (to === from) {
@@ -258,7 +260,7 @@ export function BackendProfilesPage() {
       return;
     }
     if (profiles.some((p) => p.name === to)) {
-      setRenameError(`配置「${to}」已存在`);
+      setRenameError(uiMessage("settings:backendProfilesPage.handleCreate_setError_configDone", { name: to }));
       return;
     }
     try {
@@ -268,7 +270,7 @@ export function BackendProfilesPage() {
       cancelRename();
       await loadProfiles({ silent: true });
     } catch (err) {
-      setRenameError(normalizeError(err, '重命名失败'));
+      setRenameError(normalizeError(err, uiMessage("settings:backendProfilesPage.renameFailed")));
     }
   }, [renamingName, renameDraft, profiles, cancelRename, loadProfiles]);
 
@@ -279,7 +281,7 @@ export function BackendProfilesPage() {
       await loadProfiles({ silent: true });
       startRename(copyName);
     } catch (err) {
-      setError(normalizeError(err, '复制配置失败'));
+      setError(normalizeError(err, uiMessage("settings:backendProfilesPage.copyFailed")));
     }
   }, [loadProfiles, startRename]);
 
@@ -287,12 +289,12 @@ export function BackendProfilesPage() {
     <div className="backend-profiles-page">
       <PageHeader
         className="backend-profiles-page__header"
-        title={<><Icon name="bot" /> 模型设置</>}
-        description="管理全局翻译后端配置，可在项目中直接选用，避免每个项目都重复配置。"
+        title={<><Icon name="bot" />{translate("settings:backendProfilesPage.backendProfilesPage_title_modelSettings")}</>}
+        description={translate("settings:backendProfilesPage.backendProfilesPage_description_translationBackendConfigProjectCountProjectConfig")}
         status={
           <>
-            {error && <InlineFeedback tone="error" title="操作失败" description={error} />}
-            {saveSuccess && <InlineFeedback className="inline-alert--floating" tone="success" title="配置已保存" description="新的后端配置已写入，可在项目中直接选用。" onDismiss={() => setSaveSuccess(false)} />}
+            {error && <InlineFeedback tone="error" title={translate("settings:backendProfilesPage.backendProfilesPage_title_failed")} description={error} />}
+            {saveSuccess && <InlineFeedback className="inline-alert--floating" tone="success" title={translate("settings:backendProfilesPage.backendProfilesPage_title_configDoneSave")} description={translate("settings:backendProfilesPage.backendProfilesPage_description_backendConfigDoneProject")} onDismiss={() => setSaveSuccess(false)} />}
           </>
         }
       />
@@ -300,17 +302,15 @@ export function BackendProfilesPage() {
       <div className="backend-profiles-page__content">
         <Panel
           className="backend-profiles-page__list-panel"
-          title="配置列表"
-          description="已创建的全局翻译后端配置。"
+          title={translate("settings:backendProfilesPage.backendProfilesPageListPanel_title_config")}
+          description={translate("settings:backendProfilesPage.backendProfilesPageListPanel_description_doneCreateTranslationBackendConfig")}
           actions={(
-            <Button onClick={openNewDialog}>
-              + 新建配置
-            </Button>
+            <Button onClick={openNewDialog}>{translate("settings:backendProfilesPage.backendProfilesPageListPanel_actions_newConfig")}</Button>
           )}
         >
           <div className="default-selectors">
             <label className="field">
-              <span>翻译器默认</span>
+              <span>{translate("settings:backendProfilesPage.field_message_translationDefault")}</span>
               <CustomSelect
                 className="default-select"
                 value={defaultProfile}
@@ -328,7 +328,7 @@ export function BackendProfilesPage() {
             </label>
 
             <label className="field">
-              <span>Agent 默认</span>
+              <span>{translate("settings:backendProfilesPage.field_message_agentDefault")}</span>
               <CustomSelect
                 className="default-select"
                 value={agentDefaultProfile}
@@ -349,12 +349,12 @@ export function BackendProfilesPage() {
 
           <div className="backend-profiles-page__list-scroll">
             {loading ? (
-              <LoadingState title="加载配置列表中…" description="正在读取全局翻译后端配置。" />
+              <LoadingState title={translate("settings:backendProfilesPage.backendProfilesPageListScroll_title_loadConfig")} description={translate("settings:backendProfilesPage.backendProfilesPageListScroll_description_pendingReadTranslationBackendConfig")} />
             ) : profiles.length === 0 ? (
               <EmptyState
-                title="暂无配置"
-                description="翻译前需要至少一个模型配置：新建后填写 API 地址、API Key 和模型名即可。第一个配置会自动设为默认。"
-                action={<Button onClick={openNewDialog}><Icon name="file-plus" /> 新建第一个配置</Button>}
+                title={translate("settings:backendProfilesPage.backendProfilesPageListScroll_title_emptyConfig")}
+                description={translate("settings:backendProfilesPage.backendProfilesPageListScroll_description_translationCountModelConfigNewAPIAddress")}
+                action={<Button onClick={openNewDialog}><Icon name="file-plus" />{translate("settings:backendProfilesPage.backendProfilesPageListScroll_button_newCountConfig")}</Button>}
               />
             ) : (
               <div className="profile-list">
@@ -381,8 +381,8 @@ export function BackendProfilesPage() {
                                 else if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
                               }}
                               onBlur={cancelRename}
-                              aria-label={`重命名配置 ${entry.name}`}
-                              placeholder="配置名称"
+                              aria-label={translate("settings:backendProfilesPage.renameConfigName", { name: entry.name })}
+                              placeholder={translate("settings:backendProfilesPage.field_message_configName")}
                               autoFocus
                             />
                           ) : (
@@ -398,7 +398,7 @@ export function BackendProfilesPage() {
                                   {' / '}{modelNames[0]}
                                   {modelNames.length > 1 && (
                                     <span className="profile-card__name-model-more">
-                                      {' 等 '}{modelNames.length}{' 个模型'}
+                                      {translate("settings:backendProfilesPage.modelCount", { count: modelNames.length })}
                                     </span>
                                   )}
                                 </span>
@@ -406,18 +406,18 @@ export function BackendProfilesPage() {
                             </span>
                           )}
                           {defaultProfile === entry.name && (
-                            <span className="profile-card__badge">翻译器默认</span>
+                            <span className="profile-card__badge">{translate("settings:backendProfilesPage.profileCardName_message_translationDefault")}</span>
                           )}
                           {agentDefaultProfile === entry.name && (
-                            <span className="profile-card__badge profile-card__badge--agent">Agent 默认</span>
+                            <span className="profile-card__badge profile-card__badge--agent">{translate("settings:backendProfilesPage.profileCardName_message_agentDefault")}</span>
                           )}
                           {/* 铅笔排在默认 pill 之后：之前插在名字右边会把两个 pill 顶开 */}
                           {renamingName !== entry.name && (
                             <button
                               type="button"
                               className="profile-card__rename-btn"
-                              title="重命名配置"
-                              aria-label={`重命名配置 ${entry.name}`}
+                              title={translate("settings:backendProfilesPage.renameConfig")}
+                              aria-label={translate("settings:backendProfilesPage.renameConfigName", { name: entry.name })}
                               onClick={() => startRename(entry.name)}
                             >
                               <Icon name="pencil" />
@@ -427,22 +427,22 @@ export function BackendProfilesPage() {
                         {renamingName === entry.name && renameError && (
                           <div className="profile-card__rename-error">{renameError}</div>
                         )}
-                        <div className="profile-card__meta">Base URL：{baseUrl}</div>
+                        <div className="profile-card__meta">{translate("settings:backendProfilesPage.profileCardInfo_message_baseURL", { baseUrl: baseUrl })}</div>
                       </div>
                       <div className="profile-card__actions">
                         <ProfileCardAction
                           icon="copy"
-                          label="复制"
+                          label={translate("settings:backendProfilesPage.copyConfig")}
                           onClick={() => void handleCopy(entry.name)}
                         />
                         <ProfileCardAction
                           icon="pencil"
-                          label="编辑"
+                          label={translate("common:actions.edit")}
                           onClick={() => handleEdit(entry)}
                         />
                         <ProfileCardAction
                           icon="trash"
-                          label="删除"
+                          label={translate("common:actions.delete")}
                           tone="danger"
                           onClick={() => void handleDelete(entry.name)}
                         />
@@ -472,12 +472,8 @@ export function BackendProfilesPage() {
               <h3
                 id="edit-profile-dialog-title"
                 className="backend-profiles-page__dialog-title"
-              >
-                编辑配置 - {editingName}
-              </h3>
-              <p className="backend-profiles-page__dialog-subtitle">
-                配置翻译后端参数，与项目配置中的翻译后端设置一致。
-              </p>
+              >{translate("settings:backendProfilesPage.backendProfilesPageDialogHeader_message_editConfig", { editingName: editingName })}</h3>
+              <p className="backend-profiles-page__dialog-subtitle">{translate("settings:backendProfilesPage.backendProfilesPageDialogHeader_message_configTranslationBackendProjectConfigTranslationBackend")}</p>
             </header>
 
             <div className="backend-profiles-page__dialog-body">
@@ -499,14 +495,12 @@ export function BackendProfilesPage() {
             </div>
 
             <div className="form-actions">
-              <Button variant="secondary" onClick={handleCancel} disabled={saving}>
-                取消
-              </Button>
+              <Button variant="secondary" onClick={handleCancel} disabled={saving}>{translate("common:actions.cancel")}</Button>
               <Button
                 onClick={() => void handleSave()}
                 disabled={saving || !editingName.trim()}
               >
-                {saving ? '保存中…' : '保存配置'}
+                {saving ? translate("common:actions.saving") : translate("settings:backendProfilesPage.formActions_message_saveConfig")}
               </Button>
             </div>
           </div>
@@ -528,11 +522,9 @@ export function BackendProfilesPage() {
             <h3
               id="new-profile-dialog-title"
               className="backend-profiles-page__dialog-title"
-            >
-              新建后端配置
-            </h3>
+            >{translate("settings:backendProfilesPage.backendProfilesPageDialog_message_newBackendConfig")}</h3>
             <label className="field">
-              <span>配置名称</span>
+              <span>{translate("settings:backendProfilesPage.field_message_configName")}</span>
               <input
                 type="text"
                 value={newProfileName}
@@ -541,11 +533,11 @@ export function BackendProfilesPage() {
                   if (e.key === 'Enter') { e.preventDefault(); void handleCreate(); }
                   else if (e.key === 'Escape') { e.preventDefault(); closeNewDialog(); }
                 }}
-                placeholder="例如：gpt5"
+                placeholder={translate("settings:backendProfilesPage.field_placeholder_gpt5")}
                 autoFocus
                 disabled={creating}
               />
-              <span className="field__hint">配置名称可在列表中点击名称旁的铅笔图标修改。</span>
+              <span className="field__hint">{translate("settings:backendProfilesPage.field_message_configNameCreateChangeEdit")}</span>
             </label>
             {error && <InlineFeedback tone="error" description={error} />}
             <div className="form-actions">
@@ -553,11 +545,9 @@ export function BackendProfilesPage() {
                 onClick={() => void handleCreate()}
                 disabled={creating || !newProfileName.trim()}
               >
-                {creating ? '创建中…' : '创建'}
+                {creating ? translate("settings:backendProfilesPage.formActions_message_create") : translate("settings:backendProfilesPage.formActions_message_createVariant2")}
               </Button>
-              <Button variant="secondary" onClick={closeNewDialog} disabled={creating}>
-                取消
-              </Button>
+              <Button variant="secondary" onClick={closeNewDialog} disabled={creating}>{translate("common:actions.cancel")}</Button>
             </div>
           </div>
         </div>

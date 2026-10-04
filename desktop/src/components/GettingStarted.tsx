@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../i18n";
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -47,6 +48,7 @@ export function GettingStarted({
   hasGeneratedDict,
   onOpenLatestProject,
   onOpenProjectDictionary }: GettingStartedProps) {
+  useUiLanguage();
   const navigate = useNavigate();
   const [dismissed, setDismissed] = useState(() => readFlag(DISMISSED_KEY));
   const [hasProfile, setHasProfile] = useState(() => getBackendProfileNames().length > 0);
@@ -85,22 +87,22 @@ export function GettingStarted({
   const modelReady = hasProfile && hasDefault;
   const steps = [
     {
-      title: '配置翻译模型',
+      title: translate("common:gettingStarted.title_title_configTranslationModel"),
       description: hasProfile && !hasDefault
-        ? '已有模型配置，但还没有设为全局默认，新项目会找不到后端。'
-        : '在「模型设置」中新建配置，填写 API 地址、密钥与模型名，并设为全局默认。',
+        ? translate("common:gettingStarted.description_message_doneModelConfigEmptyDefaultProjectBackend")
+        : translate("common:gettingStarted.description_message_modelSettingsNewConfigAPIAddressModel"),
       done: modelReady,
-      action: <Button variant={modelReady ? 'secondary' : 'primary'} onClick={() => navigate('/backend-profiles')}>{hasProfile ? '去设置默认' : '去配置'}</Button>,
+      action: <Button variant={modelReady ? 'secondary' : 'primary'} onClick={() => navigate('/backend-profiles')}>{hasProfile ? translate("common:gettingStarted.action_message_settingsDefault") : translate("common:gettingStarted.action_message_config")}</Button>,
     },
     {
-      title: '新建翻译项目',
-      description: '跟随向导选择项目位置，导入从游戏中提取出的脚本文件（json 等），并选择翻译规范。',
+      title: translate("common:gettingStarted.title_title_newTranslationProject"),
+      description: translate("common:gettingStarted.description_description_selectProjectImportExtractFileJsonSelect"),
       done: hasProject,
-      action: <Button variant={hasProject || !modelReady ? 'secondary' : 'primary'} onClick={() => navigate('/new-project')}>新建项目</Button>,
+      action: <Button variant={hasProject || !modelReady ? 'secondary' : 'primary'} onClick={() => navigate('/new-project')}>{translate("common:gettingStarted.action_action_newProject")}</Button>,
     },
     {
-      title: '先用 AI 生成 GPT 字典',
-      description: '在项目的「项目字典」里点「AI生成GPT字典」：GenDic 读原文提取人名、地名与专有名词并统一译名，正式翻译时术语才前后一致（跳过也能翻译，但译名容易漂）。',
+      title: translate("common:gettingStarted.title_title_aIGPTDictionary"),
+      description: translate("common:gettingStarted.description_description_projectProjectDictionaryAIGPTDictionaryGenDic"),
       // 已经开始翻译就算这步过去了：它只是「建议先做」，不该拖住引导
       done: dictGenerated || translatedOnce,
       action: (
@@ -108,23 +110,19 @@ export function GettingStarted({
           variant={hasProject && modelReady && !dictGenerated ? 'primary' : 'secondary'}
           disabled={!hasProject || !onOpenProjectDictionary}
           onClick={onOpenProjectDictionary}
-        >
-          去生成字典
-        </Button>
+        >{translate("common:gettingStarted.action_message_dictionary")}</Button>
       ),
     },
     {
-      title: '开始第一次翻译',
-      description: '在项目的「开始翻译」页启动翻译，完成后在 gt_output 文件夹取回译文。',
+      title: translate("common:gettingStarted.title_title_startTranslation"),
+      description: translate("common:gettingStarted.description_description_projectStartTranslationTranslationCompleteGtOutput"),
       done: translatedOnce,
       action: (
         <Button
           variant={hasProject && modelReady ? 'primary' : 'secondary'}
           disabled={!hasProject || !onOpenLatestProject}
           onClick={onOpenLatestProject}
-        >
-          打开最近项目
-        </Button>
+        >{translate("common:gettingStarted.action_message_openProject")}</Button>
       ),
     },
   ];
@@ -141,20 +139,20 @@ export function GettingStarted({
   };
 
   return (
-    <section className="home-onboarding" aria-label="快速上手">
+    <section className="home-onboarding" aria-label={translate("common:gettingStarted.homeOnboarding_ariaLabel_text")}>
       <div className="home-onboarding__header">
         <div>
-          <h2><Icon name="sparkle" /> 快速上手</h2>
-          <p>第一次使用？按下面几步即可完成一次翻译（{doneCount}/{steps.length}）。也可以进入「Agent 模式」，用自然语言让 AI 帮你完成这些操作。</p>
+          <h2><Icon name="sparkle" />{translate("common:gettingStarted.homeOnboardingHeader_h2_text")}</h2>
+          <p>{translate("common:gettingStarted.homeOnboardingHeader_message_completeTranslationAgentLanguageAIComplete", { doneCount: doneCount, count: steps.length })}</p>
         </div>
-        <button type="button" className="home-onboarding__dismiss" onClick={handleDismiss} title="不再显示" aria-label="不再显示快速上手">
+        <button type="button" className="home-onboarding__dismiss" onClick={handleDismiss} title={translate("common:gettingStarted.homeOnboardingDismiss_title_text")} aria-label={translate("common:gettingStarted.homeOnboardingDismiss_ariaLabel_text")}>
           <Icon name="close" />
         </button>
       </div>
       <ol className="home-onboarding__steps">
         {steps.map((step, index) => (
           <li
-            key={step.title}
+            key={index}
             className={`home-onboarding__step${step.done ? ' is-done' : ''}${index === currentIndex ? ' is-current' : ''}`}
           >
             <span className="home-onboarding__badge" aria-hidden="true">
@@ -164,7 +162,7 @@ export function GettingStarted({
               <strong>{step.title}</strong>
               <span>{step.description}</span>
             </div>
-            {step.done ? <span className="home-onboarding__done">已完成</span> : step.action}
+            {step.done ? <span className="home-onboarding__done">{translate("common:gettingStarted.homeOnboardingSteps_message_doneComplete")}</span> : step.action}
           </li>
         ))}
       </ol>

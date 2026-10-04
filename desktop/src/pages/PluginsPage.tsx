@@ -1,3 +1,5 @@
+import { localizePlugin, pluginSettingDisplayValue } from "../i18n/plugins";
+import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
@@ -8,9 +10,10 @@ import {
 import { normalizeError } from '../lib/errors';
 
 export function PluginsPage() {
+  useUiLanguage();
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useMessageState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<string>('');
 
   useEffect(() => {
@@ -21,7 +24,7 @@ export function PluginsPage() {
         if (!cancelled) setPlugins(res);
       })
       .catch((err) => {
-        if (!cancelled) setError(normalizeError(err, '加载插件列表失败'));
+        if (!cancelled) setError(normalizeError(err, uiMessage("plugins:pluginsPage.pluginsPage_normalizeError_loadPluginFailed")));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -36,8 +39,8 @@ export function PluginsPage() {
   if (loading) {
     return (
       <div className="plugins-page">
-        <PageHeader className="plugins-page__header" title="插件管理" />
-        <LoadingState title="加载插件中…" description="正在读取当前可用的文件插件与文本插件。" />
+        <PageHeader className="plugins-page__header" title={translate("plugins:pluginsPage.pluginsPage_title_plugin")} />
+        <LoadingState title={translate("plugins:pluginsPage.pluginsPage_title_loadPlugin")} description={translate("plugins:pluginsPage.pluginsPage_description_pendingReadCurrentFilePluginTextPlugin")} />
       </div>
     );
   }
@@ -45,74 +48,64 @@ export function PluginsPage() {
   if (error) {
     return (
       <div className="plugins-page">
-        <PageHeader className="plugins-page__header" title="插件管理" />
-        <ErrorState title="加载插件列表失败" description={error} />
+        <PageHeader className="plugins-page__header" title={translate("plugins:pluginsPage.pluginsPage_title_plugin")} />
+        <ErrorState title={translate("plugins:pluginsPage.pluginsPage_title_loadPluginFailed")} description={error} />
       </div>
     );
   }
 
   return (
     <div className="plugins-page">
-      <PageHeader className="plugins-page__header" title="插件管理" description={`查看和管理翻译插件，共 ${plugins.length} 个插件。`} />
+      <PageHeader className="plugins-page__header" title={translate("plugins:pluginsPage.pluginsPage_title_plugin")} description={translate("plugins:pluginsPage.pluginsPage_description_translationPluginCountPlugin", { count: plugins.length })} />
 
       <div className="plugins-page__content">
         <div className="plugin-tabs">
           <button
             className={`plugin-tab ${typeFilter === '' ? 'plugin-tab--active' : ''}`}
             onClick={() => setTypeFilter('')}
-          >
-            全部 ({plugins.length})
-          </button>
+          >{translate("plugins:pluginsPage.pluginTabs_message_all", { count: plugins.length })}</button>
           <button
             className={`plugin-tab ${typeFilter === 'file' ? 'plugin-tab--active' : ''}`}
             onClick={() => setTypeFilter('file')}
-          >
-            文件插件 ({filePlugins.length})
-          </button>
+          >{translate("plugins:pluginsPage.pluginTabs_message_filePlugin", { count: filePlugins.length })}</button>
           <button
             className={`plugin-tab ${typeFilter === 'text' ? 'plugin-tab--active' : ''}`}
             onClick={() => setTypeFilter('text')}
-          >
-            文本插件 ({textPlugins.length})
-          </button>
+          >{translate("plugins:pluginsPage.pluginTabs_message_textPlugin", { count: textPlugins.length })}</button>
         </div>
 
         <div className="plugin-list">
           {filteredPlugins.length === 0 ? (
             <EmptyState
-              title={typeFilter ? '当前筛选下没有插件' : '暂无插件'}
-              description={typeFilter ? '试试切换到其他插件类型，或检查后端插件目录。' : '后端暂未返回任何插件信息。'}
+              title={typeFilter ? translate("plugins:pluginsPage.pluginList_title_currentFilterEmptyPlugin") : translate("plugins:pluginsPage.pluginList_title_emptyPlugin")}
+              description={typeFilter ? translate("plugins:pluginsPage.pluginList_description_pluginCheckBackendPluginDirectory") : translate("plugins:pluginsPage.pluginList_description_backendNotBackPlugin")}
             />
           ) : filteredPlugins.map((plugin) => (
             <div key={plugin.name} className="plugin-card">
               <div className="plugin-card__header">
-                <span className="plugin-card__name">{plugin.display_name}</span>
-                <span className="plugin-card__version">v{plugin.version}</span>
+                <span className="plugin-card__name">{localizePlugin(plugin).display_name}</span>
+                <span className="plugin-card__version">{translate("plugins:pluginsPage.pluginCardHeader_message_v", { version: plugin.version })}</span>
                 <span className={`plugin-card__type plugin-card__type--${plugin.type}`}>
-                  {plugin.type === 'file' ? '文件' : '文本'}
+                  {plugin.type === 'file' ? translate("plugins:pluginsPage.pluginCardHeader_message_file") : translate("plugins:pluginsPage.pluginCardHeader_message_text")}
                 </span>
               </div>
               <div className="plugin-card__meta">
-                {plugin.author && <span>作者: {plugin.author}</span>}
-                <span>模块: {plugin.module}</span>
+                {plugin.author && <span>{translate("plugins:pluginsPage.pluginCardMeta_message_author", { author: plugin.author })}</span>}
+                <span>{translate("plugins:pluginsPage.pluginCardMeta_message_module", { module: plugin.module })}</span>
               </div>
-              {plugin.description && (
-                <p className="plugin-card__desc">{plugin.description}</p>
+              {localizePlugin(plugin).description && (
+                <p className="plugin-card__desc">{localizePlugin(plugin).description}</p>
               )}
               {Object.keys(plugin.settings).length > 0 && (
                 <div className="plugin-card__settings">
-                  <h4>设置项</h4>
+                  <h4>{translate("plugins:pluginsPage.pluginCardSettings_message_settingsItem")}</h4>
                   {(() => {
                     const entries = Object.entries(plugin.settings);
                     const renderSettings = (advanced: boolean) => entries
-                      .filter(([key]) => Boolean(plugin.settings_schema?.[key]?.advanced) === advanced)
+                      .filter(([key]) => Boolean(localizePlugin(plugin).settings_schema?.[key]?.advanced) === advanced)
                       .map(([key, value]) => {
-                        const schema = plugin.settings_schema?.[key];
-                        const format = (item: unknown): string => schema?.options?.find((option) => option.value === item)?.label
-                          ?? (typeof item === 'boolean' ? (item ? '开启' : '关闭')
-                            : typeof item === 'object' ? JSON.stringify(item) : item === '' || item == null ? '（空）' : String(item));
-                        const displayValue = schema?.secret ? (value ? '已设置' : '未设置')
-                          : Array.isArray(value) ? value.map(format).join('、') || '未选择' : format(value);
+                        const schema = localizePlugin(plugin).settings_schema?.[key];
+                        const displayValue = pluginSettingDisplayValue(plugin, key, value);
                         return <div key={key}>
                           <div className="plugin-setting-item">
                             <span className="plugin-setting-item__key">{schema?.label || key}:</span>
@@ -123,9 +116,9 @@ export function PluginsPage() {
                       });
                     return <>
                       {renderSettings(false)}
-                      {entries.some(([key]) => plugin.settings_schema?.[key]?.advanced) && (
+                      {entries.some(([key]) => localizePlugin(plugin).settings_schema?.[key]?.advanced) && (
                         <details className="plugin-settings-advanced">
-                          <summary>高级设置</summary>
+                          <summary>{translate("common:actions.advancedSettings")}</summary>
                           {renderSettings(true)}
                         </details>
                       )}

@@ -1,13 +1,14 @@
+import { t as translate, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { Icon, type IconName } from './Icon';
 
 const FOLDERS: Array<{ label: string; shortLabel: string; icon: IconName; directory: string }> = [
-  { label: '项目文件夹', shortLabel: '项目', icon: 'folder-open', directory: '' },
-  { label: '输入文件夹', shortLabel: '输入', icon: 'inbox', directory: 'gt_input' },
-  { label: '输出文件夹', shortLabel: '输出', icon: 'upload', directory: 'gt_output' },
-  { label: '缓存文件夹', shortLabel: '缓存', icon: 'database', directory: 'transl_cache' },
+  { get label() { return translate("common:projectFolderPopover.label_label_projectFile"); }, get shortLabel() { return translate("common:projectFolderPopover.shortLabel_shortLabel_project"); }, icon: 'folder-open', directory: '' },
+  { get label() { return translate("common:projectFolderPopover.label_label_file"); }, get shortLabel() { return translate("common:projectFolderPopover.shortLabel_shortLabel_text"); }, icon: 'inbox', directory: 'gt_input' },
+  { get label() { return translate("common:projectFolderPopover.label_label_fileVariant2"); }, get shortLabel() { return translate("common:projectFolderPopover.shortLabel_shortLabel_textVariant2"); }, icon: 'upload', directory: 'gt_output' },
+  { get label() { return translate("common:projectFolderPopover.label_label_cacheFile"); }, get shortLabel() { return translate("common:projectFolderPopover.shortLabel_shortLabel_cache"); }, icon: 'database', directory: 'transl_cache' },
 ];
 
 export function ProjectFolderPopover({ projectDir, className, expanded, onError }: {
@@ -16,6 +17,7 @@ export function ProjectFolderPopover({ projectDir, className, expanded, onError 
   expanded?: boolean;
   onError: (message: string) => void;
 }) {
+  useUiLanguage();
   const id = useId();
   const anchor = useRef<HTMLSpanElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -109,7 +111,7 @@ export function ProjectFolderPopover({ projectDir, className, expanded, onError 
       className={`${className} sidebar-folder-trigger${position && !closing ? ' sidebar-folder-trigger--active' : ''}`}
       role="button"
       tabIndex={0}
-      aria-label="项目文件夹快捷操作"
+      aria-label={translate("common:projectFolderPopover.projectFolderPopover_ariaLabel_projectFile")}
       aria-expanded={Boolean(position) && !closing}
       aria-controls={position ? id : undefined}
       onMouseEnter={hover}
@@ -137,7 +139,7 @@ export function ProjectFolderPopover({ projectDir, className, expanded, onError 
         ref={panel}
         id={id}
         role="group"
-        aria-label="项目文件夹快捷操作"
+        aria-label={translate("common:projectFolderPopover.projectFolderPopover_ariaLabel_projectFile")}
         className={`sidebar-folder-popover${closing ? ' sidebar-folder-popover--closing' : ''}`}
         style={{ left: position.left, top: position.top } as CSSProperties}
         onMouseEnter={cancelClose}
@@ -159,7 +161,7 @@ export function ProjectFolderPopover({ projectDir, className, expanded, onError 
       >
         <span className="sidebar-folder-popover__bridge" />
         {FOLDERS.map(({ label, shortLabel, icon, directory }) => (
-          <button key={label} type="button" aria-label={label} title={label} onClick={() => void openFolder(directory)}>
+          <button key={directory} type="button" aria-label={label} title={label} onClick={() => void openFolder(directory)}>
             <span className="sidebar-folder-popover__icon"><Icon name={icon} /></span><span>{shortLabel}</span>
           </button>
         ))}

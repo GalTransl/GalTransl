@@ -1,3 +1,4 @@
+import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
@@ -81,6 +82,7 @@ import { useAgentStream } from './agent/useAgentStream';
 /* ── Main page ── */
 
 export function AgentPage() {
+  const uiLanguage = useUiLanguage();
   const navigate = useNavigate();
 
   // 已打开项目与历史合并的去重列表。响应式：监听 OPEN_PROJECTS_CHANGE_EVENT
@@ -153,7 +155,7 @@ export function AgentPage() {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [status, setStatus] = useState<string>('idle');
   const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useMessageState<string | null>(null);
   // 后端配置/模型选择小菜单（点 composer 的 chip 打开）
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   // 项目 chip 的小菜单：只有"会话还没开始"时它才可点（选完项目、首条消息之前），
@@ -611,10 +613,10 @@ export function AgentPage() {
       setRunning(false);
     },
     onReconnecting: (attempt, max) => {
-      setError(attempt > 0 ? `Agent 事件流中断，正在重连…（${attempt}/${max}）` : null);
+      setError(attempt > 0 ? uiMessage("agent:agentPage.onReconnecting_setError_agentPending", { attempt: attempt, max: max }) : null);
     },
     onGiveUp: (err) => {
-      setError(normalizeError(err, 'Agent 事件流中断'));
+      setError(normalizeError(err, uiMessage("agent:agentPage.onGiveUp_normalizeError_agent")));
       setRunning(false);
     },
   });
@@ -632,12 +634,12 @@ export function AgentPage() {
     // 发出去就等于会话开始：项目 chip 马上要变成不可点的纯标签，菜单顺手收掉
     setProjectMenuOpen(false);
     if (!effectiveProject) {
-      setError('请先选择一个项目');
+      setError(uiMessage("agent:agentPage.handleSend_setError_selectCountProject"));
       return;
     }
     const profile = getBackendProfile(backendProfileName);
     if (!profile) {
-      setError('请先选择一个翻译后端配置（并在「模型设置」页填写 token/模型）');
+      setError(uiMessage("agent:agentPage.handleSend_setError_selectCountTranslationBackendConfigModelSettings"));
       setProfileMenuOpen(true);
       return;
     }
@@ -724,7 +726,7 @@ export function AgentPage() {
       void refreshSessions(effectiveProject, sid);
       subscribeStream(effectiveProject, sid);
     } catch (err) {
-      setError(normalizeError(err, '发送失败'));
+      setError(normalizeError(err, uiMessage("agent:agentPage.handleSend_normalizeError_sendFailed")));
       setRunning(false);
       setStatus('failed');
     } finally {
@@ -767,7 +769,7 @@ export function AgentPage() {
           subscribeStream(effectiveProject, activeSessionRef.current || undefined);
         }
       } catch (err) {
-        setError(normalizeError(err, '立即发送失败'));
+        setError(normalizeError(err, uiMessage("agent:agentPage.handleQueuedSendNow_normalizeError_sendFailed")));
       }
     },
     [effectiveProject, subscribeStream],
@@ -786,7 +788,7 @@ export function AgentPage() {
         setQueued(snap.queued || []);
         if (editingQueued?.id === id) setEditingQueued(null);
       } catch (err) {
-        setError(normalizeError(err, '删除排队消息失败'));
+        setError(normalizeError(err, uiMessage("agent:agentPage.handleQueuedDelete_normalizeError_deleteQueueFailed")));
       }
     },
     [effectiveProject, editingQueued],
@@ -807,7 +809,7 @@ export function AgentPage() {
       setQueued(snap.queued || []);
       setEditingQueued(null);
     } catch (err) {
-      setError(normalizeError(err, '修改排队消息失败'));
+      setError(normalizeError(err, uiMessage("agent:agentPage.handleQueuedSaveEdit_normalizeError_changeQueueFailed")));
     }
   }, [effectiveProject, editingQueued]);
 
@@ -822,7 +824,7 @@ export function AgentPage() {
       // 而流是 0.5s 轮询的——一掐就全丢了。后端收尾后会自己发 close。
       // 点了「立即」的排队消息也一样：它要等回合收尾才发 user_message。
     } catch (err) {
-      setError(normalizeError(err, '停止 Agent 失败'));
+      setError(normalizeError(err, uiMessage("agent:agentPage.handleStop_normalizeError_stopAgentFailed")));
     }
   }, [effectiveProject]);
 
@@ -924,7 +926,7 @@ export function AgentPage() {
           void refreshSessions(dir, undefined, false);
         }
       } catch (err) {
-        setError(normalizeError(err, '新建会话失败'));
+        setError(normalizeError(err, uiMessage("agent:agentPage.handleCreateSessionInProject_normalizeError_newSessionFailed")));
       }
     },
     [running, handleStop, refreshSessions],
@@ -964,14 +966,14 @@ export function AgentPage() {
       const hasRunning =
         list.some((s) => s.status === 'running') || (dir === effectiveProjectRef.current && running);
       if (hasRunning) {
-        setError(`「${shortDir}」下还有会话正在运行，请先停止再关闭。`);
+        setError(uiMessage("agent:agentPage.handleCloseProjectGroup_setError_sessionPendingRunningStopDisable", { shortDir: shortDir }));
         return;
       }
       const isOpen = loadOpenProjects().includes(dir);
       const ok = window.confirm(
         isOpen
-          ? `关闭项目「${shortDir}」？\n它会从左侧项目列表与这里一起收起；会话记录全部保留，随时可以在首页重新打开。`
-          : `把「${shortDir}」从最近项目里移除？\n只移除这条最近记录，会话与项目文件都保留。`,
+          ? translate("agent:agentPage.ok_confirm_disableProjectProjectSessionHistoryAllKeep", { shortDir: shortDir })
+          : translate("agent:agentPage.ok_confirm_projectRemoveRemoveEntryHistorySessionProject", { shortDir: shortDir }),
       );
       if (!ok) return;
       if (isOpen) {
@@ -1018,11 +1020,11 @@ export function AgentPage() {
 
   const handleDeleteSession = useCallback(
     async (dir: string, session: AgentSessionMeta) => {
-      if (!window.confirm(`删除会话「${session.title}」？该会话的对话记录会被一并删除。`)) return;
+      if (!window.confirm(translate("agent:agentPage.handleDeleteSession_confirm_deleteSessionSessionHistoryDelete", { title: session.title }))) return;
       try {
         await deleteAgentSession(dir, session.session_id);
       } catch (err) {
-        setError(normalizeError(err, '删除会话失败'));
+        setError(normalizeError(err, uiMessage("agent:agentPage.handleDeleteSession_normalizeError_deleteSessionFailed")));
         return;
       }
       const prevList = sessionsByProject[dir] || [];
@@ -1051,7 +1053,7 @@ export function AgentPage() {
 
   const handleClear = useCallback(async () => {
     if (!effectiveProject || !activeSessionRef.current) return;
-    if (!window.confirm('清空当前会话？运行中的任务会被停止，对话记录会被一并删除。')) return;
+    if (!window.confirm(translate("agent:agentPage.handleClear_confirm_clearCurrentSessionRunningJobStopHistory"))) return;
     try {
       // 清空 = 重置当前会话：停掉运行中的回合并丢弃后端历史
       await resetAgent(effectiveProject, activeSessionRef.current);
@@ -1075,7 +1077,7 @@ export function AgentPage() {
     void refreshSessions(effectiveProject, activeSessionRef.current);
   }, [effectiveProject, refreshSessions]);
 
-  const timeline = useMemo(() => buildTimeline(events), [events]);
+  const timeline = useMemo(() => buildTimeline(events), [uiLanguage, events]);
   const hasSession = events.length > 0;
   const canSend = Boolean(projectDir) && Boolean(backendProfileName) && messageDraft.trim().length > 0 && !sending;
   // 正在等用户回答的 ask_user：这条工具调用**还没有结果**，说明后端那个工具
@@ -1094,7 +1096,7 @@ export function AgentPage() {
     return null;
   }, [timeline]);
   const [askSubmitting, setAskSubmitting] = useState(false);
-  const [askError, setAskError] = useState<string | null>(null);
+  const [askError, setAskError] = useMessageState<string | null>(null);
   // 提交成功后先把卡片收起来（工具结果马上就到，避免卡片闪一下再消失）
   const [answeredAskId, setAnsweredAskId] = useState('');
   const pendingAskIdRef = useRef('');
@@ -1110,7 +1112,7 @@ export function AgentPage() {
       handleJumpToBottom();
       // Agent 卡在提问上，用户多半已经切到别的窗口了：弹条系统通知把他叫回来
       // （窗口在前台就不弹，见 desktopNotify）
-      void notifyNeedsAttention(`ask:${askId}`, 'Agent 需要你的回答', askNotifyBody(pendingAsk));
+      void notifyNeedsAttention(`ask:${askId}`, translate("agent:agentPage.agentPage_notifyNeedsAttention_agentAnswer"), askNotifyBody(pendingAsk));
     }
   }, [askId, handleJumpToBottom]);
   /** 答复 ask_user / 审批卡时捎带的前端上下文（与 handleSend 同一份）。
@@ -1150,7 +1152,7 @@ export function AgentPage() {
         }
         subscribeStream(effectiveProject, activeSessionRef.current || undefined);
       } catch (err) {
-        setAskError(normalizeError(err, '回答提交失败'));
+        setAskError(normalizeError(err, uiMessage("agent:agentPage.handleAskSubmit_normalizeError_answerSubmitFailed")));
       } finally {
         setAskSubmitting(false);
       }
@@ -1173,7 +1175,7 @@ export function AgentPage() {
     return null;
   }, [timeline]);
   const [permissionSubmitting, setPermissionSubmitting] = useState(false);
-  const [permissionError, setPermissionError] = useState<string | null>(null);
+  const [permissionError, setPermissionError] = useMessageState<string | null>(null);
   // 同上：提交后先把卡片收起来，工具结果一到就自然消失
   const [answeredPermissionId, setAnsweredPermissionId] = useState('');
   const pendingPermissionIdRef = useRef('');
@@ -1186,12 +1188,12 @@ export function AgentPage() {
     if (permissionId) {
       handleJumpToBottom();
       // 同 ask_user：被权限拦下来时也在后台等着，弹系统通知（前台不弹，见 desktopNotify）
-      const label = pendingPermission?.permission?.label || pendingPermission?.name || '这一步操作';
+      const label = pendingPermission?.permission?.label || pendingPermission?.name || translate("agent:agentPage.label_message_text");
       const name = pendingPermission?.name || '';
       void notifyNeedsAttention(
         `permission:${permissionId}`,
-        'Agent 等待你的批准',
-        name && name !== label ? `${label}（${name}）需要你确认` : `${label}需要你确认`,
+        translate("agent:agentPage.agentPage_notifyNeedsAttention_agentWaitApprove"),
+        name && name !== label ? translate("agent:agentPage.agentPage_notifyNeedsAttention_confirm", { label: label, name: name }) : translate("agent:agentPage.agentPage_notifyNeedsAttention_confirmVariant2", { label: label }),
       );
     }
   }, [permissionId, handleJumpToBottom]);
@@ -1219,7 +1221,7 @@ export function AgentPage() {
         }
         subscribeStream(effectiveProject, activeSessionRef.current || undefined);
       } catch (err) {
-        setPermissionError(normalizeError(err, '提交失败'));
+        setPermissionError(normalizeError(err, uiMessage("agent:agentPage.handlePermissionDecide_normalizeError_submitFailed")));
       } finally {
         setPermissionSubmitting(false);
       }
@@ -1257,14 +1259,14 @@ export function AgentPage() {
         effectiveProject,
         mode,
         activeSessionRef.current || undefined,
-      ).catch((err) => setError(normalizeError(err, '权限模式修改失败')));
+      ).catch((err) => setError(normalizeError(err, uiMessage("agent:agentPage.handlePickPermissionMode_normalizeError_permissionChangeFailed"))));
     },
     [effectiveProject],
   );
   // 展示「后端配置文件名/模型名」：模型名从当前配置里取，与「模型设置」页同一口径
   const backendProfileLabel = useMemo(
     () => (backendProfileName ? formatProfileLabel(backendProfileName, getBackendProfile(backendProfileName)) : ''),
-    [backendProfileName],
+    [uiLanguage, backendProfileName],
   );
 
   return (
@@ -1291,7 +1293,7 @@ export function AgentPage() {
           <span className="agent-console__avatar" aria-hidden><Icon name="bot" /></span>
           <div className="agent-console__bar-copy">
             <div className="agent-console__bar-title">
-              <span className="agent-console__bar-name">GalTransl Agent</span>
+              <span className="agent-console__bar-name">{translate("agent:agentPage.agentConsoleBarTitle_message_galTranslAgent")}</span>
             </div>
             <div className="agent-console__project-static">
               {projectDir ? (
@@ -1300,7 +1302,7 @@ export function AgentPage() {
                   <span className="agent-console__project-path">{projectDir}</span>
                 </>
               ) : (
-                <span className="agent-console__project-empty">未选择项目</span>
+                <span className="agent-console__project-empty">{translate("agent:agentPage.agentConsoleProjectStatic_message_notSelectedProject")}</span>
               )}
             </div>
           </div>
@@ -1313,8 +1315,8 @@ export function AgentPage() {
             className="agent-console__icon-btn"
             onClick={() => { if (projectDir) void invoke('open_folder', { path: projectDir }); }}
             disabled={!projectDir}
-            title={projectDir || '打开项目文件夹'}
-            aria-label="打开项目文件夹"
+            title={projectDir || translate("agent:agentPage.agentConsoleIconBtn_title_openProjectFile")}
+            aria-label={translate("agent:agentPage.agentConsoleIconBtn_ariaLabel_openProjectFile")}
           >
             <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
               <path
@@ -1332,7 +1334,7 @@ export function AgentPage() {
             className="agent-console__icon-btn"
             onClick={() => void handleClear()}
             disabled={running || !events.length}
-            title="重置会话（清空全部对话与后端历史）"
+            title={translate("agent:agentPage.agentConsoleIconBtn_title_resetSessionClearAllBackend")}
           >
             <Icon name="trash" />
           </button>
@@ -1344,10 +1346,8 @@ export function AgentPage() {
           {timeline.length === 0 ? (
             <div className="agent-hero">
               <div className="agent-hero__mark"><Icon name="bot" /></div>
-              <h2 className="agent-hero__title">让 Agent 替你跑完整个翻译流程</h2>
-              <p className="agent-hero__subtitle">
-                发送第一条消息启动会话，它会自主了解项目、准备字典、启动翻译、跟进进度，并复核修复发现的问题。运行中你可以随时插话或点停止打断，之后继续发消息它会在原会话上接着干。
-              </p>
+              <h2 className="agent-hero__title">{translate("agent:agentPage.agentHero_message_agentCountTranslation")}</h2>
+              <p className="agent-hero__subtitle">{translate("agent:agentPage.agentHero_message_sendEntrySessionProjectDictionaryTranslationProgress")}</p>
               <div className="agent-hero__steps">
                 {AGENT_PROMPT_SUGGESTIONS.map((text) => (
                   <button
@@ -1355,7 +1355,7 @@ export function AgentPage() {
                     type="button"
                     className="agent-hero__step"
                     onClick={() => applyPromptSuggestion(text)}
-                    title="点击填入输入框"
+                    title={translate("agent:agentPage.agentHeroStep_title_text")}
                   >
                     <span className="agent-hero__step-icon"><Icon name="sparkle" /></span>
                     {text}
@@ -1365,7 +1365,7 @@ export function AgentPage() {
               <div className="agent-hero__project-panel">
                 {projectOptions.length > 0 ? (
                   <>
-                    <span className="agent-hero__open-projects-label">选择一个已打开的项目开始</span>
+                    <span className="agent-hero__open-projects-label">{translate("agent:agentPage.agentHeroProjectPanel_message_selectCountDoneOpenProjectStart")}</span>
                     <div className="agent-hero__project-chips">
                       {projectOptions.map((dir) => {
                         // 选中的那个常亮：只靠 hover 的话鼠标一移开就看不出当前选的是谁
@@ -1387,27 +1387,23 @@ export function AgentPage() {
                     </div>
                   </>
                 ) : (
-                  <span className="agent-hero__open-projects-label">
-                    还没有打开的项目，从下方新建或打开一个吧
-                  </span>
+                  <span className="agent-hero__open-projects-label">{translate("agent:agentPage.agentHeroProjectPanel_message_emptyOpenProjectNewOpenCount")}</span>
                 )}
                 <div className="agent-hero__actions">
                   <button
                     type="button"
                     className="agent-hero__action"
                     onClick={() => void handleOpenProject()}
-                    title="从文件夹打开一个已有项目"
+                    title={translate("agent:agentPage.agentHeroAction_title_fileOpenCountDoneProject")}
                   >
-                    <Icon name="folder-open" /> 打开项目
-                  </button>
+                    <Icon name="folder-open" />{translate("agent:agentPage.agentHeroAction_button_openProject")}</button>
                   <button
                     type="button"
                     className="agent-hero__action agent-hero__action--secondary"
                     onClick={() => navigate('/new-project')}
-                    title="新建项目向导"
+                    title={translate("agent:agentPage.agentHeroActionAgentHeroActionSecondary_title_newProject")}
                   >
-                    <Icon name="sparkle" /> 新建项目
-                  </button>
+                    <Icon name="sparkle" />{translate("agent:agentPage.agentHeroActionAgentHeroActionSecondary_button_newProject")}</button>
                 </div>
               </div>
             </div>
@@ -1485,8 +1481,8 @@ export function AgentPage() {
               type="button"
               className="agent-jump-bottom"
               onClick={handleJumpToBottom}
-              title="回到最新"
-              aria-label="回到最新"
+              title={translate("agent:agentPage.agentJumpBottom_title_text")}
+              aria-label={translate("agent:agentPage.agentJumpBottom_ariaLabel_text")}
             >
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
                 {/* 只要一个 V 形雪佛龙，不带竖棍 */}
@@ -1536,16 +1532,12 @@ export function AgentPage() {
                           type="button"
                           className="agent-queue__act is-primary"
                           onClick={() => void handleQueuedSaveEdit()}
-                        >
-                          保存
-                        </button>
+                        >{translate("common:actions.save")}</button>
                         <button
                           type="button"
                           className="agent-queue__act"
                           onClick={() => setEditingQueued(null)}
-                        >
-                          取消
-                        </button>
+                        >{translate("common:actions.cancel")}</button>
                       </>
                     ) : (
                       <>
@@ -1555,16 +1547,15 @@ export function AgentPage() {
                         <button
                           type="button"
                           className="agent-queue__act is-primary"
-                          title="打断 Agent，马上发送这条"
+                          title={translate("agent:agentPage.agentQueueActIsPrimary_title_agentSendEntry")}
                           onClick={() => void handleQueuedSendNow(item.id)}
                         >
-                          <span className="agent-queue__act-icon"><Icon name="send-now" /></span>立即
-                        </button>
+                          <span className="agent-queue__act-icon"><Icon name="send-now" /></span>{translate("agent:agentPage.agentQueueActIsPrimary_button_text")}</button>
                         <button
                           type="button"
                           className="agent-queue__act"
-                          title="编辑这条"
-                          aria-label="编辑这条"
+                          title={translate("agent:agentPage.agentQueueAct_title_editEntry")}
+                          aria-label={translate("agent:agentPage.agentQueueAct_ariaLabel_editEntry")}
                           onClick={() => setEditingQueued({ id: item.id, text: item.text })}
                         >
                           <Icon name="pencil" />
@@ -1572,8 +1563,8 @@ export function AgentPage() {
                         <button
                           type="button"
                           className="agent-queue__act"
-                          title="删除这条"
-                          aria-label="删除这条"
+                          title={translate("agent:agentPage.agentQueueAct_title_deleteEntry")}
+                          aria-label={translate("agent:agentPage.agentQueueAct_ariaLabel_deleteEntry")}
                           onClick={() => void handleQueuedDelete(item.id)}
                         >
                           <Icon name="trash" />
@@ -1594,10 +1585,10 @@ export function AgentPage() {
             onChange={(e) => setMessageDraft(e.target.value)}
             placeholder={
               running
-                ? '继续输入以排队后续消息，本轮做完自动发出；想提前发就点队列里的「立即」。'
+                ? translate("agent:agentPage.agentConsoleComposer_placeholder_queueAuto")
                 : hasSession
-                  ? '给 Agent 下一步指令，它会接着当前进度继续。'
-                  : '描述你希望 Agent 完成的任务。'
+                  ? translate("agent:agentPage.agentConsoleComposer_placeholder_agentNextCurrentProgress")
+                  : translate("agent:agentPage.agentConsoleComposer_placeholder_agentCompleteJob")
             }
             rows={2}
             onKeyDown={(e) => {
@@ -1617,10 +1608,10 @@ export function AgentPage() {
                 // 光标与 hover 底色一并收掉（见 .agent-composer__chip--static），别看着能点
                 <span
                   className="agent-composer__chip agent-composer__chip--static"
-                  title={`${projectDir || '未选择项目'}（会话已开始；要换项目请从侧边栏新建会话）`}
+                  title={translate("agent:agentPage.agentComposerChipAgentComposerChipStatic_title_sessionDoneStartProjectNewSession", { value: projectDir || translate("agent:agentPage.interpolation_fallback_notSelectedProject") })}
                 >
                   <span className="agent-composer__chip-icon"><Icon name="folder" /></span>
-                  <span className="agent-composer__chip-label">{projectDir ? shortName(projectDir) : '未选择项目'}</span>
+                  <span className="agent-composer__chip-label">{projectDir ? shortName(projectDir) : translate("agent:agentPage.agentComposerChipLabel_message_notSelectedProject")}</span>
                 </span>
               ) : (
                 // 项目已选、还没开聊：这时换项目零成本，chip 就是入口（菜单与旁边两个 chip 同款）
@@ -1631,15 +1622,15 @@ export function AgentPage() {
                     onClick={() => setProjectMenuOpen((v) => !v)}
                     aria-haspopup="menu"
                     aria-expanded={projectMenuOpen}
-                    title={`${projectDir || '未选择项目'} · 点击换一个项目（会话开始后就固定了）`}
+                    title={translate("agent:agentPage.agentProfilePicker_title_countProjectSessionStart", { value: projectDir || translate("agent:agentPage.interpolation_fallback_notSelectedProject") })}
                   >
                     <span className="agent-composer__chip-icon"><Icon name="folder" /></span>
-                    <span className="agent-composer__chip-label">{projectDir ? shortName(projectDir) : '未选择项目'}</span>
+                    <span className="agent-composer__chip-label">{projectDir ? shortName(projectDir) : translate("agent:agentPage.agentComposerChipLabel_message_notSelectedProject")}</span>
                   </button>
                   {projectMenuOpen ? (
                     <div className="agent-profile-menu" role="menu">
                       {projectOptions.length === 0 ? (
-                        <div className="agent-profile-menu__empty">还没有打开的项目</div>
+                        <div className="agent-profile-menu__empty">{translate("agent:agentPage.agentProfileMenu_message_emptyOpenProject")}</div>
                       ) : (
                         projectOptions.map((dir) => (
                           <button
@@ -1671,7 +1662,7 @@ export function AgentPage() {
                           void handleOpenProject();
                         }}
                       >
-                        <span className="agent-profile-menu__label">打开其它项目…</span>
+                        <span className="agent-profile-menu__label">{translate("agent:agentPage.agentProfileMenuItemAgentProfileMenuItemAction_message_openProject")}</span>
                         <span className="agent-profile-menu__chev" aria-hidden>›</span>
                       </button>
                     </div>
@@ -1688,19 +1679,17 @@ export function AgentPage() {
                   aria-expanded={profileMenuOpen}
                   title={
                     running
-                      ? 'Agent 运行中，暂不能切换后端配置'
-                      : `${backendProfileLabel || '未配置后端'}${
-                          boundBackendProfile ? ' · 已绑定到本会话' : ' · 跟随 Agent 默认'
-                        } · 点击切换（只影响当前会话）`
+                      ? translate("agent:agentPage.agentProfilePicker_title_agentRunningCannotBackendConfig")
+                      : translate("agent:agentPage.agentProfilePicker_title_currentSession", { value: backendProfileLabel || translate("agent:agentPage.interpolation_fallback_notConfiguredBackend"), value2: boundBackendProfile ? translate("agent:agentPage.interpolation_fallback_doneSession") : translate("agent:agentPage.interpolation_fallback_agentDefault") })
                   }
                 >
                   <span className="agent-composer__chip-icon"><Icon name="settings" /></span>
-                  <span className="agent-composer__chip-label">{backendProfileLabel || '未配置后端'}</span>
+                  <span className="agent-composer__chip-label">{backendProfileLabel || translate("agent:agentPage.agentComposerChipLabel_message_notConfiguredBackend")}</span>
                 </button>
                 {profileMenuOpen ? (
                   <div className="agent-profile-menu" role="menu">
                     {backendProfileNames.length === 0 ? (
-                      <div className="agent-profile-menu__empty">还没有后端配置</div>
+                      <div className="agent-profile-menu__empty">{translate("agent:agentPage.agentProfileMenu_message_emptyBackendConfig")}</div>
                     ) : (
                       <>
                         {boundBackendProfile ? (
@@ -1715,9 +1704,7 @@ export function AgentPage() {
                               setProfileMenuOpen(false);
                             }}
                           >
-                            <span className="agent-profile-menu__label">
-                              跟随 Agent 默认（{formatProfileLabel(defaultProfileName, getBackendProfile(defaultProfileName))}）
-                            </span>
+                            <span className="agent-profile-menu__label">{translate("agent:agentPage.agentProfileMenuItemAgentProfileMenuItemAction_message_agentDefault", { value: formatProfileLabel(defaultProfileName, getBackendProfile(defaultProfileName)) })}</span>
                           </button>
                         ) : null}
                         {backendProfileNames.map((name) => (
@@ -1753,7 +1740,7 @@ export function AgentPage() {
                         navigate('/backend-profiles');
                       }}
                     >
-                      <span className="agent-profile-menu__label">管理后端配置</span>
+                      <span className="agent-profile-menu__label">{translate("agent:agentPage.agentProfileMenuItemAgentProfileMenuItemAction_message_backendConfig")}</span>
                       <span className="agent-profile-menu__chev" aria-hidden>›</span>
                     </button>
                   </div>
@@ -1767,9 +1754,7 @@ export function AgentPage() {
                   onClick={() => setPermissionMenuOpen((v) => !v)}
                   aria-haspopup="menu"
                   aria-expanded={permissionMenuOpen}
-                  title={`权限模式：${PERMISSION_MODE_LABELS[permissionMode]} —— ${PERMISSION_MODE_HINTS[permissionMode]}${
-                    running ? '（运行中改也会立刻生效：下一次工具调用就按新档判）' : ''
-                  }`}
+                  title={translate("agent:agentPage.agentProfilePicker_title_permission", { value: PERMISSION_MODE_LABELS[permissionMode], value2: PERMISSION_MODE_HINTS[permissionMode], value3: running ? translate("agent:agentPage.interpolation_fallback_runningEffective") : '' })}
                 >
                   <span className="agent-composer__chip-icon"><Icon name="shield" /></span>
                   <span className="agent-composer__chip-label">{PERMISSION_MODE_LABELS[permissionMode]}</span>
@@ -1795,9 +1780,7 @@ export function AgentPage() {
                       </button>
                     ))}
                     <div className="agent-profile-menu__sep" />
-                    <div className="agent-profile-menu__note">
-                      换档会清空本会话「允许」过的工具，之后会重新询问。
-                    </div>
+                    <div className="agent-profile-menu__note">{translate("agent:agentPage.agentProfileMenu_message_clearSessionAllow")}</div>
                   </div>
                 ) : null}
               </div>
@@ -1813,12 +1796,12 @@ export function AgentPage() {
                     className="agent-composer__send"
                     onClick={() => void handleSend()}
                     disabled={!canSend}
-                    title="发送插话（Agent 会在下一步看到，Enter 发送 / Shift+Enter 换行）"
-                    aria-label="发送插话"
+                    title={translate("agent:agentPage.agentComposerSend_title_sendAgentNextEnterSendShiftEnter")}
+                    aria-label={translate("agent:agentPage.agentComposerSend_ariaLabel_send")}
                   >
                     <SendIcon />
                   </button>
-                  <button type="button" className="agent-composer__stop" onClick={handleStop} title="停止 Agent">
+                  <button type="button" className="agent-composer__stop" onClick={handleStop} title={translate("agent:agentPage.agentComposerStop_title_stopAgent")}>
                     <StopIcon />
                   </button>
                 </>
@@ -1828,8 +1811,8 @@ export function AgentPage() {
                   className="agent-composer__send"
                   onClick={() => void handleSend()}
                   disabled={!canSend}
-                  title={hasSession ? '发送并继续（Enter 发送 / Shift+Enter 换行）' : '发送并启动 Agent（Enter 发送 / Shift+Enter 换行）'}
-                  aria-label="发送消息"
+                  title={hasSession ? translate("agent:agentPage.agentComposerSend_title_sendEnterSendShiftEnter") : translate("agent:agentPage.agentComposerSend_title_sendAgentEnterSendShiftEnter")}
+                  aria-label={translate("agent:agentPage.agentComposerSend_ariaLabel_sendVariant2")}
                 >
                   <SendIcon />
                 </button>

@@ -1,3 +1,4 @@
+import { UiError, message as uiMessage, resolveMessage, isUiMessage, type LocalizedText, type UiMessage } from "../i18n/core";
 import { invoke } from '@tauri-apps/api/core';
 
 import type { PermissionDecision, PermissionMode } from './permissionMode';
@@ -473,9 +474,11 @@ export function decodeProjectDir(token: string): string {
 
 export class ApiError extends Error {
   readonly status: number;
+  readonly uiMessage?: UiMessage;
 
-  constructor(message: string, status: number) {
-    super(message);
+  constructor(message: LocalizedText, status: number) {
+    super(resolveMessage(message));
+    this.uiMessage = isUiMessage(message) ? message : undefined;
     this.name = 'ApiError';
     this.status = status;
   }
@@ -1113,7 +1116,7 @@ export async function fetchBackendProfiles() {
 export async function fetchBackendProfile(name: string) {
   const profile = getBackendProfile(name);
   if (!profile) {
-    throw new Error(`profile not found: ${name}`);
+    throw new UiError(uiMessage('errors:profiles.notFound', { name }));
   }
   return { name, profile } satisfies BackendProfileResponse;
 }
@@ -1121,7 +1124,7 @@ export async function fetchBackendProfile(name: string) {
 export async function createBackendProfile(name: string, profile: Record<string, unknown>) {
   const trimmedName = name.trim();
   if (!trimmedName) {
-    throw new Error('profile name is required');
+    throw new UiError(uiMessage('errors:profiles.nameRequired'));
   }
   const profiles = readBackendProfilesStorage();
   const isFirstProfile = Object.keys(profiles).length === 0;
@@ -1142,11 +1145,11 @@ export async function updateBackendProfile(name: string, profile: Record<string,
 export async function deleteBackendProfile(name: string) {
   const trimmedName = name.trim();
   if (!trimmedName) {
-    throw new Error('profile name is required');
+    throw new UiError(uiMessage('errors:profiles.nameRequired'));
   }
   const profiles = readBackendProfilesStorage();
   if (!(trimmedName in profiles)) {
-    throw new Error(`profile not found: ${trimmedName}`);
+    throw new UiError(uiMessage('errors:profiles.notFound', { name: trimmedName }));
   }
   delete profiles[trimmedName];
   writeBackendProfilesStorage(profiles);
@@ -1177,13 +1180,13 @@ function uniqueProfileName(base: string, profiles: BackendProfilesMap): string {
 export async function copyBackendProfile(sourceName: string) {
   const from = sourceName.trim();
   if (!from) {
-    throw new Error('profile name is required');
+    throw new UiError(uiMessage('errors:profiles.nameRequired'));
   }
   const profiles = readBackendProfilesStorage();
   if (!(from in profiles)) {
-    throw new Error(`profile not found: ${from}`);
+    throw new UiError(uiMessage('errors:profiles.notFound', { name: from }));
   }
-  const copyName = uniqueProfileName(`${from}-副本`, profiles);
+  const copyName = uniqueProfileName(resolveMessage(uiMessage('errors:profiles.copyName', { name: from })), profiles);
   profiles[copyName] = cloneBackendProfile(profiles[from]);
   writeBackendProfilesStorage(profiles);
   return { success: true, name: copyName };
@@ -1217,20 +1220,20 @@ export async function renameBackendProfile(oldName: string, newName: string) {
   const from = oldName.trim();
   const to = newName.trim();
   if (!from) {
-    throw new Error('profile name is required');
+    throw new UiError(uiMessage('errors:profiles.nameRequired'));
   }
   if (!to) {
-    throw new Error('配置名称不能为空');
+    throw new UiError(uiMessage('errors:profiles.nameRequired'));
   }
   if (from === to) {
     return { success: true, name: to };
   }
   const profiles = readBackendProfilesStorage();
   if (!(from in profiles)) {
-    throw new Error(`profile not found: ${from}`);
+    throw new UiError(uiMessage('errors:profiles.notFound', { name: from }));
   }
   if (to in profiles) {
-    throw new Error(`配置「${to}」已存在`);
+    throw new UiError(uiMessage('errors:profiles.alreadyExists', { name: to }));
   }
   // 保持列表原有顺序，只换 key
   const renamed: BackendProfilesMap = {};
@@ -2337,7 +2340,7 @@ export function subscribeAgentStream(
         headers: { Accept: 'text/event-stream' },
       });
       if (!response.ok || !response.body) {
-        throw new Error(`agent stream 请求失败：${response.status}`);
+        throw new UiError(uiMessage("errors:api.subscribeAgentStream_message_agentStreamFailed", { status: response.status }));
       }
       const reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8');
@@ -2360,7 +2363,7 @@ export function subscribeAgentStream(
         }
       }
       if (!closed && !controller.signal.aborted) {
-        throw new Error('Agent 事件流意外结束');
+        throw new UiError(uiMessage("errors:api.subscribeAgentStream_message_agent"));
       }
     } catch (err) {
       if (controller.signal.aborted) return;
@@ -2398,12 +2401,12 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     response = await fetch(`${baseUrl}${path}`, init);
   } catch {
-    throw new ApiError(`无法连接到后端：${baseUrl}`, 0);
+    throw new ApiError(uiMessage("errors:api.apiRequest_message_unableConnectionBackend", { baseUrl }), 0);
   }
 
   const data = (await response.json().catch(() => ({}))) as T & ErrorResponse;
   if (!response.ok) {
-    throw new ApiError(data.error || `请求失败：${response.status}`, response.status);
+    throw new ApiError(data.error || uiMessage("errors:api.apiRequest_message_failed", { status: response.status }), response.status);
   }
 
   return data;
@@ -2424,7 +2427,7 @@ export function getBackendBaseUrl() {
 
 function requireBackendBaseUrl() {
   const url = getBackendBaseUrl();
-  if (!url) throw new ApiError('本地后端尚未就绪，请在设置中重新连接。', 0);
+  if (!url) throw new ApiError(uiMessage("errors:api.requireBackendBaseUrl_message_backendNotSettingsReconnect"), 0);
   return url;
 }
 

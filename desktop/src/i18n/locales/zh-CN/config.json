@@ -1,0 +1,277 @@
+{
+  "backendSettingsSection": {
+    "backendSettingsSection_title_translationBackend": "翻译后端",
+    "backendSettingsSection_description_openAISakuraModelProxyConfig": "OpenAI兼容接口、Sakura本地模型和代理配置。",
+    "field_message_backendConfig": "全局后端配置",
+    "field_message_default": "跟随全局默认",
+    "field_message_projectConfig": "不使用（使用项目自身配置）",
+    "fieldHint_message_currentDefaultConfigModelSettingsChange": "当前默认配置为「{{defaultProfileName}}」，可在「模型设置」页面修改",
+    "fieldHint_message_notSettingsDefaultConfigModelSettingsSettings": "尚未设置默认配置，请在「模型设置」页面设置",
+    "fieldHint_message_translationConfigProjectBackendSettings": "翻译时将使用全局配置「{{selectedProfile}}」覆盖项目后端设置",
+    "fieldHint_message_configProjectBackendSettings": "将忽略全局配置，使用项目自身的后端设置",
+    "configForm_title_currentConfig": "当前使用全局配置：{{resolvedProfile}}",
+    "configForm_description_translationConfigProjectBackendSettingsChangeConfig": "翻译时将使用该配置覆盖项目后端设置。如需修改配置内容，请前往「模型设置」页面。",
+    "field_message_autoConcurrencyWorker": "自动调节并发 Worker",
+    "field_message_429AutoWorkerConcurrency": "根据近期 429 比例和响应延迟自动降/升 worker 并发"
+  },
+  "configSectionNav": {
+    "label_label_file": "文件读写",
+    "label_label_translationSettings": "翻译设置",
+    "label_label_translationBackend": "翻译后端",
+    "label_label_textProcess": "文本处理",
+    "label_label_dictionarySettings": "字典设置",
+    "label_label_problem": "问题分析",
+    "label_label_retranslate": "重翻关键字",
+    "label_label_problemFilter": "问题过滤",
+    "label_label_projectGuideline": "项目规范",
+    "projectConfigPageSaveBtn_message_saveConfig": "保存配置",
+    "projectConfigPageSaveBtn_title_notSaveChange": "有未保存的修改",
+    "projectConfigPageSidebar_message_yAMLSource": "YAML源码"
+  },
+  "dictionarySettingsSection": {
+    "dictionarySettingsSection_title_dictionarySettings": "字典设置",
+    "dictionarySettingsSection_description_gPTDictionaryFileConfigProjectDirProject": "译前/GPT/译后字典文件配置。(project_dir)代表在项目目录下",
+    "field_message_dictionaryFile": "通用字典文件夹",
+    "field_message_dictionary": "译前字典",
+    "field_message_countDictionaryFile": "每行一个字典文件名",
+    "field_message_gPTDictionary": "GPT字典",
+    "field_message_dictionaryVariant2": "译后字典",
+    "field_message_dictionaryName": "字典用在name字段(译前)",
+    "field_message_text": "是",
+    "field_message_textVariant2": "否",
+    "field_message_dictionaryNameGPT": "字典用在name字段(GPT)",
+    "field_message_dictionaryNameVariant2": "字典用在name字段(译后)",
+    "field_message_dictionaryVariant3": "字典排序"
+  },
+  "fileIOSettingsSection": {
+    "title_title_fileSplit": "文件分割",
+    "option_no": "no",
+    "option_num": "Num",
+    "option_equal": "Equal",
+    "title_title_textFormat": "文本格式",
+    "title_title_cache": "缓存与日志",
+    "option_debug": "debug",
+    "option_info": "info",
+    "option_warning": "warning",
+    "option_true": "true",
+    "option_false": "false",
+    "fileIOSettingsSection_title_file": "文件读写",
+    "fileIOSettingsSection_description_configFilePluginFileSplitTextFormat": "配置文件插件、文件分割、文本格式及缓存与日志保存方式。",
+    "pluginSection_message_filePlugin": "文件插件",
+    "field_message_autoAuto": "自动识别 (auto)",
+    "field_message_pluginFilePluginAutoCountFileSelect": "从全局插件管理中获取可用文件插件；「自动识别」按每个输入文件的类型分别选择插件，gt_input 可混放多种格式"
+  },
+  "keyListEditor": {
+    "keyListEditor_message_add": "输入关键字后按回车或点击添加",
+    "keyListEditor_message_emptyEntry": "暂无条目"
+  },
+  "problemAnalyzeSection": {
+    "validateAndCommitThreshold_setThresholdError_thresholdRequiredEnter0": "阈值不能为空，请输入大于 0 的整数",
+    "validateAndCommitThreshold_setThresholdError_thresholdInvalidEnter0": "阈值类型无效：请输入大于 0 的整数",
+    "problemAnalyzeSection_title_problem": "问题分析",
+    "problemAnalyzeSection_description_selectEnableTranslationProblemDetectItemTranslation": "选择启用的翻译质量问题检测项。翻译过程中命中的问题会写入缓存并展示在「浏览文本」页。",
+    "problemAnalyzeSection_message_loadBackendProblemItemFailed": "加载后端支持的问题项失败：{{loadError}}",
+    "problemAnalyzeSection_message_pendingLoadBackendProblemItem": "正在加载后端支持的问题项…",
+    "problemAnalyzeSectionToolbar_message_doneEnable": "已启用 {{count}} / {{value}}",
+    "problemAnalyzeSectionToolbar_message_doneEnable_other": "已启用 {{count}} / {{value}}",
+    "problemAnalyzeSectionItemBody_message_currentBackendNotProblemItemCancelConfig": "当前后端未声明此问题项，取消勾选将从配置中移除。",
+    "problemAnalyzeSectionThresholdLabel_message_sentenceThresholdAvgSentenceLengthThreshold": "长句判定阈值（avgSentenceLengthThreshold）",
+    "problemAnalyzeSectionThreshold_message_translationTextSentenceMarkSentenceDefault17Range": "译文平均分句长度超过此值时标记为\"单句过长\"。默认 17，建议范围 15~25。",
+    "problemAnalyzeSectionToolbar_message_doneEnable_one": "已启用 {{count}} / {{value}}"
+  },
+  "problemFilterSection": {
+    "label_label_filter": "过滤关键字",
+    "label_label_filterVariant2": "过滤白名单",
+    "problemFilterSection_title_problemFilter": "问题过滤",
+    "problemFilterSectionGroup_message_0Regex0FilterItemEntryRegex": "按<0>正则</0>过滤：每项是一条正则，命中问题项（任意位置）的那条就被丢掉。 如 <1>缺失.*标点</1>、<2>^残留日文：♪</2>。<3>原则上只过滤小类</3>：<4>残留日文</4>、<5>^残留日文：</5>这类整类写法会把大类里的真问题一起藏起来，不建议用。 想只按字面过滤某一条，把特殊字符转义（在「浏览文本」页点问题项后面的 - 号会自动转义）。",
+    "problemFilterSectionGroup_placeholder_regexJapanese": "输入正则（如 ^残留日文：）",
+    "problemFilterSectionGroup_emptyText_emptyFilter": "暂无过滤关键字",
+    "problemFilterSectionGroup_message_cacheFileIndexEntryTranslationTextEntrySkip": "按「缓存文件名:index」精确豁免某几条译文，等价于给该条勾选 skip_check： 不再检测、不计入统计。index 支持闭区间（如 01.json:12-15）。",
+    "problemFilterSectionGroup_placeholder_cacheFileIndex01Json1201": "输入 缓存文件名:index（如 01.json:12 或 01.json:12-15）",
+    "problemFilterSectionGroup_emptyText_emptyEntry": "暂无白名单条目"
+  },
+  "projectGuidelineSection": {
+    "load_normalizeError_readProjectGuidelineFailed": "读取项目规范失败",
+    "handleSave_normalizeError_saveProjectGuidelineFailed": "保存项目规范失败",
+    "projectGuidelineSection_title_projectTranslationGuideline": "项目翻译规范",
+    "projectGuidelineSection_description_countProjectTranslationTranslationGuidelineGuideline": "针对这个项目的翻译要求：翻译时会拼在全局规范之后，与之冲突时以本规范为准。",
+    "projectGuidelineSection_actions_read": "重新读取",
+    "projectGuidelineSection_title_notSaveChangeFileRead": "放弃未保存的修改，从文件重新读取",
+    "projectGuidelineSection_title_currentEmptyNotSaveChange": "当前没有未保存的修改",
+    "projectGuidelineSection_message_saveGuideline": "保存规范",
+    "projectGuidelineSectionBody_title_projectGuideline": "项目规范",
+    "projectGuidelineSectionHint_div_file": "文件：",
+    "projectGuidelineSectionHint_message_projectDirectoryProject": "（位于项目目录内，跟项目一起走）",
+    "projectGuidelineSectionHint_message_notCreateSave": "尚未创建，保存后生成",
+    "projectGuidelineSectionHint_message_save0Translation0EffectivePendingTranslation": "改完保存后，<0>下一次启动翻译</0>才生效；正在跑的翻译不受影响。",
+    "projectGuidelineSectionBody_title_pendingReadProjectGuideline": "正在读取项目规范…",
+    "projectGuidelineSectionFoot_message_notSaveChange": "有未保存的修改",
+    "projectGuidelineSectionFoot_message_doneSave": "已保存",
+    "projectGuidelineSectionFoot_message_done": "已是最新",
+    "projectGuidelineSectionFoot_message_text": "{{count}} 字符",
+    "projectGuidelineSectionFoot_message_text_other": "{{count}} 字符",
+    "projectGuidelineSectionFoot_message_ctrlCmdSSave": "Ctrl / Cmd + S 保存",
+    "projectGuidelineSectionFoot_message_text_one": "{{count}} 字符"
+  },
+  "retranslKeySection": {
+    "retranslKeySection_title_problemFilter": "问题过滤关键字",
+    "retranslKeySection_title_retranslate": "重翻关键字",
+    "retranslKeySection_description_sourceTranslationTextProblemSentenceRetranslate": "原文、译文、问题中命中这些关键字的句子会在下次启动时被重翻。",
+    "retranslKeySection_placeholder_problemAdd": "输入问题关键字后按回车或点击添加",
+    "retranslKeySection_placeholder_add": "输入关键字后按回车或点击添加",
+    "retranslKeySection_emptyText_emptyFilter": "暂无过滤关键字",
+    "retranslKeySection_emptyText_emptyRetranslateAddSentenceTranslation": "暂无重翻关键字。添加后，下次启动时命中这些关键字的句子会被重新翻译。"
+  },
+  "textProcessingSettingsSection": {
+    "textProcessingSettingsSection_title_textProcess": "文本处理",
+    "textProcessingSettingsSection_description_enableTextPluginConfigTranslationTextProcess": "启用文本插件，配置翻译前后的文本处理规则。",
+    "pluginSection_message_textPlugin": "文本插件",
+    "pluginCheckItemHeader_message_v": "v{{version}}",
+    "pluginSection_message_notTextPlugin": "未找到可用的文本插件"
+  },
+  "translationSettingsSection": {
+    "option_true": "true",
+    "option_false": "false",
+    "option_zhCn": "zh-cn",
+    "option_zhTw": "zh-tw",
+    "option_en": "en",
+    "option_ja": "ja",
+    "option_ko": "ko",
+    "option_ru": "ru",
+    "option_fr": "fr",
+    "option_name": "name",
+    "option_size": "size",
+    "translationSettingsSection_title_translationSettings": "翻译设置",
+    "translationSettingsSection_description_configTargetLanguageTranslationConcurrencySentenceContext": "配置目标语言、翻译并发、单次句数、上下文和重试策略。"
+  },
+  "projectConfigPage": {
+    "projectConfigPage_normalizeError_loadConfigFailed": "加载配置失败",
+    "handleSave_normalizeError_saveConfigFailed": "保存配置失败",
+    "handleReextract_setReextractError_configSaveFailedNotStartExtract": "配置保存失败，未开始重新提取。",
+    "handleReextract_normalizeError_extractSourceFailed": "重新提取原文失败",
+    "projectConfigPage_title_configEdit": "配置编辑",
+    "projectConfigPage_title_loadConfig": "加载配置中…",
+    "projectConfigPage_description_pendingRead": "正在读取 {{configFileName}}。",
+    "projectConfigPage_title_loadConfigFailed": "加载配置失败",
+    "projectConfigPage_description_editProjectConfigFile": "可视化编辑项目配置文件 {{configFileName}}",
+    "projectConfigPageMain_title_configSaveFailed": "配置保存失败",
+    "projectConfigPageMain_title_configDoneSave": "配置已保存",
+    "projectConfigPageMain_description_currentProjectConfigDoneSuccess": "当前项目配置已成功写入磁盘。",
+    "sectionFadeInProjectConfigFields_title_yAMLSource": "YAML源码",
+    "sectionFadeInProjectConfigFields_description_editYAMLConfigSourcePreviewChange": "直接编辑YAML配置源码（只读预览，修改请使用上方表单）",
+    "yamlPreview_message_config": "无配置数据",
+    "pluginSettingRow_message_sourceExtract": "原文提取",
+    "pluginReextractButton_message_pendingSaveConfig": "正在保存配置…",
+    "pluginReextractButton_message_pendingExtract": "正在重新提取…",
+    "pluginReextractButton_message_extractSource": "重新提取原文",
+    "pluginSettingRowControl_message_saveCurrentConfigExtractPluginProcessAll": "保存当前配置，并重新提取此插件处理的全部输入文件。已有翻译缓存会保留。",
+    "pluginSettingRowControl_message_notPluginProcessFile": "未找到由此插件处理的输入文件。",
+    "pluginSettingRowControl_message_extractCompleteSuccessCountFileSentenceFailed": "重新提取完成：成功 {{count}} 个文件，共 {{total_entries}} 句；失败 {{count2}} 个文件。",
+    "pluginSettingRowControl_message_extractCompleteSuccessCountFileSentenceFailed_other": "重新提取完成：成功 {{count}} 个文件，共 {{total_entries}} 句；失败 {{count2}} 个文件。",
+    "pluginSettingRowControl_message_failedFile": "失败文件及原因",
+    "pluginSettingRowControl_message_extractCompleteSuccessCountFileSentenceFailed_one": "重新提取完成：成功 {{count}} 个文件，共 {{total_entries}} 句；失败 {{count2}} 个文件。"
+  },
+  "fields": {
+    "splitFile": {
+      "label": "文件分割",
+      "description": "单文件分片模式：no 关闭，Num 按句数切片，Equal 按份数均分。"
+    },
+    "splitFileNum": {
+      "label": "分割数量",
+      "description": "Num 模式下表示每片句数；Equal 模式下表示分片总数。"
+    },
+    "splitFileCrossNum": {
+      "label": "分割交叉句数",
+      "description": "分片间重叠句数，可提升片段衔接质量（常用 0 或 10）。"
+    },
+    "linebreakSymbol": {
+      "label": "换行符",
+      "description": "JSON 内换行符类型，供问题检测/自动修复使用。"
+    },
+    "save_steps": {
+      "label": "缓存保存频率",
+      "description": "每处理 N 个批次保存一次缓存。"
+    },
+    "loggingLevel": {
+      "label": "日志级别",
+      "description": "debug 详细，info 常规，warning 仅警告。"
+    },
+    "saveLog": {
+      "label": "保存日志到文件",
+      "description": "是否将运行日志写入文件。"
+    },
+    "workersPerProject": {
+      "label": "并发文件数",
+      "description": "项目级并行文件数；单文件并行需配合「文件读写」中的「文件分割」。"
+    },
+    "gpt_numPerRequestTranslate": {
+      "label": "单次翻译句数",
+      "description": "每次请求打包的句子数，建议不超过 16。"
+    },
+    "gpt_dynamicNumPerRequestTranslate": {
+      "label": "动态句数调整",
+      "description": "开启后根据模型解析错误自动降低句数，稳定后逐步提升。"
+    },
+    "gpt_dynamicNumPerRequestTranslate_min": {
+      "label": "动态最小句数",
+      "description": "动态调整时允许降到的最小单次翻译句数。"
+    },
+    "gpt_dynamicNumPerRequestTranslate_max": {
+      "label": "动态最大句数",
+      "description": "动态调整时允许升到的最大单次翻译句数。"
+    },
+    "language": {
+      "label": "目标语言",
+      "description": "翻译输出语言。"
+    },
+    "sortBy": {
+      "label": "翻译顺序",
+      "description": "name 按文件名，size 优先大文件（并行时通常更快）。"
+    },
+    "gpt_multiTurn": {
+      "label": "多轮对话翻译",
+      "description": "ForGal / ForNovel 默认开启，连续批次共享对话，保持人物称呼和文风一致。"
+    },
+    "gpt_contextNum": {
+      "label": "上下文句数",
+      "description": "多轮会话开始或重置时补充的前文句数；关闭多轮时每次携带。0 表示不补充前文，常用 8。"
+    },
+    "gpt_translation_guideline": {
+      "label": "翻译规范",
+      "description": "全局翻译规范文件（位于 translation_guidelines 文件夹）。本项目的专属规范在左侧「项目规范」页，翻译时会拼在这份之后、冲突时以项目规范为准。"
+    },
+    "gpt_multiTurn_maxTurns": {
+      "label": "会话最多轮数",
+      "description": "ForGal / ForNovel 每个会话的请求轮数，默认 8；达到后新开会话。"
+    },
+    "gpt_multiTurn_maxChars": {
+      "label": "会话字符预算",
+      "description": "历史消息（含思考）与新请求的字符预算，默认 24000；超限后新开会话，单个批次不截断。"
+    },
+    "start_time": {
+      "label": "定时启动",
+      "description": "24 小时制时间（如 00:30）；留空则立即启动。",
+      "placeholder": "留空则立即启动"
+    },
+    "skipH": {
+      "label": "跳过敏感句",
+      "description": "是否跳过可能触发敏感词检测的句子。"
+    },
+    "smartRetry": {
+      "label": "智能重试",
+      "description": "解析失败时自动缩小批次并重置上下文，减少无效重试。"
+    },
+    "retranslFail": {
+      "label": "重翻失败句",
+      "description": "启动时是否自动重翻标记为 (Failed) 的句子。"
+    },
+    "gpt_enhance_jailbreak": {
+      "label": "改善拒答",
+      "description": "启用后可降低模型拒答概率。"
+    },
+    "gpt_token_limit": {
+      "label": "Token限制(Sakura)",
+      "description": "Sakura 场景下单轮 token 上限；0 表示不限制。"
+    }
+  }
+}

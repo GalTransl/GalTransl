@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../../i18n";
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '../../components/Button';
@@ -14,6 +15,7 @@ import { useConnection } from '../connection/ConnectionContext';
  * （或点遮罩、按 Esc）只是这次先不弹，下次启动依然会提醒。
  */
 export function UpdateNotice() {
+  useUiLanguage();
   const { versionInfo } = useConnection();
   const [ignoredVersion, setIgnoredVersion] = useState(() => getIgnoredUpdateVersion());
   const [closedForNow, setClosedForNow] = useState(false);
@@ -68,8 +70,8 @@ export function UpdateNotice() {
           type="button"
           className="update-notice__close"
           onClick={() => setClosedForNow(true)}
-          title="稍后提醒"
-          aria-label="稍后提醒"
+          title={translate("common:updateNotice.updateNoticeClose_title_text")}
+          aria-label={translate("common:updateNotice.updateNoticeClose_ariaLabel_text")}
         >
           <Icon name="close" size={13} />
         </button>
@@ -79,35 +81,27 @@ export function UpdateNotice() {
             <Icon name="sparkle" size={18} />
           </span>
           <div className="update-notice__heading">
-            <h3 className="update-notice__title" id="update-notice-title">
-              发现新版本
-            </h3>
-            <p className="update-notice__subtitle">GalTransl 有新版本可以下载了。</p>
+            <h3 className="update-notice__title" id="update-notice-title">{translate("common:updateNotice.updateNoticeHeading_message_version")}</h3>
+            <p className="update-notice__subtitle">{translate("common:updateNotice.updateNoticeHeading_message_galTranslVersion")}</p>
           </div>
         </header>
 
         <dl className="update-notice__versions">
           <div className="update-notice__version-row">
-            <dt>当前版本</dt>
-            <dd>v{currentVersion || '—'}</dd>
+            <dt>{translate("common:updateNotice.updateNoticeVersionRow_message_currentVersion")}</dt>
+            <dd>{translate("common:updateNotice.updateNoticeVersionRow_message_v", { value: currentVersion || '—' })}</dd>
           </div>
           <div className="update-notice__version-row update-notice__version-row--latest">
-            <dt>最新版本</dt>
-            <dd>v{latestVersion}</dd>
+            <dt>{translate("common:updateNotice.updateNoticeVersionRowUpdateNoticeVersionRowLatest_message_version")}</dt>
+            <dd>{translate("common:updateNotice.updateNoticeVersionRowUpdateNoticeVersionRowLatest_message_v", { latestVersion: latestVersion })}</dd>
           </div>
         </dl>
 
-        <p className="update-notice__hint">
-          到发布页下载新版压缩包，解压后覆盖原目录即可；项目和翻译缓存都不受影响。
-        </p>
+        <p className="update-notice__hint">{translate("common:updateNotice.updateNotice_message_directoryProjectTranslationCache")}</p>
 
         <div className="update-notice__actions">
-          <Button type="button" variant="secondary" onClick={handleIgnore}>
-            忽略本次更新
-          </Button>
-          <Button type="button" onClick={handleOpenDownload}>
-            打开下载页面
-          </Button>
+          <Button type="button" variant="secondary" onClick={handleIgnore}>{translate("common:updateNotice.updateNoticeActions_message_update")}</Button>
+          <Button type="button" onClick={handleOpenDownload}>{translate("common:updateNotice.updateNoticeActions_message_open")}</Button>
         </div>
       </div>
     </div>,

@@ -9,6 +9,7 @@
 """
 
 import os
+import json
 import re
 import unittest
 
@@ -24,7 +25,7 @@ _PAGE = os.path.join(
 )
 # TOOL_META 的对象字面量：每条键缩进两个空格
 _ENTRY = re.compile(r"^\s{2}([a-z_][a-z0-9_]*):\s*\{", re.M)
-_ACTION = re.compile(r"action:\s*'([^']*)'")
+_ACTION = re.compile(r'get action\(\)\s*\{\s*return translate\("([^"]+)"\)')
 _CJK = re.compile(r"[\u4e00-\u9fff]")
 
 
@@ -74,7 +75,12 @@ class ToolMetaLabelTests(unittest.TestCase):
         for name, entry in _entries():
             match = _ACTION.search(entry)
             self.assertIsNotNone(match, f"{name} 没有 action")
-            action = match.group(1)
+            namespace, key = match.group(1).split(":", 1)
+            locale_path = os.path.join(os.path.dirname(_PAGE), "..", "..", "i18n", "locales", "zh-CN", namespace + ".json")
+            with open(locale_path, encoding="utf-8") as handle:
+                action = json.load(handle)
+            for part in key.split("."):
+                action = action[part]
             self.assertTrue(_CJK.search(action), f"{name} 的 action 不是中文：{action!r}")
 
 

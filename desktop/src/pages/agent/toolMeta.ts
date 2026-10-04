@@ -1,3 +1,4 @@
+import { t as translate } from "../../i18n/core";
 import type { IconName } from '../../components/Icon';
 import type { ActivityItem } from './timeline';
 
@@ -16,63 +17,63 @@ type ToolMeta = {
 
 const TOOL_META: Record<string, ToolMeta> = {
   get_plugin_settings: {
-    action: '查看插件设置', running: '正在查看插件设置', verb: '查看', icon: 'plug',
-    summary: (args) => String(args?.plugin_name || '全部插件'),
+    get action() { return translate("agent:tools.get_plugin_settings.action"); }, get running() { return translate("agent:tools.get_plugin_settings.running"); }, get verb() { return translate("agent:tools.get_plugin_settings.verb"); }, icon: 'plug',
+    summary: (args) => String(args?.plugin_name || translate("agent:toolMeta.summary_string_allPlugin")),
   },
   get_project_overview: {
-    action: '了解项目',
-    running: '了解项目',
+    get action() { return translate("agent:tools.get_project_overview.action"); },
+    get running() { return translate("agent:tools.get_project_overview.running"); },
     verb: '',
     icon: 'folder-open',
     // 带了 include 就亮出来，界面上一眼看出这次只取了哪几段
     summary: (a) =>
       Array.isArray(a?.include) && a.include.length
-        ? `按需：${a.include.map((s) => str(s)).join('、')}`
-        : '读取项目概况',
+        ? translate("agent:toolMeta.summary_message_text", { value: a.include.map((s) => str(s)).join('、') })
+        : translate("agent:toolMeta.summary_message_readProject"),
   },
-  update_project_config: { action: '修改项目配置', running: '修改项目配置', verb: '', icon: 'sliders', summary: () => '调整翻译参数/规范等设置' },
-  list_input_files: { action: '查看原文文件清单', running: '查看原文文件清单', verb: '', icon: 'archive', summary: () => '列出待翻译文件与句数' },
-  read_input_file: { action: '读取原文', running: '读取原文', verb: '', icon: 'file-text', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
+  update_project_config: { get action() { return translate("agent:tools.update_project_config.action"); }, get running() { return translate("agent:tools.update_project_config.running"); }, verb: '', icon: 'sliders', summary: () => translate("agent:toolMeta.summary_message_translationGuidelineSettings") },
+  list_input_files: { get action() { return translate("agent:tools.list_input_files.action"); }, get running() { return translate("agent:tools.list_input_files.running"); }, verb: '', icon: 'archive', summary: () => translate("agent:toolMeta.summary_message_translationFileSentence") },
+  read_input_file: { get action() { return translate("agent:tools.read_input_file.action"); }, get running() { return translate("agent:tools.read_input_file.running"); }, verb: '', icon: 'file-text', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
   read_guideline: {
-    action: '读取翻译规范',
-    running: '读取翻译规范',
+    get action() { return translate("agent:tools.read_guideline.action"); },
+    get running() { return translate("agent:tools.read_guideline.running"); },
     verb: '',
     icon: 'bookmark',
-    summary: (a) => (str(a?.scope) === 'project' ? '项目规范' : str(a?.name)),
+    summary: (a) => (str(a?.scope) === 'project' ? translate("agent:toolMeta.summary_message_projectGuideline") : str(a?.name)),
   },
   write_project_guideline: {
-    action: '修改项目规范',
-    running: '修改项目规范',
+    get action() { return translate("agent:tools.write_project_guideline.action"); },
+    get running() { return translate("agent:tools.write_project_guideline.running"); },
     verb: '',
     icon: 'pencil',
     summary: (a) => {
       const mode = str(a?.mode);
-      if (mode === 'overwrite') return '整份覆写';
-      if (mode === 'append') return '增写';
-      if (mode === 'replace') return '替换一段';
+      if (mode === 'overwrite') return translate("agent:toolMeta.summary_message_textVariant2");
+      if (mode === 'append') return translate("agent:toolMeta.summary_message_textVariant3");
+      if (mode === 'replace') return translate("agent:toolMeta.summary_message_replace");
       return mode;
     },
   },
-  list_dict_files: { action: '查看字典清单', running: '查看字典清单', verb: '', icon: 'books', summary: () => '列出项目字典文件' },
-  read_dict: { action: '读取字典', running: '读取字典', verb: '', icon: 'book', summary: (a) => str(a?.file_key) },
+  list_dict_files: { get action() { return translate("agent:tools.list_dict_files.action"); }, get running() { return translate("agent:tools.list_dict_files.running"); }, verb: '', icon: 'books', summary: () => translate("agent:toolMeta.summary_message_projectDictionaryFile") },
+  read_dict: { get action() { return translate("agent:tools.read_dict.action"); }, get running() { return translate("agent:tools.read_dict.running"); }, verb: '', icon: 'book', summary: (a) => str(a?.file_key) },
   save_dict: {
-    action: '保存字典',
-    running: '保存字典',
+    get action() { return translate("agent:tools.save_dict.action"); },
+    get running() { return translate("agent:tools.save_dict.running"); },
     verb: '',
     icon: 'save',
     // 带 category = 文件不存在时顺带新建（原 create_dict_file）
     summary: (a) =>
-      [str(a?.file_key), a?.category ? `新建${DICT_CATEGORY_LABELS[str(a.category)] || str(a.category)}字典` : '']
+      [str(a?.file_key), a?.category ? translate("agent:toolMeta.summary_categoryFilter_newDictionary", { value: DICT_CATEGORY_LABELS[str(a.category)] || str(a.category) }) : '']
         .filter(Boolean)
         .join(' · '),
   },
-  get_name_table: { action: '读取人名表', running: '读取人名表', verb: '', icon: 'user', summary: () => 'name替换表' },
-  save_name_table: { action: '保存人名表', running: '保存人名表', verb: '', icon: 'users', summary: (a) => (Array.isArray(a?.names) ? `${a.names.length} 条` : '') },
-  start_translation: { action: '启动翻译', running: '启动翻译', verb: '', icon: 'play', summary: (a) => [str(a?.translator), ...(Array.isArray(a?.files) ? [`仅 ${a.files.length} 个文件`] : [])].filter(Boolean).join(' · ') },
+  get_name_table: { get action() { return translate("agent:tools.get_name_table.action"); }, get running() { return translate("agent:tools.get_name_table.running"); }, verb: '', icon: 'user', summary: () => translate("agent:toolMeta.summary_message_nameReplace") },
+  save_name_table: { get action() { return translate("agent:tools.save_name_table.action"); }, get running() { return translate("agent:tools.save_name_table.running"); }, verb: '', icon: 'users', summary: (a) => (Array.isArray(a?.names) ? translate("agent:toolMeta.summary_message_entry", { count: a.names.length }) : '') },
+  start_translation: { get action() { return translate("agent:tools.start_translation.action"); }, get running() { return translate("agent:tools.start_translation.running"); }, verb: '', icon: 'play', summary: (a) => [str(a?.translator), ...(Array.isArray(a?.files) ? [translate("agent:toolMeta.summary_filter_countFile", { count: a.files.length })] : [])].filter(Boolean).join(' · ') },
   run_subagents: {
     // 子代理：一次调用带一批任务，界面上每个子代理一行（见 SubagentList）
-    action: '派子代理',
-    running: '子代理并行中',
+    get action() { return translate("agent:tools.run_subagents.action"); },
+    get running() { return translate("agent:tools.run_subagents.running"); },
     verb: '',
     icon: 'users',
     summary: (a) => {
@@ -88,17 +89,17 @@ const TOOL_META: Record<string, ToolMeta> = {
       const files = tasks
         .map((task) => {
           const file = str((task as Record<string, unknown> | undefined)?.file);
-          return file === '*' ? '自动均分' : file; // "*" 是"全部均分"的写法，照抄出来没人看得懂
+          return file === '*' ? translate("agent:toolMeta.files_message_auto") : file; // "*" 是"全部均分"的写法，照抄出来没人看得懂
         })
         .filter(Boolean);
       const head = files.slice(0, 2).join('、');
-      const rest = files.length > 2 ? ` 等 ${files.length} 项` : '';
-      return `${total} 个 · ${head}${rest}`;
+      const rest = files.length > 2 ? translate("agent:toolMeta.rest_message_item", { count: files.length }) : '';
+      return translate("agent:toolMeta.summary_message_count", { total: total, head: head, rest: rest });
     },
   },
   ask_user: {
-    action: '询问用户',
-    running: '等你回答',
+    get action() { return translate("agent:tools.ask_user.action"); },
+    get running() { return translate("agent:tools.ask_user.running"); },
     verb: '',
     icon: 'help',
     summary: (a) => {
@@ -106,21 +107,21 @@ const TOOL_META: Record<string, ToolMeta> = {
       const first = questions[0] && typeof questions[0] === 'object'
         ? str((questions[0] as Record<string, unknown>).question)
         : '';
-      return [first, questions.length > 1 ? `共 ${questions.length} 题` : ''].filter(Boolean).join(' · ');
+      return [first, questions.length > 1 ? translate("agent:toolMeta.summary_filter_text", { count: questions.length }) : ''].filter(Boolean).join(' · ');
     },
   },
-  stop_translation: { action: '停止翻译', running: '停止翻译', verb: '', icon: 'stop', summary: () => '' },
-  wait: { action: '等待', running: '等待中', verb: '', icon: 'hourglass', summary: (a) => waitSummary(a) },
-  get_runtime: { action: '查询运行时', running: '查询运行时', verb: '', icon: 'settings', summary: () => '' },
-  list_problems: { action: '检查问题清单', running: '检查问题清单', verb: '', icon: 'search', summary: (a) => str(a?.problem_type) || '问题类型统计' },
-  manage_problem_filter: { action: '管理问题过滤', running: '管理问题过滤', verb: '', icon: 'filter', summary: (a) => [str(a?.action), Array.isArray(a?.keyword) ? a.keyword.map((k) => str(k)).join('、') : str(a?.keyword)].filter(Boolean).join(' · ') },
-  manage_problem_white_list: { action: '管理问题白名单', running: '管理问题白名单', verb: '', icon: 'filter', summary: (a) => [str(a?.action), Array.isArray(a?.entry) ? a.entry.map((k) => str(k)).join('、') : str(a?.entry)].filter(Boolean).join(' · ') },
-  read_transl_cache: { action: '查阅缓存', running: '查阅缓存', verb: '', icon: 'file-text', summary: translCacheSummary },
-  read_output: { action: '读取输出', running: '读取输出', verb: '', icon: 'file-text', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
-  search_input: { action: '搜索原文', running: '搜索原文', verb: '', icon: 'search-plus', summary: (a) => [str(a?.query), str(a?.filename), a?.context ? `±${a.context} 句上下文` : ''].filter(Boolean).join(' · ') },
+  stop_translation: { get action() { return translate("agent:tools.stop_translation.action"); }, get running() { return translate("agent:tools.stop_translation.running"); }, verb: '', icon: 'stop', summary: () => '' },
+  wait: { get action() { return translate("agent:tools.wait.action"); }, get running() { return translate("agent:tools.wait.running"); }, verb: '', icon: 'hourglass', summary: (a) => waitSummary(a) },
+  get_runtime: { get action() { return translate("agent:tools.get_runtime.action"); }, get running() { return translate("agent:tools.get_runtime.running"); }, verb: '', icon: 'settings', summary: () => '' },
+  list_problems: { get action() { return translate("agent:tools.list_problems.action"); }, get running() { return translate("agent:tools.list_problems.running"); }, verb: '', icon: 'search', summary: (a) => str(a?.problem_type) || translate("agent:toolMeta.summary_message_problemStats") },
+  manage_problem_filter: { get action() { return translate("agent:tools.manage_problem_filter.action"); }, get running() { return translate("agent:tools.manage_problem_filter.running"); }, verb: '', icon: 'filter', summary: (a) => [str(a?.action), Array.isArray(a?.keyword) ? a.keyword.map((k) => str(k)).join('、') : str(a?.keyword)].filter(Boolean).join(' · ') },
+  manage_problem_white_list: { get action() { return translate("agent:tools.manage_problem_white_list.action"); }, get running() { return translate("agent:tools.manage_problem_white_list.running"); }, verb: '', icon: 'filter', summary: (a) => [str(a?.action), Array.isArray(a?.entry) ? a.entry.map((k) => str(k)).join('、') : str(a?.entry)].filter(Boolean).join(' · ') },
+  read_transl_cache: { get action() { return translate("agent:tools.read_transl_cache.action"); }, get running() { return translate("agent:tools.read_transl_cache.running"); }, verb: '', icon: 'file-text', summary: translCacheSummary },
+  read_output: { get action() { return translate("agent:tools.read_output.action"); }, get running() { return translate("agent:tools.read_output.running"); }, verb: '', icon: 'file-text', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
+  search_input: { get action() { return translate("agent:tools.search_input.action"); }, get running() { return translate("agent:tools.search_input.running"); }, verb: '', icon: 'search-plus', summary: (a) => [str(a?.query), str(a?.filename), a?.context ? translate("agent:toolMeta.summary_filter_sentenceContext", { displayContext: a.context }) : ''].filter(Boolean).join(' · ') },
   patch_transl_cache: {
-    action: '修改译文',
-    running: '修改译文',
+    get action() { return translate("agent:tools.patch_transl_cache.action"); },
+    get running() { return translate("agent:tools.patch_transl_cache.running"); },
     verb: '',
     icon: 'pencil',
     // 一次调用可以跨多个文件（patches 每条带 file）：跨了就报文件数，
@@ -129,14 +130,14 @@ const TOOL_META: Record<string, ToolMeta> = {
     summary: (a) => {
       const patches = Array.isArray(a?.patches) ? (a.patches as Record<string, unknown>[]) : [];
       const files = new Set(patches.map((p) => str(p?.file) || str(a?.filename)).filter(Boolean));
-      const head = files.size > 1 ? `${files.size} 个文件` : '';
-      return [head, patches.length ? `${patches.length} 条` : '', a?.clear_comment ? '清空批注' : '']
+      const head = files.size > 1 ? translate("agent:toolMeta.head_message_countFile", { count: files.size }) : '';
+      return [head, patches.length ? translate("agent:toolMeta.summary_clearCommentFilter_entry", { count: patches.length }) : '', a?.clear_comment ? translate("agent:toolMeta.summary_clearCommentFilter_clearComment") : '']
         .filter(Boolean)
         .join(' · ') || str(a?.filename);
     },
   },
-  delete_transl_cache: { action: '删除缓存', running: '删除缓存', verb: '', icon: 'trash', summary: (a) => [str(a?.filename), str(a?.indexes)].filter(Boolean).join(' · ') },
-  read_history_archive: { action: '回查归档', running: '回查归档', verb: '', icon: 'archive', summary: (a) => [str(a?.chunk), str(a?.query)].filter(Boolean).join(' · ') || '列出归档' },
+  delete_transl_cache: { get action() { return translate("agent:tools.delete_transl_cache.action"); }, get running() { return translate("agent:tools.delete_transl_cache.running"); }, verb: '', icon: 'trash', summary: (a) => [str(a?.filename), str(a?.indexes)].filter(Boolean).join(' · ') },
+  read_history_archive: { get action() { return translate("agent:tools.read_history_archive.action"); }, get running() { return translate("agent:tools.read_history_archive.running"); }, verb: '', icon: 'archive', summary: (a) => [str(a?.chunk), str(a?.query)].filter(Boolean).join(' · ') || translate("agent:toolMeta.summary_message_archive") },
 };
 
 // 已并入别的工具的旧名字：旧会话的转录里还有这些调用，按合并后的工具显示（参数换成新工具的口径）。
@@ -147,7 +148,7 @@ const RETIRED_TOOL_ALIASES: Record<string, { name: string; args: (a: Record<stri
   create_dict_file: { name: 'save_dict', args: (a) => ({ file_key: a?.filename, category: a?.category }) },
 };
 
-const DEFAULT_TOOL_META: ToolMeta = { action: '调用工具', running: '调用工具', verb: '', icon: 'tool', summary: () => '' };
+const DEFAULT_TOOL_META: ToolMeta = { get action() { return translate("agent:toolMeta.action_action_textVariant2"); }, get running() { return translate("agent:toolMeta.running_running_text"); }, verb: '', icon: 'tool', summary: () => '' };
 
 /** 未收录进 TOOL_META 的工具：至少把原始工具名亮出来，不再只显示「调用工具」。 */
 export function toolMeta(name: string | undefined): ToolMeta {
@@ -160,7 +161,7 @@ export function toolMeta(name: string | undefined): ToolMeta {
   return { ...DEFAULT_TOOL_META, action: name, running: name };
 }
 
-const DICT_CATEGORY_LABELS: Record<string, string> = { pre: '译前', gpt: 'GPT', post: '译后' };
+const DICT_CATEGORY_LABELS: Record<string, string> = { get pre() { return translate("agent:toolMeta.pre_pre_text"); }, gpt: 'GPT', get post() { return translate("agent:toolMeta.post_post_text"); } };
 
 /** read_transl_cache 的 action（与后端 _cache_read_action 同一推断：有 query 是 search，有 filename 是 read）。 */
 function translCacheAction(a: Record<string, unknown> | undefined): string {
@@ -173,12 +174,12 @@ function translCacheAction(a: Record<string, unknown> | undefined): string {
 
 function translCacheSummary(a: Record<string, unknown> | undefined): string {
   const action = translCacheAction(a);
-  if (action === 'list') return ['缓存清单', str(a?.grep)].filter(Boolean).join(' · ');
+  if (action === 'list') return [translate("agent:toolMeta.translCacheSummary_filter_cacheList"), str(a?.grep)].filter(Boolean).join(' · ');
   if (action === 'search') {
     return [
-      `搜索「${str(a?.query)}」`,
+      translate("agent:toolMeta.translCacheSummary_strAQueryStrAFilenameAContextAContextFilter_search", { value: str(a?.query) }),
       str(a?.filename),
-      a?.context ? `±${a.context} 句上下文` : '',
+      a?.context ? translate("agent:toolMeta.translCacheSummary_strAQueryStrAFilenameAContextAContextFilter_sentenceContext", { displayContext: a.context }) : '',
     ].filter(Boolean).join(' · ');
   }
   return [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ');
@@ -198,10 +199,10 @@ function waitSummary(args: Record<string, unknown> | undefined): string {
   const jobId = typeof args?.job_id === 'string' ? args.job_id.trim() : '';
   if (totalSeconds <= 0) return reason;
   const duration = totalSeconds % 60 === 0 && totalSeconds >= 60
-    ? `${totalSeconds / 60} 分钟`
-    : `${totalSeconds} 秒`;
+    ? translate("agent:toolMeta.duration_message_minutes", { value: totalSeconds / 60 })
+    : translate("agent:toolMeta.duration_message_seconds", { totalSeconds: totalSeconds });
   const head = jobId
-    ? `等任务 ${jobId.length > 8 ? `${jobId.slice(0, 6)}…` : jobId} 结束或 ${duration}`
+    ? translate("agent:toolMeta.head_message_job", { value: jobId.length > 8 ? `${jobId.slice(0, 6)}…` : jobId, duration: duration })
     : duration;
   return reason ? `${head} · ${reason}` : head;
 }
@@ -241,8 +242,8 @@ export function askNotifyBody(item: { arguments?: unknown } | null): string {
   const first = list[0] && typeof list[0] === 'object' && !Array.isArray(list[0])
     ? str((list[0] as Record<string, unknown>).question).trim()
     : '';
-  const suffix = list.length > 1 ? `（共 ${list.length} 题）` : '';
-  return (first || 'Agent 提了一个问题，需要你选择') + suffix;
+  const suffix = list.length > 1 ? translate("agent:toolMeta.suffix_message_text", { count: list.length }) : '';
+  return (first || translate("agent:toolMeta.askNotifyBody_message_agentCountProblemSelect")) + suffix;
 }
 
 /** 这张工具行是不是"启动翻译"且拿到了 job_id（拿不到就退回原来的工具行）。 */

@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import vm from 'node:vm';
 import ts from 'typescript';
+import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
+const i18n = createTypeScriptLoader()(new URL('../src/i18n/core.ts', import.meta.url));
 
 // Test the public API helpers with the Tauri bridge and HTTP transport replaced.
 // Transform only import.meta so each test can select Vite's runtime environment.
@@ -19,16 +21,18 @@ const { outputText } = ts.transpileModule(source, {
   },
 });
 
-function loadApi({ native = true, dev = false, configured, invoke } = {}) {
+function loadApi({ native = true, dev = false, configured, invoke, storage } = {}) {
   const requests = [];
   const requestOptions = [];
   const exports = {};
   vm.runInNewContext(outputText, {
     exports,
     __importMeta: { env: { DEV: dev, VITE_BACKEND_URL: configured } },
-    window: native ? { __TAURI_INTERNALS__: {} } : {},
-    localStorage: { getItem: () => null },
+    window: { ...(native ? { __TAURI_INTERNALS__: {} } : {}), dispatchEvent: () => true },
+    localStorage: storage ?? { getItem: () => null },
+    CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options?.detail; } },
     require: (name) => {
+      if (name === '../i18n/core') return i18n;
       assert.equal(name, '@tauri-apps/api/core');
       return { invoke: invoke ?? (() => Promise.resolve({ url: 'http://127.0.0.1:45678' })) };
     },
@@ -43,6 +47,40 @@ function loadApi({ native = true, dev = false, configured, invoke } = {}) {
   });
   return { api: exports, requests, requestOptions };
 }
+
+test('localized profile copies preserve model values and rename updates saved references', async () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  };
+  const { api } = loadApi({ native: false, storage });
+  const config = { 'OpenAI-Compatible': { tokens: [{ modelName: 'model-a', stream: false }] } };
+  await api.createBackendProfile('original', config);
+  api.setSelectedBackendProfile('project', 'original');
+  const chineseCopy = await api.copyBackendProfile('original');
+  assert.equal(chineseCopy.name, 'original-副本');
+  await i18n.setUiLanguage('en');
+  try {
+    const englishCopy = await api.copyBackendProfile('original');
+    assert.equal(englishCopy.name, 'original-copy');
+    assert.equal((await api.copyBackendProfile('original')).name, 'original-copy-2');
+    await api.renameBackendProfile('original', 'renamed');
+    assert.equal(api.getDefaultBackendProfile(), 'renamed');
+    assert.equal(api.getAgentDefaultBackendProfile(), 'renamed');
+    assert.equal(api.getSelectedBackendProfile('project'), 'renamed');
+    const profiles = JSON.parse(values.get('galtransl-backend-profiles'));
+    assert.deepEqual(profiles.renamed, config);
+    assert.deepEqual(profiles[chineseCopy.name], config);
+    assert.deepEqual(profiles[englishCopy.name], config);
+    await assert.rejects(api.renameBackendProfile('renamed', ''), /Configuration name cannot be empty/);
+    await assert.rejects(api.renameBackendProfile('renamed', englishCopy.name), /already exists/);
+    await assert.rejects(api.copyBackendProfile('missing'), /Backend configuration not found/);
+  } finally {
+    await i18n.setUiLanguage('zh-CN');
+  }
+});
 
 test('plugin settings can save and re-extract within the same project', async () => {
   const { api, requests, requestOptions } = loadApi({ native: false });

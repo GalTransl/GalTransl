@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../../i18n";
 import { Panel } from '../../components/Panel';
 import { CustomSelect } from '../../components/CustomSelect';
 import { Switch } from '../../components/Switch';
@@ -28,21 +29,22 @@ export function BackendSettingsSection({
   onProxyChange,
   onDirty,
 }: BackendSettingsSectionProps) {
+  useUiLanguage();
   const resolvedProfile = selectedProfile === '__default__' ? defaultProfileName : selectedProfile;
   const commonConfig = (config?.common as Record<string, unknown>) || {};
   const autoAdjustWorkers = commonConfig.autoAdjustWorkers === true;
 
   return (
-    <Panel title="翻译后端" description="OpenAI兼容接口、Sakura本地模型和代理配置。">
+    <Panel title={translate("config:backendSettingsSection.backendSettingsSection_title_translationBackend")} description={translate("config:backendSettingsSection.backendSettingsSection_description_openAISakuraModelProxyConfig")}>
       <div className="config-form">
         <label className="field">
-          <span>全局后端配置</span>
+          <span>{translate("config:backendSettingsSection.field_message_backendConfig")}</span>
           <CustomSelect
             value={selectedProfile}
             onChange={(e) => onProfileChange(e.target.value)}
           >
-            <option value="__default__">跟随全局默认</option>
-            <option value="">不使用（使用项目自身配置）</option>
+            <option value="__default__">{translate("config:backendSettingsSection.field_message_default")}</option>
+            <option value="">{translate("config:backendSettingsSection.field_message_projectConfig")}</option>
             {backendProfileNames.map((name) => (
               <option key={name} value={name}>{name}</option>
             ))}
@@ -50,19 +52,19 @@ export function BackendSettingsSection({
           <span className="field__hint">
             {selectedProfile === '__default__'
               ? defaultProfileName
-                ? `当前默认配置为「${defaultProfileName}」，可在「模型设置」页面修改`
-                : '尚未设置默认配置，请在「模型设置」页面设置'
+                ? translate("config:backendSettingsSection.fieldHint_message_currentDefaultConfigModelSettingsChange", { defaultProfileName: defaultProfileName })
+                : translate("config:backendSettingsSection.fieldHint_message_notSettingsDefaultConfigModelSettingsSettings")
               : selectedProfile
-                ? `翻译时将使用全局配置「${selectedProfile}」覆盖项目后端设置`
-                : '将忽略全局配置，使用项目自身的后端设置'}
+                ? translate("config:backendSettingsSection.fieldHint_message_translationConfigProjectBackendSettings", { selectedProfile: selectedProfile })
+                : translate("config:backendSettingsSection.fieldHint_message_configProjectBackendSettings")}
           </span>
         </label>
 
         {resolvedProfile ? (
           <InlineFeedback
             tone="info"
-            title={`当前使用全局配置：${resolvedProfile}`}
-            description="翻译时将使用该配置覆盖项目后端设置。如需修改配置内容，请前往「模型设置」页面。"
+            title={translate("config:backendSettingsSection.configForm_title_currentConfig", { resolvedProfile: resolvedProfile })}
+            description={translate("config:backendSettingsSection.configForm_description_translationConfigProjectBackendSettingsChangeConfig")}
           />
         ) : (
           <BackendConfigEditor
@@ -73,7 +75,7 @@ export function BackendSettingsSection({
         )}
 
         <label className="field field--switch">
-          <span>自动调节并发 Worker</span>
+          <span>{translate("config:backendSettingsSection.field_message_autoConcurrencyWorker")}</span>
           <Switch
             checked={autoAdjustWorkers}
             onChange={(next) => {
@@ -81,7 +83,7 @@ export function BackendSettingsSection({
               onDirty();
             }}
           />
-          <span className="field__hint">根据近期 429 比例和响应延迟自动降/升 worker 并发</span>
+          <span className="field__hint">{translate("config:backendSettingsSection.field_message_429AutoWorkerConcurrency")}</span>
         </label>
 
         <ProxyConfigEditor

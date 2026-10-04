@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../../i18n";
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
 import { Panel } from '../../components/Panel';
@@ -14,24 +15,25 @@ type JobListProps = {
 };
 
 export function JobList({ jobs, jobsError, loading, onRefresh, refreshing }: JobListProps) {
+  useUiLanguage();
   return (
     <Panel
-      title="Jobs"
-      description="展示全部本地任务，运行中的任务会通过轮询自动更新状态与错误信息。"
+      title={translate("common:jobList.jobList_title_jobs")}
+      description={translate("common:jobList.jobList_description_allJobRunningJobAutoUpdateStatus")}
       actions={
         <Button disabled={refreshing} onClick={onRefresh} variant="secondary">
-          {refreshing ? '刷新中…' : '刷新列表'}
+          {refreshing ? translate("common:jobList.jobList_message_text") : translate("common:jobList.jobList_message_textVariant2")}
         </Button>
       }
     >
-      {jobsError ? <InlineFeedback tone="error" title="加载任务失败" description={jobsError} /> : null}
+      {jobsError ? <InlineFeedback tone="error" title={translate("common:jobList.jobList_title_loadJobFailed")} description={jobsError} /> : null}
 
-      {loading ? <EmptyState title="正在载入任务" description="正在请求后端任务列表，请稍候。" /> : null}
+      {loading ? <EmptyState title={translate("common:jobList.jobList_title_pendingJob")} description={translate("common:jobList.jobList_description_pendingBackendJob")} /> : null}
 
       {!loading && jobs.length === 0 ? (
         <EmptyState
-          title="还没有任务"
-          description="先在左侧选择翻译模板并提交一个本地项目，任务状态会显示在这里。"
+          title={translate("common:jobList.jobList_title_emptyJob")}
+          description={translate("common:jobList.jobList_description_selectTranslationSubmitCountProjectJobStatus")}
         />
       ) : null}
 

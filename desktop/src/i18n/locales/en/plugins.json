@@ -1,0 +1,489 @@
+{
+  "pluginSettingsEditor": {
+    "pluginSettingsEditor_message_pluginConfigSettingsItem": "This plugin has no configurable settings",
+    "pluginSettingsPanel_message_settings": "{{display_name}} settings",
+    "pluginSettingsAdvanced_message_advancedSettingsItem": "Advanced settings ({{count}})",
+    "pluginSettingsAdvanced_message_advancedSettingsItem_other": "Advanced settings ({{count}})",
+    "label_label_currentCustom": "Current value: {{value}} (custom)",
+    "pluginSettingRow_message_currentCustom": "Current value: {{value}} (custom)",
+    "objectSettingInput_message_enterJSONCurrentEditNotKeepSettings": "Enter a valid JSON object; the current edit is not applied and the last valid settings are kept.",
+    "pluginSettingsAdvanced_message_advancedSettingsItem_one": "Advanced setting ({{count}})"
+  },
+  "pluginsPage": {
+    "pluginsPage_normalizeError_loadPluginFailed": "Failed to load the plugin list",
+    "pluginsPage_title_plugin": "Plugin management",
+    "pluginsPage_title_loadPlugin": "Loading plugins…",
+    "pluginsPage_description_pendingReadCurrentFilePluginTextPlugin": "Reading the file plugins and text plugins that are currently available.",
+    "pluginsPage_title_loadPluginFailed": "Failed to load the plugin list",
+    "pluginsPage_description_translationPluginCountPlugin": "View and manage the translation plugins; there are {{count}} of them.",
+    "pluginsPage_description_translationPluginCountPlugin_other": "View and manage the translation plugins; there are {{count}} of them.",
+    "pluginTabs_message_all": "All ({{count}})",
+    "pluginTabs_message_all_other": "All ({{count}})",
+    "pluginTabs_message_filePlugin": "File plugins ({{count}})",
+    "pluginTabs_message_filePlugin_other": "File plugins ({{count}})",
+    "pluginTabs_message_textPlugin": "Text plugins ({{count}})",
+    "pluginTabs_message_textPlugin_other": "Text plugins ({{count}})",
+    "pluginList_title_currentFilterEmptyPlugin": "No plugins match the current filter",
+    "pluginList_title_emptyPlugin": "No plugins yet",
+    "pluginList_description_pluginCheckBackendPluginDirectory": "Try switching to another plugin type, or check the backend plugin directory.",
+    "pluginList_description_backendNotBackPlugin": "The backend has not returned any plugin information yet.",
+    "pluginCardHeader_message_v": "v{{version}}",
+    "pluginCardHeader_message_file": "File",
+    "pluginCardHeader_message_text": "Text",
+    "pluginCardMeta_message_author": "Author: {{author}}",
+    "pluginCardMeta_message_module": "Module: {{module}}",
+    "pluginCardSettings_message_settingsItem": "Settings",
+    "pluginsPage_description_translationPluginCountPlugin_one": "View and manage the translation plugins; there is {{count}} of them.",
+    "pluginTabs_message_all_one": "All ({{count}})",
+    "pluginTabs_message_filePlugin_one": "File plugin ({{count}})",
+    "pluginTabs_message_textPlugin_one": "Text plugin ({{count}})"
+  },
+  "builtin": {
+    "file_epub_epub": {
+      "name": "Epub files",
+      "description": "Translates Epub files, with support for automatic name detection, bilingual display, reduced font size, and file splitting so a single file can be translated by several threads. Parts of the code and the regular expressions come from Ainiee.",
+      "settings": {
+        "autoDetectNames": {
+          "label": "Detect names automatically",
+          "description": "Extracts the speaker and the body text from a paragraph with a regular expression."
+        },
+        "namePattern": {
+          "label": "Name detection rule",
+          "description": "The regular expression must contain the two named groups name and message, which match the name and the body text respectively."
+        },
+        "nameTemplate": {
+          "label": "Name and text join format",
+          "description": "Joins the detected name and the translation again; {name} stands for the name and {message} for the body text."
+        },
+        "bilingual": {
+          "label": "Bilingual display",
+          "description": "Shows the translation and the source text together in the output ebook."
+        },
+        "sourceColor": {
+          "label": "Source text color",
+          "description": "The CSS color of the source text in bilingual mode, e.g. #808080 for gray."
+        },
+        "sourceScale": {
+          "label": "Source text size ratio",
+          "description": "The source text size relative to the normal size in bilingual mode; 0.8 means 80%."
+        },
+        "splitChapters": {
+          "label": "Split chapters and translate them in parallel",
+          "description": "Splits the EPUB into chapters so they can be processed concurrently, and merges them back into an ebook when done."
+        }
+      }
+    },
+    "file_galtransl_json": {
+      "name": "GalTransl standard json",
+      "description": "The standard name (optional)-message json format; including a name gives better results",
+      "settings": {
+        "output_with_src": {
+          "label": "Keep the source text in the output",
+          "description": "Keeps the source text in the output JSON so it can be compared with the translation."
+        }
+      }
+    },
+    "file_i18n_json": {
+      "name": "Key-value json files",
+      "description": "Handles json files in any dictionary format. It can be used for i18n translation or for translating the output of mtool (but text extracted by such tools has no names, so VNT or SE is recommended for galgames)"
+    },
+    "file_msgtool_script": {
+      "name": "Galgame script files",
+      "description": "Reads and writes galgame script files directly through res/msg_tool.exe (lifegpc/msg-tool). The json output of msg-tool is already in GalTransl's [{\"name\"?, \"message\"}] format, so no intermediate conversion is needed. Supports kirikiri, BGI/Ethornell, Yu-Ris, Artemis, CatSystem2, Circus, Musica, QLIE, Softpal, WillPlus/AdvHD, ExHibit, Favorite, Escu:de, Entis GLS and other engines. SExtractor-compatible JIS substitution can be enabled, and uif_config.json is generated in the output directory.",
+      "settings": {
+        "msg_tool_path": {
+          "label": "Tool path",
+          "description": "Leave it empty to use the bundled msg_tool.exe. Fill in an executable path only when you need a different version of the tool."
+        },
+        "script_type": {
+          "label": "Script engine",
+          "description": "Auto-detect is usually the right choice. For BGI files without an extension you can pick BGI / Ethornell; a manual choice applies to every script this plugin handles.",
+          "options": {
+            "default": "Auto-detect (recommended)",
+            "bgi": "BGI / Ethornell (including scripts without an extension)",
+            "bgi_bsi": "BGI BSI (._bsi)",
+            "bgi_bp": "BGI BP (._bp)",
+            "kirikiri": "KiriKiri KAG (.ks)",
+            "kirikiri_scn": "KiriKiri SCN (.scn)",
+            "kirikiri_simple_crypt": "KiriKiri SimpleCrypt text",
+            "kirikiri_tjs2": "KiriKiri compiled TJS2",
+            "kirikiri_tjs_ns0": "KiriKiri TJS NS0",
+            "artemis": "Artemis AST",
+            "artemis_asb": "Artemis ASB / IET",
+            "artemis_txt": "Artemis generic TXT",
+            "artemis_panmimisoft_txt": "Artemis ぱんみみそふと TXT",
+            "cat_system": "CatSystem2 CST",
+            "cat_system_cstl": "CatSystem2 CSTL",
+            "circus": "Circus MES",
+            "entis_gls": "Entis GLS SRCXML",
+            "entis_gls_csx": "Entis GLS CSX",
+            "escude": "Escu:de BIN",
+            "escude_list": "Escu:de list script",
+            "ex_hibit": "ExHibit RLD",
+            "favorite": "Favorite HCB",
+            "hexen_haus": "HexenHaus BIN",
+            "musica": "Musica SC",
+            "qlie": "QLIE S",
+            "silky": "Silky MES",
+            "silky_map": "Silky MAP",
+            "softpal": "Softpal SRC",
+            "will_plus_ws2": "WillPlus / AdvHD WS2",
+            "yaneurao_itufuru": "Yaneurao Itufuru",
+            "yuris_txt": "Yu-Ris scenario TXT",
+            "yuris_ystb": "Yu-Ris compiled script YSTB",
+            "yuris_yscm": "Yu-Ris opcode metadata YSCM",
+            "yuris_yser": "Yu-Ris error info YSER",
+            "yuris_yscfg": "Yu-Ris config YSCFG",
+            "yuris_ystl": "Yu-Ris file list YSTL",
+            "yuris_yslb": "Yu-Ris labels YSLB",
+            "yuris_ysvr": "Yu-Ris variables YSVR",
+            "yuris_ystd": "Yu-Ris counts YSTD"
+          }
+        },
+        "source_encoding": {
+          "label": "Source encoding",
+          "description": "The encoding used to read the source scripts; the write-back encoding is not changed. KAG scripts are detected automatically by default and other engines use the tool default; only set it when garbled text appears.",
+          "options": {
+            "default": "Use the default encoding",
+            "auto": "Auto-detect",
+            "utf8": "UTF-8",
+            "cp932": "Japanese Shift-JIS (CP932)",
+            "gb2312": "Simplified Chinese GB2312"
+          }
+        },
+        "patched_encoding": {
+          "label": "Output encoding",
+          "description": "Leave it empty to use the engine’s default write-back encoding, which does not follow the source encoding. CP932 cannot represent some Chinese characters; enable JIS substitution when the game needs Japanese encoding, or choose GB2312 or UTF-8 when other encodings are supported. The encoding is checked before writing back, and failures report the character and how it was handled. This setting has no effect while JIS substitution is enabled.",
+          "options": {
+            "default": "Use the default encoding",
+            "auto": "Auto-detect",
+            "utf8": "UTF-8",
+            "cp932": "Japanese Shift-JIS (CP932)",
+            "gb2312": "Simplified Chinese GB2312"
+          }
+        },
+        "jis_substitution": {
+          "label": "JIS substitution",
+          "description": "Uses the SExtractor dictionary to replace Chinese characters that CP932 cannot represent with Japanese ones, writes back as CP932, and generates uif_config.json in the output root. UIF or a matching substitution font is needed to restore the display."
+        },
+        "jis_unmapped": {
+          "label": "Handling of JIS unmapped characters",
+          "description": "Only takes effect while JIS substitution is enabled. Writing is blocked by default; choosing a full-width space matches the SExtractor behaviour and records the lost characters in remain in uif_config.json.",
+          "options": {
+            "error": "Report the error and stop writing (recommended)",
+            "space": "Replace with a full-width space and record it"
+          }
+        },
+        "extra_args": {
+          "label": "Extra tool arguments",
+          "description": "Command line arguments passed to msg-tool, one argument or argument value per line. Filling this in bypasses reading the cache."
+        },
+        "keep_bilingual": {
+          "label": "Keep the source text",
+          "description": "Appends the source text after the translation when writing back. Games may have limits on length and layout, so check the in-game display after enabling it."
+        },
+        "bilingual_sep": {
+          "label": "Bilingual separator",
+          "description": "The separator between the translation and the source text; only takes effect when the source text is kept. A single line break by default."
+        },
+        "timeout": {
+          "label": "Processing timeout (seconds)",
+          "description": "The longest wait for one file calling the tool; a timeout stops that run. Large scripts may need a larger value."
+        },
+        "read_cache": {
+          "label": "Enable the read cache",
+          "description": "Reuses the extracted text to speed up browsing and repeated reads. The text is extracted again automatically after the source files, the configuration or the tool change."
+        }
+      }
+    },
+    "file_mtbench_aio": {
+      "name": "Machine translation quality evaluation",
+      "description": "Used to evaluate machine translation quality. The input file is a name (optional)-message json file with an additional ref field, where ref holds the reference translation.",
+      "settings": {
+        "task": {
+          "label": "Evaluation metric",
+          "description": "Choose how the translation quality is evaluated; COMET has to load a model, and the cutoff rate checks whether the translation is truncated.",
+          "options": {
+            "chrf": "chrF character matching",
+            "comet": "COMET model score",
+            "cutoff_rate": "Cutoff rate"
+          }
+        },
+        "chrf_ngram": {
+          "label": "chrF maximum n-gram",
+          "description": "The maximum character n-gram length used by chrF; only takes effect in chrF mode."
+        },
+        "chrf_beta": {
+          "label": "chrF recall weight",
+          "description": "The relative weight of recall in chrF; the larger the value, the more recall matters."
+        },
+        "comet_model_name": {
+          "label": "COMET model",
+          "description": "The model name or path used by COMET; only takes effect in COMET mode."
+        },
+        "comet_batch_size": {
+          "label": "COMET batch size",
+          "description": "How many entries are evaluated per batch; a larger value may use more GPU memory."
+        }
+      }
+    },
+    "file_plaintext_txt": {
+      "name": "TXT/Markdown text file reader",
+      "description": "Handles .txt, .md and .markdown text files directly and translates them line by line. Markdown is treated as plain text, so Markdown syntax, indentation and code blocks are not protected; it should not be used for scripts that contain many control codes.",
+      "settings": {
+        "bilingual": {
+          "label": "Save bilingual text",
+          "description": "Keeps the translation and the source text together in the output text."
+        },
+        "bilingualLayout": {
+          "label": "Bilingual layout",
+          "description": "How the source text and the translation are arranged in bilingual output.",
+          "options": {
+            "layout1": "Stacked vertically",
+            "layout2": "Side by side"
+          }
+        },
+        "sourceEncoding": {
+          "label": "Source encoding",
+          "description": "The character encoding used to read TXT/Markdown files. Check the source file encoding when the text is garbled or cannot be read."
+        },
+        "outputEncoding": {
+          "label": "Output encoding",
+          "description": "The character encoding used to save TXT/Markdown files, UTF-8 by default."
+        }
+      }
+    },
+    "file_subtitle_srt_lrc_vtt": {
+      "name": "srt, lrc, vtt subtitle file reader",
+      "description": "Handles .srt, .lrc and .vtt subtitle files directly and translates them.",
+      "settings": {
+        "bilingual": {
+          "label": "Save bilingual subtitles",
+          "description": "Keeps the source text and the translation in the same subtitle entry."
+        },
+        "bilingualLayout": {
+          "label": "Bilingual layout",
+          "description": "How the source text and the translation are arranged in bilingual subtitles.",
+          "options": {
+            "layout1": "Stacked vertically",
+            "layout2": "Side by side"
+          }
+        }
+      }
+    },
+    "file_translator___xlsx": {
+      "name": "Translator++ xlsx files",
+      "description": "xlsx files exported by Translator++; the result is written back to the Machine translation sheet.",
+      "settings": {
+        "autoDetectNames": {
+          "label": "Detect names automatically",
+          "description": "Separates the speaker and the body text with the given rules."
+        },
+        "namePattern": {
+          "label": "Name detection rule",
+          "description": "The regular expression must contain the two named groups name and message."
+        },
+        "nameTemplate": {
+          "label": "Name and text join format",
+          "description": "Joins the name and the translation again using {name} and {message}."
+        },
+        "removeLineBreaks": {
+          "label": "Remove line breaks",
+          "description": "Removes the line breaks in the text when writing to the Translator++ sheet."
+        }
+      }
+    },
+    "text_bgi_fixruby": {
+      "name": "BGI ruby tag fixer",
+      "description": "Supports removing incorrect ruby tags and automatically correcting the number of emphasis marks (・)",
+      "settings": {
+        "remove_incorrect": {
+          "label": "Remove incorrect ruby tags",
+          "description": "Cleans up BGI ruby tags in the translation that are incomplete, unpaired or empty."
+        },
+        "auto_correct": {
+          "label": "Correct the number of emphasis marks",
+          "description": "Corrects the emphasis marks (・ or …) at the ruby position to the same number of dots as the body text length."
+        },
+        "process_log_level": {
+          "label": "Fix log level",
+          "description": "The log level used for each modified text; debug is usually kept, and info can be used while investigating a problem.",
+          "options": {
+            "debug": "Debug",
+            "info": "Info",
+            "warning": "Warning",
+            "error": "Error"
+          }
+        }
+      }
+    },
+    "text_common_full2Half": {
+      "name": "General - full-width and half-width conversion",
+      "description": "Supports converting between full-width characters (digits, upper and lower case letters, punctuation) and half-width characters. The replacement table and the moment of the replacement can be customized.",
+      "settings": {
+        "replacePunctuation": {
+          "label": "Convert punctuation too",
+          "description": "Besides digits and English letters, also converts the punctuation in the default replacement table."
+        },
+        "stage": {
+          "label": "Execution stage",
+          "description": "Choose whether the source text or the translation is processed, and whether it runs before or after the matching text processing step.",
+          "options": {
+            "before_src_processed": "Before source preprocessing",
+            "after_src_processed": "After source preprocessing",
+            "before_dst_processed": "Before translation post-processing",
+            "after_dst_processed": "After translation post-processing"
+          }
+        },
+        "reverse": {
+          "label": "Half-width to full-width",
+          "description": "When off, full-width characters are converted to half-width; when on, the conversion goes the other way."
+        },
+        "replacements": {
+          "label": "Custom character replacement table",
+          "description": "Enter a JSON object, for example {\"Ａ\":\"A\"}. Always write it as “full-width character: half-width character”; the direction is swapped automatically for the reverse conversion."
+        }
+      }
+    },
+    "text_common_lineBreakFix": {
+      "name": "In-line line break fixer",
+      "description": "Compares the text before and after translation and adds to or removes line breaks in the translated text until both have the same number.",
+      "settings": {
+        "lineBreak": {
+          "label": "Script line break marker",
+          "description": "Enter the line break marker the script uses, such as [r]; an actual line break can be entered too. The default is the Windows line break (CRLF)."
+        },
+        "mode": {
+          "label": "Line break mode",
+          "description": "Keep position breaks lines at the relative position of the source text; even splits the text evenly; split longest splits the longest segment over and over; front and back group the breaks at the beginning or the end; fixed length breaks lines at a threshold.",
+          "options": {
+            "choice1": "Keep position",
+            "choice2": "Even",
+            "choice3": "Split longest",
+            "choice4": "Front",
+            "choice5": "Back",
+            "choice6": "Fixed length"
+          }
+        },
+        "segmentLength": {
+          "label": "Characters per segment",
+          "description": "Only takes effect in fixed length mode; the line break marker is inserted once this many characters are reached."
+        },
+        "force": {
+          "label": "Force re-layout",
+          "description": "Processes the text with the selected mode even when the translation and the source text have the same number of line breaks."
+        },
+        "segmenter": {
+          "label": "Chinese segmenter",
+          "description": "Used to avoid breaking lines in the middle of a word where possible. BudouX is the lightest; the other options need extra dependencies, and HanLP may also download a fairly large model.",
+          "options": {
+            "budoux": "BudouX (lightweight, recommended)",
+            "jieba": "Jieba",
+            "pkuseg": "PKUSEG (Peking University segmenter)",
+            "hanlp": "HanLP"
+          }
+        }
+      }
+    },
+    "text_common_normalfix": {
+      "name": "General - regular text fixes",
+      "description": "General text fixes: 1. fix duplicated leading or trailing punctuation; 2. fix cases where \\r\\n line breaks were turned into \\n."
+    },
+    "text_common_skipNoJP": {
+      "name": "Skip lines without Japanese",
+      "description": "Skips lines that contain no Japanese"
+    },
+    "text_example_nouse": {
+      "name": "Example text plugin",
+      "description": "This is an example text plugin; no project should use it",
+      "settings": {
+        "set_int": {
+          "label": "Integer setting example",
+          "description": "Demonstrates how a plugin receives an integer value; this example plugin should not be enabled in a real translation project."
+        },
+        "set_string": {
+          "label": "Text setting example",
+          "description": "Demonstrates how a plugin receives a string value; it does not affect any real translation feature."
+        },
+        "set_bool": {
+          "label": "Boolean switch example",
+          "description": "Demonstrates the switch control for an English configuration key."
+        },
+        "chineseKeyExample": {
+          "label": "Chinese configuration key example",
+          "description": "Demonstrates a switch control that uses a Chinese configuration key."
+        }
+      }
+    },
+    "text_message_serverchan_tgbot": {
+      "name": "Completion notification",
+      "description": "After the translation finishes, pushes a completion message to ServerChan / Telegram Bot and supports a sound notification",
+      "settings": {
+        "channel": {
+          "label": "Completion notification channel",
+          "description": "Choose the channels that receive a notification when the translation finishes; several can be selected. Clearing every channel disables network notifications.",
+          "options": {
+            "ServerChan": "Server酱 (ServerChan)",
+            "choice2": "Telegram bot"
+          }
+        },
+        "Telegram_Bot_API_URL": {
+          "label": "Telegram API address",
+          "description": "The official Telegram API is used by default; only change it for a self-hosted endpoint or a proxy service."
+        },
+        "Telegram_Bot_Token": {
+          "label": "Telegram bot token",
+          "description": "The bot token given by BotFather; only used when Telegram notifications are enabled."
+        },
+        "Telegram_Bot_ChatID": {
+          "label": "Telegram target chat ID",
+          "description": "The user or group chat ID that receives the notification; the bot needs permission to send messages to that chat."
+        },
+        "ServerChan_SendKey": {
+          "label": "Server酱 SendKey",
+          "description": "The SendKey from the Server酱 account; only used when Server酱 notifications are enabled."
+        },
+        "soundEnabled": {
+          "label": "Play a completion sound",
+          "description": "Plays a success or failure sound when the translation ends."
+        },
+        "customAudio": {
+          "label": "Use a custom sound",
+          "description": "When on, the audio file specified below is used; sound notifications must be enabled as well."
+        },
+        "successAudio": {
+          "label": "Success sound path",
+          "description": "The audio file played on success; only takes effect when a custom sound is enabled."
+        },
+        "failureAudio": {
+          "label": "Failure sound path",
+          "description": "The audio file played on failure; only takes effect when a custom sound is enabled."
+        },
+        "openaiTts": {
+          "label": "Read out loud with speech synthesis",
+          "description": "Generates the announcement through an OpenAI-compatible speech synthesis API; sound notifications and an API key must be configured, and this may cost money."
+        },
+        "OpenAI_API_Key": {
+          "label": "Speech synthesis API key",
+          "description": "The API key of the speech synthesis service; only used when speech synthesis is enabled."
+        },
+        "OpenAI_API_Base_URL": {
+          "label": "Speech synthesis API address",
+          "description": "The base address of the OpenAI-compatible service, usually ending with /v1."
+        },
+        "OpenAI_TTS_Voice": {
+          "label": "Announcement voice",
+          "description": "Choose the speech synthesis voice; the voices actually available depend on the service in use.",
+          "options": {
+            "alloy": "Neutral (Alloy)",
+            "echo": "Steady (Echo)",
+            "fable": "Narrative (Fable)",
+            "onyx": "Deep (Onyx)",
+            "nova": "Bright (Nova)",
+            "shimmer": "Soft (Shimmer)"
+          }
+        }
+      }
+    }
+  }
+}

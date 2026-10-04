@@ -1,0 +1,277 @@
+{
+  "backendSettingsSection": {
+    "backendSettingsSection_title_translationBackend": "Translation backend",
+    "backendSettingsSection_description_openAISakuraModelProxyConfig": "OpenAI-compatible APIs, the Sakura local model and proxy settings.",
+    "field_message_backendConfig": "Global backend configuration",
+    "field_message_default": "Follow the global default",
+    "field_message_projectConfig": "Do not use (use the project’s own configuration)",
+    "fieldHint_message_currentDefaultConfigModelSettingsChange": "The current default is “{{defaultProfileName}}”; you can change it on the “Model settings” page",
+    "fieldHint_message_notSettingsDefaultConfigModelSettingsSettings": "No default configuration is set yet; set one on the “Model settings” page",
+    "fieldHint_message_translationConfigProjectBackendSettings": "The global configuration “{{selectedProfile}}” will override the project backend settings during translation",
+    "fieldHint_message_configProjectBackendSettings": "The global configuration is ignored and the project’s own backend settings are used",
+    "configForm_title_currentConfig": "Currently using the global configuration: {{resolvedProfile}}",
+    "configForm_description_translationConfigProjectBackendSettingsChangeConfig": "This configuration will override the project backend settings during translation. To change its contents, go to the “Model settings” page.",
+    "field_message_autoConcurrencyWorker": "Auto-adjust concurrent workers",
+    "field_message_429AutoWorkerConcurrency": "Automatically lowers or raises worker concurrency based on the recent 429 ratio and response latency"
+  },
+  "configSectionNav": {
+    "label_label_file": "File I/O",
+    "label_label_translationSettings": "Translation settings",
+    "label_label_translationBackend": "Translation backend",
+    "label_label_textProcess": "Text processing",
+    "label_label_dictionarySettings": "Dictionary settings",
+    "label_label_problem": "Problem analysis",
+    "label_label_retranslate": "Retranslation keywords",
+    "label_label_problemFilter": "Problem filters",
+    "label_label_projectGuideline": "Project guidelines",
+    "projectConfigPageSaveBtn_message_saveConfig": "Save configuration",
+    "projectConfigPageSaveBtn_title_notSaveChange": "There are unsaved changes",
+    "projectConfigPageSidebar_message_yAMLSource": "YAML source"
+  },
+  "dictionarySettingsSection": {
+    "dictionarySettingsSection_title_dictionarySettings": "Dictionary settings",
+    "dictionarySettingsSection_description_gPTDictionaryFileConfigProjectDirProject": "Pre-translation / GPT / post-translation dictionary files. (project_dir) means the project directory.",
+    "field_message_dictionaryFile": "Global dictionary folder",
+    "field_message_dictionary": "Pre-translation dictionary",
+    "field_message_countDictionaryFile": "One dictionary file name per line",
+    "field_message_gPTDictionary": "GPT dictionary",
+    "field_message_dictionaryVariant2": "Post-translation dictionary",
+    "field_message_dictionaryName": "Apply the dictionary to the name field (pre-translation)",
+    "field_message_text": "Yes",
+    "field_message_textVariant2": "No",
+    "field_message_dictionaryNameGPT": "Apply the dictionary to the name field (GPT)",
+    "field_message_dictionaryNameVariant2": "Apply the dictionary to the name field (post-translation)",
+    "field_message_dictionaryVariant3": "Dictionary ordering"
+  },
+  "fileIOSettingsSection": {
+    "title_title_fileSplit": "File splitting",
+    "option_no": "no",
+    "option_num": "Num",
+    "option_equal": "Equal",
+    "title_title_textFormat": "Text format",
+    "title_title_cache": "Cache and logs",
+    "option_debug": "debug",
+    "option_info": "info",
+    "option_warning": "warning",
+    "option_true": "true",
+    "option_false": "false",
+    "fileIOSettingsSection_title_file": "File I/O",
+    "fileIOSettingsSection_description_configFilePluginFileSplitTextFormat": "File configuration plugins, file splitting, text format, and how the cache and logs are saved.",
+    "pluginSection_message_filePlugin": "File plugin",
+    "field_message_autoAuto": "Auto-detect (auto)",
+    "field_message_pluginFilePluginAutoCountFileSelect": "Get the available file plugins from the global plugin manager; “Auto-detect” picks a plugin per input file type, so gt_input may mix several formats"
+  },
+  "keyListEditor": {
+    "keyListEditor_message_add": "Enter a keyword and press Enter or click add",
+    "keyListEditor_message_emptyEntry": "No entries yet"
+  },
+  "problemAnalyzeSection": {
+    "validateAndCommitThreshold_setThresholdError_thresholdRequiredEnter0": "The threshold cannot be empty; enter an integer greater than 0",
+    "validateAndCommitThreshold_setThresholdError_thresholdInvalidEnter0": "Invalid threshold: enter an integer greater than 0",
+    "problemAnalyzeSection_title_problem": "Problem analysis",
+    "problemAnalyzeSection_description_selectEnableTranslationProblemDetectItemTranslation": "Choose the translation quality checks to enable. Problems hit during translation are written to the cache and shown on the “Browse text” page.",
+    "problemAnalyzeSection_message_loadBackendProblemItemFailed": "Failed to load the problem items supported by the backend: {{loadError}}",
+    "problemAnalyzeSection_message_pendingLoadBackendProblemItem": "Loading the problem items supported by the backend…",
+    "problemAnalyzeSectionToolbar_message_doneEnable": "Enabled {{count}} / {{value}}",
+    "problemAnalyzeSectionToolbar_message_doneEnable_other": "Enabled {{count}} / {{value}}",
+    "problemAnalyzeSectionItemBody_message_currentBackendNotProblemItemCancelConfig": "The current backend does not declare this problem item, so unticking it removes it from the configuration.",
+    "problemAnalyzeSectionThresholdLabel_message_sentenceThresholdAvgSentenceLengthThreshold": "Long-sentence threshold (avgSentenceLengthThreshold)",
+    "problemAnalyzeSectionThreshold_message_translationTextSentenceMarkSentenceDefault17Range": "A translation is marked as “sentence too long” when its average sentence length exceeds this value. The default is 17 and 15~25 is the recommended range.",
+    "problemAnalyzeSectionToolbar_message_doneEnable_one": "Enabled {{count}} / {{value}}"
+  },
+  "problemFilterSection": {
+    "label_label_filter": "Filter keywords",
+    "label_label_filterVariant2": "Whitelist",
+    "problemFilterSection_title_problemFilter": "Problem filters",
+    "problemFilterSectionGroup_message_0Regex0FilterItemEntryRegex": "Filter by <0>regular expression</0>: each entry is one regular expression, and every problem item it matches (at any position) is dropped. For example <1>missing.*punctuation</1> or <2>^leftover Japanese: ♪</2>. <3>In principle, only filter subcategories</3>: whole-category entries such as <4>leftover Japanese</4> or <5>^leftover Japanese:</5> also hide the real problems inside the big category, so they are not recommended. To filter one specific entry literally, escape the special characters (clicking the - sign after a problem item on the “Browse text” page escapes them for you).",
+    "problemFilterSectionGroup_placeholder_regexJapanese": "Enter a regular expression (e.g. ^leftover Japanese:)",
+    "problemFilterSectionGroup_emptyText_emptyFilter": "No filter keywords yet",
+    "problemFilterSectionGroup_message_cacheFileIndexEntryTranslationTextEntrySkip": "Exempt specific translations with “cache file name:index”, which is the same as ticking skip_check for that entry: it is no longer checked and no longer counted in statistics. index accepts a closed range (e.g. 01.json:12-15).",
+    "problemFilterSectionGroup_placeholder_cacheFileIndex01Json1201": "Enter cacheFileName:index (e.g. 01.json:12 or 01.json:12-15)",
+    "problemFilterSectionGroup_emptyText_emptyEntry": "No whitelist entries yet"
+  },
+  "projectGuidelineSection": {
+    "load_normalizeError_readProjectGuidelineFailed": "Failed to read the project guidelines",
+    "handleSave_normalizeError_saveProjectGuidelineFailed": "Failed to save the project guidelines",
+    "projectGuidelineSection_title_projectTranslationGuideline": "Project translation guidelines",
+    "projectGuidelineSection_description_countProjectTranslationTranslationGuidelineGuideline": "Translation requirements for this project: they are appended to the global guidelines during translation and take precedence on conflicts.",
+    "projectGuidelineSection_actions_read": "Read again",
+    "projectGuidelineSection_title_notSaveChangeFileRead": "Discard the unsaved changes and read the file again",
+    "projectGuidelineSection_title_currentEmptyNotSaveChange": "There are no unsaved changes",
+    "projectGuidelineSection_message_saveGuideline": "Save guidelines",
+    "projectGuidelineSectionBody_title_projectGuideline": "Project guidelines",
+    "projectGuidelineSectionHint_div_file": "File:",
+    "projectGuidelineSectionHint_message_projectDirectoryProject": "(kept inside the project directory, so it travels with the project)",
+    "projectGuidelineSectionHint_message_notCreateSave": "Not created yet; it is generated when you save",
+    "projectGuidelineSectionHint_message_save0Translation0EffectivePendingTranslation": "After you save, they take effect only when <0>the next translation starts</0>; a running translation is not affected.",
+    "projectGuidelineSectionBody_title_pendingReadProjectGuideline": "Reading the project guidelines…",
+    "projectGuidelineSectionFoot_message_notSaveChange": "There are unsaved changes",
+    "projectGuidelineSectionFoot_message_doneSave": "Saved",
+    "projectGuidelineSectionFoot_message_done": "Already up to date",
+    "projectGuidelineSectionFoot_message_text": "{{count}} characters",
+    "projectGuidelineSectionFoot_message_text_other": "{{count}} characters",
+    "projectGuidelineSectionFoot_message_ctrlCmdSSave": "Ctrl / Cmd + S to save",
+    "projectGuidelineSectionFoot_message_text_one": "{{count}} character"
+  },
+  "retranslKeySection": {
+    "retranslKeySection_title_problemFilter": "Problem filter keywords",
+    "retranslKeySection_title_retranslate": "Retranslation keywords",
+    "retranslKeySection_description_sourceTranslationTextProblemSentenceRetranslate": "Sentences whose source text, translation or problems match these keywords are retranslated on the next run.",
+    "retranslKeySection_placeholder_problemAdd": "Enter a problem keyword and press Enter or click add",
+    "retranslKeySection_placeholder_add": "Enter a keyword and press Enter or click add",
+    "retranslKeySection_emptyText_emptyFilter": "No filter keywords yet",
+    "retranslKeySection_emptyText_emptyRetranslateAddSentenceTranslation": "No retranslation keywords yet. Once you add some, sentences matching them are translated again on the next run."
+  },
+  "textProcessingSettingsSection": {
+    "textProcessingSettingsSection_title_textProcess": "Text processing",
+    "textProcessingSettingsSection_description_enableTextPluginConfigTranslationTextProcess": "Enable text plugins and configure the text processing rules before and after translation.",
+    "pluginSection_message_textPlugin": "Text plugin",
+    "pluginCheckItemHeader_message_v": "v{{version}}",
+    "pluginSection_message_notTextPlugin": "No usable text plugin was found"
+  },
+  "translationSettingsSection": {
+    "option_true": "true",
+    "option_false": "false",
+    "option_zhCn": "zh-cn",
+    "option_zhTw": "zh-tw",
+    "option_en": "en",
+    "option_ja": "ja",
+    "option_ko": "ko",
+    "option_ru": "ru",
+    "option_fr": "fr",
+    "option_name": "name",
+    "option_size": "size",
+    "translationSettingsSection_title_translationSettings": "Translation settings",
+    "translationSettingsSection_description_configTargetLanguageTranslationConcurrencySentenceContext": "Configure the target language, translation concurrency, sentences per request, context and retry strategy."
+  },
+  "projectConfigPage": {
+    "projectConfigPage_normalizeError_loadConfigFailed": "Failed to load the configuration",
+    "handleSave_normalizeError_saveConfigFailed": "Failed to save the configuration",
+    "handleReextract_setReextractError_configSaveFailedNotStartExtract": "The configuration could not be saved, so re-extraction did not start.",
+    "handleReextract_normalizeError_extractSourceFailed": "Failed to re-extract the source text",
+    "projectConfigPage_title_configEdit": "Edit configuration",
+    "projectConfigPage_title_loadConfig": "Loading configuration…",
+    "projectConfigPage_description_pendingRead": "Reading {{configFileName}}.",
+    "projectConfigPage_title_loadConfigFailed": "Failed to load the configuration",
+    "projectConfigPage_description_editProjectConfigFile": "Edit the project configuration file {{configFileName}} visually",
+    "projectConfigPageMain_title_configSaveFailed": "The configuration could not be saved",
+    "projectConfigPageMain_title_configDoneSave": "The configuration has been saved",
+    "projectConfigPageMain_description_currentProjectConfigDoneSuccess": "The current project configuration has been written to disk successfully.",
+    "sectionFadeInProjectConfigFields_title_yAMLSource": "YAML source",
+    "sectionFadeInProjectConfigFields_description_editYAMLConfigSourcePreviewChange": "Edit the YAML configuration source directly (read-only preview; use the form above to make changes)",
+    "yamlPreview_message_config": "No configuration data",
+    "pluginSettingRow_message_sourceExtract": "Source extraction",
+    "pluginReextractButton_message_pendingSaveConfig": "Saving the configuration…",
+    "pluginReextractButton_message_pendingExtract": "Re-extracting…",
+    "pluginReextractButton_message_extractSource": "Re-extract the source text",
+    "pluginSettingRowControl_message_saveCurrentConfigExtractPluginProcessAll": "Save the current configuration and re-extract every input file handled by this plugin. Existing translation cache is kept.",
+    "pluginSettingRowControl_message_notPluginProcessFile": "No input file handled by this plugin was found.",
+    "pluginSettingRowControl_message_extractCompleteSuccessCountFileSentenceFailed": "Re-extraction finished: {{count}} files succeeded with {{total_entries}} sentences in total; {{count2}} files failed.",
+    "pluginSettingRowControl_message_extractCompleteSuccessCountFileSentenceFailed_other": "Re-extraction finished: {{count}} files succeeded with {{total_entries}} sentences in total; {{count2}} files failed.",
+    "pluginSettingRowControl_message_failedFile": "Failed files and reasons",
+    "pluginSettingRowControl_message_extractCompleteSuccessCountFileSentenceFailed_one": "Re-extraction finished: {{count}} file succeeded with {{total_entries}} sentences in total; {{count2}} files failed."
+  },
+  "fields": {
+    "splitFile": {
+      "label": "File splitting",
+      "description": "Single-file split mode: no disables splitting, Num slices by sentence count, and Equal divides the file into equal parts."
+    },
+    "splitFileNum": {
+      "label": "Split count",
+      "description": "In Num mode, the number of sentences per part; in Equal mode, the total number of parts."
+    },
+    "splitFileCrossNum": {
+      "label": "Split overlap sentences",
+      "description": "Number of overlapping sentences between parts, which improves how well segments connect (0 or 10 are common)."
+    },
+    "linebreakSymbol": {
+      "label": "Line break symbol",
+      "description": "The line break type inside JSON, used by problem detection and auto-fixing."
+    },
+    "save_steps": {
+      "label": "Cache save frequency",
+      "description": "Save the cache after every N batches."
+    },
+    "loggingLevel": {
+      "label": "Log level",
+      "description": "debug for details, info for the normal case, warning for warnings only."
+    },
+    "saveLog": {
+      "label": "Save logs to file",
+      "description": "Whether the run log is written to a file."
+    },
+    "workersPerProject": {
+      "label": "Concurrent files",
+      "description": "How many files are processed in parallel at the project level; parallel work inside a single file also needs “File splitting” under “File I/O”."
+    },
+    "gpt_numPerRequestTranslate": {
+      "label": "Sentences per request",
+      "description": "How many sentences are packed into each request; 16 or fewer is recommended."
+    },
+    "gpt_dynamicNumPerRequestTranslate": {
+      "label": "Dynamic sentence count",
+      "description": "When enabled, the sentence count drops automatically on model parse errors and rises again once things are stable."
+    },
+    "gpt_dynamicNumPerRequestTranslate_min": {
+      "label": "Dynamic minimum sentences",
+      "description": "The lowest per-request sentence count the dynamic adjustment may fall to."
+    },
+    "gpt_dynamicNumPerRequestTranslate_max": {
+      "label": "Dynamic maximum sentences",
+      "description": "The highest per-request sentence count the dynamic adjustment may rise to."
+    },
+    "language": {
+      "label": "Target language",
+      "description": "The output language of the translation."
+    },
+    "sortBy": {
+      "label": "Translation order",
+      "description": "name sorts by file name, size puts large files first (usually faster when running in parallel)."
+    },
+    "gpt_multiTurn": {
+      "label": "Multi-turn translation",
+      "description": "Enabled by default for ForGal / ForNovel; consecutive batches share the conversation so character names and writing style stay consistent."
+    },
+    "gpt_contextNum": {
+      "label": "Context sentences",
+      "description": "How many previous sentences are added when a multi-turn session starts or resets; sent with every request when multi-turn is off. 0 means no previous context; 8 is common."
+    },
+    "gpt_translation_guideline": {
+      "label": "Translation guidelines",
+      "description": "The global translation guideline file (located in the translation_guidelines folder). This project’s own guidelines are on the “Project guidelines” page on the left; during translation they are appended to the global ones and win on conflicts."
+    },
+    "gpt_multiTurn_maxTurns": {
+      "label": "Maximum turns per session",
+      "description": "Request turns per session for ForGal / ForNovel, 8 by default; a new session starts once this is reached."
+    },
+    "gpt_multiTurn_maxChars": {
+      "label": "Session character budget",
+      "description": "The character budget for the history (including thinking) and new requests, 24000 by default; a new session starts once it is exceeded, and a single batch is never truncated."
+    },
+    "start_time": {
+      "label": "Scheduled start",
+      "description": "Time in 24-hour format (e.g. 00:30); leave it empty to start immediately.",
+      "placeholder": "Leave empty to start immediately"
+    },
+    "skipH": {
+      "label": "Skip sensitive sentences",
+      "description": "Whether sentences that may trigger sensitive-word detection are skipped."
+    },
+    "smartRetry": {
+      "label": "Smart retry",
+      "description": "Shrinks the batch and resets the context automatically when parsing fails, reducing useless retries."
+    },
+    "retranslFail": {
+      "label": "Retranslate failed sentences",
+      "description": "Whether sentences marked (Failed) are retranslated automatically on startup."
+    },
+    "gpt_enhance_jailbreak": {
+      "label": "Reduce refusals",
+      "description": "When enabled, the model refuses less often."
+    },
+    "gpt_token_limit": {
+      "label": "Token limit (Sakura)",
+      "description": "The per-turn token limit in Sakura scenarios; 0 means no limit."
+    }
+  }
+}

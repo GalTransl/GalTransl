@@ -1,3 +1,4 @@
+import { t as translate, useMessageState, useUiLanguage } from "../i18n";
 /* Agent 回复里的缓存引用卡片。
 
 模型在输出里写 $transl_cache(文件名, 行号)（行号支持 12 / 12-15 / 12,20），
@@ -107,6 +108,7 @@ function CacheEntryCard({
   entry: CacheEntry;
   nameDict: Map<string, string>;
 }) {
+  const uiLanguage = useUiLanguage();
   const problems = splitProblemItems(entry.problem);
   const rawSpeaker = speakerOf(entry);
   const speaker = Array.isArray(entry.name)
@@ -139,13 +141,13 @@ function CacheEntryCard({
       </div>
       <div className="cache-card__fields">
         <div className="cache-card__field">
-          <span className="cache-card__field-label">原文</span>
+          <span className="cache-card__field-label">{translate("agent:agentCacheRef.cacheCardField_message_source")}</span>
           <div className="cache-card__input-wrap">
             <span className="cache-card__readonly-input">{srcOf(entry)}</span>
           </div>
         </div>
         <div className="cache-card__field">
-          <span className="cache-card__field-label">译文</span>
+          <span className="cache-card__field-label">{translate("agent:agentCacheRef.cacheCardField_message_translationText")}</span>
           <div className="cache-card__input-wrap">
             <span className="cache-card__readonly-input">{dstOf(entry)}</span>
           </div>
@@ -157,6 +159,7 @@ function CacheEntryCard({
 
 /** 头部的数据库小图标：emoji 在不同系统渲染不一致，SVG 更可控。 */
 function DatabaseIcon() {
+  const uiLanguage = useUiLanguage();
   return (
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
       <ellipse cx="8" cy="3.6" rx="5.4" ry="2.1" />
@@ -181,8 +184,9 @@ function CacheRefCard({
   indexSpec: string;
   nameDict: Map<string, string>;
 }) {
+  const uiLanguage = useUiLanguage();
   const [entries, setEntries] = useState<CacheEntry[] | null>(null);
-  const [error, setError] = useState<string>('');
+  const [error, setError] = useMessageState<string>('');
   // 写类工具改过缓存后 invalidateCacheFilesForToolResult 会广播一次，这里跟着重拉
   const [reloadToken, setReloadToken] = useState(0);
   const wanted = useMemo(() => parseCacheRefIndexes(indexSpec), [indexSpec]);
@@ -218,19 +222,17 @@ function CacheRefCard({
   const missing = wanted.length - found.length;
 
   return (
-    <section className="agent-cache-ref" aria-label={`缓存引用 ${filename} ${indexSpec}`}>
+    <section className="agent-cache-ref" aria-label={translate("agent:agentCacheRef.agentCacheRef_ariaLabel_cache", { filename: filename, indexSpec: indexSpec })}>
       <header className="agent-cache-ref__head">
         <span className="agent-cache-ref__icon">
           <DatabaseIcon />
         </span>
         <span className="agent-cache-ref__file" title={filename}>{filename}</span>
-        <span className="agent-cache-ref__lines">第 {indexSpec} 行</span>
-        {found.length ? <span className="agent-cache-ref__count">{found.length} 条</span> : null}
+        <span className="agent-cache-ref__lines">{translate("agent:agentCacheRef.agentCacheRefHead_message_text", { indexSpec: indexSpec })}</span>
+        {found.length ? <span className="agent-cache-ref__count">{translate("agent:agentCacheRef.agentCacheRefHead_message_entry", { count: found.length })}</span> : null}
       </header>
       {error ? (
-        <div className="agent-cache-ref__state agent-cache-ref__state--error">
-          读不到「{filename}」：{error}
-        </div>
+        <div className="agent-cache-ref__state agent-cache-ref__state--error">{translate("agent:agentCacheRef.agentCacheRef_message_text", { filename: filename, error: error })}</div>
       ) : entries === null ? (
         <div className="agent-cache-ref__state agent-cache-ref__state--loading" aria-busy="true">
           <span className="agent-cache-ref__skeleton" style={{ width: '78%' }} />
@@ -238,9 +240,7 @@ function CacheRefCard({
           <span className="agent-cache-ref__skeleton" style={{ width: '56%' }} />
         </div>
       ) : found.length === 0 ? (
-        <div className="agent-cache-ref__state">
-          「{filename}」里没有第 {indexSpec} 行（行号来自缓存条目的 index）
-        </div>
+        <div className="agent-cache-ref__state">{translate("agent:agentCacheRef.agentCacheRef_message_emptyCacheEntryIndex", { filename: filename, indexSpec: indexSpec })}</div>
       ) : (
         <>
           {/* 定高滚动区：条目多时在这里滚，不撑高对话气泡；tabIndex 让键盘也能滚 */}
@@ -248,7 +248,7 @@ function CacheRefCard({
             className="agent-cache-ref__cards"
             tabIndex={0}
             role="group"
-            aria-label={`${filename} 第 ${indexSpec} 行，共 ${found.length} 条`}
+            aria-label={translate("agent:agentCacheRef.agentCacheRefCards_ariaLabel_entry", { filename: filename, indexSpec: indexSpec, count: found.length })}
           >
             {found.map((entry) => (
               <CacheEntryCard key={`${filename}#${entry.index}`} entry={entry} nameDict={nameDict} />
@@ -256,7 +256,7 @@ function CacheRefCard({
           </div>
           {missing > 0 ? (
             <div className="agent-cache-ref__foot">
-              <span className="agent-cache-ref__missing">另有 {missing} 条未找到</span>
+              <span className="agent-cache-ref__missing">{translate("agent:agentCacheRef.agentCacheRefFoot_message_entryNot", { missing: missing })}</span>
             </div>
           ) : null}
         </>
@@ -280,6 +280,7 @@ export function AgentMarkdown({
   cursor?: boolean;
   className?: string;
 }) {
+  const uiLanguage = useUiLanguage();
   const segments = useMemo(() => splitMarkdownSegments(text), [text]);
   const hasRef = segments.some((s) => s.kind === 'cacheRef');
   const cls = ['agent-md', className].filter(Boolean).join(' ');
@@ -310,6 +311,7 @@ function CacheRefSegments({
   cursor?: boolean;
   className: string;
 }) {
+  useUiLanguage();
   const { nameDict } = useNameDict(encodeProjectDir(projectDir));
   return (
     <div className={className}>

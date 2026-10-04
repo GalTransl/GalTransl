@@ -7,6 +7,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "test:backend-connection": "node --test tests/backend-connection.test.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:i18n": "node --test tests/i18n.test.mjs",
+    "i18n:check": "node scripts/check-i18n.mjs",
     "preview": "vite preview",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
@@ -16,8 +19,10 @@
     "@tauri-apps/plugin-dialog": "^2.7.0",
     "@tauri-apps/plugin-notification": "^2.4.0",
     "@tauri-apps/plugin-shell": "^2.3.5",
+    "i18next": "^26.4.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-i18next": "^17.0.15",
     "react-router-dom": "^7.14.0"
   },
   "devDependencies": {

@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../../i18n";
 import { useMemo } from 'react';
 import { Panel } from '../../components/Panel';
 import { normalizeKeywordList } from '../../lib/problemFilter';
@@ -16,20 +17,21 @@ function readKeys(config: Record<string, unknown> | null, field: 'retranslKey' |
 }
 
 export function RetranslKeySection({ config, onChange, onDirty, field = 'retranslKey' }: RetranslKeySectionProps) {
+  const uiLanguage = useUiLanguage();
   const keys = useMemo(() => readKeys(config, field), [config, field]);
   const isFilter = field === 'problemFilterKey';
 
   return (
     <Panel
-      title={isFilter ? '问题过滤关键字' : '重翻关键字'}
-      description={isFilter ? undefined : '原文、译文、问题中命中这些关键字的句子会在下次启动时被重翻。'}
+      title={isFilter ? translate("config:retranslKeySection.retranslKeySection_title_problemFilter") : translate("config:retranslKeySection.retranslKeySection_title_retranslate")}
+      description={isFilter ? undefined : translate("config:retranslKeySection.retranslKeySection_description_sourceTranslationTextProblemSentenceRetranslate")}
     >
       <KeyListEditor
         keys={keys}
         onChange={onChange}
         onDirty={onDirty}
-        placeholder={isFilter ? '输入问题关键字后按回车或点击添加' : '输入关键字后按回车或点击添加'}
-        emptyText={isFilter ? '暂无过滤关键字' : '暂无重翻关键字。添加后，下次启动时命中这些关键字的句子会被重新翻译。'}
+        placeholder={isFilter ? translate("config:retranslKeySection.retranslKeySection_placeholder_problemAdd") : translate("config:retranslKeySection.retranslKeySection_placeholder_add")}
+        emptyText={isFilter ? translate("config:retranslKeySection.retranslKeySection_emptyText_emptyFilter") : translate("config:retranslKeySection.retranslKeySection_emptyText_emptyRetranslateAddSentenceTranslation")}
       />
     </Panel>
   );

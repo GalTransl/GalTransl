@@ -1,3 +1,4 @@
+import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
@@ -32,6 +33,7 @@ import {
   getCacheBrowserFontSizePreference,
   updateProjectConfig } from '../lib/api';
 import { normalizeError } from '../lib/errors';
+import type { LocalizedText } from '../i18n/core';
 import { escapeProblemFilterPattern, filterProblemText, normalizeKeywordList, splitProblemItems, splitProblemTypes } from '../lib/problemFilter';
 import { joinPath } from '../lib/paths';
 
@@ -67,6 +69,7 @@ const REFRESH_SPIN_CYCLE_MS = 500;
 
 /* ── Highlight helper ── */
 function HighlightText({ text, query }: { text: string; query: string }) {
+  const uiLanguage = useUiLanguage();
   if (!query) return <>{text}</>;
   const lower = text.toLowerCase();
   const qLower = query.toLowerCase();
@@ -107,6 +110,7 @@ function CacheEntryCard({
   /** 没有缓存文件（读的是原文）时只读：改了也没地方存，后端保存时会报缓存文件不存在 */
   readOnly?: boolean;
 }) {
+  const uiLanguage = useUiLanguage();
   const hasProblem = !!entry.problem;
   const rawSpeaker = Array.isArray(entry.name) ? entry.name.join('/') : entry.name || '—';
   const speaker = rawSpeaker !== '—'
@@ -131,8 +135,8 @@ function CacheEntryCard({
                 <button
                   type="button"
                   className="cache-card__problem-filter"
-                  title={`过滤「${problemItem}」`}
-                  aria-label={`过滤「${problemItem}」`}
+                  title={translate("projects:projectCachePage.cacheCardProblemFilter_title_filter", { problemItem: problemItem })}
+                  aria-label={translate("projects:projectCachePage.cacheCardProblemFilter_ariaLabel_filter", { problemItem: problemItem })}
                   onClick={(event) => {
                     event.stopPropagation();
                     // 过滤项是正则：这一条按字面过滤，先转义（否则 ( ) . * 这些会被当元字符）
@@ -147,7 +151,7 @@ function CacheEntryCard({
         )}
         <div className="cache-card__spacer" />
         {entry.skip_check && (
-          <span className="cache-card__pill cache-card__pill--skip-check" title="已跳过问题检查">⏭</span>
+          <span className="cache-card__pill cache-card__pill--skip-check" title={translate("projects:projectCachePage.cacheCardPillCacheCardPillSkipCheck_title_doneProblemCheck")}>⏭</span>
         )}
         {entry.trans_by && (
           <span className="cache-card__pill cache-card__pill--engine">{entry.trans_by}</span>
@@ -156,7 +160,7 @@ function CacheEntryCard({
           type="button"
           className="cache-card__expand"
           onClick={() => setExpanded(!expanded)}
-          title={expanded ? '收起' : '展开详情'}
+          title={expanded ? translate("projects:projectCachePage.cacheCardExpand_title_text") : translate("projects:projectCachePage.cacheCardExpand_title_textVariant2")}
         >
           {expanded ? <Icon name="chevron-down" /> : <Icon name="chevron-right" />}
         </button>
@@ -165,7 +169,7 @@ function CacheEntryCard({
           className="cache-card__delete"
           onClick={() => onDelete(!entry.deleted, entry.index)}
           disabled={readOnly}
-          title={readOnly ? '还没有缓存文件，不能删除条目' : (entry.deleted ? "撤销删除" : "删除此条")}
+          title={readOnly ? translate("projects:projectCachePage.cacheCardDelete_title_emptyCacheFileCannotDeleteEntry") : (entry.deleted ? translate("projects:projectCachePage.cacheCardDelete_title_delete") : translate("projects:projectCachePage.cacheCardDelete_title_deleteEntry"))}
         >
           {entry.deleted ? <Icon name="undo" /> : <Icon name="close" />}
         </button>
@@ -176,7 +180,7 @@ function CacheEntryCard({
         {!expanded && (
           <>
             <div className="cache-card__field">
-              <span className="cache-card__field-label">原文</span>
+              <span className="cache-card__field-label">{translate("projects:projectCachePage.cacheCardField_message_source")}</span>
               <div className="cache-card__input-wrap">
                 <span className="cache-card__readonly-input" title={escapeControlChars(src(entry))}>
                   {highlightQuery
@@ -186,14 +190,14 @@ function CacheEntryCard({
               </div>
             </div>
             <div className="cache-card__field">
-              <span className="cache-card__field-label">译文</span>
+              <span className="cache-card__field-label">{translate("projects:projectCachePage.cacheCardField_message_translationText")}</span>
               <div className="cache-card__input-wrap">
                 <input
                   className="cache-card__input cache-card__input--zh"
                   value={escapeControlChars(dst(entry))}
                   onChange={(e) => onEntryChange(entry.index, 'pre_dst', unescapeControlChars(e.target.value))}
-                  placeholder={readOnly ? '未翻译' : '译文'}
-                  title={readOnly ? '还没有缓存文件，显示的是原文' : escapeControlChars(dst(entry))}
+                  placeholder={readOnly ? translate("projects:projectCachePage.cacheCardInputWrap_placeholder_notTranslation") : translate("projects:projectCachePage.cacheCardInputWrap_placeholder_translationText")}
+                  title={readOnly ? translate("projects:projectCachePage.cacheCardInputWrap_title_emptyCacheFileSource") : escapeControlChars(dst(entry))}
                   disabled={readOnly}
                 />
                 {highlightQuery && (
@@ -209,13 +213,13 @@ function CacheEntryCard({
         {expanded && (
           <>
             <div className="cache-card__field cache-card__field--textarea">
-              <span className="cache-card__field-label">pre_src</span>
+              <span className="cache-card__field-label">{translate("projects:projectCachePage.cacheCardFieldCacheCardFieldTextarea_message_preSrc")}</span>
               <div className="cache-card__readonly-textarea">
                 {escapeControlChars(entry.pre_src || '')}
               </div>
             </div>
             <div className="cache-card__field cache-card__field--textarea">
-              <span className="cache-card__field-label">post_src</span>
+              <span className="cache-card__field-label">{translate("projects:projectCachePage.cacheCardFieldCacheCardFieldTextarea_message_postSrc")}</span>
               <div className="cache-card__readonly-textarea">
                 {highlightQuery
                   ? <HighlightText text={escapeControlChars(src(entry))} query={highlightQuery} />
@@ -223,29 +227,29 @@ function CacheEntryCard({
               </div>
             </div>
             <div className="cache-card__field cache-card__field--textarea">
-              <span className="cache-card__field-label">pre_dst</span>
+              <span className="cache-card__field-label">{translate("projects:projectCachePage.cacheCardFieldCacheCardFieldTextarea_message_preDst")}</span>
               <textarea
                 className="cache-card__textarea cache-card__textarea--zh"
                 value={escapeControlChars(entry.pre_dst || entry.pre_zh || '')}
                 onChange={(e) => onEntryChange(entry.index, 'pre_dst', unescapeControlChars(e.target.value))}
-                placeholder="预翻译"
+                placeholder={translate("projects:projectCachePage.cacheCardFieldCacheCardFieldTextarea_placeholder_translation")}
                 rows={3}
                 disabled={readOnly}
               />
             </div>
             <div className="cache-card__field cache-card__field--textarea">
-              <span className="cache-card__field-label">proofread</span>
+              <span className="cache-card__field-label">{translate("projects:projectCachePage.cacheCardFieldCacheCardFieldTextarea_message_proofread")}</span>
               <textarea
                 className="cache-card__textarea cache-card__textarea--zh"
                 value={escapeControlChars(entry.proofread_dst || entry.proofread_zh || '')}
                 onChange={(e) => onEntryChange(entry.index, 'proofread_dst', unescapeControlChars(e.target.value))}
-                placeholder="校对"
+                placeholder={translate("projects:projectCachePage.cacheCardFieldCacheCardFieldTextarea_placeholder_text")}
                 rows={3}
                 disabled={readOnly}
               />
             </div>
             <div className="cache-card__field cache-card__field--textarea">
-              <span className="cache-card__field-label">preview</span>
+              <span className="cache-card__field-label">{translate("projects:projectCachePage.cacheCardFieldCacheCardFieldTextarea_message_preview")}</span>
               <div className="cache-card__readonly-textarea">
                 {escapeControlChars(entry.post_dst_preview || entry.post_zh_preview || '')}
               </div>
@@ -258,7 +262,7 @@ function CacheEntryCard({
                   onChange={(e) => onEntryChange(entry.index, 'skip_check', e.target.checked)}
                   disabled={readOnly}
                 />
-                <span>跳过检查（skip_check）</span>
+                <span>{translate("projects:projectCachePage.cacheCardCheckboxLabel_message_checkSkipCheck")}</span>
               </label>
             </div>
           </>
@@ -287,6 +291,7 @@ function SearchResultCard({
   onContextMenu: (event: React.MouseEvent<HTMLButtonElement>) => void;
   idx: number;
 }) {
+  const uiLanguage = useUiLanguage();
   const rawSpeaker = Array.isArray(result.speaker) ? result.speaker.join('/') : result.speaker || '—';
   const speaker = rawSpeaker !== '—'
     ? (Array.isArray(result.speaker)
@@ -305,19 +310,19 @@ function SearchResultCard({
         onSelect();
         onContextMenu(e);
       }}
-      title={`跳转到 ${result.filename} #${result.index}`}
+      title={translate("projects:projectCachePage.searchResultCard_title_text", { filename: result.filename, index: result.index })}
     >
       <div className="search-result-card__header">
         {(result.match_src || result.match_dst || result.match_problem) && (
           <span className="search-result-card__match-badges">
-            {result.match_src && <span className="search-result-card__badge search-result-card__badge--src">原文</span>}
-            {result.match_dst && <span className="search-result-card__badge search-result-card__badge--dst">译文</span>}
-            {result.match_problem && <span className="search-result-card__badge search-result-card__badge--problem">问题</span>}
+            {result.match_src && <span className="search-result-card__badge search-result-card__badge--src">{translate("projects:projectCachePage.searchResultCardMatchBadges_message_source")}</span>}
+            {result.match_dst && <span className="search-result-card__badge search-result-card__badge--dst">{translate("projects:projectCachePage.searchResultCardMatchBadges_message_translationText")}</span>}
+            {result.match_problem && <span className="search-result-card__badge search-result-card__badge--problem">{translate("projects:projectCachePage.searchResultCardMatchBadges_message_problem")}</span>}
           </span>
         )}
         <span className="search-result-card__file">{result.filename}</span>
         {result.has_cache === false ? (
-          <span className="search-result-card__badge search-result-card__badge--uncached" title="这个文件还没翻译，命中的是原文">未翻译</span>
+          <span className="search-result-card__badge search-result-card__badge--uncached" title={translate("projects:projectCachePage.searchResultCardBadgeSearchResultCardBadgeUncached_title_countFileTranslationSource")}>{translate("projects:projectCachePage.searchResultCardHeader_message_notTranslation")}</span>
         ) : null}
       </div>
       {(result.index !== undefined || speaker !== '—' || result.problem) && (
@@ -331,13 +336,13 @@ function SearchResultCard({
       )}
       {result.post_src && (
         <div className="search-result-card__line">
-          <span className="search-result-card__label">原文</span>
+          <span className="search-result-card__label">{translate("projects:projectCachePage.searchResultCardLine_message_source")}</span>
           <span className="search-result-card__text" title={escapeControlChars(result.post_src)}><HighlightText text={escapeControlChars(result.post_src)} query={query} /></span>
         </div>
       )}
       {result.pre_dst && (
         <div className="search-result-card__line">
-          <span className="search-result-card__label">译文</span>
+          <span className="search-result-card__label">{translate("projects:projectCachePage.searchResultCardLine_message_translationText")}</span>
           <span className="search-result-card__text search-result-card__text--dst" title={escapeControlChars(result.pre_dst)}><HighlightText text={escapeControlChars(result.pre_dst)} query={query} /></span>
         </div>
       )}
@@ -347,6 +352,7 @@ function SearchResultCard({
 
 /* ── Main Page ── */
 export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageContext; active?: boolean }) {
+  const uiLanguage = useUiLanguage();
   const { projectId, configFileName } = ctx;
   const { nameDict } = useNameDict(projectId);
   const [cacheBrowserFontSize, setCacheBrowserFontSize] = useState(() => getCacheBrowserFontSizePreference());
@@ -435,14 +441,14 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   const entriesRequestRef = useRef(0);
   const viewingFileRef = useRef(selectedFile);
   viewingFileRef.current = selectedFile;
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useMessageState<string | null>(null);
   const activeRef = useRef(active);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterProblems, setFilterProblems] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingAll, setSavingAll] = useState(false);
-  const [localError, setLocalError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
+  const [localError, setLocalError] = useMessageState<string | null>(null);
+  const [info, setInfo] = useMessageState<string | null>(null);
 
   const handleRevealCacheFiles = useCallback(async (filenames: string[]) => {
     if (!cacheDir || filenames.length === 0) return;
@@ -453,7 +459,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         await invoke('reveal_file', { path: joinPath(cacheDir, filename) });
       }
     } catch (err) {
-      setLocalError(normalizeError(err, '在文件管理器中浏览失败'));
+      setLocalError(normalizeError(err, uiMessage("projects:projectCachePage.handleRevealCacheFiles_normalizeError_fileFailed")));
     }
   }, [cacheDir]);
 
@@ -601,7 +607,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         setSelectedFile((prev) => (prev && files.some((file) => file.name === prev) ? prev : null));
       } catch (err) {
         if (viewingProjectIdRef.current === projectId) {
-          setError(normalizeError(err, '加载缓存列表失败'));
+          setError(normalizeError(err, uiMessage("projects:projectCachePage.loadCacheFiles_normalizeError_loadCacheFailed")));
         }
       } finally {
         if (showPageLoading) {
@@ -806,7 +812,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         }
       })
       .catch((err) => {
-        if (!cancelled && request === entriesRequestRef.current) setError(normalizeError(err, '加载缓存内容失败'));
+        if (!cancelled && request === entriesRequestRef.current) setError(normalizeError(err, uiMessage("projects:projectCachePage.projectCachePage_normalizeError_loadCacheFailed")));
       })
       .finally(() => {
         if (!cancelled && request === entriesRequestRef.current) setLoadingEntries(false);
@@ -830,7 +836,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setSearchTotal(res.total);
       setSelectedSearchIdx(-1);
     } catch (err) {
-      setLocalError(normalizeError(err, '全局搜索失败'));
+      setLocalError(normalizeError(err, uiMessage("projects:projectCachePage.runGlobalSearch_normalizeError_searchFailed")));
       setSearchResults([]);
       setSearchTotal(0);
     } finally {
@@ -857,7 +863,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setEntries(res.entries);
       setError(null);
     } catch (err) {
-      if (isCurrent()) setLocalError(normalizeError(err, '刷新缓存内容失败'));
+      if (isCurrent()) setLocalError(normalizeError(err, uiMessage("projects:projectCachePage.refreshCurrentFile_normalizeError_cacheFailed")));
     } finally {
       if (isCurrent()) {
         setLoadingEntries(false);
@@ -1054,9 +1060,9 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         next.delete(targetFile);
         return next;
       });
-      setInfo(targetFile === selectedFile ? '已保存并重建缓存' : `已保存 ${targetFile}`);
+      setInfo(targetFile === selectedFile ? uiMessage("projects:projectCachePage.handleSave_setInfo_doneSaveCache") : uiMessage("projects:projectCachePage.handleSave_setInfo_doneSave", { targetFile: targetFile }));
     } catch (err) {
-      setLocalError(normalizeError(err, '保存缓存失败'));
+      setLocalError(normalizeError(err, uiMessage("projects:projectCachePage.handleSave_normalizeError_saveCacheFailed")));
     } finally {
       setSaving(false);
     }
@@ -1090,9 +1096,9 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         return next;
       });
 
-      setInfo(`已撤销 "${targetFile}" 本次修改`);
+      setInfo(uiMessage("projects:projectCachePage.handleRecover_setInfo_doneChange", { targetFile: targetFile }));
     } catch (err) {
-      setLocalError(normalizeError(err, '撤销文件失败'));
+      setLocalError(normalizeError(err, uiMessage("projects:projectCachePage.handleRecover_normalizeError_fileFailed")));
     } finally {
       setLoadingEntries(false);
     }
@@ -1106,7 +1112,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     setLocalError(null);
     setInfo(null);
     const savedFiles: string[] = [];
-    let lastError: string | null = null;
+    let lastError: LocalizedText | null = null;
     for (const file of filesToSave) {
       const fileEntries = entriesMapRef.current.get(file);
       if (!fileEntries) continue;
@@ -1133,7 +1139,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         }
         savedFiles.push(file);
       } catch (err) {
-        lastError = normalizeError(err, `保存 ${file} 失败`);
+        lastError = normalizeError(err, uiMessage("projects:projectCachePage.handleSaveAll_normalizeError_saveFailed", { file: file }));
       }
     }
     // 清除成功保存的文件的 dirty 标记
@@ -1145,7 +1151,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     if (lastError) {
       setLocalError(lastError);
     } else {
-      setInfo(`已保存 ${savedFiles.length} 个文件`);
+      setInfo(uiMessage("projects:projectCachePage.handleSaveAll_setInfo_doneSaveCountFile", { count: savedFiles.length }));
     }
     setSavingAll(false);
   };
@@ -1161,7 +1167,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setProblems(res.problems);
       setProblemFilterKeys(res.filter_keys || []);
     } catch (err) {
-      if (request === problemRequestRef.current) setLocalError(normalizeError(err, '加载问题列表失败'));
+      if (request === problemRequestRef.current) setLocalError(normalizeError(err, uiMessage("projects:projectCachePage.loadProblems_normalizeError_loadProblemFailed")));
     } finally {
       if (request === problemRequestRef.current) setLoadingProblems(false);
     }
@@ -1243,7 +1249,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
 
   const handleAddProblemKeyword = useCallback(async (keyword: string, field: 'retranslKey' | 'problemFilterKey') => {
     if (!projectId || !configFileName || savingKeyword) return;
-    const label = field === 'problemFilterKey' ? '问题过滤' : '重翻关键字';
+    const label = field === 'problemFilterKey' ? translate("projects:projectCachePage.label_message_problemFilter") : translate("projects:projectCachePage.label_message_retranslate");
     setSavingKeyword(true);
     setLocalError(null);
     try {
@@ -1252,7 +1258,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       const common = (config.common as Record<string, unknown>) || {};
       const existingKeys = normalizeKeywordList(common[field]);
       if (existingKeys.includes(keyword)) {
-        setInfo(`「${keyword}」已在${label}列表中`);
+        setInfo(uiMessage("projects:projectCachePage.handleAddProblemKeyword_setInfo_done", { keyword: keyword, label: label }));
         return;
       }
       common[field] = [...existingKeys, keyword];
@@ -1262,9 +1268,9 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         setProblemFilterKeys([...existingKeys, keyword]);
         await Promise.allSettled([loadProblems(), runGlobalSearch()]);
       }
-      setInfo(`已将「${keyword}」加入${label}`);
+      setInfo(uiMessage("projects:projectCachePage.handleAddProblemKeyword_setInfo_doneVariant2", { keyword: keyword, label: label }));
     } catch (err) {
-      setLocalError(normalizeError(err, `添加${label}失败`));
+      setLocalError(normalizeError(err, uiMessage("projects:projectCachePage.handleAddProblemKeyword_normalizeError_addFailed", { label: label })));
     } finally {
       setSavingKeyword(false);
     }
@@ -1304,8 +1310,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     const targets = filenames.filter((name) => !uncachedFiles.has(name));
     if (!projectId || targets.length === 0) return;
     const msg = targets.length === 1
-      ? `确定要删除缓存文件「${targets[0]}」吗？此操作不可撤销。`
-      : `确定要删除 ${targets.length} 个缓存文件吗？此操作不可撤销。`;
+      ? translate("projects:projectCachePage.msg_message_deleteCacheFile", { value: targets[0] })
+      : translate("projects:projectCachePage.msg_message_deleteCountCacheFile", { count: targets.length });
     if (!confirm(msg)) return;
     try {
       const res = await deleteCacheFiles(projectId, targets);
@@ -1331,11 +1337,11 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         for (const f of res.deleted_files) next.delete(f);
         return next;
       });
-      setInfo(`已删除 ${res.deleted_files.length} 个缓存文件`);
+      setInfo(uiMessage("projects:projectCachePage.handleDeleteSelectedFiles_setInfo_doneDeleteCountCacheFile", { count: res.deleted_files.length }));
       // 刷新文件列表
       void loadCacheFiles();
     } catch (err) {
-      setLocalError(normalizeError(err, '删除缓存文件失败'));
+      setLocalError(normalizeError(err, uiMessage("projects:projectCachePage.handleDeleteSelectedFiles_normalizeError_deleteCacheFileFailed")));
     }
   }, [projectId, selectedFile, loadCacheFiles, uncachedFiles]);
 
@@ -1430,7 +1436,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setReplacePreview(res.file_details);
       setReplacePreviewTotal(res.total_matches);
     } catch (err) {
-      setLocalError(normalizeError(err, '替换预览失败'));
+      setLocalError(normalizeError(err, uiMessage("projects:projectCachePage.handleReplacePreview_normalizeError_replacePreviewFailed")));
     } finally {
       setReplacing(false);
     }
@@ -1439,7 +1445,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   // Replace execute
   const handleReplaceExecute = async () => {
     if (!replaceQuery.trim()) return;
-    if (!confirm(`确定要在 ${replacePreviewTotal} 处将「${replaceQuery}」替换为「${replaceWith}」吗？此操作不可撤销。`)) {
+    if (!confirm(translate("projects:projectCachePage.handleReplaceExecute_confirm_replace", { replacePreviewTotal: replacePreviewTotal, replaceQuery: replaceQuery, replaceWith: replaceWith }))) {
       return;
     }
     setReplacing(true);
@@ -1453,7 +1459,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setShowReplace(false);
       setReplaceQuery('');
       setReplaceWith('');
-      setInfo(`已替换 ${res.total_matches} 处（涉及 ${res.total_files} 个文件），请保存后生效`);
+      setInfo(uiMessage("projects:projectCachePage.handleReplaceExecute_setInfo_doneReplaceCountFileSaveEffective", { total_matches: res.total_matches, total_files: res.total_files }));
       // 将后端返回的修改后 entries 存入 entriesMap，并标记所有受影响文件为 dirty
       const affectedFiles: string[] = [];
       for (const fd of res.file_details) {
@@ -1479,7 +1485,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         await runGlobalSearch();
       }
     } catch (err) {
-      setLocalError(normalizeError(err, '全局替换失败'));
+      setLocalError(normalizeError(err, uiMessage("projects:projectCachePage.handleReplaceExecute_normalizeError_replaceFailed")));
     } finally {
       setReplacing(false);
     }
@@ -1488,8 +1494,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   if (loading && cacheFiles.length === 0) {
     return (
       <div className="project-cache-page" style={cacheBrowserFontStyle}>
-        <PageHeader className="project-cache-page__header" title="浏览文本" />
-        <LoadingState title="加载文件列表中…" description="正在读取项目文件。" />
+        <PageHeader className="project-cache-page__header" title={translate("projects:projectCachePage.projectCachePage_title_text")} />
+        <LoadingState title={translate("projects:projectCachePage.projectCachePage_title_loadFile")} description={translate("projects:projectCachePage.projectCachePage_description_pendingReadProjectFile")} />
       </div>
     );
   }
@@ -1497,18 +1503,17 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     <div className="project-cache-page" style={cacheBrowserFontStyle}>
       <PageHeader
         className="project-cache-page__header"
-        title="浏览文本"
-        description="在这里可以浏览翻译问题、手动润色，或通过删除缓存句触发部分重翻。最终结果将基于这些缓存来构建。"
+        title={translate("projects:projectCachePage.projectCachePage_title_text")}
+        description={translate("projects:projectCachePage.projectCachePage_description_translationProblemDeleteCacheSentenceRetranslateCache")}
         actions={cacheDir ? (
           <Button variant="secondary" onClick={() => void invoke('open_folder', { path: cacheDir })} title={cacheDir}>
-            <Icon name="folder-open" /> 打开缓存文件夹
-          </Button>
+            <Icon name="folder-open" />{translate("projects:projectCachePage.projectCachePage_button_openCacheFile")}</Button>
         ) : null}
         status={
           <>
-            {error && <InlineFeedback tone="error" title="加载缓存失败" description={error} />}
-            {localError && <InlineFeedback tone="error" title="操作失败" description={localError} />}
-            {info && <InlineFeedback className="inline-alert--floating" tone="success" title="操作成功" description={info} onDismiss={() => setInfo(null)} />}
+            {error && <InlineFeedback tone="error" title={translate("projects:projectCachePage.projectCachePage_title_loadCacheFailed")} description={error} />}
+            {localError && <InlineFeedback tone="error" title={translate("projects:projectCachePage.projectCachePage_title_failed")} description={localError} />}
+            {info && <InlineFeedback className="inline-alert--floating" tone="success" title={translate("projects:projectCachePage.projectCachePage_title_success")} description={info} onDismiss={() => setInfo(null)} />}
           </>
         }
       />
@@ -1524,22 +1529,18 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
               type="button"
               className={`cache-sidebar-tab ${sidebarTab === 'files' ? 'cache-sidebar-tab--active' : ''}`}
               onClick={() => setSidebarTab('files')}
-            >
-              文件{dirtyFiles.size > 0 ? <span className="cache-sidebar-tab__badge">{dirtyFiles.size}</span> : ''}
+            >{translate("projects:projectCachePage.cacheSidebarTabs_button_file")}{dirtyFiles.size > 0 ? <span className="cache-sidebar-tab__badge">{dirtyFiles.size}</span> : ''}
             </button>
             <button
               type="button"
               className={`cache-sidebar-tab ${sidebarTab === 'search' ? 'cache-sidebar-tab--active' : ''}`}
               onClick={() => setSidebarTab('search')}
-            >
-              搜索
-            </button>
+            >{translate("common:actions.search")}</button>
             <button
               type="button"
               className={`cache-sidebar-tab ${sidebarTab === 'problems' ? 'cache-sidebar-tab--active' : ''}`}
               onClick={() => { setSidebarTab('problems'); void loadProblems(); }}
-            >
-              问题{problems.length > 0 ? <span className="cache-sidebar-tab__badge">{problems.length}</span> : ''}
+            >{translate("projects:projectCachePage.cacheSidebarTabs_button_problem")}{problems.length > 0 ? <span className="cache-sidebar-tab__badge">{problems.length}</span> : ''}
             </button>
           </div>
 
@@ -1547,7 +1548,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
           {sidebarTab === 'files' && (
             <div className="cache-sidebar-tab-content">
               <div className="cache-layout__sidebar-header">
-                <h3>文件</h3>
+                <h3>{translate("projects:projectCachePage.cacheLayoutSidebarHeader_message_file")}</h3>
                 <div className="cache-layout__sidebar-header-actions">
                   {dirtyFiles.size > 0 && (
                     <Button
@@ -1556,9 +1557,9 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                       className="cache-file-save-all"
                       onClick={() => void handleSaveAll()}
                       disabled={savingAll}
-                      title={`保存 ${dirtyFiles.size} 个有修改的文件`}
+                      title={translate("projects:projectCachePage.cacheFileSaveAll_title_saveCountChangeFile", { count: dirtyFiles.size })}
                     >
-                      {savingAll ? <Icon name="hourglass" /> : <><Icon name="save" /> 全部保存 ({dirtyFiles.size})</>}
+                      {savingAll ? <Icon name="hourglass" /> : <><Icon name="save" />{translate("projects:projectCachePage.cacheFileSaveAll_text_allSave")}{dirtyFiles.size})</>}
                     </Button>
                   )}
                   <button
@@ -1566,8 +1567,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                     className={`icon-btn icon-btn--refresh${refreshingFiles ? ' icon-btn--spinning' : ''}`}
                     onClick={() => void refreshVisibleData()}
                     disabled={refreshingFiles || loadingEntries}
-                    title="刷新文件列表与内容"
-                    aria-label="刷新文件列表与内容"
+                    title={translate("projects:projectCachePage.cacheLayoutSidebarHeaderActions_title_file")}
+                    aria-label={translate("projects:projectCachePage.cacheLayoutSidebarHeaderActions_ariaLabel_file")}
                   >
                     <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
                       <path d="M13.5 8a5.5 5.5 0 11-1.4-3.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -1578,22 +1579,18 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
               </div>
               {selectedFiles.size > 0 && (
                 <div className="cache-file-list__selection-bar">
-                  <span className="cache-file-list__selection-count">已选择 {selectedFiles.size} 个文件</span>
+                  <span className="cache-file-list__selection-count">{translate("projects:projectCachePage.cacheFileListSelectionBar_message_doneSelectCountFile", { count: selectedFiles.size })}</span>
                   <div className="cache-file-list__selection-actions">
                     <button
                       type="button"
                       className="cache-file-list__selection-delete"
                       onClick={() => void handleDeleteSelectedFiles(Array.from(selectedFiles))}
-                    >
-                      删除
-                    </button>
+                    >{translate("common:actions.delete")}</button>
                     <button
                       type="button"
                       className="cache-file-list__selection-clear"
                       onClick={() => setSelectedFiles(new Set())}
-                    >
-                      取消选择
-                    </button>
+                    >{translate("projects:projectCachePage.cacheFileListSelectionActions_message_cancelSelect")}</button>
                   </div>
                 </div>
               )}
@@ -1650,16 +1647,16 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                           showDelete: file.has_cache !== false,
                         });
                       }}
-                      title={file.input_name ? `原文：${file.input_name}` : undefined}
+                      title={file.input_name ? translate("projects:projectCachePage.cacheFileList_title_source", { input_name: file.input_name }) : undefined}
                     >
                       <span className="cache-file-item__name">
-                        {dirtyFiles.has(file.name) && <span className="cache-file-item__dot" title="有未保存修改" />}
+                        {dirtyFiles.has(file.name) && <span className="cache-file-item__dot" title={translate("projects:projectCachePage.cacheFileItemName_title_notSaveChange")} />}
                         {file.name}
                       </span>
                       {file.has_cache === false ? (
-                        <span className="cache-file-item__size cache-file-item__size--uncached" title="还没有缓存文件，打开看到的是原文">未翻译</span>
+                        <span className="cache-file-item__size cache-file-item__size--uncached" title={translate("projects:projectCachePage.cacheFileItemSizeCacheFileItemSizeUncached_title_emptyCacheFileOpenSource")}>{translate("projects:projectCachePage.cacheFileList_message_notTranslation")}</span>
                       ) : (
-                        <span className="cache-file-item__size">{file.entry_count != null ? `${file.entry_count} 行` : formatSize(file.size)}</span>
+                        <span className="cache-file-item__size">{file.entry_count != null ? translate("projects:projectCachePage.cacheFileItemSize_message_text", { entry_count: file.entry_count }) : formatSize(file.size)}</span>
                       )}
                     </button>
                   );
@@ -1675,7 +1672,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                 <input
                   type="text"
                   className="cache-search cache-search--global"
-                  placeholder="搜索内容…"
+                  placeholder={translate("projects:projectCachePage.cacheSearchInputGroup_placeholder_search")}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
@@ -1684,12 +1681,12 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                   value={searchField}
                   onChange={(e) => setSearchField(e.target.value as CacheSearchField)}
                 >
-                  <option value="all">全部</option>
-                  <option value="src">仅原文</option>
-                  <option value="dst">仅译文</option>
-                  <option value="problem">仅问题</option>
+                  <option value="all">{translate("projects:projectCachePage.cacheSearchField_message_all")}</option>
+                  <option value="src">{translate("projects:projectCachePage.cacheSearchField_message_source")}</option>
+                  <option value="dst">{translate("projects:projectCachePage.cacheSearchField_message_translationText")}</option>
+                  <option value="problem">{translate("projects:projectCachePage.cacheSearchField_message_problem")}</option>
                 </CustomSelect>
-                <label className="cache-search-regex-toggle" title="使用正则表达式搜索">
+                <label className="cache-search-regex-toggle" title={translate("projects:projectCachePage.cacheSearchRegexToggle_title_regexSearch")}>
                   <input
                     type="checkbox"
                     checked={searchOptions.re}
@@ -1697,7 +1694,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                     disabled={searching}
                   />
                   <span className="cache-search-regex-toggle__track" aria-hidden="true" />
-                  <span className="cache-search-regex-toggle__label">正则</span>
+                  <span className="cache-search-regex-toggle__label">{translate("projects:projectCachePage.cacheSearchRegexToggle_message_regex")}</span>
                 </label>
               </div>
 
@@ -1707,14 +1704,14 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                   type="button"
                   className="cache-replace-toggle__btn"
                   onClick={() => { setShowReplace(!showReplace); setReplaceQuery(searchQuery); }}
-                  title={showReplace ? '隐藏替换' : '显示替换'}
+                  title={showReplace ? translate("projects:projectCachePage.cacheReplaceToggleBtn_title_replace") : translate("projects:projectCachePage.cacheReplaceToggleBtn_title_replaceVariant2")}
                 >
-                  {showReplace ? <><Icon name="chevron-down" /> 替换</> : <><Icon name="chevron-right" /> 替换</>}
+                  {showReplace ? <><Icon name="chevron-down" />{translate("projects:projectCachePage.cacheReplaceToggleBtn_text_replace")}</> : <><Icon name="chevron-right" />{translate("projects:projectCachePage.cacheReplaceToggleBtn_text_replace")}</>}
                 </button>
-                {searching && <span className="cache-search-status">搜索中…</span>}
+                {searching && <span className="cache-search-status">{translate("projects:projectCachePage.cacheSearchMeta_message_search")}</span>}
                 {!searching && searchQuery.trim() && (
                   <span className="cache-search-status">
-                    {searchTotal > 0 ? `${searchTotal} 条结果` : '无匹配结果'}
+                    {searchTotal > 0 ? translate("projects:projectCachePage.cacheSearchStatus_message_entry", { searchTotal: searchTotal }) : translate("projects:projectCachePage.cacheSearchStatus_message_match")}
                   </span>
                 )}
               </div>
@@ -1723,14 +1720,14 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                   <input
                     type="text"
                     className="cache-search cache-search--replace"
-                    placeholder="搜索内容…"
+                    placeholder={translate("projects:projectCachePage.cacheReplaceGroup_placeholder_search")}
                     value={replaceQuery}
                     onChange={(e) => setReplaceQuery(e.target.value)}
                   />
                   <input
                     type="text"
                     className="cache-search cache-search--replace"
-                    placeholder="替换为…"
+                    placeholder={translate("projects:projectCachePage.cacheReplaceGroup_placeholder_replace")}
                     value={replaceWith}
                     onChange={(e) => setReplaceWith(e.target.value)}
                   />
@@ -1739,35 +1736,31 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                     value={replaceField}
                     onChange={(e) => setReplaceField(e.target.value as CacheReplaceField)}
                   >
-                    <option value="dst">译文</option>
-                    <option value="src">原文</option>
-                    <option value="all">全部</option>
+                    <option value="dst">{translate("projects:projectCachePage.cacheSearchField_message_translationTextVariant2")}</option>
+                    <option value="src">{translate("projects:projectCachePage.cacheSearchField_message_sourceVariant2")}</option>
+                    <option value="all">{translate("projects:projectCachePage.cacheSearchField_message_all")}</option>
                   </CustomSelect>
                   <div className="cache-replace-actions">
                     <Button
                       variant="secondary"
                       disabled={replacing || !replaceQuery.trim()}
                       onClick={() => void handleReplacePreview()}
-                    >
-                      预览
-                    </Button>
+                    >{translate("projects:projectCachePage.cacheReplaceActions_message_preview")}</Button>
                     <Button
                       variant="primary"
                       disabled={replacing || !replaceQuery.trim() || replacePreviewTotal === 0}
                       onClick={() => void handleReplaceExecute()}
                     >
-                      {replacing ? '替换中…' : '替换'}
+                      {replacing ? translate("projects:projectCachePage.cacheReplaceActions_message_replace") : translate("projects:projectCachePage.cacheReplaceActions_message_replaceVariant2")}
                     </Button>
                   </div>
                   {replacePreview !== null && (
                     <div className="cache-replace-preview">
-                      <div className="cache-replace-preview__summary">
-                        共 {replacePreviewTotal} 处匹配，{replacePreview.length} 个文件
-                      </div>
+                      <div className="cache-replace-preview__summary">{translate("projects:projectCachePage.cacheReplacePreview_message_matchCountFile", { replacePreviewTotal: replacePreviewTotal, count: replacePreview.length })}</div>
                       {replacePreview.map((fd) => (
                         <div key={fd.filename} className="cache-replace-preview__file">
                           <span className="cache-replace-preview__filename">{fd.filename}</span>
-                          <span className="cache-replace-preview__count">{fd.matches} 处</span>
+                          <span className="cache-replace-preview__count">{translate("projects:projectCachePage.cacheReplacePreviewFile_message_text", { matches: fd.matches })}</span>
                         </div>
                       ))}
                     </div>
@@ -1829,11 +1822,11 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
           {/* Tab: Problems */}
           {sidebarTab === 'problems' && (
             <div className="cache-problems-panel">
-              <div className="cache-problems-hint">点击 + 号加入重翻关键字；点 - 号按条过滤问题（该条会转义成正则，只匹配它自己）</div>
+              <div className="cache-problems-hint">{translate("projects:projectCachePage.cacheProblemsPanel_message_retranslateEntryFilterProblemEntryRegexMatch")}</div>
               {loadingProblems ? (
-                <div className="cache-problems-loading">加载问题中…</div>
+                <div className="cache-problems-loading">{translate("projects:projectCachePage.cacheProblemsPanel_message_loadProblem")}</div>
               ) : problems.length === 0 ? (
-                <div className="cache-problems-empty">暂未发现问题</div>
+                <div className="cache-problems-empty">{translate("projects:projectCachePage.cacheProblemsPanel_message_notProblem")}</div>
               ) : (
                 <div className="cache-problems-groups">
                   {problemStats.map(([type, items]) => (
@@ -1841,7 +1834,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                       <div
                         className="cache-problems-group__header"
                         onClick={() => handleProblemClick(type)}
-                        title={`点击搜索「${type}」类型问题`}
+                        title={translate("projects:projectCachePage.cacheProblemsGroupHeader_title_searchProblem", { type: type })}
                       >
                         <span className="cache-problems-group__summary">
                           <span className="cache-problems-group__type">{type}</span>
@@ -1859,11 +1852,11 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                             setRetranslEditor((cur) => (
                               cur && cur.type === type && cur.action === 'retransl'
                                 ? null
-                                : { type, draft: type, action: 'retransl', anchor }
+                                : { type, draft: type, action: "retransl", anchor }
                             ));
                           }}
-                          title={`编辑并加入重翻关键字`}
-                          aria-label={`编辑并加入「${type}」到重翻关键字`}
+                          title={translate("projects:projectCachePage.cacheProblemsGroupHeader_title_editRetranslate")}
+                          aria-label={translate("projects:projectCachePage.cacheProblemsGroupHeader_ariaLabel_editRetranslate", { type: type })}
                           aria-expanded={retranslEditor?.type === type && retranslEditor.action === 'retransl'}
                           disabled={savingKeyword}
                         >
@@ -1882,11 +1875,11 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                             setRetranslEditor((cur) => (
                               cur && cur.type === type && cur.action === 'filter'
                                 ? null
-                                : { type, draft: '', action: 'filter', anchor }
+                                : { type, draft: '', action: "filter", anchor }
                             ));
                           }}
-                          title={`按条过滤问题（需整条问题项，如「${type}：…」）`}
-                          aria-label={`按条加入「${type}」的问题项到问题过滤`}
+                          title={translate("projects:projectCachePage.cacheProblemsGroupHeader_title_entryFilterProblemEntryProblemItem", { type: type })}
+                          aria-label={translate("projects:projectCachePage.cacheProblemsGroupHeader_ariaLabel_entryProblemItemProblemFilter", { type: type })}
                           aria-expanded={retranslEditor?.type === type && retranslEditor.action === 'filter'}
                         >
                           -
@@ -1896,13 +1889,13 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                             ref={retranslPopoverRef}
                             className="retransl-popover"
                             role="dialog"
-                            aria-label={retranslEditor.action === 'filter' ? '编辑问题过滤关键字' : '编辑重翻关键字'}
+                            aria-label={retranslEditor.action === 'filter' ? translate("projects:projectCachePage.retranslPopover_ariaLabel_editProblemFilter") : translate("projects:projectCachePage.retranslPopover_ariaLabel_editRetranslate")}
                             onClick={(e) => e.stopPropagation()}
                             style={{ top: retranslEditor.anchor.top, left: retranslEditor.anchor.left }}
                           >
                             <div className="retransl-popover__arrow" aria-hidden="true" />
                             <label className="retransl-popover__label">
-                              {retranslEditor.action === 'filter' ? '加入问题过滤（支持正则）' : '加入重翻关键字'}
+                              {retranslEditor.action === 'filter' ? translate("projects:projectCachePage.retranslPopoverLabel_message_problemFilterRegex") : translate("projects:projectCachePage.retranslPopoverLabel_message_retranslate")}
                             </label>
                             <input
                               ref={retranslInputRef}
@@ -1919,7 +1912,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                                   setRetranslEditor(null);
                                 }
                               }}
-                              placeholder={retranslEditor.action === 'filter' ? '正则，如 ^残留日文： 或 残留日文：おはよう' : '关键字'}
+                              placeholder={retranslEditor.action === 'filter' ? translate("projects:projectCachePage.retranslPopover_placeholder_regexJapaneseJapanese") : translate("projects:projectCachePage.retranslPopover_placeholder_text")}
                               autoFocus
                             />
                             <div className="retransl-popover__actions">
@@ -1927,9 +1920,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                                 type="button"
                                 className="retransl-popover__btn retransl-popover__btn--ghost"
                                 onClick={() => setRetranslEditor(null)}
-                              >
-                                取消
-                              </button>
+                              >{translate("common:actions.cancel")}</button>
                               <button
                                 type="button"
                                 className="retransl-popover__btn retransl-popover__btn--primary"
@@ -1937,9 +1928,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                                  onClick={() => {
                                   submitProblemKeywordEditor(retranslEditor);
                                  }}
-                              >
-                                加入
-                              </button>
+                              >{translate("projects:projectCachePage.retranslPopoverActions_message_text")}</button>
                             </div>
                           </div>
                         ), document.body)}
@@ -1957,29 +1946,29 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
           onPointerDown={handleResizerPointerDown}
           role="separator"
           aria-orientation="vertical"
-          aria-label="调整文件列表宽度"
+          aria-label={translate("projects:projectCachePage.projectCachePage_ariaLabel_file")}
         />
 
         <div className="cache-layout__main">
           {selectedFile ? (
             <Panel
               title={selectedFile}
-              description={`${total} 句 · ${translated} 已翻译 · ${withProblems} 有问题`}
+              description={translate("projects:projectCachePage.cacheLayoutMain_description_sentenceDoneTranslationProblem", { total: total, translated: translated, withProblems: withProblems })}
               actions={(
                 <div className="cache-panel-actions">
                   <Button
                     onClick={() => void handleRecover()}
                     disabled={loadingEntries || !dirty || selectedHasNoCache}
-                    title={selectedHasNoCache ? '还没有缓存文件，没有可撤销的修改' : undefined}
+                    title={selectedHasNoCache ? translate("projects:projectCachePage.cachePanelActions_title_emptyCacheFileEmptyChange") : undefined}
                   >
-                    {loadingEntries ? '撤销中…' : '撤销'}
+                    {loadingEntries ? translate("projects:projectCachePage.cachePanelActions_message_text") : translate("projects:projectCachePage.cachePanelActions_message_textVariant2")}
                   </Button>
                   <Button
                     onClick={() => void handleSave()}
                     disabled={saving || !dirty || selectedHasNoCache}
-                    title={selectedHasNoCache ? '还没有缓存文件，翻译过之后才能在这里改' : undefined}
+                    title={selectedHasNoCache ? translate("projects:projectCachePage.cachePanelActions_title_emptyCacheFileTranslation") : undefined}
                   >
-                    {saving ? '保存中…' : '保存'}
+                    {saving ? translate("common:actions.saving") : translate("common:actions.save")}
                   </Button>
                 </div>
               )}
@@ -1987,7 +1976,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
               <div className="cache-toolbar">
                 <input
                   type="text"
-                  placeholder="搜索原文或译文…"
+                  placeholder={translate("projects:projectCachePage.cacheToolbar_placeholder_searchSourceTranslationText")}
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="cache-search"
@@ -1997,15 +1986,13 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                     type="checkbox"
                     checked={filterProblems}
                     onChange={(e) => setFilterProblems(e.target.checked)}
-                  />
-                  只看问题句
-                </label>
+                  />{translate("projects:projectCachePage.cacheFilter_label_problemSentence")}</label>
               </div>
 
               <div className="cache-card-list-wrapper">
                 {loadingEntries && (
                   <div className="cache-card-list-loading">
-                    <strong>加载中…</strong>
+                    <strong>{translate("common:actions.loading")}</strong>
                   </div>
                 )}
                 <div
@@ -2028,13 +2015,13 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                     />
                   ))}
                   {filteredEntries.length === 0 && !loadingEntries && (
-                    <EmptyState title="无匹配条目" description="尝试更换搜索关键词。" />
+                    <EmptyState title={translate("projects:projectCachePage.cacheCardListWrapper_title_matchEntry")} description={translate("projects:projectCachePage.cacheCardListWrapper_description_search")} />
                   )}
                 </div>
               </div>
             </Panel>
           ) : (
-            <EmptyState className="cache-layout__empty" title="选择一个文件" description="从左侧选择文件查看原文与译文，或使用全局搜索。" />
+            <EmptyState className="cache-layout__empty" title={translate("projects:projectCachePage.cacheLayoutMain_title_selectCountFile")} description={translate("projects:projectCachePage.cacheLayoutMain_description_selectFileSourceTranslationTextSearch")} />
           )}
         </div>
       </div>
@@ -2055,7 +2042,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
             }}
           >
             <span className="cache-context-menu__icon" aria-hidden="true"><Icon name="folder-open" /></span>
-            <span className="cache-context-menu__label">在文件管理器中浏览</span>
+            <span className="cache-context-menu__label">{translate("projects:projectCachePage.cacheContextMenuItem_message_file")}</span>
           </button>
           {contextMenu.showDelete && (
             <button
@@ -2068,8 +2055,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
               }}
             >
               <span className="cache-context-menu__icon" aria-hidden="true"><Icon name="trash" /></span>
-              <span className="cache-context-menu__label">
-                删除{contextMenu.filenames.length > 1 ? ` (${contextMenu.filenames.length} 个文件)` : ''}
+              <span className="cache-context-menu__label">{translate("common:actions.delete")}{contextMenu.filenames.length > 1 ? translate("projects:projectCachePage.cacheContextMenuLabel_message_countFile", { count: contextMenu.filenames.length }) : ''}
               </span>
             </button>
           )}

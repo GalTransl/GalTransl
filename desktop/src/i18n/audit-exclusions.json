@@ -1,0 +1,12 @@
+[
+  { "file": "src/components/RenderErrorBoundary.tsx", "text": "页面渲染出错", "reason": "Console diagnostic, not UI text." },
+  { "file": "src/components/Sidebar.tsx", "text": "翻译失败", "reason": "Matches the backend's original log text." },
+  { "file": "src/pages/agent/rows/AgentGroupView.tsx", "text": "用户停止", "reason": "Compares a backend event reason; the displayed label is translated." },
+  { "file": "src/pages/ProjectTranslatePage.tsx", "text": "检查模型可用性", "reason": "Compares the backend runtime stage; the displayed label is translated." },
+  { "file": "src/pages/agent/composer.tsx", "text": "做一下翻译前准备", "reason": "Example instruction inserted into the model prompt." },
+  { "file": "src/pages/agent/composer.tsx", "text": "通过子agent探索全文补齐字典", "reason": "Example instruction inserted into the model prompt." },
+  { "file": "src/pages/agent/composer.tsx", "text": "做一下译后流程", "reason": "Example instruction inserted into the model prompt." },
+  { "file": "src/pages/agent/composer.tsx", "text": "修一下问题", "reason": "Example instruction inserted into the model prompt." },
+  { "file": "src/pages/CommonGuidelinesPage.tsx", "text": "示例（按需增删）：\n\n## 术语与称呼\n- 「お兄ちゃん」统一译作「哥哥」，不要用「老哥」\n\n## 语气与文风\n- 主角内心独白用书面语，不用网络用语\n- 拟声词保留原文的声音感，不意译成\"啪的一声\"", "reason": "Example translation guideline supplied to a model." },
+  { "file": "src/pages/project-config/ProjectGuidelineSection.tsx", "text": "示例（按需增删）：\n\n## 术语与称呼\n- 「お兄ちゃん」统一译作「哥哥」，不要用「老哥」\n\n## 语气与文风\n- 主角内心独白用书面语，不用网络用语\n- 拟声词保留原文的声音感，不意译成\"啪的一声\"", "reason": "Example translation guideline supplied to a model." }
+]

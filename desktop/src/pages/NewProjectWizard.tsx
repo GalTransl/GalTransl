@@ -1,3 +1,5 @@
+import { localizePlugin } from "../i18n/plugins";
+import { UiTrans, message as uiMessage, t as translate, useFeedbackState, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -33,30 +35,30 @@ import type { FilePluginDetection } from '../lib/api';
 import { addProjectToHistory } from './HomePage';
 import { basenamePath, isAbsolutePath, joinPath, normalizeFileUriPath } from '../lib/paths';
 
-const STEPS = ['项目位置', '导入文件', '翻译后端', '常用设置', '提取人名', '完成'];
+const STEPS = ["projects:newProjectWizard.sTEPS_message_project","projects:newProjectWizard.sTEPS_message_importFile","projects:newProjectWizard.sTEPS_message_translationBackend","common:actions.commonSettings","projects:newProjectWizard.sTEPS_message_extractNameTable","common:actions.completed"] as const;
 const LAST_PARENT_DIR_KEY = 'galtransl-new-project-last-parent-dir';
 
 // 最后一步的后续流程指引：从生成字典到取回译文的正经顺序
 const FLOW_STEPS: { title: string; description: string }[] = [
   {
-    title: '先生成 GPT 字典',
-    description: '在项目的「项目字典」里点「AI生成GPT字典」：GenDic 读原文提取人名、地名与专有名词并统一译名（结果并入项目GPT字典-生成.txt）。',
+    get title() { return translate("projects:newProjectWizard.title_title_gPTDictionary"); },
+    get description() { return translate("projects:newProjectWizard.description_description_projectProjectDictionaryAIGPTDictionaryGenDic"); },
   },
   {
-    title: '检查字典',
-    description: '核对译名、删掉不该收的普通词。字典按类目分区、可在卡片里直接改，改完记得保存。',
+    get title() { return translate("projects:newProjectWizard.title_title_checkDictionary"); },
+    get description() { return translate("projects:newProjectWizard.description_description_dictionarySave"); },
   },
   {
-    title: '启动翻译',
-    description: '回到「开始翻译」选好模板启动。正式全量前建议先试译一两个文件，确认文风与术语没问题。',
+    get title() { return translate("projects:newProjectWizard.title_title_translation"); },
+    get description() { return translate("projects:newProjectWizard.description_description_startTranslationCountFileConfirmProblem"); },
   },
   {
-    title: '查看结果与翻译问题',
-    description: '在「浏览文本」里看译文和检测出的问题句（残留日文、缺控制符、比日文长等），据此补字典或改译文。',
+    get title() { return translate("projects:newProjectWizard.title_title_translationProblem"); },
+    get description() { return translate("projects:newProjectWizard.description_description_textTranslationTextDetectProblemSentenceJapaneseJapanese"); },
   },
   {
-    title: '构建输出',
-    description: '改完字典后点「构建输出」（rebuilda）用字典重刷缓存与结果，最终译文在 gt_output 文件夹取回。',
+    get title() { return translate("projects:newProjectWizard.title_title_text"); },
+    get description() { return translate("projects:newProjectWizard.description_description_dictionaryRebuildaDictionaryCacheTranslationTextGtOutput"); },
   },
 ];
 
@@ -67,10 +69,11 @@ type NewProjectWizardProps = {
 };
 
 export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }: NewProjectWizardProps) {
+  const uiLanguage = useUiLanguage();
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(0);
   const [stepDirection, setStepDirection] = useState<'forward' | 'backward'>('forward');
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [feedback, setFeedback] = useFeedbackState(null);
 
   // Step 1 state
   const [parentDir, setParentDir] = useState(() => {
@@ -113,9 +116,33 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
   const [translationGuideline, setTranslationGuideline] = useState('');
   const [settingsSaved, setSettingsSaved] = useState(false);
 
+  // 目标语言与翻译规范的默认值跟随界面语言：英文界面默认 English + Basic.md，
+  // 中文界面保持原样（zh-cn + 日译中_增强v2）。用户手动选过之后就不再跟随，
+  // 切换界面语言只改默认值，不会覆盖已选内容。
+  const languageTouchedRef = useRef(false);
+  const translationGuidelineTouchedRef = useRef(false);
+  const preferredGuidelines = useMemo(
+    () => (uiLanguage === 'en'
+      ? [translate("projects:newProjectWizard.newProjectWizard_message_basicMd")]
+      : [translate("projects:newProjectWizard.newProjectWizard_message_v2Md"), translate("projects:newProjectWizard.newProjectWizard_message_md")]),
+    [uiLanguage],
+  );
+
+  useEffect(() => {
+    if (languageTouchedRef.current) return;
+    setLanguage(uiLanguage === 'en' ? 'en' : 'zh-cn');
+  }, [uiLanguage]);
+
+  useEffect(() => {
+    if (translationGuidelineTouchedRef.current) return;
+    // 名字要带 .md——接口给的是文件名，少写扩展名会一个都匹配不上，
+    // 静默落到列表首位，看起来就像"默认值没生效"。
+    setTranslationGuideline(preferredGuidelines.find((name) => guidelines.includes(name)) || guidelines[0] || '');
+  }, [guidelines, preferredGuidelines]);
+
   // Step 5 state
   const [nameJobStatus, setNameJobStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
-  const [nameJobMessage, setNameJobMessage] = useState('');
+  const [nameJobMessage, setNameJobMessage] = useMessageState<string>('');
 
   const projectDir = useMemo(() => {
     if (!parentDir || !projectName) return '';
@@ -148,7 +175,7 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
       }
 
       if (pathsToImport.length === 0) {
-        setFeedback({ type: 'info', message: '已过滤重复文件，本次无新增导入。' });
+        setFeedback({ type: 'info', message: uiMessage("projects:newProjectWizard.message_message_doneFilterFileImport") });
         return;
       }
 
@@ -159,11 +186,11 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
         setFeedback({
           type: 'success',
           message: filteredCount > 0
-            ? `已导入 ${pathsToImport.length} 个文件，已过滤 ${filteredCount} 个重复文件`
-            : `已导入 ${pathsToImport.length} 个文件`,
+            ? uiMessage("projects:newProjectWizard.message_setFeedback_doneImportCountFileDoneFilterCount", { count: pathsToImport.length, filteredCount: filteredCount })
+            : uiMessage("projects:newProjectWizard.message_setFeedback_doneImportCountFile", { count: pathsToImport.length }),
         });
       } catch (err) {
-        setFeedback({ type: 'error', message: `导入失败: ${err instanceof Error ? err.message : String(err)}` });
+        setFeedback({ type: 'error', message: uiMessage("projects:newProjectWizard.message_message_importFailed", { value: err instanceof Error ? err.message : String(err) }) });
       }
     },
     [gtInputDir, importedFiles],
@@ -180,7 +207,7 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
       if (payload?.type !== 'drop') return;
       const paths = Array.isArray(payload.paths) ? payload.paths : [];
       if (paths.length === 0) {
-        setFeedback({ type: 'error', message: '未能读取拖拽文件路径，请改用“选择文件”导入。' });
+        setFeedback({ type: 'error', message: uiMessage("projects:newProjectWizard.message_message_notReadFileSelectFileImport") });
         return;
       }
       void importPathsToInput(paths);
@@ -248,7 +275,7 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
 
   const handleCreateProject = useCallback(async (): Promise<boolean> => {
     if (!projectDir) {
-      setFeedback({ type: 'error', message: '请选择目录并输入项目名称' });
+      setFeedback({ type: 'error', message: uiMessage("projects:newProjectWizard.message_message_chooseDirectoryProjectName") });
       return false;
     }
     // 目标目录里已有 config.yaml 时不覆盖，避免把已有项目的配置冲掉
@@ -256,7 +283,7 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
       .then(() => true)
       .catch(() => false);
     if (alreadyExists) {
-      setFeedback({ type: 'error', message: '该目录下已存在 config.yaml，请换一个项目名称，或回到首页用「打开项目」打开它。' });
+      setFeedback({ type: 'error', message: uiMessage("projects:newProjectWizard.message_message_directoryDoneConfigYamlCountProjectName") });
       return false;
     }
     try {
@@ -269,10 +296,10 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
       setProjectCreated(true);
       // 先记入历史：中途离开向导（比如去模型设置）也能从首页找回这个项目
       addProjectToHistory(projectDir, 'config.yaml');
-      setFeedback({ type: 'success', message: '项目创建成功！' });
+      setFeedback({ type: 'success', message: uiMessage("projects:newProjectWizard.message_message_projectCreateSuccess") });
       return true;
     } catch (err) {
-      setFeedback({ type: 'error', message: `创建失败: ${err instanceof Error ? err.message : String(err)}` });
+      setFeedback({ type: 'error', message: uiMessage("projects:newProjectWizard.message_message_createFailed", { value: err instanceof Error ? err.message : String(err) }) });
       return false;
     }
   }, [projectDir]);
@@ -304,7 +331,7 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
 
       const droppedPaths = directPaths.length > 0 ? directPaths : parseDroppedUriList();
       if (droppedPaths.length === 0) {
-        setFeedback({ type: 'error', message: '未能读取拖拽文件路径，请改用“选择文件”导入。' });
+        setFeedback({ type: 'error', message: uiMessage("projects:newProjectWizard.message_message_notReadFileSelectFileImport") });
         return;
       }
       await importPathsToInput(droppedPaths);
@@ -325,7 +352,7 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
     try {
       await invoke('open_folder', { path: gtInputDir });
     } catch (err) {
-      setFeedback({ type: 'error', message: `打开输入文件夹失败: ${err instanceof Error ? err.message : String(err)}` });
+      setFeedback({ type: 'error', message: uiMessage("projects:newProjectWizard.message_message_openFileFailed", { value: err instanceof Error ? err.message : String(err) }) });
     }
   }, [gtInputDir]);
 
@@ -384,20 +411,9 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
         })
         .catch(() => setFileDetection(null));
     }
+    // 默认值由上面的语言相关 effect 挑选，这里只负责拉列表。
     fetchTranslationGuidelines()
-      .then((list) => {
-        setGuidelines(list);
-        setTranslationGuideline((prev) => {
-          if (prev) return prev;
-          // 默认挑「日译中_增强v2」：先把首选、再退到上一代增强、最后才退到列表首位。
-          // 名字要带 .md——接口给的是文件名，少写扩展名会一个都匹配不上，静默落到 list[0]
-          // （按 Unicode 排序多半是 Basic.md），看起来就像"默认值没生效"。
-          for (const preferred of ['日译中_增强v2.md', '日译中_增强.md']) {
-            if (list.includes(preferred)) return preferred;
-          }
-          return list[0] || '';
-        });
-      })
+      .then(setGuidelines)
       .catch(() => {});
   }, [currentStep, projectDir]);
 
@@ -445,10 +461,10 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
       setSelectedBackendProfile(projectDir, selectedBackend);
 
       setSettingsSaved(true);
-      setFeedback({ type: 'success', message: '设置已保存' });
+      setFeedback({ type: 'success', message: uiMessage("projects:newProjectWizard.message_message_settingsDoneSave") });
       return true;
     } catch (err) {
-      setFeedback({ type: 'error', message: `保存失败: ${err instanceof Error ? err.message : String(err)}` });
+      setFeedback({ type: 'error', message: uiMessage("projects:newProjectWizard.message_message_saveFailed", { value: err instanceof Error ? err.message : String(err) }) });
       return false;
     }
   }, [projectDir, workersPerProject, language, numPerRequest, dynamicNumPerRequest, dynamicNumPerRequestMin, dynamicNumPerRequestMax, selectedFilePlugin, selectedBackend, translationGuideline, pluginOverrides, filePlugins]);
@@ -471,7 +487,7 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
         }
         if (!hasInputFiles) {
           setNameJobStatus('completed');
-          setNameJobMessage('gt_input 中没有文件，已跳过人名提取。可返回上一步导入文件，或稍后手动添加。');
+          setNameJobMessage(uiMessage("projects:newProjectWizard.run_setNameJobMessage_gtInputEmptyFileDoneNameTableExtract"));
           return;
         }
 
@@ -486,10 +502,10 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
             const status = await fetchJob(job.job_id);
             if (status.status === 'completed') {
               setNameJobStatus('completed');
-              setNameJobMessage(status.success ? '人名提取完成！' : `提取完成但有警告: ${status.error || ''}`);
+              setNameJobMessage(status.success ? uiMessage("projects:newProjectWizard.poll_setNameJobMessage_nameTableExtractComplete") : uiMessage("projects:newProjectWizard.poll_setNameJobMessage_extractComplete", { value: status.error || '' }));
             } else if (status.status === 'failed') {
               setNameJobStatus('failed');
-              setNameJobMessage(status.error || '提取失败');
+              setNameJobMessage(status.error || uiMessage("projects:newProjectWizard.poll_setNameJobMessage_extractFailed"));
             } else {
               setTimeout(poll, 2000);
             }
@@ -544,7 +560,7 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
           className={`wizard-step${i === currentStep ? ' wizard-step--active' : ''}${i < currentStep ? ' wizard-step--completed' : ''}`}
         >
           <span className="wizard-step__number">{i < currentStep ? <Icon name="check" /> : i + 1}</span>
-          <span className="wizard-step__label">{label}</span>
+          <span className="wizard-step__label">{translate(label)}</span>
         </li>
       ))}
     </ul>
@@ -552,44 +568,42 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
 
   // ── Step 1 ──
   const renderStep1 = () => (
-    <Panel title="项目位置" description="选择项目文件夹的保存位置和项目名称，然后创建项目结构。">
+    <Panel title={translate("projects:newProjectWizard.renderStep1_title_project")} description={translate("projects:newProjectWizard.renderStep1_description_selectProjectFileSaveProjectNameCreate")}>
       <div className="wizard-form-grid">
         <div className="field">
-          <span className="field__label">项目名称</span>
+          <span className="field__label">{translate("projects:newProjectWizard.field_message_projectName")}</span>
           <input
             className="field__input"
             autoComplete="off"
             value={projectName}
             onChange={(e) => { setProjectName(e.target.value); setProjectCreated(false); }}
-            placeholder="例如：MyProject"
+            placeholder={translate("projects:newProjectWizard.field_placeholder_myProject")}
           />
         </div>
         <div className="field">
-          <span className="field__label">父目录</span>
+          <span className="field__label">{translate("projects:newProjectWizard.field_message_directory")}</span>
           <div className="field__row">
             <input
               className="field__input"
               autoComplete="off"
               value={parentDir}
               onChange={(e) => { setParentDir(e.target.value); setParentDirTouched(true); setProjectCreated(false); }}
-              placeholder="例如：/home/user/GalTransl/projects 或 E:\GalTransl\projects"
+              placeholder={translate("projects:newProjectWizard.fieldRow_placeholder_homeUserGalTranslProjectsEGalTranslProjects")}
             />
-            <Button className="field__browse-button" variant="secondary" onClick={() => void handleSelectParentDir()}>
-              浏览
-            </Button>
+            <Button className="field__browse-button" variant="secondary" onClick={() => void handleSelectParentDir()}>{translate("projects:newProjectWizard.fieldRow_message_text")}</Button>
           </div>
-          <span className="field__hint">默认是程序所在目录；建议用当前游戏名作为项目名。</span>
+          <span className="field__hint">{translate("projects:newProjectWizard.field_message_defaultDirectoryEnglish")}</span>
         </div>
         <div className="wizard-path-preview">
-          <span className="wizard-path-preview__label">将创建目录</span>
-          <code className="wizard-path-preview__path">{projectDir || '请先填写父目录与项目名称'}</code>
-          <div className="wizard-path-preview__meta">包含 `gt_input` / `gt_output` / `transl_cache` 与 `config.yaml`</div>
+          <span className="wizard-path-preview__label">{translate("projects:newProjectWizard.wizardPathPreview_message_createDirectory")}</span>
+          <code className="wizard-path-preview__path">{projectDir || translate("projects:newProjectWizard.wizardPathPreviewPath_message_directoryProjectName")}</code>
+          <div className="wizard-path-preview__meta">{translate("projects:newProjectWizard.wizardPathPreview_message_gtInputGtOutputTranslCacheConfig")}</div>
         </div>
       </div>
       {projectCreated ? (
         <div className="wizard-tip-card">
-          <strong><Icon name="check" /> 项目已创建</strong>
-          <span>点击「下一步」继续导入文件。</span>
+          <strong><Icon name="check" />{translate("projects:newProjectWizard.wizardTipCard_strong_projectDoneCreate")}</strong>
+          <span>{translate("projects:newProjectWizard.wizardTipCard_message_nextImportFile")}</span>
         </div>
       ) : null}
     </Panel>
@@ -597,7 +611,7 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
 
   // ── Step 2 ──
   const renderStep2 = () => (
-    <Panel title="导入文件" description="将待翻译的文件导入到项目的 gt_input 目录中，也可以跳过此步骤稍后手动添加。">
+    <Panel title={translate("projects:newProjectWizard.renderStep2_title_importFile")} description={translate("projects:newProjectWizard.renderStep2_description_translationFileImportProjectGtInputDirectory")}>
       <div
         className={`drop-zone${importedFiles.length > 0 ? ' drop-zone--filled' : ''}`}
         onDragOver={(e) => {
@@ -613,10 +627,10 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
         {importedFiles.length > 0 ? (
           <>
             <div className="drop-zone__files-header">
-              <strong className="drop-zone__text">已导入 {importedFiles.length} 个文件</strong>
-              <span>可继续拖放文件到此处添加</span>
+              <strong className="drop-zone__text">{translate("projects:newProjectWizard.dropZoneFilesHeader_message_doneImportCountFile", { count: importedFiles.length })}</strong>
+              <span>{translate("projects:newProjectWizard.dropZoneFilesHeader_message_fileAdd")}</span>
             </div>
-            <ul className="wizard-file-list" aria-label="已导入文件">
+            <ul className="wizard-file-list" aria-label={translate("projects:newProjectWizard.wizardFileList_ariaLabel_doneImportFile")}>
               {importedFiles.map((file) => (
                 <li key={file} className="wizard-file-list__item">{file}</li>
               ))}
@@ -625,37 +639,37 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
         ) : (
           <>
             <div className="drop-zone__icon"><Icon name="folder" /></div>
-            <div className="drop-zone__text">拖放文件到此处导入</div>
+            <div className="drop-zone__text">{translate("projects:newProjectWizard.renderStep2_message_fileImport")}</div>
           </>
         )}
       </div>
       <div className="wizard-actions">
-        <Button variant="secondary" onClick={() => void handleFilePick()}>选择文件</Button>
-        <Button variant="secondary" onClick={() => void handleOpenInputFolder()} disabled={!gtInputDir}>打开输入文件夹</Button>
+        <Button variant="secondary" onClick={() => void handleFilePick()}>{translate("projects:newProjectWizard.wizardActions_message_selectFile")}</Button>
+        <Button variant="secondary" onClick={() => void handleOpenInputFolder()} disabled={!gtInputDir}>{translate("projects:newProjectWizard.wizardActions_message_openFile")}</Button>
       </div>
       <div className="wizard-tip-card">
-        <strong>支持的文件类型</strong>
-        <span>提取工具结果：GalTransl / Mtool JSON、Translator++ XLSX。</span>
-        <span>文本与电子书：TXT、Markdown（.md、.markdown）、EPUB；字幕：SRT、LRC、VTT。</span>
-        <span>Galgame 脚本直接输入：.ks、.scn、.ast、.asb、bgi、.cst、.srcxml、.csx、.rld、.hcb、.soc、.sc、.s、.src、.ws2、.ybn等。</span>
-        <span>部分脚本（如 .bin、.mes、.txt、BGI）需在文件插件设置中指定对应引擎。</span>
-        <span>支持拖拽多个文件；若暂时跳过，可后续手动复制到 <code>gt_input</code> 目录。</span>
+        <strong>{translate("projects:newProjectWizard.wizardTipCard_message_file")}</strong>
+        <span>{translate("projects:newProjectWizard.wizardTipCard_message_extractGalTranslMtoolJSONTranslatorXLSX")}</span>
+        <span>{translate("projects:newProjectWizard.wizardTipCard_message_textTXTMarkdownMdMarkdownEPUBSRT")}</span>
+        <span>{translate("projects:newProjectWizard.wizardTipCard_message_galgameKsScnAstAsbBgiCst")}</span>
+        <span>{translate("projects:newProjectWizard.wizardTipCard_message_binMesTxtBGIFilePluginSettings")}</span>
+        <span><UiTrans k="projects:newProjectWizard.wizardTipCard_message_countFile0GtInput0Directory" components={[<code />]} /></span>
       </div>
       <div className="wizard-tip-card">
-        <strong>Galgame 脚本兼容性提示</strong>
-        <span>游戏脚本格式多变，自动提取不一定兼容所有游戏。建议导入并完成项目创建后，在「浏览文本」中确认文本与人名是否正确、是否有遗漏，再开始翻译。</span>
+        <strong>{translate("projects:newProjectWizard.wizardTipCard_message_galgameHint")}</strong>
+        <span>{translate("projects:newProjectWizard.wizardTipCard_message_formatAutoExtractImportCompleteProjectCreate")}</span>
       </div>
     </Panel>
   );
 
   // ── Step 3 ──
   const renderStep3 = () => (
-    <Panel title="翻译后端" description="选择翻译后端配置，也可以跳过此步骤在配置编辑中设置。">
+    <Panel title={translate("projects:newProjectWizard.renderStep3_title_translationBackend")} description={translate("projects:newProjectWizard.renderStep3_description_selectTranslationBackendConfigConfigEditSettings")}>
       <div className="field">
-        <span className="field__label">后端配置</span>
+        <span className="field__label">{translate("projects:newProjectWizard.field_message_backendConfig")}</span>
         <CustomSelect value={selectedBackend} onChange={(e) => setSelectedBackend(e.target.value)}>
-          <option value="__default__">跟随全局默认</option>
-          <option value="">不使用（使用项目自身配置）</option>
+          <option value="__default__">{translate("projects:newProjectWizard.field_message_default")}</option>
+          <option value="">{translate("projects:newProjectWizard.field_message_projectConfig")}</option>
           {backendProfileNames.map((name) => (
             <option key={name} value={name}>{name}</option>
           ))}
@@ -663,28 +677,25 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
         <span className="field__hint">
           {selectedBackend === '__default__'
             ? defaultBackendName
-              ? `当前默认配置为「${defaultBackendName}」，可在「模型设置」页面修改`
-              : '尚未设置默认配置，请在「模型设置」页面设置'
+              ? translate("projects:newProjectWizard.fieldHint_message_currentDefaultConfigModelSettingsChange", { defaultBackendName: defaultBackendName })
+              : translate("projects:newProjectWizard.fieldHint_message_notSettingsDefaultConfigModelSettingsSettings")
             : selectedBackend
-              ? `翻译时将使用全局配置「${selectedBackend}」覆盖项目后端设置`
-              : '将忽略全局配置，使用项目自身后端设置'}
+              ? translate("projects:newProjectWizard.fieldHint_message_translationConfigProjectBackendSettings", { selectedBackend: selectedBackend })
+              : translate("projects:newProjectWizard.fieldHint_message_configProjectBackendSettings")}
         </span>
       </div>
       {backendProfileNames.length === 0 ? (
         <div className="wizard-tip-card wizard-tip-card--warning">
-          <strong><Icon name="warning" /> 还没有任何模型配置</strong>
-          <span>
-            没有模型就无法翻译。可以先继续完成向导，之后在「模型设置」中新建配置（第一个配置会自动设为默认）；
-            项目已保存在首页的历史项目中，随时可以回来。
-          </span>
+          <strong><Icon name="warning" />{translate("projects:newProjectWizard.wizardTipCardWizardTipCardWarning_strong_emptyModelConfig")}</strong>
+          <span>{translate("projects:newProjectWizard.wizardTipCardWizardTipCardWarning_message_emptyModelUnableTranslationCompleteModelSettings")}</span>
           <div>
-            <Button variant="secondary" onClick={() => navigate('/backend-profiles')}>前往模型设置</Button>
+            <Button variant="secondary" onClick={() => navigate('/backend-profiles')}>{translate("projects:newProjectWizard.wizardTipCardWizardTipCardWarning_message_modelSettings")}</Button>
           </div>
         </div>
       ) : (
         <div className="wizard-tip-card">
-          <strong>推荐策略</strong>
-          <span>一般保持「跟随全局默认」即可；需要为这个项目单独换模型时再选择具体配置。</span>
+          <strong>{translate("projects:newProjectWizard.wizardTipCard_message_text")}</strong>
+          <span>{translate("projects:newProjectWizard.wizardTipCard_message_defaultCountProjectModelSelectConfig")}</span>
         </div>
       )}
     </Panel>
@@ -692,10 +703,10 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
 
   // ── Step 4 ──
   const renderStep4 = () => (
-    <Panel title="常用设置" description="设置项目的基本翻译参数。">
+    <Panel title={translate("common:actions.commonSettings")} description={translate("projects:newProjectWizard.renderStep4_description_settingsProjectTranslation")}>
       <div className="wizard-settings-grid">
       <div className="field wizard-settings-grid__full">
-        <span className="field__label">文件插件</span>
+        <span className="field__label">{translate("projects:newProjectWizard.fieldWizardSettingsGridFull_message_filePlugin")}</span>
         <CustomSelect
           value={selectedFilePlugin}
           onChange={(e) => {
@@ -703,17 +714,17 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
             setSelectedFilePlugin(e.target.value);
           }}
         >
-          <option value="auto">自动识别 (auto)</option>
+          <option value="auto">{translate("projects:newProjectWizard.fieldWizardSettingsGridFull_message_autoAuto")}</option>
           {filePlugins.length > 0 ? (
             filePlugins.map((p) => (
-              <option key={p.name} value={p.name}>{p.display_name} ({p.name})</option>
+              <option key={p.name} value={p.name}>{localizePlugin(p).display_name} ({p.name})</option>
             ))
           ) : selectedFilePlugin !== 'auto' ? (
             <option value={selectedFilePlugin}>{selectedFilePlugin}</option>
           ) : null}
         </CustomSelect>
-        {filePlugins.filter((p) => p.name === selectedFilePlugin && p.description).map((plugin) => (
-          <span key={plugin.name} className="field__hint" style={{ whiteSpace: 'pre-line' }}>{plugin.description}</span>
+        {filePlugins.filter((p) => p.name === selectedFilePlugin && localizePlugin(p).description).map((plugin) => (
+          <span key={plugin.name} className="field__hint" style={{ whiteSpace: 'pre-line' }}>{localizePlugin(plugin).description}</span>
         ))}
         <span className="field__hint">{describeFileDetection(fileDetection, filePlugins)}</span>
       </div>
@@ -733,7 +744,7 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
         </div>
       ))}
       <div className="field">
-        <span className="field__label">并发文件数</span>
+        <span className="field__label">{translate("projects:newProjectWizard.field_message_concurrencyFile")}</span>
         <input
           className="field__input"
           type="number"
@@ -741,10 +752,10 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
           value={workersPerProject}
           onChange={(e) => setWorkersPerProject(Number(e.target.value))}
         />
-        <span className="field__hint">并发越高速度越快，但更吃资源。</span>
+        <span className="field__hint">{translate("projects:newProjectWizard.field_message_concurrencySource")}</span>
       </div>
       <div className="field">
-        <span className="field__label">单次翻译句数</span>
+        <span className="field__label">{translate("projects:newProjectWizard.field_message_translationSentence")}</span>
         <input
           className="field__input"
           type="number"
@@ -752,18 +763,18 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
           value={numPerRequest}
           onChange={(e) => setNumPerRequest(Number(e.target.value))}
         />
-        <span className="field__hint">建议 8~20，兼顾质量和成本。</span>
+        <span className="field__hint">{translate("projects:newProjectWizard.field_message_820")}</span>
       </div>
       <label className="field field--switch">
-        <span className="field__label">动态句数调整</span>
+        <span className="field__label">{translate("projects:newProjectWizard.field_message_sentence")}</span>
         <Switch checked={dynamicNumPerRequest} onChange={setDynamicNumPerRequest} />
-        <span className="field__hint">根据解析错误自动降低句数，稳定后逐步提升。</span>
+        <span className="field__hint">{translate("projects:newProjectWizard.field_message_errorAutoSentence")}</span>
       </label>
       {/* 关掉动态句数调整后，上下限没人用，收起来免得占地方、也免得误以为在生效 */}
       {dynamicNumPerRequest ? (
         <>
           <div className="field">
-            <span className="field__label">动态最小句数</span>
+            <span className="field__label">{translate("projects:newProjectWizard.field_message_sentenceVariant2")}</span>
             <input
               className="field__input"
               type="number"
@@ -773,7 +784,7 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
             />
           </div>
           <div className="field">
-            <span className="field__label">动态最大句数</span>
+            <span className="field__label">{translate("projects:newProjectWizard.field_message_sentenceVariant3")}</span>
             <input
               className="field__input"
               type="number"
@@ -785,23 +796,32 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
         </>
       ) : null}
       <div className="field wizard-settings-grid__full">
-        <span className="field__label">目标语言</span>
-        <CustomSelect value={language} onChange={(e) => setLanguage(e.target.value)}>
-          <option value="zh-cn">简体中文</option>
-          <option value="zh-tw">繁体中文</option>
-          <option value="en">English</option>
-          <option value="ja">日本語</option>
+        <span className="field__label">{translate("projects:newProjectWizard.fieldWizardSettingsGridFull_message_targetLanguage")}</span>
+        <CustomSelect
+          value={language}
+          onChange={(e) => {
+            languageTouchedRef.current = true;
+            setLanguage(e.target.value);
+          }}
+        >
+          <option value="zh-cn">{translate("projects:newProjectWizard.fieldWizardSettingsGridFull_message_simplifiedChinese")}</option>
+          <option value="zh-tw">{translate("projects:newProjectWizard.fieldWizardSettingsGridFull_message_traditionalChinese")}</option>
+          <option value="en">{translate("projects:newProjectWizard.fieldWizardSettingsGridFull_message_english")}</option>
+          <option value="ja">{translate("projects:newProjectWizard.fieldWizardSettingsGridFull_message_text")}</option>
           <option value="ko">한국어</option>
         </CustomSelect>
       </div>
       <div className="field wizard-settings-grid__full">
-        <span className="field__label">翻译规范</span>
+        <span className="field__label">{translate("projects:newProjectWizard.fieldWizardSettingsGridFull_message_translationGuideline")}</span>
         <CustomSelect
           value={translationGuideline}
-          onChange={(e) => setTranslationGuideline(e.target.value)}
+          onChange={(e) => {
+            translationGuidelineTouchedRef.current = true;
+            setTranslationGuideline(e.target.value);
+          }}
         >
           {guidelines.length === 0 && translationGuideline === '' ? (
-            <option value="">（未找到翻译规范文件）</option>
+            <option value="">{translate("projects:newProjectWizard.fieldWizardSettingsGridFull_message_notTranslationGuidelineFile")}</option>
           ) : null}
           {translationGuideline && !guidelines.includes(translationGuideline) ? (
             <option value={translationGuideline}>{translationGuideline}</option>
@@ -810,7 +830,7 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
             <option key={g} value={g}>{g}</option>
           ))}
         </CustomSelect>
-        <span className="field__hint">选择使用的翻译规范文件（位于 translation_guidelines 文件夹），高端模型日译中推荐"增强"规范</span>
+        <span className="field__hint">{translate("projects:newProjectWizard.fieldWizardSettingsGridFull_message_selectTranslationGuidelineFileTranslationGuidelinesFile")}</span>
       </div>
       </div>
     </Panel>
@@ -818,36 +838,34 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
 
   // ── Step 5 ──
   const renderStep5 = () => (
-    <Panel title="提取人名" description="自动从项目文件中提取人名表。">
+    <Panel title={translate("projects:newProjectWizard.renderStep5_title_extractNameTable")} description={translate("projects:newProjectWizard.renderStep5_description_autoProjectFileExtractNameTable")}>
       {nameJobStatus === 'running' && (
         <div className="wizard-progress">
           <div className="wizard-progress__bar">
             <div className="wizard-progress__fill" />
           </div>
-          <div className="wizard-progress__text">正在提取人名...</div>
+          <div className="wizard-progress__text">{translate("projects:newProjectWizard.wizardProgress_message_pendingExtractNameTable")}</div>
         </div>
       )}
       {nameJobStatus === 'completed' && (
         <div className="wizard-message wizard-message--success">
           {nameJobMessage}
           <br />
-          <span className="wizard-message__hint">可在项目的「人名翻译」菜单中使用 AI 翻译人名。</span>
+          <span className="wizard-message__hint">{translate("projects:newProjectWizard.wizardMessageWizardMessageSuccess_message_projectNameTableTranslationAITranslationNameTable")}</span>
         </div>
       )}
       {nameJobStatus === 'failed' && (
-        <div className="wizard-message wizard-message--error">
-          提取失败: {nameJobMessage}
-        </div>
+        <div className="wizard-message wizard-message--error">{translate("projects:newProjectWizard.renderStep5_message_extractFailed", { nameJobMessage: nameJobMessage })}</div>
       )}
     </Panel>
   );
 
   // ── Step 6: 完成（后续翻译流程指引） ──
   const renderStep6 = () => (
-    <Panel title="项目已就绪，接下来这样走" description="按这个顺序走完一轮翻译；每一步都能在项目左侧菜单里随时进去，中途改字典不用重建项目。">
+    <Panel title={translate("projects:newProjectWizard.renderStep6_title_projectDone")} description={translate("projects:newProjectWizard.renderStep6_description_countTranslationProjectDictionaryProject")}>
       <ol className="wizard-flow">
         {FLOW_STEPS.map((step, index) => (
-          <li key={step.title} className="wizard-flow__item">
+          <li key={index} className="wizard-flow__item">
             <span className="wizard-flow__index" aria-hidden="true">{index + 1}</span>
             <span className="wizard-flow__body">
               <strong>{step.title}</strong>
@@ -857,8 +875,8 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
         ))}
       </ol>
       <div className="wizard-tip-card">
-        <strong>提示</strong>
-        <span>点「完成并打开项目」会打开「开始翻译」；想先把名字定下来，也可以先去「人名翻译」用 AI 译人名。</span>
+        <strong>{translate("projects:newProjectWizard.wizardTipCard_message_hint")}</strong>
+        <span>{translate("projects:newProjectWizard.wizardTipCard_message_completeOpenProjectOpenStartTranslationNameTable")}</span>
       </div>
     </Panel>
   );
@@ -885,23 +903,23 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
   }, [advancing, currentStep, projectCreated, settingsSaved, handleCreateProject, handleSaveSettings]);
 
   const nextLabel = currentStep === 0 && !projectCreated
-    ? '创建项目并继续'
+    ? translate("projects:newProjectWizard.nextLabel_message_createProject")
     : currentStep === 3
-      ? '保存设置并继续'
-      : '下一步';
+      ? translate("projects:newProjectWizard.nextLabel_message_saveSettings")
+      : translate("projects:newProjectWizard.nextLabel_message_next");
 
   return (
     <div className="wizard-page">
       <PageHeader
-        title="新建项目"
-        description="按照向导创建一个新的翻译项目。"
+        title={translate("projects:newProjectWizard.wizardPage_title_newProject")}
+        description={translate("projects:newProjectWizard.wizardPage_description_createCountTranslationProject")}
       />
       {renderStepIndicator()}
       <div className="wizard-content">
         <div className="wizard-step-summary">
           <div className="wizard-step-summary__top">
-            <span>第 {currentStep + 1} / {STEPS.length} 步</span>
-            <strong>{STEPS[currentStep]}</strong>
+            <span>{translate("projects:newProjectWizard.wizardStepSummaryTop_message_text", { value: currentStep + 1, count: STEPS.length })}</span>
+            <strong>{translate(STEPS[currentStep])}</strong>
           </div>
           <div className="wizard-step-summary__bar">
             <span style={{ width: `${stepProgress}%` }} />
@@ -913,17 +931,13 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
         {feedback && <InlineFeedback className={feedback.type === 'success' ? 'inline-alert--floating' : undefined} tone={feedback.type === 'error' ? 'error' : feedback.type === 'success' ? 'success' : 'info'} title={feedback.message} />}
       </div>
       <div className="wizard-nav">
-        <Button variant="secondary" onClick={handlePrevStep} disabled={currentStep === 0}>
-          上一步
-        </Button>
+        <Button variant="secondary" onClick={handlePrevStep} disabled={currentStep === 0}>{translate("projects:newProjectWizard.wizardNav_message_previous")}</Button>
         {currentStep < STEPS.length - 1 ? (
           <Button onClick={() => void handleNextStep()} disabled={!canNext || advancing}>
-            {advancing ? '处理中…' : nextLabel}
+            {advancing ? translate("projects:newProjectWizard.wizardNav_message_processing") : nextLabel}
           </Button>
         ) : (
-          <Button onClick={handleFinish}>
-            完成并打开项目
-          </Button>
+          <Button onClick={handleFinish}>{translate("projects:newProjectWizard.wizardNav_message_completeOpenProject")}</Button>
         )}
       </div>
     </div>
@@ -932,18 +946,18 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
 
 function describeFileDetection(detection: FilePluginDetection | null, plugins: PluginInfo[]) {
   if (!detection || (Object.keys(detection.counts).length === 0 && detection.unknown.length === 0)) {
-    return '用于识别与解析源文件格式；选「自动识别」会按每个文件的类型分别选择插件。';
+    return translate("projects:newProjectWizard.describeFileDetection_message_sourceFileFormatAutoCountFileSelect");
   }
-  const label = (name: string) => plugins.find((p) => p.name === name)?.display_name || name;
+  const label = (name: string) => localizePlugin(plugins.find((p) => p.name === name))?.display_name || name;
   const parts = Object.entries(detection.counts).map(([name, n]) => `${label(name)} ×${n}`);
-  let text = `已识别 gt_input：${parts.join('、') || '无'}`;
+  let text = translate("projects:newProjectWizard.text_message_doneGtInput", { value: parts.join('、') || translate("common:actions.none") });
   if (detection.unknown.length > 0) {
-    text += `；${detection.unknown.length} 个文件无法识别（将被跳过）`;
+    text += translate("projects:newProjectWizard.describeFileDetection_message_countFileUnable", { count: detection.unknown.length });
   }
   if (detection.suggested === 'auto') {
-    text += '。检测到多种格式，已选择「自动识别」，每个文件使用各自的插件。';
+    text += translate("projects:newProjectWizard.describeFileDetection_message_detectFormatDoneSelectAutoCountFile");
   } else if (detection.suggested) {
-    text += `。已自动选择「${label(detection.suggested)}」。`;
+    text += translate("projects:newProjectWizard.describeFileDetection_message_doneAutoSelect", { value: label(detection.suggested) });
   }
   return text;
 }

@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../i18n";
 import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { HashRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -63,7 +64,8 @@ const AgentPage = lazy(async () => {
 const LAST_ACTIVE_PROJECT_KEY = 'galtransl-last-active-project';
 
 function RouteLoadingFallback() {
-  return <div className="inline-feedback">页面加载中…</div>;
+  const uiLanguage = useUiLanguage();
+  return <div className="inline-feedback">{translate("common:app.routeLoadingFallback_message_load")}</div>;
 }
 
 function loadLastActiveProject(): string | null {
@@ -91,6 +93,7 @@ function clearLastActiveProject() {
 }
 
 export function App() {
+  const uiLanguage = useUiLanguage();
   const [openProjects, setOpenProjects] = useState<string[]>(() => loadOpenProjects());
 
   useEffect(() => {
@@ -193,6 +196,7 @@ type AppInnerProps = {
 };
 
 function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherProjects, onCloseAllProjects }: AppInnerProps) {
+  useUiLanguage();
   const navigate = useNavigate();
   const location = useLocation();
   const contentRef = useRef<HTMLElement | null>(null);

@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../../i18n";
 import type { ReactNode } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 
@@ -10,15 +11,15 @@ export interface ConfigSectionDef {
 }
 
 export const CONFIG_SECTIONS: ConfigSectionDef[] = [
-  { key: 'fileIO', label: '文件读写', icon: 'folder-open' },
-  { key: 'common', label: '翻译设置', icon: 'settings' },
-  { key: 'backendSpecific', label: '翻译后端', icon: 'bot' },
-  { key: 'textProcessing', label: '文本处理', icon: 'file-text' },
-  { key: 'dictionary', label: '字典设置', icon: 'book' },
-  { key: 'problemAnalyze', label: '问题分析', icon: 'search' },
-  { key: 'retranslKey', label: '重翻关键字', icon: 'repeat' },
-  { key: 'problemFilterKey', label: '问题过滤', icon: 'ban' },
-  { key: 'projectGuideline', label: '项目规范', icon: 'bookmark' },
+  { key: 'fileIO', get label() { return translate("config:configSectionNav.label_label_file"); }, icon: 'folder-open' },
+  { key: 'common', get label() { return translate("config:configSectionNav.label_label_translationSettings"); }, icon: 'settings' },
+  { key: 'backendSpecific', get label() { return translate("config:configSectionNav.label_label_translationBackend"); }, icon: 'bot' },
+  { key: 'textProcessing', get label() { return translate("config:configSectionNav.label_label_textProcess"); }, icon: 'file-text' },
+  { key: 'dictionary', get label() { return translate("config:configSectionNav.label_label_dictionarySettings"); }, icon: 'book' },
+  { key: 'problemAnalyze', get label() { return translate("config:configSectionNav.label_label_problem"); }, icon: 'search' },
+  { key: 'retranslKey', get label() { return translate("config:configSectionNav.label_label_retranslate"); }, icon: 'repeat' },
+  { key: 'problemFilterKey', get label() { return translate("config:configSectionNav.label_label_problemFilter"); }, icon: 'ban' },
+  { key: 'projectGuideline', get label() { return translate("config:configSectionNav.label_label_projectGuideline"); }, icon: 'bookmark' },
 ];
 
 interface ConfigSectionNavProps {
@@ -43,6 +44,7 @@ export function ConfigSectionNav({
   dirty,
   disabled = false,
 }: ConfigSectionNavProps) {
+  useUiLanguage();
   return (
     <aside className="project-config-page__sidebar">
       {CONFIG_SECTIONS.map((section) => (
@@ -64,9 +66,9 @@ export function ConfigSectionNav({
       >
         <span><Icon name="save" /></span>
         <span>
-          {saving ? '保存中…' : '保存配置'}
+          {saving ? translate("common:actions.saving") : translate("config:configSectionNav.projectConfigPageSaveBtn_message_saveConfig")}
           {/* 未保存提示：一个小圆点（原来是圆点字符，CSS 画的更稳、颜色也走 token） */}
-          {dirty && !saving && <span className="project-config-page__dirty-dot" title="有未保存的修改" />}
+          {dirty && !saving && <span className="project-config-page__dirty-dot" title={translate("config:configSectionNav.projectConfigPageSaveBtn_title_notSaveChange")} />}
         </span>
       </button>
       <div className="project-config-page__section-divider" />
@@ -76,7 +78,7 @@ export function ConfigSectionNav({
         onClick={onYamlToggle}
       >
         <span><Icon name="note" /></span>
-        <span>YAML源码</span>
+        <span>{translate("config:configSectionNav.projectConfigPageSidebar_message_yAMLSource")}</span>
       </button>
     </aside>
   );

@@ -1,0 +1,18 @@
+{
+  "api": {
+    "subscribeAgentStream_message_agentStreamFailed": "Agent stream request failed: {{status}}",
+    "subscribeAgentStream_message_agent": "The Agent event stream ended unexpectedly",
+    "apiRequest_message_unableConnectionBackend": "Unable to connect to the backend: {{baseUrl}}",
+    "apiRequest_message_failed": "Request failed: {{status}}",
+    "requireBackendBaseUrl_message_backendNotSettingsReconnect": "The local backend is not ready yet. Reconnect it in Settings."
+  },
+  "profiles": {
+    "copyName": "{{name}}-copy",
+    "alreadyExists": "Configuration “{{name}}” already exists",
+    "notFound": "Backend configuration not found: {{name}}",
+    "nameRequired": "Configuration name cannot be empty"
+  },
+  "projects": {
+    "projectRequired": "Select a project first"
+  }
+}

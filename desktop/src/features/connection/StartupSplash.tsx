@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../../i18n";
 import { useEffect, useRef, useState } from 'react';
 import logoUrl from '../../assets/logo.png';
 import { Button } from '../../components/Button';
@@ -17,9 +18,9 @@ type StartupSplashProps = {
 
 /** 与 lib 侧 ConnectionContext 的 connectionStep 一一对应 */
 const STEPS = [
-  { index: 1, label: '启动本地翻译服务' },
-  { index: 2, label: '载入翻译模板与版本信息' },
-  { index: 3, label: '准备主界面' },
+  { index: 1, get label() { return translate("common:startupSplash.label_label_translation"); } },
+  { index: 2, get label() { return translate("common:startupSplash.label_label_translationVersion"); } },
+  { index: 3, get label() { return translate("common:startupSplash.label_label_interface"); } },
 ];
 
 const ELAPSED_VISIBLE_AFTER_MS = 1200;
@@ -32,6 +33,7 @@ const ELAPSED_VISIBLE_AFTER_MS = 1200;
  * 重试与跳过两条路，避免界面卡死在这张图上。
  */
 export function StartupSplash({ phase, message, step, leaving, onRetry, onSkip }: StartupSplashProps) {
+  const uiLanguage = useUiLanguage();
   const [elapsedMs, setElapsedMs] = useState(0);
   const startedAtRef = useRef(Date.now());
   const offline = phase === 'offline';
@@ -64,24 +66,20 @@ export function StartupSplash({ phase, message, step, leaving, onRetry, onSkip }
             <span className="startup-splash__logo-halo" aria-hidden="true" />
             <img src={logoUrl} alt="" className="startup-splash__logo" />
           </span>
-          <h1 className="startup-splash__title">GalTransl</h1>
-          <p className="startup-splash__subtitle">Translate your favorite Galgame</p>
+          <h1 className="startup-splash__title">{translate("common:startupSplash.startupSplashBrand_message_galTransl")}</h1>
+          <p className="startup-splash__subtitle">{translate("common:startupSplash.startupSplashBrand_message_translateYourFavoriteGalgame")}</p>
         </div>
 
         {offline ? (
           <div className="startup-splash__error">
             <div className="startup-splash__error-head">
               <Icon name="warning" size={18} />
-              <span>本地翻译服务未能启动</span>
+              <span>{translate("common:startupSplash.startupSplashErrorHead_message_translationNot")}</span>
             </div>
             <p className="startup-splash__error-message">{message}</p>
             <div className="startup-splash__actions">
-              <Button type="button" onClick={onRetry}>
-                重试连接
-              </Button>
-              <Button type="button" variant="secondary" onClick={onSkip}>
-                跳过并进入
-              </Button>
+              <Button type="button" onClick={onRetry}>{translate("common:startupSplash.startupSplashActions_message_retryConnection")}</Button>
+              <Button type="button" variant="secondary" onClick={onSkip}>{translate("common:startupSplash.startupSplashActions_message_text")}</Button>
             </div>
           </div>
         ) : (
@@ -91,7 +89,7 @@ export function StartupSplash({ phase, message, step, leaving, onRetry, onSkip }
               <div className="startup-splash__progress-text">
                 <p className="startup-splash__message">{message}</p>
                 {showElapsed ? (
-                  <p className="startup-splash__elapsed">已等待 {(elapsedMs / 1000).toFixed(1)} 秒</p>
+                  <p className="startup-splash__elapsed">{translate("common:startupSplash.startupSplashProgressText_message_doneWaitSeconds", { value: (elapsedMs / 1000).toFixed(1) })}</p>
                 ) : null}
               </div>
             </div>
@@ -116,13 +114,14 @@ export function StartupSplash({ phase, message, step, leaving, onRetry, onSkip }
           </div>
         )}
 
-        <p className="startup-splash__footnote">首次启动需要初始化本地翻译服务，通常只需几秒。</p>
+        <p className="startup-splash__footnote">{translate("common:startupSplash.startupSplashCard_message_translationSeconds")}</p>
       </div>
     </div>
   );
 }
 
 function Spinner() {
+  useUiLanguage();
   return (
     <svg className="startup-splash__spinner" viewBox="0 0 40 40" width="34" height="34" fill="none" aria-hidden="true">
       <circle cx="20" cy="20" r="16.5" stroke="var(--color-line-strong)" strokeWidth="3" />

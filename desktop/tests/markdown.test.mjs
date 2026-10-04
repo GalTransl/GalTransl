@@ -3,13 +3,17 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import vm from 'node:vm';
 import ts from 'typescript';
+import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
 
 const source = readFileSync(new URL('../src/lib/markdown.ts', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 });
 const exports = {};
-vm.runInNewContext(outputText, { exports });
+vm.runInNewContext(outputText, { exports, require: (name) => {
+  assert.equal(name, '../i18n/core');
+  return createTypeScriptLoader()(new URL('../src/i18n/core.ts', import.meta.url));
+} });
 const { renderMarkdown } = exports;
 
 test('tool tables render escaped pipes and keep br tags as literal text', () => {

@@ -1,3 +1,5 @@
+import { localizePlugin } from "../../i18n/plugins";
+import { t as translate, useUiLanguage } from "../../i18n";
 import { Panel } from '../../components/Panel';
 import type { ReactNode } from 'react';
 import { CustomSelect } from '../../components/CustomSelect';
@@ -7,25 +9,25 @@ import type { PluginInfo } from '../../lib/api';
 
 const FILE_FIELD_GROUPS: { title: string; fields: ConfigFieldDef[] }[] = [
   {
-    title: '文件分割',
+    get title() { return translate("config:fileIOSettingsSection.title_title_fileSplit"); },
     fields: [
-      { key: 'splitFile', label: '文件分割', description: '单文件分片模式：no 关闭，Num 按句数切片，Equal 按份数均分。', type: 'select', options: ['no', 'Num', 'Equal'] },
-      { key: 'splitFileNum', label: '分割数量', description: 'Num 模式下表示每片句数；Equal 模式下表示分片总数。', type: 'number', placeholder: '2048' },
-      { key: 'splitFileCrossNum', label: '分割交叉句数', description: '分片间重叠句数，可提升片段衔接质量（常用 0 或 10）。', type: 'number', placeholder: '0' },
+      { key: 'splitFile', labelKey: "config:fields.splitFile.label", descriptionKey: "config:fields.splitFile.description", type: 'select', options: [{ value: 'no', labelKey: "config:fileIOSettingsSection.option_no" }, { value: 'Num', labelKey: "config:fileIOSettingsSection.option_num" }, { value: 'Equal', labelKey: "config:fileIOSettingsSection.option_equal" }] },
+      { key: 'splitFileNum', labelKey: "config:fields.splitFileNum.label", descriptionKey: "config:fields.splitFileNum.description", type: 'number', placeholder: '2048' },
+      { key: 'splitFileCrossNum', labelKey: "config:fields.splitFileCrossNum.label", descriptionKey: "config:fields.splitFileCrossNum.description", type: 'number', placeholder: '0' },
     ],
   },
   {
-    title: '文本格式',
+    get title() { return translate("config:fileIOSettingsSection.title_title_textFormat"); },
     fields: [
-      { key: 'linebreakSymbol', label: '换行符', description: 'JSON 内换行符类型，供问题检测/自动修复使用。', type: 'text', placeholder: 'auto' },
+      { key: 'linebreakSymbol', labelKey: "config:fields.linebreakSymbol.label", descriptionKey: "config:fields.linebreakSymbol.description", type: 'text', placeholder: 'auto' },
     ],
   },
   {
-    title: '缓存与日志',
+    get title() { return translate("config:fileIOSettingsSection.title_title_cache"); },
     fields: [
-      { key: 'save_steps', label: '缓存保存频率', description: '每处理 N 个批次保存一次缓存。', type: 'number', placeholder: '1' },
-      { key: 'loggingLevel', label: '日志级别', description: 'debug 详细，info 常规，warning 仅警告。', type: 'select', options: ['debug', 'info', 'warning'] },
-      { key: 'saveLog', label: '保存日志到文件', description: '是否将运行日志写入文件。', type: 'select', options: ['true', 'false'] },
+      { key: 'save_steps', labelKey: "config:fields.save_steps.label", descriptionKey: "config:fields.save_steps.description", type: 'number', placeholder: '1' },
+      { key: 'loggingLevel', labelKey: "config:fields.loggingLevel.label", descriptionKey: "config:fields.loggingLevel.description", type: 'select', options: [{ value: 'debug', labelKey: "config:fileIOSettingsSection.option_debug" }, { value: 'info', labelKey: "config:fileIOSettingsSection.option_info" }, { value: 'warning', labelKey: "config:fileIOSettingsSection.option_warning" }] },
+      { key: 'saveLog', labelKey: "config:fields.saveLog.label", descriptionKey: "config:fields.saveLog.description", type: 'select', options: [{ value: 'true', labelKey: "config:fileIOSettingsSection.option_true" }, { value: 'false', labelKey: "config:fileIOSettingsSection.option_false" }] },
     ],
   },
 ];
@@ -47,26 +49,27 @@ export function FileIOSettingsSection({
   onFieldChange,
   reextractAction,
 }: FileIOSettingsSectionProps) {
+  useUiLanguage();
   const commonConfig = (config?.common as Record<string, unknown>) || {};
   const selectedFilePlugin = filePlugins.find(
     (p) => p.name === String((config?.plugin as Record<string, unknown>)?.filePlugin ?? 'file_galtransl_json')
   );
   return (
-    <Panel title="文件读写" description="配置文件插件、文件分割、文本格式及缓存与日志保存方式。">
+    <Panel title={translate("config:fileIOSettingsSection.fileIOSettingsSection_title_file")} description={translate("config:fileIOSettingsSection.fileIOSettingsSection_description_configFilePluginFileSplitTextFormat")}>
       <div className="config-form">
         {/* ── 文件插件 ── */}
         <div className="plugin-section">
-          <div className="plugin-section__title">文件插件</div>
+          <div className="plugin-section__title">{translate("config:fileIOSettingsSection.pluginSection_message_filePlugin")}</div>
           <label className="field">
             <CustomSelect
               value={String((config?.plugin as Record<string, unknown>)?.filePlugin ?? 'file_galtransl_json')}
               onChange={(e) => onFilePluginChange(e.target.value)}
             >
-              <option value="auto">自动识别 (auto)</option>
+              <option value="auto">{translate("config:fileIOSettingsSection.field_message_autoAuto")}</option>
               {filePlugins.length > 0 ? (
                 filePlugins.map((p) => (
                   <option key={p.name} value={p.name}>
-                    {p.display_name} ({p.name})
+                    {localizePlugin(p).display_name} ({p.name})
                   </option>
                 ))
               ) : String((config?.plugin as Record<string, unknown>)?.filePlugin) === 'auto' ? null : (
@@ -75,12 +78,10 @@ export function FileIOSettingsSection({
                 </option>
               )}
             </CustomSelect>
-            {selectedFilePlugin?.description && (
-              <span className="field__hint" style={{ whiteSpace: 'pre-line' }}>{selectedFilePlugin.description}</span>
+            {localizePlugin(selectedFilePlugin)?.description && (
+              <span className="field__hint" style={{ whiteSpace: 'pre-line' }}>{localizePlugin(selectedFilePlugin)?.description}</span>
             )}
-            <span className="field__hint">
-              从全局插件管理中获取可用文件插件；「自动识别」按每个输入文件的类型分别选择插件，gt_input 可混放多种格式
-            </span>
+            <span className="field__hint">{translate("config:fileIOSettingsSection.field_message_pluginFilePluginAutoCountFileSelect")}</span>
           </label>
           {/* 文件插件设置项 */}
           {(() => {
@@ -98,7 +99,7 @@ export function FileIOSettingsSection({
         </div>
 
         {FILE_FIELD_GROUPS.map((group) => (
-          <ConfigFieldGroup key={group.title} title={group.title}>
+          <ConfigFieldGroup key={group.fields[0].key} title={group.title}>
             {group.fields.map((field) => (
               <ConfigFieldRow
                 key={field.key}

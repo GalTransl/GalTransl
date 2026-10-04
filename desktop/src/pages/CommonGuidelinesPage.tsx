@@ -1,3 +1,5 @@
+import { getUiLanguage } from "../i18n/core";
+import { UiTrans, message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CustomSelect } from '../components/CustomSelect';
@@ -24,14 +26,14 @@ const PLACEHOLDER = `示例（按需增删）：
 - 拟声词保留原文的声音感，不意译成"啪的一声"`;
 
 function formatSize(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '空文件';
-  if (bytes < 1024) return `${bytes} 字节`;
+  if (!Number.isFinite(bytes) || bytes <= 0) return translate("settings:commonGuidelinesPage.formatSize_message_file");
+  if (bytes < 1024) return translate("settings:commonGuidelinesPage.formatSize_message_text", { bytes: bytes });
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '—';
-  return new Date(seconds * 1000).toLocaleString();
+  return new Date(seconds * 1000).toLocaleString(getUiLanguage());
 }
 
 /**
@@ -45,6 +47,7 @@ function formatTime(seconds: number): string {
  * Ctrl/Cmd+S、字符数；改完**下一次启动翻译**才生效（翻译器只在初始化时读一次规范）。
  */
 export function CommonGuidelinesPage() {
+  const uiLanguage = useUiLanguage();
   const navigate = useNavigate();
   const [files, setFiles] = useState<TranslationGuidelineFile[]>([]);
   const [dir, setDir] = useState('');
@@ -54,8 +57,8 @@ export function CommonGuidelinesPage() {
   const [savedContent, setSavedContent] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<string | null>(null);
+  const [error, setError] = useMessageState<string | null>(null);
+  const [feedback, setFeedback] = useMessageState<string | null>(null);
   const [newFileName, setNewFileName] = useState('');
 
   const selected = useMemo(
@@ -76,7 +79,7 @@ export function CommonGuidelinesPage() {
       setContent(res.content);
       setSavedContent(res.content);
     } catch (err) {
-      setError(normalizeError(err, '读取规范失败'));
+      setError(normalizeError(err, uiMessage("settings:commonGuidelinesPage.loadContent_normalizeError_readGuidelineFailed")));
     }
   }, []);
 
@@ -95,7 +98,7 @@ export function CommonGuidelinesPage() {
       setSelectedName(nextName);
       await loadContent(nextName);
     } catch (err) {
-      setError(normalizeError(err, '加载通用翻译规范失败'));
+      setError(normalizeError(err, uiMessage("settings:commonGuidelinesPage.load_normalizeError_loadTranslationGuidelineFailed")));
     } finally {
       setLoading(false);
     }
@@ -110,7 +113,7 @@ export function CommonGuidelinesPage() {
   const handleSelect = useCallback(
     (name: string) => {
       if (name === selectedName) return;
-      if (dirty && !window.confirm('当前规范有未保存的修改，切换会丢掉这些修改，是否继续？')) {
+      if (dirty && !window.confirm(translate("settings:commonGuidelinesPage.handleSelect_confirm_currentGuidelineNotSaveChangeChange"))) {
         return;
       }
       setSelectedName(name);
@@ -136,9 +139,9 @@ export function CommonGuidelinesPage() {
           file.name === selectedName ? { ...file, size: bytes, mtime: Date.now() / 1000 } : file,
         ),
       );
-      setFeedback('已保存。改完的内容在下一次启动翻译时生效。');
+      setFeedback(uiMessage("settings:commonGuidelinesPage.handleSave_setFeedback_doneSaveTranslationEffective"));
     } catch (err) {
-      setError(normalizeError(err, '保存规范失败'));
+      setError(normalizeError(err, uiMessage("settings:commonGuidelinesPage.handleSave_normalizeError_saveGuidelineFailed")));
     } finally {
       setBusy(false);
     }
@@ -154,7 +157,7 @@ export function CommonGuidelinesPage() {
   const handleCreate = useCallback(async () => {
     const name = newFileName.trim();
     if (!name) {
-      setError('请先填写新规范的文件名（如 MyStyle，未写后缀会自动补 .md）。');
+      setError(uiMessage("settings:commonGuidelinesPage.handleCreate_setError_guidelineFileMyStyleNotAutoMd"));
       return;
     }
     setBusy(true);
@@ -171,9 +174,9 @@ export function CommonGuidelinesPage() {
       setSelectedName(created);
       setContent('');
       setSavedContent('');
-      setFeedback(`已新建「${created}」。在项目配置里把 common.gpt.translation_guideline 选成它即可生效。`);
+      setFeedback(uiMessage("settings:commonGuidelinesPage.handleCreate_setFeedback_doneNewProjectConfigCommonGptTranslation", { created: created }));
     } catch (err) {
-      setError(normalizeError(err, '新建规范失败'));
+      setError(normalizeError(err, uiMessage("settings:commonGuidelinesPage.handleCreate_normalizeError_newGuidelineFailed")));
     } finally {
       setBusy(false);
     }
@@ -181,7 +184,7 @@ export function CommonGuidelinesPage() {
 
   const handleDelete = useCallback(async () => {
     if (!selectedName) return;
-    if (!window.confirm(`确定删除规范文件「${selectedName}」？此操作不可撤销。`)) return;
+    if (!window.confirm(translate("settings:commonGuidelinesPage.handleDelete_confirm_deleteGuidelineFile", { selectedName: selectedName }))) return;
     setBusy(true);
     setError(null);
     setFeedback(null);
@@ -194,10 +197,10 @@ export function CommonGuidelinesPage() {
       setSelectedName(nextName);
       await loadContent(nextName);
       setFeedback(
-        `已删除「${selectedName}」。若有项目配置里正选着它，记得去那些项目的配置里换一份。`,
+        uiMessage("settings:commonGuidelinesPage.handleDelete_setFeedback_doneDeleteProjectConfigProjectConfig", { selectedName: selectedName }),
       );
     } catch (err) {
-      setError(normalizeError(err, '删除规范失败'));
+      setError(normalizeError(err, uiMessage("settings:commonGuidelinesPage.handleDelete_normalizeError_deleteGuidelineFailed")));
     } finally {
       setBusy(false);
     }
@@ -209,41 +212,36 @@ export function CommonGuidelinesPage() {
     <div className="common-guidelines-page">
       <PageHeader
         className="common-guidelines-page__header"
-        title="通用翻译规范"
-        description="管理全局翻译规范文件。项目在配置里选用其中一份，翻译时它拼在项目规范之前；项目专属要求请到该项目的配置页维护。"
+        title={translate("settings:commonGuidelinesPage.commonGuidelinesPage_title_translationGuideline")}
+        description={translate("settings:commonGuidelinesPage.commonGuidelinesPage_description_translationGuidelineFileProjectConfigTranslationProject")}
       />
 
       <div className="common-guidelines-page__content">
         <section className="panel">
           <header className="panel__header">
             <div>
-              <h2>规范文件</h2>
-              <p>
-                文件位于程序根目录 <code>translation_guidelines/</code>，只支持 .md / .txt；
-                改完保存后，<strong>下一次启动翻译</strong>才生效。
-              </p>
+              <h2>{translate("settings:commonGuidelinesPage.panelHeader_message_guidelineFile")}</h2>
+              <p><UiTrans k="settings:commonGuidelinesPage.panelHeader_message_fileDirectory0TranslationGuidelines0Md" components={[<code />, <strong />]} /></p>
             </div>
           </header>
 
           {dir ? (
-            <div className="common-guidelines-page__dir" title={dir}>
-              目录：<code>{dir}</code>
-            </div>
+            <div className="common-guidelines-page__dir" title={dir}><UiTrans k="settings:commonGuidelinesPage.panel_message_directory00" values={{ dir: dir }} components={[<code />]} /></div>
           ) : null}
 
           {loading ? (
-            <LoadingState title="加载中…" description="正在读取通用翻译规范目录。" />
+            <LoadingState title={translate("common:actions.loading")} description={translate("settings:commonGuidelinesPage.panel_description_pendingReadTranslationGuidelineDirectory")} />
           ) : error && files.length === 0 ? (
-            <ErrorState title="加载失败" description={error} />
+            <ErrorState title={translate("settings:commonGuidelinesPage.panel_title_loadFailed")} description={error} />
           ) : files.length === 0 ? (
             <EmptyState
-              title="目录里还没有规范文件"
-              description="用下面的输入框新建一份（如 MyStyle.md），或把已有的规范文件放进该目录。"
+              title={translate("settings:commonGuidelinesPage.panel_title_directoryEmptyGuidelineFile")}
+              description={translate("settings:commonGuidelinesPage.panel_description_newMyStyleMdDoneGuidelineFileDirectory")}
             />
           ) : (
             <>
               <label className="settings-number-row">
-                <span className="settings-number-row__label">当前规范</span>
+                <span className="settings-number-row__label">{translate("settings:commonGuidelinesPage.settingsNumberRow_message_currentGuideline")}</span>
                 <div className="settings-number-row__control common-guidelines-page__select">
                   <CustomSelect
                     value={selectedName}
@@ -252,7 +250,7 @@ export function CommonGuidelinesPage() {
                     {files.map((file) => (
                       <option key={file.name} value={file.name}>
                         {file.name}
-                        {file.builtin ? ' · 兜底' : ''}
+                        {file.builtin ? translate("settings:commonGuidelinesPage.settingsNumberRowControlCommonGuidelinesPageSelect_message_text") : ''}
                       </option>
                     ))}
                   </CustomSelect>
@@ -262,9 +260,9 @@ export function CommonGuidelinesPage() {
               {selected ? (
                 <div className="common-guidelines-page__meta">
                   <span>{formatSize(selected.size)}</span>
-                  <span>最后修改：{formatTime(selected.mtime)}</span>
+                  <span>{translate("settings:commonGuidelinesPage.commonGuidelinesPageMeta_message_change", { value: formatTime(selected.mtime) })}</span>
                   {selected.builtin ? (
-                    <span>未配置规范的项目的兜底文件，不能删除</span>
+                    <span>{translate("settings:commonGuidelinesPage.commonGuidelinesPageMeta_message_notConfiguredGuidelineProjectFileCannotDelete")}</span>
                   ) : null}
                 </div>
               ) : null}
@@ -278,38 +276,32 @@ export function CommonGuidelinesPage() {
                     void handleSave();
                   }}
                 >
-                  {busy ? '处理中…' : '保存规范'}
+                  {busy ? translate("settings:commonGuidelinesPage.buttonButtonPrimary_message_processing") : translate("settings:commonGuidelinesPage.buttonButtonPrimary_message_saveGuideline")}
                 </button>
                 <button
                   type="button"
                   className="button button--secondary"
                   disabled={actionsDisabled || !dirty}
-                  title={dirty ? '放弃未保存的修改，从文件重新读取' : '当前没有未保存的修改'}
+                  title={dirty ? translate("settings:commonGuidelinesPage.buttonButtonSecondary_title_notSaveChangeFileRead") : translate("settings:commonGuidelinesPage.buttonButtonSecondary_title_currentEmptyNotSaveChange")}
                   onClick={() => {
                     void handleReload();
                   }}
-                >
-                  重新读取
-                </button>
+                >{translate("settings:commonGuidelinesPage.commonGuidelinesPageActions_message_read")}</button>
                 <button
                   type="button"
                   className="button"
                   disabled={actionsDisabled || !selected || selected.builtin}
-                  title={selected?.builtin ? '兜底文件不能删除' : '删除当前规范文件'}
+                  title={selected?.builtin ? translate("settings:commonGuidelinesPage.button_title_fileCannotDelete") : translate("settings:commonGuidelinesPage.button_title_deleteCurrentGuidelineFile")}
                   onClick={() => {
                     void handleDelete();
                   }}
-                >
-                  删除
-                </button>
+                >{translate("common:actions.delete")}</button>
                 <button
                   type="button"
                   className="button"
                   disabled={busy}
                   onClick={() => navigate('/settings')}
-                >
-                  返回设置
-                </button>
+                >{translate("settings:commonGuidelinesPage.commonGuidelinesPageActions_message_backSettings")}</button>
               </div>
 
               <textarea
@@ -332,21 +324,21 @@ export function CommonGuidelinesPage() {
 
               <div className="common-guidelines-page__foot">
                 <span className={`common-guidelines-page__status${dirty ? ' is-dirty' : ''}`}>
-                  {dirty ? '有未保存的修改' : '已是最新'}
+                  {dirty ? translate("settings:commonGuidelinesPage.commonGuidelinesPageFoot_message_notSaveChange") : translate("settings:commonGuidelinesPage.commonGuidelinesPageFoot_message_done")}
                 </span>
-                <span>{content.length} 字符</span>
-                <span>Ctrl / Cmd + S 保存</span>
+                <span>{translate("settings:commonGuidelinesPage.commonGuidelinesPageFoot_message_text", { count: content.length })}</span>
+                <span>{translate("settings:commonGuidelinesPage.commonGuidelinesPageFoot_message_ctrlCmdSSave")}</span>
               </div>
             </>
           )}
 
           <div className="common-guidelines-page__create">
             <label className="common-guidelines-page__create-field">
-              <span>新建规范</span>
+              <span>{translate("settings:commonGuidelinesPage.commonGuidelinesPageCreateField_message_newGuideline")}</span>
               <input
                 type="text"
                 value={newFileName}
-                placeholder="如 MyStyle（自动补 .md）"
+                placeholder={translate("settings:commonGuidelinesPage.commonGuidelinesPageCreateField_placeholder_myStyleAutoMd")}
                 onChange={(event) => setNewFileName(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && !busy) void handleCreate();
@@ -360,12 +352,8 @@ export function CommonGuidelinesPage() {
               onClick={() => {
                 void handleCreate();
               }}
-            >
-              新建
-            </button>
-            <span className="common-guidelines-page__create-tip">
-              新建后到项目配置里把「翻译规范」选成它，该项目才会用上。
-            </span>
+            >{translate("settings:commonGuidelinesPage.commonGuidelinesPageCreate_message_new")}</button>
+            <span className="common-guidelines-page__create-tip">{translate("settings:commonGuidelinesPage.commonGuidelinesPageCreate_message_newProjectConfigTranslationGuidelineProject")}</span>
           </div>
 
           {error && files.length > 0 ? (
@@ -375,9 +363,7 @@ export function CommonGuidelinesPage() {
           ) : null}
           {feedback ? <div className="common-guidelines-page__feedback">{feedback}</div> : null}
           {defaultName ? (
-            <div className="common-guidelines-page__tip">
-              项目没配置「翻译规范」时会兜底使用 <code>{defaultName}</code>。
-            </div>
+            <div className="common-guidelines-page__tip"><UiTrans k="settings:commonGuidelinesPage.panel_message_projectConfigTranslationGuideline00" values={{ defaultName: defaultName }} components={[<code />]} /></div>
           ) : null}
         </section>
       </div>

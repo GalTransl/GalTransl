@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../i18n";
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { decodeProjectDir } from '../lib/api';
@@ -41,11 +42,11 @@ function loadConfigFileName(projectDir: string): string {
 
 /** Tab path → component mapping */
 const TAB_MAP: { path: string; label: string }[] = [
-  { path: 'translate', label: '开始翻译' },
-  { path: 'cache', label: '浏览文本' },
-  { path: 'config', label: '配置编辑' },
-  { path: 'dictionary', label: '项目字典' },
-  { path: 'names', label: '人名翻译' },
+  { path: 'translate', get label() { return translate("common:projectLayout.label_label_startTranslation"); } },
+  { path: 'cache', get label() { return translate("common:projectLayout.label_label_text"); } },
+  { path: 'config', get label() { return translate("common:projectLayout.label_label_configEdit"); } },
+  { path: 'dictionary', get label() { return translate("common:projectLayout.label_label_projectDictionary"); } },
+  { path: 'names', get label() { return translate("common:projectLayout.label_label_nameTableTranslation"); } },
 ];
 
 /** Shared context passed to every child page */
@@ -56,6 +57,7 @@ export interface ProjectPageContext {
 }
 
 export function ProjectLayout() {
+  const uiLanguage = useUiLanguage();
   const { projectId } = useParams<{ projectId: string }>();
   const location = useLocation();
   const navigate = useNavigate();
@@ -123,7 +125,7 @@ export function ProjectLayout() {
 
   return (
     <div className="project-layout">
-      <Suspense fallback={<div className="inline-feedback">页面加载中…</div>}>
+      <Suspense fallback={<div className="inline-feedback">{translate("common:projectLayout.projectLayout_fallback_load")}</div>}>
         {activeTab === 'translate' ? <ProjectTranslatePage ctx={ctx} /> : null}
         {activeTab === 'config' ? <ProjectConfigPage ctx={ctx} /> : null}
         {shouldRenderDictionary ? (

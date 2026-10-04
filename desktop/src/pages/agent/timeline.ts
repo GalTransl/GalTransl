@@ -1,3 +1,4 @@
+import { t as translate } from "../../i18n/core";
 import type { AgentEvent } from '../../lib/api';
 import { asArgs, toolMeta } from './toolMeta';
 
@@ -484,7 +485,7 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
         run = {
           id: ev.id || '',
           agent: ev.agent || '',
-          label: ev.label || '子代理',
+          label: ev.label || translate("agent:timeline.label_message_proxy"),
           file: ev.file || '',
           indexes: ev.indexes || '',
           brief: ev.brief || '',
@@ -565,7 +566,7 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
         type: 'error',
         id: `e-${ev.step}`,
         step: ev.step,
-        message: ev.message || '未知错误',
+        message: ev.message || translate("common:actions.unknownError"),
         traceback: ev.traceback,
       });
     } else if (ev.type === 'stopped') {
@@ -573,7 +574,7 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
         type: 'stopped',
         id: `s-${ev.step}`,
         step: ev.step,
-        reason: ev.reason || '用户停止',
+        reason: ev.reason || translate("agent:timeline.reason_push_stop"),
       });
     }
   }
@@ -617,23 +618,23 @@ export function lastActivityItem(timeline: TimelineGroup[]): ActivityItem | null
 export function workingLabel(timeline: TimelineGroup[]): string {
   const item = lastActivityItem(timeline);
   if (item) {
-    if (item.kind === 'content' || item.kind === 'reasoning') return '思考中';
+    if (item.kind === 'content' || item.kind === 'reasoning') return translate("agent:timeline.workingLabel_message_text");
     // 重试/压缩行不是工具调用、没有 name，走 toolMeta 会误显示成「调用工具」
     if (item.kind === 'retry') {
       const attempt = item.attempt ?? 1;
       const max = item.maxAttempts ?? 0;
-      return max > 0 ? `重试中（第 ${attempt}/${max} 次）` : '重试中';
+      return max > 0 ? translate("agent:timeline.workingLabel_message_retry", { attempt: attempt, max: max }) : translate("agent:timeline.workingLabel_message_retryVariant2");
     }
-    if (item.kind === 'compact') return '整理上下文';
+    if (item.kind === 'compact') return translate("agent:timeline.workingLabel_message_context");
     // 工具行只有在**还没结果**时才代表"正在做这件事"（判定同 toolRowPhases）。
     // 结果一到这行就完成了——继续挂它的 running 文案会让"等你回答…"一直亮着，
     // 明明已经答完、后端都开始请求下一轮了。
     if (item.ok === undefined && item.result === undefined && item.error === undefined) {
       return `${toolMeta(item.name).running}…`;
     }
-    return '处理中';
+    return translate("agent:timeline.workingLabel_message_processing");
   }
-  return '正在开始';
+  return translate("agent:timeline.workingLabel_message_pendingStart");
 }
 
 export function liveTail(items: ActivityItem[]): string {

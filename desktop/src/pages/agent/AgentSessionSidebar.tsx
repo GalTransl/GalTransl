@@ -1,3 +1,4 @@
+import { t as translate, useUiLanguage } from "../../i18n";
 import { useEffect, useState } from 'react';
 import type { AgentSession as AgentSessionMeta } from '../../lib/api';
 import { Icon } from '../../components/Icon';
@@ -46,6 +47,7 @@ export function AgentSessionSidebar({
   onSelectSession: (dir: string, sid: string) => void;
   onDeleteSession: (dir: string, session: AgentSessionMeta) => void;
 }) {
+  useUiLanguage();
   // 哪些项目分组已经点开过「显示其余 N 个」（纯本地状态，不涉及请求）
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   // 相对时间（刚刚 / N分钟前）要定时重算，否则页面静止时数字会一直停着不动
@@ -58,22 +60,20 @@ export function AgentSessionSidebar({
   return (
     <aside className="agent-sessions">
       <div className="agent-sessions__head">
-        <span className="agent-sessions__title">会话</span>
+        <span className="agent-sessions__title">{translate("agent:agentSessionSidebar.agentSessionsHead_message_session")}</span>
         <button
           type="button"
           className="agent-sessions__new"
           onClick={onCreateBlank}
           disabled={disabled}
-          title={disabled ? 'Agent 运行中，请先停止或等待' : '新建会话（选择新项目）'}
+          title={disabled ? translate("agent:agentSessionSidebar.agentSessionsNew_title_agentRunningStopWait") : translate("agent:agentSessionSidebar.agentSessionsNew_title_newSessionSelectProject")}
         >
           ＋
         </button>
       </div>
       <div className="agent-sessions__list">
         {projects.length === 0 ? (
-          <div className="agent-sessions__empty">
-            还没有项目
-            <span>点 ＋ 新建，或在首页打开一个项目后再回到 Agent</span>
+          <div className="agent-sessions__empty">{translate("agent:agentSessionSidebar.agentSessionsEmpty_div_emptyProject")}<span>{translate("agent:agentSessionSidebar.agentSessionsEmpty_message_newOpenCountProjectAgent")}</span>
           </div>
         ) : (
           projects.map((dir) => {
@@ -103,7 +103,7 @@ export function AgentSessionSidebar({
                     type="button"
                     className="agent-sessions__group-toggle"
                     onClick={() => onToggleProject(dir)}
-                    title={`${dir}\n点击展开 / 收起`}
+                    title={translate("agent:agentSessionSidebar.agentSessionsGroupToggle_title_text", { dir: dir })}
                   >
                     <span className="agent-sessions__group-icon" aria-hidden>
                       <Icon name={isCollapsed ? 'folder' : 'folder-open'} />
@@ -123,10 +123,10 @@ export function AgentSessionSidebar({
                     disabled={hasRunning}
                     title={
                       hasRunning
-                        ? '该项目下有会话正在运行，先停止再关闭'
-                        : `关闭「${shortDir}」分组（会话记录保留，可从首页重新打开）`
+                        ? translate("agent:agentSessionSidebar.agentSessionsGroupClose_title_projectSessionPendingRunningStopDisable")
+                        : translate("agent:agentSessionSidebar.agentSessionsGroupClose_title_disableSessionHistoryKeepOpen", { shortDir: shortDir })
                     }
-                    aria-label={`关闭项目分组 ${shortDir}`}
+                    aria-label={translate("agent:agentSessionSidebar.agentSessionsGroupClose_ariaLabel_disableProject", { shortDir: shortDir })}
                   >
                     <Icon name="close" />
                   </button>
@@ -143,10 +143,10 @@ export function AgentSessionSidebar({
                     disabled={disabled && dir === activeProject}
                     title={
                       disabled && dir === activeProject
-                        ? '该项目的 Agent 正在运行，请先停止或等待'
-                        : `在「${shortDir}」下新建会话`
+                        ? translate("agent:agentSessionSidebar.agentSessionsGroupNew_title_projectAgentPendingRunningStopWait")
+                        : translate("agent:agentSessionSidebar.agentSessionsGroupNew_title_newSession", { shortDir: shortDir })
                     }
-                    aria-label={`在 ${shortDir} 新建会话`}
+                    aria-label={translate("agent:agentSessionSidebar.agentSessionsGroupNew_ariaLabel_newSession", { shortDir: shortDir })}
                   >
                     ＋
                   </button>
@@ -155,7 +155,7 @@ export function AgentSessionSidebar({
                   <div className="agent-sessions__group-collapse-inner">
                     <div className="agent-sessions__group-list">
                       {list.length === 0 ? (
-                        <div className="agent-sessions__group-empty">{loaded ? '暂无会话' : '加载中…'}</div>
+                        <div className="agent-sessions__group-empty">{loaded ? translate("agent:agentSessionSidebar.agentSessionsGroupEmpty_message_emptySession") : translate("common:actions.loading")}</div>
                       ) : (
                         visible.map((s) => {
                           const isRowActive = isGroupActive && s.session_id === activeSessionId;
@@ -188,10 +188,10 @@ export function AgentSessionSidebar({
                                   className={`agent-session-item__light is-${light}`}
                                   title={
                                     light === 'running'
-                                      ? '正在运行'
+                                      ? translate("agent:agentSessionSidebar.agentSessionsGroupList_title_pendingRunning")
                                       : light === 'failed'
-                                        ? '已结束：出错'
-                                        : '已结束'
+                                        ? translate("agent:agentSessionSidebar.agentSessionsGroupList_title_done")
+                                        : translate("agent:agentSessionSidebar.agentSessionsGroupList_title_doneVariant2")
                                   }
                                   aria-hidden
                                 />
@@ -205,8 +205,8 @@ export function AgentSessionSidebar({
                                 }}
                                 // 正在跑的那个会话不能删（灯亮着）：先停止再删
                                 disabled={isRowRunning}
-                                title={isRowRunning ? '正在运行，停止后才能删除' : '删除该会话'}
-                                aria-label={`删除会话 ${s.title}`}
+                                title={isRowRunning ? translate("agent:agentSessionSidebar.agentSessionItemDelete_title_pendingRunningStopDelete") : translate("agent:agentSessionSidebar.agentSessionItemDelete_title_deleteSession")}
+                                aria-label={translate("agent:agentSessionSidebar.agentSessionItemDelete_ariaLabel_deleteSession", { title: s.title })}
                               >
                                 <Icon name="close" />
                               </button>
@@ -219,9 +219,7 @@ export function AgentSessionSidebar({
                           type="button"
                           className="agent-sessions__show-more"
                           onClick={() => setExpandedProjects((prev) => ({ ...prev, [dir]: true }))}
-                        >
-                          显示其余 {list.length - visible.length} 个会话
-                        </button>
+                        >{translate("agent:agentSessionSidebar.agentSessionsGroupList_message_countSession", { value: list.length - visible.length })}</button>
                       ) : null}
                     </div>
                   </div>
@@ -242,13 +240,13 @@ function formatSessionTime(ts: number): string {
   const time = then.getTime();
   if (Number.isNaN(time)) return '';
   const diffMs = Date.now() - time;
-  if (diffMs < 60_000) return '刚刚'; // 含时钟偏差导致的「未来时间」
+  if (diffMs < 60_000) return translate("agent:agentSessionSidebar.formatSessionTime_message_text"); // 含时钟偏差导致的「未来时间」
   const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 60) return `${minutes}分钟前`;
+  if (minutes < 60) return translate("agent:agentSessionSidebar.formatSessionTime_message_minutes", { minutes: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}小时前`;
+  if (hours < 24) return translate("agent:agentSessionSidebar.formatSessionTime_message_hours", { hours: hours });
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}天前`;
+  if (days < 7) return translate("agent:agentSessionSidebar.formatSessionTime_message_textVariant2", { days: days });
   const showYear = then.getFullYear() !== new Date().getFullYear();
   const md = `${then.getMonth() + 1}/${then.getDate()}`;
   return showYear ? `${then.getFullYear()}/${md}` : md;
