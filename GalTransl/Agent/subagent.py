@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import fnmatch
 import json
 import os
@@ -838,7 +839,8 @@ SUBAGENT_COMPACT_INSTRUCTION_PROMPT = """[记忆压缩模式] 上面的工作已
 class SubAgentRunner:
     """一个子代理实例：自己的消息、自己的工具表，跑完交一份报告。
 
-    一个实例只被一个线程跑（见 _tool_run_subagents 的线程池），所以内部不需要加锁。
+    工作状态只由工作线程更新；父线程停止等待时只读取已发布的进度快照。
+    收尾用锁保护，保证报告只保存一次。
     消息历史超窗口时与父 Agent 走同一套压缩（Insert-then-Compress：挂上压缩指令、用下一轮
     请求把摘要拿回来，见 _begin_compaction），避免 24 轮工具往返把上下文撑爆。
     """
@@ -878,6 +880,11 @@ class SubAgentRunner:
         self._compact_failed = False
         self._last_prompt_tokens = 0
         self._anchored_message_count = 0
+        self._finish_lock = threading.Lock()
+        self._finished_result: dict[str, Any] | None = None
+        self._finish_emitted = False
+        self._finished_at = 0.0
+        self._progress_result = self._build_result("running", "")
 
     @property
     def file_label(self) -> str:
@@ -898,6 +905,46 @@ class SubAgentRunner:
         self.parent._emit(event_type, {"id": self.id, **data})
 
     def _finish(self, status: str, report: str, error: str = "", *, emit: bool = True) -> dict[str, Any]:
+        with self._finish_lock:
+            if self._finished_result is None:
+                if self.stop_event.is_set() and status != "stopped":
+                    status, error = "stopped", error or "父回合被停止，子代理提前收尾"
+                review = self.fixer.review_entries() if self.fixer is not None else []
+                result = self._build_result(status, report, error, review=review)
+                try:
+                    if self.fixer is not None and (review or self.fixer.modified):
+                        self.fixer.save_report(result, review)
+                except OSError as exc:
+                    result["review_record_error"] = str(exc)
+                self._finished_result = result
+                self._finished_at = time.time()
+            result = self._finished_result
+            if emit and not self._finish_emitted:
+                self._finish_emitted = True
+                self._emit("subagent_done", {
+                    **{key: result[key] for key in ("status", "report", "turns", "tool_calls", "duration_ms")},
+                    "proofread_comment": result.get("comment_count", len(result["proofread_comment"])),
+                    **{key: result.get(key, 0) for key in (
+                        "modified_count", "needs_review_count", "unverified_count", "failed_file_count",
+                    )},
+                    "finished_at": self._finished_at, "error": result.get("error", ""),
+                })
+            return copy.deepcopy(result)
+
+    def _stopped_result(self) -> dict[str, Any]:
+        """Do not finalize while the worker may still have an HTTP write in flight."""
+        with self._finish_lock:
+            if self._finished_result is not None:
+                return copy.deepcopy(self._finished_result)
+            return {
+                **copy.deepcopy(self._progress_result), "status": "stopped",
+                "duration_ms": int((time.time() - self.started_at) * 1000),
+                "report_pending": True,
+                "error": "父回合被停止；这里是已完成工具的进度，正在执行的请求结束后会保存最终报告",
+            }
+
+    def _build_result(self, status: str, report: str, error: str = "", *,
+                      review: list[dict] | None = None) -> dict[str, Any]:
         text = report.strip()
         limit = self.role.report_chars
         if len(text) > limit:
@@ -925,7 +972,8 @@ class SubAgentRunner:
             "duration_ms": int((time.time() - self.started_at) * 1000),
         }
         if self.fixer is not None:
-            review = self.fixer.review_entries()
+            if review is None:
+                review = self.fixer.review_entries()
             result.update({
                 "modified_count": len(self.fixer.modified),
                 "read_count": len(self.fixer.snapshots),
@@ -940,27 +988,8 @@ class SubAgentRunner:
                 "needs_review": [{**row, "reason": row["reason"][:240]} for row in review[:20]],
                 "review_truncated": len(review) > 20,
             })
-            try:
-                if review or self.fixer.modified:
-                    self.fixer.save_report(result, review)
-            except OSError as exc:
-                result["review_record_error"] = str(exc)
         if error:
             result["error"] = error
-        if emit:
-            self._emit(
-                "subagent_done",
-                {
-                    "status": status, "report": text, "turns": self.turns,
-                    "tool_calls": self.tool_calls,
-                    "proofread_comment": len(self.proofread_comments),
-                    "modified_count": result.get("modified_count", 0),
-                    "needs_review_count": result.get("needs_review_count", 0),
-                    "unverified_count": result.get("unverified_count", 0),
-                    "failed_file_count": result.get("failed_file_count", 0),
-                    "duration_ms": result["duration_ms"], "finished_at": time.time(), "error": error,
-                },
-            )
         return result
 
     # ---- 上下文窗口复用与压缩 ----
@@ -1240,6 +1269,8 @@ class SubAgentRunner:
                 return self._finish(
                     "failed", last_text, error=f"请求失败（已重试 {LLM_MAX_RETRIES} 次）：{exc}"
                 )
+            if self.stop_event.is_set():
+                return self._finish("stopped", last_text, error="父回合被停止，子代理提前收尾")
             if content.strip():
                 last_text = content
                 self._emit("subagent_message", {"round": round_i, "text": content[:2000]})
@@ -1316,6 +1347,8 @@ class SubAgentRunner:
                     self.patch_errors[row["filename"]] = row["error"]
                 else:
                     self.patch_errors.pop(row["filename"], None)
+        with self._finish_lock:
+            self._progress_result = self._build_result("running", "")
         # 事件里只给预览（读缓存动辄几万字符，界面用不上）；消息历史里给全文（有上限兜底）
         self._emit(
             "subagent_tool_result",
@@ -1642,7 +1675,7 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
     for i, (task, out) in enumerate(zip(tasks, slots)):
         if out is None:
             if i in running:
-                results.append(running[i]._finish("stopped", "", "父回合被停止，保留已提交的修改", emit=False))
+                results.append(running[i]._stopped_result())
                 continue
             out = {
                 "agent": task["agent"],

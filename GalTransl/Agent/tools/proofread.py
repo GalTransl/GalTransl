@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import tempfile
@@ -37,14 +38,25 @@ def _record_dir(runner: Any) -> str:
     return os.path.join(session_store.project_dir_for(runner.state.project_dir), "proofread")
 
 
-def _record_path(runner: Any, change_id: str) -> str:
+def _record_path(runner: Any, change_id: str, *, task_id: str | None = None) -> str:
     if not re.fullmatch(r"[0-9a-f]{32}", change_id):
         raise AgentToolError("无效的 change_id；请从 read_proofread_changes 获取")
-    return os.path.join(_record_dir(runner), change_id + ".json")
+    directory = _record_dir(runner)
+    if task_id is not None:
+        # Task prefixes allow filtering before opening records, without a
+        # separate mutable index that could drift from the audit log.
+        return os.path.join(directory, hashlib.sha256(task_id.encode()).hexdigest() + "-" + change_id + ".json")
+    legacy = os.path.join(directory, change_id + ".json")
+    if os.path.isfile(legacy):
+        return legacy
+    for name in _record_names(runner):
+        if re.fullmatch(r"[0-9a-f]{64}-" + change_id + r"\.json", name):
+            return os.path.join(directory, name)
+    return legacy
 
 
 def _write_record(runner: Any, record: dict) -> None:
-    path = _record_path(runner, record["change_id"])
+    path = _record_path(runner, record["change_id"], task_id=record["task_id"])
     _atomic_json(path, record)
 
 
@@ -64,6 +76,22 @@ def _atomic_json(path: str, record: dict) -> None:
 
 def _review_path(runner: Any, task_id: str) -> str:
     return os.path.join(_record_dir(runner), "review-" + hashlib.sha256(task_id.encode()).hexdigest() + ".json")
+
+
+def _indexed_entries(data: dict) -> dict[int, dict]:
+    """Reject malformed caches before a whole-file save can misaddress a row."""
+    entries = data.get("entries", [])
+    if not isinstance(entries, list):
+        raise AgentToolError("缓存 entries 必须是数组")
+    indexed = {}
+    for position, entry in enumerate(entries, 1):
+        if not isinstance(entry, dict) or type(entry.get("index")) is not int:
+            raise AgentToolError(f"缓存第 {position} 个条目缺少有效的整数 index，请先修复缓存")
+        index = entry["index"]
+        if index in indexed:
+            raise AgentToolError(f"缓存 index #{index} 重复，无法确定修改目标，请先修复缓存")
+        indexed[index] = entry
+    return indexed
 
 
 class _ReadSnapshot:
@@ -116,6 +144,7 @@ class ProofreadFixer:
         filename = str(args.get("filename") or "").strip()
         path = f"/api/projects/{runner._project_id()}/cache/{urllib.parse.quote(filename)}"
         data = runner._http_get(path)
+        originals = _indexed_entries(data)
         # Never authorize a write based on an intentionally hidden translation.
         fields = args.get("fields")
         if isinstance(fields, list) and "*" not in fields:
@@ -123,8 +152,6 @@ class ProofreadFixer:
                 *fields, "post_src", "pre_dst", "proofread_dst", "proofread_comment",
             ]))}
         result = _tool_read_transl_cache(_ReadSnapshot(runner, path, data), args)
-        originals = {int(e["index"]): e for e in data.get("entries", [])
-                     if isinstance(e, dict) and isinstance(e.get("index"), int)}
         for row in result.get("entries", []):
             # Context rows ("12*") are not edit targets.
             index = row.get("index")
@@ -155,7 +182,7 @@ class ProofreadFixer:
         runner = self.runner
         path = f"/api/projects/{runner._project_id()}/cache/{urllib.parse.quote(filename)}"
         data = runner._http_get(path)
-        entries = {int(e["index"]): e for e in data.get("entries", [])}
+        entries = _indexed_entries(data)
         converted: list[dict] = []
         seen: set[int] = set()
         for patch in patches:
@@ -194,13 +221,13 @@ class ProofreadFixer:
 
     def _commit(self, filename: str, path: str, data: dict, patches: list[dict], *, undo_of: str = "") -> dict:
         runner, owner = self.runner, self
+        before = _indexed_entries(data)
         record: dict = {}
 
         class Writer(_ReadSnapshot):
             def _http_post(self, url: str, body: dict) -> Any:
                 owner.check_stopped()
-                before = {int(e["index"]): e for e in data["entries"]}
-                after = {int(e["index"]): e for e in body["entries"]}
+                after = _indexed_entries(body)
                 record.update({
                     "change_id": uuid4().hex, "task_id": owner.task_id,
                     "session_id": getattr(runner.state, "session_id", ""),
@@ -251,67 +278,135 @@ class ProofreadFixer:
         return result
 
 
-def _load_records(runner: Any) -> list[dict]:
-    directory = _record_dir(runner)
-    if not os.path.isdir(directory):
+def _record_names(runner: Any) -> list[str]:
+    try:
+        return os.listdir(_record_dir(runner))
+    except FileNotFoundError:
         return []
+    except OSError as exc:
+        raise AgentToolError(f"无法列出校对记录：{exc}") from exc
+
+
+def _read_record(path: str, *, review: bool = False) -> dict:
+    try:
+        with open(path, encoding="utf-8") as stream:
+            record = json.load(stream)
+        if not isinstance(record, dict) or not isinstance(record.get("task_id"), str):
+            raise ValueError("缺少 task_id")
+        if type(record.get("at")) not in (int, float) or not math.isfinite(record["at"]):
+            raise ValueError("无效的 at")
+        if not isinstance(record.get("status"), str):
+            raise ValueError("缺少 status")
+        if review:
+            rows = record.get("review")
+            if not isinstance(rows, list) or any(
+                not isinstance(row, dict) or type(row.get("index")) is not int
+                or not isinstance(row.get("file"), str) or not isinstance(row.get("reason"), str)
+                for row in rows
+            ):
+                raise ValueError("无效的 review")
+            if any(type(record.get(key)) is not int or record[key] < 0
+                   for key in ("modified_count", "needs_review_count")):
+                raise ValueError("无效的审查计数")
+        else:
+            change_id = record.get("change_id")
+            if not isinstance(change_id, str) or not re.fullmatch(r"[0-9a-f]{32}", change_id):
+                raise ValueError("无效的 change_id")
+            if not isinstance(record.get("filename"), str):
+                raise ValueError("缺少 filename")
+            rows = record.get("entries")
+            fields = _snapshot({}).keys()
+            if not isinstance(rows, list) or any(
+                not isinstance(row, dict) or type(row.get("index")) is not int
+                or any(not isinstance(row.get(key), dict) or not fields <= row[key].keys()
+                       for key in ("before", "after")) for row in rows
+            ):
+                raise ValueError("无效的修改快照")
+        return record
+    except (OSError, ValueError, OverflowError) as exc:
+        raise AgentToolError(f"无法读取校对记录 {os.path.basename(path)}：{exc}") from exc
+
+
+def _try_read_record(path: str, warnings: list[str], *, review: bool = False,
+                     missing_ok: bool = False) -> dict | None:
+    try:
+        return _read_record(path, review=review)
+    except AgentToolError as exc:
+        if not (missing_ok and isinstance(exc.__cause__, FileNotFoundError)):
+            warnings.append(str(exc))
+        return None
+
+
+def _load_records(runner: Any, task_id: str, warnings: list[str]) -> list[dict]:
+    directory = _record_dir(runner)
+    prefix = hashlib.sha256(task_id.encode()).hexdigest() + "-" if task_id else ""
     records = []
-    for name in os.listdir(directory):
-        if not re.fullmatch(r"[0-9a-f]{32}\.json", name):
+    for name in _record_names(runner):
+        legacy = re.fullmatch(r"[0-9a-f]{32}\.json", name)
+        if not legacy and not re.fullmatch(r"[0-9a-f]{64}-[0-9a-f]{32}\.json", name):
             continue
-        with open(os.path.join(directory, name), encoding="utf-8") as stream:
-            records.append(json.load(stream))
+        # Legacy UUID-only filenames still need inspection for compatibility.
+        if not legacy and prefix and not name.startswith(prefix):
+            continue
+        record = _try_read_record(os.path.join(directory, name), warnings)
+        if record is not None and (not task_id or record["task_id"] == task_id):
+            records.append(record)
     return sorted(records, key=lambda r: (r["at"], r["change_id"]))
 
 
 def _tool_read_proofread_changes(runner: Any, args: dict) -> dict:
-    records = _load_records(runner)
     task_id = str(args.get("task_id") or "")
     view = str(args.get("view") or "changes")
     if view not in ("changes", "review"):
         raise AgentToolError("view 必须为 changes 或 review")
+    warnings: list[str] = []
+
+    def with_warnings(result: dict) -> dict:
+        if warnings:
+            result.update({"warnings": warnings[:10], "skipped_record_count": len(warnings),
+                           "incomplete": True})
+        return result
+
     if not task_id:
         groups: dict[str, dict] = {}
+        records = _load_records(runner, "", warnings) if view == "changes" else []
         for record in records:
             group = groups.setdefault(record["task_id"], {"task_id": record["task_id"], "batches": 0, "entries": 0})
             group["batches"] += 1
             group["entries"] += len(record["entries"])
-        if os.path.isdir(_record_dir(runner)):
-            for name in os.listdir(_record_dir(runner)):
-                if not name.startswith("review-") or not name.endswith(".json"):
-                    continue
-                with open(os.path.join(_record_dir(runner), name), encoding="utf-8") as stream:
-                    report = json.load(stream)
-                group = groups.setdefault(report["task_id"], {"task_id": report["task_id"], "batches": 0, "entries": 0})
-                group.update({k: report[k] for k in ("modified_count", "needs_review_count", "status")})
-        return {"tasks": list(groups.values())[-50:], "total_tasks": len(groups),
-                "note": "指定 task_id 分页查看修改前后内容；pending/uncertain 表示提交状态未确认。"}
+        for name in _record_names(runner):
+            if not re.fullmatch(r"review-[0-9a-f]{64}\.json", name):
+                continue
+            report = _try_read_record(os.path.join(_record_dir(runner), name), warnings, review=True)
+            if report is None:
+                continue
+            group = groups.setdefault(report["task_id"], {
+                "task_id": report["task_id"], **({"batches": 0, "entries": 0} if view == "changes" else {}),
+            })
+            group.update({k: report[k] for k in ("modified_count", "needs_review_count", "status")})
+        return with_warnings({"tasks": list(groups.values())[-50:], "total_tasks": len(groups),
+                "note": "指定 task_id 分页查看修改前后内容；pending/uncertain 表示提交状态未确认。"})
     try:
         offset = max(0, int(args.get("offset", 0)))
         limit = max(1, min(50, int(args.get("limit", 20))))
     except (TypeError, ValueError) as exc:
         raise AgentToolError("offset/limit 必须为整数") from exc
     if view == "review":
-        try:
-            with open(_review_path(runner, task_id), encoding="utf-8") as stream:
-                rows = json.load(stream)["review"]
-        except FileNotFoundError:
-            rows = []
-        return {"task_id": task_id, "total": len(rows), "offset": offset,
-                "has_more": offset + limit < len(rows), "needs_review": rows[offset:offset + limit]}
+        path = _review_path(runner, task_id)
+        record = _try_read_record(path, warnings, review=True, missing_ok=True)
+        rows = record["review"] if record is not None else []
+        return with_warnings({"task_id": task_id, "total": len(rows), "offset": offset,
+                "has_more": offset + limit < len(rows), "needs_review": rows[offset:offset + limit]})
+    records = _load_records(runner, task_id, warnings)
     rows = [{**{k: v for k, v in record.items() if k != "entries"}, **entry}
             for record in records if record["task_id"] == task_id for entry in record["entries"]]
-    return {"task_id": task_id, "total": len(rows), "offset": offset,
-            "has_more": offset + limit < len(rows), "changes": rows[offset:offset + limit]}
+    return with_warnings({"task_id": task_id, "total": len(rows), "offset": offset,
+            "has_more": offset + limit < len(rows), "changes": rows[offset:offset + limit]})
 
 
 def _tool_revert_proofread_changes(runner: Any, args: dict, *, preview: bool = False) -> dict:
     change_id = str(args.get("change_id") or "")
-    try:
-        with open(_record_path(runner, change_id), encoding="utf-8") as stream:
-            record = json.load(stream)
-    except FileNotFoundError as exc:
-        raise AgentToolError("找不到这份修改记录") from exc
+    record = _read_record(_record_path(runner, change_id))
     spec = str(args.get("indexes") or "").strip()
     wanted = _parse_index_spec(spec) if spec else {e["index"] for e in record["entries"]}
     rows = [e for e in record["entries"] if e["index"] in wanted]
@@ -323,7 +418,7 @@ def _tool_revert_proofread_changes(runner: Any, args: dict, *, preview: bool = F
         fixer.check_stopped()
         path = f"/api/projects/{runner._project_id()}/cache/{urllib.parse.quote(filename)}"
         data = runner._http_get(path)
-        current = {int(e["index"]): e for e in data["entries"]}
+        current = _indexed_entries(data)
         patches = []
         for row in rows:
             index = row["index"]

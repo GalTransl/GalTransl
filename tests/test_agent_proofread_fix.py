@@ -1,9 +1,12 @@
 """Direct proofreading: scope, stale reads, durable records and bounded reports."""
 
+import copy
 import json
 import tempfile
 import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from unittest.mock import patch
 
 from GalTransl.Agent import session_store, subagent
@@ -257,6 +260,246 @@ class ProofreadFixTests(unittest.TestCase):
         self.assertEqual(self.parent.files["a.json"][0]["pre_dst"], "fixed")
         self.assertEqual(self.parent.files["b.json"][0]["pre_dst"], "changed")
         self.assertEqual(fixer.review_entries()[0]["file"], "b.json")
+
+    def test_corrupt_history_is_skipped_with_visible_incomplete_warning(self):
+        self.read()
+        self.edit(dst="fixed")
+        self.fixer.save_report({"status": "done"}, [])
+        directory = Path(proofread._record_dir(self.parent))
+        bad_records = [b"", b"{", b"\xff", b"[]", b"{}", b'{"task_id":"x","at":null}']
+        for number, data in enumerate(bad_records):
+            (directory / f"{number:032x}.json").write_bytes(data)
+        Path(proofread._review_path(self.parent, "broken-task")).write_text("[]", encoding="utf-8")
+        result = proofread._tool_read_proofread_changes(self.parent, {})
+        self.assertEqual(result["total_tasks"], 1)
+        self.assertEqual(result["tasks"][0]["entries"], 1)
+        self.assertEqual(result["tasks"][0]["modified_count"], 1)
+        self.assertTrue(result["incomplete"])
+        self.assertEqual(result["skipped_record_count"], len(bad_records) + 1)
+        page = proofread._tool_read_proofread_changes(self.parent, {"task_id": "test-task"})
+        self.assertEqual(page["total"], 1)
+        self.assertEqual(page["changes"][0]["after"]["pre_dst"], "fixed")
+
+    def test_corrupt_review_is_distinguished_from_an_empty_review(self):
+        path = Path(proofread._review_path(self.parent, "test-task"))
+        path.parent.mkdir(parents=True)
+        for bad in ("{", "[]", '{"task_id":"test-task","at":1,"status":"done","review":null}'):
+            with self.subTest(bad=bad):
+                path.write_text(bad, encoding="utf-8")
+                result = proofread._tool_read_proofread_changes(self.parent, {"task_id": "test-task", "view": "review"})
+                self.assertTrue(result["incomplete"])
+                self.assertEqual(result["skipped_record_count"], 1)
+                self.assertEqual(result["needs_review"], [])
+        missing = proofread._tool_read_proofread_changes(self.parent, {"task_id": "missing", "view": "review"})
+        self.assertEqual(missing["needs_review"], [])
+        self.assertNotIn("incomplete", missing)
+
+    def test_history_read_error_does_not_hide_healthy_records(self):
+        self.read()
+        self.edit(dst="fixed")
+        denied = Path(proofread._record_dir(self.parent)) / ("0" * 32 + ".json")
+        denied.write_text("{}", encoding="utf-8")
+        original_open = open
+
+        def guarded_open(path, *args, **kwargs):
+            if Path(path) == denied:
+                raise PermissionError("access denied")
+            return original_open(path, *args, **kwargs)
+
+        with patch.object(proofread, "open", guarded_open, create=True):
+            result = proofread._tool_read_proofread_changes(self.parent, {"task_id": "test-task"})
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["skipped_record_count"], 1)
+        self.assertIn("access denied", result["warnings"][0])
+
+    def test_review_queries_never_load_change_records(self):
+        self.fixer.save_report({"status": "done"}, [])
+        with patch.object(proofread, "_load_records", side_effect=AssertionError("must not load changes")):
+            overview = proofread._tool_read_proofread_changes(self.parent, {"view": "review"})
+            self.assertEqual(overview["total_tasks"], 1)
+            with patch.object(proofread, "_record_names", side_effect=AssertionError("must not scan")):
+                page = proofread._tool_read_proofread_changes(self.parent, {"task_id": "test-task", "view": "review"})
+                self.assertEqual(page["total"], 0)
+
+    def test_task_query_opens_only_matching_new_records(self):
+        self.read()
+        self.edit(dst="fixed")
+        other = proofread.ProofreadFixer(self.parent, "other-task", self.parent.stop_event)
+        other.read(self.parent, {"filename": "a.json", "index": "2"})
+        other.patch(self.parent, {"filename": "a.json", "patches": [{"index": 2, "dst": "other"}]})
+        with patch.object(proofread, "_read_record", wraps=proofread._read_record) as reader:
+            result = proofread._tool_read_proofread_changes(self.parent, {"task_id": "test-task"})
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(reader.call_count, 1)
+        self.assertEqual(result["changes"][0]["index"], 1)
+
+    def test_legacy_records_remain_queryable_and_revertible(self):
+        self.read()
+        change_id = self.edit(dst="fixed")["files"][0]["change_id"]
+        new_path = Path(proofread._record_path(self.parent, change_id))
+        legacy_path = new_path.parent / (change_id + ".json")
+        new_path.rename(legacy_path)
+        result = proofread._tool_read_proofread_changes(self.parent, {"task_id": "test-task"})
+        self.assertEqual(result["changes"][0]["change_id"], change_id)
+        reverted = proofread._tool_revert_proofread_changes(self.parent, {"change_id": change_id})
+        self.assertEqual(reverted["updated"], 1)
+        self.assertEqual(self.parent.files["a.json"][0]["pre_dst"], ENTRY["pre_dst"])
+
+    def test_revert_of_corrupt_record_fails_before_touching_cache(self):
+        self.read()
+        change_id = self.edit(dst="fixed")["files"][0]["change_id"]
+        path = Path(proofread._record_path(self.parent, change_id))
+        for bad in ("{", "[]", "{}"):
+            with self.subTest(bad=bad):
+                path.write_text(bad, encoding="utf-8")
+                with patch.object(self.parent, "_http_get", side_effect=AssertionError("must not read cache")):
+                    with self.assertRaisesRegex(AgentToolError, "无法读取校对记录"):
+                        proofread._tool_revert_proofread_changes(self.parent, {"change_id": change_id})
+        self.assertEqual(len(self.parent.saves), 1)
+
+    def test_invalid_query_is_rejected_before_loading_records(self):
+        with patch.object(proofread, "_load_records", side_effect=AssertionError("must not scan")):
+            for args in ({"view": "invalid"}, {"task_id": "test-task", "offset": "bad"}):
+                with self.subTest(args=args), self.assertRaises(AgentToolError):
+                    proofread._tool_read_proofread_changes(self.parent, args)
+
+    def test_malformed_cache_rows_fail_cleanly_without_overwriting_or_dropping_rows(self):
+        original = self.parent._http_get
+        self.read()
+        for bad in (None, [], "bad", {}, {"index": None}, {"index": "1"}, {"index": True},
+                    {"index": 1.5}, dict(ENTRY, index=1)):
+            with self.subTest(bad=bad):
+                data = original("/api/projects/proj/cache/a.json")
+                data["entries"].append(bad)
+                before = copy.deepcopy(data)
+                with patch.object(self.parent, "_http_get", return_value=data):
+                    with self.assertRaises(AgentToolError):
+                        self.read()
+                    result = self.edit(dst="fixed")
+                    self.assertEqual(result["updated"], 0)
+                    self.assertIn("缓存", result["files"][0]["error"])
+                self.assertEqual(data, before)
+        self.assertFalse(self.parent.saves)
+
+    def test_commit_and_revert_validate_cache_indexes(self):
+        self.read()
+        change_id = self.edit(dst="fixed")["files"][0]["change_id"]
+        data = self.parent._http_get("/api/projects/proj/cache/a.json")
+        data["entries"].append({"index": "bad"})
+        with self.assertRaises(AgentToolError):
+            self.fixer._commit("a.json", "/api/projects/proj/cache/a.json", data, [{"index": 1, "pre_dst": "bad"}])
+        with patch.object(self.parent, "_http_get", return_value=data), self.assertRaises(AgentToolError):
+            proofread._tool_revert_proofread_changes(self.parent, {"change_id": change_id})
+        self.assertEqual(len(self.parent.saves), 1)
+
+    def test_concurrent_finish_saves_and_emits_only_once(self):
+        agent = subagent.SubAgentRunner(self.parent, agent="proofread", files=["a.json"], indexes="", brief="", delegation_id="finish-task")
+        agent.fixer.snapshots["a.json", 1] = {"proofread_comment": "needs review"}
+        saving, release, second_started = threading.Event(), threading.Event(), threading.Event()
+        original = agent.fixer.save_report
+
+        def save(result, review):
+            saving.set()
+            self.assertTrue(release.wait(3))
+            original(result, review)
+
+        def second_finish():
+            second_started.set()
+            return agent._finish("done", "later report")
+
+        with patch.object(agent.fixer, "save_report", side_effect=save) as saver, ThreadPoolExecutor(2) as pool:
+            first = pool.submit(agent._finish, "stopped", "first report")
+            try:
+                self.assertTrue(saving.wait(3))
+                second = pool.submit(second_finish)
+                self.assertTrue(second_started.wait(3))
+            finally:
+                release.set()
+            result = first.result(timeout=3)
+            self.assertEqual(second.result(timeout=3), result)
+            self.assertEqual(saver.call_count, 1)
+        self.assertEqual(result["status"], "stopped")
+        self.assertEqual(len([e for e, _ in self.parent.events if e == "subagent_done"]), 1)
+
+    def test_silent_finish_can_emit_cached_result_once(self):
+        agent = subagent.SubAgentRunner(self.parent, agent="proofread", files=["a.json"], indexes="", brief="", delegation_id="finish-task")
+        result = agent._finish("stopped", "first", emit=False)
+        self.assertFalse(self.parent.events)
+        self.assertEqual(agent._finish("done", "later"), result)
+        self.assertEqual(agent._finish("failed", "again"), result)
+        self.assertEqual(len(self.parent.events), 1)
+        self.assertEqual(self.parent.events[0][1]["status"], "stopped")
+
+    def test_stop_snapshot_does_not_freeze_report_before_inflight_save_returns(self):
+        agent = subagent.SubAgentRunner(self.parent, agent="proofread", files=["a.json"], indexes="", brief="", delegation_id="inflight-task")
+        handlers = subagent._subagent_handlers("proofread", ["a.json"], fixer=agent.fixer, stop_event=self.parent.stop_event)
+        agent._run_tool(_Call("read", "read_transl_cache", '{"filename":"a.json","index":"1"}'), handlers)
+        posting, release = threading.Event(), threading.Event()
+        original = self.parent._http_post
+
+        def delayed_post(path, body):
+            posting.set()
+            self.assertTrue(release.wait(3))
+            return original(path, body)
+
+        def worker():
+            agent._run_tool(_Call("edit", "patch_transl_cache", json.dumps({
+                "filename": "a.json", "patches": [{"index": 1, "dst": "fixed", "proofread_comment": "check context"}],
+            })), handlers)
+            return agent._finish("stopped", "")
+
+        with patch.object(self.parent, "_http_post", side_effect=delayed_post), ThreadPoolExecutor(1) as pool:
+            future = pool.submit(worker)
+            try:
+                self.assertTrue(posting.wait(3))
+                self.parent.stop_event.set()
+                provisional = agent._stopped_result()
+                self.assertTrue(provisional["report_pending"])
+                self.assertEqual(provisional["read_count"], 1)
+                self.assertEqual(provisional["modified_count"], 0)
+                self.assertFalse(Path(proofread._review_path(self.parent, agent.id)).exists())
+            finally:
+                release.set()
+            final = future.result(timeout=3)
+        self.assertEqual(final["modified_count"], 1)
+        self.assertEqual(final["needs_review_count"], 1)
+        self.assertEqual(agent._stopped_result(), final)
+        report = proofread._read_record(proofread._review_path(self.parent, agent.id), review=True)
+        self.assertEqual(report["modified_count"], 1)
+        self.assertEqual(report["needs_review_count"], 1)
+        self.assertEqual(report["status"], "stopped")
+
+    def test_stop_during_last_chat_response_does_not_report_done(self):
+        agent = subagent.SubAgentRunner(self.parent, agent="proofread", files=["a.json"], indexes="", brief="", delegation_id="late-chat")
+
+        def stopped_response(*args):
+            self.parent.stop_event.set()
+            return "late completion", [], "", ""
+
+        with patch.object(agent, "_chat_with_retry", side_effect=stopped_response):
+            result = agent.run()
+        self.assertEqual(result["status"], "stopped")
+
+    def test_stop_during_final_tool_round_preserves_stopped_status_and_saved_changes(self):
+        agent = subagent.SubAgentRunner(self.parent, agent="proofread", files=["a.json"], indexes="", brief="", delegation_id="last-round")
+        original = self.parent._http_post
+
+        def save_and_stop(path, body):
+            result = original(path, body)
+            self.parent.stop_event.set()
+            return result
+
+        responses = [
+            ("", [_Call("read", "read_transl_cache", '{"filename":"a.json","index":"1"}')], "", ""),
+            ("", [_Call("edit", "patch_transl_cache", '{"filename":"a.json","patches":[{"index":1,"dst":"fixed"}]}')], "", ""),
+        ]
+        with (patch.object(subagent, "SUBAGENT_MAX_ROUNDS", 2),
+              patch.object(agent, "_chat_with_retry", side_effect=responses),
+              patch.object(self.parent, "_http_post", side_effect=save_and_stop)):
+            result = agent.run()
+        self.assertEqual(result["status"], "stopped")
+        self.assertEqual(result["modified_count"], 1)
+        self.assertEqual(proofread._read_record(proofread._review_path(self.parent, agent.id), review=True)["status"], "stopped")
 
 
 if __name__ == "__main__":

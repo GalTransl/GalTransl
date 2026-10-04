@@ -47,3 +47,37 @@ test('parent result reconciles stopped child with its committed edits', () => {
   assert.equal(child.needsReviewCount, 2);
   assert.equal(child.unverifiedCount, 1);
 });
+
+for (const nextTurn of [false, true]) {
+  test(`late proofreading completion updates its original task after stop (next turn: ${nextTurn})`, () => {
+    const rows = events(false).slice(0, 3);
+    rows.push(
+      { type: 'tool_result', step: 4, id: 'parent', name: 'run_subagents', ok: true, result: {
+        tasks: [{ id: 'child', status: 'stopped', report_pending: true, modified_count: 0, needs_review_count: 0 }],
+      } },
+      { type: 'stopped', step: 5, reason: 'user stopped' },
+    );
+    if (nextTurn) rows.push(
+      { type: 'user_message', step: 6, message: 'continue' },
+      { type: 'tool_call', step: 7, id: 'new-parent', name: 'run_subagents', arguments: {} },
+      { type: 'subagent_start', step: 8, id: 'new-child', parent_id: 'new-parent', agent: 'proofread' },
+    );
+    rows.push(
+      { ...events(false)[3], step: 9 },
+      { type: 'subagent_done', step: 10, id: 'child', status: 'stopped', modified_count: 1, needs_review_count: 1 },
+    );
+    const groups = buildTimeline(rows);
+    const tasks = groups.filter(group => group.type === 'activity').flatMap(group => group.items);
+    const child = tasks.find(task => task.id === 'parent').subagents[0];
+    assert.equal(child.status, 'stopped');
+    assert.equal(child.modifiedCount, 1);
+    assert.equal(child.needsReviewCount, 1);
+    assert.equal(child.steps[0].result.changes[0].after, 'new');
+    if (nextTurn) {
+      const newChildren = tasks.find(task => task.id === 'new-parent').subagents;
+      assert.equal(newChildren.length, 1);
+      assert.equal(newChildren[0].id, 'new-child');
+      assert.equal(newChildren[0].status, 'running');
+    }
+  });
+}

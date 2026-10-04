@@ -110,9 +110,8 @@ export type TimelineGroup =
 
 /** run_subagents 的结果一到，就按结果里的 tasks 把子代理状态对齐一遍。
 
-    结果是最终名单：父回合被停止时，没跑完的子代理等不到自己的 subagent_done 事件
-    （后端把它们的终态直接写进了结果的 tasks，status=stopped）。不对齐的话这些行会
-    永远停在"进行中"，头部就一直挂着一个假的「N/16 个在跑」。 */
+    父回合被停止时，先按 tasks 里的进度快照显示 stopped，避免界面一直显示进行中。
+    子代理可能仍在等待已发出的缓存请求，迟到的 subagent_done 会补上最终计数。 */
 function reconcileSubagentStatuses(target: ActivityItem) {
   if (target.kind !== 'tool' || target.name !== 'run_subagents') return;
   const runs = target.subagents;
@@ -141,6 +140,8 @@ function reconcileSubagentStatuses(target: ActivityItem) {
 
 export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
   const groups: TimelineGroup[] = [];
+  // A stopped worker can finish after the parent group closes or a new turn starts.
+  const subagentHosts = new Map<string, ActivityItem>();
   let current: Extract<TimelineGroup, { type: 'activity' }> | null = null;
   // 助手段落（parts）的认领游标：parts 与 delta 拼出来的卡片按顺序一一对应
   // （两侧口径一致，见后端 _assistant_parts）。实时流里卡片已由 delta 建好，
@@ -479,14 +480,15 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
     // 子代理（run_subagents）：挂到发起它的那次工具调用下面，一层就够——子代理没有子代理。
     // 事件带 id（本次派发）与 parent_id（那次工具调用），据此定位到行与具体哪个子代理。
     if (ev.type.startsWith('subagent_')) {
-      if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
       const host =
-        current.items.find((it) => it.kind === 'tool' && it.id === ev.parent_id) ??
+        subagentHosts.get(ev.id || '') ??
+        current?.items.find((it) => it.kind === 'tool' && it.id === ev.parent_id) ??
         // 老记录/事件乱序时的兜底：本组最后一次 run_subagents 调用
-        [...current.items].reverse().find((it) => it.kind === 'tool' && it.name === 'run_subagents');
+        [...(current?.items || [])].reverse().find((it) => it.kind === 'tool' && it.name === 'run_subagents');
       if (!host) {
         continue;
       }
+      if (ev.id) subagentHosts.set(ev.id, host);
       if (!host.subagents) host.subagents = [];
       let run = host.subagents.find((item) => item.id === ev.id);
       if (!run) {
