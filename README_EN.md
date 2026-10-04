@@ -42,92 +42,12 @@
 * [Configuration and Engine Settings](https://github.com/XD2333/GalTransl#configuration-and-engine-settings): Details on configuring translation engine APIs
 * [GalTransl Core Features](https://github.com/XD2333/GalTransl#galtransl-core-features): GPT dictionary, cache, ordinary dictionary, problem finding, etc.
 * Further tutorials have been [moved to Wiki](https://github.com/xd2333/GalTransl/wiki)
+* [Development and Builds](#development-and-builds): Development setup, platform builds, and automated releases (click to expand)
 
 ## Environment Preparation
   * **Desktop Version (Recommended)**
   Download the package for your platform from [Releases](https://github.com/GalTransl/GalTransl/releases/). On Windows, extract `GalTransl_*_win.zip` and double-click `GalTransl Desktop.exe`; **Python is not required**. Linux x86_64 is distributed as a portable `.tar.gz`; extract it and run `./galtransl-desktop`. Linux still requires system libraries such as WebKitGTK 4.1. macOS releases include separate Intel and Apple Silicon DMGs plus portable `.tar.gz` archives. The desktop app automatically starts the backend service.
 
-  * **Command-line Version (Developers / Advanced Users)**
-  To use the command-line version or participate in development:
-
-  1. [Download this project](https://github.com/XD2333/GalTransl/releases/) or clone the repository, extract to any location
-  2. Install Python 3.11.9. [Download](https://www.python.org/downloads/release/python-3119/)
-  **Check "Add Python to PATH" during installation**
-  3. Install Python dependencies: double-click `安装、更新依赖.bat`, or run `pip install -r requirements.txt`
-  4. (Desktop development) Install Node.js, run `npm install` in the `desktop` directory, then run `run_desktop_dev.bat`
-
-### Linux x86_64 development
-
-Linux support targets x86_64 only. ARM is not included in the supported scope.
-
-Install the required WebKitGTK and packaging dependencies on Ubuntu/Debian:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y build-essential curl file libssl-dev patchelf rpm \
-  libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
-```
-
-Set up and start the desktop development environment:
-
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-npm --prefix desktop ci
-./run_desktop_dev.sh
-```
-
-Build the Linux portable release artifact:
-
-```bash
-python build_linux_x64.py --no-bundles
-```
-
-Build release packages on Ubuntu 22.04 or an equivalent glibc baseline for wider compatibility. Settings are stored under `$XDG_CONFIG_HOME/GalTransl`; editable common dictionaries live under `$XDG_DATA_HOME/GalTransl/Dict`, with bundled dictionaries used only as initial seeds. Editable guidelines and Agent sessions live under `$XDG_DATA_HOME/GalTransl/translation_guidelines` and `$XDG_DATA_HOME/GalTransl/agent_sessions`. XDG roots default to `~/.config` and `~/.local/share`. Windows retains settings and dictionaries in the program directory.
-
-Linux support does not imply that every external tool has been ported. For example, the msg-tool plugin's bundled `res/msg_tool.exe` is a Windows binary; extraction/reinsertion for those script formats cannot run directly on Linux.
-
-### macOS development and builds
-
-macOS builds cover both Intel (x86_64) and Apple Silicon (arm64). Install Xcode Command Line Tools, Python 3.11, Node.js, Rust, and the project dependencies:
-
-```bash
-npm --prefix desktop ci
-python build_macos.py
-```
-
-Build outputs are written to `release/` and include an architecture-specific `.dmg` and portable `.tar.gz`. Unsigned builds may be blocked by macOS Gatekeeper; configure Apple Developer signing and notarization for public distribution.
-
-### Automated builds and releases
-
-[Build and draft release](https://github.com/GalTransl/GalTransl/actions/workflows/build-release.yml) builds desktop packages on native Windows x64 and Ubuntu 22.04 x86_64 runners.
-
-| Trigger | Result |
-| --- | --- |
-| Push to `main` or open/update a PR | Test and build Windows, Linux, and macOS; upload Actions artifacts |
-| Actions → Build and draft release → Run workflow | Manual test build; artifacts only, no Release changes |
-| Push a version tag (`8.2.0` or `v8.2.0`) | Create a draft Release and attach packages only after Windows, Linux, and macOS pass tests, builds, and packaged-backend checks |
-
-Release checks launch the extracted backend from a separate directory with temporary settings and user data, and parse real TXT, JSON, and EPUB files. On macOS, they also mount the DMG, copy its `.app`, validate the version, both executable architectures and resources, then run the same checks against the backend inside the app bundle.
-
-**Download test builds:** open the workflow run and choose an artifact (retained for 14 days). Linux and macOS portable builds are provided directly as `GalTransl_<version>_linux_x86_64.tar.gz`, `GalTransl_<version>_macos_x86_64.tar.gz`, or `GalTransl_<version>_macos_arm64.tar.gz`. Extract once to use them, with executable permissions preserved. The Windows `GalTransl-windows-x64` and macOS architecture-specific `dmg` artifacts are still delivered in an outer ZIP by Actions.
-
-**Publish a new version (maintainers):**
-
-1. Update `GALTRANSL_VERSION` in `GalTransl/__init__.py`, commit, and push the code including this workflow.
-2. Push a new matching tag. For example, if the next unpublished source version is `8.2.0`:
-   ```bash
-   git tag 8.2.0
-   git push origin 8.2.0
-   ```
-3. Wait for the workflow to succeed, inspect the draft under **Releases**, edit the release notes, then click **Publish release**. Do not publish while assets are still uploading.
-
-Tags must be `X.Y.Z` or `vX.Y.Z` and match the source version. Never move or reuse existing tags such as `8.1.0`. Release assets include the Windows `.zip`, Linux `.tar.gz`, macOS Intel/Apple Silicon `.dmg` and `.tar.gz` files, and `SHA256SUMS.txt`. After downloading all assets, verify with `sha256sum -c SHA256SUMS.txt`; on Windows, compare PowerShell `Get-FileHash <file> -Algorithm SHA256` against the manifest.
-
-Only the built-in `GITHUB_TOKEN` is used; no extra PAT or translation API keys are needed. Only the release job requests `contents: write`; organization policies must permit Release writes. Reruns replace generated assets on an existing draft while preserving its edited title and notes, and refuse to overwrite a published Release. Even manually running the workflow on a tag only produces artifacts.
-
-The post-build smoke test extracts the final portable archive and checks the backend version and plugin listing outside the source checkout. It is not a full GUI, installer, or all-plugins functionality test.
 
 
 ## Practical Tools
@@ -445,3 +365,98 @@ A new conversation starts at the turn or character limit (including reasoning), 
 The desktop GUI manages translation backend configuration through the graphical interface (the "Backend Profiles" page on the left sidebar), no manual YAML editing required. Project-level configuration can be modified in the "Config Editor" page.
 
 For the command-line version, detailed settings can be found directly in the `config.yaml` file comments, which are now quite comprehensive.
+
+
+## Development and Builds
+
+<details>
+<summary>Development environment (developers / advanced users)</summary>
+
+* **Command-line Version (Developers / Advanced Users)**
+  To use the command-line version or participate in development:
+
+  1. [Download this project](https://github.com/XD2333/GalTransl/releases/) or clone the repository, extract to any location
+  2. Install Python 3.11.9. [Download](https://www.python.org/downloads/release/python-3119/)
+  **Check "Add Python to PATH" during installation**
+  3. Install Python dependencies: double-click `安装、更新依赖.bat`, or run `pip install -r requirements.txt`
+  4. (Desktop development) Install Node.js, run `npm install` in the `desktop` directory, then run `run_desktop_dev.bat`
+
+### Linux x86_64 development
+
+Linux support targets x86_64 only. ARM is not included in the supported scope.
+
+Install the required WebKitGTK and packaging dependencies on Ubuntu/Debian:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential curl file libssl-dev patchelf rpm \
+  libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+Set up and start the desktop development environment:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+npm --prefix desktop ci
+./run_desktop_dev.sh
+```
+
+Build the Linux portable release artifact:
+
+```bash
+python build_linux_x64.py --no-bundles
+```
+
+Build release packages on Ubuntu 22.04 or an equivalent glibc baseline for wider compatibility. Settings are stored under `$XDG_CONFIG_HOME/GalTransl`; editable common dictionaries live under `$XDG_DATA_HOME/GalTransl/Dict`, with bundled dictionaries used only as initial seeds. Editable guidelines and Agent sessions live under `$XDG_DATA_HOME/GalTransl/translation_guidelines` and `$XDG_DATA_HOME/GalTransl/agent_sessions`. XDG roots default to `~/.config` and `~/.local/share`. Windows retains settings and dictionaries in the program directory.
+
+Linux support does not imply that every external tool has been ported. For example, the msg-tool plugin's bundled `res/msg_tool.exe` is a Windows binary; extraction/reinsertion for those script formats cannot run directly on Linux.
+
+### macOS development and builds
+
+macOS builds cover both Intel (x86_64) and Apple Silicon (arm64). Install Xcode Command Line Tools, Python 3.11, Node.js, Rust, and the project dependencies:
+
+```bash
+npm --prefix desktop ci
+python build_macos.py
+```
+
+Build outputs are written to `release/` and include an architecture-specific `.dmg` and portable `.tar.gz`. Unsigned builds may be blocked by macOS Gatekeeper; configure Apple Developer signing and notarization for public distribution.
+
+</details>
+
+<details>
+<summary>Automated builds and releases (maintainers)</summary>
+
+### Automated builds and releases
+
+[Build and draft release](https://github.com/GalTransl/GalTransl/actions/workflows/build-release.yml) builds desktop packages on native Windows x64 and Ubuntu 22.04 x86_64 runners.
+
+| Trigger | Result |
+| --- | --- |
+| Push to `main` or open/update a PR | Test and build Windows, Linux, and macOS; upload Actions artifacts |
+| Actions → Build and draft release → Run workflow | Manual test build; artifacts only, no Release changes |
+| Push a version tag (`8.2.0` or `v8.2.0`) | Create a draft Release and attach packages only after Windows, Linux, and macOS pass tests, builds, and packaged-backend checks |
+
+Release checks launch the extracted backend from a separate directory with temporary settings and user data, and parse real TXT, JSON, and EPUB files. On macOS, they also mount the DMG, copy its `.app`, validate the version, both executable architectures and resources, then run the same checks against the backend inside the app bundle.
+
+**Download test builds:** open the workflow run and choose an artifact (retained for 14 days). Linux and macOS portable builds are provided directly as `GalTransl_<version>_linux_x86_64.tar.gz`, `GalTransl_<version>_macos_x86_64.tar.gz`, or `GalTransl_<version>_macos_arm64.tar.gz`. Extract once to use them, with executable permissions preserved. The Windows `GalTransl-windows-x64` and macOS architecture-specific `dmg` artifacts are still delivered in an outer ZIP by Actions.
+
+**Publish a new version (maintainers):**
+
+1. Update `GALTRANSL_VERSION` in `GalTransl/__init__.py`, commit, and push the code including this workflow.
+2. Push a new matching tag. For example, if the next unpublished source version is `8.2.0`:
+   ```bash
+   git tag 8.2.0
+   git push origin 8.2.0
+   ```
+3. Wait for the workflow to succeed, inspect the draft under **Releases**, edit the release notes, then click **Publish release**. Do not publish while assets are still uploading.
+
+Tags must be `X.Y.Z` or `vX.Y.Z` and match the source version. Never move or reuse existing tags such as `8.1.0`. Release assets include the Windows `.zip`, Linux `.tar.gz`, macOS Intel/Apple Silicon `.dmg` and `.tar.gz` files, and `SHA256SUMS.txt`. After downloading all assets, verify with `sha256sum -c SHA256SUMS.txt`; on Windows, compare PowerShell `Get-FileHash <file> -Algorithm SHA256` against the manifest.
+
+Only the built-in `GITHUB_TOKEN` is used; no extra PAT or translation API keys are needed. Only the release job requests `contents: write`; organization policies must permit Release writes. Reruns replace generated assets on an existing draft while preserving its edited title and notes, and refuse to overwrite a published Release. Even manually running the workflow on a tag only produces artifacts.
+
+The post-build smoke test extracts the final portable archive and checks the backend version and plugin listing outside the source checkout. It is not a full GUI, installer, or all-plugins functionality test.
+
+</details>

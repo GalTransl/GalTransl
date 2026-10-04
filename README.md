@@ -52,158 +52,17 @@
 
 ## 导航
 * [环境准备](https://github.com/XD2333/GalTransl#环境准备)：环境与软件的安装
-* [桌面端开发模式](#桌面端开发模式)：从源码准备环境并启动桌面端或浏览器开发页面
 * [上手教程](https://github.com/XD2333/GalTransl#上手教程)：全流程介绍如何制作一个机翻补丁，**只想看怎么使用本工具的话，可以直接跳转第2章的2.2节**   
 * [配置文件与翻译引擎设置](https://github.com/XD2333/GalTransl#配置文件与翻译引擎设置)：本篇详细介绍各个翻译引擎API的调用与配置方式。   
 * [GalTransl核心功能介绍](https://github.com/XD2333/GalTransl#galtransl核心功能介绍)：介绍GPT字典、缓存、普通字典、找问题等功能。
 * 后续教程已经[转移至Wiki](https://github.com/xd2333/GalTransl/wiki)
+* [开发与构建](#开发与构建)：开发环境、源码运行、平台构建与自动发布（点击展开）
 
 ## 环境准备
   * **桌面版（推荐）**   
   从 [Release](https://github.com/GalTransl/GalTransl/releases/) 下载对应平台的桌面包。Windows 使用 `GalTransl_*_win.zip`，解压后双击 `GalTransl Desktop.exe`，**无需安装 Python**。Linux x86_64 使用便携 `.tar.gz`，解压后运行 `./galtransl-desktop`；系统仍需具备 WebKitGTK 4.1 等运行库。macOS 提供 Intel 和 Apple Silicon 两种 DMG，同时附带便携 `.tar.gz`。桌面端会为每个实例自动启动独立后端并分配空闲端口，关闭一个窗口只会停止它自己的后端，其他窗口继续运行。
    
 
-<details>
-<summary>
-
-### 开发环境配置（开发者/高级用户）
-
-</summary>
-
-  * **命令行版（开发者/高级用户）**   
-  如需使用命令行版本或参与开发：
-
-  1. [下载本项目](https://github.com/XD2333/GalTransl/releases/) 或 clone 仓库，解压到任意位置
-  2. 安装 Python 3.11.9。 [下载](https://www.python.org/downloads/release/python-3119/)   
-  **安装时勾选下方 add Python to path**
-  3. 安装Python依赖：双击 `安装、更新依赖.bat`，或手动执行 `pip install -r requirements.txt`
-     
-以下步骤适用于 Windows。从源码运行桌面端时，请先 clone 或下载本仓库源码，并在仓库根目录（包含 `run_desktop_dev.bat` 的目录）打开终端。
-
-**首次准备环境**
-
-1. 安装 [Python 3.11.9](https://www.python.org/downloads/release/python-3119/) 和 [Node.js LTS](https://nodejs.org/)，确保 `python`、`node`、`npm` 已加入 PATH。
-2. 若要启动原生桌面窗口，安装 [Rust](https://www.rust-lang.org/tools/install)，使用默认的 Windows MSVC 工具链；安装Rust时会提示安装VC工具链和SDK，要一并安装。
-3. 安装完成后重新打开终端，在仓库根目录执行以下命令，建立项目独立的 Python 环境并安装依赖：
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-npm.cmd --prefix desktop ci
-```
-
-**日常启动**
-
-双击仓库根目录的 `run_desktop_dev.bat`，或在终端执行：
-
-```powershell
-.\run_desktop_dev.bat
-```
-
-启动脚本会自动激活仓库中的 `.venv`，并识别默认安装在 `%USERPROFILE%\.cargo\bin` 下的 Cargo。脚本会分别打开 Python 后端和前端开发控制台：
-
-- 后端地址为 [http://127.0.0.1:12333](http://127.0.0.1:12333)，前端开发地址为 [http://127.0.0.1:1420/](http://127.0.0.1:1420/)。
-- 检测到 Cargo 时，会编译并打开 Tauri 桌面窗口。首次启动需要下载 Rust 依赖并编译，请等待控制台完成。
-- 未检测到 Cargo 时，会启动浏览器开发模式；手动打开前端地址即可。此模式无需安装 Rust、C++ 编译工具或 WebView2。
-- 前端代码修改后支持热更新，Rust 代码修改后会自动重新编译；修改 Python 后端代码后需要重启后端。
-
-**使用注意**
-
-- `.venv` 和依赖只需首次创建、安装。更新源码后，如果依赖有变化，重新执行上面的 Python 依赖安装命令和 `npm.cmd --prefix desktop ci`。
-- 如果出现 `ModuleNotFoundError`，检查是否已将依赖安装到仓库的 `.venv` 中；启动脚本不会自动安装 Python 依赖。
-- 启动前确保 `12333` 和 `1420` 端口未被其他实例占用。退出时在后端、前端两个开发控制台分别按 `Ctrl+C` 停止服务，再关闭控制台；只关闭桌面窗口不会停止单独运行的 Python 后端。
-- 后端会独占监听端口；重复启动时，新后端会提示端口占用并退出，已有后端继续运行。应用此修复后，请先停止之前启动的所有旧后端，再重新运行启动脚本。
-
-### Linux x86_64 开发与构建
-
-当前 Linux 支持范围为 x86_64，不包含 ARM。
-
-Ubuntu 22.04+/Debian 12+ 可安装以下依赖：
-
-```bash
-sudo apt-get update
-sudo apt-get install -y build-essential curl file libssl-dev patchelf rpm \
-  libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
-```
-
-Fedora 可使用：
-
-```bash
-sudo dnf install webkit2gtk4.1-devel openssl-devel curl wget file \
-  libappindicator-gtk3-devel librsvg2-devel rpm-build dpkg
-```
-
-首次准备和日常启动：
-
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-npm --prefix desktop ci
-./run_desktop_dev.sh
-```
-
-脚本会先启动 Python 后端，再启动 Tauri 桌面端；未安装 Cargo 时会退回到浏览器开发模式。
-
-构建 Linux 发布包：
-
-```bash
-python build_linux_x64.py --no-bundles
-```
-
-Linux CI 和正式发布只生成便携包；需要本地测试安装包时，可通过 `--formats deb,appimage` 选择 Tauri 安装包格式。
-
-输出位于 `release/`：
-
-- `GalTransl_*_linux_x86_64.tar.gz`
-- `GalTransl_*_linux_x86_64.tar.gz`
-
-正式发布包应在 Ubuntu 22.04 或同等 glibc 基线的环境中构建。应用设置写入 `$XDG_CONFIG_HOME/GalTransl`，用户通用字典写入 `$XDG_DATA_HOME/GalTransl/Dict`；通用翻译规范和 Agent 会话分别写入 `$XDG_DATA_HOME/GalTransl/translation_guidelines` 与 `$XDG_DATA_HOME/GalTransl/agent_sessions`。未设置 XDG 环境变量时使用 `~/.config` 和 `~/.local/share`；安装目录中的字典和规范只作为初始种子。Windows 继续使用程序目录中的配置与字典。
-
-Linux 支持不代表所有外部工具均已移植：例如 msg-tool 插件自带的 `res/msg_tool.exe` 是 Windows 程序，相关脚本格式的提取/回填不能直接在 Linux 上使用。
-
-</details>
-
-### macOS 开发与构建
-
-当前 macOS 构建覆盖 Intel（x86_64）和 Apple Silicon（arm64）。需要安装 Xcode Command Line Tools、Python 3.11、Node.js、Rust，以及项目依赖：
-
-```bash
-npm --prefix desktop ci
-python build_macos.py
-```
-
-构建结果位于 `release/`，包括对应架构的 `.dmg` 和便携 `.tar.gz`。未签名构建可能被 macOS Gatekeeper 拦截；正式分发时应配置 Apple Developer 签名与公证。
-
-## 自动构建与发布
-
-[Build and draft release](https://github.com/GalTransl/GalTransl/actions/workflows/build-release.yml) 使用 Windows x64、Ubuntu 22.04 x86_64 和 macOS Intel/Apple Silicon 原生 runner 编译桌面包。
-
-发布验收会从独立目录启动解压后的后端，使用临时配置和用户数据目录，并实际解析 TXT、JSON、EPUB 文件。macOS 还会挂载 DMG、复制其中的 `.app`，校验版本、前后端架构和资源，再启动应用包内的后端完成同样的检查。
-
-| 触发方式 | 结果 |
-| --- | --- |
-| 更新 `main`、提交 PR | 测试、构建 Windows、Linux 和 macOS，并上传本次 Actions artifacts |
-| Actions → Build and draft release → Run workflow | 手动试打包；只生成 artifacts，不创建或修改 Release |
-| 推送版本 tag（`8.2.0` 或 `v8.2.0`） | Windows、Linux、macOS 全部测试、构建及打包后检查通过后，创建草稿 Release 并上传附件 |
-
-**下载试构建**：打开工作流运行详情，在 **Artifacts** 中按需下载（均保留 14 天）。Linux 和 macOS 便携包直接以 `GalTransl_<版本>_linux_x86_64.tar.gz`、`GalTransl_<版本>_macos_x86_64.tar.gz` 或 `GalTransl_<版本>_macos_arm64.tar.gz` 为名提供，下载后解压一次即可使用，并保留可执行权限。Windows 的 `GalTransl-windows-x64` 和 macOS 对应架构的 `dmg` artifact 仍由 Actions 提供外层 ZIP。
-
-**发布新版本（维护者）**：
-
-1. 更新 `GalTransl/__init__.py` 中的 `GALTRANSL_VERSION`，提交并推送包含此工作流的代码。
-2. 推送与源码版本一致的新 tag。下面以尚未发布的 `8.2.0` 为例，实际使用时替换为本次版本：
-   ```bash
-   git tag 8.2.0
-   git push origin 8.2.0
-   ```
-3. 等待工作流成功，在 **Releases** 检查自动生成的草稿，补充发布说明，然后手动点击 **Publish release**。上传过程中不要提前发布草稿。
-
-tag 支持 `X.Y.Z` 和 `vX.Y.Z`，必须与源码版本一致；不要移动或重新使用已有 tag（例如 `8.1.0`）。正式附件包括 Windows `.zip`、Linux `.tar.gz`、macOS Intel/Apple Silicon 的 `.dmg` 和 `.tar.gz`，以及 `SHA256SUMS.txt`。下载全部附件后可用 `sha256sum -c SHA256SUMS.txt` 校验；Windows 可用 PowerShell `Get-FileHash <文件> -Algorithm SHA256` 对照清单。
-
-流程只使用 GitHub 内置的 `GITHUB_TOKEN`，不需要额外 PAT 或翻译 API 密钥。只有发布 job 申请 `contents: write`；如果组织策略禁止写入，需要管理员允许该仓库的 Release 写入权限。失败后可以重跑：现有草稿会更新自动构建的附件，保留手工编辑的标题和说明；已经正式发布的 Release 则拒绝覆盖。手动选择 tag 运行也只会生成 artifacts。
-
-构建后会解压最终便携包，在源码目录之外启动后端并检查版本和插件列表；这不替代完整桌面 GUI、各安装器及全部插件的功能测试。
 
 ## 实用工具
 | 名称 | 说明 |
@@ -566,6 +425,155 @@ gpt.contextNum: 8
 桌面端通过图形界面管理翻译后端配置（左侧"后端配置"页面），无需手动编辑YAML。项目级配置可在"配置编辑"页面修改。
 
 命令行版本的详细设置项可以直接阅读 `config.yaml` 配置文件注释，目前已经比较详细。
+
+
+## 开发与构建
+
+<details>
+<summary>开发环境配置（开发者/高级用户）</summary>
+
+* **命令行版（开发者/高级用户）**
+  如需使用命令行版本或参与开发：
+
+  1. [下载本项目](https://github.com/XD2333/GalTransl/releases/) 或 clone 仓库，解压到任意位置
+  2. 安装 Python 3.11.9。 [下载](https://www.python.org/downloads/release/python-3119/)
+  **安装时勾选下方 add Python to path**
+  3. 安装Python依赖：双击 `安装、更新依赖.bat`，或手动执行 `pip install -r requirements.txt`
+
+### 桌面端开发模式
+
+以下步骤适用于 Windows。从源码运行桌面端时，请先 clone 或下载本仓库源码，并在仓库根目录（包含 `run_desktop_dev.bat` 的目录）打开终端。
+
+**首次准备环境**
+
+1. 安装 [Python 3.11.9](https://www.python.org/downloads/release/python-3119/) 和 [Node.js LTS](https://nodejs.org/)，确保 `python`、`node`、`npm` 已加入 PATH。
+2. 若要启动原生桌面窗口，安装 [Rust](https://www.rust-lang.org/tools/install)，使用默认的 Windows MSVC 工具链；安装Rust时会提示安装VC工具链和SDK，要一并安装。
+3. 安装完成后重新打开终端，在仓库根目录执行以下命令，建立项目独立的 Python 环境并安装依赖：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+npm.cmd --prefix desktop ci
+```
+
+**日常启动**
+
+双击仓库根目录的 `run_desktop_dev.bat`，或在终端执行：
+
+```powershell
+.\run_desktop_dev.bat
+```
+
+启动脚本会自动激活仓库中的 `.venv`，并识别默认安装在 `%USERPROFILE%\.cargo\bin` 下的 Cargo。脚本会分别打开 Python 后端和前端开发控制台：
+
+- 后端地址为 [http://127.0.0.1:12333](http://127.0.0.1:12333)，前端开发地址为 [http://127.0.0.1:1420/](http://127.0.0.1:1420/)。
+- 检测到 Cargo 时，会编译并打开 Tauri 桌面窗口。首次启动需要下载 Rust 依赖并编译，请等待控制台完成。
+- 未检测到 Cargo 时，会启动浏览器开发模式；手动打开前端地址即可。此模式无需安装 Rust、C++ 编译工具或 WebView2。
+- 前端代码修改后支持热更新，Rust 代码修改后会自动重新编译；修改 Python 后端代码后需要重启后端。
+
+**使用注意**
+
+- `.venv` 和依赖只需首次创建、安装。更新源码后，如果依赖有变化，重新执行上面的 Python 依赖安装命令和 `npm.cmd --prefix desktop ci`。
+- 如果出现 `ModuleNotFoundError`，检查是否已将依赖安装到仓库的 `.venv` 中；启动脚本不会自动安装 Python 依赖。
+- 启动前确保 `12333` 和 `1420` 端口未被其他实例占用。退出时在后端、前端两个开发控制台分别按 `Ctrl+C` 停止服务，再关闭控制台；只关闭桌面窗口不会停止单独运行的 Python 后端。
+- 后端会独占监听端口；重复启动时，新后端会提示端口占用并退出，已有后端继续运行。应用此修复后，请先停止之前启动的所有旧后端，再重新运行启动脚本。
+
+### Linux x86_64 开发与构建
+
+当前 Linux 支持范围为 x86_64，不包含 ARM。
+
+Ubuntu 22.04+/Debian 12+ 可安装以下依赖：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential curl file libssl-dev patchelf rpm \
+  libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+Fedora 可使用：
+
+```bash
+sudo dnf install webkit2gtk4.1-devel openssl-devel curl wget file \
+  libappindicator-gtk3-devel librsvg2-devel rpm-build dpkg
+```
+
+首次准备和日常启动：
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+npm --prefix desktop ci
+./run_desktop_dev.sh
+```
+
+脚本会先启动 Python 后端，再启动 Tauri 桌面端；未安装 Cargo 时会退回到浏览器开发模式。
+
+构建 Linux 发布包：
+
+```bash
+python build_linux_x64.py --no-bundles
+```
+
+Linux CI 和正式发布只生成便携包；需要本地测试安装包时，可通过 `--formats deb,appimage` 选择 Tauri 安装包格式。
+
+输出位于 `release/`：
+
+- `GalTransl_*_linux_x86_64.tar.gz`
+- `GalTransl_*_linux_x86_64.tar.gz`
+
+正式发布包应在 Ubuntu 22.04 或同等 glibc 基线的环境中构建。应用设置写入 `$XDG_CONFIG_HOME/GalTransl`，用户通用字典写入 `$XDG_DATA_HOME/GalTransl/Dict`；通用翻译规范和 Agent 会话分别写入 `$XDG_DATA_HOME/GalTransl/translation_guidelines` 与 `$XDG_DATA_HOME/GalTransl/agent_sessions`。未设置 XDG 环境变量时使用 `~/.config` 和 `~/.local/share`；安装目录中的字典和规范只作为初始种子。Windows 继续使用程序目录中的配置与字典。
+
+Linux 支持不代表所有外部工具均已移植：例如 msg-tool 插件自带的 `res/msg_tool.exe` 是 Windows 程序，相关脚本格式的提取/回填不能直接在 Linux 上使用。
+
+
+### macOS 开发与构建
+
+当前 macOS 构建覆盖 Intel（x86_64）和 Apple Silicon（arm64）。需要安装 Xcode Command Line Tools、Python 3.11、Node.js、Rust，以及项目依赖：
+
+```bash
+npm --prefix desktop ci
+python build_macos.py
+```
+
+构建结果位于 `release/`，包括对应架构的 `.dmg` 和便携 `.tar.gz`。未签名构建可能被 macOS Gatekeeper 拦截；正式分发时应配置 Apple Developer 签名与公证。
+
+</details>
+
+<details>
+<summary>自动构建与发布（维护者）</summary>
+
+### 自动构建与发布
+
+[Build and draft release](https://github.com/GalTransl/GalTransl/actions/workflows/build-release.yml) 使用 Windows x64、Ubuntu 22.04 x86_64 和 macOS Intel/Apple Silicon 原生 runner 编译桌面包。
+
+发布验收会从独立目录启动解压后的后端，使用临时配置和用户数据目录，并实际解析 TXT、JSON、EPUB 文件。macOS 还会挂载 DMG、复制其中的 `.app`，校验版本、前后端架构和资源，再启动应用包内的后端完成同样的检查。
+
+| 触发方式 | 结果 |
+| --- | --- |
+| 更新 `main`、提交 PR | 测试、构建 Windows、Linux 和 macOS，并上传本次 Actions artifacts |
+| Actions → Build and draft release → Run workflow | 手动试打包；只生成 artifacts，不创建或修改 Release |
+| 推送版本 tag（`8.2.0` 或 `v8.2.0`） | Windows、Linux、macOS 全部测试、构建及打包后检查通过后，创建草稿 Release 并上传附件 |
+
+**下载试构建**：打开工作流运行详情，在 **Artifacts** 中按需下载（均保留 14 天）。Linux 和 macOS 便携包直接以 `GalTransl_<版本>_linux_x86_64.tar.gz`、`GalTransl_<版本>_macos_x86_64.tar.gz` 或 `GalTransl_<版本>_macos_arm64.tar.gz` 为名提供，下载后解压一次即可使用，并保留可执行权限。Windows 的 `GalTransl-windows-x64` 和 macOS 对应架构的 `dmg` artifact 仍由 Actions 提供外层 ZIP。
+
+**发布新版本（维护者）**：
+
+1. 更新 `GalTransl/__init__.py` 中的 `GALTRANSL_VERSION`，提交并推送包含此工作流的代码。
+2. 推送与源码版本一致的新 tag。下面以尚未发布的 `8.2.0` 为例，实际使用时替换为本次版本：
+   ```bash
+   git tag 8.2.0
+   git push origin 8.2.0
+   ```
+3. 等待工作流成功，在 **Releases** 检查自动生成的草稿，补充发布说明，然后手动点击 **Publish release**。上传过程中不要提前发布草稿。
+
+tag 支持 `X.Y.Z` 和 `vX.Y.Z`，必须与源码版本一致；不要移动或重新使用已有 tag（例如 `8.1.0`）。正式附件包括 Windows `.zip`、Linux `.tar.gz`、macOS Intel/Apple Silicon 的 `.dmg` 和 `.tar.gz`，以及 `SHA256SUMS.txt`。下载全部附件后可用 `sha256sum -c SHA256SUMS.txt` 校验；Windows 可用 PowerShell `Get-FileHash <文件> -Algorithm SHA256` 对照清单。
+
+流程只使用 GitHub 内置的 `GITHUB_TOKEN`，不需要额外 PAT 或翻译 API 密钥。只有发布 job 申请 `contents: write`；如果组织策略禁止写入，需要管理员允许该仓库的 Release 写入权限。失败后可以重跑：现有草稿会更新自动构建的附件，保留手工编辑的标题和说明；已经正式发布的 Release 则拒绝覆盖。手动选择 tag 运行也只会生成 artifacts。
+
+构建后会解压最终便携包，在源码目录之外启动后端并检查版本和插件列表；这不替代完整桌面 GUI、各安装器及全部插件的功能测试。
+
+</details>
 
 
 
