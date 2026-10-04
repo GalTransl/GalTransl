@@ -791,6 +791,204 @@
   font-size: 16px;
 }
 
+/* 当前后端：纯文字按钮，不画下划线；靠 hover 变主色 + 可点光标示意可点击，锁定时去掉可点击外观 */
+.ptv2-stat__backend-btn {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  max-width: 100%;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.005em;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.ptv2-stat__backend-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  /* 不画下划线：line-height(1.15em) 比字体内容高度（Segoe UI ≈1.33em）矮，
+     行盒装不下 baseline + underline-offset，配上这里的 overflow:hidden 还会被裁掉。
+     仍留 2px padding + 等量负 margin：让 g/y 这类降部不被裁，统计块高度/基线不变。 */
+  padding-bottom: 2px;
+  margin-bottom: -2px;
+}
+
+.ptv2-stat--backend-clickable .ptv2-stat__backend-btn:hover {
+  color: var(--color-primary);
+}
+
+.ptv2-stat--backend-clickable .ptv2-stat__backend-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.ptv2-stat--backend-locked .ptv2-stat__backend-btn {
+  cursor: not-allowed;
+  color: var(--color-text-muted);
+}
+
+/* 「当前后端」标签左侧加一个小圆点，提示它对应的上一行文字就是后端切换入口 */
+.ptv2-stat--backend .ptv2-stat__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ptv2-stat--backend .ptv2-stat__label::before {
+  content: "";
+  flex: none;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-primary) 40%, transparent);
+}
+
+.ptv2-stat--backend-locked .ptv2-stat__label::before {
+  background: color-mix(in srgb, var(--color-text-muted) 35%, transparent);
+}
+
+/* 后端切换菜单：复用文件夹菜单的悬停展开机制（纯文字行，不用下拉框） */
+.ptv2-backend-menu {
+  align-items: flex-start;
+}
+
+.ptv2-backend-menu__dropdown {
+  left: 0;
+  right: auto;
+  top: 100%;
+  width: max-content;
+  min-width: 260px;
+  max-width: min(360px, 80vw);
+  margin-top: 10px;
+  padding: 6px;
+  gap: 2px;
+  border-radius: 12px;
+  border: 1px solid rgba(47, 111, 235, 0.22);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 248, 255, 0.96));
+  box-shadow:
+    0 20px 40px -12px rgba(47, 111, 235, 0.28),
+    0 8px 16px -8px rgba(16, 24, 40, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transform-origin: top left;
+}
+
+/* 点击后固定展开（触屏/单击用户）：与 hover 展开同态 */
+.ptv2-backend-menu--open .ptv2-backend-menu__dropdown {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.ptv2-backend-menu__dropdown::before {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 24px;
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  border-top: 1px solid rgba(47, 111, 235, 0.22);
+  border-left: 1px solid rgba(47, 111, 235, 0.22);
+  border-radius: 2px 0 0 0;
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+
+/* 选项区限高 + 滚动：行高约 32px + 2px 间距，6 行后出纵向滚动条；横向直接裁掉，只留省略号 */
+.ptv2-backend-menu__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 204px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.ptv2-backend-menu__item {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    transform 140ms ease,
+    border-color 140ms ease;
+}
+
+.ptv2-backend-menu__item:hover {
+  background: linear-gradient(90deg, rgba(47, 111, 235, 0.14), rgba(47, 111, 235, 0.04));
+  border-color: rgba(47, 111, 235, 0.22);
+  color: var(--color-primary);
+  transform: translateX(2px);
+}
+
+.ptv2-backend-menu__item:active {
+  transform: translateX(2px) scale(0.98);
+}
+
+.ptv2-backend-menu__item:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.ptv2-backend-menu__item .icon {
+  flex-shrink: 0;
+}
+
+.ptv2-backend-menu__item-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ptv2-backend-menu__item-model {
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.ptv2-backend-menu__item--active {
+  background: rgba(47, 111, 235, 0.1);
+  border-color: rgba(47, 111, 235, 0.25);
+  color: var(--color-primary);
+}
+
+.ptv2-backend-menu__divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: rgba(47, 111, 235, 0.16);
+}
+
 .ptv2-cockpit__ribbon-spacer {
   flex: 1;
 }
@@ -1666,6 +1864,21 @@
 }
 
 :root[data-theme='dark'] .ptv2-cockpit__folder-inline .project-translate-page__folder-menu-dropdown::before {
+  border-top-color: rgba(111, 160, 255, 0.28);
+  border-left-color: rgba(111, 160, 255, 0.28);
+}
+
+:root[data-theme='dark'] .ptv2-backend-menu__dropdown {
+  border-color: rgba(111, 160, 255, 0.28);
+  background: linear-gradient(180deg, rgba(28, 40, 58, 0.98), rgba(18, 27, 40, 0.96));
+  box-shadow:
+    0 20px 40px -12px rgba(12, 18, 28, 0.62),
+    0 8px 16px -8px rgba(4, 8, 14, 0.44),
+    inset 0 1px 0 rgba(141, 170, 212, 0.16);
+}
+
+:root[data-theme='dark'] .ptv2-backend-menu__dropdown::before {
+  background: #1c283a;
   border-top-color: rgba(111, 160, 255, 0.28);
   border-left-color: rgba(111, 160, 255, 0.28);
 }

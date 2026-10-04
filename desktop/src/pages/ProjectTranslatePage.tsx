@@ -15,14 +15,22 @@ import {
   type Job,
   type ProjectRuntimeResponse,
   type SubmitJobPayload,
+  BACKEND_PROFILES_CHANGE_EVENT,
+  DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
   fetchJobs,
   fetchProjectConfig,
   fetchProjectRuntime,
+  getBackendProfile,
+  getBackendProfileNames,
+  getDefaultBackendProfile,
+  getSelectedBackendProfileDisplay,
   getSelectedTranslatorTemplate,
   getSelectedBackendProfileJobPayload,
+  setSelectedBackendProfile,
   setSelectedTranslatorTemplate,
   stopProjectTranslation,
   submitJob } from '../lib/api';
+import { getProfileMeta } from '../lib/backendProfile';
 import { summarizeBackendUsage } from '../lib/backendUsage';
 import { normalizeError } from '../lib/errors';
 import { basenamePath, joinPath } from '../lib/paths';
@@ -114,6 +122,12 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     () => (projectId ? cachedRuntimeByProject.get(projectId) ?? null : null),
   );
   const [projectBackendConfig, setProjectBackendConfig] = useState<Record<string, unknown> | null>(null);
+  // 开始翻译页的后端切换：纯文字按钮 + 列表弹窗，不用下拉框。
+  // 值与「配置编辑-翻译后端」同一口径：'__default__' 跟随全局默认，'' 用项目自身配置，其余为配置名。
+  const [backendSelection, setBackendSelection] = useState(() => (projectDir ? getSelectedBackendProfileDisplay(projectDir) : '__default__'));
+  const [backendProfileNames, setBackendProfileNames] = useState<string[]>(() => getBackendProfileNames());
+  const [defaultBackendName, setDefaultBackendName] = useState(() => getDefaultBackendProfile());
+  const [showBackendSwitcher, setShowBackendSwitcher] = useState(false);
   const [selectedSuccessFiles, setSelectedSuccessFiles] = useState<string[]>([]);
   const [freshSuccessIds, setFreshSuccessIds] = useState<string[]>([]);
   const seenSuccessIdsRef = useRef<Set<string>>(new Set());
@@ -224,6 +238,29 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
       cancelled = true;
     };
   }, [projectId, configFileName]);
+
+  // 后端选择与「配置编辑」页共享同一份 localStorage：切项目时重读，别处改了就跟随。
+  useEffect(() => {
+    if (!projectDir) return;
+    setBackendSelection(getSelectedBackendProfileDisplay(projectDir));
+    setBackendProfileNames(getBackendProfileNames());
+    setDefaultBackendName(getDefaultBackendProfile());
+    setShowBackendSwitcher(false);
+  }, [projectDir]);
+
+  useEffect(() => {
+    const sync = () => {
+      if (projectDir) setBackendSelection(getSelectedBackendProfileDisplay(projectDir));
+      setBackendProfileNames(getBackendProfileNames());
+      setDefaultBackendName(getDefaultBackendProfile());
+    };
+    window.addEventListener(BACKEND_PROFILES_CHANGE_EVENT, sync);
+    window.addEventListener(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, sync);
+    return () => {
+      window.removeEventListener(BACKEND_PROFILES_CHANGE_EVENT, sync);
+      window.removeEventListener(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, sync);
+    };
+  }, [projectDir]);
 
   const refreshRetranslKeys = useCallback(async () => {
     if (!projectId) {
@@ -549,7 +586,9 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     () => projectDir
       ? summarizeBackendUsage(projectDir, projectBackendConfig)
       : { backend: '未选择项目', model: '未选择项目', profile: '' },
-    [projectDir, projectBackendConfig],
+    // backendSelection 变化即 localStorage 里的项目后端配置变化，强制重算展示文案
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [projectDir, projectBackendConfig, backendSelection],
   );
   const backendDisplayText = backendUsageSummary.model
     ? `${backendUsageSummary.backend}:${backendUsageSummary.model}`
@@ -654,6 +693,32 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   );
 
   const isCurrentProjectActive = currentJob?.status === 'pending' || currentJob?.status === 'running';
+  // 翻译中途锁定后端切换：pending / running 时点开也不允许换，避免任务前后用了两个模型
+  const isBackendSwitchLocked = isCurrentProjectActive || submitting || stopping;
+  const backendSwitcherTitle = isBackendSwitchLocked
+    ? '翻译进行中，无法切换后端'
+    : '点击切换后端';
+
+  const handleSelectBackendProfile = useCallback((profile: string) => {
+    if (!projectDir || isBackendSwitchLocked) return;
+    setSelectedBackendProfile(projectDir, profile);
+    setBackendSelection(profile);
+    setShowBackendSwitcher(false);
+  }, [projectDir, isBackendSwitchLocked]);
+
+  useEffect(() => {
+    if (!showBackendSwitcher || isBackendSwitchLocked) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowBackendSwitcher(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showBackendSwitcher, isBackendSwitchLocked]);
+
+  const backendProfileOptions = useMemo(() => backendProfileNames.map((name) => {
+    const { modelName } = getProfileMeta(getBackendProfile(name));
+    return { name, modelName };
+  }), [backendProfileNames]);
   const primaryActionDisabled =
     connectionPhase !== 'online'
     || submitting
@@ -896,9 +961,71 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
             <span className="ptv2-stat__value">{elapsedText}</span>
             <span className="ptv2-stat__label">已用时长</span>
           </div>
-          <div className="ptv2-stat ptv2-stat--backend" title={`当前后端：${backendDisplayText}`}>
-            <span className="ptv2-stat__value">{backendDisplayText}</span>
+          <div
+            className={`ptv2-stat ptv2-stat--backend${isBackendSwitchLocked ? ' ptv2-stat--backend-locked' : ' ptv2-stat--backend-clickable project-translate-page__folder-menu ptv2-backend-menu'}${showBackendSwitcher && !isBackendSwitchLocked ? ' ptv2-backend-menu--open' : ''}`}
+            title={`当前后端：${backendDisplayText}${isBackendSwitchLocked ? '（翻译进行中，无法切换）' : '（点击/悬停切换）'}`}
+          >
+            <button
+              type="button"
+              className="ptv2-stat__backend-btn"
+              disabled={isBackendSwitchLocked || !projectDir}
+              onClick={() => setShowBackendSwitcher((prev) => !prev)}
+              onBlur={(event) => {
+                // 焦点彻底离开整个菜单才收起，Tab 在菜单内移动时保持展开
+                if (!event.currentTarget.parentElement?.contains(event.relatedTarget as Node)) {
+                  setShowBackendSwitcher(false);
+                }
+              }}
+              title={backendSwitcherTitle}
+              aria-label={`当前后端：${backendDisplayText}，点击切换后端`}
+              aria-haspopup="menu"
+              aria-expanded={showBackendSwitcher && !isBackendSwitchLocked}
+            >
+              <span className="ptv2-stat__backend-text">{backendDisplayText}</span>
+            </button>
             <span className="ptv2-stat__label">当前后端</span>
+            {!isBackendSwitchLocked ? (
+              <div className="project-translate-page__folder-menu-dropdown ptv2-backend-menu__dropdown" role="menu" aria-label="切换后端">
+                <div className="ptv2-backend-menu__list" role="group" aria-label="后端配置列表">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={`project-translate-page__folder-menu-item ptv2-backend-menu__item${backendSelection === '__default__' ? ' ptv2-backend-menu__item--active' : ''}`}
+                    onClick={() => handleSelectBackendProfile('__default__')}
+                    title="切换后自动修改本项目的后端配置"
+                  >
+                    <Icon name={backendSelection === '__default__' ? 'check' : 'globe'} />
+                    <span className="ptv2-backend-menu__item-text">跟随全局默认{defaultBackendName ? `（${defaultBackendName}）` : '（尚未设置）'}</span>
+                  </button>
+                  {backendProfileOptions.map(({ name, modelName }) => (
+                    <button
+                      key={name}
+                      type="button"
+                      role="menuitem"
+                      className={`project-translate-page__folder-menu-item ptv2-backend-menu__item${backendSelection === name ? ' ptv2-backend-menu__item--active' : ''}`}
+                      onClick={() => handleSelectBackendProfile(name)}
+                      title={modelName && modelName !== '—' ? `${name} / ${modelName}` : name}
+                    >
+                      <Icon name={backendSelection === name ? 'check' : 'bot'} />
+                      <span className="ptv2-backend-menu__item-text">
+                        {name}
+                        {modelName && modelName !== '—' ? <span className="ptv2-backend-menu__item-model"> / {modelName}</span> : null}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <div className="ptv2-backend-menu__divider" aria-hidden="true" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="project-translate-page__folder-menu-item ptv2-backend-menu__item"
+                  onClick={() => { setShowBackendSwitcher(false); navigate('/backend-profiles'); }}
+                >
+                  <Icon name="arrow-right" />
+                  <span className="ptv2-backend-menu__item-text">前往模型设置</span>
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
       </section>

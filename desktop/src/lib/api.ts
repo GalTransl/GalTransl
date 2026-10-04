@@ -1160,6 +1160,98 @@ export async function deleteBackendProfile(name: string) {
   return { success: true, name: trimmedName };
 }
 
+/** 在 base 后面加序号直到不与已有配置重名（复制副本、导入冲突都用它取名） */
+function uniqueProfileName(base: string, profiles: BackendProfilesMap): string {
+  if (!(base in profiles)) {
+    return base;
+  }
+  let index = 2;
+  while (`${base}-${index}` in profiles) {
+    index += 1;
+  }
+  return `${base}-${index}`;
+}
+
+/** 复制一份后端配置：深拷贝内容，名字自动加「-副本」后缀（重名再加序号）。
+ *  副本不会自动变成默认配置。 */
+export async function copyBackendProfile(sourceName: string) {
+  const from = sourceName.trim();
+  if (!from) {
+    throw new Error('profile name is required');
+  }
+  const profiles = readBackendProfilesStorage();
+  if (!(from in profiles)) {
+    throw new Error(`profile not found: ${from}`);
+  }
+  const copyName = uniqueProfileName(`${from}-副本`, profiles);
+  profiles[copyName] = cloneBackendProfile(profiles[from]);
+  writeBackendProfilesStorage(profiles);
+  return { success: true, name: copyName };
+}
+
+/** 把各项目里指向 oldName 的后端选择改写为 newName。
+ *  项目级选择没有变更事件（和 setSelectedBackendProfile 一致），读取方下次渲染即生效。 */
+function renameSelectedBackendProfileReferences(oldName: string, newName: string) {
+  try {
+    const raw = localStorage.getItem(BACKEND_PROFILE_KEY);
+    if (!raw) return;
+    const map = JSON.parse(raw) as Record<string, string>;
+    let changed = false;
+    for (const [projectDir, name] of Object.entries(map)) {
+      if (name === oldName) {
+        map[projectDir] = newName;
+        changed = true;
+      }
+    }
+    if (changed) {
+      localStorage.setItem(BACKEND_PROFILE_KEY, JSON.stringify(map));
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+/** 重命名后端配置：搬数据，并把所有指向旧名的引用一起改掉，
+ *  否则「翻译器默认 / Agent 默认 / 各项目选择」会突然指向一个不存在的配置。 */
+export async function renameBackendProfile(oldName: string, newName: string) {
+  const from = oldName.trim();
+  const to = newName.trim();
+  if (!from) {
+    throw new Error('profile name is required');
+  }
+  if (!to) {
+    throw new Error('配置名称不能为空');
+  }
+  if (from === to) {
+    return { success: true, name: to };
+  }
+  const profiles = readBackendProfilesStorage();
+  if (!(from in profiles)) {
+    throw new Error(`profile not found: ${from}`);
+  }
+  if (to in profiles) {
+    throw new Error(`配置「${to}」已存在`);
+  }
+  // 保持列表原有顺序，只换 key
+  const renamed: BackendProfilesMap = {};
+  for (const [key, value] of Object.entries(profiles)) {
+    if (key === from) {
+      renamed[to] = value;
+    } else if (key !== to) {
+      renamed[key] = value;
+    }
+  }
+  writeBackendProfilesStorage(renamed);
+  if (getDefaultBackendProfile() === from) {
+    setDefaultBackendProfile(to);
+  }
+  if (getAgentDefaultBackendProfile() === from) {
+    setAgentDefaultBackendProfile(to);
+  }
+  renameSelectedBackendProfileReferences(from, to);
+  return { success: true, name: to };
+}
+
 // ---- OpenAI-Compatible model list query ----
 
 export interface FetchOpenAIModelsPayload {

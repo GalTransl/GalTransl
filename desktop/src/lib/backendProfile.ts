@@ -5,7 +5,7 @@
  *  与「模型设置」页的卡片口径保持一致。
  */
 
-const MISSING_PROFILE_META = '—';
+export const MISSING_PROFILE_META = '—';
 
 function getRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
@@ -28,6 +28,24 @@ function getNonEmptyString(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
+/** 一个配置里能用到的全部模型名（OpenAI-Compatible 按 tokens 顺序去重；
+ *  没有可用 token 时回退到 SakuraLLM 的 rewriteModelName。取不到返回空数组。 */
+export function getProfileModelNames(config: Record<string, unknown> | null | undefined): string[] {
+  const safeConfig = config ?? {};
+  const openAiCompatible = getRecord(safeConfig['OpenAI-Compatible']);
+  const tokens = Array.isArray(openAiCompatible?.tokens) ? openAiCompatible.tokens : [];
+  const names = tokens
+    .map((token) => getNonEmptyString(getRecord(token)?.modelName))
+    .filter((name): name is string => Boolean(name));
+  if (names.length > 0) {
+    // 同一模型可能配了多个 key（不同端点/令牌），去重免得显示成「等 3 个模型」
+    return Array.from(new Set(names));
+  }
+  const sakuraLlm = getRecord(safeConfig.SakuraLLM);
+  const rewriteModelName = getNonEmptyString(sakuraLlm?.rewriteModelName);
+  return rewriteModelName ? [rewriteModelName] : [];
+}
+
 export function getProfileMeta(config: Record<string, unknown> | null | undefined): {
   baseUrl: string;
   modelName: string;
@@ -43,10 +61,9 @@ export function getProfileMeta(config: Record<string, unknown> | null | undefine
     firstSakuraEndpoint ??
     MISSING_PROFILE_META;
 
-  const modelName =
-    getNonEmptyString(firstOpenAiToken?.modelName) ??
-    getNonEmptyString(sakuraLlm?.rewriteModelName) ??
-    MISSING_PROFILE_META;
+  // 与卡片、切换菜单同口径：取第一个可用模型名（不再只看 tokens[0]，
+  // 免得第一个令牌没填模型名就显示「—」而后面几个填了）
+  const modelName = getProfileModelNames(safeConfig)[0] ?? MISSING_PROFILE_META;
 
   return { baseUrl, modelName };
 }

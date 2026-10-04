@@ -81,6 +81,16 @@
   }
 }
 
+/* 默认配置下拉：选项文字是「配置名/模型名」，比纯名字长很多。
+   面板宽度跟随触发器，所以单行 + 省略号，别让它换行把行高撑乱。
+   （下拉面板是 portal 到 body 的，只能靠自定义类名选中，不能用页面级作用域） */
+.default-select .custom-select__option {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .profile-list {
   display: flex;
   flex-direction: column;
@@ -203,6 +213,89 @@
   gap: var(--space-2);
 }
 
+.profile-card__name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 「配置名 / 模型名」同一行：模型名更淡更轻，视觉上从属于配置名 */
+.profile-card__name-model {
+  font-weight: 500;
+  color: color-mix(in srgb, var(--color-text-muted) 82%, transparent);
+}
+
+/* 多模型时的「等 x 个模型」：再淡一档，避免和第一个模型名抢读 */
+.profile-card__name-model-more {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--color-text-muted) 62%, transparent);
+}
+
+/* 改名铅笔：默认藏在名字旁，鼠标移到卡片上才出现（触屏没有 hover，直接常显） */
+.profile-card__rename-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--transition-fast),
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.profile-card:hover .profile-card__rename-btn,
+.profile-card__rename-btn:focus-visible {
+  opacity: 1;
+}
+
+.profile-card__rename-btn:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.profile-card__rename-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+@media (hover: none) {
+  .profile-card__rename-btn {
+    opacity: 1;
+  }
+}
+
+.profile-card__rename-input {
+  min-width: 180px;
+  max-width: 100%;
+  height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid rgba(47, 111, 235, 0.65);
+  border-radius: calc(var(--radius-control) - 6px);
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+  box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);
+}
+
+.profile-card__rename-input:focus {
+  outline: none;
+}
+
+.profile-card__rename-error {
+  font-size: 12px;
+  color: var(--color-danger);
+}
+
 .profile-card__badge {
   font-size: 11px;
   font-weight: 600;
@@ -224,11 +317,62 @@
   color: var(--color-text-muted);
 }
 
+/* 动作组：鼠标移到卡片上才淡入（触屏没有 hover，常显）。
+   刻意不用 .button 的实体描边样式，改成图标+文字的轻盈按钮：
+   卡片右侧一列文字按钮本身就是弱操作，不该和「新建配置」抢视觉重量。 */
 .profile-card__actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: var(--space-2);
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.profile-card:hover .profile-card__actions,
+.profile-card:focus-within .profile-card__actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .profile-card__actions {
+    opacity: 1;
+  }
+}
+
+.profile-card__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.profile-card__action:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.profile-card__action:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.profile-card__action--danger:hover {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
 }
 
 /* ── Backend Type Toggle ── */

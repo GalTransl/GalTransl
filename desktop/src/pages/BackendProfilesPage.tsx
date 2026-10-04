@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BackendConfigEditor } from '../components/BackendConfigEditor';
 import { Button } from '../components/Button';
 import { CustomSelect } from '../components/CustomSelect';
 import { Icon } from '../components/Icon';
+import type { IconName } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
 import { EmptyState, InlineFeedback, LoadingState } from '../components/page-state';
@@ -10,15 +11,17 @@ import { ProxyConfigEditor } from '../components/ProxyConfigEditor';
 import {
   AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
   DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
+  copyBackendProfile,
   createBackendProfile,
   deleteBackendProfile,
   fetchBackendProfiles,
   getAgentDefaultBackendProfile,
   getDefaultBackendProfile,
+  renameBackendProfile,
   setAgentDefaultBackendProfile,
   setDefaultBackendProfile } from '../lib/api';
 import { normalizeError } from '../lib/errors';
-import { getProfileMeta } from '../lib/backendProfile';
+import { formatProfileLabel, getProfileMeta, getProfileModelNames } from '../lib/backendProfile';
 
 type ProfileEntry = {
   name: string;
@@ -26,6 +29,32 @@ type ProfileEntry = {
 };
 
 const DEFAULT_BACKEND_CONFIG: Record<string, unknown> = {};
+
+/** 卡片右侧的轻盈动作按钮：图标 + 文字，无边框无底色，hover 才显形（见 backend-profiles.css） */
+function ProfileCardAction({
+  icon,
+  label,
+  tone,
+  onClick,
+}: {
+  icon: IconName;
+  label: string;
+  tone?: 'danger';
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`profile-card__action${tone ? ` profile-card__action--${tone}` : ''}`}
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+    >
+      <Icon name={icon} />
+      <span>{label}</span>
+    </button>
+  );
+}
 
 
 export function BackendProfilesPage() {
@@ -47,8 +76,18 @@ export function BackendProfilesPage() {
   const [newProfileName, setNewProfileName] = useState('');
   const [creating, setCreating] = useState(false);
 
-  const loadProfiles = useCallback(async () => {
-    setLoading(true);
+  // 行内改名状态（鼠标悬停名字旁的铅笔图标进入）
+  const [renamingName, setRenamingName] = useState('');
+  const [renameDraft, setRenameDraft] = useState('');
+  const [renameError, setRenameError] = useState('');
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+
+  // silent：改名/复制后就地刷新，不进 loading 态把整张列表卸载掉
+  //（否则行内输入框会被卸载重建，焦点和全选都会丢）
+  const loadProfiles = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const data = await fetchBackendProfiles();
@@ -171,6 +210,25 @@ export function BackendProfilesPage() {
     }
   }, [editingName, editingConfig, loadProfiles]);
 
+  const startRename = useCallback((name: string) => {
+    setRenamingName(name);
+    setRenameDraft(name);
+    setRenameError('');
+  }, []);
+
+  const cancelRename = useCallback(() => {
+    setRenamingName('');
+    setRenameDraft('');
+    setRenameError('');
+  }, []);
+
+  // 打开输入框后全选旧名，直接输入即可覆盖
+  useEffect(() => {
+    if (renamingName) {
+      renameInputRef.current?.select();
+    }
+  }, [renamingName]);
+
   const handleDelete = useCallback(async (name: string) => {
     if (!confirm(`确定要删除配置「${name}」吗？`)) return;
     try {
@@ -179,11 +237,51 @@ export function BackendProfilesPage() {
       if (editingName === name) {
         handleCancel();
       }
+      if (renamingName === name) {
+        cancelRename();
+      }
       void loadProfiles();
     } catch (err) {
       setError(normalizeError(err, '删除配置失败'));
     }
-  }, [editingName, handleCancel, loadProfiles]);
+  }, [editingName, handleCancel, loadProfiles, renamingName, cancelRename]);
+
+  const commitRename = useCallback(async () => {
+    const from = renamingName;
+    const to = renameDraft.trim();
+    if (!to) {
+      setRenameError('配置名称不能为空');
+      return;
+    }
+    if (to === from) {
+      cancelRename();
+      return;
+    }
+    if (profiles.some((p) => p.name === to)) {
+      setRenameError(`配置「${to}」已存在`);
+      return;
+    }
+    try {
+      await renameBackendProfile(from, to);
+      // 编辑弹窗正开着这个配置时同步标题，否则保存会写回旧名
+      setEditingName((prev) => (prev === from ? to : prev));
+      cancelRename();
+      await loadProfiles({ silent: true });
+    } catch (err) {
+      setRenameError(normalizeError(err, '重命名失败'));
+    }
+  }, [renamingName, renameDraft, profiles, cancelRename, loadProfiles]);
+
+  /** 复制一份配置：落库后直接进入行内改名，让用户马上给副本起个名字 */
+  const handleCopy = useCallback(async (name: string) => {
+    try {
+      const { name: copyName } = await copyBackendProfile(name);
+      await loadProfiles({ silent: true });
+      startRename(copyName);
+    } catch (err) {
+      setError(normalizeError(err, '复制配置失败'));
+    }
+  }, [loadProfiles, startRename]);
 
   return (
     <div className="backend-profiles-page">
@@ -214,6 +312,7 @@ export function BackendProfilesPage() {
             <label className="field">
               <span>翻译器默认</span>
               <CustomSelect
+                className="default-select"
                 value={defaultProfile}
                 onChange={(e) => {
                   setDefaultBackendProfile(e.target.value);
@@ -221,7 +320,9 @@ export function BackendProfilesPage() {
                 }}
               >
                 {profiles.map((entry) => (
-                  <option key={entry.name} value={entry.name}>{entry.name}</option>
+                  <option key={entry.name} value={entry.name}>
+                    {formatProfileLabel(entry.name, entry.config)}
+                  </option>
                 ))}
               </CustomSelect>
             </label>
@@ -229,6 +330,7 @@ export function BackendProfilesPage() {
             <label className="field">
               <span>Agent 默认</span>
               <CustomSelect
+                className="default-select"
                 value={agentDefaultProfile}
                 onChange={(e) => {
                   setAgentDefaultBackendProfile(e.target.value);
@@ -236,7 +338,9 @@ export function BackendProfilesPage() {
                 }}
               >
                 {profiles.map((entry) => (
-                  <option key={entry.name} value={entry.name}>{entry.name}</option>
+                  <option key={entry.name} value={entry.name}>
+                    {formatProfileLabel(entry.name, entry.config)}
+                  </option>
                 ))}
               </CustomSelect>
             </label>
@@ -255,36 +359,93 @@ export function BackendProfilesPage() {
             ) : (
               <div className="profile-list">
                 {profiles.map((entry) => {
-                  const { baseUrl, modelName } = getProfileMeta(entry.config);
+                  const { baseUrl } = getProfileMeta(entry.config);
+                  const modelNames = getProfileModelNames(entry.config);
 
                   return (
                     <div key={entry.name} className="profile-card">
                       <div className="profile-card__info">
                         <div className="profile-card__name">
-                          {entry.name}
+                          {renamingName === entry.name ? (
+                            <input
+                              ref={renameInputRef}
+                              type="text"
+                              className="profile-card__rename-input"
+                              value={renameDraft}
+                              onChange={(e) => {
+                                setRenameDraft(e.target.value);
+                                if (renameError) setRenameError('');
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') { e.preventDefault(); void commitRename(); }
+                                else if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
+                              }}
+                              onBlur={cancelRename}
+                              aria-label={`重命名配置 ${entry.name}`}
+                              placeholder="配置名称"
+                              autoFocus
+                            />
+                          ) : (
+                            <span
+                              className="profile-card__name-text"
+                              title={modelNames.length > 1
+                                ? `${entry.name}\n${modelNames.join('\n')}`
+                                : entry.name}
+                            >
+                              {entry.name}
+                              {modelNames.length > 0 && (
+                                <span className="profile-card__name-model">
+                                  {' / '}{modelNames[0]}
+                                  {modelNames.length > 1 && (
+                                    <span className="profile-card__name-model-more">
+                                      {' 等 '}{modelNames.length}{' 个模型'}
+                                    </span>
+                                  )}
+                                </span>
+                              )}
+                            </span>
+                          )}
                           {defaultProfile === entry.name && (
                             <span className="profile-card__badge">翻译器默认</span>
                           )}
                           {agentDefaultProfile === entry.name && (
                             <span className="profile-card__badge profile-card__badge--agent">Agent 默认</span>
                           )}
+                          {/* 铅笔排在默认 pill 之后：之前插在名字右边会把两个 pill 顶开 */}
+                          {renamingName !== entry.name && (
+                            <button
+                              type="button"
+                              className="profile-card__rename-btn"
+                              title="重命名配置"
+                              aria-label={`重命名配置 ${entry.name}`}
+                              onClick={() => startRename(entry.name)}
+                            >
+                              <Icon name="pencil" />
+                            </button>
+                          )}
                         </div>
+                        {renamingName === entry.name && renameError && (
+                          <div className="profile-card__rename-error">{renameError}</div>
+                        )}
                         <div className="profile-card__meta">Base URL：{baseUrl}</div>
-                        <div className="profile-card__meta">模型：{modelName}</div>
                       </div>
                       <div className="profile-card__actions">
-                        <Button
-                          variant="secondary"
+                        <ProfileCardAction
+                          icon="copy"
+                          label="复制"
+                          onClick={() => void handleCopy(entry.name)}
+                        />
+                        <ProfileCardAction
+                          icon="pencil"
+                          label="编辑"
                           onClick={() => handleEdit(entry)}
-                        >
-                          编辑
-                        </Button>
-                        <Button
-                          variant="secondary"
+                        />
+                        <ProfileCardAction
+                          icon="trash"
+                          label="删除"
+                          tone="danger"
                           onClick={() => void handleDelete(entry.name)}
-                        >
-                          删除
-                        </Button>
+                        />
                       </div>
                     </div>
                   );
@@ -384,7 +545,7 @@ export function BackendProfilesPage() {
                 autoFocus
                 disabled={creating}
               />
-              <span className="field__hint">配置名称创建后不可修改，可在列表中点击「编辑」填写具体参数。</span>
+              <span className="field__hint">配置名称可在列表中点击名称旁的铅笔图标修改。</span>
             </label>
             {error && <InlineFeedback tone="error" description={error} />}
             <div className="form-actions">
