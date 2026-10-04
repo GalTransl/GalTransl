@@ -463,6 +463,7 @@
 
 .problem-analyze-section__toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
@@ -478,6 +479,7 @@
 
 .problem-analyze-section__toolbar-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 
@@ -508,7 +510,7 @@
   padding: 0;
   margin: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   gap: var(--space-2);
 }
 
@@ -542,6 +544,15 @@
   border-color: rgba(234, 179, 8, 0.55);
   background: rgba(234, 179, 8, 0.05);
   box-shadow: 0 0 0 1px rgba(234, 179, 8, 0.16) inset;
+}
+
+.problem-analyze-section__item--disabled {
+  opacity: 0.55;
+}
+
+.problem-analyze-section__item--disabled .problem-analyze-section__label,
+.problem-analyze-section__checkbox:disabled {
+  cursor: not-allowed;
 }
 
 .problem-analyze-section__label {
@@ -628,6 +639,40 @@
 
 .problem-analyze-section__desc--warn {
   color: #a16207;
+}
+
+.plugin-check-item__problems {
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-line);
+  column-gap: var(--space-5);
+}
+
+.problem-analyze-section .plugin-check-item__problems .problem-analyze-section__item {
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.plugin-check-item__problems .problem-analyze-section__label {
+  padding: var(--space-2) 0;
+  align-items: flex-start;
+}
+
+.plugin-check-item__problems .problem-analyze-section__checkbox {
+  margin-top: 1px;
+}
+
+.problem-analyze-section .plugin-check-item__name,
+.problem-analyze-section .plugin-check-item__module,
+.problem-analyze-section__item-body {
+  overflow-wrap: anywhere;
+}
+
+.problem-analyze-section .plugin-check-item__header {
+  flex-wrap: wrap;
 }
 
 .problem-analyze-section__threshold {

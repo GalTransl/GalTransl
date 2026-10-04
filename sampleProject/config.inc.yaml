@@ -38,6 +38,8 @@ plugin:
   textPlugins: # 文本处理插件列表，可以设置多个，按顺序执行
     - text_common_normalfix # 常规文本修复插件
     #- text_common_skipNoJP # 跳过无日语句子插件
+  problemPlugins: # 问题检测插件列表，按顺序执行；[] 禁用问题检测插件
+    - problem_common # 常规检测，使用下方 problemAnalyze 设置
   # 某个插件自己的设置可以进入plugins目录内修改对应的yaml文件，也可以这样设置：
   file_galtransl_json:
     output_with_src: False # 输出到gt_output时是否保留原文[True/False]
@@ -88,20 +90,9 @@ proxy:
   proxies:
     - address: http://127.0.0.1:7890
 
-# 自动问题分析配置，在-前面加#号可以禁用
+# 自动问题分析配置，问题类型和默认启用状态由问题插件声明
 problemAnalyze:
-  problemList: # 要发现的问题清单
-    - 词频过高 # 重复大于20次
-    - 标点错漏 # 标点符号多加或漏加
-    - 残留日文 # 日文平假名片假名残留
-    #- 丢失换行 # 缺少行内换行，一般没所谓
-    - 多加换行 # 换行符比原句多，可能导致溢出屏幕
-    - 比日文长 # 比日文长1.3倍以上
-    - 字典使用 # 没有按GPT字典要求翻译
-    - 语言不通 # 疑似没有被翻译成目标语言，翻译为中文时检查是否包含非GBK字符
-    - 缺控制符 # 检测译文丢失ruby或其他控制符的情况
-    #- 引入英文 # 本来没有英文，译文引入了英文
-    #- 比日文长严格 # 比日文长1倍以上就提醒
+  problemList: null # null 使用插件默认值；[] 全部关闭；也可填写显式问题名称列表
 
 # 字典设置
 dictionary:

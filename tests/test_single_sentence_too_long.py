@@ -1,7 +1,7 @@
 import unittest
 
 from GalTransl.Problem import find_problems
-from GalTransl.ConfigHelper import CProblemType, CProjectConfig
+from plugins.problem_common.problem_common import CProblemType, normalize_sentence_length_threshold
 from GalTransl.CSentense import CSentense
 
 
@@ -23,8 +23,8 @@ class FakeProblemConfig:
     def getlbSymbol(self):
         return "auto"
 
-    def getAvgSentenceLengthThreshold(self):
-        return self._threshold
+    def getPluginConfigSection(self):
+        return {"problem_common": {"avgSentenceLengthThreshold": self._threshold}}
 
 
 def make_tran(pre_src: str, pre_dst: str) -> CSentense:
@@ -95,13 +95,10 @@ class SingleSentenceTooLongTests(unittest.TestCase):
 
 
 class ThresholdGuardTests(unittest.TestCase):
-    """阈值取值守卫，每个取值都需与前端 resolveThreshold 保持一致"""
+    """Plugin-owned threshold validation."""
 
     def threshold_of(self, raw: object) -> int:
-        # 绕过 __init__（它依赖真实项目目录），只注入待校验的配置片段
-        cfg = CProjectConfig.__new__(CProjectConfig)
-        cfg.projectConfig = {"problemAnalyze": {"avgSentenceLengthThreshold": raw}}
-        return cfg.getAvgSentenceLengthThreshold()
+        return normalize_sentence_length_threshold(raw)
 
     def test_valid_values_are_accepted(self) -> None:
         self.assertEqual(self.threshold_of(17), 17)
@@ -121,11 +118,11 @@ class ThresholdGuardTests(unittest.TestCase):
             self.assertEqual(self.threshold_of(raw), 17, f"raw={raw!r}")
 
     def test_missing_key_fallback_to_default(self) -> None:
-        cfg = CProjectConfig.__new__(CProjectConfig)
-        cfg.projectConfig = {"problemAnalyze": {}}
-        self.assertEqual(cfg.getAvgSentenceLengthThreshold(), 17)
-        cfg.projectConfig = {}
-        self.assertEqual(cfg.getAvgSentenceLengthThreshold(), 17)
+        from plugins.problem_common.problem_common import CommonProblemPlugin
+
+        plugin = CommonProblemPlugin()
+        plugin.gtp_init({}, {})
+        self.assertEqual(plugin.sentence_length_threshold, 17)
 
 
 if __name__ == "__main__":

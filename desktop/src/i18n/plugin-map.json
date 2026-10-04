@@ -1,5 +1,18 @@
 [
   {
+    "name": "problem_common",
+    "nameKey": "plugins:builtin.problem_common.name",
+    "descriptionKey": "plugins:builtin.problem_common.description",
+    "settings": [
+      {
+        "key": "avgSentenceLengthThreshold",
+        "labelKey": "plugins:builtin.problem_common.settings.avgSentenceLengthThreshold.label",
+        "descriptionKey": "plugins:builtin.problem_common.settings.avgSentenceLengthThreshold.description",
+        "options": []
+      }
+    ]
+  },
+  {
     "name": "file_epub_epub",
     "nameKey": "plugins:builtin.file_epub_epub.name",
     "descriptionKey": "plugins:builtin.file_epub_epub.description",

@@ -23,6 +23,10 @@
     "pluginTabs_message_filePlugin_other": "文件插件 ({{count}})",
     "pluginTabs_message_textPlugin": "文本插件 ({{count}})",
     "pluginTabs_message_textPlugin_other": "文本插件 ({{count}})",
+    "pluginTabs_message_problemPlugin": "问题插件 ({{count}})",
+    "pluginTabs_message_problemPlugin_other": "问题插件 ({{count}})",
+    "pluginTabs_message_problemPlugin_one": "问题插件 ({{count}})",
+    "pluginCardHeader_message_problem": "问题插件",
     "pluginList_title_currentFilterEmptyPlugin": "当前筛选下没有插件",
     "pluginList_title_emptyPlugin": "暂无插件",
     "pluginList_description_pluginCheckBackendPluginDirectory": "试试切换到其他插件类型，或检查后端插件目录。",
@@ -39,6 +43,16 @@
     "pluginTabs_message_textPlugin_one": "文本插件 ({{count}})"
   },
   "builtin": {
+    "problem_common": {
+      "name": "常规问题检测",
+      "description": "检测残留日文、标点、换行、字典使用等问题。",
+      "settings": {
+        "avgSentenceLengthThreshold": {
+          "label": "长句判定阈值",
+          "description": "平均分句长度超过此值时标记单句过长，建议 15～25；需启用单句过长检测。"
+        }
+      }
+    },
     "file_epub_epub": {
       "name": "Epub 文件",
       "description": "翻译 Epub 文件, 支持自动识别名称、双语显示、缩小比例、拆分文件以支持单文件多线程翻译等功能。部分代码和正则来自Ainiee。",

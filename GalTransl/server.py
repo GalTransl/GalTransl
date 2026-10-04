@@ -484,31 +484,10 @@ def _build_prompt_templates_payload() -> dict[str, Any]:
     return {"templates": templates}
 
 
-_PROBLEM_TYPE_CATALOG: list[dict[str, str]] = [
-    {"name": "词频过高", "description": "某字在译文中重复大于 20 次（且远多于原文）。"},
-    {"name": "标点错漏", "description": "括号/引号/冒号等标点与原文不一致。"},
-    {"name": "残留日文", "description": "译文中残留日文平假名或片假名。"},
-    {"name": "丢失换行", "description": "译文缺少原文中的行内换行。"},
-    {"name": "多加换行", "description": "译文换行符比原文多，可能导致溢出。"},
-    {"name": "比日文长", "description": "译文长度超过原文 1.3 倍（常用，宽松阈值）。"},
-    {"name": "比日文长严格", "description": "译文长度超过原文（零容忍，严格阈值）。"},
-    {"name": "字典使用", "description": "没有按 GPT 字典的要求翻译。"},
-    {"name": "引入英文", "description": "原文无英文，但译文引入了英文单词。"},
-    {"name": "语言不通", "description": "译文包含大量非 GBK 字符（仅对中文目标语言生效）。"},
-    {"name": "缺控制符", "description": "译文缺少原文中的控制符（如 \\n、变量标记等）。"},
-    {"name": "独白男他", "description": "独白（无name）译文出现'他'。"},
-    {"name": "单句过长", "description": "译文单句过长，平均分句长度超过阈值（avgSentenceLengthThreshold）。"},
-]
+def _list_problem_types(project_dir: str = "") -> list[dict]:
+    from GalTransl.Problem import list_problem_types
 
-
-def _list_problem_types() -> list[dict[str, str]]:
-    """Return the list of problem types supported by the backend analyzer.
-
-    Each entry has ``name`` (used in YAML config) and a short ``description``.
-    Kept in sync with :class:`GalTransl.ConfigHelper.CProblemType` and
-    :func:`GalTransl.Problem.find_problems`.
-    """
-    return list(_PROBLEM_TYPE_CATALOG)
+    return list_problem_types(project_dir)
 
 
 def _guidelines_dir() -> str:
@@ -1254,6 +1233,7 @@ def _scan_plugins(project_dir: str = "") -> list[dict[str, Any]]:
                 "description": documentation.get("Description", core.get("Description", "")),
                 "type": core.get("Type", "unknown").lower(),
                 "module": core.get("Module", name),
+                "project_local": bool(project_dir) and os.path.normcase(os.path.abspath(os.path.dirname(os.path.dirname(yaml_path)))) == os.path.normcase(os.path.abspath(os.path.join(project_dir, "plugins"))),
                 "settings": settings,
                 "settings_schema": normalize_settings_schema(settings, info.get("SettingsSchema")),
             })
@@ -1784,6 +1764,10 @@ def build_handler(registry: JobRegistry):
                 self._send_json({"plugins": _scan_plugins(project_dir)})
                 return
 
+            if sub_path == "/problem-types":
+                self._send_json({"problem_types": _list_problem_types(project_dir)})
+                return
+
             if sub_path == "/plugins/file_msgtool_script/reextract":
                 if self.command != "POST":
                     self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
@@ -2025,7 +2009,7 @@ def build_handler(registry: JobRegistry):
 
                     # Rebuild: re-derive problem and post_dst_preview fields
                     try:
-                        from GalTransl.Problem import find_problems
+                        from GalTransl.Problem import find_problems, finalize_problem_plugins
                         from GalTransl.Frontend.LLMTranslate import preprocess_trans_list, postprocess_trans_list
 
                         # Load project config and dictionaries for rebuild
@@ -2090,6 +2074,9 @@ def build_handler(registry: JobRegistry):
                                 find_problems(trans_list, proj_config, gpt_dic)
                             except Exception:
                                 pass  # If problem detection fails, skip
+                            finally:
+                                if proj_config is not None:
+                                    finalize_problem_plugins(proj_config)
 
                         # Update entries with problem and post_dst_preview
                         idx = 0

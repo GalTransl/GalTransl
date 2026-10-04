@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import math
 import urllib.parse
+from GalTransl.PluginSettings import get_plugin_config_section, resolve_plugin_settings
 
 from GalTransl.Agent.core import DEFAULT_CONFIG_FILE
 from GalTransl.Agent.models import AgentToolError
@@ -21,14 +22,14 @@ def load_plugin_catalog(runner):
 
 def catalog_for_updates(runner, updates):
     keys = [str(item.get("key", "")).strip() for item in updates if isinstance(item, dict)]
-    if any(key.startswith("plugin.") and key not in ("plugin.filePlugin", "plugin.textPlugins") for key in keys):
+    if any(key.startswith("plugin.") and key not in ("plugin.filePlugin", "plugin.textPlugins", "plugin.problemPlugins") for key in keys):
         return load_plugin_catalog(runner)
     return {}
 
 
 def set_plugin_value(config, path, value):
     _, module, key = path.split(".", 2)
-    config.setdefault("plugin", {}).setdefault(module, {})[key] = copy.deepcopy(value)
+    get_plugin_config_section(config, module, create=True)[key] = copy.deepcopy(value)
 
 
 def validate_plugin_value(config, path, value, catalog):
@@ -40,8 +41,9 @@ def validate_plugin_value(config, path, value, catalog):
     plugin = catalog.get(module)
     if not plugin or key not in plugin["settings"]:
         return "插件未声明此设置；请先调用 get_plugin_settings 确认合法键"
-    node = config.get("plugin", {})
-    if not isinstance(node, dict) or not isinstance(node.get(module, {}), dict):
+    try:
+        get_plugin_config_section(config, module)
+    except ValueError:
         return "现有插件配置不是对象，请先修正项目配置结构"
     default = plugin["settings"][key]
     schema = (plugin.get("settings_schema") or {}).get(key, {})
@@ -81,14 +83,14 @@ def _tool_get_plugin_settings(runner, args):
     config = data.get("config") if isinstance(data, dict) else None
     if not isinstance(config, dict):
         raise AgentToolError("项目配置读取失败")
-    configured = config.get("plugin", {})
-    if not isinstance(configured, dict):
-        raise AgentToolError("项目 plugin 配置必须为对象")
     result = []
     for module, plugin in catalog.items():
-        overrides = configured.get(module, {})
-        if not isinstance(overrides, dict):
-            raise AgentToolError(f"plugin.{module} 配置必须为对象")
+        try:
+            overrides = get_plugin_config_section(config, module)
+        except ValueError as exc:
+            raise AgentToolError(str(exc)) from exc
+        effective = resolve_plugin_settings({"Settings": plugin["settings"],
+            "SettingsSchema": plugin.get("settings_schema", {})}, config, module)
         fields = []
         for key, default in plugin["settings"].items():
             schema = (plugin.get("settings_schema") or {}).get(key, {})
@@ -96,14 +98,14 @@ def _tool_get_plugin_settings(runner, args):
             fields.append({
                 "key": f"plugin.{module}.{key}", "type": type(default).__name__,
                 "default": "（隐藏）" if secret else default,
-                "value": "（隐藏）" if secret else overrides.get(key, default),
+                "value": "（隐藏）" if secret else effective[key],
                 "overridden": key in overrides, "writable": not secret,
                 "schema": schema,
             })
         result.append({"name": module, "display_name": plugin.get("display_name"),
                        "type": plugin.get("type"), "description": plugin.get("description"),
                        "settings": fields})
-    return {"plugins": result, "note": "value 是项目覆盖后的生效值；overridden=false 使用默认值。"
+    return {"plugins": result, "note": "value 是项目覆盖后的生效值；overridden=false 使用声明的旧配置值或插件默认值。"
             "可用 update_project_config 按完整 key 新增已声明的非敏感设置，保留其他设置。"
             "设置插件参数不会自动选用该插件；文件插件选择见 plugin.filePlugin（auto 可按文件识别）。"}
 

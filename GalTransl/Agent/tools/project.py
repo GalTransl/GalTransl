@@ -11,6 +11,7 @@ from GalTransl.Agent.core import DEFAULT_CONFIG_FILE
 from GalTransl.Agent.models import AgentToolError
 from GalTransl.Agent.tools.common import _change, _diff_lines
 from GalTransl.Agent.tools.plugin_settings import catalog_for_updates, set_plugin_value, validate_plugin_value
+from GalTransl.PluginSettings import get_plugin_config_section
 
 if TYPE_CHECKING:
     from GalTransl.Agent.runner import AgentRunner
@@ -47,8 +48,7 @@ CONFIG_FIELD_DESCRIPTIONS: dict[str, str] = {
     "common.saveLog": "是否将运行日志写入文件 [true/false]",
     "common.gpt.dynamicNumPerRequestTranslate": "动态句数调整：根据模型解析错误自动降/升单次翻译句数 [true/false]",
     # ---- problemAnalyze ----
-    "problemAnalyze.problemList": "要启用的问题检测清单（词频过高/标点错漏/残留日文/丢失换行/多加换行/比日文长/比日文长严格/字典使用/引入英文/语言不通/缺控制符/独白男他/单句过长）",
-    "problemAnalyze.avgSentenceLengthThreshold": "单句过长检测的平均分句长度阈值",
+    "problemAnalyze.problemList": "要启用的问题名称列表，类型由问题插件声明；null 使用插件默认启用状态，[] 全部关闭",
     "problemAnalyze.arinashiDict": "有無字典：检测多加/漏加字典符号（如【】）的词表",
     # ---- dictionary ----
     "dictionary.defaultDictFolder": "通用字典文件夹（相对程序目录，也可绝对路径）",
@@ -62,6 +62,7 @@ CONFIG_FIELD_DESCRIPTIONS: dict[str, str] = {
     # ---- plugin ----
     "plugin.filePlugin": "文件插件（决定输入/输出格式）：auto 按每个文件自动识别（gt_input 可混放多种格式）；file_galtransl_json；字幕 file_subtitle_srt_lrc_vtt；小说 file_epub_epub / file_plaintext_txt；Mtool json 用 file_i18n_json",
     "plugin.textPlugins": "文本处理插件列表（按顺序执行）：如 text_common_normalfix 常规修复、text_common_skipNoJP 跳过无日文句",
+    "plugin.problemPlugins": "问题检测插件列表（按顺序执行）：problem_common 使用 problemAnalyze 设置；空列表禁用问题插件；旧项目未配置时默认启用 problem_common",
     # ---- proxy ----
     "proxy.enableProxy": "是否启用代理 [true/false]，使用中转供应商时一般不用开",
 }
@@ -469,13 +470,28 @@ def _plan_config_updates(
             })
             continue
         value = _parse_config_value(item.get("value"))
+        if key == "plugin.problemPlugins":
+            if not isinstance(value, list) or any(not isinstance(name, str) or not name.strip() for name in value):
+                skipped.append({"key": key, "reason": "问题插件列表必须为非空名称组成的字符串数组"})
+                continue
+            try:
+                current = get_plugin_config_section(probe, create=True)
+            except ValueError:
+                skipped.append({"key": key, "reason": "现有插件配置不是对象，请先修正项目配置结构"})
+                continue
+            present = "problemPlugins" in current
+            before = current.get("problemPlugins", ["problem_common"])
+            current["problemPlugins"] = copy.deepcopy(value)
+            applied.append({"key": key, "value": value})
+            changes.append(_change(key, before, value, "replace" if present else "add"))
+            continue
         if key == "plugin" or (key.startswith("plugin.") and key not in ("plugin.filePlugin", "plugin.textPlugins")):
             reason = validate_plugin_value(probe, key, value, plugin_catalog or {})
             if reason:
                 skipped.append({"key": key, "reason": reason})
                 continue
             _, module, setting = key.split(".", 2)
-            current = probe.get("plugin", {}).get(module, {})
+            current = get_plugin_config_section(probe, module)
             before = current.get(setting, _MISSING)
             set_plugin_value(probe, key, value)
             applied.append({"key": key, "value": value})
@@ -510,7 +526,9 @@ def _tool_update_project_config(runner: AgentRunner, args: dict[str, Any]) -> An
     # 再把同一批改动打到真 config 上——同一个 _set_config_key、同样顺序。
     applied, skipped, changes = _plan_config_updates(config, updates, catalog_for_updates(runner, updates))
     for item in applied:
-        if item["key"].startswith("plugin.") and item["key"] not in ("plugin.filePlugin", "plugin.textPlugins"):
+        if item["key"] == "plugin.problemPlugins":
+            get_plugin_config_section(config, create=True)["problemPlugins"] = copy.deepcopy(item["value"])
+        elif item["key"].startswith("plugin.") and item["key"] not in ("plugin.filePlugin", "plugin.textPlugins"):
             set_plugin_value(config, item["key"], item["value"])
         else:
             _set_config_key(config, item["key"], item["value"])

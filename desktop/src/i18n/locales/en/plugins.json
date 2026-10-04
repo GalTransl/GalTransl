@@ -10,6 +10,10 @@
     "pluginSettingsAdvanced_message_advancedSettingsItem_one": "Advanced setting ({{count}})"
   },
   "pluginsPage": {
+    "pluginTabs_message_problemPlugin": "Problem Plugins ({{count}})",
+    "pluginTabs_message_problemPlugin_one": "Problem Plugins ({{count}})",
+    "pluginTabs_message_problemPlugin_other": "Problem Plugins ({{count}})",
+    "pluginCardHeader_message_problem": "Problem Plugin",
     "pluginsPage_normalizeError_loadPluginFailed": "Failed to load the plugin list",
     "pluginsPage_title_plugin": "Plugin management",
     "pluginsPage_title_loadPlugin": "Loading plugins…",
@@ -39,6 +43,16 @@
     "pluginTabs_message_textPlugin_one": "Text plugin ({{count}})"
   },
   "builtin": {
+    "problem_common": {
+      "name": "Common Problem Checks",
+      "description": "Check Japanese remnants, punctuation, line breaks, and dictionary usage.",
+      "settings": {
+        "avgSentenceLengthThreshold": {
+          "label": "Long-sentence threshold",
+          "description": "Flag long sentences when the average segment length exceeds this value. Suggested range: 15–25. Requires the long-sentence check."
+        }
+      }
+    },
     "file_epub_epub": {
       "name": "Epub files",
       "description": "Translates Epub files, with support for automatic name detection, bilingual display, reduced font size, and file splitting so a single file can be translated by several threads. Parts of the code and the regular expressions come from Ainiee.",

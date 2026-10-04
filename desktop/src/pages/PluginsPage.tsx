@@ -34,7 +34,8 @@ export function PluginsPage() {
 
   const filePlugins = plugins.filter((p) => p.type === 'file');
   const textPlugins = plugins.filter((p) => p.type === 'text');
-  const filteredPlugins = typeFilter === 'file' ? filePlugins : typeFilter === 'text' ? textPlugins : plugins;
+  const problemPlugins = plugins.filter((p) => p.type === 'problem');
+  const filteredPlugins = typeFilter ? plugins.filter((plugin) => plugin.type === typeFilter) : plugins;
 
   if (loading) {
     return (
@@ -72,6 +73,10 @@ export function PluginsPage() {
             className={`plugin-tab ${typeFilter === 'text' ? 'plugin-tab--active' : ''}`}
             onClick={() => setTypeFilter('text')}
           >{translate("plugins:pluginsPage.pluginTabs_message_textPlugin", { count: textPlugins.length })}</button>
+          <button
+            className={`plugin-tab ${typeFilter === 'problem' ? 'plugin-tab--active' : ''}`}
+            onClick={() => setTypeFilter('problem')}
+          >{translate('plugins:pluginsPage.pluginTabs_message_problemPlugin', { count: problemPlugins.length })}</button>
         </div>
 
         <div className="plugin-list">
@@ -86,7 +91,7 @@ export function PluginsPage() {
                 <span className="plugin-card__name">{localizePlugin(plugin).display_name}</span>
                 <span className="plugin-card__version">{translate("plugins:pluginsPage.pluginCardHeader_message_v", { version: plugin.version })}</span>
                 <span className={`plugin-card__type plugin-card__type--${plugin.type}`}>
-                  {plugin.type === 'file' ? translate("plugins:pluginsPage.pluginCardHeader_message_file") : translate("plugins:pluginsPage.pluginCardHeader_message_text")}
+                  {plugin.type === 'file' ? translate("plugins:pluginsPage.pluginCardHeader_message_file") : plugin.type === 'problem' ? translate('plugins:pluginsPage.pluginCardHeader_message_problem') : translate("plugins:pluginsPage.pluginCardHeader_message_text")}
                 </span>
               </div>
               <div className="plugin-card__meta">

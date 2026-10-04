@@ -66,8 +66,9 @@
     "keyListEditor_message_emptyEntry": "No entries yet"
   },
   "problemAnalyzeSection": {
-    "validateAndCommitThreshold_setThresholdError_thresholdRequiredEnter0": "The threshold cannot be empty; enter an integer greater than 0",
-    "validateAndCommitThreshold_setThresholdError_thresholdInvalidEnter0": "Invalid threshold: enter an integer greater than 0",
+    "restorePluginDefaults": "Restore plugin defaults",
+    "sourcePlugins": "Source: {{names}}",
+    "providerDisabled": "Source plugins disabled",
     "problemAnalyzeSection_title_problem": "Problem analysis",
     "problemAnalyzeSection_description_selectEnableTranslationProblemDetectItemTranslation": "Choose the translation quality checks to enable. Problems hit during translation are written to the cache and shown on the “Browse text” page.",
     "problemAnalyzeSection_message_loadBackendProblemItemFailed": "Failed to load the problem items supported by the backend: {{loadError}}",
@@ -75,8 +76,6 @@
     "problemAnalyzeSectionToolbar_message_doneEnable": "Enabled {{count}} / {{value}}",
     "problemAnalyzeSectionToolbar_message_doneEnable_other": "Enabled {{count}} / {{value}}",
     "problemAnalyzeSectionItemBody_message_currentBackendNotProblemItemCancelConfig": "The current backend does not declare this problem item, so unticking it removes it from the configuration.",
-    "problemAnalyzeSectionThresholdLabel_message_sentenceThresholdAvgSentenceLengthThreshold": "Long-sentence threshold (avgSentenceLengthThreshold)",
-    "problemAnalyzeSectionThreshold_message_translationTextSentenceMarkSentenceDefault17Range": "A translation is marked as “sentence too long” when its average sentence length exceeds this value. The default is 17 and 15~25 is the recommended range.",
     "problemAnalyzeSectionToolbar_message_doneEnable_one": "Enabled {{count}} / {{value}}"
   },
   "problemFilterSection": {

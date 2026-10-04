@@ -55,6 +55,36 @@ class GTextPlugin(IPlugin):
         pass
 
 
+class GProblemPlugin(IPlugin):
+    """Translation checks run after destination text processing."""
+
+    problem_types = ()
+
+    def get_problem_types(self) -> list[dict]:
+        """Declare check names and descriptions without requiring gtp_init."""
+        types = []
+        for item in self.problem_types:
+            if isinstance(item, dict):
+                types.append(dict(item))
+            else:
+                types.append({
+                    "name": item if isinstance(item, str) else item.name,
+                    "description": getattr(item, "description", ""),
+                    "default_enabled": getattr(item, "default_enabled", False),
+                })
+        return types
+
+    def gtp_init(self, plugin_conf: dict, project_conf: dict):
+        pass
+
+    def check(self, tran: CSentense, project_config, gpt_dict=None) -> list[str]:
+        """Return problem messages without changing the sentence or its problem field."""
+        raise NotImplementedError("This method must be implemented by the plugin.")
+
+    def gtp_final(self):
+        pass
+
+
 class GFilePlugin(IPlugin):
     def gtp_init(self, plugin_conf: dict, project_conf: dict):
         """

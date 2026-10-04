@@ -16,7 +16,7 @@ class FakeProblemConfig:
 
     def getProblemAnalyzeConfig(self, key):
         if key == "problemList":
-            from GalTransl.Problem import CProblemType
+            from plugins.problem_common.problem_common import CProblemType
             return [CProblemType[name] for name in self._problem_list]
         return []
 

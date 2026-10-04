@@ -9,7 +9,8 @@
 import unittest
 
 from GalTransl.CSentense import CSentense
-from GalTransl.Problem import CProblemType, find_problems
+from GalTransl.Problem import find_problems
+from plugins.problem_common.problem_common import CProblemType
 
 
 class FakeProblemConfig:

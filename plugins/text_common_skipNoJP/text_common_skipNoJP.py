@@ -1,7 +1,10 @@
 from GalTransl import LOGGER
 from GalTransl.CSentense import CSentense
 from GalTransl.GTPlugin import GTextPlugin
-from GalTransl.Utils import contains_japanese
+import re
+
+
+_JAPANESE_PATTERN = re.compile(r"[\u3040-\u309f\u30a0-\u30ff\uff66-\uff9f]")
 
 
 class skip_noJP(GTextPlugin):
@@ -28,7 +31,7 @@ class skip_noJP(GTextPlugin):
         :param tran: The CSentense to be processed.
         :return: The modified CSentense.
         """
-        if not contains_japanese(tran.post_src):
+        if not _JAPANESE_PATTERN.search(tran.post_src.replace("ー", "").replace("・", "")):
             if not contains_hankaku(tran.post_src):
                 # 像这样赋值pre_zh后，这句话就不会被翻译。
                 tran.pre_dst = tran.post_src

@@ -41,6 +41,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   const { projectDir, projectId, configFileName } = ctx;
 
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
+  const [problemPlugins, setProblemPlugins] = useState<PluginInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useMessageState<string | null>(null);
@@ -151,6 +152,15 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
       });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setProblemPlugins([]);
+    if (projectId) fetchPlugins(projectId).then((plugins) => {
+      if (!cancelled) setProblemPlugins(plugins.filter((plugin) => plugin.type === 'problem'));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   // Get/set nested config value. Prefer literal flat keys containing dots
   // (e.g. YAML under `common:` uses keys like `gpt.translation_guideline`).
@@ -467,17 +477,15 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
               {activeSection === 'problemAnalyze' && (
                 <ProblemAnalyzeSection
                   config={config}
+                  projectId={projectId}
+                  problemPlugins={problemPlugins}
+                  onPluginSettingChange={handlePluginSettingChange}
+                  onProblemPluginsChange={(plugins) => handleListFieldChange('plugin.problemPlugins', plugins)}
                   onProblemListChange={(lines) => {
                     setConfig((prev) => {
                       const pa = { ...((prev?.problemAnalyze as Record<string, unknown>) || {}) };
                       pa.problemList = lines;
-                      return prev ? { ...prev, problemAnalyze: pa } : prev;
-                    });
-                  }}
-                  onThresholdChange={(value) => {
-                    setConfig((prev) => {
-                      const pa = { ...((prev?.problemAnalyze as Record<string, unknown>) || {}) };
-                      pa.avgSentenceLengthThreshold = value;
+                      if (lines === null) delete pa.GPT35;
                       return prev ? { ...prev, problemAnalyze: pa } : prev;
                     });
                   }}

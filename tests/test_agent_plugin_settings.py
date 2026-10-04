@@ -43,6 +43,67 @@ class Runner:
 
 
 class PluginSettingsAgentTests(unittest.TestCase):
+    def test_null_sections_support_setting_discovery_preview_and_write(self):
+        for plugin in (None, {"problem_common": None}):
+            with self.subTest(plugin=plugin):
+                runner = Runner(self.plugins, {"plugin": plugin})
+                fields = _tool_get_plugin_settings(runner, {"plugin_name": "problem_common"})["plugins"][0]["settings"]
+                self.assertEqual(fields[0]["value"], 17)
+                self.assertFalse(fields[0]["overridden"])
+                args = {"updates": [
+                    {"key": "plugin.problemPlugins", "value": ["problem_common"]},
+                    {"key": "plugin.problem_common.avgSentenceLengthThreshold", "value": 25},
+                ]}
+                preview = _preview_config_update(runner, args)
+                self.assertEqual(runner.config["plugin"], plugin)
+                result = _tool_update_project_config(runner, args)
+                self.assertEqual(preview["changes"], result["changes"])
+                self.assertEqual(result["updated"], 2)
+                self.assertEqual(runner.config["plugin"]["problem_common"]["avgSentenceLengthThreshold"], 25)
+
+    def test_malformed_plugin_sections_are_preserved_and_reported(self):
+        for plugin in (False, [], "invalid", {"problem_common": False}):
+            with self.subTest(plugin=plugin):
+                runner = Runner(self.plugins, {"plugin": plugin})
+                with self.assertRaises(AgentToolError):
+                    _tool_get_plugin_settings(runner, {"plugin_name": "problem_common"})
+                result = _tool_update_project_config(runner, {"updates": [
+                    {"key": "plugin.problem_common.avgSentenceLengthThreshold", "value": 25},
+                ]})
+                self.assertEqual(result["updated"], 0)
+                self.assertEqual(runner.config["plugin"], plugin)
+                self.assertEqual(runner.writes, [])
+        runner = Runner([], {"plugin": "invalid"})
+        result = _tool_update_project_config(runner, {"updates": [{"key": "plugin.problemPlugins", "value": []}]})
+        self.assertEqual(result["updated"], 0)
+        self.assertEqual(runner.config["plugin"], "invalid")
+
+    def test_problem_plugin_setting_discovery_legacy_value_and_write(self):
+        runner = Runner(self.plugins, {"problemAnalyze": {"avgSentenceLengthThreshold": 8},
+                                      "plugin": {"problemPlugins": ["problem_common"]}})
+        fields = _tool_get_plugin_settings(runner, {"plugin_name": "problem_common"})["plugins"][0]["settings"]
+        threshold = next(field for field in fields if field["key"].endswith(".avgSentenceLengthThreshold"))
+        self.assertEqual(threshold["default"], 17)
+        self.assertEqual(threshold["value"], 8)
+        self.assertFalse(threshold["overridden"])
+        args = {"updates": [{"key": "plugin.problem_common.avgSentenceLengthThreshold", "value": 25}]}
+        preview = _preview_config_update(runner, args)
+        result = _tool_update_project_config(runner, args)
+        self.assertEqual(preview["changes"], result["changes"])
+        self.assertEqual(runner.config["plugin"]["problem_common"]["avgSentenceLengthThreshold"], 25)
+        fields = _tool_get_plugin_settings(runner, {"plugin_name": "problem_common"})["plugins"][0]["settings"]
+        self.assertEqual(fields[0]["value"], 25)
+
+    def test_problem_plugin_selection_can_be_added_to_legacy_project(self):
+        runner = Runner([], {"plugin": {"filePlugin": "auto"}})
+        args = {"updates": [{"key": "plugin.problemPlugins", "value": []}]}
+        preview = _preview_config_update(runner, args)
+        result = _tool_update_project_config(runner, args)
+        self.assertEqual(preview["changes"], result["changes"])
+        self.assertEqual(result["updated"], 1)
+        self.assertEqual(runner.config["plugin"]["problemPlugins"], [])
+        self.assertEqual(result["changes"][0]["before"], ["problem_common"])
+
     @classmethod
     def setUpClass(cls):
         cls.plugins = _scan_plugins()

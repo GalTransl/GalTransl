@@ -378,6 +378,7 @@ export type ProjectLogsResponse = {
 };
 
 export type PluginSettingSchema = {
+  legacy_path?: string;
   label?: string;
   description?: string;
   placeholder?: string;
@@ -398,6 +399,7 @@ export type PluginInfo = {
   description: string;
   type: string;
   module: string;
+  project_local?: boolean;
   settings: Record<string, unknown>;
   settings_schema?: Record<string, PluginSettingSchema>;
 };
@@ -422,6 +424,8 @@ export type PluginsResponse = {
 export type ProblemTypeInfo = {
   name: string;
   description: string;
+  default_enabled: boolean;
+  plugins?: string[];
 };
 
 export type ProblemTypesResponse = {
@@ -877,8 +881,8 @@ export async function fetchProjectLogs(projectId: string, tail = 2000) {
   );
 }
 
-export async function fetchPlugins() {
-  const response = await apiRequest<PluginsResponse>('/api/plugins');
+export async function fetchPlugins(projectId?: string) {
+  const response = await apiRequest<PluginsResponse>(projectId ? `/api/projects/${projectId}/plugins` : '/api/plugins');
   return response.plugins;
 }
 
@@ -897,8 +901,8 @@ export async function detectFilePlugin(projectId: string) {
   return apiRequest<FilePluginDetection>(`/api/projects/${projectId}/detect-file-plugin`);
 }
 
-export async function fetchProblemTypes() {
-  const response = await apiRequest<ProblemTypesResponse>('/api/problem-types');
+export async function fetchProblemTypes(projectId?: string) {
+  const response = await apiRequest<ProblemTypesResponse>(projectId ? `/api/projects/${projectId}/problem-types` : '/api/problem-types');
   return response.problem_types;
 }
 

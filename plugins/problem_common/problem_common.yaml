@@ -1,0 +1,20 @@
+Core:
+  Name: 常规问题检测
+  Type: problem
+  Module: problem_common
+
+Documentation:
+  Author: GalTransl
+  Version: 1.0
+  Description: 检测残留日文、标点、换行、字典使用等问题，检测项与阈值使用项目的 problemAnalyze 配置。
+
+Settings:
+  avgSentenceLengthThreshold: 17
+
+SettingsSchema:
+  avgSentenceLengthThreshold:
+    label: 长句判定阈值
+    description: 平均分句长度超过此值时标记单句过长，建议 15～25；需启用单句过长检测。
+    min: 1
+    step: 1
+    legacy_path: problemAnalyze.avgSentenceLengthThreshold

@@ -3,7 +3,8 @@ from os.path import exists as isPathExists
 from os import makedirs as mkdir
 import logging, colorlog
 from GalTransl import LOGGER, TRANSLATOR_SUPPORTED, new_version, GALTRANSL_VERSION,NEED_OpenAITokenPool
-from GalTransl.GTPlugin import GTextPlugin, GFilePlugin
+from GalTransl.GTPlugin import GTextPlugin, GFilePlugin, GProblemPlugin
+from GalTransl.Problem import load_problem_plugins, finalize_problem_plugins
 from GalTransl.COpenAI import COpenAITokenPool, init_sakura_endpoint_queue
 from GalTransl.yapsy.PluginManager import PluginManager
 from GalTransl.ConfigHelper import CProjectConfig, CProxyPool
@@ -190,7 +191,7 @@ async def run_galtransl(cfg: CProjectConfig, translator: str, stop_event=None):
                 mkdir(dir_path)
         # 插件初始化
         plugin_manager = PluginManager(
-            {"GTextPlugin": GTextPlugin, "GFilePlugin": GFilePlugin},
+            {"GTextPlugin": GTextPlugin, "GFilePlugin": GFilePlugin, "GProblemPlugin": GProblemPlugin},
             [str(get_plugins_dir()), os.path.join(PROJECT_DIR, "plugins")],
         )
         plugin_manager.locatePlugins()
@@ -307,6 +308,7 @@ async def run_galtransl(cfg: CProjectConfig, translator: str, stop_event=None):
 
         cfg.tPlugins = text_plugins
         cfg.fPlugins = file_plugins
+        load_problem_plugins(cfg)
         cfg.fPluginAuto = is_auto_file_plugin(cfg.getFilePlugin())
         cfg.tokenPool = OpenAITokenPool
         cfg.proxyPool = proxyPool
@@ -322,6 +324,7 @@ async def run_galtransl(cfg: CProjectConfig, translator: str, stop_event=None):
         end_time = time.time()
         LOGGER.info(f"总耗时: {end_time-start_time:.3f}s")
     finally:
+        finalize_problem_plugins(cfg)
         # 移除当前 job 添加的 handler，不影响其他并发 job
         for h in _job_handlers:
             LOGGER.removeHandler(h)
