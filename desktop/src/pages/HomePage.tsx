@@ -21,7 +21,7 @@ import {
 import { formatTimestamp } from '../lib/format';
 import { normalizeError } from '../lib/errors';
 import { basenamePath, dirnamePath } from '../lib/paths';
-import { PROJECT_HOMEPAGE, RELEASE_LATEST_URL } from '../lib/externalLink';
+import { PROJECT_HOMEPAGE, RELEASE_LATEST_URL, RELEASE_LIST_URL } from '../lib/externalLink';
 const HISTORY_KEY = 'galtransl-project-history';
 const JOB_MEMORY_KEY = 'galtransl-home-jobs-memory';
 const JOB_CLEARED_KEY = 'galtransl-home-jobs-cleared';
@@ -507,6 +507,9 @@ export function HomePage({ onOpenProject }: HomePageProps) {
               ) : null}
               <a className="home-hero__chip home-hero__chip--link" href={PROJECT_HOMEPAGE} target="_blank" rel="noreferrer noopener">
                 项目主页
+              </a>
+              <a className="home-hero__chip home-hero__chip--link" href={RELEASE_LIST_URL} target="_blank" rel="noreferrer noopener">
+                更新日志
               </a>
             </div>
           </div>

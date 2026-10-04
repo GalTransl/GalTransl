@@ -3,6 +3,9 @@ import { open as openInShell } from '@tauri-apps/plugin-shell';
 /** 项目主页（首页与「关于」页共用一份，避免多处硬编码）。 */
 export const PROJECT_HOMEPAGE = 'https://github.com/GalTransl/GalTransl';
 
+/** 发布列表页：首页「更新日志」入口。 */
+export const RELEASE_LIST_URL = `${PROJECT_HOMEPAGE}/releases`;
+
 /** 最新发布页：更新提示与「关于」页的下载入口都指向这里。 */
 export const RELEASE_LATEST_URL = `${PROJECT_HOMEPAGE}/releases/latest`;
 

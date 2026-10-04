@@ -578,7 +578,7 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
               浏览
             </Button>
           </div>
-          <span className="field__hint">默认是程序所在目录；建议用英文路径，避免空格与特殊字符。</span>
+          <span className="field__hint">默认是程序所在目录；建议用当前游戏名作为项目名。</span>
         </div>
         <div className="wizard-path-preview">
           <span className="wizard-path-preview__label">将创建目录</span>
