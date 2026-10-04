@@ -3,7 +3,7 @@
 
 <h1><p align='center' >GalTransl</p></h1>
 <div align=center><img src="https://img.shields.io/github/v/release/XD2333/GalTransl"/>   <img src="https://img.shields.io/github/license/XD2333/GalTransl"/>   <img src="https://img.shields.io/github/stars/XD2333/GalTransl"/></div>
-<p align='center' >支持GPT-4/Claude/Deepseek/Sakura等大语言模型的Galgame自动化翻译解决方案</p>
+<p align='center' >支持GPT/Claude/Deepseek/Sakura等大语言模型的Galgame自动化翻译解决方案</p>
 
   [English](https://github.com/XD2333/GalTransl/blob/main/README_EN.md)
   

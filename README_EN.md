@@ -3,7 +3,7 @@
 
 <h1><p align='center' >GalTransl</p></h1>
 <div align=center><img src="https://img.shields.io/github/v/release/XD2333/GalTransl"/>   <img src="https://img.shields.io/github/license/XD2333/GalTransl"/>   <img src="https://img.shields.io/github/stars/XD2333/GalTransl"/></div>
-<p align='center' >Visual Novel Automatic Translation Solution Supporting GPT-4/Claude/Deepseek/Sakura and More</p>
+<p align='center' >Visual Novel Automatic Translation Solution Supporting GPT/Claude/Deepseek/Sakura and More</p>
 
   [中文](https://github.com/XD2333/GalTransl/blob/main/README.md)
 
