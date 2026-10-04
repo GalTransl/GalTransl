@@ -8,6 +8,7 @@ import sys
 import tarfile
 import unittest
 import zipfile
+from fnmatch import fnmatchcase
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
@@ -256,11 +257,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
         linux_uploads = [
             step for step in jobs["build"]["steps"]
             if step.get("if") == "runner.os == 'Linux'"
-            and step.get("uses") == "actions/upload-artifact@v4"
+            and step.get("uses", "").startswith("actions/upload-artifact@")
         ]
         self.assertEqual(
-            {step["with"]["name"] for step in linux_uploads},
-            {"GalTransl-linux-x86_64-portable"},
+            {step["name"] for step in linux_uploads},
+            {"Upload Linux portable artifact"},
         )
         linux_build = next(
             step for step in jobs["build"]["steps"] if step.get("name") == "Build Linux bundles"
@@ -269,15 +270,48 @@ class ReleaseWorkflowTests(unittest.TestCase):
         mac_uploads = [
             step for step in jobs["build"]["steps"]
             if step.get("if") == "runner.os == 'macOS'"
-            and step.get("uses") == "actions/upload-artifact@v4"
+            and step.get("uses", "").startswith("actions/upload-artifact@")
         ]
         self.assertEqual(
-            {step["with"]["name"] for step in mac_uploads},
+            {step["name"] for step in mac_uploads},
             {
-                "GalTransl-${{ matrix.platform }}-dmg",
-                "GalTransl-${{ matrix.platform }}-portable",
+                "Upload macOS DMG artifact",
+                "Upload macOS portable artifact",
             },
         )
+
+    def test_portable_artifacts_download_as_tarballs_and_are_selected_for_release(self):
+        jobs = self.workflow["jobs"]
+        uploads = {
+            step["name"]: step for step in jobs["build"]["steps"]
+            if step.get("uses", "").startswith("actions/upload-artifact@")
+        }
+        download = next(
+            step for step in jobs["draft_release"]["steps"]
+            if step.get("name") == "Download this run's build artifacts"
+        )
+        self.assertEqual(download["uses"], "actions/download-artifact@v8")
+        self.assertEqual(download["with"]["merge-multiple"], "true")
+        self.assertNotEqual(download["with"].get("skip-decompress"), "true")
+        for platform in ("linux_x86_64", "macos_x86_64", "macos_arm64"):
+            with self.subTest(platform=platform):
+                upload = uploads[
+                    "Upload Linux portable artifact" if platform == "linux_x86_64"
+                    else "Upload macOS portable artifact"
+                ]
+                self.assertEqual(upload["uses"], "actions/upload-artifact@v7")
+                inputs = upload["with"]
+                self.assertEqual(inputs["archive"], "false")
+                self.assertNotIn("name", inputs)
+                self.assertEqual(inputs["if-no-files-found"], "error")
+                self.assertEqual(inputs["retention-days"], "14")
+                path = inputs["path"].replace("${{ needs.metadata.outputs.version }}", VERSION)
+                path = path.replace("${{ matrix.platform }}", platform)
+                self.assertEqual(path, f"release/GalTransl_{VERSION}_{platform}.tar.gz")
+                # Unarchived artifacts use the file name, including its extension.
+                self.assertTrue(fnmatchcase(Path(path).name, download["with"]["pattern"]))
+        for name in ("GalTransl-windows-x64", "GalTransl-macos_x86_64-dmg", "GalTransl-macos_arm64-dmg"):
+            self.assertTrue(fnmatchcase(name, download["with"]["pattern"]))
 
     def test_checksum_manifest_only_includes_expected_assets(self):
         steps = self.workflow["jobs"]["draft_release"]["steps"]

@@ -187,7 +187,7 @@ python build_macos.py
 | Actions → Build and draft release → Run workflow | 手动试打包；只生成 artifacts，不创建或修改 Release |
 | 推送版本 tag（`8.2.0` 或 `v8.2.0`） | Windows、Linux、macOS 全部测试、构建及打包后检查通过后，创建草稿 Release 并上传附件 |
 
-**下载试构建**：打开工作流运行详情，在 **Artifacts** 中按需下载 `GalTransl-windows-x64`、`GalTransl-linux-x86_64-portable`，或 macOS 对应架构的 `dmg` / `portable` artifact（均保留 14 天）。Actions 下载的每个 artifact 仍是外层 ZIP，解开后即可得到对应文件；Linux 和 macOS 便携包还需要继续解开 `.tar.gz`。
+**下载试构建**：打开工作流运行详情，在 **Artifacts** 中按需下载（均保留 14 天）。Linux 和 macOS 便携包直接以 `GalTransl_<版本>_linux_x86_64.tar.gz`、`GalTransl_<版本>_macos_x86_64.tar.gz` 或 `GalTransl_<版本>_macos_arm64.tar.gz` 为名提供，下载后解压一次即可使用，并保留可执行权限。Windows 的 `GalTransl-windows-x64` 和 macOS 对应架构的 `dmg` artifact 仍由 Actions 提供外层 ZIP。
 
 **发布新版本（维护者）**：
 

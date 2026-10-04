@@ -163,12 +163,11 @@ jobs:
 
       - name: Upload Linux portable artifact
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: GalTransl-linux-x86_64-portable
-          path: release/*.tar.gz
+          path: release/GalTransl_${{ needs.metadata.outputs.version }}_linux_x86_64.tar.gz
+          archive: false
           if-no-files-found: error
-          compression-level: 0
           overwrite: true
           retention-days: 14
 
@@ -185,12 +184,11 @@ jobs:
 
       - name: Upload macOS portable artifact
         if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: GalTransl-${{ matrix.platform }}-portable
-          path: release/*.tar.gz
+          path: release/GalTransl_${{ needs.metadata.outputs.version }}_${{ matrix.platform }}.tar.gz
+          archive: false
           if-no-files-found: error
-          compression-level: 0
           overwrite: true
           retention-days: 14
 
@@ -212,9 +210,9 @@ jobs:
         with:
           python-version: '3.11'
       - name: Download this run's build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
-          pattern: GalTransl-*
+          pattern: GalTransl*
           path: release-assets
           merge-multiple: true
 

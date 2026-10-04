@@ -111,7 +111,7 @@ Build outputs are written to `release/` and include an architecture-specific `.d
 
 Release checks launch the extracted backend from a separate directory with temporary settings and user data, and parse real TXT, JSON, and EPUB files. On macOS, they also mount the DMG, copy its `.app`, validate the version, both executable architectures and resources, then run the same checks against the backend inside the app bundle.
 
-**Download test builds:** open the workflow run and download `GalTransl-windows-x64`, `GalTransl-linux-x86_64-portable`, or the `dmg` / `portable` artifact for the desired macOS architecture (retained for 14 days). Each Actions artifact is still delivered as an outer ZIP; extract it to get the corresponding file. Linux and macOS portable artifacts also need their inner `.tar.gz` extracted to preserve executable permissions.
+**Download test builds:** open the workflow run and choose an artifact (retained for 14 days). Linux and macOS portable builds are provided directly as `GalTransl_<version>_linux_x86_64.tar.gz`, `GalTransl_<version>_macos_x86_64.tar.gz`, or `GalTransl_<version>_macos_arm64.tar.gz`. Extract once to use them, with executable permissions preserved. The Windows `GalTransl-windows-x64` and macOS architecture-specific `dmg` artifacts are still delivered in an outer ZIP by Actions.
 
 **Publish a new version (maintainers):**
 
