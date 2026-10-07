@@ -18,6 +18,7 @@ from GalTransl.Agent.context import (
     _permission_decision_text,
     _profile_context_window,
     _restore_compacted_history,
+    _restore_usage_anchor,
     _resume_context,
     _tools_overhead_tokens,
 )
@@ -246,6 +247,7 @@ class AgentRuntime:
             return None
         # 文件里带的是压缩**前**的全量（只追加），按最后一次压缩的摘要重建出真正在用的那份
         history = _restore_compacted_history(messages)
+        usage_tokens, usage_count, usage_model = _restore_usage_anchor(history, meta.get("context_usage_anchor"))
         # 事件按 step 重建 deque（保留最近 RUNTIME_EVENT_KEEP 条）
         ev_deque: deque[AgentEvent] = deque(maxlen=RUNTIME_EVENT_KEEP)
         max_step = 0
@@ -294,6 +296,9 @@ class AgentRuntime:
             started_at=float(meta.get("created_at") or 0.0),
             error="上次运行被应用重启中断" if was_running else "",
             messages=history,
+            last_prompt_tokens=usage_tokens,
+            anchored_message_count=usage_count,
+            usage_model=usage_model,
             step=max_step,
             session_id=session_id,
             title=str(meta.get("title") or session_id),
@@ -343,6 +348,10 @@ class AgentRuntime:
         backend_profile_name: str = "",
         translator_profile_name: str = "",
         translator_profile_data: dict[str, Any] | None = None,
+        gendic_profile_name: str = "",
+        gendic_profile_data: dict[str, Any] | None = None,
+        subagent_profile_name: str = "",
+        subagent_profile_data: dict[str, Any] | None = None,
         permission_mode: str = "",
     ) -> dict[str, Any]:
         """启动一个回合。session_id 为空时新建会话；标题取用户第一条消息。"""
@@ -372,6 +381,10 @@ class AgentRuntime:
                 backend_profile_name=backend_profile_name,
                 translator_profile_name=translator_profile_name,
                 translator_profile_data=translator_profile_data or {},
+                gendic_profile_name=gendic_profile_name,
+                gendic_profile_data=gendic_profile_data or {},
+                subagent_profile_name=subagent_profile_name,
+                subagent_profile_data=subagent_profile_data or {},
                 # 权限模式只在前端 localStorage，随 start/message 送过来（拿不到就是默认档）
                 permission_mode=_normalize_permission_mode(permission_mode),
                 started_at=time.time(),
@@ -413,6 +426,10 @@ class AgentRuntime:
         backend_profile_data: dict[str, Any] | None = None,
         translator_profile_name: str = "",
         translator_profile_data: dict[str, Any] | None = None,
+        gendic_profile_name: str = "",
+        gendic_profile_data: dict[str, Any] | None = None,
+        subagent_profile_name: str = "",
+        subagent_profile_data: dict[str, Any] | None = None,
         permission_mode: str = "",
     ) -> dict[str, Any]:
         """向会话追加一条用户消息。
@@ -446,6 +463,12 @@ class AgentRuntime:
                 state.translator_profile_name = translator_profile_name
             if translator_profile_data:
                 state.translator_profile_data = translator_profile_data
+            if gendic_profile_data is not None:
+                state.gendic_profile_name = gendic_profile_name
+                state.gendic_profile_data = gendic_profile_data
+            if subagent_profile_data is not None:
+                state.subagent_profile_name = subagent_profile_name
+                state.subagent_profile_data = subagent_profile_data
             # 权限模式同理：前端改了选择就跟着走，下一次工具调用按新模式判；
             # 与选择器那条路径（set_permission_mode）共用一套规则，真换了档就清空放行记录
             if permission_mode:
@@ -501,6 +524,10 @@ class AgentRuntime:
         backend_profile_data: dict[str, Any] | None = None,
         translator_profile_name: str = "",
         translator_profile_data: dict[str, Any] | None = None,
+        gendic_profile_name: str = "",
+        gendic_profile_data: dict[str, Any] | None = None,
+        subagent_profile_name: str = "",
+        subagent_profile_data: dict[str, Any] | None = None,
         permission_mode: str = "",
     ) -> dict[str, Any]:
         """把用户对 ask_user 提问的回答送回去，唤醒正在等待的那个回合。
@@ -521,6 +548,10 @@ class AgentRuntime:
             backend_profile_data=backend_profile_data,
             translator_profile_name=translator_profile_name,
             translator_profile_data=translator_profile_data,
+            gendic_profile_name=gendic_profile_name,
+            gendic_profile_data=gendic_profile_data,
+            subagent_profile_name=subagent_profile_name,
+            subagent_profile_data=subagent_profile_data,
             permission_mode=permission_mode,
         )
         key = self._key(project_dir)
@@ -529,6 +560,12 @@ class AgentRuntime:
             runner = self._runners.get(key, {}).get(sid) if sid else None
         if runner is not None:
             try:
+                if gendic_profile_data is not None:
+                    runner.state.gendic_profile_name = gendic_profile_name
+                    runner.state.gendic_profile_data = gendic_profile_data
+                if subagent_profile_data is not None:
+                    runner.state.subagent_profile_name = subagent_profile_name
+                    runner.state.subagent_profile_data = subagent_profile_data
                 return runner.resolve_ask(answers)
             except ValueError:
                 # 没有在等的询问（已作答 / 回合已结束 / 重启后重建的卡片）
@@ -589,6 +626,10 @@ class AgentRuntime:
         backend_profile_data: dict[str, Any] | None = None,
         translator_profile_name: str = "",
         translator_profile_data: dict[str, Any] | None = None,
+        gendic_profile_name: str = "",
+        gendic_profile_data: dict[str, Any] | None = None,
+        subagent_profile_name: str = "",
+        subagent_profile_data: dict[str, Any] | None = None,
         permission_mode: str = "",
     ) -> dict[str, Any]:
         """把用户对权限审批卡的答复送回去，唤醒正在等待的那个回合。
@@ -606,6 +647,10 @@ class AgentRuntime:
             backend_profile_data=backend_profile_data,
             translator_profile_name=translator_profile_name,
             translator_profile_data=translator_profile_data,
+            gendic_profile_name=gendic_profile_name,
+            gendic_profile_data=gendic_profile_data,
+            subagent_profile_name=subagent_profile_name,
+            subagent_profile_data=subagent_profile_data,
             permission_mode=permission_mode,
         )
         key = self._key(project_dir)
@@ -614,6 +659,12 @@ class AgentRuntime:
             runner = self._runners.get(key, {}).get(sid) if sid else None
         if runner is not None:
             try:
+                if gendic_profile_data is not None:
+                    runner.state.gendic_profile_name = gendic_profile_name
+                    runner.state.gendic_profile_data = gendic_profile_data
+                if subagent_profile_data is not None:
+                    runner.state.subagent_profile_name = subagent_profile_name
+                    runner.state.subagent_profile_data = subagent_profile_data
                 return runner.resolve_permission(decision, reason)
             except ValueError:
                 _log(f"🔐 审批没有在等的请求，改为按用户消息继续: session={sid}")

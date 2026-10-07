@@ -575,6 +575,15 @@ export async function fetchJob(jobId: string) {
 }
 
 export async function submitJob(payload: SubmitJobPayload) {
+  // 所有前端 GenDic 入口统一使用专属默认。
+  if (payload.translator?.toLowerCase() === 'gendic') {
+    const name = getGenDicDefaultBackendProfile();
+    if (name) {
+      const profile = getBackendProfile(name);
+      if (!profile) throw new UiError(uiMessage('errors:profiles.notFound', { name }));
+      payload = { ...payload, backend_profile: name, backend_profile_data: profile };
+    }
+  }
   const overrides = getPromptTemplateOverridesForJob(payload.translator);
   const payloadWithOverrides = Object.keys(overrides).length > 0
     ? { ...payload, prompt_template_overrides: overrides }
@@ -1135,9 +1144,11 @@ export async function createBackendProfile(name: string, profile: Record<string,
   profiles[trimmedName] = cloneBackendProfile(profile);
   writeBackendProfilesStorage(profiles);
   if (isFirstProfile) {
-    // 首个配置：同时设为翻译器默认 + Agent 默认（两者独立，新装好都给它最省心）
+    // 首个配置初始化四种默认，之后分别保存。
     setDefaultBackendProfile(trimmedName);
     setAgentDefaultBackendProfile(trimmedName);
+    setGenDicDefaultBackendProfile(trimmedName);
+    setSubagentDefaultBackendProfile(trimmedName);
   }
   return { success: true, name: trimmedName };
 }
@@ -1164,6 +1175,8 @@ export async function deleteBackendProfile(name: string) {
   if (getAgentDefaultBackendProfile() === trimmedName) {
     setAgentDefaultBackendProfile('');
   }
+  if (getGenDicDefaultBackendProfile() === trimmedName) setGenDicDefaultBackendProfile('');
+  if (getSubagentDefaultBackendProfile() === trimmedName) setSubagentDefaultBackendProfile('');
   return { success: true, name: trimmedName };
 }
 
@@ -1219,7 +1232,7 @@ function renameSelectedBackendProfileReferences(oldName: string, newName: string
 }
 
 /** 重命名后端配置：搬数据，并把所有指向旧名的引用一起改掉，
- *  否则「翻译器默认 / Agent 默认 / 各项目选择」会突然指向一个不存在的配置。 */
+ *  否则全局默认与项目选择会突然指向一个不存在的配置。 */
 export async function renameBackendProfile(oldName: string, newName: string) {
   const from = oldName.trim();
   const to = newName.trim();
@@ -1255,6 +1268,8 @@ export async function renameBackendProfile(oldName: string, newName: string) {
   if (getAgentDefaultBackendProfile() === from) {
     setAgentDefaultBackendProfile(to);
   }
+  if (getGenDicDefaultBackendProfile() === from) setGenDicDefaultBackendProfile(to);
+  if (getSubagentDefaultBackendProfile() === from) setSubagentDefaultBackendProfile(to);
   renameSelectedBackendProfileReferences(from, to);
   return { success: true, name: to };
 }
@@ -1531,6 +1546,40 @@ export function setAgentDefaultBackendProfile(name: string) {
   } catch {
     // ignore storage errors
   }
+}
+
+export const GENDIC_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT = 'galtransl:gendic-default-backend-profile-change';
+export const SUBAGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT = 'galtransl:subagent-default-backend-profile-change';
+
+function getTaskDefaultBackendProfile(task: 'gendic' | 'subagent'): string {
+  try {
+    return localStorage.getItem(`galtransl-${task}-default-backend-profile`) || '';
+  } catch {
+    return '';
+  }
+}
+
+function setTaskDefaultBackendProfile(task: 'gendic' | 'subagent', name: string, event: string) {
+  try {
+    localStorage.setItem(`galtransl-${task}-default-backend-profile`, name);
+    window.dispatchEvent(new CustomEvent(event, { detail: name }));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+/** 空值表示跟随项目的翻译器后端，兼容已有配置。 */
+export const getGenDicDefaultBackendProfile = () => getTaskDefaultBackendProfile('gendic');
+export const setGenDicDefaultBackendProfile = (name: string) =>
+  setTaskDefaultBackendProfile('gendic', name, GENDIC_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT);
+/** 空值表示跟随当前会话的主 agent 后端。 */
+export const getSubagentDefaultBackendProfile = () => getTaskDefaultBackendProfile('subagent');
+export const setSubagentDefaultBackendProfile = (name: string) =>
+  setTaskDefaultBackendProfile('subagent', name, SUBAGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT);
+
+export function resolveGenDicBackendProfile(projectDir: string) {
+  const name = getGenDicDefaultBackendProfile();
+  return name ? { name, profile: getBackendProfile(name) } : resolveSelectedBackendProfile(projectDir);
 }
 
 /**
@@ -2078,7 +2127,7 @@ export type AgentStartPayload = {
  * Agent 会话要带上的「后端上下文」：配置名＋翻译器那份的配置内容。
  *
  * 后端拿不到配置名（配置存在前端 localStorage），而「了解项目」要如实报出
- * 实际生效的两份后端（本会话在用的 + 翻译任务会用的），所以随 start/message
+ * 实际生效的后端（本会话、翻译任务、GenDic 和子 agent），所以随 start/message
  * 一起送过去。地址与密钥不在返回里出现，这里送的是原名与内容。
  */
 export type AgentBackendContext = {
@@ -2089,6 +2138,10 @@ export type AgentBackendContext = {
   /** 翻译任务会用的后端配置名（项目选择 → 否则全局「翻译器默认」）。 */
   translator_profile_name?: string;
   translator_profile_data?: Record<string, unknown>;
+  gendic_profile_name?: string;
+  gendic_profile_data?: Record<string, unknown>;
+  subagent_profile_name?: string;
+  subagent_profile_data?: Record<string, unknown>;
 };
 
 /** start / message 的请求上下文：后端上下文 + 权限模式（见 lib/permissionMode）。 */
@@ -2097,14 +2150,25 @@ export type AgentRequestContext = AgentBackendContext & {
   permission_mode?: PermissionMode;
 };
 
-/** 取「翻译任务会用的后端」：优先项目自己的选择，没有则回落到全局「翻译器默认」。 */
+/** 主 agent 启动的翻译、GenDic 和子 agent 所用后端；空对象显式清除旧选择。 */
 export function getAgentTranslatorBackendContext(
   projectDir: string,
-): Pick<AgentBackendContext, 'translator_profile_name' | 'translator_profile_data'> {
+): Omit<AgentBackendContext, 'backend_profile_name' | 'backend_profile_data'> {
   const { name, profile } = resolveSelectedBackendProfile(projectDir);
+  const gendicName = getGenDicDefaultBackendProfile();
+  const subagentName = getSubagentDefaultBackendProfile();
+  const taskProfile = (selected: string) => {
+    const data = selected ? getBackendProfile(selected) : {};
+    if (!data) throw new UiError(uiMessage('errors:profiles.notFound', { name: selected }));
+    return data;
+  };
   return {
     ...(name ? { translator_profile_name: name } : {}),
     ...(profile ? { translator_profile_data: profile } : {}),
+    gendic_profile_name: gendicName,
+    gendic_profile_data: taskProfile(gendicName),
+    subagent_profile_name: subagentName,
+    subagent_profile_data: taskProfile(subagentName),
   };
 }
 

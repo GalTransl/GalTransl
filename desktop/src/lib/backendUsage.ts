@@ -2,10 +2,9 @@ import { t as translate } from "../i18n/core";
 /**
  * 「这次任务会用哪个后端」的统一口径。
  *
- * 开始翻译顶部显示当前后端用它，字典页「AI 生成 GPT 字典」的二次确认也用它——
- * 两处必须给出同一句话，否则用户会以为换了个地方启动就换了后端。
+ * 翻译任务按项目选择解析；字典页确认优先显示 GenDic 专属默认。
  */
-import { getSelectedBackendProfileDisplay, resolveSelectedBackendProfile } from './api';
+import { getGenDicDefaultBackendProfile, getSelectedBackendProfileDisplay, resolveGenDicBackendProfile, resolveSelectedBackendProfile } from './api';
 
 export type BackendUsageSummary = {
   backend: string;
@@ -86,4 +85,10 @@ export function summarizeBackendUsage(projectDir: string, projectBackendConfig: 
 export function formatBackendUsage(summary: BackendUsageSummary): string {
   if (!summary.backend) return translate("common:backendUsage.formatBackendUsage_message_notConfiguredBackend");
   return summary.model ? `${summary.backend} · ${summary.model}` : summary.backend;
+}
+
+export function summarizeGenDicBackendUsage(projectDir: string, projectBackendConfig: Record<string, unknown> | null): BackendUsageSummary {
+  if (!getGenDicDefaultBackendProfile()) return summarizeBackendUsage(projectDir, projectBackendConfig);
+  const { name, profile } = resolveGenDicBackendProfile(projectDir);
+  return { backend: name, profile: name, model: collectBackendModels(profile).model, missing: !profile };
 }

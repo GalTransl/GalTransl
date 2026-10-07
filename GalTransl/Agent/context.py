@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any, Sequence
 
@@ -140,7 +141,7 @@ def _estimate_message_tokens(message: dict[str, Any]) -> int:
 
 # 工具参数里"含密钥"的键：emit 成事件/写日志前换成占位。模型自己仍能传真实值
 # （它需要真配置才能起任务），但界面上的工具卡片与会话文件不该出现明文 token。
-_SECRET_TOOL_ARGS = ("backend_profile_data",)
+_SECRET_TOOL_ARGS = ("backend_profile_data", "translator_profile_data", "gendic_profile_data", "subagent_profile_data")
 
 
 def _sanitize_tool_args(args: dict[str, Any]) -> dict[str, Any]:
@@ -298,6 +299,26 @@ def _find_compaction_cut(messages: list[dict[str, Any]], keep_recent_tokens: int
     if not any(m.get("role") != "system" for m in messages[:cut]):
         return 0
     return cut
+
+
+def _history_fingerprint(messages: list[dict[str, Any]]) -> str:
+    """只保存历史的摘要，不把正文、工具参数或密钥复制进统计元信息。"""
+    encoded = json.dumps(messages, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _restore_usage_anchor(messages: list[dict[str, Any]], checkpoint: Any) -> tuple[int, int, str]:
+    """统计只能用于原请求对应的消息前缀；压缩、截断或改写后自动作废。"""
+    if not isinstance(checkpoint, dict):
+        return 0, 0, ""
+    tokens = checkpoint.get("prompt_tokens")
+    count = checkpoint.get("message_count")
+    if (type(tokens) is not int or tokens <= 0 or type(count) is not int
+            or not 0 < count <= len(messages)):
+        return 0, 0, ""
+    if checkpoint.get("fingerprint") != _history_fingerprint(messages[:count]):
+        return 0, 0, ""
+    return tokens, count, str(checkpoint.get("model") or "")
 
 
 def _restore_compacted_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -565,9 +586,12 @@ def _permission_decision_text(decision: str, name: str, reason: str) -> str:
 def _resume_context(**kwargs: Any) -> dict[str, Any]:
     """重启后"接着聊"要重放的前端上下文（token 不落盘，只能由请求带上）。
 
-    字段与 /api/agent/message 同一套；只带非空项——空值让 message() 沿用会话里已有的。
+    字段与 /api/agent/message 同一套；任务后端的空对象表示清除专属默认，None 才是未提供。
     """
-    return {key: value for key, value in kwargs.items() if value}
+    return {
+        key: value for key, value in kwargs.items()
+        if value or (key.startswith(("gendic_profile_", "subagent_profile_")) and value is not None)
+    }
 
 
 def _with_cache_control(message: dict[str, Any]) -> dict[str, Any]:

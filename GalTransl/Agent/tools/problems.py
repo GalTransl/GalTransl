@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import urllib.parse
 from typing import Any, Sequence, TYPE_CHECKING
@@ -111,6 +112,48 @@ def _is_valid_regex(pattern: str) -> bool:
     return True
 
 
+def _problem_filter_keywords(raw: Any, action: str, existing_keys: Sequence[str] = ()) -> list[str]:
+    """兼容模型重复编码的 JSON；删除时先匹配历史原值，保证坏规则仍能清理。"""
+    def unpack(value: Any, depth: int = 0) -> list[str]:
+        if depth > 8:
+            raise AgentToolError("keyword 的 JSON 嵌套过深，请传正则字符串或字符串数组")
+        if isinstance(value, list):
+            return [key for item in value for key in unpack(item, depth + 1)]
+        if not isinstance(value, str):
+            raise AgentToolError("keyword 必须是正则字符串或字符串数组，不能包含对象、数字或空值")
+        value = value.strip()
+        if not value:
+            return []
+        if action == "remove" and value in existing_keys:
+            return [value]
+        try:
+            decoded = json.loads(value)
+        except ValueError:
+            # 格式损坏的数组不能落入正则字符集语法，造成大范围误过滤。
+            if re.match(r'^[\[{]\s*"', value):
+                raise AgentToolError("keyword 中的 JSON 数组格式无效，请传完整的字符串数组")
+        else:
+            if isinstance(decoded, (str, list, dict)):
+                return unpack(decoded, depth + 1)
+        lines = value.splitlines()
+        if len(lines) > 1:
+            return [key for line in lines for key in unpack(line, depth + 1)]
+        return [value]
+
+    keywords = list(dict.fromkeys(unpack(raw)))
+    if not keywords:
+        raise AgentToolError("keyword is required for add/remove（字符串或字符串数组）")
+    if action == "add":
+        invalid = [k for k in keywords if not _is_valid_regex(k)]
+        if invalid:
+            raise AgentToolError(
+                "这些过滤项不是合法正则：" + "、".join(invalid)
+                + "。过滤项按正则匹配；想按字面过滤请转义特殊字符（\\. \\( \\[ \\*）。"
+            )
+
+    return keywords
+
+
 def _tool_manage_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """增/删/查项目配置 common.problemFilterKey（问题过滤关键字）。
 
@@ -132,18 +175,8 @@ def _tool_manage_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> An
         return _load_problem_filter_stats(runner, pid, keys, config_name)
 
     # keyword 支持单个字符串或字符串数组（一次增删多个）：去重保序、忽略空串
-    keywords = _parse_filter_keywords(args.get("keyword"))
-    if not keywords:
-        raise AgentToolError("keyword is required for add/remove（字符串或字符串数组）")
-    if action == "add":
-        invalid = [k for k in keywords if not _is_valid_regex(k)]
-        if invalid:
-            raise AgentToolError(
-                "这些过滤项不是合法正则：" + "、".join(invalid)
-                + "。过滤项按正则匹配；想按字面过滤请转义特殊字符（\\. \\( \\[ \\*）。"
-            )
-
     config, keys = _load_problem_filter_keys(runner, pid, config_name)
+    keywords = _problem_filter_keywords(args.get("keyword"), action, keys)
     hit, miss, changes = _plan_problem_filter(keys, action, keywords)
     if action == "add":
         hit_key, miss_key, miss_note = "added", "already_present", "已在列表中"

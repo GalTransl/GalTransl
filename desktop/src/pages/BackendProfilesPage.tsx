@@ -12,6 +12,12 @@ import { ProxyConfigEditor } from '../components/ProxyConfigEditor';
 import {
   AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
   DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
+  GENDIC_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
+  SUBAGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
+  getGenDicDefaultBackendProfile,
+  getSubagentDefaultBackendProfile,
+  setGenDicDefaultBackendProfile,
+  setSubagentDefaultBackendProfile,
   copyBackendProfile,
   createBackendProfile,
   deleteBackendProfile,
@@ -65,6 +71,8 @@ export function BackendProfilesPage() {
   const [error, setError] = useMessageState<string | null>(null);
   const [defaultProfile, setDefaultProfileState] = useState(getDefaultBackendProfile());
   const [agentDefaultProfile, setAgentDefaultState] = useState(getAgentDefaultBackendProfile());
+  const [gendicDefaultProfile, setGenDicDefaultState] = useState(getGenDicDefaultBackendProfile());
+  const [subagentDefaultProfile, setSubagentDefaultState] = useState(getSubagentDefaultBackendProfile());
 
   // Editor state
   const [editingName, setEditingName] = useState('');
@@ -99,6 +107,8 @@ export function BackendProfilesPage() {
       setProfiles(entries);
       setDefaultProfileState(getDefaultBackendProfile());
       setAgentDefaultState(getAgentDefaultBackendProfile());
+      setGenDicDefaultState(getGenDicDefaultBackendProfile());
+      setSubagentDefaultState(getSubagentDefaultBackendProfile());
     } catch (err) {
       setError(normalizeError(err, uiMessage("settings:backendProfilesPage.loadProfiles_normalizeError_loadBackendConfigFailed")));
     } finally {
@@ -110,13 +120,19 @@ export function BackendProfilesPage() {
     void loadProfiles();
   }, [loadProfiles]);
 
-  // 默认标签可能从别处改动（将来留口子），监听两个事件保持 badge 实时同步
+  // 默认标签可能从别处改动，监听事件保持 badge 实时同步。
   useEffect(() => {
     const onTranslatorDefault = (e: Event) => setDefaultProfileState((e as CustomEvent<string>).detail || '');
     const onAgentDefault = (e: Event) => setAgentDefaultState((e as CustomEvent<string>).detail || '');
+    const onGenDicDefault = () => setGenDicDefaultState(getGenDicDefaultBackendProfile());
+    const onSubagentDefault = () => setSubagentDefaultState(getSubagentDefaultBackendProfile());
+    window.addEventListener(GENDIC_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, onGenDicDefault);
+    window.addEventListener(SUBAGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, onSubagentDefault);
     window.addEventListener(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, onTranslatorDefault as EventListener);
     window.addEventListener(AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, onAgentDefault as EventListener);
     return () => {
+      window.removeEventListener(GENDIC_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, onGenDicDefault);
+      window.removeEventListener(SUBAGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, onSubagentDefault);
       window.removeEventListener(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, onTranslatorDefault as EventListener);
       window.removeEventListener(AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, onAgentDefault as EventListener);
     };
@@ -319,6 +335,7 @@ export function BackendProfilesPage() {
                   setDefaultProfileState(e.target.value);
                 }}
               >
+                <option value="">{translate("settings:backendProfilesPage.defaultNotSet")}</option>
                 {profiles.map((entry) => (
                   <option key={entry.name} value={entry.name}>
                     {formatProfileLabel(entry.name, entry.config)}
@@ -337,10 +354,31 @@ export function BackendProfilesPage() {
                   setAgentDefaultState(e.target.value);
                 }}
               >
+                <option value="">{translate("settings:backendProfilesPage.defaultNotSet")}</option>
                 {profiles.map((entry) => (
                   <option key={entry.name} value={entry.name}>
                     {formatProfileLabel(entry.name, entry.config)}
                   </option>
+                ))}
+              </CustomSelect>
+            </label>
+            <label className="field">
+              <span>{translate("settings:backendProfilesPage.field_message_gendicDefault")}</span>
+              <CustomSelect className="default-select" value={gendicDefaultProfile}
+                onChange={(e) => setGenDicDefaultBackendProfile(e.target.value)}>
+                <option value="">{translate("settings:backendProfilesPage.followTranslatorBackend")}</option>
+                {profiles.map((entry) => (
+                  <option key={entry.name} value={entry.name}>{formatProfileLabel(entry.name, entry.config)}</option>
+                ))}
+              </CustomSelect>
+            </label>
+            <label className="field">
+              <span>{translate("settings:backendProfilesPage.field_message_subagentDefault")}</span>
+              <CustomSelect className="default-select" value={subagentDefaultProfile}
+                onChange={(e) => setSubagentDefaultBackendProfile(e.target.value)}>
+                <option value="">{translate("settings:backendProfilesPage.followMainAgentBackend")}</option>
+                {profiles.map((entry) => (
+                  <option key={entry.name} value={entry.name}>{formatProfileLabel(entry.name, entry.config)}</option>
                 ))}
               </CustomSelect>
             </label>
@@ -410,6 +448,12 @@ export function BackendProfilesPage() {
                           )}
                           {agentDefaultProfile === entry.name && (
                             <span className="profile-card__badge profile-card__badge--agent">{translate("settings:backendProfilesPage.profileCardName_message_agentDefault")}</span>
+                          )}
+                          {gendicDefaultProfile === entry.name && (
+                            <span className="profile-card__badge">{translate("settings:backendProfilesPage.profileCardName_message_gendicDefault")}</span>
+                          )}
+                          {subagentDefaultProfile === entry.name && (
+                            <span className="profile-card__badge profile-card__badge--agent">{translate("settings:backendProfilesPage.profileCardName_message_subagentDefault")}</span>
                           )}
                           {/* 铅笔排在默认 pill 之后：之前插在名字右边会把两个 pill 顶开 */}
                           {renamingName !== entry.name && (

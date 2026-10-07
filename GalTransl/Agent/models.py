@@ -53,10 +53,14 @@ class AgentState:
     # 后端配置名（只存在前端 localStorage，故随 start/message 一起送过来）：
     # backend_profile_name = 本会话在用的那份（Agent 页选中的默认）；
     # translator_* = 翻译任务实际会用的那份（项目选择 → 否则全局默认）。
-    # 只用于「了解项目」如实报出实际后端；不落盘，重启后由下一次 message 补上。
+    # 用于任务分流和「了解项目」报告；不落盘，重启后由下一次请求补上。
     backend_profile_name: str = ""
     translator_profile_name: str = ""
     translator_profile_data: dict[str, Any] = field(default_factory=dict)
+    gendic_profile_name: str = ""
+    gendic_profile_data: dict[str, Any] = field(default_factory=dict)
+    subagent_profile_name: str = ""
+    subagent_profile_data: dict[str, Any] = field(default_factory=dict)
     # 权限模式（同样只存在前端 localStorage，随 start/message 送过来）：见 PERMISSION_MODES。
     # 不落盘，重启后由下一次 start/message 补上；拿不到就是默认的「每次询问」。
     permission_mode: str = DEFAULT_PERMISSION_MODE
@@ -92,6 +96,7 @@ class AgentState:
     session_id: str = ""
     title: str = ""
     # 上次 LLM 响应的 prompt_tokens，作为上下文用量估算的锚点（0 表示未知）
+    usage_model: str = ""  # token 统计所属模型；切换模型后不能沿用。
     last_prompt_tokens: int = 0
     # 锚点对应的历史长度：锚点之后新增的消息要另外估算
     anchored_message_count: int = 0

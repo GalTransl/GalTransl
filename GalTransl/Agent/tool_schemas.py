@@ -406,7 +406,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                             {"type": "string"},
                             {"type": "array", "items": {"type": "string"}},
                         ],
-                        "description": "add/remove 必填。要操作的过滤项（**正则**，如 \"缺失.*标点\"、\"^残留日文：♪\"）；命中问题项的任意位置即过滤，特殊字符需转义（\\. \\( \\[ \\*）。原则上只过滤小类：整类写法（如 \"残留日文\"）禁止使用。可传单个字符串，也可传数组一次操作多个。",
+                        "description": "add/remove 必填。要操作的过滤项（**正则**，如 \"缺失.*标点\"、\"^残留日文：♪\"）；命中问题项的任意位置即过滤，特殊字符需转义（\\. \\( \\[ \\*）。原则上只过滤小类：整类写法（如 \"残留日文\"）禁止使用。推荐单条传正则字符串，多条传真正的 JSON 字符串数组。也兼容被序列化成字符串的 JSON 数组或带额外 JSON 引号的字符串，工具会先解码、拆成独立正则，再统一校验和写入；以返回的 added/filter_keys 为准，不要为编码问题逐条重试。remove 优先删除与现有规则完全相同的原值，否则同样解码，兼容清理历史错误项。",
                     },
                     "reason": _REASON_PROPERTY,
                 },
@@ -602,7 +602,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "run_subagents",
             "description": (
-                f"并行派发独立上下文、受限工具的子代理，等待全部结束。proofread 默认直接修复分配范围内的译文、复查并保存修改记录；把可能需要二次审查的译文留批注并回报。explore 只读原文与 GPT 字典、不写文件。派前需明确校对或润色范围及 token 成本，已有明确授权无需重复询问，否则用 ask_user；派发校对即授权范围内修复，权限由派发门禁统一处理。一次最多{SUBAGENT_MAX_TASKS}个；file 选文件，count 切份，indexes 限制可修改范围，重叠的校对任务会被拒绝；count 展开的任务共用 brief。"
+                f"并行派发独立上下文、受限工具的子代理，等待全部结束。proofread 默认直接修复分配范围内的译文、复查并保存修改记录；把可能需要二次审查的译文留批注并回报。explore 只读原文与 GPT 字典、不写文件。处理大量 problem 时先用替换或译后字典批量修复并复核，仅对无法批量替换解决的剩余问题考虑并发 proofread。派前必须先用 ask_user 说明范围、并发数量与 token 成本，等待用户明确同意；自动放行或自动代答不算同意。派发校对包含范围内直接修复。一次最多{SUBAGENT_MAX_TASKS}个；file 选文件，count 切份，indexes 限制可修改范围，重叠的校对任务会被拒绝；count 展开的任务共用 brief。"
             ),
             "parameters": {
                 "type": "object",
@@ -632,7 +632,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                                 },
                                 "brief": {
                                     "type": "string",
-                                    "description": "可选。重点核对什么、注意哪些角色/术语；校对范围是只修硬伤 / 只润色 / 两者都要，没写默认只修硬伤。proofread 的全局与项目翻译规范自动注入 system prompt，无需在 brief 重复。已有用户授权无需重复询问，信息缺失才 ask_user。子代理直接修改有把握的句子，并反馈需二次审查的事项。count > 1 时 brief 由展开的任务共用。",
+                                    "description": "可选。重点核对什么、注意哪些角色/术语；校对范围是只修硬伤 / 只润色 / 两者都要，没写默认只修硬伤。proofread 的全局与项目翻译规范自动注入 system prompt，无需在 brief 重复。派发前必须先询问用户并取得对本次子代理方案的明确同意。子代理直接修改有把握的句子，并反馈需二次审查的事项。count > 1 时 brief 由展开的任务共用。",
                                 },
                             },
                             "required": ["agent"],

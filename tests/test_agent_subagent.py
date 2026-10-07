@@ -1600,7 +1600,7 @@ class ProofreadSuggestionModeTests(unittest.TestCase):
         prompt = rt.AGENT_SYSTEM_PROMPT
 
         self.assertIn("ask_user 问清意见类型", prompt)
-        self.assertIn("只写润色建议", prompt)
+        self.assertIn("只润色", prompt)
         self.assertIn("再把答案写进 brief", prompt)
 
 

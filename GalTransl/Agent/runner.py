@@ -10,8 +10,9 @@ import time
 import traceback
 from typing import Any, TYPE_CHECKING
 
+from GalTransl.Agent.llm_backend import SubagentBackendView, resolve_llm_backend, summarize_messages
 from GalTransl.Agent.session_store import SessionStore
-from GalTransl.Agent.backend_http import _encode_project_id, _http_json, _normalize_endpoint
+from GalTransl.Agent.backend_http import _encode_project_id, _http_json
 from GalTransl.Agent.context import (
     _DANGLING_TOOL_NOTE,
     _apply_prompt_cache,
@@ -20,17 +21,14 @@ from GalTransl.Agent.context import (
     _estimate_message_tokens,
     _estimate_usage_tokens,
     _find_compaction_cut,
+    _history_fingerprint,
     _is_internal_message,
     _keep_recent_tokens,
-    _llm_timeout,
     _local_fallback_summary,
     _messages_with_tool_placeholders,
-    _profile_context_window,
     _reasoning_echo,
     _render_archive_messages,
-    _resolve_prompt_caching,
     _sanitize_tool_args,
-    _serialize_for_summary,
     _strip_internal_fields,
     _tools_overhead_tokens,
 )
@@ -46,7 +44,6 @@ from GalTransl.Agent.core import (
     LLM_MAX_RETRIES,
     MAX_STEPS,
     REASONING_FIELD_NAMES,
-    SUMMARY_MAX_TOKENS,
     _ContextOverflow,
     _SUBAGENT_STEP_EVENTS,
     _TRANSIENT_EVENT_TYPES,
@@ -71,7 +68,6 @@ from GalTransl.Agent.permissions import (
 )
 from GalTransl.Agent.prompts import (
     COMPACT_INSTRUCTION_PROMPT,
-    COMPACT_SUMMARY_PROMPT,
     _build_system_prompt,
     _parse_compact_summary,
     _parse_compact_topics,
@@ -101,6 +97,8 @@ class AgentRunner:
         self.base_url = f"http://{host}:{port}"
         self.stop_event = stop_event or threading.Event()
         self._registry = registry
+        self._subagent_clients: list[Any] = []
+        self._clients_lock = threading.Lock()
         self._openai_client: Any = None
         self._model: str = ""
         self._context_window = DEFAULT_CONTEXT_WINDOW
@@ -234,53 +232,39 @@ class AgentRunner:
 
     # ---- OpenAI 客户端 ----
     def _resolve_llm(self) -> None:
-        """从 backend_profile_data 解析出 OpenAI 客户端与模型名。"""
-        _log("解析后端配置中…")
-        profile = self.state.backend_profile_data or {}
-        openai_section = profile.get("OpenAI-Compatible") or {}
-        if not isinstance(openai_section, dict):
-            raise RuntimeError("backend profile missing OpenAI-Compatible section")
-        tokens = openai_section.get("tokens") or []
-        if not isinstance(tokens, list) or not tokens:
-            raise RuntimeError("backend profile OpenAI-Compatible.tokens is empty")
-        first = tokens[0]
-        if not isinstance(first, dict):
-            raise RuntimeError("first token entry is not an object")
-        token = str(first.get("token", "")).strip()
-        endpoint = str(first.get("endpoint", "")).strip()
-        model = str(first.get("modelName", "")).strip()
-        if not token:
-            raise RuntimeError("backend profile token is empty (请先在「翻译后端配置」页填写 token)")
-        if not model:
-            raise RuntimeError("backend profile modelName is empty (请先在「翻译后端配置」页填写 modelName)")
-        # 上下文窗口：可选配置，缺省用默认值。用于压缩触发判断与界面用量指示。
-        self._context_window = _profile_context_window(profile)
-        self.state.context_window = self._context_window
-        base_url = _normalize_endpoint(endpoint)
-        # 提示缓存断点：后端配置里可选（auto/on/off），缺省 auto——只在 Anthropic 系
-        # 的端点上注入 cache_control，其余（DeepSeek 等）靠服务端自动前缀缓存。
-        self._prompt_caching = _resolve_prompt_caching(
-            openai_section.get("promptCaching"), model, base_url
-        )
-        masked = (token[:4] + "…" + token[-4:]) if len(token) > 8 else "***"
-        _log(
-            f"LLM 配置: model={model} endpoint={base_url} token={masked} "
-            f"context_window={self._context_window} prompt_caching={self._prompt_caching}"
-        )
+        """每回合创建主代理客户端，被停止关闭后不复用旧连接。"""
+        backend = resolve_llm_backend(self.state.backend_profile_data or {})
+        if self.state.usage_model and self.state.usage_model != backend.model:
+            self.state.last_prompt_tokens = 0
+            self.state.anchored_message_count = 0
+            self.state.usage_model = ""
+            if self._store is not None:
+                self._store.append_meta(context_usage_anchor=None)
+        self._openai_client = backend.client
+        self._model = backend.model
+        self._context_window = backend.context_window
+        self.state.context_window = backend.context_window
+        if self._store is not None:
+            self._store.append_meta(context_window=backend.context_window)
+        self._prompt_caching = backend.prompt_caching
+        _log(f"主 Agent 模型: {backend.model} context_window={backend.context_window} prompt_caching={backend.prompt_caching}")
+
+    @contextlib.contextmanager
+    def _subagent_backend(self, profile: dict[str, Any], stop_event: threading.Event):
+        """子代理连接独立持有，停止时关闭，任务结束后释放。"""
+        backend = resolve_llm_backend(profile)
+        client = backend.client
         try:
-            from openai import OpenAI
-        except ImportError as exc:  # pragma: no cover - 依赖缺失
-            raise RuntimeError("openai 包未安装，Agent 无法运行") from exc
-        # max_retries=0：关掉 SDK 的静默重试，改由 _stream_llm_response 自己按
-        # 退避重试，这样每一次重试都能作为事件推给界面（否则用户只看到长时间卡住）。
-        # timeout：默认 600s 的静默上限太长，停止要等这么久才生效（见 LLM_SILENCE_TIMEOUT）。
-        # 客户端是"每回合一份"：run() 第一步都会走到这里重建。上一回合若被停止打断，
-        # 那份已被 abort_in_flight() 关掉，复用会直接抛 RuntimeError（见该方法注释）。
-        self._openai_client = OpenAI(
-            api_key=token, base_url=base_url, max_retries=0, timeout=_llm_timeout()
-        )
-        self._model = model
-        _log("OpenAI 客户端就绪")
+            with self._clients_lock:
+                if stop_event.is_set():
+                    raise AgentStopRequested()
+                self._subagent_clients.append(client)
+            yield SubagentBackendView(self, backend, stop_event)
+        finally:
+            with self._clients_lock:
+                self._subagent_clients = [item for item in self._subagent_clients if item is not client]
+            with contextlib.suppress(Exception):
+                client.close()
 
     def abort_in_flight(self) -> None:
         """打断在途的 LLM 请求（等价于给请求发一个 abort 信号）。
@@ -291,15 +275,16 @@ class AgentRunner:
         close() 0ms 返回、在途读立即被打断）。主循环随即看到停止信号、按「用户停止」
         收尾，不必干等 read 超时（以前是 600s，现在 LLM_SILENCE_TIMEOUT 兜底）。
 
-        只关当前这一份，且 close() 不阻塞，可以在 HTTP 处理线程里同步调用。
+        关闭主代理和当前仍在运行的子代理连接，可在 HTTP 处理线程里同步调用。
         """
-        client = self._openai_client
-        if client is None:
-            return
-        try:
-            client.close()
-        except Exception as exc:  # noqa: BLE001 - 关不掉不影响停止语义（仍有静默超时兜底）
-            _log(f"关闭 LLM 客户端失败（忽略，仍按停止收尾）: {exc}")
+        with self._clients_lock:
+            clients = [self._openai_client, *self._subagent_clients]
+        for client in clients:
+            if client is not None:
+                try:
+                    client.close()
+                except Exception as exc:  # noqa: BLE001
+                    _log(f"关闭 LLM 客户端失败（忽略，仍按停止收尾）: {exc}")
 
     # ---- 主循环 ----
     def run(self) -> None:
@@ -905,9 +890,8 @@ class AgentRunner:
             usage = getattr(chunk, "usage", None)
             if usage is not None:
                 prompt_tokens = getattr(usage, "prompt_tokens", None)
-                if isinstance(prompt_tokens, int) and prompt_tokens > 0:
-                    self.state.last_prompt_tokens = prompt_tokens
-                    self.state.anchored_message_count = len(self.state.messages)
+                if isinstance(prompt_tokens, int) and prompt_tokens > 0 and self._pending_compaction is None:
+                    self._record_context_usage(prompt_tokens)
             if not getattr(chunk, "choices", None):
                 continue
             choice = chunk.choices[0]
@@ -990,6 +974,20 @@ class AgentRunner:
     def _request_overhead_tokens(self) -> int:
         """这次请求里 messages 之外的固定开销：tools schema（见 _tools_overhead_tokens）。"""
         return _tools_overhead_tokens(AGENT_TOOLS)
+
+    def _record_context_usage(self, prompt_tokens: int) -> None:
+        """持久化 provider 实测用量，重启后继续只估算新增消息。"""
+        messages = self.state.messages
+        self.state.last_prompt_tokens = prompt_tokens
+        self.state.anchored_message_count = len(messages)
+        self.state.usage_model = self._model
+        if self._store is not None:
+            self._store.append_meta(context_usage_anchor={
+                "prompt_tokens": prompt_tokens,
+                "message_count": len(messages),
+                "fingerprint": _history_fingerprint(messages),
+                "model": self._model,
+            }, context_window=self._context_window)
 
     def _estimate_context_tokens(self) -> int:
         """估算当前请求占用的 token 数（锚点法，见 _estimate_usage_tokens）。"""
@@ -1315,19 +1313,7 @@ class AgentRunner:
 
     def _summarize_messages(self, messages: list[dict[str, Any]]) -> str:
         """调 LLM 把一段历史压成结构化摘要（独立请求，非流式）。"""
-        conversation = _serialize_for_summary(messages)
-        prompt = COMPACT_SUMMARY_PROMPT.replace("{conversation}", conversation)
-        resp = self._openai_client.chat.completions.create(
-            model=self._model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-            max_tokens=SUMMARY_MAX_TOKENS,
-            stream=False,
-        )
-        if not getattr(resp, "choices", None):
-            return ""
-        content = getattr(resp.choices[0].message, "content", None)
-        return str(content or "")
+        return summarize_messages(self._openai_client, self._model, messages)
 
     # ---- 工具分发 ----
     def _dispatch_tool(self, name: str, args: dict[str, Any]) -> Any:

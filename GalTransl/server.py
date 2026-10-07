@@ -3485,6 +3485,16 @@ def build_handler(registry: JobRegistry):
                             if isinstance(translator_profile_data, dict)
                             else None
                         ),
+                        gendic_profile_name=str(payload.get("gendic_profile_name", "") or ""),
+                        gendic_profile_data=(
+                            payload["gendic_profile_data"]
+                            if isinstance(payload.get("gendic_profile_data"), dict) else None
+                        ),
+                        subagent_profile_name=str(payload.get("subagent_profile_name", "") or ""),
+                        subagent_profile_data=(
+                            payload["subagent_profile_data"]
+                            if isinstance(payload.get("subagent_profile_data"), dict) else None
+                        ),
                         permission_mode=permission_mode,
                     )
                     self._send_json(status)
@@ -3554,6 +3564,16 @@ def build_handler(registry: JobRegistry):
                             if isinstance(translator_profile_data, dict)
                             else None
                         ),
+                        gendic_profile_name=str(payload.get("gendic_profile_name", "") or ""),
+                        gendic_profile_data=(
+                            payload["gendic_profile_data"]
+                            if isinstance(payload.get("gendic_profile_data"), dict) else None
+                        ),
+                        subagent_profile_name=str(payload.get("subagent_profile_name", "") or ""),
+                        subagent_profile_data=(
+                            payload["subagent_profile_data"]
+                            if isinstance(payload.get("subagent_profile_data"), dict) else None
+                        ),
                         permission_mode=str(payload.get("permission_mode", "") or ""),
                     ))
                 except ValueError as exc:
@@ -3592,6 +3612,16 @@ def build_handler(registry: JobRegistry):
                             translator_profile_data
                             if isinstance(translator_profile_data, dict)
                             else None
+                        ),
+                        gendic_profile_name=str(payload.get("gendic_profile_name", "") or ""),
+                        gendic_profile_data=(
+                            payload["gendic_profile_data"]
+                            if isinstance(payload.get("gendic_profile_data"), dict) else None
+                        ),
+                        subagent_profile_name=str(payload.get("subagent_profile_name", "") or ""),
+                        subagent_profile_data=(
+                            payload["subagent_profile_data"]
+                            if isinstance(payload.get("subagent_profile_data"), dict) else None
                         ),
                         permission_mode=str(payload.get("permission_mode", "") or ""),
                     ))
@@ -3652,6 +3682,16 @@ def build_handler(registry: JobRegistry):
                             translator_profile_data
                             if isinstance(translator_profile_data, dict)
                             else None
+                        ),
+                        gendic_profile_name=str(payload.get("gendic_profile_name", "") or ""),
+                        gendic_profile_data=(
+                            payload["gendic_profile_data"]
+                            if isinstance(payload.get("gendic_profile_data"), dict) else None
+                        ),
+                        subagent_profile_name=str(payload.get("subagent_profile_name", "") or ""),
+                        subagent_profile_data=(
+                            payload["subagent_profile_data"]
+                            if isinstance(payload.get("subagent_profile_data"), dict) else None
                         ),
                         permission_mode=str(payload.get("permission_mode", "") or ""),
                     )

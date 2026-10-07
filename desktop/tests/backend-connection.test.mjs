@@ -82,6 +82,75 @@ test('localized profile copies preserve model values and rename updates saved re
   }
 });
 
+function taskBackendApi() {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  };
+  return { ...loadApi({ native: false, storage }), storage };
+}
+
+test('four backend defaults persist independently and track profile rename/delete', async () => {
+  const { api, storage } = taskBackendApi();
+  const defaults = ['Default', 'AgentDefault', 'GenDicDefault', 'SubagentDefault'];
+  await api.createBackendProfile('first', { 'OpenAI-Compatible': { tokens: [] } });
+  for (const role of defaults) assert.equal(api[`get${role}BackendProfile`](), 'first');
+  for (const role of defaults) {
+    await api.createBackendProfile(role, { 'OpenAI-Compatible': { tokens: [{ modelName: role }] } });
+    api[`set${role}BackendProfile`](role);
+  }
+  const reloaded = loadApi({ native: false, storage }).api;
+  for (const role of defaults) assert.equal(reloaded[`get${role}BackendProfile`](), role);
+  await api.renameBackendProfile('GenDicDefault', 'dictionary');
+  assert.equal(api.getGenDicDefaultBackendProfile(), 'dictionary');
+  assert.equal(api.getSubagentDefaultBackendProfile(), 'SubagentDefault');
+  await api.deleteBackendProfile('SubagentDefault');
+  assert.equal(api.getSubagentDefaultBackendProfile(), '');
+  assert.equal(api.getAgentDefaultBackendProfile(), 'AgentDefault');
+  await api.deleteBackendProfile('dictionary');
+  assert.equal(api.getGenDicDefaultBackendProfile(), '');
+  assert.equal(api.getDefaultBackendProfile(), 'Default');
+});
+
+test('GenDic submission and agent request contexts use the independent defaults', async () => {
+  const { api, requestOptions } = taskBackendApi();
+  for (const name of ['translator', 'main', 'dictionary', 'child']) {
+    await api.createBackendProfile(name, { 'OpenAI-Compatible': { tokens: [{ modelName: name, token: `test-${name}` }] } });
+  }
+  api.setDefaultBackendProfile('translator');
+  api.setAgentDefaultBackendProfile('main');
+  api.setGenDicDefaultBackendProfile('dictionary');
+  api.setSubagentDefaultBackendProfile('child');
+  const model = (profile) => profile['OpenAI-Compatible'].tokens[0].modelName;
+  const payload = { project_dir: 'project', config_file_name: 'config.yaml', ...api.getSelectedBackendProfileJobPayload('project') };
+  await api.submitJob({ ...payload, translator: 'GenDic' });
+  assert.equal(model(JSON.parse(requestOptions.at(-1).body).backend_profile_data), 'dictionary');
+  await api.submitJob({ ...payload, translator: 'auto-translate' });
+  assert.equal(model(JSON.parse(requestOptions.at(-1).body).backend_profile_data), 'translator');
+  const context = api.getAgentTranslatorBackendContext('project');
+  assert.equal(model(context.translator_profile_data), 'translator');
+  assert.equal(model(context.gendic_profile_data), 'dictionary');
+  assert.equal(model(context.subagent_profile_data), 'child');
+  assert.equal(context.backend_profile_data, undefined); // Main agent still uses its session selector.
+  const backendUsage = createTypeScriptLoader({}, { './api': api })(new URL('../src/lib/backendUsage.ts', import.meta.url));
+  assert.equal(backendUsage.summarizeGenDicBackendUsage('project', null).model, 'dictionary');
+  api.setGenDicDefaultBackendProfile('');
+  api.setSubagentDefaultBackendProfile('');
+  await api.submitJob({ ...payload, translator: 'GenDic' });
+  assert.equal(model(JSON.parse(requestOptions.at(-1).body).backend_profile_data), 'translator');
+  assert.equal(backendUsage.summarizeGenDicBackendUsage('project', null).model, 'translator');
+  const cleared = api.getAgentTranslatorBackendContext('project');
+  assert.equal(cleared.gendic_profile_name, '');
+  assert.equal(cleared.subagent_profile_name, '');
+  assert.equal(JSON.stringify(cleared.gendic_profile_data), '{}');
+  assert.equal(JSON.stringify(cleared.subagent_profile_data), '{}');
+  api.setGenDicDefaultBackendProfile('missing');
+  await assert.rejects(api.submitJob({ ...payload, translator: 'GenDic' }));
+  assert.throws(() => api.getAgentTranslatorBackendContext('project'));
+});
+
 test('plugin settings can save and re-extract within the same project', async () => {
   const { api, requests, requestOptions } = loadApi({ native: false });
   const config = { plugin: { filePlugin: 'file_msgtool_script', file_msgtool_script: { source_encoding: 'utf8' } } };

@@ -12,9 +12,12 @@ import {
   getSelectedBackendProfileJobPayload,
   saveProjectDictionaryFile,
   submitJob,
-  type DictionaryCategory
+  type DictionaryCategory,
+  BACKEND_PROFILES_CHANGE_EVENT,
+  DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
+  GENDIC_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
 } from '../lib/api';
-import { summarizeBackendUsage } from '../lib/backendUsage';
+import { summarizeGenDicBackendUsage } from '../lib/backendUsage';
 import { normalizeError } from '../lib/errors';
 
 const DICT_POLL_INTERVAL_MS = 3000;
@@ -50,8 +53,7 @@ export function ProjectDictionaryPage({
   const [projectBackendConfig, setProjectBackendConfig] = useState<Record<string, unknown> | null>(null);
   const currentSnapshot = useMemo(() => buildDictionarySnapshot(data), [data]);
 
-  // GenDic 用的是项目选择的那个后端（没单独指定就跟随全局默认），跟开始翻译同一套口径：
-  // 二次确认里要如实写出来用的是哪个后端
+  // GenDic 优先使用专属默认；未单独指定时跟随项目翻译器后端。
   useEffect(() => {
     if (!projectId) {
       setProjectBackendConfig(null);
@@ -76,9 +78,16 @@ export function ProjectDictionaryPage({
     };
   }, [projectId, configFileName]);
 
+  const [backendRevision, setBackendRevision] = useState(0);
+  useEffect(() => {
+    const refresh = () => setBackendRevision((revision) => revision + 1);
+    const events = [BACKEND_PROFILES_CHANGE_EVENT, DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, GENDIC_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, 'storage'];
+    events.forEach((event) => window.addEventListener(event, refresh));
+    return () => events.forEach((event) => window.removeEventListener(event, refresh));
+  }, []);
   const gendicBackend = useMemo(
-    () => (projectDir ? summarizeBackendUsage(projectDir, projectBackendConfig) : null),
-    [uiLanguage, projectDir, projectBackendConfig],
+    () => (projectDir ? summarizeGenDicBackendUsage(projectDir, projectBackendConfig) : null),
+    [uiLanguage, projectDir, projectBackendConfig, backendRevision, active],
   );
 
   const loadData = useCallback(async (options?: { silent?: boolean }) => {

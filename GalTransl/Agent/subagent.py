@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from contextlib import nullcontext
 import fnmatch
 import json
 import os
@@ -1018,7 +1019,7 @@ class SubAgentRunner:
     # ---- 上下文窗口复用与压缩 ----
 
     def _parent_context_window(self) -> int:
-        """复用父 Agent 解析出的上下文窗口：同一个后端配置，子代理没理由再解析一遍。"""
+        """读取实际后端的窗口；单独配置时 parent 是子代理后端视图。"""
         try:
             window = int(getattr(self.parent, "_context_window", 0) or 0)
         except (TypeError, ValueError):
@@ -1257,7 +1258,7 @@ class SubAgentRunner:
             },
         )
         if client is None or not model:
-            return self._finish("failed", "", error="主 Agent 的后端还没就绪，子代理起不来")
+            return self._finish("failed", "", error="子 agent 的后端还没就绪")
         system_prompt = self.role.prompt
         if self.agent == SUBAGENT_AGENT_PROOFREAD:
             try:
@@ -1639,6 +1640,9 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
     lock = threading.Lock()
     base = os.urandom(8).hex()
     first_response = threading.Event()
+    # 同一批子代理固定使用同一份后端配置，保证缓存前缀与模型一致。
+    backend_profile = copy.deepcopy(getattr(runner.state, "subagent_profile_data", {}) or {})
+    has_backend_override = bool(backend_profile or getattr(runner.state, "subagent_profile_name", ""))
 
     def work(slot: int, task: dict[str, Any]) -> None:
         if slot > 0:
@@ -1651,18 +1655,23 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
         if stop_event.is_set():
             return
         try:
-            sub = SubAgentRunner(
-                runner,
-                agent=task["agent"],
-                files=task["files"],
-                indexes=task["indexes"],
-                brief=task["brief"],
-                delegation_id=f"{base}-{slot + 1:02d}",
-                guidelines=guidelines,
-                first_response_event=first_response if slot == 0 else None,
+            backend_context = (
+                runner._subagent_backend(backend_profile, stop_event)
+                if has_backend_override else nullcontext(runner)
             )
-            running[slot] = sub
-            out = sub.run()
+            with backend_context as backend_parent:
+                sub = SubAgentRunner(
+                    backend_parent,
+                    agent=task["agent"],
+                    files=task["files"],
+                    indexes=task["indexes"],
+                    brief=task["brief"],
+                    delegation_id=f"{base}-{slot + 1:02d}",
+                    guidelines=guidelines,
+                    first_response_event=first_response if slot == 0 else None,
+                )
+                running[slot] = sub
+                out = sub.run()
         except Exception as exc:  # noqa: BLE001 - 子代理自己崩了只影响它这一格
             _log(f"  🧑‍🎓 子代理 {slot + 1} 起不来或崩了: {exc}")
             out = {
@@ -1674,7 +1683,7 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
                 ),
                 "files": list(task["files"]),
                 "indexes": task["indexes"],
-                "status": "failed",
+                "status": "stopped" if stop_event.is_set() else "failed",
                 "report": "",
                 "turns": 0,
                 "tool_calls": 0,

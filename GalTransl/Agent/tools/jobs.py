@@ -19,8 +19,9 @@ if TYPE_CHECKING:
 def _tool_start_translation(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """启动翻译任务。
 
-    后端必须用**翻译任务会用的那份**（前端按「项目选择 → 否则全局『翻译器默认』」送来，
-    见 state.translator_profile_data），不能用 Agent 自己那份——否则任务会拿着 Agent 的
+    GenDic 优先使用独立的字典默认后端；其余任务使用翻译器后端。
+    翻译器后端由前端按「项目选择 → 否则全局『翻译器默认』」送来，
+    见 state.translator_profile_data。不能用 Agent 自己那份——否则任务会拿着 Agent 的
     模型跑，可用性检测也跟着测错模型（用户就是这么发现的）。只有前端没送来时才回落到
     Agent 那份，并在返回里说明。
     """
@@ -32,6 +33,13 @@ def _tool_start_translation(runner: AgentRunner, args: dict[str, Any]) -> Any:
     )
     state = runner.state
     profile = state.translator_profile_data or state.backend_profile_data
+    profile_name = state.translator_profile_name if state.translator_profile_data else state.backend_profile_name
+    uses_gendic_default = translator == "GenDic" and bool(state.gendic_profile_name or state.gendic_profile_data)
+    if uses_gendic_default:
+        if not state.gendic_profile_data:
+            raise AgentToolError("GenDic 默认后端配置为空，请先配置模型和 token")
+        profile = state.gendic_profile_data
+        profile_name = state.gendic_profile_name
     body = {
         "project_dir": state.project_dir,
         "config_file_name": state.config_file_name,
@@ -46,7 +54,7 @@ def _tool_start_translation(runner: AgentRunner, args: dict[str, Any]) -> Any:
         if not body["input_files"]:
             raise AgentToolError("files 里没有有效的文件名")
     result = runner._http_post("/api/jobs", body)
-    used = _backend_summary(profile, state.translator_profile_name)
+    used = _backend_summary(profile, profile_name)
     out: dict[str, Any] = {
         "job_id": result.get("job_id"),
         "status": result.get("status"),
@@ -55,7 +63,7 @@ def _tool_start_translation(runner: AgentRunner, args: dict[str, Any]) -> Any:
         "backend": used,
         **({"files": body["input_files"]} if files is not None else {}),
     }
-    if not state.translator_profile_data:
+    if not uses_gendic_default and not state.translator_profile_data:
         out["note"] = (
             "没拿到「翻译任务会用」的后端配置（前端没随消息送 translator_profile_data，"
             "通常是项目选择或全局「翻译器默认」那份），"

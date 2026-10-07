@@ -1,7 +1,10 @@
+import json
 import unittest
 from types import SimpleNamespace
 
 from GalTransl.Agent.runtime import AGENT_TOOLS, AgentToolError, _tool_manage_problem_filter
+from GalTransl.Agent.tools.preview import _preview_problem_filter
+from GalTransl.ProblemFilter import filter_problem_text
 
 
 class _Runner:
@@ -138,6 +141,97 @@ class ManageProblemFilterKeywordArrayTests(unittest.TestCase):
         runner = _Runner(["("])
         result = _tool_manage_problem_filter(runner, {"action": "remove", "keyword": ["("]})
         self.assertEqual(result["removed"], ["("])
+
+
+class EncodedFilterInputTests(unittest.TestCase):
+    patterns = ["^GPT字典未使用", "^项目GPT字典-生成未使用", "^项目GPT字典未使用"]
+
+    def test_encoded_inputs_are_decoded_before_preview_and_write(self):
+        encoded = json.dumps(self.patterns, ensure_ascii=False)
+        cases = [(json.dumps(self.patterns[0], ensure_ascii=False), self.patterns[:1]),
+                 (json.dumps(self.patterns[:1]), self.patterns[:1]), (encoded, self.patterns),
+                 (json.dumps(self.patterns, ensure_ascii=False, indent=2), self.patterns),
+                 ([self.patterns[0], encoded], self.patterns),
+                 (self.patterns[0] + "\n" + encoded, self.patterns),
+                 (json.dumps(encoded), self.patterns)]
+        for raw, expected in cases:
+            with self.subTest(raw=raw):
+                runner = _Runner()
+                args = {"action": "add", "keyword": raw}
+                preview = _preview_problem_filter(runner, args)
+                result = _tool_manage_problem_filter(runner, args)
+                self.assertEqual(result["added"], expected)
+                self.assertEqual(result["count"], len(expected))
+                self.assertEqual(preview["changes"], result["changes"])
+                self.assertEqual(runner.config["common"]["problemFilterKey"], expected)
+                # 用户给出的三个词仍只过滤字典问题，不能变成一个巨大的正则字符集。
+                text = "GPT字典未使用：A, 本无括号, 本无冒号, 比日文长：1.5倍"
+                self.assertEqual(filter_problem_text(text, result["filter_keys"]),
+                                 "本无括号, 本无冒号, 比日文长：1.5倍")
+                again = _tool_manage_problem_filter(runner, args)
+                self.assertNotIn("changes", again)
+                self.assertEqual(len(runner.puts), 1)
+
+    def test_invalid_encoded_batch_is_rejected_atomically(self):
+        too_deep = self.patterns
+        for _ in range(10):
+            too_deep = json.dumps(too_deep)
+        cases = [{"patterns": self.patterns}, ["^合法规则", 42],
+                 json.dumps(["^合法规则", None]), json.dumps(["^合法规则", "("]),
+                 '["^GPT字典未使用",', too_deep]
+        for raw in cases:
+            with self.subTest(raw=str(raw)[:80]):
+                runner = _Runner(["^已有规则"])
+                args = {"action": "add", "keyword": raw}
+                self.assertIsNone(_preview_problem_filter(runner, args))
+                with self.assertRaises(AgentToolError):
+                    _tool_manage_problem_filter(runner, args)
+                self.assertEqual(runner.puts, [])
+                self.assertEqual(runner.config["common"]["problemFilterKey"], ["^已有规则"])
+
+    def test_encoded_remove_uses_decoded_keys_unless_original_rule_exists(self):
+        encoded = json.dumps(self.patterns)
+        runner = _Runner(self.patterns)
+        args = {"action": "remove", "keyword": encoded}
+        preview = _preview_problem_filter(runner, args)
+        result = _tool_manage_problem_filter(runner, args)
+        self.assertEqual(result["removed"], self.patterns)
+        self.assertEqual(result["filter_keys"], [])
+        self.assertEqual(preview["changes"], result["changes"])
+        runner = _Runner([encoded, *self.patterns])
+        result = _tool_manage_problem_filter(runner, args)
+        self.assertEqual(result["removed"], [encoded])
+        self.assertEqual(result["filter_keys"], self.patterns)
+
+    def test_real_array_filters_only_requested_dictionary_problems(self):
+        runner = _Runner()
+        args = {"action": "add", "keyword": self.patterns}
+        preview = _preview_problem_filter(runner, args)
+        result = _tool_manage_problem_filter(runner, args)
+        self.assertEqual(result["count"], 3)
+        self.assertEqual(preview["changes"], result["changes"])
+        text = "GPT字典未使用：A, 项目GPT字典-生成未使用：B, 项目GPT字典未使用：C, 本无括号, 本无冒号, 比日文长：1.5倍"
+        self.assertEqual(filter_problem_text(text, runner.config["common"]["problemFilterKey"]),
+                         "本无括号, 本无冒号, 比日文长：1.5倍")
+
+    def test_bad_saved_rules_remain_visible_and_removable_by_exact_value(self):
+        for bad in (json.dumps(self.patterns[0], ensure_ascii=False), json.dumps(self.patterns, ensure_ascii=False)):
+            with self.subTest(bad=bad):
+                runner = _Runner([bad, "^合法规则"])
+                self.assertEqual(_tool_manage_problem_filter(runner, {"action": "list"})["filter_keys"][0], bad)
+                args = {"action": "remove", "keyword": bad}
+                preview = _preview_problem_filter(runner, args)
+                result = _tool_manage_problem_filter(runner, args)
+                self.assertEqual(result["removed"], [bad])
+                self.assertEqual(result["filter_keys"], ["^合法规则"])
+                self.assertEqual(preview["changes"], result["changes"])
+
+    def test_regex_character_classes_and_escaped_quotes_still_work(self):
+        patterns = [r"^[AB]类", r"^\[标记\]", r'\"带引号\"']
+        runner = _Runner()
+        _tool_manage_problem_filter(runner, {"action": "add", "keyword": patterns})
+        self.assertEqual(filter_problem_text('A类问题, [标记]问题, "带引号"问题, 本无括号',
+                                            runner.config["common"]["problemFilterKey"]), "本无括号")
 
 
 class ManageProblemFilterPromptTests(unittest.TestCase):

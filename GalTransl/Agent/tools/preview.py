@@ -17,7 +17,7 @@ from GalTransl.Agent.models import AgentToolError
 from GalTransl.Agent.tools.dicts import _dict_new_lines, _dict_save_plan
 from GalTransl.Agent.tools.names import _name_table_changes
 from GalTransl.Agent.tools.problems import (
-    _is_valid_regex,
+    _problem_filter_keywords,
     _load_problem_filter_keys,
     _load_problem_white_list,
     _parse_filter_keywords,
@@ -203,14 +203,13 @@ def _preview_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> dict[s
     action = str(args.get("action", "")).strip()
     if action not in ("add", "remove"):
         return None
-    keywords = _parse_filter_keywords(args.get("keyword"))
-    if not keywords:
-        return None
-    if action == "add" and any(not _is_valid_regex(k) for k in keywords):
-        return None  # 真执行会因正则不合法报错，卡上不必先画一份不会发生的变更
     pid = runner._project_id()
     config_name = runner.state.config_file_name or DEFAULT_CONFIG_FILE
     _, keys = _load_problem_filter_keys(runner, pid, config_name)
+    try:
+        keywords = _problem_filter_keywords(args.get("keyword"), action, keys)
+    except AgentToolError:
+        return None  # 真执行会拒绝无效参数，不展示不会发生的变更。
     _, _, changes = _plan_problem_filter(keys, action, keywords)
     if not changes:
         return None  # 全都在清单里（或本来就不在）：这次调用不会改变什么
