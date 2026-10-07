@@ -10,17 +10,17 @@ from unittest.mock import AsyncMock, patch
 
 from GalTransl.Backend.BaseTranslate import BaseTranslate, _CHATBOT_STATE
 from GalTransl.Backend.ForGalJsonTranslate import ForGalJsonTranslate
-from GalTransl.Backend.ForGalTsvTranslate import ForGalTsvTranslate
+from GalTransl.Backend.ForGalMarkdownTranslate import ForGalMarkdownTranslate, parse_markdown_row, markdown_row
 from GalTransl.Backend.ForNovelTranslate import ForNovelTranslate
 from GalTransl.Backend.Prompts import (
-    FORGAL_JSON_TRANS_PROMPT, FORGAL_TSV_TRANS_PROMPT_EN, FORNOVEL_TRANS_PROMPT_EN,
+    FORGAL_JSON_TRANS_PROMPT, FORGAL_MARKDOWN_TRANS_PROMPT_EN, FORNOVEL_TRANS_PROMPT_EN,
 )
 from GalTransl.CSentense import CSentense
 
 
 ENGINES = (
     (ForGalJsonTranslate, FORGAL_JSON_TRANS_PROMPT),
-    (ForGalTsvTranslate, FORGAL_TSV_TRANS_PROMPT_EN),
+    (ForGalMarkdownTranslate, FORGAL_MARKDOWN_TRANS_PROMPT_EN),
     (ForNovelTranslate, FORNOVEL_TRANS_PROMPT_EN),
 )
 
@@ -77,10 +77,14 @@ class Model:
                 sig, obj = match.groups()
                 obj = json.loads(obj)
                 rows.append(sig + "|" + json.dumps({"id": obj["id"], "dst": "translated-" + obj["src"]}))
+            elif isinstance(self.engine, ForGalMarkdownTranslate):
+                cells = parse_markdown_row(line)
+                if cells and len(cells) == 3 and cells[0].isdigit():
+                    rows.append(markdown_row(cells[0], cells[1], "translated-" + cells[2]))
             elif line and line.rsplit("\t", 1)[-1].isdigit():
                 src = line.split("\t")[-2]
                 index = line.rsplit("\t", 1)[-1]
-                prefix = "null\t" if isinstance(self.engine, ForGalTsvTranslate) else ""
+                prefix = "null\t" if isinstance(self.engine, ForGalMarkdownTranslate) else ""
                 rows.append(prefix + "translated-" + src + "\t" + index)
         action = self.actions.pop(0) if self.actions else None
         if isinstance(action, BaseException):
@@ -89,6 +93,8 @@ class Model:
             rows = ["invalid response"]
         elif action == "partial":
             rows = rows[:1]
+        if isinstance(self.engine, ForGalMarkdownTranslate) and action != "bad":
+            rows = ["| ID | NAME | DST |", "| --- | --- | --- |"] + rows
         reasoning = "" if action == "no-reasoning" else f"thinking-{len(self.requests)}"
         kwargs["reasoning_holder"].update(field=self.reasoning_field, text=reasoning)
         await asyncio.sleep(0)  # 让并发请求实际交错

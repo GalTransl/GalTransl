@@ -49,6 +49,21 @@ class _Runner:
 
 
 class StartTranslationBackendTests(unittest.TestCase):
+    def test_auto_is_first_and_agent_defaults_to_auto(self) -> None:
+        from GalTransl import TRANSLATOR_SUPPORTED
+        from GalTransl.Agent.prompts import AGENT_SYSTEM_PROMPT
+        from GalTransl.Agent.tool_schemas import AGENT_TOOLS
+
+        self.assertEqual(next(iter(TRANSLATOR_SUPPORTED)), "auto-translate")
+        self.assertIn('start_translation(translator="auto-translate"', AGENT_SYSTEM_PROMPT)
+        schema = next(tool["function"] for tool in AGENT_TOOLS if tool["function"]["name"] == "start_translation")
+        self.assertNotIn("translator", schema["parameters"]["required"])
+        for args in ({}, {"translator": ""}, {"translator": "auto-translate"}):
+            runner = _Runner(translator_profile_data=TRANSLATOR_PROFILE)
+            result = _tool_start_translation(runner, args)
+            self.assertEqual(result["translator"], "auto-translate")
+            self.assertEqual(runner.posts[0][1]["translator"], "auto-translate")
+
     def test_forgal_tool_is_advertised_and_submitted_with_canonical_name(self) -> None:
         from GalTransl import TRANSLATOR_SUPPORTED
         from GalTransl.Agent.prompts import AGENT_SYSTEM_PROMPT

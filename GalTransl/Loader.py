@@ -33,6 +33,7 @@ def load_transList(json_path_or_list: Union[str, list]) -> Tuple[CTransList, lis
     if not isinstance(json_list, list):
         raise ValueError("解析后的JSON不是列表格式")
 
+    file_has_name = any(isinstance(item, dict) and ("name" in item or "names" in item) for item in json_list)
     for i, item in enumerate(json_list):
         if not isinstance(item, dict):
             raise ValueError(f"JSON列表中的第{i+1}项不是字典格式")
@@ -44,6 +45,7 @@ def load_transList(json_path_or_list: Union[str, list]) -> Tuple[CTransList, lis
         pre_src = item["message"]
         index = item.get("index", i + 1)
         tmp_tran = CSentense(pre_src, name, index)
+        tmp_tran.source_file_has_name = file_has_name
         
         # 链接上下文
         if trans_list:

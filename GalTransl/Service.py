@@ -210,6 +210,8 @@ async def run_job_async(
 
         # Apply prompt template overrides from job spec
         prompt_overrides = spec.prompt_template_overrides or {}
+        if spec.translator == "auto-translate":
+            cfg.keyValues["internals.auto_translate.prompt_overrides"] = prompt_overrides
         template_override = prompt_overrides.get(spec.translator)
         if isinstance(template_override, dict):
             system_prompt_override = template_override.get("system_prompt")

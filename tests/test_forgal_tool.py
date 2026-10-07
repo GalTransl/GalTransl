@@ -18,6 +18,17 @@ from test_translation_multiturn import sentences, translator
 from test_translate_stream_progress import _make_engine, _StreamResponse
 
 
+def tool_input_rows(prompt):
+    from GalTransl.Backend.ForGalMarkdownTranslate import parse_markdown_row
+    rows = []
+    for line in prompt.split("<input>")[-1].split("</input>")[0].splitlines():
+        cells = parse_markdown_row(line)
+        if cells and re.fullmatch(r"[a-z0-9]{3}\|[0-9]+", cells[0]):
+            sig, index = cells[0].split("|")
+            rows.append((sig, {"id": int(index), "src": cells[-1]}))
+    return rows
+
+
 def function_call(name, text, call_id="c1"):
     return {"id": call_id, "type": "function", "function": {
         "name": name, "arguments": json.dumps({"patch": text}, ensure_ascii=False),
@@ -117,9 +128,7 @@ class TranslationToolTests(unittest.IsolatedAsyncioTestCase):
         async def model(**kwargs):
             messages = kwargs["messages"]
             requests.append(copy.deepcopy(messages))
-            rows = [(sig, json.loads(obj)) for sig, obj in re.findall(
-                r'(?m)^([a-z0-9]{3})\|(\{"id"[^\n]+)', messages[1]["content"],
-            )]
+            rows = tool_input_rows(messages[1]["content"])
             # 每轮都先返回一个空参数调用，再返回无名称的实际 patch，复现日志。
             step = sum(m["role"] == "tool" for m in messages) // 2
             first_batch = rows[0][1]["id"] == 1
@@ -156,9 +165,7 @@ class TranslationToolTests(unittest.IsolatedAsyncioTestCase):
         async def model(**kwargs):
             messages = kwargs["messages"]
             requests.append(copy.deepcopy(messages))
-            rows = [(sig, json.loads(obj)) for sig, obj in re.findall(
-                r'(?m)^([a-z0-9]{3})\|(\{"id"[^\n]+)', messages[1]["content"],
-            )]
+            rows = tool_input_rows(messages[1]["content"])
             step = sum(m["role"] == "tool" for m in messages)
             if step == 0:
                 starts.append(rows[0][1]["id"])
@@ -179,8 +186,8 @@ class TranslationToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(requests), 7)
         self.assertEqual(published, list(range(1, 65)))
         self.assertEqual([item.pre_dst for item in result], [f"translated-{i}" for i in range(1, 65)])
-        next_rows = re.findall(r'(?m)^([a-z0-9]{3})\|(\{"id"[^\n]+)', requests[0][1]["content"])[16:]
-        next_keys = ", ".join(f"{sig}|{json.loads(obj)['id']}" for sig, obj in next_rows)
+        next_rows = tool_input_rows(requests[0][1]["content"])[16:]
+        next_keys = ", ".join(f"{sig}|{obj['id']}" for sig, obj in next_rows)
         self.assertIn(f"Next patch anchors (in order): {next_keys}.", requests[1][-1]["content"])
         self.assertIn("16/64", requests[2][-1]["content"])
         self.assertIn("补丁重复提交已完成译文", requests[2][-1]["content"])
@@ -360,10 +367,7 @@ class TranslationToolTests(unittest.IsolatedAsyncioTestCase):
 
         async def model(**kwargs):
             messages = kwargs["messages"]
-            rows = [
-                (sig, json.loads(obj))
-                for sig, obj in re.findall(r'(?m)^([a-z0-9]{3})\|(\{"id"[^\n]+)', messages[1]["content"])
-            ]
+            rows = tool_input_rows(messages[1]["content"])
             step = sum(m["role"] == "tool" for m in messages)
             if step == 0:
                 batch_sizes.append(len(rows))
@@ -434,9 +438,8 @@ class TranslationToolTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(published), round_index // 2)
             messages = kwargs["messages"]
             requests.append(copy.deepcopy(messages))
-            input_line = re.search(r'([a-z0-9]{3})\|(\{"id"[^\n]+)', messages[1]["content"])
-            sig, obj = input_line.groups()
-            index = json.loads(obj)["id"]
+            sig, obj = tool_input_rows(messages[1]["content"])[0]
+            index = obj["id"]
             patch = patch_for(f"{sig}|{index}", "translated<br>text[t]end")
             scripted = [
                 [function_call("write_translation_result", patch_for("xxx|999", "wrong"))],

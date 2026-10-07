@@ -44,10 +44,12 @@ from GalTransl.ProjectGuideline import (
 from GalTransl.Backend.Prompts import (
     FORGAL_JSON_SYSTEM_PROMPT,
     FORGAL_TOOL_SYSTEM_PROMPT,
+    FORNOVEL_TOOL_SYSTEM_PROMPT,
+    FORNOVEL_TOOL_TRANS_PROMPT,
     FORGAL_TOOL_TRANS_PROMPT,
     FORGAL_JSON_TRANS_PROMPT,
-    FORGAL_TSV_SYSTEM,
-    FORGAL_TSV_TRANS_PROMPT_EN,
+    FORGAL_MARKDOWN_SYSTEM,
+    FORGAL_MARKDOWN_TRANS_PROMPT_EN,
     FORNOVEL_TRANS_PROMPT_EN,
     GalTransl_SYSTEM_PROMPT,
     GalTransl_TRANS_PROMPT_V3,
@@ -422,6 +424,10 @@ def _collect_common_dict_payload() -> dict[str, Any]:
 
 
 _DEFAULT_TRANSLATOR_PROMPTS: dict[str, dict[str, str]] = {
+    "auto-translate": {
+        "system_prompt": "Automatically selects the underlying translation template.",
+        "user_prompt": "Model names containing sakura or galtransl (case-insensitive) use sakura-v1.0 or galtransl-v3 respectively; errors only halve the batch without switching templates. Otherwise, files with name/names fields use ForGal-tool → ForGal-markdown → ForGal-json. Other files use ForNovel-tool → ForNovel. Errors switch templates and halve the retry batch, with at most four retries (five attempts total). Each mode uses its own prompts.",
+    },
     "ForGal-json": {
         "system_prompt": FORGAL_JSON_SYSTEM_PROMPT,
         "user_prompt": FORGAL_JSON_TRANS_PROMPT,
@@ -430,12 +436,16 @@ _DEFAULT_TRANSLATOR_PROMPTS: dict[str, dict[str, str]] = {
         "system_prompt": FORGAL_TOOL_SYSTEM_PROMPT,
         "user_prompt": FORGAL_TOOL_TRANS_PROMPT,
     },
-    "ForGal-tsv": {
-        "system_prompt": FORGAL_TSV_SYSTEM,
-        "user_prompt": FORGAL_TSV_TRANS_PROMPT_EN,
+    "ForGal-markdown": {
+        "system_prompt": FORGAL_MARKDOWN_SYSTEM,
+        "user_prompt": FORGAL_MARKDOWN_TRANS_PROMPT_EN,
+    },
+    "ForNovel-tool": {
+        "system_prompt": FORNOVEL_TOOL_SYSTEM_PROMPT,
+        "user_prompt": FORNOVEL_TOOL_TRANS_PROMPT,
     },
     "ForNovel": {
-        "system_prompt": FORGAL_TSV_SYSTEM,
+        "system_prompt": FORGAL_MARKDOWN_SYSTEM,
         "user_prompt": FORNOVEL_TRANS_PROMPT_EN,
     },
     "sakura-v1.0": {

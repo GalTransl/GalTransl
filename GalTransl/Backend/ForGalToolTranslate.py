@@ -4,6 +4,7 @@ import json
 
 from GalTransl import LOGGER
 from GalTransl.Backend.ForGalJsonTranslate import ForGalJsonTranslate
+from GalTransl.Backend.ForGalMarkdownTranslate import markdown_row
 from GalTransl.Backend.Prompts import FORGAL_TOOL_SYSTEM_PROMPT, FORGAL_TOOL_TRANS_PROMPT
 
 
@@ -65,8 +66,48 @@ def apply_translation_patch(patch, expected, results):
 
 
 class ForGalToolTranslate(ForGalJsonTranslate):
+    include_speaker = True
     default_trans_prompt = FORGAL_TOOL_TRANS_PROMPT
     default_system_prompt = FORGAL_TOOL_SYSTEM_PROMPT
+
+    def _table_header(self, text_column, proofread=False):
+        columns = ["ID"] + (["NAME"] if self.include_speaker else []) + [text_column]
+        if proofread:
+            columns.append("DST")
+        return markdown_row(*columns) + "\n" + markdown_row(*(["---"] * len(columns)))
+
+    def _format_translation_input(self, lines, proofread=False):
+        rows = [self._table_header("SRC", proofread)]
+        for line in lines:
+            anchor, payload = line.split("|", 1)
+            obj = json.loads(payload)
+            cells = [f"{anchor}|{obj['id']}"]
+            if self.include_speaker:
+                cells.append(obj.get("name", "null"))
+            cells.append(obj["src"])
+            if proofread:
+                cells.append(obj.get("dst", ""))
+            rows.append(markdown_row(*cells))
+        return "\n".join(rows)
+
+    def _format_restore_context_line(self, current_tran):
+        cells = [str(current_tran.index)]
+        if self.include_speaker:
+            cells.append(current_tran.get_speaker_name() or "null")
+        text = current_tran.pre_dst.replace("\\r\\n", "<br>").replace("\\n", "<br>").replace("\t", "[t]")
+        cells.append(text)
+        return markdown_row(*cells)
+
+    def _format_restore_context_payload(self, lines):
+        return self._table_header("DST") + "\n" + "\n".join(lines)
+
+    def _apply_history_result(self, prompt_req, filename):
+        scoped = self._session_scope().get()
+        history = (
+            scoped["context"].get(filename, "") if scoped is not None
+            else self.last_translations.get(filename, "")
+        )
+        return prompt_req.replace("[history_result]", history or "None")
 
     def __init__(self, config, eng_type, proxy_pool, token_pool):
         super().__init__(config, eng_type, proxy_pool, token_pool)
@@ -138,6 +179,7 @@ class ForGalToolTranslate(ForGalJsonTranslate):
             )
             if response.get("finish_reason") in ("length", "content_filter"):
                 failure_reason = f"响应结束原因为 {response['finish_reason']}，未执行本次工具调用"
+                self._raise_parse_error_for_auto(failure_reason)
                 LOGGER.warning("[ForGal-tool][%s] %s；正文=%r", kwargs.get("file_name", ""), failure_reason, content)
                 break  # 截断的工具调用绝不能应用
             calls = response.get("tool_calls", [])
@@ -162,6 +204,7 @@ class ForGalToolTranslate(ForGalJsonTranslate):
             if not calls:
                 missing_tool_retries += 1
                 failure_reason = f"缺少工具调用，等待 {next_tool}；已写入 {len(results)}/{len(expected)} 句"
+                self._raise_parse_error_for_auto(failure_reason)
                 LOGGER.warning(
                     "[ForGal-tool][%s] %s；finish_reason=%s；正文=%r；保留上下文重试 %s/3",
                     kwargs.get("file_name", ""), failure_reason, response.get("finish_reason"), content, missing_tool_retries,
@@ -189,7 +232,7 @@ class ForGalToolTranslate(ForGalJsonTranslate):
             for call in calls:
                 function = call.get("function", {})
                 name, arguments = function.get("name"), function.get("arguments", "")
-                log_label = f"[ForGal-tool][{kwargs.get('file_name', '')}][{getattr(token, 'model_name', '')}][{call['id']}][{name}]"
+                log_label = f"[{getattr(self, 'eng_type', 'ForGal-tool')}][{kwargs.get('file_name', '')}][{getattr(token, 'model_name', '')}][{call['id']}][{name}]"
                 print(f"{log_label} LLM工具调用：\n{arguments}", flush=True)
                 output = ""
                 previous_count = len(results)
@@ -236,6 +279,7 @@ class ForGalToolTranslate(ForGalJsonTranslate):
                             tran._runtime_success_recorded = True
                     output = f"补丁应用成功：{count} 句（新增 {new_count}，修正 {corrected_count}）；本批已完成 {len(results)}/{len(expected)} 句。"
                 except ValueError as exc:
+                    self._raise_parse_error_for_auto(str(exc))
                     output = f"补丁应用失败：{exc}"
                 no_progress_calls = 0 if len(results) > previous_count else no_progress_calls + 1
                 output += "\n" + progress_instruction()
@@ -249,6 +293,7 @@ class ForGalToolTranslate(ForGalJsonTranslate):
                 failure_reason = "连续 3 次工具调用未新增译文"
                 break
         partial = formatted_results()
+        self._raise_parse_error_for_auto(failure_reason)
         LOGGER.warning(
             "[ForGal-tool][%s] 未完成本批工具翻译：%s；%s",
             kwargs.get("file_name", ""), failure_reason,

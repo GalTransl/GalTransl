@@ -257,7 +257,10 @@ def preprocess_trans_list(trans_list, projectConfig, pre_dic, tPlugins=None):
             "file_galtransl_json",
             "file_mtbench_aio",
         ]:
-            if projectConfig.select_translator not in ["ForNovel"]:
+            if projectConfig.select_translator not in ("ForNovel", "ForNovel-tool") and not (
+                projectConfig.select_translator == "auto-translate"
+                and not getattr(tran, "source_file_has_name", bool(tran.speaker))
+            ):
                 tran.analyse_dialogue()
 
         tran.post_src = pre_dic.do_replace(tran.post_src, tran)
@@ -410,7 +413,13 @@ async def doLLMTranslate(
             try:
                 json_list, save_func = future.result()
                 projectConfig.file_save_funcs[file_path] = save_func
-                total_chunks.extend(input_splitter.split(json_list, file_path))
+                chunks = input_splitter.split(json_list, file_path)
+                file_has_name = any("name" in row or "names" in row for row in json_list)
+                for chunk in chunks:
+                    for tran in chunk.trans_list:
+                        tran.source_file_has_name = file_has_name
+                        tran.source_file_path = file_path
+                total_chunks.extend(chunks)
                 if eng_type == "GenDic":
                     all_jsons.extend(json_list)
             except Exception as exc:
@@ -836,15 +845,21 @@ async def init_gptapi(
     eng_type = projectConfig.select_translator
 
     match eng_type:
+        case "auto-translate":
+            from GalTransl.Backend.AutoTranslate import AutoTranslate
+            return AutoTranslate(projectConfig, eng_type, proxyPool, tokenPool)
         case "ForGal-tool":
             from GalTransl.Backend.ForGalToolTranslate import ForGalToolTranslate
             return ForGalToolTranslate(projectConfig, eng_type, proxyPool, tokenPool)
-        case "ForGal-tsv":
-            from GalTransl.Backend.ForGalTsvTranslate import ForGalTsvTranslate
-            return ForGalTsvTranslate(projectConfig, eng_type, proxyPool, tokenPool)
+        case "ForGal-markdown":
+            from GalTransl.Backend.ForGalMarkdownTranslate import ForGalMarkdownTranslate
+            return ForGalMarkdownTranslate(projectConfig, eng_type, proxyPool, tokenPool)
         case "ForNovel":
             from GalTransl.Backend.ForNovelTranslate import ForNovelTranslate
             return ForNovelTranslate(projectConfig, eng_type, proxyPool, tokenPool)
+        case "ForNovel-tool":
+            from GalTransl.Backend.ForNovelToolTranslate import ForNovelToolTranslate
+            return ForNovelToolTranslate(projectConfig, eng_type, proxyPool, tokenPool)
         case "ForGal-json":
             from GalTransl.Backend.ForGalJsonTranslate import ForGalJsonTranslate
             return ForGalJsonTranslate(projectConfig, eng_type, proxyPool, tokenPool)

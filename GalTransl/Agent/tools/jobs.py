@@ -24,9 +24,7 @@ def _tool_start_translation(runner: AgentRunner, args: dict[str, Any]) -> Any:
     模型跑，可用性检测也跟着测错模型（用户就是这么发现的）。只有前端没送来时才回落到
     Agent 那份，并在返回里说明。
     """
-    translator = str(args.get("translator", "")).strip()
-    if not translator:
-        raise AgentToolError("translator is required")
+    translator = str(args.get("translator") or "").strip() or "auto-translate"
     # 模型/用户可能使用小写引擎名，任务接口要求注册表中的标准拼写。
     translator = next(
         (name for name in TRANSLATOR_SUPPORTED if name.casefold() == translator.casefold()),

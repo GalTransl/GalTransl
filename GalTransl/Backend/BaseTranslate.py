@@ -235,7 +235,19 @@ class RequestHealthMetrics:
             }
 
 
+class TranslationRequestError(RuntimeError):
+    """自动模板的一次 API 请求失败，包括流式响应读取失败。"""
+
+
+class TranslationParseError(RuntimeError):
+    """一次翻译响应未通过校验；自动模板据此立即切换模式。"""
+
+
 class BaseTranslate:
+    def _raise_parse_error_for_auto(self, message):
+        if getattr(self, "fail_fast", False):
+            raise TranslationParseError(message)
+
     def __init__(
         self,
         config: CProjectConfig,
@@ -1373,6 +1385,9 @@ class BaseTranslate:
                 from GalTransl.Service import JobCancelledError
                 if isinstance(e, JobCancelledError):
                     raise
+
+                if getattr(self, "fail_fast", False):
+                    raise TranslationRequestError(str(e)) from e
 
                 api_try_count += 1
                 api_attempts += 1

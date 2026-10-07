@@ -231,6 +231,7 @@ class CSakuraTranslate(BaseTranslate):
                 result_trans_list.append(trans_list[i])
 
             if error_flag:
+                self._raise_parse_error_for_auto(error_message)
                 try:
                     from GalTransl.server import record_runtime_error
                     record_runtime_error(

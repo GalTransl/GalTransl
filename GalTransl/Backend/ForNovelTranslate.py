@@ -16,7 +16,7 @@ from GalTransl.Dictionary import CGptDict
 from GalTransl.Utils import extract_code_blocks
 from GalTransl.Backend.Prompts import (
     FORNOVEL_FOLLOWUP_PROMPT,
-    FORGAL_TSV_SYSTEM,
+    FORGAL_MARKDOWN_SYSTEM,
     FORNOVEL_TRANS_PROMPT_EN,
     H_WORDS_LIST,
 )
@@ -37,7 +37,7 @@ class ForNovelTranslate(MultiTurnTranslate):
     ):
         super().__init__(config, eng_type, proxy_pool, token_pool)
         self.trans_prompt = FORNOVEL_TRANS_PROMPT_EN
-        self.system_prompt = FORGAL_TSV_SYSTEM
+        self.system_prompt = FORGAL_MARKDOWN_SYSTEM
         self._apply_internal_prompt_template_overrides()
         # enhance_jailbreak
         if val := config.getKey("gpt.enhance_jailbreak"):
@@ -190,6 +190,9 @@ class ForNovelTranslate(MultiTurnTranslate):
                     success_count += 1
                     if i >= len(trans_list) - 1:
                         break
+
+            if error_message or stream_parse_error_message or success_count != len(trans_list):
+                self._raise_parse_error_for_auto(error_message or stream_parse_error_message or f"译文缺句：{success_count}/{len(trans_list)}")
 
             if success_count > 0 and not stream_parse_error_message:
                 error_flag = False  # 部分解析

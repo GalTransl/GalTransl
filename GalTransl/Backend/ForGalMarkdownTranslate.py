@@ -16,17 +16,53 @@ from GalTransl.Cache import save_transCache_to_json
 from GalTransl.Dictionary import CGptDict
 from GalTransl.Utils import extract_code_blocks
 from GalTransl.Backend.Prompts import (
-    FORGAL_TSV_FOLLOWUP_PROMPT,
-    FORGAL_TSV_SYSTEM,
-    FORGAL_TSV_TRANS_PROMPT_EN,
+    FORGAL_MARKDOWN_FOLLOWUP_PROMPT,
+    FORGAL_MARKDOWN_SYSTEM,
+    FORGAL_MARKDOWN_TRANS_PROMPT_EN,
     H_WORDS_LIST,
 )
 from GalTransl.Backend.MultiTurnTranslate import MultiTurnTranslate
 from openai._types import NOT_GIVEN
 
 
-class ForGalTsvTranslate(MultiTurnTranslate):
-    followup_prompt = FORGAL_TSV_FOLLOWUP_PROMPT
+def newline_symbol(text):
+    for symbol in ("\\r\\n", "\r\n", "\\n", "\n"):
+        if symbol in text:
+            return symbol
+    return ""
+
+
+def markdown_row(*cells):
+    def escape(cell):
+        cell = cell.replace("\r\n", "<br>").replace("\n", "<br>")
+        return cell.replace("\\", "\\\\").replace("|", "\\|")
+    return "| " + " | ".join(escape(cell) for cell in cells) + " |"
+
+
+def parse_markdown_row(line):
+    line = line.strip()
+    if not line.startswith("|") or not line.endswith("|"):
+        return None
+    cells, cell = [], []
+    body = line[1:-1]
+    i = 0
+    while i < len(body):
+        char = body[i]
+        if char == "\\" and i + 1 < len(body) and body[i + 1] in "\\|":
+            i += 1
+            cell.append(body[i])
+        elif char == "|":
+            cells.append("".join(cell).strip())
+            cell = []
+        else:
+            cell.append(char)
+        i += 1
+    cells.append("".join(cell).strip())
+    return cells
+
+
+class ForGalMarkdownTranslate(MultiTurnTranslate):
+    followup_prompt = FORGAL_MARKDOWN_FOLLOWUP_PROMPT
 
     # init
     def __init__(
@@ -37,8 +73,8 @@ class ForGalTsvTranslate(MultiTurnTranslate):
         token_pool: COpenAITokenPool,
     ):
         super().__init__(config, eng_type, proxy_pool, token_pool)
-        self.trans_prompt = FORGAL_TSV_TRANS_PROMPT_EN
-        self.system_prompt = FORGAL_TSV_SYSTEM
+        self.trans_prompt = FORGAL_MARKDOWN_TRANS_PROMPT_EN
+        self.system_prompt = FORGAL_MARKDOWN_SYSTEM
         self._apply_internal_prompt_template_overrides()
         # enhance_jailbreak
         if val := config.getKey("gpt.enhance_jailbreak"):
@@ -65,22 +101,15 @@ class ForGalTsvTranslate(MultiTurnTranslate):
             speaker = speaker.replace("\r\n", "").replace("\t", "").replace("\n", "")
 
             src_text = trans.post_src
-            if "\\r\\n" in src_text:
-                n_symbol = "\\r\\n"
-            elif "\r\n" in src_text:
-                n_symbol = "\r\n"
-            elif "\\n" in src_text:
-                n_symbol = "\\n"
-            elif "\n" in src_text:
-                n_symbol = "\n"
+            n_symbol = newline_symbol(src_text)
             src_text = src_text.replace("\t", "[t]")
             if n_symbol:
                 src_text = src_text.replace(n_symbol, "<br>")
 
-            tmp_obj = f"{speaker}\t{src_text}\t{trans.index}"
+            tmp_obj = markdown_row(str(trans.index), speaker, src_text)
             input_list.append(tmp_obj)
 
-        input_src = "\n".join(input_list)
+        input_src = "| ID | NAME | SRC |\n| --- | --- | --- |\n" + "\n".join(input_list)
 
         self.restore_context(trans_list, self.contextNum, filename)
 
@@ -91,7 +120,7 @@ class ForGalTsvTranslate(MultiTurnTranslate):
         while True:  # 一直循环，直到得到数据
             self._check_stop_requested()
             if self.enhance_jailbreak or tmp_enhance_jailbreak:
-                assistant_prompt = "```NAME\tDST\tID\n"
+                assistant_prompt = ""
             else:
                 assistant_prompt = ""
 
@@ -115,9 +144,9 @@ class ForGalTsvTranslate(MultiTurnTranslate):
                     return False
                 for raw_line in lines:
                     line = raw_line.strip()
-                    if not line or "```" in line or line.startswith("NAME"):
+                    if not line or line.startswith("```"):
                         continue
-                    parse_ok, parse_error = self._parse_tsv_result_line(
+                    parse_ok, parse_error = self._parse_markdown_result_line(
                         line,
                         trans_list,
                         self._get_chatbot_state()[1],
@@ -147,7 +176,6 @@ class ForGalTsvTranslate(MultiTurnTranslate):
             )
 
             result_text = resp or ""
-            result_text = result_text.split("NAME\tDST\tID")[-1].strip()
 
             i = -1
             success_count = 0
@@ -169,19 +197,18 @@ class ForGalTsvTranslate(MultiTurnTranslate):
                 i = stream_cursor["i"]
             else:
                 for line in result_lines:
-                    if "```" in line:
+                    line = line.strip()
+                    if line.startswith("```"):
                         continue
                     if line.strip() == "":
                         continue
-                    if line.startswith("NAME"):
-                        continue
 
-                    parse_ok, parse_error = self._parse_tsv_result_line(
+                    parse_ok, parse_error = self._parse_markdown_result_line(
                         line,
                         trans_list,
                         getattr(token, "model_name", ""),
                         n_symbol,
-                        {"i": i, "success_count": success_count},
+                        stream_cursor,
                         result_trans_list,
                         filename=filename,
                         emit_runtime_success=False,
@@ -191,10 +218,11 @@ class ForGalTsvTranslate(MultiTurnTranslate):
                         error_message = parse_error
                         error_flag = True
                         break
-                    i += 1
-                    success_count += 1
-                    if i >= len(trans_list) - 1:
-                        break
+                    i = stream_cursor["i"]
+                    success_count = stream_cursor["success_count"]
+
+            if error_message or stream_parse_error_message or success_count != len(trans_list):
+                self._raise_parse_error_for_auto(error_message or stream_parse_error_message or f"译文缺句：{success_count}/{len(trans_list)}")
 
             if success_count > 0 and not stream_parse_error_message:
                 error_flag = False  # 部分解析
@@ -277,7 +305,7 @@ class ForGalTsvTranslate(MultiTurnTranslate):
             break
         return i + 1, result_trans_list
 
-    def _parse_tsv_result_line(
+    def _parse_markdown_result_line(
         self,
         line: str,
         trans_list: CTransList,
@@ -289,27 +317,38 @@ class ForGalTsvTranslate(MultiTurnTranslate):
         emit_runtime_success: bool = False,
         emitted_success_indices: Optional[Set[int]] = None,
     ):
-        line_sp = line.split("\t")
-        if len(line_sp) != 3:
+        line_sp = parse_markdown_row(line)
+        if line_sp is None or len(line_sp) != 3:
             return False, f"无法解析行：{line}"
+
+        if not cursor.get("header"):
+            if line_sp != ["ID", "NAME", "DST"]:
+                return False, "缺少 Markdown 表头 ID | NAME | DST"
+            cursor["header"] = True
+            return True, ""
+        if not cursor.get("separator"):
+            if not all(re.fullmatch(r":?-{3,}:?", cell) for cell in line_sp):
+                return False, "缺少 Markdown 表格分隔行"
+            cursor["separator"] = True
+            return True, ""
 
         cursor["i"] += 1
         i = cursor["i"]
         if i > len(trans_list) - 1:
             return False, f"无法解析行：{line}"
 
-        line_id = line_sp[2]
-        if str(trans_list[i].index) not in line_id:
+        line_id = line_sp[0]
+        if str(trans_list[i].index) != line_id:
             return False, f"{line_id}句id未对应{trans_list[i].index}"
 
-        line_dst = line_sp[1]
+        line_dst = line_sp[2]
         if trans_list[i].post_src != "" and line_dst == "":
             return False, f"第{line_id}句空白"
         if "�" in line_dst:
             return False, f"第{line_id}句包含乱码：{line_dst}"
 
         line_dst = self._normalize_parsed_translation_text(
-            line_dst, trans_list[i], n_symbol
+            line_dst, trans_list[i], newline_symbol(trans_list[i].post_src)
         )
 
         return self._append_parsed_translation_result(
@@ -353,10 +392,10 @@ class ForGalTsvTranslate(MultiTurnTranslate):
     def _format_restore_context_line(self, current_tran: CSentense) -> str:
         speaker_name = current_tran.get_speaker_name()
         speaker = speaker_name if speaker_name else "null"
-        return f"{speaker}\t{current_tran.pre_dst}\t{current_tran.index}"
+        return markdown_row(str(current_tran.index), speaker, current_tran.pre_dst)
 
     def _format_restore_context_payload(self, lines: List[str]) -> str:
-        return "NAME\tDST\tID\n" + "\n".join(lines)
+        return "| ID | NAME | DST |\n| --- | --- | --- |\n" + "\n".join(lines)
 
 
 if __name__ == "__main__":

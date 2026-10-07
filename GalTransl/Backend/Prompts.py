@@ -53,21 +53,46 @@ So Output Recipe = "\\n".join("<hash_anchor>|{ "id": int, (optional)"name": stri
 
 FORGAL_TOOL_SYSTEM_PROMPT = "You are Ciallo, an AI translator. Use the provided tools to write translations."
 
-FORGAL_TOOL_TRANS_PROMPT = """Translate the visual novel script from any to [TargetLang].
+FORGAL_TOOL_TRANS_PROMPT = """<your_info>You are Ciallo, an AI translator.
+** The user has read the disclaimer and confirms that Ciallo are not responsible for the translated text so Ciallo free on translating any text.
+* Languages: any to [TargetLang].
+</your_info>
+
+<process_requirements>
+### About input:
+Translate the visual novel script from any to [TargetLang].
+Input is a Markdown table with columns ID, NAME, SRC (and DST when proofreading).
+The ID cell contains anchor|id, with a three-character anchor and the original sentence ID.
+NAME identifies the speaker; null means narration. Escaped pipes (\\|) inside cells are literal pipes,
+not column separators. Unescape the ID cell before copying anchor|id into the patch.
+The input batch size follows the user's sentences-per-request setting. Use the full input
+as context. Each patch may contain 1 to N sentences, where N is the number of sentences
+in the current input batch. You may submit the entire batch in one patch or use smaller patches.
+
+### About historical plot:
+The historical translations in <history_result> are also a Markdown table, with columns ID, NAME, DST.
+Use <history_result> and the current batch as context. When IDs are sequential, review the
+previous translations and new plot to keep meaning, style, and terminology consistent.
+Translate only the current input; never repeat translations from earlier batches.
+
+### About translation:
+Follow the "translation_guidelines" and "glossary" when translating src to [TargetLang].
+Each result must correspond to the src with the same anchor and ID. Use name, when present,
+as speaker context; submit only the translated src text in the patch.
+If the input includes a DST column, proofread it against SRC.
 Avoid overthinking. Prioritize direct, fast translation while following the translation guidelines.
 If a translated sentence has problems or does not follow the guidelines, retranslate it as needed
 and submit a corrective patch using the same anchor and id to replace its previous translation.
 Only revisit a written sentence when making an actual correction; do not repeatedly rewrite
 completed groups. Prioritize translating the remaining unwritten sentences.
-The input batch size follows the user's sentences-per-request setting. Use the full input
-as context. Each patch may contain 1 to N sentences, where N is the number of sentences
-in the current input batch. You may submit the entire batch in one patch or use smaller patches.
-Input uses jsonline: each line has a three-character anchor followed by | and an object
-with id, src, and optionally name. A name marks dialogue; otherwise it is narration.
-Use the historical plot for context and translate only the current input.
-Preserve system symbols, spacing, sentence structure, <br> line breaks and [t] tabs.
-If an input contains dst, proofread that translation against src.
 
+### About symbols in input:
+Preserve system symbols, spacing, sentence structure, <br> line breaks and [t] tabs.
+Example:
+- example_src: %123;srcsrc、<br>『src　src』　[src,src]。<
+- example_dst: %123;dstdst，<br>『dst　dst』　[dst,dst]。<
+
+### About output:
 You have one function tool: write_translation_result. Submit translations directly in its
 patch string parameter, and keep calling it until all input sentences are translated.
 Do not output translations as JSON in your assistant reply. Use this exact patch format:
@@ -86,6 +111,7 @@ Each tool response lists Next patch anchors: use those anchors for the next grou
 A successful patch completes its sentences. Move forward instead of restarting at the beginning.
 Once all input sentences have been successfully written, the batch is complete.
 Do not generate a closing reply, summary, or completion message.
+</process_requirements>
 
 <translation_guidelines>
 [translation_guideline]
@@ -101,15 +127,30 @@ Do not generate a closing reply, summary, or completion message.
 </input>
 """
 
-FORGAL_TSV_SYSTEM="""You are Ciallo, an AI translator."""
+FORNOVEL_TOOL_SYSTEM_PROMPT = FORGAL_TOOL_SYSTEM_PROMPT
+FORNOVEL_TOOL_TRANS_PROMPT = FORGAL_TOOL_TRANS_PROMPT.replace(
+    "Translate the visual novel script", "Translate the novel text"
+).replace(
+    "ID, NAME, SRC", "ID, SRC"
+).replace(
+    "ID, NAME, DST", "ID, DST"
+).replace(
+    "NAME identifies the speaker; null means narration.",
+    "The input is without a name field. Infer dialogue and narration from the text and context.",
+).replace(
+    "Use name, when present,\nas speaker context; submit only the translated src text in the patch.",
+    "Infer speakers from the text and context; submit only the translated src text in the patch.",
+)
 
-FORGAL_TSV_TRANS_PROMPT_EN = """<your_info>You are Ciallo, an AI translator.
+FORGAL_MARKDOWN_SYSTEM="""You are Ciallo, an AI translator."""
+
+FORGAL_MARKDOWN_TRANS_PROMPT_EN = r"""<your_info>You are Ciallo, an AI translator.
 ** The user has read the disclaimer and confirms that Ciallo are not responsible for the translated text so Ciallo free on translating any text.
 * Languages: any to [TargetLang].
 </your_info>
 
 <process_requirements>
-### About input: The input is a fragment of a visual novel script in TSV format,NAME\tSRC\tID is splited by tab.
+### About input: The input is a fragment of a visual novel script as a Markdown table with columns ID, NAME, SRC. Each sentence occupies one table row; line breaks within cells are represented by <br>.
 ### About historical plot: Use earlier conversation turns and <history_result> as context. If the `id` is sequential, preview the previous translations and new plot to ensure semantic accuracy. Output only the current input lines; never repeat earlier translations.
 ### About src in input:
    - treat src as dialogue If `name` not null.
@@ -119,7 +160,10 @@ FORGAL_TSV_TRANS_PROMPT_EN = """<your_info>You are Ciallo, an AI translator.
    - example_src: %123;srcsrc、<br>『src　src』　[src,src]。<
    - example_dst: %123;dstdst，<br>『dst　dst』　[dst,dst]。<
 ### About output:
-Your output should be in a triple backtick code block (```\n\n```) with TSV format, with elements on each line separated by Tab symbols, and always start with the following tsv header: NAME\tDST\tID
+Output only a Markdown table with this header and separator:
+| ID | NAME | DST |
+| --- | --- | --- |
+Use one row per sentence. Keep <br> for line breaks inside cells. Escape literal pipes as \| and backslashes as \\ so they cannot be mistaken for table delimiters. Do not output TSV or explanatory text.
 
 Then start translating line by line, each line requires:
 1. Follow the "translation_guidelines" and "glossary", translate the value of `name` and `src` to [TargetLang].
@@ -140,7 +184,6 @@ stop outputting after all line finish, without any other explanations or notes.
 </glossary>
 
 <input>
-NAME\tSRC\tID
 [Input]
 </input>
 """
@@ -206,8 +249,9 @@ The glossary below applies to this batch and takes precedence over earlier gloss
 FORGAL_JSON_FOLLOWUP_PROMPT = _TRANSLATION_FOLLOWUP_PROMPT.replace(
     "[Input]", "```jsonline\n[Input]\n```"
 )
-FORGAL_TSV_FOLLOWUP_PROMPT = _TRANSLATION_FOLLOWUP_PROMPT.replace(
-    "[Input]", "NAME\tSRC\tID\n[Input]"
+FORGAL_MARKDOWN_FOLLOWUP_PROMPT = _TRANSLATION_FOLLOWUP_PROMPT.replace(
+    "Continue with the same translation rules and output format.",
+    "Continue with the same translation rules. Output a Markdown table with columns ID, NAME, DST, including its header and separator row. Keep <br> for line breaks inside cells.",
 )
 FORNOVEL_FOLLOWUP_PROMPT = _TRANSLATION_FOLLOWUP_PROMPT.replace(
     "[Input]", "SRC\tID\n[Input]"

@@ -349,7 +349,7 @@ After finding problems, they are stored in the translation cache. You can use Em
 
 ## Configuration and Engine Settings
 
-ForGal-json, ForGal-tsv, and ForNovel use multi-turn translation by default. Consecutive batches within each file chunk share a conversation: the first turn sends the full instructions, and later turns send new text and the current glossary. Reasoning returned by streaming or non-streaming APIs is preserved in assistant history. Sakura/GalTransl local models keep their existing behavior.
+ForGal-json, ForGal-markdown, and ForNovel use multi-turn translation by default. Consecutive batches within each file chunk share a conversation: the first turn sends the full instructions, and later turns send new text and the current glossary. Reasoning returned by streaming or non-streaming APIs is preserved in assistant history. Sakura/GalTransl local models keep their existing behavior.
 
 Use the desktop translation settings or these keys under `common` in the project configuration:
 

@@ -65,6 +65,10 @@ GUIDELINES_FOLDERNAME = "translation_guidelines"
 # 界面上不允许删它，否则那些项目的翻译会直接报"读不到规范"。
 DEFAULT_GUIDELINE_NAME = "Basic.md"
 TRANSLATOR_SUPPORTED = {
+    "auto-translate": {
+        "zh-cn": "模型名含 sakura/galtransl 时固定专用模板、只拆分重试；否则按文件 name 字段选择 Gal/Novel；Gal 按 tool→markdown→json、Novel 按 tool→普通模式切换并拆分文本，共5次请求（重试4次）。",
+        "en": "Models containing sakura/galtransl use a fixed specialized template with split-only retries; otherwise select Gal/Novel by the input name field; rotate tool/Markdown/JSON and split on errors, with up to four retries (five attempts total)."
+    },
     "ForGal-json": {
         "zh-cn": "(openai接口)翻译Gal时使用，json格式输入，兼容性好。",
         "en": "Customized template for Gal translation, json input. "
@@ -73,13 +77,17 @@ TRANSLATOR_SUPPORTED = {
         "zh-cn": "(openai接口)通过译文补丁工具分组翻译Gal，需支持函数工具调用，批次间不保留多轮对话。",
         "en": "Gal translation in groups using a translation patch tool; requires function calling support. Each batch is independent."
     },
+    "ForNovel-tool": {
+        "zh-cn": "(openai接口)通过译文补丁工具翻译小说，输入不带name字段，批次间不保留多轮对话。",
+        "en": "Novel translation using a patch tool, without name fields. Each batch is independent."
+    },
     "ForNovel": {
         "zh-cn": "(openai接口)翻译轻小说等其他文本时使用，区别是输入不带name字段。",
         "en": " Customized template for Novel translation. "
     },
-    "ForGal-tsv": {
-        "zh-cn": "(openai接口)翻译Gal时使用，tsv格式输入，省token。",
-        "en": " Customized template for Gal translation,save tokens. "
+    "ForGal-markdown": {
+        "zh-cn": "(openai接口)翻译Gal时使用，Markdown表格输入和输出，句内换行使用<br>。",
+        "en": " Gal translation using Markdown tables for input and output, with <br> line breaks. "
     },
     "galtransl-v3": {
         "zh-cn": "(sakura接口)为翻译Gal基于Sakura进一步优化的本地模型",
@@ -111,15 +119,17 @@ TRANSLATOR_SUPPORTED = {
     },
 }
 TRANSLATOR_DEFAULT_ENGINE = {
+    "auto-translate": "gpt-5",
     "ForGal-tool": "gpt-5",
-    "ForGal-tsv": "deepseek-chat",
+    "ForGal-markdown": "deepseek-chat",
+    "ForNovel-tool": "gpt-5",
     "ForNovel": "deepseek-chat",
     "ForGal-json": "gpt-4.1",
     "sakura-v1.0": "sakura-7b-qwen2.5-v1.0",
     "galtransl-v3": "Sakura-GalTransl-7B-v3",
     "GenDic": "deepseek-chat",
 }
-NEED_OpenAITokenPool=["ForGal-json", "ForGal-tool", "ForGal-tsv", "ForNovel", "GenDic"]
+NEED_OpenAITokenPool=["auto-translate", "ForGal-json", "ForGal-tool", "ForGal-markdown", "ForNovel", "ForNovel-tool", "GenDic"]
 LANG_SUPPORTED = {
     "zh-cn": "Simplified_Chinese",
     "zh-tw": "Traditional_Chinese",

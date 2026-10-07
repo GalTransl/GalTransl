@@ -35,6 +35,9 @@ class ForGalJsonTranslate(MultiTurnTranslate):
     def _encode_sig_jsonline(self, sig: str, obj: dict) -> str:
         return f"{sig}|" + json.dumps(obj, ensure_ascii=False)
 
+    def _format_translation_input(self, lines, proofread=False):
+        return "\n".join(lines)
+
     # init
     def __init__(
         self,
@@ -113,7 +116,7 @@ class ForGalJsonTranslate(MultiTurnTranslate):
                 del tmp_obj["name"]
 
             input_list.append(self._encode_sig_jsonline(sig, tmp_obj))
-        input_src = "\n".join(input_list)
+        input_src = self._format_translation_input(input_list, proofread)
 
         self.restore_context(trans_list, self.contextNum, filename)
 
@@ -250,6 +253,9 @@ class ForGalJsonTranslate(MultiTurnTranslate):
                     success_count += 1
                     if i >= len(trans_list) - 1:
                         break
+
+            if error_message or stream_parse_error_message or success_count != len(trans_list):
+                self._raise_parse_error_for_auto(error_message or stream_parse_error_message or f"译文缺句：{success_count}/{len(trans_list)}")
 
             if success_count > 0 and not stream_parse_error_message:
                 error_flag = False  # 部分解析
