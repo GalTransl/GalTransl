@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from GalTransl import TRANSLATOR_SUPPORTED
 from GalTransl.Agent.core import RUNTIME_ERRORS_PER_QUERY, SUBAGENT_AGENTS, SUBAGENT_MAX_TASKS
 
 
@@ -246,11 +247,15 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "start_translation",
-            "description": "提交一个翻译任务。translator 取值：ForGal-json/ForGal-tsv/ForNovel（主翻译）；GenDic（生成GPT字典）；dump-name（导出人名表）；rebuilda（用字典重建缓存+结果，跳过翻译，复核时用这个才能在 list_problems 看到变化）；rebuildr（只重建结果 json，不更新缓存，一般不用）。任务用的是「翻译任务会用」的那份后端（项目选择 → 否则全局「翻译器默认」），不是本 Agent 会话自己那份；返回里的 backend 会写明实际用的模型。传 files 只翻译指定的输入文件（试译时用：只翻一两个文件验证文风）。",
+            "description": "提交一个翻译任务。translator 取值：ForGal-json/ForGal-tool/ForGal-tsv/ForNovel/sakura-v1.0/galtransl-v3（主翻译；ForGal-tool 使用工具补丁提交译文，需要翻译后端支持 function calling）；GenDic（生成GPT字典）；dump-name（导出人名表）；rebuilda（用字典重建缓存+结果，跳过翻译，复核时用这个才能在 list_problems 看到变化）；rebuildr（只重建结果 json，不更新缓存，一般不用）。任务用的是「翻译任务会用」的那份后端（项目选择 → 否则全局「翻译器默认」），不是本 Agent 会话自己那份；返回里的 backend 会写明实际用的模型。传 files 只翻译指定的输入文件（试译时用：只翻一两个文件验证文风）。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "translator": {"type": "string"},
+                    "translator": {
+                        "type": "string",
+                        "enum": [name for name in TRANSLATOR_SUPPORTED if name != "show-plugs"],
+                        "description": "翻译引擎名称，使用列出的标准拼写。ForGal-tool 为工具补丁翻译模板。",
+                    },
                     "files": {
                         "type": "array",
                         "items": {"type": "string"},

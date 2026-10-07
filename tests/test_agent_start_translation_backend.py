@@ -49,6 +49,27 @@ class _Runner:
 
 
 class StartTranslationBackendTests(unittest.TestCase):
+    def test_forgal_tool_is_advertised_and_submitted_with_canonical_name(self) -> None:
+        from GalTransl import TRANSLATOR_SUPPORTED
+        from GalTransl.Agent.prompts import AGENT_SYSTEM_PROMPT
+        from GalTransl.Agent.tool_schemas import AGENT_TOOLS
+
+        schema = next(tool["function"] for tool in AGENT_TOOLS if tool["function"]["name"] == "start_translation")
+        self.assertIn("ForGal-tool", schema["parameters"]["properties"]["translator"]["enum"])
+        self.assertIn("ForGal-tool", schema["description"])
+        self.assertIn("ForGal-tool", AGENT_SYSTEM_PROMPT)
+        for name in ("ForGal-tool", "forgal-tool", " FORGAL-TOOL "):
+            with self.subTest(translator=name):
+                runner = _Runner(backend_profile_data=AGENT_PROFILE, translator_profile_data=TRANSLATOR_PROFILE)
+                out = _tool_start_translation(runner, {"translator": name, "files": ["a.json"]})
+                path, body = runner.posts[0]
+                self.assertEqual(path, "/api/jobs")
+                self.assertEqual(body["translator"], "ForGal-tool")
+                self.assertIn(body["translator"], TRANSLATOR_SUPPORTED)
+                self.assertIs(body["backend_profile_data"], TRANSLATOR_PROFILE)
+                self.assertEqual(body["input_files"], ["a.json"])
+                self.assertEqual(out["translator"], "ForGal-tool")
+
     def test_uses_translator_profile(self) -> None:
         runner = _Runner(
             backend_profile_data=AGENT_PROFILE,

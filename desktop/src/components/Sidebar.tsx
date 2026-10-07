@@ -11,6 +11,7 @@ import {
   fetchProjectRuntime,
   getBackendProfileNames,
   isProjectConfigDirty,
+  listAgentSessions,
   PROJECT_CONFIG_DIRTY_CHANGE_EVENT,
   setProjectConfigDirty,
   submitJob,
@@ -22,6 +23,7 @@ import { Icon, type IconName } from './Icon';
 import { InlineFeedback } from './page-state/InlineFeedback';
 import logoUrl from '../assets/logo.png';
 import { ProjectFolderPopover } from './ProjectFolderPopover';
+import { readHistory } from '../pages/agent/storage';
 
 const CONFIG_FILE_KEY = 'galtransl-config-file';
 const LAST_ACTIVE_PROJECT_KEY = 'galtransl-last-active-project';
@@ -59,15 +61,15 @@ const PROJECT_TABS: Array<{ path: string; label: string; icon: IconName }> = [
   { path: 'config', get label() { return translate("common:sidebar.label_label_configEdit"); }, icon: 'settings' },
 ];
 
-/** 「开始翻译」正在跑任务时的呼吸蓝点（与 Agent 页「运行中」指示同款）。
+/** 翻译或 Agent 正在跑任务时的呼吸蓝点（与 Agent 页「运行中」指示同款）。
  *  child = 展开态子项行（跟在文字后面靠右）；rail = 收起态只剩图标的导航项。 */
-function RunningDot({ variant }: { variant: 'child' | 'rail' }) {
+function RunningDot({ variant, agent = false }: { variant: 'child' | 'rail'; agent?: boolean }) {
   const uiLanguage = useUiLanguage();
   return (
     <span
       className={variant === 'child' ? 'sidebar__project-child-running-dot' : 'sidebar__nav-running-dot'}
-      title={translate("common:sidebar.runningDot_title_pendingTranslation")}
-      aria-label={translate("common:sidebar.runningDot_ariaLabel_pendingTranslation")}
+      title={translate(agent ? "common:actions.running" : "common:sidebar.runningDot_title_pendingTranslation")}
+      aria-label={translate(agent ? "common:actions.running" : "common:sidebar.runningDot_ariaLabel_pendingTranslation")}
     />
   );
 }
@@ -131,6 +133,8 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onClosePr
   const [rebuildingDirs, setRebuildingDirs] = useState<Record<string, boolean>>({});
   // Track which projects have active translation jobs (running or pending)
   const [translatingDirs, setTranslatingDirs] = useState<Record<string, boolean>>({});
+  const [agentRunning, setAgentRunning] = useState(false);
+  const runningAgentProjectsRef = useRef(new Map<string, boolean>());
   const [rebuildToasts, setRebuildToasts] = useState<RebuildToast[]>([]);
   const [hasBackendProfiles, setHasBackendProfiles] = useState(() => getBackendProfileNames().length > 0);
   const [dirtyConfigProjects, setDirtyConfigProjects] = useState<Record<string, boolean>>({});
@@ -300,6 +304,37 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onClosePr
       return next;
     });
   }, [expandedProjects, openProjects]);
+
+  // Keep the Agent indicator updated even when its page is unmounted.
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+    const runningByProject = runningAgentProjectsRef.current;
+    const pollAgentStatus = async () => {
+      const projects = new Set([...openProjects, ...readHistory().map((entry) => entry.projectDir)]);
+      // Keep watching a running project even if it is removed from the navigation.
+      for (const [dir, running] of runningByProject) {
+        if (running) projects.add(dir);
+      }
+      await Promise.all(Array.from(projects, async (dir) => {
+        try {
+          const sessions = await listAgentSessions(dir);
+          if (cancelled) return;
+          runningByProject.set(dir, sessions.some((session) => session.status === 'running'));
+        } catch {
+          // Preserve the last known state during temporary connection failures.
+        }
+      }));
+      if (cancelled) return;
+      setAgentRunning(Array.from(runningByProject.values()).some(Boolean));
+      timer = window.setTimeout(() => void pollAgentStatus(), 3000);
+    };
+    void pollAgentStatus();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [openProjects]);
 
   // Poll project runtime status to detect active translation jobs
   useEffect(() => {
@@ -572,6 +607,7 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onClosePr
         >
           <span className="sidebar__nav-icon"><Icon name="bot" /></span>
           {expanded && <span className="sidebar__nav-label">{translate("common:sidebar.sidebarTopNav_message_agent")}</span>}
+          {agentRunning && <RunningDot variant={expanded ? 'child' : 'rail'} agent />}
         </NavLink>
       </div>
 

@@ -43,6 +43,8 @@ from GalTransl.ProjectGuideline import (
 )
 from GalTransl.Backend.Prompts import (
     FORGAL_JSON_SYSTEM_PROMPT,
+    FORGAL_TOOL_SYSTEM_PROMPT,
+    FORGAL_TOOL_TRANS_PROMPT,
     FORGAL_JSON_TRANS_PROMPT,
     FORGAL_TSV_SYSTEM,
     FORGAL_TSV_TRANS_PROMPT_EN,
@@ -423,6 +425,10 @@ _DEFAULT_TRANSLATOR_PROMPTS: dict[str, dict[str, str]] = {
     "ForGal-json": {
         "system_prompt": FORGAL_JSON_SYSTEM_PROMPT,
         "user_prompt": FORGAL_JSON_TRANS_PROMPT,
+    },
+    "ForGal-tool": {
+        "system_prompt": FORGAL_TOOL_SYSTEM_PROMPT,
+        "user_prompt": FORGAL_TOOL_TRANS_PROMPT,
     },
     "ForGal-tsv": {
         "system_prompt": FORGAL_TSV_SYSTEM,

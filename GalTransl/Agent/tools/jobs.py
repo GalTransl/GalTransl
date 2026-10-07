@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any, TYPE_CHECKING
 
+from GalTransl import TRANSLATOR_SUPPORTED
 from GalTransl.Agent.core import RUNTIME_ERRORS_PER_QUERY, _log
 from GalTransl.Agent.models import AgentToolError
 from GalTransl.Agent.tools.project import _backend_summary
@@ -26,6 +27,11 @@ def _tool_start_translation(runner: AgentRunner, args: dict[str, Any]) -> Any:
     translator = str(args.get("translator", "")).strip()
     if not translator:
         raise AgentToolError("translator is required")
+    # 模型/用户可能使用小写引擎名，任务接口要求注册表中的标准拼写。
+    translator = next(
+        (name for name in TRANSLATOR_SUPPORTED if name.casefold() == translator.casefold()),
+        translator,
+    )
     state = runner.state
     profile = state.translator_profile_data or state.backend_profile_data
     body = {

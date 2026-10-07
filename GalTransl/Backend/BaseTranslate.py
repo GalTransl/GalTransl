@@ -1062,6 +1062,9 @@ class BaseTranslate:
         max_retry_count: Optional[int] = None,
         reasoning_holder: Optional[dict] = None,
         progress_file: str = "",
+        tools=NOT_GIVEN,
+        tool_response_holder: Optional[dict] = None,
+        tool_choice=NOT_GIVEN,
     ):
         """发一次请求并返回 (正文, token)。
 
@@ -1091,6 +1094,9 @@ class BaseTranslate:
                 max_retry_count=max_retry_count,
                 reasoning_holder=reasoning_holder,
                 progress=progress,
+                tools=tools,
+                tool_response_holder=tool_response_holder,
+                tool_choice=tool_choice,
             )
         finally:
             progress.close()
@@ -1113,6 +1119,9 @@ class BaseTranslate:
         max_retry_count: Optional[int],
         reasoning_holder: Optional[dict],
         progress: _FileRequestProgress,
+        tools=NOT_GIVEN,
+        tool_response_holder: Optional[dict] = None,
+        tool_choice=NOT_GIVEN,
     ):
         """ask_chatbot 的本体：带重试地发请求，边收边报 progress。"""
         if max_retry_count is None:
@@ -1180,6 +1189,7 @@ class BaseTranslate:
                         timeout=self.api_timeout,
                         top_p=top_p,
                         reasoning_effort=reasoning_effort,
+                        **({"tools": tools, "tool_choice": "auto" if tool_choice is NOT_GIVEN else tool_choice} if tools is not NOT_GIVEN else {}),
                     )
                 )
 
@@ -1207,6 +1217,8 @@ class BaseTranslate:
                 lastline = ""
                 reasoning_parts: List[str] = []
                 reasoning_field = ""
+                tool_calls = {}
+                finish_reason = None
                 if is_stream:
                     stream_abort_requested = False
                     stream_line_buffer = ""
@@ -1223,6 +1235,27 @@ class BaseTranslate:
                                 raise JobCancelledError()
                             if not chunk.choices:
                                 continue
+                            finish_reason = getattr(chunk.choices[0], "finish_reason", None) or finish_reason
+                            if tool_response_holder is not None:
+                                for call in getattr(chunk.choices[0].delta, "tool_calls", None) or []:
+                                    slot = tool_calls.setdefault(call.index, {"id": ""})
+                                    if call.id:
+                                        slot["id"] = call.id
+                                    custom = getattr(call, "custom", None)
+                                    if custom:
+                                        slot["type"] = "custom"
+                                        target = slot.setdefault("custom", {"name": "", "input": ""})
+                                        target["name"] += custom.get("name") or ""
+                                        piece = custom.get("input") or ""
+                                        target["input"] += piece
+                                        progress.output("writing", len(piece))
+                                    if call.function:
+                                        slot["type"] = "function"
+                                        slot.setdefault("function", {"name": "", "arguments": ""})
+                                        slot["function"]["name"] += call.function.name or ""
+                                        piece = call.function.arguments or ""
+                                        slot["function"]["arguments"] += piece
+                                        progress.output("writing", len(piece))
                             reasoning_piece, hit_field = _extract_reasoning(
                                 chunk.choices[0].delta
                             )
@@ -1280,13 +1313,19 @@ class BaseTranslate:
                                 except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
                                     pass
                 else:
+                    if tool_response_holder is not None and response.choices:
+                        finish_reason = response.choices[0].finish_reason
+                        tool_calls = {
+                            i: call.model_dump(exclude_none=True)
+                            for i, call in enumerate(response.choices[0].message.tool_calls or [])
+                        }
                     try:
                         result = response.choices[0].message.content
                     except:
                         raise ValueError(
                             "response.choices[0].message.content is None, no_candidates"
                         )
-                    if not isinstance(result, str) or result.strip() == "":
+                    if (not isinstance(result, str) or result.strip() == "") and not tool_calls:
                         raise ValueError(
                             "response.choices[0].message.content is empty"
                         )
@@ -1296,6 +1335,12 @@ class BaseTranslate:
                     if reasoning_piece:
                         reasoning_field = reasoning_field or hit_field
                         reasoning_parts.append(reasoning_piece)
+                if tool_response_holder is not None:
+                    tool_response_holder.clear()
+                    tool_response_holder.update(
+                        tool_calls=[call for _, call in sorted(tool_calls.items())],
+                        finish_reason=finish_reason,
+                    )
                 self._record_request_health(
                     time.monotonic() - request_started,
                     is_rate_limited=False,

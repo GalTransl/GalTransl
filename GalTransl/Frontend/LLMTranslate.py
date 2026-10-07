@@ -836,6 +836,9 @@ async def init_gptapi(
     eng_type = projectConfig.select_translator
 
     match eng_type:
+        case "ForGal-tool":
+            from GalTransl.Backend.ForGalToolTranslate import ForGalToolTranslate
+            return ForGalToolTranslate(projectConfig, eng_type, proxyPool, tokenPool)
         case "ForGal-tsv":
             from GalTransl.Backend.ForGalTsvTranslate import ForGalTsvTranslate
             return ForGalTsvTranslate(projectConfig, eng_type, proxyPool, tokenPool)

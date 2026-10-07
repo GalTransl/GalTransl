@@ -27,6 +27,8 @@ from openai._types import NOT_GIVEN
 
 class ForGalJsonTranslate(MultiTurnTranslate):
     followup_prompt = FORGAL_JSON_FOLLOWUP_PROMPT
+    default_trans_prompt = FORGAL_JSON_TRANS_PROMPT
+    default_system_prompt = FORGAL_JSON_SYSTEM_PROMPT
 
     _SIGCHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
 
@@ -42,8 +44,8 @@ class ForGalJsonTranslate(MultiTurnTranslate):
         token_pool: COpenAITokenPool,
     ):
         super().__init__(config, eng_type, proxy_pool, token_pool)
-        self.trans_prompt = FORGAL_JSON_TRANS_PROMPT
-        self.system_prompt = FORGAL_JSON_SYSTEM_PROMPT
+        self.trans_prompt = self.default_trans_prompt
+        self.system_prompt = self.default_system_prompt
         self._apply_internal_prompt_template_overrides()
         # enhance_jailbreak
         if val := config.getKey("gpt.enhance_jailbreak"):
@@ -180,8 +182,10 @@ class ForGalJsonTranslate(MultiTurnTranslate):
             resp = None
             self._clear_chatbot_state()
             reasoning = {}
-            resp, token = await self._ask_translation_chatbot(
+            resp, token = await self._ask_translation_batch(
                 session,
+                trans_list=trans_list, sig_list=sig_list, proofread=proofread,
+                n_symbol=n_symbol,
                 reasoning_holder=reasoning,
                 messages=messages,
                 file_name=f"{filename}:{idx_tip}",
@@ -328,6 +332,9 @@ class ForGalJsonTranslate(MultiTurnTranslate):
             )
             break
         return success_count, result_trans_list
+
+    async def _ask_translation_batch(self, session, *, trans_list, sig_list, proofread, n_symbol="", **kwargs):
+        return await self._ask_translation_chatbot(session, **kwargs)
 
     def _parse_jsonline_result_line(
         self,
