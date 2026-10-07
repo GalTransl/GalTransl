@@ -253,6 +253,9 @@ class ForGalToolTranslate(ForGalJsonTranslate):
                     print(f"{log_label} 工具输入：\n{payload}", flush=True)
                     pending = {}
                     count = apply_translation_patch(payload, expected, pending)
+                    for key, text in pending.items():
+                        if self._has_speaker_column_in_translation(text, sentences_by_key[key]):
+                            raise ValueError(f"{key} 译文包含姓名列；补丁 + 行只能包含译文正文，不要写 NAME|DST")
                     new_count = sum(key not in results for key in pending)
                     corrected_count = sum(key in results and results[key] != text for key, text in pending.items())
                     if not new_count and not corrected_count:

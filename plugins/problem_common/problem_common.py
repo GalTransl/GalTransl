@@ -206,7 +206,7 @@ class CProblemType(Enum):
     标点错漏 = 2, "括号/引号/冒号等标点与原文不一致。", True
     本无括号 = 标点错漏
     本无引号 = 标点错漏
-    残留日文 = 3, "译文中残留日文平假名或片假名。", True
+    残留日文 = 3, "译文中残留日文平假名或片假名；若原文与最终译文完全相同，记录为原文输出。", True
     丢失换行 = 4, "译文缺少原文中的行内换行。", False
     多加换行 = 5, "译文换行符比原文多，可能导致溢出。", True
     比日文长 = 6, "译文长度超过原文 1.3 倍（常用，宽松阈值）。", True
@@ -304,7 +304,10 @@ def _check_problems(
         pre_dst_jp_chars = contains_japanese(pre_dst)
         post_dst_jp_chars = contains_japanese(post_dst)
         if pre_dst_jp_chars != "" and post_dst_jp_chars != "":
-            problem_list.append(f"残留日文：{post_dst_jp_chars}")
+            if pre_src == post_dst:
+                problem_list.append("原文输出")
+            else:
+                problem_list.append(f"残留日文：{post_dst_jp_chars}")
     if CProblemType.丢失换行 in find_type and n_symbol != "":
         if pre_src.count(n_symbol) > post_dst.count(n_symbol):
             problem_list.append("丢失换行")

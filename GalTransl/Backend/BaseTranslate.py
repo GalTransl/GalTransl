@@ -6,6 +6,7 @@ from typing import Optional, List
 from collections import deque
 from contextvars import ContextVar
 from threading import Lock
+import re
 from GalTransl.COpenAI import COpenAITokenPool, COpenAIToken
 from GalTransl.ConfigHelper import CProxyPool, build_httpx_proxy_kwargs
 from GalTransl import LOGGER, LANG_SUPPORTED, TRANSLATOR_DEFAULT_ENGINE
@@ -709,6 +710,22 @@ class BaseTranslate:
             )
         except Exception:
             pass
+
+    def _has_speaker_column_in_translation(self, text, tran, output_speaker=""):
+        """Reject a copied NAME column, while preserving pipes already in the source."""
+        if "|" in tran.post_src or "｜" in tran.post_src:
+            return False
+        match = re.match(r"^\s*([^|｜\n]+?)\s*[|｜]", text)
+        if not match:
+            return False
+        speaker = tran.get_speaker_name()
+        names = {speaker, output_speaker}
+        replacement = getattr(self.pj_config, "name_replaceDict", {}).get(speaker)
+        if isinstance(replacement, str):
+            names.add(replacement)
+        names.discard("")
+        names.discard("null")
+        return match.group(1).strip() in names
 
     def _normalize_parsed_translation_text(
         self, line_dst: str, current_tran: CSentense, n_symbol: str

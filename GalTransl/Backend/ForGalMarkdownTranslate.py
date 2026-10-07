@@ -342,6 +342,8 @@ class ForGalMarkdownTranslate(MultiTurnTranslate):
             return False, f"{line_id}句id未对应{trans_list[i].index}"
 
         line_dst = line_sp[2]
+        if self._has_speaker_column_in_translation(line_dst, trans_list[i], line_sp[1]):
+            return False, f"第{line_id}句译文包含姓名列；DST 只能包含译文正文"
         if trans_list[i].post_src != "" and line_dst == "":
             return False, f"第{line_id}句空白"
         if "�" in line_dst:

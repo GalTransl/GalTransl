@@ -706,6 +706,8 @@ class RuntimeProgressCache:
                         item = items[idx]
                         if not isinstance(item, dict):
                             return ""
+                        if item.get("translation_skipped"):
+                            return ""
                         name = str(item.get("name", "") or "")
                         pre_src = str(item.get("pre_src", item.get("pre_jp", "")) or "")
                         return f"{name}{pre_src}"
@@ -713,6 +715,8 @@ class RuntimeProgressCache:
                     def _entry_signature(items: list[Any], idx: int) -> str:
                         line_now = _name_src(items, idx)
                         row = items[idx] if 0 <= idx < len(items) else {}
+                        if isinstance(row, dict) and row.get("translation_skipped"):
+                            line_now = str(row.get("name", "") or "") + str(row.get("pre_src", row.get("pre_jp", "")) or "")
                         row_index = str(row.get("index", "")) if isinstance(row, dict) else ""
                         if not line_now:
                             if isinstance(row, dict):
@@ -787,7 +791,8 @@ class RuntimeProgressCache:
                         else:
                             entry_key = _entry_signature(entries, idx)
 
-                        is_translated = bool(item.get("pre_dst", "") or item.get("pre_zh", ""))
+                        translation_skipped = item.get("translation_skipped") is True and item.get("post_src") == ""
+                        is_translated = translation_skipped or bool(item.get("pre_dst", "") or item.get("pre_zh", ""))
                         problem_text = filter_problem_text(item.get("problem", ""), problem_filter_keys)
                         # 白名单命中：等价于该条勾了 skip_check，问题整体不算
                         if is_problem_whitelisted(problem_white_index, entry.name, item.get("index", "")):
@@ -823,6 +828,7 @@ class RuntimeProgressCache:
                             should_apply_retransl_filter = False
                         if (
                             is_translated
+                            and not translation_skipped
                             and should_apply_retransl_filter
                             and retran_key
                             and no_proofread

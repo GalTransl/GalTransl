@@ -106,6 +106,7 @@ Copy each anchor and id from the current input. Each translation text line start
 Each patch must contain 1 to N distinct sentences from the current input, proceeding in input order.
 For a shorter final batch, use its actual sentence count as N. Include only translated src text,
 without JSON, names, code fences or explanations. Use <br> for source line breaks.
+Do not copy the NAME column or table separators into a patch: write +translated text, never +speaker|translated text.
 The tool returns whether the patch succeeded; correct and retry failed patches as needed.
 Each tool response lists Next patch anchors: use those anchors for the next group.
 A successful patch completes its sentences. Move forward instead of restarting at the beginning.

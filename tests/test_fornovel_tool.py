@@ -71,3 +71,25 @@ class NovelToolTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('<br>', rendered)
             self.assertNotIn('jsonline', rendered)
             self.assertEqual(parse_markdown_row(history.splitlines()[2])[-1], 'history|text<br>next')
+
+    async def test_tool_rejects_speaker_prefix_before_publishing_patch(self):
+        from GalTransl.Backend.ForGalToolTranslate import ForGalToolTranslate
+        from GalTransl.Backend.Prompts import FORGAL_TOOL_TRANS_PROMPT
+        from GalTransl.Backend.BaseTranslate import TranslationParseError
+        engine = translator(ForGalToolTranslate, FORGAL_TOOL_TRANS_PROMPT)
+        engine.fail_fast = True
+        engine.pj_config.name_replaceDict = {'アリス': '爱丽丝'}
+        row = sentences(1)[0]
+        row.speaker = 'アリス'
+        published = []
+        engine._record_runtime_success = lambda *args: published.append(args)
+        async def reply(**kwargs):
+            sig, obj = tool_input_rows(kwargs['messages'][-1]['content'])[0]
+            patch = f"*** Begin Patch\n@@ {sig}|{obj['id']}\n+爱丽丝|你好\n*** End Patch"
+            kwargs['tool_response_holder'].update(tool_calls=[function_call('write_translation_result', patch)], finish_reason='tool_calls')
+            return '', SimpleNamespace(model_name='model')
+        engine.ask_chatbot = reply
+        with self.assertRaisesRegex(TranslationParseError, '姓名列'):
+            await engine.translate([row], filename='a')
+        self.assertEqual(row.pre_dst, '')
+        self.assertEqual(published, [])

@@ -68,3 +68,25 @@ class MarkdownTranslationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('columns ID, NAME, DST', second[-1]['content'])
         self.assertIn('Keep <br>', second[-1]['content'])
         self.assertIsNone(engine._session_scope().get())
+
+    async def test_speaker_prefix_in_dst_is_rejected(self):
+        engine = translator(ForGalMarkdownTranslate, FORGAL_MARKDOWN_TRANS_PROMPT_EN)
+        engine.fail_fast = True
+        row = sentences(1)[0]
+        row.speaker = 'アリス'
+        response = '| ID | NAME | DST |\n| --- | --- | --- |\n' + markdown_row('1', '爱丽丝', '爱丽丝|你好')
+        engine.ask_chatbot = AsyncMock(return_value=(response, SimpleNamespace(model_name='model')))
+        with self.assertRaisesRegex(TranslationParseError, '姓名列'):
+            await engine.translate([row], filename='a')
+        self.assertEqual(row.pre_dst, '')
+
+    def test_known_names_rejected_but_source_pipes_preserved(self):
+        engine = translator(ForGalMarkdownTranslate, FORGAL_MARKDOWN_TRANS_PROMPT_EN)
+        engine.pj_config.name_replaceDict = {'アリス': '爱丽丝'}
+        row = sentences(1)[0]
+        row.speaker = 'アリス'
+        for text in ('アリス|你好', '爱丽丝|你好', ' 爱丽丝 ｜你好'):
+            self.assertTrue(engine._has_speaker_column_in_translation(text, row))
+        self.assertFalse(engine._has_speaker_column_in_translation('选项甲|选项乙', row))
+        row.post_src = 'アリス|こんにちは'
+        self.assertFalse(engine._has_speaker_column_in_translation('爱丽丝|你好', row))
