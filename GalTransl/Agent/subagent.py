@@ -14,6 +14,7 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence, TYPE_CHECKING
 
+from GalTransl import DEFAULT_GUIDELINE_NAME
 from GalTransl.Agent.context import (
     _apply_prompt_cache,
     _estimate_usage_tokens,
@@ -29,12 +30,14 @@ from GalTransl.Agent.core import (
     AgentStopRequested,
     COMPACT_TRIGGER_RATIO,
     CONTEXT_RESERVE_TOKENS,
+    DEFAULT_CONFIG_FILE,
     DEFAULT_CONTEXT_WINDOW,
     LLM_MAX_RETRIES,
     REASONING_FIELD_NAMES,
     SUBAGENT_AGENTS,
     SUBAGENT_AGENT_EXPLORE,
     SUBAGENT_AGENT_PROOFREAD,
+    SUBAGENT_CACHE_WARMUP_SECONDS,
     SUBAGENT_COMPACT_KEEP_RECENT_RATIO,
     SUBAGENT_EXPLORE_REPORT_CHARS,
     SUBAGENT_LABELS,
@@ -62,6 +65,7 @@ from GalTransl.Agent.tools.listing import _list_grep, _list_limit, _list_order
 from GalTransl.Agent.tools.problems import _tool_list_problems
 from GalTransl.Agent.tools.proofread import ProofreadFixer
 from GalTransl.Agent.tools.render_md import _render_tool_result_table, _tool_result_json
+from GalTransl.ProjectGuideline import combine_guidelines
 
 if TYPE_CHECKING:
     from GalTransl.Agent.runner import AgentRunner
@@ -81,7 +85,7 @@ if TYPE_CHECKING:
 # 与 PI-Desktop 的一处刻意差异：那边一个 Task 调用只起一个子代理、**立即返回** delegationId，
 # 再由 TaskWait／自动 resume 收口；我们这里**一次调用带一批任务、阻塞到全部跑完**。原因是
 # 我们的回合里工具是串行执行的（见 run() 的 for tc in tool_calls），没有 resume 那套机制，
-# 阻塞式最省事也最不容易出错；并发一点没少——同一批里的子代理是真并行跑的。
+# 首个代理拿到模型响应后等待 2 秒，再并行启动同批其余代理，便于复用前缀缓存。
 
 # 原文探索的任务说明：它不写文件，交的只有报告。
 _SUBAGENT_EXPLORE_BRIEF = """# 你的任务
@@ -136,7 +140,7 @@ SUBAGENT_PROOFREAD_PROMPT = """你是 GalTransl 的校对修复子代理，负�
   但只允许修改任务分配的 file + index。上下文和搜索命中只供参考，不能越界修改。
 - 修改会核对最近一次读取的内容；冲突时重新读取后再决定，禁止照搬旧补丁重试。
 - 默认只修错译、漏译、事实错误、明显不通等硬伤。只有 brief 明确要求润色时才润色；两者都要时硬伤优先。
-- 保留控制符、换行和项目文风。read_guideline / get_name_table / 全项目搜索用于核对已有规范。
+- 保留控制符、换行和项目文风。全局与项目翻译规范已附在本 system prompt 中，冲突时以项目规范为准；可用全项目缓存搜索核对译名和用法。
 - 明确的问题直接改 dst；拿不准、需要全局译名或字典决策的事项写 proofread_comment，交主 Agent 裁决。
   同条有多个疑问要合并成一条批注。修复了已有批注意见时，同一 patch 明确写 proofread_comment=""；
   没处理的意见保留。不要改配置、字典、过滤规则或白名单，也没有委派/启动翻译的权限。
@@ -179,8 +183,6 @@ SUBAGENT_ROLES: dict[str, SubAgentRole] = {
         tools=(
             "read_transl_cache",
             "list_problems",
-            "get_name_table",
-            "read_guideline",
             "patch_transl_cache",
         ),
         needs_file=True,
@@ -195,6 +197,23 @@ SUBAGENT_ROLES: dict[str, SubAgentRole] = {
         report_chars=SUBAGENT_EXPLORE_REPORT_CHARS,
     ),
 }
+
+
+def _load_proofread_guidelines(runner: AgentRunner) -> str:
+    """读取当前配置的全局规范与项目规范；每次派发取一份快照供整批校对共享。"""
+    try:
+        pid = runner._project_id()
+        config_name = urllib.parse.quote(runner.state.config_file_name or DEFAULT_CONFIG_FILE)
+        config = runner._http_get(f"/api/projects/{pid}/config?config={config_name}").get("config") or {}
+        common = config.get("common") or {}
+        name = str(common.get("gpt.translation_guideline") or DEFAULT_GUIDELINE_NAME)
+        global_text = runner._http_get(
+            f"/api/translation-guidelines/{urllib.parse.quote(name, safe='')}"
+        ).get("content") or ""
+        project_text = runner._http_get(f"/api/projects/{pid}/guideline").get("content") or ""
+        return combine_guidelines(global_text, project_text)
+    except Exception as exc:
+        raise AgentToolError(f"加载校对翻译规范失败：{exc}") from exc
 
 
 def _subagent_role(agent: str) -> SubAgentRole:
@@ -242,8 +261,8 @@ def _subagent_tools(agent: str) -> list[dict[str, Any]]:
 
 
 # 认"锁定文件"的工具：任务里给了 file 时，这些工具的 filename 入参被限制在派给它的那些文件里。
-# 搜索（read_transl_cache 的 action=search / search_input）与 get_name_table 本来就是跨文件/
-# 跨项目的，不锁——子代理要核对"这个词在别处怎么翻的/原文里怎么说"，正是它们的用途。
+# 搜索（read_transl_cache 的 action=search / search_input）本来就是跨文件的，不锁——
+# 子代理要核对"这个词在别处怎么翻的/原文里怎么说"，正是它们的用途。
 # read_transl_cache 只锁 action=read（list 只列锁定的文件），见 _lock_cache_reader。list_problems 没有
 # filename 入参，改由 _subagent_handlers 传 allowed_files 收窄（见 _tool_list_problems）。
 _LOCKED_FILENAME_TOOLS: tuple[str, ...] = (
@@ -728,7 +747,7 @@ def _subagent_handlers(
       read、patch_transl_cache / read_input_file 的 filename 被限制在这一组里，read_transl_cache 的
       list 与 list_input_files 也只列这些，list_problems 也只列这些文件的问题——"一份文件只归一个子代理"由工具层保证，模型串到
       范围外会被拒（省 token，也避免两个子代理写同一条）。要核对"这个词在别处怎么翻的"，仍走
-      跨文件的 read_transl_cache(action="search") / get_name_table；
+      跨文件的 read_transl_cache(action="search")；
     - 派发门禁统一授权本次范围内的修复，批内不再逐条询问。配置、字典等全局写工具不开放。
     """
     # 延迟导入：注册表要登记 run_subagents（本模块），模块顶层互相导入会成环
@@ -854,6 +873,8 @@ class SubAgentRunner:
         indexes: str,
         brief: str,
         delegation_id: str,
+        guidelines: str | None = None,
+        first_response_event: threading.Event | None = None,
     ) -> None:
         self.parent = parent
         self.stop_event = parent.stop_event  # Keep the original turn's cancellation token.
@@ -863,6 +884,8 @@ class SubAgentRunner:
         self.files: tuple[str, ...] = tuple(str(name).strip() for name in files if str(name).strip())
         self.indexes = indexes
         self.brief = brief
+        self.guidelines = guidelines
+        self.first_response_event = first_response_event
         self.id = delegation_id
         self.fixer = ProofreadFixer(parent, delegation_id, self.stop_event) if agent == SUBAGENT_AGENT_PROOFREAD else None
         self.messages: list[dict[str, Any]] = []
@@ -1182,6 +1205,9 @@ class SubAgentRunner:
                 content, calls, field, reasoning, prompt_tokens = _subagent_chat(
                     client, model, messages, request_tools
                 )
+                # 任意模型响应都算首响（包括只有工具调用、没有正文的响应），不等任务完成。
+                if self.first_response_event is not None:
+                    self.first_response_event.set()
                 # 摘要请求省略了 tools，且即将替换历史，不能拿它校准正常请求。
                 if tools is not None and prompt_tokens > 0:
                     self._last_prompt_tokens = prompt_tokens
@@ -1232,8 +1258,16 @@ class SubAgentRunner:
         )
         if client is None or not model:
             return self._finish("failed", "", error="主 Agent 的后端还没就绪，子代理起不来")
+        system_prompt = self.role.prompt
+        if self.agent == SUBAGENT_AGENT_PROOFREAD:
+            try:
+                if self.guidelines is None:
+                    self.guidelines = _load_proofread_guidelines(self.parent)
+            except AgentToolError as exc:
+                return self._finish("failed", "", error=str(exc))
+            system_prompt += "\n\n# 翻译规范\n\n" + (self.guidelines or "（当前全局与项目规范均为空）")
         self.messages = [
-            {"role": "system", "content": self.role.prompt},
+            {"role": "system", "content": system_prompt},
             {
                 "role": "user",
                 "content": self.role.brief.format(
@@ -1420,7 +1454,7 @@ def _split_summary(agent: str, total: int, parts: int, sizes: list[int]) -> str:
 
 
 def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
-    """派一批子代理并行干活，等它们全部跑完，把每份报告收回来。
+    """首个代理预热前缀缓存后并行派发其余任务，等全部跑完收回报告。
 
     三个维度互相独立（正交），任意组合：
     - **选谁（file）**：选择器 → 有序文件清单。具体文件名 / "*"（全部，自动均分）/
@@ -1432,6 +1466,7 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
     文件与 index 共同构成写入范围；重叠任务在派发前拒绝，同文件不同区间通过文件锁串行提交。
     原文探索的 file 可以留空（自己按 list_input_files 挑）：它只读、不写文件。
     """
+    stop_event = runner.stop_event
     tasks_raw = args.get("tasks")
     if not isinstance(tasks_raw, list) or not tasks_raw:
         raise AgentToolError("tasks 必须是非空数组")
@@ -1593,12 +1628,28 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
     if getattr(runner, "_openai_client", None) is None or not str(getattr(runner, "_model", "") or ""):
         raise AgentToolError("本回合的后端还没就绪，子代理跑不起来")
 
+    # 在并行启动前读取一次，确保本批校对的 system prompt 一致；探索不加载规范。
+    guidelines = (
+        _load_proofread_guidelines(runner)
+        if any(task["agent"] == SUBAGENT_AGENT_PROOFREAD for task in tasks)
+        else None
+    )
     slots: list[dict[str, Any] | None] = [None] * len(tasks)
     running: dict[int, SubAgentRunner] = {}
     lock = threading.Lock()
     base = os.urandom(8).hex()
+    first_response = threading.Event()
 
     def work(slot: int, task: dict[str, Any]) -> None:
+        if slot > 0:
+            # 这里只启动等待线程，不创建或运行子代理；首响后其余任务一起放行。
+            while not first_response.wait(0.1):
+                if stop_event.is_set():
+                    return
+            if stop_event.wait(SUBAGENT_CACHE_WARMUP_SECONDS):
+                return
+        if stop_event.is_set():
+            return
         try:
             sub = SubAgentRunner(
                 runner,
@@ -1607,6 +1658,8 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
                 indexes=task["indexes"],
                 brief=task["brief"],
                 delegation_id=f"{base}-{slot + 1:02d}",
+                guidelines=guidelines,
+                first_response_event=first_response if slot == 0 else None,
             )
             running[slot] = sub
             out = sub.run()
@@ -1629,6 +1682,10 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
                 "duration_ms": 0,
                 "error": f"{type(exc).__name__}: {exc}",
             }
+        finally:
+            # 首个代理在收到响应前失败也要释放等待者；其他任务仍可独立尝试。
+            if slot == 0:
+                first_response.set()
         with lock:
             slots[slot] = out
 
@@ -1648,11 +1705,13 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
         f"  🧑‍🎓 派出 {len(threads)} 个子代理："
         + "、".join(_dispatch_label(task) for task in tasks)
     )
+    if len(threads) > 1:
+        _log(f"  🧑‍🎓 先启动首个子代理，首个模型响应后等待 {SUBAGENT_CACHE_WARMUP_SECONDS:g}s 再启动其余代理")
     for thread in threads:
         thread.start()
     started = time.time()
     while any(thread.is_alive() for thread in threads):
-        if runner.stop_event.is_set():
+        if stop_event.is_set():
             # 停止信号：各子代理在自己的轮次边界退出，这里不再死等
             _log("  🧑‍🎓 父回合被停止，等待子代理收尾")
             for thread in threads:
@@ -1663,7 +1722,7 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
         # SUBAGENT_PROGRESS_TICK 只用来控制进度日志的节奏。
         deadline = time.time() + SUBAGENT_PROGRESS_TICK
         while time.time() < deadline and any(t.is_alive() for t in threads):
-            if runner.stop_event.is_set():
+            if stop_event.is_set():
                 break
             time.sleep(0.1)
         if not any(thread.is_alive() for thread in threads):

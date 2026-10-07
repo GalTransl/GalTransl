@@ -21,6 +21,7 @@ import urllib.parse
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from GalTransl import DEFAULT_GUIDELINE_NAME
 from GalTransl.Agent import runtime as rt
 # patch 要打在名字被使用的模块上（runtime 只是重新导出的兼容入口）
 from GalTransl.Agent import subagent as subagent_mod
@@ -43,16 +44,21 @@ from GalTransl.Agent.runtime import (
 
 _TEST_RECORDS = None
 _STORE_PATCH = None
+_WARMUP_PATCH = None
 
 
 def setUpModule():
-    global _TEST_RECORDS, _STORE_PATCH
+    global _TEST_RECORDS, _STORE_PATCH, _WARMUP_PATCH
     _TEST_RECORDS = tempfile.TemporaryDirectory()
     _STORE_PATCH = patch.object(ss, "SESSIONS_ROOT", _TEST_RECORDS.name)
     _STORE_PATCH.start()
+    # 启动延时由 test_agent_subagent_startup 专测，其余用例不重复等待两秒。
+    _WARMUP_PATCH = patch.object(subagent_mod, "SUBAGENT_CACHE_WARMUP_SECONDS", 0)
+    _WARMUP_PATCH.start()
 
 
 def tearDownModule():
+    _WARMUP_PATCH.stop()
     _STORE_PATCH.stop()
     _TEST_RECORDS.cleanup()
 
@@ -100,6 +106,9 @@ class _Parent:
         # 原文（输入目录）与 GPT 字典：原文探索子代理要这两样
         self.inputs = {name: [dict(e) for e in entries] for name, entries in (inputs or {}).items()}
         self.dicts = dict(dicts or {})
+        self.config = {"common": {}}
+        self.global_guideline = "全局规范：保留控制符。"
+        self.project_guideline = ""
         # 问题清单：file:"select:has_problem" 直接吃它（list_problems 的同源数据）
         self.problems = [dict(p) for p in (problems or [])]
         self.saves: list[dict] = []
@@ -114,6 +123,12 @@ class _Parent:
         self.permission_checks.append(name)
 
     def _http_get(self, path: str):
+        if "/config?" in path:
+            return {"config": self.config}
+        if path.startswith("/api/translation-guidelines/"):
+            return {"content": self.global_guideline}
+        if path.endswith("/guideline"):
+            return {"content": self.project_guideline, "exists": bool(self.project_guideline)}
         if path.endswith("/cache"):
             return {
                 "files": [
@@ -462,9 +477,9 @@ class SubagentToolScopeTests(unittest.TestCase):
         }
         self.assertEqual(
             names,
-            {"read_transl_cache", "list_problems", "get_name_table",
-             "read_guideline", "patch_transl_cache"},
+            {"read_transl_cache", "list_problems", "patch_transl_cache"},
         )
+        self.assertEqual(set(_subagent_handlers(SUBAGENT_AGENT_PROOFREAD)), names)
         # 不会递归、也拿不到改配置/字典/启动任务的工具
         for forbidden in ("run_subagents", "save_dict", "update_project_config", "start_translation"):
             self.assertNotIn(forbidden, names)
@@ -496,6 +511,91 @@ class SubagentToolScopeTests(unittest.TestCase):
         parent = _Parent({"a.json": [ENTRY]})
         out = _tool_read_transl_cache(parent, {"filename": "a.json", "index": "1"})
         self.assertEqual(out["entries"][0]["pre_dst"], "译文")
+
+
+class ProofreadGuidelineTests(unittest.TestCase):
+    def test_batch_injects_current_guidelines_once_and_refreshes_next_dispatch(self):
+        parent = _Parent({"a.json": [ENTRY], "b.json": [ENTRY]})
+        parent.state.config_file_name = "校对 配置.yaml"
+        parent.config = {"common": {"gpt.translation_guideline": "日译中 增强.md"}}
+        parent.project_guideline = "项目规范：称呼保持口语化。"
+        tasks = [{"agent": "proofread", "file": name} for name in parent.files]
+        prompts = []
+
+        def chat(_client, _model, messages, tools):
+            prompts.append(messages[0]["content"])
+            self.assertEqual(messages[0]["role"], "system")
+            self.assertNotIn(parent.project_guideline, messages[1]["content"])
+            self.assertEqual(
+                {t["function"]["name"] for t in tools},
+                {"read_transl_cache", "list_problems", "patch_transl_cache"},
+            )
+            return "已完成", [], rt.REASONING_FIELD_NAMES[0], "", 10
+
+        with patch.object(parent, "_http_get", wraps=parent._http_get) as get, \
+                patch.object(subagent_mod, "_subagent_chat", chat):
+            result = _tool_run_subagents(parent, {"tasks": tasks})
+            self.assertTrue(all(task["status"] == "done" for task in result["tasks"]))
+            self.assertEqual(len(prompts), 2)
+            self.assertEqual(prompts[0], prompts[1])
+            self.assertIn(parent.global_guideline, prompts[0])
+            self.assertIn(parent.project_guideline, prompts[0])
+            self.assertLess(prompts[0].index(parent.global_guideline), prompts[0].index(parent.project_guideline))
+            self.assertIn("冲突时，以本节为准", prompts[0])
+            paths = [call.args[0] for call in get.call_args_list]
+            self.assertEqual(paths.count("/api/projects/proj/config?config=" + urllib.parse.quote(parent.state.config_file_name)), 1)
+            self.assertEqual(paths.count("/api/translation-guidelines/" + urllib.parse.quote("日译中 增强.md")), 1)
+            self.assertEqual(paths.count("/api/projects/proj/guideline"), 1)
+
+            parent.project_guideline = "更新后的项目规范。"
+            _tool_run_subagents(parent, {"tasks": tasks[:1]})
+            self.assertIn(parent.project_guideline, prompts[-1])
+            self.assertNotEqual(prompts[0], prompts[-1])
+
+    def test_missing_selection_uses_default_and_absent_project_is_allowed(self):
+        parent = _Parent()
+        parent.state.config_file_name = ""
+        with patch.object(parent, "_http_get", wraps=parent._http_get) as get:
+            text = subagent_mod._load_proofread_guidelines(parent)
+        self.assertEqual(text, parent.global_guideline)
+        paths = [call.args[0] for call in get.call_args_list]
+        self.assertIn("/api/projects/proj/config?config=config.yaml", paths)
+        self.assertIn("/api/translation-guidelines/" + urllib.parse.quote(DEFAULT_GUIDELINE_NAME), paths)
+
+    def test_direct_runner_injects_guidelines_before_first_request(self):
+        parent = _Parent({"a.json": [ENTRY]})
+        parent.project_guideline = "直接运行也要遵循项目规范。"
+        sub = rt.SubAgentRunner(parent, agent="proofread", files=["a.json"], indexes="", brief="", delegation_id="guidelines")
+        with patch.object(subagent_mod, "_subagent_chat", side_effect=_make_chat([("完成", [])])) as chat:
+            result = sub.run()
+        self.assertEqual(result["status"], "done")
+        prompt = chat.call_args.args[2][0]["content"]
+        self.assertIn(parent.global_guideline, prompt)
+        self.assertIn(parent.project_guideline, prompt)
+
+    def test_explore_does_not_load_or_receive_guidelines(self):
+        parent = _Parent()
+        with patch.object(parent, "_http_get", side_effect=AssertionError("explore must not load guidelines")), \
+                patch.object(subagent_mod, "_subagent_chat", side_effect=_make_chat([("完成", [])])) as chat:
+            result = _tool_run_subagents(parent, {"tasks": [{"agent": "explore"}]})
+        self.assertEqual(result["tasks"][0]["status"], "done")
+        self.assertEqual(chat.call_args.args[2][0]["content"], rt.SUBAGENT_EXPLORE_PROMPT)
+
+    def test_loading_failure_prevents_proofreading_without_guidelines(self):
+        parent = _Parent({"a.json": [ENTRY]})
+        original = parent._http_get
+
+        def get(path):
+            if path.startswith("/api/translation-guidelines/"):
+                raise AgentToolError("规范文件不存在")
+            return original(path)
+
+        with patch.object(parent, "_http_get", side_effect=get), \
+                patch.object(subagent_mod, "_subagent_chat") as chat:
+            with self.assertRaisesRegex(AgentToolError, "加载校对翻译规范失败"):
+                _tool_run_subagents(parent, {"tasks": [{"agent": "proofread", "file": "a.json"}]})
+            chat.assert_not_called()
+        self.assertEqual(parent.saves, [])
 
 
 class ExploreAgentTests(unittest.TestCase):
@@ -622,7 +722,7 @@ class LockedFileTests(unittest.TestCase):
 
     校对：read/patch 只能碰自己那份缓存（否则两个子代理可能写同一条）；
     原文探索：list_input_files 只列它、read_input_file 只能读它。
-    跨文件的 read_transl_cache(action=search) / list_problems / get_name_table 不受影响，file 留空则照旧放开。
+    跨文件的 read_transl_cache(action=search) 不受影响，file 留空则照旧放开。
     """
 
     def _parent(self) -> _Parent:
@@ -1419,6 +1519,7 @@ class SubagentCompactionTests(unittest.TestCase):
     def test_run_compresses_with_the_current_conversation_and_without_tools(self) -> None:
         """整条路：挂指令 → 那一轮**不带 tools**把摘要拿回来 → 历史被压 → 下一轮继续干活。"""
         parent = self._parent(rt.DEFAULT_CONTEXT_WINDOW)
+        parent.project_guideline = "项目规范在压缩后也必须保留。"
         calls: list[tuple[list[dict], object]] = []
         script = [
             ("", [_Call("c1", "read_transl_cache", '{"filename": "a.json", "index": "1"}')]),
@@ -1450,6 +1551,10 @@ class SubagentCompactionTests(unittest.TestCase):
         self.assertEqual(out["tasks"][0]["report"], "报告：没问题。")
         # 4 次请求：两轮干活 → 一轮压缩（不带 tools）→ 一轮收尾
         self.assertEqual([tools is None for _, tools in calls], [False, False, True, False])
+        for messages, _ in calls:
+            self.assertEqual(messages[0], calls[0][0][0])
+            self.assertIn(parent.global_guideline, messages[0]["content"])
+            self.assertIn(parent.project_guideline, messages[0]["content"])
         # 压缩那一轮发出去的是"当前会话 + 那条指令"（复用前缀，不是另开一份输入）
         self.assertEqual(calls[2][0][-1]["content"], rt.SUBAGENT_COMPACT_INSTRUCTION_PROMPT)
         # 收尾那轮的上下文里已经是摘要 + 尾部，指令不留在历史里

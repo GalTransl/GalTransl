@@ -632,7 +632,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                                 },
                                 "brief": {
                                     "type": "string",
-                                    "description": "可选。重点核对什么、注意哪些角色/术语；校对范围是只修硬伤 / 只润色 / 两者都要，没写默认只修硬伤。已有用户授权无需重复询问，信息缺失才 ask_user。子代理直接修改有把握的句子，并反馈需二次审查的事项。count > 1 时 brief 由展开的任务共用。",
+                                    "description": "可选。重点核对什么、注意哪些角色/术语；校对范围是只修硬伤 / 只润色 / 两者都要，没写默认只修硬伤。proofread 的全局与项目翻译规范自动注入 system prompt，无需在 brief 重复。已有用户授权无需重复询问，信息缺失才 ask_user。子代理直接修改有把握的句子，并反馈需二次审查的事项。count > 1 时 brief 由展开的任务共用。",
                                 },
                             },
                             "required": ["agent"],

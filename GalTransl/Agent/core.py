@@ -71,6 +71,8 @@ SUBAGENT_TOOL_RESULT_CHARS = 24_000
 SUBAGENT_COMPACT_KEEP_RECENT_RATIO = 0.1
 # 父回合等待子代理时的进度打印间隔（秒）
 SUBAGENT_PROGRESS_TICK = 5.0
+# 多代理派发：首个模型响应返回后再等 2 秒，让其余代理有机会复用已建立的前缀缓存。
+SUBAGENT_CACHE_WARMUP_SECONDS = 2.0
 
 SUBAGENT_LABELS: dict[str, str] = {
     SUBAGENT_AGENT_PROOFREAD: "校对",
