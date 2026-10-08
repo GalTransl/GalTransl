@@ -1,5 +1,6 @@
 import { t as translate, useUiLanguage } from "../../../i18n";
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
+import { AnimatedDisclosure } from './AnimatedDisclosure';
 import { AgentMarkdown } from '../../../components/AgentCacheRef';
 import { Icon } from '../../../components/Icon';
 import { ToolRow, toolRowPhases } from './ToolRow';
@@ -13,7 +14,7 @@ import {
 import { formatDuration, formatTokenCount, translationJobId } from '../toolMeta';
 import { liveStartedState, manualOpenState } from '../uiState';
 
-export function AgentGroupView({
+export const AgentGroupView = memo(function AgentGroupView({
   group,
   isLive,
   projectDir,
@@ -41,13 +42,13 @@ export function AgentGroupView({
     );
   }
   return <AgentActivityGroup group={group} isLive={isLive} projectDir={projectDir} persistKey={persistKey} />;
-}
+});
 
 /** 回合收尾回复：顶层普通消息，像聊天里最后一条回答。 */
-function FinalMessage({ item, projectDir }: { item: ActivityItem; projectDir: string }) {
+const FinalMessage = memo(function FinalMessage({ item, projectDir }: { item: ActivityItem; projectDir: string }) {
   const uiLanguage = useUiLanguage();
   return <AgentMarkdown text={item.content || ''} projectDir={projectDir} className="agent-final" />;
-}
+});
 
 function UserMessageRow({ message }: { message: string }) {
   const uiLanguage = useUiLanguage();
@@ -177,33 +178,35 @@ function AgentActivityGroup({
         <span className="agent-activity__caret">›</span>
       </button>
       {tail ? <div className="agent-activity__preview">{tail}</div> : null}
-      <div className="agent-activity__collapse">
-        <div className="agent-activity__collapse-inner">
-          <div className="agent-activity__body">
-            {items.map((item, i) =>
-              item.kind === 'content' ? (
-                <ContentRow key={`t-${i}`} item={item} projectDir={projectDir} />
-              ) : item.kind === 'reasoning' ? (
-                <ReasoningRow key={`r-${i}`} item={item} projectDir={projectDir} persistKey={persistKey} />
-              ) : item.kind === 'compact' ? (
-                <CompactRow key={`c-${i}`} item={item} />
-              ) : item.kind === 'retry' ? (
-                <RetryRow key={`rt-${i}`} item={item} />
-              ) : item.kind === 'tool' && item.name === 'start_translation' && translationJobId(item) ? (
-                // 启动翻译换成工作台顶部卡的迷你版（带实时进度），不再是一坨 JSON
-                <TranslationJobCard key={`j-${item.id || i}`} item={item} projectDir={projectDir} />
-              ) : (
-                <ToolRow key={`x-${item.id || i}`} item={item} phase={phases[i]} persistKey={persistKey} />
-              ),
-            )}
+      <AnimatedDisclosure open={open} className="agent-activity__collapse">
+        {() => (
+          <div className="agent-activity__collapse-inner">
+            <div className="agent-activity__body">
+              {items.map((item, i) =>
+                item.kind === 'content' ? (
+                  <ContentRow key={`t-${i}`} item={item} projectDir={projectDir} />
+                ) : item.kind === 'reasoning' ? (
+                  <ReasoningRow key={`r-${i}`} item={item} projectDir={projectDir} persistKey={persistKey} />
+                ) : item.kind === 'compact' ? (
+                  <CompactRow key={`c-${i}`} item={item} />
+                ) : item.kind === 'retry' ? (
+                  <RetryRow key={`rt-${i}`} item={item} />
+                ) : item.kind === 'tool' && item.name === 'start_translation' && translationJobId(item) ? (
+                  // 启动翻译换成工作台顶部卡的迷你版（带实时进度），不再是一坨 JSON
+                  <TranslationJobCard key={`j-${item.id || i}`} item={item} projectDir={projectDir} />
+                ) : (
+                  <ToolRow key={`x-${item.id || i}`} item={item} phase={phases[i]} persistKey={persistKey} />
+                ),
+              )}
+            </div>
           </div>
-        </div>
-      </div>
+        )}
+      </AnimatedDisclosure>
     </div>
   );
 }
 
-function ContentRow({ item, projectDir }: { item: ActivityItem; projectDir: string }) {
+const ContentRow = memo(function ContentRow({ item, projectDir }: { item: ActivityItem; projectDir: string }) {
   const uiLanguage = useUiLanguage();
   // 模型「说」的回复：直接渲染为普通黑体纯文本，不再用可折叠卡片包裹。
   const text = item.content || '';
@@ -219,7 +222,7 @@ function ContentRow({ item, projectDir }: { item: ActivityItem; projectDir: stri
       />
     </div>
   );
-}
+});
 
 /** 折叠跑马灯显示的文本：整段思考**压成一行**后取末尾一段。
  *
@@ -235,7 +238,7 @@ function reasoningOneLiner(text: string): string {
     .slice(-REASONING_MARQUEE_CHARS);
 }
 
-function ReasoningRow({
+const ReasoningRow = memo(function ReasoningRow({
   item,
   projectDir,
   persistKey,
@@ -280,19 +283,21 @@ function ReasoningRow({
         ) : null}
         <span className="agent-reasoning__caret">›</span>
       </button>
-      <div className="agent-reasoning__collapse">
-        <div className="agent-reasoning__collapse-inner">
-          <AgentMarkdown
-            text={text}
-            projectDir={projectDir}
-            cursor={streaming}
-            className="agent-reasoning__text"
-          />
-        </div>
-      </div>
+      <AnimatedDisclosure open={open} className="agent-reasoning__collapse">
+        {() => (
+          <div className="agent-reasoning__collapse-inner">
+            <AgentMarkdown
+              text={text}
+              projectDir={projectDir}
+              cursor={streaming}
+              className="agent-reasoning__text"
+            />
+          </div>
+        )}
+      </AnimatedDisclosure>
     </div>
   );
-}
+});
 
 /* ── Compact row (上下文压缩提示) ──
    压缩是后台维护动作，不是用户要读的内容，所以只做一行轻量提示。 */

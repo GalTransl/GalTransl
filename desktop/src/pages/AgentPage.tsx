@@ -72,11 +72,11 @@ import {
   shortName,
 } from './agent/storage';
 import {
-  buildTimeline,
   isTerminal,
   lastActivityItem,
   workingLabel,
 } from './agent/timeline';
+import { createTimelineBuilder } from './agent/timelineCache';
 import { askNotifyBody } from './agent/toolMeta';
 import { useAgentStream } from './agent/useAgentStream';
 
@@ -524,10 +524,6 @@ export function AgentPage() {
   useLayoutEffect(() => {
     tailFollowerRef.current?.jump();
   }, [effectiveProject, activeSessionId]);
-
-  useLayoutEffect(() => {
-    tailFollowerRef.current?.follow();
-  }, [events]);
 
   /** 回到转录最底部（并恢复跟随新消息）。 */
   const handleJumpToBottom = useCallback(() => {
@@ -1079,7 +1075,8 @@ export function AgentPage() {
     void refreshSessions(effectiveProject, activeSessionRef.current);
   }, [effectiveProject, refreshSessions]);
 
-  const timeline = useMemo(() => buildTimeline(events), [uiLanguage, events]);
+  const timelineBuilder = useMemo(() => createTimelineBuilder(), [uiLanguage, effectiveProject, activeSessionId]);
+  const timeline = useMemo(() => timelineBuilder(events), [timelineBuilder, events]);
   const hasSession = events.length > 0;
   const canSend = Boolean(projectDir) && Boolean(backendProfileName) && messageDraft.trim().length > 0 && !sending;
   // 正在等用户回答的 ask_user：这条工具调用**还没有结果**，说明后端那个工具

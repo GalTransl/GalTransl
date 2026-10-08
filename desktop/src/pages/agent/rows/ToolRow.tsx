@@ -1,5 +1,5 @@
 import { t as translate, useUiLanguage } from "../../../i18n";
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { memo, type ReactNode, useEffect, useRef, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { Markdown } from '../../../components/Markdown';
 import { SubagentList } from './SubagentList';
@@ -33,7 +33,7 @@ export function toolRowPhases(items: ActivityItem[], isLive: boolean): (ToolPhas
   return phases;
 }
 
-export function ToolRow({
+export const ToolRow = memo(function ToolRow({
   item,
   phase,
   persistKey,
@@ -199,7 +199,7 @@ export function ToolRow({
       ) : null}
     </div>
   );
-}
+});
 
 /** 参数 / 结果块：Markdown 结果复用对话渲染，原始参数和错误保留等宽正文。 */
 export function ToolBlock({

@@ -2,6 +2,17 @@ import { t as translate } from "../../i18n/core";
 import type { AgentEvent } from '../../lib/api';
 import { asArgs, toolMeta } from './toolMeta';
 
+// Rebuilding a timeline must not restart clocks or change otherwise identical rows.
+const eventTimes = new WeakMap<AgentEvent, number>();
+function eventTime(event: AgentEvent): number {
+  let time = eventTimes.get(event);
+  if (time === undefined) {
+    time = Date.now();
+    eventTimes.set(event, time);
+  }
+  return time;
+}
+
 /* ── Timeline model ──
    Raw SSE events are folded into render groups: runs of thinking/tool activity
    collapse into one summary row ("工作 6 秒 · 4 步"), while terminal moments
@@ -456,7 +467,7 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
       retryItem.attempt = ev.attempt;
       retryItem.maxAttempts = ev.max_attempts;
       retryItem.retryDelayMs = ev.delay_ms;
-      retryItem.retryStartedAtMs = typeof ev.ts === 'number' ? ev.ts * 1000 : Date.now();
+      retryItem.retryStartedAtMs = typeof ev.ts === 'number' ? ev.ts * 1000 : eventTime(ev);
       retryItem.retryCode = ev.code;
       retryItem.retryReason = ev.reason;
       retryItem.retryDone = false;
@@ -503,7 +514,7 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
           steps: [],
           // 用后端给的时间戳：subagent_start 是持久事件，刷新/切页会重放它，
           // 拿"事件到达时间"会让进行中的计时每次重建都归零。
-          startedAt: typeof ev.started_at === 'number' ? ev.started_at * 1000 : Date.now(),
+          startedAt: typeof ev.started_at === 'number' ? ev.started_at * 1000 : eventTime(ev),
         };
         host.subagents.push(run);
       }
@@ -527,7 +538,7 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
           id: ev.tool_call_id || '',
           name: ev.name || '',
           args: ev.arguments,
-          at: Date.now(),
+          at: eventTime(ev),
         });
       } else if (ev.type === 'subagent_tool_result') {
         const step = [...run.steps]
@@ -554,7 +565,7 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
         run.proofreadComment = typeof comments === 'number' ? comments : 0;
         run.durationMs = ev.duration_ms;
         run.error = ev.error || '';
-        run.finishedAt = typeof ev.finished_at === 'number' ? ev.finished_at * 1000 : Date.now();
+        run.finishedAt = typeof ev.finished_at === 'number' ? ev.finished_at * 1000 : eventTime(ev);
       }
       continue;
     }
