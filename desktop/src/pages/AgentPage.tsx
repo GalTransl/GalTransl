@@ -1,5 +1,6 @@
+import { followTail } from "./agent/followTail";
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
@@ -221,8 +222,9 @@ export function AgentPage() {
   // 工具调用就按新档判。声明放在最前：handleSend 和答复回调都要把它一起带上（见 answerBackendContext）。
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => loadPermissionMode());
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const stickToBottomRef = useRef(true);
-  // 与 stickToBottomRef 同义，但"回到最新"按钮要随滚动出现/消失，得能触发渲染
+  const threadContentRef = useRef<HTMLDivElement | null>(null);
+  const tailFollowerRef = useRef<ReturnType<typeof followTail> | null>(null);
+  // 跟随状态也驱动「回到最新」按钮。
   const [atBottom, setAtBottom] = useState(true);
   const startRef = useRef(0);
   // 本地已见的最大事件 step（SSE 续订的 after_step 起点 + 兜底去重）。
@@ -430,6 +432,7 @@ export function AgentPage() {
     const persisted = loadSession(effectiveProject, activeSessionId);
     setEvents(persisted?.events || []);
     setStatus(persisted?.status || 'idle');
+    setRunning(persisted?.status === 'running');
     startRef.current = persisted?.startedAt || 0;
     lastStepRef.current = maxStep(persisted?.events || []);
     hasBackendSessionRef.current = Boolean(persisted?.events.length);
@@ -505,32 +508,31 @@ export function AgentPage() {
     });
   }, [persistKey, status, effectiveProject, activeSessionId]);
 
-  // Follow the tail unless the user scrolled away.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || !stickToBottomRef.current) return;
-    el.scrollTop = el.scrollHeight;
-    setAtBottom(true);
-  }, [events]);
-
-  const handleScroll = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const stick = distance < 80;
-    stickToBottomRef.current = stick;
-    // 只在状态真的翻转时 setState，滚动期间不会每帧触发渲染
-    setAtBottom((prev) => (prev === stick ? prev : stick));
+  // 折叠动画、后端快照恢复及窗口大小变化都可能改变内容高度。
+  useLayoutEffect(() => {
+    const viewport = scrollRef.current;
+    const content = threadContentRef.current;
+    if (!viewport || !content) return;
+    const follower = followTail(viewport, content, setAtBottom);
+    tailFollowerRef.current = follower;
+    return () => {
+      follower.dispose();
+      tailFollowerRef.current = null;
+    };
   }, []);
 
-  /** 回到转录最底部（并恢复"跟随新消息"）。 */
+  useLayoutEffect(() => {
+    tailFollowerRef.current?.jump();
+  }, [effectiveProject, activeSessionId]);
+
+  useLayoutEffect(() => {
+    tailFollowerRef.current?.follow();
+  }, [events]);
+
+  /** 回到转录最底部（并恢复跟随新消息）。 */
   const handleJumpToBottom = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    stickToBottomRef.current = true;
-    setAtBottom(true);
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    el.scrollTo({ top: el.scrollHeight, behavior: reduced ? 'auto' : 'smooth' });
+    tailFollowerRef.current?.jump(reduced ? 'auto' : 'smooth');
   }, []);
 
   // 事件流：连接管理（重连、批量、作废旧流）在 useAgentStream 里，这里只管怎么解释事件
@@ -1341,8 +1343,8 @@ export function AgentPage() {
         </div>
       </header>
 
-      <div className="agent-console__thread" ref={scrollRef} onScroll={handleScroll}>
-        <div className="agent-thread">
+      <div className="agent-console__thread" ref={scrollRef}>
+        <div className="agent-thread" ref={threadContentRef}>
           {timeline.length === 0 ? (
             <div className="agent-hero">
               <div className="agent-hero__mark"><Icon name="bot" /></div>
