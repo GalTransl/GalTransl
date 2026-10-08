@@ -25,6 +25,10 @@ from GalTransl import GUIDELINES_FOLDERNAME, DEFAULT_GUIDELINE_NAME
 from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
 from GalTransl.AppSettings import load_app_settings, save_app_settings
 from GalTransl.Cache import CACHE_TEMP_SUFFIX
+from GalTransl.Search import (
+    parse_search_order as _parse_search_order,
+    select_search_hits as _sample_search_hits,
+)
 from GalTransl.DefaultProjectConfig import DEFAULT_PROJECT_CONFIG_YAML
 from GalTransl.RuntimePaths import (
     BUNDLED_DICT_SEED_MARKER,
@@ -919,11 +923,9 @@ def _cache_name_bases(cache_names: set[str]) -> set[str]:
     return bases
 
 
-def _search_cache_entries_in_file(
-    entries: list[Any],
-    filename: str,
+def _search_cache_entries(
+    targets: list[tuple[str, list[Any], bool]],
     *,
-    has_cache: bool,
     query: str,
     pattern: Any,
     field: str,
@@ -932,97 +934,49 @@ def _search_cache_entries_in_file(
     only_preceding: bool,
     max_results: int,
     offset: int,
-    total_matches: int,
-    hits_included: int,
-) -> tuple[list[dict[str, Any]], int, int]:
-    """在一个文件的条目列表里搜，返回 (结果行, 累计命中数, 累计已返回命中数)。
-
-    缓存文件与「还没翻译的原文」（回落条目）走同一套匹配：原文列取 post_src、译文列取 pre_dst、
-    问题列取 problem——原文条目后两者是空的，所以 field=dst / problem 时它不会命中（没翻译就没有
-    译文可搜，符合直觉）。context 只在本文件内前后展开，翻页与命中上限由调用方跨文件累计。
-    """
+    order: str,
+) -> dict[str, Any]:
+    """跨文件收集全部缓存命中后再排序/采样，供 Agent 搜索使用。"""
+    all_hits: list[dict[str, Any]] = []
+    rows_by_file: dict[str, list[dict[str, Any] | None]] = {}
     query_lower = query.lower()
-    matched_positions: list[int] = []
-    match_flags: dict[int, dict[str, bool]] = {}
 
-    for pos, entry in enumerate(entries):
-        if not isinstance(entry, dict):
-            continue
-        src_text = (
-            entry.get("post_src", "") or entry.get("post_jp", "")
-            or entry.get("pre_src", "") or entry.get("pre_jp", "")
-        )
-        dst_text = (
-            entry.get("pre_dst", "") or entry.get("pre_zh", "")
-            or entry.get("proofread_dst", "") or entry.get("proofread_zh", "")
-        )
-        problem_text = filter_problem_text(entry.get("problem", ""), filter_keys)
-        if pattern is not None:
-            match_src = bool(pattern.search(src_text))
-            match_dst = bool(pattern.search(dst_text))
-            match_problem = bool(pattern.search(problem_text))
-        else:
-            match_src = query_lower in src_text.lower()
-            match_dst = query_lower in dst_text.lower()
-            match_problem = query_lower in problem_text.lower()
-        if field == "src" and not match_src:
-            continue
-        if field == "dst" and not match_dst:
-            continue
-        if field == "problem" and not match_problem:
-            continue
-        if field == "all" and not match_src and not match_dst and not match_problem:
-            continue
-        total_matches += 1
-        if total_matches <= offset:
-            # 翻页：跳过前 offset 条命中——它们不再作为"命中"出现
-            # （相邻命中的上下文窗口里仍可能带出，那种行没标记）
-            continue
-        # 命中上限只算命中本身（前后文是搭着给的，不占配额），
-        # 否则稠密命中下上下文会把后面的命中挤掉。
-        if hits_included + len(matched_positions) < max_results:
-            matched_positions.append(pos)
-            match_flags[pos] = {
-                "match_src": match_src,
-                "match_dst": match_dst,
-                "match_problem": match_problem,
-            }
+    def matches(text: str) -> bool:
+        return bool(pattern.search(text)) if pattern is not None else query_lower in text.lower()
 
-    if not matched_positions:
-        return [], total_matches, hits_included
-
-    wanted: set[int] = set(matched_positions)
-    if context > 0:
-        after = 0 if only_preceding else context
-        for pos in matched_positions:
-            for j in range(pos - context, pos + after + 1):
-                if 0 <= j < len(entries):
-                    wanted.add(j)
-
-    rows: list[dict[str, Any]] = []
-    for pos in sorted(wanted):
-        entry = entries[pos]
-        if not isinstance(entry, dict):
-            continue
-        rows.append({
-            "filename": filename,
-            "index": entry.get("index", 0),
-            "speaker": entry.get("name", ""),
-            "post_src": (
+    for filename, entries, has_cache in targets:
+        rows: list[dict[str, Any] | None] = []
+        for pos, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                rows.append(None)
+                continue
+            src = str(
                 entry.get("post_src", "") or entry.get("post_jp", "")
                 or entry.get("pre_src", "") or entry.get("pre_jp", "")
-            ),
-            "pre_dst": (
+            )
+            dst = str(
                 entry.get("pre_dst", "") or entry.get("pre_zh", "")
                 or entry.get("proofread_dst", "") or entry.get("proofread_zh", "")
-            ),
-            "problem": filter_problem_text(entry.get("problem", ""), filter_keys),
-            "trans_by": entry.get("trans_by", ""),
-            # false = 这条来自还没翻译的原文（界面据此标一下），它没有译名/问题
-            "has_cache": has_cache,
-            **match_flags.get(pos, {"match_src": False, "match_dst": False, "match_problem": False}),
-        })
-    return rows, total_matches, hits_included + len(matched_positions)
+            )
+            problem = filter_problem_text(entry.get("problem", ""), filter_keys)
+            flags = {"match_src": matches(src), "match_dst": matches(dst), "match_problem": matches(problem)}
+            rows.append({
+                "filename": filename, "index": entry.get("index", 0), "speaker": entry.get("name", ""),
+                "post_src": src, "pre_dst": dst, "problem": problem, "trans_by": entry.get("trans_by", ""),
+                "has_cache": has_cache,
+            })
+            matched = any(flags.values()) if field == "all" else flags.get(f"match_{field}", False)
+            if matched:
+                all_hits.append({"filename": filename, "pos": pos, "flags": flags})
+        rows_by_file[filename] = rows
+    selected = _sample_search_hits(all_hits, max_results, offset, order)
+    results = _search_context_rows(
+        selected, context=context, only_preceding=only_preceding, file_rows=rows_by_file,
+    )
+    out: dict[str, Any] = {"results": results, "total": len(all_hits), "offset": offset, "order": order}
+    if context:
+        out.update({"context": context, "returned_hits": len(selected), "returned": len(results)})
+    return out
 
 
 def _list_uncached_input_files(
@@ -1090,6 +1044,51 @@ def _parse_search_offset(payload: dict[str, Any]) -> int:
         raise ValueError("offset must be a non-negative integer")
 
 
+def _search_context_rows(
+    selected: list[dict[str, Any]],
+    *,
+    context: int,
+    only_preceding: bool,
+    file_rows: dict[str, list[dict[str, Any] | None]],
+) -> list[dict[str, Any]]:
+    """按选中的命中展开上下文，重叠行去重；没有上下文时保持命中排序。"""
+    if not selected:
+        return []
+    if not context:
+        return [{**file_rows[h["filename"]][h["pos"]], **h["flags"]} for h in selected]
+    wanted_by_file: dict[str, set[int]] = {}
+    selected_keys = {(str(h["filename"]), int(h["pos"])) for h in selected}
+    hit_flags = {(str(h["filename"]), int(h["pos"])): h["flags"] for h in selected}
+    file_order: list[str] = []
+    for hit in selected:
+        name = str(hit["filename"])
+        if name not in wanted_by_file:
+            wanted_by_file[name] = set()
+            file_order.append(name)
+        pos = int(hit["pos"])
+        wanted_by_file[name].add(pos)
+        rows = file_rows[name]
+        after = 0 if only_preceding else context
+        for row_pos in range(pos - context, pos + after + 1):
+            if 0 <= row_pos < len(rows):
+                wanted_by_file[name].add(row_pos)
+
+    result: list[dict[str, Any]] = []
+    for name in file_order:
+        rows = file_rows[name]
+        for pos in sorted(wanted_by_file[name]):
+            if rows[pos] is None:
+                continue
+            row = dict(rows[pos])
+            key = (name, pos)
+            if key not in selected_keys:
+                row.update({flag: False for flag in selected[0]["flags"]})
+            else:
+                row.update(hit_flags[key])
+            result.append(row)
+    return result
+
+
 def _search_input_dir(
     project_dir: str,
     config_file_name: str,
@@ -1102,6 +1101,7 @@ def _search_input_dir(
     offset: int = 0,
     only_preceding: bool = False,
     pattern: Any = None,
+    order: str = "name",
 ) -> dict[str, Any]:
     """在待翻译原文里搜关键词（Agent 的 search_input 用）。
 
@@ -1122,9 +1122,8 @@ def _search_input_dir(
         return query.lower() in text.lower()
 
     input_dir = os.path.join(project_dir, INPUT_FOLDERNAME)
-    results: list[dict[str, Any]] = []
-    total_matches = 0
-    hits_included = 0
+    all_hits: list[dict[str, Any]] = []
+    file_rows: dict[str, list[dict[str, Any] | None]] = {}
     files_failed: list[str] = []
     if os.path.isdir(input_dir):
         for name in sorted(os.listdir(input_dir)):
@@ -1140,54 +1139,40 @@ def _search_input_dir(
                 # 没有"和"这个文件根本没读"看起来一样。要诊断它用 GET /input/:filename。
                 files_failed.append(name)
                 continue
-            matched_positions: list[int] = []
-            match_flags: dict[int, dict[str, bool]] = {}
+            normalized_rows: list[dict[str, Any] | None] = []
             for pos, entry in enumerate(entries):
                 if not isinstance(entry, dict):
+                    normalized_rows.append(None)
                     continue
                 src_text = str(entry.get("pre_src", "") or "")
                 name_text = str(entry.get("name", "") or "")
                 match_src = _hit(src_text)
                 match_name = bool(name_text) and _hit(name_text)
+                normalized_rows.append({
+                    "filename": name,
+                    "index": entry.get("index", 0),
+                    "speaker": entry.get("name", ""),
+                    "src": entry.get("pre_src", ""),
+                })
                 if field == "src" and not match_src:
                     continue
                 if field == "name" and not match_name:
                     continue
                 if field == "all" and not match_src and not match_name:
                     continue
-                total_matches += 1
-                if total_matches <= offset:
-                    # 翻页：跳过前 offset 条命中——它们不再作为"命中"出现（相邻命中的
-                    # 上下文窗口里仍可能把它当上下文带出来，这种行没有命中标记）
-                    continue
-                if hits_included + len(matched_positions) < max_results:
-                    matched_positions.append(pos)
-                    match_flags[pos] = {"match_src": match_src, "match_name": match_name}
-            if not matched_positions:
-                continue
-            wanted: set[int] = set(matched_positions)
-            if context > 0:
-                after = 0 if only_preceding else context
-                for pos in matched_positions:
-                    for j in range(pos - context, pos + after + 1):
-                        if 0 <= j < len(entries):
-                            wanted.add(j)
-            for pos in sorted(wanted):
-                entry = entries[pos]
-                if not isinstance(entry, dict):
-                    continue
-                item = {
+                all_hits.append({
                     "filename": name,
-                    "index": entry.get("index", 0),
-                    "speaker": entry.get("name", ""),
-                    "src": entry.get("pre_src", ""),
-                    **match_flags.get(pos, {"match_src": False, "match_name": False}),
-                }
-                results.append(item)
-            hits_included += len(matched_positions)
-    out: dict[str, Any] = {"results": results, "total": total_matches, "offset": offset}
+                    "pos": pos,
+                    "flags": {"match_src": match_src, "match_name": match_name},
+                })
+            file_rows[name] = normalized_rows
+    selected = _sample_search_hits(all_hits, max_results, offset, order)
+    results = _search_context_rows(
+        selected, context=context, only_preceding=only_preceding, file_rows=file_rows,
+    )
+    out: dict[str, Any] = {"results": results, "total": len(all_hits), "offset": offset, "order": order}
     if context > 0:
-        out.update({"context": context, "returned_hits": hits_included, "returned": len(results)})
+        out.update({"context": context, "returned_hits": len(selected), "returned": len(results)})
     if files_failed:
         out["files_failed"] = files_failed
     return out
@@ -1923,6 +1908,11 @@ def build_handler(registry: JobRegistry):
                     except ValueError as exc:
                         self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                         return
+                    try:
+                        order = _parse_search_order(payload)
+                    except ValueError as exc:
+                        self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                        return
                     result = _search_input_dir(
                         project_dir,
                         str(payload.get("config_file_name", "config.yaml") or "config.yaml"),
@@ -1934,6 +1924,7 @@ def build_handler(registry: JobRegistry):
                         offset=offset,
                         only_preceding=bool(payload.get("preceding_only", False)),
                         pattern=pattern,
+                        order=order,
                     )
                     self._send_json(result)
                 except json.JSONDecodeError:
@@ -2250,6 +2241,11 @@ def build_handler(registry: JobRegistry):
                     except ValueError as exc:
                         self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                         return
+                    try:
+                        order = _parse_search_order(payload)
+                    except ValueError as exc:
+                        self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                        return
                     # preceding_only：只带上文（Agent 默认开，省 token）；不传/给 false 就两边都给
                     only_preceding = bool(payload.get("preceding_only", False))
                     # include_uncached：把「还没翻译的输入文件」的原文也搜进来（界面默认开）。
@@ -2297,38 +2293,18 @@ def build_handler(registry: JobRegistry):
                     # 缓存与原文混在一张表里按文件名排：与左侧文件列表同一个顺序
                     targets.sort(key=lambda item: item[0])
 
-                    results: list[dict[str, Any]] = []
-                    total_matches = 0
-                    hits_included = 0
-                    for name, file_entries, has_cache in targets:
-                        try:
-                            rows, total_matches, hits_included = _search_cache_entries_in_file(
-                                file_entries,
-                                name,
-                                has_cache=has_cache,
-                                query=query,
-                                pattern=pattern,
-                                field=field,
-                                filter_keys=filter_keys,
-                                context=context,
-                                only_preceding=only_preceding,
-                                max_results=max_results,
-                                offset=offset,
-                                total_matches=total_matches,
-                                hits_included=hits_included,
-                            )
-                        except Exception:
-                            continue
-                        results.extend(rows)
-                    payload_out: dict[str, Any] = {
-                        "results": results, "total": total_matches, "offset": offset,
-                    }
-                    if context > 0:
-                        payload_out.update({
-                            "context": context,
-                            "returned_hits": hits_included,
-                            "returned": len(results),
-                        })
+                    payload_out = _search_cache_entries(
+                        targets,
+                        query=query,
+                        pattern=pattern,
+                        field=field,
+                        filter_keys=filter_keys,
+                        context=context,
+                        only_preceding=only_preceding,
+                        max_results=max_results,
+                        offset=offset,
+                        order=order,
+                    )
                     self._send_json(payload_out)
                 except json.JSONDecodeError:
                     self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)

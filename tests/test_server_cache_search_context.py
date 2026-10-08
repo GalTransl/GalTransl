@@ -17,6 +17,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from unittest.mock import patch
 from http.server import ThreadingHTTPServer
 
 from GalTransl import CACHE_FOLDERNAME
@@ -83,6 +84,32 @@ class CacheSearchContextTests(unittest.TestCase):
         self.assertNotIn("context", out)
         self.assertNotIn("returned", out)
         self.assertEqual(out["offset"], 0)  # 翻页字段与 context 无关，默认就有
+
+    def test_random_samples_across_files_before_limiting_and_preserves_context(self):
+        filename = os.path.join(self.project, CACHE_FOLDERNAME, "sampling.json")
+        with open(filename, "w", encoding="utf-8") as file:
+            json.dump(_entries(5, {2: "sampling-test", 4: "sampling-test"}), file)
+        self.addCleanup(os.remove, filename)
+        filename2 = os.path.join(self.project, CACHE_FOLDERNAME, "sampling-tail.json")
+        with open(filename2, "w", encoding="utf-8") as file:
+            json.dump(_entries(5, {3: "sampling-test"}), file)
+        self.addCleanup(os.remove, filename2)
+        with patch("GalTransl.Search.random.sample", side_effect=lambda population, count: population[-count:]) as sample:
+            out = self._search(query="sampling-test", order="random", max_results=1, context=1)
+        self.assertEqual(out["total"], 3)
+        self.assertEqual(out["returned_hits"], 1)
+        self.assertEqual(len(sample.call_args.args[0]), 3)
+        expected = sample.call_args.args[0][-1]
+        self.assertTrue(all(row["filename"] == expected["filename"] for row in out["results"]))
+        self.assertEqual(sum(row["match_src"] for row in out["results"]), 1)
+        self.assertEqual(out["returned"], 3)
+
+    def test_reverse_and_even_order_and_invalid_order(self):
+        self.assertEqual([row["index"] for row in self._search(order="reverse")["results"]], [5, 4])
+        self.assertEqual([row["index"] for row in self._search(order="even", max_results=1)["results"]], [4])
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._search(order="unknown")
+        self.assertEqual(ctx.exception.code, 400)
 
     def test_context_expands_around_hits_and_dedupes(self) -> None:
         out = self._search(context=2)

@@ -7,8 +7,16 @@ import re
 from collections import Counter
 from typing import Any
 
+from GalTransl.Search import SEARCH_ORDER_LABELS
 from GalTransl.Agent.core import _log
 from GalTransl.Agent.tools.common import _context_phrase
+
+
+def _search_more_hint(result: dict[str, Any]) -> str:
+    return {
+        "random": "可再次随机采样",
+        "even": "可换采样方式或缩小范围",
+    }.get(result.get("order"), "用 offset 翻页")
 
 
 def _tool_result_json(result: Any) -> str:
@@ -299,9 +307,11 @@ def _md_render_list_problems(result: dict[str, Any]) -> str:
     if result.get("matched") is not None:
         head_parts.append(f"命中 {result['matched']} 条")
     if result.get("has_more"):
-        head_parts.append(f"本页显示 {result.get('returned')} 条、还有更多（用 offset 翻页）")
+        head_parts.append(f"本页显示 {result.get('returned')} 条、还有更多（{_search_more_hint(result)}）")
     else:
         head_parts.append(f"本页显示 {result.get('returned')} 条")
+    if result.get("order"):
+        head_parts.append(f"排序：{SEARCH_ORDER_LABELS.get(result['order'], result['order'])}")
     if result.get("majority_trans_by"):
         head_parts.append(
             f"多数派模型 {result['majority_trans_by']}（表里已省略，只留少数派/改过的来源）"
@@ -367,6 +377,10 @@ def _md_render_read_transl_cache(result: dict[str, Any]) -> str:
             fields = list(entries[0].keys())
     table = _md_table(fields, result.get("entries"))
     notes = [f"字段说明：{fields_note}"] if fields_note else []
+    if result.get("order"):
+        head_parts.append(f"排序：{SEARCH_ORDER_LABELS.get(result['order'], result['order'])}")
+    if result.get("note"):
+        notes.append(f"备注：{result['note']}")
     return _md_doc("，".join(head_parts), missing_text, *notes, table)
 
 
@@ -382,6 +396,8 @@ def _md_search_head(result: dict[str, Any]) -> str:
     total = result.get("total")
     if total is not None:
         parts.append(f"共 {total} 条命中")
+    if result.get("order"):
+        parts.append(f"排序：{SEARCH_ORDER_LABELS.get(result['order'], result['order'])}")
     context_phrase = _context_phrase(result, "每条命中")
     if context_phrase:
         parts.append(context_phrase)
@@ -395,7 +411,7 @@ def _md_search_head(result: dict[str, Any]) -> str:
         if result.get("offset"):
             page += f"（offset={result['offset']}）"
         if result.get("has_more"):
-            page += "、还有更多（用 offset 翻页）"
+            page += f"、还有更多（{_search_more_hint(result)}）"
         parts.append(page)
     matched_in = result.get("matched_in")
     if isinstance(matched_in, dict) and matched_in:

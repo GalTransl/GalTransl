@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 from GalTransl.Agent.models import AgentToolError
+from GalTransl.Search import parse_search_order, search_order_note
 from GalTransl.Agent.tools.common import (
     _dominant_trans_by,
     _mark_context_row,
@@ -91,6 +92,20 @@ _SEARCH_LIMIT_MAX = 200
 _SEARCH_ROW_BUDGET = 200
 
 
+def _search_order(args: dict[str, Any]) -> str:
+    try:
+        return parse_search_order(args)
+    except ValueError as exc:
+        raise AgentToolError(str(exc)) from exc
+
+
+def _apply_search_order(result: dict[str, Any], order: str) -> None:
+    result["order"] = order
+    note = search_order_note(order)
+    if note:
+        result["note"] = "；".join(part for part in (str(result.get("note") or ""), note) if part)
+
+
 def _search_paging_args(args: dict[str, Any]) -> tuple[int, int]:
     """limit / offset：与本仓库其它清单工具同一套（非法值按默认处理，不报错）。"""
     raw_limit = args.get("limit", _SEARCH_LIMIT_DEFAULT)
@@ -146,6 +161,7 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     # 否则"命中上百条 × 前后各几句"会直接把返回体撑爆。只给上文时每条只搭 N 行，同样的行数
     # 预算里能多给几条命中。total 不受影响（仍报全部命中数）。
     only_preceding = _only_preceding_arg(args)
+    order = _search_order(args)
     limit, offset = _search_paging_args(args)
     rows_per_hit = (context + 1) if only_preceding else (2 * context + 1)
     max_hits = limit if context == 0 else min(limit, max(1, _SEARCH_ROW_BUDGET // rows_per_hit))
@@ -155,6 +171,7 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
         "field": field,
         "options": {"re": False},
         "max_results": max_hits,
+        "order": order,
         "config_file_name": runner.state.config_file_name,
     }
     if context:
@@ -169,6 +186,7 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     if isinstance(result, dict):
         _slim_search_results(result, field, context)
         _apply_search_paging(result, offset)
+        _apply_search_order(result, order)
     notes: list[str] = []
     if isinstance(result, dict) and context:
         result["context"] = context  # 服务端已回；这里兜底，保证调用方一定看得到
@@ -234,6 +252,7 @@ def _tool_search_input(runner: AgentRunner, args: dict[str, Any]) -> Any:
     # 与缓存搜索（_tool_search_transl_cache）同一套收紧规则：命中 × 每条搭的行数一起返回，整页压在
     # _SEARCH_ROW_BUDGET 行内。total 不受影响（仍是全部命中数）。
     only_preceding = _only_preceding_arg(args)
+    order = _search_order(args)
     limit, offset = _search_paging_args(args)
     rows_per_hit = (context + 1) if only_preceding else (2 * context + 1)
     max_hits = limit if context == 0 else min(limit, max(1, _SEARCH_ROW_BUDGET // rows_per_hit))
@@ -243,6 +262,7 @@ def _tool_search_input(runner: AgentRunner, args: dict[str, Any]) -> Any:
         "field": field,
         "options": {"re": False},
         "max_results": max_hits,
+        "order": order,
         "config_file_name": runner.state.config_file_name,
     }
     if context:
@@ -257,6 +277,7 @@ def _tool_search_input(runner: AgentRunner, args: dict[str, Any]) -> Any:
     if isinstance(result, dict):
         _slim_search_results(result, field, context, _INPUT_SEARCH_MATCH_KEYS)
         _apply_search_paging(result, offset)
+        _apply_search_order(result, order)
     notes: list[str] = []
     # 解析不了的文件（插件/格式问题）被跳过了：明说，否则"这个文件里没有"和"这个文件没读"
     # 看起来一模一样。要诊断那个文件用 read_input_file。

@@ -90,6 +90,15 @@ class InputSearchHttpTests(unittest.TestCase):
             self._post({"query": "x", "field": "dst"})  # 原文侧没有译文列
         self.assertEqual(ctx.exception.code, 400)
 
+    def test_order_is_forwarded_and_validated(self):
+        out = self._post({"query": "ドルード", "field": "src", "order": "reverse", "max_results": 1})
+        self.assertEqual([row["index"] for row in out["results"]], [3])
+        self.assertEqual(out["total"], 2)
+        self.assertEqual(out["order"], "reverse")
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._post({"query": "ドルード", "order": "unknown"})
+        self.assertEqual(ctx.exception.code, 400)
+
     def test_bad_context_is_rejected(self):
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             self._post({"query": "x", "context": "abc"})

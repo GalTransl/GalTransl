@@ -10,6 +10,8 @@ from typing import Any, Sequence, TYPE_CHECKING
 from GalTransl.ProblemWhiteList import parse_problem_white_list_entry
 from GalTransl.Agent.core import DEFAULT_CONFIG_FILE
 from GalTransl.Agent.models import AgentToolError
+from GalTransl.Agent.tools.search import _apply_search_order, _search_order
+from GalTransl.Search import select_search_hits
 from GalTransl.Agent.tools.cache_fields import _cache_field_value
 from GalTransl.Agent.tools.common import (
     _change,
@@ -440,7 +442,9 @@ def _tool_list_problems(
     except (TypeError, ValueError):
         offset = 0
     matched = len(problems)
-    page = problems[offset : offset + limit]
+    order = _search_order(args)
+    ordered = sorted(problems, key=lambda row: (str(row.get("filename") or ""), int(row.get("index") or 0)))
+    page = select_search_hits(ordered, limit, offset, order)
     # trans_by 与 read_transl_cache（read / search）同一套（见 _dominant_trans_by）：
     # 这批里出现最多的那个模型（多数派，通常就是翻译引擎翻的）逐条删掉、记在顶层一次，
     # 少数派（Agent 改过的、手工改的）逐条保留——列表里真正要看的是异常来源。
@@ -466,6 +470,7 @@ def _tool_list_problems(
     }
     if scope_note:
         result["note"] = scope_note
+    _apply_search_order(result, order)
     if context > 0:
         only_preceding = _only_preceding_arg(args)
         result["context"] = context

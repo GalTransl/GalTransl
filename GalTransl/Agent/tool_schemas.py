@@ -20,6 +20,18 @@ _REASON_PROPERTY: dict[str, Any] = {
     "description": "可选。这次操作的原因（怎么填、显示在哪见系统提示词里那条约束）。",
 }
 
+_SEARCH_ORDER_PROPERTY: dict[str, Any] = {
+    "type": "string",
+    "enum": ["name", "reverse", "even", "random"],
+    "description": (
+        "可选。排序/采样方式（默认 name）：name=文件名+条目正序；reverse=倒序；"
+        "even=从全部命中均匀采样；random=从全部命中随机采样（每次可能不同）。"
+        "先选择命中再应用 limit 和展开上下文，上下文保持文件内句子顺序。"
+        "even/random 的 offset 先跳过正序前 N 条，不能保证连续无重复翻页；"
+        "想换一批用 random 再调用，完整遍历用 name/reverse 配合 offset。"
+    ),
+}
+
 AGENT_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
@@ -73,11 +85,12 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "search_input",
-            "description": "在待翻译原文中搜索关键词或说话人（field=all/src/name），用于定位语境与统计称呼出现次数；译文/问题用 read_transl_cache(action=search)。filename 留空搜全项目，指定可减少文件插件解析开销。返回 filename+index 可交给 read_input_file 精读；field=all 的 matched_in 汇总原文/说话人命中。context 默认只加上文，only_preceding=false 加前后文，上下文 index 带 *。整页最多 200 行；total 为总命中数，returned 为本页命中数（不含上下文行）；has_more 时下一页 offset += returned。",
+            "description": "在待翻译原文中搜索关键词或说话人（field=all/src/name），用于定位语境与统计称呼出现次数；译文/问题用 read_transl_cache(action=search)。filename 留空搜全项目，指定可减少文件插件解析开销。返回 filename+index 可交给 read_input_file 精读；field=all 的 matched_in 汇总原文/说话人命中。context 默认只加上文，only_preceding=false 加前后文，上下文 index 带 *。整页最多 200 行；total 为总命中数，returned 为本页命中数（不含上下文行）；order=name/reverse 时 has_more 用 offset += returned 翻页，even/random 用于从全部命中采样。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
+                    "order": _SEARCH_ORDER_PROPERTY,
                     "field": {"type": "string", "enum": ["all", "src", "name"]},
                     "filename": {"type": "string", "description": "可选。只在这个输入文件里搜（来自 list_input_files）。留空搜全部输入文件。"},
                     "context": {
@@ -94,7 +107,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     },
                     "offset": {
                         "type": "integer",
-                        "description": "可选。分页偏移：跳过前 N 条命中（默认 0，前后文行不算数）。配合 has_more 翻页。",
+                        "description": "可选。分页偏移：跳过前 N 条命中（默认 0，前后文行不算数）。name/reverse 配合 has_more 翻页，even/random 的用法见 order。",
                     },
                 },
                 "required": ["query"],
@@ -363,6 +376,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "order": _SEARCH_ORDER_PROPERTY,
                     "problem_type": {
                         "type": "string",
                         "description": "可选。要查看的问题类型（来自默认返回的统计列表，如 \"残留日文\"），支持逗号分隔多个；传 \"*\" 返回所有类型的具体条目。留空只返回类型统计。",
@@ -373,7 +387,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     },
                     "offset": {
                         "type": "integer",
-                        "description": "可选。分页偏移，默认 0。配合 has_more 翻页。",
+                        "description": "可选。分页偏移，默认 0。name/reverse 配合 has_more 翻页，even/random 的用法见 order。",
                     },
                     "context": {
                         "type": "integer",
@@ -445,7 +459,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "read_transl_cache",
             "description": (
-                "翻译缓存的统一入口：list 列文件与条数，read 按 filename/index 读条目，search 搜原文/译文/问题。省略 action 时有 query→search，有 filename→read，否则 list。list 默认均匀采样而非前100个。read 默认精简字段，其它列用 fields；无缓存时回落到原文，译文/问题为空不代表漏译。read/search 的 context 默认只给上文，only_preceding=false 给前后文；上下文 index 带 *。search 整页最多200行，returned 仅计命中，has_more 时下一页 offset += returned；field=all 的 matched_in 汇总命中侧，majority_trans_by 记录逐行省略的多数派模型。返回 Markdown 表格与计数/提示。向用户展示缓存可单独一行写 $transl_cache(\"<缓存文件名>\", <index>)，支持区间/列表，界面会渲染为缓存卡片。"
+                "翻译缓存的统一入口：list 列文件与条数，read 按 filename/index 读条目，search 搜原文/译文/问题。省略 action 时有 query→search，有 filename→read，否则 list。list 默认均匀采样而非前100个。read 默认精简字段，其它列用 fields；无缓存时回落到原文，译文/问题为空不代表漏译。read/search 的 context 默认只给上文，only_preceding=false 给前后文；上下文 index 带 *。search 整页最多200行，returned 仅计命中，order=name/reverse 时 has_more 用 offset += returned 翻页，even/random 用于从全部命中采样；field=all 的 matched_in 汇总命中侧，majority_trans_by 记录逐行省略的多数派模型。返回 Markdown 表格与计数/提示。向用户展示缓存可单独一行写 $transl_cache(\"<缓存文件名>\", <index>)，支持区间/列表，界面会渲染为缓存卡片。"
             ),
             "parameters": {
                 "type": "object",
@@ -507,16 +521,16 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "可选。list：最多返回多少个文件（默认 100，上限 500）；search：本页最多几条命中（默认 100，最大 200，带 context 时还会按行数收紧）。",
+                        "description": "可选。list：最多返回多少个文件（默认 100，上限 500）；search：本页最多几条命中（默认 100，最大 200，带 context 时还会按行数收紧）；read 未指定 index：过滤后最多返回几条（默认 30，最大 200）。",
                     },
                     "offset": {
                         "type": "integer",
-                        "description": "search 用，可选。分页偏移：跳过前 N 条命中（默认 0，前后文行不算数）。配合 has_more 翻页。",
+                        "description": "search/read 未指定 index 用，可选。分页偏移：跳过前 N 条命中（默认 0，前后文行不算数）。name/reverse 配合 has_more 翻页；采样模式见 order。",
                     },
                     "order": {
                         "type": "string",
-                        "enum": ["even", "name", "random", "size_desc", "size_asc"],
-                        "description": "list 用，可选（默认 even）：even=按文件名顺序均匀采样（含首尾）；name=按文件名顺序取前 limit 个；random=随机采样；size_desc/size_asc=按文件大小从大到小/从小到大取前 limit 个。",
+                        "enum": ["even", "name", "reverse", "random", "size_desc", "size_asc"],
+                        "description": "list 用（默认 even）：even=按文件名顺序均匀采样（含首尾）；name=文件名正序；random=随机采样；size_desc/size_asc=按文件大小排序（仅 list）。search/read 未指定 index 用（默认 name）：name=文件名+条目正序；reverse=倒序；even=从全部过滤命中均匀采样；random=从全部过滤命中随机采样。先选择命中再按 limit 截取，最后展开上下文；上下文保持文件内句子顺序。even/random 的 offset 先跳过正序前 N 条，不能保证连续无重复翻页；random 可再次调用换一批，完整遍历用 name/reverse 配合 offset。",
                     },
                 },
                 "required": [],
@@ -682,6 +696,8 @@ AGENT_TOOLS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "order": _SEARCH_ORDER_PROPERTY,
+                    "offset": {"type": "integer", "description": "query 检索用。跳过前 N 条命中，默认 0；name/reverse 配合 has_more 翻页。"},
                     "chunk": {
                         "type": "string",
                         "description": "归档文件名（如 chunk-0001.md）或序号（如 1）。留空 = 列出全部归档。",

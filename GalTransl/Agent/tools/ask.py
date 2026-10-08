@@ -8,6 +8,8 @@ from typing import Any, TYPE_CHECKING
 from GalTransl.Agent.core import COMPACT_ARCHIVE_READ_CHARS, _log, _truncate_text
 from GalTransl.Agent.models import AgentToolError
 from GalTransl.Agent.permissions import AUTO_QUIET_MODE, _normalize_permission_mode
+from GalTransl.Agent.tools.search import _apply_search_order, _search_order, _search_paging_args
+from GalTransl.Search import select_search_hits
 
 if TYPE_CHECKING:
     from GalTransl.Agent.runner import AgentRunner
@@ -116,7 +118,8 @@ def _tool_read_history_archive(runner: AgentRunner, args: dict[str, Any]) -> Any
 
     if query:
         hits: list[dict[str, Any]] = []
-        truncated = False
+        order = _search_order(args)
+        _, offset = _search_paging_args(args)
         for item in chunks:
             text = store.read_chunk(item["name"]) or ""
             for lineno, line in enumerate(text.splitlines(), 1):
@@ -126,12 +129,14 @@ def _tool_read_history_archive(runner: AgentRunner, args: dict[str, Any]) -> Any
                         "line": lineno,
                         "text": _truncate_text(line.strip(), 300),
                     })
-                    if len(hits) >= limit:
-                        truncated = True
-                        break
-            if truncated:
-                break
-        return {"query": query, "hits": hits, "truncated": truncated}
+        page = select_search_hits(hits, limit, offset, order)
+        result = {
+            "query": query, "hits": page, "total": len(hits), "offset": offset,
+            "returned": len(page), "has_more": offset + len(page) < len(hits),
+            "truncated": len(page) < len(hits),
+        }
+        _apply_search_order(result, order)
+        return result
 
     if not raw_chunk:
         return {

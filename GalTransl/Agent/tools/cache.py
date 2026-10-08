@@ -36,7 +36,8 @@ from GalTransl.Agent.tools.listing import (
     _select_list_items,
 )
 from GalTransl.Agent.tools.project import _APPEND_CACHE_SUFFIX, _backend_summary
-from GalTransl.Agent.tools.search import _tool_search_transl_cache
+from GalTransl.Agent.tools.search import _apply_search_order, _search_order, _search_paging_args, _tool_search_transl_cache
+from GalTransl.Search import select_search_hits
 
 if TYPE_CHECKING:
     from GalTransl.Agent.runner import AgentRunner
@@ -272,10 +273,14 @@ def _read_transl_cache_entries(runner: AgentRunner, args: dict[str, Any]) -> Any
             "对话符号不算），proofread_* / trans_by / 备注等空值已省略；要看其它字段传 fields。"
         )
     index_spec = str(args.get("index", "") or "").strip()
-    # 不指定 index：返回前 30 条，供 Agent 通览
+    # 不指定 index：按 order 从全部过滤结果中挑选，默认仍取前 30 条。
     if not index_spec:
-        picked = entries[:30]
-        return {"filename": filename, "count": len(entries), "returned": len(picked), "entries": picked, **result_extra}
+        order = _search_order(args)
+        limit, offset = _search_paging_args({"limit": 30, **args})
+        picked = select_search_hits(entries, limit, offset, order)
+        result = {"filename": filename, "count": len(entries), "offset": offset, "returned": len(picked), "has_more": offset + len(picked) < len(entries), "entries": picked, **result_extra}
+        _apply_search_order(result, order)
+        return result
 
     wanted = _parse_index_spec(index_spec)
     if not wanted:

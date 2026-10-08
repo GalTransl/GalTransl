@@ -59,6 +59,30 @@ class InputSearchTests(unittest.TestCase):
 
     # ---- 匹配 ----
 
+    def test_random_samples_later_files_before_limit_and_expands_selected_context(self):
+        with patch("GalTransl.Search.random.sample", side_effect=lambda population, count: population[-count:]) as sample:
+            out = self._search(field="src", order="random", max_results=1, context=1)
+        self.assertEqual(out["total"], 3)
+        self.assertEqual(out["returned_hits"], 1)
+        self.assertEqual([(row["filename"], row["index"]) for row in out["results"]], [("b.json", 1)])
+        self.assertEqual(len(sample.call_args.args[0]), 3)
+
+    def test_reverse_and_even_select_from_all_files(self):
+        out = self._search(field="src", order="reverse", max_results=2)
+        self.assertEqual([(row["filename"], row["index"]) for row in out["results"]], [("b.json", 1), ("a.json", 3)])
+        out = self._search(field="src", order="even", max_results=2)
+        self.assertEqual([(row["filename"], row["index"]) for row in out["results"]], [("a.json", 2), ("b.json", 1)])
+
+    def test_random_context_marks_only_selected_hits_and_skips_invalid_rows(self):
+        self.files["a.json"].insert(2, None)
+        with patch("GalTransl.Search.random.sample", side_effect=lambda population, count: population[-count:]):
+            out = self._search(field="src", filename="a.json", order="random", max_results=1, context=2, only_preceding=True)
+        self.assertEqual([row["index"] for row in out["results"]], [2, 3])
+        self.assertFalse(out["results"][0]["match_src"])
+        self.assertTrue(out["results"][1]["match_src"])
+        self.assertEqual(out["returned_hits"], 1)
+
+
     def test_substring_match_is_case_insensitive_across_files(self):
         out = self._search(field="src")
         self.assertEqual(out["total"], 3)
