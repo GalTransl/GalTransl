@@ -96,7 +96,7 @@ class AgentState:
     session_id: str = ""
     title: str = ""
     # 上次 LLM 响应的 prompt_tokens，作为上下文用量估算的锚点（0 表示未知）
-    usage_model: str = ""  # token 统计所属模型；切换模型后不能沿用。
+    usage_model: str = ""  # 最后一次实测统计所属模型；新 usage 到达前保留旧基线。
     last_prompt_tokens: int = 0
     # 锚点对应的历史长度：锚点之后新增的消息要另外估算
     anchored_message_count: int = 0

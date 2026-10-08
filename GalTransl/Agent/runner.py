@@ -234,12 +234,8 @@ class AgentRunner:
     def _resolve_llm(self) -> None:
         """每回合创建主代理客户端，被停止关闭后不复用旧连接。"""
         backend = resolve_llm_backend(self.state.backend_profile_data or {})
-        if self.state.usage_model and self.state.usage_model != backend.model:
-            self.state.last_prompt_tokens = 0
-            self.state.anchored_message_count = 0
-            self.state.usage_model = ""
-            if self._store is not None:
-                self._store.append_meta(context_usage_anchor=None)
+        # 模型名或别名变化时仍沿用最后的实测基线，直到新请求返回 usage。
+        # 提前清空会让停止/失败且没有 usage 的回合永久退回全量字符估算。
         self._openai_client = backend.client
         self._model = backend.model
         self._context_window = backend.context_window

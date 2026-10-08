@@ -1,4 +1,4 @@
-"""重启前后的用量保持一致，且只能复用同一历史前缀、同一模型的实测统计。"""
+"""重启、停止及切换模型后，沿用同一历史前缀最后一次实测统计。"""
 
 import tempfile
 import unittest
@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from GalTransl.Agent import session_store
-from GalTransl.Agent.context import _restore_compacted_history, _restore_usage_anchor
+from GalTransl.Agent.context import _estimate_message_tokens, _restore_compacted_history, _restore_usage_anchor
 from GalTransl.Agent.llm_backend import LLMBackend
 from GalTransl.Agent.models import AgentState
 from GalTransl.Agent.registry import AgentRuntime
@@ -84,16 +84,71 @@ class UsageRestoreTests(unittest.TestCase):
             restored, _ = self.restore()
             self.assertEqual(restored.last_prompt_tokens, 0)
 
-    def test_changing_model_invalidates_persisted_usage(self):
+    def test_changing_model_preserves_usage_until_a_new_measurement(self):
         self.runner._persist_message({"role": "user", "content": "hello"})
         self.runner._record_context_usage(60000)
         restored, _ = self.restore()
         backend = LLMBackend(Mock(), "different-model", 200000, False)
+        runner = AgentRunner(restored)
         with patch("GalTransl.Agent.runner.resolve_llm_backend", return_value=backend):
-            AgentRunner(restored)._resolve_llm()
-        self.assertEqual(restored.last_prompt_tokens, 0)
-        self.assertIsNone(self.store.load()["meta"]["context_usage_anchor"])
+            runner._resolve_llm()
+        self.assertEqual(restored.last_prompt_tokens, 60000)
+        self.assertEqual(restored.usage_model, "test-model")
+        self.assertEqual(self.restore()[1]["used_tokens"], 60000)
         self.assertEqual(self.restore()[1]["window_tokens"], 200000)
+        backend.client.chat.completions.create.return_value = iter([
+            SimpleNamespace(choices=[], usage=None),
+            SimpleNamespace(choices=[], usage=SimpleNamespace(prompt_tokens=0)),
+        ])
+        runner._stream_llm_response()
+        self.assertEqual(self.restore()[1]["used_tokens"], 60000)
+        backend.client.chat.completions.create.return_value = iter([
+            SimpleNamespace(choices=[], usage=SimpleNamespace(prompt_tokens=61000)),
+        ])
+        runner._stream_llm_response()
+        latest, context = self.restore()
+        self.assertEqual(context["used_tokens"], 61000)
+        self.assertEqual(latest.usage_model, "different-model")
+
+    def test_restart_stop_and_resend_without_usage_preserves_last_measurement(self):
+        self.runner._persist_message({"role": "system", "content": "rules"})
+        self.runner._persist_message({"role": "user", "content": "中" * 240000})
+        self.runner._record_context_usage(60000)
+        checkpoint = self.store.load()["meta"]["context_usage_anchor"]
+        runtime = AgentRuntime()
+
+        def stop_before_response(**kwargs):
+            runtime.stop(self.project, self.sid)
+            raise RuntimeError("Connection error after stop")
+
+        # Run synchronously so each send observes the previous turn's completed stop.
+        with patch("GalTransl.Agent.registry.threading.Thread") as thread:
+            thread.side_effect = lambda **kwargs: SimpleNamespace(start=kwargs["target"])
+            for index, (model, text) in enumerate([
+                ("test-model", "continue"), ("model-alias", "retry"),
+                ("model-alias", "retry again"),
+            ]):
+                with self.subTest(model=model, text=text):
+                    backend = LLMBackend(Mock(), model, 128000, False)
+                    backend.client.chat.completions.create.side_effect = stop_before_response
+                    with patch("GalTransl.Agent.runner.resolve_llm_backend", return_value=backend):
+                        status = runtime.message(self.project, text, self.sid)
+                    state = runtime._get_state(self.project, self.sid)
+                    runner = runtime._runners[runtime._key(self.project)][self.sid]
+                    expected = 60000 + sum(
+                        _estimate_message_tokens(message) for message in state.messages[2:]
+                    )
+                    self.assertEqual(status["status"], "stopped")
+                    self.assertEqual(status["context"]["used_tokens"], expected)
+                    self.assertEqual(runner._estimate_context_tokens(), expected)
+                    usage = next(event for event in reversed(state.transient_events)
+                                 if event.type == "context_usage")
+                    self.assertEqual(usage.data["context"]["used_tokens"], expected)
+                    self.assertFalse(runner._begin_compaction())
+                    self.assertEqual(self.store.load()["meta"]["context_usage_anchor"], checkpoint)
+                    self.assertEqual(self.restore()[1]["used_tokens"], expected)
+                    if index == 1:
+                        runtime = AgentRuntime()
 
     def test_temporary_compaction_request_does_not_overwrite_last_checkpoint(self):
         self.runner._persist_message({"role": "user", "content": "hello"})
