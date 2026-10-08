@@ -876,6 +876,19 @@ def _resolve_input_file_for_cache_name(project_dir: str, cache_filename: str) ->
     return None
 
 
+def _output_files_for_cache_name(project_dir: str, cache_filename: str) -> list[str]:
+    """Find existing output files using the same cache naming rules as input files."""
+    output_dir = os.path.join(project_dir, OUTPUT_FOLDERNAME)
+    matches: list[str] = []
+    for name in _input_name_candidates(cache_filename):
+        if os.path.isabs(name) or ".." in name.split("/"):
+            continue
+        file_path = os.path.join(output_dir, name)
+        if _is_path_within(output_dir, file_path) and os.path.isfile(file_path):
+            matches.append(name)
+    return matches
+
+
 def _input_entries_as_cache_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """把原文条目套成缓存条目的字段：只有 pre_src/post_src，译文与问题留空。
 
@@ -1956,16 +1969,35 @@ def build_handler(registry: JobRegistry):
             # GET /api/projects/:id/output/:filename — 用文件插件解析最终输出文件
             if sub_path.startswith("/output/"):
                 filename = unquote(sub_path[len("/output/"):])
-                if not filename or filename != os.path.basename(filename):
+                output_dir = os.path.join(project_dir, OUTPUT_FOLDERNAME)
+                file_path = os.path.join(output_dir, filename)
+                if (not filename or os.path.isabs(filename)
+                        or ".." in filename.replace("\\", "/").split("/")
+                        or not _is_path_within(output_dir, file_path)):
                     self._send_json({"error": "invalid output filename"}, status=HTTPStatus.BAD_REQUEST)
                     return
-                file_path = os.path.join(project_dir, OUTPUT_FOLDERNAME, filename)
+                requested_filename = filename
                 if not os.path.isfile(file_path):
-                    self._send_json({"error": f"output file not found: {filename}"}, status=HTTPStatus.NOT_FOUND)
-                    return
+                    candidates = _output_files_for_cache_name(project_dir, filename)
+                    if not candidates:
+                        has_output_files = any(files for _, _, files in os.walk(output_dir))
+                        error = (f"output file not found: {filename}" if has_output_files
+                                 else "gt_output 是空的，请用rebuild重建结果。")
+                        self._send_json({"error": error}, status=HTTPStatus.NOT_FOUND)
+                        return
+                    if len(candidates) > 1:
+                        self._send_json({
+                            "error": f"缓存文件名 {filename} 对应多个输出文件，你是不是想读取其中之一：{candidates}？请指定实际输出文件名。",
+                            "candidates": candidates,
+                        }, status=HTTPStatus.CONFLICT)
+                        return
+                    filename = candidates[0]
                 try:
                     entries = _load_input_file_entries(project_dir, config_name_from_query(self), filename, folder=OUTPUT_FOLDERNAME)
-                    self._send_json({"filename": filename, "count": len(entries), "entries": entries})
+                    result = {"filename": filename, "count": len(entries), "entries": entries}
+                    if requested_filename != filename:
+                        result["requested_filename"] = requested_filename
+                    self._send_json(result)
                 except Exception as exc:
                     self._send_json({"error": f"failed to parse output file: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return

@@ -352,10 +352,11 @@ def _tool_read_output(runner: AgentRunner, args: dict[str, Any]) -> Any:
     except AgentToolError as exc:
         # 文件不存在时附上输出目录清单，省一轮试错
         listing = runner._http_get(f"/api/projects/{pid}/files")
-        available = [f.get("name") for f in listing.get("output_files", []) if f.get("name")]
+        available = [f.get("name") for f in listing.get("output_files", []) if f.get("name") and f.get("is_file", True)]
         if available:
             raise AgentToolError(f"{exc}. 可用的输出文件：{available}") from exc
         raise
+    filename = str(data.get("filename") or filename)
     # 输出条目里 message 位就是最终译文；统一映射成 {index, name, message}
     entries = [
         {"index": e.get("index"), "name": e.get("name", ""), "message": e.get("pre_src", "")}

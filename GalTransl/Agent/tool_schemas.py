@@ -541,11 +541,11 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_output",
-            "description": "读取最终输出文件（gt_output，交付物）。输出是缓存经译后字典替换、控制符处理后的最终形态，与缓存可能不完全一致——验收交付物、确认 postDict 替换效果用这个，而不是 read_transl_cache。文件名通常与输入文件同名。留空 index 返回前 30 条。返回 index / name / message 的 Markdown 表格，并说明总条数、返回条数和缺失的 index。",
+            "description": "读取最终输出文件（gt_output，交付物）。输出是缓存经译后字典替换、控制符处理后的最终形态，与缓存可能不完全一致——验收交付物、确认 postDict 替换效果用这个，而不是 read_transl_cache。文件名通常与输入文件同名，也可传缓存文件名自动定位输出；实际输出文件名优先，多个候选时会提示选择。留空 index 返回前 30 条。返回实际输出文件名及 index / name / message 的 Markdown 表格，并说明总条数、返回条数和缺失的 index。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "filename": {"type": "string", "description": "输出文件名，通常与输入文件同名（如 sc_0_pr00.txt.json）"},
+                    "filename": {"type": "string", "description": "实际输出文件名或缓存文件名，例如 quest_flags.ks.json 会自动定位 quest_flags.ks；也支持分块缓存名和子目录的 -} 编码。"},
                     "index": {
                         "type": "string",
                     "description": "可选。要读取的条目 index（从 1 开始），支持逗号和区间（如 \"1-100\"）。留空返回前 30 条。",

@@ -6,7 +6,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from GalTransl.Agent.models import AgentState
+from GalTransl.Agent.models import AgentState, AgentToolError
 from GalTransl.Agent.runner import AgentRunner
 from GalTransl.Agent.subagent import SubAgentRunner
 from GalTransl.Agent.tools.cache import _tool_read_output
@@ -70,6 +70,37 @@ class ReadDictionaryMarkdownTests(unittest.TestCase):
 
 
 class ReadOutputMarkdownTests(unittest.TestCase):
+    def test_empty_output_error_does_not_list_empty_directories_as_files(self):
+        def get(path):
+            if path.endswith('/files'):
+                return {'output_files': [{'name': 'empty', 'is_file': False}]}
+            raise AgentToolError('gt_output 是空的，请用rebuild重建结果。')
+
+        runner = SimpleNamespace(
+            state=SimpleNamespace(config_file_name='config.yaml'),
+            _project_id=lambda: 'test', _http_get=get,
+        )
+        with self.assertRaises(AgentToolError) as ctx:
+            _tool_read_output(runner, {'filename': 'quest_flags.ks.json'})
+        self.assertEqual(str(ctx.exception), 'gt_output 是空的，请用rebuild重建结果。')
+
+    def test_cache_alias_displays_resolved_output_name_for_both_read_modes(self):
+        runner = SimpleNamespace(
+            state=SimpleNamespace(config_file_name='config.yaml'), _project_id=lambda: 'test',
+            _http_get=lambda _: {'filename': 'quest_flags.ks', 'entries': [
+                {'index': 5, 'name': '甲', 'pre_src': '最终译文'},
+            ]},
+        )
+        for index in ('', '5,86'):
+            with self.subTest(index=index):
+                result = _tool_read_output(runner, {'filename': 'quest_flags.ks.json', 'index': index})
+                self.assertEqual(result['filename'], 'quest_flags.ks')
+                self.assertEqual(result['entries'][0]['message'], '最终译文')
+                text = _render_tool_result_table('read_output', result)
+                self.assertIn('文件 quest_flags.ks，', text)
+                if index:
+                    self.assertEqual(result['missing_indexes'], [86])
+
     def test_handler_preserves_final_text_source_indexes_and_missing_indexes(self):
         runner = SimpleNamespace(
             state=SimpleNamespace(config_file_name='config.yaml'), _project_id=lambda: 'test',
