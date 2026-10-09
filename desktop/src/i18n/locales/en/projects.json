@@ -1,5 +1,6 @@
 {
   "dictionaryManager": {
+    "unsavedChanges": "There are unsaved changes",
     "uNSECTIONEDLABEL_message_not": "Uncategorized",
     "getTypeLabel_message_text": "Comment",
     "getTypeLabel_message_textVariant2": "Blank line",

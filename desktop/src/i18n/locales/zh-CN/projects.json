@@ -1,5 +1,6 @@
 {
   "dictionaryManager": {
+    "unsavedChanges": "有未保存修改",
     "uNSECTIONEDLABEL_message_not": "未分类",
     "getTypeLabel_message_text": "注释",
     "getTypeLabel_message_textVariant2": "空行",

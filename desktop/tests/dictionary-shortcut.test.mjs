@@ -42,9 +42,13 @@ test('Ctrl+S/Cmd+S saves only the visible dictionary, prevents duplicate request
   let renderer;
   const view = active => h(PageActivityContext.Provider, { value: active }, h(DictionaryManager, props));
   act(() => { renderer = create(view(true)); });
+  const dirtyDots = () => renderer.root.findAllByProps({ className: 'dict-file-item__dot' });
+  assert.equal(dirtyDots().length, 0);
   const translationInput = () => renderer.root.findAllByType('input').find(node => ['cat', 'kitten', 'newer'].includes(node.props.value));
   act(() => translationInput().props.onChange({ target: { value: 'kitten' } }));
+  assert.equal(dirtyDots().length, 1);
   act(() => renderer.update(view(false)));
+  assert.equal(dirtyDots().length, 1);
   act(() => assert.equal(f.key(), false));
   assert.equal(saved.length, 0);
   act(() => renderer.update(view(true)));
@@ -54,12 +58,15 @@ test('Ctrl+S/Cmd+S saves only the visible dictionary, prevents duplicate request
     f.key({ repeat: true });
   });
   assert.deepEqual(saved, [['gpt.txt', '猫\tkitten\t']]);
+  assert.equal(dirtyDots().length, 1); // A pending save has not committed the edits yet.
   act(() => translationInput().props.onChange({ target: { value: 'newer' } }));
   await act(async () => { finish(); });
+  assert.equal(dirtyDots().length, 1); // Newer edits still need saving.
   act(() => assert.equal(f.key({ ctrlKey: false, metaKey: true }), true));
   assert.equal(saved.length, 2);
   assert.equal(saved[1][1], '猫\tnewer\t');
   await act(async () => { finish(); });
+  assert.equal(dirtyDots().length, 0);
   act(() => f.key());
   assert.equal(saved.length, 2);
   act(() => renderer.unmount());

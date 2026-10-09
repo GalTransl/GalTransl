@@ -201,6 +201,21 @@
   font-weight: 600;
 }
 
+.dict-file-item__label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.dict-file-item__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-danger);
+  flex-shrink: 0;
+}
+
 .dict-file-item__name {
   overflow: hidden;
   text-overflow: ellipsis;

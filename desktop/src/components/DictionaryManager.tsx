@@ -784,7 +784,17 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                       setContextMenu({ x: e.clientX, y: e.clientY, file });
                     }}
                   >
-                    <span className="dict-file-item__name">{stripProjectDirMarker(file)}</span>
+                    <span className="dict-file-item__label">
+                      {isActive && dirty && (
+                        <span
+                          className="dict-file-item__dot"
+                          role="img"
+                          title={translate("projects:dictionaryManager.unsavedChanges")}
+                          aria-label={translate("projects:dictionaryManager.unsavedChanges")}
+                        />
+                      )}
+                      <span className="dict-file-item__name">{stripProjectDirMarker(file)}</span>
+                    </span>
                     {content && <span className="dict-file-item__count">{translate("projects:dictionaryManager.dictFileList_message_entry", { count: content.count })}</span>}
                   </button>
                 );
