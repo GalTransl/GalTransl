@@ -1,6 +1,6 @@
 [package]
 name = "galtransl-desktop"
-version = "8.3.0"
+version = "8.4.0"
 description = "GalTransl desktop client"
 authors = ["GalTransl"]
 edition = "2021"
