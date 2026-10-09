@@ -35,11 +35,12 @@ _SEGMENT_MAX_LEN = 1000
 _MAX_SEGMENTS = 128
 # 审校时每批的候选词条数；相关词条（名字与全名、昵称）尽量放同一批，一组超过这个数时允许放宽到 2 倍
 _REVIEW_BATCH_SIZE = 40
-# 说话人名先单独译一遍（每批最多这么多个），提取时就不用每片都重复输出主要角色
+# 说话人名按项目并发数动态分批；每批最多 60 个，目标至少 8 个，避免请求过碎
 _NAME_BATCH_SIZE = 60
+_NAME_MIN_BATCH_SIZE = 8
 # 和别的词条都不沾边的这几类专有名词审校几乎不删，直接保留、不送审
 _DIRECT_KEEP_CATEGORIES = ("地名", "组织", "种族")
-# 被这么多个分片提取到、且译名一致（最多的译名占 2/3 以上）的词也直接保留（「其他」「活动」类除外）
+# 被这么多个分片提取到、且译名一致（最多的译名占 2/3 以上）的词也直接保留（人名/称呼/其他/活动除外）
 _DIRECT_KEEP_MIN_VOTES = 3
 _REVIEW_DELETE_MARKS = ("DELETE", "删除")
 # 多轮对话：同一个会话里连续提交多少段（提取的分片 / 审校的批次）。说明只发一次，模型记得前面
@@ -241,7 +242,7 @@ def _example_at(
 
 def _pack_review_batches(candidates: List[dict], batch_size: int) -> List[List[dict]]:
     """把候选词条分批送审：互为子串（ラエルダ / ラエルダ・レ・ファイルーダ）或共用・分隔的
-    部分（…・ル・ドルード）的词条归为一组，同组放进同一批，审校时才能统一译法。"""
+    部分（…・ル・ドルード）、备注指向同一角色的昵称归为一组，同组放进同一批，审校时才能统一译法。"""
     n = len(candidates)
     parent = list(range(n))
 
@@ -261,7 +262,7 @@ def _pack_review_batches(candidates: List[dict], batch_size: int) -> List[List[d
         if len(a) < 2:
             continue
         for j, b in enumerate(srcs):
-            if i != j and a in b:
+            if i != j and (a in b or a in candidates[j].get("note", "")):
                 union(i, j)
     part_owner: Dict[str, int] = {}
     for i, s in enumerate(srcs):
@@ -345,6 +346,13 @@ def _plan_sessions(items: List, workers: int) -> List[List]:
         return []
     per_session = max(1, min(_SESSION_MAX_TURNS, len(items) // max(1, workers)))
     return [items[i : i + per_session] for i in range(0, len(items), per_session)]
+
+
+def _plan_name_batches(names: List[str], workers: int) -> List[List[str]]:
+    """名字不多时缩小批次以用上配置的并发；大项目仍封顶 60 个/批。"""
+    workers = max(1, int(workers or 1))
+    batch_size = min(_NAME_BATCH_SIZE, max(_NAME_MIN_BATCH_SIZE, (len(names) + workers - 1) // workers))
+    return [names[i : i + batch_size] for i in range(0, len(names), batch_size)]
 
 
 class GenDic(BaseTranslate):
@@ -897,9 +905,11 @@ class GenDic(BaseTranslate):
         speakers: List[str],
         known_map: Dict[str, Tuple[str, str]],
         session: Optional[_ChatSession] = None,
+        *,
+        catalog: str = "",
+        protected_names: Set[str] = frozenset(),
     ) -> bool:
-        """审校一批。传了 session 时作为多轮对话的一轮：后面的批次能看到前面已定的译名，
-        会话里给过的参考译名不再重复给；装不下或失败时用全新会话重发。"""
+        """一次完成术语筛选与译名核对；各批读同一份全表和固定译名，只提交本批结果。"""
         rows = []
         for c in batch:
             examples = _example_lines(all_text, line_starts, speakers, c["src"], c["count"])
@@ -909,38 +919,42 @@ class GenDic(BaseTranslate):
 
         hinted = session.hinted if session is not None else set()
         batch_srcs = {c["src"] for c in batch}
-        batch_parts = {p for s in batch_srcs for p in s.split("・") if len(p) >= 2}
         fixed_rows = []
         fixed_srcs = []
         for src, (dst, note) in known_map.items():
             if src in hinted:
                 continue
-            related = any(
-                (len(src) >= 2 and src in s) or (len(s) >= 2 and s in src) for s in batch_srcs
-            ) or any(p in batch_parts for p in src.split("・") if len(p) >= 2)
-            if related:
-                fixed_rows.append(f"{src}\t{dst}\t{note}".rstrip("\t"))
-                fixed_srcs.append(src)
-        fixed = "\n".join(fixed_rows[:60]) if fixed_rows else "无"
+            # 爱称与主名可能互不包含（トレニャン / トレニア），参考表不能按子串截断。
+            fixed_rows.append(f"{src}\t{dst}\t{note}".rstrip("\t"))
+            fixed_srcs.append(src)
+        prompt_args = dict(
+            fixed="\n".join(fixed_rows) or "无",
+            catalog=catalog or "无",
+            protected="、".join(sorted(batch_srcs & protected_names)) or "无",
+            input="\n".join(rows),
+        )
 
         rsp = None
         if session is not None and session.turns > 0:
-            prompt = GENDIC_REVIEW_FOLLOWUP_PROMPT.format(fixed=fixed, input="\n".join(rows))
+            prompt = GENDIC_REVIEW_FOLLOWUP_PROMPT.format(**prompt_args)
             if session.has_room(len(prompt)):
                 rsp = await self._ask_gendic(prompt, "审校批次", batch_index, session)
             if rsp is None:
                 session.reset()
                 return await self._review_batch(
-                    batch, batch_index, all_text, line_starts, speakers, known_map, session
+                    batch, batch_index, all_text, line_starts, speakers, known_map, session,
+                    catalog=catalog, protected_names=protected_names,
                 )
         else:
-            prompt = GENDIC_REVIEW_PROMPT.format(fixed=fixed, input="\n".join(rows))
+            prompt = GENDIC_REVIEW_PROMPT.format(**prompt_args)
             rsp = await self._ask_gendic(prompt, "审校批次", batch_index, session)
         if rsp is None:
             return False
-        hinted.update(fixed_srcs[:60])
+        hinted.update(fixed_srcs)
 
-        decided = 0
+        decisions: Dict[str, Optional[Tuple[str, str]]] = {}
+        invalid = False
+        original_notes = {c["src"]: c["note"] for c in batch}
         previews = []
         for line in rsp.split("\n"):
             self._raise_if_stop_requested()
@@ -949,19 +963,28 @@ class GenDic(BaseTranslate):
                 continue
             src = sp[0].strip()
             dst = sp[1].strip()
-            if src not in batch_srcs or not dst:
+            if src not in batch_srcs:
+                continue
+            if src in decisions or not dst or dst.upper() == "NULL":
+                invalid = True
                 continue
             note = sp[2].strip() if len(sp) > 2 else ""
             if any(dst.upper().startswith(mark) for mark in _REVIEW_DELETE_MARKS):
-                self.review_decisions[src] = None
+                if src in protected_names:
+                    invalid = True
+                    continue
+                decisions[src] = None
             else:
-                self.review_decisions[src] = (dst, note if len(note) <= 30 else "")
+                # 不接受另改主名的整批结果：其中的复合行也可能已跟着错误的新主名改写。
+                if src in known_map and dst != known_map[src][0]:
+                    invalid = True
+                    continue
+                decisions[src] = (dst, note if note and len(note) <= 30 else original_notes[src])
                 if len(previews) < 3:
                     previews.append((src, dst, note))
-            decided += 1
 
-        if decided == 0:
-            warning_message = f"GenDic 审校批次 {batch_index} 未解析到有效结果，该批按规则筛选"
+        if invalid or set(decisions) != batch_srcs:
+            warning_message = f"GenDic 审校批次 {batch_index} 未完整返回有效结果，该批保留原结果或按规则筛选，需复核"
             LOGGER.warning(warning_message)
             self._record_runtime_error(
                 kind="parse",
@@ -970,6 +993,7 @@ class GenDic(BaseTranslate):
                 level="warning",
             )
             return False
+        self.review_decisions.update(decisions)
         for src, dst, note in previews:
             self._record_runtime_success(
                 index=batch_index,
@@ -982,7 +1006,7 @@ class GenDic(BaseTranslate):
         self, candidates: List[dict], name_srcs: Set[str]
     ) -> Tuple[List[dict], List[dict]]:
         """分流：和别的候选、角色名都不沾边（互不包含、不共用・分段）的词条，属于地名/组织/种族，
-        或多片提取到且译名一致的，直接保留；其余送审。按以前的审校结果，地名/组织/种族几乎不会被删，
+        或多片提取到且译名一致的，直接保留；人名/称呼始终送审，保证昵称不漏查。地名/组织/种族几乎不会被删，
         要删和要统一译法的集中在「其他」「活动」「称呼」和带名字的词条上。"""
         related: Set[str] = set()
         srcs = [c["src"] for c in candidates] + sorted(name_srcs)
@@ -1003,7 +1027,7 @@ class GenDic(BaseTranslate):
             category = _category_of(c["note"])
             top_votes = self.dic_votes[c["src"]][c["dsts"][0]] if c["src"] in self.dic_votes else 0
             consistent = c["votes"] >= _DIRECT_KEEP_MIN_VOTES and top_votes * 3 >= c["votes"] * 2
-            if c["src"] not in related and (
+            if category not in ("人名", "称呼") and c["src"] not in related and (
                 category in _DIRECT_KEEP_CATEGORIES or (consistent and category not in ("其他", "活动"))
             ):
                 direct.append(c)
@@ -1023,6 +1047,7 @@ class GenDic(BaseTranslate):
         names = [(src, d) for src, d in self.name_decisions.items() if d]
         names.sort(key=lambda item: -all_text.count(item[0]))
         for src, (dst, note) in names:
+            dst, note = self.review_decisions.get(src) or (dst, note)
             final_list.append([src, dst, note or "人名"])
         for c in candidates:
             src = c["src"]
@@ -1042,6 +1067,101 @@ class GenDic(BaseTranslate):
             ):
                 final_list.append([src, c["dsts"][0], c["note"]])
         return final_list
+
+    async def _run_final_review(
+        self,
+        candidates: List[dict],
+        name_set: Set[str],
+        known_map: Dict[str, Tuple[str, str]],
+        all_text: str,
+        line_starts: List[int],
+        speakers: List[str],
+    ):
+        """合并术语筛选与译名校对，固定参考后按批调度并发；每条最多送审一次。"""
+        from GalTransl.Service import JobCancelledError
+
+        named = {src: d for src, d in self.name_decisions.items() if d}
+        direct, to_review = self._triage_candidates(candidates, set(named))
+        for c in direct:
+            self.review_decisions[c["src"]] = (c["dsts"][0], c["note"])
+        name_candidates = [
+            {"src": src, "dsts": [dst], "note": note or "人名", "count": all_text.count(src)}
+            for src, (dst, note) in named.items()
+        ]
+        to_review = to_review + name_candidates
+        to_review.sort(key=lambda c: -c["count"])
+        batches = _pack_review_batches(to_review, _REVIEW_BATCH_SIZE)
+        if not batches:
+            return
+
+        # 主名沿用预译/提取已选的写法；复合名、全名与昵称仍是待校对项。
+        # 所有批次拿相同快照，不依赖别的批次何时完成，也不逐批重译主名。
+        review_ref = {
+            c["src"]: (c["dsts"][0], c["note"])
+            for c in to_review
+            if _category_of(c["note"]) == "人名"
+            and not _SPEAKER_JOINER_RE.search(c["src"])
+            and not _SENTENCE_MARK_RE.search(c["src"])
+            and not any(k in c["note"] for k in ("昵称", "爱称", "外号", "绰号", "全名", "简称", "缩写"))
+        }
+        review_ref.update({c["src"]: (c["dsts"][0], c["note"]) for c in direct})
+        review_ref.update(known_map)
+        catalog = "\n".join(
+            "\t".join([c["src"], "｜".join(c["dsts"][:3]), c["note"]])
+            for c in name_candidates + candidates
+        )
+        protected_names = set(named) | name_set
+        workers = max(1, int(self.wokers or 1))
+        sem = asyncio.Semaphore(workers)
+        LOGGER.info(
+            f"术语提取完成，{len(direct)}条直接保留，{len(to_review)}条分{len(batches)}批联合终审"
+            f"（术语筛选与译名一致性一次完成，并发{min(workers, len(batches))}）"
+        )
+        self._update_runtime(
+            stage="GenDic 联合终审中",
+            current_file=f"终审 0/{len(batches)}",
+            workers_active=min(workers, len(batches)),
+            file_totals={self.progress_display_name: self.progress_done + len(batches)},
+        )
+
+        async def review_one(index, batch):
+            async with sem:
+                self._raise_if_stop_requested()
+                try:
+                    ok = await self._review_batch(
+                        batch, index, all_text, line_starts, speakers, review_ref,
+                        catalog=catalog, protected_names=protected_names,
+                    )
+                    return index, ok, "" if ok else "联合终审未完成"
+                except (asyncio.CancelledError, JobCancelledError):
+                    raise
+                except Exception as exc:
+                    LOGGER.error(f"联合终审时出错: {exc}")
+                    return index, False, str(exc)
+
+        tasks = [asyncio.create_task(review_one(i, batch)) for i, batch in enumerate(batches)]
+        with terminal_progress(
+            should_print_translation_logs(self.pj_config), title="联合终审中……", total=len(batches)
+        ) as bar:
+            self.pj_config.bar = bar
+            completed = 0
+            try:
+                for future in asyncio.as_completed(tasks):
+                    index, ok, error_message = await future
+                    self._raise_if_stop_requested()
+                    completed += 1
+                    self._append_runtime_progress(f"gendic-review-{index}", ok, error_message)
+                    self._update_runtime(
+                        current_file=f"终审 {completed}/{len(batches)}",
+                        workers_active=min(workers, len(batches) - completed),
+                    )
+                    bar()
+            except BaseException:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
 
     async def batch_translate(
         self,
@@ -1159,17 +1279,22 @@ class GenDic(BaseTranslate):
             # 说话人名先统一译一遍（name 字段每项都要译，泛称也是），提取时就只需找其他词
             speaker_counts = collections.Counter(n for s in speakers if s for n in s.split("、"))
             pending_names = sorted(
-                (n for n in name_set if n not in known_map), key=lambda n: -speaker_counts.get(n, 0)
+                (n for n in name_set if n not in known_map), key=lambda n: (-speaker_counts.get(n, 0), n)
             )
-            name_batches = [
-                pending_names[i : i + _NAME_BATCH_SIZE] for i in range(0, len(pending_names), _NAME_BATCH_SIZE)
-            ]
+            workers = max(1, int(self.wokers or 1))
+            name_batches = _plan_name_batches(pending_names, workers)
             prep_tasks = len(name_batches)
             self._prepare_runtime_progress(len(index_list) + prep_tasks)
-            sem = asyncio.Semaphore(self.wokers)
+            sem = asyncio.Semaphore(workers)
             if name_batches:
-                LOGGER.info(f"先翻译{len(pending_names)}个说话人名，分{len(name_batches)}批")
-                self._update_runtime(stage="GenDic 人名翻译中", current_file=f"人名 0/{len(name_batches)}")
+                LOGGER.info(
+                    f"先翻译{len(pending_names)}个说话人名，分{len(name_batches)}批"
+                    f"（每批最多{max(map(len, name_batches))}个，并发{min(workers, len(name_batches))}）"
+                )
+                self._update_runtime(
+                    stage="GenDic 人名翻译中", current_file=f"人名 0/{len(name_batches)}",
+                    workers_active=min(workers, len(name_batches)),
+                )
 
                 async def name_item_async(batch_index, names):
                     async with sem:
@@ -1275,88 +1400,13 @@ class GenDic(BaseTranslate):
                     await asyncio.gather(*tasks, return_exceptions=True)
                     raise
 
-            # 审校：把各分片的结果汇总后整体过一遍，删掉不该收的词、统一译法
+            # 终审只跑一轮：说话人、昵称、术语一起检查，独立批次并发。
             candidates, duplicates = self._collect_candidates(
                 all_text, set(known_map), name_set, character_names, tokenizer
             )
-            named = {src: d for src, d in self.name_decisions.items() if d}
-            direct, to_review = self._triage_candidates(candidates, set(named))
-            for c in direct:
-                self.review_decisions[c["src"]] = (c["dsts"][0], c["note"])
-            # 审校参考：已有字典 + 已译的人名 + 直接保留的词，相关的全名、昵称跟着对齐
-            review_ref = dict(known_map)
-            review_ref.update(named)
-            review_ref.update({c["src"]: (c["dsts"][0], c["note"]) for c in direct})
-            batches = _pack_review_batches(to_review, _REVIEW_BATCH_SIZE)
-            if batches:
-                LOGGER.info(
-                    f"术语提取完成，{len(candidates)}个候选词条：{len(direct)}条直接保留，"
-                    f"{len(to_review)}条分{len(batches)}批审校"
-                )
-                self._update_runtime(
-                    stage="GenDic 术语审校中",
-                    current_file=f"审校 0/{len(batches)}",
-                    file_totals={self.progress_display_name: len(index_list) + prep_tasks + len(batches)},
-                )
-
-                # 审校也走多轮会话：连续的几批交给同一个会话，后面的批次能看到前面已定的译名
-                review_session_plans = _plan_sessions(list(enumerate(batches)), int(self.wokers or 1))
-
-                async def review_session_async(session_batches):
-                    async with sem:
-                        session = _ChatSession()
-                        results = []
-                        for batch_index, batch in session_batches:
-                            self._raise_if_stop_requested()
-                            try:
-                                ok = await self._review_batch(
-                                    batch,
-                                    batch_index,
-                                    all_text,
-                                    line_starts,
-                                    speakers,
-                                    review_ref,
-                                    session,
-                                )
-                                results.append((batch_index, bool(ok), ""))
-                            except asyncio.CancelledError:
-                                raise
-                            except Exception as e:
-                                if isinstance(e, JobCancelledError):
-                                    raise
-                                LOGGER.error(f"审校时出错: {e}")
-                                results.append((batch_index, False, str(e)))
-                        return results
-
-                review_tasks = [
-                    asyncio.create_task(review_session_async(items)) for items in review_session_plans
-                ]
-                completed_reviews = 0
-                with terminal_progress(
-                    should_print_translation_logs(self.pj_config),
-                    title="审校中……",
-                    total=len(batches),
-                ) as bar:
-                    self.pj_config.bar = bar
-                    try:
-                        for f in asyncio.as_completed(review_tasks):
-                            for batch_index, ok, error_message in await f:
-                                self._raise_if_stop_requested()
-                                completed_reviews += 1
-                                self._append_runtime_progress(f"gendic-review-{batch_index}", ok, error_message)
-                                remaining = len(batches) - completed_reviews
-                                self._update_runtime(
-                                    stage="GenDic 术语审校中",
-                                    current_file=f"审校 {completed_reviews}/{len(batches)}",
-                                    workers_active=min(int(self.wokers or 1), remaining),
-                                )
-                                bar()
-                    except BaseException:
-                        for task in review_tasks:
-                            if not task.done():
-                                task.cancel()
-                        await asyncio.gather(*review_tasks, return_exceptions=True)
-                        raise
+            await self._run_final_review(
+                candidates, name_set, known_map, all_text, line_starts, speakers
+            )
 
         except JobCancelledError as ex:
             cancelled_error = ex

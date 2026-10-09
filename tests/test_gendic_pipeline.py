@@ -1,4 +1,4 @@
-"""GenDic 生成 GPT 字典的流程：分片提取 → 汇总 → 整体审校。
+"""GenDic 生成 GPT 字典的流程：人名预译 → 分片提取 → 联合终审（筛选与译名一致性）。
 
 以前的几个老毛病，这里各锁一条：
 
@@ -38,6 +38,7 @@ from GalTransl.Backend.GenDic import (
     _merge_into_sections,
     _pack_review_batches,
     _plan_sessions,
+    _plan_name_batches,
     _SESSION_MAX_TURNS,
     _split_segments,
 )
@@ -88,6 +89,7 @@ def _make_engine():
     engine.progress_done = 0
     engine.progress_started_at = 0.0
     engine.gendic_max_api_retries = 2
+    engine.wokers = 4
     engine._record_runtime_error = lambda **kwargs: None
     engine._record_runtime_success = lambda **kwargs: None
     return engine
@@ -165,6 +167,15 @@ class SegmentAndExampleTests(unittest.TestCase):
 
 
 class ReviewBatchPackingTests(unittest.TestCase):
+    def test_nickname_is_grouped_by_character_in_note(self):
+        candidates = [
+            _candidate("トレニア", 800, "托蕾妮亚", "人名，女性"),
+            _candidate("白鷺市", 700, "白鹭市", "地名"),
+            _candidate("トレニャン", 2, "特蕾喵", "称呼，トレニア的爱称"),
+        ]
+        batches = _pack_review_batches(candidates, 2)
+        self.assertEqual({c["src"] for c in batches[0]}, {"トレニア", "トレニャン"})
+
     def test_related_terms_share_a_batch(self):
         candidates = [_candidate(f"用語{i:02d}", 100 - i, f"术语{i}") for i in range(10)]
         candidates += [
@@ -292,6 +303,207 @@ class ReviewBatchParseTests(unittest.IsolatedAsyncioTestCase):
         ok = await engine._review_batch([_candidate("ラエルダ", 152, "拉艾尔达")], 0, "ラエルダ", [0], [""], {})
         self.assertFalse(ok)
         self.assertEqual(engine.review_decisions, {})
+
+
+class NameConsistencyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_compounds_and_nickname_are_corrected_before_saving(self):
+        engine = _make_engine()
+        engine._update_runtime = lambda **kwargs: None
+        events = []
+        engine._append_runtime_progress = lambda *args: events.append(args)
+        final = [
+            ["クローディア", "克罗迪娅", "人名，女性"],
+            ["サフィア・クローディア", "萨菲亚·克劳迪娅", "人名，全名"],
+            ["クローディア？", "克劳迪娅？", "称呼，疑问说话人"],
+            ["クローディア・灯矢", "克劳迪娅·灯矢", "称呼，合并说话人"],
+            ["トレニャン", "特蕾喵", "称呼，トレニア的爱称"],
+            ["クラウツェル", "克劳采尔", "人名，另一角色的姓氏"],
+            ["白鷺市", "白鹭市", "地名"],
+        ]
+        corrected = {
+            "サフィア・クローディア": "萨菲亚·克罗迪娅",
+            "クローディア？": "克罗迪娅？",
+            "クローディア・灯矢": "克罗迪娅·灯矢",
+            "トレニャン": "托蕾喵",
+        }
+        known = {"トレニア": ("托蕾妮亚", "人名，女性")}
+        prompts = []
+
+        async def fake_ask(prompt, task_label, task_index, session=None):
+            prompts.append(prompt)
+            return "\n".join(
+                "\t".join([src, corrected.get(src, dst), note])
+                for src, dst, note in final if src != "白鷺市"
+            ) + "\nローション\tDELETE\t普通词\n知らない名前\t编造的名字\t人名"
+
+        engine._ask_gendic = fake_ask
+        text = "クローディア：トレニャン、来て。"
+        name_set = {"クローディア", "クローディア？", "クローディア・灯矢"}
+        engine.name_decisions = {src: (dst, note) for src, dst, note in final if src in name_set}
+        candidates = [_candidate(src, 1, dst, note) for src, dst, note in final if src not in name_set]
+        candidates.append(_candidate("ローション", 1, "润滑液", "物品"))
+        await engine._run_final_review(candidates, name_set, known, text, [0], ["クローディア"])
+        final = engine._build_final_list(candidates, name_set, name_set, text)
+        self.assertEqual(len(prompts), 1)
+        # 没有子串关系的主名也必须送作参考；全表含不同角色的姓氏，供模型判别。
+        self.assertIn("トレニア\t托蕾妮亚", prompts[0])
+        self.assertIn("クラウツェル\t克劳采尔", prompts[0])
+        self.assertIn("白鷺市\t白鹭市", prompts[0])
+        self.assertEqual(known, {"トレニア": ("托蕾妮亚", "人名，女性")})
+        self.assertEqual(events[0][1], True)
+        self.assertEqual(len(final), 7)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = engine._save_generated_dictionary(final, os.path.join(tmp, "字典.txt"))
+            saved = engine._load_existing_generated_terms(path)
+        for src, dst in corrected.items():
+            self.assertEqual(saved[src][0], dst)
+        self.assertEqual(saved["クローディア"][0], "克罗迪娅")
+        self.assertEqual(saved["クラウツェル"][0], "克劳采尔")
+        self.assertEqual(saved["白鷺市"][0], "白鹭市")
+
+    async def test_incomplete_or_invalid_batch_never_partially_changes_names(self):
+        engine = _make_engine()
+        original = [["クローディア", "克劳迪娅", "人名"], ["クローディア？", "克劳迪娅？", "称呼"]]
+        batch = [_candidate(src, 1, dst, note) for src, dst, note in original]
+        good = "クローディア\t克罗迪娅\t人名\nクローディア？\t克罗迪娅？\t称呼"
+        replies = [
+            None,
+            "クローディア\t克罗迪娅\t人名",  # 漏复合行，不提交主行的修改
+            "クローディア\t克罗迪娅\t人名\nクローディア？\tDELETE\t称呼",
+            "クローディア\t克罗迪娅\t人名\nクローディア？\tNULL\t称呼",
+            good + "\nクローディア\t另一译名\t人名",
+            "クローディア\t另一译名\t人名\nクローディア？\t另一译名？\t称呼",
+        ]
+        for reply in replies:
+            with self.subTest(reply=reply):
+                async def fake_ask(*args):
+                    return reply
+
+                engine._ask_gendic = fake_ask
+                ok = await engine._review_batch(
+                    batch, 0, "クローディア？", [0], [""], {"クローディア": ("克罗迪娅", "人名")},
+                    protected_names={row[0] for row in original},
+                )
+                self.assertFalse(ok)
+                self.assertEqual(engine.review_decisions, {})
+
+    async def test_independent_batches_run_concurrently_with_fixed_reference(self):
+        engine = _make_engine()
+        engine.wokers = 2
+        engine._update_runtime = lambda **kwargs: None
+        engine._append_runtime_progress = lambda *args: None
+        engine.name_decisions = {"トレニア": ("托蕾妮亚", "人名")}
+        candidates = [
+            _candidate("トレニャン", 1, "特蕾喵", "称呼"),
+            _candidate("白ネコ", 1, "白猫", "称呼"),
+        ]
+        prompts = []
+        active = peak = 0
+        both_started = asyncio.Event()
+
+        async def fake_ask(prompt, *args):
+            nonlocal active, peak
+            prompts.append(prompt)
+            active += 1
+            peak = max(peak, active)
+            if active == 2:
+                both_started.set()
+            try:
+                await asyncio.wait_for(both_started.wait(), timeout=1)
+                src = prompt.split("## 候选词条\n", 1)[1].split("\t", 1)[0]
+                # 即使主名那批擅自换译法，也不能污染其他批次共用的基准。
+                dst = {"トレニア": "特蕾妮亚", "トレニャン": "托蕾喵", "白ネコ": "白猫"}[src]
+                return f"{src}\t{dst}\t称呼"
+            finally:
+                active -= 1
+
+        engine._ask_gendic = fake_ask
+        with patch("GalTransl.Backend.GenDic._REVIEW_BATCH_SIZE", 1):
+            await engine._run_final_review(candidates, {"トレニア"}, {}, "トレニア トレニャン 白ネコ", [0], [""])
+        self.assertEqual(peak, 2)
+        self.assertEqual(len(prompts), 3)
+        self.assertNotIn("トレニア", engine.review_decisions)  # 擅改固定主名的批次拒绝提交
+        self.assertEqual(engine.name_decisions["トレニア"][0], "托蕾妮亚")
+        self.assertEqual(engine.review_decisions["トレニャン"][0], "托蕾喵")
+        references = [p.split("## 本批必须保留的说话人", 1)[0] for p in prompts]
+        self.assertEqual(references, [references[0]] * 3)
+
+    async def test_stop_cancels_other_reviews_and_keeps_completed_results(self):
+        from GalTransl.Service import JobCancelledError
+
+        engine = _make_engine()
+        engine.wokers = 2
+        engine._update_runtime = lambda **kwargs: None
+        completed = asyncio.Event()
+        last_started = asyncio.Event()
+        last_cancelled = []
+        engine._append_runtime_progress = lambda *args: completed.set()
+        candidates = [
+            _candidate("ひとつ", 3, "一", "称呼"),
+            _candidate("ふたつ", 2, "二", "称呼"),
+            _candidate("みっつ", 1, "三", "称呼"),
+        ]
+
+        async def fake_ask(prompt, label, index, session=None):
+            if index == 0:
+                return "ひとつ\t一号\t称呼"
+            if index == 1:
+                await asyncio.wait_for(completed.wait(), timeout=1)
+                await asyncio.wait_for(last_started.wait(), timeout=1)
+                raise JobCancelledError()
+            last_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                last_cancelled.append(True)
+                raise
+
+        engine._ask_gendic = fake_ask
+        with patch("GalTransl.Backend.GenDic._REVIEW_BATCH_SIZE", 1):
+            with self.assertRaises(JobCancelledError):
+                await engine._run_final_review(candidates, set(), {}, "ひとつ ふたつ みっつ", [0], [""])
+        self.assertEqual(engine.review_decisions, {"ひとつ": ("一号", "称呼")})
+        self.assertEqual(last_cancelled, [True])
+
+    async def test_pipeline_proofreads_pretranslated_names_and_preserves_results_on_stop(self):
+        from GalTransl.Service import JobCancelledError
+
+        for stop in (False, True):
+            with self.subTest(stop=stop), tempfile.TemporaryDirectory() as tmp:
+                engine = _make_engine()
+                engine.pj_config.getProjectDir = lambda: tmp
+                engine.wokers = 1
+                engine._update_runtime = lambda **kwargs: None
+                engine._prepare_runtime_progress = lambda total: None
+                engine._append_runtime_progress = lambda *args: None
+                engine._load_existing_gpt_terms = lambda: {}
+                engine._build_text_lines = lambda _: (["クローディア：こんにちは"], ["クローディア"], {"クローディア"})
+                phases = []
+
+                async def fake_ask(prompt, label, index, session=None):
+                    phases.append(label)
+                    if label == "人名批次":
+                        return "クローディア\t克罗迪娅\t人名，女性"
+                    if label == "分片":
+                        return "NULL\tNULL\tNULL"
+                    if stop:
+                        raise JobCancelledError()
+                    return "クローディア\t克罗迪娅\t人名，女性，主角"
+
+                engine._ask_gendic = fake_ask
+                with open(os.path.join(tmp, "bccwj-suw+unidic_pos+pron.model"), "wb") as f:
+                    f.write(b"test model")
+                with patch("tempfile.gettempdir", return_value=tmp), patch("vaporetto.Vaporetto", return_value=_FakeTokenizer({})):
+                    if stop:
+                        with self.assertRaises(JobCancelledError):
+                            await engine.batch_translate([])
+                        self.assertTrue(engine.pj_config.gendic_partial_saved)
+                    else:
+                        self.assertTrue(await engine.batch_translate([]))
+                self.assertEqual(phases, ["人名批次", "分片", "审校批次"])
+                saved = engine._load_existing_generated_terms(os.path.join(tmp, "项目GPT字典-生成.txt"))
+                expected_note = "人名，女性" if stop else "人名，女性，主角"
+                self.assertEqual(saved["クローディア"], ("克罗迪娅", expected_note))
 
 
 class ExtractionParseTests(unittest.IsolatedAsyncioTestCase):
@@ -538,6 +750,65 @@ class ReasoningCaptureTests(unittest.TestCase):
 
 class NameStepAndTriageTests(unittest.IsolatedAsyncioTestCase):
     """说话人名先统一译一遍（泛称也译），提取时不再每片重复输出；审校前分流，不沾边的地名/组织/种族直接保留。"""
+
+    def test_name_batches_scale_with_workers_without_losing_names(self):
+        names = [f"角色{i:03d}" for i in range(100)]
+        self.assertEqual(len(_plan_name_batches(names, 1)), 2)
+        batches = _plan_name_batches(names, 8)
+        self.assertEqual(len(batches), 8)
+        self.assertLessEqual(max(map(len, batches)), 13)
+        self.assertEqual([name for batch in batches for name in batch], names)
+        self.assertEqual(_plan_name_batches([], 8), [])
+        self.assertEqual(_plan_name_batches(names[:5], 32), [names[:5]])
+        self.assertEqual(_plan_name_batches(names, 0), _plan_name_batches(names, 1))
+        many = names * 10
+        self.assertLessEqual(max(map(len, _plan_name_batches(many, 8))), 60)
+
+    async def test_name_pretranslation_uses_all_eight_workers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = _make_engine()
+            engine.pj_config.getProjectDir = lambda: tmp
+            engine.wokers = 8
+            updates = []
+            engine._update_runtime = lambda **kwargs: updates.append(kwargs)
+            engine._prepare_runtime_progress = lambda total: None
+            engine._append_runtime_progress = lambda *args: None
+            engine._load_existing_gpt_terms = lambda: {}
+            names = [f"角色{i:02d}" for i in range(64)]
+            engine._build_text_lines = lambda _: ([f"{n}：こんにちは" for n in names], names, set(names))
+            active = peak = calls = 0
+            all_started = asyncio.Event()
+
+            async def fake_ask(prompt, label, index, session=None):
+                nonlocal active, peak, calls
+                if label == "人名批次":
+                    calls += 1
+                    active += 1
+                    peak = max(peak, active)
+                    if active == 8:
+                        all_started.set()
+                    try:
+                        await asyncio.wait_for(all_started.wait(), timeout=1)
+                        rows = prompt.split("## 名字\n", 1)[1].split("\n\n## 输出要求", 1)[0]
+                        return "\n".join(f"{line.split(chr(9))[0]}\t译名\t人名" for line in rows.splitlines())
+                    finally:
+                        active -= 1
+                if label == "分片":
+                    return "NULL\tNULL\tNULL"
+                rows = prompt.split("## 候选词条\n", 1)[1].split("\n\n## 输出要求", 1)[0]
+                return "\n".join(f"{line.split(chr(9))[0]}\t译名\t人名" for line in rows.splitlines())
+
+            engine._ask_gendic = fake_ask
+            with open(os.path.join(tmp, "bccwj-suw+unidic_pos+pron.model"), "wb") as f:
+                f.write(b"test model")
+            with patch("tempfile.gettempdir", return_value=tmp), patch("vaporetto.Vaporetto", return_value=_FakeTokenizer({})):
+                self.assertTrue(await engine.batch_translate([]))
+            self.assertEqual(calls, 8)  # 固定 60 个/批时只有 2 个请求
+            self.assertEqual(peak, 8)
+            first_name_update = next(u for u in updates if u.get("stage") == "GenDic 人名翻译中")
+            self.assertEqual(first_name_update["workers_active"], 8)
+            saved = engine._load_existing_generated_terms(os.path.join(tmp, "项目GPT字典-生成.txt"))
+            self.assertEqual(set(saved), set(names))
 
     async def test_all_speaker_names_are_translated_including_generic_ones(self):
         engine = _make_engine()
