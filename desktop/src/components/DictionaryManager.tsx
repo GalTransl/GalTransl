@@ -1,5 +1,5 @@
 import { UiTrans, message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { usePageActive, useRetainPage } from './PageActivity';
 import { useSaveShortcut } from './useSaveShortcut';
 import { createPortal } from 'react-dom';
@@ -209,7 +209,7 @@ function DictEntryGroupCard({
           const sourceCellIndex = getSourceCellIndex(group.type);
           const sourceWord = sourceCellIndex >= 0 ? String(row.values[sourceCellIndex] ?? '').trim() : '';
           return (
-            <div key={`${rowIndex}`} className="dict-card__table-row">
+            <div key={`${rowIndex}`} className="dict-card__table-row" data-dict-row-index={rowIndex}>
               <div className="dict-card__cell dict-card__cell--index">#{rowIndex + 1}</div>
               {labels.map((label, ci) => (
                 <div key={ci} className="dict-card__cell">
@@ -301,6 +301,17 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   const [info, setInfo] = useMessageState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<DictContextMenuState | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const cardListRef = useRef<HTMLDivElement | null>(null);
+  const addedRowRef = useRef<number | null>(null);
+
+  useLayoutEffect(() => {
+    if (!pageActive || mode !== 'card' || addedRowRef.current === null) return;
+    const row = cardListRef.current?.querySelector<HTMLElement>(`[data-dict-row-index="${addedRowRef.current}"]`);
+    if (!row) return;
+    addedRowRef.current = null;
+    row.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    row.querySelector<HTMLInputElement>('input')?.focus({ preventScroll: true });
+  }, [draftText, pageActive, mode]);
 
   const activeFiles = useMemo(() => getFilesByTab(data, activeTab), [data, activeTab]);
 
@@ -569,6 +580,10 @@ export function DictionaryManager(props: DictionaryManagerProps) {
       insertIndex = last + 1;
     }
     const next = [...parsedRows.slice(0, insertIndex), base, ...parsedRows.slice(insertIndex)];
+    addedRowRef.current = insertIndex;
+    // An empty new row cannot match a text search. Keep its section selected,
+    // but clear the search so the row can be shown and edited immediately.
+    setSearchTerm('');
     setDraftText(rowsToText(next));
     setDirty(true);
     setInfo(null);
@@ -835,7 +850,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                         <div className="dict-card__header">{sectionPills}</div>
                       </div>
                     ) : null}
-                    <div className="dict-card-list">
+                    <div className="dict-card-list" ref={cardListRef}>
                       {groupedRows.map((group, groupIndex) => (
                         <DictEntryGroupCard
                           key={`${groupIndex}-${group.type}-${group.items[0]?.rowIndex ?? 0}`}

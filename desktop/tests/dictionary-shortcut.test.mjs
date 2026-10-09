@@ -65,3 +65,51 @@ test('Ctrl+S/Cmd+S saves only the visible dictionary, prevents duplicate request
   act(() => renderer.unmount());
   assert.equal(f.key(), false);
 });
+
+test('adding an entry reveals and focuses the inserted row, including searches and section filters', () => {
+  const f = fixture();
+  const { DictionaryManager } = f.load(new URL('../src/components/DictionaryManager.tsx', import.meta.url));
+  const data = {
+    pre_dict_files: [], post_dict_files: [], gpt_dict_files: ['gpt.txt'],
+    dict_contents: { 'gpt.txt': { lines: ['---↓Animals↓---', '猫\tcat', '---↓Places↓---', '家\thouse'], mtime: 1 } },
+  };
+  const scrolled = [], focused = [];
+  let renderer;
+  act(() => {
+    renderer = create(h(DictionaryManager, {
+      title: 'Dictionary', description: '', data, loading: false, error: null,
+      onReload: async () => {}, onCreateFile: async () => '', onDeleteFile: async () => {}, onSaveFile: async () => {},
+    }), { createNodeMock(element) {
+      if (element.props.className !== 'dict-card-list') return null;
+      return { querySelector(selector) {
+        const index = Number(selector.match(/"(\d+)"/)[1]);
+        // The target must actually be rendered after filtering, not merely exist in the draft.
+        const row = renderer.root.findByProps({ 'data-dict-row-index': index });
+        assert.equal(row.findAllByType('input')[0].props.value, '');
+        return {
+          scrollIntoView: () => scrolled.push(index),
+          querySelector: () => ({ focus: () => focused.push(index) }),
+        };
+      } };
+    } });
+  });
+  const add = () => renderer.root.findAllByType('button')
+    .find(button => button.props.children === 'projects:dictionaryManager.dictToolbar_message_entry');
+  const search = () => renderer.root.findByProps({ className: 'dict-search' });
+  // A normal toolbar addition appends to the bottom, even with a search active.
+  act(() => search().props.onChange({ target: { value: 'cat' } }));
+  act(() => add().props.onClick());
+  assert.equal(search().props.value, '');
+  assert.deepEqual(scrolled, [4]);
+  assert.deepEqual(focused, [4]);
+  // A section addition lands before the next section, rather than at the file's end.
+  act(() => renderer.root.findAllByType('button').find(button => button.props.children?.[0] === 'Animals').props.onClick());
+  act(() => add().props.onClick());
+  assert.deepEqual(scrolled, [4, 2]);
+  assert.deepEqual(focused, [4, 2]);
+  // The small + at the end of a group follows the same behavior.
+  act(() => renderer.root.findByProps({ className: 'dict-card__add-row-btn' }).props.onClick());
+  assert.deepEqual(scrolled, [4, 2, 3]);
+  assert.deepEqual(focused, [4, 2, 3]);
+  act(() => renderer.unmount());
+});
