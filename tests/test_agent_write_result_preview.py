@@ -106,12 +106,12 @@ class WritePreviewTests(unittest.TestCase):
         self.assertIn("| 新角色 |  |  | add |", text)
         self.assertIn("| 旧角色 |  |  | remove |", text)
 
-    def test_noop_and_skipped_dictionary_entries_are_reported(self):
-        result, runner = save_dict(["a\tA"], "a\tB", "append")
+    def test_noop_dictionary_patch_is_reported(self):
+        result, runner = save_dict(["a\tA"], "a\tA", "patch")
         text = _render_tool_result_table("save_dict", result)
         self.assertEqual(runner.saved, [])
         self.assertIn("内容没有变化", text)
-        self.assertIn("跳过的重复词条：a", text)
+        self.assertIn("替换词条：0", text)
 
 
 class WritePreviewPipelineTests(unittest.TestCase):

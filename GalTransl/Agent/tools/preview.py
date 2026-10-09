@@ -12,11 +12,12 @@ from GalTransl.Agent.tools.cache import (
     _plan_cache_delete,
     _plan_cache_patches,
     _plan_cache_replacements,
+    _resolve_cache_replace_files,
 )
 from GalTransl.Agent.tools.cache_fields import _PATCHABLE_FIELDS
 from GalTransl.Agent.tools.common import _diff_lines, _parse_index_spec
 from GalTransl.Agent.models import AgentToolError
-from GalTransl.Agent.tools.dicts import _dict_new_lines, _dict_save_plan
+from GalTransl.Agent.tools.dicts import _dict_new_lines, _dict_save_plan, _dict_file_categories
 from GalTransl.Agent.tools.names import _name_table_changes, _name_table_save_plan
 from GalTransl.Agent.tools.problems import (
     _problem_filter_keywords,
@@ -101,7 +102,7 @@ def _preview_cache_patch(runner: AgentRunner, args: dict[str, Any]) -> dict[str,
     """
     replace_request = _cache_replace_request(args, _PATCHABLE_FIELDS)
     targets = (
-        [(name, []) for name in replace_request["files"]]
+        [(name, []) for name in _resolve_cache_replace_files(runner, replace_request["files"])]
         if replace_request is not None else _group_cache_patches_by_file(args)
     )
     qualify = len(targets) > 1
@@ -173,10 +174,10 @@ def _preview_dict_write(runner: AgentRunner, args: dict[str, Any]) -> dict[str, 
     data = runner._http_get(f"/api/projects/{pid}/dictionary/project?config={cfg}")
     contents = data.get("dict_contents", {}) if isinstance(data, dict) else {}
     try:
-        plan = _dict_save_plan(contents, args)
+        plan = _dict_save_plan(contents, args, _dict_file_categories(data))
     except AgentToolError:
         return None  # 入参本身有问题：真执行时会报错，这里不画预览
-    new_lines, _ = _dict_new_lines(plan["before_lines"], plan["content"], plan["action"])
+    new_lines, _ = _dict_new_lines(plan["before_lines"], plan["content"], plan["action"], category=plan["dictionary_type"])
     before_text = "\n".join(plan["before_lines"])
     new_text = "\n".join(new_lines)
     if new_text == before_text and not plan["create"]:

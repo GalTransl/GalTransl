@@ -51,6 +51,19 @@ def _list_grep(args: dict[str, Any]) -> str:
     return str(args.get("grep", "") or "").strip()
 
 
+def _list_offset(args: dict[str, Any]) -> int:
+    value = args.get("offset", 0)
+    if type(value) is not int or value < 0:
+        raise AgentToolError("offset 必须是非负整数")
+    return value
+
+
+def _list_paging(count: int, returned: int, offset: int, order: str) -> dict[str, Any]:
+    # 采样不能靠 offset += returned 完整遍历；只为稳定顺序提供续页位置。
+    more = order not in ("even", "random") and offset + returned < count
+    return {"order": order, "offset": offset, "has_more": more, **({"next_offset": offset + returned} if more else {})}
+
+
 def _grep_items(items: list[Any], grep: str) -> list[Any]:
     """按 name 过滤清单（子串、大小写不敏感）。"""
     if not grep:
@@ -100,7 +113,7 @@ def _item_name(item: Any) -> str:
     return str(item.get("name", "")) if isinstance(item, dict) else ""
 
 
-def _select_list_items(items: list[Any], limit: int, order: str) -> list[Any]:
+def _select_list_items(items: list[Any], limit: int, order: str, offset: int = 0) -> list[Any]:
     """按 order 从清单里挑出最多 limit 条（各模式唯一的实现，两个清单工具共用）。"""
     if order in ("size_desc", "size_asc"):
         desc = order == "size_desc"
@@ -109,7 +122,8 @@ def _select_list_items(items: list[Any], limit: int, order: str) -> list[Any]:
             size, name = _item_size(item)
             return (-size, name) if desc else (size, name)
 
-        return sorted(items, key=_key)[:limit]
+        return sorted(items, key=_key)[offset:offset + limit]
+    items = (sorted(items, key=_item_name) if order == "name" else items)[offset:]
     if len(items) <= limit:
         return list(items)  # 用不着截断：原顺序（按文件名）直接给
     if order == "name":
@@ -121,29 +135,24 @@ def _select_list_items(items: list[Any], limit: int, order: str) -> list[Any]:
 
 
 def _list_notes(
-    *, matched: int, grep: str, returned: int, limit: int, order: str, unit: str
+    *, matched: int, grep: str, returned: int, limit: int, order: str, unit: str, offset: int = 0
 ) -> list[str]:
     """过滤 / 截取的说明（各清单工具拼进返回体的 note）。"""
     notes: list[str] = []
     if grep:
         notes.append(f'已按 grep="{grep}" 过滤文件名：命中 {matched} 个{unit}。')
+    if order not in ("even", "random"):
+        notes.append(f"{LIST_ORDER_LABELS[order]}分页：共 {matched} 个{unit}，本页 {returned} 个（offset={offset}）。")
+        if offset + returned < matched:
+            notes.append(f"还有更多；保持 grep/order 不变，用 offset={offset + returned} 继续。")
+        return notes
     if returned < matched:
-        tail = f"要看更多把 limit 调大（当前 {limit}，上限 {LIST_ITEMS_MAX_LIMIT}）。"
-        if order == "name":
-            notes.append(
-                f"{matched} 个{unit}超过上限，已按**文件名顺序**取前 {returned} 个（后面的没列）："
-                "找具体文件用 grep 缩小范围，想看到整个范围就换 order=\"even\"（均匀采样）；" + tail
-            )
-        elif order == "random":
+        tail = f"要看更多把 limit 调大（当前 {limit}，上限 {LIST_ITEMS_MAX_LIMIT}）；完整遍历用 order=name + limit/offset。"
+        if order == "random":
             notes.append(
                 f"{matched} 个{unit}超过上限，已**随机采样** {returned} 个"
                 "（每次调用挑中的可能不同，这是这个模式的本意）：要多看几批就再调一次，"
                 "或用 grep / order=\"size_desc\" 缩小范围；" + tail
-            )
-        elif order in ("size_desc", "size_asc"):
-            notes.append(
-                f"{matched} 个{unit}超过上限，已按文件大小**{LIST_ORDER_LABELS[order]}**"
-                f"取前 {returned} 个（只列了最大/最小的那批）：" + tail
             )
         else:
             notes.append(

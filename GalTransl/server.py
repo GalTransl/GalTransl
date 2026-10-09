@@ -108,6 +108,7 @@ def _list_dir_entries(
     *,
     count_json_entries: bool = False,
     skip_suffixes: tuple[str, ...] = (),
+    recursive: bool = False,
 ) -> list[dict[str, Any]]:
     """List files in a directory with basic metadata.
 
@@ -118,10 +119,17 @@ def _list_dir_entries(
     entries = []
     if not os.path.isdir(dir_path):
         return entries
-    for name in sorted(os.listdir(dir_path)):
+    names = (
+        sorted(os.path.relpath(os.path.join(root, name), dir_path).replace(os.sep, "/")
+               for root, _, files in os.walk(dir_path) for name in files)
+        if recursive else sorted(os.listdir(dir_path))
+    )
+    for name in names:
         if skip_suffixes and name.endswith(tuple(skip_suffixes)):
             continue
         full = os.path.join(dir_path, name)
+        if not _is_path_within(dir_path, full):
+            continue
         stat = os.stat(full) if os.path.isfile(full) else None
         entry = {
             "name": name,
@@ -174,8 +182,8 @@ def _is_safe_config_filename(filename: str) -> bool:
 
 
 def _is_path_within(base_dir: str, target_path: str) -> bool:
-    base_abs = os.path.abspath(base_dir)
-    target_abs = os.path.abspath(target_path)
+    base_abs = os.path.normcase(os.path.realpath(base_dir))
+    target_abs = os.path.normcase(os.path.realpath(target_path))
     try:
         common = os.path.commonpath([base_abs, target_abs])
     except ValueError:
@@ -1116,8 +1124,9 @@ def _search_input_dir(
     only_preceding: bool = False,
     pattern: Any = None,
     order: str = "name",
+    folder: str = INPUT_FOLDERNAME,
 ) -> dict[str, Any]:
-    """在待翻译原文里搜关键词（Agent 的 search_input 用）。
+    """在原文或最终输出中搜索关键词（默认原文，输出由 _search_output_dir 调用）。
 
     与 /cache/search 同一套语义：命中上限只算命中本身（前后文是搭着给的，不占配额）、
     context 是"顺带带出来的前后文"、only_preceding 只给上文（Agent 默认开，省 token；
@@ -1126,7 +1135,7 @@ def _search_input_dir(
     文件插件解析（见 _load_input_file_entries），每次搜索都得把涉及的输入文件读一遍，
     所以比搜缓存慢，这也正是 filename 参数的意义。
 
-    field：all | src（原文正文）| name（说话人）。pattern 非空时按正则匹配，
+    field：all | src（原文正文，输出用 dst）| name（说话人）。pattern 非空时按正则匹配，
     否则按大小写不敏感的子串匹配（与缓存搜索一致）。
     """
 
@@ -1135,18 +1144,29 @@ def _search_input_dir(
             return bool(pattern.search(text))
         return query.lower() in text.lower()
 
-    input_dir = os.path.join(project_dir, INPUT_FOLDERNAME)
+    input_dir = os.path.join(project_dir, folder)
+    is_output = folder == OUTPUT_FOLDERNAME
+    text_field = "dst" if is_output else "src"
     all_hits: list[dict[str, Any]] = []
     file_rows: dict[str, list[dict[str, Any] | None]] = {}
     files_failed: list[str] = []
     if os.path.isdir(input_dir):
-        for name in sorted(os.listdir(input_dir)):
+        # 输出可能保留子目录结构；返回相对路径，能直接交给 read_output。
+        names = (
+            sorted(os.path.relpath(os.path.join(root, name), input_dir).replace(os.sep, "/")
+                   for root, _, files in os.walk(input_dir) for name in files)
+        )
+        for name in names:
             if filename and name != filename:
                 continue
-            if not os.path.isfile(os.path.join(input_dir, name)):
+            file_path = os.path.join(input_dir, name)
+            if not os.path.isfile(file_path) or not _is_path_within(input_dir, file_path):
                 continue
             try:
-                entries = _load_input_file_entries(project_dir, config_file_name, name)
+                entries = (
+                    _load_input_file_entries(project_dir, config_file_name, name, folder=OUTPUT_FOLDERNAME)
+                    if is_output else _load_input_file_entries(project_dir, config_file_name, name)
+                )
             except Exception:
                 # 单个文件解析不了（插件/格式问题）不影响其它文件：搜索是只读的辅助手段，
                 # 尽量给出能给的，别整个失败。但**必须报上去**——静默跳过会让"这个文件里
@@ -1166,9 +1186,9 @@ def _search_input_dir(
                     "filename": name,
                     "index": entry.get("index", 0),
                     "speaker": entry.get("name", ""),
-                    "src": entry.get("pre_src", ""),
+                    text_field: entry.get("pre_src", ""),
                 })
-                if field == "src" and not match_src:
+                if field == text_field and not match_src:
                     continue
                 if field == "name" and not match_name:
                     continue
@@ -1177,7 +1197,7 @@ def _search_input_dir(
                 all_hits.append({
                     "filename": name,
                     "pos": pos,
-                    "flags": {"match_src": match_src, "match_name": match_name},
+                    "flags": {f"match_{text_field}": match_src, "match_name": match_name},
                 })
             file_rows[name] = normalized_rows
     selected = _sample_search_hits(all_hits, max_results, offset, order)
@@ -1189,7 +1209,19 @@ def _search_input_dir(
         out.update({"context": context, "returned_hits": len(selected), "returned": len(results)})
     if files_failed:
         out["files_failed"] = files_failed
+    if is_output:
+        out["source"] = "output"
+        if not file_rows and not files_failed:
+            out["note"] = (
+                f"输出文件 {filename} 不存在；请使用 gt_output 中的实际相对路径。"
+                if filename else "gt_output 是空的，请用 rebuild 重建结果。"
+            )
     return out
+
+
+def _search_output_dir(project_dir: str, config_file_name: str, **kwargs: Any) -> dict[str, Any]:
+    """在实际交付物中搜索；与原文搜索共用分页、采样与上下文规则。"""
+    return _search_input_dir(project_dir, config_file_name, folder=OUTPUT_FOLDERNAME, **kwargs)
 
 
 def _count_input_file_sentences(
@@ -1847,7 +1879,7 @@ def build_handler(registry: JobRegistry):
                 input_dir = os.path.join(project_dir, INPUT_FOLDERNAME)
                 output_dir = os.path.join(project_dir, OUTPUT_FOLDERNAME)
                 cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
-                input_entries = _list_dir_entries(input_dir)
+                input_entries = _list_dir_entries(input_dir, recursive=True)
                 # counts=1：额外给每个输入文件附上句数（要解析原文，稍慢）。
                 # 界面不需要，所以做成可选参数：只有 Agent 的 list_input_files 用。
                 want_counts = parse_qs(urlparse(self.path).query).get("counts", ["0"])[0].lower() not in {
@@ -1867,18 +1899,19 @@ def build_handler(registry: JobRegistry):
                     "output_dir": output_dir,
                     "cache_dir": cache_dir,
                     "input_files": input_entries,
-                    "output_files": _list_dir_entries(output_dir),
+                    "output_files": _list_dir_entries(output_dir, recursive=True),
                     "cache_files": _list_dir_entries(
                         cache_dir, count_json_entries=True, skip_suffixes=(CACHE_TEMP_SUFFIX,)
                     ),
                 })
                 return
 
-            # POST /api/projects/:id/input/search — 在待翻译原文里搜（Agent 的 search_input 用）
-            # **必须排在下面的 /input/:filename 之前**：那条是按前缀匹配的，放在它后面这里
+            # POST /api/projects/:id/{input,output}/search — 搜索原文或实际交付物。
+            # **必须排在下面的 /input/:filename 与 /output/:filename 之前**：按前缀匹配时
             # 会被当成"读一个名叫 search 的输入文件"。也因此这里多带一个 POST 判断——GET
             # 落到前缀分支去，读同名文件仍然走得通。
-            if sub_path == "/input/search" and self.command == "POST":
+            if sub_path in ("/input/search", "/output/search") and self.command == "POST":
+                is_output = sub_path == "/output/search"
                 try:
                     import re as _re
 
@@ -1887,11 +1920,12 @@ def build_handler(registry: JobRegistry):
                     if not query:
                         self._send_json({"results": [], "total": 0})
                         return
-                    # field：all | src（原文正文）| name（说话人）——原文侧只有这两列可搜
+                    # 输出正文用 dst，原文正文用 src；两侧都能搜说话人。
                     field = str(payload.get("field", "all")).strip() or "all"
-                    if field not in ("all", "src", "name"):
+                    fields = ("all", "dst" if is_output else "src", "name")
+                    if field not in fields:
                         self._send_json(
-                            {"error": "field must be one of: all, src, name"},
+                            {"error": f"field must be one of: {', '.join(fields)}"},
                             status=HTTPStatus.BAD_REQUEST,
                         )
                         return
@@ -1927,7 +1961,8 @@ def build_handler(registry: JobRegistry):
                     except ValueError as exc:
                         self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                         return
-                    result = _search_input_dir(
+                    search_files = _search_output_dir if is_output else _search_input_dir
+                    result = search_files(
                         project_dir,
                         str(payload.get("config_file_name", "config.yaml") or "config.yaml"),
                         query=query,
@@ -1945,18 +1980,20 @@ def build_handler(registry: JobRegistry):
                     self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
                 except Exception as exc:
                     self._send_json(
-                        {"error": f"failed to search input files: {exc}"},
+                        {"error": f"failed to search {'output' if is_output else 'input'} files: {exc}"},
                         status=HTTPStatus.INTERNAL_SERVER_ERROR,
                     )
                 return
 
             # GET /api/projects/:id/input/:filename — 用文件插件解析待翻译原文
             if sub_path.startswith("/input/"):
-                filename = unquote(sub_path[len("/input/"):])
-                if not filename or filename != os.path.basename(filename):
+                filename = unquote(sub_path[len("/input/"):]).replace("\\", "/")
+                input_dir = os.path.join(project_dir, INPUT_FOLDERNAME)
+                file_path = os.path.join(input_dir, filename)
+                if (not filename or os.path.isabs(filename) or ".." in filename.split("/")
+                        or not _is_path_within(input_dir, file_path)):
                     self._send_json({"error": "invalid input filename"}, status=HTTPStatus.BAD_REQUEST)
                     return
-                file_path = os.path.join(project_dir, INPUT_FOLDERNAME, filename)
                 if not os.path.isfile(file_path):
                     self._send_json({"error": f"input file not found: {filename}"}, status=HTTPStatus.NOT_FOUND)
                     return

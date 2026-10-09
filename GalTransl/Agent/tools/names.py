@@ -8,7 +8,9 @@ from typing import Any, TYPE_CHECKING
 from GalTransl.Agent.core import DEFAULT_CONFIG_FILE, _log
 from GalTransl.Agent.models import AgentToolError
 from GalTransl.Agent.tools.common import _change
+from GalTransl.Agent.tools.listing import _list_limit, _list_offset, _list_paging
 from GalTransl.Agent.tools.project import _MISSING, _get_config_key
+from GalTransl.Dictionary import split_dictionary_line
 
 if TYPE_CHECKING:
     from GalTransl.Agent.runner import AgentRunner
@@ -25,7 +27,7 @@ if TYPE_CHECKING:
 def _gpt_dict_line(raw: str) -> tuple[str, str]:
     """GPT 字典的一行 →（查找词, 替换词）；不是词条行则返回两个空串。
 
-    照抄 GalTransl/Dictionary.py 的 CGptDict.load_dic：跳过空行/注释行，4 个空格当 Tab，
+    共用 GalTransl/Dictionary.py 的列解析：跳过空行/注释行，4 个空格当 Tab，
     兼容 `src->dst #note` 写法，至少两列才算词条。**不做 strip**——字典的命中判定是全等
     比较（CGptDict.get_dst），把空白修掉会让"其实查不到"的行看起来像命中了。
     """
@@ -33,10 +35,7 @@ def _gpt_dict_line(raw: str) -> tuple[str, str]:
         return "", ""
     if raw.lstrip().startswith(("//", "\\\\")):  # 注释行
         return "", ""
-    line = raw.replace("    ", "\t")
-    if "->" in line:
-        line = line.replace("->", "\t").replace("#", "\t")
-    parts = line.rstrip("\r\n").split("\t")
+    parts = split_dictionary_line(raw, gpt=True)
     if len(parts) < 2:
         return "", ""
     return parts[0], parts[1]
@@ -119,7 +118,7 @@ def _fill_names_from_gpt_dict(
     return out, still_empty
 
 
-def _tool_get_name_table(runner: AgentRunner, _args: dict[str, Any]) -> Any:
+def _load_effective_name_table(runner: AgentRunner) -> Any:
     """读人名替换表；useGPTDictInName 开着时，顺带把 GPT 字典里已有的译名补进返回值。
 
     为什么要补：翻译时 name 字段会吃 GPT 字典里同名的词条，表里译名空着而字典里有人的行
@@ -156,6 +155,34 @@ def _tool_get_name_table(runner: AgentRunner, _args: dict[str, Any]) -> Any:
             "**still_empty 才是表与字典都没有、需要你补的**；"
             "要把某个译名固定下来（不再依赖字典）用 save_name_table 写进表里。"
         ),
+    }
+
+
+def _tool_get_name_table(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """先补上实际生效的 GPT 译名，再筛选和分页，避免把已覆盖人名当作缺漏。"""
+    limit, offset = _list_limit(args), _list_offset(args)
+    query = args.get("query", "")
+    only_missing = args.get("only_missing", False)
+    if not isinstance(query, str) or type(only_missing) is not bool:
+        raise AgentToolError("query 必须是字符串，only_missing 必须是布尔值")
+    data = _load_effective_name_table(runner)
+    if not isinstance(data, dict):
+        return data
+    raw = data.get("names")
+    names = [row for row in raw if isinstance(row, dict)] if isinstance(raw, list) else []
+    def missing(row: dict[str, Any]) -> bool:
+        return not str(row.get("dst_name") or "").strip()
+
+    needle = query.casefold()
+    matched = [row for row in names if (not only_missing or missing(row)) and
+               any(needle in str(row.get(key) or "").casefold() for key in ("src_name", "dst_name"))]
+    page = matched[offset:offset + limit]
+    return {
+        **data, "names": page, "total": len(names), "matched": len(matched), "returned": len(page),
+        "query": query, "only_missing": only_missing, "limit": limit,
+        "missing_total": sum(missing(row) for row in names),
+        "still_empty": [row.get("src_name", "") for row in page if missing(row)],
+        **_list_paging(len(matched), len(page), offset, "name"),
     }
 
 
@@ -208,7 +235,7 @@ def _name_table_changes(
 
 def _name_table_save_plan(old_raw: Any, args: dict[str, Any]) -> tuple[str, list[Any]]:
     """按 mode 计算完整写入内容，供保存与审批预览共用。"""
-    mode = args.get("mode", "overwrite")
+    mode = args.get("mode", "patch")
     if mode not in ("overwrite", "patch"):
         raise AgentToolError("mode must be overwrite or patch")
     names = args.get("names", [])

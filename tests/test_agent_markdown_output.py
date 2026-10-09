@@ -443,6 +443,7 @@ class DispatcherTests(unittest.TestCase):
                 "read_input_file",
                 "read_transl_cache",
                 "search_input",
+                "search_output_files",
                 "manage_problem_filter",
                 "run_subagents",
                 "patch_transl_cache",

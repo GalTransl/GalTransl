@@ -19,11 +19,15 @@ class _Runner:
         self.saved = []
         self.reads = []
         self.expect_locked = False
+        self.listings = 0
 
     def _project_id(self):
         return "proj"
 
     def _http_get(self, url):
+        if url.endswith("/cache"):
+            self.listings += 1
+            return {"files": [{"name": name} for name in self.disk] + [{"name": "directory.json", "is_file": False}]}
         name = urllib.parse.unquote(url.rsplit("/", 1)[-1])
         if self.expect_locked:
             assert _cache_file_lock(self, name).locked()
@@ -94,7 +98,7 @@ class ReplaceCacheTests(unittest.TestCase):
         self.assertEqual(runner.disk["b.json"][0]["pre_dst"], "")
 
     def test_single_filename_shorthand_and_duplicate_files(self):
-        for selection in ({"filename": "a.json"}, {"files": ["a.json", "a.json"]}):
+        for selection in ({"filename": "a.json"}, {"files": "a.json"}, {"files": ["a.json", "a.json"]}):
             runner = _Runner(self.files)
             args = _args(replacement="old-new")
             args.pop("files")
@@ -104,6 +108,48 @@ class ReplaceCacheTests(unittest.TestCase):
             self.assertEqual(runner.saved, ["a.json"])
             self.assertEqual(runner.disk["a.json"][0]["pre_dst"], "old-new and old-new")
             self.assertEqual(result["changes"][0]["path"], "#1.pre_dst")
+            self.assertEqual(runner.listings, 0)
+
+    def test_wildcard_selects_all_snapshots_excluding_logs_and_other_files(self):
+        files = {**self.files, "a.json.append.jsonl": [], "notes.txt": []}
+        for selector in ("*", ["*"]):
+            with self.subTest(selector=selector):
+                runner = _Runner(files)
+                runner.expect_locked = True
+                result = _tool_patch_transl_cache(runner, _args(files=selector))
+                self.assertEqual(runner.saved, ["a.json", "b.json", "outside.json"])
+                self.assertEqual(result["updated"], 3)
+                self.assertEqual(runner.listings, 1)
+
+    def test_globs_expand_in_order_and_overlaps_are_only_replaced_once(self):
+        runner = _Runner(self.files)
+        _tool_patch_transl_cache(runner, _args(files=["b.json", "[ab].json", "?.json"], replacement="old-new"))
+        self.assertEqual(runner.saved, ["b.json", "a.json"])
+        self.assertEqual(runner.disk["b.json"][0]["pre_dst"], "old-new")
+        self.assertEqual(runner.disk["outside.json"], self.files["outside.json"])
+
+    def test_glob_preview_matches_execution_and_has_concrete_filenames(self):
+        runner = _Runner(self.files)
+        args = _args(files="*.json", clear_comment=True)
+        preview = _preview_cache_patch(runner, args)
+        self.assertEqual(runner.saved, [])
+        self.assertEqual(preview["files"], ["a.json", "b.json", "outside.json"])
+        result = _tool_patch_transl_cache(runner, args)
+        self.assertEqual(preview["changes"], result["changes"])
+
+    def test_unmatched_globs_fail_before_any_file_is_modified(self):
+        for files, selectors in ((self.files, "missing*"), (self.files, ["a.json", "A*.json"]), ({}, "*")):
+            with self.subTest(selectors=selectors):
+                runner = _Runner(files)
+                with self.assertRaisesRegex(AgentToolError, "未匹配"):
+                    _tool_patch_transl_cache(runner, _args(files=selectors))
+                self.assertEqual(runner.saved, [])
+                self.assertEqual(runner.reads, [])
+
+    def test_filename_with_literal_brackets_is_preferred_to_glob(self):
+        runner = _Runner({"[ab].json": [{"index": 1, "pre_dst": "old"}], **self.files})
+        _tool_patch_transl_cache(runner, _args(files="[ab].json"))
+        self.assertEqual(runner.saved, ["[ab].json"])
 
     def test_no_match_or_identical_replacement_is_success_without_writes(self):
         for overrides in ({"query": "missing"}, {"query": "OLD"}, {"replacement": "old"}):
@@ -165,7 +211,7 @@ class ReplaceCacheTests(unittest.TestCase):
     def test_invalid_arguments_are_rejected_before_reading_or_writing(self):
         for overrides in (
             {"action": "unknown"}, {"query": ""}, {"query": None}, {"replacement": None},
-            {"files": []}, {"files": "a.json"}, {"files": [""]}, {"files": [1]},
+            {"files": []}, {"files": ""}, {"files": [""]}, {"files": [1]}, {"files": 1},
             {"filename": "a.json"}, {"fields": []}, {"fields": "pre_dst"},
             {"fields": ["post_src"]}, {"fields": ["proofread_comment"]}, {"fields": [None]},
             {"patches": []},
@@ -210,6 +256,7 @@ class ReplaceCacheTests(unittest.TestCase):
     def test_schema_exposes_replace_but_proofreaders_keep_patch_contract(self):
         schema = next(t["function"] for t in AGENT_TOOLS if t["function"]["name"] == "patch_transl_cache")
         self.assertEqual(schema["parameters"]["properties"]["action"]["enum"], ["patch", "replace"])
+        self.assertEqual([s["type"] for s in schema["parameters"]["properties"]["files"]["anyOf"]], ["string", "array"])
         narrow = _subagent_patch_schema()["function"]["parameters"]
         self.assertEqual(narrow["required"], ["patches"])
         for field in ("action", "files", "query", "replacement", "fields"):

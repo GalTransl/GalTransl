@@ -97,8 +97,8 @@ class SaveNameTableTests(unittest.TestCase):
         self.assertEqual(runner.saved[-1], [{"src_name": "A", "dst_name": "Alpha", "count": 0}])
         self.assertEqual(result["names_added"], ["A"])
 
-    def test_overwrite_remains_default_and_can_remove_rows(self):
-        for mode in (None, "overwrite"):
+    def test_explicit_overwrite_can_remove_rows(self):
+        for mode in ("overwrite",):
             for names in ([self.old[0]], []):
                 with self.subTest(mode=mode, names=names):
                     runner = _Runner(self.old)

@@ -121,11 +121,11 @@ class PlanPatchNormalizationTests(unittest.TestCase):
     def test_br_written_by_the_model_becomes_the_entry_style(self):
         planned = _plan_cache_patches(
             self._entries(),
-            [{"index": 39, "pre_dst": "对对，绘制在圆圈那样<br>不过，注意不要把热水直接淋在滤纸上"}],
+            [{"index": 39, "pre_dst": "对，画圆圈一样<br>不过，注意不要把热水直接淋在滤纸上"}],
             _PATCHABLE_FIELDS,
         )
 
-        expected = "对对，绘制在圆圈那样\r\n不过，注意不要把热水直接淋在滤纸上"
+        expected = "对，画圆圈一样\r\n不过，注意不要把热水直接淋在滤纸上"
         self.assertEqual(planned["plan"][0]["updates"]["pre_dst"], expected)
         # 变更卡上的 after 就是归一化后的值：所见即所得
         self.assertEqual(planned["changes"][0]["after"], expected)
@@ -133,9 +133,9 @@ class PlanPatchNormalizationTests(unittest.TestCase):
     def test_real_newline_written_becomes_literal_for_literal_style_entries(self):
         # #40 是字面 \n 风格：模型写真换行（JSON 参数里就是 \n）→ 归一成字面 \n
         planned = _plan_cache_patches(
-            self._entries(), [{"index": 40, "pre_dst": "台词\n第二行"}], _PATCHABLE_FIELDS
+            self._entries(), [{"index": 40, "pre_dst": "新台词\n第二行"}], _PATCHABLE_FIELDS
         )
-        self.assertEqual(planned["plan"][0]["updates"]["pre_dst"], "台词\\n第二行")
+        self.assertEqual(planned["plan"][0]["updates"]["pre_dst"], "新台词\\n第二行")
 
     def test_proofread_comment_is_normalized_too(self):
         planned = _plan_cache_patches(
@@ -169,11 +169,11 @@ class ToolEndToEndTests(unittest.TestCase):
 
         result = _tool_patch_transl_cache(
             runner,
-            {"filename": "a.json", "patches": [{"index": 39, "pre_dst": "对对，绘制在圆圈那样<br>不过，注意不要把热水直接淋在滤纸上"}]},
+            {"filename": "a.json", "patches": [{"index": 39, "pre_dst": "对，画圆圈一样<br>不过，注意不要把热水直接淋在滤纸上"}]},
         )
 
         saved = {e["index"]: e for e in runner.saved}
-        expected = "对对，绘制在圆圈那样\r\n不过，注意不要把热水直接淋在滤纸上"
+        expected = "对，画圆圈一样\r\n不过，注意不要把热水直接淋在滤纸上"
         self.assertEqual(saved[39]["pre_dst"], expected)  # 落盘的是真 \r\n，不是 <br>
         self.assertEqual(result["changes"][0]["after"], expected)
 

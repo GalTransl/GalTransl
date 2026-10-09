@@ -71,6 +71,7 @@ PERMISSION_READ_TOOLS: frozenset[str] = frozenset({
     "list_input_files",
     "read_input_file",
     "search_input",
+    "search_output_files",
     "read_guideline",
     "list_dict_files",
     "read_dict",

@@ -137,7 +137,7 @@ class SaveDictCreateTests(unittest.TestCase):
     def test_category_creates_then_writes(self):
         runner = _DictRunner(dict(EXISTING))
         result = _tool_save_dict(
-            runner, {"file_key": "新字典.txt", "category": "gpt", "content": "b\tB", "action": "append"}
+            runner, {"file_key": "新字典.txt", "category": "gpt", "content": "b\tB", "action": "patch"}
         )
         paths = [p for p, _ in runner.posts]
         self.assertTrue(paths[0].endswith("/dictionary/project/create"))
@@ -159,7 +159,7 @@ class SaveDictCreateTests(unittest.TestCase):
         runner = _DictRunner(dict(EXISTING))
         _tool_save_dict(
             runner,
-            {"file_key": "(project_dir)项目GPT字典.txt", "category": "post", "content": "b\tB", "action": "append"},
+            {"file_key": "(project_dir)项目GPT字典.txt", "category": "post", "content": "b\tB", "action": "patch"},
         )
         self.assertEqual([p.rsplit("/", 1)[-1] for p, _ in runner.posts], ["save"])
 
@@ -169,9 +169,9 @@ class SaveDictCreateTests(unittest.TestCase):
             _tool_save_dict(runner, {"file_key": "不存在.txt", "content": "b\tB"})
         self.assertEqual(runner.posts, [])
 
-    def test_replace_or_delete_cannot_create(self):
+    def test_delete_cannot_create(self):
         runner = _DictRunner(dict(EXISTING))
-        with self.assertRaisesRegex(AgentToolError, "overwrite 或 append"):
+        with self.assertRaisesRegex(AgentToolError, "overwrite 或 patch"):
             _tool_save_dict(runner, {"file_key": "新.txt", "category": "gpt", "content": "a", "action": "delete"})
         self.assertEqual(runner.posts, [])
 

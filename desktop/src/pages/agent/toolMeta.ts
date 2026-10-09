@@ -121,6 +121,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   read_transl_cache: { get action() { return translate("agent:tools.read_transl_cache.action"); }, get running() { return translate("agent:tools.read_transl_cache.running"); }, verb: '', icon: 'file-text', summary: translCacheSummary },
   read_output: { get action() { return translate("agent:tools.read_output.action"); }, get running() { return translate("agent:tools.read_output.running"); }, verb: '', icon: 'file-text', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
   search_input: { get action() { return translate("agent:tools.search_input.action"); }, get running() { return translate("agent:tools.search_input.running"); }, verb: '', icon: 'search-plus', summary: (a) => [str(a?.query), str(a?.filename), a?.context ? translate("agent:toolMeta.summary_filter_sentenceContext", { displayContext: a.context }) : ''].filter(Boolean).join(' · ') },
+  search_output_files: { get action() { return translate("agent:tools.search_output_files.action"); }, get running() { return translate("agent:tools.search_output_files.running"); }, verb: '', icon: 'search-plus', summary: (a) => [str(a?.query), str(a?.filename), a?.context ? translate("agent:toolMeta.summary_filter_sentenceContext", { displayContext: a.context }) : ''].filter(Boolean).join(' · ') },
   patch_transl_cache: {
     get action() { return translate("agent:tools.patch_transl_cache.action"); },
     get running() { return translate("agent:tools.patch_transl_cache.running"); },

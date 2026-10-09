@@ -5,6 +5,15 @@ from GalTransl import LOGGER
 from GalTransl.Utils import process_escape
 
 
+def split_dictionary_line(line: str, *, gpt: bool = False) -> list[str]:
+    """字典加载与编辑共用的列解析；保留查找词中的空白。"""
+    line = line.replace("    ", "\t")
+    if gpt and "->" in line:
+        line = line.replace("->", "\t").replace("#", "\t")
+    parts = line.rstrip("\r\n").split("\t")
+    return parts if gpt else [process_escape(part) for part in parts]
+
+
 class ifWord:
     __slots__ = ["without_flag", "startswith_flag", "endswith_flag", "word"]
 
@@ -161,17 +170,10 @@ class CNormalDic:
             # elif line.startswith("\\\\") or line.startswith("//"):  # 注释行跳过
             #     continue
 
-            # 四个空格换成Tab
-            line = line.replace("    ", "\t")
-
-            sp = line.rstrip("\r\n").split("\t")  # 去多余换行符，Tab分割
+            sp = split_dictionary_line(line)
             len_sp = len(sp)
             if len_sp < 2:  # 至少是2个元素
                 continue
-            # 处理转义字符
-            for i in range(len_sp):
-                sp[i] = process_escape(sp[i])
-
             is_conditionaDic_line = True if sp[0] in self.conditionaDic_key else False
             is_situationsDic_line = True if sp[0] in self.situationsDic_key else False
             if (is_conditionaDic_line and len_sp < 4) or (
@@ -354,13 +356,7 @@ class CGptDict:
             if line.startswith("\n"):
                 continue
 
-            # 兼容四个空格
-            line = line.replace("    ", "\t")
-            # 兼容src->dst #note
-            if "->" in line:
-                line = line.replace("->", "\t").replace("#", "\t")
-
-            sp = line.rstrip("\r\n").split("\t")  # 去多余换行符，Tab分割
+            sp = split_dictionary_line(line, gpt=True)
             len_sp = len(sp)
 
             if len_sp < 2:  # 至少是2个元素

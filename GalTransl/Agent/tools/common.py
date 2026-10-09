@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from collections import Counter
+from bisect import bisect_right
 from typing import Any
+
+from GalTransl.Agent.models import AgentToolError
 
 
 def _entry_index(entry: Any) -> int:
@@ -14,6 +17,84 @@ def _entry_index(entry: Any) -> int:
         return int(entry.get("index", -1))
     except (TypeError, ValueError):
         return -1
+
+
+def _read_entries_page(
+    entries: list[dict[str, Any]], args: dict[str, Any], *, context: int = 0, only_preceding: bool = True,
+) -> dict[str, Any]:
+    """读取工具共用的有界分页：offset 跳过命中，整页连上下文最多 200 行。
+
+    index 区间保持紧凑表示，避免 1-1000000000 在读取少量条目前先展开十亿个整数。
+    缺失编号只展示前 200 个，missing_count 仍报告完整数量。
+    """
+    spec = str(args.get("index", "") or "").strip()
+    try:
+        limit = max(1, min(int(args.get("limit", 200 if spec else 30)), 200))
+        offset = int(args.get("offset", 0))
+        if offset < 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        raise AgentToolError("limit 必须是整数，offset 必须是非负整数")
+    extra: dict[str, Any] = {}
+    if spec:
+        ranges: list[tuple[int, int]] = []
+        for part in spec.split(","):
+            token = part.strip().replace("*", "")
+            try:
+                bounds = [int(x) for x in token.split("-", 1)]
+            except ValueError:
+                continue
+            ranges.append((min(bounds), max(bounds)))
+        merged: list[tuple[int, int]] = []
+        for lo, hi in sorted(ranges):
+            if merged and lo <= merged[-1][1] + 1:
+                merged[-1] = (merged[-1][0], max(hi, merged[-1][1]))
+            else:
+                merged.append((lo, hi))
+        if not merged:
+            raise AgentToolError(f"无法解析 index 列表：{spec!r}（示例：1-100,205）")
+        starts = [lo for lo, _ in merged]
+        by_index = {_entry_index(e): e for e in entries if _entry_index(e) >= 0}
+        matched_indexes = []
+        for idx in sorted(by_index):
+            at = bisect_right(starts, idx) - 1
+            if at >= 0 and idx <= merged[at][1]:
+                matched_indexes.append(idx)
+        missing_count = sum(hi - lo + 1 for lo, hi in merged) - len(matched_indexes)
+        if missing_count:
+            missing: list[int] = []
+            for lo, hi in merged:
+                cursor = lo
+                for idx in matched_indexes[bisect_right(matched_indexes, lo - 1):bisect_right(matched_indexes, hi)]:
+                    missing.extend(range(cursor, min(idx, cursor + 200 - len(missing))))
+                    cursor = idx + 1
+                    if len(missing) == 200:
+                        break
+                missing.extend(range(cursor, min(hi + 1, cursor + 200 - len(missing))))
+                if len(missing) == 200:
+                    break
+            extra.update(missing_indexes=missing, missing_count=missing_count, missing_truncated=missing_count > len(missing))
+        per_hit = context + 1 if only_preceding else 2 * context + 1
+        hit_limit = min(limit, max(1, 200 // per_hit))
+        selected = matched_indexes[offset:offset + hit_limit]
+        picked = [by_index[idx] for idx in selected]
+        if context and selected:
+            selected_set = set(selected)
+            after = 0 if only_preceding else context
+            wanted = {i for idx in selected for i in range(max(0, idx - context), idx + after + 1)}
+            picked = [by_index[i] if i in selected_set else _mark_context_row(by_index[i])
+                      for i in sorted(wanted) if i in by_index]
+        matched, hit_count = len(matched_indexes), len(selected)
+    else:
+        matched = len(entries)
+        picked = entries[offset:offset + limit]
+        hit_count = len(picked)
+    more = offset + hit_count < matched
+    return {
+        "entries": picked, "matched": matched, "returned": len(picked), "returned_hits": hit_count,
+        "offset": offset, "limit": limit, "has_more": more,
+        **({"next_offset": offset + hit_count} if more else {}), **extra,
+    }
 
 
 def _change(path: str, before: Any, after: Any, kind: str = "replace") -> dict[str, Any]:

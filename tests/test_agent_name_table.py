@@ -124,7 +124,7 @@ class NameTableGptDictTests(unittest.TestCase):
         self.assertEqual(result["names"][0]["dst_name_source"], "gpt_dict")
         # 补了哪些看行上的 dst_name_source；清单字段只剩 still_empty
         self.assertEqual(
-            list(result.keys()),
+            [key for key in ("source_file", "names", "use_gpt_dict_in_name", "still_empty", "note") if key in result],
             ["source_file", "names", "use_gpt_dict_in_name", "still_empty", "note"],
         )
         self.assertEqual(result["still_empty"], [])
@@ -243,7 +243,9 @@ class GptDictToggleTests(unittest.TestCase):
 
         result = _tool_get_name_table(runner, {})
 
-        self.assertEqual(list(result.keys()), ["source_file", "names"])
+        self.assertNotIn("use_gpt_dict_in_name", result)
+        self.assertEqual(result["total"], len(runner.names))
+        self.assertEqual(result["names"], runner.names)
         self.assertEqual(result["names"][0]["dst_name"], "")
         self.assertEqual(runner.writes, [])
 
@@ -256,7 +258,9 @@ class GptDictToggleTests(unittest.TestCase):
 
         result = _tool_get_name_table(runner, {})
 
-        self.assertEqual(list(result.keys()), ["source_file", "names"])
+        self.assertNotIn("use_gpt_dict_in_name", result)
+        self.assertEqual(result["total"], len(runner.names))
+        self.assertEqual(result["names"], runner.names)
 
     def test_flat_and_expanded_config_key_both_work(self):
         """配置里既有 useGPTDictInName，也可能写成 dictionary.useGPTDictInName。"""
@@ -282,7 +286,9 @@ class NameTableDegradationTests(unittest.TestCase):
 
         result = _tool_get_name_table(runner, {})
 
-        self.assertEqual(list(result.keys()), ["source_file", "names"])
+        self.assertNotIn("use_gpt_dict_in_name", result)
+        self.assertEqual(result["total"], len(runner.names))
+        self.assertEqual(result["names"], runner.names)
 
     def test_dict_read_failure_degrades_to_the_raw_table(self):
         runner = _NameRunner(
@@ -293,7 +299,9 @@ class NameTableDegradationTests(unittest.TestCase):
 
         result = _tool_get_name_table(runner, {})
 
-        self.assertEqual(list(result.keys()), ["source_file", "names"])
+        self.assertNotIn("use_gpt_dict_in_name", result)
+        self.assertEqual(result["total"], len(runner.names))
+        self.assertEqual(result["names"], runner.names)
 
     def test_empty_name_table_skips_the_config_lookup_entirely(self):
         runner = _NameRunner(names=[], config=_config(True))

@@ -438,6 +438,10 @@
       "action": "搜索原文",
       "running": "搜索原文"
     },
+    "search_output_files": {
+      "action": "搜索输出",
+      "running": "搜索输出"
+    },
     "patch_transl_cache": {
       "action": "修改译文",
       "running": "修改译文"

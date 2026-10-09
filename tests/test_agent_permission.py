@@ -708,7 +708,7 @@ class PermissionPreviewTests(unittest.TestCase):
 
     def test_dict_preview_diffs_lines_and_matches_the_real_run(self) -> None:
         before = ["旧词\told", "重复\tdup"]
-        args = {"file_key": "pre.json", "action": "append", "content": "重复\tdup\n新词\tnew"}
+        args = {"file_key": "pre.json", "action": "patch", "content": "重复\tdup\n新词\tnew"}
         contents = {"pre.json": {"lines": before}}
 
         preview = rt._preview_tool_changes(_PreviewRunner(dict_contents=contents), "save_dict", args)
@@ -716,7 +716,7 @@ class PermissionPreviewTests(unittest.TestCase):
 
         self.assertEqual([r["op"] for r in preview["line_diff"]["rows"]], ["add"])
         self.assertEqual(preview["line_diff"], real["line_diff"])
-        # 已存在的 key 不重复追加（append 的合并规则与真执行同一份）
+        # 已存在的 key 不重复追加（patch 的合并规则与真执行同一份）
         self.assertIn("新词\tnew", preview["line_diff"]["rows"][0]["line"])
 
     def test_dict_preview_absent_when_content_is_unchanged(self) -> None:
@@ -768,7 +768,7 @@ class PermissionPreviewTests(unittest.TestCase):
     def test_name_table_preview_lists_removed_names_with_their_old_dst(self) -> None:
         old = [{"src_name": "A", "dst_name": "甲", "count": 1}]
 
-        preview = rt._preview_tool_changes(_PreviewRunner(names=old), "save_name_table", {"names": []})
+        preview = rt._preview_tool_changes(_PreviewRunner(names=old), "save_name_table", {"mode": "overwrite", "names": []})
 
         self.assertEqual(
             [(c["path"], c["kind"], c["before"], c["after"]) for c in preview["changes"]],

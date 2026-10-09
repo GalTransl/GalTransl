@@ -47,10 +47,11 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "list_input_files",
-            "description": "列出待翻译的输入文件（原文）与每个文件解析出的条数，供估工作量与挑选代表性文件（不必再逐个 read_input_file 数句子）。条数是原文解析出的条数（文本插件如「跳过无日文句」还没跑，可能偏大）；**只用于估工作量，不代表进度**（不管这个文件有没有缓存）——进度看 get_project_overview 的 files_translated/files_total。文件很多时默认只返回 100 个（order=even：**均匀采样**，含首尾、等距摊满整个清单，不是前 100 个；sentences_total 仍是整份清单的合计），要缩小范围用 grep（文件名子串），换挑选方式用 order。返回 Markdown 表格 + 文字说明（格式见系统提示）。",
+            "description": "递归列出待翻译的输入文件（原文，相对路径）与每个文件解析出的条数，供估工作量与挑选代表性文件（不必再逐个 read_input_file 数句子）。条数是原文解析出的条数（文本插件如「跳过无日文句」还没跑，可能偏大）；**只用于估工作量，不代表进度**（不管这个文件有没有缓存）——进度看 get_project_overview 的 files_translated/files_total。文件很多时默认只返回 100 个（order=even：**均匀采样**，含首尾、等距摊满整个清单，不是前 100 个；sentences_total 仍是整份清单的合计），要缩小范围用 grep（文件名子串），换挑选方式用 order；完整遍历用 order=name + limit/offset，has_more 时用 next_offset 续页。返回 Markdown 表格 + 文字说明（格式见系统提示）。",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "offset": {"type": "integer", "minimum": 0, "description": "默认 0。name/size_desc/size_asc 可稳定翻页，续读用 next_offset；even/random 为采样，完整遍历请改用 name。"},
                     "grep": {"type": "string", "description": "可选。按文件名过滤（子串、大小写不敏感），如 \"sc_2\"、\"pr00\"。"},
                     "limit": {"type": "integer", "description": "可选。最多返回多少个文件（默认 100，上限 500）；超出时按 order 挑选。"},
                     "order": {
@@ -67,11 +68,13 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_input_file",
-            "description": "读取待翻译原文内容（文件插件解析后的条目：说话人+原文）。index 统一从 1 开始；留空 index 返回前 30 条；指定 index 支持区间，如 \"1-100\"。试译前用它了解原文文风、角色、专有名词。返回 Markdown 表格 + 文字说明（格式见系统提示）。",
+            "description": "读取待翻译原文内容（文件插件解析后的条目：说话人+原文）。index 统一从 1 开始；留空 index 默认返回前 30 条；指定区间也分页，单次最多 200 条，has_more 时用 next_offset 继续；指定 index 支持区间，如 \"1-100\"。试译前用它了解原文文风、角色、专有名词。返回 Markdown 表格 + 文字说明（格式见系统提示）。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "filename": {"type": "string", "description": "输入文件名，来自 list_input_files。"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 200, "description": "本页最多多少条命中：未指定 index 默认 30，指定 index 默认 200；最大 200。"},
+                    "offset": {"type": "integer", "minimum": 0, "description": "跳过多少条匹配条目；保持 index 不变，续读使用 next_offset。"},
+                    "filename": {"type": "string", "description": "输入文件相对路径，来自 list_input_files，支持 chapter/a.json 等子目录。"},
                     "index": {
                         "type": "string",
                     "description": "可选。要读取的条目 index（从 1 开始），支持逗号和区间，如 \"1-100\"。留空返回前 30 条。",
@@ -96,6 +99,39 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     "context": {
                         "type": "integer",
                         "description": "可选，0-20（默认 0）。每条命中再带上文（见 only_preceding），用于判断语意与称呼用法。带上下文时整页最多 200 行，命中上限按行数换算、会明显收紧（如 context=3 → 最多 28 条命中），命中很多时可配合 limit/offset 翻页或 filename 缩小范围。上下文行的 index 带 *（如 12*），那不是命中行。",
+                    },
+                    "only_preceding": {
+                        "type": "boolean",
+                        "description": "可选，默认 true：带 context 时只返回上文（判断这句为什么这么翻通常看上文就够，还省 token）；要前后两边都给传 false。",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "可选。本页最多返回几条命中，默认 100，最大 200（带 context 时还会按行数预算再收紧，整页最多 200 行）。total 始终是全部命中数。",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "可选。分页偏移：跳过前 N 条命中（默认 0，前后文行不算数）。name/reverse 配合 has_more 翻页，even/random 的用法见 order。",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_output_files",
+            "description": "在 gt_output 的实际交付物中搜索正文或说话人（field=all/dst/name），核查译后字典替换的误杀或残留；普通文本子串，不区分大小写。直接用文件插件读取输出，文件解析失败会列出。filename 留空搜索全部输出（含子目录），指定时使用实际输出相对路径；返回 filename+index 可交给 read_output 精读，index 是输出位置，不可直接用来修改缓存。context 默认只加上文，only_preceding=false 加前后文，上下文 index 带 *。整页最多 200 行；total 为总命中数，returned 为本页命中数；order=name/reverse 时用 offset += returned 翻页，even/random 从全部命中采样。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "order": _SEARCH_ORDER_PROPERTY,
+                    "field": {"type": "string", "enum": ["all", "dst", "name"]},
+                    "filename": {"type": "string", "description": "可选。只在这个输出文件里搜（相对 gt_output 的实际路径，如 chapter/a.json）。留空搜全部输出文件。"},
+                    "context": {
+                        "type": "integer",
+                        "description": "可选，0-20（默认 0）。每条命中再带上文（见 only_preceding），用于判断语意与称呼用法。带上下文时整页最多 200 行，命中上限按行数换算、会明显收紧（如 context=3 → 最多 50 条命中），命中很多时可配合 limit/offset 翻页或 filename 缩小范围。上下文行的 index 带 *（如 12*），那不是命中行。",
                     },
                     "only_preceding": {
                         "type": "boolean",
@@ -193,10 +229,15 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_dict",
-            "description": "读取某个项目字典文件的完整内容，file_key 来自 list_dict_files 表格的 file_key 列。返回 Markdown：文件与行数说明 + 原文代码块，Tab、空行和注释原样保留。",
+            "description": "分页读取或检索项目字典，file_key 来自 list_dict_files。query 对整行做不区分大小写的普通文本子串检索，覆盖原文、译名与备注。先过滤再按 offset/limit 分页，默认返回 100 行、最多 500 行。返回总行数、匹配数、本页原文件行号（从 1 开始）、下一页 offset 和原文代码块，Tab、空行和注释原样保留；只返回当前页，不要把它当成整份字典 overwrite。",
             "parameters": {
                 "type": "object",
-                "properties": {"file_key": {"type": "string", "description": "字典文件 key，形如 (project_dir)项目GPT字典.txt"}},
+                "properties": {
+                    "file_key": {"type": "string", "description": "字典文件 key，形如 (project_dir)项目GPT字典.txt"},
+                    "query": {"type": "string", "description": "可选。普通文本子串，不区分大小写、不支持正则；省略或空串表示全部行。"},
+                    "offset": {"type": "integer", "minimum": 0, "default": 0, "description": "跳过多少条匹配行（从 0 开始，默认 0）；续读用返回的 next_offset。"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100, "description": "本次最多返回多少行，默认 100，最大 500。"},
+                },
                 "required": ["file_key"],
             },
         },
@@ -205,7 +246,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "save_dict",
-            "description": "写入/维护某个项目字典文件。file_key 必须来自 list_dict_files；content 为 tab 分隔文本（格式：日文<Tab>中文[<Tab>解释]）。action 决定操作：overwrite（默认，整文件覆盖）、replace（按 key 替换已有词条，未匹配的 key 不新增）、append（追加到末尾，重复 key 跳过）、delete（按 key 删除词条）。补充新词条优先用 append，避免重发整份字典；delete 的 content 可整行粘贴，也可只写 key。新建字典文件也用它：带上 category（pre=译前 / gpt=GPT / post=译后），file_key 写新文件名（如 项目GPT字典2.txt），文件不存在时会先新建并登记到对应的字典清单再写入（新建时 action 用 overwrite 或 append；content 可为空，只建空文件）。",
+            "description": "写入/维护某个项目字典文件。file_key 必须来自 list_dict_files；content 为 tab 分隔文本（格式：日文<Tab>中文[<Tab>解释]）。action 决定操作：overwrite（显式整文件覆盖）、patch（默认，按 key 更新已有词条的译名与备注，不存在则追加到末尾）、delete（按 key 删除词条）。新增或修正词条用 patch，只发要改的行，避免重发整份字典；同批重复 key 以最后一行为准。GPT 字典兼容 src->dst#note；译前/译后条件词条按类型、条件、查找词匹配，场景词条按场景和查找词匹配；删除这些规则时传完整行或完整匹配键。delete 的 content 可整行粘贴，也可只写 key。新建字典文件也用它：带上 category（pre=译前 / gpt=GPT / post=译后），file_key 写新文件名（如 项目GPT字典2.txt），文件不存在时会先新建并登记到对应的字典清单再写入（新建时 action 用 overwrite 或 patch；content 可为空，只建空文件）。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -218,8 +259,9 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     },
                     "action": {
                         "type": "string",
-                        "enum": ["overwrite", "replace", "append", "delete"],
-                        "description": "overwrite=全量覆盖（默认）；replace=按 key 部分替换已有词条；append=追加到末尾（重复 key 跳过）；delete=按 key 删除词条。",
+                        "enum": ["overwrite", "patch", "delete"],
+                        "default": "patch",
+                        "description": "overwrite=显式全量覆盖；patch（默认）=按 key 更新译名与备注，不存在则末尾追加；delete=按 key 删除词条。",
                     },
                     "reason": _REASON_PROPERTY,
                 },
@@ -231,22 +273,28 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_name_table",
-            "description": "读取 name替换表（人名表），返回 src_name/dst_name/count 列表。为空说明尚未生成。配置 dictionary.useGPTDictInName 开着时（默认开），译名为空而 GPT 字典已收录的行会按字典译名补上（带 dst_name_source=gpt_dict），并额外返回 still_empty 清单——**还缺哪些名字看 still_empty**。",
-            "parameters": {"type": "object", "properties": {}, "required": []},
+            "description": "分页读取 name替换表（人名表），默认 100 条、最大 500 条；query 搜索原文或译名，only_missing=true 只看仍缺译名的条目，返回 src_name/dst_name/count 列表。total=0 表示全表为空；当前页为空也可能是没有匹配或 offset 已越过末页。配置 dictionary.useGPTDictInName 开着时（默认开），译名为空而 GPT 字典已收录的行会按字典译名补上（带 dst_name_source=gpt_dict），先补齐生效译名再过滤和分页；total 为全表条数，matched 为匹配条数，missing_total 为全表缺译名数，has_more 时用 next_offset 续页；still_empty 只列当前页的缺译名条目——**还缺哪些名字看 still_empty**。",
+            "parameters": {"type": "object", "properties": {
+                "query": {"type": "string", "description": "原名或译名的普通文本子串，不区分大小写；省略表示全部。"},
+                "only_missing": {"type": "boolean", "default": False, "description": "只返回仍缺译名的条目，已生效的 GPT 字典译名不算缺漏。"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100},
+                "offset": {"type": "integer", "minimum": 0, "default": 0}
+            }, "required": []},
         },
     },
     {
         "type": "function",
         "function": {
             "name": "save_name_table",
-            "description": "保存人名表（写入 name替换表.csv）。局部补译或修改优先用 mode=patch，只传要改的条目：按 src_name 更新或新增，未传入的条目保留，省略的 dst_name/count 保留旧值，显式传 dst_name=空串可清空译名。mode=overwrite（默认）整表覆盖，未传入的条目会被删除。",
+            "description": "保存人名表（写入 name替换表.csv）。默认 mode=patch，只传要改的条目：按 src_name 更新或新增，未传入的条目保留，省略的 dst_name/count 保留旧值，显式传 dst_name=空串可清空译名。显式 mode=overwrite整表覆盖，未传入的条目会被删除。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "mode": {
                         "type": "string",
                         "enum": ["overwrite", "patch"],
-                        "description": "overwrite=全量覆盖（默认）；patch=按 src_name 更新或新增，保留未传入的条目。局部修改使用 patch。",
+                        "default": "patch",
+                        "description": "overwrite=显式全量覆盖；patch（默认）=按 src_name 更新或新增，保留未传入的条目。",
                     },
                     "names": {
                         "type": "array",
@@ -526,11 +574,11 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "可选。list：最多返回多少个文件（默认 100，上限 500）；search：本页最多几条命中（默认 100，最大 200，带 context 时还会按行数收紧）；read 未指定 index：过滤后最多返回几条（默认 30，最大 200）。",
+                        "description": "可选。list：最多返回多少个文件（默认 100，上限 500）；search：本页最多几条命中（默认 100，最大 200，带 context 时还会按行数收紧）；read：未指定 index 默认 30 条，指定 index 默认 200 条；最大 200，带 context 时整页仍最多 200 行。",
                     },
                     "offset": {
                         "type": "integer",
-                        "description": "search/read 未指定 index 用，可选。分页偏移：跳过前 N 条命中（默认 0，前后文行不算数）。name/reverse 配合 has_more 翻页；采样模式见 order。",
+                        "description": "list/search/read 都可用，包括指定 index 的 read。分页偏移：跳过前 N 条命中（默认 0，前后文行不算数）。name/reverse（list 也支持 size 排序）配合 has_more 翻页；指定 index 时保持区间不变并使用 next_offset；采样模式见 order。",
                     },
                     "order": {
                         "type": "string",
@@ -546,14 +594,16 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_output",
-            "description": "读取最终输出文件（gt_output，交付物）。输出是缓存经译后字典替换、控制符处理后的最终形态，与缓存可能不完全一致——验收交付物、确认 postDict 替换效果用这个，而不是 read_transl_cache。文件名通常与输入文件同名，也可传缓存文件名自动定位输出；实际输出文件名优先，多个候选时会提示选择。留空 index 返回前 30 条。返回实际输出文件名及 index / name / message 的 Markdown 表格，并说明总条数、返回条数和缺失的 index。",
+            "description": "读取最终输出文件（gt_output，交付物）。输出是缓存经译后字典替换、控制符处理后的最终形态，与缓存可能不完全一致——验收交付物、确认 postDict 替换效果用这个，而不是 read_transl_cache。文件名通常与输入文件同名，也可传缓存文件名自动定位输出；实际输出文件名优先，多个候选时会提示选择。留空 index 默认返回前 30 条；指定区间也分页，单次最多 200 条，has_more 时用 next_offset 继续。返回实际输出文件名及 index / name / message 的 Markdown 表格，并说明总条数、返回条数和缺失的 index。",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 200, "description": "本页最多多少条命中：未指定 index 默认 30，指定 index 默认 200；最大 200。"},
+                    "offset": {"type": "integer", "minimum": 0, "description": "跳过多少条匹配条目；保持 index 不变，续读使用 next_offset。"},
                     "filename": {"type": "string", "description": "实际输出文件名或缓存文件名，例如 quest_flags.ks.json 会自动定位 quest_flags.ks；也支持分块缓存名和子目录的 -} 编码。"},
                     "index": {
                         "type": "string",
-                    "description": "可选。要读取的条目 index（从 1 开始），支持逗号和区间（如 \"1-100\"）。留空返回前 30 条。",
+                        "description": "可选。要读取的条目 index（从 1 开始），支持逗号和区间（如 \"1-100\"）。留空默认返回前 30 条。",
                     },
                 },
                 "required": ["filename"],
@@ -586,7 +636,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "patch_transl_cache",
-            "description": "批量修改缓存译文。action=patch（默认）：patches 按 index 提交完整新译文，跨文件时每条带 file，单文件可用顶层 filename。action=replace：传 files（缓存文件名数组，单文件也可用 filename）、query、replacement，在指定文件的译文中批量查找替换，不必逐条提交新译文；普通文本、区分大小写、替换所有出现位置，不支持正则。fields 默认 [pre_dst, proofread_dst]，可只选其中一列；replacement 为空串表示删除匹配文本，未命中或无实际变化的文件不保存。两种 action 不能混用。clear_comment=true 可清空本次实际修改条目的校对批注。其它条目原样保留。返回按文件分组的 Markdown，列出 before→after、未落地原因和修改后仍存在的问题；trans_by 自动标成本会话模型名，保存时重新检查问题。",
+            "description": "批量修改缓存译文。action=patch（默认）：patches 按 index 提交完整新译文，跨文件时每条带 file，单文件可用顶层 filename。action=replace：传 files（文件名/glob 字符串或数组，\"*\" 表示全部缓存；单文件也可用 filename）、query、replacement，在指定文件的译文中批量查找替换，不必逐条提交新译文；普通文本、区分大小写、替换所有出现位置，不支持正则。fields 默认 [pre_dst, proofread_dst]，可只选其中一列；replacement 为空串表示删除匹配文本，未命中或无实际变化的文件不保存。两种 action 不能混用。clear_comment=true 可一并清空校对批注（patch 按点名条目，replace 按实际替换条目）。其它条目原样保留。返回按文件分组的 Markdown，列出 before→after、未落地原因和修改后仍存在的问题；仅实际修改译文时将 trans_by 标成本会话模型名，重复提交相同内容不保存，也不更改来源；保存时重新检查问题。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -596,10 +646,11 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                         "description": "patch=按 index 修改（默认，需要 patches）；replace=指定文件内查找替换（需要 files 或 filename、query、replacement）。",
                     },
                     "files": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "minItems": 1,
-                        "description": "action=replace 用：要查找替换的缓存文件名数组，来自 read_transl_cache(action=list)。只扫描这些文件，不支持通配符；重复文件只处理一次。与 filename 二选一。",
+                        "anyOf": [
+                            {"type": "string", "minLength": 1},
+                            {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},
+                        ],
+                        "description": "action=replace 用：缓存文件名或 glob，也可传数组混用。\"*\" 匹配全部 .json 缓存（不含增量日志），如 \"chapter*.json\" 或 [\"a.json\", \"chapter?.json\"]；glob 区分大小写，支持 *、?、[abc]，无匹配时报错。按选择器顺序展开，每个 glob 按文件名排序；重叠文件只处理一次。与 filename 二选一。",
                     },
                     "query": {"type": "string", "description": "action=replace 用：要查找的非空普通文本，区分大小写，空白字符原样匹配。"},
                     "replacement": {"type": "string", "description": "action=replace 用：替换文本，可为空串（删除匹配文本）。"},

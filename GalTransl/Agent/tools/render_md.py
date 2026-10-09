@@ -72,7 +72,15 @@ def _md_render_read_dict(result: dict[str, Any]) -> str | None:
     if not isinstance(lines, list):
         return None
     head = f"字典 {_md_cell(result.get('file_key'))}：共 {result.get('count', len(lines))} 行"
-    return _md_doc(head, _md_code_block("\n".join(lines)) if lines else "字典为空。")
+    if "matched" in result:
+        head += f"；匹配 {result['matched']} 行，本页 {len(lines)} 行（offset={result.get('offset', 0)}）"
+    if result.get("query"):
+        head += f"；query={_tool_result_json(result['query'])}"
+    numbers = result.get("line_numbers", [])
+    positions = "原文件行号（从 1 开始，与下方各行依次对应）：" + ", ".join(map(str, numbers)) if numbers else ""
+    more = f"还有更多；保持 query 不变，传 offset={result['next_offset']} 继续读取。" if result.get("has_more") else ""
+    empty = "本页没有匹配行。" if result.get("count", 0) else "字典为空。"
+    return _md_doc(head, positions, _md_code_block("\n".join(lines)) if lines else empty, more)
 
 
 def _md_render_list_dict_files(result: dict[str, Any]) -> str | None:
@@ -268,12 +276,24 @@ def _md_render_manage_problem_white_list(result: dict[str, Any]) -> str:
     return _md_doc(f"共 {result.get('count', len(entries))} 条白名单", _md_table(["entry"], [{"entry": entry} for entry in entries]))
 
 
+def _list_selection_note(result: dict[str, Any]) -> str:
+    if not result.get("sampled"):
+        return ""
+    returned = result.get("returned", 0)
+    order = result.get("order", "even")
+    if order == "even":
+        return f"下面均匀采样 {returned} 个，不是前 {returned} 个；完整遍历用 order=name + limit/offset"
+    if order == "random":
+        return f"下面随机采样 {returned} 个；完整遍历用 order=name + limit/offset"
+    return f"本页 {returned} 个（offset={result.get('offset', 0)}）"
+
+
 def _md_render_list_transl_cache(result: dict[str, Any]) -> str:
     head_parts: list[str] = []
     if result.get("count") is not None:
         head_parts.append(f"共 {result['count']} 个缓存文件")
     if result.get("sampled"):
-        head_parts.append(f"下面只列其中 {result.get('returned')} 个（均匀采样，不是前几名）")
+        head_parts.append(_list_selection_note(result))
     table = _md_table(["name", "size", "entries"], result.get("cache_files"))
     note = result.get("note")
     return _md_doc("，".join(head_parts), table, f"备注：{note}" if note else "")
@@ -284,7 +304,7 @@ def _md_render_list_input_files(result: dict[str, Any]) -> str:
     if result.get("count") is not None:
         head_parts.append(f"共 {result['count']} 个输入文件")
     if result.get("sampled"):
-        head_parts.append(f"下面只列其中 {result.get('returned')} 个（均匀采样，不是前几名）")
+        head_parts.append(_list_selection_note(result))
     if result.get("sentences_total") is not None:
         head_parts.append(f"句数合计 {result['sentences_total']}（含没列出来的文件）")
     table = _md_table(["name", "size", "sentences"], result.get("input_files"))
@@ -326,6 +346,21 @@ def _md_render_list_problems(result: dict[str, Any]) -> str:
     return _md_doc("；".join(head_parts), table, note_line)
 
 
+def _read_page_note(result: dict[str, Any]) -> str:
+    parts = []
+    if "matched" in result:
+        parts.append(f"筛选后共 {result['matched']} 条，本页 offset={result.get('offset', 0)}")
+    if result.get("has_more"):
+        if result.get("order") in ("even", "random"):
+            parts.append("当前为采样；完整遍历请用 order=name 配合 offset 翻页")
+        else:
+            next_offset = result.get("next_offset", result.get("offset", 0) + result.get("returned", 0))
+            parts.append(f"还有更多；保持筛选条件不变，用 offset={next_offset} 继续")
+    if result.get("missing_truncated"):
+        parts.append(f"缺失 index 共 {result['missing_count']} 个，只列前 {len(result.get('missing_indexes', []))} 个")
+    return "；".join(parts)
+
+
 def _md_render_entries(result: dict[str, Any], columns: list[str]) -> str:
     head_parts: list[str] = []
     if result.get("filename") is not None:
@@ -337,7 +372,7 @@ def _md_render_entries(result: dict[str, Any], columns: list[str]) -> str:
         "缺失 index：" + ",".join(str(i) for i in missing) if isinstance(missing, list) and missing else ""
     )
     table = _md_table(columns, result.get("entries"))
-    return _md_doc("，".join(head_parts), missing_text, table)
+    return _md_doc("，".join(head_parts), _read_page_note(result), missing_text, table)
 
 
 def _md_render_read_input_file(result: dict[str, Any]) -> str:
@@ -381,7 +416,7 @@ def _md_render_read_transl_cache(result: dict[str, Any]) -> str:
         head_parts.append(f"排序：{SEARCH_ORDER_LABELS.get(result['order'], result['order'])}")
     if result.get("note"):
         notes.append(f"备注：{result['note']}")
-    return _md_doc("，".join(head_parts), missing_text, *notes, table)
+    return _md_doc("，".join(head_parts), _read_page_note(result), missing_text, *notes, table)
 
 
 # 搜索类工具（/cache/search 与 /input/search）的返回结构是同一套：results + total，
@@ -389,6 +424,7 @@ def _md_render_read_transl_cache(result: dict[str, Any]) -> str:
 # 解析失败的文件）只有一处口径；行本身各出各的表——两侧的列不一样。
 _SEARCH_CACHE_COLUMNS = ["filename", "index", "speaker", "post_src", "pre_dst", "problem", "trans_by"]
 _SEARCH_INPUT_COLUMNS = ["filename", "index", "speaker", "src"]
+_SEARCH_OUTPUT_COLUMNS = ["filename", "index", "speaker", "dst"]
 
 
 def _md_search_head(result: dict[str, Any]) -> str:
@@ -420,7 +456,8 @@ def _md_search_head(result: dict[str, Any]) -> str:
         parts.append(f"多数派模型 {result['majority_trans_by']}（表里已省略，只留少数派/改过的来源）")
     failed = result.get("files_failed")
     if isinstance(failed, list) and failed:
-        parts.append("这些输入文件解析失败、没参与搜索：" + "、".join(str(name) for name in failed))
+        label = "输出" if result.get("source") == "output" else "输入"
+        parts.append(f"这些{label}文件解析失败、没参与搜索：" + "、".join(str(name) for name in failed))
     return "；".join(parts)
 
 
@@ -445,6 +482,10 @@ def _md_render_search_transl_cache(result: dict[str, Any]) -> str | None:
 def _md_render_search_input(result: dict[str, Any]) -> str | None:
     """在待翻译原文里搜：原文侧只有正文与说话人，另加定位用的 filename / index。"""
     return _md_render_search(result, _SEARCH_INPUT_COLUMNS)
+
+
+def _md_render_search_output_files(result: dict[str, Any]) -> str | None:
+    return _md_render_search({**result, "source": "output"}, _SEARCH_OUTPUT_COLUMNS)
 
 
 def _md_render_manage_problem_filter(result: dict[str, Any]) -> str | None:
@@ -624,15 +665,17 @@ def _md_render_get_name_table(result: dict[str, Any]) -> str | None:
     能看出"表是空的、该去 dump-name"。
     """
     names = result.get("names")
-    if not isinstance(names, list) or not names:
+    if not isinstance(names, list) or (not names and "matched" not in result):
         return None
-    head = f"共 {len(names)} 条人名"
+    head = f"共 {result.get('total', len(names))} 条人名"
+    if "missing_total" in result:
+        head += f"，其中缺译名 {result['missing_total']} 条"
     if result.get("source_file"):
         head = f"{result['source_file']}：{head}"
     columns = ["src_name", "dst_name", "count"]
     if any(isinstance(row, dict) and row.get("dst_name_source") for row in names):
         columns.append("dst_name_source")
-    parts = [head, _md_table(columns, names)]
+    parts = [head, _read_page_note(result), _md_table(columns, names) if names else "本页没有人名条目。"]
     still_empty = result.get("still_empty")
     if isinstance(still_empty, list) and still_empty:
         parts.append(
@@ -656,6 +699,7 @@ _MD_RENDERERS: dict[str, Any] = {
     "read_input_file": _md_render_read_input_file,
     "read_transl_cache": _md_render_transl_cache,
     "search_input": _md_render_search_input,
+    "search_output_files": _md_render_search_output_files,
     "manage_problem_filter": _md_render_manage_problem_filter,
     "run_subagents": _md_render_run_subagents,
     "patch_transl_cache": _md_render_patch_transl_cache,

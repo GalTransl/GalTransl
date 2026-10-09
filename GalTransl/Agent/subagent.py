@@ -62,7 +62,7 @@ from GalTransl.Agent.tools.cache import (
 )
 from GalTransl.Agent.tools.common import _split_problem_types
 from GalTransl.Agent.tools.input import _list_input_payload
-from GalTransl.Agent.tools.listing import _list_grep, _list_limit, _list_order
+from GalTransl.Agent.tools.listing import _list_grep, _list_limit, _list_order, _list_offset
 from GalTransl.Agent.tools.problems import _tool_list_problems
 from GalTransl.Agent.tools.proofread import ProofreadFixer
 from GalTransl.Agent.tools.render_md import _render_tool_result_table, _tool_result_json
@@ -708,9 +708,10 @@ def _lock_input_listing(
             grep=_list_grep(args),
             limit=_list_limit(args),
             order=_list_order(args),
+            offset=_list_offset(args),
             names=allowed,
         )
-        if not out.get("input_files"):
+        if not out.get("count"):
             # 锁定的名字一个都不在原文清单里（多半是文件名写错了）：照旧全列，但把话说清楚，
             # 免得它对着空清单发懵
             full = _list_input_payload(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import re
 import threading
@@ -22,6 +23,7 @@ from GalTransl.Agent.tools.common import (
     _change,
     _dominant_trans_by,
     _entry_index,
+    _read_entries_page,
     _mark_context_row,
     _only_preceding_arg,
     _parse_index_spec,
@@ -33,6 +35,8 @@ from GalTransl.Agent.tools.listing import (
     _list_limit,
     _list_notes,
     _list_order,
+    _list_offset,
+    _list_paging,
     _select_list_items,
 )
 from GalTransl.Agent.tools.project import _APPEND_CACHE_SUFFIX, _backend_summary
@@ -61,6 +65,7 @@ def _tool_list_transl_cache(
     limit = _list_limit(args)
     grep = _list_grep(args)
     order = _list_order(args)
+    offset = _list_offset(args)
     pid = runner._project_id()
     data = runner._http_get(f"/api/projects/{pid}/cache")
     files = []
@@ -80,15 +85,16 @@ def _tool_list_transl_cache(
         files = [f for f in files if f["name"] in wanted]
 
     matched = _grep_items(files, grep)
-    shown = _select_list_items(matched, limit, order)
+    shown = _select_list_items(matched, limit, order, offset)
     result: dict[str, Any] = {
         "cache_files": shown,
         "count": len(matched),
         "returned": len(shown),
+        **_list_paging(len(matched), len(shown), offset, order),
         "sampled": len(shown) < len(matched),
     }
     notes = _list_notes(
-        matched=len(matched), grep=grep, returned=len(shown), limit=limit, order=order, unit="缓存文件"
+        matched=len(matched), grep=grep, returned=len(shown), limit=limit, order=order, unit="缓存文件", offset=offset
     )
     if notes:
         result["note"] = "；".join(notes)
@@ -278,65 +284,27 @@ def _read_transl_cache_entries(runner: AgentRunner, args: dict[str, Any]) -> Any
         order = _search_order(args)
         limit, offset = _search_paging_args({"limit": 30, **args})
         picked = select_search_hits(entries, limit, offset, order)
-        result = {"filename": filename, "count": len(entries), "offset": offset, "returned": len(picked), "has_more": offset + len(picked) < len(entries), "entries": picked, **result_extra}
+        more = offset + len(picked) < len(entries)
+        result = {
+            "filename": filename, "count": len(entries), "offset": offset,
+            "returned": len(picked), "has_more": more, "entries": picked, **result_extra,
+        }
+        if more and order in ("name", "reverse"):
+            result["next_offset"] = offset + len(picked)
         _apply_search_order(result, order)
         return result
 
-    wanted = _parse_index_spec(index_spec)
-    if not wanted:
-        raise AgentToolError(f"无法解析 index 列表：{index_spec!r}（示例：33-40,50-60）")
-    by_index = {int(e.get("index", -1)): e for e in entries if e.get("index") is not None}
-
-    # context=N：目标条目向上（默认）或上下各多带 N 句（修问题/润色要知道上文才敢动）。
-    # 按文件顺序连续取，扩展出来的行 index 带 *（见 _mark_context_row）。
     raw_context = args.get("context", 0)
     try:
         context = max(0, min(int(raw_context), 20))
     except (TypeError, ValueError):
         raise AgentToolError(f"context 必须是 0-20 的整数（收到 {raw_context!r}）")
     only_preceding = _only_preceding_arg(args)
-
-    result: dict[str, Any] = {
-        "filename": filename,
-        "count": len(entries),
-        "context": context,
-        **result_extra,
+    return {
+        "filename": filename, "count": len(entries), "context": context,
+        **({"only_preceding": only_preceding} if context else {}), **result_extra,
+        **_read_entries_page(entries, args, context=context, only_preceding=only_preceding),
     }
-    if context > 0:
-        result["only_preceding"] = only_preceding
-
-    if context > 0 and by_index:
-        # 以命中 index 的闭包向外扩 N 句：例如 index="205-206", context=3
-        # -> 只给上文返回 202~206，两边都给返回 202~209。多个命中段各自扩展后合并。
-        after = 0 if only_preceding else context
-        reach = after + context  # 两段窗口相接/重叠就并成一段（只给上文时窄一半）
-        spans: list[tuple[int, int]] = []
-        for i in sorted(wanted):
-            if spans and i <= spans[-1][1] + reach + 1:
-                spans[-1] = (spans[-1][0], i)
-            else:
-                spans.append((i, i))
-        wanted_ctx: set[int] = set(wanted)
-        for a, b in spans:
-            for j in range(max(0, a - context), b + after + 1):
-                wanted_ctx.add(j)
-        picked_ctx = [
-            by_index[i] if i in wanted else _mark_context_row(by_index[i])
-            for i in sorted(wanted_ctx)
-            if i in by_index
-        ]
-        result["returned"] = len(picked_ctx)
-        result["entries"] = picked_ctx
-        missing = sorted(i for i in wanted if i not in by_index)
-    else:
-        picked = [by_index[i] for i in sorted(wanted) if i in by_index]
-        missing = sorted(i for i in wanted if i not in by_index)
-        result["returned"] = len(picked)
-        result["entries"] = picked
-
-    if missing:
-        result["missing_indexes"] = missing
-    return result
 
 
 def _tool_read_output(runner: AgentRunner, args: dict[str, Any]) -> Any:
@@ -363,24 +331,7 @@ def _tool_read_output(runner: AgentRunner, args: dict[str, Any]) -> Any:
         for e in data.get("entries", [])
         if isinstance(e, dict)
     ]
-    index_spec = str(args.get("index", "") or "").strip()
-    if not index_spec:
-        return {"filename": filename, "count": len(entries), "returned": len(entries[:30]), "entries": entries[:30]}
-    wanted = _parse_index_spec(index_spec)
-    if not wanted:
-        raise AgentToolError(f"无法解析 index 列表：{index_spec!r}（示例：1-100）")
-    picked = [e for e in entries if _entry_index(e) in wanted]
-    available = {_entry_index(e) for e in entries}
-    missing = sorted(i for i in wanted if i not in available)
-    result: dict[str, Any] = {
-        "filename": filename,
-        "count": len(entries),
-        "returned": len(picked),
-        "entries": picked,
-    }
-    if missing:
-        result["missing_indexes"] = missing
-    return result
+    return {"filename": filename, "count": len(entries), **_read_entries_page(entries, args)}
 
 
 def _agent_model_name(runner: AgentRunner) -> str:
@@ -535,8 +486,10 @@ def _cache_replace_request(args: dict[str, Any], allowed: frozenset[str]) -> dic
         filenames = [args.get("filename")]
     elif args.get("filename"):
         raise AgentToolError("action=replace requires either files or filename, not both")
+    if isinstance(filenames, str):
+        filenames = [filenames]
     if not isinstance(filenames, list) or not filenames:
-        raise AgentToolError("files must be a non-empty array of cache filenames")
+        raise AgentToolError("files must be a cache filename/glob or a non-empty array of them")
     if any(not isinstance(name, str) or not name.strip() for name in filenames):
         raise AgentToolError("each file must be a non-empty cache filename")
     fields = args.get("fields", ["pre_dst", "proofread_dst"])
@@ -550,6 +503,30 @@ def _cache_replace_request(args: dict[str, Any], allowed: frozenset[str]) -> dic
         "query": query,
         "replacement": replacement,
     }
+
+
+def _resolve_cache_replace_files(runner: AgentRunner, selectors: list[str]) -> list[str]:
+    """展开缓存文件选择器；预览与执行共用，重叠选择器只处理一次。"""
+    if not any(any(char in name for char in "*?[") for name in selectors):
+        return selectors
+    pid = runner._project_id()
+    listing = runner._http_get(f"/api/projects/{pid}/cache")
+    available = sorted({
+        item["name"] for item in listing.get("files", [])
+        if isinstance(item, dict) and isinstance(item.get("name"), str)
+        and item.get("is_file", True) and item["name"].endswith(".json")
+    })
+    selected: dict[str, None] = {}
+    for selector in selectors:
+        # 字面文件名优先，兼容名字本身带方括号的缓存。
+        if selector in available or not any(char in selector for char in "*?["):
+            selected[selector] = None
+            continue
+        matches = [name for name in available if fnmatch.fnmatchcase(name, selector)]
+        if not matches:
+            raise AgentToolError(f"缓存文件通配符未匹配任何文件：{selector}")
+        selected.update(dict.fromkeys(matches))
+    return list(selected)
 
 
 def _plan_cache_replacements(
@@ -656,8 +633,13 @@ def _plan_cache_patches(
                     v, str(now.get(f) or ""), str(entry.get("post_src") or "")
                 )
                 updates[f] = v
+            if _cache_field_value(now, f) == v:
+                updates.pop(f)
+                continue
             changes.append(_change(f"#{idx_i}.{f}", _cache_field_value(now, f), v, "replace"))
             now[f] = v
+        if not updates:
+            continue
         plan.append({"entry": entry, "index": idx_i, "updates": updates})
     return {
         "by_index": by_index,
@@ -757,8 +739,8 @@ def _patch_one_cache_file_locked(
         "updated": len(applied_indexes),
         "changes": changes,
     }
-    if not applied_indexes and replace_request is not None and not skipped:
-        result["note"] = "没有需要替换的译文，未保存文件"
+    if not applied_indexes and not skipped and not not_found:
+        result["note"] = "内容没有变化，未保存文件"
     elif not applied_indexes:
         # 把跳过原因带上：否则模型只看到"没有条目被更新"，不知道是字段不许改还是 index 写错了
         # （窄字段白名单也通过这里返回拒绝原因）
@@ -845,7 +827,7 @@ def _tool_patch_transl_cache(
     clear_comment = bool(args.get("clear_comment")) and allowed_fields is None
     replace_request = _cache_replace_request(args, allowed)
     targets = (
-        [(name, []) for name in replace_request["files"]]
+        [(name, []) for name in _resolve_cache_replace_files(runner, replace_request["files"])]
         if replace_request is not None else _group_cache_patches_by_file(args)
     )
     pid = runner._project_id()
@@ -871,7 +853,7 @@ def _tool_patch_transl_cache(
             files.append({"filename": filename, "updated": 0, "changes": [], "error": str(exc)})
 
     updated = sum(int(item.get("updated") or 0) for item in files)
-    if not updated and (replace_request is None or all(item.get("error") for item in files)):
+    if not updated and all(item.get("error") for item in files):
         detail = "；".join(
             f"{item['filename']}：{item.get('error') or '没有条目被更新'}" for item in files
         )

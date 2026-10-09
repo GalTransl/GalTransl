@@ -1,4 +1,4 @@
-"""搜索类工具：在翻译缓存与待翻译原文里搜索（分页）。"""
+"""搜索类工具：在翻译缓存、待翻译原文与最终输出里搜索（分页）。"""
 
 from __future__ import annotations
 
@@ -29,6 +29,10 @@ _SEARCH_MATCH_KEYS: dict[str, str] = {
 # /input/search 同样有逐行命中标记，只是原文侧可搜的只有两列：正文与说话人。
 _INPUT_SEARCH_MATCH_KEYS: dict[str, str] = {
     "match_src": "src",
+    "match_name": "name",
+}
+_OUTPUT_SEARCH_MATCH_KEYS: dict[str, str] = {
+    "match_dst": "dst",
     "match_name": "name",
 }
 
@@ -237,12 +241,25 @@ def _tool_search_input(runner: AgentRunner, args: dict[str, Any]) -> Any:
     搜的是原文，所以**译文侧的问题（漏译/残留日文）不在这里**，那些用 read_transl_cache(action="search")。
     每次搜索都要把涉及的输入文件过一遍文件插件（比搜缓存慢），要缩小范围就传 filename。
     """
+    return _tool_search_text_files(runner, args)
+
+
+def _tool_search_output_files(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """搜索 gt_output 的实际正文与说话人，核查译后字典替换效果。"""
+    return _tool_search_text_files(runner, args, output=True)
+
+
+def _tool_search_text_files(runner: AgentRunner, args: dict[str, Any], *, output: bool = False) -> Any:
+    source = "output" if output else "input"
+    label = "输出" if output else "输入"
+    read_tool = "read_output" if output else "read_input_file"
+    text_field = "dst" if output else "src"
     query = str(args.get("query", "")).strip()
     if not query:
         raise AgentToolError("query is required")
     field = str(args.get("field", "all") or "all").strip() or "all"
-    if field not in ("all", "src", "name"):
-        raise AgentToolError("field must be one of: all, src, name")
+    if field not in ("all", text_field, "name"):
+        raise AgentToolError(f"field must be one of: all, {text_field}, name")
     filename = str(args.get("filename", "") or "").strip()
     raw_context = args.get("context", 0)
     try:
@@ -273,18 +290,21 @@ def _tool_search_input(runner: AgentRunner, args: dict[str, Any]) -> Any:
         body["offset"] = offset
     if filename:
         body["filename"] = filename
-    result = runner._http_post(f"/api/projects/{pid}/input/search", body)
+    result = runner._http_post(f"/api/projects/{pid}/{source}/search", body)
     if isinstance(result, dict):
-        _slim_search_results(result, field, context, _INPUT_SEARCH_MATCH_KEYS)
+        match_keys = _OUTPUT_SEARCH_MATCH_KEYS if output else _INPUT_SEARCH_MATCH_KEYS
+        _slim_search_results(result, field, context, match_keys)
         _apply_search_paging(result, offset)
         _apply_search_order(result, order)
+        if output:
+            result["source"] = "output"
     notes: list[str] = []
     # 解析不了的文件（插件/格式问题）被跳过了：明说，否则"这个文件里没有"和"这个文件没读"
     # 看起来一模一样。要诊断那个文件用 read_input_file。
     if isinstance(result, dict) and result.get("files_failed"):
         notes.append(
-            f"这些输入文件解析失败、没参与搜索：{'、'.join(str(n) for n in result['files_failed'])}"
-            "（文件插件/格式问题，用 read_input_file 试读该文件可看到具体报错）；"
+            f"这些{label}文件解析失败、没参与搜索：{'、'.join(str(n) for n in result['files_failed'])}"
+            f"（文件插件/格式问题，用 {read_tool} 试读该文件可看到具体报错）；"
             "它们里面有没有命中是未知的。"
         )
     if isinstance(result, dict) and context:
@@ -301,7 +321,7 @@ def _tool_search_input(runner: AgentRunner, args: dict[str, Any]) -> Any:
             "total 仍是全部命中数——命中很多时用 offset 翻页。"
         )
     # 指定了文件但 0 命中：确认一下该输入文件是否存在，避免模型误以为关键词不匹配
-    if isinstance(result, dict) and not result.get("total") and filename:
+    if not output and isinstance(result, dict) and not result.get("total") and filename:
         try:
             listing = runner._http_get(f"/api/projects/{pid}/files")
             available = [

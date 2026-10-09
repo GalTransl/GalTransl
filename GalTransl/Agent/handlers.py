@@ -36,7 +36,7 @@ from GalTransl.Agent.tools.project import (
     _tool_update_project_config,
     _tool_write_project_guideline,
 )
-from GalTransl.Agent.tools.search import _tool_search_input
+from GalTransl.Agent.tools.search import _tool_search_input, _tool_search_output_files
 from GalTransl.Agent.tools.plugin_settings import _tool_get_plugin_settings
 from GalTransl.Agent.tools.proofread import _tool_read_proofread_changes, _tool_revert_proofread_changes
 
@@ -51,6 +51,7 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "list_input_files": _tool_list_input_files,
     "read_input_file": _tool_read_input_file,
     "search_input": _tool_search_input,
+    "search_output_files": _tool_search_output_files,
     "read_guideline": _tool_read_guideline,
     "write_project_guideline": _tool_write_project_guideline,
     "list_dict_files": _tool_list_dict_files,

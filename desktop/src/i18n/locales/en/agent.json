@@ -438,6 +438,10 @@
       "action": "Search the source text",
       "running": "Searching the source text"
     },
+    "search_output_files": {
+      "action": "Search the output",
+      "running": "Searching the output"
+    },
     "patch_transl_cache": {
       "action": "Change the translation",
       "running": "Changing the translation"

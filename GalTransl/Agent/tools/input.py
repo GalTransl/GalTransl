@@ -6,7 +6,7 @@ import urllib.parse
 from typing import Any, TYPE_CHECKING
 
 from GalTransl.Agent.models import AgentToolError
-from GalTransl.Agent.tools.common import _entry_index, _parse_index_spec
+from GalTransl.Agent.tools.common import _read_entries_page
 from GalTransl.Agent.tools.listing import (
     LIST_ITEMS_DEFAULT_LIMIT,
     LIST_ORDER_DEFAULT,
@@ -15,6 +15,8 @@ from GalTransl.Agent.tools.listing import (
     _list_limit,
     _list_notes,
     _list_order,
+    _list_offset,
+    _list_paging,
     _select_list_items,
 )
 
@@ -28,6 +30,7 @@ def _list_input_payload(
     grep: str = "",
     limit: int = LIST_ITEMS_DEFAULT_LIMIT,
     order: str = LIST_ORDER_DEFAULT,
+    offset: int = 0,
     names: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """列输入文件（grep / limit / order 都在这一层做），供工具与子代理的锁定包装共用。
@@ -54,7 +57,7 @@ def _list_input_payload(
     if names is not None:
         locked = set(names)
         matched = [f for f in matched if f["name"] in locked]
-    shown = _select_list_items(matched, limit, order)
+    shown = _select_list_items(matched, limit, order, offset)
     notes = [
         "sentences 是输入文件解析出的条数，只用来估工作量：文本插件（如「跳过无日文句」）"
         "还没跑，真正要翻的句数通常比它少，所以按它估总时长会略偏大；null 表示解析失败。"
@@ -69,12 +72,14 @@ def _list_input_payload(
             limit=limit,
             order=order,
             unit="输入文件",
+            offset=offset,
         )
     )
     return {
         "input_files": shown,
         "count": len(matched),
         "returned": len(shown),
+        **_list_paging(len(matched), len(shown), offset, order),
         "sampled": len(shown) < len(matched),
         "sentences_total": sum(
             f["sentences"] for f in matched if isinstance(f["sentences"], int)
@@ -102,7 +107,7 @@ def _tool_list_input_files(runner: AgentRunner, args: dict[str, Any]) -> Any:
     不能因为少显示了几行就变小。
     """
     return _list_input_payload(
-        runner, grep=_list_grep(args), limit=_list_limit(args), order=_list_order(args)
+        runner, grep=_list_grep(args), limit=_list_limit(args), order=_list_order(args), offset=_list_offset(args)
     )
 
 
@@ -116,21 +121,4 @@ def _tool_read_input_file(runner: AgentRunner, args: dict[str, Any]) -> Any:
     cfg = urllib.parse.quote(runner.state.config_file_name)
     data = runner._http_get(f"/api/projects/{pid}/input/{urllib.parse.quote(filename)}?config={cfg}")
     entries = data.get("entries", [])
-    index_spec = str(args.get("index", "") or "").strip()
-    if not index_spec:
-        return {"filename": filename, "count": len(entries), "returned": len(entries[:30]), "entries": entries[:30]}
-    wanted = _parse_index_spec(index_spec)
-    if not wanted:
-        raise AgentToolError(f"无法解析 index 列表：{index_spec!r}（示例：1-100）")
-    picked = [e for e in entries if _entry_index(e) in wanted]
-    available = {_entry_index(e) for e in entries}
-    missing = sorted(i for i in wanted if i not in available)
-    result: dict[str, Any] = {
-        "filename": filename,
-        "count": len(entries),
-        "returned": len(picked),
-        "entries": picked,
-    }
-    if missing:
-        result["missing_indexes"] = missing
-    return result
+    return {"filename": filename, "count": len(entries), **_read_entries_page(entries, args)}
