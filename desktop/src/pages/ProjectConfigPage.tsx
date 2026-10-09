@@ -1,5 +1,6 @@
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { usePageActive, useRetainPage } from '../components/PageActivity';
 import { useSearchParams } from 'react-router-dom';
 import type { ProjectPageContext } from '../components/ProjectLayout';
 import { Panel } from '../components/Panel';
@@ -48,6 +49,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [reextracting, setReextracting] = useState(false);
+  useRetainPage(dirty || saving || reextracting);
   const [reextractResult, setReextractResult] = useState<InputReextractResult | null>(null);
   const [reextractError, setReextractError] = useMessageState<string | null>(null);
   const reextractRequestRef = useRef(0);
@@ -56,6 +58,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   configRef.current = config;
   const contextRef = useRef('');
   contextRef.current = `${projectId}:${configFileName}`;
+  const active = usePageActive();
   const [searchParams] = useSearchParams();
   const [activeSection, setActiveSection] = useState<ConfigSectionKey>(() => {
     const s = searchParams.get('section');
@@ -64,6 +67,25 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
     return CONFIG_SECTIONS.find((section) => section.key === s)?.key ?? 'fileIO';
   });
   const [yamlView, setYamlView] = useState(false);
+  useEffect(() => {
+    const section = searchParams.get('section');
+    if (section === 'plugin') setActiveSection('fileIO');
+    else if (CONFIG_SECTIONS.some((item) => item.key === section)) setActiveSection(section as ConfigSectionKey);
+  }, [searchParams]);
+
+  const wasActiveRef = useRef(active);
+  const refreshAllowedRef = useRef(false);
+  refreshAllowedRef.current = active && !dirty && !saving && !reextracting;
+  useEffect(() => {
+    const wasActive = wasActiveRef.current;
+    wasActiveRef.current = active;
+    if (wasActive || !refreshAllowedRef.current || !projectId) return;
+    let cancelled = false;
+    void fetchProjectConfig(projectId, configFileName).then((data) => {
+      if (!cancelled && refreshAllowedRef.current) setConfig(data.config);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [active, projectId, configFileName]);
 
   // Global backend profile selection
   const [backendProfileNames, setBackendProfileNames] = useState<string[]>([]);

@@ -1,3 +1,4 @@
+import { usePageActive } from '../components/PageActivity';
 import { getUiLanguage } from "../i18n/core";
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -189,6 +190,7 @@ type HomePageProps = {
 };
 
 export function HomePage({ onOpenProject }: HomePageProps) {
+  const active = usePageActive();
   const uiLanguage = useUiLanguage();
   const navigate = useNavigate();
   const [historyLimit, setHistoryLimit] = useState(() => getHomeHistoryRetentionLimit());
@@ -217,11 +219,12 @@ export function HomePage({ onOpenProject }: HomePageProps) {
   >({});
 
   useEffect(() => {
+    if (!active) return;
     setHistory(loadHistory(historyLimit));
     // Stagger entrance animation
     const t = requestAnimationFrame(() => setMounted(true));
     return () => cancelAnimationFrame(t);
-  }, [historyLimit]);
+  }, [historyLimit, active]);
 
   useEffect(() => {
     let cancelled = false;
@@ -370,19 +373,20 @@ export function HomePage({ onOpenProject }: HomePageProps) {
   }, [jobMemoryLimit, shouldLoadJobProgress]);
 
   useEffect(() => {
+    if (!active) return;
     void refreshJobs();
     const poller = window.setInterval(() => {
       void refreshJobs(true);
     }, 3000);
     return () => window.clearInterval(poller);
-  }, [refreshJobs]);
+  }, [refreshJobs, active]);
 
   useEffect(() => {
-    if (!shouldLoadJobProgress) {
+    if (!active || !shouldLoadJobProgress) {
       return;
     }
     void refreshJobs(true);
-  }, [refreshJobs, shouldLoadJobProgress]);
+  }, [refreshJobs, shouldLoadJobProgress, active]);
 
   const handleOpenProject = useCallback(async () => {
     const selected = await open({
@@ -472,7 +476,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     event.stopPropagation();
     removeProjectFromHistory(projectDirToRemove);
     setHistory(loadHistory(historyLimit));
-  }, [historyLimit]);
+  }, [historyLimit, active]);
 
   const activeJobsCount = useMemo(
     () => jobs.filter((job) => job.status === 'pending' || job.status === 'running').length,

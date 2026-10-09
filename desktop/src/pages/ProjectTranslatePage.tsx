@@ -1,3 +1,4 @@
+import { usePageActive, useRetainPage } from '../components/PageActivity';
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { invoke } from '@tauri-apps/api/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -106,6 +107,7 @@ function saveContinuousRetranslEnabled(projectDir: string, enabled: boolean) {
 }
 
 export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
+  const active = usePageActive();
   const uiLanguage = useUiLanguage();
   const { projectDir, projectId, configFileName } = ctx;
   const navigate = useNavigate();
@@ -139,6 +141,9 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const [rightTab, setRightTab] = useState<'errors' | 'files' | 'retransl'>('files');
   const [retranslKeys, setRetranslKeys] = useState<RetranslListItem[]>([]);
   const [continuousRetranslEnabled, setContinuousRetranslEnabled] = useState(false);
+  // Continuous retranslating schedules follow-up jobs from this component.
+  const monitorJobs = active || continuousRetranslEnabled;
+  useRetainPage(continuousRetranslEnabled || submitting || stopping);
   const [launchPhase, setLaunchPhase] = useState<'idle' | 'charging' | 'blasting'>('idle');
   const [stripBooting, setStripBooting] = useState(false);
   const [barSurging, setBarSurging] = useState(false);
@@ -209,15 +214,17 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   }, [projectId]);
 
   useEffect(() => {
+    if (!active) return;
     // Do NOT clear runtime here: on tab remount we already hydrated from
     // cachedRuntimeByProject so the stop/start button keeps the correct
     // color until the fresh snapshot arrives.
     setRuntimeError(null);
     void refreshJobs();
     void refreshRuntime(true);
-  }, [refreshJobs, refreshRuntime]);
+  }, [refreshJobs, refreshRuntime, active]);
 
   useEffect(() => {
+    if (!active) return;
     if (!projectId) {
       setProjectBackendConfig(null);
       return;
@@ -239,7 +246,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     return () => {
       cancelled = true;
     };
-  }, [projectId, configFileName]);
+  }, [projectId, configFileName, active]);
 
   // 后端选择与「配置编辑」页共享同一份 localStorage：切项目时重读，别处改了就跟随。
   useEffect(() => {
@@ -307,12 +314,13 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   }, [projectId, refreshRetranslKeys, rightTab, runtime?.retransl_stats]);
 
   useEffect(() => {
+    if (!monitorJobs) return;
     const poller = window.setInterval(() => {
       void loadJobs(true);
       void refreshJobs(true);
     }, JOB_POLL_INTERVAL_MS);
     return () => window.clearInterval(poller);
-  }, [loadJobs, refreshJobs]);
+  }, [loadJobs, refreshJobs, monitorJobs]);
 
   const runningJobs = useMemo(
     () => jobs.filter((job) => (job.status === 'pending' || job.status === 'running') && !HIDDEN_TRANSLATORS.has(job.translator)),
@@ -417,12 +425,12 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   }, [cancelledAlertJobId]);
 
   useEffect(() => {
-    if (!shouldPollRuntime) return;
+    if (!monitorJobs || !shouldPollRuntime) return;
     const poller = window.setInterval(() => {
       void refreshRuntime(true);
     }, RUNTIME_POLL_INTERVAL_MS);
     return () => window.clearInterval(poller);
-  }, [refreshRuntime, shouldPollRuntime]);
+  }, [refreshRuntime, shouldPollRuntime, monitorJobs]);
 
   useEffect(() => {
     const successEntries = runtime?.recent_successes ?? [];
@@ -639,12 +647,12 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const updatedAtText = summary?.updated_at ? formatDate(summary.updated_at) : translate("projects:projectTranslatePage.updatedAtText_message_wait");
 
   useEffect(() => {
-    if (!currentJob?.started_at) return;
+    if (!active || !currentJob?.started_at) return;
     if (currentJob.status !== 'pending' && currentJob.status !== 'running') return;
     setNowMs(Date.now());
     const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [currentJob?.started_at, currentJob?.status]);
+  }, [currentJob?.started_at, currentJob?.status, active]);
 
   useEffect(() => {
     if (currentJob?.finished_at) setNowMs(Date.now());
@@ -709,13 +717,13 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   }, [projectDir, isBackendSwitchLocked]);
 
   useEffect(() => {
-    if (!showBackendSwitcher || isBackendSwitchLocked) return;
+    if (!active || !showBackendSwitcher || isBackendSwitchLocked) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setShowBackendSwitcher(false);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showBackendSwitcher, isBackendSwitchLocked]);
+  }, [active, showBackendSwitcher, isBackendSwitchLocked]);
 
   const backendProfileOptions = useMemo(() => backendProfileNames.map((name) => {
     const { modelName } = getProfileMeta(getBackendProfile(name));

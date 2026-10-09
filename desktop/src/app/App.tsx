@@ -1,6 +1,6 @@
 import { t as translate, useUiLanguage } from "../i18n";
-import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { HashRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { HashRouter, Route, useNavigate, useLocation } from 'react-router-dom';
 import {
   CUSTOM_BACKGROUND_CHANGE_EVENT,
   OPEN_PROJECTS_CHANGE_EVENT,
@@ -14,6 +14,8 @@ import {
   persistOpenProjects,
   saveConfigFileName,
 } from '../lib/api';
+import { CachedRoutes } from '../components/CachedRoutes';
+import { PageActivityContext } from '../components/PageActivity';
 import { Sidebar } from '../components/Sidebar';
 import { RenderErrorBoundary } from '../components/RenderErrorBoundary';
 import { ConnectionProvider } from '../features/connection/ConnectionContext';
@@ -199,7 +201,6 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
   useUiLanguage();
   const navigate = useNavigate();
   const location = useLocation();
-  const contentRef = useRef<HTMLElement | null>(null);
   const [displayLocation, setDisplayLocation] = useState(location);
   const [wizardOpen, setWizardOpen] = useState(location.pathname === '/new-project');
   const [wizardProjectName, setWizardProjectName] = useState('');
@@ -262,7 +263,10 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
   const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (location.pathname !== displayLocation.pathname) {
+    if (location.pathname === displayLocation.pathname) {
+      setDisplayLocation(location);
+      setTransitionStage('fadeIn');
+    } else {
       setTransitionStage('fadeOut');
       // The fadeOut animation is 150 ms; give a generous margin before forcing.
       if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
@@ -279,11 +283,14 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
     };
   }, [location, displayLocation]);
 
-  useLayoutEffect(() => {
-    contentRef.current?.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
-  }, [displayLocation.pathname]);
+  const isPageAvailable = useCallback((pathname: string) => {
+    const match = pathname.match(/^\/project\/([^/]+)/);
+    if (!match) return true;
+    try { return openProjects.includes(decodeProjectDir(match[1])); } catch { return false; }
+  }, [openProjects]);
 
-  const handleTransitionEnd = () => {
+  const handleTransitionEnd = (event: React.AnimationEvent<HTMLElement>) => {
+    if (event.target !== event.currentTarget) return;
     if (transitionStage === 'fadeOut') {
       if (transitionTimerRef.current) {
         clearTimeout(transitionTimerRef.current);
@@ -349,13 +356,13 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
         onCloseAllProjects={handleCloseAllProjectsAndNavigate}
       />
       <main
-        ref={contentRef}
         className={`app-layout__content page-transition-${transitionStage}`}
         onAnimationEnd={handleTransitionEnd}
       >
         {/* Keep the draft mounted across navigation so forms, imports and jobs survive. */}
         {wizardOpen && (
-          <div hidden={!wizardVisible}>
+          <div className="app-layout__page" hidden={!wizardVisible} style={!wizardVisible ? { display: 'none' } : undefined}>
+            <PageActivityContext.Provider value={wizardVisible && location.pathname === '/new-project'}>
             <Suspense fallback={<RouteLoadingFallback />}>
               <NewProjectWizard
                 active={wizardVisible && location.pathname === '/new-project'}
@@ -363,9 +370,10 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
                 onOpenProject={handleFinishWizard}
               />
             </Suspense>
+            </PageActivityContext.Provider>
           </div>
         )}
-        <Routes location={displayLocation}>
+        <CachedRoutes location={displayLocation} currentPath={location.pathname} isAvailable={isPageAvailable}>
               <Route
                 path="/"
                 element={<HomePage onOpenProject={onOpenProject} />}
@@ -432,7 +440,7 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
                   </Suspense>
                 )}
               />
-        </Routes>
+        </CachedRoutes>
         </main>
         <UpdateNotice />
         </div>

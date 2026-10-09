@@ -1,5 +1,6 @@
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useRetainPage } from '../components/PageActivity';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
@@ -546,6 +547,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   const [replaceField, setReplaceField] = useState<CacheReplaceField>('dst');
   const [showReplace, setShowReplace] = useState(false);
   const [replacing, setReplacing] = useState(false);
+  useRetainPage(dirtyFiles.size > 0 || saving || savingAll || replacing);
   const [replacePreview, setReplacePreview] = useState<CacheReplaceFileDetail[] | null>(null);
   const [replacePreviewTotal, setReplacePreviewTotal] = useState(0);
 
@@ -1207,7 +1209,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
 
   // Close retransl popover on outside click / Escape
   useEffect(() => {
-    if (!retranslEditor) return;
+    if (!active || !retranslEditor) return;
     const onPointerDown = (e: MouseEvent) => {
       const pop = retranslPopoverRef.current;
       if (!pop) return;
@@ -1225,7 +1227,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       document.removeEventListener('mousedown', onPointerDown);
       document.removeEventListener('keydown', onKey);
     };
-  }, [retranslEditor]);
+  }, [active, retranslEditor]);
 
   // Problems grouped by type
   const problemStats = useMemo(() => {
@@ -1347,7 +1349,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
 
   // Close context menu on outside click / Escape
   useEffect(() => {
-    if (!contextMenu) return;
+    if (!active || !contextMenu) return;
     const onClick = (e: MouseEvent) => {
       const menuEl = contextMenuRef.current;
       if (menuEl && menuEl.contains(e.target as Node)) return;
@@ -1360,10 +1362,11 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       document.removeEventListener('mousedown', onClick);
       document.removeEventListener('keydown', onKey);
     };
-  }, [contextMenu]);
+  }, [active, contextMenu]);
 
   // Ctrl+S: save current file; Ctrl+Shift+S: save all dirty files
   useEffect(() => {
+    if (!active) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return;
       e.preventDefault();
@@ -1379,16 +1382,17 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [saving, savingAll, selectedFile, dirtyFiles, handleSave, handleSaveAll]);
+  }, [active, saving, savingAll, selectedFile, dirtyFiles, handleSave, handleSaveAll]);
 
   // Ctrl+A handler for file list
   useEffect(() => {
+    if (!active) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (sidebarTab !== 'files') return;
       if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
         // Only intercept if the file list area is focused / active
         const active = document.activeElement;
-        const fileListEl = document.querySelector('.cache-file-list');
+        const fileListEl = document.activeElement?.closest('.cache-file-list');
         if (!fileListEl) return;
         if (!fileListEl.contains(active) && active !== fileListEl) return;
         e.preventDefault();
@@ -1397,7 +1401,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [sidebarTab, cacheFiles]);
+  }, [active, sidebarTab, cacheFiles]);
 
   // Jump from search result to file editor
   const handleJumpToFile = (filename: string, index: number) => {
@@ -1884,7 +1888,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                         >
                           -
                         </button>
-                        {retranslEditor?.type === type && createPortal((
+                        {active && retranslEditor?.type === type && createPortal((
                           <div
                             ref={retranslPopoverRef}
                             className="retransl-popover"
@@ -2025,7 +2029,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
           )}
         </div>
       </div>
-      {contextMenu && createPortal(
+      {active && contextMenu && createPortal(
         <div
           ref={contextMenuRef}
           className="cache-context-menu"

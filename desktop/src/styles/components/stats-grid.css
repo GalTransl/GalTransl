@@ -96,7 +96,7 @@
 }
 
 @media (max-width: 1120px) {
-  .app-layout__content {
+  .app-layout__page {
     padding: var(--space-5);
   }
 
@@ -108,7 +108,7 @@
 }
 
 @media (max-width: 720px) {
-  .app-layout__content {
+  .app-layout__page {
     padding: var(--space-4);
   }
 

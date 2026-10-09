@@ -55,6 +55,7 @@ export function ProjectDictionaryPage({
 
   // GenDic 优先使用专属默认；未单独指定时跟随项目翻译器后端。
   useEffect(() => {
+    if (!active) return;
     if (!projectId) {
       setProjectBackendConfig(null);
       return;
@@ -76,7 +77,7 @@ export function ProjectDictionaryPage({
     return () => {
       cancelled = true;
     };
-  }, [projectId, configFileName]);
+  }, [projectId, configFileName, active]);
 
   const [backendRevision, setBackendRevision] = useState(0);
   useEffect(() => {

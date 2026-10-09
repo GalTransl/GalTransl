@@ -42,7 +42,7 @@
   -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur));
 }
 
-.app-layout--custom-background .app-layout__content:has(.home-page)::before {
+.app-layout--custom-background .app-layout__page:has(.home-page)::before {
   opacity: calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.06);
 }
 
@@ -233,7 +233,7 @@
   -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur));
 }
 
-:root[data-theme='dark'] .app-layout--custom-background .app-layout__content:has(.home-page)::before {
+:root[data-theme='dark'] .app-layout--custom-background .app-layout__page:has(.home-page)::before {
   opacity: calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.08);
 }
 

@@ -1,5 +1,7 @@
 import { UiTrans, message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { usePageActive, useRetainPage } from './PageActivity';
+import { useSaveShortcut } from './useSaveShortcut';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from './Button';
@@ -276,6 +278,8 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     description,
   } = props;
 
+  const pageActive = usePageActive();
+  const saveInFlightRef = useRef(false);
   const [activeTab, setActiveTab] = useState<DictTab>('gpt');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -289,6 +293,9 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   const [generatingGptDict, setGeneratingGptDict] = useState(false);
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  useRetainPage(dirty || saving || creating || deleting || generatingGptDict);
+  const latestDraftRef = useRef(draftText);
+  latestDraftRef.current = draftText;
   const [newFilename, setNewFilename] = useState('');
   const [localError, setLocalError] = useMessageState<string | null>(null);
   const [info, setInfo] = useMessageState<string | null>(null);
@@ -411,7 +418,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   };
 
   useEffect(() => {
-    if (!contextMenu) return;
+    if (!pageActive || !contextMenu) return;
 
     const onPointerDown = (event: PointerEvent) => {
       const menuEl = contextMenuRef.current;
@@ -428,7 +435,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
       window.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [contextMenu]);
+  }, [pageActive, contextMenu]);
 
   const handleRevealFile = async (file: string) => {
     const filePath = data?.dict_contents?.[file]?.path;
@@ -584,7 +591,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   };
 
   const handleSave = async () => {
-    if (!selectedFile) return;
+    if (!selectedFile || !dirty || saveInFlightRef.current) return;
     if (activeTab === 'gpt') {
       const invalidRow = parsedRows
         .map((row, index) => ({ row, index }))
@@ -600,20 +607,24 @@ export function DictionaryManager(props: DictionaryManagerProps) {
         return;
       }
     }
+    saveInFlightRef.current = true;
     setSaving(true);
     setLocalError(null);
     setInfo(null);
     try {
       await onSaveFile(selectedFile, draftText);
-      setDirty(false);
+      if (latestDraftRef.current === draftText) setDirty(false);
       setInfo(uiMessage("projects:dictionaryManager.handleSave_setInfo_doneSave"));
       await onReload();
     } catch (e) {
       setLocalError(e instanceof Error ? e.message : uiMessage("projects:dictionaryManager.handleSave_setLocalError_saveFailed"));
     } finally {
+      saveInFlightRef.current = false;
       setSaving(false);
     }
   };
+
+  useSaveShortcut(() => { void handleSave(); });
 
   const handleCreate = async () => {
     const raw = newFilename.trim();
@@ -894,7 +905,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
         </div>
       ) : null}
 
-      {contextMenu && createPortal(
+      {pageActive && contextMenu && createPortal(
         <div
           ref={contextMenuRef}
           className="cache-context-menu"

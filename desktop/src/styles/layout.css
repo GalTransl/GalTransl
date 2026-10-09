@@ -34,6 +34,14 @@
   flex: 1;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
+}
+
+/* Each cached page owns its scroll container, so hiding it preserves its position. */
+.app-layout__page {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
   padding: var(--space-7);
   overflow-y: auto;
 }

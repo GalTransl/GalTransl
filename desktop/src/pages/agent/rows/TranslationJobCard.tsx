@@ -1,3 +1,4 @@
+import { usePageActive } from '../../../components/PageActivity';
 import { t as translate, useUiLanguage } from "../../../i18n";
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -28,6 +29,7 @@ import { asArgs, formatPayload, str } from '../toolMeta';
 const JOB_CARD_POLL_MS = 1000;
 
 export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; projectDir: string }) {
+  const active = usePageActive();
   useUiLanguage();
   const args = asArgs(item.arguments);
   const result =
@@ -52,7 +54,7 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
 
   // 翻译期间每秒拉一次运行时快照（进度/速度/剩余/时长都从它来）；不在跑了就停。
   useEffect(() => {
-    if (!jobId || !projectDir || !isRunning) return undefined;
+    if (!active || !jobId || !projectDir || !isRunning) return undefined;
     const projectId = encodeProjectDir(projectDir);
     let cancelled = false;
     const pull = async () => {
@@ -86,7 +88,7 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
       window.clearInterval(poll);
       window.clearInterval(tick);
     };
-  }, [jobId, projectDir, isRunning]);
+  }, [active, jobId, projectDir, isRunning]);
 
   // 翻译期间自动展开、跑完自动折叠
   useEffect(() => {

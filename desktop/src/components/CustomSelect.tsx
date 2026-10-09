@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { usePageActive } from './PageActivity';
 import { createPortal } from 'react-dom';
 
 /* ── Option data extracted from <option> children ── */
@@ -68,6 +69,7 @@ export function CustomSelect({
   ...rest
 }: CustomSelectProps) {
   const options = extractOptions(children);
+  const active = usePageActive();
   const [open, setOpen] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -82,7 +84,7 @@ export function CustomSelect({
 
   // Close on outside click
   useEffect(() => {
-    if (!open) return;
+    if (!active || !open) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as Node;
       if (
@@ -96,19 +98,19 @@ export function CustomSelect({
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
+  }, [active, open]);
 
   // Scroll highlighted item into view
   useEffect(() => {
-    if (!open || highlightIdx < 0 || !listRef.current) return;
+    if (!active || !open || highlightIdx < 0 || !listRef.current) return;
     const el = listRef.current.querySelector(
       `[data-idx="${highlightIdx}"]`,
     ) as HTMLElement | null;
     el?.scrollIntoView({ block: 'nearest' });
-  }, [open, highlightIdx]);
+  }, [active, open, highlightIdx]);
 
   useEffect(() => {
-    if (!open) {
+    if (!active || !open) {
       setPanelStyle(null);
       return;
     }
@@ -152,7 +154,7 @@ export function CustomSelect({
       window.removeEventListener('resize', updatePanelStyle);
       window.removeEventListener('scroll', updatePanelStyle, true);
     };
-  }, [open]);
+  }, [active, open]);
 
   const notifyChange = useCallback(
     (val: string) => {
@@ -175,7 +177,7 @@ export function CustomSelect({
         case ' ':
         case 'Enter':
           e.preventDefault();
-          if (!open) {
+          if (!active || !open) {
             setOpen(true);
             setHighlightIdx(options.findIndex((o) => o.value === value));
           } else {
@@ -193,7 +195,7 @@ export function CustomSelect({
           break;
         case 'ArrowDown':
           e.preventDefault();
-          if (!open) {
+          if (!active || !open) {
             setOpen(true);
             setHighlightIdx(Math.max(0, options.findIndex((o) => o.value === value)));
           } else {
@@ -245,7 +247,7 @@ export function CustomSelect({
     .filter(Boolean)
     .join(' ');
 
-  const panel = open && options.length > 0 && panelStyle
+  const panel = active && open && options.length > 0 && panelStyle
     ? createPortal(
         <div className={rootClass}>
           <div

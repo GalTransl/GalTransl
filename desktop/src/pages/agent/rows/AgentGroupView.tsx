@@ -1,3 +1,4 @@
+import { usePageActive } from '../../../components/PageActivity';
 import { t as translate, useUiLanguage } from "../../../i18n";
 import { memo, useEffect, useRef, useState } from 'react';
 import { AnimatedDisclosure } from './AnimatedDisclosure';
@@ -74,6 +75,7 @@ function AgentActivityGroup({
   persistKey: string;
 }) {
   const uiLanguage = useUiLanguage();
+  const active = usePageActive();
   const stateKey = `${persistKey}::${group.id}`;
   const [open, setOpenRaw] = useState(() => {
     const saved = manualOpenState.get(stateKey);
@@ -120,11 +122,11 @@ function AgentActivityGroup({
       liveStartedState.delete(stateKey);
     }
     wasLiveRef.current = isLive;
-    if (!isLive) return;
+    if (!active || !isLive) return;
     setNow(Date.now());
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, [isLive, stateKey]);
+  }, [active, isLive, stateKey]);
   // 结束后展示用「事件耗时之和」兜底：恢复会话/刷新后没有墙钟起点。
   const totalMs = items.reduce((sum, it) => sum + (it.durationMs || 0), 0);
   const wallSec = liveStartedRef.current != null ? Math.max(0, Math.floor((now - liveStartedRef.current) / 1000)) : 0;
@@ -335,14 +337,15 @@ const RETRY_CODE_LABELS: Record<string, string> = {
 
 function RetryRow({ item }: { item: ActivityItem }) {
   const uiLanguage = useUiLanguage();
+  const active = usePageActive();
   const live = !item.retryDone;
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    if (!live) return undefined;
+    if (!active || !live) return undefined;
     const timer = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(timer);
-  }, [live]);
+  }, [active, live]);
 
   const startedAt = item.retryStartedAtMs ?? now;
   const delayMs = item.retryDelayMs ?? 0;

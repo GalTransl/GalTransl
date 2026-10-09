@@ -1,3 +1,4 @@
+import { usePageActive } from '../../../components/PageActivity';
 import { t as translate, useUiLanguage } from "../../../i18n";
 import { useEffect, useState } from 'react';
 import type { SubagentRun, SubagentStep } from '../timeline';
@@ -40,6 +41,7 @@ export function SubagentList({ runs }: { runs: SubagentRun[] }) {
 }
 
 function SubagentRow({ run }: { run: SubagentRun }) {
+  const active = usePageActive();
   const uiLanguage = useUiLanguage();
   // **默认折叠**：一次派 16 个时是一行一个子代理，全铺开会把父行撑得很长；要看细节点开。
   // 折叠态不丢信息——"最新动作"就挂在行上（见 subagentLatest），在干什么一眼能扫到。
@@ -50,11 +52,11 @@ function SubagentRow({ run }: { run: SubagentRun }) {
   const running = run.status === 'running';
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!running) return undefined;
+    if (!active || !running) return undefined;
     setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(timer);
-  }, [running]);
+  }, [active, running]);
   const state = subagentState(run);
   const durationMs = run.durationMs ?? (run.startedAt ? now - run.startedAt : 0);
   const latest = subagentLatest(run);

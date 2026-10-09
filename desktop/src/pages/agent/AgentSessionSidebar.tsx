@@ -1,3 +1,4 @@
+import { usePageActive } from '../../components/PageActivity';
 import { t as translate, useUiLanguage } from "../../i18n";
 import { useEffect, useState } from 'react';
 import type { AgentSession as AgentSessionMeta } from '../../lib/api';
@@ -48,14 +49,17 @@ export function AgentSessionSidebar({
   onDeleteSession: (dir: string, session: AgentSessionMeta) => void;
 }) {
   useUiLanguage();
+  const active = usePageActive();
   // 哪些项目分组已经点开过「显示其余 N 个」（纯本地状态，不涉及请求）
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   // 相对时间（刚刚 / N分钟前）要定时重算，否则页面静止时数字会一直停着不动
   const [, setTimeTick] = useState(0);
   useEffect(() => {
+    if (!active) return;
+    setTimeTick((n) => n + 1);
     const timer = window.setInterval(() => setTimeTick((n) => n + 1), 60_000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [active]);
 
   return (
     <aside className="agent-sessions">

@@ -24,6 +24,7 @@ import {
   updateProjectConfig,
   fetchProjectDictionaryManager,
 } from '../lib/api';
+import { useRetainPage } from '../components/PageActivity';
 import { normalizeError } from '../lib/errors';
 
 const JOB_POLL_INTERVAL_MS = 1500;
@@ -40,6 +41,7 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
   const [aiTranslating, setAiTranslating] = useState(false);
   const [error, setError] = useMessageState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  useRetainPage(generating || saving || aiTranslating || dirty);
   const [searchQuery, setSearchQuery] = useState('');
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -69,7 +71,7 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
 
   // Close popover on outside click
   useEffect(() => {
-    if (!showAiPopover) return;
+    if (!active || !showAiPopover) return;
     const handler = (e: MouseEvent) => {
       if (aiPopoverRef.current && !aiPopoverRef.current.contains(e.target as Node)) {
         setShowAiPopover(false);
@@ -77,7 +79,7 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [showAiPopover]);
+  }, [active, showAiPopover]);
 
   // React to global default backend profile changes
   useEffect(() => {

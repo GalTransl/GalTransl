@@ -1,3 +1,5 @@
+import { usePageActive, useRetainPage } from '../components/PageActivity';
+import { loadAgentProject, saveAgentProject, loadMessageDraft, saveMessageDraft, moveMessageDraft, useMessageDraft } from './agent/drafts';
 import { followTail } from "./agent/followTail";
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -7,6 +9,7 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   addOpenProject,
   AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
+  BACKEND_PROFILES_CHANGE_EVENT,
   type AgentContextUsage,
   type AgentEvent,
   type AgentSession as AgentSessionMeta,
@@ -83,6 +86,7 @@ import { useAgentStream } from './agent/useAgentStream';
 /* ── Main page ── */
 
 export function AgentPage() {
+  const active = usePageActive();
   const uiLanguage = useUiLanguage();
   const navigate = useNavigate();
 
@@ -130,12 +134,28 @@ export function AgentPage() {
     return () => window.removeEventListener(AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, sync as EventListener);
   }, []);
 
-  const [projectDir, setProjectDir] = useState<string>(() => projectOptions[0] || '');
+  const [projectDir, setProjectDir] = useState<string>(() => {
+    const remembered = loadAgentProject();
+    return remembered === '' || (remembered && projectOptions.includes(remembered)) ? remembered : projectOptions[0] || '';
+  });
   const [configFileName, setConfigFileName] = useState<string>(() =>
-    projectOptions[0] ? readConfigFileName(projectOptions[0]) : 'config.yaml',
+    projectDir ? readConfigFileName(projectDir) : 'config.yaml',
   );
-  const [backendProfileNames] = useState<string[]>(() => getBackendProfileNames());
-  const [messageDraft, setMessageDraft] = useState('');
+  const [backendProfileNames, setBackendProfileNames] = useState<string[]>(() => getBackendProfileNames());
+  const [activeSessionId, setActiveSessionId] = useState(() => projectDir ? loadActiveSessionId(projectDir) : '');
+  const [messageDraft, setMessageDraft] = useMessageDraft(projectDir, activeSessionId);
+  useEffect(() => { saveAgentProject(projectDir); }, [projectDir]);
+  useEffect(() => {
+    if (!active) return;
+    const sync = () => {
+      setBackendProfileNames(getBackendProfileNames());
+      setDefaultProfileName(getAgentDefaultBackendProfile() || getBackendProfileNames()[0] || '');
+      setConfigFileName(projectDir ? readConfigFileName(projectDir) : 'config.yaml');
+    };
+    sync();
+    window.addEventListener(BACKEND_PROFILES_CHANGE_EVENT, sync);
+    return () => window.removeEventListener(BACKEND_PROFILES_CHANGE_EVENT, sync);
+  }, [active, projectDir]);
 
   // 输入框本体：点推荐提示词后要把焦点还回去（用户接着改两个字就能直接回车发出）
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -151,7 +171,7 @@ export function AgentPage() {
       el.focus();
       el.setSelectionRange(el.value.length, el.value.length);
     });
-  }, []);
+  }, [setMessageDraft]);
 
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [status, setStatus] = useState<string>('idle');
@@ -164,6 +184,7 @@ export function AgentPage() {
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   // 界面上的「发送中」乐观态：消息已发出但后端尚未确认
   const [sending, setSending] = useState(false);
+  useRetainPage(running || sending);
   // 已用上下文/上下文窗口（composer 右下角指示器）：
   // 基线来自会话状态快照，运行中由 context_usage 事件实时更新。
   const [contextUsage, setContextUsage] = useState<AgentContextUsage | null>(null);
@@ -182,10 +203,6 @@ export function AgentPage() {
   const [unseenLights, setUnseenLights] = useState<Record<string, 'done' | 'failed'>>({});
   // 上一次看到的各会话状态：用来发现"刚才还在跑、现在不跑了"的那个收尾瞬间
   const prevSessionStatusRef = useRef<Record<string, string>>({});
-  const [activeSessionId, setActiveSessionId] = useState<string>(() => {
-    const first = projectOptions[0];
-    return first ? loadActiveSessionId(first) : '';
-  });
   // 每会话绑定的后端配置（'' 键 = 新会话还没发出第一条消息时选的草稿）
   const [sessionBackends, setSessionBackends] = useState<SessionBackendMap>(() => loadSessionBackends());
   const setSessionBackend = useCallback(
@@ -264,7 +281,7 @@ export function AgentPage() {
 
   // 后端配置小菜单：点外部 / Esc 关闭；Agent 跑起来后也收起（此时不能切配置）
   useEffect(() => {
-    if (!profileMenuOpen) return;
+    if (!active || !profileMenuOpen) return;
     const onPointerDown = (e: MouseEvent) => {
       if (!profilePickerRef.current?.contains(e.target as Node)) setProfileMenuOpen(false);
     };
@@ -277,11 +294,11 @@ export function AgentPage() {
       document.removeEventListener('mousedown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [profileMenuOpen]);
+  }, [active, profileMenuOpen]);
 
   // 项目 chip 的小菜单：同样点外部 / Esc 关闭
   useEffect(() => {
-    if (!projectMenuOpen) return;
+    if (!active || !projectMenuOpen) return;
     const onPointerDown = (e: MouseEvent) => {
       if (!projectPickerRef.current?.contains(e.target as Node)) setProjectMenuOpen(false);
     };
@@ -294,7 +311,7 @@ export function AgentPage() {
       document.removeEventListener('mousedown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [projectMenuOpen]);
+  }, [active, projectMenuOpen]);
 
   useEffect(() => {
     if (running) setProfileMenuOpen(false);
@@ -362,6 +379,7 @@ export function AgentPage() {
      （或别的项目）后，原来那个会话跑完了也得收到，灯才能从蓝转绿/橙。没有会话在跑
      就停掉轮询，不做无谓请求。 */
   useEffect(() => {
+    if (!active) return;
     const dirs = Object.keys(sessionsByProject).filter((dir) =>
       (sessionsByProject[dir] || []).some((s) => s.status === 'running'),
     );
@@ -372,7 +390,13 @@ export function AgentPage() {
       for (const dir of dirs) void refreshSessions(dir, undefined, false);
     }, 4000);
     return () => window.clearInterval(timer);
-  }, [running, sessionsByProject, effectiveProject, refreshSessions]);
+  }, [active, running, sessionsByProject, effectiveProject, refreshSessions]);
+
+  useEffect(() => {
+    if (!active) return;
+    setProjectOptions(mergeProjects());
+    for (const dir of Object.keys(sessionsByProject)) void refreshSessions(dir, undefined, false);
+  }, [active, refreshSessions, mergeProjects]);
 
   /* Project change: adopt the remembered session for this project, load its
      session list into the grouped map (without clobbering other projects),
@@ -394,6 +418,7 @@ export function AgentPage() {
     // hero 选项目 / 顶部＋：保持空态等用户发消息创建新会话，不取历史会话，
     // 也不让 refreshSessions 自动切到该项目最近的会话
     const remembered = skip ? '' : loadActiveSessionId(effectiveProject);
+    if (skip) saveActiveSessionId(effectiveProject, '');
     setActiveSessionId(remembered);
     activeSessionRef.current = remembered;
     // accordion：展开当前项目、收起其他（用户仍可手动再展开别的）
@@ -402,7 +427,7 @@ export function AgentPage() {
       for (const d of projectOptions) next[d] = d !== effectiveProject;
       return next;
     });
-    void refreshSessions(effectiveProject, remembered, !skip);
+    void refreshSessions(effectiveProject, remembered, !skip && !loadMessageDraft(effectiveProject, ''));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveProject]);
 
@@ -520,6 +545,10 @@ export function AgentPage() {
       tailFollowerRef.current = null;
     };
   }, []);
+
+  useLayoutEffect(() => {
+    tailFollowerRef.current?.setActive(active);
+  }, [active]);
 
   useLayoutEffect(() => {
     tailFollowerRef.current?.jump();
@@ -662,6 +691,7 @@ export function AgentPage() {
     startRef.current = Date.now();
     setStatus('running');
     setRunning(true);
+    let draftSessionId = activeSessionRef.current;
     try {
       // 目标会话：优先用当前选中会话；没有就先建一个空会话再往里发消息。
       // 走 create → message 两段式，让侧边栏立刻能看到这个新会话。
@@ -669,6 +699,8 @@ export function AgentPage() {
       if (!sid) {
         const created = await createAgentSession(effectiveProject);
         sid = created.session_id;
+        moveMessageDraft(effectiveProject, draftSessionId, sid);
+        draftSessionId = sid;
         // 会话切换 effect 已在本 await 期间被触发（activeSessionId 仍为空，
         // 走的是"清空"分支）；标记过渡窗口，随后的 setActiveSessionId 不再
         // 触发恢复逻辑，running 保持 true。
@@ -709,7 +741,9 @@ export function AgentPage() {
         });
         hasBackendSessionRef.current = true;
         if (snap.session_id) {
+          moveMessageDraft(effectiveProject, sid, snap.session_id);
           sid = snap.session_id;
+          draftSessionId = sid;
           sendTransitionRef.current = sid;
           activeSessionRef.current = sid;
           setActiveSessionId(sid);
@@ -724,6 +758,9 @@ export function AgentPage() {
       void refreshSessions(effectiveProject, sid);
       subscribeStream(effectiveProject, sid);
     } catch (err) {
+      if (!loadMessageDraft(effectiveProject, draftSessionId)) {
+        saveMessageDraft(effectiveProject, draftSessionId, messageDraft);
+      }
       setError(normalizeError(err, uiMessage("agent:agentPage.handleSend_normalizeError_sendFailed")));
       setRunning(false);
       setStatus('failed');
@@ -738,6 +775,7 @@ export function AgentPage() {
     backendProfileName,
     configFileName,
     messageDraft,
+    setMessageDraft,
     running,
     permissionMode,
     subscribeStream,
@@ -836,7 +874,8 @@ export function AgentPage() {
         skipRememberedSessionRef.current = true;
         setProjectDir(selected);
         setConfigFileName(cfg);
-        setMessageDraft('');
+        setActiveSessionId('');
+        saveActiveSessionId(selected, '');
         // 同步进翻译器的"已打开项目"列表（写盘 + 广播），让全局侧边栏
         // 和 Agent 自己的侧边栏分组都出现这个项目。
         addOpenProject(selected, cfg);
@@ -855,7 +894,8 @@ export function AgentPage() {
     skipRememberedSessionRef.current = true;
     setProjectDir(dir);
     setConfigFileName(cfg);
-    setMessageDraft('');
+    setActiveSessionId('');
+    saveActiveSessionId(dir, '');
     addOpenProject(dir, cfg);
   }, []);
 
@@ -864,12 +904,15 @@ export function AgentPage() {
    *  换个项目接着用同一条指令是常态，清掉反而要重打。 */
   const switchProjectBeforeSession = useCallback((dir: string) => {
     if (!dir) return;
+    if (messageDraft) saveMessageDraft(dir, '', messageDraft);
+    setActiveSessionId('');
+    saveActiveSessionId(dir, '');
     const cfg = readConfigFileName(dir);
     skipRememberedSessionRef.current = true;
     setProjectDir(dir);
     setConfigFileName(cfg);
     addOpenProject(dir, cfg);
-  }, []);
+  }, [messageDraft]);
 
   /** 顶部 ＋：新建"未打开项目"的会话 —— 清空当前项目选择，主区回空态，
    *  让用户重新选/打开一个项目再发消息。侧边栏的其他项目会话分组保留显示，
@@ -888,7 +931,7 @@ export function AgentPage() {
     setError(null);
     // 只清当前主区项目/目标/活动会话；不动 sessionsByProject，侧边栏保留历史
     setProjectDir('');
-    setMessageDraft('');
+    saveMessageDraft('', '', '');
   }, [running, handleStop]);
 
   /** 项目分组行 ＋：在指定项目下新建一个会话。
@@ -1029,6 +1072,7 @@ export function AgentPage() {
       const remaining = prevList.filter((s) => s.session_id !== session.session_id);
       setSessionsByProject((prev) => ({ ...prev, [dir]: remaining }));
       try {
+        saveMessageDraft(dir, session.session_id, '');
         localStorage.removeItem(sessionsKey(dir, session.session_id));
       } catch {
         // ignore
@@ -1232,7 +1276,7 @@ export function AgentPage() {
   const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
   const permissionPickerRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (!permissionMenuOpen) return;
+    if (!active || !permissionMenuOpen) return;
     const onPointerDown = (e: MouseEvent) => {
       if (!permissionPickerRef.current?.contains(e.target as Node)) setPermissionMenuOpen(false);
     };
@@ -1245,7 +1289,7 @@ export function AgentPage() {
       document.removeEventListener('mousedown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [permissionMenuOpen]);
+  }, [active, permissionMenuOpen]);
   const handlePickPermissionMode = useCallback(
     (mode: PermissionMode) => {
       setPermissionMode(mode);
@@ -1340,7 +1384,7 @@ export function AgentPage() {
         </div>
       </header>
 
-      <div className="agent-console__thread" ref={scrollRef}>
+      <div className="agent-console__thread" ref={scrollRef} data-page-scroll-managed>
         <div className="agent-thread" ref={threadContentRef}>
           {timeline.length === 0 ? (
             <div className="agent-hero">

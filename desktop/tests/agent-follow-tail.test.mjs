@@ -79,3 +79,21 @@ test('unmount disconnects observers and does not scroll detached content', () =>
   f.resize();
   assert.equal(f.viewport.scrollTop, 600);
 });
+
+test('hidden pages pause scrolling and retain the user’s reading/following mode', () => {
+  const f = fixture();
+  f.scroll(200);
+  f.follower.setActive(false);
+  f.viewport.scrollHeight = 1800;
+  f.resize();
+  assert.equal(f.viewport.scrollTop, 200);
+  f.follower.setActive(true);
+  assert.equal(f.viewport.scrollTop, 200);
+  f.follower.jump();
+  f.follower.setActive(false);
+  f.viewport.scrollHeight = 2200;
+  f.resize();
+  assert.equal(f.viewport.scrollTop, 1400);
+  f.follower.setActive(true);
+  assert.equal(f.viewport.scrollTop, 1800);
+});

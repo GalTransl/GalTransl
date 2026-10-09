@@ -13,7 +13,7 @@
 
 /* ── When home page is active, suppress outer scroll ── */
 
-.app-layout__content:has(.home-page) {
+.app-layout__page:has(.home-page) {
   position: relative;
   isolation: isolate;
   overflow: hidden;
@@ -21,7 +21,7 @@
   flex-direction: column;
 }
 
-.app-layout__content:has(.home-page)::before {
+.app-layout__page:has(.home-page)::before {
   content: '';
   position: absolute;
   inset: -120px -80px -120px;
@@ -1105,7 +1105,7 @@
   grid-template-columns: 0.76fr 1.38fr 1.16fr;
 }
 
-.app-layout__content:has(.home-page)::before {
+.app-layout__page:has(.home-page)::before {
   background:
     radial-gradient(circle at top right, rgba(47, 111, 235, 0.12), transparent 28%),
     radial-gradient(circle at 20% 16%, rgba(15, 157, 88, 0.09), transparent 24%),
@@ -1448,7 +1448,7 @@
   }
 }
 
-:root[data-theme='dark'] .app-layout__content:has(.home-page)::before {
+:root[data-theme='dark'] .app-layout__page:has(.home-page)::before {
   background:
     radial-gradient(circle at top right, rgba(67, 129, 255, 0.2), transparent 30%),
     radial-gradient(circle at 20% 16%, rgba(65, 194, 132, 0.14), transparent 26%),
