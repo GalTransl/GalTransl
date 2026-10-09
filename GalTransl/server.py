@@ -69,6 +69,7 @@ from GalTransl.server_runtime import (
     RuntimeRegistry,
     _CACHE_APPEND_SUFFIX,
     _ConcurrentLimitError,
+    _cache_entry_is_translated,
     _has_newer_release,
     _normalize_project_dir,
     _normalize_retran_terms,
@@ -2498,7 +2499,7 @@ def build_handler(registry: JobRegistry):
                             with open(fp, "rb") as f:
                                 entries = orjson.loads(f.read())
                             f_total = len(entries)
-                            f_translated = sum(1 for e in entries if isinstance(e, dict) and (e.get("pre_dst", "") or e.get("pre_zh", "")))
+                            f_translated = sum(1 for e in entries if _cache_entry_is_translated(e))
                             # 白名单命中的条目等价于勾了 skip_check：问题与失败都不计
                             live = [
                                 e for e in entries

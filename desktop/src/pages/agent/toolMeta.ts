@@ -130,6 +130,10 @@ const TOOL_META: Record<string, ToolMeta> = {
     // 只改一个文件时只报条数（文件名在参数里，不必重复）。
     // clear_comment 是"顺带清批注"，列出来：一次改动里它是容易被忽略的那半个动作。
     summary: (a) => {
+      if (a?.action === 'replace') {
+        const files = new Set(Array.isArray(a.files) ? a.files.map(str).filter(Boolean) : [str(a.filename)].filter(Boolean));
+        return [translate("agent:toolMeta.head_message_countFile", { count: files.size }), `${str(a.query)} -> ${str(a.replacement)}`, a.clear_comment ? translate("agent:toolMeta.summary_clearCommentFilter_clearComment") : ''].filter(Boolean).join(' · ');
+      }
       const patches = Array.isArray(a?.patches) ? (a.patches as Record<string, unknown>[]) : [];
       const files = new Set(patches.map((p) => str(p?.file) || str(a?.filename)).filter(Boolean));
       const head = files.size > 1 ? translate("agent:toolMeta.head_message_countFile", { count: files.size }) : '';

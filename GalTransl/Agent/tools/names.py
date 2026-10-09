@@ -206,17 +206,44 @@ def _name_table_changes(
     return added, removed, changes
 
 
-def _tool_save_name_table(runner: AgentRunner, args: dict[str, Any]) -> Any:
+def _name_table_save_plan(old_raw: Any, args: dict[str, Any]) -> tuple[str, list[Any]]:
+    """按 mode 计算完整写入内容，供保存与审批预览共用。"""
+    mode = args.get("mode", "overwrite")
+    if mode not in ("overwrite", "patch"):
+        raise AgentToolError("mode must be overwrite or patch")
     names = args.get("names", [])
     if not isinstance(names, list):
         raise AgentToolError("names must be an array")
+    if mode == "overwrite":
+        return mode, names
+
+    merged = {
+        str(item["src_name"]): dict(item)
+        for item in old_raw
+        if isinstance(item, dict) and item.get("src_name")
+    }
+    for item in names:
+        if not isinstance(item, dict) or not isinstance(item.get("src_name"), str) or not item["src_name"].strip():
+            raise AgentToolError("each patch entry must have a non-empty src_name")
+        src = item["src_name"]
+        entry = merged.setdefault(src, {"src_name": src, "dst_name": "", "count": 0})
+        # 只合并显式传入的字段；空译名可用于清空，省略字段则保留旧值。
+        for field in ("dst_name", "count"):
+            if field in item:
+                entry[field] = item[field]
+    return mode, list(merged.values())
+
+
+def _tool_save_name_table(runner: AgentRunner, args: dict[str, Any]) -> Any:
     pid = runner._project_id()
-    # 先读旧表（算 changes 的基底），再整表覆写
+    # 用原始表合并，避免把 get_name_table 的 GPT 字典展示译名写进未修改的行。
     old = runner._http_get(f"/api/projects/{pid}/name-table")
+    mode, names = _name_table_save_plan(old.get("names", []), args)
     result = runner._http_post(f"/api/projects/{pid}/name-table/save", {"names": names})
     added, removed, changes = _name_table_changes(old.get("names", []), names)
     return {
         **(result if isinstance(result, dict) else {}),
+        "mode": mode,
         "names_added": added,
         "names_removed": removed,
         "changes": changes,

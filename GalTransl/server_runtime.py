@@ -507,6 +507,18 @@ RUNTIME_REGISTRY = RuntimeRegistry()
 _CACHE_APPEND_SUFFIX = ".append.jsonl"
 
 
+def _cache_entry_translation_skipped(item: dict[str, Any]) -> bool:
+    return item.get("translation_skipped") is True and item.get("post_src") == ""
+
+
+def _cache_entry_is_translated(item: Any) -> bool:
+    """Count explicitly skipped lines as completed in both progress endpoints."""
+    return isinstance(item, dict) and (
+        _cache_entry_translation_skipped(item)
+        or bool(item.get("pre_dst", "") or item.get("pre_zh", ""))
+    )
+
+
 @dataclass(slots=True)
 class _CacheProgressFileStat:
     mtime_ns: int
@@ -791,8 +803,8 @@ class RuntimeProgressCache:
                         else:
                             entry_key = _entry_signature(entries, idx)
 
-                        translation_skipped = item.get("translation_skipped") is True and item.get("post_src") == ""
-                        is_translated = translation_skipped or bool(item.get("pre_dst", "") or item.get("pre_zh", ""))
+                        translation_skipped = _cache_entry_translation_skipped(item)
+                        is_translated = _cache_entry_is_translated(item)
                         problem_text = filter_problem_text(item.get("problem", ""), problem_filter_keys)
                         # 白名单命中：等价于该条勾了 skip_check，问题整体不算
                         if is_problem_whitelisted(problem_white_index, entry.name, item.get("index", "")):

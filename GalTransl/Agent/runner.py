@@ -480,16 +480,19 @@ class AgentRunner:
                         has_changes = isinstance(result, dict) and any(
                             key in result for key in ("changes", "line_diff", "deleted_preview")
                         )
-                        self._emit(
-                            "tool_result",
-                            {
-                                "id": call_id,
-                                "name": name,
-                                "ok": True,
-                                "result": result if has_changes or rendered is None else rendered,
-                                "duration_ms": duration_ms,
-                            },
-                        )
+                        tool_result_event = {
+                            "id": call_id,
+                            "name": name,
+                            "ok": True,
+                            "result": result if has_changes or rendered is None else rendered,
+                            "duration_ms": duration_ms,
+                        }
+                        # 写入类工具仍需保留原始结果给前端变更卡；同时把
+                        # 面向模型的 Markdown 预览单独带给 Agent 页面，避免
+                        # 结果区退回显示完整 JSON。
+                        if rendered is not None:
+                            tool_result_event["result_markdown"] = rendered
+                        self._emit("tool_result", tool_result_event)
                         content_str = rendered if rendered is not None else _tool_result_json(result)
                     except AgentToolError as exc:
                         duration_ms = int((time.time() - started) * 1000)

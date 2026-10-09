@@ -237,6 +237,9 @@ def _subagent_patch_schema() -> dict[str, Any]:
         for field in ("pre_dst", "proofread_dst"):
             properties.pop(field, None)
         schema["function"]["parameters"]["properties"].pop("clear_comment", None)
+        for field in ("action", "files", "query", "replacement", "fields"):
+            schema["function"]["parameters"]["properties"].pop(field, None)
+        schema["function"]["parameters"]["required"] = ["patches"]
         properties["dst"] = {"type": "string", "description": "新译文；工具自动更新当前生效的 pre_dst 或 proofread_dst，不能为空"}
         properties["proofread_comment"]["description"] = "需要二次审查的事项；本次已修改译文并解决旧意见时传空串清除，否则保留"
         schema["function"]["description"] = (

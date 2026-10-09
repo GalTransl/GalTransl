@@ -7,15 +7,17 @@ from typing import Any, TYPE_CHECKING
 
 from GalTransl.Agent.core import DEFAULT_CONFIG_FILE, _log
 from GalTransl.Agent.tools.cache import (
+    _cache_replace_request,
     _group_cache_patches_by_file,
     _plan_cache_delete,
     _plan_cache_patches,
+    _plan_cache_replacements,
 )
 from GalTransl.Agent.tools.cache_fields import _PATCHABLE_FIELDS
 from GalTransl.Agent.tools.common import _diff_lines, _parse_index_spec
 from GalTransl.Agent.models import AgentToolError
 from GalTransl.Agent.tools.dicts import _dict_new_lines, _dict_save_plan
-from GalTransl.Agent.tools.names import _name_table_changes
+from GalTransl.Agent.tools.names import _name_table_changes, _name_table_save_plan
 from GalTransl.Agent.tools.problems import (
     _problem_filter_keywords,
     _load_problem_filter_keys,
@@ -97,7 +99,11 @@ def _preview_cache_patch(runner: AgentRunner, args: dict[str, Any]) -> dict[str,
     changes 与真执行那份逐条一致（同一个 _plan_cache_patches、同一条前缀规则，clear_comment 也
     照传），所以卡上看到的 before→after 就是获批后会写下去的东西——包括要清掉的那些批注。
     """
-    targets = _group_cache_patches_by_file(args)
+    replace_request = _cache_replace_request(args, _PATCHABLE_FIELDS)
+    targets = (
+        [(name, []) for name in replace_request["files"]]
+        if replace_request is not None else _group_cache_patches_by_file(args)
+    )
     qualify = len(targets) > 1
     clear_comment = bool(args.get("clear_comment"))
     pid = runner._project_id()
@@ -105,12 +111,17 @@ def _preview_cache_patch(runner: AgentRunner, args: dict[str, Any]) -> dict[str,
     changes: list[dict[str, Any]] = []
     not_found: list[dict[str, Any]] = []
     for filename, patches in targets:
-        data = runner._http_get(f"/api/projects/{pid}/cache/{urllib.parse.quote(filename)}")
+        try:
+            data = runner._http_get(f"/api/projects/{pid}/cache/{urllib.parse.quote(filename)}")
+        except AgentToolError:
+            continue
         entries = data.get("entries", []) if isinstance(data, dict) else []
         if not isinstance(entries, list):
             continue
-        planned = _plan_cache_patches(
-            entries, patches, _PATCHABLE_FIELDS, clear_comment=clear_comment
+        planned = (
+            _plan_cache_replacements(entries, replace_request, _PATCHABLE_FIELDS, clear_comment=clear_comment)
+            if replace_request is not None
+            else _plan_cache_patches(entries, patches, _PATCHABLE_FIELDS, clear_comment=clear_comment)
         )
         files.append(filename)
         for change in planned["changes"]:
@@ -265,7 +276,7 @@ def _preview_guideline_write(runner: AgentRunner, args: dict[str, Any]) -> dict[
 def _preview_name_table(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
     """save_name_table 的预览：拿旧表按 src_name 比出新增/移除/改译名。
 
-    整表覆写的写法下"改了哪几个名字"只能比对才看得出来（见 _name_table_changes）；
+    按保存时相同的 mode 合并规则计算最终表，再比较译名（见 _name_table_changes）；
     原样回传同一张表时不产生任何 changes，卡上就不显示这块。
     """
     names = args.get("names", [])
@@ -273,6 +284,7 @@ def _preview_name_table(runner: AgentRunner, args: dict[str, Any]) -> dict[str, 
         return None
     pid = runner._project_id()
     old = runner._http_get(f"/api/projects/{pid}/name-table")
+    _, names = _name_table_save_plan(old.get("names", []), args)
     _, _, changes = _name_table_changes(old.get("names", []), names)
     if not changes:
         return None

@@ -109,8 +109,8 @@ export const ToolRow = memo(function ToolRow({
     item.name === 'ask_user' && ok
       ? str((item.result as Record<string, unknown> | undefined)?.summary)
       : '';
-  const resultText = askSummary || formatPayload(ok ? item.result : item.error);
-  const resultMarkdown = ok && typeof item.result === 'string';
+  const resultText = askSummary || (ok && item.resultMarkdown) || formatPayload(ok ? item.result : item.error);
+  const resultMarkdown = !askSummary && ok && (typeof item.resultMarkdown === 'string' || typeof item.result === 'string');
   const hasDetails = Boolean(summary || resultText || item.arguments || changeList);
   const longResult = resultText.length > 400;
 

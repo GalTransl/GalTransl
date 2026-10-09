@@ -28,6 +28,8 @@ export type ActivityItem = {
   arguments?: unknown;
   ok?: boolean;
   result?: unknown;
+  /** 工具结果的 Markdown 预览；原始 result 仍用于写入变更卡。 */
+  resultMarkdown?: string;
   error?: string;
   durationMs?: number;
   // 权限审批：后端在这个工具调用执行前挂起等用户点（见 PermissionCard）。
@@ -346,6 +348,7 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
       if (target) {
         target.ok = ev.ok;
         target.result = ev.result;
+        target.resultMarkdown = ev.result_markdown;
         target.error = ev.error;
         target.durationMs = ev.duration_ms;
         reconcileSubagentStatuses(target);
@@ -357,6 +360,7 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
           name: ev.name,
           ok: ev.ok,
           result: ev.result,
+          resultMarkdown: ev.result_markdown,
           error: ev.error,
           durationMs: ev.duration_ms,
         });

@@ -516,12 +516,71 @@ def _group_cache_patches_by_file(args: dict[str, Any]) -> list[tuple[str, list[A
     return list(groups.items())
 
 
+def _cache_replace_request(args: dict[str, Any], allowed: frozenset[str]) -> dict[str, Any] | None:
+    action = args.get("action", "patch")
+    if action not in ("patch", "replace"):
+        raise AgentToolError("action must be patch or replace")
+    if action == "patch":
+        return None
+    if "patches" in args:
+        raise AgentToolError("action=replace cannot be combined with patches")
+    query = args.get("query")
+    replacement = args.get("replacement")
+    if not isinstance(query, str) or not query:
+        raise AgentToolError("query must be a non-empty string")
+    if not isinstance(replacement, str):
+        raise AgentToolError("replacement must be a string (empty string deletes matches)")
+    filenames = args.get("files")
+    if filenames is None:
+        filenames = [args.get("filename")]
+    elif args.get("filename"):
+        raise AgentToolError("action=replace requires either files or filename, not both")
+    if not isinstance(filenames, list) or not filenames:
+        raise AgentToolError("files must be a non-empty array of cache filenames")
+    if any(not isinstance(name, str) or not name.strip() for name in filenames):
+        raise AgentToolError("each file must be a non-empty cache filename")
+    fields = args.get("fields", ["pre_dst", "proofread_dst"])
+    if not isinstance(fields, list) or not fields:
+        raise AgentToolError("fields must be a non-empty array")
+    if any(not isinstance(field, str) or field not in _TRANSLATION_FIELDS or field not in allowed for field in fields):
+        raise AgentToolError("replace fields must be allowed translation fields: pre_dst / proofread_dst")
+    return {
+        "files": list(dict.fromkeys(name.strip() for name in filenames)),
+        "fields": list(dict.fromkeys(fields)),
+        "query": query,
+        "replacement": replacement,
+    }
+
+
+def _plan_cache_replacements(
+    entries: list[Any], request: dict[str, Any], allowed: frozenset[str], *, clear_comment: bool = False,
+) -> dict[str, Any]:
+    patches = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        updates = {}
+        for field in request["fields"]:
+            value = _cache_field_value(entry, field)
+            if isinstance(value, str) and request["query"] in value:
+                after = value.replace(request["query"], request["replacement"])
+                if after != value:
+                    updates[field] = after
+        if updates:
+            patches.append({"index": entry.get("index"), **updates})
+    # 文本替换保留命中范围之外的字符，包括已有换行和转义序列。
+    return _plan_cache_patches(
+        entries, patches, allowed, clear_comment=clear_comment, normalize_linebreaks=False,
+    )
+
+
 def _plan_cache_patches(
     entries: list[Any],
     patches_raw: list[Any],
     allowed: frozenset[str],
     *,
     clear_comment: bool = False,
+    normalize_linebreaks: bool = True,
 ) -> dict[str, Any]:
     """把 patches 解析成「要改哪些条目的哪些字段」（**只读**，不动 entries）。
 
@@ -541,6 +600,8 @@ def _plan_cache_patches(
     """
     by_index: dict[int, dict[str, Any]] = {}
     for e in entries:
+        if not isinstance(e, dict):
+            continue
         idx = e.get("index")
         if idx is not None:
             try:
@@ -588,14 +649,14 @@ def _plan_cache_patches(
             skipped.append({"index": idx_i, "reason": reason})
             continue
         for f, v in list(updates.items()):
-            if isinstance(v, str):
+            if normalize_linebreaks and isinstance(v, str):
                 # 换行归一化：字段现值（正在编辑的那份）的风格优先，其次该条 post_src 的风格。
                 # 归一化后的值就是真执行会写下去的东西，变更卡的 before→after 也用它——所见即所得。
                 v = _normalize_linebreaks_like(
                     v, str(now.get(f) or ""), str(entry.get("post_src") or "")
                 )
                 updates[f] = v
-            changes.append(_change(f"#{idx_i}.{f}", now.get(f), v, "replace"))
+            changes.append(_change(f"#{idx_i}.{f}", _cache_field_value(now, f), v, "replace"))
             now[f] = v
         plan.append({"entry": entry, "index": idx_i, "updates": updates})
     return {
@@ -632,10 +693,12 @@ def _patch_one_cache_file(
     *,
     qualify: bool,
     clear_comment: bool = False,
+    replace_request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     with _cache_file_lock(runner, filename):
         return _patch_one_cache_file_locked(
-            runner, pid, filename, patches, allowed, qualify=qualify, clear_comment=clear_comment
+            runner, pid, filename, patches, allowed, qualify=qualify, clear_comment=clear_comment,
+            replace_request=replace_request,
         )
 
 
@@ -648,6 +711,7 @@ def _patch_one_cache_file_locked(
     *,
     qualify: bool,
     clear_comment: bool = False,
+    replace_request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """改一个缓存文件里的若干条目：读全量 → 计划 → 写全量 → 回「改了什么、还剩什么问题」。
 
@@ -665,7 +729,11 @@ def _patch_one_cache_file_locked(
     if not isinstance(entries, list):
         raise AgentToolError(f"「{filename}」的 entries 非数组，无法 patch")
 
-    planned = _plan_cache_patches(entries, patches, allowed, clear_comment=clear_comment)
+    planned = (
+        _plan_cache_replacements(entries, replace_request, allowed, clear_comment=clear_comment)
+        if replace_request is not None
+        else _plan_cache_patches(entries, patches, allowed, clear_comment=clear_comment)
+    )
     by_index = planned["by_index"]
     skipped = planned["skipped"]
     not_found = planned["not_found"]
@@ -689,7 +757,9 @@ def _patch_one_cache_file_locked(
         "updated": len(applied_indexes),
         "changes": changes,
     }
-    if not applied_indexes:
+    if not applied_indexes and replace_request is not None and not skipped:
+        result["note"] = "没有需要替换的译文，未保存文件"
+    elif not applied_indexes:
         # 把跳过原因带上：否则模型只看到"没有条目被更新"，不知道是字段不许改还是 index 写错了
         # （窄字段白名单也通过这里返回拒绝原因）
         reasons = "；".join(str(s.get("reason") or "") for s in skipped if s.get("reason"))
@@ -773,7 +843,11 @@ def _tool_patch_transl_cache(
     allowed = allowed_fields if allowed_fields is not None else _PATCHABLE_FIELDS
     # 显式窄白名单调用不启用批量清批注，避免顺手删除未处理意见。
     clear_comment = bool(args.get("clear_comment")) and allowed_fields is None
-    targets = _group_cache_patches_by_file(args)
+    replace_request = _cache_replace_request(args, allowed)
+    targets = (
+        [(name, []) for name in replace_request["files"]]
+        if replace_request is not None else _group_cache_patches_by_file(args)
+    )
     pid = runner._project_id()
     qualify = len(targets) > 1  # 跨文件才给 path 加文件名前缀
     files: list[dict[str, Any]] = []
@@ -788,6 +862,7 @@ def _tool_patch_transl_cache(
                     allowed,
                     qualify=qualify,
                     clear_comment=clear_comment,
+                    replace_request=replace_request,
                 )
             )
         except AgentToolError as exc:
@@ -796,7 +871,7 @@ def _tool_patch_transl_cache(
             files.append({"filename": filename, "updated": 0, "changes": [], "error": str(exc)})
 
     updated = sum(int(item.get("updated") or 0) for item in files)
-    if not updated:
+    if not updated and (replace_request is None or all(item.get("error") for item in files)):
         detail = "；".join(
             f"{item['filename']}：{item.get('error') or '没有条目被更新'}" for item in files
         )
@@ -810,6 +885,8 @@ def _tool_patch_transl_cache(
         # 跨文件时 path 带「文件名#」前缀，一眼看得出改的是哪份。
         "changes": [change for item in files for change in item.get("changes") or []],
     }
+    if replace_request is not None:
+        result["action"] = "replace"
     trans_by = next((str(item["trans_by"]) for item in files if item.get("trans_by")), "")
     if trans_by:
         result["trans_by"] = trans_by

@@ -239,10 +239,15 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "save_name_table",
-            "description": "保存人名表（写入 name替换表.csv）。",
+            "description": "保存人名表（写入 name替换表.csv）。局部补译或修改优先用 mode=patch，只传要改的条目：按 src_name 更新或新增，未传入的条目保留，省略的 dst_name/count 保留旧值，显式传 dst_name=空串可清空译名。mode=overwrite（默认）整表覆盖，未传入的条目会被删除。",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["overwrite", "patch"],
+                        "description": "overwrite=全量覆盖（默认）；patch=按 src_name 更新或新增，保留未传入的条目。局部修改使用 patch。",
+                    },
                     "names": {
                         "type": "array",
                         "items": {
@@ -581,10 +586,29 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "patch_transl_cache",
-            "description": "批量修改缓存条目的译文（pre_dst / proofread_dst 两列）。**一次调用可以跨多个缓存文件**（统一译名/术语这类活一次就交完）：patches 里每条自带 file；只改一个文件时用顶层 filename、patches 不带 file。只更新 patches 里点名的条目与字段，其它条目原样保留。**按校对批注改完一批译文后，顶层带 clear_comment=true**：点名的条目的 proofread_comment 一并清空（表示这些意见已处理），不必在每条 patch 里各写一遍空串。返回是一篇**按文件分组的 Markdown**：每个文件一节，先列「改了什么」（每条 before→after），再列没落地的条目（index 不存在 / 字段不许改及原因）与「改完仍存在的问题」（只列被改过的条目——没列到的就是消掉了）；改了什么一目了然、有没有引入新问题当场可验，不必再 read_transl_cache。适合发现问题后改译文、再配合 rebuilda 重建的复核循环。trans_by 由工具自动标记，不用手动指定。",
+            "description": "批量修改缓存译文。action=patch（默认）：patches 按 index 提交完整新译文，跨文件时每条带 file，单文件可用顶层 filename。action=replace：传 files（缓存文件名数组，单文件也可用 filename）、query、replacement，在指定文件的译文中批量查找替换，不必逐条提交新译文；普通文本、区分大小写、替换所有出现位置，不支持正则。fields 默认 [pre_dst, proofread_dst]，可只选其中一列；replacement 为空串表示删除匹配文本，未命中或无实际变化的文件不保存。两种 action 不能混用。clear_comment=true 可清空本次实际修改条目的校对批注。其它条目原样保留。返回按文件分组的 Markdown，列出 before→after、未落地原因和修改后仍存在的问题；trans_by 自动标成本会话模型名，保存时重新检查问题。",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["patch", "replace"],
+                        "description": "patch=按 index 修改（默认，需要 patches）；replace=指定文件内查找替换（需要 files 或 filename、query、replacement）。",
+                    },
+                    "files": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                        "description": "action=replace 用：要查找替换的缓存文件名数组，来自 read_transl_cache(action=list)。只扫描这些文件，不支持通配符；重复文件只处理一次。与 filename 二选一。",
+                    },
+                    "query": {"type": "string", "description": "action=replace 用：要查找的非空普通文本，区分大小写，空白字符原样匹配。"},
+                    "replacement": {"type": "string", "description": "action=replace 用：替换文本，可为空串（删除匹配文本）。"},
+                    "fields": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["pre_dst", "proofread_dst"]},
+                        "minItems": 1,
+                        "description": "action=replace 用：替换哪些译文字段，默认同时替换 pre_dst 和 proofread_dst。",
+                    },
                     "filename": {"type": "string", "description": "可选。默认缓存文件名（来自 read_transl_cache 的 list 清单）：patches 里没写 file 的都改它。**只改一个文件就写它**；要一次改多个文件，就每条 patch 都写 file，这里可以不写"},
                     "patches": {
                         "type": "array",
@@ -607,7 +631,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     },
                     "reason": _REASON_PROPERTY,
                 },
-                "required": ["patches"],
+                "required": [],
             },
         },
     },

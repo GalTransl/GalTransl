@@ -2010,6 +2010,8 @@ export type AgentEvent = {
   // tool_result
   ok?: boolean;
   result?: unknown;
+  /** 面向模型/结果区的 Markdown 预览；result 可能仍是前端变更卡所需的原始对象。 */
+  result_markdown?: string;
   error?: string;
   duration_ms?: number;
   // permission_request（写操作执行前请用户批准）

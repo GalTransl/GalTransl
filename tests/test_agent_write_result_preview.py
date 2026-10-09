@@ -131,7 +131,7 @@ class WritePreviewPipelineTests(unittest.TestCase):
             def response():
                 if not received:
                     received.append(None)
-                    return "", [{"id": "c1", "name": "save_name_table", "arguments": "{}"}], "tool_calls"
+                    return "", [{"id": "c1", "name": "save_dict", "arguments": "{}"}], "tool_calls"
                 received.append(next(m["content"] for m in runner.state.messages if m["role"] == "tool"))
                 return "done", [], "stop"
 
@@ -141,8 +141,13 @@ class WritePreviewPipelineTests(unittest.TestCase):
             self.assertEqual(len(_table_data(received[1])), 10)
             event = next(e for e in runner.state.events if e.type == "tool_result")
             self.assertEqual(event.data["result"], result)
+            self.assertEqual(event.data["result_markdown"], _render_tool_result_table("save_dict", result))
             loaded = runner._store.load()
             self.assertEqual(next(e for e in loaded["events"] if e["type"] == "tool_result")["result"], result)
+            self.assertEqual(
+                next(e for e in loaded["events"] if e["type"] == "tool_result")["result_markdown"],
+                _render_tool_result_table("save_dict", result),
+            )
             self.assertEqual(next(m for m in loaded["messages"] if m["role"] == "tool")["content"], received[1])
             replay = ss.read_transcript(project, sid)
             self.assertEqual(next(e for e in replay if e["type"] == "tool_result")["result"], result)

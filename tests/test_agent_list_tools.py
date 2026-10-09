@@ -360,9 +360,11 @@ class ListSchemaTests(unittest.TestCase):
             props = schema["function"]["parameters"]["properties"]
             # read_transl_cache 还管 read/search，入参更多；清单这三个必须都在
             self.assertTrue({"grep", "limit", "order"} <= set(props), name)
-            self.assertEqual(
-                props["order"]["enum"], ["even", "name", "random", "size_desc", "size_asc"], name
-            )
+            expected_orders = ["even", "name", "random", "size_desc", "size_asc"]
+            if name == "read_transl_cache":
+                # 统一入口还需声明 read/search 支持的倒序，list_input_files 不支持它。
+                expected_orders.append("reverse")
+            self.assertCountEqual(props["order"]["enum"], expected_orders, name)
             self.assertIn("均匀采样", schema["function"]["description"], name)
 
     def test_default_limit_constant_is_100(self):

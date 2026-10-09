@@ -571,6 +571,8 @@ def _md_render_patch_transl_cache(result: dict[str, Any]) -> str:
         parts.append(f"## {index}. {row.get('filename')}（改 {int(row.get('updated') or 0)} 条）")
         if row.get("error"):
             parts.append(f"⚠ {row['error']}")
+        if row.get("note"):
+            parts.append(str(row["note"]))
         if row.get("verification") == "unknown":
             parts.append("检测状态：未验证，不能据此判断问题已消除。")
         if row.get("audit_error"):
