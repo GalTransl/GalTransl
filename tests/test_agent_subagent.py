@@ -1359,7 +1359,8 @@ class SubagentCompactionTests(unittest.TestCase):
 
     窗口取自 parent._context_window、阈值走 COMPACT_TRIGGER_RATIO、切点走
     _find_compaction_cut（保证 tool_calls/tool 成对）；头部 2 条（system + 任务说明）
-    永远保留，保留尾部取 SUBAGENT_COMPACT_KEEP_RECENT。压缩那一轮**不带 tools**。
+    永远保留，保留尾部取 SUBAGENT_COMPACT_KEEP_RECENT。压缩那一轮与主 Agent 一样
+    **照常带 tools**（复用会话前缀），模型没按指令走（回工具调用）时同样回退独立摘要。
     插入式失败或没拿到摘要时，退回独立摘要请求（复用 parent._summarize_messages），
     再兜本地摘要——整条路都不该把子代理卡死。
     """
@@ -1497,6 +1498,25 @@ class SubagentCompactionTests(unittest.TestCase):
 
         self.assertIn("独立摘要", sub.messages[2]["content"])
 
+    def test_compaction_tool_calls_fall_back_to_a_separate_request(self) -> None:
+        """压缩那一轮带了 tools，模型可能没按指令走（回了工具调用）：回滚并回退独立摘要。"""
+
+        def chat(_client, _model, _messages, _tools):
+            return "", [_Call("cx", "read_transl_cache", '{"filename": "a.json"}')], "", "", 0
+
+        parent = self._parent(20_000, summarizer=lambda head: "## 目标\n独立摘要。")
+        sub = self._sub(parent)
+        sub.messages = self._history(12)
+        sub._begin_compaction()
+
+        with patch.object(subagent_mod, "_subagent_chat", chat):
+            sub._run_compaction_request(None, "fake-model")
+
+        # 指令被弹掉、历史由独立摘要重建，不留下"进行中的压缩"
+        self.assertIn("独立摘要", sub.messages[2]["content"])
+        self.assertIsNone(sub._pending_compaction)
+        self.assertFalse(any(m.get("_compact_instruction") for m in sub.messages))
+
     def test_falls_back_to_local_summary_without_parent_summarizer(self) -> None:
         sub = self._sub(self._parent(20_000))  # 不给 _summarize_messages
         sub.messages = self._history(12)
@@ -1516,8 +1536,8 @@ class SubagentCompactionTests(unittest.TestCase):
 
         self.assertIn("因上下文超限被压缩", sub.messages[2]["content"])
 
-    def test_run_compresses_with_the_current_conversation_and_without_tools(self) -> None:
-        """整条路：挂指令 → 那一轮**不带 tools**把摘要拿回来 → 历史被压 → 下一轮继续干活。"""
+    def test_run_compresses_with_the_current_conversation_and_with_tools(self) -> None:
+        """整条路：挂指令 → 那一轮**照常带 tools**把摘要拿回来 → 历史被压 → 下一轮继续干活。"""
         parent = self._parent(rt.DEFAULT_CONTEXT_WINDOW)
         parent.project_guideline = "项目规范在压缩后也必须保留。"
         calls: list[tuple[list[dict], object]] = []
@@ -1549,8 +1569,11 @@ class SubagentCompactionTests(unittest.TestCase):
 
         self.assertEqual(out["tasks"][0]["status"], "done")
         self.assertEqual(out["tasks"][0]["report"], "报告：没问题。")
-        # 4 次请求：两轮干活 → 一轮压缩（不带 tools）→ 一轮收尾
-        self.assertEqual([tools is None for _, tools in calls], [False, False, True, False])
+        # 4 次请求：两轮干活 → 一轮压缩（照常带 tools）→ 一轮收尾
+        self.assertEqual(len(calls), 4)
+        # 每一轮都带工具表——压缩轮复用同一套 tools（与主 Agent 一致），不换输入
+        self.assertTrue(all(tools is not None for _, tools in calls))
+        self.assertEqual(calls[2][1], calls[0][1])
         for messages, _ in calls:
             self.assertEqual(messages[0], calls[0][0][0])
             self.assertIn(parent.global_guideline, messages[0]["content"])

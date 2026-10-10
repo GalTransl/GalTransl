@@ -810,8 +810,9 @@ def _subagent_chat(
     思考字段的约定与主 Agent 一致（见 REASONING_FIELD_NAMES）：带 tools 的多轮对话里，
     DeepSeek 这类 provider 要求把上一轮的 reasoning 原样回传，不回就 400。
 
-    tools=None 用于压缩那一轮：整个字段不发出（而不是发 null——有些兼容端点不认），
-    模型因此没有"接着调工具"的选项（见 SubAgentRunner._begin_compaction）。
+    tools 传 None 时整个字段不发出（而不是发 null——有些兼容端点不认）。正常轮与压缩轮
+    都带工具表（见 SubAgentRunner.run / _run_compaction_request），None 只是给降级摘要等
+    特殊路径留的口子。
     """
     kwargs: dict[str, Any] = {
         "model": model,
@@ -841,11 +842,13 @@ def _subagent_chat(
 
 
 # 子代理的压缩指令（Insert-then-Compress 的那条瞬时消息，见 SubAgentRunner._begin_compaction）。
-# 与主 Agent 那份（COMPACT_INSTRUCTION_PROMPT）的差别：子代理任务单一，而且压缩那一轮**不带
-# tools**——它没有"接着调工具"的余地，所以不必像主 Agent 那样反复强调"不要执行上面的请求"。
+# 与主 Agent 那份（COMPACT_INSTRUCTION_PROMPT）同构：压缩那一轮**照常带 tools**（复用前缀、
+# 命中提示缓存），所以指令必须把话说死——上下文里全是"继续干活"的暗示，不强调"不要调工具"
+# 模型就可能接着干活（那条路由 _run_compaction_request 回退独立摘要请求兜底）。子代理任务
+# 单一，骨架按"任务与范围/已完成/关键发现/待办"组织。
 # 输出同样用 <summary> 包住，与主 Agent 共用 _parse_compact_summary 解析。
-SUBAGENT_COMPACT_INSTRUCTION_PROMPT = """[记忆压缩模式] 上面的工作已经告一段落。现在不要继续任务，把它压缩成一份摘要，供你在后续（换了一段上下文之后）接着做同一件事。严格执行：
-1. 只输出摘要，不要调用工具、不要接着干活；
+SUBAGENT_COMPACT_INSTRUCTION_PROMPT = """[记忆压缩模式] 上面的工作**已经结束**，你现在不要继续任务，把它压缩成一份摘要，供你在后续（换了一段上下文之后）接着做同一件事。严格执行：
+1. **不要**执行上面提到的任何请求，**不要**调用任何工具（tool_calls 必须为空），只输出摘要；
 2. 正文用 <summary>…</summary> 包住，按下面的骨架写：
 <summary>
 ## 任务与范围
@@ -1047,12 +1050,12 @@ class SubAgentRunner:
         """历史超窗口就挂上压缩指令，让**下一轮请求**顺带把摘要拿回来（Insert-then-Compress）。
 
         与父 Agent 同一机制、同一套阈值（父的窗口 + COMPACT_TRIGGER_RATIO + 尾部预留），
-        差别只有三处：
+        差别只有两处：
         - 头部 2 条（system 提示词 + 任务说明）永远保留——子代理没有别的途径知道"我是谁、
           负责哪些文件"；
-        - 保留段按 token 预算挑，预算取父会话的一半（SUBAGENT_COMPACT_KEEP_RECENT_RATIO）；
-        - 压缩那一轮**不带 tools**，它没有"接着调工具"的余地，也就没有父 Agent 那条
-          "模型回了工具调用就判失败"的分支。
+        - 保留段按 token 预算挑，预算取父会话的一半（SUBAGENT_COMPACT_KEEP_RECENT_RATIO）。
+        压缩那一轮与父 Agent 一样**照常带 tools**（复用会话前缀、命中提示缓存）；模型没按
+        指令走、回了工具调用时，由 _run_compaction_request 回退独立摘要请求。
         """
         if self._pending_compaction is not None or self._compact_failed:
             return False
@@ -1095,18 +1098,26 @@ class SubAgentRunner:
     def _run_compaction_request(self, client: Any, model: str) -> None:
         """发出带压缩指令的那轮请求、收下摘要；失败退回独立摘要请求。
 
-        这轮**不带 tools**（见 _begin_compaction），拿到的正文按 <summary> 解析。整条路子
-        （插入式 → 独立请求 → 本地兜底）都不会让子代理卡死。
+        与父 Agent 一样，这轮**照常带 tools**：system prompt、工具表、历史前缀全部复用，
+        摘要调用本身也能命中提示缓存。模型没按指令走（返回工具调用）或正文解析不出摘要时，
+        一律回退独立摘要请求。整条路子（插入式 → 独立请求 → 本地兜底）都不会让子代理卡死。
         """
         pending = self._pending_compaction or {}
         cut = pending.get("cut")
         try:
-            content, _, _, _ = self._chat_with_retry(client, model, None)
+            content, tool_calls, _, _ = self._chat_with_retry(
+                client, model, _subagent_tools(self.agent)
+            )
         except AgentStopRequested:
             self._abort_compaction()  # 父回合被停止：历史不必留着那条指令
             raise
         except Exception as exc:  # noqa: BLE001 - 压缩失败不能拖垮子代理
             _log(f"  ⚠ 子代理 {self.id} 压缩请求失败（{exc}），回退独立摘要请求")
+            self._abort_compaction()
+            self._compact_via_separate_request(cut)
+            return
+        if tool_calls:
+            _log(f"  ⚠ 子代理 {self.id} 压缩请求返回了工具调用（没按指令走），回退独立摘要请求")
             self._abort_compaction()
             self._compact_via_separate_request(cut)
             return
@@ -1195,7 +1206,8 @@ class SubAgentRunner:
         用量比主请求小得多，重试代价低。规则与主 Agent 一致：只重试瞬态错误（超时 /
         限流 / 5xx / 流连接断了）；鉴权、参数、上下文超限重试多少次都一样，直接失败。
         退避期间父回合被停止就立刻收尾（抛 AgentStopRequested，由 run 转成 stopped）。
-        tools=None 是压缩那一轮：不带工具，只求一段文字摘要（见 _begin_compaction）。
+        压缩那一轮也走这里，且**照常带工具表**（见 _run_compaction_request）——与正常轮
+        共用同一条请求路径，前缀缓存不废。
         """
         attempt = 0
         while True:
@@ -1213,8 +1225,13 @@ class SubAgentRunner:
                 # 任意模型响应都算首响（包括只有工具调用、没有正文的响应），不等任务完成。
                 if self.first_response_event is not None:
                     self.first_response_event.set()
-                # 摘要请求省略了 tools，且即将替换历史，不能拿它校准正常请求。
-                if tools is not None and prompt_tokens > 0:
+                # 压缩那一轮（_pending_compaction 挂着时）的历史即将被 _apply_summary 重建
+                # （锚点在那里清零），且消息里带着一次性指令——不能拿它校准正常请求。
+                if (
+                    tools is not None
+                    and prompt_tokens > 0
+                    and self._pending_compaction is None
+                ):
                     self._last_prompt_tokens = prompt_tokens
                     self._anchored_message_count = anchored_count
                 return content, calls, field, reasoning
