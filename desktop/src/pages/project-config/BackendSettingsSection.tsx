@@ -3,7 +3,6 @@ import { Panel } from '../../components/Panel';
 import { CustomSelect } from '../../components/CustomSelect';
 import { Switch } from '../../components/Switch';
 import { BackendConfigEditor } from '../../components/BackendConfigEditor';
-import { InlineFeedback } from '../../components/page-state';
 import { ProxyConfigEditor } from '../../components/ProxyConfigEditor';
 
 interface BackendSettingsSectionProps {
@@ -60,13 +59,7 @@ export function BackendSettingsSection({
           </span>
         </label>
 
-        {resolvedProfile ? (
-          <InlineFeedback
-            tone="info"
-            title={translate("config:backendSettingsSection.configForm_title_currentConfig", { resolvedProfile: resolvedProfile })}
-            description={translate("config:backendSettingsSection.configForm_description_translationConfigProjectBackendSettingsChangeConfig")}
-          />
-        ) : (
+        {!resolvedProfile && (
           <BackendConfigEditor
             config={config?.backendSpecific as Record<string, unknown> || {}}
             onChange={(newBackend) => { onBackendChange(newBackend); onDirty(); }}

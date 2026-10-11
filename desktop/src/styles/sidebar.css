@@ -97,6 +97,9 @@
   top: 0;
   background: var(--color-surface-strong);
   border-right: 1px solid var(--color-line);
+  /* 折叠/展开用 width 过渡（两种状态的内部布局不同，transform 做不到）。
+     注意别加 contain: layout/paint：侧栏里挂着 position: fixed 的文件夹弹窗、
+     右键菜单和通知，contain 会让它们以侧栏为包含块并被裁剪。 */
   transition: width 240ms cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
   flex-shrink: 0;
@@ -393,7 +396,8 @@
   font-size: 17px;
   flex-shrink: 0;
   color: inherit;
-  transition: width 180ms ease, height 180ms ease, font-size 180ms ease;
+  /* 图标在紧凑/展开态之间改尺寸：不做 transition（宽高/字号都是布局属性，
+     动它们等于给每帧加一次重排），瞬时切换即可 */
 }
 
 .sidebar__project-icon--compact {
@@ -508,7 +512,7 @@
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .sidebar__project-confirm-no:hover {

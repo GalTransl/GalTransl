@@ -14,7 +14,7 @@ function fixture() {
     '../i18n': { t: key => key, message: key => key, useUiLanguage: () => 'en', useMessageState: useState, UiTrans: () => null },
     './Button': { Button: props => h('button', props) },
     './Icon': { Icon: () => null },
-    './Panel': { Panel: ({ children }) => h('section', null, children) },
+    './Panel': { Panel: ({ children, actions }) => h('section', null, actions, children) },
     './page-state': { EmptyState: () => null, ErrorState: () => null, InlineFeedback: () => null, LoadingState: () => null },
     '../lib/backendUsage': { formatBackendUsage: () => '' },
     '@tauri-apps/api/core': { invoke: async () => {} },
@@ -118,5 +118,51 @@ test('adding an entry reveals and focuses the inserted row, including searches a
   act(() => renderer.root.findByProps({ className: 'dict-card__add-row-btn' }).props.onClick());
   assert.deepEqual(scrolled, [4, 2, 3]);
   assert.deepEqual(focused, [4, 2, 3]);
+  act(() => renderer.unmount());
+});
+
+test('edits after switching from text to cards during save remain dirty and are saved next time', async () => {
+  const f = fixture();
+  const { DictionaryManager } = f.load(new URL('../src/components/DictionaryManager.tsx', import.meta.url));
+  const data = { pre_dict_files: [], post_dict_files: [], gpt_dict_files: ['gpt.txt'], dict_contents: { 'gpt.txt': { lines: ['猫\tcat'], mtime: 1 } } };
+  const saved = [];
+  let finish, renderer;
+  act(() => {
+    renderer = create(h(DictionaryManager, {
+      title: 'Dictionary', description: '', data, loading: false, error: null,
+      onReload: async () => {}, onCreateFile: async () => '', onDeleteFile: async () => {},
+      onSaveFile: (file, text) => { saved.push(text); return new Promise(resolve => { finish = resolve; }); },
+    }));
+  });
+  const toggle = () => renderer.root.findByProps({ className: 'dict-panel-actions' }).findAllByType('button')[0].props.onClick();
+  act(toggle);
+  act(() => renderer.root.findByType('textarea').props.onChange({ target: { value: '猫\tkitten' } }));
+  act(() => f.key());
+  assert.equal(saved[0], '猫\tkitten');
+  act(toggle);
+  act(() => renderer.root.findAllByType('input').find(node => node.props.value === 'kitten').props.onChange({ target: { value: 'newer' } }));
+  await act(async () => finish());
+  assert.equal(renderer.root.findAllByProps({ className: 'dict-file-item__dot' }).length, 1);
+  act(() => f.key());
+  assert.equal(saved[1], '猫\tnewer\t');
+  await act(async () => finish());
+  act(() => renderer.unmount());
+});
+
+test('card edits keep dictionary row classification consistent with serialized text', () => {
+  const f = fixture();
+  const { DictionaryManager } = f.load(new URL('../src/components/DictionaryManager.tsx', import.meta.url));
+  const data = { pre_dict_files: ['pre.txt'], post_dict_files: [], gpt_dict_files: [], dict_contents: { 'pre.txt': { lines: ['search\treplace\tnote'], mtime: 1 } } };
+  let renderer;
+  act(() => {
+    renderer = create(h(DictionaryManager, {
+      title: 'Dictionary', description: '', data, loading: false, error: null,
+      onReload: async () => {}, onCreateFile: async () => '', onDeleteFile: async () => {}, onSaveFile: async () => {},
+    }));
+  });
+  act(() => renderer.root.findByProps({ className: 'dict-tabs' }).findAllByType('button')[1].props.onClick());
+  act(() => renderer.root.findAllByType('input').find(node => node.props.value === 'search').props.onChange({ target: { value: 'diag' } }));
+  const heading = renderer.root.findByProps({ className: 'dict-card__pill dict-card__pill--situation' });
+  assert.equal(heading.props.children, 'projects:dictionaryManager.getTypeLabel_message_textVariant4');
   act(() => renderer.unmount());
 });

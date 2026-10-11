@@ -1,6 +1,7 @@
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useRetainPage } from '../components/PageActivity';
+import { createCacheProblemFilter, entriesMatch } from '../lib/cacheEntries';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
@@ -35,7 +36,7 @@ import {
   updateProjectConfig } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 import type { LocalizedText } from '../i18n/core';
-import { escapeProblemFilterPattern, filterProblemText, normalizeKeywordList, splitProblemItems, splitProblemTypes } from '../lib/problemFilter';
+import { escapeProblemFilterPattern, normalizeKeywordList, splitProblemItems, splitProblemTypes } from '../lib/problemFilter';
 import { joinPath } from '../lib/paths';
 
 /** 兼容读取缓存字段：优先新key，回退旧key */
@@ -46,10 +47,6 @@ function cloneEntries(entries: CacheEntry[]): CacheEntry[] {
     ...entry,
     ...(Array.isArray(entry.name) ? { name: [...entry.name] } : {}),
   }));
-}
-function entriesMatch(left: CacheEntry[], right: CacheEntry[]): boolean {
-  const normalize = (items: CacheEntry[]) => items.map((entry) => ({ ...entry, deleted: !!entry.deleted }));
-  return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
 }
 function escapeControlChars(text: string): string {
   return text.replace(/\r/g, '\\r').replace(/\n/g, '\\n');
@@ -90,7 +87,7 @@ function HighlightText({ text, query }: { text: string; query: string }) {
 }
 
 /* ── Cache Entry Card ── */
-function CacheEntryCard({
+const CacheEntryCard = memo(function CacheEntryCard({
   entry,
   filename,
   projectId,
@@ -271,7 +268,7 @@ function CacheEntryCard({
       </div>
     </article>
   );
-}
+});
 
 /* ── Search Result Card ── */
 function SearchResultCard({
@@ -969,27 +966,35 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     el?.scrollIntoView({ block: 'nearest' });
   }, [selectedSearchIdx]);
 
-  const visibleEntries = entries.map((entry) => ({
-    ...entry, problem: filterProblemText(entry.problem, problemFilterKeys),
-  }));
-  const filteredEntries = visibleEntries.filter((e) => {
-    if (filterProblems && !e.problem) return false;
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      return (
-        (src(e)?.toLowerCase().includes(term)) ||
-        (dst(e)?.toLowerCase().includes(term))
-      );
+  // 击键时先更新输入框，过滤用延迟值：连续输入不会每击键都全量 filter 大列表
+  const deferredSearchTerm = useDeferredValue(searchTerm.trim().toLowerCase());
+
+  const filterEntryProblem = useMemo(() => createCacheProblemFilter(problemFilterKeys), [problemFilterKeys]);
+  const visibleEntries = useMemo(() => entries.map(filterEntryProblem), [entries, filterEntryProblem]);
+
+  const filteredEntries = useMemo(() => {
+    if (!deferredSearchTerm) {
+      return filterProblems ? visibleEntries.filter((e) => e.problem) : visibleEntries;
     }
-    return true;
-  });
+    return visibleEntries.filter((e) => {
+      if (filterProblems && !e.problem) return false;
+      return (
+        (src(e)?.toLowerCase().includes(deferredSearchTerm)) ||
+        (dst(e)?.toLowerCase().includes(deferredSearchTerm))
+      );
+    });
+  }, [visibleEntries, filterProblems, deferredSearchTerm]);
 
   const total = entries.length;
-  const translated = entries.filter((e) => dst(e)).length;
-  const withProblems = visibleEntries.filter((e) => e.problem).length;
+  const translated = useMemo(() => entries.filter((e) => dst(e)).length, [entries]);
+  const withProblems = useMemo(() => visibleEntries.filter((e) => e.problem).length, [visibleEntries]);
 
-  const handleEntryChange = (index: number, field: keyof CacheEntry, value: string | boolean) => {
-    const next = entries.map((e) => {
+  const handleEntryChange = useCallback((index: number, field: keyof CacheEntry, value: string | boolean) => {
+    if (!selectedFile) return;
+    // entriesMapRef 是当前文件的条目真源（与 entries state 同步更新），
+    // 从这里取最新值可以让回调引用稳定，配合卡片 memo 跳过一次击键的整表重渲染
+    const current = entriesMapRef.current.get(selectedFile) ?? [];
+    const next = current.map((e) => {
       if (e.index !== index) return e;
       const updated: CacheEntry = { ...e, [field]: value, deleted: false };
       // 勾选跳过检查时同步清除问题标记
@@ -998,35 +1003,36 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       }
       return updated;
     });
-    setEntries(next);
-    if (selectedFile) entriesMapRef.current.set(selectedFile, next);
-    if (selectedFile) {
-      const clean = cleanEntriesMapRef.current.get(selectedFile);
-      setDirtyFiles((current) => {
-        const updated = new Set(current);
-        if (clean && entriesMatch(next, clean)) updated.delete(selectedFile);
-        else updated.add(selectedFile);
-        return updated;
-      });
-    }
-    setInfo(null);
-  };
-
-  // 不实际删除，处理删除和恢复
-  const handleDeleteAndRecover = (deleteMode: boolean, index: number) => {
-    if (!selectedFile) return;
-    const next = entries.map((e) => e.index === index ? { ...e, deleted: deleteMode } : e);
-    setEntries(next);
     entriesMapRef.current.set(selectedFile, next);
+    setEntries(next);
     const clean = cleanEntriesMapRef.current.get(selectedFile);
-    setDirtyFiles((current) => {
-      const updated = new Set(current);
+    setDirtyFiles((currentDirty) => {
+      const updated = new Set(currentDirty);
       if (clean && entriesMatch(next, clean)) updated.delete(selectedFile);
       else updated.add(selectedFile);
       return updated;
     });
     setInfo(null);
-  };
+  }, [selectedFile]);
+
+  // 不实际删除，处理删除和恢复
+  const handleDeleteAndRecover = useCallback((deleteMode: boolean, index: number) => {
+    if (!selectedFile) return;
+    const current = entriesMapRef.current.get(selectedFile) ?? [];
+    const next = current.map((e) => e.index === index ? { ...e, deleted: deleteMode } : e);
+    entriesMapRef.current.set(selectedFile, next);
+    setEntries(next);
+    const clean = cleanEntriesMapRef.current.get(selectedFile);
+    setDirtyFiles((currentDirty) => {
+      const updated = new Set(currentDirty);
+      if (clean && entriesMatch(next, clean)) updated.delete(selectedFile);
+      else updated.add(selectedFile);
+      return updated;
+    });
+    setInfo(null);
+  }, [selectedFile]);
+
+
 
   const handleSave = async (filename?: string) => {
     const targetFile = filename || selectedFile;
@@ -1277,6 +1283,11 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setSavingKeyword(false);
     }
   }, [projectId, configFileName, savingKeyword, loadProblems, runGlobalSearch]);
+
+  /** 卡片上的「-」：条目问题按字面加进 problemFilterKey（引用稳定，卡片 memo 才生效） */
+  const handleAddProblemFilterKey = useCallback((keyword: string) => {
+    void handleAddProblemKeyword(keyword, 'problemFilterKey');
+  }, [handleAddProblemKeyword]);
 
   const submitProblemKeywordEditor = useCallback((editor: NonNullable<typeof retranslEditor>) => {
     const keyword = editor.draft.trim();
@@ -1617,9 +1628,12 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                       className={`cache-file-item ${selectedFile === file.name ? 'cache-file-item--active' : ''} ${dirtyFiles.has(file.name) ? 'cache-file-item--dirty' : ''} ${isSelected ? 'cache-file-item--selected' : ''}`}
                       onClick={(e) => {
                         if (e.ctrlKey || e.metaKey) {
-                          // Ctrl+click: toggle selection
+                          // Ctrl+click: toggle selection. The active file was opened by a
+                          // normal click (which doesn't add it to the selection set), so
+                          // include it here to match Explorer-style multi-select behavior.
                           setSelectedFiles((prev) => {
                             const next = new Set(prev);
+                            if (selectedFile && selectedFile !== file.name) next.add(selectedFile);
                             if (next.has(file.name)) next.delete(file.name);
                             else next.add(file.name);
                             return next;
@@ -2012,8 +2026,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                       projectId={projectId}
                       onEntryChange={handleEntryChange}
                       onDelete={handleDeleteAndRecover}
-                      onAddProblemFilter={(keyword) => { void handleAddProblemKeyword(keyword, 'problemFilterKey'); }}
-                      highlightQuery={searchTerm || searchQuery}
+                      onAddProblemFilter={handleAddProblemFilterKey}
+                      highlightQuery={deferredSearchTerm || searchQuery}
                       nameDict={nameDict}
                       readOnly={selectedHasNoCache}
                     />

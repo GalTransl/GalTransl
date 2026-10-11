@@ -1,5 +1,5 @@
 import { t as translate, useUiLanguage } from "../i18n";
-import { Suspense, lazy, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { HashRouter, Route, useNavigate, useLocation } from 'react-router-dom';
 import {
   CUSTOM_BACKGROUND_CHANGE_EVENT,
@@ -215,7 +215,9 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
     setWizardOpen(false);
     setWizardProjectName('');
   }, [onOpenProject]);
-  const [transitionStage, setTransitionStage] = useState<'fadeIn' | 'fadeOut'>('fadeIn');
+  // Cross-fade: the outgoing page stays mounted on top while the new page
+  // fades in underneath — no serial "wait for fadeOut, then mount" delay.
+  const [leavingPath, setLeavingPath] = useState<string | null>(null);
   const [customBackground, setCustomBackground] = useState<CustomBackgroundPreference>(() => getCustomBackgroundPreference());
 
   useEffect(() => {
@@ -257,31 +259,32 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
     };
   }, []);
 
-  // Timeout fallback: if animationend never fires (e.g. prefers-reduced-motion
-  // disables animations), force the transition to complete so the page doesn't
-  // get stuck on the old route.
-  const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
+  // Switch routes synchronously before paint, then let the two pages cross-fade
+  // in place (see CachedRoutes' leavingPath handling).
+  useLayoutEffect(() => {
     if (location.pathname === displayLocation.pathname) {
       setDisplayLocation(location);
-      setTransitionStage('fadeIn');
-    } else {
-      setTransitionStage('fadeOut');
-      // The fadeOut animation is 150 ms; give a generous margin before forcing.
-      if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
-      transitionTimerRef.current = setTimeout(() => {
-        setDisplayLocation(location);
-        setTransitionStage('fadeIn');
-      }, 200);
+      return;
     }
+    setLeavingPath(displayLocation.pathname);
+    setDisplayLocation(location);
+  }, [location, displayLocation]);
+
+  // Fallback: if the fade-out animation never ends (e.g. reduced motion),
+  // clear the outgoing page so it doesn't linger above the new one.
+  const leavingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!leavingPath) return;
+    if (leavingTimerRef.current) clearTimeout(leavingTimerRef.current);
+    leavingTimerRef.current = setTimeout(() => setLeavingPath(null), 260);
     return () => {
-      if (transitionTimerRef.current) {
-        clearTimeout(transitionTimerRef.current);
-        transitionTimerRef.current = null;
+      if (leavingTimerRef.current) {
+        clearTimeout(leavingTimerRef.current);
+        leavingTimerRef.current = null;
       }
     };
-  }, [location, displayLocation]);
+  }, [leavingPath]);
 
   const isPageAvailable = useCallback((pathname: string) => {
     const match = pathname.match(/^\/project\/([^/]+)/);
@@ -290,14 +293,10 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
   }, [openProjects]);
 
   const handleTransitionEnd = (event: React.AnimationEvent<HTMLElement>) => {
-    if (event.target !== event.currentTarget) return;
-    if (transitionStage === 'fadeOut') {
-      if (transitionTimerRef.current) {
-        clearTimeout(transitionTimerRef.current);
-        transitionTimerRef.current = null;
-      }
-      setDisplayLocation(location);
-      setTransitionStage('fadeIn');
+    // Animation events bubble up from child elements; only the outgoing page
+    // itself finishing its fade-out ends the transition early.
+    if ((event.target as HTMLElement).classList?.contains('app-layout__page--leaving')) {
+      setLeavingPath(null);
     }
   };
 
@@ -335,6 +334,79 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
     '--custom-bg-surface-soft-opacity': String(softSurfaceOpacity),
   } as CSSProperties;
 
+  // Stable route tree: CachedPage is memoized, so hidden cached pages only
+  // re-render when their own props change, not on every App render/navigation.
+  const routeChildren = useMemo(() => (
+    <>
+      <Route
+        path="/"
+        element={<HomePage onOpenProject={onOpenProject} />}
+      />
+      <Route
+        path="/backend-profiles"
+        element={(
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <BackendProfilesPage />
+          </Suspense>
+        )}
+      />
+      <Route
+        path="/common-dictionaries"
+        element={(
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <CommonDictionaryPage />
+          </Suspense>
+        )}
+      />
+      <Route
+        path="/settings"
+        element={(
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <SettingsPage />
+          </Suspense>
+        )}
+      />
+      <Route
+        path="/settings/prompt-templates"
+        element={(
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <PromptTemplatesPage />
+          </Suspense>
+        )}
+      />
+      <Route
+        path="/settings/common-guidelines"
+        element={(
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <CommonGuidelinesPage />
+          </Suspense>
+        )}
+      />
+      <Route
+        path="/new-project"
+        element={null}
+      />
+      <Route
+        path="/agent"
+        element={(
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <RenderErrorBoundary>
+              <AgentPage />
+            </RenderErrorBoundary>
+          </Suspense>
+        )}
+      />
+      <Route
+        path="/project/:projectId/*"
+        element={(
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <ProjectLayout />
+          </Suspense>
+        )}
+      />
+    </>
+  ), [onOpenProject]);
+
   return (
     <div
       className={`app-layout${customBackground.imageDataUrl ? ' app-layout--custom-background' : ''}`}
@@ -356,7 +428,7 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
         onCloseAllProjects={handleCloseAllProjectsAndNavigate}
       />
       <main
-        className={`app-layout__content page-transition-${transitionStage}`}
+        className="app-layout__content"
         onAnimationEnd={handleTransitionEnd}
       >
         {/* Keep the draft mounted across navigation so forms, imports and jobs survive. */}
@@ -373,73 +445,13 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
             </PageActivityContext.Provider>
           </div>
         )}
-        <CachedRoutes location={displayLocation} currentPath={location.pathname} isAvailable={isPageAvailable}>
-              <Route
-                path="/"
-                element={<HomePage onOpenProject={onOpenProject} />}
-              />
-              <Route
-                path="/backend-profiles"
-                element={(
-                  <Suspense fallback={<RouteLoadingFallback />}>
-                    <BackendProfilesPage />
-                  </Suspense>
-                )}
-              />
-              <Route
-                path="/common-dictionaries"
-                element={(
-                  <Suspense fallback={<RouteLoadingFallback />}>
-                    <CommonDictionaryPage />
-                  </Suspense>
-                )}
-              />
-              <Route
-                path="/settings"
-                element={(
-                  <Suspense fallback={<RouteLoadingFallback />}>
-                    <SettingsPage />
-                  </Suspense>
-                )}
-              />
-              <Route
-                path="/settings/prompt-templates"
-                element={(
-                  <Suspense fallback={<RouteLoadingFallback />}>
-                    <PromptTemplatesPage />
-                  </Suspense>
-                )}
-              />
-              <Route
-                path="/settings/common-guidelines"
-                element={(
-                  <Suspense fallback={<RouteLoadingFallback />}>
-                    <CommonGuidelinesPage />
-                  </Suspense>
-                )}
-              />
-              <Route
-                path="/new-project"
-                element={null}
-              />
-              <Route
-                path="/agent"
-                element={(
-                  <Suspense fallback={<RouteLoadingFallback />}>
-                    <RenderErrorBoundary>
-                      <AgentPage />
-                    </RenderErrorBoundary>
-                  </Suspense>
-                )}
-              />
-              <Route
-                path="/project/:projectId/*"
-                element={(
-                  <Suspense fallback={<RouteLoadingFallback />}>
-                    <ProjectLayout />
-                  </Suspense>
-                )}
-              />
+        <CachedRoutes
+          location={displayLocation}
+          currentPath={location.pathname}
+          leavingPath={leavingPath}
+          isAvailable={isPageAvailable}
+        >
+          {routeChildren}
         </CachedRoutes>
         </main>
         <UpdateNotice />

@@ -541,6 +541,12 @@
   contain: paint;
 }
 
+/* 最近译文流最多渲染 100 条：屏幕外的卡片跳过排版/绘制；auto 会记住上次实际高度 */
+.runtime-event-list--success .runtime-event {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 104px;
+}
+
 .runtime-event::before {
   content: "";
   position: absolute;

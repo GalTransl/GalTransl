@@ -484,6 +484,13 @@
   border-color: var(--color-primary-soft);
 }
 
+/* 屏幕外的卡片跳过排版/绘制（Chromium/WebView2 原生支持，零依赖）。
+   contain-intrinsic-size 的 auto 会记住上次实际高度，滚动条不会因估算而跳动。 */
+.cache-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 96px;
+}
+
 .cache-card--problem {
   border-color: var(--color-warning-soft);
   background: color-mix(in srgb, var(--color-warning-soft) 15%, var(--color-surface-strong));

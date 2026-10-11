@@ -1,5 +1,6 @@
+import '../styles/pages/project-name.css';
 import { UiError, message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ProjectPageContext } from '../components/ProjectLayout';
 import { Button } from '../components/Button';
 import { CustomSelect } from '../components/CustomSelect';
@@ -586,13 +587,19 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
     }
   }, [names]);
 
-  // Filter by search
-  const filteredNames = debouncedSearch
-    ? names.filter((n) =>
-        n.src_name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
-        n.dst_name.toLowerCase().includes(debouncedSearch.toLowerCase())
-      )
-    : names;
+  // Filter by search（顺带保留原始索引：渲染时不用再对每行 names.indexOf 扫全表）
+  const filteredNames = useMemo(() => {
+    if (!debouncedSearch) return names.map((entry, index) => ({ entry, index }));
+    const needle = debouncedSearch.toLowerCase();
+    const result: Array<{ entry: NameEntry; index: number }> = [];
+    for (let index = 0; index < names.length; index += 1) {
+      const entry = names[index];
+      if (entry.src_name.toLowerCase().includes(needle) || entry.dst_name.toLowerCase().includes(needle)) {
+        result.push({ entry, index });
+      }
+    }
+    return result;
+  }, [names, debouncedSearch]);
 
   const translatedCount = names.filter((n) => n.dst_name.trim() !== '').length;
 
@@ -730,8 +737,7 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
                 </tr>
               </thead>
               <tbody>
-                {filteredNames.map((entry, i) => {
-                  const originalIndex = names.indexOf(entry);
+                {filteredNames.map(({ entry, index: originalIndex }) => {
                   const hasTranslation = entry.dst_name.trim() !== '';
                   const isGptDictApplied = useGptDictForName
                     && hasTranslation

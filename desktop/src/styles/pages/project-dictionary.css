@@ -697,6 +697,12 @@
   border-bottom: none;
 }
 
+/* 长字典里屏幕外的行跳过排版/绘制；auto 会记住上次实际高度 */
+.dict-card__table-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 38px;
+}
+
 .dict-card__table-add-row {
   display: flex;
   justify-content: center;

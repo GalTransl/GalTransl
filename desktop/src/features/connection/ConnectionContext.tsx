@@ -1,6 +1,6 @@
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../../i18n";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import type { ConnectionPhase, TranslatorOption, VersionCheckResponse } from '../../lib/api';
+import type { ConnectionPhase, Job, TranslatorOption, VersionCheckResponse } from '../../lib/api';
 import { ensureDesktopBackendReady, fetchJobs, fetchTranslators, fetchVersion, fetchVersionCheck, getBackendBaseUrl } from '../../lib/api';
 import { normalizeError } from '../../lib/errors';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -17,10 +17,11 @@ type ConnectionContextValue = {
   loadingInitialData: boolean;
   refreshingJobs: boolean;
   loadInitialData: () => Promise<void>;
-  loadJobs: (silent?: boolean) => Promise<void>;
+  loadJobs: (silent?: boolean) => Promise<Job[] | null>;
 };
 
 const ConnectionContext = createContext<ConnectionContextValue | null>(null);
+const JOBS_ONLINE_MESSAGE = uiMessage("common:connectionContext.loadJobs_setConnectionMessage_doneConnectionBackendJobStatusAuto");
 
 export function useConnection(): ConnectionContextValue {
   const value = useContext(ConnectionContext);
@@ -49,13 +50,15 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     }
 
     try {
-      await fetchJobs();
+      const jobs = await fetchJobs();
       setConnectionPhase('online');
-      setConnectionMessage(uiMessage("common:connectionContext.loadJobs_setConnectionMessage_doneConnectionBackendJobStatusAuto"));
+      setConnectionMessage(JOBS_ONLINE_MESSAGE);
+      return jobs;
     } catch (error) {
       const message = normalizeError(error, uiMessage("common:connectionContext.message_normalizeError_readJobFailed"));
       setConnectionPhase('offline');
       setConnectionMessage(message);
+      return null;
     } finally {
       if (!silent) {
         setRefreshingJobs(false);

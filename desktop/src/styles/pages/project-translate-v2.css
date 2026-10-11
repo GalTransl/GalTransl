@@ -196,7 +196,7 @@
   100% { opacity: 1; transform: translateY(0); }
 }
 
-@media (prefers-reduced-motion: no-preference) and (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) {
   .ptv2-cockpit--arming,
   .ptv2-cockpit--arming .ptv2-cockpit__orb,
   .ptv2-cockpit--arming .ptv2-gauge__percent,
@@ -550,11 +550,6 @@
   box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.22);
 }
 
-@keyframes ptv2BarFlow {
-  0% { background-position: 220% 0; }
-  100% { background-position: -220% 0; }
-}
-
 @keyframes ptv2BarShine {
   0% { transform: translateX(-110%); opacity: 0; }
   20% { opacity: 0.9; }
@@ -762,13 +757,25 @@
 }
 
 .ptv2-cockpit--live .ptv2-stat--primary .ptv2-stat__value {
-  text-shadow: 0 0 12px rgba(47, 111, 235, 0.28);
-  animation: ptv2StatPulse 2s ease-in-out infinite;
+  position: relative;
+  text-shadow: 0 0 10px rgba(47, 111, 235, 0.2);
 }
 
-@keyframes ptv2StatPulse {
-  0%, 100% { text-shadow: 0 0 10px rgba(47, 111, 235, 0.2); }
-  50% { text-shadow: 0 0 18px rgba(47, 111, 235, 0.45); }
+/* 呼吸光晕画在伪元素遮罩层上，只动 opacity（可合成），不再每帧重绘 text-shadow */
+.ptv2-cockpit--live .ptv2-stat--primary .ptv2-stat__value::after {
+  content: attr(data-value);
+  position: absolute;
+  inset: 0;
+  color: inherit;
+  text-shadow: 0 0 18px rgba(47, 111, 235, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  animation: ptv2StatGlow 2s ease-in-out infinite;
+}
+
+@keyframes ptv2StatGlow {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
 }
 
 .ptv2-stat__label {
@@ -1335,7 +1342,7 @@
   }
 }
 
-@media (prefers-reduced-motion: no-preference) and (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) {
   .ptv2-tab--active::after,
   .ptv2-tab--active .ptv2-tab__label,
   .ptv2-tabpanel__pane {
@@ -1823,13 +1830,14 @@
   }
 }
 
-@media (prefers-reduced-motion: no-preference) and (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) {
   .ptv2-cockpit__orb,
   .ptv2-cockpit--live .ptv2-gauge__bar-fill,
   .ptv2-cockpit--live .ptv2-gauge__bar-shine,
   .ptv2-cockpit--live .ptv2-cockpit__tick-dot,
   .ptv2-cockpit--live .button.ptv2-launch-btn--stop::after,
-  .ptv2-cockpit--live .ptv2-stat--primary .ptv2-stat__value {
+  .ptv2-cockpit--live .ptv2-stat--primary .ptv2-stat__value,
+  .ptv2-cockpit--live .ptv2-stat--primary .ptv2-stat__value::after {
     animation: none;
   }
 }

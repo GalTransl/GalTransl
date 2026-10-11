@@ -38,23 +38,23 @@
 @import './styles/components/startup-splash.css';
 @import './styles/components/update-notice.css';
 
-/* ── 7. Page styles ── */
+/* ── 7. Page styles ──
+   注：agent / project-translate-v2 / project-name 不在这里导入——它们各自被对应页面的
+   懒加载模块 import（见 pages/AgentPage.tsx 等），随路由代码分割，启动时不再解析。
+   其余页面样式留在这里，因为 responsive.css / custom-background.css 里有针对它们的覆盖。 */
 @import './styles/pages/home.css';
 @import './styles/pages/translate.css';
 @import './styles/pages/settings.css';
 @import './styles/pages/prompt-templates.css';
 @import './styles/pages/common-guidelines.css';
 @import './styles/pages/project-translate.css';
-@import './styles/pages/project-translate-v2.css';
 @import './styles/pages/project-config.css';
 @import './styles/pages/project-dictionary.css';
 @import './styles/pages/project-cache.css';
-@import './styles/pages/project-name.css';
 @import './styles/pages/plugins.css';
 @import './styles/pages/backend-profiles.css';
 @import './styles/pages/plugin-settings.css';
 @import './styles/pages/new-project.css';
-@import './styles/pages/agent.css';
 
 /* ── 8. Responsive overrides (must come last) ── */
 @import './styles/responsive.css';

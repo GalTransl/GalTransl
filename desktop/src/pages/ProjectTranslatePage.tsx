@@ -1,3 +1,4 @@
+import '../styles/pages/project-translate-v2.css';
 import { usePageActive, useRetainPage } from '../components/PageActivity';
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { invoke } from '@tauri-apps/api/core';
@@ -19,7 +20,6 @@ import {
   type SubmitJobPayload,
   BACKEND_PROFILES_CHANGE_EVENT,
   DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
-  fetchJobs,
   fetchProjectConfig,
   fetchProjectRuntime,
   getBackendProfile,
@@ -41,12 +41,13 @@ import {
   RuntimeErrorRow,
   RuntimeSuccessRow,
   FileProgressRow,
+  RuntimeElapsedTime,
+  mergeRuntimeIdentity,
   toRuntimeJob,
   getStatusLabel,
   formatDate,
   formatSpeed,
   formatEta,
-  formatElapsedTime,
   formatPercentDisplay,
   clampPercent } from './translateRuntimeShared';
 
@@ -64,6 +65,26 @@ const CACHE_FOLDER_NAME = 'transl_cache';
 const CONTINUOUS_RETRANSL_STORAGE_KEY = 'galtransl-continuous-retransl-by-project';
 
 const HIDDEN_TRANSLATORS = new Set(['rebuilda', 'rebuildr', 'show-plugs', 'dump-name']);
+
+/** 任务列表逐项浅比较：内容没变就保留旧数组引用，setState 走 bail-out */
+function jobsEqual(a: Job[], b: Job[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((job, i) => {
+    const other = b[i];
+    return job.job_id === other.job_id
+      && job.status === other.status
+      && job.success === other.success
+      && job.error === other.error
+      && job.started_at === other.started_at
+      && job.finished_at === other.finished_at
+      && job.created_at === other.created_at
+      && job.translator === other.translator
+      && job.project_dir === other.project_dir
+      && job.config_file_name === other.config_file_name
+      && job.gendic_added_entries === other.gendic_added_entries
+      && job.gendic_duplicated_entries === other.gendic_duplicated_entries;
+  });
+}
 
 // 不该占用工作台「翻译模板」下拉的流程：内部辅助流程（重建/导出人名/插件列表），
 // 以及 GenDic（生成 GPT 字典，通常是从「项目字典」页启动的）。
@@ -120,11 +141,13 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const [stopping, setStopping] = useState(false);
   const [submitError, setSubmitError] = useMessageState<string | null>(null);
   const [runtimeError, setRuntimeError] = useMessageState<string | null>(null);
-  const [nowMs, setNowMs] = useState(() => Date.now());
   const [selectedTranslator, setSelectedTranslator] = useState('');
   const [runtime, setRuntime] = useState<ProjectRuntimeResponse | null>(
     () => (projectId ? cachedRuntimeByProject.get(projectId) ?? null : null),
   );
+  /** runtime 的同步镜像：轮询合并身份时不用等 state 落地就能拿到上一轮快照 */
+  const runtimeRef = useRef<ProjectRuntimeResponse | null>(runtime);
+  runtimeRef.current = runtime;
   const [projectBackendConfig, setProjectBackendConfig] = useState<Record<string, unknown> | null>(null);
   // 开始翻译页的后端切换：纯文字按钮 + 列表弹窗，不用下拉框。
   // 值与「配置编辑-翻译后端」同一口径：'__default__' 跟随全局默认，'' 用项目自身配置，其余为配置名。
@@ -187,14 +210,15 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   }, [projectDir, continuousRetranslEnabled]);
 
   const refreshJobs = useCallback(async (_silent = false) => {
-    try {
-      const nextJobs = await fetchJobs();
-      cachedJobs = nextJobs;
-      setJobs(nextJobs);
-    } catch {
-      // keep UI silent on background refresh errors
-    }
-  }, []);
+    // Share the request with connection tracking, including recovery to online.
+    const nextJobs = await loadJobs(true);
+    if (!nextJobs) return;
+    setJobs((current) => {
+      const merged = jobsEqual(current, nextJobs) ? current : nextJobs;
+      cachedJobs = merged;
+      return merged;
+    });
+  }, [loadJobs]);
 
   const refreshRuntime = useCallback(async (silent = false) => {
     if (!projectId) {
@@ -203,8 +227,14 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     }
     try {
       const data = await fetchProjectRuntime(projectId);
-      cachedRuntimeByProject.set(projectId, data);
-      setRuntime(data);
+      const prev = runtimeRef.current;
+      // 行级身份合并：内容没变的行复用旧引用，整页只有真正变化的行重渲染
+      const merged = prev && prev.project_dir === data.project_dir
+        ? mergeRuntimeIdentity(prev, data)
+        : data;
+      runtimeRef.current = merged;
+      cachedRuntimeByProject.set(projectId, merged);
+      setRuntime(merged);
       setRuntimeError(null);
     } catch (error) {
       if (!silent) {
@@ -315,12 +345,12 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
 
   useEffect(() => {
     if (!monitorJobs) return;
+    // loadJobs returns the same snapshot used to update connectivity.
     const poller = window.setInterval(() => {
-      void loadJobs(true);
       void refreshJobs(true);
     }, JOB_POLL_INTERVAL_MS);
     return () => window.clearInterval(poller);
-  }, [loadJobs, refreshJobs, monitorJobs]);
+  }, [refreshJobs, monitorJobs]);
 
   const runningJobs = useMemo(
     () => jobs.filter((job) => (job.status === 'pending' || job.status === 'running') && !HIDDEN_TRANSLATORS.has(job.translator)),
@@ -643,20 +673,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const workersConfigured = summary?.workers_configured ?? 0;
   const speedText = formatSpeed(summary?.translation_speed_lpm ?? 0, progressUnit);
   const etaText = formatEta(summary?.eta_seconds ?? 0);
-  const elapsedText = formatElapsedTime(currentJob, nowMs);
   const updatedAtText = summary?.updated_at ? formatDate(summary.updated_at) : translate("projects:projectTranslatePage.updatedAtText_message_wait");
-
-  useEffect(() => {
-    if (!active || !currentJob?.started_at) return;
-    if (currentJob.status !== 'pending' && currentJob.status !== 'running') return;
-    setNowMs(Date.now());
-    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [currentJob?.started_at, currentJob?.status, active]);
-
-  useEffect(() => {
-    if (currentJob?.finished_at) setNowMs(Date.now());
-  }, [currentJob?.finished_at]);
 
   useEffect(() => {
     const availableFiles = new Set(runtimeFiles.map((file) => file.filename));
@@ -954,7 +971,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
 
         <div className="ptv2-cockpit__ribbon">
           <div className="ptv2-stat ptv2-stat--primary">
-            <span className="ptv2-stat__value">{speedText}</span>
+            <span className="ptv2-stat__value" data-value={speedText}>{speedText}</span>
             <span className="ptv2-stat__label">{translate("projects:projectTranslatePage.ptv2StatPtv2StatPrimary_message_text")}</span>
           </div>
           <div className="ptv2-stat">
@@ -966,7 +983,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
             <span className="ptv2-stat__label">{translate("projects:projectTranslatePage.ptv2Stat_message_textVariant2")}</span>
           </div>
           <div className="ptv2-stat">
-            <span className="ptv2-stat__value">{elapsedText}</span>
+            <span className="ptv2-stat__value"><RuntimeElapsedTime job={currentJob} pageActive={active} /></span>
             <span className="ptv2-stat__label">{translate("projects:projectTranslatePage.ptv2Stat_message_done")}</span>
           </div>
           <div

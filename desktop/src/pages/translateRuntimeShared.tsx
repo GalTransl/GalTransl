@@ -1,6 +1,6 @@
 import { getUiLanguage } from "../i18n/core";
 import { t as translate, useUiLanguage } from "../i18n";
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Icon } from '../components/Icon';
 import { speakerStyle } from '../lib/speaker';
 import { resolveSpeakerName } from '../lib/useNameDict';
@@ -9,11 +9,119 @@ import type {
   FileProgress,
   Job,
   ProjectRuntimeErrorEntry,
+  ProjectRuntimeResponse,
   ProjectRuntimeSuccessEntry,
   RuntimeJob,
 } from '../lib/api';
 
-export function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) {
+/** 扁平记录（值为原始类型或原始类型数组）的相等比较 */
+function shallowRecordEqual(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  const aKeys = Object.keys(a);
+  if (aKeys.length !== Object.keys(b).length) return false;
+  for (const key of aKeys) {
+    if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
+    const av = a[key];
+    const bv = b[key];
+    if (Array.isArray(av) || Array.isArray(bv)) {
+      if (!Array.isArray(av) || !Array.isArray(bv) || av.length !== bv.length) return false;
+      for (let i = 0; i < av.length; i += 1) if (av[i] !== bv[i]) return false;
+      continue;
+    }
+    if (av !== bv) return false;
+  }
+  return true;
+}
+
+/** 保留上一轮行对象的身份：内容没变的行复用旧引用，memo 化的行组件才能跳过重渲染 */
+function mergeRowIdentity<T extends Record<string, unknown>>(
+  prevRows: T[] | undefined,
+  nextRows: T[] | undefined,
+  keyOf: (row: T) => string,
+): T[] | undefined {
+  if (!nextRows || !prevRows) return nextRows;
+  const prevByKey = new Map(prevRows.map((row) => [keyOf(row), row]));
+  let changed = nextRows.length !== prevRows.length;
+  const merged = nextRows.map((row, index) => {
+    const prevRow = prevByKey.get(keyOf(row));
+    if (prevRow && shallowRecordEqual(prevRow, row)) {
+      if (prevRows[index] !== prevRow) changed = true;
+      return prevRow;
+    }
+    changed = true;
+    return row;
+  });
+  return changed ? merged : prevRows;
+}
+
+/** 把新一轮 runtime 快照与上一轮做身份合并；完全没变化时直接返回旧对象，
+ *  让 setState 走 React 的 bail-out，空闲时轮询不再触发整页重渲染 */
+export function mergeRuntimeIdentity(prev: ProjectRuntimeResponse, next: ProjectRuntimeResponse): ProjectRuntimeResponse {
+  const files = mergeRowIdentity(prev.files, next.files, (row) => row.filename) ?? next.files;
+  const recentSuccesses = mergeRowIdentity(prev.recent_successes, next.recent_successes, (row) => row.id) ?? next.recent_successes;
+  const recentErrors = mergeRowIdentity(prev.recent_errors, next.recent_errors, (row) => row.id) ?? next.recent_errors;
+  const retranslStats = mergeRowIdentity(prev.retransl_stats, next.retransl_stats, (row) => row.key) ?? next.retransl_stats;
+  const summary = prev.summary && next.summary
+    && shallowRecordEqual(prev.summary as unknown as Record<string, unknown>, next.summary as unknown as Record<string, unknown>)
+    ? prev.summary
+    : next.summary;
+  const job = prev.job && next.job
+    && shallowRecordEqual(prev.job as unknown as Record<string, unknown>, next.job as unknown as Record<string, unknown>)
+    ? prev.job
+    : next.job;
+
+  if (
+    files === prev.files
+    && recentSuccesses === prev.recent_successes
+    && recentErrors === prev.recent_errors
+    && retranslStats === prev.retransl_stats
+    && summary === prev.summary
+    && job === prev.job
+  ) {
+    const prevRest = { ...prev } as Record<string, unknown>;
+    delete prevRest.files;
+    delete prevRest.recent_successes;
+    delete prevRest.recent_errors;
+    delete prevRest.retransl_stats;
+    delete prevRest.summary;
+    delete prevRest.job;
+    const nextRest = { ...next } as Record<string, unknown>;
+    delete nextRest.files;
+    delete nextRest.recent_successes;
+    delete nextRest.recent_errors;
+    delete nextRest.retransl_stats;
+    delete nextRest.summary;
+    delete nextRest.job;
+    if (shallowRecordEqual(prevRest, nextRest)) return prev;
+  }
+
+  return {
+    ...next,
+    files,
+    recent_successes: recentSuccesses,
+    recent_errors: recentErrors,
+    retransl_stats: retranslStats,
+    summary,
+    job,
+  };
+}
+
+/** 已用时间小计时钟：自己持有 1s 计时器，只在任务运行期间重渲染这一格，
+ *  不再让整个翻译页每秒跟着 setNowMs 重渲染 */
+export function RuntimeElapsedTime({ job, pageActive }: { job: RuntimeJob | null; pageActive: boolean }) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const running = pageActive && !!job?.started_at && (job.status === 'pending' || job.status === 'running');
+
+  useEffect(() => {
+    setNowMs(Date.now());
+    if (!running) return;
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [running, job?.started_at, job?.finished_at]);
+
+  return <>{formatElapsedTime(job, nowMs)}</>;
+}
+
+export const RuntimeErrorRow = memo(function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) {
   const uiLanguage = useUiLanguage();
   const [copied, setCopied] = useState(false);
   const [isMessageTruncated, setIsMessageTruncated] = useState(false);
@@ -108,9 +216,9 @@ export function RuntimeErrorRow({ entry }: { entry: ProjectRuntimeErrorEntry }) 
       </dl>
     </article>
   );
-}
+});
 
-export function RuntimeSuccessRow({
+export const RuntimeSuccessRow = memo(function RuntimeSuccessRow({
   entry,
   isFresh,
   isSuccessFileFilterActive,
@@ -178,7 +286,7 @@ export function RuntimeSuccessRow({
       </div>
     </article>
   );
-}
+});
 
 /** 小灯各阶段的文案：请求已发出、等第一个字 / 吐思考 / 出正文 / 上一次失败、退避等重试。
  *  停住（stalled）不改阶段文字：思考中还是思考中，只有灯的呼吸慢下来。 */
@@ -326,7 +434,7 @@ function FileProgressRing({ percent, tone }: { percent: number; tone: RingTone }
  *  标签掉回「未完成」。刚才还亮着的话，就沿用上一个状态这么久。 */
 const LIVE_HOLD_MS = 2000;
 
-export function FileProgressRow({
+export const FileProgressRow = memo(function FileProgressRow({
   file,
   isRunning,
   isSuccessFileFilterActive,
@@ -405,7 +513,7 @@ export function FileProgressRow({
       </span>
     </div>
   );
-}
+});
 
 function FilterFunnelIcon({ className }: { className: string }) {
   useUiLanguage();

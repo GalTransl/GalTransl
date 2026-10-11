@@ -1,5 +1,5 @@
 import { UiTrans, message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { usePageActive, useRetainPage } from './PageActivity';
 import { useSaveShortcut } from './useSaveShortcut';
 import { createPortal } from 'react-dom';
@@ -161,6 +161,67 @@ function getSourceCellIndex(type: DictRowType): number {
   return -1;
 }
 
+/* ── Single dict entry row (memoized) ── */
+/** 行组件单独 memo：卡片模式下编辑一格只有那一行的 row 对象变化，
+ *  其余行（row 引用不变、回调稳定）直接跳过重渲染 */
+const DictEntryRow = memo(function DictEntryRow({
+  row,
+  rowIndex,
+  labels,
+  sourceCellIndex,
+  showOpenCache,
+  onCellChange,
+  onDelete,
+  onOpenInCache,
+}: {
+  row: DictRow;
+  rowIndex: number;
+  labels: string[];
+  sourceCellIndex: number;
+  showOpenCache: boolean;
+  onCellChange: (rowIndex: number, cellIndex: number, value: string) => void;
+  onDelete: (rowIndex: number) => void;
+  onOpenInCache?: (sourceWord: string) => void;
+}) {
+  useUiLanguage();
+  // 「→」搜的是这一行的日文词：GPT 条目取原文列，其他类型取「搜索」列
+  const sourceWord = sourceCellIndex >= 0 ? String(row.values[sourceCellIndex] ?? '').trim() : '';
+  return (
+    <div className="dict-card__table-row" data-dict-row-index={rowIndex}>
+      <div className="dict-card__cell dict-card__cell--index">#{rowIndex + 1}</div>
+      {labels.map((label, ci) => (
+        <div key={ci} className="dict-card__cell">
+          <input
+            className="dict-card__input"
+            value={row.values[ci] ?? ''}
+            onChange={(e) => onCellChange(rowIndex, ci, e.target.value)}
+            placeholder={label || translate("projects:dictionaryManager.dictCardCell_placeholder_text", { value: ci + 1 })}
+          />
+        </div>
+      ))}
+      {showOpenCache && sourceCellIndex >= 0 ? (
+        <button
+          type="button"
+          className="dict-card__row-open-cache"
+          onClick={() => onOpenInCache?.(sourceWord)}
+          disabled={!sourceWord}
+          title={translate("projects:dictionaryManager.dictCardRowOpenCache_title_textSearchCount")}
+        >
+          <Icon name="arrow-right" />
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="dict-card__row-delete"
+        onClick={() => onDelete(rowIndex)}
+        title={translate("projects:dictionaryManager.dictCardRowDelete_title_deleteEntry")}
+      >
+        <Icon name="close" />
+      </button>
+    </div>
+  );
+});
+
 /* ── Grouped dict entries card ── */
 function DictEntryGroupCard({
   group,
@@ -181,7 +242,8 @@ function DictEntryGroupCard({
   onOpenInCache?: (sourceWord: string) => void;
 }) {
   const uiLanguage = useUiLanguage();
-  const labels = getFieldLabels(group.type, tab);
+  // labels 引用稳定，memo 化的行组件才不会被每次 render 新建的数组打穿
+  const labels = useMemo(() => getFieldLabels(group.type, tab), [group.type, tab, uiLanguage]);
   const tableStyle = { '--dict-column-count': labels.length } as CSSProperties;
 
   return (
@@ -204,46 +266,19 @@ function DictEntryGroupCard({
           ))}
         </div>
 
-        {group.items.map(({ row, rowIndex }) => {
-          // 「→」搜的是这一行的日文词：GPT 条目取原文列，其他类型取「搜索」列
-          const sourceCellIndex = getSourceCellIndex(group.type);
-          const sourceWord = sourceCellIndex >= 0 ? String(row.values[sourceCellIndex] ?? '').trim() : '';
-          return (
-            <div key={`${rowIndex}`} className="dict-card__table-row" data-dict-row-index={rowIndex}>
-              <div className="dict-card__cell dict-card__cell--index">#{rowIndex + 1}</div>
-              {labels.map((label, ci) => (
-                <div key={ci} className="dict-card__cell">
-                  <input
-                    className="dict-card__input"
-                    value={row.values[ci] ?? ''}
-                    onChange={(e) => onCellChange(rowIndex, ci, e.target.value)}
-                    placeholder={label || translate("projects:dictionaryManager.dictCardCell_placeholder_text", { value: ci + 1 })}
-                  />
-                </div>
-              ))}
-              {/* 拿这一行的日文词去「浏览文本」搜它出现在哪（注释行没有词，不显示） */}
-              {onOpenInCache && sourceCellIndex >= 0 ? (
-                <button
-                  type="button"
-                  className="dict-card__row-open-cache"
-                  onClick={() => onOpenInCache(sourceWord)}
-                  disabled={!sourceWord}
-                  title={translate("projects:dictionaryManager.dictCardRowOpenCache_title_textSearchCount")}
-                >
-                  <Icon name="arrow-right" />
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="dict-card__row-delete"
-                onClick={() => onDelete(rowIndex)}
-                title={translate("projects:dictionaryManager.dictCardRowDelete_title_deleteEntry")}
-              >
-                <Icon name="close" />
-              </button>
-            </div>
-          );
-        })}
+        {group.items.map(({ row, rowIndex }) => (
+          <DictEntryRow
+            key={`${rowIndex}`}
+            row={row}
+            rowIndex={rowIndex}
+            labels={labels}
+            sourceCellIndex={getSourceCellIndex(group.type)}
+            showOpenCache={Boolean(onOpenInCache)}
+            onCellChange={onCellChange}
+            onDelete={onDelete}
+            onOpenInCache={onOpenInCache}
+          />
+        ))}
 
         <div className="dict-card__table-add-row">
           <button
@@ -280,12 +315,22 @@ export function DictionaryManager(props: DictionaryManagerProps) {
 
   const pageActive = usePageActive();
   const saveInFlightRef = useRef(false);
+  /** 「→」回调经 ref 转发：父组件每次 render 新建的内联函数不会打穿行组件的 memo */
+  const onOpenInCacheRef = useRef(onOpenInCache);
+  onOpenInCacheRef.current = onOpenInCache;
+  const handleOpenInCache = useCallback((sourceWord: string) => {
+    onOpenInCacheRef.current?.(sourceWord);
+  }, []);
+  const showOpenInCache = Boolean(onOpenInCache);
   const [activeTab, setActiveTab] = useState<DictTab>('gpt');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [sectionFilter, setSectionFilter] = useState('');
   const [mode, setMode] = useState<'card' | 'text'>('card');
   const [draftText, setDraftText] = useState<string>('');
+  /** 卡片模式下的行编辑直接保存在行数组里（不整文件序列化再重解析）；
+   *  有值时它就是 parsedRows 的真源，保存/切文本模式时才落地成文本 */
+  const [rowsOverride, setRowsOverride] = useState<DictRow[] | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -294,8 +339,6 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   useRetainPage(dirty || saving || creating || deleting || generatingGptDict);
-  const latestDraftRef = useRef(draftText);
-  latestDraftRef.current = draftText;
   const [newFilename, setNewFilename] = useState('');
   const [localError, setLocalError] = useMessageState<string | null>(null);
   const [info, setInfo] = useMessageState<string | null>(null);
@@ -304,15 +347,6 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   const cardListRef = useRef<HTMLDivElement | null>(null);
   const addedRowRef = useRef<number | null>(null);
 
-  useLayoutEffect(() => {
-    if (!pageActive || mode !== 'card' || addedRowRef.current === null) return;
-    const row = cardListRef.current?.querySelector<HTMLElement>(`[data-dict-row-index="${addedRowRef.current}"]`);
-    if (!row) return;
-    addedRowRef.current = null;
-    row.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    row.querySelector<HTMLInputElement>('input')?.focus({ preventScroll: true });
-  }, [draftText, pageActive, mode]);
-
   const activeFiles = useMemo(() => getFilesByTab(data, activeTab), [data, activeTab]);
 
   const selectedContent = useMemo(() => {
@@ -320,7 +354,16 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     return data.dict_contents[selectedFile] ?? null;
   }, [data, selectedFile]);
 
-  const parsedRows = useMemo(() => parseRows(draftText, activeTab), [draftText, activeTab]);
+  const parsedRows = useMemo(
+    () => rowsOverride ?? parseRows(draftText, activeTab),
+    [rowsOverride, draftText, activeTab],
+  );
+  const parsedRowsRef = useRef<DictRow[]>(parsedRows);
+  parsedRowsRef.current = parsedRows;
+  const rowsOverrideRef = useRef<DictRow[] | null>(rowsOverride);
+  rowsOverrideRef.current = rowsOverride;
+  const draftSnapshotRef = useRef({ selectedFile, draftText, rowsOverride });
+  draftSnapshotRef.current = { selectedFile, draftText, rowsOverride };
 
   // 每行所属的类目（最近的分区标题），以及各类目的条目数；文件没有分区时 sections 为空，不显示类目筛选
   const { rowSections, sections } = useMemo(() => {
@@ -345,9 +388,16 @@ export function DictionaryManager(props: DictionaryManagerProps) {
       .map(([name, count]) => ({ name, count }));
     return { rowSections: owner, sections: list };
   }, [parsedRows]);
+  const rowSectionsRef = useRef<string[]>([]);
+  rowSectionsRef.current = rowSections;
 
   // 选中的类目在当前文件里不存在（换了文件、分区被删）时视为「全部」
   const activeSection = sections.some((s) => s.name === sectionFilter) ? sectionFilter : '';
+
+  // 击键先更新输入框，过滤用延迟值：大字典里连续输入不会每击键都全量 join+filter。
+  // 清空搜索（含「新增条目」时程序性清空）立即生效：新行要当帧就渲染出来才能聚焦。
+  const deferredSearchTerm = useDeferredValue(searchTerm);
+  const effectiveSearchTerm = searchTerm === '' ? '' : deferredSearchTerm;
 
   const filteredRows = useMemo(() => {
     const visible = parsedRows
@@ -362,10 +412,10 @@ export function DictionaryManager(props: DictionaryManagerProps) {
         if (activeSection && rowSections[rowIndex] !== activeSection) return false;
         return true;
       });
-    if (!searchTerm.trim()) return visible;
-    const needle = searchTerm.toLowerCase();
+    if (!effectiveSearchTerm.trim()) return visible;
+    const needle = effectiveSearchTerm.toLowerCase();
     return visible.filter(({ row }) => row.values.join('\t').toLowerCase().includes(needle));
-  }, [parsedRows, searchTerm, activeSection, rowSections]);
+  }, [parsedRows, effectiveSearchTerm, activeSection, rowSections]);
 
   const groupedRows = useMemo(() => {
     const groups: DictRowGroup[] = [];
@@ -379,6 +429,17 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     }
     return groups;
   }, [filteredRows]);
+
+  useLayoutEffect(() => {
+    if (!pageActive || mode !== 'card' || addedRowRef.current === null) return;
+    const row = cardListRef.current?.querySelector<HTMLElement>(`[data-dict-row-index="${addedRowRef.current}"]`);
+    // 过滤用的是 useDeferredValue：清空搜索后新行要晚一拍才渲染出来。
+    // 这时别清掉标记（下一次列表更新会再进这个 effect），否则新行永远拿不到焦点。
+    if (!row) return;
+    addedRowRef.current = null;
+    row.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    row.querySelector<HTMLInputElement>('input')?.focus({ preventScroll: true });
+  }, [parsedRows, filteredRows, pageActive, mode]);
 
   // 类目筛选：一排胶囊挂在卡片头部（跟「GPT 216条」同一行），点当前项退回全部
   const sectionPills = sections.length > 0 ? (
@@ -489,6 +550,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     if (nextFiles.length === 0) {
       setSelectedFile(null);
       setDraftText('');
+      setRowsOverride(null);
       setDirty(false);
       return;
     }
@@ -501,6 +563,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
       setSelectedFile(first);
       const next = data?.dict_contents[first]?.lines.join('\n') ?? '';
       setDraftText(next);
+      setRowsOverride(null);
       setDirty(false);
     }
   }, [activeFiles, selectedFile, data]);
@@ -510,6 +573,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     const next = selectedContent.lines.join('\n');
     if (draftText !== next) {
       setDraftText(next);
+      setRowsOverride(null);
     }
   }, [selectedFile, selectedContent, dirty, draftText]);
 
@@ -521,6 +585,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     setSectionFilter('');
     const next = data?.dict_contents[file]?.lines.join('\n') ?? '';
     setDraftText(next);
+    setRowsOverride(null);
     setDirty(false);
     setInfo(null);
     setLocalError(null);
@@ -538,56 +603,69 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     if (files.length > 0 && data) {
       setDraftText((data.dict_contents[files[0]]?.lines ?? []).join('\n'));
     }
+    setRowsOverride(null);
     setDirty(false);
   };
 
-  const updateRowCell = (rowIndex: number, cellIndex: number, value: string) => {
-    const next = [...parsedRows];
+  const updateRowCell = useCallback((rowIndex: number, cellIndex: number, value: string) => {
+    const next = [...parsedRowsRef.current];
     const row = next[rowIndex];
     if (!row || row.type === 'blank') return;
     if (row.type === 'comment' && cellIndex > 0) return;
     const nextValues = [...row.values];
     nextValues[cellIndex] = value;
-    next[rowIndex] = { ...row, values: nextValues };
-    setDraftText(rowsToText(next));
+    // 只有被改的这一行换成新对象，其余行保留引用：memo 行组件据此跳过重渲染
+    // Keep raw/type consistent with the edited values, without reparsing the
+    // rest of the dictionary (e.g. changing diag to mono or adding a comment).
+    next[rowIndex] = parseRows(rowsToText([{ ...row, values: nextValues }]), activeTab)[0];
+    // 不再整文件序列化再重解析：行数组就是真源，保存/切文本模式时才落地成文本
+    setRowsOverride(next);
     setDirty(true);
     setInfo(null);
-  };
+  }, [activeTab]);
 
-  const deleteRow = (rowIndex: number) => {
-    const next = parsedRows.filter((_, i) => i !== rowIndex);
-    setDraftText(rowsToText(next));
+  const deleteRow = useCallback((rowIndex: number) => {
+    setRowsOverride(parsedRowsRef.current.filter((_, i) => i !== rowIndex));
     setDirty(true);
     setInfo(null);
-  };
+  }, []);
 
   const buildRowByType = (rowType: DictRowType): DictRow => {
-    if (rowType === 'gpt') return { type: 'gpt', values: ['', '', ''], raw: '' };
-    if (rowType === 'conditional') return { type: 'conditional', values: ['pre_src', '', '', '', ''], raw: '' };
-    if (rowType === 'situation') return { type: 'situation', values: ['diag', '', ''], raw: '' };
-    if (rowType === 'comment') return { type: 'comment', values: [''], raw: '' };
-    return { type: 'normal', values: ['', '', ''], raw: '' };
+    // raw 要与 values 一致（旧流程走一遍文本往返，raw 就是 join('\t') 的结果）。
+    // 列表按「raw 是否含 tab」判断这行该不该显示，raw 留空新行会被直接过滤掉。
+    const make = (type: DictRowType, values: string[]): DictRow => ({
+      type,
+      values,
+      raw: type === 'comment' ? '' : values.join('\t'),
+    });
+    if (rowType === 'gpt') return make('gpt', ['', '', '']);
+    if (rowType === 'conditional') return make('conditional', ['pre_src', '', '', '', '']);
+    if (rowType === 'situation') return make('situation', ['diag', '', '']);
+    if (rowType === 'comment') return make('comment', ['']);
+    return make('normal', ['', '', '']);
   };
 
-  const addRow = (rowType?: DictRowType, insertAfterRowIndex?: number) => {
+  const addRow = useCallback((rowType?: DictRowType, insertAfterRowIndex?: number) => {
+    const rows = parsedRowsRef.current;
+    const rowSections = rowSectionsRef.current;
     const targetType = rowType ?? (activeTab === 'gpt' ? 'gpt' : 'normal');
     const base = buildRowByType(targetType);
-    let insertIndex = typeof insertAfterRowIndex === 'number' ? Math.max(0, insertAfterRowIndex + 1) : parsedRows.length;
+    let insertIndex = typeof insertAfterRowIndex === 'number' ? Math.max(0, insertAfterRowIndex + 1) : rows.length;
     if (typeof insertAfterRowIndex !== 'number' && activeSection) {
       // 正在看某个类目：新条目加到该分区末尾（跳过分区末尾的空行），否则加到文件末尾就看不到了
       let last = rowSections.lastIndexOf(activeSection);
-      while (last > 0 && parsedRows[last].type === 'blank' && rowSections[last - 1] === activeSection) last -= 1;
+      while (last > 0 && rows[last].type === 'blank' && rowSections[last - 1] === activeSection) last -= 1;
       insertIndex = last + 1;
     }
-    const next = [...parsedRows.slice(0, insertIndex), base, ...parsedRows.slice(insertIndex)];
+    const next = [...rows.slice(0, insertIndex), base, ...rows.slice(insertIndex)];
     addedRowRef.current = insertIndex;
     // An empty new row cannot match a text search. Keep its section selected,
     // but clear the search so the row can be shown and edited immediately.
     setSearchTerm('');
-    setDraftText(rowsToText(next));
+    setRowsOverride(next);
     setDirty(true);
     setInfo(null);
-  };
+  }, [activeSection, activeTab]);
 
   const handleTextEditorKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key !== 'Tab') return;
@@ -597,6 +675,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     const end = target.selectionEnd;
     const nextValue = `${draftText.slice(0, start)}\t${draftText.slice(end)}`;
     setDraftText(nextValue);
+    setRowsOverride(null);
     setDirty(true);
     setInfo(null);
     window.requestAnimationFrame(() => {
@@ -627,8 +706,20 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     setLocalError(null);
     setInfo(null);
     try {
-      await onSaveFile(selectedFile, draftText);
-      if (latestDraftRef.current === draftText) setDirty(false);
+      // 卡片模式下行数组是真源：保存时才序列化一次
+      const overrideAtSave = rowsOverride;
+      const textToSave = overrideAtSave ? rowsToText(overrideAtSave) : draftText;
+      await onSaveFile(selectedFile, textToSave);
+      const current = draftSnapshotRef.current;
+      if (current.selectedFile === selectedFile
+        && current.draftText === draftText
+        && current.rowsOverride === overrideAtSave) {
+        if (overrideAtSave) {
+          setRowsOverride(null);
+          setDraftText(textToSave);
+        }
+        setDirty(false);
+      }
       setInfo(uiMessage("projects:dictionaryManager.handleSave_setInfo_doneSave"));
       await onReload();
     } catch (e) {
@@ -640,6 +731,18 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   };
 
   useSaveShortcut(() => { void handleSave(); });
+
+  /** 切模式时把待落地的行编辑序列化进文本（或反向），保证两种视图看到同一份内容 */
+  const handleToggleMode = useCallback(() => {
+    if (mode === 'card') {
+      const rows = rowsOverrideRef.current;
+      if (rows) setDraftText(rowsToText(rows));
+      setRowsOverride(null);
+      setMode('text');
+      return;
+    }
+    setMode('card');
+  }, [mode]);
 
   const handleCreate = async () => {
     const raw = newFilename.trim();
@@ -672,6 +775,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     setInfo(null);
     try {
       await onDeleteFile(selectedFile);
+      setRowsOverride(null);
       setDirty(false);
       await onReload();
       setInfo(uiMessage("projects:dictionaryManager.handleDelete_setInfo_doneDeleteDictionaryFile"));
@@ -812,7 +916,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                 description={translate("projects:dictionaryManager.dictLayoutMain_description_entryEntry", { value: selectedContent?.count ?? 0, value2: selectedContent?.path ?? '' })}
                 actions={(
                   <div className="dict-panel-actions">
-                    <Button variant="secondary" onClick={() => setMode(mode === 'card' ? 'text' : 'card')}>
+                    <Button variant="secondary" onClick={handleToggleMode}>
                       {mode === 'card' ? translate("projects:dictionaryManager.dictPanelActions_message_text") : translate("projects:dictionaryManager.dictPanelActions_message_textVariant2")}
                     </Button>
                     <Button variant="secondary" onClick={() => void handleDelete()} disabled={deleting}>{translate("projects:dictionaryManager.dictPanelActions_message_deleteFile")}</Button>
@@ -846,6 +950,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                     value={draftText}
                     onChange={(e) => {
                       setDraftText(e.target.value);
+                      setRowsOverride(null);
                       setDirty(true);
                       setInfo(null);
                     }}
@@ -870,7 +975,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                           onCellChange={updateRowCell}
                           onDelete={deleteRow}
                           onAddRow={addRow}
-                          onOpenInCache={onOpenInCache}
+                          onOpenInCache={showOpenInCache ? handleOpenInCache : undefined}
                         />
                       ))}
                       {groupedRows.length === 0 && (

@@ -1,3 +1,4 @@
+import '../styles/pages/agent.css';
 import { usePageActive, useRetainPage } from '../components/PageActivity';
 import { loadAgentProject, saveAgentProject, loadMessageDraft, saveMessageDraft, moveMessageDraft, useMessageDraft } from './agent/drafts';
 import { followTail } from "./agent/followTail";
@@ -184,7 +185,9 @@ export function AgentPage() {
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   // 界面上的「发送中」乐观态：消息已发出但后端尚未确认
   const [sending, setSending] = useState(false);
-  useRetainPage(running || sending);
+  // Keep the chat mounted after its first visit, including while idle, so
+  // navigating through other pages never evicts its transcript or UI state.
+  useRetainPage(true);
   // 已用上下文/上下文窗口（composer 右下角指示器）：
   // 基线来自会话状态快照，运行中由 context_usage 事件实时更新。
   const [contextUsage, setContextUsage] = useState<AgentContextUsage | null>(null);

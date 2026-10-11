@@ -1,14 +1,16 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Routes, type Location } from 'react-router-dom';
 import { PageActivityContext, PageRetentionContext } from './PageActivity';
 
-export const RECENT_PAGE_LIMIT = 10;
+export const RECENT_PAGE_LIMIT = 5;
 
 type Entry = { location: Location };
 
-function CachedPage({ entry, visible, active, retain, children }: {
+const CachedPage = memo(function CachedPage({ entry, visible, active, leaving, retain, children }: {
   entry: Entry;
   visible: boolean;
+  /** Page is visible but on its way out (cross-fade): render on top, inert. */
+  leaving: boolean;
   active: boolean;
   retain: (key: string) => () => void;
   children: ReactNode;
@@ -29,8 +31,14 @@ function CachedPage({ entry, visible, active, retain, children }: {
   }, [visible]);
   return (
     <div
-      className="app-layout__page"
+      className={`app-layout__page${leaving
+        ? ' app-layout__page--leaving'
+        : visible
+          ? ' app-layout__page--entering'
+          : ''}`}
       hidden={!visible}
+      aria-hidden={!visible || leaving}
+      {...(leaving ? { inert: '' } : {})}
       style={!visible ? { display: 'none' } : undefined}
       onScrollCapture={(event) => {
         const element = event.target as HTMLElement;
@@ -49,11 +57,13 @@ function CachedPage({ entry, visible, active, retain, children }: {
       </PageActivityContext.Provider>
     </div>
   );
-}
+});
 
-export function CachedRoutes({ location, currentPath, children, isAvailable, limit = RECENT_PAGE_LIMIT }: {
+export function CachedRoutes({ location, currentPath, leavingPath = null, children, isAvailable, limit = RECENT_PAGE_LIMIT }: {
   location: Location;
   currentPath: string;
+  /** Pathname of the outgoing page during a cross-fade, if any. */
+  leavingPath?: string | null;
   children: ReactNode;
   isAvailable: (pathname: string) => boolean;
   limit?: number;
@@ -83,11 +93,17 @@ export function CachedRoutes({ location, currentPath, children, isAvailable, lim
     if (cacheCurrent && previous?.location !== location) {
       const index = previous ? kept.indexOf(previous) : -1;
       if (index >= 0) kept.splice(index, 1);
+      // A navigation can change state/key without changing the URL. Always
+      // publish its location; hidden entries still keep their own identity.
       kept.push({ location });
     }
     const recent = new Set(kept.slice(-Math.max(1, limit)));
-    return kept.filter((entry) => recent.has(entry) || retained.has(entry.location.pathname));
-  }, [entries, location, isAvailable, limit, retained]);
+    // Retention protects unsaved drafts and ongoing workflows. They may only
+    // be evicted once released or explicitly closed, regardless of the limit.
+    return kept.filter((entry) => recent.has(entry)
+      || retained.has(entry.location.pathname)
+      || entry.location.pathname === leavingPath);
+  }, [entries, location, isAvailable, limit, retained, leavingPath]);
 
   // Reconcile before rendering children so new pages never mount twice and stale
   // project routes disappear in the same commit as a project is closed.
@@ -95,13 +111,25 @@ export function CachedRoutes({ location, currentPath, children, isAvailable, lim
     setEntries(next);
   }
 
-  return next.map((entry) => {
-    const key = entry.location.pathname;
-    const visible = key === location.pathname;
-    return (
-      <CachedPage key={key} entry={entry} visible={visible} active={visible && key === currentPath} retain={retain}>
-        {children}
-      </CachedPage>
-    );
-  });
+  return (
+    <div className="cached-routes">
+      {next.map((entry) => {
+        const key = entry.location.pathname;
+        const leaving = leavingPath !== null && key === leavingPath && key !== location.pathname;
+        const visible = key === location.pathname || leaving;
+        return (
+          <CachedPage
+            key={key}
+            entry={entry}
+            visible={visible}
+            leaving={leaving}
+            active={visible && !leaving && key === currentPath}
+            retain={retain}
+          >
+            {children}
+          </CachedPage>
+        );
+      })}
+    </div>
+  );
 }

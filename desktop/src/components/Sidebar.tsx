@@ -28,6 +28,8 @@ import { readHistory } from '../pages/agent/storage';
 const CONFIG_FILE_KEY = 'galtransl-config-file';
 const LAST_ACTIVE_PROJECT_KEY = 'galtransl-last-active-project';
 const OUTPUT_FOLDER_NAME = 'gt_output';
+const AGENT_POLL_INTERVAL_MS = 3000;
+const RUNTIME_POLL_INTERVAL_MS = 3000;
 
 type RebuildToast = {
   id: number;
@@ -308,37 +310,66 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onClosePr
   // Keep the Agent indicator updated even when its page is unmounted.
   useEffect(() => {
     let cancelled = false;
+    let inFlight = false;
     let timer: number | undefined;
     const runningByProject = runningAgentProjectsRef.current;
     const pollAgentStatus = async () => {
-      const projects = new Set([...openProjects, ...readHistory().map((entry) => entry.projectDir)]);
-      // Keep watching a running project even if it is removed from the navigation.
-      for (const [dir, running] of runningByProject) {
-        if (running) projects.add(dir);
-      }
-      await Promise.all(Array.from(projects, async (dir) => {
-        try {
-          const sessions = await listAgentSessions(dir);
-          if (cancelled) return;
-          runningByProject.set(dir, sessions.some((session) => session.status === 'running'));
-        } catch {
-          // Preserve the last known state during temporary connection failures.
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      window.clearTimeout(timer);
+      // 窗口在后台时不发请求，只保持节拍；回前台立刻补一次
+      if (!document.hidden) {
+        const projects = new Set([...openProjects, ...readHistory().map((entry) => entry.projectDir)]);
+        // Keep watching a running project even if it is removed from the navigation.
+        for (const [dir, running] of runningByProject) {
+          if (running) projects.add(dir);
         }
-      }));
+        await Promise.all(Array.from(projects, async (dir) => {
+          try {
+            const sessions = await listAgentSessions(dir);
+            if (cancelled) return;
+            runningByProject.set(dir, sessions.some((session) => session.status === 'running'));
+          } catch {
+            // Preserve the last known state during temporary connection failures.
+          }
+        }));
+        if (cancelled) return;
+        setAgentRunning((prev) => {
+          const next = Array.from(runningByProject.values()).some(Boolean);
+          return prev === next ? prev : next;
+        });
+      }
+      inFlight = false;
       if (cancelled) return;
-      setAgentRunning(Array.from(runningByProject.values()).some(Boolean));
-      timer = window.setTimeout(() => void pollAgentStatus(), 3000);
+      timer = window.setTimeout(() => void pollAgentStatus(), AGENT_POLL_INTERVAL_MS);
     };
+    const handleVisibilityChange = () => {
+      if (document.hidden || cancelled) return;
+      if (timer) window.clearTimeout(timer);
+      void pollAgentStatus();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     void pollAgentStatus();
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [openProjects]);
 
   // Poll project runtime status to detect active translation jobs
   useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
+    let timer: number | undefined;
     const pollTranslationStatus = async () => {
+      if (cancelled || inFlight) return;
+      window.clearTimeout(timer);
+      if (document.hidden) {
+        timer = window.setTimeout(() => void pollTranslationStatus(), RUNTIME_POLL_INTERVAL_MS);
+        return;
+      }
+      inFlight = true;
       const statusMap: Record<string, boolean> = {};
       await Promise.all(
         openProjects.map(async (projectDir) => {
@@ -353,14 +384,33 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onClosePr
           }
         })
       );
-      setTranslatingDirs(statusMap);
+      inFlight = false;
+      if (cancelled) return;
+      // 值没变就保留旧对象引用，避免每 3s 无条件重渲染整个侧栏
+      setTranslatingDirs((prev) => {
+        const prevKeys = Object.keys(prev);
+        const nextKeys = Object.keys(statusMap);
+        if (prevKeys.length === nextKeys.length
+          && nextKeys.every((key) => prev[key] === statusMap[key])) {
+          return prev;
+        }
+        return statusMap;
+      });
+      timer = window.setTimeout(() => void pollTranslationStatus(), RUNTIME_POLL_INTERVAL_MS);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) return;
+      void pollTranslationStatus();
     };
 
     void pollTranslationStatus();
-    const poller = window.setInterval(() => {
-      void pollTranslationStatus();
-    }, 3000);
-    return () => window.clearInterval(poller);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [openProjects]);
 
   useEffect(() => {

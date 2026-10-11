@@ -424,3 +424,42 @@
     rgba(14, 22, 32, var(--custom-bg-surface-opacity-resolved));
 }
 
+/* ── blur 收敛 ──
+   模糊收敛到顶层容器（侧栏、面板、弹层、卡片本身），行内小元素不再逐个模糊：
+   缓存卡片字段、字典单元格/输入框、吸顶表头这类元素数量随条目增长，滚动时每次重绘都要
+   采样背景，是自定义背景下滚动卡顿的大头。它们只保留半透明底色，视觉上仍然是「透出壁纸」。
+   放在文件末尾 + 带 dark 前缀，才能压过前面的浅色/暗色规则。 */
+.app-layout--custom-background .project-cache-page .cache-card__input,
+.app-layout--custom-background .project-cache-page .cache-card__textarea,
+.app-layout--custom-background .project-cache-page .cache-card__readonly-textarea,
+.app-layout--custom-background .project-dictionary-page .dict-card__fields,
+.app-layout--custom-background .project-dictionary-page .dict-card__table-head,
+.app-layout--custom-background .project-dictionary-page .dict-card__table-add-row,
+.app-layout--custom-background .project-dictionary-page .dict-card__field-label,
+.app-layout--custom-background .project-dictionary-page .dict-card__cell,
+.app-layout--custom-background .project-dictionary-page .dict-card__cell--index,
+.app-layout--custom-background .project-dictionary-page .dict-card__input,
+.app-layout--custom-background .project-dictionary-page .dict-card__note-input,
+.app-layout--custom-background .project-dictionary-page .dict-card__add-row-btn,
+.app-layout--custom-background .project-dictionary-page .dict-card__row-delete,
+.app-layout--custom-background .project-dictionary-page .dict-card__row-open-cache,
+.app-layout--custom-background .name-page .name-page__th,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-card__input,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-card__textarea,
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-card__readonly-textarea,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__fields,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__table-head,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__table-add-row,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__field-label,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__cell,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__cell--index,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__input,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__note-input,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__add-row-btn,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__row-delete,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__row-open-cache,
+:root[data-theme='dark'] .app-layout--custom-background .name-page .name-page__th {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+

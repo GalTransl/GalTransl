@@ -42,10 +42,18 @@ export function StartupSplash({ phase, message, step, leaving, onRetry, onSkip }
     if (phase !== 'connecting') {
       return undefined;
     }
-    const timer = window.setInterval(() => {
+    let timer: number | undefined;
+    // 计时数字要 1.2s 后才显示：在那之前不启动轮询，别让启动屏每秒重渲染 5 次
+    const delay = window.setTimeout(() => {
       setElapsedMs(Date.now() - startedAtRef.current);
-    }, 200);
-    return () => window.clearInterval(timer);
+      timer = window.setInterval(() => {
+        setElapsedMs(Date.now() - startedAtRef.current);
+      }, 200);
+    }, ELAPSED_VISIBLE_AFTER_MS);
+    return () => {
+      window.clearTimeout(delay);
+      if (timer !== undefined) window.clearInterval(timer);
+    };
   }, [phase]);
 
   const showElapsed = !offline && elapsedMs >= ELAPSED_VISIBLE_AFTER_MS;
