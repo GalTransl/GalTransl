@@ -882,7 +882,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
             </div>
           </div>
           <div className="ptv2-cockpit__statusline">
-            <StatusBadge label={statusLabel} tone={statusTone} celebrate={justCompleted} />
+            <StatusBadge label={statusLabel} tone={statusTone} celebrate={justCompleted} working={active && shouldPollRuntime} />
             {/* 阶段内进度只给 GenDic（「人名 3/10」「审校 0/8」）：普通翻译的 current_file 是
                 「正在翻哪个文件」，最近译文里已经带了文件名，再挂一颗胶囊只是噪音 */}
             {isGendicJob && runtimeStageDetail ? (
@@ -891,7 +891,6 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
               </span>
             ) : null}
             <span className="ptv2-cockpit__tick" title={updatedAtText}>
-              <span className="ptv2-cockpit__tick-dot" aria-hidden="true" />
               {updatedAtText}
             </span>
           </div>
@@ -971,7 +970,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
 
         <div className="ptv2-cockpit__ribbon">
           <div className="ptv2-stat ptv2-stat--primary">
-            <span className="ptv2-stat__value" data-value={speedText}>{speedText}</span>
+            <span className="ptv2-stat__value">{speedText}</span>
             <span className="ptv2-stat__label">{translate("projects:projectTranslatePage.ptv2StatPtv2StatPrimary_message_text")}</span>
           </div>
           <div className="ptv2-stat">

@@ -6,8 +6,9 @@ type StatusBadgeProps = {
   label: string;
   tone: StatusBadgeTone;
   celebrate?: boolean;
+  working?: boolean;
 };
 
-export function StatusBadge({ label, tone, celebrate }: StatusBadgeProps) {
-  return <span className={`status-badge status-badge--${tone}${celebrate ? ' status-badge--celebrate' : ''}`}>{label}</span>;
+export function StatusBadge({ label, tone, celebrate, working = false }: StatusBadgeProps) {
+  return <span className={`status-badge status-badge--${tone}${working ? ' status-badge--working' : ''}${celebrate ? ' status-badge--celebrate' : ''}`}>{label}</span>;
 }

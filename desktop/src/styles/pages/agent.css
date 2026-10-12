@@ -947,12 +947,6 @@
   box-shadow:
     0 16px 36px -12px rgba(47, 111, 235, 0.6),
     inset 0 1px 0 rgba(255, 255, 255, 0.35);
-  animation: agent-hero-float 5s ease-in-out infinite;
-}
-
-@keyframes agent-hero-float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-6px); }
 }
 
 .agent-hero__title {
@@ -3587,7 +3581,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .agent-hero__mark,
   .agent-working__dots span,
   .agent-activity__label.is-running::after,
   .agent-reasoning__label.is-running::after,

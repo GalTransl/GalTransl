@@ -169,6 +169,29 @@ function mergeJobsWithMemory(existing: Job[], incoming: Job[], limit: number, cl
   return sortAndLimitJobs(Array.from(merged.values()), limit);
 }
 
+function jobsEqual(a: Job[], b: Job[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const ja = a[i];
+    const jb = b[i];
+    if (
+      ja.job_id !== jb.job_id ||
+      ja.status !== jb.status ||
+      ja.success !== jb.success ||
+      ja.error !== jb.error ||
+      ja.finished_at !== jb.finished_at ||
+      ja.started_at !== jb.started_at ||
+      ja.translator !== jb.translator ||
+      ja.project_dir !== jb.project_dir ||
+      ja.config_file_name !== jb.config_file_name
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function addProjectToHistory(projectDir: string, configFileName: string) {
   const entries = loadHistory();
   const withoutDuplicate = entries.filter((e) => e.projectDir !== projectDir);
@@ -314,15 +337,18 @@ export function HomePage({ onOpenProject }: HomePageProps) {
         }
       });
       if (clearedDirty) saveClearedJobIds(clearedJobIds.current);
-      setJobs((currentJobs) => mergeJobsWithMemory(currentJobs, nextJobs, jobMemoryLimit, clearedJobIds.current));
+      setJobs((currentJobs) => {
+        const next = mergeJobsWithMemory(currentJobs, nextJobs, jobMemoryLimit, clearedJobIds.current);
+        return jobsEqual(currentJobs, next) ? currentJobs : next;
+      });
       setJobsError(null);
 
       if (!shouldLoadJobProgress) {
-        setJobProgressById({});
+        setJobProgressById((prev) => (Object.keys(prev).length === 0 ? prev : {}));
       } else {
         const activeJobs = nextJobs.filter((job) => job.status === 'pending' || job.status === 'running');
         if (activeJobs.length === 0) {
-          setJobProgressById({});
+          setJobProgressById((prev) => (Object.keys(prev).length === 0 ? prev : {}));
           return;
         }
 
@@ -345,16 +371,37 @@ export function HomePage({ onOpenProject }: HomePageProps) {
           }),
         );
 
-        setJobProgressById(
-          progressEntries.reduce<
-            Record<string, { currentFile?: string; percent: number; total: number; translated: number }>
-          >((acc, entry) => {
-            if (entry) {
-              acc[entry[0]] = entry[1];
-            }
-            return acc;
-          }, {}),
-        );
+        const nextProgress = progressEntries.reduce<
+          Record<string, { currentFile?: string; percent: number; total: number; translated: number }>
+        >((acc, entry) => {
+          if (entry) {
+            acc[entry[0]] = entry[1];
+          }
+          return acc;
+        }, {});
+
+        setJobProgressById((prev) => {
+          const prevKeys = Object.keys(prev);
+          const nextKeys = Object.keys(nextProgress);
+          if (
+            prevKeys.length === nextKeys.length &&
+            nextKeys.every((k) => {
+              const p = prev[k];
+              const n = nextProgress[k];
+              return (
+                p &&
+                n &&
+                p.percent === n.percent &&
+                p.translated === n.translated &&
+                p.total === n.total &&
+                p.currentFile === n.currentFile
+              );
+            })
+          ) {
+            return prev;
+          }
+          return nextProgress;
+        });
       }
     } catch (error) {
       setJobsError(normalizeError(error, uiMessage("projects:homePage.refreshJobs_normalizeError_readJobFailed")));
@@ -376,7 +423,9 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     if (!active) return;
     void refreshJobs();
     const poller = window.setInterval(() => {
-      void refreshJobs(true);
+      if (!document.hidden) {
+        void refreshJobs(true);
+      }
     }, 3000);
     return () => window.clearInterval(poller);
   }, [refreshJobs, active]);

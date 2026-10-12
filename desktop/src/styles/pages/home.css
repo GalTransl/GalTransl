@@ -58,7 +58,7 @@
   transform: translateY(0);
 }
 
-/* Decorative glow orb */
+/* Decorative glow orb: 保持静态半透明光晕，停用持续脉冲动画以避免 GPU 渲染引擎持续唤醒 */
 .home-hero__glow {
   position: absolute;
   right: -60px;
@@ -68,12 +68,7 @@
   border-radius: 50%;
   background: radial-gradient(circle, rgba(47, 111, 235, 0.3) 0%, rgba(47, 111, 235, 0.08) 50%, transparent 70%);
   pointer-events: none;
-  animation: heroGlowPulse 6s ease-in-out infinite;
-}
-
-@keyframes heroGlowPulse {
-  0%, 100% { opacity: 0.7; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.08); }
+  opacity: 0.85;
 }
 
 /* Brand: logo + title */
@@ -758,7 +753,7 @@
 
 /* ── Reduced motion ── */
 
-@media (prefers-reduced-motion: no-preference) and (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) {
   .home-hero {
     opacity: 1;
     transform: none;
@@ -1027,7 +1022,7 @@
 .home-job-row__bar-fill {
   border-radius: 999px;
   background: linear-gradient(90deg, #22d3ee, #38bdf8);
-  box-shadow: 0 0 14px rgba(34, 211, 238, 0.34);
+  box-shadow: none; /* 移除发光效果以降低GPU负载，避免视觉重影 */
 }
 
 @media (max-width: 1100px) {
@@ -1434,7 +1429,7 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.82);
 }
 
-@media (prefers-reduced-motion: no-preference) and (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) {
   .home-job-row__status-pill,
   .home-job-row__stop-btn {
     transition: opacity var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);

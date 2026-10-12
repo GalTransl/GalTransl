@@ -637,7 +637,7 @@
 }
 
 .runtime-event--fresh {
-  animation: runtimeSuccessTrail 2.2s ease-out both;
+  animation: runtimeSuccessTrail 1.2s ease-out both;
 }
 
 .runtime-event--fresh::after {
@@ -1170,19 +1170,18 @@
   }
 }
 
+/* 去掉 box-shadow 阴影模糊重绘，仅对位移和边框颜色过渡，大幅降低新译文流入时的 GPU 光栅化负载 */
 @keyframes runtimeSuccessTrail {
   0% {
-    transform: translateX(-10px);
-    box-shadow: 0 0 0 rgba(52, 211, 153, 0);
+    transform: translateX(-8px);
     border-color: rgba(110, 231, 183, 0.76);
   }
   30% {
     transform: translateX(0);
-    box-shadow: 0 0 0 1px rgba(110, 231, 183, 0.28), 0 0 28px rgba(34, 211, 238, 0.18);
+    border-color: rgba(110, 231, 183, 0.55);
   }
   100% {
     transform: translateX(0);
-    box-shadow: 0 0 0 rgba(52, 211, 153, 0);
     border-color: rgba(74, 222, 128, 0.22);
   }
 }

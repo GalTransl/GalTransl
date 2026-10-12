@@ -53,3 +53,49 @@
   color: var(--color-text-muted);
 }
 
+.status-badge--working {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, currentColor 20%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+/* The sheen and lower accent share one small layer; only transform/opacity animate. */
+.status-badge--working::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 55%;
+  z-index: -1;
+  background:
+    linear-gradient(90deg, transparent, color-mix(in srgb, currentColor 65%, transparent), transparent)
+      center bottom 4px / 100% 2px no-repeat,
+    linear-gradient(110deg, transparent 15%, rgba(255, 255, 255, 0.55) 50%, transparent 85%);
+  opacity: 0;
+  transform: translateX(-110%);
+  pointer-events: none;
+  animation: statusBadgeWorking 3s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+:root[data-theme='dark'] .status-badge--working::before {
+  background:
+    linear-gradient(90deg, transparent, color-mix(in srgb, currentColor 75%, transparent), transparent)
+      center bottom 4px / 100% 2px no-repeat,
+    linear-gradient(110deg, transparent 15%, rgba(255, 255, 255, 0.12) 50%, transparent 85%);
+}
+
+@keyframes statusBadgeWorking {
+  0% { transform: translateX(-110%); opacity: 0; }
+  12% { opacity: 1; }
+  64% { transform: translateX(200%); opacity: 1; }
+  76%, 100% { transform: translateX(200%); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-badge--working::before {
+    animation: none;
+  }
+}
+
