@@ -9,6 +9,7 @@ import {
   decodeProjectDir,
   encodeProjectDir,
   getCustomBackgroundPreference,
+  loadCustomBackgroundPreference,
   getThemeModePreference,
   loadOpenProjects,
   persistOpenProjects,
@@ -18,7 +19,7 @@ import { CachedRoutes } from '../components/CachedRoutes';
 import { PageActivityContext } from '../components/PageActivity';
 import { Sidebar } from '../components/Sidebar';
 import { RenderErrorBoundary } from '../components/RenderErrorBoundary';
-import { ConnectionProvider } from '../features/connection/ConnectionContext';
+import { ConnectionProvider, useConnection } from '../features/connection/ConnectionContext';
 import { BootstrapGate } from '../features/connection/BootstrapGate';
 import { UpdateNotice } from '../features/update/UpdateNotice';
 import { HomePage, addProjectToHistory } from '../pages/HomePage';
@@ -199,6 +200,7 @@ type AppInnerProps = {
 
 function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherProjects, onCloseAllProjects }: AppInnerProps) {
   useUiLanguage();
+  const { backendUrl, connectionPhase } = useConnection();
   const navigate = useNavigate();
   const location = useLocation();
   const [displayLocation, setDisplayLocation] = useState(location);
@@ -258,6 +260,12 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
       window.removeEventListener(CUSTOM_BACKGROUND_CHANGE_EVENT, handleCustomBackgroundChange as EventListener);
     };
   }, []);
+
+  useEffect(() => {
+    if (connectionPhase === 'online') {
+      void loadCustomBackgroundPreference().catch(() => undefined);
+    }
+  }, [backendUrl, connectionPhase]);
 
   // Switch routes synchronously before paint, then let the two pages cross-fade
   // in place (see CachedRoutes' leavingPath handling).

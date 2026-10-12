@@ -24,6 +24,13 @@ from GalTransl import TRANSLATOR_SUPPORTED, INPUT_FOLDERNAME, OUTPUT_FOLDERNAME,
 from GalTransl import GUIDELINES_FOLDERNAME, DEFAULT_GUIDELINE_NAME
 from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
 from GalTransl.AppSettings import load_app_settings, save_app_settings
+from GalTransl.CustomBackground import (
+    load_custom_background,
+    save_custom_background_settings,
+    save_custom_background_image,
+    read_custom_background_image,
+    clear_custom_background,
+)
 from GalTransl.Cache import CACHE_TEMP_SUFFIX
 from GalTransl.Search import (
     parse_search_order as _parse_search_order,
@@ -3289,6 +3296,29 @@ def build_handler(registry: JobRegistry):
             parsed = urlparse(self.path)
             path = parsed.path
 
+            if path == "/api/custom-background":
+                try:
+                    self._send_json(load_custom_background())
+                except Exception as exc:
+                    self._send_json({"error": f"failed to load background: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+            if path == "/api/custom-background/image":
+                try:
+                    version = parse_qs(parsed.query).get("version", [""])[0]
+                    data, content_type = read_custom_background_image(version)
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(len(data)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.end_headers()
+                    self.wfile.write(data)
+                except FileNotFoundError:
+                    self._send_json({"error": "background image not found"}, status=HTTPStatus.NOT_FOUND)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to read background: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
             if path == "/":
                 self._send_html(INDEX_HTML)
                 return
@@ -3472,6 +3502,27 @@ def build_handler(registry: JobRegistry):
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
             path = parsed.path
+
+            if path == "/api/custom-background/image":
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if length <= 0 or length > 128 * 1024 * 1024:
+                        self._send_json({"error": "background image must be between 1 byte and 128 MiB"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    data = self.rfile.read(length)
+                    if len(data) != length:
+                        raise ValueError("incomplete background image")
+                    query = parse_qs(parsed.query)
+                    settings = {key: query[key][0] for key in ("opacity", "surfaceOpacity") if key in query}
+                    self._send_json(save_custom_background_image(
+                        data, query.get("name", ["background"])[0],
+                        self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower(), settings,
+                    ))
+                except (ValueError, TypeError) as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to save background image: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
 
             if path.startswith("/api/projects/"):
                 parts = path.split("/", 4)
@@ -4014,6 +4065,15 @@ def build_handler(registry: JobRegistry):
             parsed = urlparse(self.path)
             path = parsed.path
 
+            if path == "/api/custom-background":
+                try:
+                    self._send_json(save_custom_background_settings(self._read_json_body()))
+                except (ValueError, TypeError) as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to save background settings: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
             if path == "/api/app-settings":
                 try:
                     payload = self._read_json_body()
@@ -4120,6 +4180,13 @@ def build_handler(registry: JobRegistry):
         def do_DELETE(self) -> None:
             parsed = urlparse(self.path)
             path = parsed.path
+
+            if path == "/api/custom-background":
+                try:
+                    self._send_json(clear_custom_background())
+                except Exception as exc:
+                    self._send_json({"error": f"failed to clear background: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
 
             # DELETE /api/backend-profiles/:name
             if path.startswith("/api/backend-profiles/"):

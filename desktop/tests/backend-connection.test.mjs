@@ -21,7 +21,7 @@ const { outputText } = ts.transpileModule(source, {
   },
 });
 
-function loadApi({ native = true, dev = false, configured, invoke, storage } = {}) {
+function loadApi({ native = true, dev = false, configured, invoke, storage, fetchImpl } = {}) {
   const requests = [];
   const requestOptions = [];
   const exports = {};
@@ -36,10 +36,11 @@ function loadApi({ native = true, dev = false, configured, invoke, storage } = {
       assert.equal(name, '@tauri-apps/api/core');
       return { invoke: invoke ?? (() => Promise.resolve({ url: 'http://127.0.0.1:45678' })) };
     },
-    URL, AbortController, TextDecoder, setTimeout, clearTimeout,
+    URL, URLSearchParams, Blob, AbortController, TextDecoder, setTimeout, clearTimeout,
     fetch: async (url, options) => {
       requests.push(url);
       requestOptions.push(options);
+      if (fetchImpl) return fetchImpl(url, options);
       return url.includes('/api/agent/stream')
         ? new Response('event: agent\ndata: {"type":"close"}\n\n')
         : new Response(JSON.stringify({ jobs: [], version: 'test' }));
@@ -47,6 +48,83 @@ function loadApi({ native = true, dev = false, configured, invoke, storage } = {
   });
   return { api: exports, requests, requestOptions };
 }
+
+test('background images use binary uploads and disk settings even when localStorage is full', async () => {
+  let stored = { imageVersion: '', imageName: '', opacity: 35, surfaceOpacity: 33, configured: false };
+  const image = new Blob(['original image bytes'], { type: 'image/png' });
+  const { api, requestOptions } = loadApi({ native: false,
+    storage: { getItem: () => null, setItem: () => { throw new Error('quota exceeded'); } },
+    fetchImpl: async (url, options) => {
+      if (options?.method === 'POST') {
+        assert.equal(options.body, image);
+        assert.equal(new URL(url).searchParams.get('name'), 'wallpaper.png');
+        stored = { ...stored, imageVersion: 'new-image', imageName: 'wallpaper.png', configured: true };
+      } else if (options?.method === 'PUT') {
+        const update = JSON.parse(options.body);
+        assert.deepEqual(Object.keys(update).sort(), ['opacity', 'surfaceOpacity']);
+        stored = { ...stored, ...update };
+      } else if (options?.method === 'DELETE') {
+        stored = { imageVersion: '', imageName: '', opacity: 35, surfaceOpacity: 33, configured: true };
+      }
+      return new Response(JSON.stringify(stored));
+    },
+  });
+  await api.loadCustomBackgroundPreference();
+  const uploaded = await api.uploadCustomBackgroundImage(image, 'wallpaper.png');
+  assert.match(uploaded.imageDataUrl, /\/api\/custom-background\/image\?version=new-image$/);
+  await api.setCustomBackgroundPreference({ ...uploaded, opacity: 62 });
+  assert.equal(api.getCustomBackgroundPreference().opacity, 62);
+  assert.equal((await api.loadCustomBackgroundPreference()).opacity, 62);
+  assert.equal((await api.clearCustomBackgroundPreference()).imageDataUrl, '');
+  assert.equal(requestOptions.filter(options => options?.method === 'POST').length, 1);
+});
+
+test('legacy background migration keeps localStorage until disk commit and a cleared disk setting wins', async () => {
+  const key = 'galtransl-custom-background';
+  const legacy = JSON.stringify({ imageDataUrl: 'data:image/png;base64,aW1hZ2U=', imageName: 'old.png', opacity: 51, surfaceOpacity: 67 });
+  const values = new Map([[key, legacy]]);
+  let fail = true;
+  let stored = { imageVersion: '', imageName: '', opacity: 35, surfaceOpacity: 33, configured: false };
+  const { api } = loadApi({ native: false,
+    storage: { getItem: key => values.get(key), removeItem: key => values.delete(key) },
+    fetchImpl: async (url, options) => {
+      if (url.startsWith('data:')) return new Response('image', { headers: { 'Content-Type': 'image/png' } });
+      if (options?.method === 'POST') {
+        if (fail) return new Response(JSON.stringify({ error: 'disk full' }), { status: 500 });
+        const query = new URL(url).searchParams;
+        assert.equal(query.get('opacity'), '51');
+        assert.equal(query.get('surfaceOpacity'), '67');
+        stored = { imageVersion: 'migrated', imageName: 'old.png', opacity: 51, surfaceOpacity: 67, configured: true };
+      } else if (options?.method === 'DELETE') {
+        stored = { imageVersion: '', imageName: '', opacity: 35, surfaceOpacity: 33, configured: true };
+      }
+      return new Response(JSON.stringify(stored));
+    },
+  });
+  await assert.rejects(api.loadCustomBackgroundPreference(), /disk full/);
+  assert.equal(values.get(key), legacy);
+  assert.equal(api.getCustomBackgroundPreference().imageDataUrl, '');
+  fail = false;
+  const migrated = await api.loadCustomBackgroundPreference();
+  assert.equal(migrated.imageName, 'old.png');
+  assert.equal(values.has(key), false);
+  await api.clearCustomBackgroundPreference();
+  values.set(key, legacy);
+  assert.equal((await api.loadCustomBackgroundPreference()).imageDataUrl, '');
+});
+
+test('late background loads cannot overwrite a successful image replacement', async () => {
+  let resolveLoad;
+  const { api } = loadApi({ native: false, fetchImpl: async (url, options) => {
+    if (!options) return new Promise(resolve => { resolveLoad = resolve; });
+    return new Response(JSON.stringify({ imageVersion: 'new', imageName: 'new.png', opacity: 35, surfaceOpacity: 33, configured: true }));
+  } });
+  const loading = api.loadCustomBackgroundPreference();
+  await api.uploadCustomBackgroundImage(new Blob(['image'], { type: 'image/png' }), 'new.png');
+  resolveLoad(new Response(JSON.stringify({ imageVersion: 'old', imageName: 'old.png', opacity: 35, surfaceOpacity: 33, configured: true })));
+  await loading;
+  assert.equal(api.getCustomBackgroundPreference().imageName, 'new.png');
+});
 
 test('localized profile copies preserve model values and rename updates saved references', async () => {
   const values = new Map();

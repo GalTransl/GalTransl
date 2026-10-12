@@ -1890,42 +1890,92 @@ function normalizeCustomBackgroundPreference(value: unknown): CustomBackgroundPr
 }
 
 export function getCustomBackgroundPreference(): CustomBackgroundPreference {
-  try {
-    const raw = localStorage.getItem(CUSTOM_BACKGROUND_KEY);
-    if (!raw) {
-      return defaultCustomBackgroundPreference();
+  return customBackgroundPreference;
+}
+
+type StoredCustomBackground = Omit<CustomBackgroundPreference, 'imageDataUrl'> & { imageVersion: string; configured: boolean };
+let customBackgroundPreference = defaultCustomBackgroundPreference();
+let customBackgroundLoad: Promise<CustomBackgroundPreference> | null = null;
+let customBackgroundWrites: Promise<unknown> = Promise.resolve();
+let customBackgroundRevision = 0;
+
+function publishCustomBackground(stored: StoredCustomBackground): CustomBackgroundPreference {
+  customBackgroundPreference = normalizeCustomBackgroundPreference({
+    ...stored,
+    imageDataUrl: stored.imageVersion
+      ? `${requireBackendBaseUrl()}/api/custom-background/image?version=${encodeURIComponent(stored.imageVersion)}`
+      : '',
+  });
+  window.dispatchEvent(new CustomEvent(CUSTOM_BACKGROUND_CHANGE_EVENT, { detail: customBackgroundPreference }));
+  return customBackgroundPreference;
+}
+
+function writeCustomBackground(write: () => Promise<StoredCustomBackground>) {
+  customBackgroundRevision += 1;
+  const pending = customBackgroundWrites.catch(() => undefined).then(async () => publishCustomBackground(await write()));
+  customBackgroundWrites = pending;
+  return pending;
+}
+
+export function uploadCustomBackgroundImage(image: Blob, name: string, preference?: CustomBackgroundPreference) {
+  const query = new URLSearchParams({ name });
+  if (preference) {
+    query.set('opacity', String(preference.opacity));
+    query.set('surfaceOpacity', String(preference.surfaceOpacity));
+  }
+  return writeCustomBackground(() => apiRequest<StoredCustomBackground>(`/api/custom-background/image?${query}`, {
+    method: 'POST',
+    headers: { 'Content-Type': image.type },
+    body: image,
+  }));
+}
+
+export function loadCustomBackgroundPreference(): Promise<CustomBackgroundPreference> {
+  if (customBackgroundLoad) return customBackgroundLoad;
+  const revision = customBackgroundRevision;
+  customBackgroundLoad = (async () => {
+    const stored = await apiRequest<StoredCustomBackground>('/api/custom-background');
+    if (revision !== customBackgroundRevision) return getCustomBackgroundPreference();
+    // Read the old setting once; remove it only after a successful disk migration.
+    let legacyRaw: string | null = null;
+    try { legacyRaw = localStorage.getItem(CUSTOM_BACKGROUND_KEY); } catch { /* Storage may be unavailable. */ }
+    if (legacyRaw && !stored.configured) {
+      let legacy: CustomBackgroundPreference | null = null;
+      try { legacy = normalizeCustomBackgroundPreference(JSON.parse(legacyRaw)); } catch { /* Ignore invalid old settings. */ }
+      if (legacy?.imageDataUrl.startsWith('data:image/')) {
+        const image = await (await fetch(legacy.imageDataUrl)).blob();
+        if (revision !== customBackgroundRevision) return getCustomBackgroundPreference();
+        const migrated = await uploadCustomBackgroundImage(image, legacy.imageName, legacy);
+        try { localStorage.removeItem(CUSTOM_BACKGROUND_KEY); } catch { /* Disk is already authoritative. */ }
+        return migrated;
+      }
+      if (legacy) {
+        const migrated = await setCustomBackgroundPreference(legacy);
+        try { localStorage.removeItem(CUSTOM_BACKGROUND_KEY); } catch { /* Disk is already authoritative. */ }
+        return migrated;
+      }
     }
-    const parsed = JSON.parse(raw) as unknown;
-    return normalizeCustomBackgroundPreference(parsed);
-  } catch {
-    return defaultCustomBackgroundPreference();
-  }
+    if (legacyRaw) {
+      try { localStorage.removeItem(CUSTOM_BACKGROUND_KEY); } catch { /* Disk is already authoritative. */ }
+    }
+    return publishCustomBackground(stored);
+  })().finally(() => { customBackgroundLoad = null; });
+  return customBackgroundLoad;
 }
 
-/**
- * Persist the custom-background preference.
- *
- * Throws if `localStorage.setItem` fails (e.g. quota exceeded). Callers are
- * responsible for surfacing the error to the user — silently swallowing it
- * previously caused the "restart reverts to an older wallpaper" bug, because
- * the in-memory state diverged from what was actually persisted.
- */
-export function setCustomBackgroundPreference(preference: CustomBackgroundPreference): CustomBackgroundPreference {
-  const normalized = normalizeCustomBackgroundPreference(preference);
-  localStorage.setItem(CUSTOM_BACKGROUND_KEY, JSON.stringify(normalized));
-  window.dispatchEvent(new CustomEvent(CUSTOM_BACKGROUND_CHANGE_EVENT, { detail: normalized }));
-  return normalized;
+export function setCustomBackgroundPreference(preference: Partial<CustomBackgroundPreference>): Promise<CustomBackgroundPreference> {
+  const settings: { opacity?: number; surfaceOpacity?: number } = {};
+  if ('opacity' in preference) settings.opacity = normalizeCustomBackgroundOpacity(preference.opacity);
+  if ('surfaceOpacity' in preference) settings.surfaceOpacity = normalizeCustomBackgroundSurfaceOpacity(preference.surfaceOpacity);
+  return writeCustomBackground(() => apiRequest<StoredCustomBackground>('/api/custom-background', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  }));
 }
 
-export function clearCustomBackgroundPreference(): CustomBackgroundPreference {
-  const cleared = defaultCustomBackgroundPreference();
-  try {
-    localStorage.removeItem(CUSTOM_BACKGROUND_KEY);
-    window.dispatchEvent(new CustomEvent(CUSTOM_BACKGROUND_CHANGE_EVENT, { detail: cleared }));
-  } catch {
-    // ignore storage errors
-  }
-  return cleared;
+export function clearCustomBackgroundPreference(): Promise<CustomBackgroundPreference> {
+  return writeCustomBackground(() => apiRequest<StoredCustomBackground>('/api/custom-background', { method: 'DELETE' }));
 }
 
 // ---- Agent API ----

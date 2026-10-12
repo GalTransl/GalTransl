@@ -1,5 +1,5 @@
 import { localizePlugin, pluginSettingDisplayValue } from "../i18n/plugins";
-import { UiError, message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
+import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CustomSelect } from '../components/CustomSelect';
@@ -14,6 +14,7 @@ import {
   CUSTOM_BACKGROUND_OPACITY_MIN,
   CUSTOM_BACKGROUND_SURFACE_OPACITY_MAX,
   CUSTOM_BACKGROUND_SURFACE_OPACITY_MIN,
+  CUSTOM_BACKGROUND_CHANGE_EVENT,
   type PluginInfo,
   type ThemeMode,
   clearCustomBackgroundPreference,
@@ -22,6 +23,7 @@ import {
   fetchPlugins,
   getCacheBrowserFontSizePreference,
   getCustomBackgroundPreference,
+  loadCustomBackgroundPreference,
   getHideBackendConsolePreference,
   getHomeHistoryRetentionLimit,
   getHomeJobRetentionLimit,
@@ -34,6 +36,7 @@ import {
   setHomeHistoryRetentionLimit,
   setHomeJobRetentionLimit,
   setThemeModePreference,
+  uploadCustomBackgroundImage,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 import { setUiLanguage, type UiLanguage } from '../i18n/core';
@@ -184,6 +187,26 @@ export function SettingsPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const syncBackground = () => {
+      if (cancelled) return;
+      const preference = getCustomBackgroundPreference();
+      setCustomBackgroundImageDataUrl(preference.imageDataUrl);
+      setCustomBackgroundImageName(preference.imageName);
+      setCustomBackgroundOpacityInput(String(preference.opacity));
+      setCustomBackgroundSurfaceOpacityInput(String(preference.surfaceOpacity));
+    };
+    window.addEventListener(CUSTOM_BACKGROUND_CHANGE_EVENT, syncBackground);
+    void loadCustomBackgroundPreference().then(syncBackground).catch((error) => {
+      if (!cancelled) setCustomBackgroundError(normalizeError(error, uiMessage("settings:settingsPage.message_normalizeError_saveBackgroundFailed")));
+    });
+    return () => {
+      cancelled = true;
+      window.removeEventListener(CUSTOM_BACKGROUND_CHANGE_EVENT, syncBackground);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     setCheckingVersion(true);
     setVersionCheckError(null);
 
@@ -245,31 +268,25 @@ export function SettingsPage() {
     setHideBackendConsole(next);
   }, []);
 
-  const applyCustomBackgroundOpacity = useCallback((rawValue: string) => {
-    const current = getCustomBackgroundPreference();
+  const applyCustomBackgroundOpacity = useCallback(async (rawValue: string) => {
     try {
-      const next = setCustomBackgroundPreference({
-        imageDataUrl: current.imageDataUrl,
-        imageName: current.imageName,
+      const next = await setCustomBackgroundPreference({
         opacity: rawValue.trim() === '' ? Number.NaN : Number(rawValue),
-        surfaceOpacity: current.surfaceOpacity,
       });
       setCustomBackgroundOpacityInput(String(next.opacity));
+      setCustomBackgroundError(null);
     } catch (err) {
       setCustomBackgroundError(normalizeError(err, uiMessage("settings:settingsPage.applyCustomBackgroundOpacity_normalizeError_saveBackgroundSettingsFailed")));
     }
   }, []);
 
-  const applyCustomBackgroundSurfaceOpacity = useCallback((rawValue: string) => {
-    const current = getCustomBackgroundPreference();
+  const applyCustomBackgroundSurfaceOpacity = useCallback(async (rawValue: string) => {
     try {
-      const next = setCustomBackgroundPreference({
-        imageDataUrl: current.imageDataUrl,
-        imageName: current.imageName,
-        opacity: current.opacity,
+      const next = await setCustomBackgroundPreference({
         surfaceOpacity: rawValue.trim() === '' ? Number.NaN : Number(rawValue),
       });
       setCustomBackgroundSurfaceOpacityInput(String(next.surfaceOpacity));
+      setCustomBackgroundError(null);
     } catch (err) {
       setCustomBackgroundError(normalizeError(err, uiMessage("settings:settingsPage.applyCustomBackgroundSurfaceOpacity_normalizeError_saveBackgroundSettingsFailed")));
     }
@@ -289,37 +306,32 @@ export function SettingsPage() {
     setCustomBackgroundBusy(true);
     setCustomBackgroundError(null);
     try {
-      const dataUrl = await compressImageToDataUrl(file);
-      const current = getCustomBackgroundPreference();
-      const next = setCustomBackgroundPreference({
-        imageDataUrl: dataUrl,
-        imageName: file.name,
-        opacity: current.opacity,
-        surfaceOpacity: current.surfaceOpacity,
-      });
+      const next = await uploadCustomBackgroundImage(file, file.name);
       setCustomBackgroundImageDataUrl(next.imageDataUrl);
       setCustomBackgroundImageName(next.imageName);
       setCustomBackgroundOpacityInput(String(next.opacity));
       setCustomBackgroundSurfaceOpacityInput(String(next.surfaceOpacity));
     } catch (err) {
-      const message = normalizeError(err, uiMessage("settings:settingsPage.message_normalizeError_saveBackgroundFailed"));
-      // 典型原因：localStorage 配额溢出。提醒用户换更小的图。
-      const isQuota = err instanceof DOMException && (err.name === 'QuotaExceededError' || err.code === 22);
-      setCustomBackgroundError(
-        isQuota ? uiMessage("settings:settingsPage.handleCustomBackgroundFileChange_setCustomBackgroundError_imageChooseImage") : message,
-      );
+      setCustomBackgroundError(normalizeError(err, uiMessage("settings:settingsPage.message_normalizeError_saveBackgroundFailed")));
     } finally {
       setCustomBackgroundBusy(false);
     }
   }, []);
 
-  const clearCustomBackground = useCallback(() => {
-    const next = clearCustomBackgroundPreference();
-    setCustomBackgroundImageDataUrl(next.imageDataUrl);
-    setCustomBackgroundImageName(next.imageName);
-    setCustomBackgroundOpacityInput(String(next.opacity));
-    setCustomBackgroundSurfaceOpacityInput(String(next.surfaceOpacity));
-    setCustomBackgroundError(null);
+  const clearCustomBackground = useCallback(async () => {
+    setCustomBackgroundBusy(true);
+    try {
+      const next = await clearCustomBackgroundPreference();
+      setCustomBackgroundImageDataUrl(next.imageDataUrl);
+      setCustomBackgroundImageName(next.imageName);
+      setCustomBackgroundOpacityInput(String(next.opacity));
+      setCustomBackgroundSurfaceOpacityInput(String(next.surfaceOpacity));
+      setCustomBackgroundError(null);
+    } catch (error) {
+      setCustomBackgroundError(normalizeError(error, uiMessage("settings:settingsPage.message_normalizeError_saveBackgroundFailed")));
+    } finally {
+      setCustomBackgroundBusy(false);
+    }
   }, []);
 
   const triggerCustomBackgroundPicker = useCallback(() => {
@@ -692,41 +704,4 @@ export function SettingsPage() {
       </div>
     </div>
   );
-}
-
-// ── 壁纸图像压缩 ──
-// 将用户选择的图片通过 canvas 重绘为较小的 JPEG data URL，再写入 localStorage。
-// 这里的根因：原实现把原始文件直接 base64 编码存入 localStorage，大图极易触发 QuotaExceededError，
-// 之前该错误还被静默吞掉，导致重启后加载到的仍是上一次成功保存的旧壁纸。
-const CUSTOM_BACKGROUND_MAX_EDGE = 1920;
-const CUSTOM_BACKGROUND_JPEG_QUALITY = 0.82;
-
-async function compressImageToDataUrl(file: File): Promise<string> {
-  const objectUrl = URL.createObjectURL(file);
-  try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const image = new Image();
-      image.onload = () => resolve(image);
-      image.onerror = () => reject(new UiError(uiMessage("settings:settingsPage.img_reject_unableReadImageFile")));
-      image.src = objectUrl;
-    });
-
-    const scale = Math.min(1, CUSTOM_BACKGROUND_MAX_EDGE / Math.max(img.naturalWidth, img.naturalHeight));
-    const targetWidth = Math.max(1, Math.round(img.naturalWidth * scale));
-    const targetHeight = Math.max(1, Math.round(img.naturalHeight * scale));
-
-    const canvas = document.createElement('canvas');
-    canvas.width = targetWidth;
-    canvas.height = targetHeight;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      throw new UiError(uiMessage("settings:settingsPage.compressImageToDataUrl_message_currentCanvas"));
-    }
-    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-
-    // 半透明 PNG 会很大，统一转 JPEG；若原图带透明通道则用黑色填充，视觉影响可忽略。
-    return canvas.toDataURL('image/jpeg', CUSTOM_BACKGROUND_JPEG_QUALITY);
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
 }
