@@ -1133,7 +1133,7 @@ dependencies = [
 
 [[package]]
 name = "galtransl-desktop"
-version = "8.4.1"
+version = "8.4.2"
 dependencies = [
  "serde",
  "serde_json",
