@@ -640,6 +640,71 @@ class BaseTranslate:
             LOGGER.warning("连续网络错误，已刷新 API 客户端 [%s]", token.maskToken())
             return replacement
 
+    @staticmethod
+    def _select_client_token(
+        self,
+        api_try_count: int = 0,
+        failed_token: Optional[COpenAIToken] = None,
+    ) -> tuple[AsyncOpenAI, COpenAIToken]:
+        """按 tokenStrategy (random 或 fallback) 选择当前请求使用的 client 和 token。
+
+        当 failed_token 提供时，表示上一次请求报错，此时：
+        - fallback: 顺延切换到下一个 token；
+        - random: 排除报错 token，随机切换到另一个 token。
+        不直接永久剔除报错的 token，因为令牌可能只是临时失效。
+        """
+        client_list = getattr(self, "client_list", None)
+        if not client_list:
+            last_err = "没有可用的 API 令牌！"
+            if getattr(self, "fail_fast", False):
+                raise TranslationRequestError(last_err)
+            raise RuntimeError(last_err)
+
+        if len(client_list) == 1:
+            setattr(self, "_active_token_index", 0)
+            return client_list[0]
+
+        strategy = getattr(self, "tokenStrategy", "random")
+        active_idx = getattr(self, "_active_token_index", None)
+
+        if strategy == "fallback":
+            if failed_token is not None:
+                found_idx = None
+                for i, (_, t) in enumerate(client_list):
+                    if t is failed_token:
+                        found_idx = i
+                        break
+                if found_idx is not None:
+                    active_idx = (found_idx + 1) % len(client_list)
+                else:
+                    curr = active_idx if active_idx is not None else 0
+                    active_idx = (curr + 1) % len(client_list)
+            elif active_idx is None:
+                active_idx = 0
+            active_idx = active_idx % len(client_list)
+            setattr(self, "_active_token_index", active_idx)
+            return client_list[active_idx]
+
+        elif strategy == "random":
+            if failed_token is not None:
+                candidates = [
+                    i for i, pair in enumerate(client_list)
+                    if pair[1] is not failed_token
+                ]
+                if candidates:
+                    active_idx = random.choice(candidates)
+                else:
+                    active_idx = random.randrange(len(client_list))
+            elif active_idx is None:
+                active_idx = random.randrange(len(client_list))
+            else:
+                active_idx = active_idx % len(client_list)
+            setattr(self, "_active_token_index", active_idx)
+            return client_list[active_idx]
+
+        else:
+            raise ValueError(f"tokenStrategy must be random or fallback, got: {strategy}")
+
     def _get_chatbot_state(self) -> tuple[bool, str]:
         """Get request-local metadata, with compatibility fallback for tests/plugins."""
         return _CHATBOT_STATE.get() or (
@@ -1165,15 +1230,15 @@ class BaseTranslate:
         api_attempts = 0
         client: AsyncOpenAI
         token: COpenAIToken
-        client, token = random.choices(self.client_list, k=1)[0]
+        last_failed_token: Optional[COpenAIToken] = None
+        client, token = BaseTranslate._select_client_token(
+            self, api_try_count=api_try_count
+        )
         if messages is None:
             messages = [
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ]
-
-        if "gemini" in token.model_name:
-            temperature = NOT_GIVEN
 
         while True:
             # Check stop_event before each API attempt so that cancelling
@@ -1186,15 +1251,17 @@ class BaseTranslate:
             progress.attempt()
             request_started = time.monotonic()
             try:
-                if self.tokenStrategy == "random":
-                    if api_try_count % 2 == 0:
-                        client, token = random.choices(self.client_list, k=1)[0]
-                elif self.tokenStrategy == "fallback":
-                    index = api_try_count % len(self.client_list)
-                    client, token = self.client_list[index]
-                else:
-                    raise ValueError("tokenStrategy must be random or fallback")
-                is_stream=stream if stream != NOT_GIVEN else token.stream
+                if last_failed_token is not None:
+                    client, token = BaseTranslate._select_client_token(
+                        self,
+                        api_try_count=api_try_count,
+                        failed_token=last_failed_token,
+                    )
+                    last_failed_token = None
+                actual_temperature = (
+                    NOT_GIVEN if "gemini" in token.model_name else temperature
+                )
+                is_stream = stream if stream != NOT_GIVEN else token.stream
                 self._last_chatbot_was_stream = bool(is_stream)
                 self._last_chatbot_model_name = getattr(token, "model_name", "")
                 _CHATBOT_STATE.set(
@@ -1212,7 +1279,7 @@ class BaseTranslate:
                         model=token.model_name,
                         messages=messages,
                         stream=is_stream,
-                        temperature=temperature,
+                        temperature=actual_temperature,
                         frequency_penalty=frequency_penalty,
                         max_tokens=max_tokens,
                         timeout=self.api_timeout,
@@ -1406,6 +1473,7 @@ class BaseTranslate:
                 if getattr(self, "fail_fast", False):
                     raise TranslationRequestError(str(e)) from e
 
+                last_failed_token = token
                 api_try_count += 1
                 api_attempts += 1
                 if max_retry_count is not None and api_attempts >= max_retry_count:

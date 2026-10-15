@@ -2,6 +2,7 @@
 
 from contextvars import ContextVar
 from copy import copy
+import random
 
 import httpx
 from openai import APIError
@@ -66,6 +67,14 @@ class AutoTranslate(BaseTranslate):
         self._proxy_pool, self._token_pool = proxy_pool, token_pool
         self._engines = {}
         self._preferred_modes = {}
+        self._preferred_tokens = {}
+        client_list = getattr(self, "client_list", [])
+        if getattr(self, "tokenStrategy", "random") == "fallback":
+            self._active_token_index = 0
+        else:
+            self._active_token_index = (
+                random.randrange(len(client_list)) if client_list else 0
+            )
         self._batch_scope = ContextVar("auto_translation_batch", default=None)
         backend = config.getBackendConfigSection("OpenAI-Compatible")
         model_name = backend.get("rewriteModelName", "")
@@ -128,11 +137,32 @@ class AutoTranslate(BaseTranslate):
         file_key = (getattr(trans_list[0], "source_file_path", filename), has_name)
         state = self._batch_scope.get() or {"contexts": {}, "gpt_dic": None}
         current = trans_list
+        if not hasattr(self, "_preferred_modes"):
+            self._preferred_modes = {}
+        if not hasattr(self, "_preferred_tokens"):
+            self._preferred_tokens = {}
+
+        client_list = getattr(self, "client_list", [])
+        num_tokens = len(client_list)
+        if file_key not in self._preferred_tokens:
+            if getattr(self, "tokenStrategy", "random") == "fallback":
+                self._preferred_tokens[file_key] = (
+                    getattr(self, "_active_token_index", 0) % num_tokens if num_tokens > 0 else 0
+                )
+            else:
+                self._preferred_tokens[file_key] = (
+                    random.randrange(num_tokens) if num_tokens > 0 else 0
+                )
+
         for attempt in range(MAX_RETRIES + 1):
             self._check_stop_requested()
             index = self._preferred_modes.get(file_key, 0)
             mode = modes[index]
+            token_index = (
+                self._preferred_tokens.get(file_key, 0) % num_tokens if num_tokens > 0 else 0
+            )
             engine = self._get_engine(mode)
+            engine._active_token_index = token_index
             LOGGER.info("[auto-translate][%s:%s] %s，尝试 %s/%s", filename, self._build_idx_tip(current), mode, attempt + 1, MAX_RETRIES + 1)
             context = state["contexts"].setdefault(mode, {"sessions": {}, "context": {}})
             session_scope = engine._session_scope()
@@ -160,6 +190,7 @@ class AutoTranslate(BaseTranslate):
                 for session in context["sessions"].values():
                     if session.last_tran is working[-1]:
                         session.last_tran = current[-1]
+                self._active_token_index = token_index
                 return count, list(current)
             except (TranslationParseError, TranslationRequestError, APIError, httpx.HTTPError, OSError, ValueError) as exc:
                 engine.reset_conversation(filename)
@@ -168,11 +199,30 @@ class AutoTranslate(BaseTranslate):
                     self._preferred_modes[file_key] = (index + 1) % len(modes)
                 next_mode = modes[self._preferred_modes[file_key]]
                 action = f"保持 {mode}" if len(modes) == 1 else f"切换 {next_mode}"
+
+                token_action = ""
+                if num_tokens > 1:
+                    if self._preferred_tokens.get(file_key, 0) == token_index:
+                        if getattr(self, "tokenStrategy", "random") == "fallback":
+                            next_token_index = (token_index + 1) % num_tokens
+                        else:  # "random"
+                            other_indices = [i for i in range(num_tokens) if i != token_index]
+                            next_token_index = random.choice(other_indices)
+                        self._preferred_tokens[file_key] = next_token_index
+                        self._active_token_index = next_token_index
+                    else:
+                        next_token_index = self._preferred_tokens.get(file_key, 0)
+
+                    if next_token_index < len(client_list):
+                        next_token_obj = client_list[next_token_index][1]
+                        token_action = f"，切换令牌为 [{next_token_obj.maskToken()}]"
+
                 retry_size = max(1, len(current) // 2)
                 exhausted = attempt == MAX_RETRIES
+                action_desc = f"{action}{token_action}"
                 detail = (
                     "共 5 次请求（4 次重试）仍失败，标记翻译失败"
-                    if exhausted else f"{action}，缩小为 {retry_size} 句重试（{attempt + 1}/4）"
+                    if exhausted else f"{action_desc}，缩小为 {retry_size} 句重试（{attempt + 1}/4）"
                 )
                 try:
                     from GalTransl.server import record_runtime_error
@@ -199,7 +249,7 @@ class AutoTranslate(BaseTranslate):
                     )
                     return len(failed), failed
                 current = current[:retry_size]
-                LOGGER.warning("[auto-translate][%s] %s 出错：%s；%s，缩小为 %s 句重试（%s/4）", filename, mode, exc, action, len(current), attempt + 1)
+                LOGGER.warning("[auto-translate][%s] %s 出错：%s；%s，缩小为 %s 句重试（%s/4）", filename, mode, exc, action_desc, len(current), attempt + 1)
                 await self._interruptible_sleep(1)
             finally:
                 session_scope.reset(session_token)
@@ -211,4 +261,6 @@ class AutoTranslate(BaseTranslate):
         finally:
             self._engines.clear()
             self._preferred_modes.clear()
+            if hasattr(self, "_preferred_tokens"):
+                self._preferred_tokens.clear()
             await super().shutdown()
