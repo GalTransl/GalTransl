@@ -1,7 +1,7 @@
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useRetainPage } from '../components/PageActivity';
-import { createCacheProblemFilter, entriesMatch } from '../lib/cacheEntries';
+import { createCacheProblemFilter, entriesMatch, mergeCacheEntries } from '../lib/cacheEntries';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
@@ -845,6 +845,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
 
   const refreshCurrentFile = useCallback(async () => {
     if (!projectId || !selectedFile || dirtyFiles.has(selectedFile)) return;
+    const previousEntries = entriesMapRef.current.get(selectedFile) ?? [];
     const request = ++entriesRequestRef.current;
     const isCurrent = () => viewingProjectIdRef.current === projectId
       && viewingFileRef.current === selectedFile && request === entriesRequestRef.current;
@@ -857,9 +858,10 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       // entriesMapRef 早换成新项目的表了：这时候写进去等于把 B 的条目塞进 A
       if (!isCurrent()) return;
       noteCachePresence(selectedFile, res.has_cache !== false);
-      entriesMapRef.current.set(selectedFile, res.entries);
-      cleanEntriesMapRef.current.set(selectedFile, cloneEntries(res.entries));
-      setEntries(res.entries);
+      const merged = mergeCacheEntries(previousEntries, res.entries);
+      entriesMapRef.current.set(selectedFile, merged);
+      cleanEntriesMapRef.current.set(selectedFile, cloneEntries(merged));
+      setEntries(merged);
       setError(null);
     } catch (err) {
       if (isCurrent()) setLocalError(normalizeError(err, uiMessage("projects:projectCachePage.refreshCurrentFile_normalizeError_cacheFailed")));
@@ -1173,7 +1175,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       const res = await fetchProjectProblems(projectId, configFileName);
       if (request !== problemRequestRef.current) return;
       setProblems(res.problems);
-      setProblemFilterKeys(res.filter_keys || []);
+      const keys = res.filter_keys || [];
+      setProblemFilterKeys(previous => previous.length === keys.length && previous.every((key, i) => key === keys[i]) ? previous : keys);
     } catch (err) {
       if (request === problemRequestRef.current) setLocalError(normalizeError(err, uiMessage("projects:projectCachePage.loadProblems_normalizeError_loadProblemFailed")));
     } finally {
@@ -1193,7 +1196,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     // 配置可能刚被修改：丢弃页面内的旧快照，下次打开其他文件也要重新读取。
     // 未保存的译文继续保留在内存里。
     for (const filename of entriesMapRef.current.keys()) {
-      if (!dirtyFiles.has(filename)) {
+      if (filename !== selectedFile && !dirtyFiles.has(filename)) {
         entriesMapRef.current.delete(filename);
         cleanEntriesMapRef.current.delete(filename);
       }
@@ -1204,7 +1207,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       loadProblems(),
       refreshCurrentFile(),
     ]);
-  }, [dirtyFiles, loadCacheFiles, loadProblems, projectId, refreshCurrentFile, runGlobalSearch]);
+  }, [dirtyFiles, loadCacheFiles, loadProblems, projectId, refreshCurrentFile, runGlobalSearch, selectedFile]);
 
   useEffect(() => {
     const wasActive = activeRef.current;

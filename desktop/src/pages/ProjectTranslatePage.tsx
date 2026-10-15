@@ -13,6 +13,9 @@ import { StatusBadge } from '../components/StatusBadge';
 import { EmptyState, InlineFeedback } from '../components/page-state';
 import { useConnection } from '../features/connection/ConnectionContext';
 import { useNameDict } from '../lib/useNameDict';
+import { useFreshEntries } from '../lib/useFreshEntries';
+import { useSuccessTail } from '../lib/useSuccessTail';
+import { useProjectTranslationConfig } from '../lib/useProjectTranslationConfig';
 import {
   type FileProgress,
   type Job,
@@ -20,7 +23,6 @@ import {
   type SubmitJobPayload,
   BACKEND_PROFILES_CHANGE_EVENT,
   DEFAULT_BACKEND_PROFILE_CHANGE_EVENT,
-  fetchProjectConfig,
   fetchProjectRuntime,
   getBackendProfile,
   getBackendProfileNames,
@@ -36,7 +38,7 @@ import { getProfileMeta } from '../lib/backendProfile';
 import { summarizeBackendUsage } from '../lib/backendUsage';
 import { normalizeError } from '../lib/errors';
 import { basenamePath, joinPath } from '../lib/paths';
-import { usePrefersReducedMotion, LAUNCH, STRIP_BOOT, BAR_SURGE, COMPLETE, FRESH_HIGHLIGHT_MS } from '../lib/motion';
+import { usePrefersReducedMotion, LAUNCH, STRIP_BOOT, BAR_SURGE, COMPLETE } from '../lib/motion';
 import {
   RuntimeErrorRow,
   RuntimeSuccessRow,
@@ -55,7 +57,6 @@ const JOB_POLL_INTERVAL_MS = 2000;
 const RUNTIME_POLL_INTERVAL_MS = 1000;
 // 「文件进度」里有请求在跑的行排在最上面；请求结束后再在上面待这么久（见 prioritizedRuntimeFiles）
 const LIVE_ROW_STICKY_MS = 10_000;
-const SUCCESS_STICK_BOTTOM_THRESHOLD_PX = 24;
 // Backend keeps up to 100 success cards per translating file, but the UI only
 // renders the newest 100 cards (after filtering) to keep scrolling performant.
 const SUCCESS_RENDER_LIMIT = 100;
@@ -148,7 +149,10 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   /** runtime 的同步镜像：轮询合并身份时不用等 state 落地就能拿到上一轮快照 */
   const runtimeRef = useRef<ProjectRuntimeResponse | null>(runtime);
   runtimeRef.current = runtime;
-  const [projectBackendConfig, setProjectBackendConfig] = useState<Record<string, unknown> | null>(null);
+  const projectConfig = useProjectTranslationConfig(projectId, configFileName, active);
+  const backendSpecific = projectConfig?.backendSpecific;
+  const projectBackendConfig = backendSpecific && typeof backendSpecific === 'object'
+    ? backendSpecific as Record<string, unknown> : null;
   // 开始翻译页的后端切换：纯文字按钮 + 列表弹窗，不用下拉框。
   // 值与「配置编辑-翻译后端」同一口径：'__default__' 跟随全局默认，'' 用项目自身配置，其余为配置名。
   const [backendSelection, setBackendSelection] = useState(() => (projectDir ? getSelectedBackendProfileDisplay(projectDir) : '__default__'));
@@ -156,13 +160,8 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const [defaultBackendName, setDefaultBackendName] = useState(() => getDefaultBackendProfile());
   const [showBackendSwitcher, setShowBackendSwitcher] = useState(false);
   const [selectedSuccessFiles, setSelectedSuccessFiles] = useState<string[]>([]);
-  const [freshSuccessIds, setFreshSuccessIds] = useState<string[]>([]);
-  const seenSuccessIdsRef = useRef<Set<string>>(new Set());
-  const successListRef = useRef<HTMLDivElement | null>(null);
-  const shouldStickToBottomRef = useRef(true);
   // 默认落在「文件进度」：任务在跑的时候最常看的是它，错误只在出问题时才关心
   const [rightTab, setRightTab] = useState<'errors' | 'files' | 'retransl'>('files');
-  const [retranslKeys, setRetranslKeys] = useState<RetranslListItem[]>([]);
   const [continuousRetranslEnabled, setContinuousRetranslEnabled] = useState(false);
   // Continuous retranslating schedules follow-up jobs from this component.
   const monitorJobs = active || continuousRetranslEnabled;
@@ -253,31 +252,6 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     void refreshRuntime(true);
   }, [refreshJobs, refreshRuntime, active]);
 
-  useEffect(() => {
-    if (!active) return;
-    if (!projectId) {
-      setProjectBackendConfig(null);
-      return;
-    }
-    let cancelled = false;
-    fetchProjectConfig(projectId, configFileName || 'config.yaml')
-      .then((res) => {
-        if (cancelled) return;
-        const backendSpecific = res.config?.backendSpecific;
-        setProjectBackendConfig(
-          backendSpecific && typeof backendSpecific === 'object'
-            ? backendSpecific as Record<string, unknown>
-            : null,
-        );
-      })
-      .catch(() => {
-        if (!cancelled) setProjectBackendConfig(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, configFileName, active]);
-
   // 后端选择与「配置编辑」页共享同一份 localStorage：切项目时重读，别处改了就跟随。
   useEffect(() => {
     if (!projectDir) return;
@@ -301,47 +275,15 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     };
   }, [projectDir]);
 
-  const refreshRetranslKeys = useCallback(async () => {
-    if (!projectId) {
-      setRetranslKeys([]);
-      return;
-    }
-    try {
-      const res = await fetchProjectConfig(projectId, configFileName || 'config.yaml');
-      const common = (res.config?.common as Record<string, unknown>) || {};
-      const raw = common.retranslKey;
-      let keys: string[] = [];
-      if (Array.isArray(raw)) {
-        keys = raw.map((k) => String(k ?? '').trim()).filter(Boolean);
-      } else if (typeof raw === 'string') {
-        keys = raw.split(/\r?\n/).map((k) => k.trim()).filter(Boolean);
-      }
-      const runtimeSnapshot = runtime?.project_dir === projectDir
-        ? runtime
-        : cachedRuntimeByProject.get(projectId);
-      const runtimeStats = new Map(
-        (runtimeSnapshot?.retransl_stats || []).map((item) => [item.key, item.count]),
-      );
-      setRetranslKeys(keys.map((key) => ({ key, count: runtimeStats.get(key) ?? 0 })));
-    } catch {
-      // silent; keep prior list
-    }
-  }, [projectId, projectDir, configFileName, runtime]);
-
-  useEffect(() => {
-    void refreshRetranslKeys();
-  }, [refreshRetranslKeys]);
-
-  useEffect(() => {
-    if (rightTab !== 'retransl') return;
-    void refreshRetranslKeys();
-  }, [rightTab, refreshRetranslKeys]);
-
-  useEffect(() => {
-    if (rightTab !== 'retransl') return;
-    if (!projectId) return;
-    void refreshRetranslKeys();
-  }, [projectId, refreshRetranslKeys, rightTab, runtime?.retransl_stats]);
+  const retranslKeys = useMemo<RetranslListItem[]>(() => {
+    const common = (projectConfig?.common as Record<string, unknown>) || {};
+    const raw = common.retranslKey;
+    const keys = Array.isArray(raw)
+      ? raw.map(key => String(key ?? '').trim()).filter(Boolean)
+      : typeof raw === 'string' ? raw.split(/\r?\n/).map(key => key.trim()).filter(Boolean) : [];
+    const stats = new Map((runtime?.project_dir === projectDir ? runtime.retransl_stats : [])?.map(item => [item.key, item.count]));
+    return keys.map(key => ({ key, count: stats.get(key) ?? 0 }));
+  }, [projectConfig, projectDir, runtime?.project_dir, runtime?.retransl_stats]);
 
   useEffect(() => {
     if (!monitorJobs) return;
@@ -461,29 +403,6 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     }, RUNTIME_POLL_INTERVAL_MS);
     return () => window.clearInterval(poller);
   }, [refreshRuntime, shouldPollRuntime, monitorJobs]);
-
-  useEffect(() => {
-    const successEntries = runtime?.recent_successes ?? [];
-    if (successEntries.length === 0) return;
-    const seen = seenSuccessIdsRef.current;
-    const nextFresh = successEntries.filter((entry) => !seen.has(entry.id)).map((entry) => entry.id);
-    for (const entry of successEntries) seen.add(entry.id);
-    if (nextFresh.length === 0) return;
-    setFreshSuccessIds((current) => Array.from(new Set([...current, ...nextFresh])));
-    const timeout = window.setTimeout(() => {
-      setFreshSuccessIds((current) => current.filter((id) => !nextFresh.includes(id)));
-    }, FRESH_HIGHLIGHT_MS);
-    return () => window.clearTimeout(timeout);
-  }, [runtime?.recent_successes]);
-
-  useEffect(() => {
-    const successEntries = runtime?.recent_successes ?? [];
-    if (successEntries.length === 0) return;
-    if (!shouldStickToBottomRef.current) return;
-    const container = successListRef.current;
-    if (!container) return;
-    container.scrollTop = container.scrollHeight;
-  }, [runtime?.recent_successes]);
 
   const handleSubmit = useCallback(
     async (payload: SubmitJobPayload) => {
@@ -685,16 +604,6 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
       current.includes(filename) ? current.filter((name) => name !== filename) : [...current, filename],
     );
   }, []);
-  const handleClearSuccessFileFilters = useCallback(() => {
-    setSelectedSuccessFiles([]);
-    shouldStickToBottomRef.current = true;
-    window.requestAnimationFrame(() => {
-      const container = successListRef.current;
-      if (!container) return;
-      container.scrollTop = container.scrollHeight;
-    });
-  }, []);
-
   const selectedSuccessFileSet = useMemo(() => new Set(selectedSuccessFiles), [selectedSuccessFiles]);
   const hasSelectedSuccessFileFilter = selectedSuccessFiles.length > 0;
   const selectedSuccessFileFilterSummary = useMemo(() => {
@@ -718,6 +627,13 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     },
     [runtime?.recent_successes, runtimeMatchesProject, selectedSuccessFileSet],
   );
+  const { ref: successListRef, jumpToBottom: jumpToSuccessBottom } = useSuccessTail(
+    `${projectId}:${currentJob?.job_id ?? ''}`, successEntries, active,
+  );
+  const handleClearSuccessFileFilters = () => {
+    setSelectedSuccessFiles([]);
+    jumpToSuccessBottom();
+  };
 
   const isCurrentProjectActive = currentJob?.status === 'pending' || currentJob?.status === 'running';
   // 翻译中途锁定后端切换：pending / running 时点开也不允许换，避免任务前后用了两个模型
@@ -810,11 +726,6 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     runtimeRetranslPendingCount,
   ]);
 
-  const handleSuccessListScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
-    const element = event.currentTarget;
-    const distanceToBottom = element.scrollHeight - element.clientHeight - element.scrollTop;
-    shouldStickToBottomRef.current = distanceToBottom <= SUCCESS_STICK_BOTTOM_THRESHOLD_PX;
-  }, []);
   const handleOpenFolder = useCallback((path: string) => {
     if (!path) return;
     void invoke('open_folder', { path });
@@ -824,6 +735,11 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const cacheFolderPath = projectDir ? joinPath(projectDir, CACHE_FOLDER_NAME) : '';
 
   const recentErrors = runtimeMatchesProject ? (runtime?.recent_errors ?? []) : [];
+  const freshSuccessIds = useFreshEntries(
+    `${projectId}:${currentJob?.job_id ?? ''}`,
+    runtimeMatchesProject ? runtime?.recent_successes : undefined,
+    active,
+  );
 
   const isJobDone = currentJob?.status === 'completed';
 
@@ -918,7 +834,6 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
                 className={`ptv2-gauge__bar-fill${isJobDone ? ' ptv2-gauge__bar-fill--done' : ''}${justCompleted ? ' ptv2-gauge__bar-fill--complete' : ''}`}
                 style={{ width: `${progressPercent}%` }}
               >
-                <span className="ptv2-gauge__bar-shine" aria-hidden="true" />
               </div>
               <div className="ptv2-gauge__bar-ticks" aria-hidden="true">
                 {[25, 50, 75].map((tick) => (
@@ -1094,13 +1009,12 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
             {successEntries.length ? (
               <div
                 className="runtime-event-list runtime-event-list--success ptv2-eventlist"
-                onScroll={handleSuccessListScroll}
                 ref={successListRef}
               >
                 {successEntries.map((entry) => (
                   <RuntimeSuccessRow
                     entry={entry}
-                    isFresh={freshSuccessIds.includes(entry.id)}
+                    isFresh={freshSuccessIds.has(entry.id)}
                     isSuccessFileFilterActive={selectedSuccessFileSet.has(entry.filename || '')}
                     onToggleSuccessFileFilter={handleToggleSuccessFileFilter}
                     nameDict={nameDict}

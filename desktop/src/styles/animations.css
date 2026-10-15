@@ -7,16 +7,21 @@
 }
 
 @keyframes pageFadeOut {
-  from { opacity: 1; transform: translateY(0); }
-  to   { opacity: 0; transform: translateY(-6px); }
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@keyframes pageCrossFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 /* Cross-fade navigation: the outgoing page stays on top fading out while the
    new page mounts underneath and fades in — no serial "fade out, then mount". */
-/* 不用 forwards：动画终点就是元素本身的样式（opacity 1 / translateY(0)），
-   带 forwards 会让页面容器长期留着 transform，变成 fixed 后代的包含块 */
+/* Fade the page without moving its large backdrop-filter surfaces each frame.
+   Local section/popover movement still uses pageFadeIn. */
 .app-layout__page--entering {
-  animation: pageFadeIn 200ms ease;
+  animation: pageCrossFadeIn 200ms ease;
 }
 
 .app-layout__page--leaving {

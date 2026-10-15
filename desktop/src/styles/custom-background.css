@@ -463,3 +463,13 @@
   -webkit-backdrop-filter: none;
 }
 
+/* The stream already sits on a blurred panel. Nested blur on every card and
+   its SRC/DST block adds two render surfaces per row during scrolling. */
+.app-layout--custom-background .project-translate-page .runtime-event,
+.app-layout--custom-background .project-translate-page .runtime-success-compact,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .runtime-event,
+:root[data-theme='dark'] .app-layout--custom-background .project-translate-page .runtime-success-compact {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+

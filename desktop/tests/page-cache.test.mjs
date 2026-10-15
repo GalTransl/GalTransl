@@ -12,10 +12,13 @@ const { usePageActive, useRetainPage } = load(new URL('../src/components/PageAct
 function fixture(limit = RECENT_PAGE_LIMIT) {
   let navigate, setAvailable, setLeavingPath;
   const mounts = new Map();
+  const renders = new Map();
   const unmounts = [];
   function Page() {
     const location = useLocation();
     const { id } = useParams();
+    const pageNavigate = useNavigate();
+    renders.set(id, (renders.get(id) || 0) + 1);
     const active = usePageActive();
     const [text, setText] = useState('');
     const [busy, setBusy] = useState(false);
@@ -24,8 +27,9 @@ function fixture(limit = RECENT_PAGE_LIMIT) {
       mounts.set(id, (mounts.get(id) || 0) + 1);
       return () => { unmounts.push(id); };
     }, []);
-    return h('input', { id, active, location, value: text, onChange: setText, setBusy });
+    return h('input', { id, active, location, value: text, onChange: setText, setBusy, navigate: pageNavigate });
   }
+  const routes = h(Route, { path: '/page/:id', element: h(Page) });
   function App() {
     const location = useLocation();
     navigate = useNavigate();
@@ -33,13 +37,12 @@ function fixture(limit = RECENT_PAGE_LIMIT) {
     const [leavingPath, updateLeaving] = useState(null);
     setLeavingPath = updateLeaving;
     setAvailable = (fn) => update(() => fn);
-    return h(CachedRoutes, { location, currentPath: location.pathname, leavingPath, limit, isAvailable: available },
-      h(Route, { path: '/page/:id', element: h(Page) }));
+    return h(CachedRoutes, { location, currentPath: location.pathname, leavingPath, limit, isAvailable: available }, routes);
   }
   let renderer;
   act(() => { renderer = create(h(MemoryRouter, { initialEntries: ['/page/0'] }, h(App))); });
   return {
-    renderer, mounts, unmounts,
+    renderer, mounts, unmounts, renders,
     go: (path, options) => act(() => navigate(path, options)),
     transition: (from, to) => act(() => { setLeavingPath(from); navigate(to); }),
     finishTransition: () => act(() => setLeavingPath(null)),
@@ -48,6 +51,33 @@ function fixture(limit = RECENT_PAGE_LIMIT) {
     dispose: () => act(() => renderer.unmount()),
   };
 }
+
+test('unrelated navigation does not render hidden cached routes', () => {
+  const f = fixture();
+  f.go('/page/1');
+  const hiddenRenders = f.renders.get('0');
+  f.go('/page/2');
+  assert.equal(f.renders.get('0'), hiddenRenders);
+  act(() => f.page(2).props.setBusy(true));
+  assert.equal(f.renders.get('0'), hiddenRenders);
+  f.go('/page/0');
+  assert.equal(f.page(0).props.active, true);
+  assert.equal(f.mounts.get('0'), 1);
+  f.dispose();
+});
+
+test('navigation inside a cached page reaches the outer router and keeps local URL updates', () => {
+  const f = fixture();
+  act(() => f.page(0).props.navigate('/page/1'));
+  assert.equal(f.page(1).props.active, true);
+  act(() => f.page(1).props.navigate('?section=settings#row'));
+  assert.equal(f.page(1).props.location.pathname, '/page/1');
+  assert.equal(f.page(1).props.location.search, '?section=settings');
+  assert.equal(f.page(1).props.location.hash, '#row');
+  assert.equal(f.page(0).props.location.search, '');
+  assert.equal(f.mounts.get('1'), 1);
+  f.dispose();
+});
 
 test('recent routes preserve component state and frozen location/params; revisit updates LRU', () => {
   const f = fixture();

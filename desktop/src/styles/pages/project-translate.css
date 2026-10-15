@@ -637,17 +637,11 @@
 }
 
 .runtime-event--fresh {
-  animation: runtimeSuccessTrail 1.2s ease-out both;
+  border-color: rgba(110, 231, 183, 0.55);
 }
 
-.runtime-event--fresh::after {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(115deg, rgba(34, 211, 238, 0), rgba(110, 231, 183, 0.28), rgba(34, 211, 238, 0));
-  animation: runtimeSuccessFlash 1s ease-out both;
+.runtime-event--fresh::before {
+  animation: runtimeSuccessPulse 650ms ease-out;
 }
 
 .runtime-event__header,
@@ -1170,34 +1164,10 @@
   }
 }
 
-/* 去掉 box-shadow 阴影模糊重绘，仅对位移和边框颜色过渡，大幅降低新译文流入时的 GPU 光栅化负载 */
-@keyframes runtimeSuccessTrail {
-  0% {
-    transform: translateX(-8px);
-    border-color: rgba(110, 231, 183, 0.76);
-  }
-  30% {
-    transform: translateX(0);
-    border-color: rgba(110, 231, 183, 0.55);
-  }
-  100% {
-    transform: translateX(0);
-    border-color: rgba(74, 222, 128, 0.22);
-  }
-}
-
-@keyframes runtimeSuccessFlash {
-  0% {
-    opacity: 0;
-    transform: translateX(-18%);
-  }
-  25% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-    transform: translateX(22%);
-  }
+/* Pulse just the narrow accent; a changing border repaints the whole card. */
+@keyframes runtimeSuccessPulse {
+  from { opacity: 0.35; }
+  to { opacity: 1; }
 }
 
 @keyframes runtimeCopyCheckPop {
@@ -1886,9 +1856,9 @@
     border-color: rgba(110, 231, 183, 0.5);
   }
 
-  .runtime-event--fresh::after {
+  .runtime-event--fresh::before {
     animation: none;
-    opacity: 0;
+    opacity: 1;
   }
 
   .runtime-event-list--error .runtime-event--error {

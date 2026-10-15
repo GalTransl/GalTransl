@@ -1,5 +1,5 @@
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Routes, type Location } from 'react-router-dom';
+import { NavigationType, Routes, UNSAFE_LocationContext, type Location } from 'react-router-dom';
 import { PageActivityContext, PageRetentionContext } from './PageActivity';
 
 export const RECENT_PAGE_LIMIT = 5;
@@ -16,6 +16,9 @@ const CachedPage = memo(function CachedPage({ entry, visible, active, leaving, r
   children: ReactNode;
 }) {
   const key = entry.location.pathname;
+  // Routes reads the outer location even with an explicit location prop. Freeze
+  // that context too so unrelated navigation does not wake every hidden route.
+  const routeLocation = useMemo(() => ({ location: entry.location, navigationType: NavigationType.Pop }), [entry.location]);
   const register = useCallback(() => retain(key), [retain, key]);
   const scrollPositions = useRef(new Map<HTMLElement, { top: number; left: number }>());
   useLayoutEffect(() => {
@@ -52,7 +55,9 @@ const CachedPage = memo(function CachedPage({ entry, visible, active, leaving, r
       <PageActivityContext.Provider value={active}>
         <PageRetentionContext.Provider value={register}>
           {/* Each mounted route owns its location/params, including while hidden. */}
-          <Routes location={entry.location}>{children}</Routes>
+          <UNSAFE_LocationContext.Provider value={routeLocation}>
+            <Routes location={entry.location}>{children}</Routes>
+          </UNSAFE_LocationContext.Provider>
         </PageRetentionContext.Provider>
       </PageActivityContext.Provider>
     </div>
