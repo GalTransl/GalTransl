@@ -50,10 +50,10 @@ test('fences require a standalone closing line at least as long as the opening f
   assert.equal(renderMarkdown('```\n```'), '<pre><code></code></pre>');
 });
 
-test('streaming unclosed fences still render escaped content and the cursor', () => {
-  const html = renderMarkdown('`````text\n```\n<script>alert(1)</script>', { cursor: true });
+test('streaming unclosed fences still render escaped content without a typing cursor', () => {
+  const html = renderMarkdown('`````text\n```\n<script>alert(1)</script>');
   assert.match(html, /^<pre><code>```\n&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
-  assert.match(html, /class="agent-typing-cursor"/);
+  assert.doesNotMatch(html, /agent-typing-cursor/);
   assert.ok(html.endsWith('</code></pre>'));
   assert.doesNotMatch(html, /<script>/);
 });

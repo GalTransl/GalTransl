@@ -4,6 +4,8 @@
    workbench cockpit: one large gradient panel with a radial
    blue glow + inset highlights, tonal layers instead of
    heavy borders, and a borderless lifted composer.
+   运行状态通过文字、颜色和实际数据更新表达，避免无限动画持续合成。
+   面板使用静态渐变，避免对整个对话区域反复采样背景。
    ───────────────────────────────────────────────────────── */
 
 .agent-console {
@@ -54,8 +56,6 @@
     radial-gradient(circle at 92% -18%, rgba(47, 111, 235, 0.16), transparent 46%),
     linear-gradient(90deg, #ffffff 0%, #ffffff 45%, rgba(247, 251, 255, 0.96) 100%),
     var(--color-surface);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.9),
     inset 0 -1px 0 rgba(191, 208, 226, 0.45);
@@ -73,8 +73,6 @@
     radial-gradient(circle at 14% -12%, rgba(47, 111, 235, 0.1), transparent 42%),
     linear-gradient(180deg, #ffffff 0%, rgba(247, 251, 255, 0.96) 100%),
     var(--color-surface);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.9),
     inset 0 -1px 0 rgba(191, 208, 226, 0.45);
@@ -565,9 +563,7 @@
   color: var(--color-warning);
 }
 
-/* 旋转的是这个外壳：必须做成正好 1em 的方块，让盒中心与图标中心重合。
-   若用 inline-block，盒高由 line-height 撑开、图标又按基线(-0.125em)下沉，
-   旋转中心就落在图标上方，看起来像在绕圈乱晃。 */
+/* 重试图标保持静态，通过警告色和倒计时表示重试状态。 */
 .agent-retry-note__icon {
   flex: none;
   display: inline-flex;
@@ -578,7 +574,6 @@
   margin-top: 1px;
   line-height: 1;
   opacity: 0.9;
-  transform-origin: center;
 }
 
 .agent-retry-note__body {
@@ -594,29 +589,9 @@
   white-space: pre-wrap;
 }
 
-.agent-retry-note.is-live .agent-retry-note__icon {
-  animation: agent-retry-spin 1.6s linear infinite;
-}
-
 .agent-retry-note__count {
   font-variant-numeric: tabular-nums;
   opacity: 0.85;
-}
-
-@keyframes agent-retry-spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .agent-retry-note.is-live .agent-retry-note__icon {
-    animation: none;
-  }
 }
 
 :root[data-theme='dark'] .agent-console {
@@ -830,11 +805,6 @@
   background: var(--color-warning-soft);
 }
 
-@keyframes agent-pulse {
-  0%, 100% { opacity: 0.35; }
-  50% { opacity: 1; }
-}
-
 /* ── Thread scroller — 面板内部区域，不再自带边框/投影 ── */
 
 .agent-console__thread {
@@ -913,6 +883,18 @@
 .agent-jump-bottom:hover {
   border-color: rgba(47, 111, 235, 0.4);
   color: var(--color-primary);
+}
+
+.agent-jump-bottom > svg {
+  transition: transform var(--dur-fast) var(--ease-decel);
+}
+
+.agent-jump-bottom:hover > svg {
+  transform: translateY(2px);
+}
+
+.agent-jump-bottom:active > svg {
+  transform: translateY(2px) scale(0.9);
 }
 
 :root[data-theme='dark'] .agent-jump-bottom {
@@ -1248,7 +1230,7 @@
   font-weight: 600;
 }
 
-/* 运行中标签保持可读色，脉冲点单独承载「活着」的反馈 */
+/* 运行中标签和静态状态点保持可读；内容更新与计时表示运行进度。 */
 .agent-activity__label.is-running {
   color: var(--color-text-muted);
 }
@@ -1262,7 +1244,6 @@
   vertical-align: middle;
   border-radius: 50%;
   background: var(--color-text-muted);
-  animation: agent-pulse 1s ease-in-out infinite;
 }
 
 .agent-activity__meta {
@@ -1341,28 +1322,6 @@
   overflow-wrap: anywhere;
 }
 
-/* 光标由 renderMarkdown({ cursor: true }) 注入到最后一个文本块内部，
-   随文字同行排布；-0.12em 让竖线贴合基线上下的字形高度。 */
-.agent-typing-cursor {
-  display: inline-block;
-  width: 2px;
-  height: 1em;
-  margin-left: 2px;
-  vertical-align: -0.12em;
-  background: var(--color-primary);
-  animation: agent-cursor-blink 0.9s steps(2, start) infinite;
-}
-
-@keyframes agent-cursor-blink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0;
-  }
-}
-
 /* ── Reasoning row（模型「想」的思考过程：可折叠卡片，与「说」的纯文本区分） ── */
 
 .agent-reasoning {
@@ -1415,12 +1374,11 @@
   vertical-align: middle;
   border-radius: 50%;
   background: var(--color-text-muted);
-  animation: agent-pulse 1s ease-in-out infinite;
 }
 
 /* 折叠时的单行预览（跑马灯效果）：文本只保留一份，窗口贴在文本末尾——
    模型边写边把窗口往左推，就是"滚动显示最新思考"；不做首尾相接的无缝循环，
-   否则同一句会同时出现两遍。左端渐隐表示后面还有内容，右端是最新的一句不遮。 */
+   否则同一句会同时出现两遍。超长内容在左端裁切，右端始终显示最新文字。 */
 .agent-reasoning__marquee {
   display: flex;
   justify-content: flex-end;
@@ -1428,8 +1386,6 @@
   min-width: 0;
   max-width: min(62%, 460px);
   overflow: hidden;
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 14px);
-  mask-image: linear-gradient(90deg, transparent, #000 14px);
 }
 
 .agent-reasoning__marquee-text {
@@ -1476,7 +1432,7 @@
   overflow-wrap: anywhere;
 }
 
-/* ── Final reply（回合收尾回复：顶层普通消息） ── */
+/* ── Final reply（折叠时位于块外，展开时位于块内） ── */
 
 .agent-final {
   margin: 2px 0 6px;
@@ -1806,13 +1762,6 @@
     var(--agent-tile-strong, rgba(16, 24, 40, 0.1)) 50%,
     var(--agent-tile, rgba(16, 24, 40, 0.05)) 68%
   );
-  background-size: 220% 100%;
-  animation: agentCacheShimmer 1.3s ease-in-out infinite;
-}
-
-@keyframes agentCacheShimmer {
-  from { background-position: 160% 0; }
-  to { background-position: -60% 0; }
 }
 
 /* 气泡里是只读展示：内嵌条目不填色（外框已经圈好了范围，条目再铺一层会叠出
@@ -1962,10 +1911,6 @@
 
 .agent-tjob__state.is-running {
   color: var(--color-primary);
-}
-
-.agent-tjob__state.is-running .agent-tjob__state-dot {
-  animation: agent-pulse 1.1s ease-in-out infinite;
 }
 
 .agent-tjob__state.is-done {
@@ -2181,10 +2126,6 @@
 
 .agent-tool__state.is-running {
   color: var(--color-primary);
-}
-
-.agent-tool__state.is-running .agent-tool__state-dot {
-  animation: agent-pulse 1.1s ease-in-out infinite;
 }
 
 /* 倒计时：数字用等宽字形，避免秒数跳动时整行抖动。 */
@@ -2572,16 +2513,7 @@
   height: 4px;
   border-radius: 50%;
   background: var(--color-primary);
-  opacity: 0.35;
-  animation: agent-working-dot 1s ease-in-out infinite;
-}
-
-.agent-working__dots span:nth-child(2) { animation-delay: 0.12s; }
-.agent-working__dots span:nth-child(3) { animation-delay: 0.24s; }
-
-@keyframes agent-working-dot {
-  0%, 60%, 100% { opacity: 0.35; transform: scale(0.8); }
-  30% { opacity: 1; transform: scale(1); }
+  opacity: 0.7;
 }
 
 .agent-working__label {
@@ -3453,6 +3385,10 @@
   color: var(--color-danger);
 }
 
+.agent-composer__stop:active {
+  transform: scale(0.94);
+}
+
 /* 发送/停止用内联 SVG 图标：块级化，避免行内基线留白 */
 .agent-composer__send > svg,
 .agent-composer__stop > svg {
@@ -3581,18 +3517,16 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .agent-working__dots span,
-  .agent-activity__label.is-running::after,
-  .agent-reasoning__label.is-running::after,
-  .agent-tool__state.is-running .agent-tool__state-dot,
-  .agent-typing-cursor {
-    animation: none;
-  }
-
   .agent-activity__collapse,
   .agent-reasoning__collapse,
   .agent-sessions__group-collapse {
     transition: none;
+  }
+  .agent-jump-bottom > svg,
+  .agent-composer__send,
+  .agent-composer__stop {
+    transition: none;
+    transform: none !important;
   }
 }
 
@@ -3742,10 +3676,6 @@
 
 .agent-subagent__state.is-running {
   color: var(--color-primary);
-}
-
-.agent-subagent__state.is-running::before {
-  animation: agent-pulse 1.1s ease-in-out infinite;
 }
 
 .agent-subagent__state.is-done {

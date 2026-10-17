@@ -272,12 +272,10 @@ function CacheRefCard({
 export function AgentMarkdown({
   text,
   projectDir,
-  cursor,
   className,
 }: {
   text: string;
   projectDir: string;
-  cursor?: boolean;
   className?: string;
 }) {
   const uiLanguage = useUiLanguage();
@@ -285,30 +283,26 @@ export function AgentMarkdown({
   const hasRef = segments.some((s) => s.kind === 'cacheRef');
   const cls = ['agent-md', className].filter(Boolean).join(' ');
   if (!hasRef) {
-    return <Markdown text={text} cursor={cursor} className={className} />;
+    return <Markdown text={text} className={className} />;
   }
   return (
     <CacheRefSegments
       segments={segments}
       projectDir={projectDir}
-      cursor={cursor}
       className={`${cls} agent-md--segmented`}
     />
   );
 }
 
 /** 带缓存引用的那段文本：按片段切开，文本片段各自渲染 markdown，引用片段渲染卡片。
-    人名替换字典只在这里取——说话人 pill 要跟「浏览文本」页显示同一个译名。
-    流式输出时行末光标只加在最后一段。 */
+    人名替换字典只在这里取——说话人 pill 要跟「浏览文本」页显示同一个译名。 */
 function CacheRefSegments({
   segments,
   projectDir,
-  cursor,
   className,
 }: {
   segments: MarkdownSegment[];
   projectDir: string;
-  cursor?: boolean;
   className: string;
 }) {
   useUiLanguage();
@@ -321,7 +315,7 @@ function CacheRefSegments({
             key={`t${i}`}
             className="agent-md__chunk"
             dangerouslySetInnerHTML={{
-              __html: renderMarkdown(seg.text, { cursor: cursor && i === segments.length - 1 }),
+              __html: renderMarkdown(seg.text),
             }}
           />
         ) : (

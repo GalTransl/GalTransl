@@ -29,32 +29,29 @@ export const AgentGroupView = memo(function AgentGroupView({
   const uiLanguage = useUiLanguage();
   // Terminal groups render as notices and hold no disclosure state; dispatch
   // them before the activity component so its hooks never run conditionally.
-  if (group.type === 'user') return <UserMessageRow message={group.message} />;
+  if (group.type === 'user') return <UserMessageRow message={group.message} step={group.step} />;
   if (group.type === 'error') return <ErrorNotice group={group} />;
   if (group.type === 'stopped') return <StoppedNotice group={group} />;
-  if (group.type === 'activity' && group.finalContent) {
-    return (
-      <>
-        {group.items.length > 0 ? (
-          <AgentActivityGroup group={group} isLive={isLive} projectDir={projectDir} persistKey={persistKey} />
-        ) : null}
-        <FinalMessage item={group.finalContent} projectDir={projectDir} />
-      </>
-    );
+  if (group.finalContent && group.items.length === 0) {
+    return <FinalMessage item={group.finalContent} projectDir={projectDir} />;
   }
   return <AgentActivityGroup group={group} isLive={isLive} projectDir={projectDir} persistKey={persistKey} />;
 });
 
-/** 回合收尾回复：顶层普通消息，像聊天里最后一条回答。 */
+/** 同一份收尾正文随工作块展开状态切换位置。外层标记用于完成后的阅读定位。 */
 const FinalMessage = memo(function FinalMessage({ item, projectDir }: { item: ActivityItem; projectDir: string }) {
   const uiLanguage = useUiLanguage();
-  return <AgentMarkdown text={item.content || ''} projectDir={projectDir} className="agent-final" />;
+  return (
+    <div data-agent-final-step={item.step}>
+      <AgentMarkdown text={item.content || ''} projectDir={projectDir} className="agent-final" />
+    </div>
+  );
 });
 
-function UserMessageRow({ message }: { message: string }) {
+function UserMessageRow({ message, step }: { message: string; step: number }) {
   const uiLanguage = useUiLanguage();
   return (
-    <div className="agent-row agent-row--user">
+    <div className="agent-row agent-row--user" data-agent-user-step={step}>
       <div className="agent-bubble agent-bubble--user">
         <div className="agent-bubble__label">{translate("agent:agentGroupView.agentBubbleAgentBubbleUser_message_text")}</div>
         <div className="agent-bubble__text">{message}</div>
@@ -77,29 +74,15 @@ function AgentActivityGroup({
   const uiLanguage = useUiLanguage();
   const active = usePageActive();
   const stateKey = `${persistKey}::${group.id}`;
-  const [open, setOpenRaw] = useState(() => {
-    const saved = manualOpenState.get(stateKey);
-    return saved === undefined ? isLive : saved;
-  });
-  // 恢复过用户选择的组从挂载之初就属于“手动控制”。否则下面的 effect 会在
-  // 历史回合 isLive=false 时立刻把刚恢复的展开态重新收起。
-  const userToggledRef = useRef(manualOpenState.has(stateKey));
-  const setManualOpen = (value: boolean | ((prev: boolean) => boolean)) => {
-    setOpenRaw((prev) => {
-      const next = typeof value === 'function' ? value(prev) : value;
-      manualOpenState.set(stateKey, next);
-      return next;
-    });
+  const [manualOpen, setOpenRaw] = useState(() => manualOpenState.get(stateKey));
+  // 自动状态在本次 render 就生效，避免 finish 后先把正文挂在块内、再移到块外，
+  // 导致阅读定位拿到一个马上会被卸载的节点。
+  const open = manualOpen ?? isLive;
+  const setManualOpen = (value: boolean) => {
+    manualOpenState.set(stateKey, value);
+    setOpenRaw(value);
   };
   const items = group.items;
-
-  // Follow the live run: auto-expand while working, auto-collapse when settled,
-  // unless the user took manual control of this group.
-  useEffect(() => {
-    if (userToggledRef.current) return;
-    // 自动状态不写入 manualOpenState；只有用户点击才应取得永久控制权。
-    setOpenRaw(isLive);
-  }, [isLive]);
 
   // 运行中墙钟计时：live 时每秒跳动，结束冻结在最后值。
   const [now, setNow] = useState(() => Date.now());
@@ -164,47 +147,50 @@ function AgentActivityGroup({
   const phases = toolRowPhases(items, isLive);
 
   return (
-    <div className={`agent-activity${open ? ' is-open' : ''}${isLive ? ' is-live' : ''}`}>
-      <button
-        type="button"
-        className="agent-activity__header"
-        onClick={() => {
-          userToggledRef.current = true;
-          setManualOpen((v) => !v);
-        }}
-        aria-expanded={open}
-      >
-        <span className="agent-activity__icon"><Icon name="spark" /></span>
-        <span className={`agent-activity__label${isLive ? ' is-running' : ''}`}>{label}</span>
-        {parts.length ? <span className="agent-activity__meta">{parts.join(' · ')}</span> : null}
-        <span className="agent-activity__caret">›</span>
-      </button>
-      {tail ? <div className="agent-activity__preview">{tail}</div> : null}
-      <AnimatedDisclosure open={open} className="agent-activity__collapse">
-        {() => (
-          <div className="agent-activity__collapse-inner">
-            <div className="agent-activity__body">
-              {items.map((item, i) =>
-                item.kind === 'content' ? (
-                  <ContentRow key={`t-${i}`} item={item} projectDir={projectDir} />
-                ) : item.kind === 'reasoning' ? (
-                  <ReasoningRow key={`r-${i}`} item={item} projectDir={projectDir} persistKey={persistKey} />
-                ) : item.kind === 'compact' ? (
-                  <CompactRow key={`c-${i}`} item={item} />
-                ) : item.kind === 'retry' ? (
-                  <RetryRow key={`rt-${i}`} item={item} />
-                ) : item.kind === 'tool' && item.name === 'start_translation' && translationJobId(item) ? (
-                  // 启动翻译换成工作台顶部卡的迷你版（带实时进度），不再是一坨 JSON
-                  <TranslationJobCard key={`j-${item.id || i}`} item={item} projectDir={projectDir} />
-                ) : (
-                  <ToolRow key={`x-${item.id || i}`} item={item} phase={phases[i]} persistKey={persistKey} />
-                ),
-              )}
+    <>
+      <div className={`agent-activity${open ? ' is-open' : ''}${isLive ? ' is-live' : ''}`}>
+        <button
+          type="button"
+          className="agent-activity__header"
+          onClick={() => {
+            setManualOpen(!open);
+          }}
+          aria-expanded={open}
+        >
+          <span className="agent-activity__icon"><Icon name="spark" /></span>
+          <span className={`agent-activity__label${isLive ? ' is-running' : ''}`}>{label}</span>
+          {parts.length ? <span className="agent-activity__meta">{parts.join(' · ')}</span> : null}
+          <span className="agent-activity__caret">›</span>
+        </button>
+        {tail ? <div className="agent-activity__preview">{tail}</div> : null}
+        <AnimatedDisclosure open={open} className="agent-activity__collapse">
+          {() => (
+            <div className="agent-activity__collapse-inner">
+              <div className="agent-activity__body">
+                {items.map((item, i) =>
+                  item.final ? null : item.kind === 'content' ? (
+                    <ContentRow key={`t-${i}`} item={item} projectDir={projectDir} />
+                  ) : item.kind === 'reasoning' ? (
+                    <ReasoningRow key={`r-${i}`} item={item} projectDir={projectDir} persistKey={persistKey} />
+                  ) : item.kind === 'compact' ? (
+                    <CompactRow key={`c-${i}`} item={item} />
+                  ) : item.kind === 'retry' ? (
+                    <RetryRow key={`rt-${i}`} item={item} />
+                  ) : item.kind === 'tool' && item.name === 'start_translation' && translationJobId(item) ? (
+                    // 启动翻译换成工作台顶部卡的迷你版（带实时进度），不再是一坨 JSON
+                    <TranslationJobCard key={`j-${item.id || i}`} item={item} projectDir={projectDir} />
+                  ) : (
+                    <ToolRow key={`x-${item.id || i}`} item={item} phase={phases[i]} persistKey={persistKey} />
+                  ),
+                )}
+                {open && group.finalContent ? <FinalMessage item={group.finalContent} projectDir={projectDir} /> : null}
+              </div>
             </div>
-          </div>
-        )}
-      </AnimatedDisclosure>
-    </div>
+          )}
+        </AnimatedDisclosure>
+      </div>
+      {!open && group.finalContent ? <FinalMessage item={group.finalContent} projectDir={projectDir} /> : null}
+    </>
   );
 }
 
@@ -219,7 +205,6 @@ const ContentRow = memo(function ContentRow({ item, projectDir }: { item: Activi
       <AgentMarkdown
         text={text}
         projectDir={projectDir}
-        cursor={streaming}
         className="agent-content__text"
       />
     </div>
@@ -291,7 +276,6 @@ const ReasoningRow = memo(function ReasoningRow({
             <AgentMarkdown
               text={text}
               projectDir={projectDir}
-              cursor={streaming}
               className="agent-reasoning__text"
             />
           </div>

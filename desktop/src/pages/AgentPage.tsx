@@ -2,6 +2,7 @@ import '../styles/pages/agent.css';
 import { usePageActive, useRetainPage } from '../components/PageActivity';
 import { loadAgentProject, saveAgentProject, loadMessageDraft, saveMessageDraft, moveMessageDraft, useMessageDraft } from './agent/drafts';
 import { followTail } from "./agent/followTail";
+import { createAgentMotion } from './agent/motion';
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -244,6 +245,8 @@ export function AgentPage() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const threadContentRef = useRef<HTMLDivElement | null>(null);
   const tailFollowerRef = useRef<ReturnType<typeof followTail> | null>(null);
+  const motionRef = useRef<ReturnType<typeof createAgentMotion> | null>(null);
+  const pendingFinalRevealRef = useRef<number | null>(null);
   // 跟随状态也驱动「回到最新」按钮。
   const [atBottom, setAtBottom] = useState(true);
   const startRef = useRef(0);
@@ -542,18 +545,25 @@ export function AgentPage() {
     const content = threadContentRef.current;
     if (!viewport || !content) return;
     const follower = followTail(viewport, content, setAtBottom);
+    const motion = createAgentMotion(viewport, content);
     tailFollowerRef.current = follower;
+    motionRef.current = motion;
     return () => {
       follower.dispose();
+      motion.dispose();
       tailFollowerRef.current = null;
+      motionRef.current = null;
     };
   }, []);
 
   useLayoutEffect(() => {
     tailFollowerRef.current?.setActive(active);
+    motionRef.current?.setActive(active);
   }, [active]);
 
   useLayoutEffect(() => {
+    pendingFinalRevealRef.current = null;
+    motionRef.current?.reset();
     tailFollowerRef.current?.jump();
   }, [effectiveProject, activeSessionId]);
 
@@ -627,7 +637,11 @@ export function AgentPage() {
           return true;
         }
       }
+      motionRef.current?.observe(ev);
       if (ev.type === 'finish' || ev.type === 'error' || ev.type === 'stopped') {
+        // 只记录实时完成事件；历史恢复不跳读，followup 回合仍继续跟随。
+        pendingFinalRevealRef.current = ev.type === 'finish' && !ev.followup && ev.summary?.trim()
+          && typeof ev.step === 'number' && tailFollowerRef.current?.isFollowing() ? ev.step : null;
         // 后端若已安排好 followup 回合（点「立即」发送、或滞留插话转新回合），
         // 下一步马上又在跑：这里绝不能把运行态打回 false——否则停止按钮会消失、
         // 顶栏还会因为 running=false 显示成"空闲"，而后端其实在跑。
@@ -681,6 +695,7 @@ export function AgentPage() {
       const localId = `local:${text}`;
       localMsgIdsRef.current.set(localId, (localMsgIdsRef.current.get(localId) || 0) + 1);
       stream.flush();
+      motionRef.current?.observe({ type: 'user_message', step: -1, message: text });
       setEvents((prev) => [
         ...prev,
         { type: 'user_message', step: -1, message: text },
@@ -1124,6 +1139,18 @@ export function AgentPage() {
 
   const timelineBuilder = useMemo(() => createTimelineBuilder(), [uiLanguage, effectiveProject, activeSessionId]);
   const timeline = useMemo(() => timelineBuilder(events), [timelineBuilder, events]);
+  useLayoutEffect(() => {
+    const step = pendingFinalRevealRef.current;
+    if (step === null) return;
+    const reply = threadContentRef.current?.querySelector<HTMLElement>(`[data-agent-final-step="${step}"]`);
+    if (!reply) return; // finish 事件批量落进 timeline 后才有最终正文。
+    pendingFinalRevealRef.current = null;
+    tailFollowerRef.current?.revealFinal(reply);
+  }, [timeline]);
+  useLayoutEffect(() => {
+    // finish 会先更新 running、再批量提交正文；只在时间线提交后消费动效队列。
+    motionRef.current?.flush(() => tailFollowerRef.current?.follow());
+  }, [timeline]);
   const hasSession = events.length > 0;
   const canSend = Boolean(projectDir) && Boolean(backendProfileName) && messageDraft.trim().length > 0 && !sending;
   // 正在等用户回答的 ask_user：这条工具调用**还没有结果**，说明后端那个工具

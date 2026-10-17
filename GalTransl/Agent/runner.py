@@ -68,6 +68,7 @@ from GalTransl.Agent.permissions import (
 )
 from GalTransl.Agent.prompts import (
     COMPACT_INSTRUCTION_PROMPT,
+    build_initial_user_message,
     _build_system_prompt,
     _parse_compact_summary,
     _parse_compact_topics,
@@ -303,9 +304,9 @@ class AgentRunner:
             self._resolve_llm()
             if not self.state.messages:
                 self._persist_message({"role": "system", "content": _build_system_prompt(self.state)})
-                # 首条消息只使用用户的实际输入。
+                # 首条 user 消息在模型侧附加二次判断提示；事件流仍使用实际输入。
                 first_user_text = self.state.first_prompt
-                self._persist_message({"role": "user", "content": first_user_text})
+                self._persist_message({"role": "user", "content": build_initial_user_message(first_user_text)})
                 # 首条用户消息也进事件流：SSE 全量回放（重开页面/状态对账）时
                 # 气泡不丢。前端发送时已乐观显示，收到会按内容去重。
                 self._emit("user_message", {"message": first_user_text})

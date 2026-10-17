@@ -1,6 +1,8 @@
 import { t as translate, useUiLanguage } from "../../i18n";
 import type { AgentContextUsage } from '../../lib/api';
 import { formatTokenCount } from './toolMeta';
+import { useEffect, useRef } from 'react';
+import { usePageActive } from '../../components/PageActivity';
 
 /** 发送/插话按钮的图标：上箭头。原来是一个箭头字符，字重/基线随字体走，
  *  改成 SVG 后与页面其它图标（开文件夹、上下文环）口径一致。 */
@@ -78,7 +80,31 @@ export const AGENT_PROMPT_SUGGESTIONS = [
 
 export function StatusPill({ status, running }: { status: string; running: boolean }) {
   useUiLanguage();
+  const active = usePageActive();
   const tone = running ? 'running' : status;
+  const previousState = useRef({ status, running });
+  const labelRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const changed = previousState.current.status !== status || previousState.current.running !== running;
+    previousState.current = { status, running };
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (!changed || !active || document.hidden || reduced.matches) return;
+    const animation = labelRef.current?.animate(
+      [{ opacity: 0.4, transform: 'translateY(2px)' }, { opacity: 1, transform: 'translateY(0)' }],
+      { duration: 180, easing: 'ease-out', fill: 'none' },
+    );
+    if (!animation) return;
+    const stop = () => {
+      animation.onfinish = null;
+      animation.cancel();
+      document.removeEventListener('visibilitychange', stop);
+      reduced.removeEventListener('change', stop);
+    };
+    animation.onfinish = stop;
+    document.addEventListener('visibilitychange', stop);
+    reduced.addEventListener('change', stop);
+    return stop;
+  }, [status, running, active]);
   const label = running
     ? translate("common:actions.running")
     : status === 'awaiting_input' || status === 'done'
@@ -89,6 +115,6 @@ export function StatusPill({ status, running }: { status: string; running: boole
           ? translate("common:actions.error")
           : translate("common:actions.idle");
   return (
-    <span className={`agent-status-pill agent-status-pill--${tone}`}>{label}</span>
+    <span className={`agent-status-pill agent-status-pill--${tone}`}><span ref={labelRef}>{label}</span></span>
   );
 }

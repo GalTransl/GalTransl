@@ -10,7 +10,7 @@ from http.server import ThreadingHTTPServer
 
 from GalTransl.Agent import session_store
 from GalTransl.Agent.models import AgentState
-from GalTransl.Agent.prompts import _build_system_prompt
+from GalTransl.Agent.prompts import INITIAL_USER_MESSAGE_PREFIX, _build_system_prompt
 from GalTransl.Agent.registry import AgentRuntime
 from GalTransl.Agent.runner import AgentRunner
 from GalTransl.server import JobRegistry, build_handler
@@ -28,17 +28,23 @@ class FirstPromptTests(unittest.TestCase):
         self.assertIn("test-project", prompt)
         self.assertIn("extract.yaml", prompt)
 
-    def test_first_user_message_is_preserved_verbatim_and_not_repeated(self):
+    def test_first_user_message_gets_second_prompt_but_event_keeps_raw_input(self):
         state = AgentState(first_prompt="  仅检查人名\n不要启动翻译  ")
         runner = AgentRunner(state)
         with patch.object(runner, "_resolve_llm"), patch.object(runner, "_stream_llm_response", return_value=("好的", [], "stop")):
             runner.run()
-            self.assertEqual(state.messages[1], {"role": "user", "content": state.first_prompt})
+            self.assertEqual(
+                state.messages[1],
+                {"role": "user", "content": INITIAL_USER_MESSAGE_PREFIX + state.first_prompt},
+            )
             self.assertNotIn(state.first_prompt, state.messages[0]["content"])
             self.assertEqual([e.data["message"] for e in state.events if e.type == "user_message"], [state.first_prompt])
             state.messages.append({"role": "user", "content": "继续检查"})
             runner.run()
-        self.assertEqual([m["content"] for m in state.messages if m["role"] == "user"], [state.first_prompt, "继续检查"])
+        self.assertEqual(
+            [m["content"] for m in state.messages if m["role"] == "user"],
+            [INITIAL_USER_MESSAGE_PREFIX + state.first_prompt, "继续检查"],
+        )
 
     def test_empty_first_prompt_does_not_start_a_default_task(self):
         for text in ("", " \n "):

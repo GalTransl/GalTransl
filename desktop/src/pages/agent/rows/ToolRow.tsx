@@ -141,7 +141,7 @@ export const ToolRow = memo(function ToolRow({
                   : { label: translate("common:actions.failed"), tone: 'error', countdown: false };
 
   return (
-    <div className={`agent-tool${open ? ' is-open' : ''}`}>
+    <div className={`agent-tool${open ? ' is-open' : ''}`} data-agent-tool-id={item.id}>
       <button
         type="button"
         className="agent-tool__header"

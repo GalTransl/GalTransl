@@ -48,7 +48,7 @@ export type ActivityItem = {
   };
   // 流式 content/reasoning：正在收 delta、还没收到对应的 *_end
   streaming?: boolean;
-  // 回合的收尾回复：渲染时提升为顶层普通消息（不折进活动组）
+  // 回合的收尾回复：由 finalContent 统一渲染，随展开状态放在块内或块外。
   final?: boolean;
   // wait tool: 倒计时快照
   waitTotalMs?: number;
@@ -172,14 +172,13 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
         if ((it.kind === 'content' || it.kind === 'reasoning') && it.streaming) it.streaming = false;
       }
     }
-    // finalContent 也算有效内容：纯文字回复的回合里 items 会被清空
-    // （finish 把同文的流式 content 移出折叠区），只剩 finalContent 也要入组。
+    // 没有流式正文的回合也可能只有 finalContent。
     if (current && (current.items.length || current.finalContent)) groups.push(current);
     current = null;
     partsCursor = 0;
   };
 
-  // 收掉指定流（content/reasoning）里所有还在流式的段：撤光标、记耗时。
+  // 收掉指定流（content/reasoning）里所有还在流式的段：更新状态、记耗时。
   // 交替思考模型一路流里 想/说 来回切换，end 到达时它对应的段未必还是
   // items 的最后一条（中间可能隔着别的段），所以按 kind 扫，不能只看末尾。
   const endStreamKind = (kind: 'content' | 'reasoning', durationMs?: number) => {
@@ -270,7 +269,7 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
       continue;
     }
 
-    // 一段「说」的流结束：撤掉打字机光标，并记下这段回复的耗时
+    // 一段「说」的流结束：更新状态，并记下这段回复的耗时
     if (ev.type === 'content_end') {
       endStreamKind('content', ev.duration_ms);
       continue;
@@ -296,7 +295,7 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
       continue;
     }
 
-    // 思考流结束：卡片收尾（撤光标、记耗时）。只挂在已有卡片上、不新建——
+    // 思考流结束：卡片收尾（更新状态、记耗时）。只挂在已有卡片上、不新建——
     // 重建时的卡片由 assistant_message 的 parts 建（delta 是瞬态的，不回放）。
     if (ev.type === 'reasoning_end') {
       endStreamKind('reasoning', ev.duration_ms);
@@ -574,14 +573,19 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
       continue;
     }
 
-    // finish 是回合的收尾回复：作为活动组的 final 消息，渲染时提升为
-    // 顶层普通文本（不折进折叠区），像对话里最后一条普通消息。
+    // finish 的 summary 与最后一段助手正文通常相同，只渲染一份。
     if (ev.type === 'finish') {
       if (!current) current = { type: 'activity', id: `a-${ev.step}`, items: [] };
       const summary = ev.summary || '';
-      // 收尾回复保留折叠区里的流式 content（显示「思考 · 耗时」），
-      // summary 另行提升为顶层 final 消息，两者并存。
       if (summary) {
+        // 只认领最后一次请求的末段正文；不跨工具边界删除更早的同文说明。
+        // 保留原行的耗时和步骤计数，由渲染层跳过这份同文正文。
+        for (let i = current.items.length - 1; i >= 0; i -= 1) {
+          const item = current.items[i];
+          if (item.kind === 'reasoning') continue;
+          if (item.kind === 'content' && item.content?.trim() === summary.trim()) item.final = true;
+          break;
+        }
         current.finalContent = { kind: 'content', step: ev.step, content: summary, final: true };
       }
       closeActivity(true); // 回合结束：把组压进 groups，后续事件（新的 user_message 等）起新组
