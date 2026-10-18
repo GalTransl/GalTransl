@@ -66,8 +66,8 @@ GUIDELINES_FOLDERNAME = "translation_guidelines"
 DEFAULT_GUIDELINE_NAME = "Basic.md"
 TRANSLATOR_SUPPORTED = {
     "auto-translate": {
-        "zh-cn": "模型名含 sakura/galtransl 时固定专用模板、只拆分重试；否则按文件 name 字段选择 Gal/Novel；Gal 按 tool→markdown→json、Novel 按 tool→普通模式切换并拆分文本，共5次请求（重试4次）。",
-        "en": "Models containing sakura/galtransl use a fixed specialized template with split-only retries; otherwise select Gal/Novel by the input name field; rotate tool/Markdown/JSON and split on errors, with up to four retries (five attempts total)."
+        "zh-cn": "基于文本自动选择合适的模板并在翻译报错时轮动切换。",
+        "en": "Automatically selects the appropriate template based on the text and rotates templates when translation fails."
     },
     "ForGal-json": {
         "zh-cn": "(openai接口)翻译Gal时使用，json格式输入，兼容性好。",
