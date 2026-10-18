@@ -480,8 +480,12 @@
   gap: 2px;
 }
 
-.cache-card:hover {
-  border-color: var(--color-primary-soft);
+/* 鼠标经过时给一条清晰但柔和的蓝色线框；原来的 primary-soft 太接近底色，
+   看起来像边框变淡/消失。用 color-mix 让暗色主题下也保持足够的对比度。 */
+.cache-card:hover,
+.cache-card:focus-within {
+  border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-line));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary) 14%, transparent);
 }
 
 /* 屏幕外的卡片跳过排版/绘制（Chromium/WebView2 原生支持，零依赖）。
