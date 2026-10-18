@@ -41,6 +41,7 @@ import {
   updateAgentQueued,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
+import { PROJECT_HISTORY_CHANGE_EVENT, removeProjectStorage } from '../lib/projectStorage';
 import { prefersReducedMotion } from '../lib/motion';
 import { notifyNeedsAttention } from '../lib/desktopNotify';
 import {
@@ -116,10 +117,14 @@ export function AgentPage() {
   useEffect(() => {
     const sync = () => setProjectOptions(mergeProjects());
     window.addEventListener(OPEN_PROJECTS_CHANGE_EVENT, sync);
+    window.addEventListener(PROJECT_HISTORY_CHANGE_EVENT, sync);
     // 进入页面时也同步一次：可能在别处刚打开/关闭过项目
     sync();
-    return () => window.removeEventListener(OPEN_PROJECTS_CHANGE_EVENT, sync);
-  }, [mergeProjects]);
+    return () => {
+      window.removeEventListener(OPEN_PROJECTS_CHANGE_EVENT, sync);
+      window.removeEventListener(PROJECT_HISTORY_CHANGE_EVENT, sync);
+    };
+  }, [mergeProjects, active]);
 
   // 「模型设置」里的 Agent 默认后端：没自己绑定过的会话都跟随它。默认变化时只改
   // 这个"默认值"，绑定过的会话各自跟自己的配置走，互不影响。
@@ -1091,7 +1096,7 @@ export function AgentPage() {
       setSessionsByProject((prev) => ({ ...prev, [dir]: remaining }));
       try {
         saveMessageDraft(dir, session.session_id, '');
-        localStorage.removeItem(sessionsKey(dir, session.session_id));
+        removeProjectStorage(sessionsKey(dir, session.session_id));
       } catch {
         // ignore
       }
@@ -1129,11 +1134,7 @@ export function AgentPage() {
     localMsgIdsRef.current.clear();
     hasBackendSessionRef.current = false;
     lastStepRef.current = 0;
-    try {
-      localStorage.removeItem(sessionsKey(effectiveProject, activeSessionRef.current));
-    } catch {
-      // ignore
-    }
+    removeProjectStorage(sessionsKey(effectiveProject, activeSessionRef.current));
     void refreshSessions(effectiveProject, activeSessionRef.current);
   }, [effectiveProject, refreshSessions]);
 

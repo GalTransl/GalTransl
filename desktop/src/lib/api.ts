@@ -1,5 +1,6 @@
 import { UiError, message as uiMessage, resolveMessage, isUiMessage, type LocalizedText, type UiMessage } from "../i18n/core";
 import { invoke } from '@tauri-apps/api/core';
+import { readProjectStorage, removeProjectStorage, writeProjectStorage } from './projectStorage';
 
 import type { PermissionDecision, PermissionMode } from './permissionMode';
 
@@ -1213,7 +1214,7 @@ export async function copyBackendProfile(sourceName: string) {
  *  项目级选择没有变更事件（和 setSelectedBackendProfile 一致），读取方下次渲染即生效。 */
 function renameSelectedBackendProfileReferences(oldName: string, newName: string) {
   try {
-    const raw = localStorage.getItem(BACKEND_PROFILE_KEY);
+    const raw = readProjectStorage(BACKEND_PROFILE_KEY);
     if (!raw) return;
     const map = JSON.parse(raw) as Record<string, string>;
     let changed = false;
@@ -1224,7 +1225,7 @@ function renameSelectedBackendProfileReferences(oldName: string, newName: string
       }
     }
     if (changed) {
-      localStorage.setItem(BACKEND_PROFILE_KEY, JSON.stringify(map));
+      writeProjectStorage(BACKEND_PROFILE_KEY, JSON.stringify(map));
     }
   } catch {
     // ignore storage errors
@@ -1348,50 +1349,44 @@ const CONFIG_FILE_KEY = 'galtransl-config-file';
 
 export function loadOpenProjects(): string[] {
   try {
-    const raw = localStorage.getItem(OPEN_PROJECTS_KEY);
-    return raw ? (JSON.parse(raw) as string[]) : [];
+    const parsed: unknown = JSON.parse(readProjectStorage(OPEN_PROJECTS_KEY) || '[]');
+    return Array.isArray(parsed)
+      ? [...new Set(parsed.filter((dir): dir is string => typeof dir === 'string' && Boolean(dir.trim())))]
+      : [];
   } catch {
     return [];
   }
 }
 
 export function saveOpenProjects(projects: string[]): void {
-  try {
-    localStorage.setItem(OPEN_PROJECTS_KEY, JSON.stringify(projects));
-    window.dispatchEvent(new CustomEvent(OPEN_PROJECTS_CHANGE_EVENT, { detail: projects }));
-  } catch {
-    // ignore storage errors
-  }
+  persistOpenProjects(projects);
+  window.dispatchEvent(new CustomEvent(OPEN_PROJECTS_CHANGE_EVENT, { detail: projects }));
 }
 
 export function persistOpenProjects(projects: string[]): void {
-  // 静默写盘（不广播）：App 在自己 state 变更后调它做持久化，
-  // 避免与 OPEN_PROJECTS_CHANGE 监听器形成自回环。外部写入路径
-  // （addOpenProject）用 saveOpenProjects，会广播通知监听方。
-  try {
-    localStorage.setItem(OPEN_PROJECTS_KEY, JSON.stringify(projects));
-  } catch {
-    // ignore storage errors
-  }
+  // Persist before broadcasting so subscribers can immediately read the list,
+  // including its in-memory fallback when browser storage is unavailable.
+  writeProjectStorage(OPEN_PROJECTS_KEY, JSON.stringify(projects));
 }
 
 export function readConfigFileName(projectDir: string): string {
   try {
-    const map = JSON.parse(localStorage.getItem(CONFIG_FILE_KEY) || '{}');
-    return map[projectDir] || 'config.yaml';
+    const map = JSON.parse(readProjectStorage(CONFIG_FILE_KEY) || '{}');
+    return typeof map?.[projectDir] === 'string' && map[projectDir] ? map[projectDir] : 'config.yaml';
   } catch {
     return 'config.yaml';
   }
 }
 
 export function saveConfigFileName(projectDir: string, configFileName: string): void {
+  let parsed: unknown;
   try {
-    const map = JSON.parse(localStorage.getItem(CONFIG_FILE_KEY) || '{}');
-    map[projectDir] = configFileName;
-    localStorage.setItem(CONFIG_FILE_KEY, JSON.stringify(map));
+    parsed = JSON.parse(readProjectStorage(CONFIG_FILE_KEY) || '{}');
   } catch {
-    // ignore storage errors
+    // Replace malformed optional metadata when registering a project.
   }
+  const map = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  writeProjectStorage(CONFIG_FILE_KEY, JSON.stringify({ ...map, [projectDir]: configFileName }));
 }
 
 /** 注册一个已打开项目（幂等）。已存在则只刷新其 config 文件名、保持原顺序；
@@ -1430,7 +1425,7 @@ function cloneBackendProfile(profile: Record<string, unknown>): Record<string, u
 
 function readBackendProfilesStorage(): BackendProfilesMap {
   try {
-    const raw = localStorage.getItem(BACKEND_PROFILES_STORAGE_KEY);
+    const raw = readProjectStorage(BACKEND_PROFILES_STORAGE_KEY);
     if (!raw) {
       return {};
     }
@@ -1454,12 +1449,8 @@ function readBackendProfilesStorage(): BackendProfilesMap {
 }
 
 function writeBackendProfilesStorage(profiles: BackendProfilesMap) {
-  try {
-    localStorage.setItem(BACKEND_PROFILES_STORAGE_KEY, JSON.stringify(profiles));
-    window.dispatchEvent(new CustomEvent(BACKEND_PROFILES_CHANGE_EVENT, { detail: Object.keys(profiles) }));
-  } catch {
-    // ignore storage errors
-  }
+  writeProjectStorage(BACKEND_PROFILES_STORAGE_KEY, JSON.stringify(profiles));
+  window.dispatchEvent(new CustomEvent(BACKEND_PROFILES_CHANGE_EVENT, { detail: Object.keys(profiles) }));
 }
 
 export function getBackendProfile(name: string): Record<string, unknown> | null {
@@ -1499,25 +1490,14 @@ export function getSelectedBackendProfileJobPayload(projectDir: string): Pick<Su
 
 /** Get the global default backend profile name. */
 export function getDefaultBackendProfile(): string {
-  try {
-    return localStorage.getItem(DEFAULT_BACKEND_PROFILE_KEY) || '';
-  } catch {
-    return '';
-  }
+  return readProjectStorage(DEFAULT_BACKEND_PROFILE_KEY) || '';
 }
 
 /** Set the global default backend profile name. Pass empty to clear. */
 export function setDefaultBackendProfile(name: string) {
-  try {
-    if (name) {
-      localStorage.setItem(DEFAULT_BACKEND_PROFILE_KEY, name);
-    } else {
-      localStorage.removeItem(DEFAULT_BACKEND_PROFILE_KEY);
-    }
-    window.dispatchEvent(new CustomEvent(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, { detail: name }));
-  } catch {
-    // ignore storage errors
-  }
+  if (name) writeProjectStorage(DEFAULT_BACKEND_PROFILE_KEY, name);
+  else removeProjectStorage(DEFAULT_BACKEND_PROFILE_KEY);
+  window.dispatchEvent(new CustomEvent(DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, { detail: name }));
 }
 
 /* ── Agent 默认后端配置（与翻译器默认各自独立） ──
@@ -1530,45 +1510,26 @@ export const AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT = 'galtransl:agent-defau
 
 /** Get the Agent default backend profile name (independent of translator default). */
 export function getAgentDefaultBackendProfile(): string {
-  try {
-    return localStorage.getItem(AGENT_DEFAULT_BACKEND_PROFILE_KEY) || '';
-  } catch {
-    return '';
-  }
+  return readProjectStorage(AGENT_DEFAULT_BACKEND_PROFILE_KEY) || '';
 }
 
 /** Set the Agent default backend profile name. Pass empty to clear. */
 export function setAgentDefaultBackendProfile(name: string) {
-  try {
-    if (name) {
-      localStorage.setItem(AGENT_DEFAULT_BACKEND_PROFILE_KEY, name);
-    } else {
-      localStorage.removeItem(AGENT_DEFAULT_BACKEND_PROFILE_KEY);
-    }
-    window.dispatchEvent(new CustomEvent(AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, { detail: name }));
-  } catch {
-    // ignore storage errors
-  }
+  if (name) writeProjectStorage(AGENT_DEFAULT_BACKEND_PROFILE_KEY, name);
+  else removeProjectStorage(AGENT_DEFAULT_BACKEND_PROFILE_KEY);
+  window.dispatchEvent(new CustomEvent(AGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT, { detail: name }));
 }
 
 export const GENDIC_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT = 'galtransl:gendic-default-backend-profile-change';
 export const SUBAGENT_DEFAULT_BACKEND_PROFILE_CHANGE_EVENT = 'galtransl:subagent-default-backend-profile-change';
 
 function getTaskDefaultBackendProfile(task: 'gendic' | 'subagent'): string {
-  try {
-    return localStorage.getItem(`galtransl-${task}-default-backend-profile`) || '';
-  } catch {
-    return '';
-  }
+  return readProjectStorage(`galtransl-${task}-default-backend-profile`) || '';
 }
 
 function setTaskDefaultBackendProfile(task: 'gendic' | 'subagent', name: string, event: string) {
-  try {
-    localStorage.setItem(`galtransl-${task}-default-backend-profile`, name);
-    window.dispatchEvent(new CustomEvent(event, { detail: name }));
-  } catch {
-    // ignore storage errors
-  }
+  writeProjectStorage(`galtransl-${task}-default-backend-profile`, name);
+  window.dispatchEvent(new CustomEvent(event, { detail: name }));
 }
 
 /** 空值表示跟随项目的翻译器后端，兼容已有配置。 */
@@ -1591,7 +1552,7 @@ export function resolveGenDicBackendProfile(projectDir: string) {
  */
 export function getSelectedBackendProfile(projectDir: string): string {
   try {
-    const map = JSON.parse(localStorage.getItem(BACKEND_PROFILE_KEY) || '{}');
+    const map = JSON.parse(readProjectStorage(BACKEND_PROFILE_KEY) || '{}');
     if (map[projectDir] !== undefined) {
       return map[projectDir]; // may be empty string (explicitly chose "不使用")
     }
@@ -1609,7 +1570,7 @@ export function getSelectedBackendProfile(projectDir: string): string {
  */
 export function getSelectedBackendProfileDisplay(projectDir: string): string {
   try {
-    const map = JSON.parse(localStorage.getItem(BACKEND_PROFILE_KEY) || '{}');
+    const map = JSON.parse(readProjectStorage(BACKEND_PROFILE_KEY) || '{}');
     if (map[projectDir] !== undefined) {
       return map[projectDir]; // '' or a specific name
     }
@@ -1622,7 +1583,7 @@ export function getSelectedBackendProfileDisplay(projectDir: string): string {
 
 export function setSelectedBackendProfile(projectDir: string, profileName: string) {
   try {
-    const map = JSON.parse(localStorage.getItem(BACKEND_PROFILE_KEY) || '{}');
+    const map = JSON.parse(readProjectStorage(BACKEND_PROFILE_KEY) || '{}');
     if (profileName === '__default__') {
       // "Follow global default" → remove the project-specific key entirely
       delete map[projectDir];
@@ -1630,7 +1591,7 @@ export function setSelectedBackendProfile(projectDir: string, profileName: strin
       // Store even empty string — it means "explicitly don't use any global config".
       map[projectDir] = profileName;
     }
-    localStorage.setItem(BACKEND_PROFILE_KEY, JSON.stringify(map));
+    writeProjectStorage(BACKEND_PROFILE_KEY, JSON.stringify(map));
   } catch {
     // ignore storage errors
   }
@@ -1642,7 +1603,7 @@ export function setSelectedBackendProfile(projectDir: string, profileName: strin
  */
 export function hasExplicitBackendProfile(projectDir: string): boolean {
   try {
-    const map = JSON.parse(localStorage.getItem(BACKEND_PROFILE_KEY) || '{}');
+    const map = JSON.parse(readProjectStorage(BACKEND_PROFILE_KEY) || '{}');
     return projectDir in map;
   } catch {
     return false;
@@ -1980,31 +1941,41 @@ export function loadCustomBackgroundPreference(): Promise<CustomBackgroundPrefer
   if (customBackgroundLoad) return customBackgroundLoad;
   const revision = customBackgroundRevision;
   customBackgroundLoad = (async () => {
-    const stored = await apiRequest<StoredCustomBackground>('/api/custom-background');
-    if (revision !== customBackgroundRevision) return getCustomBackgroundPreference();
     // Read the old setting once; remove it only after a successful disk migration.
     let legacyRaw: string | null = null;
     try { legacyRaw = localStorage.getItem(CUSTOM_BACKGROUND_KEY); } catch { /* Storage may be unavailable. */ }
-    if (legacyRaw && !stored.configured) {
-      let legacy: CustomBackgroundPreference | null = null;
-      try { legacy = normalizeCustomBackgroundPreference(JSON.parse(legacyRaw)); } catch { /* Ignore invalid old settings. */ }
-      if (legacy?.imageDataUrl.startsWith('data:image/')) {
-        const image = await (await fetch(legacy.imageDataUrl)).blob();
-        if (revision !== customBackgroundRevision) return getCustomBackgroundPreference();
-        const migrated = await uploadCustomBackgroundImage(image, legacy.imageName, legacy);
-        try { localStorage.removeItem(CUSTOM_BACKGROUND_KEY); } catch { /* Disk is already authoritative. */ }
-        return migrated;
+    try {
+      const stored = await apiRequest<StoredCustomBackground>('/api/custom-background');
+      if (revision !== customBackgroundRevision) return getCustomBackgroundPreference();
+      if (legacyRaw && !stored.configured) {
+        let legacy: CustomBackgroundPreference | null = null;
+        try { legacy = normalizeCustomBackgroundPreference(JSON.parse(legacyRaw)); } catch { /* Ignore invalid old settings. */ }
+        if (legacy?.imageDataUrl.startsWith('data:image/')) {
+          const image = await (await fetch(legacy.imageDataUrl)).blob();
+          if (revision !== customBackgroundRevision) return getCustomBackgroundPreference();
+          const migrated = await uploadCustomBackgroundImage(image, legacy.imageName, legacy);
+          try { localStorage.removeItem(CUSTOM_BACKGROUND_KEY); } catch { /* Disk is already authoritative. */ }
+          return migrated;
+        }
+        if (legacy) {
+          const migrated = await setCustomBackgroundPreference(legacy);
+          try { localStorage.removeItem(CUSTOM_BACKGROUND_KEY); } catch { /* Disk is already authoritative. */ }
+          return migrated;
+        }
       }
-      if (legacy) {
-        const migrated = await setCustomBackgroundPreference(legacy);
+      if (legacyRaw) {
         try { localStorage.removeItem(CUSTOM_BACKGROUND_KEY); } catch { /* Disk is already authoritative. */ }
-        return migrated;
       }
+      return publishCustomBackground(stored);
+    } catch (error) {
+      // Backend/disk is unreachable, so the legacy base64 image can never be
+      // migrated. Keeping it would let a stale wallpaper hold the whole
+      // localStorage quota hostage (and block project metadata from saving).
+      if (legacyRaw) {
+        try { localStorage.removeItem(CUSTOM_BACKGROUND_KEY); } catch { /* Storage may be unavailable. */ }
+      }
+      throw error;
     }
-    if (legacyRaw) {
-      try { localStorage.removeItem(CUSTOM_BACKGROUND_KEY); } catch { /* Disk is already authoritative. */ }
-    }
-    return publishCustomBackground(stored);
   })().finally(() => { customBackgroundLoad = null; });
   return customBackgroundLoad;
 }

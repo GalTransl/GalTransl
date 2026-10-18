@@ -13,6 +13,7 @@ import {
   isProjectConfigDirty,
   listAgentSessions,
   PROJECT_CONFIG_DIRTY_CHANGE_EVENT,
+  readConfigFileName,
   setProjectConfigDirty,
   submitJob,
   type ProjectRuntimeResponse,
@@ -25,7 +26,6 @@ import logoUrl from '../assets/logo.png';
 import { ProjectFolderPopover } from './ProjectFolderPopover';
 import { readHistory } from '../pages/agent/storage';
 
-const CONFIG_FILE_KEY = 'galtransl-config-file';
 const LAST_ACTIVE_PROJECT_KEY = 'galtransl-last-active-project';
 const OUTPUT_FOLDER_NAME = 'gt_output';
 const AGENT_POLL_INTERVAL_MS = 3000;
@@ -37,15 +37,6 @@ type RebuildToast = {
   title: LocalizedText;
   description: LocalizedText;
 };
-
-function loadConfigFileName(projectDir: string): string {
-  try {
-    const map = JSON.parse(localStorage.getItem(CONFIG_FILE_KEY) || '{}');
-    return map[projectDir] || 'config.yaml';
-  } catch {
-    return 'config.yaml';
-  }
-}
 
 function loadLastActiveProject(): string | null {
   try {
@@ -521,7 +512,7 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onClosePr
   }, []);
 
   const handleRebuildOutput = useCallback(async (projectDir: string) => {
-    const configFileName = loadConfigFileName(projectDir);
+    const configFileName = readConfigFileName(projectDir);
     setRebuildingDirs((prev) => ({ ...prev, [projectDir]: true }));
     try {
       const job = await submitJob({

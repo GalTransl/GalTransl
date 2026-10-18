@@ -25,30 +25,20 @@ import { formatTimestamp } from '../lib/format';
 import { normalizeError } from '../lib/errors';
 import { basenamePath, dirnamePath } from '../lib/paths';
 import { PROJECT_HOMEPAGE, RELEASE_LATEST_URL, RELEASE_LIST_URL } from '../lib/externalLink';
-const HISTORY_KEY = 'galtransl-project-history';
+import { PROJECT_HISTORY_KEY, PROJECT_HISTORY_CHANGE_EVENT, readProjectHistory, writeProjectStorage, type ProjectHistoryEntry } from '../lib/projectStorage';
+export type { ProjectHistoryEntry } from '../lib/projectStorage';
 const JOB_MEMORY_KEY = 'galtransl-home-jobs-memory';
 const JOB_CLEARED_KEY = 'galtransl-home-jobs-cleared';
 const MIN_REFRESH_SPIN_MS = 420;
 const REFRESH_SPIN_CYCLE_MS = 500;
 
-export type ProjectHistoryEntry = {
-  projectDir: string;
-  configFileName: string;
-  lastOpened: string;
-};
-
 function loadHistory(limit = getHomeHistoryRetentionLimit()): ProjectHistoryEntry[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    const parsed = raw ? (JSON.parse(raw) as ProjectHistoryEntry[]) : [];
-    return parsed.slice(0, limit);
-  } catch {
-    return [];
-  }
+  return readProjectHistory().slice(0, limit);
 }
 
 function saveHistory(entries: ProjectHistoryEntry[]) {
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(entries));
+  writeProjectStorage(PROJECT_HISTORY_KEY, JSON.stringify(entries));
+  window.dispatchEvent(new CustomEvent(PROJECT_HISTORY_CHANGE_EVENT));
 }
 
 function getJobSortTimestamp(job: Job): number {
@@ -288,9 +278,11 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     };
 
     window.addEventListener(HOME_HISTORY_LIMIT_CHANGE_EVENT, handleHistoryLimitChanged as EventListener);
+    window.addEventListener(PROJECT_HISTORY_CHANGE_EVENT, handleHistoryLimitChanged);
     window.addEventListener(HOME_JOB_LIMIT_CHANGE_EVENT, handleJobLimitChanged as EventListener);
     return () => {
       window.removeEventListener(HOME_HISTORY_LIMIT_CHANGE_EVENT, handleHistoryLimitChanged as EventListener);
+      window.removeEventListener(PROJECT_HISTORY_CHANGE_EVENT, handleHistoryLimitChanged);
       window.removeEventListener(HOME_JOB_LIMIT_CHANGE_EVENT, handleJobLimitChanged as EventListener);
     };
   }, []);

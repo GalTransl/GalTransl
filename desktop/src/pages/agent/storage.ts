@@ -1,12 +1,7 @@
 import type { AgentEvent, AgentStreamingMessage } from '../../lib/api';
+import { AGENT_SESSION_CACHE_PREFIX, readProjectStorage, removeProjectStorage, writeProjectStorage } from '../../lib/projectStorage';
 
-const HISTORY_KEY = 'galtransl-project-history';
-
-type HistoryEntry = {
-  projectDir: string;
-  configFileName: string;
-  lastOpened: string;
-};
+export { readProjectHistory as readHistory } from '../../lib/projectStorage';
 
 /* ── Session persistence ──
    The backend keeps agent state per project process-wide, but the visible
@@ -24,7 +19,7 @@ type TranscriptSession = {
 };
 
 export function sessionsKey(projectDir: string, sessionId: string): string {
-  return `galtransl-agent-session:${projectDir}:${sessionId}`;
+  return `${AGENT_SESSION_CACHE_PREFIX}${projectDir}:${sessionId}`;
 }
 
 /** 记住每个项目当前选中的会话 id，刷新页面后回到同一个会话。 */
@@ -33,20 +28,12 @@ function activeSessionKey(projectDir: string): string {
 }
 
 export function loadActiveSessionId(projectDir: string): string {
-  try {
-    return localStorage.getItem(activeSessionKey(projectDir)) || '';
-  } catch {
-    return '';
-  }
+  return readProjectStorage(activeSessionKey(projectDir)) || '';
 }
 
 export function saveActiveSessionId(projectDir: string, sessionId: string): void {
-  try {
-    if (sessionId) localStorage.setItem(activeSessionKey(projectDir), sessionId);
-    else localStorage.removeItem(activeSessionKey(projectDir));
-  } catch {
-    // 存储不可用不影响主流程
-  }
+  if (sessionId) writeProjectStorage(activeSessionKey(projectDir), sessionId);
+  else removeProjectStorage(activeSessionKey(projectDir));
 }
 
 /** 每个会话自己绑定的后端配置：projectDir -> sessionId -> 配置名。
@@ -59,7 +46,7 @@ export type SessionBackendMap = Record<string, Record<string, string>>;
 
 export function loadSessionBackends(): SessionBackendMap {
   try {
-    const raw = localStorage.getItem(SESSION_BACKENDS_KEY);
+    const raw = readProjectStorage(SESSION_BACKENDS_KEY);
     return raw ? (JSON.parse(raw) as SessionBackendMap) : {};
   } catch {
     return {};
@@ -68,7 +55,7 @@ export function loadSessionBackends(): SessionBackendMap {
 
 export function saveSessionBackends(map: SessionBackendMap): void {
   try {
-    localStorage.setItem(SESSION_BACKENDS_KEY, JSON.stringify(map));
+    writeProjectStorage(SESSION_BACKENDS_KEY, JSON.stringify(map));
   } catch {
     // 存储不可用不影响主流程
   }
@@ -77,7 +64,7 @@ export function saveSessionBackends(map: SessionBackendMap): void {
 export function loadSession(projectDir: string, sessionId: string): TranscriptSession | null {
   if (!sessionId) return null;
   try {
-    const raw = localStorage.getItem(sessionsKey(projectDir, sessionId));
+    const raw = readProjectStorage(sessionsKey(projectDir, sessionId));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as TranscriptSession & { goal?: string };
     if (!parsed || !Array.isArray(parsed.events)) return null;
@@ -102,9 +89,11 @@ export function saveSession(session: TranscriptSession): void {
     // transient SSE queue; persisting them would advance after_step beyond
     // the backend's post-restart cursor and permanently skip new events.
     const events = boundTranscriptEvents(persistedTranscriptEvents(session.events));
-    localStorage.setItem(sessionsKey(session.projectDir, session.sessionId), JSON.stringify({ ...session, events }));
+    // 走共享写入层：配额满时会先淘汰最旧的会话缓存再重试，失败则留在内存里
+    // 供本会话切换使用（后端日志仍是恢复时的权威来源）。
+    writeProjectStorage(sessionsKey(session.projectDir, session.sessionId), JSON.stringify({ ...session, events }));
   } catch {
-    // Quota or serialization failure is non-fatal.
+    // Serialization failure is non-fatal.
   }
 }
 
@@ -129,21 +118,14 @@ export function persistedTranscriptEvents(events: AgentEvent[]): AgentEvent[] {
   return events.filter((event) => !TRANSIENT_EVENT_TYPES.has(event.type) && !event.streaming);
 }
 
-function boundTranscriptEvents(events: AgentEvent[], limit = 600): AgentEvent[] {
+// 后端会话日志才是转录的权威来源；本地缓存只负责切换会话时"不闪白"，
+// 所以只留最近一小段。600 条完整事件（含 tool_result 原始对象）足以把
+// localStorage 撑满，并连带写不进项目列表。
+function boundTranscriptEvents(events: AgentEvent[], limit = 80): AgentEvent[] {
   if (events.length <= limit) return events;
   const firstUser = events.find((event) => event.type === 'user_message');
   if (!firstUser) return events.slice(-limit);
   return [firstUser, ...events.slice(-(limit - 1))];
-}
-
-export function readHistory(): HistoryEntry[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    const parsed = raw ? (JSON.parse(raw) as HistoryEntry[]) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
 }
 
 export function shortName(projectDir: string): string {

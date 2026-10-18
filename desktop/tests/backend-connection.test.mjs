@@ -25,14 +25,17 @@ function loadApi({ native = true, dev = false, configured, invoke, storage, fetc
   const requests = [];
   const requestOptions = [];
   const exports = {};
+  const localStorage = storage ?? { getItem: () => null };
+  const projectStorage = createTypeScriptLoader({ localStorage })(new URL('../src/lib/projectStorage.ts', import.meta.url));
   vm.runInNewContext(outputText, {
     exports,
     __importMeta: { env: { DEV: dev, VITE_BACKEND_URL: configured } },
     window: { ...(native ? { __TAURI_INTERNALS__: {} } : {}), dispatchEvent: () => true },
-    localStorage: storage ?? { getItem: () => null },
+    localStorage,
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options?.detail; } },
     require: (name) => {
       if (name === '../i18n/core') return i18n;
+      if (name === './projectStorage') return projectStorage;
       assert.equal(name, '@tauri-apps/api/core');
       return { invoke: invoke ?? (() => Promise.resolve({ url: 'http://127.0.0.1:45678' })) };
     },
@@ -79,7 +82,7 @@ test('background images use binary uploads and disk settings even when localStor
   assert.equal(requestOptions.filter(options => options?.method === 'POST').length, 1);
 });
 
-test('legacy background migration keeps localStorage until disk commit and a cleared disk setting wins', async () => {
+test('legacy background migration drops localStorage when disk commit fails and a cleared disk setting wins', async () => {
   const key = 'galtransl-custom-background';
   const legacy = JSON.stringify({ imageDataUrl: 'data:image/png;base64,aW1hZ2U=', imageName: 'old.png', opacity: 51, surfaceOpacity: 67 });
   const values = new Map([[key, legacy]]);
@@ -102,15 +105,29 @@ test('legacy background migration keeps localStorage until disk commit and a cle
     },
   });
   await assert.rejects(api.loadCustomBackgroundPreference(), /disk full/);
-  assert.equal(values.get(key), legacy);
+  // 迁移失败时旧 base64 图不能再无限期占着 localStorage 配额。
+  assert.equal(values.has(key), false);
   assert.equal(api.getCustomBackgroundPreference().imageDataUrl, '');
   fail = false;
+  values.set(key, legacy);
   const migrated = await api.loadCustomBackgroundPreference();
   assert.equal(migrated.imageName, 'old.png');
   assert.equal(values.has(key), false);
   await api.clearCustomBackgroundPreference();
   values.set(key, legacy);
   assert.equal((await api.loadCustomBackgroundPreference()).imageDataUrl, '');
+});
+
+test('an unreachable backend drops the un-migratable legacy background', async () => {
+  const key = 'galtransl-custom-background';
+  const legacy = JSON.stringify({ imageDataUrl: 'data:image/png;base64,aW1hZ2U=', imageName: 'old.png', opacity: 51, surfaceOpacity: 67 });
+  const values = new Map([[key, legacy]]);
+  const { api } = loadApi({ native: false,
+    storage: { getItem: key => values.get(key), removeItem: key => values.delete(key) },
+    fetchImpl: async () => { throw new Error('Connection error'); },
+  });
+  await assert.rejects(api.loadCustomBackgroundPreference());
+  assert.equal(values.has(key), false);
 });
 
 test('late background loads cannot overwrite a successful image replacement', async () => {

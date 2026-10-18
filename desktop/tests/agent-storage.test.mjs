@@ -1,23 +1,15 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import vm from 'node:vm';
-import ts from 'typescript';
-
-const { outputText } = ts.transpileModule(
-  readFileSync(new URL('../src/pages/agent/storage.ts', import.meta.url), 'utf8'),
-  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } },
-);
+import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
 
 function storage() {
   const values = new Map();
-  const exports = {};
   const localStorage = {
     getItem: (key) => values.get(key) ?? null,
     setItem: (key, value) => values.set(key, value),
   };
-  vm.runInNewContext(outputText, { exports, localStorage });
-  return { api: exports, localStorage };
+  const api = createTypeScriptLoader({ localStorage })(new URL('../src/pages/agent/storage.ts', import.meta.url));
+  return { api, localStorage };
 }
 
 test('legacy browser sessions read goal and save only first_prompt', () => {
@@ -45,4 +37,31 @@ test('explicit first_prompt takes precedence over the legacy field', () => {
     }));
     assert.equal(api.loadSession('project', 'session').first_prompt, first_prompt);
   }
+});
+
+test('the browser transcript cache keeps only a small replayable tail', () => {
+  const { api, localStorage } = storage();
+  const events = Array.from({ length: 200 }, (_, index) => ({ type: 'assistant_message', step: index, parts: [] }));
+  api.saveSession({
+    projectDir: 'project', sessionId: 'session', events, status: 'idle',
+    first_prompt: '', startedAt: 1, finishedAt: 2,
+  });
+  const saved = JSON.parse(localStorage.getItem(api.sessionsKey('project', 'session')));
+  assert.equal(saved.events.length, 80);
+  assert.equal(saved.events[0].step, 120);
+});
+
+test('a quota error keeps the transcript available for the current app session', () => {
+  const values = new Map();
+  const localStorage = {
+    getItem: key => values.get(key) ?? null,
+    setItem: () => { throw new DOMException('Storage full', 'QuotaExceededError'); },
+  };
+  const api = createTypeScriptLoader({ localStorage })(new URL('../src/pages/agent/storage.ts', import.meta.url));
+  api.saveSession({
+    projectDir: 'project', sessionId: 'session',
+    events: [{ type: 'user_message', step: 1, message: 'hi' }],
+    status: 'idle', first_prompt: 'hi', startedAt: 1, finishedAt: 2,
+  });
+  assert.equal(api.loadSession('project', 'session').events[0].message, 'hi');
 });

@@ -2,7 +2,7 @@ import { t as translate, useUiLanguage } from "../i18n";
 import { Suspense, lazy, useEffect, useMemo } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { usePageActive } from './PageActivity';
-import { decodeProjectDir } from '../lib/api';
+import { decodeProjectDir, readConfigFileName } from '../lib/api';
 import { loadLastProjectTab, saveLastProjectTab } from '../lib/projectTabMemory';
 
 const ProjectTranslatePage = lazy(async () => {
@@ -30,17 +30,6 @@ const ProjectCachePage = lazy(async () => {
   return { default: mod.ProjectCachePage };
 });
 
-const CONFIG_FILE_KEY = 'galtransl-config-file';
-
-function loadConfigFileName(projectDir: string): string {
-  try {
-    const map = JSON.parse(localStorage.getItem(CONFIG_FILE_KEY) || '{}');
-    return map[projectDir] || 'config.yaml';
-  } catch {
-    return 'config.yaml';
-  }
-}
-
 /** Tab path → component mapping */
 const TAB_MAP: { path: string; label: string }[] = [
   { path: 'translate', get label() { return translate("common:projectLayout.label_label_startTranslation"); } },
@@ -65,7 +54,7 @@ export function ProjectLayout() {
   const navigate = useNavigate();
 
   const projectDir = projectId ? decodeProjectDir(projectId) : '';
-  const configFileName = useMemo(() => loadConfigFileName(projectDir), [projectDir, active]);
+  const configFileName = useMemo(() => readConfigFileName(projectDir), [projectDir, active]);
 
   // Extract current tab from URL: /project/:projectId/cache → "cache"
   const segments = location.pathname.split('/');

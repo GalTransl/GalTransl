@@ -2,6 +2,7 @@ import { t as translate, useUiLanguage } from "../i18n";
 import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { HashRouter, Route, useNavigate, useLocation } from 'react-router-dom';
 import {
+  addOpenProject,
   CUSTOM_BACKGROUND_CHANGE_EVENT,
   DISABLE_ANIMATIONS_CHANGE_EVENT,
   OPEN_PROJECTS_CHANGE_EVENT,
@@ -14,8 +15,7 @@ import {
   loadCustomBackgroundPreference,
   getThemeModePreference,
   loadOpenProjects,
-  persistOpenProjects,
-  saveConfigFileName,
+  saveOpenProjects,
 } from '../lib/api';
 import { CachedRoutes } from '../components/CachedRoutes';
 import { PageActivityContext } from '../components/PageActivity';
@@ -141,10 +141,10 @@ export function App() {
     };
   }, []);
 
-  // Persist open projects to localStorage whenever the list changes (silent —
-  // no broadcast, to avoid a self-loop with the OPEN_PROJECTS_CHANGE listener).
+  // Publish closes as well as opens to cached Agent pages. The listener below
+  // preserves state identity for an unchanged list, preventing a self-loop.
   useEffect(() => {
-    persistOpenProjects(openProjects);
+    saveOpenProjects(openProjects);
   }, [openProjects]);
 
   // Listen for open-projects changed elsewhere (e.g. Agent page calling
@@ -164,11 +164,7 @@ export function App() {
 
   const handleOpenProject = useCallback((projectDir: string, config: string) => {
     const cfg = config || 'config.yaml';
-    setOpenProjects((prev) => {
-      if (prev.includes(projectDir)) return prev;
-      return [projectDir, ...prev];
-    });
-    saveConfigFileName(projectDir, cfg);
+    addOpenProject(projectDir, cfg);
     addProjectToHistory(projectDir, cfg);
   }, []);
 
