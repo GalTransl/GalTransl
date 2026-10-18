@@ -71,6 +71,7 @@ type SidebarProps = {
   openProjects: string[];
   wizardOpen: boolean;
   wizardProjectName: string;
+  onCloseWizard: () => void;
   onCloseProject: (projectDir: string) => void;
   onCloseOtherProjects: (projectDir: string) => void;
   onCloseAllProjects: () => void;
@@ -107,7 +108,7 @@ function buildInitialExpandedProjects(openProjects: string[], pathname: string):
   return result;
 }
 
-export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseProject, onCloseOtherProjects, onCloseAllProjects }: SidebarProps) {
+export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWizard, onCloseProject, onCloseOtherProjects, onCloseAllProjects }: SidebarProps) {
   useUiLanguage();
   const navigate = useNavigate();
   const location = useLocation();
@@ -122,6 +123,7 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onClosePr
   const [visibleProjectChildren, setVisibleProjectChildren] = useState<Record<string, boolean>>({});
   // Track which project is showing the close confirmation bubble
   const [confirmCloseDir, setConfirmCloseDir] = useState<string | null>(null);
+  const [confirmCloseWizard, setConfirmCloseWizard] = useState(false);
   // Track which projects are currently rebuilding output
   const [rebuildingDirs, setRebuildingDirs] = useState<Record<string, boolean>>({});
   // Track which projects have active translation jobs (running or pending)
@@ -228,15 +230,21 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onClosePr
 
   // Close confirmation bubble when clicking outside
   useEffect(() => {
-    if (confirmCloseDir === null) return;
+    if (confirmCloseDir === null && !confirmCloseWizard) return;
     const handleClickOutside = (e: MouseEvent) => {
       if (confirmBubbleRef.current && !confirmBubbleRef.current.contains(e.target as Node)) {
         setConfirmCloseDir(null);
+        setConfirmCloseWizard(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [confirmCloseDir]);
+  }, [confirmCloseDir, confirmCloseWizard]);
+
+  // 向导结束后清掉确认态，避免下次打开时气泡又冒出来。
+  useEffect(() => {
+    if (!wizardOpen) setConfirmCloseWizard(false);
+  }, [wizardOpen]);
 
   // Close context menu when clicking outside
   useEffect(() => {
@@ -267,6 +275,7 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onClosePr
     const y = Math.min(e.clientY, window.innerHeight - menuHeight - 8);
     setContextMenu({ x, y, projectDir });
     setConfirmCloseDir(null);
+    setConfirmCloseWizard(false);
   }, []);
 
   const toggleExpanded = useCallback(() => {
@@ -499,7 +508,22 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onClosePr
   }, [openProjects, navigate]);
 
   const handleRequestClose = useCallback((projectDir: string) => {
+    setConfirmCloseWizard(false);
     setConfirmCloseDir(projectDir);
+  }, []);
+
+  const handleRequestCloseWizard = useCallback(() => {
+    setConfirmCloseDir(null);
+    setConfirmCloseWizard(true);
+  }, []);
+
+  const handleConfirmCloseWizard = useCallback(() => {
+    setConfirmCloseWizard(false);
+    onCloseWizard();
+  }, [onCloseWizard]);
+
+  const handleCancelCloseWizard = useCallback(() => {
+    setConfirmCloseWizard(false);
   }, []);
 
   const handleConfirmClose = useCallback((projectDir: string) => {
@@ -655,22 +679,53 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onClosePr
       <nav className="sidebar__nav">
         {wizardOpen && (
           <div className="sidebar__project-group">
-            <NavLink
-              to="/new-project"
-              className={({ isActive }) =>
-                expanded
-                  ? `sidebar__project-header sidebar__wizard-header${compactProjectHeaders ? ' sidebar__project-header--compact' : ''}${isActive ? ' sidebar__wizard-header--active' : ''}`
-                  : `sidebar__nav-item ${isActive ? 'sidebar__nav-item--active' : ''}`
-              }
-              title={wizardProjectName ? translate("common:sidebar.sidebarProjectGroup_title_newProject", { wizardProjectName: wizardProjectName }) : translate("common:sidebar.sidebarProjectGroup_title_newProjectVariant2")}
-            >
-              <span className={`sidebar__nav-icon${expanded ? ' sidebar__project-icon' : ''}`}><Icon name="file-plus" /></span>
+            <div className="sidebar__wizard-header-wrap">
+              <NavLink
+                to="/new-project"
+                className={({ isActive }) =>
+                  expanded
+                    ? `sidebar__project-header sidebar__wizard-header${compactProjectHeaders ? ' sidebar__project-header--compact' : ''}${isActive ? ' sidebar__wizard-header--active' : ''}`
+                    : `sidebar__nav-item ${isActive ? 'sidebar__nav-item--active' : ''}`
+                }
+                title={wizardProjectName ? translate("common:sidebar.sidebarProjectGroup_title_newProject", { wizardProjectName: wizardProjectName }) : translate("common:sidebar.sidebarProjectGroup_title_newProjectVariant2")}
+              >
+                <span className={`sidebar__nav-icon${expanded ? ' sidebar__project-icon' : ''}`}><Icon name="file-plus" /></span>
+                {expanded && (
+                  <span className="sidebar__project-name">
+                    {wizardProjectName ? translate("common:sidebar.sidebarProjectName_message_new", { wizardProjectName: wizardProjectName }) : translate("common:sidebar.sidebarProjectName_message_newProject")}
+                  </span>
+                )}
+              </NavLink>
               {expanded && (
-                <span className="sidebar__project-name">
-                  {wizardProjectName ? translate("common:sidebar.sidebarProjectName_message_new", { wizardProjectName: wizardProjectName }) : translate("common:sidebar.sidebarProjectName_message_newProject")}
-                </span>
+                <button
+                  className="sidebar__project-close"
+                  type="button"
+                  onClick={handleRequestCloseWizard}
+                  title={translate("common:actions.close")}
+                >
+                  <Icon name="close" />
+                </button>
               )}
-            </NavLink>
+              {expanded && confirmCloseWizard && (
+                <div
+                  className="sidebar__project-confirm-bubble"
+                  ref={confirmBubbleRef}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <span className="sidebar__project-confirm-text">{translate("common:sidebar.sidebarProjectConfirmBubble_message_disable")}</span>
+                  <button
+                    className="sidebar__project-confirm-yes"
+                    type="button"
+                    onClick={handleConfirmCloseWizard}
+                  >{translate("common:actions.confirm")}</button>
+                  <button
+                    className="sidebar__project-confirm-no"
+                    type="button"
+                    onClick={handleCancelCloseWizard}
+                  >{translate("common:actions.cancel")}</button>
+                </div>
+              )}
+            </div>
           </div>
         )}
         {openProjects.map((projectDir) => {

@@ -224,6 +224,13 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
     setWizardOpen(false);
     setWizardProjectName('');
   }, [onOpenProject]);
+
+  const handleCloseWizard = useCallback(() => {
+    // 只丢弃向导草稿；已经创建到磁盘的项目保持原样，不做删除或回滚。
+    setWizardOpen(false);
+    setWizardProjectName('');
+    if (location.pathname === '/new-project') navigate('/');
+  }, [navigate, location.pathname]);
   // Cross-fade: the outgoing page stays mounted on top while the new page
   // fades in underneath — no serial "wait for fadeOut, then mount" delay.
   const [leavingPath, setLeavingPath] = useState<string | null>(null);
@@ -438,6 +445,7 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
         openProjects={openProjects}
         wizardOpen={wizardOpen}
         wizardProjectName={wizardProjectName}
+        onCloseWizard={handleCloseWizard}
         onCloseProject={handleCloseProjectAndNavigate}
         onCloseOtherProjects={handleCloseOtherProjectsAndNavigate}
         onCloseAllProjects={handleCloseAllProjectsAndNavigate}

@@ -439,6 +439,24 @@
   opacity: 1;
 }
 
+/* 新建项目向导条目：复用项目关闭按钮，但按钮在 NavLink 外侧，
+   hover 判定和定位都交给这层 wrapper。 */
+.sidebar__wizard-header-wrap {
+  position: relative;
+}
+
+.sidebar__wizard-header-wrap:hover .sidebar__project-close {
+  opacity: 1;
+}
+
+.sidebar__wizard-header-wrap .sidebar__project-close {
+  right: calc(var(--space-2) + 6px);
+}
+
+.sidebar__wizard-header-wrap .sidebar__project-confirm-bubble {
+  right: var(--space-2);
+}
+
 .sidebar__project-close:hover {
   background: var(--color-danger-soft);
   color: var(--color-danger);

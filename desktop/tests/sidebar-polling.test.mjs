@@ -36,7 +36,7 @@ function fixture(hidden = false) {
   const { Sidebar } = load(new URL('../src/components/Sidebar.tsx', import.meta.url));
   const view = openProjects => h(MemoryRouter, null, h(Sidebar, {
     openProjects, wizardOpen: false, wizardProjectName: '',
-    onCloseProject: () => {}, onCloseOtherProjects: () => {}, onCloseAllProjects: () => {},
+    onCloseWizard: () => {}, onCloseProject: () => {}, onCloseOtherProjects: () => {}, onCloseAllProjects: () => {},
   }));
   let renderer;
   act(() => { renderer = create(view(['project'])); });
