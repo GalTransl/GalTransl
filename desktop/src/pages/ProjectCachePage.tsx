@@ -252,17 +252,21 @@ const CacheEntryCard = memo(function CacheEntryCard({
                 {escapeControlChars(entry.post_dst_preview || entry.post_zh_preview || '')}
               </div>
             </div>
-            <div className="cache-card__field cache-card__field--skip-check">
-              <label className="cache-card__checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={!!entry.skip_check}
-                  onChange={(e) => onEntryChange(entry.index, 'skip_check', e.target.checked)}
-                  disabled={readOnly}
-                />
-                <span>{translate("projects:projectCachePage.cacheCardCheckboxLabel_message_checkSkipCheck")}</span>
-              </label>
-            </div>
+            {/* 只有问题句才需要豁免；已勾选的行也保留入口，否则勾选后 problem 被清掉，
+                就再也没有地方取消 skip_check 了。 */}
+            {(hasProblem || entry.skip_check) && (
+              <div className="cache-card__field cache-card__field--skip-check">
+                <label className="cache-card__checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={!!entry.skip_check}
+                    onChange={(e) => onEntryChange(entry.index, 'skip_check', e.target.checked)}
+                    disabled={readOnly}
+                  />
+                  <span>{translate("projects:projectCachePage.cacheCardCheckboxLabel_message_checkSkipCheck")}</span>
+                </label>
+              </div>
+            )}
           </>
         )}
       </div>
