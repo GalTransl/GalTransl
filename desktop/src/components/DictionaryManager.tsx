@@ -76,10 +76,11 @@ function getFilesByTab(data: DictionaryManagerData | null, tab: DictTab): string
   if (!data) return [];
   const files = tab === 'pre' ? data.pre_dict_files : tab === 'gpt' ? data.gpt_dict_files : data.post_dict_files;
   return [...files].sort((a, b) => {
-    const aMtime = data.dict_contents[a]?.mtime ?? -1;
-    const bMtime = data.dict_contents[b]?.mtime ?? -1;
-    if (aMtime !== bMtime) {
-      return bMtime - aMtime;
+    // 条目多的字典排在前面；元数据缺失（尚未加载到 count）的放最后，避免顺序跳动。
+    const aCount = data.dict_contents[a]?.count ?? -1;
+    const bCount = data.dict_contents[b]?.count ?? -1;
+    if (aCount !== bCount) {
+      return bCount - aCount;
     }
     return stripProjectDirMarker(a).localeCompare(stripProjectDirMarker(b));
   });
@@ -965,7 +966,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                         <div className="dict-card__header">{sectionPills}</div>
                       </div>
                     ) : null}
-                    <div className="dict-card-list" ref={cardListRef}>
+                    <div className={`dict-card-list${groupedRows.length > 1 ? ' dict-card-list--multi' : ''}`} ref={cardListRef}>
                       {groupedRows.map((group, groupIndex) => (
                         <DictEntryGroupCard
                           key={`${groupIndex}-${group.type}-${group.items[0]?.rowIndex ?? 0}`}

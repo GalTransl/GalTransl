@@ -33,6 +33,9 @@
 .dict-tabs {
   display: flex;
   gap: var(--space-2);
+  /* 这一行贴着 content 的 overflow:hidden 顶边；Button hover 会 translateY(-1px)，
+     不留余量时顶边框会被裁掉。 */
+  padding-top: 2px;
   margin-bottom: var(--space-5);
 }
 
@@ -457,7 +460,8 @@
 
 /* ── Dictionary Card Mode ── */
 
-/* 列表本身不滚动：滚动条交给卡片内部的表格，跟卡片边框贴在一起 */
+/* 单分组时列表本身不滚动：滚动条交给卡片内部的表格，跟卡片边框贴在一起。
+   多分组（普通 + 条件等）见下面的 --multi 规则。 */
 .dict-card-list {
   display: flex;
   flex-direction: column;
@@ -466,6 +470,23 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+/* 普通 + 条件等多个分组同时存在时，不再让每张卡片按 flex 比例压缩：
+   列表整体滚动，每组保留可用的表格高度，避免 8 条的普通组被挤成两行。
+   单分组时保持原行为（卡片填满面板，表格内部滚动）。 */
+.dict-card-list--multi {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.dict-card-list--multi .dict-card--grouped {
+  flex: 0 0 auto;
+}
+
+.dict-card-list--multi .dict-card__table {
+  max-height: min(420px, 50vh);
 }
 
 .dict-card {
