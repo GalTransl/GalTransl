@@ -1,4 +1,5 @@
 import type { AgentEvent } from '../../lib/api';
+import { prefersReducedMotion } from '../../lib/motion';
 
 type Cue = { selector: string; kind: 'arrive' | 'fade' | 'pop' };
 const BUDGET = 6;
@@ -11,7 +12,7 @@ export function createAgentMotion(viewport: HTMLElement, content: HTMLElement) {
   const streams = new Set<string>();
   let active = true;
   let disposed = false;
-  const enabled = () => active && !disposed && !document.hidden && !reduced.matches;
+  const enabled = () => active && !disposed && !document.hidden && !reduced.matches && !prefersReducedMotion();
   const clear = () => {
     pending.clear();
     for (const animation of animations) {

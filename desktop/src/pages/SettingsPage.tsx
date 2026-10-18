@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CustomSelect } from '../components/CustomSelect';
 import { PageHeader } from '../components/PageHeader';
+import { Switch } from '../components/Switch';
 import { ConnectionStatusCard } from '../features/connection/ConnectionStatusCard';
 import { EmptyState, ErrorState, LoadingState } from '../components/page-state';
 import { useConnection } from '../features/connection/ConnectionContext';
@@ -15,6 +16,7 @@ import {
   CUSTOM_BACKGROUND_SURFACE_OPACITY_MAX,
   CUSTOM_BACKGROUND_SURFACE_OPACITY_MIN,
   CUSTOM_BACKGROUND_CHANGE_EVENT,
+  DISABLE_ANIMATIONS_CHANGE_EVENT,
   type PluginInfo,
   type ThemeMode,
   clearCustomBackgroundPreference,
@@ -23,6 +25,7 @@ import {
   fetchPlugins,
   getCacheBrowserFontSizePreference,
   getCustomBackgroundPreference,
+  getDisableAnimationsPreference,
   loadCustomBackgroundPreference,
   getHideBackendConsolePreference,
   getHomeHistoryRetentionLimit,
@@ -32,6 +35,7 @@ import {
   HOME_LIST_LIMIT_MIN,
   setCustomBackgroundPreference,
   setCacheBrowserFontSizePreference,
+  setDisableAnimationsPreference,
   setHideBackendConsolePreference,
   setHomeHistoryRetentionLimit,
   setHomeJobRetentionLimit,
@@ -164,6 +168,7 @@ export function SettingsPage() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => getThemeModePreference());
   const [cacheBrowserFontSizeInput, setCacheBrowserFontSizeInput] = useState(() => String(getCacheBrowserFontSizePreference()));
   const [hideBackendConsole, setHideBackendConsole] = useState(() => getHideBackendConsolePreference());
+  const [disableAnimations, setDisableAnimations] = useState(() => getDisableAnimationsPreference());
   const [customBackgroundImageDataUrl, setCustomBackgroundImageDataUrl] = useState(
     () => getCustomBackgroundPreference().imageDataUrl,
   );
@@ -266,6 +271,23 @@ export function SettingsPage() {
   const applyHideBackendConsole = useCallback((enabled: boolean) => {
     const next = setHideBackendConsolePreference(enabled);
     setHideBackendConsole(next);
+  }, []);
+
+  const applyDisableAnimations = useCallback((disabled: boolean) => {
+    const next = setDisableAnimationsPreference(disabled);
+    setDisableAnimations(next);
+  }, []);
+
+  // 「关闭所有动画效果」是全局设置：App 根 effect 负责落 dataset，
+  // 这里只同步开关自身的状态（例如别处改了同一设置）。
+  useEffect(() => {
+    const syncDisableAnimations = () => {
+      setDisableAnimations(getDisableAnimationsPreference());
+    };
+    window.addEventListener(DISABLE_ANIMATIONS_CHANGE_EVENT, syncDisableAnimations);
+    return () => {
+      window.removeEventListener(DISABLE_ANIMATIONS_CHANGE_EVENT, syncDisableAnimations);
+    };
   }, []);
 
   const applyCustomBackgroundOpacity = useCallback(async (rawValue: string) => {
@@ -381,15 +403,29 @@ export function SettingsPage() {
           <label className="settings-toggle-row">
             <span className="settings-toggle-row__label">{translate("settings:settingsPage.settingsToggleRow_message_text")}</span>
             <div className="settings-toggle-row__control">
-              <input
-                type="checkbox"
+              <Switch
                 checked={hideBackendConsole}
-                onChange={(event) => {
-                  applyHideBackendConsole(event.target.checked);
+                onChange={(next) => {
+                  applyHideBackendConsole(next);
                 }}
               />
             </div>
           </label>
+
+          <label className="settings-toggle-row">
+            <span className="settings-toggle-row__label">{translate("settings:settingsPage.settingsToggleRow_message_disableAnimations")}</span>
+            <div className="settings-toggle-row__control">
+              <Switch
+                checked={disableAnimations}
+                onChange={(next) => {
+                  applyDisableAnimations(next);
+                }}
+              />
+            </div>
+          </label>
+          <div className="settings-toggle-row__desc">
+            {translate("settings:settingsPage.settingsToggleRowDesc_message_disableAnimations")}
+          </div>
 
           <label className="settings-number-row">
             <span className="settings-number-row__label">{translate("settings:settingsPage.settingsNumberRow_message_customBackground")}</span>

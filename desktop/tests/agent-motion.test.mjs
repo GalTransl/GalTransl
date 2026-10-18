@@ -5,7 +5,8 @@ import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
 function fixture() {
   const listeners = new Map();
   const reduced = { matches: false, addEventListener: (_, fn) => listeners.set('reduced', fn), removeEventListener: () => listeners.delete('reduced') };
-  const document = { hidden: false, addEventListener: (_, fn) => listeners.set('visibility', fn), removeEventListener: () => listeners.delete('visibility') };
+  // i18n/core（经 lib/api 间接加载）会在模块加载时写 documentElement.lang。
+  const document = { hidden: false, documentElement: { dataset: {} }, addEventListener: (_, fn) => listeners.set('visibility', fn), removeEventListener: () => listeners.delete('visibility') };
   const calls = [];
   const targets = new Map();
   let queries = 0;

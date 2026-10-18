@@ -1,5 +1,6 @@
 import { t as translate, useUiLanguage } from "../../i18n";
 import type { AgentContextUsage } from '../../lib/api';
+import { prefersReducedMotion } from '../../lib/motion';
 import { formatTokenCount } from './toolMeta';
 import { useEffect, useRef } from 'react';
 import { usePageActive } from '../../components/PageActivity';
@@ -88,7 +89,7 @@ export function StatusPill({ status, running }: { status: string; running: boole
     const changed = previousState.current.status !== status || previousState.current.running !== running;
     previousState.current = { status, running };
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
-    if (!changed || !active || document.hidden || reduced.matches) return;
+    if (!changed || !active || document.hidden || reduced.matches || prefersReducedMotion()) return;
     const animation = labelRef.current?.animate(
       [{ opacity: 0.4, transform: 'translateY(2px)' }, { opacity: 1, transform: 'translateY(0)' }],
       { duration: 180, easing: 'ease-out', fill: 'none' },

@@ -3,11 +3,13 @@ import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { HashRouter, Route, useNavigate, useLocation } from 'react-router-dom';
 import {
   CUSTOM_BACKGROUND_CHANGE_EVENT,
+  DISABLE_ANIMATIONS_CHANGE_EVENT,
   OPEN_PROJECTS_CHANGE_EVENT,
   THEME_MODE_CHANGE_EVENT,
   type CustomBackgroundPreference,
   decodeProjectDir,
   encodeProjectDir,
+  applyAnimationsPreference,
   getCustomBackgroundPreference,
   loadCustomBackgroundPreference,
   getThemeModePreference,
@@ -120,12 +122,21 @@ export function App() {
       }
     };
 
+    // 「关闭所有动画效果」：main.tsx 启动时已预热过一次，这里负责设置里
+    // 的即时切换——写根元素 dataset，CSS 全局规则随之开关全部动画。
+    const handleDisableAnimationsChange = () => {
+      applyAnimationsPreference();
+    };
+
     applyTheme();
+    applyAnimationsPreference();
     window.addEventListener(THEME_MODE_CHANGE_EVENT, handleThemeModeChange as EventListener);
+    window.addEventListener(DISABLE_ANIMATIONS_CHANGE_EVENT, handleDisableAnimationsChange as EventListener);
     mediaQuery.addEventListener('change', handleSystemSchemeChange);
 
     return () => {
       window.removeEventListener(THEME_MODE_CHANGE_EVENT, handleThemeModeChange as EventListener);
+      window.removeEventListener(DISABLE_ANIMATIONS_CHANGE_EVENT, handleDisableAnimationsChange as EventListener);
       mediaQuery.removeEventListener('change', handleSystemSchemeChange);
     };
   }, []);

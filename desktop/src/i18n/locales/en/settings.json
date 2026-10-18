@@ -171,6 +171,8 @@
     "settingsNumberRowControl_message_dark": "Dark",
     "settingsNumberRowControl_message_system": "Follow the system",
     "settingsToggleRow_message_text": "Hide the server console",
+    "settingsToggleRow_message_disableAnimations": "Disable all animations",
+    "settingsToggleRowDesc_message_disableAnimations": "Turn off all transitions and animations, such as page switches and progress bars, to reduce GPU usage. Applies immediately.",
     "settingsNumberRow_message_customBackground": "Custom background",
     "settingsNumberRowControlSettingsBackgroundControl_title_notSelectedImage": "No image selected yet",
     "settingsNumberRowControlSettingsBackgroundControl_message_notSelectedImage": "No image selected yet",

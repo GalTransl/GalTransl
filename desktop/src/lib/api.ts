@@ -1308,6 +1308,7 @@ const THEME_MODE_KEY = 'galtransl-theme-mode';
 const CUSTOM_BACKGROUND_KEY = 'galtransl-custom-background';
 const HIDE_BACKEND_CONSOLE_KEY = 'galtransl-hide-backend-console';
 const CACHE_BROWSER_FONT_SIZE_KEY = 'galtransl-cache-browser-font-size';
+const DISABLE_ANIMATIONS_KEY = 'galtransl-disable-animations';
 
 export const HOME_HISTORY_LIMIT_DEFAULT = 20;
 export const HOME_JOB_LIMIT_DEFAULT = 20;
@@ -1320,6 +1321,7 @@ export const CUSTOM_BACKGROUND_SURFACE_OPACITY_MIN = 18;
 export const CUSTOM_BACKGROUND_SURFACE_OPACITY_MAX = 92;
 export const CUSTOM_BACKGROUND_SURFACE_OPACITY_DEFAULT = 33;
 export const HIDE_BACKEND_CONSOLE_DEFAULT = true;
+export const DISABLE_ANIMATIONS_DEFAULT = false;
 export const CACHE_BROWSER_FONT_SIZE_MIN = 11;
 export const CACHE_BROWSER_FONT_SIZE_MAX = 20;
 export const CACHE_BROWSER_FONT_SIZE_DEFAULT = 14;
@@ -1334,6 +1336,7 @@ export const THEME_MODE_CHANGE_EVENT = 'galtransl:theme-mode-change';
 export const CUSTOM_BACKGROUND_CHANGE_EVENT = 'galtransl:custom-background-change';
 export const HIDE_BACKEND_CONSOLE_CHANGE_EVENT = 'galtransl:hide-backend-console-change';
 export const CACHE_BROWSER_FONT_SIZE_CHANGE_EVENT = 'galtransl:cache-browser-font-size-change';
+export const DISABLE_ANIMATIONS_CHANGE_EVENT = 'galtransl:disable-animations-change';
 
 /* ── 已打开项目（open projects）的共享读写 + 广播 ──
  * 翻译器（App.tsx）和 Agent 页面都用这一套，保证两边的"已打开项目"列表
@@ -1774,6 +1777,36 @@ export function setHideBackendConsolePreference(enabled: boolean): boolean {
   return normalized;
 }
 
+export function getDisableAnimationsPreference(): boolean {
+  try {
+    const raw = localStorage.getItem(DISABLE_ANIMATIONS_KEY);
+    return normalizeDisableAnimations(raw);
+  } catch {
+    return DISABLE_ANIMATIONS_DEFAULT;
+  }
+}
+
+export function setDisableAnimationsPreference(disabled: boolean): boolean {
+  const normalized = normalizeDisableAnimations(disabled);
+  try {
+    localStorage.setItem(DISABLE_ANIMATIONS_KEY, String(normalized));
+    window.dispatchEvent(new CustomEvent(DISABLE_ANIMATIONS_CHANGE_EVENT, { detail: normalized }));
+  } catch {
+    // ignore storage errors
+  }
+  return normalized;
+}
+
+/**
+ * 把偏好写到根元素上（data-animations="off"），CSS 侧全局压制动画。
+ * 启动时先调用一次，避免首帧页面转场动画闪一下。
+ */
+export function applyAnimationsPreference(): boolean {
+  const disabled = getDisableAnimationsPreference();
+  document.documentElement.dataset.animations = disabled ? 'off' : 'on';
+  return disabled;
+}
+
 export function getHomeJobRetentionLimit(): number {
   try {
     const raw = localStorage.getItem(HOME_JOB_LIMIT_KEY);
@@ -1814,6 +1847,19 @@ function normalizeCacheBrowserFontSize(value: unknown): number {
     return CACHE_BROWSER_FONT_SIZE_MAX;
   }
   return integer;
+}
+
+function normalizeDisableAnimations(value: unknown): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (value === 'true') {
+    return true;
+  }
+  if (value === 'false') {
+    return false;
+  }
+  return DISABLE_ANIMATIONS_DEFAULT;
 }
 
 function normalizeHideBackendConsole(value: unknown): boolean {

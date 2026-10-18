@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from 'react';
+import { prefersReducedMotion } from './motion';
 
 const BOTTOM_THRESHOLD_PX = 24;
 
@@ -59,7 +60,7 @@ export function createSuccessTail(viewport: HTMLElement) {
       // Removing old rows at the 100-card limit changes scrollTop through native
       // scroll anchoring. Read that position before handling queued scroll events.
       lastTop = viewport.scrollTop;
-      if (changed && following) scroll(viewport.scrollHeight, 'smooth');
+      if (changed && following) scroll(viewport.scrollHeight, prefersReducedMotion() ? 'auto' : 'smooth');
     },
     jump() {
       following = true;

@@ -22,6 +22,7 @@ import {
   BACKEND_PROFILES_CHANGE_EVENT,
   DEFAULT_BACKEND_PROFILE_CHANGE_EVENT } from '../lib/api';
 import { normalizeError } from '../lib/errors';
+import { prefersReducedMotion } from '../lib/motion';
 import {
   ConfigSectionNav,
   CONFIG_SECTIONS,
@@ -338,7 +339,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
     setYamlView(false);
     // Scroll main area to top so new section is visible
     if (mainRef.current) {
-      mainRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+      mainRef.current.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
     }
   }, []);
 

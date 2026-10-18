@@ -171,6 +171,8 @@
     "settingsNumberRowControl_message_dark": "深色",
     "settingsNumberRowControl_message_system": "跟随系统",
     "settingsToggleRow_message_text": "隐藏服务端控制台",
+    "settingsToggleRow_message_disableAnimations": "关闭所有动画效果",
+    "settingsToggleRowDesc_message_disableAnimations": "关闭页面切换、进度条等全部过渡和动画效果，可减少 GPU 占用，设置后即时生效。",
     "settingsNumberRow_message_customBackground": "自定义背景",
     "settingsNumberRowControlSettingsBackgroundControl_title_notSelectedImage": "尚未选择图片",
     "settingsNumberRowControlSettingsBackgroundControl_message_notSelectedImage": "尚未选择图片",

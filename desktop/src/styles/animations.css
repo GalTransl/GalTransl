@@ -45,6 +45,22 @@
   }
 }
 
+/* ── User setting: disable all animations ──
+ * 设置里打开「关闭所有动画效果」后，根元素带 data-animations="off"。
+ * 用 0.01ms 而不是 none：保留 animationend，页面转场依赖它收尾；
+ * iteration-count 收掉脉冲类无限动画。JS 动效不走这条规则，
+ * 由 prefersReducedMotion() 读同一设置（lib/motion.ts）。 */
+:root[data-animations='off'] *,
+:root[data-animations='off'] *::before,
+:root[data-animations='off'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  transition-delay: 0ms !important;
+  scroll-behavior: auto !important;
+}
+
 /* ── Popover / Dropdown enter animation ── */
 
 @keyframes popoverEnter {

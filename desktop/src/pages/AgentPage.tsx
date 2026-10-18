@@ -41,6 +41,7 @@ import {
   updateAgentQueued,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
+import { prefersReducedMotion } from '../lib/motion';
 import { notifyNeedsAttention } from '../lib/desktopNotify';
 import {
   loadPermissionMode,
@@ -569,8 +570,7 @@ export function AgentPage() {
 
   /** 回到转录最底部（并恢复跟随新消息）。 */
   const handleJumpToBottom = useCallback(() => {
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    tailFollowerRef.current?.jump(reduced ? 'auto' : 'smooth');
+    tailFollowerRef.current?.jump(prefersReducedMotion() ? 'auto' : 'smooth');
   }, []);
 
   // 事件流：连接管理（重连、批量、作废旧流）在 useAgentStream 里，这里只管怎么解释事件

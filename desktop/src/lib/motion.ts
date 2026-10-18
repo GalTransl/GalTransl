@@ -6,6 +6,9 @@
  * defined in tokens.css; JS-driven timers should import from here.
  */
 
+import { useEffect, useState } from 'react';
+import { DISABLE_ANIMATIONS_CHANGE_EVENT, getDisableAnimationsPreference } from './api';
+
 // ── Durations ──────────────────────────────────────────
 export const DUR = {
   /** Micro feedback (hover, press) */
@@ -68,15 +71,27 @@ export const FRESH_HIGHLIGHT_MS = 2200;
 
 // ── reduced-motion helper ──────────────────────────────
 
-/** The desktop app keeps its own animations independent of the OS setting. */
+/**
+ * 桌面端动画不跟随系统的「减弱动态效果」，但跟随用户在设置里手动关闭的
+ * 「关闭所有动画效果」开关——打开后所有 JS 动效（发射动画、平滑滚动等）
+ * 都按减弱动态效果处理，减少 GPU 占用。
+ */
 export function prefersReducedMotion(): boolean {
-  return false;
+  return getDisableAnimationsPreference();
 }
 
 /**
- * React hook-shaped helper for motion code that should not follow the OS
- * reduced-motion preference in the desktop app.
+ * React hook-shaped helper：跟随设置里「关闭所有动画效果」的即时切换，
+ * 缓存页面（切设置后不重新挂载）也能拿到最新值。
  */
 export function usePrefersReducedMotion(): boolean {
-  return false;
+  const [reduced, setReduced] = useState(prefersReducedMotion);
+  useEffect(() => {
+    const sync = () => setReduced(prefersReducedMotion());
+    window.addEventListener(DISABLE_ANIMATIONS_CHANGE_EVENT, sync);
+    return () => {
+      window.removeEventListener(DISABLE_ANIMATIONS_CHANGE_EVENT, sync);
+    };
+  }, []);
+  return reduced;
 }

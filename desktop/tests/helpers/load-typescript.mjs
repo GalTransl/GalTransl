@@ -19,9 +19,20 @@ export function createTypeScriptLoader(globals = {}, mocks = {}) {
     modules.set(file, exports);
     const { outputText } = ts.transpileModule(readFileSync(file, 'utf8'), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
+      // api.ts 等模块用了 import.meta.env；vm 里没有模块作用域，统一替换成
+      // 普通标识符，由下面的 __importMeta 全局提供（ DEV 等按需覆盖）。
+      transformers: {
+        before: [(context) => {
+          const visit = (node) => ts.isMetaProperty(node)
+            ? ts.factory.createIdentifier('__importMeta')
+            : ts.visitEachChild(node, visit, context);
+          return (node) => ts.visitNode(node, visit);
+        }],
+      },
     });
     vm.runInNewContext(outputText, {
       exports, console, Error, Intl, Date, URL, AbortController, setTimeout, clearTimeout,
+      __importMeta: { env: {} },
       ...globals,
       require(name) {
         if (Object.hasOwn(mocks, name)) return mocks[name];
