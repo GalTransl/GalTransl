@@ -60,6 +60,8 @@ const LIVE_ROW_STICKY_MS = 10_000;
 // Backend keeps up to 100 success cards per translating file, but the UI only
 // renders the newest 100 cards (after filtering) to keep scrolling performant.
 const SUCCESS_RENDER_LIMIT = 100;
+// 空数组用同一个引用：runtime 还没到时如果每次渲染都新建 []，依赖它的 effect 会每轮都跑
+const EMPTY_RUNTIME_FILES: FileProgress[] = [];
 const INPUT_FOLDER_NAME = 'gt_input';
 const OUTPUT_FOLDER_NAME = 'gt_output';
 const CACHE_FOLDER_NAME = 'transl_cache';
@@ -508,7 +510,10 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   }, [projectId, refreshJobs, refreshRuntime]);
 
   const summary = runtimeMatchesProject ? (runtime?.summary ?? null) : null;
-  const runtimeFiles = runtimeMatchesProject ? (runtime?.files ?? []) : [];
+  const runtimeFiles = useMemo(
+    () => (runtimeMatchesProject ? (runtime?.files ?? EMPTY_RUNTIME_FILES) : EMPTY_RUNTIME_FILES),
+    [runtimeMatchesProject, runtime?.files],
+  );
   // 刚才还有请求在跑的文件（文件名 → 最近一次看到的时刻）。排序把它们顶到最上面，小灯才看得见——
   // 不然刚开始翻的文件（0%）要等第一批写进缓存才挪上来，最热闹的那段一直埋在列表下面。
   // 留 LIVE_ROW_STICKY_MS 的余量：批与批之间短暂没有请求，行也不会上下跳
@@ -596,7 +601,11 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
 
   useEffect(() => {
     const availableFiles = new Set(runtimeFiles.map((file) => file.filename));
-    setSelectedSuccessFiles((current) => current.filter((filename) => availableFiles.has(filename)));
+    setSelectedSuccessFiles((current) => {
+      // filter 总会新建数组；没有筛掉任何文件时还回原引用，避免白白触发一轮渲染
+      const next = current.filter((filename) => availableFiles.has(filename));
+      return next.length === current.length ? current : next;
+    });
   }, [runtimeFiles]);
 
   const handleToggleSuccessFileFilter = useCallback((filename: string) => {
@@ -798,6 +807,16 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
             </div>
           </div>
           <div className="ptv2-cockpit__statusline">
+            {/* 开关本体在「重翻词条」tab 里，切走后用这颗常驻胶囊提示它还在生效 */}
+            {continuousRetranslEnabled ? (
+              <span
+                className="ptv2-cockpit__auto-retransl"
+                title={translate("projects:projectTranslatePage.ptv2CockpitAutoRetransl_title_autoRetranslateOn")}
+              >
+                <span className="ptv2-cockpit__auto-retransl-dot" aria-hidden="true" />
+                {translate("projects:projectTranslatePage.ptv2CockpitAutoRetransl_message_autoRetranslate")}
+              </span>
+            ) : null}
             <StatusBadge label={statusLabel} tone={statusTone} celebrate={justCompleted} working={active && shouldPollRuntime} />
             {/* 阶段内进度只给 GenDic（「人名 3/10」「审校 0/8」）：普通翻译的 current_file 是
                 「正在翻哪个文件」，最近译文里已经带了文件名，再挂一颗胶囊只是噪音 */}

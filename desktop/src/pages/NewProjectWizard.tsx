@@ -34,6 +34,7 @@ import {
 import type { FilePluginDetection } from '../lib/api';
 import { addProjectToHistory } from './HomePage';
 import { basenamePath, isAbsolutePath, joinPath, normalizeFileUriPath } from '../lib/paths';
+import { validateProjectName } from '../lib/projectName';
 
 const STEPS = ["projects:newProjectWizard.sTEPS_message_project","projects:newProjectWizard.sTEPS_message_importFile","projects:newProjectWizard.sTEPS_message_translationBackend","common:actions.commonSettings","projects:newProjectWizard.sTEPS_message_extractNameTable","common:actions.completed"] as const;
 const LAST_PARENT_DIR_KEY = 'galtransl-new-project-last-parent-dir';
@@ -144,10 +145,13 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
   const [nameJobStatus, setNameJobStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
   const [nameJobMessage, setNameJobMessage] = useMessageState<string>('');
 
+  const trimmedProjectName = projectName.trim();
+  const projectNameIssue = validateProjectName(projectName);
   const projectDir = useMemo(() => {
-    if (!parentDir || !projectName) return '';
-    return joinPath(parentDir, projectName);
-  }, [parentDir, projectName]);
+    // 名字非法时不给出路径预览：`..` 拼出来的路径看起来像真的，容易误导
+    if (!parentDir.trim() || projectNameIssue) return '';
+    return joinPath(parentDir.trim(), trimmedProjectName);
+  }, [parentDir, projectNameIssue, trimmedProjectName]);
 
   const gtInputDir = useMemo(() => {
     if (!projectDir) return '';
@@ -274,6 +278,15 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
   }, []);
 
   const handleCreateProject = useCallback(async (): Promise<boolean> => {
+    if (!parentDir.trim() || projectNameIssue === 'empty') {
+      setFeedback({ type: 'error', message: uiMessage("projects:newProjectWizard.message_message_chooseDirectoryProjectName") });
+      return false;
+    }
+    // `..`、`a/b` 这类名字不能落到写盘这一步：joinPath 会把它带出父目录
+    if (projectNameIssue) {
+      setFeedback({ type: 'error', message: uiMessage("projects:newProjectWizard.projectNameError_message_invalidName") });
+      return false;
+    }
     if (!projectDir) {
       setFeedback({ type: 'error', message: uiMessage("projects:newProjectWizard.message_message_chooseDirectoryProjectName") });
       return false;
@@ -302,7 +315,7 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
       setFeedback({ type: 'error', message: uiMessage("projects:newProjectWizard.message_message_createFailed", { value: err instanceof Error ? err.message : String(err) }) });
       return false;
     }
-  }, [projectDir]);
+  }, [parentDir, projectDir, projectNameIssue]);
 
   // ── Step 2: Import files ──
   const handleFileDrop = useCallback(
@@ -533,13 +546,13 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
 
   // 「下一步」本身会完成创建项目 / 保存设置，不再要求先点单独的按钮
   const canNext = useMemo(() => {
-    if (currentStep === 0) return projectCreated || Boolean(parentDir.trim() && projectName.trim());
+    if (currentStep === 0) return projectCreated || Boolean(parentDir.trim() && !projectNameIssue);
     if (currentStep === 1) return true; // file import is optional
     if (currentStep === 2) return true; // backend selection is optional
     if (currentStep === 3) return true;
     if (currentStep === 4) return true; // 人名提取是后台任务，不拦着往后走
     return false;
-  }, [currentStep, projectCreated, parentDir, projectName]);
+  }, [currentStep, projectCreated, parentDir, projectNameIssue]);
 
   const stepProgress = useMemo(
     () => Math.round(((currentStep + 1) / STEPS.length) * 100),
@@ -576,9 +589,13 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
             className="field__input"
             autoComplete="off"
             value={projectName}
+            aria-invalid={projectNameIssue === 'invalid'}
             onChange={(e) => { setProjectName(e.target.value); setProjectCreated(false); }}
             placeholder={translate("projects:newProjectWizard.field_placeholder_myProject")}
           />
+          {projectNameIssue === 'invalid' ? (
+            <span className="field__hint field__hint--error">{translate("projects:newProjectWizard.projectNameError_message_invalidName")}</span>
+          ) : null}
         </div>
         <div className="field">
           <span className="field__label">{translate("projects:newProjectWizard.field_message_directory")}</span>

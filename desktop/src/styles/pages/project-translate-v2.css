@@ -291,6 +291,29 @@
   text-overflow: ellipsis;
 }
 
+/* 「自动持续重翻」常驻胶囊：开关在「重翻词条」tab 里，切走后靠它提示仍然生效 */
+.ptv2-cockpit__auto-retransl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 38%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  color: var(--color-primary);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ptv2-cockpit__auto-retransl-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+
 /* ── Gauge row: big number + progress runway + action cluster ── */
 
 .ptv2-cockpit__gauge {

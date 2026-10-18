@@ -52,10 +52,20 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
 
   const tokens = (Array.isArray(oaiConfig.tokens) ? oaiConfig.tokens : []) as TokenEntry[];
 
+  // 取消勾选后端类型时把整段配置暂存在这里，重新勾选时原样还回去；
+  // 删除只有点「保存」后才会真正落盘（取消/关闭弹窗时随组件卸载一起丢弃）。
+  const removedSectionsRef = useRef<Record<string, Record<string, unknown>>>({});
+
   // Toggle backend type presence
   const toggleBackendType = useCallback((type: 'OpenAI-Compatible' | 'SakuraLLM', enabled: boolean) => {
     if (readOnly) return;
     if (enabled) {
+      const removed = removedSectionsRef.current[type];
+      if (removed) {
+        delete removedSectionsRef.current[type];
+        onChange({ ...config, [type]: removed });
+        return;
+      }
       if (type === 'OpenAI-Compatible') {
         onChange({
           ...config,
@@ -80,6 +90,10 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
         });
       }
     } else {
+      const removed = config[type];
+      if (removed && typeof removed === 'object') {
+        removedSectionsRef.current[type] = removed as Record<string, unknown>;
+      }
       const next = { ...config };
       delete next[type];
       onChange(next);
