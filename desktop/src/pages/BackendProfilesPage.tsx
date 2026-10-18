@@ -1,5 +1,5 @@
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { BackendConfigEditor } from '../components/BackendConfigEditor';
 import { Button } from '../components/Button';
 import { CustomSelect } from '../components/CustomSelect';
@@ -76,6 +76,8 @@ export function BackendProfilesPage() {
 
   // Editor state
   const [editingName, setEditingName] = useState('');
+  // 打开编辑弹窗时的原始配置名；改名保存时据此判断是否需要 rename。
+  const [editingOriginalName, setEditingOriginalName] = useState('');
   const [editingConfig, setEditingConfig] = useState<Record<string, unknown>>(DEFAULT_BACKEND_CONFIG);
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -86,15 +88,8 @@ export function BackendProfilesPage() {
   const [newProfileName, setNewProfileName] = useState('');
   const [creating, setCreating] = useState(false);
 
-  // 行内改名状态（鼠标悬停名字旁的铅笔图标进入）
-  const [renamingName, setRenamingName] = useState('');
-  const [renameDraft, setRenameDraft] = useState('');
-  const [renameError, setRenameError] = useMessageState<string>('');
-  const renameInputRef = useRef<HTMLInputElement | null>(null);
-
   // silent：改名/复制后就地刷新，不进 loading 态把整张列表卸载掉
-  //（否则行内输入框会被卸载重建，焦点和全选都会丢）
-  const loadProfiles = useCallback(async (opts?: { silent?: boolean }) => {
+  const loadProfiles = useCallback(async (opts?: { silent?: boolean }): Promise<ProfileEntry[]> => {
     if (!opts?.silent) {
       setLoading(true);
     }
@@ -109,8 +104,10 @@ export function BackendProfilesPage() {
       setAgentDefaultState(getAgentDefaultBackendProfile());
       setGenDicDefaultState(getGenDicDefaultBackendProfile());
       setSubagentDefaultState(getSubagentDefaultBackendProfile());
+      return entries;
     } catch (err) {
       setError(normalizeError(err, uiMessage("settings:backendProfilesPage.loadProfiles_normalizeError_loadBackendConfigFailed")));
+      return [];
     } finally {
       setLoading(false);
     }
@@ -181,6 +178,7 @@ export function BackendProfilesPage() {
       setNewProfileName('');
       await loadProfiles();
       // Immediately open the edit dialog for the new profile
+      setEditingOriginalName(name);
       setEditingName(name);
       setEditingConfig(newConfig);
       setIsEditing(true);
@@ -193,6 +191,7 @@ export function BackendProfilesPage() {
 
   const handleEdit = useCallback((entry: ProfileEntry) => {
     setIsEditing(true);
+    setEditingOriginalName(entry.name);
     setEditingName(entry.name);
     setEditingConfig(JSON.parse(JSON.stringify(entry.config)));
     setSaveSuccess(false);
@@ -201,6 +200,7 @@ export function BackendProfilesPage() {
 
   const handleCancel = useCallback(() => {
     setIsEditing(false);
+    setEditingOriginalName('');
     setEditingName('');
     setEditingConfig(DEFAULT_BACKEND_CONFIG);
     setSaveSuccess(false);
@@ -213,93 +213,69 @@ export function BackendProfilesPage() {
       setError(uiMessage("settings:backendProfilesPage.handleSave_setError_configNameRequired"));
       return;
     }
+    const originalName = editingOriginalName.trim();
+    const renaming = Boolean(originalName) && originalName !== name;
+    if (renaming && profiles.some((p) => p.name === name)) {
+      setError(uiMessage("settings:backendProfilesPage.handleCreate_setError_configDone", { name: name }));
+      return;
+    }
     setSaving(true);
     setError(null);
     setSaveSuccess(false);
+    let configSaved = false;
     try {
-      await createBackendProfile(name, editingConfig);
+      // 先按原 key 落配置，再改名；改名失败时配置本身已经保存，可以原地修正名字重试。
+      await createBackendProfile(originalName || name, editingConfig);
+      configSaved = true;
+      if (renaming) {
+        await renameBackendProfile(originalName, name);
+      }
       setSaveSuccess(true);
       setIsEditing(false);
+      setEditingOriginalName('');
       void loadProfiles();
     } catch (err) {
-      setError(normalizeError(err, uiMessage("settings:backendProfilesPage.handleSave_normalizeError_saveConfigFailed")));
+      setError(normalizeError(
+        err,
+        uiMessage(configSaved
+          ? "settings:backendProfilesPage.renameFailed"
+          : "settings:backendProfilesPage.handleSave_normalizeError_saveConfigFailed"),
+      ));
     } finally {
       setSaving(false);
     }
-  }, [editingName, editingConfig, loadProfiles]);
-
-  const startRename = useCallback((name: string) => {
-    setRenamingName(name);
-    setRenameDraft(name);
-    setRenameError('');
-  }, []);
-
-  const cancelRename = useCallback(() => {
-    setRenamingName('');
-    setRenameDraft('');
-    setRenameError('');
-  }, []);
-
-  // 打开输入框后全选旧名，直接输入即可覆盖
-  useEffect(() => {
-    if (renamingName) {
-      renameInputRef.current?.select();
-    }
-  }, [renamingName]);
+  }, [editingName, editingOriginalName, editingConfig, profiles, loadProfiles]);
 
   const handleDelete = useCallback(async (name: string) => {
     if (!confirm(translate("settings:backendProfilesPage.handleDelete_confirm_deleteConfig", { name: name }))) return;
     try {
       await deleteBackendProfile(name);
       // If we're editing this profile, close the editor
-      if (editingName === name) {
+      if (editingOriginalName === name || editingName === name) {
         handleCancel();
-      }
-      if (renamingName === name) {
-        cancelRename();
       }
       void loadProfiles();
     } catch (err) {
       setError(normalizeError(err, uiMessage("settings:backendProfilesPage.handleDelete_normalizeError_deleteConfigFailed")));
     }
-  }, [editingName, handleCancel, loadProfiles, renamingName, cancelRename]);
+  }, [editingOriginalName, editingName, handleCancel, loadProfiles]);
 
-  const commitRename = useCallback(async () => {
-    const from = renamingName;
-    const to = renameDraft.trim();
-    if (!to) {
-      setRenameError(uiMessage("settings:backendProfilesPage.handleSave_setError_configNameRequired"));
-      return;
-    }
-    if (to === from) {
-      cancelRename();
-      return;
-    }
-    if (profiles.some((p) => p.name === to)) {
-      setRenameError(uiMessage("settings:backendProfilesPage.handleCreate_setError_configDone", { name: to }));
-      return;
-    }
+  /** 复制一份配置：落库后直接打开编辑弹窗，让用户马上在弹窗里给副本改名 */
+  const handleCopy = useCallback(async (entry: ProfileEntry) => {
     try {
-      await renameBackendProfile(from, to);
-      // 编辑弹窗正开着这个配置时同步标题，否则保存会写回旧名
-      setEditingName((prev) => (prev === from ? to : prev));
-      cancelRename();
-      await loadProfiles({ silent: true });
-    } catch (err) {
-      setRenameError(normalizeError(err, uiMessage("settings:backendProfilesPage.renameFailed")));
-    }
-  }, [renamingName, renameDraft, profiles, cancelRename, loadProfiles]);
-
-  /** 复制一份配置：落库后直接进入行内改名，让用户马上给副本起个名字 */
-  const handleCopy = useCallback(async (name: string) => {
-    try {
-      const { name: copyName } = await copyBackendProfile(name);
-      await loadProfiles({ silent: true });
-      startRename(copyName);
+      const { name: copyName } = await copyBackendProfile(entry.name);
+      const entries = await loadProfiles({ silent: true });
+      const copy = entries.find((item) => item.name === copyName);
+      setEditingOriginalName(copyName);
+      setEditingName(copyName);
+      setEditingConfig(JSON.parse(JSON.stringify(copy?.config ?? entry.config)));
+      setSaveSuccess(false);
+      setError(null);
+      setIsEditing(true);
     } catch (err) {
       setError(normalizeError(err, uiMessage("settings:backendProfilesPage.copyFailed")));
     }
-  }, [loadProfiles, startRename]);
+  }, [loadProfiles]);
 
   return (
     <div className="backend-profiles-page">
@@ -404,45 +380,24 @@ export function BackendProfilesPage() {
                     <div key={entry.name} className="profile-card">
                       <div className="profile-card__info">
                         <div className="profile-card__name">
-                          {renamingName === entry.name ? (
-                            <input
-                              ref={renameInputRef}
-                              type="text"
-                              className="profile-card__rename-input"
-                              value={renameDraft}
-                              onChange={(e) => {
-                                setRenameDraft(e.target.value);
-                                if (renameError) setRenameError('');
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') { e.preventDefault(); void commitRename(); }
-                                else if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
-                              }}
-                              onBlur={cancelRename}
-                              aria-label={translate("settings:backendProfilesPage.renameConfigName", { name: entry.name })}
-                              placeholder={translate("settings:backendProfilesPage.field_message_configName")}
-                              autoFocus
-                            />
-                          ) : (
-                            <span
-                              className="profile-card__name-text"
-                              title={modelNames.length > 1
-                                ? `${entry.name}\n${modelNames.join('\n')}`
-                                : entry.name}
-                            >
-                              {entry.name}
-                              {modelNames.length > 0 && (
-                                <span className="profile-card__name-model">
-                                  {' / '}{modelNames[0]}
-                                  {modelNames.length > 1 && (
-                                    <span className="profile-card__name-model-more">
-                                      {translate("settings:backendProfilesPage.modelCount", { count: modelNames.length })}
-                                    </span>
-                                  )}
-                                </span>
-                              )}
-                            </span>
-                          )}
+                          <span
+                            className="profile-card__name-text"
+                            title={modelNames.length > 1
+                              ? `${entry.name}\n${modelNames.join('\n')}`
+                              : entry.name}
+                          >
+                            {entry.name}
+                            {modelNames.length > 0 && (
+                              <span className="profile-card__name-model">
+                                {' / '}{modelNames[0]}
+                                {modelNames.length > 1 && (
+                                  <span className="profile-card__name-model-more">
+                                    {translate("settings:backendProfilesPage.modelCount", { count: modelNames.length })}
+                                  </span>
+                                )}
+                              </span>
+                            )}
+                          </span>
                           {defaultProfile === entry.name && (
                             <span className="profile-card__badge">{translate("settings:backendProfilesPage.profileCardName_message_translationDefault")}</span>
                           )}
@@ -455,29 +410,14 @@ export function BackendProfilesPage() {
                           {subagentDefaultProfile === entry.name && (
                             <span className="profile-card__badge profile-card__badge--agent">{translate("settings:backendProfilesPage.profileCardName_message_subagentDefault")}</span>
                           )}
-                          {/* 铅笔排在默认 pill 之后：之前插在名字右边会把两个 pill 顶开 */}
-                          {renamingName !== entry.name && (
-                            <button
-                              type="button"
-                              className="profile-card__rename-btn"
-                              title={translate("settings:backendProfilesPage.renameConfig")}
-                              aria-label={translate("settings:backendProfilesPage.renameConfigName", { name: entry.name })}
-                              onClick={() => startRename(entry.name)}
-                            >
-                              <Icon name="pencil" />
-                            </button>
-                          )}
                         </div>
-                        {renamingName === entry.name && renameError && (
-                          <div className="profile-card__rename-error">{renameError}</div>
-                        )}
                         <div className="profile-card__meta">{translate("settings:backendProfilesPage.profileCardInfo_message_baseURL", { baseUrl: baseUrl })}</div>
                       </div>
                       <div className="profile-card__actions">
                         <ProfileCardAction
                           icon="copy"
                           label={translate("settings:backendProfilesPage.copyConfig")}
-                          onClick={() => void handleCopy(entry.name)}
+                          onClick={() => void handleCopy(entry)}
                         />
                         <ProfileCardAction
                           icon="pencil"
@@ -522,6 +462,22 @@ export function BackendProfilesPage() {
 
             <div className="backend-profiles-page__dialog-body">
               <div className="config-form">
+                <label className="field">
+                  <span>{translate("settings:backendProfilesPage.field_message_configName")}</span>
+                  <input
+                    type="text"
+                    value={editingName}
+                    onChange={(e) => {
+                      setEditingName(e.target.value);
+                      setSaveSuccess(false);
+                      if (error) setError(null);
+                    }}
+                    placeholder={translate("settings:backendProfilesPage.field_placeholder_gpt5")}
+                    disabled={saving}
+                  />
+                  <span className="field__hint">{translate("settings:backendProfilesPage.field_message_configNameCreateChangeEdit")}</span>
+                </label>
+
                 <BackendConfigEditor
                   config={editingConfig}
                   onChange={setEditingConfig}

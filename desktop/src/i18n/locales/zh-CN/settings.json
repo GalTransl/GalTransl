@@ -48,7 +48,7 @@
     "backendProfilesPageDialog_message_newBackendConfig": "新建后端配置",
     "field_message_configName": "配置名称",
     "field_placeholder_gpt5": "例如：gpt5",
-    "field_message_configNameCreateChangeEdit": "配置名称可在列表中点击名称旁的铅笔图标修改。",
+    "field_message_configNameCreateChangeEdit": "配置名称之后可在「编辑」中修改。",
     "formActions_message_create": "创建中…",
     "formActions_message_createVariant2": "创建"
   },

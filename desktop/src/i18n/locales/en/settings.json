@@ -48,7 +48,7 @@
     "backendProfilesPageDialog_message_newBackendConfig": "New backend configuration",
     "field_message_configName": "Configuration name",
     "field_placeholder_gpt5": "e.g. gpt5",
-    "field_message_configNameCreateChangeEdit": "Click the pencil icon next to a configuration name in the list to rename it.",
+    "field_message_configNameCreateChangeEdit": "You can rename the configuration later in the edit dialog.",
     "formActions_message_create": "Creating…",
     "formActions_message_createVariant2": "Create"
   },
