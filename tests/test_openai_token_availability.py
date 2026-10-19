@@ -138,6 +138,27 @@ class MaxTokensToleranceTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertNotIn("max_tokens", fake.calls[1])
 
+    def test_reasoning_config_is_kept_when_completion_limit_is_rejected(self):
+        for error in (
+            TypeError("unexpected keyword argument 'max_completion_tokens'"),
+            RuntimeError("max_completion_tokens must be greater than 16"),
+        ):
+            with self.subTest(error=error):
+                fake = _FakeClient([error, [_chunk()]])
+                reasoning = {"reasoning_effort": "high", "extra_body": {"thinking": {"type": "enabled"}}}
+                token = COpenAIToken(
+                    "sk-x", "https://relay.example.com/v1", "custom-alias", reasoning_kwargs=reasoning,
+                )
+                with self._patch_client(fake):
+                    ok, _ = COpenAITokenPool._isTokenAvailable_sync(_pool_state(), token)
+
+                self.assertTrue(ok)
+                self.assertEqual(fake.calls[0]["max_completion_tokens"], AVAILABILITY_CHECK_MAX_TOKENS)
+                self.assertNotIn("max_completion_tokens", fake.calls[1])
+                self.assertNotIn("max_tokens", fake.calls[1])
+                self.assertEqual(fake.calls[1]["reasoning_effort"], "high")
+                self.assertEqual(fake.calls[1]["extra_body"], reasoning["extra_body"])
+
     def test_non_stream_uses_choices(self):
         fake = _FakeClient([SimpleNamespace(choices=[])])
         token = COpenAIToken(token="sk-x", domain="https://relay.example.com/v1", model_name="m", stream=False)

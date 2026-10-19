@@ -20,6 +20,7 @@ from GalTransl.Cache import save_transCache_to_json
 from GalTransl.Dictionary import CGptDict
 from GalTransl.Utils import load_guideline_file, fix_quotes2
 from GalTransl.ProjectGuideline import combine_guidelines, read_project_guideline
+from GalTransl.Reasoning import apply_reasoning_kwargs
 from openai import RateLimitError, AsyncOpenAI, APIConnectionError, APITimeoutError
 from openai import DefaultAioHttpClient
 from openai._types import NOT_GIVEN
@@ -1274,8 +1275,11 @@ class BaseTranslate:
                 # Create the API call as a task so we can cancel it if
                 # the user requests a stop while the request is in-flight.
                 LOGGER.info(f"timeout: {self.api_timeout}")
-                api_task = asyncio.ensure_future(
-                    client.chat.completions.create(
+                reasoning_kwargs = dict(getattr(token, "reasoning_kwargs", {}))
+                if reasoning_effort is not NOT_GIVEN:
+                    reasoning_kwargs["reasoning_effort"] = reasoning_effort
+                request_kwargs = apply_reasoning_kwargs(
+                    dict(
                         model=token.model_name,
                         messages=messages,
                         stream=is_stream,
@@ -1284,9 +1288,12 @@ class BaseTranslate:
                         max_tokens=max_tokens,
                         timeout=self.api_timeout,
                         top_p=top_p,
-                        reasoning_effort=reasoning_effort,
                         **({"tools": tools, "tool_choice": "auto" if tool_choice is NOT_GIVEN else tool_choice} if tools is not NOT_GIVEN else {}),
-                    )
+                    ),
+                    reasoning_kwargs,
+                )
+                api_task = asyncio.ensure_future(
+                    client.chat.completions.create(**request_kwargs)
                 )
 
                 # Poll stop_event while waiting for the API response.

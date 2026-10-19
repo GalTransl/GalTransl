@@ -11,6 +11,7 @@ import traceback
 from typing import Any, TYPE_CHECKING
 
 from GalTransl.Agent.llm_backend import SubagentBackendView, resolve_llm_backend, summarize_messages
+from GalTransl.Reasoning import apply_reasoning_kwargs
 from GalTransl.Agent.session_store import SessionStore
 from GalTransl.Agent.backend_http import _encode_project_id, _http_json
 from GalTransl.Agent.context import (
@@ -116,6 +117,7 @@ class AgentRunner:
         # 是否给请求注入 cache_control 断点（见 _apply_prompt_cache）：
         # Anthropic 系需要显式断点，OpenAI 兼容的多数实现是服务端自动前缀缓存。
         self._prompt_caching = False
+        self._reasoning_kwargs: dict[str, Any] = {}
         # 压缩请求期间把流式增量静音：摘要内容不该以"助手正文"的形式刷到界面上。
         self._stream_quiet = False
         # thinking 模式（DeepSeek 等）下要回传给 provider 的思考字段名：流里见到过就记下来，
@@ -244,6 +246,7 @@ class AgentRunner:
         if self._store is not None:
             self._store.append_meta(context_window=backend.context_window)
         self._prompt_caching = backend.prompt_caching
+        self._reasoning_kwargs = backend.reasoning_kwargs
         _log(f"主 Agent 模型: {backend.model} context_window={backend.context_window} prompt_caching={backend.prompt_caching}")
 
     @contextlib.contextmanager
@@ -748,7 +751,9 @@ class AgentRunner:
         }
         if include_usage:
             kwargs["stream_options"] = {"include_usage": True}
-        return self._openai_client.chat.completions.create(**kwargs)
+        return self._openai_client.chat.completions.create(
+            **apply_reasoning_kwargs(kwargs, self._reasoning_kwargs)
+        )
 
     def _messages_for_request(self, *, strip_internal: bool = True) -> list[dict[str, Any]]:
         """发请求前的消息列表：剥掉内部标记，并按需补齐 thinking 模式的思考字段。
@@ -1313,7 +1318,7 @@ class AgentRunner:
 
     def _summarize_messages(self, messages: list[dict[str, Any]]) -> str:
         """调 LLM 把一段历史压成结构化摘要（独立请求，非流式）。"""
-        return summarize_messages(self._openai_client, self._model, messages)
+        return summarize_messages(self._openai_client, self._model, messages, self._reasoning_kwargs)
 
     # ---- 工具分发 ----
     def _dispatch_tool(self, name: str, args: dict[str, Any]) -> Any:

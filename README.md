@@ -170,6 +170,8 @@ backendSpecific:
         stream: true # 支持为单个token设置流式请求
 ```   
 
+思考参数在「后端配置」中分别设置，也可在 `OpenAI-Compatible` 段或单个令牌中填写：`enableThinking: true/false`（Qwen3、DashScope、SiliconFlow 等的 `enable_thinking`）、`thinkingType: enabled/disabled`（DeepSeek 等的 `thinking.type`）、`reasoningEffort: none/minimal/low/medium/high/xhigh/max`（OpenAI o 系列、GPT-5 及兼容中转的 `reasoning_effort`）。三项独立，按服务文档选用。全局未配置时不发送，令牌未配置时跟随全局，支持的等级以服务文档为准。
+
 * 一些收费api转发项目，例如：[硅基流动](https://cloud.siliconflow.cn/i/SvDatvsk)（modelName: "deepseek-ai/DeepSeek-V3.1-Terminus"）、[oaipro](https://api.oaipro.com/register?aff=ceAU)等等，以上只是举例，更多中转可以谷歌，本项目不担保它们的稳定性及可用性。   
    
 &ensp;&ensp;&ensp;&ensp;但要注意这里获取的key填入的同时要修改endpoint地址，一般在对应平台的说明里能找到：   

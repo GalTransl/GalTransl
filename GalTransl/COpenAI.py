@@ -13,6 +13,7 @@ from openai import OpenAI
 import re
 import httpx
 from GalTransl.TerminalOutput import should_print_translation_logs, terminal_progress
+from GalTransl.Reasoning import apply_reasoning_kwargs, build_reasoning_kwargs
 
 # 可用性检测的输出上限：小到几乎不生成，但不能取 1——有的家对 max_tokens 有下限
 # （「max_tokens must be greater than 2」），取 1 会把一个本来能用的后端判成不可用。
@@ -20,9 +21,11 @@ AVAILABILITY_CHECK_MAX_TOKENS = 16
 
 
 def _rejects_max_tokens(exc: BaseException) -> bool:
-    """provider 是否在抱怨 max_tokens 这个参数（下限/上限/不认识）。"""
+    """provider 是否在抱怨输出上限参数（下限/上限/不认识）。"""
     text = str(exc).lower()
-    return "max_tokens" in text or "max tokens" in text
+    return any(name in text for name in (
+        "max_tokens", "max tokens", "max_completion_tokens", "max completion tokens",
+    ))
 
 
 def normalize_sakura_endpoints(section: dict, fallback_endpoint: str = "") -> list[str]:
@@ -62,12 +65,14 @@ class COpenAIToken:
         model_name: str,
         stream: bool = True,
         isAvailable: bool = True,
+        reasoning_kwargs: Optional[dict] = None,
     ) -> None:
         self.token: str = token
         self.domain: str = domain
         self.model_name: str = model_name
         self.stream: bool = stream
         self.isAvailable: bool = isAvailable
+        self.reasoning_kwargs: dict = reasoning_kwargs or {}
         self.avg_latency: float = 0
         self.req_count: int = 0
 
@@ -92,6 +97,7 @@ class COpenAITokenPool:
         self.pj_config = config
         defaultEndpoint = "https://api.openai.com"
         section_name = "OpenAI-Compatible"
+        backend_config = config.getBackendConfigSection(section_name)
         self.tokens: list[tuple[bool, COpenAIToken]] = []
         self.force_eng_name = config.getBackendConfigSection(section_name).get(
             "rewriteModelName", ""
@@ -140,6 +146,7 @@ class COpenAITokenPool:
                         model_name=model_name,
                         stream=is_stream,
                         isAvailable=True,
+                        reasoning_kwargs=build_reasoning_kwargs(backend_config, tokenEntry),
                     )
                 )
                 pass
@@ -215,6 +222,8 @@ class COpenAITokenPool:
                 stream=token.stream,
                 max_tokens=AVAILABILITY_CHECK_MAX_TOKENS,
             )
+            create_kwargs = apply_reasoning_kwargs(create_kwargs, token.reasoning_kwargs)
+            limit_key = "max_completion_tokens" if "max_completion_tokens" in create_kwargs else "max_tokens"
 
             def _attempt(**kwargs) -> Tuple[bool, COpenAIToken]:
                 """发一次请求并判断"有没有拿到响应"（流式看首个 chunk 有没有 choices）。"""
@@ -229,20 +238,21 @@ class COpenAITokenPool:
             try:
                 return _attempt(**create_kwargs)
             except TypeError:
-                # 少数兼容实现不接受 max_tokens 参数，回退一次
-                create_kwargs.pop("max_tokens", None)
+                # 少数兼容实现不接受输出上限参数，回退一次
+                create_kwargs.pop(limit_key, None)
                 return _attempt(**create_kwargs)
             except Exception as exc:
                 # 有的家嫌 max_tokens 不合规（下限/上限）——检测本身不需要这个可选参数，
                 # 摘掉再来一次，别让一个能用的后端因为一个参数被判不可用。
-                if "max_tokens" not in create_kwargs or not _rejects_max_tokens(exc):
+                if limit_key not in create_kwargs or not _rejects_max_tokens(exc):
                     raise
                 LOGGER.warning(
-                    "可用性检测：provider 不接受 max_tokens=%s（%s），改为不带该参数重试",
-                    create_kwargs["max_tokens"],
+                    "可用性检测：provider 不接受 %s=%s（%s），改为不带该参数重试",
+                    limit_key,
+                    create_kwargs[limit_key],
                     str(exc).strip()[:120],
                 )
-                create_kwargs.pop("max_tokens", None)
+                create_kwargs.pop(limit_key, None)
                 return _attempt(**create_kwargs)
         except Exception as e:
             exception_text = str(e).strip()
