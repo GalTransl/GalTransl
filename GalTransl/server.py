@@ -3073,6 +3073,8 @@ def build_handler(registry: JobRegistry):
                     user_prompt = f"请翻译以下人名：\n{names_text}"
 
                     from openai import OpenAI
+                    from GalTransl.Reasoning import build_reasoning_kwargs
+
                     client = OpenAI(api_key=api_key, base_url=base_url)
                     stream = client.chat.completions.create(
                         model=model_name,
@@ -3082,6 +3084,7 @@ def build_handler(registry: JobRegistry):
                         ],
                         timeout=timeout,
                         stream=True,
+                        **build_reasoning_kwargs(oai_section, token_entry),
                     )
 
                     line_buf = ""

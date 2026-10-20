@@ -152,6 +152,8 @@ backendSpecific:
         stream: true
 ```
 
+Configure thinking options independently in the backend editor, the `OpenAI-Compatible` section, or an individual token: `enableThinking: true/false` (`enable_thinking` for Qwen3, DashScope, SiliconFlow, and similar APIs), `thinkingType: enabled/disabled` (`thinking.type` for DeepSeek and compatible APIs), and `reasoningEffort: none/minimal/low/medium/high/xhigh/max` (`reasoning_effort` for OpenAI o-series, GPT-5, and compatible relays). Model names and URLs do not select these options automatically. Unset global options are omitted. Choose only parameters and levels supported by your provider.
+
 After modifying the project settings, make sure you have installed the required dependencies (see Environment Preparation), then double-click `run_GalTransl_terminal.bat` and enter the project path to start translating.
 
 **However**, it is not recommended to start translating right away. Please at least learn about [GPT Dictionary usage](https://github.com/XD2333/GalTransl#gpt-dictionary) first, or use GenDic to generate a name dictionary, so as to ensure basic translation quality.

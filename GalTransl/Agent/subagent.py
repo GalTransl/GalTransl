@@ -801,7 +801,8 @@ def _subagent_handlers(
 
 
 def _subagent_chat(
-    client: Any, model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
+    client: Any, model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None,
+    reasoning_kwargs: dict[str, Any] | None = None,
 ) -> tuple[str, list[Any], str, str, int]:
     """子代理的一次请求（**非流式**）：返回（正文, 工具调用, 思考字段名, 思考内容, 输入 token）。
 
@@ -822,7 +823,9 @@ def _subagent_chat(
     }
     if tools is not None:
         kwargs["tools"] = tools
-    resp = client.chat.completions.create(**kwargs)
+    from GalTransl.Reasoning import apply_reasoning_kwargs
+
+    resp = client.chat.completions.create(**apply_reasoning_kwargs(kwargs, reasoning_kwargs or {}))
     usage = getattr(resp, "usage", None)
     raw_tokens = usage.get("prompt_tokens") if isinstance(usage, dict) else getattr(usage, "prompt_tokens", None)
     prompt_tokens = raw_tokens if type(raw_tokens) is int and raw_tokens > 0 else 0
@@ -1219,8 +1222,10 @@ class SubAgentRunner:
                     request_tools = cached_tools if tools is not None else None
                 messages = [_strip_internal_fields(message) for message in messages]
                 anchored_count = len(messages)
+                reasoning_kwargs = getattr(self.parent, "_reasoning_kwargs", {})
                 content, calls, field, reasoning, prompt_tokens = _subagent_chat(
-                    client, model, messages, request_tools
+                    client, model, messages, request_tools,
+                    **({"reasoning_kwargs": reasoning_kwargs} if reasoning_kwargs else {}),
                 )
                 # 任意模型响应都算首响（包括只有工具调用、没有正文的响应），不等任务完成。
                 if self.first_response_event is not None:

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from GalTransl.Agent.backend_http import _normalize_endpoint
 from GalTransl.Agent.context import _llm_timeout, _profile_context_window, _resolve_prompt_caching, _serialize_for_summary
 from GalTransl.Agent.core import SUMMARY_MAX_TOKENS
 from GalTransl.Agent.prompts import COMPACT_SUMMARY_PROMPT
+from GalTransl.Reasoning import apply_reasoning_kwargs, build_reasoning_kwargs
 
 
 @dataclass
@@ -17,6 +18,7 @@ class LLMBackend:
     model: str
     context_window: int
     prompt_caching: bool
+    reasoning_kwargs: dict[str, Any] = field(default_factory=dict)
 
 
 def resolve_llm_backend(profile: dict[str, Any]) -> LLMBackend:
@@ -43,15 +45,23 @@ def resolve_llm_backend(profile: dict[str, Any]) -> LLMBackend:
         model=model,
         context_window=_profile_context_window(profile),
         prompt_caching=_resolve_prompt_caching(section.get("promptCaching"), model, base_url),
+        reasoning_kwargs=build_reasoning_kwargs(section, first),
     )
 
 
-def summarize_messages(client: Any, model: str, messages: list[dict[str, Any]]) -> str:
+def summarize_messages(
+    client: Any, model: str, messages: list[dict[str, Any]],
+    reasoning_kwargs: dict[str, Any] | None = None,
+) -> str:
     prompt = COMPACT_SUMMARY_PROMPT.replace("{conversation}", _serialize_for_summary(messages))
-    response = client.chat.completions.create(
-        model=model, messages=[{"role": "user", "content": prompt}],
-        temperature=0, max_tokens=SUMMARY_MAX_TOKENS, stream=False,
+    request = apply_reasoning_kwargs(
+        dict(
+            model=model, messages=[{"role": "user", "content": prompt}],
+            temperature=0, max_tokens=SUMMARY_MAX_TOKENS, stream=False,
+        ),
+        reasoning_kwargs or {},
     )
+    response = client.chat.completions.create(**request)
     if not getattr(response, "choices", None):
         return ""
     return str(getattr(response.choices[0].message, "content", None) or "")
@@ -66,10 +76,11 @@ class SubagentBackendView:
         self._model = backend.model
         self._context_window = backend.context_window
         self._prompt_caching = backend.prompt_caching
+        self._reasoning_kwargs = backend.reasoning_kwargs
         self.stop_event = stop_event
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._parent, name)
 
     def _summarize_messages(self, messages: list[dict[str, Any]]) -> str:
-        return summarize_messages(self._openai_client, self._model, messages)
+        return summarize_messages(self._openai_client, self._model, messages, self._reasoning_kwargs)
