@@ -29,6 +29,8 @@
     "tokenListHeader_message_addToken": "+ 添加令牌",
     "tokenList_message_emptyTokenAddTokenButtonAdd": "暂无令牌，请点击「添加令牌」按钮添加。",
     "tokenEntryHeader_message_token": "令牌 #{{value}}",
+    "tokenEntryToggleBtn_title_collapseOrExpand": "展开或收起此令牌的详细设置",
+    "tokenEntrySummary_message_notConfigured": "尚未填写",
     "tokenEntryRemoveBtn_title_deleteToken": "删除此令牌",
     "fieldFieldInline_message_aPIKey": "API Key",
     "fieldFieldInline_placeholder_sk": "sk-...",

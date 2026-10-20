@@ -29,6 +29,8 @@
     "tokenListHeader_message_addToken": "+ Add token",
     "tokenList_message_emptyTokenAddTokenButtonAdd": "No tokens yet. Click the “Add token” button to add one.",
     "tokenEntryHeader_message_token": "Token #{{value}}",
+    "tokenEntryToggleBtn_title_collapseOrExpand": "Expand or collapse this token's settings",
+    "tokenEntrySummary_message_notConfigured": "Not configured yet",
     "tokenEntryRemoveBtn_title_deleteToken": "Delete this token",
     "fieldFieldInline_message_aPIKey": "API Key",
     "fieldFieldInline_placeholder_sk": "sk-...",

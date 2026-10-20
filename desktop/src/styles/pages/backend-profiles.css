@@ -396,14 +396,64 @@
 .token-entry__header {
   display: flex;
   align-items: center;
+  gap: var(--space-2);
   justify-content: space-between;
   margin-bottom: var(--space-3);
+}
+
+/* 收起时头部就是这张卡片唯一的可见内容，别再给下面留一截空白 */
+.token-entry--collapsed .token-entry__header {
+  margin-bottom: 0;
+}
+
+/* 头部整条都能点：左边文字做成按钮，箭头按 aria-expanded 转 90°（右箭头 → 下箭头）。
+   按钮要吃掉剩余宽度，收起时的摘要才能用省略号截断，而不是把删除按钮挤出去。 */
+.token-entry__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.token-entry__toggle:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.token-entry__chevron {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  transition: transform var(--transition-fast);
+}
+
+.token-entry__toggle[aria-expanded='true'] .token-entry__chevron {
+  transform: rotate(90deg);
+}
+
+.token-entry__summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-muted);
 }
 
 .token-entry__index {
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text-muted);
+  flex-shrink: 0;
 }
 
 .token-entry__remove-btn {
@@ -414,6 +464,7 @@
   cursor: pointer;
   padding: 2px 6px;
   border-radius: 4px;
+  flex-shrink: 0;
   transition: background var(--transition-fast);
 }
 

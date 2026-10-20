@@ -66,6 +66,12 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
 
   const tokens = (Array.isArray(oaiConfig.tokens) ? oaiConfig.tokens : []) as TokenEntry[];
 
+  // 哪些令牌是展开的（只记下标，纯视图状态，不写进配置）。
+  // 令牌多了整页会拉得很长，所以默认只展开第一张；「添加令牌」时只留新的那张展开。
+  const [expandedTokens, setExpandedTokens] = useState<Set<number>>(
+    () => new Set(tokens.length > 0 ? [0] : []),
+  );
+
   // 取消勾选后端类型时把整段配置暂存在这里，重新勾选时原样还回去；
   // 删除只有点「保存」后才会真正落盘（取消/关闭弹窗时随组件卸载一起丢弃）。
   const removedSectionsRef = useRef<Record<string, Record<string, unknown>>>({});
@@ -93,6 +99,8 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
             apiErrorWait: 'auto',
           },
         });
+        // 预置的这条是全新的一张，展开它——否则刚勾上后端类型就只看到一张收起的卡片
+        setExpandedTokens(new Set([0]));
       } else {
         onChange({
           ...config,
@@ -149,32 +157,59 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
     updateSakura('endpoints', next);
   }, [sakuraEndpoints, updateSakura, readOnly]);
 
-  // Tokens list operations
-  const addToken = useCallback(() => {
-    if (readOnly) return;
-    // 新令牌带上默认上下文窗口（128000），免得留空让人以为没生效
-    const next = [...tokens, { token: '', endpoint: '', modelName: '', contextWindow: DEFAULT_CONTEXT_WINDOW }];
-    updateOai('tokens', next);
-  }, [tokens, updateOai, readOnly]);
-
-  const removeToken = useCallback((index: number) => {
-    if (readOnly) return;
-    const next = tokens.filter((_, i) => i !== index);
-    updateOai('tokens', next);
-  }, [tokens, updateOai, readOnly]);
-
-  const updateToken = useCallback((index: number, field: keyof TokenEntry, value: string | number | boolean | undefined) => {
-    if (readOnly) return;
-    const next = tokens.map((t, i) => i === index ? { ...t, [field]: value } : t);
-    updateOai('tokens', next);
-  }, [tokens, updateOai, readOnly]);
-
   // Per-token model-list fetch state
   type ModelsState = { loading: boolean; error: LocalizedText | null; models: string[] };
   const [modelsState, setModelsState] = useState<Record<number, ModelsState>>({});
   // Which token's model dropdown is currently open (null = none)
   const [openDropdownIdx, setOpenDropdownIdx] = useState<number | null>(null);
   const dropdownContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Tokens list operations
+  const addToken = useCallback(() => {
+    if (readOnly) return;
+    // 新令牌带上默认上下文窗口（128000），免得留空让人以为没生效
+    const next = [...tokens, { token: '', endpoint: '', modelName: '', contextWindow: DEFAULT_CONTEXT_WINDOW }];
+    updateOai('tokens', next);
+    // 只展开刚加的这张：连点几次「添加令牌」时，列表不会因为前面几张全张着而越拉越长
+    setExpandedTokens(new Set([next.length - 1]));
+    setOpenDropdownIdx(null);
+  }, [tokens, updateOai, readOnly]);
+
+  const removeToken = useCallback((index: number) => {
+    if (readOnly) return;
+    const next = tokens.filter((_, i) => i !== index);
+    updateOai('tokens', next);
+    // 折叠状态是按下标记的，删掉一条之后后面的下标整体前移，这里跟着挪；
+    // 删掉的正好是展开的那张时，让相邻的一张接手展开，免得列表里一张细节都看不到。
+    setExpandedTokens((prev) => {
+      const adjusted = new Set<number>();
+      for (const i of prev) {
+        if (i === index) continue;
+        adjusted.add(i > index ? i - 1 : i);
+      }
+      if (prev.has(index) && next.length > 0) adjusted.add(Math.min(index, next.length - 1));
+      return adjusted;
+    });
+    // 模型下拉是按下标打开的，删一条之后下标已经对不上了，直接关掉
+    setOpenDropdownIdx(null);
+  }, [tokens, updateOai, readOnly]);
+
+  const toggleTokenExpanded = useCallback((index: number) => {
+    setExpandedTokens((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+    // 收起时输入框会被卸载，留着打开状态的话再展开会莫名其妙弹回一个模型下拉
+    setOpenDropdownIdx((cur) => (cur === index ? null : cur));
+  }, []);
+
+  const updateToken = useCallback((index: number, field: keyof TokenEntry, value: string | number | boolean | undefined) => {
+    if (readOnly) return;
+    const next = tokens.map((t, i) => i === index ? { ...t, [field]: value } : t);
+    updateOai('tokens', next);
+  }, [tokens, updateOai, readOnly]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -264,10 +299,32 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
 
             {tokens.map((t, idx) => {
               const ms = modelsState[idx];
+              const open = expandedTokens.has(idx);
+              // 收起时头部这行就是这张卡片的全部可见信息：模型名 · 地址 · key 尾号，
+              // 足够认出是哪一条；网址去掉协议前缀，不然一行放不下多长的地址。
+              const summary = [
+                (t.modelName ?? '').trim(),
+                (t.endpoint ?? '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, ''),
+                (t.token ?? '').trim() ? `…${(t.token ?? '').trim().slice(-4)}` : '',
+              ].filter(Boolean).join(' · ');
               return (
-              <div key={idx} className="token-entry">
+              <div key={idx} className={`token-entry${open ? '' : ' token-entry--collapsed'}`}>
                 <div className="token-entry__header">
-                  <span className="token-entry__index">{translate("common:backendConfigEditor.tokenEntryHeader_message_token", { value: idx + 1 })}</span>
+                  <button
+                    type="button"
+                    className="token-entry__toggle"
+                    onClick={() => toggleTokenExpanded(idx)}
+                    aria-expanded={open}
+                    title={translate("common:backendConfigEditor.tokenEntryToggleBtn_title_collapseOrExpand")}
+                  >
+                    <Icon name="chevron-right" className="token-entry__chevron" />
+                    <span className="token-entry__index">{translate("common:backendConfigEditor.tokenEntryHeader_message_token", { value: idx + 1 })}</span>
+                    {!open && (
+                      <span className="token-entry__summary">
+                        {summary || translate("common:backendConfigEditor.tokenEntrySummary_message_notConfigured")}
+                      </span>
+                    )}
+                  </button>
                   {!readOnly && (
                     <button
                       type="button"
@@ -279,6 +336,8 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
                     </button>
                   )}
                 </div>
+                {open && (
+                <div className="token-entry__body">
                 <label className="field field--inline">
                   <span>{translate("common:backendConfigEditor.fieldFieldInline_message_aPIKey")}</span>
                   <input
@@ -442,6 +501,8 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
                   </CustomSelect>
                   <span className="field__hint">{translate("common:backendConfigEditor.fieldFieldInline_hint_reasoningEffort")}</span>
                 </label>
+                </div>
+                )}
               </div>
               );
             })}
