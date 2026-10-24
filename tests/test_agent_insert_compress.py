@@ -177,7 +177,7 @@ class InsertThenCompressTests(_TempSessions):
         self.assertFalse(runner._finish_compaction("   "))
 
         self.assertEqual(len(state.messages), before)
-        self.assertFalse(runner._compacted_this_turn)
+        self.assertNotIn("compacted", [e.type for e in state.events])
         self.assertFalse(any(m.get("_compact_instruction") for m in state.messages))
 
     def test_run_reuses_the_current_conversation_for_the_summary(self) -> None:
@@ -204,6 +204,44 @@ class InsertThenCompressTests(_TempSessions):
         contents = " ".join(str(m.get("content")) for m in state.messages)
         self.assertIn("压缩完成", contents)
         self.assertFalse(any(m.get("_compact_instruction") for m in state.messages))
+
+    def test_long_tool_run_compacts_multiple_times_before_finishing(self) -> None:
+        """一次用户任务中工具结果两次撑大历史，主循环都能压缩并继续工作。"""
+        state = _state()
+        state.messages = _oversized(100)
+        runner = _runner(state, window=32000)
+        rounds: list[bool] = []
+        normal_rounds = 0
+
+        def fake_stream():
+            nonlocal normal_rounds
+            rounds.append(runner._stream_quiet)
+            self.assertLess(len(rounds), 10, "压缩不能占满主循环")
+            if runner._stream_quiet:
+                return "<summary>已完成先前工作，继续校对。</summary>", [], "stop"
+            normal_rounds += 1
+            if normal_rounds <= 2:
+                return "", [{"id": f"call_{normal_rounds}", "name": "read_test", "arguments": "{}"}], "tool_calls"
+            return "干完了", [], "stop"
+
+        with (
+            patch.object(runner, "_resolve_llm", lambda: None),
+            patch.object(runner, "_request_overhead_tokens", return_value=0),
+            patch.object(runner, "_stream_llm_response", fake_stream),
+            patch.object(runner, "_dispatch_tool", return_value={"content": "w" * 40000}),
+        ):
+            runner.run()
+
+        self.assertEqual(rounds, [True, False, True, False, True, False])
+        self.assertEqual(sum(e.type == "compacted" for e in state.events), 3)
+        self.assertEqual(len(runner._store.list_chunks()), 3)
+        self.assertEqual(state.status, "awaiting_input")
+        self.assertEqual(state.messages[-1]["content"], "干完了")
+        self.assertFalse(any(m.get("_compact_instruction") for m in state.messages))
+        self.assertEqual(sum(bool(m.get("_compact_summary")) for m in state.messages), 1)
+        for i, message in enumerate(state.messages):
+            if message["role"] == "tool":
+                self.assertEqual(state.messages[i - 1]["tool_calls"][0]["id"], message["tool_call_id"])
 
     def test_summary_failure_falls_back_to_a_separate_request(self) -> None:
         """压缩请求失败（返回工具调用）时降级为独立摘要请求，不让回合挂掉。"""

@@ -104,7 +104,8 @@ class AgentRunner:
         self._openai_client: Any = None
         self._model: str = ""
         self._context_window = DEFAULT_CONTEXT_WINDOW
-        self._compacted_this_turn = False
+        # 同一长任务可多次压缩；只拦截压后没有变化的历史，避免摘要请求空转。
+        self._last_compaction_fingerprint: str | None = None
         # 进行中的压缩（Insert-then-Compress）：指令已挂在历史末尾、等这一轮请求
         # 回摘要。字段见 _begin_compaction，收尾后置空。
         self._pending_compaction: dict[str, Any] | None = None
@@ -594,8 +595,6 @@ class AgentRunner:
             # ——留着让下一回合取走，绝不能把它丢在队列里没人管。
             if not self.state.pending_followup and self.state.pending_messages:
                 self.state.pending_followup = True
-        # 回合结束就把压缩标记清掉，下一回合重新评估上下文用量
-        self._compacted_this_turn = False
         # 溢出恢复同理：新回合可以再用一次（同一回合内只恢复一次，避免空转）
         self._overflow_recovery_used = False
         # 压缩失败标记也只在回合内有效：下个回合重新给一次机会
@@ -1023,11 +1022,13 @@ class AgentRunner:
         复用当前会话前缀）；这里是它的兜底——压缩请求失败、模型不按指令走时可以调用。
         触发线：估算用量 > 窗口的 COMPACT_TRIGGER_RATIO。
         """
-        if self._compacted_this_turn or self._pending_compaction is not None:
+        if self._compact_failed_this_turn or self._pending_compaction is not None:
             return
         window = self._context_window
         limit = int(window * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
         if self._estimate_context_tokens() <= limit:
+            return
+        if self._last_compaction_fingerprint == _history_fingerprint(self.state.messages):
             return
         cut = _find_compaction_cut(self.state.messages, _keep_recent_tokens(limit))
         if cut <= 0:
@@ -1052,9 +1053,9 @@ class AgentRunner:
         limit = int(window * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
         estimated = self._estimate_context_tokens()
         if not force:
-            if self._compacted_this_turn:
-                return False
             if estimated <= limit:
+                return False
+            if self._last_compaction_fingerprint == _history_fingerprint(self.state.messages):
                 return False
 
         messages = self.state.messages
@@ -1242,7 +1243,7 @@ class AgentRunner:
         # 压缩后旧的 usage 锚点失效，重置避免继续用错误的估算
         self.state.last_prompt_tokens = 0
         self.state.anchored_message_count = 0
-        self._compacted_this_turn = True
+        self._last_compaction_fingerprint = _history_fingerprint(self.state.messages)
         removed = len(head)
         tokens_before = int(ctx.get("estimated") or 0)
         # 压缩后的大小按**重建出来的真实消息列表**再估一次（锚点刚重置，这里是纯字符估算）：

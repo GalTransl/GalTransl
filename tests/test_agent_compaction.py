@@ -5,7 +5,7 @@
    assistant.tool_calls 与后续 tool 响应的配对（否则发给 LLM 的 messages 会因孤儿
    tool_calls / 孤儿 tool 响应而被拒）。
 2. 用量估算 —— 有 usage 锚点时只估锚点之后的增量，无锚点时整体按字符数估算。
-3. 压缩执行 —— 超阈值触发、消息被替换为摘要、每回合最多一次；LLM 摘要失败时
+3. 压缩执行 —— 超阈值触发、消息被替换为摘要、同回合历史增长后可多次压缩；LLM 摘要失败时
    回退本地截断且 messages 仍合法（无孤儿 tool 响应）。
 4. 会话生命周期 —— 通过 AgentRuntime 验证标题递增、多会话隔离、删除后列表减少。
 
@@ -290,7 +290,7 @@ class MaybeCompactTests(unittest.TestCase):
         runner, state = _make_runner(msgs, window=DEFAULT_CONTEXT_WINDOW)
         runner._maybe_compact()
         self.assertEqual(len(state.messages), 5)
-        self.assertFalse(runner._compacted_this_turn)
+        self.assertNotIn("compacted", [e.type for e in state.events])
 
     def test_over_threshold_compacts_and_replaces_prefix(self):
         """超阈值时压缩：前缀被替换成 system 摘要 + user 锚点消息。"""
@@ -298,7 +298,7 @@ class MaybeCompactTests(unittest.TestCase):
         runner, state = _make_runner(msgs, window=2000, summary_text="我是摘要")
         before = len(state.messages)
         runner._maybe_compact()
-        self.assertTrue(runner._compacted_this_turn)
+        self.assertIn("compacted", [e.type for e in state.events])
         # 压缩后：system（原样）+ 摘要消息 + 尾部保留，且总条数减少
         self.assertLess(len(state.messages), before)
         self.assertEqual(state.messages[0]["role"], "system")
@@ -310,16 +310,63 @@ class MaybeCompactTests(unittest.TestCase):
         self.assertEqual(state.last_prompt_tokens, 0)
         self.assertEqual(state.anchored_message_count, 0)
 
-    def test_at_most_once_per_turn(self):
-        """同一回合第二次调用立即返回，不再压缩。"""
+    def test_compacts_again_when_history_grows_within_the_same_turn(self):
+        """长任务新增历史后允许再次压缩，不必等下一条用户消息。"""
         msgs = self._oversized_messages(40)
         runner, state = _make_runner(msgs, window=2000)
+        for expected in range(1, 4):
+            if expected > 1:
+                state.messages.extend(self._oversized_messages(40))
+            before = len(state.messages)
+            runner._maybe_compact()
+            self.assertLess(len(state.messages), before)
+            self.assertEqual(sum(e.type == "compacted" for e in state.events), expected)
+
+    def test_unchanged_compacted_history_is_not_summarized_again(self):
+        """压后仍超阈值也不能对同一份历史不断生成摘要。"""
+        runner, state = _make_runner(self._oversized_messages(40), window=2000)
         runner._maybe_compact()
-        first_count = len(state.messages)
-        # 把消息再撑大，第二次也不该动
-        state.messages.extend(self._oversized_messages(40))
+        messages = list(state.messages)
+        limit = int(2000 * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
+        self.assertGreater(runner._estimate_context_tokens(), limit)
+
+        for _ in range(3):
+            runner._maybe_compact()
+            self.assertFalse(runner._begin_compaction())
+
+        self.assertEqual(state.messages, messages)
+        self.assertEqual(len(runner._openai_client.calls), 1)
+
+    def test_usage_anchor_update_alone_does_not_repeat_compaction(self):
+        runner, state = _make_runner(self._oversized_messages(40), window=2000)
         runner._maybe_compact()
-        self.assertEqual(len(state.messages), first_count + 40)
+        state.last_prompt_tokens = 200000
+        state.anchored_message_count = len(state.messages)
+
+        self.assertFalse(runner._begin_compaction())
+
+    def test_growth_below_threshold_does_not_trigger_another_compaction(self):
+        msgs = [_msg("system", "SYS"), *[_msg("user", "w" * 8000) for _ in range(60)]]
+        runner, state = _make_runner(msgs)
+        runner._maybe_compact()
+        self.assertEqual(len(runner._openai_client.calls), 1)
+        state.messages.append(_msg("user", "继续"))
+        limit = int(DEFAULT_CONTEXT_WINDOW * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
+        self.assertLess(runner._estimate_context_tokens(), limit)
+
+        runner._maybe_compact()
+
+        self.assertFalse(runner._begin_compaction())
+        self.assertEqual(len(runner._openai_client.calls), 1)
+
+    def test_overflow_can_force_compaction_of_unchanged_history(self):
+        # 摘要本身较大，确保压后的历史仍有合法切点，验证 force 绕过防空转限制。
+        runner, state = _make_runner(self._oversized_messages(40), window=2000, summary_text="S" * 4000)
+        runner._maybe_compact()
+        self.assertFalse(runner._begin_compaction())
+
+        self.assertTrue(runner._begin_compaction(force=True))
+        runner._abort_compaction()
 
     def test_history_within_the_keep_budget_is_not_compacted(self):
         """整份历史都装得进保留预算：压了只会把摘要再摘要一遍，直接跳过。"""
@@ -328,7 +375,7 @@ class MaybeCompactTests(unittest.TestCase):
 
         runner._maybe_compact()
 
-        self.assertFalse(runner._compacted_this_turn)
+        self.assertNotIn("compacted", [e.type for e in state.events])
         self.assertEqual(len(state.messages), 10)
 
     def test_tail_that_alone_hits_the_line_skips_compaction(self):
@@ -411,7 +458,7 @@ class MaybeCompactTests(unittest.TestCase):
             msgs.append(_msg("tool", "r" * 2000))
         runner, state = _make_runner(msgs, window=2000)
         runner._maybe_compact()
-        self.assertTrue(runner._compacted_this_turn)
+        self.assertIn("compacted", [e.type for e in state.events])
         self.assertLess(len(state.messages), len(msgs))
         # 校验尾部保留区无孤儿 tool 响应（前面必须有带 tool_calls 的 assistant）
         for i, m in enumerate(state.messages):
@@ -432,7 +479,7 @@ class MaybeCompactTests(unittest.TestCase):
             msgs, window=3000, raise_exc=RuntimeError("summary down")
         )
         runner._maybe_compact()
-        self.assertTrue(runner._compacted_this_turn)
+        self.assertIn("compacted", [e.type for e in state.events])
         # 回退后仍是合法结构：system 打头 + 本地兜底摘要消息
         self.assertEqual(state.messages[0]["role"], "system")
         self.assertIn("[早前对话的压缩摘要", state.messages[1]["content"])
@@ -450,7 +497,7 @@ class MaybeCompactTests(unittest.TestCase):
         msgs = self._oversized_messages(40)
         runner, state = _make_runner(msgs, window=2000, summary_text="   ")
         runner._maybe_compact()
-        self.assertTrue(runner._compacted_this_turn)
+        self.assertIn("compacted", [e.type for e in state.events])
         self.assertGreater(len(state.messages[1]["content"]), 10)
 
     def test_compacted_emits_event(self):
@@ -532,7 +579,7 @@ class CompactionSurvivesRestartTests(unittest.TestCase):
         runner._model = "fake-model"
         runner._context_window = window
         runner._maybe_compact()
-        self.assertTrue(runner._compacted_this_turn)  # 测试前提：这一轮确实压了
+        self.assertIn("compacted", [e.type for e in state.events])  # 测试前提：这一轮确实压了
         return runner, state
 
     def _restart(self) -> tuple:
@@ -575,9 +622,8 @@ class CompactionSurvivesRestartTests(unittest.TestCase):
         runner, state = self._compact(self._history(40, "word " * 200), window=2_000)
         for _ in range(20):
             runner._persist_message(_msg("user", "word " * 200))
-        runner._compacted_this_turn = False  # 新回合才能再压
         runner._maybe_compact()
-        self.assertTrue(runner._compacted_this_turn, "测试前提：第二次也压了")
+        self.assertEqual(sum(e.type == "compacted" for e in state.events), 2)
 
         _, restored = self._restart()
 
