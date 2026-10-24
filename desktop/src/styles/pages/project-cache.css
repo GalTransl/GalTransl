@@ -974,8 +974,7 @@
   gap: var(--space-2);
 }
 
-.cache-search-condition-actions,
-.cache-search-budget-note {
+.cache-search-condition-actions {
   display: flex;
   align-items: center;
   flex-wrap: wrap;

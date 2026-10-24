@@ -700,12 +700,10 @@ export async function searchCache(
   query: string,
   field: CacheSearchField = 'all',
   options: CacheSearchOptions = { re: false },
-  maxResults = 100,
   configFileName = 'config.yaml',
   /** 连还没翻译的原文件一起搜（界面默认开；Agent 的 search_transl_cache 有专门的原文搜索工具，不开） */
   includeUncached = true,
   conditions: CacheSearchCondition[] = [],
-  offset = 0,
 ) {
   return apiRequest<CacheSearchResponse>(
     `/api/projects/${projectId}/cache/search`,
@@ -716,11 +714,10 @@ export async function searchCache(
         query,
         field,
         options,
-        max_results: maxResults,
+        result_mode: 'all',
         config_file_name: configFileName,
         include_uncached: includeUncached,
         ...(conditions.length ? { conditions } : {}),
-        offset,
       }),
     },
   );

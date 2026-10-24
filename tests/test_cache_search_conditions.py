@@ -100,6 +100,29 @@ class CacheSearchConditionsTests(unittest.TestCase):
             offset = out["next_offset"]
         self.assertEqual(indexes, list(range(1, 206)))
 
+    def test_frontend_returns_all_matches_and_full_text_without_budgets(self):
+        text = "译文" * 10000
+        self.write([{"index": i, "post_src": "hit", "pre_dst": text} for i in range(1, 206)]
+                   + [{"index": 206, "post_src": "hit", "pre_dst": "不匹配"}])
+        out = self.search(query="hit", result_mode="all",
+                          conditions=[{"field": "pre_dst", "query": "译文"}])
+        self.assertEqual(out["total"], 205)
+        self.assertEqual([r["index"] for r in out["results"]], list(range(1, 206)))
+        self.assertTrue(all(r["pre_dst"] == text and not r.get("truncated") for r in out["results"]))
+        self.assertFalse(out["has_more"])
+        self.assertNotIn("truncated", out)
+
+    def test_frontend_empty_results_are_complete(self):
+        out = self.search(query="不存在", result_mode="all")
+        self.assertEqual(out["results"], [])
+        self.assertEqual(out["total"], 0)
+        self.assertFalse(out["has_more"])
+
+    def test_invalid_result_mode_is_bad_request(self):
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.search(query="hit", result_mode="unknown")
+        self.assertEqual(caught.exception.code, 400)
+
     def test_context_counts_toward_both_budgets_and_paging_counts_only_hits(self):
         self.write([{"index": i, "post_src": "hit" if i % 5 == 0 else "context", "pre_dst": "译文" * 50}
                     for i in range(1, 121)])

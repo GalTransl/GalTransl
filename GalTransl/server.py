@@ -965,12 +965,12 @@ def _search_cache_entries(
     filter_keys: list[str],
     context: int,
     only_preceding: bool,
-    max_results: int,
+    max_results: int | None,
     offset: int,
     order: str,
     conditions: list[CacheSearchCondition] | None = None,
 ) -> dict[str, Any]:
-    """跨文件收集全部缓存命中后再排序/采样，供 Agent 搜索使用。"""
+    """跨文件收集命中；界面返回全文，Agent 请求按行数和字符预算续查。"""
     all_hits: list[dict[str, Any]] = []
     rows_by_file: dict[str, list[dict[str, Any] | None]] = {}
     query_lower = query.lower()
@@ -1021,6 +1021,16 @@ def _search_cache_entries(
             if matched:
                 all_hits.append({"filename": filename, "pos": pos, "flags": flags})
         rows_by_file[filename] = rows
+    if max_results is None:
+        selected = _sample_search_hits(all_hits, len(all_hits), 0, order)
+        results = _search_context_rows(
+            selected, context=context, only_preceding=only_preceding, file_rows=rows_by_file,
+        )
+        out = {"results": results, "total": len(all_hits), "offset": 0, "order": order,
+               "has_more": False, "next_offset": len(all_hits)}
+        if context:
+            out.update({"context": context, "returned_hits": len(selected), "returned": len(results)})
+        return out
     candidates = _sample_search_hits(all_hits, min(max_results, CACHE_SEARCH_MAX_ROWS), offset, order)
     selected: list[dict[str, Any]] = []
     results: list[dict[str, Any]] = []
@@ -2331,7 +2341,14 @@ def build_handler(registry: JobRegistry):
                     query = str(payload.get("query", "")).strip()
                     field = str(payload.get("field", "all")).strip()  # all | src | dst
                     options = payload.get("options", {})
-                    max_results = max(1, min(int(payload.get("max_results", CACHE_SEARCH_MAX_ROWS)), CACHE_SEARCH_MAX_ROWS))
+                    result_mode = payload.get("result_mode", "bounded")
+                    if result_mode not in ("bounded", "all"):
+                        self._send_json({"error": "result_mode must be bounded or all"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    # 界面显式请求完整结果；Agent 默认保持 100 句 / 10k 字符预算。
+                    max_results = None if result_mode == "all" else max(
+                        1, min(int(payload.get("max_results", CACHE_SEARCH_MAX_ROWS)), CACHE_SEARCH_MAX_ROWS),
+                    )
                     # 可选文件过滤：只搜这个缓存文件（Agent 修单文件问题时用）
                     search_filename = str(payload.get("filename", "")).strip()
                     if not isinstance(options, dict):

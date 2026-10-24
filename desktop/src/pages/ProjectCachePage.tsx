@@ -353,7 +353,6 @@ function SearchResultCard({
           {speaker !== '—' && (
             <span className="search-result-card__speaker" style={{ color: `hsl(${speakerHue(rawSpeaker)}, 55%, 32%)` }}>{speaker}</span>
           )}
-          {result.truncated && <span className="search-result-card__problem">{translate("projects:projectCachePage.searchPreviewNote")}</span>}
           {result.problem && <span className="search-result-card__problem">{result.problem}</span>}
         </div>
       )}
@@ -414,7 +413,6 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     searchField: CacheSearchField;
     searchOptions: CacheSearchOptions;
     searchConditions: CacheSearchCondition[];
-    searchNextOffset: number | null;
     searchResults: CacheSearchResult[];
     searchTotal: number;
     replaceQuery: string;
@@ -538,7 +536,6 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     re: false
   });
   const [searchConditions, setSearchConditions] = useState<CacheSearchCondition[]>([]);
-  const [searchNextOffset, setSearchNextOffset] = useState<number | null>(null);
   const searchRequestRef = useRef(0);
   const hasSearchQuery = Boolean(searchQuery.trim() || searchConditions.some((condition) => condition.query.trim()));
   const [searchResults, setSearchResults] = useState<CacheSearchResult[]>([]);
@@ -702,7 +699,6 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         searchField: 'all',
         searchOptions: { re: false },
         searchConditions: [],
-        searchNextOffset: null,
         searchResults: [],
         searchTotal: 0,
         replaceQuery: '',
@@ -723,7 +719,6 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       prevBucket.searchField = searchField;
       prevBucket.searchOptions = searchOptions;
       prevBucket.searchConditions = searchConditions;
-      prevBucket.searchNextOffset = searchNextOffset;
       prevBucket.searchResults = searchResults;
       prevBucket.searchTotal = searchTotal;
       prevBucket.replaceQuery = replaceQuery;
@@ -750,7 +745,6 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setSearchField(existing.searchField);
       setSearchOptions(existing.searchOptions);
       setSearchConditions(existing.searchConditions);
-      setSearchNextOffset(existing.searchNextOffset);
       setSearchResults(existing.searchResults);
       setSearchTotal(existing.searchTotal);
       setSelectedSearchIdx(-1);
@@ -779,7 +773,6 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setSearchField('all');
       setSearchOptions({ re: false });
       setSearchConditions([]);
-      setSearchNextOffset(null);
       setSearchResults([]);
       setSearchTotal(0);
       setSelectedSearchIdx(-1);
@@ -861,10 +854,9 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     return () => { cancelled = true; };
   }, [projectId, selectedFile, configFileName, noteCachePresence]);
 
-  const runGlobalSearch = useCallback(async (offset = 0) => {
+  const runGlobalSearch = useCallback(async () => {
     const request = ++searchRequestRef.current;
     if (!projectId || !hasSearchQuery) {
-      setSearchNextOffset(null);
       setSearching(false);
       setSearchResults([]);
       setSearchTotal(0);
@@ -873,17 +865,15 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     }
     setSearching(true);
     try {
-      const res = await searchCache(projectId, searchQuery.trim(), searchField, searchOptions, 100, configFileName, true,
-        searchConditions.filter((condition) => condition.query.trim()), offset);
+      const res = await searchCache(projectId, searchQuery.trim(), searchField, searchOptions, configFileName, true,
+        searchConditions.filter((condition) => condition.query.trim()));
       // 搜索期间切了项目：这一份结果是上一个项目的，别摆到新项目的搜索 tab 里
       if (viewingProjectIdRef.current !== projectId || request !== searchRequestRef.current) return;
       setSearchResults(res.results);
-      setSearchNextOffset(res.has_more && res.next_offset !== undefined ? res.next_offset : null);
       setSearchTotal(res.total);
       setSelectedSearchIdx(-1);
     } catch (err) {
       if (viewingProjectIdRef.current !== projectId || request !== searchRequestRef.current) return;
-      setSearchNextOffset(null);
       setLocalError(normalizeError(err, uiMessage("projects:projectCachePage.runGlobalSearch_normalizeError_searchFailed")));
       setSearchResults([]);
       setSearchTotal(0);
@@ -972,7 +962,6 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   useEffect(() => {
     // 改条件时立即废弃旧请求，避免慢响应覆盖新结果或清空后的页面。
     searchRequestRef.current += 1;
-    setSearchNextOffset(null);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     if (!hasSearchQuery) {
       setSearchResults([]);
@@ -1790,11 +1779,6 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                     {searchTotal > 0 ? translate("projects:projectCachePage.cacheSearchStatus_message_entry", { searchTotal: searchTotal }) : translate("projects:projectCachePage.cacheSearchStatus_message_match")}
                   </span>
                 )}
-              </div>
-              <div className="cache-search-budget-note">
-                {translate("projects:projectCachePage.searchBudgetNote")}
-                {searchNextOffset !== null && <button type="button" className="cache-replace-toggle__btn" disabled={searching}
-                  onClick={() => void runGlobalSearch(searchNextOffset)}>{translate("projects:projectCachePage.nextSearchPage")}</button>}
               </div>
               {showReplace && (
                 <div className="cache-replace-group">

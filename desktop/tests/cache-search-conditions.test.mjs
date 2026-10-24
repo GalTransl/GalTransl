@@ -40,7 +40,7 @@ test('cache conditions edit fields and regex independently and can be removed', 
   } finally { act(() => view.unmount()); }
 });
 
-test('cache search sends combined conditions and continuation offset to the backend', async () => {
+test('frontend cache search requests all matches with combined conditions', async () => {
   const requests = [];
   const load = createTypeScriptLoader({
     fetch: async (url, init) => {
@@ -50,12 +50,14 @@ test('cache search sends combined conditions and continuation offset to the back
   }, { '@tauri-apps/api/core': { invoke: async () => ({}) } });
   const { searchCache } = load(new URL('../src/lib/api.ts', import.meta.url));
   const conditions = [{ field: 'pre_dst', query: '挣扎', options: { re: false } }];
-  const response = await searchCache('project', '悶え', 'post_src', { re: false }, 100, 'custom.yaml', true, conditions, 21);
+  const response = await searchCache('project', '悶え', 'post_src', { re: false }, 'custom.yaml', true, conditions);
   assert.ok(requests[0].url.endsWith('/api/projects/project/cache/search'));
   assert.deepEqual(requests[0].body.conditions, conditions);
   assert.equal(requests[0].body.query, '悶え');
   assert.equal(requests[0].body.field, 'post_src');
-  assert.equal(requests[0].body.offset, 21);
-  assert.equal(requests[0].body.max_results, 100);
+  assert.equal(requests[0].body.offset, undefined);
+  assert.equal(requests[0].body.max_results, undefined);
+  assert.equal(requests[0].body.result_mode, 'all');
+  assert.equal(requests[0].body.config_file_name, 'custom.yaml');
   assert.equal(response.next_offset, 42);
 });
