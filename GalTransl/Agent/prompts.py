@@ -125,6 +125,9 @@ def build_initial_user_message(user_text: str) -> str:
 
 # 压缩会话历史时用于生成摘要的提示词。摘要要保留"接着干下去"所需的硬信息，
 # 而不是复述对话：文件路径、字典名、任务 id、问题条目 index 这些丢了就找不回来。
+COMPACT_SUMMARY_HEADINGS = ("目标", "已完成的工作", "关键决策", "当前进度与项目状态", "待办与注意事项")
+SUBAGENT_SUMMARY_HEADINGS = ("任务与范围", "已完成", "关键发现", "待办")
+
 COMPACT_SUMMARY_PROMPT = """你在为一个 Galgame 翻译项目的 AI 助手压缩对话历史。下面是这个助手之前的工作记录，请把它压缩成一份摘要，供助手在后续对话中继续工作时参考。
 
 要求：
@@ -142,6 +145,7 @@ COMPACT_SUMMARY_PROMPT = """你在为一个 Galgame 翻译项目的 AI 助手压
    还没做的事、已知问题、下次继续时要注意的点。
 3. 必须原样保留这些硬信息，不要概括掉：文件路径、字典文件名、翻译引擎名（如 ForGal-json / rebuilda）、任务 id、问题条目 index 或 index 区间、具体的译名修正。
 4. 用中文写。简洁但不要丢信息。
+5. 保留最新用户要求、禁止事项、已确认的选择与授权范围；较新要求优先。区分已执行成功、仅计划、失败或尚待确认的操作，不要把工具调用当作成功。待办写明下一步具体动作、未解决的阻塞、仍在运行的任务 id，以及尚未处理的文件或 index 范围。
 
 <conversation>
 {conversation}
@@ -151,7 +155,7 @@ COMPACT_SUMMARY_PROMPT = """你在为一个 Galgame 翻译项目的 AI 助手压
 
 # Insert-then-Compress 用的指令（见 _begin_compaction）。
 # 它不单独发一次「摘要请求」，而是作为一条**瞬时消息**拼在当前会话末尾，让下一轮
-# 正常请求带着它一起发出去——system prompt / tools / 历史前缀全部复用，摘要调用
+# 正常请求带着它一起发出去——system prompt / tools / 待移除历史前缀复用，摘要调用
 # 本身也能命中提示缓存。代价是必须把话说死：模型手上的上下文里全是"继续干活"的
 # 暗示，稍微含糊一点它就会接着调工具，而不是老实压缩。
 COMPACT_INSTRUCTION_PROMPT = """═══════════════════════════════════════════════
@@ -164,7 +168,10 @@ COMPACT_INSTRUCTION_PROMPT = """════════════════
 3. **不要**调用任何工具（tool_calls 必须为空）；
 4. 你的回复必须是**纯文本**。
 
-你唯一的任务：把上面的对话压缩成一份摘要。
+你唯一的任务：把上面的历史压缩成一份摘要。上文仅包含即将被移除的早期历史；
+最近一个助手轮次及其后续消息会原样接在摘要之后，此处未提供。
+只总结可见历史，不推测后续进展；摘要中的当前进度与待办均以上文结束时为准，
+接续时以原样保留的较新消息为准。不要把整段工具输出或重复日志复制进摘要。
 
 输出格式（严格遵守）：
 先输出一行 <topics>3-6 个关键主题短语，逗号分隔</topics>
@@ -177,6 +184,8 @@ COMPACT_INSTRUCTION_PROMPT = """════════════════
 ## 当前进度与项目状态
 ## 待办与注意事项
 
+每一节都要有内容，没有就写“无”。保留最新用户要求、禁止事项、已确认的选择与授权范围，较新要求优先。
+区分已成功、仅计划、失败与待确认的操作，不要把工具调用当作成功。待办必须写明下一步具体动作、阻塞、仍在运行的任务 id 和未处理的文件 / index 范围。
 必须原样保留、不要概括掉：文件路径、字典文件名、翻译引擎名（如 ForGal-json）、任务 id、问题条目 index 或区间、具体的译名修正。
 用中文写，简洁但不丢信息。现在开始，直接输出 <topics> 与 <summary>。"""
 
@@ -184,18 +193,47 @@ COMPACT_INSTRUCTION_PROMPT = """════════════════
 def _parse_compact_summary(content: str) -> str:
     """从压缩响应里取摘要正文。
 
-    优先取 <summary>…</summary>；模型没按格式走时退而用整段文本（除了 <topics> 行），
-    总比因为格式瑕疵白压一次强。
+    无标签的正文也可接受，但出现标签时必须完整配对，不能收下截断的摘要。
     """
     text = str(content or "").strip()
     if not text:
         return ""
+    for tag in ("summary", "topics"):
+        tags = re.findall(fr"</?{tag}\b[^>]*>?", text, re.IGNORECASE)
+        if tags and [item.lower() for item in tags] != [f"<{tag}>", f"</{tag}>"]:
+            return ""
     match = re.search(r"<summary>(.*?)</summary>", text, re.DOTALL | re.IGNORECASE)
     if match:
         return match.group(1).strip()
     text = re.sub(r"<topics>.*?</topics>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
-    text = re.sub(r"</?summary>", "", text, flags=re.IGNORECASE).strip()
     return text
+
+
+def _validated_compact_summary(
+    content: str, finish_reason: str | None = None,
+    headings: tuple[str, ...] = COMPACT_SUMMARY_HEADINGS,
+) -> str:
+    """校验传输结束状态、标签及各必需章节；校验失败时历史必须保持原样。
+
+    部分兼容端点不提供 finish_reason，此时仍校验结构；明确的截断、过滤或工具
+    结束原因一律拒绝。这里只保证结构完整，事实正确性仍依赖原文与工具证据。
+    """
+    if finish_reason not in (None, "stop"):
+        return ""
+    summary = _parse_compact_summary(content)
+    sections = list(re.finditer(r"^##[ \t]+(.+?)[ \t]*$", summary, re.MULTILINE))
+    found: dict[str, str] = {}
+    for index, section in enumerate(sections):
+        title = section.group(1).strip()
+        if title in found:
+            return ""
+        end = sections[index + 1].start() if index + 1 < len(sections) else len(summary)
+        found[title] = summary[section.end():end].strip()
+    if not all(found.get(heading) for heading in headings):
+        return ""
+    if summary.count("```") % 2:  # 常见的正文中途截断信号
+        return ""
+    return summary
 
 
 def _parse_compact_topics(content: str) -> str:

@@ -167,12 +167,16 @@ class _Parent:
         return [event_type for event_type, _ in self.events]
 
 
+def _sub_summary(goal):
+    return f"## 任务与范围\n{goal}\n## 已完成\n无\n## 关键发现\n无\n## 待办\n无"
+
+
 def _make_chat(script: list[tuple[str, list[_Call]]]):
     """按脚本依次返回响应；脚本用完后一直重复最后一条。"""
 
     calls = {"n": 0}
 
-    def fake(_client, _model, _messages, _tools):
+    def fake(_client, _model, _messages, _tools, **_kwargs):
         idx = min(calls["n"], len(script) - 1)
         calls["n"] += 1
         content, tool_calls = script[idx]
@@ -1360,8 +1364,8 @@ class SubagentCompactionTests(unittest.TestCase):
     窗口取自 parent._context_window、阈值走 COMPACT_TRIGGER_RATIO、切点走
     _find_compaction_cut（保证 tool_calls/tool 成对）；头部 2 条（system + 任务说明）
     永远保留，保留尾部取 SUBAGENT_COMPACT_KEEP_RECENT。压缩那一轮与主 Agent 一样
-    **照常带 tools**（复用会话前缀），模型没按指令走（回工具调用）时同样回退独立摘要。
-    插入式失败或没拿到摘要时，退回独立摘要请求（复用 parent._summarize_messages），
+    **照常带 tools**（复用会话前缀），模型没按指令走（回工具调用）时回退 microcompact。
+    插入式失败或没拿到摘要时，只在本地清理旧读取结果，不请求第二份摘要，
     再兜本地摘要——整条路都不该把子代理卡死。
     """
 
@@ -1440,7 +1444,7 @@ class SubagentCompactionTests(unittest.TestCase):
         sub._begin_compaction()
 
         self.assertTrue(
-            sub._finish_compaction("前言\n<summary>## 目标\n已校对 8 轮。</summary>\n后记")
+            sub._finish_compaction("前言\n<summary>" + _sub_summary("已校对 8 轮。") + "</summary>\n后记")
         )
 
         # 头部 2 条原样保留，随后一条摘要；尾部按 token 预算挑（来自原文尾部、配对完整）
@@ -1461,80 +1465,46 @@ class SubagentCompactionTests(unittest.TestCase):
         )
         self.assertIsNone(sub._pending_compaction)
 
-    def test_finish_without_a_summary_falls_back_to_a_separate_request(self) -> None:
-        seen: list[list[dict]] = []
-
-        def summarize(head: list[dict]) -> str:
-            seen.append(head)
-            return "## 目标\n独立摘要。"
-
-        parent = self._parent(20_000, summarizer=summarize)
+    def test_empty_summary_uses_microcompact_without_parent_summarizer(self) -> None:
+        calls = []
+        parent = self._parent(20_000, summarizer=lambda head: calls.append(head))
         sub = self._sub(parent)
+        sub.messages = self._history(12)
+        original = [dict(m) for m in sub.messages]
+        self.assertTrue(sub._begin_compaction())
+        with patch.object(subagent_mod, "_subagent_chat", _make_chat([("", [])])):
+            sub._run_compaction_request(None, "fake-model")
+        self.assertEqual(calls, [])
+        self.assertEqual(len(sub.messages), len(original))
+        self.assertEqual(sub.messages[:2], original[:2])
+        self.assertEqual(sub.messages[-10:], original[-10:])
+        self.assertIn("microcompact", sub.messages[3]["content"])
+        self.assertIsNone(sub._pending_compaction)
+
+    def test_compaction_request_failure_uses_microcompact(self) -> None:
+        sub = self._sub(self._parent(20_000))
         sub.messages = self._history(12)
         self.assertTrue(sub._begin_compaction())
-        head_len = int(sub._pending_compaction["cut"]) - 2  # 头部 2 条不进摘要
-
-        with patch.object(subagent_mod, "_subagent_chat", _make_chat([("", [])])):  # 回了个空正文
+        with patch.object(subagent_mod, "_subagent_chat", side_effect=RuntimeError("compaction down")):
             sub._run_compaction_request(None, "fake-model")
-
-        # 摘要只吃被压缩掉的那段（切点之前的部分），不是整份历史
-        self.assertEqual(len(seen), 1)
-        self.assertEqual(len(seen[0]), head_len)
-        self.assertGreater(head_len, 0)
-        self.assertIn("独立摘要", sub.messages[2]["content"])
+        self.assertIn("microcompact", sub.messages[3]["content"])
         self.assertIsNone(sub._pending_compaction)
 
-    def test_compaction_request_failure_falls_back_to_a_separate_request(self) -> None:
-        def boom(_client, _model, _messages, _tools):
-            raise RuntimeError("compaction down")
-
-        parent = self._parent(20_000, summarizer=lambda head: "## 目标\n独立摘要。")
-        sub = self._sub(parent)
+    def test_compaction_tool_calls_use_microcompact(self) -> None:
+        sub = self._sub(self._parent(20_000))
         sub.messages = self._history(12)
-        sub._begin_compaction()
-
-        with patch.object(subagent_mod, "_subagent_chat", boom):
+        self.assertTrue(sub._begin_compaction())
+        with patch.object(subagent_mod, "_subagent_chat", _make_chat([("", [_Call("cx", "read_transl_cache", "{}")])])):
             sub._run_compaction_request(None, "fake-model")
-
-        self.assertIn("独立摘要", sub.messages[2]["content"])
-
-    def test_compaction_tool_calls_fall_back_to_a_separate_request(self) -> None:
-        """压缩那一轮带了 tools，模型可能没按指令走（回了工具调用）：回滚并回退独立摘要。"""
-
-        def chat(_client, _model, _messages, _tools):
-            return "", [_Call("cx", "read_transl_cache", '{"filename": "a.json"}')], "", "", 0
-
-        parent = self._parent(20_000, summarizer=lambda head: "## 目标\n独立摘要。")
-        sub = self._sub(parent)
-        sub.messages = self._history(12)
-        sub._begin_compaction()
-
-        with patch.object(subagent_mod, "_subagent_chat", chat):
-            sub._run_compaction_request(None, "fake-model")
-
-        # 指令被弹掉、历史由独立摘要重建，不留下"进行中的压缩"
-        self.assertIn("独立摘要", sub.messages[2]["content"])
-        self.assertIsNone(sub._pending_compaction)
+        self.assertIn("microcompact", sub.messages[3]["content"])
         self.assertFalse(any(m.get("_compact_instruction") for m in sub.messages))
 
-    def test_falls_back_to_local_summary_without_parent_summarizer(self) -> None:
-        sub = self._sub(self._parent(20_000))  # 不给 _summarize_messages
-        sub.messages = self._history(12)
-
-        sub._compact_via_separate_request()
-
-        self.assertIn("因上下文超限被压缩", sub.messages[2]["content"])
-
-    def test_falls_back_to_local_summary_when_summarizer_raises(self) -> None:
-        def boom(_head):
-            raise RuntimeError("summarizer down")
-
-        sub = self._sub(self._parent(20_000, summarizer=boom))
-        sub.messages = self._history(12)
-
-        sub._compact_via_separate_request()
-
-        self.assertIn("因上下文超限被压缩", sub.messages[2]["content"])
+    def test_microcompact_without_candidates_does_not_remove_assignment(self) -> None:
+        sub = self._sub(self._parent(20_000))
+        sub.messages = self._history(3)
+        original = [dict(m) for m in sub.messages]
+        self.assertFalse(sub._microcompact())
+        self.assertEqual(sub.messages, original)
 
     def test_run_compresses_with_the_current_conversation_and_with_tools(self) -> None:
         """整条路：挂指令 → 那一轮**照常带 tools**把摘要拿回来 → 历史被压 → 下一轮继续干活。"""
@@ -1544,14 +1514,14 @@ class SubagentCompactionTests(unittest.TestCase):
         script = [
             ("", [_Call("c1", "read_transl_cache", '{"filename": "a.json", "index": "1"}')]),
             ("", [_Call("c2", "read_transl_cache", '{"filename": "a.json", "index": "1"}')]),
-            ("<summary>## 已完成\n读过 #1。</summary>", []),  # 压缩那一轮
+            ("<summary>" + _sub_summary("读过 #1。") + "</summary>", []),  # 压缩那一轮
             ("报告：没问题。", []),
         ]
         base = _make_chat(script)
 
-        def recording(client, model, messages, tools):
+        def recording(client, model, messages, tools, **kwargs):
             calls.append(([dict(m) for m in messages], tools))
-            return base(client, model, messages, tools)
+            return base(client, model, messages, tools, **kwargs)
 
         def fake_estimate(sub: rt.SubAgentRunner) -> int:
             # 第 3 轮开始算"超阈值"（真阈值判定见 _begin_compaction 的用例）

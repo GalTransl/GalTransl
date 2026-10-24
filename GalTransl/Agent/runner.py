@@ -24,13 +24,17 @@ from GalTransl.Agent.context import (
     _find_compaction_cut,
     _history_fingerprint,
     _is_internal_message,
-    _keep_recent_tokens,
-    _local_fallback_summary,
+    MICROCOMPACT_MIN_SAVED_TOKENS,
+    _microcompact_tool_results,
+    _microcompact_replacements,
+    _restore_microcompacted_history,
     _messages_with_tool_placeholders,
     _reasoning_echo,
     _render_archive_messages,
+    _render_task_continuation,
     _sanitize_tool_args,
     _strip_internal_fields,
+    _task_continuation,
     _tools_overhead_tokens,
 )
 from GalTransl.Agent.core import (
@@ -71,8 +75,8 @@ from GalTransl.Agent.prompts import (
     COMPACT_INSTRUCTION_PROMPT,
     build_initial_user_message,
     _build_system_prompt,
-    _parse_compact_summary,
     _parse_compact_topics,
+    _validated_compact_summary,
 )
 from GalTransl.Agent.tool_schemas import AGENT_TOOLS
 from GalTransl.Agent.tools.ask import ASK_WAIT_TICK, _normalize_ask_answers
@@ -344,11 +348,11 @@ class AgentRunner:
                 try:
                     content, tool_calls, finish_reason = self._stream_llm_response()
                 except _ContextOverflow:
-                    # 400 上下文超限：强制压缩一次再重试。先弹掉尾部一条腾空间
-                    # （历史可能已经大到连压缩指令都塞不进去），压完再接回去。
+                    # 400 上下文超限：强制压缩一次再重试。摘要请求只带待移除的前缀，
+                    # 最近助手轮次在原历史中保留，不占摘要请求的窗口。
                     # 每回合只做一次，仍超限说明问题不在历史长度，交给外层报错。
                     _log("  ⚠ 请求超出上下文窗口，强制压缩后重试")
-                    if not self._begin_compaction(force=True, pull_back=1):
+                    if not self._begin_compaction(force=True):
                         raise
                     self._run_compaction_request()
                     turns += 1
@@ -779,7 +783,12 @@ class AgentRunner:
         messages: list[dict[str, Any]] = []
         # 中途退出的回合会留下"有 tool_calls、缺 tool 响应"的残缺历史：补占位结果后再发，
         # 否则整份请求不合法（provider 直接 400，见 _messages_with_tool_placeholders）
-        for message in _messages_with_tool_placeholders(self.state.messages):
+        source = self.state.messages
+        pending = self._pending_compaction
+        if pending is not None and source and source[-1] is pending.get("instruction"):
+            # 仅投影请求：保留段不参与摘要，内存/磁盘历史不动，失败可完整回滚。
+            source = [*source[:pending["cut"]], source[-1]]
+        for message in _messages_with_tool_placeholders(source):
             clean = _strip_internal_fields(message) if strip_internal else message
             if field and message.get("role") == "assistant" and field not in message:
                 clean = {**clean, field: ""}
@@ -1016,36 +1025,17 @@ class AgentRunner:
         })
 
     def _maybe_compact(self) -> None:
-        """同步压缩入口（降级路径）：直接另发一次摘要请求，压完重建。
+        """同步入口与正常回合走同一压缩链：主摘要 → 本地 microcompact。"""
+        if self._begin_compaction():
+            self._run_compaction_request()
 
-        正式路径是 Insert-then-Compress（_begin_compaction + _run_compaction_request，
-        复用当前会话前缀）；这里是它的兜底——压缩请求失败、模型不按指令走时可以调用。
-        触发线：估算用量 > 窗口的 COMPACT_TRIGGER_RATIO。
-        """
-        if self._compact_failed_this_turn or self._pending_compaction is not None:
-            return
-        window = self._context_window
-        limit = int(window * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
-        if self._estimate_context_tokens() <= limit:
-            return
-        if self._last_compaction_fingerprint == _history_fingerprint(self.state.messages):
-            return
-        cut = _find_compaction_cut(self.state.messages, _keep_recent_tokens(limit))
-        if cut <= 0:
-            _log("  ⚠ 上下文超阈值但找不到安全切点，跳过压缩")
-            return
-        self._compact_via_separate_request(cut)
-
-    def _begin_compaction(self, *, force: bool = False, pull_back: int = 0) -> bool:
+    def _begin_compaction(self, *, force: bool = False) -> bool:
         """判断要不要压缩；要就把压缩指令挂到当前历史末尾，返回 True。
 
         **Insert-then-Compress**（不另开摘要请求）：指令作为一条**不落盘**的瞬时
         消息拼在会话尾部，由下一轮正常请求带着它一起发出去——system prompt、tools、
-        历史前缀全部复用，摘要调用本身也能命中提示缓存；压完只产生一次前缀失效。
-        对照：另发独立摘要请求的共享前缀为 0，压完主会话还要冷 4~5 轮。
-
-        pull_back > 0 用于溢出恢复：历史已经超过窗口、连指令都塞不进去时，先弹出
-        尾部 K 条腾空间（由 _rebuild_after_compaction 接回重建后的尾部，不会丢）。
+        待移除的历史前缀复用；最近一个助手起始轮次完整保留，不参与摘要请求。
+        尾部只在请求投影中排除，不修改原始历史，失败时只需移除瞬时指令。
         """
         if self._pending_compaction is not None or self._compact_failed_this_turn:
             return False
@@ -1059,16 +1049,8 @@ class AgentRunner:
                 return False
 
         messages = self.state.messages
-        pulled: list[dict[str, Any]] = []
-        if pull_back > 0:
-            count = min(pull_back, max(0, len(messages) - 1))  # 永不弹 system
-            if count > 0:
-                pulled = messages[-count:]
-                del messages[-count:]
-
-        cut = _find_compaction_cut(messages, _keep_recent_tokens(limit))
+        cut = _find_compaction_cut(messages)
         if cut <= 0:
-            messages.extend(pulled)  # 找不到安全切点：把弹出的放回去
             _log("  ⚠ 上下文超限但找不到安全切点，跳过本次压缩")
             return False
         # 摘掉头部后仍在触发线以上：问题出在**保留段自身**（典型是尾部压着一条超大工具
@@ -1082,8 +1064,7 @@ class AgentRunner:
             # 正确做法：把 estimated 里 messages 那一部分换算成比例，只按它折算保留段，
             # 再把 tools 固定开销加回来一次——算出来的才是"压完那次请求"的真实大小。
             overhead = self._request_overhead_tokens()
-            full = list(messages) + list(pulled)  # pull_back 摘下的尾部也计入总量
-            total_local = sum(_estimate_message_tokens(m) for m in full)
+            total_local = sum(_estimate_message_tokens(m) for m in messages)
             head_local = sum(_estimate_message_tokens(m) for m in messages[:cut])
             tail_local = total_local - head_local
             message_est = max(0, estimated - overhead)
@@ -1092,7 +1073,6 @@ class AgentRunner:
             else:
                 tail_est = tail_local + overhead
             if tail_est >= limit:
-                messages.extend(pulled)
                 _log("  ⚠ 保留段自身已到触发线（尾部有压不掉的大结果），压缩无益，跳过")
                 return False
 
@@ -1104,7 +1084,6 @@ class AgentRunner:
         messages.append(instruction)  # 只进内存：失败回滚时才不会污染落盘历史
         self._pending_compaction = {
             "cut": cut,
-            "pulled": pulled,
             "estimated": estimated,
             "instruction": instruction,
         }
@@ -1126,24 +1105,26 @@ class AgentRunner:
             messages.extend(pulled)
 
     def _run_compaction_request(self) -> None:
-        """发出携带压缩指令的请求并收下摘要；失败回退独立摘要请求。
+        """发出携带压缩指令的请求并收下摘要；失败回滚后做本地 microcompact。
 
         这条请求走的是正常流式通道，但把增量静音（quiet）——摘要内容不该以
         「助手正文」的形式刷到界面上。模型不按指令走（返回工具调用）或响应无法
-        解析时，一律回退到旧的独立摘要路径，保证"压不了"不会演变成"回合失败"。
+        解析时，清理旧读取结果；不再追加独立摘要请求或用通用摘要丢弃历史。
         """
         self._emit("compacting", {"phase": "start", "tokens_before": int((self._pending_compaction or {}).get("estimated") or 0)})
         previous_quiet = self._stream_quiet
         self._stream_quiet = True  # 摘要内容不该以助手正文的形式上屏
         try:
-            content, tool_calls, _finish = self._stream_llm_response()
+            content, tool_calls, finish = self._stream_llm_response()
+            if self.stop_event.is_set():
+                raise AgentStopRequested()
         except AgentStopRequested:
             self._abort_compaction()
             raise
         except Exception as exc:  # noqa: BLE001 - 压缩失败不能拖垮整回合
-            _log(f"  ⚠ 压缩请求失败（{exc}），回退独立摘要请求")
+            _log(f"  ⚠ 压缩请求失败（{exc}），回退 microcompact")
             self._abort_compaction()
-            self._compact_via_separate_request()
+            self._microcompact()
             return
         finally:
             self._stream_quiet = previous_quiet
@@ -1151,52 +1132,77 @@ class AgentRunner:
             # 助手正文的形式挂到界面上，这里直接丢掉。
             self._stream_acc = None
         if tool_calls:
-            _log("  ⚠ 压缩请求返回了工具调用（没按指令走），回退独立摘要请求")
+            _log("  ⚠ 压缩请求返回了工具调用（没按指令走），回退 microcompact")
             self._abort_compaction()
-            self._compact_via_separate_request()
+            self._microcompact()
             return
-        if not self._finish_compaction(content):
-            _log("  ⚠ 压缩响应解析失败，回退独立摘要请求")
-            self._compact_via_separate_request()
+        if not self._finish_compaction(content, finish):
+            _log("  ⚠ 压缩响应完整性校验失败，回退 microcompact")
+            self._microcompact()
 
-    def _finish_compaction(self, content: str) -> bool:
+    def _finish_compaction(self, content: str, finish_reason: str | None = None) -> bool:
         """摘要到手 → 归档被裁历史 → 重建消息列表。"""
         if self._pending_compaction is None:
             return False
-        summary = _parse_compact_summary(content)
+        summary = _validated_compact_summary(content, finish_reason)
         if not summary.strip():
             self._abort_compaction()
             return False
         topics = _parse_compact_topics(content)
         return self._rebuild_after_compaction(summary, topics)
 
-    def _compact_via_separate_request(self, cut: int | None = None) -> None:
-        """降级路径：另发一次非流式摘要请求（共享前缀为 0，但一定能拿到摘要）。"""
+    def _microcompact(self) -> bool:
+        """主摘要失败后只清理较早读取结果；原对话、调用及最近现场原样保留。"""
+        if self.stop_event.is_set():
+            raise AgentStopRequested()
         messages = self.state.messages
-        if cut is None:
-            limit = int(self._context_window * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
-            cut = _find_compaction_cut(messages, _keep_recent_tokens(limit))
-        if cut <= 0:
+        indices = _microcompact_tool_results(messages)
+        if not indices:
             self._compact_failed_this_turn = True
-            return
-        head = messages[:cut]
-        estimated = self._estimate_context_tokens()
-        summary = ""
-        try:
-            summary = self._summarize_messages(head)
-        except Exception as exc:  # noqa: BLE001
-            _log(f"  ⚠ 独立摘要请求也失败（{exc}），改用本地兜底摘要")
-        if not summary.strip():
-            summary = _local_fallback_summary(head)
-        self._pending_compaction = {
-            "cut": cut,
-            "pulled": [],
-            "estimated": estimated,
-            "instruction": None,
-        }
-        if not self._rebuild_after_compaction(summary, ""):
-            self._abort_compaction()
+            self._emit("compacting", {"phase": "done", "mode": "microcompact", "applied": False})
+            return False
+        # 归档包含完整原结果，读取工具本身有分页限制；转录 JSONL 仍保留原消息。
+        archive_indices = set(indices)
+        anchor = -1
+        for index, message in enumerate(messages):
+            if message.get("role") == "assistant":
+                anchor = index
+            if index in archive_indices and anchor >= 0:
+                archive_indices.add(anchor)
+        archive = self._archive_compacted(
+            [messages[index] for index in sorted(archive_indices)], "microcompact，较早读取结果",
+            full_tool_results=True,
+        )
+        if self._store is not None and not archive:
             self._compact_failed_this_turn = True
+            self._emit("compacting", {"phase": "done", "mode": "microcompact", "applied": False})
+            return False
+        replacements = _microcompact_replacements(messages, indices, archive)
+        rebuilt = _restore_microcompacted_history(messages, [{"replacements": replacements}])
+        tokens_before = sum(_estimate_message_tokens(message) for message in messages) + self._request_overhead_tokens()
+        saved = sum(_estimate_message_tokens(messages[index]) - _estimate_message_tokens(rebuilt[index]) for index in indices)
+        if saved < MICROCOMPACT_MIN_SAVED_TOKENS:
+            self._compact_failed_this_turn = True
+            self._emit("compacting", {"phase": "done", "mode": "microcompact", "applied": False})
+            return False
+        if self.stop_event.is_set():
+            raise AgentStopRequested()
+        if self._store is not None and not self._store.append_microcompact(replacements):
+            self._compact_failed_this_turn = True
+            self._emit("compacting", {"phase": "done", "mode": "microcompact", "applied": False})
+            return False
+        self.state.messages = rebuilt
+        self.state.last_prompt_tokens = 0
+        self.state.anchored_message_count = 0
+        self._last_compaction_fingerprint = _history_fingerprint(rebuilt)
+        self._emit("compacted", {
+            "mode": "microcompact", "cleared": len(indices), "removed": 0,
+            "tokens_before": tokens_before, "tokens_after": tokens_before - saved,
+            "tokens_saved": saved, "archive": archive,
+        })
+        self._emit("compacting", {"phase": "done", "mode": "microcompact", "applied": True})
+        _log(f"  📦 microcompact：清理 {len(indices)} 条旧读取结果，估算释放 {saved} tokens")
+        return True
 
     def _rebuild_after_compaction(self, summary: str, topics: str) -> bool:
         """用摘要替换被裁掉的那段历史：system 原样保留，摘要单独成条。
@@ -1228,6 +1234,10 @@ class AgentRunner:
         kept = [*tail, *list(ctx.get("pulled") or [])]
         archive_name = self._archive_compacted(head, topics)
         summary_msg = self._build_summary_message(summary, archive_name)
+        continuation = _task_continuation(head)
+        if continuation:
+            summary_msg["_compact_continuation"] = continuation
+            summary_msg["content"] += "\n\n" + _render_task_continuation(continuation)
         # 保留了多少条**真消息**记在摘要上：恢复时靠它把这段现场一起接回来（上一轮的摘要
         # 不是消息，不计——它已经被这次的摘要概括掉了）。
         summary_msg["_compact_kept"] = sum(1 for m in kept if not _is_internal_message(m))
@@ -1287,7 +1297,9 @@ class AgentRunner:
                 lines.append(f"- ……另有 {len(chunks) - COMPACT_ARCHIVE_MAX_LISTED} 个更早的归档")
         return {"role": "user", "content": "\n".join(lines), "_compact_summary": True}
 
-    def _archive_compacted(self, head: list[dict[str, Any]], topics: str) -> str:
+    def _archive_compacted(
+        self, head: list[dict[str, Any]], topics: str, *, full_tool_results: bool = False,
+    ) -> str:
         """把被裁掉的历史写成一份归档文件，返回文件名（失败不影响压缩本身）。"""
         if self._store is None:
             return ""
@@ -1314,7 +1326,7 @@ class AgentRunner:
             "> 这是上下文压缩时归档下来的原始对话。用 read_history_archive 读它。",
             "",
         ]
-        lines.extend(_render_archive_messages(body))
+        lines.extend(_render_archive_messages(body, full_tool_results=full_tool_results))
         return self._store.write_chunk(name, "\n".join(lines)) or ""
 
     def _summarize_messages(self, messages: list[dict[str, Any]]) -> str:

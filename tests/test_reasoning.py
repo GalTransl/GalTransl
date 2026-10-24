@@ -186,8 +186,9 @@ class AgentReasoningTests(unittest.TestCase):
             "tokens": [{"token": "sk-test", "modelName": "custom-alias", "reasoningEffort": "high"}],
         }}
         client = Mock()
+        summary = "## 目标\nsummary\n## 已完成的工作\n无\n## 关键决策\n无\n## 当前进度与项目状态\n无\n## 待办与注意事项\n无"
         client.chat.completions.create.return_value = SimpleNamespace(choices=[
-            SimpleNamespace(message=SimpleNamespace(content="summary", tool_calls=[])),
+            SimpleNamespace(message=SimpleNamespace(content=summary, tool_calls=[])),
         ])
         with patch("openai.OpenAI", return_value=client):
             backend = resolve_llm_backend(profile)
@@ -198,7 +199,7 @@ class AgentReasoningTests(unittest.TestCase):
         runner._create_stream(include_usage=True)
         self.assertEqual(client.chat.completions.create.call_args.kwargs["reasoning_effort"], "high")
         self.assertEqual(client.chat.completions.create.call_args.kwargs["extra_body"], {"enable_thinking": True})
-        self.assertEqual(runner._summarize_messages(runner.state.messages), "summary")
+        self.assertEqual(runner._summarize_messages(runner.state.messages), summary)
         self.assertNotIn("temperature", client.chat.completions.create.call_args.kwargs)
 
         child_client = Mock()

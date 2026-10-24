@@ -56,6 +56,8 @@ export type ActivityItem = {
   waitInterrupted?: boolean;
   // compact: 上下文压缩提示（前后都是估算 token；tokensAfter 含保留下来的尾部）
   removed?: number;
+  compactMode?: string;
+  cleared?: number;
   summaryChars?: number;
   tokensBefore?: number;
   tokensAfter?: number;
@@ -429,6 +431,8 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
         kind: 'compact',
         step: ev.step,
         removed: ev.removed,
+        compactMode: ev.mode,
+        cleared: ev.cleared,
         summaryChars: ev.summary_chars,
         tokensBefore: ev.tokens_before,
         tokensAfter: ev.tokens_after,

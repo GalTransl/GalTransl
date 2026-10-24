@@ -6,7 +6,7 @@
    tool_calls / 孤儿 tool 响应而被拒）。
 2. 用量估算 —— 有 usage 锚点时只估锚点之后的增量，无锚点时整体按字符数估算。
 3. 压缩执行 —— 超阈值触发、消息被替换为摘要、同回合历史增长后可多次压缩；LLM 摘要失败时
-   回退本地截断且 messages 仍合法（无孤儿 tool 响应）。
+   回退 microcompact，保留原始对话且 messages 仍合法（无孤儿 tool 响应）。
 4. 会话生命周期 —— 通过 AgentRuntime 验证标题递增、多会话隔离、删除后列表减少。
 
 不依赖真实 OpenAI / 后端：用 FakeOpenAI stub 掉 chat.completions.create，
@@ -29,17 +29,20 @@ from GalTransl.Agent.runtime import (
     DEFAULT_CONTEXT_WINDOW,
     _estimate_message_tokens,
     _find_compaction_cut,
-    _local_fallback_summary,
 )
 
 
 # ---- 测试用 stub ----
 
+def _complete_summary(goal):
+    return f"## 目标\n{goal}\n## 已完成的工作\n无\n## 关键决策\n无\n## 当前进度与项目状态\n无\n## 待办与注意事项\n无"
+
+
 class FakeOpenAI:
     """替身 OpenAI 客户端：摘要调用可配置返回值或抛异常。"""
 
     def __init__(self, summary_text="## 目标\n测试摘要", raise_exc=None):
-        self._summary_text = summary_text
+        self._summary_text = _complete_summary(summary_text) if summary_text.strip() else summary_text
         self._raise = raise_exc
         self.calls = []
 
@@ -50,9 +53,14 @@ class FakeOpenAI:
                 outer.calls.append(kwargs)
                 if outer._raise is not None:
                     raise outer._raise
+                if kwargs.get("stream"):
+                    return [SimpleNamespace(choices=[SimpleNamespace(
+                        finish_reason="stop", delta=SimpleNamespace(content=outer._summary_text),
+                    )])]
                 return SimpleNamespace(
                     choices=[
                         SimpleNamespace(
+                            finish_reason="stop",
                             message=SimpleNamespace(content=outer._summary_text)
                         )
                     ]
@@ -368,15 +376,16 @@ class MaybeCompactTests(unittest.TestCase):
         self.assertTrue(runner._begin_compaction(force=True))
         runner._abort_compaction()
 
-    def test_history_within_the_keep_budget_is_not_compacted(self):
-        """整份历史都装得进保留预算：压了只会把摘要再摘要一遍，直接跳过。"""
-        msgs = [_msg("user", "w" * 400) for _ in range(10)]  # 约 1k tokens，预算 8k
+    def test_main_compaction_does_not_retain_an_arbitrary_token_budget(self):
+        """超阈值时即使历史低于旧 8k 保留预算，也只保留最近轮次。"""
+        msgs = [_msg("user", "w" * 400) for _ in range(10)]
         runner, state = _make_runner(msgs, window=2000)
 
         runner._maybe_compact()
 
-        self.assertNotIn("compacted", [e.type for e in state.events])
-        self.assertEqual(len(state.messages), 10)
+        self.assertIn("compacted", [e.type for e in state.events])
+        self.assertEqual(state.messages[-1], msgs[-1])
+        self.assertEqual(len(state.messages), 3)
 
     def test_tail_that_alone_hits_the_line_skips_compaction(self):
         """尾部压着一条压不掉的大结果（保留段自身就到触发线）：压缩救不了，别白压一次。
@@ -470,7 +479,7 @@ class MaybeCompactTests(unittest.TestCase):
                 )
 
     def test_llm_summary_failure_falls_back_and_keeps_messages_valid(self):
-        """摘要 LLM 抛异常时回退本地截断，且 messages 无孤儿 tool 响应。"""
+        """没有足够旧读取结果时不伪造摘要或丢历史，且不追加模型请求。"""
         # 前缀里混入 tool 配对，回退后尾部保留必须仍成对
         msgs = [_msg("user", "w" * 4000) for _ in range(30)]
         msgs.append(_msg("assistant", "call", tool_calls=[_tool_call()]))
@@ -479,10 +488,9 @@ class MaybeCompactTests(unittest.TestCase):
             msgs, window=3000, raise_exc=RuntimeError("summary down")
         )
         runner._maybe_compact()
-        self.assertIn("compacted", [e.type for e in state.events])
-        # 回退后仍是合法结构：system 打头 + 本地兜底摘要消息
-        self.assertEqual(state.messages[0]["role"], "system")
-        self.assertIn("[早前对话的压缩摘要", state.messages[1]["content"])
+        self.assertNotIn("compacted", [e.type for e in state.events])
+        self.assertEqual(state.messages, msgs)
+        self.assertEqual(len(runner._openai_client.calls), 1)
         # 没有任何 tool 响应缺少前导的 assistant.tool_calls（孤儿检测）
         for i, m in enumerate(state.messages):
             if m.get("role") == "tool":
@@ -493,12 +501,12 @@ class MaybeCompactTests(unittest.TestCase):
                 )
 
     def test_empty_summary_triggers_fallback(self):
-        """LLM 返回空字符串时也要回退本地兜底，不能留空摘要。"""
+        """空摘要回退 microcompact；没有候选时保持原历史，不生成通用摘要。"""
         msgs = self._oversized_messages(40)
         runner, state = _make_runner(msgs, window=2000, summary_text="   ")
         runner._maybe_compact()
-        self.assertIn("compacted", [e.type for e in state.events])
-        self.assertGreater(len(state.messages[1]["content"]), 10)
+        self.assertNotIn("compacted", [e.type for e in state.events])
+        self.assertEqual(state.messages, msgs)
 
     def test_compacted_emits_event(self):
         """压缩成功后发 compacted 事件，带 removed/summary_chars/tokens_before/tokens_after。"""
@@ -646,22 +654,6 @@ class CompactionSurvivesRestartTests(unittest.TestCase):
         self.assertLessEqual(used, limit)
         # 也不是把历史压没了：摘要之外还留着那段现场
         self.assertGreater(len(restored.messages), 2)
-
-
-class LocalFallbackSummaryTests(unittest.TestCase):
-    def test_fallback_lists_tools_and_keeps_skeleton(self):
-        msgs = [
-            _msg("assistant", "a", tool_calls=[_tool_call(name="get_project_overview")]),
-            _msg("tool", "{}"),
-            _msg("assistant", "b", tool_calls=[_tool_call(name="start_translation")]),
-            _msg("tool", "{}"),
-        ]
-        text = _local_fallback_summary(msgs)
-        self.assertIn("已完成的工作", text)
-        self.assertIn("get_project_overview", text)
-        self.assertIn("start_translation", text)
-        # 重复工具名去重
-        self.assertEqual(text.count("get_project_overview"), 1)
 
 
 # ---- 4. 会话生命周期（经 AgentRuntime）----

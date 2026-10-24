@@ -18,6 +18,7 @@ from GalTransl.Agent.context import (
     _permission_decision_text,
     _profile_context_window,
     _restore_compacted_history,
+    _restore_microcompacted_history,
     _restore_usage_anchor,
     _resume_context,
     _tools_overhead_tokens,
@@ -246,7 +247,8 @@ class AgentRuntime:
         if not messages and not events:
             return None
         # 文件里带的是压缩**前**的全量（只追加），按最后一次压缩的摘要重建出真正在用的那份
-        history = _restore_compacted_history(messages)
+        projected = _restore_microcompacted_history(messages, data.get("microcompactions") or [])
+        history = _restore_compacted_history(projected)
         usage_tokens, usage_count, usage_model = _restore_usage_anchor(history, meta.get("context_usage_anchor"))
         # 事件按 step 重建 deque（保留最近 RUNTIME_EVENT_KEEP 条）
         ev_deque: deque[AgentEvent] = deque(maxlen=RUNTIME_EVENT_KEEP)

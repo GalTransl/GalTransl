@@ -2105,6 +2105,7 @@ export type AgentEvent = {
   // compacted（上下文压缩）：tokens_after 是压缩后重建出来的真实历史的估算
   // （含保留的尾部，所以可能远大于摘要本身）；老会话可能没有这个字段。
   removed?: number;
+  cleared?: number;
   summary_chars?: number;
   tokens_before?: number;
   tokens_after?: number;

@@ -109,7 +109,9 @@ class TaskBackendTests(unittest.TestCase):
             child = subagent.SubAgentRunner(view, agent="proofread", files=["a.json"], indexes="", brief="", delegation_id="test")
             self.assertEqual(child._parent_context_window(), 32000)
             child.messages = [{"role": "system", "content": "rules"}, {"role": "user", "content": "task"}, {"role": "assistant", "content": "old work"}]
-            child._compact_via_separate_request(3)
+            child._pending_compaction = {"cut": 3, "head_keep": 2}
+            child.messages.append({"role": "user", "content": subagent.SUBAGENT_COMPACT_INSTRUCTION_PROMPT, "_compact_instruction": True})
+            child._run_compaction_request(view._openai_client, view._model)
             self.assertEqual(self.clients[0].chat.completions.create.call_args.kwargs["model"], "child")
             self.main_client.chat.completions.create.assert_not_called()
             fixer = ProofreadFixer(view, "test", self.runner.stop_event)

@@ -2,6 +2,7 @@ import '../styles/pages/agent.css';
 import { usePageActive, useRetainPage } from '../components/PageActivity';
 import { loadAgentProject, saveAgentProject, loadMessageDraft, saveMessageDraft, moveMessageDraft, useMessageDraft } from './agent/drafts';
 import { followTail } from "./agent/followTail";
+import { readingKey, readingMemory } from './agent/readingMemory';
 import { createAgentMotion } from './agent/motion';
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -199,6 +200,7 @@ export function AgentPage() {
   }, [setMessageDraft]);
 
   const [events, setEvents] = useState<AgentEvent[]>([]);
+  const [eventsScope, setEventsScope] = useState('');
   const [status, setStatus] = useState<string>('idle');
   const [running, setRunning] = useState(false);
   const [error, setError] = useMessageState<string | null>(null);
@@ -347,6 +349,7 @@ export function AgentPage() {
   }, [running]);
 
   const effectiveProject = projectDir;
+  const readingScope = readingKey(effectiveProject, activeSessionId);
 
   /** 拉取某项目的会话列表并写进按项目分组的 map（不动其他项目的会话）。
    *  preferredId 命中则切到该会话；allowAutoPick 为真（默认）且列表非空时取第一个，
@@ -462,9 +465,10 @@ export function AgentPage() {
 
   /* Session change: restore this session's transcript, then reconcile with the
      backend (which may have a run in flight, or history restored from disk). */
-  useEffect(() => {
+  useLayoutEffect(() => {
     let cancelled = false;
     const syncVersion = statusSyncVersionRef.current;
+    setEventsScope(readingScope);
     // 发送流程自身触发的会话过渡（create→start→subscribe）不按"用户切会话"
     // 恢复：此时 startAgent 还在路上，fetch 会拿到 idle 把 running 打回去。
     if (sendingRef.current && activeSessionId === sendTransitionRef.current) {
@@ -550,7 +554,7 @@ export function AgentPage() {
   eventsRef.current = events;
   useEffect(() => {
     const events = eventsRef.current;
-    if (!effectiveProject || !activeSessionId || !events.length) return;
+    if (eventsScope !== readingScope || !effectiveProject || !activeSessionId || !events.length) return;
     saveSession({
       projectDir: effectiveProject,
       sessionId: activeSessionId,
@@ -560,15 +564,23 @@ export function AgentPage() {
       startedAt: startRef.current,
       finishedAt: status === 'running' ? 0 : Date.now(),
     });
-  }, [persistKey, status, effectiveProject, activeSessionId]);
+  }, [persistKey, status, effectiveProject, activeSessionId, eventsScope, readingScope]);
 
   // 折叠动画、后端快照恢复及窗口大小变化都可能改变内容高度。
   useLayoutEffect(() => {
+    // ID 已切换而旧正文尚未替换时，不得拿旧 DOM 恢复或覆盖新会话的阅读位置。
+    if (eventsScope !== readingScope) return;
     const viewport = scrollRef.current;
     const content = threadContentRef.current;
     if (!viewport || !content) return;
-    const follower = followTail(viewport, content, setAtBottom);
+    const follower = followTail(viewport, content, setAtBottom, {
+      initial: readingMemory.read(readingScope),
+      active,
+      // 实时保存输入/布局后的状态；卸载时 DOM 可能已被 React 改小，不能再量位置。
+      onPosition: (position) => readingMemory.save(readingScope, position),
+    });
     const motion = createAgentMotion(viewport, content);
+    motion.setActive(active);
     tailFollowerRef.current = follower;
     motionRef.current = motion;
     return () => {
@@ -577,7 +589,9 @@ export function AgentPage() {
       tailFollowerRef.current = null;
       motionRef.current = null;
     };
-  }, []);
+    // active 由独立 effect 更新，不能因此重建滚动控制器。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventsScope, readingScope]);
 
   useLayoutEffect(() => {
     tailFollowerRef.current?.setActive(active);
@@ -587,7 +601,6 @@ export function AgentPage() {
   useLayoutEffect(() => {
     pendingFinalRevealRef.current = null;
     motionRef.current?.reset();
-    tailFollowerRef.current?.jump();
   }, [effectiveProject, activeSessionId]);
 
   /** 回到转录最底部（并恢复跟随新消息）。 */
@@ -714,6 +727,7 @@ export function AgentPage() {
     // 面板里（想马上发就点「立即」）。空闲时才是普通对话气泡——本地立刻显示，
     // 不等后端确认。
     if (!running) {
+      tailFollowerRef.current?.jump();
       const localId = `local:${text}`;
       localMsgIdsRef.current.set(localId, (localMsgIdsRef.current.get(localId) || 0) + 1);
       stream.flush();
@@ -1109,6 +1123,7 @@ export function AgentPage() {
         return;
       }
       const prevList = sessionsByProject[dir] || [];
+      readingMemory.delete(readingKey(dir, session.session_id));
       const remaining = prevList.filter((s) => s.session_id !== session.session_id);
       setSessionsByProject((prev) => ({ ...prev, [dir]: remaining }));
       try {
@@ -1151,12 +1166,14 @@ export function AgentPage() {
     localMsgIdsRef.current.clear();
     hasBackendSessionRef.current = false;
     lastStepRef.current = 0;
+    readingMemory.delete(readingKey(effectiveProject, activeSessionRef.current));
+    tailFollowerRef.current?.jump();
     removeProjectStorage(sessionsKey(effectiveProject, activeSessionRef.current));
     void refreshSessions(effectiveProject, activeSessionRef.current);
   }, [effectiveProject, refreshSessions]);
 
   const timelineBuilder = useMemo(() => createTimelineBuilder(), [uiLanguage, effectiveProject, activeSessionId]);
-  const timeline = useMemo(() => timelineBuilder(events), [timelineBuilder, events]);
+  const timeline = useMemo(() => timelineBuilder(eventsScope === readingScope ? events : []), [timelineBuilder, events, eventsScope, readingScope]);
   useLayoutEffect(() => {
     const step = pendingFinalRevealRef.current;
     if (step === null) return;

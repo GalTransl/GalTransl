@@ -165,9 +165,9 @@ class SessionStore:
         self.closed = True
 
     # ---- 写入 ----
-    def _append(self, record: dict[str, Any]) -> None:
+    def _append(self, record: dict[str, Any]) -> bool:
         if self.closed:
-            return
+            return False
         try:
             os.makedirs(self.dir, exist_ok=True)
             line = json.dumps(record, ensure_ascii=False) + "\n"
@@ -184,8 +184,10 @@ class SessionStore:
                 if prefix:
                     f.write(prefix)
                 f.write(line)
+            return True
         except Exception as exc:  # noqa: BLE001 - 落盘失败不影响主流程
             _log(f"写入失败 {self.path}: {exc}")
+            return False
 
     def append_meta(self, **fields: Any) -> None:
         if self.closed:
@@ -207,6 +209,10 @@ class SessionStore:
         if event.get("type") in _SKIP_EVENT_TYPES:
             return
         self._append({"t": "event", "at": time.time(), "event": _compact_event_for_storage(event)})
+
+    def append_microcompact(self, replacements: list[dict[str, str]]) -> bool:
+        """只追加模型上下文的清理投影，保留原始消息供转录与归档回查。"""
+        return self._append({"t": "microcompact", "at": time.time(), "replacements": replacements})
 
     def append_compact(
         self, *, removed: int, summary_chars: int, tokens_before: int, tokens_after: int
@@ -364,6 +370,8 @@ class SessionStore:
                             out["events"].append(ev)
                     elif kind == "compact":
                         out["compactions"].append(rec)
+                    elif kind == "microcompact" and isinstance(rec.get("replacements"), list):
+                        out.setdefault("microcompactions", []).append({**rec, "_message_count": len(out["messages"])})
         except Exception as exc:  # noqa: BLE001
             _log(f"读取失败 {self.path}: {exc}")
         out["events"] = _restore_tool_results(out["events"], out["messages"])

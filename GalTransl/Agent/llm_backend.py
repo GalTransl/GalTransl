@@ -8,7 +8,7 @@ from typing import Any
 from GalTransl.Agent.backend_http import _normalize_endpoint
 from GalTransl.Agent.context import _llm_timeout, _profile_context_window, _resolve_prompt_caching, _serialize_for_summary
 from GalTransl.Agent.core import SUMMARY_MAX_TOKENS
-from GalTransl.Agent.prompts import COMPACT_SUMMARY_PROMPT
+from GalTransl.Agent.prompts import COMPACT_SUMMARY_PROMPT, _validated_compact_summary
 from GalTransl.Reasoning import apply_reasoning_kwargs, build_reasoning_kwargs
 
 
@@ -64,7 +64,13 @@ def summarize_messages(
     response = client.chat.completions.create(**request)
     if not getattr(response, "choices", None):
         return ""
-    return str(getattr(response.choices[0].message, "content", None) or "")
+    choice = response.choices[0]
+    message = getattr(choice, "message", None)
+    if message is None or getattr(message, "tool_calls", None) or getattr(message, "refusal", None):
+        return ""
+    return _validated_compact_summary(
+        str(getattr(message, "content", None) or ""), getattr(choice, "finish_reason", None),
+    )
 
 
 class SubagentBackendView:

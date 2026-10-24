@@ -1,8 +1,16 @@
+import type { ReadingPosition } from './readingMemory';
+
 /** 跟随内容实际高度（包括折叠动画）；用户上滚或查看记录时让出滚动权。 */
-export function followTail(viewport: HTMLElement, content: HTMLElement, onBottom: (value: boolean) => void) {
-  let following = true;
-  let active = true;
-  let lastTop = viewport.scrollTop;
+export function followTail(viewport: HTMLElement, content: HTMLElement, onBottom: (value: boolean) => void, options: {
+  initial?: ReadingPosition;
+  active?: boolean;
+  onPosition?: (position: ReadingPosition) => void;
+} = {}) {
+  let following = options.initial?.following ?? true;
+  let active = options.active ?? true;
+  let lastTop = options.initial?.scrollTop ?? viewport.scrollTop;
+  // 缓存可能比权威历史短：高度不足时保留原目标，等后续布局恢复，不能记成被钳制的 0。
+  let restoreTop: number | null = following ? null : lastTop;
   let disposed = false;
   let finalReply: HTMLElement | null = null;
   let userScrollPending = false;
@@ -11,6 +19,7 @@ export function followTail(viewport: HTMLElement, content: HTMLElement, onBottom
   let touchScrolling = false;
   const pointerRoot = viewport.ownerDocument ?? viewport;
   const nearBottom = () => viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80;
+  const remember = () => options.onPosition?.({ scrollTop: restoreTop ?? lastTop, following });
   const follow = () => {
     if (disposed || !active) return;
     if (finalReply?.isConnected === false) finalReply = null;
@@ -19,21 +28,30 @@ export function followTail(viewport: HTMLElement, content: HTMLElement, onBottom
       viewport.scrollTop += finalReply.getBoundingClientRect().top
         - viewport.getBoundingClientRect().top - viewport.clientTop - 16;
       lastTop = viewport.scrollTop;
+      remember();
       return;
     }
     if (!following) {
+      if (restoreTop !== null) {
+        viewport.scrollTop = restoreTop;
+        if (viewport.scrollHeight - viewport.clientHeight >= restoreTop) restoreTop = null;
+      }
+      lastTop = viewport.scrollTop;
       onBottom(nearBottom());
+      remember();
       return;
     }
     viewport.scrollTop = viewport.scrollHeight;
     lastTop = viewport.scrollTop;
     onBottom(true);
+    remember();
   };
   const onScroll = () => {
     if (!active) return;
     const top = viewport.scrollTop;
     if (finalReply) {
       lastTop = top;
+      remember();
       return;
     }
     // 终态折叠会把 scrollTop 钳制变小，这不是用户上滚。只有真实输入才能改跟随意图。
@@ -41,17 +59,21 @@ export function followTail(viewport: HTMLElement, content: HTMLElement, onBottom
     userScrollPending = false;
     lastTop = top;
     onBottom(following || nearBottom());
+    remember();
   };
   const releaseReply = () => { finalReply = null; };
   const userScroll = (up: boolean) => {
     if (!active) return;
     releaseReply();
+    restoreTop = null;
     userScrollPending = true;
     // 输入先于 scroll/ResizeObserver：与 finish 同帧上滚时也必须由用户优先。
     if (up && viewport.scrollTop > 0) {
       following = false;
       onBottom(false);
     }
+    lastTop = viewport.scrollTop;
+    remember();
   };
   const onWheel = (event: WheelEvent) => {
     if (event.deltaY) userScroll(event.deltaY < 0);
@@ -76,8 +98,11 @@ export function followTail(viewport: HTMLElement, content: HTMLElement, onBottom
     if (!active || !(event.target as HTMLElement | null)?.closest?.('button[aria-expanded]')) return;
     // 主动查看记录时停止吸底，避免展开的工具行把触发器推出视口。
     releaseReply();
+    restoreTop = null;
     following = false;
+    lastTop = viewport.scrollTop;
     onBottom(nearBottom());
+    remember();
   };
   const onKeyDown = (event: KeyboardEvent) => {
     const target = event.target as HTMLElement | null;
@@ -119,16 +144,19 @@ export function followTail(viewport: HTMLElement, content: HTMLElement, onBottom
       userScrollPending = draggingScrollbar = touchScrolling = false;
       if (!active) releaseReply();
       if (active) {
-        if (following) follow();
-        else viewport.scrollTop = lastTop;
+        if (!following && restoreTop === null) restoreTop = lastTop;
+        follow();
       }
     },
     jump(behavior: ScrollBehavior = 'auto') {
       releaseReply();
+      restoreTop = null;
       following = true;
       lastTop = viewport.scrollTop;
       onBottom(true);
       if (active) viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+      lastTop = viewport.scrollTop;
+      remember();
     },
     dispose() {
       disposed = true;

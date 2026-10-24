@@ -5,6 +5,8 @@ import { AnimatedDisclosure } from './AnimatedDisclosure';
 import { AgentMarkdown } from '../../../components/AgentCacheRef';
 import { Icon } from '../../../components/Icon';
 import { ToolRow, toolRowPhases } from './ToolRow';
+import { activityEntries } from '../readGroups';
+import { ReadToolGroup } from './ReadToolGroup';
 import { TranslationJobCard } from './TranslationJobCard';
 import { MessageCopyButton } from './MessageCopyButton';
 import {
@@ -172,8 +174,12 @@ function AgentActivityGroup({
           {() => (
             <div className="agent-activity__collapse-inner">
               <div className="agent-activity__body">
-                {items.map((item, i) =>
-                  item.final ? null : item.kind === 'content' ? (
+                {activityEntries(items, isLive).map((entry) => {
+                  const i = entry.indices[0];
+                  const item = items[i];
+                  return entry.reading && entry.indices.length > 1 ? (
+                    <ReadToolGroup key={`reads-${entry.key}`} entry={entry} items={items} phases={phases} persistKey={persistKey} />
+                  ) : item.final ? null : item.kind === 'content' ? (
                     <ContentRow key={`t-${i}`} item={item} projectDir={projectDir} />
                   ) : item.kind === 'reasoning' ? (
                     <ReasoningRow key={`r-${i}`} item={item} projectDir={projectDir} persistKey={persistKey} />
@@ -186,8 +192,8 @@ function AgentActivityGroup({
                     <TranslationJobCard key={`j-${item.id || i}`} item={item} projectDir={projectDir} />
                   ) : (
                     <ToolRow key={`x-${item.id || i}`} item={item} phase={phases[i]} persistKey={persistKey} />
-                  ),
-                )}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -297,6 +303,7 @@ const ReasoningRow = memo(function ReasoningRow({
 function CompactRow({ item }: { item: ActivityItem }) {
   const uiLanguage = useUiLanguage();
   const removed = item.removed || 0;
+  const microcompact = item.compactMode === 'microcompact';
   const before = item.tokensBefore || 0;
   const after = item.tokensAfter || 0;
   // 压缩后的大小是后端在**重建出来的真实历史**上估的：保留的尾部（可能带着很大的工具
@@ -305,9 +312,14 @@ function CompactRow({ item }: { item: ActivityItem }) {
     ? translate("agent:agentGroupView.size_message_tokens", { value: before > 0 ? formatTokenCount(before) : '?', value2: formatTokenCount(after) })
     : '';
   return (
-    <div className="agent-compact-note" title={translate("agent:agentGroupView.agentCompactNote_title_doneContext")}>
+    <div className="agent-compact-note" title={translate(microcompact
+      ? "agent:agentGroupView.agentCompactNote_title_microcompact"
+      : "agent:agentGroupView.agentCompactNote_title_doneContext")}>
       <span className="agent-compact-note__icon"><Icon name="compress" /></span>
-      <span className="agent-compact-note__text">{translate("agent:agentGroupView.agentCompactNote_message_doneContextEntry", { removed: removed, size: size })}</span>
+      <span className="agent-compact-note__text">{translate(microcompact
+        ? "agent:agentGroupView.agentCompactNote_message_microcompact"
+        : "agent:agentGroupView.agentCompactNote_message_doneContextEntry",
+      { removed, cleared: item.cleared || 0, size })}</span>
     </div>
   );
 }

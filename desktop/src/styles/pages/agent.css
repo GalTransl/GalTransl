@@ -1286,6 +1286,7 @@
 }
 
 /* Grid-rows collapse: animates height without measuring content. */
+.agent-read-group__collapse,
 .agent-activity__collapse {
   display: grid;
   grid-template-rows: 0fr;
@@ -1293,6 +1294,7 @@
   transition: grid-template-rows var(--dur-standard) var(--ease-decel), opacity var(--dur-fast) var(--ease-decel);
 }
 
+.agent-read-group.is-open > .agent-read-group__collapse,
 .agent-activity.is-open .agent-activity__collapse {
   grid-template-rows: 1fr;
   opacity: 1;
@@ -1301,6 +1303,24 @@
 .agent-activity__collapse-inner {
   min-height: 0;
   overflow: hidden;
+}
+
+.agent-read-group__inner {
+  min-height: 0;
+  overflow: hidden;
+  padding-left: 16px;
+  border-left: 1px solid var(--color-line);
+  margin-left: 15px;
+}
+
+.agent-read-group__caret {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  transition: transform 160ms ease;
+}
+
+.agent-read-group.is-open > .agent-read-group__header .agent-read-group__caret {
+  transform: rotate(90deg);
 }
 
 .agent-activity__body {
@@ -3580,6 +3600,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .agent-read-group__collapse,
+  .agent-read-group__caret,
   .agent-activity__collapse,
   .agent-reasoning__collapse,
   .agent-sessions__group-collapse {

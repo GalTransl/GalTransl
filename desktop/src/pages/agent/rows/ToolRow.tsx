@@ -18,7 +18,7 @@ import { manualOpenState } from '../uiState';
     - stale：不在运行中的组里却也没有结果——历史里断在半路的那次调用（进程被杀等）。
 
     返回数组与 items 下标对齐；非工具行、已有结果的行都是 undefined。 */
-type ToolPhase = 'running' | 'awaiting' | 'queued' | 'stale';
+export type ToolPhase = 'running' | 'awaiting' | 'queued' | 'stale';
 
 export function toolRowPhases(items: ActivityItem[], isLive: boolean): (ToolPhase | undefined)[] {
   const phases: (ToolPhase | undefined)[] = items.map(() => undefined);
@@ -92,7 +92,7 @@ export const ToolRow = memo(function ToolRow({
   }, [autoOpen, stateKey]);
 
   const meta = toolMeta(item.name);
-  const summary = meta.summary(asArgs(item.arguments));
+  const summary = meta.summary(asArgs(item.arguments), item.result);
 
   // 把原始参数/结果收进折叠菜单：写入调用要看的通常是 diff，JSON 参数与整份结果只是证据；
   // 派子代理的调用同理想——任务清单和各份报告已经在子代理行里逐条显示了，那串 JSON 是重复的。

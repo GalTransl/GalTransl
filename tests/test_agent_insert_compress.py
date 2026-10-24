@@ -23,6 +23,10 @@ from GalTransl.Agent import session_store as ss
 from GalTransl.Agent.runtime import AgentRunner, AgentState, AgentToolError
 
 
+def _complete_summary(goal):
+    return f"## 目标\n{goal}\n## 已完成的工作\n无\n## 关键决策\n无\n## 当前进度与项目状态\n无\n## 待办与注意事项\n无"
+
+
 def _state() -> AgentState:
     state = AgentState()
     state.project_dir = tempfile.mkdtemp(prefix="agent-ic-proj-")
@@ -145,7 +149,7 @@ class InsertThenCompressTests(_TempSessions):
         runner._begin_compaction()
 
         ok = runner._finish_compaction(
-            "<topics>术语, 序章</topics><summary>## 目标\n译完序章</summary>"
+            "<topics>术语, 序章</topics><summary>" + _complete_summary("译完序章") + "</summary>"
         )
 
         self.assertTrue(ok)
@@ -191,7 +195,7 @@ class InsertThenCompressTests(_TempSessions):
             rounds.append(runner._stream_quiet)
             if len(rounds) == 1:
                 self.assertTrue(state.messages[-1].get("_compact_instruction"))
-                return "<topics>t</topics><summary>## 目标\n压缩完成</summary>", [], "stop"
+                return "<topics>t</topics><summary>" + _complete_summary("压缩完成") + "</summary>", [], "stop"
             return "干完了", [], "stop"
 
         with (
@@ -206,7 +210,7 @@ class InsertThenCompressTests(_TempSessions):
         self.assertFalse(any(m.get("_compact_instruction") for m in state.messages))
 
     def test_long_tool_run_compacts_multiple_times_before_finishing(self) -> None:
-        """一次用户任务中工具结果两次撑大历史，主循环都能压缩并继续工作。"""
+        """一次用户任务可多次压缩；充分释放前缀后不必每次读取都压缩。"""
         state = _state()
         state.messages = _oversized(100)
         runner = _runner(state, window=32000)
@@ -218,7 +222,7 @@ class InsertThenCompressTests(_TempSessions):
             rounds.append(runner._stream_quiet)
             self.assertLess(len(rounds), 10, "压缩不能占满主循环")
             if runner._stream_quiet:
-                return "<summary>已完成先前工作，继续校对。</summary>", [], "stop"
+                return "<summary>" + _complete_summary("已完成先前工作，继续校对。") + "</summary>", [], "stop"
             normal_rounds += 1
             if normal_rounds <= 2:
                 return "", [{"id": f"call_{normal_rounds}", "name": "read_test", "arguments": "{}"}], "tool_calls"
@@ -232,9 +236,9 @@ class InsertThenCompressTests(_TempSessions):
         ):
             runner.run()
 
-        self.assertEqual(rounds, [True, False, True, False, True, False])
-        self.assertEqual(sum(e.type == "compacted" for e in state.events), 3)
-        self.assertEqual(len(runner._store.list_chunks()), 3)
+        self.assertEqual(rounds, [True, False, False, True, False])
+        self.assertEqual(sum(e.type == "compacted" for e in state.events), 2)
+        self.assertEqual(len(runner._store.list_chunks()), 2)
         self.assertEqual(state.status, "awaiting_input")
         self.assertEqual(state.messages[-1]["content"], "干完了")
         self.assertFalse(any(m.get("_compact_instruction") for m in state.messages))
@@ -243,40 +247,15 @@ class InsertThenCompressTests(_TempSessions):
             if message["role"] == "tool":
                 self.assertEqual(state.messages[i - 1]["tool_calls"][0]["id"], message["tool_call_id"])
 
-    def test_summary_failure_falls_back_to_a_separate_request(self) -> None:
-        """压缩请求失败（返回工具调用）时降级为独立摘要请求，不让回合挂掉。"""
+    def test_failed_summary_without_microcompact_candidates_preserves_history(self) -> None:
         state = _state()
         state.messages = _oversized()
         runner = _runner(state, window=2000)
+        original = list(state.messages)
         runner._begin_compaction()
-        runner._abort_compaction()  # 模拟降级前的回滚已完成
-
-        calls: list[str] = []
-
-        class _FakeOpenAI:
-            class chat:  # noqa: N801 - 贴近 SDK 形状
-                class completions:  # noqa: N801
-                    @staticmethod
-                    def create(**_kwargs):
-                        calls.append("separate")
-                        message = type("M", (), {"content": "## 目标\n独立摘要"})()
-                        return type("R", (), {"choices": [type("C", (), {"message": message})()]})()
-
-        runner._openai_client = _FakeOpenAI()
-        runner._compact_via_separate_request()
-
-        self.assertEqual(calls, ["separate"])
-        self.assertIn("独立摘要", state.messages[1]["content"])
-        self.assertTrue(state.messages[1]["_compact_summary"])
-
-    def test_failed_compaction_stops_retrying_within_the_turn(self) -> None:
-        """压缩失败后本回合不再尝试：否则主循环会「注入 → 失败 → 回滚」空转到 MAX_STEPS。"""
-        state = _state()
-        state.messages = _oversized()
-        runner = _runner(state, window=2000)
-
-        runner._compact_via_separate_request(cut=0)  # 降级路径也没得压
-
+        with patch.object(runner, "_stream_llm_response", return_value=("", [], "length")):
+            runner._run_compaction_request()
+        self.assertEqual(state.messages, original)
         self.assertTrue(runner._compact_failed_this_turn)
         self.assertFalse(runner._begin_compaction())
 

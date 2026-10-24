@@ -1,4 +1,10 @@
 {
+  "readGroup": {
+    "running": "Exploring · {{count}} calls",
+    "done": "Explored {{count}} calls",
+    "incomplete": "Exploration incomplete · {{count}} calls",
+    "queued": "Exploration queued · {{count}} calls"
+  },
   "messageActions": {
     "copy": "Copy response",
     "copied": "Copied",
@@ -74,6 +80,8 @@
     "label_message_doneVariant2": "Thought",
     "size_message_tokens": "(estimated {{value}} → {{value2}} tokens)",
     "agentCompactNote_title_doneContext": "Earlier messages were compacted into a summary to free up context space",
+    "agentCompactNote_title_microcompact": "Summary compaction failed. Earlier read results were cleared while preserving the conversation and the latest 5 read rounds.",
+    "agentCompactNote_message_microcompact": "Context lightly compacted · {{cleared}} old tool results cleared{{size}}",
     "agentCompactNote_message_doneContextEntry": "Context compacted · {{removed}} earlier messages summarized{{size}}",
     "nETWORKERROR_nETWORKERROR_connectionFailed": "Connection failed",
     "tIMEOUT_tIMEOUT_text": "The request timed out",

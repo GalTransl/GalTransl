@@ -1,4 +1,10 @@
 {
+  "readGroup": {
+    "running": "正在查阅 · {{count}} 项",
+    "done": "已查阅 {{count}} 项",
+    "incomplete": "查阅未完成 · {{count}} 项",
+    "queued": "等待查阅 · {{count}} 项"
+  },
   "messageActions": {
     "copy": "复制回复",
     "copied": "已复制",
@@ -74,6 +80,8 @@
     "label_message_doneVariant2": "已思考",
     "size_message_tokens": "（估算 {{value}} → {{value2}} tokens）",
     "agentCompactNote_title_doneContext": "早期对话已被摘要压缩，以腾出上下文空间",
+    "agentCompactNote_title_microcompact": "主摘要压缩失败后，已清理较早的读取结果，保留对话和最近 5 轮读取现场",
+    "agentCompactNote_message_microcompact": "已轻量清理上下文 · 清理 {{cleared}} 条旧工具结果{{size}}",
     "agentCompactNote_message_doneContextEntry": "已压缩上下文 · 摘要 {{removed}} 条早期消息{{size}}",
     "nETWORKERROR_nETWORKERROR_connectionFailed": "连接失败",
     "tIMEOUT_tIMEOUT_text": "请求超时",

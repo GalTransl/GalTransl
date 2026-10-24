@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
 
-function fixture() {
+function fixture(options = {}) {
   let resize;
   let disconnected = false;
   const listeners = new Map();
@@ -25,7 +25,7 @@ function fixture() {
   const { followTail } = loader(new URL('../src/pages/agent/followTail.ts', import.meta.url));
   const states = [];
   const content = {};
-  const follower = followTail(viewport, content, (value) => states.push(value));
+  const follower = followTail(viewport, content, (value) => states.push(value), options);
   const reply = (start, height) => ({
     start, height,
     getBoundingClientRect() { return { top: 102 + this.start - viewport.scrollTop, height: this.height }; },
@@ -240,4 +240,73 @@ test('hidden pages pause scrolling and retain the user’s reading/following mod
   assert.equal(f.viewport.scrollTop, 1400);
   f.follower.setActive(true);
   assert.equal(f.viewport.scrollTop, 1800);
+});
+
+test('session reading targets survive short cached history and subsequent authoritative layout', () => {
+  let saved;
+  const f = fixture({ initial: { scrollTop: 1500, following: false }, onPosition: value => { saved = value; } });
+  assert.equal(f.viewport.scrollTop, 600);
+  f.scroll(600, false);
+  assert.equal(saved.scrollTop, 1500);
+  f.viewport.scrollHeight = 2500;
+  f.resize();
+  assert.equal(f.viewport.scrollTop, 1500);
+  assert.equal(f.follower.isFollowing(), false);
+  f.viewport.scrollHeight = 3000;
+  f.resize();
+  assert.equal(f.viewport.scrollTop, 1500);
+});
+
+test('reader input cancels pending restore before delayed history arrives', () => {
+  const f = fixture({ initial: { scrollTop: 1500, following: false } });
+  f.scroll(100);
+  f.viewport.scrollHeight = 2500;
+  f.resize();
+  assert.equal(f.viewport.scrollTop, 100);
+});
+
+test('returning followers follow background growth; hidden initial history waits for activation', () => {
+  const f = fixture({ initial: { scrollTop: 100, following: true }, active: false });
+  assert.equal(f.viewport.scrollTop, 0);
+  f.viewport.scrollHeight = 2500;
+  f.follower.setActive(true);
+  assert.equal(f.viewport.scrollTop, 2100);
+  f.viewport.scrollHeight = 3000;
+  f.resize();
+  assert.equal(f.viewport.scrollTop, 2600);
+});
+
+test('A to B to A retains independent positions without measuring mutated DOM on disposal', () => {
+  const { createReadingMemory, readingKey } = createTypeScriptLoader()(new URL('../src/pages/agent/readingMemory.ts', import.meta.url));
+  const memory = createReadingMemory();
+  const keyA = readingKey('project', 'a');
+  const keyB = readingKey('project', 'b');
+  const enter = key => fixture({ initial: memory.read(key), onPosition: value => memory.save(key, value) });
+  const a = enter(keyA);
+  a.scroll(125);
+  a.viewport.scrollHeight = 400; // React removed history before layout cleanup.
+  a.viewport.scrollTop = 0;
+  a.follower.dispose();
+  const b = enter(keyB);
+  b.follower.dispose();
+  const returned = enter(keyA);
+  assert.equal(returned.viewport.scrollTop, 125);
+  assert.equal(returned.follower.isFollowing(), false);
+  assert.equal(memory.read(keyB).following, true);
+});
+
+test('reading memory is project scoped, bounded by recency, copied and clearable', () => {
+  const { createReadingMemory, readingKey } = createTypeScriptLoader()(new URL('../src/pages/agent/readingMemory.ts', import.meta.url));
+  const memory = createReadingMemory(2);
+  const a = readingKey('one', 'same');
+  const b = readingKey('two', 'same');
+  const value = { scrollTop: 123, following: false };
+  memory.save(a, value);
+  value.scrollTop = 999;
+  memory.save(b, value);
+  assert.equal(memory.read(a).scrollTop, 123);
+  memory.save('c', value);
+  assert.equal(memory.read(b), undefined);
+  memory.delete(a);
+  assert.equal(memory.read(a), undefined);
 });

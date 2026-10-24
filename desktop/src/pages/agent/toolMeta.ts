@@ -11,7 +11,7 @@ type ToolMeta = {
   running: string;
   /** 图标名（统一图标集）：渲染处 `<Icon name={meta.icon} />` */
   icon: IconName;
-  summary: (args: Record<string, unknown> | undefined) => string;
+  summary: (args: Record<string, unknown> | undefined, result?: unknown) => string;
   verb: string;
 };
 
@@ -130,10 +130,24 @@ const TOOL_META: Record<string, ToolMeta> = {
     // 一次调用可以跨多个文件（patches 每条带 file）：跨了就报文件数，
     // 只改一个文件时只报条数（文件名在参数里，不必重复）。
     // clear_comment 是"顺带清批注"，列出来：一次改动里它是容易被忽略的那半个动作。
-    summary: (a) => {
+    summary: (a, result) => {
       if (a?.action === 'replace') {
-        const files = new Set(Array.isArray(a.files) ? a.files.map(str).filter(Boolean) : [str(a.filename)].filter(Boolean));
-        return [translate("agent:toolMeta.head_message_countFile", { count: files.size }), `${str(a.query)} -> ${str(a.replacement)}`, a.clear_comment ? translate("agent:toolMeta.summary_clearCommentFilter_clearComment") : ''].filter(Boolean).join(' · ');
+        const selectors = [...new Set((Array.isArray(a.files) ? a.files : [a.files ?? a.filename])
+          .filter((value): value is string => typeof value === 'string')
+          .map(value => value.trim()).filter(Boolean))];
+        const rows = asArgs(result)?.files;
+        // 通配选择器不是文件数；结果包含未命中/失败文件，只统计实际更新成功的文件。
+        const changedFiles = Array.isArray(rows) ? new Set(rows.flatMap(row => {
+          const file = asArgs(row);
+          return file && !file.error && typeof file.updated === 'number' && file.updated > 0
+            && typeof file.filename === 'string' ? [file.filename] : [];
+        })).size : undefined;
+        const scope = changedFiles !== undefined
+          ? translate("agent:toolMeta.head_message_countFile", { count: changedFiles })
+          : selectors.some(value => /[*?\[]/.test(value))
+            ? selectors.join('、')
+            : selectors.length ? translate("agent:toolMeta.head_message_countFile", { count: selectors.length }) : '';
+        return [scope, `${str(a.query)} -> ${str(a.replacement)}`, a.clear_comment ? translate("agent:toolMeta.summary_clearCommentFilter_clearComment") : ''].filter(Boolean).join(' · ');
       }
       const patches = Array.isArray(a?.patches) ? (a.patches as Record<string, unknown>[]) : [];
       const files = new Set(patches.map((p) => str(p?.file) || str(a?.filename)).filter(Boolean));
@@ -164,7 +178,7 @@ export function toolMeta(name: string | undefined): ToolMeta {
   if (meta) return meta;
   const alias = RETIRED_TOOL_ALIASES[name];
   const base = alias && TOOL_META[alias.name];
-  if (alias && base) return { ...base, summary: (a) => base.summary(alias.args(a)) };
+  if (alias && base) return { ...base, summary: (a, result) => base.summary(alias.args(a), result) };
   return { ...DEFAULT_TOOL_META, action: name, running: name };
 }
 

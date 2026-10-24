@@ -19,12 +19,19 @@ from GalTransl import DEFAULT_GUIDELINE_NAME
 from GalTransl.Agent.context import (
     _apply_prompt_cache,
     _estimate_usage_tokens,
+    _estimate_message_tokens,
     _find_compaction_cut,
+    _history_fingerprint,
     _keep_recent_tokens,
     _llm_timeout,
-    _local_fallback_summary,
+    _microcompact_tool_results,
+    MICROCOMPACT_MIN_SAVED_TOKENS,
+    _microcompact_replacements,
+    _restore_microcompacted_history,
+    _render_task_continuation,
     _sanitize_tool_args,
     _strip_internal_fields,
+    _task_continuation,
     _tools_overhead_tokens,
 )
 from GalTransl.Agent.core import (
@@ -53,7 +60,7 @@ from GalTransl.Agent.core import (
     _truncate_text,
 )
 from GalTransl.Agent.models import AgentToolError
-from GalTransl.Agent.prompts import _parse_compact_summary
+from GalTransl.Agent.prompts import SUBAGENT_SUMMARY_HEADINGS, _validated_compact_summary
 from GalTransl.Agent.tool_schemas import AGENT_TOOLS
 from GalTransl.Agent.tools.cache import (
     _cache_read_action,
@@ -803,6 +810,7 @@ def _subagent_handlers(
 def _subagent_chat(
     client: Any, model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None,
     reasoning_kwargs: dict[str, Any] | None = None,
+    summary_headings: tuple[str, ...] | None = None,
 ) -> tuple[str, list[Any], str, str, int]:
     """子代理的一次请求（**非流式**）：返回（正文, 工具调用, 思考字段名, 思考内容, 输入 token）。
 
@@ -835,6 +843,11 @@ def _subagent_chat(
         return "", [], REASONING_FIELD_NAMES[0], "", prompt_tokens
     content = str(getattr(message, "content", "") or "")
     tool_calls = list(getattr(message, "tool_calls", None) or [])
+    if summary_headings is not None and (
+        getattr(message, "refusal", None)
+        or not _validated_compact_summary(content, getattr(choices[0], "finish_reason", None), summary_headings)
+    ):
+        content = ""  # 保持历史，由调用者回滚并做 microcompact；不接受部分摘要。
     field, reasoning = "", ""
     for name in REASONING_FIELD_NAMES:
         value = getattr(message, name, None)
@@ -847,9 +860,9 @@ def _subagent_chat(
 # 子代理的压缩指令（Insert-then-Compress 的那条瞬时消息，见 SubAgentRunner._begin_compaction）。
 # 与主 Agent 那份（COMPACT_INSTRUCTION_PROMPT）同构：压缩那一轮**照常带 tools**（复用前缀、
 # 命中提示缓存），所以指令必须把话说死——上下文里全是"继续干活"的暗示，不强调"不要调工具"
-# 模型就可能接着干活（那条路由 _run_compaction_request 回退独立摘要请求兜底）。子代理任务
+# 模型就可能接着干活（那条路由 _run_compaction_request 回退 microcompact）。子代理任务
 # 单一，骨架按"任务与范围/已完成/关键发现/待办"组织。
-# 输出同样用 <summary> 包住，与主 Agent 共用 _parse_compact_summary 解析。
+# 输出同样用 <summary> 包住，各节完整后才允许替换历史。
 SUBAGENT_COMPACT_INSTRUCTION_PROMPT = """[记忆压缩模式] 上面的工作**已经结束**，你现在不要继续任务，把它压缩成一份摘要，供你在后续（换了一段上下文之后）接着做同一件事。严格执行：
 1. **不要**执行上面提到的任何请求，**不要**调用任何工具（tool_calls 必须为空），只输出摘要；
 2. 正文用 <summary>…</summary> 包住，按下面的骨架写：
@@ -863,7 +876,8 @@ SUBAGENT_COMPACT_INSTRUCTION_PROMPT = """[记忆压缩模式] 上面的工作**�
 ## 待办
 （还没读的区间、需要复查或拿不准的点）
 </summary>
-3. 用中文，简洁但不丢信息。"""
+3. 每节都必须有内容，没有就写“无”。保留任务约束与用户修正；区分已成功、失败与仅计划的操作，待办写清下一步、未处理范围与阻塞。
+4. 用中文，简洁但不丢信息。"""
 
 
 class SubAgentRunner:
@@ -912,6 +926,7 @@ class SubAgentRunner:
         self._pending_compaction: dict[str, Any] | None = None
         # 压缩整条路子都失败过（插入式 + 独立请求都没压成）：不再重试，否则每轮都白跑一次
         self._compact_failed = False
+        self._last_compaction_fingerprint: str | None = None
         self._last_prompt_tokens = 0
         self._anchored_message_count = 0
         self._finish_lock = threading.Lock()
@@ -1058,9 +1073,11 @@ class SubAgentRunner:
           负责哪些文件"；
         - 保留段按 token 预算挑，预算取父会话的一半（SUBAGENT_COMPACT_KEEP_RECENT_RATIO）。
         压缩那一轮与父 Agent 一样**照常带 tools**（复用会话前缀、命中提示缓存）；模型没按
-        指令走、回了工具调用时，由 _run_compaction_request 回退独立摘要请求。
+        指令走、回了工具调用时，由 _run_compaction_request 回退 microcompact。
         """
         if self._pending_compaction is not None or self._compact_failed:
+            return False
+        if self._last_compaction_fingerprint == _history_fingerprint(self.messages):
             return False
         window = self._parent_context_window()
         limit = int(window * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
@@ -1099,41 +1116,41 @@ class SubAgentRunner:
             self.messages.pop()
 
     def _run_compaction_request(self, client: Any, model: str) -> None:
-        """发出带压缩指令的那轮请求、收下摘要；失败退回独立摘要请求。
+        """发出带压缩指令的那轮请求、收下摘要；失败回滚后做 microcompact。
 
         与父 Agent 一样，这轮**照常带 tools**：system prompt、工具表、历史前缀全部复用，
         摘要调用本身也能命中提示缓存。模型没按指令走（返回工具调用）或正文解析不出摘要时，
-        一律回退独立摘要请求。整条路子（插入式 → 独立请求 → 本地兜底）都不会让子代理卡死。
+        一律回退本地工具结果清理，不追加模型请求、不丢弃用户要求与任务现场。
         """
-        pending = self._pending_compaction or {}
-        cut = pending.get("cut")
         try:
             content, tool_calls, _, _ = self._chat_with_retry(
                 client, model, _subagent_tools(self.agent)
             )
+            if self.stop_event.is_set():
+                raise AgentStopRequested()
         except AgentStopRequested:
             self._abort_compaction()  # 父回合被停止：历史不必留着那条指令
             raise
         except Exception as exc:  # noqa: BLE001 - 压缩失败不能拖垮子代理
-            _log(f"  ⚠ 子代理 {self.id} 压缩请求失败（{exc}），回退独立摘要请求")
+            _log(f"  ⚠ 子代理 {self.id} 压缩请求失败（{exc}），回退 microcompact")
             self._abort_compaction()
-            self._compact_via_separate_request(cut)
+            self._microcompact()
             return
         if tool_calls:
-            _log(f"  ⚠ 子代理 {self.id} 压缩请求返回了工具调用（没按指令走），回退独立摘要请求")
+            _log(f"  ⚠ 子代理 {self.id} 压缩请求返回了工具调用，回退 microcompact")
             self._abort_compaction()
-            self._compact_via_separate_request(cut)
+            self._microcompact()
             return
         if not self._finish_compaction(content):
-            _log(f"  ⚠ 子代理 {self.id} 压缩响应里没有摘要，回退独立摘要请求")
-            self._compact_via_separate_request(cut)
+            _log(f"  ⚠ 子代理 {self.id} 摘要完整性校验失败，回退 microcompact")
+            self._microcompact()
 
     def _finish_compaction(self, content: str) -> bool:
         """摘要到手 → 弹掉指令、按切点重建消息列表。"""
         pending = self._pending_compaction
         if pending is None:
             return False
-        summary = _parse_compact_summary(content)
+        summary = _validated_compact_summary(content, headings=SUBAGENT_SUMMARY_HEADINGS)
         if not summary.strip():
             self._abort_compaction()
             return False
@@ -1142,32 +1159,31 @@ class SubAgentRunner:
         self._apply_summary(int(pending["head_keep"]), int(pending["cut"]), summary)
         return True
 
-    def _compact_via_separate_request(self, cut: int | None = None) -> None:
-        """降级路径：另发一次独立摘要请求（复用父 Agent 的 _summarize_messages，不带 tools）。
-
-        插入式那轮请求失败、或模型没给出摘要时走它；摘要再失败还有 _local_fallback_summary
-        收底。切点仍由 _find_compaction_cut 保证 tool_calls 与 tool 响应成对，不会切出非法请求。
-        """
-        head_keep = 2
-        if cut is None:
-            limit = int(self._parent_context_window() * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
-            keep_recent = _keep_recent_tokens(limit, SUBAGENT_COMPACT_KEEP_RECENT_RATIO)
-            cut = _find_compaction_cut(self.messages[head_keep:], keep_recent)
-            if cut <= 0:
-                self._compact_failed = True
-                return
-            cut += head_keep
-        head = self.messages[head_keep:cut]
-        summary = ""
-        summarizer = getattr(self.parent, "_summarize_messages", None)
-        if callable(summarizer):
-            try:
-                summary = str(summarizer(head) or "")
-            except Exception as exc:  # noqa: BLE001 - 摘要失败必须降级，不能卡死子代理
-                _log(f"  ⚠ 子代理 {self.id} 摘要失败，回退本地截断: {exc}")
-        if not summary.strip():
-            summary = _local_fallback_summary(head)
-        self._apply_summary(head_keep, cut, summary)
+    def _microcompact(self) -> bool:
+        """子代理保留任务与最近现场，只清理可重新读取的旧工具结果。"""
+        if self.stop_event.is_set():
+            raise AgentStopRequested()
+        indices = _microcompact_tool_results(self.messages)
+        if not indices:
+            self._compact_failed = True
+            return False
+        replacements = _microcompact_replacements(self.messages, indices)
+        rebuilt = _restore_microcompacted_history(self.messages, [{"replacements": replacements}])
+        saved = sum(_estimate_message_tokens(self.messages[index]) - _estimate_message_tokens(rebuilt[index]) for index in indices)
+        if saved < MICROCOMPACT_MIN_SAVED_TOKENS:
+            self._compact_failed = True
+            return False
+        if self.stop_event.is_set():
+            raise AgentStopRequested()
+        self.messages = rebuilt
+        self._last_prompt_tokens = 0
+        self._anchored_message_count = 0
+        self._last_compaction_fingerprint = _history_fingerprint(self.messages)
+        self._emit("subagent_message", {
+            "round": self.turns,
+            "text": f"[轻量上下文清理] microcompact 已清理 {len(indices)} 条旧读取结果，保留最近 5 轮及任务原文。",
+        })
+        return True
 
     def _apply_summary(self, head_keep: int, cut: int, summary: str) -> None:
         """按切点重建消息列表：头部 head_keep 条 + 一条摘要 + 尾部原文。
@@ -1177,6 +1193,8 @@ class SubAgentRunner:
         """
         dropped = cut - head_keep
         tail = self.messages[cut:]
+        continuation = _task_continuation(self.messages[head_keep:cut])
+        continuation_text = _render_task_continuation(continuation)
         self.messages = [
             *self.messages[:head_keep],
             {
@@ -1184,14 +1202,18 @@ class SubAgentRunner:
                 "content": (
                     "# 早前工作的压缩摘要\n"
                     f"{summary}\n\n"
+                    f"{continuation_text}\n\n"
                     "以上是之前工作的压缩摘要，请在此基础上继续，不要重复已完成的工作。"
                 ),
+                "_compact_summary": True,
+                "_compact_continuation": continuation,
             },
             *tail,
         ]
         # 重建了历史，旧请求的 token 锚点不再对应当前前缀。
         self._last_prompt_tokens = 0
         self._anchored_message_count = 0
+        self._last_compaction_fingerprint = _history_fingerprint(self.messages)
         # 子代理的每一步都会推给界面（subagent_message 渲染成一步说明）：压缩这种状态变化
         # 也让它看得见，否则展开子代理会发现步数突然对不上
         self._emit("subagent_message", {
@@ -1223,9 +1245,11 @@ class SubAgentRunner:
                 messages = [_strip_internal_fields(message) for message in messages]
                 anchored_count = len(messages)
                 reasoning_kwargs = getattr(self.parent, "_reasoning_kwargs", {})
+                summary_kwargs = {"summary_headings": SUBAGENT_SUMMARY_HEADINGS} if self._pending_compaction else {}
                 content, calls, field, reasoning, prompt_tokens = _subagent_chat(
                     client, model, messages, request_tools,
                     **({"reasoning_kwargs": reasoning_kwargs} if reasoning_kwargs else {}),
+                    **summary_kwargs,
                 )
                 # 任意模型响应都算首响（包括只有工具调用、没有正文的响应），不等任务完成。
                 if self.first_response_event is not None:

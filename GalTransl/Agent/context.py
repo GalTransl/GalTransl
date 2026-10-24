@@ -253,13 +253,12 @@ def _keep_recent_tokens(limit: int, ratio: float = COMPACT_KEEP_RECENT_RATIO) ->
     )
 
 
-def _find_compaction_cut(messages: list[dict[str, Any]], keep_recent_tokens: int) -> int:
-    """找出压缩切点：从尾部往前凑够保留预算，返回前缀长度。
+def _find_compaction_cut(messages: list[dict[str, Any]], keep_recent_tokens: int | None = None) -> int:
+    """返回待摘要前缀的长度；默认保留最后一个助手起始轮次。
 
-    保留段按 **token 预算**挑，不是"最近 N 条"：一条几万字符的工具结果就能吃掉整个预算，
-    按条数挑会把它连同十几条无关消息一起扣在上下文里，压缩等于没压。最后一条消息永远保留
-    ——否则没有可压的头部，压缩根本启动不了；单条就超预算的大结果会独占保留段，这是"不截断
-    消息内容"的代价（要更狠就得截断它，PI-Desktop 走的是截断那条路）。
+    一个轮次从 assistant 开始，包含后续工具结果及下一次 assistant 之前的用户消息。
+    没有 assistant 时至少保留最后一条。显式传预算的子代理仍按 token 预算选择尾部，
+    两种方式都不截断单条消息。
 
     切点必须落在"安全位置"，否则会切断 assistant.tool_calls 与后续 tool 响应
     的配对，导致请求非法。具体规则：
@@ -270,15 +269,19 @@ def _find_compaction_cut(messages: list[dict[str, Any]], keep_recent_tokens: int
     total = len(messages)
     if total <= 1:
         return 0
-    budget = max(1, int(keep_recent_tokens))
-    cut = total
-    used = 0
-    while cut > 0:
-        cost = _estimate_message_tokens(messages[cut - 1])
-        if cut < total and used + cost > budget:
-            break  # 再往前就装不下了（最后一条不设限：总得留一条）
-        used += cost
-        cut -= 1
+    if keep_recent_tokens is None:
+        cut = next((i for i in range(total - 1, -1, -1)
+                    if messages[i].get("role") == "assistant"), total - 1)
+    else:
+        budget = max(1, int(keep_recent_tokens))
+        cut = total
+        used = 0
+        while cut > 0:
+            cost = _estimate_message_tokens(messages[cut - 1])
+            if cut < total and used + cost > budget:
+                break  # 最后一条不设限：总得留一条
+            used += cost
+            cut -= 1
     # 我们要保留 [cut:]，所以被裁掉的是 [0:cut]
     while cut > 0:
         prev = messages[cut - 1] if cut - 1 >= 0 else None
@@ -321,6 +324,97 @@ def _restore_usage_anchor(messages: list[dict[str, Any]], checkpoint: Any) -> tu
     return tokens, count, str(checkpoint.get("model") or "")
 
 
+MICROCOMPACT_KEEP_RECENT_ROUNDS = 5
+MICROCOMPACT_MIN_SAVED_TOKENS = 256
+MICROCOMPACT_PLACEHOLDER = "[较早工具结果已清理（microcompact）]"
+MICROCOMPACT_TOOLS = frozenset({
+    "list_input_files", "read_input_file", "search_input", "search_output_files",
+    "list_dict_files", "read_dict", "get_name_table", "list_problems",
+    "read_transl_cache", "read_output", "read_proofread_changes",
+})
+
+
+def _microcompact_tool_results(messages: list[dict[str, Any]]) -> list[int]:
+    """找出可清理的旧读取结果；保留最近五个调用轮次，不拆工具协议配对。
+
+    按轮次保留，避免一次并行调用的结果互相挤掉。未知工具、写入、任务状态、
+    错误和媒体均保护；已经清理的结果不再候选。这里只规划，不修改输入。
+    """
+    groups: list[list[int]] = []
+    calls: dict[str, str] = {}
+    group: list[int] = []
+    for index, message in enumerate(messages):
+        if message.get("role") == "assistant":
+            if group:
+                groups.append(group)
+            group = []
+            calls = {str(call.get("id")): str((call.get("function") or {}).get("name") or "")
+                     for call in message.get("tool_calls") or [] if isinstance(call, dict) and call.get("id")}
+        if message.get("role") != "tool" or calls.get(str(message.get("tool_call_id"))) not in MICROCOMPACT_TOOLS:
+            continue
+        content = message.get("content")
+        if (not isinstance(content, str) or not content.strip() or content.startswith(MICROCOMPACT_PLACEHOLDER)
+                or message.get("isError") or message.get("is_error")):
+            continue
+        try:
+            result = json.loads(content)
+        except (ValueError, TypeError):
+            result = None
+        if isinstance(result, dict):
+            if (any(result.get(key) for key in ("error", "errors", "failed_files", "job_error", "isError", "is_error"))
+                    or result.get("ok") is False or result.get("success") is False
+                    or result.get("status") in ("failed", "error", "stopped", "cancelled")):
+                continue
+        elif any(word in content for word in ("错误", "失败", "Error:", "Traceback")):
+            continue
+        group.append(index)
+    if group:
+        groups.append(group)
+    indices = [index for group in groups[:-MICROCOMPACT_KEEP_RECENT_ROUNDS] for index in group]
+    # 占位和归档引用也有成本：保守预留每条 128 tokens，少量节省就不改历史。
+    saved = sum(_estimate_message_tokens(messages[index]) - 128 for index in indices)
+    return indices if saved >= MICROCOMPACT_MIN_SAVED_TOKENS else []
+
+
+def _microcompact_replacements(
+    messages: list[dict[str, Any]], indices: list[int], archive: str = "",
+) -> list[dict[str, str]]:
+    recall = (f"用 read_history_archive 读取 {archive} 回查。" if archive else "需要细节时重新读取，勿重复执行写入。")
+    return [{
+        "tool_call_id": str(messages[index]["tool_call_id"]),
+        "fingerprint": _history_fingerprint([messages[index]]),
+        "content": f"{MICROCOMPACT_PLACEHOLDER} {recall} tool_call_id={messages[index]['tool_call_id']}",
+    } for index in indices]
+
+
+def _restore_microcompacted_history(
+    messages: list[dict[str, Any]], checkpoints: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """投影只作用于原消息指纹匹配的 tool 结果；原始磁盘消息与 UI 转录不变。"""
+    if not checkpoints:
+        return list(messages)
+    targets: dict[tuple[str, str], list[int]] = {}
+    for index, message in enumerate(messages):
+        if message.get("role") == "tool":
+            key = (str(message.get("tool_call_id")), _history_fingerprint([message]))
+            targets.setdefault(key, []).append(index)
+    result = list(messages)
+    for checkpoint in checkpoints:
+        if not isinstance(checkpoint, dict) or not isinstance(checkpoint.get("replacements"), list):
+            continue
+        count = checkpoint.get("_message_count", len(messages))
+        if type(count) is not int or count < 0:
+            continue
+        for item in checkpoint["replacements"]:
+            if (isinstance(item, dict) and isinstance(item.get("tool_call_id"), str)
+                    and isinstance(item.get("fingerprint"), str) and isinstance(item.get("content"), str)
+                    and item["content"].startswith(MICROCOMPACT_PLACEHOLDER)):
+                for index in targets.get((item["tool_call_id"], item["fingerprint"]), []):
+                    if index < count:  # 不把早期清理操作套到后来复用同一 id 的新消息上
+                        result[index] = {**messages[index], "content": item["content"]}
+    return result
+
+
 def _restore_compacted_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """恢复会话时重建「压缩之后的历史」：system + 摘要 + 当时的现场 + 其后的消息。
 
@@ -354,13 +448,104 @@ def _restore_compacted_history(messages: list[dict[str, Any]]) -> list[dict[str,
     return ([system] if system is not None else []) + [messages[last]] + tail + messages[last + 1 :]
 
 
+def _compact_excerpt(text: str, limit: int) -> str:
+    """有界摘录保留首尾，避免长请求末尾的修正、禁止事项总被裁掉。"""
+    if len(text) <= limit:
+        return text
+    marker = "\n…（中间已省略，完整内容见原始历史）…\n"
+    left = (limit - len(marker)) // 2
+    return text[:left] + marker + text[-(limit - len(marker) - left):]
+
+
+def _task_continuation(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """保留最初及最近三条要求、最近进展、询问结果和两条翻译任务状态快照。
+
+    只摘录已进入历史的消息，不读待发送队列、不复制工具参数或大段结果。上一轮的
+    原文卡由内部元数据传递，不把整份摘要再当成用户要求，避免连续压缩时递归膨胀。
+    """
+    entries: list[dict[str, str]] = []
+    relevant_calls: dict[str, str] = {}
+
+    def add(role: str, text: str) -> None:
+        text = _compact_excerpt(text.strip(), 1000)
+        item = {"role": role, "text": text}
+        if text:
+            if item in entries:
+                entries.remove(item)
+            entries.append(item)
+
+    for message in messages:
+        if message.get("_compact_summary"):
+            carried = message.get("_compact_continuation")
+            if isinstance(carried, list):
+                for item in carried:
+                    if (isinstance(item, dict) and item.get("role") in ("user", "assistant", "confirmation", "job")
+                            and isinstance(item.get("text"), str)):
+                        add(item["role"], item["text"])
+            continue
+        if _is_internal_message(message):
+            continue
+        role = message.get("role")
+        text = _content_text(message.get("content"))
+        if role == "user":
+            # 首条请求附带的问候判断提示不是用户原话。
+            from GalTransl.Agent.prompts import INITIAL_USER_MESSAGE_PREFIX
+
+            add("user", text.removeprefix(INITIAL_USER_MESSAGE_PREFIX))
+        elif role == "assistant":
+            add("assistant", text)
+            for call in message.get("tool_calls") or []:
+                if isinstance(call, dict):
+                    name = (call.get("function") or {}).get("name")
+                    if name in ("ask_user", "start_translation", "stop_translation", "wait") and call.get("id"):
+                        relevant_calls[str(call["id"])] = name
+        elif role == "tool" and str(message.get("tool_call_id") or "") in relevant_calls:
+            try:
+                result = json.loads(text)
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(result, dict):
+                continue
+            name = relevant_calls[str(message["tool_call_id"])]
+            if name == "ask_user" and result.get("answers") and isinstance(result.get("summary"), str):
+                label = "系统自动代答（非用户确认）：" if result.get("auto_answered") else "询问用户的回答："
+                add("confirmation", label + result["summary"])
+            elif name != "ask_user" and isinstance(result.get("job_id"), str) and result["job_id"]:
+                snapshot = {key: result[key] for key in ("job_id", "status", "job_status", "translator", "error")
+                            if isinstance(result.get(key), (str, bool, int))}
+                add("job", name + ": " + json.dumps(snapshot, ensure_ascii=False))
+
+    users = [item for item in entries if item["role"] == "user"]
+    selected = ([users[0], *users[-3:]] if len(users) > 4 else users)
+    selected += [item for item in entries if item["role"] == "assistant"][-1:]
+    selected += [item for item in entries if item["role"] == "confirmation"][-1:]
+    selected += [item for item in entries if item["role"] == "job"][-2:]
+    return [item for item in entries if item in selected]  # 最多 8 × 1000 字符，按历史顺序
+
+
+def _render_task_continuation(entries: list[dict[str, str]]) -> str:
+    if not entries:
+        return ""
+    labels = {
+        "user": "用户要求原文", "assistant": "助手进展陈述（未经重新核验）",
+        "confirmation": "询问结果", "job": "翻译任务状态快照（历史值，继续前需刷新）",
+    }
+    lines = [
+        "## 任务接续原文摘录",
+        "以下为历史片段，按时间先后排列；较新用户要求优先。请求可能已完成，不代表新增待办；"
+        "助手陈述和系统代答不等于用户授权。若有省略或进展不明，先核对原始历史与当前状态。",
+    ]
+    for entry in entries:
+        lines += ["", f"### {labels[entry['role']]}", entry["text"]]
+    return "\n".join(lines)
+
+
 def _serialize_for_summary(messages: list[dict[str, Any]]) -> str:
     """把一段消息序列化成供摘要模型阅读的文本（截断超长工具结果）。"""
     lines: list[str] = []
     for msg in messages:
         role = msg.get("role") or "?"
-        content = msg.get("content")
-        text = content if isinstance(content, str) else ""
+        text = _content_text(msg.get("content"))
         calls = msg.get("tool_calls") or []
         if calls:
             names = []
@@ -368,31 +553,10 @@ def _serialize_for_summary(messages: list[dict[str, Any]]) -> str:
                 fn = tc.get("function") or {} if isinstance(tc, dict) else {}
                 names.append(str(fn.get("name") or "?"))
             text = (text + " " if text else "") + f"[调用工具: {', '.join(names)}]"
-        if len(text) > 1500:
-            text = text[:1500] + "…（已截断）"
+        # 用户约束、已有摘要的接续信息比批量工具输出更重要；两端都保留。
+        text = _compact_excerpt(text, 6000 if role == "user" else 1500)
         lines.append(f"{role}: {text}")
     return "\n".join(lines)
-
-
-def _local_fallback_summary(messages: list[dict[str, Any]]) -> str:
-    """摘要模型不可用时的兜底：只记录这段时间调用过哪些工具。"""
-    tools: list[str] = []
-    for msg in messages:
-        for tc in msg.get("tool_calls") or []:
-            fn = tc.get("function") or {} if isinstance(tc, dict) else {}
-            name = str(fn.get("name") or "")
-            if name:
-                tools.append(name)
-    tool_text = "、".join(dict.fromkeys(tools)) if tools else "无"
-    return (
-        "## 目标\n（早前对话已压缩，详细目标见消息历史）\n\n"
-        "## 已完成的工作\n"
-        f"早前 {len(messages)} 条消息因上下文超限被压缩。期间调用过的工具：{tool_text}。\n\n"
-        "## 关键决策\n无法从压缩中恢复，请根据当前项目状态判断。\n\n"
-        "## 当前进度与项目状态\n请先查一次项目概览与运行状态重新确认当前进度。\n\n"
-        "## 待办与注意事项\n"
-        "如不确定之前的进展，先查一次项目状态再继续，避免重复已完成的操作。"
-    )
 
 
 def _is_internal_message(message: Any) -> bool:
@@ -420,7 +584,7 @@ def _content_text(content: Any) -> str:
     return "" if content is None else str(content)
 
 
-def _render_archive_messages(messages: list[dict[str, Any]]) -> list[str]:
+def _render_archive_messages(messages: list[dict[str, Any]], *, full_tool_results: bool = False) -> list[str]:
     """把一段消息渲染成归档正文（Markdown）。
 
     工具结果要截断：归档是给模型"想不起来时回查"用的，一条几万字符的缓存读取
@@ -447,7 +611,11 @@ def _render_archive_messages(messages: list[dict[str, Any]]) -> list[str]:
                 lines += [text, ""]
         else:
             name = str(message.get("name") or "tool")
-            text = _truncate_text(_content_text(message.get("content")), COMPACT_ARCHIVE_TOOL_RESULT_CHARS)
+            text = _content_text(message.get("content"))
+            if not full_tool_results:
+                text = _truncate_text(text, COMPACT_ARCHIVE_TOOL_RESULT_CHARS)
+            if message.get("tool_call_id"):
+                lines += [f"tool_call_id: {message['tool_call_id']}", ""]
             lines += [f"### 工具结果：{name}", "", "```", text, "```", ""]
     return lines
 
