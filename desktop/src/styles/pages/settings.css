@@ -1,7 +1,8 @@
 /* ── Settings Page ── */
 
 .settings-page {
-  max-width: 960px;
+  /* 二级菜单占掉 200px 之后，插件卡片那 400px 的最小列宽还得塞得下两列 */
+  max-width: 1120px;
   margin: 0 auto;
 }
 
@@ -24,7 +25,22 @@
 
 .settings-page__content {
   display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
   gap: var(--space-6);
+  align-items: start;
+}
+
+/* 菜单跟着页面滚：分区一长，翻到下面还能看见自己停在哪一栏 */
+.settings-page__nav {
+  position: sticky;
+  top: 0;
+}
+
+/* 一次只渲染一个分区，这里的 gap 是给「以后某个分区想放两张卡」留的 */
+.settings-page__main {
+  display: grid;
+  gap: var(--space-6);
+  min-width: 0;
 }
 
 .settings-toggle-row {

@@ -13,7 +13,7 @@
     "pluginTabs_message_problemPlugin": "Problem Plugins ({{count}})",
     "pluginTabs_message_problemPlugin_one": "Problem Plugins ({{count}})",
     "pluginTabs_message_problemPlugin_other": "Problem Plugins ({{count}})",
-    "pluginCardHeader_message_problem": "Problem Plugin",
+    "pluginCardHeader_message_problem": "Problem",
     "pluginsPage_normalizeError_loadPluginFailed": "Failed to load the plugin list",
     "pluginsPage_title_plugin": "Plugin management",
     "pluginsPage_title_loadPlugin": "Loading plugins…",

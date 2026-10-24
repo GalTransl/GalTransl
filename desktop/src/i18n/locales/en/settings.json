@@ -146,6 +146,8 @@
     "pluginTabs_message_filePlugin_other": "File plugins ({{count}})",
     "pluginTabs_message_textPlugin": "Text plugins ({{count}})",
     "pluginTabs_message_textPlugin_other": "Text plugins ({{count}})",
+    "pluginTabs_message_problemPlugin": "Problem plugins ({{count}})",
+    "pluginTabs_message_problemPlugin_other": "Problem plugins ({{count}})",
     "pluginList_title_currentFilterEmptyPlugin": "No plugins match the current filter",
     "pluginList_title_emptyPlugin": "No plugins yet",
     "pluginList_description_pluginCheckBackendPluginDirectory": "Try switching to another plugin type, or check the backend plugin directory.",
@@ -153,6 +155,7 @@
     "pluginCardHeader_message_v": "v{{version}}",
     "pluginCardHeader_message_file": "File",
     "pluginCardHeader_message_text": "Text",
+    "pluginCardHeader_message_problem": "Problem",
     "pluginCardMeta_message_author": "Author: {{author}}",
     "pluginCardMeta_message_module": "Module: {{module}}",
     "pluginCardSettings_message_settingsItem": "Settings",
@@ -213,11 +216,22 @@
     "compressImageToDataUrl_message_currentCanvas": "The current environment does not support canvas compression.",
     "pluginTabs_message_all_one": "All ({{count}})",
     "pluginTabs_message_filePlugin_one": "File plugin ({{count}})",
-    "pluginTabs_message_textPlugin_one": "Text plugin ({{count}})"
+    "pluginTabs_message_textPlugin_one": "Text plugin ({{count}})",
+    "pluginTabs_message_problemPlugin_one": "Problem plugin ({{count}})"
   },
   "appearance": {
     "language": "Interface language",
     "simplifiedChinese": "简体中文",
     "english": "English"
+  },
+  "settingsSectionNav": {
+    "ariaLabel_sections": "Settings sections",
+    "label_appearance": "Appearance",
+    "label_prompt": "Prompts",
+    "label_guideline": "Guidelines",
+    "label_retention": "Home history",
+    "label_plugins": "Plugin list",
+    "label_connection": "Backend",
+    "label_about": "About"
   }
 }

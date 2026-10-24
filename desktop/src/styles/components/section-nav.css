@@ -1,0 +1,54 @@
+/* ── 页面内二级菜单（SectionNav） ──
+   一列按钮，跟项目配置页侧边那份视觉一致；那边还留着自己的 .project-config-page__section-btn，
+   等它换过来就能把这段并到一处。 */
+
+.section-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+}
+
+.section-nav__btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: none;
+  background: none;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--color-text-muted);
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.section-nav__btn:hover {
+  background: var(--color-neutral-soft);
+  color: var(--color-text);
+}
+
+.section-nav__btn--active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.section-nav__btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.section-nav__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  font-size: 15px;
+}
+
+.section-nav__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

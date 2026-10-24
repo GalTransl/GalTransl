@@ -14,6 +14,17 @@
     flex-wrap: wrap;
   }
 
+  /* 窄窗口下设置页的二级菜单改成横排，别把内容挤成一条 */
+  .settings-page__content {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-page__nav {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
   .dict-layout {
     grid-template-columns: 1fr;
   }

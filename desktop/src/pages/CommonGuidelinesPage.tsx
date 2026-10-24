@@ -300,7 +300,7 @@ export function CommonGuidelinesPage() {
                   type="button"
                   className="button"
                   disabled={busy}
-                  onClick={() => navigate('/settings')}
+                  onClick={() => navigate('/settings?section=guideline')}
                 >{translate("settings:commonGuidelinesPage.commonGuidelinesPageActions_message_backSettings")}</button>
               </div>
 

@@ -26,7 +26,7 @@
     "pluginTabs_message_problemPlugin": "问题插件 ({{count}})",
     "pluginTabs_message_problemPlugin_other": "问题插件 ({{count}})",
     "pluginTabs_message_problemPlugin_one": "问题插件 ({{count}})",
-    "pluginCardHeader_message_problem": "问题插件",
+    "pluginCardHeader_message_problem": "问题",
     "pluginList_title_currentFilterEmptyPlugin": "当前筛选下没有插件",
     "pluginList_title_emptyPlugin": "暂无插件",
     "pluginList_description_pluginCheckBackendPluginDirectory": "试试切换到其他插件类型，或检查后端插件目录。",

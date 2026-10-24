@@ -1,10 +1,12 @@
 import { localizePlugin, pluginSettingDisplayValue } from "../i18n/plugins";
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CustomSelect } from '../components/CustomSelect';
 import { PageHeader } from '../components/PageHeader';
+import { SectionNav } from '../components/SectionNav';
 import { Switch } from '../components/Switch';
+import type { IconName } from '../components/Icon';
 import { ConnectionStatusCard } from '../features/connection/ConnectionStatusCard';
 import { EmptyState, ErrorState, LoadingState } from '../components/page-state';
 import { useConnection } from '../features/connection/ConnectionContext';
@@ -48,9 +50,29 @@ import { PROJECT_HOMEPAGE, RELEASE_LATEST_URL } from '../lib/externalLink';
 
 const PROJECT_AUTHOR = 'xd2333';
 
+/** 插件类型徽标文案；未知类型按文本插件显示，免得卡片上出现一枚空白徽标。 */
+function pluginTypeLabel(type: string): string {
+  if (type === 'file') return translate("settings:settingsPage.pluginCardHeader_message_file");
+  if (type === 'problem') return translate("settings:settingsPage.pluginCardHeader_message_problem");
+  return translate("settings:settingsPage.pluginCardHeader_message_text");
+}
+
+type SettingsSectionKey = 'appearance' | 'prompt' | 'guideline' | 'retention' | 'plugins' | 'connection' | 'about';
+
+/** 设置页二级菜单。label 写成 getter：切界面语言时不用重建这份数组也能跟着变。 */
+const SETTINGS_SECTIONS: { key: SettingsSectionKey; label: string; icon: IconName }[] = [
+  { key: 'appearance', get label() { return translate("settings:settingsSectionNav.label_appearance"); }, icon: 'sparkle' },
+  { key: 'prompt', get label() { return translate("settings:settingsSectionNav.label_prompt"); }, icon: 'note' },
+  { key: 'guideline', get label() { return translate("settings:settingsSectionNav.label_guideline"); }, icon: 'bookmark' },
+  { key: 'retention', get label() { return translate("settings:settingsSectionNav.label_retention"); }, icon: 'archive' },
+  { key: 'plugins', get label() { return translate("settings:settingsSectionNav.label_plugins"); }, icon: 'plug' },
+  { key: 'connection', get label() { return translate("settings:settingsSectionNav.label_connection"); }, icon: 'globe' },
+  { key: 'about', get label() { return translate("settings:settingsSectionNav.label_about"); }, icon: 'help' },
+];
 
 
-function PluginListSection() {
+
+export function PluginListSection() {
   const uiLanguage = useUiLanguage();
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,7 +98,9 @@ function PluginListSection() {
 
   const filePlugins = plugins.filter((p) => p.type === 'file');
   const textPlugins = plugins.filter((p) => p.type === 'text');
-  const filteredPlugins = typeFilter === 'file' ? filePlugins : typeFilter === 'text' ? textPlugins : plugins;
+  const problemPlugins = plugins.filter((p) => p.type === 'problem');
+  // 按 type 直接过滤，不写死「file / 否则就是 text」——新增插件类型时这里不用再改一次
+  const filteredPlugins = typeFilter ? plugins.filter((plugin) => plugin.type === typeFilter) : plugins;
 
   return (
     <section className="panel">
@@ -106,6 +130,10 @@ function PluginListSection() {
               className={`plugin-tab ${typeFilter === 'text' ? 'plugin-tab--active' : ''}`}
               onClick={() => setTypeFilter('text')}
             >{translate("settings:settingsPage.pluginTabs_message_textPlugin", { count: textPlugins.length })}</button>
+            <button
+              className={`plugin-tab ${typeFilter === 'problem' ? 'plugin-tab--active' : ''}`}
+              onClick={() => setTypeFilter('problem')}
+            >{translate("settings:settingsPage.pluginTabs_message_problemPlugin", { count: problemPlugins.length })}</button>
           </div>
 
           <div className="plugin-list">
@@ -120,7 +148,7 @@ function PluginListSection() {
                   <span className="plugin-card__name">{localizePlugin(plugin).display_name}</span>
                   <span className="plugin-card__version">{translate("settings:settingsPage.pluginCardHeader_message_v", { version: plugin.version })}</span>
                   <span className={`plugin-card__type plugin-card__type--${plugin.type}`}>
-                    {plugin.type === 'file' ? translate("settings:settingsPage.pluginCardHeader_message_file") : translate("settings:settingsPage.pluginCardHeader_message_text")}
+                    {pluginTypeLabel(plugin.type)}
                   </span>
                 </div>
                 <div className="plugin-card__meta">
@@ -154,6 +182,24 @@ function PluginListSection() {
 export function SettingsPage() {
   const uiLanguage = useUiLanguage();
   const navigate = useNavigate();
+  // 选中哪个分区跟 URL 走（?section=...）：刷新、从提示词页返回都能停在原来那一页
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeSection, setActiveSection] = useState<SettingsSectionKey>(() => (
+    SETTINGS_SECTIONS.find((item) => item.key === searchParams.get('section'))?.key ?? 'appearance'
+  ));
+
+  useEffect(() => {
+    const section = searchParams.get('section');
+    if (SETTINGS_SECTIONS.some((item) => item.key === section)) setActiveSection(section as SettingsSectionKey);
+  }, [searchParams]);
+
+  const handleSectionChange = useCallback((section: SettingsSectionKey) => {
+    setActiveSection(section);
+    const next = new URLSearchParams(searchParams);
+    next.set('section', section);
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   const {
     backendUrl,
     connectionPhase,
@@ -365,6 +411,16 @@ export function SettingsPage() {
       <PageHeader className="settings-page__header" title={translate("settings:settingsPage.settingsPage_title_settings")} description={translate("settings:settingsPage.settingsPage_description_configBackendConnection")} />
 
       <div className="settings-page__content">
+        <SectionNav
+          className="settings-page__nav"
+          items={SETTINGS_SECTIONS}
+          active={activeSection}
+          onSelect={handleSectionChange}
+          ariaLabel={translate("settings:settingsSectionNav.ariaLabel_sections")}
+        />
+
+        <div className="settings-page__main">
+        {activeSection === 'appearance' && (
         <section className="panel">
           <header className="panel__header">
             <div>
@@ -571,7 +627,9 @@ export function SettingsPage() {
           <div className="settings-toggle-row__desc">
             {customBackgroundImageDataUrl ? translate("settings:settingsPage.settingsToggleRowDesc_message_doneEnableCustomBackground") : translate("settings:settingsPage.settingsToggleRowDesc_message_notSettingsCustomBackground")}{translate("settings:settingsPage.settingsToggleRowDesc_div_themeBackgroundSettingsEffectiveOpenAutoOption")}</div>
         </section>
+        )}
 
+        {activeSection === 'prompt' && (
         <section className="panel">
           <header className="panel__header">
             <div>
@@ -589,7 +647,9 @@ export function SettingsPage() {
             >{translate("settings:settingsPage.settingsActionRow_message_changeDefaultPrompt")}</button>
           </div>
         </section>
+        )}
 
+        {activeSection === 'guideline' && (
         <section className="panel">
           <header className="panel__header">
             <div>
@@ -607,7 +667,9 @@ export function SettingsPage() {
             >{translate("settings:settingsPage.settingsActionRow_message_translationGuideline")}</button>
           </div>
         </section>
+        )}
 
+        {activeSection === 'about' && (
         <section className="panel">
           <header className="panel__header">
             <div>
@@ -667,7 +729,9 @@ export function SettingsPage() {
             <div className="settings-toggle-row__desc">{translate("settings:settingsPage.panel_message_updateCheckFailed", { versionCheckError: versionCheckError })}</div>
           ) : null}
         </section>
+        )}
 
+        {activeSection === 'retention' && (
         <section className="panel">
           <header className="panel__header">
             <div>
@@ -724,7 +788,9 @@ export function SettingsPage() {
 
           <div className="settings-toggle-row__desc">{translate("settings:settingsPage.panel_message_rangeRangeAuto", { HOME_LIST_LIMIT_MIN: HOME_LIST_LIMIT_MIN, HOME_LIST_LIMIT_MAX: HOME_LIST_LIMIT_MAX })}</div>
         </section>
+        )}
 
+        {activeSection === 'connection' && (
         <ConnectionStatusCard
           backendUrl={backendUrl}
           connectionMessage={connectionMessage}
@@ -735,8 +801,10 @@ export function SettingsPage() {
           }}
           translatorCount={translators.length}
         />
+        )}
 
-        <PluginListSection />
+        {activeSection === 'plugins' && <PluginListSection />}
+        </div>
       </div>
     </div>
   );

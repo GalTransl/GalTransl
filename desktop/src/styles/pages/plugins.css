@@ -100,6 +100,13 @@
   color: var(--color-success);
 }
 
+/* 问题检测插件：跟文件（蓝）、文本（绿）区分开，用警告色 —— 这类插件是"发现问题"的，
+   不是翻译链路上的一环。 */
+.plugin-card__type--problem {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
 .plugin-card__meta {
   display: flex;
   gap: var(--space-4);

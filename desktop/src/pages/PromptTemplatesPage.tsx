@@ -241,7 +241,7 @@ export function PromptTemplatesPage() {
                       className="button"
                       disabled={saving}
                       onClick={() => {
-                        navigate('/settings');
+                        navigate('/settings?section=prompt');
                       }}
                     >{translate("settings:promptTemplatesPage.promptTemplatesPageActions_message_backSettings")}</button>
                   </div>
