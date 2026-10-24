@@ -14,9 +14,7 @@ type TokenEntry = {
   endpoint: string;
   modelName: string;
   stream?: boolean;
-  /** 思考参数的令牌级覆盖；留空跟随 OpenAI-Compatible 全局设置 */
-  enableThinking?: boolean;
-  thinkingType?: 'enabled' | 'disabled';
+  /** 思考等级的令牌级覆盖；留空跟随 OpenAI-Compatible 全局设置 */
   reasoningEffort?: string;
   /** 模型上下文窗口（token）：数字，或后端能解析的写法（如 "128k"）；留空表示用默认窗口 */
   contextWindow?: number | string;
@@ -463,35 +461,6 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
                   <span className="field__hint">{translate("common:backendConfigEditor.fieldFieldInline_message_modelContextTokenAgentContextUsageEmpty", { DEFAULT_CONTEXT_WINDOW: DEFAULT_CONTEXT_WINDOW })}</span>
                 </label>
                 <label className="field field--inline">
-                  <span>{translate("common:backendConfigEditor.fieldFieldInline_message_enableThinking")}</span>
-                  <CustomSelect
-                    disabled={readOnly}
-                    value={t.enableThinking == null ? '' : String(t.enableThinking)}
-                    onChange={(e) => {
-                      if (e.target.value === '') updateToken(idx, 'enableThinking', undefined);
-                      else updateToken(idx, 'enableThinking', e.target.value === 'true');
-                    }}
-                  >
-                    <option value="">{translate("common:backendConfigEditor.fieldFieldInline_message_settings")}</option>
-                    <option value="true">{translate("common:values.enabled")}</option>
-                    <option value="false">{translate("common:values.disabled")}</option>
-                  </CustomSelect>
-                  <span className="field__hint">{translate("common:backendConfigEditor.fieldFieldInline_hint_enableThinking")}</span>
-                </label>
-                <label className="field field--inline">
-                  <span>{translate("common:backendConfigEditor.fieldFieldInline_message_thinkingType")}</span>
-                  <CustomSelect
-                    disabled={readOnly}
-                    value={String(t.thinkingType ?? '')}
-                    onChange={(e) => updateToken(idx, 'thinkingType', e.target.value ? e.target.value : undefined)}
-                  >
-                    <option value="">{translate("common:backendConfigEditor.fieldFieldInline_message_settings")}</option>
-                    <option value="enabled">{translate("common:values.enabled")}</option>
-                    <option value="disabled">{translate("common:values.disabled")}</option>
-                  </CustomSelect>
-                  <span className="field__hint">{translate("common:backendConfigEditor.fieldFieldInline_hint_thinkingType")}</span>
-                </label>
-                <label className="field field--inline">
                   <span>{translate("common:backendConfigEditor.fieldFieldInline_message_reasoningEffort")}</span>
                   <CustomSelect
                     disabled={readOnly}
@@ -534,33 +503,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
               {translate("common:backendConfigEditor.field_message_defaultSentenceTranslationTextFileProgressTranslationDisable")}
             </span>
           </label>
-          <p className="field__hint">{translate("common:backendConfigEditor.reasoningSettings_hint")}</p>
-          <label className="field">
-            <span>{translate("common:backendConfigEditor.field_message_enableThinking")}</span>
-            <CustomSelect
-              disabled={readOnly}
-              value={oaiConfig.enableThinking == null ? '' : String(oaiConfig.enableThinking)}
-              onChange={(e) => updateOai('enableThinking', e.target.value === '' ? undefined : e.target.value === 'true')}
-            >
-              <option value="">{translate("common:backendConfigEditor.providerDefault")}</option>
-              <option value="true">{translate("common:values.enabled")}</option>
-              <option value="false">{translate("common:values.disabled")}</option>
-            </CustomSelect>
-            <span className="field__hint">{translate("common:backendConfigEditor.field_hint_enableThinking")}</span>
-          </label>
-          <label className="field">
-            <span>{translate("common:backendConfigEditor.field_message_thinkingType")}</span>
-            <CustomSelect
-              disabled={readOnly}
-              value={String(oaiConfig.thinkingType ?? '')}
-              onChange={(e) => updateOai('thinkingType', e.target.value || undefined)}
-            >
-              <option value="">{translate("common:backendConfigEditor.providerDefault")}</option>
-              <option value="enabled">{translate("common:values.enabled")}</option>
-              <option value="disabled">{translate("common:values.disabled")}</option>
-            </CustomSelect>
-            <span className="field__hint">{translate("common:backendConfigEditor.field_hint_thinkingType")}</span>
-          </label>
+          <hr className="backend-config-divider" />
           <label className="field">
             <span>{translate("common:backendConfigEditor.field_message_reasoningEffort")}</span>
             <CustomSelect

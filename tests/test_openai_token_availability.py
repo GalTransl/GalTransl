@@ -145,7 +145,7 @@ class MaxTokensToleranceTests(unittest.TestCase):
         ):
             with self.subTest(error=error):
                 fake = _FakeClient([error, [_chunk()]])
-                reasoning = {"reasoning_effort": "high", "extra_body": {"thinking": {"type": "enabled"}}}
+                reasoning = {"reasoning_effort": "high"}
                 token = COpenAIToken(
                     "sk-x", "https://relay.example.com/v1", "custom-alias", reasoning_kwargs=reasoning,
                 )
@@ -157,7 +157,7 @@ class MaxTokensToleranceTests(unittest.TestCase):
                 self.assertNotIn("max_completion_tokens", fake.calls[1])
                 self.assertNotIn("max_tokens", fake.calls[1])
                 self.assertEqual(fake.calls[1]["reasoning_effort"], "high")
-                self.assertEqual(fake.calls[1]["extra_body"], reasoning["extra_body"])
+                self.assertNotIn("extra_body", fake.calls[1])
 
     def test_non_stream_uses_choices(self):
         fake = _FakeClient([SimpleNamespace(choices=[])])

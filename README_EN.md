@@ -152,7 +152,7 @@ backendSpecific:
         stream: true
 ```
 
-Configure thinking options independently in the backend editor, the `OpenAI-Compatible` section, or an individual token: `enableThinking: true/false` (`enable_thinking` for Qwen3, DashScope, SiliconFlow, and similar APIs), `thinkingType: enabled/disabled` (`thinking.type` for DeepSeek and compatible APIs), and `reasoningEffort: none/minimal/low/medium/high/xhigh/max` (`reasoning_effort` for OpenAI o-series, GPT-5, and compatible relays). Model names and URLs do not select these options automatically. Unset global options are omitted. Choose only parameters and levels supported by your provider.
+Configure reasoning effort in the backend editor, the `OpenAI-Compatible` section, or an individual token with `reasoningEffort: none/minimal/low/medium/high/xhigh/max`, which maps to the request parameter `reasoning_effort`. An unset global value omits the parameter; an unset token value inherits the global setting. Model names and URLs do not select a level automatically. Choose a level supported by your provider.
 
 After modifying the project settings, make sure you have installed the required dependencies (see Environment Preparation), then double-click `run_GalTransl_terminal.bat` and enter the project path to start translating.
 

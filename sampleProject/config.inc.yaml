@@ -11,9 +11,7 @@ backendSpecific:
         modelName: deepseek/deepseek-chat-v3-0324:free
         stream: true # 支持为单个token设置流式请求
     tokenStrategy: "random" # 令牌策略，random随机轮询；fallback优先第一个，出现[API错误]或[解析错误]时使用下一个
-    # 思考参数彼此独立，留空/删除则不发送；令牌条目也可分别覆盖这里的设置。
-    # enableThinking: true # extra_body.enable_thinking，常见于 Qwen3、DashScope、SiliconFlow 等接口
-    # thinkingType: enabled # extra_body.thinking.type，常见于 DeepSeek 等支持 thinking.type 的接口
+    # 思考等级留空/删除则不发送；令牌条目也可覆盖这里的设置。
     # reasoningEffort: medium # reasoning_effort，常见于 OpenAI o 系列、GPT-5 及部分中转；等级按模型支持情况选择
     checkAvailable: true # 翻译前检查API是否可用[True/False]
     stream: true # 流式请求，一般不用修改除非接口不支持流式[True/False]

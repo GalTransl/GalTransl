@@ -1,4 +1,4 @@
-"""OpenAI-compatible thinking options are explicit and independent."""
+"""OpenAI-compatible reasoning effort is explicit and supports token overrides."""
 
 import json
 import unittest
@@ -21,60 +21,39 @@ class ReasoningConfigTests(unittest.TestCase):
     def test_unconfigured_options_are_not_sent(self):
         self.assertEqual(build_reasoning_kwargs({}), {})
 
-    def test_each_option_maps_to_its_own_request_field(self):
+    def test_effort_maps_to_the_request_field(self):
         for config, expected in (
-            ({"enableThinking": True}, {"extra_body": {"enable_thinking": True}}),
-            ({"enableThinking": False}, {"extra_body": {"enable_thinking": False}}),
-            ({"thinkingType": "enabled"}, {"extra_body": {"thinking": {"type": "enabled"}}}),
-            ({"thinkingType": "disabled"}, {"extra_body": {"thinking": {"type": "disabled"}}}),
             ({"reasoningEffort": "none"}, {"reasoning_effort": "none"}),
             ({"reasoningEffort": "high"}, {"reasoning_effort": "high"}),
         ):
             with self.subTest(config=config):
                 self.assertEqual(build_reasoning_kwargs(config), expected)
 
-    def test_options_can_be_combined_without_replacing_each_other(self):
+    def test_removed_options_are_ignored(self):
+        legacy = {"enableThinking": True, "thinkingType": "enabled"}
+        self.assertEqual(build_reasoning_kwargs(legacy), {})
         result = build_reasoning_kwargs({
-            "enableThinking": True,
-            "thinkingType": "enabled",
+            **legacy,
             "reasoningEffort": "high",
         })
 
-        self.assertEqual(result, {
-            "extra_body": {
-                "enable_thinking": True,
-                "thinking": {"type": "enabled"},
-            },
-            "reasoning_effort": "high",
-        })
+        self.assertEqual(result, {"reasoning_effort": "high"})
 
-    def test_token_values_override_global_values_independently(self):
+    def test_token_effort_overrides_global_effort(self):
         result = build_reasoning_kwargs(
-            {
-                "enableThinking": True,
-                "thinkingType": "enabled",
-                "reasoningEffort": "medium",
-            },
-            {
-                "enableThinking": False,
-                "thinkingType": "disabled",
-                "reasoningEffort": "none",
-            },
+            {"reasoningEffort": "medium"},
+            {"reasoningEffort": "none"},
         )
 
-        self.assertEqual(result["extra_body"]["enable_thinking"], False)
-        self.assertEqual(result["extra_body"]["thinking"], {"type": "disabled"})
-        self.assertEqual(result["reasoning_effort"], "none")
+        self.assertEqual(result, {"reasoning_effort": "none"})
 
     def test_empty_token_values_follow_global_values(self):
-        result = build_reasoning_kwargs(
-            {"enableThinking": True, "thinkingType": "enabled", "reasoningEffort": "low"},
-            {"enableThinking": None, "thinkingType": "", "reasoningEffort": " "},
-        )
-
-        self.assertEqual(result["extra_body"]["enable_thinking"], True)
-        self.assertEqual(result["extra_body"]["thinking"], {"type": "enabled"})
-        self.assertEqual(result["reasoning_effort"], "low")
+        for value in (None, "", " "):
+            with self.subTest(value=value):
+                result = build_reasoning_kwargs(
+                    {"reasoningEffort": "low"}, {"reasoningEffort": value},
+                )
+                self.assertEqual(result, {"reasoning_effort": "low"})
 
     def test_model_name_and_endpoint_do_not_infer_anything(self):
         for model, endpoint in (
@@ -107,10 +86,7 @@ class ReasoningConfigTests(unittest.TestCase):
                 "max_tokens": 1000,
                 "extra_body": {"provider": {"order": ["fast"]}},
             },
-            {
-                "reasoning_effort": "high",
-                "extra_body": {"enable_thinking": True},
-            },
+            {"reasoning_effort": "high"},
         )
 
         self.assertNotIn("temperature", result)
@@ -120,7 +96,6 @@ class ReasoningConfigTests(unittest.TestCase):
         self.assertEqual(result["max_completion_tokens"], 1000)
         self.assertEqual(result["extra_body"], {
             "provider": {"order": ["fast"]},
-            "enable_thinking": True,
         })
 
 
@@ -168,13 +143,13 @@ class TranslationReasoningTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result, "translated")
 
         first, second = bodies
-        self.assertTrue(first["enable_thinking"])
-        self.assertEqual(first["thinking"], {"type": "enabled"})
+        self.assertNotIn("enable_thinking", first)
+        self.assertNotIn("thinking", first)
         self.assertEqual(first["reasoning_effort"], "high")
         self.assertEqual(first["max_completion_tokens"], 1200)
         self.assertNotIn("temperature", first)
-        self.assertFalse(second["enable_thinking"])
-        self.assertEqual(second["thinking"], {"type": "disabled"})
+        self.assertNotIn("enable_thinking", second)
+        self.assertNotIn("thinking", second)
         self.assertEqual(second["reasoning_effort"], "none")
         self.assertEqual(second["temperature"], 0.6)
 
@@ -198,7 +173,7 @@ class AgentReasoningTests(unittest.TestCase):
         runner.state.messages = [{"role": "user", "content": "start"}]
         runner._create_stream(include_usage=True)
         self.assertEqual(client.chat.completions.create.call_args.kwargs["reasoning_effort"], "high")
-        self.assertEqual(client.chat.completions.create.call_args.kwargs["extra_body"], {"enable_thinking": True})
+        self.assertNotIn("extra_body", client.chat.completions.create.call_args.kwargs)
         self.assertEqual(runner._summarize_messages(runner.state.messages), summary)
         self.assertNotIn("temperature", client.chat.completions.create.call_args.kwargs)
 
@@ -211,7 +186,7 @@ class AgentReasoningTests(unittest.TestCase):
                 child.messages = [{"role": "user", "content": "check"}]
                 child._chat_with_retry(view._openai_client, view._model, None)
                 self.assertEqual(child_client.chat.completions.create.call_args.kwargs["reasoning_effort"], "low")
-                self.assertEqual(child_client.chat.completions.create.call_args.kwargs["extra_body"], {"enable_thinking": False})
+                self.assertNotIn("extra_body", child_client.chat.completions.create.call_args.kwargs)
                 view._summarize_messages(child.messages)
                 self.assertEqual(child_client.chat.completions.create.call_args.kwargs["reasoning_effort"], "low")
         self.assertEqual(runner._reasoning_kwargs, backend.reasoning_kwargs)

@@ -25,40 +25,34 @@ function fixture(readOnly = false) {
   };
 }
 
-test('reasoning options are independent and can return to provider defaults or inheritance', () => {
+test('reasoning effort can return to provider defaults or inheritance', () => {
   const f = fixture();
   try {
-    assert.equal(f.select('思考开关（全局）').props.value, '');
-    f.change('思考开关（全局）', 'false');
-    f.change('思考类型（全局）', 'enabled');
+    for (const label of ['思考开关', '思考类型', '思考开关（全局）', '思考类型（全局）']) {
+      assert.equal(f.select(label), undefined);
+    }
+    assert.equal(f.select('思考等级（全局）').props.value, '');
+    assert.equal(f.select('思考等级').props.value, '');
     f.change('思考等级（全局）', 'high');
-    assert.equal(f.value().enableThinking, false);
-    assert.equal(f.value().thinkingType, 'enabled');
     assert.equal(f.value().reasoningEffort, 'high');
 
-    f.change('思考开关', 'true');
-    f.change('思考类型', 'disabled');
     f.change('思考等级', 'none');
-    assert.equal(f.value().tokens[0].enableThinking, true);
-    assert.equal(f.value().tokens[0].thinkingType, 'disabled');
     assert.equal(f.value().tokens[0].reasoningEffort, 'none');
     assert.equal(f.value().reasoningEffort, 'high');
     assert.equal(f.value().tokens[0].modelName, 'custom-alias');
 
-    for (const label of ['思考开关', '思考类型', '思考等级', '思考开关（全局）', '思考类型（全局）', '思考等级（全局）']) {
+    for (const label of ['思考等级', '思考等级（全局）']) {
       f.change(label, '');
     }
-    for (const field of ['enableThinking', 'thinkingType', 'reasoningEffort']) {
-      assert.equal(Object.hasOwn(f.value(), field), false);
-      assert.equal(Object.hasOwn(f.value().tokens[0], field), false);
-    }
+    assert.equal(Object.hasOwn(f.value(), 'reasoningEffort'), false);
+    assert.equal(Object.hasOwn(f.value().tokens[0], 'reasoningEffort'), false);
   } finally { f.dispose(); }
 });
 
 test('read-only profiles disable all reasoning controls and ignore edits', () => {
   const f = fixture(true);
   try {
-    for (const label of ['思考开关', '思考类型', '思考等级', '思考开关（全局）', '思考类型（全局）', '思考等级（全局）']) {
+    for (const label of ['思考等级', '思考等级（全局）']) {
       assert.equal(f.select(label).props.disabled, true);
       f.change(label, 'high');
     }
