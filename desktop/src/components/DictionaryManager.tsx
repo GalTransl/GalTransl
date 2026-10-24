@@ -2,6 +2,8 @@ import { UiTrans, message as uiMessage, t as translate, useMessageState, useUiLa
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { usePageActive, useRetainPage } from './PageActivity';
 import { useSaveShortcut } from './useSaveShortcut';
+import { MotionConfig, UI_TRANSITION, m } from './UiMotion';
+import { useUiAnimations } from '../lib/useUiAnimations';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from './Button';
@@ -315,6 +317,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   } = props;
 
   const pageActive = usePageActive();
+  const animated = useUiAnimations();
   const saveInFlightRef = useRef(false);
   /** 「→」回调经 ref 转发：父组件每次 render 新建的内联函数不会打穿行组件的 memo */
   const onOpenInCacheRef = useRef(onOpenInCache);
@@ -593,6 +596,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   };
 
   const handleTabChange = (tab: DictTab) => {
+    if (tab === activeTab) return;
     if (dirty && !confirm(translate("projects:dictionaryManager.handleTabChange_confirm_currentFileNotSave"))) {
       return;
     }
@@ -822,33 +826,33 @@ export function DictionaryManager(props: DictionaryManagerProps) {
       {info && <InlineFeedback className="inline-alert--floating" tone="success" title={translate("projects:dictionaryManager.projectDictionaryPage_title_success")} description={info} />}
 
       <div className="project-dictionary-page__content">
-        <div className="dict-tabs">
-          {(['gpt', 'pre', 'post'] as DictTab[]).map((tab) => (
-            <button
-              key={tab}
-              className={`dict-tab ${activeTab === tab ? 'dict-tab--active' : ''}`}
-              type="button"
-              onClick={() => handleTabChange(tab)}
-            >
-              {tab === 'pre' ? translate("projects:dictionaryManager.dictTabs_message_dictionary") : tab === 'gpt' ? translate("projects:dictionaryManager.dictTabs_message_gPTDictionary") : translate("projects:dictionaryManager.dictTabs_message_dictionaryVariant2")}
-              <span className="dict-tab__count">{getFilesByTab(data, tab).length}</span>
-            </button>
-          ))}
-          {activeTab === 'gpt' && onGenerateGptDict ? (
-            <Button
-              variant="secondary"
-              onClick={() => setShowGenerateConfirm(true)}
-              disabled={generatingGptDict}
-              title={translate("projects:dictionaryManager.dictTabs_title_aIGenDicSourceExtractGPTDictionary")}
-            >
-              <Icon name="bot" />
-              {generatingGptDict ? translate("projects:dictionaryManager.dictTabs_message_text") : translate("projects:dictionaryManager.dictTabs_message_aIGPTDictionary")}
-            </Button>
-          ) : null}
-        </div>
-
         <div className="dict-layout">
+          <MotionConfig reducedMotion="never" transition={animated ? UI_TRANSITION : { duration: 0 }}>
           <aside className="dict-layout__sidebar">
+            <div className="dict-tabs">
+              {(['gpt', 'pre', 'post'] as DictTab[]).map((tab) => {
+                const label = tab === 'pre' ? translate("projects:dictionaryManager.dictTabs_message_dictionary") : tab === 'gpt' ? translate("projects:dictionaryManager.dictTabs_message_gPTDictionary") : translate("projects:dictionaryManager.dictTabs_message_dictionaryVariant2");
+                return (
+                  <button
+                    key={tab}
+                    className={`dict-tab ${activeTab === tab ? 'dict-tab--active' : ''}`}
+                    type="button"
+                    aria-pressed={activeTab === tab}
+                    title={label}
+                    onClick={() => handleTabChange(tab)}
+                  >
+                    <span className="dict-tab__label">{label}</span>
+                    <span className="dict-tab__count">{getFilesByTab(data, tab).length}</span>
+                  </button>
+                );
+              })}
+              <m.span
+                className="dict-tabs__indicator"
+                aria-hidden="true"
+                initial={false}
+                animate={{ x: `${(['gpt', 'pre', 'post'] as DictTab[]).indexOf(activeTab) * 100}%` }}
+              />
+            </div>
             <div className="dict-layout__sidebar-header">
               <h3>{translate("projects:dictionaryManager.dictLayoutSidebarHeader_message_dictionaryFile")}</h3>
               <button
@@ -874,7 +878,25 @@ export function DictionaryManager(props: DictionaryManagerProps) {
               />
               <Button onClick={() => void handleCreate()} disabled={creating}>{translate("projects:dictionaryManager.dictCreateFile_message_new")}</Button>
             </div>
-            <div className="dict-file-list">
+            {activeTab === 'gpt' && onGenerateGptDict ? (
+              <div className="dict-generate">
+                <Button
+                  variant="secondary"
+                  onClick={() => setShowGenerateConfirm(true)}
+                  disabled={generatingGptDict}
+                  title={translate("projects:dictionaryManager.dictTabs_title_aIGenDicSourceExtractGPTDictionary")}
+                >
+                  <Icon name="bot" />
+                  {generatingGptDict ? translate("projects:dictionaryManager.dictTabs_message_text") : translate("projects:dictionaryManager.dictTabs_message_aIGPTDictionary")}
+                </Button>
+              </div>
+            ) : null}
+            <m.div
+              key={activeTab}
+              className="dict-file-list"
+              initial={animated ? { opacity: 0, x: 6 } : false}
+              animate={{ opacity: 1, x: 0 }}
+            >
               {activeFiles.map((file) => {
                 const content = data?.dict_contents?.[file];
                 const isActive = selectedFile === file;
@@ -907,8 +929,9 @@ export function DictionaryManager(props: DictionaryManagerProps) {
               {activeFiles.length === 0 && (
                 <EmptyState title={translate("projects:dictionaryManager.dictFileList_title_currentDictionaryFile")} description={translate("projects:dictionaryManager.dictFileList_description_createCountDictionaryFile")} />
               )}
-            </div>
+            </m.div>
           </aside>
+          </MotionConfig>
 
           <div className="dict-layout__main">
             {selectedFile ? (

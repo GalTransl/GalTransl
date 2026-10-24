@@ -17,6 +17,7 @@ function fixture() {
     './Panel': { Panel: ({ children, actions }) => h('section', null, actions, children) },
     './page-state': { EmptyState: () => null, ErrorState: () => null, InlineFeedback: () => null, LoadingState: () => null },
     '../lib/backendUsage': { formatBackendUsage: () => '' },
+    './api': { DISABLE_ANIMATIONS_CHANGE_EVENT: 'animations', getDisableAnimationsPreference: () => false },
     '@tauri-apps/api/core': { invoke: async () => {} },
   });
   return { load, key(overrides = {}) {

@@ -10,6 +10,7 @@ import os
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 import urllib.request
 from http.server import ThreadingHTTPServer
 
@@ -136,6 +137,67 @@ class HttpTests(unittest.TestCase):
         # index1 在白名单里 → 不计入问题条目总数，也就不给任何过滤项计数
         self.assertEqual(out["problem_entries"], 1)
         self.assertEqual(out["visible_entries"], 1)
+
+    def test_unchanged_revision_skips_cache_scan(self):
+        first = self._get("/problems?config=config.yaml")
+        self.assertTrue(first["revision"])
+        with patch("GalTransl.server._iter_problem_cache_entries", side_effect=AssertionError("must not scan")):
+            checked = self._get(f"/problems?config=config.yaml&revision={first['revision']}")
+        self.assertEqual(checked, {"unchanged": True, "revision": first["revision"]})
+
+    def test_change_during_scan_does_not_cache_a_partial_snapshot(self):
+        with patch("GalTransl.server._problem_revision", side_effect=["before", "after"]):
+            response = self._get("/problems?config=config.yaml")
+        self.assertIsNone(response["revision"])
+        self.assertIn("problems", response)
+
+    def test_revision_tracks_cache_writes_additions_deletions_and_config(self):
+        with tempfile.TemporaryDirectory() as project:
+            cache_dir = os.path.join(project, CACHE_FOLDERNAME)
+            os.makedirs(cache_dir)
+            config_path = os.path.join(project, "config.yaml")
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write("common: {}\n")
+            cache_path = os.path.join(cache_dir, "a.json")
+            with open(cache_path, "wb") as f:
+                f.write(orjson.dumps([_entry(1, "问题A")]))
+            base = self.base.split("/api/projects/")[0] + "/api/projects/" + encode_project_dir(project)
+
+            def get(revision=None):
+                suffix = f"&revision={revision}" if revision else ""
+                with urllib.request.urlopen(f"{base}/problems?config=config.yaml{suffix}", timeout=30) as response:
+                    return json.load(response)
+
+            previous = get()
+            self.assertEqual(previous["problems"][0]["problem"], "问题A")
+            # 相同大小的改写也必须检测到。
+            with open(cache_path, "wb") as f:
+                f.write(orjson.dumps([_entry(1, "问题B")]))
+            current = get(previous["revision"])
+            self.assertNotEqual(current["revision"], previous["revision"])
+            self.assertEqual(current["problems"][0]["problem"], "问题B")
+            previous = current
+            with open(os.path.join(cache_dir, "b.json"), "wb") as f:
+                f.write(orjson.dumps([_entry(2, "问题C")]))
+            current = get(previous["revision"])
+            self.assertEqual(current["total"], 2)
+            self.assertNotEqual(current["revision"], previous["revision"])
+            previous = current
+            os.remove(cache_path)
+            current = get(previous["revision"])
+            self.assertEqual(current["total"], 1)
+            self.assertNotEqual(current["revision"], previous["revision"])
+            previous = current
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write('common:\n  problemFilterKey: ["问题C"]\n')
+            current = get(previous["revision"])
+            self.assertEqual(current["total"], 0)
+            self.assertEqual(current["filter_keys"], ["问题C"])
+            self.assertNotEqual(current["revision"], previous["revision"])
+            # 临时文件不参与清单或版本签名。
+            with open(os.path.join(cache_dir, "b.json.tmp"), "w", encoding="utf-8") as f:
+                f.write("[]")
+            self.assertTrue(get(current["revision"])["unchanged"])
 
 
 if __name__ == "__main__":

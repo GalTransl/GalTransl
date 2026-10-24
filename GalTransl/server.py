@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import errno
+import hashlib
 import json
 import socket
 import threading
@@ -1821,6 +1822,30 @@ def _cache_entries_to_trans_list(entries, filename, white_index):
     return trans_list
 
 
+def _problem_revision(project_dir: str, config_name: str) -> str | None:
+    """仅核对问题清单的数据源元信息，未变化时不读整份缓存。"""
+    cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
+    try:
+        names = sorted(name for name in os.listdir(cache_dir) if name.endswith(".json"))
+    except FileNotFoundError:
+        names = []
+    except OSError:
+        return None
+    sources = [("config", os.path.join(project_dir, config_name))]
+    sources.extend((name, os.path.join(cache_dir, name)) for name in names)
+    signature = []
+    for name, path in sources:
+        try:
+            stat = os.stat(path)
+        except FileNotFoundError:
+            signature.append((name, None))
+            continue
+        except OSError:
+            return None  # 无法确认数据源时，不能把旧清单当成仍有效。
+        signature.append((name, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino))
+    return hashlib.sha256(json.dumps(signature).encode("utf-8")).hexdigest()
+
+
 def _iter_problem_cache_entries(project_dir, white_index):
     """扫缓存目录，逐个产出未被问题白名单豁免的条目 (缓存文件名, 条目 dict)。
 
@@ -3304,7 +3329,12 @@ def build_handler(registry: JobRegistry):
 
             # GET /api/projects/:id/problems
             if sub_path == "/problems":
-                config_name = parse_qs(urlparse(self.path).query).get("config", ["config.yaml"])[0]
+                query = parse_qs(urlparse(self.path).query)
+                config_name = query.get("config", ["config.yaml"])[0]
+                revision = _problem_revision(project_dir, config_name)
+                if revision is not None and query.get("revision", [None])[0] == revision:
+                    self._send_json({"unchanged": True, "revision": revision})
+                    return
                 filter_keys = RUNTIME_PROGRESS_CACHE.get_problem_filter_keys(project_dir, config_name)
                 white_index = build_problem_white_list_index(
                     RUNTIME_PROGRESS_CACHE.get_problem_white_list(project_dir, config_name)
@@ -3323,7 +3353,10 @@ def build_handler(registry: JobRegistry):
                             "problem": problem_text,
                             "trans_by": e.get("trans_by", ""),
                         })
-                self._send_json({"project_dir": project_dir, "problems": all_problems, "total": len(all_problems), "filter_keys": filter_keys})
+                # 扫描途中有写入时不签发版本，下一次核对必须重新读取。
+                if revision != _problem_revision(project_dir, config_name):
+                    revision = None
+                self._send_json({"project_dir": project_dir, "problems": all_problems, "total": len(all_problems), "filter_keys": filter_keys, "revision": revision})
                 return
 
             # GET /api/projects/:id/problem_filter_stats

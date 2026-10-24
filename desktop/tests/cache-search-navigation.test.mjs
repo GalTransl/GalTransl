@@ -4,7 +4,7 @@ import { createElement as h, useState } from 'react';
 import { act, create } from 'react-test-renderer';
 import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
 
-async function fixture() {
+async function fixture({ setupSearch = true, api = {} } = {}) {
   const timers = new Map(), frames = new Map();
   let sequence = 0, view;
   const setTimer = (callback, delay) => { const id = ++sequence; timers.set(id, { callback, delay }); return id; };
@@ -52,12 +52,14 @@ async function fixture() {
       fetchProjectProblems: async () => ({ problems: [], filter_keys: [] }),
       fetchCacheFile: async (_project, file) => new Promise(resolve => pendingLoads.set(file, () => resolve({ entries, has_cache: true }))),
       searchCache: async () => ({ total: 2, results: ['a.json', 'b.json'].map(filename => ({ filename, ...entries[1], src: entries[1].post_src, dst: entries[1].pre_dst })) }),
+      ...api,
     },
   });
   const params = new URLSearchParams();
   const { ProjectCachePage } = load(new URL('../src/pages/ProjectCachePage.tsx', import.meta.url));
+  let pageProps = { ctx: { projectId: 'fixture', configFileName: 'config.yaml' }, active: true };
   await act(async () => {
-    view = create(h(ProjectCachePage, { ctx: { projectId: 'fixture', configFileName: 'config.yaml' } }), {
+    view = create(h(ProjectCachePage, pageProps), {
       createNodeMock: element => String(element.props.className).split(' ').includes('cache-card-list') ? pane : null,
     });
   });
@@ -77,15 +79,108 @@ async function fixture() {
     act(() => buttons().find(node => node.props.className?.startsWith('cache-file-item') && node.findAllByProps({ className: 'cache-file-item__name' })[0]?.props.children[1] === file)
       .props.onClick({ ctrlKey: false, metaKey: false, shiftKey: false }));
   };
-  clickText('common:actions.search');
-  clickText('projects:projectCachePage.addSearchCondition');
-  const queries = () => view.root.findAllByProps({ className: 'cache-search cache-search--global' });
-  act(() => queries()[0].props.onChange({ target: { value: '悶え' } }));
-  act(() => queries()[1].props.onChange({ target: { value: '挣扎' } }));
-  await flush(400);
+  if (setupSearch) {
+    clickText('common:actions.search');
+    clickText('projects:projectCachePage.addSearchCondition');
+    const queries = () => view.root.findAllByProps({ className: 'cache-search cache-search--global' });
+    act(() => queries()[0].props.onChange({ target: { value: '悶え' } }));
+    act(() => queries()[1].props.onChange({ target: { value: '挣扎' } }));
+    await flush(400);
+  }
+  const updatePage = async (props) => {
+    pageProps = { ...pageProps, ...props };
+    await act(async () => { view.update(h(ProjectCachePage, pageProps)); });
+  };
   const jump = i => { act(() => view.root.findAllByType('button').find(node => node.props['data-search-idx'] === i).props.onClick()); flushFrames(); };
-  return { view, pane, jump, resolveFile, flush, flushFrames, selectFile, clickText };
+  return { view, pane, jump, resolveFile, flush, flushFrames, selectFile, clickText, updatePage };
 }
+
+test('problem tabs reuse their snapshot and page returns conditionally check without hiding the list', async () => {
+  const calls = [];
+  let finish, hold = false;
+  const f = await fixture({ setupSearch: false, api: {
+    fetchProjectProblems: async (...args) => {
+      calls.push(args);
+      if (hold) return new Promise(resolve => { finish = resolve; });
+      if (args[2]) return { unchanged: true, revision: args[2] };
+      return { problems: [{ filename: 'a.json', index: 1, problem: 'old problem' }], filter_keys: [], revision: 'v1' };
+    },
+  } });
+  try {
+    await act(async () => f.clickText('projects:projectCachePage.cacheSidebarTabs_button_problem'));
+    const labels = () => f.view.root.findAllByProps({ className: 'cache-problems-group__type' }).map(node => node.props.children);
+    const loading = () => f.view.root.findAllByProps({ className: 'cache-problems-loading' }).length;
+    assert.deepEqual(labels(), ['old problem']);
+    f.clickText('common:actions.search');
+    await act(async () => f.clickText('projects:projectCachePage.cacheSidebarTabs_button_problem'));
+    f.clickText('projects:projectCachePage.cacheSidebarTabs_button_problem');
+    assert.equal(calls.length, 3);
+    assert.ok(calls.slice(1).every(args => args[2] === 'v1'));
+    hold = true;
+    await f.updatePage({ active: false });
+    await f.updatePage({ active: true });
+    assert.equal(calls.length, 4);
+    assert.equal(calls[3][2], 'v1');
+    assert.equal(loading(), 0);
+    assert.deepEqual(labels(), ['old problem']);
+    await f.updatePage({ active: false });
+    await f.updatePage({ active: true });
+    assert.equal(calls.length, 4); // A pending check is reused.
+    await act(async () => finish({ unchanged: true, revision: 'v1' }));
+    assert.deepEqual(labels(), ['old problem']);
+    await f.updatePage({ active: false });
+    await f.updatePage({ active: true });
+    await act(async () => finish({ problems: [], filter_keys: ['old problem'], revision: 'v2' }));
+    assert.equal(loading(), 0);
+    assert.deepEqual(labels(), []);
+    hold = false;
+    f.clickText('common:actions.search');
+    await act(async () => f.clickText('projects:projectCachePage.cacheSidebarTabs_button_problem'));
+    assert.equal(calls.at(-1)[2], 'v2'); // A valid empty snapshot must also be cached.
+    assert.equal(loading(), 0);
+  } finally { act(() => f.view.unmount()); }
+});
+
+test('saving cache entries bypasses the old problem revision and refreshes the snapshot', async () => {
+  const calls = [];
+  const f = await fixture({ setupSearch: false, api: {
+    fetchProjectProblems: async (...args) => {
+      calls.push(args);
+      return { problems: [], filter_keys: [], revision: `v${calls.length}` };
+    },
+    saveCacheFile: async (_project, _file, entries) => ({ entries }),
+  } });
+  try {
+    f.selectFile('a.json');
+    await f.resolveFile('a.json');
+    const card = f.view.root.findByProps({ 'data-cache-index': 25 });
+    act(() => card.findByProps({ className: 'cache-card__expand' }).props.onClick());
+    act(() => card.findAllByType('textarea')[0].props.onChange({ target: { value: 'edited translation' } }));
+    await act(async () => f.clickText('common:actions.save'));
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1][2], undefined);
+  } finally { act(() => f.view.unmount()); }
+});
+
+test('problem snapshots are scoped to the project/config and late responses cannot replace the current list', async () => {
+  const calls = [];
+  const f = await fixture({ setupSearch: false, api: {
+    fetchProjectProblems: (...args) => new Promise(resolve => calls.push({ args, resolve })),
+  } });
+  try {
+    f.clickText('projects:projectCachePage.cacheSidebarTabs_button_problem');
+    assert.equal(calls.length, 1); // Initial load and early tab click share a request.
+    await f.updatePage({ ctx: { projectId: 'fixture', configFileName: 'other.yaml' } });
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].args[2], undefined);
+    await act(async () => calls[1].resolve({ problems: [{ filename: 'a.json', index: 1, problem: 'new config' }], revision: 'new' }));
+    await act(async () => calls[0].resolve({ problems: [{ filename: 'a.json', index: 1, problem: 'stale' }], revision: 'stale' }));
+    assert.deepEqual(f.view.root.findAllByProps({ className: 'cache-problems-group__type' }).map(node => node.props.children), ['new config']);
+    await f.updatePage({ ctx: { projectId: 'other-project', configFileName: 'other.yaml' } });
+    assert.equal(calls.length, 3);
+    assert.equal(calls[2].args[2], undefined);
+  } finally { act(() => f.view.unmount()); }
+});
 
 test('result jumps wait for the file, center only the editor and override saved positions', async () => {
   const f = await fixture();

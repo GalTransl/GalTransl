@@ -338,6 +338,8 @@ export type ProblemEntry = {
 };
 
 export type ProjectProblemsResponse = {
+  unchanged?: false;
+  revision?: string | null;
   project_dir: string;
   problems: ProblemEntry[];
   total: number;
@@ -857,8 +859,14 @@ export async function deleteCommonDictionaryFile(payload: { filename: string }) 
   );
 }
 
-export async function fetchProjectProblems(projectId: string, configFileName = 'config.yaml') {
-  return apiRequest<ProjectProblemsResponse>(`/api/projects/${projectId}/problems?config=${encodeURIComponent(configFileName)}`);
+type ProjectProblemsCheckResponse = ProjectProblemsResponse | { unchanged: true; revision: string };
+
+export function fetchProjectProblems(projectId: string, configFileName?: string): Promise<ProjectProblemsResponse>;
+export function fetchProjectProblems(projectId: string, configFileName: string, revision: string | null | undefined): Promise<ProjectProblemsCheckResponse>;
+export async function fetchProjectProblems(projectId: string, configFileName = 'config.yaml', revision?: string | null): Promise<ProjectProblemsCheckResponse> {
+  const condition = revision ? `&revision=${encodeURIComponent(revision)}` : '';
+  return apiRequest<ProjectProblemsCheckResponse>(
+    `/api/projects/${projectId}/problems?config=${encodeURIComponent(configFileName)}${condition}`, { cache: 'no-store' });
 }
 
 // ---- Name Table API functions ----

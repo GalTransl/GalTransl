@@ -102,7 +102,6 @@
   -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
 }
 
- .app-layout--custom-background .project-dictionary-page .dict-tab,
  .app-layout--custom-background .project-dictionary-page .dict-layout__sidebar {
   background: var(--custom-bg-fill-strong) !important;
   backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
@@ -267,7 +266,6 @@
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .retransl-popover,
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .retransl-popover__arrow,
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .retransl-popover__input,
-:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-tab,
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-layout__sidebar,
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-create-file input,
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-search,
@@ -284,7 +282,6 @@
   -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
 }
 
-:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-tab,
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-layout__sidebar {
   background: var(--custom-bg-fill-strong) !important;
   backdrop-filter: blur(var(--custom-bg-surface-blur-soft));

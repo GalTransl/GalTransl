@@ -31,55 +31,74 @@
 }
 
 .dict-tabs {
+  position: relative;
   display: flex;
-  gap: var(--space-2);
-  /* 这一行贴着 content 的 overflow:hidden 顶边；Button hover 会 translateY(-1px)，
-     不留余量时顶边框会被裁掉。 */
-  padding-top: 2px;
-  margin-bottom: var(--space-5);
+  flex-shrink: 0;
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-line);
 }
 
 .dict-tab {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-5);
-  border: 1px solid var(--color-line);
-  background: var(--color-surface-strong);
-  border-radius: var(--radius-control);
+  justify-content: center;
+  flex: 1;
+  min-width: 0;
+  gap: 4px;
+  padding: var(--space-2) 4px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  border-radius: 0;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--color-text-muted);
   transition: all var(--transition-fast);
 }
 
+.dict-tab__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .dict-tab:hover {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
+  color: var(--color-text);
+  background: var(--color-neutral-soft);
 }
 
 .dict-tab--active {
-  background: var(--color-primary-soft);
-  border-color: var(--color-primary);
   color: var(--color-primary);
-  font-weight: 600;
+}
+
+.dict-tabs__indicator {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: calc(100% / 3);
+  height: 2px;
+  background: var(--color-primary);
+  pointer-events: none;
 }
 
 .dict-tab__count {
-  font-size: 12px;
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 16px;
   background: var(--color-neutral-soft);
-  padding: 2px 8px;
-  border-radius: 999px;
+  padding: 0 5px;
+  border-radius: 8px;
 }
 
 .dict-tab--active .dict-tab__count {
-  background: var(--color-primary);
-  color: white;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
 }
 
 .dict-layout {
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 300px minmax(0, 1fr);
   gap: var(--space-5);
   align-items: stretch;
   min-height: 0;
@@ -91,6 +110,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   background: var(--color-surface-strong);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-card);
@@ -153,6 +173,17 @@
 .dict-create-file .button {
   min-height: 36px;
   padding: 0 12px;
+  font-size: 12px;
+}
+
+.dict-generate {
+  margin-bottom: var(--space-3);
+}
+
+.dict-generate .button {
+  min-height: 32px;
+  padding: 0 10px;
+  gap: 6px;
   font-size: 12px;
 }
 

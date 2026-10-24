@@ -558,6 +558,10 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   const [problemFilterKeys, setProblemFilterKeys] = useState<string[]>([]);
   const [savingKeyword, setSavingKeyword] = useState(false);
   const problemRequestRef = useRef(0);
+  const problemSnapshotRef = useRef<{ scope: string; revision?: string | null } | null>(null);
+  const problemLoadRef = useRef<{ scope: string; promise: Promise<void> } | null>(null);
+  const problemScopeRef = useRef('');
+  problemScopeRef.current = JSON.stringify([projectId, configFileName]);
   // Retransl keyword popover editor
   const [retranslEditor, setRetranslEditor] = useState<{
     type: string;
@@ -1131,6 +1135,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         return next;
       });
       setInfo(targetFile === selectedFile ? uiMessage("projects:projectCachePage.handleSave_setInfo_doneSaveCache") : uiMessage("projects:projectCachePage.handleSave_setInfo_doneSave", { targetFile: targetFile }));
+      void loadProblems(true);
     } catch (err) {
       setLocalError(normalizeError(err, uiMessage("projects:projectCachePage.handleSave_normalizeError_saveCacheFailed")));
     } finally {
@@ -1224,34 +1229,50 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setInfo(uiMessage("projects:projectCachePage.handleSaveAll_setInfo_doneSaveCountFile", { count: savedFiles.length }));
     }
     setSavingAll(false);
+    if (savedFiles.length > 0) void loadProblems(true);
   };
 
-  // Load problems when switching to problems tab
-  const loadProblems = useCallback(async () => {
-    if (!projectId) return;
+  // 页签复用快照；返回页面只核对数据源版本，保存/手动刷新才强制重读。
+  const loadProblems = useCallback((force = false): Promise<void> => {
+    if (!projectId) return Promise.resolve();
+    const scope = JSON.stringify([projectId, configFileName]);
+    if (scope !== problemScopeRef.current) return Promise.resolve();
+    if (!force && problemLoadRef.current?.scope === scope) return problemLoadRef.current.promise;
     const request = ++problemRequestRef.current;
-    setLoadingProblems(true);
-    try {
-      const res = await fetchProjectProblems(projectId, configFileName);
-      if (request !== problemRequestRef.current) return;
-      setProblems(res.problems);
-      const keys = res.filter_keys || [];
-      setProblemFilterKeys(previous => previous.length === keys.length && previous.every((key, i) => key === keys[i]) ? previous : keys);
-    } catch (err) {
-      if (request === problemRequestRef.current) setLocalError(normalizeError(err, uiMessage("projects:projectCachePage.loadProblems_normalizeError_loadProblemFailed")));
-    } finally {
-      if (request === problemRequestRef.current) setLoadingProblems(false);
-    }
+    const snapshot = problemSnapshotRef.current?.scope === scope ? problemSnapshotRef.current : null;
+    setLoadingProblems(!snapshot);
+    const promise = (async () => {
+      try {
+        const res = await fetchProjectProblems(projectId, configFileName, force ? undefined : snapshot?.revision);
+        if (request !== problemRequestRef.current) return;
+        if (!res.unchanged) {
+          setProblems(res.problems);
+          const keys = res.filter_keys || [];
+          setProblemFilterKeys(previous => previous.length === keys.length && previous.every((key, i) => key === keys[i]) ? previous : keys);
+        }
+        problemSnapshotRef.current = { scope, revision: res.revision };
+      } catch (err) {
+        if (request === problemRequestRef.current) setLocalError(normalizeError(err, uiMessage("projects:projectCachePage.loadProblems_normalizeError_loadProblemFailed")));
+      } finally {
+        if (request === problemRequestRef.current) {
+          setLoadingProblems(false);
+          problemLoadRef.current = null;
+        }
+      }
+    })();
+    problemLoadRef.current = { scope, promise };
+    return promise;
   }, [projectId, configFileName]);
 
   useEffect(() => {
+    problemSnapshotRef.current = null;
     setProblemFilterKeys([]);
     setProblems([]);
     void loadProblems();
-    return () => { problemRequestRef.current += 1; };
+    return () => { problemRequestRef.current += 1; problemLoadRef.current = null; };
   }, [loadProblems]);
 
-  const refreshVisibleData = useCallback(async () => {
+  const refreshVisibleData = useCallback(async (forceProblems = false) => {
     if (!projectId) return;
     // 配置可能刚被修改：丢弃页面内的旧快照，下次打开其他文件也要重新读取。
     // 未保存的译文继续保留在内存里。
@@ -1264,7 +1285,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     await Promise.allSettled([
       loadCacheFiles(),
       runGlobalSearch(),
-      loadProblems(),
+      loadProblems(forceProblems),
       refreshCurrentFile(),
     ]);
   }, [dirtyFiles, loadCacheFiles, loadProblems, projectId, refreshCurrentFile, runGlobalSearch, selectedFile]);
@@ -1337,7 +1358,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       await updateProjectConfig(projectId, { config, config_file_name: configFileName });
       if (field === 'problemFilterKey') {
         setProblemFilterKeys([...existingKeys, keyword]);
-        await Promise.allSettled([loadProblems(), runGlobalSearch()]);
+        await Promise.allSettled([loadProblems(true), runGlobalSearch()]);
       }
       setInfo(uiMessage("projects:projectCachePage.handleAddProblemKeyword_setInfo_doneVariant2", { keyword: keyword, label: label }));
     } catch (err) {
@@ -1417,10 +1438,11 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setInfo(uiMessage("projects:projectCachePage.handleDeleteSelectedFiles_setInfo_doneDeleteCountCacheFile", { count: res.deleted_files.length }));
       // 刷新文件列表
       void loadCacheFiles();
+      void loadProblems(true);
     } catch (err) {
       setLocalError(normalizeError(err, uiMessage("projects:projectCachePage.handleDeleteSelectedFiles_normalizeError_deleteCacheFileFailed")));
     }
-  }, [projectId, selectedFile, loadCacheFiles, uncachedFiles]);
+  }, [projectId, selectedFile, loadCacheFiles, loadProblems, uncachedFiles]);
 
   // Close context menu on outside click / Escape
   useEffect(() => {
@@ -1619,7 +1641,11 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
             <button
               type="button"
               className={`cache-sidebar-tab ${sidebarTab === 'problems' ? 'cache-sidebar-tab--active' : ''}`}
-              onClick={() => { setSidebarTab('problems'); void loadProblems(); }}
+              onClick={() => {
+                if (sidebarTab === 'problems') return;
+                setSidebarTab('problems');
+                void loadProblems();
+              }}
             >{translate("projects:projectCachePage.cacheSidebarTabs_button_problem")}{problems.length > 0 ? <span className="cache-sidebar-tab__badge">{problems.length}</span> : ''}
             </button>
           </div>
@@ -1645,7 +1671,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                   <button
                     type="button"
                     className={`icon-btn icon-btn--refresh${refreshingFiles ? ' icon-btn--spinning' : ''}`}
-                    onClick={() => void refreshVisibleData()}
+                    onClick={() => void refreshVisibleData(true)}
                     disabled={refreshingFiles || loadingEntries}
                     title={translate("projects:projectCachePage.cacheLayoutSidebarHeaderActions_title_file")}
                     aria-label={translate("projects:projectCachePage.cacheLayoutSidebarHeaderActions_ariaLabel_file")}
