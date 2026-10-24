@@ -81,6 +81,46 @@ class WritePreviewTests(unittest.TestCase):
             self.assertIn(detail, text)
         self.assertNotIn("| b2 |", text)
 
+    def test_multifile_patch_omission_is_announced_once_and_keeps_late_diagnostics(self):
+        result = {"files": [
+            {"filename": f"chapter{i}.json", "updated": 4, "changes": _changes(4, f"chapter{i}#"),
+             "problems": [{"index": i, "problem": "译名未统一"}]}
+            for i in range(12)
+        ]}
+        result["files"][-1].update({
+            "verification": "unknown", "audit_error": "记录失败",
+            "skipped": [{"index": 99, "reason": "字段不可写"}],
+            "not_found": [{"index": 100}], "error": "未保存文件",
+        })
+        original = copy.deepcopy(result)
+
+        text = _render_tool_result_table("patch_transl_cache", result)
+
+        self.assertEqual(len(_table_data(text)), 10)
+        self.assertEqual(text.count("后续修改为节省上下文，不展示 diff"), 1)
+        self.assertNotIn("本次展示 0 行", text)
+        self.assertNotIn("变更预览共", text)
+        self.assertNotIn("没列出来的就是", text)
+        self.assertIn("共改动 48 条", text)
+        self.assertEqual(text.count("译名未统一"), 12)
+        for detail in ("chapter11.json", "未验证", "pending", "字段不可写", "100", "未保存文件"):
+            self.assertIn(detail, text)
+        self.assertEqual(result, original)  # 完整结果仍供前端变更卡和回放使用
+
+    def test_multifile_patch_exact_budget_has_no_omission_notice(self):
+        result = {"files": [
+            {"filename": "a.json", "updated": 10, "changes": _changes(10)},
+            {"filename": "b.json", "updated": 0, "changes": [], "error": "文件不存在"},
+        ]}
+        text = _render_tool_result_table("patch_transl_cache", result)
+        self.assertEqual(len(_table_data(text)), 10)
+        self.assertNotIn("不展示 diff", text)
+        self.assertIn("文件不存在", text)
+        result["files"].append({"filename": "c.json", "updated": 1, "changes": _changes(1, "hidden")})
+        text = _render_tool_result_table("patch_transl_cache", result)
+        self.assertEqual(text.count("不展示 diff"), 1)
+        self.assertNotIn("hidden", text)
+
     def test_delete_preview_is_limited_but_missing_indexes_are_kept(self):
         result = {"deleted_indexes": list(range(80)), "deleted_preview": [{"index": i, "text": f"line{i}"} for i in range(50)], "missing_indexes": [999]}
         text = _render_tool_result_table("delete_transl_cache", result)

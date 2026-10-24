@@ -351,7 +351,7 @@ class PatchMarkdownTests(unittest.TestCase):
 
         text = _render_tool_result_table("patch_transl_cache", result)
 
-        self.assertIn("改完仍存在的问题 1 条", text)
+        self.assertIn("仍有问题 1 条", text)
         self.assertIn("#1：仍有残留日文", text)
 
 

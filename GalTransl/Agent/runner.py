@@ -13,6 +13,7 @@ from typing import Any, TYPE_CHECKING
 from GalTransl.Agent.llm_backend import SubagentBackendView, resolve_llm_backend, summarize_messages
 from GalTransl.Reasoning import apply_reasoning_kwargs
 from GalTransl.Agent.session_store import SessionStore
+from GalTransl.Agent.cache_usage import _add_cache_usage, _provider_cache_usage
 from GalTransl.Agent.backend_http import _encode_project_id, _http_json
 from GalTransl.Agent.context import (
     _DANGLING_TOOL_NOTE,
@@ -855,6 +856,7 @@ class AgentRunner:
         pending_reasoning: list[str] = []  # 距上次 emit 攒下的思考文本（节流缓冲）
         throttle: dict[str, float] = {"content": 0.0, "reasoning": 0.0}
         finish_reason = ""
+        cache_usage = None  # 同一物理请求可能多次报告累计 usage，只结算最后一次。
         stream_started = time.time()  # 段起点缺失时的耗时兜底
         # 交替思考模型（GLM-4.6 等）在同一条流里 想/说 会来回切换，而
         # content_end / reasoning_end 是前端撤打字机光标的依据，必须跟着
@@ -902,6 +904,9 @@ class AgentRunner:
             # usage 可能在 choices 为空的收尾 chunk 上单独到达
             usage = getattr(chunk, "usage", None)
             if usage is not None:
+                reported_cache = _provider_cache_usage(usage)
+                if reported_cache is not None:
+                    cache_usage = reported_cache
                 prompt_tokens = getattr(usage, "prompt_tokens", None)
                 if isinstance(prompt_tokens, int) and prompt_tokens > 0 and self._pending_compaction is None:
                     self._record_context_usage(prompt_tokens)
@@ -963,6 +968,12 @@ class AgentRunner:
                     if fn.arguments:
                         slot["arguments_parts"].append(fn.arguments)
 
+        if cache_usage is not None and not self.stop_event.is_set():
+            self.state.cache_usage = _add_cache_usage(self.state.cache_usage, cache_usage)
+            if self._store is not None:
+                self._store.append_meta(cache_usage=self.state.cache_usage)
+            self._emit_context_usage()
+
         # 冲掉两条节流缓冲里剩下的文本
         _flush_stream("content", pending_content, len(content_parts), force=True)
         _flush_stream("reasoning", pending_reasoning, len(reasoning_parts), force=True)
@@ -1021,6 +1032,7 @@ class AgentRunner:
             "context": {
                 "used_tokens": self._estimate_context_tokens(),
                 "window_tokens": self._context_window,
+                "cache": dict(self.state.cache_usage) or None,
             },
         })
 

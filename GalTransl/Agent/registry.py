@@ -10,6 +10,7 @@ from typing import Any
 
 from GalTransl.Agent import session_store
 from GalTransl.Agent.session_store import SessionStore
+from GalTransl.Agent.cache_usage import _restore_cache_usage
 from GalTransl.Agent.context import (
     _answers_for_text,
     _dangling_ask_question_texts,
@@ -301,6 +302,7 @@ class AgentRuntime:
             last_prompt_tokens=usage_tokens,
             anchored_message_count=usage_count,
             usage_model=usage_model,
+            cache_usage=_restore_cache_usage(meta.get("cache_usage")),
             step=max_step,
             session_id=session_id,
             title=str(meta.get("title") or session_id),
@@ -825,6 +827,7 @@ class AgentRuntime:
                         _tools_overhead_tokens(AGENT_TOOLS),
                     ),
                     "window_tokens": state.context_window,
+                    "cache": dict(state.cache_usage) or None,
                 },
                 # 排队中的消息：队列面板的数据源（实时变更走 queue 事件）
                 "queued": [m.to_dict() for m in state.pending_messages],

@@ -62,6 +62,9 @@
     "formatSessionTime_message_textVariant2": "{{days}} d ago"
   },
   "composer": {
+    "cacheUnknown": "—",
+    "cacheUnavailable": "Cache hit rate unavailable: the provider has not reported cache usage.",
+    "cacheDetail": "Average cache hit rate {{rate}} · Latest {{latest}}\n{{cached}} / {{input}} input tokens cached across {{count}} requests.\nScope: this chat's main Agent (including compaction, excluding subagents); only requests with reported cache usage are counted.",
     "detail_message_contextDone": "{{value}}% · {{value2}} / {{value3}} of the context used",
     "label_message_wait": "Waiting for your instructions",
     "label_message_doneStop": "Stopped"

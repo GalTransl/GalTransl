@@ -98,6 +98,8 @@ class AgentState:
     # 上次 LLM 响应的 prompt_tokens，作为上下文用量估算的锚点（0 表示未知）
     usage_model: str = ""  # 最后一次实测统计所属模型；新 usage 到达前保留旧基线。
     last_prompt_tokens: int = 0
+    # 本会话主 Agent 的实测提示缓存统计（含压缩请求，不含子代理）。
+    cache_usage: dict[str, Any] = field(default_factory=dict)
     # 锚点对应的历史长度：锚点之后新增的消息要另外估算
     anchored_message_count: int = 0
     # 上下文窗口（token），来自后端配置 contextWindow；界面指示器的分母

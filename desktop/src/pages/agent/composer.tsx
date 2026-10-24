@@ -43,7 +43,18 @@ export function ContextMeter({ usage }: { usage: AgentContextUsage }) {
   const percent = ratio * 100;
   const r = 7;
   const circumference = 2 * Math.PI * r;
-  const detail = translate("agent:composer.detail_message_contextDone", { value: percent.toFixed(1), value2: formatTokenCount(used), value3: formatTokenCount(window) });
+  const contextDetail = translate("agent:composer.detail_message_contextDone", { value: percent.toFixed(1), value2: formatTokenCount(used), value3: formatTokenCount(window) });
+  const cache = usage.cache;
+  const formatRate = (rate: number | null | undefined) => typeof rate === 'number' && Number.isFinite(rate) && rate >= 0 && rate <= 1
+    ? `${(rate * 100).toFixed(1)}%` : translate('agent:composer.cacheUnknown');
+  const cacheRate = formatRate(cache?.hit_rate);
+  const cacheDetail = cache && cache.request_count > 0
+    ? translate('agent:composer.cacheDetail', {
+      rate: cacheRate, latest: formatRate(cache.latest_hit_rate), count: cache.request_count,
+      cached: cache.cached_tokens.toLocaleString(), input: cache.input_tokens.toLocaleString(),
+    })
+    : translate('agent:composer.cacheUnavailable');
+  const detail = `${contextDetail}\n\n${cacheDetail}`;
   return (
     <span
       className={`agent-context-meter${percent >= 80 ? ' is-warn' : ''}`}

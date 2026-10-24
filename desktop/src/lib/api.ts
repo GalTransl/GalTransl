@@ -2040,6 +2040,16 @@ export type AgentEventType =
 export type AgentContextUsage = {
   used_tokens: number;
   window_tokens: number;
+  /** 本会话主 Agent 的 provider 实测缓存用量；未上报的请求不计入平均值。 */
+  cache?: {
+    request_count: number;
+    input_tokens: number;
+    cached_tokens: number;
+    hit_rate: number | null;
+    latest_input_tokens: number;
+    latest_cached_tokens: number | null;
+    latest_hit_rate: number | null;
+  } | null;
 };
 
 /** 排队中的用户消息（模型还没看到）：显示在 composer 上方的队列面板里。 */

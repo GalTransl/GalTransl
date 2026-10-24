@@ -608,6 +608,7 @@ def _md_render_patch_transl_cache(result: dict[str, Any]) -> str:
             f"被改条目的 trans_by 已标成 {result['trans_by']}（与翻译引擎翻的区分开）。"
         )
     remaining = MODEL_DIFF_MAX_LINES
+    omission_noted = False
     for index, row in enumerate(files, start=1):
         parts.append(f"## {index}. {row.get('filename')}（改 {int(row.get('updated') or 0)} 条）")
         if row.get("error"):
@@ -620,10 +621,14 @@ def _md_render_patch_transl_cache(result: dict[str, Any]) -> str:
             parts.append("修改已提交，但修改记录的完成状态写入失败；pending 记录保留修改前后内容。")
         block: list[str] = []
         changes = [c for c in (row.get("changes") or []) if isinstance(c, dict)]
-        table = _md_changes(changes, remaining)
-        remaining -= min(remaining, len(changes))
+        shown = changes[:remaining]
+        table = _md_changes(shown)
+        remaining -= len(shown)
         if table:
             block.append(table)
+        if len(shown) < len(changes) and not omission_noted:
+            block.append("后续修改为节省上下文，不展示 diff（仅省略预览）。")
+            omission_noted = True
         not_found = [n for n in (row.get("not_found") or []) if isinstance(n, dict)]
         if not_found:
             block.append("没找到这些 index：" + "、".join(str(n.get("index")) for n in not_found))
@@ -636,7 +641,7 @@ def _md_render_patch_transl_cache(result: dict[str, Any]) -> str:
         problems = [p for p in (row.get("problems") or []) if isinstance(p, dict)]
         if problems:
             block.append(
-                f"改完仍存在的问题 {len(problems)} 条（没列出来的就是已经消掉了）：\n"
+                f"仍有问题 {len(problems)} 条：\n"
                 + "\n".join(f"- #{p.get('index')}：{p.get('problem')}" for p in problems)
             )
         if block:

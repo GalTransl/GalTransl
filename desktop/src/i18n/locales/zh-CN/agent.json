@@ -62,6 +62,9 @@
     "formatSessionTime_message_textVariant2": "{{days}}天前"
   },
   "composer": {
+    "cacheUnknown": "—",
+    "cacheUnavailable": "缓存命中率未知：后端尚未返回缓存用量。",
+    "cacheDetail": "平均缓存命中率 {{rate}} · 最近一次 {{latest}}\n累计命中 {{cached}} / {{input}} 输入 token，统计 {{count}} 次请求。\n范围：本会话主 Agent（含压缩，不含子 Agent）；仅统计后端返回缓存用量的请求。",
     "detail_message_contextDone": "{{value}}% · {{value2}} / {{value3}} 上下文已使用",
     "label_message_wait": "等待指令",
     "label_message_doneStop": "已停止"
