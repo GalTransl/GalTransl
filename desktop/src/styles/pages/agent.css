@@ -812,6 +812,9 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  /* 滚动权由 followTail 管理，避免浏览器锚定与折叠测高重复补偿。 */
+  overflow-anchor: none;
   /* 正文列的外框必须和 composer 卡片的外框一模一样，否则窗口一窄（两边都不再被
      840px 封顶时）正文就比输入框多内缩一块。做法：滚动容器用与 composer 容器
      相同的左右留白（--space-6），再把右侧滚动条占掉的宽度补回去，正文列的中心
@@ -1432,7 +1435,60 @@
   overflow-wrap: anywhere;
 }
 
-/* ── Final reply（折叠时位于块外，展开时位于块内） ── */
+/* ── Final reply：始终独立于执行记录，保持正文宽度和 DOM 稳定 ── */
+
+.agent-answer {
+  min-width: 0;
+  padding-bottom: 10px;
+}
+
+.agent-answer__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  margin-top: 6px;
+  color: var(--color-text-muted);
+}
+
+.agent-message-copy {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.agent-message-copy:hover:not(:disabled) {
+  background: var(--agent-hover);
+  color: var(--color-text);
+}
+
+.agent-message-copy:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.agent-message-copy__status {
+  font-size: 0.75rem;
+}
+
+.agent-message-copy__status.is-error {
+  color: var(--color-danger);
+}
+
+.agent-activity__header:focus-visible,
+.agent-reasoning__header:focus-visible,
+.agent-message-copy:focus-visible,
+.agent-jump-bottom:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
 
 .agent-final {
   margin: 2px 0 6px;

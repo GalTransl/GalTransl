@@ -1,11 +1,12 @@
 import { usePageActive } from '../../../components/PageActivity';
 import { t as translate, useUiLanguage } from "../../../i18n";
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useId, useRef, useState } from 'react';
 import { AnimatedDisclosure } from './AnimatedDisclosure';
 import { AgentMarkdown } from '../../../components/AgentCacheRef';
 import { Icon } from '../../../components/Icon';
 import { ToolRow, toolRowPhases } from './ToolRow';
 import { TranslationJobCard } from './TranslationJobCard';
+import { MessageCopyButton } from './MessageCopyButton';
 import {
   type ActivityItem,
   liveTail,
@@ -32,18 +33,21 @@ export const AgentGroupView = memo(function AgentGroupView({
   if (group.type === 'user') return <UserMessageRow message={group.message} step={group.step} />;
   if (group.type === 'error') return <ErrorNotice group={group} />;
   if (group.type === 'stopped') return <StoppedNotice group={group} />;
-  if (group.finalContent && group.items.length === 0) {
+  if (group.finalContent && group.items.every((item) => item.final)) {
     return <FinalMessage item={group.finalContent} projectDir={projectDir} />;
   }
   return <AgentActivityGroup group={group} isLive={isLive} projectDir={projectDir} persistKey={persistKey} />;
 });
 
-/** 同一份收尾正文随工作块展开状态切换位置。外层标记用于完成后的阅读定位。 */
+/** 正文始终是执行记录的兄弟节点：折叠不能重建 Markdown、缓存卡片或文本选区。 */
 const FinalMessage = memo(function FinalMessage({ item, projectDir }: { item: ActivityItem; projectDir: string }) {
   const uiLanguage = useUiLanguage();
   return (
-    <div data-agent-final-step={item.step}>
+    <div className="agent-answer" data-agent-final-step={item.step}>
       <AgentMarkdown text={item.content || ''} projectDir={projectDir} className="agent-final" />
+      <div className="agent-answer__actions">
+        <MessageCopyButton text={item.content || ''} />
+      </div>
     </div>
   );
 });
@@ -73,10 +77,10 @@ function AgentActivityGroup({
 }) {
   const uiLanguage = useUiLanguage();
   const active = usePageActive();
+  const disclosureId = useId();
   const stateKey = `${persistKey}::${group.id}`;
   const [manualOpen, setOpenRaw] = useState(() => manualOpenState.get(stateKey));
-  // 自动状态在本次 render 就生效，避免 finish 后先把正文挂在块内、再移到块外，
-  // 导致阅读定位拿到一个马上会被卸载的节点。
+  // 自动状态在本次 render 就生效，完成后立即收起记录，尊重手动选择。
   const open = manualOpen ?? isLive;
   const setManualOpen = (value: boolean) => {
     manualOpenState.set(stateKey, value);
@@ -126,7 +130,7 @@ function AgentActivityGroup({
   const toolCount = items.filter((it) => it.kind === 'tool').length;
   // 压缩与重试提示都不算"工作步骤"：前者是后台维护动作，后者只是同一次请求
   // 的重发（一次重试一个步骤会把「重试 10 次」显示成 10 个步骤）
-  const visibleCount = items.filter((it) => it.kind !== 'compact' && it.kind !== 'retry').length;
+  const visibleCount = items.filter((it) => !it.final && it.kind !== 'compact' && it.kind !== 'retry').length;
 
   // 文案：运行中「思考中/处理中 · Ns」，结束「已思考/已处理 Ns」
   const label = isLive
@@ -156,6 +160,7 @@ function AgentActivityGroup({
             setManualOpen(!open);
           }}
           aria-expanded={open}
+          aria-controls={disclosureId}
         >
           <span className="agent-activity__icon"><Icon name="spark" /></span>
           <span className={`agent-activity__label${isLive ? ' is-running' : ''}`}>{label}</span>
@@ -163,7 +168,7 @@ function AgentActivityGroup({
           <span className="agent-activity__caret">›</span>
         </button>
         {tail ? <div className="agent-activity__preview">{tail}</div> : null}
-        <AnimatedDisclosure open={open} className="agent-activity__collapse">
+        <AnimatedDisclosure id={disclosureId} open={open} className="agent-activity__collapse">
           {() => (
             <div className="agent-activity__collapse-inner">
               <div className="agent-activity__body">
@@ -183,13 +188,12 @@ function AgentActivityGroup({
                     <ToolRow key={`x-${item.id || i}`} item={item} phase={phases[i]} persistKey={persistKey} />
                   ),
                 )}
-                {open && group.finalContent ? <FinalMessage item={group.finalContent} projectDir={projectDir} /> : null}
               </div>
             </div>
           )}
         </AnimatedDisclosure>
       </div>
-      {!open && group.finalContent ? <FinalMessage item={group.finalContent} projectDir={projectDir} /> : null}
+      {group.finalContent ? <FinalMessage item={group.finalContent} projectDir={projectDir} /> : null}
     </>
   );
 }
@@ -237,6 +241,7 @@ const ReasoningRow = memo(function ReasoningRow({
   const uiLanguage = useUiLanguage();
   const streaming = Boolean(item.streaming);
   // 默认折叠，且不跟随流式自动展开（用户手动开过就一直是开的——包括切页面重挂后）
+  const disclosureId = useId();
   const stateKey = `${persistKey}::r-${item.step}-${item.id || ''}`;
   const [open, setOpenRaw] = useState(() => manualOpenState.get(stateKey) === true);
   const setOpen = (value: boolean | ((prev: boolean) => boolean)) => {
@@ -259,6 +264,7 @@ const ReasoningRow = memo(function ReasoningRow({
         className="agent-reasoning__header"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
+        aria-controls={disclosureId}
       >
         <span className="agent-reasoning__icon"><Icon name="spark" /></span>
         <span className={`agent-reasoning__label${streaming ? ' is-running' : ''}`}>{label}</span>
@@ -270,7 +276,7 @@ const ReasoningRow = memo(function ReasoningRow({
         ) : null}
         <span className="agent-reasoning__caret">›</span>
       </button>
-      <AnimatedDisclosure open={open} className="agent-reasoning__collapse">
+      <AnimatedDisclosure id={disclosureId} open={open} className="agent-reasoning__collapse">
         {() => (
           <div className="agent-reasoning__collapse-inner">
             <AgentMarkdown

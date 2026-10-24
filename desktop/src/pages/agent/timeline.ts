@@ -48,7 +48,7 @@ export type ActivityItem = {
   };
   // 流式 content/reasoning：正在收 delta、还没收到对应的 *_end
   streaming?: boolean;
-  // 回合的收尾回复：由 finalContent 统一渲染，随展开状态放在块内或块外。
+  // 回合的收尾回复：由 finalContent 在执行记录之外稳定渲染。
   final?: boolean;
   // wait tool: 倒计时快照
   waitTotalMs?: number;

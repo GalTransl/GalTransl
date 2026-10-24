@@ -7,6 +7,7 @@ import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
 
 const timers = new Map();
 let timerId = 0;
+const markdownRenders = new Map();
 const load = createTypeScriptLoader({ window: {
   setTimeout: fn => { timers.set(++timerId, fn); return timerId; },
   clearTimeout: id => timers.delete(id),
@@ -14,7 +15,10 @@ const load = createTypeScriptLoader({ window: {
   clearInterval: () => {},
 } }, {
   '../../../components/AgentCacheRef': {
-    AgentMarkdown: ({ text }) => createElement('div', { className: 'test-markdown' }, text),
+    AgentMarkdown: ({ text }) => {
+      markdownRenders.set(text, (markdownRenders.get(text) || 0) + 1);
+      return createElement('div', { className: 'test-markdown' }, text);
+    },
   },
   './TranslationJobCard': { TranslationJobCard: () => createElement('div', null, 'job') },
 });
@@ -123,7 +127,8 @@ test('collapsed history mounts no tool bodies or reasoning markdown, while final
 });
 
 for (const source of ['stream', 'history']) {
-  test(`${source} final text moves between inside and outside without duplicates, including during collapse`, () => {
+  test(`${source} final reply keeps its node and markdown render across disclosure transitions`, () => {
+    markdownRenders.clear();
     const events = [
       { type: 'reasoning_delta', step: 1, delta: 'thinking' },
       ...(source === 'stream'
@@ -136,26 +141,36 @@ for (const source of ['stream', 'history']) {
     let renderer;
     act(() => { renderer = create(createElement(AgentGroupView, { group, isLive: false, projectDir: '', persistKey: source })); });
     const header = () => renderer.root.findByProps({ className: 'agent-activity__header' });
-    const check = inside => {
+    const originalReply = renderer.root.findByProps({ 'data-agent-final-step': 4 });
+    const check = () => {
       const replies = renderer.root.findAll(node => node.type === 'div' && node.props['data-agent-final-step'] === 4);
       assert.equal(replies.length, 1);
       let withinBody = false;
       for (let node = replies[0].parent; node; node = node.parent) {
         if (node.props.className === 'agent-activity__body') withinBody = true;
       }
-      assert.equal(withinBody, inside);
+      assert.equal(withinBody, false);
+      assert.equal(replies[0], originalReply);
+      assert.equal(markdownRenders.get('unique final answer'), 1);
       assert.equal(renderer.root.findAll(node => node.type === 'div' && node.props.className === 'test-markdown' && node.children[0] === 'unique final answer').length, 1);
     };
     try {
-      check(false);
+      check();
       act(() => header().props.onClick());
-      check(true);
+      check();
+      const body = renderer.root.find(node => node.type === 'div' && node.props.className === 'agent-activity__collapse');
+      assert.equal(header().props['aria-controls'], body.props.id);
+      assert.equal(body.props.inert, undefined);
       act(() => header().props.onClick());
       // AnimatedDisclosure still retains its other children during the closing transition.
       assert.equal(renderer.root.findAllByProps({ className: 'agent-activity__body' }).length, 1);
-      check(false);
+      assert.equal(renderer.root.find(node => node.type === 'div' && node.props.className === 'agent-activity__collapse').props.inert, '');
+      check();
+      act(() => { for (const fn of [...timers.values()]) fn(); });
+      assert.equal(renderer.root.findAllByProps({ className: 'agent-activity__body' }).length, 0);
+      check();
       act(() => header().props.onClick());
-      check(true);
+      check();
     } finally {
       act(() => renderer.unmount());
       manualOpenState.delete(`${source}::${group.id}`);
@@ -185,25 +200,35 @@ test('finish only claims the last matching reply and preserves distinct narratio
 
 test('automatic completion places the final reply outside immediately and manual expansion survives remount', () => {
   const props = { isLive: true, projectDir: '', persistKey: 'live-final' };
-  const events = [{ type: 'content_delta', step: 1, delta: 'answer' }];
+  const events = [{ type: 'reasoning_delta', step: 1, delta: 'thinking' }, { type: 'content_delta', step: 2, delta: 'answer' }];
   let renderer;
   act(() => { renderer = create(createElement(AgentGroupView, { ...props, group: buildTimeline(events)[0] })); });
-  const group = buildTimeline([...events, { type: 'finish', step: 2, summary: 'answer' }])[0];
+  const group = buildTimeline([...events, { type: 'finish', step: 3, summary: 'answer' }])[0];
   try {
     act(() => renderer.update(createElement(AgentGroupView, { ...props, isLive: false, group })));
     const header = renderer.root.findByProps({ className: 'agent-activity__header' });
     assert.equal(header.props['aria-expanded'], false);
-    assert.equal(renderer.root.findAllByProps({ 'data-agent-final-step': 2 }).length, 1);
+    assert.equal(renderer.root.findAllByProps({ 'data-agent-final-step': 3 }).length, 1);
     act(() => header.props.onClick());
     assert.equal(renderer.root.findByProps({ className: 'agent-activity__header' }).props['aria-expanded'], true);
     assert.equal(renderer.root.findByProps({ className: 'agent-activity__body' })
-      .findAll(node => node.type === 'div' && node.props['data-agent-final-step'] === 2).length, 1);
+      .findAll(node => node.type === 'div' && node.props['data-agent-final-step'] === 3).length, 0);
     act(() => renderer.unmount());
     act(() => { renderer = create(createElement(AgentGroupView, { ...props, isLive: false, group })); });
     assert.equal(renderer.root.findByProps({ className: 'agent-activity__header' }).props['aria-expanded'], true);
-    assert.equal(renderer.root.findAllByProps({ 'data-agent-final-step': 2 }).length, 1);
+    assert.equal(renderer.root.findAllByProps({ 'data-agent-final-step': 3 }).length, 1);
   } finally {
     act(() => renderer.unmount());
     manualOpenState.delete('live-final::a-1');
   }
+});
+
+test('a plain final response has no empty execution disclosure', () => {
+  const group = buildTimeline([
+    { type: 'content_delta', step: 1, delta: 'plain reply' },
+    { type: 'finish', step: 2, summary: 'plain reply' },
+  ])[0];
+  const html = renderToStaticMarkup(createElement(AgentGroupView, { group, isLive: false, projectDir: '', persistKey: 'plain' }));
+  assert.match(html, /plain reply/);
+  assert.doesNotMatch(html, /agent-activity__header/);
 });

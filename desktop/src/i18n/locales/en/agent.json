@@ -1,4 +1,9 @@
 {
+  "messageActions": {
+    "copy": "Copy response",
+    "copied": "Copied",
+    "copyFailed": "Copy failed. Try again or select the text to copy manually."
+  },
   "agentCacheRef": {
     "cacheCardField_message_source": "Source",
     "cacheCardField_message_translationText": "Translation",
