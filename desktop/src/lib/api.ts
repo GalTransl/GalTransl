@@ -131,7 +131,8 @@ export type CacheEntry = {
   deleted?: boolean;
 };
 
-export type CacheSearchField = 'all' | 'src' | 'dst' | 'problem';
+export type CacheSearchField = 'all' | 'src' | 'dst' | 'problem' | 'pre_src' | 'post_src' | 'pre_dst' | 'proofread_dst';
+export type CacheSearchCondition = { query: string; field: CacheSearchField; options: CacheSearchOptions };
 
 export type CacheSearchResult = {
   filename: string;
@@ -146,11 +147,15 @@ export type CacheSearchResult = {
   trans_by: string;
   /** false = 这条来自还没翻译的原文件（原文命中），没有译文与问题 */
   has_cache?: boolean;
+  truncated?: boolean;
 };
 
 export type CacheSearchResponse = {
   results: CacheSearchResult[];
   total: number;
+  has_more?: boolean;
+  next_offset?: number;
+  truncated?: boolean;
 };
 
 export type CacheReplaceField = 'src' | 'dst' | 'all';
@@ -695,10 +700,12 @@ export async function searchCache(
   query: string,
   field: CacheSearchField = 'all',
   options: CacheSearchOptions = { re: false },
-  maxResults = 500,
+  maxResults = 100,
   configFileName = 'config.yaml',
   /** 连还没翻译的原文件一起搜（界面默认开；Agent 的 search_transl_cache 有专门的原文搜索工具，不开） */
   includeUncached = true,
+  conditions: CacheSearchCondition[] = [],
+  offset = 0,
 ) {
   return apiRequest<CacheSearchResponse>(
     `/api/projects/${projectId}/cache/search`,
@@ -712,6 +719,8 @@ export async function searchCache(
         max_results: maxResults,
         config_file_name: configFileName,
         include_uncached: includeUncached,
+        ...(conditions.length ? { conditions } : {}),
+        offset,
       }),
     },
   );

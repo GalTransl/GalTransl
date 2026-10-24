@@ -110,4 +110,4 @@ class SearchOrderTests(unittest.TestCase):
                 _tool_search_input(runner, args)
             else:
                 _tool_read_transl_cache(runner, args)
-            self.assertEqual(runner.posts[0][1]["max_results"], 4)
+            self.assertEqual(runner.posts[0][1]["max_results"], 4 if action == "input" else 2)

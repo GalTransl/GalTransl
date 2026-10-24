@@ -1,11 +1,12 @@
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useRetainPage } from '../components/PageActivity';
 import { createCacheProblemFilter, entriesMatch, mergeCacheEntries } from '../lib/cacheEntries';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '../components/Button';
+import { CacheSearchConditionRow } from '../components/CacheSearchConditionRow';
 import { CustomSelect } from '../components/CustomSelect';
 import { PageHeader } from '../components/PageHeader';
 import { Icon } from '../components/Icon';
@@ -21,6 +22,7 @@ import {
   type CacheSearchResult,
   type CacheSearchField,
   type CacheSearchOptions,
+  type CacheSearchCondition,
   type CacheReplaceField,
   type CacheReplaceFileDetail,
   type ProblemEntry,
@@ -38,6 +40,7 @@ import { normalizeError } from '../lib/errors';
 import type { LocalizedText } from '../i18n/core';
 import { escapeProblemFilterPattern, normalizeKeywordList, splitProblemItems, splitProblemTypes } from '../lib/problemFilter';
 import { joinPath } from '../lib/paths';
+import { scrollWithinContainer } from '../lib/scrollWithinContainer';
 
 /** 兼容读取缓存字段：优先新key，回退旧key */
 function src(e: CacheEntry): string { return e.post_src || e.post_jp || ''; }
@@ -66,24 +69,39 @@ const MIN_REFRESH_SPIN_MS = 420;
 const REFRESH_SPIN_CYCLE_MS = 500;
 
 /* ── Highlight helper ── */
-function HighlightText({ text, query }: { text: string; query: string }) {
-  const uiLanguage = useUiLanguage();
-  if (!query) return <>{text}</>;
+function HighlightText({ text, query }: { text: string; query: string | string[] }) {
+  const terms = (Array.isArray(query) ? query : [query]).filter(Boolean);
+  if (!terms.length) return <>{text}</>;
   const lower = text.toLowerCase();
-  const qLower = query.toLowerCase();
   const parts: React.ReactNode[] = [];
-  let lastIdx = 0;
-  let searchFrom = 0;
-  while (searchFrom < lower.length) {
-    const found = lower.indexOf(qLower, searchFrom);
-    if (found === -1) break;
-    if (found > lastIdx) parts.push(text.slice(lastIdx, found));
-    parts.push(<mark key={found} className="search-highlight">{text.slice(found, found + query.length)}</mark>);
-    lastIdx = found + query.length;
-    searchFrom = lastIdx;
+  let cursor = 0;
+  while (cursor < text.length) {
+    const matches = terms.map((term) => ({ start: lower.indexOf(term.toLowerCase(), cursor), length: term.length }))
+      .filter((match) => match.start >= 0).sort((a, b) => a.start - b.start || b.length - a.length);
+    const match = matches[0];
+    if (!match) { parts.push(text.slice(cursor)); break; }
+    if (match.start > cursor) parts.push(text.slice(cursor, match.start));
+    parts.push(<mark key={match.start} className="search-highlight">{text.slice(match.start, match.start + match.length)}</mark>);
+    cursor = match.start + match.length;
   }
-  if (lastIdx < text.length) parts.push(text.slice(lastIdx));
   return <>{parts}</>;
+}
+
+function HighlightedTextarea({ query, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { query?: string | string[] }) {
+  const overlayRef = useRef<HTMLSpanElement>(null);
+  return (
+    <div className="cache-card__textarea-wrap">
+      <textarea {...props} onScroll={(event) => {
+        if (overlayRef.current) {
+          overlayRef.current.scrollTop = event.currentTarget.scrollTop;
+          overlayRef.current.scrollLeft = event.currentTarget.scrollLeft;
+        }
+      }} />
+      {query && <span ref={overlayRef} className="cache-card__textarea-overlay cache-card__textarea--zh" aria-hidden="true">
+        <HighlightText text={String(props.value ?? '')} query={query} />
+      </span>}
+    </div>
+  );
 }
 
 /* ── Cache Entry Card ── */
@@ -103,7 +121,7 @@ const CacheEntryCard = memo(function CacheEntryCard({
   onEntryChange: (index: number, field: keyof CacheEntry, value: string | boolean) => void;
   onDelete: (deleteMode: boolean, index: number) => void;
   onAddProblemFilter: (keyword: string) => void;
-  highlightQuery?: string;
+  highlightQuery?: string | string[];
   nameDict: Map<string, string>;
   /** 没有缓存文件（读的是原文）时只读：改了也没地方存，后端保存时会报缓存文件不存在 */
   readOnly?: boolean;
@@ -213,7 +231,7 @@ const CacheEntryCard = memo(function CacheEntryCard({
             <div className="cache-card__field cache-card__field--textarea">
               <span className="cache-card__field-label">{translate("projects:projectCachePage.cacheCardFieldCacheCardFieldTextarea_message_preSrc")}</span>
               <div className="cache-card__readonly-textarea">
-                {escapeControlChars(entry.pre_src || '')}
+                <HighlightText text={escapeControlChars(entry.pre_src || entry.pre_jp || '')} query={highlightQuery ?? ''} />
               </div>
             </div>
             <div className="cache-card__field cache-card__field--textarea">
@@ -226,7 +244,8 @@ const CacheEntryCard = memo(function CacheEntryCard({
             </div>
             <div className="cache-card__field cache-card__field--textarea">
               <span className="cache-card__field-label">{translate("projects:projectCachePage.cacheCardFieldCacheCardFieldTextarea_message_preDst")}</span>
-              <textarea
+              <HighlightedTextarea
+                query={highlightQuery}
                 className="cache-card__textarea cache-card__textarea--zh"
                 value={escapeControlChars(entry.pre_dst || entry.pre_zh || '')}
                 onChange={(e) => onEntryChange(entry.index, 'pre_dst', unescapeControlChars(e.target.value))}
@@ -237,7 +256,8 @@ const CacheEntryCard = memo(function CacheEntryCard({
             </div>
             <div className="cache-card__field cache-card__field--textarea">
               <span className="cache-card__field-label">{translate("projects:projectCachePage.cacheCardFieldCacheCardFieldTextarea_message_proofread")}</span>
-              <textarea
+              <HighlightedTextarea
+                query={highlightQuery}
                 className="cache-card__textarea cache-card__textarea--zh"
                 value={escapeControlChars(entry.proofread_dst || entry.proofread_zh || '')}
                 onChange={(e) => onEntryChange(entry.index, 'proofread_dst', unescapeControlChars(e.target.value))}
@@ -249,7 +269,7 @@ const CacheEntryCard = memo(function CacheEntryCard({
             <div className="cache-card__field cache-card__field--textarea">
               <span className="cache-card__field-label">{translate("projects:projectCachePage.cacheCardFieldCacheCardFieldTextarea_message_preview")}</span>
               <div className="cache-card__readonly-textarea">
-                {escapeControlChars(entry.post_dst_preview || entry.post_zh_preview || '')}
+                <HighlightText text={escapeControlChars(entry.post_dst_preview || entry.post_zh_preview || '')} query={highlightQuery ?? ''} />
               </div>
             </div>
             {/* 只有问题句才需要豁免；已勾选的行也保留入口，否则勾选后 problem 被清掉，
@@ -285,7 +305,7 @@ function SearchResultCard({
   onContextMenu,
   idx }: {
   result: CacheSearchResult;
-  query: string;
+  query: string | string[];
   onJumpToFile: (filename: string, index: number) => void;
   nameDict: Map<string, string>;
   selected: boolean;
@@ -333,6 +353,7 @@ function SearchResultCard({
           {speaker !== '—' && (
             <span className="search-result-card__speaker" style={{ color: `hsl(${speakerHue(rawSpeaker)}, 55%, 32%)` }}>{speaker}</span>
           )}
+          {result.truncated && <span className="search-result-card__problem">{translate("projects:projectCachePage.searchPreviewNote")}</span>}
           {result.problem && <span className="search-result-card__problem">{result.problem}</span>}
         </div>
       )}
@@ -392,6 +413,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     searchQuery: string;
     searchField: CacheSearchField;
     searchOptions: CacheSearchOptions;
+    searchConditions: CacheSearchCondition[];
+    searchNextOffset: number | null;
     searchResults: CacheSearchResult[];
     searchTotal: number;
     replaceQuery: string;
@@ -514,6 +537,10 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   const [searchOptions, setSearchOptions] = useState<CacheSearchOptions>({
     re: false
   });
+  const [searchConditions, setSearchConditions] = useState<CacheSearchCondition[]>([]);
+  const [searchNextOffset, setSearchNextOffset] = useState<number | null>(null);
+  const searchRequestRef = useRef(0);
+  const hasSearchQuery = Boolean(searchQuery.trim() || searchConditions.some((condition) => condition.query.trim()));
   const [searchResults, setSearchResults] = useState<CacheSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchTotal, setSearchTotal] = useState(0);
@@ -553,7 +580,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   const [replacePreviewTotal, setReplacePreviewTotal] = useState(0);
 
   // Scroll-to-entry after clicking search result
-  const [scrollToIndex, setScrollToIndex] = useState<number | null>(null);
+  const [pendingJump, setPendingJump] = useState<{ projectId: string; file: string; index: number } | null>(null);
+  const jumpHighlightRef = useRef<{ target: HTMLElement; timer: ReturnType<typeof setTimeout> } | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const scrollPositionsRef = useRef<Map<string, number>>(new Map());
   const pendingScrollRestoreRef = useRef<{ file: string; top: number } | null>(null);
@@ -655,6 +683,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     // 的文件名，「删除」就会拿这些名字去删新项目里的同名缓存
     setSelectedFiles(new Set());
     setContextMenu(null);
+    setPendingJump(null);
+    pendingScrollRestoreRef.current = null;
     const prev = lastProjectIdRef.current;
     if (prev && prev !== projectId) {
       // snapshot 旧项目（此时 state 闭包仍是旧项目的数据，刚好用于写回）
@@ -671,6 +701,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         searchQuery: '',
         searchField: 'all',
         searchOptions: { re: false },
+        searchConditions: [],
+        searchNextOffset: null,
         searchResults: [],
         searchTotal: 0,
         replaceQuery: '',
@@ -690,6 +722,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       prevBucket.searchQuery = searchQuery;
       prevBucket.searchField = searchField;
       prevBucket.searchOptions = searchOptions;
+      prevBucket.searchConditions = searchConditions;
+      prevBucket.searchNextOffset = searchNextOffset;
       prevBucket.searchResults = searchResults;
       prevBucket.searchTotal = searchTotal;
       prevBucket.replaceQuery = replaceQuery;
@@ -715,6 +749,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setSearchQuery(existing.searchQuery);
       setSearchField(existing.searchField);
       setSearchOptions(existing.searchOptions);
+      setSearchConditions(existing.searchConditions);
+      setSearchNextOffset(existing.searchNextOffset);
       setSearchResults(existing.searchResults);
       setSearchTotal(existing.searchTotal);
       setSelectedSearchIdx(-1);
@@ -742,6 +778,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       setSearchQuery('');
       setSearchField('all');
       setSearchOptions({ re: false });
+      setSearchConditions([]);
+      setSearchNextOffset(null);
       setSearchResults([]);
       setSearchTotal(0);
       setSelectedSearchIdx(-1);
@@ -823,8 +861,11 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     return () => { cancelled = true; };
   }, [projectId, selectedFile, configFileName, noteCachePresence]);
 
-  const runGlobalSearch = useCallback(async () => {
-    if (!projectId || !searchQuery.trim()) {
+  const runGlobalSearch = useCallback(async (offset = 0) => {
+    const request = ++searchRequestRef.current;
+    if (!projectId || !hasSearchQuery) {
+      setSearchNextOffset(null);
+      setSearching(false);
       setSearchResults([]);
       setSearchTotal(0);
       setSelectedSearchIdx(-1);
@@ -832,20 +873,24 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     }
     setSearching(true);
     try {
-      const res = await searchCache(projectId, searchQuery.trim(), searchField, searchOptions, 500, configFileName);
+      const res = await searchCache(projectId, searchQuery.trim(), searchField, searchOptions, 100, configFileName, true,
+        searchConditions.filter((condition) => condition.query.trim()), offset);
       // 搜索期间切了项目：这一份结果是上一个项目的，别摆到新项目的搜索 tab 里
-      if (viewingProjectIdRef.current !== projectId) return;
+      if (viewingProjectIdRef.current !== projectId || request !== searchRequestRef.current) return;
       setSearchResults(res.results);
+      setSearchNextOffset(res.has_more && res.next_offset !== undefined ? res.next_offset : null);
       setSearchTotal(res.total);
       setSelectedSearchIdx(-1);
     } catch (err) {
+      if (viewingProjectIdRef.current !== projectId || request !== searchRequestRef.current) return;
+      setSearchNextOffset(null);
       setLocalError(normalizeError(err, uiMessage("projects:projectCachePage.runGlobalSearch_normalizeError_searchFailed")));
       setSearchResults([]);
       setSearchTotal(0);
     } finally {
-      setSearching(false);
+      if (viewingProjectIdRef.current === projectId && request === searchRequestRef.current) setSearching(false);
     }
-  }, [projectId, configFileName, searchField, searchQuery, searchOptions]);
+  }, [projectId, configFileName, searchField, searchQuery, searchOptions, searchConditions, hasSearchQuery]);
 
   const refreshCurrentFile = useCallback(async () => {
     if (!projectId || !selectedFile || dirtyFiles.has(selectedFile)) return;
@@ -885,7 +930,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     const pendingRestore = pendingScrollRestoreRef.current;
     if (!pendingRestore || pendingRestore.file !== selectedFile) return;
     const frame = requestAnimationFrame(() => {
-      if (!listRef.current) return;
+      if (!listRef.current || pendingScrollRestoreRef.current !== pendingRestore) return;
       listRef.current.scrollTop = pendingRestore.top;
       scrollPositionsRef.current.set(selectedFile, pendingRestore.top);
       if (pendingScrollRestoreRef.current?.file === selectedFile) {
@@ -923,53 +968,28 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     };
   }, [selectedFile, loadingEntries]);
 
-  // Scroll to entry after jumping from search result
-  useEffect(() => {
-    if (scrollToIndex === null || loadingEntries) return;
-    // Small delay to ensure DOM is rendered
-    const timer = setTimeout(() => {
-      const scope = listRef.current ?? document;
-      const el = scope.querySelector(`[data-cache-index="${scrollToIndex}"]`);
-      if (el) {
-        el.scrollIntoView({ behavior: 'instant', block: 'center' });
-        if (selectedFile && listRef.current) {
-          scrollPositionsRef.current.set(selectedFile, listRef.current.scrollTop);
-        }
-        el.classList.add('cache-card--highlight');
-        setTimeout(() => el.classList.remove('cache-card--highlight'), 2000);
-      }
-      setScrollToIndex(null);
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [scrollToIndex, loadingEntries, selectedFile]);
-
   // Auto-search with debounce
   useEffect(() => {
-    if (!searchQuery.trim()) {
+    // 改条件时立即废弃旧请求，避免慢响应覆盖新结果或清空后的页面。
+    searchRequestRef.current += 1;
+    setSearchNextOffset(null);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (!hasSearchQuery) {
       setSearchResults([]);
       setSearchTotal(0);
       setSelectedSearchIdx(-1);
+      setSearching(false);
       return;
     }
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    searchTimerRef.current = setTimeout(() => {
-      void runGlobalSearch();
-    }, 400);
+    searchTimerRef.current = setTimeout(() => { void runGlobalSearch(); }, 400);
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
-  }, [runGlobalSearch, searchQuery]);
-
-  // Immediate search (on search options change)
-  useEffect(() => {
-    if (!searchQuery.trim()) return;
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    void runGlobalSearch();
-  }, [runGlobalSearch, searchOptions]);
+  }, [runGlobalSearch, hasSearchQuery]);
 
   // Scroll selected search result into view
   useEffect(() => {
     if (selectedSearchIdx < 0 || !searchResultsRef.current) return;
     const el = searchResultsRef.current.querySelector(`[data-search-idx="${selectedSearchIdx}"]`) as HTMLElement | null;
-    el?.scrollIntoView({ block: 'nearest' });
+    if (el) scrollWithinContainer(searchResultsRef.current, el, 'nearest');
   }, [selectedSearchIdx]);
 
   // 击键时先更新输入框，过滤用延迟值：连续输入不会每击键都全量 filter 大列表
@@ -990,6 +1010,46 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       );
     });
   }, [visibleEntries, filterProblems, deferredSearchTerm]);
+
+  // Layout effects see the committed, filtered list. No timer or ancestor scrolling:
+  // subtracting pane and card rects also cancels the pane's enter transform.
+  useLayoutEffect(() => {
+    if (!pendingJump || !active || loadingEntries || pendingJump.projectId !== projectId || pendingJump.file !== selectedFile) return;
+    const container = listRef.current;
+    const target = container?.querySelector<HTMLElement>(`[data-cache-index="${pendingJump.index}"]`);
+    if (!container || !target) return;
+    pendingScrollRestoreRef.current = null;
+    let releaseFrame = 0;
+    const frame = requestAnimationFrame(() => {
+      scrollWithinContainer(container, target);
+      scrollPositionsRef.current.set(pendingJump.file, container.scrollTop);
+      if (jumpHighlightRef.current) {
+        clearTimeout(jumpHighlightRef.current.timer);
+        jumpHighlightRef.current.target.classList.remove('cache-card--highlight');
+      }
+      target.classList.add('cache-card--highlight');
+      jumpHighlightRef.current = { target, timer: setTimeout(() => {
+        target.classList.remove('cache-card--highlight');
+        jumpHighlightRef.current = null;
+      }, 2000) };
+      // Keep real card heights through one paint before restoring offscreen containment.
+      releaseFrame = requestAnimationFrame(() => setPendingJump((current) => current === pendingJump ? null : current));
+    });
+    return () => { cancelAnimationFrame(frame); cancelAnimationFrame(releaseFrame); };
+  }, [pendingJump, active, loadingEntries, projectId, selectedFile, filteredEntries]);
+
+  useLayoutEffect(() => () => {
+    if (jumpHighlightRef.current) {
+      clearTimeout(jumpHighlightRef.current.timer);
+      jumpHighlightRef.current.target.classList.remove('cache-card--highlight');
+      jumpHighlightRef.current = null;
+    }
+  }, [projectId, selectedFile]);
+
+  const searchHighlightQueries = useMemo(() => [searchQuery.trim(), ...searchConditions.map((condition) => condition.query.trim())]
+    .filter(Boolean), [searchQuery, searchConditions]);
+  const editorHighlightQueries = useMemo(() => [deferredSearchTerm, ...searchHighlightQueries]
+    .filter(Boolean), [deferredSearchTerm, searchHighlightQueries]);
 
   const total = entries.length;
   const translated = useMemo(() => entries.filter((e) => dst(e)).length, [entries]);
@@ -1304,6 +1364,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   }, [handleAddProblemKeyword]);
 
   const handleSelectFile = (file: string) => {
+    setPendingJump(null);
     if (file === selectedFile) return;
     // 先保存当前文件的修改到 entriesMap
     if (selectedFile && dirtyFiles.has(selectedFile)) {
@@ -1423,14 +1484,16 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
 
   // Jump from search result to file editor
   const handleJumpToFile = (filename: string, index: number) => {
-    if (filename === selectedFile) {
-      setScrollToIndex(index);
-      return;
-    }
+    // An explicit result jump takes precedence over saved positions and local filters.
+    setSearchTerm('');
+    setFilterProblems(false);
+    setPendingJump({ projectId, file: filename, index });
+    pendingScrollRestoreRef.current = null;
+    if (filename === selectedFile) return;
     if (selectedFile && dirtyFiles.has(selectedFile)) {
       entriesMapRef.current.set(selectedFile, entries);
     }
-    prepareFileSwitch(filename);
+    rememberCurrentScrollPosition();
     const cachedEntries = entriesMapRef.current.get(filename);
     pendingListEnterRef.current = true;
     setListEntering(false);
@@ -1441,7 +1504,6 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     setEntries(cachedEntries ?? []);
     setLoadingEntries(!cachedEntries);
     setSelectedFile(filename);
-    setScrollToIndex(index);
     setLocalError(null);
     setInfo(null);
   };
@@ -1503,7 +1565,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         if (modifiedEntries) setEntries(modifiedEntries);
       }
       // Refresh search if query was set
-      if (searchQuery.trim()) {
+      if (hasSearchQuery) {
         await runGlobalSearch();
       }
     } catch (err) {
@@ -1693,34 +1755,23 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
           {/* Tab: Search */}
           {sidebarTab === 'search' && (
             <div className="cache-search-panel">
-              <div className="cache-search-input-group">
-                <input
-                  type="text"
-                  className="cache-search cache-search--global"
-                  placeholder={translate("projects:projectCachePage.cacheSearchInputGroup_placeholder_search")}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+              <CacheSearchConditionRow
+                condition={{ query: searchQuery, field: searchField, options: searchOptions }}
+                onChange={(condition) => {
+                  setSearchQuery(condition.query); setSearchField(condition.field); setSearchOptions(condition.options);
+                }}
+              />
+              {searchConditions.map((condition, index) => (
+                <CacheSearchConditionRow key={index} condition={condition}
+                  onChange={(next) => setSearchConditions((current) => current.map((item, i) => i === index ? next : item))}
+                  onRemove={() => setSearchConditions((current) => current.filter((_, i) => i !== index))}
                 />
-                <CustomSelect
-                  className="cache-search-field"
-                  value={searchField}
-                  onChange={(e) => setSearchField(e.target.value as CacheSearchField)}
-                >
-                  <option value="all">{translate("projects:projectCachePage.cacheSearchField_message_all")}</option>
-                  <option value="src">{translate("projects:projectCachePage.cacheSearchField_message_source")}</option>
-                  <option value="dst">{translate("projects:projectCachePage.cacheSearchField_message_translationText")}</option>
-                  <option value="problem">{translate("projects:projectCachePage.cacheSearchField_message_problem")}</option>
-                </CustomSelect>
-                <label className="cache-search-regex-toggle" title={translate("projects:projectCachePage.cacheSearchRegexToggle_title_regexSearch")}>
-                  <input
-                    type="checkbox"
-                    checked={searchOptions.re}
-                    onChange={(e) => setSearchOptions((current) => ({ ...current, re: e.target.checked }))}
-                    disabled={searching}
-                  />
-                  <span className="cache-search-regex-toggle__track" aria-hidden="true" />
-                  <span className="cache-search-regex-toggle__label">{translate("projects:projectCachePage.cacheSearchRegexToggle_message_regex")}</span>
-                </label>
+              ))}
+              <div className="cache-search-condition-actions">
+                <button type="button" className="cache-replace-toggle__btn" disabled={searchConditions.length >= 19}
+                  onClick={() => setSearchConditions((current) => [...current, { query: '', field: 'pre_dst', options: { re: false } }])}
+                >{translate('projects:projectCachePage.addSearchCondition')}</button>
+                <span>{translate('projects:projectCachePage.allSearchConditions')}</span>
               </div>
 
               {/* Replace toggle + Search results summary */}
@@ -1734,11 +1785,16 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                   {showReplace ? <><Icon name="chevron-down" />{translate("projects:projectCachePage.cacheReplaceToggleBtn_text_replace")}</> : <><Icon name="chevron-right" />{translate("projects:projectCachePage.cacheReplaceToggleBtn_text_replace")}</>}
                 </button>
                 {searching && <span className="cache-search-status">{translate("projects:projectCachePage.cacheSearchMeta_message_search")}</span>}
-                {!searching && searchQuery.trim() && (
+                {!searching && hasSearchQuery && (
                   <span className="cache-search-status">
                     {searchTotal > 0 ? translate("projects:projectCachePage.cacheSearchStatus_message_entry", { searchTotal: searchTotal }) : translate("projects:projectCachePage.cacheSearchStatus_message_match")}
                   </span>
                 )}
+              </div>
+              <div className="cache-search-budget-note">
+                {translate("projects:projectCachePage.searchBudgetNote")}
+                {searchNextOffset !== null && <button type="button" className="cache-replace-toggle__btn" disabled={searching}
+                  onClick={() => void runGlobalSearch(searchNextOffset)}>{translate("projects:projectCachePage.nextSearchPage")}</button>}
               </div>
               {showReplace && (
                 <div className="cache-replace-group">
@@ -1824,7 +1880,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                   <SearchResultCard
                     key={`${r.filename}-${r.index}`}
                     result={r}
-                    query={searchQuery.trim()}
+                    query={searchHighlightQueries}
                     onJumpToFile={handleJumpToFile}
                     nameDict={nameDict}
                     selected={idx === selectedSearchIdx}
@@ -2023,7 +2079,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                 <div
                   ref={listRef}
                   onScroll={rememberCurrentScrollPosition}
-                  className={`cache-card-list ${loadingEntries ? 'cache-card-list--loading' : ''} ${listEntering ? 'cache-card-list--entering' : ''}`}
+                  className={`cache-card-list ${loadingEntries ? 'cache-card-list--loading' : ''} ${pendingJump?.file === selectedFile ? 'cache-card-list--positioning' : ''} ${listEntering ? 'cache-card-list--entering' : ''}`}
                 >
                   {filteredEntries.map((entry) => (
                     <CacheEntryCard
@@ -2034,7 +2090,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                       onEntryChange={handleEntryChange}
                       onDelete={handleDeleteAndRecover}
                       onAddProblemFilter={handleAddProblemFilterKey}
-                      highlightQuery={deferredSearchTerm || searchQuery}
+                      highlightQuery={editorHighlightQueries.length ? editorHighlightQueries : undefined}
                       nameDict={nameDict}
                       readOnly={selectedHasNoCache}
                     />

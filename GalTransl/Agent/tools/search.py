@@ -5,7 +5,13 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 from GalTransl.Agent.models import AgentToolError
-from GalTransl.Search import parse_search_order, search_order_note
+from GalTransl.Search import (
+    CACHE_SEARCH_MAX_ROWS,
+    CACHE_SEARCH_MAX_CHARS,
+    parse_cache_search_conditions,
+    parse_search_order,
+    search_order_note,
+)
 from GalTransl.Agent.tools.common import (
     _dominant_trans_by,
     _mark_context_row,
@@ -153,22 +159,26 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """
     query = str(args.get("query", "")).strip()
     field = str(args.get("field", "all")).strip() or "all"
-    if not query:
-        raise AgentToolError("query is required")
+    try:
+        conditions = parse_cache_search_conditions(args)
+    except ValueError as exc:
+        raise AgentToolError(str(exc)) from exc
+    if not conditions:
+        raise AgentToolError("query or conditions is required")
     filename = str(args.get("filename", "") or "").strip()
     raw_context = args.get("context", 0)
     try:
         context = max(0, min(int(raw_context or 0), 20))
     except (TypeError, ValueError):
         raise AgentToolError(f"context 必须是 0-20 的整数（收到 {raw_context!r}）")
-    # 带上下文时收紧命中上限：命中 × 每条搭的行数一起返回，整页压在 _SEARCH_ROW_BUDGET 行内，
+    # 带上下文时收紧命中上限：命中 × 每条搭的行数一起返回，整页压在 CACHE_SEARCH_MAX_ROWS 行内，
     # 否则"命中上百条 × 前后各几句"会直接把返回体撑爆。只给上文时每条只搭 N 行，同样的行数
     # 预算里能多给几条命中。total 不受影响（仍报全部命中数）。
     only_preceding = _only_preceding_arg(args)
     order = _search_order(args)
     limit, offset = _search_paging_args(args)
     rows_per_hit = (context + 1) if only_preceding else (2 * context + 1)
-    max_hits = limit if context == 0 else min(limit, max(1, _SEARCH_ROW_BUDGET // rows_per_hit))
+    max_hits = min(limit, max(1, CACHE_SEARCH_MAX_ROWS // rows_per_hit))
     pid = runner._project_id()
     body: dict[str, Any] = {
         "query": query,
@@ -178,6 +188,8 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
         "order": order,
         "config_file_name": runner.state.config_file_name,
     }
+    if args.get("conditions") is not None:
+        body["conditions"] = args["conditions"]
     if context:
         body["context"] = context
         if only_preceding:
@@ -202,7 +214,7 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
         )
         notes.append(
             f"已带上下文：{scope}（包含关键词的那行是命中，index 带 * 的是搭着给的上下文行）；"
-            f"带上下文时命中上限收紧为 {max_hits} 条、整页最多 {_SEARCH_ROW_BUDGET} 行，"
+            f"带上下文时命中上限收紧为 {max_hits} 条、整页最多 {CACHE_SEARCH_MAX_ROWS} 行或 {CACHE_SEARCH_MAX_CHARS} 字符，"
             "total 仍是全部命中数——命中很多时用 offset 翻页，或配合 filename 缩小范围。"
         )
     # 指定了文件但 0 命中：确认一下该文件是否存在，避免模型误以为关键词不匹配
@@ -225,7 +237,54 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     if notes and isinstance(result, dict):
         existing = str(result.get("note") or "")
         result = {**result, "note": "；".join([part for part in [existing, *notes] if part])}
+    if isinstance(result, dict):
+        _bound_cache_search_result(result)
     return result
+
+
+def _bound_cache_search_result(result: dict[str, Any]) -> None:
+    """Markdown 转义也会增加长度；对模型实际收到的搜索结果再校验字符上限。"""
+    from GalTransl.Agent.tools.render_md import _md_render_search_transl_cache
+
+    rows = result.get("results")
+    if not isinstance(rows, list):
+        return
+    if result.get("truncated") or result.get("context_limited"):
+        result["note"] = str(result.get("note") or "") + "；部分内容仅返回预览，完整内容请按 filename/index 读取。"
+    # 零命中的备注也可能引用很长的用户输入；元信息同样服从输出预算。
+    for key in ("note", "majority_trans_by"):
+        value = result.get(key)
+        if isinstance(value, str) and len(value) > 1000:
+            result[key] = value[:999] + "…"
+    while rows and (len(rows) > CACHE_SEARCH_MAX_ROWS or len(_md_render_search_transl_cache(result) or "") > CACHE_SEARCH_MAX_CHARS):
+        if len(rows) > 1:
+            # 先收回上下文；倒序搜索带 context 时，文件内展示仍按正序，不能直接
+            # pop 最后一行（那会丢掉应当先消费的命中，使 next_offset 跳过它）。
+            context_at = next((i for i in range(len(rows) - 1, -1, -1)
+                               if str(rows[i].get("index", "")).endswith("*")), None)
+            remove_at = context_at if context_at is not None else len(rows) - 1
+            if context_at is None and result.get("context") and result.get("order") == "reverse":
+                last_file = rows[-1].get("filename")
+                remove_at = next(i for i, row in enumerate(rows) if row.get("filename") == last_file)
+            removed = rows.pop(remove_at)
+            result.pop("matched_in", None)  # 原汇总包含被收回的行，不能继续当成本页分布展示。
+            if context_at is not None and not result.get("context_limited"):
+                result["context_limited"] = True
+                result["note"] = str(result.get("note") or "") + "；部分上下文因字符预算省略，可按 filename/index 读取。"
+            if not str(removed.get("index", "")).endswith("*"):
+                result["returned"] = max(0, result.get("returned", 0) - 1)
+                result["has_more"] = True
+                result["next_offset"] = result.get("offset", 0) + result["returned"]
+            if "returned_rows" in result:
+                result["returned_rows"] = len(rows)
+            continue
+        row = rows[0]
+        result["truncated"] = row["truncated"] = True
+        result["note"] = "超长条目仅显示预览；完整内容请按 filename/index 读取。"
+        text_keys = [k for k, value in row.items() if isinstance(value, str) and k not in ("filename", "index")]
+        key = max(text_keys, key=lambda k: len(row[k]))
+        excess = len(_md_render_search_transl_cache(result) or "") - CACHE_SEARCH_MAX_CHARS
+        row[key] = row[key][:max(0, len(row[key]) - excess - 1)] + "…"
 
 
 def _tool_search_input(runner: AgentRunner, args: dict[str, Any]) -> Any:

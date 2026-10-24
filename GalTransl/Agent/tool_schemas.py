@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from GalTransl import TRANSLATOR_SUPPORTED
+from GalTransl.Search import CACHE_SEARCH_FIELDS, CACHE_SEARCH_CONDITION_LIMIT
 from GalTransl.Agent.core import RUNTIME_ERRORS_PER_QUERY, SUBAGENT_AGENTS, SUBAGENT_MAX_TASKS
 
 
@@ -98,7 +99,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     "filename": {"type": "string", "description": "可选。只在这个输入文件里搜（来自 list_input_files）。留空搜全部输入文件。"},
                     "context": {
                         "type": "integer",
-                        "description": "可选，0-20（默认 0）。每条命中再带上文（见 only_preceding），用于判断语意与称呼用法。带上下文时整页最多 200 行，命中上限按行数换算、会明显收紧（如 context=3 → 最多 28 条命中），命中很多时可配合 limit/offset 翻页或 filename 缩小范围。上下文行的 index 带 *（如 12*），那不是命中行。",
+                        "description": "可选，0-20（默认 0）。每条命中再带上文（见 only_preceding），用于判断语意与称呼用法。带上下文时整页最多 200 行，命中上限按行数换算、会明显收紧（如 context=3 默认最多 25 条命中，only_preceding=false 时最多 14 条），命中很多时可配合 limit/offset 翻页或 filename 缩小范围。上下文行的 index 带 *（如 12*），那不是命中行。",
                     },
                     "only_preceding": {
                         "type": "boolean",
@@ -512,7 +513,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "read_transl_cache",
             "description": (
-                "翻译缓存的统一入口：list 列文件与条数，read 按 filename/index 读条目，search 搜原文/译文/问题。省略 action 时有 query→search，有 filename→read，否则 list。list 默认均匀采样而非前100个。read 默认精简字段，其它列用 fields；无缓存时回落到原文，译文/问题为空不代表漏译。read/search 的 context 默认只给上文，only_preceding=false 给前后文；上下文 index 带 *。search 整页最多200行，returned 仅计命中，order=name/reverse 时 has_more 用 offset += returned 翻页，even/random 用于从全部命中采样；field=all 的 matched_in 汇总命中侧，majority_trans_by 记录逐行省略的多数派模型。返回 Markdown 表格与计数/提示。向用户展示缓存可单独一行写 $transl_cache(\"<缓存文件名>\", <index>)，支持区间/列表，界面会渲染为缓存卡片。"
+                "翻译缓存的统一入口：list 列文件与条数，read 按 filename/index 读条目，search 搜原文/译文/问题。省略 action 时有 query/conditions→search，有 filename→read，否则 list。list 默认均匀采样而非前100个。read 默认精简字段，其它列用 fields；无缓存时回落到原文，译文/问题为空不代表漏译。read/search 的 context 默认只给上文，only_preceding=false 给前后文；上下文 index 带 *。search 整页最多100句或10000字符（含上下文），超长单条给预览，returned 仅计命中，order=name/reverse 时 has_more 用 offset += returned 翻页，even/random 用于从全部命中采样；field=all 的 matched_in 汇总命中侧，majority_trans_by 记录逐行省略的多数派模型。返回 Markdown 表格与计数/提示。向用户展示缓存可单独一行写 $transl_cache(\"<缓存文件名>\", <index>)，支持区间/列表，界面会渲染为缓存卡片。"
             ),
             "parameters": {
                 "type": "object",
@@ -520,7 +521,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     "action": {
                         "type": "string",
                         "enum": ["list", "read", "search"],
-                        "description": "list=列缓存文件；read=读某个文件的条目；search=在缓存里搜。不传则按参数推断（有 query→search，有 filename→read，否则 list）。",
+                        "description": "list=列缓存文件；read=读某个文件的条目；search=在缓存里搜。不传则按参数推断（有 query/conditions→search，有 filename→read，否则 list）。",
                     },
                     "filename": {
                         "type": "string",
@@ -530,18 +531,31 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                         "type": "string",
                         "description": "read 用，可选。要读取的条目 index 列表，支持逗号和区间，如 \"33-40,50-60\"、\"5,9,12\"。留空返回前 30 条。",
                     },
-                    "query": {"type": "string", "description": "search 必填：要搜的关键词。"},
+                    "query": {"type": "string", "description": "search：要搜的关键词；query 和 conditions 至少提供一项，同时提供时也要求 query 命中。"},
                     "field": {
                         "type": "string",
-                        "enum": ["all", "src", "dst", "problem"],
-                        "description": "search 用：在哪一侧搜（默认 all）。src=原文，dst=译文，problem=问题描述。",
+                        "enum": list(CACHE_SEARCH_FIELDS),
+                        "description": "search 用：默认 all。src/dst 搜展示原文/译文（含旧缓存回退），problem 搜问题；pre_src/post_src/pre_dst/proofread_dst 精确搜指定字段（只兼容旧键，不回退其它列）。",
+                    },
+                    "conditions": {
+                        "type": "array", "minItems": 1, "maxItems": CACHE_SEARCH_CONDITION_LIMIT,
+                        "description": "search 用：同一条缓存必须满足全部条件（AND）。例如 [{\"field\":\"post_src\",\"query\":\"悶え\"},{\"field\":\"pre_dst\",\"query\":\"挣扎\"}]；可以不传顶层 query。有 conditions 时省略 action 也会搜索。",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "field": {"type": "string", "enum": list(CACHE_SEARCH_FIELDS)},
+                                "query": {"type": "string", "minLength": 1},
+                                "options": {"type": "object", "properties": {"re": {"type": "boolean", "description": "此条件是否为正则；默认 false（普通文本、忽略大小写）。"}}},
+                            },
+                            "required": ["field", "query"],
+                        },
                     },
                     "context": {
                         "type": "integer",
                         "description": (
                             "read/search 用，可选，0-20。目标条目（read）/每条命中（search）向上多返回 N 句（见 only_preceding），"
                             "如 read 的 index=\"205-206\" context=3 返回 202~206。修问题、判断译名/语意时建议 2-4。"
-                            "search 带 context 时整页最多 200 行，命中上限按行数换算（如 context=3 → 最多 28 条命中）。"
+                            "search 带 context 时整页最多 100 行或 10000 字符，命中上限按行数换算（如 context=3 默认最多 25 条命中，only_preceding=false 时最多 14 条）。"
                         ),
                     },
                     "only_preceding": {
@@ -574,7 +588,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "可选。list：最多返回多少个文件（默认 100，上限 500）；search：本页最多几条命中（默认 100，最大 200，带 context 时还会按行数收紧）；read：未指定 index 默认 30 条，指定 index 默认 200 条；最大 200，带 context 时整页仍最多 200 行。",
+                        "description": "可选。list：最多返回多少个文件（默认 100，上限 500）；search：本页最多几条命中（默认 100，最大 100，带 context 时还会按行数收紧）；read：未指定 index 默认 30 条，指定 index 默认 200 条；最大 200，带 context 时整页仍最多 200 行。",
                     },
                     "offset": {
                         "type": "integer",

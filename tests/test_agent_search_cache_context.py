@@ -108,7 +108,7 @@ class SearchContextForwardingTests(unittest.TestCase):
         body = runner.bodies[0]
         self.assertEqual(body["context"], 3)
         self.assertTrue(body["preceding_only"])  # 默认只给上文（省 token）
-        self.assertEqual(body["max_results"], 200 // 4)  # 每条只搭 3 行 → 50，整页压在 200 行内
+        self.assertEqual(body["max_results"], 100 // 4)  # 每条只搭 3 行 → 50，整页压在 200 行内
         self.assertEqual(body["query"], "ドルード")
 
     def test_only_preceding_false_asks_for_both_sides(self) -> None:
@@ -119,7 +119,7 @@ class SearchContextForwardingTests(unittest.TestCase):
 
         body = runner.bodies[0]
         self.assertNotIn("preceding_only", body)  # 服务端默认两边都给，不必显式发
-        self.assertEqual(body["max_results"], 200 // 7)  # 每条 7 行 → 28
+        self.assertEqual(body["max_results"], 100 // 7)  # 每条 7 行 → 14
 
     def test_without_context_behaviour_unchanged(self) -> None:
         runner = _SearchRunner({"results": [], "total": 0})
@@ -191,7 +191,7 @@ class SearchPagingTests(unittest.TestCase):
         _tool_search_transl_cache(runner, {"query": "x", "limit": 9999, "offset": 100})
 
         body = runner.bodies[0]
-        self.assertEqual(body["max_results"], 200)  # 上限
+        self.assertEqual(body["max_results"], 100)  # 上限
         self.assertEqual(body["offset"], 100)
 
     def test_explicit_limit_wins_over_the_row_budget(self) -> None:
@@ -217,7 +217,7 @@ class SearchPagingTests(unittest.TestCase):
         self.assertFalse(out["has_more"])
 
     def test_page_rows_never_exceed_the_line_budget(self) -> None:
-        """整页最多 200 行（limit 拉满也一样）：只给上文时每条搭 N 行，两边都给时 2N+1 行。"""
+        """整页最多 100 行（limit 拉满也一样）：只给上文时每条搭 N 行，两边都给时 2N+1 行。"""
         for context in (1, 2, 3, 5, 10, 20):
             for only_preceding, rows_per_hit in ((True, context + 1), (False, 2 * context + 1)):
                 runner = _SearchRunner({"results": [], "total": 0})
@@ -228,7 +228,7 @@ class SearchPagingTests(unittest.TestCase):
                 )
 
                 hits = runner.bodies[0]["max_results"]
-                self.assertLessEqual(hits * rows_per_hit, 200, f"context={context} / {only_preceding}")
+                self.assertLessEqual(hits * rows_per_hit, 100, f"context={context} / {only_preceding}")
 
     def test_context_keeps_hits_and_rows_apart(self) -> None:
         runner = _SearchRunner({
@@ -269,6 +269,50 @@ class RealRunnerBodyTests(unittest.TestCase):
         self.assertEqual(body["field"], "src")
         self.assertEqual(body["config_file_name"], "config v2.yaml")
         self.assertEqual(body["context"], 1)
+
+
+class MultiConditionSearchTests(unittest.TestCase):
+    def test_conditions_infer_search_and_are_forwarded_without_a_primary_query(self):
+        from GalTransl.Agent.tools.cache import _tool_read_transl_cache
+        conditions = [{"field": "post_src", "query": "悶え"}, {"field": "pre_dst", "query": "挣扎"}]
+        runner = _SearchRunner({"results": [], "total": 0})
+        out = _tool_read_transl_cache(runner, {"conditions": conditions, "limit": 9999})
+        self.assertEqual(out["action"], "search")
+        self.assertEqual(runner.bodies[0]["conditions"], conditions)
+        self.assertEqual(runner.bodies[0]["max_results"], 100)
+
+    def test_invalid_conditions_fail_before_http(self):
+        from GalTransl.Agent.models import AgentToolError
+        runner = _SearchRunner({"results": [], "total": 0})
+        with self.assertRaises(AgentToolError):
+            _tool_search_transl_cache(runner, {"conditions": [{"field": "typo", "query": "x"}]})
+        self.assertEqual(runner.bodies, [])
+
+    def test_markdown_character_budget_handles_escaping_and_reports_continuation(self):
+        from GalTransl.Agent.tools.render_md import _render_tool_result_table
+        rows = [{"filename": "a.json", "index": i, "post_src": "hit" + "\n|" * 5000,
+                 "pre_dst": "译文", "match_src": True} for i in range(1, 4)]
+        runner = _SearchRunner({"results": rows, "total": 3})
+        out = _tool_search_transl_cache(runner, {"query": "hit"})
+        text = _render_tool_result_table("read_transl_cache", {"action": "search", **out})
+        self.assertLessEqual(len(text), 10000)
+        self.assertEqual(out["returned"], 1)
+        self.assertEqual(out["next_offset"], 1)
+        self.assertTrue(out["has_more"])
+        self.assertTrue(out["results"][0]["truncated"])
+
+    def test_markdown_budget_keeps_the_first_reverse_hit_when_context_is_sorted(self):
+        runner = _SearchRunner({
+            "results": [
+                {"filename": "a.json", "index": 1, "post_src": "context", "match_src": False},
+                {"filename": "a.json", "index": 2, "post_src": "hit" + "\n|" * 2000, "match_src": True},
+                {"filename": "a.json", "index": 3, "post_src": "hit" + "\n|" * 2000, "match_src": True},
+            ], "total": 2, "context": 1, "returned_hits": 2, "returned": 3,
+        })
+        out = _tool_search_transl_cache(runner, {"query": "hit", "context": 1, "order": "reverse"})
+        self.assertEqual([row["index"] for row in out["results"]], [3])
+        self.assertEqual(out["returned"], 1)
+        self.assertEqual(out["next_offset"], 1)
 
 
 if __name__ == "__main__":

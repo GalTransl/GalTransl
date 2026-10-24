@@ -356,13 +356,13 @@ CACHE_READ_ACTIONS: tuple[str, ...] = ("list", "read", "search")
 
 def _cache_read_action(args: dict[str, Any]) -> str:
     """read_transl_cache 的 action：显式给了就校验；没给按参数推断——
-    有 query 是 search，有 filename 是 read，都没有就是 list（先看有哪些文件）。"""
+    有 query/conditions 是 search，有 filename 是 read，都没有就是 list（先看有哪些文件）。"""
     action = str(args.get("action", "") or "").strip().lower()
     if action:
         if action not in CACHE_READ_ACTIONS:
             raise AgentToolError(f"action 只能是 {' / '.join(CACHE_READ_ACTIONS)}，收到 {action!r}")
         return action
-    if str(args.get("query", "") or "").strip():
+    if "conditions" in args or str(args.get("query", "") or "").strip():
         return "search"
     if str(args.get("filename", "") or "").strip():
         return "read"
@@ -378,8 +378,6 @@ def _tool_read_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     if action == "list":
         result = _tool_list_transl_cache(runner, args)
     elif action == "search":
-        if not str(args.get("query", "") or "").strip():
-            raise AgentToolError("action=search 需要 query（要搜的关键词）")
         result = _tool_search_transl_cache(runner, args)
     else:
         result = _read_transl_cache_entries(runner, args)

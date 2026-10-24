@@ -31,8 +31,12 @@ from GalTransl.CustomBackground import (
     read_custom_background_image,
     clear_custom_background,
 )
-from GalTransl.Cache import CACHE_TEMP_SUFFIX
+from GalTransl.Cache import CACHE_TEMP_SUFFIX, _cache_get
 from GalTransl.Search import (
+    CacheSearchCondition,
+    CACHE_SEARCH_MAX_ROWS,
+    CACHE_SEARCH_MAX_CHARS,
+    parse_cache_search_conditions,
     parse_search_order as _parse_search_order,
     select_search_hits as _sample_search_hits,
 )
@@ -964,6 +968,7 @@ def _search_cache_entries(
     max_results: int,
     offset: int,
     order: str,
+    conditions: list[CacheSearchCondition] | None = None,
 ) -> dict[str, Any]:
     """跨文件收集全部缓存命中后再排序/采样，供 Agent 搜索使用。"""
     all_hits: list[dict[str, Any]] = []
@@ -995,16 +1000,65 @@ def _search_cache_entries(
                 "has_cache": has_cache,
             })
             matched = any(flags.values()) if field == "all" else flags.get(f"match_{field}", False)
+            if conditions is not None:
+                flags = {"match_src": False, "match_dst": False, "match_problem": False}
+                matched = True
+                for condition in conditions:
+                    if condition.field in ("all", "src", "dst", "problem"):
+                        texts = {"src": src, "dst": dst, "problem": problem}
+                        sides = texts if condition.field == "all" else [condition.field]
+                        matched_sides = [side for side in sides if condition.matches(texts[side])]
+                    else:
+                        side = "src" if condition.field.endswith("_src") else "dst"
+                        # 精确字段只兼容旧键名，不把空 pre_dst 回退成校对稿。
+                        text = str(_cache_get(entry, condition.field, "") or "")
+                        matched_sides = [side] if condition.matches(text) else []
+                    if not matched_sides:
+                        matched = False
+                        break
+                    for side in matched_sides:
+                        flags[f"match_{side}"] = True
             if matched:
                 all_hits.append({"filename": filename, "pos": pos, "flags": flags})
         rows_by_file[filename] = rows
-    selected = _sample_search_hits(all_hits, max_results, offset, order)
-    results = _search_context_rows(
-        selected, context=context, only_preceding=only_preceding, file_rows=rows_by_file,
-    )
+    candidates = _sample_search_hits(all_hits, min(max_results, CACHE_SEARCH_MAX_ROWS), offset, order)
+    selected: list[dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
+    truncated = False
+    context_limited = False
+    # 给计数、续查信息和 Agent 的 Markdown 表头预留空间，正文与元信息一起不超过 10k。
+    row_budget = CACHE_SEARCH_MAX_CHARS - 1000
+    for hit in candidates:
+        candidate_rows = _search_context_rows(
+            [*selected, hit], context=context, only_preceding=only_preceding, file_rows=rows_by_file,
+        )
+        size = len(json.dumps(candidate_rows, ensure_ascii=False))
+        if len(candidate_rows) > CACHE_SEARCH_MAX_ROWS or size > row_budget:
+            if selected:
+                break
+            # 一条命中加上下文就超预算：先只给该命中，必要时把长字段变成预览。
+            candidate_rows = _search_context_rows([hit], context=0, only_preceding=True, file_rows=rows_by_file)
+            context_limited = context > 0
+            row = candidate_rows[0]
+            while len(json.dumps(candidate_rows, ensure_ascii=False)) > row_budget:
+                row["truncated"] = True
+                truncated = True
+                if isinstance(row.get("speaker"), list):
+                    row["speaker"] = "/".join(str(part) for part in row["speaker"])
+                key = max((k for k, v in row.items() if isinstance(v, str) and k != "filename"),
+                          key=lambda k: len(row[k]))
+                excess = len(json.dumps(candidate_rows, ensure_ascii=False)) - row_budget
+                row[key] = row[key][:max(0, len(row[key]) - excess - 1)] + "…"
+        selected.append(hit)
+        results = candidate_rows
     out: dict[str, Any] = {"results": results, "total": len(all_hits), "offset": offset, "order": order}
     if context:
         out.update({"context": context, "returned_hits": len(selected), "returned": len(results)})
+    out.update({"has_more": offset + len(selected) < len(all_hits), "next_offset": offset + len(selected)})
+    if truncated:
+        out["truncated"] = True
+    if context_limited:
+        out["context_limited"] = True
     return out
 
 
@@ -2277,7 +2331,7 @@ def build_handler(registry: JobRegistry):
                     query = str(payload.get("query", "")).strip()
                     field = str(payload.get("field", "all")).strip()  # all | src | dst
                     options = payload.get("options", {})
-                    max_results = min(int(payload.get("max_results", 500)), 2000)
+                    max_results = max(1, min(int(payload.get("max_results", CACHE_SEARCH_MAX_ROWS)), CACHE_SEARCH_MAX_ROWS))
                     # 可选文件过滤：只搜这个缓存文件（Agent 修单文件问题时用）
                     search_filename = str(payload.get("filename", "")).strip()
                     if not isinstance(options, dict):
@@ -2298,7 +2352,12 @@ def build_handler(registry: JobRegistry):
                             self._send_json({"error": f"invalid regular expression: {exc}"}, status=HTTPStatus.BAD_REQUEST)
                             return
 
-                    if not query:
+                    try:
+                        conditions = parse_cache_search_conditions(payload)
+                    except ValueError as exc:
+                        self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    if not conditions:
                         self._send_json({"results": [], "total": 0})
                         return
 
@@ -2381,6 +2440,7 @@ def build_handler(registry: JobRegistry):
                         max_results=max_results,
                         offset=offset,
                         order=order,
+                        conditions=conditions if payload.get("conditions") or field not in ("all", "src", "dst", "problem") else None,
                     )
                     self._send_json(payload_out)
                 except json.JSONDecodeError:

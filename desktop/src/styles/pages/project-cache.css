@@ -470,6 +470,7 @@
 }
 
 .cache-card {
+  flex-shrink: 0;
   background: var(--color-surface-strong);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-card);
@@ -493,6 +494,15 @@
 .cache-card {
   content-visibility: auto;
   contain-intrinsic-size: auto 96px;
+}
+
+/* A result jump must measure real heights, including the cards before its target. */
+.cache-card-list--positioning .cache-card {
+  content-visibility: visible;
+}
+
+.cache-card-list--positioning {
+  overflow-anchor: none;
 }
 
 .cache-card--problem {
@@ -782,6 +792,44 @@
   font-weight: 500;
 }
 
+.cache-card__textarea-wrap {
+  position: relative;
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.cache-card__textarea-wrap .cache-card__textarea {
+  width: 100%;
+  min-width: 0;
+}
+
+.cache-card__textarea-wrap:has(.cache-card__textarea-overlay) .cache-card__textarea:not(:focus) {
+  color: transparent;
+  caret-color: var(--color-text);
+}
+
+.cache-card__textarea-overlay {
+  position: absolute;
+  inset: 0;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  font-family: inherit;
+  font-size: var(--cache-font-base);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  overflow: auto;
+  scrollbar-width: none;
+  color: var(--color-text);
+  pointer-events: none;
+}
+
+.cache-card__textarea:focus + .cache-card__textarea-overlay {
+  opacity: 0;
+}
+
 /* 只读（还没有缓存文件，看到的是原文）：禁用的输入框别淡到看不清内容 */
 .cache-card__input:disabled,
 .cache-card__textarea:disabled,
@@ -924,6 +972,25 @@
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+.cache-search-condition-actions,
+.cache-search-budget-note {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.cache-search-condition-remove {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 18px;
 }
 
 .cache-search--global {
