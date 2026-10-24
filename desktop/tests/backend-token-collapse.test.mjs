@@ -33,7 +33,10 @@ function mount(initial) {
 
 const cards = (root) => root.findAll((node) => typeof node.type === 'string' && node.props.className?.split(' ').includes('token-entry'), { deep: false });
 const expandedFlags = (root) => root.findAll((node) => node.type === 'button' && node.props.className === 'token-entry__toggle', { deep: false }).map((node) => node.props['aria-expanded']);
-const bodyCount = (root) => cards(root).filter((card) => card.findAll((node) => node.props.className === 'token-entry__body').length > 0).length;
+// Motion retains closing bodies during exit; those are inert and hidden from accessibility.
+const bodyCount = (root) => cards(root).filter((card) => card.findAll((node) =>
+  typeof node.type === 'string' && node.props.className === 'token-entry__collapse' && !node.props['aria-hidden'],
+).length > 0).length;
 const text = (node) => node.findAllByType('span').map((span) => span.children.join('')).join('|');
 
 test('令牌默认只展开第一张，其余收起并给出摘要', () => {
@@ -61,6 +64,11 @@ test('点「添加令牌」只展开新加的那张，前面的全部收起', ()
     assert.equal(bodyCount(view.root()), 1);
     // 被收起的旧卡片靠摘要仍然认得出是哪一条
     assert.match(text(cards(view.root())[0]), /令牌 #1.*model-one · one\.example\.com · …1111/);
+    const exiting = cards(view.root())[0].findAll((node) => typeof node.type === 'string' && node.props.className === 'token-entry__collapse');
+    for (const body of exiting) {
+      assert.equal(body.props['aria-hidden'], true);
+      assert.equal(body.props.inert, '');
+    }
   } finally {
     view.unmount();
   }

@@ -6,6 +6,8 @@ import { Switch } from './Switch';
 import { fetchOpenAIModels } from '../lib/api';
 import { message, resolveMessage, type LocalizedText } from '../i18n/core';
 import { normalizeError } from '../lib/errors';
+import { AnimatedCollapse } from './UiMotion';
+import { useStableListKeys } from '../lib/useStableListKeys';
 
 type TokenEntry = {
   token: string;
@@ -65,6 +67,8 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
   const sakuraConfig = (config?.['SakuraLLM'] || {}) as Record<string, unknown>;
 
   const tokens = (Array.isArray(oaiConfig.tokens) ? oaiConfig.tokens : []) as TokenEntry[];
+
+  const tokenKeys = useStableListKeys(tokens);
 
   // 哪些令牌是展开的（只记下标，纯视图状态，不写进配置）。
   // 令牌多了整页会拉得很长，所以默认只展开第一张；「添加令牌」时只留新的那张展开。
@@ -308,7 +312,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
                 (t.token ?? '').trim() ? `…${(t.token ?? '').trim().slice(-4)}` : '',
               ].filter(Boolean).join(' · ');
               return (
-              <div key={idx} className={`token-entry${open ? '' : ' token-entry--collapsed'}`}>
+              <div key={tokenKeys[idx]} className={`token-entry token-entry--animated${open ? '' : ' token-entry--collapsed'}`}>
                 <div className="token-entry__header">
                   <button
                     type="button"
@@ -336,7 +340,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
                     </button>
                   )}
                 </div>
-                {open && (
+                <AnimatedCollapse open={open} className="token-entry__collapse">
                 <div className="token-entry__body">
                 <label className="field field--inline">
                   <span>{translate("common:backendConfigEditor.fieldFieldInline_message_aPIKey")}</span>
@@ -502,7 +506,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
                   <span className="field__hint">{translate("common:backendConfigEditor.fieldFieldInline_hint_reasoningEffort")}</span>
                 </label>
                 </div>
-                )}
+                </AnimatedCollapse>
               </div>
               );
             })}

@@ -1,3 +1,4 @@
+import { AnimatedDetails } from '../../components/AnimatedDetails';
 import { t as translate, useUiLanguage } from "../../i18n";
 import { useEffect, useMemo, useState } from 'react';
 import { Panel } from '../../components/Panel';
@@ -87,8 +88,7 @@ export function TranslationSettingsSection({ commonConfig, onFieldChange, onList
         ))}
       </ConfigFieldGroup>
 
-      <details className="config-advanced-details">
-        <summary className="config-advanced-details__summary">{translate("common:actions.advancedSettings")}</summary>
+      <AnimatedDetails className="config-advanced-details" summaryClassName="config-advanced-details__summary" summary={translate("common:actions.advancedSettings")}>
         <ConfigFieldGroup title={translate("common:actions.advancedSettings")} tier="advanced">
           {ADVANCED_FIELDS.map((field) => (
             <ConfigFieldRow
@@ -102,7 +102,7 @@ export function TranslationSettingsSection({ commonConfig, onFieldChange, onList
             />
           ))}
         </ConfigFieldGroup>
-      </details>
+      </AnimatedDetails>
     </Panel>
   );
 }

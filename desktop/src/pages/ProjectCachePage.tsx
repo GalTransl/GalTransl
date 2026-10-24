@@ -41,6 +41,9 @@ import type { LocalizedText } from '../i18n/core';
 import { escapeProblemFilterPattern, normalizeKeywordList, splitProblemItems, splitProblemTypes } from '../lib/problemFilter';
 import { joinPath } from '../lib/paths';
 import { scrollWithinContainer } from '../lib/scrollWithinContainer';
+import { useStableListKeys } from '../lib/useStableListKeys';
+import { AnimatedList } from '../components/AnimatedList';
+import { AnimatedCollapse } from '../components/UiMotion';
 
 /** 兼容读取缓存字段：优先新key，回退旧key */
 function src(e: CacheEntry): string { return e.post_src || e.post_jp || ''; }
@@ -175,10 +178,11 @@ const CacheEntryCard = memo(function CacheEntryCard({
         <button
           type="button"
           className="cache-card__expand"
+          aria-expanded={expanded}
           onClick={() => setExpanded(!expanded)}
           title={expanded ? translate("projects:projectCachePage.cacheCardExpand_title_text") : translate("projects:projectCachePage.cacheCardExpand_title_textVariant2")}
         >
-          {expanded ? <Icon name="chevron-down" /> : <Icon name="chevron-right" />}
+          <Icon name="chevron-right" className="cache-card__chevron" />
         </button>
         <button
           type="button"
@@ -191,6 +195,7 @@ const CacheEntryCard = memo(function CacheEntryCard({
         </button>
       </div>
 
+      <AnimatedCollapse open contentKey={expanded ? 'details' : 'summary'}>
       <div className="cache-card__fields">
         {/* 折叠态：原文 + 译文 */}
         {!expanded && (
@@ -290,6 +295,7 @@ const CacheEntryCard = memo(function CacheEntryCard({
           </>
         )}
       </div>
+      </AnimatedCollapse>
     </article>
   );
 });
@@ -536,6 +542,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     re: false
   });
   const [searchConditions, setSearchConditions] = useState<CacheSearchCondition[]>([]);
+  const searchConditionKeys = useStableListKeys(searchConditions);
   const searchRequestRef = useRef(0);
   const hasSearchQuery = Boolean(searchQuery.trim() || searchConditions.some((condition) => condition.query.trim()));
   const [searchResults, setSearchResults] = useState<CacheSearchResult[]>([]);
@@ -1744,18 +1751,21 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
           {/* Tab: Search */}
           {sidebarTab === 'search' && (
             <div className="cache-search-panel">
+              <AnimatedList active={active} className="cache-search-conditions">
               <CacheSearchConditionRow
+                key="primary"
                 condition={{ query: searchQuery, field: searchField, options: searchOptions }}
                 onChange={(condition) => {
                   setSearchQuery(condition.query); setSearchField(condition.field); setSearchOptions(condition.options);
                 }}
               />
               {searchConditions.map((condition, index) => (
-                <CacheSearchConditionRow key={index} condition={condition}
+                <CacheSearchConditionRow key={searchConditionKeys[index]} condition={condition}
                   onChange={(next) => setSearchConditions((current) => current.map((item, i) => i === index ? next : item))}
                   onRemove={() => setSearchConditions((current) => current.filter((_, i) => i !== index))}
                 />
               ))}
+              </AnimatedList>
               <div className="cache-search-condition-actions">
                 <button type="button" className="cache-replace-toggle__btn" disabled={searchConditions.length >= 19}
                   onClick={() => setSearchConditions((current) => [...current, { query: '', field: 'pre_dst', options: { re: false } }])}
@@ -1769,9 +1779,10 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                   type="button"
                   className="cache-replace-toggle__btn"
                   onClick={() => { setShowReplace(!showReplace); setReplaceQuery(searchQuery); }}
+                  aria-expanded={showReplace}
                   title={showReplace ? translate("projects:projectCachePage.cacheReplaceToggleBtn_title_replace") : translate("projects:projectCachePage.cacheReplaceToggleBtn_title_replaceVariant2")}
                 >
-                  {showReplace ? <><Icon name="chevron-down" />{translate("projects:projectCachePage.cacheReplaceToggleBtn_text_replace")}</> : <><Icon name="chevron-right" />{translate("projects:projectCachePage.cacheReplaceToggleBtn_text_replace")}</>}
+                  <Icon name="chevron-right" className="cache-card__chevron" />{translate("projects:projectCachePage.cacheReplaceToggleBtn_text_replace")}
                 </button>
                 {searching && <span className="cache-search-status">{translate("projects:projectCachePage.cacheSearchMeta_message_search")}</span>}
                 {!searching && hasSearchQuery && (
@@ -1780,7 +1791,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                   </span>
                 )}
               </div>
-              {showReplace && (
+              <AnimatedCollapse open={showReplace}>
                 <div className="cache-replace-group">
                   <input
                     type="text"
@@ -1831,7 +1842,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                     </div>
                   )}
                 </div>
-              )}
+              </AnimatedCollapse>
 
               {/* Search results list */}
               <div

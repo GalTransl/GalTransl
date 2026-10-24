@@ -689,6 +689,14 @@
   gap: var(--space-1);
 }
 
+.cache-card__chevron {
+  transition: transform var(--transition-fast);
+}
+
+[aria-expanded='true'] > .cache-card__chevron {
+  transform: rotate(90deg);
+}
+
 .cache-card__field {
   display: flex;
   align-items: center;
@@ -981,6 +989,12 @@
   gap: var(--space-2);
   color: var(--color-text-muted);
   font-size: 11px;
+}
+
+.cache-search-conditions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .cache-search-condition-remove {

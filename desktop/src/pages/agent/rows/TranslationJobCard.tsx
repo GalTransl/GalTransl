@@ -1,3 +1,4 @@
+import { AnimatedCollapse } from '../../../components/UiMotion';
 import { usePageActive } from '../../../components/PageActivity';
 import { t as translate, useUiLanguage } from "../../../i18n";
 import { useEffect, useRef, useState } from 'react';
@@ -144,7 +145,7 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
         <span className="agent-tjob__caret">›</span>
       </button>
 
-      {open ? (
+      <AnimatedCollapse open={open}>{() => (
         <div className="agent-tjob__body">
           <div className="agent-tjob__gauge">
             <span className="agent-tjob__percent">
@@ -182,7 +183,7 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
           >
             {rawOpen ? translate("agent:translationJobCard.agentTjobRawToggle_message_text") : translate("agent:translationJobCard.agentTjobRawToggle_message_textVariant2")}
           </button>
-          {rawOpen ? (
+          <AnimatedCollapse open={rawOpen} className="agent-tjob__raw">{() => (
             <>
               {item.arguments !== undefined ? (
                 <ToolBlock title={translate("agent:translationJobCard.agentTjobBody_title_text")} content={formatPayload(item.arguments)} mono />
@@ -199,9 +200,9 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
                 />
               ) : null}
             </>
-          ) : null}
+          )}</AnimatedCollapse>
         </div>
-      ) : null}
+      )}</AnimatedCollapse>
     </div>
   );
 }

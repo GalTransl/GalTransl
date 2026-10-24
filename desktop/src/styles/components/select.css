@@ -156,6 +156,11 @@ select option {
   animation: selectPanelEnter var(--dur-fast) var(--ease-spring);
 }
 
+/* CustomSelect uses Motion; the model-name combo retains its CSS entrance. */
+.custom-select__panel--motion {
+  animation: none;
+}
+
 /* ── Option items ── */
 
 .custom-select__option {

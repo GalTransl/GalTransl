@@ -16,10 +16,12 @@
     "build:linux": "cd .. && python3 build_linux_x64.py"
   },
   "dependencies": {
+    "@formkit/auto-animate": "^0.10.0",
     "@tauri-apps/plugin-dialog": "^2.7.0",
     "@tauri-apps/plugin-notification": "^2.4.0",
     "@tauri-apps/plugin-shell": "^2.3.5",
     "i18next": "^26.4.2",
+    "motion": "^14.6.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-i18next": "^17.0.15",

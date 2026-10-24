@@ -2,6 +2,8 @@ import { t as translate, useUiLanguage } from "../i18n";
 import { useCallback } from 'react';
 import { Switch } from './Switch';
 import { Icon } from './Icon';
+import { AnimatedList } from './AnimatedList';
+import { useStableListKeys } from '../lib/useStableListKeys';
 
 type ProxyEntry = {
   address: string;
@@ -19,6 +21,8 @@ export function ProxyConfigEditor({ proxyConfig, onChange, readOnly = false }: P
   useUiLanguage();
   const enableProxy = proxyConfig.enableProxy === true;
   const proxies = (Array.isArray(proxyConfig.proxies) ? proxyConfig.proxies : []) as ProxyEntry[];
+
+  const proxyKeys = useStableListKeys(proxies);
 
   const toggleEnableProxy = useCallback((enabled: boolean) => {
     if (readOnly) return;
@@ -61,12 +65,13 @@ export function ProxyConfigEditor({ proxyConfig, onChange, readOnly = false }: P
             )}
           </div>
 
+          <AnimatedList className="token-list__entries">
           {proxies.length === 0 && (
             <div className="token-list__empty">{translate("common:proxyConfigEditor.tokenList_message_emptyProxyAddProxyButtonAdd")}</div>
           )}
 
           {proxies.map((p, idx) => (
-            <div key={idx} className="token-entry">
+            <div key={proxyKeys[idx]} className="token-entry">
               <div className="token-entry__header">
                 <span className="token-entry__index">{translate("common:proxyConfigEditor.tokenEntryHeader_message_proxy", { value: idx + 1 })}</span>
                 {!readOnly && (
@@ -112,6 +117,7 @@ export function ProxyConfigEditor({ proxyConfig, onChange, readOnly = false }: P
               </label>
             </div>
           ))}
+          </AnimatedList>
         </div>
       )}
     </>

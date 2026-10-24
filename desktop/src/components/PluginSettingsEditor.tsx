@@ -1,3 +1,4 @@
+import { AnimatedDetails } from './AnimatedDetails';
 import { localizePlugin } from "../i18n/plugins";
 import { t as translate, useUiLanguage } from "../i18n";
 import { Fragment, useEffect, useId, useState, type ReactNode } from 'react';
@@ -39,10 +40,9 @@ export function PluginSettingsEditor({ plugin, overrides, onChange, afterField }
       {renderFields(common)}
       {afterField && !keys.includes(afterField.key) && afterField.content}
       {advanced.length > 0 && (
-        <details key={plugin.name} className="plugin-settings-advanced">
-          <summary>{translate("plugins:pluginSettingsEditor.pluginSettingsAdvanced_message_advancedSettingsItem", { count: advanced.length })}</summary>
+        <AnimatedDetails key={plugin.name} className="plugin-settings-advanced" summary={translate("plugins:pluginSettingsEditor.pluginSettingsAdvanced_message_advancedSettingsItem", { count: advanced.length })}>
           {renderFields(advanced)}
-        </details>
+        </AnimatedDetails>
       )}
     </div>
   );

@@ -2258,6 +2258,13 @@
   gap: var(--space-2);
 }
 
+.agent-rawdata__body,
+.agent-tjob__raw {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
 .agent-toolblock__pre,
 .agent-toolblock__markdown {
   margin: 0;

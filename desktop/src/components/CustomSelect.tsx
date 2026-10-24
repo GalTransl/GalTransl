@@ -2,6 +2,7 @@ import {
   type CSSProperties,
   type ReactNode,
   type SelectHTMLAttributes,
+  type Ref,
   Children,
   cloneElement,
   isValidElement,
@@ -13,6 +14,22 @@ import {
 } from 'react';
 import { usePageActive } from './PageActivity';
 import { createPortal } from 'react-dom';
+import { AnimatePresence, MotionConfig, UI_TRANSITION, useIsPresent, m } from './UiMotion';
+import { useUiAnimations } from '../lib/useUiAnimations';
+
+function SelectPanel({ children, panelRef, style, id, animated }: {
+  children: ReactNode; panelRef: Ref<HTMLDivElement>; style: CSSProperties; id: string; animated: boolean;
+}) {
+  const present = useIsPresent();
+  return <m.div ref={panelRef} className="custom-select__panel custom-select__panel--motion"
+    style={{ ...style, transformOrigin: style.bottom === 'auto' ? 'center top' : 'center bottom', pointerEvents: present ? undefined : 'none' }}
+    role={present ? 'listbox' : undefined} id={id} aria-hidden={!present || undefined}
+    {...(!present ? { inert: '' } : {})}
+    initial={animated ? { opacity: 0, y: -4, scale: 0.98 } : false}
+    animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -3, scale: 0.985 }} transition={animated ? UI_TRANSITION : { duration: 0 }}>
+    {children}
+  </m.div>;
+}
 
 /* ── Option data extracted from <option> children ── */
 interface OptionData {
@@ -70,6 +87,7 @@ export function CustomSelect({
 }: CustomSelectProps) {
   const options = extractOptions(children);
   const active = usePageActive();
+  const animated = useUiAnimations();
   const [open, setOpen] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -247,15 +265,17 @@ export function CustomSelect({
     .filter(Boolean)
     .join(' ');
 
-  const panel = active && open && options.length > 0 && panelStyle
+  const panel = active && options.length > 0 && panelStyle
     ? createPortal(
         <div className={rootClass}>
-          <div
-            ref={listRef}
-            className="custom-select__panel"
+          <MotionConfig reducedMotion="never">
+          <AnimatePresence>
+          {open && <SelectPanel
+            key="options"
+            panelRef={listRef}
             style={panelStyle}
-            role="listbox"
             id={`custom-select-listbox-${instanceId}`}
+            animated={animated}
           >
             {options.map((opt, idx) => (
               <div
@@ -290,7 +310,9 @@ export function CustomSelect({
                 {opt.label}
               </div>
             ))}
-          </div>
+          </SelectPanel>}
+          </AnimatePresence>
+          </MotionConfig>
         </div>,
         document.body,
       )

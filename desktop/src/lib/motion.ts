@@ -87,6 +87,7 @@ export function prefersReducedMotion(): boolean {
 export function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(prefersReducedMotion);
   useEffect(() => {
+    if (typeof window === 'undefined') return;
     const sync = () => setReduced(prefersReducedMotion());
     window.addEventListener(DISABLE_ANIMATIONS_CHANGE_EVENT, sync);
     return () => {

@@ -1,3 +1,4 @@
+import { AnimatedCollapse } from '../../../components/UiMotion';
 import { usePageActive } from '../../../components/PageActivity';
 import { t as translate, useUiLanguage } from "../../../i18n";
 import { useEffect, useState } from 'react';
@@ -102,7 +103,7 @@ function SubagentRow({ run }: { run: SubagentRun }) {
         ) : null}
         {durationMs > 0 ? <span className="agent-subagent__time">{formatDuration(durationMs)}</span> : null}
       </button>
-      {open ? (
+      <AnimatedCollapse open={open}>{() => (
         <div className="agent-subagent__body">
           {run.brief ? <div className="agent-subagent__brief">{translate("agent:subagentList.agentSubagentBody_message_text", { brief: run.brief })}</div> : null}
           {run.steps.map((step, i) =>
@@ -120,7 +121,7 @@ function SubagentRow({ run }: { run: SubagentRun }) {
           ) : null}
           {run.error ? <div className="agent-subagent__error">{run.error}</div> : null}
         </div>
-      ) : null}
+      )}</AnimatedCollapse>
     </div>
   );
 }

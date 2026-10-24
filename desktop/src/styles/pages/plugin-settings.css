@@ -118,15 +118,15 @@
   padding-top: var(--space-3);
 }
 
-.plugin-settings-advanced > summary {
+.plugin-settings-advanced > .animated-details__summary {
   cursor: pointer;
   color: var(--color-text-muted);
   font-size: 13px;
   padding: var(--space-2) 0;
 }
 
-.plugin-settings-advanced[open] > summary {
-  margin-bottom: var(--space-3);
+.plugin-settings-advanced .animated-details__content {
+  padding-top: var(--space-3);
 }
 
 .plugin-settings-empty {

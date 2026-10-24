@@ -1,3 +1,4 @@
+import { AnimatedDetails } from '../components/AnimatedDetails';
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePageActive, useRetainPage } from '../components/PageActivity';
@@ -464,10 +465,9 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
                               ? translate("config:projectConfigPage.pluginSettingRowControl_message_notPluginProcessFile")
                               : translate("config:projectConfigPage.pluginSettingRowControl_message_extractCompleteSuccessCountFileSentenceFailed", { count: reextractResult.refreshed.length, total_entries: reextractResult.total_entries, count2: reextractResult.errors.length })}
                             {reextractResult.errors.length > 0 && (
-                              <details open>
-                                <summary>{translate("config:projectConfigPage.pluginSettingRowControl_message_failedFile")}</summary>
+                              <AnimatedDetails defaultOpen summary={translate("config:projectConfigPage.pluginSettingRowControl_message_failedFile")}>
                                 {reextractResult.errors.map((item) => <p key={item.filename}>{item.filename}：{item.error}</p>)}
-                              </details>
+                              </AnimatedDetails>
                             )}
                           </div>
                         )}

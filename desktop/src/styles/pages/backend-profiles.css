@@ -406,6 +406,14 @@
   margin-bottom: 0;
 }
 
+.token-entry--animated .token-entry__header {
+  margin-bottom: 0;
+}
+
+.token-entry--animated .token-entry__body {
+  padding-top: var(--space-3);
+}
+
 /* 头部整条都能点：左边文字做成按钮，箭头按 aria-expanded 转 90°（右箭头 → 下箭头）。
    按钮要吃掉剩余宽度，收起时的摘要才能用省略号截断，而不是把删除按钮挤出去。 */
 .token-entry__toggle {

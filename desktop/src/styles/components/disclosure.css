@@ -1,0 +1,30 @@
+.animated-details__summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.animated-details__summary::before {
+  content: '';
+  flex: none;
+  width: 11px;
+  height: 11px;
+  background: currentColor;
+  mask: var(--icon-chevron-right) center / contain no-repeat;
+  transition: transform var(--transition-fast);
+}
+
+[data-open='true'] > .animated-details__summary::before {
+  transform: rotate(90deg);
+}
+
+.animated-details__content {
+  display: flow-root;
+}

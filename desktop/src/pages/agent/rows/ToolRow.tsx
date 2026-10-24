@@ -1,3 +1,4 @@
+import { AnimatedCollapse } from '../../../components/UiMotion';
 import { t as translate, useUiLanguage } from "../../../i18n";
 import { memo, type ReactNode, useEffect, useRef, useState } from 'react';
 import { Icon } from '../../../components/Icon';
@@ -159,7 +160,7 @@ export const ToolRow = memo(function ToolRow({
         </span>
         <span className="agent-tool__caret">›</span>
       </button>
-      {open ? (
+      <AnimatedCollapse open={open}>{() => (
         <div className="agent-tool__body">
           {hasSubagents ? <SubagentList runs={subagents} /> : null}
           {changeList ? (
@@ -196,7 +197,7 @@ export const ToolRow = memo(function ToolRow({
             </>
           )}
         </div>
-      ) : null}
+      )}</AnimatedCollapse>
     </div>
   );
 });
@@ -231,12 +232,12 @@ export function ToolBlock({
           <span className="agent-toolblock__duration">{formatDuration(durationMs)}</span>
         ) : null}
       </div>
-      {markdown ? (
+      <AnimatedCollapse open contentKey={expanded ? 'full' : 'preview'}>{() => markdown ? (
         // 完整解析后按高度折叠，避免截在表格或代码围栏中间破坏结构。
         <Markdown text={content} className={`agent-toolblock__markdown${expanded ? ' is-expanded' : ''}`} />
       ) : (
         <pre className={`agent-toolblock__pre${mono ? ' is-mono' : ''}`}>{shown}</pre>
-      )}
+      )}</AnimatedCollapse>
       {truncate > 0 && content.length > truncate ? (
         <button type="button" className="agent-toolblock__toggle" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}>
           {expanded ? translate("agent:toolRow.agentToolblockToggle_message_text") : translate("agent:toolRow.agentToolblockToggle_message_all", { count: content.length })}
@@ -290,7 +291,7 @@ function RawToolData({
           )}
         </span>
       </button>
-      {open ? (
+      <AnimatedCollapse open={open} className="agent-rawdata__body">{() => (
         <>
           {argsText ? <ToolBlock title={translate("agent:toolRow.agentRawdata_title_text")} content={argsText} mono /> : null}
           {resultText ? (
@@ -305,7 +306,7 @@ function RawToolData({
             />
           ) : null}
         </>
-      ) : null}
+      )}</AnimatedCollapse>
     </div>
   );
 }

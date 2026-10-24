@@ -36,6 +36,7 @@ async function fixture() {
     '../i18n': { t: key => key, message: key => key, useUiLanguage: () => 'en', useMessageState: useState },
     '../i18n/core': { t: key => key },
     '../components/PageActivity': { useRetainPage() {} },
+    '../lib/useUiAnimations': { useUiAnimations: () => false },
     '../components/Button': { Button: ({ children, ...props }) => h('button', props, children) },
     '../components/Icon': { Icon: () => null },
     '../components/Panel': { Panel: ({ children, actions }) => h('section', null, actions, children) },
@@ -116,7 +117,12 @@ test('jump reveals targets hidden by local filters and all search terms reach co
     f.jump(0);
     await f.resolveFile('a.json');
     const card = () => f.view.root.findByProps({ 'data-cache-index': 25 });
-    const marks = () => card().findAllByType('mark').map(node => node.props.children);
+    const marks = () => card().findAllByType('mark').filter(node => {
+      for (let parent = node.parent; parent; parent = parent.parent) {
+        if (parent.props['aria-hidden'] === true) return false;
+      }
+      return true;
+    }).map(node => node.props.children);
     assert.deepEqual(marks(), ['悶え', '挣扎']);
     act(() => f.view.root.findByProps({ className: 'cache-search' }).props.onChange({ target: { value: 'cat' } }));
     act(() => f.view.root.findByProps({ className: 'cache-filter' }).findByType('input').props.onChange({ target: { checked: true } }));

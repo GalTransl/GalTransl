@@ -402,7 +402,7 @@
   transition: transform var(--transition-fast);
 }
 
-.config-advanced-details[open] .config-advanced-details__summary::before {
+.config-advanced-details[data-open='true'] .config-advanced-details__summary::before {
   transform: rotate(90deg);
 }
 

@@ -1,3 +1,4 @@
+import { AnimatedDetails } from '../components/AnimatedDetails';
 import { localizePlugin, pluginSettingDisplayValue } from "../i18n/plugins";
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useState } from 'react';
@@ -122,10 +123,9 @@ export function PluginsPage() {
                     return <>
                       {renderSettings(false)}
                       {entries.some(([key]) => localizePlugin(plugin).settings_schema?.[key]?.advanced) && (
-                        <details className="plugin-settings-advanced">
-                          <summary>{translate("common:actions.advancedSettings")}</summary>
+                        <AnimatedDetails className="plugin-settings-advanced" summary={translate("common:actions.advancedSettings")}>
                           {renderSettings(true)}
-                        </details>
+                        </AnimatedDetails>
                       )}
                     </>;
                   })()}
