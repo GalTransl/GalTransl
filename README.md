@@ -25,6 +25,10 @@
 
 译后校对子 Agent 默认可以直接修复分配范围内的译文；拿不准、修改后仍需确认的句子会留下 `proofread_comment`，交主 Agent 二次审查。主 Agent 默认接收修改统计和待审查摘要，完整修改记录与待审查清单可分页查询，修改也可按记录撤销。句子已被后续编辑时会拒绝覆盖；校对完成后仍需重建输出文件。
 
+桌面端新增独立的 **提取 Agent**：复用翻译 Agent 的推理、流式会话、审批与上下文压缩框架，使用配套提取 Skill 和本地 Python/shell 识别游戏引擎、提取文本及验证回填，提取结果可直接打开为翻译项目。发布包复用现有 Python 后端，不再包含 Node.js 或 Pi SDK；内置完整 Skill，Agent 也可显式尝试本机 Python；[配置与开发说明](GalTransl/Extraction/README.md)。
+
+源码通过 Git 子模块引用 Skill，克隆时使用 `git clone --recurse-submodules https://github.com/GalTransl/GalTransl.git`。开发启动或打包时会自动下载并同步上游 `main` 分支的最新提交；有本地修改或分叉时停止同步，避免覆盖。发布包包含打包时的完整 Skill，运行时不会更新。
+
 
 ## 前言
 &ensp;&ensp;&ensp;&ensp;GalTransl的核心是一组自动化翻译流水线，解决了使用ChatGPT自动化翻译Gal过程中已知的大部分问题，并提高了整体的翻译质量。同时，通过与其他项目的组合，打通了制作补丁的完整流程，一定程度降低了上手门槛。对此感兴趣的朋友可以通过本项目更容易的构建具有一定质量的机翻补丁，并(或许)可以尝试在此框架的基础上高效的构建更高质量的汉化补丁。  

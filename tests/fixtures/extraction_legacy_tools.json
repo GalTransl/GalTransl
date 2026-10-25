@@ -1,0 +1,1488 @@
+{
+  "reference": {
+    "package": "@earendil-works/pi-coding-agent",
+    "version": "1.4.0",
+    "hashes": {
+      "src/tools.ts": "a11f7ba26426fcd394ce16974f91731da8a52500eb2632b89d0014afbead1118",
+      "src/commands.ts": "6e5e21e034669b6dd4653d014eace80d9a4b2e557e4e258859a3bcb917dfb281",
+      "src/protocol.ts": "64a274dca48d68b430b2e3da1708bdda04bc7cc338f76d66d7c009174934934f",
+      "src/session.ts": "a6c7134ef25f3ec519aa706e4c3a1affd2cf44dfe69f796e323d7dfe0ea411a5",
+      "src/paths.ts": "669397563a6ee173fa199d570aa7715b06a8953487c84de6261e708000c83608",
+      "dist/tools.js": "fa87e9235dae7965e9383535a59bc875c290cde12ad3d1d17c8d90be36af202c",
+      "node_modules/@earendil-works/pi-coding-agent/dist/core/tools/index.js": "16a517a54e2aa1386fada22cbef63205ca11463394f95fd20d74bee6fb2898a3",
+      "node_modules/@earendil-works/pi-coding-agent/dist/core/tools/read.js": "a5493a6cc7a3a03ba23d345f603bc7ee839ead2fe0ea79a096107fb9ebaa03eb",
+      "node_modules/@earendil-works/pi-coding-agent/dist/core/tools/edit.js": "e2e7081b28b170eb11bdd8d4fc295c491d581364cd57ae0670f24031b4057265",
+      "node_modules/@earendil-works/pi-coding-agent/dist/core/tools/edit-diff.js": "fadc87523d52babf246967a1f1b921e621eb4437e50c50f8426c46cec3f05071",
+      "node_modules/@earendil-works/pi-coding-agent/dist/core/tools/write.js": "0e9daec15a5001cafe651db391aed63a463c346d29b60e6dc91ef09477fd22f5",
+      "node_modules/@earendil-works/pi-coding-agent/dist/core/tools/bash.js": "f32e87a42f66276b2eafaaf0848babf52523d37ab0fd448439586376747f03c4",
+      "node_modules/@earendil-works/pi-coding-agent/dist/core/tools/powershell.js": "329abae972d61c226cddf96c8469202168aa13449791ac4f8f1796347f8624f2",
+      "node_modules/@earendil-works/pi-coding-agent/dist/core/tools/grep.js": "3ebc39e878898a348542d8b308944896af9c68439a975343ba4158d87cb20344",
+      "node_modules/@earendil-works/pi-coding-agent/dist/core/tools/find.js": "cbb5e3a76e962899f833452ff26670c1fdbf333e7efdecb9953b07f6ebd14ed7",
+      "node_modules/@earendil-works/pi-coding-agent/dist/core/tools/ls.js": "8e06f1a42e48fcf447558686d8bb4defebcb80eb8e73c3483a7892643e1622a9"
+    }
+  },
+  "schemas": [
+    {
+      "name": "read_file",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 400
+          },
+          "hex": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "list_files",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "write_file",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "path",
+          "content"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 60000
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_file",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "path",
+          "old_text",
+          "new_text"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "old_text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 30000
+          },
+          "new_text": {
+            "type": "string",
+            "maxLength": 30000
+          }
+        }
+      }
+    },
+    {
+      "name": "run_python",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 60000
+          },
+          "script": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "module": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "runtime": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "bundled"
+              },
+              {
+                "type": "string",
+                "const": "system"
+              }
+            ]
+          },
+          "python_path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "maxItems": 16
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 900
+          }
+        }
+      }
+    },
+    {
+      "name": "run_shell",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60000
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 900
+          }
+        }
+      }
+    },
+    {
+      "name": "ask_user",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "properties": {
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        }
+      }
+    }
+  ],
+  "native_schemas": [
+    {
+      "name": "read",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to the file to read (relative or absolute)"
+          },
+          "offset": {
+            "type": "number",
+            "description": "Line number to start reading from (1-indexed)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of lines to read"
+          }
+        }
+      }
+    },
+    {
+      "name": "bash",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Shell command to execute"
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Timeout in seconds (optional, no default timeout)"
+          }
+        }
+      }
+    },
+    {
+      "name": "powershell",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Shell command to execute"
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Timeout in seconds (optional, no default timeout)"
+          }
+        }
+      }
+    },
+    {
+      "name": "edit",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "path",
+          "edits"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to the file to edit (relative or absolute)"
+          },
+          "edits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "oldText",
+                "newText"
+              ],
+              "properties": {
+                "oldText": {
+                  "type": "string",
+                  "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                },
+                "newText": {
+                  "type": "string",
+                  "description": "Replacement text for this targeted edit."
+                }
+              }
+            },
+            "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+          }
+        }
+      }
+    },
+    {
+      "name": "write",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "path",
+          "content"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to the file to write (relative or absolute)"
+          },
+          "content": {
+            "type": "string",
+            "description": "Content to write to the file"
+          }
+        }
+      }
+    },
+    {
+      "name": "grep",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "pattern"
+        ],
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Search pattern (regex or literal string)"
+          },
+          "path": {
+            "type": "string",
+            "description": "Directory or file to search (default: current directory)"
+          },
+          "glob": {
+            "type": "string",
+            "description": "Filter files by glob pattern, e.g. '*.ts' or '**/*.spec.ts'"
+          },
+          "ignoreCase": {
+            "type": "boolean",
+            "description": "Case-insensitive search (default: false)"
+          },
+          "literal": {
+            "type": "boolean",
+            "description": "Treat pattern as literal string instead of regex (default: false)"
+          },
+          "context": {
+            "type": "number",
+            "description": "Number of lines to show before and after each match (default: 0)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of matches to return (default: 100)"
+          }
+        }
+      }
+    },
+    {
+      "name": "find",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "pattern"
+        ],
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Glob pattern to match files, e.g. '*.ts', '**/*.json', or 'src/**/*.spec.ts'"
+          },
+          "path": {
+            "type": "string",
+            "description": "Directory to search in (default: current directory)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of results (default: 1000)"
+          }
+        }
+      }
+    },
+    {
+      "name": "ls",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Directory to list (default: current directory)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of entries to return (default: 500)"
+          }
+        }
+      }
+    }
+  ],
+  "native_probes": [
+    {
+      "name": "edit-batch",
+      "before": "one\ntwo\n",
+      "edits": [
+        {
+          "oldText": "one",
+          "newText": "ONE"
+        },
+        {
+          "oldText": "two",
+          "newText": "TWO"
+        }
+      ],
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Successfully replaced 2 block(s) in scripts/native-edit-batch.txt."
+          }
+        ],
+        "details": {
+          "diff": "-1 one\n-2 two\n+1 ONE\n+2 TWO",
+          "patch": "--- scripts/native-edit-batch.txt\n+++ scripts/native-edit-batch.txt\n@@ -1,2 +1,2 @@\n-one\n-two\n+ONE\n+TWO\n",
+          "firstChangedLine": 1
+        }
+      },
+      "after": "4f4e450a54574f0a"
+    },
+    {
+      "name": "edit-fuzzy",
+      "before": "quote “value”\n",
+      "edits": [
+        {
+          "oldText": "quote \"value\"",
+          "newText": "replaced"
+        }
+      ],
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Successfully replaced 1 block(s) in scripts/native-edit-fuzzy.txt."
+          }
+        ],
+        "details": {
+          "diff": "-1 quote “value”\n+1 replaced",
+          "patch": "--- scripts/native-edit-fuzzy.txt\n+++ scripts/native-edit-fuzzy.txt\n@@ -1,1 +1,1 @@\n-quote “value”\n+replaced\n",
+          "firstChangedLine": 1
+        }
+      },
+      "after": "7265706c616365640a"
+    },
+    {
+      "name": "edit-crlf-bom",
+      "before": "﻿one\r\ntwo\r\n",
+      "edits": [
+        {
+          "oldText": "one\ntwo",
+          "newText": "ONE\nTWO"
+        }
+      ],
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Successfully replaced 1 block(s) in scripts/native-edit-crlf-bom.txt."
+          }
+        ],
+        "details": {
+          "diff": "-1 one\n-2 two\n+1 ONE\n+2 TWO",
+          "patch": "--- scripts/native-edit-crlf-bom.txt\n+++ scripts/native-edit-crlf-bom.txt\n@@ -1,2 +1,2 @@\n-one\n-two\n+ONE\n+TWO\n",
+          "firstChangedLine": 1
+        }
+      },
+      "after": "efbbbf4f4e450d0a54574f0d0a"
+    }
+  ],
+  "cases": [
+    {
+      "name": "text-lines",
+      "tool": "read_file",
+      "args": {
+        "path": "scripts/text.txt"
+      },
+      "files": {
+        "scripts/text.txt": "one\n二\nthree\n"
+      },
+      "value": {
+        "text": "1: one\n2: 二\n3: three\n4: ",
+        "total_lines": 4,
+        "next_line": null
+      },
+      "approvals": 0,
+      "after": {}
+    },
+    {
+      "name": "text-offset",
+      "tool": "read_file",
+      "args": {
+        "path": "scripts/text.txt",
+        "offset": 2,
+        "limit": 1
+      },
+      "files": {},
+      "value": {
+        "text": "2: 二",
+        "total_lines": 4,
+        "next_line": 3
+      },
+      "approvals": 0,
+      "after": {}
+    },
+    {
+      "name": "text-past-end",
+      "tool": "read_file",
+      "args": {
+        "path": "scripts/text.txt",
+        "offset": 99
+      },
+      "files": {},
+      "value": {
+        "text": "",
+        "total_lines": 4,
+        "next_line": null
+      },
+      "approvals": 0,
+      "after": {}
+    },
+    {
+      "name": "text-crlf-bom",
+      "tool": "read_file",
+      "args": {
+        "path": "scripts/windows.txt"
+      },
+      "files": {
+        "scripts/windows.txt": "﻿one\r\n二\r\n"
+      },
+      "value": {
+        "text": "1: ﻿one\r\n2: 二\r\n3: ",
+        "total_lines": 3,
+        "next_line": null
+      },
+      "approvals": 0,
+      "after": {}
+    },
+    {
+      "name": "text-emoji",
+      "tool": "read_file",
+      "args": {
+        "path": "scripts/emoji.txt"
+      },
+      "files": {
+        "scripts/emoji.txt": "abc😀日本語\n"
+      },
+      "value": {
+        "text": "1: abc😀日本語\n2: ",
+        "total_lines": 2,
+        "next_line": null
+      },
+      "approvals": 0,
+      "after": {}
+    },
+    {
+      "name": "binary-start",
+      "tool": "read_file",
+      "args": {
+        "path": "scripts/text.txt",
+        "hex": true,
+        "limit": 1
+      },
+      "files": {},
+      "value": {
+        "offset": 0,
+        "hex": "6f6e650ae4ba8c0a74687265650a",
+        "next_offset": 15,
+        "size": 14
+      },
+      "approvals": 0,
+      "after": {}
+    },
+    {
+      "name": "binary-eof",
+      "tool": "read_file",
+      "args": {
+        "path": "scripts/text.txt",
+        "hex": true,
+        "offset": 999
+      },
+      "files": {},
+      "value": {
+        "offset": 998,
+        "hex": "",
+        "next_offset": 999,
+        "size": 14
+      },
+      "approvals": 0,
+      "after": {}
+    },
+    {
+      "name": "list-default",
+      "tool": "list_files",
+      "args": {},
+      "files": {},
+      "value": {
+        "entries": [
+          {
+            "name": "gt_input",
+            "directory": true,
+            "link": false
+          },
+          {
+            "name": "gt_output",
+            "directory": true,
+            "link": false
+          },
+          {
+            "name": "metadata",
+            "directory": true,
+            "link": false
+          },
+          {
+            "name": "original",
+            "directory": true,
+            "link": false
+          },
+          {
+            "name": "reports",
+            "directory": true,
+            "link": false
+          },
+          {
+            "name": "scripts",
+            "directory": true,
+            "link": false
+          }
+        ],
+        "total": 6,
+        "next_offset": null
+      },
+      "approvals": 0,
+      "after": {}
+    },
+    {
+      "name": "list-past-end",
+      "tool": "list_files",
+      "args": {
+        "offset": 999
+      },
+      "files": {},
+      "value": {
+        "entries": [],
+        "total": 6,
+        "next_offset": null
+      },
+      "approvals": 0,
+      "after": {}
+    },
+    {
+      "name": "list-page-one",
+      "tool": "list_files",
+      "args": {
+        "path": "reports/paginated"
+      },
+      "files": {},
+      "value": {
+        "entries": [
+          {
+            "name": "file-000",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-001",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-002",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-003",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-004",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-005",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-006",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-007",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-008",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-009",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-010",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-011",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-012",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-013",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-014",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-015",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-016",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-017",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-018",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-019",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-020",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-021",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-022",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-023",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-024",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-025",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-026",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-027",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-028",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-029",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-030",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-031",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-032",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-033",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-034",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-035",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-036",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-037",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-038",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-039",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-040",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-041",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-042",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-043",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-044",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-045",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-046",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-047",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-048",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-049",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-050",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-051",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-052",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-053",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-054",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-055",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-056",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-057",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-058",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-059",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-060",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-061",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-062",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-063",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-064",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-065",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-066",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-067",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-068",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-069",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-070",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-071",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-072",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-073",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-074",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-075",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-076",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-077",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-078",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-079",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-080",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-081",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-082",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-083",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-084",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-085",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-086",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-087",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-088",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-089",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-090",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-091",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-092",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-093",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-094",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-095",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-096",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-097",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-098",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-099",
+            "directory": false,
+            "link": false
+          }
+        ],
+        "total": 105,
+        "next_offset": 100
+      },
+      "approvals": 0,
+      "after": {}
+    },
+    {
+      "name": "list-page-two",
+      "tool": "list_files",
+      "args": {
+        "path": "reports/paginated",
+        "offset": 100
+      },
+      "files": {},
+      "value": {
+        "entries": [
+          {
+            "name": "file-100",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-101",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-102",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-103",
+            "directory": false,
+            "link": false
+          },
+          {
+            "name": "file-104",
+            "directory": false,
+            "link": false
+          }
+        ],
+        "total": 105,
+        "next_offset": null
+      },
+      "approvals": 0,
+      "after": {}
+    },
+    {
+      "name": "write-unicode",
+      "tool": "write_file",
+      "args": {
+        "path": "scripts/write.txt",
+        "content": "中文😀\r\n"
+      },
+      "files": {},
+      "observe": [
+        "scripts/write.txt"
+      ],
+      "value": {
+        "path": "<ROOT>/workspace/scripts/write.txt",
+        "bytes": 12
+      },
+      "approvals": 1,
+      "after": {
+        "scripts/write.txt": "e4b8ade69687f09f98800d0a"
+      }
+    },
+    {
+      "name": "edit-unique",
+      "tool": "edit_file",
+      "args": {
+        "path": "scripts/edit.txt",
+        "old_text": "two",
+        "new_text": "二"
+      },
+      "files": {
+        "scripts/edit.txt": "one\r\ntwo\r\n"
+      },
+      "observe": [
+        "scripts/edit.txt"
+      ],
+      "value": {
+        "path": "<ROOT>/workspace/scripts/edit.txt",
+        "changed": true
+      },
+      "approvals": 1,
+      "after": {
+        "scripts/edit.txt": "6f6e650d0ae4ba8c0d0a"
+      }
+    },
+    {
+      "name": "edit-ambiguous",
+      "tool": "edit_file",
+      "args": {
+        "path": "scripts/edit.txt",
+        "old_text": "one",
+        "new_text": "x"
+      },
+      "files": {
+        "scripts/edit.txt": "one one"
+      },
+      "error": "old_text must match exactly once",
+      "approvals": 0,
+      "after": {}
+    },
+    {
+      "name": "edit-missing",
+      "tool": "edit_file",
+      "args": {
+        "path": "scripts/edit.txt",
+        "old_text": "missing",
+        "new_text": "x"
+      },
+      "files": {},
+      "error": "old_text must match exactly once",
+      "approvals": 0,
+      "after": {}
+    },
+    {
+      "name": "edit-conflict",
+      "tool": "edit_file",
+      "args": {
+        "path": "scripts/edit.txt",
+        "old_text": "one",
+        "new_text": "x"
+      },
+      "files": {
+        "scripts/edit.txt": "one"
+      },
+      "duringApproval": {
+        "scripts/edit.txt": "one external"
+      },
+      "observe": [
+        "scripts/edit.txt"
+      ],
+      "error": "The file changed while awaiting approval",
+      "approvals": 1,
+      "after": {
+        "scripts/edit.txt": "6f6e652065787465726e616c"
+      }
+    },
+    {
+      "name": "edit-literal-dollar",
+      "tool": "edit_file",
+      "args": {
+        "path": "scripts/edit.txt",
+        "old_text": "one",
+        "new_text": "$&"
+      },
+      "files": {
+        "scripts/edit.txt": "one"
+      },
+      "observe": [
+        "scripts/edit.txt"
+      ],
+      "value": {
+        "path": "<ROOT>/workspace/scripts/edit.txt",
+        "changed": true
+      },
+      "approvals": 1,
+      "after": {
+        "scripts/edit.txt": "6f6e65"
+      }
+    },
+    {
+      "name": "python-code",
+      "tool": "run_python",
+      "args": {
+        "code": "import sys; print(\"中文\", sys.argv[1])",
+        "args": [
+          "fixture"
+        ]
+      },
+      "files": {},
+      "command": true,
+      "value": {
+        "exit_code": 0,
+        "signal": null,
+        "output": "中文 fixture\r\n",
+        "truncated": false,
+        "output_bytes": 16
+      },
+      "approvals": 1,
+      "after": {}
+    },
+    {
+      "name": "python-system",
+      "tool": "run_python",
+      "args": {
+        "runtime": "system",
+        "code": "print(\"system fixture\")"
+      },
+      "files": {},
+      "command": true,
+      "value": {
+        "exit_code": 0,
+        "signal": null,
+        "output": "system fixture\r\n",
+        "truncated": false,
+        "output_bytes": 16
+      },
+      "approvals": 1,
+      "after": {}
+    },
+    {
+      "name": "python-script",
+      "tool": "run_python",
+      "args": {
+        "script": "scripts/adapter.py",
+        "args": [
+          "fixture"
+        ]
+      },
+      "files": {
+        "scripts/adapter.py": "import sys; print(\"script\", sys.argv[1])"
+      },
+      "command": true,
+      "value": {
+        "exit_code": 0,
+        "signal": null,
+        "output": "script fixture\r\n",
+        "truncated": false,
+        "output_bytes": 16
+      },
+      "approvals": 1,
+      "after": {}
+    },
+    {
+      "name": "python-module",
+      "tool": "run_python",
+      "args": {
+        "module": "audit_module",
+        "args": [
+          "fixture"
+        ]
+      },
+      "files": {},
+      "command": true,
+      "value": {
+        "exit_code": 0,
+        "signal": null,
+        "output": "module fixture\r\n",
+        "truncated": false,
+        "output_bytes": 16
+      },
+      "approvals": 1,
+      "after": {}
+    },
+    {
+      "name": "python-nonzero",
+      "tool": "run_python",
+      "args": {
+        "code": "print(\"nonzero fixture\"); raise SystemExit(7)"
+      },
+      "files": {},
+      "command": true,
+      "error": {
+        "exit_code": 7,
+        "signal": null,
+        "output": "nonzero fixture\r\n",
+        "truncated": false,
+        "output_bytes": 17
+      },
+      "approvals": 1,
+      "after": {}
+    },
+    {
+      "name": "shell-command",
+      "tool": "run_shell",
+      "args": {
+        "command": "Write-Output 'shell fixture'"
+      },
+      "files": {},
+      "command": true,
+      "value": {
+        "exit_code": 0,
+        "signal": null,
+        "output": "shell fixture\r\n",
+        "truncated": false,
+        "output_bytes": 15
+      },
+      "approvals": 1,
+      "after": {}
+    },
+    {
+      "name": "python-invalid-choice",
+      "tool": "run_python",
+      "args": {
+        "code": "",
+        "module": "json"
+      },
+      "files": {},
+      "error": "Supply exactly one of code, script or module",
+      "approvals": 0,
+      "after": {}
+    },
+    {
+      "name": "python-invalid-runtime",
+      "tool": "run_python",
+      "args": {
+        "code": "",
+        "python_path": "<PYTHON>"
+      },
+      "files": {},
+      "error": "python_path requires runtime=\"system\"",
+      "approvals": 0,
+      "after": {}
+    },
+    {
+      "name": "ask-text",
+      "tool": "ask_user",
+      "args": {
+        "question": "Which fixture?"
+      },
+      "files": {},
+      "value": "fixture A\n中文",
+      "approvals": 0,
+      "after": {}
+    }
+  ]
+}

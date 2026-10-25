@@ -2098,6 +2098,7 @@ export type AgentContextUsage = {
 export type QueuedMessage = {
   id: string;
   text: string;
+  images?: import('../pages/agent/images').AgentImage[];
 };
 
 /**
@@ -2128,6 +2129,7 @@ export type AgentEvent = {
   length?: number;
   // user_message
   message?: string;
+  images?: import('../pages/agent/images').AgentImage[];
   // tool_call
   id?: string;
   name?: string;
@@ -2247,6 +2249,7 @@ export type AgentStartPayload = {
   config_file_name?: string;
   backend_profile_data: Record<string, unknown>;
   first_prompt?: string;
+  images?: { name: string; data_url?: string }[];
   /** Omit to let the backend create a fresh session. */
   session_id?: string;
 } & AgentRequestContext;

@@ -12,10 +12,12 @@ import pluginsZh from "./locales/zh-CN/plugins.json";
 import pluginsEn from "./locales/en/plugins.json";
 import errorsZh from "./locales/zh-CN/errors.json";
 import errorsEn from "./locales/en/errors.json";
+import extractionZh from "./locales/zh-CN/extraction.json";
+import extractionEn from "./locales/en/extraction.json";
 
 export const resources = {
-  "zh-CN": { common: commonZh, settings: settingsZh, projects: projectsZh, agent: agentZh, config: configZh, plugins: pluginsZh, errors: errorsZh },
-  en: { common: commonEn, settings: settingsEn, projects: projectsEn, agent: agentEn, config: configEn, plugins: pluginsEn, errors: errorsEn },
+  "zh-CN": { common: commonZh, settings: settingsZh, projects: projectsZh, agent: agentZh, extraction: extractionZh, config: configZh, plugins: pluginsZh, errors: errorsZh },
+  en: { common: commonEn, settings: settingsEn, projects: projectsEn, agent: agentEn, extraction: extractionEn, config: configEn, plugins: pluginsEn, errors: errorsEn },
 };
 
 type LeafPaths<T> = { [K in keyof T & string]: T[K] extends string ? K : T[K] extends object ? `${K}.${LeafPaths<T[K]>}` : never }[keyof T & string];

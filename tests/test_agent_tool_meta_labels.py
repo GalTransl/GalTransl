@@ -14,6 +14,9 @@ import re
 import unittest
 
 from GalTransl.Agent.runtime import AGENT_TOOLS
+from GalTransl.Extraction.tool_schemas import EXTRACTION_TOOLS
+
+ALL_TOOLS = [*AGENT_TOOLS, *EXTRACTION_TOOLS]
 
 _PAGE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -55,7 +58,7 @@ class ToolMetaLabelTests(unittest.TestCase):
         have = {name for name, _ in _entries()}
         missing = [
             tool["function"]["name"]
-            for tool in AGENT_TOOLS
+            for tool in ALL_TOOLS
             if tool["function"]["name"] not in have
         ]
         self.assertEqual(
@@ -66,7 +69,7 @@ class ToolMetaLabelTests(unittest.TestCase):
 
     def test_no_stale_frontend_entries(self) -> None:
         """反向也不能漂：留着后端已经删掉的工具，标签迟早张冠李戴（get_progress 就是这么赖着的）。"""
-        names = {tool["function"]["name"] for tool in AGENT_TOOLS}
+        names = {tool["function"]["name"] for tool in ALL_TOOLS}
         stale = sorted(name for name, _ in _entries() if name not in names)
         self.assertEqual(stale, [], f"这些条目在后端已经没有对应工具：{stale}")
 

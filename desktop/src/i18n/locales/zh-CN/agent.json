@@ -1,4 +1,14 @@
 {
+  "images": {
+    "drop": "松开以添加图片",
+    "processing": "正在处理图片…",
+    "invalid": "请使用 PNG、JPEG、WebP、GIF 或 BMP 图片，原文件不超过 20 MiB。",
+    "tooLarge": "图片处理后仍过大：单张最多 2 MiB，合计最多 6 MiB。",
+    "limit": "每条消息最多添加 4 张图片。",
+    "preview": "预览图片：{{name}}",
+    "remove": "移除图片：{{name}}",
+    "close": "关闭图片预览"
+  },
   "readGroup": {
     "running": "正在查阅 · {{count}} 项",
     "done": "已查阅 {{count}} 项",

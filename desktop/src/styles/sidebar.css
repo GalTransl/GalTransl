@@ -279,6 +279,10 @@
   font-size: 16px;
 }
 
+:is(.sidebar__top-nav, .sidebar__bottom-nav) .sidebar__nav-icon {
+  font-size: 18px;
+}
+
 .sidebar__nav-item--sub {
   padding: var(--space-2) var(--space-4);
   font-size: 13px;

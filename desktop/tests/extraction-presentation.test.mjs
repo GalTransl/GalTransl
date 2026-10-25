@@ -1,0 +1,261 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { createElement as h } from 'react';
+import { act, create } from 'react-test-renderer';
+import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
+
+const load = createTypeScriptLoader({ URLSearchParams });
+const { extractionTimeline, extractionContextUsage, createExtractionTimelineBuilder } = load(new URL('../src/pages/extraction/presentation.ts', import.meta.url));
+const { toolRowPhases } = load(new URL('../src/pages/agent/rows/ToolRow.tsx', import.meta.url));
+const user = { id: 'user-1', role: 'user', text: 'Inspect this isolated fixture' };
+const tool = { id: 'tool-1', role: 'tool', tool: 'run_python', args: { code: 'print("fixture")' }, text: 'partial output' };
+
+test('native read images render with the extraction session asset URL after replay', () => {
+  const { ToolRow } = load(new URL('../src/pages/agent/rows/ToolRow.tsx', import.meta.url));
+  const image = { id: `${'a'.repeat(64)}.webp`, name: 'fixture.webp' };
+  const group = extractionTimeline([user, { ...tool, tool: 'read', done: true, images: [image] }], false, null)[1];
+  assert.deepEqual(group.items[0].images, [image]);
+  let renderer;
+  act(() => { renderer = create(h(ToolRow, { item: group.items[0], persistKey: 'native-image', imageScope: { sessionId: 'session', extraction: true }, autoExpand: false })); });
+  assert.equal(renderer.root.findByProps({ className: 'agent-tool__header' }).props['aria-expanded'], false);
+  assert.equal(renderer.root.findAllByType('img').length, 0);
+  act(() => renderer.root.findByProps({ className: 'agent-tool__header' }).props.onClick());
+  const source = renderer.root.findByType('img').props.src;
+  assert.match(source, /agent=extraction/);
+  assert.match(source, /image_id=a+\.webp/);
+  act(() => renderer.unmount());
+});
+
+test('all extraction tool details stay folded through approvals, streamed results and grouped image reads', () => {
+  const componentLoad = createTypeScriptLoader({ URLSearchParams, window: { setTimeout, clearTimeout,
+    addEventListener() {}, removeEventListener() {}, matchMedia: () => ({ matches: true }) } }, {
+    '../../components/PageActivity': { usePageActive: () => false },
+    '../../../components/PageActivity': { usePageActive: () => false },
+  });
+  const { Conversation } = componentLoad(new URL('../src/pages/extraction/Conversation.tsx', import.meta.url));
+  const { ToolRow } = componentLoad(new URL('../src/pages/agent/rows/ToolRow.tsx', import.meta.url));
+  const names = ['read', 'read', 'bash', 'edit', 'write', 'run_python', 'ask_user', 'read_history_archive'];
+  const rows = [user, ...names.map((name, index) => ({ ...tool, id: `fold-${index}`, tool: name,
+    done: index !== 2, text: index === 2 ? 'live command output' : 'result',
+  }))];
+  const props = { rows, sessionId: 'default-folded-tools', running: true, status: 'awaiting_permission', older: false,
+    loadOlder() {}, pending: { type: 'permission_request', requestId: 'approval', toolCallId: 'fold-2' } };
+  let renderer;
+  const mount = () => { renderer = create(h(Conversation, props)); };
+  act(mount);
+  const readGroup = () => renderer.root.findByProps({ className: 'agent-tool__header agent-read-group__header' });
+  assert.equal(readGroup().props['aria-expanded'], false);
+  act(() => readGroup().props.onClick());
+  const headers = () => renderer.root.findAllByProps({ className: 'agent-tool__header' });
+  assert.equal(headers().length, names.length);
+  assert.ok(headers().every(header => header.props['aria-expanded'] === false));
+  assert.ok(renderer.root.findAllByType(ToolRow).every(row => row.props.autoExpand === false));
+  const bash = () => renderer.root.findByProps({ 'data-agent-tool-id': 'fold-2' }).findByProps({ className: 'agent-tool__header' });
+  act(() => bash().props.onClick());
+  assert.equal(bash().props['aria-expanded'], true);
+  const image = { id: `${'b'.repeat(64)}.png`, name: 'late-image.png' };
+  props.rows = rows.map(row => row.id === 'fold-0' ? { ...row, images: [image] }
+    : row.id === 'fold-2' ? { ...row, done: true, error: true, text: 'command failed' } : row);
+  props.pending = null;
+  act(() => renderer.update(h(Conversation, props)));
+  assert.equal(bash().props['aria-expanded'], true);
+  assert.equal(headers()[0].props['aria-expanded'], false);
+  assert.equal(renderer.root.findAllByType('img').length, 0);
+  act(() => renderer.unmount());
+  act(mount);
+  assert.equal(bash().props['aria-expanded'], true);
+  assert.equal(headers()[0].props['aria-expanded'], false);
+  act(() => renderer.unmount());
+});
+
+test('extraction approval arguments start folded while decision buttons remain available', () => {
+  const { PendingRequest } = load(new URL('../src/pages/extraction/Conversation.tsx', import.meta.url));
+  let renderer;
+  act(() => { renderer = create(h(PendingRequest, { pending: { type: 'permission_request', requestId: 'approval',
+    toolName: 'run_python', arguments: { code: 'print("fixture")' } }, busy: false, answer() {} })); });
+  assert.equal(Boolean(renderer.root.findByType('details').props.open), false);
+  assert.equal(renderer.root.findAllByType('button').length, 3);
+  act(() => renderer.unmount());
+});
+
+test('live and replayed user events render the shared user message bubbles in turn order', () => {
+  const { reduceEvents } = load(new URL('../src/pages/extraction/transcript.ts', import.meta.url));
+  const { AgentGroupView } = load(new URL('../src/pages/agent/rows/AgentGroupView.tsx', import.meta.url));
+  const events = [
+    { seq: 1, type: 'user_message', text: '检查这个目录\n保留原文件' },
+    { seq: 2, type: 'assistant_message', messageId: 'first-answer', text: '已检查', stopReason: 'stop' },
+    { seq: 3, type: 'user_message', text: '继续' },
+  ];
+  const replayed = reduceEvents([], events);
+  const streamed = events.reduce((rows, event) => reduceEvents(rows, [event]), []);
+  assert.deepEqual(streamed, replayed);
+  const groups = extractionTimeline(replayed, true, null);
+  assert.equal(groups.map(group => group.type).join(','), 'user,activity,user');
+  for (const group of groups.filter(group => group.type === 'user')) {
+    let renderer;
+    act(() => { renderer = create(h(AgentGroupView, { group, isLive: false, projectDir: '', persistKey: 'synthetic' })); });
+    assert.equal(renderer.root.findByProps({ className: 'agent-bubble__text' }).children.join(''), group.message);
+    assert.equal(renderer.root.findByProps({ className: 'agent-bubble agent-bubble--user' }).type, 'div');
+    act(() => renderer.unmount());
+  }
+});
+
+test('stream updates retain historical groups and unchanged tool render models', () => {
+  const build = createExtractionTimelineBuilder();
+  const rows = [user, { ...tool, done: true }, { id: 'second-user', role: 'user', text: 'Continue' },
+    { ...tool, id: 'second-tool' }, { id: 'assistant-live', role: 'assistant', text: 'Working' }];
+  const before = build(rows, true, null);
+  const after = build([...rows.slice(0, -1), { ...rows.at(-1), text: 'Working on it' }], true, null);
+  assert.equal(before[0], after[0]);
+  assert.equal(before[1], after[1]);
+  assert.equal(before[3].items[0], after[3].items[0]);
+  assert.notEqual(before[3].items[1], after[3].items[1]);
+});
+
+test('live tool output stays pending; approval and interrupted history use the shared tool phases', () => {
+  const rows = [user, tool];
+  const original = JSON.stringify(rows);
+  let group = extractionTimeline(rows, true, null)[1];
+  assert.equal(group.items[0].result, undefined);
+  assert.equal(group.items[0].progressText, 'partial output');
+  assert.equal(toolRowPhases(group.items, true)[0], 'running');
+  group = extractionTimeline(rows, true, { type: 'permission_request', toolCallId: tool.id, requestId: 'approval' })[1];
+  assert.equal(toolRowPhases(group.items, true)[0], 'awaiting');
+  assert.equal(toolRowPhases(group.items, false)[0], 'stale');
+  assert.equal(JSON.stringify(rows), original);
+});
+
+test('final replies stay outside collapsed work, earlier narration stays in order, and steps survive prepended history', () => {
+  const rows = [user, { id: 'intro', role: 'assistant', text: 'Inspecting files', done: true, stopReason: 'toolUse' },
+    { ...tool, done: true, text: 'fixture verified' },
+    { id: 'final', role: 'assistant', text: 'The fixture is ready.', thinking: 'Checked the result.', done: true, stopReason: 'stop' }];
+  const group = extractionTimeline(rows, false, null)[1];
+  assert.equal(group.items.map(item => item.kind).join(','), 'content,tool,reasoning,content');
+  assert.equal(group.finalContent.content, 'The fixture is ready.');
+  assert.equal(group.items.filter(item => item.final).length, 1);
+  assert.equal(group.items[0].final, undefined);
+  const restored = extractionTimeline([{ ...user, id: 'older' }, ...rows], false, null).at(-1);
+  assert.equal(restored.id, group.id);
+  assert.equal(restored.items[1].step, group.items[1].step);
+  const partial = extractionTimeline([user, { id: 'partial', role: 'assistant', text: 'Unfinished reply', done: true, partial: true }], false, null)[1];
+  assert.equal(partial.finalContent.content, 'Unfinished reply');
+});
+
+test('error output stays literal and is not reported as a successful tool result', () => {
+  const group = extractionTimeline([user, { ...tool, done: true, error: true, text: '<error>\n# literal stderr' }], false, null)[1];
+  assert.equal(group.items[0].ok, false);
+  assert.equal(group.items[0].error, '<error>\n# literal stderr');
+  assert.equal(group.items[0].resultFormat, 'text');
+});
+
+test('context rings use the SDK context measurement, never request totals or stale values after compaction', () => {
+  assert.equal(extractionContextUsage({ type: 'usage', total: 25000 }), null);
+  assert.equal(extractionContextUsage({ type: 'context_usage', used_tokens: null, window_tokens: 128000 }), null);
+  assert.equal(extractionContextUsage({ type: 'context_usage', used_tokens: -1, window_tokens: 128000 }), null);
+  assert.equal(extractionContextUsage({ type: 'context_usage', used_tokens: NaN, window_tokens: 128000 }), null);
+  const usage = extractionContextUsage({ type: 'context_usage', used_tokens: 32000, window_tokens: 128000 });
+  const { ContextMeter } = load(new URL('../src/pages/agent/composer.tsx', import.meta.url));
+  let renderer;
+  act(() => { renderer = create(h(ContextMeter, { usage })); });
+  assert.match(renderer.root.findByProps({ role: 'img' }).props.title, /25\.0%/);
+  act(() => renderer.unmount());
+});
+
+test('composer preserves IME and multiline shortcuts and keeps stop available while a draft is edited', () => {
+  let sends = 0, stops = 0, draft = '';
+  const componentLoad = createTypeScriptLoader({ window: { matchMedia: () => ({ matches: true }) } }, {
+    '../agent/ComposerSelect': { ComposerSelect: () => null },
+  });
+  const { ExtractionComposer } = componentLoad(new URL('../src/pages/extraction/Composer.tsx', import.meta.url));
+  const props = { draft: 'Inspect a fixture', setDraft: text => { draft = text; }, textarea: { current: null },
+    session: { game_dir: 'fixture', status: 'idle' }, running: false, busy: false, ready: true,
+    profile: 'synthetic', setProfile() {}, models: ['synthetic'], mode: 'ask', setMode() {},
+    send: () => sends++, stop: () => stops++, chooseSource() {}, configure() {} };
+  let renderer;
+  act(() => { renderer = create(h(ExtractionComposer, props)); });
+  const key = extra => renderer.root.findByType('textarea').props.onKeyDown({ key: 'Enter', nativeEvent: {}, preventDefault() {}, ...extra });
+  key({ nativeEvent: { isComposing: true } }); key({ shiftKey: true }); key({ ctrlKey: true }); key({ metaKey: true });
+  assert.equal(sends, 0);
+  key({}); assert.equal(sends, 1);
+  act(() => renderer.update(h(ExtractionComposer, { ...props, running: true })));
+  key({}); assert.equal(sends, 1);
+  act(() => renderer.root.findByType('textarea').props.onChange({ target: { value: 'next task' } }));
+  assert.equal(draft, 'next task');
+  const stop = renderer.root.findByProps({ className: 'agent-composer__stop' });
+  assert.equal(stop.props.disabled, false);
+  act(() => stop.props.onClick()); assert.equal(stops, 1);
+  act(() => renderer.update(h(ExtractionComposer, { ...props, running: true, session: { game_dir: 'fixture', status: 'stopping' } })));
+  assert.equal(renderer.root.findByProps({ className: 'agent-composer__stop' }).props.disabled, true);
+  act(() => renderer.unmount());
+});
+
+test('model labels match translation profiles and permissions remain selectable during execution', () => {
+  const profiles = { primary: { 'OpenAI-Compatible': { tokens: [{ modelName: 'actual-model' }] } }, empty: {} };
+  const picks = [];
+  const componentLoad = createTypeScriptLoader({
+    window: { matchMedia: () => ({ matches: true }) },
+    document: { documentElement: {}, addEventListener() {}, removeEventListener() {} },
+  }, { '../../lib/api': { getBackendProfile: name => profiles[name] } });
+  const { ExtractionComposer } = componentLoad(new URL('../src/pages/extraction/Composer.tsx', import.meta.url));
+  const { ComposerSelect } = componentLoad(new URL('../src/pages/agent/ComposerSelect.tsx', import.meta.url));
+  const props = { draft: '', setDraft() {}, textarea: { current: null }, session: { game_dir: 'fixture', status: 'running' },
+    running: true, busy: false, ready: true, profile: 'primary', setProfile: value => picks.push(value), models: ['primary', 'empty'],
+    mode: 'auto', setMode: value => picks.push(value), send() {}, stop() {}, chooseSource() {}, configure() {} };
+  let renderer;
+  act(() => { renderer = create(h(ExtractionComposer, props)); });
+  let [model, permission] = renderer.root.findAllByType(ComposerSelect);
+  assert.equal(model.props.options[0].label, 'primary/actual-model');
+  assert.equal(model.props.options[1].label, 'empty');
+  assert.equal(model.props.disabled, true);
+  assert.equal(permission.props.disabled, false);
+  assert.equal(permission.props.options.map(option => option.value).join(','), 'ask,accept-edits,auto,auto-quiet');
+  act(() => permission.findByType('button').props.onClick());
+  const quiet = permission.findAllByProps({ role: 'menuitemradio' }).find(item => item.props.children[0].props.children[0] === '全自动-零打断');
+  assert.ok(quiet);
+  act(() => quiet.props.onClick());
+  assert.deepEqual(picks, ['auto-quiet']);
+  profiles.primary['OpenAI-Compatible'].tokens[0].modelName = 'updated-model';
+  act(() => renderer.update(h(ExtractionComposer, { ...props, running: false })));
+  [model] = renderer.root.findAllByType(ComposerSelect);
+  assert.equal(model.props.options[0].label, 'primary/updated-model');
+  act(() => model.findByType('button').props.onClick());
+  act(() => model.findAllByProps({ role: 'menuitemradio' })[1].props.onClick());
+  assert.deepEqual(picks, ['auto-quiet', 'empty']);
+  act(() => renderer.unmount());
+});
+
+test('extraction questions reuse the translation choice card and submit the selected answer', () => {
+  const { PendingRequest } = load(new URL('../src/pages/extraction/Conversation.tsx', import.meta.url));
+  let answer, renderer;
+  const pending = { type: 'ask_request', requestId: 'question', toolCallId: 'tool', questions: [
+    { question: 'Choose a fixture', options: ['A', 'B'], recommended: 'B' },
+  ] };
+  act(() => { renderer = create(h(PendingRequest, { pending, busy: false, answer: value => { answer = value; } })); });
+  assert.equal(renderer.root.findAllByProps({ className: 'agent-ask__tag' }).length, 1);
+  act(() => renderer.root.findAllByProps({ role: 'radio' })[1].props.onClick());
+  assert.deepEqual(JSON.parse(JSON.stringify(answer)), { request_id: 'question', answers: [['B']] });
+  act(() => renderer.unmount());
+});
+
+test('extraction model picker exposes the main Agent default as a distinct selectable binding', () => {
+  let selected;
+  const Picker = () => null;
+  const componentLoad = createTypeScriptLoader({}, {
+    '../../lib/api': { getBackendProfile: () => ({ 'OpenAI-Compatible': { tokens: [{ modelName: 'actual-model' }] } }) },
+    '../agent/ComposerSelect': { ComposerSelect: Picker },
+  });
+  const { ExtractionComposer } = componentLoad(new URL('../src/pages/extraction/Composer.tsx', import.meta.url));
+  let renderer;
+  act(() => { renderer = create(h(ExtractionComposer, { draft: '', setDraft() {}, textarea: { current: null },
+    running: false, busy: false, ready: true, profile: 'primary', profileSelection: '', defaultProfile: 'primary',
+    setProfile: value => { selected = value; }, models: ['primary'], mode: 'auto', setMode() {},
+    send() {}, stop() {}, chooseSource() {}, configure() {} })); });
+  const picker = renderer.root.findAllByType(Picker)[0];
+  assert.equal(picker.props.value, '');
+  assert.match(picker.props.options[0].label, /主 Agent 默认.*primary\/actual-model/);
+  assert.equal(picker.props.options[0].value, '');
+  assert.equal(picker.props.options[1].value, 'primary');
+  act(() => picker.props.onChange(''));
+  assert.equal(selected, '');
+  act(() => renderer.unmount());
+});

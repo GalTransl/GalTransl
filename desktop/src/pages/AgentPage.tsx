@@ -60,6 +60,7 @@ import { removeProjectFromHistory } from './HomePage';
 import { AgentSessionSidebar } from './agent/AgentSessionSidebar';
 import { AGENT_PROMPT_SUGGESTIONS, ContextMeter, SendIcon, StatusPill, StopIcon } from './agent/composer';
 import { AgentGroupView } from './agent/rows/AgentGroupView';
+import { useImageInput, ImageAttachments, ImageInputStatus, imageUploads } from './agent/images';
 import { AskUserCard } from './agent/rows/AskUserCard';
 import { PermissionCard } from './agent/rows/PermissionCard';
 import {
@@ -706,9 +707,11 @@ export function AgentPage() {
   );
   const closeStream = stream.close;
 
+  const imageInput = useImageInput(JSON.stringify([projectDir, activeSessionId]), composerRef, sending);
   const handleSend = useCallback(async () => {
     const text = messageDraft.trim();
-    if (!text) return;
+    const sentImages = imageInput.images;
+    if ((!text && !sentImages.length) || imageInput.processing || sending) return;
     setError(null);
     // 发出去就等于会话开始：项目 chip 马上要变成不可点的纯标签，菜单顺手收掉
     setProjectMenuOpen(false);
@@ -734,7 +737,7 @@ export function AgentPage() {
       motionRef.current?.observe({ type: 'user_message', step: -1, message: text });
       setEvents((prev) => [
         ...prev,
-        { type: 'user_message', step: -1, message: text },
+        { type: 'user_message', step: -1, message: text, ...(sentImages.length ? { images: sentImages } : {}) },
       ]);
     }
     setMessageDraft('');
@@ -753,6 +756,7 @@ export function AgentPage() {
       if (!sid) {
         const created = await createAgentSession(effectiveProject);
         sid = created.session_id;
+        imageInput.move(JSON.stringify([effectiveProject, sid]));
         moveMessageDraft(effectiveProject, draftSessionId, sid);
         draftSessionId = sid;
         // 会话切换 effect 已在本 await 期间被触发（activeSessionId 仍为空，
@@ -778,6 +782,7 @@ export function AgentPage() {
       // 如实报出"本会话在用的后端"和"翻译任务会用的后端"，所以随消息一起送过去。
       // token 不落盘，重启后继续历史会话也必须重新提供本会话的配置内容。
       const backendContext = {
+        ...(sentImages.length ? { images: imageUploads(sentImages) } : {}),
         ...(backendProfileName ? { backend_profile_name: backendProfileName } : {}),
         backend_profile_data: profile,
         ...getAgentTranslatorBackendContext(effectiveProject),
@@ -809,6 +814,7 @@ export function AgentPage() {
         const snap = await sendAgentMessage(effectiveProject, text, sid, backendContext);
         setQueued(snap.queued || []);
       }
+      imageInput.removeSent(sentImages);
       void refreshSessions(effectiveProject, sid);
       subscribeStream(effectiveProject, sid);
     } catch (err) {
@@ -834,6 +840,7 @@ export function AgentPage() {
     permissionMode,
     subscribeStream,
     refreshSessions,
+    imageInput, sending,
   ]);
 
   /** 队列面板「立即」：打断当前回合，马上把这条发出去。 */
@@ -1187,7 +1194,7 @@ export function AgentPage() {
     motionRef.current?.flush(() => tailFollowerRef.current?.follow());
   }, [timeline]);
   const hasSession = events.length > 0;
-  const canSend = Boolean(projectDir) && Boolean(backendProfileName) && messageDraft.trim().length > 0 && !sending;
+  const canSend = Boolean(projectDir) && Boolean(backendProfileName) && Boolean(messageDraft.trim() || imageInput.images.length) && !sending && !imageInput.processing;
   // 正在等用户回答的 ask_user：这条工具调用**还没有结果**，说明后端那个工具
   // 正阻塞着等这一下（结果一到就说明答过了/被跳过了）。从后往前找最新的那条。
   const pendingAsk = useMemo(() => {
@@ -1398,7 +1405,7 @@ export function AgentPage() {
       <div className="agent-console__main agent-cockpit">
       <header className="agent-console__bar">
         <div className="agent-console__bar-left">
-          <span className="agent-console__avatar" aria-hidden><Icon name="bot" /></span>
+          <span className="agent-console__avatar" aria-hidden><Icon name="agent-translate" /></span>
           <div className="agent-console__bar-copy">
             <div className="agent-console__bar-title">
               <span className="agent-console__bar-name">{translate("agent:agentPage.agentConsoleBarTitle_message_galTranslAgent")}</span>
@@ -1453,7 +1460,7 @@ export function AgentPage() {
         <div className="agent-thread" ref={threadContentRef}>
           {timeline.length === 0 ? (
             <div className="agent-hero">
-              <div className="agent-hero__mark"><Icon name="bot" /></div>
+              <div className="agent-hero__mark"><Icon name="agent-translate" /></div>
               <h2 className="agent-hero__title">{translate("agent:agentPage.agentHero_message_agentCountTranslation")}</h2>
               <p className="agent-hero__subtitle">{translate("agent:agentPage.agentHero_message_sendEntrySessionProjectDictionaryTranslationProgress")}</p>
               <div className="agent-hero__steps">
@@ -1524,6 +1531,7 @@ export function AgentPage() {
                     isLive={running && index === timeline.length - 1}
                     projectDir={effectiveProject}
                     persistKey={`${effectiveProject}::${activeSessionId}`}
+                    imageScope={{ projectDir: effectiveProject, sessionId: activeSessionId }}
                   />
                   {/* ask_user 的提问卡片就摆在那个工具行下面（同一回合内），不钉在输入框
                       上方——"在什么上下文里问了什么"一眼对得上。key 用 askId，换一题就重挂，
@@ -1652,6 +1660,7 @@ export function AgentPage() {
                         <span className="agent-queue__text" title={item.text}>
                           {item.text}
                         </span>
+                        {item.images?.length ? <ImageAttachments images={item.images} scope={{ projectDir: effectiveProject, sessionId: activeSessionId }} /> : null}
                         <button
                           type="button"
                           className="agent-queue__act is-primary"
@@ -1685,11 +1694,13 @@ export function AgentPage() {
             </div>
           </div>
         ) : null}
-        <div className={`agent-composer${running ? ' is-running' : ''}${queued.length ? ' has-queue' : ''}`}>
+        <div {...imageInput.drop} className={`agent-composer${running ? ' is-running' : ''}${queued.length ? ' has-queue' : ''}${imageInput.dragging ? ' is-image-drop' : ''}`}>
+          <ImageAttachments images={imageInput.images} remove={imageInput.remove} />
           <textarea
             ref={composerRef}
             className="agent-composer__input"
             value={messageDraft}
+            onPaste={imageInput.onPaste}
             onChange={(e) => setMessageDraft(e.target.value)}
             placeholder={
               running
@@ -1709,6 +1720,7 @@ export function AgentPage() {
               void handleSend();
             }}
           />
+          <ImageInputStatus input={imageInput} />
           <div className="agent-composer__toolbar">
             <div className="agent-composer__left">
               {hasSession ? (

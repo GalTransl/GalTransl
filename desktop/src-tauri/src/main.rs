@@ -220,6 +220,23 @@ fn copy_files(sources: Vec<String>, destination_dir: String) -> Result<(), Strin
     Ok(())
 }
 
+#[tauri::command]
+fn read_image_file(path: String) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let source = std::path::Path::new(&path);
+    let extension = source.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
+    if !["png", "jpg", "jpeg", "webp", "gif", "bmp"].contains(&extension.as_str()) {
+        return Err("Unsupported image format".into());
+    }
+    let file = std::fs::File::open(source).map_err(|e| e.to_string())?;
+    let maximum = 20 * 1024 * 1024;
+    if file.metadata().map_err(|e| e.to_string())?.len() > maximum { return Err("Image exceeds 20 MiB".into()); }
+    let mut data = Vec::new();
+    file.take(maximum + 1).read_to_end(&mut data).map_err(|e| e.to_string())?;
+    if data.len() as u64 > maximum { return Err("Image exceeds 20 MiB".into()); }
+    Ok(data)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -233,6 +250,7 @@ fn main() {
             create_dir,
             write_text_file,
             copy_files,
+            read_image_file,
         ])
         .on_window_event(|_window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {

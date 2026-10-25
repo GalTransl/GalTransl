@@ -12,6 +12,8 @@ import { t as translate, useMessageState, useUiLanguage } from "../i18n";
 
 import { useEffect, useMemo, useState } from 'react';
 import { Markdown } from './Markdown';
+import { NewProjectWizardRef } from './NewProjectWizardRef';
+import { splitWizardReferences } from '../lib/newProjectWizard';
 import {
   encodeProjectDir,
   fetchCacheFile,
@@ -273,16 +275,26 @@ export function AgentMarkdown({
   text,
   projectDir,
   className,
+  newProjectWizardRefs = false,
 }: {
   text: string;
   projectDir: string;
   className?: string;
+  newProjectWizardRefs?: boolean;
 }) {
   const uiLanguage = useUiLanguage();
   const segments = useMemo(() => splitMarkdownSegments(text), [text]);
   const hasRef = segments.some((s) => s.kind === 'cacheRef');
   const cls = ['agent-md', className].filter(Boolean).join(' ');
-  if (!hasRef) {
+  const wizardSegments = useMemo(() => newProjectWizardRefs ? splitWizardReferences(text) : [], [text, newProjectWizardRefs]);
+  if (wizardSegments.some(segment => segment.kind === 'wizard')) {
+    return <div className={`${cls} agent-md--segmented`}>
+      {wizardSegments.map((segment, index) => segment.kind === 'wizard'
+        ? <NewProjectWizardRef key={index} directory={segment.directory} />
+        : <AgentMarkdown key={index} text={segment.text} projectDir={projectDir} />)}
+    </div>;
+  }
+  if (!hasRef || !projectDir) {
     return <Markdown text={text} className={className} />;
   }
   return (

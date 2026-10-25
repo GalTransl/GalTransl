@@ -152,6 +152,31 @@ def check_api(base_url: str, version: str) -> None:
         raise RuntimeError("Packaged backend did not find any plugins")
 
 
+def check_extraction_runtime(base_url: str, directory: Path, env: dict[str, str]) -> None:
+    opener = build_opener(ProxyHandler({}))
+    with opener.open(f"{base_url}/api/extraction/environment", timeout=20) as response:
+        runtime = json.load(response)
+    if not runtime.get("ready") or runtime.get("agent_engine") != "galtransl" or runtime.get("builtin_python", {}).get("source") != "bundled":
+        raise RuntimeError(f"Packaged extraction runtime is not ready: {runtime.get('problems')}")
+    skill = Path(runtime["settings"]["skill_dir"])
+    if not (skill / "SKILL.md").is_file() or not (skill.parent / "sources.json").is_file():
+        raise RuntimeError("Packaged extraction Skill or source manifest is missing")
+    # Deliberately remove all PATH interpreters. These checks must use only
+    # packaged executables and dynamically imported bundled standard modules.
+    child_env = {**env, "PATH": ""}
+    python = runtime["builtin_python"]
+    command = [python["executable"], *python["args"], "--request-stdin"]
+    requests = [
+        {"code": "import sys, bz2, sqlite3, fractions, statistics, ctypes, xml.dom.minidom; assert 'GalTransl' not in sys.modules; assert bz2.decompress(bz2.compress(b'synthetic')) == b'synthetic'; print('bundled-python-ok')"},
+        {"module": "python.detect", "args": ["--help"], "skill_dir": str(skill)},
+    ]
+    for request, marker in zip(requests, ("bundled-python-ok", "usage:")):
+        result = subprocess.run(command, input=json.dumps(request), env=child_env, cwd=directory,
+                                capture_output=True, text=True, encoding="utf-8", timeout=30)
+        if result.returncode or marker not in result.stdout:
+            raise RuntimeError(f"Packaged Python/Skill smoke failed: {result.stderr[-4000:]}")
+
+
 def create_sample_epub(path: Path) -> None:
     """A real EPUB fixture using only the smoke runner's standard library."""
     with zipfile.ZipFile(path, "w") as book:
@@ -241,6 +266,7 @@ def smoke_backend(backend: Path, directory: Path, version: str, timeout: float,
         try:
             base_url = wait_for_backend(process, ready_file, timeout)
             check_api(base_url, version)
+            check_extraction_runtime(base_url, directory, env)
             check_file_plugins(base_url, directory)
         finally:
             stop_backend(process)

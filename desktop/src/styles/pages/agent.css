@@ -26,31 +26,9 @@
   grid-template-columns: 228px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
-  gap: var(--space-4);
-}
-
-/* 主区：单个 cockpit 面板，顶栏 / 线程 / 输入区在面板内纵向分区 */
-.agent-console__main {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  min-width: 0;
-}
-
-/* ═══════════════════════════════════════════════════════
-   Cockpit panel — 主区唯一的大面板（对标 ptv2-cockpit）
-   ═══════════════════════════════════════════════════════ */
-
-.agent-cockpit {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
+  gap: 0;
   border: 1px solid var(--agent-line);
   border-radius: var(--radius-panel);
-  isolation: isolate;
   overflow: hidden;
   background:
     radial-gradient(circle at 92% -18%, rgba(47, 111, 235, 0.16), transparent 46%),
@@ -61,21 +39,40 @@
     inset 0 -1px 0 rgba(191, 208, 226, 0.45);
 }
 
+/* 主区与会话侧栏共用外框，顶栏 / 线程 / 输入区在主区内纵向分区 */
+.agent-console__main {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* ═══════════════════════════════════════════════════════
+   Cockpit content — 主区在共用面板内裁切内容
+   ═══════════════════════════════════════════════════════ */
+
+.agent-cockpit {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  isolation: isolate;
+  overflow: hidden;
+}
+
 /* ── Session sidebar ── */
 
 .agent-sessions {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid var(--agent-line);
-  border-radius: var(--radius-panel);
+  border-right: 1px solid var(--agent-line);
   background:
     radial-gradient(circle at 14% -12%, rgba(47, 111, 235, 0.1), transparent 42%),
     linear-gradient(180deg, #ffffff 0%, rgba(247, 251, 255, 0.96) 100%),
     var(--color-surface);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    inset 0 -1px 0 rgba(191, 208, 226, 0.45);
   overflow: hidden;
 }
 
@@ -600,10 +597,6 @@
   --agent-hover: rgba(255, 255, 255, 0.07);
   --agent-line: rgba(65, 83, 111, 0.82);
   --agent-line-soft: rgba(65, 83, 111, 0.55);
-}
-
-:root[data-theme='dark'] .agent-cockpit {
-  border-color: var(--agent-line);
   background:
     radial-gradient(circle at 92% -18%, rgba(67, 129, 255, 0.24), transparent 48%),
     linear-gradient(90deg, rgba(24, 34, 48, 0.96) 0%, rgba(24, 34, 48, 0.94) 45%, rgba(17, 26, 38, 0.92) 100%),
@@ -619,9 +612,6 @@
     radial-gradient(circle at 14% -12%, rgba(67, 129, 255, 0.16), transparent 42%),
     linear-gradient(180deg, rgba(24, 34, 48, 0.96) 0%, rgba(17, 26, 38, 0.94) 100%),
     var(--color-surface);
-  box-shadow:
-    inset 0 1px 0 rgba(141, 170, 212, 0.18),
-    inset 0 -1px 0 rgba(65, 83, 111, 0.42);
 }
 
 :root[data-theme='dark'] .agent-sessions__new {
@@ -3515,6 +3505,11 @@
     grid-template-rows: auto minmax(0, 1fr);
   }
 
+  .agent-sessions {
+    border-right: 0;
+    border-bottom: 1px solid var(--agent-line);
+  }
+
   .agent-sessions__list {
     flex-direction: row;
     overflow-x: auto;
@@ -3875,3 +3870,15 @@
   color: var(--color-danger);
   overflow-wrap: anywhere;
 }
+.agent-composer.is-image-drop { outline: 2px solid var(--accent, #3478f6); outline-offset: 2px; }
+.agent-images { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0; }
+.agent-composer > .agent-images { padding: 12px 16px 0; }
+.agent-images__item { position: relative; flex: 0 0 auto; }
+.agent-images__preview { display: block; width: 84px; height: 72px; padding: 0; border: 1px solid var(--border, #cbd5e1); border-radius: 10px; overflow: hidden; cursor: zoom-in; background: var(--surface, #fff); }
+.agent-images__preview img { width: 100%; height: 100%; object-fit: contain; }
+.agent-images__remove { position: absolute; right: -5px; top: -5px; width: 22px; height: 22px; border: 1px solid var(--border, #cbd5e1); border-radius: 50%; background: var(--surface, #fff); color: var(--text, #172033); cursor: pointer; }
+.agent-images__hint { padding: 0 16px 6px; font-size: 11px; color: var(--text-muted, #748196); }
+.agent-images__error { padding: 6px 16px; color: var(--danger, #cb3546); font-size: 12px; }
+.agent-image-viewer { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; background: rgb(0 0 0 / 80%); padding: 48px; }
+.agent-image-viewer > img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.agent-image-viewer > button { position: absolute; top: 16px; right: 20px; width: 36px; height: 36px; border: 0; border-radius: 50%; font-size: 26px; color: #fff; background: rgb(255 255 255 / 16%); cursor: pointer; }

@@ -129,6 +129,11 @@ def copy_bundle_outputs() -> list[Path]:
     portable = RELEASE_APP_DIR / PORTABLE_NAME
     shutil.copy2(binary, portable)
     portable.chmod(portable.stat().st_mode | 0o111)
+    resources = ROOT / "build" / "extraction-resources"
+    for name in ("skills", "extraction-python"):
+        if not (resources / name).is_dir():
+            raise RuntimeError("Missing prepared extraction resources")
+        shutil.copytree(resources / name, RELEASE_APP_DIR / name, dirs_exist_ok=True)
 
     dmg_matches = sorted((TAURI_DIR / "target" / "release" / "bundle" / "dmg").glob("*.dmg"))
     if not dmg_matches:

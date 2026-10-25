@@ -136,7 +136,10 @@ def _estimate_message_tokens(message: dict[str, Any]) -> int:
         part_ascii = _printable_ascii_chars(part)
         ascii_chars += part_ascii
         multibyte_chars += len(part) - part_ascii
-    return _chars_to_tokens(ascii_chars, multibyte_chars) + MESSAGE_OVERHEAD_TOKENS
+    # Image pricing differs by provider. Conservatively reserve tile space until usage anchors it.
+    image_tokens = sum(85 + 170 * ((int(image.get('width', 2048)) + 511) // 512)
+                       * ((int(image.get('height', 2048)) + 511) // 512) for image in message.get('_images', []))
+    return _chars_to_tokens(ascii_chars, multibyte_chars) + MESSAGE_OVERHEAD_TOKENS + image_tokens
 
 
 # 工具参数里"含密钥"的键：emit 成事件/写日志前换成占位。模型自己仍能传真实值
@@ -597,6 +600,8 @@ def _render_archive_messages(messages: list[dict[str, Any]], *, full_tool_result
         role = str(message.get("role") or "?")
         if role == "user":
             lines += ["## 用户", "", _content_text(message.get("content")), ""]
+            for image in message.get('_images', []):
+                lines.append(f"[用户图片: {image.get('name', 'image')}，附件 ID: {image.get('id', '')}]")
         elif role == "assistant":
             lines += ["## 助手", ""]
             calls = message.get("tool_calls") or []

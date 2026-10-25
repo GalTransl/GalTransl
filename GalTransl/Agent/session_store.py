@@ -69,6 +69,10 @@ def _compact_event_for_storage(event: dict[str, Any]) -> dict[str, Any]:
     if event.get("type") != "tool_result":
         return event
     result = event.get("result")
+    if isinstance(result, dict) and isinstance(result.get("content"), list):
+        # Native extraction results contain bounded image references and diff details.
+        # structuredContent may hold up to 1 MiB of shell output; the log owns that copy.
+        return {**event, "result": {key: value for key, value in result.items() if key != "structuredContent"}}
     if isinstance(result, dict) and any(key in result for key in ("changes", "line_diff", "deleted_preview")):
         return event
     # 成功结果通常是体积最大的字段，必须避免和 role=tool message 重复落盘。
@@ -147,10 +151,10 @@ def new_session_id() -> str:
 class SessionStore:
     """单会话的 JSONL 读写器。构造时只算路径，不碰磁盘。"""
 
-    def __init__(self, project_dir: str, session_id: str) -> None:
+    def __init__(self, project_dir: str, session_id: str, *, directory: str | None = None) -> None:
         self.project_dir = project_dir
         self.session_id = session_id
-        self.dir = project_dir_for(project_dir)
+        self.dir = directory if directory is not None else project_dir_for(project_dir)
         self.path = os.path.join(self.dir, f"{session_id}.jsonl")
         self.meta_path = f"{self.path}.meta.json"
         # 上下文压缩的归档目录：被压掉的历史按 chunk 落盘，Agent 需要细节时
@@ -402,6 +406,15 @@ class SessionStore:
                 os.rmdir(self.chunks_dir)
             except OSError as exc:
                 _log(f"删除失败 {self.chunks_dir}: {exc}")
+        # Assets are direct children with generated names. Never follow linked directories.
+        from pathlib import Path
+        from GalTransl.Agent.images import asset_directory
+        images = asset_directory(self)
+        if images.is_dir() and not images.is_symlink() and not (getattr(images.lstat(), 'st_file_attributes', 0) & 0x400):
+            for image in images.iterdir():
+                if image.is_file() or image.is_symlink():
+                    image.unlink(missing_ok=True)
+            images.rmdir()
 
 
 # ---- 项目级操作 ----

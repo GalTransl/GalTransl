@@ -1,4 +1,14 @@
 {
+  "images": {
+    "drop": "Drop to add images",
+    "processing": "Processing images…",
+    "invalid": "Use a PNG, JPEG, WebP, GIF or BMP image of at most 20 MiB.",
+    "tooLarge": "Images are too large after processing: 2 MiB each, 6 MiB total.",
+    "limit": "A message can contain up to 4 images.",
+    "preview": "Preview image: {{name}}",
+    "remove": "Remove image: {{name}}",
+    "close": "Close image preview"
+  },
   "readGroup": {
     "running": "Exploring · {{count}} calls",
     "done": "Explored {{count}} calls",

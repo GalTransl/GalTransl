@@ -80,6 +80,7 @@ from GalTransl.Agent.prompts import (
     _validated_compact_summary,
 )
 from GalTransl.Agent.tool_schemas import AGENT_TOOLS
+from GalTransl.Agent.images import expand_message, user_message, user_event
 from GalTransl.Agent.tools.ask import ASK_WAIT_TICK, _normalize_ask_answers
 from GalTransl.Agent.tools.preview import _preview_tool_changes
 from GalTransl.Agent.tools.render_md import _render_tool_result_table, _tool_result_json
@@ -293,6 +294,16 @@ class AgentRunner:
                     _log(f"关闭 LLM 客户端失败（忽略，仍按停止收尾）: {exc}")
 
     # ---- 主循环 ----
+    def _system_prompt(self) -> str:
+        """Domain prompt; specialized agents share the same execution loop."""
+        return _build_system_prompt(self.state)
+
+    def _tool_definitions(self) -> list[dict[str, Any]]:
+        return AGENT_TOOLS
+
+    def _serialize_tool_result(self, result: Any) -> str:
+        return _tool_result_json(result)
+
     def run(self) -> None:
         """跑一个回合：从当前对话历史出发，直到模型不再调工具、用户停止或出错。
 
@@ -307,18 +318,18 @@ class AgentRunner:
             # 上一轮在工具执行中途退出（进程被杀/崩溃）时，界面上还挂着"没结果"的卡片：
             # 先补一条失败事件把它收掉（请求侧的合法性见 _messages_with_tool_placeholders）
             self._close_dangling_tool_calls()
-            if not self.state.messages and not self.state.first_prompt.strip():
+            if not self.state.messages and not self.state.first_prompt.strip() and not self.state.first_images:
                 self._end_turn("done", {})
                 return
             self._resolve_llm()
             if not self.state.messages:
-                self._persist_message({"role": "system", "content": _build_system_prompt(self.state)})
+                self._persist_message({"role": "system", "content": self._system_prompt()})
                 # 首条 user 消息在模型侧附加二次判断提示；事件流仍使用实际输入。
                 first_user_text = self.state.first_prompt
-                self._persist_message({"role": "user", "content": build_initial_user_message(first_user_text)})
+                self._persist_message(user_message(build_initial_user_message(first_user_text), self.state.first_images))
                 # 首条用户消息也进事件流：SSE 全量回放（重开页面/状态对账）时
                 # 气泡不丢。前端发送时已乐观显示，收到会按内容去重。
-                self._emit("user_message", {"message": first_user_text})
+                self._emit("user_message", user_event(first_user_text, self.state.first_images))
 
             # 循环到模型不再调工具为止（没有实际步数上限）；MAX_STEPS 只是
             # 防呆——真触发了也不丢历史，用户可以接着指挥继续。
@@ -482,7 +493,7 @@ class AgentRunner:
                     self._active_tool_call_id = call_id
                     try:
                         result = self._dispatch_tool(name, args)
-                        ok = True
+                        ok = not (isinstance(result, dict) and result.get("isError") is True)
                         duration_ms = int((time.time() - started) * 1000)
                         _log(f"  ✅ 工具结果: {name} 耗时 {duration_ms}ms")
                         # 写入工具的模型消息只带有限 Markdown 预览，前端保留原始变更明细。
@@ -493,7 +504,7 @@ class AgentRunner:
                         tool_result_event = {
                             "id": call_id,
                             "name": name,
-                            "ok": True,
+                            "ok": ok,
                             "result": result if has_changes or rendered is None else rendered,
                             "duration_ms": duration_ms,
                         }
@@ -503,7 +514,7 @@ class AgentRunner:
                         if rendered is not None:
                             tool_result_event["result_markdown"] = rendered
                         self._emit("tool_result", tool_result_event)
-                        content_str = rendered if rendered is not None else _tool_result_json(result)
+                        content_str = rendered if rendered is not None else self._serialize_tool_result(result)
                     except AgentToolError as exc:
                         duration_ms = int((time.time() - started) * 1000)
                         _log(f"  ❌ 工具失败: {name} 耗时 {duration_ms}ms -> {exc}")
@@ -579,14 +590,16 @@ class AgentRunner:
             # 例外是用户点了「立即」的那条：它已被摘出队列、暂存在 immediate_message，
             # 这里把它作为新回合的第一条消息发出去（见 queue_send）。
             immediate = self.state.immediate_message
+            immediate_images = self.state.immediate_images
             self.state.immediate_message = ""
-            if immediate:
-                self._persist_message({"role": "user", "content": immediate})
-                self._emit("user_message", {"message": immediate})
+            self.state.immediate_images = []
+            if immediate or immediate_images:
+                self._persist_message(user_message(immediate, immediate_images))
+                self._emit("user_message", user_event(immediate, immediate_images))
                 # 这次"停止"是「立即」触发的，不是用户按了停止：文案要说清，
                 # 否则界面上看着像"用户把回合停了"
                 data = {**data, "reason": "已按「立即」打断本轮，马上发送这条消息"}
-            self.state.pending_followup = bool(immediate)
+            self.state.pending_followup = bool(immediate or immediate_images)
             self.emit_queue()
         else:
             # 普通收尾（跑完/出错）：本轮工作已结束，排队的消息现在写进历史并开新
@@ -594,7 +607,7 @@ class AgentRunner:
             # （见函数末尾：要排在 finish 之后，界面上才读得顺）。
             queued = self._drain_pending_messages()
             for msg in queued:
-                self._persist_message({"role": "user", "content": msg.text})
+                self._persist_message(user_message(msg.text, msg.images))
             self.state.pending_followup = bool(queued)
             # 兜底：drain 之后队列里又冒出消息（锁能挡住 message() 的正常路径，这里防呆）
             # ——留着让下一回合取走，绝不能把它丢在队列里没人管。
@@ -622,7 +635,7 @@ class AgentRunner:
         # 「本轮最终回复 → 你发的新消息 → 下一轮」。反过来的话，本轮最终回复会
         # 渲染在你这条新消息的下面（其实是本轮先说的）。
         for msg in queued:
-            self._emit("user_message", {"message": msg.text})
+            self._emit("user_message", user_event(msg.text, msg.images))
 
     def _drain_pending_messages(self) -> list[PendingMessage]:
         """取走队列里等待被模型看到的消息（无则返回空列表），并同步界面面板。"""
@@ -739,7 +752,7 @@ class AgentRunner:
     def _create_stream(self, *, include_usage: bool) -> Any:
         """发一次流式请求（不做重试，重试由外层的 _stream_llm_attempt 与重试循环负责）。"""
         messages = self._messages_for_request(strip_internal=False)
-        tools = AGENT_TOOLS
+        tools = self._tool_definitions()
         if self._prompt_caching:
             # 只对认这套断点的后端注入（见 _resolve_prompt_caching）：Anthropic 系
             # 需要显式 cache_control，OpenAI 兼容的多数实现是服务端自动前缀缓存。
@@ -790,6 +803,7 @@ class AgentRunner:
             # 仅投影请求：保留段不参与摘要，内存/磁盘历史不动，失败可完整回滚。
             source = [*source[:pending["cut"]], source[-1]]
         for message in _messages_with_tool_placeholders(source):
+            message = expand_message(message, self._store)
             clean = _strip_internal_fields(message) if strip_internal else message
             if field and message.get("role") == "assistant" and field not in message:
                 clean = {**clean, field: ""}
@@ -997,7 +1011,7 @@ class AgentRunner:
     # ---- 上下文用量估算与压缩 ----
     def _request_overhead_tokens(self) -> int:
         """这次请求里 messages 之外的固定开销：tools schema（见 _tools_overhead_tokens）。"""
-        return _tools_overhead_tokens(AGENT_TOOLS)
+        return _tools_overhead_tokens(self._tool_definitions())
 
     def _record_context_usage(self, prompt_tokens: int) -> None:
         """持久化 provider 实测用量，重启后继续只估算新增消息。"""
@@ -1256,7 +1270,7 @@ class AgentRunner:
         # system 原样保留（前缀稳定的关键）；历史里没有 system 的异常情况才补一条，
         # 保证压缩后仍是「system 打头」的合法结构。
         if system is None:
-            system = {"role": "system", "content": _build_system_prompt(self.state)}
+            system = {"role": "system", "content": self._system_prompt()}
         self.state.messages = [system, summary_msg, *kept]
         # 摘要落盘。不能走 _persist_message：它会把这条再往 state.messages 末尾塞一份，
         # 而这条在内存里的位置是 system 之后。
@@ -1359,6 +1373,9 @@ class AgentRunner:
         return _attach_reason(name, args, handler(self, args))
 
     # ---- 询问用户（ask_user）----
+    def _on_ask_pending(self, holder: dict[str, Any]) -> None:
+        """Optional domain event bridge, called after the answer target exists."""
+
     def ask_user(
         self, request_id: str, tool_call_id: str, questions: list[dict[str, Any]]
     ) -> list[list[str] | None]:
@@ -1381,6 +1398,7 @@ class AgentRunner:
             self._pending_ask = holder
         _log(f"  ❓ 等待用户回答 {len(questions)} 个问题（{request_id[:8]}）")
         try:
+            self._on_ask_pending(holder)
             while not event.wait(ASK_WAIT_TICK):
                 if self.stop_event.is_set():
                     _log("  ❓ 回合被停止，未答的问题按跳过处理")

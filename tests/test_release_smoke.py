@@ -185,6 +185,7 @@ class BackendSmokeTests(unittest.TestCase):
                 with patch.object(smoke.subprocess, "Popen", return_value=process) as start, \
                      patch.object(smoke, "wait_for_backend", return_value="http://127.0.0.1:34567") as ready, \
                      patch.object(smoke, "check_api") as check, \
+                     patch.object(smoke, "check_extraction_runtime"), \
                      patch.object(smoke, "check_file_plugins") as plugins, \
                      patch.object(smoke, "stop_backend") as stop:
                     if isinstance(failure, TimeoutError):
@@ -208,7 +209,7 @@ class BackendSmokeTests(unittest.TestCase):
             resources = directory / "app/Contents/Resources"
             with patch.object(smoke.subprocess, "Popen") as start, \
                  patch.object(smoke, "wait_for_backend", return_value="http://127.0.0.1:12345"), \
-                 patch.object(smoke, "check_api"), patch.object(smoke, "check_file_plugins"), \
+                 patch.object(smoke, "check_api"), patch.object(smoke, "check_extraction_runtime"), patch.object(smoke, "check_file_plugins"), \
                  patch.object(smoke, "stop_backend"):
                 smoke.smoke_backend(directory / "app/Contents/MacOS/galtransl_backend",
                                     directory / "smoke", VERSION, 1, resources)

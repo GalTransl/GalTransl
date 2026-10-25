@@ -25,6 +25,7 @@ import { ConnectionProvider, useConnection } from '../features/connection/Connec
 import { BootstrapGate } from '../features/connection/BootstrapGate';
 import { UpdateNotice } from '../features/update/UpdateNotice';
 import { HomePage, addProjectToHistory } from '../pages/HomePage';
+import { wizardDirectoryFromState } from '../lib/newProjectWizard';
 
 const ProjectLayout = lazy(async () => {
   const mod = await import('../components/ProjectLayout');
@@ -64,6 +65,11 @@ const NewProjectWizard = lazy(async () => {
 const AgentPage = lazy(async () => {
   const mod = await import('../pages/AgentPage');
   return { default: mod.AgentPage };
+});
+
+const ExtractionPage = lazy(async () => {
+  const mod = await import('../pages/ExtractionPage');
+  return { default: mod.ExtractionPage };
 });
 
 const LAST_ACTIVE_PROJECT_KEY = 'galtransl-last-active-project';
@@ -213,22 +219,31 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
   const [displayLocation, setDisplayLocation] = useState(location);
   const [wizardOpen, setWizardOpen] = useState(location.pathname === '/new-project');
   const [wizardProjectName, setWizardProjectName] = useState('');
+  const [wizardRequest, setWizardRequest] = useState<{ key: string; directory: string } | null>(() => {
+    const directory = location.pathname === '/new-project' ? wizardDirectoryFromState(location.state) : undefined;
+    return directory ? { key: location.key, directory } : null;
+  });
   const wizardVisible = displayLocation.pathname === '/new-project';
 
   useEffect(() => {
-    if (location.pathname === '/new-project') setWizardOpen(true);
-  }, [location.pathname]);
+    if (location.pathname !== '/new-project') return;
+    setWizardOpen(true);
+    const directory = wizardDirectoryFromState(location.state);
+    if (directory) setWizardRequest({ key: location.key, directory });
+  }, [location.pathname, location.key, location.state]);
 
   const handleFinishWizard = useCallback((projectDir: string, config: string) => {
     onOpenProject(projectDir, config);
     setWizardOpen(false);
     setWizardProjectName('');
+    setWizardRequest(null);
   }, [onOpenProject]);
 
   const handleCloseWizard = useCallback(() => {
     // 只丢弃向导草稿；已经创建到磁盘的项目保持原样，不做删除或回滚。
     setWizardOpen(false);
     setWizardProjectName('');
+    setWizardRequest(null);
     if (location.pathname === '/new-project') navigate('/');
   }, [navigate, location.pathname]);
   // Cross-fade: the outgoing page stays mounted on top while the new page
@@ -409,6 +424,14 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
         element={null}
       />
       <Route
+        path="/extraction"
+        element={(
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <RenderErrorBoundary><ExtractionPage /></RenderErrorBoundary>
+          </Suspense>
+        )}
+      />
+      <Route
         path="/agent"
         element={(
           <Suspense fallback={<RouteLoadingFallback />}>
@@ -460,6 +483,8 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
             <PageActivityContext.Provider value={wizardVisible && location.pathname === '/new-project'}>
             <Suspense fallback={<RouteLoadingFallback />}>
               <NewProjectWizard
+                key={wizardRequest?.key || 'new-project'}
+                initialDirectory={wizardRequest?.directory}
                 active={wizardVisible && location.pathname === '/new-project'}
                 onProjectNameChange={setWizardProjectName}
                 onOpenProject={handleFinishWizard}

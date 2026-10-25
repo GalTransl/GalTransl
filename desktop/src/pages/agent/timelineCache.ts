@@ -21,14 +21,16 @@ function shareModel(previous: unknown, next: unknown): unknown {
 }
 
 /** Share unchanged render models, including tools inside a still-growing turn. */
+export function shareTimelineGroups<T extends { id: string }>(previous: T[], groups: T[]): T[] {
+  const byId = new Map(previous.map(group => [group.id, group]));
+  const next = groups.map(group => shareModel(byId.get(group.id), group) as T);
+  return next.length === previous.length && next.every((group, index) => group === previous[index]) ? previous : next;
+}
+
 export function createTimelineBuilder() {
   let previous: TimelineGroup[] = [];
   return (events: AgentEvent[]): TimelineGroup[] => {
-    const byId = new Map(previous.map((group) => [group.id, group]));
-    const next = buildTimeline(events).map((group) => shareModel(byId.get(group.id), group) as TimelineGroup);
-    previous = next.length === previous.length && next.every((group, index) => group === previous[index])
-      ? previous
-      : next;
+    previous = shareTimelineGroups(previous, buildTimeline(events));
     return previous;
   };
 }

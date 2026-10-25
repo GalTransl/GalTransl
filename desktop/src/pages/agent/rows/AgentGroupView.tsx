@@ -17,36 +17,43 @@ import {
 } from '../timeline';
 import { formatDuration, formatTokenCount, translationJobId } from '../toolMeta';
 import { liveStartedState, manualOpenState } from '../uiState';
+import { ImageAttachments, type AgentImage, type ImageScope } from '../images';
 
 export const AgentGroupView = memo(function AgentGroupView({
   group,
   isLive,
   projectDir,
   persistKey,
+  imageScope,
+  autoExpandTools = true,
+  newProjectWizardRefs = false,
 }: {
   group: TimelineGroup;
   isLive: boolean;
   projectDir: string;
   persistKey: string;
+  imageScope?: ImageScope;
+  autoExpandTools?: boolean;
+  newProjectWizardRefs?: boolean;
 }) {
   const uiLanguage = useUiLanguage();
   // Terminal groups render as notices and hold no disclosure state; dispatch
   // them before the activity component so its hooks never run conditionally.
-  if (group.type === 'user') return <UserMessageRow message={group.message} step={group.step} />;
+  if (group.type === 'user') return <UserMessageRow message={group.message} step={group.step} images={group.images} imageScope={imageScope} />;
   if (group.type === 'error') return <ErrorNotice group={group} />;
   if (group.type === 'stopped') return <StoppedNotice group={group} />;
   if (group.finalContent && group.items.every((item) => item.final)) {
-    return <FinalMessage item={group.finalContent} projectDir={projectDir} />;
+    return <FinalMessage item={group.finalContent} projectDir={projectDir} newProjectWizardRefs={newProjectWizardRefs} />;
   }
-  return <AgentActivityGroup group={group} isLive={isLive} projectDir={projectDir} persistKey={persistKey} />;
+  return <AgentActivityGroup group={group} isLive={isLive} projectDir={projectDir} persistKey={persistKey} imageScope={imageScope} autoExpandTools={autoExpandTools} newProjectWizardRefs={newProjectWizardRefs} />;
 });
 
 /** 正文始终是执行记录的兄弟节点：折叠不能重建 Markdown、缓存卡片或文本选区。 */
-const FinalMessage = memo(function FinalMessage({ item, projectDir }: { item: ActivityItem; projectDir: string }) {
+const FinalMessage = memo(function FinalMessage({ item, projectDir, newProjectWizardRefs }: { item: ActivityItem; projectDir: string; newProjectWizardRefs?: boolean }) {
   const uiLanguage = useUiLanguage();
   return (
     <div className="agent-answer" data-agent-final-step={item.step}>
-      <AgentMarkdown text={item.content || ''} projectDir={projectDir} className="agent-final" />
+      <AgentMarkdown text={item.content || ''} projectDir={projectDir} className="agent-final" newProjectWizardRefs={newProjectWizardRefs} />
       <div className="agent-answer__actions">
         <MessageCopyButton text={item.content || ''} />
       </div>
@@ -54,13 +61,14 @@ const FinalMessage = memo(function FinalMessage({ item, projectDir }: { item: Ac
   );
 });
 
-function UserMessageRow({ message, step }: { message: string; step: number }) {
+function UserMessageRow({ message, step, images = [], imageScope }: { message: string; step: number; images?: AgentImage[]; imageScope?: ImageScope }) {
   const uiLanguage = useUiLanguage();
   return (
     <div className="agent-row agent-row--user" data-agent-user-step={step}>
       <div className="agent-bubble agent-bubble--user">
         <div className="agent-bubble__label">{translate("agent:agentGroupView.agentBubbleAgentBubbleUser_message_text")}</div>
         <div className="agent-bubble__text">{message}</div>
+        <ImageAttachments images={images} scope={imageScope} />
       </div>
     </div>
   );
@@ -71,11 +79,17 @@ function AgentActivityGroup({
   isLive,
   projectDir,
   persistKey,
+  imageScope,
+  autoExpandTools,
+  newProjectWizardRefs,
 }: {
   group: Extract<TimelineGroup, { type: 'activity' }>;
   isLive: boolean;
   projectDir: string;
   persistKey: string;
+  imageScope?: ImageScope;
+  autoExpandTools: boolean;
+  newProjectWizardRefs: boolean;
 }) {
   const uiLanguage = useUiLanguage();
   const active = usePageActive();
@@ -178,9 +192,9 @@ function AgentActivityGroup({
                   const i = entry.indices[0];
                   const item = items[i];
                   return entry.reading && entry.indices.length > 1 ? (
-                    <ReadToolGroup key={`reads-${entry.key}`} entry={entry} items={items} phases={phases} persistKey={persistKey} />
+                    <ReadToolGroup key={`reads-${entry.key}`} entry={entry} items={items} phases={phases} persistKey={persistKey} imageScope={imageScope} autoExpandTools={autoExpandTools} />
                   ) : item.final ? null : item.kind === 'content' ? (
-                    <ContentRow key={`t-${i}`} item={item} projectDir={projectDir} />
+                    <ContentRow key={`t-${i}`} item={item} projectDir={projectDir} newProjectWizardRefs={newProjectWizardRefs} />
                   ) : item.kind === 'reasoning' ? (
                     <ReasoningRow key={`r-${i}`} item={item} projectDir={projectDir} persistKey={persistKey} />
                   ) : item.kind === 'compact' ? (
@@ -191,7 +205,7 @@ function AgentActivityGroup({
                     // 启动翻译换成工作台顶部卡的迷你版（带实时进度），不再是一坨 JSON
                     <TranslationJobCard key={`j-${item.id || i}`} item={item} projectDir={projectDir} />
                   ) : (
-                    <ToolRow key={`x-${item.id || i}`} item={item} phase={phases[i]} persistKey={persistKey} />
+                    <ToolRow key={`x-${item.id || i}`} item={item} phase={phases[i]} persistKey={persistKey} imageScope={imageScope} autoExpand={autoExpandTools} />
                   );
                 })}
               </div>
@@ -199,12 +213,12 @@ function AgentActivityGroup({
           )}
         </AnimatedDisclosure>
       </div>
-      {group.finalContent ? <FinalMessage item={group.finalContent} projectDir={projectDir} /> : null}
+      {group.finalContent ? <FinalMessage item={group.finalContent} projectDir={projectDir} newProjectWizardRefs={newProjectWizardRefs} /> : null}
     </>
   );
 }
 
-const ContentRow = memo(function ContentRow({ item, projectDir }: { item: ActivityItem; projectDir: string }) {
+const ContentRow = memo(function ContentRow({ item, projectDir, newProjectWizardRefs }: { item: ActivityItem; projectDir: string; newProjectWizardRefs?: boolean }) {
   const uiLanguage = useUiLanguage();
   // 模型「说」的回复：直接渲染为普通黑体纯文本，不再用可折叠卡片包裹。
   const text = item.content || '';
@@ -216,6 +230,7 @@ const ContentRow = memo(function ContentRow({ item, projectDir }: { item: Activi
         text={text}
         projectDir={projectDir}
         className="agent-content__text"
+        newProjectWizardRefs={newProjectWizardRefs}
       />
     </div>
   );

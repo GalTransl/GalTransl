@@ -25,6 +25,7 @@ from GalTransl import TRANSLATOR_SUPPORTED, INPUT_FOLDERNAME, OUTPUT_FOLDERNAME,
 from GalTransl import GUIDELINES_FOLDERNAME, DEFAULT_GUIDELINE_NAME
 from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
 from GalTransl.AppSettings import load_app_settings, save_app_settings
+from GalTransl.Extraction.http import route_extraction
 from GalTransl.CustomBackground import (
     load_custom_background,
     save_custom_background_settings,
@@ -3428,8 +3429,42 @@ def build_handler(registry: JobRegistry):
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
         def do_GET(self) -> None:
+            if route_extraction(self, "GET"):
+                return
             parsed = urlparse(self.path)
             path = parsed.path
+
+            if path == '/api/agent/image':
+                try:
+                    from GalTransl.Extraction.http import trusted_request
+                    from GalTransl.Agent.images import read_image
+                    from GalTransl.Agent.session_store import SessionStore
+                    if not trusted_request(self):
+                        self._send_json({'error': 'Local client required'}, status=HTTPStatus.FORBIDDEN)
+                        return
+                    query = parse_qs(parsed.query)
+                    sid = query.get('session_id', [''])[0]
+                    if not re.fullmatch(r'[0-9a-f]{32}', sid):
+                        raise ValueError('Invalid session id')
+                    if query.get('agent', [''])[0] == 'extraction':
+                        from GalTransl.Extraction.runtime import EXTRACTION_RUNTIME
+                        session = EXTRACTION_RUNTIME.store.read(sid)
+                        store = SessionStore(session['workspace'], sid, directory=str(EXTRACTION_RUNTIME.store.directory(sid) / 'execution'))
+                    else:
+                        store = SessionStore(query.get('project_dir', [''])[0], sid)
+                    data, mime = read_image(store, query.get('image_id', [''])[0])
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header('Content-Type', mime)
+                    self.send_header('Content-Length', str(len(data)))
+                    self.send_header('Cache-Control', 'private, max-age=86400')
+                    self.send_header('X-Content-Type-Options', 'nosniff')
+                    self.end_headers()
+                    self.wfile.write(data)
+                except FileNotFoundError:
+                    self._send_json({'error': 'Image not found'}, status=HTTPStatus.NOT_FOUND)
+                except ValueError as exc:
+                    self._send_json({'error': str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
 
             if path == "/api/custom-background":
                 try:
@@ -3635,6 +3670,8 @@ def build_handler(registry: JobRegistry):
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:
+            if route_extraction(self, "POST"):
+                return
             parsed = urlparse(self.path)
             path = parsed.path
 
@@ -3709,6 +3746,7 @@ def build_handler(registry: JobRegistry):
                         config_file_name=config_file_name,
                         backend_profile_data=backend_profile_data,
                         first_prompt=first_prompt,
+                        images=payload.get('images'),
                         session_id=session_id,
                         backend_profile_name=backend_profile_name,
                         translator_profile_name=translator_profile_name,
@@ -3894,7 +3932,7 @@ def build_handler(registry: JobRegistry):
                     if not project_dir:
                         self._send_json({"error": "project_dir is required"}, status=HTTPStatus.BAD_REQUEST)
                         return
-                    if not message.strip():
+                    if not message.strip() and not payload.get('images'):
                         self._send_json({"error": "message is required"}, status=HTTPStatus.BAD_REQUEST)
                         return
                     # 同 start：顺带刷新两份后端配置的名字/内容（用户可能中途改了默认）
@@ -3903,6 +3941,7 @@ def build_handler(registry: JobRegistry):
                         project_dir,
                         message,
                         session_id,
+                        images=payload.get('images'),
                         backend_profile_name=str(payload.get("backend_profile_name", "") or ""),
                         backend_profile_data=(
                             backend_profile_data
@@ -4346,6 +4385,8 @@ def build_handler(registry: JobRegistry):
 
         def _read_json_body(self) -> dict[str, Any]:
             content_length = int(self.headers.get("Content-Length", "0"))
+            if urlparse(self.path).path in {'/api/agent/start', '/api/agent/message'} and not 0 <= content_length <= 12 * 1024 * 1024:
+                raise ValueError('Agent request exceeds the 12 MiB budget')
             raw_body = self.rfile.read(content_length) if content_length > 0 else b"{}"
             data = json.loads(raw_body.decode("utf-8") or "{}")
             if not isinstance(data, dict):
@@ -4495,6 +4536,8 @@ def serve(host: str = "127.0.0.1", port: int = 12333, *, ready_file: str | None 
         pass
     finally:
         server.server_close()
+        from GalTransl.Extraction.runtime import EXTRACTION_RUNTIME
+        EXTRACTION_RUNTIME.close()
         if ready_file:
             Path(ready_file).unlink(missing_ok=True)
 

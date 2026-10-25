@@ -150,6 +150,68 @@ test('full browser storage cannot interrupt project history updates or lose the 
   assert.equal(f.agent.readHistory().length, 0);
 });
 
+test('Agent-prefilled wizard preserves the remembered parent and reads files already in the extraction directory', async () => {
+  const parentKey = 'galtransl-new-project-last-parent-dir';
+  const calls = [], scans = [];
+  const f = fixture({ [parentKey]: 'D:\\remembered' }, false, { mocks: {
+    '@tauri-apps/api/core': { invoke: async (name, args) => { calls.push({ name, args }); } },
+  } });
+  Object.assign(f.api, {
+    fetchProgramDir: async () => 'C:\\program',
+    fetchDefaultProjectConfigTemplate: async () => 'common: {}',
+    fetchProjectConfig: async () => { throw Error('No config yet'); },
+    fetchProjectFiles: async id => { scans.push(id); return { input_files: [
+      { name: 'scene.json', is_file: true }, { name: 'chapter/scene.json', is_file: true }, { name: 'chapter', is_file: false },
+    ] }; },
+  });
+  const { NewProjectWizard } = f.load(new URL('../src/pages/NewProjectWizard.tsx', import.meta.url));
+  let root;
+  await act(async () => { root = create(h(MemoryRouter, null, h(NewProjectWizard, {
+    active: true, initialDirectory: 'E:\\exports\\游戏', onProjectNameChange() {}, onOpenProject() {},
+  }))); });
+  try {
+    const inputs = root.root.findAllByType('input');
+    assert.equal(inputs[0].props.value, '游戏');
+    assert.equal(inputs[1].props.value, 'E:\\exports');
+    assert.equal(calls.length, 0);
+    assert.equal(scans.length, 0);
+    await act(async () => inputs[1].props.onChange({ target: { value: 'E:\\other-exports' } }));
+    assert.equal(f.values.get(parentKey), 'D:\\remembered');
+    await act(async () => root.root.findByProps({ className: 'wizard-nav' }).findAllByType('button').at(-1).props.onClick());
+    assert.deepEqual(scans, [f.api.encodeProjectDir('E:\\other-exports\\游戏')]);
+    assert.deepEqual(root.root.findAllByProps({ className: 'wizard-file-list__item' }).map(node => node.children.join('')), ['scene.json', 'chapter/scene.json']);
+    assert.equal(calls.filter(call => call.name === 'create_dir').length, 4);
+    assert.equal(calls.filter(call => call.name === 'write_text_file').length, 1);
+    assert.equal(calls.some(call => call.name === 'copy_files'), false);
+    assert.equal(f.values.get(parentKey), 'D:\\remembered');
+  } finally { act(() => root.unmount()); }
+});
+
+test('normal wizard remembers a manually edited parent; Agent-prefilled wizard protects an existing config', async () => {
+  const parentKey = 'galtransl-new-project-last-parent-dir';
+  const calls = [];
+  const f = fixture({}, false, { mocks: {
+    '@tauri-apps/api/core': { invoke: async (...args) => calls.push(args) },
+  } });
+  Object.assign(f.api, { fetchProgramDir: async () => 'C:\\program', fetchProjectConfig: async () => ({ config: { preserved: true } }) });
+  const { NewProjectWizard } = f.load(new URL('../src/pages/NewProjectWizard.tsx', import.meta.url));
+  let root;
+  const view = initialDirectory => h(MemoryRouter, null, h(NewProjectWizard, {
+    active: true, initialDirectory, onProjectNameChange() {}, onOpenProject() {},
+  }));
+  await act(async () => { root = create(view()); });
+  await act(async () => root.root.findAllByType('input')[1].props.onChange({ target: { value: 'D:\\manual' } }));
+  assert.equal(f.values.get(parentKey), 'D:\\manual');
+  act(() => root.unmount());
+  await act(async () => { root = create(view('E:\\exports\\existing')); });
+  try {
+    await act(async () => root.root.findByProps({ className: 'wizard-nav' }).findAllByType('button').at(-1).props.onClick());
+    assert.equal(root.root.findAllByProps({ className: 'wizard-file-list' }).length, 0);
+    assert.equal(calls.length, 0);
+    assert.equal(f.values.get(parentKey), 'D:\\manual');
+  } finally { act(() => root.unmount()); }
+});
+
 test('opening an Agent project still updates subscribers and custom config when storage is full', () => {
   const f = fixture({ 'galtransl-open-projects': JSON.stringify(['old']) });
   let observed;
@@ -286,4 +348,51 @@ test('App broadcasts project opens and closes to already mounted subscribers', a
   } finally {
     act(() => root.unmount());
   }
+});
+
+test('Agent wizard requests replace a mounted draft, survive sidebar returns, and clear when closed', async () => {
+  const mocks = {
+    'react-router-dom': { ...router, HashRouter: props => h(MemoryRouter, props) },
+    '../features/connection/ConnectionContext': {
+      ConnectionProvider: ({ children }) => children,
+      useConnection: () => ({ backendUrl: '', connectionPhase: 'offline' }),
+    },
+    '../features/connection/BootstrapGate': { BootstrapGate: ({ children }) => children },
+    '../features/update/UpdateNotice': { UpdateNotice: () => null },
+    '../components/Sidebar': { Sidebar: props => h('sidebar', props) },
+    '../pages/NewProjectWizard': { NewProjectWizard: props => {
+      const navigate = useNavigate();
+      // Capture the initial directory at mount, just like the real wizard's input state.
+      const [initialDirectory] = React.useState(props.initialDirectory);
+      return h('wizard', { initialDirectory, leave: () => navigate('/') });
+    } },
+  };
+  const React = await import('react');
+  const f = fixture({}, false, { mocks });
+  f.mocks['../pages/HomePage'] = { ...f.home, HomePage: () => {
+    const navigate = useNavigate();
+    return h('home', { wizard: directory => navigate('/new-project', {
+      state: directory ? { newProjectWizardDirectory: directory } : null,
+    }) });
+  } };
+  const { App } = f.load(new URL('../src/app/App.tsx', import.meta.url));
+  let root;
+  await act(async () => { root = create(h(App)); });
+  try {
+    await act(async () => root.root.findByType('home').props.wizard());
+    assert.equal(root.root.findByType('wizard').props.initialDirectory, undefined);
+    await act(async () => root.root.findByType('wizard').props.leave());
+    await act(async () => root.root.findByType('home').props.wizard('E:\\exports\\first'));
+    assert.equal(root.root.findByType('wizard').props.initialDirectory, 'E:\\exports\\first');
+    await act(async () => root.root.findByType('wizard').props.leave());
+    await act(async () => root.root.findByType('home').props.wizard());
+    assert.equal(root.root.findByType('wizard').props.initialDirectory, 'E:\\exports\\first');
+    await act(async () => root.root.findByType('wizard').props.leave());
+    await act(async () => root.root.findByType('home').props.wizard('E:\\exports\\second'));
+    assert.equal(root.root.findByType('wizard').props.initialDirectory, 'E:\\exports\\second');
+    await act(async () => root.root.findByType('sidebar').props.onCloseWizard());
+    assert.equal(root.root.findAllByType('wizard').length, 0);
+    await act(async () => root.root.findByType('home').props.wizard());
+    assert.equal(root.root.findByType('wizard').props.initialDirectory, undefined);
+  } finally { act(() => root.unmount()); }
 });

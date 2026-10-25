@@ -2,6 +2,7 @@ import type { ActivityItem } from './timeline';
 
 // 明确列举已知只读工具，未知工具、写操作和审批都维持独立呈现。
 const readTools = new Set([
+  'read',
   'get_plugin_settings', 'get_project_overview', 'list_input_files', 'read_input_file',
   'read_guideline', 'list_dict_files', 'read_dict', 'get_name_table', 'get_runtime',
   'list_problems', 'read_proofread_changes', 'read_transl_cache', 'read_output',

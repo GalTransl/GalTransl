@@ -199,7 +199,7 @@ test('snapshot replacement, empty history and same ids from another session rema
 test('sharing does not walk large tool result payloads', () => {
   const result = { get expensive() { throw new Error('payload traversed'); } };
   const events = [
-    { type: 'tool_call', step: 1, id: 'read', name: 'read_file' },
+    { type: 'tool_call', step: 1, id: 'read', name: 'read' },
     { type: 'tool_result', step: 2, id: 'read', ok: true, result },
   ];
   const build = createTimelineBuilder();
@@ -223,7 +223,7 @@ test('rebuilding old events preserves fallback retry and child timestamps', () =
 test('collapsed history mounts no tool bodies or reasoning markdown, while final answers stay visible', () => {
   const group = {
     type: 'activity', id: 'long',
-    items: Array.from({ length: 250 }, (_, step) => ({ kind: 'tool', step, id: `tool-${step}`, name: 'read_file', result: 'large hidden output' })),
+    items: Array.from({ length: 250 }, (_, step) => ({ kind: 'tool', step, id: `tool-${step}`, name: 'run_python', result: 'large hidden output' })),
     finalContent: { kind: 'content', step: 251, content: 'visible answer', final: true },
   };
   const html = renderToStaticMarkup(createElement(AgentGroupView, { group, isLive: false, projectDir: '', persistKey: 'perf' }));
@@ -298,7 +298,7 @@ test('finish only claims the last matching reply and preserves distinct narratio
   const build = createTimelineBuilder();
   const events = [
     { type: 'content', step: 1, content: 'answer' },
-    { type: 'tool_call', step: 2, id: 'read', name: 'read_file' },
+    { type: 'tool_call', step: 2, id: 'read', name: 'read' },
     { type: 'tool_result', step: 3, id: 'read', ok: true, result: 'result' },
     { type: 'content_delta', step: 4, delta: 'answer' },
   ];

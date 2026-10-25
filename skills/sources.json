@@ -1,0 +1,7 @@
+{
+  "galtransl-galgamereverse-skill": {
+    "source": "https://github.com/GalTransl/GalTransl-GalGameReverse-Skill",
+    "branch": "main",
+    "license": "GPL-3.0-or-later; bundled third-party components retain their own notices"
+  }
+}

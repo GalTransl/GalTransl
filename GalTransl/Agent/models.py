@@ -38,15 +38,17 @@ class PendingMessage:
 
     id: str
     text: str
+    images: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, str]:
-        return {"id": self.id, "text": self.text}
+        return {"id": self.id, "text": self.text, **({"images": self.images} if self.images else {})}
 
 
 @dataclass(slots=True)
 class AgentState:
     status: str = "idle"  # idle | running | awaiting_input | stopped | failed
     first_prompt: str = ""  # 用户首条输入；仅用于消息初始化及会话信息。
+    first_images: list[dict[str, Any]] = field(default_factory=list)
     project_dir: str = ""
     config_file_name: str = ""
     backend_profile_data: dict[str, Any] = field(default_factory=dict)
@@ -90,6 +92,7 @@ class AgentState:
     # 「立即」发送的排队消息（用户要求打断当前回合、马上把这条发出去）。
     # 回合收尾时它被当成新回合的第一条消息（其余排队项继续等它们自己的时机）。
     immediate_message: str = ""
+    immediate_images: list[dict[str, Any]] = field(default_factory=list)
     # 本回合的收尾类型，SSE stream 据此判断是否还有后续（awaiting_input 不算终态）
     turn_end: str = ""
     # 会话身份：一个项目下可以有多个会话，互不干扰

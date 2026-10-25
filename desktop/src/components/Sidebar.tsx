@@ -663,6 +663,10 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
           <span className="sidebar__nav-icon"><Icon name="home" /></span>
           {expanded && <span className="sidebar__nav-label">{translate("common:sidebar.sidebarTopNav_message_text")}</span>}
         </NavLink>
+        <NavLink to="/extraction" className={({ isActive }) => `sidebar__nav-item ${isActive ? 'sidebar__nav-item--active' : ''}`} title={translate('extraction:title')}>
+          <span className="sidebar__nav-icon"><Icon name="agent-extract" /></span>
+          {expanded && <span className="sidebar__nav-label">{translate('extraction:title')}</span>}
+        </NavLink>
         <NavLink
           to="/agent"
           className={({ isActive }) =>
@@ -670,7 +674,7 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
           }
           title={translate("common:sidebar.sidebarTopNav_title_agent")}
         >
-          <span className="sidebar__nav-icon"><Icon name="bot" /></span>
+          <span className="sidebar__nav-icon"><Icon name="agent-translate" /></span>
           {expanded && <span className="sidebar__nav-label">{translate("common:sidebar.sidebarTopNav_message_agent")}</span>}
           {agentRunning && <RunningDot variant={expanded ? 'child' : 'rail'} agent />}
         </NavLink>

@@ -7,6 +7,7 @@ import { SubagentList } from './SubagentList';
 import type { ActivityItem } from '../timeline';
 import { asArgs, formatCountdown, formatDuration, formatPayload, str, toolMeta } from '../toolMeta';
 import { manualOpenState } from '../uiState';
+import { ImageAttachments, type ImageScope } from '../images';
 
 /** 工具行的"轮到哪一步"。一批工具调用在后端是**挨个执行**的（runtime 里
     `for tc in tool_calls`），但助手消息的 parts 会先把整批一次性画成行——所以"哪一行在跑"
@@ -38,11 +39,16 @@ export const ToolRow = memo(function ToolRow({
   item,
   phase,
   persistKey,
+  imageScope,
+  autoExpand = true,
 }: {
   item: ActivityItem;
   /** 这一行在本次执行里轮到哪一步（见 toolRowPhases） */
   phase?: ToolPhase;
   persistKey: string;
+  imageScope?: ImageScope;
+  /** Extraction tools keep parameters/results folded, even as results arrive. */
+  autoExpand?: boolean;
 }) {
   const uiLanguage = useUiLanguage();
   const stateKey = `${persistKey}::tool-${item.id || item.step}`;
@@ -73,7 +79,7 @@ export const ToolRow = memo(function ToolRow({
   //    都摆在审批卡上了，这一行不必再展开一次）。
   // manualOpenState 里只记"用户手动点过"的选择——记过就听用户的，没记过才用这个默认值
   // （重挂/刷新后同一规则）。
-  const autoOpen = Boolean(changeList || reason) || hasSubagents || (awaiting && !permPreview);
+  const autoOpen = autoExpand && (Boolean(changeList || reason || item.images?.length) || hasSubagents || (awaiting && !permPreview));
   const [open, setOpenRaw] = useState(() => manualOpenState.get(stateKey) ?? autoOpen);
   const setOpen = (value: boolean | ((prev: boolean) => boolean)) => {
     setOpenRaw((prev) => {
@@ -110,9 +116,9 @@ export const ToolRow = memo(function ToolRow({
     item.name === 'ask_user' && ok
       ? str((item.result as Record<string, unknown> | undefined)?.summary)
       : '';
-  const resultText = askSummary || (ok && item.resultMarkdown) || formatPayload(ok ? item.result : item.error);
-  const resultMarkdown = !askSummary && ok && (typeof item.resultMarkdown === 'string' || typeof item.result === 'string');
-  const hasDetails = Boolean(summary || resultText || item.arguments || changeList);
+  const resultText = askSummary || (ok && item.resultMarkdown) || formatPayload(ok ? item.result : item.error) || item.progressText || '';
+  const resultMarkdown = item.resultFormat !== 'text' && !askSummary && ok && (typeof item.resultMarkdown === 'string' || typeof item.result === 'string');
+  const hasDetails = Boolean(summary || resultText || item.arguments || changeList || item.images?.length);
   const longResult = resultText.length > 400;
 
   // 权限被拒不是故障，是用户的决定：状态标签说"已拒绝"，免得看着像系统出错。
@@ -183,6 +189,7 @@ export const ToolRow = memo(function ToolRow({
               {item.arguments !== undefined ? (
                 <ToolBlock title={translate("agent:toolRow.agentToolBody_title_text")} content={formatPayload(item.arguments)} mono />
               ) : null}
+              {item.images?.length ? <ImageAttachments images={item.images} scope={imageScope} /> : null}
               {resultText ? (
                 <ToolBlock
                   title={ok ? translate("agent:toolRow.agentToolBody_title_textVariant2") : translate("agent:toolRow.agentToolBody_title_error")}

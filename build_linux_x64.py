@@ -169,6 +169,11 @@ def copy_portable_frontend() -> Path:
     destination = RELEASE_APP_DIR / PORTABLE_NAME
     shutil.copy2(source, destination)
     destination.chmod(destination.stat().st_mode | 0o111)
+    resources = ROOT / "build" / "extraction-resources"
+    for name in ("skills", "extraction-python"):
+        if not (resources / name).is_dir():
+            raise RuntimeError("Missing prepared extraction resources")
+        shutil.copytree(resources / name, RELEASE_APP_DIR / name, dirs_exist_ok=True)
     return destination
 
 

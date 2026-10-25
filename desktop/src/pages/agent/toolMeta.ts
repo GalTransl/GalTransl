@@ -16,6 +16,11 @@ type ToolMeta = {
 };
 
 const TOOL_META: Record<string, ToolMeta> = {
+  read: { get action() { return translate("extraction:toolReadFile"); }, get running() { return translate("extraction:toolReadFile"); }, verb: '', icon: 'file-text', summary: a => str(a?.path) },
+  write: { get action() { return translate("extraction:toolWriteFile"); }, get running() { return translate("extraction:toolWriteFile"); }, verb: '', icon: 'save', summary: a => str(a?.path) },
+  edit: { get action() { return translate("extraction:toolEditFile"); }, get running() { return translate("extraction:toolEditFile"); }, verb: '', icon: 'pencil', summary: a => str(a?.path) },
+  run_python: { get action() { return translate("extraction:toolRunPython"); }, get running() { return translate("extraction:toolRunPython"); }, verb: '', icon: 'tool', summary: a => str(a?.script || a?.module || a?.code).split('\n')[0].slice(0, 160) },
+  bash: { get action() { return translate("extraction:toolRunShell"); }, get running() { return translate("extraction:toolRunShell"); }, verb: '', icon: 'play', summary: a => str(a?.command).split('\n')[0].slice(0, 160) },
   get_plugin_settings: {
     get action() { return translate("agent:tools.get_plugin_settings.action"); }, get running() { return translate("agent:tools.get_plugin_settings.running"); }, get verb() { return translate("agent:tools.get_plugin_settings.verb"); }, icon: 'plug',
     summary: (args) => String(args?.plugin_name || translate("agent:toolMeta.summary_string_allPlugin")),

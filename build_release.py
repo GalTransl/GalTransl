@@ -346,6 +346,7 @@ def build_backend(onefile: bool = False):
         f"--name {BACKEND_DIST_NAME} "
         f"{'--onefile ' if onefile else ''}"
         f"{hidden_args} "
+        f'--additional-hooks-dir="{ROOT / "packaging" / "hooks"}" '
         f'--collect-data="GalTransl" '
         f"--distpath dist "
         f"--workpath build "
@@ -419,6 +420,13 @@ def assemble_release(frontend_exe: Path | None, backend_exe: Path):
         copy_dir_filtered(RES_DIR, dst_res)
         print("  复制运行时资源目录 -> res/")
 
+    # 7. Only Skill files and the adapter; the backend already contains the agent.
+    resources = ROOT / "build" / "extraction-resources"
+    for name in ("skills", "extraction-python"):
+        if not (resources / name).is_dir():
+            raise RuntimeError("Missing extraction resources; run scripts/prepare_extraction.py")
+        copy_dir_filtered(resources / name, BUILD_DIR / name)
+
     print(f"\n\033[32m发布包组装完成: {BUILD_DIR}\033[0m")
 
 
@@ -456,6 +464,12 @@ def main():
 
     if args.clean:
         clean()
+
+    # Linux/macOS build the backend before Tauri; --skip-fe must still stage
+    # the extraction resources instead of relying on a previous frontend build.
+    if args.skip_fe:
+        subprocess.run([sys.executable, str(ROOT / "scripts" / "prepare_extraction.py")],
+                       cwd=ROOT, check=True)
 
     frontend_exe = None
     backend_exe = None

@@ -133,12 +133,12 @@
     "action_message_openProject": "Open recent project",
     "homeOnboarding_ariaLabel_text": "Quick start",
     "homeOnboardingHeader_h2_text": " Quick start",
-    "homeOnboardingHeader_message_completeTranslationAgentLanguageAIComplete": "First time here? The steps below are enough to complete one translation ({{doneCount}}/{{count}}). You can also enter “Agent mode” and let the AI do these operations for you in natural language.",
-    "homeOnboardingHeader_message_completeTranslationAgentLanguageAIComplete_other": "First time here? The steps below are enough to complete one translation ({{doneCount}}/{{count}}). You can also enter “Agent mode” and let the AI do these operations for you in natural language.",
+    "homeOnboardingHeader_message_completeTranslationAgentLanguageAIComplete": "First time here? The steps below are enough to complete one translation ({{doneCount}}/{{count}}). You can also enter “Translation Agent” and let the AI do these operations for you in natural language.",
+    "homeOnboardingHeader_message_completeTranslationAgentLanguageAIComplete_other": "First time here? The steps below are enough to complete one translation ({{doneCount}}/{{count}}). You can also enter “Translation Agent” and let the AI do these operations for you in natural language.",
     "homeOnboardingDismiss_title_text": "Do not show again",
     "homeOnboardingDismiss_ariaLabel_text": "Do not show the quick start again",
     "homeOnboardingSteps_message_doneComplete": "Done",
-    "homeOnboardingHeader_message_completeTranslationAgentLanguageAIComplete_one": "First time here? The steps below are enough to complete one translation ({{doneCount}}/{{count}}). You can also enter “Agent mode” and let the AI do these operations for you in natural language."
+    "homeOnboardingHeader_message_completeTranslationAgentLanguageAIComplete_one": "First time here? The steps below are enough to complete one translation ({{doneCount}}/{{count}}). You can also enter “Translation Agent” and let the AI do these operations for you in natural language."
   },
   "errorState": {
     "errorState_message_loadFailed": "Failed to load"
@@ -207,8 +207,8 @@
     "sidebarHeader_message_galTransl": "GalTransl",
     "sidebarTopNav_title_text": "Home",
     "sidebarTopNav_message_text": "Home",
-    "sidebarTopNav_title_agent": "Agent mode",
-    "sidebarTopNav_message_agent": "Agent mode",
+    "sidebarTopNav_title_agent": "Translation Agent",
+    "sidebarTopNav_message_agent": "Translation Agent",
     "sidebarProjectGroup_title_newProject": "Continue creating the project: {{wizardProjectName}}",
     "sidebarProjectGroup_title_newProjectVariant2": "Continue the new project wizard",
     "sidebarProjectName_message_new": "{{wizardProjectName}} · Creating",

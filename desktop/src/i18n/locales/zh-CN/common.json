@@ -133,12 +133,12 @@
     "action_message_openProject": "打开最近项目",
     "homeOnboarding_ariaLabel_text": "快速上手",
     "homeOnboardingHeader_h2_text": " 快速上手",
-    "homeOnboardingHeader_message_completeTranslationAgentLanguageAIComplete": "第一次使用？按下面几步即可完成一次翻译（{{doneCount}}/{{count}}）。也可以进入「Agent 模式」，用自然语言让 AI 帮你完成这些操作。",
-    "homeOnboardingHeader_message_completeTranslationAgentLanguageAIComplete_other": "第一次使用？按下面几步即可完成一次翻译（{{doneCount}}/{{count}}）。也可以进入「Agent 模式」，用自然语言让 AI 帮你完成这些操作。",
+    "homeOnboardingHeader_message_completeTranslationAgentLanguageAIComplete": "第一次使用？按下面几步即可完成一次翻译（{{doneCount}}/{{count}}）。也可以进入「翻译 Agent」，用自然语言让 AI 帮你完成这些操作。",
+    "homeOnboardingHeader_message_completeTranslationAgentLanguageAIComplete_other": "第一次使用？按下面几步即可完成一次翻译（{{doneCount}}/{{count}}）。也可以进入「翻译 Agent」，用自然语言让 AI 帮你完成这些操作。",
     "homeOnboardingDismiss_title_text": "不再显示",
     "homeOnboardingDismiss_ariaLabel_text": "不再显示快速上手",
     "homeOnboardingSteps_message_doneComplete": "已完成",
-    "homeOnboardingHeader_message_completeTranslationAgentLanguageAIComplete_one": "第一次使用？按下面几步即可完成一次翻译（{{doneCount}}/{{count}}）。也可以进入「Agent 模式」，用自然语言让 AI 帮你完成这些操作。"
+    "homeOnboardingHeader_message_completeTranslationAgentLanguageAIComplete_one": "第一次使用？按下面几步即可完成一次翻译（{{doneCount}}/{{count}}）。也可以进入「翻译 Agent」，用自然语言让 AI 帮你完成这些操作。"
   },
   "errorState": {
     "errorState_message_loadFailed": "加载失败"
@@ -207,8 +207,8 @@
     "sidebarHeader_message_galTransl": "GalTransl",
     "sidebarTopNav_title_text": "首页",
     "sidebarTopNav_message_text": "首页",
-    "sidebarTopNav_title_agent": "Agent 模式",
-    "sidebarTopNav_message_agent": "Agent 模式",
+    "sidebarTopNav_title_agent": "翻译 Agent",
+    "sidebarTopNav_message_agent": "翻译 Agent",
     "sidebarProjectGroup_title_newProject": "继续新建项目：{{wizardProjectName}}",
     "sidebarProjectGroup_title_newProjectVariant2": "继续新建项目向导",
     "sidebarProjectName_message_new": "{{wizardProjectName}} · 新建中",

@@ -33,6 +33,7 @@ from GalTransl.Agent.core import (
     _log,
 )
 from GalTransl.Agent.models import AgentEvent, AgentState, PendingMessage
+from GalTransl.Agent.images import save_images, image_data_url, user_message, user_event
 from GalTransl.Agent.permissions import _apply_permission_mode, _normalize_permission_mode
 from GalTransl.Agent.runner import AgentRunner
 from GalTransl.Agent.tool_schemas import AGENT_TOOLS
@@ -145,10 +146,10 @@ class AgentRuntime:
         return {"status": "ok", "session_id": session_id, "title": clean}
 
     # ---- 排队消息（界面队列面板的操作）----
-    def _new_pending(self, text: str) -> PendingMessage:
+    def _new_pending(self, text: str, images=()) -> PendingMessage:
         """生成带唯一 id 的排队条目。id 只需进程内唯一（队列只在内存里）。"""
         self._queue_seq += 1
-        return PendingMessage(id=f"q{self._queue_seq}", text=text)
+        return PendingMessage(id=f"q{self._queue_seq}", text=text, images=list(images))
 
     @staticmethod
     def _pop_queued(state: AgentState, item_id: str) -> PendingMessage | None:
@@ -187,13 +188,13 @@ class AgentRuntime:
     ) -> dict[str, Any]:
         """就地改一条排队消息的文本（位置不变，仍排在原来的次序上）。"""
         clean = (text or "").strip()
-        if not clean:
-            raise ValueError("排队消息不能为空")
         with self._lock:
             _key, sid, state, runner = self._queue_ctx(project_dir, session_id)
             if state is not None:
                 for item in state.pending_messages:
                     if item.id == item_id:
+                        if not clean and not item.images:
+                            raise ValueError("排队消息不能为空")
                         item.text = clean
                         if runner is not None:
                             runner.emit_queue()
@@ -218,11 +219,14 @@ class AgentRuntime:
             _log(f"立即发送排队消息: session={sid} id={item_id} msg={item.text[:60]}")
             if state.status == "running":
                 state.immediate_message = item.text
+                state.immediate_images = item.images
                 if runner is not None:
                     runner.emit_queue()
                 self.stop(project_dir, sid)
             else:
-                self.message(project_dir, item.text, sid)
+                self.message(project_dir, item.text, sid, images=[
+                    {'name': image['name'], 'data_url': image_data_url(runner._store if runner else SessionStore(project_dir, sid), image)}
+                    for image in item.images])
             return self.status(project_dir, sid)
 
     def _resolve_session_id(self, project_dir: str, session_id: str | None) -> str | None:
@@ -357,6 +361,7 @@ class AgentRuntime:
         subagent_profile_name: str = "",
         subagent_profile_data: dict[str, Any] | None = None,
         permission_mode: str = "",
+        images: list | None = None,
     ) -> dict[str, Any]:
         """启动一个回合。session_id 为空时新建会话；标题取用户第一条消息。"""
         key = self._key(project_dir)
@@ -401,6 +406,7 @@ class AgentRuntime:
                 state, host=host if host is not None else self.host,
                 port=port if port is not None else self.port, stop_event=stop_event, registry=self,
             )
+            state.first_images = save_images(runner._store, images)
             self._states.setdefault(key, {})[sid] = state
             self._runners.setdefault(key, {})[sid] = runner
             self._stop_events.setdefault(key, {})[sid] = stop_event
@@ -411,6 +417,7 @@ class AgentRuntime:
                     project_dir=project_dir,
                     title=title,
                     first_prompt=first_prompt,
+                    **({'first_images': state.first_images} if state.first_images else {}),
                     config_file_name=state.config_file_name,
                     context_window=state.context_window,
                     created_at=state.started_at,
@@ -435,6 +442,7 @@ class AgentRuntime:
         subagent_profile_name: str = "",
         subagent_profile_data: dict[str, Any] | None = None,
         permission_mode: str = "",
+        images: list | None = None,
     ) -> dict[str, Any]:
         """向会话追加一条用户消息。
 
@@ -457,6 +465,9 @@ class AgentRuntime:
                 raise ValueError("该项目还没有 Agent 会话，请先发送第一条消息启动")
             # 会话存在说明 sid 必然有值（state 就是按 sid 取到的），这里显式收窄
             assert sid is not None
+            saved_images = save_images(SessionStore(project_dir, sid), images)
+            if not text and not saved_images:
+                raise ValueError('Message text or an image is required')
             # 后端上下文跟着最新一次的 start/message 走：用户可能中途改了默认配置
             # （名字只在前端 localStorage，后端只能这样拿到）。
             if backend_profile_name:
@@ -482,7 +493,7 @@ class AgentRuntime:
                 # 排队期间只算"待发"：不进历史、也不发 user_message 事件——界面上
                 # 显示在 composer 上方的队列面板里（emit_queue）。真正被模型看到时
                 # 才由消费点补发事件（run 的注入点 / _close_turn）。
-                state.pending_messages.append(self._new_pending(text))
+                state.pending_messages.append(self._new_pending(text, saved_images))
                 runner = self._runners.get(key, {}).get(sid)
                 if runner is not None:
                     runner.emit_queue()
@@ -507,13 +518,13 @@ class AgentRuntime:
             # 原来的工具行，只能新建一段挂到新消息后面，看着像刚刚出错（同一处说明见
             # _close_dangling_before_message；那条路径在锁外，这里已经在锁里，直接叫 runner）。
             runner._close_dangling_tool_calls()
-            runner._persist_message({"role": "user", "content": text})
+            runner._persist_message(user_message(text, saved_images))
 
             state.status = "running"
             state.error = ""
             state.finished_at = 0.0
             state.turn_end = ""
-            runner._emit("user_message", {"message": text})
+            runner._emit("user_message", user_event(text, saved_images))
             thread = threading.Thread(target=runner.run, name=f"agent-{os.path.basename(key)}", daemon=True)
             thread.start()
             _log(f"Agent 继续回合: session={sid} msg={text[:60]}")

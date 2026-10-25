@@ -1,6 +1,7 @@
 import { t as translate } from "../../i18n/core";
 import type { AgentEvent } from '../../lib/api';
 import { asArgs, toolMeta } from './toolMeta';
+import type { AgentImage } from './images';
 
 // Rebuilding a timeline must not restart clocks or change otherwise identical rows.
 const eventTimes = new WeakMap<AgentEvent, number>();
@@ -30,6 +31,10 @@ export type ActivityItem = {
   result?: unknown;
   /** 工具结果的 Markdown 预览；原始 result 仍用于写入变更卡。 */
   resultMarkdown?: string;
+  /** Shell/Python output stays literal; live output is not a completed result. */
+  resultFormat?: 'text';
+  progressText?: string;
+  images?: AgentImage[];
   error?: string;
   durationMs?: number;
   // 权限审批：后端在这个工具调用执行前挂起等用户点（见 PermissionCard）。
@@ -119,7 +124,7 @@ export type SubagentRun = {
 
 export type TimelineGroup =
   | { type: 'activity'; id: string; items: ActivityItem[]; finalContent?: ActivityItem }
-  | { type: 'user'; id: string; step: number; message: string }
+  | { type: 'user'; id: string; step: number; message: string; images?: AgentImage[] }
   | { type: 'error'; id: string; step: number; message: string; traceback?: string }
   | { type: 'stopped'; id: string; step: number; reason: string };
 
@@ -242,7 +247,7 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
     // 用户消息独立成行（右对齐气泡），并打断当前活动组。
     if (ev.type === 'user_message') {
       closeActivity(true);
-      groups.push({ type: 'user', id: `u-${ev.step}`, step: ev.step, message: ev.message || '' });
+      groups.push({ type: 'user', id: `u-${ev.step}`, step: ev.step, message: ev.message || '', ...(ev.images?.length ? { images: ev.images } : {}) });
       continue;
     }
 

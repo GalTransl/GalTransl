@@ -47,6 +47,11 @@ PERMISSION_EDIT = "edit"
 PERMISSION_HIGH = "high"
 
 PERMISSION_TOOL_RISK: dict[str, str] = {
+    "read": PERMISSION_READ,
+    "write": PERMISSION_EDIT,
+    "edit": PERMISSION_EDIT,
+    "run_python": PERMISSION_HIGH,
+    "bash": PERMISSION_HIGH,
     "save_dict": PERMISSION_EDIT,
     "save_name_table": PERMISSION_EDIT,
     "patch_transl_cache": PERMISSION_EDIT,
@@ -88,6 +93,10 @@ PERMISSION_READ_TOOLS: frozenset[str] = frozenset({
 })
 # 审批卡上显示的工具名（前端有自己的 TOOL_META，这里只需要一个可读的名字）
 PERMISSION_TOOL_LABELS: dict[str, str] = {
+    "write": "写入文件",
+    "edit": "编辑文件",
+    "run_python": "运行 Python",
+    "bash": "执行命令",
     "save_dict": "保存字典",
     "save_name_table": "保存人名表",
     "patch_transl_cache": "修改译文",

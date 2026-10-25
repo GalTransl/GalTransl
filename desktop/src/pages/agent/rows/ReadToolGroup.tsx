@@ -7,12 +7,15 @@ import { asArgs, toolMeta } from '../toolMeta';
 import { manualOpenState } from '../uiState';
 import { AnimatedDisclosure } from './AnimatedDisclosure';
 import { ToolRow, type ToolPhase } from './ToolRow';
+import type { ImageScope } from '../images';
 
-export function ReadToolGroup({ entry, items, phases, persistKey }: {
+export function ReadToolGroup({ entry, items, phases, persistKey, imageScope, autoExpandTools = true }: {
   entry: ActivityEntry;
   items: ActivityItem[];
   phases: (ToolPhase | undefined)[];
   persistKey: string;
+  imageScope?: ImageScope;
+  autoExpandTools?: boolean;
 }) {
   useUiLanguage();
   const id = useId();
@@ -39,7 +42,7 @@ export function ReadToolGroup({ entry, items, phases, persistKey }: {
       <AnimatedDisclosure id={id} open={open} className="agent-read-group__collapse">
         {() => <div className="agent-read-group__inner">
           {entry.indices.map(index => <ToolRow key={items[index].id || items[index].step}
-            item={items[index]} phase={phases[index]} persistKey={persistKey} />)}
+            item={items[index]} phase={phases[index]} persistKey={persistKey} imageScope={imageScope} autoExpand={autoExpandTools} />)}
         </div>}
       </AnimatedDisclosure>
     </div>

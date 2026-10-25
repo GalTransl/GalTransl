@@ -35,6 +35,7 @@ import type { FilePluginDetection } from '../lib/api';
 import { addProjectToHistory } from './HomePage';
 import { basenamePath, isAbsolutePath, joinPath, normalizeFileUriPath } from '../lib/paths';
 import { validateProjectName } from '../lib/projectName';
+import { projectDirectoryPrefill } from '../lib/newProjectWizard';
 
 const STEPS = ["projects:newProjectWizard.sTEPS_message_project","projects:newProjectWizard.sTEPS_message_importFile","projects:newProjectWizard.sTEPS_message_translationBackend","common:actions.commonSettings","projects:newProjectWizard.sTEPS_message_extractNameTable","common:actions.completed"] as const;
 const LAST_PARENT_DIR_KEY = 'galtransl-new-project-last-parent-dir';
@@ -64,27 +65,30 @@ const FLOW_STEPS: { title: string; description: string }[] = [
 ];
 
 type NewProjectWizardProps = {
+  initialDirectory?: string;
   active: boolean;
   onProjectNameChange: (name: string) => void;
   onOpenProject: (projectDir: string, config: string) => void;
 };
 
-export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }: NewProjectWizardProps) {
+export function NewProjectWizard({ active, initialDirectory, onProjectNameChange, onOpenProject }: NewProjectWizardProps) {
   const uiLanguage = useUiLanguage();
   const navigate = useNavigate();
+  const initialProject = useMemo(() => projectDirectoryPrefill(initialDirectory), [initialDirectory]);
   const [currentStep, setCurrentStep] = useState(0);
   const [stepDirection, setStepDirection] = useState<'forward' | 'backward'>('forward');
   const [feedback, setFeedback] = useFeedbackState(null);
 
   // Step 1 state
   const [parentDir, setParentDir] = useState(() => {
+    if (initialProject) return initialProject.parentDir;
     try {
       return localStorage.getItem(LAST_PARENT_DIR_KEY) || '';
     } catch {
       return '';
     }
   });
-  const [projectName, setProjectName] = useState('');
+  const [projectName, setProjectName] = useState(() => initialProject?.projectName || '');
   useEffect(() => {
     onProjectNameChange(projectName.trim());
   }, [projectName, onProjectNameChange]);
@@ -228,13 +232,13 @@ export function NewProjectWizard({ active, onProjectNameChange, onOpenProject }:
 
   useEffect(() => {
     try {
-      if (parentDirTouched && parentDir.trim()) {
+      if (!initialProject && parentDirTouched && parentDir.trim()) {
         localStorage.setItem(LAST_PARENT_DIR_KEY, parentDir);
       }
     } catch {
       // ignore storage errors
     }
-  }, [parentDir, parentDirTouched]);
+  }, [parentDir, parentDirTouched, initialProject]);
 
   // 进「导入文件」时以 gt_input 里的实际文件为准刷新列表：文件可能是用户直接打开目录粘贴进去的，
   // 这种不经向导导入的文件本地状态里没有，会让列表和后面的判断都误以为"没有文件"
