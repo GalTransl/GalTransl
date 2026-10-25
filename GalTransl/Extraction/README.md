@@ -2,7 +2,7 @@
 
 提取 Agent 复用 `GalTransl.Agent.AgentRunner` 的 OpenAI 兼容请求、流式输出、重试、停止、审批、会话持久化和上下文压缩。提取专用提示词、工具集和输出工作区与翻译任务分开；不再启动 Pi sidecar，也不打包 Node.js、Pi SDK 或 npm 运行依赖。
 
-工具集为 `read`、`bash`、`edit`、`write`、`run_python`、`ask_user` 和共用的 `read_history_archive`。四个原生名称工具依据本地归档的 Pi 1.4.0 实现其参数及行为契约，替换原 `read_file/run_shell/edit_file/write_file`，不再注册旧名称。目录浏览使用 `bash` 或 `run_python`。读取范围为游戏、Skill 和工作区，文件编辑仅限工作区；Python/bash 以当前用户权限执行，遵循审批模式，可停止，不构成操作系统沙箱。
+工具集为 `read`、`bash`、`edit`、`write`、`run_python`、`ask_user` 和共用的 `read_history_archive`。启用 billion-context 时隐藏 `read_history_archive`，改用插件的 `compress`、`decompress`、`search_context` 和 `acp_status`。四个原生名称工具依据本地归档的 Pi 1.4.0 实现其参数及行为契约，替换原 `read_file/run_shell/edit_file/write_file`，不再注册旧名称。目录浏览使用 `bash` 或 `run_python`。读取范围为游戏、Skill 和工作区，文件编辑仅限工作区；Python/bash 以当前用户权限执行，遵循审批模式，可停止，不构成操作系统沙箱。
 
 - `read(path, offset?, limit?)`：UTF-8 文本保留 BOM/CRLF，按 2,000 行或 50 KiB 完整行截断，附续读提示；不再限制文本文件为 2 MiB。按文件头识别 JPG/PNG/GIF/WebP/BMP，BMP 转 PNG；图片最大边 2,000 像素、base64 小于 4.5 MiB，缩放附坐标映射。模型请求中的 `tool` 回复仅含文本，图片作为该批全部工具回复之后的 `user` 附件传递并标明调用 ID。历史和 UI 日志仅保存会话资产引用；旧会话重放采用同一转换，重启后恢复。
 - `bash(command, timeout?)`：实际 Bash；Windows 优先 Git Bash，缺少 Bash 时明确报错，不替代为 PowerShell。默认无超时，支持正数小数秒、最大 2,147,483.647 秒。继承环境并清理冻结程序的私有加载路径；保留末尾 2,000 行或 50 KiB，长输出完整落在工作区日志，不设旧的 10 MiB 输出终止限制。非零退出标为失败，超时/停止回收进程树；父进程退出后也不会因后代持有输出管道而永久挂起。

@@ -4251,7 +4251,7 @@ def build_handler(registry: JobRegistry):
             if path == "/api/app-settings":
                 try:
                     payload = self._read_json_body()
-                    settings = save_app_settings(payload)
+                    settings = save_app_settings({**load_app_settings(), **payload})
                     self._send_json(settings)
                 except json.JSONDecodeError:
                     self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)

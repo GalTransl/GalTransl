@@ -12,6 +12,7 @@ from GalTransl.RuntimePaths import get_app_settings_path, get_legacy_app_setting
 DEFAULT_APP_SETTINGS: dict[str, Any] = {
     "printTranslationLogInTerminal": True,
     "maxConcurrentJobs": 4,
+    "billionContextEnabled": False,
 }
 
 # Kept for callers that imported the old constant. Runtime reads and writes use
@@ -22,6 +23,7 @@ _SETTINGS_PATH = str(get_app_settings_path())
 def _normalize_settings(data: dict[str, Any] | None) -> dict[str, Any]:
     source = data or {}
     return {
+        "billionContextEnabled": source.get("billionContextEnabled", False) is True,
         "printTranslationLogInTerminal": bool(
             source.get(
                 "printTranslationLogInTerminal",

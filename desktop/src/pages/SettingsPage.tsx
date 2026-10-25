@@ -25,6 +25,8 @@ import {
   fetchVersion,
   fetchVersionCheck,
   fetchPlugins,
+  fetchAppSettings,
+  updateAppSettings,
   getCacheBrowserFontSizePreference,
   getCustomBackgroundPreference,
   getDisableAnimationsPreference,
@@ -46,7 +48,7 @@ import {
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 import { setUiLanguage, type UiLanguage } from '../i18n/core';
-import { PROJECT_HOMEPAGE, RELEASE_LATEST_URL } from '../lib/externalLink';
+import { openExternalUrl, PROJECT_HOMEPAGE, RELEASE_LATEST_URL } from '../lib/externalLink';
 
 const PROJECT_AUTHOR = 'xd2333';
 
@@ -71,6 +73,64 @@ const SETTINGS_SECTIONS: { key: SettingsSectionKey; label: string; icon: IconNam
 ];
 
 
+
+export function AgentContextPluginSection() {
+  const { backendUrl } = useConnection();
+  const [enabled, setEnabled] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const [reload, setReload] = useState(0);
+  const generation = useRef(0);
+  useEffect(() => {
+    const current = ++generation.current;
+    setLoading(true);
+    setLoaded(false);
+    setSaving(false);
+    setError('');
+    fetchAppSettings().then(settings => {
+      if (generation.current === current) {
+        setEnabled(settings.billionContextEnabled === true);
+        setLoaded(true);
+      }
+    }).catch(err => {
+      if (generation.current === current) setError(String(err));
+    }).finally(() => {
+      if (generation.current === current) setLoading(false);
+    });
+    return () => { generation.current++; };
+  }, [backendUrl, reload]);
+  const change = async (next: boolean) => {
+    if (!loaded || loading || saving) return;
+    const current = generation.current;
+    setSaving(true);
+    setError('');
+    try {
+      const settings = await updateAppSettings({ billionContextEnabled: next });
+      if (generation.current === current) setEnabled(settings.billionContextEnabled === true);
+    } catch (err) {
+      if (generation.current === current) setError(String(err));
+    } finally {
+      if (generation.current === current) setSaving(false);
+    }
+  };
+  return <section className="panel">
+    <header className="panel__header"><div>
+      <h2>{translate('settings:billionContext.title')}</h2>
+      <p>{translate('settings:billionContext.description')}</p>
+    </div></header>
+    <label className="field">
+      <span>{translate('settings:billionContext.enabled')}</span>
+      <Switch checked={enabled} onChange={change} disabled={!loaded || loading || saving}
+        ariaLabel={translate('settings:billionContext.enabled')} />
+    </label>
+    <p>{translate('settings:billionContext.timing')}</p>
+    <p>{translate('settings:billionContext.attribution')} <a href="https://github.com/ranxianglei/billion-context" onClick={event => { event.preventDefault(); void openExternalUrl(event.currentTarget.href); }}>{'billion-context'}</a> / <a href="https://github.com/ranxianglei/acp-kernel" onClick={event => { event.preventDefault(); void openExternalUrl(event.currentTarget.href); }}>{'acp-kernel'}</a></p>
+    {error && <p role="alert">{error}</p>}
+    {error && !loaded && <button type="button" onClick={() => setReload(value => value + 1)} disabled={loading}>{translate('settings:billionContext.retry')}</button>}
+  </section>;
+}
 
 export function PluginListSection() {
   const uiLanguage = useUiLanguage();
@@ -803,7 +863,7 @@ export function SettingsPage() {
         />
         )}
 
-        {activeSection === 'plugins' && <PluginListSection />}
+        {activeSection === 'plugins' && <><AgentContextPluginSection /><PluginListSection /></>}
         </div>
       </div>
     </div>

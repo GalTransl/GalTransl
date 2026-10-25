@@ -31,6 +31,8 @@ def wait_for(predicate, timeout=8):
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
+    # Ordinary-mode contracts must not depend on the developer's plugin setting.
+    monkeypatch.setattr("GalTransl.Agent.runner.load_app_settings", lambda: {"billionContextEnabled": False})
     game, skill = tmp_path / "game", tmp_path / "skill"
     game.mkdir()
     skill.mkdir()

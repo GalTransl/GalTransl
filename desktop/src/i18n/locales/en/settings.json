@@ -1,4 +1,12 @@
 {
+  "billionContext": {
+    "title": "billion-context · Python core",
+    "description": "Tiered context compression, history search and reversible retrieval for the extraction and translation agents. No Node.js or additional runtime dependencies.",
+    "enabled": "Enable billion-context",
+    "timing": "Off by default. Changes apply on the next agent turn. Original conversations and compression archives stay local. Summaries use the current model and consume model usage. Disabling restores the original context management.",
+    "attribution": "This product uses a Python core port of:",
+    "retry": "Reload"
+  },
   "backendProfilesPage": {
     "renameFailed": "Failed to rename configuration",
     "copyFailed": "Failed to copy configuration",

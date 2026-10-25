@@ -19,6 +19,8 @@ const apiMock = {
   HOME_LIST_LIMIT_MIN: 1,
   HOME_LIST_LIMIT_MAX: 50,
   fetchPlugins: async () => [],
+  fetchAppSettings: async () => ({ billionContextEnabled: false }),
+  updateAppSettings: async patch => patch,
   fetchVersion: async () => '8.4.3',
   fetchVersionCheck: async () => ({ version: '8.4.3', latest_version: '8.4.3', update_available: false }),
   getCacheBrowserFontSizePreference: () => 12,
@@ -84,8 +86,8 @@ async function mount(entry = '/settings') {
   });
   return {
     root: () => renderer.root,
-    click(label) {
-      act(() => {
+    async click(label) {
+      await act(async () => {
         const button = byClass(renderer.root, 'section-nav__btn').find((node) => textOf(node.children).includes(label));
         assert.ok(button, `找不到二级菜单项「${label}」`);
         button.props.onClick();
@@ -110,16 +112,16 @@ test('设置页用二级菜单分区，默认停在外观', async () => {
 test('点二级菜单只切换当前分区', async () => {
   const view = await mount();
   try {
-    view.click('关于');
+    await view.click('关于');
     assert.equal(activeNav(view.root()), 6);
     assert.deepEqual(panelTitles(view.root()), ['关于']);
 
-    view.click('插件清单');
+    await view.click('插件清单');
     assert.equal(activeNav(view.root()), 4);
-    assert.deepEqual(panelTitles(view.root()), ['插件清单']);
+    assert.deepEqual(panelTitles(view.root()), ['billion-context · Python 核心版', '插件清单']);
 
     // 提示词/翻译规范只是入口，内容在各自的子页面里
-    view.click('提示词');
+    await view.click('提示词');
     assert.deepEqual(panelTitles(view.root()), ['提示词']);
   } finally {
     view.unmount();

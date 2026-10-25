@@ -414,6 +414,7 @@ export type PluginInfo = {
 
 export type AppSettings = {
   printTranslationLogInTerminal: boolean;
+  billionContextEnabled?: boolean;
 };
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -1144,7 +1145,7 @@ export function getPromptTemplateOverridesForJob(translator: string): Record<str
   return { [translator]: override };
 }
 
-export async function updateAppSettings(settings: AppSettings) {
+export async function updateAppSettings(settings: Partial<AppSettings>) {
   return apiRequest<AppSettings>('/api/app-settings', {
     method: 'PUT',
     headers: {

@@ -108,7 +108,9 @@ class ExtractionRunner(AgentRunner):
             'with the project name and parent directory prefilled, and loads existing gt_input files at step two. '
             'Output the reference on its own line, outside code fences or inline code. Do not create config.yaml yourself '
             'or claim the translation project is already created: the user completes the wizard. '
-            "Use read_history_archive if compaction removed details you need.",
+            + ("Use search_context and decompress if compressed history removed details you need."
+               if self._billion_context is not None else
+               "Use read_history_archive if compaction removed details you need."),
         ])
 
     def _tool_definitions(self):

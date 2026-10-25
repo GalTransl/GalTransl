@@ -81,6 +81,8 @@ from GalTransl.Agent.prompts import (
 )
 from GalTransl.Agent.tool_schemas import AGENT_TOOLS
 from GalTransl.Agent.images import expand_message, user_message, user_event
+from GalTransl.AppSettings import load_app_settings
+from GalTransl.Agent.billion_context import BillionContextSession
 from GalTransl.Agent.tools.ask import ASK_WAIT_TICK, _normalize_ask_answers
 from GalTransl.Agent.tools.preview import _preview_tool_changes
 from GalTransl.Agent.tools.render_md import _render_tool_result_table, _tool_result_json
@@ -108,6 +110,9 @@ class AgentRunner:
         self._subagent_clients: list[Any] = []
         self._clients_lock = threading.Lock()
         self._openai_client: Any = None
+        self._billion_context: BillionContextSession | None = None
+        self._context_plugin_lock = threading.Lock()
+        self._store_closed = False
         self._model: str = ""
         self._context_window = DEFAULT_CONTEXT_WINDOW
         # 同一长任务可多次压缩；只拦截压后没有变化的历史，避免摘要请求空转。
@@ -169,6 +174,10 @@ class AgentRunner:
         """会话被删除/重置：本 runner 之后不再落盘。"""
         if self._store is not None:
             self._store.close()
+        with self._context_plugin_lock:
+            self._store_closed = True
+            if self._billion_context is not None:
+                self._billion_context.close()
 
     # ---- 事件 ----
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
@@ -254,6 +263,20 @@ class AgentRunner:
             self._store.append_meta(context_window=backend.context_window)
         self._prompt_caching = backend.prompt_caching
         self._reasoning_kwargs = backend.reasoning_kwargs
+        enabled = load_app_settings().get("billionContextEnabled", False)
+        if enabled:
+            self._emit("status", {"message": "正在启动 billion-context 上下文插件"})
+        # Deletion can race with backend resolution. Serialize archive creation
+        # with close_store so a late resolver cannot recreate a deleted session.
+        with self._context_plugin_lock:
+            if self._store_closed or self.stop_event.is_set():
+                raise AgentStopRequested()
+            if self._billion_context is not None:
+                self._billion_context.close()
+            self._billion_context = None
+            if enabled:
+                self._billion_context = BillionContextSession(
+                    self.state, self._store, self.stop_event, context_window=backend.context_window)
         _log(f"主 Agent 模型: {backend.model} context_window={backend.context_window} prompt_caching={backend.prompt_caching}")
 
     @contextlib.contextmanager
@@ -303,6 +326,23 @@ class AgentRunner:
 
     def _serialize_tool_result(self, result: Any) -> str:
         return _tool_result_json(result)
+
+    def _request_tools(self) -> list[dict[str, Any]]:
+        tools = list(self._tool_definitions())
+        if self._billion_context is not None:
+            tools = [tool for tool in tools if tool["function"]["name"] != "read_history_archive"]
+            names = {tool["function"]["name"] for tool in tools}
+            if names & self._billion_context.names:
+                raise AgentToolError("billion-context 工具名称与 Agent 工具冲突")
+            tools.extend(self._billion_context.tools)
+        return tools
+
+    def _execute_tool(self, name: str, args: dict[str, Any]) -> Any:
+        # Intercept before domain validation (including ExtractionRunner).
+        if self._billion_context is not None and name in self._billion_context.names:
+            self._billion_context.sync(self._messages_for_request())
+            return self._billion_context.call(name, args, self._active_tool_call_id)
+        return self._dispatch_tool(name, args)
 
     def run(self) -> None:
         """跑一个回合：从当前对话历史出发，直到模型不再调工具、用户停止或出错。
@@ -364,6 +404,9 @@ class AgentRunner:
                     # 最近助手轮次在原历史中保留，不占摘要请求的窗口。
                     # 每回合只做一次，仍超限说明问题不在历史长度，交给外层报错。
                     _log("  ⚠ 请求超出上下文窗口，强制压缩后重试")
+                    if self._billion_context is not None:
+                        self._recover_billion_context(force=True)
+                        continue
                     if not self._begin_compaction(force=True):
                         raise
                     self._run_compaction_request()
@@ -492,7 +535,7 @@ class AgentRunner:
                     # 就会挂到最早那行，后面的等待没有倒计时。
                     self._active_tool_call_id = call_id
                     try:
-                        result = self._dispatch_tool(name, args)
+                        result = self._execute_tool(name, args)
                         ok = not (isinstance(result, dict) and result.get("isError") is True)
                         duration_ms = int((time.time() - started) * 1000)
                         _log(f"  ✅ 工具结果: {name} 耗时 {duration_ms}ms")
@@ -514,7 +557,11 @@ class AgentRunner:
                         if rendered is not None:
                             tool_result_event["result_markdown"] = rendered
                         self._emit("tool_result", tool_result_event)
-                        content_str = rendered if rendered is not None else self._serialize_tool_result(result)
+                        if self._billion_context is not None and name in self._billion_context.names:
+                            # Both domains receive the same plain JSON core tool receipt.
+                            content_str = result["content"][0]["text"]
+                        else:
+                            content_str = rendered if rendered is not None else self._serialize_tool_result(result)
                     except AgentToolError as exc:
                         duration_ms = int((time.time() - started) * 1000)
                         _log(f"  ❌ 工具失败: {name} 耗时 {duration_ms}ms -> {exc}")
@@ -550,6 +597,10 @@ class AgentRunner:
             self.state.status = "failed"
             self.state.turn_end = "failed"
         finally:
+            with self._context_plugin_lock:
+                if self._billion_context is not None:
+                    self._billion_context.close()
+                    self._billion_context = None
             self.state.finished_at = time.time()
             # 异常退出不经过 _close_turn，这里兜底清掉落盘里的 running 标记
             self._write_running_meta(False)
@@ -752,7 +803,13 @@ class AgentRunner:
     def _create_stream(self, *, include_usage: bool) -> Any:
         """发一次流式请求（不做重试，重试由外层的 _stream_llm_attempt 与重试循环负责）。"""
         messages = self._messages_for_request(strip_internal=False)
-        tools = self._tool_definitions()
+        tools = self._request_tools()
+        if self._billion_context is not None:
+            messages = self._billion_context.project(messages, self._request_overhead_tokens())
+            if self._billion_context.status()["contextTokens"] >= self._context_window * .90:
+                self._recover_billion_context()
+                messages = self._billion_context.project(
+                    self._messages_for_request(strip_internal=False), self._request_overhead_tokens())
         if self._prompt_caching:
             # 只对认这套断点的后端注入（见 _resolve_prompt_caching）：Anthropic 系
             # 需要显式 cache_control，OpenAI 兼容的多数实现是服务端自动前缀缓存。
@@ -805,6 +862,11 @@ class AgentRunner:
         for message in _messages_with_tool_placeholders(source):
             message = expand_message(message, self._store)
             clean = _strip_internal_fields(message) if strip_internal else message
+            if (self._billion_context is not None and clean.get("role") == "system"
+                    and isinstance(clean.get("content"), str)):
+                # Also adapt saved translation prompts when enabling the plugin
+                # in an existing session; keep the persisted history intact.
+                clean = {**clean, "content": clean["content"].replace(" 和 read_history_archive(query=...)", "")}
             if field and message.get("role") == "assistant" and field not in message:
                 clean = {**clean, field: ""}
             messages.append(clean)
@@ -1011,11 +1073,13 @@ class AgentRunner:
     # ---- 上下文用量估算与压缩 ----
     def _request_overhead_tokens(self) -> int:
         """这次请求里 messages 之外的固定开销：tools schema（见 _tools_overhead_tokens）。"""
-        return _tools_overhead_tokens(self._tool_definitions())
+        return _tools_overhead_tokens(self._request_tools())
 
     def _record_context_usage(self, prompt_tokens: int) -> None:
         """持久化 provider 实测用量，重启后继续只估算新增消息。"""
         messages = self.state.messages
+        if self._billion_context is not None:
+            self._billion_context.record_usage(prompt_tokens)
         self.state.last_prompt_tokens = prompt_tokens
         self.state.anchored_message_count = len(messages)
         self.state.usage_model = self._model
@@ -1029,6 +1093,9 @@ class AgentRunner:
 
     def _estimate_context_tokens(self) -> int:
         """估算当前请求占用的 token 数（锚点法，见 _estimate_usage_tokens）。"""
+        if self._billion_context is not None:
+            self._billion_context.project(self._messages_for_request(), self._request_overhead_tokens())
+            return self._billion_context.status()["contextTokens"]
         return _estimate_usage_tokens(
             self.state.messages,
             self.state.last_prompt_tokens,
@@ -1055,6 +1122,56 @@ class AgentRunner:
         if self._begin_compaction():
             self._run_compaction_request()
 
+    def _recover_billion_context(self, *, force: bool = False) -> None:
+        """Bounded emergency summaries through the existing Python model client.
+
+        Summarize only complete eligible ranges; commit only validated shrinking
+        results. Neither a failed model request nor cancellation edits host history.
+        """
+        from GalTransl.Agent.billion_context_prompts import EMERGENCY_PROMPT, TIER2_DISTILL_RULES, TIER3_CONDENSE_RULES
+        plugin = self._billion_context
+        if plugin is None:
+            return
+        for attempt in range(32):
+            self._check_billion_stop()
+            plugin.project(self._messages_for_request(), self._request_overhead_tokens())
+            if (not force or attempt > 0) and plugin.status()["contextTokens"] < self._context_window * .80:
+                return
+            candidate = plugin.recovery_candidate()
+            if candidate is None:
+                raise AgentToolError("billion-context 无法继续安全压缩：系统提示、最近工作区或单次工具交换过大。请增大模型上下文窗口或减少单次工具输出；原始历史已保留。")
+            self._emit("status", {"message": "billion-context 正在压缩较早历史"})
+            prompt = EMERGENCY_PROMPT
+            if candidate["tier"] > 1:
+                prompt = prompt[:prompt.index("\n\n")] + "\n\n" + (TIER2_DISTILL_RULES if candidate["tier"] == 2 else TIER3_CONDENSE_RULES)
+            response = self._openai_client.chat.completions.create(**apply_reasoning_kwargs({
+                "model": self._model,
+                "messages": [{"role": "system", "content": prompt},
+                             {"role": "user", "content": candidate["source"]}],
+                "temperature": 0,
+                "max_tokens": min(2048, max(128, self._context_window // 4)),
+                "stream": False,
+            }, self._reasoning_kwargs))
+            self._check_billion_stop()
+            choices = getattr(response, "choices", None)
+            choice = choices[0] if choices else None
+            message = getattr(choice, "message", None)
+            summary = ""
+            if (message is not None and not getattr(message, "tool_calls", None)
+                    and not getattr(message, "refusal", None) and getattr(choice, "finish_reason", None) == "stop"):
+                summary = str(getattr(message, "content", None) or "").strip()
+                if not 50 <= len(summary) <= 20000 or summary.count("```") % 2:
+                    summary = ""
+            if not summary:
+                raise AgentToolError("billion-context 紧急摘要未完整返回，原始历史已保留，请重试或增大上下文窗口。")
+            plugin.call("compress", {"content": [{"startId": candidate["startId"],
+                "endId": candidate["endId"], "summary": summary, "topic": "Emergency history summary"}]})
+        raise AgentToolError("billion-context 本次紧急压缩达到批次上限；历史已保留，可继续会话。")
+
+    def _check_billion_stop(self) -> None:
+        if self.stop_event.is_set():
+            raise AgentStopRequested()
+
     def _begin_compaction(self, *, force: bool = False) -> bool:
         """判断要不要压缩；要就把压缩指令挂到当前历史末尾，返回 True。
 
@@ -1063,6 +1180,8 @@ class AgentRunner:
         待移除的历史前缀复用；最近一个助手起始轮次完整保留，不参与摘要请求。
         尾部只在请求投影中排除，不修改原始历史，失败时只需移除瞬时指令。
         """
+        if self._billion_context is not None:
+            return False
         if self._pending_compaction is not None or self._compact_failed_this_turn:
             return False
         window = self._context_window

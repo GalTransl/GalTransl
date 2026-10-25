@@ -30,6 +30,8 @@
 源码通过 Git 子模块引用 Skill，克隆时使用 `git clone --recurse-submodules https://github.com/GalTransl/GalTransl.git`。开发启动或打包时会自动下载并同步上游 `main` 分支的最新提交；有本地修改或分叉时停止同步，避免覆盖。发布包包含打包时的完整 Skill，运行时不会更新。
 
 
+内置可选的 **billion-context Python 核心版**：在 **设置 → 插件清单** 开启，为翻译主 Agent 和提取 Agent 提供分层上下文压缩、原文归档、检索与恢复；默认关闭，下一回合生效，无需 Node.js 或额外运行依赖。GalTransl 使用了 [billion-context](https://github.com/ranxianglei/billion-context) 和 [acp-kernel](https://github.com/ranxianglei/acp-kernel) 的设计与压缩规则；[移植范围、使用与许可说明](plugins/billion-context/README.md)。
+
 ## 前言
 &ensp;&ensp;&ensp;&ensp;GalTransl的核心是一组自动化翻译流水线，解决了使用ChatGPT自动化翻译Gal过程中已知的大部分问题，并提高了整体的翻译质量。同时，通过与其他项目的组合，打通了制作补丁的完整流程，一定程度降低了上手门槛。对此感兴趣的朋友可以通过本项目更容易的构建具有一定质量的机翻补丁，并(或许)可以尝试在此框架的基础上高效的构建更高质量的汉化补丁。  
 
