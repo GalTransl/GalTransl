@@ -1,4 +1,22 @@
 {
+  "cacheDictionary": {
+    "line": "Line",
+    "emptyCell": "Empty value",
+    "preCount": "Pre {{count}}",
+    "postCount": "Post {{count}}",
+    "gptCount": "GPT {{count}}",
+    "details": "View matching dictionary entries",
+    "loading": "Dictionary …",
+    "failed": "Dictionary check failed",
+    "hint": "Calculated from the current dictionaries and text. Each rule is counted once. GPT entries match this sentence for the glossary; the model may not use them. Results may differ from translation time after dictionary changes.",
+    "pre": "Pre-translation dictionary",
+    "post": "Post-translation dictionary",
+    "gpt": "GPT dictionary",
+    "empty": "No matching entries",
+    "retry": "Retry",
+    "previous": "Previous",
+    "next": "Next"
+  },
   "dictionaryManager": {
     "unsavedChanges": "There are unsaved changes",
     "uNSECTIONEDLABEL_message_not": "Uncategorized",
@@ -275,6 +293,7 @@
     "cacheCardDelete_title_deleteEntry": "Delete this entry",
     "cacheCardField_message_source": "Source",
     "cacheCardField_message_translationText": "Translation",
+    "cacheCardField_message_finalTranslation": "Final",
     "cacheCardInputWrap_placeholder_notTranslation": "Not translated",
     "cacheCardInputWrap_placeholder_translationText": "Translation",
     "cacheCardInputWrap_title_emptyCacheFileSource": "There is no cache file yet, so the source text is shown",

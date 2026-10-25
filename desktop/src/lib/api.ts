@@ -660,6 +660,40 @@ export async function saveCacheFile(projectId: string, filename: string, entries
   );
 }
 
+export type CacheDictionaryKind = 'pre' | 'post' | 'gpt';
+export type CacheDictionaryCounts = Record<CacheDictionaryKind, number>;
+export type CacheDictionaryMatch = {
+  kind: CacheDictionaryKind;
+  file: string;
+  line: number;
+  search: string;
+  replacement: string;
+  note: string;
+  rule: string;
+};
+export type CacheDictionaryResult = {
+  counts: CacheDictionaryCounts;
+  entries?: CacheDictionaryMatch[];
+  total?: number;
+  offset?: number;
+};
+export type CacheDictionarySentence = CacheEntry & { context_before?: CacheEntry[]; context_after?: CacheEntry[] };
+
+export function fetchCacheDictionaryMatches(
+  projectId: string, configFileName: string, entries: CacheDictionarySentence[],
+  options: { details?: boolean; offset?: number; signal?: AbortSignal } = {},
+) {
+  return apiRequest<{ results: CacheDictionaryResult[] }>(
+    `/api/projects/${projectId}/cache/dictionary-matches`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: options.signal,
+      body: JSON.stringify({ entries, config_file_name: configFileName, details: options.details ?? false, offset: options.offset ?? 0 }),
+    },
+  );
+}
+
 export interface InputReextractResult {
   refreshed: { filename: string; entries: number }[];
   errors: { filename: string; error: string }[];

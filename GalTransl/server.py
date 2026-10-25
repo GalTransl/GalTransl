@@ -2572,6 +2572,28 @@ def build_handler(registry: JobRegistry):
                     self._send_json({"error": f"failed to replace in cache: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
+            # POST /api/projects/:id/cache/dictionary-matches (read-only, bounded batch)
+            if sub_path == "/cache/dictionary-matches":
+                if self.command != "POST":
+                    self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
+                    return
+                try:
+                    from GalTransl.CacheDictionary import inspect_cache_dictionaries
+                    payload = self._read_json_body()
+                    result = inspect_cache_dictionaries(
+                        project_dir,
+                        str(payload.get("config_file_name", "config.yaml")) or "config.yaml",
+                        payload.get("entries"),
+                        details=payload.get("details", False),
+                        offset=payload.get("offset", 0),
+                    )
+                    self._send_json(result)
+                except (ValueError, TypeError) as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to inspect dictionaries: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
             # GET /api/projects/:id/cache/:filename (catch-all, must be after specific /cache/* routes)
             if sub_path.startswith("/cache/"):
                 filename = unquote(sub_path[len("/cache/"):])
@@ -4332,11 +4354,16 @@ def build_handler(registry: JobRegistry):
 
         def _send_json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+                # Closing a disclosure or switching pages cancels fetch requests.
+                # The client is gone; do not retry with an error response.
+                self.close_connection = True
 
         def _send_html(self, html: str) -> None:
             body = html.encode("utf-8")

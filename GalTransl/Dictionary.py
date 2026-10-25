@@ -56,6 +56,9 @@ class CBasicDicElement:
         "spl_word",  # if_word_list的连接关键字
         "note",  # For GPT
         "dic_name",  # 字典名
+        "source_file",
+        "line_number",
+        "raw_line",
     ]
 
     def __init__(
@@ -87,6 +90,9 @@ class CBasicDicElement:
         self.spl_word: str = ""  # if_word_list的连接关键字
         self.note: str = ""  # For GPT
         self.dic_name: str = dic_name  # 字典名
+        self.source_file = ""
+        self.line_number = 0
+        self.raw_line = ""
 
     def __repr__(self) -> str:
         return f"{self.search_word} -> {self.replace_word}"
@@ -164,7 +170,7 @@ class CNormalDic:
         dic_name = path.basename(dic_path)
         dic_name = path.splitext(dic_name)[0]
 
-        for line in dic_lines:
+        for line_number, line in enumerate(dic_lines, 1):
             if line.startswith("\n"):
                 continue
             # elif line.startswith("\\\\") or line.startswith("//"):  # 注释行跳过
@@ -200,6 +206,9 @@ class CNormalDic:
             else:
                 self.dic_list.append(CBasicDicElement(sp[0], sp[1], dic_name=dic_name))
                 normalDic_count += 1
+            self.dic_list[-1].source_file = str(dic_path)
+            self.dic_list[-1].line_number = line_number
+            self.dic_list[-1].raw_line = line.rstrip("\r\n")
         LOGGER.info(
             "载入 普通字典："
             + path.basename(dic_path)
@@ -218,7 +227,8 @@ class CNormalDic:
         )
 
     def do_replace(
-        self, input_text: str, input_tran: CSentense, full_match: bool = False
+        self, input_text: str, input_tran: CSentense, full_match: bool = False,
+        *, matches: list | None = None,
     ) -> str:
         """
         通过这个dic字典来优化一个句子。
@@ -308,13 +318,21 @@ class CNormalDic:
                 if len_search_word > len_input_text:
                     continue  # 肯定不满足
                 elif input_text[:len_search_word] == search_word:
+                    if matches is not None:
+                        matches.append(dic)
                     input_text = input_text.replace(search_word, replace_word, 1)
             elif dic.onetime_flag:  # onetime情况，只替换一次
+                if matches is not None and search_word in input_text:
+                    matches.append(dic)
                 input_text = input_text.replace(search_word, replace_word, 1)
             else:  # 普通情况
                 if not full_match:
+                    if matches is not None and search_word in input_text:
+                        matches.append(dic)
                     input_text = input_text.replace(search_word, replace_word)
                 elif search_word == input_text:
+                    if matches is not None:
+                        matches.append(dic)
                     input_text = replace_word
 
         return input_text
@@ -352,7 +370,7 @@ class CGptDict:
         dic_name = path.splitext(dic_name)[0]
         normalDic_count = 0
 
-        for line in dic_lines:
+        for line_number, line in enumerate(dic_lines, 1):
             if line.startswith("\n"):
                 continue
 
@@ -381,23 +399,34 @@ class CGptDict:
 
             dic = CBasicDicElement(search_word, replace_word, dic_name=dic_name)
             dic.note = note
+            dic.source_file = str(dic_path)
+            dic.line_number = line_number
+            dic.raw_line = line.rstrip("\r\n")
             self._dic_list.append(dic)
             normalDic_count += 1
         LOGGER.info(
             f"载入 GPT字典: {path.basename(dic_path)} {normalDic_count}普通词条"
         )
 
-    def gen_prompt(self, trans_list: CTransList, type="gpt"):
-        def _should_add_dic(dic, input_text, input_text_copy, used_dic):
-            """判断是否应该添加字典条目到提示中"""
-            if dic.search_word in input_text:
-                return True
-            if dic.search_word in input_text_copy:
-                for word in used_dic:
-                    if word in dic.search_word:
-                        return True
-            return False
+    def matching_entries(self, trans_list: CTransList):
+        """Use the same overlap handling for inspection and prompt generation."""
+        input_text = "\n".join(
+            f"{tran.get_speaker_name()}:{tran.post_src}" for tran in trans_list
+        )
+        original_text = input_text
+        used_words = []
+        result = []
+        for dic in self._dic_list:
+            if dic.search_word in input_text or (
+                dic.search_word in original_text
+                and any(word in dic.search_word for word in used_words)
+            ):
+                result.append(dic)
+                input_text = input_text.replace(dic.search_word, "")
+                used_words.append(dic.search_word)
+        return result
 
+    def gen_prompt(self, trans_list: CTransList, type="gpt"):
         def _format_dic_entry_gpt(dic:CBasicDicElement):
             """格式化字典条目为提示所需的字符串"""
             entry = f"| {dic.search_word} | {dic.replace_word} |"
@@ -424,23 +453,13 @@ class CGptDict:
         TITLE_TSV="SRC\tDST\tNOTE\n"
 
         promt = ""
-        input_text = "\n".join(
-            [f"{tran.get_speaker_name()}:{tran.post_src}" for tran in trans_list]
-        )
-        input_text_copy=input_text
-        used_dic=[]
-
-
-        for dic in self._dic_list:
-            if _should_add_dic(dic, input_text, input_text_copy, used_dic):
-                if type=="gpt":
-                    promt += _format_dic_entry_gpt(dic)
-                elif type=="sakura":
-                    promt += _format_dic_entry_sakura(dic)
-                elif type=="tsv":
-                    promt += _format_dic_entry_tsv(dic)
-                input_text = input_text.replace(dic.search_word, "")
-                used_dic.append(dic.search_word)
+        for dic in self.matching_entries(trans_list):
+            if type=="gpt":
+                promt += _format_dic_entry_gpt(dic)
+            elif type=="sakura":
+                promt += _format_dic_entry_sakura(dic)
+            elif type=="tsv":
+                promt += _format_dic_entry_tsv(dic)
         if promt:
             if type=="gpt":
                 promt=TITLE_GPT+promt

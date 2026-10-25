@@ -1,4 +1,22 @@
 {
+  "cacheDictionary": {
+    "line": "行号",
+    "emptyCell": "空值",
+    "preCount": "译前 {{count}}",
+    "postCount": "译后 {{count}}",
+    "gptCount": "GPT {{count}}",
+    "details": "查看涉及的字典条目",
+    "loading": "字典 …",
+    "failed": "字典检查失败",
+    "hint": "按当前字典与文本计算，同一条规则重复命中只计一次。GPT 为该句命中的提示词条，不代表模型一定采用；字典变更后可能与翻译时不同。",
+    "pre": "译前字典",
+    "post": "译后字典",
+    "gpt": "GPT 字典",
+    "empty": "没有命中的条目",
+    "retry": "重试",
+    "previous": "上一页",
+    "next": "下一页"
+  },
   "dictionaryManager": {
     "unsavedChanges": "有未保存修改",
     "uNSECTIONEDLABEL_message_not": "未分类",
@@ -275,6 +293,7 @@
     "cacheCardDelete_title_deleteEntry": "删除此条",
     "cacheCardField_message_source": "原文",
     "cacheCardField_message_translationText": "译文",
+    "cacheCardField_message_finalTranslation": "终译",
     "cacheCardInputWrap_placeholder_notTranslation": "未翻译",
     "cacheCardInputWrap_placeholder_translationText": "译文",
     "cacheCardInputWrap_title_emptyCacheFileSource": "还没有缓存文件，显示的是原文",

@@ -587,6 +587,108 @@
   flex-shrink: 0;
 }
 
+.cache-card__pill--dictionary {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  border: 1px solid transparent;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.cache-card__pill--dictionary:hover,
+.cache-card__pill--dictionary[aria-expanded='true'] {
+  border-color: var(--color-primary);
+}
+
+.cache-card__pill--dictionary:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.cache-dictionary-details {
+  margin: var(--space-2) 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  max-height: 340px;
+  overflow: auto;
+  font-size: var(--cache-font-xs);
+}
+
+.cache-dictionary-details__hint,
+.cache-dictionary-details__source,
+.cache-dictionary-details__group p {
+  color: var(--color-text-muted);
+}
+
+.cache-dictionary-details__hint { margin: 0 0 var(--space-3); }
+.cache-dictionary-details__group + .cache-dictionary-details__group { margin-top: var(--space-3); }
+.cache-dictionary-details__source { overflow-wrap: anywhere; }
+.cache-dictionary-mini-list {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.cache-dictionary-mini {
+  min-width: 0;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.cache-dictionary-mini__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 5px 8px;
+  background: var(--color-primary-soft);
+}
+.cache-dictionary-mini__type {
+  flex-shrink: 0;
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.cache-dictionary-mini__scroll { overflow-x: auto; }
+.cache-dictionary-mini__table {
+  width: 100%;
+  min-width: 360px;
+  table-layout: fixed;
+  border-collapse: collapse;
+  text-align: left;
+}
+.cache-dictionary-mini--conditional .cache-dictionary-mini__table { min-width: 560px; }
+.cache-dictionary-mini__line-column { width: 48px; }
+.cache-dictionary-mini__table th,
+.cache-dictionary-mini__table td {
+  padding: 5px 8px;
+  border-top: 1px solid var(--color-line);
+  border-right: 1px solid var(--color-line);
+  vertical-align: top;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 4;
+}
+.cache-dictionary-mini__table th {
+  color: var(--color-text-muted);
+  font-weight: 600;
+  background: var(--color-primary-soft);
+}
+.cache-dictionary-mini__table th:last-child,
+.cache-dictionary-mini__table td:last-child { border-right: 0; }
+.cache-dictionary-mini__table th:first-child,
+.cache-dictionary-mini__line { text-align: center; }
+.cache-dictionary-mini__line,
+.cache-dictionary-mini__empty { color: var(--color-text-muted); }
+.cache-dictionary-details__pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
 .cache-card__pill--skip-check {
   background: var(--color-neutral-soft);
   color: var(--color-text-muted);

@@ -1,7 +1,7 @@
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
-import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useRetainPage } from '../components/PageActivity';
-import { createCacheProblemFilter, entriesMatch, mergeCacheEntries } from '../lib/cacheEntries';
+import { createCacheProblemFilter, entriesMatch, mergeCacheEntries, sameIgnoringDialogueBrackets, stripDialogueBrackets } from '../lib/cacheEntries';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
@@ -44,6 +44,10 @@ import { scrollWithinContainer } from '../lib/scrollWithinContainer';
 import { useStableListKeys } from '../lib/useStableListKeys';
 import { AnimatedList } from '../components/AnimatedList';
 import { AnimatedCollapse } from '../components/UiMotion';
+import { CacheDictionaryDetails } from '../components/CacheDictionaryDetails';
+import { CacheDictionaryPill } from '../components/CacheDictionaryPill';
+import { dictionarySentenceKey, useCacheDictionaryMatches } from '../lib/useCacheDictionaryMatches';
+import type { CacheDictionaryCounts, CacheDictionarySentence } from '../lib/api';
 
 /** 兼容读取缓存字段：优先新key，回退旧key */
 function src(e: CacheEntry): string { return e.post_src || e.post_jp || ''; }
@@ -112,6 +116,11 @@ const CacheEntryCard = memo(function CacheEntryCard({
   entry,
   filename,
   projectId,
+  configFileName,
+  dictionaryCounts,
+  dictionaryError,
+  dictionarySentence,
+  dictionaryRevision,
   onEntryChange,
   onDelete,
   onAddProblemFilter,
@@ -121,6 +130,11 @@ const CacheEntryCard = memo(function CacheEntryCard({
   entry: CacheEntry;
   filename: string;
   projectId: string;
+  configFileName: string;
+  dictionaryCounts?: CacheDictionaryCounts;
+  dictionaryError: string;
+  dictionarySentence?: CacheDictionarySentence;
+  dictionaryRevision: number;
   onEntryChange: (index: number, field: keyof CacheEntry, value: string | boolean) => void;
   onDelete: (deleteMode: boolean, index: number) => void;
   onAddProblemFilter: (keyword: string) => void;
@@ -131,6 +145,7 @@ const CacheEntryCard = memo(function CacheEntryCard({
 }) {
   const uiLanguage = useUiLanguage();
   const hasProblem = !!entry.problem;
+  const finalTranslation = entry.post_dst_preview ?? entry.post_zh_preview;
   const rawSpeaker = Array.isArray(entry.name) ? entry.name.join('/') : entry.name || '—';
   const speaker = rawSpeaker !== '—'
     ? (Array.isArray(entry.name)
@@ -138,6 +153,8 @@ const CacheEntryCard = memo(function CacheEntryCard({
         : resolveSpeakerName(rawSpeaker, nameDict))
     : rawSpeaker;
   const [expanded, setExpanded] = useState(false);
+  const [showDictionaries, setShowDictionaries] = useState(false);
+  const dictionaryDetailsId = useId();
 
   return (
     <article className={`cache-card ${hasProblem ? 'cache-card--problem' : ''} ${entry.deleted ? 'cache-card--pre-deleted' : ''}`} data-cache-index={entry.index}>
@@ -172,6 +189,13 @@ const CacheEntryCard = memo(function CacheEntryCard({
         {entry.skip_check && (
           <span className="cache-card__pill cache-card__pill--skip-check" title={translate("projects:projectCachePage.cacheCardPillCacheCardPillSkipCheck_title_doneProblemCheck")}>⏭</span>
         )}
+        <CacheDictionaryPill
+          counts={dictionaryCounts}
+          error={dictionaryError}
+          expanded={showDictionaries}
+          controls={dictionaryDetailsId}
+          onToggle={() => setShowDictionaries(value => !value)}
+        />
         {entry.trans_by && (
           <span className="cache-card__pill cache-card__pill--engine">{entry.trans_by}</span>
         )}
@@ -195,9 +219,19 @@ const CacheEntryCard = memo(function CacheEntryCard({
         </button>
       </div>
 
+      <AnimatedCollapse open={showDictionaries && (!dictionaryCounts || Object.values(dictionaryCounts).some(count => count > 0))}>
+        {() => <CacheDictionaryDetails
+          key={`${projectId}:${configFileName}:${dictionaryRevision}:${JSON.stringify(dictionarySentence)}`}
+          id={dictionaryDetailsId}
+          projectId={projectId}
+          configFileName={configFileName}
+          entry={dictionarySentence ?? entry}
+        />}
+      </AnimatedCollapse>
+
       <AnimatedCollapse open contentKey={expanded ? 'details' : 'summary'}>
       <div className="cache-card__fields">
-        {/* 折叠态：原文 + 译文 */}
+        {/* 折叠态：原文 + 译文；最终处理结果不同于 pre_dst 时补充终译 */}
         {!expanded && (
           <>
             <div className="cache-card__field">
@@ -228,6 +262,16 @@ const CacheEntryCard = memo(function CacheEntryCard({
                 )}
               </div>
             </div>
+            {finalTranslation !== undefined && !sameIgnoringDialogueBrackets(finalTranslation, dst(entry)) && (
+              <div className="cache-card__field cache-card__field--final">
+                <span className="cache-card__field-label">{translate('projects:projectCachePage.cacheCardField_message_finalTranslation')}</span>
+                <div className="cache-card__input-wrap">
+                  <span className="cache-card__readonly-input cache-card__input--zh" title={escapeControlChars(stripDialogueBrackets(finalTranslation))}>
+                    <HighlightText text={escapeControlChars(stripDialogueBrackets(finalTranslation))} query={highlightQuery ?? ''} />
+                  </span>
+                </div>
+              </div>
+            )}
           </>
         )}
         {/* 展开态：五个字段 */}
@@ -274,7 +318,7 @@ const CacheEntryCard = memo(function CacheEntryCard({
             <div className="cache-card__field cache-card__field--textarea">
               <span className="cache-card__field-label">{translate("projects:projectCachePage.cacheCardFieldCacheCardFieldTextarea_message_preview")}</span>
               <div className="cache-card__readonly-textarea">
-                <HighlightText text={escapeControlChars(entry.post_dst_preview || entry.post_zh_preview || '')} query={highlightQuery ?? ''} />
+                <HighlightText text={escapeControlChars(finalTranslation ?? '')} query={highlightQuery ?? ''} />
               </div>
             </div>
             {/* 只有问题句才需要豁免；已勾选的行也保留入口，否则勾选后 problem 被清掉，
@@ -394,6 +438,8 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
    */
   const [uncachedFiles, setUncachedFiles] = useState<Set<string>>(new Set());
   const [entries, setEntries] = useState<CacheEntry[]>([]);
+  const [dictionaryRevision, setDictionaryRevision] = useState(0);
+  const dictionaryMatches = useCacheDictionaryMatches(projectId, configFileName, selectedFile, entries, active, dictionaryRevision);
   /** 每个文件的条目缓存（含未保存修改），mount 后指向当前项目桶中的 Map */
   const entriesMapRef = useRef<Map<string, CacheEntry[]>>(new Map());
   /** 每个文件最近一次从后端读取或保存后的干净快照，用于准确维护 dirty 状态 */
@@ -1274,6 +1320,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
 
   const refreshVisibleData = useCallback(async (forceProblems = false) => {
     if (!projectId) return;
+    setDictionaryRevision(value => value + 1);
     // 配置可能刚被修改：丢弃页面内的旧快照，下次打开其他文件也要重新读取。
     // 未保存的译文继续保留在内存里。
     for (const filename of entriesMapRef.current.keys()) {
@@ -2108,6 +2155,11 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
                       entry={entry}
                       filename={selectedFile}
                       projectId={projectId}
+                      configFileName={configFileName}
+                      dictionaryCounts={dictionaryMatches.counts.get(dictionarySentenceKey(entry))}
+                      dictionaryError={dictionaryMatches.error}
+                      dictionarySentence={dictionaryMatches.sentences.get(entry.index)}
+                      dictionaryRevision={dictionaryRevision}
                       onEntryChange={handleEntryChange}
                       onDelete={handleDeleteAndRecover}
                       onAddProblemFilter={handleAddProblemFilterKey}

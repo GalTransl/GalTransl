@@ -4,12 +4,12 @@ import { createElement as h, useState } from 'react';
 import { act, create } from 'react-test-renderer';
 import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
 
-async function fixture({ setupSearch = true, api = {} } = {}) {
+async function fixture({ setupSearch = true, api = {}, cacheEntries } = {}) {
   const timers = new Map(), frames = new Map();
   let sequence = 0, view;
   const setTimer = (callback, delay) => { const id = ++sequence; timers.set(id, { callback, delay }); return id; };
   const events = { addEventListener() {}, removeEventListener() {} };
-  const entries = [
+  const entries = cacheEntries ?? [
     { index: 1, pre_src: '猫', post_src: '猫', pre_dst: 'cat', problem: 'test' },
     { index: 25, pre_src: '原文 悶え', post_src: '悶え source', pre_dst: '译文 挣扎', proofread_dst: '校对 挣扎', post_dst_preview: '预览 挣扎' },
   ];
@@ -218,7 +218,7 @@ test('jump reveals targets hidden by local filters and all search terms reach co
       }
       return true;
     }).map(node => node.props.children);
-    assert.deepEqual(marks(), ['悶え', '挣扎']);
+    assert.deepEqual(marks(), ['悶え', '挣扎', '挣扎']);
     act(() => f.view.root.findByProps({ className: 'cache-search' }).props.onChange({ target: { value: 'cat' } }));
     act(() => f.view.root.findByProps({ className: 'cache-filter' }).findByType('input').props.onChange({ target: { checked: true } }));
     assert.equal(f.view.root.findAllByProps({ 'data-cache-index': 25 }).length, 0);
@@ -232,6 +232,56 @@ test('jump reveals targets hidden by local filters and all search terms reach co
     act(() => textarea.props.onChange({ target: { value: '挣扎 edited' } }));
     assert.equal(card().findAllByType('textarea')[0].props.value, '挣扎 edited');
     assert.ok(marks().includes('挣扎'));
+  } finally { act(() => f.view.unmount()); }
+});
+
+test('collapsed cards show final text only when a known final result differs from pre_dst, including empty/legacy results', async () => {
+  const base = { name: '', pre_src: '原文', post_src: '原文', pre_dst: '嗯ぉっ♥' };
+  const f = await fixture({ setupSearch: false, cacheEntries: [
+    { ...base, index: 1, post_dst_preview: '嗯♥\n完成' },
+    { ...base, index: 2, post_dst_preview: base.pre_dst },
+    { ...base, index: 3, proofread_dst: '校对文本' },
+    { ...base, index: 4, post_dst_preview: '', post_zh_preview: '旧结果' },
+    { ...base, index: 5, pre_dst: undefined, pre_zh: '旧译文', post_zh_preview: '旧终译' },
+    { ...base, index: 6, post_dst_preview: `「${base.pre_dst}」` },
+    { ...base, index: 7, post_dst_preview: `  『「 ${base.pre_dst} 」』\n` },
+    { ...base, index: 8, post_dst_preview: `「${base.pre_dst}` },
+    { ...base, index: 9, post_dst_preview: '「嗯♥」' },
+    { ...base, index: 10, pre_dst: '他说「你好」', post_dst_preview: '他说你好' },
+    { ...base, index: 11, pre_dst: '初译', proofread_dst: '校对稿', post_dst_preview: '「校对稿」' },
+    { ...base, index: 12, post_dst_preview: '「他说『你好』了」' },
+  ] });
+  try {
+    f.selectFile('a.json');
+    await f.resolveFile('a.json');
+    const card = index => f.view.root.findByProps({ 'data-cache-index': index });
+    const finalRows = index => card(index).findAllByProps({ className: 'cache-card__field cache-card__field--final' }).filter(node => {
+      for (let parent = node.parent; parent; parent = parent.parent) {
+        if (parent.props['aria-hidden'] === true) return false;
+      }
+      return true;
+    });
+    assert.equal(finalRows(1).length, 1);
+    assert.equal(finalRows(1)[0].findByProps({ className: 'cache-card__field-label' }).children.join(''), 'projects:projectCachePage.cacheCardField_message_finalTranslation');
+    assert.ok(finalRows(1)[0].findByProps({ title: '嗯♥\\n完成' }));
+    assert.equal(finalRows(1)[0].findAllByType('input').length, 0);
+    assert.equal(finalRows(2).length, 0);
+    assert.equal(finalRows(3).length, 0);
+    assert.equal(finalRows(4).length, 1);
+    assert.ok(finalRows(4)[0].findByProps({ title: '' }));
+    assert.ok(finalRows(5)[0].findByProps({ title: '旧终译' }));
+    for (const index of [6, 7, 8]) assert.equal(finalRows(index).length, 0);
+    assert.ok(finalRows(9)[0].findByProps({ title: '嗯♥' }));
+    assert.equal(finalRows(10).length, 1); // Internal dialogue punctuation is part of the text.
+    assert.equal(finalRows(11).length, 1); // Keep comparing to pre_dst, as requested.
+    assert.ok(finalRows(11)[0].findByProps({ title: '校对稿' }));
+    assert.ok(finalRows(12)[0].findByProps({ title: '他说『你好』了' }));
+    act(() => card(1).findByProps({ className: 'cache-card__expand' }).props.onClick());
+    assert.equal(finalRows(1).length, 0);
+    act(() => card(1).findByProps({ className: 'cache-card__expand' }).props.onClick());
+    assert.equal(finalRows(1).length, 1);
+    act(() => card(1).findByType('input').props.onChange({ target: { value: '嗯♥\\n完成' } }));
+    assert.equal(finalRows(1).length, 0);
   } finally { act(() => f.view.unmount()); }
 });
 

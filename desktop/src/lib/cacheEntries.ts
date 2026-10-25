@@ -1,6 +1,16 @@
 import type { CacheEntry } from './api';
 import { filterProblemText } from './problemFilter';
 
+/** Match the Agent's _same_ignoring_dialogue_brackets comparison. Split
+ * dialogue can restore only one side; only boundary symbols are ignored. */
+export function stripDialogueBrackets(text: string): string {
+  return text.trim().replace(/^[「『」』]+|[「『」』]+$/g, '').trim();
+}
+
+export function sameIgnoringDialogueBrackets(left: string, right: string): boolean {
+  return stripDialogueBrackets(left) === stripDialogueBrackets(right);
+}
+
 /** A filter instance belongs to one set of rules. Unedited entries retain
  *  their view objects so card memoization also works with problem filters. */
 export function createCacheProblemFilter(keys: string[]): (entry: CacheEntry) => CacheEntry {
