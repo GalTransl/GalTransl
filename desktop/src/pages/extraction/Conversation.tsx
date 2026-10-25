@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { usePageActive } from '../../components/PageActivity';
 import { useUiLanguage } from '../../i18n';
@@ -10,15 +10,21 @@ import { x, statusLabel } from './labels';
 import type { Row } from './transcript';
 import type { AgentEvent } from './types';
 import { AskUserCard } from '../agent/rows/AskUserCard';
+import { createAgentMotion } from '../agent/motion';
+import { extractionMotionEvent } from './motion';
 
-export function Conversation({ rows, sessionId, running, status, pending, older, loadOlder }: {
+const NO_MOTION_EVENTS: AgentEvent[] = [];
+
+export function Conversation({ rows, sessionId, running, status, pending, older, loadOlder, motionEvents = NO_MOTION_EVENTS }: {
   rows: Row[]; sessionId: string; running: boolean; status: string; pending: AgentEvent | null; older: boolean; loadOlder: () => void;
+  motionEvents?: AgentEvent[];
 }) {
   useUiLanguage();
   const active = usePageActive();
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const tail = useRef<ReturnType<typeof followTail> | null>(null);
+  const motion = useRef<ReturnType<typeof createAgentMotion> | null>(null);
   const previous = useRef({ sessionId, running });
   const [atBottom, setAtBottom] = useState(true);
   const buildTimeline = useMemo(createExtractionTimelineBuilder, [sessionId]);
@@ -31,9 +37,16 @@ export function Conversation({ rows, sessionId, running, status, pending, older,
       onPosition: position => readingMemory.save(key, position),
     });
     tail.current = controller;
-    return () => { controller.dispose(); if (tail.current === controller) tail.current = null; };
+    const effects = createAgentMotion(scroller.current, content.current);
+    effects.setActive(active);
+    motion.current = effects;
+    return () => {
+      controller.dispose(); effects.dispose();
+      if (tail.current === controller) tail.current = null;
+      if (motion.current === effects) motion.current = null;
+    };
   }, [sessionId]);
-  useEffect(() => tail.current?.setActive(active), [active]);
+  useLayoutEffect(() => { tail.current?.setActive(active); motion.current?.setActive(active); }, [active]);
   useLayoutEffect(() => {
     tail.current?.follow();
     if (previous.current.sessionId === sessionId && previous.current.running && !running) {
@@ -43,6 +56,14 @@ export function Conversation({ rows, sessionId, running, status, pending, older,
     }
     previous.current = { sessionId, running };
   }, [groups, sessionId, running]);
+  useLayoutEffect(() => {
+    if (!motionEvents.length) { motion.current?.reset(); return; }
+    for (const event of motionEvents) {
+      const cue = extractionMotionEvent(event);
+      if (cue) motion.current?.observe(cue);
+    }
+    motion.current?.flush(() => tail.current?.follow());
+  }, [motionEvents, sessionId]);
   return <div className="agent-console__thread" ref={scroller} data-page-scroll-managed tabIndex={0} aria-label={x('conversation')}>
     <div className="agent-thread" ref={content}>
       {older && <button type="button" className="extract-text-button extract-older" onClick={loadOlder}>{x('older')}</button>}

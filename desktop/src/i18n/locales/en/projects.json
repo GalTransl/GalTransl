@@ -8,7 +8,7 @@
     "details": "View matching dictionary entries",
     "loading": "Dictionary …",
     "failed": "Dictionary check failed",
-    "hint": "Calculated from the current dictionaries and text. Each rule is counted once. GPT entries match this sentence for the glossary; the model may not use them. Results may differ from translation time after dictionary changes.",
+    "hint": "Calculated from the current dictionaries and sentence text + name (speaker). Each rule is counted once. GPT entries match this sentence for the glossary; the model may not use them. Results may differ from translation time after dictionary changes.",
     "pre": "Pre-translation dictionary",
     "post": "Post-translation dictionary",
     "gpt": "GPT dictionary",

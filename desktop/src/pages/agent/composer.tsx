@@ -90,7 +90,7 @@ export const AGENT_PROMPT_SUGGESTIONS = [
   '修一下问题',
 ];
 
-export function StatusPill({ status, running }: { status: string; running: boolean }) {
+export function StatusPill({ status, running, label: customLabel }: { status: string; running: boolean; label?: string }) {
   useUiLanguage();
   const active = usePageActive();
   const tone = running ? 'running' : status;
@@ -117,7 +117,7 @@ export function StatusPill({ status, running }: { status: string; running: boole
     reduced.addEventListener('change', stop);
     return stop;
   }, [status, running, active]);
-  const label = running
+  const label = customLabel ?? (running
     ? translate("common:actions.running")
     : status === 'awaiting_input' || status === 'done'
       ? translate("agent:composer.label_message_wait")
@@ -125,8 +125,8 @@ export function StatusPill({ status, running }: { status: string; running: boole
         ? translate("agent:composer.label_message_doneStop")
         : status === 'failed'
           ? translate("common:actions.error")
-          : translate("common:actions.idle");
+          : translate("common:actions.idle"));
   return (
-    <span className={`agent-status-pill agent-status-pill--${tone}`}><span ref={labelRef}>{label}</span></span>
+    <span className={`agent-status-pill agent-status-pill--${tone}`} role="status"><span ref={labelRef}>{label}</span></span>
   );
 }

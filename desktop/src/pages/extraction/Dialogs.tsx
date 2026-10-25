@@ -4,6 +4,7 @@ import { useUiLanguage } from '../../i18n';
 import { extractionApi } from './api';
 import { x } from './labels';
 import type { Environment } from './types';
+import { useDirectoryDrop } from './useDirectoryDrop';
 
 export function Dialog({ title, children, close }: { title: string; children: ReactNode; close: () => void }) {
   return <div className="extract-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}>
@@ -27,8 +28,13 @@ export function CreateDialog({ close, create, busy }: { close: () => void; creat
   useUiLanguage();
   const [game, setGame] = useState('');
   const [output, setOutput] = useState('');
+  const directoryDrop = useDirectoryDrop(setGame, busy);
   return <Dialog title={x('newSession')} close={close}><form onSubmit={event => { event.preventDefault(); void create(game, output); }}>
-    <PathField label={x('gameDir')} value={game} onChange={setGame} />
+    <div ref={directoryDrop.target} className={`extract-directory-drop${directoryDrop.dragging ? ' is-dragging' : ''}`} {...directoryDrop.handlers}>
+      <PathField label={x('gameDir')} value={game} onChange={setGame} />
+      <p className="extract-muted">{x('directoryDropHint')}</p>
+      {directoryDrop.error && <p className="extract-error" role="alert">{directoryDrop.error}</p>}
+    </div>
     <label className="extract-field"><span>{x('outputDir')}</span><input value={output} onChange={event => setOutput(event.target.value)} placeholder={x('outputHint')} autoComplete="off" /></label>
     <p className="extract-muted">{x('newOutput')}</p>
     <footer><button type="button" onClick={close}>{x('cancel')}</button><button className="extract-primary" disabled={!game.trim() || busy}>{x('create')}</button></footer>

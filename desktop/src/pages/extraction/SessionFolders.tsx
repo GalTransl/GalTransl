@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { basenamePath } from '../../lib/paths';
 import { readProjectStorage, writeProjectStorage } from '../../lib/projectStorage';
-import { statusLabel } from './labels';
+import { statusLabel, x } from './labels';
 import type { Session } from './types';
 
 const COLLAPSED_KEY = 'galtransl-extraction-collapsed-folders';
@@ -12,8 +12,9 @@ export function gameFolderKey(directory: string): string {
   return /^[a-z]:/i.test(path) || path.startsWith('//') ? path.toLowerCase() : path;
 }
 
-export function SessionFolders({ sessions, selected, activeSession, onSelect }: {
+export function SessionFolders({ sessions, selected, activeSession, onSelect, onCreateInFolder, busy }: {
   sessions: Session[]; selected: string; activeSession?: Session; onSelect: (id: string) => void;
+  onCreateInFolder: (directory: string) => void; busy: boolean;
 }) {
   const id = useId();
   const lastSelected = useRef(selected);
@@ -56,18 +57,27 @@ export function SessionFolders({ sessions, selected, activeSession, onSelect }: 
           <span className="agent-sessions__group-name">{basenamePath(group.directory) || group.directory}</span>
           <span className="agent-sessions__group-count">{group.sessions.length}</span>
         </button>
+        <button type="button" className="agent-sessions__group-new" disabled={busy}
+          title={`${x('newSessionInFolder')} (${group.directory})`}
+          aria-label={`${x('newSessionInFolder')} (${group.directory})`}
+          onClick={() => onCreateInFolder(group.directory)}>＋</button>
       </div>
-      <div id={listId} className="agent-sessions__group-list" hidden={folded}>
-        {!folded && group.sessions.map(item => {
-          const status = item.id === activeSession?.id ? activeSession.status : item.status;
-          return <div key={item.id} className={`agent-session-item${selected === item.id ? ' is-active' : ''}`}>
-            <button type="button" className="agent-session-item__main" title={item.title}
-              aria-current={selected === item.id ? 'true' : undefined} onClick={() => onSelect(item.id)}>
-              <span className="agent-session-item__title">{item.title}</span>
-              <span className="agent-session-item__time">{statusLabel(status)}</span>
-            </button>
-          </div>;
-        })}
+      <div id={listId} className="agent-sessions__group-collapse" aria-hidden={folded}
+        {...(folded ? { inert: '' } : {})}>
+        <div className="agent-sessions__group-collapse-inner">
+          <div className="agent-sessions__group-list">
+            {group.sessions.map(item => {
+              const status = item.id === activeSession?.id ? activeSession.status : item.status;
+              return <div key={item.id} className={`agent-session-item${selected === item.id ? ' is-active' : ''}`}>
+                <button type="button" className="agent-session-item__main" title={item.title}
+                  aria-current={selected === item.id ? 'true' : undefined} onClick={() => onSelect(item.id)}>
+                  <span className="agent-session-item__title">{item.title}</span>
+                  <span className="agent-session-item__time">{statusLabel(status)}</span>
+                </button>
+              </div>;
+            })}
+          </div>
+        </div>
       </div>
     </section>;
   })}</>;

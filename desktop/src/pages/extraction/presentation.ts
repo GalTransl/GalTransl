@@ -6,6 +6,8 @@ import type { AgentEvent } from './types';
 
 // Adapt the extraction protocol to the same presentation used by the translation agent.
 export type ExtractionGroup = TimelineGroup | { type: 'notice'; id: string; text: string };
+// Shared with live motion so selectors match replay-stable timeline anchors.
+export const extractionStep = (id: string) => [...id].reduce((hash, char) => (Math.imul(hash, 31) + char.charCodeAt(0)) | 0, 0) >>> 0;
 export function createExtractionTimelineBuilder() {
   let previous: ExtractionGroup[] = [];
   return (rows: Row[], running: boolean, pending: AgentEvent | null) => {
@@ -20,7 +22,7 @@ export function extractionTimeline(rows: Row[], running: boolean, pending: Agent
   let current: Extract<TimelineGroup, { type: 'activity' }> | undefined;
   let lastAssistant: Row | undefined;
   // Stable across prepending older history, session switches and stream replay.
-  const step = (id: string) => [...id].reduce((hash, char) => (Math.imul(hash, 31) + char.charCodeAt(0)) | 0, 0) >>> 0;
+  const step = extractionStep;
   const flush = (live: boolean) => {
     if (!current) return;
     const last = current.items[current.items.length - 1];

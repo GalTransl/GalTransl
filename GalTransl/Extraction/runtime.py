@@ -293,42 +293,19 @@ class ExtractionRuntime:
             return self.snapshot(session_id)
 
     def import_project(self, session_id: str) -> dict[str, Any]:
-        from GalTransl.DefaultProjectConfig import DEFAULT_PROJECT_CONFIG_YAML
+        """Resolve the output's project destination without creating configuration or cache files."""
         with self.lock:
             if session_id in self.runs:
                 raise ValueError("Stop the extraction turn before opening its output as a project")
             workspace = Path(self.session(session_id)["workspace"])
-            inputs = workspace_path(workspace, "gt_input")
-            count = 0
-            total_bytes = 0
-            for path in inputs.iterdir():
-                if path.suffix.lower() != ".json":
-                    continue
-                path = workspace_path(workspace, str(path.relative_to(workspace)))
-                total_bytes += path.stat().st_size
-                if path.stat().st_size > 16 * 1024 * 1024 or total_bytes > 256 * 1024 * 1024:
-                    raise ValueError("Export exceeds the project import validation budget")
-                rows = json.loads(path.read_text(encoding="utf-8-sig"))
-                if not isinstance(rows, list) or not rows or any(
-                    not isinstance(row, dict) or not isinstance(row.get("message"), str) for row in rows
-                ):
-                    raise ValueError(f"Invalid or empty GalTransl JSON: {path.name}")
-                count += 1
-                if count > 10000:
-                    raise ValueError("Too many input files")
-            if not count:
-                raise ValueError("No non-empty GalTransl JSON was found in gt_input")
-            config = workspace / "config.yaml"
-            if not config.exists():
-                with config.open("x", encoding="utf-8") as stream:
-                    stream.write(DEFAULT_PROJECT_CONFIG_YAML)
-            else:
-                workspace_path(workspace, "config.yaml")
-            cache = workspace / "transl_cache"
-            if cache.exists() or cache.is_symlink():
-                workspace_path(workspace, "transl_cache")
-            cache.mkdir(exist_ok=True)
-            return {"project_dir": str(workspace), "config_file_name": "config.yaml", "file_count": count}
+            workspace = workspace.resolve(strict=True)
+            for name in ("config.yaml", "config.yml"):
+                config = workspace / name
+                if config.exists() or config.is_symlink():
+                    if not workspace_path(workspace, name).is_file():
+                        raise ValueError(f"Project configuration is not a file: {name}")
+                    return {"project_dir": str(workspace), "config_file_name": name}
+            return {"project_dir": str(workspace), "config_file_name": None}
 
     def close(self) -> None:
         with self.lock:

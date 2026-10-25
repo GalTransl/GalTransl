@@ -153,22 +153,35 @@ def test_context_usage_survives_snapshot_and_compaction_invalidates_old_count(ex
         assert event["window_tokens"] == 128000
 
 
-def test_import_validates_json_and_preserves_config(extraction):
+def test_open_unconfigured_output_uses_wizard_without_writing_files(extraction):
     _, session, runtime = extraction
     root, sid = Path(session["workspace"]), session["id"]
-    with pytest.raises(ValueError, match="No non-empty"):
-        runtime.import_project(sid)
+    before = set(root.rglob("*"))
+    assert runtime.import_project(sid) == {"project_dir": str(root), "config_file_name": None}
+    assert set(root.rglob("*")) == before
     file = root / "gt_input" / "sample.json"
     file.write_text('[{"wrong":"synthetic"}]', encoding="utf8")
-    with pytest.raises(ValueError, match="Invalid"):
-        runtime.import_project(sid)
-    file.write_text('[{"name":"speaker","message":"Synthetic fixture"}]', encoding="utf8")
-    result = runtime.import_project(sid)
-    assert result["file_count"] == 1
-    assert (root / "config.yaml").is_file()
-    (root / "config.yaml").write_text("# preserve edits\n", encoding="utf8")
-    runtime.import_project(sid)
-    assert (root / "config.yaml").read_text(encoding="utf8") == "# preserve edits\n"
+    assert runtime.import_project(sid)["config_file_name"] is None
+    assert not (root / "config.yaml").exists()
+    assert not (root / "transl_cache").exists()
+
+
+@pytest.mark.parametrize("name", ["config.yaml", "config.yml"])
+def test_open_existing_output_preserves_configuration_without_revalidating_inputs(extraction, name):
+    _, session, runtime = extraction
+    root, sid = Path(session["workspace"]), session["id"]
+    config = root / name
+    config.write_text("# preserve edits\n", encoding="utf8")
+    assert runtime.import_project(sid) == {"project_dir": str(root), "config_file_name": name}
+    assert config.read_text(encoding="utf8") == "# preserve edits\n"
+    assert not (root / "transl_cache").exists()
+
+
+def test_open_output_rejects_configuration_directory(extraction):
+    _, session, runtime = extraction
+    (Path(session["workspace"]) / "config.yaml").mkdir()
+    with pytest.raises(ValueError, match="not a file"):
+        runtime.import_project(session["id"])
 
 
 def test_model_profile_uses_explicit_effort_only():

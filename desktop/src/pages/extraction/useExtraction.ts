@@ -4,11 +4,12 @@ import { extractionApi, extractionUrl } from './api';
 import { reduceEvents, type Row } from './transcript';
 import { isRunning, type AgentEvent, type Environment, type SessionList, type Snapshot } from './types';
 
-type View = Snapshot & { rows: Row[]; usage?: AgentEvent; contextUsage?: AgentEvent; compacting?: boolean };
-const fromSnapshot = (snapshot: Snapshot): View => {
+type View = Snapshot & { rows: Row[]; motionEvents: AgentEvent[]; usage?: AgentEvent; contextUsage?: AgentEvent; compacting?: boolean };
+const fromSnapshot = (snapshot: Snapshot, liveAfter?: number): View => {
   const events = [...snapshot.events, ...snapshot.live_events];
   const latest = [...events].reverse();
   return { ...snapshot, rows: reduceEvents([], events),
+    motionEvents: liveAfter === undefined ? [] : events.filter(event => (event.seq || 0) > liveAfter),
     usage: latest.find(event => event.type === 'usage'),
     contextUsage: latest.find(event => event.type === 'context_usage'),
     compacting: isRunning(snapshot.session) && latest.find(event => event.type === 'compaction')?.active };
@@ -26,6 +27,9 @@ export function useExtraction() {
   const [busy, setBusy] = useState(false);
   const [revision, setRevision] = useState(0);
   const current = useRef(selected); current.current = selected;
+  const currentView = useRef(view); currentView.current = view;
+  // A submitted message is already in the next snapshot before the SSE opens.
+  const sentAfter = useRef<{ sessionId: string; cursor: number } | null>(null);
   const request = useRef(false);
   const retries = useRef(0);
   useRetainPage(isRunning(view?.session));
@@ -59,7 +63,7 @@ export function useExtraction() {
       if (disposed || !batch.length) return;
       setView(previous => {
         if (!previous || previous.session.id !== selected) return previous;
-        const next = { ...previous, session: { ...previous.session }, rows: reduceEvents(previous.rows, batch) };
+        const next = { ...previous, session: { ...previous.session }, rows: reduceEvents(previous.rows, batch), motionEvents: batch };
         for (const event of batch) {
           next.cursor = Math.max(next.cursor, event.seq || 0);
           if (event.type === 'state') next.session.status = event.status || 'idle';
@@ -79,7 +83,9 @@ export function useExtraction() {
     };
     void extractionApi<Snapshot>('session', { session_id: selected }, undefined, abort.signal).then(snapshot => {
       if (disposed) return;
-      setView(fromSnapshot(snapshot));
+      const sent = sentAfter.current;
+      sentAfter.current = null;
+      setView(fromSnapshot(snapshot, sent?.sessionId === selected ? sent.cursor : undefined));
       if (!isRunning(snapshot.session)) return;
       source = new EventSource(extractionUrl('stream', { session_id: selected, after: snapshot.cursor }));
       source.onmessage = message => {
@@ -111,9 +117,11 @@ export function useExtraction() {
     if (request.current) return;
     request.current = true; setBusy(true); setError('');
     const id = current.current;
+    const cursor = currentView.current?.session.id === id ? currentView.current.cursor : 0;
     try {
       const result = await extractionApi<T>(action, {}, { session_id: id, ...body });
       if (id === current.current) {
+        if (action === 'message') sentAfter.current = { sessionId: id, cursor };
         if (action === 'permission-mode' && typeof body.permission_mode === 'string') {
           setView(previous => previous?.session.id === id
             ? { ...previous, session: { ...previous.session, permission_mode: body.permission_mode as string } } : previous);

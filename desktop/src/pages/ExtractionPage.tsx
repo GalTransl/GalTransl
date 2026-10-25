@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../components/Icon';
 import { useUiLanguage } from '../i18n';
-import { addOpenProject, encodeProjectDir, getBackendProfile, setSelectedBackendProfile } from '../lib/api';
+import { addOpenProject, encodeProjectDir, getBackendProfile } from '../lib/api';
 import { addProjectToHistory } from './HomePage';
 import { Conversation, PendingRequest } from './extraction/Conversation';
 import { CreateDialog, EnvironmentDialog } from './extraction/Dialogs';
@@ -17,6 +17,7 @@ import { ExtractionComposer } from './extraction/Composer';
 import { useImageInput, imageUploads } from './agent/images';
 import { useModelProfile } from './extraction/useModelProfile';
 import { SessionFolders } from './extraction/SessionFolders';
+import { StatusPill } from './agent/composer';
 
 const DRAFT_SCOPE = 'galtransl-extraction';
 
@@ -29,7 +30,7 @@ export function ExtractionPage() {
   const [draft, setDraft] = useMessageDraft(DRAFT_SCOPE, agent.selected);
   const [showWorkspace, setShowWorkspace] = useState(() => window.innerWidth >= 1440);
   const textarea = useRef<HTMLTextAreaElement>(null);
-  const imageInput = useImageInput(`extraction::${agent.selected}`, textarea, agent.busy);
+  const imageInput = useImageInput(`extraction::${agent.selected}`, textarea, agent.busy || dialog !== null);
   const session = agent.view?.session;
   const { models: modelNames, profile, boundProfile, defaultProfile, setProfile, moveProfile } = useModelProfile(session, agent.selected);
   const running = isRunning(session);
@@ -49,6 +50,13 @@ export function ExtractionPage() {
       agent.select(result.session.id); setDialog(null);
     }
   };
+  const createInFolder = async (game: string) => {
+    const result = await agent.mutate<{ session: Session }>('create', { game_dir: game, output_dir: '' });
+    if (result) {
+      moveProfile(result.session.id);
+      agent.select(result.session.id); setDialog(null);
+    }
+  };
   const send = async () => {
     const message = draft.trim();
     const sentImages = imageInput.images;
@@ -61,11 +69,14 @@ export function ExtractionPage() {
     }
   };
   const importProject = async () => {
-    const result = await agent.mutate<{ project_dir: string; config_file_name: string }>('import', {});
+    const result = await agent.mutate<{ project_dir: string; config_file_name: string | null }>('import', {});
     if (!result) return;
+    if (!result.config_file_name) {
+      navigate('/new-project', { state: { newProjectWizardDirectory: result.project_dir } });
+      return;
+    }
     addOpenProject(result.project_dir, result.config_file_name);
     addProjectToHistory(result.project_dir, result.config_file_name);
-    if (profile) setSelectedBackendProfile(result.project_dir, profile);
     navigate(`/project/${encodeProjectDir(result.project_dir)}/translate`);
   };
   return <div className={`agent-console extract-page ${showWorkspace && session ? 'extract-page--workspace' : ''}`}>
@@ -74,12 +85,13 @@ export function ExtractionPage() {
         <button type="button" className="agent-sessions__new" disabled={agent.busy} onClick={showHome} title={x('newSession')} aria-label={x('newSession')}>＋</button>
       </header>
       <nav className="agent-sessions__list" aria-label={x('sessions')}>
-      <SessionFolders sessions={agent.sessions.sessions} selected={agent.selected} activeSession={session} onSelect={agent.select} />
+      <SessionFolders sessions={agent.sessions.sessions} selected={agent.selected} activeSession={session} onSelect={agent.select}
+        onCreateInFolder={game => void createInFolder(game)} busy={agent.busy} />
       {!agent.sessions.total && <div className="agent-sessions__empty">{x('emptySessions')}</div>}
       {agent.sessions.next_offset != null && <button type="button" className="agent-sessions__show-more" onClick={() => void agent.refreshSessions(agent.sessions.next_offset!).catch(e => agent.setError(String(e)))}>{x('more')}</button>}</nav>
       <button type="button" className="extract-environment" onClick={() => { if (agent.environment) setDialog('environment'); else void agent.refreshEnvironment().then(() => setDialog('environment')).catch(e => agent.setError(String(e))); }}><Icon name="settings" /><span>{x(agent.environment?.ready ? 'ready' : 'setup')}</span><i className={agent.environment?.ready ? 'is-ready' : ''} /></button>
     </aside>
-    <main className="agent-console__main agent-cockpit extract-main">
+    <div className="extract-content">
       <header className="agent-console__bar">
         <div className="agent-console__bar-left">
           <span className="agent-console__avatar" aria-hidden><Icon name="agent-extract" /></span>
@@ -88,18 +100,19 @@ export function ExtractionPage() {
           </div>
         </div>
         <div className="agent-console__bar-right">
-          <span className={`agent-status-pill agent-status-pill--${running ? 'running' : session?.status || 'idle'}`} role="status">{statusLabel(session?.status || 'idle')}</span>
+          <StatusPill status={session?.status || 'idle'} running={running} label={statusLabel(session?.status || 'idle')} />
           <button type="button" className="agent-console__icon-btn" disabled={agent.busy} onClick={showHome} title={x('newSession')} aria-label={x('newSession')}><Icon name="pencil" /></button>
-          {session && <button type="button" className="agent-console__icon-btn" onClick={() => setShowWorkspace(value => !value)} title={x('showWorkspace')} aria-label={x('showWorkspace')} aria-pressed={showWorkspace}><Icon name="folder" /></button>}
+          {session && <button type="button" className={`agent-console__icon-btn extract-workspace-toggle${showWorkspace ? ' is-active' : ''}`} onClick={() => setShowWorkspace(value => !value)} title={x('showWorkspace')} aria-label={x('showWorkspace')} aria-pressed={showWorkspace} aria-expanded={showWorkspace} aria-controls="extraction-workspace"><Icon name="folder" /></button>}
         </div>
       </header>
+      <main className="agent-console__main agent-cockpit extract-main">
       {!session || !agent.view?.rows.length ? <div className="agent-console__thread extract-welcome"><div className="agent-thread"><div className="agent-hero">
         <div className="agent-hero__mark"><Icon name="agent-extract" /></div><h2 className="agent-hero__title">{session ? session.title : x('startTitle')}</h2><p className="agent-hero__subtitle">{x('startText')}</p>
         <div className="agent-hero__steps">{(['quickExtract', 'quickCheck', 'quickReinsert'] as const).map(key => <button type="button" className="agent-hero__step" key={key} onClick={() => { setDraft(x(key)); if (!session) setDialog('create'); else textarea.current?.focus(); }}><span className="agent-hero__step-icon"><Icon name="sparkle" /></span>{x(key)}</button>)}</div>
         <div className="agent-hero__project-panel">{session ? <div className="extract-welcome-source" title={session.game_dir}><Icon name="folder" />{session.game_dir}</div>
           : <><span className="agent-hero__open-projects-label">{x('chooseSource')}</span><div className="agent-hero__actions"><button type="button" className="agent-hero__action" disabled={agent.busy} onClick={() => setDialog('create')}><Icon name="folder" />{x('newSession')}</button></div></>}
         </div>
-      </div></div></div> : <Conversation rows={agent.view.rows} sessionId={session.id} running={running} status={session.status} pending={agent.view.pending} older={agent.view.has_more} loadOlder={() => void agent.loadOlder()} />}
+      </div></div></div> : <Conversation rows={agent.view.rows} motionEvents={agent.view.motionEvents} sessionId={session.id} running={running} status={session.status} pending={agent.view.pending} older={agent.view.has_more} loadOlder={() => void agent.loadOlder()} />}
       <div className="agent-console__composer extract-bottom">
         {agent.error && <div className="agent-notice agent-notice--error extract-inline-error" role="alert"><Icon name="warning" /><span>{agent.error}</span><button type="button" className="extract-text-button" onClick={agent.reload}>{x('reload')}</button></div>}
         {agent.view?.pending && <PendingRequest key={agent.view.pending.requestId} pending={agent.view.pending} busy={agent.busy} answer={body => { void agent.mutate('answer', body); }} />}
@@ -111,7 +124,10 @@ export function ExtractionPage() {
         {session && !agent.environment?.ready && <div className="extract-hint"><button type="button" className="extract-text-button" onClick={() => { if (agent.environment) setDialog('environment'); }}>{x('setup')}</button></div>}
       </div>
     </main>
-    {showWorkspace && session && <Workspace key={session.id} session={session} refresh={toolCount} running={running} importProject={() => void importProject()} busy={agent.busy} />}
+      {session && <div id="extraction-workspace" className="extract-workspace-shell" aria-hidden={!showWorkspace} {...(!showWorkspace ? { inert: '' } : {})}>
+        <Workspace key={session.id} session={session} refresh={toolCount} running={running} importProject={() => void importProject()} busy={agent.busy} />
+      </div>}
+    </div>
     {dialog === 'create' && <CreateDialog close={() => setDialog(null)} create={create} busy={agent.busy} />}
     {dialog === 'environment' && agent.environment && <EnvironmentDialog initial={agent.environment} close={() => setDialog(null)} saved={agent.setEnvironment} />}
   </div>;

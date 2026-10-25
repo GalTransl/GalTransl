@@ -11,6 +11,8 @@ export function Workspace({ session, refresh, running, importProject, busy }: { 
   const [directory, setDirectory] = useState('');
   const [files, setFiles] = useState<FileList | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewPath, setPreviewPath] = useState('');
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -28,10 +30,11 @@ export function Workspace({ session, refresh, running, importProject, busy }: { 
   useEffect(() => () => { previewGeneration.current++; }, []);
   const showPreview = async (path: string, offset = 0) => {
     const token = ++previewGeneration.current; setError(''); setLoading(true);
+    setPreviewPath(path); setPreviewOpen(true);
     try {
       const result = await extractionApi<Preview>('preview', { session_id: session.id, path, offset });
       if (token === previewGeneration.current) setPreview(result);
-    } catch (error) { if (token === previewGeneration.current) setError(error instanceof Error ? error.message : String(error)); }
+    } catch (error) { if (token === previewGeneration.current) { setError(error instanceof Error ? error.message : String(error)); setPreviewOpen(false); } }
     finally { if (token === previewGeneration.current) setLoading(false); }
   };
   const more = async () => {
@@ -51,7 +54,7 @@ export function Workspace({ session, refresh, running, importProject, busy }: { 
     <div className="extract-file-list">
       {directory && <button className="extract-file" onClick={() => setDirectory(directory.split('/').slice(0, -1).join('/'))}><Icon name="undo" />{x('back')}</button>}
       <small className="extract-file-path">/{directory}</small>
-      {files?.entries.map(entry => <button className="extract-file" key={entry.name} title={entry.name} onClick={() => {
+      {files?.entries.map(entry => <button className={`extract-file${previewOpen && previewPath === [directory, entry.name].filter(Boolean).join('/') ? ' is-active' : ''}`} key={entry.name} title={entry.name} onClick={() => {
         const path = [directory, entry.name].filter(Boolean).join('/');
         if (entry.is_dir) setDirectory(path); else void showPreview(path);
       }}><Icon name={entry.is_dir ? 'folder' : 'note'} /><span>{entry.name}</span>{!entry.is_dir && <small>{Math.ceil(entry.size / 1024)} {x('kilobytes')}</small>}</button>)}
@@ -60,10 +63,10 @@ export function Workspace({ session, refresh, running, importProject, busy }: { 
     </div>
     {error && <p className="extract-error" role="alert">{error}</p>}
     <footer><button className="extract-primary" onClick={importProject} disabled={running || busy} title={x('importHint')}><Icon name="globe" />{x('importProject')}</button></footer>
-    {(preview || loading) && <div className="extract-preview" role="dialog" aria-label={x('preview')}>
-      <header><strong title={preview?.path}>{preview?.path || x('loading')}</strong><button onClick={() => { previewGeneration.current++; setPreview(null); setLoading(false); }} aria-label={x('close')}>×</button></header>
-      <pre>{loading ? x('loading') : preview?.content}</pre>
+    <div className={`extract-preview${previewOpen ? ' is-open' : ''}`} role="dialog" aria-label={x('preview')} aria-hidden={!previewOpen} {...(!previewOpen ? { inert: '' } : {})}>
+      <header><strong title={previewPath}>{previewPath || x('loading')}</strong><button onClick={() => { previewGeneration.current++; setPreviewOpen(false); setLoading(false); }} aria-label={x('close')}>×</button></header>
+      <pre aria-busy={loading}>{loading ? x('loading') : preview?.content}</pre>
       {preview?.next_offset != null && <button disabled={loading} onClick={() => void showPreview(preview.path, preview.next_offset!)}>{x('more')}</button>}
-    </div>}
+    </div>
   </aside>;
 }
