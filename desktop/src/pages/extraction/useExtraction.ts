@@ -46,6 +46,18 @@ export function useExtraction() {
       void refreshEnvironment().catch(e => setError(errorText(e)));
     }
   }, [active, refreshSessions, refreshEnvironment]);
+  const hasRunningSessions = Boolean(sessions.running_game_dirs?.length || sessions.sessions.some(isRunning));
+  useEffect(() => {
+    if (!active || !hasRunningSessions) return;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      try { await refreshSessions(); } catch { /* Keep the last list until the next check. */ }
+      if (!disposed) timer = setTimeout(refresh, 2000);
+    };
+    timer = setTimeout(refresh, 2000);
+    return () => { disposed = true; clearTimeout(timer); };
+  }, [active, hasRunningSessions, refreshSessions]);
   useEffect(() => {
     try { localStorage.setItem('galtransl-extraction-session', selected); } catch { /* cache only */ }
   }, [selected]);
@@ -126,7 +138,7 @@ export function useExtraction() {
           setView(previous => previous?.session.id === id
             ? { ...previous, session: { ...previous.session, permission_mode: body.permission_mode as string } } : previous);
         }
-        setRevision(v => v + 1);
+        if (action !== 'delete' && action !== 'close-folder') setRevision(v => v + 1);
       }
       await refreshSessions().catch(error => setError(errorText(error)));
       return result;

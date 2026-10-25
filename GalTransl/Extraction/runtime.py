@@ -105,7 +105,28 @@ class ExtractionRuntime:
         with self.lock:
             result = self.store.list(offset)
             result["sessions"] = [self.session(row["id"]) for row in result["sessions"]]
+            result["running_game_dirs"] = sorted({self.store.read(sid)["game_dir"] for sid in self.runs})
             return result
+
+    def delete_session(self, session_id: str) -> dict[str, Any]:
+        with self.lock:
+            if session_id in self.runs:
+                raise ValueError("Stop the extraction agent before deleting its session")
+            self.store.delete(session_id)
+            for cache in (self.events, self.event_bytes, self.sequences, self.pending, self.live):
+                cache.pop(session_id, None)
+            self.recovered.discard(session_id)
+            return {"deleted": session_id}
+
+    def close_folder(self, game_dir: str) -> dict[str, Any]:
+        if not game_dir.strip():
+            raise ValueError("Game directory is required")
+        with self.lock:
+            key = self.store.folder_key(game_dir)
+            if any(self.store.folder_key(self.store.read(sid)["game_dir"]) == key for sid in self.runs):
+                raise ValueError("Stop the extraction agent before closing its game folder")
+            self.store.set_folder_closed(game_dir, True)
+            return {"closed": game_dir}
 
     def snapshot(self, session_id: str, before: int | None = None) -> dict[str, Any]:
         with self.lock:
@@ -145,11 +166,18 @@ class ExtractionRuntime:
         with self.lock:
             if session_id in self.runs:
                 raise ValueError("This extraction session is already running")
+            session = self.session(session_id)
+            game = Path(session["game_dir"]).resolve(strict=True)
+            workspace = Path(session["workspace"]).resolve(strict=True)
+            for active_id in self.runs:
+                active = self.store.read(active_id)
+                if Path(active["game_dir"]).resolve() == game:
+                    raise ValueError("An extraction agent is already running for this game directory; stop it before starting another session")
+                if Path(active["workspace"]).resolve() == workspace:
+                    raise ValueError("An extraction agent is already running in this output workspace; stop it before starting another session")
             if len(self.runs) >= 2:
                 raise ValueError("At most two extraction sessions can run concurrently")
-            session = self.session(session_id)
-            Path(session["workspace"]).resolve(strict=True)
-            if not Path(session["game_dir"]).is_dir():
+            if not game.is_dir():
                 raise ValueError("The game directory no longer exists")
             session_dir = self.store.directory(session_id).resolve()
             state, history = restore_state(session, session_dir, payload["profile"], prompt, mode)

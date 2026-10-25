@@ -24,7 +24,7 @@ export type Environment = {
   ready: boolean; problems: string[]; agent_engine: string; python_version: string;
   settings: { skill_dir: string; python_path: string };
 };
-export type SessionList = { sessions: Session[]; next_offset: number | null; total: number };
+export type SessionList = { sessions: Session[]; next_offset: number | null; total: number; running_game_dirs?: string[] };
 export type FileList = { path: string; entries: { name: string; is_dir: boolean; size: number }[]; next_offset: number | null; total: number };
 export type Preview = { path: string; content: string; binary: boolean; size: number; next_offset: number | null };
 export const isRunning = (session?: Session | null) => Boolean(session && ['starting', 'running', 'awaiting_permission', 'awaiting_input', 'stopping'].includes(session.status));

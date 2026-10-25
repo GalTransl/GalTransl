@@ -16,7 +16,7 @@ import { moveMessageDraft, useMessageDraft } from './agent/drafts';
 import { ExtractionComposer } from './extraction/Composer';
 import { useImageInput, imageUploads } from './agent/images';
 import { useModelProfile } from './extraction/useModelProfile';
-import { SessionFolders } from './extraction/SessionFolders';
+import { gameFolderKey, SessionFolders } from './extraction/SessionFolders';
 import { StatusPill } from './agent/composer';
 
 const DRAFT_SCOPE = 'galtransl-extraction';
@@ -32,6 +32,7 @@ export function ExtractionPage() {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const imageInput = useImageInput(`extraction::${agent.selected}`, textarea, agent.busy || dialog !== null);
   const session = agent.view?.session;
+  const selection = useRef({ id: agent.selected, session }); selection.current = { id: agent.selected, session };
   const { models: modelNames, profile, boundProfile, defaultProfile, setProfile, moveProfile } = useModelProfile(session, agent.selected);
   const running = isRunning(session);
   const toolCount = agent.view?.rows.filter(row => row.role === 'tool' && row.done).length || 0;
@@ -56,6 +57,24 @@ export function ExtractionPage() {
       moveProfile(result.session.id);
       agent.select(result.session.id); setDialog(null);
     }
+  };
+  const deleteSession = async (item: Session) => {
+    if (agent.busy || isRunning(item.id === session?.id ? session : item)) return;
+    if (!window.confirm(`${x('confirmDeleteSession')}\n${item.title}`)) return;
+    const result = await agent.mutate('delete', { session_id: item.id });
+    if (result && selection.current.id === item.id) {
+      agent.select(agent.sessions.sessions.find(row => row.id !== item.id && gameFolderKey(row.game_dir) === gameFolderKey(item.game_dir))?.id || '');
+    }
+  };
+  const closeFolder = async (directory: string) => {
+    const key = gameFolderKey(directory);
+    if (agent.busy || agent.sessions.running_game_dirs?.some(directory => gameFolderKey(directory) === key)
+      || agent.sessions.sessions.some(row => gameFolderKey(row.game_dir) === key && isRunning(row.id === session?.id ? session : row))) return;
+    if (!window.confirm(`${x('confirmCloseFolder')}\n${directory}`)) return;
+    const result = await agent.mutate('close-folder', { game_dir: directory });
+    const current = selection.current;
+    const currentSession = current.session?.id === current.id ? current.session : agent.sessions.sessions.find(row => row.id === current.id);
+    if (result && currentSession && gameFolderKey(currentSession.game_dir) === key) agent.select('');
   };
   const send = async () => {
     const message = draft.trim();
@@ -86,7 +105,8 @@ export function ExtractionPage() {
       </header>
       <nav className="agent-sessions__list" aria-label={x('sessions')}>
       <SessionFolders sessions={agent.sessions.sessions} selected={agent.selected} activeSession={session} onSelect={agent.select}
-        onCreateInFolder={game => void createInFolder(game)} busy={agent.busy} />
+        onCreateInFolder={game => void createInFolder(game)} onDeleteSession={item => void deleteSession(item)}
+        onCloseFolder={directory => void closeFolder(directory)} runningDirectories={agent.sessions.running_game_dirs} busy={agent.busy} />
       {!agent.sessions.total && <div className="agent-sessions__empty">{x('emptySessions')}</div>}
       {agent.sessions.next_offset != null && <button type="button" className="agent-sessions__show-more" onClick={() => void agent.refreshSessions(agent.sessions.next_offset!).catch(e => agent.setError(String(e)))}>{x('more')}</button>}</nav>
       <button type="button" className="extract-environment" onClick={() => { if (agent.environment) setDialog('environment'); else void agent.refreshEnvironment().then(() => setDialog('environment')).catch(e => agent.setError(String(e))); }}><Icon name="settings" /><span>{x(agent.environment?.ready ? 'ready' : 'setup')}</span><i className={agent.environment?.ready ? 'is-ready' : ''} /></button>

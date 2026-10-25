@@ -75,6 +75,38 @@ test('folder state tolerates invalid or unavailable browser storage', () => {
   }
 });
 
+test('session and folder close controls follow live activity, pagination and busy state', () => {
+  const load = createTypeScriptLoader({ localStorage: storage(new Map()) });
+  const { SessionFolders } = load(new URL('../src/pages/extraction/SessionFolders.tsx', import.meta.url));
+  const sessions = [fixture('a', '/game'), fixture('b', '/game'), fixture('c', '/other')];
+  const deleted = [], closed = [];
+  const props = { sessions, selected: 'a', onSelect() {}, onCreateInFolder() {}, busy: false,
+    onDeleteSession: item => deleted.push(item.id), onCloseFolder: directory => closed.push(directory) };
+  let renderer;
+  act(() => { renderer = create(h(SessionFolders, props)); });
+  const rowButtons = () => renderer.root.findAllByProps({ className: 'agent-session-item__delete' });
+  const folderButtons = () => renderer.root.findAllByProps({ className: 'agent-sessions__group-close' });
+  assert.equal(rowButtons().every(button => !button.props.disabled), true);
+  act(() => rowButtons()[1].props.onClick());
+  act(() => folderButtons()[1].props.onClick());
+  assert.deepEqual(deleted, ['b']);
+  assert.deepEqual(closed, ['/other']);
+  for (const status of ['starting', 'running', 'awaiting_permission', 'awaiting_input', 'stopping']) {
+    act(() => renderer.update(h(SessionFolders, { ...props, activeSession: { ...sessions[0], status } })));
+    assert.equal(rowButtons()[0].props.disabled, true);
+    assert.equal(rowButtons()[1].props.disabled, false);
+    assert.equal(folderButtons()[0].props.disabled, true);
+    assert.equal(folderButtons()[1].props.disabled, false);
+  }
+  // A running session beyond the loaded page still prevents closing its folder.
+  act(() => renderer.update(h(SessionFolders, { ...props, runningDirectories: ['/game'] })));
+  assert.equal(folderButtons()[0].props.disabled, true);
+  assert.equal(rowButtons()[0].props.disabled, false);
+  act(() => renderer.update(h(SessionFolders, { ...props, busy: true })));
+  assert.equal([...rowButtons(), ...folderButtons()].every(button => button.props.disabled), true);
+  act(() => renderer.unmount());
+});
+
 test('new extraction buttons return home without opening a dialog or stopping the session; source selection stays explicit', async () => {
   const stored = new Map([['galtransl-extraction-session', 'live']]), calls = [], streams = [];
   const session = fixture('live', 'C:\\Games\\Example', 'running');
@@ -176,5 +208,58 @@ test('new extraction buttons return home without opening a dialog or stopping th
   assert.equal(renderer.root.findByType('textarea').props.value, 'existing conversation draft');
   await act(async () => renderer.root.findByProps({ className: 'agent-sessions__new' }).props.onClick());
   assert.equal(renderer.root.findByType('textarea').props.value, 'new conversation draft');
+  await act(async () => renderer.unmount());
+});
+
+test('deleting selected sessions selects a remaining sibling and closing folders returns home without stale snapshot reloads', async () => {
+  const stored = new Map([['galtransl-extraction-session', 'a']]);
+  let rows = [fixture('a', '/game'), fixture('b', '/game')];
+  const calls = [], confirmations = [];
+  let state;
+  const load = createTypeScriptLoader({ localStorage: storage(stored),
+    window: { innerWidth: 1500, matchMedia: () => ({ matches: true }), confirm: text => { confirmations.push(text); return true; } },
+    document: { hidden: false, documentElement: { dataset: {} } } }, {
+    '../styles/pages/agent.css': {}, '../styles/pages/extraction.css': {},
+    'react-router-dom': { useNavigate: () => () => {} },
+    '../lib/api': { getBackendProfile() {} }, './HomePage': { addProjectToHistory() {} },
+    '../../components/PageActivity': { usePageActive: () => true, useRetainPage() {} },
+    './api': { extractionApi: async (action, params, body) => {
+      calls.push({ action, params, body });
+      if (action === 'environment') return { ready: true };
+      if (action === 'sessions') return { sessions: rows, total: rows.length, next_offset: null };
+      if (action === 'session') {
+        const session = rows.find(row => row.id === params.session_id);
+        assert.ok(session, `Unexpected deleted/closed session reload: ${params.session_id}`);
+        return { session, events: [], live_events: [], cursor: 0, pending: null, has_more: false, before_seq: null };
+      }
+      if (action === 'delete') { rows = rows.filter(row => row.id !== body.session_id); return { deleted: body.session_id }; }
+      if (action === 'close-folder') { rows = []; return { closed: body.game_dir }; }
+      throw Error(`Unexpected mutation: ${action}`);
+    } },
+    './extraction/useExtraction': { useExtraction: () => state },
+    './extraction/useModelProfile': { useModelProfile: () => ({ models: [], setProfile() {}, moveProfile() {} }) },
+    './agent/images': { useImageInput: () => ({ images: [] }) },
+    './extraction/Composer': { ExtractionComposer: () => h('textarea') },
+    './extraction/Workspace': { Workspace: () => h('div') },
+    './extraction/Conversation': { Conversation: () => h('div') },
+  });
+  const { useExtraction } = load(new URL('../src/pages/extraction/useExtraction.ts', import.meta.url));
+  const { ExtractionPage } = load(new URL('../src/pages/ExtractionPage.tsx', import.meta.url));
+  function Harness() { state = useExtraction(); return h(ExtractionPage); }
+  let renderer;
+  await act(async () => { renderer = create(h(Harness)); });
+  await act(async () => renderer.root.findAllByProps({ className: 'agent-session-item__delete' })[0].props.onClick());
+  assert.equal(state.selected, 'b');
+  assert.equal(state.sessions.total, 1);
+  assert.equal(state.error, '');
+  assert.deepEqual(calls.filter(call => call.action === 'delete').map(call => call.body.session_id), ['a']);
+  await act(async () => renderer.root.findByProps({ className: 'agent-sessions__group-close' }).props.onClick());
+  assert.equal(state.selected, '');
+  assert.equal(state.view, null);
+  assert.equal(state.sessions.total, 0);
+  assert.equal(state.error, '');
+  assert.equal(confirmations.length, 2);
+  assert.equal(calls.filter(call => call.action === 'session' && call.params.session_id === 'a').length, 1);
+  assert.equal(calls.filter(call => call.action === 'session' && call.params.session_id === 'b').length, 1);
   await act(async () => renderer.unmount());
 });

@@ -2,6 +2,7 @@ import json
 import subprocess
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -20,18 +21,212 @@ def extraction(tmp_path):
     return store, session, ExtractionRuntime(store)
 
 
-def test_unique_output_and_scoped_paths(extraction):
+def test_shared_output_and_scoped_paths(extraction):
     store, session, _ = extraction
     assert session['permission_mode'] == 'auto'
-    second = store.create(session["game_dir"])
-    assert second["workspace"] != session["workspace"]
     root = Path(session["workspace"])
-    assert {p.name for p in root.iterdir()} == {"gt_input", "gt_output", "original", "metadata", "reports", "scripts"}
-    with pytest.raises(FileExistsError):
-        store.create(session["game_dir"], session["workspace"])
+    assert root == Path(session["game_dir"]) / "game_extract"
+    saved = root / "gt_input" / "existing.json"
+    saved.write_text("existing extraction", encoding="utf-8")
+    (root / "config.yaml").write_text("# existing project", encoding="utf-8")
+    second = store.create(session["game_dir"])
+    third = store.create(session["game_dir"], session["workspace"])
+    assert second["workspace"] == third["workspace"] == session["workspace"]
+    assert len({row["id"] for row in (session, second, third)}) == 3
+    assert saved.read_text(encoding="utf-8") == "existing extraction"
+    assert (root / "config.yaml").read_text(encoding="utf-8") == "# existing project"
+    assert not root.with_name("game_extract_2").exists()
+    for row in (session, second, third):
+        store.append(row["id"], {"seq": 1, "type": "user_message", "text": row["id"]})
+        assert store.history(row["id"])["events"][0]["text"] == row["id"]
     for invalid in ("../game", "reports/../../", str(root), "C:/Windows", "reports\0"):
         with pytest.raises(ValueError):
             workspace_path(root, invalid)
+
+
+def test_existing_output_without_a_session_is_reused_and_initialized(tmp_path):
+    game = tmp_path / "game"
+    root = game / "game_extract"
+    root.mkdir(parents=True)
+    (root / "saved.txt").write_text("keep", encoding="utf-8")
+    session = SessionStore(tmp_path / "sessions").create(str(game))
+    assert Path(session["workspace"]) == root
+    assert {p.name for p in root.iterdir()} == {"saved.txt", "gt_input", "gt_output", "original", "metadata", "reports", "scripts"}
+    assert (root / "saved.txt").read_text(encoding="utf-8") == "keep"
+
+
+def test_output_file_collision_does_not_create_a_numbered_directory(tmp_path):
+    game = tmp_path / "game"
+    game.mkdir()
+    output = game / "game_extract"
+    output.write_text("keep", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        SessionStore(tmp_path / "sessions").create(str(game))
+    assert output.read_text(encoding="utf-8") == "keep"
+    assert not (game / "game_extract_2").exists()
+
+
+@pytest.fixture
+def controlled_extraction(extraction, monkeypatch):
+    import GalTransl.Extraction.runtime as module
+
+    class ControlledRunner:
+        def __init__(self, state, history, session, available, callback):
+            self.state = state
+            self.stop_event = threading.Event()
+            self.finished = threading.Event()
+
+        def run(self):
+            if not self.finished.wait(5):
+                raise RuntimeError("Test runner timed out")
+            if self.state.first_prompt == "fail":
+                raise RuntimeError("Synthetic extraction failure")
+
+        def abort_in_flight(self):
+            # Stopping is asynchronous: retain ownership until run() exits.
+            pass
+
+    monkeypatch.setattr(module, "ExtractionRunner", ControlledRunner)
+    monkeypatch.setattr(module, "environment", lambda: {"ready": True})
+    store, session, runtime = extraction
+    payload = {"message": "extract", "profile": {"OpenAI-Compatible": {
+        "tokens": [{"token": "synthetic-key", "modelName": "model"}]}}}
+    yield store, session, runtime, payload
+    for runner in list(runtime.runs.values()):
+        runner.finished.set()
+    runtime.close()
+
+
+@pytest.mark.parametrize("status", ["starting", "running", "awaiting_permission", "awaiting_input", "stopping"])
+def test_game_directory_is_exclusive_for_all_active_states(controlled_extraction, status):
+    store, session, runtime, payload = controlled_extraction
+    # Different outputs for the same game must still be mutually exclusive,
+    # including older sessions whose workspaces had numeric suffixes.
+    second = store.create(session["game_dir"], str(Path(session["workspace"]).with_name("game_extract_2")))
+    runtime.start(session["id"], payload)
+    with runtime.lock:
+        store.update(session["id"], status=status)
+        with pytest.raises(ValueError, match="already running for this game directory"):
+            runtime.start(second["id"], payload)
+        assert store.read(second["id"])["status"] == "idle"
+        assert store.history(second["id"])["events"] == []
+        assert not (store.directory(second["id"]) / "execution").exists()
+
+
+@pytest.mark.parametrize("finish", ["complete", "stop", "fail"])
+def test_game_directory_is_released_only_after_runner_finishes(controlled_extraction, finish):
+    store, session, runtime, payload = controlled_extraction
+    second = store.create(session["game_dir"])
+    runtime.start(session["id"], {**payload, "message": "fail" if finish == "fail" else "extract"})
+    runner = runtime.runs[session["id"]]
+    if finish == "stop":
+        runtime.stop(session["id"])
+        assert store.read(session["id"])["status"] == "stopping"
+        with pytest.raises(ValueError, match="already running for this game directory"):
+            runtime.start(second["id"], payload)
+    runner.finished.set()
+    runner.thread.join(timeout=2)
+    assert not runner.thread.is_alive()
+    assert session["id"] not in runtime.runs
+    assert store.read(session["id"])["status"] == {"complete": "idle", "stop": "stopped", "fail": "failed"}[finish]
+    runtime.start(second["id"], payload)
+    assert second["id"] in runtime.runs
+
+
+def test_simultaneous_starts_for_same_game_only_launch_one_runner(controlled_extraction):
+    store, session, runtime, payload = controlled_extraction
+    second = store.create(session["game_dir"])
+    gate = threading.Barrier(2)
+
+    def start(sid):
+        gate.wait(timeout=2)
+        try:
+            runtime.start(sid, payload)
+            return "started"
+        except ValueError as exc:
+            return str(exc)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(start, [session["id"], second["id"]]))
+    assert results.count("started") == 1
+    assert sum("already running for this game directory" in result for result in results) == 1
+    assert len(runtime.runs) == 1
+
+
+def test_different_games_can_run_concurrently_with_existing_global_limit(controlled_extraction, tmp_path):
+    store, session, runtime, payload = controlled_extraction
+    others = []
+    for name in ("other", "third"):
+        game = tmp_path / name
+        game.mkdir()
+        others.append(store.create(str(game)))
+    shared = store.create(others[0]["game_dir"], session["workspace"])
+    runtime.start(session["id"], payload)
+    with pytest.raises(ValueError, match="already running in this output workspace"):
+        runtime.start(shared["id"], payload)
+    runtime.start(others[0]["id"], payload)
+    assert len(runtime.runs) == 2
+    with pytest.raises(ValueError, match="At most two"):
+        runtime.start(others[1]["id"], payload)
+
+
+def test_delete_session_removes_only_its_history_and_runtime_caches(extraction):
+    store, session, runtime = extraction
+    second = store.create(session["game_dir"])
+    sid = session["id"]
+    output = Path(session["workspace"]) / "gt_input" / "saved.json"
+    output.write_text("keep", encoding="utf-8")
+    runtime._emit(sid, {"type": "notice", "text": "history"})
+    runtime.session(sid)
+    assert runtime.delete_session(sid) == {"deleted": sid}
+    assert not store.directory(sid).exists()
+    assert store.read(second["id"])["workspace"] == session["workspace"]
+    assert output.read_text(encoding="utf-8") == "keep"
+    assert runtime.list_sessions()["total"] == 1
+    assert sid not in runtime.recovered
+    for cache in (runtime.events, runtime.event_bytes, runtime.sequences, runtime.pending, runtime.live):
+        assert sid not in cache
+    with pytest.raises(ValueError, match="Invalid extraction session id"):
+        runtime.delete_session("../outside")
+
+
+def test_close_folder_preserves_history_persists_and_reopens_on_create(extraction, tmp_path):
+    store, session, runtime = extraction
+    second = store.create(session["game_dir"])
+    game = tmp_path / "other"
+    game.mkdir()
+    other = store.create(str(game))
+    runtime._emit(session["id"], {"type": "notice", "text": "keep history"})
+    root = Path(session["workspace"])
+    (root / "saved.txt").write_text("keep", encoding="utf-8")
+    runtime.close_folder(session["game_dir"])
+    assert [row["id"] for row in runtime.list_sessions()["sessions"]] == [other["id"]]
+    restored = ExtractionRuntime(SessionStore(store.root))
+    assert restored.list_sessions()["total"] == 1
+    assert restored.snapshot(session["id"])["events"][0]["text"] == "keep history"
+    new = restored.store.create(session["game_dir"])
+    assert restored.list_sessions()["total"] == 4
+    assert {row["id"] for row in restored.list_sessions()["sessions"]} == {session["id"], second["id"], other["id"], new["id"]}
+    assert (root / "saved.txt").read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.parametrize("status", ["starting", "running", "awaiting_permission", "awaiting_input", "stopping"])
+def test_running_session_and_folder_cannot_be_closed_even_outside_page(controlled_extraction, status):
+    store, session, runtime, payload = controlled_extraction
+    runtime.start(session["id"], payload)
+    with runtime.lock:
+        store.update(session["id"], status=status)
+        for _ in range(51):
+            store.create(session["game_dir"])
+        page = runtime.list_sessions()
+        assert session["id"] not in {row["id"] for row in page["sessions"]}
+        assert page["running_game_dirs"] == [session["game_dir"]]
+        with pytest.raises(ValueError, match="before deleting its session"):
+            runtime.delete_session(session["id"])
+        with pytest.raises(ValueError, match="before closing its game folder"):
+            runtime.close_folder(session["game_dir"])
+        assert runtime.list_sessions()["total"] == 52
+        assert store.directory(session["id"]).exists()
 
 
 def test_windows_junction_is_not_followed(extraction, tmp_path):

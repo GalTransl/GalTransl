@@ -3,7 +3,7 @@ import { Icon } from '../../components/Icon';
 import { basenamePath } from '../../lib/paths';
 import { readProjectStorage, writeProjectStorage } from '../../lib/projectStorage';
 import { statusLabel, x } from './labels';
-import type { Session } from './types';
+import { isRunning, type Session } from './types';
 
 const COLLAPSED_KEY = 'galtransl-extraction-collapsed-folders';
 
@@ -12,9 +12,10 @@ export function gameFolderKey(directory: string): string {
   return /^[a-z]:/i.test(path) || path.startsWith('//') ? path.toLowerCase() : path;
 }
 
-export function SessionFolders({ sessions, selected, activeSession, onSelect, onCreateInFolder, busy }: {
+export function SessionFolders({ sessions, selected, activeSession, onSelect, onCreateInFolder, onDeleteSession, onCloseFolder, runningDirectories = [], busy }: {
   sessions: Session[]; selected: string; activeSession?: Session; onSelect: (id: string) => void;
-  onCreateInFolder: (directory: string) => void; busy: boolean;
+  onCreateInFolder: (directory: string) => void; onDeleteSession: (session: Session) => void;
+  onCloseFolder: (directory: string) => void; runningDirectories?: string[]; busy: boolean;
 }) {
   const id = useId();
   const lastSelected = useRef(selected);
@@ -46,6 +47,8 @@ export function SessionFolders({ sessions, selected, activeSession, onSelect, on
   return <>{[...groups].map(([key, group], index) => {
     const folded = collapsed.has(key);
     const active = group.sessions.some(session => session.id === selected);
+    const hasRunning = runningDirectories.some(directory => gameFolderKey(directory) === key)
+      || group.sessions.some(session => isRunning(session.id === activeSession?.id ? activeSession : session));
     const listId = `${id}-${index}`;
     return <section key={key} className={`agent-sessions__group${folded ? ' is-collapsed' : ''}${active ? ' is-active' : ''}`}>
       <div className="agent-sessions__group-head">
@@ -61,6 +64,10 @@ export function SessionFolders({ sessions, selected, activeSession, onSelect, on
           title={`${x('newSessionInFolder')} (${group.directory})`}
           aria-label={`${x('newSessionInFolder')} (${group.directory})`}
           onClick={() => onCreateInFolder(group.directory)}>＋</button>
+        <button type="button" className="agent-sessions__group-close" disabled={busy || hasRunning}
+          title={x(hasRunning ? 'stopBeforeClose' : 'closeFolder')}
+          aria-label={`${x('closeFolder')} (${group.directory})`}
+          onClick={() => onCloseFolder(group.directory)}><Icon name="close" /></button>
       </div>
       <div id={listId} className="agent-sessions__group-collapse" aria-hidden={folded}
         {...(folded ? { inert: '' } : {})}>
@@ -68,12 +75,17 @@ export function SessionFolders({ sessions, selected, activeSession, onSelect, on
           <div className="agent-sessions__group-list">
             {group.sessions.map(item => {
               const status = item.id === activeSession?.id ? activeSession.status : item.status;
+              const itemRunning = isRunning({ ...item, status });
               return <div key={item.id} className={`agent-session-item${selected === item.id ? ' is-active' : ''}`}>
                 <button type="button" className="agent-session-item__main" title={item.title}
                   aria-current={selected === item.id ? 'true' : undefined} onClick={() => onSelect(item.id)}>
                   <span className="agent-session-item__title">{item.title}</span>
                   <span className="agent-session-item__time">{statusLabel(status)}</span>
                 </button>
+                <button type="button" className="agent-session-item__delete" disabled={busy || itemRunning}
+                  title={x(itemRunning ? 'stopBeforeClose' : 'deleteSession')}
+                  aria-label={`${x('deleteSession')} (${item.title})`}
+                  onClick={() => onDeleteSession(item)}><Icon name="close" /></button>
               </div>;
             })}
           </div>

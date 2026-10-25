@@ -63,15 +63,45 @@ class SessionStore:
 
     def list(self, offset: int = 0, limit: int = 50) -> dict[str, Any]:
         with self.lock:
+            closed = self.closed_folders()
             rows = []
             if self.root.exists():
                 for path in self.root.glob("*/session.json"):
                     if SESSION_ID.fullmatch(path.parent.name):
-                        rows.append(self.read(path.parent.name))
+                        row = self.read(path.parent.name)
+                        if self.folder_key(row["game_dir"]) not in closed:
+                            rows.append(row)
             rows.sort(key=lambda row: row["updated_at"], reverse=True)
             offset, limit = max(0, offset), min(100, max(1, limit))
             return {"sessions": rows[offset:offset + limit], "total": len(rows),
                     "next_offset": offset + limit if offset + limit < len(rows) else None}
+
+    @staticmethod
+    def folder_key(game_dir: str) -> str:
+        return os.path.normcase(str(Path(game_dir).resolve()))
+
+    def closed_folders(self) -> set[str]:
+        path = self.root / "closed-folders.json"
+        return set(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else set()
+
+    def set_folder_closed(self, game_dir: str, closed: bool) -> None:
+        with self.lock:
+            folders = self.closed_folders()
+            key = self.folder_key(game_dir)
+            if closed:
+                folders.add(key)
+            else:
+                folders.discard(key)
+            atomic_json(self.root / "closed-folders.json", sorted(folders))
+
+    def delete(self, session_id: str) -> None:
+        with self.lock:
+            directory = self.directory(session_id)
+            if directory.resolve().parent != self.root.resolve() or directory.is_symlink():
+                raise ValueError("Invalid extraction session directory")
+            self.read(session_id)
+            # Session history is separate from the shared output workspace.
+            shutil.rmtree(directory)
 
     def create(self, game_dir: str, output_dir: str = "") -> dict[str, Any]:
         game = checked_directory(game_dir)
@@ -79,20 +109,11 @@ class SessionStore:
             workspace = Path(output_dir).expanduser().absolute()
             parent = checked_directory(str(workspace.parent))
             workspace = parent / workspace.name
-            workspace.mkdir(exist_ok=False)
         else:
-            stem = f"{game.name or 'game'}_extract"
-            for number in range(1000):
-                workspace = game / (stem if number == 0 else f"{stem}_{number + 1}")
-                try:
-                    workspace.mkdir(exist_ok=False)
-                    break
-                except FileExistsError:
-                    continue
-            else:
-                raise ValueError("No unused extraction output directory is available")
+            workspace = game / f"{game.name or 'game'}_extract"
+        workspace.mkdir(exist_ok=True)
         for name in ("gt_input", "gt_output", "original", "metadata", "reports", "scripts"):
-            (workspace / name).mkdir()
+            (workspace / name).mkdir(exist_ok=True)
         session_id = uuid.uuid4().hex
         directory = self.directory(session_id)
         directory.mkdir(parents=True, exist_ok=False)
@@ -102,6 +123,7 @@ class SessionStore:
                  "status": "idle", "seq": 0, "model_name": "", "profile_name": "",
                  "permission_mode": "auto", "error": ""}
         atomic_json(directory / "session.json", value)
+        self.set_folder_closed(str(game), False)
         return value
 
     def append(self, session_id: str, event: dict[str, Any]) -> None:

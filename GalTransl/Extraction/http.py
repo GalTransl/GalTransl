@@ -102,6 +102,10 @@ def route_extraction(handler, method: str) -> bool:
                                                                      str(payload.get("output_dir", "")))}
             elif action == "message":
                 result = EXTRACTION_RUNTIME.start(session_id, payload)
+            elif action == "delete":
+                result = EXTRACTION_RUNTIME.delete_session(session_id)
+            elif action == "close-folder":
+                result = EXTRACTION_RUNTIME.close_folder(str(payload.get("game_dir", "")))
             elif action == "answer":
                 result = EXTRACTION_RUNTIME.answer(session_id, payload)
             elif action == "permission-mode":

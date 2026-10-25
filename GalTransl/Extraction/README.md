@@ -19,6 +19,10 @@
 
 开发前运行 `python scripts/prepare_extraction.py`，或在 `desktop` 运行 `npm run extraction:prepare`。脚本每次拉取并快进同步 Skill 上游 `main` 分支的最新提交，将完整 Skill 和小型 Python 适配器导出到 `build/extraction-resources`，排除 Git 元数据和本地输出；缺少 Skill 时初始化子模块，有本地修改或分叉时停止同步，网络失败时明确报错。源码清单只指定来源分支，导出清单记录实际 commit 和文件数。Tauri 开发/构建及各平台发布脚本使用相同资源；发布后的程序使用包内快照，不联网更新 Skill。前端开发仍使用常规 Node 工具链，发布后的提取 Agent 无需 Node。
 
+新会话默认复用游戏目录内的 `<游戏名>_extract`，不追加数字；自定义输出目录也可复用，创建会话仅补齐缺少的子目录并保留已有文件。多个会话保留独立历史，同一游戏目录（或同一输出工作区）同时只能运行一个提取 Agent，等待审批、等待回答和停止收尾期间仍占用目录；不同游戏仍受全局最多两个提取会话并行的限制。
+
+侧栏会话的 × 删除该会话历史并保留输出文件；文件夹的 × 仅隐藏该游戏分组，保留所有会话历史，为该游戏新建会话时重新显示。运行中的会话以及包含运行中会话的游戏分组都禁止关闭，由后端在同一运行锁内校验。
+
 UI 会话日志位于用户数据目录 `extraction/sessions/<id>/`，模型历史和压缩归档由共用的 Agent SessionStore 存在其 `execution/` 子目录，不包含 API 密钥。关闭页面仅断开显示流，停止按钮才终止当前回合。有效 `gt_input/*.json` 可直接打开为翻译项目。
 
 验证：`python -m pytest tests/test_extraction_agent.py tests/test_extraction_runtime.py tests/test_extraction_shared_runner.py tests/test_extraction_tool_parity.py tests/test_extraction_native_tools.py`；前端检查从 `desktop` 运行 `npm test`、`npm run build`、`npm run i18n:check`。测试使用隔离的合成文件和本机模拟模型，不调用付费模型或执行真实游戏提取。原生进程与图片测试需安装后端 requirements（含 Pillow）和本机 Bash；平台验证仅覆盖实际执行的环境。
