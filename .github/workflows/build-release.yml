@@ -129,6 +129,10 @@ jobs:
           npm run build
           node --test tests/*.test.mjs
 
+      # Direct Cargo commands do not run Tauri's beforeBuildCommand hook.
+      - name: Prepare extraction resources for Rust checks
+        run: python scripts/prepare_extraction.py
+
       - name: Check Rust sources
         working-directory: desktop/src-tauri
         env:
