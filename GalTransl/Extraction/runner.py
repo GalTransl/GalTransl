@@ -17,7 +17,7 @@ from GalTransl.Agent.permissions import AUTO_QUIET_MODE
 from GalTransl.Agent.runner import AgentRunner
 from GalTransl.Agent.session_store import SessionStore
 from GalTransl.Agent.tools.ask import _auto_ask_answers, _tool_ask_user, _tool_read_history_archive
-from .tool_schemas import EXTRACTION_TOOLS, prepare_arguments, validate_arguments
+from .tool_schemas import EXTRACTION_TOOLS, prepare_arguments, tool_prompt_section, validate_arguments
 from .tools import ExtractionTools
 
 
@@ -85,6 +85,7 @@ class ExtractionRunner(AgentRunner):
         return "\n\n".join([
             "You are GalTransl's extraction agent, a coding specialist for visual-novel text extraction and reinsertion. "
             "Use the configured extraction Skill and local tools; do not call translation/project tools.",
+            tool_prompt_section(),
             f"Before extraction or reinsertion, read the complete Skill with read, following offset continuation notices until done: {skill / 'SKILL.md'}. "
             "Then load only relevant engine guides and scripts. Follow the Skill output and verification contracts.",
             f"Game directory (read-only intent): {self.session['game_dir']}",

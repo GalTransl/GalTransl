@@ -11,27 +11,69 @@ def tool(name, description, properties, required=()):
 PATH = {"type": "string", "minLength": 1, "maxLength": 4096}
 TIMEOUT = {"type": "integer", "minimum": 1, "maximum": 900}
 EXTRACTION_TOOLS = [
-    tool("read", "Read text or images (jpg, png, gif, webp, bmp) from the game, Skill or workspace. Images are attachments. Text is truncated to 2000 lines or 50KB; follow offset/limit until complete. Offset is 1-based. Use run_python for binary analysis.",
-         {"path": {"type": "string"}, "offset": {"type": "number"},
-          "limit": {"type": "number"}}, ["path"]),
-    tool("write", "Create or overwrite a UTF-8 file in the output workspace, creating parent directories. Use for new files or complete rewrites. Game files and the installed Skill cannot be edited.",
-         {"path": {"type": "string"}, "content": {"type": "string"}}, ["path", "content"]),
-    tool("edit", "Edit a workspace file with targeted replacements. Each oldText must uniquely match the original file, and regions must not overlap. Put multiple disjoint changes in one edits array. Returns diff, patch and firstChangedLine.",
-         {"path": {"type": "string"}, "edits": {"type": "array", "items": {
-             "type": "object", "properties": {"oldText": {"type": "string"}, "newText": {"type": "string"}},
-             "required": ["oldText", "newText"]}}}, ["path", "edits"]),
+    tool("read", "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+         {"path": {"type": "string", "description": "Path to the file to read (relative or absolute)"},
+          "offset": {"type": "number", "description": "Line number to start reading from (1-indexed)"},
+          "limit": {"type": "number", "description": "Maximum number of lines to read"}}, ["path"]),
+    tool("write", "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+         {"path": {"type": "string", "description": "Path to the file to write (relative or absolute)"},
+          "content": {"type": "string", "description": "Content to write to the file"}}, ["path", "content"]),
+    tool("edit", "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+         {"path": {"type": "string", "description": "Path to the file to edit (relative or absolute)"},
+          "edits": {"type": "array", "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.", "items": {
+              "type": "object", "required": ["oldText", "newText"], "properties": {
+                  "oldText": {"type": "string", "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."},
+                  "newText": {"type": "string", "description": "Replacement text for this targeted edit."}}}}}, ["path", "edits"]),
     tool("run_python", "Execute Python in the output workspace. Supply exactly one of code, script, module. Defaults to the existing backend's bundled Python; the Skill root is importable. Explicitly choose runtime=system (optionally python_path) if a dependency is unavailable; never auto-install packages or silently fall back. Commands run as the local user, not in a sandbox. Never execute game EXE/DLLs or overwrite source files. Output is bounded; full output is in log_path. Nonzero exit code means failure.",
          {"code": {"type": "string", "maxLength": 60000}, "script": PATH,
           "module": {"type": "string", "minLength": 1, "maxLength": 256},
           "runtime": {"type": "string", "enum": ["bundled", "system"]}, "python_path": PATH,
           "args": {"type": "array", "maxItems": 16, "items": {"type": "string", "maxLength": 1024}},
           "timeout_seconds": TIMEOUT}),
-    tool("bash", "Execute a bash command in the output workspace as the current user. Output keeps the last 2000 lines or 50KB; full truncated output is saved to a log. Optional timeout in seconds, no default timeout. Never run game executables or modify source game files. Prefer run_python for Python.",
-         {"command": {"type": "string"}, "timeout": {"type": "number"}}, ["command"]),
+    tool("bash", "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+         {"command": {"type": "string", "description": "Shell command to execute"},
+          "timeout": {"type": "number", "description": "Timeout in seconds (optional, no default timeout)"}}, ["command"]),
     tool("ask_user", "Ask the user for a required choice that cannot be inferred. Supply 1-4 questions, each with options and a recommended option matching one of them. The user can also enter a custom answer. In full-auto no-interruption mode the recommended option is selected automatically; without a recommendation the first option is used.",
          next(item for item in AGENT_TOOLS if item["function"]["name"] == "ask_user")["function"]["parameters"]["properties"], ["questions"]),
     next(item for item in AGENT_TOOLS if item["function"]["name"] == "read_history_archive"),
 ]
+
+PROMPT_SNIPPETS = {
+    "read": "Read file contents",
+    "bash": "Execute bash commands (ls, grep, find, etc.)",
+    "edit": "Make precise file edits with exact text replacement, including multiple disjoint edits in one call",
+    "write": "Create or overwrite files",
+}
+# Pi's bash guideline about PI_* variables is omitted: this port does not export them.
+PROMPT_GUIDELINES = {
+    "read": ["Use read to examine files instead of cat or sed."],
+    "bash": [],
+    "edit": [
+        "Use edit for precise changes (edits[].oldText must match exactly)",
+        "When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls",
+        "Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
+        "Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.",
+    ],
+    "write": ["Use write only for new files or complete rewrites."],
+}
+
+
+def tool_prompt_section():
+    """Pi's 'Available tools' and 'Guidelines' blocks, built from the tool contributions."""
+    names = [name for name in ("read", "bash", "edit", "write") if PROMPT_SNIPPETS.get(name)]
+    # Same order as Pi: file-exploration hint (bash without grep/find/ls), tool guidelines, fixed trailer.
+    guidelines = ["Use bash for file operations like ls, rg, find"]
+    for name in names:
+        guidelines.extend(PROMPT_GUIDELINES[name])
+    guidelines.extend(["Be concise in your responses", "Show file paths clearly when working with files"])
+    unique = []
+    for guideline in (item.strip() for item in guidelines):
+        if guideline and guideline not in unique:
+            unique.append(guideline)
+    tools = "\n".join(f"- {name}: {PROMPT_SNIPPETS[name]}" for name in names)
+    return (f"Available tools:\n{tools}\n\nIn addition to the tools above, you may have access to other custom tools "
+            "depending on the project.\n\nGuidelines:\n" + "\n".join(f"- {item}" for item in unique))
+
 
 # Pi's TypeBox schemas allow extra properties; the retained custom tools remain strict.
 for _definition in EXTRACTION_TOOLS:

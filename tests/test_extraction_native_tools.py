@@ -34,8 +34,21 @@ def test_native_argument_schema(reference):
     def shape(spec):
         return {key: ({name: shape(value) for name, value in spec[key].items()} if key == 'properties'
                       else shape(spec[key]) if key == 'items' else spec[key])
-                for key in ('type', 'required', 'properties', 'items') if key in spec}
+                for key in ('type', 'required', 'properties', 'items', 'description') if key in spec}
     assert shape(schema) == shape(reference['parameters'])
+
+
+def test_system_prompt_carries_pi_tool_snippets_and_guidelines(fixture):
+    runner, _ = fixture
+    prompt = runner._system_prompt()
+    assert ('Available tools:\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n'
+            '- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n'
+            '- write: Create or overwrite files\n\n'
+            'In addition to the tools above, you may have access to other custom tools depending on the project.\n\n'
+            'Guidelines:\n- Use bash for file operations like ls, rg, find\n'
+            '- Use read to examine files instead of cat or sed.\n- Use edit for precise changes (edits[].oldText must match exactly)\n') in prompt
+    assert '- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n' \
+           '- Use write only for new files or complete rewrites.\n- Be concise in your responses\n- Show file paths clearly when working with files' in prompt
 
 
 def test_only_native_replacements_are_registered(fixture):
@@ -419,12 +432,38 @@ def test_bash_stop_kills_descendants_and_parent_exit_does_not_hang(fixture):
     worker.join(5)
     assert not worker.is_alive() and isinstance(errors[0], AgentStopRequested)
     assert runner.tools.commands.process is None
-    runner.stop_event.clear()
-    started = time.monotonic()
-    runner._dispatch_tool('bash', {'command': 'sleep 30 & printf done'})
-    assert time.monotonic() - started < 6
     time.sleep(2.1)
     assert not (runner.tools.workspace / 'must-not-survive').exists()
+
+
+def test_bash_returns_without_waiting_for_background_process_and_leaves_it_running(fixture):
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    started = time.monotonic()
+    result = runner._dispatch_tool('bash', {'command': '(sleep 1.5; touch survived) & printf done'})
+    assert text(result) == 'done' and time.monotonic() - started < 1.2
+    time.sleep(2.5)
+    assert (runner.tools.workspace / 'survived').exists()
+
+
+def test_bash_background_process_is_killed_by_timeout_and_stop(fixture):
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    with pytest.raises(AgentToolError, match='Command timed out'):
+        runner._dispatch_tool('bash', {'command': '(sleep 1.5; touch late) & sleep 30', 'timeout': .3})
+    time.sleep(2)
+    assert not (runner.tools.workspace / 'late').exists()
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows shell drive paths')
+@pytest.mark.parametrize('raw, expected', [
+    ('/c/Users/x/a.txt', 'C:\\Users\\x\\a.txt'), ('/mnt/d/a', 'D:\\a'), ('/cygdrive/e', 'E:\\'),
+    ('/c', 'C:\\'), ('/c/', 'C:\\'), ('//server/share', '//server/share'), ('/c\\a', '/c\\a'),
+    ('/usr/bin', '/usr/bin'), ('/mnt', '/mnt'), ('rel/c/x', 'rel/c/x'), ('@/c/a', 'C:\\a'),
+])
+def test_windows_shell_drive_paths_follow_pi(raw, expected):
+    from GalTransl.Extraction.tools import native_path
+    assert native_path(raw) == expected
 
 
 def test_mutation_queue_serializes_across_tool_instances(fixture):

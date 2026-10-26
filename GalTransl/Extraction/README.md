@@ -2,10 +2,10 @@
 
 提取 Agent 复用 `GalTransl.Agent.AgentRunner` 的 OpenAI 兼容请求、流式输出、重试、停止、审批、会话持久化和上下文压缩。提取专用提示词、工具集和输出工作区与翻译任务分开；不再启动 Pi sidecar，也不打包 Node.js、Pi SDK 或 npm 运行依赖。
 
-工具集为 `read`、`bash`、`edit`、`write`、`run_python`、`ask_user` 和共用的 `read_history_archive`。四个原生名称工具依据本地归档的 Pi 1.4.0 实现其参数及行为契约，替换原 `read_file/run_shell/edit_file/write_file`，不再注册旧名称。目录浏览使用 `bash` 或 `run_python`。读取范围为游戏、Skill 和工作区，文件编辑仅限工作区；Python/bash 以当前用户权限执行，遵循审批模式，可停止，不构成操作系统沙箱。
+工具集为 `read`、`bash`、`edit`、`write`、`run_python`、`ask_user` 和共用的 `read_history_archive`。四个原生名称工具依据本地归档的 Pi 1.4.0 实现其参数及行为契约，替换原 `read_file/run_shell/edit_file/write_file`，不再注册旧名称。四个工具的 description、参数 `description`，以及系统提示词里的 `Available tools` / `Guidelines`（各工具的 promptSnippet 与 promptGuidelines）均逐字取自 Pi 源码，由 `tool_schemas.py` 的 `tool_prompt_section()` 生成；bash 的 `PI_*` 环境变量提示不适用，已省略。目录浏览使用 `bash` 或 `run_python`。读取范围为游戏、Skill 和工作区，文件编辑仅限工作区；Python/bash 以当前用户权限执行，遵循审批模式，可停止，不构成操作系统沙箱。
 
 - `read(path, offset?, limit?)`：UTF-8 文本保留 BOM/CRLF，按 2,000 行或 50 KiB 完整行截断，附续读提示；不再限制文本文件为 2 MiB。按文件头识别 JPG/PNG/GIF/WebP/BMP，BMP 转 PNG；图片最大边 2,000 像素、base64 小于 4.5 MiB，缩放附坐标映射。模型请求中的 `tool` 回复仅含文本，图片作为该批全部工具回复之后的 `user` 附件传递并标明调用 ID。历史和 UI 日志仅保存会话资产引用；旧会话重放采用同一转换，重启后恢复。
-- `bash(command, timeout?)`：实际 Bash；Windows 优先 Git Bash，缺少 Bash 时明确报错，不替代为 PowerShell。默认无超时，支持正数小数秒、最大 2,147,483.647 秒。继承环境并清理冻结程序的私有加载路径；保留末尾 2,000 行或 50 KiB，长输出完整落在工作区日志，不设旧的 10 MiB 输出终止限制。非零退出标为失败，超时/停止回收进程树；父进程退出后也不会因后代持有输出管道而永久挂起。
+- `bash(command, timeout?)`：实际 Bash；Windows 优先 Git Bash，缺少 Bash 时明确报错，不替代为 PowerShell。默认无超时，支持正数小数秒、最大 2,147,483.647 秒。继承环境并清理冻结程序的私有加载路径；保留末尾 2,000 行或 50 KiB，长输出完整落在工作区日志，不设旧的 10 MiB 输出终止限制。非零退出标为失败，超时/停止回收进程树。与 Pi 一致，命令正常结束后留下的后台进程继续运行，bash 在输出管道静默 100 ms 后返回，不会因后代持有管道而永久挂起；Windows 上结束时释放作业对象而不杀后代。`read`/`write`/`edit` 的路径沿用 Pi 的 Windows 转换：`/c/x`、`/mnt/c/x`、`/cygdrive/c/x` 视为 `C:\x`。
 - `edit(path, edits)`：一次多个替换，全部匹配原始文件；唯一性、重叠、缺失和无变化均校验，整批成功才保存。兼容 Pi 的单对象/JSON 字符串 edits 与旧 camelCase 单替换参数。精确优先，支持 NFKC、引号、连字符、特殊空格和行尾空白模糊匹配；仅重写涉及的行，保留其他行。保留 BOM 和原换行风格，返回编号 diff、四行上下文的 unified patch、`firstChangedLine`。diff 使用与 Pi 相同的 Myers 路径选择。
 - `write(path, content)`：创建父目录，UTF-8 创建或整文件覆盖；无旧的字符数或 2 MiB 限制。与 edit 共用按文件串行的修改队列。
 
