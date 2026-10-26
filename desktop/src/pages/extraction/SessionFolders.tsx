@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { basenamePath } from '../../lib/paths';
 import { readProjectStorage, writeProjectStorage } from '../../lib/projectStorage';
+import { useSessionTime } from '../../lib/sessionTime';
 import { statusLabel, x } from './labels';
 import { isRunning, type Session } from './types';
 
@@ -17,6 +18,7 @@ export function SessionFolders({ sessions, selected, activeSession, onSelect, on
   onCreateInFolder: (directory: string) => void; onDeleteSession: (session: Session) => void;
   onCloseFolder: (directory: string) => void; runningDirectories?: string[]; busy: boolean;
 }) {
+  const formatSessionTime = useSessionTime();
   const id = useId();
   const lastSelected = useRef(selected);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
@@ -74,14 +76,17 @@ export function SessionFolders({ sessions, selected, activeSession, onSelect, on
         <div className="agent-sessions__group-collapse-inner">
           <div className="agent-sessions__group-list">
             {group.sessions.map(item => {
-              const status = item.id === activeSession?.id ? activeSession.status : item.status;
+              const currentSession = item.id === activeSession?.id ? activeSession : item;
+              const status = currentSession.status;
               const itemRunning = isRunning({ ...item, status });
+              const updatedAt = Math.max(item.updated_at || 0, currentSession.updated_at || 0) || item.created_at;
               return <div key={item.id} className={`agent-session-item${selected === item.id ? ' is-active' : ''}`}>
                 <button type="button" className="agent-session-item__main" title={item.title}
                   aria-current={selected === item.id ? 'true' : undefined} onClick={() => onSelect(item.id)}>
                   <span className="agent-session-item__title">{item.title}</span>
-                  <span className="agent-session-item__time">{statusLabel(status)}</span>
+                  <span className="agent-session-item__time">{formatSessionTime(updatedAt)}</span>
                 </button>
+                {itemRunning && <span className="agent-session-item__light is-running" title={statusLabel(status)} aria-hidden />}
                 <button type="button" className="agent-session-item__delete" disabled={busy || itemRunning}
                   title={x(itemRunning ? 'stopBeforeClose' : 'deleteSession')}
                   aria-label={`${x('deleteSession')} (${item.title})`}
