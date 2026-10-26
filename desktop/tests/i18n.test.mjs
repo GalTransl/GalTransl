@@ -16,16 +16,30 @@ function storage(value) {
   return { values, getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
 }
 
-test('first launch is Chinese regardless of browser language; persisted invalid preferences fall back', () => {
-  const { core } = setup({ navigator: { language: 'en-US' } });
-  for (const preference of [undefined, 'fr', 'en-US', '', 'zh-CN']) {
+test('first launch follows the system language: Chinese variants use Chinese, everything else English', () => {
+  const { core } = setup();
+  const launch = (systemLanguages, preference) => {
     const document = { documentElement: { lang: '' } };
-    const client = core.createUiI18n({ storage: storage(preference), document });
-    assert.equal(client.language(), 'zh-CN');
-    assert.equal(document.documentElement.lang, 'zh-CN');
+    const client = core.createUiI18n({ storage: storage(preference), systemLanguages, document });
+    assert.equal(document.documentElement.lang, client.language());
+    return client.language();
+  };
+  for (const language of ['zh-CN', 'zh-TW', 'zh-HK', 'zh-Hant-TW', 'zh_CN', 'zh', 'ZH-cn']) assert.equal(launch([language]), 'zh-CN', language);
+  for (const language of ['en-US', 'ja-JP', 'ko', 'fr-FR', 'zhuang']) assert.equal(launch([language]), 'en', language);
+  assert.equal(launch(['en-US', 'zh-CN']), 'en');
+  assert.equal(launch([]), 'zh-CN');
+  assert.equal(launch(undefined), 'zh-CN');
+});
+
+test('a saved preference wins over the system language; invalid saved values fall back to it', () => {
+  const { core } = setup();
+  assert.equal(core.createUiI18n({ storage: storage('zh-CN'), systemLanguages: ['en-US'] }).language(), 'zh-CN');
+  assert.equal(core.createUiI18n({ storage: storage('en'), systemLanguages: ['zh-CN'] }).language(), 'en');
+  for (const preference of ['fr', 'en-US', '']) {
+    assert.equal(core.createUiI18n({ storage: storage(preference), systemLanguages: ['zh-TW'] }).language(), 'zh-CN');
+    assert.equal(core.createUiI18n({ storage: storage(preference), systemLanguages: ['ja-JP'] }).language(), 'en');
   }
   const client = core.createUiI18n({ storage: storage('en') });
-  assert.equal(client.language(), 'en');
   assert.equal(client.translate('common:actions.save'), 'Save');
 });
 

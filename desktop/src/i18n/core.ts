@@ -12,16 +12,26 @@ export function normalizeUiLanguage(value: unknown): UiLanguage {
   return value === 'en' ? 'en' : 'zh-CN';
 }
 
+export function detectSystemLanguage(systemLanguages?: readonly string[]): UiLanguage {
+  return /^zh(?:[-_]|$)/i.test(systemLanguages?.[0] ?? '') ? 'zh-CN' : 'en';
+}
+
+export function resolveUiLanguage(stored: unknown, systemLanguages?: readonly string[]): UiLanguage {
+  if (stored === 'en' || stored === 'zh-CN') return stored;
+  return systemLanguages?.length ? detectSystemLanguage(systemLanguages) : 'zh-CN';
+}
+
 type Environment = {
   storage?: Pick<Storage, 'getItem' | 'setItem'>;
+  systemLanguages?: readonly string[];
   document?: Pick<Document, 'documentElement'>;
   resources?: Resource;
 };
 
 export function createUiI18n(environment: Environment = {}) {
-  let preferred: UiLanguage = 'zh-CN';
+  let preferred = resolveUiLanguage(undefined, environment.systemLanguages);
   try {
-    preferred = normalizeUiLanguage(environment.storage?.getItem(UI_LANGUAGE_STORAGE_KEY));
+    preferred = resolveUiLanguage(environment.storage?.getItem(UI_LANGUAGE_STORAGE_KEY), environment.systemLanguages);
   } catch { /* Storage can be unavailable in private browsing. */ }
 
   const instance = createInstance();
@@ -76,7 +86,9 @@ export function isUiMessage(value: unknown): value is UiMessage {
 
 let storage: Storage | undefined;
 try { storage = globalThis.localStorage; } catch { /* Access itself can throw. */ }
-export const uiI18n = createUiI18n({ storage, document: typeof document === 'undefined' ? undefined : document });
+const reported = typeof navigator === 'undefined' ? [] : navigator.languages?.length ? navigator.languages : [navigator.language];
+export const systemLanguages = reported.filter((value): value is string => typeof value === 'string' && value !== '');
+export const uiI18n = createUiI18n({ storage, systemLanguages, document: typeof document === 'undefined' ? undefined : document });
 export const i18n = uiI18n.instance;
 export const t = uiI18n.translate;
 export const resolveMessage = uiI18n.resolve;
