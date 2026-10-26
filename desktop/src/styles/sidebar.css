@@ -121,6 +121,25 @@
   width: 60px;
 }
 
+/* 60px 窄栏里只放图标：去掉左右内边距让图标居中，否则 16px 内边距 + 24px 图标
+   比高亮底块还宽，图标会被挤出底块右侧。 */
+.sidebar--collapsed .sidebar__nav-item {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* 窄栏的项目列表不预留滚动条槽：槽位会吃掉十来个像素，让这一段的高亮底块比上下
+   两段窄、还偏左。列表仍可用滚轮滚动。 */
+.sidebar--collapsed .sidebar__nav {
+  scrollbar-gutter: auto;
+  scrollbar-width: none;
+}
+
+.sidebar--collapsed .sidebar__nav::-webkit-scrollbar {
+  display: none;
+}
+
 .sidebar__header {
   display: flex;
   flex-direction: column;
