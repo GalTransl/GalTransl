@@ -47,14 +47,20 @@ def setup(tmp_path, monkeypatch):
 
 @pytest.fixture
 def model_server():
-    requests, responses = [], []
+    requests, responses, served = [], [], {}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
 
         def do_POST(self):
-            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            raw = self.rfile.read(int(self.headers["Content-Length"]))
+            request = json.loads(raw)
+            # Windows loopback occasionally resets a finished stream; replay the scripted answer for the client's identical retry.
+            payload = served.get(raw)
+            if payload is not None:
+                self._stream(payload)
+                return
             requests.append(request)
             pending = set()
             for message in request['messages']:
@@ -79,7 +85,10 @@ def model_server():
             if not responses:
                 self.send_error(400, "Unexpected synthetic model request")
                 return
-            payload = responses.pop(0)
+            payload = served[raw] = responses.pop(0)
+            self._stream(payload)
+
+        def _stream(self, payload):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
