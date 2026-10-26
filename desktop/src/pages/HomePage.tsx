@@ -7,6 +7,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
 import { GettingStarted } from '../components/GettingStarted';
+import { HomeTranslationFlow } from '../components/HomeTranslationFlow';
 import { InlineFeedback } from '../components/page-state';
 import {
   encodeProjectDir,
@@ -610,6 +611,7 @@ export function HomePage({ onOpenProject }: HomePageProps) {
               <Button type="button" className="home-open__action-btn" onClick={() => void handleOpenProject()}>{translate("projects:homePage.homeOpenActions_message_openProject")}</Button>
               <Button type="button" className="home-open__action-btn" variant="secondary" onClick={() => navigate('/new-project')}>{translate("projects:homePage.homeOpenActions_message_newProject")}</Button>
             </div>
+            <HomeTranslationFlow />
           </div>
         </section>
 

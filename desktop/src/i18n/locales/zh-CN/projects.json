@@ -115,6 +115,19 @@
     "commonDictionaryPage_description_directoryDictDictionaryFileEditTextEdit": "仅管理程序根目录 Dict 下的通用字典文件，支持卡片编辑与纯文本编辑。"
   },
   "homePage": {
+    "translationFlow": {
+      "title": "翻译流程",
+      "gameFiles": "游戏文件",
+      "japaneseDialogue": "日文台词",
+      "chineseDialogue": "中文台词",
+      "gamePatch": "游戏补丁",
+      "extract": "工具提取",
+      "translate": "翻译器",
+      "writeBack": "工具回写",
+      "or": "或",
+      "extractionAgent": "提取 Agent",
+      "translationAgent": "翻译 Agent"
+    },
     "changelog": "更新日志",
     "refreshJobs_normalizeError_readJobFailed": "读取全局任务列表失败",
     "handleStopJob_normalizeError_stopJobFailed": "停止任务失败",
@@ -270,6 +283,7 @@
     "wizardNav_message_previous": "上一步",
     "wizardNav_message_processing": "处理中…",
     "wizardNav_message_completeOpenProject": "完成并打开项目",
+    "wizardNav_message_openTranslationAgent": "进入翻译 Agent",
     "describeFileDetection_message_sourceFileFormatAutoCountFileSelect": "用于识别与解析源文件格式；选「自动识别」会按每个文件的类型分别选择插件。",
     "text_message_doneGtInput": "已识别 gt_input：{{value}}",
     "describeFileDetection_message_countFileUnable": "；{{count}} 个文件无法识别（将被跳过）",

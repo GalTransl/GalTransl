@@ -6,7 +6,7 @@ import { readingKey, readingMemory } from './agent/readingMemory';
 import { createAgentMotion } from './agent/motion';
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import {
@@ -94,6 +94,10 @@ export function AgentPage() {
   const active = usePageActive();
   const uiLanguage = useUiLanguage();
   const navigate = useNavigate();
+  const location = useLocation();
+  const requestedProject = typeof location.state?.agentProjectDir === 'string'
+    ? location.state.agentProjectDir : '';
+  const handledProjectRequestRef = useRef<string | null>(null);
 
   // 已打开项目与历史合并的去重列表。响应式：监听 OPEN_PROJECTS_CHANGE_EVENT
   // （翻译器/别处打开或关闭项目时广播），让侧边栏分组与全局侧边栏保持同步。
@@ -144,6 +148,7 @@ export function AgentPage() {
   }, []);
 
   const [projectDir, setProjectDir] = useState<string>(() => {
+    if (requestedProject) return requestedProject;
     const remembered = loadAgentProject();
     return remembered === '' || (remembered && projectOptions.includes(remembered)) ? remembered : projectOptions[0] || '';
   });
@@ -151,7 +156,7 @@ export function AgentPage() {
     projectDir ? readConfigFileName(projectDir) : 'config.yaml',
   );
   const [backendProfileNames, setBackendProfileNames] = useState<string[]>(() => getBackendProfileNames());
-  const [activeSessionId, setActiveSessionId] = useState(() => projectDir ? loadActiveSessionId(projectDir) : '');
+  const [activeSessionId, setActiveSessionId] = useState(() => !requestedProject && projectDir ? loadActiveSessionId(projectDir) : '');
   const [messageDraft, setMessageDraft] = useMessageDraft(projectDir, activeSessionId);
   useEffect(() => { saveAgentProject(projectDir); }, [projectDir]);
   useEffect(() => {
@@ -285,7 +290,9 @@ export function AgentPage() {
   // 从 hero 选择项目 / 顶部＋新建空会话：切项目后不应自动加载该项目上次
   // 记忆的会话，而要保持空态等用户发消息创建新会话。置位后项目 effect
   // 会把 activeSessionId 清空而非取 remembered，随后清掉一次性标志。
-  const skipRememberedSessionRef = useRef(false);
+  const skipRememberedSessionRef = useRef(Boolean(requestedProject));
+  // 选择新会话后，之前发出的列表请求只能更新侧栏，不能重新选中历史会话。
+  const projectSelectionVersionRef = useRef(0);
   // 后端配置小菜单的容器：点外面要能关掉
   const profilePickerRef = useRef<HTMLDivElement | null>(null);
   // 项目 chip 小菜单的容器：同上
@@ -357,6 +364,7 @@ export function AgentPage() {
    *  否则保持现状（hero 选项目等空态场景不自动加载历史会话）。 */
   const refreshSessions = useCallback(
     async (dir: string, preferredId?: string, allowAutoPick = true): Promise<AgentSessionMeta[]> => {
+      const selectionVersion = projectSelectionVersionRef.current;
       try {
         const list = await listAgentSessions(dir);
         setSessionsByProject((prev) => ({ ...prev, [dir]: list }));
@@ -387,7 +395,7 @@ export function AgentPage() {
         }
         // 仅当 dir 恰好是当前活动项目时才接管 activeSessionId 选择，
         // 否则（点别的项目的 + / 删了另一项目的会话）不强改主区。
-        if (dir === effectiveProjectRef.current) {
+        if (dir === effectiveProjectRef.current && selectionVersion === projectSelectionVersionRef.current) {
           const want = preferredId || activeSessionRef.current;
           if (want && list.some((s) => s.session_id === want)) {
             setActiveSessionId(want);
@@ -952,13 +960,23 @@ export function AgentPage() {
   const chooseProject = useCallback((dir: string) => {
     if (!dir) return;
     const cfg = readConfigFileName(dir);
-    skipRememberedSessionRef.current = true;
+    if (dir !== effectiveProjectRef.current) skipRememberedSessionRef.current = true;
+    projectSelectionVersionRef.current += 1;
+    effectiveProjectRef.current = dir;
+    activeSessionRef.current = '';
     setProjectDir(dir);
     setConfigFileName(cfg);
     setActiveSessionId('');
     saveActiveSessionId(dir, '');
     addOpenProject(dir, cfg);
   }, []);
+
+  // 向导可能返回已缓存的 Agent 页面。每次跳转只接管一次项目，随后允许用户自由切换。
+  useLayoutEffect(() => {
+    if (!active || !requestedProject || handledProjectRequestRef.current === location.key) return;
+    handledProjectRequestRef.current = location.key;
+    chooseProject(requestedProject);
+  }, [active, requestedProject, location.key, chooseProject]);
 
   /** 会话开始前从 composer 的 chip 换项目：与 chooseProject 同一套，但**不动已输入的指令**。
    *  这个动作发生在"项目已选、还没开聊"的窗口里，用户很可能已经把任务描述写好了——

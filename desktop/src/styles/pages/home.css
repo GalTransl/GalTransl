@@ -222,6 +222,7 @@
 }
 
 .home-open__header {
+  flex-shrink: 0;
   margin-bottom: var(--space-4);
 }
 
@@ -236,7 +237,120 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  flex: 1;
+  flex: 1 0 auto;
+}
+
+.home-translation-flow {
+  margin-top: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-line);
+}
+
+.home-translation-flow h3 {
+  margin: 0 0 16px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.home-translation-flow__steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-translation-flow__node,
+.home-translation-flow__transition {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 10px;
+}
+
+.home-translation-flow__node {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.home-translation-flow__icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: var(--color-surface-strong);
+  color: var(--color-text-muted);
+  font-size: 16px;
+}
+
+.home-translation-flow__icon.is-final {
+  color: var(--color-success);
+  border-color: var(--color-success-soft);
+  background: var(--color-success-soft);
+}
+
+.home-translation-flow__transition {
+  min-height: 48px;
+}
+
+.home-translation-flow__arrow {
+  position: relative;
+  justify-self: center;
+  align-self: stretch;
+  width: 1px;
+  margin: 5px 0 8px;
+  background: var(--color-line-strong, var(--color-line));
+}
+
+.home-translation-flow__arrow::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  height: 6px;
+  border-right: 1px solid var(--color-text-muted);
+  border-bottom: 1px solid var(--color-text-muted);
+  transform: rotate(45deg);
+}
+
+.home-translation-flow__action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 5px;
+  padding: 6px 0;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.8;
+}
+
+.home-translation-flow__method,
+.home-translation-flow__agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.home-translation-flow__agent {
+  color: var(--color-primary);
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.home-translation-flow__agent:hover {
+  text-decoration-thickness: 2px;
+}
+
+.home-translation-flow__agent:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
 }
 
 .home-open__fields {
@@ -1097,7 +1211,7 @@
 }
 
 .home-grid {
-  grid-template-columns: 0.76fr 1.38fr 1.16fr;
+  grid-template-columns: minmax(0, 0.76fr) minmax(0, 1.38fr) minmax(0, 1.16fr);
 }
 
 .app-layout__page:has(.home-page)::before {
@@ -1225,6 +1339,11 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+.home-open {
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .home-open__action-btn {
@@ -1637,5 +1756,54 @@
 @media (max-width: 1000px) {
   .home-onboarding__steps {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Stacked cards need content-sized rows instead of sharing the remaining viewport height.
+   Keep these breakpoints after the theme overrides so the column counts stay effective. */
+@media (max-width: 1100px) {
+  .home-page {
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+
+  .home-hero,
+  .home-onboarding {
+    flex-shrink: 0;
+  }
+
+  .home-grid {
+    flex: 0 0 auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto;
+  }
+
+  .home-open {
+    overflow: visible;
+  }
+
+  .home-history,
+  .home-jobs {
+    min-height: 260px;
+    max-height: 560px;
+  }
+
+  .home-history__header,
+  .home-jobs__header {
+    flex-shrink: 0;
+  }
+
+  .home-jobs {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-jobs {
+    grid-column: auto;
   }
 }

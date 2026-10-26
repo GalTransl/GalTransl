@@ -115,6 +115,19 @@
     "commonDictionaryPage_description_directoryDictDictionaryFileEditTextEdit": "It only manages the global dictionary files under Dict in the program root, and supports both card editing and plain text editing."
   },
   "homePage": {
+    "translationFlow": {
+      "title": "Translation workflow",
+      "gameFiles": "Game files",
+      "japaneseDialogue": "Japanese dialogue",
+      "chineseDialogue": "Chinese dialogue",
+      "gamePatch": "Game patch",
+      "extract": "Extraction tools",
+      "translate": "Translator",
+      "writeBack": "Write-back tools",
+      "or": "or",
+      "extractionAgent": "Extraction Agent",
+      "translationAgent": "Translation Agent"
+    },
     "changelog": "Changelog",
     "refreshJobs_normalizeError_readJobFailed": "Failed to read the global job list",
     "handleStopJob_normalizeError_stopJobFailed": "Failed to stop the job",
@@ -270,6 +283,7 @@
     "wizardNav_message_previous": "Previous",
     "wizardNav_message_processing": "Processing…",
     "wizardNav_message_completeOpenProject": "Finish and open the project",
+    "wizardNav_message_openTranslationAgent": "Open Translation Agent",
     "describeFileDetection_message_sourceFileFormatAutoCountFileSelect": "It is used to detect and parse the source file format; “Auto-detect” picks a plugin per file type.",
     "text_message_doneGtInput": "gt_input detected: {{value}}",
     "describeFileDetection_message_countFileUnable": "; {{count}} files could not be detected (they will be skipped)",
