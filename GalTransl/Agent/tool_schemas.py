@@ -274,7 +274,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_name_table",
-            "description": "分页读取 name替换表（人名表），默认 100 条、最大 500 条；query 搜索原文或译名，only_missing=true 只看仍缺译名的条目，返回 src_name/dst_name/count 列表。total=0 表示全表为空；当前页为空也可能是没有匹配或 offset 已越过末页。配置 dictionary.useGPTDictInName 开着时（默认开），译名为空而 GPT 字典已收录的行会按字典译名补上（带 dst_name_source=gpt_dict），先补齐生效译名再过滤和分页；total 为全表条数，matched 为匹配条数，missing_total 为全表缺译名数，has_more 时用 next_offset 续页；still_empty 只列当前页的缺译名条目——**还缺哪些名字看 still_empty**。",
+            "description": "分页读取 name替换表（人名表），默认 100 条、最大 500 条；query 搜索原文或译名，only_missing=true 只看仍缺译名的条目，返回 src_name/dst_name/count 列表。不要优先手动编辑人名表：先调用 start_translation(translator=\"GenDic\")（genDic）生成 GPT 字典，等待 completed，并结合「字典用在name字段(GPT)」（dictionary.useGPTDictInName）填充生效译名；只有 GenDic 未覆盖到的 name 才应手动补漏，字典已覆盖的译名无需重复写入表。total=0 表示全表为空；当前页为空也可能是没有匹配或 offset 已越过末页。配置 dictionary.useGPTDictInName 开着时（默认开），译名为空而 GPT 字典已收录的行会按字典译名补上（带 dst_name_source=gpt_dict），先补齐生效译名再过滤和分页；total 为全表条数，matched 为匹配条数，missing_total 为全表缺译名数，has_more 时用 next_offset 续页；still_empty 只列当前页的缺译名条目，GenDic 完成后再据此补漏；若开关关闭或配置/字典读取失败，先核对配置和已有字典覆盖情况。",
             "parameters": {"type": "object", "properties": {
                 "query": {"type": "string", "description": "原名或译名的普通文本子串，不区分大小写；省略表示全部。"},
                 "only_missing": {"type": "boolean", "default": False, "description": "只返回仍缺译名的条目，已生效的 GPT 字典译名不算缺漏。"},
@@ -287,7 +287,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "save_name_table",
-            "description": "保存人名表（写入 name替换表.csv）。默认 mode=patch，只传要改的条目：按 src_name 更新或新增，未传入的条目保留，省略的 dst_name/count 保留旧值，显式传 dst_name=空串可清空译名。显式 mode=overwrite整表覆盖，未传入的条目会被删除。",
+            "description": "保存人名表（写入 name替换表.csv）。不要优先使用本工具手动填写人名表：应先调用 start_translation(translator=\"GenDic\")（genDic）生成 GPT 字典，等待 completed，并结合「字典用在name字段(GPT)」（dictionary.useGPTDictInName）填充生效译名；之后用 get_name_table(only_missing=true) 检查，只有 GenDic 未覆盖到的 name 才应手动补漏，字典已覆盖的译名无需重复写入表。若开关关闭或配置/字典读取失败，先核对配置和已有字典覆盖情况。默认 mode=patch，只传要改的条目：按 src_name 更新或新增，未传入的条目保留，省略的 dst_name/count 保留旧值，显式传 dst_name=空串可清空译名。显式 mode=overwrite整表覆盖，未传入的条目会被删除。",
             "parameters": {
                 "type": "object",
                 "properties": {
