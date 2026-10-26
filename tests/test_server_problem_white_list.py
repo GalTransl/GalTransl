@@ -199,6 +199,39 @@ class HttpTests(unittest.TestCase):
                 f.write("[]")
             self.assertTrue(get(current["revision"])["unchanged"])
 
+    def test_revision_detects_same_size_rewrite_with_identical_metadata(self):
+        from GalTransl.server import _problem_revision
+
+        with tempfile.TemporaryDirectory() as project:
+            cache_dir = os.path.join(project, CACHE_FOLDERNAME)
+            os.makedirs(cache_dir)
+            config_path = os.path.join(project, "config.yaml")
+            cache_path = os.path.join(cache_dir, "a.json")
+            with open(config_path, "wb") as stream:
+                stream.write(b"common: {}\n")
+            with open(cache_path, "wb") as stream:
+                stream.write(orjson.dumps([_entry(1, "问题A")]))
+            original_stat = os.stat
+            cache_stat = original_stat(cache_path)
+
+            def same_cache_metadata(path, *args, **kwargs):
+                if os.fspath(path) == cache_path:
+                    return cache_stat
+                return original_stat(path, *args, **kwargs)
+
+            # Simulate a filesystem whose timestamps do not advance on this write.
+            with patch("GalTransl.server.os.stat", side_effect=same_cache_metadata):
+                before = _problem_revision(project, "config.yaml")
+                with open(cache_path, "wb") as stream:
+                    stream.write(orjson.dumps([_entry(1, "问题B")]))
+                after = _problem_revision(project, "config.yaml")
+                unchanged = _problem_revision(project, "config.yaml")
+            self.assertEqual(original_stat(cache_path).st_size, cache_stat.st_size)
+            self.assertIsNotNone(before)
+            self.assertIsNotNone(after)
+            self.assertNotEqual(before, after)
+            self.assertEqual(after, unchanged)
+
 
 if __name__ == "__main__":
     unittest.main()
