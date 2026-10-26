@@ -15,7 +15,7 @@
 .app-layout--custom-background .project-translate-page .panel,
 .app-layout--custom-background .home-open,
 .app-layout--custom-background .home-history,
-.app-layout--custom-background .home-jobs,
+.app-layout--custom-background .home-flow,
 .app-layout--custom-background .project-translate-page .ptv2-cockpit,
 .app-layout--custom-background .plugin-card,
 .app-layout--custom-background .job-card,
@@ -172,8 +172,6 @@
 }
 
 .app-layout--custom-background .home-history__item:hover,
-.app-layout--custom-background .home-job-row:hover,
-.app-layout--custom-background .home-job-row--clickable:hover,
 .app-layout--custom-background .sidebar__nav-item:hover,
 .app-layout--custom-background .sidebar__project-header:hover,
 .app-layout--custom-background .sidebar__project-child:hover,
@@ -205,7 +203,7 @@
 :root[data-theme='dark'] .app-layout--custom-background .project-translate-page .panel,
 :root[data-theme='dark'] .app-layout--custom-background .home-open,
 :root[data-theme='dark'] .app-layout--custom-background .home-history,
-:root[data-theme='dark'] .app-layout--custom-background .home-jobs,
+:root[data-theme='dark'] .app-layout--custom-background .home-flow,
 :root[data-theme='dark'] .app-layout--custom-background .project-translate-page .ptv2-cockpit,
 :root[data-theme='dark'] .app-layout--custom-background .plugin-card,
 :root[data-theme='dark'] .app-layout--custom-background .job-card,
@@ -349,8 +347,6 @@
 }
 
 :root[data-theme='dark'] .app-layout--custom-background .home-history__item:hover,
-:root[data-theme='dark'] .app-layout--custom-background .home-job-row:hover,
-:root[data-theme='dark'] .app-layout--custom-background .home-job-row--clickable:hover,
 :root[data-theme='dark'] .app-layout--custom-background .sidebar__nav-item:hover,
 :root[data-theme='dark'] .app-layout--custom-background .sidebar__project-header:hover,
 :root[data-theme='dark'] .app-layout--custom-background .sidebar__project-child:hover,

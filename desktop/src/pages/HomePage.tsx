@@ -1,37 +1,29 @@
 import { usePageActive } from '../components/PageActivity';
 import { getUiLanguage } from "../i18n/core";
-import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
+import { t as translate, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Button } from '../components/Button';
-import { StatusBadge } from '../components/StatusBadge';
 import { GettingStarted } from '../components/GettingStarted';
 import { HomeTranslationFlow } from '../components/HomeTranslationFlow';
-import { InlineFeedback } from '../components/page-state';
 import {
   encodeProjectDir,
   fetchJobs,
-  fetchProjectRuntime,
   fetchVersion,
   fetchVersionCheck,
   getHomeHistoryRetentionLimit,
   getHomeJobRetentionLimit,
   HOME_HISTORY_LIMIT_CHANGE_EVENT,
   HOME_JOB_LIMIT_CHANGE_EVENT,
-  stopProjectTranslation,
   type Job,
 } from '../lib/api';
-import { formatTimestamp } from '../lib/format';
-import { normalizeError } from '../lib/errors';
 import { basenamePath, dirnamePath } from '../lib/paths';
 import { PROJECT_HOMEPAGE, RELEASE_LATEST_URL, RELEASE_LIST_URL } from '../lib/externalLink';
 import { PROJECT_HISTORY_KEY, PROJECT_HISTORY_CHANGE_EVENT, readProjectHistory, writeProjectStorage, type ProjectHistoryEntry } from '../lib/projectStorage';
 export type { ProjectHistoryEntry } from '../lib/projectStorage';
 const JOB_MEMORY_KEY = 'galtransl-home-jobs-memory';
 const JOB_CLEARED_KEY = 'galtransl-home-jobs-cleared';
-const MIN_REFRESH_SPIN_MS = 420;
-const REFRESH_SPIN_CYCLE_MS = 500;
 
 function loadHistory(limit = getHomeHistoryRetentionLimit()): ProjectHistoryEntry[] {
   return readProjectHistory().slice(0, limit);
@@ -211,26 +203,11 @@ export function HomePage({ onOpenProject }: HomePageProps) {
   const [jobMemoryLimit, setJobMemoryLimit] = useState(() => getHomeJobRetentionLimit());
   const [history, setHistory] = useState<ProjectHistoryEntry[]>([]);
   const [jobs, setJobs] = useState<Job[]>(() => loadRememberedJobs(getHomeJobRetentionLimit()));
-  const [jobsError, setJobsError] = useMessageState<string | null>(null);
-  const [refreshingJobs, setRefreshingJobs] = useState(false);
-  const [stoppingJobId, setStoppingJobId] = useState<string | null>(null);
-  const [shouldLoadJobProgress, setShouldLoadJobProgress] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [coreVersion, setCoreVersion] = useState<string | null>(null);
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const clearedJobIds = useRef<Set<string>>(loadClearedJobIds());
-  const [jobProgressById, setJobProgressById] = useState<
-    Record<
-      string,
-      {
-        currentFile?: string;
-        percent: number;
-        total: number;
-        translated: number;
-      }
-    >
-  >({});
 
   useEffect(() => {
     if (!active) return;
@@ -289,28 +266,10 @@ export function HomePage({ onOpenProject }: HomePageProps) {
   }, []);
 
   useEffect(() => {
-    let delayTimer = 0;
-    const frameId = window.requestAnimationFrame(() => {
-      delayTimer = window.setTimeout(() => {
-        setShouldLoadJobProgress(true);
-      }, 300);
-    });
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      if (delayTimer) {
-        window.clearTimeout(delayTimer);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
     saveRememberedJobs(jobs, jobMemoryLimit);
   }, [jobMemoryLimit, jobs]);
 
-  const refreshJobs = useCallback(async (silent = false) => {
-    const startedAt = Date.now();
-    if (!silent) setRefreshingJobs(true);
+  const refreshJobs = useCallback(async () => {
     try {
       const nextJobs = await fetchJobs();
       let clearedDirty = false;
@@ -334,101 +293,21 @@ export function HomePage({ onOpenProject }: HomePageProps) {
         const next = mergeJobsWithMemory(currentJobs, nextJobs, jobMemoryLimit, clearedJobIds.current);
         return jobsEqual(currentJobs, next) ? currentJobs : next;
       });
-      setJobsError(null);
-
-      if (!shouldLoadJobProgress) {
-        setJobProgressById((prev) => (Object.keys(prev).length === 0 ? prev : {}));
-      } else {
-        const activeJobs = nextJobs.filter((job) => job.status === 'pending' || job.status === 'running');
-        if (activeJobs.length === 0) {
-          setJobProgressById((prev) => (Object.keys(prev).length === 0 ? prev : {}));
-          return;
-        }
-
-        const progressEntries = await Promise.all(
-          activeJobs.map(async (job) => {
-            try {
-              const runtime = await fetchProjectRuntime(encodeProjectDir(job.project_dir));
-              return [
-                job.job_id,
-                {
-                  currentFile: runtime.current_file,
-                  percent: runtime.summary.percent,
-                  total: runtime.summary.total,
-                  translated: runtime.summary.translated,
-                },
-              ] as const;
-            } catch {
-              return null;
-            }
-          }),
-        );
-
-        const nextProgress = progressEntries.reduce<
-          Record<string, { currentFile?: string; percent: number; total: number; translated: number }>
-        >((acc, entry) => {
-          if (entry) {
-            acc[entry[0]] = entry[1];
-          }
-          return acc;
-        }, {});
-
-        setJobProgressById((prev) => {
-          const prevKeys = Object.keys(prev);
-          const nextKeys = Object.keys(nextProgress);
-          if (
-            prevKeys.length === nextKeys.length &&
-            nextKeys.every((k) => {
-              const p = prev[k];
-              const n = nextProgress[k];
-              return (
-                p &&
-                n &&
-                p.percent === n.percent &&
-                p.translated === n.translated &&
-                p.total === n.total &&
-                p.currentFile === n.currentFile
-              );
-            })
-          ) {
-            return prev;
-          }
-          return nextProgress;
-        });
-      }
-    } catch (error) {
-      setJobsError(normalizeError(error, uiMessage("projects:homePage.refreshJobs_normalizeError_readJobFailed")));
-    } finally {
-      if (!silent) {
-        const elapsedMs = Date.now() - startedAt;
-        const minReachedMs = Math.max(elapsedMs, MIN_REFRESH_SPIN_MS);
-        const remainToFullCycleMs = (REFRESH_SPIN_CYCLE_MS - (minReachedMs % REFRESH_SPIN_CYCLE_MS)) % REFRESH_SPIN_CYCLE_MS;
-        const remainMs = Math.max(0, MIN_REFRESH_SPIN_MS - elapsedMs) + remainToFullCycleMs;
-        if (remainMs > 0) {
-          await new Promise<void>((resolve) => window.setTimeout(resolve, remainMs));
-        }
-        setRefreshingJobs(false);
-      }
+    } catch {
+      // 统计数字保持上一次的结果
     }
-  }, [jobMemoryLimit, shouldLoadJobProgress]);
+  }, [jobMemoryLimit]);
 
   useEffect(() => {
     if (!active) return;
     void refreshJobs();
     const poller = window.setInterval(() => {
       if (!document.hidden) {
-        void refreshJobs(true);
+        void refreshJobs();
       }
     }, 3000);
     return () => window.clearInterval(poller);
   }, [refreshJobs, active]);
-
-  useEffect(() => {
-    if (!active || !shouldLoadJobProgress) {
-      return;
-    }
-    void refreshJobs(true);
-  }, [refreshJobs, shouldLoadJobProgress, active]);
 
   const handleOpenProject = useCallback(async () => {
     const selected = await open({
@@ -458,61 +337,6 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     },
     [onOpenProject, navigate],
   );
-
-  const handleJobClick = useCallback((job: Job) => {
-    onOpenProject(job.project_dir, job.config_file_name);
-    const projectId = encodeProjectDir(job.project_dir);
-    navigate(`/project/${projectId}/translate`);
-  }, [onOpenProject, navigate]);
-
-  const handleStopJob = useCallback(async (job: Job, event: React.MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    if (stoppingJobId) return;
-    if (job.status !== 'pending' && job.status !== 'running') return;
-
-    setStoppingJobId(job.job_id);
-    setJobsError(null);
-
-    try {
-      const projectId = encodeProjectDir(job.project_dir);
-      const stoppedJob = await stopProjectTranslation(projectId);
-      setJobs((current) =>
-        current.map((currentJob) =>
-          currentJob.job_id === stoppedJob.job_id
-            ? {
-                ...currentJob,
-                status: stoppedJob.status,
-                success: stoppedJob.success,
-              }
-            : currentJob,
-        ),
-      );
-      await refreshJobs(true);
-    } catch (error) {
-      setJobsError(normalizeError(error, uiMessage("projects:homePage.handleStopJob_normalizeError_stopJobFailed")));
-      void refreshJobs(true);
-    } finally {
-      setStoppingJobId(null);
-    }
-  }, [refreshJobs, stoppingJobId]);
-
-  const handleClearFinishedJobs = useCallback(() => {
-    setJobs((current) => {
-      const kept = current.filter((job) => job.status === 'running' || job.status === 'pending');
-      let changed = false;
-      current.forEach((job) => {
-        if (job.status !== 'running' && job.status !== 'pending') {
-          if (!clearedJobIds.current.has(job.job_id)) {
-            clearedJobIds.current.add(job.job_id);
-            changed = true;
-          }
-        }
-      });
-      if (changed) saveClearedJobIds(clearedJobIds.current);
-      saveRememberedJobs(kept, jobMemoryLimit);
-      return kept;
-    });
-  }, [jobMemoryLimit]);
 
   const handleRemoveHistory = useCallback((projectDirToRemove: string, event: React.MouseEvent) => {
     event.stopPropagation();
@@ -611,7 +435,6 @@ export function HomePage({ onOpenProject }: HomePageProps) {
               <Button type="button" className="home-open__action-btn" onClick={() => void handleOpenProject()}>{translate("projects:homePage.homeOpenActions_message_openProject")}</Button>
               <Button type="button" className="home-open__action-btn" variant="secondary" onClick={() => navigate('/new-project')}>{translate("projects:homePage.homeOpenActions_message_newProject")}</Button>
             </div>
-            <HomeTranslationFlow />
           </div>
         </section>
 
@@ -671,105 +494,12 @@ export function HomePage({ onOpenProject }: HomePageProps) {
           )}
         </section>
 
-        {/* Right: Jobs */}
-        <section className="home-jobs">
-          <div className="home-jobs__header">
-            <div>
-              <h2>{translate("projects:homePage.homeJobsHeader_message_translationJob")}</h2>
-              <p>{translate("projects:homePage.homeJobsHeader_message_progressStatus")}</p>
-            </div>
-            <button
-              type="button"
-              className="icon-btn icon-btn--clear"
-              disabled={jobs.every((job) => job.status === 'running' || job.status === 'pending')}
-              onClick={handleClearFinishedJobs}
-              title={translate("projects:homePage.iconBtnIconBtnClear_title_clearDoneCompleteFailedJob")}
-              aria-label={translate("projects:homePage.iconBtnIconBtnClear_ariaLabel_clearDoneCompleteFailedJob")}
-            >
-              <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
-                <path d="M2 4h12M5 4V2.5a.5.5 0 01.5-.5h5a.5.5 0 01.5.5V4M6 7v5M10 7v5M3 4l.8 9.1A1 1 0 004.8 14h6.4a1 1 0 001-.9L13 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
+        {/* Right: Translation flow */}
+        <section className="home-flow">
+          <div className="home-flow__header">
+            <h2>{translate('projects:homePage.translationFlow.title')}</h2>
           </div>
-          {jobsError ? <InlineFeedback tone="error" title={translate("projects:homePage.homeJobs_title_loadFailed")} description={jobsError} /> : null}
-          {jobs.length === 0 ? (
-            <div className="home-jobs__empty">
-              <span>{translate("projects:homePage.homeJobsEmpty_message_emptyTranslationJob")}</span>
-              <span>{translate("projects:homePage.homeJobsEmpty_message_translationJob")}</span>
-            </div>
-          ) : (
-            <div className="home-jobs__list">
-              {jobs.map((job) => {
-                const prog = jobProgressById[job.job_id];
-                const isRunningJob = job.status === 'running';
-                const isStoppingThisJob = stoppingJobId === job.job_id;
-                return (
-                  <div
-                    key={job.job_id}
-                    className="home-job-row home-job-row--clickable"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => handleJobClick(job)}
-                    onKeyDown={(e) => {
-                      if (e.target !== e.currentTarget) return;
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        handleJobClick(job);
-                      }
-                    }}
-                  >
-                    <div className="home-job-row__top">
-                      <div className="home-job-row__path" title={job.project_dir}>{projectName(job.project_dir)}</div>
-                      <div className="home-job-row__actions">
-                        {isRunningJob ? (
-                          <div className={`home-job-row__status-switch${isStoppingThisJob ? ' is-stopping' : ''}`}>
-                            <span className="home-job-row__status-pill" aria-hidden={isStoppingThisJob}>
-                              <StatusBadge label={job.status} tone={job.status} />
-                            </span>
-                            <button
-                              type="button"
-                              className={`home-job-row__stop-btn${isStoppingThisJob ? ' is-stopping' : ''}`}
-                              onClick={(event) => void handleStopJob(job, event)}
-                              disabled={Boolean(stoppingJobId) && !isStoppingThisJob}
-                              aria-label={isStoppingThisJob ? translate("projects:homePage.homeJobRowActions_ariaLabel_pendingStopJob") : translate("projects:homePage.homeJobRowActions_ariaLabel_stopJob", { value: projectName(job.project_dir) })}
-                              title={isStoppingThisJob ? translate("projects:homePage.homeJobRowActions_title_pendingStopJob") : translate("projects:homePage.homeJobRowActions_title_stopJob")}
-                            >
-                              {isStoppingThisJob ? translate("projects:homePage.homeJobRowActions_message_stop") : translate("common:actions.stop")}
-                            </button>
-                          </div>
-                        ) : (
-                          <StatusBadge label={job.status} tone={job.status} />
-                        )}
-                      </div>
-                    </div>
-                    <div className="home-job-row__meta">
-                      <span>{job.translator}</span>
-                      <span className="home-job-row__sep">·</span>
-                      <span>{formatTimestamp(job.created_at)}</span>
-                      {prog ? (
-                        <>
-                          <span className="home-job-row__sep">·</span>
-                          <span className="home-job-row__progress-text">
-                            {prog.translated}/{prog.total} · {prog.percent}%
-                          </span>
-                        </>
-                      ) : null}
-                    </div>
-                    {prog ? (
-                      <div className="home-job-row__bar-track">
-                        <div className="home-job-row__bar-fill" style={{ width: `${prog.percent}%` }} />
-                      </div>
-                    ) : null}
-                    {job.error ? (
-                      <div className="home-job-row__error" title={job.error}>
-                        {job.error.length > 80 ? `${job.error.slice(0, 80)}…` : job.error}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          <HomeTranslationFlow />
         </section>
       </div>
     </div>

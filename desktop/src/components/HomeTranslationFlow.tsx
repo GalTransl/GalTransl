@@ -26,7 +26,6 @@ export function HomeTranslationFlow() {
 
   return (
     <div className="home-translation-flow">
-      <h3>{translate('projects:homePage.translationFlow.title')}</h3>
       <ol className="home-translation-flow__steps">
         {steps.map((step, index) => (
           <li key={index}>
