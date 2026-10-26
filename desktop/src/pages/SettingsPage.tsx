@@ -1,7 +1,7 @@
 import { localizePlugin, pluginSettingDisplayValue } from "../i18n/plugins";
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { CustomSelect } from '../components/CustomSelect';
 import { PageHeader } from '../components/PageHeader';
 import { SectionNav } from '../components/SectionNav';
@@ -47,6 +47,8 @@ import {
 import { normalizeError } from '../lib/errors';
 import { setUiLanguage, type UiLanguage } from '../i18n/core';
 import { PROJECT_HOMEPAGE, RELEASE_LATEST_URL } from '../lib/externalLink';
+import { PromptTemplatesPage } from './PromptTemplatesPage';
+import { CommonGuidelinesPage } from './CommonGuidelinesPage';
 
 const PROJECT_AUTHOR = 'xd2333';
 
@@ -57,18 +59,24 @@ function pluginTypeLabel(type: string): string {
   return translate("settings:settingsPage.pluginCardHeader_message_text");
 }
 
-type SettingsSectionKey = 'appearance' | 'prompt' | 'guideline' | 'retention' | 'plugins' | 'connection' | 'about';
+type SettingsSectionKey = 'appearance' | 'prompt' | 'guideline' | 'plugins' | 'about';
 
 /** 设置页二级菜单。label 写成 getter：切界面语言时不用重建这份数组也能跟着变。 */
 const SETTINGS_SECTIONS: { key: SettingsSectionKey; label: string; icon: IconName }[] = [
   { key: 'appearance', get label() { return translate("settings:settingsSectionNav.label_appearance"); }, icon: 'sparkle' },
   { key: 'prompt', get label() { return translate("settings:settingsSectionNav.label_prompt"); }, icon: 'note' },
   { key: 'guideline', get label() { return translate("settings:settingsSectionNav.label_guideline"); }, icon: 'bookmark' },
-  { key: 'retention', get label() { return translate("settings:settingsSectionNav.label_retention"); }, icon: 'archive' },
   { key: 'plugins', get label() { return translate("settings:settingsSectionNav.label_plugins"); }, icon: 'plug' },
-  { key: 'connection', get label() { return translate("settings:settingsSectionNav.label_connection"); }, icon: 'globe' },
   { key: 'about', get label() { return translate("settings:settingsSectionNav.label_about"); }, icon: 'help' },
 ];
+
+/** 首页记忆并进了外观、后端连接并进了关于；旧的 ?section= 链接照样落到合并后的分区。 */
+const MERGED_SECTION_ALIASES: Record<string, SettingsSectionKey> = { retention: 'appearance', connection: 'about' };
+
+function resolveSettingsSection(section: string | null): SettingsSectionKey | undefined {
+  if (section && section in MERGED_SECTION_ALIASES) return MERGED_SECTION_ALIASES[section];
+  return SETTINGS_SECTIONS.find((item) => item.key === section)?.key;
+}
 
 
 
@@ -181,16 +189,15 @@ export function PluginListSection() {
 
 export function SettingsPage() {
   const uiLanguage = useUiLanguage();
-  const navigate = useNavigate();
   // 选中哪个分区跟 URL 走（?section=...）：刷新、从提示词页返回都能停在原来那一页
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeSection, setActiveSection] = useState<SettingsSectionKey>(() => (
-    SETTINGS_SECTIONS.find((item) => item.key === searchParams.get('section'))?.key ?? 'appearance'
+    resolveSettingsSection(searchParams.get('section')) ?? 'appearance'
   ));
 
   useEffect(() => {
-    const section = searchParams.get('section');
-    if (SETTINGS_SECTIONS.some((item) => item.key === section)) setActiveSection(section as SettingsSectionKey);
+    const section = resolveSettingsSection(searchParams.get('section'));
+    if (section) setActiveSection(section);
   }, [searchParams]);
 
   const handleSectionChange = useCallback((section: SettingsSectionKey) => {
@@ -629,45 +636,9 @@ export function SettingsPage() {
         </section>
         )}
 
-        {activeSection === 'prompt' && (
-        <section className="panel">
-          <header className="panel__header">
-            <div>
-              <h2>{translate("settings:settingsPage.panelHeader_message_prompt")}</h2>
-              <p>{translate("settings:settingsPage.panelHeader_message_translationDefaultPromptEditReset")}</p>
-            </div>
-          </header>
-          <div className="settings-action-row">
-            <button
-              type="button"
-              className="button button--secondary"
-              onClick={() => {
-                navigate('/settings/prompt-templates');
-              }}
-            >{translate("settings:settingsPage.settingsActionRow_message_changeDefaultPrompt")}</button>
-          </div>
-        </section>
-        )}
+        {activeSection === 'prompt' && <PromptTemplatesPage embedded />}
 
-        {activeSection === 'guideline' && (
-        <section className="panel">
-          <header className="panel__header">
-            <div>
-              <h2>{translate("settings:settingsPage.panelHeader_message_translationGuideline")}</h2>
-              <p>{translate("settings:settingsPage.panelHeader_message_translationGuidelineFileDirectoryTranslationGuidelinesMd")}</p>
-            </div>
-          </header>
-          <div className="settings-action-row">
-            <button
-              type="button"
-              className="button button--secondary"
-              onClick={() => {
-                navigate('/settings/common-guidelines');
-              }}
-            >{translate("settings:settingsPage.settingsActionRow_message_translationGuideline")}</button>
-          </div>
-        </section>
-        )}
+        {activeSection === 'guideline' && <CommonGuidelinesPage embedded />}
 
         {activeSection === 'about' && (
         <section className="panel">
@@ -731,7 +702,7 @@ export function SettingsPage() {
         </section>
         )}
 
-        {activeSection === 'retention' && (
+        {activeSection === 'appearance' && (
         <section className="panel">
           <header className="panel__header">
             <div>
@@ -790,7 +761,7 @@ export function SettingsPage() {
         </section>
         )}
 
-        {activeSection === 'connection' && (
+        {activeSection === 'about' && (
         <ConnectionStatusCard
           backendUrl={backendUrl}
           connectionMessage={connectionMessage}

@@ -229,9 +229,7 @@
     "label_appearance": "Appearance",
     "label_prompt": "Prompts",
     "label_guideline": "Guidelines",
-    "label_retention": "Home history",
     "label_plugins": "Plugin list",
-    "label_connection": "Backend",
     "label_about": "About"
   }
 }

@@ -229,9 +229,7 @@
     "label_appearance": "外观",
     "label_prompt": "提示词",
     "label_guideline": "翻译规范",
-    "label_retention": "首页记忆",
     "label_plugins": "插件清单",
-    "label_connection": "后端连接",
     "label_about": "关于"
   }
 }

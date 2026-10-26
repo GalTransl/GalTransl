@@ -43,6 +43,13 @@
   min-width: 0;
 }
 
+.prompt-templates-page--embedded,
+.common-guidelines-page--embedded {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
 .settings-toggle-row {
   display: flex;
   justify-content: space-between;

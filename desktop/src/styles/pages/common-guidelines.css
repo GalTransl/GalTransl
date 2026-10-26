@@ -33,7 +33,7 @@
 }
 
 .common-guidelines-page__select .custom-select {
-  width: min(320px, 82vw);
+  width: min(320px, 100%);
 }
 
 .common-guidelines-page__select .custom-select .custom-select__trigger {

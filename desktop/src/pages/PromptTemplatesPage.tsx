@@ -13,7 +13,7 @@ import {
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
 
-export function PromptTemplatesPage() {
+export function PromptTemplatesPage({ embedded = false }: { embedded?: boolean }) {
   const uiLanguage = useUiLanguage();
   const navigate = useNavigate();
   const [templates, setTemplates] = useState<PromptTemplateInfo[]>([]);
@@ -173,19 +173,19 @@ export function PromptTemplatesPage() {
   };
 
   return (
-    <div className="prompt-templates-page">
-      <PageHeader
+    <div className={`prompt-templates-page${embedded ? ' prompt-templates-page--embedded' : ''}`}>
+      {!embedded && <PageHeader
         className="prompt-templates-page__header"
         title={translate("settings:promptTemplatesPage.promptTemplatesPage_title_defaultPrompt")}
         description={translate("settings:promptTemplatesPage.promptTemplatesPage_description_translationDefaultPromptSaveTranslationJobAuto")}
-      />
+      />}
 
       <div className="prompt-templates-page__content">
         <section className="panel">
           <header className="panel__header">
             <div>
-              <h2>{translate("settings:promptTemplatesPage.panelHeader_message_edit")}</h2>
-              <p>{translate("settings:promptTemplatesPage.panelHeader_message_changeCountTranslationSystemPromptUserPrompt")}</p>
+              <h2>{translate(embedded ? "settings:promptTemplatesPage.promptTemplatesPage_title_defaultPrompt" : "settings:promptTemplatesPage.panelHeader_message_edit")}</h2>
+              <p>{translate(embedded ? "settings:promptTemplatesPage.promptTemplatesPage_description_translationDefaultPromptSaveTranslationJobAuto" : "settings:promptTemplatesPage.panelHeader_message_changeCountTranslationSystemPromptUserPrompt")}</p>
             </div>
           </header>
 
@@ -236,14 +236,14 @@ export function PromptTemplatesPage() {
                         void handleReset();
                       }}
                     >{translate("settings:promptTemplatesPage.promptTemplatesPageActions_message_resetDefaultPrompt")}</button>
-                    <button
+                    {!embedded && <button
                       type="button"
                       className="button"
                       disabled={saving}
                       onClick={() => {
                         navigate('/settings?section=prompt');
                       }}
-                    >{translate("settings:promptTemplatesPage.promptTemplatesPageActions_message_backSettings")}</button>
+                    >{translate("settings:promptTemplatesPage.promptTemplatesPageActions_message_backSettings")}</button>}
                   </div>
 
                   <label className="prompt-templates-page__editor-label">{translate("settings:promptTemplatesPage.promptTemplatesPageEditorWrap_message_systemPrompt")}</label>
