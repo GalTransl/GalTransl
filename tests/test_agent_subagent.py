@@ -1224,9 +1224,24 @@ class RunSubagentsMarkdownTests(unittest.TestCase):
         self.assertIsNotNone(text)
         self.assertIn("共派出 1 个子代理（失败 1）", text)
         self.assertIn("另有 2 个任务因文件不够分被跳过", text)
+        # 什么都没产出的失败任务不占小节，也不打印 0 轮 / 0 次 / 0.0s
+        self.assertNotIn("## 1.", text)
+        self.assertNotIn("轮数 0", text)
+        self.assertIn("没有产出内容的子代理 1 个", text)
+        self.assertIn("- a.json：失败（RuntimeError: boom）", text)
+
+    def test_failed_task_with_report_keeps_its_section(self) -> None:
+        # 有报告就还是有内容：仍单独成节，且不再打印 0 轮 / 0 次 / 0.0s。
+        result = {"tasks": [{
+            "agent": "proofread", "label": "校对", "file": "a.json", "files": ["a.json"],
+            "status": "failed", "report": "改到一半被中止", "turns": 0, "tool_calls": 0,
+            "duration_ms": 0, "error": "RuntimeError: boom",
+        }]}
+        text = _render_tool_result_table("run_subagents", result)
         self.assertIn("## 1. 校对 · a.json", text)
-        self.assertIn("状态 失败", text)
-        self.assertIn("错误：RuntimeError: boom", text)
+        self.assertIn("改到一半被中止", text)
+        self.assertNotIn("轮数 0", text)
+        self.assertNotIn("没有产出内容的子代理", text)
 
 
 class SubagentPermissionTests(unittest.TestCase):
