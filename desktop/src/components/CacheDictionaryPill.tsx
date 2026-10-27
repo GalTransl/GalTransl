@@ -9,12 +9,13 @@ export function CacheDictionaryPill({ counts, error, expanded, controls, onToggl
   onToggle: () => void;
 }) {
   useUiLanguage();
+  if (!counts && !error) return null;
   const label = counts
     ? (['pre', 'post', 'gpt'] as const)
       .filter(kind => counts[kind] > 0)
       .map(kind => t(`projects:cacheDictionary.${kind}Count`, { count: counts[kind] }))
       .join(' · ')
-    : t(error ? 'projects:cacheDictionary.failed' : 'projects:cacheDictionary.loading');
+    : t('projects:cacheDictionary.failed');
   if (!label) return null;
   return <button
     type="button"

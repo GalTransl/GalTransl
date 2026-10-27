@@ -176,17 +176,6 @@
   font-size: 12px;
 }
 
-.dict-generate {
-  margin-bottom: var(--space-3);
-}
-
-.dict-generate .button {
-  min-height: 32px;
-  padding: 0 10px;
-  gap: 6px;
-  font-size: 12px;
-}
-
 .dict-file-list {
   display: flex;
   flex-direction: column;

@@ -47,18 +47,18 @@ export function HomeTranslationFlow() {
                       target="_blank"
                       rel="noreferrer noopener"
                     >
-                      {step.actionIcon && <Icon name={step.actionIcon} size={14} />}
+                      {step.actionIcon && <Icon name={step.actionIcon} size={12} />}
                       {step.action}
                     </a>
                   ) : (
                     <span className="home-translation-flow__method">
-                      {step.actionIcon && <Icon name={step.actionIcon} size={14} />}
+                      {step.actionIcon && <Icon name={step.actionIcon} size={12} />}
                       {step.action}
                     </span>
                   )}
                   <span className="home-translation-flow__or">{translate('projects:homePage.translationFlow.or')}</span>
                   <Link className="home-translation-flow__agent" to={step.to}>
-                    {step.agentIcon && <Icon name={step.agentIcon} size={14} />}
+                    {step.agentIcon && <Icon name={step.agentIcon} size={12} />}
                     {step.agent}
                   </Link>
                 </div>

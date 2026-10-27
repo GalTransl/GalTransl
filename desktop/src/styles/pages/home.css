@@ -144,10 +144,6 @@
   text-shadow: 0 0 12px rgba(110, 231, 183, 0.4);
 }
 
-.home-hero__stat-value--danger {
-  color: #fca5a5;
-}
-
 .home-hero__stat-label {
   display: inline-flex;
   align-items: center;
@@ -254,14 +250,14 @@
 .home-translation-flow__node,
 .home-translation-flow__transition {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr);
+  grid-template-columns: 30px minmax(0, 1fr);
   align-items: center;
-  column-gap: 14px;
+  column-gap: 10px;
 }
 
 .home-translation-flow__node {
   color: var(--color-text);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.01em;
 }
@@ -269,13 +265,13 @@
 .home-translation-flow__icon {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  width: 30px;
+  height: 30px;
   border: 1px solid var(--color-line);
-  border-radius: 13px;
+  border-radius: 10px;
   background: var(--color-surface-strong);
   color: var(--color-text-muted);
-  font-size: 18px;
+  font-size: 15px;
   box-shadow: 0 1px 2px rgba(15, 26, 52, 0.05);
 }
 
@@ -286,7 +282,7 @@
 }
 
 .home-translation-flow__transition {
-  min-height: 64px;
+  min-height: 76px;
 }
 
 .home-translation-flow__arrow {
@@ -294,7 +290,7 @@
   justify-self: center;
   align-self: stretch;
   width: 1px;
-  margin: 6px 0;
+  margin: 8px 0;
   background: linear-gradient(180deg, transparent 0%, var(--color-line-strong, var(--color-line)) 24%, var(--color-line-strong, var(--color-line)) 100%);
 }
 
@@ -316,15 +312,15 @@
   justify-self: start;
   width: max-content;
   max-width: 100%;
-  gap: 6px;
-  padding: 10px 0;
+  gap: 7px;
+  padding: 14px 0;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .home-translation-flow__or {
   justify-self: center;
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1;
   opacity: 0.75;
 }
@@ -334,12 +330,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 28px;
-  padding: 0 12px;
+  gap: 5px;
+  min-height: 22px;
+  padding: 0 10px;
   border: 1px solid var(--color-line);
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1;
   white-space: nowrap;
   transition:
@@ -871,7 +867,7 @@
 
 .home-hero__stats {
   --home-hero-stat-gap: var(--space-4);
-  flex: 0 0 clamp(400px, 33%, 500px);
+  flex: 0 0 clamp(300px, 25%, 375px);
   gap: var(--home-hero-stat-gap);
   padding: 10px var(--home-hero-stat-gap);
   border: 1px solid rgba(149, 217, 255, 0.22);

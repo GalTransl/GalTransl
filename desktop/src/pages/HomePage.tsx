@@ -354,7 +354,6 @@ export function HomePage({ onOpenProject }: HomePageProps) {
     () => jobs.some((job) => job.translator === 'GenDic' && job.status === 'completed'),
     [jobs],
   );
-  const failedJobsCount = useMemo(() => jobs.filter((job) => job.status === 'failed').length, [jobs]);
 
   return (
     <div className={`home-page${mounted ? ' home-page--mounted' : ''}`}>
@@ -400,13 +399,6 @@ export function HomePage({ onOpenProject }: HomePageProps) {
           <div className="home-hero__stat">
             <span className="home-hero__stat-value">{completedJobsCount}</span>
             <span className="home-hero__stat-label">{translate("projects:homePage.homeHeroStat_message_doneComplete")}</span>
-          </div>
-          <div className="home-hero__stat-divider" />
-          <div className="home-hero__stat">
-            <span className={`home-hero__stat-value${failedJobsCount > 0 ? ' home-hero__stat-value--danger' : ''}`}>
-              {failedJobsCount}
-            </span>
-            <span className="home-hero__stat-label">{translate("common:actions.failed")}</span>
           </div>
         </div>
 

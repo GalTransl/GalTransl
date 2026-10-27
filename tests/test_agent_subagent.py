@@ -1525,7 +1525,7 @@ class SubagentCompactionTests(unittest.TestCase):
 
         def fake_estimate(sub: rt.SubAgentRunner) -> int:
             # 第 3 轮开始算"超阈值"（真阈值判定见 _begin_compaction 的用例）
-            return 99_999 if len(sub.messages) >= 6 else 10
+            return rt.DEFAULT_CONTEXT_WINDOW if len(sub.messages) >= 6 else 10
 
         with (
             patch.object(subagent_mod, "_subagent_chat", recording),

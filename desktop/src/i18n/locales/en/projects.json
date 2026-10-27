@@ -6,7 +6,6 @@
     "postCount": "Post {{count}}",
     "gptCount": "GPT {{count}}",
     "details": "View matching dictionary entries",
-    "loading": "Dictionary …",
     "failed": "Dictionary check failed",
     "hint": "Calculated from the current dictionaries and sentence text + name (speaker). Each rule is counted once. GPT entries match this sentence for the glossary; the model may not use them. Results may differ from translation time after dictionary changes.",
     "pre": "Pre-translation dictionary",
