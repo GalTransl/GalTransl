@@ -366,7 +366,7 @@
   background: var(--color-primary-soft);
 }
 
-@media (prefers-reduced-motion: no-preference) and (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) {
   .name-page__input,
   .name-page__delete-btn,
   .name-page__search {

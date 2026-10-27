@@ -141,6 +141,42 @@ test('jump, page hiding and disposal clear completion anchors', () => {
   assert.equal(f.listeners.size, 0);
 });
 
+test('following state is reported once while content keeps growing', () => {
+  const f = fixture();
+  // 构造时 follow 已到底，之后每一帧的高度变化都不该再上报一次（否则每帧一次 setState）。
+  assert.deepEqual(f.states, [true]);
+  for (const height of [1200, 1500, 1800]) {
+    f.viewport.scrollHeight = height;
+    f.resize();
+    f.listeners.get('scroll')?.(); // 自己写 scrollTop 引起的回声
+  }
+  assert.deepEqual(f.states, [true]);
+  assert.equal(f.viewport.scrollTop, 1400);
+});
+
+test('programmatic scroll echoes never resume or drop following', () => {
+  const f = fixture();
+  f.scroll(200);
+  assert.deepEqual(f.states, [true, false]);
+  // 回声：位置没变，不该重算跟随态
+  f.listeners.get('scroll')?.();
+  f.listeners.get('scroll')?.();
+  assert.deepEqual(f.states, [true, false]);
+  assert.equal(f.follower.isFollowing(), false);
+});
+
+test('repeated layout passes without movement do not rewrite the reading position', () => {
+  const positions = [];
+  const f = fixture({ onPosition: (position) => positions.push(position) });
+  f.resize();
+  f.resize();
+  f.resize();
+  assert.equal(positions.length, 1);
+  // 位置对象来自加载器所在的 realm，逐字段比而不是 deepEqual。
+  assert.equal(positions[0].scrollTop, 600);
+  assert.equal(positions[0].following, true);
+});
+
 test('reading earlier messages is preserved while content expands and messages arrive', () => {
   const f = fixture();
   f.scroll(200);

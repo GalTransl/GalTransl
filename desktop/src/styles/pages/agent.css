@@ -1575,6 +1575,29 @@
   margin: 0.12em 0;
 }
 
+/* 任务列表（- [ ] / - [x]）：去掉圆点，用伪元素把方框画在原来圆点的位置，
+   正文左边缘仍与普通列表项对齐。 */
+.agent-md li.is-task {
+  list-style: none;
+}
+
+.agent-md li.is-task::before {
+  content: '☐';
+  display: inline-block;
+  width: 1.05em;
+  margin-left: -1.05em;
+  color: var(--color-text-muted);
+}
+
+.agent-md li.is-task.is-done {
+  color: var(--color-text-muted);
+}
+
+.agent-md li.is-task.is-done::before {
+  content: '☑';
+  color: var(--color-primary);
+}
+
 .agent-md blockquote {
   margin: 0.35em 0;
   padding: 0.15em 0.75em;
@@ -1588,6 +1611,12 @@
   background: var(--agent-tile-strong, rgba(16, 24, 40, 0.08));
   font-family: var(--agent-mono);
   font-size: 0.9em;
+  /* 长 token（URL / base64 / JSON 片段）不该顶破气泡 */
+  overflow-wrap: anywhere;
+}
+
+.agent-md del {
+  opacity: 0.7;
 }
 
 .agent-md pre {
@@ -1596,6 +1625,8 @@
   border-radius: 8px;
   background: var(--agent-tile-strong, rgba(16, 24, 40, 0.08));
   overflow-x: auto;
+  /* 默认 8 列展开会把缩进的对齐全打乱 */
+  tab-size: 2;
 }
 
 .agent-md pre code {
@@ -2581,12 +2612,28 @@
   gap: 3px;
 }
 
+/* 等待期唯一允许的心跳：只动 opacity（合成器完成，不重绘不布局）。
+   以前这里是三个静止圆点，长回合里会被读成"卡住了"。 */
+@keyframes agentWorkingDot {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
 .agent-working__dots span {
   width: 4px;
   height: 4px;
   border-radius: 50%;
   background: var(--color-primary);
   opacity: 0.7;
+  animation: agentWorkingDot 1.2s ease-in-out infinite;
+}
+
+.agent-working__dots span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.agent-working__dots span:nth-child(3) {
+  animation-delay: 0.32s;
 }
 
 .agent-working__label {
@@ -3607,6 +3654,10 @@
   .agent-composer__stop {
     transition: none;
     transform: none !important;
+  }
+  .agent-working__dots span {
+    animation: none;
+    opacity: 0.7;
   }
 }
 

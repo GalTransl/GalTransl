@@ -240,7 +240,7 @@ select option {
 
 /* ── Reduced motion ── */
 
-@media (prefers-reduced-motion: no-preference) and (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) {
   select,
   .custom-select__trigger,
   .custom-select__arrow,

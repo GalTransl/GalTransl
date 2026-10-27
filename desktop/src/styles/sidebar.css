@@ -554,7 +554,8 @@
     max-height 220ms ease,
     opacity 180ms ease,
     transform 220ms ease;
-  will-change: max-height, opacity, transform;
+  /* 不挂 will-change：max-height 提升不了合成层（白占显存提示），
+     transform/opacity 由浏览器按需提升即可。 */
 }
 
 .sidebar__project-children--expanded {
@@ -638,7 +639,7 @@
   color: var(--color-text);
 }
 
-@media (prefers-reduced-motion: no-preference) and (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) {
   .sidebar__project-children {
     transition: none;
     transform: none;
@@ -726,7 +727,7 @@
   color: var(--color-danger);
 }
 
-@media (prefers-reduced-motion: no-preference) and (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) {
   .sidebar__context-menu {
     animation: none;
   }

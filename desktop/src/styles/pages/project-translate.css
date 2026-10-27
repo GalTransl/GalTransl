@@ -1819,7 +1819,7 @@
 
 /* ── Reduced-motion overrides ── */
 
-@media (prefers-reduced-motion: no-preference) and (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) {
   /* Launch: skip ripple, particles, charge-up/blast-off */
   .project-translate-page__launch-ripple,
   .project-translate-page__launch-particle,

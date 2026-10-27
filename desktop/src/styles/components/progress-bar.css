@@ -34,7 +34,7 @@
   }
 }
 
-@media (prefers-reduced-motion: no-preference) and (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) {
   .progress-bar__fill--indeterminate {
     animation: none;
     transform: none;

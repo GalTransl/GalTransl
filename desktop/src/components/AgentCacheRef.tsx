@@ -10,8 +10,8 @@ import { t as translate, useMessageState, useUiLanguage } from "../i18n";
 两层节流：同一个文件只请求一次（Promise 复用），条目按 index 取（不是数组下标）。
 引用一长串行号（如 20-31）时卡片区定高滚动，不撑高对话气泡。 */
 
-import { useEffect, useMemo, useState } from 'react';
-import { Markdown } from './Markdown';
+import { memo, useEffect, useMemo, useState } from 'react';
+import { Markdown, useMarkdownHtml } from './Markdown';
 import { NewProjectWizardRef } from './NewProjectWizardRef';
 import { splitWizardReferences } from '../lib/newProjectWizard';
 import {
@@ -25,7 +25,6 @@ import { speakerStyle } from '../lib/speaker';
 import { resolveSpeakerName, useNameDict } from '../lib/useNameDict';
 import {
   parseCacheRefIndexes,
-  renderMarkdown,
   splitMarkdownSegments,
   type MarkdownSegment,
 } from '../lib/markdown';
@@ -271,7 +270,7 @@ function CacheRefCard({
 
     没有引用时走原来的一条 innerHTML（行为与样式完全不变）；有引用时交给
     CacheRefSegments——它要多取一份人名替换字典，没引用就不必挂这份开销。 */
-export function AgentMarkdown({
+export const AgentMarkdown = memo(function AgentMarkdown({
   text,
   projectDir,
   className,
@@ -304,7 +303,13 @@ export function AgentMarkdown({
       className={`${cls} agent-md--segmented`}
     />
   );
-}
+});
+
+/** 分段里的纯文本段：自己带缓存，流式时只有变化的那一段重解析。 */
+const MarkdownChunk = memo(function MarkdownChunk({ text }: { text: string }) {
+  const html = useMarkdownHtml(text);
+  return <div className="agent-md__chunk" dangerouslySetInnerHTML={{ __html: html }} />;
+});
 
 /** 带缓存引用的那段文本：按片段切开，文本片段各自渲染 markdown，引用片段渲染卡片。
     人名替换字典只在这里取——说话人 pill 要跟「浏览文本」页显示同一个译名。 */
@@ -323,13 +328,7 @@ function CacheRefSegments({
     <div className={className}>
       {segments.map((seg, i) =>
         seg.kind === 'text' ? (
-          <div
-            key={`t${i}`}
-            className="agent-md__chunk"
-            dangerouslySetInnerHTML={{
-              __html: renderMarkdown(seg.text),
-            }}
-          />
+          <MarkdownChunk key={`t${i}`} text={seg.text} />
         ) : (
           <CacheRefCard
             key={`${seg.filename}:${seg.indexSpec}:${i}`}

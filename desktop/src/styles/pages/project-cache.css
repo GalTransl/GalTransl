@@ -1486,7 +1486,7 @@
   font-weight: 600;
 }
 
-@media (prefers-reduced-motion: no-preference) and (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) {
   .cache-card--flash,
   [class*="cacheSlideFrom"] {
     animation: none;

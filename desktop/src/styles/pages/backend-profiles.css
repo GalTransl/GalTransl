@@ -176,7 +176,7 @@
   to   { opacity: 1; transform: translateY(0)    scale(1); }
 }
 
-@media (prefers-reduced-motion: no-preference) and (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) {
   .backend-profiles-page__dialog-overlay,
   .backend-profiles-page__dialog {
     animation: none;

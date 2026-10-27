@@ -38,9 +38,33 @@ export function parseCacheRefIndexes(spec: string, limit = 50): number[] {
 export function splitMarkdownSegments(text: string): MarkdownSegment[] {
   const segments: MarkdownSegment[] = [];
   let last = 0;
+  // 围栏状态扫描器：引用是按位置递增匹配的，游标只前进不回头，整体 O(n)。
+  let scanOffset = 0;
+  let fenceOpen = 0;
+  const insideFence = (index: number): boolean => {
+    const lineStart = text.lastIndexOf('\n', index - 1) + 1;
+    for (;;) {
+      const newline = text.indexOf('\n', scanOffset);
+      if (newline < 0 || newline >= lineStart) break; // 剩下的就是 index 所在行，不能拿半行判围栏
+      const line = text.slice(scanOffset, newline).trimEnd();
+      if (fenceOpen) {
+        const closing = /^\s*(`{3,})\s*$/.exec(line);
+        if (closing && closing[1].length >= fenceOpen) fenceOpen = 0;
+      } else {
+        const opening = /^\s*(`{3,})[^`]*$/.exec(line);
+        if (opening) fenceOpen = opening[1].length;
+      }
+      scanOffset = newline + 1;
+    }
+    return fenceOpen > 0;
+  };
+
   CACHE_REF_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = CACHE_REF_RE.exec(text)) !== null) {
+    // 围栏代码块里的 $transl_cache(...) 是示例文本：切开会把围栏劈成两半，
+    // 两段都变成"未闭合围栏"，代码内容和闭合行全丢。
+    if (insideFence(m.index)) continue;
     if (m.index > last) segments.push({ kind: 'text', text: text.slice(last, m.index) });
     const filename = (m[1] || m[2] || m[3] || '').trim();
     const indexSpec = (m[4] || '').trim();
@@ -61,19 +85,30 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;');
 }
 
-/** 行内元素：行内代码、图片/链接降级、粗体、斜体。输入须已转义。 */
+/** 行内代码被抽走后留下的占位符（U+0001 不会出现在正常文本里）。 */
+const CODE_SLOT = '\u0001';
+const CODE_SLOT_RE = /\u0001(\d+)\u0001/g;
+
+/** 行内元素：行内代码、图片/链接降级、粗体、斜体、删除线。输入须已转义。 */
 function renderInline(escaped: string): string {
-  // 行内代码优先（内部不再解析其它标记）
-  let out = escaped.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // 行内代码先整段抽成占位符、最后再还原：否则代码里的 * ~ [ ] 会被下面的规则
+  // 二次改写（`a*b*c` 会渲染成 <code>a<em>b</em>c</code>，`[x](y)` 会变成
+  // <code>x（y）</code>）——模型输出代码片段时非常常见。
+  const codes: string[] = [];
+  let out = escaped.replace(/`([^`]+)`/g, (_, code: string) => {
+    codes.push(code);
+    return `${CODE_SLOT}${codes.length - 1}${CODE_SLOT}`;
+  });
   // 图片 ![alt](url) -> 「图片」alt
   out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt: string) =>
     escapeHtml(translate('common:markdown.imageLabel', { alt: '__GALTRANSL_IMAGE_ALT__' })).replace('__GALTRANSL_IMAGE_ALT__', () => alt));
   // 链接 [text](url) -> text（url）——不生成可点击链接
   out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '$1（$2）');
-  // 加粗 + 斜体
+  // 加粗 / 删除线 / 斜体
   out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  out = out.replace(/~~([^~]+)~~/g, '<del>$1</del>');
   out = out.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-  return out;
+  return out.replace(CODE_SLOT_RE, (_, index: string) => `<code>${codes[Number(index)]}</code>`);
 }
 
 // 表格行：| a | b |，允许省略首尾竖线
@@ -146,7 +181,11 @@ export function renderMarkdown(markdown: string): string {
   const html: string[] = [];
 
   let codeFenceLength = 0;
+  let codeLanguage = '';
   let codeLines: string[] = [];
+  // 围栏后的语言标记只保留安全字符：它会进 class 属性。
+  const fenceLanguage = (info: string) => (/^[A-Za-z0-9_+#.-]+/.exec(info)?.[0] ?? '').toLowerCase();
+  const codeBlockHtml = () => `<pre><code${codeLanguage ? ` class="language-${codeLanguage}"` : ''}>${escapeHtml(codeLines.join('\n'))}</code></pre>`;
   let listType: 'ul' | 'ol' | null = null;
   let quoteLines: string[] = [];
   let paraLines: string[] = [];
@@ -201,9 +240,10 @@ export function renderMarkdown(markdown: string): string {
     if (codeFenceLength) {
       const closingFence = /^\s*(`{3,})\s*$/.exec(line);
       if (closingFence && closingFence[1].length >= codeFenceLength) {
-        html.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+        html.push(codeBlockHtml());
         codeLines = [];
         codeFenceLength = 0;
+        codeLanguage = '';
       } else {
         codeLines.push(raw);
       }
@@ -213,6 +253,7 @@ export function renderMarkdown(markdown: string): string {
     if (openingFence) {
       closeAll();
       codeFenceLength = openingFence[1].length;
+      codeLanguage = fenceLanguage(line.trim().slice(openingFence[1].length));
       continue;
     }
 
@@ -287,7 +328,11 @@ export function renderMarkdown(markdown: string): string {
         html.push('<ul>');
         listType = 'ul';
       }
-      html.push(`<li>${renderInline(escapeHtml(ul[1]))}</li>`);
+      // 任务列表（模型写待办时很常见）：- [ ] / - [x]，用伪元素画方框。
+      const task = /^\[([ xX])\]\s+(.*)$/.exec(ul[1]);
+      html.push(task
+        ? `<li class="is-task${task[1] === ' ' ? '' : ' is-done'}">${renderInline(escapeHtml(task[2]))}</li>`
+        : `<li>${renderInline(escapeHtml(ul[1]))}</li>`);
       continue;
     }
 
@@ -320,8 +365,75 @@ export function renderMarkdown(markdown: string): string {
 
   // 收尾：未闭合的代码块/列表/段落
   if (codeFenceLength && codeLines.length) {
-    html.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+    html.push(codeBlockHtml());
   }
   closeAll();
+  return html.join('\n');
+}
+
+/* ── 块级增量渲染 ──
+   流式输出每 50ms 就整段重解析一次；一条 20KB 的回复在十几秒里会被完整解析上百遍。
+   空行本来就是上面这个解析器的硬块边界（见循环里的 closeAll()），所以按顶层空行
+   切块、逐块渲染再拼起来，结果与整段渲染等价，但只有正在增长的最后一块需要重解析。
+   围栏代码块内的空行不是块边界，切分时要跟着围栏状态走。 */
+
+/** 缓存块数上限：超过直接清空（正常长度的回复远远到不了）。 */
+const BLOCK_CACHE_MAX = 2000;
+let blockCache = new Map<string, string>();
+/** 缓存与 UI 语言绑定：图片降级文案会随语言变化，换语言就整表作废。 */
+let blockCacheLanguage: string | null = null;
+
+/** 按顶层空行把 markdown 切块（围栏内的空行不切）。 */
+export function splitMarkdownBlocks(markdown: string): string[] {
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n');
+  const blocks: string[] = [];
+  let current: string[] = [];
+  let fenceLength = 0;
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (fenceLength) {
+      const closing = /^\s*(`{3,})\s*$/.exec(line);
+      if (closing && closing[1].length >= fenceLength) fenceLength = 0;
+      current.push(raw);
+      continue;
+    }
+    const opening = /^\s*(`{3,})[^`]*$/.exec(line);
+    if (opening) {
+      fenceLength = opening[1].length;
+      current.push(raw);
+      continue;
+    }
+    if (!line.trim()) {
+      if (current.length) {
+        blocks.push(current.join('\n'));
+        current = [];
+      }
+      continue;
+    }
+    current.push(raw);
+  }
+  if (current.length) blocks.push(current.join('\n'));
+  return blocks;
+}
+
+/** 与 renderMarkdown 等价，但按块命中缓存——流式输出只有最后一块会重解析。 */
+export function renderMarkdownBlocks(markdown: string, language = ''): string {
+  if (language !== blockCacheLanguage) {
+    blockCache.clear();
+    blockCacheLanguage = language;
+  }
+  const blocks = splitMarkdownBlocks(markdown);
+  const html: string[] = [];
+  for (const block of blocks) {
+    let rendered = blockCache.get(block);
+    if (rendered === undefined) {
+      rendered = renderMarkdown(block);
+      if (blockCache.size >= BLOCK_CACHE_MAX) blockCache.clear();
+      blockCache.set(block, rendered);
+    }
+    // 空结果（例如只写了个 ``` 还没跟内容）不能占位，否则 join 会多出空行，
+    // 与整段渲染的结果不再逐字节相同。
+    if (rendered) html.push(rendered);
+  }
   return html.join('\n');
 }
