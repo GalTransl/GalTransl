@@ -23,6 +23,28 @@ and talks to the Python backend over HTTP.
 - Development continues to use the external backend at `127.0.0.1:12333`; closing the dev window leaves that backend running. Explicit `VITE_BACKEND_URL` overrides remain available.
 - Rebuild both the desktop executable and the Python backend when packaging these changes, since the startup handshake changed. Assigned ports are kept in memory and are not saved to frontend preferences.
 
+## Application updates
+
+The new-version notice offers **Update automatically** and **Keep global
+dictionaries (skip Dict)**, selected by default. Updating downloads the current
+platform's existing portable release from GitHub, checks its SHA256 digest
+(or `SHA256SUMS.txt`), then prepares the files without changing the installed app.
+Once preparation succeeds, the desktop shell starts an isolated copy of its own
+backend as the installer, stops its backend, and exits. The installer waits for
+the old desktop process to exit, replaces the release files, and relaunches the
+desktop. It uses the packaged Python runtime, with no separate Python installation.
+
+Projects, translation caches, user settings, and user-only files are retained.
+Keeping dictionaries skips every update to the bundled `Dict` directory and the
+active user dictionary directory. Clearing that option also updates matching
+files in the active global dictionary directory. File replacement failures
+restore files already replaced; the next launch reports the error.
+
+Automatic replacement supports the Windows, Linux x86_64, and macOS portable
+archives in the existing release workflow. Source builds and installed system
+packages use the download-page action. Rebuild both desktop and backend to enable
+this feature. Stop active translation or Agent tasks before updating.
+
 ## Linux build
 
 Install the Tauri Linux prerequisites for your distribution, then run:

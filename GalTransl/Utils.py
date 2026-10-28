@@ -178,8 +178,8 @@ def get_n_symbol(src_text: str):
 
 def check_for_tool_updates(new_version):
     try:
-        release_api = "https://api.github.com/repos/xd2333/GalTransl/releases/latest"
-        response = requests.get(release_api, timeout=5).json()
+        from application_update import RELEASE_API
+        response = requests.get(RELEASE_API, timeout=5).json()
         latest_release = response["tag_name"]
         new_version.append(latest_release)
     except Exception:

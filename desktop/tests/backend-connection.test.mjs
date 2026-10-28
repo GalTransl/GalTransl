@@ -52,6 +52,23 @@ function loadApi({ native = true, dev = false, configured, invoke, storage, fetc
   return { api: exports, requests, requestOptions };
 }
 
+test('application updates serialize the dictionary option and hand off the prepared ID to the desktop shell', async () => {
+  const invocations = [];
+  const { api, requests, requestOptions } = loadApi({ invoke: async (name, args) => { invocations.push({ name, args }); } });
+  api.setRuntimeBackendBaseUrl('http://127.0.0.1:45678');
+  assert.equal(api.canInstallApplicationUpdate(), true);
+  await api.startApplicationUpdate(false);
+  assert.equal(requests[0], 'http://127.0.0.1:45678/api/update/start');
+  assert.equal(JSON.parse(requestOptions[0].body).preserve_dict, false);
+  await api.fetchApplicationUpdateStatus();
+  assert.equal(requests[1], 'http://127.0.0.1:45678/api/update/status');
+  await api.installApplicationUpdate('a'.repeat(32));
+  assert.equal(invocations[0].name, 'install_application_update');
+  assert.equal(invocations[0].args.updateId, 'a'.repeat(32));
+  assert.equal(loadApi({ dev: true }).api.canInstallApplicationUpdate(), false);
+  assert.equal(loadApi({ native: false }).api.canInstallApplicationUpdate(), false);
+});
+
 test('background images use binary uploads and disk settings even when localStorage is full', async () => {
   let stored = { imageVersion: '', imageName: '', opacity: 35, surfaceOpacity: 33, configured: false };
   const image = new Blob(['original image bytes'], { type: 'image/png' });

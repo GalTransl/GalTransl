@@ -26,6 +26,7 @@ from GalTransl import GUIDELINES_FOLDERNAME, DEFAULT_GUIDELINE_NAME
 from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
 from GalTransl.AppSettings import load_app_settings, save_app_settings
 from GalTransl.Extraction.http import route_extraction
+from GalTransl.AppUpdate import route_update
 from GalTransl.CustomBackground import (
     load_custom_background,
     save_custom_background_settings,
@@ -3440,6 +3441,8 @@ def build_handler(registry: JobRegistry):
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
         def do_GET(self) -> None:
+            if route_update(self, "GET", GALTRANSL_VERSION):
+                return
             if route_extraction(self, "GET"):
                 return
             parsed = urlparse(self.path)
@@ -3681,6 +3684,8 @@ def build_handler(registry: JobRegistry):
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:
+            if route_update(self, "POST", GALTRANSL_VERSION):
+                return
             if route_extraction(self, "POST"):
                 return
             parsed = urlparse(self.path)

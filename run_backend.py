@@ -2,6 +2,9 @@ import sys
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--apply-update":
+        import application_update
+        return application_update.main(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == "--extraction-python":
         from extraction_python import main as run_python
         return run_python(sys.argv[2:])
