@@ -17,7 +17,9 @@
 
 新会话默认「自动执行」：工具直接执行，`ask_user` 仍等待用户回答。「全自动-零打断」复用翻译 Agent 的问题参数和推荐项代答逻辑：自动采用 `recommended`，未指定时取第一个选项，不修改系统提示词。普通提问共用翻译 Agent 的多题、选项和自填答案卡片。权限模式可在运行中切换并保存到当前会话：放宽权限会放行当前符合条件的审批，切到零打断会按推荐项回答正在等待的问题；收紧权限对后续工具调用生效。模型列表及已选项共用「配置名/实际模型」展示格式。
 
-开发前运行 `python scripts/prepare_extraction.py`，或在 `desktop` 运行 `npm run extraction:prepare`。脚本每次拉取并快进同步 Skill 上游 `main` 分支的最新提交，将完整 Skill 和小型 Python 适配器导出到 `build/extraction-resources`，排除 Git 元数据和本地输出；缺少 Skill 时初始化子模块，有本地修改或分叉时停止同步，网络失败时明确报错。源码清单只指定来源分支，导出清单记录实际 commit 和文件数。Tauri 开发/构建及各平台发布脚本使用相同资源；发布后的程序使用包内快照，不联网更新 Skill。前端开发仍使用常规 Node 工具链，发布后的提取 Agent 无需 Node。
+开发启动只准备本地资源：Tauri 的开发配置在 `desktop` 运行 `npm run extraction:prepare -- --local`，不拉取或更新 Skill；缺少 Skill 时仍准备 Python 适配器，随后可在提取 Agent 的「运行环境」中点击「下载 Skill」。该页面显示当前版本，支持手动检查更新和下载最新版；下载通过 GitHub 的 `main` 提交和对应源码 ZIP 完成，无需本机 Git，成功后保存到用户数据目录 `extraction/skills/` 并自动启用。每个提交独立保存，原有内置、自定义和已下载目录不覆盖；下载失败时保留原选择。仅点击检查或下载时联网。
+
+打包仍运行 `python scripts/prepare_extraction.py`（或 `desktop` 中的 `npm run extraction:prepare`），拉取并快进同步 Skill 上游 `main` 分支的最新提交，将完整 Skill 和小型 Python 适配器导出到 `build/extraction-resources`，排除 Git 元数据和本地输出；缺少 Skill 时初始化子模块，有本地修改或分叉时停止同步，网络失败时明确报错。源码清单只指定来源分支，导出清单记录实际 commit 和文件数。Tauri 及各平台发布脚本使用相同资源；发布后的程序默认使用包内快照，也可在「运行环境」中手动下载更新。前端开发仍使用常规 Node 工具链，发布后的提取 Agent 无需 Node。
 
 新会话默认复用游戏目录内的 `<游戏名>_extract`，不追加数字；自定义输出目录也可复用，创建会话仅补齐缺少的子目录并保留已有文件。多个会话保留独立历史，同一游戏目录（或同一输出工作区）同时只能运行一个提取 Agent，等待审批、等待回答和停止收尾期间仍占用目录；不同游戏仍受全局最多两个提取会话并行的限制。
 

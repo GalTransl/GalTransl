@@ -93,6 +93,10 @@
 .extract-dialog h2 { margin: 0; font-size: 17px; font-weight: 600; }
 .extract-dialog header button { font-size: 22px; padding: 0 5px; }
 .extract-field { display: block; margin: 15px 0; }
+.extract-environment-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
+.extract-skill-status p { margin: 8px 0; }
+.extract-skill-status code { font-size: 12px; }
+.extract-skill-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .extract-directory-drop { border: 1px dashed var(--color-line); border-radius: 10px; padding: 0 12px 8px; }
 .extract-directory-drop.is-dragging { border-color: var(--color-primary); background: var(--color-primary-soft); }
 .extract-directory-drop > .extract-field { margin: 12px 0 8px; }

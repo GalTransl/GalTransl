@@ -10,6 +10,8 @@ from typing import Any
 
 from GalTransl.RuntimePaths import get_resource_root, get_user_data_dir
 
+from .skill import skill_status
+
 
 def data_root() -> Path:
     return get_user_data_dir() / "extraction"
@@ -109,6 +111,7 @@ def environment() -> dict[str, Any]:
     if not Path(python_runner_script()).is_file():
         problems.append("python_runner_missing")
     return {"settings": settings, "python_version": f"Python {sys.version.split()[0]}",
+            "skill": skill_status(Path(settings["skill_dir"])),
             "agent_engine": "galtransl", "builtin_python": builtin_python(),
             "python_runner_script": python_runner_script(),
             "system_pythons": system_pythons(settings["python_path"]),

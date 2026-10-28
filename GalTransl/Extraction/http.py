@@ -4,10 +4,12 @@ import ipaddress
 import json
 import time
 from http import HTTPStatus
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .environment import environment, save_settings
+from .environment import data_root, environment, load_settings, save_settings
 from .runtime import EXTRACTION_RUNTIME
+from .skill import SkillDownloadError, check_skill, install_skill
 
 
 def trusted_request(handler) -> bool:
@@ -97,6 +99,15 @@ def route_extraction(handler, method: str) -> bool:
             if action == "settings":
                 save_settings(payload)
                 result = environment()
+            elif action == "skill-check":
+                directory = payload.get("skill_dir", load_settings()["skill_dir"])
+                if not isinstance(directory, str) or not directory.strip() or "\0" in directory:
+                    raise ValueError("Skill directory is required")
+                result = check_skill(Path(directory).expanduser().resolve())
+            elif action == "skill-install":
+                directory = install_skill(data_root())
+                save_settings({"skill_dir": str(directory)})
+                result = environment()
             elif action == "create":
                 result = {"session": EXTRACTION_RUNTIME.store.create(str(payload.get("game_dir", "")),
                                                                      str(payload.get("output_dir", "")))}
@@ -120,6 +131,8 @@ def route_extraction(handler, method: str) -> bool:
         else:
             return False
         handler._send_json(result)
+    except SkillDownloadError as exc:
+        handler._send_json({"error": str(exc)}, status=HTTPStatus.BAD_GATEWAY)
     except FileNotFoundError as exc:
         handler._send_json({"error": str(exc)}, status=HTTPStatus.NOT_FOUND)
     except (ValueError, TypeError, FileExistsError, NotADirectoryError) as exc:

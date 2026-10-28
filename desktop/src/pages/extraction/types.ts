@@ -20,9 +20,13 @@ export type Snapshot = {
   session: Session; events: AgentEvent[]; live_events: AgentEvent[]; cursor: number;
   pending: AgentEvent | null; has_more: boolean; before_seq: number | null;
 };
+export type SkillStatus = {
+  installed: boolean; current_commit: string; latest_commit: string; update_available: boolean;
+};
 export type Environment = {
   ready: boolean; problems: string[]; agent_engine: string; python_version: string;
   settings: { skill_dir: string; python_path: string };
+  skill: SkillStatus;
 };
 export type SessionList = { sessions: Session[]; next_offset: number | null; total: number; running_game_dirs?: string[] };
 export type FileList = { path: string; entries: { name: string; is_dir: boolean; size: number }[]; next_offset: number | null; total: number };
