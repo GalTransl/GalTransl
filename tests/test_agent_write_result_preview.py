@@ -82,6 +82,19 @@ class WritePreviewTests(unittest.TestCase):
         self.assertNotIn("old0", text)
         self.assertNotIn("new0", text)
 
+    def test_multifile_replace_reports_global_preview_omission_once(self):
+        result = {"action": "replace", "files": [
+            {"filename": f"chapter{i}.json", "updated": 8, "changes": _changes(8, f"chapter{i}.json#")}
+            for i in range(3)
+        ]}
+
+        text = _render_tool_result_table("patch_transl_cache", result)
+
+        self.assertEqual(len([line for line in text.splitlines() if line.startswith("- #")]), 10)
+        self.assertEqual(text.count("后续修改为节省上下文，不展示 diff（仅省略预览）。"), 1)
+        self.assertNotIn("变更预览共", text)
+        self.assertNotIn("本次展示 0 行", text)
+
     def test_patch_mode_keeps_before_and_after(self):
         result = {"files": [
             {"filename": "a.json", "updated": 1, "changes": _changes(1, "a.json#7.pre_dst")},

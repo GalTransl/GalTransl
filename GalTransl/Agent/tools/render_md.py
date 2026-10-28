@@ -220,7 +220,7 @@ def _md_changes(changes: Any, limit: int = MODEL_DIFF_MAX_LINES, filename: str =
     return _md_doc(table, _diff_omission(len(shown), len(rows)))
 
 
-def _md_path_lines(changes: list[dict[str, Any]], total: int, filename: str = "") -> str:
+def _md_path_lines(changes: list[dict[str, Any]], filename: str = "") -> str:
     """只列路径的变更预览（文本替换用）：一行一条，不套表格。
 
     单独一列的表格仍要表头 + 分隔线 + 每行的竖线，几百行时全是纯开销；
@@ -232,7 +232,7 @@ def _md_path_lines(changes: list[dict[str, Any]], total: int, filename: str = ""
     lines = "\n".join(
         f"- {str(_strip_path_prefix(row.get('path'), prefix) or '').replace(chr(10), ' ')}" for row in shown
     )
-    return _md_doc(lines, _diff_omission(len(shown), total))
+    return lines
 
 
 def _md_line_diff(diff: dict[str, Any]) -> str:
@@ -715,7 +715,7 @@ def _md_render_patch_transl_cache(result: dict[str, Any]) -> str:
         shown = changes[:remaining]
         filename = str(row.get("filename") or "")
         rendered = (
-            _md_path_lines(shown, len(changes), filename)
+            _md_path_lines(shown, filename)
             if replace_mode else _md_changes(shown, filename=filename)
         )
         remaining -= len(shown)
