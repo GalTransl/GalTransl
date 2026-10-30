@@ -540,12 +540,16 @@ export function NewProjectWizard({ active, initialDirectory, onProjectNameChange
     // eslint-disable-next-line react-hooks/react-hooks
   }, [currentStep]); // intentionally only depend on currentStep
 
-  const handleFinish = useCallback(() => {
+  const handleFinish = useCallback((destination: 'project' | 'agent' = 'project') => {
     if (!projectDir) return;
     onOpenProject(projectDir, 'config.yaml');
     addProjectToHistory(projectDir, 'config.yaml');
-    const projectId = encodeProjectDir(projectDir);
-    navigate(`/project/${projectId}/translate`);
+    if (destination === 'agent') {
+      navigate('/agent', { state: { agentProjectDir: projectDir } });
+    } else {
+      const projectId = encodeProjectDir(projectDir);
+      navigate(`/project/${projectId}/translate`);
+    }
   }, [projectDir, navigate, onOpenProject]);
 
   // 「下一步」本身会完成创建项目 / 保存设置，不再要求先点单独的按钮
@@ -958,7 +962,10 @@ export function NewProjectWizard({ active, initialDirectory, onProjectNameChange
             {advancing ? translate("projects:newProjectWizard.wizardNav_message_processing") : nextLabel}
           </Button>
         ) : (
-          <Button onClick={handleFinish}>{translate("projects:newProjectWizard.wizardNav_message_completeOpenProject")}</Button>
+          <div className="wizard-nav__actions">
+            <Button variant="secondary" onClick={() => handleFinish()}>{translate("projects:newProjectWizard.wizardNav_message_completeOpenProject")}</Button>
+            <Button onClick={() => handleFinish('agent')}>{translate("projects:newProjectWizard.wizardNav_message_openTranslationAgent")}</Button>
+          </div>
         )}
       </div>
     </div>

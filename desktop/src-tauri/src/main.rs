@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod backend;
+mod update;
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -15,6 +16,19 @@ const BACKEND_STARTUP_TIMEOUT_MS: u64 = 20_000;
 fn backend_manager() -> &'static BackendManager {
     static MANAGER: OnceLock<BackendManager> = OnceLock::new();
     MANAGER.get_or_init(BackendManager::default)
+}
+
+#[tauri::command]
+async fn install_application_update(app: tauri::AppHandle, update_id: String) -> Result<(), String> {
+    if cfg!(debug_assertions) {
+        return Err("Automatic updates are unavailable in the source development environment".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || update::launch_installer(&update_id))
+        .await
+        .map_err(|error| error.to_string())??;
+    backend_manager().shutdown()?;
+    app.exit(0);
+    Ok(())
 }
 
 fn ensure_backend_ready_inner(resource_dir: Option<PathBuf>, hide_console: bool, timeout_ms: Option<u64>) -> Result<BackendConnection, String> {
@@ -244,6 +258,7 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             ensure_backend_ready,
+            install_application_update,
             set_backend_console_preference,
             open_folder,
             reveal_file,

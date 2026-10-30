@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore, type Dispatch, type ReactElement, type SetStateAction } from 'react';
 import { I18nextProvider, Trans } from 'react-i18next';
-import { getUiLanguage, i18n, normalizeUiLanguage, resolveMessage, setUiLanguage, subscribeUiLanguage, UI_LANGUAGE_STORAGE_KEY, type LocalizedText, type MessageValues, type TranslationKey } from './core';
+import { getUiLanguage, i18n, resolveMessage, resolveUiLanguage, systemLanguages, setUiLanguage, subscribeUiLanguage, UI_LANGUAGE_STORAGE_KEY, type LocalizedText, type MessageValues, type TranslationKey } from './core';
 
 export function useUiLanguage() {
   return useSyncExternalStore(subscribeUiLanguage, getUiLanguage, () => 'zh-CN' as const);
@@ -10,7 +10,7 @@ export function UiI18nProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const sync = (event: StorageEvent) => {
       if (event.key === UI_LANGUAGE_STORAGE_KEY || event.key === null) {
-        void i18n.changeLanguage(normalizeUiLanguage(event.newValue));
+        void i18n.changeLanguage(resolveUiLanguage(event.newValue, systemLanguages));
       }
     };
     window.addEventListener('storage', sync);

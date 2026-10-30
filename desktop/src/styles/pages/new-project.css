@@ -350,6 +350,13 @@
   backdrop-filter: blur(8px);
 }
 
+.wizard-nav__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
 /* ── Drop zone (Step 2) ── */
 
 .drop-zone {
@@ -620,13 +627,17 @@
     flex: 1 1 180px;
   }
 
+  .wizard-nav__actions {
+    flex: 1 1 100%;
+  }
+
   .drop-zone {
     min-height: 160px;
     padding: var(--space-6) var(--space-4);
   }
 }
 
-@media (prefers-reduced-motion: no-preference) and (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) {
   .drop-zone,
   .wizard-step {
     transition: none;

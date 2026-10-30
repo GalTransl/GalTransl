@@ -61,6 +61,20 @@
   scroll-behavior: auto !important;
 }
 
+/* ── 文档不可见时停掉 CSS 动画/过渡 ──
+ * 标记由 lib/documentMotionPause.ts 挂到根元素上。同样用 0.01ms + 单次迭代：
+ * 动画立即落到终态，事件照常派发，但不再持续占用合成层。
+ * JS 动效由各自 enabled() 里的 document.hidden 判断负责。 */
+:root[data-document-hidden] *,
+:root[data-document-hidden] *::before,
+:root[data-document-hidden] *::after {
+  animation-duration: 0.01ms !important;
+  animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  transition-delay: 0ms !important;
+}
+
 /* ── Popover / Dropdown enter animation ── */
 
 @keyframes popoverEnter {

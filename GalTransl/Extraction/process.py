@@ -25,6 +25,7 @@ class CommandJob:
                         ("process_memory", ctypes.c_size_t), ("job_memory", ctypes.c_size_t),
                         ("peak_process_memory", ctypes.c_size_t), ("peak_job_memory", ctypes.c_size_t)]
 
+        self.limits_type = ExtendedLimits
         self.kernel = ctypes.WinDLL("kernel32", use_last_error=True)
         self.kernel.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
         self.kernel.CreateJobObjectW.restype = wintypes.HANDLE
@@ -58,6 +59,14 @@ class CommandJob:
         if self.handle is not None:
             self.kernel.CloseHandle(self.handle)
             self.handle = None
+
+    def release(self):
+        """Close the job without killing descendants that outlived a finished command."""
+        if self.handle is not None:
+            import ctypes
+            limits = self.limits_type()
+            self.kernel.SetInformationJobObject(self.handle, 9, ctypes.byref(limits), ctypes.sizeof(limits))
+        self.close()
 
 
 def terminate_tree(process: subprocess.Popen) -> None:

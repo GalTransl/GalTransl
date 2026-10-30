@@ -68,6 +68,42 @@ class WritePreviewTests(unittest.TestCase):
         self.assertIn("删除行数：250", text)
         self.assertNotIn("-old10\n", text)
 
+    def test_replace_mode_lists_changed_paths_as_plain_lines(self):
+        result = {"action": "replace", "files": [
+            {"filename": "a.json", "updated": 2, "changes": _changes(2, "a.json#12.pre_dst")},
+        ]}
+        text = _render_tool_result_table("patch_transl_cache", result)
+        # 纯文本行，没有表格外壳；小节标题已有文件名，path 前缀也去掉
+        self.assertNotIn("|", text)
+        self.assertIn("- #12.pre_dst0\n- #12.pre_dst1", text)
+        self.assertNotIn("before", text)
+        self.assertNotIn("after", text)
+        # 值本身也不再回传
+        self.assertNotIn("old0", text)
+        self.assertNotIn("new0", text)
+
+    def test_multifile_replace_reports_global_preview_omission_once(self):
+        result = {"action": "replace", "files": [
+            {"filename": f"chapter{i}.json", "updated": 8, "changes": _changes(8, f"chapter{i}.json#")}
+            for i in range(3)
+        ]}
+
+        text = _render_tool_result_table("patch_transl_cache", result)
+
+        self.assertEqual(len([line for line in text.splitlines() if line.startswith("- #")]), 10)
+        self.assertEqual(text.count("后续修改为节省上下文，不展示 diff（仅省略预览）。"), 1)
+        self.assertNotIn("变更预览共", text)
+        self.assertNotIn("本次展示 0 行", text)
+
+    def test_patch_mode_keeps_before_and_after(self):
+        result = {"files": [
+            {"filename": "a.json", "updated": 1, "changes": _changes(1, "a.json#7.pre_dst")},
+        ]}
+        text = _render_tool_result_table("patch_transl_cache", result)
+        self.assertIn("| path | before | after |", text)
+        for detail in ("old0", "new0"):
+            self.assertIn(detail, text)
+
     def test_multifile_patch_uses_one_budget_and_preserves_late_errors(self):
         result = {"files": [
             {"filename": "a.json", "updated": 8, "changes": _changes(8, "a")},
@@ -120,6 +156,73 @@ class WritePreviewTests(unittest.TestCase):
         text = _render_tool_result_table("patch_transl_cache", result)
         self.assertEqual(text.count("不展示 diff"), 1)
         self.assertNotIn("hidden", text)
+
+    def test_multifile_replace_skips_files_without_any_change(self):
+        # replace 模式会把项目里全部缓存文件都走一遍，没改动的那些不该逐份列节。
+        result = {"action": "replace", "files": [
+            {"filename": "a.json", "updated": 3, "changes": _changes(3, "a")},
+            {"filename": "b.json", "updated": 0, "changes": [], "note": "内容没有变化，未保存文件"},
+            {"filename": "c.json", "updated": 0, "changes": [], "note": "内容没有变化，未保存文件"},
+            {"filename": "d.json", "updated": 0, "changes": [], "error": "文件不存在"},
+            {"filename": "e.json", "updated": 0, "changes": [],
+             "not_found": [{"index": 7}], "error": "没有条目被更新（skipped=0, not_found=1）"},
+        ]}
+        text = _render_tool_result_table("patch_transl_cache", result)
+        self.assertIn("共改动 3 条，涉及 1 个缓存文件", text)
+        self.assertIn("其余 2 个文件没有内容变化", text)
+        # 失败的文件仍然逐份交代，且编号只数真正成节的
+        self.assertIn("## 1. a.json（改 3 条）", text)
+        self.assertIn("## 2. d.json（改 0 条）", text)
+        self.assertIn("## 3. e.json（改 0 条）", text)
+        for detail in ("文件不存在", "没找到这些 index：7"):
+            self.assertIn(detail, text)
+        self.assertNotIn("b.json", text)
+        self.assertNotIn("c.json", text)
+
+    def test_revert_shares_the_patch_rendering_and_its_budget(self):
+        # 撤销的返回体和 patch 同构：必须有渲染器，且 before/after 受同一个 10 行上限约束。
+        result = {
+            "updated": 15,
+            "files": [{"filename": "a.json", "updated": 15, "changes": _changes(15, "a.json#")}],
+            "changes": _changes(15, "a.json#"),
+        }
+        text = _render_tool_result_table("revert_proofread_changes", result)
+        self.assertIsNotNone(text)
+        self.assertIn("## 1. a.json（改 15 条）", text)
+        self.assertIn("| path | before | after |", text)
+        self.assertEqual(len(_table_data(text)), 10)
+        self.assertIn("不展示 diff", text)
+        # 小节标题已经写了文件名，表里不再重复 `文件名#` 前缀
+        self.assertIn("| #0 | old0 | new0 |", text)
+        self.assertNotIn("a.json#0", text)
+
+    def test_white_list_lists_entries_as_plain_lines(self):
+        result = {"white_list": ["01.json:12", "01.json:13"], "count": 2}
+        text = _render_tool_result_table("manage_problem_white_list", result)
+        self.assertIn("共 2 条白名单", text)
+        self.assertIn("- 01.json:12\n- 01.json:13", text)
+        self.assertNotIn("|", text)
+
+    def test_white_list_is_bounded_for_the_model(self):
+        result = {"white_list": [f"f.json:{i}" for i in range(150)], "count": 150}
+        text = _render_tool_result_table("manage_problem_white_list", result)
+        self.assertEqual(len([line for line in text.splitlines() if line.startswith("- ")]), 100)
+        self.assertIn("其余 50 条未展开", text)
+
+    def test_read_page_note_does_not_repeat_the_entry_count(self):
+        base = {
+            "filename": "a.json", "count": 3, "matched": 3, "returned": 3, "offset": 0,
+            "entries": [{"index": 1, "name": "", "pre_src": "s1"}], "has_more": False,
+        }
+        text = _render_tool_result_table("read_input_file", base)
+        self.assertIn("共 3 条，显示 3 条", text)
+        self.assertNotIn("筛选后共", text)
+        self.assertNotIn("offset=", text)
+        # 真的筛过 / 真的翻页了才说
+        filtered = {**base, "matched": 1, "returned": 1, "offset": 2}
+        text = _render_tool_result_table("read_input_file", filtered)
+        self.assertIn("筛选后共 1 条", text)
+        self.assertIn("本页 offset=2", text)
 
     def test_delete_preview_is_limited_but_missing_indexes_are_kept(self):
         result = {"deleted_indexes": list(range(80)), "deleted_preview": [{"index": i, "text": f"line{i}"} for i in range(50)], "missing_indexes": [999]}

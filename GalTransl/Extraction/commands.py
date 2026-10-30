@@ -19,6 +19,7 @@ from .subprocess_env import external_environment, external_program
 
 MAX_OUTPUT_BYTES = 10 * 1024 * 1024
 PREVIEW_CHARS = 16000
+EXIT_IDLE_SECONDS = .1
 
 
 class Commands:
@@ -62,9 +63,12 @@ class Commands:
         chunks = queue.Queue(maxsize=16)
         reader_done = threading.Event()
         reader_stop = threading.Event()
+        # Set when bash returns while a background descendant still holds the pipe open.
+        detached = threading.Event()
         from .pi_output import OutputAccumulator, shell_result
         accumulator = OutputAccumulator() if native else None
         child = None
+        survive = False
         # One merged pipe preserves command output order and bounds buffering.
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path = checked_path(str(log_path), self.workspace, [self.workspace], True)
@@ -84,18 +88,20 @@ class Commands:
                 def read_output():
                     try:
                         while data := child.stdout.read1(4096):
-                            while not reader_stop.is_set():
+                            while not (reader_stop.is_set() or detached.is_set()):
                                 try:
                                     chunks.put(data, timeout=.1)
                                     break
                                 except queue.Full:
                                     continue
-                            if reader_stop.is_set():
+                            if reader_stop.is_set() or detached.is_set():
                                 return
                     except (OSError, ValueError):
                         pass
                     finally:
                         reader_done.set()
+                        if detached.is_set():
+                            child.stdout.close()
 
                 reader = threading.Thread(target=read_output, daemon=True)
                 reader.start()
@@ -112,17 +118,24 @@ class Commands:
                 last_flush = started
                 killed_at = None
                 parent_exited_at = None
+                last_data = started
                 while child.poll() is None or not reader_done.is_set() or not chunks.empty():
                     now = time.monotonic()
                     if self.stop_event.is_set():
                         failure = "Operation stopped"
-                    elif timeout is not None and now - started > timeout:
+                    elif timeout is not None and now - started > timeout and not (native and child.poll() is not None):
                         failure = f"Command timed out after {timeout:g} seconds" if native else "Command exceeded its time limit"
                     if child.poll() is not None and parent_exited_at is None:
                         parent_exited_at = now
-                        self.job.kill()
-                        terminate_tree(child)
-                    if parent_exited_at is not None and now - parent_exited_at > 4:
+                        if not native:
+                            self.job.kill()
+                            terminate_tree(child)
+                    if native and parent_exited_at is not None and not failure \
+                            and chunks.empty() and now - max(parent_exited_at, last_data) > EXIT_IDLE_SECONDS:
+                        # Like Pi, a background descendant holding the pipe does not keep bash waiting.
+                        detached.set()
+                        break
+                    if not native and parent_exited_at is not None and now - parent_exited_at > 4:
                         break
                     if failure and killed_at is None:
                         self.job.kill()
@@ -135,6 +148,7 @@ class Commands:
                     except queue.Empty:
                         data = b""
                     if data:
+                        last_data = now
                         remaining = len(data) if native else max(0, MAX_OUTPUT_BYTES - total)
                         total += len(data)
                         log.write(data[:remaining])
@@ -160,18 +174,23 @@ class Commands:
                 elif live:
                     self.emit({"type": "tool_output", "toolCallId": call_id, "text": live})
                 child.wait(timeout=5)
+                # A finished bash leaves background descendants running; stop and failure still reap them.
+                survive = native and not failure and not self.stop_event.is_set()
             except OSError as exc:
                 raise AgentToolError(f"Cannot execute command: {exc}") from exc
             finally:
-                reader_stop.set()
+                if not survive:
+                    reader_stop.set()
                 with self.lock:
                     if self.job:
-                        self.job.close()
+                        self.job.release() if survive else self.job.close()
                         self.job = None
                     if child is not None:
-                        terminate_tree(child)
+                        if not survive:
+                            terminate_tree(child)
                         child.wait(timeout=8)
-                        for stream in (child.stdin, child.stdout):
+                        # A detached reader closes its own end after its next read; closing here would block on it.
+                        for stream in (child.stdin, None if detached.is_set() else child.stdout):
                             if stream:
                                 stream.close()
                     self.process = None

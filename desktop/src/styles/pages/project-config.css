@@ -1074,7 +1074,7 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
-@media (prefers-reduced-motion: no-preference) and (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) {
   .section-fade-in { animation: none; }
 }
 .project-config-fields {

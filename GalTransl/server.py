@@ -26,6 +26,7 @@ from GalTransl import GUIDELINES_FOLDERNAME, DEFAULT_GUIDELINE_NAME
 from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
 from GalTransl.AppSettings import load_app_settings, save_app_settings
 from GalTransl.Extraction.http import route_extraction
+from GalTransl.AppUpdate import route_update
 from GalTransl.CustomBackground import (
     load_custom_background,
     save_custom_background_settings,
@@ -1824,7 +1825,11 @@ def _cache_entries_to_trans_list(entries, filename, white_index):
 
 
 def _problem_revision(project_dir: str, config_name: str) -> str | None:
-    """仅核对问题清单的数据源元信息，未变化时不读整份缓存。"""
+    """流式核对数据源内容，未变化时跳过 JSON 解析及问题清单重建。
+
+    文件时间戳可能粒度不足；Windows 的 ctime 还是创建时间，不能用于
+    可靠区分连续的同大小改写。内容摘要不依赖文件系统的时间精度。
+    """
     cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
     try:
         names = sorted(name for name in os.listdir(cache_dir) if name.endswith(".json"))
@@ -1843,7 +1848,14 @@ def _problem_revision(project_dir: str, config_name: str) -> str | None:
             continue
         except OSError:
             return None  # 无法确认数据源时，不能把旧清单当成仍有效。
-        signature.append((name, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino))
+        digest = hashlib.sha256()
+        try:
+            with open(path, "rb") as source:
+                while chunk := source.read(1024 * 1024):
+                    digest.update(chunk)
+        except OSError:
+            return None  # 删除或读取失败时不能沿用旧版本。
+        signature.append((name, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino, digest.hexdigest()))
     return hashlib.sha256(json.dumps(signature).encode("utf-8")).hexdigest()
 
 
@@ -3429,6 +3441,8 @@ def build_handler(registry: JobRegistry):
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
         def do_GET(self) -> None:
+            if route_update(self, "GET", GALTRANSL_VERSION):
+                return
             if route_extraction(self, "GET"):
                 return
             parsed = urlparse(self.path)
@@ -3670,6 +3684,8 @@ def build_handler(registry: JobRegistry):
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:
+            if route_update(self, "POST", GALTRANSL_VERSION):
+                return
             if route_extraction(self, "POST"):
                 return
             parsed = urlparse(self.path)

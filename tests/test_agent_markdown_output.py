@@ -447,6 +447,7 @@ class DispatcherTests(unittest.TestCase):
                 "manage_problem_filter",
                 "run_subagents",
                 "patch_transl_cache",
+                "revert_proofread_changes",
                 "get_name_table",
                 "save_dict",
                 "save_name_table",

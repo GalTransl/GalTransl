@@ -134,6 +134,7 @@ impl BackendManager {
                     )
                 })?;
             let mut command = Command::new(&path);
+            command.env("GALTRANSL_DESKTOP_EXECUTABLE", std::env::current_exe().map_err(|error| error.to_string())?);
             let resource_root = resolve_backend_resource_root(&path, resource_dir);
             if let Some(root) = resource_root.as_deref() {
                 command.current_dir(root);

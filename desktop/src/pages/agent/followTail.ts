@@ -18,15 +18,32 @@ export function followTail(viewport: HTMLElement, content: HTMLElement, onBottom
   let touchY: number | null = null;
   let touchScrolling = false;
   const pointerRoot = viewport.ownerDocument ?? viewport;
+  // 已上报过的跟随态 / 阅读位置：follow 会被 ResizeObserver 每帧调用，
+  // 值没变就不该穿透到 React（setState）和阅读位置存储。
+  let lastBottom: boolean | null = null;
+  let lastRemembered = '';
+  const notifyBottom = (value: boolean) => {
+    if (value === lastBottom) return;
+    lastBottom = value;
+    onBottom(value);
+  };
   const nearBottom = () => viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80;
-  const remember = () => options.onPosition?.({ scrollTop: restoreTop ?? lastTop, following });
+  const remember = () => {
+    const position = { scrollTop: restoreTop ?? lastTop, following };
+    const key = `${position.scrollTop}|${position.following}`;
+    if (key === lastRemembered) return;
+    lastRemembered = key;
+    options.onPosition?.(position);
+  };
   const follow = () => {
     if (disposed || !active) return;
     if (finalReply?.isConnected === false) finalReply = null;
     if (finalReply) {
       // 折叠工作块时回复的实际位置逐帧变化，保持其开头在视口内。
-      viewport.scrollTop += finalReply.getBoundingClientRect().top
+      // 亚像素抖动不值得写一次 scrollTop：每次写入都会再派发一个 scroll 事件。
+      const delta = finalReply.getBoundingClientRect().top
         - viewport.getBoundingClientRect().top - viewport.clientTop - 16;
+      if (Math.abs(delta) >= 0.5) viewport.scrollTop += delta;
       lastTop = viewport.scrollTop;
       remember();
       return;
@@ -37,28 +54,34 @@ export function followTail(viewport: HTMLElement, content: HTMLElement, onBottom
         if (viewport.scrollHeight - viewport.clientHeight >= restoreTop) restoreTop = null;
       }
       lastTop = viewport.scrollTop;
-      onBottom(nearBottom());
+      notifyBottom(nearBottom());
       remember();
       return;
     }
-    viewport.scrollTop = viewport.scrollHeight;
+    // 已经在底部就不写：同值赋值不改变滚动位置，却仍会被当成一次滚动。
+    const bottom = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+    if (viewport.scrollTop !== bottom) viewport.scrollTop = bottom;
     lastTop = viewport.scrollTop;
-    onBottom(true);
+    notifyBottom(true);
     remember();
   };
   const onScroll = () => {
     if (!active) return;
     const top = viewport.scrollTop;
+    // 自己写 scrollTop 引起的回声：位置与上次记下的一致，说明这次滚动不是用户产生的。
+    // 折叠/流式时 follow 每帧写一次，这类事件占绝大多数——直接放行，既不重算跟随态，
+    // 也不触发一次 React 更新。
+    if (top === lastTop) return;
+    lastTop = top;
     if (finalReply) {
-      lastTop = top;
       remember();
       return;
     }
     // 终态折叠会把 scrollTop 钳制变小，这不是用户上滚。只有真实输入才能改跟随意图。
-    if (userScrollPending || draggingScrollbar || touchScrolling) following = nearBottom();
+    const near = nearBottom();
+    if (userScrollPending || draggingScrollbar || touchScrolling) following = near;
     userScrollPending = false;
-    lastTop = top;
-    onBottom(following || nearBottom());
+    notifyBottom(following || near);
     remember();
   };
   const releaseReply = () => { finalReply = null; };
@@ -70,7 +93,7 @@ export function followTail(viewport: HTMLElement, content: HTMLElement, onBottom
     // 输入先于 scroll/ResizeObserver：与 finish 同帧上滚时也必须由用户优先。
     if (up && viewport.scrollTop > 0) {
       following = false;
-      onBottom(false);
+      notifyBottom(false);
     }
     lastTop = viewport.scrollTop;
     remember();
@@ -101,7 +124,7 @@ export function followTail(viewport: HTMLElement, content: HTMLElement, onBottom
     restoreTop = null;
     following = false;
     lastTop = viewport.scrollTop;
-    onBottom(nearBottom());
+    notifyBottom(nearBottom());
     remember();
   };
   const onKeyDown = (event: KeyboardEvent) => {
@@ -137,7 +160,7 @@ export function followTail(viewport: HTMLElement, content: HTMLElement, onBottom
       following = false;
       finalReply = reply;
       follow();
-      onBottom(false);
+      notifyBottom(false);
     },
     setActive(value: boolean) {
       active = value;
@@ -153,7 +176,7 @@ export function followTail(viewport: HTMLElement, content: HTMLElement, onBottom
       restoreTop = null;
       following = true;
       lastTop = viewport.scrollTop;
-      onBottom(true);
+      notifyBottom(true);
       if (active) viewport.scrollTo({ top: viewport.scrollHeight, behavior });
       lastTop = viewport.scrollTop;
       remember();

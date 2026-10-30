@@ -1,7 +1,7 @@
-import { usePageActive } from '../../components/PageActivity';
-import { t as translate, useUiLanguage } from "../../i18n";
-import { useEffect, useState } from 'react';
+import { t as translate } from "../../i18n";
+import { useState } from 'react';
 import type { AgentSession as AgentSessionMeta } from '../../lib/api';
+import { useSessionTime } from '../../lib/sessionTime';
 import { Icon } from '../../components/Icon';
 import { shortName } from './storage';
 
@@ -48,18 +48,9 @@ export function AgentSessionSidebar({
   onSelectSession: (dir: string, sid: string) => void;
   onDeleteSession: (dir: string, session: AgentSessionMeta) => void;
 }) {
-  useUiLanguage();
-  const active = usePageActive();
+  const formatSessionTime = useSessionTime();
   // 哪些项目分组已经点开过「显示其余 N 个」（纯本地状态，不涉及请求）
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
-  // 相对时间（刚刚 / N分钟前）要定时重算，否则页面静止时数字会一直停着不动
-  const [, setTimeTick] = useState(0);
-  useEffect(() => {
-    if (!active) return;
-    setTimeTick((n) => n + 1);
-    const timer = window.setInterval(() => setTimeTick((n) => n + 1), 60_000);
-    return () => window.clearInterval(timer);
-  }, [active]);
 
   return (
     <aside className="agent-sessions">
@@ -119,23 +110,6 @@ export function AgentSessionSidebar({
                   </button>
                   <button
                     type="button"
-                    className="agent-sessions__group-close"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onCloseProjectGroup(dir);
-                    }}
-                    disabled={hasRunning}
-                    title={
-                      hasRunning
-                        ? translate("agent:agentSessionSidebar.agentSessionsGroupClose_title_projectSessionPendingRunningStopDisable")
-                        : translate("agent:agentSessionSidebar.agentSessionsGroupClose_title_disableSessionHistoryKeepOpen", { shortDir: shortDir })
-                    }
-                    aria-label={translate("agent:agentSessionSidebar.agentSessionsGroupClose_ariaLabel_disableProject", { shortDir: shortDir })}
-                  >
-                    <Icon name="close" />
-                  </button>
-                  <button
-                    type="button"
                     className="agent-sessions__group-new"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -153,6 +127,23 @@ export function AgentSessionSidebar({
                     aria-label={translate("agent:agentSessionSidebar.agentSessionsGroupNew_ariaLabel_newSession", { shortDir: shortDir })}
                   >
                     ＋
+                  </button>
+                  <button
+                    type="button"
+                    className="agent-sessions__group-close"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseProjectGroup(dir);
+                    }}
+                    disabled={hasRunning}
+                    title={
+                      hasRunning
+                        ? translate("agent:agentSessionSidebar.agentSessionsGroupClose_title_projectSessionPendingRunningStopDisable")
+                        : translate("agent:agentSessionSidebar.agentSessionsGroupClose_title_disableSessionHistoryKeepOpen", { shortDir: shortDir })
+                    }
+                    aria-label={translate("agent:agentSessionSidebar.agentSessionsGroupClose_ariaLabel_disableProject", { shortDir: shortDir })}
+                  >
+                    <Icon name="close" />
                   </button>
                 </div>
                 <div className="agent-sessions__group-collapse">
@@ -235,23 +226,4 @@ export function AgentSessionSidebar({
       </div>
     </aside>
   );
-}
-
-/** 会话时间改成相对时间：刚刚 / N分钟前 / N小时前 / N天前，超过一周退回日期。 */
-function formatSessionTime(ts: number): string {
-  if (!ts) return '';
-  const then = new Date(ts * 1000);
-  const time = then.getTime();
-  if (Number.isNaN(time)) return '';
-  const diffMs = Date.now() - time;
-  if (diffMs < 60_000) return translate("agent:agentSessionSidebar.formatSessionTime_message_text"); // 含时钟偏差导致的「未来时间」
-  const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 60) return translate("agent:agentSessionSidebar.formatSessionTime_message_minutes", { minutes: minutes });
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return translate("agent:agentSessionSidebar.formatSessionTime_message_hours", { hours: hours });
-  const days = Math.floor(hours / 24);
-  if (days < 7) return translate("agent:agentSessionSidebar.formatSessionTime_message_textVariant2", { days: days });
-  const showYear = then.getFullYear() !== new Date().getFullYear();
-  const md = `${then.getMonth() + 1}/${then.getDate()}`;
-  return showYear ? `${then.getFullYear()}/${md}` : md;
 }

@@ -46,7 +46,7 @@ function formatTime(seconds: number): string {
  * 与项目规范同一套编辑口径：自带保存按钮（不走配置页那条 YAML 保存）、dirty 状态、
  * Ctrl/Cmd+S、字符数；改完**下一次启动翻译**才生效（翻译器只在初始化时读一次规范）。
  */
-export function CommonGuidelinesPage() {
+export function CommonGuidelinesPage({ embedded = false }: { embedded?: boolean }) {
   const uiLanguage = useUiLanguage();
   const navigate = useNavigate();
   const [files, setFiles] = useState<TranslationGuidelineFile[]>([]);
@@ -209,18 +209,18 @@ export function CommonGuidelinesPage() {
   const actionsDisabled = busy || loading;
 
   return (
-    <div className="common-guidelines-page">
-      <PageHeader
+    <div className={`common-guidelines-page${embedded ? ' common-guidelines-page--embedded' : ''}`}>
+      {!embedded && <PageHeader
         className="common-guidelines-page__header"
         title={translate("settings:commonGuidelinesPage.commonGuidelinesPage_title_translationGuideline")}
         description={translate("settings:commonGuidelinesPage.commonGuidelinesPage_description_translationGuidelineFileProjectConfigTranslationProject")}
-      />
+      />}
 
       <div className="common-guidelines-page__content">
         <section className="panel">
           <header className="panel__header">
             <div>
-              <h2>{translate("settings:commonGuidelinesPage.panelHeader_message_guidelineFile")}</h2>
+              <h2>{translate(embedded ? "settings:commonGuidelinesPage.commonGuidelinesPage_title_translationGuideline" : "settings:commonGuidelinesPage.panelHeader_message_guidelineFile")}</h2>
               <p><UiTrans k="settings:commonGuidelinesPage.panelHeader_message_fileDirectory0TranslationGuidelines0Md" components={[<code />, <strong />]} /></p>
             </div>
           </header>
@@ -296,12 +296,12 @@ export function CommonGuidelinesPage() {
                     void handleDelete();
                   }}
                 >{translate("common:actions.delete")}</button>
-                <button
+                {!embedded && <button
                   type="button"
                   className="button"
                   disabled={busy}
                   onClick={() => navigate('/settings?section=guideline')}
-                >{translate("settings:commonGuidelinesPage.commonGuidelinesPageActions_message_backSettings")}</button>
+                >{translate("settings:commonGuidelinesPage.commonGuidelinesPageActions_message_backSettings")}</button>}
               </div>
 
               <textarea

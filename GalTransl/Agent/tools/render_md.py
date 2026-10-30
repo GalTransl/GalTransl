@@ -168,6 +168,8 @@ def _md_render_project_overview(result: dict[str, Any]) -> str | None:
 # 每次工具调用共享的模型侧预览预算；原始结果仍供前端变更卡使用。
 MODEL_DIFF_MAX_LINES = 10
 MODEL_DIFF_CELL_CHARS = 500
+# 白名单这类"一行一条"的清单：只限制展示条数（原始结果仍完整给前端）。
+WHITE_LIST_SHOW_MAX = 100
 
 
 def _diff_value(value: Any) -> str:
@@ -187,18 +189,50 @@ def _diff_omission(shown: int, total: int, truncated: bool = False) -> str:
     return f"变更预览共 {count} 行，本次展示 {shown} 行，其余已省略（每次调用最多 {MODEL_DIFF_MAX_LINES} 行，仅限制预览）。"
 
 
-def _md_changes(changes: Any, limit: int = MODEL_DIFF_MAX_LINES) -> str:
+def _strip_path_prefix(value: Any, prefix: str) -> Any:
+    """去掉跨文件时给 path 加的 `文件名` 前缀（小节标题已经写了文件名）。
+
+    path 本体是 `#33.pre_dst`，跨文件时被拼成 `a.json#33.pre_dst`；这里只切掉
+    文件名，保留开头的 `#`——它表示"哪一条的哪个字段"。
+    """
+    if not prefix:
+        return value
+    text = str(value or "")
+    return text[len(prefix):] if text.startswith(prefix) else value
+
+
+def _md_changes(changes: Any, limit: int = MODEL_DIFF_MAX_LINES, filename: str = "") -> str:
     rows = [row for row in (changes or []) if isinstance(row, dict)]
     shown = rows[:limit]
     columns = ["path", "before", "after"]
     # 空译名也能新增/删除；两格都空时仍须说明操作类型。
     if any(row.get("kind") in ("add", "remove") for row in shown):
         columns.append("kind")
+    # path 只在小节里展示：`文件名` 前缀（给变更卡/JSON 用的）在这里是重复。
+    prefix = filename
     table = _md_table(
         columns,
-        [{key: _diff_value(row.get(key)) for key in columns} for row in shown],
+        [{
+            key: _diff_value(_strip_path_prefix(row.get(key), prefix) if key == "path" else row.get(key))
+            for key in columns
+        } for row in shown],
     )
     return _md_doc(table, _diff_omission(len(shown), len(rows)))
+
+
+def _md_path_lines(changes: list[dict[str, Any]], filename: str = "") -> str:
+    """只列路径的变更预览（文本替换用）：一行一条，不套表格。
+
+    单独一列的表格仍要表头 + 分隔线 + 每行的竖线，几百行时全是纯开销；
+    替换模式要的就只是「改了哪个文件的哪一行」。跨文件时 path 自带 `文件名#` 前缀
+    （那是给混在一起的 JSON/变更卡用的），而小节标题已经写了文件名，这里去掉。
+    """
+    prefix = filename
+    shown = changes[:MODEL_DIFF_MAX_LINES]
+    lines = "\n".join(
+        f"- {str(_strip_path_prefix(row.get('path'), prefix) or '').replace(chr(10), ' ')}" for row in shown
+    )
+    return lines
 
 
 def _md_line_diff(diff: dict[str, Any]) -> str:
@@ -273,7 +307,12 @@ def _md_render_manage_problem_white_list(result: dict[str, Any]) -> str:
     if "white_list" not in result or any(key in result for key in ("changes", "added", "removed", "note")):
         return _md_render_write_result(result)
     entries = result.get("white_list") or []
-    return _md_doc(f"共 {result.get('count', len(entries))} 条白名单", _md_table(["entry"], [{"entry": entry} for entry in entries]))
+    # 只有一列的表格（表头 + 分隔线 + 每行两根竖线）在这里纯属开销：一行一条就够了。
+    # 白名单本身没有分页，这里给个展示上限，避免清单一长就整份灌进上下文。
+    shown = entries[:WHITE_LIST_SHOW_MAX]
+    lines = "\n".join(f"- {str(entry).replace(chr(10), ' ')}" for entry in shown)
+    more = f"只展示前 {len(shown)} 条，其余 {len(entries) - len(shown)} 条未展开" if len(shown) < len(entries) else ""
+    return _md_doc(f"共 {result.get('count', len(entries))} 条白名单", lines, more)
 
 
 def _list_selection_note(result: dict[str, Any]) -> str:
@@ -349,7 +388,12 @@ def _md_render_list_problems(result: dict[str, Any]) -> str:
 def _read_page_note(result: dict[str, Any]) -> str:
     parts = []
     if "matched" in result:
-        parts.append(f"筛选后共 {result['matched']} 条，本页 offset={result.get('offset', 0)}")
+        # 没筛选时 matched 与表头的 count 是同一个数字（read_input_file / read_output /
+        # read_transl_cache 的 read 路径都这样），offset 为 0 也不值得单独说一句。
+        if result.get("matched") != result.get("count"):
+            parts.append(f"筛选后共 {result['matched']} 条")
+        if result.get("offset"):
+            parts.append(f"本页 offset={result['offset']}")
     if result.get("has_more"):
         if result.get("order") in ("even", "random"):
             parts.append("当前为采样；完整遍历请用 order=name 配合 offset 翻页")
@@ -512,6 +556,21 @@ def _md_render_manage_problem_filter(result: dict[str, Any]) -> str | None:
     return _md_doc(*parts)
 
 
+def _subagent_has_detail(row: dict[str, Any]) -> bool:
+    """这个子代理有没有值得单独成节的内容。
+
+    派发失败 / 被中止且什么都没产出的任务，只剩状态和错误——排成清单里的一行就够，
+    和 `_patch_file_needs_section` 是同一套判断：没内容的不占小节。
+    """
+    if str(row.get("report") or "").strip():
+        return True
+    if row.get("needs_review") or row.get("proofread_comment") or row.get("review_record_error"):
+        return True
+    if "modified_count" in row:
+        return True
+    return str(row.get("status") or "") not in ("failed", "stopped")
+
+
 def _md_render_run_subagents(result: dict[str, Any]) -> str:
     """子代理批次结果 → 一篇 Markdown：开头顶部统计，随后每个子代理一个小节。
 
@@ -539,18 +598,21 @@ def _md_render_run_subagents(result: dict[str, Any]) -> str:
     note = result.get("note")
     if note:
         parts.append(str(note))
-    for i, row in enumerate(tasks, start=1):
+    detailed = [row for row in tasks if _subagent_has_detail(row)]
+    empty = [row for row in tasks if not _subagent_has_detail(row)]
+    for i, row in enumerate(detailed, start=1):
         label = str(row.get("label") or row.get("agent") or "子代理")
         name = str(row.get("file") or "、".join(row.get("files") or []) or "（不锁定文件）")
         parts.append(f"## {i}. {label} · {name}")
         meta = [f"状态 {status_labels.get(str(row.get('status') or ''), row.get('status'))}"]
         if row.get("indexes"):
             meta.append(f"区间 {row['indexes']}")
-        if row.get("turns") is not None:
+        # 0 轮 / 0 次 / 0.0s 只说明"没跑起来"，错误信息本身已经说清楚了，别逐项列。
+        if row.get("turns"):
             meta.append(f"轮数 {row['turns']}")
-        if row.get("tool_calls") is not None:
+        if row.get("tool_calls"):
             meta.append(f"工具调用 {row['tool_calls']} 次")
-        if row.get("duration_ms") is not None:
+        if row.get("duration_ms"):
             meta.append(f"耗时 {int(row['duration_ms']) / 1000:.1f}s")
         if row.get("error"):
             meta.append(f"错误：{row['error']}")
@@ -584,24 +646,53 @@ def _md_render_run_subagents(result: dict[str, Any]) -> str:
         report = str(row.get("report") or "").strip()
         if report:
             parts.append(report)
+    if empty:
+        # 没跑起来的任务排成一张清单：占一行就够，不必各占一个 `## N.` 小节。
+        lines = []
+        for row in empty:
+            name = str(row.get("file") or "、".join(row.get("files") or []) or row.get("label") or "子代理")
+            status = status_labels.get(str(row.get("status") or ""), row.get("status"))
+            lines.append(f"- {name}：{status}" + (f"（{row['error']}）" if row.get("error") else ""))
+        parts.append(f"没有产出内容的子代理 {len(empty)} 个：\n" + "\n".join(lines))
     return _md_doc(*parts)
 
 
+def _patch_file_needs_section(row: dict[str, Any]) -> bool:
+    """这一份缓存要不要单独成节。
+
+    只有真改了、或者有必须交代的失败/未命中/剩余问题时才成一节。「内容没有变化，
+    未保存文件」这类空结果只进汇总计数——replace 模式会遍历项目里**全部**缓存文件，
+    逐份列一节等于把没改动的文件名列满上下文，文件一多就纯属浪费。
+    """
+    if int(row.get("updated") or 0) > 0:
+        return True
+    return any(row.get(key) for key in ("error", "skipped", "not_found", "problems", "audit_error"))
+
+
 def _md_render_patch_transl_cache(result: dict[str, Any]) -> str:
-    """改缓存的结果 → 一篇 Markdown：开头顶部一句总计，随后每个文件一个小节。
+    """改缓存的结果 → 一篇 Markdown：开头顶部一句总计，随后**只有实际改动过的**文件一个小节。
 
     按文件分节是因为一次调用可以跨多个文件（统一译名/术语这类活）：每节先列「改了什么」
-    （before→after 表格），再列没落地的条目与"改完仍存在的问题"——剩下的问题当场可验，
-    不必再 read_transl_cache 兜一圈。
+    （逐条 patch 给 before→after 表格；**文本替换只给 path 的纯文本行**，因为那一次
+    query→replacement 对所有命中都一样，逐行重复没有信息量），再列没落地的条目与"改完仍存在
+    的问题"——剩下的问题当场可验，不必再 read_transl_cache 兜一圈。没有改动的文件只在头部记个数。
     """
     files = [row for row in (result.get("files") or []) if isinstance(row, dict)]
     if not files:
         return ""
     total = sum(int(row.get("updated") or 0) for row in files)
+    changed = [row for row in files if int(row.get("updated") or 0) > 0]
+    reported = [row for row in files if _patch_file_needs_section(row)]
     failed = [row for row in files if row.get("error")]
-    head = f"共改动 {total} 条，涉及 {len(files)} 个缓存文件"
+    untouched = len(files) - len(reported)
+    # 文本替换是同一组 query→replacement 铺到所有命中条目上：before/after 逐行重复，
+    # 参数摘要里已经写了那一次替换，这里只留「改了哪个文件的哪一行」——纯文本行，不套表格。
+    replace_mode = result.get("action") == "replace"
+    head = f"共改动 {total} 条，涉及 {len(changed)} 个缓存文件"
     if failed:
         head += f"；其中 {len(failed)} 个文件没有改动"
+    if untouched:
+        head += f"；其余 {untouched} 个文件没有内容变化，未保存文件"
     parts: list[str] = [head + "。"]
     if result.get("trans_by"):
         parts.append(
@@ -609,7 +700,7 @@ def _md_render_patch_transl_cache(result: dict[str, Any]) -> str:
         )
     remaining = MODEL_DIFF_MAX_LINES
     omission_noted = False
-    for index, row in enumerate(files, start=1):
+    for index, row in enumerate(reported, start=1):
         parts.append(f"## {index}. {row.get('filename')}（改 {int(row.get('updated') or 0)} 条）")
         if row.get("error"):
             parts.append(f"⚠ {row['error']}")
@@ -622,10 +713,14 @@ def _md_render_patch_transl_cache(result: dict[str, Any]) -> str:
         block: list[str] = []
         changes = [c for c in (row.get("changes") or []) if isinstance(c, dict)]
         shown = changes[:remaining]
-        table = _md_changes(shown)
+        filename = str(row.get("filename") or "")
+        rendered = (
+            _md_path_lines(shown, filename)
+            if replace_mode else _md_changes(shown, filename=filename)
+        )
         remaining -= len(shown)
-        if table:
-            block.append(table)
+        if rendered:
+            block.append(rendered)
         if len(shown) < len(changes) and not omission_noted:
             block.append("后续修改为节省上下文，不展示 diff（仅省略预览）。")
             omission_noted = True
@@ -708,6 +803,9 @@ _MD_RENDERERS: dict[str, Any] = {
     "manage_problem_filter": _md_render_manage_problem_filter,
     "run_subagents": _md_render_run_subagents,
     "patch_transl_cache": _md_render_patch_transl_cache,
+    # 撤销的返回体和 patch 同构（files + changes），直接复用同一套渲染：
+    # 否则它走 JSON，一条 before/after 全文都不截断。
+    "revert_proofread_changes": _md_render_patch_transl_cache,
     "get_name_table": _md_render_get_name_table,
     "save_dict": _md_render_write_result,
     "save_name_table": _md_render_write_result,

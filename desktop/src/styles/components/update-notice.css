@@ -149,9 +149,18 @@
 
 .update-notice__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-3);
 }
+
+.update-notice__dictionary { display: flex; align-items: center; gap: var(--space-2); font-size: 13px; cursor: pointer; }
+.update-notice__dictionary input { accent-color: var(--color-primary); }
+.update-notice__progress { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: 13px; }
+.update-notice__progress > span { width: 100%; }
+.update-notice__progress progress { flex: 1; min-width: 0; accent-color: var(--color-primary); }
+.update-notice__error { margin: 0; color: var(--color-danger); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.update-notice__close:disabled { cursor: default; opacity: .45; }
 
 @media (prefers-reduced-motion: reduce) {
   .update-notice__overlay,

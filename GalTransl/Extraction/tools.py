@@ -37,11 +37,23 @@ def native_result(text, details=None):
     return {"content": [{"type": "text", "text": text}], **({"details": details} if details is not None else {})}
 
 
+def windows_shell_path(raw):
+    """Git Bash, MSYS, Cygwin and WSL drive paths (/c/x, /mnt/c/x, /cygdrive/c/x) as native Windows paths."""
+    if not raw.startswith("/") or raw.startswith("//") or "\\" in raw:
+        return raw
+    match = re.fullmatch(r"/(?:mnt/|cygdrive/)?([a-zA-Z])(?:/(.*))?", raw)
+    if not match:
+        return raw
+    return f"{match.group(1).upper()}:\\{(match.group(2) or '').replace('/', chr(92))}"
+
+
 def native_path(raw):
     if not isinstance(raw, str):
         raise AgentToolError("A file path is required")
     raw = raw.removeprefix("@")
     raw = re.sub("[\u00a0\u2000-\u200a\u202f\u205f\u3000]", " ", raw)
+    if os.name == "nt":
+        raw = windows_shell_path(raw)
     return os.path.expanduser(raw)
 
 

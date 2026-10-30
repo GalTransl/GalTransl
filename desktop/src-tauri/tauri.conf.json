@@ -4,7 +4,7 @@
   "version": "8.4.3",
   "identifier": "com.galtransl.desktop",
   "build": {
-    "beforeDevCommand": "npm run extraction:prepare && npm run dev",
+    "beforeDevCommand": "npm run extraction:prepare -- --local && npm run dev",
     "beforeBuildCommand": "npm run build && npm run extraction:prepare",
     "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../dist"

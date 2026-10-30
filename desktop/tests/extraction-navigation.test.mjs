@@ -4,7 +4,7 @@ import { createElement as h } from 'react';
 import { act, create } from 'react-test-renderer';
 import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
 
-const fixture = (id, game_dir, status = 'idle') => ({ id, game_dir, title: `Session ${id}`, status });
+const fixture = (id, game_dir, status = 'idle') => ({ id, game_dir, title: `Session ${id}`, status, updated_at: Date.now() / 1000 });
 const storage = stored => ({
   getItem: key => stored.get(key) ?? null,
   setItem: (key, value) => stored.set(key, value),
@@ -28,7 +28,8 @@ test('extraction folders group sessions by full game path and retain folds acros
   assert.equal(folders().length, 3);
   assert.deepEqual(renderer.root.findAllByProps({ className: 'agent-sessions__group-name' }).map(node => node.children.join('')), ['同名游戏', '同名游戏', 'Other']);
   assert.equal(renderer.root.findAllByProps({ className: 'agent-sessions__group-count' })[0].children.join(''), '2');
-  assert.equal(renderer.root.findAllByProps({ className: 'agent-session-item__time' })[0].children.join(''), '工作中');
+  assert.equal(renderer.root.findAllByProps({ className: 'agent-session-item__time' })[0].children.join(''), '刚刚');
+  assert.equal(renderer.root.findByProps({ className: 'agent-session-item__light is-running' }).props.title, '工作中');
   const sessionButton = id => renderer.root.findByProps({ title: `Session ${id}` });
   act(() => sessionButton('c').props.onClick());
   assert.deepEqual(selected, ['c']);

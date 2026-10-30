@@ -235,3 +235,28 @@ def test_frozen_application_never_updates_skill(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="bundled Skill without updating"):
         prepare_extraction.prepare(tmp_path, tmp_path / "export")
     assert not (tmp_path / "export").exists()
+
+
+def test_local_preparation_uses_existing_skill_without_network(tmp_path, skill_source):
+    from scripts.prepare_extraction import prepare, SKILL_NAME
+    source, skill, upstream = skill_source
+    original = resource_git(skill, "rev-parse", "HEAD")
+    advance_skill(upstream)
+    (skill / "SKILL.md").write_text("Local development edits", encoding="utf-8")
+    resource_git(skill, "remote", "set-url", "origin", str(tmp_path / "missing-upstream"))
+    output = prepare(source, tmp_path / "export", update=False)
+    assert resource_git(skill, "rev-parse", "HEAD") == original
+    assert (output / "skills" / SKILL_NAME / "SKILL.md").read_text() == "Local development edits"
+    assert (output / "extraction-python/runner.py").is_file()
+
+
+def test_local_preparation_without_skill_still_exports_adapter(tmp_path, skill_source):
+    from scripts.prepare_extraction import prepare, SKILL_NAME
+    source, skill, _ = skill_source
+    resource_git(source, "submodule", "deinit", "--", f"skills/{SKILL_NAME}")
+    resource_git(source, "config", f"submodule.skills/{SKILL_NAME}.url", str(tmp_path / "missing-upstream"))
+    output = prepare(source, tmp_path / "export", update=False)
+    assert not (skill / "SKILL.md").exists()
+    assert not (output / "skills" / SKILL_NAME).exists()
+    assert (output / "extraction-python/runner.py").is_file()
+    assert json.loads((output / "skills/sources.json").read_text())[SKILL_NAME]["files"] == 0

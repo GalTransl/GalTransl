@@ -123,11 +123,10 @@ def _load_effective_name_table(runner: AgentRunner) -> Any:
 
     为什么要补：翻译时 name 字段会吃 GPT 字典里同名的词条，表里译名空着而字典里有人的行
     **其实已经生效**。不体现这一点，模型会去补一整批"字典里早就写过"的名字。补上之后
-    still_empty 才是真正要它动手的那几个。
+    GenDic 完成后，still_empty 才是需要检查补漏的候选。
 
     补的是**空译名**的行（与前端人名页同一套规则）：表里已有的译名不动，字典只作补充说明；
-    这些行在返回里带 dst_name_source="gpt_dict"——要固定住某行的译名得写进表（save_name_table），
-    要改它则得改字典。
+    这些行在返回里带 dst_name_source="gpt_dict"，无需重复写入人名表；要改译名应修改字典。
 
     **只读**：一个字节都不写回；配置/字典读不到就退回原样返回，绝不因此把工具弄失败。
     """
@@ -152,8 +151,8 @@ def _load_effective_name_table(runner: AgentRunner) -> Any:
         "note": (
             "dictionary.useGPTDictInName 开着：names 里译名为空、而 GPT 字典收录了的行，"
             "已经按字典的译名补上（带 dst_name_source=gpt_dict，翻译时真的会生效）。"
-            "**still_empty 才是表与字典都没有、需要你补的**；"
-            "要把某个译名固定下来（不再依赖字典）用 save_name_table 写进表里。"
+            "still_empty 只列出当前页中表与字典都未提供译名的 name；"
+            "字典已覆盖的译名无需重复写入人名表。"
         ),
     }
 
@@ -177,8 +176,18 @@ def _tool_get_name_table(runner: AgentRunner, args: dict[str, Any]) -> Any:
     matched = [row for row in names if (not only_missing or missing(row)) and
                any(needle in str(row.get(key) or "").casefold() for key in ("src_name", "dst_name"))]
     page = matched[offset:offset + limit]
+    guidance = (
+        "**GPT 字典第一优先，不要优先手动编辑人名表**：应先调用 start_translation(translator=\"GenDic\")（genDic）"
+        "生成 GPT 字典，等待任务 completed，并结合「字典用在name字段(GPT)」"
+        "（dictionary.useGPTDictInName）填充人名表的生效译名。"
+        "已有字典译名需要修改时，优先用 save_dict(action=\"patch\") 修正 GPT 字典，无需把字典译名重复抄进表。"
+        "GenDic 完成后再用 get_name_table(only_missing=true) 检查 still_empty；"
+        "只有 GenDic 未覆盖到的 name 才应使用 save_name_table(mode=\"patch\") 手动补漏。"
+        "若该开关关闭或配置/字典读取失败，应先核对配置与字典覆盖情况，不要把字典已覆盖的 name 当作手动补漏项。"
+    )
     return {
         **data, "names": page, "total": len(names), "matched": len(matched), "returned": len(page),
+        "note": "\n\n".join(part for part in (data.get("note"), guidance) if part),
         "query": query, "only_missing": only_missing, "limit": limit,
         "missing_total": sum(missing(row) for row in names),
         "still_empty": [row.get("src_name", "") for row in page if missing(row)],

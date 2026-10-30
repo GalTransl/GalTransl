@@ -335,7 +335,7 @@ class PatchMarkdownTests(unittest.TestCase):
         self.assertIn("共改动 2 条，涉及 2 个缓存文件", text)
         self.assertIn("## 1. a.json（改 1 条）", text)
         self.assertIn("## 2. b.json（改 1 条）", text)
-        self.assertIn("| a.json#1.pre_dst |", text)  # 跨文件时路径带文件名
+        self.assertIn("| #1.pre_dst |", text)  # 小节标题已写文件名，表里不再重复前缀
         self.assertIn("没找到这些 index：99", text)  # 没落地的条目挂在对应文件下
 
     def test_problems_and_errors_are_listed_per_file(self) -> None:

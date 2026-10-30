@@ -81,7 +81,7 @@ SUBAGENT_LABELS: dict[str, str] = {
 
 # ---- 上下文预算 ----
 # 后端配置未指定 contextWindow 时的默认窗口（token）
-DEFAULT_CONTEXT_WINDOW = 128_000
+DEFAULT_CONTEXT_WINDOW = 200_000
 # 用量超过窗口的该比例就触发压缩
 COMPACT_TRIGGER_RATIO = 0.80
 # 压缩时保留的最近上下文按 **token 预算**挑（不是"最近 N 条"）：从尾部往前累加，装到装不下

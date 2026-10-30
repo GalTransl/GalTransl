@@ -8,6 +8,7 @@ import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from './Button';
 import { Icon } from './Icon';
+import { PageHeader } from './PageHeader';
 import { Panel } from './Panel';
 import { EmptyState, ErrorState, InlineFeedback, LoadingState } from './page-state';
 import { formatBackendUsage, type BackendUsageSummary } from '../lib/backendUsage';
@@ -817,10 +818,22 @@ export function DictionaryManager(props: DictionaryManagerProps) {
 
   return (
     <div className="project-dictionary-page">
-      <div className="project-dictionary-page__header">
-        <h1>{title}</h1>
-        <p>{description}</p>
-      </div>
+      <PageHeader
+        className="project-dictionary-page__header"
+        title={title}
+        description={description}
+        actions={onGenerateGptDict ? (
+          <Button
+            variant="secondary"
+            onClick={() => setShowGenerateConfirm(true)}
+            disabled={generatingGptDict}
+            title={translate("projects:dictionaryManager.dictTabs_title_aIGenDicSourceExtractGPTDictionary")}
+          >
+            <Icon name="bot" />
+            {generatingGptDict ? translate("projects:dictionaryManager.dictTabs_message_text") : translate("projects:dictionaryManager.dictTabs_message_aIGPTDictionary")}
+          </Button>
+        ) : null}
+      />
 
       {localError && <InlineFeedback tone="error" title={translate("projects:dictionaryManager.projectDictionaryPage_title_failed")} description={localError} />}
       {info && <InlineFeedback className="inline-alert--floating" tone="success" title={translate("projects:dictionaryManager.projectDictionaryPage_title_success")} description={info} />}
@@ -878,19 +891,6 @@ export function DictionaryManager(props: DictionaryManagerProps) {
               />
               <Button onClick={() => void handleCreate()} disabled={creating}>{translate("projects:dictionaryManager.dictCreateFile_message_new")}</Button>
             </div>
-            {activeTab === 'gpt' && onGenerateGptDict ? (
-              <div className="dict-generate">
-                <Button
-                  variant="secondary"
-                  onClick={() => setShowGenerateConfirm(true)}
-                  disabled={generatingGptDict}
-                  title={translate("projects:dictionaryManager.dictTabs_title_aIGenDicSourceExtractGPTDictionary")}
-                >
-                  <Icon name="bot" />
-                  {generatingGptDict ? translate("projects:dictionaryManager.dictTabs_message_text") : translate("projects:dictionaryManager.dictTabs_message_aIGPTDictionary")}
-                </Button>
-              </div>
-            ) : null}
             <m.div
               key={activeTab}
               className="dict-file-list"

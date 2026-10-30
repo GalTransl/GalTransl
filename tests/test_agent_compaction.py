@@ -354,7 +354,7 @@ class MaybeCompactTests(unittest.TestCase):
         self.assertFalse(runner._begin_compaction())
 
     def test_growth_below_threshold_does_not_trigger_another_compaction(self):
-        msgs = [_msg("system", "SYS"), *[_msg("user", "w" * 8000) for _ in range(60)]]
+        msgs = [_msg("system", "SYS"), *[_msg("user", "w" * 8000) for _ in range(100)]]
         runner, state = _make_runner(msgs)
         runner._maybe_compact()
         self.assertEqual(len(runner._openai_client.calls), 1)
@@ -645,7 +645,7 @@ class CompactionSurvivesRestartTests(unittest.TestCase):
 
     def test_restored_history_is_below_the_trigger_line(self) -> None:
         """压缩后重启不该"立刻又压一次"：恢复出来的用量必须落在触发线以下。"""
-        self._compact(self._history(40, "w" * 10_000), window=DEFAULT_CONTEXT_WINDOW)
+        self._compact(self._history(65, "w" * 10_000), window=DEFAULT_CONTEXT_WINDOW)
         limit = int(DEFAULT_CONTEXT_WINDOW * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
 
         runtime, restored = self._restart()

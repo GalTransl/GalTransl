@@ -99,7 +99,7 @@
   to   { transform: rotate(360deg); }
 }
 
-@media (prefers-reduced-motion: no-preference) and (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) {
   .icon-btn--refresh.icon-btn--spinning svg {
     animation: none;
   }

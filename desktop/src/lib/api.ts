@@ -520,6 +520,28 @@ export async function fetchVersionCheck() {
   return apiRequest<VersionCheckResponse>('/api/version/check');
 }
 
+export type ApplicationUpdateStatus = {
+  supported: boolean; reason: string; id: string; version: string;
+  phase: 'idle' | 'downloading' | 'verifying' | 'extracting' | 'ready' | 'failed';
+  downloaded: number; total: number; error: string;
+};
+export function fetchApplicationUpdateStatus() {
+  return apiRequest<ApplicationUpdateStatus>('/api/update/status');
+}
+export function startApplicationUpdate(preserveDict: boolean) {
+  return apiRequest<ApplicationUpdateStatus>('/api/update/start', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ preserve_dict: preserveDict }),
+  });
+}
+export function canInstallApplicationUpdate() {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+    && !import.meta.env.DEV && shouldUseManagedDesktopBackend();
+}
+export function installApplicationUpdate(updateId: string) {
+  return invoke<void>('install_application_update', { updateId });
+}
+
 /* ── 更新提示的「忽略本次更新」 ──
  * 存的是被忽略的那个版本号：同一个版本不再弹窗，等更新的版本出现还会再提醒。 */
 const IGNORED_UPDATE_VERSION_KEY = 'galtransl-ignored-update-version';

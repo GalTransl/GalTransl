@@ -70,7 +70,10 @@ function fixture(initial = {}, blocked = true, options = {}) {
   return { api, home, agent, window, events, values, load, mocks, unblock() { blocked = false; } };
 }
 
-function LocationProbe() { return h('location', { path: useLocation().pathname }); }
+function LocationProbe() {
+  const { pathname, state } = useLocation();
+  return h('location', { path: pathname, state });
+}
 
 test('the home-page open action navigates to the selected YAML despite a quota error', async () => {
   const f = fixture({}, true, { selected: 'C:\\游戏项目\\custom.yml' });
@@ -96,7 +99,8 @@ test('the home-page open action navigates to the selected YAML despite a quota e
   }
 });
 
-test('the creation wizard reaches completion and opens the created project with full storage', async () => {
+for (const destination of ['project', 'agent']) {
+test(`the creation wizard opens the created ${destination} with full storage`, async () => {
   const f = fixture();
   let projectCreated = false;
   Object.assign(f.api, {
@@ -132,14 +136,22 @@ test('the creation wizard reaches completion and opens the created project with 
       assert.equal(next.props.disabled, false);
       await act(async () => { next.props.onClick(); });
     }
-    const finish = root.root.find(node => node.props.className === 'wizard-nav').findAllByType('button').at(-1);
+    const finish = root.root.findByProps({ className: 'wizard-nav__actions' }).findAllByType('button')[destination === 'agent' ? 1 : 0];
     await act(async () => { finish.props.onClick(); });
     assert.equal(opened, true);
-    assert.equal(root.root.findByType('location').props.path, `/project/${f.api.encodeProjectDir('C:\\projects\\游戏')}/translate`);
+    const location = root.root.findByType('location').props;
+    if (destination === 'agent') {
+      assert.equal(location.path, '/agent');
+      assert.equal(location.state.agentProjectDir, 'C:\\projects\\游戏');
+    } else {
+      assert.equal(location.path, `/project/${f.api.encodeProjectDir('C:\\projects\\游戏')}/translate`);
+    }
+    assert.equal(f.api.loadOpenProjects().includes('C:\\projects\\游戏'), true);
   } finally {
     act(() => root.unmount());
   }
 });
+}
 
 test('full browser storage cannot interrupt project history updates or lose the session history', () => {
   const f = fixture();
@@ -149,6 +161,90 @@ test('full browser storage cannot interrupt project history updates or lose the 
   assert.doesNotThrow(() => f.home.removeProjectFromHistory('C:\\游戏项目'));
   assert.equal(f.agent.readHistory().length, 0);
 });
+
+for (const scenario of ['first visit', 'cached page', 'cached same project']) {
+test(`wizard handoff selects a fresh translation conversation on ${scenario}`, async () => {
+  const oldProject = 'C:\\projects\\old';
+  const newProject = scenario === 'cached same project' ? oldProject : 'C:\\projects\\created';
+  const starts = [], pendingLists = [];
+  const f = fixture({
+    'galtransl-agent-active-project': oldProject,
+    [`galtransl-agent-session-id:${oldProject}`]: 'old-session',
+    [`galtransl-agent-session-id:${newProject}`]: 'remembered-session',
+  }, false, { mocks: {
+    '../styles/pages/agent.css': {},
+    '../components/AgentCacheRef': { invalidateCacheFilesForToolResult() {} },
+    '../lib/desktopNotify': { notifyNeedsAttention() {} },
+    './agent/AgentSessionSidebar': { AgentSessionSidebar: props => h('agent-sidebar', props) },
+    './agent/rows/AgentGroupView': { AgentGroupView: () => null },
+    './agent/rows/AskUserCard': { AskUserCard: () => null },
+    './agent/rows/PermissionCard': { PermissionCard: () => null },
+    './agent/images': {
+      useImageInput: () => ({ images: [], drop: {}, move() {}, removeSent() {} }),
+      ImageAttachments: () => null, ImageInputStatus: () => null,
+    },
+  } });
+  f.api.addOpenProject(oldProject);
+  f.api.addOpenProject(newProject);
+  Object.assign(f.api, {
+    getAgentDefaultBackendProfile: () => 'test', getBackendProfileNames: () => ['test'],
+    getBackendProfile: () => ({ type: 'gpt', model: 'test-model' }),
+    getAgentTranslatorBackendContext: () => ({}),
+    listAgentSessions: dir => new Promise(resolve => pendingLists.push({ dir, resolve })),
+    fetchAgentStatus: async () => ({ status: 'completed', events: [], queued: [] }),
+    fetchAgentTranscript: async () => [],
+    createAgentSession: async dir => ({ session_id: 'new-session', project_dir: dir }),
+    startAgent: async args => { starts.push(args); return { session_id: 'new-session' }; },
+    subscribeAgentStream: () => () => {},
+  });
+  const { AgentPage } = f.load(new URL('../src/pages/AgentPage.tsx', import.meta.url));
+  const { CachedRoutes } = f.load(new URL('../src/components/CachedRoutes.tsx', import.meta.url));
+  let navigate;
+  const available = () => true;
+  function Pages() {
+    navigate = useNavigate();
+    const location = useLocation();
+    return h(CachedRoutes, { location, currentPath: location.pathname, isAvailable: available },
+      h(router.Route, { path: '/agent', element: h(AgentPage) }),
+      h(router.Route, { path: '/new-project', element: null }));
+  }
+  let root;
+  await act(async () => {
+    root = create(h(MemoryRouter, { initialEntries: [scenario === 'first visit'
+      ? { pathname: '/agent', state: { agentProjectDir: newProject } } : '/agent'] }, h(Pages)));
+  });
+  try {
+    const sidebar = () => root.root.findByType('agent-sidebar').props;
+    if (scenario !== 'first visit') {
+      assert.equal(sidebar().activeProject, oldProject);
+      assert.ok(sidebar().activeSessionId);
+      await act(async () => navigate('/new-project'));
+      await act(async () => navigate('/agent', { state: { agentProjectDir: newProject } }));
+    }
+    assert.equal(sidebar().activeProject, newProject);
+    assert.equal(sidebar().activeSessionId, '');
+    // An old list response must not restore a remembered session after handoff.
+    await act(async () => {
+      for (const { resolve } of pendingLists.splice(0)) {
+        resolve([{ session_id: 'remembered-session', status: 'completed' }]);
+      }
+    });
+    assert.equal(sidebar().activeProject, newProject);
+    assert.equal(sidebar().activeSessionId, '');
+    assert.equal(starts.length, 0);
+    await act(async () => root.root.findByType('textarea').props.onChange({ target: { value: '开始准备' } }));
+    await act(async () => root.root.findByProps({ className: 'agent-composer__send' }).props.onClick());
+    assert.equal(starts.length, 1);
+    assert.equal(starts[0].project_dir, newProject);
+    assert.equal(starts[0].config_file_name, 'config.yaml');
+    assert.equal(starts[0].session_id, 'new-session');
+    // Normal sidebar returns must preserve the conversation started after handoff.
+    await act(async () => navigate('/new-project'));
+    await act(async () => navigate('/agent'));
+    assert.equal(sidebar().activeSessionId, 'new-session');
+  } finally { act(() => root.unmount()); }
+});
+}
 
 test('Agent-prefilled wizard preserves the remembered parent and reads files already in the extraction directory', async () => {
   const parentKey = 'galtransl-new-project-last-parent-dir';

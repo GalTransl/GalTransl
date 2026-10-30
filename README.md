@@ -27,7 +27,7 @@
 
 桌面端新增独立的 **提取 Agent**：复用翻译 Agent 的推理、流式会话、审批与上下文压缩框架，使用配套提取 Skill 和本地 Python/shell 识别游戏引擎、提取文本及验证回填，提取结果可直接打开为翻译项目。发布包复用现有 Python 后端，不再包含 Node.js 或 Pi SDK；内置完整 Skill，Agent 也可显式尝试本机 Python；[配置与开发说明](GalTransl/Extraction/README.md)。
 
-源码通过 Git 子模块引用 Skill，克隆时使用 `git clone --recurse-submodules https://github.com/GalTransl/GalTransl.git`。开发启动或打包时会自动下载并同步上游 `main` 分支的最新提交；有本地修改或分叉时停止同步，避免覆盖。发布包包含打包时的完整 Skill，运行时不会更新。
+源码通过 Git 子模块引用 Skill，克隆时可使用 `git clone --recurse-submodules https://github.com/GalTransl/GalTransl.git`。开发启动只准备本地资源，不下载或更新 Skill；缺少 Skill 时可在提取 Agent 的「运行环境」中下载，也可手动检查更新。下载完成后自动启用，保存在用户数据目录，原 Skill 目录会保留。打包时仍同步上游 `main` 分支并包含完整 Skill；有本地修改或分叉时停止同步，避免覆盖。
 
 
 内置可选的 **billion-context Python 核心版**：在 **设置 → 插件清单** 开启，为翻译主 Agent 和提取 Agent 提供分层上下文压缩、原文归档、检索与恢复；默认关闭，下一回合生效，无需 Node.js 或额外运行依赖。GalTransl 使用了 [billion-context](https://github.com/ranxianglei/billion-context) 和 [acp-kernel](https://github.com/ranxianglei/acp-kernel) 的设计与压缩规则；[移植范围、使用与许可说明](plugins/billion-context/README.md)。

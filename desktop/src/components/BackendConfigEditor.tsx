@@ -24,7 +24,7 @@ type TokenEntry = {
  * 留空时的上下文窗口，与后端 DEFAULT_CONTEXT_WINDOW（GalTransl/Agent/runtime.py）保持一致。
  * 这里只是把"留空等于多少"显示给人看，真正的默认值由后端兜底。
  */
-const DEFAULT_CONTEXT_WINDOW = 128000;
+const DEFAULT_CONTEXT_WINDOW = 200000;
 
 const REASONING_EFFORT_OPTIONS = [
   { value: 'none', label: 'common:backendConfigEditor.reasoningEffort_none' },
@@ -169,7 +169,7 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
   // Tokens list operations
   const addToken = useCallback(() => {
     if (readOnly) return;
-    // 新令牌带上默认上下文窗口（128000），免得留空让人以为没生效
+    // 新令牌带上默认上下文窗口（200000），免得留空让人以为没生效
     const next = [...tokens, { token: '', endpoint: '', modelName: '', contextWindow: DEFAULT_CONTEXT_WINDOW }];
     updateOai('tokens', next);
     // 只展开刚加的这张：连点几次「添加令牌」时，列表不会因为前面几张全张着而越拉越长

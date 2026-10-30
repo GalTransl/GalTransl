@@ -211,13 +211,18 @@ def test_close_folder_preserves_history_persists_and_reopens_on_create(extractio
 
 
 @pytest.mark.parametrize("status", ["starting", "running", "awaiting_permission", "awaiting_input", "stopping"])
-def test_running_session_and_folder_cannot_be_closed_even_outside_page(controlled_extraction, status):
+def test_running_session_and_folder_cannot_be_closed_even_outside_page(controlled_extraction, status, monkeypatch):
     store, session, runtime, payload = controlled_extraction
     runtime.start(session["id"], payload)
     with runtime.lock:
         store.update(session["id"], status=status)
-        for _ in range(51):
-            store.create(session["game_dir"])
+        # A coarse clock can give all sessions the same updated_at. Explicitly
+        # put the 51 new sessions later so pagination never relies on glob order.
+        later = store.read(session["id"])["updated_at"] + 1
+        with monkeypatch.context() as clock:
+            clock.setattr("GalTransl.Extraction.store.time.time", lambda: later)
+            for _ in range(51):
+                store.create(session["game_dir"])
         page = runtime.list_sessions()
         assert session["id"] not in {row["id"] for row in page["sessions"]}
         assert page["running_game_dirs"] == [session["game_dir"]]
