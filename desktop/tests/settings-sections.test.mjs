@@ -21,8 +21,6 @@ const apiMock = {
   HOME_LIST_LIMIT_MIN: 1,
   HOME_LIST_LIMIT_MAX: 50,
   fetchPlugins: async () => [],
-  fetchAppSettings: async () => ({ billionContextEnabled: false }),
-  updateAppSettings: async patch => patch,
   fetchVersion: async () => '8.4.3',
   fetchVersionCheck: async () => ({ version: '8.4.3', latest_version: '8.4.3', update_available: false }),
   getCacheBrowserFontSizePreference: () => 12,
@@ -137,7 +135,7 @@ test('点二级菜单只切换当前分区', async () => {
 
     await view.click('插件清单');
     assert.equal(activeNav(view.root()), 3);
-    assert.deepEqual(panelTitles(view.root()), ['billion-context · Python 核心版', '插件清单']);
+    assert.deepEqual(panelTitles(view.root()), ['插件清单']);
 
     // 编辑器直接显示在设置分区里，不再需要进入子页面。
     await view.click('提示词');
@@ -199,7 +197,7 @@ test('?section= 决定初始分区，刷新和返回都停在原来那页', asyn
   const view = await mount('/settings?section=plugins');
   try {
     assert.equal(activeNav(view.root()), 3);
-    assert.deepEqual(panelTitles(view.root()), ['billion-context · Python 核心版', '插件清单']);
+    assert.deepEqual(panelTitles(view.root()), ['插件清单']);
   } finally {
     view.unmount();
   }

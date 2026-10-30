@@ -95,6 +95,8 @@ if TYPE_CHECKING:
 class AgentRunner:
     """单次 Agent 运行。在独立线程内执行 run()。"""
 
+    _billion_context_setting = "billionContextEnabled"
+
     def __init__(
         self,
         state: AgentState,
@@ -263,7 +265,7 @@ class AgentRunner:
             self._store.append_meta(context_window=backend.context_window)
         self._prompt_caching = backend.prompt_caching
         self._reasoning_kwargs = backend.reasoning_kwargs
-        enabled = load_app_settings().get("billionContextEnabled", False)
+        enabled = load_app_settings().get(self._billion_context_setting, False)
         if enabled:
             self._emit("status", {"message": "正在启动 billion-context 上下文插件"})
         # Deletion can race with backend resolution. Serialize archive creation

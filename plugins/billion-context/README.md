@@ -7,12 +7,13 @@ GalTransl 使用了 [billion-context](https://github.com/ranxianglei/billion-con
 
 ## 开启与运行环境
 
-桌面端 **设置 → 插件清单 → billion-context · Python 核心版**，默认关闭。
+桌面端在翻译或提取 Agent **左下角的齿轮配置入口**开启 billion-context，默认关闭；提取 Agent 的入口同时显示运行环境状态。
 
 启用时，翻译和提取 Agent 隐藏普通上下文压缩的 `read_history_archive` 工具，
 使用 `search_context` / `decompress` 回查插件历史；关闭后恢复普通归档工具。
-开关保存到后端应用设置 `billionContextEnabled`，从下一次 Agent 回合起生效，
-同时适用于翻译主 Agent 和提取 Agent。正在执行的回合保持开始时的状态。
+翻译开关保存到后端应用设置 `billionContextEnabled`，提取开关保存到
+`extractionBillionContextEnabled`，独立控制各自类型的 Agent，从下一次回合起生效。
+升级时两个开关继承原统一开关的状态；正在执行的回合保持开始时的状态。
 
 全部核心逻辑使用 Python 标准库（包括 `sqlite3`），复用现有模型客户端与后端解释器。
 无需 Node.js、npm、Pi SDK、代理服务或额外 Python 包。源码前端的开发、构建仍使用原有 Node 工具链。

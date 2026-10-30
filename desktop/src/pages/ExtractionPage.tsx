@@ -3,6 +3,7 @@ import '../styles/pages/extraction.css';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../components/Icon';
+import { AgentSettingsButton } from '../components/AgentSettings';
 import { useUiLanguage } from '../i18n';
 import { addOpenProject, encodeProjectDir, getBackendProfile } from '../lib/api';
 import { addProjectToHistory } from './HomePage';
@@ -109,7 +110,8 @@ export function ExtractionPage() {
         onCloseFolder={directory => void closeFolder(directory)} runningDirectories={agent.sessions.running_game_dirs} busy={agent.busy} />
       {!agent.sessions.total && <div className="agent-sessions__empty">{x('emptySessions')}</div>}
       {agent.sessions.next_offset != null && <button type="button" className="agent-sessions__show-more" onClick={() => void agent.refreshSessions(agent.sessions.next_offset!).catch(e => agent.setError(String(e)))}>{x('more')}</button>}</nav>
-      <button type="button" className="extract-environment" onClick={() => { if (agent.environment) setDialog('environment'); else void agent.refreshEnvironment().then(() => setDialog('environment')).catch(e => agent.setError(String(e))); }}><Icon name="settings" /><span>{x(agent.environment?.ready ? 'ready' : 'setup')}</span><i className={agent.environment?.ready ? 'is-ready' : ''} /></button>
+      <AgentSettingsButton ready={agent.environment?.ready ?? false} label={x(agent.environment?.ready ? 'ready' : 'setup')}
+        onClick={() => { void agent.refreshEnvironment().then(() => setDialog('environment')).catch(e => agent.setError(String(e))); }} />
     </aside>
     <div className="extract-content">
       <header className="agent-console__bar">

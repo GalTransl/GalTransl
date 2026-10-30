@@ -1,12 +1,4 @@
 {
-  "billionContext": {
-    "title": "billion-context · Python 核心版",
-    "description": "为提取与翻译 Agent 提供分层上下文压缩、历史检索和可逆解压。无需 Node.js，不新增运行依赖。",
-    "enabled": "启用 billion-context",
-    "timing": "默认关闭，修改于下一个 Agent 回合生效。原始对话和压缩归档保存在本地；压缩摘要使用当前模型，会产生模型调用用量。关闭后恢复原有上下文管理。",
-    "attribution": "本项目使用以下项目的 Python 核心移植：",
-    "retry": "重新加载"
-  },
   "backendProfilesPage": {
     "renameFailed": "重命名失败",
     "copyFailed": "复制配置失败",

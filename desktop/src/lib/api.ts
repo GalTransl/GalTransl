@@ -415,6 +415,7 @@ export type PluginInfo = {
 export type AppSettings = {
   printTranslationLogInTerminal: boolean;
   billionContextEnabled?: boolean;
+  extractionBillionContextEnabled?: boolean;
 };
 
 export type ThemeMode = 'light' | 'dark' | 'system';

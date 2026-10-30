@@ -236,7 +236,7 @@ def test_switch_off_default_and_next_turn_activation(tmp_path, monkeypatch):
     backend = SimpleNamespace(client=object(), model="model", context_window=12000, prompt_caching=False, reasoning_kwargs={})
     monkeypatch.setattr(module, "resolve_llm_backend", lambda _: backend)
     enabled = False
-    monkeypatch.setattr(module, "load_app_settings", lambda: {"billionContextEnabled": enabled})
+    monkeypatch.setattr(module, "load_app_settings", lambda: {"billionContextEnabled": enabled, "extractionBillionContextEnabled": enabled})
     runner = AgentRunner(AgentState())
     runner._store = SessionStore("project", "id", directory=str(tmp_path))
     runner._resolve_llm()
@@ -308,8 +308,29 @@ def configured_runner(tmp_path, runner_type, monkeypatch, create, window=256000)
     backend = SimpleNamespace(client=client, model="fixture", context_window=window,
                               prompt_caching=False, reasoning_kwargs={})
     monkeypatch.setattr(module, "resolve_llm_backend", lambda _: backend)
-    monkeypatch.setattr(module, "load_app_settings", lambda: {"billionContextEnabled": True})
+    monkeypatch.setattr(module, "load_app_settings", lambda: {"billionContextEnabled": True, "extractionBillionContextEnabled": True})
     return runner
+
+
+@pytest.mark.parametrize("translation_enabled,extraction_enabled", [
+    (False, False), (True, False), (False, True), (True, True),
+])
+def test_agents_read_their_own_persisted_switch(tmp_path, monkeypatch, translation_enabled, extraction_enabled):
+    from GalTransl.AppSettings import load_app_settings, save_app_settings
+    monkeypatch.setenv("GALTRANSL_APP_SETTINGS_PATH", str(tmp_path / "settings.json"))
+    translation = configured_runner(tmp_path / "translation", AgentRunner, monkeypatch, Mock())
+    extraction = configured_runner(tmp_path / "extraction", ExtractionRunner, monkeypatch, Mock())
+    monkeypatch.setattr("GalTransl.Agent.runner.load_app_settings", load_app_settings)
+    save_app_settings({"billionContextEnabled": translation_enabled,
+                       "extractionBillionContextEnabled": extraction_enabled})
+    try:
+        translation._resolve_llm()
+        extraction._resolve_llm()
+        assert (translation._billion_context is not None) is translation_enabled
+        assert (extraction._billion_context is not None) is extraction_enabled
+    finally:
+        translation.close_store()
+        extraction.close_store()
 
 
 @pytest.mark.parametrize("runner_type", [AgentRunner, ExtractionRunner])
@@ -318,7 +339,7 @@ def test_history_archive_tool_and_prompt_follow_plugin_switch(tmp_path, runner_t
     from GalTransl.Agent import runner as module
     runner = configured_runner(tmp_path, runner_type, monkeypatch, Mock())
     enabled = False
-    monkeypatch.setattr(module, "load_app_settings", lambda: {"billionContextEnabled": enabled})
+    monkeypatch.setattr(module, "load_app_settings", lambda: {"billionContextEnabled": enabled, "extractionBillionContextEnabled": enabled})
     # Simulate a session saved in ordinary mode and resumed with the plugin.
     runner.state.messages = [
         {"role": "system", "content": runner._system_prompt()},
@@ -432,7 +453,7 @@ def test_deleted_session_cannot_be_recreated_by_late_backend_resolution(tmp_path
         return SimpleNamespace(client=object(), model="fixture", context_window=128000,
                                prompt_caching=False, reasoning_kwargs={})
     monkeypatch.setattr(module, "resolve_llm_backend", resolve)
-    monkeypatch.setattr(module, "load_app_settings", lambda: {"billionContextEnabled": True})
+    monkeypatch.setattr(module, "load_app_settings", lambda: {"billionContextEnabled": True, "extractionBillionContextEnabled": True})
     with pytest.raises(AgentStopRequested):
         runner._resolve_llm()
     assert not list(tmp_path.rglob("*.sqlite3*"))

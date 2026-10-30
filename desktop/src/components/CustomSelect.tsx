@@ -160,6 +160,7 @@ export function CustomSelect({
         width,
         top: openUpward ? 'auto' : rect.bottom + gap,
         bottom: openUpward ? window.innerHeight - rect.top + gap : 'auto',
+        maxHeight: Math.min(MAX_PANEL_HEIGHT, Math.max(0, (openUpward ? spaceAbove : spaceBelow) - gap - 8)),
         zIndex: 4000,
       });
     };

@@ -1,4 +1,15 @@
 {
+  "agentSettings": {
+    "configure": "Agent settings",
+    "translationTitle": "Translation Agent settings",
+    "extractionTitle": "Extraction Agent settings",
+    "contextTitle": "Context management",
+    "enabled": "Enable billion-context",
+    "description": "Compress context in tiers and search or restore past conversations as needed.",
+    "timing": "The switch saves automatically and applies to this type of Agent from the next turn. Compression summaries use the current model and consume model usage.",
+    "attribution": "Based on",
+    "retry": "Reload"
+  },
   "values": {
     "enabled": "Enabled",
     "disabled": "Disabled",

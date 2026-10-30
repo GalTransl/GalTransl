@@ -11,6 +11,7 @@ from typing import Any
 from GalTransl.RuntimePaths import get_resource_root, get_user_data_dir
 
 from .skill import skill_status
+from .python_discovery import discover_pythons, PythonInterpreter
 
 
 def data_root() -> Path:
@@ -70,7 +71,8 @@ def save_settings(payload: dict[str, Any]) -> dict[str, str]:
                 resolved = shutil.which(value)
                 if not resolved or not Path(resolved).is_file():
                     raise ValueError(f"Executable not found: {key}")
-                value = str(Path(resolved).resolve())
+                # Resolving a venv's Python symlink would select the system interpreter instead.
+                value = str(Path(resolved).absolute())
             settings[key] = value
     atomic_json(data_root() / "settings.json", {**settings, "runtime_preferences_version": 3})
     return settings
@@ -89,16 +91,8 @@ def python_runner_script() -> str:
     return str(get_resource_root() / "extraction_python.py")
 
 
-def system_pythons(configured: str = "") -> list[dict[str, Any]]:
-    candidates = []
-    for command, args in [(configured, []), ("python3", []), ("python", []), ("py", ["-3"])]:
-        executable = shutil.which(command) if command else None
-        if not executable or ("windowsapps" in executable.casefold() and command != configured):
-            continue
-        executable = str(Path(executable).resolve())
-        if not any(candidate["executable"] == executable for candidate in candidates):
-            candidates.append({"executable": executable, "args": args})
-    return candidates
+def system_pythons(configured: str = "") -> list[PythonInterpreter]:
+    return discover_pythons(configured)
 
 
 def environment() -> dict[str, Any]:

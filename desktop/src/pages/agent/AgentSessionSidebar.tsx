@@ -3,6 +3,8 @@ import { useState } from 'react';
 import type { AgentSession as AgentSessionMeta } from '../../lib/api';
 import { useSessionTime } from '../../lib/sessionTime';
 import { Icon } from '../../components/Icon';
+import { AgentSettingsButton, AgentSettingsDialog } from '../../components/AgentSettings';
+import { useConnection } from '../../features/connection/ConnectionContext';
 import { shortName } from './storage';
 
 /* ── Session sidebar ──
@@ -49,6 +51,8 @@ export function AgentSessionSidebar({
   onDeleteSession: (dir: string, session: AgentSessionMeta) => void;
 }) {
   const formatSessionTime = useSessionTime();
+  const connection = useConnection();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // 哪些项目分组已经点开过「显示其余 N 个」（纯本地状态，不涉及请求）
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
 
@@ -224,6 +228,8 @@ export function AgentSessionSidebar({
           })
         )}
       </div>
+      <AgentSettingsButton ready={connection.connectionPhase === 'online'} onClick={() => setSettingsOpen(true)} />
+      {settingsOpen && <AgentSettingsDialog agent="translation" backendUrl={connection.backendUrl} close={() => setSettingsOpen(false)} />}
     </aside>
   );
 }

@@ -1,5 +1,9 @@
 import { useId, useState, type FormEvent, type ReactNode } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
+import { AgentSettingsDialog } from '../../components/AgentSettings';
+import { CustomSelect } from '../../components/CustomSelect';
+import { Icon } from '../../components/Icon';
+import { useConnection } from '../../features/connection/ConnectionContext';
 import { useUiLanguage } from '../../i18n';
 import { extractionApi } from './api';
 import { x } from './labels';
@@ -42,12 +46,22 @@ export function CreateDialog({ close, create, busy }: { close: () => void; creat
 }
 export function EnvironmentDialog({ initial, close, saved }: { initial: Environment; close: () => void; saved: (environment: Environment) => void }) {
   useUiLanguage();
+  const connection = useConnection();
+  const pythonId = useId();
+  const formId = useId();
+  const [manualPython, setManualPython] = useState(false);
   const [runtime, setRuntime] = useState(initial);
   const [settings, setSettings] = useState(initial.settings);
   const [skill, setSkill] = useState<SkillStatus | null>(initial.skill);
   const [error, setError] = useState('');
-  const [action, setAction] = useState<'' | 'saving' | 'checking' | 'installing'>('');
+  const [action, setAction] = useState<'' | 'saving' | 'checking' | 'installing' | 'detecting'>('');
   const busy = action !== '';
+  const refreshPythons = () => {
+    setAction('detecting'); setError('');
+    return extractionApi<Environment>('environment').then(setRuntime)
+      .catch(error => setError(error instanceof Error ? error.message : String(error)))
+      .finally(() => setAction(''));
+  };
   const checkSkill = async () => {
     setAction('checking'); setError('');
     try { setSkill(await extractionApi<SkillStatus>('skill-check', {}, { skill_dir: settings.skill_dir })); }
@@ -73,26 +87,80 @@ export function EnvironmentDialog({ initial, close, saved }: { initial: Environm
     catch (error) { setError(error instanceof Error ? error.message : String(error)); }
     finally { setAction(''); }
   };
-  return <Dialog title={x('environment')} close={close}><form onSubmit={event => void submit(event)}>
-    <p className="extract-muted">{x('requirements')}</p>
-    <fieldset className="extract-environment-fields" disabled={busy}>
-      <PathField label={x('skillDir')} value={settings.skill_dir} onChange={skill_dir => { setSettings({ ...settings, skill_dir }); setSkill(null); setError(''); }} />
-      <div className="extract-skill-status" aria-live="polite">
-        {skill?.installed && <p>{x('skillVersion')} <code title={skill.current_commit}>{skill.current_commit ? skill.current_commit.slice(0, 8) : x('skillUnknownVersion')}</code></p>}
-        {skill?.installed === false && <p className="extract-warning">{x('missingSkill')}</p>}
-        {skill?.latest_commit && <p className={skill.update_available ? 'extract-warning' : 'extract-muted'}>{x(skill.update_available ? 'skillUpdateAvailable' : 'skillUpToDate')} <code title={skill.latest_commit}>{skill.latest_commit.slice(0, 8)}</code></p>}
-      </div>
-      <div className="extract-skill-actions">
-        <button type="button" disabled={busy || !settings.skill_dir.trim()} onClick={() => void checkSkill()}>{x(action === 'checking' ? 'skillChecking' : 'skillCheck')}</button>
-        <button type="button" className="extract-primary" disabled={busy || Boolean(skill?.latest_commit && !skill.update_available)} onClick={() => void installSkill()}>{x(action === 'installing' ? 'skillInstalling' : skill?.installed ? 'skillUpdate' : 'skillDownload')}</button>
-      </div>
-      <p className="extract-muted">{x('skillDownloadHint')}</p>
-      <PathField label={x('pythonPath')} directory={false} value={settings.python_path} onChange={python_path => setSettings({ ...settings, python_path })} />
-    </fieldset>
-    <p className="extract-muted">{runtime.python_version}</p>
-    {runtime.problems.includes('python_runner_missing') && <p className="extract-warning">{x('setupRuntime')}</p>}
-    {runtime.problems.some(code => code.startsWith('python_')) && <p className="extract-warning">{x('missingPython')}</p>}
-    {error && <p role="alert" className="extract-error">{error}</p>}
-    <footer><button type="button" disabled={busy} onClick={close}>{x('cancel')}</button><button className="extract-primary" disabled={busy}>{x('save')}</button></footer>
-  </form></Dialog>;
+  return <AgentSettingsDialog agent="extraction" backendUrl={connection.backendUrl} close={close}
+    className="extract-environment-dialog" footer={<>
+      <span className="extract-environment-save-hint">{x('runtimeSaveHint')}</span>
+      <button type="button" disabled={busy} onClick={close}>{x('cancel')}</button>
+      <button type="submit" form={formId} className="extract-primary" disabled={busy}>{x('save')}</button>
+    </>}>
+    <form id={formId} onSubmit={event => void submit(event)}>
+      <fieldset className="extract-environment-fields" disabled={busy}>
+        <section className="extract-environment-card">
+          <header className="extract-environment-card__header">
+            <span className="extract-environment-card__icon"><Icon name="folder" /></span>
+            <h3>{x('skillSectionTitle')}</h3>
+            <span className={`extract-environment-badge ${skill?.installed ? 'is-ready' : ''}`}>
+              {x(skill ? skill.installed ? 'skillReady' : 'skillNotReady' : 'skillUnchecked')}
+            </span>
+          </header>
+          <p className="extract-environment-description">{x('skillSectionDescription')}</p>
+          <PathField label={x('skillDir')} value={settings.skill_dir} onChange={skill_dir => { setSettings({ ...settings, skill_dir }); setSkill(null); setError(''); }} />
+          <div className="extract-skill-toolbar">
+            <div className="extract-skill-status" aria-live="polite">
+              {skill?.installed && <div className="extract-environment-version"><span>{x('skillVersion')}</span><code title={skill.current_commit}>{skill.current_commit ? skill.current_commit.slice(0, 8) : x('skillUnknownVersion')}</code></div>}
+              {skill?.installed === false && <p className="extract-warning">{x('missingSkill')}</p>}
+            </div>
+            <div className="extract-skill-actions">
+              <button type="button" disabled={busy || !settings.skill_dir.trim()} onClick={() => void checkSkill()}>{x(action === 'checking' ? 'skillChecking' : 'skillCheck')}</button>
+              <button type="button" className="extract-primary" disabled={busy || Boolean(skill?.latest_commit && !skill.update_available)} onClick={() => void installSkill()}>{x(action === 'installing' ? 'skillInstalling' : skill?.installed ? 'skillUpdate' : 'skillDownload')}</button>
+            </div>
+          </div>
+          {skill?.latest_commit && <p className={skill.update_available ? 'extract-warning' : 'extract-muted'}>{x(skill.update_available ? 'skillUpdateAvailable' : 'skillUpToDate')} <code title={skill.latest_commit}>{skill.latest_commit.slice(0, 8)}</code></p>}
+          <p className="extract-muted">{x('skillDownloadHint')}</p>
+        </section>
+        <section className="extract-environment-card">
+          <header className="extract-environment-card__header">
+            <span className="extract-environment-card__icon"><Icon name="settings" /></span>
+            <h3>{x('pythonSectionTitle')}</h3>
+          </header>
+          <div className="extract-python-builtin">
+            <div><strong>{x('pythonAppInterpreter')}</strong><p>{x('pythonAppDescription')}</p></div>
+            <span className="extract-environment-badge">{runtime.python_version}</span>
+          </div>
+          {runtime.problems.includes('python_runner_missing') && <p className="extract-warning">{x('setupRuntime')}</p>}
+          {runtime.problems.some(code => code.startsWith('python_')) && <p className="extract-warning">{x('missingPython')}</p>}
+          <div className="extract-field">
+            <label htmlFor={pythonId}>{x('pythonInterpreterLabel')}</label>
+            <div className="extract-python-picker">
+              <CustomSelect id={pythonId} className="extract-python-select" value={manualPython ? 'custom' : settings.python_path}
+                disabled={busy} aria-label={x('pythonInterpreterLabel')} onChange={event => {
+                  setManualPython(event.target.value === 'custom');
+                  if (event.target.value === 'custom') return;
+                  setSettings({ ...settings, python_path: event.target.value });
+                }}>
+                <option value="">{x('pythonAutomatic')}</option>
+                {runtime.system_pythons.map(python => <option key={python.executable} value={python.executable}>
+                  {x('pythonInterpreter', { version: python.version, architecture: python.architecture, path: python.executable })}
+                </option>)}
+                {settings.python_path && !runtime.system_pythons.some(python => python.executable === settings.python_path)
+                  && <option value={settings.python_path}>{x('pythonCustom')}{' · '}{settings.python_path}</option>}
+                <option value="custom">{x('pythonOtherPath')}</option>
+              </CustomSelect>
+              <button type="button" disabled={busy} onClick={() => void refreshPythons()}>
+                {x(action === 'detecting' ? 'pythonDetecting' : 'pythonRefresh')}
+              </button>
+            </div>
+            {settings.python_path && <div className="extract-python-selection">
+              <span>{x('pythonSelectedPath')}</span><p className="extract-python-path">{settings.python_path}</p>
+            </div>}
+            {!settings.python_path && !runtime.system_pythons.length && <p className="extract-muted">{x('pythonNone')}</p>}
+          </div>
+          {manualPython && <PathField label={x('pythonPath')} directory={false} value={settings.python_path}
+            onChange={python_path => setSettings({ ...settings, python_path })} />}
+          <p className="extract-muted">{x('pythonLocalDescription')}</p>
+        </section>
+      </fieldset>
+      {error && <p role="alert" className="extract-error">{error}</p>}
+    </form>
+  </AgentSettingsDialog>;
 }

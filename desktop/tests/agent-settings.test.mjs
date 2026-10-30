@@ -4,13 +4,21 @@ import { createElement } from 'react';
 import { act, create } from 'react-test-renderer';
 import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
 
-function setup(fetchAppSettings, updateAppSettings = async patch => patch) {
+function setup(fetchAppSettings, updateAppSettings = async patch => patch, agent = 'translation') {
   const connection = { backendUrl: 'http://localhost:8000' };
-  const load = createTypeScriptLoader({}, {
+  const listeners = new Map();
+  const load = createTypeScriptLoader({ document: {
+    body: {},
+    documentElement: {},
+    addEventListener: (type, listener) => listeners.set(type, listener),
+    removeEventListener: type => listeners.delete(type),
+  } }, {
+    'react-dom': { createPortal: children => children },
     '../lib/api': { fetchAppSettings, updateAppSettings },
-    '../features/connection/ConnectionContext': { useConnection: () => connection },
+    '../../features/connection/ConnectionContext': { useConnection: () => connection },
   });
-  return { Component: load(new URL('../src/pages/SettingsPage.tsx', import.meta.url)).AgentContextPluginSection, connection };
+  const { AgentContextSettings } = load(new URL('../src/components/AgentSettings.tsx', import.meta.url));
+  return { Component: props => createElement(AgentContextSettings, { agent, backendUrl: connection.backendUrl, ...props }), connection, load, listeners };
 }
 const input = view => view.root.findByProps({ role: 'switch' });
 const deferred = () => {
@@ -93,5 +101,51 @@ test('changing backend discards stale loads and saves', async () => {
     await act(async () => { save.resolve({ billionContextEnabled: true }); });
     assert.equal(input(view).props.checked, false);
     assert.equal(input(view).props.disabled, false);
+  } finally { act(() => view.unmount()); }
+});
+
+test('translation and extraction settings save independently and persist after reopening', async () => {
+  let settings = { billionContextEnabled: false, extractionBillionContextEnabled: true };
+  const patches = [];
+  const { load } = setup(async () => settings, async patch => {
+    patches.push(patch);
+    settings = { ...settings, ...patch };
+    return settings;
+  });
+  const { AgentContextSettings } = load(new URL('../src/components/AgentSettings.tsx', import.meta.url));
+  const controls = ['translation', 'extraction'].map(agent => createElement(AgentContextSettings, { key: agent, agent, backendUrl: 'http://localhost:8000' }));
+  let view;
+  await act(async () => { view = create(createElement('div', {}, controls)); });
+  try {
+    const switches = () => view.root.findAllByProps({ role: 'switch' });
+    assert.deepEqual(switches().map(node => node.props.checked), [false, true]);
+    await act(async () => switches()[0].props.onChange({ target: { checked: true } }));
+    assert.deepEqual(switches().map(node => node.props.checked), [true, true]);
+    await act(async () => switches()[1].props.onChange({ target: { checked: false } }));
+    assert.deepEqual(switches().map(node => node.props.checked), [true, false]);
+    assert.equal(JSON.stringify(patches), '[{"billionContextEnabled":true},{"extractionBillionContextEnabled":false}]');
+    act(() => view.unmount());
+    await act(async () => { view = create(createElement('div', {}, controls)); });
+    assert.deepEqual(switches().map(node => node.props.checked), [true, false]);
+  } finally { act(() => view.unmount()); }
+});
+
+test('translation sidebar opens its configuration from the footer and closes on Escape', async () => {
+  const { load, listeners } = setup(async () => ({ billionContextEnabled: false }));
+  const { AgentSessionSidebar } = load(new URL('../src/pages/agent/AgentSessionSidebar.tsx', import.meta.url));
+  let view;
+  await act(async () => { view = create(createElement(AgentSessionSidebar, {
+    sessionsByProject: {}, projects: [], activeProject: '', activeSessionId: '', collapsed: {},
+    disabled: false, activeRunning: false, unseenLights: {},
+  })); });
+  try {
+    assert.equal(view.root.findAllByProps({ role: 'dialog' }).length, 0);
+    const button = view.root.findByType('aside').findByProps({ className: 'agent-settings-button' });
+    await act(async () => button.props.onClick());
+    assert.equal(view.root.findAllByProps({ role: 'dialog' }).length, 1);
+    assert.equal(input(view).props.checked, false);
+    act(() => listeners.get('keydown')({ key: 'Escape' }));
+    assert.equal(view.root.findAllByProps({ role: 'dialog' }).length, 0);
+    assert.equal(listeners.size, 0);
   } finally { act(() => view.unmount()); }
 });

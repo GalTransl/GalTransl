@@ -1,4 +1,15 @@
 {
+  "agentSettings": {
+    "configure": "Agent 配置",
+    "translationTitle": "翻译 Agent 配置",
+    "extractionTitle": "提取 Agent 配置",
+    "contextTitle": "上下文管理",
+    "enabled": "启用 billion-context",
+    "description": "分层压缩上下文，按需检索和还原历史对话。",
+    "timing": "开关自动保存，仅用于当前类型的 Agent，下一回合生效。压缩摘要使用当前模型，会产生模型调用用量。",
+    "attribution": "基于",
+    "retry": "重新加载"
+  },
   "values": {
     "enabled": "开启",
     "disabled": "关闭",

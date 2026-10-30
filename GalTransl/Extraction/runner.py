@@ -70,6 +70,8 @@ def restore_state(session, directory, profile, prompt, mode):
 
 
 class ExtractionRunner(AgentRunner):
+    _billion_context_setting = "extractionBillionContextEnabled"
+
     def __init__(self, state, store, session, available, emit):
         super().__init__(state)
         self._store = store

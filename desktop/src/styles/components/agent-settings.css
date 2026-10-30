@@ -1,0 +1,48 @@
+.agent-settings-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  margin: 0 12px 12px;
+  padding: 12px 4px 0;
+  border: 0;
+  border-top: 1px solid var(--agent-line-soft);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.agent-settings-button:hover { color: var(--color-primary); }
+.agent-settings-button > span { flex: 1; text-align: left; }
+.agent-settings-button i { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--color-warning); }
+.agent-settings-button i.is-ready { background: var(--color-success); }
+.agent-settings-backdrop { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: #0006; padding: 30px; }
+.agent-settings-dialog { display: flex; flex-direction: column; width: min(590px, 100%); max-height: 85vh; overflow: hidden; border: 1px solid var(--color-line); background: var(--color-surface-strong); color: var(--color-text); border-radius: 18px; padding: 22px; box-shadow: var(--shadow-panel); font-size: 13px; }
+.agent-settings-dialog__body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 2px; margin: 0 -2px; }
+.agent-settings-dialog button { border: 1px solid var(--color-line); background: var(--color-surface); color: inherit; border-radius: 8px; padding: 7px 10px; font: inherit; cursor: pointer; }
+.agent-settings-dialog button:disabled { cursor: default; opacity: 0.5; }
+.agent-settings-dialog button.extract-primary { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+.agent-settings-dialog__header { display: flex; align-items: center; justify-content: space-between; flex: none; margin-bottom: 20px; }
+.agent-settings-dialog__header h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.agent-settings-dialog__header button { display: grid; place-items: center; width: 28px; height: 28px; padding: 5px; border: 0; border-radius: 8px; background: transparent; color: var(--color-text-muted); cursor: pointer; }
+.agent-settings-dialog__header button:hover { background: var(--color-bg); color: var(--color-text); }
+.agent-settings-dialog p { font-size: 12px; line-height: 1.7; }
+.agent-settings-dialog__footer { display: flex; align-items: center; justify-content: flex-end; flex: none; gap: 10px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--color-line); }
+.agent-context-settings { padding: 16px; border: 1px solid var(--color-line); border-radius: 12px; background: var(--color-surface); }
+.agent-context-settings__header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.agent-context-settings__title { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 16px; font-weight: 700; }
+.agent-context-settings__icon { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: 8px; background: var(--color-primary-soft); color: var(--color-primary); font-size: 17px; }
+.agent-context-settings__toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.agent-context-settings p { margin: 8px 0 0; }
+.agent-context-settings__hint, .agent-context-settings__credits { color: var(--color-text-muted); }
+.agent-context-settings__credits a { color: var(--color-primary); }
+.agent-context-settings .agent-context-settings__credits { font-size: 11px; }
+.agent-context-settings__error { color: var(--color-danger); }
+@media (max-width: 720px) {
+  .agent-settings-button { margin: 0 12px 8px; padding-top: 8px; }
+  .agent-settings-backdrop { padding: 16px; }
+  .agent-settings-dialog { padding: 18px; max-height: calc(100dvh - 32px); }
+  .agent-settings-dialog__footer { flex-wrap: wrap; }
+  .agent-context-settings__toggle { flex-basis: 100%; }
+}

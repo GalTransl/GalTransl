@@ -11,7 +11,7 @@
 
    <img width="2044" height="1397" alt="image" src="https://github.com/user-attachments/assets/f85e4782-e53e-4b03-ae24-cd77b453c6e3" />
 
-An optional **billion-context Python core** is available under **Settings → Plugins** for the translation and extraction agents. It provides tiered context compression, original-message archiving and retrieval, with no Node.js runtime or extra Python packages. It is off by default and takes effect on the next agent turn. GalTransl uses designs and compression rules from [billion-context](https://github.com/ranxianglei/billion-context) and [acp-kernel](https://github.com/ranxianglei/acp-kernel); see the [port scope, usage and licenses](plugins/billion-context/README.md).
+An optional **billion-context Python core** is available from the **settings button at the bottom left of each Agent**. Translation and extraction agents have independent switches. It provides tiered context compression, original-message archiving and retrieval, with no Node.js runtime or extra Python packages. It is off by default and takes effect on the next agent turn. GalTransl uses designs and compression rules from [billion-context](https://github.com/ranxianglei/billion-context) and [acp-kernel](https://github.com/ranxianglei/acp-kernel); see the [port scope, usage and licenses](plugins/billion-context/README.md).
 
 ## Preface
 &ensp;&ensp;&ensp;&ensp;The core of GalTransl is a set of automatic translation scripts that solves most of the known problems in using GPT to automatically translate visual novels, and greatly improves the overall translation quality. By combining with other projects, it connects the whole process of making patches, lowering the entry barrier.

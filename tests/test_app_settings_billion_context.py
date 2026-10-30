@@ -11,10 +11,21 @@ from GalTransl.AppSettings import load_app_settings, save_app_settings
 
 @pytest.mark.parametrize("value,expected", [(True, True), (False, False), ("true", False),
     ("false", False), (1, False), (0, False), (None, False)])
-def test_only_explicit_boolean_enables_plugin(tmp_path, monkeypatch, value, expected):
+@pytest.mark.parametrize("setting", ["billionContextEnabled", "extractionBillionContextEnabled"])
+def test_only_explicit_boolean_enables_plugin(tmp_path, monkeypatch, value, expected, setting):
     monkeypatch.setenv("GALTRANSL_APP_SETTINGS_PATH", str(tmp_path / "settings.json"))
-    assert save_app_settings({"billionContextEnabled": value})["billionContextEnabled"] is expected
-    assert load_app_settings()["billionContextEnabled"] is expected
+    assert save_app_settings({setting: value})[setting] is expected
+    assert load_app_settings()[setting] is expected
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_legacy_switch_is_inherited_by_both_agents(tmp_path, monkeypatch, enabled):
+    path = tmp_path / "settings.json"
+    monkeypatch.setenv("GALTRANSL_APP_SETTINGS_PATH", str(path))
+    path.write_text(json.dumps({"billionContextEnabled": enabled}), encoding="utf-8")
+    settings = load_app_settings()
+    assert settings["billionContextEnabled"] is enabled
+    assert settings["extractionBillionContextEnabled"] is enabled
 
 
 def test_http_partial_settings_updates_preserve_plugin_and_other_preferences(tmp_path, monkeypatch):
@@ -31,10 +42,14 @@ def test_http_partial_settings_updates_preserve_plugin_and_other_preferences(tmp
             return json.load(response)
     try:
         assert update({"billionContextEnabled": True}) == {
-            "maxConcurrentJobs": 7, "printTranslationLogInTerminal": False, "billionContextEnabled": True}
+            "maxConcurrentJobs": 7, "printTranslationLogInTerminal": False,
+            "billionContextEnabled": True, "extractionBillionContextEnabled": False}
+        assert update({"extractionBillionContextEnabled": True})["billionContextEnabled"] is True
         assert update({"maxConcurrentJobs": 3})["billionContextEnabled"] is True
         assert update({"billionContextEnabled": False})["maxConcurrentJobs"] == 3
         assert load_app_settings()["billionContextEnabled"] is False
+        assert load_app_settings()["extractionBillionContextEnabled"] is True
+        assert update({"extractionBillionContextEnabled": False})["billionContextEnabled"] is False
     finally:
         server.shutdown()
         server.server_close()
