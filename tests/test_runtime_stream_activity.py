@@ -198,7 +198,7 @@ class RuntimeActivityPayloadTests(unittest.TestCase):
             f"http://127.0.0.1:{cls.httpd.server_address[1]}/api/projects/"
             f"{encode_project_dir(cls.project)}"
         )
-        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+        threading.Thread(target=cls.httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
 
     @classmethod
     def tearDownClass(cls) -> None:

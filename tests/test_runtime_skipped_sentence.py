@@ -56,7 +56,7 @@ class AgentSkippedSentenceProgressTests(unittest.TestCase):
         (self.project / "config.yaml").write_text("common: {}\n", encoding="utf-8")
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(JobRegistry()))
         self.addCleanup(self.httpd.server_close)
-        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread = threading.Thread(target=self.httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         self.thread.start()
         self.addCleanup(self.thread.join)
         self.addCleanup(self.httpd.shutdown)

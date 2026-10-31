@@ -16,6 +16,9 @@ from GalTransl.Agent.runner import AgentRunner
 
 class UsageRestoreTests(unittest.TestCase):
     def setUp(self):
+        settings = patch("GalTransl.Agent.runner.load_app_settings", return_value={"billionContextEnabled": False})
+        settings.start()
+        self.addCleanup(settings.stop)
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.project = str(Path(directory.name) / "project")

@@ -25,7 +25,7 @@ class ProofreadHttpTests(unittest.TestCase):
         cls.cache = cls.project / CACHE_FOLDERNAME / "a.json"
         cls.cache.write_text("[]", encoding="utf-8")
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(JobRegistry()))
-        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         cls.thread.start()
         cls.url = f"http://127.0.0.1:{cls.httpd.server_port}/api/projects/{encode_project_dir(str(cls.project))}/cache/save"
 

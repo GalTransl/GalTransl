@@ -48,7 +48,7 @@ class NovelToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('ForNovel-tool', TRANSLATOR_SUPPORTED)
         self.assertIn('ForNovel-tool', NEED_OpenAITokenPool)
         self.assertEqual(_DEFAULT_TRANSLATOR_PROMPTS['ForNovel-tool']['user_prompt'], FORNOVEL_TOOL_TRANS_PROMPT)
-        schema = next(t['function'] for t in AGENT_TOOLS if t['function']['name'] == 'start_translation')
+        schema = next(t['function'] for t in AGENT_TOOLS if t['function']['name'] == 'translation')
         self.assertIn('ForNovel-tool', schema['parameters']['properties']['translator']['enum'])
 
     def test_both_tool_templates_render_markdown_input_and_history(self):

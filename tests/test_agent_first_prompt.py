@@ -89,7 +89,7 @@ class FirstPromptTests(unittest.TestCase):
 
     def test_http_start_accepts_new_field_and_legacy_alias(self):
         server = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(JobRegistry()))
-        threading.Thread(target=server.serve_forever, daemon=True).start()
+        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
         try:
             for fields, expected in (({"first_prompt": "新输入"}, "新输入"), ({"goal": "旧输入"}, "旧输入"),
                                      ({"first_prompt": "", "goal": "旧输入"}, "")):

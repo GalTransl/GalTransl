@@ -320,7 +320,7 @@ class ProblemPluginTests(unittest.TestCase):
     def test_problem_type_routes_discover_project_types_and_default_flags(self):
         custom = self.typed_plugin("problem_http_types", [{"name": "http custom", "default_enabled": True}])
         server = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(JobRegistry()))
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         thread.start()
         try:
             base = f"http://127.0.0.1:{server.server_port}/api"
@@ -363,7 +363,7 @@ class ProblemPluginTests(unittest.TestCase):
                     "pre_dst": "你好!", "proofread_dst": "", "proofread_by": ""}]
         (cache / "scene.json").write_text(json.dumps(entries), encoding="utf-8")
         server = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(JobRegistry()))
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         thread.start()
         try:
             url = (f"http://127.0.0.1:{server.server_port}/api/projects/"

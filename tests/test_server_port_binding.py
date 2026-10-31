@@ -98,7 +98,7 @@ class ServerPortBindingTests(unittest.TestCase):
         for server_type, host, duplicate_host in cases:
             with self.subTest(server=server_type.__name__, host=host, duplicate_host=duplicate_host):
                 with server_type((host, 0), ProbeHandler) as first:
-                    worker = threading.Thread(target=first.serve_forever, daemon=True)
+                    worker = threading.Thread(target=first.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
                     worker.start()
                     try:
                         port = first.server_port
@@ -152,7 +152,7 @@ class ServerPortBindingTests(unittest.TestCase):
     def test_port_can_be_rebound_after_listener_closes(self):
         with BackendHTTPServer(("127.0.0.1", 0), ProbeHandler) as first:
             address = first.server_address
-            worker = threading.Thread(target=first.serve_forever, daemon=True)
+            worker = threading.Thread(target=first.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
             worker.start()
             connection = HTTPConnection(*address, timeout=5)
             try:

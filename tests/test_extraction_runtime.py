@@ -2,6 +2,7 @@
 import json
 import os
 import runpy
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -114,10 +115,10 @@ def resource_git(directory, *args):
                           check=True, capture_output=True, text=True).stdout.strip()
 
 
-@pytest.fixture
-def skill_source(tmp_path, monkeypatch):
+@pytest.fixture(scope="module")
+def skill_source_template(tmp_path_factory):
     from scripts.prepare_extraction import SKILL_NAME
-    monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file")
+    tmp_path = tmp_path_factory.mktemp("skill-source")
     upstream = tmp_path / "upstream"
     upstream.mkdir()
     resource_git(upstream, "init", "-b", "main")
@@ -128,12 +129,25 @@ def skill_source(tmp_path, monkeypatch):
     source = tmp_path / "source"
     source.mkdir()
     resource_git(source, "init")
-    resource_git(source, "submodule", "add", str(upstream), f"skills/{SKILL_NAME}")
+    resource_git(source, "-c", "protocol.file.allow=always", "submodule", "add", "../upstream", f"skills/{SKILL_NAME}")
     skill = source / "skills" / SKILL_NAME
     (source / "skills" / "sources.json").write_text(json.dumps({SKILL_NAME: {"branch": "main"}}))
     (source / "extraction_python.py").write_text("# Synthetic adapter\n")
     resource_git(source, "add", ".")
     resource_git(source, "commit", "-m", "synthetic application")
+    return source, skill, upstream
+
+
+@pytest.fixture
+def skill_source(tmp_path, monkeypatch, skill_source_template):
+    from scripts.prepare_extraction import SKILL_NAME
+    monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file")
+    source = shutil.copytree(skill_source_template[0], tmp_path / "source")
+    upstream = shutil.copytree(skill_source_template[2], tmp_path / "upstream")
+    skill = source / "skills" / SKILL_NAME
+    # Copied repositories keep absolute remote URLs; point both at this test's upstream.
+    resource_git(source, "config", f"submodule.skills/{SKILL_NAME}.url", str(upstream))
+    resource_git(skill, "remote", "set-url", "origin", str(upstream))
     return source, skill, upstream
 
 

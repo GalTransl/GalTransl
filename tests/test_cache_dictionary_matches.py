@@ -126,7 +126,7 @@ class CacheDictionaryMatchesTests(unittest.TestCase):
     def test_endpoint_is_read_only_and_rejects_unbounded_requests(self):
         snapshot = {path: path.read_bytes() for path in self.project.iterdir()}
         server = ThreadingHTTPServer(('127.0.0.1', 0), build_handler(JobRegistry()))
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         thread.start()
         url = f'http://127.0.0.1:{server.server_port}/api/projects/{encode_project_dir(str(self.project))}/cache/dictionary-matches'
         try:

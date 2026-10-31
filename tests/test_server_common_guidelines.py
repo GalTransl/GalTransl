@@ -30,7 +30,7 @@ class CommonGuidelineApiTests(unittest.TestCase):
         cls.default_name = DEFAULT_GUIDELINE_NAME
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(JobRegistry()))
         cls.base = f"http://127.0.0.1:{cls.httpd.server_address[1]}/api/translation-guidelines"
-        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+        threading.Thread(target=cls.httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
 
     @classmethod
     def tearDownClass(cls) -> None:

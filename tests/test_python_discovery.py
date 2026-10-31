@@ -55,5 +55,6 @@ def test_conda_environment_list_is_included(tmp_path, monkeypatch):
     conda.mkdir()
     custom = tmp_path / "custom-environment"
     (conda / "environments.txt").write_text(str(custom) + "\n", encoding="utf-8")
-    assert str(custom / "python.exe") in python_discovery._python_paths()
-    assert str(custom / "bin/python") in python_discovery._python_paths()
+    paths = python_discovery._python_paths()
+    assert str(custom / "python.exe") in paths
+    assert str(custom / "bin/python") in paths

@@ -111,7 +111,7 @@ def model_server():
             self.wfile.flush()
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     worker.start()
     profile = {"OpenAI-Compatible": {"tokens": [{"token": "synthetic-key", "modelName": "synthetic",
                 "endpoint": f"http://127.0.0.1:{server.server_port}/v1", "contextWindow": 128000,

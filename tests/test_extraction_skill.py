@@ -3,6 +3,7 @@ import io
 import json
 import threading
 import zipfile
+from functools import cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
@@ -22,9 +23,17 @@ def archive(files):
     return output.getvalue()
 
 
+@pytest.fixture(scope="module")
+def discover_pythons():
+    from GalTransl.Extraction import environment
+    # These tests change Skill files only; interpreter discovery can reuse real results.
+    return cache(environment.system_pythons)
+
+
 @pytest.fixture
-def skill_server(tmp_path, monkeypatch):
-    from GalTransl.Extraction import skill
+def skill_server(tmp_path, monkeypatch, discover_pythons):
+    from GalTransl.Extraction import environment, skill
+    monkeypatch.setattr(environment, "system_pythons", discover_pythons)
 
     app = tmp_path / "app"
     original = app / "skills" / SKILL_NAME

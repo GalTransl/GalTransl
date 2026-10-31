@@ -23,7 +23,7 @@ class CacheSearchConditionsTests(unittest.TestCase):
             f.write("common:\n  language: zh-cn\n")
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(JobRegistry()))
         cls.url = f"http://127.0.0.1:{cls.httpd.server_address[1]}/api/projects/{encode_project_dir(cls.project)}/cache/search"
-        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         cls.thread.start()
 
     @classmethod

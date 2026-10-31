@@ -28,7 +28,7 @@ class ProjectGuidelineApiTests(unittest.TestCase):
         cls.encode_project_dir = staticmethod(encode_project_dir)
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(JobRegistry()))
         cls.httpd_base = f"http://127.0.0.1:{cls.httpd.server_address[1]}"
-        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+        threading.Thread(target=cls.httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
 
     @classmethod
     def tearDownClass(cls) -> None:

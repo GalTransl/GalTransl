@@ -75,9 +75,9 @@ def _python_paths() -> list[str]:
     for directory in dict.fromkeys(search):
         with suppress(OSError):
             for entry in directory.iterdir():
-                if entry.is_file() and re.fullmatch(r"(?:python|pypy)(?:\d+(?:\.\d+)*)?(?:\.exe)?", entry.name, re.I):
+                if re.fullmatch(r"(?:python|pypy)(?:\d+(?:\.\d+)*)?(?:\.exe)?", entry.name, re.I) and entry.is_file():
                     candidates.append(str(entry))
-                if entry.is_dir() and directory not in path_directories:
+                if directory not in path_directories and entry.is_dir():
                     environments.append(entry)
     candidates.extend(str(directory / relative) for directory in dict.fromkeys(environments)
                       for relative in ["python.exe", "Scripts/python.exe", "bin/python", "bin/python3"])

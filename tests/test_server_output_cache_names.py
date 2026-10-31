@@ -30,7 +30,7 @@ class OutputCacheNameHttpTests(unittest.TestCase):
             f"http://127.0.0.1:{cls.httpd.server_address[1]}/api/projects/"
             f"{encode_project_dir(cls.project)}"
         )
-        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         cls.thread.start()
 
     @classmethod

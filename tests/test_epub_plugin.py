@@ -31,7 +31,7 @@ class EpubPluginTests(TestCase):
 
     def test_release_smoke_parses_epub_txt_and_json_through_real_http_plugins(self):
         server = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(JobRegistry()))
-        thread = Thread(target=server.serve_forever, daemon=True)
+        thread = Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         thread.start()
         try:
             with TemporaryDirectory() as tmp:

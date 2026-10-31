@@ -175,7 +175,7 @@ class TaskBackendTests(unittest.TestCase):
 
     def test_all_http_entrypoints_forward_task_context_including_explicit_clear(self):
         server = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(JobRegistry()))
-        threading.Thread(target=server.serve_forever, daemon=True).start()
+        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
         self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
         for route, method in (("start", "start"), ("message", "message"), ("answer", "answer_ask"), ("permission", "answer_permission")):

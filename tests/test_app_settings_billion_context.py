@@ -33,7 +33,7 @@ def test_http_partial_settings_updates_preserve_plugin_and_other_preferences(tmp
     monkeypatch.setenv("GALTRANSL_APP_SETTINGS_PATH", str(tmp_path / "settings.json"))
     save_app_settings({"maxConcurrentJobs": 7, "printTranslationLogInTerminal": False})
     server = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(JobRegistry()))
-    worker = Thread(target=server.serve_forever, daemon=True)
+    worker = Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     worker.start()
     def update(patch):
         request = Request(f"http://127.0.0.1:{server.server_port}/api/app-settings",
