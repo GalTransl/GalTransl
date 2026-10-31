@@ -170,20 +170,21 @@ class SubagentBudgetTests(unittest.TestCase):
                     sub.messages, overhead=sub._request_overhead_tokens(),
                 ))
 
-    def test_compaction_request_does_not_anchor_and_rebuild_resets_usage(self):
+    def test_microcompact_resets_usage_without_a_model_request(self):
         parent = _parent([_response(99999)])
         sub = _sub(parent)
+        parent._context_window = 10000
         sub.messages = [
             {'role': 'system', 'content': '规则'}, {'role': 'user', 'content': '任务'},
-            {'role': 'assistant', 'content': '旧工作'}, {'role': 'user', 'content': '后续'},
+            {'role': 'assistant', 'content': '旧工作', 'tool_calls': [{
+                'id': 'read-1', 'function': {'name': 'read_dict', 'arguments': '{}'},
+            }]},
+            {'role': 'tool', 'tool_call_id': 'read-1', 'content': '旧字典' * 2000},
         ]
-        sub._last_prompt_tokens = 20000
-        sub._anchored_message_count = 3
-        sub._chat_with_retry(parent._openai_client, parent._model, None)
-        self.assertEqual(sub._last_prompt_tokens, 20000)
-        request = parent._openai_client.chat.completions.create.call_args.kwargs
-        self.assertNotIn('tools', request)
-        sub._apply_summary(2, 3, '已读完')
+        sub._chat_with_retry(parent._openai_client, parent._model, subagent._subagent_tools('explore'))
+        self.assertEqual(sub._last_prompt_tokens, 99999)
+        self.assertTrue(sub._maybe_compact())
+        parent._openai_client.chat.completions.create.assert_called_once()
         self.assertEqual((sub._last_prompt_tokens, sub._anchored_message_count), (0, 0))
 
     def test_subagent_cache_selection_precedes_stripping(self):

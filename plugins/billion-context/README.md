@@ -58,7 +58,9 @@ GalTransl 使用了 [billion-context](https://github.com/ranxianglei/billion-con
 
 这是内置、由开关控制的 Python 核心移植。没有迁移通用 JS 扩展加载器、Pi/其他宿主插件协议、
 上游命令面板、可视化管理、外部检索服务或上游缓存锚点保留策略。压缩范围在请求中替换为
-历史摘要消息，可能影响前缀缓存命中。专用校对与探索子 Agent 仍使用原有上下文管理。
+历史摘要消息，可能影响前缀缓存命中。专用校对与探索子 Agent 只使用本地 microcompact，
+最多保留最近五轮可清理的读取结果，并受 token 预算限制，不调用模型生成压缩摘要；
+任务说明、助手发现、写入结果与错误原样保留。
 本实现不承诺无限上下文；原文归档增长与检索仍受本机磁盘、内存和处理时间限制。
 
 Copyright (c) 2026 ranxianglei. 许可见 [LICENSE](LICENSE) 和 [LICENSE.acp-kernel](LICENSE.acp-kernel)，

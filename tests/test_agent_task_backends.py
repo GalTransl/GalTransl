@@ -108,11 +108,18 @@ class TaskBackendTests(unittest.TestCase):
         with self.runner._subagent_backend(self.state.subagent_profile_data, self.runner.stop_event) as view:
             child = subagent.SubAgentRunner(view, agent="proofread", files=["a.json"], indexes="", brief="", delegation_id="test")
             self.assertEqual(child._parent_context_window(), 32000)
-            child.messages = [{"role": "system", "content": "rules"}, {"role": "user", "content": "task"}, {"role": "assistant", "content": "old work"}]
-            child._pending_compaction = {"cut": 3, "head_keep": 2}
-            child.messages.append({"role": "user", "content": subagent.SUBAGENT_COMPACT_INSTRUCTION_PROMPT, "_compact_instruction": True})
-            child._run_compaction_request(view._openai_client, view._model)
-            self.assertEqual(self.clients[0].chat.completions.create.call_args.kwargs["model"], "child")
+            child.messages = [{"role": "system", "content": "rules"}, {"role": "user", "content": "task"}, *[
+                message for index in range(7) for message in [
+                    {"role": "assistant", "tool_calls": [{"id": str(index), "function": {"name": "read_transl_cache", "arguments": "{}"}}]},
+                    {"role": "tool", "tool_call_id": str(index), "content": "x" * 12000},
+                ]
+            ]]
+            self.assertTrue(child._maybe_compact())
+            self.assertEqual(child.messages[-4:][1::2], [
+                {"role": "tool", "tool_call_id": str(index), "content": "x" * 12000} for index in (5, 6)
+            ])
+            self.assertIn("8000 tokens", self.parent.events[-1][1]["text"])
+            self.clients[0].chat.completions.create.assert_not_called()
             self.main_client.chat.completions.create.assert_not_called()
             fixer = ProofreadFixer(view, "test", self.runner.stop_event)
             fixer.read(view, {"filename": "a.json", "start": 1, "end": 1})

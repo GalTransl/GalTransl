@@ -66,8 +66,8 @@ SUBAGENT_REPORT_CHARS = 800
 SUBAGENT_EXPLORE_REPORT_CHARS = 6_000
 # 子代理一次工具结果的回传上限（字符）：读缓存动辄几十条，超了截断并提示它分段读
 SUBAGENT_TOOL_RESULT_CHARS = 24_000
-# 子代理自己的历史压缩：保留段同样按 token 预算挑（见 _keep_recent_tokens）。子代理历史比
-# 父会话短得多、任务也单一，预算取父会话（COMPACT_KEEP_RECENT_RATIO）的一半。
+# 子代理只清理读取结果：最近最多五轮的结果再按 token 预算保留（见 _keep_recent_tokens）。
+# 预算取主代理保留比例的一半；任务、助手发现、写入和错误不参与清理。
 SUBAGENT_COMPACT_KEEP_RECENT_RATIO = 0.1
 # 父回合等待子代理时的进度打印间隔（秒）
 SUBAGENT_PROGRESS_TICK = 5.0

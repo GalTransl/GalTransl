@@ -127,7 +127,6 @@ def build_initial_user_message(user_text: str) -> str:
 # 压缩会话历史时用于生成摘要的提示词。摘要要保留"接着干下去"所需的硬信息，
 # 而不是复述对话：文件路径、字典名、任务 id、问题条目 index 这些丢了就找不回来。
 COMPACT_SUMMARY_HEADINGS = ("目标", "已完成的工作", "关键决策", "当前进度与项目状态", "待办与注意事项")
-SUBAGENT_SUMMARY_HEADINGS = ("任务与范围", "已完成", "关键发现", "待办")
 
 COMPACT_SUMMARY_PROMPT = """你在为一个 Galgame 翻译项目的 AI 助手压缩对话历史。下面是这个助手之前的工作记录，请把它压缩成一份摘要，供助手在后续对话中继续工作时参考。
 

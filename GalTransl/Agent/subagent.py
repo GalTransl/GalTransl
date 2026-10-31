@@ -20,7 +20,6 @@ from GalTransl.Agent.context import (
     _apply_prompt_cache,
     _estimate_usage_tokens,
     _estimate_message_tokens,
-    _find_compaction_cut,
     _history_fingerprint,
     _keep_recent_tokens,
     _llm_timeout,
@@ -28,10 +27,8 @@ from GalTransl.Agent.context import (
     MICROCOMPACT_MIN_SAVED_TOKENS,
     _microcompact_replacements,
     _restore_microcompacted_history,
-    _render_task_continuation,
     _sanitize_tool_args,
     _strip_internal_fields,
-    _task_continuation,
     _tools_overhead_tokens,
 )
 from GalTransl.Agent.core import (
@@ -60,7 +57,6 @@ from GalTransl.Agent.core import (
     _truncate_text,
 )
 from GalTransl.Agent.models import AgentToolError
-from GalTransl.Agent.prompts import SUBAGENT_SUMMARY_HEADINGS, _validated_compact_summary
 from GalTransl.Agent.tool_schemas import AGENT_TOOLS
 from GalTransl.Agent.tool_operations import TOOL_OPERATIONS, tool_operation
 from GalTransl.Agent.tools.cache import (
@@ -87,8 +83,7 @@ if TYPE_CHECKING:
 # 一份报告。它中间的思考与工具调用不进主 Agent 的上下文（省 token），但会作为事件推给界面
 # （见 subagent_* 事件），所以用户看得到它在干什么。
 #
-# 子代理也有自己的上下文预算：工具往返堆超窗口时按父 Agent 的同一套规则压缩——窗口取自父
-# Agent 的 contextWindow、切点复用 _find_compaction_cut、摘要复用 _summarize_messages。
+# 子代理也有自己的上下文预算：窗口取自实际后端，只在本地清理可重新读取的工具结果。
 # 压缩发生在子代理自己的消息里，主 Agent 拿到的仍是那份最终报告。
 #
 # 与 PI-Desktop 的一处刻意差异：那边一个 Task 调用只起一个子代理、**立即返回** delegationId，
@@ -838,7 +833,6 @@ def _subagent_handlers(
 def _subagent_chat(
     client: Any, model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None,
     reasoning_kwargs: dict[str, Any] | None = None,
-    summary_headings: tuple[str, ...] | None = None,
 ) -> tuple[str, list[Any], str, str, int]:
     """子代理的一次请求（**非流式**）：返回（正文, 工具调用, 思考字段名, 思考内容, 输入 token）。
 
@@ -847,9 +841,7 @@ def _subagent_chat(
     思考字段的约定与主 Agent 一致（见 REASONING_FIELD_NAMES）：带 tools 的多轮对话里，
     DeepSeek 这类 provider 要求把上一轮的 reasoning 原样回传，不回就 400。
 
-    tools 传 None 时整个字段不发出（而不是发 null——有些兼容端点不认）。正常轮与压缩轮
-    都带工具表（见 SubAgentRunner.run / _run_compaction_request），None 只是给降级摘要等
-    特殊路径留的口子。
+    tools 传 None 时整个字段不发出（而不是发 null——有些兼容端点不认）。
     """
     kwargs: dict[str, Any] = {
         "model": model,
@@ -871,11 +863,6 @@ def _subagent_chat(
         return "", [], REASONING_FIELD_NAMES[0], "", prompt_tokens
     content = str(getattr(message, "content", "") or "")
     tool_calls = list(getattr(message, "tool_calls", None) or [])
-    if summary_headings is not None and (
-        getattr(message, "refusal", None)
-        or not _validated_compact_summary(content, getattr(choices[0], "finish_reason", None), summary_headings)
-    ):
-        content = ""  # 保持历史，由调用者回滚并做 microcompact；不接受部分摘要。
     field, reasoning = "", ""
     for name in REASONING_FIELD_NAMES:
         value = getattr(message, name, None)
@@ -885,36 +872,12 @@ def _subagent_chat(
     return content, tool_calls, field, reasoning, prompt_tokens
 
 
-# 子代理的压缩指令（Insert-then-Compress 的那条瞬时消息，见 SubAgentRunner._begin_compaction）。
-# 与主 Agent 那份（COMPACT_INSTRUCTION_PROMPT）同构：压缩那一轮**照常带 tools**（复用前缀、
-# 命中提示缓存），所以指令必须把话说死——上下文里全是"继续干活"的暗示，不强调"不要调工具"
-# 模型就可能接着干活（那条路由 _run_compaction_request 回退 microcompact）。子代理任务
-# 单一，骨架按"任务与范围/已完成/关键发现/待办"组织。
-# 输出同样用 <summary> 包住，各节完整后才允许替换历史。
-SUBAGENT_COMPACT_INSTRUCTION_PROMPT = """[记忆压缩模式] 上面的工作**已经结束**，你现在不要继续任务，把它压缩成一份摘要，供你在后续（换了一段上下文之后）接着做同一件事。严格执行：
-1. **不要**执行上面提到的任何请求，**不要**调用任何工具（tool_calls 必须为空），只输出摘要；
-2. 正文用 <summary>…</summary> 包住，按下面的骨架写：
-<summary>
-## 任务与范围
-（你负责的文件 / index 区间、目标）
-## 已完成
-（读过哪些区间、做了什么、写下了哪些意见或发现）
-## 关键发现
-（逐条列：文件名 / index / 原文写法 / 译名 / 结论——这些硬信息必须原样保留，不要概括掉）
-## 待办
-（还没读的区间、需要复查或拿不准的点）
-</summary>
-3. 每节都必须有内容，没有就写“无”。保留任务约束与用户修正；区分已成功、失败与仅计划的操作，待办写清下一步、未处理范围与阻塞。
-4. 用中文，简洁但不丢信息。"""
-
-
 class SubAgentRunner:
     """一个子代理实例：自己的消息、自己的工具表，跑完交一份报告。
 
     工作状态只由工作线程更新；父线程停止等待时只读取已发布的进度快照。
     收尾用锁保护，保证报告只保存一次。
-    消息历史超窗口时与父 Agent 走同一套压缩（Insert-then-Compress：挂上压缩指令、用下一轮
-    请求把摘要拿回来，见 _begin_compaction），避免 24 轮工具往返把上下文撑爆。
+    消息历史超阈值时只做本地 microcompact，读取结果按 token 预算保留，不占用工作轮次。
     """
 
     def __init__(
@@ -949,11 +912,6 @@ class SubAgentRunner:
         self.proofread_comments: list[dict[str, Any]] = []
         self.patch_errors: dict[str, str] = {}
         self.started_at = time.time()
-        # 正在进行的一次压缩：{cut, head_keep, estimated, limit}。挂上压缩指令后置上，
-        # 收尾（_finish_compaction）或回滚（_abort_compaction）时清空。
-        self._pending_compaction: dict[str, Any] | None = None
-        # 压缩整条路子都失败过（插入式 + 独立请求都没压成）：不再重试，否则每轮都白跑一次
-        self._compact_failed = False
         self._last_compaction_fingerprint: str | None = None
         self._last_prompt_tokens = 0
         self._anchored_message_count = 0
@@ -1092,114 +1050,32 @@ class SubAgentRunner:
             self._request_overhead_tokens(),
         )
 
-    def _begin_compaction(self) -> bool:
-        """历史超窗口就挂上压缩指令，让**下一轮请求**顺带把摘要拿回来（Insert-then-Compress）。
-
-        与父 Agent 同一机制、同一套阈值（父的窗口 + COMPACT_TRIGGER_RATIO + 尾部预留），
-        差别只有两处：
-        - 头部 2 条（system 提示词 + 任务说明）永远保留——子代理没有别的途径知道"我是谁、
-          负责哪些文件"；
-        - 保留段按 token 预算挑，预算取父会话的一半（SUBAGENT_COMPACT_KEEP_RECENT_RATIO）。
-        压缩那一轮与父 Agent 一样**照常带 tools**（复用会话前缀、命中提示缓存）；模型没按
-        指令走、回了工具调用时，由 _run_compaction_request 回退 microcompact。
-        """
-        if self._pending_compaction is not None or self._compact_failed:
+    def _maybe_compact(self) -> bool:
+        """超阈值时只做本地读取结果清理；新增历史后可以再次尝试。"""
+        limit = max(0, int(self._parent_context_window() * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS)
+        if self._estimate_context_tokens() <= limit:
             return False
         if self._last_compaction_fingerprint == _history_fingerprint(self.messages):
             return False
-        window = self._parent_context_window()
-        limit = int(window * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
-        if limit <= 0:
-            return False
-        estimated = self._estimate_context_tokens()
-        if estimated <= limit:
-            return False
-        head_keep = 2
-        keep_recent = _keep_recent_tokens(limit, SUBAGENT_COMPACT_KEEP_RECENT_RATIO)
-        cut = _find_compaction_cut(self.messages[head_keep:], keep_recent)
-        if cut <= 0:
-            # 找不到安全切点：别每轮都重算一遍（父 Agent 的 _compact_failed_this_turn 同理）
-            self._compact_failed = True
-            return False
-        cut += head_keep
-        # 指令只进内存、不落盘；它也**不会**被写进摘要或报告（收尾时弹掉）
-        self.messages.append({
-            "role": "user", "content": SUBAGENT_COMPACT_INSTRUCTION_PROMPT,
-            "_compact_instruction": True,
-        })
-        self._pending_compaction = {
-            "cut": cut,
-            "head_keep": head_keep,
-            "estimated": estimated,
-            "limit": limit,
-        }
-        return True
-
-    def _abort_compaction(self) -> None:
-        """压缩没成：把那条瞬时指令弹掉，历史回到原样。"""
-        if self._pending_compaction is None:
-            return
-        self._pending_compaction = None
-        if self.messages:
-            self.messages.pop()
-
-    def _run_compaction_request(self, client: Any, model: str) -> None:
-        """发出带压缩指令的那轮请求、收下摘要；失败回滚后做 microcompact。
-
-        与父 Agent 一样，这轮**照常带 tools**：system prompt、工具表、历史前缀全部复用，
-        摘要调用本身也能命中提示缓存。模型没按指令走（返回工具调用）或正文解析不出摘要时，
-        一律回退本地工具结果清理，不追加模型请求、不丢弃用户要求与任务现场。
-        """
-        try:
-            content, tool_calls, _, _ = self._chat_with_retry(
-                client, model, _subagent_tools(self.agent)
-            )
-            if self.stop_event.is_set():
-                raise AgentStopRequested()
-        except AgentStopRequested:
-            self._abort_compaction()  # 父回合被停止：历史不必留着那条指令
-            raise
-        except Exception as exc:  # noqa: BLE001 - 压缩失败不能拖垮子代理
-            _log(f"  ⚠ 子代理 {self.id} 压缩请求失败（{exc}），回退 microcompact")
-            self._abort_compaction()
-            self._microcompact()
-            return
-        if tool_calls:
-            _log(f"  ⚠ 子代理 {self.id} 压缩请求返回了工具调用，回退 microcompact")
-            self._abort_compaction()
-            self._microcompact()
-            return
-        if not self._finish_compaction(content):
-            _log(f"  ⚠ 子代理 {self.id} 摘要完整性校验失败，回退 microcompact")
-            self._microcompact()
-
-    def _finish_compaction(self, content: str) -> bool:
-        """摘要到手 → 弹掉指令、按切点重建消息列表。"""
-        pending = self._pending_compaction
-        if pending is None:
-            return False
-        summary = _validated_compact_summary(content, headings=SUBAGENT_SUMMARY_HEADINGS)
-        if not summary.strip():
-            self._abort_compaction()
-            return False
-        self._pending_compaction = None
-        self.messages.pop()  # 那条压缩指令不是历史
-        self._apply_summary(int(pending["head_keep"]), int(pending["cut"]), summary)
-        return True
+        return self._microcompact()
 
     def _microcompact(self) -> bool:
-        """子代理保留任务与最近现场，只清理可重新读取的旧工具结果。"""
+        """保留任务与发现，读取结果按最近五轮及 token 预算选择，不调用模型。"""
         if self.stop_event.is_set():
             raise AgentStopRequested()
-        indices = _microcompact_tool_results(self.messages)
+        limit = max(0, int(self._parent_context_window() * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS)
+        keep_recent = min(limit, _keep_recent_tokens(limit, SUBAGENT_COMPACT_KEEP_RECENT_RATIO))
+        indices = _microcompact_tool_results(self.messages, keep_recent_tokens=keep_recent)
         if not indices:
-            self._compact_failed = True
+            self._last_compaction_fingerprint = _history_fingerprint(self.messages)
             return False
-        replacements = _microcompact_replacements(self.messages, indices)
+        replacements = [item for index, item in zip(indices, _microcompact_replacements(self.messages, indices))
+                        if _estimate_message_tokens(self.messages[index]) > _estimate_message_tokens(
+                            {**self.messages[index], "content": item["content"]})]
         rebuilt = _restore_microcompacted_history(self.messages, [{"replacements": replacements}])
         saved = sum(_estimate_message_tokens(self.messages[index]) - _estimate_message_tokens(rebuilt[index]) for index in indices)
         if saved < MICROCOMPACT_MIN_SAVED_TOKENS:
-            self._compact_failed = True
+            self._last_compaction_fingerprint = _history_fingerprint(self.messages)
             return False
         if self.stop_event.is_set():
             raise AgentStopRequested()
@@ -1209,46 +1085,10 @@ class SubAgentRunner:
         self._last_compaction_fingerprint = _history_fingerprint(self.messages)
         self._emit("subagent_message", {
             "round": self.turns,
-            "text": f"[轻量上下文清理] microcompact 已清理 {len(indices)} 条旧读取结果，保留最近 5 轮及任务原文。",
+            "text": f"[轻量上下文清理] microcompact 已清理 {len(replacements)} 条读取结果，释放约 {saved} tokens；"
+                    f"最近最多 5 轮读取结果的保留预算为 {keep_recent} tokens，任务与发现原样保留。",
         })
         return True
-
-    def _apply_summary(self, head_keep: int, cut: int, summary: str) -> None:
-        """按切点重建消息列表：头部 head_keep 条 + 一条摘要 + 尾部原文。
-
-        被裁掉的旧消息直接丢掉——子代理跑完只交一份报告，中间过程不需要召回（与主 Agent
-        的 read_history_archive 不同，它没有"回头查旧账"的需求）。
-        """
-        dropped = cut - head_keep
-        tail = self.messages[cut:]
-        continuation = _task_continuation(self.messages[head_keep:cut])
-        continuation_text = _render_task_continuation(continuation)
-        self.messages = [
-            *self.messages[:head_keep],
-            {
-                "role": "user",
-                "content": (
-                    "# 早前工作的压缩摘要\n"
-                    f"{summary}\n\n"
-                    f"{continuation_text}\n\n"
-                    "以上是之前工作的压缩摘要，请在此基础上继续，不要重复已完成的工作。"
-                ),
-                "_compact_summary": True,
-                "_compact_continuation": continuation,
-            },
-            *tail,
-        ]
-        # 重建了历史，旧请求的 token 锚点不再对应当前前缀。
-        self._last_prompt_tokens = 0
-        self._anchored_message_count = 0
-        self._last_compaction_fingerprint = _history_fingerprint(self.messages)
-        # 子代理的每一步都会推给界面（subagent_message 渲染成一步说明）：压缩这种状态变化
-        # 也让它看得见，否则展开子代理会发现步数突然对不上
-        self._emit("subagent_message", {
-            "round": self.turns,
-            "text": f"[上下文压缩] 早前的 {dropped} 条消息已压成摘要（{len(summary)} 字符），从摘要继续。",
-        })
-        _log(f"  📦 子代理 {self.id} 压缩 {dropped} 条为 {len(summary)} 字符摘要")
 
     def _chat_with_retry(
         self, client: Any, model: str, tools: list[dict[str, Any]] | None
@@ -1259,11 +1099,11 @@ class SubAgentRunner:
         用量比主请求小得多，重试代价低。规则与主 Agent 一致：只重试瞬态错误（超时 /
         限流 / 5xx / 流连接断了）；鉴权、参数、上下文超限重试多少次都一样，直接失败。
         退避期间父回合被停止就立刻收尾（抛 AgentStopRequested，由 run 转成 stopped）。
-        压缩那一轮也走这里，且**照常带工具表**（见 _run_compaction_request）——与正常轮
-        共用同一条请求路径，前缀缓存不废。
         """
         attempt = 0
         while True:
+            if self.stop_event.is_set():
+                raise AgentStopRequested()
             try:
                 messages = self.messages
                 request_tools = tools
@@ -1273,22 +1113,14 @@ class SubAgentRunner:
                 messages = [_strip_internal_fields(message) for message in messages]
                 anchored_count = len(messages)
                 reasoning_kwargs = getattr(self.parent, "_reasoning_kwargs", {})
-                summary_kwargs = {"summary_headings": SUBAGENT_SUMMARY_HEADINGS} if self._pending_compaction else {}
                 content, calls, field, reasoning, prompt_tokens = _subagent_chat(
                     client, model, messages, request_tools,
                     **({"reasoning_kwargs": reasoning_kwargs} if reasoning_kwargs else {}),
-                    **summary_kwargs,
                 )
                 # 任意模型响应都算首响（包括只有工具调用、没有正文的响应），不等任务完成。
                 if self.first_response_event is not None:
                     self.first_response_event.set()
-                # 压缩那一轮（_pending_compaction 挂着时）的历史即将被 _apply_summary 重建
-                # （锚点在那里清零），且消息里带着一次性指令——不能拿它校准正常请求。
-                if (
-                    tools is not None
-                    and prompt_tokens > 0
-                    and self._pending_compaction is None
-                ):
+                if tools is not None and prompt_tokens > 0:
                     self._last_prompt_tokens = prompt_tokens
                     self._anchored_message_count = anchored_count
                 return content, calls, field, reasoning
@@ -1366,12 +1198,8 @@ class SubAgentRunner:
             self.turns = round_i
             if self.stop_event.is_set():
                 return self._finish("stopped", last_text, error="父回合被停止，子代理提前收尾")
-            # 每轮请求前判一次：工具往返堆太多就先压缩——挂上压缩指令、这一轮专门拿摘要
-            # （Insert-then-Compress，与父 Agent 同一机制），下一轮带着摘要继续干活。
-            if self._begin_compaction():
-                self._run_compaction_request(client, model)
-                continue
             try:
+                self._maybe_compact()
                 content, tool_calls, reasoning_field, reasoning = self._chat_with_retry(
                     client, model, tools
                 )
@@ -1479,6 +1307,7 @@ class SubAgentRunner:
         return {
             "role": "tool",
             "tool_call_id": call_id,
+            **({"_is_error": True} if not ok else {}),
             "content": _truncate_text(
                 payload,
                 SUBAGENT_TOOL_RESULT_CHARS,

@@ -35,14 +35,6 @@ SUMMARY = """## 目标
 只读阶段。
 ## 待办与注意事项
 继续检查 21-40，尚未修改文件。"""
-SUB_SUMMARY = """## 任务与范围
-a.json，1-40。
-## 已完成
-已读 1-20。
-## 关键发现
-无。
-## 待办
-检查 21-40。"""
 REQUEST = "校对 transl_cache/a.json 的 1-40，只读，不要改预算。"
 CORRECTION = "修正：忍不住统一为按捺不住；任务 job-42 未完成，只处理 21-40。"
 
@@ -326,16 +318,15 @@ def test_stop_during_summary_never_replaces_history():
     assert runner._pending_compaction is None
 
 
-def test_subagent_rejects_truncated_response_without_requesting_another_summary():
-    parent = SimpleNamespace(stop_event=threading.Event(), _context_window=32000,
-                             _summarize_messages=Mock(return_value=SUMMARY), _emit=Mock())
+def test_subagent_cleanup_preserves_user_corrections_and_tool_pairs_without_model_requests():
+    client = backend()
+    parent = SimpleNamespace(stop_event=threading.Event(), _context_window=10000,
+                             _openai_client=client, _emit=Mock())
     sub = SubAgentRunner(parent, agent="explore", files=[], indexes="", brief="check", delegation_id="test")
     sub.messages = history()
     before = copy.deepcopy(sub.messages)
-    sub._pending_compaction = {"head_keep": 2, "cut": 6}
-    sub.messages.append({"role": "user", "content": "compress", "_compact_instruction": True})
-    # 四节齐全仍不能接受 provider 标记 length 的响应。
-    sub._run_compaction_request(backend(SUB_SUMMARY, finish_reason="length"), "test")
-    parent._summarize_messages.assert_not_called()
-    assert sub.messages == before
-    assert sub._pending_compaction is None
+    assert sub._microcompact()
+    client.chat.completions.create.assert_not_called()
+    assert sub.messages[:5] == before[:5]
+    assert sub.messages[5]["tool_call_id"] == before[5]["tool_call_id"]
+    assert sub.messages[6:] == before[6:]

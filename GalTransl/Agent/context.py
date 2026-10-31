@@ -353,8 +353,10 @@ def _history_tool_operation(function: dict[str, object]) -> str:
         return ""
 
 
-def _microcompact_tool_results(messages: list[dict[str, Any]]) -> list[int]:
-    """找出可清理的旧读取结果；保留最近五个调用轮次，不拆工具协议配对。
+def _microcompact_tool_results(
+    messages: list[dict[str, Any]], *, keep_recent_tokens: int | None = None,
+) -> list[int]:
+    """找出可清理的读取结果；最近五轮可额外受 token 预算限制，不拆工具协议配对。
 
     按轮次保留，避免一次并行调用的结果互相挤掉。未知工具、写入、任务状态、
     错误和媒体均保护；已经清理的结果不再候选。这里只规划，不修改输入。
@@ -373,7 +375,7 @@ def _microcompact_tool_results(messages: list[dict[str, Any]]) -> list[int]:
             continue
         content = message.get("content")
         if (not isinstance(content, str) or not content.strip() or content.startswith(MICROCOMPACT_PLACEHOLDER)
-                or message.get("isError") or message.get("is_error")):
+                or message.get("isError") or message.get("is_error") or message.get("_is_error")):
             continue
         try:
             result = json.loads(content)
@@ -389,7 +391,18 @@ def _microcompact_tool_results(messages: list[dict[str, Any]]) -> list[int]:
         group.append(index)
     if group:
         groups.append(group)
-    indices = [index for group in groups[:-MICROCOMPACT_KEEP_RECENT_ROUNDS] for index in group]
+    cut = max(0, len(groups) - MICROCOMPACT_KEEP_RECENT_ROUNDS)
+    if keep_recent_tokens is not None:
+        cut = len(groups)
+        used = 0
+        for group in reversed(groups[-MICROCOMPACT_KEEP_RECENT_ROUNDS:]):
+            cost = sum(_estimate_message_tokens(messages[index]) for index in group)
+            # 单轮结果也可能超预算：不为最近一轮豁免，调用参数仍保留以便缩小范围重读。
+            if used + cost > keep_recent_tokens:
+                break
+            used += cost
+            cut -= 1
+    indices = [index for group in groups[:cut] for index in group]
     # 占位和归档引用也有成本：保守预留每条 128 tokens，少量节省就不改历史。
     saved = sum(_estimate_message_tokens(messages[index]) - 128 for index in indices)
     return indices if saved >= MICROCOMPACT_MIN_SAVED_TOKENS else []
@@ -398,7 +411,7 @@ def _microcompact_tool_results(messages: list[dict[str, Any]]) -> list[int]:
 def _microcompact_replacements(
     messages: list[dict[str, Any]], indices: list[int], archive: str = "",
 ) -> list[dict[str, str]]:
-    recall = (f"用 read_history_archive 读取 {archive} 回查。" if archive else "需要细节时重新读取，勿重复执行写入。")
+    recall = (f"用 read_history_archive 读取 {archive} 回查。" if archive else "需要细节时缩小范围重新读取，勿重复执行写入。")
     return [{
         "tool_call_id": str(messages[index]["tool_call_id"]),
         "fingerprint": _history_fingerprint([messages[index]]),

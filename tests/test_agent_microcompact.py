@@ -11,6 +11,7 @@ import pytest
 from GalTransl.Agent import session_store as ss
 from GalTransl.Agent.context import (
     MICROCOMPACT_PLACEHOLDER,
+    _estimate_message_tokens,
     _history_fingerprint,
     _microcompact_tool_results,
     _restore_compacted_history,
@@ -106,6 +107,17 @@ def test_parallel_calls_are_kept_as_rounds_not_individual_results():
     assert messages == original  # 规划不改源数据
 
 
+def test_token_budget_keeps_parallel_rounds_whole():
+    messages = [message for index in range(3) for message in tool_round(index, content="x" * 1000, parallel=3)]
+    original = copy.deepcopy(messages)
+    indices = _microcompact_tool_results(messages, keep_recent_tokens=1000)
+    assert len(indices) == 6
+    assert {messages[index]["tool_call_id"] for index in indices} == {
+        f"c-{round_index}-{call_index}" for round_index in range(2) for call_index in range(3)
+    }
+    assert messages == original
+
+
 @pytest.mark.parametrize("name,content,extra", [
     ("patch_transl_cache", "修改成功" * 2000, {}),
     ("ask_user", "用户确认" * 2000, {}),
@@ -119,12 +131,14 @@ def test_parallel_calls_are_kept_as_rounds_not_individual_results():
     ("read_transl_cache", [{"type":"image_url", "image_url":{"url":"data:example"}}], {}),
     ("read_transl_cache", [{"type":"video", "source":{}}], {}),
     ("read_transl_cache", "error" * 2000, {"isError": True}),
-], ids=["write", "ask", "runtime", "start", "unknown", "error", "failed", "ok-false", "error-text", "image", "video", "error-flag"])
+    ("read_transl_cache", "missing" * 2000, {"_is_error": True}),
+], ids=["write", "ask", "runtime", "start", "unknown", "error", "failed", "ok-false", "error-text", "image", "video", "error-flag", "internal-error-flag"])
 def test_protected_results_are_never_cleared(name, content, extra):
     protected = tool_round("protected", name=name, content=content)
     protected[-1].update(extra)
     messages = [*protected, *history()]
     assert 1 not in _microcompact_tool_results(messages)
+    assert 1 not in _microcompact_tool_results(messages, keep_recent_tokens=0)
 
 
 def test_small_savings_are_noop_and_history_is_untouched():
@@ -232,6 +246,22 @@ def test_subagent_microcompact_preserves_assignment_and_recent_rounds():
     before = copy.deepcopy(sub.messages)
     assert sub._microcompact()
     assert sub.messages[:2] == before[:2]
-    assert sub.messages[-12:] == before[-12:]
+    assert sub.messages[-8:] == before[-8:]
+    retained = [message for message in sub.messages if message.get("role") == "tool"
+                and not message["content"].startswith(MICROCOMPACT_PLACEHOLDER)]
+    assert len(retained) == 3
+    assert sum(_estimate_message_tokens(message) for message in retained) <= 8000
     assert sub.messages[3]["content"].startswith(MICROCOMPACT_PLACEHOLDER)
     assert sub._last_compaction_fingerprint == _history_fingerprint(sub.messages)
+
+
+def test_stopped_subagent_cleanup_does_not_mutate_history():
+    parent = SimpleNamespace(stop_event=threading.Event(), _context_window=32000, _emit=Mock())
+    sub = SubAgentRunner(parent, agent="explore", files=[], indexes="", brief="check", delegation_id="micro")
+    sub.messages = history()
+    original = copy.deepcopy(sub.messages)
+    parent.stop_event.set()
+    with pytest.raises(AgentStopRequested):
+        sub._microcompact()
+    assert sub.messages == original
+    parent._emit.assert_not_called()

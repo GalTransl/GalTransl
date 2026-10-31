@@ -167,10 +167,6 @@ class _Parent:
         return [event_type for event_type, _ in self.events]
 
 
-def _sub_summary(goal):
-    return f"## 任务与范围\n{goal}\n## 已完成\n无\n## 关键发现\n无\n## 待办\n无"
-
-
 def _make_chat(script: list[tuple[str, list[_Call]]]):
     """按脚本依次返回响应；脚本用完后一直重复最后一条。"""
 
@@ -1374,21 +1370,11 @@ class RunSubagentsValidationTests(unittest.TestCase):
 
 
 class SubagentCompactionTests(unittest.TestCase):
-    """子代理走与父 Agent 同一套压缩：**Insert-then-Compress**。
+    """子代理只清理读取结果，任务与工具协议不变，正常请求无需让出压缩轮次。"""
 
-    窗口取自 parent._context_window、阈值走 COMPACT_TRIGGER_RATIO、切点走
-    _find_compaction_cut（保证 tool_calls/tool 成对）；头部 2 条（system + 任务说明）
-    永远保留，保留尾部取 SUBAGENT_COMPACT_KEEP_RECENT。压缩那一轮与主 Agent 一样
-    **照常带 tools**（复用会话前缀），模型没按指令走（回工具调用）时回退 microcompact。
-    插入式失败或没拿到摘要时，只在本地清理旧读取结果，不请求第二份摘要，
-    再兜本地摘要——整条路都不该把子代理卡死。
-    """
-
-    def _parent(self, window: int, summarizer=None) -> _Parent:
-        parent = _Parent({"a.json": [ENTRY]})
+    def _parent(self, window: int) -> _Parent:
+        parent = _Parent({"a.json": [dict(ENTRY)]})
         parent._context_window = window
-        if summarizer is not None:
-            parent._summarize_messages = summarizer
         return parent
 
     def _sub(self, parent: _Parent) -> rt.SubAgentRunner:
@@ -1403,175 +1389,170 @@ class SubagentCompactionTests(unittest.TestCase):
 
     @staticmethod
     def _history(rounds: int, chars: int = 4000) -> list[dict]:
-        """构造 rounds 轮合法的 assistant(tool_calls) + tool 往返，每轮工具结果很长。"""
         messages: list[dict] = [
             {"role": "system", "content": "SYS"},
             {"role": "user", "content": "BRIEF"},
         ]
         for i in range(rounds):
-            messages.append({
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [{
-                    "id": f"c{i}",
-                    "type": "function",
-                    "function": {"name": "read_transl_cache", "arguments": "{}"},
-                }],
-            })
-            messages.append({"role": "tool", "tool_call_id": f"c{i}", "content": "x" * chars})
+            messages.extend([
+                {"role": "assistant", "content": f"已检查第 {i} 段，发现与进度必须保留。",
+                 "reasoning_content": "原始思考",
+                 "tool_calls": [{"id": f"c{i}", "type": "function", "function": {
+                     "name": "read_transl_cache", "arguments": "{}",
+                 }}]},
+                {"role": "tool", "tool_call_id": f"c{i}", "content": "x" * chars},
+            ])
         return messages
 
     def test_reuses_parent_window_with_default_fallback(self) -> None:
         self.assertEqual(self._sub(self._parent(50_000))._parent_context_window(), 50_000)
-        # 父 Agent 还没解析出窗口（或替身没有这个属性）时不炸：退回默认窗口
-        self.assertEqual(
-            self._sub(_Parent({"a.json": [ENTRY]}))._parent_context_window(),
-            rt.DEFAULT_CONTEXT_WINDOW,
-        )
+        self.assertEqual(self._sub(_Parent({"a.json": [ENTRY]}))._parent_context_window(), rt.DEFAULT_CONTEXT_WINDOW)
 
-    def test_begin_appends_the_instruction_and_abort_rolls_back(self) -> None:
-        sub = self._sub(self._parent(20_000))  # 阈值 7808
+    def test_threshold_cleanup_preserves_assignment_findings_and_recent_rounds(self) -> None:
+        sub = self._sub(self._parent(20_000))
         sub.messages = self._history(12)
-        before = [dict(m) for m in sub.messages]
-
-        self.assertGreater(sub._estimate_context_tokens(), 7808)  # 前提：确实超了
-        self.assertTrue(sub._begin_compaction())
-
-        # 指令是挂在末尾的一条瞬时消息（下一轮请求带着它一起发出去）
-        self.assertEqual(sub.messages[-1]["content"], rt.SUBAGENT_COMPACT_INSTRUCTION_PROMPT)
-        self.assertIsNotNone(sub._pending_compaction)
-
-        sub._abort_compaction()  # 压缩没成：历史回到原样，指令不留下
-        self.assertEqual(sub.messages, before)
-        self.assertIsNone(sub._pending_compaction)
+        before = list(sub.messages)
+        self.assertTrue(sub._maybe_compact())
+        self.assertEqual(sub.messages[:2], before[:2])
+        self.assertEqual(sub.messages[2::2], before[2::2])
+        self.assertEqual(sub.messages[-10:], before[-10:])
+        self.assertTrue(sub.messages[3]["content"].startswith(rt.MICROCOMPACT_PLACEHOLDER))
+        self.assertEqual(len(sub.messages), len(before))
+        self.assertFalse(sub._maybe_compact())
+        self.assertFalse(any(m.get("_compact_instruction") or m.get("_compact_summary") for m in sub.messages))
 
     def test_below_threshold_history_is_untouched(self) -> None:
         sub = self._sub(self._parent(1_000_000))
-        sub.messages = self._history(3)
-        before = [dict(m) for m in sub.messages]
-
-        self.assertFalse(sub._begin_compaction())
+        sub.messages = self._history(12)
+        before = list(sub.messages)
+        self.assertFalse(sub._maybe_compact())
         self.assertEqual(sub.messages, before)
 
-    def test_finish_rebuilds_head_summary_and_tail(self) -> None:
+    def test_result_budget_reduces_retention_below_five_rounds(self) -> None:
         sub = self._sub(self._parent(20_000))
-        sub.messages = self._history(12)
-        sub._begin_compaction()
+        sub.messages = self._history(6, chars=12_000)
+        before = list(sub.messages)
+        self.assertTrue(sub._maybe_compact())
+        retained = [m for m in sub.messages if m.get("role") == "tool"
+                    and not m["content"].startswith(rt.MICROCOMPACT_PLACEHOLDER)]
+        self.assertEqual(retained, before[-4:][1::2])
+        self.assertLessEqual(sum(rt._estimate_message_tokens(m) for m in retained), 7808)
+        self.assertEqual(sub.messages[2::2], before[2::2])
 
-        self.assertTrue(
-            sub._finish_compaction("前言\n<summary>" + _sub_summary("已校对 8 轮。") + "</summary>\n后记")
-        )
-
-        # 头部 2 条原样保留，随后一条摘要；尾部按 token 预算挑（来自原文尾部、配对完整）
-        self.assertEqual(sub.messages[0], {"role": "system", "content": "SYS"})
-        self.assertEqual(sub.messages[1], {"role": "user", "content": "BRIEF"})
-        self.assertIn("压缩摘要", sub.messages[2]["content"])
-        self.assertIn("已校对 8 轮", sub.messages[2]["content"])
-        self.assertNotIn("前言", sub.messages[2]["content"])  # <summary> 之外的不进历史
-        tail = sub.messages[3:]
-        original = self._history(12)
-        self.assertTrue(tail)
-        self.assertEqual(tail, original[-len(tail):])  # 保留段就是原文的末尾一段
-        budget = rt._keep_recent_tokens(7808, rt.SUBAGENT_COMPACT_KEEP_RECENT_RATIO)
-        self.assertLessEqual(sum(rt._estimate_message_tokens(m) for m in tail), budget)
-        self.assertEqual(sub.messages[-1]["content"], "x" * 4000)
-        self.assertNotIn(
-            rt.SUBAGENT_COMPACT_INSTRUCTION_PROMPT, [m.get("content") for m in sub.messages]
-        )
-        self.assertIsNone(sub._pending_compaction)
-
-    def test_empty_summary_uses_microcompact_without_parent_summarizer(self) -> None:
-        calls = []
-        parent = self._parent(20_000, summarizer=lambda head: calls.append(head))
-        sub = self._sub(parent)
-        sub.messages = self._history(12)
-        original = [dict(m) for m in sub.messages]
-        self.assertTrue(sub._begin_compaction())
-        with patch.object(subagent_mod, "_subagent_chat", _make_chat([("", [])])):
-            sub._run_compaction_request(None, "fake-model")
-        self.assertEqual(calls, [])
-        self.assertEqual(len(sub.messages), len(original))
-        self.assertEqual(sub.messages[:2], original[:2])
-        self.assertEqual(sub.messages[-10:], original[-10:])
-        self.assertIn("microcompact", sub.messages[3]["content"])
-        self.assertIsNone(sub._pending_compaction)
-
-    def test_compaction_request_failure_uses_microcompact(self) -> None:
+    def test_single_oversized_result_is_cleared_and_can_be_reread_in_smaller_ranges(self) -> None:
         sub = self._sub(self._parent(20_000))
-        sub.messages = self._history(12)
-        self.assertTrue(sub._begin_compaction())
-        with patch.object(subagent_mod, "_subagent_chat", side_effect=RuntimeError("compaction down")):
-            sub._run_compaction_request(None, "fake-model")
-        self.assertIn("microcompact", sub.messages[3]["content"])
-        self.assertIsNone(sub._pending_compaction)
+        sub.messages = self._history(1, chars=48_000)
+        before = list(sub.messages)
+        self.assertTrue(sub._maybe_compact())
+        self.assertEqual(sub.messages[:3], before[:3])
+        self.assertIn("缩小范围重新读取", sub.messages[3]["content"])
+        self.assertEqual(sub.messages[3]["tool_call_id"], before[3]["tool_call_id"])
 
-    def test_compaction_tool_calls_use_microcompact(self) -> None:
-        sub = self._sub(self._parent(20_000))
-        sub.messages = self._history(12)
-        self.assertTrue(sub._begin_compaction())
-        with patch.object(subagent_mod, "_subagent_chat", _make_chat([("", [_Call("cx", "read_transl_cache", "{}")])])):
-            sub._run_compaction_request(None, "fake-model")
-        self.assertIn("microcompact", sub.messages[3]["content"])
-        self.assertFalse(any(m.get("_compact_instruction") for m in sub.messages))
-
-    def test_microcompact_without_candidates_does_not_remove_assignment(self) -> None:
+    def test_noop_does_not_prevent_cleanup_after_new_results(self) -> None:
         sub = self._sub(self._parent(20_000))
         sub.messages = self._history(3)
-        original = [dict(m) for m in sub.messages]
+        original = list(sub.messages)
         self.assertFalse(sub._microcompact())
         self.assertEqual(sub.messages, original)
+        sub.messages.extend(self._history(6)[2:])
+        self.assertTrue(sub._maybe_compact())
+        self.assertTrue(sub.messages[3]["content"].startswith(rt.MICROCOMPACT_PLACEHOLDER))
 
-    def test_run_compresses_with_the_current_conversation_and_with_tools(self) -> None:
-        """整条路：挂指令 → 那一轮**照常带 tools**把摘要拿回来 → 历史被压 → 下一轮继续干活。"""
-        parent = self._parent(rt.DEFAULT_CONTEXT_WINDOW)
-        parent.project_guideline = "项目规范在压缩后也必须保留。"
-        calls: list[tuple[list[dict], object]] = []
+    def test_cleanup_does_not_replace_small_results_with_larger_placeholders(self) -> None:
+        sub = self._sub(self._parent(10_000))
+        sub.messages = self._history(2)
+        sub.messages[3]["content"] = "ok"
+        self.assertTrue(sub._maybe_compact())
+        self.assertEqual(sub.messages[3]["content"], "ok")
+        self.assertTrue(sub.messages[5]["content"].startswith(rt.MICROCOMPACT_PLACEHOLDER))
+
+    def test_cleanup_preserves_actual_read_failures(self) -> None:
+        sub = self._sub(self._parent(10_000))
+        sub.messages = self._history(2)
+
+        def fail_read(parent, args):
+            raise AgentToolError("Missing entry " * 1000)
+
+        failed = sub._run_tool(_Call("c0", "read_transl_cache", "{}"), {"read_transl_cache": fail_read})
+        sub.messages[3] = failed
+        self.assertTrue(sub._maybe_compact())
+        self.assertEqual(sub.messages[3], failed)
+        self.assertTrue(sub.messages[5]["content"].startswith(rt.MICROCOMPACT_PLACEHOLDER))
+        self.assertNotIn("_is_error", subagent_mod._strip_internal_fields(failed))
+
+    def test_proofread_can_patch_after_its_read_result_is_cleared(self) -> None:
+        parent = self._parent(20_000)
+        parent.files["a.json"][0]["post_src"] = "原文" * 6000
+        sub = self._sub(parent)
         script = [
-            ("", [_Call("c1", "read_transl_cache", '{"filename": "a.json", "index": "1"}')]),
-            ("", [_Call("c2", "read_transl_cache", '{"filename": "a.json", "index": "1"}')]),
-            ("<summary>" + _sub_summary("读过 #1。") + "</summary>", []),  # 压缩那一轮
-            ("报告：没问题。", []),
+            ("", [_Call("read", "read_transl_cache", '{"filename":"a.json","index":"1"}')]),
+            ("发现已确认，提交修复。", [_Call("patch", "edit_transl_cache", json.dumps({
+                "action": "set", "filename": "a.json", "patches": [{"index": 1, "dst": "修正译文"}],
+            }))]),
+            ("修复完成。", []),
         ]
-        base = _make_chat(script)
+        with patch.object(subagent_mod, "_subagent_chat", _make_chat(script)):
+            result = sub.run()
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(parent.files["a.json"][0]["pre_dst"], "修正译文")
+        self.assertTrue(sub.messages[3]["content"].startswith(rt.MICROCOMPACT_PLACEHOLDER))
+        self.assertFalse(sub.messages[5]["content"].startswith(rt.MICROCOMPACT_PLACEHOLDER))
 
-        def recording(client, model, messages, tools, **kwargs):
-            calls.append(([dict(m) for m in messages], tools))
-            return base(client, model, messages, tools, **kwargs)
+    def test_stop_during_cleanup_does_not_send_another_model_request(self) -> None:
+        parent = self._parent(10_000)
+        parent.files["a.json"][0]["post_src"] = "原文" * 5000
+        original_emit = parent._emit
 
-        def fake_estimate(sub: rt.SubAgentRunner) -> int:
-            # 第 3 轮开始算"超阈值"（真阈值判定见 _begin_compaction 的用例）
-            return rt.DEFAULT_CONTEXT_WINDOW if len(sub.messages) >= 6 else 10
+        def emit(event_type, data):
+            original_emit(event_type, data)
+            if event_type == "subagent_message" and "microcompact" in data["text"]:
+                parent.stop_event.set()
 
-        with (
-            patch.object(subagent_mod, "_subagent_chat", recording),
-            patch.object(rt.SubAgentRunner, "_estimate_context_tokens", fake_estimate),
-            # 保留段预算压到 1 token：6 条历史也能切出安全切点（只留最后那次工具往返）
-            patch.object(subagent_mod, "_keep_recent_tokens", lambda _limit, _ratio=None: 1),
-        ):
-            out = _tool_run_subagents(
-                parent, {"tasks": [{"agent": SUBAGENT_AGENT_PROOFREAD, "file": "a.json"}]}
-            )
+        parent._emit = emit
+        sub = self._sub(parent)
+        with patch.object(subagent_mod, "_subagent_chat", side_effect=_make_chat([
+            ("", [_Call("read", "read_transl_cache", '{"filename":"a.json","index":"1"}')]),
+            ("任务完成。", []),
+        ])) as chat:
+            result = sub.run()
+        self.assertEqual(result["status"], "stopped")
+        chat.assert_called_once()
 
-        self.assertEqual(out["tasks"][0]["status"], "done")
-        self.assertEqual(out["tasks"][0]["report"], "报告：没问题。")
-        # 4 次请求：两轮干活 → 一轮压缩（照常带 tools）→ 一轮收尾
-        self.assertEqual(len(calls), 4)
-        # 每一轮都带工具表——压缩轮复用同一套 tools（与主 Agent 一致），不换输入
-        self.assertTrue(all(tools is not None for _, tools in calls))
-        self.assertEqual(calls[2][1], calls[0][1])
-        for messages, _ in calls:
-            self.assertEqual(messages[0], calls[0][0][0])
-            self.assertIn(parent.global_guideline, messages[0]["content"])
-            self.assertIn(parent.project_guideline, messages[0]["content"])
-        # 压缩那一轮发出去的是"当前会话 + 那条指令"（复用前缀，不是另开一份输入）
-        self.assertEqual(calls[2][0][-1]["content"], rt.SUBAGENT_COMPACT_INSTRUCTION_PROMPT)
-        # 收尾那轮的上下文里已经是摘要 + 尾部，指令不留在历史里
-        last = calls[3][0]
-        self.assertTrue(any("# 早前工作的压缩摘要" in str(m.get("content") or "") for m in last))
-        self.assertNotIn(rt.SUBAGENT_COMPACT_INSTRUCTION_PROMPT, [m.get("content") for m in last])
-        # 界面上看得见这次压缩（子代理的每一步都作为一个事件推出去）
-        notes = [data["text"] for kind, data in parent.events if kind == "subagent_message"]
-        self.assertTrue(any("上下文压缩" in text for text in notes), notes)
+    def test_both_roles_cleanup_without_extra_model_requests_or_work_rounds(self) -> None:
+        for agent, tool in ((SUBAGENT_AGENT_PROOFREAD, "read_transl_cache"), (SUBAGENT_AGENT_EXPLORE, "input")):
+            with self.subTest(agent=agent):
+                parent = self._parent(20_000)
+                parent.files["a.json"][0]["post_src"] = "原文" * 5000
+                parent.inputs = {"a.json": [{"index": 1, "pre_src": "原文" * 5000}]}
+                parent.project_guideline = "项目规范必须保留。"
+                calls = []
+                args = json.dumps({"action": "read", "filename": "a.json", "index": "1"})
+                base = _make_chat([
+                    ("已记下发现一。", [_Call("c1", tool, args)]),
+                    ("已记下发现二。", [_Call("c2", tool, args)]),
+                    ("报告：没问题。", []),
+                ])
+
+                def recording(client, model, messages, tools, **kwargs):
+                    calls.append((list(messages), tools))
+                    return base(client, model, messages, tools, **kwargs)
+
+                sub = rt.SubAgentRunner(parent, agent=agent, files=["a.json"], indexes="", brief="", delegation_id="d1")
+                with patch.object(subagent_mod, "_subagent_chat", recording):
+                    result = sub.run()
+                self.assertEqual(result["status"], "done")
+                self.assertEqual(result["report"], "报告：没问题。")
+                self.assertEqual(len(calls), 3)
+                self.assertEqual(sub.turns, 3)
+                self.assertEqual(calls[-1][0][3]["tool_call_id"], "c1")
+                self.assertTrue(calls[-1][0][3]["content"].startswith(rt.MICROCOMPACT_PLACEHOLDER))
+                self.assertEqual(calls[-1][0][2]["content"], "已记下发现一。")
+                self.assertEqual(calls[-1][0][4]["content"], "已记下发现二。")
+                self.assertTrue(all(tools == calls[0][1] for _, tools in calls))
+                self.assertTrue(all(messages[:2] == calls[0][0][:2] for messages, _ in calls))
+                self.assertFalse(any(m.get("_compact_instruction") or m.get("_compact_summary") for m in sub.messages))
+                notes = [data["text"] for kind, data in parent.events if kind == "subagent_message"]
+                self.assertTrue(any("microcompact" in text for text in notes), notes)
 
 
 class ProofreadSuggestionModeTests(unittest.TestCase):
