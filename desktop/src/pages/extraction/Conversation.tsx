@@ -3,6 +3,7 @@ import { Icon } from '../../components/Icon';
 import { usePageActive } from '../../components/PageActivity';
 import { t, useUiLanguage } from '../../i18n';
 import { AgentGroupView } from '../agent/rows/AgentGroupView';
+import { lastActivityItem, workingLabel } from '../agent/timeline';
 import { followTail } from '../agent/followTail';
 import { readingMemory } from '../agent/readingMemory';
 import { createExtractionTimelineBuilder } from './presentation';
@@ -33,6 +34,8 @@ export function Conversation({ rows, sessionId, running, status, pending, older,
   const [atBottom, setAtBottom] = useState(true);
   const buildTimeline = useMemo(createExtractionTimelineBuilder, [sessionId]);
   const groups = useMemo(() => buildTimeline(rows, running, pending, activityPrefix), [buildTimeline, rows, running, pending, activityPrefix]);
+  const timeline = groups.filter(group => group.type !== 'notice');
+  const retrying = lastActivityItem(timeline)?.kind === 'retry';
   useLayoutEffect(() => {
     if (!scroller.current || !content.current) return;
     const key = `extraction::${sessionId}`;
@@ -115,7 +118,7 @@ export function Conversation({ rows, sessionId, running, status, pending, older,
       {older && <div className="extract-older" role="status">{x(loadingOlder ? 'loadingOlder' : 'scrollOlder')}</div>}
       {groups.map((group, index) => group.type === 'notice' ? <div key={group.id} className="agent-compact-note">{group.text}</div>
         : <AgentGroupView key={group.id} group={group} isLive={running && index === groups.length - 1} projectDir="" persistKey={`extraction::${sessionId}`} imageScope={{ sessionId, extraction: true }} autoExpandTools={false} newProjectWizardRefs />)}
-      {running && <div className="agent-working" role="status"><span className="agent-working__dots" aria-hidden><span /><span /><span /></span><span className="agent-working__label">{statusLabel(status)}</span></div>}
+      {running && <div className="agent-working" role="status"><span className="agent-working__dots" aria-hidden><span /><span /><span /></span><span className={`agent-working__label${retrying ? ' is-retry' : ''}`}>{retrying ? workingLabel(timeline) : statusLabel(status)}</span></div>}
       {['stopped', 'interrupted'].includes(status) && <div className="agent-stopped"><span className="agent-stopped__text">{statusLabel(status)}</span></div>}
     </div>
     {!atBottom && <div className="agent-thread__jump"><button type="button" className="agent-jump-bottom" aria-label={x('jumpLatest')} title={x('jumpLatest')} onClick={() => tail.current?.jump()}><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></button></div>}

@@ -10,6 +10,73 @@ const { toolRowPhases } = load(new URL('../src/pages/agent/rows/ToolRow.tsx', im
 const user = { id: 'user-1', role: 'user', text: 'Inspect this isolated fixture' };
 const tool = { id: 'tool-1', role: 'tool', tool: 'run_python', args: { code: 'print("fixture")' }, text: 'partial output' };
 
+test('consecutive extraction retries update the shared retry row and discard failed partial output in live and replayed turns', () => {
+  const { reduceEvents } = load(new URL('../src/pages/extraction/transcript.ts', import.meta.url));
+  const events = [
+    { type: 'user_message', text: 'Inspect fixture' },
+    { type: 'assistant_message', messageId: 'intro', text: 'Inspecting', stopReason: 'toolUse' },
+    { type: 'tool_start', toolCallId: 'inspect', toolName: 'read', arguments: {} },
+    { type: 'tool_end', toolCallId: 'inspect', text: 'verified' },
+    { type: 'assistant_start', messageId: 'failed-1' },
+    { type: 'thinking_delta', messageId: 'failed-1', text: 'discarded thinking' },
+    { type: 'assistant_delta', messageId: 'failed-1', text: 'discarded reply' },
+    { type: 'llm_retry_start', messageId: 'failed-1', attempt: 1, max_attempts: 10, delay_ms: 1000, ts: 100, code: 'TIMEOUT', reason: 'first failure' },
+    { type: 'llm_retry_end', messageId: 'failed-1', attempt: 1 },
+    { type: 'assistant_start', messageId: 'failed-2' },
+    { type: 'assistant_delta', messageId: 'failed-2', text: 'discarded second reply' },
+    { type: 'llm_retry_start', messageId: 'failed-2', attempt: 2, max_attempts: 10, delay_ms: 2000, ts: 200, code: 'PROVIDER_ERROR', reason: 'second failure' },
+  ].map((event, index) => ({ ...event, seq: index + 1 }));
+  const build = createExtractionTimelineBuilder();
+  let rows = [], firstRetry;
+  for (const event of events) {
+    const previous = JSON.stringify(rows);
+    const updated = reduceEvents(rows, [event]);
+    assert.equal(JSON.stringify(rows), previous);
+    rows = updated;
+    const groups = build(rows, true, null);
+    assert.deepEqual(groups, extractionTimeline(reduceEvents([], events.slice(0, event.seq)), true, null));
+    if (event.type === 'llm_retry_start') {
+      const retries = groups[1].items.filter(item => item.kind === 'retry');
+      assert.equal(retries.length, 1);
+      assert.equal(retries[0].attempt, event.attempt);
+      assert.equal(retries[0].retryDone, false);
+      if (!firstRetry) firstRetry = retries[0];
+      assert.equal(retries[0].id, firstRetry.id);
+      assert.equal(groups[1].items.map(item => item.kind).join(','), 'content,tool,retry');
+      assert.equal(groups[1].items[0].content, 'Inspecting');
+    }
+  }
+  const live = build(rows, true, null)[1];
+  const item = live.items.at(-1);
+  assert.equal(item.retryStartedAtMs, 200000);
+  assert.equal(item.retryDelayMs, 2000);
+  assert.equal(item.retryReason, 'second failure');
+  const componentLoad = createTypeScriptLoader({}, {
+    '../../../components/PageActivity': { usePageActive: () => false },
+  });
+  const { AgentGroupView } = componentLoad(new URL('../src/pages/agent/rows/AgentGroupView.tsx', import.meta.url));
+  let renderer;
+  act(() => { renderer = create(h(AgentGroupView, { group: live, isLive: true, projectDir: '', persistKey: 'retry-parity' })); });
+  assert.equal(renderer.root.findAllByProps({ className: 'agent-retry-note is-live' }).length, 1);
+  assert.match(renderer.root.findByProps({ className: 'agent-retry-note__count' }).children.join(''), /2\/10/);
+  assert.match(renderer.root.findByProps({ className: 'agent-retry-note__reason' }).children.join(''), /second failure/);
+  const end = { type: 'llm_retry_end', seq: 13, messageId: 'failed-2', attempt: 2 };
+  rows = reduceEvents(rows, [end]);
+  const done = build(rows, true, null)[1];
+  act(() => renderer.update(h(AgentGroupView, { group: done, isLive: true, projectDir: '', persistKey: 'retry-parity' })));
+  assert.equal(renderer.root.findAllByProps({ className: 'agent-retry-note' }).length, 1);
+  assert.equal(done.items.at(-1).retryDone, true);
+  assert.match(renderer.root.findByProps({ className: 'agent-retry-note__text' }).children[0], /已重试/);
+  act(() => renderer.unmount());
+  const nextRequest = reduceEvents(rows, [
+    { type: 'tool_start', seq: 14, toolCallId: 'next-tool', toolName: 'read' },
+    { type: 'tool_end', seq: 15, toolCallId: 'next-tool', text: 'done' },
+    { type: 'llm_retry_start', seq: 16, messageId: 'next-failure', attempt: 1, max_attempts: 10 },
+  ]);
+  assert.equal(extractionTimeline(nextRequest, true, null)[1].items.filter(item => item.kind === 'retry').length, 2);
+  assert.ok(extractionTimeline(nextRequest, false, null)[1].items.filter(item => item.kind === 'retry').every(item => item.retryDone));
+});
+
 test('work totals include unloaded history and stay stable as split rows are restored', () => {
   const { reduceEvents, prependHistory } = load(new URL('../src/pages/extraction/transcript.ts', import.meta.url));
   const events = [

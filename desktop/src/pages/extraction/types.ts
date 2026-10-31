@@ -11,6 +11,7 @@ export type AgentEvent = {
   type: string; seq?: number; text?: string; messageId?: string; toolCallId?: string;
   toolName?: string; arguments?: Record<string, unknown>; isError?: boolean;
   replace?: boolean;
+  attempt?: number; max_attempts?: number; delay_ms?: number; ts?: number; code?: string; reason?: string;
   requestId?: string; question?: string; status?: string; message?: string;
   questions?: { question: string; options: string[]; recommended?: string; multiSelect?: boolean }[];
   permission_mode?: string;

@@ -123,6 +123,27 @@ def call(name, args, ident="synthetic-call"):
     return {"index": 0, "id": ident, "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}
 
 
+def test_retry_bridge_preserves_details_and_discards_failed_live_output(setup):
+    runtime, session, available = setup
+    sid = session['id']
+    state, history = restore_state(session, runtime.store.directory(sid), {}, '', 'auto')
+    runner = ExtractionRunner(state, history, session, available, lambda event: runtime._emit(sid, event))
+    runner.message_id = 'failed-attempt'
+    runner._emit('content_delta', {'delta': 'discarded partial reply'})
+    runner._emit('reasoning_delta', {'delta': 'discarded partial reasoning'})
+    assert len(runtime.snapshot(sid)['live_events']) == 2
+    details = {'attempt': 2, 'max_attempts': 10, 'delay_ms': 2000,
+               'code': 'PROVIDER_ERROR', 'reason': 'Synthetic provider failure', 'ts': 1234}
+    runner._emit('llm_retry_start', details)
+    snapshot = runtime.snapshot(sid)
+    assert snapshot['live_events'] == []
+    assert snapshot['events'][-1] == {'type': 'llm_retry_start', 'messageId': 'failed-attempt', **details, 'seq': 3}
+    runner._emit('llm_retry_end', {'attempt': 2, 'aborted': True})
+    replay = module.ExtractionRuntime(runtime.store).snapshot(sid)
+    assert replay['events'][-1] == {'type': 'llm_retry_end', 'messageId': 'failed-attempt', 'attempt': 2, 'aborted': True, 'seq': 4}
+    assert all(event['type'] != 'notice' for event in replay['events'])
+
+
 def test_shared_loop_real_tool_approval_usage_and_restart(setup, model_server):
     runtime, session, available = setup
     profile, requests, responses = model_server

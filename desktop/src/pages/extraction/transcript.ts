@@ -1,6 +1,7 @@
 import type { AgentEvent } from './types';
 
-export type Row = { id: string; role: 'user' | 'assistant' | 'tool' | 'notice'; text: string; images?: AgentEvent['images']; thinking?: string; tool?: string; args?: Record<string, unknown>; done?: boolean; error?: boolean; stopReason?: string; partial?: boolean };
+export type Row = { id: string; role: 'user' | 'assistant' | 'tool' | 'notice' | 'retry'; text: string; images?: AgentEvent['images']; thinking?: string; tool?: string; args?: Record<string, unknown>; done?: boolean; error?: boolean; stopReason?: string; partial?: boolean;
+  retry?: Pick<AgentEvent, 'attempt' | 'max_attempts' | 'delay_ms' | 'ts' | 'code' | 'reason'> };
 export function reduceEvents(rows: Row[], events: AgentEvent[]): Row[] {
   const next = rows.slice();
   const changed = new Set<string>();
@@ -25,6 +26,11 @@ export function reduceEvents(rows: Row[], events: AgentEvent[]): Row[] {
       if (type === 'tool_start') { row.tool = event.toolName; row.args = event.arguments; }
       if (type === 'tool_output') row.text = event.replace ? (event.text || '') : (row.text + (event.text || '')).slice(-16000);
       if (type === 'tool_end') { row.text = event.text || ''; row.done = true; row.error = event.isError; if (event.images?.length) row.images = event.images; }
+    } else if (type === 'llm_retry_start' || type === 'llm_retry_end') {
+      const row = get(`retry-${event.messageId || event.seq}`, 'retry');
+      row.done = type === 'llm_retry_end';
+      if (type === 'llm_retry_start') row.retry = { attempt: event.attempt, max_attempts: event.max_attempts,
+        delay_ms: event.delay_ms, ts: event.ts, code: event.code, reason: event.reason };
     } else if (type === 'error' || type === 'notice') {
       Object.assign(get(`notice-${event.seq}`, 'notice'), { text: event.message || '', error: type === 'error' });
     }

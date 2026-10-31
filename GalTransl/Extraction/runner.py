@@ -293,8 +293,8 @@ class ExtractionRunner(AgentRunner):
             event = {"type": "context_usage", **data["context"]}
         elif event_type == "compacting":
             event = {"type": "compaction", "active": data.get("phase") == "start"}
-        elif event_type == "llm_retry_start":
-            event = {"type": "notice", "message": f"Retry {data.get('attempt')}: {data.get('message', '')}"}
+        elif event_type in {"llm_retry_start", "llm_retry_end"}:
+            event = {"type": event_type, "messageId": self.message_id, **data}
         elif event_type == "error":
             event = {"type": "error", "message": str(data.get("message", "Model request failed"))[:2000]}
         if event:

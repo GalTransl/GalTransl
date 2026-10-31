@@ -81,6 +81,9 @@ class ExtractionRuntime:
                 live.pop("assistant_delta" + str(record.get("messageId", "")), None)
             elif kind == "thinking_message":
                 live.pop("thinking_delta" + str(record.get("messageId", "")), None)
+            elif kind == "llm_retry_start":
+                live.pop("assistant_delta" + str(record.get("messageId", "")), None)
+                live.pop("thinking_delta" + str(record.get("messageId", "")), None)
             elif kind == "tool_output":
                 key = kind + str(record.get("toolCallId", ""))
                 previous = live.get(key, {})

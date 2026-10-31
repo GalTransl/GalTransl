@@ -31,7 +31,10 @@ export function extractionTimeline(rows: Row[], running: boolean, pending: Agent
       last.final = true;
       current.finalContent = last;
     }
-    if (!live) current.items.forEach(item => { item.streaming = false; });
+    if (!live) current.items.forEach(item => {
+      item.streaming = false;
+      if (item.kind === 'retry') item.retryDone = true;
+    });
     if (prefix && anchor === prefix.anchor) {
       const loaded = new Set(current.items.map(item => `${item.kind}:${item.id}`));
       current.hiddenStepCount = prefix.item_keys.filter(key => !loaded.has(key)).length;
@@ -51,7 +54,18 @@ export function extractionTimeline(rows: Row[], running: boolean, pending: Agent
       continue;
     }
     current ??= { type: 'activity', id: `extract-${anchor}`, items: [] };
-    if (row.role === 'tool') {
+    if (row.role === 'retry') {
+      // Failed attempts discard only the text after the last tool or retry boundary.
+      const boundary = current.items.reduce((last, item, index) => item.kind === 'content' || item.kind === 'reasoning' ? last : index, -1);
+      current.items.splice(boundary + 1);
+      const previousRetry = (row.retry?.attempt ?? 1) > 1 ? current.items.slice().reverse().find(item => item.kind === 'retry') : undefined;
+      const item: ActivityItem = previousRetry ?? { kind: 'retry', id: row.id, step: step(row.id) };
+      Object.assign(item, { attempt: row.retry?.attempt, maxAttempts: row.retry?.max_attempts,
+        retryDelayMs: row.retry?.delay_ms, retryStartedAtMs: row.retry?.ts === undefined ? undefined : row.retry.ts * 1000,
+        retryCode: row.retry?.code, retryReason: row.retry?.reason, retryDone: Boolean(row.done) });
+      if (!previousRetry) current.items.push(item);
+      lastAssistant = undefined;
+    } else if (row.role === 'tool') {
       const item: ActivityItem = { kind: 'tool', id: row.id, step: step(row.id), name: row.tool,
         arguments: row.args, resultFormat: 'text', ...(row.images?.length ? { images: row.images } : {}) };
       if (row.done) {
