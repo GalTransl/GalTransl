@@ -118,7 +118,7 @@ def isolated_environment(directory: Path) -> dict[str, str]:
     for name, folder in (("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
                          ("APPDATA", "roaming"), ("LOCALAPPDATA", "local")):
         env[name] = str(directory / folder)
-    # macOS ignores XDG, and Windows normally uses the program directory.
+    # Keep smoke-test state separate from the real ~/.galtransl on every platform.
     env["GALTRANSL_DATA_DIR"] = str(directory / "data")
     env["GALTRANSL_APP_SETTINGS_PATH"] = str(directory / "config" / "app_settings.json")
     env["PYTHONUTF8"] = "1"

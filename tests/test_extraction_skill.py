@@ -87,7 +87,7 @@ def skill_server(tmp_path, monkeypatch, discover_pythons):
     monkeypatch.setattr(skill, "ARCHIVE_URL", url + "/upstream/archive/{commit}")
     worker = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True)
     worker.start()
-    yield url, original, data, upstream
+    yield url, data / "skills" / SKILL_NAME, data, upstream
     server.shutdown()
     server.server_close()
     worker.join(timeout=2)
@@ -133,7 +133,7 @@ def test_update_check_does_not_download_or_change_selection(skill_server, tmp_pa
 def test_install_and_update_enable_downloads_and_preserve_previous_versions(skill_server):
     url, original, data, upstream = skill_server
     status, result = api(url, "skill-install", {})
-    downloaded = data / "extraction" / "skills" / SKILL_NAME / ("b" * 40)
+    downloaded = data / "skills" / SKILL_NAME / ("b" * 40)
     assert status == 200 and result["ready"]
     assert result["settings"]["skill_dir"] == str(downloaded)
     assert result["skill"]["current_commit"] == "b" * 40
@@ -171,7 +171,7 @@ def test_invalid_archives_do_not_replace_the_active_skill(skill_server, content)
     status, result = api(url, "skill-install", {})
     assert status == 502 and result["error"]
     assert api(url, "environment")[1]["settings"]["skill_dir"] == str(original)
-    assert list((data / "extraction/skills" / SKILL_NAME).iterdir()) == []
+    assert not any(path.is_dir() for path in (data / "skills" / SKILL_NAME).iterdir())
 
 
 @pytest.mark.parametrize("commit", ["invalid", "../../escape", None])

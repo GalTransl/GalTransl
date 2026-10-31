@@ -2,7 +2,7 @@
 
 一个会话一个文件，append-only 逐行写：
 
-    <程序根>/agent_sessions/<base64url(project_dir)>/<session_id>.jsonl
+    ~/.galtransl/agent_sessions/<base64url(project_dir)>/<session_id>.jsonl
 
 每行一条 JSON 记录，`t` 字段区分类型：
 
@@ -28,12 +28,7 @@ from uuid import uuid4
 
 from GalTransl.RuntimePaths import get_user_data_dir
 
-# 保留 Windows 的会话目录；Linux 使用持久的用户数据目录。
-_PROGRAM_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SESSIONS_ROOT = os.path.join(os.path.dirname(_PROGRAM_ROOT), "agent_sessions")
-if sys.platform != "win32":
-    # One-file bundles unpack __file__ into a temporary directory removed on exit.
-    SESSIONS_ROOT = str(get_user_data_dir() / "agent_sessions")
+SESSIONS_ROOT = str(get_user_data_dir() / "agent_sessions")
 
 # 不落盘的事件类型：流式增量高频且能由最终消息重建
 _SKIP_EVENT_TYPES = {"content_delta", "reasoning_delta", "wait_tick"}

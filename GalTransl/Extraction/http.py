@@ -7,7 +7,9 @@ from http import HTTPStatus
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .environment import data_root, environment, load_settings, save_settings
+from GalTransl.RuntimePaths import get_skills_dir
+
+from .environment import environment, load_settings, save_settings
 from .runtime import EXTRACTION_RUNTIME
 from .skill import SkillDownloadError, check_skill, install_skill
 
@@ -105,7 +107,7 @@ def route_extraction(handler, method: str) -> bool:
                     raise ValueError("Skill directory is required")
                 result = check_skill(Path(directory).expanduser().resolve())
             elif action == "skill-install":
-                directory = install_skill(data_root())
+                directory = install_skill(get_skills_dir())
                 save_settings({"skill_dir": str(directory)})
                 result = environment()
             elif action == "create":

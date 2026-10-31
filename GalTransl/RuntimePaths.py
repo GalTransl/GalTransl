@@ -93,14 +93,72 @@ def _platform_data_root() -> Path:
 
 
 def get_user_config_dir() -> Path:
-    return _platform_config_root() / APP_DIR_NAME
+    return get_user_data_dir()
+
+
+def get_legacy_user_data_dir() -> Path:
+    return _platform_data_root() / APP_DIR_NAME
 
 
 def get_user_data_dir() -> Path:
     override = os.environ.get(DATA_DIR_ENV, "").strip()
     if override:
         return Path(override).expanduser()
-    return _platform_data_root() / APP_DIR_NAME
+    directory = Path.home() / ".galtransl"
+    marker = directory / ".legacy_migration_v1"
+    if not marker.exists():
+        directory.mkdir(parents=True, exist_ok=True)
+        _copy_missing_tree(get_legacy_user_data_dir(), directory)
+        _copy_missing_tree(directory / "extraction" / "skills", directory / "skills")
+        _copy_missing_tree(get_resource_root() / "agent_sessions", directory / "agent_sessions")
+        legacy_settings = [_platform_config_root() / APP_DIR_NAME / "app_settings.json", get_legacy_app_settings_path()]
+        destination = directory / "app_settings.json"
+        for source in legacy_settings:
+            if source.is_file() and not destination.exists():
+                shutil.copy2(source, destination)
+        marker.touch()
+    return directory
+
+
+def _copy_missing_tree(source: Path, destination: Path) -> None:
+    """Migrate/seed without overwriting user edits or traversing links."""
+    if not source.is_dir() or source.is_symlink() or getattr(source.stat(), "st_file_attributes", 0) & 0x400:
+        return
+    destination.mkdir(parents=True, exist_ok=True)
+    if destination.is_symlink() or getattr(destination.stat(), "st_file_attributes", 0) & 0x400:
+        raise ValueError(f"User data directory must not be a link: {destination}")
+    for entry in source.iterdir():
+        if entry.name in {".git", "__pycache__", "node_modules"} or entry.is_symlink():
+            continue
+        target = destination / entry.name
+        if entry.is_dir():
+            _copy_missing_tree(entry, target)
+            continue
+        if entry.is_file() and not target.exists():
+            shutil.copy2(entry, target)
+
+
+def get_skills_dir() -> Path:
+    """Install bundled skill seeds in the user's home; keep local edits intact."""
+    bundled = get_resource_path("skills")
+    directory = get_user_data_dir() / "skills"
+    directory.mkdir(parents=True, exist_ok=True)
+    if not bundled.is_dir() or bundled.resolve() == directory.resolve():
+        return directory
+    digest = hashlib.sha256()
+    for source in sorted([bundled / "sources.json", *bundled.rglob("SKILL.md")]):
+        if source.is_file():
+            digest.update(str(source.relative_to(bundled)).encode("utf-8"))
+            digest.update(source.read_bytes())
+    signature = digest.hexdigest()
+    marker = directory / ".bundled_skills_seed"
+    if marker.is_file() and marker.read_text(encoding="utf-8").strip() == signature:
+        return directory
+    if not marker.exists():
+        _copy_missing_tree(get_user_data_dir() / "extraction" / "skills", directory)
+    _copy_missing_tree(bundled, directory)
+    marker.write_text(signature + "\n", encoding="utf-8")
+    return directory
 
 
 def get_user_dict_dir() -> Path:
@@ -163,8 +221,6 @@ def get_app_settings_path() -> Path:
     override = os.environ.get("GALTRANSL_APP_SETTINGS_PATH", "").strip()
     if override:
         return Path(override).expanduser()
-    if sys.platform == "win32":
-        return get_legacy_app_settings_path()
     return get_user_config_dir() / "app_settings.json"
 
 

@@ -66,9 +66,9 @@ def check_skill(directory: Path) -> SkillStatus:
             "update_available": not status["installed"] or status["current_commit"] != commit}
 
 
-def install_skill(data: Path) -> Path:
+def install_skill(skills: Path) -> Path:
     commit = latest_commit()
-    versions = data / "skills" / SKILL_NAME
+    versions = skills / SKILL_NAME
     versions.mkdir(parents=True, exist_ok=True)
     destination = versions / commit
     # Each version has its own directory, preserving bundled/custom files and

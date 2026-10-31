@@ -17,7 +17,7 @@ DEFAULT_APP_SETTINGS: dict[str, Any] = {
 }
 
 # Kept for callers that imported the old constant. Runtime reads and writes use
-# get_app_settings_path() so XDG/environment overrides remain effective.
+# get_app_settings_path() so user-home/environment overrides remain effective.
 _SETTINGS_PATH = str(get_app_settings_path())
 
 

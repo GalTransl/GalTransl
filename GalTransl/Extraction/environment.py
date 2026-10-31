@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from GalTransl.RuntimePaths import get_resource_root, get_user_data_dir
+from GalTransl.RuntimePaths import get_resource_root, get_user_data_dir, get_skills_dir, get_legacy_user_data_dir
 
 from .skill import skill_status
 from .python_discovery import discover_pythons, PythonInterpreter
@@ -37,7 +37,7 @@ def atomic_json(path: Path, value: Any) -> None:
 def load_settings() -> dict[str, str]:
     root = get_resource_root()
     defaults = {
-        "skill_dir": str(root / "skills" / "galtransl-galgamereverse-skill"),
+        "skill_dir": str(get_skills_dir() / "galtransl-galgamereverse-skill"),
         "python_path": "",  # Optional system Python; run_python defaults to bundled.
     }
     path = data_root() / "settings.json"
@@ -52,7 +52,16 @@ def load_settings() -> dict[str, str]:
             if defaults["python_path"] in {"python", "python3", "py"}:
                 defaults["python_path"] = ""
             if Path(defaults["skill_dir"]) == root.parent / "GalTransl-GalGameReverse-Skill":
-                defaults["skill_dir"] = str(root / "skills" / "galtransl-galgamereverse-skill")
+                defaults["skill_dir"] = str(get_skills_dir() / "galtransl-galgamereverse-skill")
+        selected = Path(defaults["skill_dir"]).expanduser()
+        legacy_roots = [root / "skills", get_user_data_dir() / "extraction" / "skills"]
+        # Saved selections from the old OS data directory also follow the migration.
+        legacy_roots.append(get_legacy_user_data_dir() / "extraction" / "skills")
+        legacy = next((base for base in legacy_roots if selected.is_relative_to(base)), None)
+        if legacy is not None:
+            defaults["skill_dir"] = str(get_skills_dir() / selected.relative_to(legacy))
+        if saved.get("skill_dir") != defaults["skill_dir"]:
+            atomic_json(path, {**saved, "skill_dir": defaults["skill_dir"]})
     return defaults
 
 
@@ -65,7 +74,7 @@ def save_settings(payload: dict[str, Any]) -> dict[str, str]:
                 raise ValueError(f"{key} is required")
             if key == "skill_dir":
                 if not value:
-                    value = str(get_resource_root() / "skills" / "galtransl-galgamereverse-skill")
+                    value = str(get_skills_dir() / "galtransl-galgamereverse-skill")
                 value = str(Path(value).expanduser().resolve(strict=True))
                 if not (Path(value) / "SKILL.md").is_file():
                     raise ValueError("SKILL.md was not found in the skill directory")
@@ -99,7 +108,7 @@ def system_pythons(configured: str = "") -> list[PythonInterpreter]:
 
 def environment() -> dict[str, Any]:
     settings = load_settings()
-    skills, diagnostics = discover_skills([Path(settings["skill_dir"]), get_resource_root() / "skills"])
+    skills, diagnostics = discover_skills([Path(settings["skill_dir"]), get_skills_dir()])
     problems = []
     if sys.version_info < (3, 11):
         problems.append("python_version")

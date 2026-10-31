@@ -60,9 +60,10 @@ def test_bundled_defaults_and_legacy_migration(tmp_path, monkeypatch):
     root.mkdir()
     monkeypatch.setattr(module, "get_resource_root", lambda: root)
     monkeypatch.setattr(module, "data_root", lambda: tmp_path / "data")
+    monkeypatch.setattr(module, "get_skills_dir", lambda: tmp_path / "data" / "skills")
     settings = module.load_settings()
     assert settings == {"python_path": "",
-                        "skill_dir": str(root / "skills" / "galtransl-galgamereverse-skill")}
+                        "skill_dir": str(tmp_path / "data" / "skills" / "galtransl-galgamereverse-skill")}
     module.atomic_json(tmp_path / "data/settings.json", {"node_path": "node", "python_path": "python",
         "skill_dir": str(root.parent / "GalTransl-GalGameReverse-Skill")})
     assert module.load_settings() == settings
@@ -101,6 +102,7 @@ def test_environment_uses_existing_python_without_node(tmp_path, monkeypatch):
     runner.touch()
     monkeypatch.setattr(module, "get_resource_root", lambda: tmp_path)
     monkeypatch.setattr(module, "data_root", lambda: tmp_path / "data")
+    monkeypatch.setattr(module, "get_skills_dir", lambda: tmp_path / "skills")
     monkeypatch.setattr(module, "system_pythons", lambda configured: [])
     result = module.environment()
     assert result["ready"] and result["agent_engine"] == "galtransl"

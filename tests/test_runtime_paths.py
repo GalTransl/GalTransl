@@ -31,18 +31,18 @@ class RuntimePathTests(unittest.TestCase):
                 namespace = runpy.run_path(str(module))
             self.assertEqual(namespace["SESSIONS_ROOT"], str(Path(tmp) / "agent_sessions"))
 
-    def test_windows_keeps_settings_and_dict_in_program_directory(self) -> None:
+    def test_windows_settings_use_agent_home_and_resources_keep_their_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
-            env = {"GALTRANSL_RESOURCE_DIR": tmp, "GALTRANSL_DATA_DIR": "",
+            env = {"GALTRANSL_RESOURCE_DIR": tmp, "GALTRANSL_DATA_DIR": str(root / "data"),
                    "GALTRANSL_APP_SETTINGS_PATH": ""}
             with patch.dict(os.environ, env), patch("sys.platform", "win32"):
-                self.assertEqual(get_app_settings_path(), root / "app_settings.json")
-                self.assertEqual(get_active_dict_dir(), root / "Dict")
-                self.assertEqual(resolve_dict_dir("Dict"), root / "Dict")
+                self.assertEqual(get_app_settings_path(), root / "data" / "app_settings.json")
+                self.assertEqual(get_active_dict_dir(), root / "data" / "Dict")
+                self.assertEqual(resolve_dict_dir("Dict"), root / "data" / "Dict")
                 saved = save_app_settings({"maxConcurrentJobs": 7})
                 self.assertEqual(load_app_settings(), saved)
-                self.assertEqual(get_active_translation_guidelines_dir(), root / "translation_guidelines")
+                self.assertEqual(get_active_translation_guidelines_dir(), root / "data" / "translation_guidelines")
 
     def test_linux_guideline_edits_are_read_from_user_data(self) -> None:
         from GalTransl.Utils import load_guideline_file
@@ -112,11 +112,12 @@ class RuntimePathTests(unittest.TestCase):
                 get_active_dict_dir()
                 self.assertFalse((active / "common.txt").exists())
 
-    def test_save_app_settings_uses_xdg_config_home(self) -> None:
+    def test_save_app_settings_uses_user_data_override(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             xdg = Path(tmp) / "config"
             env = {
                 "XDG_CONFIG_HOME": str(xdg),
+                "GALTRANSL_DATA_DIR": str(Path(tmp) / "data"),
                 "GALTRANSL_APP_SETTINGS_PATH": "",
             }
             with patch.dict(os.environ, env), patch("sys.platform", "linux"):
@@ -127,7 +128,7 @@ class RuntimePathTests(unittest.TestCase):
                         "maxConcurrentJobs": 7,
                     }
                 )
-                self.assertEqual(settings_path, xdg / "GalTransl" / "app_settings.json")
+                self.assertEqual(settings_path, Path(tmp) / "data" / "app_settings.json")
                 self.assertTrue(settings_path.is_file())
                 self.assertEqual(
                     json.loads(settings_path.read_text(encoding="utf-8")),
