@@ -174,11 +174,11 @@ def test_shared_loop_real_tool_approval_usage_and_restart(setup, model_server):
     assert "start_translation" not in str(requests[0]["tools"])
     assert requests[0]["reasoning_effort"] == "none"
     first_user_message = next(message['content'] for message in requests[0]['messages'] if message['role'] == 'user')
-    assert '在第一次工具调用之前' in first_user_message
-    assert '主要步骤及验证方式' in first_user_message
-    assert '在连续工具调用之间穿插简短的助手正文反馈' in first_user_message
-    assert '不能仅放在思考内容或工具的 reason 参数中' in first_user_message
-    assert first_user_message.endswith('用户原始消息：\nCheck synthetic fixture')
+    assert 'Before the first tool call' in first_user_message
+    assert 'main steps and validation approach' in first_user_message
+    assert 'Between successive tool calls' in first_user_message
+    assert 'not only in thinking content or a tool\'s reason parameter' in first_user_message
+    assert first_user_message.endswith('Original user message:\nCheck synthetic fixture')
     events = runtime.snapshot(sid)["events"]
     intent_events = [event for event in events if event['type'] in {'tool_start', 'permission_request'}]
     assert len(intent_events) == 2

@@ -16,23 +16,12 @@ from GalTransl.Agent.context import _restore_compacted_history, _restore_microco
 from GalTransl.Agent.core import AgentStopRequested
 from GalTransl.Agent.models import AgentState, AgentToolError
 from GalTransl.Agent.permissions import AUTO_QUIET_MODE
+from GalTransl.Agent.prompts import INITIAL_USER_MESSAGE_PREFIX
 from GalTransl.Agent.runner import AgentRunner
 from GalTransl.Agent.session_store import SessionStore
 from GalTransl.Agent.tools.ask import _auto_ask_answers, _tool_ask_user, _tool_read_history_archive
 from .tool_schemas import EXTRACTION_TOOLS, prepare_arguments, tool_prompt_section, validate_arguments
 from .tools import ExtractionTools
-
-
-INITIAL_USER_MESSAGE_PREFIX = """【本次请求的二次判断】
-先判断下面的用户原始消息是否只是简单问候（例如“你好”“嗨”“hello”“在吗”或类似没有具体任务的寒暄）。
-- 如果只是简单问候：只需简短、礼貌地回复一句并询问用户想做什么；不要调用任何工具，不要查看目录，也不要开始提取流程。
-- 如果包含明确任务：再按系统提示处理该任务，并区分咨询解释与实际执行。
-- 如果需要实际执行任务：在第一次工具调用之前，先用用户语言在助手正文中简短说明将要如何完成任务（主要步骤及验证方式），随后开始调用工具执行任务。
-- 工具调用期间，在连续工具调用之间穿插简短的助手正文反馈，说明当前状况、已确认的进展或发现的问题，以及下一步；在关键阶段完成、遇到阻碍或调整方案时及时反馈，不要连续只调用工具直到最后才回复。
-- 计划和进度必须是用户可见的自然语言正文，不能仅放在思考内容或工具的 reason 参数中；依据实际结果说明进度，不编造完成状态。
-
-用户原始消息：
-"""
 
 
 def display_arguments(value, budget=24000):
@@ -98,9 +87,6 @@ class ExtractionRunner(AgentRunner):
         self.turn_lock = threading.RLock()
         self.tools = ExtractionTools(session["workspace"], session["game_dir"], available["settings"]["skill_dir"],
                                      available, self.stop_event, emit, self._require_permission)
-
-    def _initial_user_message(self, user_text):
-        return f"{INITIAL_USER_MESSAGE_PREFIX}{user_text}"
 
     def _system_prompt(self):
         skill = Path(self.available["settings"]["skill_dir"])

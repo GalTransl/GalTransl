@@ -110,12 +110,15 @@ translation(action="wait") 或 translation(action="status") 返回 job_error 时
 # 首条用户消息靠近实际请求再重复一次轻量交互约束，降低模型被长流程提示
 # 带偏、把「你好」误判成需要先检查项目的概率。它只作用于模型侧消息，不改变
 # 事件流里展示给用户的原始输入。
-INITIAL_USER_MESSAGE_PREFIX = """【本次请求的二次判断】
-先判断下面的用户原始消息是否只是简单问候（例如“你好”“嗨”“hello”“在吗”或类似没有具体任务的寒暄）。
-- 如果只是简单问候：只需简短、礼貌地回复一句并询问用户想做什么；不要调用任何工具，不要查看项目，也不要开始翻译流程。
-- 如果包含明确任务：再按系统提示处理该任务。
+INITIAL_USER_MESSAGE_PREFIX = """[Assess the current request]
+First determine whether the original user message below is only a greeting (for example, "你好", "嗨", "hello", "在吗", or similar small talk without a concrete task).
+- For a greeting only, reply briefly and politely and ask what the user would like to do. Do not call tools, inspect directories, or start a task workflow.
+- For a concrete task, follow the system instructions and distinguish requests for explanation from requests for execution.
+- Before the first tool call for an execution task, briefly explain the main steps and validation approach in visible assistant text, using the user's language. Then use tools to carry out the task.
+- Between successive tool calls, provide brief visible updates describing the current situation, confirmed progress or problems, and the next step. Update the user when a key stage finishes, a blocker appears, or the approach changes. Do not use tools continuously without replying until the end.
+- Plans and progress must appear as user-visible natural language, not only in thinking content or a tool's reason parameter. Describe progress based on actual results; do not invent completion claims.
 
-用户原始消息：
+Original user message:
 """
 
 

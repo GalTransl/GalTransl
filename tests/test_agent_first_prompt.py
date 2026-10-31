@@ -17,6 +17,15 @@ from GalTransl.server import JobRegistry, build_handler
 
 
 class FirstPromptTests(unittest.TestCase):
+    def test_translation_and_extraction_share_the_english_turn_instructions(self):
+        from GalTransl.Extraction.runner import ExtractionRunner
+
+        self.assertIs(ExtractionRunner._initial_user_message, AgentRunner._initial_user_message)
+        self.assertTrue(INITIAL_USER_MESSAGE_PREFIX.startswith('[Assess the current request]'))
+        self.assertIn('Before the first tool call', INITIAL_USER_MESSAGE_PREFIX)
+        self.assertIn('Between successive tool calls', INITIAL_USER_MESSAGE_PREFIX)
+        self.assertIn("using the user's language", INITIAL_USER_MESSAGE_PREFIX)
+
     def test_system_prompt_does_not_inject_user_request_or_turn_instructions(self):
         state = AgentState(project_dir="test-project", config_file_name="extract.yaml")
         prompt = _build_system_prompt(state)
