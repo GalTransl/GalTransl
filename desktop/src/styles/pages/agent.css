@@ -1222,7 +1222,7 @@
 
 .agent-activity__label {
   flex: none;
-  font-weight: 600;
+  font-weight: 400;
 }
 
 /* 运行中标签和静态状态点保持可读；内容更新与计时表示运行进度。 */
@@ -1317,8 +1317,9 @@
 
 .agent-activity__body {
   position: relative;
-  margin: 3px 0 6px 7px;
-  padding: 2px 0 2px 12px;
+  margin: 8px 0 6px;
+  padding: 12px 0 2px;
+  border-top: 1px solid var(--agent-line-soft);
   display: flex;
   flex-direction: column;
 }
@@ -1376,7 +1377,7 @@
 
 .agent-reasoning__label {
   flex: none;
-  font-weight: 600;
+  font-weight: 400;
 }
 
 /* 思考中标签：脉冲点承载「活着」的反馈（对标活动组标签） */
@@ -2175,16 +2176,9 @@
 
 .agent-tool__name {
   flex: none;
-  font-weight: 600;
-  color: var(--color-text-muted);
-}
-
-.agent-tool__header:hover .agent-tool__name {
-  color: var(--color-text);
-}
-
-.agent-tool__name.is-running {
-  color: var(--color-primary);
+  font-weight: 400;
+  color: inherit;
+  opacity: 0.9;
 }
 
 .agent-tool__summary {
