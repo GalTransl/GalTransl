@@ -20,11 +20,10 @@ Local HTTP servers use `serve_forever(poll_interval=0.01)` so shutdown does not
 wait for the default half-second polling interval. Keep real HTTP requests and
 join or close the server during cleanup.
 
-The extraction resource tests build a Git/submodule template once per module
-and copy it for each test. Each copy has its own files, Git objects, and upstream
-remote; tests may commit, fetch, edit, or deinitialize without changing the
-template or another test's repository. Keep the template immutable and reset
-absolute remote URLs when copying it.
+The extraction resource tests use an ordinary application Git repository and
+a real local HTTP server for upstream version metadata and ZIP archives. Each
+test owns its files and server; verify fresh and shallow checkouts, fixed Skill
+directory replacement, local preparation, and preservation on download failure.
 
 Skill download tests reuse the real interpreter discovery results within their
 module: these tests change Skill files, not installed Python environments.

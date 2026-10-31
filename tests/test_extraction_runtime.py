@@ -1,5 +1,9 @@
 """Execution contracts shared by source runs and the frozen extraction runtime."""
+import io
 import json
+import threading
+import zipfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 import runpy
 import shutil
@@ -117,168 +121,139 @@ def resource_git(directory, *args):
                           check=True, capture_output=True, text=True).stdout.strip()
 
 
-@pytest.fixture(scope="module")
-def skill_source_template(tmp_path_factory):
-    from scripts.prepare_extraction import SKILL_NAME
-    tmp_path = tmp_path_factory.mktemp("skill-source")
-    upstream = tmp_path / "upstream"
-    upstream.mkdir()
-    resource_git(upstream, "init", "-b", "main")
-    for name in ("SKILL.md", "LICENSE"):
-        (upstream / name).write_text("Synthetic resource", encoding="utf-8")
-    resource_git(upstream, "add", ".")
-    resource_git(upstream, "commit", "-m", "synthetic resources")
+@pytest.fixture
+def skill_source(tmp_path, monkeypatch):
+    from GalTransl.Extraction import skill
     source = tmp_path / "source"
     source.mkdir()
-    resource_git(source, "init")
-    resource_git(source, "-c", "protocol.file.allow=always", "submodule", "add", "../upstream", f"skills/{SKILL_NAME}")
-    skill = source / "skills" / SKILL_NAME
-    (source / "skills" / "sources.json").write_text(json.dumps({SKILL_NAME: {"branch": "main"}}))
+    resource_git(source, "init", "-b", "main")
+    (source / "skills").mkdir()
+    (source / "skills/sources.json").write_text(json.dumps({skill.SKILL_NAME: {"source": skill.SOURCE, "branch": "main"}}))
     (source / "extraction_python.py").write_text("# Synthetic adapter\n")
     resource_git(source, "add", ".")
     resource_git(source, "commit", "-m", "synthetic application")
-    return source, skill, upstream
+    upstream = {"commit": "a" * 40, "status": 200, "calls": [], "files": {
+        "SKILL.md": "Synthetic resource", "LICENSE": "Synthetic license"}}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            upstream["calls"].append(self.path)
+            if self.path == "/latest":
+                content = json.dumps({"sha": upstream["commit"]}).encode()
+            else:
+                output = io.BytesIO()
+                with zipfile.ZipFile(output, "w") as bundle:
+                    for name, value in upstream["files"].items():
+                        bundle.writestr("upstream/" + name, value)
+                content = output.getvalue()
+            self.send_response(upstream["status"])
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    url = f"http://127.0.0.1:{server.server_port}"
+    monkeypatch.setattr(skill, "LATEST_URL", url + "/latest")
+    monkeypatch.setattr(skill, "ARCHIVE_URL", url + "/archive/{commit}")
+    worker = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True)
+    worker.start()
+    yield source, source / "skills" / skill.SKILL_NAME, upstream
+    server.shutdown()
+    server.server_close()
+    worker.join(timeout=2)
 
 
-@pytest.fixture
-def skill_source(tmp_path, monkeypatch, skill_source_template):
-    from scripts.prepare_extraction import SKILL_NAME
-    monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file")
-    source = shutil.copytree(skill_source_template[0], tmp_path / "source")
-    upstream = shutil.copytree(skill_source_template[2], tmp_path / "upstream")
-    skill = source / "skills" / SKILL_NAME
-    # Copied repositories keep absolute remote URLs; point both at this test's upstream.
-    resource_git(source, "config", f"submodule.skills/{SKILL_NAME}.url", str(upstream))
-    resource_git(skill, "remote", "set-url", "origin", str(upstream))
-    return source, skill, upstream
-
-
-def advance_skill(upstream):
-    (upstream / "SKILL.md").write_text("Updated Skill", encoding="utf-8")
-    (upstream / "new-tool.py").write_text("# New tool\n", encoding="utf-8")
-    resource_git(upstream, "add", ".")
-    resource_git(upstream, "commit", "-m", "update resources")
-    return resource_git(upstream, "rev-parse", "HEAD")
-
-
-def test_resource_export_follows_latest_skill_and_records_snapshot(tmp_path, skill_source):
+def test_resource_export_downloads_latest_skill_in_place(tmp_path, skill_source):
     from scripts.prepare_extraction import prepare, SKILL_NAME
+    from GalTransl.Extraction.skill import RECEIPT, SOURCE
     source, skill, upstream = skill_source
-    # Local outputs and Git metadata must never enter a release.
-    (skill / "local-output.txt").touch()
     output = prepare(source, tmp_path / "export")
-    assert {str(path.relative_to(output)).replace("\\", "/") for path in output.rglob("*") if path.is_file()} == {
+    assert {path.relative_to(output).as_posix() for path in output.rglob("*") if path.is_file()} == {
         f"skills/{SKILL_NAME}/SKILL.md", f"skills/{SKILL_NAME}/LICENSE", "skills/sources.json", "extraction-python/runner.py"}
-    commit = advance_skill(upstream)
+    (skill / "old-tool.py").write_text("obsolete")
+    upstream.update(commit="b" * 40, files={"SKILL.md": "Updated Skill", "LICENSE": "license", "new-tool.py": "# New tool"})
     prepare(source, output)
-    assert (output / "skills" / SKILL_NAME / "SKILL.md").read_text() == "Updated Skill"
+    assert (skill / "SKILL.md").read_text() == "Updated Skill"
+    assert not (skill / "old-tool.py").exists()
     assert (output / "skills" / SKILL_NAME / "new-tool.py").is_file()
     assert json.loads((output / "skills/sources.json").read_text())[SKILL_NAME] == {
-        "branch": "main", "commit": commit, "files": 3}
-    assert json.loads((source / "skills/sources.json").read_text())[SKILL_NAME] == {"branch": "main"}
-    assert resource_git(skill, "rev-parse", "HEAD") == commit
-    assert (skill / "local-output.txt").is_file()
+        "source": SOURCE, "branch": "main", "commit": "b" * 40, "files": 3}
+    assert json.loads((source / "skills/sources.json").read_text())[SKILL_NAME] == {"source": SOURCE, "branch": "main"}
+    assert json.loads((skill / RECEIPT).read_text())["commit"] == "b" * 40
+    assert not (skill / ".git").exists()
+    assert set((source / "skills").iterdir()) == {skill, source / "skills/sources.json"}
 
 
-def test_skill_update_preserves_local_edits(tmp_path, skill_source):
+def test_skill_download_handles_shallow_application_checkout(tmp_path, skill_source):
     from scripts.prepare_extraction import prepare
-    source, skill, upstream = skill_source
-    advance_skill(upstream)
-    original = resource_git(skill, "rev-parse", "HEAD")
-    (skill / "SKILL.md").write_text("Uncommitted edits")
-    with pytest.raises(RuntimeError, match="local changes"):
-        prepare(source, tmp_path / "other-export")
-    assert (skill / "SKILL.md").read_text() == "Uncommitted edits"
-    assert resource_git(skill, "rev-parse", "HEAD") == original
-    assert not (tmp_path / "other-export").exists()
+    source, _, upstream = skill_source
+    shallow = tmp_path / "shallow"
+    resource_git(tmp_path, "clone", "--depth", "1", source.as_uri(), str(shallow))
+    assert resource_git(shallow, "rev-parse", "--is-shallow-repository") == "true"
+    output = prepare(shallow, tmp_path / "export")
+    assert (output / "extraction-python/runner.py").is_file()
+    assert upstream["calls"] == ["/latest", "/archive/" + "a" * 40]
 
 
-@pytest.mark.parametrize("diverged", [False, True])
-def test_skill_update_preserves_local_commits(tmp_path, skill_source, diverged):
+@pytest.mark.parametrize("invalid_archive", [False, True])
+def test_skill_fetch_failure_preserves_existing_skill_and_export(tmp_path, skill_source, invalid_archive):
     from scripts.prepare_extraction import prepare
-    source, skill, upstream = skill_source
-    (skill / "local-tool.py").write_text("# Local tool\n")
-    resource_git(skill, "add", ".")
-    resource_git(skill, "commit", "-m", "local work")
-    original = resource_git(skill, "rev-parse", "HEAD")
-    if diverged:
-        advance_skill(upstream)
-    with pytest.raises(RuntimeError, match="local commits or diverged history"):
-        prepare(source, tmp_path / "export")
-    assert resource_git(skill, "rev-parse", "HEAD") == original
-    assert (skill / "local-tool.py").is_file()
-
-
-def test_skill_update_initializes_missing_submodule(tmp_path, skill_source):
-    from scripts.prepare_extraction import prepare, SKILL_NAME
-    source, skill, upstream = skill_source
-    resource_git(source, "submodule", "deinit", "--", f"skills/{SKILL_NAME}")
-    assert not (skill / "SKILL.md").exists()
-    commit = advance_skill(upstream)
-    prepare(source, tmp_path / "export")
-    assert resource_git(skill, "rev-parse", "HEAD") == commit
-
-
-def test_skill_update_handles_shallow_checkout(tmp_path, skill_source):
-    from scripts.prepare_extraction import prepare
-    source, skill, upstream = skill_source
-    commit = advance_skill(upstream)
-    resource_git(skill, "fetch", "--depth", "1", "origin", "main")
-    assert resource_git(skill, "rev-parse", "--is-shallow-repository") == "true"
-    prepare(source, tmp_path / "export")
-    assert resource_git(skill, "rev-parse", "HEAD") == commit
-
-
-def test_skill_fetch_failure_preserves_existing_export(tmp_path, skill_source):
-    from scripts.prepare_extraction import prepare
+    from GalTransl.Extraction.skill import SkillDownloadError
     source, skill, upstream = skill_source
     output = prepare(source, tmp_path / "export")
     before = {path.relative_to(output): path.read_bytes() for path in output.rglob("*") if path.is_file()}
-    resource_git(skill, "remote", "set-url", "origin", str(tmp_path / "missing-upstream"))
-    with pytest.raises(subprocess.CalledProcessError):
+    upstream.update(commit="b" * 40)
+    if invalid_archive:
+        upstream["files"] = {"SKILL.md": "Missing license"}
+    else:
+        upstream["status"] = 503
+    with pytest.raises(SkillDownloadError):
         prepare(source, output)
     assert {path.relative_to(output): path.read_bytes() for path in output.rglob("*") if path.is_file()} == before
+    assert (skill / "SKILL.md").read_text() == "Synthetic resource"
 
 
-def test_frozen_application_never_updates_skill(tmp_path, monkeypatch):
+def test_frozen_application_never_prepares_resources(tmp_path, monkeypatch):
     from scripts import prepare_extraction
     monkeypatch.setattr(sys, "frozen", True, raising=False)
-    def unexpected_git(*args):
-        pytest.fail("Packaged applications must not invoke Git")
-    monkeypatch.setattr(prepare_extraction, "git", unexpected_git)
     with pytest.raises(RuntimeError, match="bundled Skill without updating"):
         prepare_extraction.prepare(tmp_path, tmp_path / "export")
     assert not (tmp_path / "export").exists()
 
 
-def test_local_preparation_uses_existing_skill_without_network(tmp_path, skill_source):
+@pytest.mark.parametrize("receipt", [True, False])
+def test_local_preparation_uses_plain_skill_without_network(tmp_path, skill_source, receipt):
     from scripts.prepare_extraction import prepare, SKILL_NAME
+    from GalTransl.Extraction.skill import RECEIPT
     source, skill, upstream = skill_source
-    original = resource_git(skill, "rev-parse", "HEAD")
-    advance_skill(upstream)
+    prepare(source, tmp_path / "export")
+    if not receipt:
+        (skill / RECEIPT).unlink()
+    upstream["status"] = 503
+    upstream["calls"].clear()
     (skill / "SKILL.md").write_text("Local development edits", encoding="utf-8")
-    resource_git(skill, "remote", "set-url", "origin", str(tmp_path / "missing-upstream"))
     output = prepare(source, tmp_path / "export", update=False)
-    assert resource_git(skill, "rev-parse", "HEAD") == original
     assert (output / "skills" / SKILL_NAME / "SKILL.md").read_text() == "Local development edits"
     assert (output / "extraction-python/runner.py").is_file()
+    assert upstream["calls"] == []
 
 
 def test_local_preparation_without_skill_still_exports_adapter(tmp_path, skill_source):
     from scripts.prepare_extraction import prepare, SKILL_NAME
-    source, skill, _ = skill_source
-    resource_git(source, "submodule", "deinit", "--", f"skills/{SKILL_NAME}")
-    resource_git(source, "config", f"submodule.skills/{SKILL_NAME}.url", str(tmp_path / "missing-upstream"))
+    source, skill, upstream = skill_source
     output = prepare(source, tmp_path / "export", update=False)
-    assert not (skill / "SKILL.md").exists()
+    assert not skill.exists()
     assert not (output / "skills" / SKILL_NAME).exists()
     assert (output / "extraction-python/runner.py").is_file()
     assert json.loads((output / "skills/sources.json").read_text())[SKILL_NAME]["files"] == 0
+    assert upstream["calls"] == []
 
 
 def test_resource_export_includes_additional_skills_and_their_helpers(tmp_path, skill_source):
     from scripts.prepare_extraction import prepare
-
     source, _, _ = skill_source
     extra = source / 'skills' / 'extra'
     extra.mkdir()

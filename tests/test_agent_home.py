@@ -34,7 +34,7 @@ def save_file(path, content):
 
 
 @pytest.mark.parametrize('platform', ['win32', 'linux', 'darwin'])
-def test_default_home_migrates_conversations_settings_and_skill_versions(home, monkeypatch, platform):
+def test_default_home_migrates_conversations_settings_without_moving_skills(home, monkeypatch, platform):
     monkeypatch.setattr('sys.platform', platform)
     directory, resource = home
     legacy = RuntimePaths.get_legacy_user_data_dir()
@@ -52,7 +52,8 @@ def test_default_home_migrates_conversations_settings_and_skill_versions(home, m
     assert SessionStore().read(session_id)['title'] == 'Original session'
     assert (directory / 'extraction/sessions' / session_id / 'execution/messages.jsonl').read_text() == 'original history'
     assert (directory / 'agent_sessions/project/session.jsonl').read_text() == 'new history wins'
-    assert environment.load_settings()['skill_dir'] == str(resource / 'skills/engine/version')
+    assert environment.load_settings()['skill_dir'] == str(legacy / 'extraction/skills/engine/version')
+    assert not (resource / 'skills/engine/version').exists()
     assert not (directory / 'skills').exists()
     namespace = runpy.run_path(str(Path(RuntimePaths.__file__).parent / 'Agent/session_store.py'))
     assert namespace['SESSIONS_ROOT'] == str(directory / 'agent_sessions')
@@ -97,26 +98,29 @@ def test_extra_skill_can_make_environment_ready_without_fixed_extraction_package
     assert len(environment.environment()['skill_diagnostics']) == 1
 
 
-def test_downloaded_selection_moves_to_program_cache_and_keeps_bundled_files(home):
-    from GalTransl.Extraction.skill import SKILL_NAME, skill_versions_dir
+@pytest.mark.parametrize('location', ['home', 'cache'])
+@pytest.mark.parametrize('installed', [True, False])
+def test_saved_skill_paths_are_read_without_migration(home, location, installed):
+    from GalTransl.Extraction.skill import SKILL_NAME
 
     directory, resource = home
-    selected = directory / 'skills' / SKILL_NAME / ('a' * 40)
+    old_root = directory / 'skills' if location == 'home' else resource / 'skills' / '.downloaded'
+    selected = old_root / SKILL_NAME / ('a' * 40)
     instructions = f'---\nname: {SKILL_NAME}\ndescription: Selected download\n---\n'
     save_file(selected / 'SKILL.md', instructions)
     save_file(selected / 'helper.py', 'Downloaded helper')
     bundled = resource / 'skills' / SKILL_NAME / 'SKILL.md'
-    save_file(bundled, f'---\nname: {SKILL_NAME}\ndescription: Bundled Skill\n---\n')
+    if installed:
+        save_file(bundled, f'---\nname: {SKILL_NAME}\ndescription: Bundled Skill\n---\n')
     save_file(directory / 'extraction/settings.json', json.dumps({'skill_dir': str(selected)}))
     settings = environment.load_settings()
-    expected = skill_versions_dir(resource / 'skills') / selected.name
-    assert settings['skill_dir'] == str(expected)
-    assert (expected / 'SKILL.md').read_text() == instructions
-    assert (expected / 'helper.py').read_text() == 'Downloaded helper'
-    assert 'Bundled Skill' in bundled.read_text()
-    (selected / 'SKILL.md').write_text('Old location changed')
-    assert environment.load_settings()['skill_dir'] == str(expected)
-    assert (expected / 'SKILL.md').read_text() == instructions
+    assert settings['skill_dir'] == str(selected)
+    assert json.loads((directory / 'extraction/settings.json').read_text()) == {'skill_dir': str(selected)}
+    assert bundled.exists() == installed
+    if installed:
+        assert 'Bundled Skill' in bundled.read_text()
+    assert not (resource / 'skills' / SKILL_NAME / 'helper.py').exists()
+    assert (selected / 'SKILL.md').read_text() == instructions
 
 
 def test_explicit_data_root_is_honored_without_migrating_unrelated_home(home, monkeypatch, tmp_path):

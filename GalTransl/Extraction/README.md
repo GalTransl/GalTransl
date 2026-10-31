@@ -33,9 +33,9 @@ Windows 的 `bash` 工具也支持 `cd /e/x`、`cd /mnt/e/x`、`cd /cygdrive/e/x
 
 新会话默认「自动执行」：工具直接执行，`ask_user` 仍等待用户回答。「全自动-零打断」复用翻译 Agent 的问题参数和推荐项代答逻辑：自动采用 `recommended`，未指定时取第一个选项，不修改系统提示词。普通提问共用翻译 Agent 的多题、选项和自填答案卡片。权限模式可在运行中切换并保存到当前会话：放宽权限会放行当前符合条件的审批，切到零打断会按推荐项回答正在等待的问题；收紧权限对后续工具调用生效。模型列表及已选项共用「配置名/实际模型」展示格式。
 
-开发启动只准备本地资源：Tauri 的开发配置在 `desktop` 运行 `npm run extraction:prepare -- --local`，不拉取或更新 Skill；缺少 Skill 时仍准备 Python 适配器，随后可在提取 Agent 的「运行环境」中点击「下载 Skill」。进入提取 Agent 后自动检查已安装 Skill 的更新，页面打开期间每小时复查，离开页面暂停检查；有更新时左下角显示「Skill 有更新」和黄色状态点，打开配置窗口可查看版本并更新。检查失败保留已有状态，不影响提取。配置窗口支持手动检查更新和下载最新版；下载通过 GitHub 的 `main` 提交和对应源码 ZIP 完成，无需本机 Git，成功后保存到程序目录 `skills/.downloaded/galtransl-galgamereverse-skill/<commit>/` 并自动启用。启用成功后删除其他带有匹配下载凭据的旧哈希版本；正在运行的提取会话使用的版本保留到回合结束后再清理。内置文件和自定义目录保留，下载或切换失败时保留原选择和原版本。自动和手动检查仅查询上游版本，不下载文件；点击下载或更新后才安装。
+开发启动只准备本地资源：Tauri 的开发配置在 `desktop` 运行 `npm run extraction:prepare -- --local`，不拉取或更新 Skill；缺少 Skill 时仍准备 Python 适配器，随后可在提取 Agent 的「运行环境」中点击「下载 Skill」。进入提取 Agent 后自动检查已安装 Skill 的更新，页面打开期间每小时复查，离开页面暂停检查；有更新时左下角显示「Skill 有更新」和黄色状态点，打开配置窗口可查看版本并更新。检查失败保留已有状态，不影响提取。下载通过 GitHub 的 `main` 提交和对应源码 ZIP 完成，无需本机 Git，成功后直接保存到程序目录 `skills/galtransl-galgamereverse-skill/` 并自动启用。更新在临时目录完成下载与校验后替换固定目录，清除旧文件，不累积哈希版本；失败时保留原文件与设置，其他 skill 目录保持原状。正在运行的提取回合结束后才能更新。自动和手动检查仅查询上游版本，点击下载或更新后才安装。
 
-打包仍运行 `python scripts/prepare_extraction.py`（或 `desktop` 中的 `npm run extraction:prepare`），拉取并快进同步 Skill 上游 `main` 分支的最新提交，将完整 Skill 和小型 Python 适配器导出到 `build/extraction-resources`，排除 Git 元数据和本地输出；缺少 Skill 时初始化子模块，有本地修改或分叉时停止同步，网络失败时明确报错。源码清单只指定来源分支，导出清单记录实际 commit 和文件数。Tauri 及各平台发布脚本使用相同资源；发布后的程序默认使用程序目录 skills 中的包内快照，也可在「运行环境」中手动下载更新。前端开发仍使用常规 Node 工具链，发布后的提取 Agent 无需 Node。
+打包和 CI 运行 `python scripts/prepare_extraction.py`（或 `desktop` 中的 `npm run extraction:prepare`），复用程序下载器将上游 `main` 最新提交安装到程序 `skills/galtransl-galgamereverse-skill/`，再将完整 Skill、小型 Python 适配器及仓库跟踪的其他 skill 导出到 `build/extraction-resources`。不再使用 Git 子模块；普通、浅克隆均可构建。导出排除 Git 元数据和下载凭据，网络或校验失败保留现有 Skill 和导出文件。源码清单只指定来源分支，导出清单记录实际 commit 和文件数。Tauri 及各平台发布脚本使用相同资源；发布后的程序默认使用程序目录 skills 中的包内快照，也可在「运行环境」中手动下载更新。前端开发仍使用常规 Node 工具链，发布后的提取 Agent 无需 Node。
 
 新会话默认复用游戏目录内的 `<游戏名>_extract`，不追加数字；自定义输出目录也可复用，创建会话仅补齐缺少的子目录并保留已有文件。多个会话保留独立历史，同一游戏目录（或同一输出工作区）同时只能运行一个提取 Agent，等待审批、等待回答和停止收尾期间仍占用目录；不同游戏仍受全局最多两个提取会话并行的限制。
 

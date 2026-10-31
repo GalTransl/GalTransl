@@ -1,4 +1,0 @@
-[submodule "galtransl-galgamereverse-skill"]
-	path = skills/galtransl-galgamereverse-skill
-	url = https://github.com/GalTransl/GalTransl-GalGameReverse-Skill
-	branch = main

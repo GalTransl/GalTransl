@@ -13,6 +13,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import TypedDict
 from urllib.error import URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from .subprocess_env import external_environment, external_program
@@ -66,19 +67,18 @@ def check_skill(directory: Path) -> SkillStatus:
             "update_available": not status["installed"] or status["current_commit"] != commit}
 
 
-def install_skill(skills: Path) -> Path:
-    commit = latest_commit()
-    versions = skill_versions_dir(skills)
-    versions.mkdir(parents=True, exist_ok=True)
-    destination = versions / commit
-    # Each version has its own directory, preserving bundled/custom files and
-    # the previously selected version if a download or extraction fails.
-    if destination.exists():
-        if not (destination / "SKILL.md").is_file() or not (destination / "LICENSE").is_file():
-            raise SkillDownloadError(f"Incomplete downloaded Skill: {destination}")
+def install_skill(skills: Path, *, branch: str = "main") -> Path:
+    skills = skills.absolute()
+    skills.mkdir(parents=True, exist_ok=True)
+    destination = skills / SKILL_NAME
+    if skills.resolve() != skills or destination.resolve() != destination:
+        raise SkillDownloadError("Skill installation directory must not be a link")
+    commit = latest_commit(branch=branch)
+    if (destination / "SKILL.md").is_file() and (destination / "LICENSE").is_file() and skill_status(destination)["current_commit"] == commit:
         return destination
     archive = request_bytes(ARCHIVE_URL.format(commit=commit), 128 * 1024 * 1024)
-    with tempfile.TemporaryDirectory(prefix=".skill-download-", dir=versions) as temporary:
+    # Keep the installed directory intact until the entire archive is validated.
+    with tempfile.TemporaryDirectory(prefix=".skill-download-", dir=skills) as temporary:
         stage = Path(temporary) / "skill"
         stage.mkdir()
         try:
@@ -103,12 +103,21 @@ def install_skill(skills: Path) -> Path:
         if not (stage / "SKILL.md").is_file() or not (stage / "LICENSE").is_file():
             raise SkillDownloadError("Downloaded Skill is missing SKILL.md or LICENSE")
         (stage / RECEIPT).write_text(json.dumps({"source": SOURCE, "commit": commit}), encoding="utf-8")
-        stage.rename(destination)
+        previous = Path(temporary) / "previous"
+        if destination.exists():
+            destination.rename(previous)
+        try:
+            stage.rename(destination)
+        except OSError:
+            if previous.exists():
+                previous.rename(destination)
+            raise
     return destination
 
 
-def latest_commit() -> str:
-    content = request_bytes(LATEST_URL, 1024 * 1024)
+def latest_commit(*, branch: str = "main") -> str:
+    url = LATEST_URL if branch == "main" else LATEST_URL.rsplit("/", 1)[0] + "/" + quote(branch, safe="")
+    content = request_bytes(url, 1024 * 1024)
     try:
         metadata = json.loads(content)
     except ValueError as exc:
@@ -119,36 +128,35 @@ def latest_commit() -> str:
     return commit
 
 
-def skill_versions_dir(skills: Path) -> Path:
-    return skills / ".downloaded" / SKILL_NAME
-
-
 def prune_skill_versions(skills: Path, keep: list[Path]) -> None:
-    versions = skill_versions_dir(skills)
-    if not versions.is_dir() or versions.is_symlink() or getattr(versions.stat(), "st_file_attributes", 0) & 0x400:
-        return
-    root = versions.resolve()
-    if not root.is_relative_to(skills.resolve()):
-        return
+    """Remove receipt-verified hash directories left by older releases."""
     protected = [path.resolve() for path in keep]
-    for directory in versions.iterdir():
-        if not re.fullmatch(r"[0-9a-f]{40}", directory.name) or not directory.is_dir():
+    for versions in [skills / ".downloaded" / SKILL_NAME, skills / SKILL_NAME]:
+        if not versions.is_dir() or versions.is_symlink() or getattr(versions.stat(), "st_file_attributes", 0) & 0x400:
             continue
-        if directory.is_symlink() or getattr(directory.stat(), "st_file_attributes", 0) & 0x400:
+        root = versions.resolve()
+        if not root.is_relative_to(skills.resolve()):
             continue
-        target = directory.resolve()
-        if target.parent != root or any(path.is_relative_to(target) for path in protected):
-            continue
-        receipt = directory / RECEIPT
-        if not receipt.is_file() or receipt.is_symlink():
-            continue
-        try:
-            metadata = json.loads(receipt.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            continue
-        if not isinstance(metadata, dict) or metadata.get("source") != SOURCE or metadata.get("commit") != directory.name:
-            continue
-        shutil.rmtree(target)
+        for directory in versions.iterdir():
+            if not re.fullmatch(r"[0-9a-f]{40}", directory.name) or not directory.is_dir():
+                continue
+            if directory.is_symlink() or getattr(directory.stat(), "st_file_attributes", 0) & 0x400:
+                continue
+            target = directory.resolve()
+            if target.parent != root or any(path.is_relative_to(target) for path in protected):
+                continue
+            receipt = directory / RECEIPT
+            if not receipt.is_file() or receipt.is_symlink():
+                continue
+            try:
+                metadata = json.loads(receipt.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                continue
+            if not isinstance(metadata, dict) or metadata.get("source") != SOURCE or metadata.get("commit") != directory.name:
+                continue
+            shutil.rmtree(target)
+        if not any(versions.iterdir()):
+            versions.rmdir()
 
 
 def request_bytes(url: str, maximum: int) -> bytes:

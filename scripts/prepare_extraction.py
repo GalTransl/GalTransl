@@ -1,4 +1,4 @@
-"""Export extraction resources; only builds sync the latest Skill."""
+"""Download the latest built-in Skill and export extraction resources."""
 from __future__ import annotations
 
 import json
@@ -24,39 +24,30 @@ def git(directory, *args):
 def prepare(root=ROOT, output=OUTPUT, *, update=True):
     if getattr(sys, "frozen", False):
         raise RuntimeError("Packaged applications use their bundled Skill without updating it")
+    from GalTransl.Extraction.skill import SOURCE, RECEIPT, install_skill, prune_skill_versions, skill_status
+
     root, output = Path(root).resolve(), Path(output).absolute()
     manifest = json.loads((root / "skills" / "sources.json").read_text(encoding="utf-8"))
     source = manifest[SKILL_NAME]
-    skill = root / "skills" / SKILL_NAME
-    if update and not (skill / "SKILL.md").is_file():
-        git(root, "submodule", "update", "--init", "--", f"skills/{SKILL_NAME}")
-    if update and git(skill, "status", "--porcelain", "--untracked-files=no").strip():
-        raise RuntimeError("Extraction Skill has local changes; preserve them before packaging")
-    if update:
-        # Full ancestry is needed for a safe fast-forward from shallow CI checkouts.
-        fetch_options = ["--unshallow"] if git(skill, "rev-parse", "--is-shallow-repository").strip() == "true" else []
-        git(skill, "fetch", *fetch_options, "origin", f"refs/heads/{source['branch']}")
-        commit = git(skill, "rev-parse", "FETCH_HEAD").strip()
-        if int(git(skill, "rev-list", "--count", f"{commit}..HEAD").strip()):
-            raise RuntimeError("Extraction Skill has local commits or diverged history; preserve them before updating")
-        git(skill, "merge", "--ff-only", commit)
-    commit = git(skill, "rev-parse", "HEAD").strip() if (skill / "SKILL.md").is_file() else ""
-    files = [name for name in git(skill, "ls-files", "-z").split("\0") if name] if commit else []
+    if source["source"] != SOURCE:
+        raise RuntimeError("The extraction Skill source does not match the application's download source")
+    skill = install_skill(root / "skills", branch=source["branch"]) if update else root / "skills" / SKILL_NAME
+    present = (skill / "SKILL.md").is_file()
+    commit = skill_status(skill)["current_commit"] if present else ""
+    files = [path.relative_to(skill).as_posix() for path in sorted(skill.rglob("*"))
+             if path.is_file() and not {".git", "__pycache__"}.intersection(path.relative_to(skill).parts)
+             and path.name != RECEIPT] if present else []
     if (update or files) and not {"SKILL.md", "LICENSE"} <= set(files):
         raise RuntimeError("Incomplete extraction Skill")
     # Record the resolved version only in the export, never as an update pin.
     source.update(commit=commit, files=len(files))
     resources = [(skill / name, Path("skills") / SKILL_NAME / name) for name in files]
-    # Other skills participate in the same tracked-resource export, including submodules.
+    # Other skills and helpers come from tracked application files.
     for name in filter(None, git(root, "ls-files", "-z", "--", "skills").split("\0")):
         relative = Path(name)
-        if relative == Path("skills") / SKILL_NAME or relative == Path("skills/sources.json"):
+        if relative.is_relative_to(Path("skills") / SKILL_NAME) or relative == Path("skills/sources.json"):
             continue
         origin = root / relative
-        if origin.is_dir():
-            resources.extend((origin / child, relative / child)
-                             for child in filter(None, git(origin, "ls-files", "-z").split("\0")))
-            continue
         resources.append((origin, relative))
     output.parent.mkdir(parents=True, exist_ok=True)
     # Only our exact staging directory may be replaced; never traverse a link.
@@ -79,12 +70,15 @@ def prepare(root=ROOT, output=OUTPUT, *, update=True):
         if output.exists():
             shutil.rmtree(output)
         shutil.copytree(stage, output)
+    if update:
+        prune_skill_versions(root / "skills", [])
     print(f"Prepared extraction resources: {len(files)} Skill files at {commit}; shared Python agent")
     return output
 
 
 if __name__ == "__main__":
     import argparse
+    sys.path.insert(0, str(ROOT))
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--local", action="store_true", help="Prepare local resources without downloading or updating Skill")
     prepare(update=not parser.parse_args().local)
