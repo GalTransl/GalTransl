@@ -97,7 +97,7 @@ test('automatic checks use the real HTTP client, show the sidebar notice and ret
   assert.equal(f.state().error, '');
   assert.equal([...f.timers.values()].filter(timer => timer.delay === 60 * 60 * 1000).length, 1);
   await f.save({ ...f.state().environment, ready: false, problems: ['python_runner_missing'] });
-  assert.equal(f.button().findByType('span').children.join(''), 'Skill 有更新');
+  assert.equal(f.button().findByType('span').children.join(''), '环境未就绪');
   await f.save({ ...f.state().environment, ready: true, problems: [] });
   let refreshed;
   await act(async () => { refreshed = await f.state().refreshEnvironment(); });
@@ -138,7 +138,7 @@ test('checks pause on hidden pages, restart for the selected Skill, and clear af
   f.upstream.environment = missing;
   await f.save(missing);
   assert.equal(f.timers.size, 0);
-  assert.equal(f.button().findByType('span').children.join(''), '配置环境');
+  assert.equal(f.button().findByType('span').children.join(''), '环境未就绪');
   const count = f.calls.length;
   await f.tick();
   assert.equal(f.calls.length, count);

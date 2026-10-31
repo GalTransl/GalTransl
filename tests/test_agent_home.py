@@ -86,12 +86,12 @@ def test_skills_are_read_in_place_without_seeding_user_home(home):
     assert not directory.exists()
 
 
-def test_extra_skill_can_make_environment_ready_without_fixed_extraction_package(home):
+def test_extra_skills_do_not_make_environment_ready_without_extraction_package(home):
     directory, resource = home
     save_file(resource / 'skills/extra/SKILL.md', '---\nname: extra\ndescription: Extra skill\n---\n')
     save_file(resource / 'extraction_python.py', '# Adapter')
     available = environment.environment()
-    assert available['ready']
+    assert not available['ready'] and available['problems'] == ['skill_missing']
     assert [skill['name'] for skill in available['skills']] == ['extra']
     assert not available['skill']['installed']
     save_file(resource / 'skills/invalid/SKILL.md', 'No description')

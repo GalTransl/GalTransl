@@ -42,6 +42,13 @@ def model_config(profile: Any) -> dict[str, Any]:
             "reasoningEffort": build_reasoning_kwargs(section, token).get("reasoning_effort")}
 
 
+def _ready_environment():
+    available = environment()
+    if not available["ready"]:
+        raise ValueError("Extraction environment is incomplete: " + ", ".join(available["problems"]))
+    return available
+
+
 class ExtractionRuntime:
     def __init__(self, store: SessionStore | None = None):
         self.store = store or SessionStore()
@@ -179,6 +186,7 @@ class ExtractionRuntime:
         if (not prompt and not images) or len(prompt) > 60000:
             raise ValueError("Message must contain between 1 and 60000 characters")
         with self.lock:
+            available = _ready_environment()
             active = self.runs.get(session_id)
             if active is not None:
                 active.state.pending_messages.append(PendingMessage(uuid.uuid4().hex, prompt, save_images(active._store, images)))
@@ -188,9 +196,6 @@ class ExtractionRuntime:
             mode = str(payload.get("permission_mode", "auto"))
             if mode not in PERMISSION_MODES:
                 raise ValueError("Invalid permission mode")
-            available = environment()
-            if not available["ready"]:
-                raise ValueError("Extraction environment is incomplete: " + ", ".join(available["problems"]))
             session = self.session(session_id)
             game = Path(session["game_dir"]).resolve(strict=True)
             workspace = Path(session["workspace"]).resolve(strict=True)
@@ -293,6 +298,7 @@ class ExtractionRuntime:
                 runner = self.runs.get(session_id)
                 if runner is None:
                     return self.start(session_id, payload, item)
+                _ready_environment()
                 queued.remove(item)
                 runner.state.immediate_message = item.text
                 runner.state.immediate_images = item.images

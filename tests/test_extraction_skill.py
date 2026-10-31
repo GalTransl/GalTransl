@@ -3,6 +3,7 @@ import io
 import json
 import threading
 import zipfile
+from collections import deque
 from functools import cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -131,7 +132,8 @@ def test_selected_skills_root_is_saved_and_scanned_without_bundled_fallback(skil
         directory.mkdir(parents=True)
         (directory / "SKILL.md").write_text(f"---\nname: {directory.name}\ndescription: Selected Skill\n---\n")
     result = api(url, "environment")[1]
-    assert result["ready"] and not result["skill"]["installed"]
+    assert not result["ready"] and not result["skill"]["installed"]
+    assert result["problems"] == ["skill_missing"]
     assert [item["name"] for item in result["skills"]] == ["first", "second"]
     assert upstream["calls"] == []
 
@@ -146,6 +148,40 @@ def test_download_installs_into_the_unsaved_selected_skills_root(skill_server, t
     assert result["skill"]["installed"] and result["skill"]["current_commit"] == "b" * 40
     assert [item["base_dir"] for item in result["skills"]] == [str(selected / SKILL_NAME)]
     assert (original / "SKILL.md").read_text() == FRONTMATTER + "Original Skill"
+
+
+@pytest.mark.parametrize("mode", ["new", "queued", "active", "immediate"])
+def test_missing_extraction_skill_rejects_messages_and_preserves_queues(skill_server, tmp_path, monkeypatch, mode):
+    from GalTransl.Agent.models import PendingMessage
+    from GalTransl.Extraction import environment, http
+    from GalTransl.Extraction.runner import ExtractionRunner, restore_state
+
+    monkeypatch.setattr("GalTransl.Agent.runner.load_app_settings", lambda: {"billionContextEnabled": False})
+    url, _, _, _ = skill_server
+    selected = tmp_path / "selected-skills"
+    extra = selected / "extra"
+    extra.mkdir(parents=True)
+    (extra / "SKILL.md").write_text("---\nname: extra\ndescription: Additional Skill\n---\n")
+    assert api(url, "settings", {"skill_dir": str(selected)})[0] == 200
+    game = tmp_path / "game"
+    game.mkdir()
+    runtime = http.EXTRACTION_RUNTIME
+    session = runtime.store.create(str(game))
+    state, store = restore_state(session, runtime.store.directory(session["id"]), {}, "Inspect", "auto")
+    runner = ExtractionRunner(state, store, session, environment.environment(), lambda event: None)
+    if mode in {"active", "immediate"}:
+        runtime.runs[session["id"]] = runner
+    item = PendingMessage("queued", "Inspect later", [])
+    if mode in {"queued", "immediate"}:
+        runtime.queued[session["id"]] = deque([item])
+    action = "queue-send" if mode in {"queued", "immediate"} else "message"
+    status, result = api(url, action, {"session_id": session["id"], "message": "Inspect", "item_id": item.id})
+    assert status == 400 and "skill_missing" in result["error"]
+    assert not runner.state.pending_messages and not runner.state.immediate_message
+    assert not runner.stop_event.is_set()
+    if mode in {"queued", "immediate"}:
+        assert list(runtime.queued[session["id"]]) == [item]
+    assert runtime.store.read(session["id"])["seq"] == 0
 
 
 @pytest.mark.parametrize("installed,current", [(True, "a" * 40), (True, "b" * 40), (False, "")])

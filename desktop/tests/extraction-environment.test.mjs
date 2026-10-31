@@ -223,3 +223,53 @@ test('the extraction settings button opens the dialog without waiting for the en
   assert.equal(renderer.root.findAllByProps({ role: 'dialog' }).length, 0);
   act(() => renderer.unmount());
 });
+
+
+test('missing extraction Skill shows not ready and blocks buttons, Enter and queued sends', async () => {
+  const session = { id: 'readiness', title: 'Fixture', game_dir: '/game', workspace: '/workspace', status: 'idle' };
+  const requests = [];
+  let environment = { ...initial, ready: true, skill: { ...initial.skill, update_available: true } };
+  const load = createTypeScriptLoader({
+    document: { body: {}, documentElement: {}, addEventListener() {}, removeEventListener() {} },
+    window: { innerWidth: 1366, matchMedia: () => ({ matches: true }) },
+  }, {
+    'react-dom': { createPortal: children => children },
+    'react-router-dom': { useNavigate: () => () => {} },
+    '../styles/pages/agent.css': {}, '../styles/pages/extraction.css': {},
+    '../lib/api': { getBackendProfile: () => ({ type: 'OpenAI-Compatible' }) },
+    './HomePage': {},
+    './agent/drafts': { useMessageDraft: () => ['Inspect a fixture', () => {}] },
+    './agent/images': { useImageInput: () => ({ images: [], processing: false, removeSent() {} }), imageUploads: () => [] },
+    './extraction/useExtraction': { useExtraction: () => ({
+      selected: session.id, sessions: { sessions: [], total: 0 }, environment,
+      view: { session, rows: [], queued: [{ id: 'queued', text: 'Inspect later' }] },
+      mutate: async (...args) => { requests.push(args); return {}; },
+    }) },
+    './extraction/useModelProfile': { useModelProfile: () => ({ models: ['fixture'], profile: 'fixture' }) },
+    './extraction/SessionFolders': { SessionFolders: () => null },
+    './extraction/labels': { x: key => key, statusLabel: value => value },
+    '../agent/ComposerSelect': { ComposerSelect: () => null },
+  });
+  const { ExtractionPage } = load(new URL('../src/pages/ExtractionPage.tsx', import.meta.url));
+  let renderer;
+  act(() => { renderer = create(h(ExtractionPage)); });
+  const send = () => renderer.root.findByProps({ className: 'agent-composer__send' });
+  const queuedSend = () => renderer.root.findByProps({ className: 'agent-queue__act is-primary' });
+  const settings = () => renderer.root.findByProps({ className: 'agent-settings-button' });
+  assert.equal(settings().findByType('span').children.join(''), 'notReady');
+  assert.equal(settings().findByType('i').props.className, '');
+  assert.equal(send().props.disabled, true);
+  assert.equal(queuedSend().props.disabled, true);
+  await act(async () => { send().props.onClick(); queuedSend().props.onClick(); });
+  act(() => renderer.root.findByProps({ className: 'agent-composer__input' }).props.onKeyDown({ key: 'Enter', nativeEvent: {}, preventDefault() {} }));
+  assert.equal(requests.length, 0);
+  environment = installed;
+  act(() => renderer.update(h(ExtractionPage)));
+  assert.equal(settings().findByType('span').children.join(''), 'ready');
+  assert.equal(settings().findByType('i').props.className, 'is-ready');
+  assert.equal(send().props.disabled, false);
+  assert.equal(queuedSend().props.disabled, false);
+  await act(async () => send().props.onClick());
+  assert.equal(requests[0][0], 'message');
+  act(() => renderer.unmount());
+});

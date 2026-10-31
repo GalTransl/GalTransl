@@ -40,6 +40,7 @@ export function ExtractionPage() {
   const selection = useRef({ id: agent.selected, session }); selection.current = { id: agent.selected, session };
   const { models: modelNames, profile, boundProfile, defaultProfile, setProfile, moveProfile } = useModelProfile(session, agent.selected);
   const running = isRunning(session);
+  const ready = Boolean(agent.environment?.ready && agent.environment.skill.installed);
   const toolCount = agent.view?.rows.filter(row => row.role === 'tool' && row.done).length || 0;
   useEffect(() => { if (session) setMode(session.permission_mode || 'auto'); }, [session?.id, session?.permission_mode]);
   const changeMode = (value: string) => {
@@ -84,7 +85,7 @@ export function ExtractionPage() {
   const send = async () => {
     const message = draft.trim();
     const sentImages = imageInput.images;
-    if ((!message && !sentImages.length) || imageInput.processing || agent.busy || !profile || !agent.environment?.ready) return;
+    if ((!message && !sentImages.length) || imageInput.processing || agent.busy || !profile || !ready) return;
     if (!session) { setDialog('create'); return; }
     const result = await agent.mutate('message', { message, images: imageUploads(sentImages), profile: getBackendProfile(profile), profile_name: boundProfile, permission_mode: mode });
     if (result) {
@@ -114,8 +115,8 @@ export function ExtractionPage() {
         onCloseFolder={directory => void closeFolder(directory)} runningDirectories={agent.sessions.running_game_dirs} busy={agent.busy} />
       {!agent.sessions.total && <div className="agent-sessions__empty">{x('emptySessions')}</div>}
       {agent.sessions.next_offset != null && <button type="button" className="agent-sessions__show-more" onClick={() => void agent.refreshSessions(agent.sessions.next_offset!).catch(e => agent.setError(String(e)))}>{x('more')}</button>}</nav>
-      <AgentSettingsButton ready={agent.environment?.ready ?? false} updateAvailable={agent.environment?.skill.update_available}
-        label={x(agent.environment?.skill.update_available ? 'skillHasUpdate' : agent.environment?.ready ? 'ready' : 'setup')}
+      <AgentSettingsButton ready={ready} updateAvailable={ready && agent.environment?.skill.update_available}
+        label={x(!ready ? 'notReady' : agent.environment?.skill.update_available ? 'skillHasUpdate' : 'ready')}
         onClick={() => setDialog('environment')} />
     </aside>
     <div className="extract-content">
@@ -143,17 +144,17 @@ export function ExtractionPage() {
       <div className="agent-console__composer extract-bottom">
         {agent.error && <div className="agent-notice agent-notice--error extract-inline-error" role="alert"><Icon name="warning" /><span>{agent.error}</span><button type="button" className="extract-text-button" onClick={agent.reload}>{x('reload')}</button></div>}
         {agent.view?.pending && <PendingRequest key={agent.view.pending.requestId} pending={agent.view.pending} busy={agent.busy} answer={body => { void agent.mutate('answer', body); }} />}
-        <MessageQueue queued={agent.view?.queued || []} editing={editingQueued} onEditingChange={setEditingQueued} busy={agent.busy}
+        <MessageQueue queued={agent.view?.queued || []} editing={editingQueued} onEditingChange={setEditingQueued} busy={agent.busy} canSend={ready}
           scope={{ sessionId: agent.selected, extraction: true }}
           onSave={() => { if (editingQueued) void agent.mutate('queue-update', { item_id: editingQueued.id, text: editingQueued.text }).then(result => { if (result) setEditingQueued(null); }); }}
           onDelete={id => { void agent.mutate('queue-delete', { item_id: id }).then(result => { if (result && editingQueued?.id === id) setEditingQueued(null); }); }}
-          onSend={id => { void agent.mutate('queue-send', { item_id: id, profile: getBackendProfile(profile), profile_name: boundProfile, permission_mode: mode }).then(result => { if (result) setEditingQueued(null); }); }} />
-        <ExtractionComposer draft={draft} setDraft={setDraft} textarea={textarea} session={session} running={running} busy={agent.busy} ready={Boolean(agent.environment?.ready)}
+          onSend={id => { if (!ready) return; void agent.mutate('queue-send', { item_id: id, profile: getBackendProfile(profile), profile_name: boundProfile, permission_mode: mode }).then(result => { if (result) setEditingQueued(null); }); }} />
+        <ExtractionComposer draft={draft} setDraft={setDraft} textarea={textarea} session={session} running={running} busy={agent.busy} ready={ready}
           imageInput={imageInput} hasQueue={Boolean(agent.view?.queued?.length)}
           profile={profile} profileSelection={boundProfile} defaultProfile={defaultProfile} setProfile={setProfile} models={modelNames} mode={mode} setMode={changeMode} context={agent.view?.contextUsage} compacting={agent.view?.compacting}
           send={() => void send()} stop={() => { void agent.mutate('stop', {}); }} chooseSource={() => setDialog('create')} configure={() => navigate('/backend-profiles')} />
         {!modelNames.length && <div className="extract-hint">{x('noModel')} <button type="button" className="extract-text-button" onClick={() => navigate('/backend-profiles')}>{x('configureModel')}</button></div>}
-        {session && !agent.environment?.ready && <div className="extract-hint"><button type="button" className="extract-text-button" onClick={() => setDialog('environment')}>{x('setup')}</button></div>}
+        {session && !ready && <div className="extract-hint"><button type="button" className="extract-text-button" onClick={() => setDialog('environment')}>{x('setup')}</button></div>}
       </div>
     </main>
       {session && <div id="extraction-workspace" className="extract-workspace-shell" aria-hidden={!showWorkspace} {...(!showWorkspace ? { inert: '' } : {})}>

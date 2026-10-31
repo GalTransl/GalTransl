@@ -3,11 +3,11 @@ import { t, useUiLanguage } from '../../i18n';
 import type { QueuedMessage } from '../../lib/api';
 import { ImageAttachments, type ImageScope } from './images';
 
-export function MessageQueue({ queued, editing, onEditingChange, onSave, onSend, onDelete, scope, busy = false }: {
+export function MessageQueue({ queued, editing, onEditingChange, onSave, onSend, onDelete, scope, busy = false, canSend = true }: {
   queued: QueuedMessage[]; editing: { id: string; text: string } | null;
   onEditingChange: (editing: { id: string; text: string } | null) => void;
   onSave: () => void; onSend: (id: string) => void; onDelete: (id: string) => void;
-  scope: ImageScope; busy?: boolean;
+  scope: ImageScope; busy?: boolean; canSend?: boolean;
 }) {
   useUiLanguage();
   if (!queued.length) return null;
@@ -26,7 +26,7 @@ export function MessageQueue({ queued, editing, onEditingChange, onSave, onSend,
       </> : <>
         <span className="agent-queue__text" title={item.text}>{item.text}</span>
         {item.images?.length ? <ImageAttachments images={item.images} scope={scope} /> : null}
-        <button type="button" className="agent-queue__act is-primary" disabled={busy} title={t('agent:agentPage.agentQueueActIsPrimary_title_agentSendEntry')} onClick={() => onSend(item.id)}>
+        <button type="button" className="agent-queue__act is-primary" disabled={busy || !canSend} title={t('agent:agentPage.agentQueueActIsPrimary_title_agentSendEntry')} onClick={() => onSend(item.id)}>
           <span className="agent-queue__act-icon"><Icon name="send-now" /></span>{t('agent:agentPage.agentQueueActIsPrimary_button_text')}
         </button>
         <button type="button" className="agent-queue__act" disabled={busy} title={t('agent:agentPage.agentQueueAct_title_editEntry')} aria-label={t('agent:agentPage.agentQueueAct_ariaLabel_editEntry')} onClick={() => onEditingChange({ id: item.id, text: item.text })}><Icon name="pencil" /></button>
