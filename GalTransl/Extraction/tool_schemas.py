@@ -36,7 +36,7 @@ EXTRACTION_TOOLS = [
           "args": {"type": "array", "maxItems": 16, "items": {"type": "string", "maxLength": 1024}},
           "timeout_seconds": TIMEOUT}),
     tool("bash", "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds."
-         + (" On Windows this uses BusyBox sh: use POSIX syntax and $TMPDIR for scratch files; arrays, [[ ]] and C-style for are unavailable." if os.name == "nt" else ""),
+         + (" On Windows this uses BusyBox sh: use POSIX syntax and $TMPDIR for scratch files; arrays, [[ ]] and C-style for are unavailable. cd accepts drive paths like /e/x, /mnt/e/x and /cygdrive/e/x; use E:/x for other commands' path arguments." if os.name == "nt" else ""),
          {"command": {"type": "string", "description": "Shell command to execute"},
           "timeout": {"type": "number", "description": "Timeout in seconds (optional, no default timeout)"}}, ["command"]),
     tool("ask_user", "Ask the user for a required choice that cannot be inferred. Supply 1-4 questions, each with options and a recommended option matching one of them. The user can also enter a custom answer. In full-auto no-interruption mode the recommended option is selected automatically; without a recommendation the first option is used.",

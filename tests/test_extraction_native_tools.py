@@ -7,6 +7,7 @@ import io
 import json
 import os
 import random
+import shlex
 import subprocess
 import threading
 import time
@@ -421,6 +422,54 @@ def test_bash_scratch_dir_lives_in_the_workspace(fixture):
     lines = text(runner._dispatch_tool('bash', {'command': 'echo "$TMPDIR"; mktemp'})).splitlines()
     assert Path(lines[0]).resolve() == scratch
     assert Path(lines[1]).parent == scratch and Path(lines[1]).is_file()
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows shell drive aliases')
+@pytest.mark.parametrize('prefix,upper,option', [
+    ('/', False, ''), ('/', True, '--'),
+    ('/mnt/', False, '-P'), ('/mnt/', True, '-L'),
+    ('/cygdrive/', False, ''), ('/cygdrive/', True, '--'),
+])
+def test_bash_cd_accepts_windows_drive_aliases(fixture, prefix, upper, option):
+    runner, _ = fixture
+    approvals = []
+    runner.tools.approve = lambda *args: approvals.append(args)
+    target = runner.tools.workspace / '中文 目录'
+    (target / 'gt_input').mkdir(parents=True)
+    (target / 'metadata').mkdir()
+    (target / 'gt_input' / 'ACT_A.json').write_bytes(b'[]')
+    (target / 'metadata' / 'extraction.json').write_bytes(b'{"variant":"Tomefure"}')
+    drive = target.drive[0].upper() if upper else target.drive[0].lower()
+    alias = prefix + drive + target.as_posix()[2:]
+    args = {'command': f'directory={shlex.quote(alias)}; cd {option} "$directory" && ls gt_input && cat metadata/extraction.json'}
+    result = runner._dispatch_tool('bash', args)
+    assert text(result) == 'ACT_A.json\n{"variant":"Tomefure"}'
+    assert approvals == [('bash', args)]
+    root = prefix + drive
+    assert Path(text(runner._dispatch_tool('bash', {'command': f'cd {root} && pwd'})).strip()) == Path(target.anchor)
+    assert Path(text(runner._dispatch_tool('bash', {'command': f'cd {root}/ && pwd'})).strip()) == Path(target.anchor)
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows shell drive aliases')
+def test_bash_cd_keeps_shell_arguments_and_script_literals(fixture):
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    (runner.tools.workspace / 'relative').mkdir()
+    command = '''start="$PWD"
+set -- one two
+cd relative && cd - >/dev/null && cd -- "$start" || exit 1
+[ "$2" = two ] && [ "$PWD" = "$start" ] || exit 2
+cat <<'LITERAL'
+/e/Oculus/galgame
+cd /mnt/e/game
+LITERAL
+printf '%s' 'print("/cygdrive/e/game")'
+'''
+    assert text(runner._dispatch_tool('bash', {'command': command})) == (
+        '/e/Oculus/galgame\ncd /mnt/e/game\nprint("/cygdrive/e/game")')
+    failed = runner._dispatch_tool('bash', {'command': 'cd /z/GalTransl-missing-directory-8e32'})
+    assert failed['isError'] is True
+    assert failed['structuredContent']['exit_code'] != 0
 
 
 def test_bash_handles_non_ascii_names_and_output(fixture):

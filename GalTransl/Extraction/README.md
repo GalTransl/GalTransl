@@ -15,6 +15,8 @@
 - `edit(path, edits)`：一次多个替换，全部匹配原始文件；唯一性、重叠、缺失和无变化均校验，整批成功才保存。兼容 Pi 的单对象/JSON 字符串 edits 与旧 camelCase 单替换参数。精确优先，支持 NFKC、引号、连字符、特殊空格和行尾空白模糊匹配；仅重写涉及的行，保留其他行。保留 BOM 和原换行风格，返回编号 diff、四行上下文的 unified patch、`firstChangedLine`。diff 使用与 Pi 相同的 Myers 路径选择。
 - `write(path, content)`：创建父目录，UTF-8 创建或整文件覆盖；无旧的字符数或 2 MiB 限制。与 edit 共用按文件串行的修改队列。
 
+Windows 的 `bash` 工具也支持 `cd /e/x`、`cd /mnt/e/x`、`cd /cygdrive/e/x`，转换为 `E:/x`；盘符不区分大小写，支持盘符根目录、带引号或变量展开的路径，以及 `--`、`-L`、`-P`。转换由当前 shell 的 `cd` 函数处理，不改写命令正文或 heredoc。其他命令的路径参数仍使用 `E:/x`。
+
 集成边界：保留目录/链接限制、审批、原子替换及审批期间外部修改检测；原生参数校验允许额外字段，其余自定义工具维持严格校验。UI/审批参数仅显示有限预览，执行仍使用完整参数；超过 50 KiB 的 diff/patch 预览有明确提示，完整结果在 `fullDiffPath` JSON 中。图片处理使用 Pillow，缩放编码不保证与 Pi 的 Photon 逐字节相同；损坏或过大的图片返回明确的省略说明。未新增 grep/find/ls/powershell，也未改用 Pi 会话框架。旧集成证据与三组 Pi 原生编辑实测保留在 `tests/fixtures/extraction_legacy_tools.json`，测试与运行均无需 Pi SDK/Node。
 
 行差分移植的第三方许可随 [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt) 保留，并由现有 `--collect-data GalTransl` 发布配置收集。

@@ -48,6 +48,34 @@ def windows_shell_path(raw):
     return f"{match.group(1).upper()}:\\{(match.group(2) or '').replace('/', chr(92))}"
 
 
+def windows_shell_command(command):
+    # Convert cd's expanded argument instead of rewriting script literals or heredocs.
+    return '''cd() {
+    local path option tail drive
+    case "$#" in
+        1) path="$1" ;;
+        2) case "$1" in
+            --|-L|-P) option="$1"; path="$2" ;;
+            *) command cd "$@"; return ;;
+        esac ;;
+        *) command cd "$@"; return ;;
+    esac
+    case "$path" in
+        /mnt/[a-zA-Z]|/mnt/[a-zA-Z]/*) path="/${path#/mnt/}" ;;
+        /cygdrive/[a-zA-Z]|/cygdrive/[a-zA-Z]/*) path="/${path#/cygdrive/}" ;;
+    esac
+    case "$path" in
+        /[a-zA-Z]|/[a-zA-Z]/*)
+            tail="${path#/}"
+            drive="${tail%%/*}"
+            path="$drive:/"
+            case "$tail" in */*) path="$path${tail#*/}" ;; esac ;;
+    esac
+    command cd ${option:+"$option"} "$path"
+}
+''' + command
+
+
 def native_path(raw):
     if not isinstance(raw, str):
         raise AgentToolError("A file path is required")
@@ -249,5 +277,6 @@ class ExtractionTools:
         executable, prefix = bash_config()
         self.require_permission("bash", args)
         stdin_command = prefix[-1] == "-s"
-        return self.commands.execute(executable, prefix if stdin_command else [*prefix, args["command"]],
-                                     call_id, timeout, args["command"] if stdin_command else None, native=True)
+        command = windows_shell_command(args["command"]) if os.name == "nt" else args["command"]
+        return self.commands.execute(executable, prefix if stdin_command else [*prefix, command],
+                                     call_id, timeout, command if stdin_command else None, native=True)
