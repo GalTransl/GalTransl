@@ -158,7 +158,7 @@ def check_extraction_runtime(base_url: str, directory: Path, env: dict[str, str]
         runtime = json.load(response)
     if not runtime.get("ready") or runtime.get("agent_engine") != "galtransl" or runtime.get("builtin_python", {}).get("source") != "bundled":
         raise RuntimeError(f"Packaged extraction runtime is not ready: {runtime.get('problems')}")
-    skill = Path(runtime["settings"]["skill_dir"])
+    skill = Path(runtime["settings"]["skill_dir"]) / "galtransl-galgamereverse-skill"
     if not (skill / "SKILL.md").is_file() or not (skill.parent / "sources.json").is_file():
         raise RuntimeError("Packaged extraction Skill or source manifest is missing")
     # Deliberately remove all PATH interpreters. These checks must use only

@@ -13,7 +13,7 @@ from GalTransl.Agent.context import _profile_context_window
 from GalTransl.Reasoning import build_reasoning_kwargs
 from GalTransl.Agent.images import save_images, user_message, user_event
 from GalTransl.Agent.models import PendingMessage
-from GalTransl.RuntimePaths import get_skills_dir, get_user_data_dir, get_legacy_user_data_dir
+from GalTransl.RuntimePaths import get_user_data_dir, get_legacy_user_data_dir
 from GalTransl.Agent.permissions import AUTO_QUIET_MODE, PERMISSION_MODES, _permission_needed, _tool_risk
 
 from .environment import environment, save_settings, workspace_path
@@ -54,13 +54,14 @@ class ExtractionRuntime:
         self.recovered: set[str] = set()
         self.live: dict[str, dict[str, dict[str, Any]]] = {}
         self.queued: dict[str, deque[PendingMessage]] = {}
-    def update_skill(self) -> None:
+
+    def update_skill(self, skills: Path) -> None:
         with self.lock:
             if self.runs:
                 raise ValueError("Wait for running extraction turns to finish before updating Skill")
-            directory = install_skill(get_skills_dir())
-            save_settings({"skill_dir": str(directory)})
-            for root in [get_skills_dir(), get_user_data_dir() / "skills", get_user_data_dir() / "extraction" / "skills",
+            directory = install_skill(skills)
+            save_settings({"skill_dir": str(directory.parent)})
+            for root in [directory.parent, get_user_data_dir() / "skills", get_user_data_dir() / "extraction" / "skills",
                          get_legacy_user_data_dir() / "extraction" / "skills"]:
                 prune_skill_versions(root, [])
 

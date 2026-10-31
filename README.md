@@ -27,7 +27,7 @@
 
 桌面端新增独立的 **提取 Agent**：复用翻译 Agent 的推理、流式会话、审批与上下文压缩框架，使用配套提取 Skill 和本地 Python/shell 识别游戏引擎、提取文本及验证回填，提取结果可直接打开为翻译项目。发布包复用现有 Python 后端，不再包含 Node.js 或 Pi SDK；内置完整 Skill，Agent 也可显式尝试本机 Python；[配置与开发说明](GalTransl/Extraction/README.md)。
 
-内置 Skill 由程序和构建脚本从 GitHub 上游 `main` 分支下载，无需 Git 子模块；源码直接使用普通 `git clone`。开发启动只准备本地资源，不下载或更新 Skill；缺少 Skill 时可在提取 Agent 的「运行环境」中下载，进入页面后会自动检查更新，页面打开期间每小时复查。下载完成后自动启用，直接保存在程序目录 `skills/galtransl-galgamereverse-skill/`；更新校验成功后替换同一目录，不累积哈希版本，失败时保留原文件。正在运行的提取回合结束后才能更新。用户对话和配置仍存放在 `~/.galtransl`。新增 skill 放入程序目录 `skills/<name>/SKILL.md`，填写名称与说明后即可自动注册、按需加载，也可用 `/skill:<name>` 显式调用。打包和 CI 运行 `python scripts/prepare_extraction.py` 拉取最新 Skill，并包含完整资源；`--local` 使用现有本地文件。
+内置 Skill 由程序和构建脚本从 GitHub 上游 `main` 分支下载，无需 Git 子模块；源码直接使用普通 `git clone`。开发启动只准备本地资源，不下载或更新 Skill；缺少 Skill 时可在提取 Agent 的「运行环境」中下载，进入页面后会自动检查更新，页面打开期间每小时复查。下载完成后自动启用，默认保存在程序目录 `skills/galtransl-galgamereverse-skill/`；更新校验成功后替换同一目录，不累积哈希版本，失败时保留原文件。正在运行的提取回合结束后才能更新。用户对话和配置仍存放在 `~/.galtransl`。新增 skill 放入程序目录 `skills/<name>/SKILL.md`，填写名称与说明后即可自动注册、按需加载，也可用 `/skill:<name>` 显式调用。打包和 CI 运行 `python scripts/prepare_extraction.py` 拉取最新 Skill，并包含完整资源；`--local` 使用现有本地文件。
 
 
 内置可选的 **billion-context Python 核心版**：在翻译或提取 Agent **左下角的配置入口**分别开启，为翻译主 Agent 和提取 Agent 提供分层上下文压缩、原文归档、检索与恢复；两个开关独立保存，默认关闭，下一回合生效，无需 Node.js 或额外运行依赖。GalTransl 使用了 [billion-context](https://github.com/ranxianglei/billion-context) 和 [acp-kernel](https://github.com/ranxianglei/acp-kernel) 的设计与压缩规则；[移植范围、使用与许可说明](plugins/billion-context/README.md)。

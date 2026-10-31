@@ -82,7 +82,7 @@ def test_registered_extra_skills_are_readable_and_importable_with_bundled_python
     skills, _ = discover_skills([tmp_path / 'skills'])
     available = {'skills': skills, 'builtin_python': builtin_python(),
                  'python_runner_script': python_runner_script(), 'system_pythons': []}
-    tools = ExtractionTools(workspace, game, primary.parent, available, threading.Event(), lambda event: None)
+    tools = ExtractionTools(workspace, game, primary.parent.parent, available, threading.Event(), lambda event: None)
     assert tools.read_path(str(extra)) == extra
     with pytest.raises(AgentToolError, match='outside'):
         tools.write_path(str(extra))

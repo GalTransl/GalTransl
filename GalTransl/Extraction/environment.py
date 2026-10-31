@@ -10,7 +10,7 @@ from typing import Any
 
 from GalTransl.RuntimePaths import get_resource_root, get_user_data_dir, get_skills_dir
 
-from .skill import skill_status
+from .skill import SKILL_NAME, skill_status
 from .python_discovery import discover_pythons, PythonInterpreter
 from .skills import discover_skills
 
@@ -37,7 +37,7 @@ def atomic_json(path: Path, value: Any) -> None:
 def load_settings() -> dict[str, str]:
     root = get_resource_root()
     defaults = {
-        "skill_dir": str(get_skills_dir() / "galtransl-galgamereverse-skill"),
+        "skill_dir": str(get_skills_dir()),
         "python_path": "",  # Optional system Python; run_python defaults to bundled.
     }
     path = data_root() / "settings.json"
@@ -52,7 +52,7 @@ def load_settings() -> dict[str, str]:
             if defaults["python_path"] in {"python", "python3", "py"}:
                 defaults["python_path"] = ""
             if Path(defaults["skill_dir"]) == root.parent / "GalTransl-GalGameReverse-Skill":
-                defaults["skill_dir"] = str(get_skills_dir() / "galtransl-galgamereverse-skill")
+                defaults["skill_dir"] = str(get_skills_dir())
     return defaults
 
 
@@ -65,10 +65,10 @@ def save_settings(payload: dict[str, Any]) -> dict[str, str]:
                 raise ValueError(f"{key} is required")
             if key == "skill_dir":
                 if not value:
-                    value = str(get_skills_dir() / "galtransl-galgamereverse-skill")
+                    value = str(get_skills_dir())
                 value = str(Path(value).expanduser().resolve(strict=True))
-                if not (Path(value) / "SKILL.md").is_file():
-                    raise ValueError("SKILL.md was not found in the skill directory")
+                if not Path(value).is_dir():
+                    raise ValueError("Skills directory does not exist")
             elif value:
                 resolved = shutil.which(value)
                 if not resolved or not Path(resolved).is_file():
@@ -99,7 +99,7 @@ def system_pythons(configured: str = "") -> list[PythonInterpreter]:
 
 def environment() -> dict[str, Any]:
     settings = load_settings()
-    skills, diagnostics = discover_skills([Path(settings["skill_dir"]), get_skills_dir()])
+    skills, diagnostics = discover_skills([Path(settings["skill_dir"])])
     problems = []
     if sys.version_info < (3, 11):
         problems.append("python_version")
@@ -108,7 +108,7 @@ def environment() -> dict[str, Any]:
     if not Path(python_runner_script()).is_file():
         problems.append("python_runner_missing")
     return {"settings": settings, "python_version": f"Python {sys.version.split()[0]}",
-            "skill": skill_status(Path(settings["skill_dir"])),
+            "skill": skill_status(Path(settings["skill_dir"]) / SKILL_NAME),
             "skills": skills, "skill_diagnostics": diagnostics,
             "agent_engine": "galtransl", "builtin_python": builtin_python(),
             "python_runner_script": python_runner_script(),

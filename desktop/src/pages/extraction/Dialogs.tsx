@@ -89,7 +89,7 @@ export function EnvironmentDialog({ initial, refresh, close, saved }: {
   const installSkill = async () => {
     setAction('installing'); setError('');
     try {
-      const result = await extractionApi<Environment>('skill-install', {}, {});
+      const result = await extractionApi<Environment>('skill-install', {}, { skill_dir: settings.skill_dir });
       setRuntime(result);
       setSettings({ ...settings, skill_dir: result.settings.skill_dir });
       const skill = { ...result.skill, latest_commit: result.skill.current_commit, update_available: false };

@@ -67,7 +67,7 @@ def test_bundled_defaults_and_legacy_migration(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "get_skills_dir", lambda: tmp_path / "data" / "skills")
     settings = module.load_settings()
     assert settings == {"python_path": "",
-                        "skill_dir": str(tmp_path / "data" / "skills" / "galtransl-galgamereverse-skill")}
+                        "skill_dir": str(tmp_path / "data" / "skills")}
     module.atomic_json(tmp_path / "data/settings.json", {"node_path": "node", "python_path": "python",
         "skill_dir": str(root.parent / "GalTransl-GalGameReverse-Skill")})
     assert module.load_settings() == settings

@@ -113,26 +113,56 @@ def test_environment_only_inspects_local_skill(skill_server):
     url, original, _, upstream = skill_server
     status, result = api(url, "environment")
     assert status == 200 and result["ready"]
-    assert result["settings"]["skill_dir"] == str(original)
+    assert result["settings"]["skill_dir"] == str(original.parent)
     assert result["skill"] == {"installed": True, "current_commit": "a" * 40,
                                "latest_commit": "", "update_available": False}
     assert upstream["calls"] == []
+
+
+def test_selected_skills_root_is_saved_and_scanned_without_bundled_fallback(skill_server, tmp_path):
+    url, _, _, upstream = skill_server
+    selected = tmp_path / "selected-skills"
+    selected.mkdir()
+    status, result = api(url, "settings", {"skill_dir": str(selected)})
+    assert status == 200 and result["settings"]["skill_dir"] == str(selected)
+    assert not result["ready"] and not result["skill"]["installed"]
+    for name in ["first", "nested/second"]:
+        directory = selected / name
+        directory.mkdir(parents=True)
+        (directory / "SKILL.md").write_text(f"---\nname: {directory.name}\ndescription: Selected Skill\n---\n")
+    result = api(url, "environment")[1]
+    assert result["ready"] and not result["skill"]["installed"]
+    assert [item["name"] for item in result["skills"]] == ["first", "second"]
+    assert upstream["calls"] == []
+
+
+def test_download_installs_into_the_unsaved_selected_skills_root(skill_server, tmp_path):
+    url, original, _, _ = skill_server
+    selected = tmp_path / "selected-skills"
+    selected.mkdir()
+    status, result = api(url, "skill-install", {"skill_dir": str(selected)})
+    assert status == 200 and result["ready"]
+    assert result["settings"]["skill_dir"] == str(selected)
+    assert result["skill"]["installed"] and result["skill"]["current_commit"] == "b" * 40
+    assert [item["base_dir"] for item in result["skills"]] == [str(selected / SKILL_NAME)]
+    assert (original / "SKILL.md").read_text() == FRONTMATTER + "Original Skill"
 
 
 @pytest.mark.parametrize("installed,current", [(True, "a" * 40), (True, "b" * 40), (False, "")])
 def test_update_check_does_not_download_or_change_selection(skill_server, tmp_path, installed, current):
     url, original, _, upstream = skill_server
     selected = tmp_path / "custom"
-    selected.mkdir()
+    package = selected / SKILL_NAME
+    package.mkdir(parents=True)
     if installed:
-        (selected / "SKILL.md").touch()
-        (selected / RECEIPT).write_text(json.dumps({"commit": current}))
+        (package / "SKILL.md").touch()
+        (package / RECEIPT).write_text(json.dumps({"commit": current}))
     status, result = api(url, "skill-check", {"skill_dir": str(selected)})
     assert status == 200
     assert result == {"installed": installed, "current_commit": current, "latest_commit": "b" * 40,
                       "update_available": current != "b" * 40}
     assert upstream["calls"] == ["/upstream/latest"]
-    assert api(url, "environment")[1]["settings"]["skill_dir"] == str(original)
+    assert api(url, "environment")[1]["settings"]["skill_dir"] == str(original.parent)
 
 
 def test_install_and_update_enable_downloads_and_remove_previous_versions(skill_server):
@@ -140,7 +170,7 @@ def test_install_and_update_enable_downloads_and_remove_previous_versions(skill_
     status, result = api(url, "skill-install", {})
     downloaded = data / "skills" / SKILL_NAME
     assert status == 200 and result["ready"]
-    assert result["settings"]["skill_dir"] == str(downloaded)
+    assert result["settings"]["skill_dir"] == str(downloaded.parent)
     assert result["skill"]["current_commit"] == "b" * 40
     assert (downloaded / "python/示例.py").read_text() == "print('synthetic')"
     assert json.loads((downloaded / RECEIPT).read_text())["commit"] == "b" * 40
@@ -150,10 +180,10 @@ def test_install_and_update_enable_downloads_and_remove_previous_versions(skill_
     assert api(url, "skill-check", {})[1]["update_available"]
     status, result = api(url, "skill-install", {})
     assert status == 200 and result["skill"]["current_commit"] == "c" * 40
-    assert result["settings"]["skill_dir"] == str(downloaded)
+    assert result["settings"]["skill_dir"] == str(downloaded.parent)
     assert not (downloaded / "python/示例.py").exists()
     assert set((data / "skills").iterdir()) == {original, original.parent / "sources.json"}
-    assert (Path(result["settings"]["skill_dir"]) / "SKILL.md").read_text() == FRONTMATTER + "Updated Skill"
+    assert (Path(result["settings"]["skill_dir"]) / SKILL_NAME / "SKILL.md").read_text() == FRONTMATTER + "Updated Skill"
     upstream["calls"].clear()
     assert api(url, "skill-install", {})[0] == 200
     assert upstream["calls"] == ["/upstream/latest"]
@@ -172,7 +202,7 @@ def test_install_removes_legacy_home_hashes_and_keeps_custom_files(skill_server)
     custom.mkdir()
     (custom / "SKILL.md").write_text("Custom Skill")
     status, result = api(url, "skill-install", {})
-    assert status == 200 and result["settings"]["skill_dir"] == str(original)
+    assert status == 200 and result["settings"]["skill_dir"] == str(original.parent)
     assert not old_root.exists()
     assert (custom / "SKILL.md").read_text() == "Custom Skill"
 
@@ -184,7 +214,7 @@ def test_failed_update_keeps_the_previous_downloaded_version(skill_server):
     upstream.update(commit="c" * 40, status=503)
     assert api(url, "skill-install", {})[0] == 502
     assert downloaded.is_dir()
-    assert api(url, "environment")[1]["settings"]["skill_dir"] == str(downloaded)
+    assert api(url, "environment")[1]["settings"]["skill_dir"] == str(downloaded.parent)
     assert (original / "SKILL.md").is_file()
 
 
@@ -233,7 +263,7 @@ def test_update_waits_for_running_extraction_turns(skill_server, tmp_path):
     assert json.loads((previous / RECEIPT).read_text())["commit"] == "b" * 40
     runtime.runs.pop(session["id"])
     status, result = api(url, "skill-install", {})
-    assert status == 200 and result["settings"]["skill_dir"] == str(previous)
+    assert status == 200 and result["settings"]["skill_dir"] == str(previous.parent)
     assert json.loads((previous / RECEIPT).read_text())["commit"] == "c" * 40
 
 
@@ -243,7 +273,7 @@ def test_network_failures_report_errors_and_keep_the_active_skill(skill_server, 
     upstream["status"] = 503
     status, result = api(url, action, {})
     assert status == 502 and "Could not download Skill" in result["error"]
-    assert api(url, "environment")[1]["settings"]["skill_dir"] == str(original)
+    assert api(url, "environment")[1]["settings"]["skill_dir"] == str(original.parent)
 
 
 @pytest.mark.parametrize("content", [b"not a zip", archive({"upstream/SKILL.md": "missing license"}),
@@ -255,7 +285,7 @@ def test_invalid_archives_do_not_replace_the_active_skill(skill_server, content)
     upstream["archive"] = content
     status, result = api(url, "skill-install", {})
     assert status == 502 and result["error"]
-    assert api(url, "environment")[1]["settings"]["skill_dir"] == str(original)
+    assert api(url, "environment")[1]["settings"]["skill_dir"] == str(original.parent)
     assert (original / "SKILL.md").read_text() == FRONTMATTER + "Original Skill"
     assert set((data / "skills").iterdir()) == {original, original.parent / "sources.json"}
 
@@ -266,4 +296,4 @@ def test_invalid_upstream_versions_are_rejected(skill_server, commit):
     upstream["commit"] = commit
     status, result = api(url, "skill-install", {})
     assert status == 502 and "invalid Skill version" in result["error"]
-    assert api(url, "environment")[1]["settings"]["skill_dir"] == str(original)
+    assert api(url, "environment")[1]["settings"]["skill_dir"] == str(original.parent)

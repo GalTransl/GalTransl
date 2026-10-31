@@ -6,7 +6,7 @@ import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
 
 const initial = {
   ready: false, problems: ['skill_missing'], python_version: 'Python 3.11',
-  settings: { skill_dir: '/app/skills/missing', python_path: '' },
+  settings: { skill_dir: '/app/skills', python_path: '' },
   skill: { installed: false, current_commit: '', latest_commit: '', update_available: false },
   system_pythons: [
     { executable: '/usr/bin/python3', version: '3.11.9', architecture: 64, args: [] },
@@ -14,7 +14,7 @@ const initial = {
   ],
 };
 const installed = {
-  ...initial, ready: true, problems: [], settings: { skill_dir: '/data/skills/version', python_path: '' },
+  ...initial, ready: true, problems: [], settings: { skill_dir: '/custom/skills', python_path: '' },
   skill: { ...initial.skill, installed: true, current_commit: 'b'.repeat(40) },
 };
 const enabled = { ...installed, skill: { ...installed.skill, latest_commit: installed.skill.current_commit } };
@@ -67,6 +67,7 @@ test('runtime skill actions are explicit and downloads activate without losing p
   assert.equal(dialog.saved[0].skill.update_available, true);
   assert.equal(dialog.saved[0].settings.python_path, '');
   await act(async () => dialog.button('skillDownload').props.onClick());
+  assert.equal(dialog.calls.at(-1).body.skill_dir, initial.settings.skill_dir);
   assert.deepEqual(JSON.parse(JSON.stringify(dialog.saved.at(-1))), enabled);
   assert.equal(dialog.closed(), false);
   assert.equal(dialog.renderer.root.findByType('form').findAllByType('input')[0].props.value, installed.settings.skill_dir);
