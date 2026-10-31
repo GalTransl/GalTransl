@@ -281,6 +281,25 @@ def test_live_snapshot_restores_partial_output(extraction):
     assert runtime.snapshot(sid)["live_events"] == []
 
 
+@pytest.mark.parametrize("outputs, replace, expected", [
+    (("第一行\n", "第一行\n第二行\n", "第一行\n第二行\n第三行\n"), True, "第一行\n第二行\n第三行\n"),
+    (("第一行\n", "第二行\n", "第三行\n"), False, "第一行\n第二行\n第三行\n"),
+    (("旧输出", "新输出", ""), True, ""),
+], ids=["replace-snapshots", "append-deltas", "clear-snapshot"])
+def test_live_snapshot_restores_tool_output(extraction, outputs, replace, expected):
+    store, session, runtime = extraction
+    sid = session["id"]
+    runtime._emit(sid, {"type": "tool_start", "toolCallId": "bash", "toolName": "bash"})
+    for text in outputs:
+        runtime._emit(sid, {"type": "tool_output", "toolCallId": "bash", "text": text, "replace": replace})
+    snapshot = runtime.snapshot(sid)
+    assert snapshot["live_events"] == [{"type": "tool_output", "toolCallId": "bash",
+                                        "text": expected, "replace": replace, "seq": 4}]
+    assert all(event["type"] != "tool_output" for event in store.history(sid)["events"])
+    runtime._emit(sid, {"type": "tool_end", "toolCallId": "bash", "text": "finished"})
+    assert runtime.snapshot(sid)["live_events"] == []
+
+
 @pytest.mark.parametrize("limit", [1, 2, 99, 100, 200])
 def test_history_counts_the_truncated_turn_without_loading_its_output(extraction, limit):
     store, session, runtime = extraction

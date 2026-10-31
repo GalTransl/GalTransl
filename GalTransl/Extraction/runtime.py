@@ -90,7 +90,7 @@ class ExtractionRuntime:
             elif kind == "tool_output":
                 key = kind + str(record.get("toolCallId", ""))
                 previous = live.get(key, {})
-                live[key] = {**record, "text": (previous.get("text", "") + record.get("text", ""))[-16000:]}
+                live[key] = {**record, "text": (record.get("text", "") if record.get("replace") else previous.get("text", "") + record.get("text", ""))[-16000:]}
             elif kind == "tool_end":
                 live.pop("tool_output" + str(record.get("toolCallId", "")), None)
             # Model history is persisted by the shared AgentRunner. This journal is a UI projection.
