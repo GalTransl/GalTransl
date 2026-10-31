@@ -263,18 +263,6 @@ test('GenDic submission and agent request contexts use the independent defaults'
   assert.throws(() => api.getAgentTranslatorBackendContext('project'));
 });
 
-test('plugin settings can save and re-extract within the same project', async () => {
-  const { api, requests, requestOptions } = loadApi({ native: false });
-  const config = { plugin: { filePlugin: 'file_msgtool_script', file_msgtool_script: { source_encoding: 'utf8' } } };
-  await api.updateProjectConfig('project', { config, config_file_name: 'extract.yaml' });
-  await api.reextractMsgtoolInput('project', 'extract.yaml');
-  assert.equal(requestOptions[0].method, 'PUT');
-  assert.deepEqual(JSON.parse(requestOptions[0].body), { config, config_file_name: 'extract.yaml' });
-  assert.equal(new URL(requests[1]).pathname, '/api/projects/project/plugins/file_msgtool_script/reextract');
-  assert.equal(requestOptions[1].method, 'POST');
-  assert.deepEqual(JSON.parse(requestOptions[1].body), { config_file_name: 'extract.yaml' });
-});
-
 test('packaged startup cannot fall back to an unrelated backend on 12333', async () => {
   const { api, requests } = loadApi();
   assert.equal(api.getBackendBaseUrl(), '');

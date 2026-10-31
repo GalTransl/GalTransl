@@ -140,7 +140,7 @@ test('localized boolean options retain switches and three-state fields retain se
   assert.doesNotMatch(render('', ['', ...field.options]), /role="switch"/);
 });
 
-test('builtin plugin options preserve numeric, empty and custom values; unknown metadata falls back', async () => {
+test('builtin plugin options preserve numeric and custom values; unknown metadata falls back', async () => {
   const { core, load } = setup();
   const { localizePlugin } = load(src('i18n/plugins.ts'));
   const plugin = { name: 'file_subtitle_srt_lrc_vtt', display_name: 'raw', description: 'raw', settings: { '上下双语1左右双语2': 1 }, settings_schema: {
@@ -158,9 +158,6 @@ test('builtin plugin options preserve numeric, empty and custom values; unknown 
   assert.equal(result.settings, plugin.settings);
   assert.equal(result.settings_schema.future, plugin.settings_schema.future);
   assert.equal(JSON.stringify(plugin.settings), JSON.stringify(result.settings));
-  const script = localizePlugin({ name: 'file_msgtool_script', display_name: 'raw', settings: {}, settings_schema: { script_type: { options: [{ value: '', label: 'raw' }] } } });
-  assert.equal(script.settings_schema.script_type.options[0].value, '');
-  assert.equal(script.settings_schema.script_type.options[0].label, 'Auto-detect (recommended)');
   const thirdParty = { ...plugin, name: 'custom.plugin-v2' };
   assert.equal(localizePlugin(thirdParty), thirdParty);
 });

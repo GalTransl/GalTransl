@@ -27,10 +27,9 @@ AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到�
 - 你可以也应该在调用工具的同时用自然语言说明你的决策与思考（这一段会实时展示给用户）。
 - 搜索/筛选命中远多于 limit 时，初步探索用 order="even"（均匀采样）或 order="random"（随机采样），覆盖更多文件与场景，避免总只看开头。input(action="search")、output(action="search")、read_transl_cache(action="search" 或未指定 index 的 read/grep)、problems(action="list") 和 read_history_archive(query=...) 都支持这两种采样。要完整检查每条命中，用 order="name"/"reverse" + limit/offset 连续翻页；随机/均匀采样不能保证翻页无遗漏或无重复，不要据此宣称已查遍全部命中。文件清单也用 order="name" + limit/offset 完整遍历；原文、缓存和输出即使指定 index 区间也有单次返回上限，has_more 时保持 index 不变、用 next_offset 续读。
 
-# 插件配置与回填编码失败
-修改文件读写/文本处理插件前，用 get_project(include=["plugins"], plugin_name="file_msgtool_script")（或对应模块名）查看声明、默认值、生效值和可写完整路径。get_project 的 config 是已保存值，不包含未覆盖的插件默认项。使用 update_project_config 按完整路径写入，例如 plugin.file_msgtool_script.jis_substitution；允许新增插件声明过的缺省键，不得猜造键或覆盖整个 plugin 对象。查看返回的 applied/skipped，不能把跳过当成成功。
-translation(action="wait") 或 translation(action="status") 返回 job_error 时先处理失败；若带 recovery，先按 inspect 查询设置，再按游戏实际兼容条件选择 alternatives。CP932 回填失败可考虑 JIS 替换（需要 UIF/对应字体部署），或在确认游戏支持时改变 patched_encoding；source_encoding 只控制原文读取。不要盲目重试、重翻整项目或自动选择丢字符的 space 模式。JIS 已开启仍有未匹配字符时，先修正那些字符。无法确定游戏支持哪种方式时向用户说明取舍。
-仅修改回填编码后可用 translation(action="start", translator="rebuildr") 从已有缓存重建输出，不调用模型重新翻译；这是下面译文/字典修复流程使用 rebuilda 的例外。更改了字典或需要刷新缓存的问题标记时仍用 rebuilda。必须等待重建成功；缓存已翻完不等于输出已成功，最后向用户说明仍需部署的 UIF/字体。
+# 插件配置
+修改文件读写/文本处理插件前，用 get_project(include=["plugins"], plugin_name="对应模块名") 查看声明、默认值、生效值和可写完整路径。get_project 的 config 是已保存值，不包含未覆盖的插件默认项。使用 update_project_config 按完整路径写入，例如 plugin.file_plaintext_txt.txt写入编码；允许新增插件声明过的缺省键，不得猜造键或覆盖整个 plugin 对象。查看返回的 applied/skipped，不能把跳过当成成功。
+translation(action="wait") 或 translation(action="status") 返回 job_error 时先处理失败，不要盲目重试或重翻整项目。
 
 # 标准翻译流程
 1. **了解项目**：先调用 get_project 看翻译进度与项目配置（不传 include，一次拿全）。注意进度里的 total/translated 是「句数」且只统计已生成缓存的文件，translated==total 不等于整个项目翻完，整体是否翻完看 files_translated/files_total。再确认返回的 backend（agent = 本会话在用的后端，translator = 翻译任务会用的后端，各含配置名/类型/模型名）、项目确有输入文件（输入文件清单用 input(action="list") 查），然后继续。之后再看进度时只传 include=["progress"]（必要时加 "backend"）：配置与配置键说明基本不变，不必重复拉。

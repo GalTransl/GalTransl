@@ -718,21 +718,6 @@ export function fetchCacheDictionaryMatches(
   );
 }
 
-export interface InputReextractResult {
-  refreshed: { filename: string; entries: number }[];
-  errors: { filename: string; error: string }[];
-  skipped: number;
-  total_entries: number;
-}
-
-export async function reextractMsgtoolInput(projectId: string, configFileName: string) {
-  return apiRequest<InputReextractResult>(`/api/projects/${projectId}/plugins/file_msgtool_script/reextract`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ config_file_name: configFileName }),
-  });
-}
-
 export async function deleteCacheEntry(projectId: string, filename: string, index: number) {
   return apiRequest<{ success: boolean; filename: string; deleted_index: number }>(
     `/api/projects/${projectId}/cache/delete-entry`,

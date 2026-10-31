@@ -108,26 +108,3 @@ def _tool_get_plugin_settings(runner, args):
     return {"plugins": result, "note": "value 是项目覆盖后的生效值；overridden=false 使用声明的旧配置值或插件默认值。"
             "可用 update_project_config 按完整 key 新增已声明的非敏感设置，保留其他设置。"
             "设置插件参数不会自动选用该插件；文件插件选择见 plugin.filePlugin（auto 可按文件识别）。"}
-
-
-def encoding_recovery(error):
-    if not any(token in error for token in ("脚本回填编码失败", "回填前编码检查未通过", "Failed to encode Shift-JIS", "could not be encoded in Shift-JIS", "JIS 替换字典未覆盖")):
-        return None
-    return {
-        "inspect": {"tool": "get_plugin_settings", "arguments": {"plugin_name": "file_msgtool_script"}},
-        "guidance": "先检查当前设置与游戏兼容性，不要盲目重试或重新翻译。游戏必须使用 CP932 时可开启 JIS 替换，"
-        "并需 UIF 与生成的 uif_config.json 或对应替换字体；已开启 JIS 时先修正未匹配字符。"
-        "仅在游戏支持时改用其他输出编码；原文编码不会改变回填编码。需要改输出编码时关闭 JIS，"
-        "并检查 extra_args 的 -p/-P 是否覆盖该值。不要为消除错误而自动把未匹配字符替换为空格。",
-        "alternatives": [
-            {"condition": "游戏需要 CP932，且能够部署 UIF 或对应字体",
-             "tool": "update_project_config", "arguments": {"action": "set", "updates": [
-                 {"key": "plugin.file_msgtool_script.jis_substitution", "value": True}]}},
-            {"condition": "已确认游戏支持 UTF-8；也可按实际支持情况选择 gb2312",
-             "tool": "update_project_config", "arguments": {"action": "set", "updates": [
-                 {"key": "plugin.file_msgtool_script.jis_substitution", "value": False},
-                 {"key": "plugin.file_msgtool_script.patched_encoding", "value": "utf8"}]}},
-        ],
-        "rebuild": {"tool": "translation", "arguments": {"action": "start", "translator": "rebuildr"}},
-        "verify": '确认配置更新成功再重建；translation(action="wait", job_id=...) 或 translation(action="status") 确认无编码错误，不能只看缓存已翻译进度。',
-    }

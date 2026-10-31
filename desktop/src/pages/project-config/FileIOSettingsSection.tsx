@@ -1,7 +1,6 @@
 import { localizePlugin } from "../../i18n/plugins";
 import { t as translate, useUiLanguage } from "../../i18n";
 import { Panel } from '../../components/Panel';
-import type { ReactNode } from 'react';
 import { CustomSelect } from '../../components/CustomSelect';
 import { PluginSettingsEditor } from '../../components/PluginSettingsEditor';
 import { ConfigFieldRow, ConfigFieldGroup, type ConfigFieldDef } from './ConfigFieldRow';
@@ -38,7 +37,6 @@ interface FileIOSettingsSectionProps {
   onFilePluginChange: (value: string) => void;
   onPluginSettingChange: (pluginName: string, key: string, value: unknown) => void;
   onFieldChange: (path: string, value: string) => void;
-  reextractAction?: ReactNode;
 }
 
 export function FileIOSettingsSection({
@@ -47,7 +45,6 @@ export function FileIOSettingsSection({
   onFilePluginChange,
   onPluginSettingChange,
   onFieldChange,
-  reextractAction,
 }: FileIOSettingsSectionProps) {
   useUiLanguage();
   const commonConfig = (config?.common as Record<string, unknown>) || {};
@@ -91,8 +88,6 @@ export function FileIOSettingsSection({
                 plugin={selectedFilePlugin}
                 overrides={((config?.plugin as Record<string, unknown>)?.[selectedFilePlugin.name] as Record<string, unknown>) || {}}
                 onChange={onPluginSettingChange}
-                afterField={selectedFilePlugin.name.replace('(project_dir)', '') === 'file_msgtool_script'
-                  ? { key: 'source_encoding', content: reextractAction } : undefined}
               />
             );
           })()}

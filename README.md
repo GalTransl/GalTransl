@@ -537,7 +537,6 @@ Linux CI 和正式发布只生成便携包；需要本地测试安装包时，�
 
 正式发布包应在 Ubuntu 22.04 或同等 glibc 基线的环境中构建。应用设置写入 `$XDG_CONFIG_HOME/GalTransl`，用户通用字典写入 `$XDG_DATA_HOME/GalTransl/Dict`；通用翻译规范和 Agent 会话分别写入 `$XDG_DATA_HOME/GalTransl/translation_guidelines` 与 `$XDG_DATA_HOME/GalTransl/agent_sessions`。未设置 XDG 环境变量时使用 `~/.config` 和 `~/.local/share`；安装目录中的字典和规范只作为初始种子。Windows 继续使用程序目录中的配置与字典。
 
-Linux 支持不代表所有外部工具均已移植：例如 msg-tool 插件自带的 `res/msg_tool.exe` 是 Windows 程序，相关脚本格式的提取/回填不能直接在 Linux 上使用。
 
 
 ### macOS 开发与构建

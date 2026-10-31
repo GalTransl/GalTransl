@@ -825,38 +825,6 @@ def _cache_key_for_input_name(input_name: str) -> str:
     return cache_key
 
 
-def _reextract_msgtool_input(project_dir: str, config_file_name: str) -> dict[str, Any]:
-    """按保存的项目配置刷新 msg-tool 提取缓存，不改动翻译缓存或输出。"""
-    from GalTransl.FilePluginDetect import MSGTOOL_SCRIPT, detect_file_plugin
-    from GalTransl.Utils import get_file_list
-
-    plugins = _ProjectFilePlugins(project_dir, config_file_name)
-    if not plugins.auto and plugins.fname.removeprefix("(project_dir)") != MSGTOOL_SCRIPT:
-        raise ValueError("当前文件插件不是 file_msgtool_script，请先选择此插件或自动识别")
-    input_dir = os.path.join(project_dir, INPUT_FOLDERNAME)
-    files = sorted(get_file_list(input_dir)) if os.path.isdir(input_dir) else []
-    refreshed = []
-    errors = []
-    skipped = 0
-    for file_path in files:
-        relative = os.path.relpath(file_path, input_dir).replace(os.sep, "/")
-        if "__MACOSX" in relative:
-            skipped += 1
-            continue
-        name = detect_file_plugin(file_path, plugins._ext_map) if plugins.auto else plugins.fname
-        if not name or name.removeprefix("(project_dir)") != MSGTOOL_SCRIPT:
-            skipped += 1
-            continue
-        try:
-            plugin, name = plugins.get(file_path)
-            entries = _normalize_input_entries(plugin.reload_file(file_path), name)
-            refreshed.append({"filename": relative, "entries": len(entries)})
-        except Exception as exc:
-            errors.append({"filename": relative, "error": str(exc)})
-    return {"refreshed": refreshed, "errors": errors, "skipped": skipped,
-            "total_entries": sum(item["entries"] for item in refreshed)}
-
-
 def _input_name_candidates(cache_filename: str) -> list[str]:
     """缓存文件名反推回可能的输入文件相对路径，按可能性从高到低。
 
@@ -1922,23 +1890,6 @@ def build_handler(registry: JobRegistry):
 
             if sub_path == "/problem-types":
                 self._send_json({"problem_types": _list_problem_types(project_dir)})
-                return
-
-            if sub_path == "/plugins/file_msgtool_script/reextract":
-                if self.command != "POST":
-                    self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
-                    return
-                try:
-                    payload = self._read_json_body()
-                    config_name = str(payload.get("config_file_name") or "config.yaml")
-                    if config_name != os.path.basename(config_name) or config_name in (".", ".."):
-                        raise ValueError("invalid config filename")
-                    result = _reextract_msgtool_input(project_dir, config_name)
-                    self._send_json(result)
-                except ValueError as exc:
-                    self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
-                except Exception as exc:
-                    self._send_json({"error": f"重新提取原文失败：{exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
             if sub_path == "/config":

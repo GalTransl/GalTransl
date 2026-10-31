@@ -415,7 +415,6 @@ python build_linux_x64.py --no-bundles
 
 Build release packages on Ubuntu 22.04 or an equivalent glibc baseline for wider compatibility. Settings are stored under `$XDG_CONFIG_HOME/GalTransl`; editable common dictionaries live under `$XDG_DATA_HOME/GalTransl/Dict`, with bundled dictionaries used only as initial seeds. Editable guidelines and Agent sessions live under `$XDG_DATA_HOME/GalTransl/translation_guidelines` and `$XDG_DATA_HOME/GalTransl/agent_sessions`. XDG roots default to `~/.config` and `~/.local/share`. Windows retains settings and dictionaries in the program directory.
 
-Linux support does not imply that every external tool has been ported. For example, the msg-tool plugin's bundled `res/msg_tool.exe` is a Windows binary; extraction/reinsertion for those script formats cannot run directly on Linux.
 
 ### macOS development and builds
 

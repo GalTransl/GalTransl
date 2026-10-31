@@ -172,7 +172,7 @@ class CacheSourceFallbackHttpTests(unittest.TestCase):
     def test_refresh_calls_plugin_reload_and_reports_extraction_failure(self):
         with patch("GalTransl.server._ProjectFilePlugins") as plugins:
             plugin = Mock()
-            plugins.return_value.get.return_value = (plugin, "file_msgtool_script")
+            plugins.return_value.get.return_value = (plugin, "file_galtransl_json")
             plugin.reload_file.return_value = [{"message": "refreshed", "index": 1}]
             result = self._get("/cache/a.json?refresh_input=1")
             self.assertEqual(result["entries"][0]["pre_src"], "refreshed")

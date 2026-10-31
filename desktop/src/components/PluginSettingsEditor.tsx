@@ -1,7 +1,7 @@
 import { AnimatedDetails } from './AnimatedDetails';
 import { localizePlugin } from "../i18n/plugins";
 import { t as translate, useUiLanguage } from "../i18n";
-import { Fragment, useEffect, useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { PluginInfo, PluginSettingSchema } from '../lib/api';
 import { CustomSelect } from './CustomSelect';
 
@@ -9,11 +9,10 @@ interface PluginSettingsEditorProps {
   plugin: PluginInfo;
   overrides: Record<string, unknown>;
   onChange: (pluginName: string, key: string, value: unknown) => void;
-  afterField?: { key: string; content: ReactNode };
 }
 
 /** Settings 保持运行时默认值，SettingsSchema 仅描述如何展示和编辑。 */
-export function PluginSettingsEditor({ plugin, overrides, onChange, afterField }: PluginSettingsEditorProps) {
+export function PluginSettingsEditor({ plugin, overrides, onChange }: PluginSettingsEditorProps) {
   const uiLanguage = useUiLanguage();
   const settings = plugin.settings || {};
   const keys = Object.keys(settings);
@@ -23,13 +22,10 @@ export function PluginSettingsEditor({ plugin, overrides, onChange, afterField }
   const renderFields = (fields: string[]) => (
     <div className="plugin-settings-panel__fields">
       {fields.map((key) => (
-        <Fragment key={key}>
-          <PluginSettingRow settingKey={key} schema={schema[key] || {}}
-            defaultValue={settings[key]}
-            value={overrides[key] !== undefined ? overrides[key] : settings[key]}
-            onChange={(value) => onChange(plugin.name, key, value)} />
-          {afterField?.key === key && afterField.content}
-        </Fragment>
+        <PluginSettingRow key={key} settingKey={key} schema={schema[key] || {}}
+          defaultValue={settings[key]}
+          value={overrides[key] !== undefined ? overrides[key] : settings[key]}
+          onChange={(value) => onChange(plugin.name, key, value)} />
       ))}
     </div>
   );
@@ -38,7 +34,6 @@ export function PluginSettingsEditor({ plugin, overrides, onChange, afterField }
     <div className="plugin-settings-panel">
       <div className="plugin-settings-panel__title">{translate("plugins:pluginSettingsEditor.pluginSettingsPanel_message_settings", { display_name: localizePlugin(plugin).display_name })}</div>
       {renderFields(common)}
-      {afterField && !keys.includes(afterField.key) && afterField.content}
       {advanced.length > 0 && (
         <AnimatedDetails key={plugin.name} className="plugin-settings-advanced" summary={translate("plugins:pluginSettingsEditor.pluginSettingsAdvanced_message_advancedSettingsItem", { count: advanced.length })}>
           {renderFields(advanced)}
