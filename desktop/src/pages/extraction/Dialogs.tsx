@@ -78,7 +78,11 @@ export function EnvironmentDialog({ initial, refresh, close, saved }: {
   };
   const checkSkill = async () => {
     setAction('checking'); setError('');
-    try { setSkill(await extractionApi<SkillStatus>('skill-check', {}, { skill_dir: settings.skill_dir })); }
+    try {
+      const result = await extractionApi<SkillStatus>('skill-check', {}, { skill_dir: settings.skill_dir });
+      setSkill(result);
+      if (runtime && settings.skill_dir === runtime.settings.skill_dir) saved({ ...runtime, skill: result });
+    }
     catch (error) { setError(error instanceof Error ? error.message : String(error)); }
     finally { setAction(''); }
   };
@@ -88,8 +92,9 @@ export function EnvironmentDialog({ initial, refresh, close, saved }: {
       const result = await extractionApi<Environment>('skill-install', {}, {});
       setRuntime(result);
       setSettings({ ...settings, skill_dir: result.settings.skill_dir });
-      setSkill({ ...result.skill, latest_commit: result.skill.current_commit, update_available: false });
-      saved(result);
+      const skill = { ...result.skill, latest_commit: result.skill.current_commit, update_available: false };
+      setSkill(skill);
+      saved({ ...result, skill });
     } catch (error) { setError(error instanceof Error ? error.message : String(error)); }
     finally { setAction(''); }
   };
@@ -97,7 +102,12 @@ export function EnvironmentDialog({ initial, refresh, close, saved }: {
     event.preventDefault();
     if (busy) return;
     setAction('saving'); setError('');
-    try { const result = await extractionApi<Environment>('settings', {}, settings); saved(result); close(); }
+    try {
+      const result = await extractionApi<Environment>('settings', {}, settings);
+      saved(skill && settings.skill_dir === runtime?.settings.skill_dir && skill.current_commit === result.skill.current_commit
+        && skill.installed === result.skill.installed ? { ...result, skill } : result);
+      close();
+    }
     catch (error) { setError(error instanceof Error ? error.message : String(error)); }
     finally { setAction(''); }
   };

@@ -129,7 +129,7 @@ test('new extraction buttons return home without opening a dialog or stopping th
     '../../components/PageActivity': { usePageActive: () => true, useRetainPage() {} },
     './api': { extractionUrl: () => 'fixture-stream', extractionApi: async (action, params, body) => {
       calls.push({ action, params, body });
-      if (action === 'environment') return { ready: true };
+      if (action === 'environment') return { ready: true, settings: { skill_dir: '', python_path: '' }, skill: { installed: false, current_commit: '', latest_commit: '', update_available: false } };
       if (action === 'sessions') return { sessions: created ? [newSession, session] : [session], total: created ? 2 : 1, next_offset: null };
       if (action === 'create') { created = true; return { session: newSession }; }
       if (action === 'session') return { session: params.session_id === newSession.id ? newSession : session,
@@ -226,7 +226,7 @@ test('deleting selected sessions selects a remaining sibling and closing folders
     '../../components/PageActivity': { usePageActive: () => true, useRetainPage() {} },
     './api': { extractionApi: async (action, params, body) => {
       calls.push({ action, params, body });
-      if (action === 'environment') return { ready: true };
+      if (action === 'environment') return { ready: true, settings: { skill_dir: '', python_path: '' }, skill: { installed: false, current_commit: '', latest_commit: '', update_available: false } };
       if (action === 'sessions') return { sessions: rows, total: rows.length, next_offset: null };
       if (action === 'session') {
         const session = rows.find(row => row.id === params.session_id);

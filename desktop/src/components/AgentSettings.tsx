@@ -6,16 +6,17 @@ import { openExternalUrl } from '../lib/externalLink';
 import { Icon } from './Icon';
 import { Switch } from './Switch';
 
-export function AgentSettingsButton({ onClick, label, ready }: {
+export function AgentSettingsButton({ onClick, label, ready, updateAvailable = false }: {
   onClick: () => void;
   label?: string;
   ready?: boolean;
+  updateAvailable?: boolean;
 }) {
   return <button type="button" className="agent-settings-button" onClick={onClick}
     aria-haspopup="dialog" title={t('common:agentSettings.configure')}>
     <Icon name="settings" />
     <span>{label ?? t('common:agentSettings.configure')}</span>
-    {ready !== undefined && <i className={ready ? 'is-ready' : ''} aria-hidden="true" />}
+    {ready !== undefined && <i className={ready && !updateAvailable ? 'is-ready' : ''} aria-hidden="true" />}
   </button>;
 }
 

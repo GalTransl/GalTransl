@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePageActive, useRetainPage } from '../../components/PageActivity';
 import { extractionApi, extractionUrl } from './api';
 import { prependHistory, reduceEvents, type Row } from './transcript';
-import { isRunning, type AgentEvent, type Environment, type SessionList, type Snapshot } from './types';
+import { isRunning, type AgentEvent, type Environment, type SessionList, type SkillStatus, type Snapshot } from './types';
 import { message, t, useMessageState } from '../../i18n';
 import { notifyNeedsAttention } from '../../lib/desktopNotify';
 import { askNotifyBody, toolMeta } from '../agent/toolMeta';
@@ -38,6 +38,7 @@ export function useExtraction() {
   const [revision, setRevision] = useState(0);
   const current = useRef(selected); current.current = selected;
   const currentView = useRef(view); currentView.current = view;
+  const currentEnvironment = useRef(environment); currentEnvironment.current = environment;
   // A submitted message is already in the next snapshot before the SSE opens.
   const sentAfter = useRef<{ sessionId: string; cursor: number } | null>(null);
   const request = useRef(false);
@@ -49,7 +50,13 @@ export function useExtraction() {
     setSessions(previous => offset ? { ...result, sessions: [...previous.sessions.slice(0, offset), ...result.sessions] } : result);
   }, []);
   const refreshEnvironment = useCallback(async () => {
-    const result = await extractionApi<Environment>('environment'); setEnvironment(result); return result;
+    const result = await extractionApi<Environment>('environment');
+    const previous = currentEnvironment.current;
+    const updated = previous?.settings.skill_dir === result.settings.skill_dir
+      && previous.skill.current_commit === result.skill.current_commit
+      && previous.skill.installed === result.skill.installed
+      ? { ...result, skill: previous.skill } : result;
+    setEnvironment(updated); return updated;
   }, []);
   useEffect(() => {
     if (active) {
@@ -57,6 +64,23 @@ export function useExtraction() {
       void refreshEnvironment().catch(e => setError(errorText(e)));
     }
   }, [active, refreshSessions, refreshEnvironment]);
+  const skillDirectory = environment?.settings.skill_dir;
+  const skillCommit = environment?.skill.current_commit;
+  const skillInstalled = environment?.skill.installed;
+  useEffect(() => {
+    if (!active || !skillInstalled || !skillDirectory) return;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const check = () => extractionApi<SkillStatus>('skill-check', {}, { skill_dir: skillDirectory }).then(skill => {
+      if (disposed) return;
+      setEnvironment(previous => previous?.settings.skill_dir === skillDirectory && previous.skill.current_commit === skillCommit
+        ? { ...previous, skill } : previous);
+    }).catch(() => { /* Keep the last known status when GitHub is unavailable. */ }).finally(() => {
+      if (!disposed) timer = setTimeout(check, 60 * 60 * 1000);
+    });
+    void check();
+    return () => { disposed = true; clearTimeout(timer); };
+  }, [active, skillDirectory, skillCommit, skillInstalled]);
   const hasRunningSessions = Boolean(sessions.running_game_dirs?.length || sessions.sessions.some(isRunning));
   useEffect(() => {
     if (!active || !hasRunningSessions) return;

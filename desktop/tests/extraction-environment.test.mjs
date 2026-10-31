@@ -17,6 +17,7 @@ const installed = {
   ...initial, ready: true, problems: [], settings: { skill_dir: '/data/skills/version', python_path: '' },
   skill: { ...initial.skill, installed: true, current_commit: 'b'.repeat(40) },
 };
+const enabled = { ...installed, skill: { ...installed.skill, latest_commit: installed.skill.current_commit } };
 
 function mount(api, environment = initial, refresh = () => Promise.resolve(environment)) {
   const saved = [], calls = [];
@@ -62,9 +63,11 @@ test('runtime skill actions are explicit and downloads activate without losing p
   assert.equal(dialog.calls[0].action, 'skill-check');
   assert.equal(dialog.calls[0].body.skill_dir, initial.settings.skill_dir);
   assert.ok(dialog.renderer.root.findAllByType('p').some(node => node.children.includes('skillUpdateAvailable')));
-  assert.equal(dialog.saved.length, 0);
+  assert.equal(dialog.saved.length, 1);
+  assert.equal(dialog.saved[0].skill.update_available, true);
+  assert.equal(dialog.saved[0].settings.python_path, '');
   await act(async () => dialog.button('skillDownload').props.onClick());
-  assert.deepEqual(dialog.saved, [installed]);
+  assert.deepEqual(JSON.parse(JSON.stringify(dialog.saved.at(-1))), enabled);
   assert.equal(dialog.closed(), false);
   assert.equal(dialog.renderer.root.findByType('form').findAllByType('input')[0].props.value, installed.settings.skill_dir);
   assert.equal(dialog.renderer.root.findByType('form').findAllByType('input')[1].props.value, '/custom/python');
@@ -90,6 +93,25 @@ test('detected interpreters can be selected and saved while automatic selection 
   act(() => select().props.onChange({ target: { value: '/project/.venv/bin/python' } }));
   await act(async () => dialog.renderer.root.findByType('form').props.onSubmit({ preventDefault() {} }));
   assert.equal(dialog.calls.at(-1).body.python_path, '/project/.venv/bin/python');
+  act(() => dialog.renderer.unmount());
+});
+
+test('checking an unsaved Skill path leaves the sidebar state alone and saving interpreter edits retains the active update notice', async () => {
+  const checked = { ...installed.skill, latest_commit: 'c'.repeat(40), update_available: true };
+  const dialog = mount(async (action, body) => action === 'skill-check' ? checked : { ...installed, settings: body },
+    { ...installed, skill: checked });
+  await act(async () => {});
+  const path = () => dialog.renderer.root.findByType('form').findByType('input');
+  act(() => path().props.onChange({ target: { value: '/pending/skill' } }));
+  await act(async () => dialog.button('skillCheck').props.onClick());
+  assert.equal(dialog.saved.length, 0);
+  act(() => path().props.onChange({ target: { value: installed.settings.skill_dir } }));
+  await act(async () => dialog.button('skillCheck').props.onClick());
+  assert.equal(dialog.saved.at(-1).skill.update_available, true);
+  act(() => pythonSelect(dialog.renderer).props.onChange({ target: { value: '/project/.venv/bin/python' } }));
+  await act(async () => dialog.renderer.root.findByType('form').props.onSubmit({ preventDefault() {} }));
+  assert.equal(dialog.saved.at(-1).settings.python_path, '/project/.venv/bin/python');
+  assert.equal(dialog.saved.at(-1).skill.update_available, true);
   act(() => dialog.renderer.unmount());
 });
 
@@ -127,7 +149,7 @@ test('checks and downloads show errors, release disabled controls, and permit re
   act(() => dialog.button('skillUpdate').props.onClick());
   await act(async () => finish.resolve(installed));
   assert.equal(dialog.renderer.root.findAllByProps({ role: 'alert' }).length, 0);
-  assert.deepEqual(dialog.saved, [installed]);
+  assert.deepEqual(JSON.parse(JSON.stringify(dialog.saved)), [enabled]);
   act(() => dialog.renderer.unmount());
 });
 

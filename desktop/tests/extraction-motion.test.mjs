@@ -82,7 +82,7 @@ test('snapshots stay still except the new turn just submitted; SSE and reconnect
   const load = createTypeScriptLoader({ EventSource: Source, localStorage: { getItem: () => 'fixture', setItem() {} } }, {
     '../../components/PageActivity': { usePageActive: () => true, useRetainPage() {} },
     './api': { extractionUrl: () => 'synthetic-stream', extractionApi: async action => {
-      if (action === 'environment') return { ready: true };
+      if (action === 'environment') return { ready: true, settings: { skill_dir: '', python_path: '' }, skill: { installed: false, current_commit: '', latest_commit: '', update_available: false } };
       if (action === 'sessions') return { sessions: [], total: 0, next_offset: null };
       if (action === 'message') { sent = true; return { ok: true }; }
       if (action === 'session') return {

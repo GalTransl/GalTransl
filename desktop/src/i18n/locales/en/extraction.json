@@ -33,6 +33,7 @@
   "skillUpdate": "Update Skill",
   "skillInstalling": "Downloading…",
   "skillUpdateAvailable": "Latest Skill available:",
+  "skillHasUpdate": "Skill update available",
   "skillUpToDate": "Skill is up to date:",
   "skillDownloadHint": "Downloads from GitHub are enabled immediately and saved in the user data directory. The original folder is preserved.",
   "pythonSectionTitle": "Python runtime",

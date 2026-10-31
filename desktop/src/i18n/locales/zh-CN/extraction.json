@@ -33,6 +33,7 @@
   "skillUpdate": "更新 Skill",
   "skillInstalling": "正在下载…",
   "skillUpdateAvailable": "可下载最新 Skill：",
+  "skillHasUpdate": "Skill 有更新",
   "skillUpToDate": "已是最新 Skill：",
   "skillDownloadHint": "从 GitHub 下载后自动启用，保存在用户数据目录；原目录会保留。",
   "pythonSectionTitle": "Python 运行环境",

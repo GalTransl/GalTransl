@@ -114,7 +114,8 @@ export function ExtractionPage() {
         onCloseFolder={directory => void closeFolder(directory)} runningDirectories={agent.sessions.running_game_dirs} busy={agent.busy} />
       {!agent.sessions.total && <div className="agent-sessions__empty">{x('emptySessions')}</div>}
       {agent.sessions.next_offset != null && <button type="button" className="agent-sessions__show-more" onClick={() => void agent.refreshSessions(agent.sessions.next_offset!).catch(e => agent.setError(String(e)))}>{x('more')}</button>}</nav>
-      <AgentSettingsButton ready={agent.environment?.ready ?? false} label={x(agent.environment?.ready ? 'ready' : 'setup')}
+      <AgentSettingsButton ready={agent.environment?.ready ?? false} updateAvailable={agent.environment?.skill.update_available}
+        label={x(agent.environment?.skill.update_available ? 'skillHasUpdate' : agent.environment?.ready ? 'ready' : 'setup')}
         onClick={() => setDialog('environment')} />
     </aside>
     <div className="extract-content">

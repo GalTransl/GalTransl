@@ -36,7 +36,7 @@ test('stream reconnects visibly with shared exponential delays, resumes from sna
   }, {
     '../../components/PageActivity': { usePageActive: () => true, useRetainPage() {} },
     './api': { extractionUrl: (action, params) => `${action}?after=${params.after}`, extractionApi: async action => {
-      if (action === 'environment') return { ready: true };
+      if (action === 'environment') return { ready: true, settings: { skill_dir: '', python_path: '' }, skill: { installed: false, current_commit: '', latest_commit: '', update_available: false } };
       if (action === 'sessions') return { sessions: [], total: 0, next_offset: null };
       if (failSnapshot) throw Error('Synthetic server unavailable');
       return snapshot('reconnect', { session: { id: 'reconnect', status: 'running' }, cursor: 42 });
@@ -80,7 +80,7 @@ test('background extraction keeps receiving pending requests and routes attentio
     '../../components/PageActivity': { usePageActive: () => active, useRetainPage() {} },
     '../../lib/desktopNotify': { notifyNeedsAttention: (...args) => notifications.push(args) },
     './api': { extractionUrl: () => 'background-stream', extractionApi: async action => {
-      if (action === 'environment') return { ready: true };
+      if (action === 'environment') return { ready: true, settings: { skill_dir: '', python_path: '' }, skill: { installed: false, current_commit: '', latest_commit: '', update_available: false } };
       if (action === 'sessions') return { sessions: [], total: 0, next_offset: null };
       return currentSnapshot;
     } },
@@ -116,7 +116,7 @@ test('snapshot failures exhaust five reconnects and manual reload starts a fresh
   }, {
     '../../components/PageActivity': { usePageActive: () => true, useRetainPage() {} },
     './api': { extractionApi: async action => {
-      if (action === 'environment') return { ready: true };
+      if (action === 'environment') return { ready: true, settings: { skill_dir: '', python_path: '' }, skill: { installed: false, current_commit: '', latest_commit: '', update_available: false } };
       if (action === 'sessions') return { sessions: [], total: 0, next_offset: null };
       calls += 1;
       if (fail) throw Error('Synthetic server unavailable');
@@ -148,7 +148,7 @@ test('live snapshots place segment completion after accumulated text and retain 
   const load = createTypeScriptLoader({ EventSource: class { close() {} }, localStorage: { getItem: () => 'segments', setItem() {} } }, {
     '../../components/PageActivity': { usePageActive: () => true, useRetainPage() {} },
     './api': { extractionUrl: () => 'segments', extractionApi: async action => {
-      if (action === 'environment') return { ready: true };
+      if (action === 'environment') return { ready: true, settings: { skill_dir: '', python_path: '' }, skill: { installed: false, current_commit: '', latest_commit: '', update_available: false } };
       if (action === 'sessions') return { sessions: [], total: 0, next_offset: null };
       return snapshot('segments', { session: { id: 'segments', status: 'running' },
         events: [{ type: 'content_end', seq: 3, messageId: 'a', duration_ms: 2000 }],
@@ -197,7 +197,7 @@ test('late snapshots cannot cross sessions; hiding the page closes only the UI s
   }
   const api = async (action, params, body) => {
     calls.push({ action, params, body });
-    if (action === 'environment') return { ready: true };
+    if (action === 'environment') return { ready: true, settings: { skill_dir: '', python_path: '' }, skill: { installed: false, current_commit: '', latest_commit: '', update_available: false } };
     if (action === 'sessions') return { sessions: [], total: 0, next_offset: null };
     if (action === 'session') return new Promise(resolve => deferred.set(params.session_id, resolve));
     throw Error(`Unexpected mutation ${action}`);
@@ -250,7 +250,7 @@ test('live permission changes reach the backend, persist through snapshots and r
   }
   const api = async (action, params, body) => {
     calls.push({ action, params, body });
-    if (action === 'environment') return { ready: true };
+    if (action === 'environment') return { ready: true, settings: { skill_dir: '', python_path: '' }, skill: { installed: false, current_commit: '', latest_commit: '', update_available: false } };
     if (action === 'sessions') return { sessions: [], total: 0, next_offset: null };
     if (action === 'session') return snapshot('live', { session: { id: 'live', status: 'running', permission_mode: mode } });
     if (action === 'permission-mode') {
@@ -300,7 +300,7 @@ test('history requests are serialized, keep live results and survive a fresh sna
   const load = createTypeScriptLoader({ EventSource: Source, localStorage: { getItem: () => 'history', setItem() {} } }, {
     '../../components/PageActivity': { usePageActive: () => true, useRetainPage() {} },
     './api': { extractionUrl: () => 'synthetic-stream', extractionApi: async (action, params) => {
-      if (action === 'environment') return { ready: true };
+      if (action === 'environment') return { ready: true, settings: { skill_dir: '', python_path: '' }, skill: { installed: false, current_commit: '', latest_commit: '', update_available: false } };
       if (action === 'sessions') return { sessions: [], total: 0, next_offset: null };
       if (action === 'session' && params.before_seq) {
         calls.push(params);

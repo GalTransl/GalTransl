@@ -22,7 +22,7 @@ for (const config of [null, 'config.yaml', 'config.yml']) {
       './agent/composer': { StatusPill: () => null },
       './extraction/useModelProfile': { useModelProfile: () => ({ models: ['fixture'], profile: 'agent-profile' }) },
       './extraction/useExtraction': { useExtraction: () => ({
-        selected: session.id, view: { session, rows: [] }, sessions: { total: 0, sessions: [] }, environment: { ready: true },
+        selected: session.id, view: { session, rows: [] }, sessions: { total: 0, sessions: [] }, environment: { ready: true, settings: { skill_dir: '', python_path: '' }, skill: { installed: false, current_commit: '', latest_commit: '', update_available: false } },
         mutate: async (...args) => { requests.push(args); return { project_dir: directory, config_file_name: config }; },
       }) },
       './extraction/SessionFolders': { SessionFolders: () => null },
