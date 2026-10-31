@@ -1375,8 +1375,9 @@
 
 .agent-reasoning__icon {
   flex: none;
-  color: var(--color-text-muted);
+  color: inherit;
   font-size: 0.85rem;
+  opacity: 0.9;
 }
 
 .agent-reasoning__label {
@@ -2181,6 +2182,7 @@
 .agent-tool__icon {
   flex: none;
   font-size: 0.88rem;
+  opacity: 0.9;
 }
 
 .agent-tool__name {
