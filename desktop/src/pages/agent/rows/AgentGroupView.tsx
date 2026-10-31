@@ -184,6 +184,7 @@ function AgentActivityGroup({
           {parts.length ? <span className="agent-activity__meta">{parts.join(' · ')}</span> : null}
           <span className="agent-activity__caret">›</span>
         </button>
+        <div className="agent-activity__divider" aria-hidden="true" />
         {tail ? <div className="agent-activity__preview">{tail}</div> : null}
         <AnimatedDisclosure id={disclosureId} open={open} className="agent-activity__collapse">
           {() => (

@@ -1297,6 +1297,11 @@
   overflow: hidden;
 }
 
+.agent-activity__divider {
+  margin-top: 8px;
+  border-top: 1px solid var(--agent-line-soft);
+}
+
 .agent-read-group__inner {
   min-height: 0;
   overflow: hidden;
@@ -1317,9 +1322,8 @@
 
 .agent-activity__body {
   position: relative;
-  margin: 8px 0 6px;
+  margin: 0 0 6px;
   padding: 12px 0 2px;
-  border-top: 1px solid var(--agent-line-soft);
   display: flex;
   flex-direction: column;
 }
