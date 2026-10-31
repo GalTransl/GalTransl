@@ -93,10 +93,10 @@
 .extract-environment-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
 .extract-environment-dialog { width: min(680px, 100%); max-height: calc(100dvh - 60px); }
 .extract-environment-card { margin-top: 16px; padding: 18px; border: 1px solid var(--color-line); border-radius: 12px; background: var(--color-surface); }
-.extract-environment-card__header { display: flex; align-items: center; gap: 10px; }
+.extract-environment-card__header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .extract-environment-card__header h3 { flex: 1; margin: 0; font-size: 16px; font-weight: 700; }
 .extract-environment-card__icon { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: 8px; background: var(--color-primary-soft); color: var(--color-primary); font-size: 17px; }
-.extract-environment-badge { display: inline-flex; align-items: center; flex: none; padding: 4px 8px; border-radius: 6px; background: var(--color-neutral-soft); color: var(--color-text-muted); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.extract-environment-badge { display: inline-flex; align-items: center; flex: none; max-width: 100%; margin-left: auto; padding: 4px 8px; border-radius: 6px; background: var(--color-neutral-soft); color: var(--color-text-muted); font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
 .extract-environment-badge.is-ready { background: var(--color-success-soft); color: var(--color-success); }
 .extract-environment-description { margin: 10px 0 16px; color: var(--color-text-muted); }
 .extract-environment-save-hint { flex: 1; color: var(--color-text-muted); font-size: 11px; }
