@@ -594,11 +594,13 @@
 }
 
 :root[data-theme='dark'] .agent-console {
+  --color-text: #d4d4d4;
   --agent-tile: rgba(255, 255, 255, 0.05);
   --agent-tile-strong: rgba(255, 255, 255, 0.085);
   --agent-hover: rgba(255, 255, 255, 0.07);
   --agent-line: rgba(65, 83, 111, 0.82);
   --agent-line-soft: rgba(65, 83, 111, 0.55);
+  color: var(--color-text);
   background:
     radial-gradient(circle at 92% -18%, rgba(67, 129, 255, 0.24), transparent 48%),
     linear-gradient(90deg, rgba(24, 34, 48, 0.96) 0%, rgba(24, 34, 48, 0.94) 45%, rgba(17, 26, 38, 0.92) 100%),
