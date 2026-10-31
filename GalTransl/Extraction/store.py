@@ -37,6 +37,17 @@ def _repair_records(path: Path) -> list[dict[str, Any]]:
     return records
 
 
+def _work_item_keys(event: dict[str, Any]) -> set[str]:
+    # Only retain identities while scanning the truncated turn, never its output.
+    kind = event["type"]
+    if kind in {"tool_start", "tool_end"}:
+        return {f"tool:{event.get('toolCallId') or 'tool-' + str(event['seq'])}"}
+    if kind in {"assistant_message", "thinking_message"} and event.get("text"):
+        row_id = event.get("messageId") or f"assistant-{event['seq']}"
+        return {f"{'content' if kind == 'assistant_message' else 'reasoning'}:{row_id}"}
+    return set()
+
+
 class SessionStore:
     def __init__(self, root: Path | None = None):
         self.root = root or data_root() / "sessions"
@@ -205,6 +216,10 @@ class SessionStore:
         rows: list[dict[str, Any]] = []
         used = 0
         more = False
+        prefix_open = True
+        prefix_done = False
+        prefix_anchor = "history"
+        prefix_items: set[str] = set()
         with self.lock:
             if path.exists():
                 with path.open("rb") as stream:
@@ -224,18 +239,32 @@ class SessionStore:
                             event = json.loads(line)
                             if before is not None and event["seq"] >= before:
                                 continue
-                            if len(rows) >= limit or used + len(line) > MAX_PAGE_BYTES:
+                            if not more and (len(rows) >= limit or used + len(line) > MAX_PAGE_BYTES):
                                 more = True
-                                break
+                            if more:
+                                if not prefix_open:
+                                    prefix_done = True
+                                    break
+                                if event["type"] in {"user_message", "notice", "error"}:
+                                    prefix_anchor = f"{'user' if event['type'] == 'user_message' else 'notice'}-{event['seq']}"
+                                    prefix_done = True
+                                    break
+                                prefix_items.update(_work_item_keys(event))
+                                continue
+                            if event["type"] in {"user_message", "notice", "error"}:
+                                prefix_open = False
+                            elif event["type"] in {"assistant_start", "assistant_message", "thinking_message", "tool_start", "tool_end"}:
+                                prefix_open = True
                             rows.append(event)
                             used += len(line)
-                        if more:
+                        if prefix_done:
                             break
                         if not position and pending:
                             raise ValueError("Invalid extraction journal framing")
             rows.reverse()
         return {"events": rows, "has_more": more,
-                "before_seq": rows[0]["seq"] if more and rows else None}
+                "before_seq": rows[0]["seq"] if more and rows else None,
+                "activity_prefix": {"anchor": prefix_anchor, "item_keys": sorted(prefix_items)} if more and prefix_open else None}
 
     def files(self, session_id: str, relative: str = "", offset: int = 0) -> dict[str, Any]:
         root = Path(self.read(session_id)["workspace"])

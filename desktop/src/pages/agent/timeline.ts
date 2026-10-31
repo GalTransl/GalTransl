@@ -123,7 +123,7 @@ export type SubagentRun = {
 };
 
 export type TimelineGroup =
-  | { type: 'activity'; id: string; items: ActivityItem[]; finalContent?: ActivityItem }
+  | { type: 'activity'; id: string; items: ActivityItem[]; finalContent?: ActivityItem; hiddenStepCount?: number }
   | { type: 'user'; id: string; step: number; message: string; images?: AgentImage[] }
   | { type: 'error'; id: string; step: number; message: string; traceback?: string }
   | { type: 'stopped'; id: string; step: number; reason: string };

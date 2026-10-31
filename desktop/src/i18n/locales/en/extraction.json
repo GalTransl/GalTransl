@@ -96,6 +96,8 @@
   "toolDone": "Completed",
   "toolError": "Failed",
   "older": "Load earlier messages",
+  "loadingOlder": "Loading earlier messages…",
+  "scrollOlder": "Scroll up to load earlier messages",
   "reload": "Reconnect",
   "quickExtract": "Identify the engine and extract scripts",
   "quickCommands": "Quick commands",

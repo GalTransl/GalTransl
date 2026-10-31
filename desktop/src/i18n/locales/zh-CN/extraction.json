@@ -96,6 +96,8 @@
   "toolDone": "已完成",
   "toolError": "执行失败",
   "older": "加载更早的消息",
+  "loadingOlder": "正在加载更早的消息…",
+  "scrollOlder": "向上滚动加载更早的消息",
   "reload": "重新连接",
   "quickExtract": "识别引擎并提取剧本",
   "quickCommands": "快捷指令",

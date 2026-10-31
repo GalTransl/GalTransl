@@ -10,6 +10,48 @@ const { toolRowPhases } = load(new URL('../src/pages/agent/rows/ToolRow.tsx', im
 const user = { id: 'user-1', role: 'user', text: 'Inspect this isolated fixture' };
 const tool = { id: 'tool-1', role: 'tool', tool: 'run_python', args: { code: 'print("fixture")' }, text: 'partial output' };
 
+test('work totals include unloaded history and stay stable as split rows are restored', () => {
+  const { reduceEvents, prependHistory } = load(new URL('../src/pages/extraction/transcript.ts', import.meta.url));
+  const events = [
+    { type: 'user_message', seq: 1, text: 'Inspect fixture' },
+    { type: 'thinking_message', seq: 2, messageId: 'intro', text: 'Plan' },
+    { type: 'assistant_message', seq: 3, messageId: 'intro', text: 'Inspecting', stopReason: 'toolUse' },
+    { type: 'tool_start', seq: 4, toolCallId: 'bash', toolName: 'bash', arguments: { command: 'synthetic' } },
+    { type: 'tool_end', seq: 5, toolCallId: 'bash', text: 'done' },
+    { type: 'thinking_message', seq: 6, messageId: 'final', text: 'Verified' },
+    { type: 'assistant_message', seq: 7, messageId: 'final', text: 'Finished', stopReason: 'stop' },
+  ];
+  const prefix = { anchor: 'user-1', item_keys: ['reasoning:intro', 'content:intro', 'tool:bash', 'reasoning:final'] };
+  const assertTotal = rows => {
+    const group = extractionTimeline(rows, false, null, prefix).find(group => group.type === 'activity');
+    assert.equal(group.id, 'extract-user-1');
+    assert.equal((group.hiddenStepCount || 0) + group.items.filter(item => !item.final).length, 4);
+    let renderer;
+    act(() => { renderer = create(h(load(new URL('../src/pages/agent/rows/AgentGroupView.tsx', import.meta.url)).AgentGroupView,
+      { group, isLive: false, projectDir: '', persistKey: 'history-count' })); });
+    assert.match(renderer.root.findByProps({ className: 'agent-activity__meta' }).children.join(''), /4/);
+    act(() => renderer.unmount());
+  };
+  for (let start = 1; start < events.length; start += 1) {
+    const rows = reduceEvents([], events.slice(start));
+    assertTotal(rows);
+    const restored = prependHistory(rows, reduceEvents([], events.slice(0, start)));
+    assert.deepEqual(JSON.parse(JSON.stringify(restored)), JSON.parse(JSON.stringify(reduceEvents([], events))));
+    assertTotal(restored);
+  }
+});
+
+test('loading more than 1000 history rows retains the oldest and latest messages', () => {
+  const { reduceEvents, prependHistory } = load(new URL('../src/pages/extraction/transcript.ts', import.meta.url));
+  const events = Array.from({ length: 1200 }, (_, index) => ({ type: 'user_message', seq: index + 1, text: String(index) }));
+  const recent = reduceEvents([], events.slice(1100));
+  const rows = prependHistory(recent, reduceEvents([], events.slice(0, 1100)));
+  assert.equal(rows.length, 1200);
+  assert.equal(rows[0].id, 'user-1');
+  assert.equal(rows.at(-1).id, 'user-1200');
+  assert.equal(rows.at(-1), recent.at(-1));
+});
+
 test('native read images render with the extraction session asset URL after replay', () => {
   const { ToolRow } = load(new URL('../src/pages/agent/rows/ToolRow.tsx', import.meta.url));
   const image = { id: `${'a'.repeat(64)}.webp`, name: 'fixture.webp' };

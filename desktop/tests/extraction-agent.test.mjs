@@ -43,7 +43,7 @@ test('streaming text reconciles with authoritative final messages; reasoning and
   assert.equal(final[2].error, true);
   assert.equal(initial[1].text, 'partial');
   assert.equal(final[0], initial[0]);
-  assert.equal(reduceEvents([], Array.from({ length: 1500 }, (_, seq) => ({ type: 'user_message', seq, text: 'x' }))).length, 1000);
+  assert.equal(reduceEvents([], Array.from({ length: 1500 }, (_, seq) => ({ type: 'user_message', seq, text: 'x' }))).length, 1500);
 });
 
 test('late snapshots cannot cross sessions; hiding the page closes only the UI stream and restores live text', async () => {
@@ -140,6 +140,61 @@ test('live permission changes reach the backend, persist through snapshots and r
     await wait(100);
   });
   assert.equal(state.view.session.permission_mode, 'ask');
+  await act(async () => renderer.unmount());
+});
+
+test('history requests are serialized, keep live results and survive a fresh snapshot', async () => {
+  let state, stream, resolveOlder;
+  const calls = [];
+  const recent = snapshot('history', { session: { id: 'history', status: 'running' }, cursor: 5,
+    events: [{ type: 'tool_end', seq: 5, toolCallId: 'tool', text: 'complete' }], has_more: true, before_seq: 5,
+    activity_prefix: { anchor: 'user-1', item_keys: ['tool:tool'] } });
+  const older = snapshot('history', { events: [
+    { type: 'user_message', seq: 1, text: 'Extract' },
+    { type: 'thinking_message', seq: 2, messageId: 'intro', text: 'Plan' },
+    { type: 'assistant_message', seq: 3, messageId: 'intro', text: 'Inspecting', stopReason: 'toolUse' },
+    { type: 'tool_start', seq: 4, toolCallId: 'tool', toolName: 'bash', arguments: { command: 'synthetic' } },
+  ] });
+  class Source { constructor() { stream = this; } close() {} }
+  const load = createTypeScriptLoader({ EventSource: Source, localStorage: { getItem: () => 'history', setItem() {} } }, {
+    '../../components/PageActivity': { usePageActive: () => true, useRetainPage() {} },
+    './api': { extractionUrl: () => 'synthetic-stream', extractionApi: async (action, params) => {
+      if (action === 'environment') return { ready: true };
+      if (action === 'sessions') return { sessions: [], total: 0, next_offset: null };
+      if (action === 'session' && params.before_seq) {
+        calls.push(params);
+        return new Promise(resolve => { resolveOlder = resolve; });
+      }
+      if (action === 'session') return recent;
+      throw Error(`Unexpected ${action}`);
+    } },
+  });
+  const { useExtraction } = load(source('useExtraction.ts'));
+  function Probe() { state = useExtraction(); return null; }
+  let renderer, request;
+  await act(async () => { renderer = create(h(Probe)); });
+  await act(async () => { request = state.loadOlder(); void state.loadOlder(); });
+  assert.equal(calls.length, 1);
+  assert.equal(state.loadingOlder, true);
+  assert.equal(state.busy, false);
+  await act(async () => {
+    stream.onmessage({ data: JSON.stringify({ type: 'assistant_delta', seq: 6, messageId: 'live', text: 'New output' }) });
+    await wait(100);
+  });
+  await act(async () => { resolveOlder(older); await request; });
+  assert.equal(state.loadingOlder, false);
+  assert.equal(state.view.rows[0].id, 'user-1');
+  assert.equal(state.view.rows[2].tool, 'bash');
+  assert.equal(state.view.rows[2].text, 'complete');
+  assert.equal(state.view.rows.at(-1).text, 'New output');
+  recent.cursor = 6;
+  recent.live_events = [{ type: 'assistant_delta', messageId: 'live', text: 'Authoritative output' }];
+  await act(async () => state.reload());
+  assert.equal(state.view.rows[0].id, 'user-1');
+  assert.equal(state.view.rows[2].tool, 'bash');
+  assert.equal(state.view.rows.at(-1).text, 'Authoritative output');
+  assert.equal(state.view.has_more, false);
+  assert.equal(state.view.before_seq, null);
   await act(async () => renderer.unmount());
 });
 

@@ -281,6 +281,58 @@ def test_live_snapshot_restores_partial_output(extraction):
     assert runtime.snapshot(sid)["live_events"] == []
 
 
+@pytest.mark.parametrize("limit", [1, 2, 99, 100, 200])
+def test_history_counts_the_truncated_turn_without_loading_its_output(extraction, limit):
+    store, session, runtime = extraction
+    sid = session["id"]
+    events = [{"type": "user_message", "text": "previous turn"},
+              {"type": "tool_start", "toolCallId": "previous-tool"},
+              {"type": "user_message", "text": "long turn"}]
+    for index in range(125):
+        events.extend([
+            {"type": "thinking_message", "messageId": str(index), "text": "reasoning"},
+            {"type": "assistant_message", "messageId": str(index), "text": "progress", "stopReason": "toolUse"},
+            {"type": "tool_start", "toolCallId": f"tool-{index}", "toolName": "bash"},
+            {"type": "tool_end", "toolCallId": f"tool-{index}", "text": "output" * 1000},
+        ])
+    events.append({"type": "assistant_message", "messageId": "final", "text": "finished", "stopReason": "stop"})
+    for seq, event in enumerate(events, 1):
+        store.append(sid, {**event, "seq": seq})
+    page = store.history(sid, limit=limit)
+    assert len(page["events"]) == limit
+    assert page["activity_prefix"]["anchor"] == "user-3"
+    keys = set(page["activity_prefix"]["item_keys"])
+    for event in page["events"]:
+        if event["type"].startswith("tool_"):
+            keys.add(f"tool:{event['toolCallId']}")
+        if event["type"] == "thinking_message":
+            keys.add(f"reasoning:{event['messageId']}")
+        if event["type"] == "assistant_message" and event.get("text"):
+            keys.add(f"content:{event['messageId']}")
+    assert len(keys - {"content:final"}) == 375
+    assert "tool:previous-tool" not in keys
+    assert "output" not in json.dumps(page["activity_prefix"])
+    assert runtime.snapshot(sid)["activity_prefix"]["anchor"] == "user-3"
+
+
+def test_history_prefix_stops_at_loaded_user_and_notice_boundaries(extraction):
+    store, session, _ = extraction
+    sid = session["id"]
+    events = [
+        {"type": "tool_start", "toolCallId": "old"},
+        {"type": "notice", "message": "boundary"},
+        {"type": "tool_start", "toolCallId": "new"},
+        {"type": "user_message", "text": "next"},
+        {"type": "assistant_message", "messageId": "answer", "text": "done"},
+    ]
+    for seq, event in enumerate(events, 1):
+        store.append(sid, {**event, "seq": seq})
+    assert store.history(sid, limit=2)["activity_prefix"] is None
+    page = store.history(sid, before=4, limit=1)
+    assert page["activity_prefix"] == {"anchor": "notice-2", "item_keys": []}
+    assert store.history(sid, limit=200)["activity_prefix"] is None
+
+
 def test_missing_user_bubbles_are_recovered_in_turn_order_once(extraction):
     from GalTransl.Agent.session_store import SessionStore as SharedStore
 

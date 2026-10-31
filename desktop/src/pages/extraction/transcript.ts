@@ -29,5 +29,19 @@ export function reduceEvents(rows: Row[], events: AgentEvent[]): Row[] {
       Object.assign(get(`notice-${event.seq}`, 'notice'), { text: event.message || '', error: type === 'error' });
     }
   }
-  return next.slice(-1000);
+  return next;
+}
+
+export function prependHistory(rows: Row[], history: Row[]) {
+  const byId = new Map(history.map(row => [row.id, row]));
+  const merged = rows.map(row => {
+    const older = byId.get(row.id);
+    return older ? { ...older, ...row,
+      ...(row.role === 'tool' ? { tool: row.tool ?? older.tool, args: row.args ?? older.args } : {}),
+      ...(row.role === 'assistant' ? { thinking: row.thinking ?? older.thinking,
+        text: row.done || row.text ? row.text : older.text } : {}),
+    } : row;
+  });
+  const ids = new Set(rows.map(row => row.id));
+  return [...history.filter(row => !ids.has(row.id)), ...merged];
 }

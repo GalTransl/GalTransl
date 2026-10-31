@@ -42,7 +42,7 @@ export const AgentGroupView = memo(function AgentGroupView({
   if (group.type === 'user') return <UserMessageRow message={group.message} step={group.step} images={group.images} imageScope={imageScope} />;
   if (group.type === 'error') return <ErrorNotice group={group} />;
   if (group.type === 'stopped') return <StoppedNotice group={group} />;
-  if (group.finalContent && group.items.every((item) => item.final)) {
+  if (!group.hiddenStepCount && group.finalContent && group.items.every((item) => item.final)) {
     return <FinalMessage item={group.finalContent} projectDir={projectDir} newProjectWizardRefs={newProjectWizardRefs} />;
   }
   return <AgentActivityGroup group={group} isLive={isLive} projectDir={projectDir} persistKey={persistKey} imageScope={imageScope} autoExpandTools={autoExpandTools} newProjectWizardRefs={newProjectWizardRefs} />;
@@ -146,7 +146,7 @@ function AgentActivityGroup({
   const toolCount = items.filter((it) => it.kind === 'tool').length;
   // 压缩与重试提示都不算"工作步骤"：前者是后台维护动作，后者只是同一次请求
   // 的重发（一次重试一个步骤会把「重试 10 次」显示成 10 个步骤）
-  const visibleCount = items.filter((it) => !it.final && it.kind !== 'compact' && it.kind !== 'retry').length;
+  const visibleCount = (group.hiddenStepCount ?? 0) + items.filter((it) => !it.final && it.kind !== 'compact' && it.kind !== 'retry').length;
 
   // 文案：运行中「思考中/处理中 · Ns」，结束「已思考/已处理 Ns」
   const label = isLive
@@ -172,6 +172,7 @@ function AgentActivityGroup({
         <button
           type="button"
           className="agent-activity__header"
+          data-agent-history-anchor={group.id}
           onClick={() => {
             setManualOpen(!open);
           }}
@@ -194,9 +195,9 @@ function AgentActivityGroup({
                   return entry.reading && entry.indices.length > 1 ? (
                     <ReadToolGroup key={`reads-${entry.key}`} entry={entry} items={items} phases={phases} persistKey={persistKey} imageScope={imageScope} autoExpandTools={autoExpandTools} />
                   ) : item.final ? null : item.kind === 'content' ? (
-                    <ContentRow key={`t-${i}`} item={item} projectDir={projectDir} newProjectWizardRefs={newProjectWizardRefs} />
+                    <ContentRow key={`t-${item.id ?? i}`} item={item} projectDir={projectDir} newProjectWizardRefs={newProjectWizardRefs} />
                   ) : item.kind === 'reasoning' ? (
-                    <ReasoningRow key={`r-${i}`} item={item} projectDir={projectDir} persistKey={persistKey} />
+                    <ReasoningRow key={`r-${item.id ?? i}`} item={item} projectDir={projectDir} persistKey={persistKey} />
                   ) : item.kind === 'compact' ? (
                     <CompactRow key={`c-${i}`} item={item} />
                   ) : item.kind === 'retry' ? (
@@ -225,7 +226,7 @@ const ContentRow = memo(function ContentRow({ item, projectDir, newProjectWizard
   const streaming = Boolean(item.streaming);
 
   return (
-    <div className={`agent-content${streaming ? ' is-streaming' : ''}`}>
+    <div className={`agent-content${streaming ? ' is-streaming' : ''}`} data-agent-history-anchor={`content-${item.id ?? item.step}`}>
       <AgentMarkdown
         text={text}
         projectDir={projectDir}
@@ -279,7 +280,7 @@ const ReasoningRow = memo(function ReasoningRow({
   const marquee = !open && streaming ? reasoningOneLiner(text) : '';
 
   return (
-    <div className={`agent-reasoning${open ? ' is-open' : ''}${streaming ? ' is-streaming' : ''}`}>
+    <div className={`agent-reasoning${open ? ' is-open' : ''}${streaming ? ' is-streaming' : ''}`} data-agent-history-anchor={`reasoning-${item.id ?? item.step}`}>
       <button
         type="button"
         className="agent-reasoning__header"

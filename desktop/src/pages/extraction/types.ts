@@ -1,4 +1,5 @@
 import type { AgentContextUsage } from '../../lib/api';
+import type { AgentImage } from '../agent/images';
 
 export type Session = {
   id: string; title: string; game_dir: string; workspace: string; status: string;
@@ -6,7 +7,7 @@ export type Session = {
   profile_name: string; permission_mode: string; error: string;
 };
 export type AgentEvent = {
-  images?: import('../agent/images').AgentImage[];
+  images?: AgentImage[];
   type: string; seq?: number; text?: string; messageId?: string; toolCallId?: string;
   toolName?: string; arguments?: Record<string, unknown>; isError?: boolean;
   replace?: boolean;
@@ -19,6 +20,7 @@ export type AgentEvent = {
 export type Snapshot = {
   session: Session; events: AgentEvent[]; live_events: AgentEvent[]; cursor: number;
   pending: AgentEvent | null; has_more: boolean; before_seq: number | null;
+  activity_prefix?: { anchor: string; item_keys: string[] } | null;
 };
 export type SkillStatus = {
   installed: boolean; current_commit: string; latest_commit: string; update_available: boolean;
