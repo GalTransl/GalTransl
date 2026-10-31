@@ -254,14 +254,15 @@ class SearchInputRegistrationTests(unittest.TestCase):
 
     def test_schema_and_handler_are_registered(self):
         names = [t["function"]["name"] for t in rt.AGENT_TOOLS]
-        self.assertIn("search_input", names)
+        self.assertIn("input", names)
         self.assertIn("search_input", rt._TOOL_HANDLERS)
 
     def test_schema_advertises_the_same_fields_the_handler_accepts(self):
-        schema = next(t for t in rt.AGENT_TOOLS if t["function"]["name"] == "search_input")
+        schema = next(t for t in rt.AGENT_TOOLS if t["function"]["name"] == "input")
         props = schema["function"]["parameters"]["properties"]
         self.assertEqual(props["field"]["enum"], ["all", "src", "name"])
-        self.assertEqual(schema["function"]["parameters"]["required"], ["query"])
+        self.assertEqual(schema["function"]["parameters"]["required"], ["action"])
+        self.assertIn("search 必填", props["query"]["description"])
 
     def test_explore_subagent_can_search_the_source_text(self):
         role = rt.SUBAGENT_ROLES[rt.SUBAGENT_AGENT_EXPLORE]

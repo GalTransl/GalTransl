@@ -55,7 +55,7 @@ class PatchTranslCacheReturnShapeTests(unittest.TestCase):
     def test_returns_compact_result_without_redundant_fields(self) -> None:
         runner = _StubRunner([{"index": 33, "pre_dst": "旧译文", "problem": "残留日文"}])
         result = _tool_patch_transl_cache(
-            runner, {"filename": "a.json", "patches": [{"index": 33, "pre_dst": "新译文"}]}
+            runner, {"action": "set", "filename": "a.json", "patches": [{"index": 33, "pre_dst": "新译文"}]}
         )
 
         self.assertEqual(result["updated"], 1)
@@ -72,7 +72,7 @@ class PatchTranslCacheReturnShapeTests(unittest.TestCase):
     def test_empty_lists_are_omitted(self) -> None:
         runner = _StubRunner([{"index": 1, "pre_dst": "x"}])
         result = _tool_patch_transl_cache(
-            runner, {"filename": "a.json", "patches": [{"index": 1, "pre_dst": "y"}]}
+            runner, {"action": "set", "filename": "a.json", "patches": [{"index": 1, "pre_dst": "y"}]}
         )
         self.assertNotIn("not_found", result["files"][0])
         self.assertNotIn("skipped", result["files"][0])
@@ -91,7 +91,7 @@ class PatchTranslCacheReturnShapeTests(unittest.TestCase):
         )
         result = _tool_patch_transl_cache(
             runner,
-            {"filename": "a.json", "patches": [{"index": 33, "pre_dst": "A"}, {"index": 34, "pre_dst": "B"}]},
+            {"action": "set", "filename": "a.json", "patches": [{"index": 33, "pre_dst": "A"}, {"index": 34, "pre_dst": "B"}]},
         )
         self.assertEqual(
             result["files"][0]["problems"],
@@ -102,7 +102,7 @@ class PatchTranslCacheReturnShapeTests(unittest.TestCase):
         runner = _StubRunner([{"index": 1, "pre_dst": "x"}])
         result = _tool_patch_transl_cache(
             runner,
-            {
+            {"action": "set",
                 "filename": "a.json",
                 "patches": [
                     {"index": 1, "pre_dst": "y"},
@@ -120,7 +120,7 @@ class PatchTranslCacheReturnShapeTests(unittest.TestCase):
         runner = _StubRunner([{"index": 1, "pre_dst": "x"}])
         with self.assertRaises(AgentToolError):
             _tool_patch_transl_cache(
-                runner, {"filename": "a.json", "patches": [{"index": 99, "pre_dst": "z"}]}
+                runner, {"action": "set", "filename": "a.json", "patches": [{"index": 99, "pre_dst": "z"}]}
             )
 
 
@@ -134,7 +134,7 @@ class PatchTransByTests(unittest.TestCase):
         runner = _StubRunner([{"index": 7, "pre_dst": "旧译文", "trans_by": "gpt-4o"}])
 
         result = _tool_patch_transl_cache(
-            runner, {"filename": "a.json", "patches": [{"index": 7, "pre_dst": "新译文"}]}
+            runner, {"action": "set", "filename": "a.json", "patches": [{"index": 7, "pre_dst": "新译文"}]}
         )
 
         # 写回文件的那份条目被标成 Agent 的模型名（原来的引擎名被覆盖）
@@ -150,7 +150,7 @@ class PatchTransByTests(unittest.TestCase):
 
         result = _tool_patch_transl_cache(
             runner,
-            {
+            {"action": "set",
                 "filename": "a.json",
                 "patches": [
                     {"index": 1, "trans_by": "manual"},  # 只给 trans_by = 没有可更新字段
@@ -176,7 +176,7 @@ class PatchTransByTests(unittest.TestCase):
         )
 
         result = _tool_patch_transl_cache(
-            runner, {"filename": "a.json", "patches": [{"index": 1, "pre_dst": "y"}]}
+            runner, {"action": "set", "filename": "a.json", "patches": [{"index": 1, "pre_dst": "y"}]}
         )
 
         self.assertEqual(result["trans_by"], "deepseek-chat")
@@ -200,7 +200,7 @@ class MultiFilePatchTests(unittest.TestCase):
 
         result = _tool_patch_transl_cache(
             runner,
-            {
+            {"action": "set",
                 "patches": [
                     {"file": "a.json", "index": 1, "pre_dst": "贤酱"},
                     {"file": "b.json", "index": 7, "pre_dst": "贤酱"},
@@ -218,13 +218,13 @@ class MultiFilePatchTests(unittest.TestCase):
         runner = self._runner()
 
         one = _tool_patch_transl_cache(
-            runner, {"filename": "a.json", "patches": [{"index": 1, "pre_dst": "z"}]}
+            runner, {"action": "set", "filename": "a.json", "patches": [{"index": 1, "pre_dst": "z"}]}
         )
         self.assertEqual(one["changes"][0]["path"], "#1.pre_dst")  # 单文件：保持原来的短路径
 
         both = _tool_patch_transl_cache(
             runner,
-            {
+            {"action": "set",
                 "patches": [
                     {"file": "a.json", "index": 1, "pre_dst": "z2"},
                     {"file": "b.json", "index": 7, "pre_dst": "w"},
@@ -244,7 +244,7 @@ class MultiFilePatchTests(unittest.TestCase):
 
         result = _tool_patch_transl_cache(
             runner,
-            {
+            {"action": "set",
                 "filename": "a.json",
                 "patches": [
                     {"index": 1, "pre_dst": "z"},
@@ -261,7 +261,7 @@ class MultiFilePatchTests(unittest.TestCase):
         """两边都没给文件：报错说清怎么补，别猜一个文件改错地方。"""
         runner = self._runner()
         with self.assertRaises(AgentToolError) as ctx:
-            _tool_patch_transl_cache(runner, {"patches": [{"index": 1, "pre_dst": "z"}]})
+            _tool_patch_transl_cache(runner, {"action": "set", "patches": [{"index": 1, "pre_dst": "z"}]})
         self.assertIn("没写 file", str(ctx.exception))
         self.assertEqual(runner.saved, {})
 
@@ -279,7 +279,7 @@ class MultiFilePatchTests(unittest.TestCase):
 
         result = _tool_patch_transl_cache(
             runner,
-            {
+            {"action": "set",
                 "patches": [
                     {"file": "a.json", "index": 1, "pre_dst": "z"},
                     {"file": "b.json", "index": 7, "pre_dst": "w"},
@@ -298,7 +298,7 @@ class MultiFilePatchTests(unittest.TestCase):
         with self.assertRaises(AgentToolError) as ctx:
             _tool_patch_transl_cache(
                 runner,
-                {
+                {"action": "set",
                     "patches": [
                         {"file": "a.json", "index": 99, "pre_dst": "z"},
                         {"file": "b.json", "index": 98, "pre_dst": "w"},
@@ -321,7 +321,7 @@ class PatchMarkdownTests(unittest.TestCase):
         )
         result = _tool_patch_transl_cache(
             runner,
-            {
+            {"action": "set",
                 "patches": [
                     {"file": "a.json", "index": 1, "pre_dst": "贤酱"},
                     {"file": "b.json", "index": 7, "pre_dst": "贤酱"},
@@ -346,7 +346,7 @@ class PatchMarkdownTests(unittest.TestCase):
 
         runner = _StubRunner({"a.json": [{"index": 1, "pre_dst": "x"}]}, rebuild=rebuild)
         result = _tool_patch_transl_cache(
-            runner, {"filename": "a.json", "patches": [{"index": 1, "pre_dst": "y"}]}
+            runner, {"action": "set", "filename": "a.json", "patches": [{"index": 1, "pre_dst": "y"}]}
         )
 
         text = _render_tool_result_table("patch_transl_cache", result)
@@ -374,7 +374,7 @@ class ClearCommentTests(unittest.TestCase):
 
         result = _tool_patch_transl_cache(
             runner,
-            {
+            {"action": "set",
                 "filename": "a.json",
                 "clear_comment": True,
                 "patches": [{"index": 1, "pre_dst": "贤酱"}, {"index": 2, "proofread_dst": "早上好啊"}],
@@ -393,7 +393,7 @@ class ClearCommentTests(unittest.TestCase):
 
         result = _tool_patch_transl_cache(
             runner,
-            {"filename": "a.json", "clear_comment": True, "patches": [{"index": 1, "pre_dst": "贤酱"}]},
+            {"action": "set", "filename": "a.json", "clear_comment": True, "patches": [{"index": 1, "pre_dst": "贤酱"}]},
         )
 
         self.assertEqual(
@@ -407,7 +407,7 @@ class ClearCommentTests(unittest.TestCase):
 
         preview = _preview_cache_patch(
             runner,
-            {"filename": "a.json", "clear_comment": True, "patches": [{"index": 1, "pre_dst": "贤酱"}]},
+            {"action": "set", "filename": "a.json", "clear_comment": True, "patches": [{"index": 1, "pre_dst": "贤酱"}]},
         )
 
         self.assertEqual(
@@ -421,7 +421,7 @@ class ClearCommentTests(unittest.TestCase):
 
         _tool_patch_transl_cache(
             runner,
-            {
+            {"action": "set",
                 "filename": "a.json",
                 "clear_comment": True,
                 "patches": [
@@ -441,7 +441,7 @@ class ClearCommentTests(unittest.TestCase):
 
         result = _tool_patch_transl_cache(
             runner,
-            {"filename": "a.json", "clear_comment": True, "patches": [{"index": 1, "pre_dst": "贤酱"}]},
+            {"action": "set", "filename": "a.json", "clear_comment": True, "patches": [{"index": 1, "pre_dst": "贤酱"}]},
         )
 
         self.assertEqual([c["path"] for c in result["changes"]], ["#1.pre_dst"])
@@ -451,7 +451,7 @@ class ClearCommentTests(unittest.TestCase):
         runner = self._runner()
 
         result = _tool_patch_transl_cache(
-            runner, {"filename": "a.json", "clear_comment": True, "patches": [{"index": 1}]}
+            runner, {"action": "set", "filename": "a.json", "clear_comment": True, "patches": [{"index": 1}]}
         )
 
         self.assertEqual(result["updated"], 1)
@@ -464,7 +464,7 @@ class ClearCommentTests(unittest.TestCase):
         ])
 
         result = _tool_patch_transl_cache(
-            runner, {"filename": "a.json", "clear_comment": True, "patches": [{"index": 1}]}
+            runner, {"action": "set", "filename": "a.json", "clear_comment": True, "patches": [{"index": 1}]}
         )
 
         self.assertNotIn("trans_by", result)
@@ -476,7 +476,7 @@ class ClearCommentTests(unittest.TestCase):
 
         with self.assertRaises(AgentToolError) as ctx:
             _tool_patch_transl_cache(
-                runner, {"filename": "a.json", "clear_comment": True, "patches": [{"index": 1}]}
+                runner, {"action": "set", "filename": "a.json", "clear_comment": True, "patches": [{"index": 1}]}
             )
 
         self.assertIn("批注", str(ctx.exception))
@@ -488,7 +488,7 @@ class ClearCommentTests(unittest.TestCase):
 
         result = _tool_patch_transl_cache(
             runner,
-            {
+            {"action": "set",
                 "filename": "a.json",
                 "clear_comment": True,
                 "patches": [{"index": 1, "proofread_comment": "新意见"}, {"index": 2}],

@@ -17,15 +17,16 @@
 .extract-content .agent-console__project-static { min-width: 0; }
 .extract-content .agent-console__project-name { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .extract-bottom > .agent-notice, .extract-bottom > .extract-pending { width: min(100%, 840px); }
-.extract-composer .agent-composer__left { flex: 1; flex-wrap: wrap; }
-.extract-composer .agent-composer__right { align-self: flex-end; }
 .extract-composer .agent-composer__chip { max-width: 190px; }
 .extract-composer .agent-composer__chip--auto :is(.agent-composer__chip-icon, .agent-composer__chip-label) { color: var(--color-warning); }
-.extract-composer .agent-composer__input { display: block; box-shadow: none; }
+.extract-composer .agent-composer__input { box-shadow: none; }
 .extract-composer .agent-composer__input:focus-visible { outline: none; }
 .extract-composer .agent-composer__stop:disabled { opacity: .45; cursor: default; transform: none; }
 .extract-composer .agent-composer__stop:disabled:hover { background: var(--agent-tile-strong); color: var(--color-text-muted); }
 .extract-composer .agent-profile-menu { max-height: min(320px, 45vh); overflow-y: auto; }
+.extract-quick-commands::before { content: ''; position: absolute; bottom: 100%; left: 0; width: 100%; height: 8px; }
+.extract-composer .agent-profile-picker:nth-last-child(-n + 2) { flex-shrink: 0; }
+.extract-quick-commands .agent-profile-menu { min-width: 160px; }
 .extract-context-note { display: inline-flex; align-items: center; justify-content: center; color: var(--color-text-muted); width: 28px; height: 28px; }
 .extract-hint { font-size: 11px; text-align: center; color: var(--color-text-muted); margin: 0; }
 .extract-text-button { padding: 2px 4px; border: 0; background: transparent; color: var(--color-primary); font: inherit; cursor: pointer; border-radius: 5px; }

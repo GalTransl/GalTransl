@@ -108,7 +108,7 @@ def _md_render_list_dict_files(result: dict[str, Any]) -> str | None:
 
 
 def _md_render_project_overview(result: dict[str, Any]) -> str | None:
-    if not any(key in result for key in ("progress", "backend", "config", "config_field_descriptions")):
+    if not any(key in result for key in ("progress", "backend", "config", "config_field_descriptions", "plugins")):
         return None
     parts: list[str] = []
     if "progress" in result:
@@ -160,6 +160,8 @@ def _md_render_project_overview(result: dict[str, Any]) -> str | None:
         columns = ["key"] + (["value"] if has_config else []) + (["description"] if has_descriptions else [])
         title = "## config · 项目配置" if has_config else "## config_field_descriptions · 配置键说明"
         parts.extend([title, _md_table(columns, rows) if rows else "没有配置项。"])
+    if "plugins" in result:
+        parts.extend(["## plugins · 插件设置", _tool_result_json(result["plugins"])])
     if result.get("note"):
         parts.append(f"备注：{result['note']}")
     return _md_doc(*parts)
@@ -790,6 +792,7 @@ def _md_render_get_name_table(result: dict[str, Any]) -> str | None:
 
 # 工具名 → 渲染器。渲染只对这里列出的工具生效，其余工具维持 JSON。
 _MD_RENDERERS: dict[str, Any] = {
+    "get_project": _md_render_project_overview,
     "get_project_overview": _md_render_project_overview,
     "list_dict_files": _md_render_list_dict_files,
     "read_dict": _md_render_read_dict,

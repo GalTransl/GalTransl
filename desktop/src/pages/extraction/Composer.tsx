@@ -1,6 +1,7 @@
-import { useLayoutEffect, type RefObject } from 'react';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { Icon } from '../../components/Icon';
 import { usePageActive } from '../../components/PageActivity';
+import { useComposerAutosize } from '../../components/useComposerAutosize';
 import { ComposerSelect } from '../agent/ComposerSelect';
 import { ContextMeter, SendIcon, StopIcon } from '../agent/composer';
 import { extractionContextUsage } from './presentation';
@@ -21,15 +22,9 @@ export function ExtractionComposer({ draft, setDraft, textarea, session, running
   context?: AgentEvent; compacting?: boolean; send: () => void; stop: () => void; chooseSource: () => void; configure: () => void;
   imageInput?: ReturnType<typeof useImageInput>;
 }) {
-  const active = usePageActive();
   const usage = extractionContextUsage(context);
   const canSend = Boolean((draft.trim() || imageInput?.images.length) && !imageInput?.processing && !running && !busy && profile && ready);
-  useLayoutEffect(() => {
-    const input = textarea.current;
-    if (!input || !active) return;
-    input.style.height = 'auto';
-    input.style.height = `${Math.min(180, Math.max(54, input.scrollHeight))}px`;
-  }, [draft, active, textarea]);
+  useComposerAutosize(textarea, draft);
   return <div {...imageInput?.drop} className={`agent-composer extract-composer${running ? ' is-running' : ''}${imageInput?.dragging ? ' is-image-drop' : ''}`}>
     {imageInput && <ImageAttachments images={imageInput.images} remove={imageInput.remove} />}
     <textarea ref={textarea} className="agent-composer__input" aria-label={x('composer')} placeholder={x('composer')}
@@ -55,6 +50,7 @@ export function ExtractionComposer({ draft, setDraft, textarea, session, running
             label: x(value === 'ask' ? 'ask' : value === 'auto' ? 'auto' : value === 'auto-quiet' ? 'autoQuiet' : 'acceptEdits'),
             hint: value === 'auto' ? x('autoHint') : value === 'auto-quiet' ? x('autoQuietHint') : undefined,
           }))} />
+        <ExtractionQuickCommands setDraft={setDraft} textarea={textarea} />
       </div>
       <div className="agent-composer__right">
         {compacting ? <span className="extract-context-note" role="status" title={x('compacting')}><Icon name="repeat" /></span>
@@ -64,5 +60,56 @@ export function ExtractionComposer({ draft, setDraft, textarea, session, running
           aria-label={x(session?.status === 'stopping' ? 'stopping' : 'stop')} title={x(session?.status === 'stopping' ? 'stopping' : 'stop')}><StopIcon /></button>}
       </div>
     </div>
+  </div>;
+}
+
+function ExtractionQuickCommands({ setDraft, textarea }: {
+  setDraft: (text: string) => void; textarea: RefObject<HTMLTextAreaElement>;
+}) {
+  const active = usePageActive();
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const id = useId();
+  useEffect(() => { if (!active) setOpen(false); }, [active]);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false); };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+  }, [open]);
+  const showMenu = () => {
+    setOpen(true);
+    requestAnimationFrame(() => root.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus());
+  };
+  return <div className="agent-profile-picker extract-quick-commands" ref={root}
+    onMouseEnter={() => setOpen(true)} onMouseLeave={() => {
+      if (!root.current?.contains(document.activeElement)) setOpen(false);
+    }} onBlur={event => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+    }} onKeyDown={event => {
+      if (event.key === 'Escape') {
+        event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus(); return;
+      }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      if (!open) { showMenu(); return; }
+      const items = Array.from(root.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') || []);
+      const current = items.indexOf(document.activeElement as HTMLButtonElement);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+        : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      items[next]?.focus();
+    }}>
+    <button type="button" ref={trigger} className={`agent-composer__chip${open ? ' is-open' : ''}`}
+      aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined} onClick={showMenu}>
+      <span className="agent-composer__chip-icon"><Icon name="sparkle" /></span>
+      <span className="agent-composer__chip-label">{x('quickCommands')}</span>
+    </button>
+    {open && <div className="agent-profile-menu" id={id} role="menu" aria-label={x('quickCommands')}>
+      {([{ label: 'quickExtractLabel', prompt: 'quickExtract' }, { label: 'quickPatchLabel', prompt: 'quickPatch' }] as const)
+        .map(command => <button type="button" className="agent-profile-menu__item" key={command.prompt} role="menuitem" onClick={() => {
+          setDraft(x(command.prompt)); setOpen(false); textarea.current?.focus();
+        }}>{x(command.label)}</button>)}
+    </div>}
   </div>;
 }

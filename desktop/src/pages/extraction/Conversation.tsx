@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { usePageActive } from '../../components/PageActivity';
-import { useUiLanguage } from '../../i18n';
+import { t, useUiLanguage } from '../../i18n';
 import { AgentGroupView } from '../agent/rows/AgentGroupView';
 import { followTail } from '../agent/followTail';
 import { readingMemory } from '../agent/readingMemory';
@@ -12,6 +12,7 @@ import type { AgentEvent } from './types';
 import { AskUserCard } from '../agent/rows/AskUserCard';
 import { createAgentMotion } from '../agent/motion';
 import { extractionMotionEvent } from './motion';
+import { toolMeta, toolReason } from '../agent/toolMeta';
 
 const NO_MOTION_EVENTS: AgentEvent[] = [];
 
@@ -79,12 +80,15 @@ export function PendingRequest({ pending, answer, busy }: { pending: AgentEvent;
   useUiLanguage();
   const [text, setText] = useState('');
   const permission = pending.type === 'permission_request';
+  const reason = toolReason(pending.arguments);
   if (!permission && pending.questions?.length) return <AskUserCard
     item={{ kind: 'tool', step: 0, id: pending.toolCallId || '', name: 'ask_user', arguments: { questions: pending.questions } }}
     submitting={busy} error={null} onSubmit={answers => answer({ request_id: pending.requestId, answers })} />;
   return <section className={`agent-perm extract-pending${permission ? '' : ' extract-pending--question'}`} aria-live="polite" aria-label={x(permission ? 'permissionTitle' : 'questionTitle')}>
     <header className="agent-perm__head"><span className="agent-perm__icon"><Icon name={permission ? 'shield' : 'help'} /></span><strong className="agent-perm__title">{x(permission ? 'permissionTitle' : 'questionTitle')}</strong></header>
-    {permission ? <><div className="extract-pending__body"><p className="extract-muted">{x('commandWarning')}</p><details><summary>{pending.toolName}</summary><pre>{JSON.stringify(pending.arguments, null, 2)}</pre></details></div><div className="extract-actions">
+    {permission ? <><div className="extract-pending__body"><p className="extract-muted">{x('commandWarning')}</p>
+      {reason && <p className="agent-perm__reason">{t('agent:permissionCard.agentPerm_message_text', { reason })}</p>}
+      <details><summary>{toolMeta(pending.toolName, pending.arguments).action}</summary><pre>{JSON.stringify(pending.arguments, null, 2)}</pre></details></div><div className="extract-actions">
       {(['deny', 'allow-turn', 'allow-once'] as const).map(decision => <button type="button" key={decision} disabled={busy} className={`agent-perm__btn${decision === 'allow-once' ? ' is-primary' : ''}`} onClick={() => answer({ request_id: pending.requestId, decision })}>{x(decision === 'deny' ? 'deny' : decision === 'allow-turn' ? 'allowTurn' : 'allowOnce')}</button>)}
     </div></> : <form onSubmit={event => { event.preventDefault(); answer({ request_id: pending.requestId, text }); }}><div className="extract-pending__body"><p className="agent-ask__question">{pending.question}</p><textarea aria-label={x('answer')} value={text} onChange={event => setText(event.target.value)} placeholder={x('answer')} maxLength={10000} /></div><div className="extract-actions"><button className="agent-ask__btn is-primary" disabled={!text.trim() || busy}>{x('submit')}</button></div></form>}
   </section>;

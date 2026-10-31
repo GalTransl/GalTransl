@@ -127,14 +127,16 @@ def test_shared_loop_real_tool_approval_usage_and_restart(setup, model_server):
     runtime, session, available = setup
     profile, requests, responses = model_server
     sid, workspace = session["id"], Path(session["workspace"])
+    reason = '验证提取脚本并保存检查结果'
     responses.extend([
         {"reasoning_content": "Inspect only synthetic files.", "content": "Checking the synthetic output.",
-         "tool_calls": [call("run_python", {"code": "from pathlib import Path; Path('reports/fixture.txt').write_text('synthetic'); print('checked synthetic')"})]},
+         "tool_calls": [call("run_python", {"code": "from pathlib import Path; Path('reports/fixture.txt').write_text('synthetic'); print('checked synthetic')", "reason": reason})]},
         {"content": "Synthetic check finished."},
     ])
     runtime.start(sid, {"message": "Check synthetic fixture", "profile": profile, "permission_mode": "ask"})
     pending = wait_for(lambda: runtime.snapshot(sid)["pending"])
     assert pending["toolName"] == "run_python"
+    assert pending['arguments']['reason'] == reason
     assert not (workspace / "reports/fixture.txt").exists()
     with pytest.raises(ValueError, match="already running"):
         runtime.start(sid, {"message": "duplicate", "profile": profile})
@@ -146,7 +148,16 @@ def test_shared_loop_real_tool_approval_usage_and_restart(setup, model_server):
     assert {tool["function"]["name"] for tool in requests[0]["tools"]} == {tool["function"]["name"] for tool in EXTRACTION_TOOLS}
     assert "start_translation" not in str(requests[0]["tools"])
     assert requests[0]["reasoning_effort"] == "none"
+    first_user_message = next(message['content'] for message in requests[0]['messages'] if message['role'] == 'user')
+    assert '在第一次工具调用之前' in first_user_message
+    assert '主要步骤及验证方式' in first_user_message
+    assert '在连续工具调用之间穿插简短的助手正文反馈' in first_user_message
+    assert '不能仅放在思考内容或工具的 reason 参数中' in first_user_message
+    assert first_user_message.endswith('用户原始消息：\nCheck synthetic fixture')
     events = runtime.snapshot(sid)["events"]
+    intent_events = [event for event in events if event['type'] in {'tool_start', 'permission_request'}]
+    assert len(intent_events) == 2
+    assert all(event['arguments']['reason'] == reason for event in intent_events)
     user_events = [event for event in events if event["type"] == "user_message"]
     assert [event["text"] for event in user_events] == ["Check synthetic fixture"]
     assert user_events[0]["seq"] < next(event["seq"] for event in events if event["type"] == "assistant_start")
@@ -165,7 +176,9 @@ def test_shared_loop_real_tool_approval_usage_and_restart(setup, model_server):
     assert any(message.get("content") == "Synthetic check finished." for message in requests[-1]["messages"])
     assert requests[-1]["messages"][0] == requests[0]["messages"][0]
     assert requests[-1]["messages"][-1]["content"] == "Continue"
+    assert next(message['content'] for message in requests[-1]['messages'] if message['role'] == 'user') == first_user_message
     replay = module.ExtractionRuntime(runtime.store).snapshot(sid)["events"]
+    assert [event for event in replay if event['type'] in {'tool_start', 'permission_request'}] == intent_events
     assert [event["text"] for event in replay if event["type"] == "user_message"] == ["Check synthetic fixture", "Continue"]
     continuation = next(index for index, event in enumerate(replay) if event.get("text") == "Continue")
     assert replay[continuation + 1]["type"] == "state"

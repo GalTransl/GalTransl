@@ -78,6 +78,60 @@ test('extraction approval arguments start folded while decision buttons remain a
   act(() => renderer.unmount());
 });
 
+test('extraction approvals show intent and the localized tool name before opening arguments', () => {
+  const { PendingRequest } = load(new URL('../src/pages/extraction/Conversation.tsx', import.meta.url));
+  let renderer;
+  act(() => { renderer = create(h(PendingRequest, { pending: { type: 'permission_request', requestId: 'intent-approval',
+    toolName: 'run_python', arguments: { code: 'print("fixture")', reason: '验证剧本提取结果' } }, busy: false, answer() {} })); });
+  assert.equal(renderer.root.findByProps({ className: 'agent-perm__reason' }).children.join(''), '原因：验证剧本提取结果');
+  assert.equal(renderer.root.findByType('summary').children.join(''), '运行 Python');
+  assert.equal(Boolean(renderer.root.findByType('details').props.open), false);
+  act(() => renderer.unmount());
+});
+
+test('intent stays visible in folded extraction tools while running, finished, failed and replayed', () => {
+  const { reduceEvents } = load(new URL('../src/pages/extraction/transcript.ts', import.meta.url));
+  const { ToolRow } = load(new URL('../src/pages/agent/rows/ToolRow.tsx', import.meta.url));
+  for (const name of ['read', 'write', 'edit', 'bash', 'run_python']) {
+    const reason = '检查剧本文件格式';
+    const start = { type: 'tool_start', toolCallId: `intent-${name}`, toolName: name, arguments: { reason } };
+    for (const state of ['running', 'finished', 'failed']) {
+      const events = [start, ...(state === 'running' ? [] : [{ type: 'tool_end', toolCallId: start.toolCallId, text: 'tool output', isError: state === 'failed' }])];
+      const replayed = reduceEvents([], events);
+      const streamed = events.reduce((rows, event) => reduceEvents(rows, [event]), []);
+      assert.deepEqual(streamed, replayed);
+      const item = extractionTimeline(replayed, state === 'running', null)[0].items[0];
+      let renderer;
+      act(() => { renderer = create(h(ToolRow, { item, phase: state === 'running' ? 'running' : undefined,
+        persistKey: `intent-${name}-${state}`, autoExpand: false })); });
+      const summary = renderer.root.findByProps({ className: 'agent-tool__summary' });
+      assert.equal(summary.children.join(''), reason);
+      assert.equal(summary.props.title, reason);
+      assert.equal(renderer.root.findByProps({ className: 'agent-tool__header' }).props['aria-expanded'], false);
+      act(() => renderer.unmount());
+    }
+  }
+});
+
+test('both Agent timelines render localized billion-context tool names', () => {
+  const { buildTimeline } = load(new URL('../src/pages/agent/timeline.ts', import.meta.url));
+  const { ToolRow } = load(new URL('../src/pages/agent/rows/ToolRow.tsx', import.meta.url));
+  for (const [name, label] of [
+    ['compress', '压缩上下文'], ['decompress', '还原上下文'],
+    ['search_context', '搜索上下文'], ['acp_status', '查看上下文状态'],
+  ]) {
+    const translation = buildTimeline([{ type: 'tool_call', step: 1, id: name, name, arguments: {} }]);
+    const extraction = extractionTimeline([{ id: name, role: 'tool', tool: name, args: {}, text: '' }], true, null);
+    for (const [agent, timeline] of [['translation', translation], ['extraction', extraction]]) {
+      let renderer;
+      act(() => { renderer = create(h(ToolRow, { item: timeline[0].items[0], phase: 'running',
+        persistKey: `billion-${agent}-${name}`, autoExpand: false })); });
+      assert.equal(renderer.root.findByProps({ className: 'agent-tool__name is-running' }).children.join(''), label);
+      act(() => renderer.unmount());
+    }
+  }
+});
+
 test('live and replayed user events render the shared user message bubbles in turn order', () => {
   const { reduceEvents } = load(new URL('../src/pages/extraction/transcript.ts', import.meta.url));
   const { AgentGroupView } = load(new URL('../src/pages/agent/rows/AgentGroupView.tsx', import.meta.url));

@@ -152,7 +152,7 @@ class WaitForJobTests(unittest.TestCase):
 
         self.assertTrue(result["wait_completed"])
         self.assertNotIn("runtime", result)
-        self.assertIn("get_runtime", result["note"])  # 没带快照就让它自己去查
+        self.assertIn('translation(action="status")', result["note"])  # 没带快照就让它自己去查
 
     def test_failed_job_returns_its_error_and_stops_early(self):
         runner = self._runner()

@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { AgentSettingsDialog } from '../../components/AgentSettings';
 import { CustomSelect } from '../../components/CustomSelect';
@@ -44,18 +44,32 @@ export function CreateDialog({ close, create, busy }: { close: () => void; creat
     <footer><button type="button" onClick={close}>{x('cancel')}</button><button className="extract-primary" disabled={!game.trim() || busy}>{x('create')}</button></footer>
   </form></Dialog>;
 }
-export function EnvironmentDialog({ initial, close, saved }: { initial: Environment; close: () => void; saved: (environment: Environment) => void }) {
+export function EnvironmentDialog({ initial, refresh, close, saved }: {
+  initial: Environment | null; refresh: () => Promise<Environment>; close: () => void; saved: (environment: Environment) => void;
+}) {
   useUiLanguage();
   const connection = useConnection();
   const pythonId = useId();
   const formId = useId();
   const [manualPython, setManualPython] = useState(false);
   const [runtime, setRuntime] = useState(initial);
-  const [settings, setSettings] = useState(initial.settings);
-  const [skill, setSkill] = useState<SkillStatus | null>(initial.skill);
+  const [settings, setSettings] = useState(initial?.settings ?? { skill_dir: '', python_path: '' });
+  const [skill, setSkill] = useState<SkillStatus | null>(initial?.skill ?? null);
   const [error, setError] = useState('');
-  const [action, setAction] = useState<'' | 'saving' | 'checking' | 'installing' | 'detecting'>('');
+  const [action, setAction] = useState<'' | 'saving' | 'checking' | 'installing' | 'detecting'>('detecting');
+  const [reload, setReload] = useState(0);
   const busy = action !== '';
+  useEffect(() => {
+    let disposed = false;
+    setAction('detecting'); setError('');
+    void refresh().then(result => {
+      if (disposed) return;
+      setRuntime(result); setSettings(result.settings); setSkill(result.skill);
+    }).catch(error => {
+      if (!disposed) setError(error instanceof Error ? error.message : String(error));
+    }).finally(() => { if (!disposed) setAction(''); });
+    return () => { disposed = true; };
+  }, [refresh, reload]);
   const refreshPythons = () => {
     setAction('detecting'); setError('');
     return extractionApi<Environment>('environment').then(setRuntime)
@@ -90,10 +104,10 @@ export function EnvironmentDialog({ initial, close, saved }: { initial: Environm
   return <AgentSettingsDialog agent="extraction" backendUrl={connection.backendUrl} close={close}
     className="extract-environment-dialog" footer={<>
       <span className="extract-environment-save-hint">{x('runtimeSaveHint')}</span>
-      <button type="button" disabled={busy} onClick={close}>{x('cancel')}</button>
-      <button type="submit" form={formId} className="extract-primary" disabled={busy}>{x('save')}</button>
+      <button type="button" disabled={action === 'saving' || action === 'installing'} onClick={close}>{x('cancel')}</button>
+      <button type="submit" form={formId} className="extract-primary" disabled={busy || !runtime}>{x('save')}</button>
     </>}>
-    <form id={formId} onSubmit={event => void submit(event)}>
+    {runtime ? <form id={formId} onSubmit={event => void submit(event)}>
       <fieldset className="extract-environment-fields" disabled={busy}>
         <section className="extract-environment-card">
           <header className="extract-environment-card__header">
@@ -160,7 +174,8 @@ export function EnvironmentDialog({ initial, close, saved }: { initial: Environm
           <p className="extract-muted">{x('pythonLocalDescription')}</p>
         </section>
       </fieldset>
-      {error && <p role="alert" className="extract-error">{error}</p>}
-    </form>
+    </form> : action === 'detecting' ? <p className="extract-muted" role="status">{x('loading')}</p>
+      : <button type="button" className="extract-text-button" onClick={() => setReload(value => value + 1)}>{x('reload')}</button>}
+    {error && <p role="alert" className="extract-error">{error}</p>}
   </AgentSettingsDialog>;
 }

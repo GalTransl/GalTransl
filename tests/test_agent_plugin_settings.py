@@ -50,7 +50,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
                 fields = _tool_get_plugin_settings(runner, {"plugin_name": "problem_common"})["plugins"][0]["settings"]
                 self.assertEqual(fields[0]["value"], 17)
                 self.assertFalse(fields[0]["overridden"])
-                args = {"updates": [
+                args = {"action": "set", "updates": [
                     {"key": "plugin.problemPlugins", "value": ["problem_common"]},
                     {"key": "plugin.problem_common.avgSentenceLengthThreshold", "value": 25},
                 ]}
@@ -67,14 +67,14 @@ class PluginSettingsAgentTests(unittest.TestCase):
                 runner = Runner(self.plugins, {"plugin": plugin})
                 with self.assertRaises(AgentToolError):
                     _tool_get_plugin_settings(runner, {"plugin_name": "problem_common"})
-                result = _tool_update_project_config(runner, {"updates": [
+                result = _tool_update_project_config(runner, {"action": "set", "updates": [
                     {"key": "plugin.problem_common.avgSentenceLengthThreshold", "value": 25},
                 ]})
                 self.assertEqual(result["updated"], 0)
                 self.assertEqual(runner.config["plugin"], plugin)
                 self.assertEqual(runner.writes, [])
         runner = Runner([], {"plugin": "invalid"})
-        result = _tool_update_project_config(runner, {"updates": [{"key": "plugin.problemPlugins", "value": []}]})
+        result = _tool_update_project_config(runner, {"action": "set", "updates": [{"key": "plugin.problemPlugins", "value": []}]})
         self.assertEqual(result["updated"], 0)
         self.assertEqual(runner.config["plugin"], "invalid")
 
@@ -86,7 +86,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
         self.assertEqual(threshold["default"], 17)
         self.assertEqual(threshold["value"], 8)
         self.assertFalse(threshold["overridden"])
-        args = {"updates": [{"key": "plugin.problem_common.avgSentenceLengthThreshold", "value": 25}]}
+        args = {"action": "set", "updates": [{"key": "plugin.problem_common.avgSentenceLengthThreshold", "value": 25}]}
         preview = _preview_config_update(runner, args)
         result = _tool_update_project_config(runner, args)
         self.assertEqual(preview["changes"], result["changes"])
@@ -96,7 +96,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
 
     def test_problem_plugin_selection_can_be_added_to_legacy_project(self):
         runner = Runner([], {"plugin": {"filePlugin": "auto"}})
-        args = {"updates": [{"key": "plugin.problemPlugins", "value": []}]}
+        args = {"action": "set", "updates": [{"key": "plugin.problemPlugins", "value": []}]}
         preview = _preview_config_update(runner, args)
         result = _tool_update_project_config(runner, args)
         self.assertEqual(preview["changes"], result["changes"])
@@ -128,7 +128,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
         runner = Runner(self.plugins, {"common": {"language": "zh-cn"}, "plugin": {
             "filePlugin": "auto", "textPlugins": ["text_common_normalfix"],
             "file_msgtool_script": {"timeout": 500}}})
-        args = {"updates": [{"key": "plugin.file_msgtool_script.jis_substitution", "value": True}]}
+        args = {"action": "set", "updates": [{"key": "plugin.file_msgtool_script.jis_substitution", "value": True}]}
         preview = _preview_config_update(runner, args)
         self.assertEqual(runner.writes, [])
         result = _tool_update_project_config(runner, args)
@@ -140,7 +140,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
 
     def test_missing_plugin_objects_and_repeated_updates(self):
         runner = Runner(self.plugins, {"common": {"language": "zh-cn"}})
-        args = {"updates": [
+        args = {"action": "set", "updates": [
             {"key": "plugin.file_msgtool_script.jis_substitution", "value": True},
             {"key": "plugin.file_msgtool_script.jis_substitution", "value": False}]}
         preview = _preview_config_update(runner, args)
@@ -163,7 +163,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
         ):
             with self.subTest(key=key, value=value):
                 runner = Runner(self.plugins)
-                args = {"updates": [{"key": key, "value": value}]}
+                args = {"action": "set", "updates": [{"key": key, "value": value}]}
                 self.assertIsNone(_preview_config_update(runner, args))
                 result = _tool_update_project_config(runner, args)
                 self.assertEqual(result["updated"], 0)
@@ -177,7 +177,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
         info = _tool_get_plugin_settings(runner, {"plugin_name": "custom"})
         self.assertNotIn("PROJECT_SECRET", json.dumps(info))
         self.assertNotIn("DEFAULT_SECRET", json.dumps(info))
-        result = _tool_update_project_config(runner, {"updates": [
+        result = _tool_update_project_config(runner, {"action": "set", "updates": [
             {"key": "plugin.custom.a.b", "value": True},
             {"key": "plugin.custom.token", "value": "other"}]})
         self.assertEqual(result["updated"], 1)
@@ -193,7 +193,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
             catalog = _scan_plugins(directory)
             plugin = next(p for p in catalog if p["module"] == "file_msgtool_script")
             self.assertEqual(plugin["settings"], {"custom": 1})
-            result = _tool_update_project_config(Runner(catalog), {"updates": [
+            result = _tool_update_project_config(Runner(catalog), {"action": "set", "updates": [
                 {"key": "plugin.file_msgtool_script.jis_substitution", "value": True}]})
             self.assertEqual(result["updated"], 0)
 
@@ -201,7 +201,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
         runner = Runner(self.plugins)
         runner._http_get = lambda path: {"config": runner.config}
         with self.assertRaises(AgentToolError):
-            _tool_update_project_config(runner, {"updates": [
+            _tool_update_project_config(runner, {"action": "set", "updates": [
                 {"key": "plugin.file_msgtool_script.jis_substitution", "value": True}]})
         self.assertEqual(runner.writes, [])
 

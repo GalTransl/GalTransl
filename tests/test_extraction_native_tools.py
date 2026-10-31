@@ -20,6 +20,7 @@ from GalTransl.Agent.images import expand_message
 from GalTransl.Agent.models import AgentToolError
 from GalTransl.Extraction.pi_output import OutputAccumulator
 from GalTransl.Extraction.pi_text import MAX_BYTES, apply_edits, edit_diff, truncate
+from GalTransl.Extraction.runner import display_arguments
 from GalTransl.Extraction.tool_schemas import EXTRACTION_TOOLS
 from test_extraction_tool_parity import REFERENCE, fixture
 
@@ -31,6 +32,7 @@ def text(result):
 @pytest.mark.parametrize('reference', [item for item in REFERENCE['native_schemas'] if item['name'] in {'read', 'bash', 'edit', 'write'}], ids=lambda item: item['name'])
 def test_native_argument_schema(reference):
     schema = next(item['function']['parameters'] for item in EXTRACTION_TOOLS if item['function']['name'] == reference['name'])
+    schema = {**schema, 'properties': {key: value for key, value in schema['properties'].items() if key != 'reason'}}
     def shape(spec):
         return {key: ({name: shape(value) for name, value in spec[key].items()} if key == 'properties'
                       else shape(spec[key]) if key == 'items' else spec[key])
@@ -38,9 +40,53 @@ def test_native_argument_schema(reference):
     assert shape(schema) == shape(reference['parameters'])
 
 
+@pytest.mark.parametrize('name,args', [
+    ('read', {'path': 'text'}),
+    ('write', {'path': 'text', 'content': 'before'}),
+    ('edit', {'path': 'text', 'edits': [{'oldText': 'before', 'newText': 'after'}]}),
+    ('bash', {'command': 'printf checked'}),
+    ('run_python', {'code': 'print("checked")'}),
+])
+def test_main_tools_accept_intent_without_changing_results(fixture, name, args):
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    (runner.tools.workspace / 'text').write_text('before')
+    result = runner._dispatch_tool(name, {**args, 'reason': '检查剧本文件'})
+    assert result
+    if name in {'read', 'write', 'edit'}:
+        assert 'reason' not in result
+    for invalid in (None, 1, ['intent'], '中' * 201):
+        with pytest.raises(AgentToolError, match='reason'):
+            runner._dispatch_tool(name, {**args, 'reason': invalid})
+
+
+@pytest.mark.parametrize('name,args', [
+    ('write', {'path': 'scripts/large.txt', 'content': '中' * 30000}),
+    ('edit', {'path': 'scripts/large.txt', 'edits': [{'oldText': '中' * 30000, 'newText': 'changed'}]}),
+    ('run_python', {'code': '#' + '中' * 19000}),
+])
+def test_intent_survives_bounded_call_and_approval_previews(fixture, name, args):
+    runner, _ = fixture
+    events = []
+    runner.publish = events.append
+    arguments = {**args, 'reason': '检查大文件中的剧本格式'}
+    original = json.dumps(arguments)
+    preview = display_arguments(arguments)
+    assert preview['reason'] == arguments['reason']
+    assert 'truncated' in json.dumps(preview)
+    assert len(json.dumps(preview, ensure_ascii=False).encode()) < 25000
+    runner._emit('tool_call', {'name': name, 'id': 'large', 'arguments': arguments})
+    runner._emit('permission_request', {'name': name, 'id': 'approval', 'tool_call_id': 'large', 'arguments': arguments})
+    assert [event['type'] for event in events] == ['tool_start', 'permission_request']
+    assert all(event['arguments']['reason'] == arguments['reason'] for event in events)
+    assert all(event['arguments'] == preview for event in events)
+    assert json.dumps(arguments) == original
+
+
 def test_system_prompt_carries_pi_tool_snippets_and_guidelines(fixture):
     runner, _ = fixture
     prompt = runner._system_prompt()
+    assert "include reason: one short sentence in the user's language" in prompt
     assert ('Available tools:\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n'
             '- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n'
             '- write: Create or overwrite files\n\n'

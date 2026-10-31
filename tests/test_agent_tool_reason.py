@@ -10,7 +10,6 @@ import unittest
 
 from GalTransl.Agent.runtime import (
     AGENT_TOOLS,
-    _REASON_PROPERTY,
     _TOOLS_WITH_REASON,
     _attach_reason,
 )
@@ -25,14 +24,14 @@ def _tool_schema(name: str) -> dict:
 
 class ReasonSchemaTests(unittest.TestCase):
     def test_reason_tools_declare_it_as_optional(self) -> None:
-        for name in sorted(_TOOLS_WITH_REASON):
+        for name in ("update_project_config", "guideline", "dictionary", "names", "edit_transl_cache", "problems", "subagents", "translation"):
             schema = _tool_schema(name)
             # 同一份描述对象，这些工具不各写一遍
-            self.assertIs(schema["parameters"]["properties"].get("reason"), _REASON_PROPERTY, name)
+            self.assertEqual(schema["parameters"]["properties"]["reason"]["type"], "string", name)
             self.assertNotIn("reason", schema["parameters"].get("required") or [], name)
 
     def test_read_tools_do_not_declare_reason(self) -> None:
-        for name in ("get_project_overview", "read_transl_cache", "read_guideline", "list_problems"):
+        for name in ("get_project", "read_transl_cache", "input", "output", "ask_user", "read_history_archive"):
             properties = _tool_schema(name)["parameters"]["properties"]
             self.assertNotIn("reason", properties, name)
 
@@ -47,7 +46,7 @@ class ReasonSchemaTests(unittest.TestCase):
             for tool in AGENT_TOOLS
             if "reason" in tool["function"]["parameters"].get("properties", {})
         }
-        self.assertEqual(declared - {"wait"}, set(_TOOLS_WITH_REASON))
+        self.assertEqual(declared, {"update_project_config", "guideline", "dictionary", "names", "edit_transl_cache", "problems", "subagents", "translation"})
 
 
 class AttachReasonTests(unittest.TestCase):

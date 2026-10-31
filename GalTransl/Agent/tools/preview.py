@@ -15,7 +15,7 @@ from GalTransl.Agent.tools.cache import (
     _resolve_cache_replace_files,
 )
 from GalTransl.Agent.tools.cache_fields import _PATCHABLE_FIELDS
-from GalTransl.Agent.tools.common import _diff_lines, _parse_index_spec
+from GalTransl.Agent.tools.common import _diff_lines, _parse_index_spec, _write_action
 from GalTransl.Agent.models import AgentToolError
 from GalTransl.Agent.tools.dicts import _dict_new_lines, _dict_save_plan, _dict_file_categories
 from GalTransl.Agent.tools.names import _name_table_changes, _name_table_save_plan
@@ -26,7 +26,7 @@ from GalTransl.Agent.tools.problems import (
     _parse_filter_keywords,
     _plan_problem_filter,
 )
-from GalTransl.Agent.tools.project import _plan_config_updates
+from GalTransl.Agent.tools.project import _plan_config_updates, _guideline_write_request
 from GalTransl.Agent.tools.plugin_settings import catalog_for_updates
 from GalTransl.Agent.tools.proofread import _tool_revert_proofread_changes
 
@@ -114,16 +114,16 @@ def _preview_cache_patch(runner: AgentRunner, args: dict[str, Any]) -> dict[str,
     for filename, patches in targets:
         try:
             data = runner._http_get(f"/api/projects/{pid}/cache/{urllib.parse.quote(filename)}")
+            entries = data.get("entries", []) if isinstance(data, dict) else []
+            if not isinstance(entries, list):
+                continue
+            planned = (
+                _plan_cache_replacements(entries, replace_request, _PATCHABLE_FIELDS, clear_comment=clear_comment)
+                if replace_request is not None
+                else _plan_cache_patches(entries, patches, _PATCHABLE_FIELDS, clear_comment=clear_comment)
+            )
         except AgentToolError:
             continue
-        entries = data.get("entries", []) if isinstance(data, dict) else []
-        if not isinstance(entries, list):
-            continue
-        planned = (
-            _plan_cache_replacements(entries, replace_request, _PATCHABLE_FIELDS, clear_comment=clear_comment)
-            if replace_request is not None
-            else _plan_cache_patches(entries, patches, _PATCHABLE_FIELDS, clear_comment=clear_comment)
-        )
         files.append(filename)
         for change in planned["changes"]:
             row = {**change, "file": filename}
@@ -142,6 +142,7 @@ def _preview_cache_patch(runner: AgentRunner, args: dict[str, Any]) -> dict[str,
 
 def _preview_cache_delete(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
     """delete_transl_cache 的预览（只覆盖"按 index 删条目"；整文件删除没有 diff 可看）。"""
+    _write_action(args, ("delete",))
     filename = str(args.get("filename", "")).strip()
     index_spec = str(args.get("indexes", "") or "").strip()
     if not filename or not index_spec:
@@ -192,6 +193,7 @@ def _preview_dict_write(runner: AgentRunner, args: dict[str, Any]) -> dict[str, 
 
 def _preview_config_update(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
     """update_project_config 的预览：读配置 + 在副本上算一遍改完的结果（一行都不写回）。"""
+    _write_action(args, ("set",))
     updates = args.get("updates")
     if not isinstance(updates, list) or not updates:
         return None
@@ -210,10 +212,10 @@ def _preview_config_update(runner: AgentRunner, args: dict[str, Any]) -> dict[st
 def _preview_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
     """manage_problem_filter 的预览：读现在的清单，算出这次会加/删哪几个关键字。
 
-    只覆盖 add / remove：list 不改任何东西，没有 diff 可看。
+    只覆盖 set / delete：list 不改任何东西，没有 diff 可看。
     """
-    action = str(args.get("action", "")).strip()
-    if action not in ("add", "remove"):
+    action = _write_action(args, ("list", "set", "delete"))
+    if action not in ("set", "delete"):
         return None
     pid = runner._project_id()
     config_name = runner.state.config_file_name or DEFAULT_CONFIG_FILE
@@ -231,10 +233,10 @@ def _preview_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> dict[s
 def _preview_problem_white_list(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
     """manage_problem_white_list 的预览：读现在的白名单，算出这次会加/删哪几条。
 
-    只覆盖 add / remove：list 不改任何东西，没有 diff 可看。
+    只覆盖 set / delete：list 不改任何东西，没有 diff 可看。
     """
-    action = str(args.get("action", "")).strip()
-    if action not in ("add", "remove"):
+    action = _write_action(args, ("list", "set", "delete"))
+    if action not in ("set", "delete"):
         return None
     entries = _parse_filter_keywords(args.get("entry"))
     if not entries:
@@ -256,20 +258,12 @@ def _preview_guideline_write(runner: AgentRunner, args: dict[str, Any]) -> dict[
     第二份，早晚对不上。所以预览也走那个入口，只是带 dry_run（服务端算完就走，不落盘）：
     连 replace 没命中、超长这类校验结果都跟真执行一致。
     """
-    mode = str(args.get("mode", "") or "").strip()
-    if mode not in ("overwrite", "append", "replace"):
-        return None
+    body = _guideline_write_request(args)
     endpoint = f"/api/projects/{runner._project_id()}/guideline"
     before = str((runner._http_get(endpoint) or {}).get("content") or "")
-    preview = runner._http_put(endpoint, {
-        "mode": mode,
-        "content": str(args.get("content", "") or ""),
-        "old_text": str(args.get("old_text", "") or ""),
-        "new_text": str(args.get("new_text", "") or ""),
-        "dry_run": True,
-    })
+    preview = runner._http_put(endpoint, {**body, "dry_run": True})
     after = str((preview or {}).get("content") or "") if isinstance(preview, dict) else ""
-    if not after or after == before:
+    if after == before:
         return None  # 内容没变（如 append 一段已有的文字）：没有 diff 可显示
     return {"changed": True, "line_diff": _diff_lines(before, after)}
 
@@ -277,7 +271,7 @@ def _preview_guideline_write(runner: AgentRunner, args: dict[str, Any]) -> dict[
 def _preview_name_table(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
     """save_name_table 的预览：拿旧表按 src_name 比出新增/移除/改译名。
 
-    按保存时相同的 mode 合并规则计算最终表，再比较译名（见 _name_table_changes）；
+    按保存时相同的 action 合并规则计算最终表，再比较译名（见 _name_table_changes）；
     原样回传同一张表时不产生任何 changes，卡上就不显示这块。
     """
     names = args.get("names", [])

@@ -6,6 +6,7 @@ import { Icon } from '../components/Icon';
 import { AgentSettingsButton } from '../components/AgentSettings';
 import { useUiLanguage } from '../i18n';
 import { addOpenProject, encodeProjectDir, getBackendProfile } from '../lib/api';
+import { basenamePath } from '../lib/paths';
 import { addProjectToHistory } from './HomePage';
 import { Conversation, PendingRequest } from './extraction/Conversation';
 import { CreateDialog, EnvironmentDialog } from './extraction/Dialogs';
@@ -111,14 +112,14 @@ export function ExtractionPage() {
       {!agent.sessions.total && <div className="agent-sessions__empty">{x('emptySessions')}</div>}
       {agent.sessions.next_offset != null && <button type="button" className="agent-sessions__show-more" onClick={() => void agent.refreshSessions(agent.sessions.next_offset!).catch(e => agent.setError(String(e)))}>{x('more')}</button>}</nav>
       <AgentSettingsButton ready={agent.environment?.ready ?? false} label={x(agent.environment?.ready ? 'ready' : 'setup')}
-        onClick={() => { void agent.refreshEnvironment().then(() => setDialog('environment')).catch(e => agent.setError(String(e))); }} />
+        onClick={() => setDialog('environment')} />
     </aside>
     <div className="extract-content">
       <header className="agent-console__bar">
         <div className="agent-console__bar-left">
           <span className="agent-console__avatar" aria-hidden><Icon name="agent-extract" /></span>
           <div className="agent-console__bar-copy"><div className="agent-console__bar-title"><span className="agent-console__bar-name">{x('title')}</span></div>
-            <div className="agent-console__project-static">{session ? <><span className="agent-console__project-name">{session.title}</span><span className="agent-console__project-path" title={session.game_dir}>{session.game_dir}</span></> : <span className="agent-console__project-empty">{x('subtitle')}</span>}</div>
+            <div className="agent-console__project-static">{session ? <><span className="agent-console__project-name">{basenamePath(session.game_dir) || session.game_dir}</span><span className="agent-console__project-path" title={session.game_dir}>{session.game_dir}</span></> : <span className="agent-console__project-empty">{x('subtitle')}</span>}</div>
           </div>
         </div>
         <div className="agent-console__bar-right">
@@ -143,7 +144,7 @@ export function ExtractionPage() {
           profile={profile} profileSelection={boundProfile} defaultProfile={defaultProfile} setProfile={setProfile} models={modelNames} mode={mode} setMode={changeMode} context={agent.view?.contextUsage} compacting={agent.view?.compacting}
           send={() => void send()} stop={() => { void agent.mutate('stop', {}); }} chooseSource={() => setDialog('create')} configure={() => navigate('/backend-profiles')} />
         {!modelNames.length && <div className="extract-hint">{x('noModel')} <button type="button" className="extract-text-button" onClick={() => navigate('/backend-profiles')}>{x('configureModel')}</button></div>}
-        {session && !agent.environment?.ready && <div className="extract-hint"><button type="button" className="extract-text-button" onClick={() => { if (agent.environment) setDialog('environment'); }}>{x('setup')}</button></div>}
+        {session && !agent.environment?.ready && <div className="extract-hint"><button type="button" className="extract-text-button" onClick={() => setDialog('environment')}>{x('setup')}</button></div>}
       </div>
     </main>
       {session && <div id="extraction-workspace" className="extract-workspace-shell" aria-hidden={!showWorkspace} {...(!showWorkspace ? { inert: '' } : {})}>
@@ -151,6 +152,6 @@ export function ExtractionPage() {
       </div>}
     </div>
     {dialog === 'create' && <CreateDialog close={() => setDialog(null)} create={create} busy={agent.busy} />}
-    {dialog === 'environment' && agent.environment && <EnvironmentDialog initial={agent.environment} close={() => setDialog(null)} saved={agent.setEnvironment} />}
+    {dialog === 'environment' && <EnvironmentDialog initial={agent.environment} refresh={agent.refreshEnvironment} close={() => setDialog(null)} saved={agent.setEnvironment} />}
   </div>;
 }

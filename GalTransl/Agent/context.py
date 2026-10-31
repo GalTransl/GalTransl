@@ -6,6 +6,9 @@ import hashlib
 import json
 from typing import Any, Sequence
 
+from GalTransl.Agent.models import AgentToolError
+from GalTransl.Agent.tool_operations import tool_operation
+
 from GalTransl.Agent.core import (
     ASCII_CHARS_PER_TOKEN,
     COMPACT_ARCHIVE_TOOL_RESULT_CHARS,
@@ -337,6 +340,19 @@ MICROCOMPACT_TOOLS = frozenset({
 })
 
 
+def _history_tool_operation(function: dict[str, object]) -> str:
+    """Malformed historical calls stay protected from automatic cleanup."""
+    name = str(function.get("name") or "")
+    raw = function.get("arguments")
+    if not isinstance(raw, str):
+        return name
+    try:
+        args = json.loads(raw or "{}")
+        return tool_operation(name, args) if isinstance(args, dict) else ""
+    except (ValueError, AgentToolError):
+        return ""
+
+
 def _microcompact_tool_results(messages: list[dict[str, Any]]) -> list[int]:
     """找出可清理的旧读取结果；保留最近五个调用轮次，不拆工具协议配对。
 
@@ -351,7 +367,7 @@ def _microcompact_tool_results(messages: list[dict[str, Any]]) -> list[int]:
             if group:
                 groups.append(group)
             group = []
-            calls = {str(call.get("id")): str((call.get("function") or {}).get("name") or "")
+            calls = {str(call.get("id")): _history_tool_operation(call.get("function") or {})
                      for call in message.get("tool_calls") or [] if isinstance(call, dict) and call.get("id")}
         if message.get("role") != "tool" or calls.get(str(message.get("tool_call_id"))) not in MICROCOMPACT_TOOLS:
             continue
@@ -499,7 +515,7 @@ def _task_continuation(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
             add("assistant", text)
             for call in message.get("tool_calls") or []:
                 if isinstance(call, dict):
-                    name = (call.get("function") or {}).get("name")
+                    name = _history_tool_operation(call.get("function") or {})
                     if name in ("ask_user", "start_translation", "stop_translation", "wait") and call.get("id"):
                         relevant_calls[str(call["id"])] = name
         elif role == "tool" and str(message.get("tool_call_id") or "") in relevant_calls:

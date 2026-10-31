@@ -3250,6 +3250,7 @@
 }
 
 .agent-composer__input {
+  display: block;
   width: 100%;
   min-height: 54px;
   max-height: 180px;
@@ -3289,6 +3290,9 @@
   gap: 6px;
   min-width: 0;
 }
+
+.agent-composer__left { flex: 1; }
+.agent-composer__right { align-self: flex-end; }
 
 .agent-composer__chip {
   display: inline-flex;
@@ -3636,6 +3640,8 @@
     padding-right: var(--space-4);
     padding-bottom: var(--space-4);
   }
+
+  .agent-composer__left { flex-wrap: wrap; }
 
   .agent-row--user .agent-bubble--user {
     width: 100%;

@@ -21,8 +21,22 @@ from .tool_schemas import EXTRACTION_TOOLS, prepare_arguments, tool_prompt_secti
 from .tools import ExtractionTools
 
 
+INITIAL_USER_MESSAGE_PREFIX = """【本次请求的二次判断】
+先判断下面的用户原始消息是否只是简单问候（例如“你好”“嗨”“hello”“在吗”或类似没有具体任务的寒暄）。
+- 如果只是简单问候：只需简短、礼貌地回复一句并询问用户想做什么；不要调用任何工具，不要查看目录，也不要开始提取流程。
+- 如果包含明确任务：再按系统提示处理该任务，并区分咨询解释与实际执行。
+- 如果需要实际执行任务：在第一次工具调用之前，先用用户语言在助手正文中简短说明将要如何完成任务（主要步骤及验证方式），随后开始调用工具执行任务。
+- 工具调用期间，在连续工具调用之间穿插简短的助手正文反馈，说明当前状况、已确认的进展或发现的问题，以及下一步；在关键阶段完成、遇到阻碍或调整方案时及时反馈，不要连续只调用工具直到最后才回复。
+- 计划和进度必须是用户可见的自然语言正文，不能仅放在思考内容或工具的 reason 参数中；依据实际结果说明进度，不编造完成状态。
+
+用户原始消息：
+"""
+
+
 def display_arguments(value, budget=24000):
     """Bound UI/approval previews; execution always receives the original arguments."""
+    if isinstance(value, dict) and 'reason' in value:
+        value = {'reason': value['reason'], **{key: item for key, item in value.items() if key != 'reason'}}
     remaining = budget
     def visit(item):
         nonlocal remaining
@@ -82,12 +96,17 @@ class ExtractionRunner(AgentRunner):
         self.tools = ExtractionTools(session["workspace"], session["game_dir"], available["settings"]["skill_dir"],
                                      available, self.stop_event, emit, self._require_permission)
 
+    def _initial_user_message(self, user_text):
+        return f"{INITIAL_USER_MESSAGE_PREFIX}{user_text}"
+
     def _system_prompt(self):
         skill = Path(self.available["settings"]["skill_dir"])
         return "\n\n".join([
             "You are GalTransl's extraction agent, a coding specialist for visual-novel text extraction and reinsertion. "
             "Use the configured extraction Skill and local tools; do not call translation/project tools.",
             tool_prompt_section(),
+            "For every read, write, edit, bash and run_python call, include reason: one short sentence in the user's language "
+            "explaining what this call is intended to accomplish. Describe the immediate purpose, not your internal reasoning.",
             f"Before extraction or reinsertion, read the complete Skill with read, following offset continuation notices until done: {skill / 'SKILL.md'}. "
             "Then load only relevant engine guides and scripts. Follow the Skill output and verification contracts.",
             f"Game directory (read-only intent): {self.session['game_dir']}",
@@ -225,7 +244,7 @@ class ExtractionRunner(AgentRunner):
         return super()._stream_llm_attempt()
 
     def _emit(self, event_type, data):
-        if event_type in {'tool_call', 'permission_request'} and data.get('name') in {'read', 'bash', 'edit', 'write'}:
+        if event_type in {'tool_call', 'permission_request'} and data.get('name') in {'read', 'bash', 'edit', 'write', 'run_python'}:
             data = {**data, 'arguments': display_arguments(data.get('arguments', {}))}
         if event_type == 'tool_result' and isinstance(data.get('result'), dict) and 'content' in data['result']:
             data = {**data, 'result': {key: value for key, value in data['result'].items() if key != 'structuredContent'}}

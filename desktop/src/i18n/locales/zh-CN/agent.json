@@ -1,4 +1,10 @@
 {
+  "billionContextTools": {
+    "compress": { "action": "压缩上下文", "running": "正在压缩上下文" },
+    "decompress": { "action": "还原上下文", "running": "正在还原上下文" },
+    "search_context": { "action": "搜索上下文", "running": "正在搜索上下文" },
+    "acp_status": { "action": "查看上下文状态", "running": "正在查看上下文状态" }
+  },
   "images": {
     "drop": "松开以添加图片",
     "processing": "正在处理图片…",
@@ -316,7 +322,7 @@
     "agentPage_notifyNeedsAttention_confirmVariant2": "{{label}}需要你确认",
     "handlePermissionDecide_normalizeError_submitFailed": "提交失败",
     "handlePickPermissionMode_normalizeError_permissionChangeFailed": "权限模式修改失败",
-    "agentConsoleBarTitle_message_galTranslAgent": "GalTransl Agent",
+    "agentConsoleBarTitle_message_galTranslAgent": "翻译 Agent",
     "agentConsoleProjectStatic_message_notSelectedProject": "未选择项目",
     "agentConsoleIconBtn_title_openProjectFile": "打开项目文件夹",
     "agentConsoleIconBtn_ariaLabel_openProjectFile": "打开项目文件夹",

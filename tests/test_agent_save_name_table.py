@@ -34,13 +34,13 @@ class SaveNameTableTests(unittest.TestCase):
     def test_patch_preserves_other_rows_counts_and_raw_empty_translations(self):
         runner = _Runner(self.old)
         result = _tool_save_name_table(runner, {
-            "mode": "patch", "names": [{"src_name": "B", "dst_name": "New Beta"}],
+            "action": "set", "names": [{"src_name": "B", "dst_name": "New Beta"}],
         })
         expected = deepcopy(self.old)
         expected[1]["dst_name"] = "New Beta"
         self.assertEqual(runner.saved, [expected])
         self.assertEqual(runner.names, self.old)
-        self.assertEqual(result["mode"], "patch")
+        self.assertEqual(result["action"], "set")
         self.assertEqual(result["names_removed"], [])
         self.assertEqual(result["names_added"], [])
         self.assertEqual([c["path"] for c in result["changes"]], ["B"])
@@ -48,7 +48,7 @@ class SaveNameTableTests(unittest.TestCase):
     def test_patch_adds_new_rows_and_preserves_explicit_counts(self):
         runner = _Runner(self.old)
         result = _tool_save_name_table(runner, {
-            "mode": "patch", "names": [
+            "action": "set", "names": [
                 {"src_name": "D", "dst_name": "Delta"},
                 {"src_name": "E", "dst_name": "Echo", "count": 5},
             ],
@@ -62,7 +62,7 @@ class SaveNameTableTests(unittest.TestCase):
 
     def test_patch_can_clear_translation_and_update_only_count(self):
         runner = _Runner(self.old)
-        _tool_save_name_table(runner, {"mode": "patch", "names": [
+        _tool_save_name_table(runner, {"action": "set", "names": [
             {"src_name": "A", "dst_name": ""},
             {"src_name": "B", "count": 0},
         ]})
@@ -73,7 +73,7 @@ class SaveNameTableTests(unittest.TestCase):
 
     def test_duplicate_patches_merge_fields_in_order(self):
         runner = _Runner(self.old)
-        _tool_save_name_table(runner, {"mode": "patch", "names": [
+        _tool_save_name_table(runner, {"action": "set", "names": [
             {"src_name": "A", "dst_name": "First", "count": 2},
             {"src_name": "A", "dst_name": "Last"},
         ]})
@@ -82,16 +82,16 @@ class SaveNameTableTests(unittest.TestCase):
 
     def test_empty_patch_keeps_whole_table(self):
         runner = _Runner(self.old)
-        result = _tool_save_name_table(runner, {"mode": "patch", "names": []})
+        result = _tool_save_name_table(runner, {"action": "set", "names": []})
         self.assertEqual(runner.saved[-1], self.old)
         self.assertEqual(result["changes"], [])
         self.assertIsNone(_preview_tool_changes(_Runner(self.old), "save_name_table", {
-            "mode": "patch", "names": [],
+            "action": "set", "names": [],
         }))
 
     def test_patch_creates_table_when_empty(self):
         runner = _Runner([])
-        result = _tool_save_name_table(runner, {"mode": "patch", "names": [
+        result = _tool_save_name_table(runner, {"action": "set", "names": [
             {"src_name": "A", "dst_name": "Alpha"},
         ]})
         self.assertEqual(runner.saved[-1], [{"src_name": "A", "dst_name": "Alpha", "count": 0}])
@@ -104,14 +104,14 @@ class SaveNameTableTests(unittest.TestCase):
                     runner = _Runner(self.old)
                     args = {"names": names}
                     if mode:
-                        args["mode"] = mode
+                        args["action"] = mode
                     result = _tool_save_name_table(runner, args)
                     self.assertEqual(runner.saved[-1], names)
-                    self.assertEqual(result["mode"], "overwrite")
+                    self.assertEqual(result["action"], "overwrite")
                     self.assertEqual(result["names_removed"], [n["src_name"] for n in self.old[len(names):]])
 
     def test_patch_preview_matches_written_table_without_removals(self):
-        args = {"mode": "patch", "names": [
+        args = {"action": "set", "names": [
             {"src_name": "A", "dst_name": "New Alpha"},
             {"src_name": "D", "dst_name": "Delta"},
         ]}
@@ -125,11 +125,11 @@ class SaveNameTableTests(unittest.TestCase):
 
     def test_invalid_mode_or_patch_entries_never_write(self):
         for args in (
-            {"mode": "merge", "names": []},
-            {"mode": "patch", "names": "A"},
-            {"mode": "patch", "names": ["A"]},
-            {"mode": "patch", "names": [{"dst_name": "Alpha"}]},
-            {"mode": "patch", "names": [{"src_name": " "}]},
+            {"action": "merge", "names": []},
+            {"action": "set", "names": "A"},
+            {"action": "set", "names": ["A"]},
+            {"action": "set", "names": [{"dst_name": "Alpha"}]},
+            {"action": "set", "names": [{"src_name": " "}]},
         ):
             with self.subTest(args=args):
                 runner = _Runner(self.old)
@@ -138,8 +138,8 @@ class SaveNameTableTests(unittest.TestCase):
                 self.assertEqual(runner.saved, [])
 
     def test_schema_exposes_patch_mode(self):
-        schema = next(t["function"] for t in AGENT_TOOLS if t["function"]["name"] == "save_name_table")
-        self.assertEqual(schema["parameters"]["properties"]["mode"]["enum"], ["overwrite", "patch"])
+        schema = next(t["function"] for t in AGENT_TOOLS if t["function"]["name"] == "names")
+        self.assertEqual(schema["parameters"]["properties"]["action"]["enum"], ["read", "set", "overwrite"])
 
 
 if __name__ == "__main__":

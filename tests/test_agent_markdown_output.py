@@ -434,7 +434,7 @@ class DispatcherTests(unittest.TestCase):
         self.assertEqual(
             set(rt._MD_RENDERERS),
             {
-                "get_project_overview",
+                "get_project_overview", "get_project",
                 "list_dict_files",
                 "read_dict",
                 "read_output",

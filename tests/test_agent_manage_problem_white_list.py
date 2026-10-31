@@ -43,7 +43,7 @@ class ManageProblemWhiteListTests(unittest.TestCase):
         runner = _Runner(["a.json:1"])
         result = _tool_manage_problem_white_list(
             runner,
-            {"action": "add", "entry": ["a.json:1", "b.json:2", "b.json:2", " ", "a.json:3-4"]},
+            {"action": "set", "entry": ["a.json:1", "b.json:2", "b.json:2", " ", "a.json:3-4"]},
         )
         self.assertEqual(result["white_list"], ["a.json:1", "b.json:2", "a.json:3-4"])
         self.assertEqual(result["added"], ["b.json:2", "a.json:3-4"])
@@ -56,13 +56,13 @@ class ManageProblemWhiteListTests(unittest.TestCase):
     def test_invalid_entry_is_rejected(self):
         runner = _Runner([])
         with self.assertRaises(AgentToolError):
-            _tool_manage_problem_white_list(runner, {"action": "add", "entry": ["a.json:1", "nonsense"]})
+            _tool_manage_problem_white_list(runner, {"action": "set", "entry": ["a.json:1", "nonsense"]})
         self.assertEqual(runner.puts, [])
 
     def test_remove_reports_not_found(self):
         runner = _Runner(["a.json:1", "b.json:2"])
         result = _tool_manage_problem_white_list(
-            runner, {"action": "remove", "entry": ["a.json:1", "z.json:9"]}
+            runner, {"action": "delete", "entry": ["a.json:1", "z.json:9"]}
         )
         self.assertEqual(result["white_list"], ["b.json:2"])
         self.assertEqual(result["removed"], ["a.json:1"])
@@ -70,14 +70,14 @@ class ManageProblemWhiteListTests(unittest.TestCase):
 
     def test_no_effective_change_skips_write(self):
         runner = _Runner(["a.json:1"])
-        result = _tool_manage_problem_white_list(runner, {"action": "add", "entry": ["a.json:1"]})
+        result = _tool_manage_problem_white_list(runner, {"action": "set", "entry": ["a.json:1"]})
         self.assertIn("note", result)
         self.assertEqual(runner.puts, [])
 
     def test_empty_entry_raises(self):
         runner = _Runner([])
         with self.assertRaises(AgentToolError):
-            _tool_manage_problem_white_list(runner, {"action": "add", "entry": [" ", ""]})
+            _tool_manage_problem_white_list(runner, {"action": "set", "entry": [" ", ""]})
 
     def test_bad_action_raises(self):
         with self.assertRaises(AgentToolError):
@@ -88,12 +88,12 @@ class PreviewTests(unittest.TestCase):
     def test_preview_add_and_remove(self):
         runner = _Runner(["a.json:1"])
         preview = _preview_tool_changes(
-            runner, "manage_problem_white_list", {"action": "add", "entry": ["a.json:1", "b.json:2"]}
+            runner, "manage_problem_white_list", {"action": "set", "entry": ["a.json:1", "b.json:2"]}
         )
         self.assertEqual([(c["kind"], c["after"]) for c in preview["changes"]], [("add", "b.json:2")])
 
         preview = _preview_tool_changes(
-            runner, "manage_problem_white_list", {"action": "remove", "entry": ["a.json:1"]}
+            runner, "manage_problem_white_list", {"action": "delete", "entry": ["a.json:1"]}
         )
         self.assertEqual([(c["kind"], c["before"]) for c in preview["changes"]], [("remove", "a.json:1")])
 
@@ -101,8 +101,8 @@ class PreviewTests(unittest.TestCase):
         runner = _Runner(["a.json:1"])
         for args in (
             {"action": "list"},
-            {"action": "add", "entry": ["a.json:1"]},
-            {"action": "add"},
+            {"action": "set", "entry": ["a.json:1"]},
+            {"action": "set"},
         ):
             self.assertIsNone(_preview_tool_changes(runner, "manage_problem_white_list", args), args)
 

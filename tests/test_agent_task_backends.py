@@ -116,7 +116,7 @@ class TaskBackendTests(unittest.TestCase):
             self.main_client.chat.completions.create.assert_not_called()
             fixer = ProofreadFixer(view, "test", self.runner.stop_event)
             fixer.read(view, {"filename": "a.json", "start": 1, "end": 1})
-            fixer.patch(view, {"filename": "a.json", "patches": [{"index": 1, "dst": "fixed"}]})
+            fixer.patch(view, {"action": "set", "filename": "a.json", "patches": [{"index": 1, "dst": "fixed"}]})
             self.assertEqual(self.parent.files["a.json"][0]["trans_by"], "child")
 
     def test_stop_closes_active_child_and_does_not_close_next_turn_client_on_cleanup(self):

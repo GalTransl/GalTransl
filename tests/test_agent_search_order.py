@@ -98,7 +98,7 @@ class SearchOrderTests(unittest.TestCase):
 
     def test_all_search_schemas_expose_sampling(self):
         schemas = {tool["function"]["name"]: tool["function"]["parameters"]["properties"] for tool in AGENT_TOOLS}
-        for tool in ("search_input", "read_transl_cache", "list_problems", "read_history_archive"):
+        for tool in ("input", "read_transl_cache", "problems", "read_history_archive"):
             self.assertIn("random", schemas[tool]["order"]["enum"])
             self.assertIn("even", schemas[tool]["order"]["enum"])
 

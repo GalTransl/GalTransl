@@ -9,6 +9,28 @@ from typing import Any
 from GalTransl.Agent.models import AgentToolError
 
 
+def _write_action(args: dict[str, object], allowed: tuple[str, ...]) -> str:
+    action = args.get("action")
+    if "mode" in args or not isinstance(action, str) or action not in allowed:
+        raise AgentToolError(f"显式传入 action：{' / '.join(allowed)}；不再使用 mode 或 patch/add/remove 动作")
+    return action
+
+
+def _text_replacement(args: dict[str, object]) -> tuple[str, str, bool]:
+    if "query" in args or "replacement" in args:
+        raise AgentToolError("文本替换请使用 old_text / new_text，批量替换显式传 replace_all=true")
+    old_text = args.get("old_text")
+    new_text = args.get("new_text")
+    replace_all = args.get("replace_all", False)
+    if not isinstance(old_text, str) or not old_text:
+        raise AgentToolError("old_text must be a non-empty string")
+    if not isinstance(new_text, str):
+        raise AgentToolError("new_text must be a string (empty string clears matched text)")
+    if not isinstance(replace_all, bool):
+        raise AgentToolError("replace_all must be a boolean")
+    return old_text, new_text, replace_all
+
+
 def _entry_index(entry: Any) -> int:
     """Return a comparable entry index, or -1 for malformed/missing values."""
     if not isinstance(entry, dict):
@@ -221,7 +243,7 @@ def _dominant_trans_by(rows: list[Any]) -> str:
     """这批条目里出现最多的 trans_by 值（= 这批的"正常情况"，多半就是翻译引擎翻的）。
 
     逐条重复报它没有信息量，所以调用方把它删掉、改在顶层 majority_trans_by 记一次；少数派
-    （Agent 用 patch_transl_cache 改过的、手工改的）才逐条留在 trans_by 上。空值不参与统计，
+    （Agent 用 edit_transl_cache 改过的、手工改的）才逐条留在 trans_by 上。空值不参与统计，
     一个值都没有时返回空串，调用方据此不做任何过滤。
 
     按**数据本身**判，而不是跟配置里「翻译任务会用」那份模型名比：项目当初是哪个模型翻的

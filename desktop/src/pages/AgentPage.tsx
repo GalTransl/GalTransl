@@ -1,5 +1,6 @@
 import '../styles/pages/agent.css';
 import { usePageActive, useRetainPage } from '../components/PageActivity';
+import { useComposerAutosize } from '../components/useComposerAutosize';
 import { loadAgentProject, saveAgentProject, loadMessageDraft, saveMessageDraft, moveMessageDraft, useMessageDraft } from './agent/drafts';
 import { followTail } from "./agent/followTail";
 import { readingKey, readingMemory } from './agent/readingMemory';
@@ -173,24 +174,7 @@ export function AgentPage() {
 
   // 输入框本体：点推荐提示词后要把焦点还回去（用户接着改两个字就能直接回车发出）
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  useLayoutEffect(() => {
-    const input = composerRef.current;
-    if (!active || !input) return;
-    const resize = () => {
-      // 先释放旧高度才能随删字缩回；上限由 CSS 统一决定，超长草稿在框内滚动。
-      input.style.height = 'auto';
-      input.style.height = `${input.scrollHeight}px`;
-    };
-    resize();
-    let width = input.clientWidth;
-    const observer = new ResizeObserver(() => {
-      if (input.clientWidth === width) return;
-      width = input.clientWidth;
-      resize();
-    });
-    observer.observe(input);
-    return () => observer.disconnect();
-  }, [active, messageDraft]);
+  useComposerAutosize(composerRef, messageDraft);
 
   /** 空态的推荐提示词：填进输入框并聚焦到末尾，**不直接发送**（用户还能改）。
    *  输入框里已经有字时追加成新的一行——点了没反应或者把写了一半的话冲掉都很难受。 */

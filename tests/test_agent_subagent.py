@@ -202,7 +202,7 @@ class ProofreadAgentFlowTests(unittest.TestCase):
                         "c2",
                         "patch_transl_cache",
                         json.dumps(
-                            {
+                            {"action": "set",
                                 "filename": "a.json",
                                 "patches": [{"index": 1, "proofread_comment": "漏译：原文缺了「欧派」"}],
                             }
@@ -254,7 +254,7 @@ class ProofreadAgentFlowTests(unittest.TestCase):
                         "c1",
                         "patch_transl_cache",
                         json.dumps(
-                            {"filename": "a.json", "patches": [{"index": 1, "pre_dst": "我自己改"}]}
+                            {"action": "set", "filename": "a.json", "patches": [{"index": 1, "pre_dst": "我自己改"}]}
                         ),
                     )
                 ],
@@ -481,9 +481,9 @@ class SubagentToolScopeTests(unittest.TestCase):
         }
         self.assertEqual(
             names,
-            {"read_transl_cache", "list_problems", "patch_transl_cache"},
+            {"read_transl_cache", "problems", "edit_transl_cache"},
         )
-        self.assertEqual(set(_subagent_handlers(SUBAGENT_AGENT_PROOFREAD)), names)
+        self.assertEqual(set(_subagent_handlers(SUBAGENT_AGENT_PROOFREAD)), {"read_transl_cache", "list_problems", "patch_transl_cache"})
         # 不会递归、也拿不到改配置/字典/启动任务的工具
         for forbidden in ("run_subagents", "save_dict", "update_project_config", "start_translation"):
             self.assertNotIn(forbidden, names)
@@ -492,7 +492,7 @@ class SubagentToolScopeTests(unittest.TestCase):
         parent = _Parent({"a.json": [ENTRY]})
         handlers = _subagent_handlers(SUBAGENT_AGENT_PROOFREAD, "a.json")
         handlers["read_transl_cache"](parent, {"filename": "a.json", "index": "1"})
-        result = handlers["patch_transl_cache"](parent, {"filename": "a.json", "patches": [{"index": 1, "pre_dst": "改"}]})
+        result = handlers["patch_transl_cache"](parent, {"action": "set", "filename": "a.json", "patches": [{"index": 1, "pre_dst": "改"}]})
         self.assertEqual(result["updated"], 0)
         self.assertIn("只允许 dst / proofread_comment", result["files"][0]["error"])
         self.assertEqual(parent.saves, [])
@@ -505,7 +505,7 @@ class SubagentToolScopeTests(unittest.TestCase):
         """同一个 handler 在主 Agent 那边不受收窄影响。"""
         parent = _Parent({"a.json": [ENTRY]})
         out = _tool_patch_transl_cache(
-            parent, {"filename": "a.json", "patches": [{"index": 1, "pre_dst": "新译文"}]}
+            parent, {"action": "set", "filename": "a.json", "patches": [{"index": 1, "pre_dst": "新译文"}]}
         )
         self.assertEqual(out["updated"], 1)
         self.assertEqual(parent.files["a.json"][0]["pre_dst"], "新译文")
@@ -532,7 +532,7 @@ class ProofreadGuidelineTests(unittest.TestCase):
             self.assertNotIn(parent.project_guideline, messages[1]["content"])
             self.assertEqual(
                 {t["function"]["name"] for t in tools},
-                {"read_transl_cache", "list_problems", "patch_transl_cache"},
+                {"read_transl_cache", "problems", "edit_transl_cache"},
             )
             return "已完成", [], rt.REASONING_FIELD_NAMES[0], "", 10
 
@@ -629,7 +629,7 @@ class ExploreAgentTests(unittest.TestCase):
         }
         self.assertEqual(
             names,
-            {"list_input_files", "read_input_file", "search_input", "list_dict_files", "read_dict"},
+            {"input", "dictionary"},
         )
         for forbidden in ("patch_transl_cache", "read_transl_cache", "run_subagents", "start_translation"):
             self.assertNotIn(forbidden, names)
@@ -696,7 +696,7 @@ class ExploreAgentTests(unittest.TestCase):
                         "c1",
                         "patch_transl_cache",
                         json.dumps(
-                            {"filename": "a.json", "patches": [{"index": 1, "proofread_comment": "顺手写一条"}]}
+                            {"action": "set", "filename": "a.json", "patches": [{"index": 1, "proofread_comment": "顺手写一条"}]}
                         ),
                     )
                 ],
@@ -768,7 +768,7 @@ class LockedFileTests(unittest.TestCase):
             handlers["read_transl_cache"](parent, {"filename": "b.json"})
         with self.assertRaises(AgentToolError):
             handlers["patch_transl_cache"](
-                parent, {"filename": "b.json", "patches": [{"index": 1, "proofread_comment": "越界"}]}
+                parent, {"action": "set", "filename": "b.json", "patches": [{"index": 1, "proofread_comment": "越界"}]}
             )
         self.assertEqual(parent.saves, [])  # 一个字都没写进别的文件
 
@@ -1020,7 +1020,7 @@ class AutoSplitTests(unittest.TestCase):
                         "c1",
                         "patch_transl_cache",
                         json.dumps(
-                            {"filename": "b.json", "patches": [{"index": 1, "proofread_comment": "漏译"}]}
+                            {"action": "set", "filename": "b.json", "patches": [{"index": 1, "proofread_comment": "漏译"}]}
                         ),
                     )
                 ],
@@ -1169,7 +1169,7 @@ class RunSubagentsMarkdownTests(unittest.TestCase):
                         "c1",
                         "patch_transl_cache",
                         json.dumps(
-                            {
+                            {"action": "set",
                                 "filename": "a.json",
                                 "patches": [{"index": 1, "proofread_comment": "漏译"}],
                             }
@@ -1268,7 +1268,7 @@ class SubagentPermissionTests(unittest.TestCase):
         call = _Call(
             "c1",
             "patch_transl_cache",
-            json.dumps({"filename": "a.json", "patches": [{"index": 1, "proofread_comment": "漏译"}]}),
+            json.dumps({"action": "set", "filename": "a.json", "patches": [{"index": 1, "proofread_comment": "漏译"}]}),
         )
 
         sub = self._subagent(parent)
@@ -1294,7 +1294,7 @@ class SubagentPermissionTests(unittest.TestCase):
                     _Call(
                         "c1",
                         "patch_transl_cache",
-                        json.dumps({"filename": "a.json", "patches": [{"index": 1, "proofread_comment": "漏译"}]}),
+                        json.dumps({"action": "set", "filename": "a.json", "patches": [{"index": 1, "proofread_comment": "漏译"}]}),
                     )
                 ],
             ),
@@ -1600,7 +1600,7 @@ class ProofreadSuggestionModeTests(unittest.TestCase):
 
     def test_subagent_patch_tool_points_back_at_the_brief(self) -> None:
         tools = rt._subagent_tools(SUBAGENT_AGENT_PROOFREAD)
-        schema = next(t for t in tools if t["function"]["name"] == "patch_transl_cache")
+        schema = next(t for t in tools if t["function"]["name"] == "edit_transl_cache")
 
         self.assertIn("以任务说明为准", schema["function"]["description"])
 

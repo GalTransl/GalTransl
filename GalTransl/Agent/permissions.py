@@ -71,6 +71,7 @@ PERMISSION_TOOL_RISK: dict[str, str] = {
 # 只读类工具：读 / 检索 / 等待 / 询问，外加"停止任务"——停止是安全方向的动作，
 # 要停下来还得先点确认是最糟的设计，所以任何模式都直接放行。
 PERMISSION_READ_TOOLS: frozenset[str] = frozenset({
+    "get_project",
     "get_project_overview",
     "get_plugin_settings",
     "list_input_files",
@@ -111,9 +112,11 @@ PERMISSION_TOOL_LABELS: dict[str, str] = {
 }
 
 
-def _tool_risk(name: str) -> str:
+def _tool_risk(name: str, args: dict[str, object] | None = None) -> str:
     """工具的风险档。没登记的工具按 high 处理（fail closed）：新增写类工具忘了
     登记时宁可多问一次，也不要默默改掉用户的项目。"""
+    if name in ("manage_problem_filter", "manage_problem_white_list") and args and args.get("action") == "list":
+        return PERMISSION_READ
     if name in PERMISSION_TOOL_RISK:
         return PERMISSION_TOOL_RISK[name]
     if name in PERMISSION_READ_TOOLS:

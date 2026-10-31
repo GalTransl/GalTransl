@@ -59,10 +59,7 @@ def _list_input_payload(
         matched = [f for f in matched if f["name"] in locked]
     shown = _select_list_items(matched, limit, order, offset)
     notes = [
-        "sentences 是输入文件解析出的条数，只用来估工作量：文本插件（如「跳过无日文句」）"
-        "还没跑，真正要翻的句数通常比它少，所以按它估总时长会略偏大；null 表示解析失败。"
-        "**它不是进度**——某文件缓存里有多少条与这个数无关，"
-        "整体翻没翻完看 get_project_overview 的 files_translated/files_total。"
+        'sentences 是输入文件解析出的条数，只用来估工作量：文本插件（如「跳过无日文句」）还没跑，真正要翻的句数通常比它少，所以按它估总时长会略偏大；null 表示解析失败。**它不是进度**——某文件缓存里有多少条与这个数无关，整体翻没翻完看 get_project 的 files_translated/files_total。'
     ]
     notes.extend(
         _list_notes(
@@ -96,7 +93,7 @@ def _tool_list_input_files(runner: AgentRunner, args: dict[str, Any]) -> Any:
     以前这里对"已有缓存的文件"改报**缓存条数**（理由是它与进度/ETA 同口径、更准），
     实际是个陷阱：缓存条数只说明缓存里存了多少条，一旦和别处的数字相等，读的人就会
     以为整个文件翻完了。句数是拿来看工作量的，不该兼职当进度——进度去看
-    get_project_overview 的 files_translated / progress，那里才有真正翻到哪了。
+    get_project 的 files_translated / progress，那里才有真正翻到哪了。
 
     注意口径：这是文件插件解析出的**原始条目数**，文本插件（如「跳过无日文句」）
     还没跑，因此通常**大于**最终会送去翻译的句数（估工作量偏大是已知的取舍）。
@@ -112,7 +109,7 @@ def _tool_list_input_files(runner: AgentRunner, args: dict[str, Any]) -> Any:
 
 
 def _tool_read_input_file(runner: AgentRunner, args: dict[str, Any]) -> Any:
-    """读取待翻译原文。filename 来自 list_input_files；index 统一为 1-based，支持区间
+    """读取待翻译原文。filename 来自 input(action="list")；index 统一为 1-based，支持区间
     （"1-100"、读取文件头几十句足够了解文风）。"""
     filename = str(args.get("filename", "")).strip()
     if not filename:

@@ -36,7 +36,7 @@ def validate_plugin_value(config, path, value, catalog):
     """返回错误说明；仅允许 Settings 声明过的完整键，不创建任意嵌套路径。"""
     parts = path.split(".", 2)
     if len(parts) != 3:
-        return "请使用 get_plugin_settings 返回的完整设置路径，不能覆盖整个插件配置对象"
+        return '请使用 get_project(include=["plugins"]) 返回的完整设置路径，不能覆盖整个插件配置对象'
     _, module, key = parts
     plugin = catalog.get(module)
     if not plugin or key not in plugin["settings"]:
@@ -121,13 +121,13 @@ def encoding_recovery(error):
         "并检查 extra_args 的 -p/-P 是否覆盖该值。不要为消除错误而自动把未匹配字符替换为空格。",
         "alternatives": [
             {"condition": "游戏需要 CP932，且能够部署 UIF 或对应字体",
-             "tool": "update_project_config", "arguments": {"updates": [
+             "tool": "update_project_config", "arguments": {"action": "set", "updates": [
                  {"key": "plugin.file_msgtool_script.jis_substitution", "value": True}]}},
             {"condition": "已确认游戏支持 UTF-8；也可按实际支持情况选择 gb2312",
-             "tool": "update_project_config", "arguments": {"updates": [
+             "tool": "update_project_config", "arguments": {"action": "set", "updates": [
                  {"key": "plugin.file_msgtool_script.jis_substitution", "value": False},
                  {"key": "plugin.file_msgtool_script.patched_encoding", "value": "utf8"}]}},
         ],
-        "rebuild": {"tool": "start_translation", "arguments": {"translator": "rebuildr"}},
-        "verify": "确认配置更新成功再重建；wait(job_id=...) 或 get_runtime 确认无编码错误，不能只看缓存已翻译进度。",
+        "rebuild": {"tool": "translation", "arguments": {"action": "start", "translator": "rebuildr"}},
+        "verify": '确认配置更新成功再重建；translation(action="wait", job_id=...) 或 translation(action="status") 确认无编码错误，不能只看缓存已翻译进度。',
     }

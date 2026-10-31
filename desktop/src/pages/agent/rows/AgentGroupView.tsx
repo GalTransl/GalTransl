@@ -15,7 +15,7 @@ import {
   REASONING_MARQUEE_CHARS,
   type TimelineGroup,
 } from '../timeline';
-import { formatDuration, formatTokenCount, translationJobId } from '../toolMeta';
+import { toolOperation, asArgs, formatDuration, formatTokenCount, translationJobId } from '../toolMeta';
 import { liveStartedState, manualOpenState } from '../uiState';
 import { ImageAttachments, type AgentImage, type ImageScope } from '../images';
 
@@ -201,7 +201,7 @@ function AgentActivityGroup({
                     <CompactRow key={`c-${i}`} item={item} />
                   ) : item.kind === 'retry' ? (
                     <RetryRow key={`rt-${i}`} item={item} />
-                  ) : item.kind === 'tool' && item.name === 'start_translation' && translationJobId(item) ? (
+                  ) : item.kind === 'tool' && toolOperation(item.name, asArgs(item.arguments)) === 'start_translation' && translationJobId(item) ? (
                     // 启动翻译换成工作台顶部卡的迷你版（带实时进度），不再是一坨 JSON
                     <TranslationJobCard key={`j-${item.id || i}`} item={item} projectDir={projectDir} />
                   ) : (

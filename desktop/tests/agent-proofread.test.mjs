@@ -36,6 +36,23 @@ test('replayed proofreading events retain full actual changes and review counter
   assert.doesNotMatch(html, /实际修改 2 条/);
 });
 
+test('merged subagent calls reconcile children and render committed edits', () => {
+  const rows = events(false).map(event => {
+    if (event.name === 'run_subagents') return { ...event, name: 'subagents', arguments: { ...event.arguments, action: 'run' } };
+    if (event.name === 'patch_transl_cache') return { ...event, name: 'edit_transl_cache', arguments: { ...event.arguments, action: 'set' } };
+    return event;
+  });
+  rows.push({ type: 'tool_result', step: 5, id: 'parent', name: 'subagents', ok: true, result: {
+    tasks: [{ id: 'child', status: 'done', modified_count: 1, needs_review_count: 1 }],
+  } });
+  const child = run(rows);
+  assert.equal(child.status, 'done');
+  assert.equal(child.modifiedCount, 1);
+  const html = renderToStaticMarkup(createElement(SubagentList, { runs: [child] }));
+  assert.match(html, /实际修改 1 条/);
+  assert.doesNotMatch(html, /edit_transl_cache/);
+});
+
 test('parent result reconciles stopped child with its committed edits', () => {
   const rows = events(false);
   rows.push({ type: 'tool_result', step: 5, id: 'parent', name: 'run_subagents', ok: true, result: {

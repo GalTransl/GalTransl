@@ -1,4 +1,10 @@
 {
+  "billionContextTools": {
+    "compress": { "action": "Compress context", "running": "Compressing context" },
+    "decompress": { "action": "Restore context", "running": "Restoring context" },
+    "search_context": { "action": "Search context", "running": "Searching context" },
+    "acp_status": { "action": "View context status", "running": "Checking context status" }
+  },
   "images": {
     "drop": "Drop to add images",
     "processing": "Processing images…",
@@ -316,7 +322,7 @@
     "agentPage_notifyNeedsAttention_confirmVariant2": "{{label}} needs your confirmation",
     "handlePermissionDecide_normalizeError_submitFailed": "Failed to submit",
     "handlePickPermissionMode_normalizeError_permissionChangeFailed": "Failed to change the permission mode",
-    "agentConsoleBarTitle_message_galTranslAgent": "GalTransl Agent",
+    "agentConsoleBarTitle_message_galTranslAgent": "Translation Agent",
     "agentConsoleProjectStatic_message_notSelectedProject": "No project selected",
     "agentConsoleIconBtn_title_openProjectFile": "Open the project folder",
     "agentConsoleIconBtn_ariaLabel_openProjectFile": "Open the project folder",

@@ -45,7 +45,7 @@ class ManageProblemFilterKeywordArrayTests(unittest.TestCase):
     def test_add_accepts_array_and_dedupes(self) -> None:
         runner = _Runner(["A"])
         result = _tool_manage_problem_filter(
-            runner, {"action": "add", "keyword": ["A", "B", "B", " ", "C"]}
+            runner, {"action": "set", "keyword": ["A", "B", "B", " ", "C"]}
         )
         self.assertEqual(result["filter_keys"], ["A", "B", "C"])
         self.assertEqual(result["added"], ["B", "C"])
@@ -56,13 +56,13 @@ class ManageProblemFilterKeywordArrayTests(unittest.TestCase):
 
     def test_single_string_still_supported(self) -> None:
         runner = _Runner([])
-        result = _tool_manage_problem_filter(runner, {"action": "add", "keyword": "X"})
+        result = _tool_manage_problem_filter(runner, {"action": "set", "keyword": "X"})
         self.assertEqual(result["added"], ["X"])
         self.assertNotIn("already_present", result)
 
     def test_remove_array_reports_not_found(self) -> None:
         runner = _Runner(["A", "B", "C"])
-        result = _tool_manage_problem_filter(runner, {"action": "remove", "keyword": ["B", "Z"]})
+        result = _tool_manage_problem_filter(runner, {"action": "delete", "keyword": ["B", "Z"]})
         self.assertEqual(result["filter_keys"], ["A", "C"])
         self.assertEqual(result["removed"], ["B"])
         self.assertEqual(result["not_found"], ["Z"])
@@ -70,7 +70,7 @@ class ManageProblemFilterKeywordArrayTests(unittest.TestCase):
 
     def test_no_effective_change_skips_write(self) -> None:
         runner = _Runner(["A"])
-        result = _tool_manage_problem_filter(runner, {"action": "add", "keyword": ["A"]})
+        result = _tool_manage_problem_filter(runner, {"action": "set", "keyword": ["A"]})
         self.assertIn("note", result)
         self.assertNotIn("changes", result)
         self.assertEqual(runner.puts, [])
@@ -78,7 +78,7 @@ class ManageProblemFilterKeywordArrayTests(unittest.TestCase):
     def test_empty_keyword_raises(self) -> None:
         runner = _Runner([])
         with self.assertRaises(AgentToolError):
-            _tool_manage_problem_filter(runner, {"action": "add", "keyword": [" ", ""]})
+            _tool_manage_problem_filter(runner, {"action": "set", "keyword": [" ", ""]})
 
     def test_list_returns_keys_with_hit_counts(self) -> None:
         runner = _Runner(
@@ -124,14 +124,14 @@ class ManageProblemFilterKeywordArrayTests(unittest.TestCase):
     def test_add_accepts_regex_patterns(self) -> None:
         runner = _Runner([])
         result = _tool_manage_problem_filter(
-            runner, {"action": "add", "keyword": ["^残留日文：", r"缺控制符：<\w+>"]}
+            runner, {"action": "set", "keyword": ["^残留日文：", r"缺控制符：<\w+>"]}
         )
         self.assertEqual(result["added"], ["^残留日文：", r"缺控制符：<\w+>"])
 
     def test_add_rejects_invalid_regex(self) -> None:
         runner = _Runner([])
         with self.assertRaises(AgentToolError) as ctx:
-            _tool_manage_problem_filter(runner, {"action": "add", "keyword": ["^残留日文：", "("]})
+            _tool_manage_problem_filter(runner, {"action": "set", "keyword": ["^残留日文：", "("]})
         self.assertIn("(", str(ctx.exception))
         self.assertIn("转义", str(ctx.exception))
         self.assertEqual(runner.puts, [])
@@ -139,7 +139,7 @@ class ManageProblemFilterKeywordArrayTests(unittest.TestCase):
     def test_remove_does_not_validate_regex(self) -> None:
         # 清单里可能已经躺着一条坏模式（手改配置留下的）：必须还能删掉它
         runner = _Runner(["("])
-        result = _tool_manage_problem_filter(runner, {"action": "remove", "keyword": ["("]})
+        result = _tool_manage_problem_filter(runner, {"action": "delete", "keyword": ["("]})
         self.assertEqual(result["removed"], ["("])
 
 
@@ -157,7 +157,7 @@ class EncodedFilterInputTests(unittest.TestCase):
         for raw, expected in cases:
             with self.subTest(raw=raw):
                 runner = _Runner()
-                args = {"action": "add", "keyword": raw}
+                args = {"action": "set", "keyword": raw}
                 preview = _preview_problem_filter(runner, args)
                 result = _tool_manage_problem_filter(runner, args)
                 self.assertEqual(result["added"], expected)
@@ -182,7 +182,7 @@ class EncodedFilterInputTests(unittest.TestCase):
         for raw in cases:
             with self.subTest(raw=str(raw)[:80]):
                 runner = _Runner(["^已有规则"])
-                args = {"action": "add", "keyword": raw}
+                args = {"action": "set", "keyword": raw}
                 self.assertIsNone(_preview_problem_filter(runner, args))
                 with self.assertRaises(AgentToolError):
                     _tool_manage_problem_filter(runner, args)
@@ -192,7 +192,7 @@ class EncodedFilterInputTests(unittest.TestCase):
     def test_encoded_remove_uses_decoded_keys_unless_original_rule_exists(self):
         encoded = json.dumps(self.patterns)
         runner = _Runner(self.patterns)
-        args = {"action": "remove", "keyword": encoded}
+        args = {"action": "delete", "keyword": encoded}
         preview = _preview_problem_filter(runner, args)
         result = _tool_manage_problem_filter(runner, args)
         self.assertEqual(result["removed"], self.patterns)
@@ -205,7 +205,7 @@ class EncodedFilterInputTests(unittest.TestCase):
 
     def test_real_array_filters_only_requested_dictionary_problems(self):
         runner = _Runner()
-        args = {"action": "add", "keyword": self.patterns}
+        args = {"action": "set", "keyword": self.patterns}
         preview = _preview_problem_filter(runner, args)
         result = _tool_manage_problem_filter(runner, args)
         self.assertEqual(result["count"], 3)
@@ -219,7 +219,7 @@ class EncodedFilterInputTests(unittest.TestCase):
             with self.subTest(bad=bad):
                 runner = _Runner([bad, "^合法规则"])
                 self.assertEqual(_tool_manage_problem_filter(runner, {"action": "list"})["filter_keys"][0], bad)
-                args = {"action": "remove", "keyword": bad}
+                args = {"action": "delete", "keyword": bad}
                 preview = _preview_problem_filter(runner, args)
                 result = _tool_manage_problem_filter(runner, args)
                 self.assertEqual(result["removed"], [bad])
@@ -229,7 +229,7 @@ class EncodedFilterInputTests(unittest.TestCase):
     def test_regex_character_classes_and_escaped_quotes_still_work(self):
         patterns = [r"^[AB]类", r"^\[标记\]", r'\"带引号\"']
         runner = _Runner()
-        _tool_manage_problem_filter(runner, {"action": "add", "keyword": patterns})
+        _tool_manage_problem_filter(runner, {"action": "set", "keyword": patterns})
         self.assertEqual(filter_problem_text('A类问题, [标记]问题, "带引号"问题, 本无括号',
                                             runner.config["common"]["problemFilterKey"]), "本无括号")
 
@@ -239,16 +239,17 @@ class ManageProblemFilterPromptTests(unittest.TestCase):
 
     @staticmethod
     def _description() -> str:
-        schema = next(t for t in AGENT_TOOLS if t["function"]["name"] == "manage_problem_filter")
-        return schema["function"]["description"]
+        schema = next(t for t in AGENT_TOOLS if t["function"]["name"] == "problems")
+        return schema["function"]["parameters"]["properties"]["keyword"]["description"]
 
     def test_description_forbids_category_wide_filtering(self) -> None:
         description = self._description()
-        self.assertIn("原则上只过滤小类", description)
-        self.assertIn("不要过滤大类", description)
+        self.assertIn("只过滤小类", description)
+        self.assertIn("禁止过滤整类", description)
 
     def test_description_points_to_white_list_for_single_entries(self) -> None:
-        self.assertIn("manage_problem_white_list", self._description())
+        schema = next(t for t in AGENT_TOOLS if t["function"]["name"] == "problems")
+        self.assertIn("white_list", schema["function"]["parameters"]["properties"]["target"]["enum"])
 
 
 if __name__ == "__main__":

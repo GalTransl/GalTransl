@@ -65,6 +65,7 @@ def apply_project_guideline_edit(
     content: str = "",
     old_text: str = "",
     new_text: str = "",
+    replace_all: bool = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """按 mode 修改项目规范，返回 {mode, path, existed, created, length}。
@@ -73,9 +74,7 @@ def apply_project_guideline_edit(
     - overwrite：整份覆写（文件不存在就创建）
     - append：在当前内容后面增写（文件不存在等同于 overwrite）
     - replace：把 old_text 换成 new_text（局部改，适合只调几条）
-      old_text 必须**恰好出现一次**：没找到、或出现多次都直接报错，让它带上
-      更多上下文重来——规范文件里"角色名"这种短片段出现多次是常态，
-      默默替换掉一处（或全部）比报错更糟。
+      old_text 默认必须恰好出现一次；replace_all=True 显式替换全部匹配。
 
     参数不合法一律抛 ValueError（调用方转成 400 / 工具报错），不替调用方猜意图。
 
@@ -85,6 +84,8 @@ def apply_project_guideline_edit(
     """
     if mode not in WRITE_MODES:
         raise ValueError(f"mode 必须是 {'/'.join(WRITE_MODES)} 之一，收到：{mode!r}")
+    if not isinstance(replace_all, bool):
+        raise ValueError("replace_all must be a boolean")
     if not project_dir:
         raise ValueError("project_dir is required")
 
@@ -110,9 +111,9 @@ def apply_project_guideline_edit(
         hits = current.count(old_text)
         if hits == 0:
             raise ValueError("old_text 在项目规范里没有找到，请原样粘贴要改的那段（含前后文）")
-        if hits > 1:
-            raise ValueError(f"old_text 在项目规范里出现了 {hits} 次，请带上更多前后文只圈定一处")
-        text = current.replace(old_text, new_text, 1)
+        if hits > 1 and not replace_all:
+            raise ValueError(f"old_text 在项目规范里出现了 {hits} 次，请带上更多前后文只圈定一处，或显式传 replace_all=true")
+        text = current.replace(old_text, new_text)
 
     if len(text) > MAX_PROJECT_GUIDELINE_CHARS:
         raise ValueError(

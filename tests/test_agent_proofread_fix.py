@@ -36,14 +36,14 @@ class ProofreadFixTests(unittest.TestCase):
         return self.handlers["read_transl_cache"](self.parent, {"filename": "a.json", "index": index, **kwargs})
 
     def edit(self, **kwargs):
-        return self.handlers["patch_transl_cache"](self.parent, {
+        return self.handlers["patch_transl_cache"](self.parent, {"action": "set",
             "filename": "a.json", "patches": [{"index": 1, **kwargs}],
         })
 
     def test_proofread_schema_always_allows_effective_translation_edits(self):
         fields = subagent._subagent_patch_schema()["function"]["parameters"]["properties"]["patches"]["items"]["properties"]
         self.assertEqual(set(fields), {"file", "index", "proofread_comment", "dst"})
-        schema = next(t for t in subagent.AGENT_TOOLS if t["function"]["name"] == "run_subagents")
+        schema = next(t for t in subagent.AGENT_TOOLS if t["function"]["name"] == "subagents")
         self.assertNotIn("mode", schema["function"]["parameters"]["properties"]["tasks"]["items"]["properties"])
         self.assertEqual(_tool_risk("read_proofread_changes"), PERMISSION_READ)
         self.assertEqual(_tool_risk("revert_proofread_changes"), PERMISSION_EDIT)
@@ -104,7 +104,7 @@ class ProofreadFixTests(unittest.TestCase):
         self.read(context=2, only_preceding=False)
         for patch_row in ({"index": 2, "dst": "bad"}, {"index": 1, "file": "b.json", "dst": "bad"}, {"index": True, "dst": "bad"}):
             with self.subTest(patch=patch_row), self.assertRaises(AgentToolError):
-                self.handlers["patch_transl_cache"](self.parent, {
+                self.handlers["patch_transl_cache"](self.parent, {"action": "set",
                     "filename": "a.json", "patches": [{"index": 1, "dst": "good"}, patch_row],
                 })
         self.assertFalse(self.parent.saves)
@@ -112,7 +112,7 @@ class ProofreadFixTests(unittest.TestCase):
     def test_scope_applies_to_comments_and_problem_statistics(self):
         handlers = subagent._subagent_handlers("proofread", ["a.json"], indexes="1")
         with self.assertRaises(AgentToolError):
-            handlers["patch_transl_cache"](self.parent, {"filename": "a.json", "patches": [{"index": 2, "proofread_comment": "bad"}]})
+            handlers["patch_transl_cache"](self.parent, {"action": "set", "filename": "a.json", "patches": [{"index": 2, "proofread_comment": "bad"}]})
         self.parent.problems = [{"filename": "a.json", "index": i, "problem": "type: detail"} for i in (1, 2)]
         self.assertEqual(handlers["list_problems"](self.parent, {})["total"], 1)
 
@@ -175,7 +175,7 @@ class ProofreadFixTests(unittest.TestCase):
     def test_complete_flow_returns_summary_and_persists_full_ui_changes(self):
         script = [
             ("read", [_Call("read", "read_transl_cache", '{"filename":"a.json","index":"1"}')]),
-            ("fix", [_Call("fix", "patch_transl_cache", '{"filename":"a.json","patches":[{"index":1,"dst":"new"}]}')]),
+            ("fix", [_Call("fix", "edit_transl_cache", '{"action": "set", "filename": "a.json", "patches": [{"index": 1, "dst": "new"}]}')]),
             ("done", []),
         ]
         result = _run(self.parent, {"tasks": [{"agent": "proofread", "file": "a.json", "indexes": "1"}]}, script)
@@ -184,7 +184,7 @@ class ProofreadFixTests(unittest.TestCase):
         self.assertEqual(row["modified_count"], 1)
         self.assertEqual(row["read_count"], 1)
         self.assertEqual(self.parent.permission_checks, [])
-        event = next(data for kind, data in self.parent.events if kind == "subagent_tool_result" and data["name"] == "patch_transl_cache")
+        event = next(data for kind, data in self.parent.events if kind == "subagent_tool_result" and data["name"] == "edit_transl_cache")
         self.assertEqual(event["result"]["changes"][0]["after"], "new")
         text = _render_tool_result_table("run_subagents", result)
         self.assertIn("直接修改 1 条译文", text)
@@ -202,7 +202,7 @@ class ProofreadFixTests(unittest.TestCase):
     def test_edited_translation_can_still_be_flagged_for_second_review(self):
         script = [
             ("read", [_Call("read", "read_transl_cache", '{"filename":"a.json","index":"1"}')]),
-            ("fix", [_Call("fix", "patch_transl_cache", json.dumps({"filename": "a.json", "patches": [
+            ("fix", [_Call("fix", "patch_transl_cache", json.dumps({"action": "set", "filename": "a.json", "patches": [
                 {"index": 1, "dst": "fixed", "proofread_comment": "称谓需要结合后文二次确认"},
             ]}))]),
             ("done", []),
@@ -252,7 +252,7 @@ class ProofreadFixTests(unittest.TestCase):
         for filename in ("a.json", "b.json"):
             handlers["read_transl_cache"](self.parent, {"filename": filename, "index": "1"})
         self.parent.files["b.json"][0]["pre_dst"] = "changed"
-        result = handlers["patch_transl_cache"](self.parent, {"patches": [
+        result = handlers["patch_transl_cache"](self.parent, {"action": "set", "patches": [
             {"file": "a.json", "index": 1, "dst": "fixed"},
             {"file": "b.json", "index": 1, "dst": "stale"},
         ]})
@@ -326,7 +326,7 @@ class ProofreadFixTests(unittest.TestCase):
         self.edit(dst="fixed")
         other = proofread.ProofreadFixer(self.parent, "other-task", self.parent.stop_event)
         other.read(self.parent, {"filename": "a.json", "index": "2"})
-        other.patch(self.parent, {"filename": "a.json", "patches": [{"index": 2, "dst": "other"}]})
+        other.patch(self.parent, {"action": "set", "filename": "a.json", "patches": [{"index": 2, "dst": "other"}]})
         with patch.object(proofread, "_read_record", wraps=proofread._read_record) as reader:
             result = proofread._tool_read_proofread_changes(self.parent, {"task_id": "test-task"})
         self.assertEqual(result["total"], 1)
@@ -443,7 +443,7 @@ class ProofreadFixTests(unittest.TestCase):
             return original(path, body)
 
         def worker():
-            agent._run_tool(_Call("edit", "patch_transl_cache", json.dumps({
+            agent._run_tool(_Call("edit", "patch_transl_cache", json.dumps({"action": "set",
                 "filename": "a.json", "patches": [{"index": 1, "dst": "fixed", "proofread_comment": "check context"}],
             })), handlers)
             return agent._finish("stopped", "")
@@ -491,7 +491,7 @@ class ProofreadFixTests(unittest.TestCase):
 
         responses = [
             ("", [_Call("read", "read_transl_cache", '{"filename":"a.json","index":"1"}')], "", ""),
-            ("", [_Call("edit", "patch_transl_cache", '{"filename":"a.json","patches":[{"index":1,"dst":"fixed"}]}')], "", ""),
+            ("", [_Call("edit", "patch_transl_cache", '{"action": "set", "filename": "a.json", "patches": [{"index": 1, "dst": "fixed"}]}')], "", ""),
         ]
         with (patch.object(subagent, "SUBAGENT_MAX_ROUNDS", 2),
               patch.object(agent, "_chat_with_retry", side_effect=responses),

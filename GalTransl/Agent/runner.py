@@ -80,6 +80,7 @@ from GalTransl.Agent.prompts import (
     _validated_compact_summary,
 )
 from GalTransl.Agent.tool_schemas import AGENT_TOOLS
+from GalTransl.Agent.tool_operations import tool_operation
 from GalTransl.Agent.images import expand_message, user_message, user_event
 from GalTransl.AppSettings import load_app_settings
 from GalTransl.Agent.billion_context import BillionContextSession
@@ -323,6 +324,9 @@ class AgentRunner:
         """Domain prompt; specialized agents share the same execution loop."""
         return _build_system_prompt(self.state)
 
+    def _initial_user_message(self, user_text: str) -> str:
+        return build_initial_user_message(user_text)
+
     def _tool_definitions(self) -> list[dict[str, Any]]:
         return AGENT_TOOLS
 
@@ -368,7 +372,7 @@ class AgentRunner:
                 self._persist_message({"role": "system", "content": self._system_prompt()})
                 # 首条 user 消息在模型侧附加二次判断提示；事件流仍使用实际输入。
                 first_user_text = self.state.first_prompt
-                self._persist_message(user_message(build_initial_user_message(first_user_text), self.state.first_images))
+                self._persist_message(user_message(self._initial_user_message(first_user_text), self.state.first_images))
                 # 首条用户消息也进事件流：SSE 全量回放（重开页面/状态对账）时
                 # 气泡不丢。前端发送时已乐观显示，收到会按内容去重。
                 self._emit("user_message", user_event(first_user_text, self.state.first_images))
@@ -542,7 +546,7 @@ class AgentRunner:
                         duration_ms = int((time.time() - started) * 1000)
                         _log(f"  ✅ 工具结果: {name} 耗时 {duration_ms}ms")
                         # 写入工具的模型消息只带有限 Markdown 预览，前端保留原始变更明细。
-                        rendered = _render_tool_result_table(name, result)
+                        rendered = _render_tool_result_table(tool_operation(name, args), result)
                         has_changes = isinstance(result, dict) and any(
                             key in result for key in ("changes", "line_diff", "deleted_preview")
                         )
@@ -1482,16 +1486,19 @@ class AgentRunner:
 
     # ---- 工具分发 ----
     def _dispatch_tool(self, name: str, args: dict[str, Any]) -> Any:
-        handler = _TOOL_HANDLERS.get(name)
+        if name in _RETIRED_TOOLS:
+            raise AgentToolError(_RETIRED_TOOLS[name])
+        operation = tool_operation(name, args)
+        handler = _TOOL_HANDLERS.get(operation)
         if handler is None:
-            raise AgentToolError(_RETIRED_TOOLS.get(name) or f"未知工具：{name}")
+            raise AgentToolError(f"未知工具：{name}")
         # 权限门禁：按当前模式放行 / 先请用户批准（拒绝时抛 AgentToolError，由主循环
         # 转成工具错误给模型看——见 _require_permission）。
-        self._require_permission(name, args)
+        self._require_permission(operation, args)
         # 带 reason 的工具（写类 + 启动翻译）的可选 reason（模型说明"为什么"）集中在这里
         # 搬到结果上，而不是让各自的 handler 都拼一遍——它们的结果结构各不相同，漏一个
         # 就是"填了却看不见"。
-        return _attach_reason(name, args, handler(self, args))
+        return _attach_reason(operation, args, handler(self, args))
 
     # ---- 询问用户（ask_user）----
     def _on_ask_pending(self, holder: dict[str, Any]) -> None:
@@ -1560,7 +1567,7 @@ class AgentRunner:
         用户这次点了允许。被拒绝时抛 AgentToolError——模型因此收到一条"用户拒绝权限"
         的工具错误，可以换策略；不抛错就会把"没执行"当成"执行成功"。
         """
-        risk = _tool_risk(name)
+        risk = _tool_risk(name, args)
         mode = _normalize_permission_mode(self.state.permission_mode)
         if not _permission_needed(risk, mode):
             return
@@ -1594,7 +1601,7 @@ class AgentRunner:
         挂起前会顺手把「这次会改成什么」算一遍塞进事件（preview，见 _preview_tool_changes）：
         写类工具的那份 before→after 就这么提前摆到卡上。
         """
-        risk = _tool_risk(name)
+        risk = _tool_risk(name, args)
         safe_args = _sanitize_tool_args(args)
         event = threading.Event()
         holder: dict[str, Any] = {
@@ -1656,7 +1663,7 @@ class AgentRunner:
         if holder is None:
             return
         name = str(holder.get("name") or "")
-        if _permission_needed(_tool_risk(name), self.state.permission_mode):
+        if _permission_needed(holder["risk"], self.state.permission_mode):
             return
         holder["decision"] = "allow-once"
         holder["event"].set()
