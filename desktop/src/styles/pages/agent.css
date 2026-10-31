@@ -2154,6 +2154,7 @@
   color: var(--color-text-muted);
   font: inherit;
   font-size: 0.84rem;
+  line-height: 1.5;
   text-align: left;
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
@@ -2192,8 +2193,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--agent-mono);
-  font-size: 0.76rem;
+  font: inherit;
   color: var(--color-text-muted);
   opacity: 0.9;
 }
