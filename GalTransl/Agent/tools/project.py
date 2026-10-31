@@ -9,8 +9,8 @@ from typing import Any, TYPE_CHECKING
 
 from GalTransl.Agent.core import DEFAULT_CONFIG_FILE
 from GalTransl.Agent.models import AgentToolError
-from GalTransl.Agent.tools.common import _change, _diff_lines
-from GalTransl.Agent.tools.plugin_settings import catalog_for_updates, set_plugin_value, validate_plugin_value
+from GalTransl.Agent.tools.common import _change, _diff_lines, _write_action, _text_replacement
+from GalTransl.Agent.tools.plugin_settings import catalog_for_updates, set_plugin_value, validate_plugin_value, _tool_get_plugin_settings
 from GalTransl.PluginSettings import get_plugin_config_section
 
 if TYPE_CHECKING:
@@ -38,10 +38,10 @@ CONFIG_FIELD_DESCRIPTIONS: dict[str, str] = {
     "common.smartRetry": "解析失败时自动缩小批次并重置上下文，减少无效重试 [true/false]",
     "common.retranslFail": "程序重启时是否自动重翻标记为 (Failed) 的句子 [true/false]",
     "common.retranslKey": "重翻关键字列表：启动时命中缓存 problem 或原文关键字的句子会被重翻（如「翻译失败」「残留日文」）",
-    "common.problemFilterKey": "问题过滤关键字列表：**正则列表**，每项是一条正则，命中的问题项在问题统计与 list_problems 中被过滤掉。原则上只过滤小类（如 `缺失.*标点`、`^残留日文：♪`），不要用 `残留日文` 这类整类写法",
+    "common.problemFilterKey": '问题过滤关键字列表：**正则列表**，每项是一条正则，命中的问题项在问题统计与 problems(action="list") 中被过滤掉。原则上只过滤小类（如 `缺失.*标点`、`^残留日文：♪`），不要用 `残留日文` 这类整类写法',
     "common.problemWhiteList": "问题白名单：按「缓存文件名:index」（如 a.json:12，区间写 a.json:12-15）豁免指定缓存条目的问题，等价于给该条勾选 skip_check",
     "common.gpt.contextNum": "每次请求附带的前文句数；值越大上下文越强、成本越高（常用 8）[0-32]",
-    "common.gpt.translation_guideline": "使用的**全局**翻译规范文件名（位于 translation_guidelines 文件夹），决定文风与措辞；项目专属规范不是配置项，而是项目目录里的 translation_guideline.md（用 read_guideline/write_project_guideline 读改），翻译时拼在全局规范之后",
+    "common.gpt.translation_guideline": '使用的**全局**翻译规范文件名（位于 translation_guidelines 文件夹），决定文风与措辞；项目专属规范不是配置项，而是项目目录里的 translation_guideline.md（用 guideline(action="read")/guideline 读改），翻译时拼在全局规范之后',
     "common.gpt.enhance_jailbreak": "是否启用「抗拒答」增强提示，降低模型拒答概率 [true/false]",
     "common.gpt.token_limit": "(Sakura/GalTransl) 单轮 token 上限；0 表示不限制，用于避免上下文溢出",
     "common.loggingLevel": "日志输出级别：debug 详细，info 常规，warning 仅警告 [debug/info/warning]",
@@ -210,6 +210,7 @@ OVERVIEW_SECTIONS: tuple[str, ...] = (
     "backend",
     "config",
     "config_field_descriptions",
+    "plugins",
 )
 
 
@@ -217,7 +218,7 @@ def _normalize_overview_include(args: dict[str, Any]) -> list[str]:
     """校验 include：不传 = 全部；传了就去重并按标准顺序返回，未知名字直接报错。"""
     raw = args.get("include")
     if raw is None:
-        return list(OVERVIEW_SECTIONS)
+        return [section for section in OVERVIEW_SECTIONS if section != "plugins"]
     if not isinstance(raw, list) or not raw:
         raise AgentToolError("include 必须是非空数组（不传表示返回全部）")
     wanted: set[str] = set()
@@ -264,12 +265,7 @@ def _tool_get_project_overview(runner: AgentRunner, args: dict[str, Any]) -> Any
             "failed": progress.get("failed", 0),
             **file_counts,
             "note": (
-                "total/translated 是句数，且只统计已生成缓存的文件；未开始翻译的文件不计入分母，"
-                "所以 translated==total 只说明「已有缓存的部分翻完了」，不代表整个项目翻完。"
-                "整体进度请结合 files_translated/files_total 判断。"
-                "这里是**已落盘缓存**的口径（扫缓存目录得到）；本轮任务自身的计数与 ETA 见 "
-                "get_runtime 的 summary（按任务计划统计，含正在翻译、尚未落盘的文件，"
-                "total 通常比这里大）——两个分母不同，别拿它们互相校对。"
+                'total/translated 是句数，且只统计已生成缓存的文件；未开始翻译的文件不计入分母，所以 translated==total 只说明「已有缓存的部分翻完了」，不代表整个项目翻完。整体进度请结合 files_translated/files_total 判断。这里是**已落盘缓存**的口径（扫缓存目录得到）；本轮任务自身的计数与 ETA 见 translation(action="status") 的 summary（按任务计划统计，含正在翻译、尚未落盘的文件，total 通常比这里大）——两个分母不同，别拿它们互相校对。'
             ),
         }
 
@@ -290,7 +286,10 @@ def _tool_get_project_overview(runner: AgentRunner, args: dict[str, Any]) -> Any
         if "config_field_descriptions" in include:
             out["config_field_descriptions"] = descriptions
 
-    if len(include) < len(OVERVIEW_SECTIONS):
+    if "plugins" in include:
+        out["plugins"] = _tool_get_plugin_settings(runner, args)
+
+    if args.get("include") is not None and len(include) < len(OVERVIEW_SECTIONS):
         out["note"] = (
             f"本次只返回了{'、'.join(include)}；需要其它部分时再调用一次并带上对应的 include"
             f"（可选：{'、'.join(OVERVIEW_SECTIONS)}）。"
@@ -307,7 +306,7 @@ def _tool_read_guideline(runner: AgentRunner, args: dict[str, Any]) -> Any:
     if not name:
         data = runner._http_get("/api/translation-guidelines")
         guidelines = data.get("guidelines", [])
-        current = "（见 get_project_overview 配置 common.gpt.translation_guideline）"
+        current = '（见 get_project 配置 common.gpt.translation_guideline）'
         return {
             "guidelines": guidelines,
             "note": (
@@ -332,14 +331,9 @@ def _tool_write_project_guideline(runner: AgentRunner, args: dict[str, Any]) -> 
     审批卡上的提前预览同理，只是那次带 dry_run（见 _preview_guideline_write）：同一个入口，
     服务端算完就走。所以"批准前看到的 diff"和"批准后落盘的内容"来自同一段拼接逻辑。
     """
+    body = _guideline_write_request(args)
     endpoint = f"/api/projects/{runner._project_id()}/guideline"
     before = str((runner._http_get(endpoint) or {}).get("content") or "")
-    body = {
-        "mode": str(args.get("mode", "") or "").strip(),
-        "content": str(args.get("content", "") or ""),
-        "old_text": str(args.get("old_text", "") or ""),
-        "new_text": str(args.get("new_text", "") or ""),
-    }
     result = runner._http_put(endpoint, body)
     after = str((runner._http_get(endpoint) or {}).get("content") or "")
 
@@ -347,8 +341,10 @@ def _tool_write_project_guideline(runner: AgentRunner, args: dict[str, Any]) -> 
     added = diff["added"]
     removed = diff["removed"]
     out: dict[str, Any] = dict(result) if isinstance(result, dict) else {}
+    out.pop("mode", None)
     out.update(
         {
+            "action": body["mode"],
             "changed": before != after,
             "lines_before": len(before.splitlines()),
             "lines_after": len(after.splitlines()),
@@ -358,6 +354,17 @@ def _tool_write_project_guideline(runner: AgentRunner, args: dict[str, Any]) -> 
         }
     )
     return out
+
+
+def _guideline_write_request(args: dict[str, object]) -> dict[str, object]:
+    action = _write_action(args, ("append", "replace", "overwrite"))
+    if action == "replace":
+        old_text, new_text, replace_all = _text_replacement(args)
+        return {"mode": action, "old_text": old_text, "new_text": new_text, "replace_all": replace_all}
+    content = args.get("content")
+    if not isinstance(content, str):
+        raise AgentToolError("content must be a string")
+    return {"mode": action, "content": content}
 
 
 def _parse_config_value(raw: Any) -> Any:
@@ -466,7 +473,7 @@ def _plan_config_updates(
             # 免得模型绕开 write_project_guideline 去改一份"看不见的"旧机制
             skipped.append({
                 "key": key,
-                "reason": "该键已下线（仅为旧工程兼容保留），请改用 write_project_guideline 写项目规范",
+                "reason": '该键已下线（仅为旧工程兼容保留），请改用 guideline 写项目规范',
             })
             continue
         value = _parse_config_value(item.get("value"))
@@ -512,6 +519,7 @@ def _tool_update_project_config(runner: AgentRunner, args: dict[str, Any]) -> An
     """修改项目配置：读-改-写回（与桌面端「项目配置」页同一通道）。
 
     普通键必须已存在；插件设置允许新增声明过的键，并验证类型与选项。"""
+    _write_action(args, ("set",))
     updates = args.get("updates")
     if not isinstance(updates, list) or not updates:
         raise AgentToolError("updates must be a non-empty array of {key, value}")

@@ -146,8 +146,6 @@
   "projectConfigPage": {
     "projectConfigPage_normalizeError_loadConfigFailed": "Failed to load the configuration",
     "handleSave_normalizeError_saveConfigFailed": "Failed to save the configuration",
-    "handleReextract_setReextractError_configSaveFailedNotStartExtract": "The configuration could not be saved, so re-extraction did not start.",
-    "handleReextract_normalizeError_extractSourceFailed": "Failed to re-extract the source text",
     "projectConfigPage_title_configEdit": "Edit configuration",
     "projectConfigPage_title_loadConfig": "Loading configuration…",
     "projectConfigPage_description_pendingRead": "Reading {{configFileName}}.",
@@ -158,17 +156,7 @@
     "projectConfigPageMain_description_currentProjectConfigDoneSuccess": "The current project configuration has been written to disk successfully.",
     "sectionFadeInProjectConfigFields_title_yAMLSource": "YAML source",
     "sectionFadeInProjectConfigFields_description_editYAMLConfigSourcePreviewChange": "Edit the YAML configuration source directly (read-only preview; use the form above to make changes)",
-    "yamlPreview_message_config": "No configuration data",
-    "pluginSettingRow_message_sourceExtract": "Source extraction",
-    "pluginReextractButton_message_pendingSaveConfig": "Saving the configuration…",
-    "pluginReextractButton_message_pendingExtract": "Re-extracting…",
-    "pluginReextractButton_message_extractSource": "Re-extract the source text",
-    "pluginSettingRowControl_message_saveCurrentConfigExtractPluginProcessAll": "Save the current configuration and re-extract every input file handled by this plugin. Existing translation cache is kept.",
-    "pluginSettingRowControl_message_notPluginProcessFile": "No input file handled by this plugin was found.",
-    "pluginSettingRowControl_message_extractCompleteSuccessCountFileSentenceFailed": "Re-extraction finished: {{count}} files succeeded with {{total_entries}} sentences in total; {{count2}} files failed.",
-    "pluginSettingRowControl_message_extractCompleteSuccessCountFileSentenceFailed_other": "Re-extraction finished: {{count}} files succeeded with {{total_entries}} sentences in total; {{count2}} files failed.",
-    "pluginSettingRowControl_message_failedFile": "Failed files and reasons",
-    "pluginSettingRowControl_message_extractCompleteSuccessCountFileSentenceFailed_one": "Re-extraction finished: {{count}} file succeeded with {{total_entries}} sentences in total; {{count2}} files failed."
+    "yamlPreview_message_config": "No configuration data"
   },
   "fields": {
     "splitFile": {

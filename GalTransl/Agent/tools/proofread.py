@@ -23,7 +23,7 @@ from GalTransl.Agent.tools.cache import (
     _tool_read_transl_cache, _plan_cache_patches,
 )
 from GalTransl.Agent.tools.cache_fields import _cache_field_value, _PATCHABLE_FIELDS
-from GalTransl.Agent.tools.common import _parse_index_spec
+from GalTransl.Agent.tools.common import _parse_index_spec, _write_action
 
 
 def _snapshot(entry: dict) -> dict:
@@ -40,7 +40,7 @@ def _record_dir(runner: Any) -> str:
 
 def _record_path(runner: Any, change_id: str, *, task_id: str | None = None) -> str:
     if not re.fullmatch(r"[0-9a-f]{32}", change_id):
-        raise AgentToolError("无效的 change_id；请从 read_proofread_changes 获取")
+        raise AgentToolError('无效的 change_id；请从 subagents(action="changes") 获取')
     directory = _record_dir(runner)
     if task_id is not None:
         # Task prefixes allow filtering before opening records, without a
@@ -160,6 +160,9 @@ class ProofreadFixer:
         return result
 
     def patch(self, runner: Any, args: dict) -> dict:
+        _write_action(args, ("set",))
+        if any(field in args for field in ("files", "old_text", "new_text", "replace_all", "fields", "query", "replacement")):
+            raise AgentToolError("校对子代理只支持 action=set 与 patches")
         targets = _group_cache_patches_by_file(args)
         files: list[dict] = []
         for filename, patches in targets:

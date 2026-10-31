@@ -75,7 +75,7 @@ class ReadDictTests(unittest.TestCase):
                 _read(["a\tA"], **args)
 
     def test_schema_exposes_query_and_bounded_paging(self):
-        schema = next(t["function"] for t in AGENT_TOOLS if t["function"]["name"] == "read_dict")
+        schema = next(t["function"] for t in AGENT_TOOLS if t["function"]["name"] == "dictionary")
         props = schema["parameters"]["properties"]
         self.assertEqual(props["query"]["type"], "string")
         self.assertEqual(props["offset"]["default"], 0)

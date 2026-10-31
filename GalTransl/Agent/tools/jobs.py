@@ -9,7 +9,6 @@ from GalTransl import TRANSLATOR_SUPPORTED
 from GalTransl.Agent.core import RUNTIME_ERRORS_PER_QUERY, _log
 from GalTransl.Agent.models import AgentToolError
 from GalTransl.Agent.tools.project import _backend_summary
-from GalTransl.Agent.tools.plugin_settings import encoding_recovery
 
 if TYPE_CHECKING:
     from GalTransl.Agent.models import AgentState
@@ -215,8 +214,8 @@ def _tool_wait(runner: AgentRunner, args: dict[str, Any]) -> Any:
             "job_id": job_id,
             "job_found": False,
             "note": (
-                f"任务列表里找不到 {job_id}：id 可能写错，或这个任务已经不在列表里。"
-                "用 get_runtime 看当前项目的任务状态再决定下一步。"
+                f'任务列表里找不到 {job_id}：id 可能写错，或这个任务已经不在列表里。'
+                '用 translation(action="status") 看当前项目的任务状态再决定下一步。'
             ),
         }
     if job_id and job_status in WAIT_JOB_DONE_STATUSES:
@@ -232,9 +231,6 @@ def _tool_wait(runner: AgentRunner, args: dict[str, Any]) -> Any:
         }
         if job_error:
             out["job_error"] = job_error
-            recovery = encoding_recovery(job_error)
-            if recovery:
-                out["recovery"] = recovery
         return out
     _log(f"  ⏳ 等待结束，共 {elapsed_ms / 1000:.1f}s")
     if job_id:
@@ -252,30 +248,28 @@ def _tool_wait(runner: AgentRunner, args: dict[str, Any]) -> Any:
             out["runtime"] = snapshot
             out["note"] = (
                 f"等待时长到了，任务 {job_id} 还在跑（{job_status or 'running'}）："
-                "下面附了当前运行时快照（等同 get_runtime，含 summary.eta_seconds），"
-                "据此决定下一轮等多久——eta 还长就再 wait 一次同一个 job_id，快完了就把时长调短盯着。"
+                '下面附了当前运行时快照（等同 translation(action="status")，含 summary.eta_seconds），据此决定下一轮等多久。'
             )
         else:
             out["note"] = (
                 f"等待时长到了，任务 {job_id} 还在跑（{job_status or 'running'}）："
-                "调用 get_runtime 看进度与 eta_seconds 再决定下一轮等多久"
-                "（也可以再 wait 一次同一个 job_id）。"
+                '调用 translation(action="status") 看进度与 eta_seconds 再决定下一轮等多久。'
             )
         return out
     return {
         "waited_seconds": waited,
         "wait_completed": True,
-        "note": "这只是计时结束，不代表后台任务完成。如果是翻译任务，请调用 get_runtime 确认任务状态后再决定下一步。",
+        "note": '这只是计时结束，不代表后台任务完成。如果是翻译任务，请调用 translation(action="status") 确认任务状态后再决定下一步。',
     }
 
 
 def _runtime_snapshot(runner: AgentRunner) -> dict[str, Any] | None:
-    """顺手取一份运行时快照（等同模型再调一次 get_runtime），取不到就返回 None。
+    """顺手取一份运行时快照（等同模型再调一次 translation(action="status")），取不到就返回 None。
 
-    放在 wait 的"时长先到、任务还在跑"分支里：那一刻模型正需要进度与 eta_seconds 来决定
+    放在 translation(action="wait") 的"时长先到、任务还在跑"分支里：那一刻模型正需要进度与 eta_seconds 来决定
     下一轮等多久，直接带上就不必再多跑一个来回。副作用（错误水位线 seen_error_ids）与
-    模型自己调 get_runtime 一致，所以不会造成同一条报错被重复发。
-    快照只是顺手带的，取不到（后端抖了/项目读不到）不该影响 wait 本身的结论。
+    模型自己调 translation(action="status") 一致，所以不会造成同一条报错被重复发。
+    快照只是顺手带的，取不到（后端抖了/项目读不到）不该影响 translation(action="wait") 本身的结论。
     """
     try:
         return _tool_get_runtime(runner, {})
@@ -423,9 +417,6 @@ def _tool_get_runtime(runner: AgentRunner, _args: dict[str, Any]) -> Any:
     }
     if job.get("error"):
         result["job_error"] = str(job["error"])
-        recovery = encoding_recovery(result["job_error"])
-        if recovery:
-            result["recovery"] = recovery
     if pending_errors:
         # 还有没发完的新错误：说明这次报错很密集，下次查询继续给
         result["recent_errors_pending"] = pending_errors

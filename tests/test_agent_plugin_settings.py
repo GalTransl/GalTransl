@@ -12,7 +12,7 @@ from GalTransl.server import _scan_plugins
 from GalTransl.Agent.models import AgentToolError, AgentState
 from GalTransl.Agent.runner import AgentRunner
 from GalTransl.Agent.permissions import _tool_risk, _permission_needed
-from GalTransl.Agent.tools.plugin_settings import _tool_get_plugin_settings, encoding_recovery
+from GalTransl.Agent.tools.plugin_settings import _tool_get_plugin_settings
 from GalTransl.Agent.tools.project import _tool_update_project_config
 from GalTransl.Agent.tools.preview import _preview_config_update
 from GalTransl.Agent.tools.jobs import _tool_get_runtime, _tool_wait
@@ -50,7 +50,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
                 fields = _tool_get_plugin_settings(runner, {"plugin_name": "problem_common"})["plugins"][0]["settings"]
                 self.assertEqual(fields[0]["value"], 17)
                 self.assertFalse(fields[0]["overridden"])
-                args = {"updates": [
+                args = {"action": "set", "updates": [
                     {"key": "plugin.problemPlugins", "value": ["problem_common"]},
                     {"key": "plugin.problem_common.avgSentenceLengthThreshold", "value": 25},
                 ]}
@@ -67,14 +67,14 @@ class PluginSettingsAgentTests(unittest.TestCase):
                 runner = Runner(self.plugins, {"plugin": plugin})
                 with self.assertRaises(AgentToolError):
                     _tool_get_plugin_settings(runner, {"plugin_name": "problem_common"})
-                result = _tool_update_project_config(runner, {"updates": [
+                result = _tool_update_project_config(runner, {"action": "set", "updates": [
                     {"key": "plugin.problem_common.avgSentenceLengthThreshold", "value": 25},
                 ]})
                 self.assertEqual(result["updated"], 0)
                 self.assertEqual(runner.config["plugin"], plugin)
                 self.assertEqual(runner.writes, [])
         runner = Runner([], {"plugin": "invalid"})
-        result = _tool_update_project_config(runner, {"updates": [{"key": "plugin.problemPlugins", "value": []}]})
+        result = _tool_update_project_config(runner, {"action": "set", "updates": [{"key": "plugin.problemPlugins", "value": []}]})
         self.assertEqual(result["updated"], 0)
         self.assertEqual(runner.config["plugin"], "invalid")
 
@@ -86,7 +86,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
         self.assertEqual(threshold["default"], 17)
         self.assertEqual(threshold["value"], 8)
         self.assertFalse(threshold["overridden"])
-        args = {"updates": [{"key": "plugin.problem_common.avgSentenceLengthThreshold", "value": 25}]}
+        args = {"action": "set", "updates": [{"key": "plugin.problem_common.avgSentenceLengthThreshold", "value": 25}]}
         preview = _preview_config_update(runner, args)
         result = _tool_update_project_config(runner, args)
         self.assertEqual(preview["changes"], result["changes"])
@@ -96,7 +96,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
 
     def test_problem_plugin_selection_can_be_added_to_legacy_project(self):
         runner = Runner([], {"plugin": {"filePlugin": "auto"}})
-        args = {"updates": [{"key": "plugin.problemPlugins", "value": []}]}
+        args = {"action": "set", "updates": [{"key": "plugin.problemPlugins", "value": []}]}
         preview = _preview_config_update(runner, args)
         result = _tool_update_project_config(runner, args)
         self.assertEqual(preview["changes"], result["changes"])
@@ -109,61 +109,61 @@ class PluginSettingsAgentTests(unittest.TestCase):
         cls.plugins = _scan_plugins()
 
     def test_discovery_defaults_overrides_paths_and_schema(self):
-        runner = Runner(self.plugins, {"plugin": {"filePlugin": "file_msgtool_script",
-                          "file_msgtool_script": {"patched_encoding": "utf8"}}})
-        result = _tool_get_plugin_settings(runner, {"plugin_name": "file_msgtool_script"})
+        runner = Runner(self.plugins, {"plugin": {"filePlugin": "file_epub_epub",
+                          "file_epub_epub": {"原文颜色": "#ffffff"}}})
+        result = _tool_get_plugin_settings(runner, {"plugin_name": "file_epub_epub"})
         self.assertEqual(len(result["plugins"]), 1)
         fields = {f["key"]: f for f in result["plugins"][0]["settings"]}
-        jis = fields["plugin.file_msgtool_script.jis_substitution"]
-        self.assertIs(jis["value"], False)
-        self.assertFalse(jis["overridden"])
-        self.assertEqual(jis["schema"]["label"], "JIS 替换")
-        enc = fields["plugin.file_msgtool_script.patched_encoding"]
-        self.assertEqual(enc["value"], "utf8")
-        self.assertEqual(enc["default"], "")
-        self.assertTrue(enc["overridden"])
+        name = fields["plugin.file_epub_epub.是否自动识别名称"]
+        self.assertIs(name["value"], False)
+        self.assertFalse(name["overridden"])
+        self.assertEqual(name["schema"]["label"], "自动识别人名")
+        color = fields["plugin.file_epub_epub.原文颜色"]
+        self.assertEqual(color["value"], "#ffffff")
+        self.assertEqual(color["default"], "#808080")
+        self.assertTrue(color["overridden"])
         self.assertEqual(runner.writes, [])
 
     def test_add_default_key_preview_matches_write_preserves_other_values(self):
         runner = Runner(self.plugins, {"common": {"language": "zh-cn"}, "plugin": {
             "filePlugin": "auto", "textPlugins": ["text_common_normalfix"],
-            "file_msgtool_script": {"timeout": 500}}})
-        args = {"updates": [{"key": "plugin.file_msgtool_script.jis_substitution", "value": True}]}
+            "file_epub_epub": {"缩小比例": 0.5}}})
+        args = {"action": "set", "updates": [{"key": "plugin.file_epub_epub.是否自动识别名称", "value": True}]}
         preview = _preview_config_update(runner, args)
         self.assertEqual(runner.writes, [])
         result = _tool_update_project_config(runner, args)
         self.assertEqual(preview["changes"], result["changes"])
         self.assertEqual(result["updated"], 1)
-        self.assertEqual(runner.config["plugin"]["file_msgtool_script"], {"timeout": 500, "jis_substitution": True})
+        self.assertEqual(runner.config["plugin"]["file_epub_epub"], {"缩小比例": 0.5, "是否自动识别名称": True})
         self.assertEqual(runner.config["common"], {"language": "zh-cn"})
         self.assertEqual(runner.config["plugin"]["filePlugin"], "auto")
 
     def test_missing_plugin_objects_and_repeated_updates(self):
         runner = Runner(self.plugins, {"common": {"language": "zh-cn"}})
-        args = {"updates": [
-            {"key": "plugin.file_msgtool_script.jis_substitution", "value": True},
-            {"key": "plugin.file_msgtool_script.jis_substitution", "value": False}]}
+        args = {"action": "set", "updates": [
+            {"key": "plugin.file_epub_epub.是否自动识别名称", "value": True},
+            {"key": "plugin.file_epub_epub.是否自动识别名称", "value": False}]}
         preview = _preview_config_update(runner, args)
         result = _tool_update_project_config(runner, args)
         self.assertEqual(preview["changes"], result["changes"])
         self.assertIs(result["changes"][1]["before"], True)
-        self.assertIs(runner.config["plugin"]["file_msgtool_script"]["jis_substitution"], False)
+        self.assertIs(runner.config["plugin"]["file_epub_epub"]["是否自动识别名称"], False)
 
     def test_invalid_keys_types_options_ranges_and_bulk_overwrite_do_not_write(self):
         for key, value in (
-            ("plugin.file_msgtool_script.typo", True),
-            ("plugin.file_msgtool_script.jis_substitution", "true"),
-            ("plugin.file_msgtool_script.patched_encoding", "made-up"),
-            ("plugin.file_msgtool_script.timeout", 0),
-            ("plugin.file_msgtool_script.timeout", True),
-            ("plugin.file_msgtool_script.timeout", float("nan")),
-            ("plugin.file_msgtool_script", {"typo": True}),
-            ("plugin", {"file_msgtool_script": {"typo": True}}),
+            ("plugin.file_epub_epub.typo", True),
+            ("plugin.file_epub_epub.是否自动识别名称", "true"),
+            ("plugin.file_plaintext_txt.上下双语1左右双语2", 3),
+            ("plugin.file_epub_epub.缩小比例", 0),
+            ("plugin.file_epub_epub.缩小比例", True),
+            ("plugin.file_epub_epub.缩小比例", float("nan")),
+            ("plugin.file_epub_epub", {"typo": True}),
+            ("plugin", {"file_epub_epub": {"typo": True}}),
             ("common.made_up", 1),
         ):
             with self.subTest(key=key, value=value):
                 runner = Runner(self.plugins)
-                args = {"updates": [{"key": key, "value": value}]}
+                args = {"action": "set", "updates": [{"key": key, "value": value}]}
                 self.assertIsNone(_preview_config_update(runner, args))
                 result = _tool_update_project_config(runner, args)
                 self.assertEqual(result["updated"], 0)
@@ -177,7 +177,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
         info = _tool_get_plugin_settings(runner, {"plugin_name": "custom"})
         self.assertNotIn("PROJECT_SECRET", json.dumps(info))
         self.assertNotIn("DEFAULT_SECRET", json.dumps(info))
-        result = _tool_update_project_config(runner, {"updates": [
+        result = _tool_update_project_config(runner, {"action": "set", "updates": [
             {"key": "plugin.custom.a.b", "value": True},
             {"key": "plugin.custom.token", "value": "other"}]})
         self.assertEqual(result["updated"], 1)
@@ -186,23 +186,23 @@ class PluginSettingsAgentTests(unittest.TestCase):
 
     def test_project_plugin_overrides_global_declaration(self):
         with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory) / "plugins/file_msgtool_script/file_msgtool_script.yaml"
+            target = Path(directory) / "plugins/file_epub_epub/file_epub_epub.yaml"
             target.parent.mkdir(parents=True)
-            target.write_text(yaml.safe_dump({"Core": {"Name": "本地版本", "Module": "file_msgtool_script", "Type": "file"},
+            target.write_text(yaml.safe_dump({"Core": {"Name": "本地版本", "Module": "file_epub_epub", "Type": "file"},
                                               "Settings": {"custom": 1}}), encoding="utf-8")
             catalog = _scan_plugins(directory)
-            plugin = next(p for p in catalog if p["module"] == "file_msgtool_script")
+            plugin = next(p for p in catalog if p["module"] == "file_epub_epub")
             self.assertEqual(plugin["settings"], {"custom": 1})
-            result = _tool_update_project_config(Runner(catalog), {"updates": [
-                {"key": "plugin.file_msgtool_script.jis_substitution", "value": True}]})
+            result = _tool_update_project_config(Runner(catalog), {"action": "set", "updates": [
+                {"key": "plugin.file_epub_epub.是否自动识别名称", "value": True}]})
             self.assertEqual(result["updated"], 0)
 
     def test_discovery_failure_cannot_create_keys(self):
         runner = Runner(self.plugins)
         runner._http_get = lambda path: {"config": runner.config}
         with self.assertRaises(AgentToolError):
-            _tool_update_project_config(runner, {"updates": [
-                {"key": "plugin.file_msgtool_script.jis_substitution", "value": True}]})
+            _tool_update_project_config(runner, {"action": "set", "updates": [
+                {"key": "plugin.file_epub_epub.是否自动识别名称", "value": True}]})
         self.assertEqual(runner.writes, [])
 
     def test_permissions_retained(self):
@@ -211,7 +211,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
             self.assertTrue(_permission_needed(_tool_risk("update_project_config"), mode))
         self.assertFalse(_permission_needed(_tool_risk("update_project_config"), "auto"))
 
-    def test_wait_and_runtime_deliver_error_and_same_actionable_recovery(self):
+    def test_wait_and_runtime_deliver_full_job_error(self):
         runner = AgentRunner(AgentState())
         runner._project_id = lambda: "test"
         error = "脚本回填编码失败：01_YU02.cst\nFailed to encode Shift-JIS"
@@ -220,13 +220,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
         waited = _tool_wait(runner, {"job_id": "j1", "seconds": 0.1})
         runtime = _tool_get_runtime(runner, {})
         self.assertEqual(runtime["job_error"], error)
-        self.assertEqual(waited["recovery"], runtime["recovery"])
-        recovery = waited["recovery"]
-        self.assertEqual(recovery["inspect"]["tool"], "get_plugin_settings")
-        self.assertEqual(recovery["alternatives"][0]["arguments"]["updates"][0]["key"],
-                         "plugin.file_msgtool_script.jis_substitution")
-        self.assertEqual(recovery["rebuild"]["arguments"]["translator"], "rebuildr")
-        self.assertIsNone(encoding_recovery("Failed to decode Shift-JIS"))
+        self.assertEqual(waited["job_error"], error)
 
 
 if __name__ == "__main__":

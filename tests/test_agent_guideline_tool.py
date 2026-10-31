@@ -7,7 +7,7 @@
 import unittest
 from unittest.mock import patch
 
-from GalTransl.Agent.runtime import AgentRunner, AgentState, _tool_write_project_guideline
+from GalTransl.Agent.runtime import AgentRunner, AgentState, AgentToolError, _tool_write_project_guideline
 
 
 class WriteProjectGuidelineDiffTests(unittest.TestCase):
@@ -41,7 +41,7 @@ class WriteProjectGuidelineDiffTests(unittest.TestCase):
         out, writes = self._run(
             "## 称呼\n- お兄ちゃん→哥哥",
             "## 称呼\n- お兄ちゃん→哥哥\n\n## 语气\n- 书面语",
-            {"mode": "append", "content": "## 语气\n- 书面语"},
+            {"action": "append", "content": "## 语气\n- 书面语"},
         )
 
         rows = out["line_diff"]["rows"]
@@ -52,12 +52,26 @@ class WriteProjectGuidelineDiffTests(unittest.TestCase):
         self.assertEqual(writes[0]["mode"], "append")
         # 后端那份结果原样保留（前端与模型都还要看 success / filename / length）
         self.assertTrue(out["success"])
+        self.assertEqual(out["action"], "append")
+        self.assertNotIn("mode", out)
+
+    def test_replace_all_is_forwarded_and_new_text_is_required(self):
+        out, writes = self._run("old old", "new new", {
+            "action": "replace", "old_text": "old", "new_text": "new", "replace_all": True,
+        })
+        self.assertTrue(writes[0]["replace_all"])
+        self.assertEqual(out["action"], "replace")
+        for args in ({"mode": "overwrite", "content": "x"}, {"content": "x"},
+                     {"action": "overwrite"}, {"action": "replace", "old_text": "old"},
+                     {"action": "replace", "old_text": "old", "new_text": "new", "replace_all": "true"}):
+            with self.subTest(args=args), self.assertRaises(AgentToolError):
+                self._run("old", "new", args)
 
     def test_replace_reports_one_del_and_one_add(self) -> None:
         out, _ = self._run(
             "## 称呼\n- お兄ちゃん→哥哥\n## 语气\n- 书面语",
             "## 称呼\n- お兄ちゃん→兄长\n## 语气\n- 书面语",
-            {"mode": "replace", "old_text": "→哥哥", "new_text": "→兄长"},
+            {"action": "replace", "old_text": "→哥哥", "new_text": "→兄长"},
         )
 
         self.assertEqual([r["op"] for r in out["line_diff"]["rows"]], ["del", "add"])
@@ -65,7 +79,7 @@ class WriteProjectGuidelineDiffTests(unittest.TestCase):
         self.assertTrue(out["changed"])
 
     def test_unchanged_content_produces_no_rows(self) -> None:
-        out, _ = self._run("同样的内容", "同样的内容", {"mode": "append", "content": "同样的内容"})
+        out, _ = self._run("同样的内容", "同样的内容", {"action": "append", "content": "同样的内容"})
 
         self.assertEqual(out["line_diff"]["rows"], [])
         self.assertFalse(out["changed"])

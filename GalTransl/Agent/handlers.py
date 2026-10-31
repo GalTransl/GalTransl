@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable, TYPE_CHECKING
 
 from GalTransl.Agent.subagent import _tool_run_subagents
+from GalTransl.Agent.tool_operations import TOOL_OPERATIONS, PROBLEM_OPERATIONS
 from GalTransl.Agent.tools.ask import _tool_ask_user, _tool_read_history_archive
 from GalTransl.Agent.tools.cache import (
     _tool_delete_transl_cache,
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
 
 
 _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
+    "get_project": _tool_get_project_overview,
     "get_project_overview": _tool_get_project_overview,
     "get_plugin_settings": _tool_get_plugin_settings,
     "update_project_config": _tool_update_project_config,
@@ -81,16 +83,25 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
 # 已合并掉的旧工具名 → 现在该怎么调。旧会话的历史里还留着这些调用，模型可能照着历史再调一次：
 # 回一句明确的改法，比"未知工具"好接得多。
 _RETIRED_TOOLS: dict[str, str] = {
+    **{
+        operation: f'{operation} 已并入 {name}：改用 {name}(action="{action}", ...)；可用动作见工具定义。'
+        for name, actions in TOOL_OPERATIONS.items()
+        for action, operation in reversed(list(actions.items()))
+    },
+    **{
+        operation: f'{operation} 已并入 problems：改用 problems(action="list", target="{target}", ...)；写入动作见工具定义。'
+        for target, operation in PROBLEM_OPERATIONS.items()
+    },
+    "get_project_overview": '改用 get_project(include=[...])。',
+    "get_plugin_settings": '改用 get_project(include=["plugins"], plugin_name=...)。',
     "list_transl_cache": 'list_transl_cache 已并入 read_transl_cache：改用 read_transl_cache(action="list", ...)。',
     "search_transl_cache": 'search_transl_cache 已并入 read_transl_cache：改用 read_transl_cache(action="search", query=..., ...)。',
-    "create_dict_file": 'create_dict_file 已并入 save_dict：改用 save_dict(file_key="<文件名>", category="pre|gpt|post", content=...)，文件不存在时会先新建并登记。',
+    "create_dict_file": '改用 dictionary(action="set", file_key="<文件名>", category="pre|gpt|post", content=...)，文件不存在时会新建并登记。',
 }
 
 
-# 带 reason 入参的工具：写类（改配置/规范/字典/缓存）+ start_translation。读类工具没有这个
-# 参数、模型也不会传，这里再列一次是为了在分发时确认"这次调用确实能填原因"，而不是只靠
-# schema 声明。start_translation 的 reason 还多一个用处：启动翻译是要审批的动作，理由会跟着
-# arguments 一起进那张权限卡（见 request_permission），用户批之前先看到为什么。
+# 合并入口的 reason 按解析后的具体操作附加，读操作不会因共享 schema 而被当作写入。
+# 启动翻译的原因也会随 arguments 显示在审批卡上。
 _TOOLS_WITH_REASON: frozenset[str] = frozenset({
     "update_project_config",
     "write_project_guideline",

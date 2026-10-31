@@ -26,7 +26,7 @@ export function ReadToolGroup({ entry, items, phases, persistKey, imageScope, au
   const label = t(queued ? 'agent:readGroup.queued' : entry.live ? 'agent:readGroup.running' : incomplete ? 'agent:readGroup.incomplete' : 'agent:readGroup.done', { count: entry.indices.length });
   const summary = [...new Set(entry.indices.map(index => {
     const item = items[index];
-    const meta = toolMeta(item.name);
+    const meta = toolMeta(item.name, asArgs(item.arguments));
     return meta.summary(asArgs(item.arguments)) || meta.action;
   }))].join('；');
   return (

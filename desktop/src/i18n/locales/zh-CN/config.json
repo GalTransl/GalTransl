@@ -146,8 +146,6 @@
   "projectConfigPage": {
     "projectConfigPage_normalizeError_loadConfigFailed": "加载配置失败",
     "handleSave_normalizeError_saveConfigFailed": "保存配置失败",
-    "handleReextract_setReextractError_configSaveFailedNotStartExtract": "配置保存失败，未开始重新提取。",
-    "handleReextract_normalizeError_extractSourceFailed": "重新提取原文失败",
     "projectConfigPage_title_configEdit": "配置编辑",
     "projectConfigPage_title_loadConfig": "加载配置中…",
     "projectConfigPage_description_pendingRead": "正在读取 {{configFileName}}。",
@@ -158,17 +156,7 @@
     "projectConfigPageMain_description_currentProjectConfigDoneSuccess": "当前项目配置已成功写入磁盘。",
     "sectionFadeInProjectConfigFields_title_yAMLSource": "YAML源码",
     "sectionFadeInProjectConfigFields_description_editYAMLConfigSourcePreviewChange": "直接编辑YAML配置源码（只读预览，修改请使用上方表单）",
-    "yamlPreview_message_config": "无配置数据",
-    "pluginSettingRow_message_sourceExtract": "原文提取",
-    "pluginReextractButton_message_pendingSaveConfig": "正在保存配置…",
-    "pluginReextractButton_message_pendingExtract": "正在重新提取…",
-    "pluginReextractButton_message_extractSource": "重新提取原文",
-    "pluginSettingRowControl_message_saveCurrentConfigExtractPluginProcessAll": "保存当前配置，并重新提取此插件处理的全部输入文件。已有翻译缓存会保留。",
-    "pluginSettingRowControl_message_notPluginProcessFile": "未找到由此插件处理的输入文件。",
-    "pluginSettingRowControl_message_extractCompleteSuccessCountFileSentenceFailed": "重新提取完成：成功 {{count}} 个文件，共 {{total_entries}} 句；失败 {{count2}} 个文件。",
-    "pluginSettingRowControl_message_extractCompleteSuccessCountFileSentenceFailed_other": "重新提取完成：成功 {{count}} 个文件，共 {{total_entries}} 句；失败 {{count2}} 个文件。",
-    "pluginSettingRowControl_message_failedFile": "失败文件及原因",
-    "pluginSettingRowControl_message_extractCompleteSuccessCountFileSentenceFailed_one": "重新提取完成：成功 {{count}} 个文件，共 {{total_entries}} 句；失败 {{count2}} 个文件。"
+    "yamlPreview_message_config": "无配置数据"
   },
   "fields": {
     "splitFile": {

@@ -16,11 +16,15 @@ type ToolMeta = {
 };
 
 const TOOL_META: Record<string, ToolMeta> = {
-  read: { get action() { return translate("extraction:toolReadFile"); }, get running() { return translate("extraction:toolReadFile"); }, verb: '', icon: 'file-text', summary: a => str(a?.path) },
-  write: { get action() { return translate("extraction:toolWriteFile"); }, get running() { return translate("extraction:toolWriteFile"); }, verb: '', icon: 'save', summary: a => str(a?.path) },
-  edit: { get action() { return translate("extraction:toolEditFile"); }, get running() { return translate("extraction:toolEditFile"); }, verb: '', icon: 'pencil', summary: a => str(a?.path) },
-  run_python: { get action() { return translate("extraction:toolRunPython"); }, get running() { return translate("extraction:toolRunPython"); }, verb: '', icon: 'tool', summary: a => str(a?.script || a?.module || a?.code).split('\n')[0].slice(0, 160) },
-  bash: { get action() { return translate("extraction:toolRunShell"); }, get running() { return translate("extraction:toolRunShell"); }, verb: '', icon: 'play', summary: a => str(a?.command).split('\n')[0].slice(0, 160) },
+  read: { get action() { return translate("extraction:toolReadFile"); }, get running() { return translate("extraction:toolReadFile"); }, verb: '', icon: 'file-text', summary: a => toolReason(a) || str(a?.path) },
+  write: { get action() { return translate("extraction:toolWriteFile"); }, get running() { return translate("extraction:toolWriteFile"); }, verb: '', icon: 'save', summary: a => toolReason(a) || str(a?.path) },
+  edit: { get action() { return translate("extraction:toolEditFile"); }, get running() { return translate("extraction:toolEditFile"); }, verb: '', icon: 'pencil', summary: a => toolReason(a) || str(a?.path) },
+  run_python: { get action() { return translate("extraction:toolRunPython"); }, get running() { return translate("extraction:toolRunPython"); }, verb: '', icon: 'tool', summary: a => toolReason(a) || str(a?.script || a?.module || a?.code).split('\n')[0].slice(0, 160) },
+  bash: { get action() { return translate("extraction:toolRunShell"); }, get running() { return translate("extraction:toolRunShell"); }, verb: '', icon: 'play', summary: a => toolReason(a) || str(a?.command).split('\n')[0].slice(0, 160) },
+  compress: { get action() { return translate("agent:billionContextTools.compress.action"); }, get running() { return translate("agent:billionContextTools.compress.running"); }, verb: '', icon: 'archive', summary: () => '' },
+  decompress: { get action() { return translate("agent:billionContextTools.decompress.action"); }, get running() { return translate("agent:billionContextTools.decompress.running"); }, verb: '', icon: 'repeat', summary: a => str(a?.blockId) },
+  search_context: { get action() { return translate("agent:billionContextTools.search_context.action"); }, get running() { return translate("agent:billionContextTools.search_context.running"); }, verb: '', icon: 'search', summary: a => str(a?.query) },
+  acp_status: { get action() { return translate("agent:billionContextTools.acp_status.action"); }, get running() { return translate("agent:billionContextTools.acp_status.running"); }, verb: '', icon: 'settings', summary: () => '' },
   get_plugin_settings: {
     get action() { return translate("agent:tools.get_plugin_settings.action"); }, get running() { return translate("agent:tools.get_plugin_settings.running"); }, get verb() { return translate("agent:tools.get_plugin_settings.verb"); }, icon: 'plug',
     summary: (args) => String(args?.plugin_name || translate("agent:toolMeta.summary_string_allPlugin")),
@@ -52,11 +56,11 @@ const TOOL_META: Record<string, ToolMeta> = {
     verb: '',
     icon: 'pencil',
     summary: (a) => {
-      const mode = str(a?.mode);
-      if (mode === 'overwrite') return translate("agent:toolMeta.summary_message_textVariant2");
-      if (mode === 'append') return translate("agent:toolMeta.summary_message_textVariant3");
-      if (mode === 'replace') return translate("agent:toolMeta.summary_message_replace");
-      return mode;
+      const action = str(a?.action ?? a?.mode);
+      if (action === 'overwrite') return translate("agent:toolMeta.summary_message_textVariant2");
+      if (action === 'append') return translate("agent:toolMeta.summary_message_textVariant3");
+      if (action === 'replace') return translate("agent:toolMeta.summary_message_replace");
+      return action;
     },
   },
   list_dict_files: { get action() { return translate("agent:tools.list_dict_files.action"); }, get running() { return translate("agent:tools.list_dict_files.running"); }, verb: '', icon: 'books', summary: () => translate("agent:toolMeta.summary_message_projectDictionaryFile") },
@@ -152,7 +156,7 @@ const TOOL_META: Record<string, ToolMeta> = {
           : selectors.some(value => /[*?\[]/.test(value))
             ? selectors.join('、')
             : selectors.length ? translate("agent:toolMeta.head_message_countFile", { count: selectors.length }) : '';
-        return [scope, `${str(a.query)} -> ${str(a.replacement)}`, a.clear_comment ? translate("agent:toolMeta.summary_clearCommentFilter_clearComment") : ''].filter(Boolean).join(' · ');
+        return [scope, `${str(a.old_text ?? a.query)} -> ${str(a.new_text ?? a.replacement)}`, a.clear_comment ? translate("agent:toolMeta.summary_clearCommentFilter_clearComment") : ''].filter(Boolean).join(' · ');
       }
       const patches = Array.isArray(a?.patches) ? (a.patches as Record<string, unknown>[]) : [];
       const files = new Set(patches.map((p) => str(p?.file) || str(a?.filename)).filter(Boolean));
@@ -176,11 +180,36 @@ const RETIRED_TOOL_ALIASES: Record<string, { name: string; args: (a: Record<stri
 
 const DEFAULT_TOOL_META: ToolMeta = { get action() { return translate("agent:toolMeta.action_action_textVariant2"); }, get running() { return translate("agent:toolMeta.running_running_text"); }, verb: '', icon: 'tool', summary: () => '' };
 
+export const TOOL_OPERATIONS: Record<string, Record<string, string>> = {
+  get_project: { read: 'get_project_overview' },
+  input: { list: 'list_input_files', read: 'read_input_file', search: 'search_input' },
+  guideline: { read: 'read_guideline', overwrite: 'write_project_guideline', append: 'write_project_guideline', replace: 'write_project_guideline' },
+  dictionary: { list: 'list_dict_files', read: 'read_dict', set: 'save_dict', delete: 'save_dict', overwrite: 'save_dict' },
+  names: { read: 'get_name_table', set: 'save_name_table', overwrite: 'save_name_table' },
+  translation: { start: 'start_translation', status: 'get_runtime', wait: 'wait', stop: 'stop_translation' },
+  edit_transl_cache: { set: 'patch_transl_cache', replace: 'patch_transl_cache', delete: 'delete_transl_cache' },
+  output: { read: 'read_output', search: 'search_output_files' },
+  problems: { items: 'list_problems', filter: 'manage_problem_filter', white_list: 'manage_problem_white_list' },
+  subagents: { run: 'run_subagents', changes: 'read_proofread_changes', revert: 'revert_proofread_changes' },
+};
+
+/** Keep historical operation names readable while new calls select presentation by action. */
+export function toolOperation(name: string | undefined, args?: Record<string, unknown>): string {
+  if (!name) return '';
+  const operations = TOOL_OPERATIONS[name];
+  if (!operations) return name;
+  const action = name === 'problems' ? str(args?.target || 'items') : str(args?.action || Object.keys(operations)[0]);
+  return operations[action] || name;
+}
+
 /** 未收录进 TOOL_META 的工具：至少把原始工具名亮出来，不再只显示「调用工具」。 */
-export function toolMeta(name: string | undefined): ToolMeta {
+export function toolMeta(name: string | undefined, args?: Record<string, unknown>): ToolMeta {
   if (!name) return DEFAULT_TOOL_META;
-  const meta = TOOL_META[name];
-  if (meta) return meta;
+  const meta = TOOL_META[toolOperation(name, args)];
+  if (meta) return TOOL_OPERATIONS[name] ? {
+    ...meta,
+    summary: (a, result) => (TOOL_META[toolOperation(name, a)] || meta).summary(a, result),
+  } : meta;
   const alias = RETIRED_TOOL_ALIASES[name];
   const base = alias && TOOL_META[alias.name];
   if (alias && base) return { ...base, summary: (a, result) => base.summary(alias.args(a), result) };
@@ -214,6 +243,10 @@ function translCacheSummary(a: Record<string, unknown> | undefined): string {
 export function str(v: unknown): string {
   if (v === undefined || v === null) return '';
   return typeof v === 'string' ? v : JSON.stringify(v);
+}
+
+export function toolReason(args: Record<string, unknown> | undefined): string {
+  return typeof args?.reason === 'string' ? args.reason.trim().replace(/\s+/g, ' ') : '';
 }
 
 /** wait 工具的参数摘要：把 seconds/minutes 归一成"等待 2 分钟"。

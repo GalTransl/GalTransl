@@ -27,7 +27,7 @@ from GalTransl.Agent.runtime import (
 
 def _runtime_description() -> str:
     for tool in AGENT_TOOLS:
-        if tool["function"]["name"] == "get_runtime":
+        if tool["function"]["name"] == "translation":
             return str(tool["function"]["description"])
     raise AssertionError("get_runtime 不在工具表里")
 
@@ -179,7 +179,7 @@ class IncrementalRecentErrorsTests(unittest.TestCase):
         self.assertIn("count 是本次新增次数", description)
         self.assertIn(str(RUNTIME_ERRORS_PER_QUERY), description)  # 单次上限与常量一致
         self.assertIn("recent_errors_pending", description)
-        self.assertIn("list_problems", description)  # 整体问题去哪查
+        self.assertIn("problems", description)  # 整体问题去哪查
         self.assertIn("只代表没有新错误", description)
 
     def test_group_count_only_counts_new_occurrences(self) -> None:
@@ -217,7 +217,7 @@ class IncrementalRecentErrorsTests(unittest.TestCase):
         out = _tool_get_runtime(_Runner([_err("e1")]), {})
         self.assertEqual(out["summary"]["total"], 100)
         self.assertIn("两个 total 分母不同", _runtime_description())
-        self.assertIn("get_project_overview", _runtime_description())
+        self.assertIn("get_project", _runtime_description())
 
 
 class RealRuntimePayloadTests(unittest.TestCase):

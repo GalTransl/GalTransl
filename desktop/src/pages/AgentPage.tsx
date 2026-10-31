@@ -1,5 +1,6 @@
 import '../styles/pages/agent.css';
 import { usePageActive, useRetainPage } from '../components/PageActivity';
+import { useComposerAutosize } from '../components/useComposerAutosize';
 import { loadAgentProject, saveAgentProject, loadMessageDraft, saveMessageDraft, moveMessageDraft, useMessageDraft } from './agent/drafts';
 import { followTail } from "./agent/followTail";
 import { readingKey, readingMemory } from './agent/readingMemory';
@@ -63,6 +64,7 @@ import { AgentGroupView } from './agent/rows/AgentGroupView';
 import { useImageInput, ImageAttachments, ImageInputStatus, imageUploads } from './agent/images';
 import { AskUserCard } from './agent/rows/AskUserCard';
 import { PermissionCard } from './agent/rows/PermissionCard';
+import { MessageQueue } from './agent/MessageQueue';
 import {
   loadActiveSessionId,
   loadSession,
@@ -173,24 +175,7 @@ export function AgentPage() {
 
   // 输入框本体：点推荐提示词后要把焦点还回去（用户接着改两个字就能直接回车发出）
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  useLayoutEffect(() => {
-    const input = composerRef.current;
-    if (!active || !input) return;
-    const resize = () => {
-      // 先释放旧高度才能随删字缩回；上限由 CSS 统一决定，超长草稿在框内滚动。
-      input.style.height = 'auto';
-      input.style.height = `${input.scrollHeight}px`;
-    };
-    resize();
-    let width = input.clientWidth;
-    const observer = new ResizeObserver(() => {
-      if (input.clientWidth === width) return;
-      width = input.clientWidth;
-      resize();
-    });
-    observer.observe(input);
-    return () => observer.disconnect();
-  }, [active, messageDraft]);
+  useComposerAutosize(composerRef, messageDraft);
 
   /** 空态的推荐提示词：填进输入框并聚焦到末尾，**不直接发送**（用户还能改）。
    *  输入框里已经有字时追加成新的一行——点了没反应或者把写了一半的话冲掉都很难受。 */
@@ -903,7 +888,7 @@ export function AgentPage() {
   const handleQueuedSaveEdit = useCallback(async () => {
     if (!effectiveProject || !editingQueued) return;
     const text = editingQueued.text.trim();
-    if (!text) return;
+    if (!text && !queued.find(item => item.id === editingQueued.id)?.images?.length) return;
     try {
       const snap = await updateAgentQueued(
         effectiveProject,
@@ -916,7 +901,7 @@ export function AgentPage() {
     } catch (err) {
       setError(normalizeError(err, uiMessage("agent:agentPage.handleQueuedSaveEdit_normalizeError_changeQueueFailed")));
     }
-  }, [effectiveProject, editingQueued]);
+  }, [effectiveProject, editingQueued, queued]);
 
   const handleStop = useCallback(async () => {
     if (!effectiveProject) return;
@@ -1637,81 +1622,10 @@ export function AgentPage() {
       <div className="agent-console__composer">
         {/* 排队中的消息：运行中发的消息先落到这里（不进聊天框）。
             每条可以「立即」打断模型马上发，也可以就地编辑或删掉。 */}
-        {queued.length ? (
-          <div className="agent-queue">
-            <div className="agent-queue__list">
-              {queued.map((item) => {
-                const editing = editingQueued?.id === item.id;
-                return (
-                  <div className="agent-queue__item" key={item.id}>
-                    {editing ? (
-                      <>
-                        <input
-                          className="agent-queue__input"
-                          value={editingQueued?.text ?? ''}
-                          autoFocus
-                          onChange={(e) => setEditingQueued({ id: item.id, text: e.target.value })}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Escape') {
-                              setEditingQueued(null);
-                              return;
-                            }
-                            if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-                              e.preventDefault();
-                              void handleQueuedSaveEdit();
-                            }
-                          }}
-                        />
-                        <button
-                          type="button"
-                          className="agent-queue__act is-primary"
-                          onClick={() => void handleQueuedSaveEdit()}
-                        >{translate("common:actions.save")}</button>
-                        <button
-                          type="button"
-                          className="agent-queue__act"
-                          onClick={() => setEditingQueued(null)}
-                        >{translate("common:actions.cancel")}</button>
-                      </>
-                    ) : (
-                      <>
-                        <span className="agent-queue__text" title={item.text}>
-                          {item.text}
-                        </span>
-                        {item.images?.length ? <ImageAttachments images={item.images} scope={{ projectDir: effectiveProject, sessionId: activeSessionId }} /> : null}
-                        <button
-                          type="button"
-                          className="agent-queue__act is-primary"
-                          title={translate("agent:agentPage.agentQueueActIsPrimary_title_agentSendEntry")}
-                          onClick={() => void handleQueuedSendNow(item.id)}
-                        >
-                          <span className="agent-queue__act-icon"><Icon name="send-now" /></span>{translate("agent:agentPage.agentQueueActIsPrimary_button_text")}</button>
-                        <button
-                          type="button"
-                          className="agent-queue__act"
-                          title={translate("agent:agentPage.agentQueueAct_title_editEntry")}
-                          aria-label={translate("agent:agentPage.agentQueueAct_ariaLabel_editEntry")}
-                          onClick={() => setEditingQueued({ id: item.id, text: item.text })}
-                        >
-                          <Icon name="pencil" />
-                        </button>
-                        <button
-                          type="button"
-                          className="agent-queue__act"
-                          title={translate("agent:agentPage.agentQueueAct_title_deleteEntry")}
-                          aria-label={translate("agent:agentPage.agentQueueAct_ariaLabel_deleteEntry")}
-                          onClick={() => void handleQueuedDelete(item.id)}
-                        >
-                          <Icon name="trash" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
+        <MessageQueue queued={queued} editing={editingQueued} onEditingChange={setEditingQueued}
+          onSave={() => void handleQueuedSaveEdit()} onSend={id => void handleQueuedSendNow(id)} onDelete={id => void handleQueuedDelete(id)}
+          scope={{ projectDir: effectiveProject, sessionId: activeSessionId }} />
+
         <div {...imageInput.drop} className={`agent-composer${running ? ' is-running' : ''}${queued.length ? ' has-queue' : ''}${imageInput.dragging ? ' is-image-drop' : ''}`}>
           <ImageAttachments images={imageInput.images} remove={imageInput.remove} />
           <textarea

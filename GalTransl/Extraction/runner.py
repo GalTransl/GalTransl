@@ -6,6 +6,8 @@ GalTransl.Agent. This module supplies only tools, a prompt and the UI event brid
 from __future__ import annotations
 
 import json
+import os
+import threading
 import uuid
 from pathlib import Path
 
@@ -21,8 +23,22 @@ from .tool_schemas import EXTRACTION_TOOLS, prepare_arguments, tool_prompt_secti
 from .tools import ExtractionTools
 
 
+INITIAL_USER_MESSAGE_PREFIX = """【本次请求的二次判断】
+先判断下面的用户原始消息是否只是简单问候（例如“你好”“嗨”“hello”“在吗”或类似没有具体任务的寒暄）。
+- 如果只是简单问候：只需简短、礼貌地回复一句并询问用户想做什么；不要调用任何工具，不要查看目录，也不要开始提取流程。
+- 如果包含明确任务：再按系统提示处理该任务，并区分咨询解释与实际执行。
+- 如果需要实际执行任务：在第一次工具调用之前，先用用户语言在助手正文中简短说明将要如何完成任务（主要步骤及验证方式），随后开始调用工具执行任务。
+- 工具调用期间，在连续工具调用之间穿插简短的助手正文反馈，说明当前状况、已确认的进展或发现的问题，以及下一步；在关键阶段完成、遇到阻碍或调整方案时及时反馈，不要连续只调用工具直到最后才回复。
+- 计划和进度必须是用户可见的自然语言正文，不能仅放在思考内容或工具的 reason 参数中；依据实际结果说明进度，不编造完成状态。
+
+用户原始消息：
+"""
+
+
 def display_arguments(value, budget=24000):
     """Bound UI/approval previews; execution always receives the original arguments."""
+    if isinstance(value, dict) and 'reason' in value:
+        value = {'reason': value['reason'], **{key: item for key, item in value.items() if key != 'reason'}}
     remaining = budget
     def visit(item):
         nonlocal remaining
@@ -70,6 +86,8 @@ def restore_state(session, directory, profile, prompt, mode):
 
 
 class ExtractionRunner(AgentRunner):
+    _billion_context_setting = "extractionBillionContextEnabled"
+
     def __init__(self, state, store, session, available, emit):
         super().__init__(state)
         self._store = store
@@ -77,8 +95,12 @@ class ExtractionRunner(AgentRunner):
         self.available = available
         self.publish = emit
         self.message_id = ""
+        self.turn_lock = threading.RLock()
         self.tools = ExtractionTools(session["workspace"], session["game_dir"], available["settings"]["skill_dir"],
                                      available, self.stop_event, emit, self._require_permission)
+
+    def _initial_user_message(self, user_text):
+        return f"{INITIAL_USER_MESSAGE_PREFIX}{user_text}"
 
     def _system_prompt(self):
         skill = Path(self.available["settings"]["skill_dir"])
@@ -86,6 +108,8 @@ class ExtractionRunner(AgentRunner):
             "You are GalTransl's extraction agent, a coding specialist for visual-novel text extraction and reinsertion. "
             "Use the configured extraction Skill and local tools; do not call translation/project tools.",
             tool_prompt_section(),
+            "For every read, write, edit, bash and run_python call, include reason: one short sentence in the user's language "
+            "explaining what this call is intended to accomplish. Describe the immediate purpose, not your internal reasoning.",
             f"Before extraction or reinsertion, read the complete Skill with read, following offset continuation notices until done: {skill / 'SKILL.md'}. "
             "Then load only relevant engine guides and scripts. Follow the Skill output and verification contracts.",
             f"Game directory (read-only intent): {self.session['game_dir']}",
@@ -98,7 +122,11 @@ class ExtractionRunner(AgentRunner):
             "Validate parser/writer roundtrips; preserve control codes and non-text structures.",
             "Python uses the existing backend interpreter by default; explicitly choose runtime=system only when needed. "
             "Use read/bash/edit/write; older read_file/run_shell/edit_file/write_file names in saved history are obsolete. "
-            "Commands run as the local user. A denied operation was not executed: explain or change strategy, never retry unchanged. Stop promptly when cancelled.",
+            + ("bash runs BusyBox sh: keep to POSIX syntax, as arrays, [[ ]] and C-style for are unavailable. "
+               "POSIX paths are drive-relative, so /tmp means <current drive>:\\tmp and usually does not exist; "
+               "use $TMPDIR (a directory inside the output workspace) for scratch files. "
+               if os.name == "nt" else "")
+            + "Commands run as the local user. A denied operation was not executed: explain or change strategy, never retry unchanged. Stop promptly when cancelled.",
             "Use the user's language. Report concrete output paths, counts, failures and actual validation. "
             "After a valid export, gt_input can be opened as a GalTransl project; same-name translations go in gt_output for later reinsertion. "
             'When extraction is complete and the exported gt_input files have been validated, include '
@@ -109,7 +137,9 @@ class ExtractionRunner(AgentRunner):
             'with the project name and parent directory prefilled, and loads existing gt_input files at step two. '
             'Output the reference on its own line, outside code fences or inline code. Do not create config.yaml yourself '
             'or claim the translation project is already created: the user completes the wizard. '
-            "Use read_history_archive if compaction removed details you need.",
+            + ("Use search_context and decompress if compressed history removed details you need."
+               if self._billion_context is not None else
+               "Use read_history_archive if compaction removed details you need."),
         ])
 
     def _tool_definitions(self):
@@ -129,10 +159,13 @@ class ExtractionRunner(AgentRunner):
             if message.get('role') == 'tool' and isinstance(content, list):
                 images = [block for block in content if block.get('type') == 'image_url']
                 if images:
-                    attachments.append({'role': 'user', 'content': [
+                    attachment = {'role': 'user', 'content': [
                         {'type': 'text', 'text': f"Images returned by tool call {message['tool_call_id']}:"},
                         *images,
-                    ]})
+                    ]}
+                    if not strip_internal:
+                        attachment['_billion_context_synthetic'] = True
+                    attachments.append(attachment)
                     message = {key: value for key, value in message.items() if key != '_images'}
                     message['content'] = '\n'.join(block['text'] for block in content if block.get('type') == 'text')
             projected.append(message)
@@ -220,8 +253,13 @@ class ExtractionRunner(AgentRunner):
             self.publish({"type": "assistant_start", "messageId": self.message_id})
         return super()._stream_llm_attempt()
 
+    def _end_turn(self, kind, data):
+        # Queue submission and turn completion share the runtime's lock.
+        with self.turn_lock:
+            self._close_turn(kind, data)
+
     def _emit(self, event_type, data):
-        if event_type in {'tool_call', 'permission_request'} and data.get('name') in {'read', 'bash', 'edit', 'write'}:
+        if event_type in {'tool_call', 'permission_request'} and data.get('name') in {'read', 'bash', 'edit', 'write', 'run_python'}:
             data = {**data, 'arguments': display_arguments(data.get('arguments', {}))}
         if event_type == 'tool_result' and isinstance(data.get('result'), dict) and 'content' in data['result']:
             data = {**data, 'result': {key: value for key, value in data['result'].items() if key != 'structuredContent'}}
@@ -233,6 +271,8 @@ class ExtractionRunner(AgentRunner):
         elif event_type in {"content_delta", "reasoning_delta"}:
             event = {"type": "assistant_delta" if event_type == "content_delta" else "thinking_delta",
                      "messageId": self.message_id, "text": data.get("delta", "")}
+        elif event_type in {"content_end", "reasoning_end"}:
+            event = {"type": event_type, "messageId": self.message_id, **data}
         elif event_type == "assistant_message":
             parts = data.get("parts", [])
             text = "".join(part.get("text", "") for part in parts if part["type"] == "text")
@@ -256,7 +296,7 @@ class ExtractionRunner(AgentRunner):
                 text = (result if isinstance(result, str) else json.dumps(result, ensure_ascii=False))[-24000:]
             event = {"type": "tool_end", "toolCallId": data["id"], "toolName": data["name"],
                      "text": text,
-                     "isError": not data.get("ok")}
+                     "isError": not data.get("ok"), "duration_ms": data.get("duration_ms")}
             if native:
                 images = [block["image"] for block in result["content"] if block.get("type") == "image" and "image" in block]
                 if images:
@@ -270,8 +310,10 @@ class ExtractionRunner(AgentRunner):
             event = {"type": "context_usage", **data["context"]}
         elif event_type == "compacting":
             event = {"type": "compaction", "active": data.get("phase") == "start"}
-        elif event_type == "llm_retry_start":
-            event = {"type": "notice", "message": f"Retry {data.get('attempt')}: {data.get('message', '')}"}
+        elif event_type in {"compacted", "queue"}:
+            event = {"type": event_type, **data}
+        elif event_type in {"llm_retry_start", "llm_retry_end"}:
+            event = {"type": event_type, "messageId": self.message_id, **data}
         elif event_type == "error":
             event = {"type": "error", "message": str(data.get("message", "Model request failed"))[:2000]}
         if event:

@@ -55,8 +55,8 @@ class StartTranslationBackendTests(unittest.TestCase):
         from GalTransl.Agent.tool_schemas import AGENT_TOOLS
 
         self.assertEqual(next(iter(TRANSLATOR_SUPPORTED)), "auto-translate")
-        self.assertIn('start_translation(translator="auto-translate"', AGENT_SYSTEM_PROMPT)
-        schema = next(tool["function"] for tool in AGENT_TOOLS if tool["function"]["name"] == "start_translation")
+        self.assertIn('translation(action="start", translator="auto-translate"', AGENT_SYSTEM_PROMPT)
+        schema = next(tool["function"] for tool in AGENT_TOOLS if tool["function"]["name"] == "translation")
         self.assertNotIn("translator", schema["parameters"]["required"])
         for args in ({}, {"translator": ""}, {"translator": "auto-translate"}):
             runner = _Runner(translator_profile_data=TRANSLATOR_PROFILE)
@@ -69,9 +69,9 @@ class StartTranslationBackendTests(unittest.TestCase):
         from GalTransl.Agent.prompts import AGENT_SYSTEM_PROMPT
         from GalTransl.Agent.tool_schemas import AGENT_TOOLS
 
-        schema = next(tool["function"] for tool in AGENT_TOOLS if tool["function"]["name"] == "start_translation")
+        schema = next(tool["function"] for tool in AGENT_TOOLS if tool["function"]["name"] == "translation")
         self.assertIn("ForGal-tool", schema["parameters"]["properties"]["translator"]["enum"])
-        self.assertIn("ForGal-tool", schema["description"])
+        self.assertIn("ForGal-tool", schema["parameters"]["properties"]["translator"]["enum"])
         self.assertIn("ForGal-tool", AGENT_SYSTEM_PROMPT)
         for name in ("ForGal-tool", "forgal-tool", " FORGAL-TOOL "):
             with self.subTest(translator=name):
@@ -159,7 +159,7 @@ class ToolArgSanitizingTests(unittest.TestCase):
             if calls["n"] == 1:
                 return (
                     "",
-                    [{"id": "c1", "name": "start_translation", "arguments": '{"translator": "ForGal-json"}'}],
+                    [{"id": "c1", "name": "translation", "arguments": '{"action": "start", "translator": "ForGal-json"}'}],
                     "tool_calls",
                 )
             return ("好", [], "stop")
@@ -180,7 +180,7 @@ class ToolArgSanitizingTests(unittest.TestCase):
         tool_call_events = [e for e in state.events if e.type == "tool_call"]
         self.assertEqual(len(tool_call_events), 1)
         arguments = tool_call_events[0].data["arguments"]
-        self.assertEqual(arguments, {"translator": "ForGal-json"})
+        self.assertEqual(arguments, {"action": "start", "translator": "ForGal-json"})
         dumped = json.dumps([e.to_dict() for e in state.events], ensure_ascii=False)
         self.assertNotIn("sk-trans-secret", dumped)
         self.assertNotIn("sk-agent-secret", dumped)

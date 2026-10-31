@@ -14,6 +14,7 @@ from GalTransl.Agent.tools.search import _apply_search_order, _search_order
 from GalTransl.Search import select_search_hits
 from GalTransl.Agent.tools.cache_fields import _cache_field_value
 from GalTransl.Agent.tools.common import (
+    _write_action,
     _change,
     _dominant_trans_by,
     _mark_context_row,
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
 def _parse_filter_keywords(raw: Any) -> list[str]:
     """字符串列表入参（单个字符串 / 字符串数组 / 配置里那串）→ 去空白、去重保序的列表。
 
-    manage_problem_filter / manage_problem_white_list 与审批卡上的「将要变更」预览共用：
+    problems(target="filter") / problems(target="white_list") 与审批卡上的「将要变更」预览共用：
     字符串既可能是单个项，也可能是换行分隔的一串（模型两种都爱写）。
     """
     items = raw.split("\n") if isinstance(raw, str) else raw
@@ -44,7 +45,7 @@ def _load_problem_filter_keys(
 ) -> tuple[dict[str, Any], list[str]]:
     """读配置里的 common.problemFilterKey：返回（整份 config, 去重保序的关键字清单）。
 
-    manage_problem_filter 的 list/add/remove 三支与预览都走它——"现在的清单是什么"
+    problems(target="filter") 的 list/set/delete 三支与预览都走它——"现在的清单是什么"
     只能有一处口径。
     """
     data = runner._http_get(f"/api/projects/{pid}/config?config={urllib.parse.quote(config_name)}")
@@ -63,7 +64,7 @@ def _load_problem_filter_stats(
 ) -> dict[str, Any]:
     """list 的结果：过滤清单 + 每条当前各挡住了多少条问题。
 
-    条数由服务端扫缓存算（/problem_filter_stats），与 list_problems / 进度统计同一口径
+    条数由服务端扫缓存算（/problem_filter_stats），与 problems(action="list") / 进度统计同一口径
     （白名单命中的条目不算）。数字是「现在」的快照：0 说明这条过滤项当前一条也挡不到，
     多半已经没用了。统计取不到（老服务端/接口异常）时退回只有清单的结果——list 是只读查询，
     不该因为统计挂掉。
@@ -88,13 +89,13 @@ def _load_problem_filter_stats(
 def _plan_problem_filter(
     keys: list[str], action: str, keywords: list[str], field: str = "problemFilterKey"
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
-    """算出这次 add/remove 实际会动到哪些项（**只读**）：返回（命中, 未命中, changes）。
+    """算出这次 set/delete 实际会动到哪些项（**只读**）：返回（命中, 未命中, changes）。
 
     与 _tool_manage_problem_filter / _tool_manage_problem_white_list 共用：卡上列出的
     增删就是真执行会写进去的那些；field 决定变更卡上显示的是哪个配置键。
     """
     existing = set(keys)
-    if action == "add":
+    if action == "set":
         hit = [k for k in keywords if k not in existing]  # 实际新增
         miss = [k for k in keywords if k in existing]  # 本来就有
         changes = [_change(field, None, k, "add") for k in hit]
@@ -126,7 +127,7 @@ def _problem_filter_keywords(raw: Any, action: str, existing_keys: Sequence[str]
         value = value.strip()
         if not value:
             return []
-        if action == "remove" and value in existing_keys:
+        if action == "delete" and value in existing_keys:
             return [value]
         try:
             decoded = json.loads(value)
@@ -144,8 +145,8 @@ def _problem_filter_keywords(raw: Any, action: str, existing_keys: Sequence[str]
 
     keywords = list(dict.fromkeys(unpack(raw)))
     if not keywords:
-        raise AgentToolError("keyword is required for add/remove（字符串或字符串数组）")
-    if action == "add":
+        raise AgentToolError("keyword is required for set/delete（字符串或字符串数组）")
+    if action == "set":
         invalid = [k for k in keywords if not _is_valid_regex(k)]
         if invalid:
             raise AgentToolError(
@@ -160,14 +161,12 @@ def _tool_manage_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> An
     """增/删/查项目配置 common.problemFilterKey（问题过滤关键字）。
 
     与桌面端「浏览文本」页同一套配置。**正则匹配**：keyword 是一条正则，按 re.search
-    命中问题项的那一项才会在 list_problems / 进度统计里被过滤掉（如 `缺失.*标点`）。
+    命中问题项的那一项才会在 problems(action="list") / 进度统计里被过滤掉（如 `缺失.*标点`）。
     **原则上只过滤小类、不过滤大类**（`残留日文`、`^残留日文：` 这类整类写法等于放弃复核，
-    要在提示里挡住）。add/remove 是对清单里字符串的精确增删（区分大小写）；
+    要在提示里挡住）。set/delete 是对清单里字符串的精确增删（区分大小写）；
     add 时校验正则可编译，写坏了直接报错并提示转义。
     """
-    action = str(args.get("action", "")).strip()
-    if action not in ("list", "add", "remove"):
-        raise AgentToolError("action must be one of: list, add, remove")
+    action = _write_action(args, ("list", "set", "delete"))
     pid = runner._project_id()
     config_name = runner.state.config_file_name or DEFAULT_CONFIG_FILE
 
@@ -180,7 +179,7 @@ def _tool_manage_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> An
     config, keys = _load_problem_filter_keys(runner, pid, config_name)
     keywords = _problem_filter_keywords(args.get("keyword"), action, keys)
     hit, miss, changes = _plan_problem_filter(keys, action, keywords)
-    if action == "add":
+    if action == "set":
         hit_key, miss_key, miss_note = "added", "already_present", "已在列表中"
     else:  # remove
         hit_key, miss_key, miss_note = "removed", "not_found", "不在列表中"
@@ -192,7 +191,7 @@ def _tool_manage_problem_filter(runner: AgentRunner, args: dict[str, Any]) -> An
             "note": f"这些关键字{miss_note}，过滤清单未变化",
         }
 
-    if action == "add":
+    if action == "set":
         keys.extend(hit)
     else:
         removing = set(hit)
@@ -215,7 +214,7 @@ def _load_problem_white_list(
 ) -> tuple[dict[str, Any], list[str]]:
     """读配置里的 common.problemWhiteList：返回（整份 config, 去重保序的条目清单）。
 
-    manage_problem_white_list 的 list/add/remove 三支与审批卡预览都走它——"现在的
+    problems(target="white_list") 的 list/set/delete 三支与审批卡预览都走它——"现在的
     白名单是什么"只能有一处口径。
     """
     data = runner._http_get(f"/api/projects/{pid}/config?config={urllib.parse.quote(config_name)}")
@@ -236,12 +235,10 @@ def _tool_manage_problem_white_list(runner: AgentRunner, args: dict[str, Any]) -
     """增/删/查项目配置 common.problemWhiteList（问题白名单）。
 
     白名单是「缓存文件 + 条目 index」的名单，命中的条目等价于勾了 skip_check：
-    list_problems / 进度统计不再显示它的问题，缓存重建时也不再检测。与
-    manage_problem_filter（按问题文本子串整类过滤）互补：白名单按具体位置豁免。
+    problems(action="list") / 进度统计不再显示它的问题，缓存重建时也不再检测。与
+    problems(target="filter")（按问题文本子串整类过滤）互补：白名单按具体位置豁免。
     """
-    action = str(args.get("action", "")).strip()
-    if action not in ("list", "add", "remove"):
-        raise AgentToolError("action must be one of: list, add, remove")
+    action = _write_action(args, ("list", "set", "delete"))
     pid = runner._project_id()
     config_name = runner.state.config_file_name or DEFAULT_CONFIG_FILE
 
@@ -251,15 +248,15 @@ def _tool_manage_problem_white_list(runner: AgentRunner, args: dict[str, Any]) -
 
     entries = _parse_filter_keywords(args.get("entry"))
     if not entries:
-        raise AgentToolError(f"entry is required for add/remove（{_WHITE_LIST_ENTRY_HINT}）")
-    if action == "add":
+        raise AgentToolError(f"entry is required for set/delete（{_WHITE_LIST_ENTRY_HINT}）")
+    if action == "set":
         invalid = [e for e in entries if parse_problem_white_list_entry(e) is None]
         if invalid:
             raise AgentToolError(f"这些条目格式不对：{'、'.join(invalid)}；{_WHITE_LIST_ENTRY_HINT}")
 
     config, current = _load_problem_white_list(runner, pid, config_name)
     hit, miss, changes = _plan_problem_filter(current, action, entries, field="problemWhiteList")
-    if action == "add":
+    if action == "set":
         hit_key, miss_key, miss_note = "added", "already_present", "已在白名单里"
     else:  # remove
         hit_key, miss_key, miss_note = "removed", "not_found", "不在白名单里"
@@ -271,7 +268,7 @@ def _tool_manage_problem_white_list(runner: AgentRunner, args: dict[str, Any]) -
             "note": f"这些条目{miss_note}，白名单未变化",
         }
 
-    if action == "add":
+    if action == "set":
         current.extend(hit)
     else:
         removing = set(hit)
@@ -293,7 +290,7 @@ def _tool_manage_problem_white_list(runner: AgentRunner, args: dict[str, Any]) -
 def _merge_problem_context(
     runner: AgentRunner, page: list[dict[str, Any]], context: int, only_preceding: bool = True
 ) -> list[dict[str, Any]]:
-    """给问题行并上文（list_problems 的 context，与 read_transl_cache 同一语义）。
+    """给问题行并上文（problems(action="list") 的 context，与 read_transl_cache 同一语义）。
 
     问题行自己往往看不出"为什么有问题"——修「残留日文」「译名不一致」要看着上文才敢动手，
     逐条 read_transl_cache 又太碎，所以把上文直接并进这张表。上下文行的 index 带 *（见

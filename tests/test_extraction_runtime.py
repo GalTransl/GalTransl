@@ -72,13 +72,11 @@ def test_bundled_defaults_and_legacy_migration(tmp_path, monkeypatch):
     assert module.builtin_python() == {"executable": sys.executable, "args": ["--extraction-python"], "source": "bundled"}
 
 
-def test_system_python_discovery_and_external_environment(monkeypatch, tmp_path):
-    custom = str(tmp_path / "custom-python.exe")
-    launcher = str(tmp_path / "py.exe")
-    monkeypatch.setattr(module.shutil, "which", lambda command: {
-        custom: custom, "python": custom, "python3": "C:/WindowsApps/python3.exe", "py": launcher}.get(command))
-    assert module.system_pythons(custom) == [{"executable": str(Path(custom).resolve()), "args": []},
-                                             {"executable": str(Path(launcher).resolve()), "args": ["-3"]}]
+def test_system_python_discovery_and_external_environment(monkeypatch):
+    python = module.system_pythons(sys.executable)[0]
+    assert os.path.normcase(python["executable"]) == os.path.normcase(sys.executable)
+    assert python["version"] == ".".join(map(str, sys.version_info[:3]))
+    assert python["args"] == []
     from GalTransl.Extraction.subprocess_env import external_environment
     monkeypatch.setenv("_PYI_APPLICATION_HOME_DIR", "private-bundle")
     monkeypatch.setenv("PYTHONHOME", "system-python")

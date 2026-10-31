@@ -7,7 +7,7 @@ from typing import Any, TYPE_CHECKING
 
 from GalTransl.Agent.core import DEFAULT_CONFIG_FILE, _log
 from GalTransl.Agent.models import AgentToolError
-from GalTransl.Agent.tools.common import _change
+from GalTransl.Agent.tools.common import _change, _write_action
 from GalTransl.Agent.tools.listing import _list_limit, _list_offset, _list_paging
 from GalTransl.Agent.tools.project import _MISSING, _get_config_key
 from GalTransl.Dictionary import split_dictionary_line
@@ -71,7 +71,7 @@ def _use_gpt_dict_in_name(runner: AgentRunner) -> bool:
     """配置里 dictionary.useGPTDictInName 是否开着。
 
     取值口径与 Name.py 一致（**缺键 = 没开**）：配置里没写就意味着翻译时不会拿字典补 name
-    字段，这时在 get_name_table 里补上译名等于骗模型——它会以为这些名字已经有人管了。
+    字段，这时在 names(action="read") 里补上译名等于骗模型——它会以为这些名字已经有人管了。
     配置读不到也按"没开"处理：这只是附加信息，不值得为一个可选展示把工具弄失败。
     """
     try:
@@ -177,13 +177,7 @@ def _tool_get_name_table(runner: AgentRunner, args: dict[str, Any]) -> Any:
                any(needle in str(row.get(key) or "").casefold() for key in ("src_name", "dst_name"))]
     page = matched[offset:offset + limit]
     guidance = (
-        "**GPT 字典第一优先，不要优先手动编辑人名表**：应先调用 start_translation(translator=\"GenDic\")（genDic）"
-        "生成 GPT 字典，等待任务 completed，并结合「字典用在name字段(GPT)」"
-        "（dictionary.useGPTDictInName）填充人名表的生效译名。"
-        "已有字典译名需要修改时，优先用 save_dict(action=\"patch\") 修正 GPT 字典，无需把字典译名重复抄进表。"
-        "GenDic 完成后再用 get_name_table(only_missing=true) 检查 still_empty；"
-        "只有 GenDic 未覆盖到的 name 才应使用 save_name_table(mode=\"patch\") 手动补漏。"
-        "若该开关关闭或配置/字典读取失败，应先核对配置与字典覆盖情况，不要把字典已覆盖的 name 当作手动补漏项。"
+        '**GPT 字典第一优先，不要优先手动编辑人名表**：应先调用 translation(action="start", translator="GenDic")（genDic）生成 GPT 字典，等待任务 completed，并结合「字典用在name字段(GPT)」（dictionary.useGPTDictInName）填充人名表的生效译名。已有字典译名需要修改时，优先用 dictionary(action="set") 修正 GPT 字典，无需把字典译名重复抄进表。GenDic 完成后再用 names(action="read", only_missing=true) 检查 still_empty；只有 GenDic 未覆盖到的 name 才应使用 names(action="set") 手动补漏。若该开关关闭或配置/字典读取失败，应先核对配置与字典覆盖情况，不要把字典已覆盖的 name 当作手动补漏项。'
     )
     return {
         **data, "names": page, "total": len(names), "matched": len(matched), "returned": len(page),
@@ -198,7 +192,7 @@ def _tool_get_name_table(runner: AgentRunner, args: dict[str, Any]) -> Any:
 def _name_table_entries(raw: Any) -> dict[str, str]:
     """人名表 entries → {src_name: dst_name}（按出现顺序）。
 
-    接口两个方向都是这个结构（get_name_table 返回、save_name_table 入参）：
+    接口两个方向都是这个结构（names(action="read") 返回、names 入参）：
     [{src_name, dst_name, count}]，对应 CSV 的 SRC_Name / DST_Name / Count 三列。
     顺带认下老会话里可能还留着的 {"name": ...} 与裸字符串写法（当成只有 src）。
     """
@@ -221,7 +215,7 @@ def _name_table_changes(
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
     """人名表的增删改明细（**只算不写**）：返回（新增的 src_name, 移除的 src_name, changes）。
 
-    save_name_table 与审批预览共用。**按 src_name 逐条比 dst_name**，而不是把整条 entry
+    names 与审批预览共用。**按 src_name 逐条比 dst_name**，而不是把整条 entry
     拿去比对：CSV 的键是 SRC_Name，值才是 DST_Name，count 只是出现次数统计——整条比会让
     "count 变了"也算成加一条删一条，卡上就会冒出「+ {'src_name': ...}」和「− None」这种
     噪音（字段名一换更是整表都成了新增）。count 不在比对范围内。
@@ -243,15 +237,13 @@ def _name_table_changes(
 
 
 def _name_table_save_plan(old_raw: Any, args: dict[str, Any]) -> tuple[str, list[Any]]:
-    """按 mode 计算完整写入内容，供保存与审批预览共用。"""
-    mode = args.get("mode", "patch")
-    if mode not in ("overwrite", "patch"):
-        raise AgentToolError("mode must be overwrite or patch")
-    names = args.get("names", [])
+    """按 action 计算完整写入内容，供保存与审批预览共用。"""
+    action = _write_action(args, ("set", "overwrite"))
+    names = args.get("names")
     if not isinstance(names, list):
         raise AgentToolError("names must be an array")
-    if mode == "overwrite":
-        return mode, names
+    if action == "overwrite":
+        return action, names
 
     merged = {
         str(item["src_name"]): dict(item)
@@ -260,26 +252,26 @@ def _name_table_save_plan(old_raw: Any, args: dict[str, Any]) -> tuple[str, list
     }
     for item in names:
         if not isinstance(item, dict) or not isinstance(item.get("src_name"), str) or not item["src_name"].strip():
-            raise AgentToolError("each patch entry must have a non-empty src_name")
+            raise AgentToolError("each set entry must have a non-empty src_name")
         src = item["src_name"]
         entry = merged.setdefault(src, {"src_name": src, "dst_name": "", "count": 0})
         # 只合并显式传入的字段；空译名可用于清空，省略字段则保留旧值。
         for field in ("dst_name", "count"):
             if field in item:
                 entry[field] = item[field]
-    return mode, list(merged.values())
+    return action, list(merged.values())
 
 
 def _tool_save_name_table(runner: AgentRunner, args: dict[str, Any]) -> Any:
     pid = runner._project_id()
     # 用原始表合并，避免把 get_name_table 的 GPT 字典展示译名写进未修改的行。
     old = runner._http_get(f"/api/projects/{pid}/name-table")
-    mode, names = _name_table_save_plan(old.get("names", []), args)
+    action, names = _name_table_save_plan(old.get("names", []), args)
     result = runner._http_post(f"/api/projects/{pid}/name-table/save", {"names": names})
     added, removed, changes = _name_table_changes(old.get("names", []), names)
     return {
         **(result if isinstance(result, dict) else {}),
-        "mode": mode,
+        "action": action,
         "names_added": added,
         "names_removed": removed,
         "changes": changes,

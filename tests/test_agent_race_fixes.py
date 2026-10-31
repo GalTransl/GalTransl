@@ -148,7 +148,7 @@ class CacheFileLockTests(unittest.TestCase):
 
         def patch_one(index: int, text: str) -> None:
             _tool_patch_transl_cache(
-                runner, {"filename": "a.json", "patches": [{"index": index, "pre_dst": text}]}
+                runner, {"action": "set", "filename": "a.json", "patches": [{"index": index, "pre_dst": text}]}
             )
 
         threads = [

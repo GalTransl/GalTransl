@@ -41,7 +41,7 @@ def fixture(tmp_path):
 def test_all_original_tools_and_argument_fields_are_present(legacy):
     current = next(item['function']['parameters'] for item in EXTRACTION_TOOLS
                    if item['function']['name'] == legacy['name'])
-    assert current['properties'].keys() == legacy['parameters']['properties'].keys()
+    assert current['properties'].keys() - {'reason'} == legacy['parameters']['properties'].keys()
     assert set(current.get('required', [])) == set(legacy['parameters'].get('required', []))
     for name, old in legacy['parameters']['properties'].items():
         for constraint in ('type', 'minimum', 'maximum', 'minLength', 'maxLength', 'maxItems'):

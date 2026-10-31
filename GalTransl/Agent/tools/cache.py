@@ -20,6 +20,8 @@ from GalTransl.Agent.tools.cache_fields import (
     _patchable_fields_text,
 )
 from GalTransl.Agent.tools.common import (
+    _write_action,
+    _text_replacement,
     _change,
     _dominant_trans_by,
     _entry_index,
@@ -438,7 +440,7 @@ def _normalize_linebreaks_like(value: str, *reference_texts: str) -> str:
 def _group_cache_patches_by_file(args: dict[str, Any]) -> list[tuple[str, list[Any]]]:
     """把这次调用的 patches 按缓存文件分组（**按文件首次出现的顺序**）。
 
-    两种写法都认、也能混着写（见 patch_transl_cache 的 schema）：
+    两种写法都认、也能混着写（见 edit_transl_cache 的 schema）：
 
     - 顶层 filename + patches（每条不带 file）：老写法，一次一个文件；
     - patches 里每条自带 file：跨文件一次提交——统一译名/术语这类活不必"一个文件一次调用"，
@@ -466,19 +468,14 @@ def _group_cache_patches_by_file(args: dict[str, Any]) -> list[tuple[str, list[A
 
 
 def _cache_replace_request(args: dict[str, Any], allowed: frozenset[str]) -> dict[str, Any] | None:
-    action = args.get("action", "patch")
-    if action not in ("patch", "replace"):
-        raise AgentToolError("action must be patch or replace")
-    if action == "patch":
+    action = _write_action(args, ("set", "replace"))
+    if action == "set":
+        if any(field in args for field in ("files", "old_text", "new_text", "replace_all", "query", "replacement", "fields")):
+            raise AgentToolError("action=set 只接受 patches；文本替换请用 action=replace")
         return None
     if "patches" in args:
         raise AgentToolError("action=replace cannot be combined with patches")
-    query = args.get("query")
-    replacement = args.get("replacement")
-    if not isinstance(query, str) or not query:
-        raise AgentToolError("query must be a non-empty string")
-    if not isinstance(replacement, str):
-        raise AgentToolError("replacement must be a string (empty string deletes matches)")
+    old_text, new_text, replace_all = _text_replacement(args)
     filenames = args.get("files")
     if filenames is None:
         filenames = [args.get("filename")]
@@ -498,8 +495,9 @@ def _cache_replace_request(args: dict[str, Any], allowed: frozenset[str]) -> dic
     return {
         "files": list(dict.fromkeys(name.strip() for name in filenames)),
         "fields": list(dict.fromkeys(fields)),
-        "query": query,
-        "replacement": replacement,
+        "old_text": old_text,
+        "new_text": new_text,
+        "replace_all": replace_all,
     }
 
 
@@ -530,6 +528,14 @@ def _resolve_cache_replace_files(runner: AgentRunner, selectors: list[str]) -> l
 def _plan_cache_replacements(
     entries: list[Any], request: dict[str, Any], allowed: frozenset[str], *, clear_comment: bool = False,
 ) -> dict[str, Any]:
+    hits = sum(
+        value.count(request["old_text"])
+        for entry in entries if isinstance(entry, dict)
+        for field in request["fields"]
+        if isinstance(value := _cache_field_value(entry, field), str)
+    )
+    if not request["replace_all"] and hits != 1:
+        raise AgentToolError(f"old_text 在该缓存文件的所选字段中匹配 {hits} 次；默认要求唯一匹配，批量替换请显式传 replace_all=true")
     patches = []
     for entry in entries:
         if not isinstance(entry, dict):
@@ -537,8 +543,8 @@ def _plan_cache_replacements(
         updates = {}
         for field in request["fields"]:
             value = _cache_field_value(entry, field)
-            if isinstance(value, str) and request["query"] in value:
-                after = value.replace(request["query"], request["replacement"])
+            if isinstance(value, str) and request["old_text"] in value:
+                after = value.replace(request["old_text"], request["new_text"])
                 if after != value:
                     updates[field] = after
         if updates:
@@ -559,7 +565,7 @@ def _plan_cache_patches(
 ) -> dict[str, Any]:
     """把 patches 解析成「要改哪些条目的哪些字段」（**只读**，不动 entries）。
 
-    patch_transl_cache 的落盘与审批卡上的「将要变更」预览共用这一份判断：卡上给用户看的
+    edit_transl_cache 的落盘与审批卡上的「将要变更」预览共用这一份判断：卡上给用户看的
     before→after 就是真执行会写下去的东西，不会两边各算一遍再漂移。调用方拿到 plan 后
     自己逐条 entry.update(updates) 才算写。
 
@@ -878,7 +884,7 @@ def _plan_cache_delete(
 ) -> tuple[list[Any], list[int], list[dict[str, Any]]]:
     """按 index 挑出要删的条目（**只读**）：返回（保留的条目、命中的 index、被删条目的预览）。
 
-    delete_transl_cache 的落盘与审批卡上的「将要变更」预览共用这一份挑选：卡上列出的
+    edit_transl_cache(action="delete") 的落盘与审批卡上的「将要变更」预览共用这一份挑选：卡上列出的
     "会删掉哪几条、删的是什么"就是真执行会删的那些。
     """
     kept: list[Any] = []
@@ -906,10 +912,11 @@ def _tool_delete_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
 
     两种粒度：
     - 指定 indexes：删除某个缓存文件里的部分条目（index 可用 read_transl_cache /
-      list_problems 返回的 index，支持 "33-40,50-60" 区间写法）
+      problems(action="list") 返回的 index，支持 "33-40,50-60" 区间写法）
     - 不指定 indexes：删除整个缓存文件（该文件全部句子重翻）
     删除不可撤销；rebuilda/rebuildr 依赖缓存存在，删除后不要跑重建。
     """
+    _write_action(args, ("delete",))
     filename = str(args.get("filename", "")).strip()
     if not filename:
         raise AgentToolError("filename is required")
@@ -957,7 +964,7 @@ def _tool_delete_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
         "count_after": len(kept),
         "deleted_indexes": deleted_indexes,
         "deleted_preview": deleted_previews[:50],
-        "note": "被删除的句子已不在缓存中，重启翻译（start_translation）时它们会重新翻译",
+        "note": '被删除的句子已不在缓存中，重启翻译（translation(action="start")）时它们会重新翻译',
     }
     if missing:
         result["missing_indexes"] = missing

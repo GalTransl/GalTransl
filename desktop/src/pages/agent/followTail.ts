@@ -153,6 +153,13 @@ export function followTail(viewport: HTMLElement, content: HTMLElement, onBottom
   return {
     follow,
     isFollowing: () => !disposed && active && following,
+    restoreReading(top: number) {
+      if (disposed || !active) return;
+      releaseReply();
+      following = false;
+      restoreTop = top;
+      follow();
+    },
     revealFinal(reply: HTMLElement) {
       if (disposed || !active || !following) return;
       // 短回复仍留在底部；仅当正文无法完整放进视口时切到开头阅读。

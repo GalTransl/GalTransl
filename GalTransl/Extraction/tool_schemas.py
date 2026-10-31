@@ -3,6 +3,9 @@ from GalTransl.Agent.tool_schemas import AGENT_TOOLS
 
 
 def tool(name, description, properties, required=()):
+    if name in {"read", "write", "edit", "bash", "run_python"}:
+        properties = {**properties, "reason": {"type": "string", "maxLength": 200,
+            "description": "Explain the intent of this tool call in one short sentence, using the user's language."}}
     return {"type": "function", "function": {"name": name, "description": description,
             "parameters": {"type": "object", "properties": properties,
                            "required": list(required), "additionalProperties": False}}}

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from GalTransl.Agent.core import AgentStopRequested
 from GalTransl.Agent.models import AgentToolError
+from GalTransl.RuntimePaths import get_res_dir
 from .commands import Commands
 from .pi_text import MAX_BYTES, apply_edits, edit_diff, format_size, normalize_lf, truncate
 
@@ -38,7 +39,7 @@ def native_result(text, details=None):
 
 
 def windows_shell_path(raw):
-    """Git Bash, MSYS, Cygwin and WSL drive paths (/c/x, /mnt/c/x, /cygdrive/c/x) as native Windows paths."""
+    """MSYS, Cygwin and WSL drive paths (/c/x, /mnt/c/x, /cygdrive/c/x) as native Windows paths."""
     if not raw.startswith("/") or raw.startswith("//") or "\\" in raw:
         return raw
     match = re.fullmatch(r"/(?:mnt/|cygdrive/)?([a-zA-Z])(?:/(.*))?", raw)
@@ -58,19 +59,17 @@ def native_path(raw):
 
 
 def bash_config():
+    """Return the shell executable and the arguments that precede its script.
+
+    A trailing ``-s`` means the script is piped through stdin, which keeps long
+    commands clear of the Windows command-line limit. Windows uses the bundled
+    Unicode BusyBox so every path and byte stays UTF-8.
+    """
     if os.name == "nt":
-        for variable in ("ProgramFiles", "ProgramFiles(x86)"):
-            candidate = Path(os.environ.get(variable, "C:/Program Files")) / "Git/bin/bash.exe"
-            if candidate.is_file():
-                return str(candidate), ["-c"]
-        executable = shutil.which("bash.exe")
-        if not executable:
-            raise AgentToolError("No bash shell found. Install Git for Windows or add bash to PATH.")
-        # Windows' legacy WSL launcher does not support -c command transport.
-        system = Path(os.environ.get("SystemRoot", "C:/Windows"))
-        if any(Path(executable) == system / name / "bash.exe" for name in ("System32", "Sysnative")):
-            return executable, ["-s"]
-        return executable, ["-c"]
+        busybox = get_res_dir() / "busybox64u.exe"
+        if not busybox.is_file():
+            raise AgentToolError("busybox64u.exe is missing from the res directory")
+        return str(busybox), ["sh", "-s"]
     return ("/bin/bash" if Path("/bin/bash").is_file() else shutil.which("bash") or "sh"), ["-c"]
 
 
@@ -135,6 +134,7 @@ class ExtractionTools:
             if self.stop_event.is_set():
                 raise AgentStopRequested()
             os.replace(temporary, self.write_path(str(target)))
+            temporary = None  # the rename consumed the temporary file
         finally:
             if temporary:
                 temporary.unlink(missing_ok=True)
@@ -247,6 +247,6 @@ class ExtractionTools:
             raise AgentToolError("Invalid timeout: maximum is 2147483.647 seconds")
         executable, prefix = bash_config()
         self.require_permission("bash", args)
-        stdin_command = prefix == ["-s"]
+        stdin_command = prefix[-1] == "-s"
         return self.commands.execute(executable, prefix if stdin_command else [*prefix, args["command"]],
                                      call_id, timeout, args["command"] if stdin_command else None, native=True)

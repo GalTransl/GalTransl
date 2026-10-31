@@ -102,8 +102,8 @@ async function mount(entry = '/settings') {
   });
   return {
     root: () => renderer.root,
-    click(label) {
-      act(() => {
+    async click(label) {
+      await act(async () => {
         const button = byClass(renderer.root, 'section-nav__btn').find((node) => textOf(node.children).includes(label));
         assert.ok(button, `找不到二级菜单项「${label}」`);
         button.props.onClick();
@@ -129,16 +129,16 @@ test('点二级菜单只切换当前分区', async () => {
   const view = await mount();
   try {
     // 后端连接并在关于里
-    view.click('关于');
+    await view.click('关于');
     assert.equal(activeNav(view.root()), 4);
     assert.deepEqual(panelTitles(view.root()), ['关于', '后端连接']);
 
-    view.click('插件清单');
+    await view.click('插件清单');
     assert.equal(activeNav(view.root()), 3);
     assert.deepEqual(panelTitles(view.root()), ['插件清单']);
 
     // 编辑器直接显示在设置分区里，不再需要进入子页面。
-    view.click('提示词');
+    await view.click('提示词');
     assert.deepEqual(panelTitles(view.root()), ['默认提示词']);
   } finally {
     view.unmount();

@@ -52,6 +52,22 @@ test('restored activity expanding over several frames stays at the bottom withou
   }
 });
 
+test('prepending history restores the reading position and later output does not pull it to the bottom', () => {
+  let saved;
+  const f = fixture({ onPosition: position => { saved = position; } });
+  f.scroll(100);
+  f.viewport.scrollHeight = 1600;
+  f.follower.restoreReading(700);
+  assert.equal(f.viewport.scrollTop, 700);
+  assert.equal(saved.scrollTop, 700);
+  assert.equal(saved.following, false);
+  f.viewport.scrollHeight = 1900;
+  f.resize();
+  assert.equal(f.viewport.scrollTop, 700);
+  f.follower.jump();
+  assert.equal(f.viewport.scrollTop, 1500);
+});
+
 test('long final replies reveal their start and stay aligned throughout work-block collapse', () => {
   const f = fixture();
   f.viewport.scrollHeight = 2200;

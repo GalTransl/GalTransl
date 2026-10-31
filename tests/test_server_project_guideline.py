@@ -64,6 +64,17 @@ class ProjectGuidelineApiTests(unittest.TestCase):
 
     # ---- 用例 ----
 
+    def test_replace_all_preview_and_write_share_the_same_result(self):
+        self._put({"mode": "overwrite", "content": "哥哥 … 哥哥"})
+        args = {"mode": "replace", "old_text": "哥哥", "new_text": "兄长"}
+        self.assertIn("2 次", self._put_expect_400(args))
+        self.assertIn("replace_all", self._put_expect_400({**args, "replace_all": "true"}))
+        preview = self._put({**args, "replace_all": True, "dry_run": True})
+        self.assertEqual(preview["content"], "兄长 … 兄长")
+        self.assertEqual(read_project_guideline(self.project), "哥哥 … 哥哥")
+        self._put({**args, "replace_all": True})
+        self.assertEqual(read_project_guideline(self.project), preview["content"])
+
     def test_get_reports_missing_file(self) -> None:
         out = self._get()
         self.assertEqual(out["filename"], PROJECT_GUIDELINE_FILENAME)

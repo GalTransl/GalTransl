@@ -250,7 +250,7 @@ class WritePreviewTests(unittest.TestCase):
         self.assertIn("| 旧角色 |  |  | remove |", text)
 
     def test_noop_dictionary_patch_is_reported(self):
-        result, runner = save_dict(["a\tA"], "a\tA", "patch")
+        result, runner = save_dict(["a\tA"], "a\tA", "set")
         text = _render_tool_result_table("save_dict", result)
         self.assertEqual(runner.saved, [])
         self.assertIn("内容没有变化", text)

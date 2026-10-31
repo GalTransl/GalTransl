@@ -1,19 +1,15 @@
-import { AnimatedDetails } from '../components/AnimatedDetails';
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePageActive, useRetainPage } from '../components/PageActivity';
 import { useSearchParams } from 'react-router-dom';
 import type { ProjectPageContext } from '../components/ProjectLayout';
 import { Panel } from '../components/Panel';
-import { Button } from '../components/Button';
 import { PageHeader } from '../components/PageHeader';
 import { EmptyState, ErrorState, InlineFeedback, LoadingState } from '../components/page-state';
 import {
   type PluginInfo,
-  type InputReextractResult,
   fetchProjectConfig,
   updateProjectConfig,
-  reextractMsgtoolInput,
   fetchPlugins,
   getBackendProfileNames,
   getDefaultBackendProfile,
@@ -50,12 +46,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   const [error, setError] = useMessageState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [reextracting, setReextracting] = useState(false);
-  useRetainPage(dirty || saving || reextracting);
-  const [reextractResult, setReextractResult] = useState<InputReextractResult | null>(null);
-  const [reextractError, setReextractError] = useMessageState<string | null>(null);
-  const reextractRequestRef = useRef(0);
-  const reextractBusyRef = useRef(false);
+  useRetainPage(dirty || saving);
   const configRef = useRef(config);
   configRef.current = config;
   const contextRef = useRef('');
@@ -77,7 +68,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
 
   const wasActiveRef = useRef(active);
   const refreshAllowedRef = useRef(false);
-  refreshAllowedRef.current = active && !dirty && !saving && !reextracting;
+  refreshAllowedRef.current = active && !dirty && !saving;
   useEffect(() => {
     const wasActive = wasActiveRef.current;
     wasActiveRef.current = active;
@@ -110,11 +101,6 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   // Load config
   useEffect(() => {
     if (!projectId) return;
-    reextractRequestRef.current += 1;
-    reextractBusyRef.current = false;
-    setReextracting(false);
-    setReextractResult(null);
-    setReextractError(null);
     setSaving(false);
     let cancelled = false;
     setLoading(true);
@@ -307,33 +293,6 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
     }
   }, [projectId, config, configFileName]);
 
-  const handleReextract = useCallback(async () => {
-    if (!projectId || !config || saving || reextractBusyRef.current) return;
-    reextractBusyRef.current = true;
-    const request = ++reextractRequestRef.current;
-    const isCurrent = () => request === reextractRequestRef.current;
-    setReextracting(true);
-    setReextractResult(null);
-    setReextractError(null);
-    try {
-      const saved = await handleSave();
-      if (!isCurrent()) return;
-      if (!saved) {
-        setReextractError(uiMessage("config:projectConfigPage.handleReextract_setReextractError_configSaveFailedNotStartExtract"));
-        return;
-      }
-      const result = await reextractMsgtoolInput(projectId, configFileName);
-      if (isCurrent()) setReextractResult(result);
-    } catch (err) {
-      if (isCurrent()) setReextractError(normalizeError(err, uiMessage("config:projectConfigPage.handleReextract_normalizeError_extractSourceFailed")));
-    } finally {
-      if (isCurrent()) {
-        reextractBusyRef.current = false;
-        setReextracting(false);
-      }
-    }
-  }, [projectId, config, configFileName, saving, handleSave]);
-
   // Scroll to active section
   const handleSectionChange = useCallback((section: ConfigSectionKey) => {
     setActiveSection(section);
@@ -377,7 +336,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
           onSave={() => void handleSave()}
           saving={saving}
           dirty={dirty}
-          disabled={!config || reextracting}
+          disabled={!config}
         />
 
         <div className="project-config-page__main" ref={mainRef}>
@@ -388,7 +347,7 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
             <InlineFeedback className="inline-alert--floating" tone="success" title={translate("config:projectConfigPage.projectConfigPageMain_title_configDoneSave")} description={translate("config:projectConfigPage.projectConfigPageMain_description_currentProjectConfigDoneSuccess")} onDismiss={() => setSaveSuccess(false)} />
           )}
 
-          <fieldset key={yamlView ? 'yaml' : activeSection} className="section-fade-in project-config-fields" disabled={saving || reextracting}>
+          <fieldset key={yamlView ? 'yaml' : activeSection} className="section-fade-in project-config-fields" disabled={saving}>
           {yamlView ? (
             <Panel title={translate("config:projectConfigPage.sectionFadeInProjectConfigFields_title_yAMLSource")} description={translate("config:projectConfigPage.sectionFadeInProjectConfigFields_description_editYAMLConfigSourcePreviewChange")}>
               <pre className="yaml-preview">
@@ -449,31 +408,6 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
                     setDirty(true);
                   }}
                   onPluginSettingChange={handlePluginSettingChange}
-                  reextractAction={(
-                    <div className="plugin-setting-row">
-                      <span className="plugin-setting-row__label">{translate("config:projectConfigPage.pluginSettingRow_message_sourceExtract")}</span>
-                      <div className="plugin-setting-row__control">
-                        <Button type="button" variant="secondary" className="plugin-reextract-button"
-                          onClick={() => void handleReextract()} disabled={saving || reextracting}>
-                          {reextracting ? (saving ? translate("config:projectConfigPage.pluginReextractButton_message_pendingSaveConfig") : translate("config:projectConfigPage.pluginReextractButton_message_pendingExtract")) : translate("config:projectConfigPage.pluginReextractButton_message_extractSource")}
-                        </Button>
-                        <span className="plugin-setting-row__hint">{translate("config:projectConfigPage.pluginSettingRowControl_message_saveCurrentConfigExtractPluginProcessAll")}</span>
-                        {reextractError && <p role="alert">{reextractError}</p>}
-                        {reextractResult && (
-                          <div role="status">
-                            {reextractResult.refreshed.length === 0 && reextractResult.errors.length === 0
-                              ? translate("config:projectConfigPage.pluginSettingRowControl_message_notPluginProcessFile")
-                              : translate("config:projectConfigPage.pluginSettingRowControl_message_extractCompleteSuccessCountFileSentenceFailed", { count: reextractResult.refreshed.length, total_entries: reextractResult.total_entries, count2: reextractResult.errors.length })}
-                            {reextractResult.errors.length > 0 && (
-                              <AnimatedDetails defaultOpen summary={translate("config:projectConfigPage.pluginSettingRowControl_message_failedFile")}>
-                                {reextractResult.errors.map((item) => <p key={item.filename}>{item.filename}：{item.error}</p>)}
-                              </AnimatedDetails>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
                 />
               )}
 

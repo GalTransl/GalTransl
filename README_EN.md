@@ -11,6 +11,8 @@
 
    <img width="2044" height="1397" alt="image" src="https://github.com/user-attachments/assets/f85e4782-e53e-4b03-ae24-cd77b453c6e3" />
 
+An optional **billion-context Python core** is available from the **settings button at the bottom left of each Agent**. Translation and extraction agents have independent switches. It provides tiered context compression, original-message archiving and retrieval, with no Node.js runtime or extra Python packages. It is off by default and takes effect on the next agent turn. GalTransl uses designs and compression rules from [billion-context](https://github.com/ranxianglei/billion-context) and [acp-kernel](https://github.com/ranxianglei/acp-kernel); see the [port scope, usage and licenses](plugins/billion-context/README.md).
+
 ## Preface
 &ensp;&ensp;&ensp;&ensp;The core of GalTransl is a set of automatic translation scripts that solves most of the known problems in using GPT to automatically translate visual novels, and greatly improves the overall translation quality. By combining with other projects, it connects the whole process of making patches, lowering the entry barrier.
 
@@ -413,7 +415,6 @@ python build_linux_x64.py --no-bundles
 
 Build release packages on Ubuntu 22.04 or an equivalent glibc baseline for wider compatibility. Settings are stored under `$XDG_CONFIG_HOME/GalTransl`; editable common dictionaries live under `$XDG_DATA_HOME/GalTransl/Dict`, with bundled dictionaries used only as initial seeds. Editable guidelines and Agent sessions live under `$XDG_DATA_HOME/GalTransl/translation_guidelines` and `$XDG_DATA_HOME/GalTransl/agent_sessions`. XDG roots default to `~/.config` and `~/.local/share`. Windows retains settings and dictionaries in the program directory.
 
-Linux support does not imply that every external tool has been ported. For example, the msg-tool plugin's bundled `res/msg_tool.exe` is a Windows binary; extraction/reinsertion for those script formats cannot run directly on Linux.
 
 ### macOS development and builds
 

@@ -50,7 +50,7 @@ class SearchOutputFilesTests(unittest.TestCase):
         result = _tool_search_output_files(runner, {"query": "x"})
         text = rt._render_tool_result_table("search_output_files", result)
         self.assertIn("输出文件解析失败", text)
-        self.assertIn("read_output", text)
+        self.assertIn('output(action="read")', text)
         self.assertIn("未知", text)
         self.assertNotIn("输入文件解析失败", text)
 
@@ -67,9 +67,9 @@ class SearchOutputFilesTests(unittest.TestCase):
         self.assertIs(rt._TOOL_HANDLERS["search_output_files"], _tool_search_output_files)
         self.assertEqual(rt._tool_risk("search_output_files"), rt.PERMISSION_READ)
         schemas = {t["function"]["name"]: t["function"]["parameters"] for t in rt.AGENT_TOOLS}
-        schema = schemas["search_output_files"]
-        self.assertEqual(schema["required"], ["query"])
-        self.assertEqual(set(schema["properties"]), set(schemas["search_input"]["properties"]))
+        schema = schemas["output"]
+        self.assertEqual(schema["required"], ["action"])
+        self.assertEqual(set(schema["properties"]), set(schemas["input"]["properties"]) - {"grep"})
         self.assertEqual(schema["properties"]["field"]["enum"], ["all", "dst", "name"])
 
 

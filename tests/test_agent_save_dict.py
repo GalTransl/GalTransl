@@ -26,7 +26,7 @@ class _Runner:
 
 def _run(lines, content, action=None):
     runner = _Runner(lines)
-    args = {"file_key": "(project_dir)项目GPT字典.txt", "content": content}
+    args = {"action": "set", "file_key": "(project_dir)项目GPT字典.txt", "content": content}
     if action:
         args["action"] = action
     return _tool_save_dict(runner, args), runner
@@ -47,6 +47,25 @@ class DictLineKeyTests(unittest.TestCase):
 
 
 class SaveDictActionTests(unittest.TestCase):
+    def test_set_preserves_omitted_note_and_clears_explicit_empty_columns(self):
+        for before, incoming, expected in (
+            ("a\tA\tnote", "a\tNew", "a\tNew\tnote"),
+            ("a->A#note", "a->New", "a\tNew\tnote"),
+            ("a\tA\tnote", "a\tNew\t", "a\tNew\t"),
+            ("a\tA\tnote", "a\t", "a\t\tnote"),
+        ):
+            with self.subTest(incoming=incoming):
+                result, runner = _run([before, "keep\tK"], incoming, "set")
+                self.assertEqual(runner.saved, [expected + "\nkeep\tK"])
+                self.assertEqual(result["action"], "set")
+
+    def test_missing_action_and_legacy_actions_never_write(self):
+        for extra in ({}, {"action": "patch"}, {"mode": "overwrite"}, {"action": "set", "mode": "overwrite"}):
+            runner = _Runner(["a\tA"])
+            with self.subTest(extra=extra), self.assertRaisesRegex(AgentToolError, "action"):
+                _tool_save_dict(runner, {"file_key": "(project_dir)项目GPT字典.txt", "content": "a\tNew", **extra})
+            self.assertEqual(runner.saved, [])
+
     def test_explicit_overwrite_replaces_whole_file(self) -> None:
         result, runner = _run(["a\tA"], "b\tB\nc\tC", "overwrite")
         self.assertEqual(result["action"], "overwrite")
@@ -54,7 +73,7 @@ class SaveDictActionTests(unittest.TestCase):
         self.assertEqual(result["line_count_after"], 2)
 
     def test_patch_updates_translation_and_note_and_appends_new_entries(self) -> None:
-        result, runner = _run(["// 注释", "a\tA\t旧备注", "keep\tK"], "a\tA2\t新备注\nb\tB", "patch")
+        result, runner = _run(["// 注释", "a\tA\t旧备注", "keep\tK"], "a\tA2\t新备注\nb\tB", "set")
         self.assertEqual(result["appended_keys"], ["b"])
         self.assertEqual(result["replaced_keys"], ["a"])
         self.assertNotIn("skipped_duplicate_keys", result)
@@ -62,7 +81,7 @@ class SaveDictActionTests(unittest.TestCase):
         self.assertEqual(runner.saved[-1], "// 注释\na\tA2\t新备注\nkeep\tK\nb\tB")
 
     def test_patch_repeated_keys_use_last_value_without_duplicate_rows(self) -> None:
-        result, runner = _run(["a\tA"], "a\tA2\nb\tB\na\tA3\nb\tB2", "patch")
+        result, runner = _run(["a\tA"], "a\tA2\nb\tB\na\tA3\nb\tB2", "set")
         self.assertEqual(result["replaced_keys"], ["a"])
         self.assertEqual(result["appended_keys"], ["b"])
         self.assertEqual(runner.saved[-1], "a\tA3\nb\tB2")
@@ -70,28 +89,28 @@ class SaveDictActionTests(unittest.TestCase):
     def test_patch_preserves_blank_lines_comments_and_special_dictionary_keys(self) -> None:
         result, runner = _run(
             ["// 标题", "", "mono\t独白词\t旧译", "pre_src\t条件\t词\t旧译"],
-            "mono\t独白词\t新译\r\npre_src\t条件\t词\t新译\r\n// 新注释\r\n新词\t译名", "patch",
+            "mono\t独白词\t新译\r\npre_src\t条件\t词\t新译\r\n// 新注释\r\n新词\t译名", "set",
         )
         self.assertEqual(result["replaced_keys"], ["mono\t独白词", "pre_src\t条件\t词"])
         self.assertEqual(runner.saved[-1], "// 标题\n\nmono\t独白词\t新译\npre_src\t条件\t词\t新译\n// 新注释\n新词\t译名")
 
     def test_patch_preview_matches_mixed_updates_and_additions(self) -> None:
         runner = _Runner(["a\tA", "b\tB"])
-        args = {"file_key": "(project_dir)项目GPT字典.txt", "action": "patch", "content": "b\tB2\nc\tC"}
+        args = {"file_key": "(project_dir)项目GPT字典.txt", "action": "set", "content": "b\tB2\nc\tC"}
         preview = _preview_tool_changes(runner, "save_dict", args)
         self.assertEqual(runner.saved, [])
         result = _tool_save_dict(runner, args)
         self.assertEqual(preview["line_diff"], result["line_diff"])
 
     def test_schema_only_exposes_unified_patch_action(self) -> None:
-        schema = next(t["function"] for t in AGENT_TOOLS if t["function"]["name"] == "save_dict")
-        self.assertEqual(schema["parameters"]["properties"]["action"]["enum"], ["overwrite", "patch", "delete"])
+        schema = next(t["function"] for t in AGENT_TOOLS if t["function"]["name"] == "dictionary")
+        self.assertEqual(schema["parameters"]["properties"]["action"]["enum"], ["list", "read", "set", "delete", "overwrite"])
         for action in ("append", "replace"):
-            with self.subTest(action=action), self.assertRaisesRegex(AgentToolError, "patch"):
+            with self.subTest(action=action), self.assertRaisesRegex(AgentToolError, "set"):
                 _run(["a\tA"], "a\tB", action)
 
     def test_no_effective_change_skips_write(self) -> None:
-        result, runner = _run(["a\tA"], "a\tA", "patch")
+        result, runner = _run(["a\tA"], "a\tA", "set")
         self.assertIn("note", result)
         self.assertEqual(runner.saved, [])
         self.assertEqual(result["replaced_keys"], [])

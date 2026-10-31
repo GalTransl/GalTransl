@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from GalTransl.Agent import runtime as rt
+from GalTransl.Agent.tool_operations import TOOL_OPERATIONS, PROBLEM_OPERATIONS
 from GalTransl.Agent.runtime import (
     AGENT_TOOLS,
     AUTO_QUIET_MODE,
@@ -188,7 +189,9 @@ class PermissionMatrixTests(unittest.TestCase):
 
     def test_every_tool_has_a_risk_class(self) -> None:
         """工具表里的每个工具都得显式归过类：新增工具忘了登记，这里会红。"""
-        declared = {tool["function"]["name"] for tool in AGENT_TOOLS}
+        declared = {operation for actions in TOOL_OPERATIONS.values() for operation in actions.values()}
+        declared.update(PROBLEM_OPERATIONS.values())
+        declared.update(tool["function"]["name"] for tool in AGENT_TOOLS if tool["function"]["name"] not in {*TOOL_OPERATIONS, "problems"})
         self.assertEqual(declared - (PERMISSION_READ_TOOLS | set(PERMISSION_TOOL_RISK)), set())
 
     def test_mode_normalization(self) -> None:
@@ -547,11 +550,11 @@ class PermissionDispatchTests(unittest.TestCase):
             return {"ok": True}
 
         with patch.dict(rt._TOOL_HANDLERS, {"patch_transl_cache": fake_handler}):
-            out = run_gate(runner, "patch_transl_cache", "deny", dispatch=True)
+            out = run_gate(runner, "edit_transl_cache", "deny", dispatch=True, args={"action": "set"})
             self.assertIsInstance(out["error"], AgentToolError)
             self.assertEqual(called, [])
 
-            out2 = run_gate(runner, "patch_transl_cache", "allow-once", dispatch=True)
+            out2 = run_gate(runner, "edit_transl_cache", "allow-once", dispatch=True, args={"action": "set"})
             self.assertTrue(out2["ok"], out2.get("error"))
             self.assertEqual(called, ["ran"])
 
@@ -607,6 +610,23 @@ class _PreviewRunner:
 
 
 class PermissionPreviewTests(unittest.TestCase):
+    def test_every_write_tool_requires_an_explicit_action_before_writing(self):
+        requests = {
+            "save_dict": {"file_key": "pre.json", "content": "a\tA"},
+            "save_name_table": {"names": []},
+            "write_project_guideline": {"content": "new guideline"},
+            "update_project_config": {"updates": [{"key": "common.language", "value": "zh-cn"}]},
+            "patch_transl_cache": {"filename": "a.json", "patches": [{"index": 1, "pre_dst": "new"}]},
+            "delete_transl_cache": {"filename": "a.json"},
+            "manage_problem_filter": {"keyword": "literal"},
+            "manage_problem_white_list": {"entry": "a.json:1"},
+        }
+        for name, args in requests.items():
+            runner = _PreviewRunner()
+            with self.subTest(tool=name), self.assertRaisesRegex(AgentToolError, "action"):
+                rt._TOOL_HANDLERS[name](runner, args)
+            self.assertEqual(runner.writes, [])
+
     """审批卡的「将要变更」：挂起前只读算出 before→after，且绝不落盘。
 
     预览与真执行**共用同一批计划函数**（_plan_cache_patches / _plan_cache_delete /
@@ -620,7 +640,7 @@ class PermissionPreviewTests(unittest.TestCase):
         runner = _PreviewRunner(cache={"a.json": [{"index": 33, "pre_dst": "旧译文"}]})
 
         preview = rt._preview_tool_changes(
-            runner, "patch_transl_cache", {"filename": "a.json", "patches": [{"index": 33, "pre_dst": "新译文"}]}
+            runner, "patch_transl_cache", {"action": "set", "filename": "a.json", "patches": [{"index": 33, "pre_dst": "新译文"}]}
         )
 
         self.assertEqual(preview["files"], ["a.json"])
@@ -639,7 +659,7 @@ class PermissionPreviewTests(unittest.TestCase):
         preview = rt._preview_tool_changes(
             runner,
             "patch_transl_cache",
-            {
+            {"action": "set",
                 "patches": [
                     {"file": "a.json", "index": 1, "pre_dst": "贤酱"},
                     {"file": "b.json", "index": 2, "pre_dst": "贤酱"},
@@ -657,7 +677,7 @@ class PermissionPreviewTests(unittest.TestCase):
 
     def test_patch_preview_matches_what_the_real_run_writes(self) -> None:
         """同一条 index 被两条 patch 命中时，第二条的 before 也要是第一条的 after。"""
-        args = {
+        args = {"action": "set",
             "filename": "a.json",
             "patches": [{"index": 7, "pre_dst": "B"}, {"index": 7, "pre_dst": "C"}],
         }
@@ -676,8 +696,8 @@ class PermissionPreviewTests(unittest.TestCase):
         runner = _PreviewRunner(cache={"a.json": [{"index": 1, "pre_dst": "x"}]})
         # index 不存在 / 字段不在白名单 / 工具没给 patches：都没有 diff 可显示
         for args in (
-            {"filename": "a.json", "patches": [{"index": 99, "pre_dst": "y"}]},
-            {"filename": "a.json", "patches": [{"index": 1, "trans_by": "我"}]},
+            {"action": "set", "filename": "a.json", "patches": [{"index": 99, "pre_dst": "y"}]},
+            {"action": "set", "filename": "a.json", "patches": [{"index": 1, "trans_by": "我"}]},
             {"filename": "a.json"},
         ):
             self.assertIsNone(rt._preview_tool_changes(runner, "patch_transl_cache", args), args)
@@ -690,7 +710,7 @@ class PermissionPreviewTests(unittest.TestCase):
         )
 
         preview = rt._preview_tool_changes(
-            runner, "delete_transl_cache", {"filename": "a.json", "indexes": "2"}
+            runner, "delete_transl_cache", {"action": "delete", "filename": "a.json", "indexes": "2"}
         )
 
         self.assertEqual(preview["deleted_indexes"], [2])
@@ -701,14 +721,14 @@ class PermissionPreviewTests(unittest.TestCase):
         runner = _PreviewRunner(cache={"a.json": [{"index": 1, "pre_dst": "x"}]})
         # 整文件删除没有可比对的 diff：卡上退回摘要，也不去读缓存
         self.assertIsNone(
-            rt._preview_tool_changes(runner, "delete_transl_cache", {"filename": "a.json"})
+            rt._preview_tool_changes(runner, "delete_transl_cache", {"action": "delete", "filename": "a.json"})
         )
 
     # ---- 字典 ----
 
     def test_dict_preview_diffs_lines_and_matches_the_real_run(self) -> None:
         before = ["旧词\told", "重复\tdup"]
-        args = {"file_key": "pre.json", "action": "patch", "content": "重复\tdup\n新词\tnew"}
+        args = {"file_key": "pre.json", "action": "set", "content": "重复\tdup\n新词\tnew"}
         contents = {"pre.json": {"lines": before}}
 
         preview = rt._preview_tool_changes(_PreviewRunner(dict_contents=contents), "save_dict", args)
@@ -741,7 +761,7 @@ class PermissionPreviewTests(unittest.TestCase):
         ]
         runner = _PreviewRunner(names=old)
 
-        preview = rt._preview_tool_changes(runner, "save_name_table", {"names": new})
+        preview = rt._preview_tool_changes(runner, "save_name_table", {"action": "set", "names": new})
 
         # 路径是 src_name、值是 dst_name：改译名是 replace，不是"加一条删一条"
         self.assertEqual(
@@ -756,7 +776,7 @@ class PermissionPreviewTests(unittest.TestCase):
             {"src_name": "A", "dst_name": "甲2", "count": 1},
             {"src_name": "B", "dst_name": "", "count": 0},  # 译名还空着
         ]
-        args = {"names": new}
+        args = {"action": "set", "names": new}
 
         preview = rt._preview_tool_changes(_PreviewRunner(names=old), "save_name_table", args)
         real = rt._tool_save_name_table(_PreviewRunner(names=old), args)
@@ -768,7 +788,7 @@ class PermissionPreviewTests(unittest.TestCase):
     def test_name_table_preview_lists_removed_names_with_their_old_dst(self) -> None:
         old = [{"src_name": "A", "dst_name": "甲", "count": 1}]
 
-        preview = rt._preview_tool_changes(_PreviewRunner(names=old), "save_name_table", {"mode": "overwrite", "names": []})
+        preview = rt._preview_tool_changes(_PreviewRunner(names=old), "save_name_table", {"action": "overwrite", "names": []})
 
         self.assertEqual(
             [(c["path"], c["kind"], c["before"], c["after"]) for c in preview["changes"]],
@@ -785,14 +805,14 @@ class PermissionPreviewTests(unittest.TestCase):
         new = [{"src_name": "ゴブリン", "dst_name": "哥布林", "count": 9}]
 
         self.assertIsNone(
-            rt._preview_tool_changes(_PreviewRunner(names=old), "save_name_table", {"names": new})
+            rt._preview_tool_changes(_PreviewRunner(names=old), "save_name_table", {"action": "set", "names": new})
         )
 
     # ---- 项目配置（high 档也要提前看 diff） ----
 
     def test_config_preview_shows_key_before_after_and_matches_the_real_run(self) -> None:
         config = {"common": {"gpt": {"contextNum": 8}}}
-        args = {"updates": [{"key": "common.gpt.contextNum", "value": 12}]}
+        args = {"action": "set", "updates": [{"key": "common.gpt.contextNum", "value": 12}]}
 
         preview = rt._preview_tool_changes(_PreviewRunner(config=config), "update_project_config", args)
         real = rt._tool_update_project_config(_PreviewRunner(config=config), args)
@@ -806,7 +826,7 @@ class PermissionPreviewTests(unittest.TestCase):
     def test_config_preview_chains_two_updates_on_the_same_key(self) -> None:
         """同一个键改两次：第二条的 before 要是第一条的 after（真执行是逐条写下去的）。"""
         config = {"common": {"gpt": {"contextNum": 8}}}
-        args = {
+        args = {"action": "set",
             "updates": [
                 {"key": "common.gpt.contextNum", "value": 12},
                 {"key": "common.gpt.contextNum", "value": 16},
@@ -825,14 +845,14 @@ class PermissionPreviewTests(unittest.TestCase):
             [],  # 空 updates
         ):
             self.assertIsNone(
-                rt._preview_tool_changes(runner, "update_project_config", {"updates": updates}), updates
+                rt._preview_tool_changes(runner, "update_project_config", {"action": "set", "updates": updates}), updates
             )
 
     # ---- 问题过滤 ----
 
     def test_problem_filter_preview_lists_added_keys_and_matches_the_real_run(self) -> None:
         config = {"common": {"problemFilterKey": ["残留日文"]}}
-        args = {"action": "add", "keyword": ["残留日文", "标点错漏"]}
+        args = {"action": "set", "keyword": ["残留日文", "标点错漏"]}
 
         preview = rt._preview_tool_changes(_PreviewRunner(config=config), "manage_problem_filter", args)
         real = rt._tool_manage_problem_filter(_PreviewRunner(config=config), args)
@@ -845,7 +865,7 @@ class PermissionPreviewTests(unittest.TestCase):
         config = {"common": {"problemFilterKey": ["残留日文", "标点错漏"]}}
 
         preview = rt._preview_tool_changes(
-            _PreviewRunner(config=config), "manage_problem_filter", {"action": "remove", "keyword": "标点错漏"}
+            _PreviewRunner(config=config), "manage_problem_filter", {"action": "delete", "keyword": "标点错漏"}
         )
 
         self.assertEqual([(c["kind"], c["before"]) for c in preview["changes"]], [("remove", "标点错漏")])
@@ -854,9 +874,9 @@ class PermissionPreviewTests(unittest.TestCase):
         runner = _PreviewRunner(config={"common": {"problemFilterKey": ["残留日文"]}})
         for args in (
             {"action": "list"},  # 查清单不改东西
-            {"action": "add", "keyword": "残留日文"},  # 本来就有
-            {"action": "remove", "keyword": "不在清单里"},  # 本来就没有
-            {"action": "add"},  # 没给 keyword（真执行会报错，卡上不必先闪一下）
+            {"action": "set", "keyword": "残留日文"},  # 本来就有
+            {"action": "delete", "keyword": "不在清单里"},  # 本来就没有
+            {"action": "set"},  # 没给 keyword（真执行会报错，卡上不必先闪一下）
         ):
             self.assertIsNone(rt._preview_tool_changes(runner, "manage_problem_filter", args), args)
 
@@ -866,7 +886,7 @@ class PermissionPreviewTests(unittest.TestCase):
         runner = _PreviewRunner(guideline="原有\n", guideline_after="原有\n新增\n")
 
         preview = rt._preview_tool_changes(
-            runner, "write_project_guideline", {"mode": "append", "content": "新增"}
+            runner, "write_project_guideline", {"action": "append", "content": "新增"}
         )
 
         self.assertEqual(
@@ -879,7 +899,7 @@ class PermissionPreviewTests(unittest.TestCase):
     def test_guideline_preview_absent_when_content_is_unchanged(self) -> None:
         runner = _PreviewRunner(guideline="同样的一段", guideline_after="同样的一段")
         self.assertIsNone(
-            rt._preview_tool_changes(runner, "write_project_guideline", {"mode": "append", "content": "x"})
+            rt._preview_tool_changes(runner, "write_project_guideline", {"action": "append", "content": "x"})
         )
 
     def test_guideline_preview_absent_for_unknown_mode(self) -> None:
@@ -907,7 +927,7 @@ class PermissionPreviewTests(unittest.TestCase):
             rt._preview_tool_changes(
                 runner,
                 "patch_transl_cache",
-                {"filename": "a.json", "patches": [{"index": 1, "pre_dst": "x"}]},
+                {"action": "set", "filename": "a.json", "patches": [{"index": 1, "pre_dst": "x"}]},
             )
         )
 
@@ -921,7 +941,7 @@ class PermissionPreviewTests(unittest.TestCase):
             runner,
             "patch_transl_cache",
             "allow-once",
-            args={"filename": "a.json", "patches": [{"index": 33, "pre_dst": "新译文"}]},
+            args={"action": "set", "filename": "a.json", "patches": [{"index": 33, "pre_dst": "新译文"}]},
         )
 
         self.assertTrue(out["ok"], out.get("error"))

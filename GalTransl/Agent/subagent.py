@@ -62,6 +62,7 @@ from GalTransl.Agent.core import (
 from GalTransl.Agent.models import AgentToolError
 from GalTransl.Agent.prompts import SUBAGENT_SUMMARY_HEADINGS, _validated_compact_summary
 from GalTransl.Agent.tool_schemas import AGENT_TOOLS
+from GalTransl.Agent.tool_operations import TOOL_OPERATIONS, tool_operation
 from GalTransl.Agent.tools.cache import (
     _cache_read_action,
     _tool_list_transl_cache,
@@ -111,9 +112,9 @@ _SUBAGENT_EXPLORE_BRIEF = """# 你的任务
 SUBAGENT_EXPLORE_PROMPT = """你是 GalTransl 的**原文探索子代理**，只干两件事：读**原文**、对照 **GPT 字典**，找出「字典里还缺什么」与「翻译规范该注意什么」，把结论写进最后那份报告。
 
 # 权力边界（越界即失败）
-- 你**只能读**两样东西：输入目录里的原文（list_input_files / read_input_file / search_input）与项目 GPT 字典（list_dict_files / read_dict）；
+- 你**只能读**两样东西：输入目录里的原文（input(action="list") / input(action="read") / input(action="search")）与项目 GPT 字典（dictionary(action="list") / dictionary(action="read")）；
 - 你**不写任何文件**，也看不到译文：字典与项目规范由主 Agent 汇总后落地。你的价值在"读得广、找得准"，不在动手改；
-- 任务里点名了原文文件的话，你就**只负责点名给你的那些**（可能不止一个，自动均分出来的，逐个处理别漏）：list_input_files 只会列出它们，读别的文件会被拒；没点名才由你自己挑。
+- 任务里点名了原文文件的话，你就**只负责点名给你的那些**（可能不止一个，自动均分出来的，逐个处理别漏）：input(action="list") 只会列出它们，读别的文件会被拒；没点名才由你自己挑。
 
 # 找什么
 1. **GPT 字典的缺口（主要目标）**，尤其是自动生成（GenDic）会漏的那类：
@@ -124,11 +125,11 @@ SUBAGENT_EXPLORE_PROMPT = """你是 GalTransl 的**原文探索子代理**，只
 2. **翻译规范建议（次要目标）**：称谓与人称取舍（敬称是否保留、さん / ちゃん 怎么落）、文体与语气（书面或口语、口癖要不要译出）、标点与符号（「」是否保留、省略号、感叹号）、以及"哪些词必须统一译法"。
 
 # 怎么干
-1. 先 list_input_files 看有哪些原文文件，挑代表性的读——**别试图读完整个项目**，预算用完就停，按文件顺序来；
-2. 用 read_input_file 读原文（index 从 1 开始，支持区间如 "1-100"）；判断只能基于原文本身与字典，你没有译文可参考；
-3. 用 **search_input** 核对"某个词/称呼全篇出现过多少次、都在什么上下文、是不是同一个角色在用"（context=2~3 一起看上文）——收不收进字典、收哪个写法，靠的是这些次数与场景，别凭一次偶遇下结论；
-4. 用 list_dict_files / read_dict 看 GPT 字典里**已经有什么**：只报没有的或写得不好的，重复的建议是噪音；
-5. 提到一个词时把信息给准：原文写法、出现处（文件 / index）、大约出现多少次（search_input 的 total 就是）、为什么该收进字典。
+1. 先 input(action="list") 看有哪些原文文件，挑代表性的读——**别试图读完整个项目**，预算用完就停，按文件顺序来；
+2. 用 input(action="read") 读原文（index 从 1 开始，支持区间如 "1-100"）；判断只能基于原文本身与字典，你没有译文可参考；
+3. 用 **input(action="search")** 核对"某个词/称呼全篇出现过多少次、都在什么上下文、是不是同一个角色在用"（context=2~3 一起看上文）——收不收进字典、收哪个写法，靠的是这些次数与场景，别凭一次偶遇下结论；
+4. 用 dictionary(action="list") / dictionary(action="read") 看 GPT 字典里**已经有什么**：只报没有的或写得不好的，重复的建议是噪音；
+5. 提到一个词时把信息给准：原文写法、出现处（文件 / index）、大约出现多少次（input(action="search") 的 total 就是）、为什么该收进字典。
 
 # 收尾
 不再调用工具后，输出一份**紧凑的结构化报告**（这是主 Agent 唯一会看到的你的输出，有长度上限）：
@@ -144,7 +145,7 @@ SUBAGENT_EXPLORE_PROMPT = """你是 GalTransl 的**原文探索子代理**，只
 
 SUBAGENT_PROOFREAD_PROMPT = """你是 GalTransl 的校对修复子代理，负责读完分配的句子、直接修复并复查。
 - 先 read_transl_cache 显式读取目标句，结合 context 查看上下文；译文以 proofread_dst 优先、pre_dst 其次。
-- patch_transl_cache 用 dst 提交新译文，工具自动选择当前生效的字段。可以跨文件批量提交，
+- edit_transl_cache 显式传 action="set"，用 dst 提交新译文，工具自动选择当前生效的字段。可以跨文件批量提交，
   但只允许修改任务分配的 file + index。上下文和搜索命中只供参考，不能越界修改。
 - 修改会核对最近一次读取的内容；冲突时重新读取后再决定，禁止照搬旧补丁重试。
 - 默认只修错译、漏译、事实错误、明显不通等硬伤。只有 brief 明确要求润色时才润色；两者都要时硬伤优先。
@@ -237,37 +238,64 @@ def _subagent_role(agent: str) -> SubAgentRole:
 def _subagent_patch_schema() -> dict[str, Any]:
     """Proofreaders edit the effective translation through dst, plus review comments."""
     for tool in AGENT_TOOLS:
-        if (tool.get("function") or {}).get("name") != "patch_transl_cache":
+        if (tool.get("function") or {}).get("name") != "edit_transl_cache":
             continue
         schema = json.loads(json.dumps(tool, ensure_ascii=False))
         properties = schema["function"]["parameters"]["properties"]["patches"]["items"]["properties"]
         for field in ("pre_dst", "proofread_dst"):
             properties.pop(field, None)
         schema["function"]["parameters"]["properties"].pop("clear_comment", None)
-        for field in ("action", "files", "query", "replacement", "fields"):
+        for field in ("files", "old_text", "new_text", "replace_all", "fields", "indexes"):
             schema["function"]["parameters"]["properties"].pop(field, None)
-        schema["function"]["parameters"]["required"] = ["patches"]
+        schema["function"]["parameters"]["properties"]["action"] = {"type": "string", "enum": ["set"]}
+        schema["function"]["parameters"]["properties"]["filename"]["description"] = "任务范围内的缓存文件；跨文件时可在每条 patch 中提供 file。"
+        schema["function"]["parameters"]["required"] = ["action", "patches"]
         properties["dst"] = {"type": "string", "description": "新译文；工具自动更新当前生效的 pre_dst 或 proofread_dst，不能为空"}
         properties["proofread_comment"]["description"] = "需要二次审查的事项；本次已修改译文并解决旧意见时传空串清除，否则保留"
         schema["function"]["description"] = (
-            "批量校对修复任务范围内的句子。先显式 read_transl_cache，再传 index + dst；"
+            "批量校对修复任务范围内的句子。先显式 read_transl_cache，再传 action=set 和 index + dst；"
             "内容已变化时拒绝该文件的提交，需重新读取。校对或润色以任务说明为准，默认只修硬伤。"
             "用 proofread_comment 标记需要二次审查的译文，可与 dst 同时提交。"
             "返回真实变更、检测状态与仍存在的问题。修改记录自动保存，不必在报告复述。"
         )
         return schema
-    raise RuntimeError("AGENT_TOOLS 里找不到 patch_transl_cache")
+    raise RuntimeError("AGENT_TOOLS 里找不到 edit_transl_cache")
 
 
 def _subagent_tools(agent: str) -> list[dict[str, Any]]:
-    """某个角色的工具表：从主 Agent 的工具表里按它的白名单挑，patch_transl_cache 换成收窄版。"""
+    """Only advertise actions permitted by the role's operation whitelist."""
     role = _subagent_role(agent)
     picked: list[dict[str, Any]] = []
     for tool in AGENT_TOOLS:
         name = str((tool.get("function") or {}).get("name") or "")
-        if name not in role.tools:
+        if name in role.tools:
+            picked.append(tool)
             continue
-        picked.append(_subagent_patch_schema() if name == "patch_transl_cache" else tool)
+        if name == "edit_transl_cache" and "patch_transl_cache" in role.tools:
+            picked.append(_subagent_patch_schema())
+            continue
+        actions = [action for action, operation in TOOL_OPERATIONS.get(name, {}).items() if operation in role.tools]
+        if name == "problems" and "list_problems" in role.tools:
+            actions = ["list"]
+        if not actions:
+            continue
+        schema = json.loads(json.dumps(tool, ensure_ascii=False))
+        properties = schema["function"]["parameters"]["properties"]
+        properties["action"]["enum"] = actions
+        if name == "input":
+            schema["function"]["description"] = "列出、读取或搜索原文。list 默认均匀采样，句数只用于估工作量。"
+        if name == "dictionary":
+            schema["function"]["description"] = "列出或分页读取项目字典；支持 query 子串过滤。"
+            schema["function"]["parameters"]["properties"] = {
+                key: value for key, value in properties.items() if key in ("action", "file_key", "query", "offset", "limit")
+            }
+            schema["function"]["parameters"]["properties"]["file_key"]["description"] = "read 必填，来自 list 返回的 file_key。"
+        if name == "problems":
+            schema["function"]["description"] = "查询分配范围内的检测问题；problem_type 留空取统计，* 取全部类型。"
+            schema["function"]["parameters"]["properties"] = {
+                key: value for key, value in properties.items() if key not in ("target", "keyword", "entry", "reason")
+            }
+        picked.append(schema)
     return picked
 
 
@@ -334,9 +362,9 @@ def _subagent_file_counts(runner: AgentRunner, agent: str) -> dict[str, int]:
 
 
 def _subagent_problem_files(runner: AgentRunner, problem_type: str = "") -> set[str]:
-    """有问题（或含指定问题类型）的文件集合——直接吃 list_problems 的结果集。
+    """有问题（或含指定问题类型）的文件集合——直接吃 problems(action="list") 的结果集。
 
-    problem_type 为空 = 只要有问题的文件；给了则按类型过滤（口径同 list_problems：
+    problem_type 为空 = 只要有问题的文件；给了则按类型过滤（口径同 problems(action="list")：
     英文逗号分隔、取「类型：详情」的类型前缀做子串匹配）。
     """
     pid = runner._project_id()
@@ -640,7 +668,7 @@ def _lock_to_filenames(
 ) -> Callable[[AgentRunner, dict[str, Any]], Any]:
     """把工具引用的文件名限制在 allowed 里：范围外一律拒绝，并说清这是本次派活的锁定范围。
 
-    引用的文件不只有顶层 filename：patch_transl_cache 支持每条 patch 自带 file（跨文件批量，
+    引用的文件不只有顶层 filename：edit_transl_cache 支持每条 patch 自带 file（跨文件批量，
     见 _group_cache_patches_by_file），那也得逐条查——否则子代理靠 patches[].file 就绕过了锁定。
     """
 
@@ -705,7 +733,7 @@ def _lock_cache_reader(allowed: tuple[str, ...]) -> Callable[[AgentRunner, dict[
 def _lock_input_listing(
     allowed: tuple[str, ...],
 ) -> Callable[[AgentRunner, dict[str, Any]], Any]:
-    """list_input_files 在锁定模式下只列自己负责的那几份原文；一个都对不上就照实说。"""
+    """input(action="list") 在锁定模式下只列自己负责的那几份原文；一个都对不上就照实说。"""
 
     def wrapped(runner: AgentRunner, args: dict[str, Any]) -> Any:
         # 过滤交给 _list_input_payload 的 names（**先过滤再采样**）：自己过滤采样后的结果，
@@ -754,10 +782,10 @@ def _subagent_handlers(
 ) -> dict[str, Callable[[AgentRunner, dict[str, Any]], Any]]:
     """某个角色可用的 handler（按它的白名单从主 Agent 那张表里取）。
 
-    - patch_transl_cache 只接受 dst / proofread_comment；显式读取、范围、旧值和停止检查由工具执行；
+    - edit_transl_cache 只接受 dst / proofread_comment；显式读取、范围、旧值和停止检查由工具执行；
     - **锁定文件**（locked_files 非空，来自任务里的 file；自动均分时是一组）：read_transl_cache 的
-      read、patch_transl_cache / read_input_file 的 filename 被限制在这一组里，read_transl_cache 的
-      list 与 list_input_files 也只列这些，list_problems 也只列这些文件的问题——"一份文件只归一个子代理"由工具层保证，模型串到
+      read、edit_transl_cache / input(action="read") 的 filename 被限制在这一组里，read_transl_cache 的
+      list 与 input(action="list") 也只列这些，problems(action="list") 也只列这些文件的问题——"一份文件只归一个子代理"由工具层保证，模型串到
       范围外会被拒（省 token，也避免两个子代理写同一条）。要核对"这个词在别处怎么翻的"，仍走
       跨文件的 read_transl_cache(action="search")；
     - 派发门禁统一授权本次范围内的修复，批内不再逐条询问。配置、字典等全局写工具不开放。
@@ -1398,24 +1426,26 @@ class SubAgentRunner:
             "subagent_tool_call",
             {"tool_call_id": call_id, "name": name, "arguments": _sanitize_tool_args(args)},
         )
-        handler = handlers.get(name)
+        operation = name
         started = time.time()
         ok = True
         result: Any = None
         try:
             if self.stop_event.is_set():
                 raise AgentStopRequested()
+            operation = tool_operation(name, args)
+            handler = handlers.get(operation)
             if handler is None:
                 raise AgentToolError(
-                    f"子代理没有这个工具：{name}（只能用 {'、'.join(self.role.tools)}）"
+                    f"子代理没有这个工具或动作的权限：{name}"
                 )
             result = handler(self.parent, args)
-            if name == "patch_transl_cache" and isinstance(result, dict) and not result.get("updated"):
+            if operation == "patch_transl_cache" and isinstance(result, dict) and not result.get("updated"):
                 failures = [str(row["error"]) for row in result.get("files", []) if row.get("error")]
                 if failures:
                     raise AgentToolError("；".join(failures))
             # 子代理读缓存是大头（校对一批 16 个、每个几十条）：同样走 Markdown 渲染
-            rendered = _render_tool_result_table(name, result)
+            rendered = _render_tool_result_table(operation, result)
             payload = rendered if rendered is not None else _tool_result_json(result)
             # UI 预览仍用原格式；节省的是随模型历史重复发送的结构空白。
             preview = rendered if rendered is not None else json.dumps(result, ensure_ascii=False)
@@ -1424,7 +1454,7 @@ class SubAgentRunner:
         except Exception as exc:  # noqa: BLE001
             payload, ok = f"{type(exc).__name__}: {exc}", False
         duration_ms = int((time.time() - started) * 1000)
-        if name == "patch_transl_cache" and isinstance(result, dict):
+        if operation == "patch_transl_cache" and isinstance(result, dict):
             if ok:
                 self._remember_proofread_comments(result, str(args.get("filename", "") or ""))
             for row in result.get("files", []):
@@ -1441,7 +1471,7 @@ class SubAgentRunner:
                 "tool_call_id": call_id,
                 "name": name,
                 "ok": ok,
-                "result": result if ok and self.fixer and name == "patch_transl_cache" else preview[:400] if ok else None,
+                "result": result if ok and self.fixer and operation == "patch_transl_cache" else preview[:400] if ok else None,
                 "error": None if ok else payload[:400],
                 "duration_ms": duration_ms,
             },
@@ -1457,7 +1487,7 @@ class SubAgentRunner:
         }
 
     def _remember_proofread_comments(self, result: Any, filename: str) -> None:
-        """从 patch_transl_cache 的变更里挑出 proofread_comment 那几条，记进报告用的小结。
+        """从 edit_transl_cache 的变更里挑出 proofread_comment 那几条，记进报告用的小结。
 
         认的是返回的 changes 而不是模型传的参数：它到底写了什么、写没写成功，以工具的返回为准。
         文件取变更行上的 file（一次调用可以跨文件，见 _patch_one_cache_file），取不到才退回
@@ -1510,12 +1540,12 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
     三个维度互相独立（正交），任意组合：
     - **选谁（file）**：选择器 → 有序文件清单。具体文件名 / "*"（全部，自动均分）/
       "list:a.json,b.json" / "glob:SW_01_*" / "regex:^0[12]_" / "select:has_problem" /
-      "select:problem_type=残留日文"（吃 list_problems 的结果集）/ "random:N"（随机 N 个）。
+      "select:problem_type=残留日文"（吃 problems(action="list") 的结果集）/ "random:N"（随机 N 个）。
     - **切几份（count）**：对任何选择器都生效——文件够就按文件均分；文件不够就把大文件按
       index 切成 count 段（一个大文件切给 N 个代理并行）。
     - **取哪段（indexes）**：单文件 + count>1 时在区间内再切段；多文件 + indexes 判为歧义。
     文件与 index 共同构成写入范围；重叠任务在派发前拒绝，同文件不同区间通过文件锁串行提交。
-    原文探索的 file 可以留空（自己按 list_input_files 挑）：它只读、不写文件。
+    原文探索的 file 可以留空（自己按 input(action="list") 挑）：它只读、不写文件。
     """
     stop_event = runner.stop_event
     tasks_raw = args.get("tasks")
@@ -1596,7 +1626,7 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
         if not task["files"]:
             raise AgentToolError(
                 f"第 {task['index']} 个任务的 file 选择器（{spec}）一个文件都没选中："
-                "先用 read_transl_cache（action=list）/ list_problems 看看有哪些文件。"
+                '先用 read_transl_cache(action="list") / problems(action="list") 看看有哪些文件。'
             )
         named.setdefault(task["agent"], set()).update(task["files"])
 
@@ -1818,10 +1848,7 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
     note = "原文探索结果见各任务报告；字典与规范建议由主 Agent 汇总。"
     if any(task["agent"] == SUBAGENT_AGENT_PROOFREAD for task in tasks):
         note = (
-            "校对子代理直接修复译文，实际提交以修改数为准，无需按成功改句逐条重做。优先处理 needs_review，"
-            "用 read_proofread_changes(task_id=change_task_id, view='review') 分页查看需二次审查的译文。"
-            "完整修改记录用 read_proofread_changes(task_id=change_task_id) 分页查看，"
-            "必要时用 revert_proofread_changes 撤销。读取数不等于校对完成数；中止或轮数到限时请检查未完成范围。"
+            '校对子代理直接修复译文，实际提交以修改数为准，无需按成功改句逐条重做。优先处理 needs_review，用 subagents(action="changes", task_id=change_task_id, view=\'review\') 分页查看需二次审查的译文。完整修改记录用 subagents(action="changes", task_id=change_task_id) 分页查看，必要时用 subagents(action="revert") 撤销。读取数不等于校对完成数；中止或轮数到限时请检查未完成范围。'
         )
     if split_notes:
         note = " ".join(split_notes) + " " + note

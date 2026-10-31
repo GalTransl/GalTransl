@@ -355,13 +355,13 @@ class ListSchemaTests(unittest.TestCase):
     """schema 里得真有这些入参，否则模型不会传。"""
 
     def test_both_list_tools_advertise_grep_limit_order(self):
-        for name in ("read_transl_cache", "list_input_files"):
+        for name in ("read_transl_cache", "input"):
             schema = next(t for t in rt.AGENT_TOOLS if t["function"]["name"] == name)
             props = schema["function"]["parameters"]["properties"]
             # read_transl_cache 还管 read/search，入参更多；清单这三个必须都在
             self.assertTrue({"grep", "limit", "order"} <= set(props), name)
             expected_orders = ["even", "name", "random", "size_desc", "size_asc"]
-            if name == "read_transl_cache":
+            if name in ("read_transl_cache", "input"):
                 # 统一入口还需声明 read/search 支持的倒序，list_input_files 不支持它。
                 expected_orders.append("reverse")
             self.assertCountEqual(props["order"]["enum"], expected_orders, name)

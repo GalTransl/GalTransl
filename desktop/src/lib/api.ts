@@ -414,6 +414,8 @@ export type PluginInfo = {
 
 export type AppSettings = {
   printTranslationLogInTerminal: boolean;
+  billionContextEnabled?: boolean;
+  extractionBillionContextEnabled?: boolean;
 };
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -714,21 +716,6 @@ export function fetchCacheDictionaryMatches(
       body: JSON.stringify({ entries, config_file_name: configFileName, details: options.details ?? false, offset: options.offset ?? 0 }),
     },
   );
-}
-
-export interface InputReextractResult {
-  refreshed: { filename: string; entries: number }[];
-  errors: { filename: string; error: string }[];
-  skipped: number;
-  total_entries: number;
-}
-
-export async function reextractMsgtoolInput(projectId: string, configFileName: string) {
-  return apiRequest<InputReextractResult>(`/api/projects/${projectId}/plugins/file_msgtool_script/reextract`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ config_file_name: configFileName }),
-  });
 }
 
 export async function deleteCacheEntry(projectId: string, filename: string, index: number) {
@@ -1166,7 +1153,7 @@ export function getPromptTemplateOverridesForJob(translator: string): Record<str
   return { [translator]: override };
 }
 
-export async function updateAppSettings(settings: AppSettings) {
+export async function updateAppSettings(settings: Partial<AppSettings>) {
   return apiRequest<AppSettings>('/api/app-settings', {
     method: 'PUT',
     headers: {

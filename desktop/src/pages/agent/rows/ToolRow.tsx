@@ -5,7 +5,7 @@ import { Icon } from '../../../components/Icon';
 import { Markdown } from '../../../components/Markdown';
 import { SubagentList } from './SubagentList';
 import type { ActivityItem } from '../timeline';
-import { asArgs, formatCountdown, formatDuration, formatPayload, str, toolMeta } from '../toolMeta';
+import { toolOperation, asArgs, formatCountdown, formatDuration, formatPayload, str, toolMeta } from '../toolMeta';
 import { manualOpenState } from '../uiState';
 import { ImageAttachments, type ImageScope } from '../images';
 
@@ -97,7 +97,7 @@ export const ToolRow = memo(function ToolRow({
     if (!manualOpenState.has(stateKey)) setOpenRaw(true);
   }, [autoOpen, stateKey]);
 
-  const meta = toolMeta(item.name);
+  const meta = toolMeta(item.name, asArgs(item.arguments));
   const summary = meta.summary(asArgs(item.arguments), item.result);
 
   // 把原始参数/结果收进折叠菜单：写入调用要看的通常是 diff，JSON 参数与整份结果只是证据；
@@ -106,7 +106,7 @@ export const ToolRow = memo(function ToolRow({
   const foldRaw = ok && (hasSubagents || (Boolean(changeList) && !pending));
 
   // wait 行：等待期间显示倒计时（只出秒数，不画进度条）。
-  const isWait = item.name === 'wait';
+  const isWait = toolOperation(item.name, asArgs(item.arguments)) === 'wait';
   const waiting = isWait && pending && typeof item.waitTotalMs === 'number';
   const waitTotal = item.waitTotalMs || 0;
   const waitRemaining = item.waitRemainingMs ?? waitTotal;
@@ -158,7 +158,7 @@ export const ToolRow = memo(function ToolRow({
       >
         <span className="agent-tool__icon"><Icon name={meta.icon} /></span>
         <span className={`agent-tool__name${state.tone === 'running' ? ' is-running' : ''}`}>{meta.action}</span>
-        {summary ? <span className="agent-tool__summary">{summary}</span> : null}
+        {summary ? <span className="agent-tool__summary" title={summary}>{summary}</span> : null}
         {changeList ? <span className="agent-tool__diffbadge">±{changeList.total}</span> : null}
         <span className={`agent-tool__state${state.tone ? ` is-${state.tone}` : ''}${state.countdown ? ' is-countdown' : ''}`}>
           <span className="agent-tool__state-dot" />

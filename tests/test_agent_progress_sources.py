@@ -26,7 +26,7 @@ from GalTransl.Agent.runtime import (
 
 def _runtime_tool_description() -> str:
     for tool in AGENT_TOOLS:
-        if tool["function"]["name"] == "get_runtime":
+        if tool["function"]["name"] == "translation":
             return str(tool["function"]["description"])
     raise AssertionError("get_runtime 不在工具表里")
 
@@ -72,7 +72,7 @@ class ProgressSourceMergeTests(unittest.TestCase):
         self.assertNotIn("get_progress", names)
         self.assertNotIn("get_progress", _TOOL_HANDLERS)
         # 进度统一从「了解项目」拿（include 里点 progress 即可）
-        self.assertIn("get_project_overview", names)
+        self.assertIn("get_project", names)
 
     def test_overview_is_the_progress_source(self) -> None:
         out = _tool_get_project_overview(_Runner(), {"include": ["progress"]})
@@ -87,7 +87,7 @@ class ProgressScaleNotesTests(unittest.TestCase):
         out = _tool_get_project_overview(_Runner(), {"include": ["progress"]})
         note = out["progress"]["note"]
         self.assertIn("已落盘", note)  # 说明自己是哪套口径
-        self.assertIn("get_runtime", note)  # 另一套去哪看
+        self.assertIn('translation(action="status")', note)  # 另一套去哪看
         self.assertIn("两个分母不同", note)
 
     def test_runtime_scale_explained_in_tool_description(self) -> None:
@@ -97,7 +97,7 @@ class ProgressScaleNotesTests(unittest.TestCase):
 
         description = _runtime_tool_description()
         self.assertIn("本轮任务", description)
-        self.assertIn("get_project_overview", description)
+        self.assertIn("get_project", description)
         self.assertIn("不要为了对齐", description)
 
     def test_both_scales_are_reported_without_reconciling(self) -> None:

@@ -137,7 +137,7 @@ class SaveDictCreateTests(unittest.TestCase):
     def test_category_creates_then_writes(self):
         runner = _DictRunner(dict(EXISTING))
         result = _tool_save_dict(
-            runner, {"file_key": "新字典.txt", "category": "gpt", "content": "b\tB", "action": "patch"}
+            runner, {"file_key": "新字典.txt", "category": "gpt", "content": "b\tB", "action": "set"}
         )
         paths = [p for p, _ in runner.posts]
         self.assertTrue(paths[0].endswith("/dictionary/project/create"))
@@ -150,7 +150,7 @@ class SaveDictCreateTests(unittest.TestCase):
 
     def test_empty_content_just_creates_the_file(self):
         runner = _DictRunner(dict(EXISTING))
-        result = _tool_save_dict(runner, {"file_key": "空字典.txt", "category": "pre", "content": ""})
+        result = _tool_save_dict(runner, {"action": "set", "file_key": "空字典.txt", "category": "pre", "content": ""})
         self.assertEqual(len(runner.posts), 1)  # 只建文件，不写
         self.assertTrue(result["created"])
         self.assertIn("译前", result["note"])
@@ -159,25 +159,25 @@ class SaveDictCreateTests(unittest.TestCase):
         runner = _DictRunner(dict(EXISTING))
         _tool_save_dict(
             runner,
-            {"file_key": "(project_dir)项目GPT字典.txt", "category": "post", "content": "b\tB", "action": "patch"},
+            {"file_key": "(project_dir)项目GPT字典.txt", "category": "post", "content": "b\tB", "action": "set"},
         )
         self.assertEqual([p.rsplit("/", 1)[-1] for p, _ in runner.posts], ["save"])
 
     def test_missing_file_without_category_is_an_error(self):
         runner = _DictRunner(dict(EXISTING))
         with self.assertRaisesRegex(AgentToolError, "category"):
-            _tool_save_dict(runner, {"file_key": "不存在.txt", "content": "b\tB"})
+            _tool_save_dict(runner, {"action": "set", "file_key": "不存在.txt", "content": "b\tB"})
         self.assertEqual(runner.posts, [])
 
     def test_delete_cannot_create(self):
         runner = _DictRunner(dict(EXISTING))
-        with self.assertRaisesRegex(AgentToolError, "overwrite 或 patch"):
+        with self.assertRaisesRegex(AgentToolError, "overwrite 或 set"):
             _tool_save_dict(runner, {"file_key": "新.txt", "category": "gpt", "content": "a", "action": "delete"})
         self.assertEqual(runner.posts, [])
 
     def test_preview_marks_creation(self):
         runner = _DictRunner(dict(EXISTING))
-        preview = _preview_dict_write(runner, {"file_key": "新.txt", "category": "gpt", "content": "b\tB"})
+        preview = _preview_dict_write(runner, {"action": "set", "file_key": "新.txt", "category": "gpt", "content": "b\tB"})
         self.assertEqual(preview["create"], {"category": "gpt"})
         self.assertEqual(preview["file_key"], "(project_dir)新.txt")
         self.assertIn("line_diff", preview)

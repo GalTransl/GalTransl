@@ -3,8 +3,10 @@ import '../styles/pages/extraction.css';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../components/Icon';
+import { AgentSettingsButton } from '../components/AgentSettings';
 import { useUiLanguage } from '../i18n';
 import { addOpenProject, encodeProjectDir, getBackendProfile } from '../lib/api';
+import { basenamePath } from '../lib/paths';
 import { addProjectToHistory } from './HomePage';
 import { Conversation, PendingRequest } from './extraction/Conversation';
 import { CreateDialog, EnvironmentDialog } from './extraction/Dialogs';
@@ -18,6 +20,7 @@ import { useImageInput, imageUploads } from './agent/images';
 import { useModelProfile } from './extraction/useModelProfile';
 import { gameFolderKey, SessionFolders } from './extraction/SessionFolders';
 import { StatusPill } from './agent/composer';
+import { MessageQueue } from './agent/MessageQueue';
 
 const DRAFT_SCOPE = 'galtransl-extraction';
 
@@ -26,6 +29,8 @@ export function ExtractionPage() {
   const agent = useExtraction();
   const navigate = useNavigate();
   const [mode, setMode] = useState('auto');
+  const [editingQueued, setEditingQueued] = useState<{ id: string; text: string } | null>(null);
+  useEffect(() => setEditingQueued(null), [agent.selected]);
   const [dialog, setDialog] = useState<'create' | 'environment' | null>(null);
   const [draft, setDraft] = useMessageDraft(DRAFT_SCOPE, agent.selected);
   const [showWorkspace, setShowWorkspace] = useState(() => window.innerWidth >= 1440);
@@ -79,7 +84,7 @@ export function ExtractionPage() {
   const send = async () => {
     const message = draft.trim();
     const sentImages = imageInput.images;
-    if ((!message && !sentImages.length) || imageInput.processing || running || agent.busy || !profile || !agent.environment?.ready) return;
+    if ((!message && !sentImages.length) || imageInput.processing || agent.busy || !profile || !agent.environment?.ready) return;
     if (!session) { setDialog('create'); return; }
     const result = await agent.mutate('message', { message, images: imageUploads(sentImages), profile: getBackendProfile(profile), profile_name: boundProfile, permission_mode: mode });
     if (result) {
@@ -109,14 +114,15 @@ export function ExtractionPage() {
         onCloseFolder={directory => void closeFolder(directory)} runningDirectories={agent.sessions.running_game_dirs} busy={agent.busy} />
       {!agent.sessions.total && <div className="agent-sessions__empty">{x('emptySessions')}</div>}
       {agent.sessions.next_offset != null && <button type="button" className="agent-sessions__show-more" onClick={() => void agent.refreshSessions(agent.sessions.next_offset!).catch(e => agent.setError(String(e)))}>{x('more')}</button>}</nav>
-      <button type="button" className="extract-environment" onClick={() => { if (agent.environment) setDialog('environment'); else void agent.refreshEnvironment().then(() => setDialog('environment')).catch(e => agent.setError(String(e))); }}><Icon name="settings" /><span>{x(agent.environment?.ready ? 'ready' : 'setup')}</span><i className={agent.environment?.ready ? 'is-ready' : ''} /></button>
+      <AgentSettingsButton ready={agent.environment?.ready ?? false} label={x(agent.environment?.ready ? 'ready' : 'setup')}
+        onClick={() => setDialog('environment')} />
     </aside>
     <div className="extract-content">
       <header className="agent-console__bar">
         <div className="agent-console__bar-left">
           <span className="agent-console__avatar" aria-hidden><Icon name="agent-extract" /></span>
           <div className="agent-console__bar-copy"><div className="agent-console__bar-title"><span className="agent-console__bar-name">{x('title')}</span></div>
-            <div className="agent-console__project-static">{session ? <><span className="agent-console__project-name">{session.title}</span><span className="agent-console__project-path" title={session.game_dir}>{session.game_dir}</span></> : <span className="agent-console__project-empty">{x('subtitle')}</span>}</div>
+            <div className="agent-console__project-static">{session ? <><span className="agent-console__project-name">{basenamePath(session.game_dir) || session.game_dir}</span><span className="agent-console__project-path" title={session.game_dir}>{session.game_dir}</span></> : <span className="agent-console__project-empty">{x('subtitle')}</span>}</div>
           </div>
         </div>
         <div className="agent-console__bar-right">
@@ -132,16 +138,21 @@ export function ExtractionPage() {
         <div className="agent-hero__project-panel">{session ? <div className="extract-welcome-source" title={session.game_dir}><Icon name="folder" />{session.game_dir}</div>
           : <><span className="agent-hero__open-projects-label">{x('chooseSource')}</span><div className="agent-hero__actions"><button type="button" className="agent-hero__action" disabled={agent.busy} onClick={() => setDialog('create')}><Icon name="folder" />{x('newSession')}</button></div></>}
         </div>
-      </div></div></div> : <Conversation rows={agent.view.rows} motionEvents={agent.view.motionEvents} sessionId={session.id} running={running} status={session.status} pending={agent.view.pending} older={agent.view.has_more} loadOlder={() => void agent.loadOlder()} />}
+      </div></div></div> : <Conversation rows={agent.view.rows} motionEvents={agent.view.motionEvents} sessionId={session.id} running={running} status={session.status} pending={agent.view.pending} older={agent.view.has_more} beforeSeq={agent.view.before_seq} loadingOlder={agent.loadingOlder} activityPrefix={agent.view.activity_prefix} loadOlder={agent.loadOlder} />}
       <div className="agent-console__composer extract-bottom">
         {agent.error && <div className="agent-notice agent-notice--error extract-inline-error" role="alert"><Icon name="warning" /><span>{agent.error}</span><button type="button" className="extract-text-button" onClick={agent.reload}>{x('reload')}</button></div>}
         {agent.view?.pending && <PendingRequest key={agent.view.pending.requestId} pending={agent.view.pending} busy={agent.busy} answer={body => { void agent.mutate('answer', body); }} />}
+        <MessageQueue queued={agent.view?.queued || []} editing={editingQueued} onEditingChange={setEditingQueued} busy={agent.busy}
+          scope={{ sessionId: agent.selected, extraction: true }}
+          onSave={() => { if (editingQueued) void agent.mutate('queue-update', { item_id: editingQueued.id, text: editingQueued.text }).then(result => { if (result) setEditingQueued(null); }); }}
+          onDelete={id => { void agent.mutate('queue-delete', { item_id: id }).then(result => { if (result && editingQueued?.id === id) setEditingQueued(null); }); }}
+          onSend={id => { void agent.mutate('queue-send', { item_id: id, profile: getBackendProfile(profile), profile_name: boundProfile, permission_mode: mode }).then(result => { if (result) setEditingQueued(null); }); }} />
         <ExtractionComposer draft={draft} setDraft={setDraft} textarea={textarea} session={session} running={running} busy={agent.busy} ready={Boolean(agent.environment?.ready)}
-          imageInput={imageInput}
+          imageInput={imageInput} hasQueue={Boolean(agent.view?.queued?.length)}
           profile={profile} profileSelection={boundProfile} defaultProfile={defaultProfile} setProfile={setProfile} models={modelNames} mode={mode} setMode={changeMode} context={agent.view?.contextUsage} compacting={agent.view?.compacting}
           send={() => void send()} stop={() => { void agent.mutate('stop', {}); }} chooseSource={() => setDialog('create')} configure={() => navigate('/backend-profiles')} />
         {!modelNames.length && <div className="extract-hint">{x('noModel')} <button type="button" className="extract-text-button" onClick={() => navigate('/backend-profiles')}>{x('configureModel')}</button></div>}
-        {session && !agent.environment?.ready && <div className="extract-hint"><button type="button" className="extract-text-button" onClick={() => { if (agent.environment) setDialog('environment'); }}>{x('setup')}</button></div>}
+        {session && !agent.environment?.ready && <div className="extract-hint"><button type="button" className="extract-text-button" onClick={() => setDialog('environment')}>{x('setup')}</button></div>}
       </div>
     </main>
       {session && <div id="extraction-workspace" className="extract-workspace-shell" aria-hidden={!showWorkspace} {...(!showWorkspace ? { inert: '' } : {})}>
@@ -149,6 +160,6 @@ export function ExtractionPage() {
       </div>}
     </div>
     {dialog === 'create' && <CreateDialog close={() => setDialog(null)} create={create} busy={agent.busy} />}
-    {dialog === 'environment' && agent.environment && <EnvironmentDialog initial={agent.environment} close={() => setDialog(null)} saved={agent.setEnvironment} />}
+    {dialog === 'environment' && <EnvironmentDialog initial={agent.environment} refresh={agent.refreshEnvironment} close={() => setDialog(null)} saved={agent.setEnvironment} />}
   </div>;
 }

@@ -14,9 +14,11 @@ import re
 import unittest
 
 from GalTransl.Agent.runtime import AGENT_TOOLS
+from GalTransl.Agent.billion_context import BillionContextSession
+from GalTransl.Agent.handlers import _TOOL_HANDLERS
 from GalTransl.Extraction.tool_schemas import EXTRACTION_TOOLS
 
-ALL_TOOLS = [*AGENT_TOOLS, *EXTRACTION_TOOLS]
+ALL_TOOLS = [*AGENT_TOOLS, *EXTRACTION_TOOLS, *BillionContextSession.tools]
 
 _PAGE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -56,10 +58,15 @@ class ToolMetaLabelTests(unittest.TestCase):
 
     def test_every_backend_tool_has_a_frontend_entry(self) -> None:
         have = {name for name, _ in _entries()}
+        with open(_PAGE, encoding="utf-8") as handle:
+            operations = handle.read().split("export const TOOL_OPERATIONS", 1)[1].split("\n};", 1)[0]
+        groups = dict(re.findall(r"^  (\w+): \{([^\n]+)\}", operations, re.M))
+        for name, body in groups.items():
+            self.assertTrue(set(re.findall(r": '([^']+)'", body)) <= have, name)
         missing = [
             tool["function"]["name"]
             for tool in ALL_TOOLS
-            if tool["function"]["name"] not in have
+            if tool["function"]["name"] not in have | groups.keys()
         ]
         self.assertEqual(
             missing,
@@ -69,7 +76,7 @@ class ToolMetaLabelTests(unittest.TestCase):
 
     def test_no_stale_frontend_entries(self) -> None:
         """反向也不能漂：留着后端已经删掉的工具，标签迟早张冠李戴（get_progress 就是这么赖着的）。"""
-        names = {tool["function"]["name"] for tool in ALL_TOOLS}
+        names = set(_TOOL_HANDLERS) | {tool["function"]["name"] for tool in ALL_TOOLS}
         stale = sorted(name for name, _ in _entries() if name not in names)
         self.assertEqual(stale, [], f"这些条目在后端已经没有对应工具：{stale}")
 

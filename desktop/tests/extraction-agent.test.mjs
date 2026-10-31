@@ -23,6 +23,147 @@ test('native bash snapshots replace live output and image results retain attachm
 function snapshot(id, extra = {}) {
   return { session: { id, title: id, status: 'idle', seq: 0 }, events: [], live_events: [], cursor: 0, pending: null, has_more: false, before_seq: null, ...extra };
 }
+
+test('stream reconnects visibly with shared exponential delays, resumes from snapshots and clears feedback', async () => {
+  let state, failSnapshot = false;
+  const streams = [], timers = new Map(), delays = [];
+  let nextTimer = 0;
+  class Source { constructor(url) { this.url = url; streams.push(this); } close() { this.closed = true; } }
+  const load = createTypeScriptLoader({ EventSource: Source,
+    localStorage: { getItem: () => 'reconnect', setItem() {} },
+    setTimeout: (callback, delay) => { timers.set(++nextTimer, { callback, delay }); return nextTimer; },
+    clearTimeout: id => timers.delete(id),
+  }, {
+    '../../components/PageActivity': { usePageActive: () => true, useRetainPage() {} },
+    './api': { extractionUrl: (action, params) => `${action}?after=${params.after}`, extractionApi: async action => {
+      if (action === 'environment') return { ready: true };
+      if (action === 'sessions') return { sessions: [], total: 0, next_offset: null };
+      if (failSnapshot) throw Error('Synthetic server unavailable');
+      return snapshot('reconnect', { session: { id: 'reconnect', status: 'running' }, cursor: 42 });
+    } },
+  });
+  const { useExtraction } = load(source('useExtraction.ts'));
+  function Probe() { state = useExtraction(); return null; }
+  let renderer;
+  await act(async () => { renderer = create(h(Probe)); });
+  for (const [attempt, delay] of [1000, 2000, 4000, 8000, 10000].entries()) {
+    if (!failSnapshot) await act(async () => streams.at(-1).onerror());
+    assert.match(state.error, new RegExp(`${attempt + 1}/5`));
+    const [id, timer] = [...timers.entries()].filter(([, timer]) => timer.delay === delay).at(-1);
+    delays.push(timer.delay); timers.delete(id);
+    if (attempt === 1) failSnapshot = true;
+    if (attempt === 3) failSnapshot = false;
+    await act(async () => timer.callback());
+  }
+  assert.equal(delays.join(','), '1000,2000,4000,8000,10000');
+  assert.match(streams.at(-1).url, /after=42/);
+  await act(async () => streams.at(-1).onmessage({ data: JSON.stringify({ type: 'queue', seq: 43, queued: [{ id: 'q', text: 'next' }] }) }));
+  assert.equal(state.error, '');
+  const [id, timer] = [...timers.entries()].find(([, timer]) => timer.delay === 80);
+  timers.delete(id); await act(async () => timer.callback());
+  assert.equal(state.view.queued[0].text, 'next');
+  assert.equal(state.view.cursor, 43);
+  await act(async () => streams.at(-1).onerror());
+  assert.match(state.error, /1\/5/);
+  const count = streams.length;
+  await act(async () => renderer.unmount());
+  assert.equal(timers.size, 0);
+  assert.equal(streams.length, count);
+  assert.equal(streams.at(-1).closed, true);
+});
+
+test('background extraction keeps receiving pending requests and routes attention notifications once per request', async () => {
+  let state, active = true, currentSnapshot = snapshot('background', { session: { id: 'background', status: 'running' } });
+  const streams = [], notifications = [];
+  class Source { constructor() { streams.push(this); } close() { this.closed = true; } }
+  const load = createTypeScriptLoader({ EventSource: Source, localStorage: { getItem: () => 'background', setItem() {} } }, {
+    '../../components/PageActivity': { usePageActive: () => active, useRetainPage() {} },
+    '../../lib/desktopNotify': { notifyNeedsAttention: (...args) => notifications.push(args) },
+    './api': { extractionUrl: () => 'background-stream', extractionApi: async action => {
+      if (action === 'environment') return { ready: true };
+      if (action === 'sessions') return { sessions: [], total: 0, next_offset: null };
+      return currentSnapshot;
+    } },
+  });
+  const { useExtraction } = load(source('useExtraction.ts'));
+  function Probe() { state = useExtraction(); return null; }
+  let renderer;
+  await act(async () => { renderer = create(h(Probe)); });
+  await act(async () => { active = false; renderer.update(h(Probe)); });
+  assert.equal(streams.length, 2);
+  const ask = { type: 'ask_request', seq: 1, requestId: 'ask-1', questions: [{ question: 'Which format?', options: ['A', 'B'] }] };
+  await act(async () => { streams.at(-1).onmessage({ data: JSON.stringify(ask) }); await wait(100); });
+  assert.equal(state.view.pending.requestId, 'ask-1');
+  assert.equal(notifications.length, 1);
+  assert.match(notifications[0][2], /Which format/);
+  currentSnapshot = { ...currentSnapshot, pending: ask };
+  await act(async () => state.reload());
+  assert.equal(notifications.length, 1);
+  const permission = { type: 'permission_request', seq: 2, requestId: 'perm-1', toolName: 'bash', arguments: { command: 'pwd' } };
+  await act(async () => { streams.at(-1).onmessage({ data: JSON.stringify(permission) }); await wait(100); });
+  assert.equal(notifications.length, 2);
+  assert.match(notifications[1][0], /extraction:background:perm-1/);
+  assert.match(notifications[1][1], /批准/);
+  await act(async () => renderer.unmount());
+});
+
+test('snapshot failures exhaust five reconnects and manual reload starts a fresh attempt', async () => {
+  let state, fail = true, calls = 0;
+  const timers = new Map();
+  let next = 0;
+  const load = createTypeScriptLoader({ localStorage: { getItem: () => 'failed', setItem() {} },
+    setTimeout: callback => { timers.set(++next, callback); return next; }, clearTimeout: id => timers.delete(id),
+  }, {
+    '../../components/PageActivity': { usePageActive: () => true, useRetainPage() {} },
+    './api': { extractionApi: async action => {
+      if (action === 'environment') return { ready: true };
+      if (action === 'sessions') return { sessions: [], total: 0, next_offset: null };
+      calls += 1;
+      if (fail) throw Error('Synthetic server unavailable');
+      return snapshot('failed');
+    } },
+  });
+  const { useExtraction } = load(source('useExtraction.ts'));
+  function Probe() { state = useExtraction(); return null; }
+  let renderer;
+  await act(async () => { renderer = create(h(Probe)); });
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    assert.match(state.error, new RegExp(`${attempt}/5`));
+    assert.equal(timers.size, 1);
+    const [id, callback] = [...timers.entries()][0];
+    timers.delete(id); await act(async () => callback());
+  }
+  assert.equal(calls, 6);
+  assert.equal(timers.size, 0);
+  assert.match(state.error, /事件流中断/);
+  fail = false;
+  await act(async () => state.reload());
+  assert.equal(calls, 7);
+  assert.equal(state.error, '');
+  await act(async () => renderer.unmount());
+});
+
+test('live snapshots place segment completion after accumulated text and retain stream durations', async () => {
+  let state;
+  const load = createTypeScriptLoader({ EventSource: class { close() {} }, localStorage: { getItem: () => 'segments', setItem() {} } }, {
+    '../../components/PageActivity': { usePageActive: () => true, useRetainPage() {} },
+    './api': { extractionUrl: () => 'segments', extractionApi: async action => {
+      if (action === 'environment') return { ready: true };
+      if (action === 'sessions') return { sessions: [], total: 0, next_offset: null };
+      return snapshot('segments', { session: { id: 'segments', status: 'running' },
+        events: [{ type: 'content_end', seq: 3, messageId: 'a', duration_ms: 2000 }],
+        live_events: [{ type: 'assistant_delta', seq: 2, messageId: 'a', text: 'Completed text' }] });
+    } },
+  });
+  const { useExtraction } = load(source('useExtraction.ts'));
+  function Probe() { state = useExtraction(); return null; }
+  let renderer;
+  await act(async () => { renderer = create(h(Probe)); });
+  assert.equal(state.view.rows[0].text, 'Completed text');
+  assert.equal(state.view.rows[0].contentDone, true);
+  assert.equal(state.view.rows[0].durationMs, 2000);
+  await act(async () => renderer.unmount());
+});
 test('streaming text reconciles with authoritative final messages; reasoning and tools retain their own rows', () => {
   const { reduceEvents } = createTypeScriptLoader()(source('transcript.ts'));
   const initial = reduceEvents([], [
@@ -43,7 +184,7 @@ test('streaming text reconciles with authoritative final messages; reasoning and
   assert.equal(final[2].error, true);
   assert.equal(initial[1].text, 'partial');
   assert.equal(final[0], initial[0]);
-  assert.equal(reduceEvents([], Array.from({ length: 1500 }, (_, seq) => ({ type: 'user_message', seq, text: 'x' }))).length, 1000);
+  assert.equal(reduceEvents([], Array.from({ length: 1500 }, (_, seq) => ({ type: 'user_message', seq, text: 'x' }))).length, 1500);
 });
 
 test('late snapshots cannot cross sessions; hiding the page closes only the UI stream and restores live text', async () => {
@@ -140,6 +281,61 @@ test('live permission changes reach the backend, persist through snapshots and r
     await wait(100);
   });
   assert.equal(state.view.session.permission_mode, 'ask');
+  await act(async () => renderer.unmount());
+});
+
+test('history requests are serialized, keep live results and survive a fresh snapshot', async () => {
+  let state, stream, resolveOlder;
+  const calls = [];
+  const recent = snapshot('history', { session: { id: 'history', status: 'running' }, cursor: 5,
+    events: [{ type: 'tool_end', seq: 5, toolCallId: 'tool', text: 'complete' }], has_more: true, before_seq: 5,
+    activity_prefix: { anchor: 'user-1', item_keys: ['tool:tool'] } });
+  const older = snapshot('history', { events: [
+    { type: 'user_message', seq: 1, text: 'Extract' },
+    { type: 'thinking_message', seq: 2, messageId: 'intro', text: 'Plan' },
+    { type: 'assistant_message', seq: 3, messageId: 'intro', text: 'Inspecting', stopReason: 'toolUse' },
+    { type: 'tool_start', seq: 4, toolCallId: 'tool', toolName: 'bash', arguments: { command: 'synthetic' } },
+  ] });
+  class Source { constructor() { stream = this; } close() {} }
+  const load = createTypeScriptLoader({ EventSource: Source, localStorage: { getItem: () => 'history', setItem() {} } }, {
+    '../../components/PageActivity': { usePageActive: () => true, useRetainPage() {} },
+    './api': { extractionUrl: () => 'synthetic-stream', extractionApi: async (action, params) => {
+      if (action === 'environment') return { ready: true };
+      if (action === 'sessions') return { sessions: [], total: 0, next_offset: null };
+      if (action === 'session' && params.before_seq) {
+        calls.push(params);
+        return new Promise(resolve => { resolveOlder = resolve; });
+      }
+      if (action === 'session') return recent;
+      throw Error(`Unexpected ${action}`);
+    } },
+  });
+  const { useExtraction } = load(source('useExtraction.ts'));
+  function Probe() { state = useExtraction(); return null; }
+  let renderer, request;
+  await act(async () => { renderer = create(h(Probe)); });
+  await act(async () => { request = state.loadOlder(); void state.loadOlder(); });
+  assert.equal(calls.length, 1);
+  assert.equal(state.loadingOlder, true);
+  assert.equal(state.busy, false);
+  await act(async () => {
+    stream.onmessage({ data: JSON.stringify({ type: 'assistant_delta', seq: 6, messageId: 'live', text: 'New output' }) });
+    await wait(100);
+  });
+  await act(async () => { resolveOlder(older); await request; });
+  assert.equal(state.loadingOlder, false);
+  assert.equal(state.view.rows[0].id, 'user-1');
+  assert.equal(state.view.rows[2].tool, 'bash');
+  assert.equal(state.view.rows[2].text, 'complete');
+  assert.equal(state.view.rows.at(-1).text, 'New output');
+  recent.cursor = 6;
+  recent.live_events = [{ type: 'assistant_delta', seq: 6, messageId: 'live', text: 'Authoritative output' }];
+  await act(async () => state.reload());
+  assert.equal(state.view.rows[0].id, 'user-1');
+  assert.equal(state.view.rows[2].tool, 'bash');
+  assert.equal(state.view.rows.at(-1).text, 'Authoritative output');
+  assert.equal(state.view.has_more, false);
+  assert.equal(state.view.before_seq, null);
   await act(async () => renderer.unmount());
 });
 

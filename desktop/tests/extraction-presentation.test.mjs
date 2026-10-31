@@ -10,6 +10,232 @@ const { toolRowPhases } = load(new URL('../src/pages/agent/rows/ToolRow.tsx', im
 const user = { id: 'user-1', role: 'user', text: 'Inspect this isolated fixture' };
 const tool = { id: 'tool-1', role: 'tool', tool: 'run_python', args: { code: 'print("fixture")' }, text: 'partial output' };
 
+test('running extraction labels follow tool and text activity while preserving waiting and stopping states', () => {
+  const componentLoad = createTypeScriptLoader({ URLSearchParams }, {
+    '../../components/PageActivity': { usePageActive: () => false },
+    '../../../components/PageActivity': { usePageActive: () => false },
+  });
+  const { Conversation } = componentLoad(new URL('../src/pages/extraction/Conversation.tsx', import.meta.url));
+  const { workingLabel } = componentLoad(new URL('../src/pages/agent/timeline.ts', import.meta.url));
+  const { statusLabel } = componentLoad(new URL('../src/pages/extraction/labels.ts', import.meta.url));
+  const props = { rows: [user, tool], sessionId: 'working-label', running: true, status: 'running', pending: null, older: false, loadOlder() {} };
+  let renderer;
+  act(() => { renderer = create(h(Conversation, props)); });
+  const label = () => renderer.root.findByProps({ className: 'agent-working__label' }).children.join('');
+  assert.equal(label(), workingLabel(extractionTimeline(props.rows, true, null)));
+  act(() => renderer.update(h(Conversation, { ...props, rows: [user, { id: 'a', role: 'assistant', text: 'Writing' }] })));
+  assert.equal(label(), workingLabel(extractionTimeline([user, { id: 'a', role: 'assistant', text: 'Writing' }], true, null)));
+  for (const status of ['awaiting_permission', 'awaiting_input', 'stopping']) {
+    act(() => renderer.update(h(Conversation, { ...props, status })));
+    assert.equal(label(), statusLabel(status));
+  }
+  act(() => renderer.unmount());
+});
+
+test('the shared queue supports immediate sending, editing, deletion and image-only entries', () => {
+  const { MessageQueue } = load(new URL('../src/pages/agent/MessageQueue.tsx', import.meta.url));
+  const calls = [];
+  const queued = [{ id: 'q', text: 'Followup', images: [{ id: `${'a'.repeat(64)}.png`, name: 'fixture.png', width: 1, height: 1 }] }];
+  let props = { queued, editing: null, scope: { sessionId: 'queue-parity', extraction: true },
+    onEditingChange: editing => { props = { ...props, editing }; renderer.update(h(MessageQueue, props)); },
+    onSave: () => calls.push(['save', props.editing.text]), onSend: id => calls.push(['send', id]), onDelete: id => calls.push(['delete', id]) };
+  let renderer;
+  act(() => { renderer = create(h(MessageQueue, props)); });
+  assert.match(renderer.root.findByType('img').props.src, /agent=extraction/);
+  act(() => renderer.root.findAllByType('button').find(button => button.props.className === 'agent-queue__act is-primary').props.onClick());
+  assert.equal(calls[0].join(','), 'send,q');
+  act(() => renderer.root.findAllByType('button').find(button => button.props['aria-label']?.includes('编辑')).props.onClick());
+  act(() => renderer.root.findByType('input').props.onChange({ target: { value: '' } }));
+  assert.equal(renderer.root.findByProps({ className: 'agent-queue__act is-primary' }).props.disabled, false);
+  act(() => renderer.root.findByType('input').props.onKeyDown({ key: 'Enter', nativeEvent: { isComposing: true }, preventDefault() {} }));
+  assert.equal(calls.length, 1);
+  act(() => renderer.root.findByType('input').props.onKeyDown({ key: 'Enter', nativeEvent: {}, preventDefault() {} }));
+  assert.equal(calls[1][0], 'save');
+  act(() => renderer.root.findByType('input').props.onKeyDown({ key: 'Escape' }));
+  act(() => renderer.root.findAllByType('button').find(button => button.props['aria-label']?.includes('删除')).props.onClick());
+  assert.equal(calls[2].join(','), 'delete,q');
+  act(() => renderer.update(h(MessageQueue, { ...props, busy: true })));
+  assert.ok(renderer.root.findAllByType('button').filter(button => button.props.className?.startsWith('agent-queue__act')).every(button => button.props.disabled));
+  act(() => renderer.unmount());
+});
+
+test('stream segments finish independently and replay retains durations across split history', () => {
+  const { reduceEvents, prependHistory } = load(new URL('../src/pages/extraction/transcript.ts', import.meta.url));
+  const events = [
+    { type: 'user_message', text: 'Inspect' },
+    { type: 'thinking_delta', messageId: 'a', text: 'Thinking' },
+    { type: 'reasoning_end', messageId: 'a', duration_ms: 1200 },
+    { type: 'assistant_delta', messageId: 'a', text: 'Progress' },
+    { type: 'content_end', messageId: 'a', duration_ms: 100 },
+    { type: 'thinking_delta', messageId: 'a', text: ' again' },
+    { type: 'reasoning_end', messageId: 'a', duration_ms: 800 },
+    { type: 'assistant_message', messageId: 'a', text: 'Progress', stopReason: 'toolUse' },
+    { type: 'tool_start', toolCallId: 't', toolName: 'read' },
+    { type: 'tool_end', toolCallId: 't', text: 'Read', duration_ms: 3000 },
+  ].map((event, index) => ({ ...event, seq: index + 1 }));
+  const segments = extractionTimeline(reduceEvents([], events.slice(0, 4)), true, null)[1].items;
+  assert.equal(segments[0].streaming, false);
+  assert.equal(segments[1].streaming, true);
+  const replay = reduceEvents([], events);
+  for (let split = 1; split < events.length; split += 1) {
+    const restored = prependHistory(reduceEvents([], events.slice(split)), reduceEvents([], events.slice(0, split)));
+    assert.equal(restored.find(row => row.id === 'a').thinkingDurationMs, 2000);
+    assert.equal(restored.find(row => row.id === 'a').durationMs, 100);
+  }
+  const group = extractionTimeline(replay, false, null)[1];
+  assert.equal(group.items.reduce((sum, item) => sum + (item.durationMs || 0), 0), 5100);
+  assert.equal(group.items.at(-1).durationMs, 3000);
+  assert.equal(reduceEvents(replay, [events[6]])[1].thinkingDurationMs, 2000);
+});
+
+test('compaction results use shared rows and do not inflate work step totals', () => {
+  const { reduceEvents } = load(new URL('../src/pages/extraction/transcript.ts', import.meta.url));
+  const { AgentGroupView } = load(new URL('../src/pages/agent/rows/AgentGroupView.tsx', import.meta.url));
+  const rows = reduceEvents([], [
+    { type: 'user_message', seq: 1, text: 'Inspect' },
+    { type: 'compacted', seq: 2, mode: 'microcompact', cleared: 4, removed: 0, tokens_before: 12000, tokens_after: 8000 },
+    { type: 'compacted', seq: 3, removed: 8, summary_chars: 1000, tokens_before: 8000, tokens_after: 2000 },
+    { type: 'tool_start', seq: 4, toolCallId: 't', toolName: 'read' },
+    { type: 'tool_end', seq: 5, toolCallId: 't', text: 'OK', duration_ms: 2000 },
+  ]);
+  const group = extractionTimeline(rows, false, null)[1];
+  assert.equal(group.items[0].cleared, 4);
+  assert.equal(group.items[1].summaryChars, 1000);
+  let renderer;
+  act(() => { renderer = create(h(AgentGroupView, { group, isLive: false, projectDir: '', persistKey: 'compact-parity' })); });
+  assert.equal(renderer.root.findAllByProps({ className: 'agent-activity__meta' }).length, 0);
+  act(() => renderer.root.findByProps({ className: 'agent-activity__header' }).props.onClick());
+  const text = JSON.stringify(renderer.toJSON());
+  assert.match(text, /12\.0K/); assert.match(text, /8\.0K/); assert.match(text, /2\.0K/);
+  act(() => renderer.unmount());
+});
+
+test('extraction approval passes the optional denial reason by button or Enter', () => {
+  const { PendingRequest } = load(new URL('../src/pages/extraction/Conversation.tsx', import.meta.url));
+  const answers = [];
+  let renderer;
+  act(() => { renderer = create(h(PendingRequest, { pending: { type: 'permission_request', requestId: 'deny-reason', toolName: 'bash', arguments: {} }, answer: body => answers.push(body), busy: false })); });
+  const input = () => renderer.root.findByProps({ className: 'agent-perm__reason-input' });
+  act(() => input().props.onChange({ target: { value: '  Read files only  ' } }));
+  act(() => renderer.root.findAllByType('button').find(button => button.children.includes('拒绝')).props.onClick());
+  assert.deepEqual(JSON.parse(JSON.stringify(answers[0])), { request_id: 'deny-reason', decision: 'deny', reason: 'Read files only' });
+  act(() => input().props.onKeyDown({ key: 'Enter', preventDefault() {} }));
+  assert.equal(answers[1].reason, 'Read files only');
+  act(() => renderer.update(h(PendingRequest, { pending: { type: 'permission_request', requestId: 'deny-reason', toolName: 'bash' }, answer: body => answers.push(body), busy: true })));
+  act(() => input().props.onKeyDown({ key: 'Enter', preventDefault() {} }));
+  assert.equal(answers.length, 2);
+  act(() => renderer.unmount());
+});
+
+test('consecutive extraction retries update the shared retry row and discard failed partial output in live and replayed turns', () => {
+  const { reduceEvents } = load(new URL('../src/pages/extraction/transcript.ts', import.meta.url));
+  const events = [
+    { type: 'user_message', text: 'Inspect fixture' },
+    { type: 'assistant_message', messageId: 'intro', text: 'Inspecting', stopReason: 'toolUse' },
+    { type: 'tool_start', toolCallId: 'inspect', toolName: 'read', arguments: {} },
+    { type: 'tool_end', toolCallId: 'inspect', text: 'verified' },
+    { type: 'assistant_start', messageId: 'failed-1' },
+    { type: 'thinking_delta', messageId: 'failed-1', text: 'discarded thinking' },
+    { type: 'assistant_delta', messageId: 'failed-1', text: 'discarded reply' },
+    { type: 'llm_retry_start', messageId: 'failed-1', attempt: 1, max_attempts: 10, delay_ms: 1000, ts: 100, code: 'TIMEOUT', reason: 'first failure' },
+    { type: 'llm_retry_end', messageId: 'failed-1', attempt: 1 },
+    { type: 'assistant_start', messageId: 'failed-2' },
+    { type: 'assistant_delta', messageId: 'failed-2', text: 'discarded second reply' },
+    { type: 'llm_retry_start', messageId: 'failed-2', attempt: 2, max_attempts: 10, delay_ms: 2000, ts: 200, code: 'PROVIDER_ERROR', reason: 'second failure' },
+  ].map((event, index) => ({ ...event, seq: index + 1 }));
+  const build = createExtractionTimelineBuilder();
+  let rows = [], firstRetry;
+  for (const event of events) {
+    const previous = JSON.stringify(rows);
+    const updated = reduceEvents(rows, [event]);
+    assert.equal(JSON.stringify(rows), previous);
+    rows = updated;
+    const groups = build(rows, true, null);
+    assert.deepEqual(groups, extractionTimeline(reduceEvents([], events.slice(0, event.seq)), true, null));
+    if (event.type === 'llm_retry_start') {
+      const retries = groups[1].items.filter(item => item.kind === 'retry');
+      assert.equal(retries.length, 1);
+      assert.equal(retries[0].attempt, event.attempt);
+      assert.equal(retries[0].retryDone, false);
+      if (!firstRetry) firstRetry = retries[0];
+      assert.equal(retries[0].id, firstRetry.id);
+      assert.equal(groups[1].items.map(item => item.kind).join(','), 'content,tool,retry');
+      assert.equal(groups[1].items[0].content, 'Inspecting');
+    }
+  }
+  const live = build(rows, true, null)[1];
+  const item = live.items.at(-1);
+  assert.equal(item.retryStartedAtMs, 200000);
+  assert.equal(item.retryDelayMs, 2000);
+  assert.equal(item.retryReason, 'second failure');
+  const componentLoad = createTypeScriptLoader({}, {
+    '../../../components/PageActivity': { usePageActive: () => false },
+  });
+  const { AgentGroupView } = componentLoad(new URL('../src/pages/agent/rows/AgentGroupView.tsx', import.meta.url));
+  let renderer;
+  act(() => { renderer = create(h(AgentGroupView, { group: live, isLive: true, projectDir: '', persistKey: 'retry-parity' })); });
+  assert.equal(renderer.root.findAllByProps({ className: 'agent-retry-note is-live' }).length, 1);
+  assert.match(renderer.root.findByProps({ className: 'agent-retry-note__count' }).children.join(''), /2\/10/);
+  assert.match(renderer.root.findByProps({ className: 'agent-retry-note__reason' }).children.join(''), /second failure/);
+  const end = { type: 'llm_retry_end', seq: 13, messageId: 'failed-2', attempt: 2 };
+  rows = reduceEvents(rows, [end]);
+  const done = build(rows, true, null)[1];
+  act(() => renderer.update(h(AgentGroupView, { group: done, isLive: true, projectDir: '', persistKey: 'retry-parity' })));
+  assert.equal(renderer.root.findAllByProps({ className: 'agent-retry-note' }).length, 1);
+  assert.equal(done.items.at(-1).retryDone, true);
+  assert.match(renderer.root.findByProps({ className: 'agent-retry-note__text' }).children[0], /已重试/);
+  act(() => renderer.unmount());
+  const nextRequest = reduceEvents(rows, [
+    { type: 'tool_start', seq: 14, toolCallId: 'next-tool', toolName: 'read' },
+    { type: 'tool_end', seq: 15, toolCallId: 'next-tool', text: 'done' },
+    { type: 'llm_retry_start', seq: 16, messageId: 'next-failure', attempt: 1, max_attempts: 10 },
+  ]);
+  assert.equal(extractionTimeline(nextRequest, true, null)[1].items.filter(item => item.kind === 'retry').length, 2);
+  assert.ok(extractionTimeline(nextRequest, false, null)[1].items.filter(item => item.kind === 'retry').every(item => item.retryDone));
+});
+
+test('work totals include unloaded history and stay stable as split rows are restored', () => {
+  const { reduceEvents, prependHistory } = load(new URL('../src/pages/extraction/transcript.ts', import.meta.url));
+  const events = [
+    { type: 'user_message', seq: 1, text: 'Inspect fixture' },
+    { type: 'thinking_message', seq: 2, messageId: 'intro', text: 'Plan' },
+    { type: 'assistant_message', seq: 3, messageId: 'intro', text: 'Inspecting', stopReason: 'toolUse' },
+    { type: 'tool_start', seq: 4, toolCallId: 'bash', toolName: 'bash', arguments: { command: 'synthetic' } },
+    { type: 'tool_end', seq: 5, toolCallId: 'bash', text: 'done' },
+    { type: 'thinking_message', seq: 6, messageId: 'final', text: 'Verified' },
+    { type: 'assistant_message', seq: 7, messageId: 'final', text: 'Finished', stopReason: 'stop' },
+  ];
+  const prefix = { anchor: 'user-1', item_keys: ['reasoning:intro', 'content:intro', 'tool:bash', 'reasoning:final'] };
+  const assertTotal = rows => {
+    const group = extractionTimeline(rows, false, null, prefix).find(group => group.type === 'activity');
+    assert.equal(group.id, 'extract-user-1');
+    assert.equal((group.hiddenStepCount || 0) + group.items.filter(item => !item.final).length, 4);
+    let renderer;
+    act(() => { renderer = create(h(load(new URL('../src/pages/agent/rows/AgentGroupView.tsx', import.meta.url)).AgentGroupView,
+      { group, isLive: false, projectDir: '', persistKey: 'history-count' })); });
+    assert.match(renderer.root.findByProps({ className: 'agent-activity__meta' }).children.join(''), /4/);
+    act(() => renderer.unmount());
+  };
+  for (let start = 1; start < events.length; start += 1) {
+    const rows = reduceEvents([], events.slice(start));
+    assertTotal(rows);
+    const restored = prependHistory(rows, reduceEvents([], events.slice(0, start)));
+    assert.deepEqual(JSON.parse(JSON.stringify(restored)), JSON.parse(JSON.stringify(reduceEvents([], events))));
+    assertTotal(restored);
+  }
+});
+
+test('loading more than 1000 history rows retains the oldest and latest messages', () => {
+  const { reduceEvents, prependHistory } = load(new URL('../src/pages/extraction/transcript.ts', import.meta.url));
+  const events = Array.from({ length: 1200 }, (_, index) => ({ type: 'user_message', seq: index + 1, text: String(index) }));
+  const recent = reduceEvents([], events.slice(1100));
+  const rows = prependHistory(recent, reduceEvents([], events.slice(0, 1100)));
+  assert.equal(rows.length, 1200);
+  assert.equal(rows[0].id, 'user-1');
+  assert.equal(rows.at(-1).id, 'user-1200');
+  assert.equal(rows.at(-1), recent.at(-1));
+});
+
 test('native read images render with the extraction session asset URL after replay', () => {
   const { ToolRow } = load(new URL('../src/pages/agent/rows/ToolRow.tsx', import.meta.url));
   const image = { id: `${'a'.repeat(64)}.webp`, name: 'fixture.webp' };
@@ -76,6 +302,60 @@ test('extraction approval arguments start folded while decision buttons remain a
   assert.equal(Boolean(renderer.root.findByType('details').props.open), false);
   assert.equal(renderer.root.findAllByType('button').length, 3);
   act(() => renderer.unmount());
+});
+
+test('extraction approvals show intent and the localized tool name before opening arguments', () => {
+  const { PendingRequest } = load(new URL('../src/pages/extraction/Conversation.tsx', import.meta.url));
+  let renderer;
+  act(() => { renderer = create(h(PendingRequest, { pending: { type: 'permission_request', requestId: 'intent-approval',
+    toolName: 'run_python', arguments: { code: 'print("fixture")', reason: '验证剧本提取结果' } }, busy: false, answer() {} })); });
+  assert.equal(renderer.root.findByProps({ className: 'agent-perm__reason' }).children.join(''), '原因：验证剧本提取结果');
+  assert.equal(renderer.root.findByType('summary').children.join(''), '运行 Python');
+  assert.equal(Boolean(renderer.root.findByType('details').props.open), false);
+  act(() => renderer.unmount());
+});
+
+test('intent stays visible in folded extraction tools while running, finished, failed and replayed', () => {
+  const { reduceEvents } = load(new URL('../src/pages/extraction/transcript.ts', import.meta.url));
+  const { ToolRow } = load(new URL('../src/pages/agent/rows/ToolRow.tsx', import.meta.url));
+  for (const name of ['read', 'write', 'edit', 'bash', 'run_python']) {
+    const reason = '检查剧本文件格式';
+    const start = { type: 'tool_start', toolCallId: `intent-${name}`, toolName: name, arguments: { reason } };
+    for (const state of ['running', 'finished', 'failed']) {
+      const events = [start, ...(state === 'running' ? [] : [{ type: 'tool_end', toolCallId: start.toolCallId, text: 'tool output', isError: state === 'failed' }])];
+      const replayed = reduceEvents([], events);
+      const streamed = events.reduce((rows, event) => reduceEvents(rows, [event]), []);
+      assert.deepEqual(streamed, replayed);
+      const item = extractionTimeline(replayed, state === 'running', null)[0].items[0];
+      let renderer;
+      act(() => { renderer = create(h(ToolRow, { item, phase: state === 'running' ? 'running' : undefined,
+        persistKey: `intent-${name}-${state}`, autoExpand: false })); });
+      const summary = renderer.root.findByProps({ className: 'agent-tool__summary' });
+      assert.equal(summary.children.join(''), reason);
+      assert.equal(summary.props.title, reason);
+      assert.equal(renderer.root.findByProps({ className: 'agent-tool__header' }).props['aria-expanded'], false);
+      act(() => renderer.unmount());
+    }
+  }
+});
+
+test('both Agent timelines render localized billion-context tool names', () => {
+  const { buildTimeline } = load(new URL('../src/pages/agent/timeline.ts', import.meta.url));
+  const { ToolRow } = load(new URL('../src/pages/agent/rows/ToolRow.tsx', import.meta.url));
+  for (const [name, label] of [
+    ['compress', '压缩上下文'], ['decompress', '还原上下文'],
+    ['search_context', '搜索上下文'], ['acp_status', '查看上下文状态'],
+  ]) {
+    const translation = buildTimeline([{ type: 'tool_call', step: 1, id: name, name, arguments: {} }]);
+    const extraction = extractionTimeline([{ id: name, role: 'tool', tool: name, args: {}, text: '' }], true, null);
+    for (const [agent, timeline] of [['translation', translation], ['extraction', extraction]]) {
+      let renderer;
+      act(() => { renderer = create(h(ToolRow, { item: timeline[0].items[0], phase: 'running',
+        persistKey: `billion-${agent}-${name}`, autoExpand: false })); });
+      assert.equal(renderer.root.findByProps({ className: 'agent-tool__name is-running' }).children.join(''), label);
+      act(() => renderer.unmount());
+    }
+  }
 });
 
 test('live and replayed user events render the shared user message bubbles in turn order', () => {
@@ -178,7 +458,8 @@ test('composer preserves IME and multiline shortcuts and keeps stop available wh
   assert.equal(sends, 0);
   key({}); assert.equal(sends, 1);
   act(() => renderer.update(h(ExtractionComposer, { ...props, running: true })));
-  key({}); assert.equal(sends, 1);
+  key({}); assert.equal(sends, 2);
+  assert.match(renderer.root.findByType('textarea').props.placeholder, /本轮做完自动/);
   act(() => renderer.root.findByType('textarea').props.onChange({ target: { value: 'next task' } }));
   assert.equal(draft, 'next task');
   const stop = renderer.root.findByProps({ className: 'agent-composer__stop' });

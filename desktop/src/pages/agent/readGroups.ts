@@ -1,8 +1,9 @@
 import type { ActivityItem } from './timeline';
+import { asArgs, toolOperation } from './toolMeta';
 
 // 明确列举已知只读工具，未知工具、写操作和审批都维持独立呈现。
 const readTools = new Set([
-  'read',
+  'read', 'get_project',
   'get_plugin_settings', 'get_project_overview', 'list_input_files', 'read_input_file',
   'read_guideline', 'list_dict_files', 'read_dict', 'get_name_table', 'get_runtime',
   'list_problems', 'read_proofread_changes', 'read_transl_cache', 'read_output',
@@ -20,7 +21,10 @@ export interface ActivityEntry {
 export function activityEntries(items: ActivityItem[], isLive: boolean): ActivityEntry[] {
   const entries: ActivityEntry[] = [];
   items.forEach((item, index) => {
-    const reading = item.kind === 'tool' && readTools.has(item.name || '')
+    const args = asArgs(item.arguments);
+    const operation = toolOperation(item.name, args);
+    const reading = item.kind === 'tool' && (readTools.has(operation)
+      || (['manage_problem_filter', 'manage_problem_white_list'].includes(operation) && args?.action === 'list'))
       && !item.permission && item.ok !== false && item.error === undefined && !item.final;
     const previous = entries[entries.length - 1];
     if (reading && previous?.reading) previous.indices.push(index);

@@ -1,6 +1,6 @@
 import { t as translate } from "../../i18n/core";
 import type { AgentEvent } from '../../lib/api';
-import { asArgs, toolMeta } from './toolMeta';
+import { asArgs, toolMeta, toolOperation } from './toolMeta';
 import type { AgentImage } from './images';
 
 // Rebuilding a timeline must not restart clocks or change otherwise identical rows.
@@ -123,7 +123,7 @@ export type SubagentRun = {
 };
 
 export type TimelineGroup =
-  | { type: 'activity'; id: string; items: ActivityItem[]; finalContent?: ActivityItem }
+  | { type: 'activity'; id: string; items: ActivityItem[]; finalContent?: ActivityItem; hiddenStepCount?: number }
   | { type: 'user'; id: string; step: number; message: string; images?: AgentImage[] }
   | { type: 'error'; id: string; step: number; message: string; traceback?: string }
   | { type: 'stopped'; id: string; step: number; reason: string };
@@ -133,7 +133,7 @@ export type TimelineGroup =
     父回合被停止时，先按 tasks 里的进度快照显示 stopped，避免界面一直显示进行中。
     子代理可能仍在等待已发出的缓存请求，迟到的 subagent_done 会补上最终计数。 */
 function reconcileSubagentStatuses(target: ActivityItem) {
-  if (target.kind !== 'tool' || target.name !== 'run_subagents') return;
+  if (target.kind !== 'tool' || toolOperation(target.name, asArgs(target.arguments)) !== 'run_subagents') return;
   const runs = target.subagents;
   if (!runs?.length || typeof target.result !== 'object' || target.result === null) return;
   const tasks = (target.result as Record<string, unknown>).tasks;
@@ -412,7 +412,7 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
       if (!target) {
         for (let i = current.items.length - 1; i >= 0; i -= 1) {
           const it = current.items[i];
-          if (it.kind === 'tool' && it.name === 'wait' && it.waitInterrupted === undefined) {
+          if (it.kind === 'tool' && toolOperation(it.name, asArgs(it.arguments)) === 'wait' && it.waitInterrupted === undefined) {
             target = it;
             break;
           }
@@ -507,7 +507,7 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
         subagentHosts.get(ev.id || '') ??
         current?.items.find((it) => it.kind === 'tool' && it.id === ev.parent_id) ??
         // 老记录/事件乱序时的兜底：本组最后一次 run_subagents 调用
-        [...(current?.items || [])].reverse().find((it) => it.kind === 'tool' && it.name === 'run_subagents');
+        [...(current?.items || [])].reverse().find((it) => it.kind === 'tool' && toolOperation(it.name, asArgs(it.arguments)) === 'run_subagents');
       if (!host) {
         continue;
       }
@@ -672,7 +672,7 @@ export function workingLabel(timeline: TimelineGroup[]): string {
     // 结果一到这行就完成了——继续挂它的 running 文案会让"等你回答…"一直亮着，
     // 明明已经答完、后端都开始请求下一轮了。
     if (item.ok === undefined && item.result === undefined && item.error === undefined) {
-      return `${toolMeta(item.name).running}…`;
+      return `${toolMeta(item.name, asArgs(item.arguments)).running}…`;
     }
     return translate("agent:timeline.workingLabel_message_processing");
   }
@@ -687,8 +687,8 @@ export function liveTail(items: ActivityItem[]): string {
       return lastReasoningLine(it.content);
     }
     if (it.kind === 'tool') {
-      const s = toolMeta(it.name).summary(asArgs(it.arguments));
-      return [toolMeta(it.name).action, s].filter(Boolean).join(' ');
+      const s = toolMeta(it.name, asArgs(it.arguments)).summary(asArgs(it.arguments));
+      return [toolMeta(it.name, asArgs(it.arguments)).action, s].filter(Boolean).join(' ');
     }
   }
   return '';

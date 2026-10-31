@@ -52,6 +52,15 @@ class Commands:
                     env["LD_LIBRARY_PATH"] = os.environ["LD_LIBRARY_PATH_ORIG"]
                 else:
                     env.pop("LD_LIBRARY_PATH", None)
+            if os.name == "nt":
+                # BusyBox resolves /tmp against the working drive (E:\tmp), so hand the
+                # shell a scratch directory the file tools can reach as well.
+                scratch = self.workspace / "tmp"
+                try:
+                    scratch.mkdir(parents=True, exist_ok=True)
+                    env["TMPDIR"] = scratch.as_posix()
+                except OSError:
+                    pass
         python = self.available["builtin_python"]
         if not native:
             env['PYTHONPATH'] = self.skill

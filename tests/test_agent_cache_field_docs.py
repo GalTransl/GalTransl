@@ -111,7 +111,7 @@ class CacheFieldsSectionTests(unittest.TestCase):
         self.assertIn("proofread_dst ＞ pre_dst", section)  # 哪个才是最终译文
         self.assertIn("派生字段", section)  # 哪些改不动
         self.assertIn("缓存 ≠ 交付物", section)  # 别拿缓存当输出
-        self.assertIn("read_output", section)
+        self.assertIn('output(action="read")', section)
 
 
 class CacheRefSyntaxTests(unittest.TestCase):
@@ -128,10 +128,9 @@ class CacheRefSyntaxTests(unittest.TestCase):
         self.assertIn("单独一行", prompt)  # 单独成行才会渲染成卡片
         self.assertIn("不要把它写进代码块", prompt)
 
-    def test_read_cache_tool_mentions_it(self) -> None:
-        description = _tool_description("read_transl_cache")
-        self.assertIn("$transl_cache(", description)
-        self.assertIn("卡片", description)
+    def test_display_workflow_lives_in_system_prompt(self) -> None:
+        self.assertNotIn("$transl_cache(", _tool_description("read_transl_cache"))
+        self.assertIn("$transl_cache(", _cache_fields_section())
 
 
 class SystemPromptInclusionTests(unittest.TestCase):

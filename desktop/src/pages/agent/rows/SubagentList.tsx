@@ -3,7 +3,7 @@ import { usePageActive } from '../../../components/PageActivity';
 import { t as translate, useUiLanguage } from "../../../i18n";
 import { useEffect, useState } from 'react';
 import type { SubagentRun, SubagentStep } from '../timeline';
-import { asArgs, clipText, formatDuration, toolMeta } from '../toolMeta';
+import { toolOperation, asArgs, clipText, formatDuration, toolMeta } from '../toolMeta';
 
 /* ── Tool row (disclosure, not a boxed card) ── */
 
@@ -156,19 +156,19 @@ function subagentLatest(run: SubagentRun): { short: string; full: string; tone?:
       const error = (step.error || translate("common:actions.failed")).trim();
       return { short: translate("agent:subagentList.short_short_failed", { value: clipText(error, 40) }), full: error, tone: 'error' };
     }
-    if (step.name === 'patch_transl_cache' && step.result && typeof step.result === 'object') {
+    if (toolOperation(step.name, asArgs(step.args)) === 'patch_transl_cache' && step.result && typeof step.result === 'object') {
       const count = Number((step.result as Record<string, unknown>).updated) || 0;
       const text = translate("agent:subagentList.appliedChanges", { count });
       return { short: text, full: text };
     }
     const doubts = stepDoubts(step.args);
-    if (step.name === 'patch_transl_cache' && doubts.length && step.ok === true) {
+    if (toolOperation(step.name, asArgs(step.args)) === 'patch_transl_cache' && doubts.length && step.ok === true) {
       return {
         short: translate("agent:subagentList.short_short_entry", { count: doubts.length }),
         full: doubts.map((doubt) => `#${doubt.index} ${doubt.text}`).join('\n'),
       };
     }
-    const meta = toolMeta(step.name);
+    const meta = toolMeta(step.name, asArgs(step.args));
     const detail = meta.summary(asArgs(step.args));
     return {
       short: detail ? `${meta.action} · ${detail}` : meta.action,
@@ -186,7 +186,7 @@ function SubagentStepRow({ step }: { step: Extract<SubagentStep, { kind: 'tool' 
   const result = step.result && typeof step.result === 'object' ? step.result as Record<string, unknown> : undefined;
   const changes = Array.isArray(result?.changes) ? result.changes as Record<string, unknown>[] : [];
   const files = Array.isArray(result?.files) ? result.files as Record<string, unknown>[] : [];
-  if (step.name === 'patch_transl_cache' && result) {
+  if (toolOperation(step.name, asArgs(step.args)) === 'patch_transl_cache' && result) {
     return (
       <div className="agent-subagent__step">
         <span className="agent-subagent__step-name">{translate("agent:subagentList.appliedChanges", { count: Number(result.updated) || 0 })}</span>
@@ -208,7 +208,7 @@ function SubagentStepRow({ step }: { step: Extract<SubagentStep, { kind: 'tool' 
     );
   }
   const doubts = stepDoubts(step.args);
-  if (step.name === 'patch_transl_cache' && doubts.length && step.ok === true) {
+  if (toolOperation(step.name, asArgs(step.args)) === 'patch_transl_cache' && doubts.length && step.ok === true) {
     return (
       <div className="agent-subagent__step is-doubt">
         <span className="agent-subagent__step-name">{translate("agent:subagentList.agentSubagentStepIsDoubt_message_text")}</span>
@@ -225,11 +225,11 @@ function SubagentStepRow({ step }: { step: Extract<SubagentStep, { kind: 'tool' 
   }
   return (
     <div className={`agent-subagent__step${step.ok === false ? ' is-error' : ''}`}>
-      <span className="agent-subagent__step-name">{toolMeta(step.name).action}</span>
+      <span className="agent-subagent__step-name">{toolMeta(step.name, asArgs(step.args)).action}</span>
       <span className="agent-subagent__step-detail">
         {step.ok === false
           ? step.error || translate("common:actions.failed")
-          : toolMeta(step.name).summary(asArgs(step.args)) || translate("common:actions.completed")}
+          : toolMeta(step.name, asArgs(step.args)).summary(asArgs(step.args)) || translate("common:actions.completed")}
       </span>
     </div>
   );

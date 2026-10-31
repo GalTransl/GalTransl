@@ -132,7 +132,7 @@ def _search_paging_args(args: dict[str, Any]) -> tuple[int, int]:
 
 
 def _apply_search_paging(result: dict[str, Any], offset: int) -> None:
-    """给搜索结果补上分页口径（就地改），字段名与 list_problems 对齐。
+    """给搜索结果补上分页口径（就地改），字段名与 problems(action="list") 对齐。
 
     - returned：本页的**命中数**（服务端的 returned_hits；不带 context 时就是行数）；
     - returned_rows：本页总行数（带 context 时 = 命中行 + 搭着给的前后文行）；
@@ -225,8 +225,8 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
                 # 文件确实存在、只是还没翻译：缓存里当然搜不到，要搜它的原文得换 search_input
                 if any(f.get("name") == filename for f in listing.get("uncached_files", [])):
                     notes.append(
-                        f"{filename} 还没翻译（没有缓存文件），这里是缓存搜索的 0 命中；"
-                        f"要搜它的原文用 search_input（filename={filename}）。"
+                        f'{filename} 还没翻译（没有缓存文件），这里是缓存搜索的 0 命中；'
+                        f'要搜它的原文用 input(action="search", filename="{filename}")。'
                     )
                 else:
                     notes.append(
@@ -294,8 +294,8 @@ def _tool_search_input(runner: AgentRunner, args: dict[str, Any]) -> Any:
     含已翻的部分），这边搜**输入文件**（还没翻译的原文全文）。用途也由此分工——
     - 定译法/收字典前，查某个称呼、口头禅、专有名词在全篇出现过多少次、都出现在什么上下文里
       （出现次数与说话人是"该不该收进字典、收哪个写法"的依据）；
-    - 拿不准某句原文的语境时，比 read_input_file 逐段读更省 token；
-    - 命中的 filename + index 可直接交给 read_input_file 精读。
+    - 拿不准某句原文的语境时，比 input(action="read") 逐段读更省 token；
+    - 命中的 filename + index 可直接交给 input(action="read") 精读。
 
     搜的是原文，所以**译文侧的问题（漏译/残留日文）不在这里**，那些用 read_transl_cache(action="search")。
     每次搜索都要把涉及的输入文件过一遍文件插件（比搜缓存慢），要缩小范围就传 filename。
@@ -311,7 +311,7 @@ def _tool_search_output_files(runner: AgentRunner, args: dict[str, Any]) -> Any:
 def _tool_search_text_files(runner: AgentRunner, args: dict[str, Any], *, output: bool = False) -> Any:
     source = "output" if output else "input"
     label = "输出" if output else "输入"
-    read_tool = "read_output" if output else "read_input_file"
+    read_tool = 'output(action="read")' if output else 'input(action="read")'
     text_field = "dst" if output else "src"
     query = str(args.get("query", "")).strip()
     if not query:
@@ -390,8 +390,7 @@ def _tool_search_text_files(runner: AgentRunner, args: dict[str, Any], *, output
             ]
             if filename not in available:
                 notes.append(
-                    f"输入文件 {filename} 不存在（检查 list_input_files 的文件名拼写）；"
-                    "这是全项目搜索的 0 命中。"
+                    f'输入文件 {filename} 不存在（检查 input(action="list") 的文件名拼写）；这是全项目搜索的 0 命中。'
                 )
         except AgentToolError:
             pass

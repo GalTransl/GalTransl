@@ -41,7 +41,7 @@ export function PermissionCard({
   // 别和下面那个 `reason`（模型填在入参里的"为什么做这件事"）搞混，那个是只读展示用的。
   const [denyReason, setDenyReason] = useState('');
   if (!perm) return null;
-  const meta = toolMeta(perm.name || item.name || '');
+  const meta = toolMeta(perm.name || item.name || '', perm.arguments);
   const args = perm.arguments;
   const summary = meta.summary(args);
   const reason = typeof args?.reason === 'string' ? args.reason.trim() : '';

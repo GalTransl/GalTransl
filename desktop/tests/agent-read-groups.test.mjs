@@ -2,6 +2,18 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
 
+test('merged reads group while writes and waiting remain separate', () => {
+  const items = [
+    ['dictionary', { action: 'read' }], ['input', { action: 'search' }],
+    ['dictionary', { action: 'set' }], ['problems', { action: 'list', target: 'filter' }],
+    ['problems', { action: 'delete', target: 'filter' }], ['translation', { action: 'wait' }],
+  ].map(([name, args], index) => ({ kind: 'tool', id: String(index), step: index, name, arguments: args }));
+  const entries = activityEntries(items, false);
+  assert.deepEqual(Array.from(entries, entry => [Array.from(entry.indices), entry.reading]), [
+    [[0, 1], true], [[2], false], [[3], true], [[4], false], [[5], false],
+  ]);
+});
+
 const load = createTypeScriptLoader();
 const { activityEntries } = load(new URL('../src/pages/agent/readGroups.ts', import.meta.url));
 const read = (step, extra = {}) => ({ kind: 'tool', step, id: `id-${step}`, name: 'read_input_file', ok: true, ...extra });

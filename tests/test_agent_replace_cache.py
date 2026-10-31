@@ -50,10 +50,40 @@ class _Runner:
 
 def _args(**overrides):
     return {"action": "replace", "files": ["a.json", "b.json"],
-            "query": "old", "replacement": "new", **overrides}
+            "old_text": "old", "new_text": "new", "replace_all": True, **overrides}
 
 
 class ReplaceCacheTests(unittest.TestCase):
+    def test_unique_match_is_required_by_default_and_checked_before_file_save(self):
+        args = {"action": "replace", "filename": "a.json", "old_text": "old", "new_text": "new"}
+        for entries in (
+            [{"index": 1, "pre_dst": "old old"}],
+            [{"index": 1, "pre_dst": "old", "proofread_dst": "old"}],
+            [{"index": 1, "pre_dst": "missing"}],
+        ):
+            with self.subTest(entries=entries):
+                runner = _Runner({"a.json": entries})
+                self.assertIsNone(_preview_cache_patch(runner, args))
+                with self.assertRaisesRegex(AgentToolError, "replace_all"):
+                    _tool_patch_transl_cache(runner, args)
+                self.assertEqual(runner.saved, [])
+                self.assertEqual(runner.disk["a.json"], entries)
+        runner = _Runner({"a.json": [{"index": 1, "pre_dst": "old"}]})
+        preview = _preview_cache_patch(runner, args)
+        result = _tool_patch_transl_cache(runner, args)
+        self.assertEqual(preview["changes"], result["changes"])
+        self.assertEqual(runner.disk["a.json"][0]["pre_dst"], "new")
+
+    def test_default_replace_preview_matches_partial_file_success(self):
+        runner = _Runner({"a.json": [{"index": 1, "pre_dst": "old old"}],
+                          "b.json": [{"index": 1, "pre_dst": "old"}]})
+        args = _args(replace_all=False)
+        preview = _preview_cache_patch(runner, args)
+        result = _tool_patch_transl_cache(runner, args)
+        self.assertEqual(preview["changes"], result["changes"])
+        self.assertIn("error", result["files"][0])
+        self.assertEqual(runner.saved, ["b.json"])
+
     def setUp(self):
         self.files = {
             "a.json": [
@@ -91,16 +121,16 @@ class ReplaceCacheTests(unittest.TestCase):
         self.assertEqual(runner.disk["a.json"][0]["proofread_dst"], "new review")
         self.assertEqual(runner.saved, ["a.json"])
 
-    def test_empty_replacement_deletes_matches(self):
+    def test_empty_new_text_deletes_matches(self):
         runner = _Runner(self.files)
-        _tool_patch_transl_cache(runner, _args(replacement=""))
+        _tool_patch_transl_cache(runner, _args(new_text=""))
         self.assertEqual(runner.disk["a.json"][0]["pre_dst"], " and ")
         self.assertEqual(runner.disk["b.json"][0]["pre_dst"], "")
 
     def test_single_filename_shorthand_and_duplicate_files(self):
         for selection in ({"filename": "a.json"}, {"files": "a.json"}, {"files": ["a.json", "a.json"]}):
             runner = _Runner(self.files)
-            args = _args(replacement="old-new")
+            args = _args(new_text="old-new")
             args.pop("files")
             args.update(selection)
             result = _tool_patch_transl_cache(runner, args)
@@ -123,7 +153,7 @@ class ReplaceCacheTests(unittest.TestCase):
 
     def test_globs_expand_in_order_and_overlaps_are_only_replaced_once(self):
         runner = _Runner(self.files)
-        _tool_patch_transl_cache(runner, _args(files=["b.json", "[ab].json", "?.json"], replacement="old-new"))
+        _tool_patch_transl_cache(runner, _args(files=["b.json", "[ab].json", "?.json"], new_text="old-new"))
         self.assertEqual(runner.saved, ["b.json", "a.json"])
         self.assertEqual(runner.disk["b.json"][0]["pre_dst"], "old-new")
         self.assertEqual(runner.disk["outside.json"], self.files["outside.json"])
@@ -151,8 +181,8 @@ class ReplaceCacheTests(unittest.TestCase):
         _tool_patch_transl_cache(runner, _args(files="[ab].json"))
         self.assertEqual(runner.saved, ["[ab].json"])
 
-    def test_no_match_or_identical_replacement_is_success_without_writes(self):
-        for overrides in ({"query": "missing"}, {"query": "OLD"}, {"replacement": "old"}):
+    def test_no_match_or_identical_new_text_is_success_without_writes(self):
+        for overrides in ({"old_text": "missing"}, {"old_text": "OLD"}, {"new_text": "old"}):
             runner = _Runner(self.files)
             result = _tool_patch_transl_cache(runner, _args(clear_comment=True, **overrides))
             self.assertEqual(result["updated"], 0)
@@ -170,10 +200,10 @@ class ReplaceCacheTests(unittest.TestCase):
     def test_literal_text_and_whitespace_and_linebreaks_are_preserved(self):
         before = "old \r\nline\\n<br>.* OLD old "
         runner = _Runner({"a.json": [{"index": 1, "pre_dst": before}]})
-        _tool_patch_transl_cache(runner, _args(files=["a.json"], query="old ", replacement="new "))
+        _tool_patch_transl_cache(runner, _args(files=["a.json"], old_text="old ", new_text="new "))
         self.assertEqual(runner.disk["a.json"][0]["pre_dst"], before.replace("old ", "new "))
         runner = _Runner({"a.json": [{"index": 1, "pre_dst": before}]})
-        _tool_patch_transl_cache(runner, _args(files=["a.json"], query=".*", replacement="\\1"))
+        _tool_patch_transl_cache(runner, _args(files=["a.json"], old_text=".*", new_text="\\1"))
         self.assertEqual(runner.disk["a.json"][0]["pre_dst"], before.replace(".*", "\\1"))
 
     def test_old_cache_keys_are_read_and_new_keys_are_written(self):
@@ -193,7 +223,7 @@ class ReplaceCacheTests(unittest.TestCase):
         self.assertEqual(preview["changes"], result["changes"])
 
     def test_preview_returns_none_for_no_change(self):
-        self.assertIsNone(_preview_cache_patch(_Runner(self.files), _args(query="missing")))
+        self.assertIsNone(_preview_cache_patch(_Runner(self.files), _args(old_text="missing")))
 
     def test_missing_file_does_not_prevent_other_files_from_updating(self):
         runner = _Runner(self.files)
@@ -210,11 +240,13 @@ class ReplaceCacheTests(unittest.TestCase):
 
     def test_invalid_arguments_are_rejected_before_reading_or_writing(self):
         for overrides in (
-            {"action": "unknown"}, {"query": ""}, {"query": None}, {"replacement": None},
+            {"replace_all": "true"}, {"replace_all": 1},
+            {"query": "old"}, {"replacement": "new"}, {"action": "patch"},
+            {"action": "unknown"}, {"old_text": ""}, {"old_text": None}, {"new_text": None},
             {"files": []}, {"files": ""}, {"files": [""]}, {"files": [1]}, {"files": 1},
             {"filename": "a.json"}, {"fields": []}, {"fields": "pre_dst"},
             {"fields": ["post_src"]}, {"fields": ["proofread_comment"]}, {"fields": [None]},
-            {"patches": []},
+            {"action": "set", "patches": []},
         ):
             with self.subTest(overrides=overrides):
                 runner = _Runner(self.files)
@@ -229,18 +261,18 @@ class ReplaceCacheTests(unittest.TestCase):
             _tool_patch_transl_cache(runner, _args(fields=["proofread_dst"]), frozenset({"pre_dst"}))
         self.assertEqual(runner.saved, [])
 
-    def test_replacements_are_planned_after_acquiring_file_lock(self):
+    def test_new_texts_are_planned_after_acquiring_file_lock(self):
         runner = _Runner(self.files)
         runner.expect_locked = True
         _tool_patch_transl_cache(runner, _args())
 
-    def test_concurrent_replacements_preserve_both_changes(self):
+    def test_concurrent_new_texts_preserve_both_changes(self):
         runner = _Runner({"a.json": [{"index": 1, "pre_dst": "one two"}]})
         errors = []
 
-        def replace(query, replacement):
+        def replace(old_text, new_text):
             try:
-                _tool_patch_transl_cache(runner, _args(files=["a.json"], query=query, replacement=replacement))
+                _tool_patch_transl_cache(runner, _args(files=["a.json"], old_text=old_text, new_text=new_text))
             except Exception as exc:
                 errors.append(exc)
 
@@ -254,12 +286,12 @@ class ReplaceCacheTests(unittest.TestCase):
         self.assertEqual(runner.disk["a.json"][0]["pre_dst"], "1 2")
 
     def test_schema_exposes_replace_but_proofreaders_keep_patch_contract(self):
-        schema = next(t["function"] for t in AGENT_TOOLS if t["function"]["name"] == "patch_transl_cache")
-        self.assertEqual(schema["parameters"]["properties"]["action"]["enum"], ["patch", "replace"])
+        schema = next(t["function"] for t in AGENT_TOOLS if t["function"]["name"] == "edit_transl_cache")
+        self.assertEqual(schema["parameters"]["properties"]["action"]["enum"], ["set", "replace", "delete"])
         self.assertEqual([s["type"] for s in schema["parameters"]["properties"]["files"]["anyOf"]], ["string", "array"])
         narrow = _subagent_patch_schema()["function"]["parameters"]
-        self.assertEqual(narrow["required"], ["patches"])
-        for field in ("action", "files", "query", "replacement", "fields"):
+        self.assertEqual(narrow["required"], ["action", "patches"])
+        for field in ("files", "old_text", "new_text", "replace_all", "fields"):
             self.assertNotIn(field, narrow["properties"])
 
 

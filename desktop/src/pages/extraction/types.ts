@@ -1,4 +1,5 @@
-import type { AgentContextUsage } from '../../lib/api';
+import type { AgentContextUsage, QueuedMessage } from '../../lib/api';
+import type { AgentImage } from '../agent/images';
 
 export type Session = {
   id: string; title: string; game_dir: string; workspace: string; status: string;
@@ -6,10 +7,14 @@ export type Session = {
   profile_name: string; permission_mode: string; error: string;
 };
 export type AgentEvent = {
-  images?: import('../agent/images').AgentImage[];
+  images?: AgentImage[];
   type: string; seq?: number; text?: string; messageId?: string; toolCallId?: string;
   toolName?: string; arguments?: Record<string, unknown>; isError?: boolean;
   replace?: boolean;
+  attempt?: number; max_attempts?: number; delay_ms?: number; ts?: number; code?: string; reason?: string;
+  duration_ms?: number;
+  mode?: string; removed?: number; cleared?: number; summary_chars?: number; tokens_before?: number; tokens_after?: number;
+  queued?: QueuedMessage[];
   requestId?: string; question?: string; status?: string; message?: string;
   questions?: { question: string; options: string[]; recommended?: string; multiSelect?: boolean }[];
   permission_mode?: string;
@@ -19,6 +24,8 @@ export type AgentEvent = {
 export type Snapshot = {
   session: Session; events: AgentEvent[]; live_events: AgentEvent[]; cursor: number;
   pending: AgentEvent | null; has_more: boolean; before_seq: number | null;
+  queued?: QueuedMessage[];
+  activity_prefix?: { anchor: string; item_keys: string[] } | null;
 };
 export type SkillStatus = {
   installed: boolean; current_commit: string; latest_commit: string; update_available: boolean;
@@ -27,6 +34,7 @@ export type Environment = {
   ready: boolean; problems: string[]; agent_engine: string; python_version: string;
   settings: { skill_dir: string; python_path: string };
   skill: SkillStatus;
+  system_pythons: { executable: string; args: string[]; version: string; architecture: number }[];
 };
 export type SessionList = { sessions: Session[]; next_offset: number | null; total: number; running_game_dirs?: string[] };
 export type FileList = { path: string; entries: { name: string; is_dir: boolean; size: number }[]; next_offset: number | null; total: number };

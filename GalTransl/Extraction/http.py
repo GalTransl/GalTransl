@@ -113,6 +113,8 @@ def route_extraction(handler, method: str) -> bool:
                                                                      str(payload.get("output_dir", "")))}
             elif action == "message":
                 result = EXTRACTION_RUNTIME.start(session_id, payload)
+            elif action in {"queue-update", "queue-delete", "queue-send"}:
+                result = EXTRACTION_RUNTIME.queue_action(session_id, action, payload)
             elif action == "delete":
                 result = EXTRACTION_RUNTIME.delete_session(session_id)
             elif action == "close-folder":

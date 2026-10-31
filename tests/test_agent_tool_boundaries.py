@@ -19,7 +19,7 @@ from tests.test_agent_name_table import _NameRunner, _config, _dict_file
 
 class DictionaryRuleTests(unittest.TestCase):
     def test_arrow_entry_is_updated_and_translation_loader_uses_new_value(self):
-        lines, stats = _dict_new_lines(["Alice->Old#note", "Bob\tB"], "Alice\tNew\tnew note", "patch", category="gpt")
+        lines, stats = _dict_new_lines(["Alice->Old#note", "Bob\tB"], "Alice\tNew\tnew note", "set", category="gpt")
         self.assertEqual(lines, ["Alice\tNew\tnew note", "Bob\tB"])
         self.assertEqual(stats["replaced_keys"], ["Alice"])
         with tempfile.TemporaryDirectory() as root:
@@ -30,7 +30,7 @@ class DictionaryRuleTests(unittest.TestCase):
     def test_same_word_in_different_conditions_and_scenes_is_preserved(self):
         old = ["pre_src\tA\tword\tA", "pre_src\tB\tword\tB", "post_src\tB\tword\tPost",
                "mono\tword\tMono", "diag\tword\tDialog", "word\tPlain", "^^word\tStart"]
-        lines, _ = _dict_new_lines(old, "pre_src\tB\tword\tNewB\ndiag\tword\tNewDialog", "patch", category="post")
+        lines, _ = _dict_new_lines(old, "pre_src\tB\tword\tNewB\ndiag\tword\tNewDialog", "set", category="post")
         expected = list(old)
         expected[1] = "pre_src\tB\tword\tNewB"
         expected[4] = "diag\tword\tNewDialog"
@@ -44,28 +44,28 @@ class DictionaryRuleTests(unittest.TestCase):
         self.assertEqual(remaining, expected[:1] + expected[2:])
 
     def test_gpt_reserved_words_and_normal_literal_arrows_are_not_misparsed(self):
-        lines, _ = _dict_new_lines(["mono\told\tnote"], "mono\tnew\tnew note", "patch", category="gpt")
+        lines, _ = _dict_new_lines(["mono\told\tnote"], "mono\tnew\tnew note", "set", category="gpt")
         self.assertEqual(lines, ["mono\tnew\tnew note"])
-        lines, _ = _dict_new_lines(["a->b\told", "a\tkeep"], "a->b\tnew", "patch", category="post")
+        lines, _ = _dict_new_lines(["a->b\told", "a\tkeep"], "a->b\tnew", "set", category="post")
         self.assertEqual(lines, ["a->b\tnew", "a\tkeep"])
 
     def test_key_whitespace_and_escaped_newlines_follow_loader_rules(self):
-        lines, _ = _dict_new_lines([" a \tOld", "a\tKeep"], " a \tNew", "patch", category="gpt")
+        lines, _ = _dict_new_lines([" a \tOld", "a\tKeep"], " a \tNew", "set", category="gpt")
         self.assertEqual(lines, [" a \tNew", "a\tKeep"])
-        lines, _ = _dict_new_lines([r"a\nb" + "\tOld"], r"a\nb" + "\tNew", "patch", category="post")
+        lines, _ = _dict_new_lines([r"a\nb" + "\tOld"], r"a\nb" + "\tNew", "set", category="post")
         self.assertEqual(lines, [r"a\nb" + "\tNew"])
 
-    def test_default_saves_preserve_unmentioned_dictionary_and_name_entries(self):
+    def test_set_preserves_unmentioned_dictionary_and_name_entries(self):
         result, runner = _run(["a\tA", "b\tB"], "a\tNewA")
-        self.assertEqual(result["action"], "patch")
+        self.assertEqual(result["action"], "set")
         self.assertEqual(runner.saved, ["a\tNewA\nb\tB"])
         names = NamesRunner([{"src_name": "A", "dst_name": "Alpha", "count": 9}])
-        result = _tool_save_name_table(names, {"names": [{"src_name": "B", "dst_name": "Beta"}]})
-        self.assertEqual(result["mode"], "patch")
+        result = _tool_save_name_table(names, {"action": "set", "names": [{"src_name": "B", "dst_name": "Beta"}]})
+        self.assertEqual(result["action"], "set")
         self.assertEqual([row["src_name"] for row in names.saved[-1]], ["A", "B"])
         runner = DictRunner(["Alice->Old#note"])
-        preview = _preview_dict_write(runner, {"file_key": "(project_dir)项目GPT字典.txt", "content": "Alice\tNew"})
-        self.assertEqual(preview["action"], "patch")
+        preview = _preview_dict_write(runner, {"action": "set", "file_key": "(project_dir)项目GPT字典.txt", "content": "Alice\tNew"})
+        self.assertEqual(preview["action"], "set")
         self.assertEqual(preview["line_diff"]["removed"], 1)
 
 
@@ -74,7 +74,7 @@ class CacheNoopTests(unittest.TestCase):
         for before, incoming in (("same", "same"), (r"line\nbreak", "line\nbreak")):
             with self.subTest(before=before):
                 runner = CacheRunner({"a.json": [{"index": 1, "pre_dst": before, "trans_by": "original"}]})
-                args = {"filename": "a.json", "patches": [{"index": 1, "pre_dst": incoming}]}
+                args = {"action": "set", "filename": "a.json", "patches": [{"index": 1, "pre_dst": incoming}]}
                 self.assertIsNone(_preview_cache_patch(runner, args))
                 result = _tool_patch_transl_cache(runner, args)
                 self.assertEqual(result["updated"], 0)
@@ -83,7 +83,7 @@ class CacheNoopTests(unittest.TestCase):
 
     def test_comment_only_change_keeps_translator_even_with_identical_translation(self):
         runner = CacheRunner({"a.json": [{"index": 1, "pre_dst": "same", "proofread_comment": "fix", "trans_by": "original"}]})
-        result = _tool_patch_transl_cache(runner, {"filename": "a.json", "clear_comment": True,
+        result = _tool_patch_transl_cache(runner, {"action": "set", "filename": "a.json", "clear_comment": True,
                                                  "patches": [{"index": 1, "pre_dst": "same"}]})
         self.assertEqual([row["path"] for row in result["changes"]], ["#1.proofread_comment"])
         self.assertEqual(runner.disk["a.json"][0]["trans_by"], "original")
@@ -200,9 +200,9 @@ class ListAndNamePagingTests(unittest.TestCase):
 
     def test_schemas_expose_defaults_and_paging(self):
         schemas = {t["function"]["name"]: t["function"]["parameters"]["properties"] for t in AGENT_TOOLS}
-        self.assertEqual(schemas["save_dict"]["action"]["default"], "patch")
-        self.assertEqual(schemas["save_name_table"]["mode"]["default"], "patch")
-        for name in ("get_name_table", "list_input_files", "read_input_file", "read_output", "read_transl_cache"):
+        self.assertNotIn("default", schemas["dictionary"]["action"])
+        self.assertNotIn("default", schemas["names"]["action"])
+        for name in ("names", "input", "output", "read_transl_cache"):
             self.assertTrue({"limit", "offset"} <= schemas[name].keys())
 
 

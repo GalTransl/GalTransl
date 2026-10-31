@@ -169,7 +169,7 @@ class ToolEndToEndTests(unittest.TestCase):
 
         result = _tool_patch_transl_cache(
             runner,
-            {"filename": "a.json", "patches": [{"index": 39, "pre_dst": "对，画圆圈一样<br>不过，注意不要把热水直接淋在滤纸上"}]},
+            {"action": "set", "filename": "a.json", "patches": [{"index": 39, "pre_dst": "对，画圆圈一样<br>不过，注意不要把热水直接淋在滤纸上"}]},
         )
 
         saved = {e["index"]: e for e in runner.saved}
@@ -181,7 +181,7 @@ class ToolEndToEndTests(unittest.TestCase):
         runner = _StubRunner(PlanPatchNormalizationTests._entries())
 
         result = _tool_patch_transl_cache(
-            runner, {"filename": "a.json", "patches": [{"index": 41, "pre_dst": "全新译文"}]}
+            runner, {"action": "set", "filename": "a.json", "patches": [{"index": 41, "pre_dst": "全新译文"}]}
         )
 
         self.assertEqual(result["changes"][0]["after"], "全新译文")

@@ -383,6 +383,13 @@ class SessionStore:
 
     def clear(self) -> None:
         """删除本会话文件（reset / delete 用），连同它的 meta sidecar。"""
+        for suffix in (".billion-context.sqlite3", ".billion-context.sqlite3-journal"):
+            try:
+                os.remove(self.path + suffix)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                _log(f"删除 billion-context 归档失败: {exc}")
         try:
             if os.path.isfile(self.path):
                 os.remove(self.path)

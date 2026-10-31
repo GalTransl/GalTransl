@@ -75,15 +75,12 @@ class PluginSettingsSchemaTests(unittest.TestCase):
 
     def test_plugin_api_exposes_schema_without_changing_settings(self):
         plugins = {p["name"]: p for p in _scan_plugins()}
-        msgtool = plugins["file_msgtool_script"]
-        self.assertIn("直接读取和写入 galgame 脚本文件", msgtool["description"])
-        self.assertEqual(msgtool["settings"]["script_type"], "")
-        self.assertIn("bgi", [o["value"] for o in msgtool["settings_schema"]["script_type"]["options"]])
-        self.assertTrue(msgtool["settings_schema"]["msg_tool_path"]["advanced"])
-        self.assertFalse(msgtool["settings_schema"]["script_type"]["advanced"])
-        self.assertIs(msgtool["settings"]["jis_substitution"], False)
-        self.assertFalse(msgtool["settings_schema"]["jis_substitution"]["advanced"])
-        self.assertEqual([o["value"] for o in msgtool["settings_schema"]["jis_unmapped"]["options"]], ["error", "space"])
+        epub = plugins["file_epub_epub"]
+        self.assertIn("翻译 Epub 文件", epub["description"])
+        self.assertIs(epub["settings"]["是否自动识别名称"], False)
+        self.assertTrue(epub["settings_schema"]["名称识别正则表达式"]["advanced"])
+        self.assertFalse(epub["settings_schema"]["双语显示"]["advanced"])
+        self.assertEqual(epub["settings"]["缩小比例"], 0.8)
         self.assertEqual(plugins["file_i18n_json"]["settings_schema"], {})
 
 
