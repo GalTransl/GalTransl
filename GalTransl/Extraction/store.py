@@ -201,6 +201,7 @@ class SessionStore:
                         for event in repaired:
                             stream.write(json.dumps(event, ensure_ascii=False) + "\n")
                     os.replace(temporary, journal)
+                    temporary = None  # the rename consumed the temporary file
                 finally:
                     if temporary:
                         temporary.unlink(missing_ok=True)

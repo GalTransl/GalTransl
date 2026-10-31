@@ -27,6 +27,7 @@ def atomic_json(path: Path, value: Any) -> None:
             temporary = Path(stream.name)
             json.dump(value, stream, ensure_ascii=False)
         os.replace(temporary, path)
+        temporary = None  # the rename consumed the temporary file
     finally:
         if temporary:
             temporary.unlink(missing_ok=True)

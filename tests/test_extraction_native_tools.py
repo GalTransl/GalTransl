@@ -393,15 +393,41 @@ def test_invalid_shell_timeout_never_approves(fixture, timeout):
     assert not approvals
 
 
-def test_bash_is_bash_inherits_environment_and_reports_nonzero(fixture, monkeypatch):
+def test_bash_runs_a_real_shell_inherits_environment_and_reports_nonzero(fixture, monkeypatch):
     runner, _ = fixture
     runner.tools.approve = lambda *args: None
     monkeypatch.setenv('GALTRANSL_NATIVE_TEST', 'inherited')
-    result = runner._dispatch_tool('bash', {'command': 'a=(one two); printf "%s:%s" "${a[1]}" "$GALTRANSL_NATIVE_TEST"; printf stderr >&2; exit 7'})
+    result = runner._dispatch_tool('bash', {'command': 'set -- one two; printf "%s:%s" "$2" "$GALTRANSL_NATIVE_TEST"; printf stderr >&2; exit 7'})
     assert result['isError'] is True
     assert result['structuredContent']['exit_code'] == 7
     assert text(result) == 'two:inheritedstderr\n\nCommand exited with code 7'
     assert text(runner._dispatch_tool('bash', {'command': ':'})) == '(no output)'
+
+
+def test_bash_sends_non_ascii_commands_as_utf8(fixture):
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    runner._dispatch_tool('bash', {'command': "printf '中文' > chinese.txt; grep -c 中 chinese.txt"})
+    assert (runner.tools.workspace / 'chinese.txt').read_bytes() == '中文'.encode('utf-8')
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows drive-relative POSIX paths')
+def test_bash_scratch_dir_lives_in_the_workspace(fixture):
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    scratch = (runner.tools.workspace / 'tmp').resolve()
+    lines = text(runner._dispatch_tool('bash', {'command': 'echo "$TMPDIR"; mktemp'})).splitlines()
+    assert Path(lines[0]).resolve() == scratch
+    assert Path(lines[1]).parent == scratch and Path(lines[1]).is_file()
+
+
+def test_bash_handles_non_ascii_names_and_output(fixture):
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    (runner.tools.workspace / '中文目录').mkdir()
+    (runner.tools.workspace / '中文目录' / '日语脚本.txt').write_bytes('中文内容'.encode('utf-8'))
+    assert '中文目录' in text(runner._dispatch_tool('bash', {'command': 'ls'}))
+    assert text(runner._dispatch_tool('bash', {'command': "cat 中文目录/日语脚本.txt"})) == '中文内容'
 
 
 def test_bash_optional_timeout_and_no_default(fixture, monkeypatch):
@@ -422,7 +448,7 @@ def test_bash_optional_timeout_and_no_default(fixture, monkeypatch):
 def test_bash_long_output_full_log_and_utf8_tail(fixture):
     runner, _ = fixture
     runner.tools.approve = lambda *args: None
-    result = runner._dispatch_tool('bash', {'command': "for ((i=0;i<2105;i++)); do printf '%s:中文\\n' \"$i\"; done"})
+    result = runner._dispatch_tool('bash', {'command': "i=0; while [ $i -lt 2105 ]; do printf '%s:中文\\n' $i; i=$((i+1)); done"})
     truncation = result['details']['truncation']
     assert truncation['outputLines'] == 2000 and truncation['totalLines'] == 2105
     assert text(result).startswith('105:中文\n') and 'Showing lines 106-2105 of 2105' in text(result)
@@ -510,6 +536,14 @@ def test_bash_background_process_is_killed_by_timeout_and_stop(fixture):
 def test_windows_shell_drive_paths_follow_pi(raw, expected):
     from GalTransl.Extraction.tools import native_path
     assert native_path(raw) == expected
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows uses the bundled BusyBox shell')
+def test_windows_shell_is_the_bundled_busybox_on_stdin():
+    from GalTransl.Extraction.tools import bash_config
+    executable, prefix = bash_config()
+    assert Path(executable).name == 'busybox64u.exe' and Path(executable).is_file()
+    assert prefix == ['sh', '-s']
 
 
 def test_mutation_queue_serializes_across_tool_instances(fixture):

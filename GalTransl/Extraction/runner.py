@@ -6,6 +6,7 @@ GalTransl.Agent. This module supplies only tools, a prompt and the UI event brid
 from __future__ import annotations
 
 import json
+import os
 import threading
 import uuid
 from pathlib import Path
@@ -121,7 +122,11 @@ class ExtractionRunner(AgentRunner):
             "Validate parser/writer roundtrips; preserve control codes and non-text structures.",
             "Python uses the existing backend interpreter by default; explicitly choose runtime=system only when needed. "
             "Use read/bash/edit/write; older read_file/run_shell/edit_file/write_file names in saved history are obsolete. "
-            "Commands run as the local user. A denied operation was not executed: explain or change strategy, never retry unchanged. Stop promptly when cancelled.",
+            + ("bash runs BusyBox sh: keep to POSIX syntax, as arrays, [[ ]] and C-style for are unavailable. "
+               "POSIX paths are drive-relative, so /tmp means <current drive>:\\tmp and usually does not exist; "
+               "use $TMPDIR (a directory inside the output workspace) for scratch files. "
+               if os.name == "nt" else "")
+            + "Commands run as the local user. A denied operation was not executed: explain or change strategy, never retry unchanged. Stop promptly when cancelled.",
             "Use the user's language. Report concrete output paths, counts, failures and actual validation. "
             "After a valid export, gt_input can be opened as a GalTransl project; same-name translations go in gt_output for later reinsertion. "
             'When extraction is complete and the exported gt_input files have been validated, include '
