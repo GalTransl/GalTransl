@@ -701,6 +701,7 @@ def _tool_placeholder_message(call_id: str) -> dict[str, Any]:
     """给残缺调用补的占位 tool 消息。"""
     return {
         "role": "tool",
+        "_placeholder": True,
         "tool_call_id": call_id,
         "content": json.dumps(
             {"status": "interrupted", "error": _DANGLING_TOOL_NOTE}, ensure_ascii=False

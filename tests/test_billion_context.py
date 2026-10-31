@@ -21,6 +21,21 @@ def history(count=18):
         for i in range(count)]
 
 
+def tool_history(count=6, content="大" * 4000):
+    return [{"role": "system", "content": "System"}, {"role": "user", "content": "当前任务必须保留"}] + [
+        message for i in range(count) for message in (
+            {"role": "assistant", "tool_calls": [{"id": f"call-{i}", "type": "function",
+                "function": {"name": "read", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": f"call-{i}", "content": content})]
+
+
+@pytest.fixture
+def working_plugin(tmp_path):
+    item = BillionContextSession(path=tmp_path / "working.sqlite3", context_window=64000)
+    yield item
+    item.close()
+
+
 def unpack(result):
     assert result["isError"] is False
     return json.loads(result["content"][0]["text"])
@@ -34,7 +49,7 @@ def fold(plugin, start="m00001", end="m00004", summary=None, call_id=""):
 
 @pytest.fixture
 def plugin(tmp_path):
-    item = BillionContextSession(path=tmp_path / "context.sqlite3", context_window=12000)
+    item = BillionContextSession(path=tmp_path / "context.sqlite3", context_window=256000)
     item.sync(history())
     yield item
     item.close()
@@ -52,7 +67,7 @@ def test_archive_projection_restart_refs_and_exact_unicode(plugin):
     assert source == saved
     original_path = plugin.path
     # A separate connection simulates a restarted process (also reads committed data).
-    resumed = BillionContextSession(path=original_path, context_window=12000)
+    resumed = BillionContextSession(path=original_path, context_window=plugin.context_window)
     try:
         resumed.sync(source)
         assert resumed.project(source) == after
@@ -154,7 +169,9 @@ def test_rewritten_history_retains_archives_without_stale_folds_or_ref_reuse(plu
     assert not any("Historical summary b1" in str(message) for message in wire)
     assert plugin.status()["archivedMessages"] == 19
     found = unpack(plugin.call("search_context", {"query": "日本語原文路径"}))
-    assert found["total"] == 18
+    assert found["total"] == 7  # Four block originals plus the three surviving messages.
+    assert all(result["blockIds"] or result["ref"] in {"m00016", "m00017", "m00018"}
+               for result in found["results"])
     assert unpack(plugin.call("decompress", {"blockId": "b1", "full": True}))["records"][0]["ref"] == "m00001"
     assert "m00019" in str(wire)
 
@@ -189,6 +206,7 @@ def test_session_isolation_and_delete_cleanup(tmp_path):
 
 
 def test_request_hints_do_not_accumulate_and_usage_calibrates(plugin):
+    plugin.context_window = 12000
     source = history()
     first = plugin.project(source, 100)
     assert "EMERGENCY" in str(first[-1])
@@ -472,3 +490,225 @@ def test_closed_archive_during_deletion_stops_without_recreating_files(tmp_path)
         runner._billion_context.project(history())
     runner._billion_context.close()  # Turn finalizer may close it again.
     assert not list(tmp_path.rglob("*.sqlite3*"))
+
+
+@pytest.mark.parametrize("runner_type", [AgentRunner, ExtractionRunner])
+def test_pending_tool_batch_does_not_archive_placeholders(tmp_path, runner_type, monkeypatch):
+    create = Mock(return_value="stream")
+    runner = configured_runner(tmp_path, runner_type, monkeypatch, create)
+    runner.state.messages = [{"role": "user", "content": "当前任务"}, {
+        "role": "assistant", "tool_calls": [
+            {"id": name, "type": "function", "function": {"name": name, "arguments": "{}"}}
+            for name in ("acp_status", "search_context")]}]
+    try:
+        runner._resolve_llm()
+        for name, args in (("acp_status", {}), ("search_context", {"query": "interrupted"})):
+            runner._active_tool_call_id = name
+            result = runner._execute_tool(name, args)
+            if name == "search_context":
+                assert unpack(result)["results"] == []
+            runner._persist_message({"role": "tool", "tool_call_id": name, "content": result["content"][0]["text"]})
+        runner._estimate_context_tokens()
+        plugin = runner._billion_context
+        assert plugin.status()["archivedMessages"] == 4
+        assert [item["ref"] for item in plugin.status()["recentRefs"]] == [f"m{i:05d}" for i in range(1, 5)]
+        assert runner._create_stream(include_usage=True) == "stream"
+        messages = create.call_args.kwargs["messages"]
+        assert not any(key.startswith("_") for message in messages for key in message)
+        assert {message["tool_call_id"] for message in messages if message["role"] == "tool"} == {"acp_status", "search_context"}
+        resumed = BillionContextSession(path=plugin.path)
+        try:
+            resumed.sync(runner._messages_for_request(strip_internal=False))
+            assert resumed.status()["archivedMessages"] == 4
+        finally:
+            resumed.close()
+    finally:
+        runner.close_store()
+
+
+def test_current_user_is_pinned_without_locking_completed_tool_exchanges(working_plugin):
+    source = tool_history()
+    working_plugin.project(source)
+    with pytest.raises(AgentToolError, match="protected"):
+        fold(working_plugin, "m00001", "m00009")
+    assert working_plugin.status()["compressibleRanges"][0]["startId"] == "m00002"
+    assert working_plugin.recovery_candidate()["startId"] == "m00002"
+    block = fold(working_plugin, "m00003", "m00009")
+    assert block["startId"] == "m00002"
+    projected = working_plugin.project(source)
+    assert any(message.get("content") == "[m00001]\n" + source[1]["content"] for message in projected)
+    assert source == tool_history()
+
+
+def test_tool_images_do_not_replace_the_user_anchor(tmp_path, monkeypatch):
+    create = Mock(return_value="stream")
+    runner = configured_runner(tmp_path, ExtractionRunner, monkeypatch, create)
+    runner.state.messages = tool_history()
+    runner.state.messages[-1]["content"] = [
+        {"type": "text", "text": "图像结果" * 2000},
+        {"type": "image_url", "image_url": {"url": "https://example.com/result.png"}}]
+    try:
+        runner._resolve_llm()
+        runner._estimate_context_tokens()
+        with pytest.raises(AgentToolError, match="protected"):
+            fold(runner._billion_context, "m00001", "m00009")
+        assert runner._billion_context.status()["compressibleRanges"][0]["startId"] == "m00002"
+        runner._create_stream(include_usage=True)
+        messages = create.call_args.kwargs["messages"]
+        assert not any(key.startswith("_") for message in messages for key in message)
+    finally:
+        runner.close_store()
+
+
+@pytest.mark.parametrize("runner_type", [AgentRunner, ExtractionRunner])
+def test_default_decompress_does_not_poison_the_next_request(tmp_path, runner_type, monkeypatch):
+    create = Mock(return_value="stream")
+    runner = configured_runner(tmp_path, runner_type, monkeypatch, create, window=64000)
+    original = copy.deepcopy(runner.state.messages)
+    try:
+        runner._resolve_llm()
+        runner._estimate_context_tokens()
+        fold(runner._billion_context, "m00001", "m00014")
+        runner._persist_message({"role": "assistant", "tool_calls": [{"id": "restore", "type": "function",
+            "function": {"name": "decompress", "arguments": '{"blockId":"b1","full":true}'}}]})
+        runner._active_tool_call_id = "restore"
+        reply = runner._execute_tool("decompress", {"blockId": "b1", "full": True})
+        assert text_tokens(reply["content"][0]["text"]) <= runner._context_window // 4
+        assert unpack(reply)["nextOffset"] is not None
+        runner._persist_message({"role": "tool", "tool_call_id": "restore", "content": reply["content"][0]["text"]})
+        assert runner._create_stream(include_usage=True) == "stream"
+        assert create.call_count == 1
+        assert create.call_args.kwargs["stream"] is True
+        assert runner.state.messages[:len(original)] == original
+    finally:
+        runner.close_store()
+
+
+def test_decompress_fragments_reconstruct_an_oversized_original(working_plugin):
+    content = '大\\"\n日本語' * 16000
+    source = tool_history(1, content) + history(3)[1:]
+    working_plugin.project(source)
+    fold(working_plugin, "m00002", "m00003")
+    fragments = []
+    char_offset = 0
+    while True:
+        reply = working_plugin.call("decompress", {"blockId": "b1", "full": True, "offset": 1,
+                                                   "limit": 1, "charOffset": char_offset})
+        page = unpack(reply)
+        assert text_tokens(reply["content"][0]["text"]) <= working_plugin.context_window // 4
+        record = page["records"][0]
+        assert record["partial"] is True
+        assert record["charOffset"] == char_offset
+        fragments.append(record["recordJson"])
+        if page["nextOffset"] is None:
+            break
+        assert page["nextOffset"] == 1
+        assert page["nextCharOffset"] > char_offset
+        char_offset = page["nextCharOffset"]
+    assert len(fragments) > 1
+    assert json.loads("".join(fragments)) == {"ref": "m00003", "message": source[3]}
+    assert source == tool_history(1, content) + history(3)[1:]
+
+
+@pytest.mark.parametrize("calibrate", [False, True])
+def test_decompress_respects_available_space_and_provider_calibration(working_plugin, calibrate):
+    source = tool_history(1, "大" * 80000) + [
+        {"role": "user", "content": "新" * 6000},
+        {"role": "assistant", "content": "新" * 6000},
+        {"role": "user", "content": "新" * 6000}]
+    source[0]["content"] = "S" * 100000
+    working_plugin.project(source)
+    fold(working_plugin, "m00002", "m00003")
+    if calibrate:
+        working_plugin.record_usage(working_plugin.status()["contextTokens"] * 2)
+        working_plugin.context_window = 128000
+    reply = working_plugin.call("decompress", {"blockId": "b1", "offset": 1, "limit": 1})
+    tokens = text_tokens(reply["content"][0]["text"])
+    assert unpack(reply)["records"][0]["partial"] is True
+    assert tokens < working_plugin.context_window // 4
+    assert working_plugin.status()["contextTokens"] + tokens * (2 if calibrate else 1) < working_plugin.context_window * .80
+
+
+def test_decompress_child_summaries_are_bounded_and_page_forward(working_plugin):
+    source = tool_history(content="大" * 20000) + history(3)[1:]
+    working_plugin.project(source)
+    fold(working_plugin, "m00002", "m00005", "一" * 10000)
+    fold(working_plugin, "m00006", "m00009", "二" * 10000)
+    fold(working_plugin, "m00010", "m00013", "三" * 10000)
+    fold(working_plugin, "b1", "b3")
+    for offset, block_id in enumerate(("b1", "b2", "b3")):
+        reply = working_plugin.call("decompress", {"blockId": "b4", "offset": offset})
+        page = unpack(reply)
+        assert text_tokens(reply["content"][0]["text"]) <= working_plugin.context_window // 4
+        assert len(page["records"]) == 1
+        assert page["records"][0]["blockId"] == block_id
+        assert page["nextOffset"] == (offset + 1 if offset < 2 else None)
+
+
+@pytest.mark.parametrize("char_offset", [0, 5])
+def test_decompress_reports_insufficient_space_without_returning_large_content(working_plugin, char_offset):
+    source = tool_history(1, "大" * 80000) + history(3)[1:]
+    working_plugin.project(source)
+    fold(working_plugin, "m00002", "m00003")
+    source[0]["content"] = "S" * 240000
+    working_plugin.project(source)
+    reply = working_plugin.call("decompress", {"blockId": "b1", "offset": 1, "charOffset": char_offset})
+    page = unpack(reply)
+    assert page["status"] == "insufficient_context"
+    assert page["records"] == []
+    assert page["nextOffset"] == 1
+    assert page["nextCharOffset"] == (char_offset or None)
+    assert "Compress" in page["message"]
+    assert text_tokens(reply["content"][0]["text"]) < 128
+
+
+@pytest.mark.parametrize("char_offset", [-1, True, 999999])
+def test_decompress_rejects_invalid_character_cursors(working_plugin, char_offset):
+    working_plugin.project(history())
+    fold(working_plugin)
+    working_plugin.context_window = 256000
+    with pytest.raises(AgentToolError, match="charOffset"):
+        working_plugin.call("decompress", {"blockId": "b1", "charOffset": char_offset})
+
+
+def test_legacy_placeholder_refs_are_not_reused_or_searchable(working_plugin):
+    from GalTransl.Agent.context import _tool_placeholder_message
+    source = tool_history(1)
+    placeholder = _tool_placeholder_message("call-0")
+    legacy = {key: value for key, value in placeholder.items() if not key.startswith("_")}
+    working_plugin.sync([*source[:-1], legacy])
+    assert working_plugin.status()["recentRefs"][-1]["ref"] == "m00003"
+    working_plugin.sync([*source[:-1], placeholder])
+    assert working_plugin.status()["recentRefs"][-1]["ref"] is None
+    assert unpack(working_plugin.call("search_context", {"query": "interrupted"}))["results"] == []
+    working_plugin.sync(source)
+    assert working_plugin.status()["recentRefs"][-1]["ref"] == "m00004"
+
+
+@pytest.mark.parametrize("runner_type", [AgentRunner, ExtractionRunner])
+@pytest.mark.parametrize("usage_factor", [0.5, 1])
+def test_decompress_batch_shares_the_remaining_context_budget(tmp_path, runner_type, usage_factor, monkeypatch):
+    create = Mock(return_value="stream")
+    runner = configured_runner(tmp_path, runner_type, monkeypatch, create, window=64000)
+    try:
+        runner._resolve_llm()
+        runner._estimate_context_tokens()
+        fold(runner._billion_context, "m00001", "m00014")
+        runner._record_context_usage(round(runner._billion_context.status()["contextTokens"] * usage_factor))
+        runner._persist_message({"role": "assistant", "tool_calls": [
+            {"id": f"restore-{i}", "type": "function", "function": {
+                "name": "decompress", "arguments": '{"blockId":"b1","full":true}'}}
+            for i in range(4)]})
+        replies = []
+        for i in range(4):
+            runner._active_tool_call_id = f"restore-{i}"
+            reply = runner._execute_tool("decompress", {"blockId": "b1", "full": True})
+            replies.append(reply)
+            runner._persist_message({"role": "tool", "tool_call_id": f"restore-{i}", "content": reply["content"][0]["text"]})
+        assert text_tokens(replies[-1]["content"][0]["text"]) < text_tokens(replies[0]["content"][0]["text"])
+        assert unpack(replies[-1])["status"] == "insufficient_context"
+        assert runner._create_stream(include_usage=True) == "stream"
+        assert create.call_count == 1
+        assert create.call_args.kwargs["stream"] is True
+    finally:
+        runner.close_store()

@@ -152,10 +152,13 @@ class ExtractionRunner(AgentRunner):
             if message.get('role') == 'tool' and isinstance(content, list):
                 images = [block for block in content if block.get('type') == 'image_url']
                 if images:
-                    attachments.append({'role': 'user', 'content': [
+                    attachment = {'role': 'user', 'content': [
                         {'type': 'text', 'text': f"Images returned by tool call {message['tool_call_id']}:"},
                         *images,
-                    ]})
+                    ]}
+                    if not strip_internal:
+                        attachment['_billion_context_synthetic'] = True
+                    attachments.append(attachment)
                     message = {key: value for key, value in message.items() if key != '_images'}
                     message['content'] = '\n'.join(block['text'] for block in content if block.get('type') == 'text')
             projected.append(message)

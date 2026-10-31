@@ -87,9 +87,12 @@ class BillionContextSession:
                   "type": "object", "properties": {"startId": {"type": "string"}, "endId": {"type": "string"},
                   "summary": {"type": "string"}, "topic": {"type": "string"}}, "required": ["startId", "endId", "summary"]}}]}}, ("content",)),
         _tool("decompress", "Retrieve a compression block. full=false returns one tier (child summaries); full=true returns exact original message objects. "
-              "Does not unfold the request. Use offset/limit to page large results; originals remain complete in the archive.",
+              "Response size is bounded by the remaining context. Use nextOffset/nextCharOffset as offset/charOffset for the next page. "
+              "Oversized records return partial=true and recordJson fragments; concatenate fragments in order to reconstruct the exact JSON record. "
+              "Does not unfold the request; originals remain complete in the archive.",
               {"blockId": {"type": "string"}, "full": {"type": "boolean", "default": False},
-               "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, ("blockId",)),
+               "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+               "charOffset": {"type": "integer", "minimum": 0}}, ("blockId",)),
         _tool("search_context", "Search summaries and archived original messages, including Unicode/CJK. Results include stable refs and excerpts; use decompress for folded originals.",
               {"query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 50},
                "offset": {"type": "integer", "minimum": 0}}, ("query",)),
@@ -118,6 +121,8 @@ class BillionContextSession:
                 "head": [], "digests": [], "blocks": [], "next_message": 1, "next_block": 1}),))
         self._last_estimate = 0
         self._anchor = None
+        self._overhead = 0
+        self._synthetic_users = set()
         self._source: list[dict] = []
 
     def close(self):
@@ -145,8 +150,10 @@ class BillionContextSession:
 
     def sync(self, messages: list[dict]):
         """Reconcile append-only or host-rewritten history, never recycling refs."""
+        placeholders = {index for index, message in enumerate(messages) if message.get("_placeholder")}
         source = [_clean(message) for message in messages]
-        digests = [_digest(message) for message in source]
+        digests = [("placeholder:" if index in placeholders else "") + _digest(message)
+                   for index, message in enumerate(source)]
         with self._transaction() as state:
             old = state["digests"]
             if digests != old:
@@ -158,7 +165,7 @@ class BillionContextSession:
                     for left, right, count in matcher.get_matching_blocks():
                         refs[right:right + count] = state["head"][left:left + count]
                 for index, message in enumerate(source):
-                    if message.get("role") in {"system", "developer"}:
+                    if message.get("role") in {"system", "developer"} or index in placeholders:
                         refs[index] = None
                     elif refs[index] is None:
                         refs[index] = f"m{state['next_message']:05d}"
@@ -172,6 +179,9 @@ class BillionContextSession:
                     if first < 0 or refs[first:first + len(covered)] != covered:
                         block["active"] = False
             self._source = source
+            self._synthetic_users = {index for index, message in enumerate(messages)
+                                     if message.get("_billion_context_synthetic") or message.get("_compact_summary")
+                                     or message.get("_compact_instruction")}
 
     @staticmethod
     def _summary(block: dict) -> dict:
@@ -231,10 +241,10 @@ class BillionContextSession:
     def _ranges(self, state):
         """Visible compressible runs, split at system messages and fold boundaries."""
         runs, run = [], []
-        protected = self._protected_start()
+        protected = self._protected_indices(state)
         for unit in self._units(state):
             kind = "b" if unit["block"] else "m"
-            if not unit["ref"] or unit["end"] >= protected:
+            if any(index in protected for index in range(unit["start"], unit["end"] + 1)):
                 if run:
                     runs.append(run)
                     run = []
@@ -246,6 +256,22 @@ class BillionContextSession:
         if run:
             runs.append(run)
         return runs
+
+    def _protected_indices(self, state):
+        start = self._protected_start()
+        protected = {index for index, ref in enumerate(state["head"]) if not ref or index >= start}
+        # Pin user intent separately, so completed exchanges in this turn can fold.
+        user = next((unit for unit in reversed(self._units(state)) if not unit["block"]
+                     and unit["message"].get("role") == "user" and unit["start"] not in self._synthetic_users), None)
+        if user:
+            protected.add(user["start"])
+        exchanges = self._exchanges()
+        while True:
+            expanded = protected | {index for exchange in exchanges if any(index in protected for index in exchange)
+                                    for index in range(exchange[0], exchange[-1] + 1)}
+            if expanded == protected:
+                return protected
+            protected = expanded
 
     @staticmethod
     def _block_info(block):
@@ -273,34 +299,38 @@ class BillionContextSession:
     def project(self, messages: list[dict], overhead=0) -> list[dict]:
         self.sync(messages)
         with self._transaction() as state:
-            projected = []
-            for unit in self._units(state):
-                message = copy.deepcopy(unit["message"])
-                # Never touch structured/signed assistant blocks or tool arguments.
-                if unit["ref"] and not unit["block"] and message.get("role") != "assistant":
-                    content = message.get("content")
-                    if isinstance(content, str) and content:
-                        message["content"] = f"[{unit['ref']}]\n" + content
-                    elif isinstance(content, list) and message.get("role") != "assistant":
-                        message["content"] = [{"type": "text", "text": f"[{unit['ref']}]"}, *content]
-                projected.append(message)
-            # A static guide is request-only. No persistent or accumulating nudges.
-            insertion = 0
-            while insertion < len(projected) and projected[insertion].get("role") in {"system", "developer"}:
-                insertion += 1
-            projected.insert(insertion, {"role": "system", "content": _GUIDE})
-            local = _tokens(projected) + overhead
-            used = self._calibrated(local)
-            if used >= self.context_window * .45:
-                pressure = "EMERGENCY" if used >= self.context_window * .95 else "HIGH" if used >= self.context_window * .75 else "NOTICE"
-                ranges = self._status(state)["compressibleRanges"][:6]
-                hint = f"[billion-context {pressure}: {used}/{self.context_window} estimated tokens] "
-                hint += "Compress completed history now. " if pressure != "NOTICE" else "Consider compressing completed history. "
-                hint += "Available ranges: " + _json(ranges) + ". Use acp_status for details; keep unfinished user objectives."
-                projected.append({"role": "user", "content": hint})
-            self._last_local = _tokens(projected) + overhead
-            self._last_estimate = self._calibrated(self._last_local)
-            return projected
+            return self._project(state, overhead)
+
+    def _project(self, state, overhead):
+        self._overhead = overhead
+        projected = []
+        for unit in self._units(state):
+            message = copy.deepcopy(unit["message"])
+            # Never touch structured/signed assistant blocks or tool arguments.
+            if unit["ref"] and not unit["block"] and message.get("role") != "assistant":
+                content = message.get("content")
+                if isinstance(content, str) and content:
+                    message["content"] = f"[{unit['ref']}]\n" + content
+                elif isinstance(content, list) and message.get("role") != "assistant":
+                    message["content"] = [{"type": "text", "text": f"[{unit['ref']}]"}, *content]
+            projected.append(message)
+        # A static guide is request-only. No persistent or accumulating nudges.
+        insertion = 0
+        while insertion < len(projected) and projected[insertion].get("role") in {"system", "developer"}:
+            insertion += 1
+        projected.insert(insertion, {"role": "system", "content": _GUIDE})
+        local = _tokens(projected) + overhead
+        used = self._calibrated(local)
+        if used >= self.context_window * .45:
+            pressure = "EMERGENCY" if used >= self.context_window * .95 else "HIGH" if used >= self.context_window * .75 else "NOTICE"
+            ranges = self._status(state)["compressibleRanges"][:6]
+            hint = f"[billion-context {pressure}: {used}/{self.context_window} estimated tokens] "
+            hint += "Compress completed history now. " if pressure != "NOTICE" else "Consider compressing completed history. "
+            hint += "Available ranges: " + _json(ranges) + ". Use acp_status for details; keep unfinished user objectives."
+            projected.append({"role": "user", "content": hint})
+        self._last_local = _tokens(projected) + overhead
+        self._last_estimate = self._calibrated(self._last_local)
+        return projected
 
     def _calibrated(self, local):
         # Scaling, rather than an additive offset, tracks savings after folding.
@@ -352,8 +382,9 @@ class BillionContextSession:
             selected = [unit for unit in units if unit["end"] >= low and unit["start"] <= high]
             if any(not unit["ref"] or bool(unit["block"]) != is_block for unit in selected):
                 raise AgentToolError("Whole tool exchange crosses a compressed/system boundary")
-        if high >= self._protected_start():
-            raise AgentToolError("Range touches the protected recent working tail (including complete tool exchanges)")
+        protected = self._protected_indices(state)
+        if any(index in protected for index in range(low, high + 1)):
+            raise AgentToolError("Range touches protected user intent or the recent working tail (including complete tool exchanges)")
         # A call missing its result must never be archived away while in flight.
         messages = self._source[low:high + 1]
         call_ids = {call.get("id") for message in messages for call in message.get("tool_calls") or []}
@@ -382,6 +413,9 @@ class BillionContextSession:
         offset, limit = self._page(args, maximum=100, default=20)
         if not isinstance(args.get("full", False), bool):
             raise AgentToolError("full must be a boolean")
+        char_offset = args.get("charOffset", 0)
+        if type(char_offset) is not int or char_offset < 0:
+            raise AgentToolError("charOffset must be a nonnegative integer")
         if block["children"] and not args.get("full", False):
             by_id = {item["id"]: item for item in state["blocks"]}
             refs = block["children"]
@@ -391,8 +425,50 @@ class BillionContextSession:
             refs = block["refs"]
             records = [{"ref": ref, "message": json.loads(self._db.execute("SELECT payload FROM messages WHERE ref=?", (ref,)).fetchone()[0])}
                        for ref in refs[offset:offset + limit]]
-        return {"blockId": block["id"], "records": records, "total": len(refs),
-                "nextOffset": offset + len(records) if offset + len(records) < len(refs) else None}
+        self._project(state, self._overhead)
+        reserve = min(2048, self.context_window // 4)
+        # A low calibration ratio must not discount newly restored JSON payloads.
+        headroom = self.context_window * .80 - max(self._last_estimate, self._last_local) - reserve
+        budget = max(0, math.floor(min(self.context_window // 4, headroom) / max(1, self._anchor or 1)))
+        page = {"blockId": block["id"], "records": [], "total": len(refs),
+                "nextOffset": offset if offset < len(refs) else None, "nextCharOffset": char_offset or None}
+        unavailable = {**page, "status": "insufficient_context", "message": "Compress completed history before retrieving more context."}
+        if not records:
+            if char_offset:
+                raise AgentToolError("charOffset requires an existing record")
+            return page
+        if budget < text_tokens(_json(page)) + 128:
+            return unavailable
+        for index, record in enumerate(records):
+            self._check_stop()
+            next_offset = offset + index + 1 if offset + index + 1 < len(refs) else None
+            candidate = {**page, "records": [*page["records"], record], "nextOffset": next_offset}
+            if not char_offset and text_tokens(_json(candidate)) <= budget:
+                page = candidate
+                continue
+            if page["records"]:
+                return page
+            serialized = _json(record)
+            if char_offset >= len(serialized):
+                raise AgentToolError("charOffset is beyond the selected record")
+            # Fragment the serialized record, not its message fields, to preserve exact originals.
+            def fragment(end):
+                return {**page, "records": [{"ref": refs[offset], "partial": True, "charOffset": char_offset,
+                                             "totalChars": len(serialized), "recordJson": serialized[char_offset:end]}],
+                        "nextOffset": offset if end < len(serialized) else next_offset,
+                        "nextCharOffset": end if end < len(serialized) else None}
+
+            low, high = char_offset, len(serialized)
+            while low < high:
+                end = (low + high + 1) // 2
+                if text_tokens(_json(fragment(end))) <= budget:
+                    low = end
+                    continue
+                high = end - 1
+            if low == char_offset:
+                return unavailable
+            return fragment(low)
+        return page
 
     @staticmethod
     def _page(args, *, maximum=50, default=5):
@@ -419,9 +495,11 @@ class BillionContextSession:
         for block in state["blocks"]:
             for ref in block["refs"]:
                 by_ref.setdefault(ref, []).append(block["id"])
+        reachable = {ref for ref in state["head"] if ref} | by_ref.keys()
         for ref, payload in self._db.execute("SELECT ref,payload FROM messages ORDER BY rowid DESC"):
             self._check_stop()
-            add(ref, "message", payload, blockIds=by_ref.get(ref, []))
+            if ref in reachable:
+                add(ref, "message", payload, blockIds=by_ref.get(ref, []))
         return {"results": found[offset:offset + limit], "total": len(found),
                 "nextOffset": offset + limit if offset + limit < len(found) else None}
 
@@ -438,6 +516,7 @@ class BillionContextSession:
                     return json.loads(previous[1])
             if name == "compress":
                 value = {"blocks": [self._compress(state, entry) for entry in self._parse(args.get("content"))]}
+                self._project(state, self._overhead)
             elif name == "decompress":
                 value = self._decompress(state, args)
             elif name == "search_context":

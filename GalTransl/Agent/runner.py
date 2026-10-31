@@ -346,7 +346,7 @@ class AgentRunner:
     def _execute_tool(self, name: str, args: dict[str, Any]) -> Any:
         # Intercept before domain validation (including ExtractionRunner).
         if self._billion_context is not None and name in self._billion_context.names:
-            self._billion_context.sync(self._messages_for_request())
+            self._billion_context.project(self._messages_for_request(strip_internal=False), self._request_overhead_tokens())
             return self._billion_context.call(name, args, self._active_tool_call_id)
         return self._dispatch_tool(name, args)
 
@@ -442,7 +442,7 @@ class AgentRunner:
                         "上一次响应因达到输出长度上限被截断，其中的工具调用可能不完整，已全部丢弃、未执行。"
                         "请缩小单次操作范围（比如减少一次读取的条目数、拆分批量修改）后重试。"
                     )
-                    self._persist_message({"role": "user", "content": truncated_msg})
+                    self._persist_message({"role": "user", "content": truncated_msg, "_billion_context_synthetic": True})
                     self._emit("tool_result", {
                         "id": "truncated",
                         "name": "(已丢弃的截断工具调用)",
@@ -1100,7 +1100,7 @@ class AgentRunner:
     def _estimate_context_tokens(self) -> int:
         """估算当前请求占用的 token 数（锚点法，见 _estimate_usage_tokens）。"""
         if self._billion_context is not None:
-            self._billion_context.project(self._messages_for_request(), self._request_overhead_tokens())
+            self._billion_context.project(self._messages_for_request(strip_internal=False), self._request_overhead_tokens())
             return self._billion_context.status()["contextTokens"]
         return _estimate_usage_tokens(
             self.state.messages,
@@ -1140,7 +1140,7 @@ class AgentRunner:
             return
         for attempt in range(32):
             self._check_billion_stop()
-            plugin.project(self._messages_for_request(), self._request_overhead_tokens())
+            plugin.project(self._messages_for_request(strip_internal=False), self._request_overhead_tokens())
             if (not force or attempt > 0) and plugin.status()["contextTokens"] < self._context_window * .80:
                 return
             candidate = plugin.recovery_candidate()
