@@ -36,7 +36,7 @@
   "skillUpdateAvailable": "Latest Skill available:",
   "skillHasUpdate": "Skill update available",
   "skillUpToDate": "Skill is up to date:",
-  "skillDownloadHint": "Downloads from GitHub go into galtransl-galgamereverse-skill under the selected directory. Updates replace the previous version.",
+  "skillDownloadHint": "Automatically selects an available GitHub download route, with direct fallback on failure. Installs into galtransl-galgamereverse-skill under the selected directory. Updates replace the previous version.",
   "pythonSectionTitle": "Python runtime",
   "pythonAppInterpreter": "App Python (default)",
   "pythonAppDescription": "The Agent uses the app's existing Python to run scripts by default.",

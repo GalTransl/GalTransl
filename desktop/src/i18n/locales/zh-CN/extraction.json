@@ -36,7 +36,7 @@
   "skillUpdateAvailable": "可下载最新 Skill：",
   "skillHasUpdate": "Skill 有更新",
   "skillUpToDate": "已是最新 Skill：",
-  "skillDownloadHint": "从 GitHub 下载到所选目录下的 galtransl-galgamereverse-skill 文件夹，更新时替换原版本。",
+  "skillDownloadHint": "自动选择可用的 GitHub 下载节点，失败后回退直连。安装到所选目录下的 galtransl-galgamereverse-skill 文件夹，更新时替换原版本。",
   "pythonSectionTitle": "Python 运行环境",
   "pythonAppInterpreter": "应用 Python（默认）",
   "pythonAppDescription": "Agent 默认使用应用现有的 Python 执行脚本。",

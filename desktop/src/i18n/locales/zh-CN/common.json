@@ -330,7 +330,7 @@
     "updateNoticeVersionRow_message_v": "v{{value}}",
     "updateNoticeVersionRowUpdateNoticeVersionRowLatest_message_version": "最新版本",
     "updateNoticeVersionRowUpdateNoticeVersionRowLatest_message_v": "v{{latestVersion}}",
-    "updateNotice_message_directoryProjectTranslationCache": "自动升级会下载新版、校验并覆盖程序文件，然后重新启动。请先停止正在运行的任务；项目、翻译缓存和用户配置会保留。",
+    "updateNotice_message_directoryProjectTranslationCache": "自动升级会下载新版、校验并覆盖程序文件，然后重新启动。下载自动选择可用的 GitHub 节点，失败后回退直连。请先停止正在运行的任务；项目、翻译缓存和用户配置会保留。",
     "autoUpdate": "自动升级",
     "preserveDict": "不覆盖全局字典（跳过 Dict 目录）",
     "downloading": "正在下载新版本…",

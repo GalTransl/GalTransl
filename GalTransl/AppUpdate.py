@@ -1,7 +1,6 @@
 """Download the existing portable release and prepare an isolated installer."""
 from __future__ import annotations
 
-import hashlib
 import ipaddress
 import json
 import os
@@ -24,6 +23,7 @@ import requests
 from packaging.version import Version
 
 from application_update import RELEASE_API, UpdatePlan
+from GalTransl.GitHubDownload import download_archive
 from GalTransl.RuntimePaths import get_active_dict_dir, get_resource_root, get_user_data_dir
 
 DOWNLOAD_PREFIX = "https://github.com/GalTransl/GalTransl/releases/download/"
@@ -191,20 +191,10 @@ class UpdateManager:
             self.set_state(version=asset.version, total=asset.size)
             stage.mkdir()
             archive = stage / asset.name
-            digest = hashlib.sha256()
-            with requests.get(asset.url, stream=True, timeout=(20, 60)) as response, archive.open("wb") as output:
-                response.raise_for_status()
-                downloaded = 0
-                for chunk in response.iter_content(256 * 1024):
-                    downloaded += len(chunk)
-                    if downloaded > asset.size:
-                        raise UpdateError("Release download exceeds its declared size")
-                    output.write(chunk)
-                    digest.update(chunk)
-                    self.set_state(downloaded=downloaded)
+            with archive.open("w+b") as output:
+                download_archive(asset.url, output, asset.size, sha256=asset.digest,
+                                 progress=lambda downloaded: self.set_state(downloaded=downloaded))
             self.set_state(phase="verifying")
-            if downloaded != asset.size or digest.hexdigest() != asset.digest:
-                raise UpdateError("Release download failed SHA256 verification; the installed application was not changed")
             self.set_state(phase="extracting")
             payload = stage / "payload"
             files = unpack_release(archive, payload, asset, available.executable.name)

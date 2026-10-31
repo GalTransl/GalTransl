@@ -34,6 +34,17 @@ backend as the installer, stops its backend, and exits. The installer waits for
 the old desktop process to exit, replaces the release files, and relaunches the
 desktop. It uses the packaged Python runtime, with no separate Python installation.
 
+Release archives and Skill ZIP downloads share `GalTransl/GitHubDownload.py`.
+It reads the node configuration published by [github.akams.cn](https://github.akams.cn/)
+from the site's CDN-hosted `oopsunix/ghproxy-next/components/nodes.ts`, caching
+successful lists in memory for one hour. It probes six candidates and direct
+GitHub using a small Range request, tries up to three healthy routes in latency
+order, and retains direct fallback. Failed node discovery uses direct GitHub.
+Release metadata and SHA256 checksums are fetched directly from official GitHub;
+each release download must match both its declared size and checksum before
+preparation continues. Skill archive and path validation remain in the installer.
+Build and CI Skill downloads use this same path.
+
 Projects, translation caches, user settings, and user-only files are retained.
 Keeping dictionaries skips every update to the bundled `Dict` directory and the
 active user dictionary directory. Clearing that option also updates matching

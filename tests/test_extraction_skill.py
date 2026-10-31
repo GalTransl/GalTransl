@@ -254,6 +254,21 @@ def test_failed_update_keeps_the_previous_downloaded_version(skill_server):
     assert (original / "SKILL.md").is_file()
 
 
+def test_failed_archive_routes_preserve_installed_skill_and_settings(skill_server, monkeypatch):
+    from GalTransl import GitHubDownload
+
+    url, original, _, upstream = skill_server
+    upstream["archive"] = b"<html>proxy error</html>"
+    monkeypatch.setattr(GitHubDownload, "download_candidates", lambda url: [url + "?proxy", url])
+    status, result = api(url, "skill-install", {})
+    assert status == 502 and "did not return an archive" in result["error"]
+    assert upstream["calls"][0] == "/upstream/latest"
+    assert len(upstream["calls"]) == 3
+    assert (original / "SKILL.md").read_text() == FRONTMATTER + "Original Skill"
+    assert api(url, "environment")[1]["settings"]["skill_dir"] == str(original.parent)
+    assert not list(original.parent.glob(".skill-download-*"))
+
+
 @pytest.mark.parametrize("layout", ["cache", "direct"])
 def test_pruning_keeps_active_versions_bundled_and_custom_skills(tmp_path, layout):
     skills = tmp_path / "skills"

@@ -330,7 +330,7 @@
     "updateNoticeVersionRow_message_v": "v{{value}}",
     "updateNoticeVersionRowUpdateNoticeVersionRowLatest_message_version": "Latest version",
     "updateNoticeVersionRowUpdateNoticeVersionRowLatest_message_v": "v{{latestVersion}}",
-    "updateNotice_message_directoryProjectTranslationCache": "Automatic updates download and verify the release, replace application files, and restart the app. Stop running tasks first. Projects, translation caches, and user settings are preserved.",
+    "updateNotice_message_directoryProjectTranslationCache": "Automatic updates download and verify the release, replace application files, and restart the app. Downloads automatically select an available GitHub route, with direct fallback on failure. Stop running tasks first. Projects, translation caches, and user settings are preserved.",
     "autoUpdate": "Update automatically",
     "preserveDict": "Keep global dictionaries (skip Dict)",
     "downloading": "Downloading the new version…",

@@ -16,6 +16,8 @@ from urllib.error import URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from GalTransl.GitHubDownload import GitHubDownloadError, download_archive_bytes
+
 from .subprocess_env import external_environment, external_program
 
 SKILL_NAME = "galtransl-galgamereverse-skill"
@@ -76,7 +78,10 @@ def install_skill(skills: Path, *, branch: str = "main") -> Path:
     commit = latest_commit(branch=branch)
     if (destination / "SKILL.md").is_file() and (destination / "LICENSE").is_file() and skill_status(destination)["current_commit"] == commit:
         return destination
-    archive = request_bytes(ARCHIVE_URL.format(commit=commit), 128 * 1024 * 1024)
+    try:
+        archive = download_archive_bytes(ARCHIVE_URL.format(commit=commit), 128 * 1024 * 1024)
+    except GitHubDownloadError as exc:
+        raise SkillDownloadError(str(exc)) from exc
     # Keep the installed directory intact until the entire archive is validated.
     with tempfile.TemporaryDirectory(prefix=".skill-download-", dir=skills) as temporary:
         stage = Path(temporary) / "skill"

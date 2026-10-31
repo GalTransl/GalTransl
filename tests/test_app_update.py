@@ -188,6 +188,20 @@ def test_failed_downloads_never_change_the_installation(update_server, failure):
     assert (installed / "Dict/common.txt").read_text() == "original bundled dictionary"
 
 
+def test_checksum_failures_on_every_route_preserve_installation_and_remove_staging(update_server, monkeypatch):
+    from GalTransl import GitHubDownload
+
+    _, installed, _, _, upstream, _ = update_server
+    upstream["digest"] = "0" * 64
+    monkeypatch.setattr(GitHubDownload, "download_candidates", lambda url: [url + "?proxy", url])
+    state, stage = prepared(update_server)
+    assert state["phase"] == "failed" and "SHA256" in state["error"]
+    assert len([path for path in upstream["calls"] if path.startswith("/downloads/")]) == 2
+    assert (installed / "plugins/existing.txt").read_text() == "original"
+    assert (installed / "Dict/common.txt").read_text() == "original bundled dictionary"
+    assert not stage.exists()
+
+
 def test_updates_reject_web_origins_and_invalid_options(update_server):
     port = update_server[0]
     assert api(port, "start", {"preserve_dict": True}, "https://example.invalid")[0] == 403
