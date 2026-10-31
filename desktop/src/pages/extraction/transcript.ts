@@ -1,7 +1,7 @@
 import type { AgentEvent } from './types';
 
 export type Row = { id: string; role: 'user' | 'assistant' | 'tool' | 'notice' | 'retry' | 'compact'; text: string; images?: AgentEvent['images']; thinking?: string; tool?: string; args?: Record<string, unknown>; done?: boolean; error?: boolean; stopReason?: string; partial?: boolean;
-  durationMs?: number; thinkingDurationMs?: number; contentDone?: boolean; thinkingDone?: boolean;
+  durationMs?: number; thinkingDurationMs?: number; contentDone?: boolean; thinkingDone?: boolean; completedAtMs?: number;
   durations?: Record<string, { kind: 'content' | 'reasoning'; ms: number }>;
   compact?: Pick<AgentEvent, 'mode' | 'removed' | 'cleared' | 'summary_chars' | 'tokens_before' | 'tokens_after'>;
   retry?: Pick<AgentEvent, 'attempt' | 'max_attempts' | 'delay_ms' | 'ts' | 'code' | 'reason'> };
@@ -20,7 +20,8 @@ export function reduceEvents(rows: Row[], events: AgentEvent[]): Row[] {
     if (type === 'user_message') Object.assign(get(`user-${event.seq}`, 'user'), { text: event.text || '', ...(event.images?.length ? { images: event.images } : {}) });
     else if (['assistant_start', 'assistant_delta', 'assistant_message', 'thinking_delta', 'thinking_message', 'content_end', 'reasoning_end'].includes(type)) {
       const row = get(event.messageId || `assistant-${event.seq}`, 'assistant');
-      if (type === 'assistant_message') { row.text = event.text || ''; row.done = true; row.stopReason = event.stopReason; row.partial = event.partial; }
+      if (type === 'assistant_message') { row.text = event.text || ''; row.done = true; row.stopReason = event.stopReason; row.partial = event.partial;
+        row.completedAtMs = event.ts === undefined ? undefined : event.ts * 1000; }
       if (type === 'assistant_delta') { row.text = (row.text + (event.text || '')).slice(-64000); row.contentDone = false; }
       if (type === 'thinking_delta') { row.thinking = ((row.thinking || '') + (event.text || '')).slice(-64000); row.thinkingDone = false; }
       if (type === 'thinking_message') row.thinking = event.text || '';

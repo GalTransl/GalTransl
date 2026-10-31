@@ -37,6 +37,7 @@ export type ActivityItem = {
   images?: AgentImage[];
   error?: string;
   durationMs?: number;
+  completedAtMs?: number;
   // 权限审批：后端在这个工具调用执行前挂起等用户点（见 PermissionCard）。
   // 没有超时字段——后端不设超时，卡片会一直等着（老会话事件里可能还带着 timeout_s /
   // started_at，这里不读、也不用）。
@@ -595,7 +596,8 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
           if (item.kind === 'content' && item.content?.trim() === summary.trim()) item.final = true;
           break;
         }
-        current.finalContent = { kind: 'content', step: ev.step, content: summary, final: true };
+        current.finalContent = { kind: 'content', step: ev.step, content: summary, final: true,
+          completedAtMs: ev.ts === undefined ? undefined : ev.ts * 1000 };
       }
       closeActivity(true); // 回合结束：把组压进 groups，后续事件（新的 user_message 等）起新组
       continue;

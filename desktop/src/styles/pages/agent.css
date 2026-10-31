@@ -1481,6 +1481,11 @@
   cursor: pointer;
 }
 
+.agent-answer__time {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .agent-message-copy:hover:not(:disabled) {
   background: var(--agent-hover);
   color: var(--color-text);

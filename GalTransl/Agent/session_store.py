@@ -119,6 +119,13 @@ def _restore_tool_results(
     return restored
 
 
+def _restore_event_time(event: dict[str, Any], recorded_at: object) -> dict[str, Any]:
+    # Older finish events keep their timestamp only in the JSONL envelope.
+    if event.get("type") == "finish" and "ts" not in event and isinstance(recorded_at, (int, float)):
+        return {**event, "ts": recorded_at}
+    return event
+
+
 def _log(msg: str, *args: object) -> None:
     try:
         import time as _t
@@ -366,7 +373,7 @@ class SessionStore:
                     elif kind == "event":
                         ev = rec.get("event")
                         if isinstance(ev, dict):
-                            out["events"].append(ev)
+                            out["events"].append(_restore_event_time(ev, rec.get("at")))
                     elif kind == "compact":
                         out["compactions"].append(rec)
                     elif kind == "microcompact" and isinstance(rec.get("replacements"), list):
@@ -627,6 +634,7 @@ def read_transcript(project_dir: str, session_id: str, limit: int = TRANSCRIPT_M
                 ev = rec.get("event")
                 if not isinstance(ev, dict) or ev.get("type") in _SKIP_TRANSCRIPT_TYPES:
                     continue
+                ev = _restore_event_time(ev, rec.get("at"))
                 if ev.get("type") == "user_message" and first_user is None:
                     first_user = ev
                 if ev.get("type") in _SUBAGENT_STEP_TYPES:

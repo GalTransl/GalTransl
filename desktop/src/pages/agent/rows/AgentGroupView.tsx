@@ -51,11 +51,15 @@ export const AgentGroupView = memo(function AgentGroupView({
 /** 正文始终是执行记录的兄弟节点：折叠不能重建 Markdown、缓存卡片或文本选区。 */
 const FinalMessage = memo(function FinalMessage({ item, projectDir, newProjectWizardRefs }: { item: ActivityItem; projectDir: string; newProjectWizardRefs?: boolean }) {
   const uiLanguage = useUiLanguage();
+  const completedAt = item.completedAtMs === undefined ? undefined : new Date(item.completedAtMs);
   return (
     <div className="agent-answer" data-agent-final-step={item.step}>
       <AgentMarkdown text={item.content || ''} projectDir={projectDir} className="agent-final" newProjectWizardRefs={newProjectWizardRefs} />
       <div className="agent-answer__actions">
         <MessageCopyButton text={item.content || ''} />
+        {completedAt && <time className="agent-answer__time" dateTime={completedAt.toISOString()} title={completedAt.toLocaleString()}>
+          {`${String(completedAt.getHours()).padStart(2, '0')}:${String(completedAt.getMinutes()).padStart(2, '0')}`}
+        </time>}
       </div>
     </div>
   );

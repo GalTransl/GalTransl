@@ -85,7 +85,7 @@ export function extractionTimeline(rows: Row[], running: boolean, pending: Agent
       lastAssistant = undefined;
     } else {
       if (row.thinking) current.items.push({ kind: 'reasoning', id: row.id, step: step(row.id), content: row.thinking, streaming: running && !row.done && !row.thinkingDone, durationMs: row.thinkingDurationMs });
-      if (row.text) current.items.push({ kind: 'content', id: row.id, step: step(row.id), content: row.text, streaming: running && !row.done && !row.contentDone, durationMs: row.durationMs });
+      if (row.text) current.items.push({ kind: 'content', id: row.id, step: step(row.id), content: row.text, streaming: running && !row.done && !row.contentDone, durationMs: row.durationMs, completedAtMs: row.completedAtMs });
       lastAssistant = row;
     }
   }

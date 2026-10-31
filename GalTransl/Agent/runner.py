@@ -685,7 +685,7 @@ class AgentRunner:
             self._emit("stopped", data)
             self.state.status = "stopped"
         else:
-            self._emit("finish", data)
+            self._emit("finish", {**data, "ts": time.time()})
             self.state.status = "awaiting_input"
         self.state.turn_end = kind
         # 排队消息的 user_message 事件排在收尾事件之后：界面上才是

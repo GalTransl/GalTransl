@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import uuid
 from collections import OrderedDict, deque
 from pathlib import Path
@@ -59,7 +60,8 @@ class ExtractionRuntime:
                 self.sequences[session_id] = max(self.store.read(session_id).get("seq", 0),
                                                  tail[-1]["seq"] if tail else 0)
             self.sequences[session_id] += 1
-            record = {**event, "seq": self.sequences[session_id]}
+            record = {**({"ts": time.time()} if event["type"] == "assistant_message" else {}),
+                      **event, "seq": self.sequences[session_id]}
             events = self.events.setdefault(session_id, deque())
             events.append(record)
             self.event_bytes[session_id] = self.event_bytes.get(session_id, 0) + len(json.dumps(record, ensure_ascii=False).encode("utf-8"))

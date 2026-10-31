@@ -10,6 +10,41 @@ const { toolRowPhases } = load(new URL('../src/pages/agent/rows/ToolRow.tsx', im
 const user = { id: 'user-1', role: 'user', text: 'Inspect this isolated fixture' };
 const tool = { id: 'tool-1', role: 'tool', tool: 'run_python', args: { code: 'print("fixture")' }, text: 'partial output' };
 
+test('extraction completion time appears beside copy and survives replay and split history', () => {
+  const { reduceEvents, prependHistory } = load(new URL('../src/pages/extraction/transcript.ts', import.meta.url));
+  const { AgentGroupView } = load(new URL('../src/pages/agent/rows/AgentGroupView.tsx', import.meta.url));
+  const completedAt = new Date(2026, 9, 31, 23, 0);
+  const events = [
+    { type: 'assistant_start', seq: 1, messageId: 'reply' },
+    { type: 'assistant_delta', seq: 2, messageId: 'reply', text: 'Finished' },
+    { type: 'content_end', seq: 3, messageId: 'reply', duration_ms: 500 },
+    { type: 'assistant_message', seq: 4, messageId: 'reply', text: 'Finished', stopReason: 'stop', ts: completedAt.getTime() / 1000 },
+  ];
+  const build = createExtractionTimelineBuilder();
+  const streaming = build(reduceEvents([], events.slice(0, -1)), true, null);
+  assert.equal(streaming[0].finalContent, undefined);
+  const live = reduceEvents([], events);
+  const group = build(live, true, null)[0];
+  assert.equal(group.finalContent.completedAtMs, completedAt.getTime());
+  for (let split = 1; split < events.length; split += 1) {
+    const restored = prependHistory(reduceEvents([], events.slice(split)), reduceEvents([], events.slice(0, split)));
+    assert.equal(extractionTimeline(restored, false, null)[0].finalContent.completedAtMs, completedAt.getTime());
+  }
+  const replay = reduceEvents([], JSON.parse(JSON.stringify(events)));
+  assert.equal(build(replay, true, null)[0], group);
+  for (const rows of [live, replay]) {
+    let renderer;
+    act(() => { renderer = create(h(AgentGroupView, { group: extractionTimeline(rows, false, null)[0], isLive: false, projectDir: '', persistKey: 'completion-time' })); });
+    const time = renderer.root.findByType('time');
+    assert.equal(time.children.join(''), '23:00');
+    assert.equal(time.props.dateTime, completedAt.toISOString());
+    assert.equal(time.parent.props.className, 'agent-answer__actions');
+    assert.ok(time.parent.findByProps({ className: 'agent-message-copy' }));
+    act(() => renderer.unmount());
+  }
+  assert.equal(extractionTimeline(reduceEvents([], [{ ...events.at(-1), ts: undefined }]), false, null)[0].finalContent.completedAtMs, undefined);
+});
+
 test('running extraction labels follow tool and text activity while preserving waiting and stopping states', () => {
   const componentLoad = createTypeScriptLoader({ URLSearchParams }, {
     '../../components/PageActivity': { usePageActive: () => false },

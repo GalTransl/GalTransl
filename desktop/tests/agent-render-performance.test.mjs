@@ -245,15 +245,17 @@ test('collapsed history mounts no tool bodies or reasoning markdown, while final
 for (const source of ['stream', 'history']) {
   test(`${source} final reply keeps its node and markdown render across disclosure transitions`, () => {
     markdownRenders.clear();
+    const completedAt = new Date(2026, 9, 31, 23, 0);
     const events = [
       { type: 'reasoning_delta', step: 1, delta: 'thinking' },
       ...(source === 'stream'
         ? [{ type: 'content_delta', step: 2, delta: 'unique final answer' }, { type: 'content_end', step: 3, duration_ms: 1200 }]
         : [{ type: 'assistant_message', step: 3, parts: [{ type: 'reasoning', text: 'thinking' }, { type: 'text', text: 'unique final answer' }] }]),
-      { type: 'finish', step: 4, summary: 'unique final answer' },
+      { type: 'finish', step: 4, summary: 'unique final answer', ts: completedAt.getTime() / 1000 },
     ];
     const group = buildTimeline(events)[0];
     assert.equal(group.items.at(-1).final, true);
+    assert.equal(buildTimeline(JSON.parse(JSON.stringify(events)))[0].finalContent.completedAtMs, completedAt.getTime());
     let renderer;
     act(() => { renderer = create(createElement(AgentGroupView, { group, isLive: false, projectDir: '', persistKey: source })); });
     const header = () => renderer.root.findByProps({ className: 'agent-activity__header' });
@@ -268,6 +270,11 @@ for (const source of ['stream', 'history']) {
       assert.equal(withinBody, false);
       assert.equal(replies[0], originalReply);
       assert.equal(markdownRenders.get('unique final answer'), 1);
+      const time = renderer.root.findByType('time');
+      assert.equal(time.children.join(''), '23:00');
+      assert.equal(time.props.dateTime, completedAt.toISOString());
+      assert.equal(time.parent.props.className, 'agent-answer__actions');
+      assert.ok(time.parent.findByProps({ className: 'agent-message-copy' }));
       assert.equal(renderer.root.findAll(node => node.type === 'div' && node.props.className === 'test-markdown' && node.children[0] === 'unique final answer').length, 1);
     };
     try {
@@ -347,4 +354,16 @@ test('a plain final response has no empty execution disclosure', () => {
   const html = renderToStaticMarkup(createElement(AgentGroupView, { group, isLive: false, projectDir: '', persistKey: 'plain' }));
   assert.match(html, /plain reply/);
   assert.doesNotMatch(html, /agent-activity__header/);
+  assert.doesNotMatch(html, /<time/);
+});
+
+test('completion timestamp updates the shared final model without changing unchanged replies', () => {
+  const build = createTimelineBuilder();
+  const finish = { type: 'finish', step: 1, summary: 'reply' };
+  const legacy = build([finish]);
+  const completed = build([{ ...finish, ts: 1793458800 }]);
+  assert.equal(legacy[0].finalContent.completedAtMs, undefined);
+  assert.equal(completed[0].finalContent.completedAtMs, 1793458800000);
+  assert.notEqual(completed, legacy);
+  assert.equal(build([{ ...finish, ts: 1793458800 }]), completed);
 });

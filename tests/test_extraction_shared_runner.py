@@ -182,6 +182,9 @@ def test_shared_loop_real_tool_approval_usage_and_restart(setup, model_server):
     assert 'not only in thinking content or a tool\'s reason parameter' in first_user_message
     assert first_user_message.endswith('Original user message:\nCheck synthetic fixture')
     events = runtime.snapshot(sid)["events"]
+    completed = next(event for event in events if event.get("text") == "Synthetic check finished.")
+    assert completed["ts"] > 0
+    assert next(event for event in runtime.poll(sid, 0)["events"] if event["type"] == "assistant_message" and event.get("text") == completed["text"])["ts"] == completed["ts"]
     intent_events = [event for event in events if event['type'] in {'tool_start', 'permission_request'}]
     assert len(intent_events) == 2
     assert all(event['arguments']['reason'] == reason for event in intent_events)
@@ -207,6 +210,7 @@ def test_shared_loop_real_tool_approval_usage_and_restart(setup, model_server):
     assert requests[-1]["messages"][-1]["content"] == "Continue"
     assert next(message['content'] for message in requests[-1]['messages'] if message['role'] == 'user') == first_user_message
     replay = module.ExtractionRuntime(runtime.store).snapshot(sid)["events"]
+    assert next(event for event in replay if event.get("text") == completed["text"])["ts"] == completed["ts"]
     assert [event for event in replay if event['type'] in {'tool_start', 'permission_request'}] == intent_events
     assert [event["text"] for event in replay if event["type"] == "user_message"] == ["Check synthetic fixture", "Continue"]
     continuation = next(index for index, event in enumerate(replay) if event.get("text") == "Continue")

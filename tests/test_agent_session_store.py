@@ -51,6 +51,24 @@ class SessionStoreTests(unittest.TestCase):
         store.append_event({"type": "content", "step": 3, "content": "kept"})
         self.assertEqual(len(store.load()["events"]), 1)
 
+    def test_completion_time_survives_replay_and_legacy_logs(self) -> None:
+        from GalTransl.Agent.models import AgentState
+        from GalTransl.Agent.runner import AgentRunner
+
+        sid = ss.create_session(self.project, "time")
+        runner = AgentRunner(AgentState(project_dir=self.project, session_id=sid))
+        runner._end_turn("done", {"summary": "Finished"})
+        live = next(event.to_dict() for event in runner.state.events if event.type == "finish")
+        self.assertGreater(live["ts"], 0)
+        store = ss.SessionStore(self.project, sid)
+        self.assertEqual(store.load()["events"][-1], live)
+        self.assertEqual(ss.read_transcript(self.project, sid)[-1], live)
+        store.append_event({"type": "finish", "step": 10, "summary": "Legacy reply"})
+        with open(store.path, encoding="utf-8") as stream:
+            recorded = [json.loads(line) for line in stream][-1]
+        self.assertEqual(store.load()["events"][-1]["ts"], recorded["at"])
+        self.assertEqual(ss.read_transcript(self.project, sid)[-1]["ts"], recorded["at"])
+
     def test_tool_result_payload_is_stored_once_and_restored(self) -> None:
         sid = ss.create_session(self.project, "t")
         store = ss.SessionStore(self.project, sid)

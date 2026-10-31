@@ -2177,6 +2177,7 @@ export type AgentEvent = {
   max_attempts?: number;
   delay_ms?: number;
   code?: string;
+  /** Event time in Unix seconds (retry start or turn completion). */
   ts?: number;
   aborted?: boolean;
   // finish
