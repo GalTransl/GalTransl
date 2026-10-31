@@ -373,7 +373,12 @@ def test_history_archive_tool_and_prompt_follow_plugin_switch(tmp_path, runner_t
         runner._resolve_llm()
         ordinary_tools = runner._request_tools()
         assert "read_history_archive" in {tool["function"]["name"] for tool in ordinary_tools}
-        assert "read_history_archive" in runner._messages_for_request(strip_internal=strip_internal)[0]["content"]
+        ordinary_messages = runner._messages_for_request(strip_internal=strip_internal)
+        if runner_type is AgentRunner:
+            assert "read_history_archive" in ordinary_messages[0]["content"]
+        if runner_type is ExtractionRunner:
+            assert "Available tools:" in ordinary_messages[0]["content"]
+            assert "read_history_archive" not in ordinary_messages[0]["content"]
 
         enabled = True
         runner._resolve_llm()

@@ -46,18 +46,28 @@ def prepare(root=ROOT, output=OUTPUT, *, update=True):
         raise RuntimeError("Incomplete extraction Skill")
     # Record the resolved version only in the export, never as an update pin.
     source.update(commit=commit, files=len(files))
+    resources = [(skill / name, Path("skills") / SKILL_NAME / name) for name in files]
+    # Other skills participate in the same tracked-resource export, including submodules.
+    for name in filter(None, git(root, "ls-files", "-z", "--", "skills").split("\0")):
+        relative = Path(name)
+        if relative == Path("skills") / SKILL_NAME or relative == Path("skills/sources.json"):
+            continue
+        origin = root / relative
+        if origin.is_dir():
+            resources.extend((origin / child, relative / child)
+                             for child in filter(None, git(origin, "ls-files", "-z").split("\0")))
+            continue
+        resources.append((origin, relative))
     output.parent.mkdir(parents=True, exist_ok=True)
     # Only our exact staging directory may be replaced; never traverse a link.
     if output.is_symlink() or output.resolve() != output:
         raise RuntimeError("Extraction staging directory must not be a link")
     with tempfile.TemporaryDirectory(prefix="extraction-stage-", dir=output.parent) as temporary:
         stage = Path(temporary)
-        for name in files:
-            relative = Path(name)
-            origin = skill / relative
-            if relative.is_absolute() or ".." in relative.parts or origin.is_symlink() or not origin.is_file() or not origin.resolve().is_relative_to(skill.resolve()):
-                raise RuntimeError(f"Invalid Skill resource: {name}")
-            target = stage / "skills" / SKILL_NAME / relative
+        for origin, relative in resources:
+            if relative.is_absolute() or ".." in relative.parts or origin.is_symlink() or not origin.is_file() or not origin.resolve().is_relative_to((root / "skills").resolve()):
+                raise RuntimeError(f"Invalid Skill resource: {relative}")
+            target = stage / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(origin, target)
         (stage / "skills").mkdir(exist_ok=True)

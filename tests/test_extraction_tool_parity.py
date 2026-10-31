@@ -26,7 +26,7 @@ def fixture(tmp_path):
     game, skill = tmp_path / 'game', tmp_path / 'skill'
     game.mkdir()
     skill.mkdir()
-    (skill / 'SKILL.md').write_text('Synthetic audit Skill', encoding='utf-8')
+    (skill / 'SKILL.md').write_text('---\nname: audit\ndescription: Synthetic audit\n---\nSynthetic audit Skill', encoding='utf-8')
     (skill / 'audit_module.py').write_text('import sys; print("module", sys.argv[1])', encoding='utf-8')
     store = SessionStore(tmp_path / 'sessions')
     session = store.create(str(game), str(tmp_path / 'workspace'))

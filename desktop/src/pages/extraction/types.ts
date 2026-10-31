@@ -34,6 +34,8 @@ export type Environment = {
   ready: boolean; problems: string[]; agent_engine: string; python_version: string;
   settings: { skill_dir: string; python_path: string };
   skill: SkillStatus;
+  skills: { name: string; description: string; file_path: string; base_dir: string; source: string; disable_model_invocation: boolean }[];
+  skill_diagnostics: { path: string; message: string }[];
   system_pythons: { executable: string; args: string[]; version: string; architecture: number }[];
 };
 export type SessionList = { sessions: Session[]; next_offset: number | null; total: number; running_game_dirs?: string[] };

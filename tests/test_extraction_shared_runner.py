@@ -17,6 +17,7 @@ from GalTransl.Extraction.runner import ExtractionRunner, restore_state
 from GalTransl.Extraction.store import SessionStore
 from GalTransl.Extraction.tool_schemas import EXTRACTION_TOOLS, validate_arguments
 from GalTransl.Extraction.tools import ExtractionTools, checked_path
+from GalTransl.Extraction.skills import discover_skills
 
 
 def wait_for(predicate, timeout=8):
@@ -36,9 +37,10 @@ def setup(tmp_path, monkeypatch):
     game, skill = tmp_path / "game", tmp_path / "skill"
     game.mkdir()
     skill.mkdir()
-    (skill / "SKILL.md").write_text("Synthetic isolated extraction Skill", encoding="utf-8")
+    (skill / "SKILL.md").write_text("---\nname: synthetic\ndescription: Synthetic extraction\n---\nSynthetic isolated extraction Skill", encoding="utf-8")
+    skills, _ = discover_skills([skill, Path(__file__).resolve().parent.parent / "skills" / "galtransl-project-handoff"])
     available = {"ready": True, "problems": [], "settings": {"skill_dir": str(skill), "python_path": ""},
-                 "builtin_python": builtin_python(), "python_runner_script": python_runner_script(), "system_pythons": []}
+                 "builtin_python": builtin_python(), "python_runner_script": python_runner_script(), "system_pythons": [], "skills": skills}
     monkeypatch.setattr(module, "environment", lambda: available)
     store = SessionStore(tmp_path / "sessions")
     session = store.create(str(game))
@@ -668,7 +670,7 @@ def test_legacy_development_history_import_does_not_need_node(setup):
         previous_messages({**session, "pi_session_file": str(legacy)}, directory / "wrong-root")
 
 
-def test_resumed_extraction_refreshes_wizard_instructions_without_rewriting_history(setup):
+def test_resumed_extraction_advertises_handoff_skill_without_loading_its_body(setup):
     runtime, session, available = setup
     state, store = restore_state(session, runtime.store.directory(session["id"]), {}, "continue", "ask")
     runner = ExtractionRunner(state, store, session, available, lambda event: None)
@@ -676,10 +678,12 @@ def test_resumed_extraction_refreshes_wizard_instructions_without_rewriting_hist
     runner._persist_message(old)
     runner._persist_message({"role": "user", "content": "Finish extracting"})
     prompt = runner._messages_for_request()[0]["content"]
-    assert '@new_project_wizard("absolute project directory")' in prompt
-    assert "CONTAINS gt_input" in prompt
-    assert "Do not create config.yaml yourself" in prompt
-    assert str(session["workspace"]) in prompt
+    assert '<name>galtransl-project-handoff</name>' in prompt
+    assert '@new_project_wizard' not in prompt
+    handoff = next(skill for skill in available['skills'] if skill['name'] == 'galtransl-project-handoff')
+    result = runner._dispatch_tool('read', {'path': handoff['file_path']})
+    assert '@new_project_wizard("absolute project directory")' in result['content'][0]['text']
+    assert Path(session["workspace"]).as_posix() in prompt
     assert state.messages[0] == old
     assert store.load()["messages"][0] == old
 

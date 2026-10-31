@@ -1,8 +1,12 @@
 # 提取 Agent
 
-提取 Agent 复用 `GalTransl.Agent.AgentRunner` 的 OpenAI 兼容请求、流式输出、重试、停止、审批、会话持久化和上下文压缩。提取专用提示词、工具集和输出工作区与翻译任务分开；不再启动 Pi sidecar，也不打包 Node.js、Pi SDK 或 npm 运行依赖。
+提取 Agent 复用 `GalTransl.Agent.AgentRunner` 的 OpenAI 兼容请求、流式输出、重试、停止、审批、会话持久化和上下文压缩。system prompt 沿用原版 Pi 的身份、工具、简短指南、skill 元数据和工作目录结构，将身份改为 GalTransl 提取助手；提取流程留在对应 skill 中，不预先载入全文。不再启动 Pi sidecar，也不打包 Node.js、Pi SDK 或 npm 运行依赖。
 
-工具集为 `read`、`bash`、`edit`、`write`、`run_python`、`ask_user` 和共用的 `read_history_archive`。启用 billion-context 时隐藏 `read_history_archive`，改用插件的 `compress`、`decompress`、`search_context` 和 `acp_status`。四个原生名称工具依据本地归档的 Pi 1.4.0 实现其参数及行为契约，替换原 `read_file/run_shell/edit_file/write_file`，不再注册旧名称。四个工具的 description、参数 `description`，以及系统提示词里的 `Available tools` / `Guidelines`（各工具的 promptSnippet 与 promptGuidelines）均逐字取自 Pi 源码，由 `tool_schemas.py` 的 `tool_prompt_section()` 生成；bash 的 `PI_*` 环境变量提示不适用，已省略。目录浏览使用 `bash` 或 `run_python`。读取范围为游戏、Skill 和工作区，文件编辑仅限工作区；Python/bash 以当前用户权限执行，遵循审批模式，可停止，不构成操作系统沙箱。
+新增 skill 时，在 `skills/<name>/SKILL.md` 写入 YAML frontmatter 的 `name` 和非空 `description`，正文写具体任务指引，脚本和参考文件放在同一目录。下一回合自动注册，无需修改代码；默认只把名称、说明和绝对路径加入 prompt，agent 匹配任务后用 `read` 读取全文。支持递归查找子目录里的 `SKILL.md` 及 skills 根目录的单文件 `.md`，发现 skill 根目录后不扫描其中的参考文档；跳过隐藏目录、链接、node_modules 和 Python 缓存。当前选择的 skill 优先，同名项保留第一个，并通过环境接口 `skill_diagnostics` 报告重复或无效元数据。`disable-model-invocation: true` 隐藏自动提示，但仍可用 `/skill:<name> 参数` 显式调用，全文在进入模型历史时展开。所有已注册 skill 的目录都可读取并由 `run_python` 导入，写入工具仍限于工作区。
+
+仓库 `skills/` 是打包来源；新增仓库 skill 及辅助文件纳入 Git 后，现有资源准备命令会自动导出。`galtransl-project-handoff` skill 保存提取完成后的项目创建按钮说明，按任务加载。
+
+工具集为 `read`、`bash`、`edit`、`write`、`run_python`、`ask_user` 和共用的 `read_history_archive`。启用 billion-context 时隐藏 `read_history_archive`，改用插件的 `compress`、`decompress`、`search_context` 和 `acp_status`。四个原生名称工具依据本地归档的 Pi 1.4.0 实现其参数及行为契约，替换原 `read_file/run_shell/edit_file/write_file`，不再注册旧名称。四个工具的基础 description、参数 `description`，以及系统提示词里的 `Available tools` / `Guidelines`（各工具的 promptSnippet 与 promptGuidelines）均逐字取自 Pi 源码，由 `tool_schemas.py` 的 `tool_prompt_section()` 生成；bash 的 `PI_*` 环境变量提示不适用，已省略；Windows 的 BusyBox 语法与 `$TMPDIR` 说明放在 bash 的工具描述中。目录浏览使用 `bash` 或 `run_python`。读取范围为游戏、Skill 和工作区，文件编辑仅限工作区；Python/bash 以当前用户权限执行，遵循审批模式，可停止，不构成操作系统沙箱。
 
 - `read(path, offset?, limit?)`：UTF-8 文本保留 BOM/CRLF，按 2,000 行或 50 KiB 完整行截断，附续读提示；不再限制文本文件为 2 MiB。按文件头识别 JPG/PNG/GIF/WebP/BMP，BMP 转 PNG；图片最大边 2,000 像素、base64 小于 4.5 MiB，缩放附坐标映射。模型请求中的 `tool` 回复仅含文本，图片作为该批全部工具回复之后的 `user` 附件传递并标明调用 ID。历史和 UI 日志仅保存会话资产引用；旧会话重放采用同一转换，重启后恢复。
 - `bash(command, timeout?)`：实际 shell；Windows 使用随程序分发的 `res/busybox64u.exe`（Unicode 构建，64 位，需 Win10 1903+；缺失时明确报错，不替代为 PowerShell 或 Git Bash）。命令经 stdin 以 UTF-8 交给 `busybox sh -s`，既避开 Windows 命令行长度限制，也保证中文/日文路径与内容全程 UTF-8。语法是 POSIX sh（BusyBox ash）语义：管道、`$(...)`、heredoc、`for/while` 可用，bash 专有的数组、`[[ ]]`、`for ((;;))` 不支持。BusyBox 的 POSIX 绝对路径按当前驱动器解析（`/tmp` 就是 `<工作目录所在盘>:\tmp`，通常在非系统盘上并不存在），所以 shell 环境的 `TMPDIR` 指向工作区内的 `tmp` 目录，临时文件应使用 `$TMPDIR`（`$TEMP` 仍是系统临时目录）。默认无超时，支持正数小数秒、最大 2,147,483.647 秒。继承环境并清理冻结程序的私有加载路径；保留末尾 2,000 行或 50 KiB，长输出完整落在工作区日志，不设旧的 10 MiB 输出终止限制。非零退出标为失败，超时/停止回收进程树。与 Pi 一致，命令正常结束后留下的后台进程继续运行，bash 在输出管道静默 100 ms 后返回，不会因后代持有管道而永久挂起；Windows 上结束时释放作业对象而不杀后代。`read`/`write`/`edit` 的路径沿用 Pi 的 Windows 转换：`/c/x`、`/mnt/c/x`、`/cygdrive/c/x` 视为 `C:\x`。
@@ -19,7 +23,7 @@
 
 配置窗口立即打开，先显示已加载的环境信息，再后台检查环境和探测解释器；首次尚无数据时显示加载提示。检查失败时窗口内显示错误，并支持重试。
 
-`read`、`write`、`edit`、`bash` 和 `run_python` 增加可选 `reason` 参数（最多 200 字符），系统提示词要求每次调用用用户语言填写一句简短的操作意图。调用行和审批区直接显示这句说明；没有该参数的旧会话仍显示文件路径或命令摘要。原始执行参数、工具结果和 Pi 参数契约保留，`reason` 是 GalTransl 额外提供的展示参数。billion-context 的四个工具共用翻译和提取界面的中文标签。
+`read`、`write`、`edit`、`bash` 和 `run_python` 增加可选 `reason` 参数（最多 200 字符），参数说明提示用用户语言填写一句简短的操作意图。调用行和审批区直接显示这句说明；没有该参数的旧会话仍显示文件路径或命令摘要。原始执行参数、工具结果和 Pi 参数契约保留，`reason` 是 GalTransl 额外提供的展示参数。billion-context 的四个工具共用翻译和提取界面的中文标签。
 
 翻译与提取 agent 共用 `GalTransl/Agent/prompts.py` 中的英文 `INITIAL_USER_MESSAGE_PREFIX`，通过首条用户消息注入：问候只作简短回复；实际执行任务时，先用用户语言在助手正文说明主要步骤与验证方式，再开始调用工具。执行过程中在工具调用之间穿插当前状况、实际进展、问题和下一步，关键阶段、阻碍和方案调整及时反馈；思考内容或工具 `reason` 不代替正文反馈。界面及用户消息事件仍展示原始输入，后续用户消息不重复注入该段落。
 
@@ -39,4 +43,4 @@ UI 会话日志位于用户数据目录 `extraction/sessions/<id>/`，模型历�
 
 运行期间发送的文字和图片先进入消息队列，面板共用翻译 Agent 的立即发送、编辑和删除操作。本轮正常完成或失败后自动消费队列并续跑；手动停止则保留队列供用户处理。「立即」打断本轮，先发送选中的消息，其余消息继续等待新一轮完成。队列仅保存在内存中，重启后清空；消费前不进入模型历史。自动续跑和立即发送期间持续占用游戏目录及输出工作区。
 
-验证：`python -m pytest tests/test_extraction_agent.py tests/test_extraction_runtime.py tests/test_extraction_shared_runner.py tests/test_extraction_tool_parity.py tests/test_extraction_native_tools.py`；前端检查从 `desktop` 运行 `npm test`、`npm run build`、`npm run i18n:check`。测试使用隔离的合成文件和本机模拟模型，不调用付费模型或执行真实游戏提取。原生进程与图片测试需安装后端 requirements（含 Pillow）和本机 Bash；平台验证仅覆盖实际执行的环境。
+验证：从 `tests` 运行 `../.venv/Scripts/python.exe -m pytest test_extraction_skills.py test_extraction_agent.py test_extraction_runtime.py test_extraction_shared_runner.py test_extraction_tool_parity.py test_extraction_native_tools.py test_runtime_paths.py`（Linux/macOS 使用 `../.venv/bin/python`）；前端检查从 `desktop` 运行 `npm test`、`npm run build`、`npm run i18n:check`。测试使用隔离的合成文件和本机模拟模型，不调用付费模型或执行真实游戏提取。原生进程与图片测试需安装后端 requirements（含 Pillow）和本机 Bash；平台验证仅覆盖实际执行的环境。

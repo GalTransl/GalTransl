@@ -86,7 +86,8 @@ def test_intent_survives_bounded_call_and_approval_previews(fixture, name, args)
 def test_system_prompt_carries_pi_tool_snippets_and_guidelines(fixture):
     runner, _ = fixture
     prompt = runner._system_prompt()
-    assert "include reason: one short sentence in the user's language" in prompt
+    assert prompt.startswith("You are an expert extraction assistant operating inside GalTransl, a coding agent harness.")
+    assert "Before extraction or reinsertion" not in prompt
     assert ('Available tools:\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n'
             '- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n'
             '- write: Create or overwrite files\n\n'
@@ -120,7 +121,8 @@ def test_old_saved_system_instruction_uses_native_read_without_rewriting_history
     old = {'role': 'system', 'content': 'Before extraction, read_file, following next_line until done: SKILL.md'}
     runner.state.messages = [old, {'role': 'user', 'content': 'Continue'}]
     projected = runner._messages_for_request()
-    assert 'read, following offset continuation notices until done' in projected[0]['content']
+    assert "Use the read tool to load a skill's file when the task matches its description." in projected[0]['content']
+    assert 'read_file' not in projected[0]['content']
     assert 'read_file' in runner.state.messages[0]['content']
 
 

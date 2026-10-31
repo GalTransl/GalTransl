@@ -15,6 +15,9 @@ from GalTransl.Extraction.http import route_extraction
 from GalTransl.Extraction.skill import RECEIPT, SKILL_NAME
 
 
+FRONTMATTER = f"---\nname: {SKILL_NAME}\ndescription: Synthetic extraction\n---\n"
+
+
 def archive(files):
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w") as bundle:
@@ -38,7 +41,7 @@ def skill_server(tmp_path, monkeypatch, discover_pythons):
     app = tmp_path / "app"
     original = app / "skills" / SKILL_NAME
     original.mkdir(parents=True)
-    (original / "SKILL.md").write_text("Original Skill", encoding="utf-8")
+    (original / "SKILL.md").write_text(FRONTMATTER + "Original Skill", encoding="utf-8")
     (original / "LICENSE").write_text("Original license", encoding="utf-8")
     (original.parent / "sources.json").write_text(json.dumps({SKILL_NAME: {"commit": "a" * 40}}))
     (app / "extraction_python.py").touch()
@@ -46,7 +49,7 @@ def skill_server(tmp_path, monkeypatch, discover_pythons):
     monkeypatch.setenv("GALTRANSL_RESOURCE_DIR", str(app))
     monkeypatch.setenv("GALTRANSL_DATA_DIR", str(data))
     upstream = {"commit": "b" * 40, "status": 200, "calls": [], "archive": archive({
-        "upstream/SKILL.md": "Downloaded Skill", "upstream/LICENSE": "Synthetic license",
+        "upstream/SKILL.md": FRONTMATTER + "Downloaded Skill", "upstream/LICENSE": "Synthetic license",
         "upstream/python/示例.py": "print('synthetic')",
     })}
 
@@ -136,14 +139,14 @@ def test_install_and_update_enable_downloads_and_preserve_previous_versions(skil
     assert result["skill"]["current_commit"] == "b" * 40
     assert (downloaded / "python/示例.py").read_text() == "print('synthetic')"
     assert json.loads((downloaded / RECEIPT).read_text())["commit"] == "b" * 40
-    assert (original / "SKILL.md").read_text() == "Original Skill"
+    assert (original / "SKILL.md").read_text() == FRONTMATTER + "Original Skill"
     upstream["commit"] = "c" * 40
-    upstream["archive"] = archive({"upstream/SKILL.md": "Updated Skill", "upstream/LICENSE": "license"})
+    upstream["archive"] = archive({"upstream/SKILL.md": FRONTMATTER + "Updated Skill", "upstream/LICENSE": "license"})
     assert api(url, "skill-check", {})[1]["update_available"]
     status, result = api(url, "skill-install", {})
     assert status == 200 and result["skill"]["current_commit"] == "c" * 40
-    assert (downloaded / "SKILL.md").read_text() == "Downloaded Skill"
-    assert (Path(result["settings"]["skill_dir"]) / "SKILL.md").read_text() == "Updated Skill"
+    assert (downloaded / "SKILL.md").read_text() == FRONTMATTER + "Downloaded Skill"
+    assert (Path(result["settings"]["skill_dir"]) / "SKILL.md").read_text() == FRONTMATTER + "Updated Skill"
     upstream["calls"].clear()
     assert api(url, "skill-install", {})[0] == 200
     assert upstream["calls"] == ["/upstream/latest"]

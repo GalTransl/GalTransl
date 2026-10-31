@@ -1,4 +1,6 @@
 """Pi-style local tools, exposed through GalTransl's existing function-calling loop."""
+import os
+
 from GalTransl.Agent.tool_schemas import AGENT_TOOLS
 
 
@@ -27,13 +29,14 @@ EXTRACTION_TOOLS = [
               "type": "object", "required": ["oldText", "newText"], "properties": {
                   "oldText": {"type": "string", "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."},
                   "newText": {"type": "string", "description": "Replacement text for this targeted edit."}}}}}, ["path", "edits"]),
-    tool("run_python", "Execute Python in the output workspace. Supply exactly one of code, script, module. Defaults to the existing backend's bundled Python; the Skill root is importable. Explicitly choose runtime=system (optionally python_path) if a dependency is unavailable; never auto-install packages or silently fall back. Commands run as the local user, not in a sandbox. Never execute game EXE/DLLs or overwrite source files. Output is bounded; full output is in log_path. Nonzero exit code means failure.",
+    tool("run_python", "Execute Python in the output workspace. Supply exactly one of code, script, module. Defaults to the existing backend's bundled Python; registered Skill directories are importable. Explicitly choose runtime=system (optionally python_path) if a dependency is unavailable; never auto-install packages or silently fall back. Commands run as the local user, not in a sandbox. Never execute game EXE/DLLs or overwrite source files. Output is bounded; full output is in log_path. Nonzero exit code means failure.",
          {"code": {"type": "string", "maxLength": 60000}, "script": PATH,
           "module": {"type": "string", "minLength": 1, "maxLength": 256},
           "runtime": {"type": "string", "enum": ["bundled", "system"]}, "python_path": PATH,
           "args": {"type": "array", "maxItems": 16, "items": {"type": "string", "maxLength": 1024}},
           "timeout_seconds": TIMEOUT}),
-    tool("bash", "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+    tool("bash", "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds."
+         + (" On Windows this uses BusyBox sh: use POSIX syntax and $TMPDIR for scratch files; arrays, [[ ]] and C-style for are unavailable." if os.name == "nt" else ""),
          {"command": {"type": "string", "description": "Shell command to execute"},
           "timeout": {"type": "number", "description": "Timeout in seconds (optional, no default timeout)"}}, ["command"]),
     tool("ask_user", "Ask the user for a required choice that cannot be inferred. Supply 1-4 questions, each with options and a recommended option matching one of them. The user can also enter a custom answer. In full-auto no-interruption mode the recommended option is selected automatically; without a recommendation the first option is used.",

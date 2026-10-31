@@ -96,7 +96,7 @@ def test_packaging_collects_dynamic_standard_library_and_license():
 def test_environment_uses_existing_python_without_node(tmp_path, monkeypatch):
     skill = tmp_path / "skills" / "galtransl-galgamereverse-skill"
     skill.mkdir(parents=True)
-    (skill / "SKILL.md").touch()
+    (skill / "SKILL.md").write_text('---\nname: synthetic\ndescription: Synthetic extraction\n---\n')
     runner = tmp_path / "extraction_python.py"
     runner.touch()
     monkeypatch.setattr(module, "get_resource_root", lambda: tmp_path)
@@ -272,3 +272,19 @@ def test_local_preparation_without_skill_still_exports_adapter(tmp_path, skill_s
     assert not (output / "skills" / SKILL_NAME).exists()
     assert (output / "extraction-python/runner.py").is_file()
     assert json.loads((output / "skills/sources.json").read_text())[SKILL_NAME]["files"] == 0
+
+
+def test_resource_export_includes_additional_skills_and_their_helpers(tmp_path, skill_source):
+    from scripts.prepare_extraction import prepare
+
+    source, _, _ = skill_source
+    extra = source / 'skills' / 'extra'
+    extra.mkdir()
+    (extra / 'SKILL.md').write_text('---\nname: extra\ndescription: Extra skill\n---\n')
+    (extra / 'helper.py').write_text("print('extra')")
+    (extra / 'local-output.txt').write_text('untracked')
+    resource_git(source, 'add', 'skills/extra/SKILL.md', 'skills/extra/helper.py')
+    output = prepare(source, tmp_path / 'export', update=False)
+    assert (output / 'skills/extra/SKILL.md').read_bytes() == (extra / 'SKILL.md').read_bytes()
+    assert (output / 'skills/extra/helper.py').read_bytes() == (extra / 'helper.py').read_bytes()
+    assert not (output / 'skills/extra/local-output.txt').exists()

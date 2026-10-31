@@ -12,6 +12,7 @@ from GalTransl.RuntimePaths import get_resource_root, get_user_data_dir
 
 from .skill import skill_status
 from .python_discovery import discover_pythons, PythonInterpreter
+from .skills import discover_skills
 
 
 def data_root() -> Path:
@@ -98,15 +99,17 @@ def system_pythons(configured: str = "") -> list[PythonInterpreter]:
 
 def environment() -> dict[str, Any]:
     settings = load_settings()
+    skills, diagnostics = discover_skills([Path(settings["skill_dir"]), get_resource_root() / "skills"])
     problems = []
     if sys.version_info < (3, 11):
         problems.append("python_version")
-    if not (Path(settings["skill_dir"]) / "SKILL.md").is_file():
+    if not skills:
         problems.append("skill_missing")
     if not Path(python_runner_script()).is_file():
         problems.append("python_runner_missing")
     return {"settings": settings, "python_version": f"Python {sys.version.split()[0]}",
             "skill": skill_status(Path(settings["skill_dir"])),
+            "skills": skills, "skill_diagnostics": diagnostics,
             "agent_engine": "galtransl", "builtin_python": builtin_python(),
             "python_runner_script": python_runner_script(),
             "system_pythons": system_pythons(settings["python_path"]),

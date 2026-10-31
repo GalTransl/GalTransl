@@ -26,6 +26,7 @@ class Commands:
     def __init__(self, workspace, skill, available, stop_event, emit):
         self.workspace, self.skill = Path(workspace), str(skill)
         self.available, self.stop_event, self.emit = available, stop_event, emit
+        self.skill_dirs = list(dict.fromkeys(item["base_dir"] for item in available["skills"])) if "skills" in available else [self.skill]
         self.lock = threading.Lock()
         self.process = None
         self.job = None
@@ -63,8 +64,9 @@ class Commands:
                     pass
         python = self.available["builtin_python"]
         if not native:
-            env['PYTHONPATH'] = self.skill
+            env['PYTHONPATH'] = os.pathsep.join(self.skill_dirs)
         env.update(GALTRANSL_SKILL_DIR=self.skill,
+                   GALTRANSL_SKILL_DIRS=json.dumps(self.skill_dirs, ensure_ascii=False),
                    GALTRANSL_OUTPUT_DIR=str(self.workspace), GALTRANSL_PYTHON=python["executable"],
                    GALTRANSL_PYTHON_ARGS=json.dumps(python["args"]))
         started = time.monotonic()

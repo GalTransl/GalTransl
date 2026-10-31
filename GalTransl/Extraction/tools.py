@@ -103,6 +103,7 @@ class ExtractionTools:
         self.available = available
         self.stop_event, self.approve = stop_event, approve
         self.commands = Commands(workspace, skill, available, stop_event, emit)
+        self.skill_dirs = self.commands.skill_dirs
 
     def require_permission(self, name, args):
         self.check_stop()
@@ -115,7 +116,7 @@ class ExtractionTools:
             raise AgentStopRequested()
 
     def read_path(self, raw):
-        return checked_path(raw, self.workspace, [self.workspace, self.game, self.skill])
+        return checked_path(raw, self.workspace, [self.workspace, self.game, *self.skill_dirs])
 
     def write_path(self, raw):
         return checked_path(raw, self.workspace, [self.workspace], True)
@@ -235,7 +236,7 @@ class ExtractionTools:
             else:
                 raise AgentToolError("No local Python found. Configure a system Python executable or provide an absolute python_path")
         request = {kinds[0]: str(self.read_path(args["script"])) if kinds[0] == "script" else args[kinds[0]],
-                   "args": args.get("args", []), "skill_dir": str(self.skill)}
+                   "args": args.get("args", []), "skill_dirs": self.skill_dirs}
         self.require_permission("run_python", args)
         return self.commands.execute(executable, [*prefix, "--request-stdin"], call_id, args.get("timeout_seconds", 120), request)
 

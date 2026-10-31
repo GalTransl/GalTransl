@@ -48,13 +48,18 @@ def main(argv: list[str] | None = None) -> int:
         arguments = request.get("args", [])
         if not isinstance(arguments, list) or any(not isinstance(arg, str) for arg in arguments):
             raise ValueError("Python arguments must be strings")
-        skill = request.get("skill_dir") or os.environ.get("GALTRANSL_SKILL_DIR")
+        skills = request.get("skill_dirs")
+        if skills is None:
+            skill = request.get("skill_dir") or os.environ.get("GALTRANSL_SKILL_DIR")
+            skills = [skill] if skill else json.loads(os.environ.get("GALTRANSL_SKILL_DIRS", "[]"))
+        if not isinstance(skills, list) or any(not isinstance(skill, str) or not skill for skill in skills):
+            raise ValueError("Python skill_dirs must be a list of directory paths")
         paths = [str(Path.cwd())]
-        if skill:
-            skill = Path(skill).resolve(strict=True)
-            if not (skill / "SKILL.md").is_file():
+        for skill in reversed(skills):
+            directory = Path(skill).resolve(strict=True)
+            if not directory.is_dir():
                 raise ValueError("Invalid extraction Skill directory")
-            paths.insert(0, str(skill))
+            paths.insert(0, str(directory))
         sys.path[:0] = paths
         if kind[0] == "script":
             script = Path(request["script"]).resolve(strict=True)
