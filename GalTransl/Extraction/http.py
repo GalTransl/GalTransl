@@ -108,7 +108,7 @@ def route_extraction(handler, method: str) -> bool:
                 result = check_skill(Path(directory).expanduser().resolve())
             elif action == "skill-install":
                 directory = install_skill(get_skills_dir())
-                save_settings({"skill_dir": str(directory)})
+                EXTRACTION_RUNTIME.activate_skill(directory)
                 result = environment()
             elif action == "create":
                 result = {"session": EXTRACTION_RUNTIME.store.create(str(payload.get("game_dir", "")),

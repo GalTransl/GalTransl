@@ -2,11 +2,11 @@
 
 提取 Agent 复用 `GalTransl.Agent.AgentRunner` 的 OpenAI 兼容请求、流式输出、重试、停止、审批、会话持久化和上下文压缩。system prompt 沿用原版 Pi 的身份、工具、简短指南、skill 元数据和工作目录结构，将身份改为 GalTransl 提取助手；提取流程留在对应 skill 中，不预先载入全文。不再启动 Pi sidecar，也不打包 Node.js、Pi SDK 或 npm 运行依赖。
 
-用户状态统一存放在 `~/.galtransl`：翻译对话在 `agent_sessions/`，提取对话及其模型历史、图片、压缩归档在 `extraction/sessions/<id>/`，提取设置在 `extraction/settings.json`，应用设置在 `app_settings.json`，skill 在 `skills/`。首次使用会复制旧程序目录和系统用户数据目录中的历史与设置、迁移旧 skill 选择，保留原文件备份且不覆盖新位置已有文件。`GALTRANSL_DATA_DIR` 和 `GALTRANSL_APP_SETTINGS_PATH` 仍可指定其他位置。游戏输出工作区由用户选择，沿用原位置。
+会话和配置存放在 `~/.galtransl`：翻译对话在 `agent_sessions/`，提取对话及其模型历史、图片、压缩归档在 `extraction/sessions/<id>/`，提取设置在 `extraction/settings.json`，应用设置在 `app_settings.json`。Skill 直接读取程序目录的 `skills/`。首次使用会复制旧程序目录和系统用户数据目录中的历史与设置；旧用户目录中的 Skill 选择会迁移到程序目录，补齐缺少的文件且不覆盖程序目录已有文件。`GALTRANSL_DATA_DIR` 和 `GALTRANSL_APP_SETTINGS_PATH` 仍可指定会话和配置的位置。游戏输出工作区由用户选择，沿用原位置。
 
-新增 skill 时，在 `~/.galtransl/skills/<name>/SKILL.md` 写入 YAML frontmatter 的 `name` 和非空 `description`，正文写具体任务指引，脚本和参考文件放在同一目录。下一回合自动注册，无需修改代码；默认只把名称、说明和绝对路径加入 prompt，agent 匹配任务后用 `read` 读取全文。支持递归查找子目录里的 `SKILL.md` 及 skills 根目录的单文件 `.md`，发现 skill 根目录后不扫描其中的参考文档；跳过隐藏目录、链接、node_modules 和 Python 缓存。当前选择的 skill 优先，同名项保留第一个，并通过环境接口 `skill_diagnostics` 报告重复或无效元数据。`disable-model-invocation: true` 隐藏自动提示，但仍可用 `/skill:<name> 参数` 显式调用，全文在进入模型历史时展开。所有已注册 skill 的目录都可读取并由 `run_python` 导入，写入工具仍限于工作区。
+新增 skill 时，在程序目录的 `skills/<name>/SKILL.md` 写入 YAML frontmatter 的 `name` 和非空 `description`，正文写具体任务指引，脚本和参考文件放在同一目录。下一回合自动注册，无需修改代码；默认只把名称、说明和绝对路径加入 prompt，agent 匹配任务后用 `read` 读取全文。支持递归查找子目录里的 `SKILL.md` 及 skills 根目录的单文件 `.md`，发现 skill 根目录后不扫描其中的参考文档；跳过隐藏目录、链接、node_modules 和 Python 缓存。当前选择的 skill 优先，同名项保留第一个，并通过环境接口 `skill_diagnostics` 报告重复或无效元数据。`disable-model-invocation: true` 隐藏自动提示，但仍可用 `/skill:<name> 参数` 显式调用，全文在进入模型历史时展开。所有已注册 skill 的目录都可读取并由 `run_python` 导入，写入工具仍限于工作区。
 
-内置 skill 从发布资源安装到用户的 `skills/`，保留本地编辑。仓库 `skills/` 是打包来源；新增仓库 skill 及辅助文件纳入 Git 后，现有资源准备命令会自动导出。`galtransl-project-handoff` skill 保存提取完成后的项目创建按钮说明，按任务加载。
+内置 Skill 直接使用程序目录 `skills/` 中的发布资源。仓库 `skills/` 是打包来源；新增仓库 skill 及辅助文件纳入 Git 后，现有资源准备命令会自动导出。`galtransl-project-handoff` skill 保存提取完成后的项目创建按钮说明，按任务加载。
 
 工具集为 `read`、`bash`、`edit`、`write`、`run_python`、`ask_user` 和共用的 `read_history_archive`。启用 billion-context 时隐藏 `read_history_archive`，改用插件的 `compress`、`decompress`、`search_context` 和 `acp_status`。四个原生名称工具依据本地归档的 Pi 1.4.0 实现其参数及行为契约，替换原 `read_file/run_shell/edit_file/write_file`，不再注册旧名称。四个工具的基础 description、参数 `description`，以及系统提示词里的 `Available tools` / `Guidelines`（各工具的 promptSnippet 与 promptGuidelines）均逐字取自 Pi 源码，由 `tool_schemas.py` 的 `tool_prompt_section()` 生成；bash 的 `PI_*` 环境变量提示不适用，已省略；Windows 的 BusyBox 语法与 `$TMPDIR` 说明放在 bash 的工具描述中。目录浏览使用 `bash` 或 `run_python`。读取范围为游戏、Skill 和工作区，文件编辑仅限工作区；Python/bash 以当前用户权限执行，遵循审批模式，可停止，不构成操作系统沙箱。
 
@@ -33,9 +33,9 @@ Windows 的 `bash` 工具也支持 `cd /e/x`、`cd /mnt/e/x`、`cd /cygdrive/e/x
 
 新会话默认「自动执行」：工具直接执行，`ask_user` 仍等待用户回答。「全自动-零打断」复用翻译 Agent 的问题参数和推荐项代答逻辑：自动采用 `recommended`，未指定时取第一个选项，不修改系统提示词。普通提问共用翻译 Agent 的多题、选项和自填答案卡片。权限模式可在运行中切换并保存到当前会话：放宽权限会放行当前符合条件的审批，切到零打断会按推荐项回答正在等待的问题；收紧权限对后续工具调用生效。模型列表及已选项共用「配置名/实际模型」展示格式。
 
-开发启动只准备本地资源：Tauri 的开发配置在 `desktop` 运行 `npm run extraction:prepare -- --local`，不拉取或更新 Skill；缺少 Skill 时仍准备 Python 适配器，随后可在提取 Agent 的「运行环境」中点击「下载 Skill」。进入提取 Agent 后自动检查已安装 Skill 的更新，页面打开期间每小时复查，离开页面暂停检查；有更新时左下角显示「Skill 有更新」和黄色状态点，打开配置窗口可查看版本并更新。检查失败保留已有状态，不影响提取。配置窗口支持手动检查更新和下载最新版；下载通过 GitHub 的 `main` 提交和对应源码 ZIP 完成，无需本机 Git，成功后保存到`~/.galtransl/skills/galtransl-galgamereverse-skill/<commit>/` 并自动启用。每个提交独立保存，原有内置、自定义和已下载目录不覆盖；下载失败时保留原选择。自动和手动检查仅查询上游版本，不下载文件；点击下载或更新后才安装。
+开发启动只准备本地资源：Tauri 的开发配置在 `desktop` 运行 `npm run extraction:prepare -- --local`，不拉取或更新 Skill；缺少 Skill 时仍准备 Python 适配器，随后可在提取 Agent 的「运行环境」中点击「下载 Skill」。进入提取 Agent 后自动检查已安装 Skill 的更新，页面打开期间每小时复查，离开页面暂停检查；有更新时左下角显示「Skill 有更新」和黄色状态点，打开配置窗口可查看版本并更新。检查失败保留已有状态，不影响提取。配置窗口支持手动检查更新和下载最新版；下载通过 GitHub 的 `main` 提交和对应源码 ZIP 完成，无需本机 Git，成功后保存到程序目录 `skills/.downloaded/galtransl-galgamereverse-skill/<commit>/` 并自动启用。启用成功后删除其他带有匹配下载凭据的旧哈希版本；正在运行的提取会话使用的版本保留到回合结束后再清理。内置文件和自定义目录保留，下载或切换失败时保留原选择和原版本。自动和手动检查仅查询上游版本，不下载文件；点击下载或更新后才安装。
 
-打包仍运行 `python scripts/prepare_extraction.py`（或 `desktop` 中的 `npm run extraction:prepare`），拉取并快进同步 Skill 上游 `main` 分支的最新提交，将完整 Skill 和小型 Python 适配器导出到 `build/extraction-resources`，排除 Git 元数据和本地输出；缺少 Skill 时初始化子模块，有本地修改或分叉时停止同步，网络失败时明确报错。源码清单只指定来源分支，导出清单记录实际 commit 和文件数。Tauri 及各平台发布脚本使用相同资源；发布后的程序默认使用安装到用户 skills 目录的包内快照，也可在「运行环境」中手动下载更新。前端开发仍使用常规 Node 工具链，发布后的提取 Agent 无需 Node。
+打包仍运行 `python scripts/prepare_extraction.py`（或 `desktop` 中的 `npm run extraction:prepare`），拉取并快进同步 Skill 上游 `main` 分支的最新提交，将完整 Skill 和小型 Python 适配器导出到 `build/extraction-resources`，排除 Git 元数据和本地输出；缺少 Skill 时初始化子模块，有本地修改或分叉时停止同步，网络失败时明确报错。源码清单只指定来源分支，导出清单记录实际 commit 和文件数。Tauri 及各平台发布脚本使用相同资源；发布后的程序默认使用程序目录 skills 中的包内快照，也可在「运行环境」中手动下载更新。前端开发仍使用常规 Node 工具链，发布后的提取 Agent 无需 Node。
 
 新会话默认复用游戏目录内的 `<游戏名>_extract`，不追加数字；自定义输出目录也可复用，创建会话仅补齐缺少的子目录并保留已有文件。多个会话保留独立历史，同一游戏目录（或同一输出工作区）同时只能运行一个提取 Agent，等待审批、等待回答和停止收尾期间仍占用目录；不同游戏仍受全局最多两个提取会话并行的限制。
 

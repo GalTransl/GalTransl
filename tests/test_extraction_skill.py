@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 from GalTransl.Extraction.http import route_extraction
-from GalTransl.Extraction.skill import RECEIPT, SKILL_NAME
+from GalTransl.Extraction.skill import RECEIPT, SKILL_NAME, SOURCE, prune_skill_versions, skill_versions_dir
 
 
 FRONTMATTER = f"---\nname: {SKILL_NAME}\ndescription: Synthetic extraction\n---\n"
@@ -48,6 +48,8 @@ def skill_server(tmp_path, monkeypatch, discover_pythons):
     data = tmp_path / "data"
     monkeypatch.setenv("GALTRANSL_RESOURCE_DIR", str(app))
     monkeypatch.setenv("GALTRANSL_DATA_DIR", str(data))
+    from GalTransl.Extraction import http, runtime
+    monkeypatch.setattr(http, "EXTRACTION_RUNTIME", runtime.ExtractionRuntime())
     upstream = {"commit": "b" * 40, "status": 200, "calls": [], "archive": archive({
         "upstream/SKILL.md": FRONTMATTER + "Downloaded Skill", "upstream/LICENSE": "Synthetic license",
         "upstream/python/示例.py": "print('synthetic')",
@@ -87,7 +89,7 @@ def skill_server(tmp_path, monkeypatch, discover_pythons):
     monkeypatch.setattr(skill, "ARCHIVE_URL", url + "/upstream/archive/{commit}")
     worker = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True)
     worker.start()
-    yield url, data / "skills" / SKILL_NAME, data, upstream
+    yield url, original, app, upstream
     server.shutdown()
     server.server_close()
     worker.join(timeout=2)
@@ -130,10 +132,10 @@ def test_update_check_does_not_download_or_change_selection(skill_server, tmp_pa
     assert api(url, "environment")[1]["settings"]["skill_dir"] == str(original)
 
 
-def test_install_and_update_enable_downloads_and_preserve_previous_versions(skill_server):
+def test_install_and_update_enable_downloads_and_remove_previous_versions(skill_server):
     url, original, data, upstream = skill_server
     status, result = api(url, "skill-install", {})
-    downloaded = data / "skills" / SKILL_NAME / ("b" * 40)
+    downloaded = skill_versions_dir(data / "skills") / ("b" * 40)
     assert status == 200 and result["ready"]
     assert result["settings"]["skill_dir"] == str(downloaded)
     assert result["skill"]["current_commit"] == "b" * 40
@@ -145,11 +147,72 @@ def test_install_and_update_enable_downloads_and_preserve_previous_versions(skil
     assert api(url, "skill-check", {})[1]["update_available"]
     status, result = api(url, "skill-install", {})
     assert status == 200 and result["skill"]["current_commit"] == "c" * 40
-    assert (downloaded / "SKILL.md").read_text() == FRONTMATTER + "Downloaded Skill"
+    assert not downloaded.exists()
     assert (Path(result["settings"]["skill_dir"]) / "SKILL.md").read_text() == FRONTMATTER + "Updated Skill"
     upstream["calls"].clear()
     assert api(url, "skill-install", {})[0] == 200
     assert upstream["calls"] == ["/upstream/latest"]
+
+
+def test_failed_update_keeps_the_previous_downloaded_version(skill_server):
+    url, original, app, upstream = skill_server
+    assert api(url, "skill-install", {})[0] == 200
+    downloaded = skill_versions_dir(app / "skills") / ("b" * 40)
+    upstream.update(commit="c" * 40, status=503)
+    assert api(url, "skill-install", {})[0] == 502
+    assert downloaded.is_dir()
+    assert api(url, "environment")[1]["settings"]["skill_dir"] == str(downloaded)
+    assert (original / "SKILL.md").is_file()
+
+
+def test_pruning_keeps_active_versions_bundled_and_custom_skills(tmp_path):
+    skills = tmp_path / "skills"
+    versions = skill_versions_dir(skills)
+    versions.mkdir(parents=True)
+    bundled = skills / SKILL_NAME
+    bundled.mkdir()
+    (bundled / "SKILL.md").write_text("Bundled Skill")
+    current, active, old, custom, foreign, damaged = [versions / (letter * 40) for letter in "abcdef"]
+    for directory in [current, active, old, custom, foreign, damaged]:
+        directory.mkdir()
+        (directory / "SKILL.md").write_text(directory.name)
+    for directory in [current, active, old]:
+        (directory / RECEIPT).write_text(json.dumps({"source": SOURCE, "commit": directory.name}))
+    (foreign / RECEIPT).write_text(json.dumps({"source": "custom", "commit": foreign.name}))
+    (damaged / RECEIPT).write_text("invalid metadata")
+    prune_skill_versions(skills, [current, active / "references"])
+    assert not old.exists()
+    assert all(directory.is_dir() for directory in [current, active, custom, foreign, damaged])
+    assert (bundled / "SKILL.md").read_text() == "Bundled Skill"
+    prune_skill_versions(skills, [current])
+    assert not active.exists()
+    assert current.is_dir()
+
+
+def test_activation_defers_cleanup_of_a_running_runner_version(skill_server, tmp_path):
+    from GalTransl.Extraction import environment, http
+    from GalTransl.Extraction.runner import ExtractionRunner, restore_state
+
+    url, _, app, upstream = skill_server
+    assert api(url, "skill-install", {})[0] == 200
+    previous = skill_versions_dir(app / "skills") / ("b" * 40)
+    runtime = http.EXTRACTION_RUNTIME
+    game = tmp_path / "game"
+    game.mkdir()
+    session = runtime.store.create(str(game))
+    state, store = restore_state(session, runtime.store.directory(session["id"]), {}, "Check", "auto")
+    runner = ExtractionRunner(state, store, session, environment.environment(), lambda event: runtime._on_event(session["id"], event))
+    runtime.runs[session["id"]] = runner
+    upstream.update(commit="c" * 40)
+    status, result = api(url, "skill-install", {})
+    assert status == 200
+    current = Path(result["settings"]["skill_dir"])
+    assert previous.is_dir() and current.is_dir()
+    assert runtime._skill_cleanup_pending
+    runtime.runs.pop(session["id"])
+    runtime._prune_skills()
+    assert not previous.exists() and current.is_dir()
+    assert not runtime._skill_cleanup_pending
 
 
 @pytest.mark.parametrize("action", ["skill-check", "skill-install"])
@@ -171,7 +234,7 @@ def test_invalid_archives_do_not_replace_the_active_skill(skill_server, content)
     status, result = api(url, "skill-install", {})
     assert status == 502 and result["error"]
     assert api(url, "environment")[1]["settings"]["skill_dir"] == str(original)
-    assert not any(path.is_dir() for path in (data / "skills" / SKILL_NAME).iterdir())
+    assert not any(path.is_dir() for path in skill_versions_dir(data / "skills").iterdir())
 
 
 @pytest.mark.parametrize("commit", ["invalid", "../../escape", None])

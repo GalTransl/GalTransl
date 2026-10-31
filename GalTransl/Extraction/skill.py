@@ -68,7 +68,7 @@ def check_skill(directory: Path) -> SkillStatus:
 
 def install_skill(skills: Path) -> Path:
     commit = latest_commit()
-    versions = skills / SKILL_NAME
+    versions = skill_versions_dir(skills)
     versions.mkdir(parents=True, exist_ok=True)
     destination = versions / commit
     # Each version has its own directory, preserving bundled/custom files and
@@ -117,6 +117,38 @@ def latest_commit() -> str:
     if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise SkillDownloadError("GitHub returned an invalid Skill version")
     return commit
+
+
+def skill_versions_dir(skills: Path) -> Path:
+    return skills / ".downloaded" / SKILL_NAME
+
+
+def prune_skill_versions(skills: Path, keep: list[Path]) -> None:
+    versions = skill_versions_dir(skills)
+    if not versions.is_dir() or versions.is_symlink() or getattr(versions.stat(), "st_file_attributes", 0) & 0x400:
+        return
+    root = versions.resolve()
+    if not root.is_relative_to(skills.resolve()):
+        return
+    protected = [path.resolve() for path in keep]
+    for directory in versions.iterdir():
+        if not re.fullmatch(r"[0-9a-f]{40}", directory.name) or not directory.is_dir():
+            continue
+        if directory.is_symlink() or getattr(directory.stat(), "st_file_attributes", 0) & 0x400:
+            continue
+        target = directory.resolve()
+        if target.parent != root or any(path.is_relative_to(target) for path in protected):
+            continue
+        receipt = directory / RECEIPT
+        if not receipt.is_file() or receipt.is_symlink():
+            continue
+        try:
+            metadata = json.loads(receipt.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(metadata, dict) or metadata.get("source") != SOURCE or metadata.get("commit") != directory.name:
+            continue
+        shutil.rmtree(target)
 
 
 def request_bytes(url: str, maximum: int) -> bytes:

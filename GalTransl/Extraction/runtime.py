@@ -13,9 +13,11 @@ from GalTransl.Agent.context import _profile_context_window
 from GalTransl.Reasoning import build_reasoning_kwargs
 from GalTransl.Agent.images import save_images, user_message, user_event
 from GalTransl.Agent.models import PendingMessage
+from GalTransl.RuntimePaths import get_skills_dir
 from GalTransl.Agent.permissions import AUTO_QUIET_MODE, PERMISSION_MODES, _permission_needed, _tool_risk
 
-from .environment import environment, workspace_path
+from .environment import environment, load_settings, save_settings, workspace_path
+from .skill import prune_skill_versions
 from .runner import ExtractionRunner, restore_state
 from .legacy import previous_messages
 from .store import ACTIVE_STATUSES, SessionStore
@@ -52,6 +54,18 @@ class ExtractionRuntime:
         self.recovered: set[str] = set()
         self.live: dict[str, dict[str, dict[str, Any]]] = {}
         self.queued: dict[str, deque[PendingMessage]] = {}
+        self._skill_cleanup_pending = False
+
+    def activate_skill(self, directory: Path) -> None:
+        with self.lock:
+            save_settings({"skill_dir": str(directory)})
+            self._prune_skills()
+
+    def _prune_skills(self) -> None:
+        selected = Path(load_settings()["skill_dir"])
+        active = [Path(runner.available["settings"]["skill_dir"]) for runner in self.runs.values()]
+        prune_skill_versions(get_skills_dir(), [selected, *active])
+        self._skill_cleanup_pending = bool(active)
 
     def _emit(self, session_id: str, event: dict[str, Any]) -> None:
         with self.lock:
@@ -256,6 +270,8 @@ class ExtractionRuntime:
                 self.store.update(session_id, status=status, seq=self.sequences[session_id])
                 # Keep game/workspace ownership through every queued followup.
                 self.runs.pop(session_id, None)
+                if self._skill_cleanup_pending:
+                    self._prune_skills()
             return
 
     def _finish_live_message(self, session_id: str) -> None:

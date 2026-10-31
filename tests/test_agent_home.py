@@ -1,4 +1,4 @@
-"""Real file migration and bundled skill seeding under ~/.galtransl."""
+"""Conversations stay in ~/.galtransl; skills are read from the application."""
 import json
 import runpy
 from pathlib import Path
@@ -52,7 +52,8 @@ def test_default_home_migrates_conversations_settings_and_skill_versions(home, m
     assert SessionStore().read(session_id)['title'] == 'Original session'
     assert (directory / 'extraction/sessions' / session_id / 'execution/messages.jsonl').read_text() == 'original history'
     assert (directory / 'agent_sessions/project/session.jsonl').read_text() == 'new history wins'
-    assert environment.load_settings()['skill_dir'] == str(directory / 'skills/engine/version')
+    assert environment.load_settings()['skill_dir'] == str(resource / 'skills/engine/version')
+    assert not (directory / 'skills').exists()
     namespace = runpy.run_path(str(Path(RuntimePaths.__file__).parent / 'Agent/session_store.py'))
     assert namespace['SESSIONS_ROOT'] == str(directory / 'agent_sessions')
     (directory / 'agent_sessions/project/session.jsonl').unlink()
@@ -61,17 +62,17 @@ def test_default_home_migrates_conversations_settings_and_skill_versions(home, m
     assert (resource / 'agent_sessions/project/session.jsonl').read_text() == 'translation history'
 
 
-def test_bundled_skills_seed_into_home_without_git_or_overwriting_edits(home):
+def test_skills_are_read_in_place_without_seeding_user_home(home):
     directory, resource = home
     skill = resource / 'skills/galtransl-galgamereverse-skill'
     save_file(skill / 'SKILL.md', '---\nname: engine\ndescription: Detect engine\n---\nOriginal instructions')
     save_file(skill / 'helper.py', "print('helper')")
     save_file(skill / '.git', 'gitdir: private path')
     save_file(resource / 'skills/sources.json', '{}')
-    assert RuntimePaths.get_skills_dir() == directory / 'skills'
-    installed = directory / 'skills/galtransl-galgamereverse-skill'
+    assert RuntimePaths.get_skills_dir() == resource / 'skills'
+    installed = skill
     assert (installed / 'helper.py').read_text() == "print('helper')"
-    assert not (installed / '.git').exists()
+    assert (installed / '.git').exists()
     (installed / 'SKILL.md').write_text('User instructions', encoding='utf-8')
     (installed / 'helper.py').unlink()
     RuntimePaths.get_skills_dir()
@@ -79,27 +80,50 @@ def test_bundled_skills_seed_into_home_without_git_or_overwriting_edits(home):
     assert not (installed / 'helper.py').exists()
     save_file(resource / 'skills/extra/SKILL.md', '---\nname: extra\ndescription: Extra skill\n---\n')
     RuntimePaths.get_skills_dir()
-    assert (directory / 'skills/extra/SKILL.md').is_file()
+    assert (resource / 'skills/extra/SKILL.md').is_file()
     assert (installed / 'SKILL.md').read_text() == 'User instructions'
+    assert not directory.exists()
 
 
 def test_extra_skill_can_make_environment_ready_without_fixed_extraction_package(home):
     directory, resource = home
-    save_file(directory / 'skills/extra/SKILL.md', '---\nname: extra\ndescription: Extra skill\n---\n')
+    save_file(resource / 'skills/extra/SKILL.md', '---\nname: extra\ndescription: Extra skill\n---\n')
     save_file(resource / 'extraction_python.py', '# Adapter')
     available = environment.environment()
     assert available['ready']
     assert [skill['name'] for skill in available['skills']] == ['extra']
     assert not available['skill']['installed']
-    save_file(directory / 'skills/invalid/SKILL.md', 'No description')
+    save_file(resource / 'skills/invalid/SKILL.md', 'No description')
     assert len(environment.environment()['skill_diagnostics']) == 1
 
 
+def test_downloaded_selection_moves_to_program_cache_and_keeps_bundled_files(home):
+    from GalTransl.Extraction.skill import SKILL_NAME, skill_versions_dir
+
+    directory, resource = home
+    selected = directory / 'skills' / SKILL_NAME / ('a' * 40)
+    instructions = f'---\nname: {SKILL_NAME}\ndescription: Selected download\n---\n'
+    save_file(selected / 'SKILL.md', instructions)
+    save_file(selected / 'helper.py', 'Downloaded helper')
+    bundled = resource / 'skills' / SKILL_NAME / 'SKILL.md'
+    save_file(bundled, f'---\nname: {SKILL_NAME}\ndescription: Bundled Skill\n---\n')
+    save_file(directory / 'extraction/settings.json', json.dumps({'skill_dir': str(selected)}))
+    settings = environment.load_settings()
+    expected = skill_versions_dir(resource / 'skills') / selected.name
+    assert settings['skill_dir'] == str(expected)
+    assert (expected / 'SKILL.md').read_text() == instructions
+    assert (expected / 'helper.py').read_text() == 'Downloaded helper'
+    assert 'Bundled Skill' in bundled.read_text()
+    (selected / 'SKILL.md').write_text('Old location changed')
+    assert environment.load_settings()['skill_dir'] == str(expected)
+    assert (expected / 'SKILL.md').read_text() == instructions
+
+
 def test_explicit_data_root_is_honored_without_migrating_unrelated_home(home, monkeypatch, tmp_path):
-    directory, _ = home
+    directory, resource = home
     override = tmp_path / 'override'
     monkeypatch.setenv('GALTRANSL_DATA_DIR', str(override))
     assert RuntimePaths.get_user_data_dir() == override
     assert RuntimePaths.get_app_settings_path() == override / 'app_settings.json'
-    assert RuntimePaths.get_skills_dir() == override / 'skills'
+    assert RuntimePaths.get_skills_dir() == resource / 'skills'
     assert not directory.exists()

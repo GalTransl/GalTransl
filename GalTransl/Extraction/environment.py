@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from GalTransl.RuntimePaths import get_resource_root, get_user_data_dir, get_skills_dir, get_legacy_user_data_dir
+from GalTransl.RuntimePaths import _copy_missing_tree, get_resource_root, get_user_data_dir, get_skills_dir, get_legacy_user_data_dir
 
-from .skill import skill_status
+from .skill import SKILL_NAME, skill_status, skill_versions_dir
 from .python_discovery import discover_pythons, PythonInterpreter
 from .skills import discover_skills
 
@@ -54,12 +55,16 @@ def load_settings() -> dict[str, str]:
             if Path(defaults["skill_dir"]) == root.parent / "GalTransl-GalGameReverse-Skill":
                 defaults["skill_dir"] = str(get_skills_dir() / "galtransl-galgamereverse-skill")
         selected = Path(defaults["skill_dir"]).expanduser()
-        legacy_roots = [root / "skills", get_user_data_dir() / "extraction" / "skills"]
+        legacy_roots = [get_user_data_dir() / "skills", get_user_data_dir() / "extraction" / "skills"]
         # Saved selections from the old OS data directory also follow the migration.
         legacy_roots.append(get_legacy_user_data_dir() / "extraction" / "skills")
         legacy = next((base for base in legacy_roots if selected.is_relative_to(base)), None)
         if legacy is not None:
-            defaults["skill_dir"] = str(get_skills_dir() / selected.relative_to(legacy))
+            relative = selected.relative_to(legacy)
+            downloaded = len(relative.parts) == 2 and relative.parts[0] == SKILL_NAME and re.fullmatch(r"[0-9a-f]{40}", relative.parts[1])
+            destination = skill_versions_dir(get_skills_dir()) / relative.parts[1] if downloaded else get_skills_dir() / relative
+            _copy_missing_tree(selected, destination)
+            defaults["skill_dir"] = str(destination)
         if saved.get("skill_dir") != defaults["skill_dir"]:
             atomic_json(path, {**saved, "skill_dir": defaults["skill_dir"]})
     return defaults

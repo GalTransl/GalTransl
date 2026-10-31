@@ -108,8 +108,13 @@ def get_user_data_dir() -> Path:
     marker = directory / ".legacy_migration_v1"
     if not marker.exists():
         directory.mkdir(parents=True, exist_ok=True)
-        _copy_missing_tree(get_legacy_user_data_dir(), directory)
-        _copy_missing_tree(directory / "extraction" / "skills", directory / "skills")
+        legacy = get_legacy_user_data_dir()
+        _copy_missing_tree(legacy / "agent_sessions", directory / "agent_sessions")
+        _copy_missing_tree(legacy / "extraction" / "sessions", directory / "extraction" / "sessions")
+        extraction_settings = directory / "extraction" / "settings.json"
+        if (legacy / "extraction" / "settings.json").is_file() and not extraction_settings.exists():
+            extraction_settings.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(legacy / "extraction" / "settings.json", extraction_settings)
         _copy_missing_tree(get_resource_root() / "agent_sessions", directory / "agent_sessions")
         legacy_settings = [_platform_config_root() / APP_DIR_NAME / "app_settings.json", get_legacy_app_settings_path()]
         destination = directory / "app_settings.json"
@@ -128,7 +133,7 @@ def _copy_missing_tree(source: Path, destination: Path) -> None:
     if destination.is_symlink() or getattr(destination.stat(), "st_file_attributes", 0) & 0x400:
         raise ValueError(f"User data directory must not be a link: {destination}")
     for entry in source.iterdir():
-        if entry.name in {".git", "__pycache__", "node_modules"} or entry.is_symlink():
+        if entry.name in {".git", "__pycache__", "node_modules", ".bundled_skills_seed"} or entry.is_symlink():
             continue
         target = destination / entry.name
         if entry.is_dir():
@@ -139,26 +144,7 @@ def _copy_missing_tree(source: Path, destination: Path) -> None:
 
 
 def get_skills_dir() -> Path:
-    """Install bundled skill seeds in the user's home; keep local edits intact."""
-    bundled = get_resource_path("skills")
-    directory = get_user_data_dir() / "skills"
-    directory.mkdir(parents=True, exist_ok=True)
-    if not bundled.is_dir() or bundled.resolve() == directory.resolve():
-        return directory
-    digest = hashlib.sha256()
-    for source in sorted([bundled / "sources.json", *bundled.rglob("SKILL.md")]):
-        if source.is_file():
-            digest.update(str(source.relative_to(bundled)).encode("utf-8"))
-            digest.update(source.read_bytes())
-    signature = digest.hexdigest()
-    marker = directory / ".bundled_skills_seed"
-    if marker.is_file() and marker.read_text(encoding="utf-8").strip() == signature:
-        return directory
-    if not marker.exists():
-        _copy_missing_tree(get_user_data_dir() / "extraction" / "skills", directory)
-    _copy_missing_tree(bundled, directory)
-    marker.write_text(signature + "\n", encoding="utf-8")
-    return directory
+    return get_resource_path("skills")
 
 
 def get_user_dict_dir() -> Path:
