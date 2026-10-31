@@ -1185,9 +1185,14 @@
 /* ── Activity group ── */
 
 .agent-activity {
+  --agent-detail-muted: #a4a4a4;
   width: 100%;
   min-width: 0;
   margin: 4px 0;
+}
+
+:root[data-theme='dark'] .agent-activity {
+  --agent-detail-muted: #8f8f8f;
 }
 
 .agent-activity__header {
@@ -1360,7 +1365,7 @@
   border: 0;
   border-radius: 8px;
   background: none;
-  color: var(--color-text-muted);
+  color: var(--agent-detail-muted);
   font: inherit;
   font-size: 0.82rem;
   text-align: left;
@@ -1370,14 +1375,12 @@
 
 .agent-reasoning__header:hover {
   background: var(--agent-hover);
-  color: var(--color-text);
 }
 
 .agent-reasoning__icon {
   flex: none;
   color: inherit;
   font-size: 0.85rem;
-  opacity: 0.9;
 }
 
 .agent-reasoning__label {
@@ -1394,7 +1397,7 @@
   margin-left: 6px;
   vertical-align: middle;
   border-radius: 50%;
-  background: var(--color-text-muted);
+  background: currentColor;
 }
 
 /* 折叠时的单行预览（跑马灯效果）：文本只保留一份，窗口贴在文本末尾——
@@ -1412,7 +1415,7 @@
 .agent-reasoning__marquee-text {
   flex: none;
   white-space: nowrap;
-  color: var(--color-text-muted);
+  color: inherit;
   font-size: 0.78rem;
   opacity: 0.85;
 }
@@ -2162,7 +2165,7 @@
   border: 0;
   border-radius: 8px;
   background: none;
-  color: var(--color-text-muted);
+  color: var(--agent-detail-muted);
   font: inherit;
   font-size: 0.84rem;
   line-height: 1.5;
@@ -2182,14 +2185,17 @@
 .agent-tool__icon {
   flex: none;
   font-size: 0.88rem;
-  opacity: 0.9;
+}
+
+.agent-tool__icon .icon,
+.agent-reasoning__icon .icon {
+  stroke-width: 1.25;
 }
 
 .agent-tool__name {
   flex: none;
   font-weight: 400;
   color: inherit;
-  opacity: 0.9;
 }
 
 .agent-tool__summary {
@@ -2199,8 +2205,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font: inherit;
-  color: var(--color-text-muted);
-  opacity: 0.9;
+  color: inherit;
 }
 
 .agent-tool__state {
