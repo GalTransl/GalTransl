@@ -6,6 +6,7 @@ GalTransl.Agent. This module supplies only tools, a prompt and the UI event brid
 from __future__ import annotations
 
 import json
+import threading
 import uuid
 from pathlib import Path
 
@@ -93,6 +94,7 @@ class ExtractionRunner(AgentRunner):
         self.available = available
         self.publish = emit
         self.message_id = ""
+        self.turn_lock = threading.RLock()
         self.tools = ExtractionTools(session["workspace"], session["game_dir"], available["settings"]["skill_dir"],
                                      available, self.stop_event, emit, self._require_permission)
 
@@ -246,6 +248,11 @@ class ExtractionRunner(AgentRunner):
             self.publish({"type": "assistant_start", "messageId": self.message_id})
         return super()._stream_llm_attempt()
 
+    def _end_turn(self, kind, data):
+        # Queue submission and turn completion share the runtime's lock.
+        with self.turn_lock:
+            self._close_turn(kind, data)
+
     def _emit(self, event_type, data):
         if event_type in {'tool_call', 'permission_request'} and data.get('name') in {'read', 'bash', 'edit', 'write', 'run_python'}:
             data = {**data, 'arguments': display_arguments(data.get('arguments', {}))}
@@ -259,6 +266,8 @@ class ExtractionRunner(AgentRunner):
         elif event_type in {"content_delta", "reasoning_delta"}:
             event = {"type": "assistant_delta" if event_type == "content_delta" else "thinking_delta",
                      "messageId": self.message_id, "text": data.get("delta", "")}
+        elif event_type in {"content_end", "reasoning_end"}:
+            event = {"type": event_type, "messageId": self.message_id, **data}
         elif event_type == "assistant_message":
             parts = data.get("parts", [])
             text = "".join(part.get("text", "") for part in parts if part["type"] == "text")
@@ -282,7 +291,7 @@ class ExtractionRunner(AgentRunner):
                 text = (result if isinstance(result, str) else json.dumps(result, ensure_ascii=False))[-24000:]
             event = {"type": "tool_end", "toolCallId": data["id"], "toolName": data["name"],
                      "text": text,
-                     "isError": not data.get("ok")}
+                     "isError": not data.get("ok"), "duration_ms": data.get("duration_ms")}
             if native:
                 images = [block["image"] for block in result["content"] if block.get("type") == "image" and "image" in block]
                 if images:
@@ -296,6 +305,8 @@ class ExtractionRunner(AgentRunner):
             event = {"type": "context_usage", **data["context"]}
         elif event_type == "compacting":
             event = {"type": "compaction", "active": data.get("phase") == "start"}
+        elif event_type in {"compacted", "queue"}:
+            event = {"type": event_type, **data}
         elif event_type in {"llm_retry_start", "llm_retry_end"}:
             event = {"type": event_type, "messageId": self.message_id, **data}
         elif event_type == "error":

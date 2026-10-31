@@ -91,6 +91,9 @@ def model_server():
             self._stream(payload)
 
         def _stream(self, payload):
+            if payload.get('_error'):
+                self.send_error(payload['_error'], 'Synthetic model failure')
+                return
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
@@ -127,7 +130,7 @@ def test_retry_bridge_preserves_details_and_discards_failed_live_output(setup):
     runtime, session, available = setup
     sid = session['id']
     state, history = restore_state(session, runtime.store.directory(sid), {}, '', 'auto')
-    runner = ExtractionRunner(state, history, session, available, lambda event: runtime._emit(sid, event))
+    runner = ExtractionRunner(state, history, session, available, lambda event: runtime._on_event(sid, event))
     runner.message_id = 'failed-attempt'
     runner._emit('content_delta', {'delta': 'discarded partial reply'})
     runner._emit('reasoning_delta', {'delta': 'discarded partial reasoning'})
@@ -159,8 +162,9 @@ def test_shared_loop_real_tool_approval_usage_and_restart(setup, model_server):
     assert pending["toolName"] == "run_python"
     assert pending['arguments']['reason'] == reason
     assert not (workspace / "reports/fixture.txt").exists()
-    with pytest.raises(ValueError, match="already running"):
-        runtime.start(sid, {"message": "duplicate", "profile": profile})
+    queued = runtime.start(sid, {"message": "later", "profile": profile})["queued"]
+    assert queued[0]["text"] == "later"
+    runtime.queue_action(sid, "queue-delete", {"item_id": queued[0]["id"]})
     runtime.answer(sid, {"request_id": pending["requestId"], "decision": "allow-once"})
     wait_for(lambda: sid not in runtime.runs)
     assert runtime.session(sid)["status"] == "idle"
@@ -184,6 +188,8 @@ def test_shared_loop_real_tool_approval_usage_and_restart(setup, model_server):
     assert user_events[0]["seq"] < next(event["seq"] for event in events if event["type"] == "assistant_start")
     assert [event["text"] for event in runtime.poll(sid, 0)["events"] if event["type"] == "user_message"] == ["Check synthetic fixture"]
     assert any(event["type"] == "thinking_message" and "synthetic" in event["text"] for event in events)
+    assert all(isinstance(event['duration_ms'], int) for event in events if event['type'] in {'content_end', 'reasoning_end', 'tool_end'})
+    assert {'content_end', 'reasoning_end', 'tool_end'} <= {event['type'] for event in events}
     usage = [event for event in events if event["type"] == "context_usage"][-1]
     assert usage["used_tokens"] >= 3000 and usage["window_tokens"] == 128000
     assert usage["cache"]["cached_tokens"] > 0
@@ -220,7 +226,7 @@ def test_denied_or_stopped_command_is_not_executed(setup, model_server, decision
     if decision == "stop":
         runtime.stop(sid)
     else:
-        runtime.answer(sid, {"request_id": pending["requestId"], "decision": decision})
+        runtime.answer(sid, {"request_id": pending["requestId"], "decision": decision, "reason": "Use a read-only approach"})
     wait_for(lambda: sid not in runtime.runs)
     assert not (Path(session["workspace"]) / "must-not-exist").exists()
     assert runtime.snapshot(sid)["pending"] is None
@@ -228,6 +234,126 @@ def test_denied_or_stopped_command_is_not_executed(setup, model_server, decision
     assert runtime.session(sid)["status"] == ("stopped" if decision == "stop" else "idle")
     if decision == "deny":
         assert "拒绝" in requests[-1]["messages"][-1]["content"]
+        assert "Use a read-only approach" in requests[-1]["messages"][-1]["content"]
+
+
+def test_queued_messages_wait_for_final_reply_and_followup_retains_directory_ownership(setup, model_server):
+    runtime, session, _ = setup
+    profile, requests, responses = model_server
+    sid = session['id']
+    responses.extend([
+        {'tool_calls': [call('ask_user', {'questions': [{'question': 'First?', 'options': ['yes', 'no']}]}, 'first-question')]},
+        {'content': 'First turn complete'},
+        {'tool_calls': [call('ask_user', {'questions': [{'question': 'Followup?', 'options': ['yes', 'no']}]}, 'next-question')]},
+        {'content': 'All queued work complete'},
+    ])
+    runtime.start(sid, {'message': 'First task', 'profile': profile})
+    first = wait_for(lambda: runtime.snapshot(sid)['pending'])
+    runner = runtime.runs[sid]
+    queued = runtime.start(sid, {'message': 'Second task'})['queued']
+    queued = runtime.start(sid, {'message': 'Third task'})['queued']
+    assert [item['text'] for item in queued] == ['Second task', 'Third task']
+    assert [event['text'] for event in runtime.snapshot(sid)['events'] if event['type'] == 'user_message'] == ['First task']
+    assert len(requests) == 1
+    runtime.answer(sid, {'request_id': first['requestId'], 'answers': [['yes']]})
+    next_request = wait_for(lambda: (value if (value := runtime.snapshot(sid)['pending']) and value['requestId'] != first['requestId'] else None))
+    assert runtime.runs[sid] is runner
+    assert runtime.snapshot(sid)['queued'] == []
+    assert [message['content'] for message in requests[-1]['messages'][-2:]] == ['Second task', 'Third task']
+    second_session = runtime.store.create(session['game_dir'])
+    with pytest.raises(ValueError, match='already running for this game directory'):
+        runtime.start(second_session['id'], {'message': 'Conflict', 'profile': profile})
+    runtime.answer(sid, {'request_id': next_request['requestId'], 'answers': [['yes']]})
+    wait_for(lambda: sid not in runtime.runs)
+    events = runtime.snapshot(sid)['events']
+    assert [event['text'] for event in events if event['type'] == 'user_message'] == ['First task', 'Second task', 'Third task']
+    assert not any(event.get('status') in {'idle', 'stopped'} for event in events[:-1])
+    assert events[-1]['status'] == 'idle'
+
+
+def test_stop_retains_queue_edits_images_and_idle_send_consumes_selected_item(setup, model_server):
+    runtime, session, _ = setup
+    profile, requests, responses = model_server
+    sid = session['id']
+    responses.append({'tool_calls': [call('ask_user', {'questions': [{'question': 'Wait?', 'options': ['yes', 'no']}]})]})
+    runtime.start(sid, {'message': 'Hold current turn', 'profile': profile})
+    wait_for(lambda: runtime.snapshot(sid)['pending'])
+    uploads = [{'name': 'fixture.png', 'data_url': 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVSYAAAAASUVORK5CYII='}]
+    queued = runtime.start(sid, {'message': '', 'images': uploads})['queued']
+    image_id = queued[0]['id']
+    queued = runtime.start(sid, {'message': 'Remove this'})['queued']
+    runtime.queue_action(sid, 'queue-delete', {'item_id': queued[1]['id']})
+    runtime.stop(sid)
+    wait_for(lambda: sid not in runtime.runs)
+    assert len(requests) == 1
+    assert len(runtime.snapshot(sid)['queued']) == 1
+    assert module.ExtractionRuntime(runtime.store).snapshot(sid)['queued'] == []
+    runtime.queue_action(sid, 'queue-update', {'item_id': image_id, 'text': ''})
+    with pytest.raises(ValueError, match='60000'):
+        runtime.queue_action(sid, 'queue-update', {'item_id': image_id, 'text': 'x' * 60001})
+    with pytest.raises(ValueError, match='profile'):
+        runtime.queue_action(sid, 'queue-send', {'item_id': image_id})
+    assert len(runtime.snapshot(sid)['queued']) == 1
+    responses.append({'content': 'Image inspected'})
+    runtime.queue_action(sid, 'queue-send', {'item_id': image_id, 'profile': profile})
+    wait_for(lambda: sid not in runtime.runs)
+    assert requests[-1]['messages'][-1]['content'][0]['type'] == 'image_url'
+    users = [event for event in runtime.snapshot(sid)['events'] if event['type'] == 'user_message']
+    assert len(users) == 2 and users[-1]['images'] == queued[0]['images']
+    assert runtime.snapshot(sid)['queued'] == []
+    assert 'base64' not in json.dumps(users)
+
+
+def test_queued_followup_runs_after_model_failure(setup, model_server):
+    runtime, session, _ = setup
+    profile, requests, responses = model_server
+    sid = session['id']
+    responses.extend([
+        {'tool_calls': [call('ask_user', {'questions': [{'question': 'Continue?', 'options': ['yes', 'no']}]})]},
+        {'_error': 400},
+        {'content': 'Recovered for queued task'},
+    ])
+    runtime.start(sid, {'message': 'First', 'profile': profile})
+    pending = wait_for(lambda: runtime.snapshot(sid)['pending'])
+    runtime.start(sid, {'message': 'Next task'})
+    runtime.answer(sid, {'request_id': pending['requestId'], 'answers': [['yes']]})
+    wait_for(lambda: sid not in runtime.runs)
+    assert runtime.session(sid)['status'] == 'idle'
+    assert runtime.session(sid)['error'] == ''
+    assert requests[-1]['messages'][-1]['content'] == 'Next task'
+    assert runtime.snapshot(sid)['queued'] == []
+    events = runtime.snapshot(sid)['events']
+    assert any(event['type'] == 'error' for event in events)
+    assert [event['text'] for event in events if event['type'] == 'user_message'] == ['First', 'Next task']
+
+
+def test_immediate_queue_send_interrupts_approval_and_preserves_remaining_queue(setup, model_server):
+    runtime, session, _ = setup
+    profile, requests, responses = model_server
+    sid = session['id']
+    responses.extend([
+        {'tool_calls': [call('run_python', {'code': "open('must-not-exist', 'w').write('bad')"})]},
+        {'tool_calls': [call('ask_user', {'questions': [{'question': 'Immediate?', 'options': ['yes', 'no']}]}, 'immediate-question')]},
+        {'content': 'Immediate done'},
+        {'content': 'Remaining done'},
+    ])
+    runtime.start(sid, {'message': 'First', 'profile': profile, 'permission_mode': 'ask'})
+    old = wait_for(lambda: runtime.snapshot(sid)['pending'])
+    runtime.start(sid, {'message': 'Wait until done'})
+    queued = runtime.start(sid, {'message': 'Send now'})['queued']
+    runner = runtime.runs[sid]
+    runtime.queue_action(sid, 'queue-send', {'item_id': queued[1]['id']})
+    pending = wait_for(lambda: (value if (value := runtime.snapshot(sid)['pending']) and value['requestId'] != old['requestId'] else None))
+    assert runtime.runs[sid] is runner and not runner.stop_event.is_set()
+    assert [item['text'] for item in runtime.snapshot(sid)['queued']] == ['Wait until done']
+    assert requests[-1]['messages'][-1]['content'] == 'Send now'
+    assert not (Path(session['workspace']) / 'must-not-exist').exists()
+    assert runtime.poll(sid, 0)['running']
+    runtime.answer(sid, {'request_id': pending['requestId'], 'answers': [['yes']]})
+    wait_for(lambda: sid not in runtime.runs)
+    assert [event['text'] for event in runtime.snapshot(sid)['events'] if event['type'] == 'user_message'] == ['First', 'Send now', 'Wait until done']
+    assert requests[-1]['messages'][-1]['content'] == 'Wait until done'
+    assert runtime.session(sid)['status'] == 'idle'
 
 
 def test_shared_ask_wait_is_answerable_and_replays(setup, model_server):
@@ -561,13 +687,18 @@ def test_resumed_extraction_refreshes_wizard_instructions_without_rewriting_hist
 def test_extraction_compaction_keeps_own_prompt_tools_and_archives(setup):
     runtime, session, available = setup
     state, store = restore_state(session, runtime.store.directory(session["id"]), {}, "synthetic", "ask")
-    runner = ExtractionRunner(state, store, session, available, lambda event: None)
+    runner = ExtractionRunner(state, store, session, available, lambda event: runtime._on_event(session['id'], event))
     messages = [{"role": "system", "content": runner._system_prompt()}, {"role": "user", "content": "old synthetic task"},
                 {"role": "assistant", "content": "old response"}, {"role": "user", "content": "keep this new task"}]
     for message in messages:
         runner._persist_message(message)
     runner._pending_compaction = {"cut": 3, "estimated": 12000}
     assert runner._rebuild_after_compaction("Synthetic summary", "synthetic")
+    compacted = next(event for event in runtime.snapshot(session['id'])['events'] if event['type'] == 'compacted')
+    assert compacted['removed'] == 3
+    assert compacted['summary_chars'] == len('Synthetic summary')
+    assert compacted['tokens_before'] > compacted['tokens_after']
+    assert module.ExtractionRuntime(runtime.store).snapshot(session['id'])['events'][-2] == compacted
     assert runner.state.messages[0] == messages[0]
     assert runner.state.messages[-1] == messages[-1]
     assert runner._dispatch_tool("read_history_archive", {})["archives"]

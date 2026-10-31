@@ -1,4 +1,4 @@
-import type { AgentContextUsage } from '../../lib/api';
+import type { AgentContextUsage, QueuedMessage } from '../../lib/api';
 import type { AgentImage } from '../agent/images';
 
 export type Session = {
@@ -12,6 +12,9 @@ export type AgentEvent = {
   toolName?: string; arguments?: Record<string, unknown>; isError?: boolean;
   replace?: boolean;
   attempt?: number; max_attempts?: number; delay_ms?: number; ts?: number; code?: string; reason?: string;
+  duration_ms?: number;
+  mode?: string; removed?: number; cleared?: number; summary_chars?: number; tokens_before?: number; tokens_after?: number;
+  queued?: QueuedMessage[];
   requestId?: string; question?: string; status?: string; message?: string;
   questions?: { question: string; options: string[]; recommended?: string; multiSelect?: boolean }[];
   permission_mode?: string;
@@ -21,6 +24,7 @@ export type AgentEvent = {
 export type Snapshot = {
   session: Session; events: AgentEvent[]; live_events: AgentEvent[]; cursor: number;
   pending: AgentEvent | null; has_more: boolean; before_seq: number | null;
+  queued?: QueuedMessage[];
   activity_prefix?: { anchor: string; item_keys: string[] } | null;
 };
 export type SkillStatus = {

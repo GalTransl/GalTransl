@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import uuid
 from collections import OrderedDict, deque
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ from GalTransl.Agent.backend_http import _normalize_endpoint
 from GalTransl.Agent.context import _profile_context_window
 from GalTransl.Reasoning import build_reasoning_kwargs
 from GalTransl.Agent.images import save_images, user_message, user_event
+from GalTransl.Agent.models import PendingMessage
 from GalTransl.Agent.permissions import AUTO_QUIET_MODE, PERMISSION_MODES, _permission_needed, _tool_risk
 
 from .environment import environment, workspace_path
@@ -48,6 +50,7 @@ class ExtractionRuntime:
         self.pending: dict[str, dict[str, Any]] = {}
         self.recovered: set[str] = set()
         self.live: dict[str, dict[str, dict[str, Any]]] = {}
+        self.queued: dict[str, deque[PendingMessage]] = {}
 
     def _emit(self, session_id: str, event: dict[str, Any]) -> None:
         with self.lock:
@@ -91,7 +94,7 @@ class ExtractionRuntime:
             elif kind == "tool_end":
                 live.pop("tool_output" + str(record.get("toolCallId", "")), None)
             # Model history is persisted by the shared AgentRunner. This journal is a UI projection.
-            if record["type"] not in {"assistant_delta", "thinking_delta", "tool_output"}:
+            if record["type"] not in {"assistant_delta", "thinking_delta", "tool_output", "queue"}:
                 self.store.append(session_id, record)
 
     def session(self, session_id: str) -> dict[str, Any]:
@@ -116,7 +119,7 @@ class ExtractionRuntime:
             if session_id in self.runs:
                 raise ValueError("Stop the extraction agent before deleting its session")
             self.store.delete(session_id)
-            for cache in (self.events, self.event_bytes, self.sequences, self.pending, self.live):
+            for cache in (self.events, self.event_bytes, self.sequences, self.pending, self.live, self.queued):
                 cache.pop(session_id, None)
             self.recovered.discard(session_id)
             return {"deleted": session_id}
@@ -144,7 +147,8 @@ class ExtractionRuntime:
             return {"session": value, **history,
                     "cursor": self.sequences.get(session_id, value["seq"]),
                     "live_events": list(self.live.get(session_id, {}).values()) if before is None else [],
-                    "pending": self.pending.get(session_id)}
+                    "pending": self.pending.get(session_id),
+                    "queued": [item.to_dict() for item in self.queued.get(session_id, [])]}
 
     def poll(self, session_id: str, after: int) -> dict[str, Any]:
         with self.lock:
@@ -155,20 +159,24 @@ class ExtractionRuntime:
             return {"events": [event for event in events if event["seq"] > after] if not reset else [],
                     "cursor": cursor, "reset": reset, "running": session_id in self.runs}
 
-    def start(self, session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        prompt = str(payload.get("message", "")).strip()
-        if (not prompt and not payload.get('images')) or len(prompt) > 60000:
+    def start(self, session_id: str, payload: dict[str, Any], queued_message: PendingMessage | None = None) -> dict[str, Any]:
+        prompt = queued_message.text if queued_message else str(payload.get("message", "")).strip()
+        images = queued_message.images if queued_message else payload.get('images')
+        if (not prompt and not images) or len(prompt) > 60000:
             raise ValueError("Message must contain between 1 and 60000 characters")
-        model = model_config(payload.get("profile"))
-        mode = str(payload.get("permission_mode", "auto"))
-        if mode not in PERMISSION_MODES:
-            raise ValueError("Invalid permission mode")
-        available = environment()
-        if not available["ready"]:
-            raise ValueError("Extraction environment is incomplete: " + ", ".join(available["problems"]))
         with self.lock:
-            if session_id in self.runs:
-                raise ValueError("This extraction session is already running")
+            active = self.runs.get(session_id)
+            if active is not None:
+                active.state.pending_messages.append(PendingMessage(uuid.uuid4().hex, prompt, save_images(active._store, images)))
+                active.emit_queue()
+                return self.snapshot(session_id)
+            model = model_config(payload.get("profile"))
+            mode = str(payload.get("permission_mode", "auto"))
+            if mode not in PERMISSION_MODES:
+                raise ValueError("Invalid permission mode")
+            available = environment()
+            if not available["ready"]:
+                raise ValueError("Extraction environment is incomplete: " + ", ".join(available["problems"]))
             session = self.session(session_id)
             game = Path(session["game_dir"]).resolve(strict=True)
             workspace = Path(session["workspace"]).resolve(strict=True)
@@ -184,8 +192,12 @@ class ExtractionRuntime:
                 raise ValueError("The game directory no longer exists")
             session_dir = self.store.directory(session_id).resolve()
             state, history = restore_state(session, session_dir, payload["profile"], prompt, mode)
-            state.first_images = save_images(history, payload.get('images'))
+            state.first_images = queued_message.images if queued_message else save_images(history, images)
+            state.pending_messages = self.queued.setdefault(session_id, deque())
+            if queued_message:
+                state.pending_messages.remove(queued_message)
             runner = ExtractionRunner(state, history, session, available, lambda event: self._on_event(session_id, event))
+            runner.turn_lock = self.lock
             if not state.messages:
                 legacy = previous_messages(session, session_dir)
                 if legacy:
@@ -198,6 +210,7 @@ class ExtractionRuntime:
                               profile_name=str(payload.get("profile_name", ""))[:200], permission_mode=mode,
                               title=prompt[:50] if session["seq"] == 0 else session["title"])
             self._emit(session_id, {"type": "state", "status": "starting"})
+            self._emit(session_id, {"type": "queue", "queued": [item.to_dict() for item in state.pending_messages]})
             if state.messages:
                 runner._persist_message(user_message(prompt, state.first_images))
                 runner._emit("user_message", user_event(prompt, state.first_images))
@@ -207,30 +220,73 @@ class ExtractionRuntime:
             return self.snapshot(session_id)
 
     def _run(self, session_id: str, runner: ExtractionRunner) -> None:
-        failed = False
-        try:
-            with self.lock:
-                if not runner.stop_event.is_set():
-                    self.store.update(session_id, status="running")
-                    self._emit(session_id, {"type": "state", "status": "running"})
-            runner.run()
-        except Exception as exc:
-            failed = True
-            self.store.update(session_id, error=str(exc)[:2000])
-            self._emit(session_id, {"type": "error", "message": str(exc)[:2000]})
-        finally:
+        while True:
+            failed = False
+            try:
+                with self.lock:
+                    if not runner.stop_event.is_set():
+                        self.store.update(session_id, status="running", error="")
+                        self._emit(session_id, {"type": "state", "status": "running"})
+                runner.run()
+            except Exception as exc:
+                failed = True
+                self.store.update(session_id, error=str(exc)[:2000])
+                self._emit(session_id, {"type": "error", "message": str(exc)[:2000]})
             runner.abort_in_flight()
             with self.lock:
                 self.pending.pop(session_id, None)
-                for event in list(self.live.pop(session_id, {}).values()):
-                    if event["type"] in {"assistant_delta", "thinking_delta"}:
-                        self._emit(session_id, {**event, "type": "assistant_message" if event["type"] == "assistant_delta" else "thinking_message", "partial": True})
+                self._finish_live_message(session_id)
                 self.live.pop(session_id, None)
+                # A message may arrive after _close_turn but before run() returns.
+                if not runner.state.pending_followup and (runner.state.immediate_message or runner.state.immediate_images
+                        or (runner.state.pending_messages and not runner.stop_event.is_set())):
+                    runner._end_turn("stopped" if runner.stop_event.is_set() else "finish", {})
+                if runner.state.pending_followup:
+                    runner.state.pending_followup = False
+                    runner.state.status = "running"
+                    runner.state.error = ""
+                    runner.state.finished_at = 0.0
+                    runner.state.turn_end = ""
+                    runner.stop_event.clear()
+                    continue
                 status = "stopped" if runner.stop_event.is_set() else "failed" if failed or runner.state.status == "failed" else "idle"
                 self._emit(session_id, {"type": "state", "status": status})
                 self.store.update(session_id, status=status, seq=self.sequences[session_id])
-                # Publish the terminal state before poll() may close its stream.
+                # Keep game/workspace ownership through every queued followup.
                 self.runs.pop(session_id, None)
+            return
+
+    def _finish_live_message(self, session_id: str) -> None:
+        for event in list(self.live.get(session_id, {}).values()):
+            if event["type"] in {"assistant_delta", "thinking_delta"}:
+                self._emit(session_id, {**event, "type": "assistant_message" if event["type"] == "assistant_delta" else "thinking_message", "partial": True})
+
+    def queue_action(self, session_id: str, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            self.session(session_id)
+            queued = self.queued.get(session_id, deque())
+            item = next((item for item in queued if item.id == payload.get("item_id")), None)
+            if item is None:
+                return self.snapshot(session_id)
+            if action == "queue-update":
+                text = str(payload.get("text", "")).strip()
+                if (not text and not item.images) or len(text) > 60000:
+                    raise ValueError("Message must contain between 1 and 60000 characters")
+                item.text = text
+            elif action == "queue-delete":
+                queued.remove(item)
+            elif action == "queue-send":
+                runner = self.runs.get(session_id)
+                if runner is None:
+                    return self.start(session_id, payload, item)
+                queued.remove(item)
+                runner.state.immediate_message = item.text
+                runner.state.immediate_images = item.images
+                self.stop(session_id)
+            else:
+                raise ValueError("Invalid queue action")
+            self._emit(session_id, {"type": "queue", "queued": [item.to_dict() for item in queued]})
+            return self.snapshot(session_id)
 
     def _on_event(self, session_id: str, event: dict[str, Any]) -> None:
         with self.lock:
@@ -248,10 +304,14 @@ class ExtractionRuntime:
                     runner.apply_permission_mode(runner.state.permission_mode)
                     self._clear_allowed_request(session_id, runner)
             elif kind == "error":
-                self.store.update(session_id, status="failed", error=str(event.get("message", ""))[:2000])
+                # Keep the stream alive while the runner closes or starts a queued followup.
+                self.store.update(session_id, error=str(event.get("message", ""))[:2000])
                 self._emit(session_id, event)
             elif kind in {"user_message", "assistant_start", "assistant_delta", "assistant_message", "thinking_delta", "thinking_message",
-                          "tool_start", "tool_output", "tool_end", "compaction", "usage", "context_usage", "notice"}:
+                          "tool_start", "tool_output", "tool_end", "compaction", "usage", "context_usage", "notice",
+                          "llm_retry_start", "llm_retry_end", "content_end", "reasoning_end", "compacted", "queue"}:
+                if kind == "user_message":
+                    self._finish_live_message(session_id)
                 self._emit(session_id, event)
 
     def answer(self, session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -264,7 +324,11 @@ class ExtractionRuntime:
                 decision = payload.get("decision")
                 if decision not in {"allow-once", "allow-turn", "deny"}:
                     raise ValueError("Invalid approval decision")
-                command = {"type": "answer", "requestId": request_id, "decision": decision}
+                reason = str(payload.get("reason", "")).strip()
+                if len(reason) > 500:
+                    raise ValueError("Approval rejection reason must not exceed 500 characters")
+                command = {"type": "answer", "requestId": request_id, "decision": decision,
+                           "reason": reason if decision == "deny" else ""}
             else:
                 if 'answers' in payload:
                     command = {"type": "answer", "requestId": request_id, "answers": payload['answers']}
@@ -275,13 +339,13 @@ class ExtractionRuntime:
                     command = {"type": "answer", "requestId": request_id, "text": text, "answers": [[text]]}
             runner = self.runs[session_id]
             if pending["type"] == "permission_request":
-                runner.resolve_permission("allow-session" if command["decision"] == "allow-turn" else command["decision"])
+                runner.resolve_permission("allow-session" if command["decision"] == "allow-turn" else command["decision"], command["reason"])
             else:
                 runner.resolve_ask(command['answers'])
             self.pending.pop(session_id, None)
             self._emit(session_id, {"type": "request_answered", "requestId": request_id,
                                     "decision": command.get("decision"), "text": command.get("text"),
-                                    "answers": command.get('answers')})
+                                    "answers": command.get('answers'), "reason": command.get('reason')})
             self.store.update(session_id, status="running")
             self._emit(session_id, {"type": "state", "status": "running"})
             return self.snapshot(session_id)

@@ -33,6 +33,10 @@
 
 侧栏会话的 × 删除该会话历史并保留输出文件；文件夹的 × 仅隐藏该游戏分组，保留所有会话历史，为该游戏新建会话时重新显示。运行中的会话以及包含运行中会话的游戏分组都禁止关闭，由后端在同一运行锁内校验。
 
-UI 会话日志位于用户数据目录 `extraction/sessions/<id>/`，模型历史和压缩归档由共用的 Agent SessionStore 存在其 `execution/` 子目录，不包含 API 密钥。关闭页面仅断开显示流，停止按钮才终止当前回合。有效 `gt_input/*.json` 可直接打开为翻译项目。
+UI 会话日志位于用户数据目录 `extraction/sessions/<id>/`，模型历史和压缩归档由共用的 Agent SessionStore 存在其 `execution/` 子目录，不包含 API 密钥。切换到其他页面时，运行中的当前会话继续接收事件，并复用翻译 Agent 的后台提问/审批系统通知。停止按钮终止当前回合。有效 `gt_input/*.json` 可直接打开为翻译项目。
+
+运行指示器、压缩结果、流式段落结束和工具/思考耗时共用翻译 Agent 的展示；压缩结果及耗时写入日志，刷新后可回放。审批支持填写可选拒绝原因，并将原因传回模型。事件流断开时显示重连次数，按 1/2/4/8/10 秒退避，最多重试五次；恢复后撤掉提示，从最新快照和游标继续接收。
+
+运行期间发送的文字和图片先进入消息队列，面板共用翻译 Agent 的立即发送、编辑和删除操作。本轮正常完成或失败后自动消费队列并续跑；手动停止则保留队列供用户处理。「立即」打断本轮，先发送选中的消息，其余消息继续等待新一轮完成。队列仅保存在内存中，重启后清空；消费前不进入模型历史。自动续跑和立即发送期间持续占用游戏目录及输出工作区。
 
 验证：`python -m pytest tests/test_extraction_agent.py tests/test_extraction_runtime.py tests/test_extraction_shared_runner.py tests/test_extraction_tool_parity.py tests/test_extraction_native_tools.py`；前端检查从 `desktop` 运行 `npm test`、`npm run build`、`npm run i18n:check`。测试使用隔离的合成文件和本机模拟模型，不调用付费模型或执行真实游戏提取。原生进程与图片测试需安装后端 requirements（含 Pillow）和本机 Bash；平台验证仅覆盖实际执行的环境。

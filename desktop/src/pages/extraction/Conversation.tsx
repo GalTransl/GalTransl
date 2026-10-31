@@ -36,6 +36,7 @@ export function Conversation({ rows, sessionId, running, status, pending, older,
   const groups = useMemo(() => buildTimeline(rows, running, pending, activityPrefix), [buildTimeline, rows, running, pending, activityPrefix]);
   const timeline = groups.filter(group => group.type !== 'notice');
   const retrying = lastActivityItem(timeline)?.kind === 'retry';
+  const working = ['starting', 'running'].includes(status) ? workingLabel(timeline) : statusLabel(status);
   useLayoutEffect(() => {
     if (!scroller.current || !content.current) return;
     const key = `extraction::${sessionId}`;
@@ -118,7 +119,7 @@ export function Conversation({ rows, sessionId, running, status, pending, older,
       {older && <div className="extract-older" role="status">{x(loadingOlder ? 'loadingOlder' : 'scrollOlder')}</div>}
       {groups.map((group, index) => group.type === 'notice' ? <div key={group.id} className="agent-compact-note">{group.text}</div>
         : <AgentGroupView key={group.id} group={group} isLive={running && index === groups.length - 1} projectDir="" persistKey={`extraction::${sessionId}`} imageScope={{ sessionId, extraction: true }} autoExpandTools={false} newProjectWizardRefs />)}
-      {running && <div className="agent-working" role="status"><span className="agent-working__dots" aria-hidden><span /><span /><span /></span><span className={`agent-working__label${retrying ? ' is-retry' : ''}`}>{retrying ? workingLabel(timeline) : statusLabel(status)}</span></div>}
+      {running && <div className="agent-working" role="status"><span className="agent-working__dots" aria-hidden><span /><span /><span /></span><span className={`agent-working__label${retrying ? ' is-retry' : ''}`}>{working}</span></div>}
       {['stopped', 'interrupted'].includes(status) && <div className="agent-stopped"><span className="agent-stopped__text">{statusLabel(status)}</span></div>}
     </div>
     {!atBottom && <div className="agent-thread__jump"><button type="button" className="agent-jump-bottom" aria-label={x('jumpLatest')} title={x('jumpLatest')} onClick={() => tail.current?.jump()}><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></button></div>}
@@ -127,6 +128,7 @@ export function Conversation({ rows, sessionId, running, status, pending, older,
 export function PendingRequest({ pending, answer, busy }: { pending: AgentEvent; answer: (body: Record<string, unknown>) => void; busy: boolean }) {
   useUiLanguage();
   const [text, setText] = useState('');
+  const [denyReason, setDenyReason] = useState('');
   const permission = pending.type === 'permission_request';
   const reason = toolReason(pending.arguments);
   if (!permission && pending.questions?.length) return <AskUserCard
@@ -137,7 +139,11 @@ export function PendingRequest({ pending, answer, busy }: { pending: AgentEvent;
     {permission ? <><div className="extract-pending__body"><p className="extract-muted">{x('commandWarning')}</p>
       {reason && <p className="agent-perm__reason">{t('agent:permissionCard.agentPerm_message_text', { reason })}</p>}
       <details><summary>{toolMeta(pending.toolName, pending.arguments).action}</summary><pre>{JSON.stringify(pending.arguments, null, 2)}</pre></details></div><div className="extract-actions">
-      {(['deny', 'allow-turn', 'allow-once'] as const).map(decision => <button type="button" key={decision} disabled={busy} className={`agent-perm__btn${decision === 'allow-once' ? ' is-primary' : ''}`} onClick={() => answer({ request_id: pending.requestId, decision })}>{x(decision === 'deny' ? 'deny' : decision === 'allow-turn' ? 'allowTurn' : 'allowOnce')}</button>)}
+      {(['deny', 'allow-turn', 'allow-once'] as const).map(decision => <button type="button" key={decision} disabled={busy} className={`agent-perm__btn${decision === 'allow-once' ? ' is-primary' : ''}`} onClick={() => answer({ request_id: pending.requestId, decision, ...(decision === 'deny' ? { reason: denyReason.trim() } : {}) })}>{x(decision === 'deny' ? 'deny' : decision === 'allow-turn' ? 'allowTurn' : 'allowOnce')}</button>)}
+      <input type="text" className="agent-perm__reason-input" value={denyReason} onChange={event => setDenyReason(event.target.value)}
+        onKeyDown={event => { if (event.key !== 'Enter' || busy) return; event.preventDefault(); answer({ request_id: pending.requestId, decision: 'deny', reason: denyReason.trim() }); }}
+        placeholder={t('agent:permissionCard.agentPermFoot_placeholder_deny')} aria-label={t('agent:permissionCard.agentPermFoot_ariaLabel_deny')}
+        title={t('agent:permissionCard.agentPermFoot_title_denyAgent')} maxLength={500} disabled={busy} />
     </div></> : <form onSubmit={event => { event.preventDefault(); answer({ request_id: pending.requestId, text }); }}><div className="extract-pending__body"><p className="agent-ask__question">{pending.question}</p><textarea aria-label={x('answer')} value={text} onChange={event => setText(event.target.value)} placeholder={x('answer')} maxLength={10000} /></div><div className="extract-actions"><button className="agent-ask__btn is-primary" disabled={!text.trim() || busy}>{x('submit')}</button></div></form>}
   </section>;
 }

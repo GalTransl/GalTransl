@@ -3,10 +3,14 @@ import { usePageActive, useRetainPage } from '../../components/PageActivity';
 import { extractionApi, extractionUrl } from './api';
 import { prependHistory, reduceEvents, type Row } from './transcript';
 import { isRunning, type AgentEvent, type Environment, type SessionList, type Snapshot } from './types';
+import { message, t, useMessageState } from '../../i18n';
+import { notifyNeedsAttention } from '../../lib/desktopNotify';
+import { askNotifyBody, toolMeta } from '../agent/toolMeta';
+import { STREAM_MAX_RECONNECTS, streamReconnectDelay } from '../agent/streamReconnect';
 
 type View = Snapshot & { rows: Row[]; motionEvents: AgentEvent[]; usage?: AgentEvent; contextUsage?: AgentEvent; compacting?: boolean };
 const fromSnapshot = (snapshot: Snapshot, liveAfter?: number, previous?: View | null): View => {
-  const events = [...snapshot.events, ...snapshot.live_events];
+  const events = [...snapshot.events, ...snapshot.live_events].sort((left, right) => (left.seq || 0) - (right.seq || 0));
   const latest = [...events].reverse();
   const retainHistory = previous?.session.id === snapshot.session.id && snapshot.has_more
     && (previous.before_seq === null || (snapshot.before_seq !== null && previous.before_seq < snapshot.before_seq));
@@ -28,6 +32,7 @@ export function useExtraction() {
   const [selected, setSelected] = useState(remembered);
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState('');
+  const [reconnecting, setReconnecting] = useMessageState<string>('');
   const [busy, setBusy] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -67,9 +72,19 @@ export function useExtraction() {
   useEffect(() => {
     try { localStorage.setItem('galtransl-extraction-session', selected); } catch { /* cache only */ }
   }, [selected]);
-  useEffect(() => { setView(null); setError(''); retries.current = 0; }, [selected]);
+  useEffect(() => { setView(null); setError(''); setReconnecting(''); retries.current = 0; }, [selected]);
+  const pendingRequest = view?.pending;
   useEffect(() => {
-    if (!active || !selected) return;
+    if (!pendingRequest) return;
+    const permission = pendingRequest.type === 'permission_request';
+    const label = toolMeta(pendingRequest.toolName, pendingRequest.arguments).action;
+    const body = permission ? t('agent:agentPage.agentPage_notifyNeedsAttention_confirmVariant2', { label })
+      : askNotifyBody({ arguments: { questions: pendingRequest.questions || [{ question: pendingRequest.question }] } });
+    void notifyNeedsAttention(`extraction:${selected}:${pendingRequest.requestId}`,
+      t(permission ? 'agent:agentPage.agentPage_notifyNeedsAttention_agentWaitApprove' : 'agent:agentPage.agentPage_notifyNeedsAttention_agentAnswer'), body);
+  }, [selected, pendingRequest?.requestId]);
+  useEffect(() => {
+    if (!selected || (!active && !isRunning(currentView.current?.session))) return;
     let disposed = false;
     let source: EventSource | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -91,6 +106,7 @@ export function useExtraction() {
           if (event.type === 'usage') next.usage = event;
           if (event.type === 'context_usage') next.contextUsage = event;
           if (event.type === 'compaction') next.compacting = event.active;
+          if (event.type === 'queue') next.queued = event.queued || [];
           if (event.type === 'state' && (!isRunning(next.session) || event.status === 'stopping')) {
             next.pending = null;
             next.compacting = false;
@@ -99,18 +115,33 @@ export function useExtraction() {
         return next;
       });
     };
+    const connected = () => {
+      retries.current = 0;
+      setReconnecting('');
+    };
+    const retry = () => {
+      if (disposed) return;
+      const attempt = retries.current;
+      if (attempt >= STREAM_MAX_RECONNECTS) {
+        setReconnecting(message('agent:agentPage.onGiveUp_normalizeError_agent'));
+        return;
+      }
+      retries.current = attempt + 1;
+      setReconnecting(message('agent:agentPage.onReconnecting_setError_agentPending', { attempt: attempt + 1, max: STREAM_MAX_RECONNECTS }));
+      reconnect = setTimeout(() => setRevision(value => value + 1), streamReconnectDelay(attempt));
+    };
     void extractionApi<Snapshot>('session', { session_id: selected }, undefined, abort.signal).then(snapshot => {
       if (disposed) return;
       const sent = sentAfter.current;
       sentAfter.current = null;
       setView(previous => fromSnapshot(snapshot, sent?.sessionId === selected ? sent.cursor : undefined, previous));
-      if (!isRunning(snapshot.session)) return;
+      if (!isRunning(snapshot.session)) { connected(); return; }
       source = new EventSource(extractionUrl('stream', { session_id: selected, after: snapshot.cursor }));
-      source.onmessage = message => {
+      source.onmessage = incoming => {
         if (disposed) return;
         let event: AgentEvent & { snapshot?: Snapshot };
-        try { event = JSON.parse(message.data); } catch { setError('Invalid extraction stream'); source?.close(); return; }
-        retries.current = 0;
+        try { event = JSON.parse(incoming.data); } catch { source?.close(); flush(); retry(); return; }
+        connected();
         if (event.type === 'reset' && event.snapshot) {
           flush();
           const snapshot = event.snapshot;
@@ -126,10 +157,9 @@ export function useExtraction() {
       };
       source.onerror = () => {
         source?.close(); flush();
-        if (!disposed && retries.current++ < 5) reconnect = setTimeout(() => setRevision(v => v + 1), Math.min(1000 * retries.current, 5000));
-        else if (!disposed) setError('Stream disconnected. Reload the session to reconnect.');
+        retry();
       };
-    }).catch(error => { if (!disposed) setError(errorText(error)); });
+    }).catch(() => retry());
     return () => { disposed = true; abort.abort(); source?.close(); clearTimeout(timer); clearTimeout(reconnect); };
   }, [selected, revision, active, refreshSessions]);
 
@@ -169,7 +199,7 @@ export function useExtraction() {
     } catch (error) { if (current.current === id) setError(errorText(error)); }
     finally { olderRequest.current = false; setLoadingOlder(false); }
   }, []);
-  return { sessions, environment, selected, select: setSelected, view, error, setError, busy, loadingOlder,
+  return { sessions, environment, selected, select: setSelected, view, error: reconnecting || error, setError, busy, loadingOlder,
     mutate, loadOlder, refreshSessions, refreshEnvironment, setEnvironment,
-    reload: () => { retries.current = 0; setError(''); setRevision(v => v + 1); } };
+    reload: () => { retries.current = 0; setError(''); setReconnecting(''); setRevision(v => v + 1); } };
 }

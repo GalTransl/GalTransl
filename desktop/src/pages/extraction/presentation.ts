@@ -37,7 +37,7 @@ export function extractionTimeline(rows: Row[], running: boolean, pending: Agent
     });
     if (prefix && anchor === prefix.anchor) {
       const loaded = new Set(current.items.map(item => `${item.kind}:${item.id}`));
-      current.hiddenStepCount = prefix.item_keys.filter(key => !loaded.has(key)).length;
+      current.hiddenStepCount = prefix.item_keys.filter(key => !key.startsWith('compact:') && !key.startsWith('retry:') && !loaded.has(key)).length;
     }
     groups.push(current);
     current = undefined;
@@ -65,9 +65,14 @@ export function extractionTimeline(rows: Row[], running: boolean, pending: Agent
         retryCode: row.retry?.code, retryReason: row.retry?.reason, retryDone: Boolean(row.done) });
       if (!previousRetry) current.items.push(item);
       lastAssistant = undefined;
+    } else if (row.role === 'compact') {
+      current.items.push({ kind: 'compact', id: row.id, step: step(row.id), compactMode: row.compact?.mode,
+        removed: row.compact?.removed, cleared: row.compact?.cleared, summaryChars: row.compact?.summary_chars,
+        tokensBefore: row.compact?.tokens_before, tokensAfter: row.compact?.tokens_after });
+      lastAssistant = undefined;
     } else if (row.role === 'tool') {
       const item: ActivityItem = { kind: 'tool', id: row.id, step: step(row.id), name: row.tool,
-        arguments: row.args, resultFormat: 'text', ...(row.images?.length ? { images: row.images } : {}) };
+        arguments: row.args, resultFormat: 'text', durationMs: row.durationMs, ...(row.images?.length ? { images: row.images } : {}) };
       if (row.done) {
         item.ok = !row.error;
         if (row.error) item.error = row.text;
@@ -79,8 +84,8 @@ export function extractionTimeline(rows: Row[], running: boolean, pending: Agent
       current.items.push(item);
       lastAssistant = undefined;
     } else {
-      if (row.thinking) current.items.push({ kind: 'reasoning', id: row.id, step: step(row.id), content: row.thinking, streaming: running && !row.done });
-      if (row.text) current.items.push({ kind: 'content', id: row.id, step: step(row.id), content: row.text, streaming: running && !row.done });
+      if (row.thinking) current.items.push({ kind: 'reasoning', id: row.id, step: step(row.id), content: row.thinking, streaming: running && !row.done && !row.thinkingDone, durationMs: row.thinkingDurationMs });
+      if (row.text) current.items.push({ kind: 'content', id: row.id, step: step(row.id), content: row.text, streaming: running && !row.done && !row.contentDone, durationMs: row.durationMs });
       lastAssistant = row;
     }
   }

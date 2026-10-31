@@ -451,6 +451,7 @@ def test_approval_lifecycle_and_no_duplicate_turns(extraction, monkeypatch):
     class FakeRunner:
         def __init__(self, state, history, session, available, callback):
             self.callback = callback
+            self._store = history
             self.state = state
             self.stop_event = threading.Event()
             self.commands = []
@@ -460,8 +461,11 @@ def test_approval_lifecycle_and_no_duplicate_turns(extraction, monkeypatch):
             ready.set()
             finished.wait(3)
 
-        def resolve_permission(self, decision):
-            self.commands.append({"decision": decision})
+        def emit_queue(self):
+            self.callback({"type": "queue", "queued": [item.to_dict() for item in self.state.pending_messages]})
+
+        def resolve_permission(self, decision, reason=""):
+            self.commands.append({"decision": decision, "reason": reason})
 
         def apply_permission_mode(self, mode):
             self.state.permission_mode = mode
@@ -481,13 +485,15 @@ def test_approval_lifecycle_and_no_duplicate_turns(extraction, monkeypatch):
     try:
         assert ready.wait(2)
         assert runtime.snapshot(sid)["pending"]["requestId"] == "one"
-        with pytest.raises(ValueError, match="already running"):
-            runtime.start(sid, payload)
+        queued = runtime.start(sid, payload)["queued"]
+        assert len(queued) == 1
+        assert queued[0]["text"] == payload["message"]
         with pytest.raises(ValueError, match="no longer pending"):
             runtime.answer(sid, {"request_id": "stale", "decision": "allow-once"})
         sidecar = runtime.runs[sid]
-        runtime.answer(sid, {"request_id": "one", "decision": "deny"})
+        runtime.answer(sid, {"request_id": "one", "decision": "deny", "reason": "Use a read-only command"})
         assert sidecar.commands[-1]["decision"] == "deny"
+        assert sidecar.commands[-1]["reason"] == "Use a read-only command"
         assert runtime.snapshot(sid)["pending"] is None
         assert "synthetic-key" not in json.dumps(store.read(sid))
     finally:

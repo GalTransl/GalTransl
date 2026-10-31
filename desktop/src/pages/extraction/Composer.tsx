@@ -14,20 +14,21 @@ import { PERMISSION_MODES } from '../../lib/permissionMode';
 import { t } from '../../i18n';
 
 export function ExtractionComposer({ draft, setDraft, textarea, session, running, busy, ready, profile, profileSelection = profile, defaultProfile, setProfile, models, mode, setMode,
-  context, compacting, send, stop, chooseSource, configure, imageInput }: {
+  context, compacting, send, stop, chooseSource, configure, imageInput, hasQueue = false }: {
   draft: string; setDraft: (text: string) => void; textarea: RefObject<HTMLTextAreaElement>;
   session?: Session; running: boolean; busy: boolean; ready: boolean;
   profile: string; setProfile: (value: string) => void; models: string[]; mode: string; setMode: (value: string) => void;
   profileSelection?: string; defaultProfile?: string;
   context?: AgentEvent; compacting?: boolean; send: () => void; stop: () => void; chooseSource: () => void; configure: () => void;
   imageInput?: ReturnType<typeof useImageInput>;
+  hasQueue?: boolean;
 }) {
   const usage = extractionContextUsage(context);
-  const canSend = Boolean((draft.trim() || imageInput?.images.length) && !imageInput?.processing && !running && !busy && profile && ready);
+  const canSend = Boolean((draft.trim() || imageInput?.images.length) && !imageInput?.processing && !busy && profile && ready);
   useComposerAutosize(textarea, draft);
-  return <div {...imageInput?.drop} className={`agent-composer extract-composer${running ? ' is-running' : ''}${imageInput?.dragging ? ' is-image-drop' : ''}`}>
+  return <div {...imageInput?.drop} className={`agent-composer extract-composer${running ? ' is-running' : ''}${hasQueue ? ' has-queue' : ''}${imageInput?.dragging ? ' is-image-drop' : ''}`}>
     {imageInput && <ImageAttachments images={imageInput.images} remove={imageInput.remove} />}
-    <textarea ref={textarea} className="agent-composer__input" aria-label={x('composer')} placeholder={x('composer')}
+    <textarea ref={textarea} className="agent-composer__input" aria-label={x('composer')} placeholder={running ? t('agent:agentPage.agentConsoleComposer_placeholder_queueAuto') : x('composer')}
       onPaste={imageInput?.onPaste}
       value={draft} rows={2} maxLength={60000} onChange={event => setDraft(event.target.value)} onKeyDown={event => {
         if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.nativeEvent.isComposing || !canSend) return;

@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { subscribeAgentStream, type AgentEvent } from '../../lib/api';
 import { appendStreamEvents } from './timeline';
+import { STREAM_MAX_RECONNECTS, streamReconnectDelay } from './streamReconnect';
 
-// 事件流意外断开后的自动重连次数（退避 1s、2s、4s… 封顶 10s）
-const STREAM_MAX_RECONNECTS = 5;
 // 流事件批量进 state 的间隔（ms）
 const EVENT_FLUSH_MS = 50;
 
@@ -110,7 +109,7 @@ export function useAgentStream(
             subscribe(dir, sessionId, afterStep);
             // subscribe 开头的 close 会把计数清零，这里接回去
             attemptsRef.current = attempt + 1;
-          }, Math.min(1000 * 2 ** attempt, 10000));
+          }, streamReconnectDelay(attempt));
         },
         afterStep(),
         sessionId,

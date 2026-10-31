@@ -20,6 +20,7 @@ import { useImageInput, imageUploads } from './agent/images';
 import { useModelProfile } from './extraction/useModelProfile';
 import { gameFolderKey, SessionFolders } from './extraction/SessionFolders';
 import { StatusPill } from './agent/composer';
+import { MessageQueue } from './agent/MessageQueue';
 
 const DRAFT_SCOPE = 'galtransl-extraction';
 
@@ -28,6 +29,8 @@ export function ExtractionPage() {
   const agent = useExtraction();
   const navigate = useNavigate();
   const [mode, setMode] = useState('auto');
+  const [editingQueued, setEditingQueued] = useState<{ id: string; text: string } | null>(null);
+  useEffect(() => setEditingQueued(null), [agent.selected]);
   const [dialog, setDialog] = useState<'create' | 'environment' | null>(null);
   const [draft, setDraft] = useMessageDraft(DRAFT_SCOPE, agent.selected);
   const [showWorkspace, setShowWorkspace] = useState(() => window.innerWidth >= 1440);
@@ -81,7 +84,7 @@ export function ExtractionPage() {
   const send = async () => {
     const message = draft.trim();
     const sentImages = imageInput.images;
-    if ((!message && !sentImages.length) || imageInput.processing || running || agent.busy || !profile || !agent.environment?.ready) return;
+    if ((!message && !sentImages.length) || imageInput.processing || agent.busy || !profile || !agent.environment?.ready) return;
     if (!session) { setDialog('create'); return; }
     const result = await agent.mutate('message', { message, images: imageUploads(sentImages), profile: getBackendProfile(profile), profile_name: boundProfile, permission_mode: mode });
     if (result) {
@@ -139,8 +142,13 @@ export function ExtractionPage() {
       <div className="agent-console__composer extract-bottom">
         {agent.error && <div className="agent-notice agent-notice--error extract-inline-error" role="alert"><Icon name="warning" /><span>{agent.error}</span><button type="button" className="extract-text-button" onClick={agent.reload}>{x('reload')}</button></div>}
         {agent.view?.pending && <PendingRequest key={agent.view.pending.requestId} pending={agent.view.pending} busy={agent.busy} answer={body => { void agent.mutate('answer', body); }} />}
+        <MessageQueue queued={agent.view?.queued || []} editing={editingQueued} onEditingChange={setEditingQueued} busy={agent.busy}
+          scope={{ sessionId: agent.selected, extraction: true }}
+          onSave={() => { if (editingQueued) void agent.mutate('queue-update', { item_id: editingQueued.id, text: editingQueued.text }).then(result => { if (result) setEditingQueued(null); }); }}
+          onDelete={id => { void agent.mutate('queue-delete', { item_id: id }).then(result => { if (result && editingQueued?.id === id) setEditingQueued(null); }); }}
+          onSend={id => { void agent.mutate('queue-send', { item_id: id, profile: getBackendProfile(profile), profile_name: boundProfile, permission_mode: mode }).then(result => { if (result) setEditingQueued(null); }); }} />
         <ExtractionComposer draft={draft} setDraft={setDraft} textarea={textarea} session={session} running={running} busy={agent.busy} ready={Boolean(agent.environment?.ready)}
-          imageInput={imageInput}
+          imageInput={imageInput} hasQueue={Boolean(agent.view?.queued?.length)}
           profile={profile} profileSelection={boundProfile} defaultProfile={defaultProfile} setProfile={setProfile} models={modelNames} mode={mode} setMode={changeMode} context={agent.view?.contextUsage} compacting={agent.view?.compacting}
           send={() => void send()} stop={() => { void agent.mutate('stop', {}); }} chooseSource={() => setDialog('create')} configure={() => navigate('/backend-profiles')} />
         {!modelNames.length && <div className="extract-hint">{x('noModel')} <button type="button" className="extract-text-button" onClick={() => navigate('/backend-profiles')}>{x('configureModel')}</button></div>}
