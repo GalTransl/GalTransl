@@ -75,6 +75,16 @@
   zoom: 0.9;
 }
 
+.agent-translation-preview__viewport .page-header {
+  display: contents;
+}
+
+.agent-translation-preview__viewport .page-header__topline,
+.agent-translation-preview__viewport .page-header__status:empty,
+.agent-translation-preview__viewport .project-dictionary-page__header:not(.page-header) {
+  display: none;
+}
+
 @media (max-width: 700px) {
   .agent-translation-preview { width: calc(100vw - 32px); height: calc(100dvh - 48px); }
   .agent-translation-preview__header { padding: 10px 14px; }
