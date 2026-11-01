@@ -1,4 +1,17 @@
 {
+  "cacheHistory": {
+    "pending": "记录未完成",
+    "title": "缓存编辑历史",
+    "summary": "{{count}} 个缓存文件已更改 · {{edits}} 次编辑",
+    "undoTurn": "撤销",
+    "undone": "已撤销",
+    "viewDiff": "查看差异",
+    "closeDiff": "关闭差异",
+    "loading": "正在读取差异…",
+    "conflict": "内容已有后续修改，整次撤销未写入。请先核对以下冲突：",
+    "user": "用户",
+    "list": "检索缓存编辑历史"
+  },
   "projectPreview": {
     "openEntry": "在迷你窗中查看并定位此条目"
   },

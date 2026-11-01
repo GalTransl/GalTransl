@@ -39,6 +39,7 @@ from GalTransl.Agent.tools.project import (
 )
 from GalTransl.Agent.tools.search import _tool_search_input, _tool_search_output_files
 from GalTransl.Agent.tools.find_replace import _tool_search_replace_cache
+from GalTransl.Agent.tools.history import _tool_cache_history
 from GalTransl.Agent.tools.plugin_settings import _tool_get_plugin_settings
 from GalTransl.Agent.tools.proofread import _tool_read_proofread_changes, _tool_revert_proofread_changes
 
@@ -47,6 +48,9 @@ if TYPE_CHECKING:
 
 
 _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
+    "list_cache_history": _tool_cache_history,
+    "diff_cache_history": _tool_cache_history,
+    "revert_cache_history": _tool_cache_history,
     "get_project": _tool_get_project_overview,
     "get_project_overview": _tool_get_project_overview,
     "get_plugin_settings": _tool_get_plugin_settings,
@@ -114,6 +118,7 @@ _TOOLS_WITH_REASON: frozenset[str] = frozenset({
     "manage_problem_white_list",
     "patch_transl_cache",
     "replace_cache",
+    "revert_cache_history",
     "revert_proofread_changes",
     "delete_transl_cache",
     "start_translation",

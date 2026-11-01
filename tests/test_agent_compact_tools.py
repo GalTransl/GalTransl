@@ -46,13 +46,13 @@ def test_public_tools_and_optional_context_plugin(tmp_path):
     names = {tool["function"]["name"] for tool in runner._request_tools()}
     assert names == {"get_project", "update_project_config", "input", "guideline", "dictionary", "names",
                      "translation", "read_transl_cache", "edit_transl_cache", "output", "problems", "subagents",
-                     "ask_user", "read_history_archive", "search_replace_cache"}
+                     "ask_user", "read_history_archive", "search_replace_cache", "cache_history"}
     assert not names & _RETIRED_TOOLS.keys()
     plugin = BillionContextSession(path=tmp_path / "context.sqlite3", context_window=128000)
     runner._billion_context = plugin
     tools = runner._request_tools()
     plugin.close()
-    assert len(tools) == 18
+    assert len(tools) == 19
     assert "read_history_archive" not in {tool["function"]["name"] for tool in tools}
 
 

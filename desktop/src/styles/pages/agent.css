@@ -1,5 +1,23 @@
 @import '../components/agent-settings.css';
 
+.agent-cache-edits { margin: 16px 0; border: 1px solid var(--agent-line); border-radius: 12px; background: var(--agent-tile); overflow: hidden; }
+.agent-cache-edits__header, .agent-cache-edits__file, .agent-cache-edits__review-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
+.agent-cache-edits__header { justify-content: space-between; }
+.agent-cache-edits__toggle { display: flex; align-items: center; gap: 8px; min-width: 0; color: inherit; font: inherit; background: none; border: 0; cursor: pointer; text-align: left; }
+.agent-cache-edits__files, .agent-cache-edits__review { border-top: 1px solid var(--agent-line-soft); }
+.agent-cache-edits__file + .agent-cache-edits__file { border-top: 1px solid var(--agent-line-soft); }
+.agent-cache-edits__filename, .agent-cache-edits__review-header strong { min-width: 0; overflow-wrap: anywhere; flex: 1; }
+.agent-cache-edits__actors { font-size: 12px; opacity: .65; }
+.agent-cache-edits__diff { margin: 0; padding: 14px; max-height: 520px; overflow: auto; font: 12px/1.65 var(--agent-mono); tab-size: 2; }
+.agent-cache-edits__diff span { display: block; min-height: 1.65em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-cache-edits__diff .is-added { background: rgba(34, 197, 94, .09); color: #16a34a; }
+.agent-cache-edits__diff .is-removed { background: rgba(239, 68, 68, .09); color: #ef4444; }
+.agent-cache-edits__diff .is-hunk { color: #60a5fa; }
+.agent-cache-edits__added { color: #16a34a; }
+.agent-cache-edits__removed, .agent-cache-edits__error { color: #ef4444; }
+.agent-cache-edits__error { padding: 0 14px; font-size: 13px; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .agent-cache-edits__header, .agent-cache-edits__file { flex-wrap: wrap; } .agent-cache-edits__actors { display: none; } }
+
 /* ─────────────────────────────────────────────────────────
    Agent Console — a focused, chat-style workspace for the
    translation agent. Visual language matches the translate

@@ -136,7 +136,7 @@ def _md_render_list_dict_files(result: dict[str, Any]) -> str | None:
 
 
 def _md_render_project_overview(result: dict[str, Any]) -> str | None:
-    if not any(key in result for key in ("progress", "backend", "config", "config_field_descriptions", "plugins")):
+    if not any(key in result for key in ("progress", "backend", "config", "config_field_descriptions", "plugins", "cache_output")):
         return None
     parts: list[str] = []
     if "progress" in result:
@@ -190,6 +190,16 @@ def _md_render_project_overview(result: dict[str, Any]) -> str | None:
         parts.extend([title, _md_table(columns, rows) if rows else "没有配置项。"])
     if "plugins" in result:
         parts.extend(["## plugins · 插件设置", _tool_result_json(result["plugins"])])
+    if "cache_output" in result:
+        check = result["cache_output"]
+        labels = {"consistent": "一致", "inconsistent": "不一致", "partial": "部分文件无法核对", "not_checked": "暂无可核对文件"}
+        parts.extend([
+            f"## cache_output · 缓存 ↔ 最终输出：{labels.get(check.get('status'), check.get('status'))}",
+            _md_table(["field", "value"], [{"field": key, "value": value} for key, value in check.items()
+                                           if key not in ("files", "note", "status")]),
+            _md_table(["file", "status", "reason", "indexes"], check.get("files")),
+            str(check.get("note") or ""),
+        ])
     if result.get("note"):
         parts.append(f"备注：{result['note']}")
     return _md_doc(*parts)
@@ -553,7 +563,13 @@ def _md_render_search_transl_cache(result: dict[str, Any]) -> str | None:
     extra = [key for key in ("matched_fields", "pre_src", "proofread_dst") if any(
         key in row for row in result.get("results", [])
     )]
-    return _md_render_search(result, [*_SEARCH_CACHE_COLUMNS, *extra])
+    text = _md_render_search(result, [*_SEARCH_CACHE_COLUMNS, *extra])
+    if not any(row.get("matched_fields") for row in result.get("results", [])):
+        return text
+    return _md_doc(
+        text or "",
+        "matched_fields 格式：字段:起始偏移-结束偏移:命中及前后各2字片段；偏移从0开始，结束位置不含在内，零宽匹配的起止相同。",
+    )
 
 
 def _md_render_search_input(result: dict[str, Any]) -> str | None:
@@ -893,8 +909,29 @@ def _md_render_proofread_changes(result: dict) -> str | None:
     return _md_doc(head, body, warning, str(result.get("note") or ""))
 
 
+def _md_render_cache_history(result: dict) -> str:
+    action = result.get("action")
+    if action == "list":
+        return _md_doc("缓存编辑历史：" + _page_summary(result, result["total"], result["returned"], "次"),
+                       _md_table(["change_id", "session_id", "turn_id", "actor_id", "operation", "files", "updated", "status", "reverted_by", "reason"], [
+                           {**row, "files": ", ".join(file["filename"] for file in row["files"])} for row in result["items"]
+                       ]))
+    if action == "diff":
+        return _md_doc("缓存编辑差异：" + _page_summary(result, result["total"], result["returned"], "个文件"),
+                       *[_md_doc(f"#### {file['filename']}（{file['updated']} 条，+{file['added']} -{file['removed']}）",
+                                 "```diff\n" + file["diff"] + "\n```") for file in result["items"]])
+    if result.get("conflicts"):
+        return _md_doc(str(result.get("note") or "撤销冲突，未写入"), _md_table(["file", "index", "field", "reason"], result["conflicts"]))
+    return _md_doc(f"{'预览撤销' if result.get('dry_run') else '撤销'}：{result.get('would_update') if result.get('dry_run') else result.get('updated', 0)} 条",
+                   f"编辑 ID：{result['history']['change_id']}" if result.get("history") else "",
+                   _md_table(["file", "index", "field", "before", "after"], result.get("changes", [])))
+
+
 # 工具名 → 渲染器。渲染只对这里列出的工具生效，其余工具维持 JSON。
 _MD_RENDERERS: dict[str, Any] = {
+    "list_cache_history": _md_render_cache_history,
+    "diff_cache_history": _md_render_cache_history,
+    "revert_cache_history": _md_render_cache_history,
     "get_project": _md_render_project_overview,
     "get_project_overview": _md_render_project_overview,
     "list_dict_files": _md_render_list_dict_files,

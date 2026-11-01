@@ -1,5 +1,5 @@
 import { t as translate } from "../../i18n/core";
-import type { AgentEvent } from '../../lib/api';
+import type { AgentEvent, CacheEdit } from '../../lib/api';
 import { asArgs, toolMeta, toolOperation } from './toolMeta';
 import type { AgentImage } from './images';
 
@@ -124,6 +124,7 @@ export type SubagentRun = {
 };
 
 export type TimelineGroup =
+  | { type: 'cache-edits'; id: string; turnId: string; edits: CacheEdit[]; warning?: string }
   | { type: 'activity'; id: string; items: ActivityItem[]; finalContent?: ActivityItem; hiddenStepCount?: number }
   | { type: 'user'; id: string; step: number; message: string; images?: AgentImage[] }
   | { type: 'error'; id: string; step: number; message: string; traceback?: string }
@@ -161,6 +162,8 @@ function reconcileSubagentStatuses(target: ActivityItem) {
 
 export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
   const groups: TimelineGroup[] = [];
+  const cacheEdits = new Map<string, Map<string, CacheEdit>>();
+  const cacheSummaries = new Map<string, Extract<TimelineGroup, { type: 'cache-edits' }>>();
   // A stopped worker can finish after the parent group closes or a new turn starts.
   const subagentHosts = new Map<string, ActivityItem>();
   let current: Extract<TimelineGroup, { type: 'activity' }> | null = null;
@@ -234,6 +237,24 @@ export function buildTimeline(events: AgentEvent[]): TimelineGroup[] {
   };
 
   for (const ev of events) {
+    if (ev.type === 'cache_edit' && ev.edit) {
+      const edits = cacheEdits.get(ev.edit.turn_id) || new Map<string, CacheEdit>();
+      edits.set(ev.edit.change_id, ev.edit);
+      cacheEdits.set(ev.edit.turn_id, edits);
+      const summary = cacheSummaries.get(ev.edit.turn_id);
+      if (summary) summary.edits = [...edits.values()];
+      continue;
+    }
+    if (ev.type === 'cache_edit_summary' && ev.turn_id) {
+      closeActivity(true);
+      const edits = cacheEdits.get(ev.turn_id) || new Map<string, CacheEdit>();
+      ev.edits?.forEach(edit => edits.set(edit.change_id, edit));
+      cacheEdits.set(ev.turn_id, edits);
+      const summary = { type: 'cache-edits' as const, id: `cache-${ev.turn_id}`, turnId: ev.turn_id, edits: [...edits.values()], warning: ev.warning };
+      cacheSummaries.set(ev.turn_id, summary);
+      groups.push(summary);
+      continue;
+    }
     // 控制与指标事件不进对话转录，也不打断当前活动组。
     // compacting 的 start/done 只是压缩进度；压缩结果由 compacted 在组内展示。
     if (

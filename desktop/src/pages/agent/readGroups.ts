@@ -3,6 +3,7 @@ import { asArgs, toolOperation } from './toolMeta';
 
 // 明确列举已知只读工具，未知工具、写操作和审批都维持独立呈现。
 const readTools = new Set([
+  'list_cache_history', 'diff_cache_history',
   'read', 'get_project',
   'get_plugin_settings', 'get_project_overview', 'list_input_files', 'read_input_file',
   'read_guideline', 'list_dict_files', 'read_dict', 'get_name_table', 'get_runtime',
@@ -25,6 +26,7 @@ export function activityEntries(items: ActivityItem[], isLive: boolean): Activit
     const operation = toolOperation(item.name, args);
     const reading = item.kind === 'tool' && (readTools.has(operation)
       || (operation === 'replace_cache' && args?.dry_run === true)
+      || (operation === 'revert_cache_history' && args?.dry_run === true)
       || (['manage_problem_filter', 'manage_problem_white_list'].includes(operation) && args?.action === 'list'))
       && !item.permission && item.ok !== false && item.error === undefined && !item.final;
     const previous = entries[entries.length - 1];

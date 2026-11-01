@@ -87,6 +87,7 @@ from GalTransl.Agent.billion_context import BillionContextSession
 from GalTransl.Agent.tools.ask import ASK_WAIT_TICK, _normalize_ask_answers
 from GalTransl.Agent.tools.preview import _preview_tool_changes
 from GalTransl.Agent.tools.render_md import _render_tool_result_table, _tool_result_json
+from GalTransl.Agent.cache_edits import cache_edit_source, current_cache_edit_source
 
 if TYPE_CHECKING:
     from GalTransl.Agent.models import AgentState, PendingMessage
@@ -144,6 +145,7 @@ class AgentRunner:
         self._stream_acc: dict[str, Any] | None = None
         # 正在执行的工具调用 id（工具事件带上它，界面才能挂到对应行上）
         self._active_tool_call_id = ""
+        self._cache_turn_id = ""
         # ask_user 的挂起询问：{request_id, tool_call_id, questions, answers, event}。
         # HTTP 线程（answer_ask）会写 answers 并 set(event)，回合线程在这里等。
         self._ask_lock = threading.Lock()
@@ -358,6 +360,8 @@ class AgentRunner:
         发消息触发下一回合。
         """
         turns = 0  # 本回合真实 LLM 请求次数；state.step 是事件计数（含流式 delta），不代表轮数
+        self._cache_turn_id = os.urandom(16).hex()
+        self._cache_summary_emitted = False
         # 每个回合（不只是首回合）都记下 running：重启后据此判断"上次被中断"
         self._write_running_meta(True)
         try:
@@ -599,10 +603,12 @@ class AgentRunner:
             tb = traceback.format_exc()
             _log(f"❌ Agent 异常: {exc}\n{tb}")
             self._emit("error", {"message": str(exc), "traceback": tb})
+            self._emit_cache_edit_summary()
             self.state.error = str(exc)
             self.state.status = "failed"
             self.state.turn_end = "failed"
         finally:
+            self._emit_cache_edit_summary()
             with self._context_plugin_lock:
                 if self._billion_context is not None:
                     self._billion_context.close()
@@ -683,9 +689,11 @@ class AgentRunner:
             data = {**data, "followup": True}
         if kind == "stopped":
             self._emit("stopped", data)
+            self._emit_cache_edit_summary()
             self.state.status = "stopped"
         else:
             self._emit("finish", {**data, "ts": time.time()})
+            self._emit_cache_edit_summary()
             self.state.status = "awaiting_input"
         self.state.turn_end = kind
         # 排队消息的 user_message 事件排在收尾事件之后：界面上才是
@@ -1498,7 +1506,22 @@ class AgentRunner:
         # 带 reason 的工具（写类 + 启动翻译）的可选 reason（模型说明"为什么"）集中在这里
         # 搬到结果上，而不是让各自的 handler 都拼一遍——它们的结果结构各不相同，漏一个
         # 就是"填了却看不见"。
-        return _attach_reason(operation, args, handler(self, args))
+        with cache_edit_source({"operation": operation, "reason": str(args.get("reason") or "")}):
+            return _attach_reason(operation, args, handler(self, args))
+
+    def _emit_cache_edit_summary(self) -> None:
+        if not self._cache_turn_id or getattr(self, "_cache_summary_emitted", False):
+            return
+        self._cache_summary_emitted = True
+        from GalTransl.CacheHistory import matching_records, record_summary
+        try:
+            records = matching_records(self.state.project_dir, {
+                "session_id": self.state.session_id, "turn_id": self._cache_turn_id,
+            })
+            edits = [record_summary(record) for record in records]
+            self._emit("cache_edit_summary", {"turn_id": self._cache_turn_id, "edits": edits})
+        except (OSError, ValueError) as exc:
+            self._emit("cache_edit_summary", {"turn_id": self._cache_turn_id, "edits": [], "warning": str(exc)})
 
     # ---- 询问用户（ask_user）----
     def _on_ask_pending(self, holder: dict[str, Any]) -> None:
@@ -1705,7 +1728,16 @@ class AgentRunner:
 
     def _http_post(self, path: str, body: dict[str, Any]) -> Any:
         url = f"{self.base_url}{path}"
-        return _http_json("POST", url, body)
+        cache_edit = any(path.endswith(suffix) for suffix in ("/cache/save", "/cache/delete-file", "/cache/delete-entry"))
+        cache_revert = path.endswith("/cache/history") and body.get("action") == "revert"
+        payload = {**body, "config_file_name": body.get("config_file_name") or self.state.config_file_name,
+                   "_cache_edit": current_cache_edit_source(self)} if cache_edit else (
+            {**body, "_cache_edit": current_cache_edit_source(self)} if cache_revert else body
+        )
+        result = _http_json("POST", url, payload)
+        if isinstance(result, dict) and isinstance(result.get("history"), dict):
+            self._emit("cache_edit", {"edit": result["history"]})
+        return result
 
     def _http_put(self, path: str, body: dict[str, Any]) -> Any:
         url = f"{self.base_url}{path}"

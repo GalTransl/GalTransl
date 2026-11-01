@@ -630,6 +630,7 @@ export function AgentPage() {
       // 写类工具可能改了缓存文件（结果里带 filename / deleted_files）：清掉引用卡片的
       // 取数记忆并让它重拉。不做的话，回复里现渲染的 $transl_cache 卡片、以及已经挂在
       // 屏幕上的旧卡片，拿到的都是改动前那份快照——模型明明改了，界面还是旧译文。
+      if (ev.type === 'cache_edit' && ev.edit) invalidateCacheFilesForToolResult(ev.edit);
       if (ev.type === 'tool_result' && ev.ok) {
         invalidateCacheFilesForToolResult(ev.result);
       }

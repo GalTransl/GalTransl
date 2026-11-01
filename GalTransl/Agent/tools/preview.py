@@ -30,6 +30,7 @@ from GalTransl.Agent.tools.project import _plan_config_updates, _guideline_write
 from GalTransl.Agent.tools.plugin_settings import catalog_for_updates
 from GalTransl.Agent.tools.proofread import _tool_revert_proofread_changes
 from GalTransl.Agent.tools.find_replace import _tool_search_replace_cache
+from GalTransl.Agent.tools.history import _tool_cache_history
 
 if TYPE_CHECKING:
     from GalTransl.Agent.runner import AgentRunner
@@ -51,6 +52,7 @@ if TYPE_CHECKING:
 # （delete_transl_cache 不传 indexes 时没有单个文件名可对）、启动翻译、派子代理。
 PREVIEW_TOOLS: frozenset[str] = frozenset({
     "replace_cache",
+    "revert_cache_history",
     "revert_proofread_changes",
     "patch_transl_cache",
     "delete_transl_cache",
@@ -74,6 +76,8 @@ def _preview_tool_changes(runner: AgentRunner, name: str, args: dict[str, Any]) 
     if name not in PREVIEW_TOOLS:
         return None
     try:
+        if name == "revert_cache_history":
+            return _tool_cache_history(runner, {**args, "dry_run": True})
         if name == "replace_cache":
             return _tool_search_replace_cache(runner, {**args, "dry_run": True})
         if name == "revert_proofread_changes":

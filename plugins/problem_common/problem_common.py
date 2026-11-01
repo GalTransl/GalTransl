@@ -333,7 +333,7 @@ def _check_problems(
 
             )
     if CProblemType.字典使用 in find_type and gpt_dict is not None:
-        if val := gpt_dict.check_dic_use(pre_dst, tran):
+        if val := gpt_dict.check_dic_use(tran.proofread_zh or pre_dst, tran):
             problem_list.append(val)
     if CProblemType.引入英文 in find_type:
         if not contains_english(post_src) and contains_english(pre_dst):

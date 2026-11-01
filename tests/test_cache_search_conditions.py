@@ -137,6 +137,59 @@ class CacheSearchConditionsTests(unittest.TestCase):
         saved = json.loads(Path(self.project, CACHE_FOLDERNAME, "a.json").read_bytes())
         self.assertEqual(saved[0]["pre_dst"], r"OLD \g<1>")
 
+    def test_match_fragments_preserve_original_text_and_character_offsets(self):
+        self.write([{"index": 1, "pre_dst": "甲乙🙂Old丙丁OLD戊"}])
+        agent = self.agent()
+        result = _tool_search_replace_cache(agent, {"action": "search", "query": "old"})
+        self.assertEqual(result["results"][0]["matched_fields"],
+                         "pre_dst:3-6:乙🙂Old丙丁；pre_dst:8-11:丙丁OLD戊")
+        text = _render_tool_result_table("search_cache", result)
+        self.assertIn("pre_dst:3-6:乙🙂Old丙丁", text)
+        self.assertIn("偏移从0开始", text)
+        sensitive = _tool_search_replace_cache(agent, {
+            "action": "search", "query": "Old", "match_case": True,
+        })
+        self.assertEqual(sensitive["results"][0]["matched_fields"], "pre_dst:3-6:乙🙂Old丙丁")
+
+    def test_match_fragments_clip_context_at_field_boundaries_and_support_old_keys(self):
+        self.write([{"index": 1, "pre_zh": "词中词"}])
+        result = self.search(query="词", field="pre_dst")
+        self.assertEqual(result["results"][0]["matched_fields"], "pre_dst:0-1:词中词；pre_dst:2-3:词中词")
+
+    def test_regex_match_fragments_deduplicate_conditions_and_escape_markdown(self):
+        self.write([{"index": 1, "name": "角色", "pre_dst": "ab12|CD34\nx"}])
+        result = _tool_search_replace_cache(self.agent(), {
+            "action": "search", "query": r"[a-z]+\d+", "regex": True,
+            "conditions": [
+                {"field": "pre_dst", "query": r"[a-z]+\d+", "options": {"re": True}},
+                {"field": "name", "query": "角色"},
+            ],
+        })
+        self.assertEqual(result["results"][0]["matched_fields"],
+                         "pre_dst:0-4:ab12|C；pre_dst:5-9:2|CD34\nx；name:0-2:角色")
+        text = _render_tool_result_table("search_cache", result)
+        self.assertIn(r"pre_dst:0-4:ab12\|C", text)
+        self.assertIn(r"pre_dst:5-9:2\|CD34<br>x", text)
+
+    def test_zero_width_fragments_and_compatibility_fields_use_their_search_offsets(self):
+        self.write([{"index": 1, "name": "角色", "post_src": "原文", "pre_dst": "甲乙丙丁"}])
+        result = self.search(query=r"(?=丙)", field="dst", options={"re": True})
+        self.assertEqual(result["results"][0]["matched_fields"], "dst:2-2:甲乙丙丁")
+        result = self.search(query="角色", field="all")
+        self.assertEqual(result["results"][0]["matched_fields"], "name:0-2:角色")
+        result = self.search(query="原文", field="src")
+        self.assertEqual(result["results"][0]["matched_fields"], "src:0-2:原文")
+
+    def test_context_rows_do_not_display_unselected_match_fragments(self):
+        self.write([{"index": index, "pre_dst": "命中"} for index in (1, 2)])
+        result = _tool_search_replace_cache(self.agent(), {
+            "action": "search", "query": "命中", "limit": 1,
+            "context": 1, "only_preceding": False,
+        })
+        self.assertEqual(result["results"][0]["matched_fields"], "pre_dst:0-2:命中")
+        self.assertEqual(result["results"][1]["index"], "2*")
+        self.assertNotIn("matched_fields", result["results"][1])
+
     def test_regex_case_options_apply_to_search_and_replacement_filters(self):
         entries = [
             {"index": 1, "post_src": "ABC", "pre_dst": "old"},

@@ -1,4 +1,17 @@
 {
+  "cacheHistory": {
+    "pending": "Incomplete record",
+    "title": "Cache edit history",
+    "summary": "{{count}} cache files changed · {{edits}} edits",
+    "undoTurn": "Undo",
+    "undone": "Undone",
+    "viewDiff": "View diff",
+    "closeDiff": "Close diff",
+    "loading": "Loading diff…",
+    "conflict": "Later edits conflict with this undo. Nothing was changed. Review these conflicts first:",
+    "user": "User",
+    "list": "Search cache edit history"
+  },
   "projectPreview": {
     "openEntry": "Open this entry in the mini window"
   },

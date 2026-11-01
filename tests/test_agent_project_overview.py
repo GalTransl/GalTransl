@@ -318,7 +318,7 @@ class OverviewIncludeTests(unittest.TestCase):
 
     def test_default_returns_everything_without_note(self) -> None:
         out, _ = self._call({})
-        self.assertEqual(sorted(out), sorted(section for section in OVERVIEW_SECTIONS if section != "plugins"))
+        self.assertEqual(sorted(out), sorted(section for section in OVERVIEW_SECTIONS if section not in ("plugins", "cache_output")))
         self.assertNotIn("note", out)  # 全量返回时不加"本次只返回了…"的提示
 
     def test_progress_only_skips_the_config_request(self) -> None:
@@ -342,7 +342,7 @@ class OverviewIncludeTests(unittest.TestCase):
             _normalize_overview_include({"include": ["config", "progress", "config"]}),
             ["progress", "config"],
         )
-        self.assertEqual(_normalize_overview_include({}), [section for section in OVERVIEW_SECTIONS if section != "plugins"])
+        self.assertEqual(_normalize_overview_include({}), [section for section in OVERVIEW_SECTIONS if section not in ("plugins", "cache_output")])
 
     def test_bad_include_is_rejected(self) -> None:
         for bad in ({"include": ["progress", "nope"]}, {"include": []}, {"include": "progress"}):

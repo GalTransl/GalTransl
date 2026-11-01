@@ -57,6 +57,7 @@ PERMISSION_TOOL_RISK: dict[str, str] = {
     "patch_transl_cache": PERMISSION_EDIT,
     "replace_cache": PERMISSION_EDIT,
     "revert_proofread_changes": PERMISSION_EDIT,
+    "revert_cache_history": PERMISSION_EDIT,
     "delete_transl_cache": PERMISSION_EDIT,
     "update_project_config": PERMISSION_HIGH,
     "manage_problem_filter": PERMISSION_HIGH,
@@ -87,6 +88,8 @@ PERMISSION_READ_TOOLS: frozenset[str] = frozenset({
     "list_problems",
     "read_transl_cache",
     "read_proofread_changes",
+    "list_cache_history",
+    "diff_cache_history",
     "read_output",
     "read_history_archive",
     "get_runtime",
@@ -105,6 +108,7 @@ PERMISSION_TOOL_LABELS: dict[str, str] = {
     "patch_transl_cache": "修改译文",
     "replace_cache": "替换译文",
     "revert_proofread_changes": "撤销校对修改",
+    "revert_cache_history": "撤销缓存编辑",
     "delete_transl_cache": "删除缓存",
     "update_project_config": "修改项目配置",
     "manage_problem_filter": "管理问题过滤",
@@ -118,7 +122,7 @@ PERMISSION_TOOL_LABELS: dict[str, str] = {
 def _tool_risk(name: str, args: dict[str, object] | None = None) -> str:
     """工具的风险档。没登记的工具按 high 处理（fail closed）：新增写类工具忘了
     登记时宁可多问一次，也不要默默改掉用户的项目。"""
-    if name == "replace_cache" and args and args.get("dry_run") is True:
+    if name in ("replace_cache", "revert_cache_history") and args and args.get("dry_run") is True:
         return PERMISSION_READ
     if name in ("manage_problem_filter", "manage_problem_white_list") and args and args.get("action") == "list":
         return PERMISSION_READ

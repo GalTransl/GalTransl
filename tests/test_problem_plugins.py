@@ -16,6 +16,7 @@ import yaml
 from GalTransl import CACHE_FOLDERNAME
 from GalTransl.ConfigHelper import CProjectConfig
 from GalTransl.CSentense import CSentense
+from GalTransl.Dictionary import CGptDict
 from GalTransl.Problem import find_problems, load_problem_plugins, finalize_problem_plugins, list_problem_types
 from GalTransl.server import JobRegistry, _scan_plugins, build_handler
 from GalTransl.server_runtime import encode_project_dir
@@ -117,6 +118,25 @@ class ProblemPluginTests(unittest.TestCase):
         find_problems([skipped, empty], config)
         self.assertEqual(skipped.problem, "")
         self.assertEqual(empty.problem, "")
+
+    def test_gpt_dictionary_usage_checks_proofread_text_before_initial_translation(self):
+        dictionary_path = self.project / "gpt.txt"
+        dictionary_path.write_text("こんにちは\t你好\n", encoding="utf-8")
+        dictionary = CGptDict([str(dictionary_path)])
+        config = self.config(problemAnalyze={"problemList": ["字典使用"]})
+        self.addCleanup(finalize_problem_plugins, config)
+        for initial, proofread, expected in [
+            ("您好", "你好", ""),
+            ("你好", "您好", "gpt未使用：こんにちは---你好"),
+            ("你好", "", ""),
+            ("您好", "", "gpt未使用：こんにちは---你好"),
+        ]:
+            with self.subTest(initial=initial, proofread=proofread):
+                tran = self.tran(initial)
+                tran.proofread_zh = proofread
+                tran.post_dst = proofread or initial
+                find_problems([tran], config, dictionary)
+                self.assertEqual(tran.problem, expected)
 
     def test_plugin_errors_and_invalid_return_do_not_stop_other_checks(self):
         broken = self.plugin("problem_broken", source=PLUGIN_SOURCE.replace(

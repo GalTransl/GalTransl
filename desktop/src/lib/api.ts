@@ -684,6 +684,68 @@ export async function saveCacheFile(projectId: string, filename: string, entries
   );
 }
 
+export type CacheEdit = {
+  change_id: string;
+  at: number;
+  session_id: string;
+  turn_id: string;
+  actor_id: string;
+  actor_label: string;
+  operation: string;
+  reason: string;
+  status: string;
+  updated: number;
+  reverted_by?: string | null;
+  reverts: string[];
+  files: { filename: string; updated: number; deleted: boolean; created: boolean }[];
+};
+
+export type CacheHistoryFile = {
+  filename: string;
+  updated: number;
+  added: number;
+  removed: number;
+  diff: string;
+};
+
+export type CacheHistoryPage<T> = {
+  items: T[];
+  total: number;
+  returned: number;
+  has_more: boolean;
+  next_offset?: number;
+};
+
+export type CacheUndoResult = {
+  status: 'reverted' | 'conflict' | 'no_change' | 'preview';
+  updated: number;
+  note?: string;
+  conflicts: { file: string; index?: number; field?: string; reason: string }[];
+  history?: CacheEdit;
+};
+
+export function listCacheHistory(projectDir: string, sessionId: string, turnId: string, offset = 0) {
+  return apiRequest<CacheHistoryPage<CacheEdit>>(`/api/projects/${encodeProjectDir(projectDir)}/cache/history`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'list', session_id: sessionId, turn_id: turnId, limit: 200, offset }),
+  });
+}
+
+export function diffCacheHistory(projectDir: string, changeIds: string[], filename: string) {
+  return apiRequest<CacheHistoryPage<CacheHistoryFile>>(`/api/projects/${encodeProjectDir(projectDir)}/cache/history`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'diff', change_ids: changeIds, filename }),
+  });
+}
+
+export function undoCacheHistory(projectDir: string, changeIds: string[], sessionId: string) {
+  return apiRequest<CacheUndoResult>(`/api/projects/${encodeProjectDir(projectDir)}/cache/history`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'revert', change_ids: changeIds,
+      _cache_edit: { session_id: sessionId, turn_id: `undo-${crypto.randomUUID()}`, actor_id: '', actor_label: resolveMessage(uiMessage('agent:cacheHistory.user')) } }),
+  });
+}
+
 export type CacheDictionaryKind = 'pre' | 'post' | 'gpt';
 export type CacheDictionaryCounts = Record<CacheDictionaryKind, number>;
 export type CacheDictionaryMatch = {
@@ -2081,6 +2143,8 @@ export type AgentEventType =
   | 'subagent_tool_result'
   | 'subagent_retry'
   | 'subagent_done'
+  | 'cache_edit'
+  | 'cache_edit_summary'
   | 'finish'
   | 'error'
   | 'stopped'
@@ -2130,6 +2194,10 @@ export type AgentStreamingMessage = {
 export type AgentEvent = {
   type: AgentEventType;
   step: number;
+  edit?: CacheEdit;
+  edits?: CacheEdit[];
+  turn_id?: string;
+  warning?: string;
   // content
   content?: string;
   // content_delta（流式增量）/ content_end（一段流式文本结束）/ reasoning_*（思考流同构）

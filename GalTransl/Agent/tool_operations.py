@@ -4,6 +4,7 @@ from GalTransl.Agent.models import AgentToolError
 
 
 TOOL_OPERATIONS = {
+    "cache_history": {"list": "list_cache_history", "diff": "diff_cache_history", "revert": "revert_cache_history"},
     "input": {"list": "list_input_files", "read": "read_input_file", "search": "search_input"},
     "guideline": {"read": "read_guideline", "append": "write_project_guideline", "replace": "write_project_guideline", "overwrite": "write_project_guideline"},
     "dictionary": {"list": "list_dict_files", "read": "read_dict", "set": "save_dict", "delete": "save_dict", "overwrite": "save_dict"},

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Sequence, TYPE_CHECKING
 
 from GalTransl import DEFAULT_GUIDELINE_NAME
+from GalTransl.Agent.cache_edits import cache_edit_source
 from GalTransl.Agent.context import (
     _apply_prompt_cache,
     _estimate_usage_tokens,
@@ -910,6 +911,7 @@ class SubAgentRunner:
         self.guidelines = guidelines
         self.first_response_event = first_response_event
         self.id = delegation_id
+        self.cache_turn_id = getattr(parent, "_cache_turn_id", "")
         self.fixer = ProofreadFixer(parent, delegation_id, self.stop_event) if agent == SUBAGENT_AGENT_PROOFREAD else None
         self.messages: list[dict[str, Any]] = []
         self.turns = 0
@@ -1274,7 +1276,13 @@ class SubAgentRunner:
                 raise AgentToolError(
                     f"子代理没有这个工具或动作的权限：{name}"
                 )
-            result = handler(self.parent, args)
+            with cache_edit_source({
+                "turn_id": self.cache_turn_id, "actor_id": self.id,
+                "actor_label": SUBAGENT_LABELS.get(self.agent, self.agent),
+                "tool_call_id": call_id, "operation": operation,
+                "reason": str(args.get("reason") or self.brief),
+            }):
+                result = handler(self.parent, args)
             if operation == "patch_transl_cache" and isinstance(result, dict) and not result.get("updated"):
                 failures = [str(row["error"]) for row in result.get("files", []) if row.get("error")]
                 if failures:

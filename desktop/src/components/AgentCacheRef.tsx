@@ -62,6 +62,9 @@ export function invalidateCacheFilesForToolResult(result: unknown): void {
     const names = [
       raw,
       ...(Array.isArray(r.deleted_files) ? r.deleted_files : []),
+      ...(Array.isArray(r.files) ? r.files.map(file => file && typeof file === 'object' ? (file as Record<string, unknown>).filename : '') : []),
+      ...(r.history && typeof r.history === 'object' && Array.isArray((r.history as Record<string, unknown>).files)
+        ? ((r.history as Record<string, unknown>).files as { filename: string }[]).map(file => file.filename) : []),
     ]
       .map((name) => (typeof name === 'string' ? name.trim() : ''))
       .filter(Boolean);

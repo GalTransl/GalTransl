@@ -443,7 +443,7 @@ def _group_cache_patches_by_file(args: dict[str, Any]) -> list[tuple[str, list[A
 def _cache_replace_request(args: dict[str, Any], allowed: frozenset[str]) -> dict[str, Any] | None:
     action = _write_action(args, ("set", "replace"))
     if action == "set":
-        if any(field in args for field in ("files", "old_text", "new_text", "replace_all", "query", "replacement", "fields")):
+        if any(field in args for field in ("files", "old_text", "new_text", "replace_all", "query", "replacement", "fields", "regex")):
             raise AgentToolError("action=set 只接受 patches；文本替换请用 action=replace")
         return None
     if "patches" in args:
@@ -458,6 +458,16 @@ def _cache_replace_request(args: dict[str, Any], allowed: frozenset[str]) -> dic
         raise AgentToolError("old_text must be a non-empty string")
     if not isinstance(new_text, str):
         raise AgentToolError("new_text must be a string (empty string clears matched text)")
+    regex = args.get("regex", False)
+    match_case = args.get("match_case", True)
+    if not isinstance(regex, bool) or not isinstance(match_case, bool):
+        raise AgentToolError("regex/match_case 必须是 boolean")
+    try:
+        pattern = re.compile(old_text if regex else re.escape(old_text), 0 if match_case else re.IGNORECASE)
+        if regex:
+            pattern.sub(new_text, "")  # Validate group references even when no file matches.
+    except (re.error, IndexError) as exc:
+        raise AgentToolError(f"无效的正则表达式或替换文本：{exc}") from exc
     filenames = args.get("files")
     if filenames is None:
         filenames = [args.get("filename")]
@@ -479,8 +489,10 @@ def _cache_replace_request(args: dict[str, Any], allowed: frozenset[str]) -> dic
         "fields": list(dict.fromkeys(fields)),
         "old_text": old_text,
         "new_text": new_text,
+        "regex": regex,
+        "pattern": pattern,
         "conditions": parse_cache_search_conditions({"conditions": args["conditions"]}) if args.get("conditions") else [],
-        "match_case": args.get("match_case", True),
+        "match_case": match_case,
         "filter_keys": args.get("_filter_keys", []),
     }
 
@@ -519,7 +531,7 @@ def _plan_cache_replacements(
             conditions,
         )
     )]
-    pattern = re.compile(re.escape(request["old_text"]), 0 if request.get("match_case", True) else re.IGNORECASE)
+    pattern = request["pattern"]
     counts = [
         sum(
             len(pattern.findall(value))
@@ -535,7 +547,7 @@ def _plan_cache_replacements(
         for field in request["fields"]:
             value = _cache_field_value(entry, field)
             if isinstance(value, str) and pattern.search(value):
-                after = pattern.sub(lambda match: request["new_text"], value)
+                after = pattern.sub(request["new_text"], value) if request["regex"] else pattern.sub(lambda match: request["new_text"], value)
                 if after != value:
                     updates[field] = after
         if updates:
@@ -789,6 +801,8 @@ def _patch_one_cache_file_locked(
     # 作为轻量校验信号——没引入新问题的条目不出现在 problems 里；改了什么由
     # changes 的 before→after 表达，不重复回传最终译文，不必再 read_transl_cache。
     save_result = runner._http_post(f"/api/projects/{pid}/cache/save", save_body)
+    if isinstance(save_result, dict) and isinstance(save_result.get("history"), dict):
+        result["change_id"] = save_result["history"]["change_id"]
     saved_entries = save_result.get("entries") if isinstance(save_result, dict) else None
     result["verification"] = (
         "checked" if isinstance(saved_entries, list) and save_result.get("verification", "checked") == "checked" else "unknown"

@@ -164,7 +164,7 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     只给命中行常常不够判断——比如查「ドルード」，要决定该译成「多鲁德」还是「杜罗德」，
     得看这句前后的对话与说话人，和 read_transl_cache 的 context 是同一个用途。
     """
-    query = str(args.get("query", "")).strip()
+    query = str(args.get("query", "")) if args.get("options", {}).get("re", False) else str(args.get("query", "")).strip()
     field = str(args.get("field", "all")).strip() or "all"
     try:
         conditions = parse_cache_search_conditions(args)
@@ -190,7 +190,7 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     body: dict[str, Any] = {
         "query": query,
         "field": field,
-        "options": {"re": False, "match_case": args.get("options", {}).get("match_case", False)},
+        "options": {"re": args.get("options", {}).get("re", False), "match_case": args.get("options", {}).get("match_case", False)},
         "max_results": max_hits,
         "order": order,
         "config_file_name": runner.state.config_file_name,

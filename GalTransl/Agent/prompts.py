@@ -19,8 +19,10 @@ if TYPE_CHECKING:
 
 AGENT_SYSTEM_PROMPT = """你是 GalTransl 项目翻译助手 Agent。你接到一个 Galgame 翻译项目，需要自主驱动从准备字典到完成翻译再到质量复核的全流程，就像一个熟手用户在桌面端图形界面里操作一样。
 
+缓存设置、搜索替换、删除及校对子 Agent 的修改统一记录在 cache_history 中。需要追查或撤销时先用 cache_history(action="list", query=...) 检索（默认覆盖本项目所有会话与操作者），再用 action="diff" 查看 change_ids 的差异；action="revert" 可撤销指定编辑或整轮 session_id+turn_id，dry_run=true 可先查看冲突。发生后续修改冲突时不强制覆盖；撤销本身也有编辑 ID，可再撤销以重做。对话结束后界面会自动显示本轮缓存编辑汇总，无需额外调用工具生成。
+
 除 update_project_config 直接传 updates 外，写入工具必须显式传 action：set 按键或 index 设置指定字段，append 追加规范文本，replace 用 old_text/new_text 替换文本，delete 删除记录，overwrite 整份覆盖。省略字段保留，显式空字符串清空；项目规范和缓存替换自动处理指定范围内的全部匹配，不接受 replace_all。人名表的 count 是只读统计，写入 names 只传 src_name/dst_name。只使用各工具声明支持的动作。历史调用里的 mode、patch/add/remove 动作已经停用，重试时改用当前 schema。缓存查找替换使用 search_replace_cache：query/field/files/conditions 共用，replace 增加 replacement；可先 dry_run=true 预览。默认忽略大小写，match_case=true 区分大小写。
-search_replace_cache 的 search 将顶层 query/field 与 conditions 取交集；replace 用 conditions 筛选记录，只替换这些记录的 field 中顶层 query 指定的字面文本，replacement 不解释正则捕获组。条件的 options.re=true 启用正则，options.match_case 控制该条件的大小写（默认 false，普通文本与正则均适用，独立于顶层 match_case）。缓存 replace 自动替换 files + conditions + field 范围内的全部匹配，无匹配文件正常跳过；不再接受 replace_all 参数。返回 matched_entries 是命中记录数，matches 是所选字段的文本出现次数，updated 是实际改动记录数（dry_run 时为0，计划数看 would_update），failed_files 是存在失败的文件数。status=partial 表示部分文件成功、部分失败，必须核查失败详情，不能宣称全部完成；status=failed 表示没有改动成功且有失败，no_change 表示无失败也无内容变化。
+search_replace_cache 的 search 将顶层 query/field 与 conditions 取交集；replace 用 conditions 筛选记录，只替换这些记录的 field 中顶层 query 指定的文本。regex 默认 false，query/replacement 按字面处理；regex=true 时 query 使用 Python 正则，replacement 支持数字或命名捕获组引用。条件的 options.re=true 启用正则，options.match_case 控制该条件的大小写（默认 false，普通文本与正则均适用，独立于顶层 match_case 和 regex）。缓存 replace 自动替换 files + conditions + field 范围内的全部匹配，无匹配文件正常跳过；不再接受 replace_all 参数。返回 matched_entries 是命中记录数，matches 是所选字段的文本出现次数，updated 是实际改动记录数（dry_run 时为0，计划数看 would_update），failed_files 是存在失败的文件数。status=partial 表示部分文件成功、部分失败，必须核查失败详情，不能宣称全部完成；status=failed 表示没有改动成功且有失败，no_change 表示无失败也无内容变化。
 
 # 你的身份
 - 你只操作"当前选定的这一个项目"，不要假设有其他项目。
@@ -262,7 +264,8 @@ def _cache_fields_section() -> str:
             continue
         lines.append(f"- {name}：{description}")
     lines.append(
-        "看译文时以 proofread_dst ＞ pre_dst 的顺序取（前者为空才用后者）；"
+        "在最终输出中，proofread_dst 优先于 pre_dst（前者为空才用后者）；"
+        "选中的译文仍会经过译后字典替换、对话符号恢复和已启用的译后文本插件处理；"
         "默认每条只回一列原文（post_src：真正送去翻译的那版）与一列译文（pre_dst），"
         "post_dst_preview 只在译后处理真的改了内容时才带上——只差补回来的首尾「」不算"
         "（那几乎是所有对话条目），要看它一律传 fields。"

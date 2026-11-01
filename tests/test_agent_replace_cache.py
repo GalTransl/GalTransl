@@ -368,6 +368,7 @@ class ReplaceCacheTests(unittest.TestCase):
         replacement = next(t["function"] for t in AGENT_TOOLS if t["function"]["name"] == "search_replace_cache")
         self.assertEqual([s["type"] for s in replacement["parameters"]["properties"]["files"]["anyOf"]], ["string", "array"])
         self.assertNotIn("replace_all", replacement["parameters"]["properties"])
+        self.assertEqual(replacement["parameters"]["properties"]["regex"]["default"], False)
         narrow = _subagent_patch_schema()["function"]["parameters"]
         self.assertEqual(narrow["required"], ["action", "patches"])
         for field in ("files", "old_text", "new_text", "replace_all", "fields"):

@@ -9,7 +9,7 @@ from GalTransl.Search import parse_cache_search_conditions
 
 def _tool_search_replace_cache(runner, args):
     unsupported = args.keys() - {
-        "action", "query", "field", "files", "conditions", "match_case", "replacement",
+        "action", "query", "field", "files", "conditions", "match_case", "regex", "replacement",
         "dry_run", "clear_comment", "limit", "offset", "order", "context",
         "only_preceding", "reason",
     }
@@ -19,17 +19,23 @@ def _tool_search_replace_cache(runner, args):
     if action not in ("search", "replace"):
         raise AgentToolError('search_replace_cache 必须指定 action="search" 或 "replace"')
     match_case = args.get("match_case", False)
+    regex = args.get("regex", False)
     dry_run = args.get("dry_run", False)
-    if not isinstance(match_case, bool) or not isinstance(dry_run, bool):
-        raise AgentToolError("match_case/dry_run 必须是 boolean")
+    if not isinstance(match_case, bool) or not isinstance(dry_run, bool) or not isinstance(regex, bool):
+        raise AgentToolError("match_case/regex/dry_run 必须是 boolean")
     if not isinstance(args.get("clear_comment", False), bool):
         raise AgentToolError("clear_comment 必须是 boolean")
     field = args.get("field", "pre_dst")
     query = args.get("query", "")
     if not isinstance(query, str):
         raise AgentToolError("query 必须是字符串")
-    normalized = {**args, "field": field, "query": query.strip(), "options": {"match_case": match_case}}
-    conditions = parse_cache_search_conditions(normalized)
+    normalized = {**args, "field": field, "query": query if regex else query.strip(), "options": {"re": regex, "match_case": match_case}}
+    if regex and not normalized["query"]:
+        raise AgentToolError("regex=true 需要非空 query；条件自身的正则请用 conditions[].options.re")
+    try:
+        conditions = parse_cache_search_conditions(normalized)
+    except ValueError as exc:
+        raise AgentToolError(str(exc)) from exc
     if not conditions:
         raise AgentToolError("query 或 conditions 至少提供一个")
     selectors = args.get("files", "*")
@@ -56,6 +62,7 @@ def _tool_search_replace_cache(runner, args):
         "action": "replace", "files": selectors, "fields": [field],
         "old_text": normalized["query"], "new_text": args["replacement"],
         "match_case": match_case,
+        "regex": regex,
         "conditions": args.get("conditions"), "_filter_keys": filter_keys,
         "clear_comment": args.get("clear_comment", False),
     }, dry_run=dry_run)

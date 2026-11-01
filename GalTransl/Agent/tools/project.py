@@ -204,23 +204,24 @@ def _backend_overview(runner: AgentRunner) -> dict[str, Any]:
 
 
 # 「了解项目」可分段返回。名字与返回体的键一一对应（include 里写什么，回来就是什么键），
-# 顺序即返回顺序；不传 include 就是全部（保持老行为）。
+# 顺序即返回顺序；plugins/cache_output 仅显式选择时执行。
 OVERVIEW_SECTIONS: tuple[str, ...] = (
     "progress",
     "backend",
     "config",
     "config_field_descriptions",
     "plugins",
+    "cache_output",
 )
 
 
 def _normalize_overview_include(args: dict[str, Any]) -> list[str]:
-    """校验 include：不传 = 全部；传了就去重并按标准顺序返回，未知名字直接报错。"""
+    """校验 include：不传取基础概览；显式选择时去重并按标准顺序返回。"""
     raw = args.get("include")
     if raw is None:
-        return [section for section in OVERVIEW_SECTIONS if section != "plugins"]
+        return [section for section in OVERVIEW_SECTIONS if section not in ("plugins", "cache_output")]
     if not isinstance(raw, list) or not raw:
-        raise AgentToolError("include 必须是非空数组（不传表示返回全部）")
+        raise AgentToolError("include 必须是非空数组（不传表示返回基础概览）")
     wanted: set[str] = set()
     for item in raw:
         name = str(item or "").strip()
@@ -237,7 +238,7 @@ def _normalize_overview_include(args: dict[str, Any]) -> list[str]:
 
 
 def _tool_get_project_overview(runner: AgentRunner, args: dict[str, Any]) -> Any:
-    """了解项目。按 include 分块返回（不传 = 全部）。
+    """了解项目。按 include 分块返回，插件设置和输出一致性检查须显式选择。
 
     分块的意义：config 与 config_field_descriptions（约 40 个键的说明）基本是静态的，
     开局拿全看过一次之后，再查进度时没有理由原样重发一遍。只取需要的部分，没要配置
@@ -288,6 +289,9 @@ def _tool_get_project_overview(runner: AgentRunner, args: dict[str, Any]) -> Any
 
     if "plugins" in include:
         out["plugins"] = _tool_get_plugin_settings(runner, args)
+
+    if "cache_output" in include:
+        out["cache_output"] = runner._http_get(f"/api/projects/{pid}/cache-output?config={cfg_name}")
 
     if args.get("include") is not None and len(include) < len(OVERVIEW_SECTIONS):
         out["note"] = (

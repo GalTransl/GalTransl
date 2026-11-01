@@ -108,7 +108,7 @@ class CacheFieldsSectionTests(unittest.TestCase):
         self.assertIn("前润", section)  # post_src 与 pre_src 的区别
         self.assertIn("译前字典", section)
         self.assertIn("译后字典", section)
-        self.assertIn("proofread_dst ＞ pre_dst", section)  # 哪个才是最终译文
+        self.assertIn("在最终输出中，proofread_dst 优先于 pre_dst", section)
         self.assertIn("派生字段", section)  # 哪些改不动
         self.assertIn("缓存 ≠ 交付物", section)  # 别拿缓存当输出
         self.assertIn('output(action="read")', section)

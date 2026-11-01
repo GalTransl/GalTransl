@@ -54,7 +54,7 @@ class ReasonSchemaTests(unittest.TestCase):
             for tool in AGENT_TOOLS
             if "reason" in tool["function"]["parameters"].get("properties", {})
         }
-        self.assertEqual(declared, {"update_project_config", "guideline", "dictionary", "names", "edit_transl_cache", "search_replace_cache", "problems", "subagents", "translation"})
+        self.assertEqual(declared, {"update_project_config", "guideline", "dictionary", "names", "edit_transl_cache", "search_replace_cache", "cache_history", "problems", "subagents", "translation"})
 
 
 class AttachReasonTests(unittest.TestCase):

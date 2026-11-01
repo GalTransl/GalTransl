@@ -35,9 +35,12 @@ from GalTransl.CustomBackground import (
     clear_custom_background,
 )
 from GalTransl.Cache import CACHE_TEMP_SUFFIX, _cache_get
+from GalTransl.CacheHistory import begin_edit, finish_edit, indexed_entries, project_lock
+from GalTransl.CacheHistoryHttp import cache_history_action
 from GalTransl.Search import (
     cache_search_texts,
     cache_search_matches,
+    cache_search_match_fragments,
     CacheSearchCondition,
     CACHE_SEARCH_MAX_ROWS,
     CACHE_SEARCH_MAX_CHARS,
@@ -981,7 +984,7 @@ def _search_cache_entries(
                 for matched_field in matched_fields:
                     side = matched_field.rsplit("_", 1)[-1]
                     flags[f"match_{side}"] = True
-                rows[-1]["matched_fields"] = ", ".join(matched_fields)
+                rows[-1]["matched_fields"] = cache_search_match_fragments(texts, conditions) if matched else ""
                 rows[-1].update({key: texts[key] for key in matched_fields if key in ("pre_src", "post_src", "pre_dst", "proofread_dst")})
             if matched:
                 all_hits.append({"filename": filename, "pos": pos, "flags": flags})
@@ -1145,6 +1148,7 @@ def _search_context_rows(
             key = (name, pos)
             if key not in selected_keys:
                 row.update({flag: False for flag in selected[0]["flags"]})
+                row.pop("matched_fields", None)
             else:
                 row.update(hit_flags[key])
             result.append(row)
@@ -1854,6 +1858,112 @@ def _iter_problem_cache_entries(project_dir, white_index):
             yield name, e
 
 
+def _save_cache_entries(project_dir, filename, entries, config_name):
+    file_path = os.path.join(project_dir, CACHE_FOLDERNAME, filename)
+    import orjson
+    with open(file_path, "wb") as f:
+        f.write(orjson.dumps(entries, option=orjson.OPT_INDENT_2))
+
+    # Rebuild: re-derive problem and post_dst_preview fields
+    try:
+        from GalTransl.Problem import find_problems, finalize_problem_plugins
+        from GalTransl.Frontend.LLMTranslate import preprocess_trans_list, postprocess_trans_list
+
+        # Load project config and dictionaries for rebuild
+        proj_config = None
+        pre_dic = None
+        post_dic = None
+        gpt_dic = None
+        tPlugins = []
+        try:
+            from GalTransl.ConfigHelper import CProjectConfig, initDictList
+            from GalTransl.Dictionary import CNormalDic, CGptDict
+            proj_config = CProjectConfig(project_dir, config_name)
+            dict_cfg = proj_config.getDictCfgSection()
+            pre_dic_list = dict_cfg.get("preDict", [])
+            post_dic_list = dict_cfg.get("postDict", [])
+            gpt_dic_list = dict_cfg.get("gpt.dict", [])
+            default_dic_dir = dict_cfg.get("defaultDictFolder", "")
+            pre_dic = CNormalDic(
+                initDictList(pre_dic_list, default_dic_dir, project_dir)
+            )
+            post_dic = CNormalDic(
+                initDictList(post_dic_list, default_dic_dir, project_dir)
+            )
+            gpt_dic = CGptDict(
+                initDictList(gpt_dic_list, default_dic_dir, project_dir)
+            )
+            if dict_cfg.get("sortDict", True):
+                pre_dic.sort_dic()
+                post_dic.sort_dic()
+                gpt_dic.sort_dic()
+            # Load text plugins
+            try:
+                tPlugins = proj_config.tPlugins
+            except Exception:
+                tPlugins = []
+        except Exception:
+            pass  # If config loading fails, skip dict processing
+
+        # Build CSentense list from saved entries
+        # 白名单命中的条目等价于勾了 skip_check：重建问题时不检测、并清掉旧 problem
+        white_index = build_problem_white_list_index(
+            RUNTIME_PROGRESS_CACHE.get_problem_white_list(project_dir, config_name)
+        )
+        trans_list = _cache_entries_to_trans_list(entries, filename, white_index)
+
+        # Link prev/next
+        for i, s in enumerate(trans_list):
+            if i > 0:
+                s.prev_tran = trans_list[i - 1]
+            if i < len(trans_list) - 1:
+                s.next_tran = trans_list[i + 1]
+
+        # Pre-processing and post-processing (shared with LLMTranslate)
+        if pre_dic and proj_config:
+            preprocess_trans_list(trans_list, proj_config, pre_dic, tPlugins or None)
+        if post_dic and proj_config:
+            postprocess_trans_list(trans_list, proj_config, post_dic, tPlugins or None)
+
+        # Run find_problems
+        verification = "unknown"
+        if trans_list:
+            try:
+                find_problems(trans_list, proj_config, gpt_dic)
+                if proj_config is not None:
+                    verification = "checked"
+            except Exception:
+                pass  # If problem detection fails, skip
+            finally:
+                if proj_config is not None:
+                    finalize_problem_plugins(proj_config)
+
+        # Update entries with problem and post_dst_preview
+        idx = 0
+        for e in entries:
+            post_src_val = e.get("post_src", "") or e.get("post_jp", "")
+            if post_src_val == "":
+                continue
+            if idx < len(trans_list):
+                tran = trans_list[idx]
+                if verification == "checked":
+                    if tran.problem:
+                        e["problem"] = tran.problem
+                    elif "problem" in e:
+                        del e["problem"]
+                e["post_dst_preview"] = tran.post_dst
+                idx += 1
+
+        # Re-save with updated fields
+        with open(file_path, "wb") as f:
+            f.write(orjson.dumps(entries, option=orjson.OPT_INDENT_2))
+
+        return {"success": True, "filename": filename, "entries": entries, "verification": verification}
+    except Exception:
+        # Rebuild failed, but original save succeeded
+        return {"success": True, "filename": filename, "verification": "unknown"}
+
+
 def build_handler(registry: JobRegistry):
     class RequestHandler(BaseHTTPRequestHandler):
         def end_headers(self) -> None:
@@ -1871,6 +1981,46 @@ def build_handler(registry: JobRegistry):
         # -----------------------------------------------------------------
 
         def _route_project_api(self, project_id: str, sub_path: str) -> None:
+            if sub_path == "/cache/history":
+                if self.command != "POST":
+                    self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
+                    return
+                try:
+                    project_dir = _safe_project_dir(project_id)
+                    result = cache_history_action(project_dir, self._read_json_body(), _save_cache_entries)
+                    self._send_json(result)
+                except (ValueError, KeyError) as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                except OSError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+            if self.command != "POST" or sub_path not in ("/cache/save", "/cache/delete-entry", "/cache/delete-file"):
+                self._route_project_api_inner(project_id, sub_path)
+                return
+            try:
+                project_dir = _safe_project_dir(project_id)
+                payload = self._read_json_body()
+                if sub_path == "/cache/save":
+                    indexed_entries(payload.get("entries", []))
+                filenames = payload.get("filenames", []) if sub_path == "/cache/delete-file" else [payload.get("filename", "")]
+                if not isinstance(filenames, list) or any(not isinstance(name, str) for name in filenames):
+                    raise ValueError("filenames 必须是字符串数组")
+                metadata = payload.get("_cache_edit", {})
+                if not isinstance(metadata, dict):
+                    raise ValueError("无效的缓存编辑来源")
+                with project_lock(project_dir):
+                    self._cached_json_body = payload
+                    self._cache_edit = (project_dir, begin_edit(
+                        project_dir, filenames, metadata, metadata.get("operation") or sub_path.rsplit("/", 1)[-1],
+                        str(payload.get("config_file_name") or "config.yaml"),
+                    ))
+                    self._route_project_api_inner(project_id, sub_path)
+            except (ValueError, KeyError) as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            except OSError as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        def _route_project_api_inner(self, project_id: str, sub_path: str) -> None:
             """Handle /api/projects/:id/* routes."""
             try:
                 project_dir = _safe_project_dir(project_id)
@@ -2138,108 +2288,7 @@ def build_handler(registry: JobRegistry):
                         self._send_json({"error": f"cache file not found: {filename}"}, status=HTTPStatus.NOT_FOUND)
                         return
 
-                    import orjson
-                    with open(file_path, "wb") as f:
-                        f.write(orjson.dumps(entries, option=orjson.OPT_INDENT_2))
-
-                    # Rebuild: re-derive problem and post_dst_preview fields
-                    try:
-                        from GalTransl.Problem import find_problems, finalize_problem_plugins
-                        from GalTransl.Frontend.LLMTranslate import preprocess_trans_list, postprocess_trans_list
-
-                        # Load project config and dictionaries for rebuild
-                        proj_config = None
-                        pre_dic = None
-                        post_dic = None
-                        gpt_dic = None
-                        tPlugins = []
-                        try:
-                            from GalTransl.ConfigHelper import CProjectConfig, initDictList
-                            from GalTransl.Dictionary import CNormalDic, CGptDict
-                            proj_config = CProjectConfig(project_dir, config_name)
-                            dict_cfg = proj_config.getDictCfgSection()
-                            pre_dic_list = dict_cfg.get("preDict", [])
-                            post_dic_list = dict_cfg.get("postDict", [])
-                            gpt_dic_list = dict_cfg.get("gpt.dict", [])
-                            default_dic_dir = dict_cfg.get("defaultDictFolder", "")
-                            pre_dic = CNormalDic(
-                                initDictList(pre_dic_list, default_dic_dir, project_dir)
-                            )
-                            post_dic = CNormalDic(
-                                initDictList(post_dic_list, default_dic_dir, project_dir)
-                            )
-                            gpt_dic = CGptDict(
-                                initDictList(gpt_dic_list, default_dic_dir, project_dir)
-                            )
-                            if dict_cfg.get("sortDict", True):
-                                pre_dic.sort_dic()
-                                post_dic.sort_dic()
-                                gpt_dic.sort_dic()
-                            # Load text plugins
-                            try:
-                                tPlugins = proj_config.tPlugins
-                            except Exception:
-                                tPlugins = []
-                        except Exception:
-                            pass  # If config loading fails, skip dict processing
-
-                        # Build CSentense list from saved entries
-                        # 白名单命中的条目等价于勾了 skip_check：重建问题时不检测、并清掉旧 problem
-                        white_index = build_problem_white_list_index(
-                            RUNTIME_PROGRESS_CACHE.get_problem_white_list(project_dir, config_name)
-                        )
-                        trans_list = _cache_entries_to_trans_list(entries, filename, white_index)
-
-                        # Link prev/next
-                        for i, s in enumerate(trans_list):
-                            if i > 0:
-                                s.prev_tran = trans_list[i - 1]
-                            if i < len(trans_list) - 1:
-                                s.next_tran = trans_list[i + 1]
-
-                        # Pre-processing and post-processing (shared with LLMTranslate)
-                        if pre_dic and proj_config:
-                            preprocess_trans_list(trans_list, proj_config, pre_dic, tPlugins or None)
-                        if post_dic and proj_config:
-                            postprocess_trans_list(trans_list, proj_config, post_dic, tPlugins or None)
-
-                        # Run find_problems
-                        verification = "unknown"
-                        if trans_list:
-                            try:
-                                find_problems(trans_list, proj_config, gpt_dic)
-                                if proj_config is not None:
-                                    verification = "checked"
-                            except Exception:
-                                pass  # If problem detection fails, skip
-                            finally:
-                                if proj_config is not None:
-                                    finalize_problem_plugins(proj_config)
-
-                        # Update entries with problem and post_dst_preview
-                        idx = 0
-                        for e in entries:
-                            post_src_val = e.get("post_src", "") or e.get("post_jp", "")
-                            if post_src_val == "":
-                                continue
-                            if idx < len(trans_list):
-                                tran = trans_list[idx]
-                                if verification == "checked":
-                                    if tran.problem:
-                                        e["problem"] = tran.problem
-                                    elif "problem" in e:
-                                        del e["problem"]
-                                e["post_dst_preview"] = tran.post_dst
-                                idx += 1
-
-                        # Re-save with updated fields
-                        with open(file_path, "wb") as f:
-                            f.write(orjson.dumps(entries, option=orjson.OPT_INDENT_2))
-
-                        self._send_json({"success": True, "filename": filename, "entries": entries, "verification": verification})
-                    except Exception:
-                        # Rebuild failed, but original save succeeded
-                        self._send_json({"success": True, "filename": filename, "verification": "unknown"})
+                    self._send_json(_save_cache_entries(project_dir, filename, entries, config_name))
                 except json.JSONDecodeError:
                     self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
                 except Exception as exc:
@@ -2325,7 +2374,7 @@ def build_handler(registry: JobRegistry):
                     return
                 try:
                     payload = self._read_json_body()
-                    query = str(payload.get("query", "")).strip()
+                    raw_query = str(payload.get("query", ""))
                     field = str(payload.get("field", "all")).strip()  # all | src | dst
                     options = payload.get("options", {})
                     result_mode = payload.get("result_mode", "bounded")
@@ -2348,21 +2397,13 @@ def build_handler(registry: JobRegistry):
                     if not isinstance(options, dict):
                         self._send_json({"error": "options must be an object"}, status=HTTPStatus.BAD_REQUEST)
                         return
-                    option_re = bool(options.get("re", False))
+                    query = raw_query if options.get("re", False) else raw_query.strip()
                     config_name = str(payload.get("config_file_name", "config.yaml")) or "config.yaml"
                     filter_keys = RUNTIME_PROGRESS_CACHE.get_problem_filter_keys(
                         project_dir, config_name
                     )
 
                     pattern = None
-                    if option_re:
-                        import re
-                        try:
-                            pattern = re.compile(query)
-                        except re.error as exc:
-                            self._send_json({"error": f"invalid regular expression: {exc}"}, status=HTTPStatus.BAD_REQUEST)
-                            return
-
                     try:
                         conditions = parse_cache_search_conditions(payload)
                     except ValueError as exc:
@@ -2453,7 +2494,7 @@ def build_handler(registry: JobRegistry):
                         max_results=max_results,
                         offset=offset,
                         order=order,
-                        conditions=conditions if payload.get("conditions") or field not in ("all", "src", "dst", "problem") else None,
+                        conditions=conditions,
                     )
                     self._send_json(payload_out)
                 except json.JSONDecodeError:
@@ -2613,6 +2654,18 @@ def build_handler(registry: JobRegistry):
                     "entries": _input_entries_as_cache_entries(source_entries),
                     "has_cache": False,
                 })
+                return
+
+            # GET /api/projects/:id/cache-output
+            if sub_path == "/cache-output" and self.command == "GET":
+                from GalTransl.CacheOutput import check_cache_output
+
+                config_name = parse_qs(urlparse(self.path).query).get("config", ["config.yaml"])[0]
+                try:
+                    plugins = _ProjectFilePlugins(project_dir, config_name)
+                    self._send_json(check_cache_output(plugins.cfg, plugins.get))
+                except Exception as exc:
+                    self._send_json({"error": f"无法核对缓存与最终输出：{exc}"}, status=HTTPStatus.BAD_REQUEST)
                 return
 
             # GET /api/projects/:id/progress
@@ -4360,6 +4413,10 @@ def build_handler(registry: JobRegistry):
             return
 
         def _read_json_body(self) -> dict[str, Any]:
+            cached = getattr(self, "_cached_json_body", None)
+            if cached is not None:
+                self._cached_json_body = None
+                return cached
             content_length = int(self.headers.get("Content-Length", "0"))
             if urlparse(self.path).path in {'/api/agent/start', '/api/agent/message'} and not 0 <= content_length <= 12 * 1024 * 1024:
                 raise ValueError('Agent request exceeds the 12 MiB budget')
@@ -4370,6 +4427,12 @@ def build_handler(registry: JobRegistry):
             return data
 
         def _send_json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
+            edit = getattr(self, "_cache_edit", None)
+            if edit is not None:
+                self._cache_edit = None
+                history = finish_edit(*edit)
+                if history is not None:
+                    payload = {**payload, "history": history}
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             try:
                 self.send_response(status)

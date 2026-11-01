@@ -54,6 +54,21 @@ def cache_search_matches(texts, conditions):
     return list(dict.fromkeys(matched))
 
 
+def cache_search_match_fragments(texts, conditions):
+    spans = dict.fromkeys(
+        (field, match.start(), match.end())
+        for condition in conditions
+        for field in (("src", "dst", "problem", "name") if condition.field == "all" else (condition.field,))
+        for match in (condition.pattern or re.compile(
+            re.escape(condition.query), 0 if condition.match_case else re.IGNORECASE,
+        )).finditer(texts[field])
+    )
+    return "；".join(
+        f"{field}:{start}-{end}:{texts[field][max(0, start - 2):end + 2]}"
+        for field, start, end in spans
+    )
+
+
 def parse_cache_search_conditions(payload: dict[str, Any]) -> list[CacheSearchCondition]:
     """各条件在同一条缓存上取交集；旧 query/field 作为额外的第一个条件。"""
     raw = payload.get("conditions")
@@ -62,7 +77,9 @@ def parse_cache_search_conditions(payload: dict[str, Any]) -> list[CacheSearchCo
     ):
         raise ValueError(f"conditions must contain 1-{CACHE_SEARCH_CONDITION_LIMIT} search conditions")
     specs = list(raw or [])
-    if str(payload.get("query", "")).strip():
+    primary_query = str(payload.get("query", ""))
+    primary_options = payload.get("options", {})
+    if primary_query.strip() or (isinstance(primary_options, dict) and primary_options.get("re") is True and primary_query):
         specs.insert(0, {"query": str(payload["query"]), "field": payload.get("field", "all"),
                          "options": payload.get("options", {})})
     conditions = []
@@ -70,7 +87,7 @@ def parse_cache_search_conditions(payload: dict[str, Any]) -> list[CacheSearchCo
         if not isinstance(spec, dict):
             raise ValueError("each search condition must be an object")
         query = spec.get("query")
-        if not isinstance(query, str) or not query.strip():
+        if not isinstance(query, str):
             raise ValueError("each search condition requires a non-empty query")
         field = spec.get("field", "all")
         if field not in CACHE_SEARCH_FIELDS:
@@ -84,14 +101,17 @@ def parse_cache_search_conditions(payload: dict[str, Any]) -> list[CacheSearchCo
         use_regex = options.get("re", False)
         if not isinstance(use_regex, bool):
             raise ValueError("re must be a boolean")
+        normalized_query = query if use_regex else query.strip()
+        if not normalized_query:
+            raise ValueError("each search condition requires a non-empty query")
         try:
             pattern = re.compile(
-                query.strip() if use_regex else re.escape(query.strip()),
+                normalized_query if use_regex else re.escape(normalized_query),
                 0 if match_case else re.IGNORECASE,
             )
         except re.error as exc:
             raise ValueError(f"invalid regular expression: {exc}") from exc
-        conditions.append(CacheSearchCondition(field, query.strip(), pattern, match_case))
+        conditions.append(CacheSearchCondition(field, normalized_query, pattern, match_case))
     return conditions
 
 

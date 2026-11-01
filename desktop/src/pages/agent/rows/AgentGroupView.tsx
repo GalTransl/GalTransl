@@ -9,6 +9,7 @@ import { activityEntries } from '../readGroups';
 import { ReadToolGroup } from './ReadToolGroup';
 import { TranslationJobCard } from './TranslationJobCard';
 import { MessageCopyButton } from './MessageCopyButton';
+import { CacheEditSummary } from './CacheEditSummary';
 import {
   type ActivityItem,
   liveTail,
@@ -37,6 +38,7 @@ export const AgentGroupView = memo(function AgentGroupView({
   newProjectWizardRefs?: boolean;
 }) {
   const uiLanguage = useUiLanguage();
+  if (group.type === 'cache-edits') return group.edits.length || group.warning ? <CacheEditSummary edits={group.edits} turnId={group.turnId} warning={group.warning} projectDir={projectDir} sessionId={imageScope?.sessionId || ''} /> : null;
   // Terminal groups render as notices and hold no disclosure state; dispatch
   // them before the activity component so its hooks never run conditionally.
   if (group.type === 'user') return <UserMessageRow message={group.message} step={group.step} images={group.images} imageScope={imageScope} />;

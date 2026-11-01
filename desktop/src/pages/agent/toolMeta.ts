@@ -16,6 +16,9 @@ type ToolMeta = {
 };
 
 const TOOL_META: Record<string, ToolMeta> = {
+  list_cache_history: { get action() { return translate("agent:cacheHistory.list"); }, get running() { return translate("agent:cacheHistory.list"); }, verb: '', icon: 'search', summary: a => str(a?.query || a?.filename || a?.turn_id) },
+  diff_cache_history: { get action() { return translate("agent:cacheHistory.viewDiff"); }, get running() { return translate("agent:cacheHistory.viewDiff"); }, verb: '', icon: 'file-text', summary: a => str(a?.filename || a?.turn_id) },
+  revert_cache_history: { get action() { return translate("agent:cacheHistory.undoTurn"); }, get running() { return translate("agent:cacheHistory.undoTurn"); }, verb: '', icon: 'undo', summary: a => toolReason(a) || str(a?.turn_id) },
   read: { get action() { return translate("extraction:toolReadFile"); }, get running() { return translate("extraction:toolReadFile"); }, verb: '', icon: 'file-text', summary: a => toolReason(a) || str(a?.path) },
   write: { get action() { return translate("extraction:toolWriteFile"); }, get running() { return translate("extraction:toolWriteFile"); }, verb: '', icon: 'save', summary: a => toolReason(a) || str(a?.path) },
   edit: { get action() { return translate("extraction:toolEditFile"); }, get running() { return translate("extraction:toolEditFile"); }, verb: '', icon: 'pencil', summary: a => toolReason(a) || str(a?.path) },
@@ -183,6 +186,7 @@ const RETIRED_TOOL_ALIASES: Record<string, { name: string; args: (a: Record<stri
 const DEFAULT_TOOL_META: ToolMeta = { get action() { return translate("agent:toolMeta.action_action_textVariant2"); }, get running() { return translate("agent:toolMeta.running_running_text"); }, verb: '', icon: 'tool', summary: () => '' };
 
 export const TOOL_OPERATIONS: Record<string, Record<string, string>> = {
+  cache_history: { list: 'list_cache_history', diff: 'diff_cache_history', revert: 'revert_cache_history' },
   get_project: { read: 'get_project_overview' },
   input: { list: 'list_input_files', read: 'read_input_file', search: 'search_input' },
   guideline: { read: 'read_guideline', overwrite: 'write_project_guideline', append: 'write_project_guideline', replace: 'write_project_guideline' },
