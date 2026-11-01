@@ -5,6 +5,9 @@
  *  重挂时恢复。只记「用户点过」的，自动跟随逻辑不受影响。 */
 export const manualOpenState = new Map<string, boolean>();
 
+/** 停止按钮在请求发出前保存当前工作记录的开合状态，每个会话只有一个 live 活动组。 */
+export const liveActivityDisclosures = new Map<string, () => void>();
+
 /** 运行中回合的墙钟起点（模块级，key 同 stateKey）：切页面/切会话会把组件卸载重建，
  *  useRef 里的起点随之丢失；重挂时若直接拿 Date.now() 当起点，"处理中 · Ns"的计时
  *  就从 0 重走。起点按组记住，重挂后接着上次的时刻继续走。回合结束即删，表不会积大。

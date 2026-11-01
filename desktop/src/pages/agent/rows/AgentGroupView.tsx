@@ -16,7 +16,7 @@ import {
   type TimelineGroup,
 } from '../timeline';
 import { toolOperation, asArgs, formatDuration, formatTokenCount, translationJobId } from '../toolMeta';
-import { liveStartedState, manualOpenState } from '../uiState';
+import { liveActivityDisclosures, liveStartedState, manualOpenState } from '../uiState';
 import { ImageAttachments, type AgentImage, type ImageScope } from '../images';
 
 export const AgentGroupView = memo(function AgentGroupView({
@@ -106,6 +106,14 @@ function AgentActivityGroup({
     manualOpenState.set(stateKey, value);
     setOpenRaw(value);
   };
+  useEffect(() => {
+    if (!isLive) return;
+    liveActivityDisclosures.set(persistKey, () => {
+      manualOpenState.set(stateKey, open);
+      setOpenRaw(open);
+    });
+    return () => { liveActivityDisclosures.delete(persistKey); };
+  }, [isLive, open, persistKey, stateKey]);
   const items = group.items;
 
   // 运行中墙钟计时：live 时每秒跳动，结束冻结在最后值。

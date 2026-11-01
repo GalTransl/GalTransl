@@ -183,8 +183,8 @@ test('new extraction buttons return home without opening a dialog or stopping th
   await act(async () => renderer.root.findByProps({ title: session.title }).props.onClick());
   assert.equal(state.selected, 'live');
   assert.equal(renderer.root.findByType('textarea').props.value, 'existing conversation draft');
-  const newButton = renderer.root.findAllByProps({ 'aria-label': '新建提取' }).find(node => node.type === 'button' && node.props.className === 'agent-console__icon-btn');
-  await act(async () => newButton.props.onClick());
+  assert.equal(renderer.root.findAll(node => node.type === 'button' && node.props.className === 'agent-console__icon-btn' && node.props['aria-label'] === '新建提取').length, 0);
+  await act(async () => renderer.root.findByProps({ className: 'agent-sessions__new' }).props.onClick());
   assert.equal(state.selected, '');
   assert.equal(renderer.root.findAllByProps({ role: 'dialog' }).length, 0);
   act(() => renderer.root.findByProps({ className: 'agent-hero__action' }).props.onClick());

@@ -31,7 +31,7 @@ const load = createTypeScriptLoader({ window: {
 const { buildTimeline, appendStreamEvents } = load(new URL('../src/pages/agent/timeline.ts', import.meta.url));
 const { createTimelineBuilder } = load(new URL('../src/pages/agent/timelineCache.ts', import.meta.url));
 const { AgentGroupView } = load(new URL('../src/pages/agent/rows/AgentGroupView.tsx', import.meta.url));
-const { manualOpenState } = load(new URL('../src/pages/agent/uiState.ts', import.meta.url));
+const { liveActivityDisclosures, manualOpenState } = load(new URL('../src/pages/agent/uiState.ts', import.meta.url));
 const { ToolRow } = load(new URL('../src/pages/agent/rows/ToolRow.tsx', import.meta.url));
 
 test('microcompact events render the cleared result count instead of a zero-message summary', () => {
@@ -343,6 +343,37 @@ test('automatic completion places the final reply outside immediately and manual
   } finally {
     act(() => renderer.unmount());
     manualOpenState.delete('live-final::a-1');
+  }
+});
+
+test('user stopping either agent preserves the current disclosure through terminal updates and remounts', () => {
+  const { extractionTimeline } = load(new URL('../src/pages/extraction/presentation.ts', import.meta.url));
+  const events = [{ type: 'tool_call', step: 1, id: 'stop-tool', name: 'read_input_file', arguments: { filename: 'scene.json' } }];
+  const rows = [{ id: 'stop-tool', role: 'tool', tool: 'read_input_file', args: { filename: 'scene.json' }, text: '' }];
+  const scenarios = [
+    { key: 'translation-stop', live: buildTimeline(events)[0], stopped: buildTimeline([...events, { type: 'stopped', step: 2 }])[0] },
+    { key: 'extraction::stop', live: extractionTimeline(rows, true, null)[0], stopped: extractionTimeline(rows, false, null)[0] },
+  ];
+  for (const scenario of scenarios) {
+    for (const choice of ['automatic', 'expanded', 'collapsed']) {
+      const persistKey = `${scenario.key}-${choice}`;
+      const props = { projectDir: '', persistKey };
+      let renderer;
+      act(() => { renderer = create(createElement(AgentGroupView, { ...props, group: scenario.live, isLive: true })); });
+      const header = () => renderer.root.findByProps({ className: 'agent-activity__header' });
+      if (choice !== 'automatic') act(() => header().props.onClick());
+      if (choice === 'expanded') act(() => header().props.onClick());
+      const wasOpen = header().props['aria-expanded'];
+      act(() => liveActivityDisclosures.get(persistKey)());
+      act(() => renderer.update(createElement(AgentGroupView, { ...props, group: scenario.stopped, isLive: false })));
+      assert.equal(header().props['aria-expanded'], wasOpen, `${persistKey}: stopped`);
+      assert.equal(liveActivityDisclosures.has(persistKey), false);
+      act(() => renderer.unmount());
+      act(() => { renderer = create(createElement(AgentGroupView, { ...props, group: scenario.stopped, isLive: false })); });
+      assert.equal(header().props['aria-expanded'], wasOpen, `${persistKey}: remounted`);
+      act(() => renderer.unmount());
+      manualOpenState.delete(`${persistKey}::${scenario.live.id}`);
+    }
   }
 });
 

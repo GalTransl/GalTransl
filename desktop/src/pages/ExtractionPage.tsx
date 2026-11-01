@@ -20,6 +20,7 @@ import { useImageInput, imageUploads } from './agent/images';
 import { useModelProfile } from './extraction/useModelProfile';
 import { gameFolderKey, SessionFolders } from './extraction/SessionFolders';
 import { StatusPill } from './agent/composer';
+import { liveActivityDisclosures } from './agent/uiState';
 import { MessageQueue } from './agent/MessageQueue';
 
 const DRAFT_SCOPE = 'galtransl-extraction';
@@ -151,7 +152,10 @@ export function ExtractionPage() {
         <ExtractionComposer draft={draft} setDraft={setDraft} textarea={textarea} session={session} running={running} busy={agent.busy} ready={ready}
           imageInput={imageInput} hasQueue={Boolean(agent.view?.queued?.length)}
           profile={profile} profileSelection={boundProfile} defaultProfile={defaultProfile} setProfile={setProfile} models={modelNames} mode={mode} setMode={changeMode} context={agent.view?.contextUsage} compacting={agent.view?.compacting}
-          send={() => void send()} stop={() => { void agent.mutate('stop', {}); }} chooseSource={() => setDialog('create')} configure={() => navigate('/backend-profiles')} />
+          send={() => void send()} stop={() => {
+            liveActivityDisclosures.get(`extraction::${agent.selected}`)?.();
+            void agent.mutate('stop', {});
+          }} chooseSource={() => setDialog('create')} configure={() => navigate('/backend-profiles')} />
         {!modelNames.length && <div className="extract-hint">{x('noModel')} <button type="button" className="extract-text-button" onClick={() => navigate('/backend-profiles')}>{x('configureModel')}</button></div>}
         {session && !ready && <div className="extract-hint"><button type="button" className="extract-text-button" onClick={() => setDialog('environment')}>{x('setup')}</button></div>}
       </div>

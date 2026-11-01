@@ -60,6 +60,7 @@ import { removeProjectFromHistory } from './HomePage';
 import { AgentSessionSidebar } from './agent/AgentSessionSidebar';
 import { AGENT_PROMPT_SUGGESTIONS, ContextMeter, SendIcon, StatusPill, StopIcon } from './agent/composer';
 import { AgentGroupView } from './agent/rows/AgentGroupView';
+import { liveActivityDisclosures } from './agent/uiState';
 import { useImageInput, ImageAttachments, ImageInputStatus, imageUploads } from './agent/images';
 import { AskUserCard } from './agent/rows/AskUserCard';
 import { PermissionCard } from './agent/rows/PermissionCard';
@@ -1819,7 +1820,10 @@ export function AgentPage() {
                   >
                     <SendIcon />
                   </button>
-                  <button type="button" className="agent-composer__stop" onClick={handleStop} title={translate("agent:agentPage.agentComposerStop_title_stopAgent")}>
+                  <button type="button" className="agent-composer__stop" onClick={() => {
+                    liveActivityDisclosures.get(`${effectiveProject}::${activeSessionId}`)?.();
+                    void handleStop();
+                  }} title={translate("agent:agentPage.agentComposerStop_title_stopAgent")}>
                     <StopIcon />
                   </button>
                 </>
