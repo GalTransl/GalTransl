@@ -10,7 +10,8 @@ import { t as translate, useMessageState, useUiLanguage } from "../i18n";
 两层节流：同一个文件只请求一次（Promise 复用），条目按 index 取（不是数组下标）。
 引用一长串行号（如 20-31）时卡片区定高滚动，不撑高对话气泡。 */
 
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useContext, useEffect, useMemo, useState } from 'react';
+import { ProjectPreviewContext } from './ProjectPreviewContext';
 import { Markdown, useMarkdownHtml } from './Markdown';
 import { NewProjectWizardRef } from './NewProjectWizardRef';
 import { splitWizardReferences } from '../lib/newProjectWizard';
@@ -105,9 +106,11 @@ function speakerOf(entry: CacheEntry): string {
 function CacheEntryCard({
   entry,
   nameDict,
+  onOpen,
 }: {
   entry: CacheEntry;
   nameDict: Map<string, string>;
+  onOpen?: () => void;
 }) {
   const uiLanguage = useUiLanguage();
   const problems = splitProblemItems(entry.problem);
@@ -118,7 +121,14 @@ function CacheEntryCard({
   const engine = entry.trans_by || '';
 
   return (
-    <article className={`cache-card${problems.length ? ' cache-card--problem' : ''}`}>
+    <article className={`cache-card${problems.length ? ' cache-card--problem' : ''}`}
+      role={onOpen ? 'button' : undefined} tabIndex={onOpen ? 0 : undefined} onClick={onOpen}
+      title={onOpen ? translate('agent:projectPreview.openEntry') : undefined}
+      onKeyDown={event => {
+        if (!onOpen || (event.key !== 'Enter' && event.key !== ' ')) return;
+        event.preventDefault();
+        onOpen();
+      }}>
       <div className="cache-card__row">
         <span className="cache-card__field-label">#{entry.index}</span>
         {speaker ? (
@@ -186,6 +196,7 @@ function CacheRefCard({
   nameDict: Map<string, string>;
 }) {
   const uiLanguage = useUiLanguage();
+  const showPreview = useContext(ProjectPreviewContext);
   const [entries, setEntries] = useState<CacheEntry[] | null>(null);
   const [error, setError] = useMessageState<string>('');
   // 写类工具改过缓存后 invalidateCacheFilesForToolResult 会广播一次，这里跟着重拉
@@ -252,7 +263,8 @@ function CacheRefCard({
             aria-label={translate("agent:agentCacheRef.agentCacheRefCards_ariaLabel_entry", { filename: filename, indexSpec: indexSpec, count: found.length })}
           >
             {found.map((entry) => (
-              <CacheEntryCard key={`${filename}#${entry.index}`} entry={entry} nameDict={nameDict} />
+              <CacheEntryCard key={`${filename}#${entry.index}`} entry={entry} nameDict={nameDict}
+                onOpen={showPreview ? () => showPreview({ projectDir, page: 'cache', filename, index: entry.index }) : undefined} />
             ))}
           </div>
           {missing > 0 ? (

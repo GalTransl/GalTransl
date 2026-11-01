@@ -42,6 +42,8 @@ function setup(status = 'running', currentJobId = 'job-1', options = {}) {
       const [instance] = useState(() => ++mounted);
       return createElement('workbench', { ctx, active: pageActivity.usePageActive(), instance });
     } },
+    '../ProjectDictionaryPage': { ProjectDictionaryPage: props => createElement('dictionary-editor', props) },
+    '../ProjectCachePage': { ProjectCachePage: props => createElement('cache-editor', props) },
   });
   const api = load(new URL('../src/lib/api.ts', import.meta.url));
   Object.assign(boundary, api, {
@@ -69,6 +71,41 @@ function setup(status = 'running', currentJobId = 'job-1', options = {}) {
     cancel: () => { snapshot = { ...snapshot, job: { ...snapshot.job, status: 'cancelled', finished_at: '2026-11-01T00:01:00Z' } }; },
   };
 }
+
+test('dictionary and cache diff entries open the matching mini editor with project, config, file and row', async () => {
+  const f = setup();
+  const { ProjectTranslationPreviewProvider } = f.load(new URL('../src/pages/agent/ProjectTranslationPreview.tsx', import.meta.url));
+  const { ChangeListCard, extractChangeList } = f.load(new URL('../src/pages/agent/rows/ToolRow.tsx', import.meta.url));
+  const directory = 'C:\\Games\\Example';
+  const cache = extractChangeList({ changes: [
+    { path: 'a.json#25.pre_dst', file: 'a.json', before: 'old', after: 'new' },
+    { path: 'b.json#9.proofread_dst', file: 'b.json', before: 'old', after: 'new' },
+  ] });
+  const dictionary = extractChangeList({ file_key: '(project_dir)pre.txt', line_diff: { rows: [{ op: 'add', line: '猫\tcat' }] } });
+  let renderer;
+  await act(async () => { renderer = create(createElement(ProjectTranslationPreviewProvider, { projectDir: directory, configFileName: 'special.yml' },
+    createElement(ChangeListCard, { data: cache }), createElement(ChangeListCard, { data: dictionary }))); });
+  try {
+    const cacheRows = () => renderer.root.findAllByProps({ className: 'agent-changes__item' });
+    await act(async () => cacheRows()[1].props.onClick());
+    const cacheEditor = renderer.root.findByType('cache-editor');
+    assert.equal(cacheEditor.props.ctx.projectDir, directory);
+    assert.equal(cacheEditor.props.ctx.configFileName, 'special.yml');
+    assert.equal(cacheEditor.props.focusTarget.filename, 'b.json');
+    assert.equal(cacheEditor.props.focusTarget.index, 9);
+    const outside = {};
+    act(() => renderer.root.findByProps({ className: 'agent-translation-preview-backdrop' }).props.onClick({ target: outside, currentTarget: outside }));
+    assert.equal(renderer.root.findByType('cache-editor').props.active, false);
+    let prevented = false;
+    await act(async () => renderer.root.findByProps({ className: 'agent-changes__dline agent-changes__dline--add' }).props.onKeyDown({ key: 'Enter', preventDefault() { prevented = true; } }));
+    assert.equal(prevented, true);
+    const dictionaryEditor = renderer.root.findByType('dictionary-editor');
+    assert.equal(dictionaryEditor.props.focusTarget.fileKey, '(project_dir)pre.txt');
+    assert.equal(dictionaryEditor.props.focusTarget.line, '猫\tcat');
+    await act(async () => dictionaryEditor.props.onOpenInCache('猫'));
+    assert.equal(renderer.root.findByType('cache-editor').props.focusTarget.query, '猫');
+  } finally { act(() => renderer.unmount()); }
+});
 
 test('translation card requests stop for its project, disables the button in flight and retains progress after cancellation', async () => {
   const f = setup();

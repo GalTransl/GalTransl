@@ -28,6 +28,49 @@ function fixture() {
   } };
 }
 
+test('mini window targets select the dictionary category, match the row key and scroll only the editor', () => {
+  const f = fixture();
+  const { DictionaryManager } = f.load(new URL('../src/components/DictionaryManager.tsx', import.meta.url));
+  const { PageActivityContext } = f.load(new URL('../src/components/PageActivity.tsx', import.meta.url));
+  const data = { pre_dict_files: ['pre.txt'], post_dict_files: [], gpt_dict_files: ['gpt.txt'], dict_contents: {
+    'gpt.txt': { lines: ['猫\tcat'] },
+    'pre.txt': { lines: ['mono\t猫\tkitten', 'diag\t猫\tcat', '犬\tdog'] },
+  } };
+  const highlighted = [], focused = [];
+  let renderer;
+  const pane = { scrollTop: 0, clientTop: 0, clientHeight: 100, scrollHeight: 1000,
+    getBoundingClientRect: () => ({ top: 100 }), querySelector: selector => {
+      const index = Number(selector.match(/"(\d+)"/)[1]);
+      if (!renderer.root.findAllByProps({ 'data-dict-row-index': index }).length) return null;
+      return { getBoundingClientRect: () => ({ top: 100 + index * 200 - pane.scrollTop, height: 50 }),
+        classList: { add: () => highlighted.push(index), remove() {} },
+        querySelector: () => ({ focus: () => focused.push(index) }),
+        scrollIntoView() { assert.fail('must not scroll the outer dialog'); },
+      };
+    } };
+  const props = { title: 'Dictionary', description: '', data: null, loading: true, error: null,
+    onReload: async () => {}, onCreateFile: async () => '', onDeleteFile: async () => {}, onSaveFile: async () => {} };
+  const view = (focusTarget, active = true) => h(PageActivityContext.Provider, { value: active }, h(DictionaryManager, { ...props, focusTarget }));
+  act(() => { renderer = create(view({ page: 'dictionary', fileKey: 'pre.txt', line: 'diag\t猫\told' }), {
+    createNodeMock: node => String(node.props.className).startsWith('dict-card-list') ? pane : null,
+  }); });
+  try {
+    props.data = data;
+    props.loading = false;
+    act(() => renderer.update(view({ page: 'dictionary', fileKey: 'pre.txt', line: 'diag\t猫\told' })));
+    assert.deepEqual(highlighted, [1]);
+    assert.deepEqual(focused, [1]);
+    assert.equal(pane.scrollTop, 175);
+    assert.ok(renderer.root.findAllByType('input').some(node => node.props.value === 'dog'));
+    act(() => renderer.update(view({ page: 'dictionary', fileKey: 'pre.txt', line: '犬\tdog' })));
+    assert.deepEqual(highlighted, [1, 2]);
+    assert.equal(pane.scrollTop, 375);
+    act(() => renderer.update(view({ page: 'dictionary', fileKey: 'pre.txt', line: '消失\tmissing' })));
+    assert.ok(renderer.root.findAll(node => node.props.children === 'projects:projectPreview.entryMissing').length);
+    assert.deepEqual(highlighted, [1, 2]);
+  } finally { act(() => renderer.unmount()); }
+});
+
 test('Ctrl+S/Cmd+S saves only the visible dictionary, prevents duplicate requests and preserves edits made during save', async () => {
   const f = fixture();
   const { DictionaryManager } = f.load(new URL('../src/components/DictionaryManager.tsx', import.meta.url));

@@ -1,4 +1,8 @@
 {
+  "projectPreview": {
+    "entryMissing": "This entry was deleted or changed; its row could not be found in the current file.",
+    "fileMissing": "This dictionary file was deleted or has not been created yet."
+  },
   "cacheDictionary": {
     "line": "Line",
     "emptyCell": "Empty value",

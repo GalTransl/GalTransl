@@ -1,6 +1,7 @@
 import { AnimatedCollapse } from '../../../components/UiMotion';
 import { t as translate, useUiLanguage } from "../../../i18n";
-import { memo, type ReactNode, useEffect, useRef, useState } from 'react';
+import { memo, type KeyboardEvent, type ReactNode, useContext, useEffect, useRef, useState } from 'react';
+import { ProjectPreviewContext, ProjectPreviewScopeContext, type ProjectPreviewTarget } from '../../../components/ProjectPreviewContext';
 import { Icon } from '../../../components/Icon';
 import { Markdown } from '../../../components/Markdown';
 import { SubagentList } from './SubagentList';
@@ -170,7 +171,7 @@ export const ToolRow = memo(function ToolRow({
         <div className="agent-tool__body">
           {hasSubagents ? <SubagentList runs={subagents} /> : null}
           {changeList ? (
-            <ChangeListCard data={changeList} />
+            <ChangeListCard data={changeList} args={asArgs(item.arguments)} />
           ) : reason ? (
             <ChangeReason text={reason} />
           ) : null}
@@ -328,11 +329,13 @@ function RawToolData({
    审批卡上的「将要变更」用的是**同一份结构**（后端在挂起前只读算出来，见
    _preview_tool_changes），所以两处共用这一个渲染，没有第二套 diff 视图。 */
 
-type ChangeEntry = { path: string; before?: unknown; after?: unknown; kind?: string };
+type ChangeEntry = { path: string; before?: unknown; after?: unknown; kind?: string; file?: string };
 
 type DiffRow = { op: 'add' | 'del'; line: string };
 
 type ChangeData = {
+  fileKey?: string;
+  filename?: string;
   changes?: ChangeEntry[];
   line_diff?: { rows?: DiffRow[]; truncated?: boolean };
   deleted_preview?: { index: number; text: string }[];
@@ -363,6 +366,8 @@ export function extractChangeList(result: unknown): ChangeData | null {
     (deletedPreview?.length || 0);
   if (!total) return null;
   return {
+    fileKey: typeof r.file_key === 'string' ? r.file_key : undefined,
+    filename: typeof r.filename === 'string' ? r.filename : undefined,
     changes,
     line_diff: lineDiff,
     deleted_preview: deletedPreview,
@@ -394,8 +399,21 @@ function ChangeReason({ text }: { text: string }) {
 }
 
 /** 变更卡。title 只有审批卡会换（那边的同一份数据是"将要变更"，还没真写）。 */
-export function ChangeListCard({ data, title = translate("agent:toolRow.changeListCard_message_text") }: { data: ChangeData; title?: string }) {
+export function ChangeListCard({ data, args, title = translate("agent:toolRow.changeListCard_message_text") }: { data: ChangeData; args?: Record<string, unknown>; title?: string }) {
   useUiLanguage();
+  const showPreview = useContext(ProjectPreviewContext);
+  const scope = useContext(ProjectPreviewScopeContext);
+  const navigation = (target: ProjectPreviewTarget | null) => {
+    if (!target || !showPreview || !scope?.projectDir) return {};
+    const show = () => showPreview({ ...scope, ...target });
+    return { role: 'button', tabIndex: 0, title: translate('agent:projectPreview.openEntry'),
+      onClick: show, onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        show();
+      } };
+  };
+  const filename = data.filename || str(args?.filename);
   const rows: ReactNode[] = [];
 
   if (data.line_diff?.rows?.length) {
@@ -404,7 +422,8 @@ export function ChangeListCard({ data, title = translate("agent:toolRow.changeLi
     const diffRows = data.line_diff.rows;
     for (const [i, r] of diffRows.entries()) {
       rows.push(
-        <div key={`d-${i}`} className={`agent-changes__dline agent-changes__dline--${r.op}`}>
+        <div key={`d-${i}`} className={`agent-changes__dline agent-changes__dline--${r.op}`}
+          {...navigation(data.fileKey ? { page: 'dictionary', fileKey: data.fileKey, line: r.line } : null)}>
           <span className="agent-changes__sign">{r.op === 'add' ? '+' : '−'}</span>
           <span className="agent-changes__dtext">{r.line || ' '}</span>
         </div>,
@@ -419,7 +438,8 @@ export function ChangeListCard({ data, title = translate("agent:toolRow.changeLi
   if (data.deleted_preview?.length) {
     for (const p of data.deleted_preview) {
       rows.push(
-        <div key={`del-${p.index}`} className="agent-changes__dline agent-changes__dline--del">
+        <div key={`del-${p.index}`} className="agent-changes__dline agent-changes__dline--del"
+          {...navigation(filename ? { page: 'cache', filename, index: p.index } : null)}>
           <span className="agent-changes__sign">−</span>
           <span className="agent-changes__path">#{p.index}</span>
           <span className="agent-changes__dtext">{p.text || translate("agent:toolRow.agentChangesDtext_message_translationText")}</span>
@@ -430,8 +450,11 @@ export function ChangeListCard({ data, title = translate("agent:toolRow.changeLi
 
   if (data.changes?.length) {
     for (const [i, c] of data.changes.entries()) {
+      const match = /^(.*?)#(\d+)\./.exec(c.path);
+      const file = c.file || match?.[1] || filename;
       rows.push(
-        <div key={`c-${i}`} className="agent-changes__item">
+        <div key={`c-${i}`} className="agent-changes__item"
+          {...navigation(match && file ? { page: 'cache', filename: file, index: Number(match[2]) } : null)}>
           <span className="agent-changes__path">{c.path}</span>
           {c.kind !== 'add' ? (
             <span className="agent-changes__old">

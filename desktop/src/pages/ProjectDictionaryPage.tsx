@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ProjectPageContext } from '../components/ProjectLayout';
 import { DictionaryManager } from '../components/DictionaryManager';
+import type { DictionaryPreviewTarget } from '../components/ProjectPreviewContext';
 import {
   type ProjectDictionaryManagerResponse,
   createProjectDictionaryFile,
@@ -38,9 +39,13 @@ function buildDictionarySnapshot(data: ProjectDictionaryManagerResponse | null):
 export function ProjectDictionaryPage({
   ctx,
   active = true,
+  focusTarget,
+  onOpenInCache,
 }: {
   ctx: ProjectPageContext;
   active?: boolean;
+  focusTarget?: DictionaryPreviewTarget;
+  onOpenInCache?: (query: string) => void;
 }) {
   const uiLanguage = useUiLanguage();
   const { projectId, projectDir, configFileName } = ctx;
@@ -184,6 +189,7 @@ export function ProjectDictionaryPage({
       title={translate("projects:projectDictionaryPage.projectDictionaryPage_title_projectDictionary")}
       description={translate("projects:projectDictionaryPage.projectDictionaryPage_description_projectDirectoryDictionaryFileGPTDictionaryModel")}
       data={data}
+      focusTarget={focusTarget}
       loading={loading}
       error={error}
       onReload={loadData}
@@ -216,6 +222,10 @@ export function ProjectDictionaryPage({
       // 带一个 nonce（n）：同一个词连点两次时 URL 不变，缓存页拿不到新事件（那边按 n 去重）
       onOpenInCache={(sourceWord) => {
         if (!projectId || !sourceWord) return;
+        if (onOpenInCache) {
+          onOpenInCache(sourceWord);
+          return;
+        }
         navigate(`/project/${projectId}/cache?q=${encodeURIComponent(sourceWord)}&n=${Date.now()}`);
       }}
       onGenerateGptDict={async () => {

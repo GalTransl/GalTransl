@@ -13,6 +13,8 @@ import { Panel } from './Panel';
 import { EmptyState, ErrorState, InlineFeedback, LoadingState } from './page-state';
 import { formatBackendUsage, type BackendUsageSummary } from '../lib/backendUsage';
 import type { DictFileContent, DictionaryCategory } from '../lib/api';
+import type { DictionaryPreviewTarget } from './ProjectPreviewContext';
+import { scrollWithinContainer } from '../lib/scrollWithinContainer';
 
 type DictTab = DictionaryCategory;
 type DictRowType = 'normal' | 'conditional' | 'situation' | 'gpt' | 'comment' | 'blank';
@@ -59,6 +61,7 @@ type DictionaryManagerProps = {
    * 不传就不显示这个按钮（全局字典页没有所属项目，传不了）。
    */
   onOpenInCache?: (sourceWord: string) => void;
+  focusTarget?: DictionaryPreviewTarget;
 };
 
 type DictContextMenuState = {
@@ -351,6 +354,11 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const cardListRef = useRef<HTMLDivElement | null>(null);
   const addedRowRef = useRef<number | null>(null);
+  const textEditorRef = useRef<HTMLTextAreaElement>(null);
+  const appliedPreviewTargetRef = useRef<DictionaryPreviewTarget>();
+  const [pendingPreviewRow, setPendingPreviewRow] = useState<number | null>(null);
+  const [previewNotice, setPreviewNotice] = useMessageState<string | null>(null);
+  const highlightedPreviewRowRef = useRef<HTMLElement | null>(null);
 
   const activeFiles = useMemo(() => getFilesByTab(data, activeTab), [data, activeTab]);
 
@@ -613,6 +621,68 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     setDirty(false);
   };
 
+  useEffect(() => {
+    const target = props.focusTarget;
+    if (!pageActive || loading || !data || !target || appliedPreviewTargetRef.current === target) return;
+    appliedPreviewTargetRef.current = target;
+    highlightedPreviewRowRef.current?.classList.remove('dict-card__table-row--highlight');
+    setPreviewNotice(null);
+    const tab = (['gpt', 'pre', 'post'] as const).find(category => getFilesByTab(data, category).includes(target.fileKey));
+    if (!tab) {
+      setPreviewNotice(uiMessage('projects:projectPreview.fileMissing'));
+      return;
+    }
+    if (selectedFile !== target.fileKey && dirty && !confirm(translate('projects:dictionaryManager.handleSelectFile_confirm_currentFileNotSave'))) return;
+    const text = selectedFile === target.fileKey && dirty ? rowsToText(parsedRows) : data.dict_contents[target.fileKey]?.lines.join('\n') ?? '';
+    const rows = parseRows(text, tab);
+    setActiveTab(tab);
+    setSelectedFile(target.fileKey);
+    setDraftText(text);
+    setRowsOverride(null);
+    if (selectedFile !== target.fileKey) setDirty(false);
+    setSearchTerm('');
+    setSectionFilter('');
+    setInfo(null);
+    if (target.line === undefined) return;
+    const exact = rows.findIndex(row => row.raw === target.line);
+    const wanted = parseRows(target.line, tab)[0];
+    const keyLength = wanted?.type === 'conditional' ? 3 : wanted?.type === 'situation' ? 2 : 1;
+    const matched = exact >= 0 ? exact : rows.findIndex(row => wanted && row.type === wanted.type
+      && row.type !== 'comment' && row.type !== 'blank'
+      && row.values.slice(0, keyLength).join('\t') === wanted.values.slice(0, keyLength).join('\t'));
+    if (matched < 0) {
+      setPreviewNotice(uiMessage('projects:projectPreview.entryMissing'));
+      setPendingPreviewRow(null);
+      return;
+    }
+    const row = rows[matched];
+    setMode(row.type === 'comment' || row.type === 'blank' || !row.raw.includes('\t') ? 'text' : 'card');
+    setPendingPreviewRow(matched);
+  }, [props.focusTarget, data, loading, pageActive]);
+
+  useLayoutEffect(() => {
+    if (!pageActive || pendingPreviewRow === null) return;
+    if (mode === 'text') {
+      const editor = textEditorRef.current;
+      if (!editor) return;
+      const start = draftText.split('\n').slice(0, pendingPreviewRow).reduce((length, line) => length + line.length + 1, 0);
+      editor.focus({ preventScroll: true });
+      editor.setSelectionRange(start, start + (draftText.split('\n')[pendingPreviewRow]?.length ?? 0));
+      const lineHeight = Number.parseFloat(getComputedStyle(editor).lineHeight) || 20;
+      editor.scrollTop = Math.max(0, pendingPreviewRow * lineHeight - editor.clientHeight / 2);
+      setPendingPreviewRow(null);
+      return;
+    }
+    const container = cardListRef.current;
+    const row = container?.querySelector<HTMLElement>(`[data-dict-row-index="${pendingPreviewRow}"]`);
+    if (!container || !row) return;
+    scrollWithinContainer(container, row);
+    row.classList.add('dict-card__table-row--highlight');
+    highlightedPreviewRowRef.current = row;
+    row.querySelector<HTMLInputElement>('input')?.focus({ preventScroll: true });
+    setPendingPreviewRow(null);
+  }, [pendingPreviewRow, pageActive, mode, filteredRows, draftText]);
+
   const updateRowCell = useCallback((rowIndex: number, cellIndex: number, value: string) => {
     const next = [...parsedRowsRef.current];
     const row = next[rowIndex];
@@ -837,6 +907,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
 
       {localError && <InlineFeedback tone="error" title={translate("projects:dictionaryManager.projectDictionaryPage_title_failed")} description={localError} />}
       {info && <InlineFeedback className="inline-alert--floating" tone="success" title={translate("projects:dictionaryManager.projectDictionaryPage_title_success")} description={info} />}
+      {previewNotice && <p className="inline-feedback" role="status">{previewNotice}</p>}
 
       <div className="project-dictionary-page__content">
         <div className="dict-layout">
@@ -970,6 +1041,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
 
                 {mode === 'text' ? (
                   <textarea
+                    ref={textEditorRef}
                     className="dict-text-editor"
                     value={draftText}
                     onChange={(e) => {

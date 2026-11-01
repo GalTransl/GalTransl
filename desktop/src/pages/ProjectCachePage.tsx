@@ -11,6 +11,7 @@ import { CustomSelect } from '../components/CustomSelect';
 import { PageHeader } from '../components/PageHeader';
 import { Icon } from '../components/Icon';
 import type { ProjectPageContext } from '../components/ProjectLayout';
+import type { CachePreviewTarget } from '../components/ProjectPreviewContext';
 import { Panel } from '../components/Panel';
 import { EmptyState, InlineFeedback, LoadingState } from '../components/page-state';
 import { speakerStyle, speakerHue } from '../lib/speaker';
@@ -423,7 +424,7 @@ function SearchResultCard({
 }
 
 /* ── Main Page ── */
-export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageContext; active?: boolean }) {
+export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: ProjectPageContext; active?: boolean; focusTarget?: CachePreviewTarget }) {
   const uiLanguage = useUiLanguage();
   const { projectId, configFileName } = ctx;
   const { nameDict } = useNameDict(projectId);
@@ -432,6 +433,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
   const [cacheFiles, setCacheFiles] = useState<FileEntry[]>([]);
   const [cacheDir, setCacheDir] = useState<string>('');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [previewNotice, setPreviewNotice] = useMessageState<string | null>(null);
   /**
    * 还没有缓存的输入文件（名单里的名字是它们「本该有」的缓存键）。
    * 这些文件在后端是按原文回落的：只有 pre_src/post_src、译文为空，所以界面里不让编辑。
@@ -1063,7 +1065,13 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     if (!pendingJump || !active || loadingEntries || pendingJump.projectId !== projectId || pendingJump.file !== selectedFile) return;
     const container = listRef.current;
     const target = container?.querySelector<HTMLElement>(`[data-cache-index="${pendingJump.index}"]`);
-    if (!container || !target) return;
+    if (!container) return;
+    if (!target) {
+      if (deferredSearchTerm || filterProblems) return;
+      setPendingJump(null);
+      setPreviewNotice(uiMessage('projects:projectPreview.entryMissing'));
+      return;
+    }
     pendingScrollRestoreRef.current = null;
     let releaseFrame = 0;
     const frame = requestAnimationFrame(() => {
@@ -1082,7 +1090,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
       releaseFrame = requestAnimationFrame(() => setPendingJump((current) => current === pendingJump ? null : current));
     });
     return () => { cancelAnimationFrame(frame); cancelAnimationFrame(releaseFrame); };
-  }, [pendingJump, active, loadingEntries, projectId, selectedFile, filteredEntries]);
+  }, [pendingJump, active, loadingEntries, projectId, selectedFile, filteredEntries, deferredSearchTerm, filterProblems]);
 
   useLayoutEffect(() => () => {
     if (jumpHighlightRef.current) {
@@ -1573,6 +1581,24 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
     setInfo(null);
   };
 
+  const appliedPreviewTargetRef = useRef<CachePreviewTarget>();
+  useEffect(() => {
+    if (!active || !focusTarget || appliedPreviewTargetRef.current === focusTarget) return;
+    appliedPreviewTargetRef.current = focusTarget;
+    setPreviewNotice(null);
+    if (focusTarget.query !== undefined) {
+      setSidebarTab('search');
+      setSearchQuery(focusTarget.query);
+      setSearchField('all');
+      setSearchOptions({ re: false });
+      return;
+    }
+    if (!focusTarget.filename) return;
+    setSidebarTab('files');
+    handleJumpToFile(focusTarget.filename, focusTarget.index ?? -1);
+    if (focusTarget.index === undefined) setPendingJump(null);
+  }, [active, focusTarget]);
+
   // Replace preview (dry run)
   const handleReplacePreview = async () => {
     if (!replaceQuery.trim()) return;
@@ -1667,6 +1693,7 @@ export function ProjectCachePage({ ctx, active = true }: { ctx: ProjectPageConte
         }
       />
 
+      {previewNotice && <p className="inline-feedback" role="status">{previewNotice}</p>}
       <div
         className={`cache-layout${resizing ? ' cache-layout--resizing' : ''}`}
         ref={layoutRef}

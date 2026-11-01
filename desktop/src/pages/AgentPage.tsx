@@ -1365,7 +1365,7 @@ export function AgentPage() {
   );
 
   return (
-    <ProjectTranslationPreviewProvider>
+    <ProjectTranslationPreviewProvider projectDir={projectDir} configFileName={configFileName}>
     <div className="agent-console">
       <AgentSessionSidebar
         sessionsByProject={sessionsByProject}

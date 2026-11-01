@@ -440,6 +440,11 @@
   flex: 1;
 }
 
+.dict-card__table-row--highlight {
+  background: var(--color-primary-soft);
+  box-shadow: inset 3px 0 var(--color-primary);
+}
+
 .dict-search {
   width: 100%;
   padding: var(--space-3) var(--space-4);

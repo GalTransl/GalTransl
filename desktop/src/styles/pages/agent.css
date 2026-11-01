@@ -3165,6 +3165,20 @@
 
 /* 审批卡里的「将要变更」（同一份 ChangeListCard）：像子代理行那样加一层浅底，把
    "这次要写下去的东西"从标题/按钮里圈出来——它是这张卡的证据，不是卡面文案。 */
+.agent-changes [role="button"], .agent-cache-ref .cache-card[role="button"] {
+  cursor: pointer;
+  transition: box-shadow var(--transition-fast);
+}
+
+.agent-changes [role="button"]:hover, .agent-cache-ref .cache-card[role="button"]:hover {
+  box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+
+.agent-changes [role="button"]:focus-visible, .agent-cache-ref .cache-card[role="button"]:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
 .agent-perm .agent-changes {
   padding: 6px 8px 7px;
   border-radius: 8px;

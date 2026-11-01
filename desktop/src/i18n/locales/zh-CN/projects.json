@@ -1,4 +1,8 @@
 {
+  "projectPreview": {
+    "entryMissing": "此条目已被删除或修改，当前文件中找不到对应行。",
+    "fileMissing": "此字典文件已被删除或尚未创建。"
+  },
   "cacheDictionary": {
     "line": "行号",
     "emptyCell": "空值",

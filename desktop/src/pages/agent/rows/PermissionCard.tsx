@@ -84,7 +84,7 @@ export function PermissionCard({
       <p className="agent-perm__meta">{detail}</p>
       {reason ? <p className="agent-perm__reason">{translate("agent:permissionCard.agentPerm_message_text", { reason: reason })}</p> : null}
       {/* 将要变更：摆在这一屏里而不是藏在工具行的展开里——用户要点的就是这个 */}
-      {preview ? <ChangeListCard data={preview} title={translate("agent:permissionCard.agentPerm_title_text")} /> : null}
+      {preview ? <ChangeListCard data={preview} args={args} title={translate("agent:permissionCard.agentPerm_title_text")} /> : null}
       {error ? <div className="agent-perm__error">{error}</div> : null}
       <div className="agent-perm__foot">
         <button

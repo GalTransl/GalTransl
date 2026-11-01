@@ -1,4 +1,7 @@
 {
+  "projectPreview": {
+    "openEntry": "在迷你窗中查看并定位此条目"
+  },
   "billionContextTools": {
     "compress": { "action": "压缩上下文", "running": "正在压缩上下文" },
     "decompress": { "action": "还原上下文", "running": "正在还原上下文" },

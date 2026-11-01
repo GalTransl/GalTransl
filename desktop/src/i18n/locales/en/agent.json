@@ -1,4 +1,7 @@
 {
+  "projectPreview": {
+    "openEntry": "Open this entry in the mini window"
+  },
   "billionContextTools": {
     "compress": { "action": "Compress context", "running": "Compressing context" },
     "decompress": { "action": "Restore context", "running": "Restoring context" },

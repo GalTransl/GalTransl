@@ -4,7 +4,7 @@ import { createElement as h, useState } from 'react';
 import { act, create } from 'react-test-renderer';
 import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
 
-async function fixture({ setupSearch = true, api = {}, cacheEntries } = {}) {
+async function fixture({ setupSearch = true, api = {}, cacheEntries, focusTarget } = {}) {
   const timers = new Map(), frames = new Map();
   let sequence = 0, view;
   const setTimer = (callback, delay) => { const id = ++sequence; timers.set(id, { callback, delay }); return id; };
@@ -57,7 +57,7 @@ async function fixture({ setupSearch = true, api = {}, cacheEntries } = {}) {
   });
   const params = new URLSearchParams();
   const { ProjectCachePage } = load(new URL('../src/pages/ProjectCachePage.tsx', import.meta.url));
-  let pageProps = { ctx: { projectId: 'fixture', configFileName: 'config.yaml' }, active: true };
+  let pageProps = { ctx: { projectId: 'fixture', configFileName: 'config.yaml' }, active: true, focusTarget };
   await act(async () => {
     view = create(h(ProjectCachePage, pageProps), {
       createNodeMock: element => String(element.props.className).split(' ').includes('cache-card-list') ? pane : null,
@@ -94,6 +94,25 @@ async function fixture({ setupSearch = true, api = {}, cacheEntries } = {}) {
   const jump = i => { act(() => view.root.findAllByType('button').find(node => node.props['data-search-idx'] === i).props.onClick()); flushFrames(); };
   return { view, pane, jump, resolveFile, flush, flushFrames, selectFile, clickText, updatePage };
 }
+
+test('mini window targets select the file before loading and repeat jumps override filters and scroll positions', async () => {
+  const f = await fixture({ setupSearch: false, focusTarget: { page: 'cache', filename: 'b.json', index: 25 } });
+  try {
+    assert.equal(f.pane.scrollTop, 0);
+    await f.resolveFile('b.json');
+    assert.equal(f.pane.scrollTop, 2350);
+    f.pane.scrollTop = 0;
+    await f.updatePage({ focusTarget: { page: 'cache', filename: 'b.json', index: 25 } });
+    f.flushFrames();
+    assert.equal(f.pane.scrollTop, 2350);
+    await f.updatePage({ focusTarget: { page: 'cache', filename: 'a.json', index: 1 } });
+    await f.resolveFile('a.json');
+    assert.equal(f.view.root.findAllByProps({ 'data-cache-index': 1 }).length, 1);
+    await f.updatePage({ focusTarget: { page: 'cache', filename: 'a.json', index: 999 } });
+    assert.ok(f.view.root.findAll(node => node.props.children === 'projects:projectPreview.entryMissing').length);
+    assert.equal(f.view.root.findAll(node => node.type === 'div' && String(node.props.className).includes('cache-card-list--positioning')).length, 0);
+  } finally { act(() => f.view.unmount()); }
+});
 
 test('problem tabs reuse their snapshot and page returns conditionally check without hiding the list', async () => {
   const calls = [];
@@ -317,4 +336,14 @@ test('container scroll math handles pane transforms, borders, nearest alignment 
   assert.equal(pane.scrollTop, 0);
   scrollWithinContainer(pane, target(2000));
   assert.equal(pane.scrollTop, 600);
+});
+
+test('mini window zoom converts screen rectangles back to layout pixels when centering rows', () => {
+  const load = createTypeScriptLoader();
+  const { scrollWithinContainer } = load(new URL('../src/lib/scrollWithinContainer.ts', import.meta.url));
+  const pane = { scrollTop: 100, clientTop: 2, clientHeight: 400, scrollHeight: 4000, offsetHeight: 404,
+    getBoundingClientRect: () => ({ top: 150, height: 404 * 0.9 }) };
+  const card = { getBoundingClientRect: () => ({ top: 150 + (2 + 2000) * 0.9, bottom: 150 + (2 + 2100) * 0.9, height: 90 }) };
+  scrollWithinContainer(pane, card);
+  assert.equal(pane.scrollTop, 1950);
 });
