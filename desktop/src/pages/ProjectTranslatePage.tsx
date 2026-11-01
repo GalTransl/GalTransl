@@ -101,6 +101,7 @@ const TEMPLATE_SELECTION_IGNORED = new Set([...HIDDEN_TRANSLATORS, 'GenDic']);
 // causing the button to flip blue→red on every tab switch.
 let cachedJobs: Job[] = [];
 const cachedRuntimeByProject = new Map<string, ProjectRuntimeResponse>();
+const automaticRetranslationByProject = new Map<string, string>();
 
 type RetranslListItem = {
   key: string;
@@ -701,7 +702,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
       && prevJobId === jobId
       && prevStatus !== 'completed',
     );
-    if (!justCompleted) return;
+    if (!jobId || !justCompleted) return;
     if (!continuousRetranslEnabled) return;
 
     if (runtimeRetranslPendingCount <= 0) {
@@ -721,13 +722,16 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
     if (autoRetranslStagnationRoundsRef.current >= 3) return;
 
     const timer = window.setTimeout(() => {
-      if (!isCurrentProjectActive) {
+      // 工作台也可从 Agent 卡片打开，同一已完成任务只发起一次连续重译。
+      if (!isCurrentProjectActive && automaticRetranslationByProject.get(projectId) !== jobId) {
+        automaticRetranslationByProject.set(projectId, jobId);
         handleStartTranslation();
       }
     }, 450);
     return () => window.clearTimeout(timer);
   }, [
     continuousRetranslEnabled,
+    projectId,
     currentJob?.job_id,
     currentJob?.status,
     handleStartTranslation,

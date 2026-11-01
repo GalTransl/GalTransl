@@ -216,6 +216,8 @@
     "agentToolblockToggle_message_all_one": "展开全部（{{count}} 字符）"
   },
   "translationJobCard": {
+    "openProject": "查看项目的开始翻译页面",
+    "toggleProgress": "展开或收起任务进度",
     "stateLabel_message_translation": "翻译中",
     "stateLabel_message_doneCancel": "已取消",
     "stateLabel_message_doneComplete": "已完成",

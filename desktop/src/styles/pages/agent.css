@@ -2053,6 +2053,10 @@
   padding: 0 10px 10px;
 }
 
+.agent-tjob__body[role='button'] { cursor: pointer; transition: background var(--transition-fast); }
+.agent-tjob__body[role='button']:hover { background: var(--agent-hover); }
+.agent-tjob__body[role='button']:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+
 .agent-tjob__gauge {
   display: flex;
   align-items: baseline;

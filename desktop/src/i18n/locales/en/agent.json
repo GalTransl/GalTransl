@@ -216,6 +216,8 @@
     "agentToolblockToggle_message_all_one": "Expand all ({{count}} character)"
   },
   "translationJobCard": {
+    "openProject": "View the project's translation page",
+    "toggleProgress": "Expand or collapse task progress",
     "stateLabel_message_translation": "Translating",
     "stateLabel_message_doneCancel": "Cancelled",
     "stateLabel_message_doneComplete": "Completed",

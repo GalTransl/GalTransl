@@ -60,6 +60,7 @@ import { removeProjectFromHistory } from './HomePage';
 import { AgentSessionSidebar } from './agent/AgentSessionSidebar';
 import { AGENT_PROMPT_SUGGESTIONS, ContextMeter, SendIcon, StatusPill, StopIcon } from './agent/composer';
 import { AgentGroupView } from './agent/rows/AgentGroupView';
+import { ProjectTranslationPreviewProvider } from './agent/ProjectTranslationPreview';
 import { liveActivityDisclosures } from './agent/uiState';
 import { useImageInput, ImageAttachments, ImageInputStatus, imageUploads } from './agent/images';
 import { AskUserCard } from './agent/rows/AskUserCard';
@@ -1364,6 +1365,7 @@ export function AgentPage() {
   );
 
   return (
+    <ProjectTranslationPreviewProvider>
     <div className="agent-console">
       <AgentSessionSidebar
         sessionsByProject={sessionsByProject}
@@ -1845,5 +1847,6 @@ export function AgentPage() {
       </div>
       </div>
     </div>
+    </ProjectTranslationPreviewProvider>
   );
 }

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createElement } from 'react';
+import { createElement, useState } from 'react';
 import { act, create } from 'react-test-renderer';
 import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
 
-function setup(status = 'running', currentJobId = 'job-1') {
+function setup(status = 'running', currentJobId = 'job-1', options = {}) {
   const requests = [];
   const timers = new Map();
   let timerId = 0;
@@ -13,12 +13,36 @@ function setup(status = 'running', currentJobId = 'job-1') {
     summary: { total: 100, translated: 8, percent: 8, translation_speed_lpm: 12, eta_seconds: 460 },
   };
   const boundary = {};
-  const load = createTypeScriptLoader({ TextEncoder, btoa, window: {
+  const listeners = new Map(), storage = new Map();
+  let pageActivity, mounted = 0, restored = 0;
+  const document = {
+    body: {}, documentElement: {}, hidden: false,
+    activeElement: { focus() { restored++; } },
+    addEventListener(type, fn) {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type).add(fn);
+    },
+    removeEventListener(type, fn) { listeners.get(type)?.delete(fn); },
+  };
+  const closeNode = { focus() { document.activeElement = closeNode; }, hasAttribute: () => false, getClientRects: () => [{}] };
+  const lastNode = { ...closeNode, focus() { document.activeElement = lastNode; } };
+  const dialogNode = { querySelectorAll: () => [closeNode, lastNode], contains: node => node === closeNode || node === lastNode };
+  const load = createTypeScriptLoader({ TextEncoder, btoa, document, CustomEvent: class { constructor(type) { this.type = type; } }, localStorage: {
+    getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key),
+  }, window: {
     addEventListener() {},
     removeEventListener() {},
+    dispatchEvent() {},
     setInterval: callback => { timers.set(++timerId, callback); return timerId; },
     clearInterval: id => timers.delete(id),
-  } }, { '../../../lib/api': boundary });
+  } }, {
+    '../../../lib/api': boundary,
+    'react-dom': { createPortal: children => children },
+    '../ProjectTranslatePage': { ProjectTranslatePage: ({ ctx }) => {
+      const [instance] = useState(() => ++mounted);
+      return createElement('workbench', { ctx, active: pageActivity.usePageActive(), instance });
+    } },
+  });
   const api = load(new URL('../src/lib/api.ts', import.meta.url));
   Object.assign(boundary, api, {
     fetchProjectRuntime: async () => snapshot,
@@ -28,10 +52,20 @@ function setup(status = 'running', currentJobId = 'job-1') {
       return boundary.stopResponse;
     },
   });
+  api.getDisableAnimationsPreference = () => options.animated !== true;
+  api.addOpenProject('C:\\Games\\Example', 'custom.yml');
+  pageActivity = load(new URL('../src/components/PageActivity.tsx', import.meta.url));
+  const { ProjectTranslationPreviewProvider } = load(new URL('../src/pages/agent/ProjectTranslationPreview.tsx', import.meta.url));
   const { TranslationJobCard } = load(new URL('../src/pages/agent/rows/TranslationJobCard.tsx', import.meta.url));
   const item = { kind: 'tool', step: 1, ok: true, arguments: { translator: 'auto-translate', files: ['scene.json'] }, result: { job_id: 'job-1', status } };
-  return { load, boundary, requests, timers, api,
-    view: () => createElement(TranslationJobCard, { item, projectDir: 'C:\\Games\\Example' }),
+  return { load, boundary, requests, timers, api, document, listeners, closeNode, lastNode, restored: () => restored,
+    nodes: element => element.type === 'section' && element.props.className === 'agent-translation-preview'
+      ? dialogNode : element.type === 'button' && element.props['aria-label'] === '关闭' ? closeNode : null,
+    view: (active = true, cardVisible = true, directory = 'C:\\Games\\Example') => {
+      const card = cardVisible ? createElement(TranslationJobCard, { item, projectDir: directory }) : null;
+      return options.preview ? createElement(pageActivity.PageActivityContext.Provider, { value: active },
+        createElement(ProjectTranslationPreviewProvider, null, card)) : card;
+    },
     cancel: () => { snapshot = { ...snapshot, job: { ...snapshot.job, status: 'cancelled', finished_at: '2026-11-01T00:01:00Z' } }; },
   };
 }
@@ -56,6 +90,112 @@ test('translation card requests stop for its project, disables the button in fli
   act(() => renderer.unmount());
   assert.equal(f.timers.size, 0);
 });
+
+test('the header only toggles progress; the expanded body opens the workbench and outside clicks shrink it', async () => {
+  const f = setup('running', 'job-1', { preview: true });
+  let renderer;
+  await act(async () => { renderer = create(f.view(), { createNodeMock: f.nodes }); });
+  const surface = () => renderer.root.findByProps({ className: 'agent-tjob__body' });
+  const backdrop = () => renderer.root.findByProps({ className: 'agent-translation-preview-backdrop' });
+  try {
+    assert.equal(renderer.root.findAllByType('workbench').length, 0);
+    assert.equal(renderer.root.findByProps({ className: 'agent-tjob is-open is-live' }).props.onClick, undefined);
+    act(() => renderer.root.findByProps({ className: 'agent-tjob__header' }).props.onClick());
+    assert.equal(renderer.root.findByProps({ className: 'agent-tjob__header' }).props['aria-expanded'], false);
+    assert.equal(renderer.root.findAllByType('workbench').length, 0);
+    act(() => renderer.root.findByProps({ className: 'agent-tjob__header' }).props.onClick());
+    assert.equal(renderer.root.findByProps({ className: 'agent-tjob__header' }).props['aria-expanded'], true);
+    assert.equal(renderer.root.findAllByType('workbench').length, 0);
+    await act(async () => surface().props.onClick({ target: { closest: () => null } }));
+    const workbench = () => renderer.root.findByType('workbench').props;
+    assert.equal(workbench().ctx.projectDir, 'C:\\Games\\Example');
+    assert.equal(workbench().ctx.projectId, f.api.encodeProjectDir('C:\\Games\\Example'));
+    assert.equal(workbench().ctx.configFileName, 'custom.yml');
+    assert.equal(workbench().active, true);
+    assert.equal(backdrop().props.style.pointerEvents, 'auto');
+    const instance = workbench().instance;
+    const outside = {};
+    act(() => backdrop().props.onClick({ target: {}, currentTarget: outside }));
+    assert.equal(workbench().active, true);
+    act(() => backdrop().props.onClick({ target: outside, currentTarget: outside }));
+    assert.equal(workbench().active, false);
+    assert.equal(backdrop().props['aria-hidden'], true);
+    assert.equal(backdrop().props.style.pointerEvents, 'none');
+    assert.equal(f.requests.length, 0);
+    assert.equal(f.restored(), 1);
+    await act(async () => surface().props.onClick({ target: { closest: () => null } }));
+    assert.equal(workbench().instance, instance);
+    assert.equal(workbench().active, true);
+    // Work records collapsing cannot destroy the open preview.
+    await act(async () => renderer.update(f.view(true, false)));
+    assert.equal(workbench().active, true);
+    await act(async () => renderer.update(f.view(false, false)));
+    assert.equal(workbench().active, false);
+    await act(async () => renderer.update(f.view(true)));
+    assert.equal(workbench().active, false);
+    await act(async () => renderer.update(f.view(true, true, 'D:\\Another')));
+    await act(async () => surface().props.onClick({ target: { closest: () => null } }));
+    assert.equal(workbench().ctx.projectDir, 'D:\\Another');
+    assert.equal(workbench().ctx.configFileName, 'config.yaml');
+    assert.notEqual(workbench().instance, instance);
+  } finally { act(() => renderer.unmount()); }
+  assert.equal(f.timers.size, 0);
+  assert.equal([...f.listeners.values()].some(set => set.size), false);
+});
+
+test('card controls keep their actions and never open the project preview', async () => {
+  const f = setup('running', 'job-1', { preview: true });
+  f.boundary.stopResponse = Promise.resolve({ status: 'cancelled' });
+  let renderer;
+  await act(async () => { renderer = create(f.view()); });
+  try {
+    const raw = renderer.root.findByProps({ className: 'agent-tjob__raw-toggle' });
+    act(() => raw.props.onClick());
+    const surface = renderer.root.findByProps({ className: 'agent-tjob__body' });
+    act(() => surface.props.onClick({ target: { closest: () => raw } }));
+    assert.equal(renderer.root.findAllByType('workbench').length, 0);
+    assert.equal(raw.props['aria-expanded'], true);
+    const stop = renderer.root.findAllByType('button').find(node => node.props.className?.includes('agent-tjob__stop'));
+    await act(async () => { f.cancel(); stop.props.onClick(); });
+    assert.equal(f.requests.length, 1);
+    assert.equal(renderer.root.findAllByType('workbench').length, 0);
+    act(() => renderer.root.findByProps({ className: 'agent-tjob__header' }).props.onClick());
+    assert.equal(renderer.root.findAllByType('workbench').length, 0);
+    assert.equal(renderer.root.findByProps({ className: 'agent-tjob__header' }).props['aria-expanded'], false);
+  } finally { act(() => renderer.unmount()); }
+});
+
+for (const animated of [false, true]) {
+test(`preview supports keyboard focus, Escape and the animation setting (${animated})`, async () => {
+  const f = setup('completed', 'job-1', { preview: true, animated });
+  let renderer;
+  await act(async () => { renderer = create(f.view(), { createNodeMock: f.nodes }); });
+  try {
+    await act(async () => renderer.root.findByProps({ className: 'agent-tjob__header' }).props.onClick());
+    assert.equal(renderer.root.findAllByType('workbench').length, 0);
+    const body = renderer.root.findByProps({ className: 'agent-tjob__body' });
+    const element = {};
+    await act(async () => body.props.onKeyDown({ key: 'Enter', target: element, currentTarget: element, preventDefault() {} }));
+    assert.equal(f.document.activeElement, f.closeNode);
+    const dialog = renderer.root.findByProps({ className: 'agent-translation-preview' });
+    assert.equal(dialog.props.transition.duration, animated ? 0.2 : 0);
+    const press = (key, shiftKey = false) => {
+      const event = { key, shiftKey, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+      act(() => { for (const fn of f.listeners.get('keydown') || []) fn(event); });
+      return event;
+    };
+    assert.equal(press('Tab', true).defaultPrevented, true);
+    assert.equal(f.document.activeElement, f.lastNode);
+    assert.equal(press('Tab').defaultPrevented, true);
+    assert.equal(f.document.activeElement, f.closeNode);
+    press('Escape');
+    assert.equal(renderer.root.findByType('workbench').props.active, false);
+    assert.equal(f.restored(), 1);
+    assert.equal(f.requests.length, 0);
+    assert.equal(f.listeners.get('keydown').size, 0);
+  } finally { act(() => renderer.unmount()); }
+});
+}
 
 test('failed stop keeps the job running, shows an error and allows retry', async () => {
   const f = setup();

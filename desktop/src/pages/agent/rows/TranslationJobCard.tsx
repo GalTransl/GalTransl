@@ -1,7 +1,7 @@
 import { AnimatedCollapse } from '../../../components/UiMotion';
 import { usePageActive } from '../../../components/PageActivity';
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../../../i18n";
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import {
   encodeProjectDir,
   fetchJobs,
@@ -23,6 +23,7 @@ import {
 import { ToolBlock } from './ToolRow';
 import type { ActivityItem } from '../timeline';
 import { asArgs, formatPayload, str } from '../toolMeta';
+import { ProjectTranslationPreviewContext } from '../ProjectTranslationPreview';
 
 /* ── 启动翻译卡片（开始翻译顶部卡的迷你版） ──
    原本这里是「启动翻译 · ForGal-json · 仅 1 个文件」加一段原始参数/结果 JSON。
@@ -34,6 +35,7 @@ const JOB_CARD_POLL_MS = 1000;
 
 export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; projectDir: string }) {
   const active = usePageActive();
+  const showPreview = useContext(ProjectTranslationPreviewContext);
   useUiLanguage();
   const args = asArgs(item.arguments);
   const result =
@@ -136,17 +138,17 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
   const resultText = formatPayload(item.ok === false ? item.error : item.result);
   // GenDic 跑的是分片/批次而不是句子：进度与速度的单位都跟着它换（与工作台一致）
   const progressUnit = translator === 'GenDic' || (runtime?.stage ?? '').startsWith('GenDic') ? translate("agent:translationJobCard.progressUnit_message_item") : translate("agent:translationJobCard.progressUnit_message_sentence");
+  const previewAvailable = Boolean(projectDir && showPreview);
+  const showProject = () => showPreview?.(projectDir, str(args?.config_file_name) || str(result.config_file_name) || undefined);
 
   return (
     <div className={`agent-tjob${open ? ' is-open' : ''}${isRunning ? ' is-live' : ''}`}>
       <button
         type="button"
         className="agent-tjob__header"
-        onClick={() => {
-          userToggledRef.current = true;
-          setOpen((v) => !v);
-        }}
+        onClick={() => { userToggledRef.current = true; setOpen(value => !value); }}
         aria-expanded={open}
+        title={translate("agent:translationJobCard.toggleProgress")}
       >
         <span className="agent-tjob__icon"><Icon name="play" /></span>
         <span className="agent-tjob__action">{translate("agent:translationJobCard.agentTjobHeader_message_translation")}</span>
@@ -166,7 +168,20 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
       </button>
 
       <AnimatedCollapse open={open}>{() => (
-        <div className="agent-tjob__body">
+        <div className="agent-tjob__body"
+          role={previewAvailable ? 'button' : undefined}
+          tabIndex={open && previewAvailable ? 0 : undefined}
+          aria-haspopup={previewAvailable ? 'dialog' : undefined}
+          aria-label={previewAvailable ? translate("agent:translationJobCard.openProject") : undefined}
+          onClick={open && previewAvailable ? event => {
+            const control = (event.target as HTMLElement).closest('button, a, input, select, textarea, [role="button"], [role="switch"]');
+            if (!control || control === event.currentTarget) showProject();
+          } : undefined}
+          onKeyDown={open && previewAvailable ? event => {
+            if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return;
+            event.preventDefault();
+            showProject();
+          } : undefined}>
           <div className="agent-tjob__gauge">
             <span className="agent-tjob__percent">
               {formatPercentDisplay(summary?.percent ?? 0)}

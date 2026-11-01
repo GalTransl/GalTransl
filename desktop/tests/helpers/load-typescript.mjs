@@ -13,6 +13,7 @@ export function createTypeScriptLoader(globals = {}, mocks = {}) {
     let file = input instanceof URL ? fileURLToPath(input) : input;
     if (!existsSync(file) || statSync(file).isDirectory()) file = ['.ts', '.tsx', '.json', '/index.ts'].map((extension) => file + extension).find(existsSync);
     if (!file) throw new Error(`Missing test module: ${input}`);
+    if (file.endsWith('.css')) return {};
     if (modules.has(file)) return modules.get(file);
     if (file.endsWith('.json')) return JSON.parse(readFileSync(file, 'utf8'));
     const exports = {};
