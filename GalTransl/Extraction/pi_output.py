@@ -1,4 +1,4 @@
-"""Bounded streaming tail and Pi shell result formatting; logs retain all bytes."""
+"""Bounded streaming tail and Pi shell results; truncated output has a full log."""
 import codecs
 
 from .pi_text import MAX_BYTES, MAX_LINES, format_size, truncate
@@ -59,19 +59,21 @@ def shell_result(accumulator, path, exit_code, seconds, failure=""):
         text += ("\n\n" if text else "") + status
     if failure:
         return text
-    size = path.stat().st_size
+    size = path.stat().st_size if path is not None else accumulator.total_bytes
     cap = 1024 * 1024
-    with path.open("rb") as stream:
-        if size <= cap:
-            full = stream.read().decode("utf-8-sig", errors="replace")
-        else:
-            head = codecs.getincrementaldecoder("utf-8-sig")("replace").decode(stream.read(cap // 2))
-            stream.seek(-cap // 2, 2)
-            tail = stream.read()
-            start = 0
-            while start < len(tail) and tail[start] & 0xc0 == 0x80:
-                start += 1
-            full = f"{head}\n\n[... {size - cap} bytes omitted ...]\n\n{tail[start:].decode('utf-8', errors='replace')}"
+    full = accumulator.tail
+    if path is not None:
+        with path.open("rb") as stream:
+            if size <= cap:
+                full = stream.read().decode("utf-8-sig", errors="replace")
+            else:
+                head = codecs.getincrementaldecoder("utf-8-sig")("replace").decode(stream.read(cap // 2))
+                stream.seek(-cap // 2, 2)
+                tail = stream.read()
+                start = 0
+                while start < len(tail) and tail[start] & 0xc0 == 0x80:
+                    start += 1
+                full = f"{head}\n\n[... {size - cap} bytes omitted ...]\n\n{tail[start:].decode('utf-8', errors='replace')}"
     structured = dict(output=full, truncated=size > cap, exit_code=exit_code,
                       wall_time_seconds=round(seconds, 1))
     if size > cap:

@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import uuid
+from contextlib import ExitStack
 from pathlib import Path
 
 from GalTransl.Agent.core import AgentStopRequested
@@ -23,8 +24,9 @@ EXIT_IDLE_SECONDS = .1
 
 
 class Commands:
-    def __init__(self, workspace, skill, available, stop_event, emit):
+    def __init__(self, workspace, skill, available, stop_event, emit, *, session_dir):
         self.workspace, self.skill = Path(workspace), str(skill)
+        self.session_dir = Path(session_dir)
         self.available, self.stop_event, self.emit = available, stop_event, emit
         self.skill_dirs = list(dict.fromkeys(item["base_dir"] for item in available["skills"])) if "skills" in available else [self.skill]
         self.lock = threading.Lock()
@@ -41,9 +43,8 @@ class Commands:
     def execute(self, executable, args, call_id, timeout=120, request=None, *, native=False):
         if self.stop_event.is_set():
             raise AgentStopRequested()
-        # The reports directory must be rechecked: scripts can create links.
         from .tools import checked_path
-        log_path = checked_path(f"reports/command-{uuid.uuid4().hex}.log", self.workspace, [self.workspace], True)
+        log_path = self.session_dir / "tmp" / f"command-{uuid.uuid4().hex}.log"
         env = external_environment()
         if native:
             # Native bash inherits the user's environment; frozen loader paths still need cleaning.
@@ -55,13 +56,12 @@ class Commands:
                     env.pop("LD_LIBRARY_PATH", None)
             if os.name == "nt":
                 # BusyBox resolves /tmp against the working drive (E:\tmp), so hand the
-                # shell a scratch directory the file tools can reach as well.
-                scratch = self.workspace / "tmp"
-                try:
-                    scratch.mkdir(parents=True, exist_ok=True)
-                    env["TMPDIR"] = scratch.as_posix()
-                except OSError:
-                    pass
+                # shell a session scratch directory the file tools can reach.
+                scratch = checked_path("tmp", self.session_dir, [self.session_dir], True)
+                scratch.mkdir(parents=True, exist_ok=True)
+                scratch = checked_path(str(scratch), self.session_dir, [self.session_dir])
+                env["TMPDIR"] = scratch.as_posix()
+        env.update(PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
         python = self.available["builtin_python"]
         if not native:
             env['PYTHONPATH'] = os.pathsep.join(self.skill_dirs)
@@ -70,7 +70,7 @@ class Commands:
                    GALTRANSL_OUTPUT_DIR=str(self.workspace), GALTRANSL_PYTHON=python["executable"],
                    GALTRANSL_PYTHON_ARGS=json.dumps(python["args"]))
         started = time.monotonic()
-        output, live, total, failure = "", "", 0, ""
+        output, live, total, output_chars, failure = "", "", 0, 0, ""
         chunks = queue.Queue(maxsize=16)
         reader_done = threading.Event()
         reader_stop = threading.Event()
@@ -81,9 +81,19 @@ class Commands:
         child = None
         survive = False
         # One merged pipe preserves command output order and bounds buffering.
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_path = checked_path(str(log_path), self.workspace, [self.workspace], True)
-        with log_path.open("xb") as log:
+        pending = bytearray()
+        log = None
+        with ExitStack() as logs:
+            def open_log():
+                # Commands can create links, so validate immediately before writing.
+                target = checked_path(str(log_path), self.session_dir, [self.session_dir], True)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target = checked_path(str(target), self.session_dir, [self.session_dir], True)
+                stream = logs.enter_context(target.open("xb"))
+                stream.write(pending)
+                pending.clear()
+                return stream
+
             try:
                 with self.lock, external_program():
                     if self.stop_event.is_set():
@@ -162,11 +172,18 @@ class Commands:
                         last_data = now
                         remaining = len(data) if native else max(0, MAX_OUTPUT_BYTES - total)
                         total += len(data)
-                        log.write(data[:remaining])
                         text = decoder.decode(data[:remaining])
+                        output_chars += len(text)
                         if accumulator:
                             accumulator.append(data)
                         output, live = (output + text)[-PREVIEW_CHARS:], (live + text)[-PREVIEW_CHARS:]
+                        if log is not None:
+                            log.write(data[:remaining])
+                        if log is None:
+                            pending.extend(data[:remaining])
+                            truncated = accumulator.snapshot()['truncated'] if native else output_chars > PREVIEW_CHARS
+                            if truncated:
+                                log = open_log()
                         if not native and total > MAX_OUTPUT_BYTES:
                             failure = "Command exceeded the 10 MiB output budget"
                     if live and now - last_flush >= .08:
@@ -176,9 +193,14 @@ class Commands:
                         else:
                             self.emit({"type": "tool_output", "toolCallId": call_id, "text": live})
                         live, last_flush = "", now
-                output = (output + decoder.decode(b"", final=True))[-PREVIEW_CHARS:]
+                text = decoder.decode(b"", final=True)
+                output_chars += len(text)
+                output = (output + text)[-PREVIEW_CHARS:]
                 if accumulator:
                     accumulator.append(b"", final=True)
+                truncated = accumulator.snapshot()['truncated'] if native else output_chars > PREVIEW_CHARS
+                if log is None and truncated:
+                    log = open_log()
                 if native:
                     self.emit({"type": "tool_output", "toolCallId": call_id,
                                "text": accumulator.snapshot()['content'], "replace": True})
@@ -211,19 +233,28 @@ class Commands:
             exit_code = child.returncode
             if os.name != "nt" and exit_code < 0:
                 exit_code = 128 - exit_code
-            result = shell_result(accumulator, log_path, exit_code, time.monotonic() - started, failure)
+            result = shell_result(accumulator, log_path if log is not None else None,
+                                  exit_code, time.monotonic() - started, failure)
             if failure:
                 raise AgentToolError(result)
             return result
         result = {"exit_code": child.returncode, "signal": None, "output": output, "output_bytes": total,
-                  "truncated": total > len(output.encode("utf-8")),
-                  "log_path": str(log_path.relative_to(self.workspace)),
+                  "truncated": output_chars > PREVIEW_CHARS,
                   "wall_time_seconds": round(time.monotonic() - started, 3)}
+        if log is not None:
+            result["log_path"] = str(log_path)
         if os.name != "nt" and child.returncode < 0:
             import signal
             result.update(exit_code=None, signal=signal.Signals(-child.returncode).name)
         if failure:
             result["error"] = failure
+        text = output or ("" if failure else "(no output)")
+        if result["truncated"]:
+            text += f"\n\n[Showing last {PREVIEW_CHARS} of {output_chars} characters. Full output: {log_path}]"
         if failure or child.returncode:
-            raise AgentToolError(json.dumps(result, ensure_ascii=False))
-        return result
+            status = failure or (f"Command terminated by signal {result['signal']}" if result["signal"]
+                                 else f"Command exited with code {result['exit_code']}")
+            text += ("\n\n" if text else "") + status
+        return {"content": [{"type": "text", "text": text}], "structuredContent": result,
+                **({"details": {"fullOutputPath": str(log_path)}} if log is not None else {}),
+                **({"isError": True} if failure or child.returncode else {})}

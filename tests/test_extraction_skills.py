@@ -82,14 +82,24 @@ def test_registered_extra_skills_are_readable_and_importable_with_bundled_python
     skills, _ = discover_skills([tmp_path / 'skills'])
     available = {'skills': skills, 'builtin_python': builtin_python(),
                  'python_runner_script': python_runner_script(), 'system_pythons': []}
-    tools = ExtractionTools(workspace, game, primary.parent.parent, available, threading.Event(), lambda event: None)
+    session = tmp_path / 'session'
+    session.mkdir()
+    tools = ExtractionTools(workspace, game, primary.parent.parent, available, threading.Event(),
+                            lambda event: None, session_dir=session)
     assert tools.read_path(str(extra)) == extra
     with pytest.raises(AgentToolError, match='outside'):
         tools.write_path(str(extra))
     for arguments in ({'script': str(script)}, {'code': 'import primary_module, extra_module; print(primary_module.VALUE, extra_module.VALUE)'}):
         result = tools.run_python(arguments, 'probe')
-        assert result['exit_code'] == 0
-        assert result['output'].strip() == 'primary extra'
+        assert result['structuredContent']['exit_code'] == 0
+        assert result['content'][0]['text'].strip() == 'primary extra'
+    result = tools.bash({'command': "python -B -c 'import primary_module, extra_module; print(primary_module.VALUE, extra_module.VALUE)'"}, 'bash-probe')
+    assert not result.get('isError'), result
+    assert result['structuredContent']['output'].strip() == 'primary extra'
+    result = tools.run_python({'code': "import os, json, sys; from pathlib import Path; assert os.environ['GALTRANSL_SKILL_DIR'] == sys.argv[1]; assert json.loads(os.environ['GALTRANSL_SKILL_DIRS']) == sys.argv[2:]; assert all(str(Path(path).resolve()) in sys.path for path in sys.argv[2:]); print('automatic Skill paths')",
+                               'args': [str(primary.parent.parent), *tools.skill_dirs]}, 'paths-probe')
+    assert not result.get('isError'), result
+    assert result['content'][0]['text'].strip() == 'automatic Skill paths'
 
 
 def test_skill_command_is_saved_expanded_on_first_and_later_turns_with_images(tmp_path, monkeypatch):

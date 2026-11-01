@@ -129,13 +129,14 @@ def checked_directory(raw: Any) -> Path:
 def workspace_path(workspace: Path, relative: str) -> Path:
     if "\0" in relative or Path(relative).is_absolute() or ":" in relative:
         raise ValueError("Expected a relative workspace path")
+    parts = relative.replace("\\", "/").split("/")
+    if ".." in parts:
+        raise ValueError("Path escapes the workspace")
     root = workspace.resolve(strict=True)
     current = root
-    for part in relative.replace("\\", "/").split("/"):
+    for part in parts:
         if part in ("", "."):
             continue
-        if part == "..":
-            raise ValueError("Path escapes the workspace")
         current = current / part
         if current.is_symlink() or (getattr(current.lstat(), "st_file_attributes", 0) & 0x400):
             raise ValueError("Links are not allowed")

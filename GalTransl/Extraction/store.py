@@ -123,8 +123,6 @@ class SessionStore:
         else:
             workspace = game / f"{game.name or 'game'}_extract"
         workspace.mkdir(exist_ok=True)
-        for name in ("gt_input", "gt_output", "original", "metadata", "reports", "scripts"):
-            (workspace / name).mkdir(exist_ok=True)
         session_id = uuid.uuid4().hex
         directory = self.directory(session_id)
         directory.mkdir(parents=True, exist_ok=False)

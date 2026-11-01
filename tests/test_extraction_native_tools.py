@@ -9,6 +9,7 @@ import os
 import random
 import shlex
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -414,14 +415,100 @@ def test_bash_sends_non_ascii_commands_as_utf8(fixture):
     assert (runner.tools.workspace / 'chinese.txt').read_bytes() == '中文'.encode('utf-8')
 
 
-@pytest.mark.skipif(os.name != 'nt', reason='Windows drive-relative POSIX paths')
-def test_bash_scratch_dir_lives_in_the_workspace(fixture):
+def test_bash_python_overrides_non_utf8_environment(fixture, monkeypatch):
     runner, _ = fixture
     runner.tools.approve = lambda *args: None
-    scratch = (runner.tools.workspace / 'tmp').resolve()
+    monkeypatch.setenv('PYTHONUTF8', '0')
+    monkeypatch.setenv('PYTHONIOENCODING', 'cp932')
+    code = 'import sys; print(sys.stdout.encoding); print("日本語の台詞：こんにちは、ありがとう。")'
+    result = runner._dispatch_tool('bash', {'command': shlex.join([sys.executable, '-c', code])})
+    expected = ['utf-8', '日本語の台詞：こんにちは、ありがとう。']
+    assert text(result).splitlines() == expected
+    assert result['structuredContent']['output'].splitlines() == expected
+
+
+@pytest.mark.parametrize('executable', ['python', 'python3'])
+def test_bash_python_runs_without_system_python_on_path(fixture, monkeypatch, executable):
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    monkeypatch.setenv('PATH', '')
+    code = 'import sys; print(sys.executable); print("日本語の台詞")'
+    result = runner._dispatch_tool('bash', {'command': shlex.join([executable, '-c', code])})
+    assert not result.get('isError'), text(result)
+    assert text(result).splitlines() == [runner.available['builtin_python']['executable'], '日本語の台詞']
+
+
+@pytest.mark.parametrize('mode', ['script', 'module', 'stdin', 'heredoc', 'pipe'])
+def test_bash_bundled_python_modes_preserve_japanese_arguments_and_stdin(fixture, monkeypatch, mode):
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    monkeypatch.setenv('PATH', '')
+    argument = "日本語 空白 ' $()"
+    code = 'import sys; print(sys.argv[1]); print("日本語の台詞", file=sys.stderr)'
+    script = runner.tools.workspace / "日本語 ' script.py"
+    if mode == 'script':
+        script.write_text(code, encoding='utf-8')
+    if mode == 'module':
+        (runner.tools.skill / 'cli_probe.py').write_text(code, encoding='utf-8')
+    pipe_code = 'import sys; print(sys.stdin.read()); print("日本語の台詞", file=sys.stderr)'
+    heredoc_code = f'import sys; print({argument!r}); print("日本語の台詞", file=sys.stderr)'
+    commands = {
+        'script': shlex.join(['python', '-B', str(script), argument]),
+        'module': shlex.join(['python3', '-B', '-m', 'cli_probe', argument]),
+        'pipe': f'printf %s {shlex.quote(argument)} | ' + shlex.join(['python', '-c', pipe_code]),
+        'stdin': shlex.join(['python', '-', argument]) + " <<'PY'\n" + code + '\nPY\n',
+        'heredoc': "python3 <<'PY'\n" + heredoc_code + '\nPY\n',
+    }
+    result = runner._dispatch_tool('bash', {'command': commands[mode]})
+    assert not result.get('isError'), text(result)
+    assert sorted(text(result).splitlines()) == sorted([argument, '日本語の台詞'])
+    assert not list(runner.tools.session_dir.rglob('command-*.log'))
+    assert not (runner.tools.workspace / '__pycache__').exists()
+    if mode == 'module':
+        assert not (runner.tools.skill / '__pycache__').exists()
+
+
+@pytest.mark.parametrize('flag', ['-V', '--version'])
+def test_bash_bundled_python_version_without_path(fixture, monkeypatch, flag):
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    monkeypatch.setenv('PATH', '')
+    result = runner._dispatch_tool('bash', {'command': shlex.join(['python', flag])})
+    assert text(result).strip() == f'Python {sys.version.split()[0]}'
+
+
+def test_bash_bundled_python_unbuffered_output_and_script_options(fixture, monkeypatch):
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    monkeypatch.setenv('PATH', '')
+    code = 'import io, sys; assert sys.stdout.write_through; assert isinstance(sys.stdout.buffer, io.FileIO); assert sys.argv == ["-c", "--version", "-B"]; print("日本語")'
+    result = runner._dispatch_tool('bash', {'command': shlex.join(['python', '-u', '-c', code, '--version', '-B'])})
+    assert text(result).strip() == '日本語'
+
+
+@pytest.mark.parametrize('arguments,message', [
+    (['-c'], '-c requires an argument'), (['-m'], '-m requires an argument'),
+    (['-S'], 'Unsupported bundled Python option: -S'),
+])
+def test_bash_bundled_python_rejects_invalid_options(fixture, monkeypatch, arguments, message):
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    monkeypatch.setenv('PATH', '')
+    result = runner._dispatch_tool('bash', {'command': shlex.join(['python', *arguments])})
+    assert result['isError'] and result['structuredContent']['exit_code'] == 1
+    assert message in text(result)
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows drive-relative POSIX paths')
+def test_bash_scratch_dir_lives_in_the_session(fixture):
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    scratch = (runner.tools.session_dir / 'tmp').resolve()
     lines = text(runner._dispatch_tool('bash', {'command': 'echo "$TMPDIR"; mktemp'})).splitlines()
     assert Path(lines[0]).resolve() == scratch
     assert Path(lines[1]).parent == scratch and Path(lines[1]).is_file()
+    assert runner.tools.read_path(lines[1]) == Path(lines[1])
+    assert not (runner.tools.workspace / 'tmp').exists()
 
 
 @pytest.mark.skipif(os.name != 'nt', reason='Windows shell drive aliases')
@@ -496,6 +583,78 @@ def test_bash_optional_timeout_and_no_default(fixture, monkeypatch):
     assert seen == [None, .2]
 
 
+@pytest.mark.parametrize('name,count,truncated', [
+    ('run_python', 16000, False), ('run_python', 16001, True),
+    ('bash', MAX_BYTES, False), ('bash', MAX_BYTES + 1, True),
+])
+def test_commands_only_create_session_logs_when_output_is_truncated(fixture, name, count, truncated):
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    before = sorted(str(path.relative_to(runner.tools.workspace)) for path in runner.tools.workspace.rglob('*'))
+    args = {'code': f'import sys; sys.stdout.write("x" * {count})'} if name == 'run_python' else {'command': f"printf '%0{count}d' 0"}
+    result = runner._dispatch_tool(name, args)
+    logs = list(runner.tools.session_dir.rglob('command-*.log'))
+    assert len(logs) == int(truncated)
+    assert sorted(str(path.relative_to(runner.tools.workspace)) for path in runner.tools.workspace.rglob('*')) == before
+    path = result.get('details', {}).get('fullOutputPath')
+    assert bool(path) == truncated
+    if path:
+        assert Path(path) == logs[0] and Path(path).stat().st_size == count
+    if name == 'bash':
+        assert len(result['structuredContent']['output']) == count
+
+
+def test_readonly_commands_keep_an_empty_output_directory(fixture):
+    from GalTransl.Extraction.tools import ExtractionTools
+    runner, root = fixture
+    output = root / 'empty-output'
+    output.mkdir()
+    tools = ExtractionTools(output, runner.tools.game, runner.tools.skill, runner.available,
+                            runner.stop_event, lambda event: None, session_dir=runner.tools.session_dir)
+    assert text(tools.run_python({'code': 'print("ready")'}, 'python')).strip() == 'ready'
+    assert text(tools.bash({'command': 'printf ready'}, 'bash')) == 'ready'
+    assert list(output.iterdir()) == []
+    assert not list(tools.session_dir.rglob('command-*.log'))
+
+
+@pytest.mark.parametrize('runtime', ['bundled', 'system'])
+def test_python_task_errors_have_readable_text_and_structured_status(fixture, runtime):
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    args = {'code': "def fail():\n    raise ValueError('日本語のエラー')\nfail()", 'runtime': runtime}
+    if runtime == 'system':
+        args['python_path'] = runner.available['builtin_python']['executable']
+    result = runner._dispatch_tool('run_python', args)
+    assert result['isError'] and result['structuredContent']['exit_code'] == 1
+    assert result['structuredContent']['signal'] is None
+    assert 'Traceback (most recent call last):\n' in text(result).replace('\r\n', '\n')
+    assert 'line 2, in fail' in text(result) and 'ValueError: 日本語のエラー' in text(result)
+    assert 'extraction_python.py' not in text(result) and '\\r\\n' not in text(result)
+    assert text(result).endswith('Command exited with code 1')
+    assert runner._serialize_tool_result(result) == text(result)
+
+
+def test_python_multibyte_output_within_character_limit_leaves_no_log(fixture):
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    result = runner._dispatch_tool('run_python', {'code': 'import sys; sys.stdout.write("中" * 10000)'})
+    assert text(result) == '中' * 10000
+    assert not result['structuredContent']['truncated'] and 'log_path' not in result['structuredContent']
+    assert not list(runner.tools.session_dir.rglob('command-*.log'))
+
+
+def test_short_failed_commands_leave_no_logs(fixture):
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    result = runner._dispatch_tool('run_python', {'code': 'print("failed"); raise SystemExit(7)'})
+    assert result['isError'] and result['structuredContent']['exit_code'] == 7
+    assert text(result).splitlines() == ['failed', '', '', 'Command exited with code 7']
+    result = runner._dispatch_tool('bash', {'command': 'printf failed; exit 7'})
+    assert result['isError'] and result['structuredContent']['exit_code'] == 7
+    assert not list(runner.tools.session_dir.rglob('command-*.log'))
+    assert not list(runner.tools.workspace.rglob('command-*.log'))
+
+
 def test_bash_long_output_full_log_and_utf8_tail(fixture):
     runner, _ = fixture
     runner.tools.approve = lambda *args: None
@@ -504,6 +663,10 @@ def test_bash_long_output_full_log_and_utf8_tail(fixture):
     assert truncation['outputLines'] == 2000 and truncation['totalLines'] == 2105
     assert text(result).startswith('105:中文\n') and 'Showing lines 106-2105 of 2105' in text(result)
     assert Path(result['details']['fullOutputPath']).read_bytes().startswith('0:中文'.encode())
+    path = Path(result['details']['fullOutputPath'])
+    assert path.is_relative_to(runner.tools.session_dir)
+    assert '0:中文' in text(runner._dispatch_tool('read', {'path': str(path), 'limit': 1}))
+    assert not list(runner.tools.workspace.rglob('command-*.log'))
     result = runner._dispatch_tool('bash', {'command': "printf '%011534336d' 0"})
     assert result['structuredContent']['truncated'] is True
     assert Path(result['details']['fullOutputPath']).stat().st_size == 11534336
@@ -601,7 +764,8 @@ def test_mutation_queue_serializes_across_tool_instances(fixture):
     from GalTransl.Extraction.tools import ExtractionTools
     runner, _ = fixture
     first = runner.tools
-    second = ExtractionTools(first.workspace, first.game, first.skill, first.available, first.stop_event, lambda event: None)
+    second = ExtractionTools(first.workspace, first.game, first.skill, first.available, first.stop_event,
+                             lambda event: None, session_dir=first.session_dir)
     target = first.workspace / 'text'
     target.write_bytes(b'one')
     entered, release = threading.Event(), threading.Event()

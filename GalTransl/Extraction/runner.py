@@ -89,7 +89,8 @@ class ExtractionRunner(AgentRunner):
         if self.skills is None:
             self.skills, _ = discover_skills([Path(available["settings"]["skill_dir"])])
         self.tools = ExtractionTools(session["workspace"], session["game_dir"], available["settings"]["skill_dir"],
-                                     available, self.stop_event, emit, self._require_permission)
+                                     available, self.stop_event, emit, self._require_permission,
+                                     session_dir=Path(store.dir).parent)
 
     def _system_prompt(self):
         sections = [

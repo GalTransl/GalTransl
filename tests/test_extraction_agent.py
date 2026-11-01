@@ -26,7 +26,9 @@ def test_shared_output_and_scoped_paths(extraction):
     assert session['permission_mode'] == 'auto'
     root = Path(session["workspace"])
     assert root == Path(session["game_dir"]) / "game_extract"
+    assert list(root.iterdir()) == []
     saved = root / "gt_input" / "existing.json"
+    saved.parent.mkdir()
     saved.write_text("existing extraction", encoding="utf-8")
     (root / "config.yaml").write_text("# existing project", encoding="utf-8")
     second = store.create(session["game_dir"])
@@ -44,14 +46,14 @@ def test_shared_output_and_scoped_paths(extraction):
             workspace_path(root, invalid)
 
 
-def test_existing_output_without_a_session_is_reused_and_initialized(tmp_path):
+def test_existing_output_without_a_session_is_reused_without_new_subdirectories(tmp_path):
     game = tmp_path / "game"
     root = game / "game_extract"
     root.mkdir(parents=True)
     (root / "saved.txt").write_text("keep", encoding="utf-8")
     session = SessionStore(tmp_path / "sessions").create(str(game))
     assert Path(session["workspace"]) == root
-    assert {p.name for p in root.iterdir()} == {"saved.txt", "gt_input", "gt_output", "original", "metadata", "reports", "scripts"}
+    assert {p.name for p in root.iterdir()} == {"saved.txt"}
     assert (root / "saved.txt").read_text(encoding="utf-8") == "keep"
 
 
@@ -175,6 +177,7 @@ def test_delete_session_removes_only_its_history_and_runtime_caches(extraction):
     second = store.create(session["game_dir"])
     sid = session["id"]
     output = Path(session["workspace"]) / "gt_input" / "saved.json"
+    output.parent.mkdir()
     output.write_text("keep", encoding="utf-8")
     runtime._emit(sid, {"type": "notice", "text": "history"})
     runtime.session(sid)
@@ -431,6 +434,7 @@ def test_open_unconfigured_output_uses_wizard_without_writing_files(extraction):
     assert runtime.import_project(sid) == {"project_dir": str(root), "config_file_name": None}
     assert set(root.rglob("*")) == before
     file = root / "gt_input" / "sample.json"
+    file.parent.mkdir()
     file.write_text('[{"wrong":"synthetic"}]', encoding="utf8")
     assert runtime.import_project(sid)["config_file_name"] is None
     assert not (root / "config.yaml").exists()

@@ -44,6 +44,8 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "environment", lambda: available)
     store = SessionStore(tmp_path / "sessions")
     session = store.create(str(game))
+    for name in ("gt_input", "gt_output", "original", "metadata", "reports", "scripts"):
+        (Path(session["workspace"]) / name).mkdir()
     runtime = module.ExtractionRuntime(store)
     yield runtime, session, available
     runtime.close()
@@ -149,6 +151,27 @@ def test_retry_bridge_preserves_details_and_discards_failed_live_output(setup):
     assert all(event['type'] != 'notice' for event in replay['events'])
 
 
+@pytest.mark.parametrize('arguments,status', [
+    ({'code': "def fail():\n    raise ValueError('日本語のエラー')\nfail()"}, 'ValueError: 日本語のエラー'),
+    ({'code': 'raise SystemExit(7)'}, 'Command exited with code 7'),
+    ({'code': "print('waiting', flush=True); import time; time.sleep(30)", 'timeout_seconds': 1}, 'Command exceeded its time limit'),
+])
+def test_python_failures_reach_model_and_ui_as_plain_text(setup, model_server, arguments, status):
+    runtime, session, _ = setup
+    profile, requests, responses = model_server
+    responses.extend([{'tool_calls': [call('run_python', arguments)]}, {'content': 'Handled failure.'}])
+    runtime.start(session['id'], {'message': 'Check synthetic failure', 'profile': profile, 'permission_mode': 'auto'})
+    wait_for(lambda: session['id'] not in runtime.runs)
+    content = next(message['content'] for message in requests[-1]['messages'] if message['role'] == 'tool')
+    assert status in content
+    assert '\n' in content and '\\r\\n' not in content
+    assert not content.startswith('{') and 'extraction_python.py' not in content
+    event = next(event for event in runtime.snapshot(session['id'])['events'] if event['type'] == 'tool_end')
+    assert event['isError'] and event['text'] == content
+    replay = module.ExtractionRuntime(runtime.store).snapshot(session['id'])['events']
+    assert next(event['text'] for event in replay if event['type'] == 'tool_end') == content
+
+
 def test_shared_loop_real_tool_approval_usage_and_restart(setup, model_server):
     runtime, session, available = setup
     profile, requests, responses = model_server
@@ -171,7 +194,7 @@ def test_shared_loop_real_tool_approval_usage_and_restart(setup, model_server):
     wait_for(lambda: sid not in runtime.runs)
     assert runtime.session(sid)["status"] == "idle"
     assert (workspace / "reports/fixture.txt").read_text() == "synthetic"
-    assert any(message.get("role") == "tool" and "checked synthetic" in message["content"] for message in requests[1]["messages"])
+    assert next(message['content'] for message in requests[1]['messages'] if message['role'] == 'tool').strip() == 'checked synthetic'
     assert {tool["function"]["name"] for tool in requests[0]["tools"]} == {tool["function"]["name"] for tool in EXTRACTION_TOOLS}
     assert "start_translation" not in str(requests[0]["tools"])
     assert requests[0]["reasoning_effort"] == "none"
@@ -574,9 +597,10 @@ def test_native_large_write_previews_do_not_break_ui_journal(setup, model_server
 
 
 def make_tools(setup):
-    _, session, available = setup
+    runtime, session, available = setup
     events, stop = [], threading.Event()
-    return ExtractionTools(session["workspace"], session["game_dir"], available["settings"]["skill_dir"], available, stop, events.append), events, stop
+    return ExtractionTools(session["workspace"], session["game_dir"], available["settings"]["skill_dir"],
+                           available, stop, events.append, session_dir=runtime.store.directory(session["id"])), events, stop
 
 
 def test_file_tools_edit_and_source_boundaries(setup, tmp_path):
@@ -597,18 +621,20 @@ def test_file_tools_edit_and_source_boundaries(setup, tmp_path):
 
 def test_commands_log_fail_timeout_and_cancellation(setup):
     tools, events, stop = make_tools(setup)
-    result = tools.run_python({"code": "print('synthetic 中文')"}, "python")
+    result = tools.run_python({"code": "print('synthetic 中文')"}, "python")["structuredContent"]
     assert result["exit_code"] == 0 and "synthetic 中文" in result["output"]
-    assert (tools.workspace / result["log_path"]).is_file()
+    assert "log_path" not in result
+    assert not list(tools.session_dir.rglob("command-*.log"))
     assert any(event["type"] == "tool_output" for event in events)
     shell = tools.bash({"command": "printf 'synthetic shell'"}, "shell")
     assert "synthetic shell" in shell["content"][0]["text"]
-    with pytest.raises(AgentToolError, match='"exit_code": 7'):
-        tools.run_python({"code": "raise SystemExit(7)"}, "failure")
-    with pytest.raises(AgentToolError, match="time limit"):
-        tools.run_python({"code": "import time; time.sleep(30)", "timeout_seconds": 1}, "timeout")
-    with pytest.raises(AgentToolError, match="time limit"):
-        tools.run_python({"code": "import os, time; os.close(1); os.close(2); time.sleep(30)", "timeout_seconds": 1}, "closed-output")
+    failed = tools.run_python({"code": "raise SystemExit(7)"}, "failure")
+    assert failed["isError"] and failed["structuredContent"]["exit_code"] == 7
+    assert failed["content"][0]["text"] == "(no output)\n\nCommand exited with code 7"
+    for code in ("import time; time.sleep(30)", "import os, time; os.close(1); os.close(2); time.sleep(30)"):
+        timed_out = tools.run_python({"code": code, "timeout_seconds": 1}, "timeout")
+        assert timed_out["isError"] and "time limit" in timed_out["content"][0]["text"]
+        assert timed_out["structuredContent"]["error"] == "Command exceeded its time limit"
     timer = threading.Timer(.4, stop.set)
     timer.start()
     started = time.monotonic()
@@ -644,12 +670,20 @@ def test_stopping_a_command_terminates_its_child_processes(setup):
 
 def test_command_output_is_bounded_and_complete_log_is_available(setup):
     tools, _, _ = make_tools(setup)
-    result = tools.run_python({"code": "print('synthetic ' * 5000)"}, "preview")
+    preview = tools.run_python({"code": "print('synthetic ' * 5000)"}, "preview")
+    result = preview["structuredContent"]
     assert len(result["output"]) <= 16000 and result["truncated"]
-    assert (tools.workspace / result["log_path"]).stat().st_size == result["output_bytes"]
-    with pytest.raises(AgentToolError, match="output budget"):
-        tools.run_python({"code": "import sys; sys.stdout.write('x' * (11 * 1024 * 1024))"}, "budget")
-    assert all(path.stat().st_size <= 10 * 1024 * 1024 for path in (tools.workspace / "reports").glob("*.log"))
+    log = Path(result["log_path"])
+    assert str(log) in preview["content"][0]["text"]
+    assert log.is_relative_to(tools.session_dir)
+    assert log.stat().st_size == result["output_bytes"]
+    assert "synthetic" in tools.read({"path": str(log), "limit": 1}, "log")["content"][0]["text"]
+    with pytest.raises(AgentToolError, match="outside"):
+        tools.write({"path": str(log), "content": "replacement"}, "log-write")
+    failed = tools.run_python({"code": "import sys; sys.stdout.write('x' * (11 * 1024 * 1024))"}, "budget")
+    assert failed["isError"] and "output budget" in failed["content"][0]["text"]
+    assert all(path.stat().st_size <= 10 * 1024 * 1024 for path in (tools.session_dir / "tmp").glob("*.log"))
+    assert not list(tools.workspace.rglob("command-*.log"))
 
 
 def test_legacy_development_history_import_does_not_need_node(setup):

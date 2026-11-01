@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import math
 import re
+import shlex
 import shutil
 import tempfile
 import threading
@@ -108,7 +109,7 @@ def checked_path(raw, workspace, roots, allow_missing=False):
     permitted = sorted((Path(root).resolve(strict=True) for root in roots), key=lambda root: len(str(root)), reverse=True)
     root = next((root for root in permitted if target.is_relative_to(root)), None)
     if root is None:
-        raise AgentToolError("Path is outside the permitted game, Skill or output directories")
+        raise AgentToolError("Path is outside the permitted game, Skill, output or session directories")
     current = root
     for part in target.relative_to(root).parts:
         current /= part
@@ -126,11 +127,12 @@ def checked_path(raw, workspace, roots, allow_missing=False):
 
 
 class ExtractionTools:
-    def __init__(self, workspace, game, skill, available, stop_event, emit, approve=None):
+    def __init__(self, workspace, game, skill, available, stop_event, emit, approve=None, *, session_dir):
         self.workspace, self.game, self.skill = map(Path, (workspace, game, skill))
+        self.session_dir = Path(session_dir)
         self.available = available
         self.stop_event, self.approve = stop_event, approve
-        self.commands = Commands(workspace, skill, available, stop_event, emit)
+        self.commands = Commands(workspace, skill, available, stop_event, emit, session_dir=self.session_dir)
         self.skill_dirs = self.commands.skill_dirs
 
     def require_permission(self, name, args):
@@ -144,7 +146,7 @@ class ExtractionTools:
             raise AgentStopRequested()
 
     def read_path(self, raw):
-        return checked_path(raw, self.workspace, [self.workspace, self.game, *self.skill_dirs])
+        return checked_path(raw, self.workspace, [self.workspace, self.game, *self.skill_dirs, self.session_dir])
 
     def write_path(self, raw):
         return checked_path(raw, self.workspace, [self.workspace], True)
@@ -278,5 +280,8 @@ class ExtractionTools:
         self.require_permission("bash", args)
         stdin_command = prefix[-1] == "-s"
         command = windows_shell_command(args["command"]) if os.name == "nt" else args["command"]
+        python = self.available["builtin_python"]
+        launcher = shlex.join([Path(python["executable"]).as_posix(), *python["args"]])
+        command = f'python() {{ {launcher} "$@"; }}\npython3() {{ python "$@"; }}\n' + command
         return self.commands.execute(executable, prefix if stdin_command else [*prefix, command],
                                      call_id, timeout, command if stdin_command else None, native=True)

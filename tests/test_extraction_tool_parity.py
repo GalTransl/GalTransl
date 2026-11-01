@@ -30,6 +30,8 @@ def fixture(tmp_path):
     (skill / 'audit_module.py').write_text('import sys; print("module", sys.argv[1])', encoding='utf-8')
     store = SessionStore(tmp_path / 'sessions')
     session = store.create(str(game), str(tmp_path / 'workspace'))
+    for name in ('gt_input', 'gt_output', 'original', 'metadata', 'reports', 'scripts'):
+        (Path(session['workspace']) / name).mkdir()
     available = {'settings': {'skill_dir': str(skill)}, 'builtin_python': builtin_python(),
                  'python_runner_script': python_runner_script(),
                  'system_pythons': [{'executable': builtin_python()['executable'], 'args': []}]}
@@ -87,16 +89,20 @@ def test_captured_old_tool_executions(fixture, subtests):
                 value = runner._dispatch_tool(reference['tool'], args)
             except AgentToolError as exc:
                 error = str(exc)
-                if reference.get('command'):
-                    try:
-                        error = json.loads(error)
-                    except ValueError:
-                        pass
             if reference.get('command'):
+                # Plain-text receipts replace the legacy JSON exception; compare
+                # the retained execution metadata against the captured contract.
+                assert runner._serialize_tool_result(value) == value['content'][0]['text']
+                failed = value.get('isError', False)
+                value, error = (None, value['structuredContent']) if failed else (value['structuredContent'], None)
                 for result in (value, error):
                     if isinstance(result, dict):
                         result.pop('wall_time_seconds')
-                        assert (workspace / result.pop('log_path')).is_file()
+                        log_path = result.pop('log_path', None)
+                        assert bool(log_path) == result['truncated']
+                        if log_path:
+                            assert Path(log_path).is_file()
+                            assert Path(log_path).is_relative_to(runner.tools.session_dir)
                 if os.name != 'nt':
                     for key in ('value', 'error'):
                         result = expected.get(key)

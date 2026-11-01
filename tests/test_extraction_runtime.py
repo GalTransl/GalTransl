@@ -56,7 +56,54 @@ def test_empty_code_errors_exit_codes_and_request_budget(tmp_path):
                     {"code": "#" * (1024 * 1024)}):
         result = execute(request, tmp_path)
         assert result.returncode != 0
-        assert "Traceback" in result.stderr
+        assert "ValueError:" in result.stderr
+        assert "extraction_python.py" not in result.stderr
+
+
+@pytest.mark.parametrize("entry", ["run_backend.py", "extraction_python.py"])
+@pytest.mark.parametrize("kind", ["code", "script", "module"])
+def test_task_tracebacks_preserve_user_frames_and_exception_chains(tmp_path, entry, kind):
+    code = "def inner():\n    raise ValueError('日本語のエラー')\ntry:\n    inner()\nexcept ValueError as exc:\n    raise RuntimeError('outer failure') from exc\n"
+    script = tmp_path / "traceback_probe.py"
+    script.write_text(code, encoding="utf-8")
+    request = {kind: code if kind == "code" else str(script) if kind == "script" else "traceback_probe"}
+    result = execute(request, tmp_path, entry)
+    assert result.returncode == 1
+    assert "extraction_python.py" not in result.stderr and "runpy" not in result.stderr
+    assert "ValueError: 日本語のエラー" in result.stderr
+    assert "The above exception was the direct cause" in result.stderr
+    assert "RuntimeError: outer failure" in result.stderr
+    assert "line 2, in inner" in result.stderr and "line 6, in <module>" in result.stderr
+    assert ('"<extraction-agent>"' if kind == "code" else str(script)) in result.stderr
+
+
+@pytest.mark.parametrize("entry", ["run_backend.py", "extraction_python.py"])
+def test_syntax_errors_keep_source_location_without_executor_frames(tmp_path, entry):
+    result = execute({"code": "if True print('bad')"}, tmp_path, entry)
+    assert result.returncode == 1
+    assert "SyntaxError:" in result.stderr
+    assert 'File "<extraction-agent>", line 1' in result.stderr
+    assert "if True print('bad')" in result.stderr and "^" in result.stderr
+    assert "extraction_python.py" not in result.stderr and "Traceback" not in result.stderr
+
+
+def test_import_tracebacks_keep_imported_module_frames(tmp_path):
+    script = tmp_path / "broken_import.py"
+    script.write_text("raise LookupError('import failure')", encoding="utf-8")
+    result = execute({"code": "import broken_import"}, tmp_path)
+    assert result.returncode == 1
+    assert 'File "<extraction-agent>", line 1' in result.stderr
+    assert str(script) in result.stderr and "raise LookupError('import failure')" in result.stderr
+    assert "LookupError: import failure" in result.stderr
+    assert "extraction_python.py" not in result.stderr
+
+
+def test_missing_bundled_module_keeps_system_runtime_hint(tmp_path):
+    result = execute({"code": "import sys; sys.frozen = True; import galtransl_synthetic_missing_dependency"}, tmp_path)
+    assert result.returncode == 1
+    assert "ModuleNotFoundError:" in result.stderr
+    assert "runtime='system'" in result.stderr
+    assert "extraction_python.py" not in result.stderr
 
 
 def test_bundled_defaults_and_legacy_migration(tmp_path, monkeypatch):
