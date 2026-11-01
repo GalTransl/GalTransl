@@ -7,6 +7,7 @@ from bisect import bisect_right
 from typing import Any
 
 from GalTransl.Agent.models import AgentToolError
+from GalTransl.Search import parse_search_order, select_search_hits, search_order_note
 
 
 def _write_action(args: dict[str, object], allowed: tuple[str, ...]) -> str:
@@ -16,19 +17,16 @@ def _write_action(args: dict[str, object], allowed: tuple[str, ...]) -> str:
     return action
 
 
-def _text_replacement(args: dict[str, object]) -> tuple[str, str, bool]:
+def _text_replacement(args: dict[str, object]) -> tuple[str, str]:
     if "query" in args or "replacement" in args:
-        raise AgentToolError("文本替换请使用 old_text / new_text，批量替换显式传 replace_all=true")
+        raise AgentToolError("文本替换请使用 old_text / new_text；自动替换全部匹配")
     old_text = args.get("old_text")
     new_text = args.get("new_text")
-    replace_all = args.get("replace_all", False)
     if not isinstance(old_text, str) or not old_text:
         raise AgentToolError("old_text must be a non-empty string")
     if not isinstance(new_text, str):
         raise AgentToolError("new_text must be a string (empty string clears matched text)")
-    if not isinstance(replace_all, bool):
-        raise AgentToolError("replace_all must be a boolean")
-    return old_text, new_text, replace_all
+    return old_text, new_text
 
 
 def _entry_index(entry: Any) -> int:
@@ -42,12 +40,13 @@ def _entry_index(entry: Any) -> int:
 
 
 def _read_entries_page(
-    entries: list[dict[str, Any]], args: dict[str, Any], *, context: int = 0, only_preceding: bool = True,
+    entries: list[dict[str, Any]], args: dict[str, Any],
 ) -> dict[str, Any]:
     """读取工具共用的有界分页：offset 跳过命中，整页连上下文最多 200 行。
 
     index 区间保持紧凑表示，避免 1-1000000000 在读取少量条目前先展开十亿个整数。
     缺失编号只展示前 200 个，missing_count 仍报告完整数量。
+    order 选择本页目标；附带上下文时按文件内句子顺序展示。
     """
     spec = str(args.get("index", "") or "").strip()
     try:
@@ -57,6 +56,17 @@ def _read_entries_page(
             raise ValueError
     except (TypeError, ValueError):
         raise AgentToolError("limit 必须是整数，offset 必须是非负整数")
+    try:
+        context = max(0, min(int(args.get("context", 0)), 20))
+    except (TypeError, ValueError) as exc:
+        raise AgentToolError("context 必须是 0-20 的整数") from exc
+    try:
+        order = parse_search_order(args)
+    except ValueError as exc:
+        raise AgentToolError(str(exc)) from exc
+    only_preceding = _only_preceding_arg(args)
+    per_hit = context + 1 if only_preceding else 2 * context + 1
+    hit_limit = min(limit, max(1, 200 // per_hit))
     extra: dict[str, Any] = {}
     if spec:
         ranges: list[tuple[int, int]] = []
@@ -96,26 +106,29 @@ def _read_entries_page(
                 if len(missing) == 200:
                     break
             extra.update(missing_indexes=missing, missing_count=missing_count, missing_truncated=missing_count > len(missing))
-        per_hit = context + 1 if only_preceding else 2 * context + 1
-        hit_limit = min(limit, max(1, 200 // per_hit))
-        selected = matched_indexes[offset:offset + hit_limit]
+        selected = select_search_hits(matched_indexes, hit_limit, offset, order)
         picked = [by_index[idx] for idx in selected]
-        if context and selected:
-            selected_set = set(selected)
-            after = 0 if only_preceding else context
-            wanted = {i for idx in selected for i in range(max(0, idx - context), idx + after + 1)}
-            picked = [by_index[i] if i in selected_set else _mark_context_row(by_index[i])
-                      for i in sorted(wanted) if i in by_index]
         matched, hit_count = len(matched_indexes), len(selected)
     else:
         matched = len(entries)
-        picked = entries[offset:offset + limit]
+        picked = select_search_hits(sorted(entries, key=_entry_index), hit_limit, offset, order)
         hit_count = len(picked)
+    if context and picked:
+        by_index = {_entry_index(e): e for e in entries if _entry_index(e) >= 0}
+        selected_set = {_entry_index(e) for e in picked}
+        after = 0 if only_preceding else context
+        wanted = {i for idx in selected_set for i in range(max(0, idx - context), idx + after + 1)}
+        picked = [by_index[i] if i in selected_set else _mark_context_row(by_index[i])
+                  for i in sorted(wanted) if i in by_index]
     more = offset + hit_count < matched
+    note = search_order_note(order)
     return {
         "entries": picked, "matched": matched, "returned": len(picked), "returned_hits": hit_count,
         "offset": offset, "limit": limit, "has_more": more,
-        **({"next_offset": offset + hit_count} if more else {}), **extra,
+        "context": context, "order": order,
+        **({"only_preceding": only_preceding} if context else {}),
+        **({"note": note} if note else {}),
+        **({"next_offset": offset + hit_count} if more and order in ("name", "reverse") else {}), **extra,
     }
 
 

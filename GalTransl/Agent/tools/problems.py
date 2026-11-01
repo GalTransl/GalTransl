@@ -462,7 +462,8 @@ def _tool_list_problems(
         "problem_type": problem_type,
         "offset": offset,
         "returned": len(page),
-        "has_more": offset + limit < matched,
+        "has_more": offset + len(page) < matched,
+        **({"next_offset": offset + len(page)} if offset + len(page) < matched and order in ("name", "reverse") else {}),
         "problems": page,
     }
     if scope_note:

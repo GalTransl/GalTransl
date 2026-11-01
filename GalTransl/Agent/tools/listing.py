@@ -135,29 +135,18 @@ def _select_list_items(items: list[Any], limit: int, order: str, offset: int = 0
 
 
 def _list_notes(
-    *, matched: int, grep: str, returned: int, limit: int, order: str, unit: str, offset: int = 0
+    *, matched: int, grep: str, returned: int, order: str
 ) -> list[str]:
     """过滤 / 截取的说明（各清单工具拼进返回体的 note）。"""
     notes: list[str] = []
     if grep:
-        notes.append(f'已按 grep="{grep}" 过滤文件名：命中 {matched} 个{unit}。')
+        notes.append(f'grep="{grep}" 过滤文件名（不区分大小写）。')
     if order not in ("even", "random"):
-        notes.append(f"{LIST_ORDER_LABELS[order]}分页：共 {matched} 个{unit}，本页 {returned} 个（offset={offset}）。")
-        if offset + returned < matched:
-            notes.append(f"还有更多；保持 grep/order 不变，用 offset={offset + returned} 继续。")
+        notes.append(f"排序：{LIST_ORDER_LABELS[order]}。")
         return notes
     if returned < matched:
-        tail = f"要看更多把 limit 调大（当前 {limit}，上限 {LIST_ITEMS_MAX_LIMIT}）；完整遍历用 order=name + limit/offset。"
         if order == "random":
-            notes.append(
-                f"{matched} 个{unit}超过上限，已**随机采样** {returned} 个"
-                "（每次调用挑中的可能不同，这是这个模式的本意）：要多看几批就再调一次，"
-                "或用 grep / order=\"size_desc\" 缩小范围；" + tail
-            )
-        else:
-            notes.append(
-                f"{matched} 个{unit}超过上限，已从整个清单里**均匀采样** {returned} 个"
-                f"（含首尾、等距取，不是前 {returned} 个）："
-                "要定位具体文件用 grep 缩小范围；" + tail
-            )
+            notes.append("随机采样，可再次调用换一批；完整遍历用 order=name 配合 offset。")
+            return notes
+        notes.append("均匀采样，覆盖整个范围；完整遍历用 order=name 配合 offset。")
     return notes

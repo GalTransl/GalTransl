@@ -450,7 +450,8 @@
     "cacheFileSaveAll_title_saveCountChangeFile_one": "保存 {{count}} 个有修改的文件",
     "cacheFileListSelectionBar_message_doneSelectCountFile_one": "已选择 {{count}} 个文件",
     "cacheReplacePreview_message_matchCountFile_one": "共 {{replacePreviewTotal}} 处匹配，{{count}} 个文件",
-    "cacheContextMenuLabel_message_countFile_one": " ({{count}} 个文件)"
+    "cacheContextMenuLabel_message_countFile_one": " ({{count}} 个文件)",
+    "searchFieldName": "说话人"
   },
   "projectDictionaryPage": {
     "loadData_normalizeError_loadProjectDictionaryFailed": "加载项目字典失败",

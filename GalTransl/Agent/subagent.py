@@ -186,6 +186,7 @@ SUBAGENT_ROLES: dict[str, SubAgentRole] = {
         brief=_SUBAGENT_BRIEF_TEMPLATE,
         tools=(
             "read_transl_cache",
+            "search_cache",
             "list_problems",
             "patch_transl_cache",
         ),
@@ -279,6 +280,12 @@ def _subagent_tools(agent: str) -> list[dict[str, Any]]:
         properties["action"]["enum"] = actions
         if name == "input":
             schema["function"]["description"] = "列出、读取或搜索原文。list 默认均匀采样，句数只用于估工作量。"
+        if name == "search_replace_cache":
+            schema["function"]["description"] = "全项目只读缓存搜索，可按角色和原文/译文组合筛选；不允许替换。"
+            schema["function"]["parameters"]["properties"] = {
+                key: value for key, value in properties.items()
+                if key not in ("replacement", "dry_run", "clear_comment", "reason")
+            }
         if name == "dictionary":
             schema["function"]["description"] = "列出或分页读取项目字典；支持 query 子串过滤。"
             schema["function"]["parameters"]["properties"] = {
@@ -295,7 +302,7 @@ def _subagent_tools(agent: str) -> list[dict[str, Any]]:
 
 
 # 认"锁定文件"的工具：任务里给了 file 时，这些工具的 filename 入参被限制在派给它的那些文件里。
-# 搜索（read_transl_cache 的 action=search / search_input）本来就是跨文件的，不锁——
+# 搜索（search_replace_cache 的 action=search / search_input）本来就是跨文件的，不锁——
 # 子代理要核对"这个词在别处怎么翻的/原文里怎么说"，正是它们的用途。
 # read_transl_cache 只锁 action=read（list 只列锁定的文件），见 _lock_cache_reader。list_problems 没有
 # filename 入参，改由 _subagent_handlers 传 allowed_files 收窄（见 _tool_list_problems）。
@@ -782,7 +789,7 @@ def _subagent_handlers(
       read、edit_transl_cache / input(action="read") 的 filename 被限制在这一组里，read_transl_cache 的
       list 与 input(action="list") 也只列这些，problems(action="list") 也只列这些文件的问题——"一份文件只归一个子代理"由工具层保证，模型串到
       范围外会被拒（省 token，也避免两个子代理写同一条）。要核对"这个词在别处怎么翻的"，仍走
-      跨文件的 read_transl_cache(action="search")；
+      跨文件的 search_replace_cache(action="search")；
     - 派发门禁统一授权本次范围内的修复，批内不再逐条询问。配置、字典等全局写工具不开放。
     """
     # 延迟导入：注册表要登记 run_subagents（本模块），模块顶层互相导入会成环

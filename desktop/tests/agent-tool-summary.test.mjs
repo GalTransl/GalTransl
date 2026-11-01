@@ -5,6 +5,22 @@ import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
 const load = createTypeScriptLoader();
 const { toolMeta } = load(new URL('../src/pages/agent/toolMeta.ts', import.meta.url));
 
+test('wait summary formats seconds as human durations', () => {
+  const meta = toolMeta('translation', { action: 'wait' });
+  assert.match(meta.summary({ action: 'wait', seconds: 120 }), /2 分钟/);
+  assert.match(meta.summary({ action: 'wait', seconds: 30 }), /30 秒/);
+});
+
+test('cache find and replace distinguish searching, previewing and writing', () => {
+  const search = { action: 'search', query: '是也', field: 'pre_dst', conditions: [{ field: 'name', query: 'シャニ' }] };
+  assert.equal(toolMeta('search_replace_cache', search).action, '搜索缓存');
+  assert.match(toolMeta('search_replace_cache', search).summary(search), /シャニ/);
+  const replace = { action: 'replace', query: '是也', replacement: '的说', dry_run: true };
+  assert.equal(toolMeta('search_replace_cache', replace).action, '预览替换');
+  assert.match(toolMeta('search_replace_cache', replace).summary(replace), /预览替换/);
+  assert.equal(toolMeta('search_replace_cache', { ...replace, dry_run: false }).action, '替换译文');
+});
+
 test('extraction intent takes precedence while historical calls keep their argument summary', () => {
   for (const [name, args, fallback] of [
     ['read', { path: 'script.txt' }, 'script.txt'],

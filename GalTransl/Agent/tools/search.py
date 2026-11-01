@@ -24,12 +24,13 @@ if TYPE_CHECKING:
 
 
 # /cache/search 返回体里逐行的命中标记（服务端给界面用的：缓存页拿它画「原文/译文/问题」
-# 小徽标）。逐行丢给模型纯属噪音——命中的位置从行内容（post_src / pre_dst / problem）直接
-# 看得到。这里收成顶层一条汇总（见 _slim_search_results）。
+# 小徽标）。逐行丢给模型纯属噪音——具体命中列由 matched_fields 保留；这些界面布尔徽标
+# 收成顶层一条汇总（见 _slim_search_results）。
 _SEARCH_MATCH_KEYS: dict[str, str] = {
     "match_src": "src",
     "match_dst": "dst",
     "match_problem": "problem",
+    "match_name": "name",
 }
 
 # /input/search 同样有逐行命中标记，只是原文侧可搜的只有两列：正文与说话人。
@@ -111,6 +112,8 @@ def _search_order(args: dict[str, Any]) -> str:
 
 def _apply_search_order(result: dict[str, Any], order: str) -> None:
     result["order"] = order
+    if order in ("even", "random"):
+        result.pop("next_offset", None)
     note = search_order_note(order)
     if note:
         result["note"] = "；".join(part for part in (str(result.get("note") or ""), note) if part)
@@ -149,6 +152,10 @@ def _apply_search_paging(result: dict[str, Any], offset: int) -> None:
         result["returned_rows"] = row_count
     total = result.get("total")
     result["has_more"] = isinstance(total, int) and offset + hits < total
+    if result["has_more"]:
+        result["next_offset"] = offset + hits
+    if not result["has_more"]:
+        result.pop("next_offset", None)
 
 
 def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
@@ -183,7 +190,7 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     body: dict[str, Any] = {
         "query": query,
         "field": field,
-        "options": {"re": False},
+        "options": {"re": False, "match_case": args.get("options", {}).get("match_case", False)},
         "max_results": max_hits,
         "order": order,
         "config_file_name": runner.state.config_file_name,
@@ -198,6 +205,8 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
         body["offset"] = offset
     if filename:
         body["filename"] = filename
+    if args.get("filenames") is not None:
+        body["filenames"] = args["filenames"]
     result = runner._http_post(f"/api/projects/{pid}/cache/search", body)
     if isinstance(result, dict):
         _slim_search_results(result, field, context)
@@ -207,16 +216,7 @@ def _tool_search_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
     if isinstance(result, dict) and context:
         result["context"] = context  # 服务端已回；这里兜底，保证调用方一定看得到
         result["only_preceding"] = only_preceding
-        scope = (
-            f"每条命中前面 {context} 句（默认只给上文，要上下都给传 only_preceding=false）"
-            if only_preceding
-            else f"每条命中前后各 {context} 句"
-        )
-        notes.append(
-            f"已带上下文：{scope}（包含关键词的那行是命中，index 带 * 的是搭着给的上下文行）；"
-            f"带上下文时命中上限收紧为 {max_hits} 条、整页最多 {CACHE_SEARCH_MAX_ROWS} 行或 {CACHE_SEARCH_MAX_CHARS} 字符，"
-            "total 仍是全部命中数——命中很多时用 offset 翻页，或配合 filename 缩小范围。"
-        )
+        notes.append(f"整页上限 {CACHE_SEARCH_MAX_ROWS} 行或 {CACHE_SEARCH_MAX_CHARS} 字符，本页最多 {max_hits} 条命中。")
     # 指定了文件但 0 命中：确认一下该文件是否存在，避免模型误以为关键词不匹配
     if isinstance(result, dict) and not result.get("total") and filename:
         try:
@@ -257,6 +257,7 @@ def _bound_cache_search_result(result: dict[str, Any]) -> None:
         if isinstance(value, str) and len(value) > 1000:
             result[key] = value[:999] + "…"
     while rows and (len(rows) > CACHE_SEARCH_MAX_ROWS or len(_md_render_search_transl_cache(result) or "") > CACHE_SEARCH_MAX_CHARS):
+        result["limited_by"] = "rows" if len(rows) > CACHE_SEARCH_MAX_ROWS else "characters"
         if len(rows) > 1:
             # 先收回上下文；倒序搜索带 context 时，文件内展示仍按正序，不能直接
             # pop 最后一行（那会丢掉应当先消费的命中，使 next_offset 跳过它）。
@@ -274,7 +275,8 @@ def _bound_cache_search_result(result: dict[str, Any]) -> None:
             if not str(removed.get("index", "")).endswith("*"):
                 result["returned"] = max(0, result.get("returned", 0) - 1)
                 result["has_more"] = True
-                result["next_offset"] = result.get("offset", 0) + result["returned"]
+                if result.get("order") not in ("even", "random"):
+                    result["next_offset"] = result.get("offset", 0) + result["returned"]
             if "returned_rows" in result:
                 result["returned_rows"] = len(rows)
             continue
@@ -290,14 +292,14 @@ def _bound_cache_search_result(result: dict[str, Any]) -> None:
 def _tool_search_input(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """在待翻译原文里搜关键词/说话人；context=N 时每条命中再带上 N 句上文（默认只给上文）。
 
-    与 read_transl_cache(action="search") 是一套用法，区别只在搜的对象：那边搜**缓存**（原文 + 译文 + 问题，
+    与 search_replace_cache(action="search") 是一套用法，区别只在搜的对象：那边搜**缓存**（原文 + 译文 + 问题，
     含已翻的部分），这边搜**输入文件**（还没翻译的原文全文）。用途也由此分工——
     - 定译法/收字典前，查某个称呼、口头禅、专有名词在全篇出现过多少次、都出现在什么上下文里
       （出现次数与说话人是"该不该收进字典、收哪个写法"的依据）；
     - 拿不准某句原文的语境时，比 input(action="read") 逐段读更省 token；
     - 命中的 filename + index 可直接交给 input(action="read") 精读。
 
-    搜的是原文，所以**译文侧的问题（漏译/残留日文）不在这里**，那些用 read_transl_cache(action="search")。
+    搜的是原文，所以**译文侧的问题（漏译/残留日文）不在这里**，那些用 search_replace_cache(action="search")。
     每次搜索都要把涉及的输入文件过一遍文件插件（比搜缓存慢），要缩小范围就传 filename。
     """
     return _tool_search_text_files(runner, args)
@@ -310,7 +312,6 @@ def _tool_search_output_files(runner: AgentRunner, args: dict[str, Any]) -> Any:
 
 def _tool_search_text_files(runner: AgentRunner, args: dict[str, Any], *, output: bool = False) -> Any:
     source = "output" if output else "input"
-    label = "输出" if output else "输入"
     read_tool = 'output(action="read")' if output else 'input(action="read")'
     text_field = "dst" if output else "src"
     query = str(args.get("query", "")).strip()
@@ -362,23 +363,12 @@ def _tool_search_text_files(runner: AgentRunner, args: dict[str, Any], *, output
     # 看起来一模一样。要诊断那个文件用 read_input_file。
     if isinstance(result, dict) and result.get("files_failed"):
         notes.append(
-            f"这些{label}文件解析失败、没参与搜索：{'、'.join(str(n) for n in result['files_failed'])}"
-            f"（文件插件/格式问题，用 {read_tool} 试读该文件可看到具体报错）；"
-            "它们里面有没有命中是未知的。"
+            f"解析失败的文件是否命中未知；用 {read_tool} 试读可查看具体报错。"
         )
     if isinstance(result, dict) and context:
         result["context"] = context  # 服务端已回；这里兜底，保证调用方一定看得到
         result["only_preceding"] = only_preceding
-        scope = (
-            f"每条命中前面 {context} 句（默认只给上文，要上下都给传 only_preceding=false）"
-            if only_preceding
-            else f"每条命中前后各 {context} 句"
-        )
-        notes.append(
-            f"已带上下文：{scope}（包含关键词的那行是命中，index 带 * 的是搭着给的上下文行）；"
-            f"带上下文时命中上限收紧为 {max_hits} 条、整页最多 {_SEARCH_ROW_BUDGET} 行，"
-            "total 仍是全部命中数——命中很多时用 offset 翻页。"
-        )
+        notes.append(f"整页上限 {_SEARCH_ROW_BUDGET} 行，本页最多 {max_hits} 条命中。")
     # 指定了文件但 0 命中：确认一下该输入文件是否存在，避免模型误以为关键词不匹配
     if not output and isinstance(result, dict) and not result.get("total") and filename:
         try:

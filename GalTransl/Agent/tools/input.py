@@ -66,10 +66,7 @@ def _list_input_payload(
             matched=len(matched),
             grep=grep,
             returned=len(shown),
-            limit=limit,
             order=order,
-            unit="输入文件",
-            offset=offset,
         )
     )
     return {

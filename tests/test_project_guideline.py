@@ -83,7 +83,7 @@ class ProjectGuidelineTests(unittest.TestCase):
 
     # ---- 写：参数错误一律报错，不替调用方猜 ----
 
-    def test_replace_miss_or_ambiguous_raises(self) -> None:
+    def test_replace_miss_raises_and_multiple_matches_are_all_replaced(self) -> None:
         apply_project_guideline_edit(self.project, mode="overwrite", content="哥哥")
         with self.assertRaises(ValueError) as ctx:
             apply_project_guideline_edit(self.project, mode="replace", old_text="没有这段", new_text="x")
@@ -92,10 +92,11 @@ class ProjectGuidelineTests(unittest.TestCase):
         self.assertEqual(read_project_guideline(self.project), "哥哥")
 
         apply_project_guideline_edit(self.project, mode="overwrite", content="哥哥 … 哥哥")
-        with self.assertRaises(ValueError) as ctx:
-            apply_project_guideline_edit(self.project, mode="replace", old_text="哥哥", new_text="兄长")
-        self.assertIn("2 次", str(ctx.exception))
+        preview = apply_project_guideline_edit(self.project, mode="replace", old_text="哥哥", new_text="兄长", dry_run=True)
+        self.assertEqual(preview["content"], "兄长 … 兄长")
         self.assertEqual(read_project_guideline(self.project), "哥哥 … 哥哥")
+        apply_project_guideline_edit(self.project, mode="replace", old_text="哥哥", new_text="兄长")
+        self.assertEqual(read_project_guideline(self.project), preview["content"])
 
     def test_replace_without_file_raises(self) -> None:
         with self.assertRaises(ValueError):
@@ -127,9 +128,9 @@ class ProjectGuidelineTests(unittest.TestCase):
         apply_project_guideline_edit(self.project, mode="overwrite", content="哥哥 … 哥哥")
         with self.assertRaises(ValueError) as ctx:
             apply_project_guideline_edit(
-                self.project, mode="replace", old_text="哥哥", new_text="兄长", dry_run=True
+                self.project, mode="replace", old_text="不存在", new_text="兄长", dry_run=True
             )
-        self.assertIn("2 次", str(ctx.exception))
+        self.assertIn("没有找到", str(ctx.exception))
         self.assertEqual(read_project_guideline(self.project), "哥哥 … 哥哥")
 
     def test_bad_mode_and_empty_append_and_size_guard(self) -> None:

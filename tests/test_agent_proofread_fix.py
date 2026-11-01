@@ -231,6 +231,61 @@ class ProofreadFixTests(unittest.TestCase):
         self.assertFalse(page["has_more"])
         self.assertFalse(self.parent.saves)
 
+    def test_task_overview_pagination_visits_every_report(self):
+        for i in range(55):
+            fixer = proofread.ProofreadFixer(self.parent, f"task-{i}", self.parent.stop_event)
+            fixer.save_report({"status": "done"}, [])
+        for view in ("changes", "review"):
+            seen = []
+            offset = 0
+            while True:
+                page = proofread._tool_read_proofread_changes(self.parent, {"view": view, "offset": offset, "limit": 17})
+                self.assertEqual(page["total_tasks"], 55)
+                self.assertLessEqual(page["returned"], 17)
+                seen.extend(row["task_id"] for row in page["tasks"])
+                if not page["has_more"]:
+                    break
+                offset = page["next_offset"]
+            self.assertEqual(len(seen), 55)
+            self.assertEqual(len(set(seen)), 55)
+
+    def test_change_pages_keep_full_snapshots_and_share_batch_metadata(self):
+        self.fixer.read(self.parent, {"filename": "a.json", "index": "1-2"})
+        self.fixer.patch(self.parent, {"action": "set", "filename": "a.json", "patches": [
+            {"index": 1, "dst": "fixed one"}, {"index": 2, "dst": "fixed two"},
+        ]})
+        result = proofread._tool_read_proofread_changes(self.parent, {"task_id": "test-task", "limit": 2})
+        original = copy.deepcopy(result)
+        text = _render_tool_result_table("read_proofread_changes", result)
+        self.assertEqual(text.count(result["changes"][0]["change_id"]), 1)
+        self.assertEqual(text.count("test-task"), 1)
+        self.assertEqual(text.count("a.json"), 1)
+        self.assertIn("fixed one", text)
+        self.assertIn("fixed two", text)
+        self.assertIn("checked", text)
+        self.assertEqual(result, original)
+        page = proofread._tool_read_proofread_changes(self.parent, {"task_id": "test-task", "limit": 1})
+        self.assertEqual(page["next_offset"], 1)
+        self.assertEqual(page["returned"], 1)
+        self.assertIn("offset=1", _render_tool_result_table("read_proofread_changes", page))
+
+    def test_review_pages_keep_positions_reasons_and_corruption_warnings(self):
+        self.fixer.save_report({"status": "done"}, [
+            {"file": "a.json", "index": i, "reason": f"reason {i}"} for i in range(1, 4)
+        ])
+        result = proofread._tool_read_proofread_changes(self.parent, {"task_id": "test-task", "view": "review", "limit": 2})
+        self.assertEqual(result["next_offset"], 2)
+        text = _render_tool_result_table("read_proofread_changes", result)
+        self.assertIn("offset=2", text)
+        self.assertIn("reason 2", text)
+        self.assertNotIn("reason 3", text)
+        Path(proofread._review_path(self.parent, "broken-task")).write_text("[]", encoding="utf-8")
+        overview = proofread._tool_read_proofread_changes(self.parent, {"view": "review"})
+        text = _render_tool_result_table("read_proofread_changes", overview)
+        self.assertIn("记录不完整", text)
+        self.assertIn(overview["warnings"][0], text)
+        self.assertFalse(self.parent.saves)
+
     def test_revert_preview_is_read_only_and_later_edit_is_protected(self):
         from GalTransl.Agent.tools.preview import _preview_tool_changes
         self.read()

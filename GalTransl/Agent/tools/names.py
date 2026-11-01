@@ -242,23 +242,24 @@ def _name_table_save_plan(old_raw: Any, args: dict[str, Any]) -> tuple[str, list
     names = args.get("names")
     if not isinstance(names, list):
         raise AgentToolError("names must be an array")
-    if action == "overwrite":
-        return action, names
-
-    merged = {
+    existing = {
         str(item["src_name"]): dict(item)
         for item in old_raw
         if isinstance(item, dict) and item.get("src_name")
     }
+    merged = {} if action == "overwrite" else {src: dict(item) for src, item in existing.items()}
     for item in names:
         if not isinstance(item, dict) or not isinstance(item.get("src_name"), str) or not item["src_name"].strip():
-            raise AgentToolError("each set entry must have a non-empty src_name")
+            raise AgentToolError("each name entry must have a non-empty src_name")
+        if "count" in item:
+            raise AgentToolError("count 是只读的出现次数统计；names 写入请只传 src_name / dst_name")
+        if "dst_name" in item and not isinstance(item["dst_name"], str):
+            raise AgentToolError("dst_name must be a string")
         src = item["src_name"]
-        entry = merged.setdefault(src, {"src_name": src, "dst_name": "", "count": 0})
+        entry = merged.setdefault(src, {"src_name": src, "dst_name": "", "count": existing.get(src, {}).get("count", 0)})
         # 只合并显式传入的字段；空译名可用于清空，省略字段则保留旧值。
-        for field in ("dst_name", "count"):
-            if field in item:
-                entry[field] = item[field]
+        if "dst_name" in item:
+            entry["dst_name"] = item["dst_name"]
     return action, list(merged.values())
 
 

@@ -55,11 +55,11 @@ class WriteProjectGuidelineDiffTests(unittest.TestCase):
         self.assertEqual(out["action"], "append")
         self.assertNotIn("mode", out)
 
-    def test_replace_all_is_forwarded_and_new_text_is_required(self):
+    def test_replace_omits_removed_flag_and_new_text_is_required(self):
         out, writes = self._run("old old", "new new", {
-            "action": "replace", "old_text": "old", "new_text": "new", "replace_all": True,
+            "action": "replace", "old_text": "old", "new_text": "new",
         })
-        self.assertTrue(writes[0]["replace_all"])
+        self.assertNotIn("replace_all", writes[0])
         self.assertEqual(out["action"], "replace")
         for args in ({"mode": "overwrite", "content": "x"}, {"content": "x"},
                      {"action": "overwrite"}, {"action": "replace", "old_text": "old"},

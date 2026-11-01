@@ -615,7 +615,6 @@ class PermissionPreviewTests(unittest.TestCase):
             "save_dict": {"file_key": "pre.json", "content": "a\tA"},
             "save_name_table": {"names": []},
             "write_project_guideline": {"content": "new guideline"},
-            "update_project_config": {"updates": [{"key": "common.language", "value": "zh-cn"}]},
             "patch_transl_cache": {"filename": "a.json", "patches": [{"index": 1, "pre_dst": "new"}]},
             "delete_transl_cache": {"filename": "a.json"},
             "manage_problem_filter": {"keyword": "literal"},
@@ -755,9 +754,9 @@ class PermissionPreviewTests(unittest.TestCase):
             {"src_name": "ゴブリン", "dst_name": "哥布林", "count": 2},
         ]
         new = [
-            {"src_name": "ウェアウルフ", "dst_name": "狼人族", "count": 2},  # 改译名
-            {"src_name": "ゴブリン", "dst_name": "哥布林", "count": 2},  # 原样回传
-            {"src_name": "ドラゴン", "dst_name": "龙", "count": 1},  # 新增
+            {"src_name": "ウェアウルフ", "dst_name": "狼人族"},  # 改译名
+            {"src_name": "ゴブリン", "dst_name": "哥布林"},  # 原样回传
+            {"src_name": "ドラゴン", "dst_name": "龙"},  # 新增
         ]
         runner = _PreviewRunner(names=old)
 
@@ -773,8 +772,8 @@ class PermissionPreviewTests(unittest.TestCase):
     def test_name_table_preview_matches_the_real_run(self) -> None:
         old = [{"src_name": "A", "dst_name": "甲", "count": 1}]
         new = [
-            {"src_name": "A", "dst_name": "甲2", "count": 1},
-            {"src_name": "B", "dst_name": "", "count": 0},  # 译名还空着
+            {"src_name": "A", "dst_name": "甲2"},
+            {"src_name": "B", "dst_name": ""},  # 译名还空着
         ]
         args = {"action": "set", "names": new}
 
@@ -795,14 +794,9 @@ class PermissionPreviewTests(unittest.TestCase):
             [("A", "remove", "甲", None)],
         )
 
-    def test_name_table_preview_is_quiet_when_only_counts_change(self) -> None:
-        """回归：原样回传同一张表（只有 count 动过）不该冒出「+ {'src_name': ...}」「− None」那种行。
-
-        接口的 entry 是 {src_name, dst_name, count}，早先这里拿整条 entry 去比对、旧值还读错了
-        字段（读的是不存在的 name），于是"保存"这样一张没改过的表会显示成一堆新增 + 一行 None。
-        """
+    def test_name_table_preview_is_quiet_when_translations_are_unchanged(self) -> None:
         old = [{"src_name": "ゴブリン", "dst_name": "哥布林", "count": 2}]
-        new = [{"src_name": "ゴブリン", "dst_name": "哥布林", "count": 9}]
+        new = [{"src_name": "ゴブリン", "dst_name": "哥布林"}]
 
         self.assertIsNone(
             rt._preview_tool_changes(_PreviewRunner(names=old), "save_name_table", {"action": "set", "names": new})
@@ -812,7 +806,7 @@ class PermissionPreviewTests(unittest.TestCase):
 
     def test_config_preview_shows_key_before_after_and_matches_the_real_run(self) -> None:
         config = {"common": {"gpt": {"contextNum": 8}}}
-        args = {"action": "set", "updates": [{"key": "common.gpt.contextNum", "value": 12}]}
+        args = {"updates": [{"key": "common.gpt.contextNum", "value": 12}]}
 
         preview = rt._preview_tool_changes(_PreviewRunner(config=config), "update_project_config", args)
         real = rt._tool_update_project_config(_PreviewRunner(config=config), args)
@@ -826,7 +820,7 @@ class PermissionPreviewTests(unittest.TestCase):
     def test_config_preview_chains_two_updates_on_the_same_key(self) -> None:
         """同一个键改两次：第二条的 before 要是第一条的 after（真执行是逐条写下去的）。"""
         config = {"common": {"gpt": {"contextNum": 8}}}
-        args = {"action": "set",
+        args = {
             "updates": [
                 {"key": "common.gpt.contextNum", "value": 12},
                 {"key": "common.gpt.contextNum", "value": 16},
@@ -845,7 +839,7 @@ class PermissionPreviewTests(unittest.TestCase):
             [],  # 空 updates
         ):
             self.assertIsNone(
-                rt._preview_tool_changes(runner, "update_project_config", {"action": "set", "updates": updates}), updates
+                rt._preview_tool_changes(runner, "update_project_config", {"updates": updates}), updates
             )
 
     # ---- 问题过滤 ----

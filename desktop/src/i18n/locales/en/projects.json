@@ -450,7 +450,8 @@
     "cacheFileSaveAll_title_saveCountChangeFile_one": "Save {{count}} modified file",
     "cacheFileListSelectionBar_message_doneSelectCountFile_one": "{{count}} file selected",
     "cacheReplacePreview_message_matchCountFile_one": "{{replacePreviewTotal}} matches in {{count}} file",
-    "cacheContextMenuLabel_message_countFile_one": " ({{count}} file)"
+    "cacheContextMenuLabel_message_countFile_one": " ({{count}} file)",
+    "searchFieldName": "Speaker"
   },
   "projectDictionaryPage": {
     "loadData_normalizeError_loadProjectDictionaryFailed": "Failed to load the project dictionary",

@@ -98,9 +98,8 @@ def _format_ask_answers(questions: list[dict[str, Any]], answers: list[list[str]
 def _tool_read_history_archive(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """读上下文压缩归档（会话目录里的 chunk 文件）。
 
-    三种用法：不带参数列出归档；带 chunk 取全文；带 query 在全部归档里检索。
-    归档只是"想不起来时回查"的兜底，所以单次回传有字符上限——超了就让模型
-    改用关键词检索，而不是把整份归档塞回上下文（那就白压了）。
+    不带 chunk/query 列归档；带 chunk 分页读正文；query 可限定 chunk 检索。
+    正文按行分页；字符预算切在行内时返回续读位置，避免跳过尚未读到的内容。
     """
     store = getattr(runner, "_store", None)
     if store is None:
@@ -111,16 +110,20 @@ def _tool_read_history_archive(runner: AgentRunner, args: dict[str, Any]) -> Any
 
     raw_chunk = str(args.get("chunk", "") or "").strip()
     query = str(args.get("query", "") or "").strip()
-    limit = args.get("limit")
-    if not isinstance(limit, int) or limit <= 0:
-        limit = 30
-    limit = min(limit, 200)
+    limit, offset = _search_paging_args({"limit": 30, **args})
+    order = _search_order(args)
+    names = [item["name"] for item in chunks]
+    name = raw_chunk if raw_chunk in names else ""
+    if not name and raw_chunk.isdigit():
+        index = int(raw_chunk)
+        if 1 <= index <= len(names):
+            name = names[index - 1]
+    if raw_chunk and not name:
+        raise AgentToolError(f"没有这个归档：{raw_chunk}（可用：{'、'.join(names)}）")
 
     if query:
         hits: list[dict[str, Any]] = []
-        order = _search_order(args)
-        _, offset = _search_paging_args(args)
-        for item in chunks:
+        for item in [item for item in chunks if not name or item["name"] == name]:
             text = store.read_chunk(item["name"]) or ""
             for lineno, line in enumerate(text.splitlines(), 1):
                 if query.lower() in line.lower():
@@ -132,35 +135,55 @@ def _tool_read_history_archive(runner: AgentRunner, args: dict[str, Any]) -> Any
         page = select_search_hits(hits, limit, offset, order)
         result = {
             "query": query, "hits": page, "total": len(hits), "offset": offset,
+            "limit": limit, **({"chunk": name} if name else {}),
             "returned": len(page), "has_more": offset + len(page) < len(hits),
             "truncated": len(page) < len(hits),
+            **({"next_offset": offset + len(page)}
+               if offset + len(page) < len(hits) and order in ("name", "reverse") else {}),
         }
         _apply_search_order(result, order)
         return result
 
     if not raw_chunk:
-        return {
+        page = select_search_hits(chunks, limit, offset, order)
+        more = offset + len(page) < len(chunks)
+        result = {
             "archives": [
-                {"name": item["name"], "topics": item.get("topics") or ""} for item in chunks
+                {"name": item["name"], "topics": item.get("topics") or ""} for item in page
             ],
+            "total": len(chunks), "offset": offset, "limit": limit,
+            "returned": len(page), "has_more": more,
+            **({"next_offset": offset + len(page)} if more and order in ("name", "reverse") else {}),
             "note": "用 chunk 参数读其中一份，或用 query 关键词检索细节",
         }
+        _apply_search_order(result, order)
+        return result
 
-    names = [item["name"] for item in chunks]
-    name = raw_chunk if raw_chunk in names else ""
-    if not name and raw_chunk.isdigit():
-        index = int(raw_chunk)
-        if 1 <= index <= len(names):
-            name = names[index - 1]
-    if not name:
-        raise AgentToolError(f"没有这个归档：{raw_chunk}（可用：{'、'.join(names)}）")
     text = store.read_chunk(name) or ""
-    truncated = len(text) > COMPACT_ARCHIVE_READ_CHARS
+    lines = text.splitlines(keepends=True)
+    try:
+        char_offset = int(args.get("char_offset", 0))
+        if char_offset < 0 or (char_offset and (offset >= len(lines) or char_offset >= len(lines[offset]))):
+            raise ValueError
+    except (TypeError, ValueError) as exc:
+        raise AgentToolError("char_offset 必须是当前 offset 行内的有效字符位置") from exc
+    content = "".join(lines[offset:offset + limit])[char_offset:]
+    shown = content[:COMPACT_ARCHIVE_READ_CHARS]
+    consumed = len(shown) + char_offset
+    next_offset = offset
+    for line in lines[offset:offset + limit]:
+        if consumed < len(line):
+            break
+        consumed -= len(line)
+        next_offset += 1
+    more = next_offset < len(lines)
     return {
-        "chunk": name,
-        "content": text[:COMPACT_ARCHIVE_READ_CHARS] if truncated else text,
-        "truncated": truncated,
-        "note": "内容过长已截断，可用 query 检索关键词" if truncated else "",
+        "chunk": name, "content": shown, "total": len(lines), "offset": offset,
+        "limit": limit, "char_offset": char_offset,
+        "returned": next_offset - offset + int(consumed > 0), "has_more": more,
+        "truncated": len(content) > len(shown),
+        **({"next_offset": next_offset, "next_char_offset": consumed} if more else {}),
+        "note": "用 next_offset 作为 offset 续读；next_char_offset 非零时同时传 char_offset" if more else "",
     }
 
 

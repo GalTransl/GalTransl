@@ -477,9 +477,9 @@ class SubagentToolScopeTests(unittest.TestCase):
         }
         self.assertEqual(
             names,
-            {"read_transl_cache", "problems", "edit_transl_cache"},
+            {"read_transl_cache", "search_replace_cache", "problems", "edit_transl_cache"},
         )
-        self.assertEqual(set(_subagent_handlers(SUBAGENT_AGENT_PROOFREAD)), {"read_transl_cache", "list_problems", "patch_transl_cache"})
+        self.assertEqual(set(_subagent_handlers(SUBAGENT_AGENT_PROOFREAD)), {"read_transl_cache", "search_cache", "list_problems", "patch_transl_cache"})
         # 不会递归、也拿不到改配置/字典/启动任务的工具
         for forbidden in ("run_subagents", "save_dict", "update_project_config", "start_translation"):
             self.assertNotIn(forbidden, names)
@@ -528,7 +528,7 @@ class ProofreadGuidelineTests(unittest.TestCase):
             self.assertNotIn(parent.project_guideline, messages[1]["content"])
             self.assertEqual(
                 {t["function"]["name"] for t in tools},
-                {"read_transl_cache", "problems", "edit_transl_cache"},
+                {"read_transl_cache", "search_replace_cache", "problems", "edit_transl_cache"},
             )
             return "已完成", [], rt.REASONING_FIELD_NAMES[0], "", 10
 

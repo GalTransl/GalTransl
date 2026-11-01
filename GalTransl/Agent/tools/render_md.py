@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from itertools import groupby
 from typing import Any
 
 from GalTransl.Search import SEARCH_ORDER_LABELS
@@ -13,10 +14,35 @@ from GalTransl.Agent.tools.common import _context_phrase
 
 
 def _search_more_hint(result: dict[str, Any]) -> str:
+    next_offset = result.get("next_offset", result.get("offset", 0) + result.get("returned_hits", result.get("returned", 0)))
+    next_position = f"offset={next_offset}"
+    if result.get("next_char_offset"):
+        next_position += f", char_offset={result['next_char_offset']}"
     return {
         "random": "可再次随机采样",
         "even": "可换采样方式或缩小范围",
-    }.get(result.get("order"), "用 offset 翻页")
+    }.get(result.get("order"), f"用 {next_position} 继续")
+
+
+def _compact_numbers(numbers: list[int]) -> str:
+    """保持原顺序，把连续编号压成闭区间；展开后仍与正文逐行对应。"""
+    parts = []
+    for _, group in groupby(enumerate(numbers), lambda item: item[1] - item[0]):
+        values = [item[1] for item in group]
+        parts.append(str(values[0]) if len(values) == 1 else f"{values[0]}-{values[-1]}")
+    return ", ".join(parts)
+
+
+def _page_summary(result: dict, total: int, returned: int, unit: str) -> str:
+    parts = [f"共 {total} {unit}"]
+    if result.get("matched", total) != total:
+        parts.append(f"筛选后 {result['matched']} {unit}")
+    parts.append(f"本页 {returned} {unit}")
+    if result.get("offset"):
+        parts.append(f"offset={result['offset']}")
+    if result.get("has_more"):
+        parts.append(f"还有更多（{_search_more_hint(result)}）")
+    return "；".join(parts)
 
 
 def _tool_result_json(result: Any) -> str:
@@ -72,15 +98,17 @@ def _md_render_read_dict(result: dict[str, Any]) -> str | None:
     if not isinstance(lines, list):
         return None
     head = f"字典 {_md_cell(result.get('file_key'))}：共 {result.get('count', len(lines))} 行"
-    if "matched" in result:
-        head += f"；匹配 {result['matched']} 行，本页 {len(lines)} 行（offset={result.get('offset', 0)}）"
     if result.get("query"):
-        head += f"；query={_tool_result_json(result['query'])}"
+        head += f"；匹配 {result.get('matched', len(lines))} 行；query={_tool_result_json(result['query'])}"
+    head += f"；本页 {len(lines)} 行"
+    if result.get("offset") and result.get("query"):
+        head += f"（offset={result['offset']}）"
     numbers = result.get("line_numbers", [])
-    positions = "原文件行号（从 1 开始，与下方各行依次对应）：" + ", ".join(map(str, numbers)) if numbers else ""
-    more = f"还有更多；保持 query 不变，传 offset={result['next_offset']} 继续读取。" if result.get("has_more") else ""
+    if numbers:
+        head += f"；原文件行号：{_compact_numbers(numbers)}（从 1 开始）"
+    more = f"还有更多（{_search_more_hint(result)}；保持筛选条件不变）" if result.get("has_more") else ""
     empty = "本页没有匹配行。" if result.get("count", 0) else "字典为空。"
-    return _md_doc(head, positions, _md_code_block("\n".join(lines)) if lines else empty, more)
+    return _md_doc(head, more, _md_code_block("\n".join(lines)) if lines else empty)
 
 
 def _md_render_list_dict_files(result: dict[str, Any]) -> str | None:
@@ -326,30 +354,24 @@ def _list_selection_note(result: dict[str, Any]) -> str:
         return f"下面均匀采样 {returned} 个，不是前 {returned} 个；完整遍历用 order=name + limit/offset"
     if order == "random":
         return f"下面随机采样 {returned} 个；完整遍历用 order=name + limit/offset"
-    return f"本页 {returned} 个（offset={result.get('offset', 0)}）"
+    return ""
 
 
 def _md_render_list_transl_cache(result: dict[str, Any]) -> str:
-    head_parts: list[str] = []
-    if result.get("count") is not None:
-        head_parts.append(f"共 {result['count']} 个缓存文件")
-    if result.get("sampled"):
-        head_parts.append(_list_selection_note(result))
+    files = result.get("cache_files") or []
+    head = _page_summary(result, result.get("count", len(files)), result.get("returned", len(files)), "个缓存文件")
     table = _md_table(["name", "size", "entries"], result.get("cache_files"))
-    note = result.get("note")
-    return _md_doc("，".join(head_parts), table, f"备注：{note}" if note else "")
+    note = result.get("note") or _list_selection_note(result)
+    return _md_doc(head, table, f"备注：{note}" if note else "")
 
 
 def _md_render_list_input_files(result: dict[str, Any]) -> str:
-    head_parts: list[str] = []
-    if result.get("count") is not None:
-        head_parts.append(f"共 {result['count']} 个输入文件")
-    if result.get("sampled"):
-        head_parts.append(_list_selection_note(result))
+    files = result.get("input_files") or []
+    head_parts = [_page_summary(result, result.get("count", len(files)), result.get("returned", len(files)), "个输入文件")]
     if result.get("sentences_total") is not None:
         head_parts.append(f"句数合计 {result['sentences_total']}（含没列出来的文件）")
     table = _md_table(["name", "size", "sentences"], result.get("input_files"))
-    note = result.get("note")
+    note = result.get("note") or _list_selection_note(result)
     return _md_doc("，".join(head_parts), table, f"备注：{note}" if note else "")
 
 
@@ -392,7 +414,7 @@ def _read_page_note(result: dict[str, Any]) -> str:
     if "matched" in result:
         # 没筛选时 matched 与表头的 count 是同一个数字（read_input_file / read_output /
         # read_transl_cache 的 read 路径都这样），offset 为 0 也不值得单独说一句。
-        if result.get("matched") != result.get("count"):
+        if result.get("matched") != result.get("count", result.get("total")):
             parts.append(f"筛选后共 {result['matched']} 条")
         if result.get("offset"):
             parts.append(f"本页 offset={result['offset']}")
@@ -400,8 +422,7 @@ def _read_page_note(result: dict[str, Any]) -> str:
         if result.get("order") in ("even", "random"):
             parts.append("当前为采样；完整遍历请用 order=name 配合 offset 翻页")
         else:
-            next_offset = result.get("next_offset", result.get("offset", 0) + result.get("returned", 0))
-            parts.append(f"还有更多；保持筛选条件不变，用 offset={next_offset} 继续")
+            parts.append(f"还有更多；{_search_more_hint(result)}（保持筛选条件不变）")
     if result.get("missing_truncated"):
         parts.append(f"缺失 index 共 {result['missing_count']} 个，只列前 {len(result.get('missing_indexes', []))} 个")
     return "；".join(parts)
@@ -413,9 +434,14 @@ def _md_render_entries(result: dict[str, Any], columns: list[str]) -> str:
         head_parts.append(f"文件 {result['filename']}")
     if result.get("count") is not None:
         head_parts.append(f"共 {result['count']} 条，显示 {result.get('returned')} 条")
+    context_phrase = _context_phrase(result, "目标条目")
+    if context_phrase:
+        head_parts.append(context_phrase)
+    if result.get("order"):
+        head_parts.append(f"排序：{SEARCH_ORDER_LABELS.get(result['order'], result['order'])}")
     missing = result.get("missing_indexes")
     missing_text = (
-        "缺失 index：" + ",".join(str(i) for i in missing) if isinstance(missing, list) and missing else ""
+        "缺失 index：" + _compact_numbers(missing) if isinstance(missing, list) and missing else ""
     )
     table = _md_table(columns, result.get("entries"))
     return _md_doc("，".join(head_parts), _read_page_note(result), missing_text, table)
@@ -449,7 +475,7 @@ def _md_render_read_transl_cache(result: dict[str, Any]) -> str:
     fields_note = result.get("fields_note")
     missing = result.get("missing_indexes")
     missing_text = (
-        "缺失 index：" + ",".join(str(i) for i in missing) if isinstance(missing, list) and missing else ""
+        "缺失 index：" + _compact_numbers(missing) if isinstance(missing, list) and missing else ""
     )
     fields = [str(f) for f in result.get("fields") or []]
     if not fields:
@@ -475,6 +501,8 @@ _SEARCH_OUTPUT_COLUMNS = ["filename", "index", "speaker", "dst"]
 
 def _md_search_head(result: dict[str, Any]) -> str:
     parts: list[str] = []
+    if result.get("limited_by"):
+        parts.append("因字符预算缩减本页" if result["limited_by"] == "characters" else "因行数上限缩减本页")
     total = result.get("total")
     if total is not None:
         parts.append(f"共 {total} 条命中")
@@ -522,7 +550,10 @@ def _md_render_search(result: dict[str, Any], columns: list[str]) -> str | None:
 
 def _md_render_search_transl_cache(result: dict[str, Any]) -> str | None:
     """在缓存里搜（原文/译文/问题）：命中行与 read_transl_cache 是同一批列。"""
-    return _md_render_search(result, _SEARCH_CACHE_COLUMNS)
+    extra = [key for key in ("matched_fields", "pre_src", "proofread_dst") if any(
+        key in row for row in result.get("results", [])
+    )]
+    return _md_render_search(result, [*_SEARCH_CACHE_COLUMNS, *extra])
 
 
 def _md_render_search_input(result: dict[str, Any]) -> str | None:
@@ -682,19 +713,38 @@ def _md_render_patch_transl_cache(result: dict[str, Any]) -> str:
     files = [row for row in (result.get("files") or []) if isinstance(row, dict)]
     if not files:
         return ""
-    total = sum(int(row.get("updated") or 0) for row in files)
-    changed = [row for row in files if int(row.get("updated") or 0) > 0]
-    reported = [row for row in files if _patch_file_needs_section(row)]
-    failed = [row for row in files if row.get("error")]
-    untouched = len(files) - len(reported)
+    count_key = "would_update" if result.get("dry_run") else "updated"
+    total = sum(int(row.get(count_key) or 0) for row in files)
+    changed = [row for row in files if int(row.get(count_key) or 0) > 0]
+    replacement = result.get("action") == "replace"
+    unmatched = [row for row in files if replacement and row.get("matches") == 0]
+    reported = [
+        row for row in files
+        if (_patch_file_needs_section(row) or row.get("would_update"))
+        and not (replacement and row.get("matches") == 0)
+    ]
+    failed = [row for row in reported if row.get("error") or (
+        replacement and (row.get("skipped") or row.get("not_found"))
+    )]
+    untouched = len(files) - len(reported) - len(unmatched)
     # 文本替换是同一组 query→replacement 铺到所有命中条目上：before/after 逐行重复，
     # 参数摘要里已经写了那一次替换，这里只留「改了哪个文件的哪一行」——纯文本行，不套表格。
-    replace_mode = result.get("action") == "replace"
-    head = f"共改动 {total} 条，涉及 {len(changed)} 个缓存文件"
+    replace_mode = replacement and not result.get("dry_run")
+    head = f"预览：将改动 {total} 条，涉及 {len(changed)} 个缓存文件；尚未写入" if result.get("dry_run") else f"共改动 {total} 条，涉及 {len(changed)} 个缓存文件"
+    if result.get("status") == "partial":
+        head = ("仅部分文件可替换；" if result.get("dry_run") else "部分成功：") + head
+    if result.get("status") == "failed":
+        head = ("预览发现替换失败；" if result.get("dry_run") else "替换失败：") + head
+    if "matched_entries" in result:
+        head += f"；命中 {result['matched_entries']} 条记录"
+    if "matches" in result:
+        head += f"；文本出现 {result['matches']} 次"
+    if unmatched:
+        head += f"；{len(unmatched)} 个文件未匹配，已跳过"
     if failed:
-        head += f"；其中 {len(failed)} 个文件没有改动"
+        head += f"；{len(failed)} 个文件替换失败" if replacement else f"；其中 {len(failed)} 个文件没有改动"
     if untouched:
-        head += f"；其余 {untouched} 个文件没有内容变化，未保存文件"
+        head += f"；{untouched} 个文件没有内容变化" if replacement else f"；其余 {untouched} 个文件没有内容变化，未保存文件"
     parts: list[str] = [head + "。"]
     if result.get("trans_by"):
         parts.append(
@@ -703,7 +753,9 @@ def _md_render_patch_transl_cache(result: dict[str, Any]) -> str:
     remaining = MODEL_DIFF_MAX_LINES
     omission_noted = False
     for index, row in enumerate(reported, start=1):
-        parts.append(f"## {index}. {row.get('filename')}（改 {int(row.get('updated') or 0)} 条）")
+        parts.append(f"## {index}. {row.get('filename')}（{'将改' if result.get('dry_run') else '改'} {int(row.get(count_key) or 0)} 条）")
+        if row.get("shadowed_indexes"):
+            parts.append("注意：这些 index 只修改了 pre_dst，当前仍采用非空的 proofread_dst，输出不会采用本次 pre_dst 修改：" + "、".join(map(str, row["shadowed_indexes"])))
         if row.get("error"):
             parts.append(f"⚠ {row['error']}")
         if row.get("note"):
@@ -769,7 +821,7 @@ def _md_render_get_name_table(result: dict[str, Any]) -> str | None:
     names = result.get("names")
     if not isinstance(names, list) or (not names and "matched" not in result):
         return None
-    head = f"共 {result.get('total', len(names))} 条人名"
+    head = _page_summary(result, result.get('total', len(names)), result.get('returned', len(names)), "条人名")
     if "missing_total" in result:
         head += f"，其中缺译名 {result['missing_total']} 条"
     if result.get("source_file"):
@@ -777,17 +829,68 @@ def _md_render_get_name_table(result: dict[str, Any]) -> str | None:
     columns = ["src_name", "dst_name", "count"]
     if any(isinstance(row, dict) and row.get("dst_name_source") for row in names):
         columns.append("dst_name_source")
-    parts = [head, _read_page_note(result), _md_table(columns, names) if names else "本页没有人名条目。"]
+    parts = [head, _md_table(columns, names) if names else "本页没有人名条目。"]
     still_empty = result.get("still_empty")
     if isinstance(still_empty, list) and still_empty:
-        parts.append(
-            f"表与字典都没有译名、需要补的有 {len(still_empty)} 个："
-            + "、".join(str(src) for src in still_empty)
-        )
+        parts.append(f"本页需补译名 {len(still_empty)} 个（表中 dst_name 为空）。")
     note = result.get("note")
     if note:
         parts.append(f"备注：{note}")
     return _md_doc(*parts)
+
+
+def _md_render_history_archive(result: dict) -> str | None:
+    if "content" in result:
+        head = f"归档 {result['chunk']}：" + _page_summary(result, result.get("total", 0), result.get("returned", 0), "行")
+        budget = "达到字符预算，本页末行可能未读完，按上述位置续读。" if result.get("truncated") else ""
+        return _md_doc(head, budget, _md_code_block(result["content"]) if result["content"] else "本页没有正文。")
+    if "hits" in result:
+        hits = result["hits"]
+        head = f"query={_tool_result_json(result.get('query', ''))}；" + _page_summary(result, result.get("total", len(hits)), len(hits), "条命中")
+        if result.get("chunk"):
+            head = f"归档 {result['chunk']}：{head}"
+        columns = ["line", "text"] if result.get("chunk") else ["chunk", "line", "text"]
+        return _md_doc(head, _md_table(columns, hits) if hits else "没有匹配行。", str(result.get("note") or ""))
+    archives = result.get("archives")
+    if not isinstance(archives, list):
+        return None
+    head = _page_summary(result, result.get("total", len(archives)), len(archives), "份归档")
+    return _md_doc(head, _md_table(["name", "topics"], archives), str(result.get("note") or ""))
+
+
+def _md_render_proofread_changes(result: dict) -> str | None:
+    if "tasks" in result:
+        tasks = result["tasks"]
+        head = _page_summary(result, result.get("total_tasks", len(tasks)), len(tasks), "个任务")
+        columns = list(dict.fromkeys(key for row in tasks for key in row))
+        body = _md_table(columns, tasks) if tasks else "没有任务记录。"
+    elif "needs_review" in result:
+        rows = result["needs_review"]
+        head = f"任务 {result['task_id']}：" + _page_summary(result, result.get("total", len(rows)), len(rows), "条审查事项")
+        body = _md_table(["file", "index", "reason"], rows) if rows else "没有待审查事项。"
+    elif "changes" in result:
+        rows = result["changes"]
+        head = f"任务 {result['task_id']}：" + _page_summary(result, result.get("total", len(rows)), len(rows), "条修改")
+        parts = []
+        for _, group in groupby(rows, lambda row: row["change_id"]):
+            entries = list(group)
+            # 同一批修改的文件、状态、校验结果与记录 ID 只写一次；逐条保留完整快照。
+            metadata = {key: value for key, value in entries[0].items() if key not in ("index", "before", "after", "task_id")}
+            parts.append(_md_doc(
+                "记录：" + _tool_result_json(metadata),
+                _md_table(["index", "before", "after"], [{
+                    "index": row["index"], "before": _tool_result_json(row["before"]), "after": _tool_result_json(row["after"]),
+                } for row in entries]),
+            ))
+        body = _md_doc(*parts) if parts else "没有修改记录。"
+    else:
+        return None
+    warnings = result.get("warnings") or []
+    warning = _md_doc(
+        f"⚠ 记录不完整，跳过 {result.get('skipped_record_count', len(warnings))} 份记录。" if result.get("incomplete") else "",
+        "\n".join(f"- {_md_cell(item)}" for item in warnings),
+    )
+    return _md_doc(head, body, warning, str(result.get("note") or ""))
 
 
 # 工具名 → 渲染器。渲染只对这里列出的工具生效，其余工具维持 JSON。
@@ -803,6 +906,8 @@ _MD_RENDERERS: dict[str, Any] = {
     "read_transl_cache": _md_render_transl_cache,
     "search_input": _md_render_search_input,
     "search_output_files": _md_render_search_output_files,
+    "search_cache": _md_render_search_transl_cache,
+    "replace_cache": _md_render_patch_transl_cache,
     "manage_problem_filter": _md_render_manage_problem_filter,
     "run_subagents": _md_render_run_subagents,
     "patch_transl_cache": _md_render_patch_transl_cache,
@@ -810,6 +915,8 @@ _MD_RENDERERS: dict[str, Any] = {
     # 否则它走 JSON，一条 before/after 全文都不截断。
     "revert_proofread_changes": _md_render_patch_transl_cache,
     "get_name_table": _md_render_get_name_table,
+    "read_history_archive": _md_render_history_archive,
+    "read_proofread_changes": _md_render_proofread_changes,
     "save_dict": _md_render_write_result,
     "save_name_table": _md_render_write_result,
     "write_project_guideline": _md_render_write_result,

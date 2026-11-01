@@ -357,10 +357,12 @@ def _tool_write_project_guideline(runner: AgentRunner, args: dict[str, Any]) -> 
 
 
 def _guideline_write_request(args: dict[str, object]) -> dict[str, object]:
+    if "replace_all" in args:
+        raise AgentToolError("replace_all 已移除；replace 自动替换全部匹配，请删除该参数")
     action = _write_action(args, ("append", "replace", "overwrite"))
     if action == "replace":
-        old_text, new_text, replace_all = _text_replacement(args)
-        return {"mode": action, "old_text": old_text, "new_text": new_text, "replace_all": replace_all}
+        old_text, new_text = _text_replacement(args)
+        return {"mode": action, "old_text": old_text, "new_text": new_text}
     content = args.get("content")
     if not isinstance(content, str):
         raise AgentToolError("content must be a string")
@@ -519,7 +521,6 @@ def _tool_update_project_config(runner: AgentRunner, args: dict[str, Any]) -> An
     """修改项目配置：读-改-写回（与桌面端「项目配置」页同一通道）。
 
     普通键必须已存在；插件设置允许新增声明过的键，并验证类型与选项。"""
-    _write_action(args, ("set",))
     updates = args.get("updates")
     if not isinstance(updates, list) or not updates:
         raise AgentToolError("updates must be a non-empty array of {key, value}")

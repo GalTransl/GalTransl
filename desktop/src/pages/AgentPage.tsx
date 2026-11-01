@@ -1562,7 +1562,7 @@ export function AgentPage() {
             </div>
           ) : null}
         </div>
-        {/* 不在底部时贴右下角的圆形"回到最新"（sticky 跟着滚动口走，见 CSS） */}
+        {/* 不在底部时贴底部中央的圆形"回到最新"（sticky 跟着滚动口走，见 CSS） */}
         {!atBottom ? (
           <div className="agent-thread__jump">
             <button

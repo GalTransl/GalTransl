@@ -169,7 +169,7 @@ class WritePreviewTests(unittest.TestCase):
         ]}
         text = _render_tool_result_table("patch_transl_cache", result)
         self.assertIn("共改动 3 条，涉及 1 个缓存文件", text)
-        self.assertIn("其余 2 个文件没有内容变化", text)
+        self.assertIn("2 个文件没有内容变化", text)
         # 失败的文件仍然逐份交代，且编号只数真正成节的
         self.assertIn("## 1. a.json（改 3 条）", text)
         self.assertIn("## 2. d.json（改 0 条）", text)

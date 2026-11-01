@@ -8,6 +8,9 @@ from GalTransl.Agent.models import AgentToolError
 from GalTransl.Agent.tool_schemas import AGENT_TOOLS
 from GalTransl.Agent.tools.ask import _tool_read_history_archive
 from GalTransl.Agent.tools.cache import _tool_read_transl_cache
+from GalTransl.Agent.tools.cache import _tool_read_output
+from GalTransl.Agent.tools.input import _tool_read_input_file
+from GalTransl.Agent.tools.find_replace import _tool_search_replace_cache
 from GalTransl.Agent.tools.problems import _tool_list_problems
 from GalTransl.Agent.tools.render_md import _md_render_search_input
 from GalTransl.Agent.tools.search import _tool_search_input
@@ -64,7 +67,7 @@ class SearchOrderTests(unittest.TestCase):
         for action in ("input", "cache"):
             runner = _Runner()
             args = {"query": "match", "order": "random", "limit": 2}
-            result = _tool_search_input(runner, args) if action == "input" else _tool_read_transl_cache(runner, args)
+            result = _tool_search_input(runner, args) if action == "input" else _tool_search_replace_cache(runner, {**args, "action": "search"})
             self.assertEqual(runner.posts[0][1]["order"], "random")
             self.assertEqual(runner.posts[0][1]["max_results"], 2)
             rendered = _md_render_search_input(result)
@@ -96,6 +99,57 @@ class SearchOrderTests(unittest.TestCase):
         self.assertEqual(result["returned"], 1)
         self.assertTrue(result["has_more"])
 
+    def test_all_entry_reads_honor_order_with_and_without_indexes(self):
+        for read in (_tool_read_input_file, _tool_read_output, _tool_read_transl_cache):
+            for spec in ("", "1-8"):
+                args = {"filename": "a.json", "index": spec, "limit": 2, "offset": 1}
+                with self.subTest(read=read.__name__, spec=spec):
+                    result = read(_Runner(), {**args, "order": "reverse"})
+                    self.assertEqual([row["index"] for row in result["entries"]], [7, 6])
+                    self.assertEqual(result["next_offset"], 3)
+                    even = read(_Runner(), {**args, "order": "even"})
+                    self.assertEqual([row["index"] for row in even["entries"]], [2, 8])
+                    random = read(_Runner(), {**args, "order": "random"})
+                    self.assertEqual(len({row["index"] for row in random["entries"]}), 2)
+                    self.assertNotIn("next_offset", random)
+                    with self.assertRaises(AgentToolError):
+                        read(_Runner(), {**args, "order": "invalid"})
+
+    def test_input_output_context_marks_neighbors_and_pages_only_targets(self):
+        for read in (_tool_read_input_file, _tool_read_output):
+            args = {"filename": "a.json", "index": "3,6", "context": 1, "limit": 1}
+            with self.subTest(read=read.__name__):
+                result = read(_Runner(), args)
+                self.assertEqual([row["index"] for row in result["entries"]], ["2*", 3])
+                self.assertEqual(result["returned_hits"], 1)
+                self.assertEqual(result["next_offset"], 1)
+                page = read(_Runner(), {**args, "offset": 1, "only_preceding": False})
+                self.assertEqual([row["index"] for row in page["entries"]], ["5*", 6, "7*"])
+                self.assertFalse(page["has_more"])
+
+    def test_context_read_keeps_row_budget_and_no_index_context_works(self):
+        runner = _Runner()
+        runner.rows = [{"index": i, "pre_src": str(i)} for i in range(1, 501)]
+        for read in (_tool_read_input_file, _tool_read_output, _tool_read_transl_cache):
+            result = read(runner, {"filename": "a.json", "index": "1-500", "limit": 200,
+                                   "context": 20, "only_preceding": False, "order": "even"})
+            self.assertLessEqual(result["returned"], 200)
+            self.assertEqual(result["returned_hits"], 4)
+            result = read(runner, {"filename": "a.json", "offset": 2, "limit": 1, "context": 1})
+            self.assertEqual([row["index"] for row in result["entries"]], ["2*", 3])
+
+    def test_archive_query_respects_chunk_name_and_ordinal(self):
+        runner = _Runner()
+        chunks = {"a.md": "match a", "b.md": "match b\nmatch c"}
+        runner._store = SimpleNamespace(list_chunks=lambda: [{"name": name} for name in chunks], read_chunk=chunks.get)
+        for chunk in ("b.md", "2"):
+            result = _tool_read_history_archive(runner, {"query": "match", "chunk": chunk, "limit": 1})
+            self.assertEqual(result["total"], 2)
+            self.assertEqual(result["hits"][0]["chunk"], "b.md")
+            self.assertEqual(result["next_offset"], 1)
+        with self.assertRaises(AgentToolError):
+            _tool_read_history_archive(runner, {"query": "match", "chunk": "missing"})
+
     def test_all_search_schemas_expose_sampling(self):
         schemas = {tool["function"]["name"]: tool["function"]["parameters"]["properties"] for tool in AGENT_TOOLS}
         for tool in ("input", "read_transl_cache", "problems", "read_history_archive"):
@@ -109,5 +163,5 @@ class SearchOrderTests(unittest.TestCase):
             if action == "input":
                 _tool_search_input(runner, args)
             else:
-                _tool_read_transl_cache(runner, args)
+                _tool_search_replace_cache(runner, {**args, "action": "search"})
             self.assertEqual(runner.posts[0][1]["max_results"], 4 if action == "input" else 2)

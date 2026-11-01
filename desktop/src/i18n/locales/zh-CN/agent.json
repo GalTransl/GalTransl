@@ -498,6 +498,16 @@
     "revert_proofread_changes": {
       "action": "撤销校对修改",
       "running": "撤销校对修改"
+    },
+    "search_cache": {
+      "action": "搜索缓存",
+      "running": "正在搜索缓存"
+    },
+    "replace_cache": {
+      "action": "替换译文",
+      "running": "正在替换译文",
+      "preview": "预览替换",
+      "previewRunning": "正在预览替换"
     }
   }
 }

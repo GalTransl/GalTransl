@@ -362,9 +362,19 @@ def _tool_read_proofread_changes(runner: Any, args: dict) -> dict:
     view = str(args.get("view") or "changes")
     if view not in ("changes", "review"):
         raise AgentToolError("view 必须为 changes 或 review")
+    try:
+        offset = max(0, int(args.get("offset", 0)))
+        limit = max(1, min(50, int(args.get("limit", 20))))
+    except (TypeError, ValueError) as exc:
+        raise AgentToolError("offset/limit 必须为整数") from exc
     warnings: list[str] = []
 
-    def with_warnings(result: dict) -> dict:
+    def with_paging(result: dict) -> dict:
+        rows = result.get("tasks", result.get("needs_review", result.get("changes", [])))
+        total = result.get("total_tasks", result.get("total", 0))
+        more = offset + len(rows) < total
+        result.update({"offset": offset, "limit": limit, "returned": len(rows), "has_more": more,
+                       **({"next_offset": offset + len(rows)} if more else {})})
         if warnings:
             result.update({"warnings": warnings[:10], "skipped_record_count": len(warnings),
                            "incomplete": True})
@@ -387,24 +397,18 @@ def _tool_read_proofread_changes(runner: Any, args: dict) -> dict:
                 "task_id": report["task_id"], **({"batches": 0, "entries": 0} if view == "changes" else {}),
             })
             group.update({k: report[k] for k in ("modified_count", "needs_review_count", "status")})
-        return with_warnings({"tasks": list(groups.values())[-50:], "total_tasks": len(groups),
+        tasks = list(groups.values())[offset:offset + limit]
+        return with_paging({"tasks": tasks, "total_tasks": len(groups),
                 "note": "指定 task_id 分页查看修改前后内容；pending/uncertain 表示提交状态未确认。"})
-    try:
-        offset = max(0, int(args.get("offset", 0)))
-        limit = max(1, min(50, int(args.get("limit", 20))))
-    except (TypeError, ValueError) as exc:
-        raise AgentToolError("offset/limit 必须为整数") from exc
     if view == "review":
         path = _review_path(runner, task_id)
         record = _try_read_record(path, warnings, review=True, missing_ok=True)
         rows = record["review"] if record is not None else []
-        return with_warnings({"task_id": task_id, "total": len(rows), "offset": offset,
-                "has_more": offset + limit < len(rows), "needs_review": rows[offset:offset + limit]})
+        return with_paging({"task_id": task_id, "total": len(rows), "needs_review": rows[offset:offset + limit]})
     records = _load_records(runner, task_id, warnings)
     rows = [{**{k: v for k, v in record.items() if k != "entries"}, **entry}
             for record in records if record["task_id"] == task_id for entry in record["entries"]]
-    return with_warnings({"task_id": task_id, "total": len(rows), "offset": offset,
-            "has_more": offset + limit < len(rows), "changes": rows[offset:offset + limit]})
+    return with_paging({"task_id": task_id, "total": len(rows), "changes": rows[offset:offset + limit]})
 
 
 def _tool_revert_proofread_changes(runner: Any, args: dict, *, preview: bool = False) -> dict:

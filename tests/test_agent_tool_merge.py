@@ -16,6 +16,7 @@ from GalTransl.Agent.handlers import _RETIRED_TOOLS, _TOOL_HANDLERS
 from GalTransl.Agent.models import AgentToolError
 from GalTransl.Agent.subagent import SUBAGENT_AGENT_PROOFREAD, _subagent_handlers
 from GalTransl.Agent.tools.cache import _cache_read_action, _tool_read_transl_cache
+from GalTransl.Agent.tools.find_replace import _tool_search_replace_cache
 from GalTransl.Agent.tools.dicts import _tool_save_dict
 from GalTransl.Agent.tools.preview import _preview_dict_write
 from GalTransl.Agent.tools.render_md import _render_tool_result_table
@@ -56,7 +57,8 @@ class ActionInferenceTests(unittest.TestCase):
         self.assertEqual(_cache_read_action({"action": "LIST", "filename": "a.json"}), "list")
 
     def test_inferred_from_arguments(self):
-        self.assertEqual(_cache_read_action({"query": "x", "filename": "a.json"}), "search")
+        with self.assertRaisesRegex(AgentToolError, "search_replace_cache"):
+            _cache_read_action({"query": "x", "filename": "a.json"})
         self.assertEqual(_cache_read_action({"filename": "a.json"}), "read")
         self.assertEqual(_cache_read_action({}), "list")
 
@@ -78,14 +80,13 @@ class UnifiedToolTests(unittest.TestCase):
         self.assertEqual(read["action"], "read")
         self.assertIn("文件 a.json", _render_tool_result_table("read_transl_cache", read))
 
-        found = _tool_read_transl_cache(runner, {"query": "ドルード", "field": "src"})
-        self.assertEqual(found["action"], "search")
+        found = _tool_search_replace_cache(runner, {"action": "search", "query": "ドルード", "field": "src"})
         self.assertEqual(runner.searches[-1]["query"], "ドルード")
-        self.assertIn("共 1 条命中", _render_tool_result_table("read_transl_cache", found))
+        self.assertIn("共 1 条命中", _render_tool_result_table("search_cache", found))
 
     def test_search_without_query_and_read_without_filename_fail_clearly(self):
         runner = _CacheRunner(FILES)
-        with self.assertRaisesRegex(AgentToolError, "query"):
+        with self.assertRaisesRegex(AgentToolError, "search_replace_cache"):
             _tool_read_transl_cache(runner, {"action": "search"})
         with self.assertRaisesRegex(AgentToolError, "filename"):
             _tool_read_transl_cache(runner, {"action": "read"})
@@ -105,8 +106,9 @@ class SubagentScopeTests(unittest.TestCase):
         self.assertIn("a.json", listed["note"])
 
         # 搜索是全项目的，带别的文件名也放行
-        handler(runner, {"action": "search", "query": "ドルード", "filename": "b.json"})
-        self.assertEqual(runner.searches[-1]["filename"], "b.json")
+        search = _subagent_handlers(SUBAGENT_AGENT_PROOFREAD, "a.json")["search_cache"]
+        search(runner, {"action": "search", "query": "ドルード", "files": "b.json"})
+        self.assertEqual(runner.searches[-1]["filenames"], ["b.json"])
 
 
 class _DictRunner:

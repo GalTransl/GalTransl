@@ -64,15 +64,14 @@ class ProjectGuidelineApiTests(unittest.TestCase):
 
     # ---- 用例 ----
 
-    def test_replace_all_preview_and_write_share_the_same_result(self):
+    def test_replace_preview_and_write_share_all_matches_without_a_flag(self):
         self._put({"mode": "overwrite", "content": "哥哥 … 哥哥"})
         args = {"mode": "replace", "old_text": "哥哥", "new_text": "兄长"}
-        self.assertIn("2 次", self._put_expect_400(args))
         self.assertIn("replace_all", self._put_expect_400({**args, "replace_all": "true"}))
-        preview = self._put({**args, "replace_all": True, "dry_run": True})
+        preview = self._put({**args, "dry_run": True})
         self.assertEqual(preview["content"], "兄长 … 兄长")
         self.assertEqual(read_project_guideline(self.project), "哥哥 … 哥哥")
-        self._put({**args, "replace_all": True})
+        self._put(args)
         self.assertEqual(read_project_guideline(self.project), preview["content"])
 
     def test_get_reports_missing_file(self) -> None:
@@ -111,10 +110,10 @@ class ProjectGuidelineApiTests(unittest.TestCase):
         error = self._put_expect_400({"mode": "replace", "old_text": "不存在", "new_text": "x"})
         self.assertIn("没有找到", error)
 
-    def test_replace_ambiguous_is_400(self) -> None:
+    def test_replace_can_target_one_occurrence_using_surrounding_text(self) -> None:
         self._put({"mode": "overwrite", "content": "哥哥 … 哥哥"})
-        error = self._put_expect_400({"mode": "replace", "old_text": "哥哥", "new_text": "兄长"})
-        self.assertIn("2 次", error)
+        self._put({"mode": "replace", "old_text": "哥哥 …", "new_text": "兄长 …"})
+        self.assertEqual(self._get()["content"], "兄长 … 哥哥")
 
     def test_unknown_mode_is_400(self) -> None:
         error = self._put_expect_400({"mode": "prepend", "content": "x"})

@@ -52,6 +52,13 @@ class WaitForJobTests(unittest.TestCase):
         runner._active_tool_call_id = "call_wait_job"
         return runner
 
+    def test_removed_minutes_reports_migration_without_starting_wait(self):
+        runner = self._runner()
+        for args in ({"minutes": 1}, {"seconds": 30, "minutes": 1}):
+            with self.assertRaisesRegex(rt.AgentToolError, "seconds"):
+                _tool_wait(runner, args)
+        self.assertFalse(runner.state.events)
+
     # 时长先到时 wait 会顺手带一份运行时快照（等同 get_runtime）：这个假后端也把它备好
     _RUNTIME = {
         "job": {"status": "running", "translator": "ForGal-json"},
@@ -160,7 +167,7 @@ class WaitForJobTests(unittest.TestCase):
 
         fast_a, fast_b = self._fast()
         with fast_a, fast_b:
-            result = _tool_wait(runner, {"job_id": "j1", "minutes": 5})
+            result = _tool_wait(runner, {"job_id": "j1", "seconds": 300})
 
         self.assertTrue(result["job_finished"])
         self.assertEqual(result["job_status"], "failed")

@@ -84,7 +84,7 @@ class ListTranslCacheTests(unittest.TestCase):
         self.assertEqual(names[0], "sc_000.json")
         self.assertEqual(names[-1], "sc_249.json")  # 尾部文件没有被藏起来
         self.assertIn("均匀采样", result["note"])
-        self.assertIn("grep", result["note"])
+        self.assertIn("order=name", result["note"])
 
     def test_short_list_has_no_sampling_note(self):
         runner = _ListRunner(cache_files=_cache_files(3))

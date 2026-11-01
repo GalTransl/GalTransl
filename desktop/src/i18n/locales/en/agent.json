@@ -498,6 +498,16 @@
     "revert_proofread_changes": {
       "action": "Revert proofreading changes",
       "running": "Revert proofreading changes"
+    },
+    "search_cache": {
+      "action": "Search cache",
+      "running": "Searching cache"
+    },
+    "replace_cache": {
+      "action": "Replace translation",
+      "running": "Replacing translation",
+      "preview": "Preview replacement",
+      "previewRunning": "Previewing replacement"
     }
   }
 }

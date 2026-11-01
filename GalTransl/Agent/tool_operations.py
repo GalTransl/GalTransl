@@ -9,7 +9,8 @@ TOOL_OPERATIONS = {
     "dictionary": {"list": "list_dict_files", "read": "read_dict", "set": "save_dict", "delete": "save_dict", "overwrite": "save_dict"},
     "names": {"read": "get_name_table", "set": "save_name_table", "overwrite": "save_name_table"},
     "translation": {"start": "start_translation", "status": "get_runtime", "wait": "wait", "stop": "stop_translation"},
-    "edit_transl_cache": {"set": "patch_transl_cache", "replace": "patch_transl_cache", "delete": "delete_transl_cache"},
+    "edit_transl_cache": {"set": "patch_transl_cache", "delete": "delete_transl_cache"},
+    "search_replace_cache": {"search": "search_cache", "replace": "replace_cache"},
     "output": {"read": "read_output", "search": "search_output_files"},
     "subagents": {"run": "run_subagents", "changes": "read_proofread_changes", "revert": "revert_proofread_changes"},
 }
@@ -19,6 +20,16 @@ PROBLEM_OPERATIONS = {"items": "list_problems", "filter": "manage_problem_filter
 
 def tool_operation(name: str, args: dict[str, object]) -> str:
     """Resolve before permission checks; a malformed action never reaches a handler."""
+    if name == "update_project_config" and ("action" in args or "mode" in args):
+        raise AgentToolError("update_project_config 不再使用 action/mode；直接传 updates")
+    if name == "guideline" and "replace_all" in args:
+        raise AgentToolError("replace_all 已移除；replace 自动替换全部匹配，请删除该参数")
+    if name == "translation" and "minutes" in args:
+        raise AgentToolError("minutes 已移除；请换算为 seconds（1 分钟 = 60 秒）")
+    if name == "read_transl_cache" and (args.get("action") == "search" or "query" in args or "conditions" in args):
+        raise AgentToolError('缓存搜索已拆出，请改用 search_replace_cache(action="search", ...)')
+    if name == "edit_transl_cache" and args.get("action") == "replace":
+        raise AgentToolError('缓存替换已拆出，请改用 search_replace_cache(action="replace", query=old_text, replacement=new_text, field="pre_dst", ...)')
     if name == "problems":
         target = args.get("target", "items")
         if not isinstance(target, str) or target not in PROBLEM_OPERATIONS:

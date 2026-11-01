@@ -843,7 +843,7 @@
   gap: 2px;
 }
 
-/* ── 回到最新（不在底部时贴转录区右下角的圆形按钮）──
+/* ── 回到最新（不在底部时贴转录区底部中央的圆形按钮）──
    用 sticky 而不是 absolute：它跟着滚动口走，不必换算 composer 的高度，
    也不会因为容器内边距变化而跑偏。外层高度为 0，所以不占布局、不改动
    "是否到底"的判断。 */
@@ -854,7 +854,7 @@
   height: 0;
   margin: 0 auto;
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
   pointer-events: none;
 }
 

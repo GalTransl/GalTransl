@@ -188,8 +188,8 @@ class SearchInputSlimmingTests(unittest.TestCase):
         for row in result["results"]:
             self.assertNotIn("in_context", row)
         self.assertEqual(result["context"], 1)
-        self.assertIn("包含关键词的那行是命中", result["note"])
-        self.assertIn("带上下文时命中上限收紧", result["note"])
+        self.assertTrue(result["only_preceding"])
+        self.assertIn("整页上限 200 行", result["note"])
 
     def test_no_context_means_no_context_note(self):
         runner = _SearchRunner(response={"results": [_row(match_src=True)], "total": 1})
@@ -207,7 +207,7 @@ class SearchInputFailedFileTests(unittest.TestCase):
 
         result = _tool_search_input(runner, {"query": "x"})
 
-        self.assertIn("broken.json", result["note"])
+        self.assertEqual(result["files_failed"], ["broken.json"])
         self.assertIn("解析失败", result["note"])
         self.assertIn("未知", result["note"])  # 这些文件里有没有命中是未知的
 

@@ -131,7 +131,7 @@ export type CacheEntry = {
   deleted?: boolean;
 };
 
-export type CacheSearchField = 'all' | 'src' | 'dst' | 'problem' | 'pre_src' | 'post_src' | 'pre_dst' | 'proofread_dst';
+export type CacheSearchField = 'all' | 'src' | 'dst' | 'problem' | 'name' | 'pre_src' | 'post_src' | 'pre_dst' | 'proofread_dst';
 export type CacheSearchCondition = { query: string; field: CacheSearchField; options: CacheSearchOptions };
 
 export type CacheSearchResult = {

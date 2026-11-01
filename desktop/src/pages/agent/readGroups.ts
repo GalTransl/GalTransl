@@ -7,7 +7,7 @@ const readTools = new Set([
   'get_plugin_settings', 'get_project_overview', 'list_input_files', 'read_input_file',
   'read_guideline', 'list_dict_files', 'read_dict', 'get_name_table', 'get_runtime',
   'list_problems', 'read_proofread_changes', 'read_transl_cache', 'read_output',
-  'search_input', 'search_output_files', 'read_history_archive',
+  'search_input', 'search_output_files', 'search_cache', 'read_history_archive',
   'list_transl_cache', 'search_transl_cache',
 ]);
 
@@ -24,6 +24,7 @@ export function activityEntries(items: ActivityItem[], isLive: boolean): Activit
     const args = asArgs(item.arguments);
     const operation = toolOperation(item.name, args);
     const reading = item.kind === 'tool' && (readTools.has(operation)
+      || (operation === 'replace_cache' && args?.dry_run === true)
       || (['manage_problem_filter', 'manage_problem_white_list'].includes(operation) && args?.action === 'list'))
       && !item.permission && item.ok !== false && item.error === undefined && !item.final;
     const previous = entries[entries.length - 1];

@@ -25,6 +25,7 @@ export function CacheSearchConditionRow({ condition, onChange, onRemove }: {
         <option value="src">{t('projects:projectCachePage.cacheSearchField_message_source')}</option>
         <option value="dst">{t('projects:projectCachePage.cacheSearchField_message_translationText')}</option>
         <option value="problem">{t('projects:projectCachePage.cacheSearchField_message_problem')}</option>
+        <option value="name">{t('projects:projectCachePage.searchFieldName')}</option>
         <option value="pre_src">{t('projects:projectCachePage.searchFieldPreSrc')}</option>
         <option value="post_src">{t('projects:projectCachePage.searchFieldPostSrc')}</option>
         <option value="pre_dst">{t('projects:projectCachePage.searchFieldPreDst')}</option>

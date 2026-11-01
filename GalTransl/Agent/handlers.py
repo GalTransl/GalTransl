@@ -38,6 +38,7 @@ from GalTransl.Agent.tools.project import (
     _tool_write_project_guideline,
 )
 from GalTransl.Agent.tools.search import _tool_search_input, _tool_search_output_files
+from GalTransl.Agent.tools.find_replace import _tool_search_replace_cache
 from GalTransl.Agent.tools.plugin_settings import _tool_get_plugin_settings
 from GalTransl.Agent.tools.proofread import _tool_read_proofread_changes, _tool_revert_proofread_changes
 
@@ -53,6 +54,8 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "list_input_files": _tool_list_input_files,
     "read_input_file": _tool_read_input_file,
     "search_input": _tool_search_input,
+    "search_cache": _tool_search_replace_cache,
+    "replace_cache": _tool_search_replace_cache,
     "search_output_files": _tool_search_output_files,
     "read_guideline": _tool_read_guideline,
     "write_project_guideline": _tool_write_project_guideline,
@@ -95,7 +98,7 @@ _RETIRED_TOOLS: dict[str, str] = {
     "get_project_overview": '改用 get_project(include=[...])。',
     "get_plugin_settings": '改用 get_project(include=["plugins"], plugin_name=...)。',
     "list_transl_cache": 'list_transl_cache 已并入 read_transl_cache：改用 read_transl_cache(action="list", ...)。',
-    "search_transl_cache": 'search_transl_cache 已并入 read_transl_cache：改用 read_transl_cache(action="search", query=..., ...)。',
+    "search_transl_cache": '缓存搜索已拆出：改用 search_replace_cache(action="search", query=..., ...)。',
     "create_dict_file": '改用 dictionary(action="set", file_key="<文件名>", category="pre|gpt|post", content=...)，文件不存在时会新建并登记。',
 }
 
@@ -110,6 +113,7 @@ _TOOLS_WITH_REASON: frozenset[str] = frozenset({
     "manage_problem_filter",
     "manage_problem_white_list",
     "patch_transl_cache",
+    "replace_cache",
     "revert_proofread_changes",
     "delete_transl_cache",
     "start_translation",

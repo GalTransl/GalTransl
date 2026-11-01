@@ -11,6 +11,8 @@ import yaml
 from GalTransl.server import _scan_plugins
 from GalTransl.Agent.models import AgentToolError, AgentState
 from GalTransl.Agent.runner import AgentRunner
+from GalTransl.Agent.tool_operations import tool_operation
+from GalTransl.Agent.tool_schemas import AGENT_TOOLS
 from GalTransl.Agent.permissions import _tool_risk, _permission_needed
 from GalTransl.Agent.tools.plugin_settings import _tool_get_plugin_settings
 from GalTransl.Agent.tools.project import _tool_update_project_config
@@ -43,6 +45,15 @@ class Runner:
 
 
 class PluginSettingsAgentTests(unittest.TestCase):
+    def test_config_tool_uses_updates_without_action(self):
+        schema = next(tool["function"]["parameters"] for tool in AGENT_TOOLS if tool["function"]["name"] == "update_project_config")
+        self.assertEqual(schema["required"], ["updates"])
+        self.assertNotIn("action", schema["properties"])
+        self.assertEqual(tool_operation("update_project_config", {"updates": []}), "update_project_config")
+        for key in ("action", "mode"):
+            with self.assertRaisesRegex(AgentToolError, "直接传 updates"):
+                tool_operation("update_project_config", {key: "set", "updates": []})
+
     def test_null_sections_support_setting_discovery_preview_and_write(self):
         for plugin in (None, {"problem_common": None}):
             with self.subTest(plugin=plugin):
@@ -50,7 +61,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
                 fields = _tool_get_plugin_settings(runner, {"plugin_name": "problem_common"})["plugins"][0]["settings"]
                 self.assertEqual(fields[0]["value"], 17)
                 self.assertFalse(fields[0]["overridden"])
-                args = {"action": "set", "updates": [
+                args = {"updates": [
                     {"key": "plugin.problemPlugins", "value": ["problem_common"]},
                     {"key": "plugin.problem_common.avgSentenceLengthThreshold", "value": 25},
                 ]}
@@ -67,14 +78,14 @@ class PluginSettingsAgentTests(unittest.TestCase):
                 runner = Runner(self.plugins, {"plugin": plugin})
                 with self.assertRaises(AgentToolError):
                     _tool_get_plugin_settings(runner, {"plugin_name": "problem_common"})
-                result = _tool_update_project_config(runner, {"action": "set", "updates": [
+                result = _tool_update_project_config(runner, {"updates": [
                     {"key": "plugin.problem_common.avgSentenceLengthThreshold", "value": 25},
                 ]})
                 self.assertEqual(result["updated"], 0)
                 self.assertEqual(runner.config["plugin"], plugin)
                 self.assertEqual(runner.writes, [])
         runner = Runner([], {"plugin": "invalid"})
-        result = _tool_update_project_config(runner, {"action": "set", "updates": [{"key": "plugin.problemPlugins", "value": []}]})
+        result = _tool_update_project_config(runner, {"updates": [{"key": "plugin.problemPlugins", "value": []}]})
         self.assertEqual(result["updated"], 0)
         self.assertEqual(runner.config["plugin"], "invalid")
 
@@ -86,7 +97,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
         self.assertEqual(threshold["default"], 17)
         self.assertEqual(threshold["value"], 8)
         self.assertFalse(threshold["overridden"])
-        args = {"action": "set", "updates": [{"key": "plugin.problem_common.avgSentenceLengthThreshold", "value": 25}]}
+        args = {"updates": [{"key": "plugin.problem_common.avgSentenceLengthThreshold", "value": 25}]}
         preview = _preview_config_update(runner, args)
         result = _tool_update_project_config(runner, args)
         self.assertEqual(preview["changes"], result["changes"])
@@ -96,7 +107,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
 
     def test_problem_plugin_selection_can_be_added_to_legacy_project(self):
         runner = Runner([], {"plugin": {"filePlugin": "auto"}})
-        args = {"action": "set", "updates": [{"key": "plugin.problemPlugins", "value": []}]}
+        args = {"updates": [{"key": "plugin.problemPlugins", "value": []}]}
         preview = _preview_config_update(runner, args)
         result = _tool_update_project_config(runner, args)
         self.assertEqual(preview["changes"], result["changes"])
@@ -128,7 +139,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
         runner = Runner(self.plugins, {"common": {"language": "zh-cn"}, "plugin": {
             "filePlugin": "auto", "textPlugins": ["text_common_normalfix"],
             "file_epub_epub": {"缩小比例": 0.5}}})
-        args = {"action": "set", "updates": [{"key": "plugin.file_epub_epub.是否自动识别名称", "value": True}]}
+        args = {"updates": [{"key": "plugin.file_epub_epub.是否自动识别名称", "value": True}]}
         preview = _preview_config_update(runner, args)
         self.assertEqual(runner.writes, [])
         result = _tool_update_project_config(runner, args)
@@ -140,7 +151,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
 
     def test_missing_plugin_objects_and_repeated_updates(self):
         runner = Runner(self.plugins, {"common": {"language": "zh-cn"}})
-        args = {"action": "set", "updates": [
+        args = {"updates": [
             {"key": "plugin.file_epub_epub.是否自动识别名称", "value": True},
             {"key": "plugin.file_epub_epub.是否自动识别名称", "value": False}]}
         preview = _preview_config_update(runner, args)
@@ -163,7 +174,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
         ):
             with self.subTest(key=key, value=value):
                 runner = Runner(self.plugins)
-                args = {"action": "set", "updates": [{"key": key, "value": value}]}
+                args = {"updates": [{"key": key, "value": value}]}
                 self.assertIsNone(_preview_config_update(runner, args))
                 result = _tool_update_project_config(runner, args)
                 self.assertEqual(result["updated"], 0)
@@ -177,7 +188,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
         info = _tool_get_plugin_settings(runner, {"plugin_name": "custom"})
         self.assertNotIn("PROJECT_SECRET", json.dumps(info))
         self.assertNotIn("DEFAULT_SECRET", json.dumps(info))
-        result = _tool_update_project_config(runner, {"action": "set", "updates": [
+        result = _tool_update_project_config(runner, {"updates": [
             {"key": "plugin.custom.a.b", "value": True},
             {"key": "plugin.custom.token", "value": "other"}]})
         self.assertEqual(result["updated"], 1)
@@ -193,7 +204,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
             catalog = _scan_plugins(directory)
             plugin = next(p for p in catalog if p["module"] == "file_epub_epub")
             self.assertEqual(plugin["settings"], {"custom": 1})
-            result = _tool_update_project_config(Runner(catalog), {"action": "set", "updates": [
+            result = _tool_update_project_config(Runner(catalog), {"updates": [
                 {"key": "plugin.file_epub_epub.是否自动识别名称", "value": True}]})
             self.assertEqual(result["updated"], 0)
 
@@ -201,7 +212,7 @@ class PluginSettingsAgentTests(unittest.TestCase):
         runner = Runner(self.plugins)
         runner._http_get = lambda path: {"config": runner.config}
         with self.assertRaises(AgentToolError):
-            _tool_update_project_config(runner, {"action": "set", "updates": [
+            _tool_update_project_config(runner, {"updates": [
                 {"key": "plugin.file_epub_epub.是否自动识别名称", "value": True}]})
         self.assertEqual(runner.writes, [])
 

@@ -20,6 +20,8 @@ from unittest.mock import patch
 
 from GalTransl.Agent import runtime as rt
 from GalTransl.Agent import session_store as ss
+from GalTransl.Agent.core import COMPACT_ARCHIVE_READ_CHARS
+from GalTransl.Agent.tools.render_md import _render_tool_result_table
 from GalTransl.Agent.runtime import AgentRunner, AgentState, AgentToolError
 
 
@@ -319,9 +321,37 @@ class ReadHistoryArchiveTests(_TempSessions):
             rt._tool_read_history_archive(self._runner(), {"chunk": "nope.md"})
         self.assertIn("chunk-0001.md", str(ctx.exception))
 
+    def test_chunk_pages_preserve_text_and_continue_inside_overlong_lines(self) -> None:
+        runner = self._runner()
+        original = "first\n" + "长" * (COMPACT_ARCHIVE_READ_CHARS + 5) + "\nlast\n"
+        runner._store.write_chunk("chunk-0001.md", original)
+        page = rt._tool_read_history_archive(runner, {"chunk": "1", "limit": 1})
+        self.assertEqual(page["content"], "first\n")
+        self.assertEqual(page["next_offset"], 1)
+        parts = [page["content"]]
+        while page["has_more"]:
+            page = rt._tool_read_history_archive(runner, {
+                "chunk": "1", "limit": 2, "offset": page["next_offset"],
+                "char_offset": page.get("next_char_offset", 0),
+            })
+            self.assertLessEqual(len(page["content"]), COMPACT_ARCHIVE_READ_CHARS)
+            parts.append(page["content"])
+        self.assertEqual("".join(parts), original)
+
     def test_no_archives_is_not_an_error(self) -> None:
         out = rt._tool_read_history_archive(_runner(_state()), {})
         self.assertEqual(out["archives"], [])
+
+    def test_archive_markdown_keeps_exact_continuation_and_literal_content(self) -> None:
+        runner = self._runner()
+        text = "原样|正文```" * COMPACT_ARCHIVE_READ_CHARS + "\n"
+        runner._store.write_chunk("chunk-0001.md", text)
+        page = rt._tool_read_history_archive(runner, {"chunk": "1", "limit": 1})
+        rendered = _render_tool_result_table("read_history_archive", page)
+        self.assertIn(page["content"], rendered)
+        self.assertIn(f"offset=0, char_offset={page['next_char_offset']}", rendered)
+        self.assertEqual(rendered.count("chunk-0001.md"), 1)
+        self.assertNotIn('"has_more"', rendered)
 
 
 if __name__ == "__main__":

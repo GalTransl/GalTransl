@@ -46,13 +46,13 @@ def test_public_tools_and_optional_context_plugin(tmp_path):
     names = {tool["function"]["name"] for tool in runner._request_tools()}
     assert names == {"get_project", "update_project_config", "input", "guideline", "dictionary", "names",
                      "translation", "read_transl_cache", "edit_transl_cache", "output", "problems", "subagents",
-                     "ask_user", "read_history_archive"}
+                     "ask_user", "read_history_archive", "search_replace_cache"}
     assert not names & _RETIRED_TOOLS.keys()
     plugin = BillionContextSession(path=tmp_path / "context.sqlite3", context_window=128000)
     runner._billion_context = plugin
     tools = runner._request_tools()
     plugin.close()
-    assert len(tools) == 17
+    assert len(tools) == 18
     assert "read_history_archive" not in {tool["function"]["name"] for tool in tools}
 
 
@@ -88,8 +88,8 @@ def test_cache_set_replace_delete_keep_scope_and_require_explicit_actions():
     })
     assert result["updated"] == 1
     assert transport.disk["b.json"][0]["pre_dst"] == "keep"
-    runner._dispatch_tool("edit_transl_cache", {
-        "action": "replace", "files": "a.json", "old_text": "new", "new_text": "done",
+    runner._dispatch_tool("search_replace_cache", {
+        "action": "replace", "files": "a.json", "query": "new", "replacement": "done",
     })
     assert transport.disk["a.json"][0]["pre_dst"] == "done"
     for args in ({"filename": "a.json"}, {"action": "patch"},
@@ -110,6 +110,19 @@ def test_get_project_combines_config_and_plugins_in_one_call():
     assert {"config", "plugins"} <= result.keys()
     rendered = _render_tool_result_table("get_project", result)
     assert "config" in rendered and "plugins" in rendered
+    assert runner.approvals == []
+
+
+def test_config_dispatch_uses_updates_and_keeps_reason_without_action():
+    transport = test_agent_plugin_settings.Runner([], {"common": {"language": "ja"}})
+    runner = MemoryAgent(transport)
+    result = runner._dispatch_tool("update_project_config", {
+        "updates": [{"key": "common.language", "value": "zh-cn"}], "reason": "设置目标语言",
+    })
+    assert transport.config["common"]["language"] == "zh-cn"
+    assert result["updated"] == 1
+    assert result["reason"] == "设置目标语言"
+    assert len(transport.writes) == 1
     assert runner.approvals == []
 
 

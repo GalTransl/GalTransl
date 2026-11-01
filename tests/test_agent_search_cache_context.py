@@ -147,9 +147,10 @@ class SearchContextForwardingTests(unittest.TestCase):
 
         self.assertEqual(out["context"], 2)
         note = out["note"]
-        self.assertIn("包含关键词的那行是命中", note)
-        self.assertIn("命中上限收紧为", note)
-        self.assertIn("total 仍是全部命中数", note)
+        self.assertIn("整页上限 100 行", note)
+        self.assertIn("最多 33 条命中", note)
+        self.assertTrue(out["only_preceding"])
+        self.assertEqual(out["total"], 1)
 
     def test_missing_file_note_and_context_note_are_both_kept(self) -> None:
         """0 命中 + 文件不存在时的提示不能把上下文说明顶掉。"""
@@ -160,7 +161,8 @@ class SearchContextForwardingTests(unittest.TestCase):
 
         note = out["note"]
         self.assertIn("不存在", note)
-        self.assertIn("包含关键词的那行是命中", note)
+        self.assertEqual(out["context"], 1)
+        self.assertIn("整页上限 100 行", note)
 
     def test_no_note_without_context(self) -> None:
         runner = _SearchRunner({"results": [{"index": 1}], "total": 1})
@@ -273,11 +275,10 @@ class RealRunnerBodyTests(unittest.TestCase):
 
 class MultiConditionSearchTests(unittest.TestCase):
     def test_conditions_infer_search_and_are_forwarded_without_a_primary_query(self):
-        from GalTransl.Agent.tools.cache import _tool_read_transl_cache
+        from GalTransl.Agent.tools.find_replace import _tool_search_replace_cache
         conditions = [{"field": "post_src", "query": "悶え"}, {"field": "pre_dst", "query": "挣扎"}]
         runner = _SearchRunner({"results": [], "total": 0})
-        out = _tool_read_transl_cache(runner, {"conditions": conditions, "limit": 9999})
-        self.assertEqual(out["action"], "search")
+        out = _tool_search_replace_cache(runner, {"action": "search", "conditions": conditions, "limit": 9999})
         self.assertEqual(runner.bodies[0]["conditions"], conditions)
         self.assertEqual(runner.bodies[0]["max_results"], 100)
 

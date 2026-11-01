@@ -127,7 +127,7 @@ class ListProblemsMdTests(unittest.TestCase):
 
         self.assertIn("问题类型：残留日文", text)
         self.assertIn("命中 45 条", text)
-        self.assertIn("还有更多（用 offset 翻页）", text)
+        self.assertIn("还有更多（用 offset=2 继续）", text)
         self.assertIn("多数派模型 demo-model（表里已省略，只留少数派/改过的来源）", text)
         rows = _table_rows(text, "filename")
         # 多数派的 problem/trans_by 都已省略（空单元格）；少数派的 trans_by 逐行保留
@@ -152,7 +152,7 @@ class ReadInputFileMdTests(unittest.TestCase):
 
         self.assertIn("文件 a.json", text)
         self.assertIn("共 5 条，显示 2 条", text)
-        self.assertIn("缺失 index：4,5", text)
+        self.assertIn("缺失 index：4-5", text)
         rows = _table_rows(text, "index")
         self.assertEqual(rows[1][2], "第一行<br>第二行 \\| 有竖线")
 
@@ -245,7 +245,7 @@ class SearchMdTests(unittest.TestCase):
         text = _render_tool_result_table("read_transl_cache", result)
 
         self.assertIn("含上文（每条命中前面 1 句", text)
-        self.assertIn("本页 1 条命中、含前后文共 2 行、还有更多（用 offset 翻页）", text)
+        self.assertIn("本页 1 条命中、含前后文共 2 行、还有更多（用 offset=1 继续）", text)
         self.assertEqual([row[1] for row in _table_rows(text, "filename")], ["1*", "2"])
 
     def test_second_page_says_where_it_starts(self):
@@ -402,7 +402,8 @@ class GetNameTableMdTests(unittest.TestCase):
         text = _render_tool_result_table("get_name_table", result)
 
         self.assertIn("name替换表.csv：共 2 条人名", text)
-        self.assertIn("需要补的有 1 个：アリス", text)
+        self.assertIn("本页需补译名 1 个", text)
+        self.assertEqual(text.count("アリス"), 1)
         self.assertIn("备注：dictionary.useGPTDictInName 开着", text)
         rows = _table_rows(text, "src_name")
         self.assertEqual(rows[0], ["ドルード", "多鲁德", "12", "gpt_dict"])
@@ -437,11 +438,15 @@ class DispatcherTests(unittest.TestCase):
                 "get_project_overview", "get_project",
                 "list_dict_files",
                 "read_dict",
+                "read_history_archive",
+                "read_proofread_changes",
                 "read_output",
                 "list_input_files",
                 "list_problems",
                 "read_input_file",
                 "read_transl_cache",
+                "search_cache",
+                "replace_cache",
                 "search_input",
                 "search_output_files",
                 "manage_problem_filter",

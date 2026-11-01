@@ -36,6 +36,8 @@ from GalTransl.CustomBackground import (
 )
 from GalTransl.Cache import CACHE_TEMP_SUFFIX, _cache_get
 from GalTransl.Search import (
+    cache_search_texts,
+    cache_search_matches,
     CacheSearchCondition,
     CACHE_SEARCH_MAX_ROWS,
     CACHE_SEARCH_MAX_CHARS,
@@ -972,23 +974,15 @@ def _search_cache_entries(
             })
             matched = any(flags.values()) if field == "all" else flags.get(f"match_{field}", False)
             if conditions is not None:
-                flags = {"match_src": False, "match_dst": False, "match_problem": False}
-                matched = True
-                for condition in conditions:
-                    if condition.field in ("all", "src", "dst", "problem"):
-                        texts = {"src": src, "dst": dst, "problem": problem}
-                        sides = texts if condition.field == "all" else [condition.field]
-                        matched_sides = [side for side in sides if condition.matches(texts[side])]
-                    else:
-                        side = "src" if condition.field.endswith("_src") else "dst"
-                        # 精确字段只兼容旧键名，不把空 pre_dst 回退成校对稿。
-                        text = str(_cache_get(entry, condition.field, "") or "")
-                        matched_sides = [side] if condition.matches(text) else []
-                    if not matched_sides:
-                        matched = False
-                        break
-                    for side in matched_sides:
-                        flags[f"match_{side}"] = True
+                texts = {**cache_search_texts(entry), "problem": problem}
+                matched_fields = cache_search_matches(texts, conditions)
+                matched = bool(matched_fields)
+                flags = {"match_src": False, "match_dst": False, "match_problem": False, "match_name": False}
+                for matched_field in matched_fields:
+                    side = matched_field.rsplit("_", 1)[-1]
+                    flags[f"match_{side}"] = True
+                rows[-1]["matched_fields"] = ", ".join(matched_fields)
+                rows[-1].update({key: texts[key] for key in matched_fields if key in ("pre_src", "post_src", "pre_dst", "proofread_dst")})
             if matched:
                 all_hits.append({"filename": filename, "pos": pos, "flags": flags})
         rows_by_file[filename] = rows
@@ -1007,6 +1001,7 @@ def _search_cache_entries(
     results: list[dict[str, Any]] = []
     truncated = False
     context_limited = False
+    limited_by = None
     # 给计数、续查信息和 Agent 的 Markdown 表头预留空间，正文与元信息一起不超过 10k。
     row_budget = CACHE_SEARCH_MAX_CHARS - 1000
     for hit in candidates:
@@ -1015,6 +1010,7 @@ def _search_cache_entries(
         )
         size = len(json.dumps(candidate_rows, ensure_ascii=False))
         if len(candidate_rows) > CACHE_SEARCH_MAX_ROWS or size > row_budget:
+            limited_by = "rows" if len(candidate_rows) > CACHE_SEARCH_MAX_ROWS else "characters"
             if selected:
                 break
             # 一条命中加上下文就超预算：先只给该命中，必要时把长字段变成预览。
@@ -1036,6 +1032,8 @@ def _search_cache_entries(
     if context:
         out.update({"context": context, "returned_hits": len(selected), "returned": len(results)})
     out.update({"has_more": offset + len(selected) < len(all_hits), "next_offset": offset + len(selected)})
+    if limited_by:
+        out["limited_by"] = limited_by
     if truncated:
         out["truncated"] = True
     if context_limited:
@@ -2340,6 +2338,13 @@ def build_handler(registry: JobRegistry):
                     )
                     # 可选文件过滤：只搜这个缓存文件（Agent 修单文件问题时用）
                     search_filename = str(payload.get("filename", "")).strip()
+                    search_filenames = payload.get("filenames")
+                    if search_filenames is not None and (
+                        not isinstance(search_filenames, list) or not search_filenames
+                        or any(not isinstance(name, str) or not name for name in search_filenames)
+                    ):
+                        self._send_json({"error": "filenames must be a non-empty string array"}, status=HTTPStatus.BAD_REQUEST)
+                        return
                     if not isinstance(options, dict):
                         self._send_json({"error": "options must be an object"}, status=HTTPStatus.BAD_REQUEST)
                         return
@@ -2405,6 +2410,8 @@ def build_handler(registry: JobRegistry):
                         if not name.endswith(".json"):
                             continue
                         if search_filename and name != search_filename:
+                            continue
+                        if search_filenames is not None and name not in search_filenames:
                             continue
                         try:
                             import orjson
@@ -4263,6 +4270,8 @@ def build_handler(registry: JobRegistry):
                     return
                 try:
                     payload = self._read_json_body()
+                    if "replace_all" in payload:
+                        raise ValueError("replace_all 已移除；replace 自动替换全部匹配，请删除该参数")
                     mode = str(payload.get("mode", "overwrite") or "overwrite").strip()
                     result = apply_project_guideline_edit(
                         project_dir,
@@ -4270,7 +4279,6 @@ def build_handler(registry: JobRegistry):
                         content=str(payload.get("content", "") or ""),
                         old_text=str(payload.get("old_text", "") or ""),
                         new_text=str(payload.get("new_text", "") or ""),
-                        replace_all=payload.get("replace_all", False),
                         # dry_run=1：只算不写，把"会落盘的那份全文"回给调用方（Agent 的
                         # 审批卡据此提前显示 diff，见 runtime._preview_guideline_write）。
                         # 走同一个入口是有意的——三种 mode 的拼接规则只有这一份实现。
@@ -4278,7 +4286,7 @@ def build_handler(registry: JobRegistry):
                     )
                     self._send_json({"success": True, "filename": PROJECT_GUIDELINE_FILENAME, **result})
                 except ValueError as exc:
-                    # 参数/内容不合法（模式不认识、replace 没命中或命中多处、超长…）
+                    # 参数/内容不合法（模式不认识、replace 没命中、超长…）
                     self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                 except json.JSONDecodeError:
                     self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)

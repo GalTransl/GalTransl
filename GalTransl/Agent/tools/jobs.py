@@ -109,23 +109,22 @@ def _tool_wait(runner: AgentRunner, args: dict[str, Any]) -> Any:
     先等满则 normal，被打断则 interrupted。无论哪种都以工具成功返回，
     把状态交给模型判断下一步，而不是抛错中断整个循环。
     """
+    if "minutes" in args:
+        raise AgentToolError("minutes 已移除；请换算为 seconds（1 分钟 = 60 秒）")
     raw_seconds = args.get("seconds")
-    raw_minutes = args.get("minutes")
     try:
         seconds = float(raw_seconds) if raw_seconds is not None else 0.0
-        minutes = float(raw_minutes) if raw_minutes is not None else 0.0
     except (TypeError, ValueError):
-        raise AgentToolError("seconds / minutes 必须是数字")
-    if seconds < 0 or minutes < 0:
+        raise AgentToolError("seconds 必须是数字")
+    if seconds < 0:
         raise AgentToolError("等待时长不能为负数")
 
-    total = seconds + minutes * 60
-    if total <= 0:
+    if seconds <= 0:
         raise AgentToolError(
-            "未指定等待时长：请给出 seconds 或 minutes"
+            "未指定等待时长：请给出正数 seconds"
             "（带 job_id 时也要给——它是兜底：任务先结束就提前返回）"
         )
-    total = min(total, WAIT_SECONDS_MAX)
+    total = min(seconds, WAIT_SECONDS_MAX)
 
     # 要盯的任务（可选）：给了它就不用非等满时长——任务先结束就立刻收尾
     job_id = str(args.get("job_id", "") or "").strip()

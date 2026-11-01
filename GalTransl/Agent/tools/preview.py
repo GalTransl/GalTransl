@@ -29,6 +29,7 @@ from GalTransl.Agent.tools.problems import (
 from GalTransl.Agent.tools.project import _plan_config_updates, _guideline_write_request
 from GalTransl.Agent.tools.plugin_settings import catalog_for_updates
 from GalTransl.Agent.tools.proofread import _tool_revert_proofread_changes
+from GalTransl.Agent.tools.find_replace import _tool_search_replace_cache
 
 if TYPE_CHECKING:
     from GalTransl.Agent.runner import AgentRunner
@@ -49,6 +50,7 @@ if TYPE_CHECKING:
 # 它们同样要用户点允许，同样该看到要改什么）。不在列的都是没有可比对 diff 的：整文件删缓存
 # （delete_transl_cache 不传 indexes 时没有单个文件名可对）、启动翻译、派子代理。
 PREVIEW_TOOLS: frozenset[str] = frozenset({
+    "replace_cache",
     "revert_proofread_changes",
     "patch_transl_cache",
     "delete_transl_cache",
@@ -72,6 +74,8 @@ def _preview_tool_changes(runner: AgentRunner, name: str, args: dict[str, Any]) 
     if name not in PREVIEW_TOOLS:
         return None
     try:
+        if name == "replace_cache":
+            return _tool_search_replace_cache(runner, {**args, "dry_run": True})
         if name == "revert_proofread_changes":
             return _tool_revert_proofread_changes(runner, args, preview=True)
         if name == "patch_transl_cache":
@@ -111,6 +115,7 @@ def _preview_cache_patch(runner: AgentRunner, args: dict[str, Any]) -> dict[str,
     files: list[str] = []
     changes: list[dict[str, Any]] = []
     not_found: list[dict[str, Any]] = []
+    warnings = []
     for filename, patches in targets:
         try:
             data = runner._http_get(f"/api/projects/{pid}/cache/{urllib.parse.quote(filename)}")
@@ -125,6 +130,7 @@ def _preview_cache_patch(runner: AgentRunner, args: dict[str, Any]) -> dict[str,
         except AgentToolError:
             continue
         files.append(filename)
+        warnings.extend({"file": filename, "index": index, "effective_field": "proofread_dst"} for index in planned["shadowed_indexes"])
         for change in planned["changes"]:
             row = {**change, "file": filename}
             if qualify and isinstance(row.get("path"), str):
@@ -135,6 +141,8 @@ def _preview_cache_patch(runner: AgentRunner, args: dict[str, Any]) -> dict[str,
     if not changes:
         return None
     out: dict[str, Any] = {"files": files, "changes": changes}
+    if warnings:
+        out["warnings"] = warnings
     if not_found:
         out["not_found"] = not_found
     return out
@@ -193,7 +201,6 @@ def _preview_dict_write(runner: AgentRunner, args: dict[str, Any]) -> dict[str, 
 
 def _preview_config_update(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
     """update_project_config 的预览：读配置 + 在副本上算一遍改完的结果（一行都不写回）。"""
-    _write_action(args, ("set",))
     updates = args.get("updates")
     if not isinstance(updates, list) or not updates:
         return None
@@ -253,7 +260,7 @@ def _preview_problem_white_list(runner: AgentRunner, args: dict[str, Any]) -> di
 def _preview_guideline_write(runner: AgentRunner, args: dict[str, Any]) -> dict[str, Any] | None:
     """write_project_guideline 的预览：让后端按 dry_run 算一遍"写完会是什么样"，再和现在比。
 
-    三种 mode 的拼接规则（overwrite / append 的空行与结尾换行 / replace 的命中唯一性）只在
+    三种 mode 的拼接规则（overwrite / append 的空行与结尾换行 / replace 的全部匹配）只在
     ProjectGuideline.apply_project_guideline_edit 那一份实现里——在 Agent 侧重算一遍就是
     第二份，早晚对不上。所以预览也走那个入口，只是带 dry_run（服务端算完就走，不落盘）：
     连 replace 没命中、超长这类校验结果都跟真执行一致。

@@ -13,6 +13,8 @@ from GalTransl.Agent.runtime import (
     _TOOLS_WITH_REASON,
     _attach_reason,
 )
+from GalTransl.Agent.models import AgentToolError
+from GalTransl.Agent.tool_operations import tool_operation
 
 
 def _tool_schema(name: str) -> dict:
@@ -23,6 +25,12 @@ def _tool_schema(name: str) -> dict:
 
 
 class ReasonSchemaTests(unittest.TestCase):
+    def test_removed_parameters_are_absent_and_public_calls_explain_migration(self):
+        for name, action, removed in (("guideline", "replace", "replace_all"), ("translation", "wait", "minutes")):
+            self.assertNotIn(removed, _tool_schema(name)["parameters"]["properties"])
+            with self.assertRaisesRegex(AgentToolError, "已移除"):
+                tool_operation(name, {"action": action, removed: True})
+
     def test_reason_tools_declare_it_as_optional(self) -> None:
         for name in ("update_project_config", "guideline", "dictionary", "names", "edit_transl_cache", "problems", "subagents", "translation"):
             schema = _tool_schema(name)
@@ -46,7 +54,7 @@ class ReasonSchemaTests(unittest.TestCase):
             for tool in AGENT_TOOLS
             if "reason" in tool["function"]["parameters"].get("properties", {})
         }
-        self.assertEqual(declared, {"update_project_config", "guideline", "dictionary", "names", "edit_transl_cache", "problems", "subagents", "translation"})
+        self.assertEqual(declared, {"update_project_config", "guideline", "dictionary", "names", "edit_transl_cache", "search_replace_cache", "problems", "subagents", "translation"})
 
 
 class AttachReasonTests(unittest.TestCase):

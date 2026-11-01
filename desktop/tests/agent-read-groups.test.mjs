@@ -18,6 +18,18 @@ const load = createTypeScriptLoader();
 const { activityEntries } = load(new URL('../src/pages/agent/readGroups.ts', import.meta.url));
 const read = (step, extra = {}) => ({ kind: 'tool', step, id: `id-${step}`, name: 'read_input_file', ok: true, ...extra });
 
+test('cache searches and replacement previews group as reads while execution stays separate', () => {
+  const items = [
+    read(1, { name: 'search_replace_cache', arguments: { action: 'search' } }),
+    read(2, { name: 'search_replace_cache', arguments: { action: 'replace', dry_run: true } }),
+    read(3, { name: 'search_replace_cache', arguments: { action: 'replace' } }),
+  ];
+  const entries = activityEntries(items, false);
+  assert.deepEqual(Array.from(entries, entry => [Array.from(entry.indices), entry.reading]), [
+    [[0, 1], true], [[2], false],
+  ]);
+});
+
 test('consecutive known reads group without reordering or mutating events', () => {
   const items = [read(1), read(2), read(3, { name: 'save_dict' }), read(4), read(5)];
   const before = JSON.stringify(items);

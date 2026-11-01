@@ -128,6 +128,8 @@ const TOOL_META: Record<string, ToolMeta> = {
   manage_problem_filter: { get action() { return translate("agent:tools.manage_problem_filter.action"); }, get running() { return translate("agent:tools.manage_problem_filter.running"); }, verb: '', icon: 'filter', summary: (a) => [str(a?.action), Array.isArray(a?.keyword) ? a.keyword.map((k) => str(k)).join('、') : str(a?.keyword)].filter(Boolean).join(' · ') },
   manage_problem_white_list: { get action() { return translate("agent:tools.manage_problem_white_list.action"); }, get running() { return translate("agent:tools.manage_problem_white_list.running"); }, verb: '', icon: 'filter', summary: (a) => [str(a?.action), Array.isArray(a?.entry) ? a.entry.map((k) => str(k)).join('、') : str(a?.entry)].filter(Boolean).join(' · ') },
   read_transl_cache: { get action() { return translate("agent:tools.read_transl_cache.action"); }, get running() { return translate("agent:tools.read_transl_cache.running"); }, verb: '', icon: 'file-text', summary: translCacheSummary },
+  search_cache: { get action() { return translate("agent:tools.search_cache.action"); }, get running() { return translate("agent:tools.search_cache.running"); }, verb: '', icon: 'search-plus', summary: (a) => [str(a?.query), str(a?.field), str(a?.files), str(a?.conditions)].filter(Boolean).join(' · ') },
+  replace_cache: { get action() { return translate("agent:tools.replace_cache.action"); }, get running() { return translate("agent:tools.replace_cache.running"); }, verb: '', icon: 'repeat', summary: (a) => [a?.dry_run ? translate("agent:tools.replace_cache.preview") : '', `${str(a?.query)} -> ${str(a?.replacement)}`, str(a?.field), str(a?.files), str(a?.conditions)].filter(Boolean).join(' · ') },
   read_output: { get action() { return translate("agent:tools.read_output.action"); }, get running() { return translate("agent:tools.read_output.running"); }, verb: '', icon: 'file-text', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
   search_input: { get action() { return translate("agent:tools.search_input.action"); }, get running() { return translate("agent:tools.search_input.running"); }, verb: '', icon: 'search-plus', summary: (a) => [str(a?.query), str(a?.filename), a?.context ? translate("agent:toolMeta.summary_filter_sentenceContext", { displayContext: a.context }) : ''].filter(Boolean).join(' · ') },
   search_output_files: { get action() { return translate("agent:tools.search_output_files.action"); }, get running() { return translate("agent:tools.search_output_files.running"); }, verb: '', icon: 'search-plus', summary: (a) => [str(a?.query), str(a?.filename), a?.context ? translate("agent:toolMeta.summary_filter_sentenceContext", { displayContext: a.context }) : ''].filter(Boolean).join(' · ') },
@@ -188,6 +190,7 @@ export const TOOL_OPERATIONS: Record<string, Record<string, string>> = {
   names: { read: 'get_name_table', set: 'save_name_table', overwrite: 'save_name_table' },
   translation: { start: 'start_translation', status: 'get_runtime', wait: 'wait', stop: 'stop_translation' },
   edit_transl_cache: { set: 'patch_transl_cache', replace: 'patch_transl_cache', delete: 'delete_transl_cache' },
+  search_replace_cache: { search: 'search_cache', replace: 'replace_cache' },
   output: { read: 'read_output', search: 'search_output_files' },
   problems: { items: 'list_problems', filter: 'manage_problem_filter', white_list: 'manage_problem_white_list' },
   subagents: { run: 'run_subagents', changes: 'read_proofread_changes', revert: 'revert_proofread_changes' },
@@ -206,6 +209,11 @@ export function toolOperation(name: string | undefined, args?: Record<string, un
 export function toolMeta(name: string | undefined, args?: Record<string, unknown>): ToolMeta {
   if (!name) return DEFAULT_TOOL_META;
   const meta = TOOL_META[toolOperation(name, args)];
+  if (meta && toolOperation(name, args) === 'replace_cache' && args?.dry_run === true) return {
+    ...meta,
+    action: translate("agent:tools.replace_cache.preview"),
+    running: translate("agent:tools.replace_cache.previewRunning"),
+  };
   if (meta) return TOOL_OPERATIONS[name] ? {
     ...meta,
     summary: (a, result) => (TOOL_META[toolOperation(name, a)] || meta).summary(a, result),
@@ -218,7 +226,7 @@ export function toolMeta(name: string | undefined, args?: Record<string, unknown
 
 const DICT_CATEGORY_LABELS: Record<string, string> = { get pre() { return translate("agent:toolMeta.pre_pre_text"); }, gpt: 'GPT', get post() { return translate("agent:toolMeta.post_post_text"); } };
 
-/** read_transl_cache 的 action（与后端 _cache_read_action 同一推断：有 query 是 search，有 filename 是 read）。 */
+/** 保留旧会话的 query/search 摘要；当前 read_transl_cache 只列文件和读取条目。 */
 function translCacheAction(a: Record<string, unknown> | undefined): string {
   const action = str(a?.action);
   if (action) return action;
@@ -249,11 +257,11 @@ export function toolReason(args: Record<string, unknown> | undefined): string {
   return typeof args?.reason === 'string' ? args.reason.trim().replace(/\s+/g, ' ') : '';
 }
 
-/** wait 工具的参数摘要：把 seconds/minutes 归一成"等待 2 分钟"。
+/** wait 工具的参数摘要：把秒数显示成"等待 2 分钟"。
  *  带了 job_id（等某个任务，任务先结束就提前返回）时把这一点说清楚。 */
 function waitSummary(args: Record<string, unknown> | undefined): string {
   const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-  const totalSeconds = num(args?.seconds) + num(args?.minutes) * 60;
+  const totalSeconds = num(args?.seconds);
   const reason = typeof args?.reason === 'string' ? args.reason.trim() : '';
   const jobId = typeof args?.job_id === 'string' ? args.job_id.trim() : '';
   if (totalSeconds <= 0) return reason;

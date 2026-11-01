@@ -1,4 +1,4 @@
-"""翻译缓存类工具：read_transl_cache（列文件 / 读条目 / 搜索）、修改、删除缓存条目，以及读取输出文件。"""
+"""翻译缓存类工具：read_transl_cache（列文件 / 读条目）、修改、删除缓存条目，以及读取输出文件。"""
 
 from __future__ import annotations
 
@@ -21,13 +21,11 @@ from GalTransl.Agent.tools.cache_fields import (
 )
 from GalTransl.Agent.tools.common import (
     _write_action,
-    _text_replacement,
     _change,
     _dominant_trans_by,
     _entry_index,
     _read_entries_page,
     _mark_context_row,
-    _only_preceding_arg,
     _parse_index_spec,
     _strip_dominant_trans_by,
 )
@@ -42,8 +40,8 @@ from GalTransl.Agent.tools.listing import (
     _select_list_items,
 )
 from GalTransl.Agent.tools.project import _APPEND_CACHE_SUFFIX, _backend_summary
-from GalTransl.Agent.tools.search import _apply_search_order, _search_order, _search_paging_args, _tool_search_transl_cache
-from GalTransl.Search import select_search_hits
+from GalTransl.Search import parse_cache_search_conditions, cache_search_texts, cache_search_matches
+from GalTransl.ProblemFilter import filter_problem_text
 
 if TYPE_CHECKING:
     from GalTransl.Agent.runner import AgentRunner
@@ -96,7 +94,7 @@ def _tool_list_transl_cache(
         "sampled": len(shown) < len(matched),
     }
     notes = _list_notes(
-        matched=len(matched), grep=grep, returned=len(shown), limit=limit, order=order, unit="缓存文件", offset=offset
+        matched=len(matched), grep=grep, returned=len(shown), order=order
     )
     if notes:
         result["note"] = "；".join(notes)
@@ -280,32 +278,9 @@ def _read_transl_cache_entries(runner: AgentRunner, args: dict[str, Any]) -> Any
             "默认精简字段：post_dst_preview 只在译后处理真的改了内容时返回（只差首尾「」这类"
             "对话符号不算），proofread_* / trans_by / 备注等空值已省略；要看其它字段传 fields。"
         )
-    index_spec = str(args.get("index", "") or "").strip()
-    # 不指定 index：按 order 从全部过滤结果中挑选，默认仍取前 30 条。
-    if not index_spec:
-        order = _search_order(args)
-        limit, offset = _search_paging_args({"limit": 30, **args})
-        picked = select_search_hits(entries, limit, offset, order)
-        more = offset + len(picked) < len(entries)
-        result = {
-            "filename": filename, "count": len(entries), "offset": offset,
-            "returned": len(picked), "has_more": more, "entries": picked, **result_extra,
-        }
-        if more and order in ("name", "reverse"):
-            result["next_offset"] = offset + len(picked)
-        _apply_search_order(result, order)
-        return result
-
-    raw_context = args.get("context", 0)
-    try:
-        context = max(0, min(int(raw_context), 20))
-    except (TypeError, ValueError):
-        raise AgentToolError(f"context 必须是 0-20 的整数（收到 {raw_context!r}）")
-    only_preceding = _only_preceding_arg(args)
     return {
-        "filename": filename, "count": len(entries), "context": context,
-        **({"only_preceding": only_preceding} if context else {}), **result_extra,
-        **_read_entries_page(entries, args, context=context, only_preceding=only_preceding),
+        "filename": filename, "count": len(entries), **result_extra,
+        **_read_entries_page(entries, args),
     }
 
 
@@ -352,35 +327,33 @@ def _agent_model_name(runner: AgentRunner) -> str:
     return str(_backend_summary(profile, name).get("model") or "")
 
 
-# read_transl_cache 一个工具管三件读缓存的事（原来是 list/read/search_transl_cache 三个工具）。
-CACHE_READ_ACTIONS: tuple[str, ...] = ("list", "read", "search")
+# read_transl_cache 保留列文件和读条目；搜索由 search_replace_cache 提供。
+CACHE_READ_ACTIONS: tuple[str, ...] = ("list", "read")
 
 
 def _cache_read_action(args: dict[str, Any]) -> str:
     """read_transl_cache 的 action：显式给了就校验；没给按参数推断——
-    有 query/conditions 是 search，有 filename 是 read，都没有就是 list（先看有哪些文件）。"""
+    有 filename 是 read，否则 list；搜索参数给出迁移提示。"""
+    if args.get("action") == "search" or "query" in args or "conditions" in args:
+        raise AgentToolError('缓存搜索已拆出，请改用 search_replace_cache(action="search", ...)')
     action = str(args.get("action", "") or "").strip().lower()
     if action:
         if action not in CACHE_READ_ACTIONS:
             raise AgentToolError(f"action 只能是 {' / '.join(CACHE_READ_ACTIONS)}，收到 {action!r}")
         return action
-    if "conditions" in args or str(args.get("query", "") or "").strip():
-        return "search"
     if str(args.get("filename", "") or "").strip():
         return "read"
     return "list"
 
 
 def _tool_read_transl_cache(runner: AgentRunner, args: dict[str, Any]) -> Any:
-    """读缓存：list=列缓存文件，read=读某个文件的条目，search=在缓存里搜。
+    """读缓存：list=列缓存文件，read=读某个文件的条目。
 
     结果带上 action，渲染器（_md_render_transl_cache）据此选表格样式。
     """
     action = _cache_read_action(args)
     if action == "list":
         result = _tool_list_transl_cache(runner, args)
-    elif action == "search":
-        result = _tool_search_transl_cache(runner, args)
     else:
         result = _read_transl_cache_entries(runner, args)
     return {"action": action, **result} if isinstance(result, dict) else result
@@ -475,7 +448,16 @@ def _cache_replace_request(args: dict[str, Any], allowed: frozenset[str]) -> dic
         return None
     if "patches" in args:
         raise AgentToolError("action=replace cannot be combined with patches")
-    old_text, new_text, replace_all = _text_replacement(args)
+    if "replace_all" in args:
+        raise AgentToolError("缓存替换已移除 replace_all；现在替换指定范围内的全部匹配")
+    if "query" in args or "replacement" in args:
+        raise AgentToolError("内部缓存替换使用 old_text / new_text")
+    old_text = args.get("old_text")
+    new_text = args.get("new_text")
+    if not isinstance(old_text, str) or not old_text:
+        raise AgentToolError("old_text must be a non-empty string")
+    if not isinstance(new_text, str):
+        raise AgentToolError("new_text must be a string (empty string clears matched text)")
     filenames = args.get("files")
     if filenames is None:
         filenames = [args.get("filename")]
@@ -497,7 +479,9 @@ def _cache_replace_request(args: dict[str, Any], allowed: frozenset[str]) -> dic
         "fields": list(dict.fromkeys(fields)),
         "old_text": old_text,
         "new_text": new_text,
-        "replace_all": replace_all,
+        "conditions": parse_cache_search_conditions({"conditions": args["conditions"]}) if args.get("conditions") else [],
+        "match_case": args.get("match_case", True),
+        "filter_keys": args.get("_filter_keys", []),
     }
 
 
@@ -528,31 +512,39 @@ def _resolve_cache_replace_files(runner: AgentRunner, selectors: list[str]) -> l
 def _plan_cache_replacements(
     entries: list[Any], request: dict[str, Any], allowed: frozenset[str], *, clear_comment: bool = False,
 ) -> dict[str, Any]:
-    hits = sum(
-        value.count(request["old_text"])
-        for entry in entries if isinstance(entry, dict)
-        for field in request["fields"]
-        if isinstance(value := _cache_field_value(entry, field), str)
-    )
-    if not request["replace_all"] and hits != 1:
-        raise AgentToolError(f"old_text 在该缓存文件的所选字段中匹配 {hits} 次；默认要求唯一匹配，批量替换请显式传 replace_all=true")
+    conditions = request.get("conditions", [])
+    selected = [entry for entry in entries if isinstance(entry, dict) and (
+        not conditions or cache_search_matches(
+            {**cache_search_texts(entry), "problem": filter_problem_text(entry.get("problem", ""), request.get("filter_keys", []))},
+            conditions,
+        )
+    )]
+    pattern = re.compile(re.escape(request["old_text"]), 0 if request.get("match_case", True) else re.IGNORECASE)
+    counts = [
+        sum(
+            len(pattern.findall(value))
+            for field in request["fields"]
+            if isinstance(value := _cache_field_value(entry, field), str)
+        )
+        for entry in selected
+    ]
+    matched = {"matches": sum(counts), "matched_entries": sum(count > 0 for count in counts)}
     patches = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
+    for entry in selected:
         updates = {}
         for field in request["fields"]:
             value = _cache_field_value(entry, field)
-            if isinstance(value, str) and request["old_text"] in value:
-                after = value.replace(request["old_text"], request["new_text"])
+            if isinstance(value, str) and pattern.search(value):
+                after = pattern.sub(lambda match: request["new_text"], value)
                 if after != value:
                     updates[field] = after
         if updates:
             patches.append({"index": entry.get("index"), **updates})
     # 文本替换保留命中范围之外的字符，包括已有换行和转义序列。
-    return _plan_cache_patches(
+    planned = _plan_cache_patches(
         entries, patches, allowed, clear_comment=clear_comment, normalize_linebreaks=False,
     )
+    return {**planned, **matched}
 
 
 def _plan_cache_patches(
@@ -651,6 +643,12 @@ def _plan_cache_patches(
         "changes": changes,
         "skipped": skipped,
         "not_found": not_found,
+        "shadowed_indexes": [
+            idx for idx, now in shadow.items()
+            if _cache_field_value(now, "pre_dst") != _cache_field_value(by_index[idx], "pre_dst")
+            and _cache_field_value(now, "proofread_dst")
+            and _cache_field_value(now, "proofread_dst") == _cache_field_value(by_index[idx], "proofread_dst")
+        ],
     }
 
 
@@ -680,11 +678,13 @@ def _patch_one_cache_file(
     qualify: bool,
     clear_comment: bool = False,
     replace_request: dict[str, Any] | None = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     with _cache_file_lock(runner, filename):
         return _patch_one_cache_file_locked(
             runner, pid, filename, patches, allowed, qualify=qualify, clear_comment=clear_comment,
             replace_request=replace_request,
+            dry_run=dry_run,
         )
 
 
@@ -698,6 +698,7 @@ def _patch_one_cache_file_locked(
     qualify: bool,
     clear_comment: bool = False,
     replace_request: dict[str, Any] | None = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """改一个缓存文件里的若干条目：读全量 → 计划 → 写全量 → 回「改了什么、还剩什么问题」。
 
@@ -726,7 +727,8 @@ def _patch_one_cache_file_locked(
     applied_indexes: list[int] = []
     retranslated_indexes: list[int] = []
     for item in planned["plan"]:
-        item["entry"].update(item["updates"])
+        if not dry_run:
+            item["entry"].update(item["updates"])
         applied_indexes.append(item["index"])
         if item["updates"].keys() & _TRANSLATION_FIELDS:
             retranslated_indexes.append(item["index"])
@@ -742,9 +744,14 @@ def _patch_one_cache_file_locked(
         "filename": filename,
         "updated": len(applied_indexes),
         "changes": changes,
+        "shadowed_indexes": planned["shadowed_indexes"],
     }
+    if replace_request is not None:
+        result["matches"] = planned["matches"]
+        result["matched_entries"] = planned["matched_entries"]
     if not applied_indexes and not skipped and not not_found:
-        result["note"] = "内容没有变化，未保存文件"
+        if not dry_run:
+            result["note"] = "内容没有变化，未保存文件"
     elif not applied_indexes:
         # 把跳过原因带上：否则模型只看到"没有条目被更新"，不知道是字段不许改还是 index 写错了
         # （窄字段白名单也通过这里返回拒绝原因）
@@ -757,6 +764,8 @@ def _patch_one_cache_file_locked(
         result["not_found"] = [{"file": filename, "index": idx} for idx in sorted(not_found)]
     if skipped:
         result["skipped"] = [{**s, "file": filename} for s in skipped]
+    if dry_run:
+        return {**result, "updated": 0, "would_update": len(applied_indexes), "dry_run": True}
     if not applied_indexes:
         return result  # 没有要写的东西：别白跑一次 /cache/save（它还会重建 problem）
 
@@ -810,7 +819,7 @@ def _patch_one_cache_file_locked(
 
 
 def _tool_patch_transl_cache(
-    runner: AgentRunner, args: dict[str, Any], allowed_fields: frozenset[str] | None = None
+    runner: AgentRunner, args: dict[str, Any], allowed_fields: frozenset[str] | None = None, *, dry_run: bool = False
 ) -> Any:
     """改缓存条目的字段（主 Agent 可改 pre_dst / proofread_dst / proofread_comment）。
 
@@ -849,6 +858,7 @@ def _tool_patch_transl_cache(
                     qualify=qualify,
                     clear_comment=clear_comment,
                     replace_request=replace_request,
+                    dry_run=dry_run,
                 )
             )
         except AgentToolError as exc:
@@ -857,11 +867,12 @@ def _tool_patch_transl_cache(
             files.append({"filename": filename, "updated": 0, "changes": [], "error": str(exc)})
 
     updated = sum(int(item.get("updated") or 0) for item in files)
-    if not updated and all(item.get("error") for item in files):
+    if not dry_run and not updated and all(item.get("error") for item in files):
         detail = "；".join(
-            f"{item['filename']}：{item.get('error') or '没有条目被更新'}" for item in files
+            f"{item['filename']}：{item.get('error') or '没有条目被更新'}" for item in files[:10]
         )
-        raise AgentToolError(f"没有条目被更新（{detail}）")
+        omitted = f"；其余 {len(files) - 10} 个失败文件未展开" if len(files) > 10 else ""
+        raise AgentToolError(f"没有条目被更新（{len(files)} 个文件失败；{detail}{omitted}）")
 
     result: dict[str, Any] = {
         "updated": updated,
@@ -873,6 +884,24 @@ def _tool_patch_transl_cache(
     }
     if replace_request is not None:
         result["action"] = "replace"
+        result["matches"] = sum(item.get("matches", 0) for item in files)
+        result["matched_entries"] = sum(item.get("matched_entries", 0) for item in files)
+        count_key = "would_update" if dry_run else "updated"
+        changed_count = sum(item.get(count_key, 0) for item in files)
+        result["failed_files"] = sum(bool(item.get("error") or item.get("skipped") or item.get("not_found")) for item in files)
+        result["unmatched_files"] = sum(item.get("matches") == 0 for item in files)
+        result["unchanged_files"] = sum(
+            item.get("matches", 0) > 0 and not item.get(count_key)
+            and not (item.get("error") or item.get("skipped") or item.get("not_found"))
+            for item in files
+        )
+        result["status"] = (
+            ("partial" if changed_count else "failed") if result["failed_files"]
+            else ("success" if changed_count else "no_change")
+        )
+    if dry_run:
+        result["dry_run"] = True
+        result["would_update"] = sum(item.get("would_update", 0) for item in files)
     trans_by = next((str(item["trans_by"]) for item in files if item.get("trans_by")), "")
     if trans_by:
         result["trans_by"] = trans_by
