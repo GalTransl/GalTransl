@@ -174,11 +174,13 @@
 }
 
 .sidebar__top-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
   padding: var(--space-3) 0 var(--space-1);
   flex-shrink: 0;
   /* 与下面的项目列表分开：上面是固定入口（首页 / Agent），下面是可滚动的项目。
-     线自己只留 space-1：导航项自带 12px 内边距，加起来就是「文字到线 16px」，
-     与头部那条线（logo 下方 16px）同一种呼吸感，线不额外撑一圈空白。 */
+     线自己只留 space-1，导航项内边距与项间距一起提供留白。 */
   border-bottom: 1px solid var(--color-line);
 }
 
@@ -233,6 +235,10 @@
     color var(--transition-fast);
   white-space: nowrap;
   overflow: hidden;
+}
+
+:is(.sidebar__top-nav, .sidebar__bottom-nav) .sidebar__nav-item {
+  padding-block: var(--space-2);
 }
 
 .sidebar__nav-notice-dot {
@@ -734,8 +740,7 @@
 }
 
 .sidebar__bottom-nav {
-  /* 上方 space-1 与顶部分割线对齐（两面都是"文字到线 16px"）；下方保留 space-3，
-     那是与底部按钮那条线之间的距离 */
+  /* 上方 space-1 与顶部导航的分割线留白对齐；下方 space-3 留给底部按钮。 */
   padding: var(--space-1) 0 var(--space-3);
   display: flex;
   flex-direction: column;
