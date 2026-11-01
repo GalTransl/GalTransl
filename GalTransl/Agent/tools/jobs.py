@@ -9,6 +9,7 @@ from GalTransl import TRANSLATOR_SUPPORTED
 from GalTransl.Agent.core import RUNTIME_ERRORS_PER_QUERY, _log
 from GalTransl.Agent.models import AgentToolError
 from GalTransl.Agent.tools.project import _backend_summary
+from GalTransl.TranslationScope import parse_sentence_range
 
 if TYPE_CHECKING:
     from GalTransl.Agent.models import AgentState
@@ -52,6 +53,9 @@ def _tool_start_translation(runner: AgentRunner, args: dict[str, Any]) -> Any:
         body["input_files"] = [str(f).strip() for f in files if str(f).strip()]
         if not body["input_files"]:
             raise AgentToolError("files 里没有有效的文件名")
+    sentence_range = parse_sentence_range(args.get("sentence_range"), body.get("input_files", []), translator)
+    if sentence_range is not None:
+        body["sentence_range"] = str(sentence_range)
     result = runner._http_post("/api/jobs", body)
     used = _backend_summary(profile, profile_name)
     out: dict[str, Any] = {
@@ -61,6 +65,7 @@ def _tool_start_translation(runner: AgentRunner, args: dict[str, Any]) -> Any:
         # 实际用哪份后端起任务（名字/类型/模型），出问题时一眼能对上
         "backend": used,
         **({"files": body["input_files"]} if files is not None else {}),
+        **({"sentence_range": str(sentence_range)} if sentence_range is not None else {}),
     }
     if not uses_gendic_default and not state.translator_profile_data:
         out["note"] = (

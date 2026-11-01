@@ -12,6 +12,7 @@ from GalTransl import (
 from GalTransl.Dictionary import CGptDict, CNormalDic
 from GalTransl.RuntimePaths import resolve_dict_dir
 from GalTransl.PluginSettings import get_plugin_config_section
+from GalTransl.TranslationScope import SentenceRange
 from asyncio import gather
 from tenacity import retry, stop_after_attempt, wait_fixed
 import httpx
@@ -142,10 +143,11 @@ class CProjectConfig:
         self.translation_guideline=""
         self.non_interactive: bool = False  # 非交互模式（前端启动时为True）
         self.runtime_project_dir: str = projectPath
-        # 只翻译这些输入文件（文件名匹配）；空 = 全部。试译/部分重翻场景由
+        # 只翻译这些输入文件（输入目录相对路径）；空 = 全部。试译/部分重翻场景由
         # JobSpec.input_files 注入，run_job 阶段设置，翻译流程读取。
         self.runtime_input_files: list = []
-        
+        self.runtime_sentence_range: SentenceRange | None = None
+
 
     def getProjectConfig(self) -> dict:
         """

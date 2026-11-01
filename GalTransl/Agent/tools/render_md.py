@@ -136,7 +136,7 @@ def _md_render_list_dict_files(result: dict[str, Any]) -> str | None:
 
 
 def _md_render_project_overview(result: dict[str, Any]) -> str | None:
-    if not any(key in result for key in ("progress", "backend", "config", "config_field_descriptions", "plugins", "cache_output")):
+    if not any(key in result for key in ("progress", "dictionaries", "names", "backend", "config", "config_field_descriptions", "plugins", "cache_output")):
         return None
     parts: list[str] = []
     if "progress" in result:
@@ -148,6 +148,21 @@ def _md_render_project_overview(result: dict[str, Any]) -> str | None:
                 for key, value in progress.items() if key != "note"
             ]) if progress else "暂无进度数据。",
             str(progress.get("note") or ""),
+        ])
+    if "dictionaries" in result:
+        dictionaries = result["dictionaries"]
+        parts.extend([
+            "## dictionaries · 当前配置字典",
+            _md_table(["category", "file_key", "count", "error"], dictionaries.get("files")) or "当前配置未启用字典。",
+            str(dictionaries.get("note") or ""),
+        ])
+    if "names" in result:
+        names = result["names"]
+        parts.extend([
+            "## names · name 替换表统计",
+            _md_table(["field", "value"], [{"field": key, "value": value} for key, value in names.items() if key != "note"]),
+            "未找到 name 替换表。" if not names.get("source_file") else "",
+            str(names.get("note") or ""),
         ])
     if "backend" in result:
         backend = result["backend"]

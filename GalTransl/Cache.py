@@ -237,7 +237,7 @@ def _build_cache_dict_from_snapshot(cache_list: list) -> tuple[dict, list[str]]:
             line_next = f'{cache_list[next_index].get("name", "")}{_cache_get(cache_list[next_index], "pre_src", "")}'
         line_priv = "None" if line_priv == "" else line_priv
         line_next = "None" if line_next == "" else line_next
-        cache_key = line_priv + line_now + line_next
+        cache_key = cache.get("__cache_key") or line_priv + line_now + line_next
         if cache_key not in cache_dict:
             cache_order.append(cache_key)
         cache_dict[cache_key] = cache
@@ -264,7 +264,7 @@ async def _compact_cache_from_append(cache_file_path: str, append_file_path: str
                 cache_obj = orjson.loads(line)
             except Exception:
                 continue
-            cache_key = str(cache_obj.pop("__cache_key", ""))
+            cache_key = str(cache_obj.get("__cache_key", ""))
             if not cache_key:
                 continue
             if cache_key not in cache_dict:
@@ -336,8 +336,11 @@ async def save_transCache_to_json(trans_list: CTransList, cache_file_path, post_
         cache_obj = _build_cache_obj(tran, post_save=post_save)
         if cache_obj is None:
             continue
-        cache_json.append(cache_obj)
         cache_key = _build_cache_key_for_tran(tran)
+        if post_save and cache_key:
+            # 部分翻译的快照缺少未译行，必须保留真实邻句构成的 key，才能供后续全量命中。
+            cache_obj["__cache_key"] = cache_key
+        cache_json.append(cache_obj)
         if cache_key:
             append_obj = dict(cache_obj)
             append_obj["__cache_key"] = cache_key

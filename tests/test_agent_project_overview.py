@@ -266,6 +266,10 @@ class OverviewToolReturnTests(unittest.TestCase):
                 }
             if path.endswith("/files"):
                 return {"input_files": []}
+            if "/dictionary?" in path:
+                return {"files": []}
+            if path.endswith("/name-table"):
+                return {"source_file": None, "names": []}
             raise AssertionError(f"未预期的请求: {path}")
 
         with patch.object(AgentRunner, "_http_get", lambda self, path: fake_get(path)):
@@ -306,6 +310,10 @@ class OverviewIncludeTests(unittest.TestCase):
                 return {"input_files": [{"name": "01.json", "is_file": True}]}
             if "/config" in path:
                 return {"config": {"common": {"language": "zh-cn"}}}
+            if "/dictionary?" in path:
+                return {"files": []}
+            if path.endswith("/name-table"):
+                return {"source_file": None, "names": []}
             raise AssertionError(f"未预期的请求: {path}")
 
         return fake_get

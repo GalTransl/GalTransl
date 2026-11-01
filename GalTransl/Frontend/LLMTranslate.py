@@ -38,6 +38,7 @@ from GalTransl.CSplitter import (
     DictionaryCombiner,
 )
 from GalTransl.TerminalOutput import should_print_translation_logs, terminal_progress
+from GalTransl.TranslationScope import SentenceRange
 
 
 def _runtime_project_dir(projectConfig: CProjectConfig) -> str:
@@ -160,7 +161,16 @@ def _check_stop_requested(projectConfig: CProjectConfig):
         raise JobCancelledError()
 
 
-def _build_runtime_file_maps(ordered_chunks: list[SplitChunkMetadata], input_dir: str) -> tuple[dict[str, int], dict[str, str]]:
+def _chunk_translation_list(chunk: SplitChunkMetadata, sentence_range: SentenceRange | None):
+    if sentence_range is None:
+        return chunk.trans_list
+    chunk_start = max(0, chunk.start_index - chunk.cross_num)
+    start = max(0, sentence_range.start - chunk_start)
+    end = max(0, sentence_range.end - chunk_start)
+    return chunk.trans_list[start:end]
+
+
+def _build_runtime_file_maps(ordered_chunks: list[SplitChunkMetadata], input_dir: str, sentence_range: SentenceRange | None = None) -> tuple[dict[str, int], dict[str, str]]:
     """构造两个给前端使用的映射：
 
     - file_totals: {显示名: 该文件总行数}，用于前端展示每个文件的进度分母。
@@ -174,6 +184,10 @@ def _build_runtime_file_maps(ordered_chunks: list[SplitChunkMetadata], input_dir
         file_totals.setdefault(display_name, 0)
         non_cross_start = max(0, int(chunk.cross_num or 0))
         non_cross_end = min(non_cross_start + int(chunk.chunk_non_cross_size or 0), len(chunk.json_list))
+        if sentence_range is not None:
+            chunk_start = max(0, chunk.start_index - chunk.cross_num)
+            non_cross_start = max(chunk.start_index, sentence_range.start) - chunk_start
+            non_cross_end = max(non_cross_start, min(chunk.end_index, sentence_range.end) - chunk_start)
         progress_countable = 0
         for row in chunk.json_list[non_cross_start:non_cross_end]:
             if not isinstance(row, dict):
@@ -368,17 +382,19 @@ async def doLLMTranslate(
             return True
         raise RuntimeError(f"{projectConfig.getInputPath()}中没有待翻译的文件")
 
-    # 只翻译指定文件子集（试译/部分重翻场景）。按文件名（basename）匹配，
-    # 兼容嵌套目录；指定了但一个都不存在时报错，避免静默全量翻译。
+    # 输入清单返回相对路径；同名文件必须按路径区分，避免试译意外多选。
     runtime_input_files = getattr(projectConfig, "runtime_input_files", None)
+    sentence_range = projectConfig.runtime_sentence_range
     if runtime_input_files:
-        wanted = {os_path.basename(f) for f in runtime_input_files}
-        file_list = [f for f in file_list if os_path.basename(f) in wanted]
-        if not file_list:
+        wanted = {f.replace("\\", "/") for f in runtime_input_files}
+        by_name = {os_path.relpath(f, input_dir).replace(os_sep, "/"): f for f in file_list}
+        missing = wanted - by_name.keys()
+        if missing:
             raise RuntimeError(
-                f"指定的输入文件 {sorted(wanted)} 在 {projectConfig.getInputPath()} 中都不存在"
+                f"指定的输入文件 {sorted(missing)} 在 {projectConfig.getInputPath()} 中不存在，请使用 input(action=\"list\") 返回的相对路径"
             )
-        LOGGER.info(f"本次只翻译指定的 {len(file_list)} 个文件: {sorted(os_path.basename(f) for f in file_list)}")
+        file_list = [f for name, f in by_name.items() if name in wanted]
+        LOGGER.info(f"本次只翻译指定的 {len(file_list)} 个文件: {sorted(wanted)}")
 
     # 按文件名自然排序（处理数字部分）
     import re
@@ -412,6 +428,8 @@ async def doLLMTranslate(
             file_path = future_to_file[future]
             try:
                 json_list, save_func = future.result()
+                if sentence_range is not None and sentence_range.start >= len(json_list):
+                    raise ValueError(f"{file_path} 只有 {len(json_list)} 句，sentence_range={sentence_range} 未选中任何句子")
                 projectConfig.file_save_funcs[file_path] = save_func
                 chunks = input_splitter.split(json_list, file_path)
                 file_has_name = any("name" in row or "names" in row for row in json_list)
@@ -423,9 +441,13 @@ async def doLLMTranslate(
                 if eng_type == "GenDic":
                     all_jsons.extend(json_list)
             except Exception as exc:
+                if sentence_range is not None:
+                    raise
                 LOGGER.error(get_text("file_processing_error", GT_LANG, file_path, exc))
 
     # ---- 2.5 特殊引擎短路：只导出 name 表 / 只生成字典，不进入翻译流程 ----
+    if sentence_range is not None and not total_chunks:
+        raise ValueError("所选文件没有可翻译的句子，请检查文件插件和 sentence_range")
     if "dump-name" in eng_type:
         _check_stop_requested(projectConfig)
         await dump_name_table_from_chunks(total_chunks, projectConfig)
@@ -468,9 +490,14 @@ async def doLLMTranslate(
         total_chunks.sort(key=lambda x: x.chunk_size, reverse=True)
         ordered_chunks = total_chunks
 
-    total_lines = sum([len(chunk.trans_list) for chunk in ordered_chunks])
-    runtime_file_totals, runtime_cache_map = _build_runtime_file_maps(ordered_chunks, input_dir)
-    _update_runtime(projectConfig, file_totals=runtime_file_totals, cache_file_display_map=runtime_cache_map)
+    total_lines = sum(len(_chunk_translation_list(chunk, sentence_range)) for chunk in ordered_chunks)
+    runtime_file_totals, runtime_cache_map = _build_runtime_file_maps(ordered_chunks, input_dir, sentence_range)
+    selected_indexes = {
+        cache_name: [str(tran.index) for tran in _chunk_translation_list(chunk, sentence_range)]
+        for chunk, cache_name in zip(ordered_chunks, runtime_cache_map)
+    } if sentence_range is not None else {}
+    _update_runtime(projectConfig, file_totals=runtime_file_totals, cache_file_display_map=runtime_cache_map,
+                    cache_file_selected_indexes=selected_indexes)
 
     # ---- 4. name 替换表（首次运行时自动生成）----
     name_replaceDict_path_xlsx = joinpath(
@@ -698,8 +725,16 @@ async def doLLMTranslSingleChunk(
         # 翻译前处理
         preprocess_trans_list(split_chunk.trans_list, projectConfig, pre_dic, tPlugins)
 
+        translation_list = _chunk_translation_list(split_chunk, projectConfig.runtime_sentence_range)
+        selected = {id(tran) for tran in translation_list}
+        outside_range = [tran for tran in split_chunk.trans_list if id(tran) not in selected]
+        if outside_range:
+            # 范围外只读旧缓存；重翻关键字和失败重试不能清掉这些句子的已有译文。
+            await get_transCache_from_json(outside_range, cache_file_path, ignr_post_src=True,
+                                           eng_type=eng_type)
+
         translist_hit, translist_unhit = await get_transCache_from_json(
-            split_chunk.trans_list,
+            translation_list,
             cache_file_path,
             retry_failed=projectConfig.getKey("retranslFail"),
             proofread=False,
@@ -718,7 +753,7 @@ async def doLLMTranslSingleChunk(
             await gptapi.batch_translate(
                 file_name + (f"_{file_index}" if total_splits > 1 else ""),
                 cache_file_path,
-                split_chunk.trans_list,
+                translation_list,
                 projectConfig.getKey("gpt.numPerRequestTranslate"),
                 retry_failed=projectConfig.getKey("retranslFail"),
                 gpt_dic=gpt_dic,
@@ -734,7 +769,7 @@ async def doLLMTranslSingleChunk(
                     await gptapi.batch_translate(
                         file_name,
                         cache_file_path,
-                        split_chunk.trans_list,
+                        translation_list,
                         projectConfig.getKey("gpt.numPerRequestProofRead"),
                         retry_failed=projectConfig.getKey("retranslFail"),
                         gpt_dic=gpt_dic,
@@ -748,6 +783,9 @@ async def doLLMTranslSingleChunk(
         # 翻译后处理
         _check_stop_requested(projectConfig)
         postprocess_trans_list(split_chunk.trans_list, projectConfig, post_dic, tPlugins)
+        for tran in outside_range:
+            if not tran.pre_dst and not tran.proofread_zh and tran.post_src:
+                tran.post_dst = tran.pre_src
 
         et = time()
         LOGGER.info(

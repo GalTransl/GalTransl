@@ -13,6 +13,7 @@ from GalTransl.ConfigHelper import CProjectConfig
 from GalTransl.Runner import run_galtransl
 from GalTransl.i18n import get_text, GT_LANG
 from GalTransl.AppSettings import load_app_settings
+from GalTransl.TranslationScope import SentenceRange
 
 
 class JobCancelledError(Exception):
@@ -115,6 +116,7 @@ class JobSpec:
     # 只翻译输入目录下这些文件（相对输入目录的文件名）。空 = 全部文件。
     # 用于试译：只翻一两个文件验证文风，再全量启动。
     input_files: list[str] = field(default_factory=list)
+    sentence_range: SentenceRange | None = None
 
 
 @dataclass(slots=True)
@@ -224,6 +226,7 @@ async def run_job_async(
                 LOGGER.info("Applied prompt template override from job spec: %s", spec.translator)
 
         # 只翻译指定文件子集（试译场景）；空列表 = 全部
+        cfg.runtime_sentence_range = spec.sentence_range
         if spec.input_files:
             valid_files = [f for f in spec.input_files if isinstance(f, str) and f.strip()]
             if valid_files:

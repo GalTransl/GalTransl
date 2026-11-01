@@ -9,6 +9,7 @@ from typing import Any, TYPE_CHECKING
 
 from GalTransl.Agent.core import DEFAULT_CONFIG_FILE
 from GalTransl.Agent.models import AgentToolError
+from GalTransl.Agent.name_table import _load_effective_name_table
 from GalTransl.Agent.tools.common import _change, _diff_lines, _write_action, _text_replacement
 from GalTransl.Agent.tools.plugin_settings import catalog_for_updates, set_plugin_value, validate_plugin_value, _tool_get_plugin_settings
 from GalTransl.PluginSettings import get_plugin_config_section
@@ -207,6 +208,8 @@ def _backend_overview(runner: AgentRunner) -> dict[str, Any]:
 # 顺序即返回顺序；plugins/cache_output 仅显式选择时执行。
 OVERVIEW_SECTIONS: tuple[str, ...] = (
     "progress",
+    "dictionaries",
+    "names",
     "backend",
     "config",
     "config_field_descriptions",
@@ -267,6 +270,24 @@ def _tool_get_project_overview(runner: AgentRunner, args: dict[str, Any]) -> Any
             **file_counts,
             "note": (
                 'total/translated 是句数，且只统计已生成缓存的文件；未开始翻译的文件不计入分母，所以 translated==total 只说明「已有缓存的部分翻完了」，不代表整个项目翻完。整体进度请结合 files_translated/files_total 判断。这里是**已落盘缓存**的口径（扫缓存目录得到）；本轮任务自身的计数与 ETA 见 translation(action="status") 的 summary（按任务计划统计，含正在翻译、尚未落盘的文件，total 通常比这里大）——两个分母不同，别拿它们互相校对。'
+            ),
+        }
+
+    if "dictionaries" in include:
+        out["dictionaries"] = runner._http_get(f"/api/projects/{pid}/dictionary?config={cfg_name}&summary=true")
+
+    if "names" in include:
+        table = _load_effective_name_table(runner)
+        rows = [row for row in table.get("names", []) if isinstance(row, dict)]
+        out["names"] = {
+            "source_file": table.get("source_file"),
+            "count": len(rows),
+            "missing_translations": sum(not str(row.get("dst_name") or "").strip() for row in rows),
+            **({"use_gpt_dict_in_name": True} if table.get("use_gpt_dict_in_name") else {}),
+            "note": (
+                "count 是人名表条数，不是 Count 列的人名出现次数；missing_translations 与 "
+                "names(action=\"read\", only_missing=true) 口径一致，开启 dictionary.useGPTDictInName "
+                "时按 GPT 字典补齐后的生效译名统计，字典已覆盖的空译名不再计为缺漏。"
             ),
         }
 

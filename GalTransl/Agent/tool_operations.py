@@ -27,6 +27,8 @@ def tool_operation(name: str, args: dict[str, object]) -> str:
         raise AgentToolError("replace_all 已移除；replace 自动替换全部匹配，请删除该参数")
     if name == "translation" and "minutes" in args:
         raise AgentToolError("minutes 已移除；请换算为 seconds（1 分钟 = 60 秒）")
+    if name == "translation" and "sentence_range" in args and args.get("action") != "start":
+        raise AgentToolError("sentence_range 只用于 translation(action=\"start\")")
     if name == "read_transl_cache" and (args.get("action") == "search" or "query" in args or "conditions" in args):
         raise AgentToolError('缓存搜索已拆出，请改用 search_replace_cache(action="search", ...)')
     if name == "edit_transl_cache" and args.get("action") == "replace":

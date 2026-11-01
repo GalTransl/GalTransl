@@ -1712,6 +1712,10 @@ class JobRegistry:
         if input_files:
             input_files = [str(f).strip() for f in input_files if str(f).strip()]
 
+        from GalTransl.TranslationScope import parse_sentence_range
+
+        sentence_range = parse_sentence_range(payload.get("sentence_range"), input_files or [], translator)
+
         if not project_dir:
             raise ValueError("project_dir is required")
         if not translator:
@@ -1741,6 +1745,7 @@ class JobRegistry:
                 backend_profile=backend_profile,
                 backend_profile_data=backend_profile_data if isinstance(backend_profile_data, dict) else {},
                 input_files=input_files or [],
+                sentence_range=sentence_range,
             )
             state = create_job_state(spec)
             reset_runtime_project(project_dir)
@@ -2744,6 +2749,7 @@ def build_handler(registry: JobRegistry):
                     project_dir,
                     file_totals=file_totals,
                     cache_file_display_map=cache_file_display_map,
+                    cache_file_selected_indexes=runtime.get("cache_file_selected_indexes", {}),
                     retran_key=retran_key,
                     retran_terms=retran_terms,
                     current_job_started_at_ns=current_job_started_at_ns,
@@ -2834,6 +2840,25 @@ def build_handler(registry: JobRegistry):
                     dict_cfg = data.get("dictionary", {})
                     default_folder = dict_cfg.get("defaultDictFolder", "Dict")
                     dict_base = str(resolve_dict_dir(default_folder))
+                    summary = parse_qs(urlparse(self.path).query).get("summary", ["false"])[0] == "true"
+                    if summary:
+                        from GalTransl.ConfigHelper import initDictList
+
+                        files = []
+                        for category, key in (("pre", "preDict"), ("gpt", "gpt.dict"), ("post", "postDict")):
+                            configured = dict_cfg.get(key, [])
+                            paths = initDictList(configured, default_folder, project_dir)
+                            for file_key, path in zip(configured, paths):
+                                payload = _read_dict_file_payload(path)
+                                files.append({"category": category, "file_key": file_key,
+                                              "count": None if payload.get("error") else payload["count"],
+                                              **({"error": payload["error"]} if payload.get("error") else {})})
+                        self._send_json({
+                            "default_dict_folder": default_folder,
+                            "files": files,
+                            "note": "只列当前配置启用的译前/GPT/译后字典，包含公共与项目字典；count 是有效词条数，不计空行、注释和分区标题。文件缺失或读取失败时 count 为 null，并返回 error。",
+                        })
+                        return
                     result = {
                         "project_dir": project_dir,
                         "default_dict_folder": default_folder,

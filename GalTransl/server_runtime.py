@@ -105,6 +105,7 @@ class RuntimeState:
     updated_at: str = field(default_factory=_utcnow_text)
     file_totals: dict[str, int] = field(default_factory=dict)
     cache_file_display_map: dict[str, str] = field(default_factory=dict)
+    cache_file_selected_indexes: dict[str, list[str]] = field(default_factory=dict)
     # Per-file deque of recent success events. Each file keeps up to
     # RUNTIME_PER_FILE_SUCCESS_LIMIT events independently so that concurrent
     # translations of multiple files do not evict each other's cards.
@@ -229,6 +230,7 @@ class RuntimeRegistry:
         workers_configured: int | None = None,
         file_totals: dict[str, int] | None = None,
         cache_file_display_map: dict[str, str] | None = None,
+        cache_file_selected_indexes: dict[str, list[str]] | None = None,
         progress_speed_lpm: float | None = None,
     ) -> None:
         with self._lock:
@@ -248,6 +250,8 @@ class RuntimeRegistry:
                 state.file_totals = dict(file_totals)
             if cache_file_display_map is not None:
                 state.cache_file_display_map = dict(cache_file_display_map)
+            if cache_file_selected_indexes is not None:
+                state.cache_file_selected_indexes = dict(cache_file_selected_indexes)
             if progress_speed_lpm is not None:
                 state.progress_speed_lpm = max(0.0, float(progress_speed_lpm))
             state.updated_at = _utcnow_text()
@@ -423,6 +427,7 @@ class RuntimeRegistry:
                     "translation_speed_lpm": 0,
                     "file_totals": {},
                     "cache_file_display_map": {},
+                    "cache_file_selected_indexes": {},
                     "activity": {},
                     "recent_errors": [],
                     "recent_successes": [],
@@ -453,6 +458,7 @@ class RuntimeRegistry:
                 "translation_speed_lpm": speed,
                 "file_totals": dict(state.file_totals),
                 "cache_file_display_map": dict(state.cache_file_display_map),
+                "cache_file_selected_indexes": dict(state.cache_file_selected_indexes),
                 "activity": activity,
                 "recent_errors": [event.to_dict() for event in state.recent_errors],
                 "recent_successes": [event.to_dict() for event in merged_successes],
@@ -530,6 +536,7 @@ class _CacheProgressFileStat:
     retran_hit_keys: dict[str, frozenset[str]] = field(default_factory=dict)
     problem_filter_signature: tuple[str, ...] = field(default_factory=tuple)
     problem_white_signature: tuple[str, ...] = field(default_factory=tuple)
+    selected_indexes_signature: tuple[str, ...] | None = None
 
 
 @dataclass(slots=True)
@@ -663,6 +670,7 @@ class RuntimeProgressCache:
         current_job_started_at_ns: int | None = None,
         problem_filter_keys=None,
         problem_white_list=None,
+        cache_file_selected_indexes: dict[str, list[str]] | None = None,
     ) -> dict[str, Any]:
         normalized = _normalize_project_dir(project_dir)
         cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
@@ -690,6 +698,9 @@ class RuntimeProgressCache:
 
                     name = entry.name
                     seen_files.add(name)
+                    selected_indexes = (cache_file_selected_indexes or {}).get(name.removesuffix(_CACHE_APPEND_SUFFIX))
+                    selected_signature = tuple(selected_indexes) if selected_indexes is not None else None
+                    selected_keys = set(selected_indexes) if selected_indexes is not None else None
 
                     try:
                         stat = entry.stat()
@@ -704,6 +715,7 @@ class RuntimeProgressCache:
                         and cached.retran_terms_signature == retran_terms_signature
                         and cached.problem_filter_signature == problem_filter_signature
                         and cached.problem_white_signature == problem_white_signature
+                        and cached.selected_indexes_signature == selected_signature
                     ):
                         continue
 
@@ -792,6 +804,8 @@ class RuntimeProgressCache:
                     for idx, item in enumerate(entries):
                         if not isinstance(item, dict):
                             continue
+                        if selected_keys is not None and str(item.get("index", "")) not in selected_keys:
+                            continue
 
                         entry_key = str(item.get("__cache_key", "")).strip()
                         if entry_key:
@@ -867,6 +881,7 @@ class RuntimeProgressCache:
                         retran_terms_signature=retran_terms_signature,
                         problem_filter_signature=problem_filter_signature,
                         problem_white_signature=problem_white_signature,
+                        selected_indexes_signature=selected_signature,
                         retran_hit_keys={
                             term: frozenset(hit_keys)
                             for term, hit_keys in retran_hit_keys.items()
@@ -970,6 +985,7 @@ def update_runtime_status(
     workers_configured: int | None = None,
     file_totals: dict[str, int] | None = None,
     cache_file_display_map: dict[str, str] | None = None,
+    cache_file_selected_indexes: dict[str, list[str]] | None = None,
     progress_speed_lpm: float | None = None,
 ) -> None:
     RUNTIME_REGISTRY.update_status(
@@ -980,6 +996,7 @@ def update_runtime_status(
         workers_configured=workers_configured,
         file_totals=file_totals,
         cache_file_display_map=cache_file_display_map,
+        cache_file_selected_indexes=cache_file_selected_indexes,
         progress_speed_lpm=progress_speed_lpm,
     )
 
