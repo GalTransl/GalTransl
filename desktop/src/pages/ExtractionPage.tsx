@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../components/Icon';
 import { AgentSettingsButton } from '../components/AgentSettings';
+import { AnimatePresence } from '../components/UiMotion';
 import { useUiLanguage } from '../i18n';
 import { addOpenProject, encodeProjectDir, getBackendProfile } from '../lib/api';
 import { basenamePath } from '../lib/paths';
@@ -165,6 +166,6 @@ export function ExtractionPage() {
       </div>}
     </div>
     {dialog === 'create' && <CreateDialog close={() => setDialog(null)} create={create} busy={agent.busy} />}
-    {dialog === 'environment' && <EnvironmentDialog initial={agent.environment} refresh={agent.refreshEnvironment} close={() => setDialog(null)} saved={agent.setEnvironment} />}
+    <AnimatePresence>{dialog === 'environment' && <EnvironmentDialog key="environment" initial={agent.environment} refresh={agent.refreshEnvironment} close={() => setDialog(null)} saved={agent.setEnvironment} />}</AnimatePresence>
   </div>;
 }

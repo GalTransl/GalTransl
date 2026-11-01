@@ -1,22 +1,174 @@
 @import '../components/agent-settings.css';
 
-.agent-cache-edits { margin: 16px 0; border: 1px solid var(--agent-line); border-radius: 12px; background: var(--agent-tile); overflow: hidden; }
-.agent-cache-edits__header, .agent-cache-edits__file, .agent-cache-edits__review-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
-.agent-cache-edits__header { justify-content: space-between; }
-.agent-cache-edits__toggle { display: flex; align-items: center; gap: 8px; min-width: 0; color: inherit; font: inherit; background: none; border: 0; cursor: pointer; text-align: left; }
-.agent-cache-edits__files, .agent-cache-edits__review { border-top: 1px solid var(--agent-line-soft); }
+.agent-cache-edits {
+  margin: 16px 0;
+  border: 1px solid var(--agent-line-soft);
+  border-radius: var(--agent-radius-lg);
+  background: color-mix(in srgb, var(--color-surface-strong) 82%, transparent);
+  overflow: hidden;
+}
+
+.agent-cache-edits__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--color-primary-soft) 55%, transparent);
+}
+
+.agent-cache-edits__toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 2px 4px 2px 0;
+  border: 0;
+  border-radius: 8px;
+  color: var(--color-text);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-cache-edits__toggle:hover { color: var(--color-primary); }
+.agent-cache-edits__toggle:focus-visible,
+.agent-cache-edits__action:focus-visible,
+.agent-cache-edits__close:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
+}
+
+.agent-cache-edits__icon,
+.agent-cache-edits__file-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+  font-size: 17px;
+}
+
+.agent-cache-edits__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-cache-edits__title { font-size: 13px; font-weight: 700; }
+.agent-cache-edits__summary { font-size: 11px; line-height: 1.45; color: var(--color-text-muted); }
+.agent-cache-edits__caret { flex: none; font-size: 12px; color: var(--color-text-muted); transition: transform var(--transition-fast); }
+.agent-cache-edits__toggle[aria-expanded='true'] .agent-cache-edits__caret { transform: rotate(180deg); }
+
+.agent-cache-edits .agent-cache-edits__action {
+  flex: none;
+  min-height: 32px;
+  padding: 0 11px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.agent-cache-edits__action:hover:not(:disabled) { transform: none; background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface-strong)); }
+.agent-cache-edits__file.is-selected .agent-cache-edits__action { border-color: var(--color-primary); }
+.agent-cache-edits.is-undone .agent-cache-edits__icon,
+.agent-cache-edits.is-undone .agent-cache-edits__undo { color: var(--color-success); background: var(--color-success-soft); }
+.agent-cache-edits.is-undone .agent-cache-edits__undo { border-color: transparent; opacity: 1; }
+
+.agent-cache-edits__files { padding: 2px 14px 4px; border-top: 1px solid var(--agent-line-soft); }
+.agent-cache-edits__file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 11px 0;
+}
 .agent-cache-edits__file + .agent-cache-edits__file { border-top: 1px solid var(--agent-line-soft); }
-.agent-cache-edits__filename, .agent-cache-edits__review-header strong { min-width: 0; overflow-wrap: anywhere; flex: 1; }
-.agent-cache-edits__actors { font-size: 12px; opacity: .65; }
-.agent-cache-edits__diff { margin: 0; padding: 14px; max-height: 520px; overflow: auto; font: 12px/1.65 var(--agent-mono); tab-size: 2; }
-.agent-cache-edits__diff span { display: block; min-height: 1.65em; white-space: pre-wrap; overflow-wrap: anywhere; }
-.agent-cache-edits__diff .is-added { background: rgba(34, 197, 94, .09); color: #16a34a; }
-.agent-cache-edits__diff .is-removed { background: rgba(239, 68, 68, .09); color: #ef4444; }
-.agent-cache-edits__diff .is-hunk { color: #60a5fa; }
-.agent-cache-edits__added { color: #16a34a; }
-.agent-cache-edits__removed, .agent-cache-edits__error { color: #ef4444; }
-.agent-cache-edits__error { padding: 0 14px; font-size: 13px; overflow-wrap: anywhere; }
-@media (max-width: 600px) { .agent-cache-edits__header, .agent-cache-edits__file { flex-wrap: wrap; } .agent-cache-edits__actors { display: none; } }
+.agent-cache-edits__file-icon { width: 28px; height: 28px; border-radius: 9px; font-size: 14px; }
+.agent-cache-edits__file-info { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+.agent-cache-edits__filename,
+.agent-cache-edits__review-heading h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--agent-mono, "Cascadia Code", "Consolas", monospace);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+.agent-cache-edits__file.is-selected .agent-cache-edits__filename { color: var(--color-primary); }
+.agent-cache-edits__meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 10px; color: var(--color-text-muted); }
+.agent-cache-edits__actors { padding: 1px 6px; border-radius: 5px; background: var(--agent-tile); line-height: 1.4; }
+
+.agent-cache-edits__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(15 23 42 / 34%);
+}
+.agent-cache-edits__review {
+  display: flex;
+  flex-direction: column;
+  width: min(960px, 100%);
+  max-height: calc(100dvh - 48px);
+  min-height: 0;
+  border: 1px solid var(--color-line);
+  border-radius: 18px;
+  overflow: hidden;
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 24%);
+}
+.agent-cache-edits__review-header { display: flex; align-items: center; flex: none; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--color-line); background: color-mix(in srgb, var(--color-primary-soft) 45%, transparent); }
+.agent-cache-edits__review-heading { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 0; }
+.agent-cache-edits__review-heading h2 { margin: 0; font-size: 14px; }
+.agent-cache-edits__review-label { font-size: 11px; font-weight: 600; color: var(--color-text-muted); }
+.agent-cache-edits__diff-counts { display: flex; gap: 4px; flex: none; font: 12px "Cascadia Code", "Consolas", monospace; }
+.agent-cache-edits__diff-counts b { padding: 3px 6px; border-radius: 5px; font-weight: 600; }
+.agent-cache-edits__added { color: var(--color-success); background: var(--color-success-soft); }
+.agent-cache-edits__removed { color: var(--color-danger); background: var(--color-danger-soft); }
+.agent-cache-edits__close { flex: none; border-color: transparent; border-radius: 8px; }
+
+.agent-cache-edits__diff {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 10px 0;
+  font: 12px/1.65 "Cascadia Code", "Consolas", monospace;
+  tab-size: 2;
+  outline-offset: -2px;
+}
+.agent-cache-edits__diff > div { display: grid; grid-template-columns: 34px 34px minmax(0, 1fr); min-height: 1.65em; border-left: 2px solid transparent; }
+.agent-cache-edits__line-number { padding: 3px 7px 3px 0; text-align: right; color: var(--color-text-muted); opacity: .65; user-select: none; font-variant-numeric: tabular-nums; }
+.agent-cache-edits__diff code { padding: 3px 12px 3px 10px; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-cache-edits__diff .is-added { background: color-mix(in srgb, var(--color-success) 7%, transparent); color: var(--color-success); border-left-color: var(--color-success); }
+.agent-cache-edits__diff .is-removed { background: color-mix(in srgb, var(--color-danger) 7%, transparent); color: var(--color-danger); border-left-color: var(--color-danger); }
+.agent-cache-edits__diff .is-hunk { margin: 5px 0; padding: 3px 0; background: var(--color-primary-soft); color: var(--color-primary); font-size: 10px; }
+.agent-cache-edits__diff .is-meta { color: var(--color-text-muted); }
+.agent-cache-edits__empty { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 96px; padding: 16px; font-size: 12px; color: var(--color-text-muted); }
+.agent-cache-edits__error { margin: 10px 14px; padding: 10px 12px; border-radius: 9px; color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 7%, transparent); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.agent-cache-edits__error p { display: flex; align-items: baseline; gap: 6px; margin: 0 0 5px; }
+
+@media (max-width: 600px) {
+  .agent-cache-edits__header { gap: 8px; padding: 10px; }
+  .agent-cache-edits__files { padding-inline: 10px; }
+  .agent-cache-edits__file { gap: 8px; }
+  .agent-cache-edits__icon { width: 28px; height: 28px; font-size: 14px; }
+  .agent-cache-edits .agent-cache-edits__action { padding-inline: 8px; }
+  .agent-cache-edits__backdrop { padding: 12px; }
+  .agent-cache-edits__review { max-height: calc(100dvh - 24px); border-radius: 14px; }
+  .agent-cache-edits__review-header { gap: 8px; padding: 12px; }
+  .agent-cache-edits__diff > div { grid-template-columns: 26px 26px minmax(0, 1fr); }
+}
 
 /* ─────────────────────────────────────────────────────────
    Agent Console — a focused, chat-style workspace for the

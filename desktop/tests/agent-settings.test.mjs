@@ -139,13 +139,13 @@ test('translation sidebar opens its configuration from the footer and closes on 
     disabled: false, activeRunning: false, unseenLights: {},
   })); });
   try {
-    assert.equal(view.root.findAllByProps({ role: 'dialog' }).length, 0);
+    assert.equal(view.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 0);
     const button = view.root.findByType('aside').findByProps({ className: 'agent-settings-button' });
     await act(async () => button.props.onClick());
-    assert.equal(view.root.findAllByProps({ role: 'dialog' }).length, 1);
+    assert.equal(view.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 1);
     assert.equal(input(view).props.checked, false);
-    act(() => listeners.get('keydown')({ key: 'Escape' }));
-    assert.equal(view.root.findAllByProps({ role: 'dialog' }).length, 0);
-    assert.equal(listeners.size, 0);
+    act(() => listeners.get('keydown')({ key: 'Escape', preventDefault() {} }));
+    assert.equal(view.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 0);
+    assert.equal(listeners.has('keydown'), false);
   } finally { act(() => view.unmount()); }
 });

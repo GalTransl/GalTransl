@@ -42,16 +42,25 @@ test('late child edits update their original stopped turn without closing the ne
   assert.equal(groups[3].items[0].streaming, true);
 });
 
-async function fixture({ undo, read } = {}) {
+async function fixture({ undo, read, diffText = '-旧译文\n+新译文' } = {}) {
   const calls = [];
   const edits = [edit('one'), edit('two', 'b.json')];
-  const loader = createTypeScriptLoader({ window: { dispatchEvent() {} }, CustomEvent: class {} }, {
+  const listeners = new Map();
+  const previousFocus = { focus: () => calls.push({ action: 'focus' }) };
+  const loader = createTypeScriptLoader({
+    window: { dispatchEvent() {}, addEventListener() {}, removeEventListener() {} }, CustomEvent: class {},
+    document: { body: {}, documentElement: {}, activeElement: previousFocus,
+      addEventListener: (name, listener) => listeners.set(name, listener),
+      removeEventListener: (name, listener) => { if (listeners.get(name) === listener) listeners.delete(name); },
+    },
+  }, {
+    'react-dom': { createPortal: children => children },
     '../../../components/AgentCacheRef': { invalidateCacheFilesForToolResult() {} },
     '../../../lib/api': {
       listCacheHistory: read || (async () => ({ items: edits, total: 2, returned: 2, has_more: false })),
       diffCacheHistory: async (dir, ids, filename) => {
         calls.push({ action: 'diff', dir, ids, filename });
-        return { items: [{ filename, diff: '-旧译文\n+新译文', added: 1, removed: 1, updated: 1 }] };
+        return { items: [{ filename, diff: diffText, added: 1, removed: 1, updated: 1 }] };
       },
       undoCacheHistory: undo || (async (dir, ids) => { calls.push({ action: 'undo', dir, ids }); return { status: 'reverted', updated: 2, conflicts: [] }; }),
     },
@@ -59,7 +68,7 @@ async function fixture({ undo, read } = {}) {
   const { CacheEditSummary } = loader(new URL('../src/pages/agent/rows/CacheEditSummary.tsx', import.meta.url));
   let renderer;
   await act(async () => { renderer = create(createElement(CacheEditSummary, { edits, projectDir: 'project', sessionId: 'session', turnId: 'turn' })); });
-  return { renderer, calls, button: text => renderer.root.findAllByType('button').find(button => button.children.includes(text)) };
+  return { renderer, calls, listeners, button: text => renderer.root.findAllByType('button').find(button => button.children.includes(text)) };
 }
 
 test('collapsed summaries load history and reveal exact diffs before undoing every selected edit', async () => {
@@ -69,9 +78,11 @@ test('collapsed summaries load history and reveal exact diffs before undoing eve
     await act(async () => f.renderer.root.findByProps({ 'aria-expanded': false }).props.onClick());
     await act(async () => f.button('查看差异').props.onClick());
     assert.deepEqual(JSON.parse(JSON.stringify(f.calls[0])), { action: 'diff', dir: 'project', ids: ['one', 'two'], filename: 'a.json' });
-    assert.equal(f.renderer.root.findByProps({ className: 'is-added' }).children[0], '+新译文');
+    assert.equal(f.renderer.root.findByProps({ className: 'is-added' }).findByType('code').children[0], '+新译文');
+    await act(async () => f.renderer.root.findByProps({ 'aria-label': '关闭差异' }).props.onClick());
+    assert.equal(f.renderer.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 0);
     await act(async () => f.button('撤销').props.onClick());
-    assert.deepEqual(Array.from(f.calls[1].ids), ['one', 'two']);
+    assert.deepEqual(Array.from(f.calls.find(call => call.action === 'undo').ids), ['one', 'two']);
     assert.equal(f.button('已撤销').props.disabled, true);
   } finally { act(() => f.renderer.unmount()); }
 });
@@ -82,7 +93,7 @@ test('conflicting undo remains actionable and displays the affected file and fie
     await act(async () => f.button('撤销').props.onClick());
     assert.equal(f.button('撤销').props.disabled, false);
     const alert = f.renderer.root.findByProps({ role: 'alert' });
-    assert.match(JSON.stringify(alert.children.map(child => typeof child === 'string' ? child : child.children)), /a.json/);
+    assert.ok(alert.findAllByType('div').some(row => row.children.includes('a.json')));
   } finally { act(() => f.renderer.unmount()); }
 });
 
@@ -97,5 +108,49 @@ test('undoing a turn includes its own reversals so cancelled edits are not reapp
   try {
     await act(async () => f.button('撤销').props.onClick());
     assert.deepEqual(Array.from(f.calls[0].ids), ['one', 'two']);
+  } finally { act(() => f.renderer.unmount()); }
+});
+
+test('diff preview keeps exact text and hunk line numbers without treating file headers as edits', async () => {
+  const f = await fixture({ diffText: '--- a/a.json\n+++ b/a.json\n@@ -12,2 +20,2 @@\n unchanged\n-旧译文\n+新译文\n' });
+  try {
+    await act(async () => f.renderer.root.findByProps({ 'aria-expanded': false }).props.onClick());
+    await act(async () => f.button('查看差异').props.onClick());
+    const removed = f.renderer.root.findByProps({ className: 'is-removed' });
+    const added = f.renderer.root.findByProps({ className: 'is-added' });
+    assert.deepEqual(removed.findAllByType('span').map(node => node.children.join('')), ['13', '']);
+    assert.deepEqual(added.findAllByType('span').map(node => node.children.join('')), ['', '21']);
+    assert.equal(removed.findByType('code').children[0], '-旧译文');
+    assert.equal(added.findByType('code').children[0], '+新译文');
+    assert.equal(f.renderer.root.findAllByType('code').length, 4);
+    assert.equal(f.renderer.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 1);
+  } finally { act(() => f.renderer.unmount()); }
+});
+
+test('diff opens in a named dialog and closes from the backdrop or Escape, restoring focus', async () => {
+  const f = await fixture();
+  try {
+    await act(async () => f.renderer.root.findByProps({ 'aria-expanded': false }).props.onClick());
+    assert.equal(f.button('查看差异').props['aria-haspopup'], 'dialog');
+    await act(async () => f.button('查看差异').props.onClick());
+    const dialog = f.renderer.root.findByProps({ role: 'dialog' });
+    assert.equal(dialog.props['aria-modal'], 'true');
+    assert.equal(f.renderer.root.findByProps({ id: dialog.props['aria-labelledby'] }).children[0], 'a.json');
+    const outside = {};
+    const backdrop = f.renderer.root.findByProps({ className: 'agent-cache-edits__backdrop' });
+    await act(async () => backdrop.props.onClick({ target: {}, currentTarget: outside }));
+    assert.equal(f.renderer.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 1);
+    await act(async () => backdrop.props.onClick({ target: outside, currentTarget: outside }));
+    assert.equal(f.renderer.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 0);
+    assert.equal(f.calls.at(-1).action, 'focus');
+    assert.equal(f.listeners.has('keydown'), false);
+
+    await act(async () => f.button('查看差异').props.onClick());
+    let prevented = false;
+    await act(async () => f.listeners.get('keydown')({ key: 'Escape', preventDefault: () => { prevented = true; } }));
+    assert.equal(prevented, true);
+    assert.equal(f.renderer.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 0);
+    assert.equal(f.calls.at(-1).action, 'focus');
+    assert.equal(f.listeners.has('keydown'), false);
   } finally { act(() => f.renderer.unmount()); }
 });

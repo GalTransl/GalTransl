@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import { AnimatedDialog } from './AnimatedDialog';
 import { t } from '../i18n';
 import { fetchAppSettings, updateAppSettings } from '../lib/api';
 import { openExternalUrl } from '../lib/externalLink';
@@ -29,29 +29,20 @@ export function AgentSettingsDialog({ agent, backendUrl, close, children, footer
   className?: string;
 }) {
   const titleId = useId();
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') close(); };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [close]);
-  return createPortal(<div className="agent-settings-backdrop" onMouseDown={event => {
-    if (event.target === event.currentTarget) close();
-  }}>
-    <section className={`agent-settings-dialog ${className}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
-      <header className="agent-settings-dialog__header">
-        <h2 id={titleId}>{t(agent === 'translation'
-          ? 'common:agentSettings.translationTitle' : 'common:agentSettings.extractionTitle')}</h2>
-        <button type="button" autoFocus onClick={close} aria-label={t('common:actions.close')}>
-          <Icon name="close" />
-        </button>
-      </header>
-      <div className="agent-settings-dialog__body">
-        <AgentContextSettings agent={agent} backendUrl={backendUrl} />
-        {children}
-      </div>
-      {footer && <footer className="agent-settings-dialog__footer">{footer}</footer>}
-    </section>
-  </div>, document.body);
+  return <AnimatedDialog backdropClassName="agent-settings-backdrop" className={`agent-settings-dialog ${className}`} labelledBy={titleId} close={close}>
+    <header className="agent-settings-dialog__header">
+      <h2 id={titleId}>{t(agent === 'translation'
+        ? 'common:agentSettings.translationTitle' : 'common:agentSettings.extractionTitle')}</h2>
+      <button type="button" onClick={close} aria-label={t('common:actions.close')}>
+        <Icon name="close" />
+      </button>
+    </header>
+    <div className="agent-settings-dialog__body">
+      <AgentContextSettings agent={agent} backendUrl={backendUrl} />
+      {children}
+    </div>
+    {footer && <footer className="agent-settings-dialog__footer">{footer}</footer>}
+  </AnimatedDialog>;
 }
 
 export function AgentContextSettings({ agent, backendUrl }: { agent: 'translation' | 'extraction'; backendUrl: string }) {

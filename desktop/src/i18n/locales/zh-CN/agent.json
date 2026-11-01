@@ -1,5 +1,10 @@
 {
   "cacheHistory": {
+    "changes": "本轮修改",
+    "editCount": "{{count}} 次编辑",
+    "undoing": "正在撤销…",
+    "diffPreview": "差异预览",
+    "noDiff": "没有内容差异",
     "pending": "记录未完成",
     "title": "缓存编辑历史",
     "summary": "{{count}} 个缓存文件已更改 · {{edits}} 次编辑",

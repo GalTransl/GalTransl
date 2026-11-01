@@ -1,5 +1,10 @@
 {
   "cacheHistory": {
+    "changes": "Changes this turn",
+    "editCount": "{{count}} edits",
+    "undoing": "Undoing…",
+    "diffPreview": "Diff preview",
+    "noDiff": "No content differences",
     "pending": "Incomplete record",
     "title": "Cache edit history",
     "summary": "{{count}} cache files changed · {{edits}} edits",

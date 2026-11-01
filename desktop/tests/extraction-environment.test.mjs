@@ -157,7 +157,7 @@ test('checks and downloads show errors, release disabled controls, and permit re
 test('settings display cached information before environment discovery finishes', async () => {
   let finish;
   const dialog = mount(async () => initial, initial, () => new Promise(resolve => { finish = resolve; }));
-  assert.equal(dialog.renderer.root.findAllByProps({ role: 'dialog' }).length, 1);
+  assert.equal(dialog.renderer.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 1);
   assert.equal(dialog.renderer.root.findByType('form').findByType('input').props.value, initial.settings.skill_dir);
   assert.equal(dialog.renderer.root.findByType('fieldset').props.disabled, true);
   assert.ok(dialog.button('pythonDetecting'));
@@ -172,7 +172,7 @@ test('settings display cached information before environment discovery finishes'
 test('settings open before the first environment load, and failed discovery can be retried inside the dialog', async () => {
   let finish;
   const dialog = mount(async () => initial, null, () => new Promise((resolve, reject) => { finish = { resolve, reject }; }));
-  assert.equal(dialog.renderer.root.findAllByProps({ role: 'dialog' }).length, 1);
+  assert.equal(dialog.renderer.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 1);
   assert.equal(dialog.renderer.root.findByProps({ role: 'status' }).children.join(''), 'loading');
   assert.equal(dialog.button('save').props.disabled, true);
   await act(async () => finish.reject(Error('Discovery failed')));
@@ -192,7 +192,7 @@ test('the extraction settings button opens the dialog without waiting for the en
   let renderer;
   const load = createTypeScriptLoader({
     document: { body: {}, documentElement: {}, addEventListener() {}, removeEventListener() {} },
-    window: { innerWidth: 1366, matchMedia: () => ({ matches: true }) },
+    window: { innerWidth: 1366, matchMedia: () => ({ matches: true }), addEventListener() {}, removeEventListener() {} },
   }, {
     'react-dom': { createPortal: children => children },
     'react-router-dom': { useNavigate: () => () => {} },
@@ -213,14 +213,14 @@ test('the extraction settings button opens the dialog without waiting for the en
   });
   const { ExtractionPage } = load(new URL('../src/pages/ExtractionPage.tsx', import.meta.url));
   act(() => { renderer = create(h(ExtractionPage)); });
-  assert.equal(renderer.root.findAllByProps({ role: 'dialog' }).length, 0);
+  assert.equal(renderer.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 0);
   act(() => renderer.root.findByProps({ className: 'agent-settings-button' }).props.onClick());
-  assert.equal(renderer.root.findAllByProps({ role: 'dialog' }).length, 1);
-  const close = renderer.root.findByProps({ role: 'dialog' }).findAllByType('button').find(button => button.props.autoFocus);
+  assert.equal(renderer.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 1);
+  const close = renderer.root.findByProps({ className: 'agent-settings-dialog__header' }).findByType('button');
   act(() => close.props.onClick());
-  assert.equal(renderer.root.findAllByProps({ role: 'dialog' }).length, 0);
+  assert.equal(renderer.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 0);
   await act(async () => finish(installed));
-  assert.equal(renderer.root.findAllByProps({ role: 'dialog' }).length, 0);
+  assert.equal(renderer.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 0);
   act(() => renderer.unmount());
 });
 

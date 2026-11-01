@@ -4,6 +4,7 @@ import type { AgentSession as AgentSessionMeta } from '../../lib/api';
 import { useSessionTime } from '../../lib/sessionTime';
 import { Icon } from '../../components/Icon';
 import { AgentSettingsButton, AgentSettingsDialog } from '../../components/AgentSettings';
+import { AnimatePresence } from '../../components/UiMotion';
 import { useConnection } from '../../features/connection/ConnectionContext';
 import { shortName } from './storage';
 
@@ -229,7 +230,7 @@ export function AgentSessionSidebar({
         )}
       </div>
       <AgentSettingsButton ready={connection.connectionPhase === 'online'} onClick={() => setSettingsOpen(true)} />
-      {settingsOpen && <AgentSettingsDialog agent="translation" backendUrl={connection.backendUrl} close={() => setSettingsOpen(false)} />}
+      <AnimatePresence>{settingsOpen && <AgentSettingsDialog key="settings" agent="translation" backendUrl={connection.backendUrl} close={() => setSettingsOpen(false)} />}</AnimatePresence>
     </aside>
   );
 }
