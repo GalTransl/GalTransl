@@ -2108,8 +2108,19 @@
 
 .agent-tjob__stats {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 4px 18px;
+}
+
+.agent-tjob__stop {
+  margin-left: auto;
+  min-height: 32px;
+  padding: 0 10px;
+  border-color: var(--color-danger);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  font-size: 0.76rem;
 }
 
 .agent-tjob__stat {

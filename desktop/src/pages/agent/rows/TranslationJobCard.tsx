@@ -1,15 +1,18 @@
 import { AnimatedCollapse } from '../../../components/UiMotion';
 import { usePageActive } from '../../../components/PageActivity';
-import { t as translate, useUiLanguage } from "../../../i18n";
+import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../../../i18n";
 import { useEffect, useRef, useState } from 'react';
 import {
   encodeProjectDir,
   fetchJobs,
   fetchProjectRuntime,
+  stopProjectTranslation,
   type ProjectRuntimeResponse,
   type RuntimeJob,
 } from '../../../lib/api';
 import { Icon } from '../../../components/Icon';
+import { Button } from '../../../components/Button';
+import { normalizeError } from '../../../lib/errors';
 import {
   clampPercent,
   formatElapsedTime,
@@ -43,6 +46,8 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
   const [lastStatus, setLastStatus] = useState<string>(str(result.status));
   const [open, setOpen] = useState(true);
   const [rawOpen, setRawOpen] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [stopError, setStopError] = useMessageState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const userToggledRef = useRef(false);
   const seenJobRef = useRef(false);
@@ -52,6 +57,21 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
   const snapJob: RuntimeJob | null = runtime && jobId && runtime.job?.job_id === jobId ? runtime.job : null;
   const status = snapJob?.status ?? lastStatus;
   const isRunning = status === 'pending' || status === 'running';
+
+  const handleStop = () => {
+    setStopping(true);
+    setStopError(null);
+    userToggledRef.current = true;
+    const projectId = encodeProjectDir(projectDir);
+    void stopProjectTranslation(projectId)
+      .then(job => {
+        setLastStatus(job.status);
+        return fetchProjectRuntime(projectId);
+      })
+      .then(setRuntime)
+      .catch(error => setStopError(normalizeError(error, uiMessage("projects:projectTranslatePage.message_normalizeError_stopJobFailed"))))
+      .finally(() => setStopping(false));
+  };
 
   // 翻译期间每秒拉一次运行时快照（进度/速度/剩余/时长都从它来）；不在跑了就停。
   useEffect(() => {
@@ -173,7 +193,15 @@ export function TranslationJobCard({ item, projectDir }: { item: ActivityItem; p
               <b>{formatElapsedTime(snapJob, nowMs)}</b>
               <i>{translate("agent:translationJobCard.agentTjobStat_message_done")}</i>
             </span>
+            {isRunning && <Button className="agent-tjob__stop" variant="secondary" disabled={stopping || !snapJob} onClick={handleStop}>
+              <Icon name="stop" />
+              {translate(stopping
+                ? "projects:projectTranslatePage.primaryActionLabel_message_stop"
+                : "projects:projectTranslatePage.primaryActionLabel_message_stopTranslation")}
+            </Button>}
           </div>
+
+          {stopError && <div className="agent-notice agent-notice--error" role="alert">{stopError}</div>}
 
           <button
             type="button"
