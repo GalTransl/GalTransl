@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createElement as h, useState } from 'react';
+import React, { createElement as h, useEffect, useState } from 'react';
 import { act, create } from 'react-test-renderer';
 import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
 
-async function fixture({ setupSearch = true, api = {}, cacheEntries, focusTarget } = {}) {
+async function fixture({ setupSearch = true, api = {}, cacheEntries, focusTarget, replayProjectSetup = false } = {}) {
+  const projectSetups = [];
   const timers = new Map(), frames = new Map();
   let sequence = 0, view;
   const setTimer = (callback, delay) => { const id = ++sequence; timers.set(id, { callback, delay }); return id; };
@@ -33,6 +34,10 @@ async function fixture({ setupSearch = true, api = {}, cacheEntries, focusTarget
     requestAnimationFrame: callback => { const id = ++sequence; frames.set(id, callback); return id; },
     cancelAnimationFrame: id => frames.delete(id),
   }, {
+    ...(replayProjectSetup ? { react: { ...React, useEffect: (setup, dependencies) => {
+      if (dependencies?.length === 1 && dependencies[0] === 'fixture') projectSetups.push(setup);
+      useEffect(setup, dependencies);
+    } } } : {}),
     '../i18n': { t: key => key, message: key => key, useUiLanguage: () => 'en', useMessageState: useState },
     '../i18n/core': { t: key => key },
     '../components/PageActivity': { useRetainPage() {} },
@@ -92,8 +97,21 @@ async function fixture({ setupSearch = true, api = {}, cacheEntries, focusTarget
     await act(async () => { view.update(h(ProjectCachePage, pageProps)); });
   };
   const jump = i => { act(() => view.root.findAllByType('button').find(node => node.props['data-search-idx'] === i).props.onClick()); flushFrames(); };
-  return { view, pane, jump, resolveFile, flush, flushFrames, selectFile, clickText, updatePage };
+  return { view, pane, jump, resolveFile, flush, flushFrames, selectFile, clickText, updatePage,
+    replayProjectSetup: () => act(() => projectSetups[0]()) };
 }
+
+test('replayed project initialization preserves the first mini window file and pending row jump', async () => {
+  const f = await fixture({ setupSearch: false, replayProjectSetup: true,
+    focusTarget: { page: 'cache', filename: 'b.json', index: 25 } });
+  try {
+    // React's test renderer does not replay passive effects in StrictMode; replay the real setup.
+    f.replayProjectSetup();
+    await f.resolveFile('b.json');
+    assert.equal(f.view.root.findAllByProps({ 'data-cache-index': 25 }).length, 1);
+    assert.equal(f.pane.scrollTop, 2350);
+  } finally { act(() => f.view.unmount()); }
+});
 
 test('mini window targets select the file before loading and repeat jumps override filters and scroll positions', async () => {
   const f = await fixture({ setupSearch: false, focusTarget: { page: 'cache', filename: 'b.json', index: 25 } });

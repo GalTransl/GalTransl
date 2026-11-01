@@ -732,7 +732,8 @@ export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: Pro
   // 按 projectId 切换状态桶：先 snapshot 旧项目，再恢复或新建新项目的桶。
   // 该 effect 是本页跨项目状态保留的核心入口。
   useEffect(() => {
-    if (!projectId) return;
+    // StrictMode 重放 setup 时，不能清掉首次打开迷你窗已应用的文件与定位请求。
+    if (!projectId || lastProjectIdRef.current === projectId) return;
     // 先记下"现在在看哪个项目"：下面所有按项目发的请求都拿它判断自己是否已经过期
     viewingProjectIdRef.current = projectId;
     // 多选与右键菜单是「屏幕上这些文件」的临时状态，不跟着项目走：切项目后若留着上个项目
