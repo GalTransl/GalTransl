@@ -1,5 +1,6 @@
 {
   "backendProfilesPage": {
+    "recommendedProviders": "中转站推荐",
     "renameFailed": "重命名失败",
     "copyFailed": "复制配置失败",
     "renameConfigName": "重命名配置 {{name}}",
@@ -40,7 +41,7 @@
     "backendProfilesPageListScroll_button_newCountConfig": " 新建第一个配置",
     "profileCardName_message_translationDefault": "翻译器默认",
     "profileCardName_message_agentDefault": "主 agent 默认",
-    "profileCardInfo_message_baseURL": "Base URL：{{baseUrl}}",
+    "profileCardInfo_message_baseURL": "Base URL：<0>{{baseUrl}}</0>",
     "profileCardInfo_message_model": "模型：{{modelName}}",
     "backendProfilesPageDialogHeader_message_editConfig": "编辑配置 - {{editingName}}",
     "backendProfilesPageDialogHeader_message_configTranslationBackendProjectConfigTranslationBackend": "配置翻译后端参数，与项目配置中的翻译后端设置一致。",

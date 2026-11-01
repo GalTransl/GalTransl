@@ -129,7 +129,6 @@ export function ExtractionPage() {
         </div>
         <div className="agent-console__bar-right">
           <StatusPill status={session?.status || 'idle'} running={running} label={statusLabel(session?.status || 'idle')} />
-          <button type="button" className="agent-console__icon-btn" disabled={agent.busy} onClick={showHome} title={x('newSession')} aria-label={x('newSession')}><Icon name="pencil" /></button>
           {session && <button type="button" className={`agent-console__icon-btn extract-workspace-toggle${showWorkspace ? ' is-active' : ''}`} onClick={() => setShowWorkspace(value => !value)} title={x('showWorkspace')} aria-label={x('showWorkspace')} aria-pressed={showWorkspace} aria-expanded={showWorkspace} aria-controls="extraction-workspace"><Icon name="folder" /></button>}
         </div>
       </header>

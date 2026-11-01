@@ -1,4 +1,4 @@
-import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
+import { UiTrans, message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useState } from 'react';
 import { BackendConfigEditor } from '../components/BackendConfigEditor';
 import { Button } from '../components/Button';
@@ -28,6 +28,7 @@ import {
   setAgentDefaultBackendProfile,
   setDefaultBackendProfile } from '../lib/api';
 import { normalizeError } from '../lib/errors';
+import { openExternalUrl } from '../lib/externalLink';
 import { formatProfileLabel, getProfileMeta, getProfileModelNames } from '../lib/backendProfile';
 
 type ProfileEntry = {
@@ -283,6 +284,11 @@ export function BackendProfilesPage() {
         className="backend-profiles-page__header"
         title={<><Icon name="bot" />{translate("settings:backendProfilesPage.backendProfilesPage_title_modelSettings")}</>}
         description={translate("settings:backendProfilesPage.backendProfilesPage_description_translationBackendConfigProjectCountProjectConfig")}
+        actions={(
+          <Button variant="secondary" onClick={() => void openExternalUrl('https://github.com/GalTransl/GalTransl/issues/93')}>
+            {translate("settings:backendProfilesPage.recommendedProviders")}
+          </Button>
+        )}
         status={
           <>
             {error && <InlineFeedback tone="error" title={translate("settings:backendProfilesPage.backendProfilesPage_title_failed")} description={error} />}
@@ -411,7 +417,18 @@ export function BackendProfilesPage() {
                             <span className="profile-card__badge profile-card__badge--agent">{translate("settings:backendProfilesPage.profileCardName_message_subagentDefault")}</span>
                           )}
                         </div>
-                        <div className="profile-card__meta">{translate("settings:backendProfilesPage.profileCardInfo_message_baseURL", { baseUrl: baseUrl })}</div>
+                        <div className="profile-card__meta">
+                          <UiTrans
+                            k="settings:backendProfilesPage.profileCardInfo_message_baseURL"
+                            values={{ baseUrl }}
+                            components={[/^https?:\/\//i.test(baseUrl) ? (
+                              <a className="profile-card__base-url" href={baseUrl} target="_blank" rel="noopener noreferrer" onClick={event => {
+                                event.preventDefault();
+                                void openExternalUrl(event.currentTarget.href);
+                              }} />
+                            ) : <span />]}
+                          />
+                        </div>
                       </div>
                       <div className="profile-card__actions">
                         <ProfileCardAction

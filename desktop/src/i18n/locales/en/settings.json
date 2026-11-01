@@ -1,5 +1,6 @@
 {
   "backendProfilesPage": {
+    "recommendedProviders": "Recommended API providers",
     "renameFailed": "Failed to rename configuration",
     "copyFailed": "Failed to copy configuration",
     "renameConfigName": "Rename configuration {{name}}",
@@ -40,7 +41,7 @@
     "backendProfilesPageListScroll_button_newCountConfig": " Create the first configuration",
     "profileCardName_message_translationDefault": "Translator default",
     "profileCardName_message_agentDefault": "Main agent default",
-    "profileCardInfo_message_baseURL": "Base URL: {{baseUrl}}",
+    "profileCardInfo_message_baseURL": "Base URL: <0>{{baseUrl}}</0>",
     "profileCardInfo_message_model": "Model: {{modelName}}",
     "backendProfilesPageDialogHeader_message_editConfig": "Edit configuration - {{editingName}}",
     "backendProfilesPageDialogHeader_message_configTranslationBackendProjectConfigTranslationBackend": "Configure the translation backend parameters; they match the translation backend settings in the project configuration.",

@@ -33,7 +33,6 @@ import {
   OPEN_PROJECTS_CHANGE_EVENT,
   type QueuedMessage,
   readConfigFileName,
-  resetAgent,
   saveOpenProjects,
   sendAgentMessage,
   sendAgentQueuedNow,
@@ -1158,30 +1157,6 @@ export function AgentPage() {
     [sessionsByProject],
   );
 
-  const handleClear = useCallback(async () => {
-    if (!effectiveProject || !activeSessionRef.current) return;
-    if (!window.confirm(translate("agent:agentPage.handleClear_confirm_clearCurrentSessionRunningJobStopHistory"))) return;
-    try {
-      // 清空 = 重置当前会话：停掉运行中的回合并丢弃后端历史
-      await resetAgent(effectiveProject, activeSessionRef.current);
-    } catch {
-      // 后端不可达也要清本地视图
-    }
-    setEvents([]);
-    setStatus('idle');
-    setError(null);
-    setContextUsage(null);
-    setQueued([]);
-    setEditingQueued(null);
-    localMsgIdsRef.current.clear();
-    hasBackendSessionRef.current = false;
-    lastStepRef.current = 0;
-    readingMemory.delete(readingKey(effectiveProject, activeSessionRef.current));
-    tailFollowerRef.current?.jump();
-    removeProjectStorage(sessionsKey(effectiveProject, activeSessionRef.current));
-    void refreshSessions(effectiveProject, activeSessionRef.current);
-  }, [effectiveProject, refreshSessions]);
-
   const timelineBuilder = useMemo(() => createTimelineBuilder(), [uiLanguage, effectiveProject, activeSessionId]);
   const timeline = useMemo(() => timelineBuilder(eventsScope === readingScope ? events : []), [timelineBuilder, events, eventsScope, readingScope]);
   useLayoutEffect(() => {
@@ -1446,15 +1421,6 @@ export function AgentPage() {
                 d="M3 7.2c0-1.12.9-2.02 2-2.02h4.17c.53 0 1.04.21 1.41.59L12 7.2h7c1.1 0 2 .9 2 2.02v7.77c0 1.12-.9 2.02-2 2.02H5c-1.1 0-2-.9-2-2.02V7.2z"
               />
             </svg>
-          </button>
-          <button
-            type="button"
-            className="agent-console__icon-btn"
-            onClick={() => void handleClear()}
-            disabled={running || !events.length}
-            title={translate("agent:agentPage.agentConsoleIconBtn_title_resetSessionClearAllBackend")}
-          >
-            <Icon name="trash" />
           </button>
         </div>
       </header>

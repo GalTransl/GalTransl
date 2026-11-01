@@ -253,6 +253,17 @@
   color: var(--color-text-muted);
 }
 
+.profile-card__base-url {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.profile-card__base-url:hover,
+.profile-card__base-url:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 /* 动作组：鼠标移到卡片上才淡入（触屏没有 hover，常显）。
    刻意不用 .button 的实体描边样式，改成图标+文字的轻盈按钮：
    卡片右侧一列文字按钮本身就是弱操作，不该和「新建配置」抢视觉重量。 */
