@@ -308,6 +308,143 @@ test('normal wizard remembers a manually edited parent; Agent-prefilled wizard p
   } finally { act(() => root.unmount()); }
 });
 
+for (const uiLanguage of ['zh-CN', 'en']) {
+test(`automatic creation waits for files, detected settings and name extraction before handing off (${uiLanguage})`, async () => {
+  const directory = 'E:\\exports\\游戏';
+  const parentKey = 'galtransl-new-project-last-parent-dir';
+  const files = Promise.withResolvers(), plugins = Promise.withResolvers();
+  const detection = Promise.withResolvers(), guidelines = Promise.withResolvers(), job = Promise.withResolvers();
+  const disk = new Map(), calls = [], scans = [], saved = [], jobs = [], opened = [];
+  const f = fixture({ [parentKey]: 'D:\\remembered', 'galtransl.ui.language': uiLanguage }, false, { mocks: {
+    '@tauri-apps/api/core': { invoke: async (name, args) => {
+      calls.push({ name, args });
+      if (name === 'write_text_file') disk.set(args.path, args.content);
+    } },
+  } });
+  f.api.setDefaultBackendProfile('default-model');
+  Object.assign(f.api, {
+    fetchProgramDir: async () => 'C:\\program',
+    fetchDefaultProjectConfigTemplate: async () => 'common: {}\nplugin: {}',
+    fetchProjectConfig: async () => {
+      if (!disk.has(`${directory}\\config.yaml`)) throw Error('No config yet');
+      return { config: { common: { preserved: true }, plugin: { custom_reader: { encoding: 'utf-8' } } } };
+    },
+    fetchProjectFiles: id => { scans.push(id); return files.promise; },
+    fetchPlugins: () => plugins.promise,
+    detectFilePlugin: () => detection.promise,
+    fetchTranslationGuidelines: () => guidelines.promise,
+    updateProjectConfig: async (id, payload) => { saved.push({ id, payload }); },
+    submitJob: async payload => { jobs.push(payload); return { job_id: 'names' }; },
+    fetchJob: () => job.promise,
+  });
+  const { NewProjectWizard } = f.load(new URL('../src/pages/NewProjectWizard.tsx', import.meta.url));
+  const onOpenProject = (dir, config) => { opened.push([dir, config]); f.api.addOpenProject(dir, config); };
+  const view = active => h(MemoryRouter, { initialEntries: ['/new-project'] }, h(NewProjectWizard, {
+    active, initialDirectory: directory, autoCreate: true, onProjectNameChange() {}, onOpenProject,
+  }), h(LocationProbe));
+  let root;
+  await act(async () => { root = create(view(true)); });
+  try {
+    assert.equal(calls.filter(call => call.name === 'create_dir').length, 4);
+    assert.equal(calls.filter(call => call.name === 'write_text_file').length, 1);
+    assert.equal(disk.get(`${directory}\\config.yaml`), 'common: {}\nplugin: {}');
+    assert.equal(saved.length, 0);
+    assert.equal(scans.length, 1);
+    assert.equal(root.root.findByProps({ className: 'wizard-nav' }).findAllByType('button').every(button => button.props.disabled), true);
+    await act(async () => files.resolve({ input_files: [{ name: 'scene.json', is_file: true }] }));
+    assert.equal(saved.length, 0);
+    await act(async () => plugins.resolve([{ name: 'custom_reader', module: 'custom_reader', type: 'file', display_name: 'Custom reader', settings: {} }]));
+    assert.equal(saved.length, 0);
+    await act(async () => detection.resolve({ suggested: 'custom_reader', counts: { custom_reader: 1 }, unknown: [] }));
+    assert.equal(saved.length, 0);
+    await act(async () => guidelines.resolve(['Other.md', 'Basic.md', '日译中_增强v2.md']));
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0].id, f.api.encodeProjectDir(directory));
+    assert.equal(saved[0].payload.config_file_name, 'config.yaml');
+    const config = saved[0].payload.config;
+    assert.equal(config.common.preserved, true);
+    assert.equal(config.common.workersPerProject, 16);
+    assert.equal(config.common['gpt.contextNum'], 8);
+    assert.equal(config.common.language, uiLanguage === 'en' ? 'en' : 'zh-cn');
+    assert.equal(config.common['gpt.translation_guideline'], uiLanguage === 'en' ? 'Basic.md' : '日译中_增强v2.md');
+    assert.equal(config.plugin.filePlugin, 'custom_reader');
+    assert.equal(config.plugin.custom_reader.encoding, 'utf-8');
+    assert.equal(f.api.getSelectedBackendProfile(directory), 'default-model');
+    assert.equal(jobs.length, 1);
+    assert.equal(jobs[0].project_dir, directory);
+    assert.equal(jobs[0].translator, 'dump-name');
+    assert.equal(jobs[0].config_file_name, 'config.yaml');
+    assert.equal(opened.length, 0);
+    assert.equal(root.root.findByType('location').props.path, '/new-project');
+    // Completing in a hidden wizard must wait until the user returns before navigating.
+    await act(async () => root.update(view(false)));
+    await act(async () => job.resolve({ status: 'completed', success: true }));
+    assert.equal(opened.length, 0);
+    await act(async () => root.update(view(true)));
+    assert.deepEqual(opened, [[directory, 'config.yaml']]);
+    assert.equal(root.root.findByType('location').props.path, '/agent');
+    assert.equal(root.root.findByType('location').props.state.agentProjectDir, directory);
+    assert.equal(f.api.loadOpenProjects().includes(directory), true);
+    assert.equal(f.agent.readHistory()[0].projectDir, directory);
+    assert.equal(f.values.get(parentKey), 'D:\\remembered');
+    assert.equal(calls.some(call => call.name === 'copy_files'), false);
+    assert.equal(scans.every(id => id === f.api.encodeProjectDir(directory)), true);
+  } finally { act(() => root.unmount()); }
+});
+}
+
+for (const failure of ['creation', 'files', 'detection', 'guidelines', 'save', 'names', 'unsuccessful names']) {
+test(`automatic creation stops on ${failure} failure and restores manual navigation`, async () => {
+  const directory = '/exports/game';
+  const disk = new Map(), attempts = [], opened = [];
+  const f = fixture({}, false, { mocks: {
+    '@tauri-apps/api/core': { invoke: async (name, args) => {
+      if (name === 'write_text_file') disk.set(args.path, args.content);
+    } },
+    '../components/page-state': { InlineFeedback: props => h('feedback', props) },
+  } });
+  const atBoundary = (step, value) => {
+    attempts.push(step);
+    if (step === failure) throw Error(`${step} failed`);
+    return value;
+  };
+  Object.assign(f.api, {
+    fetchProgramDir: async () => '',
+    fetchDefaultProjectConfigTemplate: async () => atBoundary('creation', 'common: {}'),
+    fetchProjectConfig: async () => {
+      if (!disk.has(`${directory}/config.yaml`)) throw Error('No config yet');
+      return { config: {} };
+    },
+    fetchProjectFiles: async () => atBoundary('files', { input_files: [{ name: 'scene.json', is_file: true }] }),
+    fetchPlugins: async () => [],
+    detectFilePlugin: async () => atBoundary('detection', { counts: {}, unknown: [] }),
+    fetchTranslationGuidelines: async () => atBoundary('guidelines', []),
+    updateProjectConfig: async () => atBoundary('save', {}),
+    submitJob: async () => atBoundary('names', { job_id: 'names' }),
+    fetchJob: async () => {
+      attempts.push('unsuccessful names');
+      return { status: 'completed', success: failure !== 'unsuccessful names', error: 'names failed' };
+    },
+  });
+  const { NewProjectWizard } = f.load(new URL('../src/pages/NewProjectWizard.tsx', import.meta.url));
+  let root;
+  await act(async () => { root = create(h(MemoryRouter, { initialEntries: ['/new-project'] }, h(NewProjectWizard, {
+    active: true, initialDirectory: directory, autoCreate: true, onProjectNameChange() {}, onOpenProject: (...args) => opened.push(args),
+  }), h(LocationProbe))); });
+  try {
+    assert.equal(attempts.filter(step => step === failure).length, 1);
+    assert.equal(opened.length, 0);
+    assert.equal(root.root.findByType('location').props.path, '/new-project');
+    assert.equal(root.root.findByProps({ className: 'wizard-nav' }).findAllByType('button').at(-1).props.disabled, false);
+    if (!failure.includes('names')) assert.equal(root.root.findByType('feedback').props.tone, 'error');
+    await act(async () => root.root.findByProps({ className: 'wizard-nav' }).findAllByType('button').at(-1).props.onClick());
+    // The normal Next action remains usable after automatic processing stops.
+    if (failure === 'creation' || failure === 'save') assert.equal(attempts.filter(step => step === failure).length, 2);
+    if (failure !== 'creation' && failure !== 'save') assert.equal(root.root.findByProps({ className: 'wizard-nav' }).findAllByType('button')[0].props.disabled, false);
+  } finally { act(() => root.unmount()); }
+});
+}
+
 test('opening an Agent project still updates subscribers and custom config when storage is full', () => {
   const f = fixture({ 'galtransl-open-projects': JSON.stringify(['old']) });
   let observed;
@@ -460,15 +597,15 @@ test('Agent wizard requests replace a mounted draft, survive sidebar returns, an
       const navigate = useNavigate();
       // Capture the initial directory at mount, just like the real wizard's input state.
       const [initialDirectory] = React.useState(props.initialDirectory);
-      return h('wizard', { initialDirectory, leave: () => navigate('/') });
+      return h('wizard', { initialDirectory, autoCreate: props.autoCreate, leave: () => navigate('/') });
     } },
   };
   const React = await import('react');
   const f = fixture({}, false, { mocks });
   f.mocks['../pages/HomePage'] = { ...f.home, HomePage: () => {
     const navigate = useNavigate();
-    return h('home', { wizard: directory => navigate('/new-project', {
-      state: directory ? { newProjectWizardDirectory: directory } : null,
+    return h('home', { wizard: (directory, autoCreate = false) => navigate('/new-project', {
+      state: directory ? { newProjectWizardDirectory: directory, newProjectWizardAutoCreate: autoCreate } : null,
     }) });
   } };
   const { App } = f.load(new URL('../src/app/App.tsx', import.meta.url));
@@ -480,15 +617,21 @@ test('Agent wizard requests replace a mounted draft, survive sidebar returns, an
     await act(async () => root.root.findByType('wizard').props.leave());
     await act(async () => root.root.findByType('home').props.wizard('E:\\exports\\first'));
     assert.equal(root.root.findByType('wizard').props.initialDirectory, 'E:\\exports\\first');
+    assert.equal(root.root.findByType('wizard').props.autoCreate, false);
     await act(async () => root.root.findByType('wizard').props.leave());
     await act(async () => root.root.findByType('home').props.wizard());
     assert.equal(root.root.findByType('wizard').props.initialDirectory, 'E:\\exports\\first');
     await act(async () => root.root.findByType('wizard').props.leave());
-    await act(async () => root.root.findByType('home').props.wizard('E:\\exports\\second'));
+    await act(async () => root.root.findByType('home').props.wizard('E:\\exports\\second', true));
     assert.equal(root.root.findByType('wizard').props.initialDirectory, 'E:\\exports\\second');
+    assert.equal(root.root.findByType('wizard').props.autoCreate, true);
+    await act(async () => root.root.findByType('wizard').props.leave());
+    await act(async () => root.root.findByType('home').props.wizard());
+    assert.equal(root.root.findByType('wizard').props.autoCreate, true);
     await act(async () => root.root.findByType('sidebar').props.onCloseWizard());
     assert.equal(root.root.findAllByType('wizard').length, 0);
     await act(async () => root.root.findByType('home').props.wizard());
     assert.equal(root.root.findByType('wizard').props.initialDirectory, undefined);
+    assert.equal(root.root.findByType('wizard').props.autoCreate, undefined);
   } finally { act(() => root.unmount()); }
 });

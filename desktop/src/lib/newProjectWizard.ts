@@ -10,10 +10,12 @@ export function projectDirectoryPrefill(directory: unknown): { parentDir: string
   return { parentDir, projectName };
 }
 
-export function wizardDirectoryFromState(state: unknown): string | undefined {
-  if (!state || typeof state !== 'object') return undefined;
-  const directory = (state as Record<string, unknown>).newProjectWizardDirectory;
-  return projectDirectoryPrefill(directory) ? directory as string : undefined;
+export function wizardRequestFromState(state: unknown): { directory: string; autoCreate: boolean } | null {
+  if (!state || typeof state !== 'object') return null;
+  const request = state as Record<string, unknown>;
+  const directory = request.newProjectWizardDirectory;
+  if (typeof directory !== 'string' || !projectDirectoryPrefill(directory)) return null;
+  return { directory, autoCreate: request.newProjectWizardAutoCreate === true };
 }
 
 export type WizardReferenceSegment = { kind: 'text'; text: string } | { kind: 'wizard'; directory: string };

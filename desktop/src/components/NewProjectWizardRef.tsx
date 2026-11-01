@@ -11,7 +11,7 @@ export function NewProjectWizardRef({ directory }: { directory: string }) {
   const request = useRef(false);
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState('');
-  const openProject = async () => {
+  const openProject = async (autoCreate = false) => {
     if (request.current) return;
     request.current = true; setOpening(true); setError('');
     try {
@@ -24,16 +24,19 @@ export function NewProjectWizardRef({ directory }: { directory: string }) {
         }
         addOpenProject(directory, config);
         addProjectToHistory(directory, config);
-        navigate(`/project/${projectId}/translate`);
+        if (autoCreate) navigate('/agent', { state: { agentProjectDir: directory } });
+        if (!autoCreate) navigate(`/project/${projectId}/translate`);
         return;
       }
-      navigate('/new-project', { state: { newProjectWizardDirectory: directory } });
+      navigate('/new-project', { state: { newProjectWizardDirectory: directory, ...(autoCreate ? { newProjectWizardAutoCreate: true } : {}) } });
     } catch (error) { setError(error instanceof Error ? error.message : String(error)); }
     finally { request.current = false; setOpening(false); }
   };
-  return <><button type="button" className="extract-project-wizard-ref" title={directory}
-    disabled={opening} aria-busy={opening} onClick={() => void openProject()}>
-    <Icon name="file-plus" /><span className="extract-project-wizard-ref__label">{t('extraction:createTranslationProject')}</span>
-    <span className="extract-project-wizard-ref__path">{directory}</span>
-  </button>{error && <span className="extract-error" role="alert">{error}</span>}</>;
+  return <><div className="extract-project-wizard-actions">
+    {[false, true].map(autoCreate => <button key={String(autoCreate)} type="button" className="extract-project-wizard-ref"
+      disabled={opening} aria-busy={opening} onClick={() => void openProject(autoCreate)}>
+      <Icon name={autoCreate ? 'agent-translate' : 'file-plus'} />
+      <span className="extract-project-wizard-ref__label">{t(autoCreate ? 'extraction:createAndHandoffAgent' : 'extraction:createTranslationProject')}</span>
+    </button>)}
+  </div>{error && <span className="extract-error" role="alert">{error}</span>}</>;
 }

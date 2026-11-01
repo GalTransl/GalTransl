@@ -66,15 +66,18 @@ const FLOW_STEPS: { title: string; description: string }[] = [
 
 type NewProjectWizardProps = {
   initialDirectory?: string;
+  autoCreate?: boolean;
   active: boolean;
   onProjectNameChange: (name: string) => void;
   onOpenProject: (projectDir: string, config: string) => void;
 };
 
-export function NewProjectWizard({ active, initialDirectory, onProjectNameChange, onOpenProject }: NewProjectWizardProps) {
+export function NewProjectWizard({ active, initialDirectory, autoCreate = false, onProjectNameChange, onOpenProject }: NewProjectWizardProps) {
   const uiLanguage = useUiLanguage();
   const navigate = useNavigate();
   const initialProject = useMemo(() => projectDirectoryPrefill(initialDirectory), [initialDirectory]);
+  const [automatic, setAutomatic] = useState(autoCreate && Boolean(initialProject));
+  const automaticStepRef = useRef(-1);
   const [currentStep, setCurrentStep] = useState(0);
   const [stepDirection, setStepDirection] = useState<'forward' | 'backward'>('forward');
   const [feedback, setFeedback] = useFeedbackState(null);
@@ -98,6 +101,7 @@ export function NewProjectWizard({ active, initialDirectory, onProjectNameChange
 
   // Step 2 state
   const [importedFiles, setImportedFiles] = useState<string[]>([]);
+  const [filesReady, setFilesReady] = useState(false);
 
   // Step 3 state
   const [backendProfileNames, setBackendProfileNames] = useState<string[]>([]);
@@ -120,6 +124,7 @@ export function NewProjectWizard({ active, initialDirectory, onProjectNameChange
   const [guidelines, setGuidelines] = useState<string[]>([]);
   const [translationGuideline, setTranslationGuideline] = useState('');
   const [settingsSaved, setSettingsSaved] = useState(false);
+  const [settingsReady, setSettingsReady] = useState(false);
 
   // 目标语言与翻译规范的默认值跟随界面语言：英文界面默认 English + Basic.md，
   // 中文界面保持原样（zh-cn + 日译中_增强v2）。用户手动选过之后就不再跟随，
@@ -245,20 +250,24 @@ export function NewProjectWizard({ active, initialDirectory, onProjectNameChange
   useEffect(() => {
     if (!active || currentStep !== 1 || !projectDir) return;
     let cancelled = false;
+    setFilesReady(false);
     fetchProjectFiles(encodeProjectDir(projectDir))
       .then((res) => {
         if (cancelled) return;
         setImportedFiles(
           (res.input_files || []).filter((entry) => entry.is_file).map((entry) => entry.name),
         );
+        setFilesReady(true);
       })
-      .catch(() => {
-        // 列不出来就沿用本地记录（导入过的那些）
+      .catch((error) => {
+        if (cancelled) return;
+        setAutomatic(false);
+        if (autoCreate) setFeedback({ type: 'error', message: uiMessage("projects:newProjectWizard.message_message_importFailed", { value: error instanceof Error ? error.message : String(error) }) });
       });
     return () => {
       cancelled = true;
     };
-  }, [active, currentStep, projectDir]);
+  }, [active, currentStep, projectDir, autoCreate]);
 
   // 没记过上次用过的目录时，「父目录」默认填程序所在目录（只填空着的，不覆盖已有值）
   useEffect(() => {
@@ -399,11 +408,11 @@ export function NewProjectWizard({ active, initialDirectory, onProjectNameChange
 
   // ── Step 4: Load plugins on entry ──
   useEffect(() => {
-    if (currentStep !== 3) return;
-    fetchPlugins()
+    if (currentStep !== 3 || !projectDir) return;
+    setSettingsReady(false);
+    const pluginsRequest = fetchPlugins()
       .then(async (plugins) => {
         setFilePlugins(plugins.filter((p) => p.type === 'file'));
-        if (!projectDir) return;
         const { config } = await fetchProjectConfig(encodeProjectDir(projectDir), 'config.yaml');
         const configured = (config.plugin as Record<string, unknown>) || {};
         setPluginOverrides((previous) => {
@@ -416,23 +425,28 @@ export function NewProjectWizard({ active, initialDirectory, onProjectNameChange
           }
           return next;
         });
-      })
-      .catch(() => {});
-    if (projectDir) {
-      detectFilePlugin(encodeProjectDir(projectDir))
-        .then((detection) => {
-          setFileDetection(detection);
-          if (detection.suggested && !filePluginTouchedRef.current) {
-            setSelectedFilePlugin(detection.suggested);
-          }
-        })
-        .catch(() => setFileDetection(null));
-    }
-    // 默认值由上面的语言相关 effect 挑选，这里只负责拉列表。
-    fetchTranslationGuidelines()
-      .then(setGuidelines)
-      .catch(() => {});
-  }, [currentStep, projectDir]);
+      });
+    const detectionRequest = detectFilePlugin(encodeProjectDir(projectDir))
+      .then((detection) => {
+        setFileDetection(detection);
+        if (detection.suggested && !filePluginTouchedRef.current) {
+          setSelectedFilePlugin(detection.suggested);
+        }
+      });
+    const guidelinesRequest = fetchTranslationGuidelines().then((names) => {
+      setGuidelines(names);
+      if (!translationGuidelineTouchedRef.current) {
+        setTranslationGuideline(preferredGuidelines.find((name) => names.includes(name)) || names[0] || '');
+      }
+    });
+    // 自动保存必须等识别结果、插件配置和默认翻译规范都已载入。
+    void Promise.all([pluginsRequest, detectionRequest, guidelinesRequest])
+      .then(() => setSettingsReady(true))
+      .catch((error) => {
+        setAutomatic(false);
+        if (autoCreate) setFeedback({ type: 'error', message: uiMessage("projects:newProjectWizard.message_message_saveFailed", { value: error instanceof Error ? error.message : String(error) }) });
+      });
+  }, [currentStep, projectDir, preferredGuidelines, autoCreate]);
 
   const handleSaveSettings = useCallback(async (): Promise<boolean> => {
     if (!projectDir) return false;
@@ -518,7 +532,7 @@ export function NewProjectWizard({ active, initialDirectory, onProjectNameChange
           try {
             const status = await fetchJob(job.job_id);
             if (status.status === 'completed') {
-              setNameJobStatus('completed');
+              setNameJobStatus(status.success === false ? 'failed' : 'completed');
               setNameJobMessage(status.success ? uiMessage("projects:newProjectWizard.poll_setNameJobMessage_nameTableExtractComplete") : uiMessage("projects:newProjectWizard.poll_setNameJobMessage_extractComplete", { value: status.error || '' }));
             } else if (status.status === 'failed') {
               setNameJobStatus('failed');
@@ -918,14 +932,39 @@ export function NewProjectWizard({ active, initialDirectory, onProjectNameChange
     if (advancing) return;
     setAdvancing(true);
     try {
-      if (currentStep === 0 && !projectCreated && !(await handleCreateProject())) return;
-      if (currentStep === 3 && !settingsSaved && !(await handleSaveSettings())) return;
+      if (currentStep === 0 && !projectCreated && !(await handleCreateProject())) {
+        setAutomatic(false);
+        return;
+      }
+      if (currentStep === 3 && !settingsSaved && !(await handleSaveSettings())) {
+        setAutomatic(false);
+        return;
+      }
       setStepDirection('forward');
       setCurrentStep((s) => Math.min(STEPS.length - 1, s + 1));
     } finally {
       setAdvancing(false);
     }
   }, [advancing, currentStep, projectCreated, settingsSaved, handleCreateProject, handleSaveSettings]);
+
+  useEffect(() => {
+    if (!active || !automatic || advancing) return;
+    if (currentStep === 4 && nameJobStatus === 'failed') {
+      setAutomatic(false);
+      return;
+    }
+    if (currentStep === 1 && !filesReady) return;
+    if (currentStep === 3 && !settingsReady) return;
+    if (currentStep === 4 && nameJobStatus !== 'completed') return;
+    if (currentStep !== STEPS.length - 1 && !canNext) return;
+    if (automaticStepRef.current === currentStep) return;
+    automaticStepRef.current = currentStep;
+    if (currentStep === STEPS.length - 1) {
+      handleFinish('agent');
+      return;
+    }
+    void handleNextStep();
+  }, [active, automatic, advancing, currentStep, filesReady, settingsReady, nameJobStatus, canNext, handleNextStep, handleFinish]);
 
   const nextLabel = currentStep === 0 && !projectCreated
     ? translate("projects:newProjectWizard.nextLabel_message_createProject")
@@ -956,10 +995,10 @@ export function NewProjectWizard({ active, initialDirectory, onProjectNameChange
         {feedback && <InlineFeedback className={feedback.type === 'success' ? 'inline-alert--floating' : undefined} tone={feedback.type === 'error' ? 'error' : feedback.type === 'success' ? 'success' : 'info'} title={feedback.message} />}
       </div>
       <div className="wizard-nav">
-        <Button variant="secondary" onClick={handlePrevStep} disabled={currentStep === 0}>{translate("projects:newProjectWizard.wizardNav_message_previous")}</Button>
+        <Button variant="secondary" onClick={handlePrevStep} disabled={currentStep === 0 || advancing || automatic}>{translate("projects:newProjectWizard.wizardNav_message_previous")}</Button>
         {currentStep < STEPS.length - 1 ? (
-          <Button onClick={() => void handleNextStep()} disabled={!canNext || advancing}>
-            {advancing ? translate("projects:newProjectWizard.wizardNav_message_processing") : nextLabel}
+          <Button onClick={() => void handleNextStep()} disabled={!canNext || advancing || automatic}>
+            {advancing || automatic ? translate("projects:newProjectWizard.wizardNav_message_processing") : nextLabel}
           </Button>
         ) : (
           <div className="wizard-nav__actions">

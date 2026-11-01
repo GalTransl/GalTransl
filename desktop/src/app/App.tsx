@@ -25,7 +25,7 @@ import { ConnectionProvider, useConnection } from '../features/connection/Connec
 import { BootstrapGate } from '../features/connection/BootstrapGate';
 import { UpdateNotice } from '../features/update/UpdateNotice';
 import { HomePage, addProjectToHistory } from '../pages/HomePage';
-import { wizardDirectoryFromState } from '../lib/newProjectWizard';
+import { wizardRequestFromState } from '../lib/newProjectWizard';
 
 const ProjectLayout = lazy(async () => {
   const mod = await import('../components/ProjectLayout');
@@ -219,17 +219,17 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
   const [displayLocation, setDisplayLocation] = useState(location);
   const [wizardOpen, setWizardOpen] = useState(location.pathname === '/new-project');
   const [wizardProjectName, setWizardProjectName] = useState('');
-  const [wizardRequest, setWizardRequest] = useState<{ key: string; directory: string } | null>(() => {
-    const directory = location.pathname === '/new-project' ? wizardDirectoryFromState(location.state) : undefined;
-    return directory ? { key: location.key, directory } : null;
+  const [wizardRequest, setWizardRequest] = useState<{ key: string; directory: string; autoCreate: boolean } | null>(() => {
+    const request = location.pathname === '/new-project' ? wizardRequestFromState(location.state) : null;
+    return request ? { key: location.key, ...request } : null;
   });
   const wizardVisible = displayLocation.pathname === '/new-project';
 
   useEffect(() => {
     if (location.pathname !== '/new-project') return;
     setWizardOpen(true);
-    const directory = wizardDirectoryFromState(location.state);
-    if (directory) setWizardRequest({ key: location.key, directory });
+    const request = wizardRequestFromState(location.state);
+    if (request) setWizardRequest({ key: location.key, ...request });
   }, [location.pathname, location.key, location.state]);
 
   const handleFinishWizard = useCallback((projectDir: string, config: string) => {
@@ -485,6 +485,7 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
               <NewProjectWizard
                 key={wizardRequest?.key || 'new-project'}
                 initialDirectory={wizardRequest?.directory}
+                autoCreate={wizardRequest?.autoCreate}
                 active={wizardVisible && location.pathname === '/new-project'}
                 onProjectNameChange={setWizardProjectName}
                 onOpenProject={handleFinishWizard}
