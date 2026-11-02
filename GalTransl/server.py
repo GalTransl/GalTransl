@@ -1985,6 +1985,50 @@ def build_handler(registry: JobRegistry):
         # Routing helpers
         # -----------------------------------------------------------------
 
+        def _route_memories(self, method: str) -> bool:
+            parsed = urlparse(self.path)
+            if (method, parsed.path) not in (("GET", "/api/agent/memories"), ("POST", "/api/agent/memories/delete")):
+                return False
+            from contextlib import closing
+            import sqlite3
+            from GalTransl.Agent.mnemon_store import Forget, MnemonStore, memory_directory
+            from GalTransl.Agent.models import AgentToolError
+            from GalTransl.Extraction.http import trusted_request
+
+            if not trusted_request(self):
+                self._send_json({"error": "Memory management is only available to the local desktop client"}, status=HTTPStatus.FORBIDDEN)
+                return True
+            try:
+                payload = {key: values[0] for key, values in parse_qs(parsed.query).items()} if method == "GET" else self._read_json_body()
+                if not isinstance(payload, dict):
+                    raise ValueError("request must be an object")
+                project_dir = payload.get("project_dir", "")
+                if not isinstance(project_dir, str):
+                    raise ValueError("project_dir must be a string")
+                if project_dir and not Path(project_dir).is_dir():
+                    raise ValueError("project_dir must be an existing directory")
+                if method == "GET":
+                    entries = []
+                    for scope in (["global", "project"] if project_dir else ["global"]):
+                        with closing(MnemonStore(memory_directory(project_dir if scope == "project" else ""), scope=scope)) as store:
+                            entries.extend(store.entries())
+                    self._send_json({"entries": entries})
+                    return True
+                memory_id = payload.get("id")
+                if not isinstance(memory_id, str) or not 1 <= len(memory_id.strip()) <= 100:
+                    raise ValueError("id must be a nonempty string of at most 100 characters")
+                memory_id = memory_id.strip()
+                scope = "global" if memory_id.startswith("global-") else "project"
+                if scope == "project" and not project_dir:
+                    raise ValueError("project_dir is required for project memory")
+                with closing(MnemonStore(memory_directory(project_dir if scope == "project" else ""), scope=scope)) as store:
+                    self._send_json(store.mutate(Forget(memory_id)))
+            except (ValueError, AgentToolError) as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            except (OSError, sqlite3.Error) as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+            return True
+
         def _route_project_api(self, project_id: str, sub_path: str) -> None:
             if sub_path == "/cache/history":
                 if self.command != "POST":
@@ -3477,6 +3521,8 @@ def build_handler(registry: JobRegistry):
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
         def do_GET(self) -> None:
+            if self._route_memories("GET"):
+                return
             if route_update(self, "GET", GALTRANSL_VERSION):
                 return
             if route_extraction(self, "GET"):
@@ -3720,6 +3766,8 @@ def build_handler(registry: JobRegistry):
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:
+            if self._route_memories("POST"):
+                return
             if route_update(self, "POST", GALTRANSL_VERSION):
                 return
             if route_extraction(self, "POST"):

@@ -44,8 +44,9 @@ export function CreateDialog({ close, create, busy }: { close: () => void; creat
     <footer><button type="button" onClick={close}>{x('cancel')}</button><button className="extract-primary" disabled={!game.trim() || busy}>{x('create')}</button></footer>
   </form></Dialog>;
 }
-export function EnvironmentDialog({ initial, refresh, close, saved }: {
+export function EnvironmentDialog({ initial, refresh, close, saved, projectDir = '' }: {
   initial: Environment | null; refresh: () => Promise<Environment>; close: () => void; saved: (environment: Environment) => void;
+  projectDir?: string;
 }) {
   useUiLanguage();
   const connection = useConnection();
@@ -111,7 +112,7 @@ export function EnvironmentDialog({ initial, refresh, close, saved }: {
     catch (error) { setError(error instanceof Error ? error.message : String(error)); }
     finally { setAction(''); }
   };
-  return <AgentSettingsDialog agent="extraction" backendUrl={connection.backendUrl} close={close}
+  return <AgentSettingsDialog agent="extraction" backendUrl={connection.backendUrl} projectDir={projectDir} close={close}
     className="extract-environment-dialog" footer={<>
       <span className="extract-environment-save-hint">{x('runtimeSaveHint')}</span>
       <button type="button" disabled={action === 'saving' || action === 'installing'} onClick={close}>{x('cancel')}</button>

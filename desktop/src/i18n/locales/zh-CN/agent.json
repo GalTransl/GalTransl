@@ -20,6 +20,12 @@
   "projectPreview": {
     "openEntry": "在迷你窗中查看并定位此条目"
   },
+  "mnemonTools": {
+    "recall": "检索记忆",
+    "remember": "保存记忆",
+    "forget": "删除记忆",
+    "globalSummary": "全局 · {{content}}"
+  },
   "billionContextTools": {
     "compress": { "action": "压缩上下文", "running": "正在压缩上下文" },
     "decompress": { "action": "还原上下文", "running": "正在还原上下文" },
@@ -158,6 +164,8 @@
     "agentAskHead_message_text_one": "第 {{value}} / {{count}} 题"
   },
   "permissionCard": {
+    "globalMemory": "全局记忆",
+    "globalMemoryHint": "影响所有项目；每次变更都需批准，自动模式和会话放行不适用。",
     "edit_edit_translationText": "改译文数据",
     "delegate_delegate_proxy": "派子代理",
     "high_high_settingsJob": "改设置 / 启动任务",

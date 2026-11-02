@@ -375,7 +375,7 @@ class ExtractionRuntime:
         if not pending:
             return
         allowed = (runner.state.permission_mode == AUTO_QUIET_MODE if pending['type'] == 'ask_request'
-                   else not _permission_needed(_tool_risk(pending['toolName']), runner.state.permission_mode))
+                   else not _permission_needed(_tool_risk(pending['toolName'], pending.get('arguments')), runner.state.permission_mode))
         if allowed:
             self.pending.pop(session_id, None)
             self._emit(session_id, {'type': 'request_answered', 'requestId': pending['requestId'], 'automatic': True})

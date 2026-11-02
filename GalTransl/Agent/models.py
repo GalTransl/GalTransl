@@ -105,6 +105,10 @@ class AgentState:
     cache_usage: dict[str, Any] = field(default_factory=dict)
     # 锚点对应的历史长度：锚点之后新增的消息要另外估算
     anchored_message_count: int = 0
+    # Request-only snapshot and tool costs already included in the measured anchor.
+    usage_overhead_tokens: int | None = None
+    # None means this session has not captured a memory snapshot; "" pins no memory.
+    mnemon_snapshot: str | None = None
     # 上下文窗口（token），来自后端配置 contextWindow；界面指示器的分母
     context_window: int = DEFAULT_CONTEXT_WINDOW
     # 从磁盘恢复的会话标记（本次进程内还没跑过回合）

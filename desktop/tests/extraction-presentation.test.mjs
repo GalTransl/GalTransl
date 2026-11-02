@@ -10,6 +10,22 @@ const { toolRowPhases } = load(new URL('../src/pages/agent/rows/ToolRow.tsx', im
 const user = { id: 'user-1', role: 'user', text: 'Inspect this isolated fixture' };
 const tool = { id: 'tool-1', role: 'tool', tool: 'run_python', args: { code: 'print("fixture")' }, text: 'partial output' };
 
+test('global memory approval in extraction only offers approval for this change', () => {
+  const { PendingRequest } = load(new URL('../src/pages/extraction/Conversation.tsx', import.meta.url));
+  const content = '全局记忆正文'.repeat(100);
+  const answers = [];
+  let view;
+  act(() => { view = create(h(PendingRequest, { pending: {
+    type: 'permission_request', requestId: 'memory', toolName: 'mnemon_remember', risk: 'global-memory', arguments: { scope: 'global', content },
+  }, answer: body => answers.push(body), busy: false })); });
+  try {
+    assert.equal(view.root.findByProps({ className: 'memory-manager__content' }).children.join(''), content);
+    assert.equal(view.root.findAllByType('button').length, 2);
+    view.root.findAllByType('button').forEach(node => act(() => node.props.onClick()));
+    assert.deepEqual(answers.map(answer => answer.decision), ['deny', 'allow-once']);
+  } finally { act(() => view.unmount()); }
+});
+
 test('extraction completion time appears beside copy and survives replay and split history', () => {
   const { reduceEvents, prependHistory } = load(new URL('../src/pages/extraction/transcript.ts', import.meta.url));
   const { AgentGroupView } = load(new URL('../src/pages/agent/rows/AgentGroupView.tsx', import.meta.url));

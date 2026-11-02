@@ -65,10 +65,13 @@ def restore_state(session, directory, profile, prompt, mode):
     messages = _restore_compacted_history(_restore_microcompacted_history(
         saved["messages"], saved.get("microcompactions", [])))
     meta = saved["meta"]
-    usage, count, model = _restore_usage_anchor(messages, meta.get("context_usage_anchor"))
+    usage, count, model, overhead = _restore_usage_anchor(messages, meta.get("context_usage_anchor"))
+    snapshot = meta.get("mnemon_snapshot")
     state = AgentState(project_dir=session["workspace"], session_id=session["id"], title=session["title"],
         status="running", first_prompt=prompt, backend_profile_data=profile, permission_mode=mode,
         messages=messages, last_prompt_tokens=usage, anchored_message_count=count, usage_model=model,
+        usage_overhead_tokens=overhead,
+        mnemon_snapshot=snapshot if isinstance(snapshot, str) else None,
         cache_usage=_restore_cache_usage(meta.get("cache_usage")),
         step=max((event.get("step", 0) for event in saved["events"]), default=0))
     return state, store
@@ -76,6 +79,10 @@ def restore_state(session, directory, profile, prompt, mode):
 
 class ExtractionRunner(AgentRunner):
     _billion_context_setting = "extractionBillionContextEnabled"
+    _mnemon_setting = "extractionMnemonEnabled"
+
+    def _mnemon_project_dir(self):
+        return self.session["game_dir"]
 
     def __init__(self, state, store, session, available, emit):
         super().__init__(state)
@@ -132,9 +139,6 @@ class ExtractionRunner(AgentRunner):
                     message['content'] = '\n'.join(block['text'] for block in content if block.get('type') == 'text')
             projected.append(message)
         projected.extend(attachments)
-        # Refresh generated instructions for resumed sessions without rewriting saved history.
-        if projected and projected[0].get('role') == 'system':
-            projected[0] = {**projected[0], 'content': self._system_prompt()}
         return projected
 
     def _serialize_tool_result(self, result):
@@ -279,7 +283,7 @@ class ExtractionRunner(AgentRunner):
                     event["details"] = result["details"]
         elif event_type == "permission_request":
             event = {"type": "permission_request", "requestId": data["id"], "toolCallId": data["tool_call_id"],
-                     "toolName": data["name"], "arguments": data["arguments"]}
+                     "toolName": data["name"], "arguments": data["arguments"], "risk": data["risk"]}
         elif event_type == "context_usage":
             event = {"type": "context_usage", **data["context"]}
         elif event_type == "compacting":

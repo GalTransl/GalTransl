@@ -21,6 +21,7 @@ from GalTransl.Agent.context import (
     _assistant_parts,
     _dangling_tool_calls,
     _estimate_message_tokens,
+    _estimate_text_tokens,
     _estimate_usage_tokens,
     _find_compaction_cut,
     _history_fingerprint,
@@ -63,6 +64,7 @@ from GalTransl.Agent.handlers import _RETIRED_TOOLS, _TOOL_HANDLERS, _attach_rea
 from GalTransl.Agent.models import AgentEvent, AgentToolError
 from GalTransl.Agent.permissions import (
     PERMISSION_DECISIONS,
+    PERMISSION_GLOBAL_MEMORY,
     PERMISSION_WAIT_TICK,
     _apply_permission_mode,
     _normalize_permission_mode,
@@ -84,6 +86,7 @@ from GalTransl.Agent.tool_operations import tool_operation
 from GalTransl.Agent.images import expand_message, user_message, user_event
 from GalTransl.AppSettings import load_app_settings
 from GalTransl.Agent.billion_context import BillionContextSession
+from GalTransl.Agent.mnemon import MnemonSession
 from GalTransl.Agent.tools.ask import ASK_WAIT_TICK, _normalize_ask_answers
 from GalTransl.Agent.tools.preview import _preview_tool_changes
 from GalTransl.Agent.tools.render_md import _render_tool_result_table, _tool_result_json
@@ -98,6 +101,7 @@ class AgentRunner:
     """单次 Agent 运行。在独立线程内执行 run()。"""
 
     _billion_context_setting = "billionContextEnabled"
+    _mnemon_setting = "mnemonEnabled"
 
     def __init__(
         self,
@@ -115,6 +119,7 @@ class AgentRunner:
         self._clients_lock = threading.Lock()
         self._openai_client: Any = None
         self._billion_context: BillionContextSession | None = None
+        self._mnemon: MnemonSession | None = None
         self._context_plugin_lock = threading.Lock()
         self._store_closed = False
         self._model: str = ""
@@ -183,6 +188,9 @@ class AgentRunner:
             self._store_closed = True
             if self._billion_context is not None:
                 self._billion_context.close()
+            if self._mnemon is not None:
+                self._mnemon.close()
+                self._mnemon = None
 
     # ---- 事件 ----
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
@@ -268,7 +276,8 @@ class AgentRunner:
             self._store.append_meta(context_window=backend.context_window)
         self._prompt_caching = backend.prompt_caching
         self._reasoning_kwargs = backend.reasoning_kwargs
-        enabled = load_app_settings().get(self._billion_context_setting, False)
+        settings = load_app_settings()
+        enabled = settings.get(self._billion_context_setting, False)
         if enabled:
             self._emit("status", {"message": "正在启动 billion-context 上下文插件"})
         # Deletion can race with backend resolution. Serialize archive creation
@@ -282,6 +291,14 @@ class AgentRunner:
             if enabled:
                 self._billion_context = BillionContextSession(
                     self.state, self._store, self.stop_event, context_window=backend.context_window)
+            if self._mnemon is not None:
+                self._mnemon.close()
+            self._mnemon = None
+            if settings.get(self._mnemon_setting, False):
+                self._emit("status", {"message": "正在启动 agent-mnemon 全局/项目记忆"})
+                self._mnemon = MnemonSession(self._mnemon_project_dir(), self.state.session_id,
+                    self.stop_event, context_window=backend.context_window)
+            self._session_memory_snapshot()
         _log(f"主 Agent 模型: {backend.model} context_window={backend.context_window} prompt_caching={backend.prompt_caching}")
 
     @contextlib.contextmanager
@@ -329,6 +346,25 @@ class AgentRunner:
     def _initial_user_message(self, user_text: str) -> str:
         return build_initial_user_message(user_text)
 
+    def _mnemon_project_dir(self) -> str:
+        return self.state.project_dir
+
+    def _request_system_prompt(self, saved_prompt: str) -> str:
+        snapshot = self._session_memory_snapshot() if self.state.mnemon_snapshot is not None or self._mnemon is not None else ""
+        return saved_prompt + "\n\n" + snapshot if snapshot else saved_prompt
+
+    def _session_memory_snapshot(self) -> str:
+        if self.state.mnemon_snapshot is not None:
+            return self.state.mnemon_snapshot
+        saved = self._store.load() if self._store is not None else {"meta": {}, "messages": []}
+        snapshot = saved["meta"].get("mnemon_snapshot")
+        # Old sessions without a recorded snapshot must not acquire new memory.
+        self.state.mnemon_snapshot = snapshot if isinstance(snapshot, str) else (
+            self._mnemon.projection() if self._mnemon is not None and not saved["messages"] else "")
+        if self._store is not None:
+            self._store.append_meta(mnemon_snapshot=self.state.mnemon_snapshot)
+        return self.state.mnemon_snapshot
+
     def _tool_definitions(self) -> list[dict[str, Any]]:
         return AGENT_TOOLS
 
@@ -343,10 +379,20 @@ class AgentRunner:
             if names & self._billion_context.names:
                 raise AgentToolError("billion-context 工具名称与 Agent 工具冲突")
             tools.extend(self._billion_context.tools)
+        if self._mnemon is not None:
+            names = {tool["function"]["name"] for tool in tools}
+            if names & self._mnemon.names:
+                raise AgentToolError("agent-mnemon 工具名称与 Agent 工具冲突")
+            tools.extend(self._mnemon.tools)
         return tools
 
     def _execute_tool(self, name: str, args: dict[str, Any]) -> Any:
         # Intercept before domain validation (including ExtractionRunner).
+        if self._mnemon is not None and name in self._mnemon.names:
+            if name in self._mnemon.write_names:
+                self._require_permission(name, args)
+            token_budget = max(0, int(self._context_window * .8) - self._estimate_context_tokens()) if name == "mnemon_recall" else None
+            return self._mnemon.call(name, args, self._active_tool_call_id, token_budget=token_budget)
         if self._billion_context is not None and name in self._billion_context.names:
             self._billion_context.project(self._messages_for_request(strip_internal=False), self._request_overhead_tokens())
             return self._billion_context.call(name, args, self._active_tool_call_id)
@@ -570,6 +616,8 @@ class AgentRunner:
                         if self._billion_context is not None and name in self._billion_context.names:
                             # Both domains receive the same plain JSON core tool receipt.
                             content_str = result["content"][0]["text"]
+                        elif self._mnemon is not None and name in self._mnemon.names:
+                            content_str = json.dumps(result, ensure_ascii=False)
                         else:
                             content_str = rendered if rendered is not None else self._serialize_tool_result(result)
                     except AgentToolError as exc:
@@ -613,6 +661,9 @@ class AgentRunner:
                 if self._billion_context is not None:
                     self._billion_context.close()
                     self._billion_context = None
+                if self._mnemon is not None:
+                    self._mnemon.close()
+                    self._mnemon = None
             self.state.finished_at = time.time()
             # 异常退出不经过 _close_turn，这里兜底清掉落盘里的 running 标记
             self._write_running_meta(False)
@@ -884,6 +935,12 @@ class AgentRunner:
             if field and message.get("role") == "assistant" and field not in message:
                 clean = {**clean, field: ""}
             messages.append(clean)
+        system_index = next((index for index, message in enumerate(messages)
+            if message.get("role") == "system" and isinstance(message.get("content"), str)), None)
+        if system_index is not None:
+            messages[system_index] = {**messages[system_index], "content": self._request_system_prompt(messages[system_index]["content"])}
+        if system_index is None and (self._mnemon is not None or self.state.mnemon_snapshot):
+            messages.insert(0, {"role": "system", "content": self._request_system_prompt("")})
         return messages
 
     def _open_stream(self, *, include_usage: bool) -> Any:
@@ -1089,6 +1146,10 @@ class AgentRunner:
         """这次请求里 messages 之外的固定开销：tools schema（见 _tools_overhead_tokens）。"""
         return _tools_overhead_tokens(self._request_tools())
 
+    def _request_context_overhead_tokens(self) -> int:
+        snapshot = self._session_memory_snapshot() if self.state.mnemon_snapshot is not None or self._mnemon is not None else ""
+        return self._request_overhead_tokens() + (_estimate_text_tokens("\n\n" + snapshot) if snapshot else 0)
+
     def _record_context_usage(self, prompt_tokens: int) -> None:
         """持久化 provider 实测用量，重启后继续只估算新增消息。"""
         messages = self.state.messages
@@ -1097,12 +1158,14 @@ class AgentRunner:
         self.state.last_prompt_tokens = prompt_tokens
         self.state.anchored_message_count = len(messages)
         self.state.usage_model = self._model
+        self.state.usage_overhead_tokens = self._request_context_overhead_tokens()
         if self._store is not None:
             self._store.append_meta(context_usage_anchor={
                 "prompt_tokens": prompt_tokens,
                 "message_count": len(messages),
                 "fingerprint": _history_fingerprint(messages),
                 "model": self._model,
+                "overhead_tokens": self.state.usage_overhead_tokens,
             }, context_window=self._context_window)
 
     def _estimate_context_tokens(self) -> int:
@@ -1114,7 +1177,8 @@ class AgentRunner:
             self.state.messages,
             self.state.last_prompt_tokens,
             self.state.anchored_message_count,
-            self._request_overhead_tokens(),
+            self._request_context_overhead_tokens(),
+            self.state.usage_overhead_tokens,
         )
 
     def _emit_context_usage(self) -> None:
@@ -1594,7 +1658,7 @@ class AgentRunner:
         mode = _normalize_permission_mode(self.state.permission_mode)
         if not _permission_needed(risk, mode):
             return
-        if name in self.state.permission_grants:
+        if risk != PERMISSION_GLOBAL_MEMORY and name in self.state.permission_grants:
             _log(f"  🔐 权限：{name} 本会话已放行，直接执行")
             return
         decision, deny_reason = self.request_permission(
@@ -1603,7 +1667,8 @@ class AgentRunner:
         if decision == "allow-once":
             return
         if decision == "allow-session":
-            self.state.permission_grants.add(name)
+            if risk != PERMISSION_GLOBAL_MEMORY:
+                self.state.permission_grants.add(name)
             return
         _log(f"  🔐 权限被拒（{decision}）：{name}" + (f"（原因：{deny_reason}）" if deny_reason else ""))
         raise AgentToolError(_permission_denied_reason(name, decision, deny_reason))

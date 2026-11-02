@@ -15,10 +15,11 @@ import unittest
 
 from GalTransl.Agent.runtime import AGENT_TOOLS
 from GalTransl.Agent.billion_context import BillionContextSession
+from GalTransl.Agent.mnemon import MnemonSession
 from GalTransl.Agent.handlers import _TOOL_HANDLERS
 from GalTransl.Extraction.tool_schemas import EXTRACTION_TOOLS
 
-ALL_TOOLS = [*AGENT_TOOLS, *EXTRACTION_TOOLS, *BillionContextSession.tools]
+ALL_TOOLS = [*AGENT_TOOLS, *EXTRACTION_TOOLS, *BillionContextSession.tools, *MnemonSession.tools]
 
 _PAGE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),

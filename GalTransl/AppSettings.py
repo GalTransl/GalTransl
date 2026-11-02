@@ -14,6 +14,8 @@ DEFAULT_APP_SETTINGS: dict[str, Any] = {
     "maxConcurrentJobs": 4,
     "billionContextEnabled": False,
     "extractionBillionContextEnabled": False,
+    "mnemonEnabled": False,
+    "extractionMnemonEnabled": False,
 }
 
 # Kept for callers that imported the old constant. Runtime reads and writes use
@@ -24,6 +26,8 @@ _SETTINGS_PATH = str(get_app_settings_path())
 def _normalize_settings(data: dict[str, Any] | None) -> dict[str, Any]:
     source = data or {}
     return {
+        "mnemonEnabled": source.get("mnemonEnabled", False) is True,
+        "extractionMnemonEnabled": source.get("extractionMnemonEnabled", False) is True,
         "billionContextEnabled": source.get("billionContextEnabled", False) is True,
         # Existing installations used one switch for both agents.
         "extractionBillionContextEnabled": source.get(

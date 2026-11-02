@@ -130,16 +130,18 @@ export function PendingRequest({ pending, answer, busy }: { pending: AgentEvent;
   const [text, setText] = useState('');
   const [denyReason, setDenyReason] = useState('');
   const permission = pending.type === 'permission_request';
+  const globalMemory = pending.risk === 'global-memory';
   const reason = toolReason(pending.arguments);
   if (!permission && pending.questions?.length) return <AskUserCard
     item={{ kind: 'tool', step: 0, id: pending.toolCallId || '', name: 'ask_user', arguments: { questions: pending.questions } }}
     submitting={busy} error={null} onSubmit={answers => answer({ request_id: pending.requestId, answers })} />;
   return <section className={`agent-perm extract-pending${permission ? '' : ' extract-pending--question'}`} aria-live="polite" aria-label={x(permission ? 'permissionTitle' : 'questionTitle')}>
     <header className="agent-perm__head"><span className="agent-perm__icon"><Icon name={permission ? 'shield' : 'help'} /></span><strong className="agent-perm__title">{x(permission ? 'permissionTitle' : 'questionTitle')}</strong></header>
-    {permission ? <><div className="extract-pending__body"><p className="extract-muted">{x('commandWarning')}</p>
+    {permission ? <><div className="extract-pending__body"><p className="extract-muted">{globalMemory ? t('agent:permissionCard.globalMemoryHint') : x('commandWarning')}</p>
+      {globalMemory && typeof pending.arguments?.content === 'string' && <pre className="memory-manager__content">{pending.arguments.content}</pre>}
       {reason && <p className="agent-perm__reason">{t('agent:permissionCard.agentPerm_message_text', { reason })}</p>}
       <details><summary>{toolMeta(pending.toolName, pending.arguments).action}</summary><pre>{JSON.stringify(pending.arguments, null, 2)}</pre></details></div><div className="extract-actions">
-      {(['deny', 'allow-turn', 'allow-once'] as const).map(decision => <button type="button" key={decision} disabled={busy} className={`agent-perm__btn${decision === 'allow-once' ? ' is-primary' : ''}`} onClick={() => answer({ request_id: pending.requestId, decision, ...(decision === 'deny' ? { reason: denyReason.trim() } : {}) })}>{x(decision === 'deny' ? 'deny' : decision === 'allow-turn' ? 'allowTurn' : 'allowOnce')}</button>)}
+      {(['deny', 'allow-turn', 'allow-once'] as const).filter(decision => !globalMemory || decision !== 'allow-turn').map(decision => <button type="button" key={decision} disabled={busy} className={`agent-perm__btn${decision === 'allow-once' ? ' is-primary' : ''}`} onClick={() => answer({ request_id: pending.requestId, decision, ...(decision === 'deny' ? { reason: denyReason.trim() } : {}) })}>{x(decision === 'deny' ? 'deny' : decision === 'allow-turn' ? 'allowTurn' : 'allowOnce')}</button>)}
       <input type="text" className="agent-perm__reason-input" value={denyReason} onChange={event => setDenyReason(event.target.value)}
         onKeyDown={event => { if (event.key !== 'Enter' || busy) return; event.preventDefault(); answer({ request_id: pending.requestId, decision: 'deny', reason: denyReason.trim() }); }}
         placeholder={t('agent:permissionCard.agentPermFoot_placeholder_deny')} aria-label={t('agent:permissionCard.agentPermFoot_ariaLabel_deny')}

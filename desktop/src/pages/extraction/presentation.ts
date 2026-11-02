@@ -79,7 +79,7 @@ export function extractionTimeline(rows: Row[], running: boolean, pending: Agent
         else item.result = row.text;
       } else item.progressText = row.text;
       if (!row.done && pending?.toolCallId === row.id) {
-        item.permission = { id: pending.requestId || row.id, name: row.tool || '', label: '', risk: '', mode: '', arguments: row.args };
+        item.permission = { id: pending.requestId || row.id, name: row.tool || '', label: '', risk: pending.risk || '', mode: '', arguments: row.args };
       }
       current.items.push(item);
       lastAssistant = undefined;

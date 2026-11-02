@@ -527,6 +527,23 @@ def test_approval_lifecycle_and_no_duplicate_turns(extraction, monkeypatch):
     assert store.read(sid)["status"] == "stopped"
 
 
+@pytest.mark.parametrize("name,arguments", [
+    ("mnemon_remember", {"scope": "global", "content": "偏好"}),
+    ("mnemon_remember", {"id": "global-existing", "content": "偏好"}),
+    ("mnemon_forget", {"id": "global-existing"}),
+])
+def test_global_memory_approval_stays_visible_in_auto_mode(extraction, name, arguments):
+    from GalTransl.Agent.models import AgentState
+    from GalTransl.Agent.runner import AgentRunner
+    store, session, runtime = extraction
+    runner = AgentRunner(AgentState(project_dir=session["game_dir"], permission_mode="auto-quiet"))
+    sid = session["id"]
+    pending = {"type": "permission_request", "requestId": "global-write", "toolName": name, "arguments": arguments}
+    runtime.pending[sid] = pending
+    runtime._clear_allowed_request(sid, runner)
+    assert runtime.pending[sid] == pending
+
+
 def test_http_origin_is_local_only():
     from GalTransl.Extraction.http import trusted_request
     class Request:

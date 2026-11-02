@@ -15,6 +15,7 @@ from GalTransl.Agent.context import (
     _answers_for_text,
     _dangling_ask_question_texts,
     _dangling_tool_calls,
+    _estimate_text_tokens,
     _estimate_usage_tokens,
     _permission_decision_text,
     _profile_context_window,
@@ -254,7 +255,8 @@ class AgentRuntime:
         # 文件里带的是压缩**前**的全量（只追加），按最后一次压缩的摘要重建出真正在用的那份
         projected = _restore_microcompacted_history(messages, data.get("microcompactions") or [])
         history = _restore_compacted_history(projected)
-        usage_tokens, usage_count, usage_model = _restore_usage_anchor(history, meta.get("context_usage_anchor"))
+        usage_tokens, usage_count, usage_model, usage_overhead = _restore_usage_anchor(history, meta.get("context_usage_anchor"))
+        snapshot = meta.get("mnemon_snapshot")
         # 事件按 step 重建 deque（保留最近 RUNTIME_EVENT_KEEP 条）
         ev_deque: deque[AgentEvent] = deque(maxlen=RUNTIME_EVENT_KEEP)
         max_step = 0
@@ -306,6 +308,8 @@ class AgentRuntime:
             last_prompt_tokens=usage_tokens,
             anchored_message_count=usage_count,
             usage_model=usage_model,
+            usage_overhead_tokens=usage_overhead,
+            mnemon_snapshot=snapshot if isinstance(snapshot, str) else None,
             cache_usage=_restore_cache_usage(meta.get("cache_usage")),
             step=max_step,
             session_id=session_id,
@@ -831,11 +835,13 @@ class AgentRuntime:
                 # 口径必须和 _emit_context_usage 一致（都含 tools schema 那笔固定开销），
                 # 否则刷新前后指示器会跳一下。
                 "context": {
-                    "used_tokens": _estimate_usage_tokens(
+                    "used_tokens": runner._estimate_context_tokens() if runner is not None and (
+                        runner._mnemon is not None or runner._billion_context is not None) else _estimate_usage_tokens(
                         state.messages,
                         state.last_prompt_tokens,
                         state.anchored_message_count,
-                        _tools_overhead_tokens(AGENT_TOOLS),
+                        _tools_overhead_tokens(AGENT_TOOLS) + (
+                            _estimate_text_tokens("\n\n" + state.mnemon_snapshot) if state.mnemon_snapshot else 0),
                     ),
                     "window_tokens": state.context_window,
                     "cache": dict(state.cache_usage) or None,

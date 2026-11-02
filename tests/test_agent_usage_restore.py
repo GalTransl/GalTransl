@@ -1,5 +1,6 @@
 """重启、停止及切换模型后，沿用同一历史前缀最后一次实测统计。"""
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,9 +8,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from GalTransl.Agent import session_store
-from GalTransl.Agent.context import _estimate_message_tokens, _restore_compacted_history, _restore_usage_anchor
+from GalTransl.Agent.context import _estimate_message_tokens, _estimate_text_tokens, _restore_compacted_history, _restore_usage_anchor
 from GalTransl.Agent.llm_backend import LLMBackend
 from GalTransl.Agent.models import AgentState
+from GalTransl.Agent.mnemon import MnemonSession
 from GalTransl.Agent.registry import AgentRuntime
 from GalTransl.Agent.runner import AgentRunner
 
@@ -54,6 +56,50 @@ class UsageRestoreTests(unittest.TestCase):
         checkpoint = self.store.load()["meta"]["context_usage_anchor"]
         self.assertNotIn("content", checkpoint)
 
+    def test_memory_snapshot_and_measured_overhead_survive_restart(self):
+        with patch.dict(os.environ, {"GALTRANSL_DATA_DIR": str(Path(self.project).parent / "data")}):
+            self.runner._mnemon = MnemonSession(self.project)
+            saved = self.runner._mnemon.call("mnemon_remember", {"content": "保留完整人名", "importance": "critical"})
+            prefix = self.runner._request_system_prompt("rules")
+            self.runner._persist_message({"role": "system", "content": "rules"})
+            self.runner._persist_message({"role": "user", "content": "中" * 240000})
+            self.runner._record_context_usage(60000)
+            self.runner._mnemon.call("mnemon_remember", {"id": saved["id"], "content": "修改后的规则"})
+            restored, context = self.restore()
+            reopened = AgentRunner(restored)
+            reopened._mnemon = MnemonSession(self.project)
+            try:
+                self.assertEqual(restored.mnemon_snapshot, self.state.mnemon_snapshot)
+                self.assertEqual(restored.usage_overhead_tokens, self.state.usage_overhead_tokens)
+                self.assertEqual(context["used_tokens"], 60000)
+                self.assertEqual(reopened._messages_for_request()[0]["content"], prefix)
+                self.assertEqual(reopened._estimate_context_tokens(), 60000)
+            finally:
+                reopened.close_store()
+                self.runner.close_store()
+
+    def test_legacy_or_invalid_overhead_keeps_a_valid_usage_measurement(self):
+        self.runner._persist_message({"role": "user", "content": "hello"})
+        self.runner._record_context_usage(60000)
+        checkpoint = self.store.load()["meta"]["context_usage_anchor"]
+        legacy = {key: value for key, value in checkpoint.items() if key != "overhead_tokens"}
+        for overhead in (None, True, -1, "1200"):
+            self.store.append_meta(context_usage_anchor={**legacy, "overhead_tokens": overhead})
+            restored, context = self.restore()
+            self.assertIsNone(restored.usage_overhead_tokens)
+            self.assertEqual(context["used_tokens"], 60000)
+        self.store.append_meta(context_usage_anchor=legacy)
+        restored, context = self.restore()
+        self.assertIsNone(restored.usage_overhead_tokens)
+        self.assertEqual(context["used_tokens"], 60000)
+
+    def test_restored_unmeasured_usage_includes_frozen_memory(self):
+        self.store.append_meta(mnemon_snapshot="固定的会话记忆")
+        self.runner._persist_message({"role": "user", "content": "hello"})
+        restored, context = self.restore()
+        base = AgentRunner(AgentState(messages=restored.messages))._estimate_context_tokens()
+        self.assertEqual(context["used_tokens"], base + _estimate_text_tokens("\n\n固定的会话记忆"))
+
     def test_checkpoint_after_compaction_uses_restored_history_not_full_log(self):
         for message in [
             {"role": "system", "content": "rules"}, {"role": "user", "content": "old"},
@@ -74,7 +120,7 @@ class UsageRestoreTests(unittest.TestCase):
         self.runner._record_context_usage(90000)
         checkpoint = self.store.load()["meta"]["context_usage_anchor"]
         changed = [self.state.messages[0], {"role": "user", "content": "different"}]
-        self.assertEqual(_restore_usage_anchor(changed, checkpoint), (0, 0, ""))
+        self.assertEqual(_restore_usage_anchor(changed, checkpoint), (0, 0, "", None))
         self.runner._persist_message({"role": "user", "content": "summary", "_compact_summary": True, "_compact_kept": 0})
         restored, _ = self.restore()
         self.assertEqual(restored.last_prompt_tokens, 0)

@@ -166,6 +166,6 @@ export function ExtractionPage() {
       </div>}
     </div>
     {dialog === 'create' && <CreateDialog close={() => setDialog(null)} create={create} busy={agent.busy} />}
-    <AnimatePresence>{dialog === 'environment' && <EnvironmentDialog key="environment" initial={agent.environment} refresh={agent.refreshEnvironment} close={() => setDialog(null)} saved={agent.setEnvironment} />}</AnimatePresence>
+    <AnimatePresence>{dialog === 'environment' && <EnvironmentDialog key="environment" initial={agent.environment} refresh={agent.refreshEnvironment} close={() => setDialog(null)} saved={agent.setEnvironment} projectDir={session?.game_dir ?? ''} />}</AnimatePresence>
   </div>;
 }

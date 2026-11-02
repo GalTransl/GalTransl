@@ -11,7 +11,7 @@ from GalTransl.AppSettings import load_app_settings, save_app_settings
 
 @pytest.mark.parametrize("value,expected", [(True, True), (False, False), ("true", False),
     ("false", False), (1, False), (0, False), (None, False)])
-@pytest.mark.parametrize("setting", ["billionContextEnabled", "extractionBillionContextEnabled"])
+@pytest.mark.parametrize("setting", ["billionContextEnabled", "extractionBillionContextEnabled", "mnemonEnabled", "extractionMnemonEnabled"])
 def test_only_explicit_boolean_enables_plugin(tmp_path, monkeypatch, value, expected, setting):
     monkeypatch.setenv("GALTRANSL_APP_SETTINGS_PATH", str(tmp_path / "settings.json"))
     assert save_app_settings({setting: value})[setting] is expected
@@ -43,7 +43,8 @@ def test_http_partial_settings_updates_preserve_plugin_and_other_preferences(tmp
     try:
         assert update({"billionContextEnabled": True}) == {
             "maxConcurrentJobs": 7, "printTranslationLogInTerminal": False,
-            "billionContextEnabled": True, "extractionBillionContextEnabled": False}
+            "billionContextEnabled": True, "extractionBillionContextEnabled": False,
+            "mnemonEnabled": False, "extractionMnemonEnabled": False}
         assert update({"extractionBillionContextEnabled": True})["billionContextEnabled"] is True
         assert update({"maxConcurrentJobs": 3})["billionContextEnabled"] is True
         assert update({"billionContextEnabled": False})["maxConcurrentJobs"] == 3

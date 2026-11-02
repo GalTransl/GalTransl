@@ -78,6 +78,13 @@ class EstimateUsageTokensTests(unittest.TestCase):
         msgs = [{"role": "user", "content": "a" * 400}]
         self.assertEqual(_estimate_usage_tokens(msgs, anchor=500, anchored=99), 400 // 4 + 4)
 
+    def test_only_overhead_changes_are_added_to_the_measured_anchor(self):
+        messages = [{"role": "user", "content": "a" * 400}]
+        self.assertEqual(_estimate_usage_tokens(messages, 50000, 1, 1200, 1200), 50000)
+        self.assertEqual(_estimate_usage_tokens(messages, 50000, 1, 1400, 1200), 50200)
+        self.assertEqual(_estimate_usage_tokens(messages, 50000, 1, 1000, 1200), 49800)
+        self.assertEqual(_estimate_usage_tokens(messages, 50000, 1, 1400), 50000)
+
 
 class ContextUsageStatusTests(unittest.TestCase):
     def setUp(self) -> None:

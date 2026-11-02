@@ -30,5 +30,5 @@ module: these tests change Skill files, not installed Python environments.
 Interpreter discovery itself remains covered by `test_python_discovery.py`.
 
 Tests for ordinary Agent behavior should explicitly disable the optional
-billion-context plugin through their settings fixture. Developer application
+billion-context and agent-mnemon plugins through their settings fixture. Developer application
 settings must not change which implementation a test exercises.

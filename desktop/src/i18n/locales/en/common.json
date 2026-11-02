@@ -1,4 +1,23 @@
 {
+  "mnemonSettings": {
+    "contextTitle": "Memory",
+    "enabled": "Enable agent-mnemon",
+    "description": "Global memory shares preferences and general conventions; project memory keeps local facts. Important entries load when a new session starts; other facts are searched on demand. Works alongside context compression.",
+    "timing": "The memory tool switch saves automatically and applies from the next turn; existing session snapshots remain unchanged. Global memory is shared across projects and Agent types; project memory stays isolated. Both layers persist after disabling memory or deleting a session. Each global memory change requires approval in every mode.",
+    "entries": "Saved memories",
+    "refresh": "Refresh list",
+    "auditHint": "Review complete global and current project memories, even when memory is disabled. Deletions update storage immediately and are excluded from new sessions; existing sessions retain their original system snapshot.",
+    "loading": "Loading memories…",
+    "empty": "No memories yet",
+    "global": "Global",
+    "project": "Current project",
+    "critical": "Included automatically",
+    "normal": "Search on demand",
+    "delete": "Delete memory",
+    "confirm": "Confirm deletion",
+    "confirmDelete": "Delete this project memory?",
+    "confirmGlobalDelete": "Delete this global memory? This affects all projects sharing it."
+  },
   "agentSettings": {
     "configure": "Agent settings",
     "translationTitle": "Translation Agent settings",

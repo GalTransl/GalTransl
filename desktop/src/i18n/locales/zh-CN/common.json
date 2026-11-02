@@ -1,4 +1,23 @@
 {
+  "mnemonSettings": {
+    "contextTitle": "记忆管理",
+    "enabled": "启用 agent-mnemon",
+    "description": "全局层共享偏好和通用约定，项目层保存各项目事实。重要条目在新会话开始时载入，其余按需搜索，可与上下文压缩同时使用。",
+    "timing": "记忆工具开关自动保存，下一回合生效；已有会话的快照保持不变。全局记忆跨项目、跨 Agent 类型共享；项目记忆按项目隔离。关闭或删除会话会保留两层记忆。全局记忆变更在任何模式下都逐次审批。",
+    "entries": "已保存的记忆",
+    "refresh": "刷新列表",
+    "auditHint": "可查看全局和当前项目的完整记忆；关闭记忆功能后仍可管理。删除立即落库，新会话不再包含该条目；已有会话保留原 system 快照。",
+    "loading": "正在读取记忆…",
+    "empty": "暂无记忆",
+    "global": "全局",
+    "project": "当前项目",
+    "critical": "常驻",
+    "normal": "按需检索",
+    "delete": "删除记忆",
+    "confirm": "确认删除",
+    "confirmDelete": "确认删除这条项目记忆？",
+    "confirmGlobalDelete": "确认删除这条全局记忆？这会影响所有共享该记忆的项目。"
+  },
   "agentSettings": {
     "configure": "Agent 配置",
     "translationTitle": "翻译 Agent 配置",

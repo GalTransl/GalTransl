@@ -10,6 +10,7 @@ export type AgentEvent = {
   images?: AgentImage[];
   type: string; seq?: number; text?: string; messageId?: string; toolCallId?: string;
   toolName?: string; arguments?: Record<string, unknown>; isError?: boolean;
+  risk?: string;
   replace?: boolean;
   attempt?: number; max_attempts?: number; delay_ms?: number; ts?: number; code?: string; reason?: string;
   duration_ms?: number;

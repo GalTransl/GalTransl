@@ -20,6 +20,12 @@
   "projectPreview": {
     "openEntry": "Open this entry in the mini window"
   },
+  "mnemonTools": {
+    "recall": "Search memory",
+    "remember": "Save memory",
+    "forget": "Delete memory",
+    "globalSummary": "Global · {{content}}"
+  },
   "billionContextTools": {
     "compress": { "action": "Compress context", "running": "Compressing context" },
     "decompress": { "action": "Restore context", "running": "Restoring context" },
@@ -158,6 +164,8 @@
     "agentAskHead_message_text_one": "Question {{value}} / {{count}}"
   },
   "permissionCard": {
+    "globalMemory": "Global memory",
+    "globalMemoryHint": "Affects all projects. Each change requires approval, including in automatic modes and after session grants.",
     "edit_edit_translationText": "Change translation data",
     "delegate_delegate_proxy": "Launch subagents",
     "high_high_settingsJob": "Change settings / start a job",

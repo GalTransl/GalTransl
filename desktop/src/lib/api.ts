@@ -416,6 +416,8 @@ export type AppSettings = {
   printTranslationLogInTerminal: boolean;
   billionContextEnabled?: boolean;
   extractionBillionContextEnabled?: boolean;
+  mnemonEnabled?: boolean;
+  extractionMnemonEnabled?: boolean;
 };
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -1150,6 +1152,26 @@ export async function saveProjectGuideline(
 
 export async function fetchAppSettings() {
   return apiRequest<AppSettings>('/api/app-settings');
+}
+
+export type MemoryEntry = {
+  id: string;
+  scope: 'project' | 'global';
+  content: string;
+  importance: 'normal' | 'critical';
+  created_at: string;
+  updated_at: string;
+};
+
+export async function fetchMemories(projectDir: string) {
+  return apiRequest<{ entries: MemoryEntry[] }>(`/api/agent/memories?${new URLSearchParams({ project_dir: projectDir })}`);
+}
+
+export async function deleteMemory(projectDir: string, id: string) {
+  return apiRequest<{ success: boolean }>('/api/agent/memories/delete', {
+    method: 'POST',
+    body: JSON.stringify({ project_dir: projectDir, id }),
+  });
 }
 
 export async function fetchDefaultProjectConfigTemplate() {

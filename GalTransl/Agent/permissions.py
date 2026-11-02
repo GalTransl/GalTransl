@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 # - ask（每次询问，默认）：写操作一律先问；
 # - accept-edits（允许编辑）：只自动放行"改译文数据"（缓存 / 字典 / 人名表），
 #   改项目配置、改项目规范、启动翻译仍然要问；
-# - auto（全自动）：全部放行；
+# - auto（全自动）：放行普通工具；全局记忆变更逐次审批；
 # - auto-quiet（全自动-零打断）：放行规则与 auto 一模一样，差别只有一处——**ask_user
 #   不再真的拦下来等人**：后端直接按模型给的「推荐选项」代答（见 _tool_ask_user），
 #   用户完全不被打断。其余档位照旧：不把档位写进 system prompt，模型只会在被拒绝时
@@ -45,8 +45,11 @@ PERMISSION_WAIT_TICK = 0.2
 PERMISSION_READ = "read"
 PERMISSION_EDIT = "edit"
 PERMISSION_HIGH = "high"
+PERMISSION_GLOBAL_MEMORY = "global-memory"
 
 PERMISSION_TOOL_RISK: dict[str, str] = {
+    "mnemon_remember": PERMISSION_HIGH,
+    "mnemon_forget": PERMISSION_HIGH,
     "read": PERMISSION_READ,
     "write": PERMISSION_EDIT,
     "edit": PERMISSION_EDIT,
@@ -73,6 +76,7 @@ PERMISSION_TOOL_RISK: dict[str, str] = {
 # 只读类工具：读 / 检索 / 等待 / 询问，外加"停止任务"——停止是安全方向的动作，
 # 要停下来还得先点确认是最糟的设计，所以任何模式都直接放行。
 PERMISSION_READ_TOOLS: frozenset[str] = frozenset({
+    "mnemon_recall",
     "get_project",
     "get_project_overview",
     "get_plugin_settings",
@@ -99,6 +103,8 @@ PERMISSION_READ_TOOLS: frozenset[str] = frozenset({
 })
 # 审批卡上显示的工具名（前端有自己的 TOOL_META，这里只需要一个可读的名字）
 PERMISSION_TOOL_LABELS: dict[str, str] = {
+    "mnemon_remember": "保存记忆",
+    "mnemon_forget": "删除记忆",
     "write": "写入文件",
     "edit": "编辑文件",
     "run_python": "运行 Python",
@@ -122,6 +128,10 @@ PERMISSION_TOOL_LABELS: dict[str, str] = {
 def _tool_risk(name: str, args: dict[str, object] | None = None) -> str:
     """工具的风险档。没登记的工具按 high 处理（fail closed）：新增写类工具忘了
     登记时宁可多问一次，也不要默默改掉用户的项目。"""
+    if name in ("mnemon_remember", "mnemon_forget") and args:
+        # Updates/deletes infer scope from id; normalize like the tool boundary.
+        if str(args.get("scope", "")).strip() == "global" or str(args.get("id", "")).strip().startswith("global-"):
+            return PERMISSION_GLOBAL_MEMORY
     if name in ("replace_cache", "revert_cache_history") and args and args.get("dry_run") is True:
         return PERMISSION_READ
     if name in ("manage_problem_filter", "manage_problem_white_list") and args and args.get("action") == "list":
@@ -162,6 +172,8 @@ def _apply_permission_mode(state: AgentState, mode: Any) -> bool:
 
 def _permission_needed(risk: str, mode: str) -> bool:
     """这次调用要不要先请用户批准。读类永远不用；其余按模式矩阵判断。"""
+    if risk == PERMISSION_GLOBAL_MEMORY:
+        return True
     if risk == PERMISSION_READ:
         return False
     if mode in ("auto", AUTO_QUIET_MODE):

@@ -20,6 +20,7 @@ from PIL import Image
 from GalTransl.Agent.core import AgentStopRequested
 from GalTransl.Agent.images import expand_message
 from GalTransl.Agent.models import AgentToolError
+from GalTransl.Agent.permissions import _tool_risk
 from GalTransl.Extraction.pi_output import OutputAccumulator
 from GalTransl.Extraction.pi_text import MAX_BYTES, apply_edits, edit_diff, truncate
 from GalTransl.Extraction.runner import display_arguments
@@ -78,7 +79,7 @@ def test_intent_survives_bounded_call_and_approval_previews(fixture, name, args)
     assert 'truncated' in json.dumps(preview)
     assert len(json.dumps(preview, ensure_ascii=False).encode()) < 25000
     runner._emit('tool_call', {'name': name, 'id': 'large', 'arguments': arguments})
-    runner._emit('permission_request', {'name': name, 'id': 'approval', 'tool_call_id': 'large', 'arguments': arguments})
+    runner._emit('permission_request', {'name': name, 'id': 'approval', 'tool_call_id': 'large', 'arguments': arguments, 'risk': _tool_risk(name, arguments)})
     assert [event['type'] for event in events] == ['tool_start', 'permission_request']
     assert all(event['arguments']['reason'] == arguments['reason'] for event in events)
     assert all(event['arguments'] == preview for event in events)
@@ -118,14 +119,13 @@ def test_ask_user_shares_translation_question_contract():
     assert extraction['required'] == shared['required']
 
 
-def test_old_saved_system_instruction_uses_native_read_without_rewriting_history(fixture):
+def test_old_saved_system_instruction_stays_unchanged_on_resume(fixture):
     runner, _ = fixture
     old = {'role': 'system', 'content': 'Before extraction, read_file, following next_line until done: SKILL.md'}
     runner.state.messages = [old, {'role': 'user', 'content': 'Continue'}]
     projected = runner._messages_for_request()
-    assert "Use the read tool to load a skill's file when the task matches its description." in projected[0]['content']
-    assert 'read_file' not in projected[0]['content']
-    assert 'read_file' in runner.state.messages[0]['content']
+    assert projected[0] == old
+    assert runner.state.messages[0] == old
 
 
 @pytest.mark.parametrize('probe', REFERENCE['native_probes'], ids=lambda probe: probe['name'])

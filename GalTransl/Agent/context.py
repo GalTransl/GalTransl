@@ -223,16 +223,19 @@ def _tools_overhead_tokens(tools: Any) -> int:
 
 
 def _estimate_usage_tokens(
-    messages: list[dict[str, Any]], anchor: int = 0, anchored: int = 0, overhead: int = 0
+    messages: list[dict[str, Any]], anchor: int = 0, anchored: int = 0, overhead: int = 0,
+    anchor_overhead: int | None = None,
 ) -> int:
     """估算一次请求占用的 token 数（供压缩判断与界面用量指示共用）。
 
     用法锚定法：有上一次响应的 prompt_tokens 作锚点时，只对锚点之后新增的消息按字符估算
     ——锚点里已经含了 system/tools 那部分静态开销，不能再加一遍；没有锚点就整体估算，
-    这时要把 tools schema 的固定开销（overhead）算上，否则整体偏低约 9k。
+    这时要把 tools schema 与请求快照的开销（overhead）算上。
+    已知锚点对应的开销时只补差值；旧会话缺少此记录时继续沿用实测基线。
     """
     if anchor > 0 and 0 <= anchored <= len(messages):
-        return anchor + sum(_estimate_message_tokens(m) for m in messages[anchored:])
+        delta = overhead - anchor_overhead if anchor_overhead is not None else 0
+        return max(0, anchor + delta + sum(_estimate_message_tokens(m) for m in messages[anchored:]))
     return overhead + sum(_estimate_message_tokens(m) for m in messages)
 
 
@@ -316,18 +319,19 @@ def _history_fingerprint(messages: list[dict[str, Any]]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def _restore_usage_anchor(messages: list[dict[str, Any]], checkpoint: Any) -> tuple[int, int, str]:
+def _restore_usage_anchor(messages: list[dict[str, Any]], checkpoint: Any) -> tuple[int, int, str, int | None]:
     """统计只能用于原请求对应的消息前缀；压缩、截断或改写后自动作废。"""
     if not isinstance(checkpoint, dict):
-        return 0, 0, ""
+        return 0, 0, "", None
     tokens = checkpoint.get("prompt_tokens")
     count = checkpoint.get("message_count")
     if (type(tokens) is not int or tokens <= 0 or type(count) is not int
             or not 0 < count <= len(messages)):
-        return 0, 0, ""
+        return 0, 0, "", None
     if checkpoint.get("fingerprint") != _history_fingerprint(messages[:count]):
-        return 0, 0, ""
-    return tokens, count, str(checkpoint.get("model") or "")
+        return 0, 0, "", None
+    overhead = checkpoint.get("overhead_tokens")
+    return tokens, count, str(checkpoint.get("model") or ""), overhead if type(overhead) is int and overhead >= 0 else None
 
 
 MICROCOMPACT_KEEP_RECENT_ROUNDS = 5

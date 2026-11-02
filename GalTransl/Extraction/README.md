@@ -1,5 +1,11 @@
 # 提取 Agent
 
+配置窗口另有可选的 agent-mnemon 记忆开关，默认关闭，与翻译开关独立。
+全局层与翻译 Agent 跨项目共享偏好和通用约定，项目层按游戏目录隔离。
+重要偏好/约定自动常驻，其余事实同时从两层按需搜索，共享上下文预算；
+写入遵循现有审批，可与 billion-context 同时启用。
+数据、三个工具和移植范围见 [Python 项目记忆说明](../../plugins/agent-mnemon/README.md)。
+
 提取 Agent 复用 `GalTransl.Agent.AgentRunner` 的 OpenAI 兼容请求、流式输出、重试、停止、审批、会话持久化和上下文压缩。system prompt 沿用原版 Pi 的身份、工具、简短指南、skill 元数据和工作目录结构，将身份改为 GalTransl 提取助手；提取流程留在对应 skill 中，不预先载入全文。不再启动 Pi sidecar，也不打包 Node.js、Pi SDK 或 npm 运行依赖。
 
 会话和配置存放在 `~/.galtransl`：翻译对话在 `agent_sessions/`，提取对话及其模型历史、图片、压缩归档在 `extraction/sessions/<id>/`，提取设置在 `extraction/settings.json`，应用设置在 `app_settings.json`。Skills 目录默认选择程序目录的 `skills/`，提取 Agent 扫描所选目录下的 Skill。首次使用会复制旧程序目录和系统用户数据目录中的历史与设置；已保存的 Skill 路径按原值读取，不自动迁移。`GALTRANSL_DATA_DIR` 和 `GALTRANSL_APP_SETTINGS_PATH` 仍可指定会话和配置的位置。游戏输出工作区由用户选择，沿用原位置。新建会话只创建工作区根目录，子目录由提取流程按需创建；复用已有工作区时保留现有内容。

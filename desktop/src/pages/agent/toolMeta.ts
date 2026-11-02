@@ -16,6 +16,9 @@ type ToolMeta = {
 };
 
 const TOOL_META: Record<string, ToolMeta> = {
+  mnemon_recall: { get action() { return translate("agent:mnemonTools.recall"); }, get running() { return translate("agent:mnemonTools.recall"); }, verb: '', icon: 'search', summary: a => str(a?.query) },
+  mnemon_remember: { get action() { return translate("agent:mnemonTools.remember"); }, get running() { return translate("agent:mnemonTools.remember"); }, verb: '', icon: 'save', summary: a => memorySummary(a, str(a?.content).slice(0, 80)) },
+  mnemon_forget: { get action() { return translate("agent:mnemonTools.forget"); }, get running() { return translate("agent:mnemonTools.forget"); }, verb: '', icon: 'trash', summary: a => memorySummary(a, str(a?.id)) },
   list_cache_history: { get action() { return translate("agent:cacheHistory.list"); }, get running() { return translate("agent:cacheHistory.list"); }, verb: '', icon: 'search', summary: a => str(a?.query || a?.filename || a?.turn_id) },
   diff_cache_history: { get action() { return translate("agent:cacheHistory.viewDiff"); }, get running() { return translate("agent:cacheHistory.viewDiff"); }, verb: '', icon: 'file-text', summary: a => str(a?.filename || a?.turn_id) },
   revert_cache_history: { get action() { return translate("agent:cacheHistory.undoTurn"); }, get running() { return translate("agent:cacheHistory.undoTurn"); }, verb: '', icon: 'undo', summary: a => toolReason(a) || str(a?.turn_id) },
@@ -231,6 +234,11 @@ export function toolMeta(name: string | undefined, args?: Record<string, unknown
 const DICT_CATEGORY_LABELS: Record<string, string> = { get pre() { return translate("agent:toolMeta.pre_pre_text"); }, gpt: 'GPT', get post() { return translate("agent:toolMeta.post_post_text"); } };
 
 /** 保留旧会话的 query/search 摘要；当前 read_transl_cache 只列文件和读取条目。 */
+function memorySummary(args: Record<string, unknown> | undefined, content: string) {
+  return args?.scope === 'global' || str(args?.id).startsWith('global-')
+    ? translate('agent:mnemonTools.globalSummary', { content }) : content;
+}
+
 function translCacheAction(a: Record<string, unknown> | undefined): string {
   const action = str(a?.action);
   if (action) return action;

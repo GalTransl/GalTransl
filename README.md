@@ -34,6 +34,8 @@
 
 内置可选的 **billion-context Python 核心版**：在翻译或提取 Agent **左下角的配置入口**分别开启，为翻译主 Agent 和提取 Agent 提供分层上下文压缩、原文归档、检索与恢复；两个开关独立保存，默认关闭，下一回合生效，无需 Node.js 或额外运行依赖。GalTransl 使用了 [billion-context](https://github.com/ranxianglei/billion-context) 和 [acp-kernel](https://github.com/ranxianglei/acp-kernel) 的设计与压缩规则；[移植范围、使用与许可说明](plugins/billion-context/README.md)。
 
+内置可选的 **agent-mnemon Python 全局/项目记忆精简版**：在同一配置入口独立开启，全局层跨项目共享偏好和通用约定，项目层隔离具体事实。重要条目自动常驻，其余通过中文/日文关键词按需搜索，两层共享上下文预算；Agent 仅使用检索、保存/更新、删除三个工具，可与 billion-context 配合使用。默认关闭，写入遵循现有审批模式，无额外运行依赖；[使用、移植范围与 MIT 许可](plugins/agent-mnemon/README.md)。
+
 ## 前言
 &ensp;&ensp;&ensp;&ensp;GalTransl的核心是一组自动化翻译流水线，解决了使用ChatGPT自动化翻译Gal过程中已知的大部分问题，并提高了整体的翻译质量。同时，通过与其他项目的组合，打通了制作补丁的完整流程，一定程度降低了上手门槛。对此感兴趣的朋友可以通过本项目更容易的构建具有一定质量的机翻补丁，并(或许)可以尝试在此框架的基础上高效的构建更高质量的汉化补丁。  
 

@@ -73,6 +73,24 @@ test('merged tools select labels, icons and summaries by action', () => {
     assert.equal(meta.summary(args), previous.summary(args));
   }
 });
+
+test('global and project memory labels and summaries follow the UI language', async () => {
+  const { setUiLanguage } = load(new URL('../src/i18n/core.ts', import.meta.url));
+  await setUiLanguage('zh-CN');
+  assert.equal(toolMeta('mnemon_recall').action, '检索记忆');
+  assert.equal(toolMeta('mnemon_recall').summary({ query: '编码约定' }), '编码约定');
+  assert.equal(toolMeta('mnemon_remember').summary({ content: '保留完整人名' }), '保留完整人名');
+  assert.equal(toolMeta('mnemon_forget').summary({ id: 'mem-1' }), 'mem-1');
+  assert.equal(toolMeta('mnemon_remember').summary({ content: '中文回复', scope: 'global' }), '全局 · 中文回复');
+  assert.equal(toolMeta('mnemon_remember').summary({ content: '中文回复', id: 'global-1' }), '全局 · 中文回复');
+  assert.equal(toolMeta('mnemon_forget').summary({ id: 'global-1' }), '全局 · global-1');
+  await setUiLanguage('en');
+  assert.equal(toolMeta('mnemon_recall').action, 'Search memory');
+  assert.equal(toolMeta('mnemon_remember').action, 'Save memory');
+  assert.equal(toolMeta('mnemon_forget').action, 'Delete memory');
+  assert.equal(toolMeta('mnemon_remember').summary({ content: 'Chinese', scope: 'global' }), 'Global · Chinese');
+  await setUiLanguage('zh-CN');
+});
 const summary = (selection, result) => toolMeta('patch_transl_cache').summary({
   action: 'replace', old_text: '扭动挣扎', new_text: '扭动呻吟', ...selection,
 }, result);

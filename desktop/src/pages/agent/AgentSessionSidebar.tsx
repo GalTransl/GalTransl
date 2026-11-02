@@ -230,7 +230,7 @@ export function AgentSessionSidebar({
         )}
       </div>
       <AgentSettingsButton ready={connection.connectionPhase === 'online'} onClick={() => setSettingsOpen(true)} />
-      <AnimatePresence>{settingsOpen && <AgentSettingsDialog key="settings" agent="translation" backendUrl={connection.backendUrl} close={() => setSettingsOpen(false)} />}</AnimatePresence>
+      <AnimatePresence>{settingsOpen && <AgentSettingsDialog key="settings" agent="translation" backendUrl={connection.backendUrl} projectDir={activeProject} close={() => setSettingsOpen(false)} />}</AnimatePresence>
     </aside>
   );
 }

@@ -14,13 +14,13 @@ function setup(fetchAppSettings, updateAppSettings = async patch => patch, agent
     removeEventListener: type => listeners.delete(type),
   } }, {
     'react-dom': { createPortal: children => children },
-    '../lib/api': { fetchAppSettings, updateAppSettings },
+    '../lib/api': { fetchAppSettings, updateAppSettings, fetchMemories: async () => ({ entries: [] }) },
     '../../features/connection/ConnectionContext': { useConnection: () => connection },
   });
   const { AgentContextSettings } = load(new URL('../src/components/AgentSettings.tsx', import.meta.url));
   return { Component: props => createElement(AgentContextSettings, { agent, backendUrl: connection.backendUrl, ...props }), connection, load, listeners };
 }
-const input = view => view.root.findByProps({ role: 'switch' });
+const input = view => view.root.findAllByProps({ role: 'switch' })[0];
 const deferred = () => {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -144,8 +144,36 @@ test('translation sidebar opens its configuration from the footer and closes on 
     await act(async () => button.props.onClick());
     assert.equal(view.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 1);
     assert.equal(input(view).props.checked, false);
+    assert.equal(view.root.findAllByProps({ role: 'switch' }).length, 2);
     act(() => listeners.get('keydown')({ key: 'Escape', preventDefault() {} }));
     assert.equal(view.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 0);
     assert.equal(listeners.has('keydown'), false);
+  } finally { act(() => view.unmount()); }
+});
+
+test('project memory switches are independent of context compression and of each other', async () => {
+  let settings = { billionContextEnabled: true, extractionBillionContextEnabled: false, mnemonEnabled: false, extractionMnemonEnabled: true };
+  const patches = [];
+  const { load } = setup(async () => settings, async patch => {
+    patches.push(patch);
+    settings = { ...settings, ...patch };
+    return settings;
+  });
+  const { AgentContextSettings } = load(new URL('../src/components/AgentSettings.tsx', import.meta.url));
+  const controls = ['translation', 'extraction'].map(agent => createElement(AgentContextSettings,
+    { key: agent, agent, plugin: 'agent-mnemon', backendUrl: 'http://localhost:8000' }));
+  let view;
+  await act(async () => { view = create(createElement('div', {}, controls)); });
+  try {
+    const switches = () => view.root.findAllByProps({ role: 'switch' });
+    assert.deepEqual(switches().map(node => node.props.checked), [false, true]);
+    await act(async () => switches()[0].props.onChange({ target: { checked: true } }));
+    await act(async () => switches()[1].props.onChange({ target: { checked: false } }));
+    assert.equal(JSON.stringify(patches), '[{"mnemonEnabled":true},{"extractionMnemonEnabled":false}]');
+    assert.equal(settings.billionContextEnabled, true);
+    assert.equal(settings.extractionBillionContextEnabled, false);
+    act(() => view.unmount());
+    await act(async () => { view = create(createElement('div', {}, controls)); });
+    assert.deepEqual(switches().map(node => node.props.checked), [true, false]);
   } finally { act(() => view.unmount()); }
 });

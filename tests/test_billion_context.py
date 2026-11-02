@@ -242,7 +242,7 @@ def test_both_domains_share_core_dispatch_and_request_projection(tmp_path, runne
         request = runner._openai_client.chat.completions.create.call_args.kwargs
         assert "read_history_archive" not in {tool["function"]["name"] for tool in request["tools"]}
         assert "Historical summary b1" in str(request["messages"])
-        assert request["messages"][0]["content"] == ("Extraction prompt" if runner_type is ExtractionRunner else "Original system prompt")
+        assert request["messages"][0]["content"] == "Original system prompt"
         assert state.messages == history()
         assert runner._begin_compaction(force=True) is False
     finally:

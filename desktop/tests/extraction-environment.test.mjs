@@ -27,6 +27,7 @@ function mount(api, environment = initial, refresh = () => Promise.resolve(envir
     '../lib/api': {
       fetchAppSettings: async () => ({ extractionBillionContextEnabled: false }),
       updateAppSettings: async patch => patch,
+      fetchMemories: async () => ({ entries: [] }),
     },
     '../../i18n': { useUiLanguage: () => 'zh-CN' },
     '@tauri-apps/plugin-dialog': { open: async () => null },
@@ -173,12 +174,12 @@ test('settings open before the first environment load, and failed discovery can 
   let finish;
   const dialog = mount(async () => initial, null, () => new Promise((resolve, reject) => { finish = { resolve, reject }; }));
   assert.equal(dialog.renderer.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 1);
-  assert.equal(dialog.renderer.root.findByProps({ role: 'status' }).children.join(''), 'loading');
+  assert.equal(dialog.renderer.root.findByProps({ role: 'status', className: 'extract-muted' }).children.join(''), 'loading');
   assert.equal(dialog.button('save').props.disabled, true);
   await act(async () => finish.reject(Error('Discovery failed')));
   assert.equal(dialog.renderer.root.findByProps({ role: 'alert' }).children.join(''), 'Discovery failed');
   act(() => dialog.button('reload').props.onClick());
-  assert.equal(dialog.renderer.root.findByProps({ role: 'status' }).children.join(''), 'loading');
+  assert.equal(dialog.renderer.root.findByProps({ role: 'status', className: 'extract-muted' }).children.join(''), 'loading');
   await act(async () => finish.resolve(installed));
   assert.equal(dialog.renderer.root.findAllByProps({ role: 'alert' }).length, 0);
   assert.equal(dialog.renderer.root.findByType('form').findByType('input').props.value, installed.settings.skill_dir);
@@ -197,7 +198,7 @@ test('the extraction settings button opens the dialog without waiting for the en
     'react-dom': { createPortal: children => children },
     'react-router-dom': { useNavigate: () => () => {} },
     '../styles/pages/agent.css': {}, '../styles/pages/extraction.css': {},
-    '../lib/api': { fetchAppSettings: async () => ({ extractionBillionContextEnabled: false }) },
+    '../lib/api': { fetchAppSettings: async () => ({ extractionBillionContextEnabled: false }), fetchMemories: async () => ({ entries: [] }) },
     './HomePage': {},
     './agent/drafts': { useMessageDraft: () => ['', () => {}] },
     './agent/images': { useImageInput: () => ({ images: [] }) },
