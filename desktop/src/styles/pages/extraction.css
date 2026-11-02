@@ -45,7 +45,7 @@
 .extract-error { color: var(--color-danger); overflow-wrap: anywhere; }
 /* Keep extraction-only file browsing and approval controls scoped away from shared agent buttons. */
 .extract-workspace button, .extract-preview button, .extract-dialog button { font: inherit; cursor: pointer; border: 1px solid transparent; border-radius: 8px; padding: 7px 10px; color: inherit; background: transparent; box-shadow: none; }
-.extract-workspace button:hover, .extract-preview button:hover, .extract-dialog button:hover { background: var(--agent-hover, var(--color-neutral-soft)); }
+.extract-workspace button:not(.extract-primary):hover, .extract-preview button:not(.extract-primary):hover, .extract-dialog button:not(.extract-primary):hover { background: var(--agent-hover, var(--color-neutral-soft)); }
 .extract-workspace button:disabled, .extract-dialog button:disabled { cursor: default; opacity: .45; }
 .extract-page :is(button, textarea):focus-visible, .extract-dialog :focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .extract-page .extract-primary, .extract-dialog .extract-primary { display: inline-flex; align-items: center; justify-content: center; gap: 7px; background: linear-gradient(135deg, #2f6feb 0%, #3b82f6 50%, #22d3ee 100%); color: white; border-color: transparent; }
