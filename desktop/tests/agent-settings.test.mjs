@@ -177,3 +177,45 @@ test('project memory switches are independent of context compression and of each
     assert.deepEqual(switches().map(node => node.props.checked), [true, false]);
   } finally { act(() => view.unmount()); }
 });
+
+test('saved memories open in a separate dialog and dismiss back to Agent settings', async () => {
+  const { load, listeners } = setup(async () => ({ mnemonEnabled: false }));
+  const { AgentSettingsDialog } = load(new URL('../src/components/AgentSettings.tsx', import.meta.url));
+  let closed = false;
+  let view;
+  await act(async () => { view = create(createElement(AgentSettingsDialog, {
+    agent: 'translation', backendUrl: 'local', projectDir: 'C:/game', close: () => { closed = true; },
+  })); });
+  try {
+    assert.equal(view.root.findAllByProps({ className: 'memory-manager' }).length, 0);
+    const open = view.root.findAllByType('button').find(node => node.children.join('') === '已保存的记忆');
+    assert.equal(open.props['aria-haspopup'], 'dialog');
+    await act(async () => open.props.onClick());
+    assert.equal(view.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 1);
+    assert.equal(view.root.findAllByProps({ role: 'switch' }).length, 0);
+    assert.equal(view.root.findAllByProps({ className: 'memory-manager' }).length, 1);
+    assert.equal(view.root.findByType('h2').children.join(''), '翻译 Agent 的记忆');
+    await act(async () => listeners.get('keydown')({ key: 'Escape', preventDefault() {} }));
+    assert.equal(closed, false);
+    assert.equal(view.root.findAllByProps({ className: 'memory-manager' }).length, 0);
+    assert.equal(view.root.findAllByProps({ role: 'switch' }).length, 2);
+    act(() => listeners.get('keydown')({ key: 'Escape', preventDefault() {} }));
+    assert.equal(closed, true);
+  } finally { act(() => view.unmount()); }
+});
+
+test('extraction settings open their own memory manager', async () => {
+  const { load } = setup(async () => ({ extractionMnemonEnabled: false }));
+  const { AgentSettingsDialog } = load(new URL('../src/components/AgentSettings.tsx', import.meta.url));
+  let view;
+  await act(async () => { view = create(createElement(AgentSettingsDialog, {
+    agent: 'extraction', backendUrl: 'local', projectDir: 'C:/game', close() {},
+  })); });
+  try {
+    await act(async () => view.root.findAllByType('button').find(node => node.children.join('') === '已保存的记忆').props.onClick());
+    assert.equal(view.root.findByType('h2').children.join(''), '提取 Agent 的记忆');
+    const manager = view.root.findAll(node => typeof node.type === 'function' && node.type.name === 'MemoryManager')[0];
+    assert.equal(manager.props.agent, 'extraction');
+    assert.equal(manager.props.projectDir, 'C:/game');
+  } finally { act(() => view.unmount()); }
+});

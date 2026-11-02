@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import sqlite3
 import threading
+from typing import Literal
 import uuid
 
 from GalTransl.Agent.core import AgentStopRequested
@@ -17,8 +18,9 @@ from GalTransl.Agent.models import AgentToolError
 from GalTransl.RuntimePaths import get_user_data_dir
 
 
-def memory_directory(project_dir: str = "") -> Path:
-    root = get_user_data_dir() / "mnemon"
+def memory_directory(project_dir: str = "", *, agent: Literal["translation", "extraction"] = "translation") -> Path:
+    # Translation retains the legacy directories so existing memories stay available.
+    root = get_user_data_dir() / "mnemon" / ("extraction" if agent == "extraction" else "")
     if not project_dir:
         return root / "global"
     identity = os.path.normcase(str(Path(project_dir).resolve()))

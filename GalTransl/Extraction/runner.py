@@ -80,6 +80,7 @@ def restore_state(session, directory, profile, prompt, mode):
 class ExtractionRunner(AgentRunner):
     _billion_context_setting = "extractionBillionContextEnabled"
     _mnemon_setting = "extractionMnemonEnabled"
+    _mnemon_agent = "extraction"
 
     def _mnemon_project_dir(self):
         return self.session["game_dir"]

@@ -24,9 +24,9 @@ def memory_api(tmp_path, monkeypatch):
     worker.start()
     base = f"http://127.0.0.1:{server.server_port}/api/agent/memories"
 
-    def request(project_dir="", payload=None, origin="http://tauri.localhost"):
-        url = base + "/delete" if payload is not None else base + "?" + urlencode({"project_dir": project_dir})
-        body = json.dumps(payload).encode() if payload is not None else None
+    def request(project_dir="", payload=None, origin="http://tauri.localhost", action="delete", agent="translation"):
+        url = base + "/" + action if payload is not None else base + "?" + urlencode({"project_dir": project_dir, "agent": agent})
+        body = json.dumps({"agent": agent, **payload} if isinstance(payload, dict) else payload).encode() if payload is not None else None
         with urlopen(Request(url, data=body, headers={"Content-Type": "application/json", "Origin": origin}), timeout=3) as response:
             return json.load(response)
 
@@ -89,13 +89,122 @@ def test_project_id_from_another_project_cannot_be_deleted(memory_api, tmp_path)
         assert len(memory.store.entries()) == 1
 
 
-@pytest.mark.parametrize("delete", [False, True])
-def test_external_origin_cannot_read_or_delete_memories(memory_api, delete):
+@pytest.mark.parametrize("action", ["list", "delete", "save"])
+def test_external_origin_cannot_manage_memories(memory_api, action):
     project, request = memory_api
     with closing(MnemonSession(project)) as memory:
         saved = memory.call("mnemon_remember", {"content": "私有偏好", "scope": "global"})
         with pytest.raises(HTTPError) as error:
-            request(payload={"id": saved["id"]} if delete else None, origin="https://example.com")
+            request(payload={"id": saved["id"], "content": "被修改的偏好"} if action != "list" else None,
+                action=action, origin="https://example.com")
         assert error.value.code == 403
         error.value.close()
         assert len(memory.global_store.entries()) == 1
+
+
+@pytest.mark.parametrize("scope", ["global", "project"])
+def test_save_edit_and_deduplicate_memories_without_model(memory_api, scope):
+    project, request = memory_api
+    with closing(MnemonSession(project)) as memory:
+        snapshot = memory.projection()
+        saved = request(payload={"project_dir": str(project), "scope": scope,
+            "content": "  手动保存的偏好\n保留换行  ", "importance": "critical"}, action="save")["entry"]
+        assert saved["scope"] == scope
+        assert saved["content"] == "手动保存的偏好\n保留换行"
+        assert saved["importance"] == "critical"
+        edited = request(payload={"project_dir": str(project), "id": saved["id"],
+            "content": "修改后的偏好"}, action="save")["entry"]
+        assert edited["id"] == saved["id"]
+        assert edited["created_at"] == saved["created_at"]
+        assert edited["importance"] == "critical"
+        assert edited["content"] == "修改后的偏好"
+        assert memory.projection() == snapshot
+        with closing(MnemonSession(project, "new")) as fresh:
+            assert "修改后的偏好" in fresh.projection()
+        duplicate = request(payload={"project_dir": str(project), "scope": scope,
+            "content": "修改后的偏好", "importance": "normal"}, action="save")
+        assert duplicate["duplicate"] is True
+        assert duplicate["entry"]["id"] == saved["id"]
+        assert duplicate["entry"]["importance"] == "normal"
+        assert request(str(project))["entries"] == [duplicate["entry"]]
+
+
+@pytest.mark.parametrize("payload", [
+    [], {}, {"content": None}, {"content": True}, {"content": " "}, {"content": "x" * 1001},
+    {"content": "规则", "scope": "invalid"}, {"content": "规则", "scope": []},
+    {"content": "规则", "importance": None}, {"content": "规则", "importance": "invalid"},
+    {"content": "规则", "id": ""}, {"content": "规则", "id": True},
+    {"content": "规则", "id": "global-missing"}, {"content": "规则", "id": "x" * 101},
+    {"content": "规则", "project_dir": []},
+])
+def test_invalid_save_cannot_mutate_storage(memory_api, payload):
+    project, request = memory_api
+    with closing(MnemonSession(project)) as memory:
+        memory.call("mnemon_remember", {"content": "保留的偏好", "scope": "global"})
+        with pytest.raises(HTTPError) as error:
+            request(payload={"project_dir": str(project), "scope": "global", **payload} if isinstance(payload, dict) else payload,
+                action="save")
+        assert error.value.code == 400
+        error.value.close()
+        assert memory.global_store.entries()[0]["content"] == "保留的偏好"
+        assert memory.store.entries() == []
+
+
+def test_save_requires_project_and_cannot_move_scope_or_edit_another_project(memory_api, tmp_path):
+    project, request = memory_api
+    other = tmp_path / "other"
+    other.mkdir()
+    with closing(MnemonSession(project)) as memory:
+        saved = memory.call("mnemon_remember", {"content": "项目事实"})
+        global_entry = memory.call("mnemon_remember", {"content": "全局偏好", "scope": "global"})
+        for payload in [
+            {"scope": "project"},
+            {"project_dir": str(other), "id": saved["id"]},
+            {"project_dir": str(project), "id": saved["id"], "scope": "global"},
+            {"project_dir": str(project), "id": global_entry["id"], "scope": "project"},
+            {"project_dir": str(project), "id": saved["id"], "content": "全局偏好", "scope": "global"},
+        ]:
+            with pytest.raises(HTTPError) as error:
+                request(payload={"content": "尝试修改", **payload}, action="save")
+            assert error.value.code == 400
+            error.value.close()
+        assert memory.store.entries()[0]["content"] == "项目事实"
+        assert memory.global_store.entries()[0]["content"] == "全局偏好"
+
+
+@pytest.mark.parametrize("agent,other_agent", [("translation", "extraction"), ("extraction", "translation")])
+def test_http_memories_are_isolated_by_agent_and_project(memory_api, tmp_path, agent, other_agent):
+    project, request = memory_api
+    other_project = tmp_path / "other"
+    other_project.mkdir()
+    saved = [request(payload={"project_dir": str(project), "scope": scope,
+        "content": f"{agent} {scope} 记忆", "importance": "critical"}, action="save", agent=agent)["entry"]
+        for scope in ("global", "project")]
+    assert request(str(project), agent=other_agent)["entries"] == []
+    assert {entry["id"] for entry in request(str(project), agent=agent)["entries"]} == {entry["id"] for entry in saved}
+    assert request(str(other_project), agent=agent)["entries"] == [saved[0]]
+    for entry in saved:
+        for action in ("save", "delete"):
+            with pytest.raises(HTTPError) as error:
+                request(payload={"project_dir": str(project), "id": entry["id"], "content": "越界修改"},
+                    action=action, agent=other_agent)
+            assert error.value.code == 400
+            error.value.close()
+    assert {entry["content"] for entry in request(str(project), agent=agent)["entries"]} == {entry["content"] for entry in saved}
+    own = request(payload={"scope": "global", "content": saved[0]["content"]}, action="save", agent=other_agent)["entry"]
+    assert own["id"] != saved[0]["id"]
+    assert request(agent=other_agent)["entries"] == [own]
+
+
+@pytest.mark.parametrize("agent", [None, "", "other", "../translation", True, []])
+@pytest.mark.parametrize("action", ["list", "save", "delete"])
+def test_invalid_agent_cannot_access_memory(memory_api, agent, action):
+    project, request = memory_api
+    with closing(MnemonSession(project)) as memory:
+        saved = memory.call("mnemon_remember", {"content": "保留的记忆", "scope": "global"})
+        with pytest.raises(HTTPError) as error:
+            request(payload=None if action == "list" else {"id": saved["id"], "content": "尝试修改"},
+                agent=agent, action=action)
+        assert error.value.code == 400
+        error.value.close()
+        assert memory.global_store.entries()[0]["content"] == "保留的记忆"

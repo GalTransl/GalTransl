@@ -1987,11 +1987,12 @@ def build_handler(registry: JobRegistry):
 
         def _route_memories(self, method: str) -> bool:
             parsed = urlparse(self.path)
-            if (method, parsed.path) not in (("GET", "/api/agent/memories"), ("POST", "/api/agent/memories/delete")):
+            if (method, parsed.path) not in (("GET", "/api/agent/memories"), ("POST", "/api/agent/memories/delete"),
+                    ("POST", "/api/agent/memories/save")):
                 return False
             from contextlib import closing
             import sqlite3
-            from GalTransl.Agent.mnemon_store import Forget, MnemonStore, memory_directory
+            from GalTransl.Agent.mnemon_store import Forget, MnemonStore, Remember, memory_directory
             from GalTransl.Agent.models import AgentToolError
             from GalTransl.Extraction.http import trusted_request
 
@@ -2002,6 +2003,9 @@ def build_handler(registry: JobRegistry):
                 payload = {key: values[0] for key, values in parse_qs(parsed.query).items()} if method == "GET" else self._read_json_body()
                 if not isinstance(payload, dict):
                     raise ValueError("request must be an object")
+                agent = payload.get("agent")
+                if agent not in ("translation", "extraction"):
+                    raise ValueError("agent must be translation or extraction")
                 project_dir = payload.get("project_dir", "")
                 if not isinstance(project_dir, str):
                     raise ValueError("project_dir must be a string")
@@ -2010,19 +2014,35 @@ def build_handler(registry: JobRegistry):
                 if method == "GET":
                     entries = []
                     for scope in (["global", "project"] if project_dir else ["global"]):
-                        with closing(MnemonStore(memory_directory(project_dir if scope == "project" else ""), scope=scope)) as store:
+                        with closing(MnemonStore(memory_directory(project_dir if scope == "project" else "", agent=agent), scope=scope)) as store:
                             entries.extend(store.entries())
                     self._send_json({"entries": entries})
                     return True
-                memory_id = payload.get("id")
-                if not isinstance(memory_id, str) or not 1 <= len(memory_id.strip()) <= 100:
+                saving = parsed.path == "/api/agent/memories/save"
+                memory_id = payload.get("id", "" if saving else None)
+                if not isinstance(memory_id, str) or ("id" in payload or not saving) and not 1 <= len(memory_id.strip()) <= 100:
                     raise ValueError("id must be a nonempty string of at most 100 characters")
                 memory_id = memory_id.strip()
-                scope = "global" if memory_id.startswith("global-") else "project"
+                scope = ("global" if memory_id.startswith("global-") else "project") if memory_id else payload.get("scope", "project")
+                if scope not in ("global", "project"):
+                    raise ValueError("scope must be global or project")
+                if saving and "scope" in payload and payload["scope"] != scope:
+                    raise ValueError("Memory scope cannot be changed when updating an existing id")
                 if scope == "project" and not project_dir:
                     raise ValueError("project_dir is required for project memory")
-                with closing(MnemonStore(memory_directory(project_dir if scope == "project" else ""), scope=scope)) as store:
-                    self._send_json(store.mutate(Forget(memory_id)))
+                if saving:
+                    content = payload.get("content")
+                    if not isinstance(content, str) or not 1 <= len(content.strip()) <= 1000:
+                        raise ValueError("content must be a nonempty string of at most 1000 characters")
+                    importance = payload.get("importance")
+                    if "importance" in payload and importance not in ("normal", "critical"):
+                        raise ValueError("importance must be normal or critical")
+                command = Remember(content.strip(), id=memory_id, importance=importance) if saving else Forget(memory_id)
+                with closing(MnemonStore(memory_directory(project_dir if scope == "project" else "", agent=agent), scope=scope)) as store:
+                    result = store.mutate(command)
+                    if saving:
+                        result["entry"] = next(entry for entry in store.entries() if entry["id"] == result["id"])
+                    self._send_json(result)
             except (ValueError, AgentToolError) as exc:
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
             except (OSError, sqlite3.Error) as exc:

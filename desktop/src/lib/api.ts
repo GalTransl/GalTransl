@@ -1154,6 +1154,8 @@ export async function fetchAppSettings() {
   return apiRequest<AppSettings>('/api/app-settings');
 }
 
+export type MemoryAgent = 'translation' | 'extraction';
+
 export type MemoryEntry = {
   id: string;
   scope: 'project' | 'global';
@@ -1163,14 +1165,23 @@ export type MemoryEntry = {
   updated_at: string;
 };
 
-export async function fetchMemories(projectDir: string) {
-  return apiRequest<{ entries: MemoryEntry[] }>(`/api/agent/memories?${new URLSearchParams({ project_dir: projectDir })}`);
+export async function fetchMemories(projectDir: string, agent: MemoryAgent) {
+  return apiRequest<{ entries: MemoryEntry[] }>(`/api/agent/memories?${new URLSearchParams({ project_dir: projectDir, agent })}`);
 }
 
-export async function deleteMemory(projectDir: string, id: string) {
+export async function deleteMemory(projectDir: string, id: string, agent: MemoryAgent) {
   return apiRequest<{ success: boolean }>('/api/agent/memories/delete', {
     method: 'POST',
-    body: JSON.stringify({ project_dir: projectDir, id }),
+    body: JSON.stringify({ project_dir: projectDir, id, agent }),
+  });
+}
+
+export type MemoryDraft = Pick<MemoryEntry, 'content' | 'scope' | 'importance'> & { id?: string };
+
+export async function saveMemory(projectDir: string, memory: MemoryDraft, agent: MemoryAgent) {
+  return apiRequest<{ entry: MemoryEntry }>('/api/agent/memories/save', {
+    method: 'POST',
+    body: JSON.stringify({ project_dir: projectDir, ...memory, agent }),
   });
 }
 

@@ -5,7 +5,7 @@ import { fetchAppSettings, updateAppSettings } from '../lib/api';
 import { openExternalUrl } from '../lib/externalLink';
 import { Icon } from './Icon';
 import { Switch } from './Switch';
-import { MemoryManager } from './MemoryManager';
+import { MemoryManagerDialog } from './MemoryManager';
 
 export function AgentSettingsButton({ onClick, label, ready, updateAvailable = false }: {
   onClick: () => void;
@@ -31,6 +31,9 @@ export function AgentSettingsDialog({ agent, backendUrl, projectDir = '', close,
   className?: string;
 }) {
   const titleId = useId();
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  if (memoryOpen) return <MemoryManagerDialog agent={agent} backendUrl={backendUrl} projectDir={projectDir} close={() => setMemoryOpen(false)} />;
+
   return <AnimatedDialog backdropClassName="agent-settings-backdrop" className={`agent-settings-dialog ${className}`} labelledBy={titleId} close={close}>
     <header className="agent-settings-dialog__header">
       <h2 id={titleId}>{t(agent === 'translation'
@@ -41,16 +44,20 @@ export function AgentSettingsDialog({ agent, backendUrl, projectDir = '', close,
     </header>
     <div className="agent-settings-dialog__body">
       <AgentContextSettings agent={agent} backendUrl={backendUrl} />
-      <AgentContextSettings agent={agent} backendUrl={backendUrl} plugin="agent-mnemon" />
-      <MemoryManager backendUrl={backendUrl} projectDir={projectDir} />
+      <AgentContextSettings agent={agent} backendUrl={backendUrl} plugin="agent-mnemon">
+        <div className="agent-context-settings__actions">
+          <button type="button" aria-haspopup="dialog" onClick={() => setMemoryOpen(true)}>{t('common:mnemonSettings.entries')}</button>
+        </div>
+      </AgentContextSettings>
       {children}
     </div>
     {footer && <footer className="agent-settings-dialog__footer">{footer}</footer>}
   </AnimatedDialog>;
 }
 
-export function AgentContextSettings({ agent, backendUrl, plugin = 'billion-context' }: {
+export function AgentContextSettings({ agent, backendUrl, plugin = 'billion-context', children }: {
   agent: 'translation' | 'extraction'; backendUrl: string; plugin?: 'billion-context' | 'agent-mnemon';
+  children?: ReactNode;
 }) {
   const mnemon = plugin === 'agent-mnemon';
   const setting = mnemon
@@ -120,5 +127,6 @@ export function AgentContextSettings({ agent, backendUrl, plugin = 'billion-cont
     {error && !loaded && <button type="button" onClick={() => setReload(value => value + 1)} disabled={loading}>
       {t('common:agentSettings.retry')}
     </button>}
+    {children}
   </section>;
 }

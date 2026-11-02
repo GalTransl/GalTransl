@@ -102,6 +102,7 @@ class AgentRunner:
 
     _billion_context_setting = "billionContextEnabled"
     _mnemon_setting = "mnemonEnabled"
+    _mnemon_agent = "translation"
 
     def __init__(
         self,
@@ -297,7 +298,7 @@ class AgentRunner:
             if settings.get(self._mnemon_setting, False):
                 self._emit("status", {"message": "正在启动 agent-mnemon 全局/项目记忆"})
                 self._mnemon = MnemonSession(self._mnemon_project_dir(), self.state.session_id,
-                    self.stop_event, context_window=backend.context_window)
+                    self.stop_event, context_window=backend.context_window, agent=self._mnemon_agent)
             self._session_memory_snapshot()
         _log(f"主 Agent 模型: {backend.model} context_window={backend.context_window} prompt_caching={backend.prompt_caching}")
 

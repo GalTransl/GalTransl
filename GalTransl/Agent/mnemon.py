@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
 from GalTransl.Agent.context import _estimate_text_tokens
 from GalTransl.Agent.core import AgentStopRequested
@@ -23,14 +24,15 @@ def _tool(name, description, properties, required):
 
 class MnemonSession:
     tools = [
-        _tool("mnemon_recall", "Search global preferences and this project's durable facts, including Chinese/Japanese. "
+        _tool("mnemon_recall", "Search this Agent type's global preferences and this project's durable facts, including Chinese/Japanese. "
             "Returns complete entries with ids and scope; output shares one available-context budget, with no query-count quota.",
             {"query": _string(1000), "limit": {"type": "integer", "minimum": 1, "maximum": 5}}, ["query"]),
         _tool("mnemon_remember", "Save a short durable fact or preference (max 1000 characters). "
             "Supply an existing id to correct it. critical preferences/conventions are automatically included "
             "in the bounded system snapshot; normal facts are searched on demand. "
             "Snapshot changes apply in new sessions; recall reads current stored facts. "
-            "New entries default to normal and project scope. Use global scope for cross-project preferences. "
+            "New entries default to normal and project scope. Use global scope for cross-project preferences within this Agent type. "
+            "Translation and extraction memories are isolated. "
             "Updates infer scope from id and preserve importance unless explicitly supplied; scope cannot be changed.",
             {"content": _string(1000), "id": _string(100),
              "scope": {"type": "string", "enum": ["project", "global"]},
@@ -41,10 +43,11 @@ class MnemonSession:
     names = frozenset(tool["function"]["name"] for tool in tools)
     write_names = frozenset({"mnemon_remember", "mnemon_forget"})
 
-    def __init__(self, project_dir, session_id="", stop_event=None, *, directory=None, context_window=128000):
-        project_directory = memory_directory(project_dir)
+    def __init__(self, project_dir, session_id="", stop_event=None, *, directory=None, context_window=128000,
+            agent: Literal["translation", "extraction"] = "translation"):
+        project_directory = memory_directory(project_dir, agent=agent)
         self.store = MnemonStore(Path(directory) if directory is not None else project_directory, stop_event)
-        self.global_store = MnemonStore(memory_directory(), self.store.stop_event, scope="global")
+        self.global_store = MnemonStore(memory_directory(agent=agent), self.store.stop_event, scope="global")
         self.session_id = f"{project_directory.name}:{session_id}"
         self.projection_limit = max(0, min(1024, context_window // 16) - _estimate_text_tokens(MNEMON_GUIDANCE) - 64)
         self.recall_limit = min(2048, context_window // 16)

@@ -16,7 +16,7 @@ from GalTransl.Agent.mnemon import MnemonSession
 from GalTransl.Agent.mnemon_prompts import MNEMON_GUIDANCE
 from GalTransl.Agent.models import AgentState, AgentToolError
 from GalTransl.Agent.permissions import _tool_risk
-from GalTransl.Agent.mnemon_store import Forget, MnemonStore, memory_directory
+from GalTransl.Agent.mnemon_store import Forget, MnemonStore, Remember, memory_directory
 from GalTransl.Agent.runner import AgentRunner
 from GalTransl.Agent.session_store import SessionStore
 from GalTransl.AppSettings import load_app_settings, save_app_settings
@@ -224,7 +224,7 @@ def test_projects_isolate_and_sessions_share_memory(tmp_path, monkeypatch):
             session.close()
 
 
-def test_global_memory_is_shared_and_project_facts_remain_isolated(tmp_path):
+def test_global_memory_is_shared_within_agent_type_and_project_facts_remain_isolated(tmp_path):
     first = MnemonSession(tmp_path / "a", "one")
     try:
         global_entry = first.call("mnemon_remember", {"content": "始终使用简体中文", "scope": "global", "importance": "critical"})
@@ -390,7 +390,7 @@ def pending_approval(runner, action):
 def test_global_memory_mutations_require_each_approval(tmp_path, runner_type, mode):
     runner = make_runner(tmp_path, runner_type, "http://127.0.0.1:1")
     runner.state.permission_mode = mode
-    runner._mnemon = MnemonSession(tmp_path / "project")
+    runner._mnemon = MnemonSession(tmp_path / "project", agent=runner._mnemon_agent)
     try:
         runner.state.permission_grants.update({"mnemon_remember", "mnemon_forget"})
         args = {"content": "全局偏好", "scope": " global ", "importance": "critical"}
@@ -423,7 +423,7 @@ def test_global_memory_mutations_require_each_approval(tmp_path, runner_type, mo
 def test_snapshot_is_in_system_prompt_and_external_deletion_keeps_prefix(tmp_path, runner_type):
     runner = make_runner(tmp_path, runner_type, "http://127.0.0.1:1")
     domain_prompt = runner._messages_for_request()[0]["content"]
-    runner._mnemon = MnemonSession(tmp_path / "project")
+    runner._mnemon = MnemonSession(tmp_path / "project", agent=runner._mnemon_agent)
     original = copy.deepcopy(runner.state.messages)
     content = "使用简体中文。\n保留完整的人名。"
     saved = runner._mnemon.call("mnemon_remember", {"content": content, "scope": "global", "importance": "critical"})
@@ -436,14 +436,14 @@ def test_snapshot_is_in_system_prompt_and_external_deletion_keeps_prefix(tmp_pat
         assert f"[global; {saved['id']}] {content}" in messages[0]["content"]
         assert messages[-1] == original[-1]
         assert runner.state.messages == original
-        external = MnemonStore(memory_directory(), scope="global")
+        external = MnemonStore(memory_directory(agent=runner._mnemon_agent), scope="global")
         try:
             external.mutate(Forget(saved["id"]))
         finally:
             external.close()
         assert runner._messages_for_request()[0]["content"] == messages[0]["content"]
         assert runner._mnemon.call("mnemon_recall", {"query": "简体中文"})["results"] == []
-        with closing(MnemonSession(tmp_path / "project", "new")) as fresh:
+        with closing(MnemonSession(tmp_path / "project", "new", agent=runner._mnemon_agent)) as fresh:
             assert saved["id"] not in fresh.projection()
     finally:
         runner.close_store()
@@ -452,7 +452,7 @@ def test_snapshot_is_in_system_prompt_and_external_deletion_keeps_prefix(tmp_pat
 @pytest.mark.parametrize("runner_type", [AgentRunner, ExtractionRunner])
 def test_host_limits_recall_by_current_request_context(tmp_path, runner_type):
     runner = make_runner(tmp_path, runner_type, "http://127.0.0.1:1")
-    runner._mnemon = MnemonSession(tmp_path, directory=tmp_path / "memory")
+    runner._mnemon = MnemonSession(tmp_path, directory=tmp_path / "memory", agent=runner._mnemon_agent)
     runner._context_window = 16384
     try:
         saved = runner._mnemon.call("mnemon_remember", {"content": "剧本编码采用 UTF-8。"})
@@ -472,7 +472,7 @@ def test_host_limits_recall_by_current_request_context(tmp_path, runner_type):
 def test_memory_keeps_measured_usage_and_estimates_only_new_messages(tmp_path, runner_type, critical):
     runner = make_runner(tmp_path, runner_type, "http://127.0.0.1:1")
     runner._context_window = 200000
-    runner._mnemon = MnemonSession(tmp_path / "project")
+    runner._mnemon = MnemonSession(tmp_path / "project", agent=runner._mnemon_agent)
     try:
         if critical:
             runner._mnemon.call("mnemon_remember", {"content": "保留完整人名", "importance": "critical"})
@@ -494,7 +494,7 @@ def test_memory_keeps_measured_usage_and_estimates_only_new_messages(tmp_path, r
 @pytest.mark.parametrize("runner_type", [AgentRunner, ExtractionRunner])
 def test_new_runner_reuses_saved_snapshot_and_new_session_reads_latest(tmp_path, runner_type):
     runner = make_runner(tmp_path, runner_type, "http://127.0.0.1:1")
-    runner._mnemon = MnemonSession(tmp_path / "project")
+    runner._mnemon = MnemonSession(tmp_path / "project", agent=runner._mnemon_agent)
     saved = runner._mnemon.call("mnemon_remember", {"content": "最初的项目约定", "importance": "critical"})
     prefix = runner._messages_for_request()[0]["content"]
     for message in runner.state.messages:
@@ -503,10 +503,10 @@ def test_new_runner_reuses_saved_snapshot_and_new_session_reads_latest(tmp_path,
     runner._mnemon.call("mnemon_remember", {"id": saved["id"], "content": "更新后的项目约定"})
     runner._mnemon.call("mnemon_remember", {"content": "新增加的常驻记忆", "importance": "critical"})
     reopened = make_runner(tmp_path, runner_type, "http://127.0.0.1:1")
-    reopened._mnemon = MnemonSession(tmp_path / "project")
+    reopened._mnemon = MnemonSession(tmp_path / "project", agent=reopened._mnemon_agent)
     fresh = make_runner(tmp_path, runner_type, "http://127.0.0.1:1")
     fresh._store = SessionStore(str(tmp_path / "project"), "new-session", directory=str(tmp_path / "sessions"))
-    fresh._mnemon = MnemonSession(tmp_path / "project")
+    fresh._mnemon = MnemonSession(tmp_path / "project", agent=fresh._mnemon_agent)
     try:
         checkpoint = reopened._store.load()["meta"]["context_usage_anchor"]
         usage = _restore_usage_anchor(reopened.state.messages, checkpoint)
@@ -534,7 +534,7 @@ def test_old_session_without_snapshot_does_not_read_new_memory(tmp_path, runner_
     runner = make_runner(tmp_path, runner_type, "http://127.0.0.1:1")
     for message in runner.state.messages:
         runner._store.append_message(message)
-    runner._mnemon = MnemonSession(tmp_path / "project")
+    runner._mnemon = MnemonSession(tmp_path / "project", agent=runner._mnemon_agent)
     runner._mnemon.call("mnemon_remember", {"content": "新的常驻规则", "importance": "critical"})
     try:
         assert runner._messages_for_request()[0] == runner.state.messages[0]
@@ -548,7 +548,7 @@ def test_extraction_restore_keeps_snapshot_and_usage_overhead(tmp_path):
     from GalTransl.Extraction.runner import restore_state
     runner = make_runner(tmp_path, ExtractionRunner, "http://127.0.0.1:1")
     runner._store = SessionStore(str(tmp_path / "project"), "host", directory=str(tmp_path / "execution"))
-    runner._mnemon = MnemonSession(tmp_path / "project")
+    runner._mnemon = MnemonSession(tmp_path / "project", agent=runner._mnemon_agent)
     saved = runner._mnemon.call("mnemon_remember", {"content": "提取约定", "importance": "critical"})
     prefix = runner._messages_for_request()[0]["content"]
     for message in runner.state.messages:
@@ -558,7 +558,7 @@ def test_extraction_restore_keeps_snapshot_and_usage_overhead(tmp_path):
     session = {"workspace": str(tmp_path / "project"), "game_dir": str(tmp_path / "project"), "id": "host", "title": "test"}
     state, store = restore_state(session, tmp_path, {}, "继续", "auto")
     restored = ExtractionRunner(state, store, session, {"settings": {"skill_dir": str(tmp_path)}}, lambda event: None)
-    restored._mnemon = MnemonSession(tmp_path / "project")
+    restored._mnemon = MnemonSession(tmp_path / "project", agent=restored._mnemon_agent)
     try:
         assert state.mnemon_snapshot == runner.state.mnemon_snapshot
         assert state.usage_overhead_tokens == runner.state.usage_overhead_tokens
@@ -606,7 +606,7 @@ def test_real_model_loop_keeps_session_snapshot_and_journal(tmp_path, monkeypatc
         runner.run()
         assert len(requests) == 3
         assert requests[2]["messages"][0]["content"] == requests[0]["messages"][0]["content"]
-        with closing(MnemonSession(tmp_path / "project", "new")) as fresh:
+        with closing(MnemonSession(tmp_path / "project", "new", agent=runner._mnemon_agent)) as fresh:
             assert "新回合要记住的编码约定" in fresh.projection()
     finally:
         runner.abort_in_flight()
@@ -644,3 +644,63 @@ def test_partial_settings_preserve_both_memory_switches(tmp_path, monkeypatch):
     save_app_settings({**load_app_settings(), "billionContextEnabled": True})
     assert load_app_settings()["mnemonEnabled"] is True
     assert load_app_settings()["extractionMnemonEnabled"] is False
+
+
+@pytest.mark.parametrize("agent,other_agent", [("translation", "extraction"), ("extraction", "translation")])
+def test_memory_tools_and_snapshots_cannot_cross_agent_types(tmp_path, agent, other_agent):
+    with closing(MnemonSession(tmp_path, "same-session", agent=agent)) as first:
+        saved = [first.call("mnemon_remember", {"content": f"{scope} 编码约定", "scope": scope,
+            "importance": "critical"}, f"save-{scope}") for scope in ("global", "project")]
+        with closing(MnemonSession(tmp_path, "same-session", agent=other_agent)) as other:
+            assert other.call("mnemon_recall", {"query": "编码约定"})["results"] == []
+            assert all(entry["id"] not in other.projection() for entry in saved)
+            for entry in saved:
+                with pytest.raises(AgentToolError, match="Unknown memory id"):
+                    other.call("mnemon_remember", {"id": entry["id"], "content": "越界更新"})
+                with pytest.raises(AgentToolError, match="Unknown memory id"):
+                    other.call("mnemon_forget", {"id": entry["id"]})
+            independent = other.call("mnemon_remember", {"content": "global 编码约定", "scope": "global"}, "save-global")
+            assert independent["id"] != saved[0]["id"]
+        with closing(MnemonSession(tmp_path / "other-project", agent=agent)) as another_project:
+            assert saved[0]["id"] in another_project.projection()
+            assert saved[1]["id"] not in another_project.projection()
+        assert first.global_store.entries()[0]["content"] == "global 编码约定"
+        assert first.store.entries()[0]["content"] == "project 编码约定"
+
+
+def test_legacy_memory_directories_belong_only_to_translation(tmp_path):
+    legacy_root = tmp_path / "data" / "mnemon"
+    with closing(MnemonStore(legacy_root / "global", scope="global")) as legacy:
+        saved = legacy.mutate(Remember("旧翻译词典", importance="critical"))
+    with closing(MnemonSession(tmp_path, agent="translation")) as translation:
+        assert translation.global_store.directory == legacy_root / "global"
+        assert saved["id"] in translation.projection()
+    with closing(MnemonSession(tmp_path, agent="extraction")) as extraction:
+        assert extraction.global_store.directory == legacy_root / "extraction" / "global"
+        assert extraction.global_store.entries() == []
+        assert saved["id"] not in extraction.projection()
+
+
+def test_runners_choose_their_own_memory_type(tmp_path, monkeypatch, model_server):
+    monkeypatch.setenv("GALTRANSL_APP_SETTINGS_PATH", str(tmp_path / "settings.json"))
+    save_app_settings({"mnemonEnabled": True, "extractionMnemonEnabled": True, "billionContextEnabled": False,
+        "extractionBillionContextEnabled": False})
+    with closing(MnemonSession(tmp_path / "project", agent="translation")) as memory:
+        saved = [memory.call("mnemon_remember", {"content": f"翻译 {scope} 约定", "scope": scope,
+            "importance": "critical"}) for scope in ("global", "project")]
+    translation = make_runner(tmp_path / "translation", AgentRunner, model_server[0])
+    extraction = make_runner(tmp_path / "extraction", ExtractionRunner, model_server[0])
+    translation.state.project_dir = str(tmp_path / "project")
+    extraction.session["game_dir"] = str(tmp_path / "project")
+    try:
+        translation._resolve_llm()
+        extraction._resolve_llm()
+        assert translation._mnemon.global_store.directory != extraction._mnemon.global_store.directory
+        assert translation._mnemon.store.directory != extraction._mnemon.store.directory
+        assert all(entry["id"] in translation._messages_for_request()[0]["content"] for entry in saved)
+        assert all(entry["id"] not in extraction._messages_for_request()[0]["content"] for entry in saved)
+    finally:
+        translation.abort_in_flight()
+        extraction.abort_in_flight()
+        translation.close_store()
+        extraction.close_store()

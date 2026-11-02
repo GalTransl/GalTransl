@@ -52,6 +52,18 @@ function loadApi({ native = true, dev = false, configured, invoke, storage, fetc
   return { api: exports, requests, requestOptions };
 }
 
+['translation', 'extraction'].forEach(agent => test(`memory HTTP requests include the ${agent} scope`, async () => {
+  const { api, requests, requestOptions } = loadApi();
+  api.setRuntimeBackendBaseUrl('http://127.0.0.1:45678');
+  await api.fetchMemories('C:/game', agent);
+  assert.equal(new URL(requests[0]).searchParams.get('agent'), agent);
+  assert.equal(new URL(requests[0]).searchParams.get('project_dir'), 'C:/game');
+  await api.saveMemory('C:/game', { content: '记忆', scope: 'global', importance: 'critical' }, agent);
+  await api.deleteMemory('C:/game', 'global-one', agent);
+  assert.equal(JSON.parse(requestOptions[1].body).agent, agent);
+  assert.equal(JSON.parse(requestOptions[2].body).agent, agent);
+}));
+
 test('application updates serialize the dictionary option and hand off the prepared ID to the desktop shell', async () => {
   const invocations = [];
   const { api, requests, requestOptions } = loadApi({ invoke: async (name, args) => { invocations.push({ name, args }); } });
