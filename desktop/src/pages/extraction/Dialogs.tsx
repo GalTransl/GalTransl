@@ -1,6 +1,7 @@
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { AgentSettingsDialog } from '../../components/AgentSettings';
+import { AnimatedDialog } from '../../components/AnimatedDialog';
 import { CustomSelect } from '../../components/CustomSelect';
 import { Icon } from '../../components/Icon';
 import { useConnection } from '../../features/connection/ConnectionContext';
@@ -11,11 +12,10 @@ import type { Environment, SkillStatus } from './types';
 import { useDirectoryDrop } from './useDirectoryDrop';
 
 export function Dialog({ title, children, close }: { title: string; children: ReactNode; close: () => void }) {
-  return <div className="extract-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}>
-    <section className="extract-dialog" role="dialog" aria-modal="true" aria-label={title} onKeyDown={event => { if (event.key === 'Escape') close(); }}>
-      <header><h2>{title}</h2><button type="button" onClick={close} aria-label={x('close')}>×</button></header>{children}
-    </section>
-  </div>;
+  const titleId = useId();
+  return <AnimatedDialog backdropClassName="extract-dialog-backdrop" className="extract-dialog" labelledBy={titleId} close={close}>
+    <header><h2 id={titleId}>{title}</h2><button type="button" onClick={close} aria-label={x('close')}>×</button></header>{children}
+  </AnimatedDialog>;
 }
 export function PathField({ label, value, onChange, directory = true }: { label: string; value: string; onChange: (value: string) => void; directory?: boolean }) {
   const id = useId();

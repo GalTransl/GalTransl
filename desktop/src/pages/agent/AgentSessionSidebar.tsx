@@ -65,10 +65,11 @@ export function AgentSessionSidebar({
           type="button"
           className="agent-sessions__new"
           onClick={onCreateBlank}
-          disabled={disabled}
+          disabled={disabled || !activeSessionId}
           title={disabled ? translate("agent:agentSessionSidebar.agentSessionsNew_title_agentRunningStopWait") : translate("agent:agentSessionSidebar.agentSessionsNew_title_newSessionSelectProject")}
+          aria-label={translate("agent:agentSessionSidebar.agentSessionsNew_title_newSessionSelectProject")}
         >
-          ＋
+          <Icon name="plus" size={12} />
         </button>
       </div>
       <div className="agent-sessions__list">
@@ -131,7 +132,7 @@ export function AgentSessionSidebar({
                     }
                     aria-label={translate("agent:agentSessionSidebar.agentSessionsGroupNew_ariaLabel_newSession", { shortDir: shortDir })}
                   >
-                    ＋
+                    <Icon name="plus" size={12} />
                   </button>
                   <button
                     type="button"

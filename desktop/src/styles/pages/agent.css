@@ -280,6 +280,7 @@
   place-items: center;
   width: 26px;
   height: 26px;
+  padding: 0;
   flex: none;
   border: 1px solid rgba(47, 111, 235, 0.22);
   border-radius: 8px;
@@ -429,6 +430,7 @@
   place-items: center;
   width: 22px;
   height: 22px;
+  padding: 0;
   flex: none;
   margin-right: 2px;
   border: none;

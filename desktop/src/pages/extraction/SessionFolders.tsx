@@ -65,7 +65,7 @@ export function SessionFolders({ sessions, selected, activeSession, onSelect, on
         <button type="button" className="agent-sessions__group-new" disabled={busy}
           title={`${x('newSessionInFolder')} (${group.directory})`}
           aria-label={`${x('newSessionInFolder')} (${group.directory})`}
-          onClick={() => onCreateInFolder(group.directory)}>＋</button>
+          onClick={() => onCreateInFolder(group.directory)}><Icon name="plus" size={12} /></button>
         <button type="button" className="agent-sessions__group-close" disabled={busy || hasRunning}
           title={x(hasRunning ? 'stopBeforeClose' : 'closeFolder')}
           aria-label={`${x('closeFolder')} (${group.directory})`}

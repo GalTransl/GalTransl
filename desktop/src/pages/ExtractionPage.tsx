@@ -109,7 +109,7 @@ export function ExtractionPage() {
   return <div className={`agent-console extract-page ${showWorkspace && session ? 'extract-page--workspace' : ''}`}>
     <aside className="agent-sessions extract-sessions">
       <header className="agent-sessions__head"><span className="agent-sessions__title">{x('sessions')} · {agent.sessions.total}</span>
-        <button type="button" className="agent-sessions__new" disabled={agent.busy} onClick={showHome} title={x('newSession')} aria-label={x('newSession')}>＋</button>
+        <button type="button" className="agent-sessions__new" disabled={agent.busy || !agent.selected} onClick={showHome} title={x('newSession')} aria-label={x('newSession')}><Icon name="plus" size={12} /></button>
       </header>
       <nav className="agent-sessions__list" aria-label={x('sessions')}>
       <SessionFolders sessions={agent.sessions.sessions} selected={agent.selected} activeSession={session} onSelect={agent.select}
@@ -165,7 +165,7 @@ export function ExtractionPage() {
         <Workspace key={session.id} session={session} refresh={toolCount} running={running} importProject={() => void importProject()} busy={agent.busy} />
       </div>}
     </div>
-    {dialog === 'create' && <CreateDialog close={() => setDialog(null)} create={create} busy={agent.busy} />}
+    <AnimatePresence>{dialog === 'create' && <CreateDialog key="create" close={() => setDialog(null)} create={create} busy={agent.busy} />}</AnimatePresence>
     <AnimatePresence>{dialog === 'environment' && <EnvironmentDialog key="environment" initial={agent.environment} refresh={agent.refreshEnvironment} close={() => setDialog(null)} saved={agent.setEnvironment} projectDir={session?.game_dir ?? ''} />}</AnimatePresence>
   </div>;
 }

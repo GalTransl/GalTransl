@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import { createElement as h } from 'react';
 import { act, create } from 'react-test-renderer';
 import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
+
+// Share Motion's CommonJS presence context with the TypeScript loader.
+const { useIsPresent } = createRequire(import.meta.url)('motion/react');
 
 const fixture = (id, game_dir, status = 'idle') => ({ id, game_dir, title: `Session ${id}`, status, updated_at: Date.now() / 1000 });
 const storage = stored => ({
@@ -144,7 +148,7 @@ test('new extraction buttons return home without opening a dialog or stopping th
     './extraction/Composer': { ExtractionComposer: props => h('textarea', { value: props.draft, onChange: props.setDraft }) },
     './extraction/Workspace': { Workspace: () => h('div', { className: 'test-workspace' }) },
     './extraction/Conversation': { Conversation: () => h('div', { className: 'test-conversation' }) },
-    './extraction/Dialogs': { CreateDialog: () => h('div', { role: 'dialog' }) },
+    './extraction/Dialogs': { CreateDialog: () => h('div', { role: useIsPresent() ? 'dialog' : undefined }) },
   });
   const { useExtraction } = load(new URL('../src/pages/extraction/useExtraction.ts', import.meta.url));
   const { ExtractionPage } = load(new URL('../src/pages/ExtractionPage.tsx', import.meta.url));

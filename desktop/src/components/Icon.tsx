@@ -305,6 +305,12 @@ const ICONS = {
   ),
 
 
+  plus: (
+    <>
+      <path d="M8 3.5v9M3.5 8h9" />
+    </>
+  ),
+
   close: (
     <>
       <path d="M4.1 4.1l7.8 7.8" />
