@@ -112,6 +112,10 @@ class ExtractionRunner(AgentRunner):
         ]
         return "\n\n".join(section for section in sections if section)
 
+    def _request_system_prompt(self, saved_prompt):
+        # Refresh generated capabilities while retaining the session's memory snapshot.
+        return super()._request_system_prompt(self._system_prompt())
+
     def _tool_definitions(self):
         return EXTRACTION_TOOLS
 

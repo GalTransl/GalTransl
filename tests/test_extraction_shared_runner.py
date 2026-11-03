@@ -708,14 +708,18 @@ def test_legacy_development_history_import_does_not_need_node(setup):
         previous_messages({**session, "pi_session_file": str(legacy)}, directory / "wrong-root")
 
 
-def test_resumed_extraction_advertises_handoff_skill_without_loading_its_body(setup):
+@pytest.mark.parametrize("snapshot", ["", "Fixed session memory snapshot"])
+def test_resumed_extraction_advertises_handoff_skill_without_loading_its_body(setup, snapshot):
     runtime, session, available = setup
     state, store = restore_state(session, runtime.store.directory(session["id"]), {}, "continue", "ask")
-    runner = ExtractionRunner(state, store, session, available, lambda event: None)
     old = {"role": "system", "content": "Old generated extraction instructions"}
-    runner._persist_message(old)
-    runner._persist_message({"role": "user", "content": "Finish extracting"})
+    store.append_message(old)
+    store.append_message({"role": "user", "content": "Finish extracting"})
+    store.append_meta(mnemon_snapshot=snapshot)
+    state, store = restore_state(session, runtime.store.directory(session["id"]), {}, "continue", "ask")
+    runner = ExtractionRunner(state, store, session, available, lambda event: None)
     prompt = runner._messages_for_request()[0]["content"]
+    assert prompt == runner._system_prompt() + ("\n\n" + snapshot if snapshot else "")
     assert '<name>galtransl-project-handoff</name>' in prompt
     assert '@new_project_wizard' not in prompt
     handoff = next(skill for skill in available['skills'] if skill['name'] == 'galtransl-project-handoff')
@@ -724,6 +728,7 @@ def test_resumed_extraction_advertises_handoff_skill_without_loading_its_body(se
     assert Path(session["workspace"]).as_posix() in prompt
     assert state.messages[0] == old
     assert store.load()["messages"][0] == old
+    assert store.load()["meta"]["mnemon_snapshot"] == snapshot
 
 
 def test_extraction_compaction_keeps_own_prompt_tools_and_archives(setup):

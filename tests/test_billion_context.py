@@ -10,6 +10,7 @@ import pytest
 from GalTransl.Agent.billion_context import BillionContextSession, text_tokens
 from GalTransl.Agent.core import AgentStopRequested
 from GalTransl.Agent.models import AgentState, AgentToolError
+from GalTransl.Agent.registry import AgentRuntime
 from GalTransl.Agent.runner import AgentRunner
 from GalTransl.Agent.session_store import SessionStore
 from GalTransl.Extraction.runner import ExtractionRunner
@@ -160,6 +161,36 @@ def test_cancel_during_transaction_rolls_back(plugin, monkeypatch):
     assert plugin._db.execute("SELECT count(*) FROM receipts").fetchone()[0] == 0
 
 
+def test_stop_status_keeps_folded_usage_without_writing_archive(tmp_path):
+    state = AgentState(project_dir=str(tmp_path), session_id="stopping", status="running", messages=history())
+    runner = AgentRunner(AgentState())
+    runner.state = state
+    runtime = AgentRuntime()
+    key = runtime._key(state.project_dir)
+    runtime._states[key] = {state.session_id: state}
+    runtime._runners[key] = {state.session_id: runner}
+    runtime._stop_events[key] = {state.session_id: runner.stop_event}
+    plugin = BillionContextSession(path=tmp_path / "stopping.sqlite3", stop_event=runner.stop_event)
+    runner._billion_context = plugin
+    try:
+        before = runtime.status(state.project_dir, state.session_id)["context"]["used_tokens"]
+        fold(plugin)
+        folded = runtime.status(state.project_dir, state.session_id)["context"]["used_tokens"]
+        assert folded < before
+        writes = plugin._db.total_changes
+        stopped = runtime.stop(state.project_dir, state.session_id)
+        assert runner.stop_event.is_set()
+        assert stopped["context"]["used_tokens"] == folded
+        assert runtime.status(state.project_dir, state.session_id)["context"]["used_tokens"] == folded
+        assert plugin._db.total_changes == writes
+        with pytest.raises(AgentStopRequested):
+            runner._estimate_context_tokens()
+        runner.close_store()
+        assert runtime.status(state.project_dir, state.session_id)["context"]["used_tokens"] == folded
+    finally:
+        plugin.close()
+
+
 def test_rewritten_history_retains_archives_without_stale_folds_or_ref_reuse(plugin):
     fold(plugin)
     rewritten = [{"role": "system", "content": "Original system prompt"},
@@ -242,7 +273,8 @@ def test_both_domains_share_core_dispatch_and_request_projection(tmp_path, runne
         request = runner._openai_client.chat.completions.create.call_args.kwargs
         assert "read_history_archive" not in {tool["function"]["name"] for tool in request["tools"]}
         assert "Historical summary b1" in str(request["messages"])
-        assert request["messages"][0]["content"] == "Original system prompt"
+        assert request["messages"][0]["content"] == (
+            "Extraction prompt" if runner_type is ExtractionRunner else "Original system prompt")
         assert state.messages == history()
         assert runner._begin_compaction(force=True) is False
     finally:

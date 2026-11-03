@@ -1169,11 +1169,13 @@ class AgentRunner:
                 "overhead_tokens": self.state.usage_overhead_tokens,
             }, context_window=self._context_window)
 
-    def _estimate_context_tokens(self) -> int:
+    def _estimate_context_tokens(self, *, refresh=True) -> int:
         """估算当前请求占用的 token 数（锚点法，见 _estimate_usage_tokens）。"""
-        if self._billion_context is not None:
-            self._billion_context.project(self._messages_for_request(strip_internal=False), self._request_overhead_tokens())
-            return self._billion_context.status()["contextTokens"]
+        with self._context_plugin_lock:
+            if self._billion_context is not None:
+                if refresh:
+                    self._billion_context.project(self._messages_for_request(strip_internal=False), self._request_overhead_tokens())
+                return self._billion_context.context_tokens
         return _estimate_usage_tokens(
             self.state.messages,
             self.state.last_prompt_tokens,

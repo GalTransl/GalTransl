@@ -119,12 +119,13 @@ def test_ask_user_shares_translation_question_contract():
     assert extraction['required'] == shared['required']
 
 
-def test_old_saved_system_instruction_stays_unchanged_on_resume(fixture):
+def test_old_saved_system_instruction_uses_native_read_without_rewriting_history(fixture):
     runner, _ = fixture
     old = {'role': 'system', 'content': 'Before extraction, read_file, following next_line until done: SKILL.md'}
     runner.state.messages = [old, {'role': 'user', 'content': 'Continue'}]
     projected = runner._messages_for_request()
-    assert projected[0] == old
+    assert "Use the read tool to load a skill's file when the task matches its description." in projected[0]['content']
+    assert 'read_file' not in projected[0]['content']
     assert runner.state.messages[0] == old
 
 

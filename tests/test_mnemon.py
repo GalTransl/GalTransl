@@ -532,12 +532,13 @@ def test_new_runner_reuses_saved_snapshot_and_new_session_reads_latest(tmp_path,
 @pytest.mark.parametrize("runner_type", [AgentRunner, ExtractionRunner])
 def test_old_session_without_snapshot_does_not_read_new_memory(tmp_path, runner_type):
     runner = make_runner(tmp_path, runner_type, "http://127.0.0.1:1")
+    domain_prompt = runner._messages_for_request()[0]
     for message in runner.state.messages:
         runner._store.append_message(message)
     runner._mnemon = MnemonSession(tmp_path / "project", agent=runner._mnemon_agent)
     runner._mnemon.call("mnemon_remember", {"content": "新的常驻规则", "importance": "critical"})
     try:
-        assert runner._messages_for_request()[0] == runner.state.messages[0]
+        assert runner._messages_for_request()[0] == domain_prompt
         assert runner.state.mnemon_snapshot == ""
         assert runner._mnemon.call("mnemon_recall", {"query": "常驻规则"})["results"]
     finally:

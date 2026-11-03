@@ -296,6 +296,11 @@ class BillionContextSession:
         with self._transaction() as state:
             return self._status(state)
 
+    @property
+    def context_tokens(self):
+        """Last projected usage, readable after cancellation without a transaction."""
+        return self._last_estimate
+
     def project(self, messages: list[dict], overhead=0) -> list[dict]:
         self.sync(messages)
         with self._transaction() as state:

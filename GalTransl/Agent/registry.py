@@ -835,7 +835,7 @@ class AgentRuntime:
                 # 口径必须和 _emit_context_usage 一致（都含 tools schema 那笔固定开销），
                 # 否则刷新前后指示器会跳一下。
                 "context": {
-                    "used_tokens": runner._estimate_context_tokens() if runner is not None and (
+                    "used_tokens": runner._estimate_context_tokens(refresh=not runner.stop_event.is_set()) if runner is not None and (
                         runner._mnemon is not None or runner._billion_context is not None) else _estimate_usage_tokens(
                         state.messages,
                         state.last_prompt_tokens,
