@@ -244,6 +244,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_platforms_and_release_permissions(self):
         self.assertEqual(self.workflow["permissions"], {"contents": "read"})
         jobs = self.workflow["jobs"]
+        self.assertEqual(jobs["build"]["env"]["GH_TOKEN"], "${{ github.token }}")
         matrix = jobs["build"]["strategy"]["matrix"]["include"]
         self.assertEqual(
             {entry["os"] for entry in matrix},

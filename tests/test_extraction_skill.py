@@ -65,7 +65,9 @@ def skill_server(tmp_path, monkeypatch, discover_pythons):
                 return
             upstream["calls"].append(self.path)
             content = json.dumps({"sha": upstream["commit"]}).encode() if self.path == "/upstream/latest" else upstream["archive"]
-            self.send_response(upstream["status"])
+            upstream["authorization"] = self.headers.get("Authorization")
+            required = upstream.get("required_authorization")
+            self.send_response(403 if required and upstream["authorization"] != required else upstream["status"])
             self.send_header("Content-Length", str(len(content)))
             self.end_headers()
             self.wfile.write(content)
@@ -108,6 +110,40 @@ def api(url, action, payload=None):
             return response.status, json.load(response)
     except HTTPError as response:
         return response.code, json.load(response)
+
+
+@pytest.mark.parametrize("tokens,url,authenticated", [
+    ({}, "https://api.github.com/commits/main", False),
+    ({"GH_TOKEN": "test-token"}, "https://api.github.com/commits/main", True),
+    ({"GITHUB_TOKEN": "test-token"}, "https://api.github.com/commits/main", True),
+    ({"GH_TOKEN": "test-token", "GITHUB_TOKEN": "unused-token"}, "https://api.github.com/commits/main", True),
+    ({"GH_TOKEN": "", "GITHUB_TOKEN": "test-token"}, "https://api.github.com/commits/main", True),
+    ({"GH_TOKEN": "test-token"}, "http://api.github.com/commits/main", False),
+    ({"GH_TOKEN": "test-token"}, "https://api.github.com.example.org/commits/main", False),
+])
+def test_api_credentials_avoid_anonymous_rate_limit_and_stay_on_github(skill_server, monkeypatch, tokens, url, authenticated):
+    from GalTransl.Extraction import skill
+
+    local, _, _, upstream = skill_server
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    for name, value in tokens.items():
+        monkeypatch.setenv(name, value)
+    upstream["required_authorization"] = "Bearer test-token"
+    monkeypatch.setattr(skill, "LATEST_URL", url)
+
+    def local_request(request, timeout):
+        # Route the real request headers to a local server that rejects anonymous calls.
+        return urlopen(Request(local + "/upstream/latest", headers=dict(request.header_items())), timeout=timeout)
+
+    monkeypatch.setattr(skill, "urlopen", local_request)
+    if authenticated:
+        assert skill.latest_commit() == upstream["commit"]
+        assert upstream["authorization"] == "Bearer test-token"
+        return
+    with pytest.raises(skill.SkillDownloadError, match="403"):
+        skill.latest_commit()
+    assert upstream["authorization"] is None
 
 
 def test_environment_only_inspects_local_skill(skill_server):

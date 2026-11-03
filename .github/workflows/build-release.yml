@@ -77,6 +77,7 @@ jobs:
         shell: bash
     env:
       RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
 
     steps:
       - name: Checkout

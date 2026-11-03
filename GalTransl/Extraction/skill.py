@@ -13,7 +13,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import TypedDict
 from urllib.error import URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
 from GalTransl.GitHubDownload import GitHubDownloadError, download_archive_bytes
@@ -166,6 +166,10 @@ def prune_skill_versions(skills: Path, keep: list[Path]) -> None:
 
 def request_bytes(url: str, maximum: int) -> bytes:
     request = Request(url, headers={"User-Agent": "GalTransl-Skill", "Accept": "application/vnd.github+json"})
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    destination = urlsplit(url)
+    if token and destination.scheme == "https" and destination.netloc == "api.github.com":
+        request.add_header("Authorization", f"Bearer {token}")
     try:
         with urlopen(request, timeout=60) as response:
             content = response.read(maximum + 1)
