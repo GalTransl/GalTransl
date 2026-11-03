@@ -85,3 +85,7 @@ def terminate_tree(process: subprocess.Popen) -> None:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+        except PermissionError:
+            # macOS reports EPERM for a group containing only zombies after SIGKILL.
+            if process.poll() is None:
+                raise
