@@ -59,7 +59,7 @@ def get_translation_guidelines_dir() -> Path:
 
 
 def get_active_translation_guidelines_dir() -> Path:
-    if sys.platform == "win32" and not os.environ.get(DATA_DIR_ENV, "").strip():
+    if not os.environ.get(DATA_DIR_ENV, "").strip():
         return get_translation_guidelines_dir()
     return _seed_bundled_files(
         get_translation_guidelines_dir(),
@@ -164,12 +164,12 @@ def _bundled_dict_signature(bundled_dir: Path) -> str:
 
 
 def get_active_dict_dir() -> Path:
-    """Return the writable common dictionary directory.
+    """Use program dictionaries unless the user data directory is overridden.
 
-    Bundled dictionaries are copied as seeds when their file set changes.
-    Existing user files are never overwritten.
+    An explicit override is seeded when the bundled file set changes, without
+    overwriting existing user files.
     """
-    if sys.platform == "win32" and not os.environ.get(DATA_DIR_ENV, "").strip():
+    if not os.environ.get(DATA_DIR_ENV, "").strip():
         return get_dict_dir()
     return _seed_bundled_files(get_dict_dir(), get_user_dict_dir(), BUNDLED_DICT_SEED_MARKER)
 

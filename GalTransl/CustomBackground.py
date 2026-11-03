@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import sys
 import tempfile
 from pathlib import Path
 from threading import RLock
@@ -17,7 +16,7 @@ _IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp
 
 
 def background_directory() -> Path:
-    root = get_resource_root() if sys.platform == "win32" and not os.environ.get(DATA_DIR_ENV, "").strip() else get_user_data_dir()
+    root = get_user_data_dir() if os.environ.get(DATA_DIR_ENV, "").strip() else get_resource_root()
     return root / "desktop-background"
 
 

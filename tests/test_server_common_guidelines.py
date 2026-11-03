@@ -3,7 +3,7 @@
 设置页的「通用翻译规范管理」和 Agent 的 read_guideline(scope="global") 都打这几个路由，
 这里起一个真的 ThreadingHTTPServer 走 HTTP，把读写、重名、路径穿越与"兜底文件不许删"锁住。
 
-规范目录按平台使用资源目录或用户数据目录，所以每个用例都把
+规范目录默认使用程序目录，显式数据目录覆盖时使用用户数据目录，所以每个用例都把
 GALTRANSL_RESOURCE_DIR 和 GALTRANSL_DATA_DIR 指到临时目录，互不污染。
 """
 

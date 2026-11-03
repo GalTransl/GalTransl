@@ -417,7 +417,7 @@ Build the Linux portable release artifact:
 python build_linux_x64.py --no-bundles
 ```
 
-Build release packages on Ubuntu 22.04 or an equivalent glibc baseline for wider compatibility. Settings are stored under `$XDG_CONFIG_HOME/GalTransl`; editable common dictionaries live under `$XDG_DATA_HOME/GalTransl/Dict`, with bundled dictionaries used only as initial seeds. Editable guidelines and Agent sessions live under `$XDG_DATA_HOME/GalTransl/translation_guidelines` and `$XDG_DATA_HOME/GalTransl/agent_sessions`. XDG roots default to `~/.config` and `~/.local/share`. Windows retains settings and dictionaries in the program directory.
+Build release packages on Ubuntu 22.04 or an equivalent glibc baseline for wider compatibility. Linux, macOS, and Windows read and write common dictionaries (`Dict/`), global translation guidelines (`translation_guidelines/`), and custom backgrounds (`desktop-background/`) in the program directory by default. Sessions and application settings live in `~/.galtransl`, with legacy sessions and settings migrated on first launch. An explicit `GALTRANSL_DATA_DIR` override places sessions, settings, and these three directories under the selected data directory; dictionaries and guidelines are seeded from the program directory without overwriting existing edits. `GALTRANSL_APP_SETTINGS_PATH` can override the application settings file separately.
 
 
 ### macOS development and builds

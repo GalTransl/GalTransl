@@ -44,7 +44,7 @@ class RuntimePathTests(unittest.TestCase):
                 self.assertEqual(load_app_settings(), saved)
                 self.assertEqual(get_active_translation_guidelines_dir(), root / "data" / "translation_guidelines")
 
-    def test_linux_guideline_edits_are_read_from_user_data(self) -> None:
+    def test_linux_guideline_edits_are_read_from_explicit_user_data_override(self) -> None:
         from GalTransl.Utils import load_guideline_file
 
         with tempfile.TemporaryDirectory() as tmp:

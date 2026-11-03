@@ -539,7 +539,7 @@ def _list_problem_types(project_dir: str = "") -> list[dict]:
 
 
 def _guidelines_dir() -> str:
-    """全局翻译规范目录（Linux 使用可写的用户数据目录）。
+    """全局翻译规范目录（默认使用程序目录，支持显式数据目录覆盖）。
 
     各项目的 config `common.gpt.translation_guideline` 从这里选一份；翻译时它拼在
     项目规范之前（项目规范冲突时以项目规范为准）。

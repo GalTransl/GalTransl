@@ -539,7 +539,7 @@ Linux CI 和正式发布只生成便携包；需要本地测试安装包时，�
 - `GalTransl_*_linux_x86_64.tar.gz`
 - `GalTransl_*_linux_x86_64.tar.gz`
 
-正式发布包应在 Ubuntu 22.04 或同等 glibc 基线的环境中构建。应用设置写入 `$XDG_CONFIG_HOME/GalTransl`，用户通用字典写入 `$XDG_DATA_HOME/GalTransl/Dict`；通用翻译规范和 Agent 会话分别写入 `$XDG_DATA_HOME/GalTransl/translation_guidelines` 与 `$XDG_DATA_HOME/GalTransl/agent_sessions`。未设置 XDG 环境变量时使用 `~/.config` 和 `~/.local/share`；安装目录中的字典和规范只作为初始种子。Windows 继续使用程序目录中的配置与字典。
+正式发布包应在 Ubuntu 22.04 或同等 glibc 基线的环境中构建。Linux、macOS 与 Windows 一致，默认在程序目录读写通用字典 `Dict/`、全局翻译规范 `translation_guidelines/` 和自定义背景 `desktop-background/`；会话与应用设置存放在 `~/.galtransl`，首次启动会迁移旧会话和设置。显式设置 `GALTRANSL_DATA_DIR` 时，会话、设置及这三个目录使用指定的数据目录；字典和规范会从程序目录复制初始文件，不覆盖已有修改。`GALTRANSL_APP_SETTINGS_PATH` 可单独指定应用设置文件。
 
 
 

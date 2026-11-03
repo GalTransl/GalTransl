@@ -86,6 +86,63 @@ def test_skills_are_read_in_place_without_seeding_user_home(home):
     assert not directory.exists()
 
 
+@pytest.mark.parametrize('platform', ['win32', 'linux', 'darwin'])
+def test_common_resources_stay_in_program_directory_after_home_migration(home, monkeypatch, platform):
+    from GalTransl.ConfigHelper import initDictList
+    from GalTransl.CustomBackground import (
+        background_directory,
+        load_custom_background,
+        read_custom_background_image,
+        save_custom_background_settings,
+    )
+    from GalTransl.Utils import load_guideline_file
+
+    monkeypatch.setattr('sys.platform', platform)
+    directory, resource = home
+    legacy = RuntimePaths.get_legacy_user_data_dir()
+    version = 'a' * 32
+    settings = {
+        'imageVersion': version,
+        'imageName': 'wallpaper.png',
+        'imageType': 'image/png',
+        'opacity': 48,
+        'surfaceOpacity': 72,
+    }
+    save_file(resource / 'Dict/custom.txt', 'original\ttranslated')
+    save_file(resource / 'translation_guidelines/custom.md', 'Program guidelines')
+    save_file(resource / 'desktop-background/settings.json', json.dumps(settings))
+    save_file(resource / 'desktop-background' / f'image-{version}', 'Program image')
+    save_file(resource / 'app_settings.json', '{"maxConcurrentJobs": 3}')
+    save_file(legacy / 'Dict/custom.txt', 'Legacy dictionary')
+    save_file(legacy / 'translation_guidelines/custom.md', 'Legacy guidelines')
+    save_file(legacy / 'desktop-background/settings.json', '{}')
+
+    assert RuntimePaths.get_user_data_dir() == directory
+    assert json.loads((directory / 'app_settings.json').read_text()) == {'maxConcurrentJobs': 3}
+    assert RuntimePaths.get_active_dict_dir() == resource / 'Dict'
+    assert RuntimePaths.get_active_translation_guidelines_dir() == resource / 'translation_guidelines'
+    assert background_directory() == resource / 'desktop-background'
+    assert not (directory / 'Dict').exists()
+    assert not (directory / 'translation_guidelines').exists()
+    assert not (directory / 'desktop-background').exists()
+
+    save_file(directory / 'Dict/custom.txt', 'Home dictionary')
+    save_file(directory / 'translation_guidelines/custom.md', 'Home guidelines')
+    save_file(directory / 'desktop-background/settings.json', '{}')
+    dictionary = initDictList(['custom.txt'], 'Dict', str(resource))
+    assert dictionary == [str(resource / 'Dict/custom.txt')]
+    assert Path(dictionary[0]).read_text() == 'original\ttranslated'
+    assert RuntimePaths.resolve_dict_dir('Dict/nested') == resource / 'Dict/nested'
+    assert load_guideline_file('custom.md') == 'Program guidelines'
+    save_file(resource / 'translation_guidelines/custom.md', 'Edited program guidelines')
+    assert load_guideline_file('translation_guidelines/custom.md') == 'Edited program guidelines'
+    assert load_custom_background()['imageVersion'] == version
+    assert read_custom_background_image(version) == (b'Program image', 'image/png')
+    save_custom_background_settings({'opacity': 55})
+    assert json.loads((resource / 'desktop-background/settings.json').read_text())['opacity'] == 55
+    assert (directory / 'desktop-background/settings.json').read_text() == '{}'
+
+
 def test_extra_skills_do_not_make_environment_ready_without_extraction_package(home):
     directory, resource = home
     save_file(resource / 'skills/extra/SKILL.md', '---\nname: extra\ndescription: Extra skill\n---\n')

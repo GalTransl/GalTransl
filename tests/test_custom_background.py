@@ -94,10 +94,12 @@ class CustomBackgroundTests(unittest.TestCase):
 
 
 class BackgroundDirectoryTests(unittest.TestCase):
-    def test_windows_uses_program_resources_and_honors_explicit_data_override(self):
-        with patch("GalTransl.CustomBackground.sys.platform", "win32"), patch.dict("os.environ", {"GALTRANSL_DATA_DIR": ""}), \
-                patch("GalTransl.CustomBackground.get_resource_root", return_value=Path("program")):
-            self.assertEqual(background_directory(), Path("program/desktop-background"))
-            with patch.dict("os.environ", {"GALTRANSL_DATA_DIR": "override"}), \
-                    patch("GalTransl.CustomBackground.get_user_data_dir", return_value=Path("override")):
-                self.assertEqual(background_directory(), Path("override/desktop-background"))
+    def test_program_resources_and_explicit_data_override_on_all_platforms(self):
+        for platform in ["win32", "linux", "darwin"]:
+            with self.subTest(platform=platform), patch("sys.platform", platform), \
+                    patch.dict("os.environ", {"GALTRANSL_DATA_DIR": ""}), \
+                    patch("GalTransl.CustomBackground.get_resource_root", return_value=Path("program")):
+                self.assertEqual(background_directory(), Path("program/desktop-background"))
+                with patch.dict("os.environ", {"GALTRANSL_DATA_DIR": "override"}), \
+                        patch("GalTransl.CustomBackground.get_user_data_dir", return_value=Path("override")):
+                    self.assertEqual(background_directory(), Path("override/desktop-background"))
