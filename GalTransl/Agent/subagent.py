@@ -1488,7 +1488,7 @@ def _tool_run_subagents(runner: AgentRunner, args: dict[str, Any]) -> Any:
                 "缓存里还没有可校对的文件（条目为空或还没跑翻译）：先用 read_transl_cache（action=list）看看，"
                 "或先把具体文件名写出来。"
                 if agent == SUBAGENT_AGENT_PROOFREAD
-                else "输入目录里没有可分派的原文文件：先用 list_input_files 看看。"
+                else '输入目录里没有可分派的原文文件：先用 input(action="list") 看看。'
             )
             raise AgentToolError(f"「{SUBAGENT_LABELS.get(agent, agent)}」自动均分拿不到文件：{hint}")
         total_slots = sum(task["count"] for task in slots)

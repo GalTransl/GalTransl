@@ -40,7 +40,7 @@ def validate_plugin_value(config, path, value, catalog):
     _, module, key = parts
     plugin = catalog.get(module)
     if not plugin or key not in plugin["settings"]:
-        return "插件未声明此设置；请先调用 get_plugin_settings 确认合法键"
+        return '插件未声明此设置；请先调用 get_project(include=["plugins"]) 确认合法键'
     try:
         get_plugin_config_section(config, module)
     except ValueError:

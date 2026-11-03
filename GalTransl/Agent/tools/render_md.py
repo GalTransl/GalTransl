@@ -695,7 +695,7 @@ def _md_render_run_subagents(result: dict[str, Any]) -> str:
         if review:
             parts.append("需二次审查的译文（包括已修改但仍待确认的条目）：\n\n" + _md_table(["file", "index", "reason"], review))
         if row.get("review_truncated"):
-            parts.append('这里只展示前 20 条；用 read_proofread_changes(task_id="' + str(row.get("change_task_id", "")) + '", view="review") 分页查看完整清单。')
+            parts.append('这里只展示前 20 条；用 subagents(action="changes", task_id="' + str(row.get("change_task_id", "")) + '", view="review") 分页查看完整清单。')
         if row.get("review_record_error"):
             parts.append("二次审查清单保存失败：" + str(row["review_record_error"]))
         comments = row.get("proofread_comment")
