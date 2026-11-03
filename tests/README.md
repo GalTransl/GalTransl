@@ -26,7 +26,8 @@ test owns its files and server; verify fresh and shallow checkouts, fixed Skill
 directory replacement, local preparation, and preservation on download failure.
 
 Skill download tests reuse the real interpreter discovery results within their
-module: these tests change Skill files, not installed Python environments.
+module, completing the first scan during fixture setup before HTTP requests:
+these tests change Skill files, not installed Python environments.
 Interpreter discovery itself remains covered by `test_python_discovery.py`.
 
 Tests for ordinary Agent behavior should explicitly disable the optional

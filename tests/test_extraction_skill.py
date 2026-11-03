@@ -31,7 +31,10 @@ def archive(files):
 def discover_pythons():
     from GalTransl.Extraction import environment
     # These tests change Skill files only; interpreter discovery can reuse real results.
-    return cache(environment.system_pythons)
+    discover = cache(environment.system_pythons)
+    # Windows CI's first scan can exceed the HTTP client's five-second timeout.
+    discover("")
+    return discover
 
 
 @pytest.fixture
