@@ -7,8 +7,9 @@
 
 ## 开启与职责
 
-翻译或提取 Agent 左下角的齿轮配置窗口中开启 **agent-mnemon**，默认关闭。
+**agent-mnemon** 默认开启，可在翻译或提取 Agent 左下角的齿轮配置窗口中关闭。
 两个开关为 `mnemonEnabled`、`extractionMnemonEnabled`，独立控制，下一回合生效。
+新安装和未保存开关的配置默认开启，已有明确关闭的设置继续保留。
 翻译与提取的记忆独立，各自拥有全局和项目两层；工具和管理弹窗只访问当前类型 Agent 的记忆。
 
 mnemon 保存跨会话需要复用的偏好与项目事实；billion-context 压缩、回查当前会话原文。

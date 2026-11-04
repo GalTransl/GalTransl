@@ -1,4 +1,4 @@
-"""Plugin settings are opt-in and partial HTTP saves preserve other preferences."""
+"""Plugin settings default on and partial HTTP saves preserve other preferences."""
 import json
 from http.server import ThreadingHTTPServer
 from threading import Thread
@@ -7,6 +7,21 @@ from urllib.request import Request, urlopen
 import pytest
 
 from GalTransl.AppSettings import load_app_settings, save_app_settings
+
+
+@pytest.mark.parametrize("source", [None, {}, {"maxConcurrentJobs": 7}])
+def test_plugins_default_on_for_new_and_legacy_settings(tmp_path, monkeypatch, source):
+    path = tmp_path / "settings.json"
+    monkeypatch.setenv("GALTRANSL_APP_SETTINGS_PATH", str(path))
+    if source is not None:
+        path.write_text(json.dumps(source), encoding="utf-8")
+    settings = load_app_settings()
+    assert settings["billionContextEnabled"] is True
+    assert settings["extractionBillionContextEnabled"] is True
+    assert settings["mnemonEnabled"] is True
+    assert settings["extractionMnemonEnabled"] is True
+    assert save_app_settings(settings) == settings
+    assert load_app_settings() == settings
 
 
 @pytest.mark.parametrize("value,expected", [(True, True), (False, False), ("true", False),
@@ -43,14 +58,21 @@ def test_http_partial_settings_updates_preserve_plugin_and_other_preferences(tmp
     try:
         assert update({"billionContextEnabled": True}) == {
             "maxConcurrentJobs": 7, "printTranslationLogInTerminal": False,
-            "billionContextEnabled": True, "extractionBillionContextEnabled": False,
-            "mnemonEnabled": False, "extractionMnemonEnabled": False}
+            "billionContextEnabled": True, "extractionBillionContextEnabled": True,
+            "mnemonEnabled": True, "extractionMnemonEnabled": True}
         assert update({"extractionBillionContextEnabled": True})["billionContextEnabled"] is True
         assert update({"maxConcurrentJobs": 3})["billionContextEnabled"] is True
         assert update({"billionContextEnabled": False})["maxConcurrentJobs"] == 3
         assert load_app_settings()["billionContextEnabled"] is False
         assert load_app_settings()["extractionBillionContextEnabled"] is True
         assert update({"extractionBillionContextEnabled": False})["billionContextEnabled"] is False
+        assert update({"mnemonEnabled": False})["extractionMnemonEnabled"] is True
+        assert update({"extractionMnemonEnabled": False}) == {
+            "maxConcurrentJobs": 3, "printTranslationLogInTerminal": False,
+            "billionContextEnabled": False, "extractionBillionContextEnabled": False,
+            "mnemonEnabled": False, "extractionMnemonEnabled": False}
+        assert load_app_settings()["mnemonEnabled"] is False
+        assert load_app_settings()["extractionMnemonEnabled"] is False
     finally:
         server.shutdown()
         server.server_close()

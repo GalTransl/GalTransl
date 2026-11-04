@@ -571,13 +571,14 @@ def test_extraction_restore_keeps_snapshot_and_usage_overhead(tmp_path):
 
 
 @pytest.mark.parametrize("runner_type", [AgentRunner, ExtractionRunner])
-@pytest.mark.parametrize("billion", [False, True])
+@pytest.mark.parametrize("billion", [False, True, None])
 @pytest.mark.parametrize("model_server", ["project", "global"], indirect=True)
 def test_real_model_loop_keeps_session_snapshot_and_journal(tmp_path, monkeypatch, model_server, runner_type, billion, request):
     monkeypatch.setenv("GALTRANSL_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("GALTRANSL_APP_SETTINGS_PATH", str(tmp_path / "settings.json"))
-    save_app_settings({"mnemonEnabled": True, "extractionMnemonEnabled": True,
-        "billionContextEnabled": billion, "extractionBillionContextEnabled": billion})
+    if billion is not None:
+        save_app_settings({"mnemonEnabled": True, "extractionMnemonEnabled": True,
+            "billionContextEnabled": billion, "extractionBillionContextEnabled": billion})
     endpoint, requests = model_server
     runner = make_runner(tmp_path, runner_type, endpoint)
     original = copy.deepcopy(runner.state.messages)
@@ -598,7 +599,7 @@ def test_real_model_loop_keeps_session_snapshot_and_journal(tmp_path, monkeypatc
             for message in requests[1]["messages"] if message["role"] == "user")
         names = {tool["function"]["name"] for tool in requests[0]["tools"]}
         assert MnemonSession.names <= names
-        assert (BillionContextSession.names <= names) is billion
+        assert (BillionContextSession.names <= names) is (billion is not False)
         assert runner.state.messages[:2] == original
         assert runner._mnemon is None
         assert _tool_risk("mnemon_remember") == "high"
