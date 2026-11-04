@@ -23,18 +23,6 @@
 
 ![GalTransl Agent 模式：自主进行翻译前准备并启动试译](./img/agent-mode.png)
 
-译后校对子 Agent 默认可以直接修复分配范围内的译文；拿不准、修改后仍需确认的句子会留下 `proofread_comment`，交主 Agent 二次审查。主 Agent 默认接收修改统计和待审查摘要，完整修改记录与待审查清单可分页查询，修改也可按记录撤销。句子已被后续编辑时会拒绝覆盖；校对完成后仍需重建输出文件。
-
-桌面端新增独立的 **提取 Agent**：复用翻译 Agent 的推理、流式会话、审批与上下文压缩框架，使用配套提取 Skill 和本地 Python/shell 识别游戏引擎、提取文本及验证回填，提取结果可直接打开为翻译项目。发布包复用现有 Python 后端，不再包含 Node.js 或 Pi SDK；内置完整 Skill，Agent 也可显式尝试本机 Python；[配置与开发说明](GalTransl/Extraction/README.md)。
-
-内置 Skill 由程序和构建脚本从 GitHub 上游 `main` 分支下载，无需 Git 子模块；源码直接使用普通 `git clone`。开发启动只准备本地资源，不下载或更新 Skill；缺少 Skill 时可在提取 Agent 的「运行环境」中下载，进入页面后会自动检查更新，页面打开期间每小时复查。下载完成后自动启用，默认保存在程序目录 `skills/galtransl-galgamereverse-skill/`；更新校验成功后替换同一目录，不累积哈希版本，失败时保留原文件。正在运行的提取回合结束后才能更新。用户对话和配置仍存放在 `~/.galtransl`。新增 skill 放入程序目录 `skills/<name>/SKILL.md`，填写名称与说明后即可自动注册、按需加载，也可用 `/skill:<name>` 显式调用。打包和 CI 运行 `python scripts/prepare_extraction.py` 拉取最新 Skill，并包含完整资源；`--local` 使用现有本地文件。
-
-程序自动升级和 Skill 下载共用 GitHub 加速下载器：从 [github.akams.cn](https://github.akams.cn/) 发布的节点列表自动探测候选节点，优先使用响应较快的可用线路，失败后切换并回退直连，无需配置。版本信息及升级 SHA256 仍从 GitHub 官方获取；校验失败不会替换已安装的程序或 Skill。程序与 CI 构建时的 Skill 下载也使用同一机制。
-
-
-内置默认开启的 **billion-context Python 核心版**：为翻译主 Agent 和提取 Agent 提供分层上下文压缩、原文归档、检索与恢复，可在各自 **左下角的配置入口**关闭；两个开关独立保存，下一回合生效，已有明确关闭的设置继续保留，无需 Node.js 或额外运行依赖。GalTransl 使用了 [billion-context](https://github.com/ranxianglei/billion-context) 和 [acp-kernel](https://github.com/ranxianglei/acp-kernel) 的设计与压缩规则；[移植范围、使用与许可说明](plugins/billion-context/README.md)。
-
-内置默认开启的 **agent-mnemon Python 全局/项目记忆精简版**：可在同一配置入口独立关闭，全局层跨项目共享偏好和通用约定，项目层隔离具体事实。重要条目自动常驻，其余通过中文/日文关键词按需搜索，两层共享上下文预算；Agent 仅使用检索、保存/更新、删除三个工具，可与 billion-context 配合使用。已有明确关闭的设置继续保留，写入遵循现有审批模式，无额外运行依赖；[使用、移植范围与 MIT 许可](plugins/agent-mnemon/README.md)。
 
 ## 前言
 &ensp;&ensp;&ensp;&ensp;GalTransl的核心是一组自动化翻译流水线，解决了使用ChatGPT自动化翻译Gal过程中已知的大部分问题，并提高了整体的翻译质量。同时，通过与其他项目的组合，打通了制作补丁的完整流程，一定程度降低了上手门槛。对此感兴趣的朋友可以通过本项目更容易的构建具有一定质量的机翻补丁，并(或许)可以尝试在此框架的基础上高效的构建更高质量的汉化补丁。  
