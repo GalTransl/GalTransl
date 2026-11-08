@@ -532,6 +532,33 @@ def _cache_entry_is_translated(item: Any) -> bool:
     )
 
 
+def _cache_entry_is_failed(item: dict[str, Any], problem_text: str) -> bool:
+    """翻译失败的条目。失败时 problem 写的是「翻译失败」，译文以 (Failed) 开头。
+
+    problem_text 是已按 problemFilterKey / 白名单过滤后的 problem；两个进度接口共用这一口径。
+    """
+    dst = str(item.get("pre_dst", "") or item.get("pre_zh", ""))
+    return "翻译失败" in problem_text or "(Failed)" in dst or "(翻译失败)" in dst
+
+
+def _read_cache_append_rows(path: str) -> list[dict[str, Any]]:
+    """读 .append.jsonl：一行一条，坏行跳过。"""
+    import orjson
+
+    rows: list[dict[str, Any]] = []
+    with open(path, "rb") as f:
+        for line in f.read().splitlines():
+            if not line:
+                continue
+            try:
+                row = orjson.loads(line)
+            except Exception:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+    return rows
+
+
 @dataclass(slots=True)
 class _CacheProgressFileStat:
     mtime_ns: int
@@ -813,20 +840,11 @@ class RuntimeProgressCache:
                     entries: list[Any] = []
                     try:
                         import orjson
-                        with open(entry.path, "rb") as f:
-                            raw = f.read()
                         if entry.name.endswith(_CACHE_APPEND_SUFFIX):
-                            for line in raw.splitlines():
-                                if not line:
-                                    continue
-                                try:
-                                    row = orjson.loads(line)
-                                except Exception:
-                                    continue
-                                if isinstance(row, dict):
-                                    entries.append(row)
+                            entries = _read_cache_append_rows(entry.path)
                         else:
-                            loaded = orjson.loads(raw)
+                            with open(entry.path, "rb") as f:
+                                loaded = orjson.loads(f.read())
                             if isinstance(loaded, list):
                                 entries = loaded
                     except Exception:
@@ -857,11 +875,7 @@ class RuntimeProgressCache:
                         if is_problem_whitelisted(problem_white_index, entry.name, item.get("index", "")):
                             problem_text = ""
                         is_problem = bool(problem_text)
-                        is_failed = (
-                            "翻译失败" in problem_text
-                            or "(Failed)" in str(item.get("pre_dst", "") or item.get("pre_zh", ""))
-                            or "(翻译失败)" in str(item.get("pre_dst", "") or item.get("pre_zh", ""))
-                        )
+                        is_failed = _cache_entry_is_failed(item, problem_text)
 
                         no_proofread = str(item.get("proofread_dst", "") or "") == ""
 

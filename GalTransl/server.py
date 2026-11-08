@@ -88,7 +88,9 @@ from GalTransl.server_runtime import (
     RuntimeRegistry,
     _CACHE_APPEND_SUFFIX,
     _ConcurrentLimitError,
+    _cache_entry_is_failed,
     _cache_entry_is_translated,
+    _read_cache_append_rows,
     _has_newer_release,
     _normalize_project_dir,
     _normalize_retran_terms,
@@ -2751,14 +2753,38 @@ def build_handler(registry: JobRegistry):
                 failed = 0
                 file_progress = []
                 if os.path.isdir(cache_dir):
-                    for name in sorted(os.listdir(cache_dir)):
+                    # 翻译中（或中途崩溃后）新译文先进 .append.jsonl，压实后才并回 .json；
+                    # 只看 .json 会把这些句子算成没翻
+                    cache_names = sorted({
+                        name.removesuffix(_CACHE_APPEND_SUFFIX)
+                        for name in os.listdir(cache_dir)
+                        if os.path.isfile(os.path.join(cache_dir, name))
+                        and (name.endswith(".json") or name.endswith(_CACHE_APPEND_SUFFIX))
+                    })
+                    for name in cache_names:
                         fp = os.path.join(cache_dir, name)
-                        if not os.path.isfile(fp) or not fp.endswith(".json"):
-                            continue
                         try:
                             import orjson
-                            with open(fp, "rb") as f:
-                                entries = orjson.loads(f.read())
+                            entries: list[Any] = []
+                            if os.path.isfile(fp):
+                                with open(fp, "rb") as f:
+                                    loaded = orjson.loads(f.read())
+                                entries = loaded if isinstance(loaded, list) else []
+                            append_path = fp + _CACHE_APPEND_SUFFIX
+                            if os.path.isfile(append_path):
+                                # 与压实同一口径：按 index 合并，追加行的字段覆盖快照（快照的 problem 等保留）
+                                by_index = {
+                                    str(e.get("index", "")): pos
+                                    for pos, e in enumerate(entries)
+                                    if isinstance(e, dict) and str(e.get("index", ""))
+                                }
+                                for row in _read_cache_append_rows(append_path):
+                                    pos = by_index.get(str(row.get("index", "")))
+                                    if pos is None:
+                                        by_index[str(row.get("index", ""))] = len(entries)
+                                        entries.append(row)
+                                    else:
+                                        entries[pos] = {**entries[pos], **row}
                             f_total = len(entries)
                             f_translated = sum(1 for e in entries if _cache_entry_is_translated(e))
                             # 白名单命中的条目等价于勾了 skip_check：问题与失败都不计
@@ -2767,8 +2793,10 @@ def build_handler(registry: JobRegistry):
                                 if isinstance(e, dict)
                                 and not is_problem_whitelisted(white_index, name, e.get("index", ""))
                             ]
-                            f_problems = sum(1 for e in live if filter_problem_text(e.get("problem", ""), filter_keys))
-                            f_failed = sum(1 for e in live if "(Failed)" in str(e.get("problem", "")))
+                            live_problems = [filter_problem_text(e.get("problem", ""), filter_keys) for e in live]
+                            f_problems = sum(1 for text in live_problems if text)
+                            # 失败时 problem 写「翻译失败」、译文以 (Failed) 开头，与 /runtime 同一判定
+                            f_failed = sum(1 for e, text in zip(live, live_problems) if _cache_entry_is_failed(e, text))
                             total += f_total
                             translated += f_translated
                             problems += f_problems

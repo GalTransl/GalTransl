@@ -4,6 +4,7 @@
 
 from GalTransl.CSentense import CSentense, CTransList
 from GalTransl.ProblemFilter import filter_problem_text, normalize_problem_filter_keys
+from GalTransl.ProblemWhiteList import build_problem_white_list_index, is_problem_whitelisted
 from GalTransl import LOGGER
 from typing import List
 import orjson
@@ -407,6 +408,7 @@ async def get_transCache_from_json(
     ignr_post_src=False,
     eng_type="",
     problem_filter_keys=None,
+    problem_white_list=None,
 ):
     """
     此函数从 JSON 文件中检索翻译缓存，并相应地更新翻译列表。
@@ -419,6 +421,8 @@ async def get_transCache_from_json(
         retran_key (str or list, optional): 重译关键字，可以是字符串或字符串列表。默认为空字符串。
         load_post_src (bool, optional): 不检查post_src是否被改变, 且直接使用cache的post_src。默认为 False。
         ignr_post_src (bool, optional): 仅不检查post_src是否被改变。默认为 False。
+        problem_white_list (list, optional): 问题白名单（problemWhiteList）。命中的条目等价于
+            勾了 skip_check，其 problem 不参与 retranslKey 匹配——与进度、问题列表同一口径。
 
     Returns:
         Tuple[List[CTrans], List[CTrans]]: 包含两个列表的元组：击中缓存的翻译列表和未击中缓存的翻译列表。
@@ -429,6 +433,7 @@ async def get_transCache_from_json(
 
     translist_hit = []
     problem_filter_keys = normalize_problem_filter_keys(problem_filter_keys)
+    white_index = build_problem_white_list_index(problem_white_list)
     translist_unhit = []
     cache_dict = {}
     if os.path.exists(cache_file_path):
@@ -564,7 +569,13 @@ async def get_transCache_from_json(
                     LOGGER.info(f"[cache]retran_key in 'pre_src' message: {line_now}")
                     continue
             # retran_key在problem中
-            if retran_key and "problem" in cache_dict[cache_key]:
+            if (
+                retran_key
+                and "problem" in cache_dict[cache_key]
+                and not is_problem_whitelisted(
+                    white_index, os.path.basename(cache_file_path), cache_dict[cache_key].get("index", "")
+                )
+            ):
                 if check_retran_key(retran_key, filter_problem_text(cache_dict[cache_key]["problem"], problem_filter_keys)):
                     if "rebuild" not in eng_type:
                         _mark_cache_miss(tran, MISS_RETRAN_PROBLEM)

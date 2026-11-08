@@ -767,6 +767,7 @@ async def doLLMTranslSingleChunk(
             retran_key=projectConfig.getKey("retranslKey"),
             eng_type=eng_type,
             problem_filter_keys=projectConfig.getKey("problemFilterKey", []),
+            problem_white_list=projectConfig.getKey("problemWhiteList", []),
         )
 
         if len(translist_hit) > 0:
