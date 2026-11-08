@@ -251,7 +251,8 @@ class ExtractionRuntime:
                 failed = True
                 self.store.update(session_id, error=str(exc)[:2000])
                 self._emit(session_id, {"type": "error", "message": str(exc)[:2000]})
-            runner.abort_in_flight()
+            if not self._abort_in_flight(session_id, runner):
+                failed = True
             with self.lock:
                 self.pending.pop(session_id, None)
                 self._finish_live_message(session_id)
@@ -274,6 +275,21 @@ class ExtractionRuntime:
                 # Keep game/workspace ownership through every queued followup.
                 self.runs.pop(session_id, None)
             return
+
+    def _abort_in_flight(self, session_id: str, runner: ExtractionRunner) -> bool:
+        """结束进行中的工具进程；失败只记成会话错误，返回是否成功。
+
+        清理失败（例如 macOS 上 killpg 对仍存活的进程组报 EPERM）不能让调用方半途中断：
+        _run 后面还要清掉挂起状态并写下最终状态，否则会话会永远停在 running/stopping。
+        """
+        try:
+            runner.abort_in_flight()
+            return True
+        except Exception as exc:  # noqa: BLE001
+            message = f"Failed to stop the running tool: {exc}"[:2000]
+            self.store.update(session_id, error=message)
+            self._emit(session_id, {"type": "error", "message": message})
+            return False
 
     def _finish_live_message(self, session_id: str) -> None:
         for event in list(self.live.get(session_id, {}).values()):
@@ -404,7 +420,7 @@ class ExtractionRuntime:
                 self.store.update(session_id, status="stopping")
                 self._emit(session_id, {"type": "state", "status": "stopping"})
                 run.stop_event.set()
-                run.abort_in_flight()
+                self._abort_in_flight(session_id, run)
             return self.snapshot(session_id)
 
     def import_project(self, session_id: str) -> dict[str, Any]:
@@ -424,10 +440,12 @@ class ExtractionRuntime:
 
     def close(self) -> None:
         with self.lock:
-            runs = list(self.runs.values())
-        for runner in runs:
+            runs = list(self.runs.items())
+        # 一个会话清理失败不能跳过其余会话的停止与等待
+        for session_id, runner in runs:
             runner.stop_event.set()
-            runner.abort_in_flight()
+            self._abort_in_flight(session_id, runner)
+        runs = [runner for _, runner in runs]
         for runner in runs:
             runner.thread.join(timeout=12)
 

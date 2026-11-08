@@ -221,6 +221,17 @@ def check_file_plugins(base_url: str, directory: Path) -> None:
             raise RuntimeError(f"Packaged file plugin did not parse {filename}: {result}")
 
 
+def _signal_group(process: subprocess.Popen, sig: int) -> None:
+    try:
+        os.killpg(process.pid, sig)
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        # macOS reports EPERM for a group containing only zombies.
+        if process.poll() is None:
+            raise
+
+
 def stop_backend(process: subprocess.Popen) -> None:
     if sys.platform == "win32":
         if process.poll() is None:
@@ -228,20 +239,14 @@ def stop_backend(process: subprocess.Popen) -> None:
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
     else:
         # The Linux onefile bootloader may have a child; terminate its whole group.
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+        _signal_group(process, signal.SIGTERM)
     try:
         process.wait(timeout=10)
     except subprocess.TimeoutExpired:
         if sys.platform == "win32":
             process.kill()
         else:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            _signal_group(process, signal.SIGKILL)
         process.wait(timeout=10)
 
 
