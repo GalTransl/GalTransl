@@ -473,9 +473,12 @@ class CGptDict:
 
     def check_dic_use(self, find_from_str: str, tran: CSentense):
         problem_list = []
-        for dic in self._dic_list:
-            if dic.search_word not in tran.post_src:
+        # 长词条先检查并从原文里抹掉，免得只作为长词一部分出现的短词条（マルアンネ 里的 ルアン）被误报未使用
+        remaining_src = tran.post_src
+        for dic in sorted(self._dic_list, key=lambda d: len(d.search_word), reverse=True):
+            if not dic.search_word or dic.search_word not in remaining_src:
                 continue
+            remaining_src = remaining_src.replace(dic.search_word, "\0")
 
             replace_word_list = (
                 dic.replace_word.split("/")

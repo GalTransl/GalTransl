@@ -138,6 +138,20 @@ class ProblemPluginTests(unittest.TestCase):
                 find_problems([tran], config, dictionary)
                 self.assertEqual(tran.problem, expected)
 
+    def test_gpt_dictionary_usage_ignores_words_only_inside_longer_entries(self):
+        dictionary_path = self.project / "gpt.txt"
+        dictionary_path.write_text("ルアン\t鲁安\nマルアンネ\t马尔安内\n", encoding="utf-8")
+        dictionary = CGptDict([str(dictionary_path)])
+        for src, dst, expected in [
+            ("マルアンネへ", "去马尔安内", ""),
+            ("マルアンネとルアン", "马尔安内和鲁安", ""),
+            ("マルアンネとルアン", "马尔安内和他", "gpt未使用：ルアン---鲁安"),
+            ("マルアンネへ", "去马尔", "gpt未使用：マルアンネ---马尔安内"),
+        ]:
+            with self.subTest(src=src, dst=dst):
+                tran = CSentense(src, index=1)
+                self.assertEqual(dictionary.check_dic_use(dst, tran), expected)
+
     def test_plugin_errors_and_invalid_return_do_not_stop_other_checks(self):
         broken = self.plugin("problem_broken", source=PLUGIN_SOURCE.replace(
             'return [self.settings["message"], "shared"] if "!" in tran.post_dst else []',
