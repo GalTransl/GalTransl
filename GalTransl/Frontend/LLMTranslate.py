@@ -48,6 +48,13 @@ from GalTransl.CSplitter import (
 from GalTransl.TerminalOutput import should_print_translation_logs, terminal_progress
 from GalTransl.TranslationScope import SentenceRange
 from GalTransl.Frontend.TranslationEta import TranslationEtaEstimator
+from GalTransl.TailSplit import (
+    TailSplitHandle,
+    TailSplitRegistry,
+    TailSplitTask,
+    reset_current_tail_split,
+    set_current_tail_split,
+)
 
 
 def _runtime_project_dir(projectConfig: CProjectConfig) -> str:
@@ -373,6 +380,99 @@ async def _count_pending_lines(
         **_cache_lookup_kwargs(projectConfig, eng_type),
     )
     return len(unhit)
+
+
+# 收尾拆分：队列取空的 worker 多久看一次有没有能拆的段（秒）
+_TAIL_SPLIT_POLL_INTERVAL = 0.5
+
+
+def _config_flag(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "on"}
+    return bool(value)
+
+
+def _tail_split_lines(projectConfig: CProjectConfig, eng_type: str) -> int:
+    """收尾拆分每次拆出、以及拆完后原段至少留下的句数（两批）；没开返回 0。"""
+    if "rebuild" in eng_type or not _config_flag(projectConfig.getKey("splitTailChunks", False)):
+        return 0
+    try:
+        per_request = int(projectConfig.getKey("gpt.numPerRequestTranslate") or 0)
+    except (TypeError, ValueError):
+        per_request = 0
+    return 2 * (per_request if per_request > 0 else 16)
+
+
+async def _tail_split_loop(semaphore: asyncio.Semaphore, projectConfig: CProjectConfig, gptapi: Any) -> None:
+    """队列取空后的 worker：有够拆的段就拆走它还没发出的后一半来翻，直到所有段都翻完。"""
+    registry: TailSplitRegistry = projectConfig.tail_split_registry
+    while registry.active:
+        _check_stop_requested(projectConfig)
+        if registry.pick() is None:
+            await asyncio.sleep(_TAIL_SPLIT_POLL_INTERVAL)
+            continue
+        async with semaphore:
+            victim = registry.pick()  # 等信号量期间可能已经被别的 worker 拆过
+            if victim is not None:
+                await _translate_tail_piece(victim, projectConfig, gptapi)
+
+
+async def _translate_tail_piece(victim: TailSplitTask, projectConfig: CProjectConfig, gptapi: Any) -> None:
+    """拆走 victim 还没发出的后一半，作为新的一段串行翻完（它自己也还能再被拆）。"""
+    registry: TailSplitRegistry = projectConfig.tail_split_registry
+    spare = victim.handle.spare
+    stolen = victim.handle.split()
+    registry.pieces += 1
+    piece_no = registry.pieces
+    piece = TailSplitTask(
+        split_chunk=victim.split_chunk,
+        cache_file_path=victim.cache_file_path,
+        base_filename=victim.base_filename,
+        translation_list=victim.translation_list,
+        eta_key=f"{victim.cache_file_path}#{piece_no}",
+        handle=TailSplitHandle(victim.handle.min_lines),
+    )
+    # victim 收尾（校对、快照、输出）前要等这段翻完
+    done = asyncio.get_running_loop().create_future()
+    victim.handle.children.append(done)
+    LOGGER.info(f"[收尾拆分] {victim.base_filename} 还有 {spare} 句未发出，拆出 {len(stolen)} 句交给空闲线程")
+    eta_estimator = getattr(projectConfig, "eta_estimator", None)
+    if eta_estimator is not None:
+        eta_estimator.split(victim.eta_key, piece.eta_key, len(stolen))
+    registry.add(piece)
+    eta_token = _CURRENT_ETA_CHUNK.set(piece.eta_key)
+    tail_token = set_current_tail_split(piece.handle)
+    try:
+        try:
+            await ensure_model_available_if_needed(projectConfig)
+            # 后端文件名多带一个 _{段号}：上下文历史各段分开记，运行时事件仍归到同一个文件
+            await gptapi.batch_translate(
+                f"{piece.base_filename}_{piece_no}",
+                piece.cache_file_path,
+                piece.translation_list,
+                projectConfig.getKey("gpt.numPerRequestTranslate"),
+                retry_failed=projectConfig.getKey("retranslFail"),
+                gpt_dic=projectConfig.gpt_dic,
+                retran_key=projectConfig.getKey("retranslKey"),
+                translist_hit=[],
+                translist_unhit=stolen,
+            )
+        finally:
+            reset_current_tail_split(tail_token)
+            _CURRENT_ETA_CHUNK.reset(eta_token)
+            registry.remove(piece)
+        await piece.handle.wait_children()
+    except asyncio.CancelledError:
+        done.cancel()
+        raise
+    except BaseException as exc:
+        done.set_exception(exc)
+        raise
+    else:
+        done.set_result(None)
+    finally:
+        if eta_estimator is not None:
+            eta_estimator.finish(piece.eta_key)
 
 
 class _EtaTrackingBar:
@@ -769,6 +869,11 @@ async def doLLMTranslate(
         LOGGER.info(f"本次待翻译 {sum(pending_by_chunk.values())} 句（{len(ordered_chunks)} 个分片）")
     projectConfig.eta_estimator = eta_estimator
     projectConfig.split_cache_pools = _SplitCachePools(input_dir, cache_dir, input_cache_names)
+    # 收尾拆分（splitTailChunks）：队列取空后，空闲 worker 拆走正在翻的分片还没发出的后半段
+    projectConfig.tail_split_lines = _tail_split_lines(projectConfig, eng_type)
+    projectConfig.tail_split_registry = TailSplitRegistry() if projectConfig.tail_split_lines else None
+    if eta_estimator is not None:
+        eta_estimator.min_split_lines = projectConfig.tail_split_lines
 
     # ---- 6. 初始化共享的 gptapi 实例（所有 worker 共用同一实例）----
     gptapi = await init_gptapi(projectConfig)
@@ -841,6 +946,8 @@ async def doLLMTranslate(
                 _check_stop_requested(projectConfig)
                 split_chunk = await chunk_queue.get()
                 if split_chunk is None:
+                    if projectConfig.tail_split_registry is not None:
+                        await _tail_split_loop(semaphore, projectConfig, gptapi)
                     return
                 await doLLMTranslSingleChunk(
                     semaphore,
@@ -959,6 +1066,19 @@ async def doLLMTranslSingleChunk(
         # 本文件的其它分片缓存（含改分片设置前的旧分片）：本分片缓存里没有的句子到这里找
         split_cache_pools = getattr(projectConfig, "split_cache_pools", None)
         fallback_pool = split_cache_pools.get(split_chunk) if split_cache_pools else None
+        # 收尾拆分：先登记，队列取空的 worker 看到还有分片在翻就会等着拆，不会提前退出
+        tail_registry = getattr(projectConfig, "tail_split_registry", None)
+        tail_task = None
+        if tail_registry is not None:
+            tail_task = TailSplitTask(
+                split_chunk=split_chunk,
+                cache_file_path=cache_file_path,
+                base_filename=file_name + (f"_{file_index}" if total_splits > 1 else ""),
+                translation_list=translation_list,
+                eta_key=cache_file_path,
+                handle=TailSplitHandle(projectConfig.tail_split_lines),
+            )
+            tail_registry.add(tail_task)
         if outside_range:
             # 范围外只读旧缓存；重翻关键字和失败重试不能清掉这些句子的已有译文。
             await get_transCache_from_json(outside_range, cache_file_path, ignr_post_src=True,
@@ -987,17 +1107,25 @@ async def doLLMTranslSingleChunk(
             _check_stop_requested(projectConfig)
             await ensure_model_available_if_needed(projectConfig)
             # 执行翻译
-            await gptapi.batch_translate(
-                file_name + (f"_{file_index}" if total_splits > 1 else ""),
-                cache_file_path,
-                translation_list,
-                projectConfig.getKey("gpt.numPerRequestTranslate"),
-                retry_failed=projectConfig.getKey("retranslFail"),
-                gpt_dic=gpt_dic,
-                retran_key=projectConfig.getKey("retranslKey"),
-                translist_hit=translist_hit,
-                translist_unhit=translist_unhit,
-            )
+            tail_token = set_current_tail_split(tail_task.handle if tail_task else None)
+            try:
+                await gptapi.batch_translate(
+                    file_name + (f"_{file_index}" if total_splits > 1 else ""),
+                    cache_file_path,
+                    translation_list,
+                    projectConfig.getKey("gpt.numPerRequestTranslate"),
+                    retry_failed=projectConfig.getKey("retranslFail"),
+                    gpt_dic=gpt_dic,
+                    retran_key=projectConfig.getKey("retranslKey"),
+                    translist_hit=translist_hit,
+                    translist_unhit=translist_unhit,
+                )
+            finally:
+                reset_current_tail_split(tail_token)
+            if tail_task is not None:
+                # 拆出去的段都翻完，这个分片才算翻完：校对、快照、输出都要用到全部译文
+                tail_registry.remove(tail_task)
+                await tail_task.handle.wait_children()
 
             # 执行校对（如果启用）
             if projectConfig.getKey("gpt.enableProofRead"):
@@ -1017,6 +1145,8 @@ async def doLLMTranslSingleChunk(
                     LOGGER.warning("当前引擎不支持校对，跳过校对步骤")
             gptapi.clean_up()
 
+        if tail_task is not None:
+            tail_registry.remove(tail_task)
         _CURRENT_ETA_CHUNK.reset(eta_chunk_token)
         if eta_estimator is not None:
             eta_estimator.finish(cache_file_path)

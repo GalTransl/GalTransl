@@ -45,6 +45,7 @@ common:
   workersPerProject: 16 # 项目级并行文件数；单文件并行需配合splitFile。
   autoAdjustWorkers: false # 基于近期429比例和响应延迟自动调节并发worker数。[True/False]
   sortBy: "size" # 文件调度顺序：name按文件名，size优先大文件（并行时通常更快）。[name/size]
+  splitTailChunks: false # 收尾拆分：分片都开翻后，空闲线程拆走正在翻的分片还没发出的后半段并行翻，缩短收尾时间；拆开处少一点前文上下文。[True/False]
   language: "zh-cn" # 目标输出语言。[zh-cn/zh-tw/en/ja/ko/ru/fr]
 
   # 单文件分割设置

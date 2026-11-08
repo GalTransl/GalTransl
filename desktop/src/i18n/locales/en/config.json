@@ -215,6 +215,10 @@
       "label": "Translation order",
       "description": "name sorts by file name, size puts large files first (usually faster when running in parallel)."
     },
+    "splitTailChunks": {
+      "label": "Split chunks at the tail",
+      "description": "Once every chunk has started, idle workers take over the unsent second half of a chunk still being translated, so the run finishes sooner. The first batch after each split gets less preceding context."
+    },
     "gpt_multiTurn": {
       "label": "Multi-turn translation",
       "description": "Enabled by default for ForGal / ForNovel; consecutive batches share the conversation so character names and writing style stay consistent."

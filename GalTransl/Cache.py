@@ -11,6 +11,7 @@ import orjson
 import os
 import re
 import asyncio
+import weakref
 from GalTransl.i18n import get_text,GT_LANG
 import aiofiles
 
@@ -138,10 +139,24 @@ def _record_runtime_cache_error(project_dir: str, *, message: str, filename: str
         return
 
 
+# 同一份增量日志的追加写入串行化：收尾拆分（splitTailChunks）时同一分片的两段会同时写它。
+# 按事件循环区分：asyncio.Lock 不能跨事件循环用（测试里每个 asyncio.run 都是新循环）。
+_APPEND_LOCKS: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, asyncio.Lock]]" = weakref.WeakKeyDictionary()
+
+
+def _append_lock(append_file_path: str) -> asyncio.Lock:
+    locks = _APPEND_LOCKS.setdefault(asyncio.get_running_loop(), {})
+    return locks.setdefault(os.path.abspath(append_file_path), asyncio.Lock())
+
+
 async def _write_append_entries_with_retry(append_file_path: str, append_entries: list[dict]) -> None:
     if not append_entries:
         return
+    async with _append_lock(append_file_path):
+        await _write_append_entries_locked(append_file_path, append_entries)
 
+
+async def _write_append_entries_locked(append_file_path: str, append_entries: list[dict]) -> None:
     last_error = None
     for attempt in range(_CACHE_APPEND_WRITE_RETRY_TIMES):
         try:

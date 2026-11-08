@@ -215,6 +215,10 @@
       "label": "翻译顺序",
       "description": "name 按文件名，size 优先大文件（并行时通常更快）。"
     },
+    "splitTailChunks": {
+      "label": "收尾拆分",
+      "description": "分片都开翻后，空闲线程拆走正在翻的分片还没发出的后半段并行翻，缩短收尾时间；拆开处的第一批少一点前文上下文。"
+    },
     "gpt_multiTurn": {
       "label": "多轮对话翻译",
       "description": "ForGal / ForNovel 默认开启，连续批次共享对话，保持人物称呼和文风一致。"

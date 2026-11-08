@@ -6,6 +6,9 @@
 
 这里改成：测「单个 worker 的速度」（句/秒），再把正在翻的分片剩余量和排队分片的待翻量
 按真实调度（依次交给最早空闲的 worker）模拟一遍，最后一个 worker 完成的时刻就是 ETA。
+
+开了收尾拆分（splitTailChunks）时，收尾阶段空闲 worker 会把别人剩下的活拆走，剩余工作量
+近似均摊到所有 worker 上；只是拆不到比 min_split_lines 更碎。
 """
 
 from __future__ import annotations
@@ -40,6 +43,8 @@ class TranslationEtaEstimator:
         self._queued: dict[str, int] = {}
         self._running: dict[str, _RunningChunk] = {}
         self._rate: float | None = None
+        # 收尾拆分最小能拆出的句数；0 表示没开收尾拆分
+        self.min_split_lines = 0
 
     @property
     def rate(self) -> float | None:
@@ -71,6 +76,13 @@ class TranslationEtaEstimator:
         sample = lines / elapsed
         self._rate = sample if self._rate is None else self._rate + _RATE_ALPHA * (sample - self._rate)
 
+    def split(self, key: str, new_key: str, lines: int) -> None:
+        """从正在翻的 key 拆出 lines 句，作为新的一段 new_key 开始翻。"""
+        chunk = self._running.get(key)
+        if chunk is not None:
+            chunk.pending = max(chunk.done, chunk.pending - int(lines))
+        self.start(new_key, lines)
+
     def finish(self, key: str) -> None:
         self._running.pop(key, None)
         self._queued.pop(key, None)
@@ -94,4 +106,8 @@ class TranslationEtaEstimator:
             done_at = heapq.heappop(free_at) + pending / rate
             finish = max(finish, done_at)
             heapq.heappush(free_at, done_at)
+        if self.min_split_lines > 0 and free_at:
+            # 收尾拆分：剩余活均摊给所有 worker，但最后一段至少还要翻 min_split_lines 句
+            balanced = sum(free_at) / len(free_at)
+            finish = max(balanced, min(finish, self.min_split_lines / rate))
         return finish

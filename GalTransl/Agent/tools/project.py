@@ -28,6 +28,7 @@ CONFIG_FIELD_DESCRIPTIONS: dict[str, str] = {
     "common.workersPerProject": "项目级并行文件数；单文件并行需配合 splitFile",
     "common.autoAdjustWorkers": "根据近期 429 比例和响应延迟自动降/升 worker 并发 [true/false]",
     "common.sortBy": "文件调度顺序：name 按文件名，size 优先大文件（并行时通常更快）",
+    "common.splitTailChunks": "收尾拆分：分片都开翻后，空闲线程拆走正在翻的分片还没发出的后半段并行翻，缩短收尾时间；拆开处少一点前文上下文 [true/false]",
     "common.language": "目标输出语言 [zh-cn/zh-tw/en/ja/ko/ru/fr]",
     "common.splitFile": "单文件分片模式：no 关闭；Num 每 n 句切一片；Equal 每文件均分 n 片。改动后已有缓存仍可沿用（下次翻译时旧分片译文并入新分片）",
     "common.splitFileNum": "分片参数：Num 模式表示每片句数；Equal 模式表示分片总数",

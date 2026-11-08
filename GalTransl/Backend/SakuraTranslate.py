@@ -6,6 +6,7 @@ from GalTransl import LOGGER, LANG_SUPPORTED
 from GalTransl.ConfigHelper import CProjectConfig, CProxyPool
 from GalTransl.CSentense import CSentense, CTransList
 from GalTransl.Cache import save_transCache_to_json
+from GalTransl.TailSplit import bind_tail_split
 from GalTransl.Dictionary import CGptDict
 from GalTransl.Utils import find_most_repeated_substring
 from GalTransl.Backend.BaseTranslate import BaseTranslate
@@ -329,8 +330,10 @@ class CSakuraTranslate(BaseTranslate):
         trans_result_list = []
         len_trans_list = len(translist_unhit)
         transl_step_count = 0
+        # 收尾拆分（splitTailChunks）：还没发出的后半段可能被空闲 worker 拆走，终点以句柄为准
+        tail_split = None if proofread else bind_tail_split(translist_unhit)
 
-        while i < len_trans_list:
+        while i < (tail_split.end if tail_split else len_trans_list):
             self._check_stop_requested()
             # await asyncio.sleep(1)
 
@@ -338,7 +341,10 @@ class CSakuraTranslate(BaseTranslate):
                 num_pre_request,
                 proofread=proofread,
             )
-            trans_list_split = translist_unhit[i : i + effective_num_pre_request]
+            if tail_split:
+                trans_list_split = tail_split.reserve(i, effective_num_pre_request)
+            else:
+                trans_list_split = translist_unhit[i : i + effective_num_pre_request]
             dic_prompt = (
                 gpt_dic.gen_prompt(trans_list_split, type="sakura")
                 if gpt_dic != None
@@ -382,7 +388,7 @@ class CSakuraTranslate(BaseTranslate):
 
             LOGGER.info("".join([repr(tran) for tran in trans_result]))
             LOGGER.info(
-                f"{filename}: {str(len(trans_result_list))}/{str(len_trans_list)}"
+                f"{filename}: {str(len(trans_result_list))}/{str(tail_split.end if tail_split else len_trans_list)}"
             )
 
         return trans_result_list

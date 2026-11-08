@@ -17,6 +17,7 @@ from GalTransl.ConfigHelper import (
 )
 from GalTransl.CSentense import CSentense, CTransList
 from GalTransl.Cache import save_transCache_to_json
+from GalTransl.TailSplit import bind_tail_split
 from GalTransl.Dictionary import CGptDict
 from GalTransl.Utils import load_guideline_file, fix_quotes2
 from GalTransl.ProjectGuideline import combine_guidelines, read_project_guideline
@@ -933,18 +934,23 @@ class BaseTranslate:
         trans_result_list = []
         len_trans_list = len(translist_unhit)
         transl_step_count = 0
+        # 收尾拆分（splitTailChunks）：还没发出的后半段可能被空闲 worker 拆走，终点以句柄为准
+        tail_split = None if proofread else bind_tail_split(translist_unhit)
 
-        while i < len_trans_list:
+        while i < (tail_split.end if tail_split else len_trans_list):
             self._check_stop_requested()
             effective_num_pre_request = self._get_effective_num_per_request(
                 num_pre_request,
                 proofread=proofread,
             )
-            trans_list_split = (
-                translist_unhit[i : i + effective_num_pre_request]
-                if (i + effective_num_pre_request < len_trans_list)
-                else translist_unhit[i:]
-            )
+            if tail_split:
+                trans_list_split = tail_split.reserve(i, effective_num_pre_request)
+            else:
+                trans_list_split = (
+                    translist_unhit[i : i + effective_num_pre_request]
+                    if (i + effective_num_pre_request < len_trans_list)
+                    else translist_unhit[i:]
+                )
 
             if gpt_dic:
                 if glossary_style:
@@ -1093,8 +1099,9 @@ class BaseTranslate:
 
             if trans_result:
                 trans_by = trans_result[0].trans_by
+                total = tail_split.end if tail_split else len_trans_list
                 LOGGER.info(
-                    f"{filename}: {str(len(trans_result_list))}/{str(len_trans_list)} with {trans_by}"
+                    f"{filename}: {str(len(trans_result_list))}/{str(total)} with {trans_by}"
                 )
 
         return trans_result_list
