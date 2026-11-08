@@ -1062,8 +1062,11 @@ export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: Pro
 
   // Layout effects see the committed, filtered list. No timer or ancestor scrolling:
   // subtracting pane and card rects also cancels the pane's enter transform.
+  // A fresh mount (e.g. the mini window switching from dictionary to cache) can load entries
+  // before the file list; until then the page-loading screen replaces the list, so wait for it.
+  const pageLoading = loading && cacheFiles.length === 0;
   useLayoutEffect(() => {
-    if (!pendingJump || !active || loadingEntries || pendingJump.projectId !== projectId || pendingJump.file !== selectedFile) return;
+    if (!pendingJump || !active || loadingEntries || pageLoading || pendingJump.projectId !== projectId || pendingJump.file !== selectedFile) return;
     const container = listRef.current;
     const target = container?.querySelector<HTMLElement>(`[data-cache-index="${pendingJump.index}"]`);
     if (!container) return;
@@ -1091,7 +1094,7 @@ export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: Pro
       releaseFrame = requestAnimationFrame(() => setPendingJump((current) => current === pendingJump ? null : current));
     });
     return () => { cancelAnimationFrame(frame); cancelAnimationFrame(releaseFrame); };
-  }, [pendingJump, active, loadingEntries, projectId, selectedFile, filteredEntries, deferredSearchTerm, filterProblems]);
+  }, [pendingJump, active, loadingEntries, pageLoading, projectId, selectedFile, filteredEntries, deferredSearchTerm, filterProblems]);
 
   useLayoutEffect(() => () => {
     if (jumpHighlightRef.current) {
