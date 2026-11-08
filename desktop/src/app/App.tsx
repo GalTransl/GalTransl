@@ -186,6 +186,16 @@ export function App() {
     setOpenProjects([]);
   }, []);
 
+  const handleReorderProject = useCallback((projectDir: string, toIndex: number) => {
+    setOpenProjects((prev) => {
+      const fromIndex = prev.indexOf(projectDir);
+      if (fromIndex < 0 || fromIndex === toIndex) return prev;
+      const next = prev.filter((d) => d !== projectDir);
+      next.splice(Math.max(0, Math.min(toIndex, next.length)), 0, projectDir);
+      return next;
+    });
+  }, []);
+
   return (
     <HashRouter>
       <ConnectionProvider>
@@ -196,6 +206,7 @@ export function App() {
             onCloseProject={handleCloseProject}
             onCloseOtherProjects={handleCloseOtherProjects}
             onCloseAllProjects={handleCloseAllProjects}
+            onReorderProject={handleReorderProject}
           />
         </BootstrapGate>
       </ConnectionProvider>
@@ -209,9 +220,10 @@ type AppInnerProps = {
   onCloseProject: (projectDir: string) => void;
   onCloseOtherProjects: (keepProjectDir: string) => void;
   onCloseAllProjects: () => void;
+  onReorderProject: (projectDir: string, toIndex: number) => void;
 };
 
-function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherProjects, onCloseAllProjects }: AppInnerProps) {
+function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherProjects, onCloseAllProjects, onReorderProject }: AppInnerProps) {
   useUiLanguage();
   const { backendUrl, connectionPhase } = useConnection();
   const navigate = useNavigate();
@@ -472,6 +484,7 @@ function AppInner({ openProjects, onOpenProject, onCloseProject, onCloseOtherPro
         onCloseProject={handleCloseProjectAndNavigate}
         onCloseOtherProjects={handleCloseOtherProjectsAndNavigate}
         onCloseAllProjects={handleCloseAllProjectsAndNavigate}
+        onReorderProject={onReorderProject}
       />
       <main
         className="app-layout__content"

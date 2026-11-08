@@ -334,6 +334,26 @@
   flex-direction: column;
 }
 
+/* 长按项目行拖拽排序：被拖项跟手，其余项平移让位，松手后才真正重排 */
+.sidebar__nav--dragging {
+  cursor: grabbing;
+}
+
+.sidebar__nav--dragging .sidebar__project-group {
+  pointer-events: none;
+  transition: transform 160ms ease;
+}
+
+.sidebar__nav--dragging .sidebar__project-group--dragging {
+  position: relative;
+  z-index: 2;
+  border-radius: var(--radius-control);
+  background: var(--color-surface-strong);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
+  opacity: 0.94;
+  transition: none;
+}
+
 .sidebar__project-header {
   position: relative;
   display: flex;
