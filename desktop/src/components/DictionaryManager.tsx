@@ -872,7 +872,8 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     );
   }
 
-  if (error) {
+  // 同上：已有内容时重新读取失败不整页换成错误页（编辑器和刷新按钮都会被藏起来），改为页内提示
+  if (error && !data) {
     return (
       <div className="project-dictionary-page">
         <div className="project-dictionary-page__header"><h1>{title}</h1></div>
@@ -906,7 +907,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
         ) : null}
       />
 
-      {localError && <InlineFeedback tone="error" title={translate("projects:dictionaryManager.projectDictionaryPage_title_failed")} description={localError} />}
+      {(localError || error) && <InlineFeedback tone="error" title={translate("projects:dictionaryManager.projectDictionaryPage_title_failed")} description={localError || error || ''} />}
       {info && <InlineFeedback className="inline-alert--floating" tone="success" title={translate("projects:dictionaryManager.projectDictionaryPage_title_success")} description={info} />}
       {previewNotice && <p className="inline-feedback" role="status">{previewNotice}</p>}
 

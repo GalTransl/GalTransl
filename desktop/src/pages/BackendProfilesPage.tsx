@@ -89,7 +89,7 @@ export function BackendProfilesPage() {
   const [newProfileName, setNewProfileName] = useState('');
   const [creating, setCreating] = useState(false);
 
-  // silent：改名/复制后就地刷新，不进 loading 态把整张列表卸载掉
+  // silent：新建/保存/改名/复制/删除后就地刷新，不进 loading 态把整张列表卸载掉（滚动位置会被重置）
   const loadProfiles = useCallback(async (opts?: { silent?: boolean }): Promise<ProfileEntry[]> => {
     if (!opts?.silent) {
       setLoading(true);
@@ -177,7 +177,7 @@ export function BackendProfilesPage() {
       setSaveSuccess(true);
       setShowNewDialog(false);
       setNewProfileName('');
-      await loadProfiles();
+      await loadProfiles({ silent: true });
       // Immediately open the edit dialog for the new profile
       setEditingOriginalName(name);
       setEditingName(name);
@@ -234,7 +234,7 @@ export function BackendProfilesPage() {
       setSaveSuccess(true);
       setIsEditing(false);
       setEditingOriginalName('');
-      void loadProfiles();
+      void loadProfiles({ silent: true });
     } catch (err) {
       setError(normalizeError(
         err,
@@ -255,7 +255,7 @@ export function BackendProfilesPage() {
       if (editingOriginalName === name || editingName === name) {
         handleCancel();
       }
-      void loadProfiles();
+      void loadProfiles({ silent: true });
     } catch (err) {
       setError(normalizeError(err, uiMessage("settings:backendProfilesPage.handleDelete_normalizeError_deleteConfigFailed")));
     }

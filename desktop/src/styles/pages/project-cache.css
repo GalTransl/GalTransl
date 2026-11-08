@@ -1650,6 +1650,17 @@
   border-color: var(--color-warning);
 }
 
+/* 基础 :hover 选择器更具体，会把激活态的实心底换成浅蓝而文字仍是白色——悬停时保持激活色 */
+.cache-problems-group__retransl--active:hover {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.cache-problems-group__filter--active:hover {
+  background: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
 /* ── Retransl keyword popover (bubble) ── */
 .retransl-popover {
   position: fixed;

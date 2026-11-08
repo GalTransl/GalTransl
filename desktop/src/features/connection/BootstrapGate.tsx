@@ -24,7 +24,11 @@ export function BootstrapGate({ children }: { children: ReactNode }) {
   const mountedAtRef = useRef(Date.now());
 
   const ready = connectionPhase === 'online' && !loadingInitialData;
-  const showApp = ready || skipped;
+  // 只做启动闸门：主界面挂上之后，之后的掉线（某次任务轮询失败）或「关于」里的重新连接
+  // 都不能把它卸掉，否则各页未保存的修改全丢，加载界面也早已淡出，窗口只剩一片空白。
+  const [opened, setOpened] = useState(false);
+  if ((ready || skipped) && !opened) setOpened(true);
+  const showApp = ready || skipped || opened;
 
   useEffect(() => {
     if (!showApp) {
