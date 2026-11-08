@@ -506,6 +506,7 @@
     "namePageTable_message_textVariant2": "译名",
     "namePageTable_message_textVariant3": "次数",
     "namePageTdNamePageTdCn_placeholder_text": "输入 {{src_name}} 的译名...",
+    "namePageTdNamePageTdCn_title_gptLocked": "译名来自 GPT 字典，优先于人名表；要修改请到项目字典中编辑",
     "namePageDeleteBtn_title_delete": "删除此行",
     "namePageAddBtn_title_addNameTable": "添加人名",
     "namePageAddBtn_ariaLabel_addNameTable": "添加人名",

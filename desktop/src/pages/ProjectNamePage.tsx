@@ -54,6 +54,8 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
   // GPT dict integration state
   const [useGptDictForName, setUseGptDictForName] = useState(true);
   const [gptDictNameMap, setGptDictNameMap] = useState<Map<string, string>>(new Map());
+  /** Bumped whenever the name table is (re)loaded so the GPT dict overlay reapplies to it */
+  const [namesRevision, setNamesRevision] = useState(0);
   const [gptToggleBusy, setGptToggleBusy] = useState(false);
 
   // AI translate popover state
@@ -132,6 +134,7 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
       setNames(res.names);
       setSourceFile(res.source_file);
       setDirty(false);
+      setNamesRevision((value) => value + 1);
     } catch (err) {
       setError(normalizeError(err, uiMessage("projects:projectNamePage.loadData_normalizeError_loadNameTableFailed")));
     } finally {
@@ -195,16 +198,16 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
     return parseGptDictLines(lines);
   }, [projectId, configFileName, parseGptDictLines]);
 
-  // Overlay GPT dict translations onto empty dst_name entries.
+  // Overlay GPT dict translations onto the name table. The dict takes priority over
+  // existing dst_name values, matching load_name_table in GalTransl/Name.py.
   const overlayGptDictOntoNames = useCallback(
     (list: NameEntry[], dictMap: Map<string, string>): { next: NameEntry[]; changed: number } => {
       let changed = 0;
       const next = list.map((entry) => {
-        if (entry.dst_name.trim() !== '') return entry;
         const src = entry.src_name.trim();
         if (!src) return entry;
         const mapped = dictMap.get(src);
-        if (!mapped) return entry;
+        if (!mapped || entry.dst_name === mapped) return entry;
         changed++;
         return { ...entry, dst_name: mapped };
       });
@@ -359,6 +362,17 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
   useEffect(() => {
     namesRef.current = names;
   }, [names]);
+
+  // The table and the dict map load independently; whichever arrives last applies the overlay.
+  // Declared after the namesRef sync so it sees the freshly loaded table.
+  useEffect(() => {
+    if (!useGptDictForName || gptDictNameMap.size === 0 || namesRef.current.length === 0) return;
+    const { next, changed } = overlayGptDictOntoNames(namesRef.current, gptDictNameMap);
+    if (changed > 0) {
+      setNames(next);
+      setDirty(true);
+    }
+  }, [namesRevision, useGptDictForName, gptDictNameMap, overlayGptDictOntoNames]);
 
   const handleSave = useCallback(async () => {
     if (!projectId) return;
@@ -561,6 +575,12 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
     setDirty(true);
   }, []);
 
+  // GPT 字典覆盖的行以字典译名为准（翻译时也是字典优先），译名框只读：要改请改字典
+  const isGptDictApplied = useCallback((entry: NameEntry) => {
+    const dst = entry.dst_name.trim();
+    return useGptDictForName && dst !== '' && gptDictNameMap.get(entry.src_name.trim()) === dst;
+  }, [useGptDictForName, gptDictNameMap]);
+
   const handlePaste = useCallback((e: React.ClipboardEvent, field: 'src_name' | 'dst_name', startIndex: number) => {
     const text = e.clipboardData.getData('text/plain');
     if (text.includes('\n') || text.includes('\t')) {
@@ -578,14 +598,14 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
           if (parts.length > 1) {
             newNames[targetIndex] = { ...newNames[targetIndex], dst_name: (parts[1] || '').trim() };
           }
-        } else {
+        } else if (!isGptDictApplied(newNames[targetIndex])) {
           newNames[targetIndex] = { ...newNames[targetIndex], dst_name: (parts[0] || '').trim() };
         }
       }
       setNames(newNames);
       setDirty(true);
     }
-  }, [names]);
+  }, [names, isGptDictApplied]);
 
   // Filter by search（顺带保留原始索引：渲染时不用再对每行 names.indexOf 扫全表）
   const filteredNames = useMemo(() => {
@@ -739,13 +759,11 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
               <tbody>
                 {filteredNames.map(({ entry, index: originalIndex }) => {
                   const hasTranslation = entry.dst_name.trim() !== '';
-                  const isGptDictApplied = useGptDictForName
-                    && hasTranslation
-                    && gptDictNameMap.get(entry.src_name.trim()) === entry.dst_name.trim();
+                  const gptLocked = isGptDictApplied(entry);
                   return (
                     <tr
                       key={originalIndex}
-                      className={`name-page__row${hasTranslation ? ' name-page__row--translated' : ''}${isGptDictApplied ? ' name-page__row--gpt-translated' : ''}`}
+                      className={`name-page__row${hasTranslation ? ' name-page__row--translated' : ''}${gptLocked ? ' name-page__row--gpt-translated' : ''}`}
                     >
                       <td className="name-page__td name-page__td--index">{originalIndex + 1}</td>
                       <td className="name-page__td name-page__td--jp">
@@ -765,8 +783,10 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
                       <td className="name-page__td name-page__td--cn">
                         <input
                           type="text"
-                          className="name-page__input"
+                          className={`name-page__input${gptLocked ? ' name-page__input--locked' : ''}`}
                           value={entry.dst_name}
+                          readOnly={gptLocked}
+                          title={gptLocked ? translate("projects:projectNamePage.namePageTdNamePageTdCn_title_gptLocked") : undefined}
                           placeholder={entry.src_name ? translate("projects:projectNamePage.namePageTdNamePageTdCn_placeholder_text", { src_name: entry.src_name }) : ''}
                           onChange={(e) => handleDstNameChange(originalIndex, e.target.value)}
                           onPaste={(e) => handlePaste(e, 'dst_name', originalIndex)}

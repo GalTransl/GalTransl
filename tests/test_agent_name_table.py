@@ -108,7 +108,7 @@ class GptDictParityTests(unittest.TestCase):
 
 
 class NameTableGptDictTests(unittest.TestCase):
-    """开着 useGPTDictInName 时：补空译名、保留已有译名、点出真正还缺的。"""
+    """开着 useGPTDictInName 时：字典译名优先于表、点出真正还缺的。"""
 
     def test_empty_dst_names_are_filled_from_gpt_dict(self):
         runner = _NameRunner(
@@ -131,8 +131,8 @@ class NameTableGptDictTests(unittest.TestCase):
         self.assertTrue(result["use_gpt_dict_in_name"])
         self.assertEqual(runner.writes, [])  # 只读：一个字节都不写
 
-    def test_existing_dst_name_is_never_overridden_by_the_dict(self):
-        """表里写下的译名是决定，字典只补空的——与前端人名页同一套规则。"""
+    def test_gpt_dict_overrides_existing_dst_name(self):
+        """字典优先于表——与 Name.py 的 load_name_table、前端人名页同一套规则。"""
         runner = _NameRunner(
             names=[{"src_name": "ドルード", "dst_name": "杜鲁德", "count": 3}],
             config=_config(True),
@@ -142,9 +142,23 @@ class NameTableGptDictTests(unittest.TestCase):
 
         result = _tool_get_name_table(runner, {})
 
-        self.assertEqual(result["names"][0]["dst_name"], "杜鲁德")
-        self.assertNotIn("dst_name_source", result["names"][0])
-        self.assertNotIn("filled_from_gpt_dict", result)
+        self.assertEqual(result["names"][0]["dst_name"], "多鲁德")
+        self.assertEqual(result["names"][0]["dst_name_source"], "gpt_dict")
+        self.assertEqual(result["names"][0]["table_dst_name"], "杜鲁德")
+        self.assertEqual(runner.writes, [])
+
+    def test_matching_dst_name_has_no_table_dst_name(self):
+        runner = _NameRunner(
+            names=[{"src_name": "ドルード", "dst_name": "多鲁德", "count": 3}],
+            config=_config(True),
+            gpt_dict_files=["gpt_dict.txt"],
+            dict_contents=_dict_file("ドルード\t多鲁德"),
+        )
+
+        row = _tool_get_name_table(runner, {})["names"][0]
+
+        self.assertEqual(row["dst_name_source"], "gpt_dict")
+        self.assertNotIn("table_dst_name", row)
 
     def test_names_missing_everywhere_land_in_still_empty(self):
         runner = _NameRunner(

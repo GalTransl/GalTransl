@@ -77,7 +77,9 @@ class ProjectStatisticsTests(unittest.TestCase):
         self.assertEqual(summary["missing_translations"], table["matched"])
         self.assertEqual(table["names"][0]["src_name"], "未收录")
         all_names = _tool_get_name_table(self.runner, {})["names"]
-        self.assertEqual([row["dst_name"] for row in all_names], ["爱丽丝", "已有译名", "多鲁德", "  "])
+        # GPT 字典优先于表里已有的译名（与 Name.py 翻译时的口径一致）
+        self.assertEqual([row["dst_name"] for row in all_names], ["爱丽丝", "字典译名", "多鲁德", "  "])
+        self.assertEqual(all_names[1]["table_dst_name"], "已有译名")
         self.assertNotIn("still_empty", summary)
         self.assertNotIn("names", summary)
         rendered = _render_tool_result_table("get_project", result)

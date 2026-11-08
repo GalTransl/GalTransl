@@ -845,8 +845,8 @@ def _md_render_transl_cache(result: dict[str, Any]) -> str | None:
 def _md_render_get_name_table(result: dict[str, Any]) -> str | None:
     """人名表 → 一篇 Markdown：表头写来源与条数，正文是 src/dst 表格，末尾点出仍缺译名的。
 
-    dst_name_source 只在真有行带它时才加进表头（开着 useGPTDictInName 且确实补上过才有），
-    否则平白多一列空单元格。表为空（还没生成）时不渲染，交给 JSON 原样返回——模型照旧
+    dst_name_source / table_dst_name 只在真有行带它时才加进表头（开着 useGPTDictInName 且
+    字典确实覆盖过才有；后者只在表里原值与字典不同时出现），否则平白多一列空单元格。表为空（还没生成）时不渲染，交给 JSON 原样返回——模型照旧
     能看出"表是空的、该去 dump-name"。
     """
     names = result.get("names")
@@ -858,8 +858,9 @@ def _md_render_get_name_table(result: dict[str, Any]) -> str | None:
     if result.get("source_file"):
         head = f"{result['source_file']}：{head}"
     columns = ["src_name", "dst_name", "count"]
-    if any(isinstance(row, dict) and row.get("dst_name_source") for row in names):
-        columns.append("dst_name_source")
+    for optional in ("dst_name_source", "table_dst_name"):
+        if any(isinstance(row, dict) and row.get(optional) for row in names):
+            columns.append(optional)
     parts = [head, _md_table(columns, names) if names else "本页没有人名条目。"]
     still_empty = result.get("still_empty")
     if isinstance(still_empty, list) and still_empty:

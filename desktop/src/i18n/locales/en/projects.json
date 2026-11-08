@@ -506,6 +506,7 @@
     "namePageTable_message_textVariant2": "Translation",
     "namePageTable_message_textVariant3": "Occurrences",
     "namePageTdNamePageTdCn_placeholder_text": "Enter the translation of {{src_name}}…",
+    "namePageTdNamePageTdCn_title_gptLocked": "This translation comes from the GPT dictionary and takes priority over the name table. Edit it in the project dictionary.",
     "namePageDeleteBtn_title_delete": "Delete this row",
     "namePageAddBtn_title_addNameTable": "Add a name",
     "namePageAddBtn_ariaLabel_addNameTable": "Add a name",

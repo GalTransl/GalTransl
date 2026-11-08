@@ -219,6 +219,12 @@
 
 .name-page__row--gpt-translated .name-page__td--jp::after {
   content: 'GPT';
+  width: auto;
+  height: auto;
+  line-height: 1;
+  background: none;
+  -webkit-mask-image: none;
+  mask-image: none;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -244,6 +250,15 @@
 .name-page__input:focus {
   border-color: var(--color-primary);
   background: var(--color-surface, rgba(255, 255, 255, 0.5));
+}
+
+.name-page__input--locked,
+.name-page__input--locked:hover,
+.name-page__input--locked:focus {
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: default;
 }
 
 .name-page__input::placeholder {
