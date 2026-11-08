@@ -52,7 +52,7 @@ common:
   language: "zh-cn" # 目标输出语言。[zh-cn/zh-tw/en/ja/ko/ru/fr]
 
   # 单文件分割设置
-  ###【重要】分割设置直接影响缓存文件的读取命中，迁移旧项目请确保单文件分割设置一致 ###
+  ### 改了分割设置也能沿用已有缓存：下次翻译时旧分片的译文会并入新分片，并清理旧分片缓存 ###
   splitFile: "Num" # 单文件分片模式：no关闭；Num每n句切一片；Equal每文件均分n片。[no/Num/Equal]
   splitFileNum: 2048 # 分片参数：Num模式表示每片句数；Equal模式表示分片总数。
   splitFileCrossNum: 0 # 分片重叠句数（上下文缓冲），可提升片段衔接质量。[推荐0或10]

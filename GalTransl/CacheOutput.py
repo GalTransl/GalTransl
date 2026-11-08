@@ -9,7 +9,7 @@ import tempfile
 
 import orjson
 
-from GalTransl.Cache import get_transCache_from_json
+from GalTransl.Cache import SplitCachePool, chunk_cache_name, get_transCache_from_json, list_file_cache_names
 from GalTransl.ConfigHelper import initDictList
 from GalTransl.CSerialize import update_json_with_transList
 from GalTransl.CSplitter import DictionaryCombiner, DictionaryCountSplitter, EqualPartsSplitter
@@ -47,10 +47,11 @@ def check_cache_output(config, get_file_plugin):
     results = []
     input_files = sorted(get_file_list(config.getInputPath()))
     input_names = {os.path.relpath(filename, config.getInputPath()).replace(os.sep, "/") for filename in input_files}
+    input_cache_names = {chunk_cache_name(name.replace("/", "-}"), 0, 1) for name in input_names}
     for filename in input_files:
         name = os.path.relpath(filename, config.getInputPath()).replace(os.sep, "/")
         try:
-            results.append(_check_output_file(config, get_file_plugin, splitter, plugins, filename, name))
+            results.append(_check_output_file(config, get_file_plugin, splitter, plugins, filename, name, input_cache_names))
         except Exception as exc:
             results.append({"file": name, "status": "uncheckable", "reason": str(exc)[:300]})
     results.extend({"file": name, "status": "uncheckable", "reason": "输出存在，但对应输入文件已缺失，无法从缓存重建核对"}
@@ -86,29 +87,35 @@ def check_cache_output(config, get_file_plugin):
     }
 
 
-def _check_output_file(config, get_file_plugin, splitter, plugins, filename, name):
+def _check_output_file(config, get_file_plugin, splitter, plugins, filename, name, input_cache_names=frozenset()):
     plugin, _ = get_file_plugin(filename)
     source = plugin.load_file(filename)
     source = source[0] if isinstance(source, tuple) else source
     chunks = splitter.split(source, filename)
-    cache_paths = [os.path.join(config.getCachePath(), name.replace("/", "-}") + (
-        f"_{chunk.chunk_index}" if len(chunks) > 1 else ""
-    )) for chunk in chunks]
-    cache_paths = [path if path.endswith(".json") else path + ".json" for path in cache_paths]
+    cache_name = name.replace("/", "-}")
+    current = [chunk_cache_name(cache_name, chunk.chunk_index, len(chunks)) for chunk in chunks]
+    cache_paths = [os.path.join(config.getCachePath(), current_name) for current_name in current]
     output_path = os.path.join(config.getOutputPath(), name)
-    cache_exists = [os.path.isfile(path) or os.path.isfile(path + ".append.jsonl") for path in cache_paths]
-    if not any(cache_exists):
+    # 与翻译时同一口径（见 Frontend/LLMTranslate._SplitCachePools）：分片缓存里没有的句子，
+    # 到这个文件的其它分片缓存里找，含改分片设置前留下、还没被重翻清理掉的旧分片
+    existing = list_file_cache_names(
+        config.getCachePath(), cache_name, exclude=set(input_cache_names) - {chunk_cache_name(cache_name, 0, 1)}
+    )
+    if not existing:
         if os.path.isfile(output_path):
             return {"file": name, "status": "uncheckable", "reason": "输出存在，但没有对应缓存；请先恢复或补齐缓存"}
         return {"file": name, "status": "untranslated"}
-    if not all(cache_exists):
-        return {"file": name, "status": "uncheckable", "reason": "分片缓存不完整；rebuilda 无法补译缺失条目"}
+    fallback_names = [n for n in current if n in existing] + [n for n in existing if n not in current]
+    fallback_pool = None
+    if len(chunks) > 1 or fallback_names != current:
+        fallback_pool = SplitCachePool(os.path.join(config.getCachePath(), n) for n in fallback_names)
     for chunk, cache_path in zip(chunks, cache_paths):
         for tran in chunk.trans_list:
             tran.source_file_path = filename
             tran.source_file_has_name = any("name" in row or "names" in row for row in source)
         preprocess_trans_list(chunk.trans_list, config, config.pre_dic, plugins)
-        _, missing = asyncio.run(get_transCache_from_json(chunk.trans_list, cache_path, eng_type="rebuilda"))
+        _, missing = asyncio.run(get_transCache_from_json(chunk.trans_list, cache_path, eng_type="rebuilda",
+                                                          fallback_pool=fallback_pool))
         if missing:
             return {"file": name, "status": "uncheckable", "reason": "缓存缺失或已过期；rebuilda 无法补译",
                     "indexes": [tran.index for tran in missing[:10]]}

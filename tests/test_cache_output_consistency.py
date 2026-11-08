@@ -173,6 +173,18 @@ class CacheOutputConsistencyTests(unittest.TestCase):
         (self.project / CACHE_FOLDERNAME / "sub-}b.json_1.json").unlink()
         self.assertEqual(self.check()["status"], "partial")
 
+    def test_caches_from_an_earlier_split_setting_are_still_checked(self):
+        """改了分片设置还没重翻：旧分片缓存照样用来核对，不报「缓存缺失」。"""
+        for folder in (INPUT_FOLDERNAME, CACHE_FOLDERNAME, OUTPUT_FOLDERNAME):
+            (self.project / folder / "a.json").unlink()
+        self.write(INPUT_FOLDERNAME, "b.json", [{"message": "第一句"}, {"message": "第二句"}])
+        for part, source, target in ((0, "第一句", "第一译文"), (1, "第二句", "第二译文")):
+            self.write(CACHE_FOLDERNAME, f"b.json_{part}.json", [
+                {"index": 1, "pre_src": source, "post_src": source, "pre_dst": target},
+            ])
+        self.write(OUTPUT_FOLDERNAME, "b.json", [{"message": "第一译文"}, {"message": "第二译文"}])
+        self.assertTrue(self.check()["consistent"])
+
     def test_latest_append_cache_is_used(self):
         tran = CSentense("「原文」", "猫", 1)
         tran.post_src = "原文"

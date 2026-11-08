@@ -13,7 +13,7 @@
 """
 
 from typing import List, Dict, Any, Optional, Union, Tuple
-from os import makedirs, cpu_count, sep as os_sep,listdir, path as os_path
+from os import makedirs, cpu_count, sep as os_sep,listdir, path as os_path, remove as os_remove
 from os.path import join as joinpath, exists as isPathExists, dirname
 from venv import logger
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -25,7 +25,13 @@ from dataclasses import dataclass
 
 from GalTransl import LOGGER, NEED_OpenAITokenPool
 from GalTransl.i18n import get_text, GT_LANG
-from GalTransl.Cache import get_transCache_from_json
+from GalTransl.Cache import (
+    SplitCachePool,
+    _append_cache_file_path,
+    chunk_cache_name,
+    get_transCache_from_json,
+    list_file_cache_names,
+)
 from GalTransl.ConfigHelper import initDictList, CProjectConfig
 from GalTransl.Dictionary import CGptDict, CNormalDic
 from GalTransl.Problem import find_problems
@@ -243,11 +249,82 @@ _CURRENT_ETA_CHUNK: ContextVar[str] = ContextVar("galtransl_eta_chunk", default=
 _ETA_REPORT_INTERVAL = 2.0
 
 
+def _file_cache_name(file_path: str, input_dir: str) -> str:
+    """输入文件在缓存目录里的基础名：相对路径，分隔符换成 "-}"（不含分片号与 .json）。"""
+    return file_path.replace(input_dir, "").lstrip(os_sep).replace(os_sep, "-}")
+
+
 def _chunk_cache_file_path(split_chunk: SplitChunkMetadata, input_dir: str, cache_dir: str) -> str:
     """分片对应的缓存文件路径（不带 .json）；多分片的文件按 _{分片号} 区分。"""
-    file_name = split_chunk.file_path.replace(input_dir, "").lstrip(os_sep).replace(os_sep, "-}")
+    file_name = _file_cache_name(split_chunk.file_path, input_dir)
     suffix = f"_{split_chunk.chunk_index}" if split_chunk.total_chunks > 1 else ""
     return joinpath(cache_dir, file_name + suffix)
+
+
+class _SplitCachePools:
+    """按输入文件给分片找兜底缓存（见 Cache.SplitCachePool）：改了分片设置，旧分片的译文照样能用。
+
+    当前分片布局之外的同名缓存（旧分片）排在后面，当前布局的排在前面。不分片、也没有旧分片缓存的
+    文件不兜底——查缓存的口径与以前完全一样。一个文件的分片都查过缓存后就丢掉它的兜底缓存，
+    不把整个项目的缓存攒在内存里。
+    """
+
+    def __init__(self, input_dir: str, cache_dir: str, input_cache_names: set[str]) -> None:
+        self.input_dir = input_dir
+        self.cache_dir = cache_dir
+        self.input_cache_names = input_cache_names
+        self._pools: dict[str, list] = {}  # file_path -> [pool, 还没查缓存的分片数]
+
+    def cache_names(self, split_chunk: SplitChunkMetadata) -> tuple[list[str], list[str]]:
+        """(缓存目录里已有的当前布局缓存文件名, 不属于当前布局的旧分片缓存文件名)"""
+        cache_name = _file_cache_name(split_chunk.file_path, self.input_dir)
+        current = [chunk_cache_name(cache_name, i, split_chunk.total_chunks) for i in range(split_chunk.total_chunks)]
+        # 别的输入文件可能就叫 foo_1 这种「看着像分片」的名字，它的缓存不算 foo 的
+        exclude = self.input_cache_names - {chunk_cache_name(cache_name, 0, 1)}
+        existing = list_file_cache_names(self.cache_dir, cache_name, exclude=exclude)
+        return [name for name in current if name in existing], [name for name in existing if name not in current]
+
+    def get(self, split_chunk: SplitChunkMetadata) -> SplitCachePool | None:
+        entry = self._pools.get(split_chunk.file_path)
+        if entry is None:
+            current, stale = self.cache_names(split_chunk)
+            pool = None
+            if (split_chunk.total_chunks > 1 and current) or stale:
+                names = current + stale
+                pool = SplitCachePool(joinpath(self.cache_dir, name) for name in names)
+            entry = self._pools[split_chunk.file_path] = [pool, split_chunk.total_chunks]
+        return entry[0]
+
+    def done(self, split_chunk: SplitChunkMetadata) -> None:
+        """这个分片查完缓存了；同一文件的分片都查完就丢掉兜底缓存。"""
+        entry = self._pools.get(split_chunk.file_path)
+        if entry is None:
+            return
+        entry[1] -= 1
+        if entry[1] <= 0:
+            del self._pools[split_chunk.file_path]
+
+
+def _remove_stale_chunk_caches(split_chunk: SplitChunkMetadata, pools: _SplitCachePools) -> None:
+    """整个文件按当前分片布局写完快照后，删掉不属于当前布局的旧分片缓存。
+
+    旧分片里还用得上的译文，查缓存时已经并进当前分片、随快照写下了；留着旧文件只会让
+    浏览文本、进度统计里同一句出现两遍。
+    """
+    _, stale = pools.cache_names(split_chunk)
+    for name in stale:
+        path = joinpath(pools.cache_dir, name)
+        for target in (path, _append_cache_file_path(path)):
+            try:
+                if isPathExists(target):
+                    os_remove(target)
+            except OSError as exc:
+                LOGGER.warning(f"[cache]清理旧分片缓存失败：{target}: {exc}")
+    if stale:
+        LOGGER.info(
+            f"[cache]{_file_cache_name(split_chunk.file_path, pools.input_dir)} 的分片设置已变更，"
+            f"旧分片缓存已并入当前分片，清理 {len(stale)} 个旧缓存文件"
+        )
 
 
 def _cache_lookup_kwargs(projectConfig: CProjectConfig, eng_type: str) -> dict[str, Any]:
@@ -270,7 +347,11 @@ def _preprocess_chunk(split_chunk: SplitChunkMetadata, projectConfig: CProjectCo
 
 
 async def _count_pending_lines(
-    split_chunk: SplitChunkMetadata, cache_file_path: str, projectConfig: CProjectConfig, eng_type: str
+    split_chunk: SplitChunkMetadata,
+    cache_file_path: str,
+    projectConfig: CProjectConfig,
+    eng_type: str,
+    fallback_pool: SplitCachePool | None = None,
 ) -> int:
     """分片里这次真正要翻的句数：用与 worker 相同的缓存判定，在句子副本上跑一遍。
 
@@ -288,6 +369,7 @@ async def _count_pending_lines(
         [copies[id(tran)] for tran in translation_list],
         cache_file_path,
         quiet=True,
+        fallback_pool=fallback_pool,
         **_cache_lookup_kwargs(projectConfig, eng_type),
     )
     return len(unhit)
@@ -487,6 +569,8 @@ async def doLLMTranslate(
 
     # 获取待翻译文件列表
     file_list = get_file_list(projectConfig.getInputPath())
+    # 全部输入文件（不只是本次要翻的）在缓存目录里的不分片缓存名：认旧分片缓存时排除别的文件
+    input_cache_names = {chunk_cache_name(_file_cache_name(f, input_dir), 0, 1) for f in file_list}
     if not file_list:
         # dump-name / GenDic 等仅基于输入文件的短路流程，空目录不算致命错误，友好返回
         if "dump-name" in eng_type or eng_type == "GenDic":
@@ -661,13 +745,18 @@ async def doLLMTranslate(
     eta_estimator = None
     pending_by_chunk: dict[int, int] = {}
     count_pending = "rebuild" not in eng_type
-    for chunk in ordered_chunks:
+    counting_pools = _SplitCachePools(input_dir, cache_dir, input_cache_names)
+    # 同一文件的分片挨着统计，它的兜底缓存统计完就能丢
+    file_order = {file_path: i for i, file_path in enumerate(file_list)}
+    for chunk in sorted(ordered_chunks, key=lambda chunk: file_order.get(chunk.file_path, 0)):
         _check_stop_requested(projectConfig)
         _preprocess_chunk(chunk, projectConfig)
         if count_pending:
             pending_by_chunk[id(chunk)] = await _count_pending_lines(
-                chunk, _chunk_cache_file_path(chunk, input_dir, cache_dir), projectConfig, eng_type
+                chunk, _chunk_cache_file_path(chunk, input_dir, cache_dir), projectConfig, eng_type,
+                fallback_pool=counting_pools.get(chunk),
             )
+            counting_pools.done(chunk)
     if count_pending:
         if soryBy == "size":
             # 稳定排序：待翻量相同的仍按分片大小
@@ -679,6 +768,7 @@ async def doLLMTranslate(
         )
         LOGGER.info(f"本次待翻译 {sum(pending_by_chunk.values())} 句（{len(ordered_chunks)} 个分片）")
     projectConfig.eta_estimator = eta_estimator
+    projectConfig.split_cache_pools = _SplitCachePools(input_dir, cache_dir, input_cache_names)
 
     # ---- 6. 初始化共享的 gptapi 实例（所有 worker 共用同一实例）----
     gptapi = await init_gptapi(projectConfig)
@@ -866,17 +956,23 @@ async def doLLMTranslSingleChunk(
         translation_list = _chunk_translation_list(split_chunk, projectConfig.runtime_sentence_range)
         selected = {id(tran) for tran in translation_list}
         outside_range = [tran for tran in split_chunk.trans_list if id(tran) not in selected]
+        # 本文件的其它分片缓存（含改分片设置前的旧分片）：本分片缓存里没有的句子到这里找
+        split_cache_pools = getattr(projectConfig, "split_cache_pools", None)
+        fallback_pool = split_cache_pools.get(split_chunk) if split_cache_pools else None
         if outside_range:
             # 范围外只读旧缓存；重翻关键字和失败重试不能清掉这些句子的已有译文。
             await get_transCache_from_json(outside_range, cache_file_path, ignr_post_src=True,
-                                           eng_type=eng_type)
+                                           eng_type=eng_type, fallback_pool=fallback_pool)
 
         translist_hit, translist_unhit = await get_transCache_from_json(
             translation_list,
             cache_file_path,
             proofread=False,
+            fallback_pool=fallback_pool,
             **_cache_lookup_kwargs(projectConfig, eng_type),
         )
+        if split_cache_pools:
+            split_cache_pools.done(split_chunk)
 
         if len(translist_hit) > 0:
             projectConfig.bar(len(translist_hit), skipped=True) # 更新进度条
@@ -973,11 +1069,7 @@ async def postprocess_results(
     for i, chunk in enumerate(resultChunks):
         trans_list = chunk.trans_list
         file_path = chunk.file_path
-        cache_file_path = joinpath(
-            cache_dir,
-            file_path.replace(input_dir, "").lstrip(os_sep).replace(os_sep, "-}")
-            + (f"_{chunk.chunk_index}" if chunk.total_chunks > 1 else ""),
-        )
+        cache_file_path = _chunk_cache_file_path(chunk, input_dir, cache_dir)
 
         # rebuildr 是"只重建输出文件"模式，不应修改缓存；其余引擎正常刷新
         if eng_type != "rebuildr":
@@ -989,6 +1081,9 @@ async def postprocess_results(
                 post_save=True,
                 project_dir=_runtime_project_dir(projectConfig),
             )
+    split_cache_pools = getattr(projectConfig, "split_cache_pools", None)
+    if eng_type != "rebuildr" and split_cache_pools:
+        _remove_stale_chunk_caches(resultChunks[0], split_cache_pools)
 
     # 使用output_combiner合并结果，即使只有一个结果
     all_trans_list, all_json_list = DictionaryCombiner.combine(resultChunks)

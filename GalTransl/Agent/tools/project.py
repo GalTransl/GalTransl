@@ -29,7 +29,7 @@ CONFIG_FIELD_DESCRIPTIONS: dict[str, str] = {
     "common.autoAdjustWorkers": "根据近期 429 比例和响应延迟自动降/升 worker 并发 [true/false]",
     "common.sortBy": "文件调度顺序：name 按文件名，size 优先大文件（并行时通常更快）",
     "common.language": "目标输出语言 [zh-cn/zh-tw/en/ja/ko/ru/fr]",
-    "common.splitFile": "单文件分片模式：no 关闭；Num 每 n 句切一片；Equal 每文件均分 n 片。【重要】分割设置直接影响缓存读取命中，迁移旧项目必须保持一致",
+    "common.splitFile": "单文件分片模式：no 关闭；Num 每 n 句切一片；Equal 每文件均分 n 片。改动后已有缓存仍可沿用（下次翻译时旧分片译文并入新分片）",
     "common.splitFileNum": "分片参数：Num 模式表示每片句数；Equal 模式表示分片总数",
     "common.splitFileCrossNum": "分片重叠句数（上下文缓冲），可提升片段衔接质量 [常用 0 或 10]",
     "common.save_steps": "每处理 n 个批次保存一次缓存；值越大保存越少、速度可能更快",
