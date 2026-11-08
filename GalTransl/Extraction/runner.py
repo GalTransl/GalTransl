@@ -106,7 +106,9 @@ class ExtractionRunner(AgentRunner):
             "You help users by reading files, executing commands, editing code, and writing new files.",
             tool_prompt_section(),
             f"# Project Context\n\nGame directory: {Path(self.session['game_dir']).as_posix()}\n"
-            "Write outputs only in the current working directory; preserve original game files and installed skills.",
+            "Write outputs only in the current working directory; preserve original game files and installed skills.\n"
+            "After extraction is complete, use the galtransl-project-handoff skill to give the user the button "
+            "that hands the project off to the translation agent.",
             format_skills_for_prompt(self.skills),
             f"Current working directory: {Path(self.session['workspace']).as_posix()}",
         ]
