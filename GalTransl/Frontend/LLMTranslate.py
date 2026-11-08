@@ -19,6 +19,8 @@ from venv import logger
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import time
 import asyncio
+import copy
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 from GalTransl import LOGGER, NEED_OpenAITokenPool
@@ -39,6 +41,7 @@ from GalTransl.CSplitter import (
 )
 from GalTransl.TerminalOutput import should_print_translation_logs, terminal_progress
 from GalTransl.TranslationScope import SentenceRange
+from GalTransl.Frontend.TranslationEta import TranslationEtaEstimator
 
 
 def _runtime_project_dir(projectConfig: CProjectConfig) -> str:
@@ -233,12 +236,89 @@ def _build_runtime_file_maps(ordered_chunks: list[SplitChunkMetadata], input_dir
     return file_totals, cache_file_display_map
 
 
+# 当前 worker 正在翻的分片（缓存文件路径）：进度条回调据此把每批完成量记到对应分片上。
+# 后端的批次循环与 worker 在同一个 asyncio 任务里，ContextVar 会一路跟过去，不用改各家后端。
+_CURRENT_ETA_CHUNK: ContextVar[str] = ContextVar("galtransl_eta_chunk", default="")
+# ETA 上报间隔（秒）
+_ETA_REPORT_INTERVAL = 2.0
+
+
+def _chunk_cache_file_path(split_chunk: SplitChunkMetadata, input_dir: str, cache_dir: str) -> str:
+    """分片对应的缓存文件路径（不带 .json）；多分片的文件按 _{分片号} 区分。"""
+    file_name = split_chunk.file_path.replace(input_dir, "").lstrip(os_sep).replace(os_sep, "-}")
+    suffix = f"_{split_chunk.chunk_index}" if split_chunk.total_chunks > 1 else ""
+    return joinpath(cache_dir, file_name + suffix)
+
+
+def _cache_lookup_kwargs(projectConfig: CProjectConfig, eng_type: str) -> dict[str, Any]:
+    """翻译时判定缓存命中的参数。开翻前统计待翻句数与 worker 共用，两边口径不会走样。"""
+    return {
+        "retry_failed": projectConfig.getKey("retranslFail"),
+        "retran_key": projectConfig.getKey("retranslKey"),
+        "eng_type": eng_type,
+        "problem_filter_keys": projectConfig.getKey("problemFilterKey", []),
+        "problem_white_list": projectConfig.getKey("problemWhiteList", []),
+    }
+
+
+def _preprocess_chunk(split_chunk: SplitChunkMetadata, projectConfig: CProjectConfig) -> None:
+    """翻译前处理只做一次：开翻前统计待翻句数时已经做过的分片，worker 里不再重复替换。"""
+    if getattr(split_chunk, "preprocessed", False):
+        return
+    preprocess_trans_list(split_chunk.trans_list, projectConfig, projectConfig.pre_dic, projectConfig.tPlugins)
+    split_chunk.preprocessed = True
+
+
+async def _count_pending_lines(
+    split_chunk: SplitChunkMetadata, cache_file_path: str, projectConfig: CProjectConfig, eng_type: str
+) -> int:
+    """分片里这次真正要翻的句数：用与 worker 相同的缓存判定，在句子副本上跑一遍。
+
+    缓存判定会就地改写句子（命中时填译文），所以复制一份并把上下句指针接到副本上
+    （缓存 key 由前后句拼成），原句保持不动，留给 worker 正式判定。
+    """
+    translation_list = _chunk_translation_list(split_chunk, projectConfig.runtime_sentence_range)
+    if not translation_list:
+        return 0
+    copies = {id(tran): copy.copy(tran) for tran in split_chunk.trans_list}
+    for tran in copies.values():
+        tran.prev_tran = copies.get(id(tran.prev_tran), tran.prev_tran) if tran.prev_tran else None
+        tran.next_tran = copies.get(id(tran.next_tran), tran.next_tran) if tran.next_tran else None
+    _, unhit = await get_transCache_from_json(
+        [copies[id(tran)] for tran in translation_list],
+        cache_file_path,
+        quiet=True,
+        **_cache_lookup_kwargs(projectConfig, eng_type),
+    )
+    return len(unhit)
+
+
+class _EtaTrackingBar:
+    """包一层进度条：未跳过的完成量（真正翻过的句子）按当前分片记进 ETA 估算器。"""
+
+    def __init__(self, bar: Any, projectConfig: CProjectConfig) -> None:
+        self._bar = bar
+        self._config = projectConfig
+
+    def __call__(self, count: int = 1, *args: Any, **kwargs: Any) -> Any:
+        result = self._bar(count, *args, **kwargs)
+        estimator = getattr(self._config, "eta_estimator", None)
+        key = _CURRENT_ETA_CHUNK.get()
+        if estimator is not None and key and not kwargs.get("skipped"):
+            estimator.record(key, int(count or 0))
+        return result
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._bar, name)
+
+
 async def update_progress_title(
     bar, semaphore, workersPerProject: int, projectConfig: CProjectConfig
 ):
     """异步任务，用于动态更新 alive_bar 的标题以显示活动工作线程数。"""
     base_title = "翻译进度"
     is_interactive = should_print_translation_logs(projectConfig)
+    last_eta_report = 0.0
     while True:
         try:
             # 计算当前活动的任务数
@@ -261,6 +341,15 @@ async def update_progress_title(
                 workers_active=active_workers,
                 workers_configured=configured_workers,
             )
+            estimator = getattr(projectConfig, "eta_estimator", None)
+            now = time()
+            if estimator is not None and now - last_eta_report >= _ETA_REPORT_INTERVAL:
+                last_eta_report = now
+                # 信号量按分片占用：自动调并发降下来时，同时在翻的分片也跟着变少
+                estimator.workers = max(1, int(getattr(projectConfig, "runtime_workers_effective", workersPerProject)))
+                eta = estimator.estimate()
+                if eta is not None:
+                    _update_runtime(projectConfig, eta_seconds=eta)
             # 更新标题（仅 CLI 模式有 bar）
             if is_interactive:
                 new_title = f"{base_title} [{active_workers}/{configured_workers} 并发]"
@@ -565,6 +654,32 @@ async def doLLMTranslate(
             name_replaceDict_path_xlsx, name_replaceDict_firstime,total_chunks,projectConfig
         )
 
+    # ---- 5.5 翻译前处理 + 统计每个分片这次真正要翻的句数 ----
+    # 前处理挪到这里统一做（worker 里会跳过）：缓存 key 要用前处理后的说话人，统计才准。
+    # 待翻句数用于：size 排序按实际工作量排（续翻/重翻时，大部分已有缓存的大分片不该排在前面），
+    # 以及 ETA 按调度模拟剩余时间。rebuild 不翻译，不统计。
+    eta_estimator = None
+    pending_by_chunk: dict[int, int] = {}
+    count_pending = "rebuild" not in eng_type
+    for chunk in ordered_chunks:
+        _check_stop_requested(projectConfig)
+        _preprocess_chunk(chunk, projectConfig)
+        if count_pending:
+            pending_by_chunk[id(chunk)] = await _count_pending_lines(
+                chunk, _chunk_cache_file_path(chunk, input_dir, cache_dir), projectConfig, eng_type
+            )
+    if count_pending:
+        if soryBy == "size":
+            # 稳定排序：待翻量相同的仍按分片大小
+            ordered_chunks.sort(key=lambda chunk: pending_by_chunk[id(chunk)], reverse=True)
+        eta_estimator = TranslationEtaEstimator(workers=max(1, workersPerProject))
+        eta_estimator.queue(
+            (_chunk_cache_file_path(chunk, input_dir, cache_dir), pending_by_chunk[id(chunk)])
+            for chunk in ordered_chunks
+        )
+        LOGGER.info(f"本次待翻译 {sum(pending_by_chunk.values())} 句（{len(ordered_chunks)} 个分片）")
+    projectConfig.eta_estimator = eta_estimator
+
     # ---- 6. 初始化共享的 gptapi 实例（所有 worker 共用同一实例）----
     gptapi = await init_gptapi(projectConfig)
 
@@ -607,7 +722,7 @@ async def doLLMTranslate(
         should_print_translation_logs(projectConfig),
         total=total_lines, title="翻译进度", unit=" line", enrich_print=False, dual_line=True,length=30
     ) as bar:
-        projectConfig.bar = bar
+        projectConfig.bar = _EtaTrackingBar(bar, projectConfig)
 
         # 启动后台任务来更新进度条标题
         title_update_task = asyncio.create_task(
@@ -730,10 +845,7 @@ async def doLLMTranslSingleChunk(
         input_file_path = file_path
         output_file_path = input_file_path.replace(input_dir, output_dir)
 
-        cache_file_path = joinpath(
-            cache_dir,
-            file_name + (f"_{file_index}" if total_splits > 1 else ""),
-        )
+        cache_file_path = _chunk_cache_file_path(split_chunk, input_dir, cache_dir)
 
         part_info = f" (part {file_index+1}/{total_splits})" if total_splits > 1 else ""
         _update_runtime(
@@ -748,8 +860,8 @@ async def doLLMTranslSingleChunk(
         LOGGER.debug(f"  实际大小: {split_chunk.chunk_size}")
         LOGGER.debug(f"  交叉数量: {split_chunk.cross_num}")
 
-        # 翻译前处理
-        preprocess_trans_list(split_chunk.trans_list, projectConfig, pre_dic, tPlugins)
+        # 翻译前处理（开翻前统计待翻句数时通常已做过）
+        _preprocess_chunk(split_chunk, projectConfig)
 
         translation_list = _chunk_translation_list(split_chunk, projectConfig.runtime_sentence_range)
         selected = {id(tran) for tran in translation_list}
@@ -762,16 +874,18 @@ async def doLLMTranslSingleChunk(
         translist_hit, translist_unhit = await get_transCache_from_json(
             translation_list,
             cache_file_path,
-            retry_failed=projectConfig.getKey("retranslFail"),
             proofread=False,
-            retran_key=projectConfig.getKey("retranslKey"),
-            eng_type=eng_type,
-            problem_filter_keys=projectConfig.getKey("problemFilterKey", []),
-            problem_white_list=projectConfig.getKey("problemWhiteList", []),
+            **_cache_lookup_kwargs(projectConfig, eng_type),
         )
 
         if len(translist_hit) > 0:
             projectConfig.bar(len(translist_hit), skipped=True) # 更新进度条
+
+        # ETA：登记本分片的实际待翻量，并让进度条回调把每批完成量记到本分片上
+        eta_estimator = getattr(projectConfig, "eta_estimator", None)
+        if eta_estimator is not None:
+            eta_estimator.start(cache_file_path, len(translist_unhit))
+        eta_chunk_token = _CURRENT_ETA_CHUNK.set(cache_file_path)
 
         if len(translist_unhit) > 0:
             _check_stop_requested(projectConfig)
@@ -806,6 +920,10 @@ async def doLLMTranslSingleChunk(
                 else:
                     LOGGER.warning("当前引擎不支持校对，跳过校对步骤")
             gptapi.clean_up()
+
+        _CURRENT_ETA_CHUNK.reset(eta_chunk_token)
+        if eta_estimator is not None:
+            eta_estimator.finish(cache_file_path)
 
         # 翻译后处理
         _check_stop_requested(projectConfig)

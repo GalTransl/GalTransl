@@ -2857,6 +2857,10 @@ def build_handler(registry: JobRegistry):
                 speed = runtime["translation_speed_lpm"]
                 remaining = max(total - translated, 0)
                 eta_seconds = round((remaining / speed) * 60) if speed > 0 and remaining > 0 else None
+                # 翻译引擎按调度模拟估的剩余时间优先：它把收尾阶段并发变少算了进去
+                engine_eta = runtime.get("eta_seconds")
+                if engine_eta is not None and job and job.status in {"pending", "running"} and remaining > 0:
+                    eta_seconds = round(engine_eta)
                 self._send_json({
                     "project_dir": project_dir,
                     "job": None if job is None else {

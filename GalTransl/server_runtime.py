@@ -108,6 +108,10 @@ class RuntimeState:
     cache_file_selected_indexes: dict[str, list[str]] = field(default_factory=dict)
     # 进度分母里分块交叉句的数量（相邻两块各翻一次的那部分），界面在进度旁单独标出
     cross_total: int = 0
+    # 翻译引擎按调度模拟估出的剩余秒数（见 Frontend/TranslationEta.py）与上报时刻（monotonic）；
+    # 没有时退回「剩余句数 ÷ 最近速度」
+    eta_seconds: float | None = None
+    eta_reported_at: float = 0.0
     # Per-file deque of recent success events. Each file keeps up to
     # RUNTIME_PER_FILE_SUCCESS_LIMIT events independently so that concurrent
     # translations of multiple files do not evict each other's cards.
@@ -235,6 +239,7 @@ class RuntimeRegistry:
         cache_file_selected_indexes: dict[str, list[str]] | None = None,
         progress_speed_lpm: float | None = None,
         cross_total: int | None = None,
+        eta_seconds: float | None = None,
     ) -> None:
         with self._lock:
             state = self._states.get(_normalize_project_dir(project_dir))
@@ -259,6 +264,9 @@ class RuntimeRegistry:
                 state.progress_speed_lpm = max(0.0, float(progress_speed_lpm))
             if cross_total is not None:
                 state.cross_total = max(0, int(cross_total))
+            if eta_seconds is not None:
+                state.eta_seconds = max(0.0, float(eta_seconds))
+                state.eta_reported_at = time.monotonic()
             state.updated_at = _utcnow_text()
 
     def begin_request(self, project_dir: str, *, filename: str) -> int | None:
@@ -434,6 +442,7 @@ class RuntimeRegistry:
                     "cache_file_display_map": {},
                     "cache_file_selected_indexes": {},
                     "cross_total": 0,
+                    "eta_seconds": None,
                     "activity": {},
                     "recent_errors": [],
                     "recent_successes": [],
@@ -466,6 +475,11 @@ class RuntimeRegistry:
                 "cache_file_display_map": dict(state.cache_file_display_map),
                 "cache_file_selected_indexes": dict(state.cache_file_selected_indexes),
                 "cross_total": state.cross_total,
+                # 扣掉上报后已过去的时间：引擎每隔几秒才报一次
+                "eta_seconds": (
+                    None if state.eta_seconds is None
+                    else max(0.0, state.eta_seconds - (time.monotonic() - state.eta_reported_at))
+                ),
                 "activity": activity,
                 "recent_errors": [event.to_dict() for event in state.recent_errors],
                 "recent_successes": [event.to_dict() for event in merged_successes],
@@ -1052,6 +1066,7 @@ def update_runtime_status(
     cache_file_selected_indexes: dict[str, list[str]] | None = None,
     progress_speed_lpm: float | None = None,
     cross_total: int | None = None,
+    eta_seconds: float | None = None,
 ) -> None:
     RUNTIME_REGISTRY.update_status(
         project_dir,
@@ -1064,6 +1079,7 @@ def update_runtime_status(
         cache_file_selected_indexes=cache_file_selected_indexes,
         progress_speed_lpm=progress_speed_lpm,
         cross_total=cross_total,
+        eta_seconds=eta_seconds,
     )
 
 

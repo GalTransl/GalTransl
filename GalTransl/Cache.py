@@ -409,6 +409,7 @@ async def get_transCache_from_json(
     eng_type="",
     problem_filter_keys=None,
     problem_white_list=None,
+    quiet=False,
 ):
     """
     此函数从 JSON 文件中检索翻译缓存，并相应地更新翻译列表。
@@ -423,6 +424,8 @@ async def get_transCache_from_json(
         ignr_post_src (bool, optional): 仅不检查post_src是否被改变。默认为 False。
         problem_white_list (list, optional): 问题白名单（problemWhiteList）。命中的条目等价于
             勾了 skip_check，其 problem 不参与 retranslKey 匹配——与进度、问题列表同一口径。
+        quiet (bool, optional): 不输出 info 级的重翻命中日志。开翻前统计待翻句数时用，
+            免得同一批日志打两遍。
 
     Returns:
         Tuple[List[CTrans], List[CTrans]]: 包含两个列表的元组：击中缓存的翻译列表和未击中缓存的翻译列表。
@@ -566,7 +569,8 @@ async def get_transCache_from_json(
                 if "rebuild" not in eng_type:
                     _mark_cache_miss(tran, MISS_RETRAN_KEY)
                     translist_unhit.append(tran)
-                    LOGGER.info(f"[cache]retran_key in 'pre_src' message: {line_now}")
+                    if not quiet:
+                        LOGGER.info(f"[cache]retran_key in 'pre_src' message: {line_now}")
                     continue
             # retran_key在problem中
             if (
@@ -580,7 +584,8 @@ async def get_transCache_from_json(
                     if "rebuild" not in eng_type:
                         _mark_cache_miss(tran, MISS_RETRAN_PROBLEM)
                         translist_unhit.append(tran)
-                        LOGGER.info(f"[cache]retran_key in 'problem' message: {line_now}")
+                        if not quiet:
+                            LOGGER.info(f"[cache]retran_key in 'problem' message: {line_now}")
                         continue
 
         # 击中缓存的,post_dst初始值赋pre_dst
