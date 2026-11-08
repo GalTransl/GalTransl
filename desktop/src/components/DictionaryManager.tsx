@@ -862,7 +862,8 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     }
   };
 
-  if (loading) {
+  // 只在首次加载时整页换成加载态：保存/刷新后的重新读取若也卸掉列表，滚动位置会被重置
+  if (loading && !data) {
     return (
       <div className="project-dictionary-page">
         <div className="project-dictionary-page__header"><h1>{title}</h1></div>
