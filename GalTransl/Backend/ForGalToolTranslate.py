@@ -90,16 +90,16 @@ class ForGalToolTranslate(ForGalJsonTranslate):
             rows.append(markdown_row(*cells))
         return "\n".join(rows)
 
-    def _format_restore_context_line(self, current_tran):
+    def _format_restore_context_line(self, current_tran, source=False):
         cells = [str(current_tran.index)]
         if self.include_speaker:
             cells.append(current_tran.get_speaker_name() or "null")
-        text = current_tran.pre_dst.replace("\\r\\n", "<br>").replace("\\n", "<br>").replace("\t", "[t]")
+        text = (current_tran.post_src if source else current_tran.pre_dst).replace("\\r\\n", "<br>").replace("\\n", "<br>").replace("\t", "[t]")
         cells.append(text)
         return markdown_row(*cells)
 
-    def _format_restore_context_payload(self, lines):
-        return self._table_header("DST") + "\n" + "\n".join(lines)
+    def _format_restore_context_payload(self, lines, source=False):
+        return self._table_header("SRC" if source else "DST") + "\n" + "\n".join(lines)
 
     def _apply_history_result(self, prompt_req, filename):
         scoped = self._session_scope().get()

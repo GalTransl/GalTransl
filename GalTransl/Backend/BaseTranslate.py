@@ -1701,10 +1701,11 @@ class BaseTranslate:
     def _get_restore_context_failed_markers(self) -> tuple[str, ...]:
         return ("(Failed)",)
 
-    def _format_restore_context_line(self, current_tran: CSentense) -> str:
+    def _format_restore_context_line(self, current_tran: CSentense, source: bool = False) -> str:
+        """前文的一行；source=True 时放原文（post_src）而不是译文。"""
         raise NotImplementedError
 
-    def _format_restore_context_payload(self, lines: List[str]) -> str:
+    def _format_restore_context_payload(self, lines: List[str], source: bool = False) -> str:
         return "\n".join(lines)
 
     def _collect_restore_context_items(
@@ -1754,6 +1755,30 @@ class BaseTranslate:
         self.last_translations[filename] = self._format_restore_context_payload(
             context_lines
         )
+
+    def restore_source_context(
+        self, translist_unhit: CTransList, num_pre_request: int, filename=""
+    ) -> bool:
+        """前文改用原文：取本批之前的 num_pre_request 句原文（不管译没译过）放进 history_result。
+
+        单句反复被拒、清空上文也不行时的最后一次重试用。返回是否有前文可放（没有就不必再试）。
+        """
+        if not hasattr(self, "last_translations") or num_pre_request <= 0 or not translist_unhit:
+            return False
+        context_items: List[CSentense] = []
+        current_tran = translist_unhit[0].prev_tran
+        while current_tran is not None and len(context_items) < num_pre_request:
+            if current_tran.post_src != "":
+                context_items.append(current_tran)
+            current_tran = current_tran.prev_tran
+        if not context_items:
+            return False
+        context_items.reverse()
+        self.last_translations[filename] = self._format_restore_context_payload(
+            [self._format_restore_context_line(tran, source=True) for tran in context_items],
+            source=True,
+        )
+        return True
 
     def _set_temp_type(self, style_name: str):
         if self._current_temp_type == style_name:

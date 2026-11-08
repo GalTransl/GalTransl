@@ -74,6 +74,13 @@ class MultiTurnTranslate(BaseTranslate):
         if scoped is not None:
             scoped["context"][filename] = self.last_translations[filename]
 
+    def restore_source_context(self, translist_unhit, num_pre_request, filename=""):
+        restored = super().restore_source_context(translist_unhit, num_pre_request, filename)
+        scoped = self._session_scope().get()
+        if restored and scoped is not None:
+            scoped["context"][filename] = self.last_translations[filename]
+        return restored
+
     def _apply_history_result(self, prompt_req, filename):
         scoped = self._session_scope().get()
         if scoped is None:

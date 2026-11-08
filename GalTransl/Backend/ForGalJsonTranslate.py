@@ -63,8 +63,11 @@ class ForGalJsonTranslate(MultiTurnTranslate):
         pass
 
     async def translate(
-        self, trans_list: CTransList, gptdict="", proofread=False, filename=""
+        self, trans_list: CTransList, gptdict="", proofread=False, filename="", context_num=None
     ):
+        # 前文句数：拆分重试时随批次一起减半（批次拆 1/3，前文拆 1/2），见下方「拆分重试」
+        if context_num is None:
+            context_num = self.contextNum
         input_list = []
         sig_list = []
         tmp_enhance_jailbreak = False
@@ -118,11 +121,12 @@ class ForGalJsonTranslate(MultiTurnTranslate):
             input_list.append(self._encode_sig_jsonline(sig, tmp_obj))
         input_src = self._format_translation_input(input_list, proofread)
 
-        self.restore_context(trans_list, self.contextNum, filename)
+        self.restore_context(trans_list, context_num, filename)
 
         prompt_template = self._build_prompt_request(input_src, gptdict)
 
         retry_count = 0
+        source_context_tried = False
         emitted_success_indices = set()
         while True:  # 一直循环，直到得到数据
             self._check_stop_requested()
@@ -300,13 +304,24 @@ class ForGalJsonTranslate(MultiTurnTranslate):
                         gptdict,
                         proofread=proofread,
                         filename=filename,
+                        context_num=max(context_num // 2, 1) if context_num > 0 else 0,
                     )
-                # 单句重试仍错则重置会话
+                # 单句重试仍错：先重置会话、前文换成原文（上一批的译文本身可能就是被拒的原因）；
+                # 没有前文可换就直接是清空上文
                 if retry_count == 3 and self.smartRetry:
                     self.reset_conversation(filename)
+                    source_context_tried = self.restore_source_context(trans_list, context_num, filename)
                     LOGGER.warning(
-                        f"[解析错误][{filename}:{idx_tip}]连续3次出错，尝试清空上文"
+                        f"[解析错误][{filename}:{idx_tip}]连续3次出错，"
+                        + ("尝试将前文替换为原文" if source_context_tried else "尝试清空上文")
                     )
+                # 前文换成原文仍错，再清空上文试最后一次
+                elif retry_count == 4 and self.smartRetry and source_context_tried:
+                    self.reset_conversation(filename)
+                    LOGGER.warning(
+                        f"[解析错误][{filename}:{idx_tip}]连续4次出错，尝试清空上文"
+                    )
+                    continue
                 # 重试中止
                 if retry_count >= 4:
                     self.reset_conversation(filename)
@@ -432,19 +447,22 @@ class ForGalJsonTranslate(MultiTurnTranslate):
             ensure_last_translations=True,
         )
 
-    def _format_restore_context_line(self, current_tran: CSentense) -> str:
+    def _format_restore_context_line(self, current_tran: CSentense, source: bool = False) -> str:
         speaker_name = current_tran.get_speaker_name()
         speaker = speaker_name if speaker_name else "null"
         tmp_obj = {
             "id": current_tran.index,
             "name": speaker,
-            "dst": current_tran.pre_dst,
         }
+        if source:
+            tmp_obj["src"] = current_tran.post_src
+        else:
+            tmp_obj["dst"] = current_tran.pre_dst
         if speaker == "null":
             del tmp_obj["name"]
         return self._encode_sig_jsonline("old", tmp_obj)
 
-    def _format_restore_context_payload(self, lines: List[str]) -> str:
+    def _format_restore_context_payload(self, lines: List[str], source: bool = False) -> str:
         return "```jsonline\n" + "\n".join(lines) + "\n```"
 
 
