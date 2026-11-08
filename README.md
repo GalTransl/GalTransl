@@ -12,7 +12,7 @@
 > [!TIP]
 > **想翻译 Galgame，却不知道怎么提取台词、把译文放回游戏？**
 >
-> 试试配套的 **[GalTransl-GalGameReverse-Skill](https://github.com/GalTransl/GalTransl-GalGameReverse-Skill)**：把工具包和游戏目录交给能操作本地文件的 AI 助手，让它帮你识别引擎、提取台词，再将 GalTransl 的翻译结果回写为游戏补丁。项目内附新手教程，建议先测试几句中文，再翻译整部游戏；具体支持范围以引擎和游戏版本为准。
+> 直接使用桌面端的 **「提取 Agent」** 功能：新建提取，选择游戏目录，AI 会帮你识别引擎、提取台词，并在翻译完成后将 GalTransl 的翻译结果回写为游戏补丁。建议先测试几句中文，再翻译整部游戏；具体支持范围以引擎和游戏版本为准。
 
 ## 🤖 现已支持 Agent 模式
 
@@ -524,7 +524,6 @@ Linux CI 和正式发布只生成便携包；需要本地测试安装包时，�
 
 输出位于 `release/`：
 
-- `GalTransl_*_linux_x86_64.tar.gz`
 - `GalTransl_*_linux_x86_64.tar.gz`
 
 正式发布包应在 Ubuntu 22.04 或同等 glibc 基线的环境中构建。Linux、macOS 与 Windows 一致，默认在程序目录读写通用字典 `Dict/`、全局翻译规范 `translation_guidelines/` 和自定义背景 `desktop-background/`；会话与应用设置存放在 `~/.galtransl`，首次启动会迁移旧会话和设置。显式设置 `GALTRANSL_DATA_DIR` 时，会话、设置及这三个目录使用指定的数据目录；字典和规范会从程序目录复制初始文件，不覆盖已有修改。`GALTRANSL_APP_SETTINGS_PATH` 可单独指定应用设置文件。

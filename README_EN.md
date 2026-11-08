@@ -3,77 +3,95 @@
 
 <h1><p align='center' >GalTransl</p></h1>
 <div align=center><img src="https://img.shields.io/github/v/release/XD2333/GalTransl"/>   <img src="https://img.shields.io/github/license/XD2333/GalTransl"/>   <img src="https://img.shields.io/github/stars/XD2333/GalTransl"/></div>
-<p align='center' >Visual Novel Automatic Translation Solution Supporting GPT/Claude/Deepseek/Sakura and More</p>
+<p align='center' >Visual Novel Automatic Translation Solution Supporting GPT/Claude/Deepseek/Sakura and Other LLMs</p>
 
   [中文](https://github.com/XD2333/GalTransl/blob/main/README.md)
 
-  GalTransl is a set of visual novel automatic translation tools that combines several minor innovations in basic functions with deep use of GPT prompt engineering to create embedded translation patches. Now featuring a **desktop graphical interface** — no command-line experience needed to complete the full translation workflow.
+  GalTransl is an automatic visual novel translation tool that combines several improvements to basic functions with deep use of GPT prompt engineering to create embedded translation patches. It now provides a **desktop graphical interface**, so the full translation workflow can be completed without the command line.
 
-   <img width="2044" height="1397" alt="image" src="https://github.com/user-attachments/assets/f85e4782-e53e-4b03-ae24-cd77b453c6e3" />
+> [!TIP]
+> **Want to translate a visual novel but don't know how to extract the script text or put the translation back into the game?**
+>
+> Use the **"Extraction Agent"** in the desktop app: create a new extraction and select the game directory. The AI identifies the engine, extracts the script text, and after translation writes GalTransl's results back into a game patch. Test a few lines of Chinese first before translating the whole game; actual support depends on the engine and game version.
+
+## 🤖 Agent Mode Is Now Available
+
+> [!IMPORTANT]
+> **GalTransl now supports Agent mode, which can carry out the entire translation workflow on its own.**
+>
+> Enter **Agent mode** in the desktop app and describe your translation needs in natural language; the Agent then drives the translation task by itself.
+
+![GalTransl Agent mode: preparing for translation and starting a trial translation on its own](./img/agent-mode.png)
+
 
 ## Preface
-&ensp;&ensp;&ensp;&ensp;The core of GalTransl is a set of automatic translation scripts that solves most of the known problems in using GPT to automatically translate visual novels, and greatly improves the overall translation quality. By combining with other projects, it connects the whole process of making patches, lowering the entry barrier.
+&ensp;&ensp;&ensp;&ensp;The core of GalTransl is a set of automatic translation pipelines that solves most of the known problems in automatically translating visual novels with ChatGPT and improves overall translation quality. By combining it with other projects, the whole patch-making process is connected, which lowers the entry barrier to some degree. If you are interested, this project makes it easier to build machine-translated patches of reasonable quality, and you can (perhaps) build higher-quality translation patches efficiently on top of this framework.
 
   * Features:
-  1. 🖥️ **Desktop GUI** — Modern desktop app built with Tauri + React, no command-line needed. Supports dark mode, custom backgrounds, multi-project management, and more
-  2. Supports **GPT-4/Claude/Deepseek/Sakura** and other LLMs, with improved translation quality through prompt engineering
-  3. Pioneering **GPT Dictionary** system — lets GPT understand character settings, accurately translate names, pronouns, and new words
-  4. Flexible automatic dictionary system with pre-translation, post-translation, and conditional dictionaries
-  5. Real-time cache saving, automatic breakpoint continuation
-  6. Combined with other projects to support one-click unpacking and injection of multi-engine scripts
-  7. Supports translating srt, lrc, vtt subtitle files, mtool json, t++ excel, and epub files
-  8. 🤗 [GalTransl-7B-v3.5](https://huggingface.co/SakuraLLM/GalTransl-7B-v2) — a local model specifically optimized for visual novel translation, deployable on 6G+ VRAM GPUs
-  9. 🤗 [GalTransl-14B-v3](https://huggingface.co/SakuraLLM/Sakura-GalTransl-14B-v3) — the 14B version with better overall quality thanks to a larger base model and improved alignment training
+  1. 🖥️ **Desktop GUI** — a modern desktop app built with Tauri + React, no command line needed. Supports dark mode, custom backgrounds, multi-project management, and more
 
-<b>❗❗When publishing translations made with this tool without full manual proofreading/polishing, please clearly label them as "GPT translation/AI translation patch", not "personal translation" or "AI localization".</b>
+<img width="2044" height="1397" alt="QQ20261003-110410" src="https://github.com/user-attachments/assets/25185c5b-7d5a-46d5-b4d1-0f3353ea67a0" />
+
+  2. Supports **GPT/Claude/Deepseek/Sakura** and other LLMs, with GPT translation quality improved through prompt engineering
+  3. Supports the **GPT dictionary**, which lets GPT understand character settings and accurately translate names, pronouns, and new words
+  4. A flexible automatic dictionary system with pre-translation, post-translation, and conditional dictionaries
+  5. Real-time cache saving and automatic resume from breakpoints
+  6. Combined with other projects, supports one-click unpacking and injection of scripts for many engines, with a complete tutorial to lower the learning curve
+  7. Directly translates srt, lrc, and vtt subtitle files, mtool json files, t++ excel files, and epub files
+  8. 🤗 [GalTransl-7B-v3.5](https://huggingface.co/SakuraLLM/GalTransl-7B-v2) is a local model specifically optimized for visual novel translation, deployable on GPUs with 6 GB+ VRAM, built jointly by sakuraumi and xd2333
+  9. 🤗 [GalTransl-14B-v3](https://huggingface.co/SakuraLLM/Sakura-GalTransl-14B-v3) is the 14B version of the GalTransl-v3 model. Thanks to a larger base model and improved alignment training, GalTransl-14B-v3 has better overall quality than GalTransl-7B-v3
+
+<b>❗❗When publishing translations made with this tool without full proofreading/polishing, please clearly label them as "xx model AI translation patch", not as a "personal translation" patch.</b>
 
 ## Recent Updates
-* 2026.4: Updated v7, added **desktop GUI** (Tauri + React) with dark mode, custom backgrounds, multi-project management, visual translation workbench, etc.
-* 2025.5: Updated v6, added ForGal translation template, GalTransl-14B-v3 model
-* 2024.5: Updated v5, added GalTransl-7B model, multiple file type support
-* 2024.2: Updated v4, plugin system support
+* 2026.8: Updated v8, added Agent mode, where AI carries out the translation workflow on its own
+* 2026.4: Updated v7, added the **desktop GUI** (Tauri + React) with dark mode, custom backgrounds, multi-project management, a visual translation workflow, etc.
+* 2025.5: Updated v6, added the ForGal translation template and the GalTransl-14B-v3 model
+* 2024.5: Updated v5, added the GalTransl-7B model and support for many file types
+* 2024.2: Updated v4, mainly added the plugin system
 * 2023.12: Updated v3, file-based multithreading by @ryank231231
 * 2023.7: Updated v2, major code refactoring by @ryank231231
 * 2023.6: v1 initial release
 
 ## Navigation
-* [Environment Preparation](https://github.com/XD2333/GalTransl#environment-preparation): Installing environment and software
-* [Getting Started Tutorial](https://github.com/XD2333/GalTransl#getting-started-tutorial): Full process introduction on making a machine-translated patch
-* [Configuration and Engine Settings](https://github.com/XD2333/GalTransl#configuration-and-engine-settings): Details on configuring translation engine APIs
-* [GalTransl Core Features](https://github.com/XD2333/GalTransl#galtransl-core-features): GPT dictionary, cache, ordinary dictionary, problem finding, etc.
-* Further tutorials have been [moved to Wiki](https://github.com/xd2333/GalTransl/wiki)
-* [Development and Builds](#development-and-builds): Development setup, platform builds, and automated releases (click to expand)
+* [Environment Preparation](https://github.com/XD2333/GalTransl/blob/main/README_EN.md#environment-preparation): installing the environment and software
+* [Getting Started Tutorial](https://github.com/XD2333/GalTransl/blob/main/README_EN.md#getting-started-tutorial): a full walkthrough of making a machine-translated patch. **If you only want to know how to use this tool, jump straight to section 2.2 of Part 2**
+* [Configuration and Engine Settings](https://github.com/XD2333/GalTransl/blob/main/README_EN.md#configuration-and-engine-settings): details on calling and configuring each translation engine API
+* [GalTransl Core Features](https://github.com/XD2333/GalTransl/blob/main/README_EN.md#galtransl-core-features): the GPT dictionary, cache, ordinary dictionaries, problem finding, and more
+* Further tutorials have been [moved to the Wiki](https://github.com/xd2333/GalTransl/wiki)
+* [Development and Builds](#development-and-builds): development environment, running from source, platform builds, and automated releases (click to expand)
 
 ## Environment Preparation
   * **Desktop Version (Recommended)**
-  Download the package for your platform from [Releases](https://github.com/GalTransl/GalTransl/releases/). On Windows, extract `GalTransl_*_win.zip` and double-click `GalTransl Desktop.exe`; **Python is not required**. Linux x86_64 is distributed as a portable `.tar.gz`; extract it and run `./galtransl-desktop`. Linux still requires system libraries such as WebKitGTK 4.1. macOS releases include separate Intel and Apple Silicon DMGs plus portable `.tar.gz` archives. The desktop app automatically starts the backend service.
+  Download the desktop package for your platform from [Releases](https://github.com/GalTransl/GalTransl/releases/). On Windows, use `GalTransl_*_win.zip`: extract it and double-click `GalTransl Desktop.exe`; **Python is not required**. Linux x86_64 uses a portable `.tar.gz`: extract it and run `./galtransl-desktop`; the system still needs runtime libraries such as WebKitGTK 4.1. macOS releases include separate Intel and Apple Silicon DMGs plus portable `.tar.gz` archives. The desktop app automatically starts a separate backend for each instance on a free port; closing one window stops only its own backend, and other windows keep running.
 
 
 
 ## Practical Tools
 | Name | Description |
 | --- | --- |
-| GARbro | Engine tool: Universal unpacker. [Download](https://github.com/morkt/GARbro/releases/download/v1.5.44/GARbro-v1.5.44.2904.rar) |
+| GARbro | Engine tool: a godlike unpacker. [Download](https://github.com/morkt/GARbro/releases/download/v1.5.44/GARbro-v1.5.44.2904.rar) |
 | [KirikiriTools](https://github.com/arcusmaximus/KirikiriTools) | Engine tool: Krkr, krkrz extraction and injection tool |
-| [UniversalInjectorFramework](https://github.com/AtomCrafty/UniversalInjectorFramework) | Engine tool: Shift-JIS tunnel, Shift-JIS replacement mode universal injection framework |
-| [VNTextProxy](https://github.com/arcusmaximus/VNTranslationTools) | Engine tool: Shift-JIS tunnel mode universal injection framework |
-| GalTransl_DumpInjector | Script tool: [VNTextPatch](https://github.com/arcusmaximus/VNTranslationTools) GUI, comprehensive script text extraction/injection tool |
-| [SExtractor](https://github.com/satan53x/SExtractor) | Script tool: Comprehensive script text extraction/injection tool |
-| [msg-tool](https://github.com/lifegpc/msg-tool) | Script tool: Comprehensive script text extraction/injection tool |
-| [DBTXT2Json_jp](https://github.com/XD2333/DBTXT2Json_jp) | Script tool: Double-line text and json_jp conversion script |
-| [EmEditor](https://www.emeditor.com/) | Text tool: Powerful text editor, mainly for editing cache files |
-| [VSCode](https://code.visualstudio.com/) | Text tool: Powerful text editor, mainly for editing cache files |
-| [KeywordGacha](https://github.com/neavo/KeywordGacha) | Text tool: Automatic glossary generation using OpenAI-compatible API |
+| [UniversalInjectorFramework](https://github.com/AtomCrafty/UniversalInjectorFramework) | Engine tool: universal injection framework for Shift-JIS tunnel and Shift-JIS replacement modes |
+| [VNTextProxy](https://github.com/arcusmaximus/VNTranslationTools) | Engine tool: universal injection framework for Shift-JIS tunnel mode |
+| GalTransl_DumpInjector | Script tool: a GUI for [VNTextPatch](https://github.com/arcusmaximus/VNTranslationTools), comprehensive script text extraction/injection tool |
+| [SExtractor](https://github.com/satan53x/SExtractor) | Script tool: comprehensive script text extraction/injection tool |
+| [msg-tool](https://github.com/lifegpc/msg-tool) | Script tool: comprehensive script text extraction/injection tool |
+| [DBTXT2Json_jp](https://github.com/XD2333/DBTXT2Json_jp) | Script tool: converts between double-line text and json_jp |
+| [EmEditor](https://www.emeditor.com/) | Text tool: a godlike text editor, mainly used for fixing cache files |
+| [VSCode](https://code.visualstudio.com/) | Text tool: a godlike text editor, mainly used for fixing cache files |
+| [KeywordGacha](https://github.com/neavo/KeywordGacha) | Text tool: automatically generates glossaries using an OpenAI-compatible API |
 
-## Getting started tutorial
-The general process of making a visual novel embedded translation patch is:
+## Getting Started Tutorial
+The general process of making an embedded visual novel translation patch is:
+1. Identify the engine -> unpack the resource packs to get the scripts -> go to 2.
+2. Dump the scripts into Japanese text -> translate into Chinese text -> build the Chinese scripts -> go to 3.
+3. Pack into a resource pack / load without packing -> go to 4.
+4. If the engine supports Unicode, just play -> if the engine uses Shift-JIS, try 2 approaches to make it display Chinese
 
-1. Identify the engine -> unpack the resource pack to get the script -> go to 2.
-2. Dump the script into original language text -> translate into target language text -> build the target script -> go to 3
-3. Pack as resource pack/non-pack -> go to 4
-4. If the engine supports Unicode, just play -> if the engine uses Shift-JIS, try 2 approaches to display Chinese
+I explain these 4 parts step by step below. This section is written to be beginner-friendly so that people who have never done this can get started.
 
-* It is recommended to only run the translation of the first file, or just add some strings randomly, and return to the game to confirm that it can be displayed normally before translating all.
+* It is recommended to translate only the first file at first, or just add some Chinese text, and put it back into the game to confirm it displays correctly before translating everything
 
 (Click to expand detailed instructions)
 <details>
@@ -83,13 +101,15 @@ The general process of making a visual novel embedded translation patch is:
 ### Part 1 Identification and Unpacking
 
 </summary>
-Identifying the engine is actually very simple. Usually, using GARbro to open any resource pack in the game directory, the engine name will be displayed in the lower left corner of the status bar.
+Identifying the engine is actually very simple. Usually, when you open any resource pack in the game directory with GARbro, the engine name is shown in the status bar at the lower left.
 
-Or, refer to the [supported formats](https://morkt.github.io/GARbro/supported.html), and compare the suffixes of the resource packs.
+Or, refer to the [table of resource pack extensions](https://morkt.github.io/GARbro/supported.html) and compare the extensions of the resource packs.
 
-Scripts are usually in some resource packs with obvious keywords, or in directories with obvious keywords in the resource packs, such as: scene, scenario, message, script, etc. And scripts are usually divided into obvious chapters and characters, some of which are also divided into main route and erotic (such as with _h), usually you can find them by looking through a few resource packs.
+Story scripts are usually in resource packs with obvious keywords, or in directories with obvious keywords inside the resource packs, such as scene, scenario, message, or script. Scripts are usually split clearly by chapter or character, and some also separate the main story from the H scenes (e.g. with an _h suffix). Looking through a few resource packs is usually enough to find them.
 
-Especially for the new krkrz engine, GARbro can no longer open the resource pack, you can use the [KrkrzExtract project](https://github.com/xmoezzz/KrkrzExtract/releases/tag/1.0.0.0), drag the game to the exe to start. Then download a full cg save, and skip all the plots directly, you can also get the script file.
+Or, refer to [Dir-A's tutorials](https://space.bilibili.com/8144708/).
+
+In particular, GARbro can no longer open the resource packs of the newer krkrz engine. You can use the [KrkrzExtract project](https://github.com/xmoezzz/KrkrzExtract/releases/tag/1.0.0.0): drag the game onto the exe to launch it. Then download a full-CG save and skip (Ctrl) through all the story; this also gives you the script files.
 
 </details>
 <details>
@@ -101,16 +121,13 @@ Especially for the new krkrz engine, GARbro can no longer open the resource pack
 </summary>
 
 * **【2.1. Extract script text】**
-Usually, this project is combined with [VNTextPatch tool](https://github.com/arcusmaximus/VNTranslationTools) to unpack the script. VNTextPatch is a universal tool developed by arcusmaximus that supports extraction and injection of scripts for [many engines](https://github.com/arcusmaximus/VNTranslationTools#vntextpatch).
+&ensp;&ensp;&ensp;&ensp;Usually, this project is combined with the [VNTextPatch tool](https://github.com/arcusmaximus/VNTranslationTools) to unpack scripts. VNTextPatch is a universal script extraction and injection tool developed by arcusmaximus that [supports many engines](https://github.com/arcusmaximus/VNTranslationTools#vntextpatch). (Not every game on those engines works, though; extraction fails for some games in practice.)
 
-VNTextPatch is operated using cmd. In order to reduce the difficulty of getting started, a graphical interface is available in the useful_tools/GalTransl_DumpInjector folder. Click GalTransl_DumpInjector.exe to run.
-
-Now, you only need to select the original script directory, and then select the directory where you want to save the extracted original json. Here we usually put the original script in a folder called script_jp, and then create a new gt_input directory to store the extracted script:
-
+&ensp;&ensp;&ensp;&ensp;VNTextPatch is operated from cmd. To make it easier to get started, I made a graphical interface for it, which you can find in the project's useful_tools/GalTransl_DumpInjector folder. Run GalTransl_DumpInjector.exe.
+&ensp;&ensp;&ensp;&ensp;Now you only need to select the Japanese script directory and then the directory to save the extracted Japanese json. Usually the Japanese scripts are put in a folder called script_jp, and a new gt_input directory is created to store the extracted scripts:
 ![Picture 1](./img/img_dumper.png)
-
-GalTransl uses name-message JSON format for input, processing and output throughout. The extracted json file looks like this:
-
+&ensp;&ensp;&ensp;&ensp;Note that GalTransl uses JSON in name-message format for input, processing, and output throughout. [What is JSON](https://www.json.org/json-en.html)
+The extracted json file can be opened with EmEditor and usually looks like this:
 ```json
 [
   {
@@ -119,53 +136,61 @@ GalTransl uses name-message JSON format for input, processing and output through
   }
 ]
 ```
-Each {} object is a sentence, `message` is the message content, and if the object also has a `name`, it means it is a dialogue. **When names can be correctly extracted, GalTransl's translation quality will be better.**
+&ensp;&ensp;&ensp;&ensp;Each {object} is one sentence, and `message` is the message content. If the object also has a `name`, it is dialogue. Not every type of script can be extracted with names, but **GalTransl translates better when names can be extracted correctly**.
+&ensp;&ensp;&ensp;&ensp;PS. GalTransl only accepts json files in the specified format, but that does not tie GalTransl to VNTextPatch. You can also use the SExtractor tool, which now supports exporting the name-message JSON format that GalTransl needs.
 
-PS. GalTransl only supports input of json files in a specified format, but that does not mean that GalTransl is bound to the VNTextPatch tool. You can also use [SExtractor](https://github.com/satan53x/SExtractor) tool, which now supports exporting GalTransl's name-message format JSON.
+* **【2.2. Translate with the desktop app (Recommended)】**
+&ensp;&ensp;&ensp;&ensp;Download the latest version from [Releases](https://github.com/XD2333/GalTransl/releases/), extract it, and double-click `GalTransl Desktop.exe` to start the desktop app. The desktop app starts the backend service automatically; no manual steps are needed.
 
-* **【2.2. Using Desktop GUI (Recommended)】**
-Download the latest release from [Release](https://github.com/XD2333/GalTransl/releases/), extract it, and double-click `GalTransl Desktop.exe` to start. The desktop app automatically starts the backend service.
+&ensp;&ensp;&ensp;&ensp;Basic workflow after starting:
+1. **New project**: click "New project" on the home page, choose where to store the project, and import the files to translate
+2. **Configure the translation backend**: choose a translation backend (e.g. Deepseek, OpenAI) in the new project wizard and fill in the API Key and Endpoint. You can also pre-configure several backend profiles on the "Backend configuration" page in the left sidebar
+3. **Set up dictionaries**: configure the GPT dictionary and ordinary dictionaries on the project's "Project dictionary" page (at least a name dictionary is recommended)
+4. **Start translating**: start the translation on the "Start translation" page and watch progress and results in real time
+5. **Browse text**: after translation, check the automatic error finding results on the "Browse text" page, fix the cache, and regenerate
 
-Basic workflow after starting:
-1. **New Project**: Click "New Project" on the homepage, select project location, import files to translate
-2. **Configure Backend**: In the new project wizard, select translation backend (e.g. Deepseek, OpenAI, etc.), fill in API Key and Endpoint. You can also pre-configure multiple backend profiles in the "Backend Profiles" page on the left sidebar
-3. **Set Dictionaries**: Configure GPT dictionary and regular dictionaries in the project's "Project Dictionary" page (at minimum, configure a name dictionary)
-4. **Start Translation**: Click start translation on the "Translation Workbench" page, monitor progress and results in real-time
-5. **Review Cache & Problems**: After translation, check automatic error finding results on the "Cache & Problems" page, fix cache entries and regenerate
+&ensp;&ensp;&ensp;&ensp;The desktop app supports opening multiple projects at once, dark mode, custom backgrounds, and more; adjust them on the "Settings" page.
 
-The desktop app supports opening multiple projects simultaneously, dark mode, custom backgrounds, and more. These can be adjusted in the "Settings" page.
-
-* **【2.2b. Using Command Line (Advanced Users)】**
-To use the command-line version, rename `config.inc.yaml` to `config.yaml` in the `sampleProject` folder, put the source json files in the `gt_input` folder, and edit `config.yaml` to configure the translation backend:
+* **【2.2b. Translate with the command line (Advanced users)】**
+&ensp;&ensp;&ensp;&ensp;To use the command-line version, rename `config.inc.yaml` to `config.yaml` in the sample project folder `sampleProject`, put the Japanese json files into the `gt_input` folder, and edit `config.yaml` to configure the translation backend:
 
 ```yaml
 # Translation backend settings
 backendSpecific:
-  OpenAI-Compatible: # (ForGal/ForNovel/GenDic) OpenAI API compatible interface
+  OpenAI-Compatible: # (ForGal/ForNovel/GenDic) generic OpenAI API compatible interface
     tokens:
       - token: sk-example-key1
-        endpoint: https://api.deepseek.com # Request URL
+        endpoint: https://api.deepseek.com # Request URL, with or without v1
         modelName: deepseek-chat
       - token: sk-example-key2
-        endpoint: https://openrouter.ai/api/v1/chat/completions
+        endpoint: https://openrouter.ai/api/v1/chat/completions # v1 is not appended automatically when the URL ends with /chat/completions
         modelName: deepseek/deepseek-chat-v3-0324:free
-        stream: true
+        stream: true # Streaming requests can be enabled per token
 ```
 
-Configure reasoning effort in the backend editor, the `OpenAI-Compatible` section, or an individual token with `reasoningEffort: none/minimal/low/medium/high/xhigh/max`, which maps to the request parameter `reasoning_effort`. An unset global value omits the parameter; an unset token value inherits the global setting. Model names and URLs do not select a level automatically. Choose a level supported by your provider.
+Set the reasoning effort in "Backend configuration", or write `reasoningEffort: none/minimal/low/medium/high/xhigh/max` in the `OpenAI-Compatible` section or an individual token; it maps to the request parameter `reasoning_effort`. When the global value is unset the parameter is not sent, and an unset token value follows the global setting. The level is never chosen automatically from the model name or URL; check your provider's documentation for supported levels.
 
-After modifying the project settings, make sure you have installed the required dependencies (see Environment Preparation), then double-click `run_GalTransl_terminal.bat` and enter the project path to start translating.
+* Some paid API relay services, for example [SiliconFlow](https://cloud.siliconflow.cn/i/SvDatvsk) (modelName: "deepseek-ai/DeepSeek-V3.1-Terminus") and [oaipro](https://api.oaipro.com/register?aff=ceAU). These are only examples; you can search for more relays. This project does not guarantee their stability or availability.
 
-**However**, it is not recommended to start translating right away. Please at least learn about [GPT Dictionary usage](https://github.com/XD2333/GalTransl#gpt-dictionary) first, or use GenDic to generate a name dictionary, so as to ensure basic translation quality.
+&ensp;&ensp;&ensp;&ensp;Note that when you fill in a key obtained this way, you also need to change the endpoint address, which can usually be found in the platform's documentation:
+```yaml
+      - token: sk-example-key1
+        endpoint: https://api.siliconflow.cn # Request URL, with or without v1
+```
 
-After translation is complete, **remember to review the cache**, as LLMs often make mistakes. GalTransl automatically finds common problems and records them in the cache. You can fix the cache and rerun the program to regenerate the result json. See [Automatic Error Finding and Translation Cache](https://github.com/XD2333/GalTransl#automatic-error-finding).
+&ensp;&ensp;&ensp;&ensp;After modifying the project settings, make sure the required dependencies are installed (see Environment Preparation), then double-click `run_GalTransl_terminal.bat` and enter the project path to start translating.
 
-* **【2.3. Build target language script】**
-If you used the GalTransl extraction and injection tool to extract the script, build the same way: select the original script directory, translated json directory, and target script save directory, then click 'inject' to inject the text back into the script.
+&ensp;&ensp;&ensp;&ensp;**However, starting the translation right away is not recommended.** At least learn [how to use the GPT dictionary](https://github.com/XD2333/GalTransl/blob/main/README_EN.md#gpt-dictionary) first, or use GenDic to generate a name dictionary, and set up a name dictionary for each character of the game you are translating. Only then is basic translation quality ensured.
 
-Note:
-1. The target script save directory is usually called script_cn
-2. Generally use the same tool for both export and import. So test both import and export before starting translation.
+&ensp;&ensp;&ensp;&ensp;After translation, **remember to fix the cache**, because LLMs often make mistakes. GalTransl automatically finds some common problems and records them in the cache. You can fix the cache and rerun the program to regenerate the result json from it; see [Automatic Error Finding and Translation Cache](https://github.com/XD2333/GalTransl/blob/main/README_EN.md#automatic-error-finding).
+
+* **【2.3. Build the Chinese scripts】**
+&ensp;&ensp;&ensp;&ensp;If you extracted the scripts with the GalTransl extraction/injection tool, building works the same way: select the Japanese script directory, the Chinese json directory, and the directory to save the Chinese scripts, then click 'Inject' to inject the text back into the scripts. There are some pitfalls here, which Part 4 covers.
+
+Notes:
+1. The Chinese script directory is usually called script_cn, since the Japanese script directory is called script_jp
+2. Generally, import with the same tool you exported with. So check that both export and import work before you start translating.
+
 
 </details>
 
@@ -177,9 +202,8 @@ Note:
 
 </summary>
 
-After building the target language script, the next step is to find a way to make the game read it. Most mainstream engines support non-pack reading.
-
-Especially for krkr/krkrz engine, you can use [KirikiriTools tool](https://github.com/arcusmaximus/KirikiriTools) by arcusmaximus, download the version.dll inside, put it in the game directory, then create a new "unencrypted" folder in the game directory, put the script in, and krkr can read it.
+&ensp;&ensp;&ensp;&ensp;After building the Chinese scripts, the next step is to make the game read them. Most mainstream engines support loading files without repacking; see Dir-A's [tutorials](https://space.bilibili.com/8144708/) to check whether the engine you are working on supports it.
+&ensp;&ensp;&ensp;&ensp;In particular, for the krkr/krkrz engines you can use arcusmaximus's [KirikiriTools](https://github.com/arcusmaximus/KirikiriTools): download version.dll from it, put it in the game directory, create an "unencrypted" folder in the game directory, and put the scripts directly into it (no subdirectory needed). krkr will then read them.
 
 </details>
 
@@ -191,60 +215,89 @@ Especially for krkr/krkrz engine, you can use [KirikiriTools tool](https://githu
 
 </summary>
 
-First, you need to understand the basics of Unicode, Shift-JIS (SJIS), and GBK encoding. If the engine you are working with supports Unicode encoding (e.g. krkr, Artemis engine), you can generally play directly. But if the engine uses SJIS encoding, you will see garbled text and need to try 2 approaches:
+&ensp;&ensp;&ensp;&ensp;This part requires some basic knowledge of the Unicode, SJIS (Shift-JIS), and GBK encodings. To save effort I'll again point to [Dir-A's article](https://www.bilibili.com/read/cv12367744/); if you are not familiar with this area, read it first.
 
-**Route 1**: Inject scripts using GBK encoding, then modify the engine program to support GBK encoding
+If the engine you are working on supports Unicode, such as krkr or Artemis, you can usually just play. But if the engine uses SJIS, the text will be garbled when you open the game. In that case, try 2 approaches to make it display Chinese correctly:
 
-**Route 2**: Still inject scripts using JIS encoding, but use JIS tunnel or JIS replacement (recommended) combined with universal injection DLL to dynamically replace characters at runtime to display Chinese
+Route 1: inject the scripts with GBK encoding, then modify the engine program to support GBK
+Route 2: still inject the scripts with JIS encoding, but use JIS tunneling or JIS replacement (recommended) together with a universal injection dll to display Chinese through dynamic replacement at runtime
 
-For detailed instructions on JIS tunnel and JIS replacement, please refer to the [Chinese README](https://github.com/XD2333/GalTransl#第四章-引擎与编码) as these techniques are primarily relevant for Chinese translation.
+In VNTextPatch mode, the GalTransl extraction/injection tool injects scripts in sjis or unicode (utf8) by default, depending on the engine type.
+
+* **Using Route 1**
+(Note: this mode currently has a bug, and some engines freeze.) Check "GBK encoding injection" before injecting. In this mode, every character GBK does not support is replaced with a blank, e.g. the musical note ♪.
+Then you need ollydbg or windbg ([download here](https://down.52pojie.cn/Tools/Debuggers/)) to modify the engine.
+Finally, see [Dir-A's tutorials](https://space.bilibili.com/8144708/) again, which explain how to set breakpoints and patch the engine. This may be hard if you have never done any reverse engineering, but there is no way around it; follow the videos and keep trying.
+
+* **Using Route 2**
+Inject the scripts without checking anything first. If you get the message "sjis_ext.bin contains characters: xxx", the program injected in sjis and placed the characters that cannot be displayed into sjis_ext.bin in the script_cn directory for use by sjis tunnel mode.
+
+**JIS tunnel**: also from arcusmaximus's VNTranslationTools project, the [VNTextProxy component](https://github.com/arcusmaximus/VNTranslationTools#vntextproxy). When VNTextPatch injects text back into the scripts, it temporarily replaces characters that sjis does not support with characters that are undefined in sjis. VNTextProxy hooks the game through DLL hijacking and restores those characters when it encounters them.
+
+When using sjis tunnel mode, move `sjis_ext.bin` from `script_cn` into the game directory, then put the dlls in useful_tools\VNTextProxy into the game directory one at a time (version.dll is usually worth trying first, or check the import table with tools such as PEID/DIE). Run the game and see whether one of the dlls hooks it correctly so that the missing text displays (if not, those places will be blank). If it doesn't work, delete that DLL and try the next one. [Detailed settings here](https://github.com/XD2333/GalTransl/tree/main/useful_tools/VNTextProxy)
+
+**JIS replacement**: from AtomCrafty's [UniversalInjectorFramework](https://github.com/AtomCrafty/UniversalInjectorFramework#character-substitution) project, which also hooks the game through DLL hijacking and can replace a character with another configured character, regardless of encoding. I built [a replacement table](https://github.com/XD2333/GalTransl_DumpInjector/blob/main/hanzi2kanji_table.txt) that maps simplified Chinese characters not supported by jis to Japanese kanji that jis supports, following a set of rules. It covers 99.99% of commonly used simplified Chinese characters (see hanzi2kanji_table.txt), and the replacement feature is built into the GalTransl extraction/injection tool (new: [SExtractor](https://github.com/satan53x/SExtractor) now supports replacement too, and is easier to use). After replacement, UniversalInjectorFramework's dynamic hook replacement turns these Japanese kanji back into simplified Chinese characters in the game, so the game displays correctly.
+
+When using sjis replacement mode, first run the text injection of the GalTransl extraction/injection tool once to get the list of characters the game does not support (after injection it shows "sjis_ext.bin contains characters: xxx"). Then check "sjis replacement mode injection", copy those characters into the text box on the right, and click Inject again. You will get an sjis replacement mode configuration after injection.
+
+Open the useful_tools/UniversalInjectorFramework folder, which also contains many dlls; again, try them one by one. winmm.dll is usually worth trying first. Copy uif_config.json from that folder into the game directory as well, then edit the json and fill in `source_characters` and `target_characters` according to the configuration given by the GalTransl extraction/injection tool.
+Then run the game. If it runs normally and a console like this pops up:
+![img_terminal](./img/img_terminal.png)
+it most likely works. If not, delete that DLL and try the next one.
+Note: UniversalInjectorFramework also supports sjis tunnel mode: set `tunnel_decoder` to `True` and put the characters contained in sjis_ext.bin into `mapping`.
+Note: the UniversalInjectorFramework console window can be hidden. [Detailed configuration file settings here](https://github.com/XD2333/GalTransl/tree/main/useful_tools/UniversalInjectorFramework)
 
 </details>
 
 ## GalTransl Core Features
-Introduces GPT dictionary, cache, ordinary dictionary, problem finding and other functions.
+Introduces the GPT dictionary, cache, ordinary dictionaries, problem finding, and other features.
 (Click to expand detailed instructions)
 <details>
 
 <summary>
 
 ### GPT Dictionary
-The GPT dictionary system is a key function to improve translation quality when using GPT. It greatly improves translation quality by supplementing character settings and word explanations.
+&ensp;&ensp;&ensp;&ensp;The GPT dictionary system is the key feature for improving quality when translating with GalTransl. It greatly improves translation quality by supplying extra settings, and it is the core of what sets GPT translation apart from traditional machine translation. It works with gpt35, gpt4, and newbing.
+In the program directory, the `Dict` folder contains "通用GPT字典.txt" (general GPT dictionary), and you can create "项目GPT字典.txt" (project GPT dictionary) in the project folder. Generally, name definitions go into the project dictionary, and words that improve translation quality in general go into the general dictionary.
 
 </summary>
 
-* For example, you can pre-define the target language translation of each character name here, and explain the character's setting, such as gender, approximate age, occupation, etc. By automatically feeding GPT these settings, you can automatically adjust the appropriate pronouns, titles, etc., and fix the translation of names when they are in kana.
-* Or, you can supplement some words that GPT always translates incorrectly. If you provide some explanation, it will understand better.
+* For example, you can define the Chinese translation of each character's name here in advance and describe the character's setting, such as gender, approximate age, and occupation. By automatically feeding GPT these settings, it adjusts pronouns (he/she), forms of address, etc. appropriately, and keeps the Chinese translation of names written in kana consistent.
+* Or, you can supply words that GPT keeps getting wrong. If you add an explanation, it will understand them better.
 
 ---
 
-* Learn how to use GPT dictionary to feed character settings through the following example. The format of each line is `Source[Tab]Target[Tab]Explanation(optional)`, note the connector is **TAB**
+* The following example shows how to use the GPT dictionary to feed character settings. The format of each line is `Japanese[Tab]Chinese[Tab]Explanation (optional)`; note that the separators are **TAB**s
 ```
-フラン	Flan	name, lady, teacher
-笠間	Kasama	笠間 陽菜乃's lastname, girl
-陽菜乃	Hinano	笠間 陽菜乃's firstname, girl
-瞬	Shun	player's name, boy
+フラン	芙兰	name, lady, teacher
+笠間	笠间	笠間 陽菜乃's lastname, girl
+陽菜乃	阳菜乃	笠間 陽菜乃's firstname, girl
+张三	张三	player's name, boy
 $str20	$str20	player's codename, boy
 ```
-These dictionary entries define characters:
-* The first one tells GPT: "The translation of フラン is Flan, this is a name, a lady, a teacher". This way GPT will translate フラン先生 as Flan teacher instead of Flan doctor.
-* The second and third ones are the Japanese surname and given name of the same person. Names must be written in two lines, otherwise GPT may not recognize them.
-* The fourth one is the recommended way to write the **protagonist's name**. **Note: even if the source and target are the same, repeat them**
-* The fifth one is for when the protagonist uses a placeholder instead of a name in the script.
+These entries all define characters:
+* The first one tells GPT: "The kana フラン translates to 芙兰. It is a name, the person is a lady, and she is a teacher." That way GPT translates フラン先生 as 芙兰老师 (teacher) instead of 芙兰医生 (doctor).
+* The second and third are the Japanese surname and given name of the same person. Testing shows that names must be split into two lines, otherwise GPT3.5 won't recognize them.
+* The fourth is the recommended way to set the protagonist. **Note: even if the Japanese and Chinese are identical, write it again**
+* The fifth is the recommended way when the protagonist appears as a placeholder rather than a name in the script.
+* **Don't make the settings too complex**, or GPT will make up a lot of strange details.
 
 ---
 
-* Learn how to use GPT dictionary to feed new words:
+* The following example shows how to use the GPT dictionary to feed new words. The format of each line is also `Japanese[Tab]Chinese[Tab]Explanation (optional)`; note that the separators are **TAB**s
 ```
-大家さん  landlord
-あたし	I/ic	use 'ic' when being cute
+大家さん  房东
+あたし	我/人家	use '人家' when being cute
 ```
+* When you find that GPT doesn't know a word well, such as "大家さん", and the word has a fairly unique meaning, you can add it to the general GPT dictionary like this; the explanation is optional.
+* The second line gives an ambiguous Chinese translation "我/人家" with the explanation "use 人家 when being cute". GPT3.5 isn't that smart, but GPT4 can basically use it flexibly.
+* Want GPT to be spicier? Add your own dictionary entries (
 
-In the program directory, there is a "General GPT Dictionary.txt" in the `Dict` folder, and a "Project GPT Dictionary.txt" in the project folder. Generally, name definitions are written in the project dictionary, and common words that improve translation quality are written in the general dictionary.
+In the program directory, the `Dict` folder contains "通用GPT字典.txt" (general GPT dictionary), and the `sampleProject` folder contains "项目GPT字典.txt" (project GPT dictionary). Generally, name definitions go into the project dictionary, and words that improve translation quality in general go into the general dictionary.
+A word's explanation is only sent in the current round of conversation when the names and sentences sent to GPT this time contain that word.
+**But don't add every word**, ~~adding everything will only hurt you~~. It is recommended to only write **each character's settings** and **words that are always translated wrong**.
 
-Only when the name and sentence sent to GPT this time contain this word, will this word's explanation be sent into this round of conversation. **Don't add everything to it** — it is recommended to only write **the settings of each character** and **words that are always translated wrong**.
-
-The dictionary will be dynamically displayed in each request when running:
+At runtime, the dictionary is shown dynamically in each request:
 
 ![img_start](./img/img_start.png)
 
@@ -255,18 +308,19 @@ The dictionary will be dynamically displayed in each request when running:
 <summary>
 
 ### Ordinary Dictionary
-In GalTransl, ordinary dictionary is divided into "pre-translation dictionary" and "post-translation dictionary". Pre-translation dictionary does a-to-b replacement of original script before translation, and post-translation dictionary does a-to-b replacement of translated script after translation.
+In GalTransl, ordinary dictionaries are divided into "pre-translation dictionaries" and "post-translation dictionaries". A pre-translation dictionary does a-to-b replacement on the Japanese before translation, and a post-translation dictionary does a-to-b replacement on the Chinese after translation.
 
 </summary>
 
-Pre-translation dictionary is mostly used for unclear speech correction, and if multiple words represent the same meaning, you can use pre-translation dictionary to unify them first.
+Pre-translation dictionaries are mostly used to correct slurred speech, and when several words mean the same thing, you can unify them with a pre-translation dictionary first to reduce the GPT dictionary input.
 
-Post-translation dictionary is more common, but here we have an improved "conditional dictionary". Conditional dictionary adds a step of judgment before replacing, to avoid misreplacement and overreplacement.
-Each line format is `pre_jp/post_jp[tab]judgment word[tab]search word[tab]replacement word`
-* pre_jp/post_jp indicates the position where the judgment word is searched
-* Judgment word: If the judgment word is found in the search position, the replacement will be activated.
-* Judgment word can be prefixed with "!" to mean "replace if not present", otherwise it usually means "replace if present".
-* Judgment word can use `[or]` or `[and]` keywords to connect
+The post-translation dictionary is the more common kind of dictionary, replacing one word with another after translation, but here I improved it with something called a "conditional dictionary". A conditional dictionary simply adds a check before replacing, to avoid wrong or excessive replacements.
+Each line has the format `pre_jp/post_jp[tab]condition word[tab]search word[tab]replacement word`
+* pre_jp/post_jp is where the condition word is searched for; these are defined in the "Translation Cache" section
+* Condition word: the replacement is only activated if the condition word is found in the search location (pre_jp/post_jp).
+* The condition word can be prefixed with "!" to mean "replace if absent"; otherwise it means "replace if present".
+* Condition words can be joined with the `[or]` or `[and]` keywords. Multiple `[or]` joins mean "replace if any condition is met", and multiple `[and]` joins mean "replace only if all conditions are met".
+* Search word and replacement word work like an ordinary dictionary, replacing a with b.
 
 </details>
 
@@ -275,44 +329,52 @@ Each line format is `pre_jp/post_jp[tab]judgment word[tab]search word[tab]replac
 <summary>
 
 ### Translation Cache
-After starting the translation, you can find the translation cache in the transl_cache directory.
+After translation starts, you can find the translation cache in the transl_cache directory.
 </summary>
 
-The translation cache corresponds to json_jp one by one. During the translation process, the translation result will be written to the cache first. When a file is translated, it will appear in json_cn.
+The translation cache corresponds one-to-one with json_jp. During translation, results are written to the cache first, and a file only appears in json_cn after it has been fully translated.
 
-Key points:
-1. When you want to re-translate a sentence, open the corresponding translation cache file and delete the whole line of pre_zh for that sentence (**do not leave a blank line**)
-2. When you want to re-translate a whole paragraph, just delete the corresponding number of object blocks. When you want to re-translate a file, just delete the corresponding translation cache file.
-3. When GalTransl is translating, do not modify the cache of the file being translated. It will be overwritten anyway.
-4. json_cn result file = pre_zh/proofread_zh in translation cache + post-translation dictionary replacement + restore dialogue box
-5. When the new post_jp is inconsistent with the post_jp in the cache, it will trigger re-translation, which usually happens when a new pre-translation dictionary is added
+First, a summary of key points:
+1. To re-translate a sentence, open the corresponding cache file and delete that sentence's entire pre_zh line (**don't leave a blank line**)
+2. To re-translate a whole passage, delete the corresponding object blocks; to re-translate a file, delete its cache file.
+3. While GalTransl is translating, don't modify the cache of the file being translated; your edits would be overwritten.
+4. json_cn result file = pre_zh/proofread_zh in the translation cache + post-translation dictionary replacement + restored dialogue boxes
+5. When the new post_jp differs from the post_jp in the cache, re-translation is triggered. This usually happens after adding new pre-translation dictionary entries
 
+A typical cache entry looks like this:
 ```json
-{
-    "index": 4,
-    "name": "",
-    "pre_jp": "欠品していたコーヒー豆を受け取ったまでは良かったが、\r\n帰り道を歩いていると汗が吹き出してくる。",
-    "post_jp": "欠品していたコーヒー豆を受け取ったまでは良かったが、\r\n帰り道を歩いていると汗が吹き出してくる。",
-    "pre_zh": "领取了缺货的咖啡豆还好，\r\n但是走在回去的路上就汗流浃背了。",
-    "proofread_zh": "领了缺货的咖啡豆倒是没问题，\r\n可是走在回去的路上，汗水就冒了出来。",
-    "trans_by": "NewBing",
-    "proofread_by": "NewBing",
-}
+    {
+        "index": 4,
+        "name": "",
+        "pre_jp": "欠品していたコーヒー豆を受け取ったまでは良かったが、\r\n帰り道を歩いていると汗が吹き出してくる。",
+        "post_jp": "欠品していたコーヒー豆を受け取ったまでは良かったが、\r\n帰り道を歩いていると汗が吹き出してくる。",
+        "pre_zh": "领取了缺货的咖啡豆还好，\r\n但是走在回去的路上就汗流浃背了。",
+        "proofread_zh": "领了缺货的咖啡豆倒是没问题，\r\n可是走在回去的路上，汗水就冒了出来。",
+        "trans_by": "NewBing",
+        "proofread_by": "NewBing",
+    },
 ```
+What each field means:
+* Basic fields:
+`index`  serial number
+`name`  character name
+`pre_jp`  original Japanese
+`post_jp`  processed Japanese. Generally, post_jp = pre_jp with dialogue boxes removed + pre-translation dictionary replacement. If you can code, you can add your own processing here
+`pre_zh`  raw Chinese translation
+`proofread_zh`  proofread Chinese
+(There is no post_zh; post_zh is in the result folder.)
+`trans_by`  translation engine/translator
+`proofread_by`  proofreading engine/proofreader
+`problem`  stored problems; see Automatic Error Finding below.
+`post_zh_preview`  for previewing json_cn, but **editing it does not apply to json_cn**; edit `pre_zh`/`proofread_zh` instead
 
-Field explanations:
-* `index` — serial number
-* `name` — character name
-* `pre_jp` — original text
-* `post_jp` — processed text (generally: pre_jp with dialogue box removed + pre-translation dictionary replacement)
-* `pre_zh` — raw translation
-* `proofread_zh` — proofread translation
-* `trans_by` — translation engine/translator
-* `proofread_by` — proofreading engine/proofreader
-* `problem` — stored problems (see Automatic Error Finding)
-* `post_zh_preview` — for previewing json_cn, but **modifying it will not apply to json_cn**; modify `pre_zh`/`proofread_zh` instead
+* A quick guide to fixing the cache with EmEditor: select one file, right-click and open it with EmEditor, then select all files in transl_cache and drag them in.
+The tabs may take up a lot of space at this point. Right-click a tab, choose Customize Tabs, and change "When tabs do not fit" to "None" so the tabs stay on one line (requires EmEditor Professional).
+Then press Ctrl+F and search for the keywords you're interested in (such as problem or proofread_comment), check "Search all documents in the group" to search all files quickly, or click Extract to preview all problems at once.
 
-After determining the content that needs to be modified, directly modify the `pre_zh` or `proofread_zh` of the corresponding sentence, and then rerun the program to generate a new json_cn.
+* **VSCode** is also a great tool for fixing the cache: open the cache folder in VSCode and search globally for e.g. problem to quickly locate all problems
+
+* Once you know what needs changing, edit the `pre_zh` or `proofread_zh` of the corresponding sentence, then **run GalTransl again**; a new json_cn is generated quickly
 
 </details>
 
@@ -322,38 +384,39 @@ After determining the content that needs to be modified, directly modify the `pr
 
 ### Automatic Error Finding
 
-GalTransl has built a system of automatically finding problems based on rules based on long-term observation of translation results.
-
+Based on long-term observation of translation results, GalTransl has built a rule-based system for finding problems automatically.
 </summary>
-The error finding system is enabled in the `config.yaml` of each project. The default configuration is:
+The problem finding system is enabled in each project's `config.yaml`. The default configuration is:
 
 ```yaml
-# Automatic problem analysis config
+# Automatic problem analysis config; add # before - to disable an item
 problemAnalyze:
-  problemList: # Problem checklist
-    - 词频过高 # Repeated more than 20 times
+  problemList: # Problems to look for
+    - 词频过高 # Word repeated more than 20 times
     - 标点错漏 # Punctuation added or missing
-    - 残留日文 # Japanese hiragana/katakana remaining
-    - 丢失换行 # Missing line breaks
-    - 多加换行 # More line breaks than original
-    - 比日文长 # 1.3x longer than Japanese
-    - 字典使用 # Not following GPT dictionary requirements
-    - 语言不通 # Suspected not translated to target language
+    - 残留日文 # Leftover Japanese hiragana/katakana
+    - 丢失换行 # Missing line breaks, usually harmless
+    - 多加换行 # More line breaks than the original, may overflow the screen
+    - 比日文长 # More than 1.3x longer than the Japanese
+    - 字典使用 # Not translated as the GPT dictionary requires
+    - 语言不通 # Possibly not translated into the target language; for Chinese, checks for non-GBK characters
+    #- 引入英文 # English introduced where the original had none
+    #- 比日文长严格 # Strict check: must not be longer than the Japanese
 ```
 
-Currently supports finding the above problems. Some items are commented out with #, you can uncomment to enable, or add # to disable.
+The problems above are currently supported. Some items are commented out with #; remove the # to enable them, or add # to stop looking for a problem.
 
-After finding problems, they are stored in the translation cache. You can use Emeditor or VSCode to batch search the "problem" keyword to see all current problems, and correct them by modifying the cache.
+Found problems are stored in the translation cache (see the Translation Cache section). Batch-extract the problem keyword with EmEditor to see all current problems, and fix them by editing the cache.
 
-(New) You can also configure `retranslKey` in config.yaml to batch re-translate a specific problem, e.g. `retranslKey: "残留日文"`
+(New) You can now also set retranslKey in config.yaml to batch re-translate a specific problem, e.g. retranslKey: "残留日文"
 
 </details>
 
 ## Configuration and Engine Settings
 
-ForGal-json, ForGal-markdown, and ForNovel use multi-turn translation by default. Consecutive batches within each file chunk share a conversation: the first turn sends the full instructions, and later turns send new text and the current glossary. Reasoning returned by streaming or non-streaming APIs is preserved in assistant history. Sakura/GalTransl local models keep their existing behavior.
+ForGal-json, ForGal-markdown, and ForNovel use multi-turn translation by default. Consecutive batches within the same file chunk share a conversation: the first turn sends the full rules and translation guidelines, and later turns send new text and the current glossary. Reasoning content from streaming and non-streaming responses is passed back with the message history. Sakura/GalTransl local models keep their existing flow.
 
-Use the desktop translation settings or these keys under `common` in the project configuration:
+Multi-turn translation can be toggled in the desktop "Translation settings", and session limits can be adjusted in "Advanced settings"; you can also set them under `common` in the project configuration:
 
 ```yaml
 gpt.multiTurn: true
@@ -362,11 +425,11 @@ gpt.multiTurn.maxChars: 24000
 gpt.contextNum: 8
 ```
 
-A new conversation starts at the turn or character limit (including reasoning), seeded with the latest `gpt.contextNum` translated lines. The budget limits history and does not truncate a single batch; reduce the batch size for models with smaller context windows. Gaps caused by cache hits also restart context at the corresponding position. Set `gpt.multiTurn: false` to restore single-turn requests. Setting `gpt.contextNum: 0` disables the seed context only. Each request still sends the full conversation, so costs depend on the provider's context caching.
+When the turn count or character budget (including reasoning) reaches its limit, a new conversation starts, seeded with the latest `gpt.contextNum` translated lines. The character budget limits history and does not truncate a single batch; for models with smaller context windows, also reduce the number of lines per request. Gaps caused by cache hits rebuild the context from the corresponding position. Set `gpt.multiTurn: false` to restore single-turn requests; `gpt.contextNum: 0` only disables the seed context and does not disable multi-turn conversations. The API still receives the full conversation history each turn, so costs depend on the provider's context caching.
 
-The desktop GUI manages translation backend configuration through the graphical interface (the "Backend Profiles" page on the left sidebar), no manual YAML editing required. Project-level configuration can be modified in the "Config Editor" page.
+The desktop app manages translation backend configuration through the graphical interface (the "Backend configuration" page in the left sidebar), with no manual YAML editing required. Project-level configuration can be changed on the "Edit configuration" page.
 
-For the command-line version, detailed settings can be found directly in the `config.yaml` file comments, which are now quite comprehensive.
+For the command-line version, read the comments in the `config.yaml` file for the detailed settings; they are now fairly comprehensive.
 
 
 ## Development and Builds
@@ -375,19 +438,56 @@ For the command-line version, detailed settings can be found directly in the `co
 <summary>Development environment (developers / advanced users)</summary>
 
 * **Command-line Version (Developers / Advanced Users)**
-  To use the command-line version or participate in development:
+  To use the command-line version or take part in development:
 
-  1. [Download this project](https://github.com/XD2333/GalTransl/releases/) or clone the repository, extract to any location
+  1. [Download this project](https://github.com/XD2333/GalTransl/releases/) or clone the repository, and extract it anywhere
   2. Install Python 3.11.9. [Download](https://www.python.org/downloads/release/python-3119/)
-  **Check "Add Python to PATH" during installation**
-  3. Install Python dependencies: double-click `安装、更新依赖.bat`, or run `pip install -r requirements.txt`
-  4. (Desktop development) Install Node.js, run `npm install` in the `desktop` directory, then run `run_desktop_dev.bat`
+  **Check "Add Python to PATH" at the bottom during installation**
+  3. Install the Python dependencies: double-click `安装、更新依赖.bat`, or run `pip install -r requirements.txt` manually
 
-### Linux x86_64 development
+### Desktop development mode
 
-Linux support targets x86_64 only. ARM is not included in the supported scope.
+The following steps are for Windows. To run the desktop app from source, first clone or download this repository and open a terminal in the repository root (the directory containing `run_desktop_dev.bat`).
 
-Install the required WebKitGTK and packaging dependencies on Ubuntu/Debian:
+**First-time setup**
+
+1. Install [Python 3.11.9](https://www.python.org/downloads/release/python-3119/) and [Node.js LTS](https://nodejs.org/), and make sure `python`, `node`, and `npm` are on PATH.
+2. To launch the native desktop window, install [Rust](https://www.rust-lang.org/tools/install) with the default Windows MSVC toolchain; the Rust installer prompts you to install the VC toolchain and SDK, which you should install as well.
+3. After installation, reopen the terminal and run the following commands in the repository root to create a project-local Python environment and install the dependencies:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+npm.cmd --prefix desktop ci
+```
+
+**Daily startup**
+
+Double-click `run_desktop_dev.bat` in the repository root, or run in a terminal:
+
+```powershell
+.\run_desktop_dev.bat
+```
+
+The startup script automatically activates the repository's `.venv` and detects Cargo installed in the default `%USERPROFILE%\.cargo\bin`. It opens separate development consoles for the Python backend and the frontend:
+
+- The backend runs at [http://127.0.0.1:12333](http://127.0.0.1:12333) and the frontend dev server at [http://127.0.0.1:1420/](http://127.0.0.1:1420/).
+- When Cargo is detected, it compiles and opens the Tauri desktop window. The first launch downloads Rust dependencies and compiles them; wait for the console to finish.
+- When Cargo is not detected, it starts browser development mode; open the frontend address manually. This mode does not need Rust, C++ build tools, or WebView2.
+- Frontend changes hot-reload, and Rust changes recompile automatically; restart the backend after changing the Python backend code.
+
+**Notes**
+
+- `.venv` and the dependencies only need to be created and installed once. After updating the source, if dependencies changed, rerun the Python dependency installation command above and `npm.cmd --prefix desktop ci`.
+- If you get `ModuleNotFoundError`, check that the dependencies were installed into the repository's `.venv`; the startup script does not install Python dependencies automatically.
+- Make sure ports `12333` and `1420` are not used by other instances before starting. To exit, press `Ctrl+C` in both the backend and frontend development consoles to stop the services, then close the consoles; closing only the desktop window does not stop a separately running Python backend.
+- The backend binds its port exclusively; if started twice, the new backend reports that the port is in use and exits, while the existing backend keeps running. After applying this fix, stop all previously started old backends before running the startup script again.
+
+### Linux x86_64 development and builds
+
+Linux support currently covers x86_64 only, not ARM.
+
+On Ubuntu 22.04+/Debian 12+, install the following dependencies:
 
 ```bash
 sudo apt-get update
@@ -395,7 +495,14 @@ sudo apt-get install -y build-essential curl file libssl-dev patchelf rpm \
   libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
 ```
 
-Set up and start the desktop development environment:
+On Fedora:
+
+```bash
+sudo dnf install webkit2gtk4.1-devel openssl-devel curl wget file \
+  libappindicator-gtk3-devel librsvg2-devel rpm-build dpkg
+```
+
+First-time setup and daily startup:
 
 ```bash
 python3.11 -m venv .venv
@@ -405,25 +512,34 @@ npm --prefix desktop ci
 ./run_desktop_dev.sh
 ```
 
-Build the Linux portable release artifact:
+The script starts the Python backend first and then the Tauri desktop app; without Cargo installed, it falls back to browser development mode.
+
+Build the Linux release package:
 
 ```bash
 python build_linux_x64.py --no-bundles
 ```
 
-Build release packages on Ubuntu 22.04 or an equivalent glibc baseline for wider compatibility. Linux, macOS, and Windows read and write common dictionaries (`Dict/`), global translation guidelines (`translation_guidelines/`), and custom backgrounds (`desktop-background/`) in the program directory by default. Sessions and application settings live in `~/.galtransl`, with legacy sessions and settings migrated on first launch. An explicit `GALTRANSL_DATA_DIR` override places sessions, settings, and these three directories under the selected data directory; dictionaries and guidelines are seeded from the program directory without overwriting existing edits. `GALTRANSL_APP_SETTINGS_PATH` can override the application settings file separately.
+Linux CI and official releases only produce the portable package; to test installers locally, choose Tauri installer formats with `--formats deb,appimage`.
+
+Output is written to `release/`:
+
+- `GalTransl_*_linux_x86_64.tar.gz`
+
+Official release packages should be built on Ubuntu 22.04 or an environment with an equivalent glibc baseline. As on Windows, Linux and macOS read and write the common dictionaries `Dict/`, global translation guidelines `translation_guidelines/`, and custom backgrounds `desktop-background/` in the program directory by default. Sessions and application settings live in `~/.galtransl`, and old sessions and settings are migrated on first launch. When `GALTRANSL_DATA_DIR` is set explicitly, sessions, settings, and these three directories use the specified data directory; dictionaries and guidelines are seeded from the program directory without overwriting existing edits. `GALTRANSL_APP_SETTINGS_PATH` can specify the application settings file separately.
+
 
 
 ### macOS development and builds
 
-macOS builds cover both Intel (x86_64) and Apple Silicon (arm64). Install Xcode Command Line Tools, Python 3.11, Node.js, Rust, and the project dependencies:
+macOS builds currently cover Intel (x86_64) and Apple Silicon (arm64). Install Xcode Command Line Tools, Python 3.11, Node.js, Rust, and the project dependencies:
 
 ```bash
 npm --prefix desktop ci
 python build_macos.py
 ```
 
-Build outputs are written to `release/` and include an architecture-specific `.dmg` and portable `.tar.gz`. Unsigned builds may be blocked by macOS Gatekeeper; configure Apple Developer signing and notarization for public distribution.
+Build outputs are in `release/`, including an architecture-specific `.dmg` and portable `.tar.gz`. Unsigned builds may be blocked by macOS Gatekeeper; configure Apple Developer signing and notarization for official distribution.
 
 </details>
 
@@ -432,32 +548,35 @@ Build outputs are written to `release/` and include an architecture-specific `.d
 
 ### Automated builds and releases
 
-[Build and draft release](https://github.com/GalTransl/GalTransl/actions/workflows/build-release.yml) builds desktop packages on native Windows x64 and Ubuntu 22.04 x86_64 runners.
+[Build and draft release](https://github.com/GalTransl/GalTransl/actions/workflows/build-release.yml) builds the desktop packages on native Windows x64, Ubuntu 22.04 x86_64, and macOS Intel/Apple Silicon runners.
+
+Release checks launch the extracted backend from a separate directory with temporary configuration and user data directories, and actually parse TXT, JSON, and EPUB files. On macOS, they also mount the DMG, copy its `.app`, validate the version, frontend/backend architectures, and resources, then run the same checks against the backend inside the app bundle.
 
 | Trigger | Result |
 | --- | --- |
-| Push to `main` or open/update a PR | Test and build Windows, Linux, and macOS; upload Actions artifacts |
-| Actions → Build and draft release → Run workflow | Manual test build; artifacts only, no Release changes |
-| Push a version tag (`8.2.0` or `v8.2.0`) | Create a draft Release and attach packages only after Windows, Linux, and macOS pass tests, builds, and packaged-backend checks |
+| Push to `main` or submit a PR | Test and build Windows, Linux, and macOS; upload this run's Actions artifacts |
+| Actions → Build and draft release → Run workflow | Manual test build; produces artifacts only, no Release is created or modified |
+| Push a version tag (`8.2.0` or `v8.2.0`) | After all Windows, Linux, and macOS tests, builds, and post-packaging checks pass, create a draft Release and upload the assets |
 
-Release checks launch the extracted backend from a separate directory with temporary settings and user data, and parse real TXT, JSON, and EPUB files. On macOS, they also mount the DMG, copy its `.app`, validate the version, both executable architectures and resources, then run the same checks against the backend inside the app bundle.
-
-**Download test builds:** open the workflow run and choose an artifact (retained for 14 days). Linux and macOS portable builds are provided directly as `GalTransl_<version>_linux_x86_64.tar.gz`, `GalTransl_<version>_macos_x86_64.tar.gz`, or `GalTransl_<version>_macos_arm64.tar.gz`. Extract once to use them, with executable permissions preserved. The Windows `GalTransl-windows-x64` and macOS architecture-specific `dmg` artifacts are still delivered in an outer ZIP by Actions.
+**Download test builds:** open the workflow run details and download what you need under **Artifacts** (all retained for 14 days). Linux and macOS portable packages are provided directly as `GalTransl_<version>_linux_x86_64.tar.gz`, `GalTransl_<version>_macos_x86_64.tar.gz`, or `GalTransl_<version>_macos_arm64.tar.gz`; extract once to use them, with executable permissions preserved. The Windows `GalTransl-windows-x64` artifact and the macOS architecture-specific `dmg` artifacts are still wrapped in an outer ZIP by Actions.
 
 **Publish a new version (maintainers):**
 
-1. Update `GALTRANSL_VERSION` in `GalTransl/__init__.py`, commit, and push the code including this workflow.
-2. Push a new matching tag. For example, if the next unpublished source version is `8.2.0`:
+1. Update `GALTRANSL_VERSION` in `GalTransl/__init__.py`, then commit and push the code that includes this workflow.
+2. Push a new tag matching the source version. The example below uses the not-yet-released `8.2.0`; replace it with the actual version:
    ```bash
    git tag 8.2.0
    git push origin 8.2.0
    ```
-3. Wait for the workflow to succeed, inspect the draft under **Releases**, edit the release notes, then click **Publish release**. Do not publish while assets are still uploading.
+3. Wait for the workflow to succeed, check the automatically generated draft under **Releases**, add release notes, then click **Publish release** manually. Don't publish the draft while uploads are still in progress.
 
-Tags must be `X.Y.Z` or `vX.Y.Z` and match the source version. Never move or reuse existing tags such as `8.1.0`. Release assets include the Windows `.zip`, Linux `.tar.gz`, macOS Intel/Apple Silicon `.dmg` and `.tar.gz` files, and `SHA256SUMS.txt`. After downloading all assets, verify with `sha256sum -c SHA256SUMS.txt`; on Windows, compare PowerShell `Get-FileHash <file> -Algorithm SHA256` against the manifest.
+Tags may be `X.Y.Z` or `vX.Y.Z` and must match the source version; never move or reuse an existing tag (e.g. `8.1.0`). Official assets include the Windows `.zip`, Linux `.tar.gz`, macOS Intel/Apple Silicon `.dmg` and `.tar.gz`, and `SHA256SUMS.txt`. After downloading all assets, verify them with `sha256sum -c SHA256SUMS.txt`; on Windows, compare PowerShell `Get-FileHash <file> -Algorithm SHA256` against the list.
 
-Only the built-in `GITHUB_TOKEN` is used; no extra PAT or translation API keys are needed. Only the release job requests `contents: write`; organization policies must permit Release writes. Reruns replace generated assets on an existing draft while preserving its edited title and notes, and refuse to overwrite a published Release. Even manually running the workflow on a tag only produces artifacts.
+The workflow only uses GitHub's built-in `GITHUB_TOKEN`; no extra PAT or translation API key is needed. Only the release job requests `contents: write`; if organization policy forbids writes, an administrator needs to allow Release writes for this repository. Failed runs can be rerun: an existing draft has its generated assets updated while keeping the manually edited title and notes, and a Release that has already been published is never overwritten. Manually running the workflow on a tag also only produces artifacts.
 
-The post-build smoke test extracts the final portable archive and checks the backend version and plugin listing outside the source checkout. It is not a full GUI, installer, or all-plugins functionality test.
+After the build, the final portable package is extracted and its backend is started outside the source directory to check the version and plugin list; this does not replace functional testing of the full desktop GUI, the installers, and all plugins.
 
 </details>
+
+
+
