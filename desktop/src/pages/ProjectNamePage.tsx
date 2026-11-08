@@ -52,7 +52,8 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
   const aiTranslateAbortRef = useRef<AbortController | null>(null);
 
   // GPT dict integration state
-  const [useGptDictForName, setUseGptDictForName] = useState(true);
+  // 读到配置前按关闭：否则叠加 effect 会先拿字典改写人名表，哪怕项目其实没开
+  const [useGptDictForName, setUseGptDictForName] = useState(false);
   const [gptDictNameMap, setGptDictNameMap] = useState<Map<string, string>>(new Map());
   /** Bumped whenever the name table is (re)loaded so the GPT dict overlay reapplies to it */
   const [namesRevision, setNamesRevision] = useState(0);
@@ -225,7 +226,8 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
       try {
         const res = await fetchProjectConfig(projectId, configFileName || 'config.yaml');
         const dictCfg = (res.config?.dictionary ?? {}) as Record<string, unknown>;
-        const enabled = dictCfg.useGPTDictInName === undefined ? true : Boolean(dictCfg.useGPTDictInName);
+        // 默认开启：缺键也按开启（与 DefaultProjectConfig、Name.py、配置页开关一致），只有显式 false 才关闭
+        const enabled = dictCfg.useGPTDictInName !== false;
         if (cancelled) return;
         setUseGptDictForName(enabled);
         if (enabled) {
@@ -234,7 +236,7 @@ export function ProjectNamePage({ ctx, active = true }: { ctx: ProjectPageContex
           setGptDictNameMap(map);
         }
       } catch {
-        // Non-critical: keep default enabled if config can't be read
+        // Non-critical: stay disabled if config can't be read
       }
     })();
     return () => { cancelled = true; };

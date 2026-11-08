@@ -88,21 +88,25 @@ class ProjectStatisticsTests(unittest.TestCase):
         after = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in self.project.rglob("*") if path.is_file()}
         self.assertEqual(before, after)
 
-    def test_disabled_or_missing_flag_preserves_raw_missing_count_and_pagination_parity(self):
-        for enabled in (False, None):
-            with self.subTest(enabled=enabled):
-                self.config["dictionary"].pop("useGPTDictInName", None)
-                if enabled is not None:
-                    self.config["dictionary"]["useGPTDictInName"] = enabled
-                self.save_config()
-                self.requests.clear()
-                summary = _tool_get_project_overview(self.runner, {"include": ["names"]})["names"]
-                table = _tool_get_name_table(self.runner, {"limit": 1, "offset": 1, "only_missing": True})
-                self.assertEqual(summary["missing_translations"], 3)
-                self.assertEqual(summary["missing_translations"], table["matched"])
-                self.assertEqual(table["returned"], 1)
-                self.assertNotIn("use_gpt_dict_in_name", summary)
-                self.assertFalse(any("/dictionary" in path for path in self.requests))
+    def test_missing_flag_counts_as_enabled(self):
+        """useGPTDictInName 默认开启：配置里没写也按开启统计。"""
+        self.config["dictionary"].pop("useGPTDictInName", None)
+        self.save_config()
+        summary = _tool_get_project_overview(self.runner, {"include": ["names"]})["names"]
+        self.assertTrue(summary["use_gpt_dict_in_name"])
+        self.assertEqual(summary["missing_translations"], 1)
+
+    def test_disabled_flag_preserves_raw_missing_count_and_pagination_parity(self):
+        self.config["dictionary"]["useGPTDictInName"] = False
+        self.save_config()
+        self.requests.clear()
+        summary = _tool_get_project_overview(self.runner, {"include": ["names"]})["names"]
+        table = _tool_get_name_table(self.runner, {"limit": 1, "offset": 1, "only_missing": True})
+        self.assertEqual(summary["missing_translations"], 3)
+        self.assertEqual(summary["missing_translations"], table["matched"])
+        self.assertEqual(table["returned"], 1)
+        self.assertNotIn("use_gpt_dict_in_name", summary)
+        self.assertFalse(any("/dictionary" in path for path in self.requests))
 
     def test_selected_config_controls_overlay_and_dictionary_summary(self):
         self.config["dictionary"]["gpt.dict"] = ["(project_dir)b.txt"]

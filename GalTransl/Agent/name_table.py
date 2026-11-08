@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 # ---- GPT 字典用于 name 字段（dictionary.useGPTDictInName）----
 # 翻译时（GalTransl/Name.py 的 load_name_table）会拿 GPT 字典里同名的词条覆盖 name 字段，
-# 而且这个开关默认就是开的（见 DefaultProjectConfig）。也就是说字典收录了的人名，真正生效的
+# 而且这个开关默认就是开的（见 DefaultProjectConfig；缺键也按开启）。也就是说字典收录了的人名，真正生效的
 # 是字典译名而不是表里写的——get_name_table 若不体现这一点，模型会去补一整批字典里早就有的
 # 名字，或者以为改表就能改掉字典已覆盖的译名。下面这套就是按同一口径把字典译名叠进返回值
 # （前端人名页的 overlayGptDictOntoNames 是同一套规则的另一份实现：字典优先于表）。
@@ -66,9 +66,9 @@ def _gpt_dict_name_map(runner: AgentRunner) -> dict[str, str]:
 def _use_gpt_dict_in_name(runner: AgentRunner) -> bool:
     """配置里 dictionary.useGPTDictInName 是否开着。
 
-    取值口径与 Name.py 一致（**缺键 = 没开**）：配置里没写就意味着翻译时不会拿字典补 name
-    字段，这时在 names(action="read") 里补上译名等于骗模型——它会以为这些名字已经有人管了。
-    配置读不到也按"没开"处理：这只是附加信息，不值得为一个可选展示把工具弄失败。
+    取值口径与 Name.py 一致（**缺键 = 开启**，与 DefaultProjectConfig 的默认值相同）；只有显式写成
+    false 才算关闭。配置读不到则按"没开"处理：这只是附加信息，不值得为一个可选展示把工具弄失败，
+    也不该在不确定时给模型补出可能并不生效的译名。
     """
     try:
         pid = runner._project_id()
@@ -82,8 +82,9 @@ def _use_gpt_dict_in_name(runner: AgentRunner) -> bool:
         return False
     dictionary = config.get("dictionary")
     if not isinstance(dictionary, dict):
-        return False
-    return bool(dictionary.get("dictionary.useGPTDictInName", dictionary.get("useGPTDictInName", False)))
+        dictionary = {}
+    value = dictionary.get("dictionary.useGPTDictInName", dictionary.get("useGPTDictInName"))
+    return True if value is None else bool(value)
 
 
 def _fill_names_from_gpt_dict(

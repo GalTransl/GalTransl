@@ -3,7 +3,8 @@ import openpyxl
 from os.path import join as joinpath, splitext
 from GalTransl.CSplitter import SplitChunkMetadata
 from GalTransl import LOGGER, INPUT_FOLDERNAME, CACHE_FOLDERNAME
-from GalTransl.ConfigHelper import CProjectConfig
+from GalTransl.ConfigHelper import CProjectConfig, initDictList
+from GalTransl.Dictionary import CGptDict
 import csv
 from InquirerPy import inquirer
 from InquirerPy.base.control import Choice
@@ -162,6 +163,25 @@ def _load_existing_dst_names(proj_dir: str) -> Dict[str, str]:
     return dst_names
 
 
+_DICT_PROJECT_MARKER = "(project_dir)"
+
+
+def _project_gpt_dict(proj_config: CProjectConfig) -> CGptDict:
+    """只含项目字典的 GPT 字典，供 useGPTDictInName 用在 name 字段。
+
+    翻译时的 GPT 字典还包含通用字典（如 GPT字典.txt 里的「メイド→女仆」），
+    这类泛用词条不该改写说话人。只取 (project_dir) 开头的条目，与人名翻译页、
+    Agent 的 names 工具读取的范围一致（server._collect_project_dict_payload）。
+    get_dst 是全等查找、同词取首个，不需要 sort_dic。
+    """
+    entries = [
+        str(entry)
+        for entry in proj_config.getDictCfgSection("gpt.dict") or []
+        if str(entry).startswith(_DICT_PROJECT_MARKER)
+    ]
+    return CGptDict(initDictList(entries, "", proj_config.getProjectDir()))
+
+
 def load_name_table(
     name_table_path: str, firstime_load: bool, chunks: List[SplitChunkMetadata], proj_config: CProjectConfig
 ) -> Dict[str, str]:
@@ -177,9 +197,9 @@ def load_name_table(
     """
 
     usePostDictInName = proj_config.getDictCfgSection("usePostDictInName") or False
-    useGPTDictInName = proj_config.getDictCfgSection("useGPTDictInName") or False
+    # 默认开启（DefaultProjectConfig）：缺键也按开启，只有显式 false 才关闭
+    useGPTDictInName = proj_config.getDictCfgSection("useGPTDictInName") is not False
     usePreDictInName=proj_config.getDictCfgSection("usePreDictInName") or False
-    gpt_dic = proj_config.gpt_dic
     post_dic = proj_config.post_dic
     pre_dic=proj_config.pre_dic
 
@@ -329,12 +349,13 @@ def load_name_table(
         LOGGER.info(f"usePreDictInName: 使用译前字典载入 {count} 条name替换表")
 
     if useGPTDictInName:
+        gpt_dic = _project_gpt_dict(proj_config)
         count = 0
         for name in name_counter.keys():
             if gpt_dic.get_dst(name) != "":
                 name_table[name] = gpt_dic.get_dst(name)
                 count += 1
-        LOGGER.info(f"useGPTDictInName: 使用GPT字典载入 {count} 条name替换表")
+        LOGGER.info(f"useGPTDictInName: 使用项目GPT字典载入 {count} 条name替换表")
 
     if usePostDictInName:
         count = 0

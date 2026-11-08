@@ -263,18 +263,19 @@ class GptDictToggleTests(unittest.TestCase):
         self.assertEqual(result["names"][0]["dst_name"], "")
         self.assertEqual(runner.writes, [])
 
-    def test_missing_flag_counts_as_off(self):
-        """与 Name.py 的取值口径一致：配置里没写 = 翻译时不吃字典。"""
+    def test_missing_flag_counts_as_on(self):
+        """与 Name.py、DefaultProjectConfig 一致：默认开启，配置里没写也按开启。"""
         runner = _NameRunner(
             names=[{"src_name": "ドルード", "dst_name": ""}],
             config=_config(None),
+            gpt_dict_files=["gpt_dict.txt"],
+            dict_contents=_dict_file("ドルード	多鲁德"),
         )
 
         result = _tool_get_name_table(runner, {})
 
-        self.assertNotIn("use_gpt_dict_in_name", result)
-        self.assertEqual(result["total"], len(runner.names))
-        self.assertEqual(result["names"], runner.names)
+        self.assertTrue(result["use_gpt_dict_in_name"])
+        self.assertEqual(result["names"][0]["dst_name"], "多鲁德")
 
     def test_flat_and_expanded_config_key_both_work(self):
         """配置里既有 useGPTDictInName，也可能写成 dictionary.useGPTDictInName。"""

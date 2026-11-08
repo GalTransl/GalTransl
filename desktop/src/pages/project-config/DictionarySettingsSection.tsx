@@ -72,7 +72,7 @@ function DictConfigEditor({
       <label className="field field--switch">
         <span>{translate("config:dictionarySettingsSection.field_message_dictionaryNameGPT")}</span>
         <Switch
-          checked={dictConfig.useGPTDictInName === true}
+          checked={dictConfig.useGPTDictInName !== false}
           onChange={(next) => onChange({ ...dictConfig, useGPTDictInName: next })}
         />
       </label>
