@@ -86,6 +86,13 @@ def terminate_tree(process: subprocess.Popen) -> None:
         except ProcessLookupError:
             pass
         except PermissionError:
-            # macOS reports EPERM for a group containing only zombies after SIGKILL.
+            # macOS reports EPERM when the group contains zombies, e.g. a killed child the
+            # dying parent has not reaped yet; the live members are still signalled. Only a
+            # parent that survives a direct SIGKILL is a real failure.
+            try:
+                process.kill()
+                process.wait(timeout=2)
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                pass
             if process.poll() is None:
                 raise
