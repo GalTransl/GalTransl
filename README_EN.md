@@ -11,12 +11,6 @@
 
    <img width="2044" height="1397" alt="image" src="https://github.com/user-attachments/assets/f85e4782-e53e-4b03-ae24-cd77b453c6e3" />
 
-The **billion-context Python core** is enabled by default and can be disabled from the **settings button at the bottom left of each Agent**. Translation and extraction agents have independent switches. It provides tiered context compression, original-message archiving and retrieval, with no Node.js runtime or extra Python packages. Changes take effect on the next agent turn; previously saved disabled settings are preserved. GalTransl uses designs and compression rules from [billion-context](https://github.com/ranxianglei/billion-context) and [acp-kernel](https://github.com/ranxianglei/acp-kernel); see the [port scope, usage and licenses](plugins/billion-context/README.md).
-
-The **compact agent-mnemon Python global/project memory** is enabled by default and can be disabled in the same Agent settings. Global memory shares preferences and general conventions across projects; project memory isolates local facts. Important entries are included automatically; other facts use CJK-aware keyword search, with both layers sharing one context budget. Agents receive only three tools: search, save/update and delete. It works with billion-context, preserves previously saved disabled settings, follows the existing write permissions, and requires no additional runtime dependencies. See the [usage, port scope and MIT license](plugins/agent-mnemon/README.md).
-
-Automatic application updates and Skill downloads probe candidate routes from the node list published by [github.akams.cn](https://github.akams.cn/), prefer healthy routes with lower response latency, and switch routes or fall back to direct GitHub downloads on failure. No configuration is required. Version metadata and application SHA256 checksums still come directly from GitHub. Failed validation preserves the installed application or Skill. Build and CI Skill downloads use the same downloader.
-
 ## Preface
 &ensp;&ensp;&ensp;&ensp;The core of GalTransl is a set of automatic translation scripts that solves most of the known problems in using GPT to automatically translate visual novels, and greatly improves the overall translation quality. By combining with other projects, it connects the whole process of making patches, lowering the entry barrier.
 
