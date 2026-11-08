@@ -943,6 +943,82 @@ def _md_render_cache_history(result: dict) -> str:
                    _md_table(["file", "index", "field", "before", "after"], result.get("changes", [])))
 
 
+def _eta_text(seconds: Any) -> str:
+    """eta_seconds 附一个读得快的时长：754 → 754（约 12 分 34 秒）。"""
+    if not isinstance(seconds, (int, float)) or isinstance(seconds, bool):
+        return "未知（估算中）"
+    total = max(0, int(round(seconds)))
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    readable = (f"{hours} 时 " if hours else "") + (f"{minutes} 分 " if hours or minutes else "") + f"{secs} 秒"
+    return f"{total}（约 {readable}）"
+
+
+def _md_runtime_error_line(group: dict[str, Any]) -> str:
+    """一类新报错一行：只留类别、次数、原因、涉及文件（时间戳与重复的 text 不给模型）。"""
+    label = "警告" if group.get("level") == "warning" else "错误"
+    line = f"- {group.get('kind') or '未知'} {label} ×{group.get('count', 0)}：{group.get('message') or '(无描述)'}"
+    files = [str(name) for name in group.get("files") or []]
+    if files:
+        total = int(group.get("files_total") or len(files))
+        line += f"（{'、'.join(files[:3])}" + (f" 等 {total} 个文件" if total > 3 else "") + "）"
+    return line
+
+
+def _md_render_runtime(result: dict[str, Any]) -> str:
+    """translation(action="status") 的运行时快照：两行状态 + 新报错清单。"""
+    summary = result.get("summary") or {}
+    state = [f"状态：{result.get('job_status') or '无任务'}"]
+    if result.get("job_translator"):
+        state.append(f"引擎 {result['job_translator']}")
+    if result.get("stage"):
+        state.append(f"阶段 {result['stage']}")
+    if result.get("current_file"):
+        state.append(f"当前 {result['current_file']}")
+    progress = (
+        f"进度：{summary.get('translated', 0)}/{summary.get('total', 0)} 句（{summary.get('percent', 0)}%）"
+        f" · 问题 {summary.get('problems', 0)} · 失败 {summary.get('failed', 0)}"
+        f" · 活动线程 {summary.get('workers_active', 0)}"
+        f" · eta_seconds {_eta_text(summary.get('eta_seconds'))}"
+    )
+    groups = [group for group in result.get("recent_errors") or [] if isinstance(group, dict)]
+    errors = "recent_errors：无新报错"
+    if groups:
+        errors = "recent_errors（新出现的报错，同类已合并）：\n" + "\n".join(_md_runtime_error_line(g) for g in groups)
+    pending = result.get("recent_errors_pending")
+    return _md_doc(
+        " · ".join(state) + "\n" + progress,
+        f"job_error：{result['job_error']}" if result.get("job_error") else "",
+        errors,
+        f"recent_errors_pending：还有 {pending} 条新报错没列出，下次查询继续给" if pending else "",
+    )
+
+
+def _md_render_wait(result: dict[str, Any]) -> str:
+    """translation(action="wait")：一句结论；时长先到、任务还在跑时附运行时快照。"""
+    waited = f"{result.get('waited_seconds', 0):g}s"
+    job_id = result.get("job_id")
+    if result.get("wait_interrupted"):
+        return f"等待被用户停止打断（已等 {waited}）。"
+    if job_id and result.get("job_found") is False:
+        return f'任务列表里找不到 {job_id}（id 写错或已不在列表），用 translation(action="status") 看当前任务。'
+    if result.get("job_finished"):
+        outcome = "成功" if result.get("job_success") else "未成功"
+        return _md_doc(
+            f"任务 {job_id} 已结束：{result.get('job_status')}（{outcome}），等了 {waited}，不用再等。",
+            f"job_error：{result['job_error']}" if result.get("job_error") else "",
+            "按流程处理结果（查进度/问题清单）。",
+        )
+    if job_id:
+        head = f"等满 {waited}，任务 {job_id} 仍在 {result.get('job_status') or 'running'}。"
+        runtime = result.get("runtime")
+        if isinstance(runtime, dict):
+            return _md_doc(head + '运行时快照（同 translation(action="status")），据此决定下一轮等多久：',
+                           _md_render_runtime(runtime))
+        return head + '用 translation(action="status") 看进度与 eta_seconds 再决定下一轮等多久。'
+    return f'计时结束（{waited}），不代表后台任务完成；翻译任务请用 translation(action="status") 确认状态。'
+
+
 # 工具名 → 渲染器。渲染只对这里列出的工具生效，其余工具维持 JSON。
 _MD_RENDERERS: dict[str, Any] = {
     "list_cache_history": _md_render_cache_history,
@@ -976,6 +1052,8 @@ _MD_RENDERERS: dict[str, Any] = {
     "update_project_config": _md_render_write_result,
     "manage_problem_white_list": _md_render_manage_problem_white_list,
     "delete_transl_cache": _md_render_write_result,
+    "wait": _md_render_wait,
+    "get_runtime": _md_render_runtime,
 }
 
 

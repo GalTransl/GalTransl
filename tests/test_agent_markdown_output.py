@@ -463,6 +463,8 @@ class DispatcherTests(unittest.TestCase):
                 "update_project_config",
                 "manage_problem_white_list",
                 "delete_transl_cache",
+                "wait",
+                "get_runtime",
             },
         )
         # ISON 渲染层已删：确认没有残留的旧渲染注册表
