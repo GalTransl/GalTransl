@@ -2805,9 +2805,11 @@ def build_handler(registry: JobRegistry):
                 config_retran_key = RUNTIME_PROGRESS_CACHE.get_retran_key(project_dir, config_file_name)
                 retran_terms = _normalize_retran_terms(config_retran_key)
                 retran_key = ""
+                retry_failed = False
                 current_job_started_at_ns = None
                 if job and job.status in {"pending", "running"}:
                     retran_key = config_retran_key
+                    retry_failed = RUNTIME_PROGRESS_CACHE.get_retransl_fail(project_dir, config_file_name)
                     current_job_started_at_ns = _parse_runtime_job_started_at_ns(job.started_at)
                 progress_payload = RUNTIME_PROGRESS_CACHE.get_progress(
                     project_dir,
@@ -2816,6 +2818,7 @@ def build_handler(registry: JobRegistry):
                     cache_file_selected_indexes=runtime.get("cache_file_selected_indexes", {}),
                     retran_key=retran_key,
                     retran_terms=retran_terms,
+                    retry_failed=retry_failed,
                     current_job_started_at_ns=current_job_started_at_ns,
                     problem_filter_keys=RUNTIME_PROGRESS_CACHE.get_problem_filter_keys(project_dir, config_file_name),
                     problem_white_list=RUNTIME_PROGRESS_CACHE.get_problem_white_list(project_dir, config_file_name),
@@ -2845,6 +2848,8 @@ def build_handler(registry: JobRegistry):
                         "problems": progress_payload["problems"],
                         "failed": progress_payload["failed"],
                         "percent": percent,
+                        # total 里有多少是分块交叉句（相邻两块各翻一次），界面在进度旁单独标出
+                        "cross_total": runtime.get("cross_total", 0),
                         "workers_active": runtime["workers_active"],
                         "workers_configured": runtime["workers_configured"],
                         "translation_speed_lpm": speed,

@@ -106,6 +106,8 @@ class RuntimeState:
     file_totals: dict[str, int] = field(default_factory=dict)
     cache_file_display_map: dict[str, str] = field(default_factory=dict)
     cache_file_selected_indexes: dict[str, list[str]] = field(default_factory=dict)
+    # 进度分母里分块交叉句的数量（相邻两块各翻一次的那部分），界面在进度旁单独标出
+    cross_total: int = 0
     # Per-file deque of recent success events. Each file keeps up to
     # RUNTIME_PER_FILE_SUCCESS_LIMIT events independently so that concurrent
     # translations of multiple files do not evict each other's cards.
@@ -232,6 +234,7 @@ class RuntimeRegistry:
         cache_file_display_map: dict[str, str] | None = None,
         cache_file_selected_indexes: dict[str, list[str]] | None = None,
         progress_speed_lpm: float | None = None,
+        cross_total: int | None = None,
     ) -> None:
         with self._lock:
             state = self._states.get(_normalize_project_dir(project_dir))
@@ -254,6 +257,8 @@ class RuntimeRegistry:
                 state.cache_file_selected_indexes = dict(cache_file_selected_indexes)
             if progress_speed_lpm is not None:
                 state.progress_speed_lpm = max(0.0, float(progress_speed_lpm))
+            if cross_total is not None:
+                state.cross_total = max(0, int(cross_total))
             state.updated_at = _utcnow_text()
 
     def begin_request(self, project_dir: str, *, filename: str) -> int | None:
@@ -428,6 +433,7 @@ class RuntimeRegistry:
                     "file_totals": {},
                     "cache_file_display_map": {},
                     "cache_file_selected_indexes": {},
+                    "cross_total": 0,
                     "activity": {},
                     "recent_errors": [],
                     "recent_successes": [],
@@ -459,6 +465,7 @@ class RuntimeRegistry:
                 "file_totals": dict(state.file_totals),
                 "cache_file_display_map": dict(state.cache_file_display_map),
                 "cache_file_selected_indexes": dict(state.cache_file_selected_indexes),
+                "cross_total": state.cross_total,
                 "activity": activity,
                 "recent_errors": [event.to_dict() for event in state.recent_errors],
                 "recent_successes": [event.to_dict() for event in merged_successes],
@@ -537,6 +544,9 @@ class _CacheProgressFileStat:
     problem_filter_signature: tuple[str, ...] = field(default_factory=tuple)
     problem_white_signature: tuple[str, ...] = field(default_factory=tuple)
     selected_indexes_signature: tuple[str, ...] | None = None
+    # 本轮任务的重翻口径（retran_key / retry_failed / 任务开始时间）：任务开始前算好的结果
+    # 不能在任务开始后原样复用，否则要重翻的句子仍被算作已翻
+    retransl_filter_signature: tuple[Any, ...] = field(default_factory=tuple)
 
 
 @dataclass(slots=True)
@@ -546,6 +556,7 @@ class _RetranConfigStat:
     retran_key: str | list[str]
     problem_filter_keys: list[str] = field(default_factory=list)
     problem_white_list: list[str] = field(default_factory=list)
+    retransl_fail: bool = False
 
 
 def _normalize_retran_key(value: Any) -> str | list[str]:
@@ -625,6 +636,7 @@ class RuntimeProgressCache:
         retran_key: str | list[str] = ""
         problem_filter_keys = []
         problem_white_list = []
+        retransl_fail = False
         try:
             with open(config_path, "rb") as cfg_file:
                 cfg = safe_load(cfg_file.read()) or {}
@@ -632,6 +644,7 @@ class RuntimeProgressCache:
             retran_key = _normalize_retran_key(common.get("retranslKey", ""))
             problem_filter_keys = normalize_problem_filter_keys(common.get("problemFilterKey", []))
             problem_white_list = normalize_problem_white_list(common.get("problemWhiteList", []))
+            retransl_fail = common.get("retranslFail") is True
         except Exception:
             retran_key = ""
 
@@ -642,9 +655,17 @@ class RuntimeProgressCache:
                 retran_key=retran_key,
                 problem_filter_keys=problem_filter_keys,
                 problem_white_list=problem_white_list,
+                retransl_fail=retransl_fail,
             )
 
         return retran_key
+
+    def get_retransl_fail(self, project_dir: str, config_file_name: str = "config.yaml") -> bool:
+        self.get_retran_key(project_dir, config_file_name)
+        config_path = str(Path(project_dir, config_file_name or "config.yaml").resolve())
+        with self._lock:
+            cached = self._retran_config_cache.get(config_path)
+            return bool(cached and cached.retransl_fail)
 
     def get_problem_filter_keys(self, project_dir: str, config_file_name: str = "config.yaml") -> list[str]:
         self.get_retran_key(project_dir, config_file_name)
@@ -671,6 +692,7 @@ class RuntimeProgressCache:
         problem_filter_keys=None,
         problem_white_list=None,
         cache_file_selected_indexes: dict[str, list[str]] | None = None,
+        retry_failed: bool = False,
     ) -> dict[str, Any]:
         normalized = _normalize_project_dir(project_dir)
         cache_dir = os.path.join(project_dir, CACHE_FOLDERNAME)
@@ -678,6 +700,14 @@ class RuntimeProgressCache:
         retran_terms_signature = tuple(retran_terms)
         problem_filter_keys = normalize_problem_filter_keys(problem_filter_keys)
         problem_filter_signature = tuple(problem_filter_keys)
+        # 与 Cache.get_transCache_from_json 一致：retranslFail 打开且「翻译失败」没被
+        # problemFilterKey 滤掉时，(Failed) 句子会被引擎重翻，进度里也不能算已翻
+        retry_failed = bool(retry_failed) and bool(filter_problem_text("翻译失败", problem_filter_keys))
+        retransl_filter_signature = (
+            tuple(retran_key) if isinstance(retran_key, list) else retran_key,
+            retry_failed,
+            current_job_started_at_ns,
+        )
         problem_white_list = normalize_problem_white_list(problem_white_list)
         problem_white_signature = tuple(problem_white_list)
         problem_white_index = build_problem_white_list_index(problem_white_list)
@@ -716,6 +746,7 @@ class RuntimeProgressCache:
                         and cached.problem_filter_signature == problem_filter_signature
                         and cached.problem_white_signature == problem_white_signature
                         and cached.selected_indexes_signature == selected_signature
+                        and cached.retransl_filter_signature == retransl_filter_signature
                     ):
                         continue
 
@@ -807,8 +838,10 @@ class RuntimeProgressCache:
                         if selected_keys is not None and str(item.get("index", "")) not in selected_keys:
                             continue
 
-                        entry_key = str(item.get("__cache_key", "")).strip()
-                        if entry_key:
+                        # 不能 strip：原文常以换行结尾，__cache_key 去掉尾部换行就与没写 __cache_key 的
+                        # 旧快照按上下文现拼的 key 对不上，重翻一句就多算一句，进度提前冲到 100%
+                        entry_key = str(item.get("__cache_key", "") or "")
+                        if entry_key.strip():
                             # 同 _entry_signature：以 index 为前缀使不同位置的同文本条目
                             # 在 set 中各占一席，同时保持与 .json 快照 key 的一致性。
                             item_index = str(item.get("index", ""))
@@ -864,6 +897,17 @@ class RuntimeProgressCache:
                             )
                         ):
                             is_translated = False
+                        # 本轮任务开始后还没被改写过的缓存里，(Failed) 句子正等着重翻；
+                        # 重翻结果会写进 .append.jsonl / 新快照（mtime 晚于任务开始），届时照常计入
+                        if (
+                            is_translated
+                            and retry_failed
+                            and current_job_started_at_ns is not None
+                            and int(stat.st_mtime_ns) < int(current_job_started_at_ns)
+                            and no_proofread
+                            and "(Failed)" in str(item.get("pre_dst", "") or "")
+                        ):
+                            is_translated = False
 
                         if is_translated:
                             translated_keys.add(entry_key)
@@ -882,6 +926,7 @@ class RuntimeProgressCache:
                         problem_filter_signature=problem_filter_signature,
                         problem_white_signature=problem_white_signature,
                         selected_indexes_signature=selected_signature,
+                        retransl_filter_signature=retransl_filter_signature,
                         retran_hit_keys={
                             term: frozenset(hit_keys)
                             for term, hit_keys in retran_hit_keys.items()
@@ -915,9 +960,14 @@ class RuntimeProgressCache:
                         "_problem_keys": set(),
                         "_failed_keys": set(),
                     }
-                file_progress_map[display_name]["_translated_keys"].update(stat.translated_keys)
-                file_progress_map[display_name]["_problem_keys"].update(stat.problem_keys)
-                file_progress_map[display_name]["_failed_keys"].update(stat.failed_keys)
+                # key 带上块缓存名：同一块的 .json 与 .append.jsonl 照旧去重，不同块各算各的——
+                # 分块交叉句两边的块都会真的翻一遍，分母（file_totals）也按含交叉句计
+                def _scoped(keys: frozenset[str]) -> set[str]:
+                    return {f"{canonical_name}:{key}" for key in keys}
+
+                file_progress_map[display_name]["_translated_keys"].update(_scoped(stat.translated_keys))
+                file_progress_map[display_name]["_problem_keys"].update(_scoped(stat.problem_keys))
+                file_progress_map[display_name]["_failed_keys"].update(_scoped(stat.failed_keys))
                 for term, hit_keys in stat.retran_hit_keys.items():
                     retran_counts.setdefault(term, set()).update(hit_keys)
 
@@ -987,6 +1037,7 @@ def update_runtime_status(
     cache_file_display_map: dict[str, str] | None = None,
     cache_file_selected_indexes: dict[str, list[str]] | None = None,
     progress_speed_lpm: float | None = None,
+    cross_total: int | None = None,
 ) -> None:
     RUNTIME_REGISTRY.update_status(
         project_dir,
@@ -998,6 +1049,7 @@ def update_runtime_status(
         cache_file_display_map=cache_file_display_map,
         cache_file_selected_indexes=cache_file_selected_indexes,
         progress_speed_lpm=progress_speed_lpm,
+        cross_total=cross_total,
     )
 
 

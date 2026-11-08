@@ -168,7 +168,9 @@ class PartialTranslationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(sent), {f"a.json:{i}" for i in range(30, 100)})
         self.assertEqual(self.messages("a.json"), [f"译:a.json:{i}" if 30 <= i < 100 else f"a.json:{i}" for i in range(180)])
         runtime = RUNTIME_REGISTRY.get_runtime_snapshot(str(self.project))
-        self.assertEqual(runtime["file_totals"]["a.json"], 70)
+        # 范围内 70 句，另有 20 句交叉句被相邻两块各翻一次（30-45 / 35-85 / 75-100），分母按实际工作量
+        self.assertEqual(runtime["file_totals"]["a.json"], 90)
+        self.assertEqual(runtime["cross_total"], 20)
         self.assertIn("a.json_4.json", runtime["cache_file_display_map"])
 
     async def test_short_file_clips_end_and_missing_or_empty_selection_fails(self):

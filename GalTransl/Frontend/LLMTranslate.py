@@ -170,10 +170,49 @@ def _chunk_translation_list(chunk: SplitChunkMetadata, sentence_range: SentenceR
     return chunk.trans_list[start:end]
 
 
+def _chunk_progress_slice(chunk: SplitChunkMetadata, sentence_range: SentenceRange | None, include_cross: bool = True) -> tuple[int, int]:
+    """块内计入进度的行区间（json_list / trans_list 下标）。
+
+    include_cross=True 是整块（交叉句两边的块都会真的翻一遍，按实际工作量计入进度）；
+    False 只取非交叉部分，用来算交叉句数。第一块前面没有交叉，非交叉起点是
+    start_index - chunk_start 而不是 cross_num。
+    """
+    chunk_start = max(0, chunk.start_index - chunk.cross_num)
+    if include_cross:
+        if sentence_range is None:
+            return 0, len(chunk.json_list)
+        start = max(0, sentence_range.start - chunk_start)
+        return start, max(start, sentence_range.end - chunk_start)
+    start = chunk.start_index - chunk_start
+    end = min(start + int(chunk.chunk_non_cross_size or 0), len(chunk.json_list))
+    if sentence_range is not None:
+        start = max(chunk.start_index, sentence_range.start) - chunk_start
+        end = max(start, min(chunk.end_index, sentence_range.end) - chunk_start)
+    return start, end
+
+
+def _count_progress_rows(chunk: SplitChunkMetadata, bounds: tuple[int, int]) -> int:
+    """区间内会进缓存的行数：message 为空的行不翻也不进缓存，不计。"""
+    return sum(
+        1
+        for row in chunk.json_list[bounds[0]:bounds[1]]
+        if isinstance(row, dict) and str(row.get("message", "") or "").strip()
+    )
+
+
+def _runtime_cross_total(ordered_chunks: list[SplitChunkMetadata], sentence_range: SentenceRange | None = None) -> int:
+    """进度分母里有多少是分块交叉句（同一句在相邻两块各翻一次，多出来的那份）。"""
+    return sum(
+        _count_progress_rows(chunk, _chunk_progress_slice(chunk, sentence_range))
+        - _count_progress_rows(chunk, _chunk_progress_slice(chunk, sentence_range, include_cross=False))
+        for chunk in ordered_chunks
+    )
+
+
 def _build_runtime_file_maps(ordered_chunks: list[SplitChunkMetadata], input_dir: str, sentence_range: SentenceRange | None = None) -> tuple[dict[str, int], dict[str, str]]:
     """构造两个给前端使用的映射：
 
-    - file_totals: {显示名: 该文件总行数}，用于前端展示每个文件的进度分母。
+    - file_totals: {显示名: 该文件要翻的总句数（含分块交叉句）}，用于前端展示每个文件的进度分母。
     - cache_file_display_map: {缓存文件名(.json): 显示名}，用于把缓存回写事件关联到对应文件。
     """
     file_totals: dict[str, int] = {}
@@ -182,21 +221,7 @@ def _build_runtime_file_maps(ordered_chunks: list[SplitChunkMetadata], input_dir
     for chunk in ordered_chunks:
         display_name = chunk.file_path.replace(input_dir, "").lstrip(os_sep).replace(os_sep, "/")
         file_totals.setdefault(display_name, 0)
-        non_cross_start = max(0, int(chunk.cross_num or 0))
-        non_cross_end = min(non_cross_start + int(chunk.chunk_non_cross_size or 0), len(chunk.json_list))
-        if sentence_range is not None:
-            chunk_start = max(0, chunk.start_index - chunk.cross_num)
-            non_cross_start = max(chunk.start_index, sentence_range.start) - chunk_start
-            non_cross_end = max(non_cross_start, min(chunk.end_index, sentence_range.end) - chunk_start)
-        progress_countable = 0
-        for row in chunk.json_list[non_cross_start:non_cross_end]:
-            if not isinstance(row, dict):
-                continue
-            message = str(row.get("message", "") or "").strip()
-            if not message:
-                continue
-            progress_countable += 1
-        file_totals[display_name] += progress_countable
+        file_totals[display_name] += _count_progress_rows(chunk, _chunk_progress_slice(chunk, sentence_range))
         cache_key = display_name.replace("/", "-}")
         if chunk.total_chunks > 1:
             cache_key = f"{cache_key}_{chunk.chunk_index}"
@@ -497,7 +522,8 @@ async def doLLMTranslate(
         for chunk, cache_name in zip(ordered_chunks, runtime_cache_map)
     } if sentence_range is not None else {}
     _update_runtime(projectConfig, file_totals=runtime_file_totals, cache_file_display_map=runtime_cache_map,
-                    cache_file_selected_indexes=selected_indexes)
+                    cache_file_selected_indexes=selected_indexes,
+                    cross_total=_runtime_cross_total(ordered_chunks, sentence_range))
 
     # ---- 4. name 替换表（首次运行时自动生成）----
     name_replaceDict_path_xlsx = joinpath(

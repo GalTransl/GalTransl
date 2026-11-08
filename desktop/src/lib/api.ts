@@ -232,6 +232,8 @@ export type ProjectRuntimeSummary = {
   problems: number;
   failed: number;
   percent: number;
+  /** total 中分块交叉句的数量（相邻两块各翻一次）；旧后端不返回 */
+  cross_total?: number;
   workers_active: number;
   workers_configured: number;
   translation_speed_lpm: number;

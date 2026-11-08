@@ -594,6 +594,8 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   const translatedCount = summary?.translated ?? 0;
   const totalCount = summary?.total ?? 0;
   const remainingCount = Math.max(totalCount - translatedCount, 0);
+  // 分母里的分块交叉句：相邻两块各翻一次，所以句数会比文件实际句数多，单独标出来
+  const crossCount = isGendicJob ? 0 : summary?.cross_total ?? 0;
   const workersActive = summary?.workers_active ?? 0;
   const workersConfigured = summary?.workers_configured ?? 0;
   const speedText = formatSpeed(summary?.translation_speed_lpm ?? 0, progressUnit);
@@ -846,6 +848,12 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
               <span className="ptv2-gauge__fraction-sep">/</span>
               <span className="ptv2-gauge__fraction-total">{totalCount}</span>
               <span className="ptv2-gauge__fraction-unit">{progressUnit}</span>
+              {crossCount > 0 ? (
+                <>
+                  <span className="ptv2-gauge__fraction-divider" aria-hidden="true" />
+                  <span className="ptv2-gauge__fraction-remain">{translate("projects:projectTranslatePage.ptv2GaugeFraction_message_cross", { crossCount })}</span>
+                </>
+              ) : null}
               <span className="ptv2-gauge__fraction-divider" aria-hidden="true" />
               <span className="ptv2-gauge__fraction-remain">{translate("projects:projectTranslatePage.ptv2GaugeFraction_message_text", { remainingCount: remainingCount })}</span>
             </div>

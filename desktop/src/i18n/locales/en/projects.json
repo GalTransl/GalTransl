@@ -554,6 +554,7 @@
     "projectTranslatePageFolderMenuItem_button_fileVariant2": " Output folder",
     "projectTranslatePageFolderMenuItem_button_cacheFile": " Cache folder",
     "ptv2GaugeFraction_message_text": "{{remainingCount}} left",
+    "ptv2GaugeFraction_message_cross": "{{crossCount}} overlap",
     "ptv2CockpitField_message_translation": "Translation template",
     "ptv2CockpitField_message_empty": "No template available yet",
     "ptv2StatPtv2StatPrimary_message_text": "Current speed",
