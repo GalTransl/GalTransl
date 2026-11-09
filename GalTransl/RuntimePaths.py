@@ -18,6 +18,20 @@ def _source_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _without_verbatim_prefix(path: Path) -> Path:
+    """Drop the Windows ``\\\\?\\`` prefix that Tauri's resource_dir() adds.
+
+    ``Path.resolve()`` keeps the prefix, so a verbatim path never compares
+    equal to the same directory spelled normally (e.g. the desktop executable).
+    """
+    text = str(path)
+    if os.name != "nt" or not text.startswith("\\\\?\\"):
+        return path
+    if text[4:8].upper() == "UNC\\":
+        return Path("\\\\" + text[8:])
+    return Path(text[4:])
+
+
 def get_resource_root() -> Path:
     """Return the directory containing bundled runtime resources.
 
@@ -27,10 +41,10 @@ def get_resource_root() -> Path:
     """
     override = os.environ.get(RESOURCE_DIR_ENV, "").strip()
     if override:
-        return Path(override).expanduser().resolve()
+        return _without_verbatim_prefix(Path(override).expanduser().resolve())
 
     if getattr(sys, "frozen", False):
-        exe_dir = Path(sys.executable).resolve().parent
+        exe_dir = _without_verbatim_prefix(Path(sys.executable).resolve()).parent
         candidates = [exe_dir, exe_dir.parent]
         for candidate in candidates:
             if any((candidate / name).exists() for name in ("plugins", "Dict", "res")):

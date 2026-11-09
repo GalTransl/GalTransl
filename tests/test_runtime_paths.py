@@ -85,6 +85,13 @@ class RuntimePathTests(unittest.TestCase):
                     root.resolve() / "translation_guidelines",
                 )
 
+    @unittest.skipUnless(os.name == "nt", "verbatim paths are Windows-only")
+    def test_resource_root_drops_tauri_verbatim_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            with patch.dict(os.environ, {"GALTRANSL_RESOURCE_DIR": "\\\\?\\" + str(root)}):
+                self.assertEqual(str(get_resource_root()), str(root))
+
     def test_active_dict_dir_seeds_from_bundled_resources(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

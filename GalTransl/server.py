@@ -21,7 +21,7 @@ import sys
 from datetime import datetime
 from yaml import safe_load, safe_dump
 
-from GalTransl import TRANSLATOR_SUPPORTED, INPUT_FOLDERNAME, OUTPUT_FOLDERNAME, CACHE_FOLDERNAME, GALTRANSL_VERSION, new_version
+from GalTransl import TRANSLATOR_SUPPORTED, INPUT_FOLDERNAME, OUTPUT_FOLDERNAME, CACHE_FOLDERNAME, GALTRANSL_VERSION, new_version, update_thread
 from GalTransl import GUIDELINES_FOLDERNAME, DEFAULT_GUIDELINE_NAME
 from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
 from GalTransl.AppSettings import load_app_settings, save_app_settings
@@ -3652,6 +3652,9 @@ def build_handler(registry: JobRegistry):
                 self._send_json({"path": _program_dir()})
                 return
             if path == "/api/version/check":
+                # The desktop prewarms the backend, so the first check can
+                # arrive before the startup GitHub request has finished.
+                update_thread.join(timeout=10)
                 latest_version = new_version[0] if new_version else None
                 self._send_json(
                     {

@@ -142,6 +142,13 @@ def prepared(fixture, preserve=True):
     pytest.fail("Update preparation did not finish")
 
 
+@pytest.mark.skipif(os.name != "nt", reason="verbatim paths are Windows-only")
+def test_installation_accepts_tauri_verbatim_resource_dir(update_server, monkeypatch):
+    # Tauri's resource_dir() on Windows is \\?\C:\..., while current_exe() is not.
+    monkeypatch.setenv("GALTRANSL_RESOURCE_DIR", "\\\\?\\" + str(Path(os.environ["GALTRANSL_RESOURCE_DIR"]).resolve()))
+    assert AppUpdate.installation() is not None
+
+
 @pytest.mark.parametrize("preserve", [True, False])
 def test_download_and_replacement_preserve_projects_and_selected_dictionaries(update_server, preserve):
     _, installed, dictionary, _, upstream, _ = update_server
