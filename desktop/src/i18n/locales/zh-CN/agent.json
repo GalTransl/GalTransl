@@ -399,6 +399,7 @@
     "agentComposerSend_title_sendAgentNextEnterSendShiftEnter": "发送插话（Agent 会在下一步看到，Enter 发送 / Shift+Enter 换行）",
     "agentComposerSend_ariaLabel_send": "发送插话",
     "agentComposerStop_title_stopAgent": "停止 Agent",
+    "agentComposerStop_title_stopping": "正在停止…",
     "agentComposerSend_title_sendEnterSendShiftEnter": "发送并继续（Enter 发送 / Shift+Enter 换行）",
     "agentComposerSend_title_sendAgentEnterSendShiftEnter": "发送并启动 Agent（Enter 发送 / Shift+Enter 换行）",
     "agentComposerSend_ariaLabel_sendVariant2": "发送消息"

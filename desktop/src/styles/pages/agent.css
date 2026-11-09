@@ -3728,6 +3728,18 @@
   transform: scale(0.94);
 }
 
+/* 停止请求在路上：置灰防连点，不再响应 hover/active */
+.agent-composer__stop:disabled {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+}
+
+.agent-composer__stop:disabled:hover {
+  background: var(--agent-tile-strong);
+  color: var(--color-text);
+}
+
 /* 发送/停止用内联 SVG 图标：块级化，避免行内基线留白 */
 .agent-composer__send > svg,
 .agent-composer__stop > svg {

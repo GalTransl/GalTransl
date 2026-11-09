@@ -399,6 +399,7 @@
     "agentComposerSend_title_sendAgentNextEnterSendShiftEnter": "Send an interjection (the Agent sees it at the next step, Enter sends / Shift+Enter inserts a line break)",
     "agentComposerSend_ariaLabel_send": "Send an interjection",
     "agentComposerStop_title_stopAgent": "Stop the Agent",
+    "agentComposerStop_title_stopping": "Stopping…",
     "agentComposerSend_title_sendEnterSendShiftEnter": "Send and continue (Enter sends / Shift+Enter inserts a line break)",
     "agentComposerSend_title_sendAgentEnterSendShiftEnter": "Send and start the Agent (Enter sends / Shift+Enter inserts a line break)",
     "agentComposerSend_ariaLabel_sendVariant2": "Send a message"

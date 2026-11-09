@@ -4628,11 +4628,20 @@ def build_handler(registry: JobRegistry):
                 self.wfile.write(msg.encode("utf-8"))
                 self.wfile.flush()
 
+            def _heartbeat() -> None:
+                # SSE 注释帧（没有 data:），前端解析器直接忽略。它的用处是探活：客户端早就
+                # 切走/关页的流，服务端这边只有在**写**的时候才会发现对端没了（BrokenPipe）。
+                # 回合长时间没新事件（等 LLM 首字、等工具跑完）就一直不写，这条线程会抱着
+                # 连接空转到回合结束，切几次会话就攒几条——每条每 0.5s 都来 status() 一趟。
+                self.wfile.write(b": ping\n\n")
+                self.wfile.flush()
+
             try:
                 # 先发一次状态快照，让前端知道当前阶段
                 _sse({"type": "status", **{k: v for k, v in AGENT_REGISTRY.status(project_dir, session_id).items() if k != "events"}})
                 last_step = max(0, after_step)
                 deadline_loops = 0
+                idle_ticks = 0
                 # 启动宽限期：Agent 线程可能略晚于 start() 返回才发出第一个事件，
                 # 在此之前 status 可能仍是 idle，不应据此提前结束流。
                 warmup_grace = 20  # 最多等 20 个 tick (10s) 让首个事件到达
@@ -4643,6 +4652,12 @@ def build_handler(registry: JobRegistry):
                         _sse(ev)
                         if ev.get("step", 0) > last_step:
                             last_step = ev["step"]
+                    if events:
+                        idle_ticks = 0
+                    else:
+                        idle_ticks += 1
+                        if idle_ticks % 4 == 0:  # 约每 2s 探一次活
+                            _heartbeat()
                     snap = AGENT_REGISTRY.status(project_dir, session_id)
                     # awaiting_input = 回合结束但会话还活着；对订阅方而言本轮已终态，
                     # 流自然关闭，用户发下一条消息时前端带 after_step 重订即可。
@@ -4655,8 +4670,8 @@ def build_handler(registry: JobRegistry):
                     _time.sleep(0.5)
                     deadline_loops += 1
                 _sse({"type": "close"})
-            except (BrokenPipeError, ConnectionResetError):
-                # 客户端断开连接
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                # 客户端断开连接（Windows 上对端关闭多报 ConnectionAborted/Reset）
                 pass
 
     return RequestHandler

@@ -182,7 +182,7 @@ class AgentRuntime:
                 _log(f"删除排队消息: session={sid} id={item_id}")
                 if runner is not None:
                     runner.emit_queue()
-            return self.status(project_dir, sid)
+        return self.status(project_dir, sid)
 
     def queue_update(
         self, project_dir: str, item_id: str, text: str, session_id: str | None = None
@@ -200,7 +200,7 @@ class AgentRuntime:
                         if runner is not None:
                             runner.emit_queue()
                         break
-            return self.status(project_dir, sid)
+        return self.status(project_dir, sid)
 
     def queue_send(self, project_dir: str, item_id: str, session_id: str | None = None) -> dict[str, Any]:
         """「立即」：打断当前回合，把这条排队消息马上发出去。
@@ -210,25 +210,33 @@ class AgentRuntime:
         其余排队项继续排队，等它们自己的时机（下次本轮收尾）。
         回合已结束 → 直接当普通消息开新回合。
         """
+        interrupt = False
         with self._lock:
-            _key, sid, state, runner = self._queue_ctx(project_dir, session_id)
-            if state is None:
-                return self.status(project_dir, sid)
-            item = self._pop_queued(state, item_id)
-            if item is None:
-                return self.status(project_dir, sid)
-            _log(f"立即发送排队消息: session={sid} id={item_id} msg={item.text[:60]}")
-            if state.status == "running":
-                state.immediate_message = item.text
-                state.immediate_images = item.images
-                if runner is not None:
-                    runner.emit_queue()
-                self.stop(project_dir, sid)
-            else:
-                self.message(project_dir, item.text, sid, images=[
-                    {'name': image['name'], 'data_url': image_data_url(runner._store if runner else SessionStore(project_dir, sid), image)}
-                    for image in item.images])
+            key, sid, state, runner = self._queue_ctx(project_dir, session_id)
+            item = self._pop_queued(state, item_id) if state is not None else None
+            if item is not None:
+                _log(f"立即发送排队消息: session={sid} id={item_id} msg={item.text[:60]}")
+                if state.status == "running":
+                    # 锁内：挂到 immediate_message 上并置位停止信号（回合线程收尾时在同一把锁里取它）。
+                    # 关在途连接放到锁外做（同 stop()）：不该占着注册表锁等 socket 关完。
+                    state.immediate_message = item.text
+                    state.immediate_images = item.images
+                    if runner is not None:
+                        runner.emit_queue()
+                    event = self._stop_events.get(key, {}).get(sid)
+                    if event:
+                        event.set()
+                    interrupt = True
+        if item is None:
             return self.status(project_dir, sid)
+        if interrupt:
+            if runner is not None:
+                runner.abort_in_flight()
+        else:
+            self.message(project_dir, item.text, sid, images=[
+                {'name': image['name'], 'data_url': image_data_url(runner._store if runner else SessionStore(project_dir, sid), image)}
+                for image in item.images])
+        return self.status(project_dir, sid)
 
     def _resolve_session_id(self, project_dir: str, session_id: str | None) -> str | None:
         """缺省 session_id 时取最近活跃的会话（兼容旧前端只传项目）。"""
@@ -430,7 +438,8 @@ class AgentRuntime:
             thread = threading.Thread(target=runner.run, name=f"agent-{os.path.basename(key)}", daemon=True)
             thread.start()
             _log(f"Agent 回合已启动: project={key} session={sid} config={config_file_name} first_prompt={first_prompt[:60]}")
-            return self.status(project_dir, sid)
+        # 回包的状态快照在锁外取（见 status()：上下文估算不该占着注册表锁）
+        return self.status(project_dir, sid)
 
     def message(
         self,
@@ -502,37 +511,40 @@ class AgentRuntime:
                 if runner is not None:
                     runner.emit_queue()
                 _log(f"Agent 运行中，消息已排队: session={sid} msg={text[:60]}")
-                return self.status(project_dir, sid)
-
-            # 回合已结束（可能是重启后恢复的）
-            if state.pending_followup:
-                state.pending_followup = False
-            runner = self._runners.get(key, {}).get(sid)
-            if runner is None:
-                stop_event = threading.Event()
-                runner = AgentRunner(state, host=self.host, port=self.port, stop_event=stop_event, registry=self)
-                self._runners.setdefault(key, {})[sid] = runner
-                self._stop_events.setdefault(key, {})[sid] = stop_event
             else:
-                stop_event = threading.Event()
-                runner.stop_event = stop_event
-                self._stop_events.setdefault(key, {})[sid] = stop_event
-            # 上一轮在工具执行中途退出（进程被杀 / 用户点了停止）会留下"没结果"的卡片：
-            # 先收掉，而且**必须排在 user_message 前面**——反过来的话前端在转录里找不到
-            # 原来的工具行，只能新建一段挂到新消息后面，看着像刚刚出错（同一处说明见
-            # _close_dangling_before_message；那条路径在锁外，这里已经在锁里，直接叫 runner）。
-            runner._close_dangling_tool_calls()
-            runner._persist_message(user_message(text, saved_images))
+                self._start_turn(key, sid, state, text, saved_images)
+        # 回包的状态快照在锁外取（见 status()：上下文估算不该占着注册表锁）
+        return self.status(project_dir, sid)
 
-            state.status = "running"
-            state.error = ""
-            state.finished_at = 0.0
-            state.turn_end = ""
-            runner._emit("user_message", user_event(text, saved_images))
-            thread = threading.Thread(target=runner.run, name=f"agent-{os.path.basename(key)}", daemon=True)
-            thread.start()
-            _log(f"Agent 继续回合: session={sid} msg={text[:60]}")
-            return self.status(project_dir, sid)
+    def _start_turn(self, key: str, sid: str, state: AgentState, text: str, saved_images: list) -> None:
+        """message() 的"回合已结束（可能是重启后恢复的）→ 追加消息并开新回合"分支。调用方持注册表锁。"""
+        if state.pending_followup:
+            state.pending_followup = False
+        runner = self._runners.get(key, {}).get(sid)
+        if runner is None:
+            stop_event = threading.Event()
+            runner = AgentRunner(state, host=self.host, port=self.port, stop_event=stop_event, registry=self)
+            self._runners.setdefault(key, {})[sid] = runner
+            self._stop_events.setdefault(key, {})[sid] = stop_event
+        else:
+            stop_event = threading.Event()
+            runner.stop_event = stop_event
+            self._stop_events.setdefault(key, {})[sid] = stop_event
+        # 上一轮在工具执行中途退出（进程被杀 / 用户点了停止）会留下"没结果"的卡片：
+        # 先收掉，而且**必须排在 user_message 前面**——反过来的话前端在转录里找不到
+        # 原来的工具行，只能新建一段挂到新消息后面，看着像刚刚出错（同一处说明见
+        # _close_dangling_before_message；那条路径在锁外，这里已经在锁里，直接叫 runner）。
+        runner._close_dangling_tool_calls()
+        runner._persist_message(user_message(text, saved_images))
+
+        state.status = "running"
+        state.error = ""
+        state.finished_at = 0.0
+        state.turn_end = ""
+        runner._emit("user_message", user_event(text, saved_images))
+        thread = threading.Thread(target=runner.run, name=f"agent-{os.path.basename(key)}", daemon=True)
+        thread.start()
+        _log(f"Agent 继续回合: session={sid} msg={text[:60]}")
 
     def answer_ask(
         self,
@@ -755,16 +767,19 @@ class AgentRuntime:
             event = self._stop_events.get(key, {}).get(sid) if sid else None
             if event:
                 event.set()
-            # 只置位事件不够：请求可能正阻塞在 socket read 上，主循环根本没机会看
-            # 信号（这正是以前"点了停止要等 1-2 分钟才收尾"的原因）。主动打断在途请求，
-            # 停止才能秒级生效。
             state = self._states.get(key, {}).get(sid) if sid else None
             runner = self._runners.get(key, {}).get(sid) if sid else None
-            if runner is not None and (state is None or state.status == "running"):
-                runner.abort_in_flight()
             # 不直接改状态：回合线程自己收尾落 stopped，并消费排队中的插话。
             # 期间 status 保持 running，此时到达的 message() 会走插话路径，
             # 最终由 followup 消费。
+        # 只置位事件不够：请求可能正阻塞在 socket read 上，主循环根本没机会看
+        # 信号（这正是以前"点了停止要等 1-2 分钟才收尾"的原因）。主动打断在途请求，
+        # 停止才能秒级生效。
+        # 放在注册表锁**外面**做：关客户端要进 httpx 连接池、逐个关 socket，万一哪一层
+        # 卡住（代理、半开连接……），不能连带把整个注册表锁死——那样别的会话、会话列表、
+        # 甚至这一次停止的回包都一起没响应，界面上就是"点停止没反应、新建也点不了"。
+        if runner is not None and (state is None or state.status == "running"):
+            runner.abort_in_flight()
         return self.status(project_dir, sid)
 
     def reset(self, project_dir: str, session_id: str | None = None) -> dict[str, Any]:
@@ -817,7 +832,7 @@ class AgentRuntime:
             return {"status": "idle", "project_dir": project_dir, "session_id": sid, "events": [], "step": 0}
         with self._lock:
             runner = (self._runners.get(self._key(project_dir)) or {}).get(sid)
-            return {
+            snapshot = {
                 "status": state.status,
                 "project_dir": state.project_dir,
                 "session_id": state.session_id,
@@ -830,26 +845,40 @@ class AgentRuntime:
                 # 正在生成的助手消息（进行中）。与 events 里的已提交记录分离：
                 # 它就是"进行中的助手消息"快照，刷新/切会话时据此把半条消息补上。
                 "streaming": runner.live_streaming() if runner is not None else None,
-                # 上下文用量：界面指示器的兜底来源（实时更新走 context_usage 事件）。
-                # 打开页面/刷新时按当前历史现场估算，不依赖历史事件回放。
-                # 口径必须和 _emit_context_usage 一致（都含 tools schema 那笔固定开销），
-                # 否则刷新前后指示器会跳一下。
-                "context": {
-                    "used_tokens": runner._estimate_context_tokens(refresh=not runner.stop_event.is_set()) if runner is not None and (
-                        runner._mnemon is not None or runner._billion_context is not None) else _estimate_usage_tokens(
-                        state.messages,
-                        state.last_prompt_tokens,
-                        state.anchored_message_count,
-                        _tools_overhead_tokens(AGENT_TOOLS) + (
-                            _estimate_text_tokens("\n\n" + state.mnemon_snapshot) if state.mnemon_snapshot else 0),
-                    ),
-                    "window_tokens": state.context_window,
-                    "cache": dict(state.cache_usage) or None,
-                },
                 # 排队中的消息：队列面板的数据源（实时变更走 queue 事件）
                 "queued": [m.to_dict() for m in state.pending_messages],
                 "events": self._snapshot_events(state),
             }
+        # 上下文用量放在注册表锁**外面**算：它要走 token 估算，开了 billion-context /
+        # mnemon 时还要进上下文插件的锁、跑一次投影（含 sqlite 事务）。SSE 每 0.5s 轮询一次
+        # status()，再加上每次 message()/stop() 的回包也走这里——这段要是在锁里，回合线程
+        # 一旦把插件锁占久一点，整个注册表就被它拖住：停止、发消息、会话列表全部排队，
+        # 界面看起来就是"卡死、点停止也停不了"。锁外算最多只让这一次 status 慢，不殃及别人。
+        snapshot["context"] = self._context_snapshot(state, runner)
+        return snapshot
+
+    @staticmethod
+    def _context_snapshot(state: AgentState, runner: AgentRunner | None) -> dict[str, Any]:
+        """status() 里的上下文用量：界面指示器的兜底来源（实时更新走 context_usage 事件）。
+
+        打开页面/刷新时按当前历史现场估算，不依赖历史事件回放。口径必须和
+        _emit_context_usage 一致（都含 tools schema 那笔固定开销），否则刷新前后指示器会跳一下。
+        """
+        if runner is not None and (runner._mnemon is not None or runner._billion_context is not None):
+            used = runner._estimate_context_tokens(refresh=not runner.stop_event.is_set())
+        else:
+            used = _estimate_usage_tokens(
+                state.messages,
+                state.last_prompt_tokens,
+                state.anchored_message_count,
+                _tools_overhead_tokens(AGENT_TOOLS) + (
+                    _estimate_text_tokens("\n\n" + state.mnemon_snapshot) if state.mnemon_snapshot else 0),
+            )
+        return {
+            "used_tokens": used,
+            "window_tokens": state.context_window,
+            "cache": dict(state.cache_usage) or None,
+        }
 
     @staticmethod
     def _snapshot_events(state: AgentState) -> list[dict[str, Any]]:

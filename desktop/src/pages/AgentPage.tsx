@@ -17,6 +17,7 @@ import {
   type AgentContextUsage,
   type AgentEvent,
   type AgentSession as AgentSessionMeta,
+  ApiError,
   answerAgentAsk,
   answerAgentPermission,
   createAgentSession,
@@ -211,6 +212,9 @@ export function AgentPage() {
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   // 界面上的「发送中」乐观态：消息已发出但后端尚未确认
   const [sending, setSending] = useState(false);
+  // 停止请求在路上：按钮置灰防连点；请求没回来之前运行态保持不变
+  const [stopping, setStopping] = useState(false);
+  const stoppingRef = useRef(false);
   // Keep the chat mounted after its first visit, including while idle, so
   // navigating through other pages never evicts its transcript or UI state.
   useRetainPage(true);
@@ -261,6 +265,8 @@ export function AgentPage() {
   // 用户在此窗口内手动切到别的会话则不拦（id 不匹配，正常恢复）。
   const sendingRef = useRef(false);
   const sendTransitionRef = useRef<string | null>(null);
+  // 发送请求没等到回包（超时/断连）后要对账的会话：见 handleSend 的 catch
+  const reconcileAfterSendFailureRef = useRef<{ dir: string; sid: string } | null>(null);
 
   // 权限模式：本地存一份（下次打开还是这个档），同时立刻推给后端——跑着也能改，下一次
   // 工具调用就按新档判。声明放在最前：handleSend 和答复回调都要把它一起带上（见 answerBackendContext）。
@@ -816,11 +822,29 @@ export function AgentPage() {
       setError(normalizeError(err, uiMessage("agent:agentPage.handleSend_normalizeError_sendFailed")));
       setRunning(false);
       setStatus('failed');
+      // 后端有回包（4xx/5xx）说明它明确拒了，状态就是上面这样；**没有**回包（超时/断连）
+      // 则不好说——最常见的是后端收到了消息、回合已经开跑，只是回包没及时到。这时查一次
+      // 状态对账：真在跑就接上事件流，别让界面停在"发送失败"而后端其实在干活、没人收事件。
+      if (!(err instanceof ApiError && err.status > 0)) {
+        reconcileAfterSendFailureRef.current = { dir: effectiveProject, sid: draftSessionId };
+      }
     } finally {
       setSending(false);
       sendingRef.current = false;
       statusSyncVersionRef.current += 1;
       sendTransitionRef.current = null;
+    }
+    const pending = reconcileAfterSendFailureRef.current;
+    if (pending) {
+      reconcileAfterSendFailureRef.current = null;
+      const live = pending.sid
+        ? await fetchAgentStatus(pending.dir, pending.sid).then((snap) => snap.status === 'running').catch(() => false)
+        : false;
+      if (live && activeSessionRef.current === pending.sid && effectiveProjectRef.current === pending.dir) {
+        setStatus('running');
+        setRunning(true);
+        subscribeStream(pending.dir, pending.sid);
+      }
     }
   }, [
     effectiveProject,
@@ -902,10 +926,18 @@ export function AgentPage() {
     }
   }, [effectiveProject, editingQueued, queued]);
 
+  /** 停止当前会话的回合。**不会无限等**：stopAgent 带超时，后端没回音就报错并恢复按钮；
+   *  运行态只在后端确认后才改——打回 false 会让停止按钮消失而后端其实还在跑。 */
   const handleStop = useCallback(async () => {
-    if (!effectiveProject) return;
+    if (!effectiveProject || stoppingRef.current) return;
+    const dir = effectiveProject;
+    const sid = activeSessionRef.current;
+    stoppingRef.current = true;
+    setStopping(true);
     try {
-      await stopAgent(effectiveProject, activeSessionRef.current || undefined);
+      await stopAgent(dir, sid || undefined);
+      // 用户可能已经切走/新建了会话（这两处不等停止回包）：别把别的会话的状态改成"已停止"
+      if (activeSessionRef.current !== sid || effectiveProjectRef.current !== dir) return;
       // 先给出即时反馈；收尾事件随后由流补上。
       setStatus('stopped');
       setRunning(false);
@@ -913,7 +945,11 @@ export function AgentPage() {
       // 而流是 0.5s 轮询的——一掐就全丢了。后端收尾后会自己发 close。
       // 点了「立即」的排队消息也一样：它要等回合收尾才发 user_message。
     } catch (err) {
+      if (activeSessionRef.current !== sid || effectiveProjectRef.current !== dir) return;
       setError(normalizeError(err, uiMessage("agent:agentPage.handleStop_normalizeError_stopAgentFailed")));
+    } finally {
+      stoppingRef.current = false;
+      setStopping(false);
     }
   }, [effectiveProject]);
 
@@ -981,7 +1017,9 @@ export function AgentPage() {
    *  让用户重新选/打开一个项目再发消息。侧边栏的其他项目会话分组保留显示，
    *  不会被清掉（不再清空 sessionsByProject）。 */
   const handleCreateBlankSession = useCallback(async () => {
-    if (running) await handleStop();
+    // 停止请求只发不等：它要是等不到回音（后端卡住），不能把"新建会话"也一起卡住——
+    // 用户点这里多半正是想从卡死的会话里脱身。下面立刻把主区切到空态，回包晚到也不影响。
+    if (running) void handleStop();
     closeStream();
     localMsgIdsRef.current.clear();
     hasBackendSessionRef.current = false;
@@ -1012,8 +1050,9 @@ export function AgentPage() {
         // 确保该分组展开可见
         setCollapsedProjects((prev) => ({ ...prev, [dir]: false }));
         if (dir === effectiveProjectRef.current) {
-          // 当前项目：切到新会话，主区随之加载（空会话 → 等首条消息）
-          if (running) await handleStop();
+          // 当前项目：切到新会话，主区随之加载（空会话 → 等首条消息）。
+          // 停止只发不等（同 handleCreateBlankSession）：切换不该被一个没回音的请求挡住。
+          if (running) void handleStop();
           closeStream();
           activeSessionRef.current = created.session_id;
           setActiveSessionId(created.session_id);
@@ -1823,10 +1862,10 @@ export function AgentPage() {
                   >
                     <SendIcon />
                   </button>
-                  <button type="button" className="agent-composer__stop" onClick={() => {
+                  <button type="button" className="agent-composer__stop" disabled={stopping} onClick={() => {
                     liveActivityDisclosures.get(`${effectiveProject}::${activeSessionId}`)?.();
                     void handleStop();
-                  }} title={translate("agent:agentPage.agentComposerStop_title_stopAgent")}>
+                  }} title={stopping ? translate("agent:agentPage.agentComposerStop_title_stopping") : translate("agent:agentPage.agentComposerStop_title_stopAgent")}>
                     <StopIcon />
                   </button>
                 </>

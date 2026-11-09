@@ -2431,11 +2431,19 @@ export function getAgentTranslatorBackendContext(
   };
 }
 
+/** Agent 控制类请求（停止 / 队列 / 状态 / 会话列表与新建）的超时。
+ *  这些接口后端正常都是毫秒级回包；等不到就该报错让界面恢复可操作，而不是无限挂着——
+ *  否则停止、新建、发送全卡在一个没回音的请求上，看起来就是整页"卡死"。 */
+const AGENT_CONTROL_TIMEOUT_MS = 15_000;
+/** 发消息 / 启动回合：后端要落盘、起线程、回状态快照，给宽一点。 */
+const AGENT_SEND_TIMEOUT_MS = 30_000;
+
 export async function startAgent(payload: AgentStartPayload) {
   return apiRequest<AgentStatus>('/api/agent/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    timeoutMs: AGENT_SEND_TIMEOUT_MS,
   });
 }
 
@@ -2463,6 +2471,7 @@ export async function answerAgentAsk(
         answers,
         ...(backendContext || {}),
       }),
+      timeoutMs: AGENT_SEND_TIMEOUT_MS,
     },
   );
 }
@@ -2493,6 +2502,7 @@ export async function answerAgentPermission(
         reason: reason || undefined,
         ...(backendContext || {}),
       }),
+      timeoutMs: AGENT_SEND_TIMEOUT_MS,
     },
   );
 }
@@ -2517,6 +2527,7 @@ export async function setAgentPermissionMode(
         session_id: sessionId,
         permission_mode: permissionMode,
       }),
+      timeoutMs: AGENT_CONTROL_TIMEOUT_MS,
     },
   );
 }
@@ -2541,6 +2552,7 @@ export async function sendAgentMessage(
       session_id: sessionId,
       ...backendContext,
     }),
+    timeoutMs: AGENT_SEND_TIMEOUT_MS,
   });
 }
 
@@ -2558,6 +2570,7 @@ export async function stopAgent(projectDir: string, sessionId?: string) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_dir: projectDir, session_id: sessionId }),
+    timeoutMs: AGENT_CONTROL_TIMEOUT_MS,
   });
 }
 
@@ -2567,6 +2580,7 @@ export async function deleteAgentQueued(projectDir: string, id: string, sessionI
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_dir: projectDir, id, session_id: sessionId }),
+    timeoutMs: AGENT_CONTROL_TIMEOUT_MS,
   });
 }
 
@@ -2581,6 +2595,7 @@ export async function updateAgentQueued(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_dir: projectDir, id, message, session_id: sessionId }),
+    timeoutMs: AGENT_CONTROL_TIMEOUT_MS,
   });
 }
 
@@ -2590,6 +2605,7 @@ export async function sendAgentQueuedNow(projectDir: string, id: string, session
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_dir: projectDir, id, session_id: sessionId }),
+    timeoutMs: AGENT_CONTROL_TIMEOUT_MS,
   });
 }
 
@@ -2597,6 +2613,7 @@ export async function fetchAgentStatus(projectDir: string, sessionId?: string) {
   const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : '';
   return apiRequest<AgentStatus>(
     `/api/agent/status?project_dir=${encodeURIComponent(projectDir)}${sid}`,
+    { timeoutMs: AGENT_CONTROL_TIMEOUT_MS },
   );
 }
 
@@ -2604,6 +2621,7 @@ export async function fetchAgentStatus(projectDir: string, sessionId?: string) {
 export async function listAgentSessions(projectDir: string) {
   const res = await apiRequest<{ sessions: AgentSession[] }>(
     `/api/agent/sessions?project_dir=${encodeURIComponent(projectDir)}`,
+    { timeoutMs: AGENT_CONTROL_TIMEOUT_MS },
   );
   return res.sessions || [];
 }
@@ -2617,6 +2635,7 @@ export async function fetchAgentTranscript(projectDir: string, sessionId?: strin
   const lim = limit ? `&limit=${limit}` : '';
   const res = await apiRequest<{ events: AgentEvent[] }>(
     `/api/agent/transcript?project_dir=${encodeURIComponent(projectDir)}${sid}${lim}`,
+    { timeoutMs: AGENT_SEND_TIMEOUT_MS },
   );
   return res.events || [];
 }
@@ -2628,6 +2647,7 @@ export async function createAgentSession(projectDir: string, title?: string) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_dir: projectDir, title }),
+    timeoutMs: AGENT_CONTROL_TIMEOUT_MS,
   });
 }
 
@@ -2637,6 +2657,7 @@ export async function deleteAgentSession(projectDir: string, sessionId: string) 
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_dir: projectDir, session_id: sessionId }),
+    timeoutMs: AGENT_CONTROL_TIMEOUT_MS,
   });
 }
 
@@ -2725,14 +2746,42 @@ function parseAgentFrame(frame: string, onEvent: (event: AgentEvent) => void) {
 
 // ---- Internal ----
 
-async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+type ApiRequestInit = RequestInit & {
+  /** 等不到响应头就放弃（毫秒）。调用方自己传了 signal 时不叠加。 */
+  timeoutMs?: number;
+};
+
+async function apiRequest<T>(path: string, init?: ApiRequestInit): Promise<T> {
   const baseUrl = requireBackendBaseUrl();
+  // 没传 init 就原样不传（fetch(url, undefined)）：有调用方/测试按"有没有 options"区分请求
+  let requestInit: RequestInit | undefined;
+  let timeoutMs: number | undefined;
+  if (init) ({ timeoutMs, ...requestInit } = init);
+  // 超时用 AbortController 自己计时（不用 AbortSignal.timeout：测试的 vm 环境里没有）。
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+  if (timeoutMs && timeoutMs > 0 && !requestInit?.signal) {
+    const controller = new AbortController();
+    requestInit = { ...requestInit, signal: controller.signal };
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+  }
 
   let response: Response;
   try {
-    response = await fetch(`${baseUrl}${path}`, init);
+    response = await fetch(`${baseUrl}${path}`, requestInit);
   } catch {
+    if (timedOut) {
+      throw new ApiError(
+        uiMessage("errors:api.apiRequest_message_timeout", { seconds: Math.round((timeoutMs || 0) / 1000) }),
+        0,
+      );
+    }
     throw new ApiError(uiMessage("errors:api.apiRequest_message_unableConnectionBackend", { baseUrl }), 0);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 
   const data = (await response.json().catch(() => ({}))) as T & ErrorResponse;

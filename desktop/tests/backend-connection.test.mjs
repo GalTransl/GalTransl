@@ -172,6 +172,33 @@ test('late background loads cannot overwrite a successful image replacement', as
   assert.equal(api.getCustomBackgroundPreference().imageName, 'new.png');
 });
 
+// Agent 控制类请求带超时：后端没回音时要报错让界面恢复可操作，而不是无限挂着
+// （用户反馈过"点停止没反应、新建也点不了"——全卡在一个没回音的请求上）。
+test('agent control requests give up when the backend never answers', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const aborted = [];
+  const { api } = loadApi({ native: false, fetchImpl: (url, options) => new Promise((_, reject) => {
+    options.signal.addEventListener('abort', () => {
+      aborted.push(url);
+      reject(new DOMException('aborted', 'AbortError'));
+    });
+  }) });
+  const stopping = api.stopAgent('C:/game', 'sid');
+  const sending = api.sendAgentMessage('C:/game', '继续', 'sid');
+  t.mock.timers.tick(15_000);
+  await assert.rejects(stopping, (err) => err.name === 'ApiError' && err.status === 0 && /15 秒/.test(err.message));
+  assert.equal(aborted.length, 1);
+  assert.match(aborted[0], /\/api\/agent\/stop$/);
+  t.mock.timers.tick(15_000);
+  await assert.rejects(sending, /30 秒/);
+  assert.equal(aborted.length, 2);
+});
+
+test('agent control requests keep the normal connection error when fetch itself fails', async () => {
+  const { api } = loadApi({ native: false, fetchImpl: async () => { throw new TypeError('Failed to fetch'); } });
+  await assert.rejects(api.stopAgent('C:/game', 'sid'), /无法连接到后端/);
+});
+
 test('localized profile copies preserve model values and rename updates saved references', async () => {
   const values = new Map();
   const storage = {
