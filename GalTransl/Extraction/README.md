@@ -6,11 +6,11 @@
 写入遵循现有审批，可与 billion-context 同时启用。
 数据、三个工具和移植范围见 [Python 项目记忆说明](../../plugins/agent-mnemon/README.md)。
 
-提取 Agent 复用 `GalTransl.Agent.AgentRunner` 的 OpenAI 兼容请求、流式输出、重试、停止、审批、会话持久化和上下文压缩。system prompt 沿用原版 Pi 的身份、工具、简短指南、skill 元数据和工作目录结构，将身份改为 GalTransl 提取助手；提取流程留在对应 skill 中，不预先载入全文。不再启动 Pi sidecar，也不打包 Node.js、Pi SDK 或 npm 运行依赖。
+提取 Agent 复用 `GalTransl.Agent.AgentRunner` 的 OpenAI 兼容请求、流式输出、重试、停止、审批、会话持久化和上下文压缩。system prompt 沿用原版 Pi 的身份、工具、简短指南、skill 元数据和工作目录结构，将身份改为 GalTransl 提取助手；内置 `galtransl-galgamereverse-skill` 的 SKILL.md 正文（去掉 frontmatter，附 skill 目录作为相对路径基准）每次请求时读取并放在 system prompt 末尾，不再列入 skill 列表；它引用的指南和引擎页仍按需 `read`。该文件读不到时退回普通列表项。不再启动 Pi sidecar，也不打包 Node.js、Pi SDK 或 npm 运行依赖。
 
 会话和配置存放在 `~/.galtransl`：翻译对话在 `agent_sessions/`，提取对话及其模型历史、图片、压缩归档在 `extraction/sessions/<id>/`，提取设置在 `extraction/settings.json`，应用设置在 `app_settings.json`。Skills 目录默认选择程序目录的 `skills/`，提取 Agent 扫描所选目录下的 Skill。首次使用会复制旧程序目录和系统用户数据目录中的历史与设置；已保存的 Skill 路径按原值读取，不自动迁移。`GALTRANSL_DATA_DIR` 和 `GALTRANSL_APP_SETTINGS_PATH` 仍可指定会话和配置的位置。游戏输出工作区由用户选择，沿用原位置。新建会话只创建工作区根目录，子目录由提取流程按需创建；复用已有工作区时保留现有内容。
 
-新增 skill 时，在程序目录的 `skills/<name>/SKILL.md` 写入 YAML frontmatter 的 `name` 和非空 `description`，正文写具体任务指引，脚本和参考文件放在同一目录。下一回合自动注册，无需修改代码；默认只把名称、说明和绝对路径加入 prompt，agent 匹配任务后用 `read` 读取全文。支持递归查找子目录里的 `SKILL.md` 及 skills 根目录的单文件 `.md`，发现 skill 根目录后不扫描其中的参考文档；跳过隐藏目录、链接、node_modules 和 Python 缓存。仅扫描所选 Skills 目录，同名项保留第一个，并通过环境接口 `skill_diagnostics` 报告重复或无效元数据。`disable-model-invocation: true` 隐藏自动提示，但仍可用 `/skill:<name> 参数` 显式调用，全文在进入模型历史时展开。所有已注册 skill 的目录都可读取并由 `run_python` 导入，写入工具仍限于工作区。
+新增 skill 时，在程序目录的 `skills/<name>/SKILL.md` 写入 YAML frontmatter 的 `name` 和非空 `description`，正文写具体任务指引，脚本和参考文件放在同一目录。下一回合自动注册，无需修改代码；除上述内置 skill 外，默认只把名称、说明和绝对路径加入 prompt，agent 匹配任务后用 `read` 读取全文。支持递归查找子目录里的 `SKILL.md` 及 skills 根目录的单文件 `.md`，发现 skill 根目录后不扫描其中的参考文档；跳过隐藏目录、链接、node_modules 和 Python 缓存。仅扫描所选 Skills 目录，同名项保留第一个，并通过环境接口 `skill_diagnostics` 报告重复或无效元数据。`disable-model-invocation: true` 隐藏自动提示，但仍可用 `/skill:<name> 参数` 显式调用，全文在进入模型历史时展开。所有已注册 skill 的目录都可读取并由 `run_python` 导入，写入工具仍限于工作区。
 
 内置 Skill 直接使用程序目录 `skills/` 中的发布资源。仓库 `skills/` 是打包来源；新增仓库 skill 及辅助文件纳入 Git 后，现有资源准备命令会自动导出。`galtransl-project-handoff` skill 保存提取完成后的项目创建按钮说明，按任务加载。
 

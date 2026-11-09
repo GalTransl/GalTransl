@@ -21,7 +21,8 @@ from GalTransl.Agent.session_store import SessionStore
 from GalTransl.Agent.tools.ask import _auto_ask_answers, _tool_ask_user, _tool_read_history_archive
 from .tool_schemas import EXTRACTION_TOOLS, prepare_arguments, tool_prompt_section, validate_arguments
 from .tools import ExtractionTools
-from .skills import discover_skills, expand_skill_command, format_skills_for_prompt
+from .skill import SKILL_NAME as BUILTIN_SKILL_NAME
+from .skills import discover_skills, expand_skill_command, format_skills_for_prompt, render_skill_block
 
 
 def display_arguments(value, budget=24000):
@@ -101,6 +102,16 @@ class ExtractionRunner(AgentRunner):
                                      session_dir=Path(store.dir).parent)
 
     def _system_prompt(self):
+        listed, builtin = self.skills, ""
+        skill = next((item for item in self.skills if item["name"] == BUILTIN_SKILL_NAME
+                      and not item["disable_model_invocation"]), None)
+        if skill is not None:
+            try:
+                builtin = render_skill_block(skill)
+            except (OSError, UnicodeError, ValueError):
+                builtin = ""  # Unreadable now: keep it in the list so the model can still try `read`.
+            else:
+                listed = [item for item in self.skills if item is not skill]
         sections = [
             "You are an expert extraction assistant operating inside GalTransl, a coding agent harness. "
             "You help users by reading files, executing commands, editing code, and writing new files.",
@@ -109,8 +120,14 @@ class ExtractionRunner(AgentRunner):
             "Write outputs only in the current working directory; preserve original game files and installed skills.\n"
             "After extraction is complete, use the galtransl-project-handoff skill to give the user the button "
             "that hands the project off to the translation agent.",
-            format_skills_for_prompt(self.skills),
+            format_skills_for_prompt(listed),
             f"Current working directory: {Path(self.session['workspace']).as_posix()}",
+            # The core extraction skill is always needed, so its SKILL.md is inlined instead of
+            # being listed for an extra `read`; referenced guides are still loaded on demand.
+            f"# Built-in Skill: {BUILTIN_SKILL_NAME}\n\n"
+            "This skill's SKILL.md is already loaded below; do not read it again. "
+            "Load the guides and engine pages it references with the read tool when needed.\n\n"
+            f"{builtin}" if builtin else "",
         ]
         return "\n\n".join(section for section in sections if section)
 

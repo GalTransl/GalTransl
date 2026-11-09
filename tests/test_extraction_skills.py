@@ -102,6 +102,37 @@ def test_registered_extra_skills_are_readable_and_importable_with_bundled_python
     assert result['content'][0]['text'].strip() == 'automatic Skill paths'
 
 
+def test_builtin_skill_body_is_inlined_at_end_of_system_prompt(tmp_path, monkeypatch):
+    monkeypatch.setattr('GalTransl.Agent.runner.load_app_settings', lambda: {'billionContextEnabled': False})
+    game = tmp_path / 'game'
+    game.mkdir()
+    root = tmp_path / 'skills'
+    builtin = write_skill(root / 'galtransl-galgamereverse-skill' / 'SKILL.md',
+                          'name: galtransl-galgamereverse-skill\ndescription: Builtin reverse skill',
+                          'Builtin body, see [guide](guides/detection.md)')
+    write_skill(root / 'other' / 'SKILL.md', 'description: Other skill', 'Other body')
+    skills, _ = discover_skills([root])
+    available = {'skills': skills, 'settings': {'skill_dir': str(root)}, 'builtin_python': builtin_python()}
+    store = SessionStore(tmp_path / 'sessions')
+    session = store.create(str(game))
+    state, history = restore_state(session, store.directory(session['id']), {}, 'test', 'auto')
+    runner = ExtractionRunner(state, history, session, available, lambda event: None)
+
+    prompt = runner._system_prompt()
+    assert prompt.rstrip().endswith('</skill>')
+    assert 'Builtin body, see [guide](guides/detection.md)' in prompt
+    assert '---' not in prompt.split('# Built-in Skill:')[1]  # frontmatter stripped
+    assert f'References are relative to {builtin.parent.resolve().as_posix()}.' in prompt
+    assert prompt.index('Current working directory:') < prompt.index('# Built-in Skill:')
+    assert '<name>galtransl-galgamereverse-skill</name>' not in prompt
+    assert '<name>other</name>' in prompt and 'Other body' not in prompt
+
+    builtin.unlink()  # unreadable later: fall back to the plain listing instead of failing the turn
+    prompt = runner._system_prompt()
+    assert '# Built-in Skill:' not in prompt
+    assert '<name>galtransl-galgamereverse-skill</name>' in prompt
+
+
 def test_skill_command_is_saved_expanded_on_first_and_later_turns_with_images(tmp_path, monkeypatch):
     monkeypatch.setattr('GalTransl.Agent.runner.load_app_settings', lambda: {'billionContextEnabled': False})
     game = tmp_path / 'game'

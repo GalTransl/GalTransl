@@ -114,6 +114,13 @@ def format_skills_for_prompt(skills: list[Skill]) -> str:
         f"<available_skills>\n{entries}\n</available_skills>")
 
 
+def render_skill_block(skill: Skill) -> str:
+    """The skill's full body (frontmatter stripped), wrapped with its location for relative references."""
+    _, body = parse_skill_file(Path(skill["file_path"]).read_text(encoding="utf-8-sig"))
+    return (f'<skill name="{escape(skill["name"])}" location="{escape(Path(skill["file_path"]).as_posix())}">\n'
+            f"References are relative to {Path(skill['base_dir']).as_posix()}.\n\n{body.strip()}\n</skill>")
+
+
 def expand_skill_command(text: str, skills: list[Skill]) -> str:
     if not text.startswith("/skill:"):
         return text
@@ -121,7 +128,5 @@ def expand_skill_command(text: str, skills: list[Skill]) -> str:
     skill = next((skill for skill in skills if skill["name"] == command[7:]), None)
     if skill is None:
         return text
-    _, body = parse_skill_file(Path(skill["file_path"]).read_text(encoding="utf-8-sig"))
-    block = (f'<skill name="{escape(skill["name"])}" location="{escape(Path(skill["file_path"]).as_posix())}">\n'
-             f"References are relative to {Path(skill['base_dir']).as_posix()}.\n\n{body.strip()}\n</skill>")
+    block = render_skill_block(skill)
     return f"{block}\n\n{arguments.strip()}" if arguments.strip() else block
