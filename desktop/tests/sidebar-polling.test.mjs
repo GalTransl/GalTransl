@@ -19,7 +19,7 @@ function fixture(hidden = false) {
     clearTimeout(id) { timers.delete(id); },
     requestAnimationFrame: () => 1, cancelAnimationFrame: () => {},
   };
-  const requests = { agent: [], runtime: [] };
+  const requests = { agent: [], runtime: [], extraction: [] };
   const pending = kind => new Promise(resolve => { requests[kind].push(resolve); });
   const load = createTypeScriptLoader({ document, window, localStorage: { getItem: () => null } }, {
     '../i18n': { message: key => key, resolveMessage: key => key, t: key => key, useUiLanguage: () => 'en' },
@@ -28,9 +28,10 @@ function fixture(hidden = false) {
       encodeProjectDir: dir => dir, decodeProjectDir: dir => dir, setProjectConfigDirty: () => {},
       listAgentSessions: () => pending('agent'), fetchProjectRuntime: () => pending('runtime'),
     },
-    './Icon': { Icon: () => null }, './ProjectFolderPopover': { ProjectFolderPopover: () => null },
+    './Icon': { Icon: () => null },
     './page-state/InlineFeedback': { InlineFeedback: () => null },
     '../assets/logo.png': { default: '' }, '../pages/agent/storage': { readHistory: () => [] },
+    '../pages/extraction/api': { extractionApi: () => pending('extraction') },
     '@tauri-apps/api/core': {},
   });
   const { Sidebar } = load(new URL('../src/components/Sidebar.tsx', import.meta.url));
@@ -47,6 +48,7 @@ function fixture(hidden = false) {
     complete: async () => act(async () => {
       for (const resolve of requests.agent.splice(0)) resolve([]);
       for (const resolve of requests.runtime.splice(0)) resolve({ job: null });
+      for (const resolve of requests.extraction.splice(0)) resolve({ sessions: [], total: 0, next_offset: null });
     }),
     replace: projects => act(() => renderer.update(view(projects))),
     dispose: () => act(() => renderer.unmount()),
@@ -55,39 +57,35 @@ function fixture(hidden = false) {
 
 test('visibility changes never overlap sidebar polls or multiply their timers', async () => {
   const f = fixture();
-  assert.equal(f.requests.agent.length, 1);
-  assert.equal(f.requests.runtime.length, 1);
+  const inFlight = count => ['agent', 'runtime', 'extraction'].forEach(kind => assert.equal(f.requests[kind].length, count, kind));
+  inFlight(1);
   f.visibility(true);
   f.visibility(false);
-  assert.equal(f.requests.agent.length, 1);
-  assert.equal(f.requests.runtime.length, 1);
+  inFlight(1);
   await f.complete();
-  assert.equal(f.timers.size, 2);
+  assert.equal(f.timers.size, 3);
   f.visibility(true);
   f.tick();
-  assert.equal(f.requests.agent.length, 0);
-  assert.equal(f.requests.runtime.length, 0);
-  assert.equal(f.timers.size, 2);
+  inFlight(0);
+  assert.equal(f.timers.size, 3);
   f.visibility(false);
-  assert.equal(f.requests.agent.length, 1);
-  assert.equal(f.requests.runtime.length, 1);
+  inFlight(1);
   assert.equal(f.timers.size, 0);
   await f.complete();
-  assert.equal(f.timers.size, 2);
+  assert.equal(f.timers.size, 3);
   f.dispose();
   assert.equal(f.timers.size, 0);
 });
 
 test('sidebar skips initial requests while hidden and late responses cannot restart cleaned-up polls', async () => {
   const f = fixture(true);
-  assert.equal(f.requests.agent.length, 0);
-  assert.equal(f.requests.runtime.length, 0);
+  const inFlight = count => ['agent', 'runtime', 'extraction'].forEach(kind => assert.equal(f.requests[kind].length, count, kind));
+  inFlight(0);
   f.visibility(false);
-  assert.equal(f.requests.agent.length, 1);
-  assert.equal(f.requests.runtime.length, 1);
+  inFlight(1);
   f.replace([]);
   await f.complete();
-  assert.equal(f.timers.size, 2);
+  assert.equal(f.timers.size, 3);
   f.dispose();
   assert.equal(f.timers.size, 0);
 });

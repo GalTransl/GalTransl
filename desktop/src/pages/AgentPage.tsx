@@ -45,6 +45,14 @@ import { normalizeError } from '../lib/errors';
 import { PROJECT_HISTORY_CHANGE_EVENT, removeProjectStorage } from '../lib/projectStorage';
 import { notifyNeedsAttention } from '../lib/desktopNotify';
 import {
+  forgetAgentSessions,
+  reportAgentSessions,
+  setViewingAgentSession,
+  settleViewedAgentSession,
+  translationSessionPhase,
+  useUnseenAgentLights,
+} from '../lib/agentActivity';
+import {
   loadPermissionMode,
   PERMISSION_MODE_HINTS,
   PERMISSION_MODE_LABELS,
@@ -219,11 +227,9 @@ export function AgentPage() {
   // 侧边栏每个项目分组的折叠态（默认当前活动项目展开，其余折叠）
   const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
   // 侧边栏状态灯里"跑完了但还没点开看过"的那些：session_id -> done（绿）/ failed（橙）。
-  // 工作中的会话不在这里——它的蓝灯直接由后端 status（或本会话的 running）推出来。
-  // 用户点开该会话（激活）就把它清掉，灯随之消失。
-  const [unseenLights, setUnseenLights] = useState<Record<string, 'done' | 'failed'>>({});
-  // 上一次看到的各会话状态：用来发现"刚才还在跑、现在不跑了"的那个收尾瞬间
-  const prevSessionStatusRef = useRef<Record<string, string>>({});
+  // 与主侧栏「翻译 Agent」入口上的点共用一份（见 lib/agentActivity）；工作中的会话不在
+  // 这里——它的蓝灯直接由后端 status（或本会话的 running）推出来。点开该会话即熄灭。
+  const unseenLights = useUnseenAgentLights('translation');
   // 每会话绑定的后端配置（'' 键 = 新会话还没发出第一条消息时选的草稿）
   const [sessionBackends, setSessionBackends] = useState<SessionBackendMap>(() => loadSessionBackends());
   const setSessionBackend = useCallback(
@@ -290,14 +296,22 @@ export function AgentPage() {
     activeSessionRef.current = activeSessionId;
     // 后端配置绑定在会话上：切会话时 chip 自动切到该会话绑定的那份（没有就跟随
     // Agent 默认），不需要也没有"重置"动作。
-    // 点开（激活）这个会话 → 它的状态灯熄灭（"跑完了，等你回来看"的信号已经送达）
-    setUnseenLights((prev) => {
-      if (!(activeSessionId in prev)) return prev;
-      const next = { ...prev };
-      delete next[activeSessionId];
-      return next;
-    });
   }, [activeSessionId]);
+  // 页面在前台时登记正在看的会话 → 它的状态灯熄灭（"跑完了，等你回来看"的信号已经送达）；
+  // 切到别的页面就不算在看了，这时跑完的会话会在主侧栏入口和这里亮绿灯。
+  useEffect(() => {
+    setViewingAgentSession('translation', active ? activeSessionId : '');
+    return () => setViewingAgentSession('translation', '');
+  }, [active, activeSessionId]);
+  // 看着当前会话在这里跑完：立刻记为已停，不等列表轮询（看完马上切走也不会再亮绿灯）
+  const lastViewedRunRef = useRef({ id: '', running: false });
+  useEffect(() => {
+    const previous = lastViewedRunRef.current;
+    lastViewedRunRef.current = { id: activeSessionId, running };
+    if (previous.id === activeSessionId && previous.running && !running) {
+      settleViewedAgentSession('translation', activeSessionId);
+    }
+  }, [activeSessionId, running]);
   // 当前活动项目，供回调读取（refreshSessions 判断是否接管 activeSessionId）
   const effectiveProjectRef = useRef(projectDir);
   useEffect(() => {
@@ -351,34 +365,17 @@ export function AgentPage() {
   const refreshSessions = useCallback(
     async (dir: string, preferredId?: string, allowAutoPick = true): Promise<AgentSessionMeta[]> => {
       const selectionVersion = projectSelectionVersionRef.current;
+      const observedAt = Date.now();
       try {
         const list = await listAgentSessions(dir);
         setSessionsByProject((prev) => ({ ...prev, [dir]: list }));
-        // 状态灯：和后端状态比对，找出"刚跑完"的会话（上一次 running、这次不是了）。
-        // 你正看着它（当前项目 + 当前会话）就当作已读，不亮灯。
-        const prevStatuses = prevSessionStatusRef.current;
-        const nextStatuses: Record<string, string> = {};
-        const justFinished: Record<string, 'done' | 'failed'> = {};
-        for (const s of list) {
-          const status = s.status || '';
-          nextStatuses[s.session_id] = status;
-          if (prevStatuses[s.session_id] === 'running' && status !== 'running') {
-            justFinished[s.session_id] = status === 'failed' ? 'failed' : 'done';
-          }
-        }
-        // 基线按会话 id 合并、而不是整份替换：现在会按需拉单个项目（展开时），
-        // 整份替换的话，拉 B 项目会把 A 项目的基线抹掉，A 那边"刚跑完"的灯就点不亮。
-        prevSessionStatusRef.current = { ...prevStatuses, ...nextStatuses };
-        if (Object.keys(justFinished).length) {
-          setUnseenLights((prev) => {
-            const merged = { ...prev };
-            for (const [sid, light] of Object.entries(justFinished)) {
-              if (dir === effectiveProjectRef.current && sid === activeSessionRef.current) delete merged[sid];
-              else merged[sid] = light;
-            }
-            return merged;
-          });
-        }
+        // 状态灯：交给共享状态比对出"刚跑完"的会话（上一次 running、这次不是了）；
+        // 你正看着它（页面在前台 + 当前会话）就当作已读，不亮灯。
+        reportAgentSessions(
+          'translation',
+          list.map((s) => ({ id: s.session_id, phase: translationSessionPhase(s.status) })),
+          observedAt,
+        );
         // 仅当 dir 恰好是当前活动项目时才接管 activeSessionId 选择，
         // 否则（点别的项目的 + / 删了另一项目的会话）不强改主区。
         if (dir === effectiveProjectRef.current && selectionVersion === projectSelectionVersionRef.current) {
@@ -1091,6 +1088,8 @@ export function AgentPage() {
       if (dir === effectiveProjectRef.current) {
         void handleCreateBlankSession();
       }
+      // 收起来的分组里没看过的灯也一并撤掉，免得主侧栏入口亮着却找不到是哪个
+      forgetAgentSessions('translation', list.map((s) => s.session_id));
       // 分组从列表里消失；会话缓存一并清掉（下次打开该项目时会重新拉）
       setSessionsByProject((prev) => {
         if (!(dir in prev)) return prev;
@@ -1135,6 +1134,7 @@ export function AgentPage() {
         return;
       }
       const prevList = sessionsByProject[dir] || [];
+      forgetAgentSessions('translation', [session.session_id]);
       readingMemory.delete(readingKey(dir, session.session_id));
       const remaining = prevList.filter((s) => s.session_id !== session.session_id);
       setSessionsByProject((prev) => ({ ...prev, [dir]: remaining }));

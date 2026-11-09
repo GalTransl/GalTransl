@@ -1,4 +1,5 @@
 import type { AgentContextUsage, QueuedMessage } from '../../lib/api';
+import type { AgentSessionPhase } from '../../lib/agentActivity';
 import type { AgentImage } from '../agent/images';
 
 export type Session = {
@@ -43,3 +44,6 @@ export type SessionList = { sessions: Session[]; next_offset: number | null; tot
 export type FileList = { path: string; entries: { name: string; is_dir: boolean; size: number }[]; next_offset: number | null; total: number };
 export type Preview = { path: string; content: string; binary: boolean; size: number; next_offset: number | null };
 export const isRunning = (session?: Session | null) => Boolean(session && ['starting', 'running', 'awaiting_permission', 'awaiting_input', 'stopping'].includes(session.status));
+/** Sidebar status lights: interrupted runs are flagged like failures. */
+export const sessionPhase = (session: Session): AgentSessionPhase =>
+  isRunning(session) ? 'running' : ['failed', 'interrupted'].includes(session.status) ? 'failed' : 'done';

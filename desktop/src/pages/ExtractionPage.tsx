@@ -7,6 +7,7 @@ import { AgentSettingsButton } from '../components/AgentSettings';
 import { AnimatePresence } from '../components/UiMotion';
 import { useUiLanguage } from '../i18n';
 import { addOpenProject, encodeProjectDir, getBackendProfile } from '../lib/api';
+import { forgetAgentSessions } from '../lib/agentActivity';
 import { basenamePath } from '../lib/paths';
 import { addProjectToHistory } from './HomePage';
 import { Conversation, PendingRequest } from './extraction/Conversation';
@@ -70,6 +71,7 @@ export function ExtractionPage() {
     if (agent.busy || isRunning(item.id === session?.id ? session : item)) return;
     if (!window.confirm(`${x('confirmDeleteSession')}\n${item.title}`)) return;
     const result = await agent.mutate('delete', { session_id: item.id });
+    if (result) forgetAgentSessions('extraction', [item.id]);
     if (result && selection.current.id === item.id) {
       agent.select(agent.sessions.sessions.find(row => row.id !== item.id && gameFolderKey(row.game_dir) === gameFolderKey(item.game_dir))?.id || '');
     }
@@ -79,7 +81,9 @@ export function ExtractionPage() {
     if (agent.busy || agent.sessions.running_game_dirs?.some(directory => gameFolderKey(directory) === key)
       || agent.sessions.sessions.some(row => gameFolderKey(row.game_dir) === key && isRunning(row.id === session?.id ? session : row))) return;
     if (!window.confirm(`${x('confirmCloseFolder')}\n${directory}`)) return;
+    const folderSessions = agent.sessions.sessions.filter(row => gameFolderKey(row.game_dir) === key).map(row => row.id);
     const result = await agent.mutate('close-folder', { game_dir: directory });
+    if (result) forgetAgentSessions('extraction', folderSessions);
     const current = selection.current;
     const currentSession = current.session?.id === current.id ? current.session : agent.sessions.sessions.find(row => row.id === current.id);
     if (result && currentSession && gameFolderKey(currentSession.game_dir) === key) agent.select('');

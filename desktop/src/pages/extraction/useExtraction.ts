@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePageActive, useRetainPage } from '../../components/PageActivity';
 import { extractionApi, extractionUrl } from './api';
 import { prependHistory, reduceEvents, type Row } from './transcript';
-import { isRunning, type AgentEvent, type Environment, type SessionList, type SkillStatus, type Snapshot } from './types';
+import { isRunning, sessionPhase, type AgentEvent, type Environment, type SessionList, type SkillStatus, type Snapshot } from './types';
+import { reportAgentSessions, setViewingAgentSession, settleViewedAgentSession } from '../../lib/agentActivity';
 import { message, t, useMessageState } from '../../i18n';
 import { notifyNeedsAttention } from '../../lib/desktopNotify';
 import { askNotifyBody, toolMeta } from '../agent/toolMeta';
@@ -46,8 +47,10 @@ export function useExtraction() {
   const retries = useRef(0);
   useRetainPage(isRunning(view?.session));
   const refreshSessions = useCallback(async (offset = 0) => {
+    const observedAt = Date.now();
     const result = await extractionApi<SessionList>('sessions', { offset });
     setSessions(previous => offset ? { ...result, sessions: [...previous.sessions.slice(0, offset), ...result.sessions] } : result);
+    reportAgentSessions('extraction', result.sessions.map(session => ({ id: session.id, phase: sessionPhase(session) })), observedAt);
   }, []);
   const refreshEnvironment = useCallback(async () => {
     const result = await extractionApi<Environment>('environment');
@@ -96,6 +99,19 @@ export function useExtraction() {
   useEffect(() => {
     try { localStorage.setItem('galtransl-extraction-session', selected); } catch { /* cache only */ }
   }, [selected]);
+  // Opening a session clears its "finished, not seen yet" light in both sidebars.
+  useEffect(() => {
+    setViewingAgentSession('extraction', active ? selected : '');
+    return () => setViewingAgentSession('extraction', '');
+  }, [active, selected]);
+  const viewedId = view?.session.id || '';
+  const viewedRunning = isRunning(view?.session);
+  const lastViewed = useRef({ id: '', running: false });
+  useEffect(() => {
+    const previous = lastViewed.current;
+    lastViewed.current = { id: viewedId, running: viewedRunning };
+    if (previous.id === viewedId && previous.running && !viewedRunning) settleViewedAgentSession('extraction', viewedId);
+  }, [viewedId, viewedRunning]);
   useEffect(() => { setView(null); setError(''); setReconnecting(''); retries.current = 0; }, [selected]);
   const pendingRequest = view?.pending;
   useEffect(() => {

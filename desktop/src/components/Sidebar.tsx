@@ -1,4 +1,5 @@
 import { message as uiMessage, resolveMessage, t as translate, useUiLanguage, type LocalizedText } from "../i18n";
+import type { TranslationKey } from '../i18n/resources';
 import { useCallback, useEffect, useRef, useState, type TransitionEvent } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
@@ -23,12 +24,22 @@ import { basenamePath, joinPath } from '../lib/paths';
 import { Icon, type IconName } from './Icon';
 import { InlineFeedback } from './page-state/InlineFeedback';
 import logoUrl from '../assets/logo.png';
-import { ProjectFolderPopover } from './ProjectFolderPopover';
 import { readHistory } from '../pages/agent/storage';
+import { extractionApi } from '../pages/extraction/api';
+import { sessionPhase as extractionSessionPhase, type SessionList as ExtractionSessionList } from '../pages/extraction/types';
+import { reportAgentSessions, translationSessionPhase, useAgentIndicator, type AgentIndicator, type AgentSessionReport } from '../lib/agentActivity';
 
 const LAST_ACTIVE_PROJECT_KEY = 'galtransl-last-active-project';
 const OUTPUT_FOLDER_NAME = 'gt_output';
+/** 项目右键菜单里「打开 xx 文件夹」的几项：subdir 为空表示项目根目录。 */
+const PROJECT_FOLDERS: Array<{ labelKey: TranslationKey; icon: IconName; subdir: string }> = [
+  { labelKey: 'common:projectFolders.project', icon: 'folder-open', subdir: '' },
+  { labelKey: 'common:projectFolders.input', icon: 'inbox', subdir: 'gt_input' },
+  { labelKey: 'common:projectFolders.output', icon: 'upload', subdir: OUTPUT_FOLDER_NAME },
+  { labelKey: 'common:projectFolders.cache', icon: 'database', subdir: 'transl_cache' },
+];
 const AGENT_POLL_INTERVAL_MS = 3000;
+const EXTRACTION_IDLE_POLL_INTERVAL_MS = 15000;
 const RUNTIME_POLL_INTERVAL_MS = 3000;
 const LONG_PRESS_MS = 350;
 const LONG_PRESS_MOVE_TOLERANCE = 6;
@@ -97,15 +108,33 @@ const PROJECT_TABS: Array<{ path: string; label: string; icon: IconName }> = [
   { path: 'config', get label() { return translate("common:sidebar.label_label_configEdit"); }, icon: 'settings' },
 ];
 
-/** 翻译或 Agent 正在跑任务时的呼吸蓝点（与 Agent 页「运行中」指示同款）。
+/** 翻译正在跑任务时的蓝点。
  *  child = 展开态子项行（跟在文字后面靠右）；rail = 收起态只剩图标的导航项。 */
-function RunningDot({ variant, agent = false }: { variant: 'child' | 'rail'; agent?: boolean }) {
-  const uiLanguage = useUiLanguage();
+function RunningDot({ variant }: { variant: 'child' | 'rail' }) {
+  useUiLanguage();
   return (
     <span
       className={variant === 'child' ? 'sidebar__project-child-running-dot' : 'sidebar__nav-running-dot'}
-      title={translate(agent ? "common:actions.running" : "common:sidebar.runningDot_title_pendingTranslation")}
-      aria-label={translate(agent ? "common:actions.running" : "common:sidebar.runningDot_ariaLabel_pendingTranslation")}
+      title={translate("common:sidebar.runningDot_title_pendingTranslation")}
+      aria-label={translate("common:sidebar.runningDot_ariaLabel_pendingTranslation")}
+    />
+  );
+}
+
+/** 提取 / 翻译 Agent 入口上的状态点（与各自会话列表里的灯同色）：
+ *  有会话在跑 = 蓝；有会话跑完但还没点开看过 = 绿（出错结束 = 橙），点开那个会话即熄灭。 */
+function AgentStatusDot({ indicator, variant }: { indicator: AgentIndicator; variant: 'child' | 'rail' }) {
+  useUiLanguage();
+  if (!indicator) return null;
+  const label = translate(
+    indicator === 'running' ? "common:actions.running"
+      : indicator === 'failed' ? "common:sidebar.agentDot_label_failed" : "common:sidebar.agentDot_label_done",
+  );
+  return (
+    <span
+      className={`${variant === 'child' ? 'sidebar__project-child-running-dot' : 'sidebar__nav-running-dot'}${indicator === 'running' ? '' : ` sidebar__agent-dot--${indicator}`}`}
+      title={label}
+      aria-label={label}
     />
   );
 }
@@ -172,7 +201,9 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
   const [rebuildingDirs, setRebuildingDirs] = useState<Record<string, boolean>>({});
   // Track which projects have active translation jobs (running or pending)
   const [translatingDirs, setTranslatingDirs] = useState<Record<string, boolean>>({});
-  const [agentRunning, setAgentRunning] = useState(false);
+  const translationAgentIndicator = useAgentIndicator('translation');
+  const extractionAgentIndicator = useAgentIndicator('extraction');
+  const extractionAgentRunning = extractionAgentIndicator === 'running';
   const runningAgentProjectsRef = useRef(new Map<string, boolean>());
   const [rebuildToasts, setRebuildToasts] = useState<RebuildToast[]>([]);
   const [hasBackendProfiles, setHasBackendProfiles] = useState(() => getBackendProfileNames().length > 0);
@@ -457,7 +488,7 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
     e.stopPropagation();
     // Clamp menu position to viewport
     const menuWidth = 180;
-    const menuHeight = 120;
+    const menuHeight = 270;
     const x = Math.min(e.clientX, window.innerWidth - menuWidth - 8);
     const y = Math.min(e.clientY, window.innerHeight - menuHeight - 8);
     setContextMenu({ x, y, projectDir });
@@ -494,7 +525,8 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
     });
   }, [expandedProjects, openProjects]);
 
-  // Keep the Agent indicator updated even when its page is unmounted.
+  // Keep the Agent indicators updated even when their pages are unmounted or hidden:
+  // a session that finishes while you are elsewhere is caught here and lights the green dot.
   useEffect(() => {
     let cancelled = false;
     let inFlight = false;
@@ -511,20 +543,24 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
         for (const [dir, running] of runningByProject) {
           if (running) projects.add(dir);
         }
+        const observedAt = Date.now();
+        const reports: AgentSessionReport[] = [];
+        let complete = true;
         await Promise.all(Array.from(projects, async (dir) => {
           try {
             const sessions = await listAgentSessions(dir);
             if (cancelled) return;
             runningByProject.set(dir, sessions.some((session) => session.status === 'running'));
+            for (const session of sessions) {
+              reports.push({ id: session.session_id, phase: translationSessionPhase(session.status) });
+            }
           } catch {
             // Preserve the last known state during temporary connection failures.
+            complete = false;
           }
         }));
         if (cancelled) return;
-        setAgentRunning((prev) => {
-          const next = Array.from(runningByProject.values()).some(Boolean);
-          return prev === next ? prev : next;
-        });
+        reportAgentSessions('translation', reports, observedAt, { complete });
       }
       inFlight = false;
       if (cancelled) return;
@@ -543,6 +579,52 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [openProjects]);
+
+  // 提取 Agent 同理。它的运行只会从提取页发起，那边一发出就会把"运行中"报进来，
+  // 所以空闲时放慢轮询，有会话在跑才跟紧。
+  useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
+    let timer: number | undefined;
+    const pollExtractionStatus = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      window.clearTimeout(timer);
+      if (!document.hidden) {
+        const observedAt = Date.now();
+        try {
+          const list = await extractionApi<ExtractionSessionList>('sessions');
+          if (cancelled) return;
+          reportAgentSessions(
+            'extraction',
+            list.sessions.map((session) => ({ id: session.id, phase: extractionSessionPhase(session) })),
+            observedAt,
+            { complete: true },
+          );
+        } catch {
+          // 后端暂时连不上（或远程后端不开放提取接口）：保留上次的状态
+        }
+      }
+      inFlight = false;
+      if (cancelled) return;
+      timer = window.setTimeout(
+        () => void pollExtractionStatus(),
+        extractionAgentRunning ? AGENT_POLL_INTERVAL_MS : EXTRACTION_IDLE_POLL_INTERVAL_MS,
+      );
+    };
+    const handleVisibilityChange = () => {
+      if (document.hidden || cancelled) return;
+      if (timer) window.clearTimeout(timer);
+      void pollExtractionStatus();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    void pollExtractionStatus();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [extractionAgentRunning]);
 
   // Poll project runtime status to detect active translation jobs
   useEffect(() => {
@@ -853,6 +935,7 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
         <NavLink to="/extraction" className={({ isActive }) => `sidebar__nav-item ${isActive ? 'sidebar__nav-item--active' : ''}`} title={translate('extraction:title')}>
           <span className="sidebar__nav-icon"><Icon name="agent-extract" /></span>
           {expanded && <span className="sidebar__nav-label">{translate('extraction:title')}</span>}
+          <AgentStatusDot indicator={extractionAgentIndicator} variant={expanded ? 'child' : 'rail'} />
         </NavLink>
         <NavLink
           to="/agent"
@@ -863,7 +946,7 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
         >
           <span className="sidebar__nav-icon"><Icon name="agent-translate" /></span>
           {expanded && <span className="sidebar__nav-label">{translate("common:sidebar.sidebarTopNav_message_agent")}</span>}
-          {agentRunning && <RunningDot variant={expanded ? 'child' : 'rail'} agent />}
+          <AgentStatusDot indicator={translationAgentIndicator} variant={expanded ? 'child' : 'rail'} />
         </NavLink>
       </div>
 
@@ -949,12 +1032,10 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
                     onClick={() => toggleProjectExpanded(projectDir)}
                     onContextMenu={(e) => handleProjectContextMenu(e, projectDir)}
                   >
-                    <ProjectFolderPopover
-                      projectDir={projectDir}
-                      expanded={isProjectExpanded}
-                      className={`sidebar__nav-icon sidebar__project-icon sidebar__project-icon--link${isProjectExpanded ? ' sidebar__project-icon--open' : ''}${compactProjectHeaders ? ' sidebar__project-icon--compact' : ''}`}
-                      onError={(description) => pushRebuildToast({ tone: 'error', title: uiMessage("common:sidebar.title_title_openFileFailedVariant2"), description })}
-                    />
+                    <span
+                      className={`sidebar__nav-icon sidebar__project-icon${isProjectExpanded ? ' sidebar__project-icon--open' : ''}${compactProjectHeaders ? ' sidebar__project-icon--compact' : ''}`}
+                      aria-hidden
+                    ><Icon name={isProjectExpanded ? 'folder-open' : 'folder'} /></span>
                     <span className="sidebar__project-name">{projectName}</span>
                     <button
                       className="sidebar__project-close"
@@ -1034,8 +1115,9 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
                     title={projectName}
                     data-project-drag-handle
                     draggable={false}
+                    onContextMenu={(e) => handleProjectContextMenu(e, projectDir)}
                   >
-                    <ProjectFolderPopover projectDir={projectDir} className="sidebar__nav-icon" onError={(description) => pushRebuildToast({ tone: 'error', title: uiMessage("common:sidebar.title_title_openFileFailedVariant2"), description })} />
+                    <span className="sidebar__nav-icon"><Icon name="folder" /></span>
                   </NavLink>
                   {PROJECT_TABS.map((tab) => (
                     <NavLink
@@ -1074,8 +1156,9 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
                   title={projectName}
                   data-project-drag-handle
                   draggable={false}
+                  onContextMenu={(e) => handleProjectContextMenu(e, projectDir)}
                 >
-                  <ProjectFolderPopover projectDir={projectDir} className="sidebar__nav-icon" onError={(description) => pushRebuildToast({ tone: 'error', title: uiMessage("common:sidebar.title_title_openFileFailedVariant2"), description })} />
+                  <span className="sidebar__nav-icon"><Icon name="folder" /></span>
                 </NavLink>
               )}
             </div>
@@ -1139,6 +1222,29 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
           ref={contextMenuRef}
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
+          {PROJECT_FOLDERS.map(({ labelKey, icon, subdir }) => {
+            const path = subdir ? joinPath(contextMenu.projectDir, subdir) : contextMenu.projectDir;
+            return (
+              <button
+                key={labelKey}
+                className="sidebar__context-menu-item"
+                type="button"
+                title={path}
+                onClick={() => {
+                  setContextMenu(null);
+                  invoke('open_folder', { path }).catch((err) => pushRebuildToast({
+                    tone: 'error',
+                    title: uiMessage("common:sidebar.title_title_openFileFailedVariant2"),
+                    description: err instanceof Error ? err.message : String(err),
+                  }));
+                }}
+              >
+                <span className="sidebar__context-menu-icon" aria-hidden><Icon name={icon} /></span>
+                {translate(labelKey)}
+              </button>
+            );
+          })}
+          <div className="sidebar__context-menu-separator" role="separator" />
           <button
             className="sidebar__context-menu-item"
             type="button"
@@ -1146,7 +1252,7 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
               handleRequestClose(contextMenu.projectDir);
               setContextMenu(null);
             }}
-          >{translate("common:sidebar.sidebarContextMenu_message_disableProject")}</button>
+          ><span className="sidebar__context-menu-icon" aria-hidden />{translate("common:sidebar.sidebarContextMenu_message_disableProject")}</button>
           <button
             className="sidebar__context-menu-item"
             type="button"
@@ -1155,7 +1261,7 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
               onCloseOtherProjects(contextMenu.projectDir);
               setContextMenu(null);
             }}
-          >{translate("common:sidebar.sidebarContextMenu_message_disableProjectVariant2")}</button>
+          ><span className="sidebar__context-menu-icon" aria-hidden />{translate("common:sidebar.sidebarContextMenu_message_disableProjectVariant2")}</button>
           <button
             className="sidebar__context-menu-item sidebar__context-menu-item--danger"
             type="button"
@@ -1164,7 +1270,7 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
               onCloseAllProjects();
               setContextMenu(null);
             }}
-          >{translate("common:sidebar.sidebarContextMenu_message_disableProjectVariant3")}</button>
+          ><span className="sidebar__context-menu-icon" aria-hidden />{translate("common:sidebar.sidebarContextMenu_message_disableProjectVariant3")}</button>
         </div>
       )}
 

@@ -128,6 +128,8 @@
   "newOutput": "Existing output folders are reused. Creating a session preserves existing files. Only one extraction agent can run per game directory at a time.",
   "closeFolder": "Close folder",
   "deleteSession": "Delete session",
+  "sessionFinishedUnseen": "Finished",
+  "sessionFailedUnseen": "Finished: error",
   "stopBeforeClose": "Stop the running agent before closing",
   "confirmDeleteSession": "Delete this session and its history? Output files will be kept.",
   "confirmCloseFolder": "Close this folder in the sidebar? Session history and output files will be kept. Creating a new session for this game will show them again.",

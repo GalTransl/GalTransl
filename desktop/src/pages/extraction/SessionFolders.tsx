@@ -1,8 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
+import { useFolderContextMenu } from '../../components/FolderContextMenu';
 import { basenamePath } from '../../lib/paths';
 import { readProjectStorage, writeProjectStorage } from '../../lib/projectStorage';
 import { useSessionTime } from '../../lib/sessionTime';
+import { useUnseenAgentLights } from '../../lib/agentActivity';
 import { statusLabel, x } from './labels';
 import { isRunning, type Session } from './types';
 
@@ -19,8 +21,10 @@ export function SessionFolders({ sessions, selected, activeSession, onSelect, on
   onCloseFolder: (directory: string) => void; runningDirectories?: string[]; busy: boolean;
 }) {
   const formatSessionTime = useSessionTime();
+  const unseen = useUnseenAgentLights('extraction');
   const id = useId();
   const lastSelected = useRef(selected);
+  const folderMenu = useFolderContextMenu();
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
     try {
       const saved = JSON.parse(readProjectStorage(COLLAPSED_KEY) || '[]');
@@ -53,7 +57,7 @@ export function SessionFolders({ sessions, selected, activeSession, onSelect, on
       || group.sessions.some(session => isRunning(session.id === activeSession?.id ? activeSession : session));
     const listId = `${id}-${index}`;
     return <section key={key} className={`agent-sessions__group${folded ? ' is-collapsed' : ''}${active ? ' is-active' : ''}`}>
-      <div className="agent-sessions__group-head">
+      <div className="agent-sessions__group-head" onContextMenu={event => folderMenu.onContextMenu(event, group.directory)}>
         <button type="button" className="agent-sessions__group-toggle" title={group.directory}
           aria-expanded={!folded} aria-controls={listId} onClick={() => setCollapsed(previous => {
             const next = new Set(previous); if (next.has(key)) next.delete(key); else next.add(key); return next;
@@ -80,13 +84,16 @@ export function SessionFolders({ sessions, selected, activeSession, onSelect, on
               const status = currentSession.status;
               const itemRunning = isRunning({ ...item, status });
               const updatedAt = Math.max(item.updated_at || 0, currentSession.updated_at || 0) || item.created_at;
+              // Blue while working; green/orange once finished until the session is opened.
+              const light = itemRunning ? 'running' : selected === item.id ? '' : unseen[item.id] || '';
               return <div key={item.id} className={`agent-session-item${selected === item.id ? ' is-active' : ''}`}>
                 <button type="button" className="agent-session-item__main" title={item.title}
                   aria-current={selected === item.id ? 'true' : undefined} onClick={() => onSelect(item.id)}>
                   <span className="agent-session-item__title">{item.title}</span>
                   <span className="agent-session-item__time">{formatSessionTime(updatedAt)}</span>
                 </button>
-                {itemRunning && <span className="agent-session-item__light is-running" title={statusLabel(status)} aria-hidden />}
+                {light && <span className={`agent-session-item__light is-${light}`}
+                  title={light === 'running' ? statusLabel(status) : x(light === 'failed' ? 'sessionFailedUnseen' : 'sessionFinishedUnseen')} aria-hidden />}
                 <button type="button" className="agent-session-item__delete" disabled={busy || itemRunning}
                   title={x(itemRunning ? 'stopBeforeClose' : 'deleteSession')}
                   aria-label={`${x('deleteSession')} (${item.title})`}
@@ -97,5 +104,5 @@ export function SessionFolders({ sessions, selected, activeSession, onSelect, on
         </div>
       </div>
     </section>;
-  })}</>;
+  })}{folderMenu.menu}</>;
 }

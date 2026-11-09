@@ -128,6 +128,8 @@
   "newOutput": "已有输出目录会直接复用，创建会话时保留已有文件。同一游戏目录同时只能运行一个提取 Agent。",
   "closeFolder": "关闭文件夹",
   "deleteSession": "删除会话",
+  "sessionFinishedUnseen": "已结束",
+  "sessionFailedUnseen": "已结束：出错",
   "stopBeforeClose": "请先停止运行中的 Agent，再关闭",
   "confirmDeleteSession": "删除此会话及其历史记录？输出文件会保留。",
   "confirmCloseFolder": "从侧栏关闭此文件夹？会话历史和输出文件会保留，重新为此游戏新建会话时恢复显示。",

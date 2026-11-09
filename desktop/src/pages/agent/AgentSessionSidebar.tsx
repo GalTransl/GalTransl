@@ -5,6 +5,7 @@ import { useSessionTime } from '../../lib/sessionTime';
 import { Icon } from '../../components/Icon';
 import { AgentSettingsButton, AgentSettingsDialog } from '../../components/AgentSettings';
 import { AnimatePresence } from '../../components/UiMotion';
+import { useFolderContextMenu } from '../../components/FolderContextMenu';
 import { useConnection } from '../../features/connection/ConnectionContext';
 import { shortName } from './storage';
 
@@ -56,6 +57,7 @@ export function AgentSessionSidebar({
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 哪些项目分组已经点开过「显示其余 N 个」（纯本地状态，不涉及请求）
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
+  const folderMenu = useFolderContextMenu();
 
   return (
     <aside className="agent-sessions">
@@ -99,7 +101,7 @@ export function AgentSessionSidebar({
                 key={dir}
                 className={`agent-sessions__group${isCollapsed ? ' is-collapsed' : ''}${isGroupActive ? ' is-active' : ''}`}
               >
-                <div className="agent-sessions__group-head">
+                <div className="agent-sessions__group-head" onContextMenu={(e) => folderMenu.onContextMenu(e, dir)}>
                   <button
                     type="button"
                     className="agent-sessions__group-toggle"
@@ -231,6 +233,7 @@ export function AgentSessionSidebar({
         )}
       </div>
       <AgentSettingsButton ready={connection.connectionPhase === 'online'} onClick={() => setSettingsOpen(true)} />
+      {folderMenu.menu}
       <AnimatePresence>{settingsOpen && <AgentSettingsDialog key="settings" agent="translation" backendUrl={connection.backendUrl} projectDir={activeProject} close={() => setSettingsOpen(false)} />}</AnimatePresence>
     </aside>
   );

@@ -156,7 +156,8 @@
     "add": "Add",
     "selectAll": "Select all",
     "clearAll": "Clear all",
-    "clear": "Clear"
+    "clear": "Clear",
+    "openFolder": "Open folder"
   },
   "gettingStarted": {
     "title_title_configTranslationModel": "Configure the translation model",
@@ -190,16 +191,11 @@
     "inlineAlertMeta_message_text": "just now",
     "inlineAlertClose_ariaLabel_disableHint": "Dismiss the hint"
   },
-  "projectFolderPopover": {
-    "label_label_projectFile": "Project folder",
-    "shortLabel_shortLabel_project": "Project",
-    "label_label_file": "Input folder",
-    "shortLabel_shortLabel_text": "Input",
-    "label_label_fileVariant2": "Output folder",
-    "shortLabel_shortLabel_textVariant2": "Output",
-    "label_label_cacheFile": "Cache folder",
-    "shortLabel_shortLabel_cache": "Cache",
-    "projectFolderPopover_ariaLabel_projectFile": "Quick actions for the project folder"
+  "projectFolders": {
+    "project": "Open project folder",
+    "input": "Open input folder",
+    "output": "Open output folder",
+    "cache": "Open cache folder"
   },
   "projectLayout": {
     "label_label_startTranslation": "Start translation",
@@ -237,6 +233,8 @@
     "label_label_configEdit": "Edit configuration",
     "runningDot_title_pendingTranslation": "Translating",
     "runningDot_ariaLabel_pendingTranslation": "Translating",
+    "agentDot_label_done": "A session finished and hasn't been viewed yet",
+    "agentDot_label_failed": "A session ended with an error and hasn't been viewed yet",
     "title_title_translationFailedProblem": "Some translations still failed",
     "description_description_problemListEntryTranslationFailedProblemNot": "{{translationFailureCount}} “translation failed” problems in the list are still unresolved.",
     "title_title_text": "Build finished",

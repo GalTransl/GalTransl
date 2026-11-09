@@ -156,7 +156,8 @@
     "add": "添加",
     "selectAll": "全选",
     "clearAll": "清空",
-    "clear": "清除"
+    "clear": "清除",
+    "openFolder": "打开文件夹"
   },
   "gettingStarted": {
     "title_title_configTranslationModel": "配置翻译模型",
@@ -190,16 +191,11 @@
     "inlineAlertMeta_message_text": "刚刚",
     "inlineAlertClose_ariaLabel_disableHint": "关闭提示"
   },
-  "projectFolderPopover": {
-    "label_label_projectFile": "项目文件夹",
-    "shortLabel_shortLabel_project": "项目",
-    "label_label_file": "输入文件夹",
-    "shortLabel_shortLabel_text": "输入",
-    "label_label_fileVariant2": "输出文件夹",
-    "shortLabel_shortLabel_textVariant2": "输出",
-    "label_label_cacheFile": "缓存文件夹",
-    "shortLabel_shortLabel_cache": "缓存",
-    "projectFolderPopover_ariaLabel_projectFile": "项目文件夹快捷操作"
+  "projectFolders": {
+    "project": "打开项目文件夹",
+    "input": "打开输入文件夹",
+    "output": "打开输出文件夹",
+    "cache": "打开缓存文件夹"
   },
   "projectLayout": {
     "label_label_startTranslation": "开始翻译",
@@ -237,6 +233,8 @@
     "label_label_configEdit": "配置编辑",
     "runningDot_title_pendingTranslation": "正在翻译",
     "runningDot_ariaLabel_pendingTranslation": "正在翻译",
+    "agentDot_label_done": "有会话已完成，尚未查看",
+    "agentDot_label_failed": "有会话出错结束，尚未查看",
     "title_title_translationFailedProblem": "仍有翻译失败问题",
     "description_description_problemListEntryTranslationFailedProblemNot": "问题清单中还有 {{translationFailureCount}} 条“翻译失败”问题未修复。",
     "title_title_text": "构建完毕",
