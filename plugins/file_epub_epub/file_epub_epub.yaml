@@ -6,8 +6,8 @@ Core:
 
 Documentation:
   Author: PiDanShouRouZhou
-  Version: 1.0
-  Description: 翻译 Epub 文件, 支持自动识别名称、双语显示、缩小比例、拆分文件以支持单文件多线程翻译等功能。部分代码和正则来自Ainiee。
+  Version: 2.0
+  Description: 翻译 Epub 文件，按段落、标题、列表等块级元素提取正文，注音（ruby）不送翻译，只替换正文、保留链接与锚点；支持自动识别名称、双语显示、译前/译后正则、拆分文件以支持单文件多线程翻译。
 
 Settings: # 这里存放插件的设置
   是否自动识别名称: False  # 默认关闭自动识别名称
@@ -16,6 +16,8 @@ Settings: # 这里存放插件的设置
   双语显示: True  # 默认开启双语显示
   原文颜色: "#808080" #默认灰色
   缩小比例: 0.8  # 默认缩小到原始大小的80%
+  译前正则: []  # 每条「正则 => 替换」，提取正文前作用于章节 HTML
+  译后正则: []  # 每条「正则 => 替换」，写回译文后作用于章节 HTML
   是否拆分文件以支持单文件多线程: False  # 单文件拆分功能，用于支持单文件多线程翻译，默认关闭。
 
 SettingsSchema:
@@ -46,6 +48,14 @@ SettingsSchema:
     advanced: true
     min: 0.1
     step: 0.1
+  译前正则:
+    label: 译前正则
+    description: '提取正文前对每个章节的 HTML 依次执行替换，每行一条「正则 => 替换」，例如 <ruby>(.*?)<rt>(.*?)</rt></ruby> => \1(\2) 把注音改成括号留给模型参考；替换串用 Python 语法（\1、\g<name>），省略「 => 替换」表示删除匹配内容。'
+    advanced: true
+  译后正则:
+    label: 译后正则
+    description: 写回译文后对每个章节的 HTML 依次执行替换，格式同译前正则，可用于还原译前正则改写的标记。
+    advanced: true
   是否拆分文件以支持单文件多线程:
     label: 拆分章节并发翻译
     description: 将 EPUB 拆分为章节以便并发处理，完成后合并为电子书。

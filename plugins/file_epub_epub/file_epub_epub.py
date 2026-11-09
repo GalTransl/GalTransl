@@ -1,23 +1,340 @@
-import re
+"""Epub 文件插件。
+
+正文按块级元素切分：<p>、<h1>~<h6>、<li>、<td> 等块内连续的行内内容为一句，
+<ruby> 的注音（<rt>/<rp>）不送翻译。回写时按源码偏移只替换被翻译的片段，
+文档其余部分（声明、样式、空白和换行风格）保持原样。
+"""
+import codecs
+import html as html_lib
 import os
+import posixpath
+import re
 import shutil
+import unicodedata
+import xml.etree.ElementTree as ET
 import zipfile
+from html.parser import HTMLParser
+from urllib.parse import unquote
+
 from GalTransl import LOGGER
 from GalTransl.GTPlugin import GFilePlugin
-import sys
 
-lib_path = os.path.abspath(os.path.dirname(__file__))
-sys.path.append(lib_path)
+VOID_TAGS = frozenset(
+    "area base br col embed hr img input link meta param source track wbr".split()
+)
+# 块级边界：遇到这些标签就结束当前句子
+BLOCK_TAGS = frozenset(
+    """address article aside blockquote body caption center dd details dialog div dl dt
+    fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hgroup hr html legend
+    li main ol p pre section summary table tbody td tfoot th thead tr ul""".split()
+)
+# 段落类块：块内的 <br> 是句内换行；其余容器（body、div 等）里的 <br> 视为分句边界
+PARAGRAPH_TAGS = frozenset(
+    "address caption dd dt figcaption h1 h2 h3 h4 h5 h6 legend li p pre summary td th".split()
+)
+# 整段跳过、不提取文本的元素
+SKIP_TAGS = frozenset("head script style nav svg math template noscript".split())
+RUBY_TEXT_TAGS = frozenset(("rt", "rp"))
+# 替换时不深入这些元素内部（整段注音结构需要一起替换）
+NO_DESCEND_TAGS = frozenset(("ruby", "rb", "rt", "rp", "rtc"))
+DOC_MEDIA_TYPES = frozenset(("application/xhtml+xml",))
+RULE_SEPARATOR = " => "
+_BR = "\x00"
+_NEWLINE_SPACE = re.compile(r"[ \t\r\n\f]*[\r\n][ \t\r\n\f]*")
+_ENCODING_DECL = re.compile(rb"""(?:encoding|charset)\s*=\s*["']?([A-Za-z0-9._-]+)""")
 
-try:
-    import ebooklib
-    from ebooklib import epub
-except ImportError:
-    LOGGER.warning("缺少依赖包ebooklib, 请更新依赖")
-try:
-    from bs4 import BeautifulSoup
-except ImportError:
-    LOGGER.warning("缺少依赖包beautifulsoup4, 请更新依赖")
+
+class _Token:
+    __slots__ = ("kind", "tag", "start", "end", "text", "has_id")
+
+    def __init__(self, kind: str, tag: str, start: int, text: str, has_id: bool):
+        self.kind = kind  # start / end / void / data / other
+        self.tag = tag
+        self.start = start
+        self.end = start
+        self.text = text
+        self.has_id = has_id
+
+
+class _Tokenizer(HTMLParser):
+    """把 HTML 拆成首尾相接的标记序列，每个标记带源码偏移。"""
+
+    def __init__(self, source: str):
+        super().__init__(convert_charrefs=True)
+        self.tokens: list[_Token] = []
+        self._line_starts = [0] + [m.end() for m in re.finditer("\n", source)]
+        self.feed(source)
+        self.close()
+        for current, following in zip(self.tokens, self.tokens[1:]):
+            current.end = following.start
+        if self.tokens:
+            self.tokens[-1].end = len(source)
+
+    def _add(self, kind: str, tag: str = "", text: str = "", attrs=()):
+        line, column = self.getpos()
+        start = self._line_starts[line - 1] + column
+        has_id = any(key == "id" for key, _ in attrs)
+        self.tokens.append(_Token(kind, tag, start, text, has_id))
+
+    def handle_starttag(self, tag, attrs):
+        self._add("void" if tag in VOID_TAGS else "start", tag, attrs=attrs)
+
+    def handle_startendtag(self, tag, attrs):
+        self._add("void", tag, attrs=attrs)
+
+    def handle_endtag(self, tag):
+        self._add("end", tag)
+
+    def handle_data(self, data):
+        self._add("data", text=data)
+
+    def handle_comment(self, data):
+        self._add("other")
+
+    handle_decl = handle_pi = unknown_decl = handle_comment
+
+
+class _Segment:
+    """一句正文及其在源码中的替换位置。"""
+
+    __slots__ = ("text", "indent", "start", "end", "balanced", "data_spans", "anchors")
+
+    def __init__(self, text, indent, start, end, balanced, data_spans, anchors):
+        self.text = text
+        self.indent = indent
+        self.start = start
+        self.end = end
+        self.balanced = balanced
+        self.data_spans = data_spans
+        self.anchors = anchors
+
+
+def _is_wide(char: str) -> bool:
+    return unicodedata.east_asian_width(char) in ("W", "F")
+
+
+def _collapse_newlines(text: str) -> str:
+    """源码里的换行只是排版空白：中日文之间直接去掉，其余折叠为一个空格。"""
+
+    def replace(match):
+        before = text[match.start() - 1] if match.start() else ""
+        after = text[match.end()] if match.end() < len(text) else ""
+        if not before or not after or _BR in (before, after) or (_is_wide(before) and _is_wide(after)):
+            return ""
+        return " "
+
+    return _NEWLINE_SPACE.sub(replace, text)
+
+
+def _is_blank(token: _Token) -> bool:
+    return token.kind == "data" and not token.text.strip(" \t\r\n\f")
+
+
+def _trim(tokens, lo: int, hi: int) -> tuple:
+    while lo < hi and _is_blank(tokens[lo]):
+        lo += 1
+    while hi > lo and _is_blank(tokens[hi - 1]):
+        hi -= 1
+    return lo, hi
+
+
+def _balanced(tokens, lo: int, hi: int) -> bool:
+    stack = []
+    for token in tokens[lo:hi]:
+        if token.kind == "start":
+            stack.append(token.tag)
+        elif token.kind == "end" and token.tag not in VOID_TAGS:
+            if not stack or stack[-1] != token.tag:
+                return False
+            stack.pop()
+    return not stack
+
+
+def _matching_end(tokens, index: int, hi: int):
+    tag, depth = tokens[index].tag, 0
+    for position in range(index, hi):
+        token = tokens[position]
+        if token.tag != tag:
+            continue
+        if token.kind == "start":
+            depth += 1
+        elif token.kind == "end":
+            depth -= 1
+            if depth == 0:
+                return position
+    return None
+
+
+def _matching_start(tokens, index: int, lo: int):
+    tag, depth = tokens[index].tag, 0
+    for position in range(index, lo - 1, -1):
+        token = tokens[position]
+        if token.tag != tag:
+            continue
+        if token.kind == "end":
+            depth += 1
+        elif token.kind == "start":
+            depth -= 1
+            if depth == 0:
+                return position
+    return None
+
+
+def _split_runs(tokens) -> list:
+    """按块级边界切出行内内容区间 (lo, hi)。"""
+    runs, run_start = [], None
+    skip_tag, skip_depth = "", 0
+    blocks = []  # 当前打开的块级元素
+
+    def close(position):
+        if run_start is not None and run_start < position:
+            runs.append((run_start, position))
+
+    for index, token in enumerate(tokens):
+        if skip_tag:
+            if token.tag == skip_tag and token.kind == "start":
+                skip_depth += 1
+            elif token.tag == skip_tag and token.kind == "end":
+                skip_depth -= 1
+            elif skip_tag == "head" and token.tag == "body" and token.kind == "start":
+                skip_depth = 0  # HTML 允许省略 </head>
+            if skip_depth <= 0:
+                skip_tag = ""
+            continue
+        if token.tag in SKIP_TAGS and token.kind == "start":
+            close(index)
+            run_start = None
+            skip_tag, skip_depth = token.tag, 1
+        elif token.tag in BLOCK_TAGS or token.tag in SKIP_TAGS:
+            close(index)
+            run_start = None
+            if token.kind == "start":
+                if token.tag == "p" and blocks and blocks[-1] == "p":
+                    blocks.pop()  # HTML 允许省略 </p>
+                blocks.append(token.tag)
+            elif token.kind == "end" and token.tag in blocks:
+                while blocks.pop() != token.tag:
+                    pass
+        elif token.tag == "br" and token.kind != "end" and not (blocks and blocks[-1] in PARAGRAPH_TAGS):
+            close(index)  # 容器里按 <br> 换行排版的正文，每行一句
+            run_start = None
+        elif run_start is None:
+            run_start = index
+    close(len(tokens))
+    return runs
+
+
+def _build_segment(source: str, tokens, lo: int, hi: int):
+    parts, annotation = [], False
+    for token in tokens[lo:hi]:
+        if token.kind == "start" and token.tag in RUBY_TEXT_TAGS:
+            annotation = True
+        elif token.tag in RUBY_TEXT_TAGS or token.tag in ("ruby", "rb"):
+            annotation = False
+        elif token.tag == "br" and token.kind != "end":
+            parts.append(_BR)
+        elif token.kind == "data" and not annotation:
+            parts.append(token.text)
+    text = _collapse_newlines("".join(parts)).replace(_BR, "\n")
+    message = text.strip()
+    if not message:
+        return None
+    leading = text[: len(text) - len(text.lstrip())]
+    indent = "".join(char for char in leading if char == "　")
+
+    lo, hi = _trim(tokens, lo, hi)
+    # 剥掉跨出本句的首尾标签（如 <br> 分句时包住多行的 <span>），剩余部分通常就能整体替换
+    while not _balanced(tokens, lo, hi):
+        if tokens[lo].kind == "start" and _matching_end(tokens, lo, hi) is None:
+            lo, hi = _trim(tokens, lo + 1, hi)
+        elif tokens[hi - 1].kind == "end" and _matching_start(tokens, hi - 1, lo) is None:
+            lo, hi = _trim(tokens, lo, hi - 1)
+        else:
+            break
+    balanced = _balanced(tokens, lo, hi)
+    # 整句被同一个行内元素包住（如 <a href>、<span class>）时只替换其内部，保留链接和样式
+    while balanced and hi - lo >= 2:
+        first, last = tokens[lo], tokens[hi - 1]
+        if (first.kind != "start" or last.kind != "end" or first.tag != last.tag
+                or first.tag in NO_DESCEND_TAGS or not _balanced(tokens, lo + 1, hi - 1)):
+            break
+        lo, hi = _trim(tokens, lo + 1, hi - 1)
+
+    data_spans = [(token.start, token.end) for token in tokens[lo:hi] if token.kind == "data"]
+    anchors, index = [], lo
+    while index < hi:  # 没有文字、带 id 的元素（脚注锚点、页码标记）在替换后保留
+        token = tokens[index]
+        if token.has_id and token.kind == "void" and token.tag not in ("br", "img"):
+            anchors.append(source[token.start:token.end])
+        elif token.has_id and token.kind == "start":
+            close = _matching_end(tokens, index, hi)
+            if close is not None and not any(
+                t.kind == "data" and t.text.strip() for t in tokens[index + 1:close]
+            ):
+                anchors.append(source[token.start:tokens[close].end])
+                index = close
+        index += 1
+    return _Segment(message, indent, tokens[lo].start, tokens[hi - 1].end, balanced, data_spans, anchors)
+
+
+def parse_segments(source: str) -> list:
+    tokens = _Tokenizer(source).tokens
+    segments = []
+    for lo, hi in _split_runs(tokens):
+        segment = _build_segment(source, tokens, lo, hi)
+        if segment is not None:
+            segments.append(segment)
+    return segments
+
+
+def _escape(text: str) -> str:
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return html_lib.escape(text, quote=False).replace("\n", "<br/>")
+
+
+def _decode(data: bytes):
+    """返回 (文本, 编码, 是否带 BOM)；无法解码时返回 None。"""
+    try:
+        return data.decode("utf-8-sig"), "utf-8", data.startswith(codecs.BOM_UTF8)
+    except UnicodeDecodeError:
+        pass
+    match = _ENCODING_DECL.search(data[:1024])
+    if match:
+        encoding = match.group(1).decode("ascii")
+        try:
+            return data.decode(encoding), encoding, False
+        except (LookupError, UnicodeDecodeError):
+            pass
+    return None
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def epub_documents(book: zipfile.ZipFile) -> list:
+    """按 OPF manifest 顺序列出正文文档（不含导航文档）的 zip 路径。"""
+    names = book.namelist()
+    try:
+        container = ET.fromstring(book.read("META-INF/container.xml"))
+        opf_path = next(
+            element.get("full-path") for element in container.iter()
+            if _local_name(element.tag) == "rootfile" and element.get("full-path")
+        )
+        opf = ET.fromstring(book.read(opf_path))
+    except (KeyError, StopIteration, ET.ParseError):
+        return [name for name in names if name.lower().endswith((".xhtml", ".html", ".htm"))]
+    existing, base, documents = set(names), posixpath.dirname(opf_path), []
+    for element in opf.iter():
+        if _local_name(element.tag) != "item" or element.get("media-type") not in DOC_MEDIA_TYPES:
+            continue
+        if {"nav", "cover"} & set((element.get("properties") or "").split()):
+            continue
+        path = posixpath.normpath(posixpath.join(base, unquote(element.get("href", ""))))
+        if path in existing and path not in documents:
+            documents.append(path)
+    return documents
+
 
 class FilePlugin(GFilePlugin):
     def gtp_init(self, plugin_conf: dict, project_conf: dict):
@@ -34,11 +351,54 @@ class FilePlugin(GFilePlugin):
         self.原文颜色 = settings.get("原文颜色", "#808080")
         self.缩小比例 = settings.get("缩小比例", "0.8")
         self.双语显示 = settings.get("双语显示", True)
+        self.译前正则 = self._compile_rules(settings.get("译前正则", []), "译前正则")
+        self.译后正则 = self._compile_rules(settings.get("译后正则", []), "译后正则")
         self.project_dir = project_conf["project_dir"]
         self.是否拆分文件以支持单文件多线程 = settings.get("是否拆分文件以支持单文件多线程", False)
 
         if self.是否拆分文件以支持单文件多线程:
             self.extract_epub()
+
+    def _compile_rules(self, rules, label: str) -> list:
+        """每条规则写成「正则 => 替换」，省略替换部分表示删除匹配内容。"""
+        compiled = []
+        for rule in rules or []:
+            if not isinstance(rule, str) or not rule.strip():
+                continue
+            pattern, _, replacement = rule.partition(RULE_SEPARATOR)
+            try:
+                compiled.append((re.compile(pattern), replacement))
+            except re.error as error:
+                LOGGER.warning(f"[{self.pname}] 已忽略无效的{label}「{rule}」：{error}")
+        return compiled
+
+    def _apply_rules(self, text: str, rules: list) -> str:
+        for pattern, replacement in rules:
+            try:
+                text = pattern.sub(replacement, text)
+            except (re.error, IndexError) as error:
+                LOGGER.warning(f"[{self.pname}] 正则「{pattern.pattern}」的替换「{replacement}」无效：{error}")
+        return text
+
+    def _parse_document(self, raw: str) -> tuple:
+        source = self._apply_rules(raw, self.译前正则)
+        return source, parse_segments(source)
+
+    def _entries(self, segments: list, start_index: int, item_id: str = None) -> list:
+        entries = []
+        for number, segment in enumerate(segments):
+            name, message = self.extract_name_message(segment.text)
+            entry = {
+                "index": start_index + number,
+                "name": name,
+                "message": message,
+                "original_message": segment.text,
+                "segment": number,
+            }
+            if item_id is not None:
+                entry["item_id"] = item_id
+            entries.append(entry)
+        return entries
 
     def extract_epub(self):
         """
@@ -50,6 +410,7 @@ class FilePlugin(GFilePlugin):
         epub_files = [file for file in os.listdir(input_dir) if file.endswith(".epub")]
 
         self.epub_file_info = {}
+        used_keys = set()
 
         for epub_file in epub_files:
             epub_name = os.path.splitext(epub_file)[0]
@@ -67,6 +428,13 @@ class FilePlugin(GFilePlugin):
                         file_path = os.path.join(root, file)
                         rel_path = os.path.relpath(file_path, temp_dir)
                         key = f"{epub_name}_{file}"
+                        if key in used_keys:  # 不同目录下的同名章节
+                            stem, ext = os.path.splitext(file)
+                            number = 2
+                            while f"{epub_name}_{stem}_{number}{ext}" in used_keys:
+                                number += 1
+                            key = f"{epub_name}_{stem}_{number}{ext}"
+                        used_keys.add(key)
                         self.epub_file_info[epub_name][key] = rel_path
                         shutil.copy(file_path, os.path.join(input_dir, key))
 
@@ -108,76 +476,15 @@ class FilePlugin(GFilePlugin):
             self.rebuild_epub()
 
     def read_html_xhtml_to_json(self, file_path: str) -> list:
-        """
-        读取HTML或XHTML文件,返回一个包含message和name(可空)的对象列表。
-        :param file_path: HTML或XHTML文件路径。
-        :return: 包含message和name(可空)的对象列表。
-        """
-
-        from ebooklib.epub import EpubHtml
-        from ebooklib.epub import CHAPTER_XML
-        json_list = []
-        
-        # 模拟 EpubBook 对象
-        class MockEpubBook:
-            def __init__(self):
-                self.IDENTIFIER_ID = 'id'
-                self.language = 'jp'
-                self.title = 'Mock Book'
-                self.direction = None
-
-            def get_template(self, name):
-                return CHAPTER_XML  # 这是在epub库中定义的常量
-
-            def get_metadata(self, namespace, name):
-                return []
-
-        # 创建一个临时的 EpubHtml 对象
-        temp_item = EpubHtml()
-        temp_item.file_name = os.path.basename(file_path)
-        temp_item.book = MockEpubBook()  # 设置模拟的 book 属性
-        temp_item.lang = 'en'  # 设置语言属性
-        temp_item.direction = None  # 设置方向属性
-        
-        # 读取文件内容
-        with open(file_path, 'rb') as file:
-            temp_item.content = file.read()
-        
-        # 使用 get_content 方法获取处理后的内容
-        html_content = temp_item.get_content()
-        
-        # 如果 html_content 是 bytes 类型，解码为字符串
-        if isinstance(html_content, bytes):
-            html_content = html_content.decode('utf-8')
-        
-        # 检查是否只包含图片
-        if '<img' in html_content and len(re.findall(r'<p', html_content)) <= 1:
-            # 如果只包含图片,返回一个包含原始HTML内容的对象
-            return [{"index": 1, "name": "", "message": "", "original_message": "", "html": html_content}]
-        
-        paragraphs = self.extract_paragraphs(html_content)
-        if not paragraphs or paragraphs == [''] or paragraphs == ['\n'] or paragraphs == []:
-            return [{"index": 1, "name": "", "message": "", "original_message": "", "html": ""}]
-        
-        i = 1
-        for p in paragraphs:
-            cleaned_text, text_content, _ = self.process_paragraph(p)
-
-            if not text_content.strip():
-                continue
-
-            name, message = self.extract_name_message(text_content)
-            json_list.append({
-                "index": i,
-                "name": name,
-                "message": message,
-                "original_message": text_content,
-                "html": cleaned_text,
-            })
-            i += 1
-
-        return json_list
-
+        """读取拆分出来的单个章节文件。"""
+        with open(file_path, "rb") as file:
+            decoded = _decode(file.read())
+        if decoded is None:
+            raise ValueError(f"无法识别 {file_path} 的文本编码")
+        _, segments = self._parse_document(decoded[0])
+        entries = self._entries(segments, 1)
+        # 没有正文（如纯插图页）时保留一个空句，保证保存阶段照常输出该章节
+        return entries or [{"index": 1, "name": "", "message": "", "original_message": "", "segment": -1}]
 
     def read_epub_to_json(self, file_path: str) -> list:
         """
@@ -186,62 +493,15 @@ class FilePlugin(GFilePlugin):
         :return: 包含message和name(可空)的对象列表。
         """
         json_list = []
-        book = epub.read_epub(file_path)
-        i = 1
-
-        for item in book.get_items():
-            if item.get_type() == ebooklib.ITEM_DOCUMENT:
-                html_content = item.get_content().decode('utf-8')
-                paragraphs = self.extract_paragraphs(html_content)
-
-                for p in paragraphs:
-                    cleaned_text, text_content, item_id = self.process_paragraph(
-                        p, item)
-
-                    if not text_content.strip():
-                        continue
-
-                    name, message = self.extract_name_message(text_content)
-                    json_list.append({
-                        "index": i,
-                        "name": name,
-                        "message": message,
-                        "original_message": text_content,
-                        "html": cleaned_text,
-                        "item_id": item_id,
-                    })
-                    i += 1
+        with zipfile.ZipFile(file_path) as book:
+            for document in epub_documents(book):
+                decoded = _decode(book.read(document))
+                if decoded is None:
+                    LOGGER.warning(f"[{self.pname}] 无法识别 {document} 的文本编码，已跳过")
+                    continue
+                _, segments = self._parse_document(decoded[0])
+                json_list.extend(self._entries(segments, len(json_list) + 1, document))
         return json_list
-
-    def extract_paragraphs(self, html_content: str) -> list:
-        """
-        从HTML内容中提取<p>标签及其内容。
-        :param html_content: HTML内容。
-        :return: 包含<p>标签及其内容的列表。
-        """
-        p_pattern = r'<p[^>/]*>(.*?)</p>|<p[^>/]*/>'
-        paragraphs = re.findall(p_pattern, html_content, re.DOTALL)
-        return [match for match in paragraphs if match.strip()]
-
-    def process_paragraph(self, p: str, item: epub.EpubItem = None) -> tuple:
-        """
-        处理段落,提取文本内容和相关信息。
-        :param p: 段落内容。
-        :param item: epub.EpubItem对象。
-        :return: 包含清理后的段落内容、文本内容和item_id的元组。
-        """
-        cleaned_text = p
-        p_html = f"<p>{p}</p>"
-        soup = BeautifulSoup(p_html, 'html.parser')
-        soup.prettify(formatter="html")
-        text_content = soup.get_text()
-
-        text_content = text_content.lstrip()
-        cleaned_text = cleaned_text.lstrip()
-
-        item_id = item.get_id() if item else None
-
-        return cleaned_text, text_content, item_id
 
     def extract_name_message(self, text_content: str) -> tuple:
         """
@@ -258,35 +518,75 @@ class FilePlugin(GFilePlugin):
                 message = match.group("message").strip()
         return name, message
 
+    def _translated_text(self, entry: dict):
+        """返回要写回的译文；未翻译（与原文相同）时返回 None。"""
+        original = entry.get("original_message") or ""
+        name = str(entry.get("name") or "")
+        message = str(entry.get("message") or "")
+        if (name, message) == self.extract_name_message(original) or not message:
+            return None
+        if self.是否自动识别名称 and name:
+            return self.名称识别拼接方案.format(name=name, message=message)
+        return message
+
+    def _render(self, source: str, segments: list, entries: list, label: str) -> str:
+        edits, mismatched = [], 0
+        for entry in entries:
+            number = entry.get("segment")
+            if not isinstance(number, int) or number < 0:
+                continue
+            if number >= len(segments) or segments[number].text != entry.get("original_message"):
+                mismatched += 1
+                continue
+            text = self._translated_text(entry)
+            if text is None:
+                continue
+            segment = segments[number]
+            if segment.indent and not text[:1].isspace():
+                text = segment.indent + text
+            escaped = _escape(text)
+            if segment.balanced and self.双语显示:
+                style = html_lib.escape(f"color: {self.原文颜色}; font-size: {self.缩小比例}em;")
+                original = source[segment.start:segment.end]
+                edits.append((segment.start, segment.end, f'{escaped}<br/><span style="{style}">{original}</span>'))
+            elif segment.balanced:
+                edits.append((segment.start, segment.end, "".join(segment.anchors) + escaped))
+            elif self.双语显示:  # 标签跨块嵌套的少见情况：原文结构不动，译文插在前面
+                edits.append((segment.start, segment.start, escaped + "<br/>"))
+            else:  # 保留全部标签，译文放进第一个文本节点，其余文本清空
+                spans = segment.data_spans
+                first = next((span for span in spans if source[span[0]:span[1]].strip()), spans[0])
+                edits.extend((start, end, escaped if (start, end) == first else "") for start, end in spans)
+        if mismatched:
+            LOGGER.warning(f"[{self.pname}] {label} 有 {mismatched} 句与原文对不上（原文或译前正则已改动），这些句子保留原文")
+        for start, end, replacement in sorted(edits, key=lambda edit: (edit[0], edit[1]), reverse=True):
+            source = source[:start] + replacement + source[end:]
+        return source
+
+    def _translate_document(self, data: bytes, entries: list, label: str) -> bytes:
+        decoded = _decode(data)
+        if decoded is None:
+            LOGGER.warning(f"[{self.pname}] 无法识别 {label} 的文本编码，保留原文件")
+            return data
+        raw, encoding, bom = decoded
+        source, segments = self._parse_document(raw)
+        rendered = self._apply_rules(self._render(source, segments, entries, label), self.译后正则)
+        if rendered == raw:
+            return data
+        return (codecs.BOM_UTF8 if bom else b"") + rendered.encode(encoding, errors="xmlcharrefreplace")
+
     def save_html_xhtml_file(self, file_path: str, transl_json: list):
         """
         保存翻译后的HTML或XHTML文件。
         :param file_path: 保存文件路径。
         :param transl_json: 包含翻译内容的JSON对象列表。
         """
-        if len(transl_json) == 1 and not transl_json[0]['message'] and transl_json[0]['html']:
-            # 如果只有一个对象,且message为空但html不为空,说明是只包含图片的文件
-            with open(file_path, 'w', encoding='utf-8') as file:
-                file.write(transl_json[0]['html'])
-            return
-
-        text_dict = {item['index']: item for item in transl_json if 'index' in item}
-
         input_file_path = file_path.replace("gt_output", "gt_input")
-        with open(input_file_path, 'r', encoding='utf-8') as file:
-            content_html = file.read()
-
-        if not content_html.strip():
-            # 如果输入文件为空,直接写入空文件
-            with open(file_path, 'w', encoding='utf-8') as file:
-                file.write('')
-            return
-
-        content_html = self.replace_content(content_html, text_dict)
-
-        output_path = file_path
-        with open(output_path, 'w', encoding='utf-8') as file:
-            file.write(content_html)
+        with open(input_file_path, "rb") as file:
+            data = file.read()
+        data = self._translate_document(data, transl_json, os.path.basename(file_path))
+        with open(file_path, "wb") as file:
+            file.write(data)
 
     def save_epub_file(self, file_path: str, transl_json: list):
         """
@@ -294,152 +594,66 @@ class FilePlugin(GFilePlugin):
         :param file_path: 保存文件路径。
         :param transl_json: 包含翻译内容的JSON对象列表。
         """
-        text_dict = {item['index']: item for item in transl_json if 'index' in item}
-        output_path = file_path
-        shutil.copy(file_path.replace("gt_output", "gt_input"), output_path)
+        source_path = file_path.replace("gt_output", "gt_input")
+        output_path = file_path.rsplit('.', 1)[0] + '_translated.epub'
+        grouped = {}
+        for entry in transl_json:
+            grouped.setdefault(entry.get("item_id"), []).append(entry)
 
-        book = epub.read_epub(file_path)
-        parent_path = os.path.dirname(file_path)
-        extract_path = os.path.join(parent_path, 'EpubCache')
-
-        if not os.path.exists(extract_path):
-            os.makedirs(extract_path)
-
-        with zipfile.ZipFile(file_path, 'r') as epub_file:
-            epub_file.extractall(extract_path)
-
-        for item in book.get_items():
-            if item.get_type() == ebooklib.ITEM_DOCUMENT:
-                item_id = item.get_id()
-                file_name = os.path.basename(item.get_name())
-
-                the_file_path = self.find_file_path(extract_path, file_name)
-
-                with open(the_file_path, 'r', encoding='utf-8') as file:
-                    content_html = file.read()
-
-                content_html = self.replace_content(content_html, text_dict, item_id)
-
-                soup = BeautifulSoup(content_html, 'html.parser')
-                soup.prettify(formatter="html")
-                content_html = str(soup)
-
-                with open(the_file_path, 'w', encoding='utf-8') as file:
-                    file.write(content_html)
-
-        modified_epub_file = file_path.rsplit('.', 1)[0] + '_translated.epub'
-        with zipfile.ZipFile(modified_epub_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for root, dirs, files in os.walk(extract_path):
-                for file in files:
-                    full_file_path = os.path.join(root, file)
-                    relative_file_path = os.path.relpath(full_file_path, extract_path)
-                    zipf.write(full_file_path, relative_file_path)
-
-        os.remove(file_path)
-        shutil.rmtree(extract_path)
-
-    def find_file_path(self, extract_path: str, file_name: str) -> str:
-        """
-        在提取路径中查找指定文件名的文件路径。
-        :param extract_path: 提取路径。
-        :param file_name: 文件名。
-        :return: 文件路径。
-        """
-        for root, dirs, files in os.walk(extract_path):
-            for filename in files:
-                if filename == file_name:
-                    return os.path.join(root, filename)
-        return ""
-
-    def replace_content(self, content_html: str, text_dict: dict, item_id: str = None) -> str:
-        """
-        替换HTML内容中的原文为翻译后的内容。
-        :param content_html: HTML内容。
-        :param text_dict: 包含翻译内容的字典。
-        :param item_id: 项目ID。
-        :return: 替换后的HTML内容。
-        """
-        for index, content in text_dict.items():
-            if item_id is None or item_id == content.get('item_id'):
-                original_name = content['name']
-                original_message = content['original_message']
-                translated = content['message']
-                html = content['html']
-                html = str(html)
-                html = html.replace("&#13;\n\t\t\t\t", "")
-
-                if (re.match(r'^(?:<a(?:\s[^>]*?)?>[^<]*?</a>)*$', html) is not None):
-                    a_tag_pattern = re.compile(r'<a[^>]*>(.*?)</a>')
-                    matches = a_tag_pattern.findall(html)
-                    if len(matches) == 1:
-                        html = matches[0]
-
-                if (original_message and translated):
-                    if self.是否自动识别名称 and original_name:
-                        original_formatted = self.名称识别拼接方案.format(name=original_name, message=original_message)
-                        translated_formatted = self.名称识别拼接方案.format(name=original_name, message=translated)
-                    else:
-                        original_formatted = original_message
-                        translated_formatted = translated
-
-                    if self.双语显示:
-                        bilingual_text = f'<p>{translated_formatted}<br><span style="color: {self.原文颜色}; font-size: {self.缩小比例}em;">{original_formatted}</span></p><br />'
-                    else:
-                        bilingual_text = f'<p>{translated_formatted}</p>'
-
-                    content_html = content_html.replace(html, bilingual_text, 1)
-        return content_html
+        temp_path = output_path + ".tmp"
+        try:
+            with zipfile.ZipFile(source_path) as book, zipfile.ZipFile(temp_path, "w") as output:
+                documents = set(epub_documents(book))
+                # EPUB 规范要求 mimetype 为第一项且不压缩
+                for info in sorted(book.infolist(), key=lambda item: item.filename != "mimetype"):
+                    data = book.read(info)
+                    if info.filename in documents:
+                        data = self._translate_document(data, grouped.get(info.filename, []), info.filename)
+                    target = zipfile.ZipInfo(info.filename, info.date_time)
+                    target.external_attr = info.external_attr
+                    target.compress_type = zipfile.ZIP_STORED if info.filename == "mimetype" else zipfile.ZIP_DEFLATED
+                    output.writestr(target, data)
+            os.replace(temp_path, output_path)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
 
     def rebuild_epub(self):
         """
         重建EPUB文件。
-        从原始 temp 目录中复制所有非XHTML文件到新的目录结构中。
-        从 gt_output 文件夹中恢复翻译后的XHTML文件的原始相对路径。
-        最终打包重建EPUB文件。
+        以原始 temp 目录为底，用 gt_output 中翻译后的章节替换对应文件，最终打包重建EPUB文件。
         """
         temp_dir = os.path.join(self.project_dir, "temp")
-        epub_rebuild_dir = os.path.join(self.project_dir, "epub_rebuild")
-        os.makedirs(epub_rebuild_dir, exist_ok=True)
-
         gt_input = os.path.join(self.project_dir, "gt_input")
         gt_output = os.path.join(self.project_dir, "gt_output")
-        epub_files = [file for file in os.listdir(gt_input) if file.endswith(".epub")]
 
-        for epub_name in self.epub_file_info.keys():
-            # Copy non-xhtml files and directories from temp dir to epub_rebuild_dir
+        for epub_name, files in self.epub_file_info.items():
             temp_subdir = os.path.join(temp_dir, epub_name)
-            for root, dirs, files in os.walk(temp_subdir):
-                for file in files:
-                    if not file.endswith(".xhtml"):
-                        source_path = os.path.join(root, file)
-                        rel_path = os.path.relpath(source_path, temp_subdir)
-                        target_path = os.path.join(epub_rebuild_dir, epub_name, rel_path)
-                        os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                        shutil.copy(source_path, target_path)
+            translated = {
+                rel_path.replace(os.sep, "/"): os.path.join(gt_output, key) for key, rel_path in files.items()
+            }
+            members = []
+            for root, dirs, names in os.walk(temp_subdir):
+                for name in names:
+                    full_path = os.path.join(root, name)
+                    members.append((os.path.relpath(full_path, temp_subdir).replace(os.sep, "/"), full_path))
+            members.sort(key=lambda member: member[0] != "mimetype")
 
-            # Move back the translated xhtml files with corrected names
-            for file, rel_path in self.epub_file_info[epub_name].items():
-                source_path = os.path.join(gt_output, file)
-                target_path = os.path.join(epub_rebuild_dir, epub_name, rel_path)
-                os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                shutil.copy(source_path, target_path)
-
-            # Rebuild EPUB
-            epub_file = f"{epub_name}.epub"
             output_path = os.path.join(gt_output, f"{epub_name}_translated.epub")
             with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for root, dirs, files in os.walk(os.path.join(epub_rebuild_dir, epub_name)):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        rel_path = os.path.relpath(file_path, os.path.join(epub_rebuild_dir, epub_name))
-                        zipf.write(file_path, rel_path)
+                for rel_path, full_path in members:
+                    source_path = translated.get(rel_path, full_path)
+                    if not os.path.isfile(source_path):
+                        LOGGER.warning(f"[{self.pname}] 未找到 {rel_path} 的译文，使用原文")
+                        source_path = full_path
+                    compress = zipfile.ZIP_STORED if rel_path == "mimetype" else zipfile.ZIP_DEFLATED
+                    zipf.write(source_path, rel_path, compress_type=compress)
 
-        shutil.rmtree(temp_dir)
-        shutil.rmtree(epub_rebuild_dir)
+        shutil.rmtree(temp_dir, ignore_errors=True)
         for file in os.listdir(gt_output):
-            if file.endswith((".xhtml", ".html")): 
+            if file.endswith((".xhtml", ".html")):
                 os.remove(os.path.join(gt_output, file))
         for file in os.listdir(gt_input):
-            if file.endswith((".xhtml", ".html")): 
+            if file.endswith((".xhtml", ".html")):
                 os.remove(os.path.join(gt_input, file))
         LOGGER.info("EPUB文件重建完成，缓存已经清理。")
