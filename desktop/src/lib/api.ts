@@ -654,6 +654,21 @@ export async function updateProjectConfig(projectId: string, payload: ProjectCon
   );
 }
 
+/** 按保存时的格式把配置渲染成 YAML 文本（只读预览用，不写盘）。 */
+export async function previewProjectConfigYaml(projectId: string, config: Record<string, unknown>, signal?: AbortSignal) {
+  return apiRequest<{ yaml: string }>(
+    `/api/projects/${projectId}/config/preview`,
+    {
+      body: JSON.stringify({ config }),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      method: 'POST',
+      signal,
+    },
+  );
+}
+
 export async function fetchProjectFiles(projectId: string) {
   return apiRequest<ProjectFilesResponse>(`/api/projects/${projectId}/files`);
 }

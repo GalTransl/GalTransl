@@ -155,8 +155,11 @@
     "projectConfigPageMain_title_configDoneSave": "配置已保存",
     "projectConfigPageMain_description_currentProjectConfigDoneSuccess": "当前项目配置已成功写入磁盘。",
     "sectionFadeInProjectConfigFields_title_yAMLSource": "YAML源码",
-    "sectionFadeInProjectConfigFields_description_editYAMLConfigSourcePreviewChange": "直接编辑YAML配置源码（只读预览，修改请使用上方表单）",
-    "yamlPreview_message_config": "无配置数据"
+    "sectionFadeInProjectConfigFields_description_editYAMLConfigSourcePreviewChange": "保存后写入配置文件的 YAML 内容（只读预览，含未保存的修改；修改请使用左侧各分区表单）",
+    "yamlPreview_message_config": "无配置数据",
+    "yamlPreview_message_rendering": "正在生成 YAML…",
+    "yamlPreview_title_renderFailed": "YAML 生成失败",
+    "yamlPreview_normalizeError_renderFailed": "无法生成 YAML 预览"
   },
   "fields": {
     "splitFile": {

@@ -155,8 +155,11 @@
     "projectConfigPageMain_title_configDoneSave": "The configuration has been saved",
     "projectConfigPageMain_description_currentProjectConfigDoneSuccess": "The current project configuration has been written to disk successfully.",
     "sectionFadeInProjectConfigFields_title_yAMLSource": "YAML source",
-    "sectionFadeInProjectConfigFields_description_editYAMLConfigSourcePreviewChange": "Edit the YAML configuration source directly (read-only preview; use the form above to make changes)",
-    "yamlPreview_message_config": "No configuration data"
+    "sectionFadeInProjectConfigFields_description_editYAMLConfigSourcePreviewChange": "The YAML that will be written to the config file on save (read-only preview, includes unsaved changes; use the section forms on the left to make changes)",
+    "yamlPreview_message_config": "No configuration data",
+    "yamlPreview_message_rendering": "Rendering YAML…",
+    "yamlPreview_title_renderFailed": "Could not render YAML",
+    "yamlPreview_normalizeError_renderFailed": "Failed to render the YAML preview"
   },
   "fields": {
     "splitFile": {

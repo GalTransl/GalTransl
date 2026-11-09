@@ -9,6 +9,7 @@ import { EmptyState, ErrorState, InlineFeedback, LoadingState } from '../compone
 import {
   type PluginInfo,
   fetchProjectConfig,
+  previewProjectConfigYaml,
   updateProjectConfig,
   fetchPlugins,
   getBackendProfileNames,
@@ -120,6 +121,26 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
       });
     return () => { cancelled = true; };
   }, [projectId, configFileName]);
+
+  // YAML 源码视图：由后端按保存时同样的格式渲染，所见即写入文件的内容
+  const [yamlText, setYamlText] = useState<string | null>(null);
+  const [yamlError, setYamlError] = useMessageState<string | null>(null);
+  useEffect(() => {
+    if (!yamlView || !config || !projectId) {
+      setYamlText(null);
+      return;
+    }
+    const controller = new AbortController();
+    setYamlError(null);
+    previewProjectConfigYaml(projectId, config, controller.signal)
+      .then((data) => setYamlText(data.yaml))
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        setYamlText(null);
+        setYamlError(normalizeError(err, uiMessage("config:projectConfigPage.yamlPreview_normalizeError_renderFailed")));
+      });
+    return () => controller.abort();
+  }, [yamlView, config, projectId]);
 
   // Load backend profile names and current selection
   useEffect(() => {
@@ -350,9 +371,15 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
           <fieldset key={yamlView ? 'yaml' : activeSection} className="section-fade-in project-config-fields" disabled={saving}>
           {yamlView ? (
             <Panel title={translate("config:projectConfigPage.sectionFadeInProjectConfigFields_title_yAMLSource")} description={translate("config:projectConfigPage.sectionFadeInProjectConfigFields_description_editYAMLConfigSourcePreviewChange")}>
-              <pre className="yaml-preview">
-                {config ? JSON.stringify(config, null, 2) : translate("config:projectConfigPage.yamlPreview_message_config")}
-              </pre>
+              {yamlError ? (
+                <InlineFeedback tone="error" title={translate("config:projectConfigPage.yamlPreview_title_renderFailed")} description={yamlError} />
+              ) : (
+                <pre className="yaml-preview">
+                  {!config
+                    ? translate("config:projectConfigPage.yamlPreview_message_config")
+                    : yamlText ?? translate("config:projectConfigPage.yamlPreview_message_rendering")}
+                </pre>
+              )}
             </Panel>
           ) : (
             <>

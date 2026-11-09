@@ -116,11 +116,17 @@ def _read_yaml_file(path: str) -> dict:
         return safe_load(f) or {}
 
 
+def _dump_yaml_text(data: dict) -> str:
+    """Serialize config the same way _write_yaml_file does (also used by the YAML preview)."""
+    return safe_dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+
 def _write_yaml_file(path: str, data: dict) -> None:
     """Write data to a YAML file atomically."""
+    text = _dump_yaml_text(data)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        safe_dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        f.write(text)
     os.replace(tmp, path)
 
 
@@ -2109,6 +2115,26 @@ def build_handler(registry: JobRegistry):
 
             if sub_path == "/problem-types":
                 self._send_json({"problem_types": _list_problem_types(project_dir)})
+                return
+
+            # POST /api/projects/:id/config/preview — 把（可能未保存的）配置按保存时的格式渲染成 YAML 文本
+            if sub_path == "/config/preview":
+                if self.command != "POST":
+                    self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
+                    return
+                try:
+                    payload = self._read_json_body()
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                config_data = payload.get("config") if isinstance(payload, dict) else None
+                if not isinstance(config_data, dict):
+                    self._send_json({"error": "config field must be an object"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                try:
+                    self._send_json({"yaml": _dump_yaml_text(config_data)})
+                except Exception as exc:
+                    self._send_json({"error": f"failed to render yaml: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
             if sub_path == "/config":
