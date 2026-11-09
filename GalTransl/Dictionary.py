@@ -237,6 +237,8 @@ class CNormalDic:
         full_match：是否全匹配，默认False，开启后查找词完全等于input_text才替换
         """
         # 遍历每个BasicDicElement做替换
+        # "~"/"(同上)" 条件沿用上一条条件字典的结果；首条之前视为不满足
+        last_one_success = False
         for dic in self.dic_list:
             # 场景字典判断
             if dic.is_situationsDic:
