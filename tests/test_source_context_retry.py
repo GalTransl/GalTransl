@@ -49,7 +49,7 @@ def _translator(accept_when) -> tuple[ForGalJsonTranslate, list[str]]:
     translator._remember_translation_turn = lambda *args, **kwargs: None
     histories: list[str] = []
 
-    def prepare(prompt_template, input_src, gptdict, trans_list, filename, proofread=False, assistant_prompt=""):
+    def prepare(prompt_template, input_src, gptdict, trans_list, filename, proofread=False, assistant_prompt="", image_mode=False):
         prompt = translator._apply_history_result(prompt_template, filename)
         histories.append(prompt.split("<history>", 1)[1].split("</history>", 1)[0])
         return [], None, prompt

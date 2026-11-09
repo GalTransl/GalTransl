@@ -213,6 +213,30 @@ export function ProjectConfigPage({ ctx }: { ctx: ProjectPageContext }) {
   const setNestedValue = useCallback((obj: Record<string, unknown>, path: string, value: unknown): Record<string, unknown> => {
     const keys = path.split('.');
     const result = JSON.parse(JSON.stringify(obj));
+    // common 下的配置项都是平铺的点号键（后端按 `gpt.xxx.yyy` 整体读取）。
+    // 文件里还没有这个键时不能按点号拆成嵌套对象，否则后端读不到。
+    if (keys[0] === 'common' && keys.length > 2) {
+      const isObject = (v: unknown): v is Record<string, unknown> => v != null && typeof v === 'object' && !Array.isArray(v);
+      if (!isObject(result.common)) result.common = {};
+      const common = result.common as Record<string, unknown>;
+      common[keys.slice(1).join('.')] = value;
+      // 清掉以前误写出的同名嵌套值（只删叶子，不动还有别的子项的对象）
+      const parents: Record<string, unknown>[] = [common];
+      let node: unknown = common;
+      for (const key of keys.slice(1, -1)) {
+        node = isObject(node) ? node[key] : undefined;
+        if (!isObject(node)) return result;
+        parents.push(node);
+      }
+      const leafParent = parents[parents.length - 1];
+      const leafKey = keys[keys.length - 1];
+      if (!Object.prototype.hasOwnProperty.call(leafParent, leafKey) || isObject(leafParent[leafKey])) return result;
+      delete leafParent[leafKey];
+      for (let i = parents.length - 1; i > 0 && Object.keys(parents[i]).length === 0; i--) {
+        delete parents[i - 1][keys[i]];
+      }
+      return result;
+    }
     let current: Record<string, unknown> = result;
     for (let i = 0; i < keys.length - 1; i++) {
       const remaining = keys.slice(i).join('.');

@@ -35,6 +35,7 @@ const ADVANCED_FIELDS: ConfigFieldDef[] = [
   { key: 'smartRetry', labelKey: "config:fields.smartRetry.label", descriptionKey: "config:fields.smartRetry.description", type: 'select', options: [{ value: 'true', labelKey: "config:translationSettingsSection.option_true" }, { value: 'false', labelKey: "config:translationSettingsSection.option_false" }] },
   { key: 'retranslFail', labelKey: "config:fields.retranslFail.label", descriptionKey: "config:fields.retranslFail.description", type: 'select', options: [{ value: 'true', labelKey: "config:translationSettingsSection.option_true" }, { value: 'false', labelKey: "config:translationSettingsSection.option_false" }] },
   { key: 'gpt.enhance_jailbreak', labelKey: "config:fields.gpt_enhance_jailbreak.label", descriptionKey: "config:fields.gpt_enhance_jailbreak.description", type: 'select', options: [{ value: 'true', labelKey: "config:translationSettingsSection.option_true" }, { value: 'false', labelKey: "config:translationSettingsSection.option_false" }] },
+  { key: 'gpt.enhance_jailbreak.mode', labelKey: "config:fields.gpt_enhance_jailbreak_mode.label", descriptionKey: "config:fields.gpt_enhance_jailbreak_mode.description", type: 'select', options: [{ value: 'prefill', labelKey: "config:translationSettingsSection.option_jailbreakPrefill" }, { value: 'image', labelKey: "config:translationSettingsSection.option_jailbreakImage" }] },
   { key: 'gpt.token_limit', labelKey: "config:fields.gpt_token_limit.label", descriptionKey: "config:fields.gpt_token_limit.description", type: 'number', placeholder: '0' },
 ];
 

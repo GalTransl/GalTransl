@@ -55,6 +55,8 @@ class _ServerStatusFilter(logging.Filter):
         "翻译开始时间",
         "开始时间已到",
         "当前使用",
+        "[改善拒答]",
+        "[自动策略]",
     )
 
     def filter(self, record: logging.LogRecord) -> bool:

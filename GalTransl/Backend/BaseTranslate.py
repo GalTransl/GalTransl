@@ -243,13 +243,21 @@ class TranslationRequestError(RuntimeError):
 
 
 class TranslationParseError(RuntimeError):
-    """一次翻译响应未通过校验；自动模板据此立即切换模式。"""
+    """一次翻译响应未通过校验；自动模板据此立即切换模式。
+
+    reply 是模型这次的回复原文（None 表示调用方没提供）：自动模式靠它区分
+    「格式不对」和「被拒答/被拦截」，两者的应对完全不同。
+    """
+
+    def __init__(self, message="", reply=None):
+        super().__init__(message)
+        self.reply = reply
 
 
 class BaseTranslate:
-    def _raise_parse_error_for_auto(self, message):
+    def _raise_parse_error_for_auto(self, message, reply=None):
         if getattr(self, "fail_fast", False):
-            raise TranslationParseError(message)
+            raise TranslationParseError(message, reply)
 
     def __init__(
         self,

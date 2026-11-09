@@ -158,7 +158,6 @@ class TokenStrategyRotationTests(unittest.IsolatedAsyncioTestCase):
         c1, c2 = object(), object()
 
         engine = AutoTranslate.__new__(AutoTranslate)
-        engine._preferred_modes = {}
         engine._preferred_tokens = {}
         engine._active_token_index = 0
         engine.tokenStrategy = "fallback"
@@ -207,11 +206,9 @@ class TokenStrategyRotationTests(unittest.IsolatedAsyncioTestCase):
 
         count, result = await engine.translate(rows, filename="test.json")
 
-        self.assertEqual(count, 2)  # 第一次失败后切成一半（4 // 2 = 2）
-        # 验证两次调用的模式与令牌索引：
-        # 第 1 次：ForGal-tool，token_index=0
-        # 第 2 次：ForGal-markdown，token_index=1（同时切换模板与令牌！）
-        self.assertEqual(calls, [("ForGal-tool", 0), ("ForGal-markdown", 1)])
+        # 额度耗尽属于 API 错误：模板没问题，只换令牌，不换模板也不缩小批次
+        self.assertEqual(count, 4)
+        self.assertEqual(calls, [("ForGal-tool", 0), ("ForGal-tool", 1)])
 
         # 验证令牌列表未被破坏
         self.assertEqual(len(engine.client_list), 2)
@@ -222,7 +219,7 @@ class TokenStrategyRotationTests(unittest.IsolatedAsyncioTestCase):
         calls.clear()
         count2, result2 = await engine.translate(rows[:2], filename="test.json")
         self.assertEqual(count2, 2)
-        self.assertEqual(calls, [("ForGal-markdown", 1)])
+        self.assertEqual(calls, [("ForGal-tool", 1)])
 
     async def test_auto_translate_switches_mode_and_token_simultaneously_random(self) -> None:
         """测试 auto-translate 下，重试时一边更换翻译模板，一边 random 切换令牌。"""
@@ -231,7 +228,6 @@ class TokenStrategyRotationTests(unittest.IsolatedAsyncioTestCase):
         c1, c2 = object(), object()
 
         engine = AutoTranslate.__new__(AutoTranslate)
-        engine._preferred_modes = {}
         engine._preferred_tokens = {}
         engine._active_token_index = 0
         engine.tokenStrategy = "random"

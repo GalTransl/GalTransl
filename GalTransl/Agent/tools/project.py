@@ -45,6 +45,7 @@ CONFIG_FIELD_DESCRIPTIONS: dict[str, str] = {
     "common.gpt.contextNum": "每次请求附带的前文句数；值越大上下文越强、成本越高（常用 8）[0-32]",
     "common.gpt.translation_guideline": '使用的**全局**翻译规范文件名（位于 translation_guidelines 文件夹），决定文风与措辞；项目专属规范不是配置项，而是项目目录里的 translation_guideline.md（用 guideline(action="read")/guideline 读改），翻译时拼在全局规范之后',
     "common.gpt.enhance_jailbreak": "是否启用「抗拒答」增强提示，降低模型拒答概率 [true/false]",
+    "common.gpt.enhance_jailbreak.mode": "改善拒答方式：prefill 预置回复开头；image 把前文和输入渲染成图片发送，需模型支持图片输入。ForGal/ForNovel 各模板都支持 image（tool 模板读图后照常调用工具提交），tool 模板不支持 prefill。未启用改善拒答时，解析失败的重试也会隔次使用该方式 [prefill/image]",
     "common.gpt.token_limit": "(Sakura/GalTransl) 单轮 token 上限；0 表示不限制，用于避免上下文溢出",
     "common.loggingLevel": "日志输出级别：debug 详细，info 常规，warning 仅警告 [debug/info/warning]",
     "common.saveLog": "是否将运行日志写入文件 [true/false]",

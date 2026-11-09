@@ -69,6 +69,7 @@ class ForGalToolTranslate(ForGalJsonTranslate):
     include_speaker = True
     default_trans_prompt = FORGAL_TOOL_TRANS_PROMPT
     default_system_prompt = FORGAL_TOOL_SYSTEM_PROMPT
+    image_mode_reply_hint = "submit the translations by calling write_translation_result as usual."
 
     def _table_header(self, text_column, proofread=False):
         columns = ["ID"] + (["NAME"] if self.include_speaker else []) + [text_column]
@@ -112,7 +113,6 @@ class ForGalToolTranslate(ForGalJsonTranslate):
     def __init__(self, config, eng_type, proxy_pool, token_pool):
         super().__init__(config, eng_type, proxy_pool, token_pool)
         self.multi_turn = False
-        self.enhance_jailbreak = False
 
     def _get_effective_num_per_request(self, configured_value, proofread=False):
         return self._coerce_positive_int(configured_value, 1)
@@ -122,9 +122,42 @@ class ForGalToolTranslate(ForGalJsonTranslate):
         pass
 
     def _prepare_translation_messages(self, *args, **kwargs):
-        # 父类解析重试可能启用 JSON prefill；工具模板始终禁用。
+        # 结果走工具调用，预置 JSON 开头没有意义，始终不加；图片方式照常可用：
+        # 前文和输入以图片发送，模型读图后照样调用 write_translation_result 提交补丁。
         kwargs["assistant_prompt"] = ""
         return super()._prepare_translation_messages(*args, **kwargs)
+
+    def _record_tool_error(self, kwargs, message, token=None, attempt=None):
+        """把批内的工具错误记进工作台「最近错误」（终端日志之外，前端也能看到）。
+
+        auto 模式下这些错误会先由 _raise_parse_error_for_auto 抛给 auto，由它统一记录，
+        所以调用处都放在抛出之后，这里只会在非 auto 模式下执行到。
+        """
+        try:
+            from GalTransl.server import record_runtime_error
+
+            file_name = str(kwargs.get("file_name", ""))
+            filename = kwargs.get("progress_file") or file_name.rsplit(":", 1)[0]
+            index_range = file_name.rsplit(":", 1)[1] if ":" in file_name else ""
+            record_runtime_error(
+                getattr(self.pj_config, "runtime_project_dir", None) or self.pj_config.getProjectDir(),
+                kind="parse",
+                message=f"[{getattr(self, 'eng_type', 'ForGal-tool')}] {message}",
+                filename=filename,
+                index_range=index_range,
+                retry_count=attempt,
+                model=getattr(token, "model_name", ""),
+                level="warning",
+            )
+        except Exception:
+            LOGGER.debug("工具翻译错误写入运行时记录失败", exc_info=True)
+
+    @staticmethod
+    def _messages_have_images(messages):
+        return any(
+            message.get("role") == "user" and isinstance(message.get("content"), list)
+            for message in messages
+        )
 
     def _get_chatbot_state(self):
         # 工具响应在本批完成后统一适配为记录，不走父类的逐行流式解析。
@@ -168,7 +201,8 @@ class ForGalToolTranslate(ForGalJsonTranslate):
             return "\n".join(lines)
 
         # 工具往返仅属于当前批次，不保留跨批次对话。设置上限防止模型空转。
-        for _ in range(2 * len(trans_list) + 6):
+        for round_index in range(2 * len(trans_list) + 6):
+            attempt = round_index + 1
             self._check_stop_requested()
             response, reasoning = {}, {}
             next_tool = "write_translation_result"
@@ -179,8 +213,11 @@ class ForGalToolTranslate(ForGalJsonTranslate):
             )
             if response.get("finish_reason") in ("length", "content_filter"):
                 failure_reason = f"响应结束原因为 {response['finish_reason']}，未执行本次工具调用"
-                self._raise_parse_error_for_auto(failure_reason)
+                self._raise_parse_error_for_auto(
+                    failure_reason, content or "" if response["finish_reason"] == "content_filter" else None
+                )
                 LOGGER.warning("[ForGal-tool][%s] %s；正文=%r", kwargs.get("file_name", ""), failure_reason, content)
+                self._record_tool_error(kwargs, failure_reason, token, attempt)
                 break  # 截断的工具调用绝不能应用
             calls = response.get("tool_calls", [])
             # 部分兼容接口在指定 function 的请求里省略返回的 function.name。
@@ -204,7 +241,21 @@ class ForGalToolTranslate(ForGalJsonTranslate):
             if not calls:
                 missing_tool_retries += 1
                 failure_reason = f"缺少工具调用，等待 {next_tool}；已写入 {len(results)}/{len(expected)} 句"
-                self._raise_parse_error_for_auto(failure_reason)
+                self._raise_parse_error_for_auto(failure_reason, content or "")
+                # 正文常是接口的拒绝/拦截说明，一并记下，前端能直接看出原因
+                self._record_tool_error(
+                    kwargs,
+                    f"{failure_reason}；finish_reason={response.get('finish_reason')}；正文：{(content or '').strip() or '（空）'}",
+                    token, attempt,
+                )
+                # 没调工具多半是提示词被拒/被拦：原样重发大概率还是被拦。配置了图片方式、
+                # 而这次还是文字请求时，直接交回外层，让解析失败重试改用图片方式重新请求。
+                if not self._messages_have_images(messages) and getattr(self, "enhance_jailbreak_mode", "prefill") == "image":
+                    LOGGER.warning(
+                        "[ForGal-tool][%s] %s；finish_reason=%s；正文=%r；疑似拒答，不再原样重试，改用改善拒答（图片输入）重新请求",
+                        kwargs.get("file_name", ""), failure_reason, response.get("finish_reason"), content,
+                    )
+                    break
                 LOGGER.warning(
                     "[ForGal-tool][%s] %s；finish_reason=%s；正文=%r；保留上下文重试 %s/3",
                     kwargs.get("file_name", ""), failure_reason, response.get("finish_reason"), content, missing_tool_retries,
@@ -284,6 +335,7 @@ class ForGalToolTranslate(ForGalJsonTranslate):
                 except ValueError as exc:
                     self._raise_parse_error_for_auto(str(exc))
                     output = f"补丁应用失败：{exc}"
+                    self._record_tool_error(kwargs, f"{output}（已退回模型修正）", token, attempt)
                 no_progress_calls = 0 if len(results) > previous_count else no_progress_calls + 1
                 output += "\n" + progress_instruction()
                 print(f"{log_label} 工具返回：\n{output}", flush=True)

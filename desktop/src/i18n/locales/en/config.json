@@ -140,6 +140,8 @@
     "option_fr": "fr",
     "option_name": "name",
     "option_size": "size",
+    "option_jailbreakPrefill": "Prefill reply start",
+    "option_jailbreakImage": "Send as image",
     "translationSettingsSection_title_translationSettings": "Translation settings",
     "translationSettingsSection_description_configTargetLanguageTranslationConcurrencySentenceContext": "Configure the target language, translation concurrency, sentences per request, context and retry strategy."
   },
@@ -262,6 +264,10 @@
     "gpt_enhance_jailbreak": {
       "label": "Reduce refusals",
       "description": "When enabled, the model refuses less often."
+    },
+    "gpt_enhance_jailbreak_mode": {
+      "label": "Refusal reduction method",
+      "description": "Prefill: start the reply with a preset opening. Image: render the previous context and the input as images (needs a model that accepts images). Tool templates support only Image; the model still submits translations through the tool. Even when refusal reduction is off, parse-failure retries use this method every other attempt."
     },
     "gpt_token_limit": {
       "label": "Token limit (Sakura)",

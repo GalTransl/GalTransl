@@ -76,11 +76,7 @@ class ForGalMarkdownTranslate(MultiTurnTranslate):
         self.trans_prompt = FORGAL_MARKDOWN_TRANS_PROMPT_EN
         self.system_prompt = FORGAL_MARKDOWN_SYSTEM
         self._apply_internal_prompt_template_overrides()
-        # enhance_jailbreak
-        if val := config.getKey("gpt.enhance_jailbreak"):
-            self.enhance_jailbreak = val
-        else:
-            self.enhance_jailbreak = False
+        self._load_enhance_jailbreak(config)
         self.last_translations = {}
         self.init_chatbot(eng_type=eng_type, config=config)
         self._set_temp_type("precise")
@@ -123,14 +119,14 @@ class ForGalMarkdownTranslate(MultiTurnTranslate):
         emitted_success_indices = set()
         while True:  # 一直循环，直到得到数据
             self._check_stop_requested()
-            if self.enhance_jailbreak or tmp_enhance_jailbreak:
-                assistant_prompt = ""
-            else:
-                assistant_prompt = ""
+            # Markdown 表格没有可预置的开头，prefill 方式在这里不改变请求
+            jailbreak = self._enhance_jailbreak_strategy(tmp_enhance_jailbreak)
+            assistant_prompt = ""
 
             messages, session, prompt_req = self._prepare_translation_messages(
                 prompt_template, input_src, gptdict, trans_list, filename,
                 proofread=proofread, assistant_prompt=assistant_prompt,
+                image_mode=(jailbreak == "image"),
             )
 
             if self.pj_config.active_workers == 1:
@@ -226,7 +222,7 @@ class ForGalMarkdownTranslate(MultiTurnTranslate):
                     success_count = stream_cursor["success_count"]
 
             if error_message or stream_parse_error_message or success_count != len(trans_list):
-                self._raise_parse_error_for_auto(error_message or stream_parse_error_message or f"译文缺句：{success_count}/{len(trans_list)}")
+                self._raise_parse_error_for_auto(error_message or stream_parse_error_message or f"译文缺句：{success_count}/{len(trans_list)}", resp or "")
 
             if success_count > 0 and not stream_parse_error_message:
                 error_flag = False  # 部分解析

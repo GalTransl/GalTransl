@@ -72,6 +72,7 @@ common:
   gpt.multiTurn.maxChars: 24000 # 历史消息（含思考）与新请求的字符预算，超限时新开会话；不截断单个批次。
   gpt.translation_guideline: "Basic.md" # 使用的翻译规范文件名（位于translation_guidelines），会影响文风与措辞。
   gpt.enhance_jailbreak: False # 是否启用“抗拒答”增强提示，降低模型拒答概率。[True/False]
+  gpt.enhance_jailbreak.mode: prefill # 改善拒答方式：prefill 预置回复开头；image 把前文和输入渲染成图片发送（需要支持图片输入的模型；tool 模板读图后照常调用工具提交，且只支持 image）。未启用时，解析失败的重试也会隔次使用该方式。[prefill/image]
   # Sakura/GalTransl
   gpt.token_limit: 0 # (Sakura/GalTransl) 单轮token上限；0表示不限制。用于避免上下文溢出。
   # 调试日志

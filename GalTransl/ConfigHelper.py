@@ -28,6 +28,24 @@ from importlib.metadata import version
 
 
 
+def flatten_nested_common(common: dict) -> dict:
+    """把 common 下的嵌套映射展开成点号键：{"gpt": {"a": {"b": 1}}} -> {"gpt.a.b": 1}。"""
+    flat = {}
+
+    def walk(prefix, value):
+        for key, child in value.items():
+            name = f"{prefix}.{key}"
+            if isinstance(child, dict):
+                walk(name, child)
+            else:
+                flat[name] = child
+
+    for key, value in (common or {}).items():
+        if isinstance(value, dict):
+            walk(str(key), value)
+    return flat
+
+
 def build_httpx_proxy_kwargs(proxy_addr: Optional[str]) -> dict:
     """根据当前安装的 httpx 版本，返回与 `httpx.AsyncClient` 兼容的代理参数。
 
@@ -114,6 +132,10 @@ class CProjectConfig:
         self.keyValues = dict()
         for k, v in self.projectConfig["common"].items():
             self.keyValues[k] = v
+        # 旧版桌面端会把新配置项误存成嵌套（gpt: {enhance_jailbreak: {mode: image}}），
+        # 这里补出对应的平铺键；文件里已有的平铺键优先。
+        for k, v in flatten_nested_common(self.projectConfig["common"]).items():
+            self.keyValues.setdefault(k, v)
         self.refreshProxyEnabledFlag()
         LOGGER.debug(
             "inputPath: %s, outputPath: %s, cachePath: %s,keyValues: %s",

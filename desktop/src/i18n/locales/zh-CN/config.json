@@ -140,6 +140,8 @@
     "option_fr": "fr",
     "option_name": "name",
     "option_size": "size",
+    "option_jailbreakPrefill": "预置补全",
+    "option_jailbreakImage": "图片输入",
     "translationSettingsSection_title_translationSettings": "翻译设置",
     "translationSettingsSection_description_configTargetLanguageTranslationConcurrencySentenceContext": "配置目标语言、翻译并发、单次句数、上下文和重试策略。"
   },
@@ -262,6 +264,10 @@
     "gpt_enhance_jailbreak": {
       "label": "改善拒答",
       "description": "启用后可降低模型拒答概率。"
+    },
+    "gpt_enhance_jailbreak_mode": {
+      "label": "改善拒答方式",
+      "description": "预置补全：预置模型回复的开头；图片输入：把前文和输入渲染成图片发送（需要支持图片输入的模型）。tool 模板只支持图片输入，读图后照常调用工具提交译文。未启用改善拒答时，解析失败的重试也会隔次使用该方式。"
     },
     "gpt_token_limit": {
       "label": "Token限制(Sakura)",
