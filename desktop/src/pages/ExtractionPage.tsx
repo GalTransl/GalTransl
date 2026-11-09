@@ -26,6 +26,11 @@ import { liveActivityDisclosures } from './agent/uiState';
 import { MessageQueue } from './agent/MessageQueue';
 
 const DRAFT_SCOPE = 'galtransl-extraction';
+/** 工作区开合只跟随用户的点击：默认收起，记在 localStorage 里。页面是路由级组件，
+ *  切页面再回来会整个重建，若初始值按窗口宽度推断，宽屏用户每次回来都会被"自动弹出"。 */
+const WORKSPACE_KEY = 'galtransl-extraction-workspace';
+const rememberedWorkspace = () => { try { return localStorage.getItem(WORKSPACE_KEY) === '1'; } catch { return false; } };
+const rememberWorkspace = (open: boolean) => { try { localStorage.setItem(WORKSPACE_KEY, open ? '1' : '0'); } catch { /* Toggle still works without storage. */ } };
 
 export function ExtractionPage() {
   useUiLanguage();
@@ -36,7 +41,8 @@ export function ExtractionPage() {
   useEffect(() => setEditingQueued(null), [agent.selected]);
   const [dialog, setDialog] = useState<'create' | 'environment' | null>(null);
   const [draft, setDraft] = useMessageDraft(DRAFT_SCOPE, agent.selected);
-  const [showWorkspace, setShowWorkspace] = useState(() => window.innerWidth >= 1440);
+  const [showWorkspace, setShowWorkspace] = useState(rememberedWorkspace);
+  const toggleWorkspace = () => { const next = !showWorkspace; rememberWorkspace(next); setShowWorkspace(next); };
   const textarea = useRef<HTMLTextAreaElement>(null);
   const imageInput = useImageInput(`extraction::${agent.selected}`, textarea, agent.busy || dialog !== null);
   const session = agent.view?.session;
@@ -135,7 +141,7 @@ export function ExtractionPage() {
         </div>
         <div className="agent-console__bar-right">
           <StatusPill status={session?.status || 'idle'} running={running} label={statusLabel(session?.status || 'idle')} />
-          {session && <button type="button" className={`agent-console__icon-btn extract-workspace-toggle${showWorkspace ? ' is-active' : ''}`} onClick={() => setShowWorkspace(value => !value)} title={x('showWorkspace')} aria-label={x('showWorkspace')} aria-pressed={showWorkspace} aria-expanded={showWorkspace} aria-controls="extraction-workspace"><Icon name="folder" /></button>}
+          {session && <button type="button" className={`agent-console__icon-btn extract-workspace-toggle${showWorkspace ? ' is-active' : ''}`} onClick={toggleWorkspace} title={x('showWorkspace')} aria-label={x('showWorkspace')} aria-pressed={showWorkspace} aria-expanded={showWorkspace} aria-controls="extraction-workspace"><Icon name="folder" /></button>}
         </div>
       </header>
       <main className="agent-console__main agent-cockpit extract-main">

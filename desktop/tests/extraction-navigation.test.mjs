@@ -162,16 +162,32 @@ test('new extraction buttons return home without opening a dialog or stopping th
   const workspace = renderer.root.findByProps({ className: 'test-workspace' });
   const toggle = () => renderer.root.findByProps({ 'aria-controls': 'extraction-workspace' });
   const panel = () => renderer.root.findByProps({ id: 'extraction-workspace' });
-  // Keep browsing state mounted through both directions, while folded controls cannot receive focus.
-  act(() => toggle().props.onClick());
+  // The workspace never opens on its own (not even on wide windows); it only follows the user's toggle.
   assert.equal(toggle().props['aria-expanded'], false);
   assert.equal(panel().props.inert, '');
   assert.equal(panel().props['aria-hidden'], true);
-  assert.equal(renderer.root.findByProps({ className: 'test-workspace' }), workspace);
+  // Keep browsing state mounted through both directions, while folded controls cannot receive focus.
   act(() => toggle().props.onClick());
   assert.equal(toggle().props['aria-expanded'], true);
   assert.equal(panel().props.inert, undefined);
+  assert.equal(panel().props['aria-hidden'], false);
   assert.equal(renderer.root.findByProps({ className: 'test-workspace' }), workspace);
+  assert.equal(stored.get('galtransl-extraction-workspace'), '1');
+  act(() => toggle().props.onClick());
+  assert.equal(toggle().props['aria-expanded'], false);
+  assert.equal(panel().props.inert, '');
+  assert.equal(renderer.root.findByProps({ className: 'test-workspace' }), workspace);
+  assert.equal(stored.get('galtransl-extraction-workspace'), '0');
+  // Leaving and returning to the page remounts it; the remembered choice survives instead of resetting.
+  act(() => toggle().props.onClick());
+  await act(async () => renderer.unmount());
+  await act(async () => { renderer = create(h(Harness)); });
+  assert.equal(toggle().props['aria-expanded'], true);
+  act(() => toggle().props.onClick());
+  await act(async () => renderer.unmount());
+  await act(async () => { renderer = create(h(Harness)); });
+  assert.equal(toggle().props['aria-expanded'], false);
+  assert.equal(panel().props['aria-hidden'], true);
   assert.equal(renderer.root.findByType('textarea').props.value, 'existing conversation draft');
   await act(async () => renderer.root.findByProps({ className: 'agent-sessions__new' }).props.onClick());
   assert.equal(state.selected, '');
