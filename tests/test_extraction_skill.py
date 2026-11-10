@@ -264,6 +264,26 @@ def test_install_and_update_enable_downloads_and_remove_previous_versions(skill_
     assert upstream["calls"] == ["/upstream/latest"]
 
 
+def test_auto_update_setting_defaults_on_and_spares_git_checkouts(skill_server):
+    url, original, _, upstream = skill_server
+    assert api(url, "environment")[1]["settings"]["skill_auto_update"] is True
+    assert api(url, "settings", {"skill_auto_update": "no"})[0] == 400
+    status, result = api(url, "settings", {"skill_auto_update": False})
+    assert status == 200 and result["settings"]["skill_auto_update"] is False
+    assert api(url, "environment")[1]["settings"]["skill_auto_update"] is False
+    # A later path-only save keeps the switch off.
+    assert api(url, "settings", {"python_path": ""})[1]["settings"]["skill_auto_update"] is False
+
+    (original / ".git").mkdir()
+    status, result = api(url, "skill-install", {"automatic": True})
+    assert status == 200 and upstream["calls"] == []
+    assert (original / "SKILL.md").read_text() == FRONTMATTER + "Original Skill"
+    (original / ".git").rmdir()
+    status, result = api(url, "skill-install", {"automatic": True})
+    assert status == 200 and result["skill"]["current_commit"] == "b" * 40
+    assert (original / "SKILL.md").read_text() == FRONTMATTER + "Downloaded Skill"
+
+
 def test_install_removes_legacy_home_hashes_and_keeps_custom_files(skill_server):
     from GalTransl.RuntimePaths import get_user_data_dir
 

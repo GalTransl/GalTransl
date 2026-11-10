@@ -6,7 +6,7 @@ import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
 
 const initial = {
   ready: false, problems: ['skill_missing'], python_version: 'Python 3.11',
-  settings: { skill_dir: '/app/skills', python_path: '' },
+  settings: { skill_dir: '/app/skills', python_path: '', skill_auto_update: true },
   skill: { installed: false, current_commit: '', latest_commit: '', update_available: false },
   system_pythons: [
     { executable: '/usr/bin/python3', version: '3.11.9', architecture: 64, args: [] },
@@ -14,7 +14,7 @@ const initial = {
   ],
 };
 const installed = {
-  ...initial, ready: true, problems: [], settings: { skill_dir: '/custom/skills', python_path: '' },
+  ...initial, ready: true, problems: [], settings: { skill_dir: '/custom/skills', python_path: '', skill_auto_update: true },
   skill: { ...initial.skill, installed: true, current_commit: 'b'.repeat(40) },
 };
 const enabled = { ...installed, skill: { ...installed.skill, latest_commit: installed.skill.current_commit } };
@@ -45,6 +45,9 @@ function mount(api, environment = initial, refresh = () => Promise.resolve(envir
     button: key => renderer.root.findAllByType('button').find(node => node.children.includes(key)) };
 }
 
+// Path fields only; the auto-update switch is a checkbox input.
+const textInputs = dialog => dialog.renderer.root.findByType('form').findAllByType('input')
+  .filter(node => node.props.type !== 'checkbox');
 const pythonSelect = renderer => renderer.root.findAllByProps({ 'aria-label': 'pythonInterpreterLabel' })
   .find(node => typeof node.props.onChange === 'function');
 
@@ -59,7 +62,7 @@ test('runtime skill actions are explicit and downloads activate without losing p
   assert.equal(dialog.calls.length, 0);
   assert.ok(dialog.button('skillDownload'));
   act(() => pythonSelect(dialog.renderer).props.onChange({ target: { value: 'custom' } }));
-  act(() => dialog.renderer.root.findByType('form').findAllByType('input')[1].props.onChange({ target: { value: '/custom/python' } }));
+  act(() => textInputs(dialog)[1].props.onChange({ target: { value: '/custom/python' } }));
   await act(async () => dialog.button('skillCheck').props.onClick());
   assert.equal(dialog.calls[0].action, 'skill-check');
   assert.equal(dialog.calls[0].body.skill_dir, initial.settings.skill_dir);
@@ -71,12 +74,12 @@ test('runtime skill actions are explicit and downloads activate without losing p
   assert.equal(dialog.calls.at(-1).body.skill_dir, initial.settings.skill_dir);
   assert.deepEqual(JSON.parse(JSON.stringify(dialog.saved.at(-1))), enabled);
   assert.equal(dialog.closed(), false);
-  assert.equal(dialog.renderer.root.findByType('form').findAllByType('input')[0].props.value, installed.settings.skill_dir);
-  assert.equal(dialog.renderer.root.findByType('form').findAllByType('input')[1].props.value, '/custom/python');
+  assert.equal(textInputs(dialog)[0].props.value, installed.settings.skill_dir);
+  assert.equal(textInputs(dialog)[1].props.value, '/custom/python');
   assert.ok(dialog.renderer.root.findAllByType('p').some(node => node.children.includes('skillUpToDate')));
   assert.equal(dialog.renderer.root.findAllByType('p').some(node => node.children.includes('missingSkill')), false);
   assert.equal(dialog.button('skillUpdate').props.disabled, true);
-  act(() => dialog.renderer.root.findByType('form').findAllByType('input')[0].props.onChange({ target: { value: '/custom/skill' } }));
+  act(() => textInputs(dialog)[0].props.onChange({ target: { value: '/custom/skill' } }));
   assert.equal(dialog.renderer.root.findAllByType('code').length, 0);
   await act(async () => dialog.renderer.root.findByType('form').props.onSubmit({ preventDefault() {} }));
   assert.equal(dialog.calls.at(-1).body.skill_dir, '/custom/skill');
@@ -103,7 +106,7 @@ test('checking an unsaved Skill path leaves the sidebar state alone and saving i
   const dialog = mount(async (action, body) => action === 'skill-check' ? checked : { ...installed, settings: body },
     { ...installed, skill: checked });
   await act(async () => {});
-  const path = () => dialog.renderer.root.findByType('form').findByType('input');
+  const path = () => textInputs(dialog)[0];
   act(() => path().props.onChange({ target: { value: '/pending/skill' } }));
   await act(async () => dialog.button('skillCheck').props.onClick());
   assert.equal(dialog.saved.length, 0);
@@ -124,9 +127,9 @@ test('refreshing interpreters keeps pending paths and makes newly installed Pyth
     return { ...initial, system_pythons: [newer] };
   });
   await act(async () => {});
-  act(() => dialog.renderer.root.findByType('form').findByType('input').props.onChange({ target: { value: '/pending/skill' } }));
+  act(() => textInputs(dialog)[0].props.onChange({ target: { value: '/pending/skill' } }));
   await act(async () => dialog.button('pythonRefresh').props.onClick());
-  assert.equal(dialog.renderer.root.findByType('form').findByType('input').props.value, '/pending/skill');
+  assert.equal(textInputs(dialog)[0].props.value, '/pending/skill');
   assert.deepEqual(Children.toArray(pythonSelect(dialog.renderer).props.children).filter(isValidElement).map(node => node.props.value), ['', newer.executable, 'custom']);
   assert.equal(dialog.saved.length, 0);
   act(() => dialog.renderer.unmount());
@@ -146,7 +149,7 @@ test('checks and downloads show errors, release disabled controls, and permit re
   assert.ok(dialog.button('skillInstalling'));
   await act(async () => finish.reject(Error('Download failed')));
   assert.equal(dialog.renderer.root.findByProps({ role: 'alert' }).children.join(''), 'Download failed');
-  assert.equal(dialog.renderer.root.findByType('form').findAllByType('input')[0].props.value, installed.settings.skill_dir);
+  assert.equal(textInputs(dialog)[0].props.value, installed.settings.skill_dir);
   assert.equal(dialog.saved.length, 0);
   act(() => dialog.button('skillUpdate').props.onClick());
   await act(async () => finish.resolve(installed));
@@ -159,12 +162,12 @@ test('settings display cached information before environment discovery finishes'
   let finish;
   const dialog = mount(async () => initial, initial, () => new Promise(resolve => { finish = resolve; }));
   assert.equal(dialog.renderer.root.findAll(node => node.type === 'section' && node.props.role === 'dialog').length, 1);
-  assert.equal(dialog.renderer.root.findByType('form').findByType('input').props.value, initial.settings.skill_dir);
+  assert.equal(textInputs(dialog)[0].props.value, initial.settings.skill_dir);
   assert.equal(dialog.renderer.root.findByType('fieldset').props.disabled, true);
   assert.ok(dialog.button('pythonDetecting'));
   assert.equal(dialog.button('cancel').props.disabled, false);
   await act(async () => finish(installed));
-  assert.equal(dialog.renderer.root.findByType('form').findByType('input').props.value, installed.settings.skill_dir);
+  assert.equal(textInputs(dialog)[0].props.value, installed.settings.skill_dir);
   assert.equal(dialog.renderer.root.findByType('fieldset').props.disabled, false);
   assert.ok(dialog.button('pythonRefresh'));
   act(() => dialog.renderer.unmount());
@@ -182,7 +185,7 @@ test('settings open before the first environment load, and failed discovery can 
   assert.equal(dialog.renderer.root.findByProps({ role: 'status', className: 'extract-muted' }).children.join(''), 'loading');
   await act(async () => finish.resolve(installed));
   assert.equal(dialog.renderer.root.findAllByProps({ role: 'alert' }).length, 0);
-  assert.equal(dialog.renderer.root.findByType('form').findByType('input').props.value, installed.settings.skill_dir);
+  assert.equal(textInputs(dialog)[0].props.value, installed.settings.skill_dir);
   assert.equal(dialog.button('save').props.disabled, false);
   act(() => dialog.renderer.unmount());
 });
@@ -273,4 +276,22 @@ test('missing extraction Skill shows not ready and blocks buttons, Enter and que
   await act(async () => send().props.onClick());
   assert.equal(requests[0][0], 'message');
   act(() => renderer.unmount());
+});
+
+test('the auto-update switch is on by default and saves on its own, keeping pending path edits', async () => {
+  const dialog = mount(async (action, body) => {
+    if (action === 'settings') return { ...enabled, settings: { ...enabled.settings, ...body } };
+    throw Error(`Unexpected action: ${action}`);
+  }, enabled);
+  await act(async () => {});
+  const toggle = () => dialog.renderer.root.findByType('form').findByProps({ role: 'switch' });
+  assert.equal(toggle().props.checked, true);
+  act(() => textInputs(dialog)[0].props.onChange({ target: { value: '/pending/skill' } }));
+  await act(async () => toggle().props.onChange({ target: { checked: false } }));
+  assert.equal(JSON.stringify(dialog.calls), JSON.stringify([{ action: 'settings', body: { skill_auto_update: false } }]));
+  assert.equal(toggle().props.checked, false);
+  assert.equal(dialog.saved.at(-1).settings.skill_auto_update, false);
+  assert.equal(dialog.saved.at(-1).settings.skill_dir, enabled.settings.skill_dir);
+  assert.equal(textInputs(dialog)[0].props.value, '/pending/skill');
+  assert.equal(dialog.closed(), false);
 });

@@ -17,7 +17,7 @@ from GalTransl.RuntimePaths import get_user_data_dir, get_legacy_user_data_dir
 from GalTransl.Agent.permissions import AUTO_QUIET_MODE, PERMISSION_MODES, _permission_needed, _tool_risk
 
 from .environment import environment, save_settings, workspace_path
-from .skill import install_skill, prune_skill_versions
+from .skill import SKILL_NAME, install_skill, prune_skill_versions
 from .runner import ExtractionRunner, restore_state
 from .legacy import previous_messages
 from .store import ACTIVE_STATUSES, SessionStore
@@ -62,10 +62,13 @@ class ExtractionRuntime:
         self.live: dict[str, dict[str, dict[str, Any]]] = {}
         self.queued: dict[str, deque[PendingMessage]] = {}
 
-    def update_skill(self, skills: Path) -> None:
+    def update_skill(self, skills: Path, *, automatic: bool = False) -> None:
         with self.lock:
             if self.runs:
                 raise ValueError("Wait for running extraction turns to finish before updating Skill")
+            # Replacing a git checkout would discard local work; only an explicit update may do that.
+            if automatic and (skills / SKILL_NAME / ".git").exists():
+                return
             directory = install_skill(skills)
             save_settings({"skill_dir": str(directory.parent)})
             for root in [directory.parent, get_user_data_dir() / "skills", get_user_data_dir() / "extraction" / "skills",

@@ -36,6 +36,8 @@
   "skillUpdateAvailable": "可下载最新 Skill：",
   "skillHasUpdate": "Skill 有更新",
   "skillUpToDate": "已是最新 Skill：",
+  "skillAutoUpdate": "自动更新",
+  "skillAutoUpdateHint": "检查到新版本时自动下载并替换；有提取会话在运行时会等到空闲后再更新。",
   "skillDownloadHint": "自动选择可用的 GitHub 下载节点，失败后回退直连。安装到所选目录下的 galtransl-galgamereverse-skill 文件夹，更新时替换原版本。",
   "pythonSectionTitle": "Python 运行环境",
   "pythonAppInterpreter": "应用 Python（默认）",

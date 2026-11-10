@@ -70,20 +70,27 @@ export function useExtraction() {
   const skillDirectory = environment?.settings.skill_dir;
   const skillCommit = environment?.skill.current_commit;
   const skillInstalled = environment?.skill.installed;
+  const skillAutoUpdate = environment?.settings.skill_auto_update;
   useEffect(() => {
     if (!active || !skillInstalled || !skillDirectory) return;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
-    const check = () => extractionApi<SkillStatus>('skill-check', {}, { skill_dir: skillDirectory }).then(skill => {
+    const check = () => extractionApi<SkillStatus>('skill-check', {}, { skill_dir: skillDirectory }).then(async skill => {
       if (disposed) return;
       setEnvironment(previous => previous?.settings.skill_dir === skillDirectory && previous.skill.current_commit === skillCommit
         ? { ...previous, skill } : previous);
+      if (!skill.update_available || !skillAutoUpdate) return;
+      // The backend refuses while a turn is running and skips git checkouts; the next check retries.
+      const result = await extractionApi<Environment>('skill-install', {}, { skill_dir: skillDirectory, automatic: true });
+      if (disposed || result.skill.current_commit !== skill.latest_commit) return;
+      setEnvironment(previous => previous?.settings.skill_dir === skillDirectory
+        ? { ...result, skill: { ...result.skill, latest_commit: skill.latest_commit, update_available: false } } : previous);
     }).catch(() => { /* Keep the last known status when GitHub is unavailable. */ }).finally(() => {
       if (!disposed) timer = setTimeout(check, 60 * 60 * 1000);
     });
     void check();
     return () => { disposed = true; clearTimeout(timer); };
-  }, [active, skillDirectory, skillCommit, skillInstalled]);
+  }, [active, skillDirectory, skillCommit, skillInstalled, skillAutoUpdate]);
   const hasRunningSessions = Boolean(sessions.running_game_dirs?.length || sessions.sessions.some(isRunning));
   useEffect(() => {
     if (!active || !hasRunningSessions) return;

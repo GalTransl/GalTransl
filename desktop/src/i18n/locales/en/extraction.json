@@ -36,6 +36,8 @@
   "skillUpdateAvailable": "Latest Skill available:",
   "skillHasUpdate": "Skill update available",
   "skillUpToDate": "Skill is up to date:",
+  "skillAutoUpdate": "Update automatically",
+  "skillAutoUpdateHint": "Downloads and replaces the Skill when a new version is found; waits until no extraction turn is running.",
   "skillDownloadHint": "Automatically selects an available GitHub download route, with direct fallback on failure. Installs into galtransl-galgamereverse-skill under the selected directory. Updates replace the previous version.",
   "pythonSectionTitle": "Python runtime",
   "pythonAppInterpreter": "App Python (default)",

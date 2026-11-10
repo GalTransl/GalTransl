@@ -114,6 +114,9 @@
 .extract-skill-status p { margin: 8px 0; }
 .extract-skill-status code { font-size: 12px; }
 .extract-skill-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.extract-skill-auto-update { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--color-bg); cursor: pointer; }
+.extract-skill-auto-update strong { display: block; font-size: 13px; font-weight: 600; }
+.extract-skill-auto-update small { display: block; margin-top: 4px; color: var(--color-text-muted); font-size: 11px; }
 .extract-directory-drop { border: 1px dashed var(--color-line); border-radius: 10px; padding: 0 12px 8px; }
 .extract-directory-drop.is-dragging { border-color: var(--color-primary); background: var(--color-primary-soft); }
 .extract-directory-drop > .extract-field { margin: 12px 0 8px; }

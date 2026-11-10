@@ -34,18 +34,21 @@ def atomic_json(path: Path, value: Any) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def load_settings() -> dict[str, str]:
+def load_settings() -> dict[str, Any]:
     root = get_resource_root()
     defaults = {
         "skill_dir": str(get_skills_dir()),
         "python_path": "",  # Optional system Python; run_python defaults to bundled.
+        "skill_auto_update": True,
     }
     path = data_root() / "settings.json"
     if path.is_file():
         saved = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(saved, dict):
             raise ValueError("Invalid extraction settings")
-        defaults.update({key: str(saved[key]) for key in defaults if key in saved})
+        defaults.update({key: str(saved[key]) for key in ("skill_dir", "python_path") if key in saved})
+        if isinstance(saved.get("skill_auto_update"), bool):
+            defaults["skill_auto_update"] = saved["skill_auto_update"]
         if saved.get("runtime_preferences_version") != 3:
             # Old releases stored PATH commands as defaults. Preserve explicit
             # custom paths while migrating automatic selections to bundled tools.
@@ -56,10 +59,15 @@ def load_settings() -> dict[str, str]:
     return defaults
 
 
-def save_settings(payload: dict[str, Any]) -> dict[str, str]:
+def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
     settings = load_settings()
     for key in settings:
         if key in payload:
+            if key == "skill_auto_update":
+                if not isinstance(payload[key], bool):
+                    raise ValueError("skill_auto_update must be a boolean")
+                settings[key] = payload[key]
+                continue
             value = str(payload[key]).strip()
             if "\0" in value:
                 raise ValueError(f"{key} is required")

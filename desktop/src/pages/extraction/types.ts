@@ -34,7 +34,7 @@ export type SkillStatus = {
 };
 export type Environment = {
   ready: boolean; problems: string[]; agent_engine: string; python_version: string;
-  settings: { skill_dir: string; python_path: string };
+  settings: { skill_dir: string; python_path: string; skill_auto_update: boolean };
   skill: SkillStatus;
   skills: { name: string; description: string; file_path: string; base_dir: string; source: string; disable_model_invocation: boolean }[];
   skill_diagnostics: { path: string; message: string }[];

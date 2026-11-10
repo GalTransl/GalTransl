@@ -4,6 +4,7 @@ import { AgentSettingsDialog } from '../../components/AgentSettings';
 import { AnimatedDialog } from '../../components/AnimatedDialog';
 import { CustomSelect } from '../../components/CustomSelect';
 import { Icon } from '../../components/Icon';
+import { Switch } from '../../components/Switch';
 import { useConnection } from '../../features/connection/ConnectionContext';
 import { useUiLanguage } from '../../i18n';
 import { extractionApi } from './api';
@@ -54,7 +55,7 @@ export function EnvironmentDialog({ initial, refresh, close, saved, projectDir =
   const formId = useId();
   const [manualPython, setManualPython] = useState(false);
   const [runtime, setRuntime] = useState(initial);
-  const [settings, setSettings] = useState(initial?.settings ?? { skill_dir: '', python_path: '' });
+  const [settings, setSettings] = useState(initial?.settings ?? { skill_dir: '', python_path: '', skill_auto_update: true });
   const [skill, setSkill] = useState<SkillStatus | null>(initial?.skill ?? null);
   const [error, setError] = useState('');
   const [action, setAction] = useState<'' | 'saving' | 'checking' | 'installing' | 'detecting'>('detecting');
@@ -99,14 +100,27 @@ export function EnvironmentDialog({ initial, refresh, close, saved, projectDir =
     } catch (error) { setError(error instanceof Error ? error.message : String(error)); }
     finally { setAction(''); }
   };
+  // Saving settings re-reads local Skill state only; keep the last update check when it still applies.
+  const withCheckedSkill = (result: Environment, directory: string) => skill && directory === runtime?.settings.skill_dir
+    && result.settings.skill_dir === runtime.settings.skill_dir && skill.current_commit === result.skill.current_commit
+    && skill.installed === result.skill.installed ? { ...result, skill } : result;
+  // Applied at once, without the Save button: the switch must not silently revert when the dialog is dismissed.
+  const setAutoUpdate = async (skill_auto_update: boolean) => {
+    setAction('saving'); setError('');
+    try {
+      const result = await extractionApi<Environment>('settings', {}, { skill_auto_update });
+      setSettings(previous => ({ ...previous, skill_auto_update }));
+      saved(withCheckedSkill(result, settings.skill_dir));
+    } catch (error) { setError(error instanceof Error ? error.message : String(error)); }
+    finally { setAction(''); }
+  };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (busy) return;
     setAction('saving'); setError('');
     try {
       const result = await extractionApi<Environment>('settings', {}, settings);
-      saved(skill && settings.skill_dir === runtime?.settings.skill_dir && skill.current_commit === result.skill.current_commit
-        && skill.installed === result.skill.installed ? { ...result, skill } : result);
+      saved(withCheckedSkill(result, settings.skill_dir));
       close();
     }
     catch (error) { setError(error instanceof Error ? error.message : String(error)); }
@@ -142,6 +156,10 @@ export function EnvironmentDialog({ initial, refresh, close, saved, projectDir =
           </div>
           {skill?.latest_commit && <p className={skill.update_available ? 'extract-warning' : 'extract-muted'}>{x(skill.update_available ? 'skillUpdateAvailable' : 'skillUpToDate')} <code title={skill.latest_commit}>{skill.latest_commit.slice(0, 8)}</code></p>}
           <p className="extract-muted">{x('skillDownloadHint')}</p>
+          <label className="extract-skill-auto-update">
+            <span><strong>{x('skillAutoUpdate')}</strong><small>{x('skillAutoUpdateHint')}</small></span>
+            <Switch checked={settings.skill_auto_update} disabled={busy} onChange={next => void setAutoUpdate(next)} />
+          </label>
         </section>
         <section className="extract-environment-card">
           <header className="extract-environment-card__header">
