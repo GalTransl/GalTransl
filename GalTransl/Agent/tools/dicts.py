@@ -13,19 +13,40 @@ if TYPE_CHECKING:
     from GalTransl.Agent.runner import AgentRunner
 
 
-def _tool_list_dict_files(runner: AgentRunner, _args: dict[str, Any]) -> Any:
-    """列出项目字典清单（文件 + 行数）。内容用 dictionary(action="read") 单独读取，这里不回传全文。"""
+_DICT_PROJECT_MARKER = "(project_dir)"
+
+
+def _fetch_dicts(runner: AgentRunner) -> dict[str, Any]:
+    """当前配置启用的全部字典（项目字典 + 通用字典）的清单与内容。
+
+    项目字典的 file_key 带 (project_dir) 前缀；不带前缀的是通用字典（多个项目共用）。"""
     pid = runner._project_id()
     cfg = urllib.parse.quote(runner.state.config_file_name)
-    data = runner._http_get(f"/api/projects/{pid}/dictionary/project?config={cfg}")
+    data = runner._http_get(f"/api/projects/{pid}/dictionary/project?config={cfg}&include_common=1")
+    return data if isinstance(data, dict) else {}
+
+
+def _is_common_dict_key(file_key: str) -> bool:
+    return not file_key.startswith(_DICT_PROJECT_MARKER)
+
+
+def _tool_list_dict_files(runner: AgentRunner, _args: dict[str, Any]) -> Any:
+    """列出当前配置启用的字典清单（文件 + 行数），含项目字典与通用字典。
+
+    内容用 dictionary(action="read") 单独读取，这里不回传全文。"""
+    data = _fetch_dicts(runner)
     contents = data.get("dict_contents", {})
     summary = {key: val.get("count", 0) for key, val in contents.items()}
-    return {
+    result = {
         "pre_dict_files": data.get("pre_dict_files", []),
         "gpt_dict_files": data.get("gpt_dict_files", []),
         "post_dict_files": data.get("post_dict_files", []),
         "line_counts": summary,
     }
+    common = [str(key) for key in data.get("common_dict_files", [])]
+    if common:
+        result["common_dict_files"] = common
+    return result
 
 
 def _tool_read_dict(runner: AgentRunner, args: dict[str, Any]) -> Any:
@@ -41,10 +62,7 @@ def _tool_read_dict(runner: AgentRunner, args: dict[str, Any]) -> Any:
         raise AgentToolError("offset must be a non-negative integer")
     if type(limit) is not int or not 1 <= limit <= 500:
         raise AgentToolError("limit must be an integer between 1 and 500")
-    pid = runner._project_id()
-    cfg = urllib.parse.quote(runner.state.config_file_name)
-    data = runner._http_get(f"/api/projects/{pid}/dictionary/project?config={cfg}")
-    contents = data.get("dict_contents", {})
+    contents = _fetch_dicts(runner).get("dict_contents", {})
     if file_key not in contents:
         available = list(contents.keys())
         raise AgentToolError(f"file_key 不存在：{file_key}。可选：{available}")
@@ -192,7 +210,6 @@ def _dict_file_categories(data: dict[str, Any]) -> dict[str, str]:
 # save_dict 的 category：文件还不存在时新建并登记到哪一类字典（原 create_dict_file 的职责）
 DICT_CATEGORIES: tuple[str, ...] = ("pre", "gpt", "post")
 _DICT_CATEGORY_LABELS = {"pre": "译前", "gpt": "GPT", "post": "译后"}
-_DICT_PROJECT_MARKER = "(project_dir)"
 # 能在新文件上执行的 action：delete 需要已有词条，对新文件没有意义
 _DICT_CREATE_ACTIONS = ("overwrite", "set")
 
@@ -220,14 +237,23 @@ def _dict_save_plan(contents: dict[str, Any], args: dict[str, Any], categories: 
     if category and category not in DICT_CATEGORIES:
         raise AgentToolError("category must be one of: pre, gpt, post")
 
-    create = False
-    if file_key not in contents and category:
-        file_key = _dict_new_file_key(file_key)
-        create = file_key not in contents
+    # 带 category 的裸文件名一律按「项目字典」解释（新建或写已有的同名项目字典）：
+    # 通用字典只能改已有的、不能经 Agent 新建，权限分级也靠这条只看入参的规则
+    # （见 permissions._is_common_dict_write）。
+    if category and _is_common_dict_key(file_key):
+        project_key = _dict_new_file_key(file_key)
+        if file_key in contents and project_key not in contents:
+            raise AgentToolError(
+                f"{file_key} 是通用字典：修改它不要带 category；"
+                "要新建同名的项目字典请换一个文件名。"
+            )
+        file_key = project_key
+    create = bool(category) and file_key not in contents
     if file_key not in contents and not create:
         raise AgentToolError(
             f"字典文件不存在：{file_key}。已有：{list(contents)}。"
-            "要新建就带上 category（pre=译前 / gpt=GPT / post=译后），file_key 写文件名（如 项目GPT字典2.txt）。"
+            "要新建项目字典就带上 category（pre=译前 / gpt=GPT / post=译后），file_key 写文件名（如 项目GPT字典2.txt）；"
+            "通用字典不能新建。"
         )
     if create and action not in _DICT_CREATE_ACTIONS:
         raise AgentToolError(f"{file_key} 还不存在，{action} 没有可改的词条：新建时用 overwrite 或 set。")
@@ -240,12 +266,13 @@ def _dict_save_plan(contents: dict[str, Any], args: dict[str, Any], categories: 
         "category": category,
         "create": create,
         "before_lines": before_lines,
+        "common": _is_common_dict_key(file_key),
         "dictionary_type": (categories or {}).get(file_key, category if create else ""),
     }
 
 
 def _tool_save_dict(runner: AgentRunner, args: dict[str, Any]) -> Any:
-    """写入项目字典。action 决定写入方式：
+    """写入字典（项目字典，或当前配置启用的通用字典）。action 决定写入方式：
 
     - overwrite：显式指定才整文件覆盖；
     - set：按每行的 key 更新指定列，保留省略列，不存在则追加到末尾；
@@ -255,8 +282,7 @@ def _tool_save_dict(runner: AgentRunner, args: dict[str, Any]) -> Any:
     """
     pid = runner._project_id()
     # 先读旧内容（算行级 diff + 作为 set 的基底），写完后随结果返回
-    cfg = urllib.parse.quote(runner.state.config_file_name)
-    data = runner._http_get(f"/api/projects/{pid}/dictionary/project?config={cfg}")
+    data = _fetch_dicts(runner)
     plan = _dict_save_plan(data.get("dict_contents", {}), args, _dict_file_categories(data))
     file_key, action, before_lines = plan["file_key"], plan["action"], plan["before_lines"]
 
@@ -288,7 +314,9 @@ def _tool_save_dict(runner: AgentRunner, args: dict[str, Any]) -> Any:
         "file_key": file_key,
         "content": new_text,
     }
-    runner._http_post(f"/api/projects/{pid}/dictionary/project/save", body)
+    # 通用字典走单独的端点：它不在项目目录里，后端按配置的通用字典文件夹定位
+    scope = "common" if plan["common"] else "project"
+    runner._http_post(f"/api/projects/{pid}/dictionary/{scope}/save", body)
     diff = _diff_lines(before_text, new_text)
     added = diff["added"]
     removed = diff["removed"]

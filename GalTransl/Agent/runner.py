@@ -64,7 +64,7 @@ from GalTransl.Agent.handlers import _RETIRED_TOOLS, _TOOL_HANDLERS, _attach_rea
 from GalTransl.Agent.models import AgentEvent, AgentToolError
 from GalTransl.Agent.permissions import (
     PERMISSION_DECISIONS,
-    PERMISSION_GLOBAL_MEMORY,
+    PERMISSION_PER_CALL_RISKS,
     PERMISSION_WAIT_TICK,
     _apply_permission_mode,
     _normalize_permission_mode,
@@ -1661,7 +1661,7 @@ class AgentRunner:
         mode = _normalize_permission_mode(self.state.permission_mode)
         if not _permission_needed(risk, mode):
             return
-        if risk != PERMISSION_GLOBAL_MEMORY and name in self.state.permission_grants:
+        if risk not in PERMISSION_PER_CALL_RISKS and name in self.state.permission_grants:
             _log(f"  🔐 权限：{name} 本会话已放行，直接执行")
             return
         decision, deny_reason = self.request_permission(
@@ -1670,7 +1670,7 @@ class AgentRunner:
         if decision == "allow-once":
             return
         if decision == "allow-session":
-            if risk != PERMISSION_GLOBAL_MEMORY:
+            if risk not in PERMISSION_PER_CALL_RISKS:
                 self.state.permission_grants.add(name)
             return
         _log(f"  🔐 权限被拒（{decision}）：{name}" + (f"（原因：{deny_reason}）" if deny_reason else ""))

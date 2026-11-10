@@ -75,8 +75,8 @@
     "autoQuiet_autoQuiet_auto": "Fully automatic, no interruptions",
     "ask_ask_count": "Ask before every change",
     "acceptEdits_acceptEdits_cacheDictionarySettingsGuidelineTranslationProxy": "Cache and dictionary edits go through directly; settings, guidelines, starting a translation and launching subagents are asked first",
-    "auto_auto_confirmAgentCacheSettingsTranslation": "No more confirmations: the Agent edits the cache and the settings and starts translations on its own",
-    "autoQuiet_autoQuiet_autoProblemItem": "Same as “Fully automatic”; questions are answered by the system with the recommended option, so you are not interrupted"
+    "auto_auto_confirmAgentCacheSettingsTranslation": "No more confirmations: the Agent edits the cache and the settings and starts translations on its own; common dictionary writes still need approval",
+    "autoQuiet_autoQuiet_autoProblemItem": "Same as “Fully automatic”; questions are answered by the system with the recommended option, and common dictionary writes are not confirmed, so you are not interrupted"
   },
   "agentSessionSidebar": {
     "agentSessionsHead_message_session": "Sessions",
@@ -166,6 +166,8 @@
   "permissionCard": {
     "globalMemory": "Global memory",
     "globalMemoryHint": "Affects all projects. Each change requires approval, including in automatic modes and after session grants.",
+    "commonDict": "Common dictionary",
+    "commonDictHint": "Common dictionaries are shared across projects. Every write requires approval except in “Fully automatic, no interruptions”; session grants do not apply.",
     "edit_edit_translationText": "Change translation data",
     "delegate_delegate_proxy": "Launch subagents",
     "high_high_settingsJob": "Change settings / start a job",

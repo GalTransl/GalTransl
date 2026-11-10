@@ -113,7 +113,7 @@ AGENT_TOOLS = [{'type': 'function', 'function': {
                               'required': ['action']}}},
  {'type': 'function',
   'function': {'name': 'dictionary',
-               'description': '字典列表、分页读取与维护。set 按 key 更新或新增，省略尾列保留、空列清空；delete 按 key 删除；overwrite 覆盖整文件。同批重复 key 后值优先。',
+               'description': '字典列表、分页读取与维护。set 按 key 更新或新增，省略尾列保留、空列清空；delete 按 key 删除；overwrite 覆盖整文件。同批重复 key 后值优先。file_key 带 (project_dir) 前缀的是项目字典，不带的是通用字典（多个项目共用）：可读可改、不能新建，只写跨项目都成立的词条，写入需用户确认。',
                'parameters': {'type': 'object',
                               'properties': {'action': {'type': 'string',
                                                         'enum': ['list', 'read', 'set', 'delete', 'overwrite']},

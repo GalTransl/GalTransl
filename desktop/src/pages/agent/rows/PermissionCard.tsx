@@ -48,14 +48,17 @@ export function PermissionCard({
   const toolLabel = perm.label || meta.action;
   const editable = perm.risk === 'edit';
   const globalMemory = perm.risk === 'global-memory';
+  // 写通用字典：多个项目共用，逐次审批（「本会话允许」不适用，后端也不认）
+  const commonDict = perm.risk === 'common-dict';
   // 徽标只留最要紧的几个字（会改什么），完整解释挪进 tooltip——照 PI-Desktop 那张卡：
   // 标题行一行说完，正文只留"允许什么 + 为什么"，说明性长句不再铺在卡面上。
   // 派子代理单独一档说法：它既不改设置、也不是改译文，但「允许编辑」档照样要问它
   // （见后端 PERMISSION_TOOL_RISK），归进"改设置 / 启动任务"会让人看不懂为什么要问。
-  const riskKind = globalMemory ? 'memory' : perm.name === 'run_subagents' ? 'delegate' : editable ? 'edit' : 'high';
-  const riskLabel = { memory: translate('agent:permissionCard.globalMemory'), edit: translate("agent:permissionCard.edit_edit_translationText"), delegate: translate("agent:permissionCard.delegate_delegate_proxy"), high: translate("agent:permissionCard.high_high_settingsJob") }[riskKind];
+  const riskKind = globalMemory ? 'memory' : commonDict ? 'commonDict' : perm.name === 'run_subagents' ? 'delegate' : editable ? 'edit' : 'high';
+  const riskLabel = { memory: translate('agent:permissionCard.globalMemory'), commonDict: translate('agent:permissionCard.commonDict'), edit: translate("agent:permissionCard.edit_edit_translationText"), delegate: translate("agent:permissionCard.delegate_delegate_proxy"), high: translate("agent:permissionCard.high_high_settingsJob") }[riskKind];
   const riskHint = {
     memory: translate('agent:permissionCard.globalMemoryHint'),
+    commonDict: translate('agent:permissionCard.commonDictHint'),
     edit: translate("agent:permissionCard.edit_edit_translationTextCacheDictionaryNameTable"),
     delegate:
       translate("agent:permissionCard.delegate_delegate_proxyCountModelProxyCacheSourceSource"),
@@ -83,7 +86,7 @@ export function PermissionCard({
       </header>
       <p className="agent-perm__lead">{translate("agent:permissionCard.agentPerm_message_allowRunning", { toolLabel: toolLabel })}</p>
       <p className="agent-perm__meta">{detail}</p>
-      {globalMemory && <p className="agent-perm__reason">{riskHint}</p>}
+      {(globalMemory || commonDict) && <p className="agent-perm__reason">{riskHint}</p>}
       {globalMemory && typeof args?.content === 'string' && <pre className="memory-manager__content">{args.content}</pre>}
       {reason ? <p className="agent-perm__reason">{translate("agent:permissionCard.agentPerm_message_text", { reason: reason })}</p> : null}
       {/* 将要变更：摆在这一屏里而不是藏在工具行的展开里——用户要点的就是这个 */}
@@ -97,7 +100,7 @@ export function PermissionCard({
           disabled={submitting}
           title={translate("agent:permissionCard.agentPermBtnIsPrimary_title_approve")}
         >{translate("agent:permissionCard.agentPermFoot_message_allow")}</button>
-        {!globalMemory && <button
+        {!globalMemory && !commonDict && <button
           type="button"
           className="agent-perm__btn"
           onClick={() => onDecide('allow-session')}

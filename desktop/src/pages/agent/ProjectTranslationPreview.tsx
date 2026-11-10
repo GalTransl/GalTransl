@@ -20,6 +20,10 @@ const ProjectDictionaryPage = lazy(async () => {
   const page = await import('../ProjectDictionaryPage');
   return { default: page.ProjectDictionaryPage };
 });
+const CommonDictionaryPage = lazy(async () => {
+  const page = await import('../CommonDictionaryPage');
+  return { default: page.CommonDictionaryPage };
+});
 const ProjectCachePage = lazy(async () => {
   const page = await import('../ProjectCachePage');
   return { default: page.ProjectCachePage };
@@ -87,6 +91,9 @@ function ProjectTranslationPreview({ project, target, show, open, close }: { pro
     };
   }, [open, close]);
 
+  // 不带 (project_dir) 前缀的 file_key 是通用字典：它不属于任何项目，要开通用字典管理页
+  const commonTarget = target.page === 'dictionary' && !target.fileKey.startsWith('(project_dir)') ? target : null;
+  const commonDictionary = commonTarget !== null;
   // 保留工作台实例：收回窗口不会中断提交、停止请求或连续重译。
   return createPortal(<m.div className="agent-translation-preview-backdrop"
     initial={false}
@@ -100,8 +107,8 @@ function ProjectTranslationPreview({ project, target, show, open, close }: { pro
       animate={open ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.92, y: 16 }}
       transition={animated ? UI_TRANSITION : { duration: 0 }}>
       <header className="agent-translation-preview__header">
-        <h2 id={titleId}><Icon name={target.page === 'translate' ? 'play' : target.page === 'dictionary' ? 'book' : 'file-text'} />{t(target.page === 'translate' ? 'common:projectLayout.label_label_startTranslation' : target.page === 'dictionary' ? 'common:projectLayout.label_label_projectDictionary' : 'common:projectLayout.label_label_text')}
-          <span>{basenamePath(project.projectDir)}</span>
+        <h2 id={titleId}><Icon name={target.page === 'translate' ? 'play' : target.page === 'dictionary' ? 'book' : 'file-text'} />{t(target.page === 'translate' ? 'common:projectLayout.label_label_startTranslation' : target.page === 'dictionary' ? (commonDictionary ? 'common:sidebar.sidebarBottomNav_message_dictionary' : 'common:projectLayout.label_label_projectDictionary') : 'common:projectLayout.label_label_text')}
+          {!commonDictionary && <span>{basenamePath(project.projectDir)}</span>}
         </h2>
         <button ref={closeRef} type="button" onClick={close} aria-label={t('common:actions.close')}><Icon name="close" /></button>
       </header>
@@ -110,7 +117,8 @@ function ProjectTranslationPreview({ project, target, show, open, close }: { pro
           <RenderErrorBoundary key={`${project.projectDir}:${project.configFileName}`}>
             <Suspense fallback={<div className="inline-feedback">{t('common:actions.loading')}</div>}>
               {target.page === 'translate' && <ProjectTranslatePage ctx={project} />}
-              {target.page === 'dictionary' && <ProjectDictionaryPage ctx={project} active={open} focusTarget={target}
+              {commonTarget && <CommonDictionaryPage active={open} focusTarget={commonTarget} />}
+              {target.page === 'dictionary' && !commonDictionary && <ProjectDictionaryPage ctx={project} active={open} focusTarget={target}
                 onOpenInCache={query => show({ ...project, page: 'cache', query })} />}
               {target.page === 'cache' && <ProjectCachePage ctx={project} active={open} focusTarget={target} />}
             </Suspense>

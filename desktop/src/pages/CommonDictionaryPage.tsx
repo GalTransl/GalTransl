@@ -1,6 +1,7 @@
 import { message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
 import { useCallback, useEffect, useState } from 'react';
 import { DictionaryManager } from '../components/DictionaryManager';
+import type { DictionaryPreviewTarget } from '../components/ProjectPreviewContext';
 import {
   createCommonDictionaryFile,
   deleteCommonDictionaryFile,
@@ -11,7 +12,8 @@ import {
 import { normalizeError } from '../lib/errors';
 
 
-export function CommonDictionaryPage() {
+/** `active` / `focusTarget` 供 Agent 的预览小窗使用：每次打开都重新加载，并定位到指定文件与词条。 */
+export function CommonDictionaryPage({ active = true, focusTarget }: { active?: boolean; focusTarget?: DictionaryPreviewTarget } = {}) {
   useUiLanguage();
   const [data, setData] = useState<CommonDictionaryManagerResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -31,8 +33,8 @@ export function CommonDictionaryPage() {
   }, []);
 
   useEffect(() => {
-    void loadData();
-  }, [loadData]);
+    if (active) void loadData();
+  }, [active, loadData]);
 
   return (
     <DictionaryManager
@@ -42,6 +44,7 @@ export function CommonDictionaryPage() {
       loading={loading}
       error={error}
       onReload={loadData}
+      focusTarget={focusTarget}
       onCreateFile={async (category: DictionaryCategory, filename: string) => {
         const result = await createCommonDictionaryFile({ category, filename });
         return result.filename;

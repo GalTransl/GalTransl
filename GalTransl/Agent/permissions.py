@@ -16,10 +16,11 @@ if TYPE_CHECKING:
 # - ask（每次询问，默认）：写操作一律先问；
 # - accept-edits（允许编辑）：只自动放行"改译文数据"（缓存 / 字典 / 人名表），
 #   改项目配置、改项目规范、启动翻译仍然要问；
-# - auto（全自动）：放行普通工具；全局记忆变更逐次审批；
-# - auto-quiet（全自动-零打断）：放行规则与 auto 一模一样，差别只有一处——**ask_user
-#   不再真的拦下来等人**：后端直接按模型给的「推荐选项」代答（见 _tool_ask_user），
-#   用户完全不被打断。其余档位照旧：不把档位写进 system prompt，模型只会在被拒绝时
+# - auto（全自动）：放行普通工具；全局记忆变更逐次审批；写通用字典也逐次审批
+#   （它是多个项目共用的，改错了波及面远大于当前项目）；
+# - auto-quiet（全自动-零打断）：放行规则与 auto 基本一样，差别有两处——**ask_user
+#   不再真的拦下来等人**：后端直接按模型给的「推荐选项」代答（见 _tool_ask_user）；
+#   **写通用字典也直接放行**。用户完全不被打断（全局记忆除外）。其余档位照旧：不把档位写进 system prompt，模型只会在被拒绝时
 #   收到一条工具错误。
 AUTO_QUIET_MODE = "auto-quiet"
 PERMISSION_MODES: tuple[str, ...] = ("ask", "accept-edits", "auto", AUTO_QUIET_MODE)
@@ -46,6 +47,23 @@ PERMISSION_READ = "read"
 PERMISSION_EDIT = "edit"
 PERMISSION_HIGH = "high"
 PERMISSION_GLOBAL_MEMORY = "global-memory"
+# 写通用字典：除「全自动-零打断」外每次都问（含「全自动」），且不接受「本会话允许」。
+PERMISSION_COMMON_DICT = "common-dict"
+# 逐次审批的风险档：「本会话允许」对它们不生效（点了也只算允许这一次）。
+PERMISSION_PER_CALL_RISKS: frozenset[str] = frozenset({PERMISSION_GLOBAL_MEMORY, PERMISSION_COMMON_DICT})
+_DICT_PROJECT_MARKER = "(project_dir)"
+
+
+def _is_common_dict_write(args: dict[str, object] | None) -> bool:
+    """save_dict 这次写的是不是通用字典（只看入参，与 _dict_save_plan 的判定同口径）。
+
+    项目字典的 file_key 带 (project_dir) 前缀；带 category 的裸文件名是「新建项目字典」。
+    剩下的——不带前缀也不带 category——只可能落到通用字典上。"""
+    if not args:
+        return False
+    file_key = str(args.get("file_key", "") or "").strip()
+    category = str(args.get("category", "") or "").strip()
+    return bool(file_key) and not file_key.startswith(_DICT_PROJECT_MARKER) and not category
 
 PERMISSION_TOOL_RISK: dict[str, str] = {
     "mnemon_remember": PERMISSION_HIGH,
@@ -132,6 +150,8 @@ def _tool_risk(name: str, args: dict[str, object] | None = None) -> str:
         # Updates/deletes infer scope from id; normalize like the tool boundary.
         if str(args.get("scope", "")).strip() == "global" or str(args.get("id", "")).strip().startswith("global-"):
             return PERMISSION_GLOBAL_MEMORY
+    if name == "save_dict" and _is_common_dict_write(args):
+        return PERMISSION_COMMON_DICT
     if name in ("replace_cache", "revert_cache_history") and args and args.get("dry_run") is True:
         return PERMISSION_READ
     if name in ("manage_problem_filter", "manage_problem_white_list") and args and args.get("action") == "list":
@@ -176,6 +196,9 @@ def _permission_needed(risk: str, mode: str) -> bool:
         return True
     if risk == PERMISSION_READ:
         return False
+    if risk == PERMISSION_COMMON_DICT:
+        # 通用字典多项目共用：只有「全自动-零打断」不问
+        return mode != AUTO_QUIET_MODE
     if mode in ("auto", AUTO_QUIET_MODE):
         return False
     if mode == "accept-edits":

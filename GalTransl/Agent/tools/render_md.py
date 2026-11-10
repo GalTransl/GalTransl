@@ -129,9 +129,14 @@ def _md_render_list_dict_files(result: dict[str, Any]) -> str | None:
     for file_key, count in counts.items():
         if file_key not in listed:
             rows.append({"category": "未分类", "file_key": file_key, "lines": count})
+    common = [str(key) for key in (result.get("common_dict_files") or [])]
     return _md_doc(
         "项目字典：" + "；".join(summary) + "（pre=译前，gpt=GPT，post=译后）",
         _md_table(["category", "file_key", "lines"], rows) if rows else "没有配置字典文件。",
+        (
+            f"其中 {len(common)} 个不带 (project_dir) 前缀的是通用字典（多个项目共用）："
+            "只写跨项目都成立的词条，项目专属词条写项目字典；写入需要用户确认。"
+        ) if common else "",
     )
 
 

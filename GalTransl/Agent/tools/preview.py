@@ -17,7 +17,7 @@ from GalTransl.Agent.tools.cache import (
 from GalTransl.Agent.tools.cache_fields import _PATCHABLE_FIELDS
 from GalTransl.Agent.tools.common import _diff_lines, _parse_index_spec, _write_action
 from GalTransl.Agent.models import AgentToolError
-from GalTransl.Agent.tools.dicts import _dict_new_lines, _dict_save_plan, _dict_file_categories
+from GalTransl.Agent.tools.dicts import _dict_new_lines, _dict_save_plan, _dict_file_categories, _fetch_dicts
 from GalTransl.Agent.tools.names import _name_table_changes, _name_table_save_plan
 from GalTransl.Agent.tools.problems import (
     _problem_filter_keywords,
@@ -182,10 +182,8 @@ def _preview_dict_write(runner: AgentRunner, args: dict[str, Any]) -> dict[str, 
 
     文件还不存在（带 category 新建）时按空文件算 diff，并在预览里标出要新建。
     """
-    pid = runner._project_id()
-    cfg = urllib.parse.quote(runner.state.config_file_name)
-    data = runner._http_get(f"/api/projects/{pid}/dictionary/project?config={cfg}")
-    contents = data.get("dict_contents", {}) if isinstance(data, dict) else {}
+    data = _fetch_dicts(runner)
+    contents = data.get("dict_contents", {})
     try:
         plan = _dict_save_plan(contents, args, _dict_file_categories(data))
     except AgentToolError:

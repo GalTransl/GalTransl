@@ -75,8 +75,8 @@
     "autoQuiet_autoQuiet_auto": "全自动-零打断",
     "ask_ask_count": "每个改动都先问你",
     "acceptEdits_acceptEdits_cacheDictionarySettingsGuidelineTranslationProxy": "缓存与字典直接改；改设置、规范、启动翻译、派子代理要先问",
-    "auto_auto_confirmAgentCacheSettingsTranslation": "不再确认，Agent 自主改缓存、设置与启动翻译",
-    "autoQuiet_autoQuiet_autoProblemItem": "同「全自动」；问题也由系统按推荐项代答，不打断你"
+    "auto_auto_confirmAgentCacheSettingsTranslation": "不再确认，Agent 自主改缓存、设置与启动翻译；写通用字典仍要确认",
+    "autoQuiet_autoQuiet_autoProblemItem": "同「全自动」；问题由系统按推荐项代答，写通用字典也不再确认，不打断你"
   },
   "agentSessionSidebar": {
     "agentSessionsHead_message_session": "会话",
@@ -166,6 +166,8 @@
   "permissionCard": {
     "globalMemory": "全局记忆",
     "globalMemoryHint": "影响所有项目；每次变更都需批准，自动模式和会话放行不适用。",
+    "commonDict": "通用字典",
+    "commonDictHint": "通用字典由多个项目共用；除「全自动-零打断」外，每次写入都需批准，会话放行不适用。",
     "edit_edit_translationText": "改译文数据",
     "delegate_delegate_proxy": "派子代理",
     "high_high_settingsJob": "改设置 / 启动任务",

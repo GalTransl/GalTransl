@@ -294,7 +294,16 @@ def _read_dict_file_payload(file_path: str) -> dict[str, Any]:
         }
 
 
-def _collect_project_dict_payload(project_dir: str, config_name: str) -> dict[str, Any]:
+def _resolve_common_dict_path(default_folder: Any, project_dir: str, file_key: str) -> str:
+    """配置里一条通用字典（不带 (project_dir) 前缀）对应的文件路径。只接受纯文件名。"""
+    from GalTransl.ConfigHelper import initDictList
+
+    if not _is_safe_dict_filename(file_key) or DICT_PROJECT_MARKER in file_key:
+        raise ValueError("invalid dictionary filename")
+    return initDictList([file_key], str(default_folder or "Dict"), project_dir)[0]
+
+
+def _collect_project_dict_payload(project_dir: str, config_name: str, include_common: bool = False) -> dict[str, Any]:
     if not _is_safe_config_filename(config_name):
         raise ValueError("invalid config filename")
     config_path = os.path.join(project_dir, config_name)
@@ -336,7 +345,7 @@ def _collect_project_dict_payload(project_dir: str, config_name: str) -> dict[st
             continue
         dict_contents[file_key] = _read_dict_file_payload(file_path)
 
-    return {
+    payload: dict[str, Any] = {
         "project_dir": project_dir,
         "config_file_name": config_name,
         "pre_dict_files": pre_files,
@@ -344,6 +353,24 @@ def _collect_project_dict_payload(project_dir: str, config_name: str) -> dict[st
         "post_dict_files": post_files,
         "dict_contents": dict_contents,
     }
+    if include_common:
+        # 当前配置启用的通用字典按原配置顺序并入各分类（加载顺序影响匹配）
+        default_folder = dict_cfg.get("defaultDictFolder", "Dict")
+        common_files: list[str] = []
+        for key, all_files in (("pre_dict_files", pre_all), ("gpt_dict_files", gpt_all), ("post_dict_files", post_all)):
+            payload[key] = all_files
+            for file_key in all_files:
+                if file_key.startswith(DICT_PROJECT_MARKER) or file_key in dict_contents:
+                    continue
+                common_files.append(file_key)
+                try:
+                    dict_contents[file_key] = _read_dict_file_payload(
+                        _resolve_common_dict_path(default_folder, project_dir, file_key)
+                    )
+                except ValueError as exc:
+                    dict_contents[file_key] = {"path": "", "lines": [], "count": 0, "mtime": None, "error": str(exc)}
+        payload["common_dict_files"] = common_files
+    return payload
 
 
 def _common_dict_directory() -> str:
@@ -3020,8 +3047,9 @@ def build_handler(registry: JobRegistry):
                 if not _is_safe_config_filename(config_name):
                     self._send_json({"error": "invalid config filename"}, status=HTTPStatus.BAD_REQUEST)
                     return
+                include_common = parse_qs(urlparse(self.path).query).get("include_common", [""])[0] in ("1", "true")
                 try:
-                    self._send_json(_collect_project_dict_payload(project_dir, config_name))
+                    self._send_json(_collect_project_dict_payload(project_dir, config_name, include_common))
                 except FileNotFoundError as exc:
                     self._send_json({"error": str(exc)}, status=HTTPStatus.NOT_FOUND)
                 except ValueError as exc:
@@ -3127,6 +3155,52 @@ def build_handler(registry: JobRegistry):
                     self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
                 except Exception as exc:
                     self._send_json({"error": f"failed to save project dictionary file: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            # POST /api/projects/:id/dictionary/common/save
+            # 写当前配置启用的通用字典（Agent 用）：只能改配置里列出的、已存在的文件。
+            if sub_path == "/dictionary/common/save":
+                if self.command != "POST":
+                    self._send_json({"error": "method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
+                    return
+                try:
+                    payload = self._read_json_body()
+                    config_name = str(payload.get("config_file_name", "config.yaml") or "config.yaml")
+                    file_key = str(payload.get("file_key", "")).strip()
+                    content = _normalize_dict_text(str(payload.get("content", "")))
+
+                    if not _is_safe_config_filename(config_name):
+                        self._send_json({"error": "invalid config filename"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    config_path = os.path.join(project_dir, config_name)
+                    if not os.path.isfile(config_path):
+                        self._send_json({"error": f"config file not found: {config_name}"}, status=HTTPStatus.NOT_FOUND)
+                        return
+
+                    data = _read_yaml_file(config_path)
+                    dict_cfg = data.get("dictionary", {})
+                    listed = set(str(x) for x in dict_cfg.get("preDict", []))
+                    listed.update(str(x) for x in dict_cfg.get("gpt.dict", []))
+                    listed.update(str(x) for x in dict_cfg.get("postDict", []))
+                    if file_key not in listed:
+                        self._send_json({"error": "dictionary file is not configured in project dictionary lists"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    try:
+                        file_path = _resolve_common_dict_path(dict_cfg.get("defaultDictFolder", "Dict"), project_dir, file_key)
+                    except ValueError as exc:
+                        self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    if not os.path.isfile(file_path):
+                        self._send_json({"error": f"common dictionary file not found: {file_key}"}, status=HTTPStatus.NOT_FOUND)
+                        return
+
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    self._send_json({"success": True, "file_key": file_key})
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json({"error": f"failed to save common dictionary file: {exc}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
             # POST /api/projects/:id/dictionary/project/delete
