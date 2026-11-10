@@ -114,6 +114,26 @@ def get_legacy_user_data_dir() -> Path:
     return _platform_data_root() / APP_DIR_NAME
 
 
+# 单个目录名的上限。Windows / 主流文件系统单段最多 255 字符，再给会话文件名和
+# MAX_PATH 留余量；base64 会把每个日文/中文字符膨胀成 4 个字符，长项目路径很容易超。
+_PROJECT_KEY_MAX_CHARS = 120
+
+
+def project_storage_key(project_dir: str) -> str:
+    """项目目录 -> 用户数据目录下的子目录名（文件名安全、同一路径稳定）。
+
+    短路径沿用历史上的 base64url(绝对路径) 编码，已有数据原地可用；
+    编码后过长的改用 sha256 摘要——否则 makedirs 会报 WinError 123 / ENAMETOOLONG。
+    """
+    from base64 import urlsafe_b64encode
+
+    raw = os.path.abspath(project_dir).encode("utf-8")
+    token = urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    if len(token) <= _PROJECT_KEY_MAX_CHARS:
+        return token
+    return "sha256-" + hashlib.sha256(raw).hexdigest()
+
+
 def get_user_data_dir() -> Path:
     override = os.environ.get(DATA_DIR_ENV, "").strip()
     if override:

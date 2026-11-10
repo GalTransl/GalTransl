@@ -2,7 +2,7 @@
 
 一个会话一个文件，append-only 逐行写：
 
-    ~/.galtransl/agent_sessions/<base64url(project_dir)>/<session_id>.jsonl
+    ~/.galtransl/agent_sessions/<project_storage_key(project_dir)>/<session_id>.jsonl
 
 每行一条 JSON 记录，`t` 字段区分类型：
 
@@ -21,12 +21,11 @@ import os
 import sys
 import tempfile
 import time
-from base64 import urlsafe_b64encode
 from collections import deque
 from typing import Any
 from uuid import uuid4
 
-from GalTransl.RuntimePaths import get_user_data_dir
+from GalTransl.RuntimePaths import get_user_data_dir, project_storage_key
 
 SESSIONS_ROOT = str(get_user_data_dir() / "agent_sessions")
 
@@ -136,9 +135,8 @@ def _log(msg: str, *args: object) -> None:
 
 
 def encode_project_dir(project_dir: str) -> str:
-    """项目目录 -> 文件名安全 token（UTF-8 base64url 去填充）。"""
-    raw = os.path.abspath(project_dir).encode("utf-8")
-    return urlsafe_b64encode(raw).decode("ascii").rstrip("=").replace("+", "-").replace("/", "_")
+    """项目目录 -> 文件名安全 token（短路径为 base64url，过长时为 sha256 摘要）。"""
+    return project_storage_key(project_dir)
 
 
 def project_dir_for(project_dir: str) -> str:

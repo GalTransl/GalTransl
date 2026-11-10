@@ -296,6 +296,17 @@ class SessionStoreTests(unittest.TestCase):
         # 同一路径编码稳定
         self.assertEqual(token, ss.encode_project_dir(weird))
 
+    def test_very_long_project_path_still_gets_a_usable_directory(self) -> None:
+        """长日文路径 base64 后超过单段 255 字符上限，必须退化成定长摘要。"""
+        name = "ご主人様、セイラに夢みたいないちゃラブご奉仕させていただけますか"
+        long_project = os.path.join(tempfile.mkdtemp(), name, name + "_extract")
+        token = ss.encode_project_dir(long_project)
+        self.assertLessEqual(len(token), 120)
+        self.assertEqual(token, ss.encode_project_dir(long_project))
+        self.assertNotEqual(token, ss.encode_project_dir(long_project + "2"))
+        sid = ss.create_session(long_project, "Long")
+        self.assertEqual([s["session_id"] for s in ss.list_sessions(long_project)], [sid])
+
     def test_sessions_isolated_per_project(self) -> None:
         other = os.path.join(tempfile.mkdtemp(prefix="agent-proj2-"), "Other")
         os.makedirs(other, exist_ok=True)

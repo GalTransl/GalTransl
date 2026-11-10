@@ -10,12 +10,11 @@ import re
 import tempfile
 import threading
 import time
-from base64 import urlsafe_b64encode
 from pathlib import Path
 from uuid import uuid4
 
 from GalTransl import CACHE_FOLDERNAME
-from GalTransl.RuntimePaths import get_user_data_dir
+from GalTransl.RuntimePaths import get_user_data_dir, project_storage_key
 
 
 _LOCKS: dict[str, threading.RLock] = {}
@@ -30,8 +29,7 @@ def project_lock(project_dir: str):
 
 
 def history_dir(project_dir: str) -> Path:
-    key = urlsafe_b64encode(os.path.abspath(project_dir).encode()).decode().rstrip("=")
-    return get_user_data_dir() / "cache_history" / key
+    return get_user_data_dir() / "cache_history" / project_storage_key(project_dir)
 
 
 def cache_path(project_dir: str, filename: str) -> Path:
