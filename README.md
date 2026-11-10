@@ -14,12 +14,15 @@
 >
 > 直接使用桌面端的 **「提取 Agent」** 功能：新建提取，选择游戏目录，AI 会帮你识别引擎、提取台词，并在翻译完成后将 GalTransl 的翻译结果回写为游戏补丁。建议先测试几句中文，再翻译整部游戏；具体支持范围以引擎和游戏版本为准。
 
+<img width="1322" height="864" alt="image" src="https://github.com/user-attachments/assets/2b5df717-aa0a-4224-9e6d-015e084e9e8a" />
+
+
 ## 🤖 现已支持 Agent 模式
 
 > [!IMPORTANT]
-> **现在 GalTransl 支持 Agent 模式，可以自主完成整个翻译流程。**
+> **现在 GalTransl 支持 Agent 模式，可以自主完成整个提取翻译流程。**
 >
-> 在桌面端进入 **Agent 模式**，用自然语言告诉它你的翻译需求，即可让 Agent 自主推进翻译任务。
+> 在桌面端进入 **提取/翻译Agent 模式**，用自然语言告诉它你的翻译需求，即可让 Agent 自主推进翻译任务。
 
 ![GalTransl Agent 模式：自主进行翻译前准备并启动试译](./img/agent-mode.png)
 
