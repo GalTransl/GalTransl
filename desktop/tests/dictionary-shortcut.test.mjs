@@ -38,11 +38,16 @@ test('mini window targets select the dictionary category, match the row key and 
   } };
   const highlighted = [], focused = [];
   let renderer;
-  const pane = { scrollTop: 0, clientTop: 0, clientHeight: 100, scrollHeight: 1000,
-    getBoundingClientRect: () => ({ top: 100 }), querySelector: selector => {
+  // 单分组时竖向滚动条在表格（.dict-card__table）上，外层列表是 overflow: hidden、滚不动。
+  const table = { scrollTop: 0, clientTop: 0, clientHeight: 100, scrollHeight: 1000, offsetHeight: 100,
+    getBoundingClientRect: () => ({ top: 100, height: 100 }) };
+  const pane = { scrollTop: 0, clientTop: 0, clientHeight: 100, scrollHeight: 100, offsetHeight: 100,
+    getBoundingClientRect: () => ({ top: 100, height: 100 }), querySelector: selector => {
       const index = Number(selector.match(/"(\d+)"/)[1]);
       if (!renderer.root.findAllByProps({ 'data-dict-row-index': index }).length) return null;
-      return { getBoundingClientRect: () => ({ top: 100 + index * 200 - pane.scrollTop, height: 50 }),
+      return { getBoundingClientRect: () => ({ top: 100 + index * 200 - table.scrollTop, bottom: 150 + index * 200 - table.scrollTop, height: 50 }),
+        closest: selector => { assert.equal(selector, '.dict-card__table'); return table; },
+        offsetWidth: 0,
         classList: { add: () => highlighted.push(index), remove() {} },
         querySelector: () => ({ focus: () => focused.push(index) }),
         scrollIntoView() { assert.fail('must not scroll the outer dialog'); },
@@ -60,11 +65,12 @@ test('mini window targets select the dictionary category, match the row key and 
     act(() => renderer.update(view({ page: 'dictionary', fileKey: 'pre.txt', line: 'diag\t猫\told' })));
     assert.deepEqual(highlighted, [1]);
     assert.deepEqual(focused, [1]);
-    assert.equal(pane.scrollTop, 175);
+    assert.equal(table.scrollTop, 175);
+    assert.equal(pane.scrollTop, 0);
     assert.ok(renderer.root.findAllByType('input').some(node => node.props.value === 'dog'));
     act(() => renderer.update(view({ page: 'dictionary', fileKey: 'pre.txt', line: '犬\tdog' })));
     assert.deepEqual(highlighted, [1, 2]);
-    assert.equal(pane.scrollTop, 375);
+    assert.equal(table.scrollTop, 375);
     act(() => renderer.update(view({ page: 'dictionary', fileKey: 'pre.txt', line: '消失\tmissing' })));
     assert.ok(renderer.root.findAll(node => node.props.children === 'projects:projectPreview.entryMissing').length);
     assert.deepEqual(highlighted, [1, 2]);

@@ -676,7 +676,14 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     const container = cardListRef.current;
     const row = container?.querySelector<HTMLElement>(`[data-dict-row-index="${pendingPreviewRow}"]`);
     if (!container || !row) return;
+    // 竖向滚动条在表格自己身上（单分组时列表是 overflow: hidden，滚它没有任何效果）；
+    // 多分组时列表也滚，所以先滚表格、再滚列表，两层都把这一行带到中间。
+    const table = row.closest<HTMLElement>('.dict-card__table');
+    if (table) scrollWithinContainer(table, row);
     scrollWithinContainer(container, row);
+    // 再次定位到同一行时也要重新闪一次：先摘掉类并强制回流，动画才会从头播
+    row.classList.remove('dict-card__table-row--highlight');
+    void row.offsetWidth;
     row.classList.add('dict-card__table-row--highlight');
     highlightedPreviewRowRef.current = row;
     row.querySelector<HTMLInputElement>('input')?.focus({ preventScroll: true });

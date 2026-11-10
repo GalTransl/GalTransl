@@ -440,9 +440,55 @@
   flex: 1;
 }
 
-.dict-card__table-row--highlight {
-  background: var(--color-primary-soft);
+/* 预览小窗定位到的词条。高亮画在盖住整行的伪元素上，而不是行自身：
+   单元格有自己的不透明底色，会把行的背景和内描边整个盖住；行又开了
+   content-visibility（自带 paint containment），画到行外的光晕会被裁掉。 */
+.dict-card__table-row--highlight::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
   box-shadow: inset 3px 0 var(--color-primary);
+  animation: dict-row-flash 2s ease-out;
+}
+
+/* 与缓存卡片的定位闪烁同一节奏：先亮起蓝框和蓝晕，再退回常驻的浅底 + 左侧色条 */
+@keyframes dict-row-flash {
+  0%,
+  30% {
+    background: color-mix(in srgb, var(--color-primary) 26%, transparent);
+    box-shadow:
+      inset 3px 0 var(--color-primary),
+      inset 0 0 0 2px var(--color-primary),
+      inset 0 0 14px rgba(47, 111, 235, 0.45);
+  }
+  15%,
+  45% {
+    background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+    box-shadow:
+      inset 3px 0 var(--color-primary),
+      inset 0 0 0 2px var(--color-primary),
+      inset 0 0 6px rgba(47, 111, 235, 0.2);
+  }
+  70% {
+    background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+    box-shadow:
+      inset 3px 0 var(--color-primary),
+      inset 0 0 0 2px var(--color-primary),
+      inset 0 0 10px rgba(47, 111, 235, 0.25);
+  }
+  100% {
+    background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+    box-shadow: inset 3px 0 var(--color-primary);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dict-card__table-row--highlight::after {
+    animation: none;
+  }
 }
 
 .dict-search {
