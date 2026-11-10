@@ -120,6 +120,7 @@ export function NewProjectWizard({ active, initialDirectory, autoCreate = false,
   const [dynamicNumPerRequest, setDynamicNumPerRequest] = useState(false);
   const [dynamicNumPerRequestMin, setDynamicNumPerRequestMin] = useState(8);
   const [dynamicNumPerRequestMax, setDynamicNumPerRequestMax] = useState(64);
+  const [splitTailChunks, setSplitTailChunks] = useState(false);
   const [language, setLanguage] = useState('zh-cn');
   const [guidelines, setGuidelines] = useState<string[]>([]);
   const [translationGuideline, setTranslationGuideline] = useState('');
@@ -464,6 +465,7 @@ export function NewProjectWizard({ active, initialDirectory, autoCreate = false,
       common['gpt.dynamicNumPerRequestTranslate'] = dynamicNumPerRequest;
       common['gpt.dynamicNumPerRequestTranslate.min'] = dynamicNumPerRequestMin;
       common['gpt.dynamicNumPerRequestTranslate.max'] = dynamicNumPerRequestMax;
+      common.splitTailChunks = splitTailChunks;
       common['gpt.contextNum'] = 8;
       if (translationGuideline) {
         common['gpt.translation_guideline'] = translationGuideline;
@@ -498,7 +500,7 @@ export function NewProjectWizard({ active, initialDirectory, autoCreate = false,
       setFeedback({ type: 'error', message: uiMessage("projects:newProjectWizard.message_message_saveFailed", { value: err instanceof Error ? err.message : String(err) }) });
       return false;
     }
-  }, [projectDir, workersPerProject, language, numPerRequest, dynamicNumPerRequest, dynamicNumPerRequestMin, dynamicNumPerRequestMax, selectedFilePlugin, selectedBackend, translationGuideline, pluginOverrides, filePlugins]);
+  }, [projectDir, workersPerProject, language, numPerRequest, dynamicNumPerRequest, dynamicNumPerRequestMin, dynamicNumPerRequestMax, splitTailChunks, selectedFilePlugin, selectedBackend, translationGuideline, pluginOverrides, filePlugins]);
 
   // ── Step 5: Auto-extract names on entry ──
   useEffect(() => {
@@ -584,7 +586,7 @@ export function NewProjectWizard({ active, initialDirectory, autoCreate = false,
   useEffect(() => {
     if (!settingsSaved) return;
     setSettingsSaved(false);
-  }, [selectedBackend, selectedFilePlugin, workersPerProject, numPerRequest, language]);
+  }, [selectedBackend, selectedFilePlugin, workersPerProject, numPerRequest, language, splitTailChunks]);
 
   // ── Step indicator ──
   const renderStepIndicator = () => (
@@ -834,6 +836,11 @@ export function NewProjectWizard({ active, initialDirectory, autoCreate = false,
           </div>
         </>
       ) : null}
+      <label className="field field--switch wizard-settings-grid__full">
+        <span className="field__label">{translate("config:fields.splitTailChunks.label")}</span>
+        <Switch checked={splitTailChunks} onChange={setSplitTailChunks} />
+        <span className="field__hint">{translate("config:fields.splitTailChunks.description")}</span>
+      </label>
       <div className="field wizard-settings-grid__full">
         <span className="field__label">{translate("projects:newProjectWizard.fieldWizardSettingsGridFull_message_targetLanguage")}</span>
         <CustomSelect
