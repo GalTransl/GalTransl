@@ -15,6 +15,7 @@ import { useConnection } from '../features/connection/ConnectionContext';
 import { useNameDict } from '../lib/useNameDict';
 import { useFreshEntries } from '../lib/useFreshEntries';
 import { useSuccessTail } from '../lib/useSuccessTail';
+import { useIsTruncated } from '../lib/useIsTruncated';
 import { useProjectTranslationConfig } from '../lib/useProjectTranslationConfig';
 import {
   type FileProgress,
@@ -547,6 +548,7 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   );
 
   const projectName = projectDir ? basenamePath(projectDir) : '';
+  const [titleProjectRef, titleProjectTruncated] = useIsTruncated<HTMLSpanElement>(projectName);
   const backendUsageSummary = useMemo(
     () => projectDir
       ? summarizeBackendUsage(projectDir, projectBackendConfig)
@@ -777,7 +779,11 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
               <h1 className="ptv2-cockpit__title">{translate("projects:projectTranslatePage.ptv2CockpitTitle_h1_startTranslation")}{projectName ? (
                   <>
                     <span className="ptv2-cockpit__title-sep">·</span>
-                    <span className="ptv2-cockpit__title-project">{projectName}</span>
+                    <span
+                      ref={titleProjectRef}
+                      className={`ptv2-cockpit__title-project${titleProjectTruncated ? ' is-truncated' : ''}`}
+                      title={titleProjectTruncated ? projectName : undefined}
+                    >{projectName}</span>
                   </>
                 ) : null}
               </h1>

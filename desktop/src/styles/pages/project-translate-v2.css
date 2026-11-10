@@ -237,8 +237,10 @@
   color: var(--color-text);
   display: flex;
   align-items: baseline;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0 2px;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .ptv2-cockpit__title-sep {
@@ -248,9 +250,28 @@
   font-size: 18px;
 }
 
+.ptv2-cockpit__title-sep {
+  flex-shrink: 0;
+}
+
+/* 项目名：单行、限宽，放不下的部分在右端淡出（不折行、不把标题区撑高）。 */
 .ptv2-cockpit__title-project {
   color: var(--color-primary);
   font-weight: 800;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 20em;
+  overflow: hidden;
+  white-space: nowrap;
+  /* overflow: hidden 配 1.1 行高会削掉字形上下缘，用内边距留出余量 */
+  padding-block: 0.15em;
+  margin-block: -0.15em;
+}
+
+/* 只有真被裁掉时才淡出，短名字保持完整实色 */
+.ptv2-cockpit__title-project.is-truncated {
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 3em), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 3em), transparent);
 }
 
 .ptv2-cockpit__statusline {
@@ -928,7 +949,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   min-width: 0;
 }
 
