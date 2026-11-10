@@ -110,3 +110,38 @@ test('snapshots stay still except the new turn just submitted; SSE and reconnect
   assert.equal(state.view.motionEvents.length, 0);
   await act(async () => renderer.unmount());
 });
+
+test('stopping a turn leaves the view where it is instead of jumping to the previous reply', () => {
+  const revealed = [];
+  const answer = { id: 'previous answer' };
+  const viewport = { getBoundingClientRect: () => ({ top: 0, bottom: 400 }) };
+  const content = { querySelectorAll: selector => selector === '[data-agent-final-step]' ? [answer] : [] };
+  const load = createTypeScriptLoader({
+    window: { matchMedia: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }) }, CSS: { escape: value => value },
+    document: { hidden: false, documentElement: { dataset: {} }, addEventListener() {}, removeEventListener() {} },
+  }, {
+    '../../components/PageActivity': { usePageActive: () => true },
+    '../agent/rows/AgentGroupView': { AgentGroupView: () => null },
+    '../agent/followTail': { followTail: () => ({ follow() {}, setActive() {}, dispose() {}, revealFinal: reply => revealed.push(reply) }) },
+  });
+  const { Conversation } = load(source('Conversation.tsx'));
+  const { reduceEvents } = load(source('transcript.ts'));
+  let props = { rows: [], motionEvents: [], sessionId: 'fixture', running: true,
+    status: 'running', pending: null, older: false, loadOlder() {} };
+  let renderer;
+  const render = (events, next) => {
+    props = { ...props, ...next, rows: reduceEvents(props.rows, events) };
+    act(() => { renderer ? renderer.update(h(Conversation, props)) : (renderer = create(h(Conversation, props), {
+      createNodeMock: element => element.props.className === 'agent-thread' ? content : viewport,
+    })); });
+  };
+  render([{ type: 'user_message', seq: 1, text: 'First' }], {});
+  // 正常跑完：这一轮有最终回复，跳到它的开头
+  render([{ type: 'assistant_message', messageId: 'a1', text: 'Final answer', stopReason: 'stop' }], { running: false, status: 'idle' });
+  assert.deepEqual(revealed, [answer]);
+  // 第二轮被停止：没有最终回复，页面上最后一个回复是上一轮的，不能跳过去
+  render([{ type: 'user_message', seq: 2, text: 'Second' }, { type: 'tool_start', toolCallId: 't1', toolName: 'read' }], { running: true, status: 'running' });
+  render([], { running: false, status: 'stopped' });
+  assert.deepEqual(revealed, [answer]);
+  act(() => renderer.unmount());
+});

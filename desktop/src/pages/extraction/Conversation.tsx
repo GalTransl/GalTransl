@@ -71,12 +71,17 @@ export function Conversation({ rows, sessionId, running, status, pending, older,
   useLayoutEffect(() => {
     tail.current?.follow();
     if (previous.current.sessionId === sessionId && previous.current.running && !running) {
-      const answers = content.current?.querySelectorAll<HTMLElement>('[data-agent-final-step]');
+      // 只有**这一轮**真的给出了最终回复才跳到它的开头。被停止 / 中断的回合没有最终回复，
+      // 页面上最后一个回复是上一轮的——跳过去就是「点了停止，视口自己蹿回上面」。
+      const tailGroup = groups[groups.length - 1];
+      const answered = !['stopped', 'interrupted'].includes(status)
+        && tailGroup?.type === 'activity' && Boolean(tailGroup.finalContent);
+      const answers = answered ? content.current?.querySelectorAll<HTMLElement>('[data-agent-final-step]') : undefined;
       const last = answers?.[answers.length - 1];
       if (last) tail.current?.revealFinal(last);
     }
     previous.current = { sessionId, running };
-  }, [groups, sessionId, running]);
+  }, [groups, sessionId, running, status]);
   useLayoutEffect(() => {
     if (!motionEvents.length) { motion.current?.reset(); return; }
     for (const event of motionEvents) {
