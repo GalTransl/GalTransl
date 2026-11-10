@@ -144,6 +144,17 @@ function renderTableCell(cell: string): string {
   return renderInline(escapeHtml(cell));
 }
 
+/** 短列阈值：按显示宽度算，全角字符记 2（即 8 个汉字或 16 个半角字符）。 */
+const COMPACT_CELL_WIDTH = 16;
+/** 单元格的大致显示宽度：去掉 markdown 标记符号，全角字符记 2。 */
+function cellDisplayWidth(cell: string): number {
+  let width = 0;
+  for (const ch of cell.replace(/[`*~]/g, '')) {
+    width += (ch.codePointAt(0) ?? 0) > 0x2e7f ? 2 : 1;
+  }
+  return width;
+}
+
 function renderTable(header: string, splitLine: string, bodyRows: string[]): string {
   const headerCells = splitTableRow(header).map(renderTableCell);
   const aligns = splitTableRow(splitLine).map((c) => {
@@ -153,20 +164,30 @@ function renderTable(header: string, splitLine: string, bodyRows: string[]): str
     if (r) return 'right';
     return '';
   });
-  const align = (i: number) => (aligns[i] ? ` style="text-align:${aligns[i]}"` : '');
+  const rawHeader = splitTableRow(header);
+  const rawRows = bodyRows.map(splitTableRow);
+  // 短列（标签 / 序号 / 状态）整列不换行：否则自动布局会把宽度几乎全让给长文本列，
+  // 短列被挤成一字一行。只在同表还有长列时才标，全是短列的表保持原样。
+  const compact = rawHeader.map((_, i) =>
+    [rawHeader, ...rawRows].every((cells) => cellDisplayWidth(cells[i] ?? '') <= COMPACT_CELL_WIDTH),
+  );
+  const mixed = compact.includes(true) && compact.includes(false);
+  const attrs = (i: number) =>
+    (mixed && compact[i] ? ' class="is-compact"' : '') +
+    (aligns[i] ? ` style="text-align:${aligns[i]}"` : '');
 
   const html: string[] = ['<table>', '<thead><tr>'];
   headerCells.forEach((c, i) => {
-    html.push(`<th${align(i)}>${c}</th>`);
+    html.push(`<th${attrs(i)}>${c}</th>`);
   });
   html.push('</tr></thead>');
-  if (bodyRows.length) {
+  if (rawRows.length) {
     html.push('<tbody>');
-    for (const row of bodyRows) {
+    for (const row of rawRows) {
       html.push('<tr>');
-      splitTableRow(row)
+      row
         .map(renderTableCell)
-        .forEach((c, i) => html.push(`<td${align(i)}>${c}</td>`));
+        .forEach((c, i) => html.push(`<td${attrs(i)}>${c}</td>`));
       html.push('</tr>');
     }
     html.push('</tbody>');

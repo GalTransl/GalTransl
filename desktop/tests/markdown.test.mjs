@@ -34,6 +34,21 @@ test('tool tables render escaped pipes and keep br tags as literal text', () => 
   assert.doesNotMatch(html, /<img|<br\b/i);
 });
 
+test('short table columns are kept on one line only when a long column sits beside them', () => {
+  const mixed = renderMarkdown([
+    '| 项目 | 结果 |',
+    '| --- | :-- |',
+    '| 引擎与格式 | TyranoScript（Electron 构建，TyranoScript Studio），KAG 脚本方言 |',
+    '| **文本编码** | 脚本 UTF-8 无 BOM |',
+  ].join('\n'));
+  assert.ok(mixed.includes('<th class="is-compact">项目</th>'));
+  assert.ok(mixed.includes('<th>结果</th>'));
+  assert.ok(mixed.includes('<td class="is-compact">引擎与格式</td>'));
+  assert.ok(mixed.includes('<td class="is-compact"><strong>文本编码</strong></td>'));
+  // 全是短列的表不需要标记
+  assert.doesNotMatch(renderMarkdown('| a | b |\n| --- | --- |\n| 1 | 2 |'), /is-compact/);
+});
+
 test('dictionary fences preserve nested fences, tabs, blank lines and trailing spaces', () => {
   const raw = ['// 注释', '', '  アリス\t爱丽丝\t人名  ', '```', '````text', '\\n\t<br>|', ''];
   const html = renderMarkdown(['字典 GPT.txt', '', '`````text', ...raw, '`````', '', '**结束**'].join('\n'));

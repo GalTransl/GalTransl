@@ -1843,7 +1843,8 @@
   border-collapse: separate;
   border-spacing: 0;
   font-size: 0.95em;
-  line-height: 1.5;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
   /* 外框：1px 线 + 圆角，画在 table 自身 */
   border: 1px solid var(--color-line);
   border-radius: 8px;
@@ -1855,10 +1856,21 @@
 
 .agent-md th,
 .agent-md td {
-  padding: 4px 10px;
+  padding: 7px 12px;
   border: 0;
   text-align: left;
+  /* 多行单元格旁边的短标签贴顶对齐，而不是悬在行中间 */
+  vertical-align: top;
+  /* 长文本列的下限：列多时宁可整表横向滚动，也不把正文挤成窄条 */
+  min-width: 9em;
   overflow-wrap: anywhere;
+}
+
+/* 短列（标签 / 序号 / 状态，由渲染器标记）：按内容定宽、整列不换行 */
+.agent-md th.is-compact,
+.agent-md td.is-compact {
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .agent-md th {
@@ -1866,6 +1878,18 @@
   color: var(--color-text);
   background: var(--agent-tile, rgba(16, 24, 40, 0.04));
   white-space: nowrap;
+}
+
+.agent-md tbody tr:hover td {
+  background: var(--agent-tile, rgba(16, 24, 40, 0.04));
+}
+
+/* 单元格里的行内代码：折行时每一段都保留完整的圆角底色，
+   不再出现被拦腰切开的色块 */
+.agent-md td code,
+.agent-md th code {
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 .agent-md th + th,
