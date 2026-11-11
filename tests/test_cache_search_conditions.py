@@ -358,14 +358,16 @@ class CacheSearchConditionsTests(unittest.TestCase):
         self.assertEqual(indexes, list(range(1, 206)))
 
     def test_frontend_returns_all_matches_and_full_text_without_budgets(self):
-        text = "译文" * 10000
-        self.write([{"index": i, "post_src": "hit", "pre_dst": text} for i in range(1, 206)]
+        # 行数（205 > 100）、总字符数、单行字符数（第 1 行 20000 字）都超出有界模式的预算。
+        # 只让一行超长：全部超长时响应有 12MB，慢的 CI 机器上会读超时。
+        texts = {i: "译文" * (10000 if i == 1 else 100) for i in range(1, 206)}
+        self.write([{"index": i, "post_src": "hit", "pre_dst": text} for i, text in texts.items()]
                    + [{"index": 206, "post_src": "hit", "pre_dst": "不匹配"}])
         out = self.search(query="hit", result_mode="all",
                           conditions=[{"field": "pre_dst", "query": "译文"}])
         self.assertEqual(out["total"], 205)
         self.assertEqual([r["index"] for r in out["results"]], list(range(1, 206)))
-        self.assertTrue(all(r["pre_dst"] == text and not r.get("truncated") for r in out["results"]))
+        self.assertTrue(all(r["pre_dst"] == texts[r["index"]] and not r.get("truncated") for r in out["results"]))
         self.assertFalse(out["has_more"])
         self.assertNotIn("truncated", out)
 
