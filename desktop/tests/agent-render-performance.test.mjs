@@ -223,7 +223,7 @@ test('rebuilding old events preserves fallback retry and child timestamps', () =
 test('collapsed history mounts no tool bodies or reasoning markdown, while final answers stay visible', () => {
   const group = {
     type: 'activity', id: 'long',
-    items: Array.from({ length: 250 }, (_, step) => ({ kind: 'tool', step, id: `tool-${step}`, name: 'run_python', result: 'large hidden output' })),
+    items: Array.from({ length: 250 }, (_, step) => ({ kind: 'tool', step, id: `tool-${step}`, name: 'write', result: 'large hidden output' })),
     finalContent: { kind: 'content', step: 251, content: 'visible answer', final: true },
   };
   const html = renderToStaticMarkup(createElement(AgentGroupView, { group, isLive: false, projectDir: '', persistKey: 'perf' }));

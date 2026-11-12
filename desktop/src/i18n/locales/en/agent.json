@@ -48,6 +48,12 @@
     "incomplete": "Exploration incomplete · {{count}} calls",
     "queued": "Exploration queued · {{count}} calls"
   },
+  "commandGroup": {
+    "running": "Running commands · {{count}}",
+    "done": "Ran {{count}} commands",
+    "incomplete": "Commands incomplete · {{count}}",
+    "queued": "Commands queued · {{count}}"
+  },
   "messageActions": {
     "copy": "Copy response",
     "copied": "Copied",

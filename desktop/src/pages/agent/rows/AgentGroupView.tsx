@@ -207,7 +207,7 @@ function AgentActivityGroup({
                 {activityEntries(items, isLive).map((entry) => {
                   const i = entry.indices[0];
                   const item = items[i];
-                  return entry.reading && entry.indices.length > 1 ? (
+                  return entry.group && entry.indices.length > 1 ? (
                     <ReadToolGroup key={`reads-${entry.key}`} entry={entry} items={items} phases={phases} persistKey={persistKey} imageScope={imageScope} autoExpandTools={autoExpandTools} />
                   ) : item.final ? null : item.kind === 'content' ? (
                     <ContentRow key={`t-${item.id ?? i}`} item={item} projectDir={projectDir} newProjectWizardRefs={newProjectWizardRefs} />

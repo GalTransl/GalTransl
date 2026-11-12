@@ -48,6 +48,12 @@
     "incomplete": "查阅未完成 · {{count}} 项",
     "queued": "等待查阅 · {{count}} 项"
   },
+  "commandGroup": {
+    "running": "正在执行命令 · {{count}} 条",
+    "done": "已执行 {{count}} 条命令",
+    "incomplete": "命令未执行完 · {{count}} 条",
+    "queued": "等待执行命令 · {{count}} 条"
+  },
   "messageActions": {
     "copy": "复制回复",
     "copied": "已复制",
