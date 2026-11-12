@@ -70,6 +70,21 @@ are protected. Never change tool arguments or signed reasoning to add references
 """
 
 
+_REF = r"[mb]\d{1,7}"
+# Upstream #5555: ".." joins "..." and the dash/tilde/"to" family between refs.
+_SEPARATOR = r"(?:[-–—…~−－]|\.{2,3}|to)"
+_HEADER = re.compile(rf"(?im)^[^\S\n]*({_REF})[^\S\n]*{_SEPARATOR}[^\S\n]*({_REF})\b[^\S\n]*([^\n]*)(?:\n|$)")
+
+
+def _normalize_ref(value: Any) -> Any:
+    """Accept m1 / M00001 / b01 spellings for the stable mNNNNN / bN refs."""
+    match = re.fullmatch(r"\s*([mb])0*(\d{1,7})\s*", value, re.I) if isinstance(value, str) else None
+    if not match:
+        return value
+    number = int(match[2])
+    return f"m{number:05d}" if match[1].lower() == "m" else f"b{number}"
+
+
 def _tool(name: str, description: str, properties: dict, required: tuple = ()) -> dict:
     return {"type": "function", "function": {"name": name, "description": description,
             "parameters": {"type": "object", "properties": properties, "required": list(required)}}}
@@ -80,12 +95,18 @@ class BillionContextSession:
 
     names = frozenset({"compress", "decompress", "search_context", "acp_status"})
     tools = [
-        _tool("compress", _GUIDE + "\ncontent accepts an array of {startId,endId,summary,topic?}; aliases startRef/endRef work. "
-              "Or use text: m00001–m00008 topic\\nsummary. Batch operations are atomic. "
-              "Summaries must be 50–20000 characters and reduce tokens. Raw ranges cannot overlap existing folds; use bN refs for those.",
-              {"content": {"oneOf": [{"type": "string"}, {"type": "array", "minItems": 1, "items": {
-                  "type": "object", "properties": {"startId": {"type": "string"}, "endId": {"type": "string"},
-                  "summary": {"type": "string"}, "topic": {"type": "string"}}, "required": ["startId", "endId", "summary"]}}]}}, ("content",)),
+        # Upstream #4252: one advertised form (a plain string). Schema-guided
+        # decoders blend oneOf alternatives into hybrids; the parser still
+        # accepts entry arrays and JSON-encoded entries.
+        _tool("compress", _GUIDE + "\nONE call, ONE string: content holds one block per range — a header line "
+              "'m00001–m00008 optional topic', then the summary on the following lines; repeat header+summary for "
+              "more ranges in the same call. Use 'b1–b3 topic' headers to distill existing blocks. Batch operations are atomic. "
+              "Each summary must reduce tokens and be at most 20000 characters; one range needs 50+ characters, "
+              "a multi-range batch 50+ characters combined. Ranges already folded or inside the protected recent tail are "
+              "no-ops (nothing failed; do not resend them); a range running into the protected tail is trimmed at its boundary. "
+              "Never guess refs above the highest allocated ref reported by acp_status.",
+              {"content": {"type": "string", "description": "m00001–m00008 optional topic\\nsummary...\\nm00009–m00012 topic\\nsummary..."}},
+              ("content",)),
         _tool("decompress", "Retrieve a compression block. full=false returns one tier (child summaries); full=true returns exact original message objects. "
               "Response size is bounded by the remaining context. Use nextOffset/nextCharOffset as offset/charOffset for the next page. "
               "Oversized records return partial=true and recordJson fragments; concatenate fragments in order to reconstruct the exact JSON record. "
@@ -274,6 +295,10 @@ class BillionContextSession:
             protected = expanded
 
     @staticmethod
+    def _highest(state):
+        return f"m{state['next_message'] - 1:05d}" if state["next_message"] > 1 else None
+
+    @staticmethod
     def _block_info(block):
         return {**{key: block[key] for key in ("id", "tier", "topic", "inputTokens", "summaryTokens")},
                 "startId": block["refs"][0], "endId": block["refs"][-1], "messageCount": len(block["refs"])}
@@ -284,7 +309,7 @@ class BillionContextSession:
         ranges = self._ranges(state)
         return {"contextTokens": self._last_estimate, "contextWindow": self.context_window,
                 "pressure": round(self._last_estimate / self.context_window, 3),
-                "archivedMessages": state["next_message"] - 1,
+                "archivedMessages": state["next_message"] - 1, "highestRef": self._highest(state),
                 "activeBlocks": [self._block_info(block) for block in active[offset:offset + limit]],
                 "activeBlockCount": len(active), "rangeCount": len(ranges),
                 "nextOffset": offset + limit if offset + limit < max(len(active), len(ranges)) else None,
@@ -331,7 +356,8 @@ class BillionContextSession:
             ranges = self._status(state)["compressibleRanges"][:6]
             hint = f"[billion-context {pressure}: {used}/{self.context_window} estimated tokens] "
             hint += "Compress completed history now. " if pressure != "NOTICE" else "Consider compressing completed history. "
-            hint += "Available ranges: " + _json(ranges) + ". Use acp_status for details; keep unfinished user objectives."
+            hint += "Available ranges: " + _json(ranges) + f". Highest allocated ref is {self._highest(state)}; never guess higher refs. "
+            hint += "Use acp_status for details; keep unfinished user objectives."
             projected.append({"role": "user", "content": hint})
         self._last_local = _tokens(projected) + overhead
         self._last_estimate = self._calibrated(self._last_local)
@@ -347,41 +373,120 @@ class BillionContextSession:
             self._last_estimate = prompt_tokens
 
     @staticmethod
-    def _parse(content):
+    def _parse_text(text):
+        matches = list(_HEADER.finditer(text))
+        if not matches:
+            raise AgentToolError("No range header found: start each range with a line like 'm00001–m00008 topic', "
+                                 "then its summary on the following lines")
+        return [{"startId": match[1], "endId": match[2], "topic": match[3].strip(),
+                 "summary": text[match.end():matches[i + 1].start() if i + 1 < len(matches) else len(text)].strip()}
+                for i, match in enumerate(matches)]
+
+    @classmethod
+    def _parse(cls, content):
         if isinstance(content, str):
+            text = content.strip()
+            fence = re.fullmatch(r"```[\w-]*\n(.*?)\n?```", text, re.S)
+            text = fence[1].strip() if fence else text
             try:
-                content = json.loads(content)
+                content = json.loads(text)
             except ValueError:
-                pattern = r"(?m)^\s*((?:m\d+|b\d+))\s*[-–—]\s*((?:m\d+|b\d+))[^\S\n]*([^\n]*)\n"
-                matches = list(re.finditer(pattern, content))
-                content = [{"startId": match[1], "endId": match[2], "topic": match[3].strip(),
-                            "summary": content[match.end():matches[i + 1].start() if i + 1 < len(matches) else len(content)].strip()}
-                           for i, match in enumerate(matches)]
+                content = text
+            if not isinstance(content, (dict, list)):
+                # Plain line form, or a JSON-encoded line-form string.
+                content = cls._parse_text(content if isinstance(content, str) else text)
         if isinstance(content, dict):
             content = [content]
+        if isinstance(content, list):
+            # An array of line-form strings is accepted like one joined string.
+            content = [entry for item in content
+                       for entry in (cls._parse_text(item) if isinstance(item, str) else [item])]
         if not isinstance(content, list) or not content or len(content) > 32:
             raise AgentToolError("content must contain 1–32 compression ranges")
+        for entry in content:
+            if not isinstance(entry, dict):
+                raise AgentToolError("Each compression range must be a header line with its summary")
+            summary, topic = entry.get("summary"), entry.get("topic", "")
+            if not isinstance(summary, str) or not summary.strip():
+                raise AgentToolError("missing summary after the refs header line (every range needs refs THEN its summary; "
+                                     "drop notes about already-folded ranges; to rewrite existing blocks use a bN–bM header)")
+            if len(summary.strip()) > 20000:
+                raise AgentToolError("summary must be at most 20000 characters per range")
+            if not isinstance(topic, str) or len(topic) > 300:
+                raise AgentToolError("topic must be at most 300 characters")
+        # Upstream #5894: a multi-range batch passes the floor on its combined summaries.
+        if sum(len(entry["summary"].strip()) for entry in content) < 50:
+            raise AgentToolError("summary must be 50–20000 characters" if len(content) == 1
+                                 else "combined summaries of the batch must reach 50 characters")
         return content
 
-    def _compress(self, state, entry):
-        if not isinstance(entry, dict):
-            raise AgentToolError("Each compression range must be an object")
-        start_ref = entry.get("startId", entry.get("startRef"))
-        end_ref = entry.get("endId", entry.get("endRef"))
-        summary = entry.get("summary")
-        topic = entry.get("topic", "")
-        if not isinstance(summary, str) or not 50 <= len(summary.strip()) <= 20000:
-            raise AgentToolError("summary must be 50–20000 characters")
-        if not isinstance(topic, str) or len(topic) > 300:
-            raise AgentToolError("topic must be at most 300 characters")
+    def _locate(self, state, entry, created, warnings):
+        """Resolve one entry to visible units; None means a successful no-op (upstream #4521)."""
+        start_ref = _normalize_ref(entry.get("startId", entry.get("startRef")))
+        end_ref = _normalize_ref(entry.get("endId", entry.get("endRef")))
+        kinds = {ref[0] if isinstance(ref, str) and re.fullmatch(_REF, ref) else None for ref in (start_ref, end_ref)}
+        if None in kinds or len(kinds) != 1:
+            raise AgentToolError("Use mNNNNN refs or bN block IDs at both ends of a range")
+        is_block = kinds == {"b"}
+        highest = state["next_message"] - 1
+        if not is_block and int(start_ref[1:]) <= highest < int(end_ref[1:]):
+            warnings.append(f"endId {end_ref} is above the highest allocated ref; clamped to m{highest:05d}.")
+            end_ref = f"m{highest:05d}"
         units = self._units(state)
-        positions = {unit["ref"]: index for index, unit in enumerate(units) if unit["ref"]}
+        positions = {}
+        for index, unit in enumerate(units):
+            # Raw refs inside an active block resolve to that block.
+            for ref in ([unit["ref"]] if unit["ref"] else []) + (unit["refs"] if unit["block"] else []):
+                positions[ref] = index
         if start_ref not in positions or end_ref not in positions or positions[start_ref] > positions[end_ref]:
-            raise AgentToolError("Unknown, folded or reversed range; use acp_status for visible references")
+            raise AgentToolError(f"Unknown or reversed range {start_ref}–{end_ref}; highest allocated ref is "
+                                 f"{self._highest(state)}. Use acp_status for visible references")
         selected = units[positions[start_ref]:positions[end_ref] + 1]
-        is_block = bool(selected[0]["block"])
+        if any(unit["block"] and unit["ref"] in created for unit in selected):
+            raise AgentToolError("Ranges in one compress batch overlap")
+        if not is_block:
+            covered = [unit["ref"] for unit in selected if unit["block"]]
+            while selected and selected[0]["block"]:
+                selected.pop(0)
+            while selected and selected[-1]["block"]:
+                selected.pop()
+            if not selected:
+                warnings.append(f"Range {start_ref}–{end_ref} folded nothing: already covered by {', '.join(covered)}. "
+                                f"Nothing failed; do not resend it. To merge blocks, use block IDs ({covered[0]}–{covered[-1]}).")
+                return None
+            if covered and any(unit["block"] for unit in selected):
+                raise AgentToolError(f"Range {start_ref}–{end_ref} mixes raw messages with existing blocks; "
+                                     "split it around the blocks, or merge blocks with bN–bM block IDs")
+            if covered:
+                warnings.append(f"Range {start_ref}–{end_ref} skipped messages already covered by {', '.join(covered)}.")
         if any(not unit["ref"] or bool(unit["block"]) != is_block for unit in selected):
             raise AgentToolError("A range cannot cross system messages or mix raw messages with blocks")
+        # Upstream #3953/#4521: trim at the protected boundary instead of refusing.
+        protected = self._protected_indices(state)
+        def guarded(unit):
+            return any(index in protected for index in range(unit["start"], unit["end"] + 1))
+        kept = list(selected)
+        while kept and guarded(kept[0]):
+            kept.pop(0)
+        kept = kept[:next((index for index, unit in enumerate(kept) if guarded(unit)), len(kept))]
+        if not kept:
+            warnings.append(f"Range {start_ref}–{end_ref} folded nothing: it lies inside the protected zone (latest user "
+                            f"instruction or recent working tail). Nothing failed; do not resend it. Highest allocated ref is "
+                            f"{self._highest(state)}; target older ranges.")
+            return None
+        if len(kept) != len(selected):
+            warnings.append(f"Range {start_ref}–{end_ref} trimmed to {kept[0]['ref']}–{kept[-1]['ref']}; "
+                            "protected messages stay visible.")
+        return kept, is_block
+
+    def _compress(self, state, entry, created=frozenset(), warnings=None):
+        warnings = [] if warnings is None else warnings
+        located = self._locate(state, entry, created, warnings)
+        if located is None:
+            return None
+        selected, is_block = located
+        summary, topic = entry["summary"], entry.get("topic", "")
+        units = self._units(state)
         low, high = self._expand(selected[0]["start"], selected[-1]["end"])
         if low != selected[0]["start"] or high != selected[-1]["end"]:
             selected = [unit for unit in units if unit["end"] >= low and unit["start"] <= high]
@@ -520,7 +625,16 @@ class BillionContextSession:
                         raise AgentToolError("Tool call ID was already used with different arguments")
                     return json.loads(previous[1])
             if name == "compress":
-                value = {"blocks": [self._compress(state, entry) for entry in self._parse(args.get("content"))]}
+                blocks, warnings = [], []
+                for entry in self._parse(args.get("content")):
+                    block = self._compress(state, entry, {block["id"] for block in blocks}, warnings)
+                    if block:
+                        blocks.append(block)
+                value = {"blocks": blocks}
+                if warnings:
+                    value["warnings"] = warnings
+                if not blocks:
+                    value["noop"] = True
                 self._project(state, self._overhead)
             elif name == "decompress":
                 value = self._decompress(state, args)

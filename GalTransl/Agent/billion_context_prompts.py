@@ -1,4 +1,5 @@
-'''Adapted from acp-kernel compression-rules.ts at billion-context bb7c249.
+'''Adapted from acp-kernel compression-rules.ts at billion-context bb7c249,
+synced with the #5620 media re-access lines at billion-context c26c31a.
 Copyright (c) 2026 ranxianglei. See plugins/billion-context/LICENSE*.
 Generated once during the Python port; no build or runtime Node requirement.'''
 
@@ -20,6 +21,7 @@ KEEP VERBATIM — never paraphrase or abbreviate these:
 - Purpose behind each significant action — preserve not just what was done but why: the hypothesis behind each experiment, the question behind each exploration, the task goal behind each work action. Without purpose, the summary reads as disconnected technical steps with no through-line.
 - Open questions and unresolved TODOs — losing these changes what work appears to remain.
 - Message refs of key anchors (`m00420`, `m00510–m00520`) — they let you or a later reader jump back via decompress to the exact original.
+- Media re-access handles — URLs and file IDs attached to the range (images or files referenced rather than inlined) MUST appear verbatim in the summary: after folding they are the only way to re-access the payload (decompress restores the original message itself). Preserve any `MEDIA REFS` section verbatim — never alter, reorder, or drop its entries.
 
 DROP — extract the signal, discard the vessel:
 - Verbose logs (build/test/`npm` output) once you have captured the error line or the result.
@@ -52,6 +54,7 @@ KEEP — these are the only things that survive distillation:
 - Design decisions with architectural impact ("chose compress-as-anchor over synthetic messages because prefix cache").
 - User quotes and task state only as attributed history: keep the source ref with any user quote; never carry an UNVERIFIED tier-1 "CURRENT TASK" claim forward as a live directive — relabel it "TASK AS OF THIS BLOCK". A ref-backed objective that no later source marks completed or superseded is not unverified: it carries in the `Open objectives:` entry (next bullet), not as a directive.
 - Open objectives — if ANY source block's summary names a user-requested objective that no later source block marks completed or superseded, the distilled summary MUST keep a one-line `Open objectives:` entry re-carrying each still-open objective verbatim with its original ref. They are the last thing to drop and the first thing to restore.
+- Media re-access handles — carry every entry of any source block's `MEDIA REFS` section verbatim (URLs/file IDs are re-access handles, not detail to distill away).
 - Whether content is OBSOLETE or SUPERSEDED — mark with one line: "[SUPERSEDED by PR #NNN]" or "[OBSOLETE: deleted in vX.Y.Z]". Do NOT keep the obsolete content's details — just the marker and reason.
 - Function/class/type names and module paths that are the SUBJECT of the work — e.g., "fixed filterCompressedRanges in prune.ts", "added SessionStateRegistry in state.ts". Not exact line numbers or full signatures — just enough to LOCATE the code without searching.
 - Exploration findings: if a block was exploratory with no decision, keep the CONCLUSION in one line ("explored X, not viable because Y"). Do not keep the exploration process.
@@ -82,6 +85,7 @@ PRIORITY — when a source block has more facts than the size target allows, kee
 2. Open work — PRs/issues still pending AND still-open user-requested objectives (re-carry any source block's `Open objectives:` entries verbatim); these may need follow-up.
 3. Key decisions with architectural impact ("chose X over Y because Z").
 4. Critical constraints ("must support Node 22").
+5. Media re-access handles — carry any source block's `MEDIA REFS` entries verbatim when present; handles must survive condensation.
 Drop everything else. Tier 3 is a lookup index, not a knowledge base.
 
 FORMAT:
@@ -128,6 +132,7 @@ KEEP VERBATIM — never paraphrase or abbreviate these:
 - Purpose behind each significant action — preserve not just what was done but why: the hypothesis behind each experiment, the question behind each exploration, the task goal behind each work action. Without purpose, the summary reads as disconnected technical steps with no through-line.
 - Open questions and unresolved TODOs — losing these changes what work appears to remain.
 - Message refs of key anchors (`m00420`, `m00510–m00520`) — they let you or a later reader jump back via decompress to the exact original.
+- Media re-access handles — URLs and file IDs attached to the range (images or files referenced rather than inlined) MUST appear verbatim in the summary: after folding they are the only way to re-access the payload (decompress restores the original message itself). Preserve any `MEDIA REFS` section verbatim — never alter, reorder, or drop its entries.
 
 DROP — extract the signal, discard the vessel:
 - Verbose logs (build/test/`npm` output) once you have captured the error line or the result.

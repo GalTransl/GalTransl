@@ -135,16 +135,86 @@ def test_failed_batch_rolls_back_blocks_ids_and_receipts(plugin):
 
 
 @pytest.mark.parametrize("start,end,summary", [
-    ("m00018", "m00018", "recent tail" * 10),
     ("m00006", "m00001", "reversed range" * 10),
     ("m99999", "m99999", "unknown refs" * 10),
+    ("m00001", "b1", "mixed kinds" * 10),
     ("m00001", "m00002", "short"),
     ("m00001", "m00001", "大" * 19000),
-], ids=["protected", "reversed", "unknown", "short", "nonshrinking"])
-def test_invalid_nonshrinking_and_protected_ranges_leave_history(plugin, start, end, summary):
+], ids=["reversed", "unknown", "mixed-kinds", "short", "nonshrinking"])
+def test_invalid_and_nonshrinking_ranges_leave_history(plugin, start, end, summary):
     with pytest.raises(AgentToolError):
         fold(plugin, start, end, summary)
     assert plugin.status()["activeBlockCount"] == 0
+
+
+def noop(plugin, content):
+    result = unpack(plugin.call("compress", {"content": content}))
+    assert result["noop"] is True and result["blocks"] == []
+    return result["warnings"]
+
+
+SUMMARY = "保留用户目标、关键路径与决定；已完成历史检查，剩余工作仍待处理。" * 4
+
+
+def test_folded_and_protected_ranges_are_successful_noops(plugin):
+    assert "protected zone" in noop(plugin, f"m00018–m00018 tail\n{SUMMARY}")[0]
+    assert plugin.status()["activeBlockCount"] == 0
+    fold(plugin, "m00001", "m00004")
+    warning = noop(plugin, f"m00002–m00003 resend\n{SUMMARY}")[0]
+    assert "already covered by b1" in warning and "do not resend" in warning
+    # A resend that also reaches new history skips only the covered prefix.
+    result = unpack(plugin.call("compress", {"content": f"m00001–m00006 next\n{SUMMARY}"}))
+    assert result["blocks"][0]["startId"] == "m00005" and "already covered by b1" in result["warnings"][0]
+    assert plugin.status()["activeBlockCount"] == 2
+
+
+def test_ranges_clamp_to_allocated_refs_and_trim_at_the_protected_tail(plugin):
+    status = plugin.status()
+    assert status["highestRef"] == "m00018"
+    tail_start = status["compressibleRanges"][-1]["endId"]
+    result = unpack(plugin.call("compress", {"content": f"m00010–m00500 later\n{SUMMARY}"}))
+    assert result["blocks"][0]["endId"] == tail_start
+    assert any("clamped to m00018" in item for item in result["warnings"])
+    assert any("trimmed" in item for item in result["warnings"])
+    plugin.context_window = 12000
+    assert "Highest allocated ref is m00018" in plugin.project(history())[-1]["content"]
+
+
+def test_blocks_inside_a_raw_range_are_rejected_without_folding(plugin):
+    fold(plugin, "m00003", "m00004")
+    with pytest.raises(AgentToolError, match="mixes raw messages"):
+        fold(plugin, "m00001", "m00006")
+    assert plugin.status()["activeBlockCount"] == 1
+
+
+def test_multi_range_batch_judges_the_summary_floor_combined(plugin):
+    content = f"m00001–m00002 a\n短摘要：用户目标。\nm00003–m00004 b\n{SUMMARY}"
+    assert [block["id"] for block in unpack(plugin.call("compress", {"content": content}))["blocks"]] == ["b1", "b2"]
+    with pytest.raises(AgentToolError, match="combined"):
+        plugin.call("compress", {"content": "m00005–m00006 a\n短。\nm00007–m00008 b\n也短。"})
+    with pytest.raises(AgentToolError, match="missing summary"):
+        plugin.call("compress", {"content": f"m00005–m00006 empty\nm00007–m00008 b\n{SUMMARY}"})
+    assert plugin.status()["activeBlockCount"] == 2
+
+
+@pytest.mark.parametrize("content", [
+    f"m00001..m00002 dots\n{SUMMARY}",
+    f"m00001...m00002 dots\n{SUMMARY}",
+    f"M1 to m2 words\n{SUMMARY}",
+    f"m00001~m00002 tilde\n{SUMMARY}",
+    f"```text\nm00001－m00002 fenced\n{SUMMARY}\n```",
+    json.dumps(f"m00001–m00002 encoded\n{SUMMARY}", ensure_ascii=False),
+    json.dumps({"startId": "m1", "endId": "m00002", "summary": SUMMARY}, ensure_ascii=False),
+    [f"m00001–m00002 array\n{SUMMARY}"],
+], ids=["two-dots", "three-dots", "to", "tilde", "fence", "encoded-string", "encoded-object", "string-array"])
+def test_parser_accepts_upstream_header_and_encoding_variants(plugin, content):
+    block = unpack(plugin.call("compress", {"content": content}))["blocks"][0]
+    assert (block["startId"], block["endId"]) == ("m00001", "m00002")
+
+
+def test_compress_schema_advertises_one_string_form():
+    compress = next(tool for tool in BillionContextSession.tools if tool["function"]["name"] == "compress")
+    assert compress["function"]["parameters"]["properties"]["content"]["type"] == "string"
 
 
 def test_cancel_during_transaction_rolls_back(plugin, monkeypatch):
@@ -566,8 +636,7 @@ def test_pending_tool_batch_does_not_archive_placeholders(tmp_path, runner_type,
 def test_current_user_is_pinned_without_locking_completed_tool_exchanges(working_plugin):
     source = tool_history()
     working_plugin.project(source)
-    with pytest.raises(AgentToolError, match="protected"):
-        fold(working_plugin, "m00001", "m00009")
+    assert "protected zone" in noop(working_plugin, f"m00001–m00001 anchor\n{SUMMARY}")[0]
     assert working_plugin.status()["compressibleRanges"][0]["startId"] == "m00002"
     assert working_plugin.recovery_candidate()["startId"] == "m00002"
     block = fold(working_plugin, "m00003", "m00009")
@@ -575,6 +644,13 @@ def test_current_user_is_pinned_without_locking_completed_tool_exchanges(working
     projected = working_plugin.project(source)
     assert any(message.get("content") == "[m00001]\n" + source[1]["content"] for message in projected)
     assert source == tool_history()
+
+
+def test_range_over_the_pinned_user_anchor_is_trimmed_not_refused(working_plugin):
+    working_plugin.project(tool_history())
+    result = unpack(working_plugin.call("compress", {"content": f"m00001–m00009 reads\n{SUMMARY}"}))
+    assert result["blocks"][0]["startId"] == "m00002" and "trimmed" in result["warnings"][0]
+    assert "[m00001]" in str(working_plugin.project(tool_history()))
 
 
 def test_tool_images_do_not_replace_the_user_anchor(tmp_path, monkeypatch):
@@ -587,8 +663,7 @@ def test_tool_images_do_not_replace_the_user_anchor(tmp_path, monkeypatch):
     try:
         runner._resolve_llm()
         runner._estimate_context_tokens()
-        with pytest.raises(AgentToolError, match="protected"):
-            fold(runner._billion_context, "m00001", "m00009")
+        assert "protected zone" in noop(runner._billion_context, f"m00001–m00001 anchor\n{SUMMARY}")[0]
         assert runner._billion_context.status()["compressibleRanges"][0]["startId"] == "m00002"
         runner._create_stream(include_usage=True)
         messages = create.call_args.kwargs["messages"]
