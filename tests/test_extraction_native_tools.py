@@ -501,15 +501,42 @@ def test_bash_bundled_python_rejects_invalid_options(fixture, monkeypatch, argum
 
 
 @pytest.mark.skipif(os.name != 'nt', reason='Windows drive-relative POSIX paths')
-def test_bash_scratch_dir_lives_in_the_session(fixture):
+def test_bash_scratch_dir_lives_in_the_workspace(fixture):
+    """Scratch files go to <workspace>/tmp, not the session or system Temp: they are
+    not reliably cleaned up and must stay visible and off the system drive."""
     runner, _ = fixture
     runner.tools.approve = lambda *args: None
-    scratch = (runner.tools.session_dir / 'tmp').resolve()
+    scratch = (runner.tools.workspace / 'tmp').resolve()
     lines = text(runner._dispatch_tool('bash', {'command': 'echo "$TMPDIR"; mktemp'})).splitlines()
     assert Path(lines[0]).resolve() == scratch
     assert Path(lines[1]).parent == scratch and Path(lines[1]).is_file()
     assert runner.tools.read_path(lines[1]) == Path(lines[1])
-    assert not (runner.tools.workspace / 'tmp').exists()
+    assert runner.tools.write_path(str(scratch / 'driver.py')) == scratch / 'driver.py'
+    assert not (runner.tools.session_dir / 'tmp').exists()
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='TMPDIR is only overridden on Windows')
+def test_run_python_tempfile_shares_the_bash_scratch_dir(fixture):
+    """Regression: run_python's tempfile used the system Temp while bash used another
+    scratch dir, so the model looked for staged output in the wrong directory."""
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    scratch = (runner.tools.workspace / 'tmp').resolve()
+    output = text(runner._dispatch_tool('run_python', {'code': 'import tempfile; print(tempfile.gettempdir())'}))
+    assert Path(output.strip()).resolve() == scratch
+
+
+def test_write_outside_workspace_names_the_workspace(fixture):
+    """Regression: the shared read-scope error mentioned session directories, so the
+    model retried writes there; writes must point at the output workspace."""
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    target = runner.tools.session_dir / 'driver.py'
+    with pytest.raises(AgentToolError) as error:
+        runner._dispatch_tool('write', {'path': str(target), 'content': 'x'})
+    message = str(error.value)
+    assert runner.tools.workspace.as_posix() in message and 'session' not in message
+    assert not target.exists()
 
 
 @pytest.mark.skipif(os.name != 'nt', reason='Windows shell drive aliases')

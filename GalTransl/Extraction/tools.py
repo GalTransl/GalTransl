@@ -102,14 +102,14 @@ def bash_config():
     return ("/bin/bash" if Path("/bin/bash").is_file() else shutil.which("bash") or "sh"), ["-c"]
 
 
-def checked_path(raw, workspace, roots, allow_missing=False):
+def checked_path(raw, workspace, roots, allow_missing=False, outside=None):
     if not isinstance(raw, str) or not raw or "\0" in raw:
         raise AgentToolError("A file path is required")
     target = Path(os.path.abspath(Path(workspace) / raw))
     permitted = sorted((Path(root).resolve(strict=True) for root in roots), key=lambda root: len(str(root)), reverse=True)
     root = next((root for root in permitted if target.is_relative_to(root)), None)
     if root is None:
-        raise AgentToolError("Path is outside the permitted game, Skill, output or session directories")
+        raise AgentToolError(outside or "Path is outside the permitted game, Skill, output or session directories")
     current = root
     for part in target.relative_to(root).parts:
         current /= part
@@ -149,7 +149,12 @@ class ExtractionTools:
         return checked_path(raw, self.workspace, [self.workspace, self.game, *self.skill_dirs, self.session_dir])
 
     def write_path(self, raw):
-        return checked_path(raw, self.workspace, [self.workspace], True)
+        # The shared read-scope message names the session directory, which made the
+        # model retry writes there; say exactly where writes may go instead.
+        return checked_path(raw, self.workspace, [self.workspace], True, outside=(
+            f"Path is outside the output workspace {self.workspace.as_posix()}; write and edit only accept paths inside it. "
+            "Put scratch scripts under its tmp/ subdirectory (remove them when done), "
+            "or pass code inline to run_python."))
 
     def save(self, target, text):
         if self.stop_event.is_set():

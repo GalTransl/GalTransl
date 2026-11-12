@@ -36,7 +36,7 @@ EXTRACTION_TOOLS = [
           "args": {"type": "array", "maxItems": 16, "items": {"type": "string", "maxLength": 1024}},
           "timeout_seconds": TIMEOUT}),
     tool("bash", "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds."
-         + (" On Windows this uses BusyBox sh: use POSIX syntax and $TMPDIR for scratch files; arrays, [[ ]] and C-style for are unavailable. cd accepts drive paths like /e/x, /mnt/e/x and /cygdrive/e/x; use E:/x for other commands' path arguments." if os.name == "nt" else "")
+         + (" On Windows this uses BusyBox sh: use POSIX syntax and $TMPDIR (the output workspace's tmp/, shared with run_python; delete scratch files when done) for scratch files; arrays, [[ ]] and C-style for are unavailable. cd accepts drive paths like /e/x, /mnt/e/x and /cygdrive/e/x; use E:/x for other commands' path arguments." if os.name == "nt" else "")
          + " python and python3 use GalTransl's bundled executor with UTF-8 output. Supports -c, -m, script files, stdin, -B, -u and version queries. All registered Skill directories are already on sys.path; import their modules directly. $GALTRANSL_SKILL_DIR provides the selected Skills root. Use run_python with runtime=system when a dependency is unavailable.",
          {"command": {"type": "string", "description": "Shell command to execute"},
           "timeout": {"type": "number", "description": "Timeout in seconds (optional, no default timeout)"}}, ["command"]),

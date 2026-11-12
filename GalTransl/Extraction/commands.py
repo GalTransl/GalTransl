@@ -43,6 +43,30 @@ class Commands:
     def execute(self, executable, args, call_id, timeout=120, request=None, *, native=False):
         if self.stop_event.is_set():
             raise AgentStopRequested()
+        if os.name != "nt":
+            return self._execute(executable, args, call_id, timeout, request, native=native)
+        from .tools import checked_path
+        # BusyBox resolves /tmp against the working drive (E:\tmp), so hand the
+        # shell a scratch directory. It lives in the output workspace rather than
+        # the session or system Temp: scratch files are not reliably cleaned up,
+        # and there they stay visible to the user and off the system drive, and
+        # write/edit can reach them. run_python gets the same one so bash's and
+        # run_python's tempfile agree. The Skill's write_new_tree tolerates this
+        # unrelated entry in the output root.
+        scratch = checked_path("tmp", self.workspace, [self.workspace], True)
+        scratch.mkdir(parents=True, exist_ok=True)
+        scratch = checked_path(str(scratch), self.workspace, [self.workspace])
+        try:
+            return self._execute(executable, args, call_id, timeout, request, native=native, scratch=scratch)
+        finally:
+            # Leave no trace when the command created nothing (read-only commands
+            # keep an empty output directory); rmdir only succeeds if empty.
+            try:
+                scratch.rmdir()
+            except OSError:
+                pass
+
+    def _execute(self, executable, args, call_id, timeout, request, *, native, scratch=None):
         from .tools import checked_path
         log_path = self.session_dir / "tmp" / f"command-{uuid.uuid4().hex}.log"
         env = external_environment()
@@ -54,13 +78,8 @@ class Commands:
                     env["LD_LIBRARY_PATH"] = os.environ["LD_LIBRARY_PATH_ORIG"]
                 else:
                     env.pop("LD_LIBRARY_PATH", None)
-            if os.name == "nt":
-                # BusyBox resolves /tmp against the working drive (E:\tmp), so hand the
-                # shell a session scratch directory the file tools can reach.
-                scratch = checked_path("tmp", self.session_dir, [self.session_dir], True)
-                scratch.mkdir(parents=True, exist_ok=True)
-                scratch = checked_path(str(scratch), self.session_dir, [self.session_dir])
-                env["TMPDIR"] = scratch.as_posix()
+        if scratch is not None:
+            env["TMPDIR"] = scratch.as_posix()
         env.update(PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
         python = self.available["builtin_python"]
         if not native:
