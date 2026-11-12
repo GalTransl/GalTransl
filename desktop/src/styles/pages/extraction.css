@@ -1,5 +1,8 @@
 /* Shared console, messages, tools and composer come from agent.css. */
-.extract-page { color: var(--color-text); font-size: 13px; }
+.extract-page { position: relative; color: var(--color-text); font-size: 13px; }
+/* Shown while a folder is dragged over the page; never intercepts the drop itself. */
+.extract-page-drop { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; padding: 12px; background: color-mix(in srgb, var(--color-bg) 70%, transparent); pointer-events: none; }
+.extract-page-drop > div { display: flex; align-items: center; gap: 10px; padding: 22px 30px; border: 2px dashed var(--color-primary); border-radius: 16px; background: var(--color-primary-soft); color: var(--color-primary); font-size: 15px; font-weight: 600; }
 /* The header spans both columns, keeping its controls still as the workspace moves. */
 .extract-content { --extract-workspace-width: 285px; position: relative; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
 .extract-content > .agent-console__bar { grid-column: 1 / -1; flex-wrap: nowrap; }

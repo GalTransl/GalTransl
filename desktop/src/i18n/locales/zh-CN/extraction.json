@@ -12,6 +12,7 @@
   "gameDir": "游戏目录",
   "directoryDropHint": "将游戏目录拖入此处，或点击“选择”。",
   "directoryDropError": "请一次拖入一个游戏目录；无法读取路径时请点击“选择”。",
+  "pageDropHint": "松开鼠标，用这个游戏目录新建提取",
   "outputDir": "输出目录（可选）",
   "outputHint": "留空时使用游戏目录内的「游戏名_extract」文件夹",
   "browse": "选择",

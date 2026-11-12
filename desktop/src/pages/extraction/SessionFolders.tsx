@@ -15,6 +15,12 @@ export function gameFolderKey(directory: string): string {
   return /^[a-z]:/i.test(path) || path.startsWith('//') ? path.toLowerCase() : path;
 }
 
+/** The session listed first under an open game folder, if that folder is in the list. */
+export function firstSessionInFolder(sessions: Session[], directory: string): Session | undefined {
+  const key = gameFolderKey(directory);
+  return sessions.find(session => gameFolderKey(session.game_dir) === key);
+}
+
 export function SessionFolders({ sessions, selected, activeSession, onSelect, onCreateInFolder, onDeleteSession, onCloseFolder, runningDirectories = [], busy }: {
   sessions: Session[]; selected: string; activeSession?: Session; onSelect: (id: string) => void;
   onCreateInFolder: (directory: string) => void; onDeleteSession: (session: Session) => void;

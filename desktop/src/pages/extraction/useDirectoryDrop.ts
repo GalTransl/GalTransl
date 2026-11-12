@@ -5,20 +5,32 @@ import { usePageActive } from '../../components/PageActivity';
 import { isAbsolutePath, normalizeFileUriPath } from '../../lib/paths';
 import { x } from './labels';
 
-/** Native drops provide absolute paths; browser drops must also expose a real path. */
-export function useDirectoryDrop(onSelect: (path: string) => void, disabled: boolean) {
+const inside = (bounds: DOMRect | undefined, px: number, py: number) => Boolean(bounds
+  && px >= bounds.left && px <= bounds.right && py >= bounds.top && py <= bounds.bottom);
+const carriesPath = (transfer: DataTransfer) => ['Files', 'text/uri-list'].some(type => Array.from(transfer.types).includes(type));
+
+/** Native drops provide absolute paths; browser drops must also expose a real path.
+ *  `exclude` leaves a nested drop zone (the composer's image drop) to its own handler. */
+export function useDirectoryDrop(onSelect: (path: string) => void, disabled: boolean,
+  options: { exclude?: string; initialError?: string; onError?: (message: string) => void } = {}) {
   const active = usePageActive();
   const target = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(options.initialError || '');
+  const { exclude } = options;
   const select = (paths: string[]) => {
     setDragging(false);
     if (!active || disabled) return;
-    if (paths.length !== 1 || !isAbsolutePath(paths[0])) { setError(x('directoryDropError')); return; }
+    if (paths.length !== 1 || !isAbsolutePath(paths[0])) {
+      const message = x('directoryDropError');
+      setError(message); options.onError?.(message);
+      return;
+    }
     setError('');
     onSelect(paths[0]);
   };
   const selectRef = useRef(select); selectRef.current = select;
+  const excluded = (event: DragEvent<HTMLDivElement>) => Boolean(exclude && (event.target as Element).closest?.(exclude));
 
   useEffect(() => {
     setDragging(false);
@@ -27,22 +39,22 @@ export function useDirectoryDrop(onSelect: (path: string) => void, disabled: boo
     const listener = getCurrentWebviewWindow().onDragDropEvent(({ payload }) => {
       if (disposed) return;
       if (payload.type === 'leave') { setDragging(false); return; }
-      const bounds = target.current?.getBoundingClientRect();
       const ratio = window.devicePixelRatio || 1;
-      const { x: px, y: py } = payload.position;
-      const within = bounds && px / ratio >= bounds.left && px / ratio <= bounds.right
-        && py / ratio >= bounds.top && py / ratio <= bounds.bottom;
-      setDragging(Boolean(within) && payload.type !== 'drop');
+      const px = payload.position.x / ratio, py = payload.position.y / ratio;
+      const within = inside(target.current?.getBoundingClientRect(), px, py)
+        && !(exclude && inside(target.current?.querySelector(exclude)?.getBoundingClientRect(), px, py));
+      setDragging(within && payload.type !== 'drop');
       if (within && payload.type === 'drop') selectRef.current(payload.paths);
     });
     void listener.catch(() => { /* The path picker remains available. */ });
     return () => { disposed = true; void listener.then(unlisten => unlisten()).catch(() => {}); };
-  }, [active, disabled]);
+  }, [active, disabled, exclude]);
 
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (excluded(event)) { setDragging(false); return; }
     event.preventDefault(); event.stopPropagation();
     setDragging(false);
-    if (!active || disabled) return;
+    if (!active || disabled || !carriesPath(event.dataTransfer)) return;
     const items = Array.from(event.dataTransfer.items || []);
     // Chromium exposes the kind of a dropped entry even without its absolute path.
     if (items.some(item => item.webkitGetAsEntry?.()?.isFile)) { setError(x('directoryDropError')); return; }
@@ -56,6 +68,8 @@ export function useDirectoryDrop(onSelect: (path: string) => void, disabled: boo
   return { target, dragging, error, handlers: {
     onDrop,
     onDragOver: (event: DragEvent<HTMLDivElement>) => {
+      // Text selections and other in-page drags carry no folder path.
+      if (excluded(event) || !carriesPath(event.dataTransfer)) { setDragging(false); return; }
       event.preventDefault(); event.stopPropagation();
       event.dataTransfer.dropEffect = active && !disabled ? 'copy' : 'none';
       setDragging(active && !disabled);

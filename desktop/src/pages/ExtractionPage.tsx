@@ -20,7 +20,8 @@ import { moveMessageDraft, useMessageDraft } from './agent/drafts';
 import { ExtractionComposer } from './extraction/Composer';
 import { useImageInput, imageUploads } from './agent/images';
 import { useModelProfile } from './extraction/useModelProfile';
-import { gameFolderKey, SessionFolders } from './extraction/SessionFolders';
+import { useDirectoryDrop } from './extraction/useDirectoryDrop';
+import { firstSessionInFolder, gameFolderKey, SessionFolders } from './extraction/SessionFolders';
 import { StatusPill } from './agent/composer';
 import { liveActivityDisclosures } from './agent/uiState';
 import { MessageQueue } from './agent/MessageQueue';
@@ -40,11 +41,19 @@ export function ExtractionPage() {
   const [editingQueued, setEditingQueued] = useState<{ id: string; text: string } | null>(null);
   useEffect(() => setEditingQueued(null), [agent.selected]);
   const [dialog, setDialog] = useState<'create' | 'environment' | null>(null);
+  const [dropped, setDropped] = useState({ game: '', error: '' });
+  const openCreate = (game = '', error = '') => { setDropped({ game, error }); setDialog('create'); };
   const [draft, setDraft] = useMessageDraft(DRAFT_SCOPE, agent.selected);
   const [showWorkspace, setShowWorkspace] = useState(rememberedWorkspace);
   const toggleWorkspace = () => { const next = !showWorkspace; rememberWorkspace(next); setShowWorkspace(next); };
   const textarea = useRef<HTMLTextAreaElement>(null);
   const imageInput = useImageInput(`extraction::${agent.selected}`, textarea, agent.busy || dialog !== null);
+  // A folder dropped anywhere on the page jumps to its first session when the game is already open,
+  // otherwise opens the new-extraction dialog prefilled; the composer keeps its image drop.
+  const pageDrop = useDirectoryDrop(path => {
+    const existing = firstSessionInFolder(agent.sessions.sessions, path);
+    if (existing) agent.select(existing.id); else openCreate(path);
+  }, agent.busy || dialog !== null, { exclude: '.agent-composer', onError: message => openCreate('', message) });
   const session = agent.view?.session;
   const selection = useRef({ id: agent.selected, session }); selection.current = { id: agent.selected, session };
   const { models: modelNames, profile, boundProfile, defaultProfile, setProfile, moveProfile } = useModelProfile(session, agent.selected);
@@ -98,7 +107,7 @@ export function ExtractionPage() {
     const message = draft.trim();
     const sentImages = imageInput.images;
     if ((!message && !sentImages.length) || imageInput.processing || agent.busy || !profile || !ready) return;
-    if (!session) { setDialog('create'); return; }
+    if (!session) { openCreate(); return; }
     const result = await agent.mutate('message', { message, images: imageUploads(sentImages), profile: getBackendProfile(profile), profile_name: boundProfile, permission_mode: mode });
     if (result) {
       imageInput.removeSent(sentImages);
@@ -116,7 +125,7 @@ export function ExtractionPage() {
     addProjectToHistory(result.project_dir, result.config_file_name);
     navigate(`/project/${encodeProjectDir(result.project_dir)}/translate`);
   };
-  return <div className={`agent-console extract-page ${showWorkspace && session ? 'extract-page--workspace' : ''}`}>
+  return <div ref={pageDrop.target} className={`agent-console extract-page ${showWorkspace && session ? 'extract-page--workspace' : ''}`} {...pageDrop.handlers}>
     <aside className="agent-sessions extract-sessions">
       <header className="agent-sessions__head"><span className="agent-sessions__title">{x('sessions')} · {agent.sessions.total}</span>
         <button type="button" className="agent-sessions__new" disabled={agent.busy || !agent.selected} onClick={showHome} title={x('newSession')} aria-label={x('newSession')}><Icon name="plus" size={12} /></button>
@@ -147,9 +156,9 @@ export function ExtractionPage() {
       <main className="agent-console__main agent-cockpit extract-main">
       {!session || !agent.view?.rows.length ? <div className="agent-console__thread extract-welcome"><div className="agent-thread"><div className="agent-hero">
         <div className="agent-hero__mark"><Icon name="agent-extract" /></div><h2 className="agent-hero__title">{session ? session.title : x('startTitle')}</h2><p className="agent-hero__subtitle">{x('startText')}</p>
-        <div className="agent-hero__steps">{(['quickExtract', 'quickCheck', 'quickReinsert'] as const).map(key => <button type="button" className="agent-hero__step" key={key} onClick={() => { setDraft(x(key)); if (!session) setDialog('create'); else textarea.current?.focus(); }}><span className="agent-hero__step-icon"><Icon name="sparkle" /></span>{x(key)}</button>)}</div>
+        <div className="agent-hero__steps">{(['quickExtract', 'quickCheck', 'quickReinsert'] as const).map(key => <button type="button" className="agent-hero__step" key={key} onClick={() => { setDraft(x(key)); if (!session) openCreate(); else textarea.current?.focus(); }}><span className="agent-hero__step-icon"><Icon name="sparkle" /></span>{x(key)}</button>)}</div>
         <div className="agent-hero__project-panel">{session ? <div className="extract-welcome-source" title={session.game_dir}><Icon name="folder" />{session.game_dir}</div>
-          : <><span className="agent-hero__open-projects-label">{x('chooseSource')}</span><div className="agent-hero__actions"><button type="button" className="agent-hero__action" disabled={agent.busy} onClick={() => setDialog('create')}><Icon name="folder" />{x('newSession')}</button></div></>}
+          : <><span className="agent-hero__open-projects-label">{x('chooseSource')}</span><div className="agent-hero__actions"><button type="button" className="agent-hero__action" disabled={agent.busy} onClick={() => openCreate()}><Icon name="folder" />{x('newSession')}</button></div></>}
         </div>
       </div></div></div> : <Conversation rows={agent.view.rows} motionEvents={agent.view.motionEvents} sessionId={session.id} running={running} status={session.status} pending={agent.view.pending} older={agent.view.has_more} beforeSeq={agent.view.before_seq} loadingOlder={agent.loadingOlder} activityPrefix={agent.view.activity_prefix} loadOlder={agent.loadOlder} />}
       <div className="agent-console__composer extract-bottom">
@@ -166,7 +175,7 @@ export function ExtractionPage() {
           send={() => void send()} stop={() => {
             liveActivityDisclosures.get(`extraction::${agent.selected}`)?.();
             void agent.mutate('stop', {});
-          }} chooseSource={() => setDialog('create')} configure={() => navigate('/backend-profiles')} />
+          }} chooseSource={() => openCreate()} configure={() => navigate('/backend-profiles')} />
         {!modelNames.length && <div className="extract-hint">{x('noModel')} <button type="button" className="extract-text-button" onClick={() => navigate('/backend-profiles')}>{x('configureModel')}</button></div>}
         {session && !ready && <div className="extract-hint"><button type="button" className="extract-text-button" onClick={() => setDialog('environment')}>{x('setup')}</button></div>}
       </div>
@@ -175,7 +184,8 @@ export function ExtractionPage() {
         <Workspace key={session.id} session={session} refresh={toolCount} running={running} importProject={() => void importProject()} busy={agent.busy} />
       </div>}
     </div>
-    <AnimatePresence>{dialog === 'create' && <CreateDialog key="create" close={() => setDialog(null)} create={create} busy={agent.busy} />}</AnimatePresence>
+    <AnimatePresence>{dialog === 'create' && <CreateDialog key="create" close={() => setDialog(null)} create={create} busy={agent.busy} initialGame={dropped.game} initialError={dropped.error} />}</AnimatePresence>
+    {pageDrop.dragging && <div className="extract-page-drop" aria-hidden><div><Icon name="folder" />{x('pageDropHint')}</div></div>}
     <AnimatePresence>{dialog === 'environment' && <EnvironmentDialog key="environment" initial={agent.environment} refresh={agent.refreshEnvironment} close={() => setDialog(null)} saved={agent.setEnvironment} projectDir={session?.game_dir ?? ''} />}</AnimatePresence>
   </div>;
 }

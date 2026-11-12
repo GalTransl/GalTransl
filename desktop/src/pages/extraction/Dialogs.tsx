@@ -29,11 +29,15 @@ export function PathField({ label, value, onChange, directory = true }: { label:
   };
   return <div className="extract-field"><label htmlFor={id}>{label}</label><div><input id={id} value={value} onChange={event => onChange(event.target.value)} autoComplete="off" /><button type="button" onClick={() => void browse()}>{x('browse')}</button></div>{error && <small role="alert">{error}</small>}</div>;
 }
-export function CreateDialog({ close, create, busy }: { close: () => void; create: (game: string, output: string) => Promise<void>; busy: boolean }) {
+export function CreateDialog({ close, create, busy, initialGame = '', initialError = '' }: {
+  close: () => void; create: (game: string, output: string) => Promise<void>; busy: boolean;
+  /** A folder dropped on the page, or the reason that drop could not be used. */
+  initialGame?: string; initialError?: string;
+}) {
   useUiLanguage();
-  const [game, setGame] = useState('');
+  const [game, setGame] = useState(initialGame);
   const [output, setOutput] = useState('');
-  const directoryDrop = useDirectoryDrop(setGame, busy);
+  const directoryDrop = useDirectoryDrop(setGame, busy, { initialError });
   return <Dialog title={x('newSession')} close={close}><form onSubmit={event => { event.preventDefault(); void create(game, output); }}>
     <div ref={directoryDrop.target} className={`extract-directory-drop${directoryDrop.dragging ? ' is-dragging' : ''}`} {...directoryDrop.handlers}>
       <PathField label={x('gameDir')} value={game} onChange={setGame} />

@@ -284,3 +284,12 @@ test('deleting selected sessions selects a remaining sibling and closing folders
   assert.equal(calls.filter(call => call.action === 'session' && call.params.session_id === 'b').length, 1);
   await act(async () => renderer.unmount());
 });
+
+test('a dropped game folder resolves to the first session of its open folder', () => {
+  const load = createTypeScriptLoader({ localStorage: storage(new Map()) });
+  const { firstSessionInFolder } = load(new URL('../src/pages/extraction/SessionFolders.tsx', import.meta.url));
+  const sessions = [fixture('a', 'D:/Games/Other'), fixture('b', 'C:/Games/Tomefure'), fixture('c', 'c:/games/tomefure/')];
+  assert.equal(firstSessionInFolder(sessions, 'C:/GAMES/Tomefure/')?.id, 'b');
+  assert.equal(firstSessionInFolder(sessions, 'C:/Games/Tomefure2'), undefined);
+  assert.equal(firstSessionInFolder([], 'C:/Games/Tomefure'), undefined);
+});
