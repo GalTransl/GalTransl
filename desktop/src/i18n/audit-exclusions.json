@@ -7,6 +7,8 @@
   { "file": "src/pages/agent/composer.tsx", "text": "通过子agent探索全文补齐字典", "reason": "Example instruction inserted into the model prompt." },
   { "file": "src/pages/agent/composer.tsx", "text": "做一下译后流程", "reason": "Example instruction inserted into the model prompt." },
   { "file": "src/pages/agent/composer.tsx", "text": "修一下问题", "reason": "Example instruction inserted into the model prompt." },
+  { "file": "src/pages/agent/composer.tsx", "text": "开始翻译全文", "reason": "Example instruction inserted into the model prompt." },
+  { "file": "src/pages/agent/composer.tsx", "text": "通过子agent校对润色", "reason": "Example instruction inserted into the model prompt." },
   { "file": "src/pages/CommonGuidelinesPage.tsx", "text": "示例（按需增删）：\n\n## 术语与称呼\n- 「お兄ちゃん」统一译作「哥哥」，不要用「老哥」\n\n## 语气与文风\n- 主角内心独白用书面语，不用网络用语\n- 拟声词保留原文的声音感，不意译成\"啪的一声\"", "reason": "Example translation guideline supplied to a model." },
   { "file": "src/pages/project-config/ProjectGuidelineSection.tsx", "text": "示例（按需增删）：\n\n## 术语与称呼\n- 「お兄ちゃん」统一译作「哥哥」，不要用「老哥」\n\n## 语气与文风\n- 主角内心独白用书面语，不用网络用语\n- 拟声词保留原文的声音感，不意译成\"啪的一声\"", "reason": "Example translation guideline supplied to a model." }
 ]

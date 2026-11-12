@@ -3552,6 +3552,11 @@
   transition: background var(--transition-fast), color var(--transition-fast);
 }
 
+/* 项目名常是很长的游戏标题，收窄到与提取页 chip 一致，给模型、权限、快捷指令留出位置 */
+.agent-composer__chip--project {
+  max-width: 190px;
+}
+
 .agent-composer__chip:hover:not(:disabled) {
   background: var(--agent-tile-strong);
   color: var(--color-text);
@@ -3580,6 +3585,20 @@
   position: relative;
   display: inline-flex;
   min-width: 0;
+}
+
+/* 快捷指令悬停即展开：在 chip 和上方菜单之间垫一条透明区，鼠标移过 8px 间隙时菜单不收起 */
+.agent-quick-commands::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  width: 100%;
+  height: 8px;
+}
+
+.agent-quick-commands .agent-profile-menu {
+  min-width: 160px;
 }
 
 .agent-composer__chip.is-open {
@@ -3891,6 +3910,7 @@
   }
 
   .agent-composer__left { flex-wrap: wrap; }
+  .agent-composer__chip--project { max-width: 150px; }
 
   .agent-row--user .agent-bubble--user {
     width: 100%;

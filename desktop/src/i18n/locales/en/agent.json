@@ -369,6 +369,7 @@
     "agentHero_message_agentCountTranslation": "Let the Agent run the whole translation workflow for you",
     "agentHero_message_sendEntrySessionProjectDictionaryTranslationProgress": "Send the first message to start a session. The Agent explores the project on its own, prepares the dictionary, starts the translation, follows the progress, and reviews and fixes the problems it finds. While it runs you can interject at any time or press stop to interrupt it; sending a message afterwards continues in the same session.",
     "agentHeroStep_title_text": "Click to put it in the input box",
+    "agentComposerQuickCommands_label": "Quick commands",
     "agentHeroProjectPanel_message_selectCountDoneOpenProjectStart": "Choose one of the open projects to get started",
     "agentHeroProjectPanel_message_emptyOpenProjectNewOpenCount": "No project is open yet; create or open one below",
     "agentHeroAction_title_fileOpenCountDoneProject": "Open an existing project from a folder",

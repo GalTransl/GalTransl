@@ -68,6 +68,7 @@ import { formatProfileLabel } from '../lib/backendProfile';
 import { removeProjectFromHistory } from './HomePage';
 import { AgentSessionSidebar } from './agent/AgentSessionSidebar';
 import { AGENT_PROMPT_SUGGESTIONS, ContextMeter, SendIcon, StatusPill, StopIcon } from './agent/composer';
+import { QuickCommands } from './agent/QuickCommands';
 import { AgentGroupView } from './agent/rows/AgentGroupView';
 import { ProjectTranslationPreviewProvider } from './agent/ProjectTranslationPreview';
 import { liveActivityDisclosures } from './agent/uiState';
@@ -1668,7 +1669,7 @@ export function AgentPage() {
                 // 会话已经开聊：项目是这次会话的锚点，换它等于换会话——chip 退化成纯标签，
                 // 光标与 hover 底色一并收掉（见 .agent-composer__chip--static），别看着能点
                 <span
-                  className="agent-composer__chip agent-composer__chip--static"
+                  className="agent-composer__chip agent-composer__chip--static agent-composer__chip--project"
                   title={translate("agent:agentPage.agentComposerChipAgentComposerChipStatic_title_sessionDoneStartProjectNewSession", { value: projectDir || translate("agent:agentPage.interpolation_fallback_notSelectedProject") })}
                 >
                   <span className="agent-composer__chip-icon"><Icon name="folder" /></span>
@@ -1679,7 +1680,7 @@ export function AgentPage() {
                 <div className="agent-profile-picker" ref={projectPickerRef}>
                   <button
                     type="button"
-                    className={`agent-composer__chip${projectMenuOpen ? ' is-open' : ''}`}
+                    className={`agent-composer__chip agent-composer__chip--project${projectMenuOpen ? ' is-open' : ''}`}
                     onClick={() => setProjectMenuOpen((v) => !v)}
                     aria-haspopup="menu"
                     aria-expanded={projectMenuOpen}
@@ -1845,6 +1846,12 @@ export function AgentPage() {
                   </div>
                 ) : null}
               </div>
+              {/* 快捷指令：和空态引导里的建议是同一组，开聊后空态消失了也能随时填入 */}
+              <QuickCommands
+                label={translate("agent:agentPage.agentComposerQuickCommands_label")}
+                commands={AGENT_PROMPT_SUGGESTIONS.map((text) => ({ key: text, label: text, prompt: text }))}
+                onPick={applyPromptSuggestion}
+              />
             </div>
             <div className="agent-composer__right">
               {contextUsage && contextUsage.used_tokens > 0 ? (

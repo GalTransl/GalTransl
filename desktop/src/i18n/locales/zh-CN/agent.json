@@ -369,6 +369,7 @@
     "agentHero_message_agentCountTranslation": "让 Agent 替你跑完整个翻译流程",
     "agentHero_message_sendEntrySessionProjectDictionaryTranslationProgress": "发送第一条消息启动会话，它会自主了解项目、准备字典、启动翻译、跟进进度，并复核修复发现的问题。运行中你可以随时插话或点停止打断，之后继续发消息它会在原会话上接着干。",
     "agentHeroStep_title_text": "点击填入输入框",
+    "agentComposerQuickCommands_label": "快捷指令",
     "agentHeroProjectPanel_message_selectCountDoneOpenProjectStart": "选择一个已打开的项目开始",
     "agentHeroProjectPanel_message_emptyOpenProjectNewOpenCount": "还没有打开的项目，从下方新建或打开一个吧",
     "agentHeroAction_title_fileOpenCountDoneProject": "从文件夹打开一个已有项目",

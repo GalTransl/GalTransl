@@ -27,9 +27,7 @@
 .extract-composer .agent-composer__stop:disabled { opacity: .45; cursor: default; transform: none; }
 .extract-composer .agent-composer__stop:disabled:hover { background: var(--agent-tile-strong); color: var(--color-text-muted); }
 .extract-composer .agent-profile-menu { max-height: min(320px, 45vh); overflow-y: auto; }
-.extract-quick-commands::before { content: ''; position: absolute; bottom: 100%; left: 0; width: 100%; height: 8px; }
 .extract-composer .agent-profile-picker:nth-last-child(-n + 2) { flex-shrink: 0; }
-.extract-quick-commands .agent-profile-menu { min-width: 160px; }
 .extract-context-note { display: inline-flex; align-items: center; justify-content: center; color: var(--color-text-muted); width: 28px; height: 28px; }
 .extract-hint { font-size: 11px; text-align: center; color: var(--color-text-muted); margin: 0; }
 .extract-text-button { padding: 2px 4px; border: 0; background: transparent; color: var(--color-primary); font: inherit; cursor: pointer; border-radius: 5px; }

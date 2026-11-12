@@ -85,9 +85,11 @@ export function ContextMeter({ usage }: { usage: AgentContextUsage }) {
    条目写成"能直接当第一条消息发出"的口气，所以文案本身就是提示词。 */
 export const AGENT_PROMPT_SUGGESTIONS = [
   '做一下翻译前准备',
+  '开始翻译全文',
   '通过子agent探索全文补齐字典',
   '做一下译后流程',
   '修一下问题',
+  '通过子agent校对润色',
 ];
 
 export function StatusPill({ status, running, label: customLabel }: { status: string; running: boolean; label?: string }) {
