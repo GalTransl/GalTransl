@@ -109,7 +109,6 @@
   border: 1px solid rgba(191, 208, 226, 0.72);
   border-radius: var(--radius-panel);
   background: var(--color-surface);
-  box-shadow: var(--shadow-panel);
   backdrop-filter: blur(14px);
 }
 

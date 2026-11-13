@@ -52,7 +52,7 @@
   border: 1px solid rgba(191, 208, 226, 0.72);
   border-radius: var(--radius-panel);
   background: var(--color-surface);
-  box-shadow: var(--shadow-panel);
+  /* 不加外阴影，与其他自适应页面的面板一致（见 components/panel.css）。 */
   backdrop-filter: blur(14px);
 }
 

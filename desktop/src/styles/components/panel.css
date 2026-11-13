@@ -65,7 +65,8 @@
   padding: var(--space-6);
   background: var(--color-surface);
   backdrop-filter: blur(14px);
-  box-shadow: var(--shadow-panel);
+  /* 面板不加外阴影，只靠边框：所有页面（含浏览文本、项目字典的外框）保持同一种平面外观。
+     外阴影在 overflow:hidden 的自适应布局里还会被裁成底部一条硬边。 */
 }
 
 .panel__header {
@@ -107,10 +108,6 @@
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  /* Drop the outset shadow: combined with overflow:hidden + tight ancestors
-     it renders as a sharp-edged band at the bottom. The rounded border alone
-     is enough for the adaptive-layout frame. */
-  box-shadow: none;
 }
 
 /* Dict/cache: children manage their own scroll, body just passes through height */
