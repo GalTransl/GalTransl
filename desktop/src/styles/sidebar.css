@@ -280,8 +280,8 @@
   align-items: center;
   gap: var(--space-2);
   width: calc(100% - var(--space-4));
+  /* 行高与上方「首页 / Agent」导航项一致：同样的上下内边距，由内容撑高 */
   padding: var(--space-2) var(--space-4);
-  min-height: 48px;
   margin: 0 var(--space-2);
   border: none;
   border-radius: var(--radius-control);
@@ -340,7 +340,8 @@
   align-items: center;
   justify-content: center;
   width: 26px;
-  height: 26px;
+  /* 24px = 导航项图标（18px 字号）的行盒高度，项目行因此与导航项等高 */
+  height: 24px;
   border-radius: 6px;
   font-size: 17px;
   flex-shrink: 0;
