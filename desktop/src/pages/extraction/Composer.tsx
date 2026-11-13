@@ -39,7 +39,7 @@ export function ExtractionComposer({ draft, setDraft, textarea, session, running
       <div className="agent-composer__left">
         {session ? <span className="agent-composer__chip agent-composer__chip--static" title={session.game_dir}>
           <span className="agent-composer__chip-icon"><Icon name="folder" /></span><span className="agent-composer__chip-label">{session.game_dir.split(/[\\/]/).filter(Boolean).pop()}</span>
-        </span> : <button type="button" className="agent-composer__chip" onClick={chooseSource}><span className="agent-composer__chip-icon"><Icon name="folder" /></span><span className="agent-composer__chip-label">{x('chooseSource')}</span></button>}
+        </span> : <button type="button" className="agent-composer__chip" onClick={chooseSource}><span className="agent-composer__chip-icon"><Icon name="folder" /></span><span className="agent-composer__chip-label">{x('chooseSourceChip')}</span></button>}
         <ComposerSelect icon="settings" label={x('model')} value={profileSelection} onChange={setProfile} disabled={running || busy}
           options={[
             ...(defaultProfile ? [{ value: '', label: t('extraction:followAgentDefault', { profile: formatProfileLabel(defaultProfile, getBackendProfile(defaultProfile)) }) }] : []),
