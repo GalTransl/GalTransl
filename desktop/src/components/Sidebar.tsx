@@ -22,6 +22,7 @@ import {
 import { loadLastProjectTab } from '../lib/projectTabMemory';
 import { basenamePath, joinPath } from '../lib/paths';
 import { Icon, type IconName } from './Icon';
+import { useDragReorder } from './useDragReorder';
 import { InlineFeedback } from './page-state/InlineFeedback';
 import logoUrl from '../assets/logo.png';
 import { readHistory } from '../pages/agent/storage';
@@ -41,50 +42,6 @@ const PROJECT_FOLDERS: Array<{ labelKey: TranslationKey; icon: IconName; subdir:
 const AGENT_POLL_INTERVAL_MS = 3000;
 const EXTRACTION_IDLE_POLL_INTERVAL_MS = 15000;
 const RUNTIME_POLL_INTERVAL_MS = 3000;
-const LONG_PRESS_MS = 350;
-const LONG_PRESS_MOVE_TOLERANCE = 6;
-const DRAG_AUTOSCROLL_EDGE = 32;
-const DRAG_AUTOSCROLL_STEP = 8;
-
-type ProjectDragState = {
-  projectDir: string;
-  fromIndex: number;
-  toIndex: number;
-  offsetY: number;
-  shift: number;
-};
-
-/** 拖拽中各项目组的位移：被拖项跟手，介于起止位置之间的项让出一个身位。 */
-function projectDragTransform(drag: ProjectDragState | null, index: number): string | undefined {
-  if (!drag) return undefined;
-  if (index === drag.fromIndex) return `translateY(${drag.offsetY}px)`;
-  if (drag.fromIndex < drag.toIndex && index > drag.fromIndex && index <= drag.toIndex) {
-    return `translateY(${-drag.shift}px)`;
-  }
-  if (drag.toIndex < drag.fromIndex && index >= drag.toIndex && index < drag.fromIndex) {
-    return `translateY(${drag.shift}px)`;
-  }
-  return undefined;
-}
-
-/** 拖拽结束后浏览器还会补发一次 click（WebView2 下可能晚于下一个宏任务才到），
- *  吞掉它以免误触展开/跳转；直到下一次按下（新手势）或超时才放行。 */
-function suppressNextClick() {
-  const swallow = (event: MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    release();
-  };
-  const release = () => {
-    window.clearTimeout(timer);
-    window.removeEventListener('click', swallow, { capture: true });
-    window.removeEventListener('pointerdown', release, { capture: true });
-  };
-  const timer = window.setTimeout(release, 500);
-  window.addEventListener('click', swallow, { capture: true });
-  window.addEventListener('pointerdown', release, { capture: true });
-}
-
 type RebuildToast = {
   id: number;
   tone: 'error' | 'warning' | 'success';
@@ -215,149 +172,20 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const expandAnimationFrameRef = useRef<Record<string, number>>({});
   const rebuildToastIdRef = useRef(0);
-  // Long-press drag reordering of project groups
-  const [projectDrag, setProjectDrag] = useState<ProjectDragState | null>(null);
+  // 按下拖动排序项目组（与两个 Agent 侧栏共用 useDragReorder）
   const projectNavRef = useRef<HTMLElement>(null);
-  const projectGroupRefs = useRef(new Map<string, HTMLDivElement>());
-  const projectDragCleanupRef = useRef<(() => void) | null>(null);
-
-  // Abort a pending or active drag when the project list changes underneath it, and on unmount.
-  useEffect(() => () => projectDragCleanupRef.current?.(), [openProjects]);
-
-  const handleProjectPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>, projectDir: string) => {
-    if (event.button !== 0 || !event.isPrimary || openProjects.length < 2) return;
-    const target = event.target as HTMLElement;
-    if (
-      !event.currentTarget.contains(target)
-      || !target.closest('[data-project-drag-handle]')
-      || target.closest('.sidebar__project-close, .sidebar__project-confirm-bubble')
-    ) return;
-    const nav = projectNavRef.current;
-    const order = [...openProjects];
-    const fromIndex = order.indexOf(projectDir);
-    if (!nav || fromIndex < 0) return;
-
-    projectDragCleanupRef.current?.();
-    const pointerId = event.pointerId;
-    const startX = event.clientX;
-    const startY = event.clientY;
-    const startScrollTop = nav.scrollTop;
-    let pointerY = startY;
-    let dragging = false;
-    let mids: number[] = [];
-    let shift = 0;
-    let toIndex = fromIndex;
-    let autoScrollFrame = 0;
-    let prevUserSelect = '';
-
-    const update = () => {
-      const offsetY = pointerY - startY + (nav.scrollTop - startScrollTop);
-      const center = mids[fromIndex] + offsetY;
-      let next = fromIndex;
-      for (let i = fromIndex + 1; i < mids.length; i++) if (center > mids[i]) next = i;
-      for (let i = fromIndex - 1; i >= 0; i--) if (center < mids[i]) next = i;
-      toIndex = next;
-      setProjectDrag({ projectDir, fromIndex, toIndex, offsetY, shift });
-    };
-
-    const autoScroll = () => {
-      autoScrollFrame = 0;
-      const rect = nav.getBoundingClientRect();
-      const delta = pointerY < rect.top + DRAG_AUTOSCROLL_EDGE ? -DRAG_AUTOSCROLL_STEP
-        : pointerY > rect.bottom - DRAG_AUTOSCROLL_EDGE ? DRAG_AUTOSCROLL_STEP : 0;
-      if (!delta) return;
-      const before = nav.scrollTop;
-      nav.scrollTop += delta;
-      if (nav.scrollTop === before) return;
-      update();
-      autoScrollFrame = window.requestAnimationFrame(autoScroll);
-    };
-
-    const begin = () => {
-      const rects = order.map((dir) => projectGroupRefs.current.get(dir)?.getBoundingClientRect());
-      if (rects.some((rect) => !rect)) {
-        cleanup();
-        return;
-      }
-      mids = rects.map((rect) => rect!.top + rect!.height / 2);
-      const gap = parseFloat(getComputedStyle(nav).rowGap) || 0;
-      shift = rects[fromIndex]!.height + gap;
-      dragging = true;
-      prevUserSelect = document.body.style.userSelect;
-      document.body.style.userSelect = 'none';
-      window.getSelection()?.removeAllRanges();
+  const projectDrag = useDragReorder({
+    keys: openProjects,
+    onReorder: onReorderProject,
+    onStart: () => {
       setContextMenu(null);
       setConfirmCloseDir(null);
       setConfirmCloseWizard(false);
-      update();
-    };
-
-    const timer = window.setTimeout(begin, LONG_PRESS_MS);
-
-    const handleMove = (e: PointerEvent) => {
-      if (e.pointerId !== pointerId) return;
-      pointerY = e.clientY;
-      if (!dragging) {
-        if (Math.hypot(e.clientX - startX, e.clientY - startY) > LONG_PRESS_MOVE_TOLERANCE) cleanup();
-        return;
-      }
-      e.preventDefault();
-      update();
-      if (!autoScrollFrame) autoScrollFrame = window.requestAnimationFrame(autoScroll);
-    };
-
-    const handleUp = (e: PointerEvent) => {
-      if (e.pointerId !== pointerId) return;
-      const wasDragging = dragging;
-      cleanup();
-      if (!wasDragging) return;
-      suppressNextClick();
-      if (toIndex !== fromIndex) onReorderProject(projectDir, toIndex);
-    };
-
-    const handleCancel = (e: PointerEvent) => {
-      if (e.pointerId === pointerId) cleanup();
-    };
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && dragging) {
-        e.preventDefault();
-        cleanup();
-        suppressNextClick();
-      }
-    };
-
-    const handleScroll = () => {
-      if (dragging) update();
-    };
-
-    const blockNativeDrag = (e: DragEvent) => e.preventDefault();
-
-    function cleanup() {
-      window.clearTimeout(timer);
-      window.cancelAnimationFrame(autoScrollFrame);
-      window.removeEventListener('pointermove', handleMove);
-      window.removeEventListener('pointerup', handleUp);
-      window.removeEventListener('pointercancel', handleCancel);
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('dragstart', blockNativeDrag);
-      nav!.removeEventListener('scroll', handleScroll);
-      if (dragging) {
-        document.body.style.userSelect = prevUserSelect;
-        dragging = false;
-      }
-      setProjectDrag(null);
-      if (projectDragCleanupRef.current === cleanup) projectDragCleanupRef.current = null;
-    }
-
-    window.addEventListener('pointermove', handleMove);
-    window.addEventListener('pointerup', handleUp);
-    window.addEventListener('pointercancel', handleCancel);
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('dragstart', blockNativeDrag);
-    nav.addEventListener('scroll', handleScroll);
-    projectDragCleanupRef.current = cleanup;
-  }, [openProjects, onReorderProject]);
+    },
+    handle: '[data-project-drag-handle]',
+    ignore: '.sidebar__project-close, .sidebar__project-confirm-bubble',
+    container: projectNavRef,
+  });
 
   const pushRebuildToast = useCallback((toast: Omit<RebuildToast, 'id'>) => {
     const id = ++rebuildToastIdRef.current;
@@ -950,7 +778,7 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
         </NavLink>
       </div>
 
-      <nav className={`sidebar__nav${projectDrag ? ' sidebar__nav--dragging' : ''}`} ref={projectNavRef}>
+      <nav className={`sidebar__nav${projectDrag.drag ? ' sidebar__nav--dragging' : ''}`} ref={projectNavRef}>
         {wizardOpen && (
           <div className="sidebar__project-group">
             <div className="sidebar__wizard-header-wrap">
@@ -1009,18 +837,15 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
           const shouldRenderProjectChildren = renderedProjectChildren[projectDir] ?? isProjectExpanded;
           const isProjectChildrenVisible = visibleProjectChildren[projectDir] ?? isProjectExpanded;
           const isConfirming = confirmCloseDir === projectDir;
-          const isDragging = projectDrag?.projectDir === projectDir;
+          const isDragging = projectDrag.drag?.key === projectDir;
 
           return (
             <div
               className={`sidebar__project-group${compactProjectHeaders ? ' sidebar__project-group--compact' : ''}${isDragging ? ' sidebar__project-group--dragging' : ''}`}
               key={projectDir}
-              ref={(node) => {
-                if (node) projectGroupRefs.current.set(projectDir, node);
-                else projectGroupRefs.current.delete(projectDir);
-              }}
-              style={projectDrag ? { transform: projectDragTransform(projectDrag, index) } : undefined}
-              onPointerDown={(event) => handleProjectPointerDown(event, projectDir)}
+              ref={projectDrag.itemRef(projectDir)}
+              style={projectDrag.itemStyle(index)}
+              onPointerDown={(event) => projectDrag.onPointerDown(event, projectDir)}
             >
               {expanded ? (
                 <>

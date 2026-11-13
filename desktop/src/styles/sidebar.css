@@ -254,7 +254,7 @@
   flex-direction: column;
 }
 
-/* 长按项目行拖拽排序：被拖项跟手，其余项平移让位，松手后才真正重排 */
+/* 按下项目行拖拽排序：被拖项跟手，其余项平移让位，松手后才真正重排 */
 .sidebar__nav--dragging {
   cursor: grabbing;
 }

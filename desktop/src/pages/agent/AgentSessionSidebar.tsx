@@ -2,6 +2,11 @@ import { t as translate } from "../../i18n";
 import { useState } from 'react';
 import type { AgentSession as AgentSessionMeta } from '../../lib/api';
 import { useSessionTime } from '../../lib/sessionTime';
+import { previewSessions } from '../../lib/sessionPreview';
+import { applySavedOrder } from '../../lib/dragReorder';
+import { useDragReorder, useSavedOrder } from '../../components/useDragReorder';
+
+const FOLDER_ORDER_KEY = 'galtransl-agent-folder-order';
 import { Icon } from '../../components/Icon';
 import { AgentSettingsButton, AgentSettingsDialog } from '../../components/AgentSettings';
 import { AnimatePresence } from '../../components/UiMotion';
@@ -12,11 +17,6 @@ import { shortName } from './storage';
 /* ── Session sidebar ──
    一个项目下可以有多个会话；这里负责新建、切换、删除。
    标题由后端生成：新建时是占位「新会话」，首条消息发出后变成这条消息。 */
-
-/** 一个项目下的会话再多也只先渲染这么多条：首次打开的开销与"会话总数"脱钩。
- *  后端返回的列表仍是完整的（分组计数、状态灯都用全量），点「显示其余 N 个」
- *  纯本地展开、不再请求。 */
-const SESSION_RENDER_LIMIT = 60;
 
 export function AgentSessionSidebar({
   sessionsByProject,
@@ -55,9 +55,17 @@ export function AgentSessionSidebar({
   const formatSessionTime = useSessionTime();
   const connection = useConnection();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // 哪些项目分组已经点开过「显示其余 N 个」（纯本地状态，不涉及请求）
+  // 哪些项目分组点了「显示更多」（纯本地状态，后端列表本来就是全量，不再请求）
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   const folderMenu = useFolderContextMenu();
+  // 分组顺序：用户拖过就按拖出来的顺序，新出现的项目排最前（只影响这个侧栏，不改全局已打开项目顺序）
+  const folderOrder = useSavedOrder(FOLDER_ORDER_KEY);
+  const orderedProjects = applySavedOrder(projects, folderOrder.order);
+  const folderDrag = useDragReorder({
+    keys: orderedProjects,
+    onReorder: (dir, toIndex) => folderOrder.reorder(orderedProjects, dir, toIndex),
+    handle: '.agent-sessions__group-toggle',
+  });
 
   return (
     <aside className="agent-sessions">
@@ -79,7 +87,7 @@ export function AgentSessionSidebar({
           <div className="agent-sessions__empty">{translate("agent:agentSessionSidebar.agentSessionsEmpty_div_emptyProject")}<span>{translate("agent:agentSessionSidebar.agentSessionsEmpty_message_newOpenCountProjectAgent")}</span>
           </div>
         ) : (
-          projects.map((dir) => {
+          orderedProjects.map((dir, index) => {
             const raw = sessionsByProject[dir];
             const list = raw || [];
             // undefined = 这个项目还没拉过列表（非活动项目是展开时才按需拉的）
@@ -89,17 +97,15 @@ export function AgentSessionSidebar({
             const shortDir = shortName(dir);
             // 该组里还有会话在跑就不给关：收起来就看不到那个蓝灯了，容易忘了它还在跑
             const hasRunning = list.some((s) => s.status === 'running') || (isGroupActive && activeRunning);
-            // 只渲染前 N 条；但当前正在看的那个会话无论多老都要在列表里，
-            // 否则侧边栏上看不出"你在哪"，它的状态灯也没地方挂。
-            const visible = expandedProjects[dir] ? list : list.slice(0, SESSION_RENDER_LIMIT);
-            if (!expandedProjects[dir] && activeSessionId && !visible.some((s) => s.session_id === activeSessionId)) {
-              const active = list.find((s) => s.session_id === activeSessionId);
-              if (active) visible.push(active);
-            }
+            const { visible, hidden, collapsible } = previewSessions(list, Boolean(expandedProjects[dir]), (s) =>
+              s.status === 'running' || (isGroupActive && s.session_id === activeSessionId));
             return (
               <div
                 key={dir}
-                className={`agent-sessions__group${isCollapsed ? ' is-collapsed' : ''}${isGroupActive ? ' is-active' : ''}`}
+                className={`agent-sessions__group${isCollapsed ? ' is-collapsed' : ''}${isGroupActive ? ' is-active' : ''}${folderDrag.drag?.key === dir ? ' is-dragging' : ''}`}
+                ref={folderDrag.itemRef(dir)}
+                style={folderDrag.itemStyle(index)}
+                onPointerDown={(event) => folderDrag.onPointerDown(event, dir)}
               >
                 <div className="agent-sessions__group-head" onContextMenu={(e) => folderMenu.onContextMenu(e, dir)}>
                   <button
@@ -217,12 +223,14 @@ export function AgentSessionSidebar({
                           );
                         })
                       )}
-                      {list.length > visible.length ? (
+                      {hidden > 0 || collapsible ? (
                         <button
                           type="button"
                           className="agent-sessions__show-more"
-                          onClick={() => setExpandedProjects((prev) => ({ ...prev, [dir]: true }))}
-                        >{translate("agent:agentSessionSidebar.agentSessionsGroupList_message_countSession", { value: list.length - visible.length })}</button>
+                          onClick={() => setExpandedProjects((prev) => ({ ...prev, [dir]: hidden > 0 }))}
+                        >{translate(hidden > 0
+                          ? "agent:agentSessionSidebar.agentSessionsGroupList_button_showMore"
+                          : "agent:agentSessionSidebar.agentSessionsGroupList_button_showLess")}</button>
                       ) : null}
                     </div>
                   </div>

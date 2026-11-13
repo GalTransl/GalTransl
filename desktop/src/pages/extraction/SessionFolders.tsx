@@ -5,10 +5,15 @@ import { basenamePath } from '../../lib/paths';
 import { readProjectStorage, writeProjectStorage } from '../../lib/projectStorage';
 import { useSessionTime } from '../../lib/sessionTime';
 import { useUnseenAgentLights } from '../../lib/agentActivity';
+import { previewSessions } from '../../lib/sessionPreview';
+import { applySavedOrder } from '../../lib/dragReorder';
+import { useDragReorder, useSavedOrder } from '../../components/useDragReorder';
+import { t } from '../../i18n';
 import { statusLabel, x } from './labels';
 import { isRunning, type Session } from './types';
 
 const COLLAPSED_KEY = 'galtransl-extraction-collapsed-folders';
+const FOLDER_ORDER_KEY = 'galtransl-extraction-folder-order';
 
 export function gameFolderKey(directory: string): string {
   const path = directory.replace(/\\/g, '/').replace(/\/+$/, '') || '/';
@@ -38,12 +43,22 @@ export function SessionFolders({ sessions, selected, activeSession, onSelect, on
     } catch { return new Set(); }
   });
   useEffect(() => { writeProjectStorage(COLLAPSED_KEY, JSON.stringify([...collapsed])); }, [collapsed]);
+  // Folders whose "show more" is open; local only, like the translation sidebar.
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const folderOrder = useSavedOrder(FOLDER_ORDER_KEY);
   const groups = new Map<string, { directory: string; sessions: Session[] }>();
   for (const session of sessions) {
     const key = gameFolderKey(session.game_dir);
     if (!groups.has(key)) groups.set(key, { directory: session.game_dir, sessions: [] });
     groups.get(key)!.sessions.push(session);
   }
+  // Folder order: the user's dragged order, with folders they have not placed yet on top.
+  const orderedKeys = applySavedOrder([...groups.keys()], folderOrder.order);
+  const folderDrag = useDragReorder({
+    keys: orderedKeys,
+    onReorder: (key, toIndex) => folderOrder.reorder(orderedKeys, key, toIndex),
+    handle: '.agent-sessions__group-toggle',
+  });
   // Reveal a newly selected/created session even when its folder was folded.
   const selectedDirectory = (activeSession?.id === selected ? activeSession : sessions.find(session => session.id === selected))?.game_dir;
   useEffect(() => {
@@ -56,13 +71,17 @@ export function SessionFolders({ sessions, selected, activeSession, onSelect, on
       const next = new Set(previous); next.delete(key); return next;
     });
   }, [selected, selectedDirectory]);
-  return <>{[...groups].map(([key, group], index) => {
+  return <>{orderedKeys.map((key, index) => {
+    const group = groups.get(key)!;
     const folded = collapsed.has(key);
     const active = group.sessions.some(session => session.id === selected);
     const hasRunning = runningDirectories.some(directory => gameFolderKey(directory) === key)
       || group.sessions.some(session => isRunning(session.id === activeSession?.id ? activeSession : session));
     const listId = `${id}-${index}`;
-    return <section key={key} className={`agent-sessions__group${folded ? ' is-collapsed' : ''}${active ? ' is-active' : ''}`}>
+    const preview = previewSessions(group.sessions, expanded.has(key), session =>
+      session.id === selected || isRunning(session.id === activeSession?.id ? activeSession : session));
+    return <section key={key} className={`agent-sessions__group${folded ? ' is-collapsed' : ''}${active ? ' is-active' : ''}${folderDrag.drag?.key === key ? ' is-dragging' : ''}`}
+      ref={folderDrag.itemRef(key)} style={folderDrag.itemStyle(index)} onPointerDown={event => folderDrag.onPointerDown(event, key)}>
       <div className="agent-sessions__group-head" onContextMenu={event => folderMenu.onContextMenu(event, group.directory)}>
         <button type="button" className="agent-sessions__group-toggle" title={group.directory}
           aria-expanded={!folded} aria-controls={listId} onClick={() => setCollapsed(previous => {
@@ -85,7 +104,7 @@ export function SessionFolders({ sessions, selected, activeSession, onSelect, on
         {...(folded ? { inert: '' } : {})}>
         <div className="agent-sessions__group-collapse-inner">
           <div className="agent-sessions__group-list">
-            {group.sessions.map(item => {
+            {preview.visible.map(item => {
               const currentSession = item.id === activeSession?.id ? activeSession : item;
               const status = currentSession.status;
               const itemRunning = isRunning({ ...item, status });
@@ -106,6 +125,12 @@ export function SessionFolders({ sessions, selected, activeSession, onSelect, on
                   onClick={() => onDeleteSession(item)}><Icon name="close" /></button>
               </div>;
             })}
+            {(preview.hidden > 0 || preview.collapsible) && <button type="button" className="agent-sessions__show-more"
+              onClick={() => setExpanded(previous => {
+                const next = new Set(previous); if (preview.hidden > 0) next.add(key); else next.delete(key); return next;
+              })}>{t(preview.hidden > 0
+                ? 'agent:agentSessionSidebar.agentSessionsGroupList_button_showMore'
+                : 'agent:agentSessionSidebar.agentSessionsGroupList_button_showLess')}</button>}
           </div>
         </div>
       </div>

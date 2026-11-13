@@ -352,6 +352,26 @@
   border-radius: 10px;
 }
 
+/* 按下文件夹标题行拖动排序（与主侧栏同一套手感，见 components/useDragReorder.ts）：
+   被拖的分组跟手，其余分组平移让位，松手后才真正重排。data-reordering 由 hook 挂在列表容器上。 */
+.agent-sessions__list[data-reordering] {
+  cursor: grabbing;
+}
+
+.agent-sessions__list[data-reordering] .agent-sessions__group {
+  pointer-events: none;
+  transition: transform 160ms ease;
+}
+
+.agent-sessions__list[data-reordering] .agent-sessions__group.is-dragging {
+  position: relative;
+  z-index: 2;
+  background: var(--color-surface-strong);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
+  opacity: 0.94;
+  transition: none;
+}
+
 .agent-sessions__group-head {
   display: flex;
   align-items: center;
@@ -531,28 +551,28 @@
   opacity: 0.7;
 }
 
-/* 「显示其余 N 个会话」：项目下会话太多时只渲染前 N 条，这是唯一的展开入口。
-   虚线框让它读起来像"还有内容"，而不是一条会话。 */
+/* 「显示更多 / 收起」：每个项目默认只列最近几条会话（见 lib/sessionPreview.ts）。
+   做成和会话行同一缩进的淡色文字行，读起来是列表的延续，而不是另一个按钮。 */
 .agent-sessions__show-more {
   display: block;
-  width: calc(100% - 10px);
-  margin: 2px 5px 4px;
-  padding: 4px 8px;
-  border: 1px dashed var(--agent-line-soft, var(--color-line));
+  width: 100%;
+  padding: var(--space-2);
+  border: none;
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--color-text-muted);
+  opacity: 0.75;
   font: inherit;
-  font-size: 11px;
-  text-align: center;
+  font-size: 13px;
+  text-align: left;
   cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
 }
 
 .agent-sessions__show-more:hover {
   background: var(--agent-hover);
-  border-color: var(--color-primary);
-  color: var(--color-primary);
+  color: var(--color-text);
+  opacity: 1;
 }
 
 .agent-session-item {
