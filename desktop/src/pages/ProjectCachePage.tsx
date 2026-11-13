@@ -1688,14 +1688,17 @@ export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: Pro
           <Button variant="secondary" onClick={() => void invoke('open_folder', { path: cacheDir })} title={cacheDir}>
             <Icon name="folder-open" />{translate("projects:projectCachePage.projectCachePage_button_openCacheFile")}</Button>
         ) : null}
-        status={
+        // 没有错误时不能传空片段：PageHeader 会为它渲染一个空的 status 行，
+        // 多出一段间距，下方面板就比项目字典页矮一截、切换时跳动。
+        status={error || localError ? (
           <>
             {error && <InlineFeedback tone="error" title={translate("projects:projectCachePage.projectCachePage_title_loadCacheFailed")} description={error} />}
             {localError && <InlineFeedback tone="error" title={translate("projects:projectCachePage.projectCachePage_title_failed")} description={localError} />}
-            {info && <InlineFeedback className="inline-alert--floating" tone="success" title={translate("projects:projectCachePage.projectCachePage_title_success")} description={info} onDismiss={() => setInfo(null)} />}
           </>
-        }
+        ) : undefined}
       />
+
+      {info && <InlineFeedback className="inline-alert--floating" tone="success" title={translate("projects:projectCachePage.projectCachePage_title_success")} description={info} onDismiss={() => setInfo(null)} />}
 
       {previewNotice && <p className="inline-feedback" role="status">{previewNotice}</p>}
       <div

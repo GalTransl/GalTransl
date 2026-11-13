@@ -30,6 +30,7 @@
 .app-layout--custom-background .home-hero,
 .app-layout--custom-background .home-hero__stats,
 .app-layout--custom-background .project-cache-page .cache-layout,
+.app-layout--custom-background .project-dictionary-page .dict-layout,
 .app-layout--custom-background .sidebar__project-confirm-bubble,
 .app-layout--custom-background .sidebar__context-menu,
 .app-layout--custom-background .project-cache-page .cache-context-menu,
@@ -61,7 +62,8 @@
   opacity: calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.08);
 }
 
-.app-layout--custom-background .project-cache-page .cache-layout {
+.app-layout--custom-background .project-cache-page .cache-layout,
+.app-layout--custom-background .project-dictionary-page .dict-layout {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.14)), rgba(245, 249, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.04))),
     rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.04)) !important;
@@ -218,6 +220,7 @@
 :root[data-theme='dark'] .app-layout--custom-background .home-hero,
 :root[data-theme='dark'] .app-layout--custom-background .home-hero__stats,
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-layout,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-layout,
 :root[data-theme='dark'] .app-layout--custom-background .sidebar__project-confirm-bubble,
 :root[data-theme='dark'] .app-layout--custom-background .sidebar__context-menu,
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-context-menu,
@@ -234,7 +237,8 @@
   opacity: calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.08);
 }
 
-:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-layout {
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-layout,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-layout {
   background:
     linear-gradient(180deg, rgba(24, 34, 48, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.18)), rgba(12, 19, 30, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.06))),
     rgba(14, 22, 32, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.06)) !important;

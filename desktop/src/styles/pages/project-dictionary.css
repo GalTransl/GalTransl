@@ -96,14 +96,25 @@
   color: var(--color-primary);
 }
 
+/* 与「浏览文本」页（.cache-layout）同一种外框：文件栏和编辑区合在一个面板里，
+   中间只留一条分隔线，外框是唯一的边框/圆角/阴影。 */
 .dict-layout {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
-  gap: var(--space-5);
+  gap: 0;
   align-items: stretch;
   min-height: 0;
   flex: 1;
   overflow: hidden;
+  border: 1px solid rgba(191, 208, 226, 0.72);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-panel);
+  backdrop-filter: blur(14px);
+}
+
+:root[data-theme='dark'] .dict-layout {
+  border-color: rgba(65, 83, 111, 0.78);
 }
 
 .dict-layout__sidebar {
@@ -111,9 +122,10 @@
   flex-direction: column;
   min-height: 0;
   min-width: 0;
-  background: var(--color-surface-strong);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--color-line);
+  border-radius: 0;
   padding: var(--space-4);
 }
 
@@ -190,6 +202,15 @@
 
 .dict-layout__main .panel {
   width: 100%;
+}
+
+/* 编辑区的 Panel 去掉自己的外框，只保留 .dict-layout 那一层 */
+.project-dictionary-page .dict-layout__main > .panel {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .dict-layout__main > .empty-state {
