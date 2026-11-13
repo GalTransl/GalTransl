@@ -322,6 +322,25 @@ test('collapsed cards show final text only when a known final result differs fro
   } finally { act(() => f.view.unmount()); }
 });
 
+test('large files mount only the cards near the viewport and still jump to far rows', async () => {
+  // Regression: a 4000-row file mounted every card, so opening it, returning to the page
+  // and switching pages all stalled on a six-figure DOM.
+  const cacheEntries = Array.from({ length: 300 }, (_, i) => ({ index: i + 1, pre_src: `原文${i}`, post_src: `原文${i}`, pre_dst: '' }));
+  const f = await fixture({ setupSearch: false, cacheEntries, focusTarget: { page: 'cache', filename: 'b.json', index: 280 } });
+  try {
+    f.pane.scrollHeight = 40_000;
+    await f.resolveFile('b.json');
+    const rendered = () => f.view.root.findAll(node => node.type === 'article' && node.props['data-cache-index'] !== undefined);
+    assert.ok(rendered().length < 100, `rendered ${rendered().length} cards`);
+    assert.equal(f.view.root.findAllByProps({ 'data-cache-index': 280 }).length, 1);
+    assert.equal(f.view.root.findAllByProps({ 'data-cache-index': 1 }).length, 0);
+    assert.equal(f.pane.scrollTop, 280 * 100 - 150);
+    const spacers = f.view.root.findAll(node => node.props.className === 'cache-card-list__spacer');
+    assert.equal(spacers.length, 2);
+    assert.ok(spacers.every(node => node.props.style.height > 0));
+  } finally { act(() => f.view.unmount()); }
+});
+
 test('ordinary file selection keeps its remembered position', async () => {
   const f = await fixture();
   try {

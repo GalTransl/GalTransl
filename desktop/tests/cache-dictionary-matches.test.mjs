@@ -22,8 +22,8 @@ function fixture() {
   });
   let state;
   const { useCacheDictionaryMatches } = load(new URL('../src/lib/useCacheDictionaryMatches.ts', import.meta.url));
-  function Harness({ project = 'a', config = 'config.yaml', file = 'scene.json', entries, active = true, revision = 0 }) {
-    state = useCacheDictionaryMatches(project, config, file, entries, active, revision);
+  function Harness({ project = 'a', config = 'config.yaml', file = 'scene.json', entries, active = true, revision = 0, wanted }) {
+    state = useCacheDictionaryMatches(project, config, file, entries, active, revision, wanted);
     return null;
   }
   return {
@@ -97,6 +97,37 @@ test('unsaved edits recompute affected sentences, cancel stale requests and refr
   act(() => renderer.update(view(edited, { project: 'b', config: 'alternate.yaml', revision: 1 })));
   await f.flush();
   assert.equal(f.calls.length, 5);
+  act(() => renderer.unmount());
+});
+
+test('a partial view only queries the wanted rows, keeps their context and reuses unchanged sentences', async () => {
+  // Regression: a 4000-row file sent 40+ sequential batches for rows nobody was looking at.
+  const f = fixture();
+  const entries = Array.from({ length: 500 }, (_, i) => entry(i));
+  let renderer;
+  const firstWanted = new Set([200, 201, 202]);
+  act(() => { renderer = create(h(f.Harness, { entries, wanted: firstWanted })); });
+  await f.flush();
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual([...f.calls[0].entries.map(sentence => sentence.index)], [200, 201, 202]);
+  assert.deepEqual([...f.calls[0].entries[0].context_before.map(sentence => sentence.index)], [198, 199]);
+  await act(async () => finish(f.calls[0]));
+  assert.equal(f.state.counts.size, 3);
+  const sentence = f.state.sentences.get(201);
+  // An edit elsewhere in the file must not hand visible cards new objects.
+  const edited = entries.map((value, i) => i === 10 ? { ...value, pre_dst: 'changed' } : value);
+  act(() => renderer.update(h(f.Harness, { entries: edited, wanted: firstWanted })));
+  assert.equal(f.state.sentences.get(201), sentence);
+  await f.flush();
+  assert.equal(f.calls.length, 1);
+  // Scrolling away and back reuses earlier results instead of refetching them.
+  act(() => renderer.update(h(f.Harness, { entries: edited, wanted: new Set([400]) })));
+  await f.flush();
+  await act(async () => finish(f.calls[1]));
+  act(() => renderer.update(h(f.Harness, { entries: edited, wanted: firstWanted })));
+  await f.flush();
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.state.counts.size, 3);
   act(() => renderer.unmount());
 });
 

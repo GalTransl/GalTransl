@@ -42,6 +42,7 @@ import type { LocalizedText } from '../i18n/core';
 import { escapeProblemFilterPattern, normalizeKeywordList, splitProblemItems, splitProblemTypes } from '../lib/problemFilter';
 import { joinPath } from '../lib/paths';
 import { scrollWithinContainer } from '../lib/scrollWithinContainer';
+import { useVirtualList } from '../lib/virtualList';
 import { useStableListKeys } from '../lib/useStableListKeys';
 import { AnimatedList } from '../components/AnimatedList';
 import { AnimatedCollapse } from '../components/UiMotion';
@@ -423,6 +424,9 @@ function SearchResultCard({
   );
 }
 
+/** 达到这个条数才窗口化渲染；几百句以内全量渲染足够快，也保留浏览器原生的整页查找。 */
+const VIRTUALIZE_MIN_ENTRIES = 200;
+
 /* ── Main Page ── */
 export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: ProjectPageContext; active?: boolean; focusTarget?: CachePreviewTarget }) {
   const uiLanguage = useUiLanguage();
@@ -441,7 +445,6 @@ export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: Pro
   const [uncachedFiles, setUncachedFiles] = useState<Set<string>>(new Set());
   const [entries, setEntries] = useState<CacheEntry[]>([]);
   const [dictionaryRevision, setDictionaryRevision] = useState(0);
-  const dictionaryMatches = useCacheDictionaryMatches(projectId, configFileName, selectedFile, entries, active, dictionaryRevision);
   /** 每个文件的条目缓存（含未保存修改），mount 后指向当前项目桶中的 Map */
   const entriesMapRef = useRef<Map<string, CacheEntry[]>>(new Map());
   /** 每个文件最近一次从后端读取或保存后的干净快照，用于准确维护 dirty 状态 */
@@ -1060,6 +1063,27 @@ export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: Pro
     });
   }, [visibleEntries, filterProblems, deferredSearchTerm]);
 
+  // 大文件只渲染视口附近的卡片（见 lib/virtualList.ts）；小文件照旧全量渲染。
+  const virtualKeys = useMemo(() => filteredEntries.map((entry) => String(entry.index)), [filteredEntries]);
+  const virtualList = useVirtualList({
+    containerRef: listRef,
+    keys: virtualKeys,
+    enabled: filteredEntries.length >= VIRTUALIZE_MIN_ENTRIES,
+    resetKey: JSON.stringify([projectId, selectedFile]),
+    keyAttribute: 'data-cache-index',
+  });
+  const renderedEntries = useMemo(
+    () => filteredEntries.slice(virtualList.start, virtualList.end),
+    [filteredEntries, virtualList.start, virtualList.end],
+  );
+  const renderedIndices = useMemo(() => new Set(renderedEntries.map((entry) => entry.index)), [renderedEntries]);
+  const dictionaryMatches = useCacheDictionaryMatches(projectId, configFileName, selectedFile, entries, active, dictionaryRevision, renderedIndices);
+  const { onScroll: updateVirtualRange, reveal: revealVirtualPosition } = virtualList;
+  const handleListScroll = useCallback(() => {
+    rememberCurrentScrollPosition();
+    updateVirtualRange();
+  }, [rememberCurrentScrollPosition, updateVirtualRange]);
+
   // Layout effects see the committed, filtered list. No timer or ancestor scrolling:
   // subtracting pane and card rects also cancels the pane's enter transform.
   // A fresh mount (e.g. the mini window switching from dictionary to cache) can load entries
@@ -1071,6 +1095,12 @@ export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: Pro
     const target = container?.querySelector<HTMLElement>(`[data-cache-index="${pendingJump.index}"]`);
     if (!container) return;
     if (!target) {
+      // 窗口化渲染时目标可能只是还没挂载：先把它滚进窗口，下一次提交再精确对准。
+      const position = filteredEntries.findIndex((entry) => entry.index === pendingJump.index);
+      if (position >= 0) {
+        revealVirtualPosition(position);
+        return;
+      }
       if (deferredSearchTerm || filterProblems) return;
       setPendingJump(null);
       setPreviewNotice(uiMessage('projects:projectPreview.entryMissing'));
@@ -1094,7 +1124,7 @@ export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: Pro
       releaseFrame = requestAnimationFrame(() => setPendingJump((current) => current === pendingJump ? null : current));
     });
     return () => { cancelAnimationFrame(frame); cancelAnimationFrame(releaseFrame); };
-  }, [pendingJump, active, loadingEntries, pageLoading, projectId, selectedFile, filteredEntries, deferredSearchTerm, filterProblems]);
+  }, [pendingJump, active, loadingEntries, pageLoading, projectId, selectedFile, filteredEntries, deferredSearchTerm, filterProblems, revealVirtualPosition, renderedEntries]);
 
   useLayoutEffect(() => () => {
     if (jumpHighlightRef.current) {
@@ -2180,10 +2210,13 @@ export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: Pro
                 )}
                 <div
                   ref={listRef}
-                  onScroll={rememberCurrentScrollPosition}
-                  className={`cache-card-list ${loadingEntries ? 'cache-card-list--loading' : ''} ${pendingJump?.file === selectedFile ? 'cache-card-list--positioning' : ''} ${listEntering ? 'cache-card-list--entering' : ''}`}
+                  onScroll={handleListScroll}
+                  className={`cache-card-list ${virtualList.end - virtualList.start < filteredEntries.length ? 'cache-card-list--virtual ' : ''}${loadingEntries ? 'cache-card-list--loading' : ''} ${pendingJump?.file === selectedFile ? 'cache-card-list--positioning' : ''} ${listEntering ? 'cache-card-list--entering' : ''}`}
                 >
-                  {filteredEntries.map((entry) => (
+                  {virtualList.start > 0 && (
+                    <div className="cache-card-list__spacer" aria-hidden="true" style={{ height: virtualList.topSpacer }} />
+                  )}
+                  {renderedEntries.map((entry) => (
                     <CacheEntryCard
                       key={`${selectedFile}-${entry.index}`}
                       entry={entry}
@@ -2202,6 +2235,9 @@ export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: Pro
                       readOnly={selectedHasNoCache}
                     />
                   ))}
+                  {virtualList.end < filteredEntries.length && (
+                    <div className="cache-card-list__spacer" aria-hidden="true" style={{ height: virtualList.bottomSpacer }} />
+                  )}
                   {filteredEntries.length === 0 && !loadingEntries && (
                     <EmptyState title={translate("projects:projectCachePage.cacheCardListWrapper_title_matchEntry")} description={translate("projects:projectCachePage.cacheCardListWrapper_description_search")} />
                   )}

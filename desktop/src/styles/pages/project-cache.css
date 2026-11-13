@@ -505,6 +505,16 @@
   overflow-anchor: none;
 }
 
+/* 窗口化渲染时屏幕外的卡片本来就没挂载；已挂载的要量真实高度，不能用占位尺寸。 */
+.cache-card-list--virtual .cache-card {
+  content-visibility: visible;
+}
+
+.cache-card-list__spacer {
+  flex-shrink: 0;
+  overflow-anchor: none;
+}
+
 .cache-card--problem {
   border-color: var(--color-warning-soft);
   background: color-mix(in srgb, var(--color-warning-soft) 15%, var(--color-surface-strong));
