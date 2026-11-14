@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, TYPE_CHECKING
 
 from GalTransl.Agent.models import AgentToolError
@@ -314,9 +315,26 @@ def _tool_search_text_files(runner: AgentRunner, args: dict[str, Any], *, output
     source = "output" if output else "input"
     read_tool = 'output(action="read")' if output else 'input(action="read")'
     text_field = "dst" if output else "src"
-    query = str(args.get("query", "")).strip()
-    if not query:
+    # 与 search_replace_cache 的顶层 regex 同名同义；正则保留首尾空白（行首全角空格之类的缩进可能正是要找的）
+    regex = args.get("regex", False)
+    if not isinstance(regex, bool):
+        raise AgentToolError("regex 必须是布尔值")
+    match_case = args.get("match_case", False)
+    if not isinstance(match_case, bool):
+        raise AgentToolError("match_case 必须是布尔值")
+    query = str(args.get("query", ""))
+    if not regex:
+        query = query.strip()
+    if not query.strip():
         raise AgentToolError("query is required")
+    if regex:
+        try:
+            re.compile(query)
+        except re.error as exc:
+            raise AgentToolError(
+                f"query 不是合法的正则：{exc}。按字面搜索就去掉 regex=true；"
+                "正则里的字面特殊字符要转义（\\[ \\( \\$ \\.）。"
+            )
     field = str(args.get("field", "all") or "all").strip() or "all"
     if field not in ("all", text_field, "name"):
         raise AgentToolError(f"field must be one of: all, {text_field}, name")
@@ -337,7 +355,7 @@ def _tool_search_text_files(runner: AgentRunner, args: dict[str, Any], *, output
     body: dict[str, Any] = {
         "query": query,
         "field": field,
-        "options": {"re": False},
+        "options": {"re": regex, "match_case": match_case},
         "max_results": max_hits,
         "order": order,
         "config_file_name": runner.state.config_file_name,

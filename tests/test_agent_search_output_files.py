@@ -19,7 +19,7 @@ class SearchOutputFilesTests(unittest.TestCase):
         self.assertEqual(url, "/api/projects/proj/output/search")
         self.assertEqual(body, {"query": "译名", "field": "dst", "filename": "chapter/a.json",
                                 "context": 3, "offset": 2, "max_results": 50, "order": "reverse",
-                                "preceding_only": True, "options": {"re": False}, "config_file_name": "config.yaml"})
+                                "preceding_only": True, "options": {"re": False, "match_case": False}, "config_file_name": "config.yaml"})
         self.assertEqual(runner.gets, [])
 
     def test_two_sided_context_reduces_hit_budget(self):

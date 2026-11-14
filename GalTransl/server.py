@@ -2378,8 +2378,12 @@ def build_handler(registry: JobRegistry):
                     import re as _re
 
                     payload = self._read_json_body()
-                    query = str(payload.get("query", "")).strip()
-                    if not query:
+                    raw_options = payload.get("options", {})
+                    query = str(payload.get("query", ""))
+                    # 正则保留首尾空白（要找的可能正是行首缩进）；字面搜索照旧去掉
+                    if not (isinstance(raw_options, dict) and bool(raw_options.get("re", False))):
+                        query = query.strip()
+                    if not query.strip():
                         self._send_json({"results": [], "total": 0})
                         return
                     # 输出正文用 dst，原文正文用 src；两侧都能搜说话人。
@@ -2395,16 +2399,23 @@ def build_handler(registry: JobRegistry):
                     if not isinstance(options, dict):
                         self._send_json({"error": "options must be an object"}, status=HTTPStatus.BAD_REQUEST)
                         return
+                    # 大小写与缓存搜索同口径：默认忽略，match_case=true 才区分，字面与正则都适用
+                    match_case = options.get("match_case", False)
+                    if not isinstance(match_case, bool):
+                        self._send_json({"error": "match_case must be a boolean"}, status=HTTPStatus.BAD_REQUEST)
+                        return
                     pattern = None
                     if bool(options.get("re", False)):
                         try:
-                            pattern = _re.compile(query)
+                            pattern = _re.compile(query, 0 if match_case else _re.IGNORECASE)
                         except _re.error as exc:
                             self._send_json(
                                 {"error": f"invalid regular expression: {exc}"},
                                 status=HTTPStatus.BAD_REQUEST,
                             )
                             return
+                    elif match_case:
+                        pattern = _re.compile(_re.escape(query))
                     try:
                         context = max(0, min(int(payload.get("context", 0) or 0), 20))
                     except (TypeError, ValueError):

@@ -38,6 +38,9 @@ class InputSearchHttpTests(unittest.TestCase):
         ]
         with open(os.path.join(cls.project, INPUT_FOLDERNAME, "a.json"), "w", encoding="utf-8") as f:
             json.dump(entries, f, ensure_ascii=False)
+        # 大小写用例单独一个文件：不改变 a.json 的条数和上下文
+        with open(os.path.join(cls.project, INPUT_FOLDERNAME, "b.json"), "w", encoding="utf-8") as f:
+            json.dump([{"name": "", "message": "<Ctrl>終わり"}], f, ensure_ascii=False)
 
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(JobRegistry()))
         cls.base = (
@@ -107,6 +110,26 @@ class InputSearchHttpTests(unittest.TestCase):
     def test_invalid_regex_is_rejected(self):
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             self._post({"query": "(", "options": {"re": True}})
+        self.assertEqual(ctx.exception.code, 400)
+
+    def test_regex_matches_by_pattern_and_keeps_leading_whitespace(self):
+        """正则按模式匹配；首尾空白是模式的一部分，不能像字面搜索那样被去掉。"""
+        out = self._post({"query": "^ドルード[、だ]", "field": "src", "options": {"re": True}})
+        self.assertEqual([r["index"] for r in out["results"]], [2, 3])
+        self.assertEqual(self._post({"query": " ドルード", "options": {"re": True}})["total"], 0)
+        self.assertEqual(self._post({"query": " ドルード"})["total"], 2)
+        self.assertEqual(self._post({"query": "   ", "options": {"re": True}}), {"results": [], "total": 0})
+
+    def test_case_is_ignored_unless_match_case_for_both_literal_and_regex(self):
+        """与缓存搜索同口径：同一个词在缓存里搜得到、在原文里因大小写搜不到，会被当成"原文没有"。"""
+        for options in ({}, {"re": True}):
+            with self.subTest(options=options):
+                self.assertEqual(self._post({"query": "CTRL", "options": options})["total"], 1)
+                strict = {**options, "match_case": True}
+                self.assertEqual(self._post({"query": "CTRL", "options": strict})["total"], 0)
+                self.assertEqual(self._post({"query": "Ctrl", "options": strict})["total"], 1)
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._post({"query": "x", "options": {"match_case": "yes"}})
         self.assertEqual(ctx.exception.code, 400)
 
     def test_get_falls_through_to_the_file_route(self):

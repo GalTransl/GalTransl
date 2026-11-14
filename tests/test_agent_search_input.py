@@ -52,7 +52,7 @@ class SearchInputRequestTests(unittest.TestCase):
         self.assertEqual(url, "/api/projects/proj/input/search")
         self.assertEqual(body["query"], "ドルード")
         self.assertEqual(body["field"], "src")
-        self.assertFalse(body["options"]["re"])  # 关键词搜索：当前只做子串匹配
+        self.assertFalse(body["options"]["re"])  # 默认是子串匹配，正则要显式 regex=true
         self.assertEqual(body["config_file_name"], "config.yaml")
         # 没给 context / filename 就不发这两个键（服务端按默认处理）
         self.assertNotIn("context", body)
@@ -210,6 +210,48 @@ class SearchInputFailedFileTests(unittest.TestCase):
         self.assertEqual(result["files_failed"], ["broken.json"])
         self.assertIn("解析失败", result["note"])
         self.assertIn("未知", result["note"])  # 这些文件里有没有命中是未知的
+
+
+class SearchRegexTests(unittest.TestCase):
+    """regex=true：原文/输出搜索按正则匹配。
+
+    回归背景：缓存搜索早就支持正则，原文侧工具却把 options.re 写死成 False。译前要摸清
+    控制符、变量的写法（设计译前/译后占位符的依据）时只能一个个字面去猜。
+    """
+
+    def test_regex_is_forwarded_and_keeps_surrounding_whitespace(self):
+        for tool in (_tool_search_input, rt._TOOL_HANDLERS["search_output_files"]):
+            with self.subTest(tool=tool.__name__):
+                runner = _SearchRunner()
+                tool(runner, {"query": r"^　<\w+> ", "regex": True})
+                body = runner.posts[0][1]
+                self.assertEqual(body["options"], {"re": True, "match_case": False})
+                tool(runner, {"query": "Name", "match_case": True})
+                self.assertEqual(runner.posts[1][1]["options"], {"re": False, "match_case": True})
+                self.assertEqual(body["query"], r"^　<\w+> ")
+
+    def test_literal_query_is_still_stripped(self):
+        runner = _SearchRunner()
+        _tool_search_input(runner, {"query": "  $name  "})
+        self.assertEqual(runner.posts[0][1]["query"], "$name")
+
+    def test_bad_regex_or_flag_fails_before_any_request_with_a_way_out(self):
+        runner = _SearchRunner()
+        with self.assertRaises(AgentToolError) as ctx:
+            _tool_search_input(runner, {"query": "<(", "regex": True})
+        self.assertIn("转义", str(ctx.exception))
+        self.assertIn("去掉 regex=true", str(ctx.exception))
+        for args in ({"query": "x", "regex": "true"}, {"query": "x", "match_case": 1}, {"query": "   ", "regex": True}):
+            with self.subTest(args=args), self.assertRaises(AgentToolError):
+                _tool_search_input(runner, args)
+        self.assertEqual(runner.posts, [])
+
+    def test_both_schemas_advertise_regex(self):
+        for name in ("input", "output"):
+            schema = next(t["function"] for t in rt.AGENT_TOOLS if t["function"]["name"] == name)
+            self.assertEqual(schema["parameters"]["properties"]["regex"]["type"], "boolean")
+            self.assertEqual(schema["parameters"]["properties"]["match_case"]["type"], "boolean")
+        self.assertIn('input(action="search", regex=true', rt.AGENT_SYSTEM_PROMPT)
 
 
 class SearchInputEmptyResultTests(unittest.TestCase):
