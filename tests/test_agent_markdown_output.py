@@ -451,6 +451,7 @@ class DispatcherTests(unittest.TestCase):
                 "search_cache",
                 "replace_cache",
                 "search_input",
+                "input_repeats",
                 "search_output_files",
                 "manage_problem_filter",
                 "run_subagents",

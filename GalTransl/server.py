@@ -1190,6 +1190,96 @@ def _search_context_rows(
     return result
 
 
+def _input_repeats(
+    project_dir: str,
+    config_file_name: str,
+    *,
+    query: str = "",
+    min_count: int = 2,
+    min_length: int = 1,
+    max_results: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """统计原文里**整句完全相同**的句子（去掉首尾空白后比较），按出现次数从多到少排。
+
+    用途在翻译之前：重复句（系统文本、选项、口头禅、固定招呼）各批次独立翻译时容易译得
+    不一样，先知道哪些句子重复、重复多少次，才能提前把固定译法写进字典或规范。
+
+    只按正文分组，不区分说话人——同一句话由不同角色说出来时该不该同译，要由读的人
+    结合 speakers 判断，所以把说话人作为信息带出来而不是拆成多组。读的是文件插件解析出
+    的原始条目（文本插件与译前字典还没跑），与 /input/search 同口径；单个文件解析失败
+    照样报在 files_failed 里，不影响其它文件。
+    """
+    input_dir = os.path.join(project_dir, INPUT_FOLDERNAME)
+    groups: dict[str, dict[str, Any]] = {}
+    files_failed: list[str] = []
+    sentences_total = 0
+    if os.path.isdir(input_dir):
+        names = sorted(
+            os.path.relpath(os.path.join(root, name), input_dir).replace(os.sep, "/")
+            for root, _, files in os.walk(input_dir) for name in files
+        )
+        for name in names:
+            file_path = os.path.join(input_dir, name)
+            if not os.path.isfile(file_path) or not _is_path_within(input_dir, file_path):
+                continue
+            try:
+                entries = _load_input_file_entries(project_dir, config_file_name, name)
+            except Exception:
+                files_failed.append(name)
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                text = str(entry.get("pre_src", "") or "").strip()
+                if not text:
+                    continue
+                sentences_total += 1
+                group = groups.get(text)
+                if group is None:
+                    group = groups[text] = {
+                        "count": 0, "files": set(), "speakers": {},
+                        "first": f"{name}:{entry.get('index', 0)}",
+                    }
+                group["count"] += 1
+                group["files"].add(name)
+                speaker = str(entry.get("name", "") or "")
+                group["speakers"][speaker] = group["speakers"].get(speaker, 0) + 1
+    repeated = [(text, group) for text, group in groups.items() if group["count"] >= min_count]
+    needle = query.lower()
+    matched = [
+        (text, group) for text, group in repeated
+        if len(text) >= min_length and (not needle or needle in text.lower())
+    ]
+    # 稳定排序：次数相同的保持首次出现的先后（dict 的插入顺序）
+    matched.sort(key=lambda item: -item[1]["count"])
+    results: list[dict[str, Any]] = []
+    for text, group in matched[offset:offset + max_results]:
+        speakers = sorted(group["speakers"].items(), key=lambda item: -item[1])
+        results.append({
+            "src": text,
+            "count": group["count"],
+            "files": len(group["files"]),
+            # 最多列 3 个说话人，空串是旁白/无 name 的条目
+            "speakers": [{"name": speaker, "count": count} for speaker, count in speakers[:3]],
+            "speakers_total": len(speakers),
+            "first": group["first"],
+        })
+    out: dict[str, Any] = {
+        "results": results,
+        "total": len(matched),
+        "offset": offset,
+        "sentences_total": sentences_total,
+        "unique_sentences": len(groups),
+        # 全项目口径（不受 query/min_length 影响）：重复句一共占了多少条原文
+        "repeated_sentences": len(repeated),
+        "repeated_occurrences": sum(group["count"] for _, group in repeated),
+    }
+    if files_failed:
+        out["files_failed"] = files_failed
+    return out
+
+
 def _search_input_dir(
     project_dir: str,
     config_file_name: str,
@@ -2236,6 +2326,37 @@ def build_handler(registry: JobRegistry):
                         cache_dir, count_json_entries=True, skip_suffixes=(CACHE_TEMP_SUFFIX,)
                     ),
                 })
+                return
+
+            # POST /api/projects/:id/input/repeats — 统计原文里整句重复的句子。
+            # 与下面的 search 一样必须排在 /input/:filename 之前。
+            if sub_path == "/input/repeats" and self.command == "POST":
+                try:
+                    payload = self._read_json_body()
+                    try:
+                        min_count = max(2, int(payload.get("min_count", 2) or 2))
+                        min_length = max(1, int(payload.get("min_length", 1) or 1))
+                        max_results = max(1, min(int(payload.get("max_results", 50) or 50), 500))
+                        offset = _parse_search_offset(payload)
+                    except (TypeError, ValueError) as exc:
+                        self._send_json({"error": f"invalid paging or threshold: {exc}"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    self._send_json(_input_repeats(
+                        project_dir,
+                        str(payload.get("config_file_name", "config.yaml") or "config.yaml"),
+                        query=str(payload.get("query", "") or "").strip(),
+                        min_count=min_count,
+                        min_length=min_length,
+                        max_results=max_results,
+                        offset=offset,
+                    ))
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid json body"}, status=HTTPStatus.BAD_REQUEST)
+                except Exception as exc:
+                    self._send_json(
+                        {"error": f"failed to count repeated input sentences: {exc}"},
+                        status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    )
                 return
 
             # POST /api/projects/:id/{input,output}/search — 搜索原文或实际交付物。

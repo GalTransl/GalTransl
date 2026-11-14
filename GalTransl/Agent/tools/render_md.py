@@ -597,6 +597,38 @@ def _md_render_search_input(result: dict[str, Any]) -> str | None:
     return _md_render_search(result, _SEARCH_INPUT_COLUMNS)
 
 
+def _md_render_input_repeats(result: dict[str, Any]) -> str | None:
+    """原文重复句统计：一行一个重复句，次数从多到少。"""
+    rows = []
+    for row in result.get("results") or []:
+        if not isinstance(row, dict):
+            continue
+        speakers = "、".join(
+            f"{item.get('name') or '（无）'}×{item.get('count')}"
+            for item in row.get("speakers") or [] if isinstance(item, dict)
+        )
+        more = int(row.get("speakers_total") or 0) - len(row.get("speakers") or [])
+        rows.append({**row, "speakers": speakers + (f" 等{more}人" if more > 0 else "")})
+    head = [
+        f"原文共 {result.get('sentences_total')} 句、去重后 {result.get('unique_sentences')} 句；"
+        f"其中 {result.get('repeated_sentences')} 个句子有重复，合计占 {result.get('repeated_occurrences')} 句",
+        f"符合筛选的重复句 {result.get('total')} 个，本页 {result.get('returned')} 个",
+    ]
+    if result.get("offset"):
+        head.append(f"offset={result['offset']}")
+    if result.get("has_more"):
+        head.append(f"还有更多（offset={result.get('next_offset')} 续读）")
+    failed = result.get("files_failed")
+    if isinstance(failed, list) and failed:
+        head.append("这些输入文件解析失败、没参与统计：" + "、".join(str(name) for name in failed))
+    note = result.get("note")
+    return _md_doc(
+        "；".join(head),
+        _md_table(["src", "count", "files", "speakers", "first"], rows),
+        f"备注：{note}" if note else "",
+    ) or None
+
+
 def _md_render_search_output_files(result: dict[str, Any]) -> str | None:
     return _md_render_search({**result, "source": "output"}, _SEARCH_OUTPUT_COLUMNS)
 
@@ -1039,6 +1071,7 @@ _MD_RENDERERS: dict[str, Any] = {
     "read_input_file": _md_render_read_input_file,
     "read_transl_cache": _md_render_transl_cache,
     "search_input": _md_render_search_input,
+    "input_repeats": _md_render_input_repeats,
     "search_output_files": _md_render_search_output_files,
     "search_cache": _md_render_search_transl_cache,
     "replace_cache": _md_render_patch_transl_cache,

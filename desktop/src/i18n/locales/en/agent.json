@@ -512,6 +512,10 @@
       "action": "Search the source text",
       "running": "Searching the source text"
     },
+    "input_repeats": {
+      "action": "Count repeated source lines",
+      "running": "Counting repeated source lines"
+    },
     "search_output_files": {
       "action": "Search the output",
       "running": "Searching the output"

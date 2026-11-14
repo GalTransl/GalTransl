@@ -18,7 +18,7 @@ from GalTransl.Agent.tools.dicts import (
     _tool_read_dict,
     _tool_save_dict,
 )
-from GalTransl.Agent.tools.input import _tool_list_input_files, _tool_read_input_file
+from GalTransl.Agent.tools.input import _tool_input_repeats, _tool_list_input_files, _tool_read_input_file
 from GalTransl.Agent.tools.jobs import (
     _tool_get_runtime,
     _tool_start_translation,
@@ -58,6 +58,7 @@ _TOOL_HANDLERS: dict[str, Callable[[AgentRunner, dict[str, Any]], Any]] = {
     "list_input_files": _tool_list_input_files,
     "read_input_file": _tool_read_input_file,
     "search_input": _tool_search_input,
+    "input_repeats": _tool_input_repeats,
     "search_cache": _tool_search_replace_cache,
     "replace_cache": _tool_search_replace_cache,
     "search_output_files": _tool_search_output_files,

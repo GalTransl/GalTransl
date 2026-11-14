@@ -138,6 +138,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   replace_cache: { get action() { return translate("agent:tools.replace_cache.action"); }, get running() { return translate("agent:tools.replace_cache.running"); }, verb: '', icon: 'repeat', summary: (a) => [a?.dry_run ? translate("agent:tools.replace_cache.preview") : '', `${str(a?.query)} -> ${str(a?.replacement)}`, str(a?.field), str(a?.files), str(a?.conditions)].filter(Boolean).join(' · ') },
   read_output: { get action() { return translate("agent:tools.read_output.action"); }, get running() { return translate("agent:tools.read_output.running"); }, verb: '', icon: 'file-text', summary: (a) => [str(a?.filename), str(a?.index)].filter(Boolean).join(' · ') },
   search_input: { get action() { return translate("agent:tools.search_input.action"); }, get running() { return translate("agent:tools.search_input.running"); }, verb: '', icon: 'search-plus', summary: (a) => [str(a?.query), str(a?.filename), a?.context ? translate("agent:toolMeta.summary_filter_sentenceContext", { displayContext: a.context }) : ''].filter(Boolean).join(' · ') },
+  input_repeats: { get action() { return translate("agent:tools.input_repeats.action"); }, get running() { return translate("agent:tools.input_repeats.running"); }, verb: '', icon: 'search-plus', summary: (a) => str(a?.query) },
   search_output_files: { get action() { return translate("agent:tools.search_output_files.action"); }, get running() { return translate("agent:tools.search_output_files.running"); }, verb: '', icon: 'search-plus', summary: (a) => [str(a?.query), str(a?.filename), a?.context ? translate("agent:toolMeta.summary_filter_sentenceContext", { displayContext: a.context }) : ''].filter(Boolean).join(' · ') },
   patch_transl_cache: {
     get action() { return translate("agent:tools.patch_transl_cache.action"); },
@@ -191,7 +192,7 @@ const DEFAULT_TOOL_META: ToolMeta = { get action() { return translate("agent:too
 export const TOOL_OPERATIONS: Record<string, Record<string, string>> = {
   cache_history: { list: 'list_cache_history', diff: 'diff_cache_history', revert: 'revert_cache_history' },
   get_project: { read: 'get_project_overview' },
-  input: { list: 'list_input_files', read: 'read_input_file', search: 'search_input' },
+  input: { list: 'list_input_files', read: 'read_input_file', search: 'search_input', repeats: 'input_repeats' },
   guideline: { read: 'read_guideline', overwrite: 'write_project_guideline', append: 'write_project_guideline', replace: 'write_project_guideline' },
   dictionary: { list: 'list_dict_files', read: 'read_dict', set: 'save_dict', delete: 'save_dict', overwrite: 'save_dict' },
   names: { read: 'get_name_table', set: 'save_name_table', overwrite: 'save_name_table' },

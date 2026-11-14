@@ -69,7 +69,7 @@ class SearchOutputFilesTests(unittest.TestCase):
         schemas = {t["function"]["name"]: t["function"]["parameters"] for t in rt.AGENT_TOOLS}
         schema = schemas["output"]
         self.assertEqual(schema["required"], ["action"])
-        self.assertEqual(set(schema["properties"]), set(schemas["input"]["properties"]) - {"grep"})
+        self.assertEqual(set(schema["properties"]), set(schemas["input"]["properties"]) - {"grep", "min_count", "min_length"})
         self.assertEqual(schema["properties"]["field"]["enum"], ["all", "dst", "name"])
 
 

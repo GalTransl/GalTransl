@@ -471,15 +471,27 @@ class SubagentToolScopeTests(unittest.TestCase):
         self.assertIn("index + dst", schema["function"]["description"])
 
     def test_tool_table_has_no_delegation_or_write_tools(self) -> None:
-        names = {
-            str((tool.get("function") or {}).get("name") or "")
+        tools = {
+            str((tool.get("function") or {}).get("name") or ""): tool["function"]["parameters"]["properties"]
             for tool in _subagent_tools(SUBAGENT_AGENT_PROOFREAD)
         }
+        names = set(tools)
         self.assertEqual(
             names,
-            {"read_transl_cache", "search_replace_cache", "problems", "edit_transl_cache"},
+            {"read_transl_cache", "search_replace_cache", "problems", "edit_transl_cache", "dictionary", "names"},
         )
-        self.assertEqual(set(_subagent_handlers(SUBAGENT_AGENT_PROOFREAD)), {"read_transl_cache", "search_cache", "list_problems", "patch_transl_cache"})
+        self.assertEqual(
+            set(_subagent_handlers(SUBAGENT_AGENT_PROOFREAD)),
+            {"read_transl_cache", "search_cache", "list_problems", "patch_transl_cache",
+             "list_dict_files", "read_dict", "get_name_table"},
+        )
+        # 字典和人名表是给校对核对译名用的依据，只开放读：没有写动作，也没有写入用的参数
+        self.assertEqual(tools["dictionary"]["action"]["enum"], ["list", "read"])
+        self.assertEqual(tools["names"]["action"]["enum"], ["read"])
+        for prop in ("content", "category", "reason"):
+            self.assertNotIn(prop, tools["dictionary"])
+        for prop in ("names", "reason"):
+            self.assertNotIn(prop, tools["names"])
         # 不会递归、也拿不到改配置/字典/启动任务的工具
         for forbidden in ("run_subagents", "save_dict", "update_project_config", "start_translation"):
             self.assertNotIn(forbidden, names)
@@ -528,7 +540,7 @@ class ProofreadGuidelineTests(unittest.TestCase):
             self.assertNotIn(parent.project_guideline, messages[1]["content"])
             self.assertEqual(
                 {t["function"]["name"] for t in tools},
-                {"read_transl_cache", "search_replace_cache", "problems", "edit_transl_cache"},
+                {"read_transl_cache", "search_replace_cache", "problems", "edit_transl_cache", "dictionary", "names"},
             )
             return "已完成", [], rt.REASONING_FIELD_NAMES[0], "", 10
 

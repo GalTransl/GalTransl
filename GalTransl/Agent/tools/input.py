@@ -116,3 +116,55 @@ def _tool_read_input_file(runner: AgentRunner, args: dict[str, Any]) -> Any:
     data = runner._http_get(f"/api/projects/{pid}/input/{urllib.parse.quote(filename)}?config={cfg}")
     entries = data.get("entries", [])
     return {"filename": filename, "count": len(entries), **_read_entries_page(entries, args)}
+
+
+_REPEATS_LIMIT_DEFAULT = 50
+_REPEATS_LIMIT_MAX = 200
+
+
+def _tool_input_repeats(runner: AgentRunner, args: dict[str, Any]) -> Any:
+    """统计原文里整句重复的句子，按出现次数从多到少列出（翻译前用）。
+
+    各批次独立送翻，同一句原文（系统文本、选项、口头禅、固定招呼）很容易译出几种写法；
+    等全量翻完再统一就得批量替换加复核。这个工具让它在翻译前就看得见：哪些句子重复、
+    各多少次、谁在说——需要固定译法的整句提前写进 GPT 字典或项目规范。
+    """
+    def _int_arg(key: str, default: int, low: int, high: int | None = None) -> int:
+        raw = args.get(key, default)
+        try:
+            value = max(low, int(raw))
+        except (TypeError, ValueError):
+            raise AgentToolError(f"{key} 必须是不小于 {low} 的整数（收到 {raw!r}）")
+        return value if high is None else min(value, high)
+
+    limit = _int_arg("limit", _REPEATS_LIMIT_DEFAULT, 1, _REPEATS_LIMIT_MAX)
+    offset = _int_arg("offset", 0, 0)
+    body: dict[str, Any] = {
+        "query": str(args.get("query", "") or "").strip(),
+        "min_count": _int_arg("min_count", 2, 2),
+        "min_length": _int_arg("min_length", 1, 1),
+        "max_results": limit,
+        "offset": offset,
+        "config_file_name": runner.state.config_file_name,
+    }
+    result = runner._http_post(f"/api/projects/{runner._project_id()}/input/repeats", body)
+    if not isinstance(result, dict):
+        return result
+    rows = result.get("results")
+    returned = len(rows) if isinstance(rows, list) else 0
+    total = result.get("total")
+    has_more = isinstance(total, int) and offset + returned < total
+    notes = [
+        "按去掉首尾空白后的整句原文分组，不区分说话人；统计的是文件插件解析出的原始条目，"
+        "文本插件与译前字典还没跑。first 是首次出现处（文件名:index），"
+        '要看全部出现处及上下文用 input(action="search", query=原句, context=2)。'
+    ]
+    if result.get("files_failed"):
+        notes.append('解析失败的文件没有参与统计；用 input(action="read") 试读可查看具体报错。')
+    return {
+        **result,
+        "returned": returned,
+        "has_more": has_more,
+        **({"next_offset": offset + returned} if has_more else {}),
+        "note": "".join(notes),
+    }

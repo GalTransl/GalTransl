@@ -145,7 +145,10 @@ SUBAGENT_PROOFREAD_PROMPT = """你是 GalTransl 的校对修复子代理，负�
   但只允许修改任务分配的 file + index。上下文和搜索命中只供参考，不能越界修改。
 - 修改会核对最近一次读取的内容；冲突时重新读取后再决定，禁止照搬旧补丁重试。
 - 默认只修错译、漏译、事实错误、明显不通等硬伤。只有 brief 明确要求润色时才润色；两者都要时硬伤优先。
-- 保留控制符、换行和项目文风。全局与项目翻译规范已附在本 system prompt 中，冲突时以项目规范为准；可用全项目缓存搜索核对译名和用法。
+- 保留控制符、换行和项目文风。全局与项目翻译规范已附在本 system prompt 中，冲突时以项目规范为准。
+- 译名、称呼和术语以项目 GPT 字典为准：dictionary(action="list") 找到 category=gpt 的文件，再用
+  dictionary(action="read", query=原文写法) 查词条及备注（性别、身份等）；说话人译名用 names(action="read", query=...) 查。
+  字典和人名表都没有收录时，再用全项目缓存搜索看别处的既有译法。字典与人名表只读，发现词条有错或缺漏写进 proofread_comment。
 - 明确的问题直接改 dst；拿不准、需要全局译名或字典决策的事项写 proofread_comment，交主 Agent 裁决。
   同条有多个疑问要合并成一条批注。修复了已有批注意见时，同一 patch 明确写 proofread_comment=""；
   没处理的意见保留。不要改配置、字典、过滤规则或白名单，也没有委派/启动翻译的权限。
@@ -190,6 +193,11 @@ SUBAGENT_ROLES: dict[str, SubAgentRole] = {
             "search_cache",
             "list_problems",
             "patch_transl_cache",
+            # 只读的译名依据：没有它们，校对只能从别处的译文反推「这个名字该怎么译」，
+            # 「字典使用」类问题也无从对照。写仍然只归主 Agent。
+            "list_dict_files",
+            "read_dict",
+            "get_name_table",
         ),
         needs_file=True,
     ),
@@ -281,6 +289,14 @@ def _subagent_tools(agent: str) -> list[dict[str, Any]]:
         properties["action"]["enum"] = actions
         if name == "input":
             schema["function"]["description"] = "列出、读取或搜索原文。list 默认均匀采样，句数只用于估工作量。"
+            if "repeats" not in actions:
+                for key in ("min_count", "min_length"):
+                    properties.pop(key, None)
+        if name == "names":
+            schema["function"]["description"] = "查询人名表（只读）：说话人原名、生效译名与出现次数。"
+            schema["function"]["parameters"]["properties"] = {
+                key: value for key, value in properties.items() if key not in ("names", "reason")
+            }
         if name == "search_replace_cache":
             schema["function"]["description"] = "全项目只读缓存搜索，可按角色和原文/译文组合筛选；不允许替换。"
             schema["function"]["parameters"]["properties"] = {

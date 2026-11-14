@@ -8,7 +8,7 @@ const readTools = new Set([
   'get_plugin_settings', 'get_project_overview', 'list_input_files', 'read_input_file',
   'read_guideline', 'list_dict_files', 'read_dict', 'get_name_table', 'get_runtime',
   'list_problems', 'read_proofread_changes', 'read_transl_cache', 'read_output',
-  'search_input', 'search_output_files', 'search_cache', 'read_history_archive',
+  'search_input', 'input_repeats', 'search_output_files', 'search_cache', 'read_history_archive',
   'list_transl_cache', 'search_transl_cache',
 ]);
 // 提取 Agent 的命令执行：连续多条收成一组，和查阅分开计数。

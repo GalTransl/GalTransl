@@ -338,7 +338,7 @@ MICROCOMPACT_KEEP_RECENT_ROUNDS = 5
 MICROCOMPACT_MIN_SAVED_TOKENS = 256
 MICROCOMPACT_PLACEHOLDER = "[较早工具结果已清理（microcompact）]"
 MICROCOMPACT_TOOLS = frozenset({
-    "list_input_files", "read_input_file", "search_input", "search_output_files",
+    "list_input_files", "read_input_file", "search_input", "input_repeats", "search_output_files",
     "list_dict_files", "read_dict", "get_name_table", "list_problems",
     "read_transl_cache", "read_output", "read_proofread_changes",
 })

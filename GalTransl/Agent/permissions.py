@@ -101,6 +101,7 @@ PERMISSION_READ_TOOLS: frozenset[str] = frozenset({
     "list_input_files",
     "read_input_file",
     "search_input",
+    "input_repeats",
     "search_cache",
     "search_output_files",
     "read_guideline",
