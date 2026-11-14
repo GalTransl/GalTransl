@@ -240,7 +240,7 @@ AGENT_TOOLS = [{'type': 'function', 'function': {
                              'replacement，在指定范围内替换全部匹配；dry_run=true 只预览。默认忽略大小写的字面匹配，query 去除首尾空白；regex=true 使用正则并支持捕获组替换，条件的正则独立设置。'
                              'search 的 matched_fields 按字段:起始偏移-结束偏移:片段列出每处命中，片段带前后各2字；偏移从0开始，结束位置不含在内。'
                              'replace 返回 matched_entries（命中记录数）、matches（文本出现次数）、updated（实际改动记录数；预览为0，计划数看would_update），'
-                             '以及 failed_files/unmatched_files/unchanged_files。status 为 success/partial/failed/no_change；partial 表示部分文件失败，须核查错误详情。',
+                             '以及 failed_files/unmatched_files/unchanged_files。status 为 success/partial/failed/no_change；partial 表示部分文件失败，须核查错误详情、不能当作全部完成；failed 表示没有改动成功且有失败，no_change 表示无失败也无内容变化。无匹配的文件正常跳过。',
               'parameters': {'type': 'object',
                              'properties': {'action': {'type': 'string', 'enum': ['search', 'replace']},
                                             'query': {'type': 'string',
