@@ -1036,9 +1036,9 @@ export function AgentPage() {
     saveMessageDraft('', '', '');
   }, [running, handleStop]);
 
-  /** 项目分组行 ＋：在指定项目下新建一个会话。
-   *  - 若 dir 是当前活动项目 → 切到新会话（主区跟着切）。
-   *  - 若 dir 是别的项目 → 只在该分组列表里增一行，主区不变（用户点该会话才切过去）。 */
+  /** 项目分组行 ＋：在指定项目下新建一个会话，并把主区切到它。
+   *  dir 不是当前项目（含还没选项目的首页）时连项目一起切过去：以前只在分组里增一行，
+   *  主区停在原地，看起来像没建成，连点几次就留下一串空会话。 */
   const handleCreateSessionInProject = useCallback(
     async (dir: string) => {
       if (!dir) return;
@@ -1050,30 +1050,34 @@ export function AgentPage() {
         }));
         // 确保该分组展开可见
         setCollapsedProjects((prev) => ({ ...prev, [dir]: false }));
-        if (dir === effectiveProjectRef.current) {
-          // 当前项目：切到新会话，主区随之加载（空会话 → 等首条消息）。
-          // 停止只发不等（同 handleCreateBlankSession）：切换不该被一个没回音的请求挡住。
-          if (running) void handleStop();
-          closeStream();
-          activeSessionRef.current = created.session_id;
-          setActiveSessionId(created.session_id);
-          saveActiveSessionId(dir, created.session_id);
-          setEvents([]);
-          setStatus('idle');
-          setRunning(false);
-          setError(null);
-          hasBackendSessionRef.current = false;
-          lastStepRef.current = 0;
-        } else {
-          // 非活动项目：上面只是本地插了一条，而这个项目的列表可能根本没拉过
-          // （懒加载下是展开才拉）。补一次完整列表，免得那一列只剩刚建的会话。
-          void refreshSessions(dir, undefined, false);
+        const sameProject = dir === effectiveProjectRef.current;
+        // 当前项目里新建：停掉正在跑的回合。停止只发不等（同 handleCreateBlankSession）：
+        // 切换不该被一个没回音的请求挡住。别的项目的会话不受影响，与点选会话切走时一致。
+        if (sameProject && running) void handleStop();
+        closeStream();
+        activeSessionRef.current = created.session_id;
+        setActiveSessionId(created.session_id);
+        // 先记住活动会话再切项目：项目 effect 会按这条记录恢复活动会话。
+        saveActiveSessionId(dir, created.session_id);
+        setEvents([]);
+        setStatus('idle');
+        setRunning(false);
+        setError(null);
+        hasBackendSessionRef.current = false;
+        lastStepRef.current = 0;
+        if (!sameProject) {
+          // 同 handleSelectSession 的切项目路径；项目 effect 会拉这个项目的完整会话列表
+          // （懒加载下它可能还没拉过，上面只是本地插了一条）。
+          // 首页选项目 / 顶部＋ 留下的「不恢复历史会话」标记在这里不适用，否则刚建的会话会被清掉。
+          skipRememberedSessionRef.current = false;
+          setConfigFileName(readConfigFileName(dir));
+          setProjectDir(dir);
         }
       } catch (err) {
         setError(normalizeError(err, uiMessage("agent:agentPage.handleCreateSessionInProject_normalizeError_newSessionFailed")));
       }
     },
-    [running, handleStop, refreshSessions],
+    [running, handleStop],
   );
 
   /** 折叠/展开某项目分组（手风琴外的自由切换：点击只翻转这一个）。
