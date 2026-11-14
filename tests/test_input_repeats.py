@@ -40,7 +40,8 @@ FILES = {
         ("", "……"),
         ("少女", "ただいま"),
         ("アリス", " おはよう "),  # 首尾空白不影响分组
-        ("", "……"),
+        ("", "「……」"),  # 纯符号句：不参与统计
+        ("少女", "はい"),
     ]),
     "b.json": _entries([
         ("少女", "おはよう"),
@@ -48,6 +49,7 @@ FILES = {
         ("ボブ", "ただいま"),
         ("ボブ", "一度きり"),
         ("ボブ", ""),  # 空句不计
+        ("ボブ", "はい"),
     ]),
 }
 
@@ -77,14 +79,20 @@ class InputRepeatsServerTests(_Project):
         out = self._repeats()
         self.assertEqual(
             [(row["src"], row["count"], row["files"], row["first"]) for row in out["results"]],
-            [("おはよう", 3, 2, "a.json:1"), ("……", 3, 2, "a.json:2"), ("ただいま", 2, 2, "a.json:3")],
+            [("おはよう", 3, 2, "a.json:1"), ("ただいま", 2, 2, "a.json:3"), ("はい", 2, 2, "a.json:6")],
         )
         # 只出现一次的句子不算重复；空句不计入总数
         self.assertEqual(out["total"], 3)
-        self.assertEqual(out["sentences_total"], 9)
+        self.assertEqual(out["sentences_total"], 11)
         self.assertEqual(out["unique_sentences"], 4)
         self.assertEqual(out["repeated_sentences"], 3)
-        self.assertEqual(out["repeated_occurrences"], 8)
+        self.assertEqual(out["repeated_occurrences"], 7)
+
+    def test_symbol_only_sentences_are_ignored_but_counted(self):
+        """「……」这类没有文字的句子在任何项目里都排最前，却没有译法可定：不进结果，只报数量。"""
+        out = self._repeats(query="…")
+        self.assertEqual(out["results"], [])
+        self.assertEqual(out["symbol_only_sentences"], 3)
 
     def test_speakers_are_reported_not_split_into_groups(self):
         """同一句由不同角色说出来仍是一组：该不该同译由读的人看 speakers 判断。"""
@@ -93,14 +101,15 @@ class InputRepeatsServerTests(_Project):
         self.assertEqual(row["speakers_total"], 2)
 
     def test_thresholds_and_query_filter_but_keep_project_totals(self):
-        out = self._repeats(min_count=3, min_length=3)
-        self.assertEqual([row["src"] for row in out["results"]], ["おはよう"])
-        self.assertEqual(out["total"], 1)
-        self.assertEqual(out["repeated_sentences"], 2)  # 只受 min_count 影响，不受 min_length 影响
+        out = self._repeats(min_count=2, min_length=3)
+        self.assertEqual([row["src"] for row in out["results"]], ["おはよう", "ただいま"])
+        self.assertEqual(out["total"], 2)
+        self.assertEqual(out["repeated_sentences"], 3)  # 全项目口径，不受 min_length 影响
+        self.assertEqual([row["src"] for row in self._repeats(min_count=3)["results"]], ["おはよう"])
 
     def test_paging_skips_groups_and_reports_the_full_total(self):
         out = self._repeats(max_results=1, offset=1)
-        self.assertEqual([row["src"] for row in out["results"]], ["……"])
+        self.assertEqual([row["src"] for row in out["results"]], ["ただいま"])
         self.assertEqual((out["total"], out["offset"]), (3, 1))
 
     def test_unparsable_file_is_reported_and_does_not_fail_the_scan(self):
@@ -132,6 +141,7 @@ class InputRepeatsToolTests(_Project):
     def test_tool_forwards_arguments_pages_and_renders_a_table(self):
         runner = self._runner()
         result = _tool_input_repeats(runner, {"limit": 2, "min_length": 2})
+        self.assertIn("纯符号句 3 句不参与统计", _render_tool_result_table("input_repeats", result))
         url, body = runner.posts[0]
         self.assertTrue(url.endswith("/input/repeats"))
         self.assertEqual((body["max_results"], body["min_count"], body["min_length"]), (2, 2, 2))

@@ -155,7 +155,7 @@ def _tool_input_repeats(runner: AgentRunner, args: dict[str, Any]) -> Any:
     total = result.get("total")
     has_more = isinstance(total, int) and offset + returned < total
     notes = [
-        "按去掉首尾空白后的整句原文分组，不区分说话人；统计的是文件插件解析出的原始条目，"
+        "按去掉首尾空白后的整句原文分组，不区分说话人，不含文字和数字的纯符号句已忽略；统计的是文件插件解析出的原始条目，"
         "文本插件与译前字典还没跑。first 是首次出现处（文件名:index），"
         '要看全部出现处及上下文用 input(action="search", query=原句, context=2)。'
     ]

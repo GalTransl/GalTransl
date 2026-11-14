@@ -1209,11 +1209,16 @@ def _input_repeats(
     结合 speakers 判断，所以把说话人作为信息带出来而不是拆成多组。读的是文件插件解析出
     的原始条目（文本插件与译前字典还没跑），与 /input/search 同口径；单个文件解析失败
     照样报在 files_failed 里，不影响其它文件。
+
+    不含任何文字或数字的句子（「……」、！？、♪ 这类纯符号句）不参与分组：它们在哪个
+    项目里都排在最前面，却没有译法可定，只会把真正要看的重复句挤到后面。数量单独报在
+    symbol_only_sentences 里，仍计入 sentences_total。
     """
     input_dir = os.path.join(project_dir, INPUT_FOLDERNAME)
     groups: dict[str, dict[str, Any]] = {}
     files_failed: list[str] = []
     sentences_total = 0
+    symbol_only = 0
     if os.path.isdir(input_dir):
         names = sorted(
             os.path.relpath(os.path.join(root, name), input_dir).replace(os.sep, "/")
@@ -1235,6 +1240,9 @@ def _input_repeats(
                 if not text:
                     continue
                 sentences_total += 1
+                if not any(char.isalnum() for char in text):
+                    symbol_only += 1
+                    continue
                 group = groups.get(text)
                 if group is None:
                     group = groups[text] = {
@@ -1271,6 +1279,7 @@ def _input_repeats(
         "offset": offset,
         "sentences_total": sentences_total,
         "unique_sentences": len(groups),
+        "symbol_only_sentences": symbol_only,
         # 全项目口径（不受 query/min_length 影响）：重复句一共占了多少条原文
         "repeated_sentences": len(repeated),
         "repeated_occurrences": sum(group["count"] for _, group in repeated),

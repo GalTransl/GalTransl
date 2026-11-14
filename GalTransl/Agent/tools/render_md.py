@@ -610,7 +610,8 @@ def _md_render_input_repeats(result: dict[str, Any]) -> str | None:
         more = int(row.get("speakers_total") or 0) - len(row.get("speakers") or [])
         rows.append({**row, "speakers": speakers + (f" 等{more}人" if more > 0 else "")})
     head = [
-        f"原文共 {result.get('sentences_total')} 句、去重后 {result.get('unique_sentences')} 句；"
+        f"原文共 {result.get('sentences_total')} 句（其中纯符号句 {result.get('symbol_only_sentences')} 句不参与统计）、"
+        f"其余去重后 {result.get('unique_sentences')} 句；"
         f"其中 {result.get('repeated_sentences')} 个句子有重复，合计占 {result.get('repeated_occurrences')} 句",
         f"符合筛选的重复句 {result.get('total')} 个，本页 {result.get('returned')} 个",
     ]
