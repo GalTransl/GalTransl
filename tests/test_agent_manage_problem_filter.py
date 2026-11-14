@@ -247,6 +247,15 @@ class ManageProblemFilterPromptTests(unittest.TestCase):
         self.assertIn("只过滤小类", description)
         self.assertIn("禁止过滤整类", description)
 
+    def test_workflow_prompt_forbids_filtering_a_whole_category(self) -> None:
+        """回归背景：模型见某类问题多，就直接加 `^GPT字典未使用` 把整类藏掉，真问题跟着消失。"""
+        from GalTransl.Agent.runtime import AGENT_SYSTEM_PROMPT
+
+        self.assertIn("禁止直接把整类问题加进过滤", AGENT_SYSTEM_PROMPT)
+        self.assertIn("`^GPT字典未使用`", AGENT_SYSTEM_PROMPT)
+        self.assertIn("由用户决定", AGENT_SYSTEM_PROMPT)
+        self.assertIn("`^GPT字典未使用`", self._description())
+
     def test_description_points_to_white_list_for_single_entries(self) -> None:
         schema = next(t for t in AGENT_TOOLS if t["function"]["name"] == "problems")
         self.assertIn("white_list", schema["function"]["parameters"]["properties"]["target"]["enum"])

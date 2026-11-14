@@ -19,6 +19,7 @@ from GalTransl.Agent.tools.common import (
     _dominant_trans_by,
     _mark_context_row,
     _only_preceding_arg,
+    _problem_details,
     _split_problem_types,
     _strip_dominant_trans_by,
 )
@@ -377,6 +378,10 @@ def _merge_problem_context(
     return merged
 
 
+# 类型统计里每类带出的明细数：够看出"是不是少数几种占了大头"，完整排行走 group_by="detail"
+_STATS_TOP_DETAILS = 3
+
+
 def _tool_list_problems(
     runner: AgentRunner, args: dict[str, Any], allowed_files: Sequence[str] | None = None,
     *, index_ranges: list[tuple[int, int]] | None = None,
@@ -409,15 +414,35 @@ def _tool_list_problems(
     problem_type = str(args.get("problem_type", "") or "").strip()
     if not problem_type:
         stats: dict[str, int] = {}
+        # 每类再按明细聚合：同一类里往往是少数几种明细占了大头（「残留日文：♪」几百条），
+        # 这才是"能不能批量处理"的依据；只有类型数时得一页页翻条目才看得出来。
+        detail_stats: dict[str, dict[str, int]] = {}
         for p in problems:
-            for t in _split_problem_types(p.get("problem", "")):
+            for t, details in _problem_details(p.get("problem", "")).items():
                 stats[t] = stats.get(t, 0) + 1
+                counts = detail_stats.setdefault(t, {})
+                for detail in details:
+                    if detail:
+                        counts[detail] = counts.get(detail, 0) + 1
         ranked = sorted(stats.items(), key=lambda kv: -kv[1])
+        types: list[dict[str, Any]] = []
+        for t, c in ranked:
+            row: dict[str, Any] = {"type": t, "count": c}
+            counts = detail_stats.get(t) or {}
+            if counts:
+                top = sorted(counts.items(), key=lambda kv: -kv[1])[:_STATS_TOP_DETAILS]
+                row["top_details"] = [{"detail": d, "count": n} for d, n in top]
+                row["details_total"] = len(counts)
+            types.append(row)
         out: dict[str, Any] = {
             "total": total,
             "mode": "stats",
-            "types": [{"type": t, "count": c} for t, c in ranked],
-            "hint": "默认只返回类型统计。用 problem_type 指定类型查看具体条目（配合 limit/offset 分页），problem_type 传 \"*\" 列出全部类型的具体条目。",
+            "types": types,
+            "hint": (
+                "默认只返回类型统计，top_details 是该类出现最多的几种明细及条数。"
+                "用 problem_type 指定类型查看具体条目（配合 limit/offset 分页），problem_type 传 \"*\" 列出全部类型的具体条目；"
+                "problem_type 加 group_by=\"detail\" 分页查看该类的完整明细排行。"
+            ),
         }
         if scope_note:
             out["note"] = scope_note
@@ -428,16 +453,50 @@ def _tool_list_problems(
         wanted = [t.strip() for t in problem_type.split(",") if t.strip()]
         problems = [p for p in problems if any(w in _split_problem_types(p.get("problem", "")) for w in wanted)]
 
-    limit = args.get("limit", 10)
+    group_by = str(args.get("group_by", "") or "").strip()
+    if group_by and group_by != "detail":
+        raise AgentToolError('group_by 只支持 "detail"')
+    if group_by and (problem_type == "*" or "," in problem_type):
+        raise AgentToolError('group_by="detail" 需要 problem_type 指定单个问题类型')
+    limit = args.get("limit", 20 if group_by else 10)
     offset = args.get("offset", 0)
     try:
         limit = max(1, min(int(limit), 20))
     except (TypeError, ValueError):
-        limit = 10
+        limit = 20 if group_by else 10
     try:
         offset = max(0, int(offset))
     except (TypeError, ValueError):
         offset = 0
+    if group_by:
+        # 明细排行：条数多的在前；次数相同按首次出现的先后（文件名、index 顺序）
+        groups: dict[str, dict[str, Any]] = {}
+        for p in sorted(problems, key=lambda row: (str(row.get("filename") or ""), int(row.get("index") or 0))):
+            for detail in _problem_details(p.get("problem", "")).get(problem_type, []):
+                group = groups.setdefault(detail, {"count": 0, "example": f"{p.get('filename')}:{p.get('index')}"})
+                group["count"] += 1
+        ranked_details = sorted(groups.items(), key=lambda kv: -kv[1]["count"])
+        page_details = ranked_details[offset:offset + limit]
+        more = offset + len(page_details) < len(ranked_details)
+        out = {
+            "total": total,
+            "mode": "details",
+            "problem_type": problem_type,
+            "matched": len(problems),
+            "details_total": len(ranked_details),
+            "offset": offset,
+            "returned": len(page_details),
+            "has_more": more,
+            **({"next_offset": offset + len(page_details)} if more else {}),
+            "details": [{"detail": d, **g} for d, g in page_details],
+            "hint": (
+                f'要看某个明细的具体条目：search_replace_cache(action="search", field="problem", query="{problem_type}：<明细>")；'
+                "明细为空表示该类问题不带明细。"
+            ),
+        }
+        if scope_note:
+            out["note"] = scope_note
+        return out
     matched = len(problems)
     order = _search_order(args)
     ordered = sorted(problems, key=lambda row: (str(row.get("filename") or ""), int(row.get("index") or 0)))

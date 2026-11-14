@@ -181,6 +181,27 @@ def _split_problem_types(problem: str) -> list[str]:
     return types
 
 
+def _problem_details(problem: str) -> dict[str, list[str]]:
+    """问题文本 → {类型: [明细, ...]}，拆项口径同 _split_problem_types。
+
+    明细是「类型：详情」冒号后的部分（如「残留日文：♪」的「♪」）；没有冒号的项（「丢失换行」）
+    明细为空串。同一条里重复的明细只记一次：统计的是"有多少条句子带这个明细"。
+    """
+    details: dict[str, list[str]] = {}
+    for part in str(problem or "").split(","):
+        token = part.strip()
+        if not token:
+            continue
+        type_name, _, detail = token.partition("：")
+        type_name, detail = type_name.strip(), detail.strip()
+        if not type_name:
+            continue
+        found = details.setdefault(type_name, [])
+        if detail not in found:
+            found.append(detail)
+    return details
+
+
 def _only_preceding_arg(args: dict[str, Any]) -> bool:
     """only_preceding：带上下文时是否只给上文（**默认 true**，省 token）。
 

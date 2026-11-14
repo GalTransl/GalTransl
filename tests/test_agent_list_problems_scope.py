@@ -54,7 +54,10 @@ class StatsScopeTests(unittest.TestCase):
         self.assertEqual(out["total"], 2)
         self.assertEqual(
             out["types"],
-            [{"type": "残留日文", "count": 1}, {"type": "缺控制符", "count": 1}],
+            [
+                {"type": "残留日文", "count": 1},
+                {"type": "缺控制符", "count": 1, "top_details": [{"detail": "/ ]", "count": 1}], "details_total": 1},
+            ],
         )
         self.assertIn("a.json", out["note"])
 

@@ -410,9 +410,30 @@ def _md_render_list_problems(result: dict[str, Any]) -> str:
     note_line = f"备注：{note}" if note else ""
     if result.get("mode") == "stats":
         head = f"共 {result.get('total')} 个问题，类型统计如下"
-        table = _md_table(["type", "count"], result.get("types"))
+        rows = []
+        for row in result.get("types") or []:
+            if not isinstance(row, dict):
+                continue
+            top = row.get("top_details") or []
+            text = "、".join(f"{item.get('detail')}×{item.get('count')}" for item in top if isinstance(item, dict))
+            more = int(row.get("details_total") or 0) - len(top)
+            rows.append({**row, "top_details": text + (f" 等{row.get('details_total')}种" if more > 0 else "")})
+        columns = ["type", "count", "top_details"] if any(row["top_details"] for row in rows) else ["type", "count"]
+        table = _md_table(columns, rows)
         hint = result.get("hint")
         return _md_doc(head, table, f"提示：{hint}" if hint else "", note_line)
+    if result.get("mode") == "details":
+        head = (
+            f"问题类型：{result.get('problem_type')}；共 {result.get('matched')} 条、{result.get('details_total')} 种明细；"
+            f"本页 {result.get('returned')} 种"
+        )
+        if result.get("has_more"):
+            head += f"、还有更多（offset={result.get('next_offset')} 续读）"
+        hint = result.get("hint")
+        return _md_doc(
+            head, _md_table(["detail", "count", "example"], result.get("details")),
+            f"提示：{hint}" if hint else "", note_line,
+        )
 
     head_parts: list[str] = []
     if result.get("problem_type") is not None:
