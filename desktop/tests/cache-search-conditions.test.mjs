@@ -34,9 +34,16 @@ test('cache conditions edit fields and regex independently and can be removed', 
     assert.equal(conditions[1].options.re, true);
     act(() => view.root.findAllByType('select')[1].props.onChange({ target: { value: 'proofread_dst' } }));
     assert.equal(conditions[1].field, 'proofread_dst');
-    act(() => view.root.findByType('button').props.onClick());
+    // 第一条没有删除按钮，它的 × 清空关键词并把范围复位到全部；附加条件的 × 删掉整条
+    const [clearFirst, removeSecond] = view.root.findAllByType('button');
+    act(() => removeSecond.props.onClick());
     assert.equal(conditions.length, 1);
     assert.equal(conditions[0].field, 'post_src');
+    act(() => clearFirst.props.onClick());
+    assert.equal(conditions[0].query, '');
+    assert.equal(conditions[0].field, 'all');
+    assert.equal(conditions[0].options.re, false);
+    assert.equal(view.root.findAllByType('button').length, 0);
   } finally { act(() => view.unmount()); }
 });
 

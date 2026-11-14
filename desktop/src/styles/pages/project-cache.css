@@ -16,7 +16,6 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  animation: cacheSlideFromLeft 200ms ease;
 }
 
 .project-cache-page__header {
@@ -1078,52 +1077,97 @@
 
 /* ── Cache Search Panel (sidebar) ── */
 
+/* 三个标签页共用：内容从它相对上一个标签的方向滑入（方向由 ProjectCachePage 给出） */
+.cache-sidebar-pane--from-left {
+  animation: cacheSlideFromLeft 200ms ease;
+}
+
+.cache-sidebar-pane--from-right {
+  animation: cacheSlideFromRight 200ms ease;
+}
+
 .cache-search-panel {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   flex: 1;
   min-height: 0;
-  animation: cacheSlideFromRight 200ms ease;
-}
-
-.cache-search-input-group {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-.cache-search-condition-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  color: var(--color-text-muted);
-  font-size: 11px;
 }
 
 .cache-search-conditions {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: 6px;
 }
 
-.cache-search-condition-remove {
+/* 一个条件 = 一个整体输入框：字段 | 关键词 | 正则 | 删除 */
+.cache-search-box {
+  display: flex;
+  align-items: stretch;
+  height: 32px;
+  box-sizing: border-box;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: var(--color-surface-strong);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.cache-search-box:hover {
+  border-color: var(--color-line-strong);
+}
+
+.cache-search-box:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
+}
+
+.cache-search-box__input {
+  flex: 1 0 0;
+  min-width: 56px;
+  padding: 0 8px;
   border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.cache-search-box__input::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+
+.cache-search-box__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  align-self: center;
+  width: 22px;
+  height: 22px;
+  margin-right: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
-  padding: 2px 6px;
-  font-size: 18px;
+  opacity: 0;
+  transition: background var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
 }
 
-.cache-search--global {
-  flex: 1 1 150px;
-  min-width: 0;
+.cache-search-box:hover .cache-search-box__remove,
+.cache-search-box:focus-within .cache-search-box__remove {
+  opacity: 1;
 }
 
-/* cache-search-field — compact CustomSelect in cache search bar */
+.cache-search-box__remove:hover {
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  color: var(--color-danger);
+}
+
+/* cache-search-field — compact CustomSelect in the cache search panel */
 .cache-search-field.custom-select {
   flex-shrink: 0;
   width: auto;
@@ -1131,11 +1175,11 @@
 }
 
 .cache-search-field.custom-select .custom-select__trigger {
-  min-height: 26px;
+  min-height: 28px;
   padding: 2px 8px;
   padding-right: 6px;
-  font-size: 11px;
-  border-radius: calc(var(--radius-control) - 4px);
+  font-size: 12px;
+  border-radius: 8px;
 }
 
 .cache-search-field.custom-select .custom-select__arrow {
@@ -1154,74 +1198,60 @@
   font-size: 11px;
 }
 
-.cache-search-meta {
+/* 条件框里的字段选择：去掉自己的边框，只留一条分隔线，长字段名省略 */
+.cache-search-box__field.custom-select {
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
+  /* 侧栏拖到最窄时让字段名先让位，关键词至少留得下几个字 */
+  flex-shrink: 1;
+  max-width: 46%;
 }
 
-.cache-search-meta .cache-search-status {
-  margin-left: auto;
-}
-
-.cache-replace-toggle__btn {
-  border: none;
-  background: none;
-  cursor: pointer;
-  font-size: 12px;
+.cache-search-box__field.custom-select .custom-select__trigger {
+  min-height: 0;
+  height: 100%;
+  border: 0;
+  border-right: 1px solid var(--color-line);
+  border-radius: 9px 0 0 9px;
+  background: transparent;
+  box-shadow: none;
   color: var(--color-text-muted);
-  padding: 2px var(--space-2);
-  border-radius: var(--radius-control);
-  transition: all var(--transition-fast);
 }
 
-.cache-replace-toggle__btn:hover {
+.cache-search-box__field.custom-select .custom-select__trigger:hover,
+.cache-search-box__field.custom-select.custom-select--open .custom-select__trigger {
   background: var(--color-neutral-soft);
   color: var(--color-text);
 }
 
-.cache-replace-group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-2);
-  background: var(--color-surface-base);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-}
-
+/* 正则开关：贴着输入框右边框的图标按钮，开启时变蓝 */
 .cache-search-regex-toggle {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
   flex: 0 0 auto;
-  min-height: 26px;
-  padding: 2px 8px;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-control);
-  background: var(--color-surface-strong);
+  align-self: center;
+  width: 24px;
+  height: 22px;
+  margin-right: 4px;
+  border-radius: 6px;
   color: var(--color-text-muted);
-  font-size: 11px;
-  line-height: 1;
   cursor: pointer;
-  white-space: nowrap;
-  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .cache-search-regex-toggle:hover {
-  border-color: var(--color-primary-soft);
   background: var(--color-neutral-soft);
   color: var(--color-text);
 }
 
-.cache-search-regex-toggle:has(input:focus-visible) {
-  outline: 2px solid var(--color-primary-soft);
-  outline-offset: 1px;
+.cache-search-regex-toggle:has(input:checked) {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
 }
 
-.cache-search-regex-toggle:has(input:disabled) {
-  cursor: not-allowed;
-  opacity: 0.55;
+.cache-search-regex-toggle:has(input:focus-visible) {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
 }
 
 .cache-search-regex-toggle input {
@@ -1232,45 +1262,112 @@
   pointer-events: none;
 }
 
-.cache-search-regex-toggle__track {
-  position: relative;
-  width: 24px;
-  height: 14px;
-  flex: 0 0 24px;
-  border-radius: 999px;
-  background: var(--color-line-strong);
-  transition: background var(--transition-fast);
+.cache-search-hint {
+  padding: 0 2px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.3;
 }
 
-.cache-search-regex-toggle__track::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
+.cache-search-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-height: 26px;
+}
+
+.cache-search-toolbar .cache-search-status {
+  margin-left: auto;
+  padding: 0 2px;
+}
+
+.cache-search-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 24px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.cache-search-action:hover:not(:disabled) {
+  background: var(--color-neutral-soft);
+  color: var(--color-text);
+}
+
+.cache-search-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.cache-search-action--active {
+  color: var(--color-primary);
+}
+
+.cache-replace-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--color-neutral-soft);
+  border-radius: 12px;
+}
+
+/* 查找 / 替换为 两个输入叠成一个框 */
+.cache-replace-fields {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
   background: var(--color-surface-strong);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.22);
-  transition: transform var(--transition-fast);
+  overflow: hidden;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.cache-search-regex-toggle input:checked + .cache-search-regex-toggle__track {
-  background: var(--color-primary);
+.cache-replace-fields:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
 }
 
-.cache-search-regex-toggle input:checked + .cache-search-regex-toggle__track::after {
-  transform: translateX(10px);
+.cache-replace-fields__input {
+  height: 30px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
 }
 
-.cache-search--replace {
-  width: 100%;
+.cache-replace-fields__input + .cache-replace-fields__input {
+  border-top: 1px solid var(--color-line);
 }
 
 .cache-replace-actions {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
-  justify-content: flex-end;
+}
+
+.cache-replace-actions__field.custom-select {
+  margin-right: auto;
+}
+
+.cache-replace-actions .button {
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  font-size: 12px;
 }
 
 .cache-replace-preview {

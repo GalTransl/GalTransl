@@ -389,6 +389,7 @@
     "searchFieldPreDst": "Model translation (pre_dst)",
     "searchFieldProofreadDst": "Proofread translation (proofread_dst)",
     "removeSearchCondition": "Remove condition",
+    "clearSearchCondition": "Clear search",
     "addSearchCondition": "+ Add condition",
     "allSearchConditions": "Match all conditions",
     "cacheSearchInputGroup_placeholder_search": "Search…",

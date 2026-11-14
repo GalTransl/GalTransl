@@ -68,6 +68,7 @@ function unescapeControlChars(text: string): string {
 }
 
 type SidebarTab = 'files' | 'search' | 'problems';
+const SIDEBAR_TAB_ORDER: SidebarTab[] = ['files', 'search', 'problems'];
 type CacheContextMenuState = {
   x: number;
   y: number;
@@ -545,6 +546,12 @@ export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: Pro
 
   // Tab state
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files');
+  // 标签内容从它相对上一个标签的方向滑入。切换入口很多（点标签、点问题跳搜索、外部跳转、
+  // 切项目恢复），所以在渲染时对比上一次的标签来定方向，而不是让每个入口各自记。
+  const [tabEnter, setTabEnter] = useState<{ tab: SidebarTab; from: 'left' | 'right' }>({ tab: 'files', from: 'left' });
+  const tabEnterFrom = tabEnter.tab === sidebarTab ? tabEnter.from
+    : SIDEBAR_TAB_ORDER.indexOf(sidebarTab) > SIDEBAR_TAB_ORDER.indexOf(tabEnter.tab) ? 'right' : 'left';
+  if (tabEnter.tab !== sidebarTab) setTabEnter({ tab: sidebarTab, from: tabEnterFrom });
   /** ?q=xxx 带进来的搜索词（GPT 字典条目行的「→」），已经应用过的那次靠 ref 去重 */
   const [searchParams] = useSearchParams();
   const appliedCacheSearchRef = useRef('');
@@ -1763,7 +1770,7 @@ export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: Pro
 
           {/* Tab: Files */}
           {sidebarTab === 'files' && (
-            <div className="cache-sidebar-tab-content">
+            <div className={`cache-sidebar-tab-content cache-sidebar-pane--from-${tabEnterFrom}`}>
               <div className="cache-layout__sidebar-header">
                 <h3>{translate("projects:projectCachePage.cacheLayoutSidebarHeader_message_file")}</h3>
                 <div className="cache-layout__sidebar-header-actions">
@@ -1887,7 +1894,7 @@ export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: Pro
 
           {/* Tab: Search */}
           {sidebarTab === 'search' && (
-            <div className="cache-search-panel">
+            <div className={`cache-search-panel cache-sidebar-pane--from-${tabEnterFrom}`}>
               <AnimatedList active={active} className="cache-search-conditions">
               <CacheSearchConditionRow
                 key="primary"
@@ -1903,18 +1910,18 @@ export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: Pro
                 />
               ))}
               </AnimatedList>
-              <div className="cache-search-condition-actions">
-                <button type="button" className="cache-replace-toggle__btn" disabled={searchConditions.length >= 19}
+              {searchConditions.length > 0 && (
+                <div className="cache-search-hint">{translate('projects:projectCachePage.allSearchConditions')}</div>
+              )}
+
+              {/* 一行工具条：加条件、展开替换在左，结果数在右 */}
+              <div className="cache-search-toolbar">
+                <button type="button" className="cache-search-action" disabled={searchConditions.length >= 19}
                   onClick={() => setSearchConditions((current) => [...current, { query: '', field: 'pre_dst', options: { re: false } }])}
                 >{translate('projects:projectCachePage.addSearchCondition')}</button>
-                <span>{translate('projects:projectCachePage.allSearchConditions')}</span>
-              </div>
-
-              {/* Replace toggle + Search results summary */}
-              <div className="cache-search-meta">
                 <button
                   type="button"
-                  className="cache-replace-toggle__btn"
+                  className={`cache-search-action${showReplace ? ' cache-search-action--active' : ''}`}
                   onClick={() => { setShowReplace(!showReplace); setReplaceQuery(searchQuery); }}
                   aria-expanded={showReplace}
                   title={showReplace ? translate("projects:projectCachePage.cacheReplaceToggleBtn_title_replace") : translate("projects:projectCachePage.cacheReplaceToggleBtn_title_replaceVariant2")}
@@ -1930,30 +1937,34 @@ export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: Pro
               </div>
               <AnimatedCollapse open={showReplace}>
                 <div className="cache-replace-group">
-                  <input
-                    type="text"
-                    className="cache-search cache-search--replace"
-                    placeholder={translate("projects:projectCachePage.cacheReplaceGroup_placeholder_search")}
-                    value={replaceQuery}
-                    onChange={(e) => setReplaceQuery(e.target.value)}
-                  />
-                  <input
-                    type="text"
-                    className="cache-search cache-search--replace"
-                    placeholder={translate("projects:projectCachePage.cacheReplaceGroup_placeholder_replace")}
-                    value={replaceWith}
-                    onChange={(e) => setReplaceWith(e.target.value)}
-                  />
-                  <CustomSelect
-                    className="cache-search-field"
-                    value={replaceField}
-                    onChange={(e) => setReplaceField(e.target.value as CacheReplaceField)}
-                  >
-                    <option value="dst">{translate("projects:projectCachePage.cacheSearchField_message_translationTextVariant2")}</option>
-                    <option value="src">{translate("projects:projectCachePage.cacheSearchField_message_sourceVariant2")}</option>
-                    <option value="all">{translate("projects:projectCachePage.cacheSearchField_message_all")}</option>
-                  </CustomSelect>
+                  <div className="cache-replace-fields">
+                    <input
+                      type="text"
+                      className="cache-replace-fields__input"
+                      placeholder={translate("projects:projectCachePage.cacheReplaceGroup_placeholder_search")}
+                      aria-label={translate("projects:projectCachePage.cacheReplaceGroup_placeholder_search")}
+                      value={replaceQuery}
+                      onChange={(e) => setReplaceQuery(e.target.value)}
+                    />
+                    <input
+                      type="text"
+                      className="cache-replace-fields__input"
+                      placeholder={translate("projects:projectCachePage.cacheReplaceGroup_placeholder_replace")}
+                      aria-label={translate("projects:projectCachePage.cacheReplaceGroup_placeholder_replace")}
+                      value={replaceWith}
+                      onChange={(e) => setReplaceWith(e.target.value)}
+                    />
+                  </div>
                   <div className="cache-replace-actions">
+                    <CustomSelect
+                      className="cache-search-field cache-replace-actions__field"
+                      value={replaceField}
+                      onChange={(e) => setReplaceField(e.target.value as CacheReplaceField)}
+                    >
+                      <option value="dst">{translate("projects:projectCachePage.cacheSearchField_message_translationTextVariant2")}</option>
+                      <option value="src">{translate("projects:projectCachePage.cacheSearchField_message_sourceVariant2")}</option>
+                      <option value="all">{translate("projects:projectCachePage.cacheSearchField_message_all")}</option>
+                    </CustomSelect>
                     <Button
                       variant="secondary"
                       disabled={replacing || !replaceQuery.trim()}
@@ -2034,7 +2045,7 @@ export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: Pro
 
           {/* Tab: Problems */}
           {sidebarTab === 'problems' && (
-            <div className="cache-problems-panel">
+            <div className={`cache-problems-panel cache-sidebar-pane--from-${tabEnterFrom}`}>
               <div className="cache-problems-hint">{translate("projects:projectCachePage.cacheProblemsPanel_message_retranslateEntryFilterProblemEntryRegexMatch")}</div>
               {loadingProblems ? (
                 <div className="cache-problems-loading">{translate("projects:projectCachePage.cacheProblemsPanel_message_loadProblem")}</div>

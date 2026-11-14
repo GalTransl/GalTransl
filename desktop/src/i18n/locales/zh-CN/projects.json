@@ -389,6 +389,7 @@
     "searchFieldPreDst": "模型译文 (pre_dst)",
     "searchFieldProofreadDst": "校对译文 (proofread_dst)",
     "removeSearchCondition": "删除此条件",
+    "clearSearchCondition": "清空搜索条件",
     "addSearchCondition": "+ 添加条件",
     "allSearchConditions": "同时满足全部条件",
     "cacheSearchInputGroup_placeholder_search": "搜索内容…",

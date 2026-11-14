@@ -87,7 +87,7 @@ async function fixture({ setupSearch = true, api = {}, cacheEntries, focusTarget
   if (setupSearch) {
     clickText('common:actions.search');
     clickText('projects:projectCachePage.addSearchCondition');
-    const queries = () => view.root.findAllByProps({ className: 'cache-search cache-search--global' });
+    const queries = () => view.root.findAllByProps({ className: 'cache-search-box__input' });
     act(() => queries()[0].props.onChange({ target: { value: '悶え' } }));
     act(() => queries()[1].props.onChange({ target: { value: '挣扎' } }));
     await flush(400);
