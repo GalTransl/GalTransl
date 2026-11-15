@@ -50,7 +50,8 @@ def windows_shell_path(raw):
 
 
 def windows_shell_command(command):
-    # Convert cd's expanded argument instead of rewriting script literals or heredocs.
+    # Convert expanded arguments of cd and common file commands instead of rewriting
+    # script literals or heredocs: BusyBox reads /c/x as \c\x on the working drive.
     return '''cd() {
     local path option tail drive
     case "$#" in
@@ -74,6 +75,45 @@ def windows_shell_command(command):
     esac
     command cd ${option:+"$option"} "$path"
 }
+__gt_drive_path() {
+    # $1: argument, $2: "exists" to convert only when the result exists. Sets REPLY.
+    local tail drive first
+    REPLY="$1"
+    case "$1" in
+        /mnt/[a-zA-Z]|/mnt/[a-zA-Z]/*) tail="${1#/mnt/}"; first=/mnt ;;
+        /cygdrive/[a-zA-Z]|/cygdrive/[a-zA-Z]/*) tail="${1#/cygdrive/}"; first=/cygdrive ;;
+        /[a-zA-Z]|/[a-zA-Z]/*) tail="${1#/}"; first="/${tail%%/*}" ;;
+        *) return ;;
+    esac
+    drive="${tail%%/*}"
+    # A real directory of that name on the working drive wins over the drive letter.
+    [ -e "$first" ] && return
+    [ -d "$drive:/" ] || return
+    case "$tail" in */*) tail="$drive:/${tail#*/}" ;; *) tail="$drive:/" ;; esac
+    [ "$2" = exists ] && [ ! -e "$tail" ] && return
+    REPLY="$tail"
+}
+__gt_run() {
+    local mode="$1" name="$2" arg
+    shift 2
+    for arg do
+        shift
+        __gt_drive_path "$arg" "$mode"
+        set -- "$@" "$REPLY"
+    done
+    case "$name" in
+        python) __gt_python "$@" ;;
+        *) command "$name" "$@" ;;
+    esac
+}
+# Path arguments only; grep and find also take patterns, so they convert existing paths only.
+for __gt_name in ls cat head tail wc cp mv rm mkdir rmdir touch stat file du sort uniq diff cmp md5sum sha1sum sha256sum xxd hexdump od strings tar unzip python; do
+    eval "$__gt_name() { __gt_run any $__gt_name "'"$@"; }'
+done
+for __gt_name in grep find sed awk; do
+    eval "$__gt_name() { __gt_run exists $__gt_name "'"$@"; }'
+done
+unset __gt_name
 ''' + command
 
 
@@ -284,9 +324,31 @@ class ExtractionTools:
         executable, prefix = bash_config()
         self.require_permission("bash", args)
         stdin_command = prefix[-1] == "-s"
-        command = windows_shell_command(args["command"]) if os.name == "nt" else args["command"]
         python = self.available["builtin_python"]
         launcher = shlex.join([Path(python["executable"]).as_posix(), *python["args"]])
-        command = f'python() {{ {launcher} "$@"; }}\npython3() {{ python "$@"; }}\n' + command
+        if os.name == "nt":
+            # The wrappers defined by windows_shell_command route python through __gt_python.
+            command = f'__gt_python() {{ {launcher} "$@"; }}\n' + windows_shell_command(args["command"])
+        else:
+            command = f'python() {{ {launcher} "$@"; }}\n' + args["command"]
+        command = 'python3() { python "$@"; }\n' + command
         return self.commands.execute(executable, prefix if stdin_command else [*prefix, command],
-                                     call_id, timeout, command if stdin_command else None, native=True)
+                                     call_id, timeout, command if stdin_command else None, native=True,
+                                     path_prefix=self.python_shims(launcher))
+
+    def python_shims(self, launcher):
+        """PATH directory whose python/python3 scripts run the bundled executor.
+
+        Shell functions only cover direct calls: `time python`, `xargs python`,
+        `env python` and scripts exec a program from PATH, which used to be a
+        system Python without the Skill directories (or nothing at all).
+        """
+        directory = checked_path("bin", self.session_dir, [self.session_dir], True)
+        directory.mkdir(parents=True, exist_ok=True)
+        script = f'#!/bin/sh\nexec {launcher} "$@"\n'.encode("utf-8")
+        for name in ("python", "python3"):
+            target = checked_path(str(directory / name), self.session_dir, [self.session_dir], True)
+            if not target.is_file() or target.read_bytes() != script:
+                target.write_bytes(script)
+                target.chmod(0o755)
+        return str(directory)

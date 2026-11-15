@@ -566,6 +566,35 @@ def test_bash_cd_accepts_windows_drive_aliases(fixture, prefix, upper, option):
 
 
 @pytest.mark.skipif(os.name != 'nt', reason='Windows shell drive aliases')
+@pytest.mark.parametrize('prefix', ['/', '/mnt/', '/cygdrive/'])
+def test_bash_file_commands_accept_windows_drive_aliases(fixture, prefix):
+    """Regression: `ls /c/Users/...` failed with "No such file or directory" because
+    BusyBox reads /c/x as \\c\\x on the working drive; only cd used to convert it."""
+    runner, _ = fixture
+    runner.tools.approve = lambda *args: None
+    target = runner.tools.workspace / '中文 目录'
+    target.mkdir()
+    (target / 'a.txt').write_bytes(b'first\nneedle /e/literal\n')
+    (target / 'probe.py').write_bytes(b'import sys\nprint(open(sys.argv[1], encoding="utf-8").readline().strip())\n')
+    alias = shlex.quote(prefix + target.drive[0].lower() + target.as_posix()[2:])
+    run = lambda command: text(runner._dispatch_tool('bash', {'command': command})).strip()
+    assert run(f'ls {alias}/').split() == ['a.txt', 'probe.py']
+    assert run(f'cat {alias}/a.txt | head -1') == 'first'
+    assert run(f'head -n 1 {alias}/a.txt; wc -l < {alias}/a.txt 2>/dev/null || echo redirect-not-converted'
+               ).splitlines()[0] == 'first'
+    assert run(f'cp {alias}/a.txt {alias}/b.txt && ls {alias} | wc -l').strip() == '3'
+    assert run(f'find {alias} -name "*.py" | wc -l').strip() == '1'
+    assert run(f'python {alias}/probe.py {alias}/a.txt') == 'first'
+    assert run(f'python3 {alias}/probe.py {alias}/a.txt') == 'first'
+    # Patterns and literals that merely look like drive paths are left alone.
+    assert run(f"grep -c '/e/literal' {alias}/a.txt") == '1'
+    assert run("echo /e/literal; printf '%s' /c/x") == '/e/literal\n/c/x'
+    assert run(f"sed -n 's#/e/literal#ok#p' {alias}/a.txt") == 'needle ok'
+    missing = runner._dispatch_tool('bash', {'command': f'ls {alias}/missing'})
+    assert missing['isError'] is True
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows shell drive aliases')
 def test_bash_cd_keeps_shell_arguments_and_script_literals(fixture):
     runner, _ = fixture
     runner.tools.approve = lambda *args: None

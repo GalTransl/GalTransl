@@ -40,11 +40,12 @@ class Commands:
                     self.job.kill()
                 terminate_tree(self.process)
 
-    def execute(self, executable, args, call_id, timeout=120, request=None, *, native=False):
+    def execute(self, executable, args, call_id, timeout=120, request=None, *, native=False, path_prefix=None):
         if self.stop_event.is_set():
             raise AgentStopRequested()
         if os.name != "nt":
-            return self._execute(executable, args, call_id, timeout, request, native=native)
+            return self._execute(executable, args, call_id, timeout, request, native=native,
+                                 path_prefix=path_prefix)
         from .tools import checked_path
         # BusyBox resolves /tmp against the working drive (E:\tmp), so hand the
         # shell a scratch directory. It lives in the output workspace rather than
@@ -57,7 +58,8 @@ class Commands:
         scratch.mkdir(parents=True, exist_ok=True)
         scratch = checked_path(str(scratch), self.workspace, [self.workspace])
         try:
-            return self._execute(executable, args, call_id, timeout, request, native=native, scratch=scratch)
+            return self._execute(executable, args, call_id, timeout, request, native=native, scratch=scratch,
+                                 path_prefix=path_prefix)
         finally:
             # Leave no trace when the command created nothing (read-only commands
             # keep an empty output directory); rmdir only succeeds if empty.
@@ -66,7 +68,7 @@ class Commands:
             except OSError:
                 pass
 
-    def _execute(self, executable, args, call_id, timeout, request, *, native, scratch=None):
+    def _execute(self, executable, args, call_id, timeout, request, *, native, scratch=None, path_prefix=None):
         from .tools import checked_path
         log_path = self.session_dir / "tmp" / f"command-{uuid.uuid4().hex}.log"
         env = external_environment()
@@ -80,6 +82,8 @@ class Commands:
                     env.pop("LD_LIBRARY_PATH", None)
         if scratch is not None:
             env["TMPDIR"] = scratch.as_posix()
+        if path_prefix:
+            env["PATH"] = os.pathsep.join(filter(None, [path_prefix, env.get("PATH")]))
         env.update(PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
         python = self.available["builtin_python"]
         if not native:

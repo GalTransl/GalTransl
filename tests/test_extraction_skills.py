@@ -96,6 +96,14 @@ def test_registered_extra_skills_are_readable_and_importable_with_bundled_python
     result = tools.bash({'command': "python -B -c 'import primary_module, extra_module; print(primary_module.VALUE, extra_module.VALUE)'"}, 'bash-probe')
     assert not result.get('isError'), result
     assert result['structuredContent']['output'].strip() == 'primary extra'
+    # Regression: `time python` and `xargs python` exec a program from PATH instead of
+    # the shell function, so they ran a system Python without the Skill directories.
+    (workspace / 'probe.py').write_text('import primary_module, extra_module\nprint(primary_module.VALUE, extra_module.VALUE)\n', encoding='utf-8')
+    for command in ('time python probe.py', 'echo probe.py | xargs python3', 'env python probe.py',
+                    "sh -c 'python probe.py'"):
+        result = tools.bash({'command': command}, 'bash-indirect')
+        assert not result.get('isError'), (command, result)
+        assert 'primary extra' in result['structuredContent']['output'], (command, result)
     result = tools.run_python({'code': "import os, json, sys; from pathlib import Path; assert os.environ['GALTRANSL_SKILL_DIR'] == sys.argv[1]; assert json.loads(os.environ['GALTRANSL_SKILL_DIRS']) == sys.argv[2:]; assert all(str(Path(path).resolve()) in sys.path for path in sys.argv[2:]); print('automatic Skill paths')",
                                'args': [str(primary.parent.parent), *tools.skill_dirs]}, 'paths-probe')
     assert not result.get('isError'), result
