@@ -1047,6 +1047,18 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
           ref={contextMenuRef}
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
+          <button
+            className="sidebar__context-menu-item"
+            type="button"
+            onClick={() => {
+              const { projectDir } = contextMenu;
+              setContextMenu(null);
+              navigate('/agent', { state: { agentProjectDir: projectDir, agentOpenFirstSession: true } });
+            }}
+          >
+            <span className="sidebar__context-menu-icon" aria-hidden><Icon name="bot" /></span>
+            {translate("common:sidebar.sidebarContextMenu_message_openTranslationAgent")}
+          </button>
           {PROJECT_FOLDERS.map(({ labelKey, icon, subdir }) => {
             const path = subdir ? joinPath(contextMenu.projectDir, subdir) : contextMenu.projectDir;
             return (

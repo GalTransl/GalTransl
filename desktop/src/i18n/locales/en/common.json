@@ -272,6 +272,7 @@
     "sidebarToggleBtn_title_text": "Collapse the sidebar",
     "sidebarToggleBtn_title_textVariant2": "Expand the sidebar",
     "sidebarToggleBtn_message_text": "Collapse",
+    "sidebarContextMenu_message_openTranslationAgent": "Open in Translation Agent",
     "sidebarContextMenu_message_disableProject": "Close project",
     "sidebarContextMenu_message_disableProjectVariant2": "Close other projects",
     "sidebarContextMenu_message_disableProjectVariant3": "Close all projects"

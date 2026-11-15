@@ -272,6 +272,7 @@
     "sidebarToggleBtn_title_text": "收起侧边栏",
     "sidebarToggleBtn_title_textVariant2": "展开侧边栏",
     "sidebarToggleBtn_message_text": "收起",
+    "sidebarContextMenu_message_openTranslationAgent": "进入翻译 Agent",
     "sidebarContextMenu_message_disableProject": "关闭项目",
     "sidebarContextMenu_message_disableProjectVariant2": "关闭其他项目",
     "sidebarContextMenu_message_disableProjectVariant3": "关闭所有项目"

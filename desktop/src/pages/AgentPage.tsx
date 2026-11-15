@@ -110,6 +110,8 @@ export function AgentPage() {
   const location = useLocation();
   const requestedProject = typeof location.state?.agentProjectDir === 'string'
     ? location.state.agentProjectDir : '';
+  // 主侧栏项目右键「进入翻译 Agent」：打开该项目的第一个会话，而不是空态
+  const requestedFirstSession = location.state?.agentOpenFirstSession === true;
   const handledProjectRequestRef = useRef<string | null>(null);
 
   // 已打开项目与历史合并的去重列表。响应式：监听 OPEN_PROJECTS_CHANGE_EVENT
@@ -994,10 +996,10 @@ export function AgentPage() {
 
   // 向导可能返回已缓存的 Agent 页面。每次跳转只接管一次项目，随后允许用户自由切换。
   useLayoutEffect(() => {
-    if (!active || !requestedProject || handledProjectRequestRef.current === location.key) return;
+    if (!active || !requestedProject || requestedFirstSession || handledProjectRequestRef.current === location.key) return;
     handledProjectRequestRef.current = location.key;
     chooseProject(requestedProject);
-  }, [active, requestedProject, location.key, chooseProject]);
+  }, [active, requestedProject, requestedFirstSession, location.key, chooseProject]);
 
   /** 会话开始前从 composer 的 chip 换项目：与 chooseProject 同一套，但**不动已输入的指令**。
    *  这个动作发生在"项目已选、还没开聊"的窗口里，用户很可能已经把任务描述写好了——
@@ -1167,6 +1169,39 @@ export function AgentPage() {
     },
     [],
   );
+
+  /* 主侧栏项目右键「进入翻译 Agent」：先拉该项目的会话列表，有会话就打开会话栏里的
+     第一个，没有就新建一个空白会话（与项目分组上的 ＋ 同一条路径）。先拉列表再切，
+     主区不会先闪一下空态。等列表期间又有新的跳转就作废这一次。 */
+  useEffect(() => {
+    if (!active || !requestedProject || !requestedFirstSession || handledProjectRequestRef.current === location.key) return;
+    const requestKey = location.key;
+    handledProjectRequestRef.current = requestKey;
+    void (async () => {
+      let sessions: AgentSessionMeta[];
+      try {
+        sessions = await listAgentSessions(requestedProject);
+      } catch {
+        // 后端不可达时建会话也会失败：退回只打开项目
+        if (handledProjectRequestRef.current === requestKey) chooseProject(requestedProject);
+        return;
+      }
+      if (handledProjectRequestRef.current !== requestKey) return;
+      addOpenProject(requestedProject, readConfigFileName(requestedProject));
+      const first = sessions[0]?.session_id;
+      if (!first) {
+        await handleCreateSessionInProject(requestedProject);
+        return;
+      }
+      // 作废还在路上的旧列表请求，免得它回来后把主区切回别的会话；
+      // 切项目时项目 effect 要按刚记下的活动会话恢复，不能沿用「保持空态」的旧标记
+      projectSelectionVersionRef.current += 1;
+      skipRememberedSessionRef.current = false;
+      handleSelectSession(requestedProject, first);
+      setCollapsedProjects((prev) => ({ ...prev, [requestedProject]: false }));
+      void refreshSessions(requestedProject, first, false);
+    })();
+  }, [active, requestedProject, requestedFirstSession, location.key, chooseProject, handleCreateSessionInProject, handleSelectSession, refreshSessions]);
 
   const handleDeleteSession = useCallback(
     async (dir: string, session: AgentSessionMeta) => {
