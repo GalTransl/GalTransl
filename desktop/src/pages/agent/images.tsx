@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getBackendBaseUrl } from '../../lib/api';
@@ -143,9 +144,9 @@ export function ImageAttachments({ images, scope, remove }: { images: AgentImage
   return <><div className="agent-images">{images.map(image => <div className="agent-images__item" key={image.id}>
     <button type="button" className="agent-images__preview" title={image.name} aria-label={t('agent:images.preview', { name: image.name })} onClick={() => setOpened(image)}><img src={imageUrl(image, scope)} alt={image.name} loading="lazy" /></button>
     {remove && <button type="button" className="agent-images__remove" aria-label={t('agent:images.remove', { name: image.name })} onClick={() => remove(image.id)}>×</button>}
-  </div>)}</div>{opened && <div className="agent-image-viewer" role="dialog" aria-modal="true" aria-label={opened.name} onClick={() => setOpened(null)}>
+  </div>)}</div>{opened && createPortal(<div className="agent-image-viewer" role="dialog" aria-modal="true" aria-label={opened.name} onClick={() => setOpened(null)}>
     <button type="button" ref={close} onClick={() => setOpened(null)} aria-label={t('agent:images.close')}>×</button><img src={imageUrl(opened, scope)} alt={opened.name} onClick={event => event.stopPropagation()} />
-  </div>}</>;
+  </div>, document.body)}</>;
 }
 
 export function ImageInputStatus({ input }: { input: Pick<ReturnType<typeof useImageInput>, 'processing' | 'error' | 'dragging'> }) {
