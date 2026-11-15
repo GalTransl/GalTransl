@@ -623,7 +623,9 @@
 /* ── Dictionary Card Mode ── */
 
 /* 单分组时列表本身不滚动：滚动条交给卡片内部的表格，跟卡片边框贴在一起。
-   多分组（普通 + 条件等）见下面的 --multi 规则。 */
+   多分组（普通 + 条件等）见下面的 --multi 规则。
+   1px 内边距让卡片边框离开裁剪边：文件栏可拖宽后列宽常带小数，加上系统缩放，
+   裁剪边按物理像素取整时会把贴边卡片的右边框整列吃掉（圆角往里弯，所以还在）。 */
 .dict-card-list {
   display: flex;
   flex-direction: column;
@@ -631,6 +633,7 @@
   flex: 1;
   min-width: 0;
   min-height: 0;
+  padding: 1px;
   overflow: hidden;
 }
 
