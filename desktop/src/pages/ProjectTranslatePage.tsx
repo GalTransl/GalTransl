@@ -37,6 +37,7 @@ import {
   submitJob } from '../lib/api';
 import { getProfileMeta } from '../lib/backendProfile';
 import { summarizeBackendUsage } from '../lib/backendUsage';
+import { formatTokenCount, formatTokenPercent, summarizeTokenUsage } from '../lib/tokenUsage';
 import { normalizeError } from '../lib/errors';
 import { basenamePath, joinPath } from '../lib/paths';
 import { usePrefersReducedMotion, LAUNCH, STRIP_BOOT, BAR_SURGE, COMPLETE } from '../lib/motion';
@@ -599,6 +600,8 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
   // 分母里的分块交叉句：相邻两块各翻一次，所以句数会比文件实际句数多，单独标出来
   const crossCount = isGendicJob ? 0 : summary?.cross_total ?? 0;
   const workersActive = summary?.workers_active ?? 0;
+  const tokenUsage = summarizeTokenUsage(runtimeMatchesProject ? runtime?.usage : null);
+  const tokenUsageTotalText = tokenUsage.hasData ? formatTokenCount(tokenUsage.total) : '—';
   const workersConfigured = summary?.workers_configured ?? 0;
   const speedText = formatSpeed(summary?.translation_speed_lpm ?? 0, progressUnit);
   const etaText = formatEta(summary?.eta_seconds ?? 0);
@@ -936,6 +939,50 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
           <div className="ptv2-stat">
             <span className="ptv2-stat__value"><RuntimeElapsedTime job={currentJob} pageActive={active} /></span>
             <span className="ptv2-stat__label">{translate("projects:projectTranslatePage.ptv2Stat_message_done")}</span>
+          </div>
+          {/* Token 用量：一格只放合计，悬停/聚焦展开明细（复用后端切换菜单的悬停展开机制） */}
+          <div className="ptv2-stat ptv2-stat--usage project-translate-page__folder-menu ptv2-backend-menu">
+            <button
+              type="button"
+              className="ptv2-stat__value ptv2-stat__usage-btn"
+              aria-label={translate("projects:projectTranslatePage.tokenUsageAriaLabel", { total: tokenUsageTotalText })}
+            >
+              {tokenUsageTotalText}
+            </button>
+            <span className="ptv2-stat__label">{translate("projects:projectTranslatePage.tokenUsageLabel")}</span>
+            <div className="project-translate-page__folder-menu-dropdown ptv2-backend-menu__dropdown ptv2-usage-menu__dropdown" role="group" aria-label={translate("projects:projectTranslatePage.tokenUsageMenu")}>
+              {tokenUsage.requests > 0 ? (
+                <dl className="ptv2-usage-menu__rows">
+                  <dt>{translate("projects:projectTranslatePage.tokenUsageRequests")}</dt>
+                  <dd>
+                    {tokenUsage.unreportedRequests > 0
+                      ? translate("projects:projectTranslatePage.tokenUsageRequestsPartial", { requests: formatTokenCount(tokenUsage.requests), missing: formatTokenCount(tokenUsage.unreportedRequests) })
+                      : formatTokenCount(tokenUsage.requests)}
+                  </dd>
+                  <dt>{translate("projects:projectTranslatePage.tokenUsageInput")}</dt>
+                  <dd>{formatTokenCount(tokenUsage.input)}</dd>
+                  <dt className="ptv2-usage-menu__sub">{translate("projects:projectTranslatePage.tokenUsageCached")}</dt>
+                  <dd className={tokenUsage.cached === null ? 'ptv2-usage-menu__missing' : undefined}>
+                    {tokenUsage.cached === null || tokenUsage.cacheRate === null
+                      ? translate("projects:projectTranslatePage.tokenUsageNotReported")
+                      : translate("projects:projectTranslatePage.tokenUsageWithPercent", { tokens: formatTokenCount(tokenUsage.cached), percent: formatTokenPercent(tokenUsage.cacheRate) })}
+                  </dd>
+                  <dt>{translate("projects:projectTranslatePage.tokenUsageOutput")}</dt>
+                  <dd>{formatTokenCount(tokenUsage.output)}</dd>
+                  <dt className="ptv2-usage-menu__sub">{translate("projects:projectTranslatePage.tokenUsageReasoning")}</dt>
+                  <dd className={tokenUsage.reasoning === null ? 'ptv2-usage-menu__missing' : undefined}>
+                    {tokenUsage.reasoning === null || tokenUsage.reasoningRate === null
+                      ? translate("projects:projectTranslatePage.tokenUsageNotReported")
+                      : translate("projects:projectTranslatePage.tokenUsageWithPercent", { tokens: formatTokenCount(tokenUsage.reasoning), percent: formatTokenPercent(tokenUsage.reasoningRate) })}
+                  </dd>
+                  <dt className="ptv2-usage-menu__total">{translate("projects:projectTranslatePage.tokenUsageTotal")}</dt>
+                  <dd className="ptv2-usage-menu__total">{formatTokenCount(tokenUsage.total)}</dd>
+                </dl>
+              ) : null}
+              <p className="ptv2-usage-menu__note">
+                {translate(tokenUsage.requests > 0 ? "projects:projectTranslatePage.tokenUsageNote" : "projects:projectTranslatePage.tokenUsageEmpty")}
+              </p>
+            </div>
           </div>
           <div
             className={`ptv2-stat ptv2-stat--backend${isBackendSwitchLocked ? ' ptv2-stat--backend-locked' : ' ptv2-stat--backend-clickable project-translate-page__folder-menu ptv2-backend-menu'}${showBackendSwitcher && !isBackendSwitchLocked ? ' ptv2-backend-menu--open' : ''}`}

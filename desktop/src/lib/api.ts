@@ -265,6 +265,18 @@ export type ProjectRuntimeSuccessEntry = {
   trans_by: string;
 };
 
+/** 本次任务累计的 token 用量；cached/reasoning 为 null 表示没有任何请求报过这一项 */
+export type ProjectRuntimeUsage = {
+  requests: number;
+  reported_requests: number;
+  input_tokens: number;
+  cached_tokens: number | null;
+  cache_reported_input_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number | null;
+  reasoning_reported_output_tokens: number;
+};
+
 export type ProjectRetranslStatEntry = {
   key: string;
   count: number;
@@ -276,6 +288,8 @@ export type ProjectRuntimeResponse = {
   summary: ProjectRuntimeSummary;
   stage: string;
   current_file: string;
+  /** 旧后端不返回 */
+  usage?: ProjectRuntimeUsage;
   recent_errors: ProjectRuntimeErrorEntry[];
   recent_successes: ProjectRuntimeSuccessEntry[];
   retransl_stats: ProjectRetranslStatEntry[];

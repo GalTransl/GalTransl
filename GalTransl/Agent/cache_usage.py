@@ -4,43 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-
-def _field(value: Any, key: str) -> Any:
-    return value.get(key) if isinstance(value, dict) else getattr(value, key, None)
-
-
-def _tokens(value: Any) -> int | None:
-    return value if type(value) is int and value >= 0 else None
-
-
-def _provider_cache_usage(usage: Any) -> tuple[int, int | None] | None:
-    """OpenAI/DeepSeek/兼容端点；缓存字段缺失不能当成零命中。
-
-    OpenAI prompt_tokens 已含缓存。仅原生 Anthropic input_tokens 不含 read/write，
-    此时才补上，避免对兼容端点的 prompt_tokens 重复加算。
-    """
-    cached = None
-    for value in (
-        _field(_field(usage, "prompt_tokens_details"), "cached_tokens"),
-        _field(usage, "prompt_cache_hit_tokens"),
-        _field(usage, "cache_read_input_tokens"),
-    ):
-        cached = _tokens(value)
-        if cached is not None:
-            break
-    total = _tokens(_field(usage, "prompt_tokens"))
-    if total is None:
-        total = _tokens(_field(usage, "input_tokens"))
-        if total is not None:
-            total += (_tokens(_field(usage, "cache_read_input_tokens")) or 0)
-            total += (_tokens(_field(usage, "cache_creation_input_tokens")) or 0)
-        else:
-            miss = _tokens(_field(usage, "prompt_cache_miss_tokens"))
-            if cached is not None and miss is not None:
-                total = cached + miss
-    if total is None or total <= 0:
-        return None
-    return total, cached if cached is not None and cached <= total else None
+from GalTransl.TokenUsage import _field, _provider_cache_usage, _tokens  # 旧导入路径仍可用
 
 
 def _restore_cache_usage(raw: Any) -> dict[str, Any]:

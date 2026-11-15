@@ -102,6 +102,7 @@ from GalTransl.server_runtime import (
     encode_project_dir,
     end_runtime_request,
     note_runtime_request,
+    record_runtime_usage,
     record_runtime_error,
     record_runtime_success,
     reset_runtime_project,
@@ -3084,6 +3085,8 @@ def build_handler(registry: JobRegistry):
                     },
                     "stage": runtime["stage"],
                     "current_file": runtime["current_file"],
+                    # 本次任务累计的 token 用量（输入/缓存命中/输出/思考），见 RuntimeRegistry.record_usage
+                    "usage": runtime["usage"],
                     "recent_errors": runtime["recent_errors"],
                     "recent_successes": runtime["recent_successes"],
                     "retransl_stats": progress_payload["retransl_stats"],

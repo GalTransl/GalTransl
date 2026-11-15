@@ -238,6 +238,17 @@ class RequestHealthMetrics:
             }
 
 
+def _rejects_stream_options(error: BaseException) -> bool:
+    """接口不认识 stream_options 这个可选参数（与 Agent 的判断同口径：参数错误且点到了参数名）。"""
+    status = getattr(error, "status_code", None)
+    if not isinstance(status, int):
+        status = getattr(getattr(error, "response", None), "status_code", None)
+    if status not in (400, 404, 422):
+        return False
+    message = str(error).lower()
+    return "stream_options" in message or "stream options" in message
+
+
 class TranslationRequestError(RuntimeError):
     """自动模板的一次 API 请求失败，包括流式响应读取失败。"""
 
@@ -1266,6 +1277,7 @@ class BaseTranslate:
 
             progress.attempt()
             request_started = time.monotonic()
+            asked_stream_usage = False
             try:
                 if last_failed_token is not None:
                     client, token = BaseTranslate._select_client_token(
@@ -1307,6 +1319,13 @@ class BaseTranslate:
                     ),
                     reasoning_kwargs,
                 )
+                # 流式响应默认不带 usage，要显式要：工作台的 token 用量靠它。
+                # 接口不认这个参数时本引擎之后都不再带（见下方 except）。
+                asked_stream_usage = bool(is_stream) and not getattr(
+                    self, "_stream_usage_unsupported", False
+                )
+                if asked_stream_usage:
+                    request_kwargs["stream_options"] = {"include_usage": True}
                 api_task = asyncio.ensure_future(
                     client.chat.completions.create(**request_kwargs)
                 )
@@ -1331,6 +1350,7 @@ class BaseTranslate:
                         break
 
                 response = api_task.result()
+                usage = None if is_stream else getattr(response, "usage", None)
                 result = ""
                 lastline = ""
                 reasoning_parts: List[str] = []
@@ -1351,6 +1371,8 @@ class BaseTranslate:
                                 stream_abort_requested = True
                                 from GalTransl.Service import JobCancelledError
                                 raise JobCancelledError()
+                            # usage 在流的最后一块里，那一块没有 choices；也有接口每块都带累计值，取最后一次
+                            usage = getattr(chunk, "usage", None) or usage
                             if not chunk.choices:
                                 continue
                             finish_reason = getattr(chunk.choices[0], "finish_reason", None) or finish_reason
@@ -1464,11 +1486,19 @@ class BaseTranslate:
                     is_rate_limited=False,
                 )
                 getattr(self, "_client_failure_counts", {}).pop(id(client), None)
+                BaseTranslate._record_token_usage(self, usage)
                 if reasoning_holder is not None:
                     reasoning_holder["field"] = reasoning_field or REASONING_FIELD_NAMES[0]
                     reasoning_holder["text"] = "".join(reasoning_parts)
                 return result, token
             except Exception as e:
+                if asked_stream_usage and _rejects_stream_options(e):
+                    # 只是不支持这个可选参数：摘掉重发，不算一次失败，也不换令牌
+                    self._stream_usage_unsupported = True
+                    LOGGER.warning(
+                        f"[{token.model_name}] 接口不支持 stream_options，之后的流式请求不再统计 token 用量"
+                    )
+                    continue
                 is_rate_limited = isinstance(e, RateLimitError)
                 if BaseTranslate._is_transport_error(e):
                     failure_counts = getattr(self, "_client_failure_counts", None)
@@ -1577,6 +1607,18 @@ class BaseTranslate:
 
                 progress.retrying()
                 await self._interruptible_sleep(sleep_time)
+
+    def _record_token_usage(self, usage) -> None:
+        """把一次成功请求的用量记进工作台。只是界面上的统计：出错一律吞掉，不能影响翻译本身。"""
+        try:
+            from GalTransl.server import record_runtime_usage
+            from GalTransl.TokenUsage import parse_request_usage
+
+            project_dir = getattr(self.pj_config, "runtime_project_dir", None) or self.pj_config.getProjectDir()
+            if project_dir:
+                record_runtime_usage(project_dir, parse_request_usage(usage))
+        except Exception:
+            pass
 
     def clean_up(self):
         pass

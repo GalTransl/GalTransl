@@ -831,6 +831,79 @@
   transform-origin: top left;
 }
 
+/* Token 用量：数值本身是个无外观的按钮，只为键盘能聚焦到它、从而展开明细 */
+.ptv2-stat__usage-btn {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font-family: inherit;
+  text-align: left;
+  cursor: default;
+  border-radius: 4px;
+}
+
+.ptv2-stat__usage-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.ptv2-usage-menu__dropdown {
+  min-width: 240px;
+  padding: 12px 14px;
+  gap: 10px;
+  cursor: default;
+}
+
+.ptv2-usage-menu__rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  /* 列间距放在 dd 的内边距里：合计那一行的分隔线要连续跨过两列 */
+  gap: 6px 0;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.ptv2-usage-menu__rows dt {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.ptv2-usage-menu__rows dd {
+  margin: 0;
+  padding-left: 20px;
+  text-align: right;
+  font-weight: 600;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 缓存命中 / 思考是上一行的子项 */
+.ptv2-usage-menu__rows dt.ptv2-usage-menu__sub {
+  padding-left: 12px;
+}
+
+.ptv2-usage-menu__rows dd.ptv2-usage-menu__missing {
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.ptv2-usage-menu__rows .ptv2-usage-menu__total {
+  padding-top: 6px;
+  border-top: 1px dashed color-mix(in srgb, var(--color-text-muted) 35%, transparent);
+}
+
+.ptv2-usage-menu__note {
+  margin: 0;
+  max-width: 260px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
 /* 点击后固定展开（触屏/单击用户）：与 hover 展开同态 */
 .ptv2-backend-menu--open .ptv2-backend-menu__dropdown {
   opacity: 1;

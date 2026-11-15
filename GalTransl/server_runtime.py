@@ -129,6 +129,34 @@ class RuntimeState:
     # （请求中黄 / 思考中蓝 / 翻译中绿 / 重试中红，光晕的呼吸快慢跟着输出的字/秒走，
     # 停住的请求标成 stalled，灯放慢但阶段不变）。
     requests: dict[int, "_RequestActivity"] = field(default_factory=dict)
+    # 本次任务的 token 用量累计（见 RuntimeRegistry.record_usage）；任务开始时随 reset_project 清零
+    usage: dict[str, int] = field(default_factory=lambda: dict.fromkeys(_USAGE_COUNTERS, 0))
+
+
+# usage 累计的各项。接口不一定每项都报，所以除了总量还要记「报了这一项的请求」对应的基数：
+# - reported_requests：返回了 usage 的请求数（流被中途掐断、接口不支持时没有）；
+# - cache_reported_input_tokens：报了缓存命中数的那些请求的输入总量，命中率以它为分母；
+# - reasoning_reported_output_tokens：报了思考 token 的那些请求的输出总量，思考占比以它为分母。
+_USAGE_COUNTERS = (
+    "requests",
+    "reported_requests",
+    "input_tokens",
+    "cached_tokens",
+    "cache_reported_input_tokens",
+    "output_tokens",
+    "reasoning_tokens",
+    "reasoning_reported_output_tokens",
+)
+
+
+def _usage_snapshot(counters: dict[str, int] | None = None) -> dict[str, int | None]:
+    """给界面的用量：没有任何请求报过的项给 None，界面显示「未提供」而不是 0。"""
+    usage: dict[str, int | None] = {name: int((counters or {}).get(name, 0)) for name in _USAGE_COUNTERS}
+    if not usage["cache_reported_input_tokens"]:
+        usage["cached_tokens"] = None
+    if not usage["reasoning_reported_output_tokens"]:
+        usage["reasoning_tokens"] = None
+    return usage
 
 
 # 在出字的请求多久没有新输出就算「停住」：阶段不变（思考中/翻译中），只把这一行标成
@@ -268,6 +296,29 @@ class RuntimeRegistry:
                 state.eta_seconds = max(0.0, float(eta_seconds))
                 state.eta_reported_at = time.monotonic()
             state.updated_at = _utcnow_text()
+
+    def record_usage(self, project_dir: str, usage: dict[str, int | None] | None) -> None:
+        """记一次成功返回的模型请求；usage 是 TokenUsage.parse_request_usage 的结果，None 表示接口没报用量。"""
+        with self._lock:
+            state = self._states.get(_normalize_project_dir(project_dir))
+            if state is None:
+                state = RuntimeState(project_dir=project_dir)
+                self._states[_normalize_project_dir(project_dir)] = state
+            counters = state.usage
+            counters["requests"] += 1
+            if not usage:
+                return
+            input_tokens = int(usage.get("input_tokens") or 0)
+            output_tokens = int(usage.get("output_tokens") or 0)
+            counters["reported_requests"] += 1
+            counters["input_tokens"] += input_tokens
+            counters["output_tokens"] += output_tokens
+            if usage.get("cached_tokens") is not None:
+                counters["cached_tokens"] += int(usage["cached_tokens"])
+                counters["cache_reported_input_tokens"] += input_tokens
+            if usage.get("reasoning_tokens") is not None:
+                counters["reasoning_tokens"] += int(usage["reasoning_tokens"])
+                counters["reasoning_reported_output_tokens"] += output_tokens
 
     def begin_request(self, project_dir: str, *, filename: str) -> int | None:
         """登记「这个文件有一个请求开始跑了」（阶段是请求中），返回请求编号，交给 note_request / end_request。
@@ -444,6 +495,7 @@ class RuntimeRegistry:
                     "cross_total": 0,
                     "eta_seconds": None,
                     "activity": {},
+                    "usage": _usage_snapshot(),
                     "recent_errors": [],
                     "recent_successes": [],
                     "updated_at": _utcnow_text(),
@@ -481,6 +533,7 @@ class RuntimeRegistry:
                     else max(0.0, state.eta_seconds - (time.monotonic() - state.eta_reported_at))
                 ),
                 "activity": activity,
+                "usage": _usage_snapshot(state.usage),
                 "recent_errors": [event.to_dict() for event in state.recent_errors],
                 "recent_successes": [event.to_dict() for event in merged_successes],
                 "updated_at": state.updated_at,
@@ -1127,6 +1180,11 @@ def record_runtime_error(
         sleep_seconds=sleep_seconds,
         level=level,
     )
+
+
+def record_runtime_usage(project_dir: str, usage: dict[str, int | None] | None) -> None:
+    """一次模型请求成功返回：累计进工作台的「Token 用量」。usage 为 None 表示接口没报用量。"""
+    RUNTIME_REGISTRY.record_usage(project_dir, usage)
 
 
 def begin_runtime_request(project_dir: str, *, filename: str) -> int | None:
