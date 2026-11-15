@@ -101,8 +101,12 @@
   background: var(--color-primary);
 }
 
-/* Vertically center the "select a file" empty hint in the main area. */
+/* Vertically center the "select a file" empty hint in the main area.
+   It sits inside .cache-layout, so drop EmptyState's own dashed frame and fill. */
 .cache-layout__main > .cache-layout__empty {
+  border: none;
+  border-radius: 0;
+  background: transparent;
   flex: 1;
   min-height: 0;
   display: flex;

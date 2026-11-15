@@ -30,77 +30,12 @@
   overflow: hidden;
 }
 
-.dict-tabs {
-  position: relative;
-  display: flex;
-  flex-shrink: 0;
-  margin-bottom: var(--space-3);
-  border-bottom: 1px solid var(--color-line);
-}
-
-.dict-tab {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-  min-width: 0;
-  gap: 4px;
-  padding: var(--space-2) 4px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: none;
-  border-radius: 0;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-text-muted);
-  transition: all var(--transition-fast);
-}
-
-.dict-tab__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dict-tab:hover {
-  color: var(--color-text);
-  background: var(--color-neutral-soft);
-}
-
-.dict-tab--active {
-  color: var(--color-primary);
-}
-
-.dict-tabs__indicator {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: calc(100% / 3);
-  height: 2px;
-  background: var(--color-primary);
-  pointer-events: none;
-}
-
-.dict-tab__count {
-  flex-shrink: 0;
-  font-size: 11px;
-  line-height: 16px;
-  background: var(--color-neutral-soft);
-  padding: 0 5px;
-  border-radius: 8px;
-}
-
-.dict-tab--active .dict-tab__count {
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-}
-
 /* 与「浏览文本」页（.cache-layout）同一种外框：文件栏和编辑区合在一个面板里，
-   中间只留一条分隔线，外框是唯一的边框/圆角/阴影。 */
+   中间只留一条可拖拽的分隔线，外框是唯一的边框/圆角/阴影。
+   文件栏宽度由内联的 --dict-sidebar-width 给出（useResizableSidebar，默认与浏览文本一致）。 */
 .dict-layout {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: var(--dict-sidebar-width, 240px) 1px minmax(0, 1fr);
   gap: 0;
   align-items: stretch;
   min-height: 0;
@@ -116,6 +51,11 @@
   border-color: rgba(65, 83, 111, 0.78);
 }
 
+.dict-layout--resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
 .dict-layout__sidebar {
   display: flex;
   flex-direction: column;
@@ -123,9 +63,30 @@
   min-width: 0;
   background: transparent;
   border: none;
-  border-right: 1px solid var(--color-line);
   border-radius: 0;
   padding: var(--space-4);
+}
+
+.dict-layout__resizer {
+  background: var(--color-line);
+  position: relative;
+  cursor: col-resize;
+  transition: background var(--transition-fast);
+}
+
+/* 1px 的线太难抓，左右各放宽 4px 的命中区 */
+.dict-layout__resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
+}
+
+.dict-layout__resizer:hover,
+.dict-layout__resizer--dragging {
+  background: var(--color-primary);
 }
 
 .dict-file-list {
@@ -191,6 +152,116 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* 译前译后页签：新建文件的目标类别 */
+.dict-create-target {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: calc(-1 * var(--space-1)) 0 var(--space-3);
+  font-size: 12px;
+}
+
+.dict-create-target__label {
+  color: var(--color-text-muted);
+  margin-right: var(--space-1);
+}
+
+.dict-create-target__option {
+  padding: 2px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.dict-create-target__option:hover {
+  color: var(--color-text);
+  background: var(--color-neutral-soft);
+}
+
+.dict-create-target__option--active,
+.dict-create-target__option--active:hover {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+/* 译前、译后两棵可折叠的文件树 */
+.dict-file-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dict-file-tree + .dict-file-tree {
+  margin-top: var(--space-2);
+}
+
+.dict-file-tree__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  background: none;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.dict-file-tree__header svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.dict-file-tree__header:hover {
+  color: var(--color-text);
+  background: var(--color-neutral-soft);
+}
+
+.dict-file-tree__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dict-file-tree__children {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: 11px;
+  padding-left: var(--space-2);
+  border-left: 1px solid var(--color-line);
+}
+
+.dict-file-tree__count {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  background: var(--color-neutral-soft);
+  padding: 0 5px;
+  border-radius: 8px;
+}
+
+.dict-file-tree__empty {
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  font-size: 12px;
+  color: var(--color-text-muted);
 }
 
 .dict-layout__main {

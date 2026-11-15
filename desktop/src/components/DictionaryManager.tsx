@@ -2,8 +2,6 @@ import { UiTrans, message as uiMessage, t as translate, useMessageState, useUiLa
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { usePageActive, useRetainPage } from './PageActivity';
 import { useSaveShortcut } from './useSaveShortcut';
-import { MotionConfig, UI_TRANSITION, m } from './UiMotion';
-import { useUiAnimations } from '../lib/useUiAnimations';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from './Button';
@@ -15,8 +13,12 @@ import { formatBackendUsage, type BackendUsageSummary } from '../lib/backendUsag
 import type { DictFileContent, DictionaryCategory } from '../lib/api';
 import type { DictionaryPreviewTarget } from './ProjectPreviewContext';
 import { scrollWithinContainer } from '../lib/scrollWithinContainer';
+import { useResizableSidebar } from '../lib/useResizableSidebar';
 
 type DictTab = DictionaryCategory;
+/** 侧栏不分页签，三类字典按翻译流程的先后各占一棵可折叠的树 */
+const DICT_CATEGORIES: DictTab[] = ['pre', 'gpt', 'post'];
+const DICTIONARY_SIDEBAR_WIDTH_KEY = 'galtransl.dictionary.sidebarWidth';
 type DictRowType = 'normal' | 'conditional' | 'situation' | 'gpt' | 'comment' | 'blank';
 
 type DictRow = {
@@ -92,6 +94,19 @@ function getFilesByTab(data: DictionaryManagerData | null, tab: DictTab): string
   });
 }
 
+/** 文件属于哪类字典；找不到时按 GPT 处理（与以前默认打开 GPT 页签一致） */
+function getFileCategory(data: DictionaryManagerData | null, file: string | null): DictTab {
+  if (!data || !file) return 'gpt';
+  return DICT_CATEGORIES.find((category) => getFilesByTab(data, category).includes(file)) ?? 'gpt';
+}
+
+/** 默认打开的文件：GPT 字典最常编辑，先选它；没有 GPT 字典时按侧栏顺序取第一个 */
+function getDefaultFile(data: DictionaryManagerData | null): string | null {
+  return getFilesByTab(data, 'gpt')[0]
+    ?? DICT_CATEGORIES.flatMap((category) => getFilesByTab(data, category))[0]
+    ?? null;
+}
+
 // GenDic 生成的 GPT 字典按类目分区：----------↓人名↓----------
 const SECTION_LINE_RE = /^-{3,}↓(.+?)↓-{3,}\s*$/;
 // 第一个分区标题之前的词条（旧格式、手加的）归到这一类
@@ -132,6 +147,19 @@ function rowsToText(rows: DictRow[]): string {
     if (row.type === 'comment') return row.values[0] ?? row.raw;
     return row.values.join('\t');
   }).join('\n');
+}
+
+function getCategoryLabel(category: DictTab): string {
+  if (category === 'pre') return translate("projects:dictionaryManager.dictTabs_message_dictionary");
+  if (category === 'gpt') return translate("projects:dictionaryManager.dictTabs_message_gPTDictionary");
+  return translate("projects:dictionaryManager.dictTabs_message_dictionaryVariant2");
+}
+
+/** 「新建到」选项里放不下完整名称，用短名 */
+function getCategoryShortLabel(category: DictTab): string {
+  if (category === 'pre') return translate("projects:dictionaryManager.dictCreateTarget_option_pre");
+  if (category === 'gpt') return translate("projects:dictionaryManager.dictCreateTarget_option_gpt");
+  return translate("projects:dictionaryManager.dictCreateTarget_option_post");
 }
 
 /** Column labels by tab & row type for the card's header pills */
@@ -321,7 +349,6 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   } = props;
 
   const pageActive = usePageActive();
-  const animated = useUiAnimations();
   const saveInFlightRef = useRef(false);
   /** 「→」回调经 ref 转发：父组件每次 render 新建的内联函数不会打穿行组件的 memo */
   const onOpenInCacheRef = useRef(onOpenInCache);
@@ -330,8 +357,18 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     onOpenInCacheRef.current?.(sourceWord);
   }, []);
   const showOpenInCache = Boolean(onOpenInCache);
-  const [activeTab, setActiveTab] = useState<DictTab>('gpt');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  // 当前文件的字典类别（决定解析方式、新增条目类型）：看选中的文件落在哪棵树
+  const activeTab = getFileCategory(data, selectedFile);
+  /** 「新建」建到哪一类；选中文件时跟着它走，也可以手动切换 */
+  const [createCategory, setCreateCategory] = useState<DictTab>('gpt');
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<DictTab>>(() => new Set());
+  const {
+    width: sidebarWidth,
+    resizing,
+    layoutRef,
+    onResizerPointerDown,
+  } = useResizableSidebar(DICTIONARY_SIDEBAR_WIDTH_KEY);
   const [searchTerm, setSearchTerm] = useState('');
   const [sectionFilter, setSectionFilter] = useState('');
   const [mode, setMode] = useState<'card' | 'text'>('card');
@@ -360,7 +397,6 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   const [previewNotice, setPreviewNotice] = useMessageState<string | null>(null);
   const highlightedPreviewRowRef = useRef<HTMLElement | null>(null);
 
-  const activeFiles = useMemo(() => getFilesByTab(data, activeTab), [data, activeTab]);
 
   const selectedContent = useMemo(() => {
     if (!data || !selectedFile) return null;
@@ -559,27 +595,17 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     void handleGenerateGptDict();
   };
 
-  const ensureSelection = (nextFiles: string[]) => {
-    if (nextFiles.length === 0) {
-      setSelectedFile(null);
-      setDraftText('');
-      setRowsOverride(null);
-      setDirty(false);
-      return;
-    }
-    setSelectedFile((prev) => (prev && nextFiles.includes(prev) ? prev : nextFiles[0]));
-  };
-
   useEffect(() => {
-    if (!selectedFile && activeFiles.length > 0) {
-      const first = activeFiles[0];
-      setSelectedFile(first);
-      const next = data?.dict_contents[first]?.lines.join('\n') ?? '';
-      setDraftText(next);
-      setRowsOverride(null);
-      setDirty(false);
-    }
-  }, [activeFiles, selectedFile, data]);
+    if (selectedFile) return;
+    const first = getDefaultFile(data);
+    if (!first) return;
+    setSelectedFile(first);
+    setCreateCategory(getFileCategory(data, first));
+    const next = data?.dict_contents[first]?.lines.join('\n') ?? '';
+    setDraftText(next);
+    setRowsOverride(null);
+    setDirty(false);
+  }, [selectedFile, data]);
 
   useEffect(() => {
     if (!selectedFile || !selectedContent || dirty) return;
@@ -595,6 +621,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
       return;
     }
     setSelectedFile(file);
+    setCreateCategory(getFileCategory(data, file));
     setSectionFilter('');
     const next = data?.dict_contents[file]?.lines.join('\n') ?? '';
     setDraftText(next);
@@ -604,21 +631,23 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     setLocalError(null);
   };
 
-  const handleTabChange = (tab: DictTab) => {
-    if (tab === activeTab) return;
-    if (dirty && !confirm(translate("projects:dictionaryManager.handleTabChange_confirm_currentFileNotSave"))) {
-      return;
-    }
-    setActiveTab(tab);
-    setSearchTerm('');
-    setSectionFilter('');
-    const files = getFilesByTab(data, tab);
-    ensureSelection(files);
-    if (files.length > 0 && data) {
-      setDraftText((data.dict_contents[files[0]]?.lines ?? []).join('\n'));
-    }
-    setRowsOverride(null);
-    setDirty(false);
+  const toggleGroup = (category: DictTab) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+  };
+
+  /** 跳到或新建某类文件时展开它所在的树，否则选中项藏在折叠的树里看不见 */
+  const expandGroup = (category: DictTab) => {
+    setCollapsedGroups((prev) => {
+      if (!prev.has(category)) return prev;
+      const next = new Set(prev);
+      next.delete(category);
+      return next;
+    });
   };
 
   useEffect(() => {
@@ -627,7 +656,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     appliedPreviewTargetRef.current = target;
     highlightedPreviewRowRef.current?.classList.remove('dict-card__table-row--highlight');
     setPreviewNotice(null);
-    const tab = (['gpt', 'pre', 'post'] as const).find(category => getFilesByTab(data, category).includes(target.fileKey));
+    const tab = DICT_CATEGORIES.find(category => getFilesByTab(data, category).includes(target.fileKey));
     if (!tab) {
       setPreviewNotice(uiMessage('projects:projectPreview.fileMissing'));
       return;
@@ -635,7 +664,8 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     if (selectedFile !== target.fileKey && dirty && !confirm(translate('projects:dictionaryManager.handleSelectFile_confirm_currentFileNotSave'))) return;
     const text = selectedFile === target.fileKey && dirty ? rowsToText(parsedRows) : data.dict_contents[target.fileKey]?.lines.join('\n') ?? '';
     const rows = parseRows(text, tab);
-    setActiveTab(tab);
+    setCreateCategory(tab);
+    expandGroup(tab);
     setSelectedFile(target.fileKey);
     setDraftText(text);
     setRowsOverride(null);
@@ -838,9 +868,10 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     setLocalError(null);
     setInfo(null);
     try {
-      const createdFileKey = await onCreateFile(activeTab, name);
+      const createdFileKey = await onCreateFile(createCategory, name);
       setNewFilename('');
       setSelectedFile(createdFileKey);
+      expandGroup(createCategory);
       await onReload();
       setInfo(uiMessage("projects:dictionaryManager.handleCreate_setInfo_doneCreateDictionaryFile"));
     } catch (e) {
@@ -895,6 +926,36 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   );
   const gendicBackendMissing = gendicBackend?.missing === true;
 
+  const renderFileItem = (file: string) => {
+    const content = data?.dict_contents?.[file];
+    const isActive = selectedFile === file;
+    return (
+      <button
+        key={file}
+        className={`dict-file-item ${isActive ? 'dict-file-item--active' : ''}`}
+        type="button"
+        onClick={() => handleSelectFile(file)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setContextMenu({ x: e.clientX, y: e.clientY, file });
+        }}
+      >
+        <span className="dict-file-item__label">
+          {isActive && dirty && (
+            <span
+              className="dict-file-item__dot"
+              role="img"
+              title={translate("projects:dictionaryManager.unsavedChanges")}
+              aria-label={translate("projects:dictionaryManager.unsavedChanges")}
+            />
+          )}
+          <span className="dict-file-item__name">{stripProjectDirMarker(file)}</span>
+        </span>
+        {content && <span className="dict-file-item__count">{translate("projects:dictionaryManager.dictFileList_message_entry", { count: content.count })}</span>}
+      </button>
+    );
+  };
+
   return (
     <div className="project-dictionary-page">
       <PageHeader
@@ -919,33 +980,12 @@ export function DictionaryManager(props: DictionaryManagerProps) {
       {previewNotice && <p className="inline-feedback" role="status">{previewNotice}</p>}
 
       <div className="project-dictionary-page__content">
-        <div className="dict-layout">
-          <MotionConfig reducedMotion="never" transition={animated ? UI_TRANSITION : { duration: 0 }}>
+        <div
+          className={`dict-layout${resizing ? ' dict-layout--resizing' : ''}`}
+          ref={layoutRef}
+          style={{ '--dict-sidebar-width': `${sidebarWidth}px` } as CSSProperties}
+        >
           <aside className="dict-layout__sidebar">
-            <div className="dict-tabs">
-              {(['gpt', 'pre', 'post'] as DictTab[]).map((tab) => {
-                const label = tab === 'pre' ? translate("projects:dictionaryManager.dictTabs_message_dictionary") : tab === 'gpt' ? translate("projects:dictionaryManager.dictTabs_message_gPTDictionary") : translate("projects:dictionaryManager.dictTabs_message_dictionaryVariant2");
-                return (
-                  <button
-                    key={tab}
-                    className={`dict-tab ${activeTab === tab ? 'dict-tab--active' : ''}`}
-                    type="button"
-                    aria-pressed={activeTab === tab}
-                    title={label}
-                    onClick={() => handleTabChange(tab)}
-                  >
-                    <span className="dict-tab__label">{label}</span>
-                    <span className="dict-tab__count">{getFilesByTab(data, tab).length}</span>
-                  </button>
-                );
-              })}
-              <m.span
-                className="dict-tabs__indicator"
-                aria-hidden="true"
-                initial={false}
-                animate={{ x: `${(['gpt', 'pre', 'post'] as DictTab[]).indexOf(activeTab) * 100}%` }}
-              />
-            </div>
             <div className="dict-layout__sidebar-header">
               <h3>{translate("projects:dictionaryManager.dictLayoutSidebarHeader_message_dictionaryFile")}</h3>
               <button
@@ -971,47 +1011,63 @@ export function DictionaryManager(props: DictionaryManagerProps) {
               />
               <Button onClick={() => void handleCreate()} disabled={creating}>{translate("projects:dictionaryManager.dictCreateFile_message_new")}</Button>
             </div>
-            <m.div
-              key={activeTab}
-              className="dict-file-list"
-              initial={animated ? { opacity: 0, x: 6 } : false}
-              animate={{ opacity: 1, x: 0 }}
+            <div
+              className="dict-create-target"
+              role="radiogroup"
+              aria-label={translate("projects:dictionaryManager.dictCreateTarget_ariaLabel_createIn")}
             >
-              {activeFiles.map((file) => {
-                const content = data?.dict_contents?.[file];
-                const isActive = selectedFile === file;
+              <span className="dict-create-target__label">{translate("projects:dictionaryManager.dictCreateTarget_message_createIn")}</span>
+              {DICT_CATEGORIES.map((category) => (
+                <button
+                  key={category}
+                  type="button"
+                  role="radio"
+                  aria-checked={createCategory === category}
+                  className={`dict-create-target__option${createCategory === category ? ' dict-create-target__option--active' : ''}`}
+                  onClick={() => setCreateCategory(category)}
+                >
+                  {getCategoryShortLabel(category)}
+                </button>
+              ))}
+            </div>
+            <div className="dict-file-list">
+              {DICT_CATEGORIES.map((category) => {
+                const files = getFilesByTab(data, category);
+                const collapsed = collapsedGroups.has(category);
+                const label = getCategoryLabel(category);
                 return (
-                  <button
-                    key={file}
-                    className={`dict-file-item ${isActive ? 'dict-file-item--active' : ''}`}
-                    type="button"
-                    onClick={() => handleSelectFile(file)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setContextMenu({ x: e.clientX, y: e.clientY, file });
-                    }}
-                  >
-                    <span className="dict-file-item__label">
-                      {isActive && dirty && (
-                        <span
-                          className="dict-file-item__dot"
-                          role="img"
-                          title={translate("projects:dictionaryManager.unsavedChanges")}
-                          aria-label={translate("projects:dictionaryManager.unsavedChanges")}
-                        />
-                      )}
-                      <span className="dict-file-item__name">{stripProjectDirMarker(file)}</span>
-                    </span>
-                    {content && <span className="dict-file-item__count">{translate("projects:dictionaryManager.dictFileList_message_entry", { count: content.count })}</span>}
-                  </button>
+                  <div key={category} className="dict-file-tree" role="group" aria-label={label}>
+                    <button
+                      type="button"
+                      className="dict-file-tree__header"
+                      aria-expanded={!collapsed}
+                      onClick={() => toggleGroup(category)}
+                    >
+                      <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} />
+                      <span className="dict-file-tree__title">{label}</span>
+                      <span className="dict-file-tree__count">{files.length}</span>
+                    </button>
+                    {collapsed ? null : (
+                      <div className="dict-file-tree__children">
+                        {files.map(renderFileItem)}
+                        {files.length === 0 && (
+                          <p className="dict-file-tree__empty">{translate("projects:dictionaryManager.dictFileTree_message_empty")}</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
-              {activeFiles.length === 0 && (
-                <EmptyState title={translate("projects:dictionaryManager.dictFileList_title_currentDictionaryFile")} description={translate("projects:dictionaryManager.dictFileList_description_createCountDictionaryFile")} />
-              )}
-            </m.div>
+            </div>
           </aside>
-          </MotionConfig>
+
+          <div
+            className={`dict-layout__resizer${resizing ? ' dict-layout__resizer--dragging' : ''}`}
+            onPointerDown={onResizerPointerDown}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={translate("projects:dictionaryManager.dictLayoutResizer_ariaLabel_sidebarWidth")}
+          />
 
           <div className="dict-layout__main">
             {selectedFile ? (

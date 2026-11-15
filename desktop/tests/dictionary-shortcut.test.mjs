@@ -199,6 +199,53 @@ test('edits after switching from text to cards during save remain dirty and are 
   act(() => renderer.unmount());
 });
 
+test('one sidebar lists pre, GPT and post dictionaries as trees and new files go to the chosen tree', async () => {
+  const f = fixture();
+  const { DictionaryManager } = f.load(new URL('../src/components/DictionaryManager.tsx', import.meta.url));
+  const data = { pre_dict_files: ['pre.txt'], post_dict_files: ['post.txt'], gpt_dict_files: ['gpt.txt'], dict_contents: {
+    'gpt.txt': { lines: ['猫	cat'], count: 1 },
+    'pre.txt': { lines: ['a	b'], count: 1 },
+    'post.txt': { lines: ['c	d'], count: 1 },
+  } };
+  const created = [];
+  let renderer;
+  act(() => {
+    renderer = create(h(DictionaryManager, {
+      title: 'Dictionary', description: '', data, loading: false, error: null,
+      onReload: async () => {}, onDeleteFile: async () => {}, onSaveFile: async () => {},
+      onCreateFile: async (category, name) => { created.push([category, name]); return name; },
+    }));
+  });
+  const trees = () => renderer.root.findAllByProps({ className: 'dict-file-tree' });
+  const fileNames = () => trees().map(tree => tree.findAllByProps({ className: 'dict-file-item__name' }).map(node => node.props.children));
+  assert.deepEqual(trees().map(tree => tree.props['aria-label']), [
+    'projects:dictionaryManager.dictTabs_message_dictionary',
+    'projects:dictionaryManager.dictTabs_message_gPTDictionary',
+    'projects:dictionaryManager.dictTabs_message_dictionaryVariant2',
+  ]);
+  assert.deepEqual(fileNames(), [['pre.txt'], ['gpt.txt'], ['post.txt']]);
+  // The GPT dictionary is still opened by default.
+  assert.ok(renderer.root.findAllByType('input').some(node => node.props.value === 'cat'));
+  const radios = () => renderer.root.findAllByProps({ role: 'radio' });
+  assert.deepEqual(radios().map(radio => radio.props['aria-checked']), [false, true, false]);
+  // Selecting a post file opens it as a post dictionary and makes it the target for new files.
+  act(() => trees()[2].findByProps({ className: 'dict-file-item ' }).props.onClick());
+  assert.ok(renderer.root.findAllByType('input').some(node => node.props.value === 'd'));
+  assert.ok(renderer.root.findAllByType('button').some(node => node.props.children === 'projects:dictionaryManager.dictToolbar_message_entryEntry'));
+  const newName = renderer.root.findByProps({ placeholder: 'projects:dictionaryManager.dictCreateFile_placeholder_fileCustomPreTxt' });
+  const createButton = () => renderer.root.findByProps({ className: 'dict-create-file' }).findByType('button');
+  act(() => newName.props.onChange({ target: { value: 'extra' } }));
+  await act(async () => createButton().props.onClick());
+  act(() => radios()[0].props.onClick());
+  act(() => newName.props.onChange({ target: { value: 'extra2' } }));
+  await act(async () => createButton().props.onClick());
+  assert.deepEqual(created, [['post', 'extra.txt'], ['pre', 'extra2.txt']]);
+  // Collapsing a tree hides only its files.
+  act(() => trees()[0].findByProps({ className: 'dict-file-tree__header' }).props.onClick());
+  assert.deepEqual(fileNames(), [[], ['gpt.txt'], ['post.txt']]);
+  act(() => renderer.unmount());
+});
+
 test('card edits keep dictionary row classification consistent with serialized text', () => {
   const f = fixture();
   const { DictionaryManager } = f.load(new URL('../src/components/DictionaryManager.tsx', import.meta.url));
@@ -210,7 +257,6 @@ test('card edits keep dictionary row classification consistent with serialized t
       onReload: async () => {}, onCreateFile: async () => '', onDeleteFile: async () => {}, onSaveFile: async () => {},
     }));
   });
-  act(() => renderer.root.findByProps({ className: 'dict-tabs' }).findAllByType('button')[1].props.onClick());
   act(() => renderer.root.findAllByType('input').find(node => node.props.value === 'search').props.onChange({ target: { value: 'diag' } }));
   const heading = renderer.root.findByProps({ className: 'dict-card__pill dict-card__pill--situation' });
   assert.equal(heading.props.children, 'projects:dictionaryManager.getTypeLabel_message_textVariant4');

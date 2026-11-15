@@ -44,6 +44,7 @@ import { joinPath } from '../lib/paths';
 import { scrollWithinContainer } from '../lib/scrollWithinContainer';
 import { useVirtualList } from '../lib/virtualList';
 import { useStableListKeys } from '../lib/useStableListKeys';
+import { useResizableSidebar } from '../lib/useResizableSidebar';
 import { AnimatedList } from '../components/AnimatedList';
 import { AnimatedCollapse } from '../components/UiMotion';
 import { CacheDictionaryDetails } from '../components/CacheDictionaryDetails';
@@ -556,42 +557,13 @@ export function ProjectCachePage({ ctx, active = true, focusTarget }: { ctx: Pro
   const [searchParams] = useSearchParams();
   const appliedCacheSearchRef = useRef('');
 
-  // Sidebar width (draggable) with persistence
-  const SIDEBAR_WIDTH_KEY = 'galtransl.cache.sidebarWidth';
-  const SIDEBAR_MIN = 180;
-  const SIDEBAR_MAX = 560;
-  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
-    try {
-      const v = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
-      if (Number.isFinite(v) && v >= SIDEBAR_MIN && v <= SIDEBAR_MAX) return v;
-    } catch {}
-    return 240;
-  });
-  const [resizing, setResizing] = useState(false);
-  const layoutRef = useRef<HTMLDivElement | null>(null);
-  const handleResizerPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const layoutEl = layoutRef.current;
-    if (!layoutEl) return;
-    setResizing(true);
-    const onMove = (ev: PointerEvent) => {
-      const rect = layoutEl.getBoundingClientRect();
-      const next = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, ev.clientX - rect.left));
-      setSidebarWidth(next);
-    };
-    const onUp = () => {
-      setResizing(false);
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
-  }, []);
-  useEffect(() => {
-    try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth)); } catch {}
-  }, [sidebarWidth]);
+  // Sidebar width (draggable); same default as the dictionary pages, persisted separately
+  const {
+    width: sidebarWidth,
+    resizing,
+    layoutRef,
+    onResizerPointerDown: handleResizerPointerDown,
+  } = useResizableSidebar('galtransl.cache.sidebarWidth');
 
   // Global search state
   const [searchQuery, setSearchQuery] = useState('');

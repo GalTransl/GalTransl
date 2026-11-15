@@ -87,7 +87,6 @@
  .app-layout--custom-background .project-cache-page .retransl-popover,
  .app-layout--custom-background .project-cache-page .retransl-popover__arrow,
  .app-layout--custom-background .project-cache-page .retransl-popover__input,
- .app-layout--custom-background .project-dictionary-page .dict-tab,
  .app-layout--custom-background .project-dictionary-page .dict-layout__sidebar,
  .app-layout--custom-background .project-dictionary-page .dict-create-file input,
  .app-layout--custom-background .project-dictionary-page .dict-search,
@@ -125,13 +124,6 @@
  .app-layout--custom-background .project-dictionary-page .dict-card__row-open-cache,
  .app-layout--custom-background .name-page .name-page__th {
   background: var(--custom-bg-fill-strong) !important;
-  backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
-  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
-}
-
-.app-layout--custom-background .project-cache-page .cache-layout__main > .cache-layout__empty {
-  background: rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.06)) !important;
-  border-color: rgba(191, 208, 226, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.5));
   backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
   -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
 }
@@ -309,13 +301,6 @@
   -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
 }
 
-:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-layout__main > .cache-layout__empty {
-  background: rgba(14, 22, 32, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.08)) !important;
-  border-color: rgba(65, 83, 111, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.5));
-  backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
-  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
-}
-
 :root[data-theme='dark'] .app-layout--custom-background .field input,
 :root[data-theme='dark'] .app-layout--custom-background .field select,
 :root[data-theme='dark'] .app-layout--custom-background .field textarea,
@@ -341,7 +326,6 @@
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-sidebar-tab,
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-problems-group__header,
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-file-item--active,
-:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-tab--active,
 :root[data-theme='dark'] .app-layout--custom-background .name-page .name-page__input:focus,
 :root[data-theme='dark'] .app-layout--custom-background .problem-analyze-section__loading,
 :root[data-theme='dark'] .app-layout--custom-background .problem-analyze-section__item,
@@ -364,7 +348,7 @@
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-card__delete:hover,
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-problems-group__header:hover,
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-file-item:hover,
-:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-tab:hover,
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-file-tree__header:hover,
 :root[data-theme='dark'] .app-layout--custom-background .sidebar__context-menu-item:hover:not(:disabled) {
   background: var(--custom-bg-fill-soft-hover);
 }

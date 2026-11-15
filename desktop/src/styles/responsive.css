@@ -31,8 +31,11 @@
 
   /* 单列时文件栏在上，分隔线从右侧换到底部 */
   .dict-layout__sidebar {
-    border-right: none;
     border-bottom: 1px solid var(--color-line);
+  }
+
+  .dict-layout__resizer {
+    display: none;
   }
 
   .cache-layout {
