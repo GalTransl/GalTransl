@@ -42,7 +42,7 @@ plugin:
 
 # 程序设置
 common:
-  gpt.numPerRequestTranslate: 16 # 每次请求包含的句子数，建议不超过16。[1-32]
+  gpt.numPerRequestTranslate: 32 # 每次请求包含的句子数，建议不超过32。[1-32]
   gpt.dynamicNumPerRequestTranslate: false # 动态句数调整：根据解析错误自动调节每次请求句数。[True/False]
   gpt.dynamicNumPerRequestTranslate.min: 8 # 动态句数调整的最小句数。[1-64]
   gpt.dynamicNumPerRequestTranslate.max: 64 # 动态句数调整的最大句数。[1-64]

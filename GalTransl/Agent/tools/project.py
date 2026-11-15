@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 # 页各 section 的字段说明一致。键用点号路径，与 YAML 展平后一致。
 CONFIG_FIELD_DESCRIPTIONS: dict[str, str] = {
     # ---- common ----
-    "common.gpt.numPerRequestTranslate": "每次请求打包的句子数，建议不超过 16 [1-32]",
+    "common.gpt.numPerRequestTranslate": "每次请求打包的句子数，建议不超过 32 [1-32]",
     "common.workersPerProject": "项目级并行文件数；单文件并行需配合 splitFile",
     "common.autoAdjustWorkers": "根据近期 429 比例和响应延迟自动降/升 worker 并发 [true/false]",
     "common.sortBy": "文件调度顺序：name 按文件名，size 优先大文件（并行时通常更快）",

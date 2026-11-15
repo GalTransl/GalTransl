@@ -198,7 +198,7 @@
     },
     "gpt_numPerRequestTranslate": {
       "label": "Sentences per request",
-      "description": "How many sentences are packed into each request; 16 or fewer is recommended."
+      "description": "How many sentences are packed into each request; 32 or fewer is recommended."
     },
     "gpt_dynamicNumPerRequestTranslate": {
       "label": "Dynamic sentence count",

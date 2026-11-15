@@ -116,7 +116,7 @@ export function NewProjectWizard({ active, initialDirectory, autoCreate = false,
   // 用户手动选过插件后，重新进入这一步不再用识别结果覆盖
   const filePluginTouchedRef = useRef(false);
   const [workersPerProject, setWorkersPerProject] = useState(16);
-  const [numPerRequest, setNumPerRequest] = useState(16);
+  const [numPerRequest, setNumPerRequest] = useState(32);
   const [dynamicNumPerRequest, setDynamicNumPerRequest] = useState(false);
   const [dynamicNumPerRequestMin, setDynamicNumPerRequestMin] = useState(8);
   const [dynamicNumPerRequestMax, setDynamicNumPerRequestMax] = useState(64);

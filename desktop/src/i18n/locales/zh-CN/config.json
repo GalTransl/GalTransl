@@ -198,7 +198,7 @@
     },
     "gpt_numPerRequestTranslate": {
       "label": "单次翻译句数",
-      "description": "每次请求打包的句子数，建议不超过 16。"
+      "description": "每次请求打包的句子数，建议不超过 32。"
     },
     "gpt_dynamicNumPerRequestTranslate": {
       "label": "动态句数调整",

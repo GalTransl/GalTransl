@@ -258,7 +258,7 @@
     "field_message_concurrencyFile": "并发文件数",
     "field_message_concurrencySource": "并发越高速度越快，但更吃资源。",
     "field_message_translationSentence": "单次翻译句数",
-    "field_message_820": "建议 8~20，兼顾质量和成本。",
+    "field_message_820": "建议 16~32，兼顾质量和成本。",
     "field_message_sentence": "动态句数调整",
     "field_message_errorAutoSentence": "根据解析错误自动降低句数，稳定后逐步提升。",
     "field_message_sentenceVariant2": "动态最小句数",

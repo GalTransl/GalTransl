@@ -258,7 +258,7 @@
     "field_message_concurrencyFile": "Concurrent files",
     "field_message_concurrencySource": "Higher concurrency is faster but uses more resources.",
     "field_message_translationSentence": "Sentences per request",
-    "field_message_820": "8~20 is recommended, balancing quality and cost.",
+    "field_message_820": "16~32 is recommended, balancing quality and cost.",
     "field_message_sentence": "Dynamic sentence count",
     "field_message_errorAutoSentence": "Lowers the sentence count automatically on parse errors and raises it again once things are stable.",
     "field_message_sentenceVariant2": "Dynamic minimum sentences",

@@ -400,7 +400,7 @@ def _tail_split_lines(projectConfig: CProjectConfig, eng_type: str) -> int:
         per_request = int(projectConfig.getKey("gpt.numPerRequestTranslate") or 0)
     except (TypeError, ValueError):
         per_request = 0
-    return 2 * (per_request if per_request > 0 else 16)
+    return 2 * (per_request if per_request > 0 else 32)
 
 
 async def _tail_split_loop(semaphore: asyncio.Semaphore, projectConfig: CProjectConfig, gptapi: Any) -> None:

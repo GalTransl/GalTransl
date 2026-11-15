@@ -8,7 +8,7 @@ import { fetchTranslationGuidelines } from '../../lib/api';
 // ── Primary (high-frequency) fields ──
 const PRIMARY_FIELDS: ConfigFieldDef[] = [
   { key: 'workersPerProject', labelKey: "config:fields.workersPerProject.label", descriptionKey: "config:fields.workersPerProject.description", type: 'number', placeholder: '16' },
-  { key: 'gpt.numPerRequestTranslate', labelKey: "config:fields.gpt_numPerRequestTranslate.label", descriptionKey: "config:fields.gpt_numPerRequestTranslate.description", type: 'number', placeholder: '16' },
+  { key: 'gpt.numPerRequestTranslate', labelKey: "config:fields.gpt_numPerRequestTranslate.label", descriptionKey: "config:fields.gpt_numPerRequestTranslate.description", type: 'number', placeholder: '32' },
   { key: 'gpt.dynamicNumPerRequestTranslate', labelKey: "config:fields.gpt_dynamicNumPerRequestTranslate.label", descriptionKey: "config:fields.gpt_dynamicNumPerRequestTranslate.description", type: 'select', options: [{ value: 'true', labelKey: "config:translationSettingsSection.option_true" }, { value: 'false', labelKey: "config:translationSettingsSection.option_false" }] },
   { key: 'gpt.dynamicNumPerRequestTranslate.min', labelKey: "config:fields.gpt_dynamicNumPerRequestTranslate_min.label", descriptionKey: "config:fields.gpt_dynamicNumPerRequestTranslate_min.description", type: 'number', placeholder: '8' },
   { key: 'gpt.dynamicNumPerRequestTranslate.max', labelKey: "config:fields.gpt_dynamicNumPerRequestTranslate_max.label", descriptionKey: "config:fields.gpt_dynamicNumPerRequestTranslate_max.description", type: 'number', placeholder: '64' },
