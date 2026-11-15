@@ -93,6 +93,9 @@ class Model:
             rows = ["invalid response"]
         elif action == "partial":
             rows = rows[:1]
+        elif action == "broken-middle":
+            # 前两句正常，第三行是坏行，后面还有正常行：只有坏行之前的句子可用
+            rows = rows[:2] + ["invalid response"] + rows[2:]
         if isinstance(self.engine, ForGalMarkdownTranslate) and action != "bad":
             rows = ["| ID | NAME | DST |", "| --- | --- | --- |"] + rows
         reasoning = "" if action == "no-reasoning" else f"thinking-{len(self.requests)}"
@@ -359,3 +362,80 @@ class TranslationMultiTurnTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PartialParseTests(unittest.IsolatedAsyncioTestCase):
+    """输出中途出错时，坏行之前已通过校验的句子直接采用，下一批从坏行那一句接着翻。
+
+    回归背景：流式下只要有一行解析失败就整批丢弃重试（非流式一直是采用前缀的），
+    大批次里一行坏输出会让前面几十句白翻；markdown 模板还会把坏行算进返回的句数，
+    直接放开会跳过那一句。
+    """
+
+    async def test_sentences_before_a_broken_line_are_kept(self):
+        for kind, prompt in ENGINES:
+            for stream in (False, True):
+                with self.subTest(engine=kind.__name__, stream=stream):
+                    engine = translator(kind, prompt)
+                    model = Model(engine, stream=stream, actions=["broken-middle"])
+                    engine.ask_chatbot = model
+                    items = sentences(5)
+                    count, result = await engine.translate(items, filename="part")
+                    self.assertEqual(len(model.requests), 1)  # 不为坏行重发整批
+                    self.assertEqual(count, 2)
+                    self.assertEqual([row.index for row in result], [1, 2])
+                    self.assertEqual(
+                        [row.pre_dst for row in items],
+                        ["translated-source-1", "translated-source-2", "", "", ""],
+                    )
+
+    async def test_next_batch_resumes_at_the_broken_sentence(self):
+        for kind, prompt in ENGINES:
+            for stream in (False, True):
+                with self.subTest(engine=kind.__name__, stream=stream):
+                    engine = translator(kind, prompt)
+                    engine.restore_context_mode = False
+                    model = Model(engine, stream=stream, actions=["broken-middle"])
+                    engine.ask_chatbot = model
+                    items = sentences(5)
+                    result = await engine._batch_translate_common(
+                        filename="part", cache_file_path="", translist_unhit=items, num_pre_request=5,
+                    )
+                    self.assertEqual(len(model.requests), 2)
+                    self.assertEqual(
+                        [row.pre_dst for row in result],
+                        [f"translated-source-{i}" for i in range(1, 6)],
+                    )
+
+    async def test_broken_first_line_still_retries(self):
+        for kind, prompt in ENGINES:
+            with self.subTest(engine=kind.__name__):
+                engine = translator(kind, prompt)
+                model = Model(engine, stream=True, actions=["bad", None])
+                engine.ask_chatbot = model
+                count, _result = await engine.translate(sentences(3), filename="part")
+                self.assertEqual(len(model.requests), 2)
+                self.assertEqual(count, 3)
+
+    async def test_markdown_row_rejected_after_parsing_is_not_skipped(self):
+        """坏行本身能解析成表格行、只是内容不合格（这里是空译文）时，游标已经越过它：
+        返回的句数仍只算通过校验的，否则下一批会从坏行的后一句开始，坏行那句永远不翻。"""
+        engine = translator(ForGalMarkdownTranslate, FORGAL_MARKDOWN_TRANS_PROMPT_EN)
+
+        async def ask(**kwargs):
+            rows = [
+                "| ID | NAME | DST |", "| --- | --- | --- |",
+                markdown_row("1", "null", "translated-source-1"),
+                markdown_row("2", "null", ""),
+                markdown_row("3", "null", "translated-source-3"),
+            ]
+            _CHATBOT_STATE.set((True, "test-model"))
+            kwargs["stream_line_callback"](rows, True)
+            return chr(10).join(rows), SimpleNamespace(model_name="test-model")
+
+        engine.ask_chatbot = ask
+        items = sentences(3)
+        count, result = await engine.translate(items, filename="part")
+        self.assertEqual(count, 1)
+        self.assertEqual([row.index for row in result], [1])
+        self.assertEqual(items[1].pre_dst, "")

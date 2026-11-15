@@ -1186,8 +1186,12 @@ class BaseTranslate:
         tools=NOT_GIVEN,
         tool_response_holder: Optional[dict] = None,
         tool_choice=NOT_GIVEN,
+        tool_arguments_callback=None,
     ):
         """发一次请求并返回 (正文, token)。
+
+        tool_arguments_callback(序号, 新到的片段, 已收到的参数全文)：流式响应里工具调用的参数每到一段
+        就调一次，调用方可以不等收完就先处理写完的部分（tool 模板据此提前显示译文）。非流式不会调。
 
         传了 reasoning_holder 时，把这次响应的思考内容填进去：{"field": 字段名, "text": 思考全文}。
         多轮对话的调用方要拿它跟着 assistant 消息回传给 provider（见 REASONING_FIELD_NAMES）。
@@ -1218,6 +1222,7 @@ class BaseTranslate:
                 tools=tools,
                 tool_response_holder=tool_response_holder,
                 tool_choice=tool_choice,
+                tool_arguments_callback=tool_arguments_callback,
             )
         finally:
             progress.close()
@@ -1243,6 +1248,7 @@ class BaseTranslate:
         tools=NOT_GIVEN,
         tool_response_holder: Optional[dict] = None,
         tool_choice=NOT_GIVEN,
+        tool_arguments_callback=None,
     ):
         """ask_chatbot 的本体：带重试地发请求，边收边报 progress。"""
         if max_retry_count is None:
@@ -1396,6 +1402,14 @@ class BaseTranslate:
                                         piece = call.function.arguments or ""
                                         slot["function"]["arguments"] += piece
                                         progress.output("writing", len(piece))
+                                        if tool_arguments_callback and piece:
+                                            try:
+                                                tool_arguments_callback(
+                                                    call.index, piece, slot["function"]["arguments"]
+                                                )
+                                            except Exception:
+                                                # 只是提前显示用的，出错不能影响这次请求
+                                                pass
                             reasoning_piece, hit_field = _extract_reasoning(
                                 chunk.choices[0].delta
                             )

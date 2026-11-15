@@ -1,8 +1,10 @@
 """每批独立的工具翻译：通过译文补丁分组写入结果。"""
 
 import json
+from copy import copy
 
 from GalTransl import LOGGER
+from GalTransl.Backend.BaseTranslate import TranslationParseError
 from GalTransl.Backend.ForGalJsonTranslate import ForGalJsonTranslate
 from GalTransl.Backend.ForGalMarkdownTranslate import markdown_row
 from GalTransl.Backend.Prompts import FORGAL_TOOL_SYSTEM_PROMPT, FORGAL_TOOL_TRANS_PROMPT
@@ -63,6 +65,37 @@ def apply_translation_patch(patch, expected, results):
     # 条目必须来自本批且不重复，因此最多可写入本批的全部句子。
     results.update(pending)
     return len(pending)
+
+
+# 补丁还在流式接收时，每攒够这么多句完整译文就先推一次到工作台「最近译文」
+STREAM_PREVIEW_SENTENCES = 8
+_ENTRY_BREAK = "\\n@@ "  # arguments 是 JSON 文本，补丁里的换行在其中是字面的反斜杠 + n
+
+
+def streamed_patch_entries(arguments):
+    """从还没收完的工具参数里取出已经写完的条目 [(anchor|id, 译文), ...]。
+
+    一个条目要等下一个 @@ 行出现才算写完，所以最后一个条目永远不取——它可能还在输出。
+    认不出格式时返回空列表：这只用于提前显示，补丁收完后照常由 apply_translation_patch 校验。
+    """
+    start = arguments.find('"patch"')
+    start = arguments.find('"', arguments.find(":", start) + 1) if start >= 0 else -1
+    end = arguments.rfind(_ENTRY_BREAK)
+    if start < 0 or end <= start:
+        return []
+    try:
+        lines = json.loads('"' + arguments[start + 1:end] + '"').splitlines()
+    except ValueError:
+        return []
+    entries = []
+    for line in lines[1:]:
+        if line.startswith("@@ "):
+            entries.append((line.removeprefix("@@ "), []))
+        elif entries and line.startswith("+"):
+            entries[-1][1].append(line[1:])
+        else:
+            return []
+    return [(key, "\n".join(text)) for key, text in entries]
 
 
 class ForGalToolTranslate(ForGalJsonTranslate):
@@ -163,13 +196,39 @@ class ForGalToolTranslate(ForGalJsonTranslate):
         # 工具响应在本批完成后统一适配为记录，不走父类的逐行流式解析。
         return False, super()._get_chatbot_state()[1]
 
+    def _format_tool_results(self, results, trans_list, sig_list, proofread):
+        # 与 ForGal-json 的部分解析一致：只推进连续的已完成前缀，不能跳过缺句。
+        key = "newdst" if proofread else "dst"
+        lines = []
+        for sig, tran in zip(sig_list, trans_list):
+            anchor = f"{sig}|{tran.index}"
+            if anchor not in results:
+                break
+            lines.append(self._encode_sig_jsonline(sig, {"id": tran.index, key: results[anchor]}))
+        return "\n".join(lines)
+
     async def _ask_translation_batch(self, session, *, trans_list, sig_list, proofread, n_symbol="", **kwargs):
+        results, last_token = {}, [None]
+        try:
+            return await self._run_tool_batch(
+                results, last_token,
+                trans_list=trans_list, sig_list=sig_list, proofread=proofread, n_symbol=n_symbol, **kwargs,
+            )
+        except TranslationParseError:
+            # 自动模式下工具出错会立刻抛出（不在批内让模型修正）。此前的补丁若已写出连续的开头几句，
+            # 就交回这几句：外层按部分结果返回，自动模式采用它们并记一次模板失败。
+            partial = self._format_tool_results(results, trans_list, sig_list, proofread)
+            if not partial:
+                raise
+            self._clear_chatbot_state()
+            return partial, last_token[0]
+
+    async def _run_tool_batch(self, results, last_token, *, trans_list, sig_list, proofread, n_symbol="", **kwargs):
         messages = list(kwargs.pop("messages"))
         kwargs.pop("stream_line_callback", None)
         kwargs.pop("reasoning_holder", None)
         expected = {f"{sig}|{tran.index}": tran.post_src for sig, tran in zip(sig_list, trans_list)}
         sentences_by_key = {f"{sig}|{tran.index}": tran for sig, tran in zip(sig_list, trans_list)}
-        results = {}
         reasoning_field = ""
         token = None
         missing_tool_retries = 0
@@ -190,27 +249,59 @@ class ForGalToolTranslate(ForGalJsonTranslate):
             )
 
         def formatted_results():
-            # 与 ForGal-json 的部分解析一致：只推进连续的已完成前缀，不能跳过缺句。
-            key = "newdst" if proofread else "dst"
-            lines = []
-            for sig, tran in zip(sig_list, trans_list):
-                anchor = f"{sig}|{tran.index}"
-                if anchor not in results:
-                    break
-                lines.append(self._encode_sig_jsonline(sig, {"id": tran.index, key: results[anchor]}))
-            return "\n".join(lines)
+            return self._format_tool_results(results, trans_list, sig_list, proofread)
+
+        # 提前显示：大批次的补丁要收很久，不等整份收完，写完的句子每攒够 STREAM_PREVIEW_SENTENCES 句
+        # 就先推到「最近译文」。这只是显示——句子本身仍等整份补丁校验通过才写入；补丁最后没通过时，
+        # 已显示的那几句不会被采用，重翻后会再出现一次。
+        previewed = {}  # anchor|id -> (已显示的译文, 模型名)；补丁通过后同样的译文不重复上报
+        preview = {}  # 当前这一次请求的进度，每次请求前清空
+
+        def preview_streamed_patch(call_index, piece, arguments):
+            if preview.get("stopped") or "@" not in piece:
+                return
+            entries = streamed_patch_entries(arguments)
+            taken = preview.setdefault("taken", {})
+            waiting = preview.setdefault("waiting", [])
+            for key, text in entries[taken.get(call_index, 0):]:
+                tran = sentences_by_key.get(key)
+                if (
+                    tran is None or key in results or "�" in text
+                    or (expected[key] and not text.strip())
+                    or self._has_speaker_column_in_translation(text, tran)
+                ):
+                    # 这份补丁收完后多半通不过校验，后面的句子不再提前显示
+                    preview["stopped"] = True
+                    return
+                waiting.append((key, tran, text))
+            taken[call_index] = len(entries)
+            if len(waiting) < STREAM_PREVIEW_SENTENCES:
+                return
+            model_name = self._get_chatbot_state()[1]
+            for key, tran, text in waiting:
+                shown = copy(tran)
+                shown.pre_dst = self._normalize_parsed_translation_text(text, tran, n_symbol)
+                shown.trans_by = model_name
+                # 上一份补丁作废后模型重新提交：已显示过的同一句译文不再推一遍
+                if previewed.get(key) != (shown.pre_dst, model_name):
+                    self._record_runtime_success(kwargs.get("progress_file", ""), shown)
+                    previewed[key] = (shown.pre_dst, model_name)
+            waiting.clear()
 
         # 工具往返仅属于当前批次，不保留跨批次对话。设置上限防止模型空转。
         for round_index in range(2 * len(trans_list) + 6):
             attempt = round_index + 1
             self._check_stop_requested()
             response, reasoning = {}, {}
+            preview.clear()
             next_tool = "write_translation_result"
             tool_choice = {"type": "function", "function": {"name": next_tool}}
             content, token = await self.ask_chatbot(
                 messages=list(messages), tools=TRANSLATION_TOOLS,
-                tool_choice=tool_choice, tool_response_holder=response, reasoning_holder=reasoning, **kwargs,
+                tool_choice=tool_choice, tool_response_holder=response, reasoning_holder=reasoning,
+                tool_arguments_callback=None if proofread else preview_streamed_patch, **kwargs,
             )
+            last_token[0] = token
             if response.get("finish_reason") in ("length", "content_filter"):
                 failure_reason = f"响应结束原因为 {response['finish_reason']}，未执行本次工具调用"
                 self._raise_parse_error_for_auto(
@@ -324,7 +415,7 @@ class ForGalToolTranslate(ForGalJsonTranslate):
                             already_reported = (
                                 getattr(tran, "_runtime_success_recorded", False)
                                 and tran.pre_dst == text and tran.trans_by == model_name
-                            )
+                            ) or previewed.get(key) == (text, model_name)
                             tran.pre_dst = tran.post_dst = text
                             tran.trans_by = model_name
                             if not already_reported:

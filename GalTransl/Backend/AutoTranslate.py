@@ -9,6 +9,9 @@
 - API 错误（网络、限流、5xx）：模板和改善拒答都没问题，保持策略、只换令牌，不缩小批次；
 - 模型不支持图片（图片请求被 4xx 拒收）：本次任务停用图片方式。
 
+模板只交回开头连续几句（后面缺句或有坏行）不走上面的重试：这几句已逐句通过校验，直接采用，
+剩下的由下一批接着翻；模板照样记一次格式失败，让成功率统计反映出来。
+
 成功率按「文件类型（有无 name）× 模型」分别统计：模板只记格式成败，改善拒答方式只记是否被拒，
 API 错误两边都不计。每个文件还会记住自己上次成功的模板和需要的改善拒答等级；在高等级上
 连续成功几批后，只派一个批次试着降回更便宜的方式：成功就降级，被拒就保持，并把下次试降的
@@ -441,7 +444,8 @@ class AutoTranslate(BaseTranslate):
             session_scope = engine._session_scope()
             session_token = session_scope.set(context)
             jb_token = JAILBREAK_OVERRIDE.set("" if jb == "none" else jb)
-            # 失败模板不能把局部解析结果或失败标记写回正式译文。
+            # 在副本上翻：模板抛错时，它写了一半的内容和失败标记不能留在正式句子上；
+            # 只有模板正常交回的句子（整批，或通过校验的开头几句）才写回。
             working = [copy(tran) for tran in current]
             for i, tran in enumerate(working):
                 if i:
@@ -456,10 +460,35 @@ class AutoTranslate(BaseTranslate):
                         style = "sakura"
                     glossary = state["gpt_dic"].gen_prompt(current, style)
                 count, translated = await engine.translate(working, glossary, proofread=proofread, filename=filename)
-                if count != len(current) or len(translated) != len(current):
+                # 部分结果：模板只交回了开头连续的几句（后面缺句或有坏行）。这几句逐句通过了校验，
+                # 直接采用，剩下的由下一批接着翻；模板照样记一次格式失败。
+                partial = 0 < count < len(current) and len(translated) == count
+                if not partial and (count != len(current) or len(translated) != len(current)):
                     raise TranslationParseError(f"译文缺句：{count}/{len(current)}")
                 for original, result in zip(current, translated):
                     original.__dict__.update({key: value for key, value in result.__dict__.items() if key not in ("prev_tran", "next_tran")})
+                if partial:
+                    self._count("template", (group, model, mode), False)
+                    engine.reset_conversation(filename)
+                    detail = f"只完成 {count}/{len(current)} 句，已采用这 {count} 句，其余下一批重翻；记一次模板失败"
+                    LOGGER.warning("[auto-translate][%s] %s %s", label, plan, detail)
+                    try:
+                        from GalTransl.server import record_runtime_error
+
+                        record_runtime_error(
+                            getattr(self.pj_config, "runtime_project_dir", None) or self.pj_config.getProjectDir(),
+                            kind="parse",
+                            message=f"[auto-translate][{plan}] {detail}",
+                            filename=filename,
+                            index_range=self._build_idx_tip(current),
+                            retry_count=attempt,
+                            model=engine._get_chatbot_state()[1],
+                            sleep_seconds=0.0,
+                            level="warning",
+                        )
+                    except Exception:
+                        LOGGER.debug("自动翻译错误写入运行时记录失败", exc_info=True)
+                    return count, list(current[:count])
                 # 会话连续性按正式句子对象判断，替换临时副本引用。
                 for session in context["sessions"].values():
                     if session.last_tran is working[-1]:

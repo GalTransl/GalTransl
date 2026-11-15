@@ -31,6 +31,8 @@ def auto_engine(actions, settings=None):
             rows[0].pre_dst = 'temporary'
             if isinstance(action, BaseException):
                 raise action
+            if isinstance(action, int):  # 模板只交回开头 action 句（部分结果）
+                rows = rows[:action]
             for row in rows:
                 row.pre_dst = row.post_dst = 'translated'
             return len(rows), rows
@@ -89,16 +91,84 @@ class AutoTranslateTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(engine._state()['template'], {})
             self.assertEqual(rows[0].pre_dst, '')
 
-    async def test_real_parsers_fail_fast_on_partial_and_invalid_output(self):
+    async def test_real_parsers_fail_fast_on_invalid_output(self):
         for kind, prompt in ENGINES:
-            for action in ('bad', 'partial'):
-                engine = translator(kind, prompt)
-                engine.fail_fast = True
-                model = Model(engine, actions=[action])
-                engine.ask_chatbot = model
-                with self.assertRaises(TranslationParseError):
-                    await engine.translate(sentences(3), filename='a')
-                self.assertEqual(len(model.requests), 1)
+            engine = translator(kind, prompt)
+            engine.fail_fast = True
+            model = Model(engine, actions=['bad'])
+            engine.ask_chatbot = model
+            with self.assertRaises(TranslationParseError):
+                await engine.translate(sentences(3), filename='a')
+            self.assertEqual(len(model.requests), 1)
+
+    async def test_real_parsers_hand_back_the_valid_prefix_instead_of_failing(self):
+        """自动模式下模板不再为缺句/中途坏行抛错：通过校验的开头几句照常返回，由自动模式采用。
+        回归背景：原先整批作废重翻，大批次里一行坏输出会让前面几十句白翻。"""
+        for kind, prompt in ENGINES:
+            for stream in (False, True):
+                for action, expected in (('partial', 1), ('broken-middle', 2)):
+                    with self.subTest(engine=kind.__name__, stream=stream, action=action):
+                        engine = translator(kind, prompt)
+                        engine.fail_fast = True
+                        model = Model(engine, stream=stream, actions=[action])
+                        engine.ask_chatbot = model
+                        count, rows = await engine.translate(sentences(4), filename='a')
+                        self.assertEqual((count, len(rows)), (expected, expected))
+                        self.assertEqual(len(model.requests), 1)
+
+    async def test_partial_result_is_adopted_and_counted_as_a_template_failure(self):
+        from unittest.mock import patch
+        engine = auto_engine([2])
+        engine.pj_config.runtime_project_dir = 'test-project'
+        rows = named(5)
+        with patch('GalTransl.server.record_runtime_error') as report:
+            count, result = await engine.translate(rows, filename='chapter.json')
+        # 一次请求：采用前 2 句，不为剩下的句子在本批内重试
+        self.assertEqual(engine.calls, [(GAL_MODES[0], 5)])
+        self.assertEqual(count, 2)
+        self.assertEqual(result, rows[:2])
+        self.assertEqual([row.pre_dst for row in rows], ['translated', 'translated', '', '', ''])
+        # 标记失败：模板成功率记一次失败，工作台「最近错误」有一条
+        model = engine._model_name(0)
+        self.assertEqual(engine._state()['template'][('gal', model, GAL_MODES[0])], (0, 1))
+        self.assertEqual(report.call_count, 1)
+        self.assertIn('2/5', report.call_args.kwargs['message'])
+        self.assertEqual(report.call_args.kwargs['level'], 'warning')
+
+    async def test_partial_batches_finish_the_file_through_the_batch_loop(self):
+        engine = auto_engine([2])
+        rows = named(5)
+        result = await engine._batch_translate_common(
+            filename='chapter.json', cache_file_path='', translist_unhit=rows, num_pre_request=5,
+        )
+        self.assertEqual([size for _mode, size in engine.calls], [5, 3])
+        self.assertEqual([row.pre_dst for row in result], ['translated'] * 5)
+
+    async def test_tool_keeps_sentences_written_before_a_bad_patch(self):
+        """工具模板在自动模式下遇到坏补丁会立刻失败；之前的补丁已写出的开头几句要交回，而不是整批作废。"""
+        from GalTransl.Backend.ForGalToolTranslate import ForGalToolTranslate
+        from GalTransl.Backend.Prompts import FORGAL_TOOL_TRANS_PROMPT
+        from test_forgal_tool import function_call, patch_for, tool_input_rows
+        from types import SimpleNamespace
+        engine = translator(ForGalToolTranslate, FORGAL_TOOL_TRANS_PROMPT)
+        engine.fail_fast = True
+        calls = 0
+        async def reply(**kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                sig, obj = tool_input_rows(kwargs['messages'][1]['content'])[0]
+                text = patch_for(f"{sig}|{obj['id']}", 'first')
+            else:
+                text = 'invalid'
+            kwargs['tool_response_holder'].update(tool_calls=[function_call('write_translation_result', text, f'c{calls}')])
+            return '', SimpleNamespace(model_name='test')
+        engine.ask_chatbot = reply
+        rows = sentences(3)
+        count, result = await engine.translate(rows, filename='a')
+        self.assertEqual(calls, 2)
+        self.assertEqual(count, 1)
+        self.assertEqual([row.pre_dst for row in result], ['first'])
 
     async def test_batch_finishes_without_hidden_retry_after_fifth_failure(self):
         engine = auto_engine([TranslationParseError('bad')] * 5)

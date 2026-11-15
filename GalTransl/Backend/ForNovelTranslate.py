@@ -190,10 +190,13 @@ class ForNovelTranslate(MultiTurnTranslate):
                     if i >= len(trans_list) - 1:
                         break
 
-            if error_message or stream_parse_error_message or success_count != len(trans_list):
+            # 自动模式靠这个异常换模板/缩批；但已有通过校验的句子时不抛，
+            # 照常按部分结果返回，由自动模式采用这几句并记一次模板失败
+            if success_count <= 0 and (error_message or stream_parse_error_message or success_count != len(trans_list)):
                 self._raise_parse_error_for_auto(error_message or stream_parse_error_message or f"译文缺句：{success_count}/{len(trans_list)}", resp or "")
 
-            if success_count > 0 and not stream_parse_error_message:
+            # 坏行之前已逐行通过校验的句子直接采用（流式、非流式一致），下一批从坏行那句接着翻
+            if success_count > 0:
                 error_flag = False  # 部分解析
 
             if not error_flag and success_count <= 0 and not result_trans_list:
