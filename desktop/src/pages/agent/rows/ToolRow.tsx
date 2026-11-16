@@ -72,15 +72,17 @@ export const ToolRow = memo(function ToolRow({
   // 有它就不必为了"它准备改什么"把这一行撑开去铺原始 JSON。
   const permPreview = awaiting ? extractChangeList(item.permission?.preview) : null;
 
-  // 行**默认展开**的三种情形：
-  // 1) 已有变更卡 —— 改了什么是这次调用的重点，diff 不该藏在一次点击后面；
-  // 2) 有 reason 却没有变更卡（save_dict 只新建空文件之类不产生 changes）——理由也该直接可见；
-  // 3) **正等着批准、但算不出 diff 的调用** —— 整文件删缓存、启动翻译、派子代理这类没有
+  // 行**默认展开**的情形：
+  // 1) 成功且有变更卡 —— 改了什么是这次调用的重点，diff 不该藏在一次点击后面。
+  //    只有 reason 没有 diff（改动 0 条、文本没变、调用失败）不展开：那时铺开的只是参数和
+  //    一句"未保存"，反倒把真正有改动的行挤下去；
+  // 2) **正等着批准、但算不出 diff 的调用** —— 整文件删缓存、启动翻译、派子代理这类没有
   //    可比对的 before→after，用户要判断就只能看原始参数，那还是替它铺开（能算 diff 的
-  //    都摆在审批卡上了，这一行不必再展开一次）。
+  //    都摆在审批卡上了，这一行不必再展开一次）；
+  // 3) 带图片或子代理的行。
   // manualOpenState 里只记"用户手动点过"的选择——记过就听用户的，没记过才用这个默认值
   // （重挂/刷新后同一规则）。
-  const autoOpen = autoExpand && (Boolean(changeList || reason || item.images?.length) || hasSubagents || (awaiting && !permPreview));
+  const autoOpen = autoExpand && (Boolean((ok && changeList) || item.images?.length) || hasSubagents || (awaiting && !permPreview));
   const [open, setOpenRaw] = useState(() => manualOpenState.get(stateKey) ?? autoOpen);
   const setOpen = (value: boolean | ((prev: boolean) => boolean)) => {
     setOpenRaw((prev) => {

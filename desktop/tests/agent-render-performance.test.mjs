@@ -71,6 +71,24 @@ test('replace tool header updates wildcard scope to the actual changed file coun
   act(() => renderer.unmount());
 });
 
+test('edit rows auto-expand only when they succeed with a diff, not on no-op or failed edits', () => {
+  // 回归：edit_transl_cache 改动 0 条（只带回 reason）或调用失败时也被默认展开。
+  const cases = [
+    ['diff', { ok: true, result: { reason: 'typo', changes: [{ path: '#91.pre_dst', before: 'a', after: 'b' }] } }, true],
+    ['noop', { ok: true, result: { reason: 'typo', updated: 0 } }, false],
+    ['failed', { ok: false, error: 'index out of range', result: { reason: 'typo' } }, false],
+    ['dict-failed', { ok: false, error: 'bad dict', result: { reason: 'r', line_diff: { rows: [{ op: 'add', line: 'x' }] } } }, false],
+  ];
+  for (const [id, extra, expected] of cases) {
+    const item = { kind: 'tool', step: 1, id: `edit-${id}`, name: 'edit_transl_cache',
+      arguments: { action: 'set', filename: 'a.json', reason: 'typo' }, ...extra };
+    let renderer;
+    act(() => { renderer = create(createElement(ToolRow, { item, persistKey: `edit-expand-${id}` })); });
+    assert.equal(renderer.root.findByProps({ className: 'agent-tool__header' }).props['aria-expanded'], expected, id);
+    act(() => renderer.unmount());
+  }
+});
+
 test('read aggregation preserves expansion across streamed additions and remounts, with errors outside', () => {
   const read = (step, extra = {}) => ({ kind: 'tool', step, id: `read-${step}`, name: 'read_input_file', arguments: { filename: `file-${step}.json` }, ok: true, ...extra });
   let group = { type: 'activity', id: 'reads', items: [read(1), read(2)] };
