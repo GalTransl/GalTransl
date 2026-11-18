@@ -1328,11 +1328,10 @@ export async function createBackendProfile(name: string, profile: Record<string,
   profiles[trimmedName] = cloneBackendProfile(profile);
   writeBackendProfilesStorage(profiles);
   if (isFirstProfile) {
-    // 首个配置初始化四种默认，之后分别保存。
+    // 首个配置只初始化翻译器和主 agent 的默认。GenDic、子 agent 留空表示"跟随翻译器 /
+    // 跟随主 agent"：在这里写死名字，用户之后换翻译器或主 agent 默认时它们不会跟着变。
     setDefaultBackendProfile(trimmedName);
     setAgentDefaultBackendProfile(trimmedName);
-    setGenDicDefaultBackendProfile(trimmedName);
-    setSubagentDefaultBackendProfile(trimmedName);
   }
   return { success: true, name: trimmedName };
 }

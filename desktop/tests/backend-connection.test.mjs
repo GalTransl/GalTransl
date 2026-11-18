@@ -247,7 +247,11 @@ test('four backend defaults persist independently and track profile rename/delet
   const { api, storage } = taskBackendApi();
   const defaults = ['Default', 'AgentDefault', 'GenDicDefault', 'SubagentDefault'];
   await api.createBackendProfile('first', { 'OpenAI-Compatible': { tokens: [] } });
-  for (const role of defaults) assert.equal(api[`get${role}BackendProfile`](), 'first');
+  // 首个配置只设翻译器和主 agent 默认；GenDic、子 agent 保持空（跟随），否则之后换默认时它们不跟。
+  assert.equal(api.getDefaultBackendProfile(), 'first');
+  assert.equal(api.getAgentDefaultBackendProfile(), 'first');
+  assert.equal(api.getGenDicDefaultBackendProfile(), '');
+  assert.equal(api.getSubagentDefaultBackendProfile(), '');
   for (const role of defaults) {
     await api.createBackendProfile(role, { 'OpenAI-Compatible': { tokens: [{ modelName: role }] } });
     api[`set${role}BackendProfile`](role);
