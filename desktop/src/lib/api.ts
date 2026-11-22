@@ -1325,8 +1325,14 @@ export async function createBackendProfile(name: string, profile: Record<string,
   }
   const profiles = readBackendProfilesStorage();
   const isFirstProfile = Object.keys(profiles).length === 0;
-  profiles[trimmedName] = cloneBackendProfile(profile);
-  writeBackendProfilesStorage(profiles);
+  if (trimmedName in profiles) {
+    // 保存已有配置时原地更新，不改变它在列表里的位置
+    profiles[trimmedName] = cloneBackendProfile(profile);
+    writeBackendProfilesStorage(profiles);
+  } else {
+    // 新建的配置排在列表最前面，刚建的不用滚到底去找
+    writeBackendProfilesStorage({ [trimmedName]: cloneBackendProfile(profile), ...profiles });
+  }
   if (isFirstProfile) {
     // 首个配置只初始化翻译器和主 agent 的默认。GenDic、子 agent 留空表示"跟随翻译器 /
     // 跟随主 agent"：在这里写死名字，用户之后换翻译器或主 agent 默认时它们不会跟着变。
@@ -1387,8 +1393,15 @@ export async function copyBackendProfile(sourceName: string) {
     throw new UiError(uiMessage('errors:profiles.notFound', { name: from }));
   }
   const copyName = uniqueProfileName(resolveMessage(uiMessage('errors:profiles.copyName', { name: from })), profiles);
-  profiles[copyName] = cloneBackendProfile(profiles[from]);
-  writeBackendProfilesStorage(profiles);
+  // 副本紧跟在原配置后面，方便对照着改
+  const withCopy: BackendProfilesMap = {};
+  for (const [key, value] of Object.entries(profiles)) {
+    withCopy[key] = value;
+    if (key === from) {
+      withCopy[copyName] = cloneBackendProfile(value);
+    }
+  }
+  writeBackendProfilesStorage(withCopy);
   return { success: true, name: copyName };
 }
 

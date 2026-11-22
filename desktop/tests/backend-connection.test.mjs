@@ -269,6 +269,29 @@ test('four backend defaults persist independently and track profile rename/delet
   assert.equal(api.getDefaultBackendProfile(), 'Default');
 });
 
+test('newly created backend profiles go to the top of the list while saving keeps position', async () => {
+  // 模型设置页按存储顺序列出配置，新建的曾经排在末尾，配置多了要滚到底才找得到。
+  const { api } = taskBackendApi();
+  await api.createBackendProfile('a', { 'OpenAI-Compatible': { tokens: [] } });
+  await api.createBackendProfile('b', { 'OpenAI-Compatible': { tokens: [] } });
+  await api.createBackendProfile('c', { 'OpenAI-Compatible': { tokens: [] } });
+  assert.deepEqual([...api.getBackendProfileNames()], ['c', 'b', 'a']);
+  await api.updateBackendProfile('a', { 'OpenAI-Compatible': { tokens: [{ modelName: 'edited' }] } });
+  assert.deepEqual([...api.getBackendProfileNames()], ['c', 'b', 'a']);
+  assert.equal(api.getBackendProfile('a')['OpenAI-Compatible'].tokens[0].modelName, 'edited');
+});
+
+test('copied backend profile is placed right after its source', async () => {
+  // 副本曾经追加到列表末尾，和原配置隔得很远，不方便对照修改。
+  const { api } = taskBackendApi();
+  for (const name of ['a', 'b', 'c']) {
+    await api.createBackendProfile(name, { 'OpenAI-Compatible': { tokens: [{ modelName: name }] } });
+  }
+  const copy = await api.copyBackendProfile('b');
+  assert.deepEqual([...api.getBackendProfileNames()], ['c', 'b', copy.name, 'a']);
+  assert.equal(api.getBackendProfile(copy.name)['OpenAI-Compatible'].tokens[0].modelName, 'b');
+});
+
 test('GenDic submission and agent request contexts use the independent defaults', async () => {
   const { api, requestOptions } = taskBackendApi();
   for (const name of ['translator', 'main', 'dictionary', 'child']) {
