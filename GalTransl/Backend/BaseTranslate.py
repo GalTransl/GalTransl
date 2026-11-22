@@ -38,6 +38,42 @@ except Exception:
     PyreqwestClientBuilder = None
 
 
+if HttpxTransport is not None:
+
+    class _LiveByteStream(httpx.AsyncByteStream):
+        """用 read_chunk() 逐块交出响应体：到多少给多少，不等攒满一个块。"""
+
+        def __init__(self, inner) -> None:
+            self._inner = inner
+
+        async def __aiter__(self):
+            reader = self._inner._body_reader
+            while (chunk := await reader.read_chunk()) is not None:
+                yield bytes(chunk)
+
+        async def aclose(self) -> None:
+            await self._inner.aclose()
+
+    class _LiveHttpxTransport(HttpxTransport):
+        """流式响应边到边交出的 pyreqwest transport。
+
+        pyreqwest 的 httpx 适配层有两处缓冲：流式请求先把响应体预读进缓冲再返回
+        （streamed_read_buffer_limit，默认 64KB），之后又用 body_reader.read() 按块读、要攒满才返回。
+        一次翻译回复通常不到 64KB，于是整段生成完才一次性到达：「文件进度」的灯从请求中直接跳到
+        翻译中、看不到思考中，字/秒和提前显示的译文也都不对。两处都得改，只改一处仍然整段到达。
+        """
+
+        def _map_body(self, builder, request):
+            return super()._map_body(builder, request).streamed_read_buffer_limit(0)
+
+        async def handle_async_request(self, request):
+            response = await super().handle_async_request(request)
+            # 上游内部结构变了就保持原样：只是流式退回整段到达，请求本身不受影响
+            if hasattr(response.stream, "_body_reader"):
+                response.stream = _LiveByteStream(response.stream)
+            return response
+
+
 _GLOBAL_RPM_LOCK = Lock()
 _GLOBAL_NEXT_ALLOWED_TS = 0.0
 _CHATBOT_STATE: ContextVar[tuple[bool, str] | None] = ContextVar(
@@ -577,9 +613,9 @@ class BaseTranslate:
                         max_connections=100,
                         keepalive_expiry=30.0,
                     ),
-                    transport=HttpxTransport(pyreqwest_client)
+                    transport=_LiveHttpxTransport(pyreqwest_client)
                     if pyreqwest_client is not None
-                    else HttpxTransport(),
+                    else _LiveHttpxTransport(),
                 )
             except Exception as exc:
                 LOGGER.warning(
