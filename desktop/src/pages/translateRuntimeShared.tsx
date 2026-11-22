@@ -460,6 +460,15 @@ export const FileProgressRow = memo(function FileProgressRow({
   const live = active
     ? file.activity ?? (held && now - held.at <= LIVE_HOLD_MS ? held.activity : null)
     : null;
+  // 沿用的状态到期时要自己重渲染一次：轮询会复用没变化的 file 对象、这一行是 memo 的，
+  // 文件翻完后 props 不再变，不重渲染的话就一直停在「翻译中」，直到整个任务结束
+  const holdingAt = live && !file.activity && held ? held.at : null;
+  const [, setHoldExpiry] = useState(0);
+  useEffect(() => {
+    if (holdingAt === null) return;
+    const timer = setTimeout(() => setHoldExpiry((n) => n + 1), Math.max(0, holdingAt + LIVE_HOLD_MS - Date.now()) + 1);
+    return () => clearTimeout(timer);
+  }, [holdingAt]);
   // 状态文案：**有请求在跑就先说它的阶段**（几个请求同时在跑时带上 ×n）——哪怕计数已经满了，
   // 这一行也还在动，不能报「已完成」；没在跑才轮到「已完成 / 未完成」（在等线程，或者这一轮
   // 不会再碰它），一点没翻的在任务里是「排队中」

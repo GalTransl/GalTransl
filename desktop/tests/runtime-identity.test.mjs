@@ -56,3 +56,41 @@ test('runtime honors insertions, removals and changes outside row lists', () => 
   assert.equal(merged.stage, 'complete');
   assert.equal(merged.job, next.job);
 });
+
+test('a finished file stops showing its held live phase once the hold expires, even without new props', async () => {
+  // Regression: polls reuse unchanged file objects, so a memo'd row only re-rendered once after the
+  // last request ended. That render fell inside the 2s hold and kept "translating"; a finished file's
+  // props never change again, so the row stayed "translating" until the whole job ended.
+  const { mock } = await import('node:test');
+  const { createElement: h } = await import('react');
+  const { act, create } = await import('react-test-renderer');
+  mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+  try {
+    const rowLoad = createTypeScriptLoader({}, {
+      '../i18n': { t: key => key, useUiLanguage: () => 'en' },
+      '../i18n/core': { getUiLanguage: () => 'en' },
+      '../components/Icon': { Icon: () => null },
+      '../lib/speaker': { speakerStyle: () => ({}) },
+      '../lib/useNameDict': { resolveSpeakerName: name => name },
+    });
+    const { FileProgressRow } = rowLoad(new URL('../src/pages/translateRuntimeShared.tsx', import.meta.url));
+    const writing = 'projects:translateRuntimeShared.writing_writing_translation';
+    const props = { isRunning: true, isSuccessFileFilterActive: false, onToggleSuccessFileFilter() {} };
+    const file = { filename: 'a.json', translated: 310, total: 310, failed: 0 };
+    let renderer;
+    const label = () => renderer.root.findByProps({ className: 'file-progress-row__state' }).children.filter(c => typeof c === 'string').join('');
+    act(() => { renderer = create(h(FileProgressRow, { ...props, file: { ...file, activity: { phase: 'writing', cps: 30, requests: 1, stalled: false } } })); });
+    assert.equal(label(), writing);
+    // Next poll: the request has ended. Within the hold the row may still say "translating"...
+    mock.timers.tick(1000);
+    const finished = { ...file };
+    act(() => { renderer.update(h(FileProgressRow, { ...props, file: finished })); });
+    assert.equal(label(), writing);
+    // ...but once the hold expires it must settle on "done" with no further prop changes.
+    act(() => { mock.timers.tick(1100); });
+    assert.equal(label(), 'projects:translateRuntimeShared.stateLabel_message_doneComplete');
+    act(() => renderer.unmount());
+  } finally {
+    mock.timers.reset();
+  }
+});
