@@ -174,7 +174,7 @@ def find_problems(
 ) -> None:
     plugins = load_problem_plugins(projectConfig)
     for tran in trans_list:
-        if getattr(tran, "skip_check", False):
+        if getattr(tran, "skip_check", False) or getattr(tran, "keep_src", False):
             tran.problem = ""
             continue
         if not tran.pre_dst:

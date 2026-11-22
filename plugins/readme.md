@@ -85,6 +85,8 @@ Settings: # 这里存放插件的设置
 
 * 在load_file中，可以通过以下方式把与message无关的内容带到结果里
 1. 直接在每个dict里插其他的信息，save_file里会原样将其他内容送回，然后还原成原文件并保存文件（例如file_subtitle_srt插件）
+
+* 资源路径、网址这类必须原样保留的行，在对应 dict 里加 `"keep_src": true`：这一行不送模型、不过译前/译后字典和文本插件、不做问题检查，输出就是原文；前后句的缓存 key 不受影响，已有项目不会因此重翻（例如 file_i18n_json 插件）。
 ## 4. 问题插件
 
 插件目录与文件名建议使用 `problem_` 前缀，YAML 的 `Core.Type` 填 `problem`。

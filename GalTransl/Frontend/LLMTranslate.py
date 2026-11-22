@@ -554,6 +554,11 @@ async def update_progress_title(
 def preprocess_trans_list(trans_list, projectConfig, pre_dic, tPlugins=None):
     """翻译前处理：插件before_src → 对话分析 → 预处理字典替换源文 → 预处理字典替换说话人 → 插件after_src"""
     for tran in trans_list:
+        if tran.keep_src:
+            # 预先给 pre_dst 赋值，查缓存时直接算命中、不会送模型（旧缓存里被误翻的路径也就不再生效）。
+            # post_src 保持非空，前后句的缓存 key 不变。
+            tran.post_src = tran.pre_dst = tran.pre_src
+            continue
         if tPlugins:
             for plugin in tPlugins:
                 try:
@@ -592,6 +597,10 @@ def preprocess_trans_list(trans_list, projectConfig, pre_dic, tPlugins=None):
 def postprocess_trans_list(trans_list, projectConfig, post_dic, tPlugins=None):
     """翻译后处理：插件before_dst → 恢复对话符号 → 后处理字典替换译文 → 插件after_dst"""
     for tran in trans_list:
+        if tran.keep_src:
+            # 译后字典（如 ー→—）作用在路径上会让资源找不到，原样输出
+            tran.post_dst = tran.pre_src
+            continue
         if tPlugins:
             for plugin in tPlugins:
                 try:

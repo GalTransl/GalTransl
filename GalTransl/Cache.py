@@ -220,6 +220,9 @@ def _build_cache_obj(tran, post_save: bool = False):
 
     if getattr(tran, "skip_check", False):
         cache_obj["skip_check"] = True
+    if getattr(tran, "keep_src", False):
+        # 问题清单等从缓存重建句子的地方靠它认出原样输出的行，不再报「原文输出」
+        cache_obj["keep_src"] = True
 
     cache_obj["trans_by"] = tran.trans_by
     cache_obj["proofread_by"] = tran.proofread_by

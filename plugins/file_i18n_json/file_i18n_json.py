@@ -33,7 +33,10 @@ class file_plugin(GFilePlugin):
         result_list = []
         for key, value in flat_dict.items():
             if type(value) is str:
-                result_list.append({"key": key,"value":value, "message": value})
+                item = {"key": key,"value":value, "message": value}
+                if is_resource_reference(value):
+                    item["keep_src"] = True
+                result_list.append(item)
             else:
                 result_list.append({"key": key,"value":value, "message": ""})
 
@@ -64,6 +67,24 @@ class file_plugin(GFilePlugin):
         在所有文件翻译完成之后的动作，例如输出提示信息。
         """
         pass
+
+
+# MTool 之类的工具按「原字符串→译文」在运行时替换，路径被翻译后资源就找不到了。
+# 只认形态上明确的引用：带协议头（res://、https://）、带目录分隔符且以扩展名结尾、
+# 或以常见资源扩展名结尾的单个文件名；都不含空白。纯 ASCII 字段名无法与英文界面文本区分，不在此列。
+_SCHEME_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*://\S*")
+_PATH_WITH_EXT_RE = re.compile(r"\S*[/\\]\S*\.[A-Za-z0-9]*[A-Za-z][A-Za-z0-9]*")
+_ASSET_FILE_RE = re.compile(
+    # 不收 bin、dat、res 这类也是普通单词的后缀，免得 "Mr.Bin" 之类被当成文件名
+    r"[^\s/\\]+\.(png|jpe?g|webp|gif|bmp|svg|tga|dds|wav|ogg|mp3|m4a|opus|flac|midi?|"
+    r"mp4|webm|ogv|avi|mkv|wmv|json|txt|csv|xml|ya?ml|tres|tscn|ttf|otf|woff2?|rpy)",
+    re.IGNORECASE,
+)
+
+
+def is_resource_reference(text: str) -> bool:
+    """资源路径、网址、文件名这类原样保留、不该送去翻译的字符串。"""
+    return any(p.fullmatch(text) for p in (_SCHEME_RE, _PATH_WITH_EXT_RE, _ASSET_FILE_RE))
 
 
 def _object_to_rows(obj, prefix=None):

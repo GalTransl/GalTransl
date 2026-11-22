@@ -1930,6 +1930,7 @@ def _cache_entries_to_trans_list(entries, filename, white_index):
         s.skip_check = bool(e.get("skip_check", False)) or is_problem_whitelisted(
             white_index, filename, e.get("index", "")
         )
+        s.keep_src = e.get("keep_src") is True
         trans_list.append(s)
     return trans_list
 

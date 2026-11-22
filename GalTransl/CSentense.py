@@ -40,6 +40,8 @@ class CSentense:
 
         self.problem = ""  # 问题记录
         self.skip_check = False  # 跳过问题检查
+        # 文件插件标记的不可翻译行（资源路径、网址等）：原样输出，不送模型、不过字典和文本插件、不查问题
+        self.keep_src = False
         self.trans_conf = 0.0  # 翻译可信度 For GPT4
         self.proofread_comment = ""  # 校对批注：校对子代理写下的意见
         self.unknown_proper_noun = ""  # 用于记录未知的专有名词 For GPT4
