@@ -3,8 +3,11 @@
 一次尝试的「策略」= 模板（ForGal-tool / markdown / json、ForNovel-tool / ForNovel）
 + 改善拒答方式（none / prefill / image）。
 
+要不要改善拒答按文件区分；用哪个模板、哪种改善拒答方式不分文件，按共用的成功率统计挑。
+
 失败先分类，再对症处理：
-- 被拒（输出为空/被拦截/content_filter/回复是拒绝说明）：换模板没用，升级改善拒答方式，并缩小批次隔离问题句；
+- 被拒（输出为空/被拦截/content_filter/回复是拒绝说明）：这个文件之后都带改善拒答，换一个本批
+  还没被拒过的「模板 + 改善拒答方式」组合，并缩小批次隔离问题句；
 - 格式错（解析不出、缺句、补丁写错）：本批不再用这个模板，换成功率次高的模板，并缩小批次；
 - API 错误（网络、限流、5xx）：模板和改善拒答都没问题，保持策略、只换令牌，不缩小批次；
 - 模型不支持图片（图片请求被 4xx 拒收）：本次任务停用图片方式。
@@ -12,10 +15,10 @@
 模板只交回开头连续几句（后面缺句或有坏行）不走上面的重试：这几句已逐句通过校验，直接采用，
 剩下的由下一批接着翻；模板照样记一次格式失败，让成功率统计反映出来。
 
-成功率按「文件类型（有无 name）× 模型」分别统计：模板只记格式成败，改善拒答方式只记是否被拒，
-API 错误两边都不计。每个文件还会记住自己上次成功的模板和需要的改善拒答等级；在高等级上
-连续成功几批后，只派一个批次试着降回更便宜的方式：成功就降级，被拒就保持，并把下次试降的
-间隔加倍。
+成功率按「文件类型（有无 name）× 模型」分别统计，所有文件共用：模板只记格式成败；是否被拒按
+「模板 + 改善拒答方式」的组合记（同样叫预置补全，tool 模板是让模型调用读取工具，json 是预置
+回复开头，效果不能混在一起算）。API 错误两边都不计。每个文件只记住自己要不要改善拒答；带着
+改善拒答连续成功几批后，只派一个批次试着不带：成功就关掉，被拒就保持，并把下次试的间隔加倍。
 """
 
 from contextvars import ContextVar
@@ -83,20 +86,19 @@ MAX_RETRIES = 4
 # 改善拒答等级，按开销从低到高
 JB_LEVELS = ("none", "prefill", "image")
 JB_LABELS = {"none": "不改善拒答", "prefill": "预置补全", "image": "图片输入"}
-# 预置补全只对能预置回复开头的模板有效；tool 走工具调用、markdown 没有固定开头
-PREFILL_MODES = frozenset({"ForGal-json", "ForNovel"})
+# 预置补全：json / TSV 预置回复开头；tool 没有可预置的开头，改为让模型先调用读取工具取回
+# 前文和输入（见 ForGalToolTranslate._prepare_translation_messages）；markdown 没有固定开头，不支持
+PREFILL_MODES = frozenset({"ForGal-tool", "ForGal-json", "ForNovel-tool", "ForNovel"})
 IMAGE_MODES = frozenset({"ForGal-tool", "ForGal-markdown", "ForGal-json", "ForNovel-tool", "ForNovel"})
 
 # 先验：没有数据时模板的格式成功率按 0.8 估，强度相当于 4 次观测；之后由实际成败主导
 TEMPLATE_PRIOR, TEMPLATE_PRIOR_WEIGHT = 0.8, 4
-# 改善拒答方式的抗拒答先验：预置补全和图片取相同先验，开头由开销决定（先试便宜的），
-# 之后谁更少被拒谁优先
+# 「模板 + 改善拒答方式」组合的抗拒答先验：预置补全和图片取相同先验，开头由开销决定（先试便宜的），
+# 之后哪个组合更少被拒哪个优先
 JB_PRIOR = {"none": 0.5, "prefill": 0.6, "image": 0.6}
 JB_PRIOR_WEIGHT = 2
 JB_COST = 0.05          # 每升一级改善拒答扣的分：效果相近时用便宜的
-STICKY_BONUS = 0.1      # 文件上次成功的模板加分，避免来回切换
-UNSATISFIED_PENALTY = 0.5  # 模板达不到所需改善拒答等级时扣的分
-PROBE_AFTER, PROBE_AFTER_MAX = 3, 24  # 高等级上连续成功几批后试降一级；试降失败则间隔加倍
+PROBE_AFTER, PROBE_AFTER_MAX = 3, 24  # 带改善拒答连续成功几批后试着不带；试降被拒则间隔加倍
 
 _STRUCTURED_REPLY = re.compile(r'\|\s*\{\s*"id"|^\s*\|.*\|\s*$|\t\d+\s*$', re.M)
 _REFUSAL_REPLY = re.compile(
@@ -144,13 +146,15 @@ def classify_failure(exc, jb="none"):
 
 @dataclass
 class _Strategy:
-    """一个文件（含它被拆出的并发片段）的当前策略。"""
-    mode: str = ""          # 上次成功的模板
-    level: int = -1         # 需要的改善拒答等级（JB_LEVELS 下标），-1 = 还没初始化
-    streak: int = 0         # 在当前（高于基础）等级上连续成功的批数
+    """一个文件（含它被拆出的并发片段）要不要改善拒答。
+
+    用哪个模板、哪种改善拒答方式不记在这里：那是所有文件共用的统计（见 _choose）。
+    """
+    need: bool = False      # 这个文件被拒过：之后的批次都带改善拒答
+    streak: int = 0         # 带着改善拒答连续成功的批数
     probe_after: int = PROBE_AFTER
-    probe_level: int = -1   # 待试降到的等级，-1 = 没有待试降
-    probe_inflight: bool = False  # 已有批次在试降，其余批次照常用 level
+    probe_pending: bool = False   # 下一批试着不带改善拒答
+    probe_inflight: bool = False  # 已有批次在试降，其余批次照常带改善拒答
 
 
 class AutoTranslate(BaseTranslate):
@@ -232,9 +236,9 @@ class AutoTranslate(BaseTranslate):
         counts = self._state()["template"].get((group, model, mode), (0, 0))
         return self._rate(counts, TEMPLATE_PRIOR, TEMPLATE_PRIOR_WEIGHT)
 
-    def _jb_score(self, group, model, level):
+    def _jb_score(self, group, model, mode, level):
         jb = JB_LEVELS[level]
-        counts = self._state()["jailbreak"].get((group, model, jb), (0, 0))
+        counts = self._state()["jailbreak"].get((group, model, mode, jb), (0, 0))
         return self._rate(counts, JB_PRIOR[jb], JB_PRIOR_WEIGHT)
 
     def _count(self, table, key, ok):
@@ -242,100 +246,89 @@ class AutoTranslate(BaseTranslate):
         self._state()[table][key] = (counts[0] + 1, counts[1]) if ok else (counts[0], counts[1] + 1)
 
     def _strategy(self, file_key, modes):
-        strategies = self._state()["strategies"]
-        strategy = strategies.setdefault(file_key, _Strategy())
-        base = self._base_level(modes)
-        available = self._levels(modes)
-        if strategy.level < 0:
-            strategy.level = base
-        elif strategy.level < base or strategy.level not in available:
-            # 原等级不可用了（如图片方式被停用）：优先就近往上，没有就取能用的最高一级
-            higher = [level for level in available if level >= max(base, strategy.level)]
-            usable = [level for level in available if level >= base]
-            strategy.level = higher[0] if higher else (usable[-1] if usable else base)
-        if strategy.probe_level >= 0 and not (
-            strategy.probe_level in available and base <= strategy.probe_level < strategy.level
-        ):
-            strategy.probe_level = -1
+        strategy = self._state()["strategies"].setdefault(file_key, _Strategy())
+        if self._base_level(modes) > 0:
+            strategy.probe_pending = False  # 常开改善拒答：不试降
         return strategy
 
-    @staticmethod
-    def _claim_level(strategy):
-        """本次尝试用的等级；有待试降且没人在试时，由这次尝试去试。返回 (等级, 是否试降)。"""
-        if strategy.probe_level >= 0 and not strategy.probe_inflight:
+    def _claim_need(self, strategy, modes):
+        """本次尝试要不要带改善拒答；有待试降且没人在试时，由这次尝试去试。返回 (要不要, 是否试降)。"""
+        if strategy.probe_pending and not strategy.probe_inflight:
             strategy.probe_inflight = True
-            return strategy.probe_level, True
-        return strategy.level, False
+            return False, True
+        return strategy.need or self._base_level(modes) > 0, False
 
     @staticmethod
     def _end_probe(strategy, refused):
         strategy.probe_inflight = False
+        strategy.probe_pending = False
+        strategy.streak = 0
         if refused:
-            strategy.probe_level = -1
-            strategy.streak = 0
             strategy.probe_after = min(strategy.probe_after * 2, PROBE_AFTER_MAX)
 
-    def _choose(self, modes, group, model, level, sticky, excluded):
-        """在本批没失败过的模板里挑（模板, 改善拒答等级）。"""
-        best = None
+    def _choose(self, modes, group, model, need, excluded, refused):
+        """在本批没出过格式错误的模板里挑（模板, 改善拒答等级）。
+
+        文件不需要改善拒答时只比模板的格式成功率。需要时在「模板 + 改善拒答方式」的组合里挑，
+        比「格式成功率 × 未被拒率」，效果相近时用便宜的；本批已被拒过的组合先不再用，
+        全都被拒过就重新从头挑。常开改善拒答时不低于用户选的方式（见 _base_level）。
+        """
+        floor = max(1, self._base_level(modes)) if need else 0
+        best = fallback = None
+        skipped_refused = False
         for order, mode in enumerate(modes):
             if mode in excluded:
                 continue
-            supported = [lv for lv in range(len(JB_LEVELS)) if self._jb_supported(mode, lv)]
-            enough = [lv for lv in supported if lv >= level]
-            used = min(enough) if enough else max(supported)
-            score = (
-                self._template_score(group, model, mode)
-                - (0 if enough else UNSATISFIED_PENALTY)
-                - JB_COST * used
-                + (STICKY_BONUS if mode == sticky else 0)
-                - 0.001 * order  # 同分时保持默认顺序
-            )
-            if best is None or score > best[0]:
-                best = (score, mode, used)
+            template = self._template_score(group, model, mode)
+            tie = 0.001 * order  # 同分时保持默认顺序
+            if not need:
+                levels = [0]
+            else:
+                levels = [lv for lv in range(floor, len(JB_LEVELS)) if self._jb_supported(mode, lv)]
+            if not levels:
+                # 这个模板没有可用的改善拒答方式：只在没有别的选择时不带改善拒答地用
+                if fallback is None or template - tie > fallback[0]:
+                    fallback = (template - tie, mode, 0)
+                continue
+            for lv in levels:
+                if (mode, lv) in refused:
+                    skipped_refused = True
+                    continue
+                score = template - tie
+                if need:
+                    score = template * self._jb_score(group, model, mode, lv) - JB_COST * lv - tie
+                if best is None or score > best[0]:
+                    best = (score, mode, lv)
+        if best is None and skipped_refused:
+            refused.clear()
+            return self._choose(modes, group, model, need, excluded, refused)
+        best = best or fallback
         if best is None:
             excluded.clear()  # 全都失败过：本批重新从头挑
-            return self._choose(modes, group, model, level, sticky, excluded)
+            return self._choose(modes, group, model, need, excluded, refused)
         return best[1], best[2]
 
-    def _stronger_level(self, modes, group, model, level):
-        """被拒后升到哪一级：只看比当前更强的方式，按过往抗拒答成功率挑，效果相近时用便宜的。"""
-        candidates = [lv for lv in self._levels(modes) if lv > level]
-        if not candidates:
-            return None
-        return max(candidates, key=lambda lv: (self._jb_score(group, model, lv) - JB_COST * lv, -lv))
-
-    def _after_success(self, strategy, modes, mode, used, probing, label):
-        strategy.mode = mode
-        base = self._base_level(modes)
+    def _after_success(self, strategy, modes, used, probing, label):
         if probing:
             self._end_probe(strategy, refused=False)
-            if strategy.probe_level >= 0 and used < strategy.level:
-                LOGGER.info(
-                    "[自动策略][%s] 试降成功，本文件之后改用 %s",
-                    label, JB_LABELS[JB_LEVELS[used]],
-                )
-                strategy.level = max(used, base)
-                strategy.probe_after = PROBE_AFTER
-            strategy.probe_level = -1
-            strategy.streak = 0
+            if strategy.need:
+                LOGGER.info("[自动策略][%s] 试降成功，本文件之后不再改善拒答", label)
+            strategy.need = False
+            strategy.probe_after = PROBE_AFTER
             return
-        # 并发时，早于升级发出的低等级请求成功不算数；只统计当前等级上的连续成功
-        if strategy.level <= base or used < strategy.level:
-            if strategy.level <= base:
+        # 并发时，早于被拒发出的不带改善拒答的请求成功不算数；只统计带着改善拒答的连续成功
+        if not strategy.need or self._base_level(modes) > 0 or used == 0:
+            if not strategy.need:
                 strategy.streak = 0
             return
         strategy.streak += 1
-        if strategy.streak < strategy.probe_after or strategy.probe_level >= 0:
-            return
-        lower = [lv for lv in self._levels(modes) if base <= lv < strategy.level]
-        if not lower:
+        if strategy.streak < strategy.probe_after or strategy.probe_pending:
             return
         LOGGER.info(
-            "[自动策略][%s] %s 已连续成功 %s 批，派下一批试着降回 %s 以节省开销",
-            label, JB_LABELS[JB_LEVELS[strategy.level]], strategy.streak, JB_LABELS[JB_LEVELS[lower[-1]]],
+            "[自动策略][%s] 改善拒答已连续成功 %s 批，派下一批试着降回 %s 以节省开销",
+            label, strategy.streak, JB_LABELS["none"],
         )
-        strategy.probe_level = lower[-1]
+        strategy.probe_pending = True
 
     def _get_engine(self, mode):
         if mode not in self._engines:
@@ -422,6 +415,7 @@ class AutoTranslate(BaseTranslate):
                 )
 
         excluded = set()  # 本批格式出错过的模板
+        refused = set()   # 本批被拒过的（模板, 改善拒答等级）
         for attempt in range(MAX_RETRIES + 1):
             self._check_stop_requested()
             token_index = (
@@ -429,8 +423,8 @@ class AutoTranslate(BaseTranslate):
             )
             model = self._model_name(token_index)
             strategy = self._strategy(file_key, modes)
-            level, probing = self._claim_level(strategy)
-            mode, used = self._choose(modes, group, model, level, strategy.mode, excluded)
+            need, probing = self._claim_need(strategy, modes)
+            mode, used = self._choose(modes, group, model, need, excluded, refused)
             jb = JB_LEVELS[used]
             engine = self._get_engine(mode)
             engine._active_token_index = token_index
@@ -495,8 +489,8 @@ class AutoTranslate(BaseTranslate):
                         session.last_tran = current[-1]
                 self._active_token_index = token_index
                 self._count("template", (group, model, mode), True)
-                self._count("jailbreak", (group, model, jb), True)
-                self._after_success(strategy, modes, mode, used, probing, label)
+                self._count("jailbreak", (group, model, mode, jb), True)
+                self._after_success(strategy, modes, used, probing, label)
                 probing = False
                 return count, list(current)
             except (TranslationParseError, TranslationRequestError, APIError, httpx.HTTPError, OSError, ValueError) as exc:
@@ -506,39 +500,39 @@ class AutoTranslate(BaseTranslate):
                 if kind == "format":
                     self._count("template", (group, model, mode), False)
                     excluded.add(mode)
-                    following, _ = self._choose(modes, group, model, strategy.level, strategy.mode, set(excluded))
+                    following, _ = self._choose(
+                        modes, group, model, strategy.need or self._base_level(modes) > 0, set(excluded), set(refused),
+                    )
                     action = f"格式错误，切换 {following}" if following != mode else f"格式错误，保持 {mode}"
                 elif kind == "refusal" and probing:
-                    # 试降被拒说明还需要原来的等级，不是这批句子的问题：恢复原等级，不缩小批次
-                    self._count("jailbreak", (group, model, jb), False)
+                    # 试降被拒说明这个文件还需要改善拒答，不是这批句子的问题：恢复，不缩小批次
+                    self._count("jailbreak", (group, model, mode, jb), False)
                     self._end_probe(strategy, refused=True)
                     probing = False
                     shrink = False
-                    action = f"试降后被拒，恢复{JB_LABELS[JB_LEVELS[strategy.level]]}"
+                    action = "试降后被拒，恢复改善拒答"
                     LOGGER.info(
-                        "[自动策略][%s] 试降后被拒，保持 %s，连续成功 %s 批后再试",
-                        label, JB_LABELS[JB_LEVELS[strategy.level]], strategy.probe_after,
+                        "[自动策略][%s] 试降后被拒，保持改善拒答，连续成功 %s 批后再试",
+                        label, strategy.probe_after,
                     )
                 elif kind == "refusal":
-                    self._count("jailbreak", (group, model, jb), False)
-                    stronger = self._stronger_level(modes, group, model, used)
+                    self._count("jailbreak", (group, model, mode, jb), False)
+                    refused.add((mode, used))
                     strategy.streak = 0
                     if not strategy.probe_inflight:
-                        strategy.probe_level = -1
-                    if stronger is not None:
-                        if stronger > strategy.level:
-                            strategy.level = stronger
-                            LOGGER.info(
-                                "[自动策略][%s] 疑似拒答，本文件之后改用 %s",
-                                label, JB_LABELS[JB_LEVELS[stronger]],
-                            )
-                        action = f"疑似拒答，改用{JB_LABELS[JB_LEVELS[strategy.level]]}"
+                        strategy.probe_pending = False
+                    if not strategy.need:
+                        strategy.need = True
+                        if self._base_level(modes) == 0:
+                            LOGGER.info("[自动策略][%s] 疑似拒答，本文件之后开启改善拒答", label)
+                    next_mode, next_used = self._choose(modes, group, model, True, set(excluded), set(refused))
+                    if (next_mode, next_used) in refused:
+                        action = "疑似拒答，可用的改善拒答方式都已被拒，缩小批次隔离问题句"
                     else:
-                        strategy.level = max(strategy.level, used)
-                        action = "疑似拒答，已无更强的改善拒答方式，缩小批次隔离问题句"
+                        next_jb = JB_LEVELS[next_used]
+                        action = "疑似拒答，改用 " + (next_mode if next_jb == "none" else f"{next_mode}+{JB_LABELS[next_jb]}")
                 elif kind == "image_unsupported":
                     self._state()["image_disabled"] = True
-                    self._strategy(file_key, modes)  # 把等级调整到仍可用的方式
                     action = "模型疑似不支持图片输入，本次任务停用图片方式"
                     LOGGER.warning("[自动策略] %s：%s", action, exc)
                 else:
@@ -598,9 +592,9 @@ class AutoTranslate(BaseTranslate):
             for (g, m, mode), (ok, bad) in sorted(state["template"].items()):
                 if (g, m) == (group, model):
                     parts.append(f"{mode} {ok}/{ok + bad}")
-            for (g, m, jb), (ok, bad) in sorted(state["jailbreak"].items()):
+            for (g, m, mode, jb), (ok, bad) in sorted(state["jailbreak"].items()):
                 if (g, m) == (group, model) and (jb != "none" or bad):
-                    parts.append(f"{JB_LABELS[jb]}未被拒 {ok}/{ok + bad}")
+                    parts.append(f"{mode}+{JB_LABELS[jb]}未被拒 {ok}/{ok + bad}")
             lines.append(f"[自动策略] 统计（{group}，{model or '默认模型'}）：" + "；".join(parts))
         return lines
 

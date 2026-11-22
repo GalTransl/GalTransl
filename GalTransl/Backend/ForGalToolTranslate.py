@@ -1,6 +1,7 @@
 """每批独立的工具翻译：通过译文补丁分组写入结果。"""
 
 import json
+from contextvars import ContextVar
 from copy import copy
 
 from GalTransl import LOGGER
@@ -25,6 +26,22 @@ TRANSLATION_TOOLS = [
         },
     },
 ]
+
+
+# 改善拒答的预置补全对工具模板没有可预置的回复开头，改成让模型多走一步读取：前文和输入不放进
+# user 消息，由模型自己调用这个工具取回。调用是模型真实发出的，思考字段等照常回传。
+READ_INPUT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "read_translation_input",
+        "description": "Read the current batch: the <history_result> table of previous translations and the <input> table to translate. Call it once before writing any translation.",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+}
+READ_INPUT_PLACEHOLDER = "(returned by the read_translation_input tool)"
+# 本批要由读取工具返回的内容；None 表示输入照常在 user 消息里。每次组装请求时重设。
+# 用 ContextVar 而不是引擎属性：同一个引擎会被并发的多个批次共用。
+_READ_INPUT: ContextVar = ContextVar("forgal_tool_read_input", default=None)
 
 
 def apply_translation_patch(patch, expected, results):
@@ -154,11 +171,33 @@ class ForGalToolTranslate(ForGalJsonTranslate):
         # 严格使用用户设置的单次句数，不自动扩缩输入批次。
         pass
 
-    def _prepare_translation_messages(self, *args, **kwargs):
-        # 结果走工具调用，预置 JSON 开头没有意义，始终不加；图片方式照常可用：
+    def _prepare_translation_messages(
+        self, prompt_template, input_src, gptdict, trans_list, filename,
+        proofread=False, assistant_prompt="", image_mode=False,
+    ):
+        # 结果走工具调用，预置 JSON 开头没有意义，始终不加。预置补全生效时（assistant_prompt 非空）
+        # 改为由模型调用 read_translation_input 读取前文和输入；图片方式照常可用：
         # 前文和输入以图片发送，模型读图后照样调用 write_translation_result 提交补丁。
-        kwargs["assistant_prompt"] = ""
-        return super()._prepare_translation_messages(*args, **kwargs)
+        _READ_INPUT.set(None)
+        if assistant_prompt and not image_mode:
+            history = self._apply_history_result("[history_result]", filename)
+            prompt = self._build_prompt_request(READ_INPUT_PLACEHOLDER, gptdict)
+            prompt = prompt.replace("[history_result]", READ_INPUT_PLACEHOLDER).rstrip() + (
+                "\n\nNote: the <history_result> and <input> contents are not included in this message. "
+                "First call the read_translation_input tool to read them, "
+                "then submit the translations by calling write_translation_result as usual."
+            )
+            _READ_INPUT.set(f"<history_result>\n{history}\n</history_result>\n<input>\n{input_src}\n</input>")
+            label = f"{filename}:{self._build_idx_tip(trans_list)}" if trans_list else filename
+            self._log_enhance_jailbreak(label, "前文与输入改由 read_translation_input 工具读取")
+            return [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": prompt},
+            ], None, prompt
+        return super()._prepare_translation_messages(
+            prompt_template, input_src, gptdict, trans_list, filename,
+            proofread=proofread, assistant_prompt="", image_mode=image_mode,
+        )
 
     def _record_tool_error(self, kwargs, message, token=None, attempt=None):
         """把批内的工具错误记进工作台「最近错误」（终端日志之外，前端也能看到）。
@@ -231,6 +270,9 @@ class ForGalToolTranslate(ForGalJsonTranslate):
         sentences_by_key = {f"{sig}|{tran.index}": tran for sig, tran in zip(sig_list, trans_list)}
         reasoning_field = ""
         token = None
+        read_input = _READ_INPUT.get()
+        tools = TRANSLATION_TOOLS if read_input is None else [READ_INPUT_TOOL, *TRANSLATION_TOOLS]
+        input_read = read_input is None
         missing_tool_retries = 0
         no_progress_calls = 0
         failure_reason = "工具调用轮数达到上限"
@@ -294,10 +336,10 @@ class ForGalToolTranslate(ForGalJsonTranslate):
             self._check_stop_requested()
             response, reasoning = {}, {}
             preview.clear()
-            next_tool = "write_translation_result"
+            next_tool = "write_translation_result" if input_read else "read_translation_input"
             tool_choice = {"type": "function", "function": {"name": next_tool}}
             content, token = await self.ask_chatbot(
-                messages=list(messages), tools=TRANSLATION_TOOLS,
+                messages=list(messages), tools=tools,
                 tool_choice=tool_choice, tool_response_holder=response, reasoning_holder=reasoning,
                 tool_arguments_callback=None if proofread else preview_streamed_patch, **kwargs,
             )
@@ -376,6 +418,14 @@ class ForGalToolTranslate(ForGalJsonTranslate):
                 name, arguments = function.get("name"), function.get("arguments", "")
                 log_label = f"[{getattr(self, 'eng_type', 'ForGal-tool')}][{kwargs.get('file_name', '')}][{getattr(token, 'model_name', '')}][{call['id']}][{name}]"
                 print(f"{log_label} LLM工具调用：\n{arguments}", flush=True)
+                if name == "read_translation_input" and read_input is not None:
+                    # 读取不是补丁：不解析参数，也不计入「未新增译文」的次数。
+                    output = read_input if not input_read else "The input was already returned above."
+                    input_read = True
+                    output += "\n" + progress_instruction()
+                    print(f"{log_label} 工具返回：\n{output}", flush=True)
+                    messages.append({"role": "tool", "tool_call_id": call["id"], "content": output})
+                    continue
                 output = ""
                 previous_count = len(results)
                 try:
@@ -389,6 +439,8 @@ class ForGalToolTranslate(ForGalJsonTranslate):
                         raise ValueError("工具参数必须为对象")
                     if name != "write_translation_result":
                         raise ValueError(f"未知工具：{name}")
+                    if not input_read:
+                        raise ValueError("尚未读取本批输入；请先调用 read_translation_input")
                     payload = args.get("patch")
                     if not isinstance(payload, str):
                         raise ValueError("工具参数 patch 必须为字符串")

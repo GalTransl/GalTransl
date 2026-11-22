@@ -11,7 +11,7 @@ from unittest.mock import patch
 from GalTransl import LOGGER
 from GalTransl.Backend import TextImage
 from GalTransl.Backend.BaseTranslate import BaseTranslate
-from GalTransl.Backend.ForGalToolTranslate import ForGalToolTranslate
+from GalTransl.Backend.ForGalToolTranslate import ForGalToolTranslate, READ_INPUT_PLACEHOLDER, TRANSLATION_TOOLS
 from GalTransl.Backend.ForNovelToolTranslate import ForNovelToolTranslate
 from GalTransl.Backend.MultiTurnTranslate import IMAGE_PLACEHOLDER
 from GalTransl.Backend.Prompts import FORGAL_TOOL_TRANS_PROMPT, FORNOVEL_TOOL_TRANS_PROMPT
@@ -234,7 +234,7 @@ class EnhanceJailbreakImageTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(any("疑似拒答" in line for line in logs.output))
                     self.assertTrue(any("已生效（解析失败重试，临时启用）" in line for line in logs.output))
                 else:
-                    # prefill 对 tool 没有可改的内容，维持原来的「保留上下文重试」
+                    # prefill 不换成图片：批内维持原来的「保留上下文重试」
                     self.assertTrue(any("保留上下文重试 1/3" in line for line in logs.output))
 
     async def test_tool_errors_inside_a_batch_reach_recent_errors(self):
@@ -284,14 +284,60 @@ class EnhanceJailbreakImageTests(unittest.IsolatedAsyncioTestCase):
             await engine.translate(sentences(1), filename="file")
         self.assertEqual(recorded, [])  # auto 自己会记录这次失败
 
-    async def test_tool_template_prefill_mode_adds_nothing(self):
+    async def test_tool_template_prefill_mode_lets_the_model_read_the_input_with_a_tool(self):
+        """预置补全对工具模板没有可预置的开头：前文和输入不进 user，由模型先调用读取工具取回。"""
+        for engine_class, prompt in TOOL_ENGINES:
+            with self.subTest(engine=engine_class.__name__):
+                engine = translator(engine_class, prompt)
+                engine.multi_turn = False
+                engine.enhance_jailbreak = True
+                engine.last_translations = {"part": "cached-first"}
+                engine.restore_context = lambda *args, **kwargs: None
+                requests = []
+
+                async def model(**kwargs):
+                    messages = kwargs["messages"]
+                    requests.append((copy.deepcopy(messages), kwargs["tools"], kwargs["tool_choice"]))
+                    if messages[-1]["role"] != "tool":
+                        call = function_call("read_translation_input", "", "read-1")
+                        call["function"]["arguments"] = "{}"
+                    else:
+                        rows = tool_input_rows(messages[-1]["content"])
+                        body = "\n".join(f"@@ {sig}|{obj['id']}\n+translated-{obj['src']}" for sig, obj in rows)
+                        call = function_call("write_translation_result", f"*** Begin Patch\n{body}\n*** End Patch")
+                    kwargs["tool_response_holder"].update(tool_calls=[call], finish_reason="tool_calls")
+                    return "", SimpleNamespace(model_name="test")
+
+                engine.ask_chatbot = model
+                with redirect_stdout(io.StringIO()), self.assertLogs("GalTransl", "INFO") as logs:
+                    count, result = await engine.translate(sentences(2), filename="part")
+                self.assertEqual(count, 2)
+                self.assertEqual([item.pre_dst for item in result], ["translated-source-1", "translated-source-2"])
+                self.assertTrue(any("read_translation_input 工具读取" in line for line in logs.output))
+                first, tools, choice = requests[0]
+                self.assertEqual([m["role"] for m in first], ["system", "user"])
+                self.assertNotIn("source-1", first[1]["content"])
+                self.assertNotIn("cached-first", first[1]["content"])
+                self.assertEqual(first[1]["content"].count(READ_INPUT_PLACEHOLDER), 2)
+                self.assertEqual([t["function"]["name"] for t in tools],
+                                 ["read_translation_input", "write_translation_result"])
+                self.assertEqual(choice["function"]["name"], "read_translation_input")
+                second, _, choice = requests[1]
+                self.assertEqual([m["role"] for m in second], ["system", "user", "assistant", "tool"])
+                self.assertEqual(choice["function"]["name"], "write_translation_result")
+                history, _, current = second[-1]["content"].partition("<input>")
+                self.assertIn("cached-first", history)
+                self.assertIn("source-2", current)
+                self.assertIn("Next patch anchors", current)
+                self.assertEqual(len(requests), 2)
+
+    async def test_tool_template_keeps_input_in_the_user_message_by_default(self):
         engine = translator(*TOOL_ENGINES[0])
         engine.multi_turn = False
-        engine.enhance_jailbreak = True
         requests = []
 
         async def model(**kwargs):
-            requests.append(copy.deepcopy(kwargs["messages"]))
+            requests.append((copy.deepcopy(kwargs["messages"]), kwargs["tools"]))
             rows = tool_input_rows(kwargs["messages"][1]["content"])
             body = "\n".join(f"@@ {sig}|{obj['id']}\n+t" for sig, obj in rows)
             kwargs["tool_response_holder"].update(
@@ -304,8 +350,40 @@ class EnhanceJailbreakImageTests(unittest.IsolatedAsyncioTestCase):
         with redirect_stdout(io.StringIO()):
             count, _ = await engine.translate(sentences(1), filename="part")
         self.assertEqual(count, 1)
-        self.assertEqual([m["role"] for m in requests[0]], ["system", "user"])
-        self.assertIsInstance(requests[0][1]["content"], str)
+        self.assertEqual([m["role"] for m in requests[0][0]], ["system", "user"])
+        self.assertIn("source-1", requests[0][0][1]["content"])
+        self.assertIs(requests[0][1], TRANSLATION_TOOLS)
+
+    async def test_patch_before_reading_is_rejected_and_reading_does_not_count_as_no_progress(self):
+        """接口忽略指定工具、模型没读输入就提交补丁时退回修正；读取本身不算一次空转。"""
+        engine = translator(*TOOL_ENGINES[0])
+        engine.multi_turn = False
+        engine.enhance_jailbreak = True
+        replies = []
+
+        async def model(**kwargs):
+            messages = kwargs["messages"]
+            tool_messages = [m for m in messages if m["role"] == "tool"]
+            replies.append(tool_messages[-1]["content"] if tool_messages else "")
+            if not tool_messages:
+                call = function_call("write_translation_result", "*** Begin Patch\n@@ abc|1\n+guess\n*** End Patch")
+            elif len(tool_messages) == 1:
+                call = function_call("read_translation_input", "", "read-1")
+                call["function"]["arguments"] = "{}"
+            else:
+                rows = tool_input_rows(tool_messages[-1]["content"])
+                body = "\n".join(f"@@ {sig}|{obj['id']}\n+done" for sig, obj in rows)
+                call = function_call("write_translation_result", f"*** Begin Patch\n{body}\n*** End Patch", "w2")
+            kwargs["tool_response_holder"].update(tool_calls=[call], finish_reason="tool_calls")
+            return "", SimpleNamespace(model_name="test")
+
+        engine.ask_chatbot = model
+        with patch("GalTransl.server.record_runtime_error", lambda *a, **kw: None), redirect_stdout(io.StringIO()):
+            count, result = await engine.translate(sentences(1), filename="part")
+        self.assertEqual(count, 1)
+        self.assertEqual(result[0].pre_dst, "done")
+        self.assertIn("请先调用 read_translation_input", replies[1])
+        self.assertIn("<input>", replies[2])
 
     def test_configuration(self):
         cases = (

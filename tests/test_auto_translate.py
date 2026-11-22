@@ -301,26 +301,33 @@ class AutoStrategyTests(unittest.IsolatedAsyncioTestCase):
     async def test_refusal_escalates_jailbreak_and_learns_which_one_works(self):
         engine = auto_engine([refused(), refused()], IMAGE_ALLOWED)
         count, _ = await engine.translate(named(16), filename='a')
-        # 被拒：换模板没用，先升到便宜的预置补全（只有 json 支持），还被拒再升到图片
+        # 被拒：这个文件之后都带改善拒答。先用最便宜的组合（tool 模板的预置补全是让模型先调用
+        # 读取工具），还被拒就换下一个本批没被拒过的组合
         self.assertEqual(engine.plans, [
-            ('ForGal-tool', 16, ''), ('ForGal-json', 8, 'prefill'), ('ForGal-tool', 4, 'image'),
+            ('ForGal-tool', 16, ''), ('ForGal-tool', 8, 'prefill'), ('ForGal-json', 4, 'prefill'),
         ])
         self.assertEqual(count, 4)
-        # 同一文件之后直接沿用图片方式
+        # 同一文件之后直接用统计里有效的组合
         await engine.translate(named(4), filename='a')
-        self.assertEqual(engine.plans[-1], ('ForGal-tool', 4, 'image'))
-        # 新文件按自己的经验从不改善拒答开始；被拒后按已学到的效果直接跳到图片，跳过无效的预置补全
+        self.assertEqual(engine.plans[-1], ('ForGal-json', 4, 'prefill'))
+        # 要不要改善拒答按文件区分：新文件从不改善拒答开始（模板按共用的格式成功率挑，json 刚成功过）。
+        # 哪个组合有效也是共用的：被拒后直接用
+        # ForGal-json+预置补全，跳过同样叫预置补全、但在 tool 模板上被拒过的组合
         engine.plans.clear()
         engine_actions(engine, [refused()])
         await engine.translate(named(4), filename='b')
-        self.assertEqual(engine.plans, [('ForGal-tool', 4, ''), ('ForGal-tool', 2, 'image')])
+        self.assertEqual(engine.plans, [('ForGal-json', 4, ''), ('ForGal-json', 2, 'prefill')])
+        strategies = engine._state()['strategies']
+        self.assertEqual([strategy.need for strategy in strategies.values()], [True, True])
+        await engine.translate(named(4), filename='c')
+        self.assertEqual(engine.plans[-1], ('ForGal-json', 4, ''))
 
     async def test_high_jailbreak_success_rate_alone_never_turns_it_on(self):
         engine = auto_engine([TranslationParseError('bad'), httpx.ReadError('network')], IMAGE_ALLOWED)
         model = engine._model_name(0)
-        engine._state()['jailbreak'][('gal', model, 'prefill')] = (50, 0)
-        engine._state()['jailbreak'][('gal', model, 'image')] = (50, 0)
-        engine._state()['jailbreak'][('gal', model, 'none')] = (0, 5)
+        engine._state()['jailbreak'][('gal', model, 'ForGal-tool', 'prefill')] = (50, 0)
+        engine._state()['jailbreak'][('gal', model, 'ForGal-tool', 'image')] = (50, 0)
+        engine._state()['jailbreak'][('gal', model, 'ForGal-tool', 'none')] = (0, 5)
         for i in range(3):
             await engine.translate(named(4), filename=f'f{i}')
         # 只有被拒才会升级；格式错误、API 错误和历史成功率都不会让它改善拒答
@@ -329,38 +336,38 @@ class AutoStrategyTests(unittest.IsolatedAsyncioTestCase):
     async def test_escalation_skips_jailbreak_known_to_be_refused(self):
         engine = auto_engine([refused()], IMAGE_ALLOWED)
         model = engine._model_name(0)
-        engine._state()['jailbreak'][('gal', model, 'prefill')] = (0, 3)
-        engine._state()['jailbreak'][('gal', model, 'image')] = (3, 0)
+        engine._state()['jailbreak'][('gal', model, 'ForGal-tool', 'prefill')] = (0, 3)
+        engine._state()['jailbreak'][('gal', model, 'ForGal-tool', 'image')] = (3, 0)
         await engine.translate(named(4), filename='a')
-        # 预置补全一直被拒、图片有效：直接跳到图片，跳过无效的预置补全
+        # tool+预置补全一直被拒、tool+图片有效：直接用图片，跳过无效的组合
         self.assertEqual(engine.plans, [('ForGal-tool', 4, ''), ('ForGal-tool', 2, 'image')])
 
-    async def test_concurrent_refusals_never_downgrade_shared_level(self):
+    async def test_concurrent_refusals_all_turn_refusal_reduction_on(self):
         engine = auto_engine([refused(), refused(), refused()], IMAGE_ALLOWED)
         model = engine._model_name(0)
-        engine._state()['jailbreak'][('gal', model, 'image')] = (3, 0)
-        # 同一文件的三个片段同时以「不改善拒答」发出、同时被拒，都只会把该文件的等级往上调
+        engine._state()['jailbreak'][('gal', model, 'ForGal-tool', 'image')] = (3, 0)
+        # 同一文件的三个片段同时以「不改善拒答」发出、同时被拒：都只会让该文件开启改善拒答
         await asyncio.gather(*(engine.translate(named(4), filename='a') for _ in range(3)))
         strategy = next(iter(engine._state()['strategies'].values()))
-        self.assertEqual(strategy.level, 2)
+        self.assertTrue(strategy.need)
         self.assertEqual([plan[2] for plan in engine.plans[3:]], ['image'] * 3)
 
-    async def test_without_image_mode_refusal_moves_to_prefill_capable_template(self):
+    async def test_without_image_mode_refusal_keeps_the_tool_template_with_prefill(self):
         actions = [refused()]
         engine = auto_engine(actions, {'gpt.enhance_jailbreak.mode': 'prefill'})
         await engine.translate(named(4), filename='gal')
         actions.append(refused())
         await engine.translate(sentences(4), filename='novel')
         self.assertEqual(engine.plans, [
-            ('ForGal-tool', 4, ''), ('ForGal-json', 2, 'prefill'),
-            ('ForNovel-tool', 4, ''), ('ForNovel', 2, 'prefill'),
+            ('ForGal-tool', 4, ''), ('ForGal-tool', 2, 'prefill'),
+            ('ForNovel-tool', 4, ''), ('ForNovel-tool', 2, 'prefill'),
         ])
-        # 已无更强方式：继续缩小批次隔离问题句，而不是换回不改善拒答的模板
+        # 被拒后换另一个组合；两个组合都被拒过就重新从头挑，继续缩小批次隔离问题句，不换回不改善拒答
         engine = auto_engine([refused()] * 3, {'gpt.enhance_jailbreak.mode': 'prefill'})
         await engine.translate(named(8), filename='gal')
         self.assertEqual(engine.plans, [
-            ('ForGal-tool', 8, ''), ('ForGal-json', 4, 'prefill'),
-            ('ForGal-json', 2, 'prefill'), ('ForGal-json', 1, 'prefill'),
+            ('ForGal-tool', 8, ''), ('ForGal-tool', 4, 'prefill'),
+            ('ForGal-json', 2, 'prefill'), ('ForGal-tool', 1, 'prefill'),
         ])
 
     async def test_always_on_uses_configured_mode_and_never_probes_below_it(self):
@@ -371,12 +378,12 @@ class AutoStrategyTests(unittest.IsolatedAsyncioTestCase):
         engine = auto_engine([], {'gpt.enhance_jailbreak': True, 'gpt.enhance_jailbreak.mode': 'prefill'})
         await engine.translate(named(2), filename='a')
         await engine.translate(sentences(2), filename='novel')
-        self.assertEqual(engine.plans, [('ForGal-json', 2, 'prefill'), ('ForNovel', 2, 'prefill')])
+        self.assertEqual(engine.plans, [('ForGal-tool', 2, 'prefill'), ('ForNovel-tool', 2, 'prefill')])
 
     async def test_probes_back_down_after_streak_and_backs_off_when_probe_is_refused(self):
         engine = auto_engine([refused()], IMAGE_ALLOWED)
         await engine.translate(named(8), filename='a')
-        self.assertEqual(engine.plans[-1], ('ForGal-json', 4, 'prefill'))
+        self.assertEqual(engine.plans[-1], ('ForGal-tool', 4, 'prefill'))
         with self.assertLogs('GalTransl', level='INFO') as logs:
             await engine.translate(named(4), filename='a')
             await engine.translate(named(4), filename='a')
@@ -385,9 +392,10 @@ class AutoStrategyTests(unittest.IsolatedAsyncioTestCase):
         engine.plans.clear()
         engine_actions(engine, [refused()])
         await engine.translate(named(4), filename='a')
-        self.assertEqual(engine.plans, [('ForGal-json', 4, ''), ('ForGal-json', 4, 'prefill')])
+        self.assertEqual(engine.plans, [('ForGal-tool', 4, ''), ('ForGal-tool', 4, 'prefill')])
         strategy = next(iter(engine._state()['strategies'].values()))
-        self.assertEqual((strategy.probe_after, strategy.probe_level, strategy.probe_inflight), (6, -1, False))
+        self.assertEqual((strategy.probe_after, strategy.probe_pending, strategy.probe_inflight), (6, False, False))
+        self.assertTrue(strategy.need)
 
     async def test_only_one_concurrent_batch_probes_and_success_lowers_everyone(self):
         engine = auto_engine([refused()], IMAGE_ALLOWED)
@@ -400,19 +408,19 @@ class AutoStrategyTests(unittest.IsolatedAsyncioTestCase):
         # 试降成功：本文件之后不再改善拒答
         engine.plans.clear()
         await engine.translate(named(4), filename='a')
-        self.assertEqual(engine.plans, [('ForGal-json', 4, '')])
+        self.assertEqual(engine.plans, [('ForGal-tool', 4, '')])
         strategy = next(iter(engine._state()['strategies'].values()))
-        self.assertEqual((strategy.level, strategy.probe_level), (0, -1))
+        self.assertEqual((strategy.need, strategy.probe_pending), (False, False))
 
     async def test_image_unsupported_disables_image_without_shrinking(self):
         error = TranslationRequestError('Error code: 400 - image_url is not supported by this model')
         engine = auto_engine([error], {'gpt.enhance_jailbreak': True, 'gpt.enhance_jailbreak.mode': 'image'})
         with self.assertLogs('GalTransl', level='WARNING') as logs:
             await engine.translate(named(4), filename='a')
-        self.assertEqual(engine.plans, [('ForGal-tool', 4, 'image'), ('ForGal-json', 4, 'prefill')])
+        self.assertEqual(engine.plans, [('ForGal-tool', 4, 'image'), ('ForGal-tool', 4, 'prefill')])
         self.assertTrue(any('停用图片方式' in line for line in logs.output))
         await engine.translate(named(4), filename='b')
-        self.assertEqual(engine.plans[-1], ('ForGal-json', 4, 'prefill'))
+        self.assertEqual(engine.plans[-1], ('ForGal-tool', 4, 'prefill'))
 
     async def test_strategy_summary_reports_success_rates(self):
         engine = auto_engine([TranslationParseError('bad'), refused()], IMAGE_ALLOWED)
@@ -420,11 +428,11 @@ class AutoStrategyTests(unittest.IsolatedAsyncioTestCase):
         lines = engine.strategy_summary()
         self.assertEqual(len(lines), 1)
         self.assertIn('ForGal-tool 0/1', lines[0])
-        # 被拒只记到改善拒答方式上，不算模板的格式成败
-        self.assertNotIn('ForGal-markdown', lines[0])
+        # 被拒只记到「模板 + 改善拒答方式」的组合上，不算模板的格式成败
+        self.assertNotIn('ForGal-markdown 0/1', lines[0])
         self.assertIn('ForGal-json 1/1', lines[0])
-        self.assertIn('不改善拒答未被拒 0/1', lines[0])
-        self.assertIn('预置补全未被拒 1/1', lines[0])
+        self.assertIn('ForGal-markdown+不改善拒答未被拒 0/1', lines[0])
+        self.assertIn('ForGal-json+预置补全未被拒 1/1', lines[0])
 
     def test_classify_failure(self):
         cases = [
