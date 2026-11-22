@@ -91,6 +91,11 @@ COMPACT_TRIGGER_RATIO = 0.80
 COMPACT_KEEP_RECENT_RATIO = 0.2
 COMPACT_KEEP_RECENT_MIN_TOKENS = 8_000
 COMPACT_KEEP_RECENT_MAX_TOKENS = 64_000
+# 增量压缩：已有摘要卡原样保留，只压最后一张之后的新历史。摘要卡攒到这个数就整体合并一次，
+# 免得前缀被一串旧卡占满；新历史扣掉新卡（按 SUMMARY_MAX_TOKENS 计）后至少要省下这么多，
+# 否则同样整体合并。
+COMPACT_MAX_CHECKPOINTS = 4
+COMPACT_INCREMENTAL_MIN_SAVED_TOKENS = 4_096
 # 尾部预留：当前轮新增消息 + 模型输出
 CONTEXT_RESERVE_TOKENS = 8_192
 # 摘要生成的最大输出 token

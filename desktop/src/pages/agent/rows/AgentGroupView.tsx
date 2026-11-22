@@ -335,6 +335,8 @@ function CompactRow({ item }: { item: ActivityItem }) {
   const uiLanguage = useUiLanguage();
   const removed = item.removed || 0;
   const microcompact = item.compactMode === 'microcompact';
+  // 摘要前的第一级整理：旧的大型工具结果折叠成首尾预览，没有调用模型。
+  const masked = item.compactMode === 'observation_mask';
   const before = item.tokensBefore || 0;
   const after = item.tokensAfter || 0;
   // 压缩后的大小是后端在**重建出来的真实历史**上估的：保留的尾部（可能带着很大的工具
@@ -343,13 +345,17 @@ function CompactRow({ item }: { item: ActivityItem }) {
     ? translate("agent:agentGroupView.size_message_tokens", { value: before > 0 ? formatTokenCount(before) : '?', value2: formatTokenCount(after) })
     : '';
   return (
-    <div className="agent-compact-note" title={translate(microcompact
-      ? "agent:agentGroupView.agentCompactNote_title_microcompact"
-      : "agent:agentGroupView.agentCompactNote_title_doneContext")}>
+    <div className="agent-compact-note" title={translate(masked
+      ? "agent:agentGroupView.agentCompactNote_title_observationMask"
+      : microcompact
+        ? "agent:agentGroupView.agentCompactNote_title_microcompact"
+        : "agent:agentGroupView.agentCompactNote_title_doneContext")}>
       <span className="agent-compact-note__icon"><Icon name="compress" /></span>
-      <span className="agent-compact-note__text">{translate(microcompact
-        ? "agent:agentGroupView.agentCompactNote_message_microcompact"
-        : "agent:agentGroupView.agentCompactNote_message_doneContextEntry",
+      <span className="agent-compact-note__text">{translate(masked
+        ? "agent:agentGroupView.agentCompactNote_message_observationMask"
+        : microcompact
+          ? "agent:agentGroupView.agentCompactNote_message_microcompact"
+          : "agent:agentGroupView.agentCompactNote_message_doneContextEntry",
       { removed, cleared: item.cleared || 0, size })}</span>
     </div>
   );

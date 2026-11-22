@@ -343,6 +343,37 @@ MICROCOMPACT_TOOLS = frozenset({
     "read_transl_cache", "read_output", "read_proofread_changes",
 })
 
+# 摘要前的第一级整理（思路参考 DSH Compaction Weave 0.4.0 的 observation masking）：
+# 保留段之外的大型工具结果先整条归档，上下文里只留首尾预览和回查指引，不调用模型。
+# 首尾都留是因为读取结果的结论、报错和分页提示常在末尾。
+OBSERVATION_MASK_PLACEHOLDER = "[较早的大型工具结果已折叠（observation mask）]"
+OBSERVATION_MASK_MIN_CHARS = 4_000
+OBSERVATION_MASK_HEAD_CHARS = 300
+OBSERVATION_MASK_TAIL_CHARS = 300
+# 折叠必须至少释放这一比例才算"够用"：刚过触发线就停，下一两步又会触发。
+OBSERVATION_MASK_MIN_REDUCTION = 0.2
+# 被清理或折叠过的工具结果都以这些前缀开头：不再二次处理，恢复时也只认这些前缀。
+_FOLDED_TOOL_RESULT_PREFIXES = (MICROCOMPACT_PLACEHOLDER, OBSERVATION_MASK_PLACEHOLDER)
+
+
+def _tool_result_failed(message: dict[str, Any], content: str, *, text_heuristic: bool = True) -> bool:
+    """错误结果保留原文：模型接着排障时最需要完整报错。
+
+    text_heuristic 按关键词识别非 JSON 的报错文本；折叠大结果时关掉，因为译文、
+    剧本正文里本来就常有"错误""失败"，按词判断会让大段正文永远折不掉。
+    """
+    if message.get("isError") or message.get("is_error") or message.get("_is_error"):
+        return True
+    try:
+        result = json.loads(content)
+    except (ValueError, TypeError):
+        result = None
+    if isinstance(result, dict):
+        return bool(any(result.get(key) for key in ("error", "errors", "failed_files", "job_error", "isError", "is_error"))
+                    or result.get("ok") is False or result.get("success") is False
+                    or result.get("status") in ("failed", "error", "stopped", "cancelled"))
+    return text_heuristic and any(word in content for word in ("错误", "失败", "Error:", "Traceback"))
+
 
 def _history_tool_operation(function: dict[str, object]) -> str:
     """Malformed historical calls stay protected from automatic cleanup."""
@@ -378,19 +409,8 @@ def _microcompact_tool_results(
         if message.get("role") != "tool" or calls.get(str(message.get("tool_call_id"))) not in MICROCOMPACT_TOOLS:
             continue
         content = message.get("content")
-        if (not isinstance(content, str) or not content.strip() or content.startswith(MICROCOMPACT_PLACEHOLDER)
-                or message.get("isError") or message.get("is_error") or message.get("_is_error")):
-            continue
-        try:
-            result = json.loads(content)
-        except (ValueError, TypeError):
-            result = None
-        if isinstance(result, dict):
-            if (any(result.get(key) for key in ("error", "errors", "failed_files", "job_error", "isError", "is_error"))
-                    or result.get("ok") is False or result.get("success") is False
-                    or result.get("status") in ("failed", "error", "stopped", "cancelled")):
-                continue
-        elif any(word in content for word in ("错误", "失败", "Error:", "Traceback")):
+        if (not isinstance(content, str) or not content.strip() or content.startswith(_FOLDED_TOOL_RESULT_PREFIXES)
+                or _tool_result_failed(message, content)):
             continue
         group.append(index)
     if group:
@@ -423,6 +443,63 @@ def _microcompact_replacements(
     } for index in indices]
 
 
+def _observation_mask_candidates(
+    messages: list[dict[str, Any]], *, keep_recent_tokens: int,
+) -> list[int]:
+    """找出可折叠的大型工具结果：保留段之外、超过字符阈值、非报错的文本结果。
+
+    不限工具种类：折叠留首尾预览并整条归档，不像 microcompact 那样整条清空。
+    最后一个助手轮次（模型正在用的结果）和尾部 keep_recent_tokens 内的消息不动；
+    没有对应调用的孤儿结果、媒体与已清理/折叠的结果都跳过。这里只规划，不修改输入。
+    """
+    last_assistant = next((index for index in range(len(messages) - 1, -1, -1)
+                           if messages[index].get("role") == "assistant"), len(messages))
+    protected_from = last_assistant
+    used = 0
+    for index in range(len(messages) - 1, -1, -1):
+        used += _estimate_message_tokens(messages[index])
+        if used > keep_recent_tokens:
+            break
+        protected_from = min(protected_from, index)
+    call_ids: set[str] = set()
+    indices: list[int] = []
+    for index, message in enumerate(messages[:protected_from]):
+        if message.get("role") == "assistant":
+            call_ids.update(str(call.get("id")) for call in message.get("tool_calls") or []
+                            if isinstance(call, dict) and call.get("id"))
+            continue
+        if message.get("role") != "tool" or str(message.get("tool_call_id")) not in call_ids:
+            continue
+        content = message.get("content")
+        if (isinstance(content, str) and len(content) > OBSERVATION_MASK_MIN_CHARS
+                and not content.startswith(_FOLDED_TOOL_RESULT_PREFIXES)
+                and not _tool_result_failed(message, content, text_heuristic=False)):
+            indices.append(index)
+    return indices
+
+
+def _observation_mask_replacements(
+    messages: list[dict[str, Any]], indices: list[int], archive: str = "",
+) -> list[dict[str, str]]:
+    """折叠后的内容沿用 microcompact 的落盘与恢复格式，只是正文换成首尾预览。"""
+    recall = (f"完整内容用 read_history_archive 读取 {archive}。" if archive
+              else "需要细节时缩小范围重新读取，勿重复执行写入。")
+    replacements = []
+    for index in indices:
+        message = messages[index]
+        content = str(message["content"])
+        head = content[:OBSERVATION_MASK_HEAD_CHARS]
+        tail = content[-OBSERVATION_MASK_TAIL_CHARS:]
+        replacements.append({
+            "tool_call_id": str(message["tool_call_id"]),
+            "fingerprint": _history_fingerprint([message]),
+            "content": (f"{OBSERVATION_MASK_PLACEHOLDER} 原结果共 {len(content)} 字符，这里只保留开头和结尾。"
+                        f"{recall} tool_call_id={message['tool_call_id']}\n"
+                        f"[开头]\n{head}\n[……中间已折叠……]\n[结尾]\n{tail}"),
+        })
+    return replacements
+
+
 def _restore_microcompacted_history(
     messages: list[dict[str, Any]], checkpoints: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -444,7 +521,7 @@ def _restore_microcompacted_history(
         for item in checkpoint["replacements"]:
             if (isinstance(item, dict) and isinstance(item.get("tool_call_id"), str)
                     and isinstance(item.get("fingerprint"), str) and isinstance(item.get("content"), str)
-                    and item["content"].startswith(MICROCOMPACT_PLACEHOLDER)):
+                    and item["content"].startswith(_FOLDED_TOOL_RESULT_PREFIXES)):
                 for index in targets.get((item["tool_call_id"], item["fingerprint"]), []):
                     if index < count:  # 不把早期清理操作套到后来复用同一 id 的新消息上
                         result[index] = {**messages[index], "content": item["content"]}
@@ -461,11 +538,16 @@ def _restore_compacted_history(messages: list[dict[str, Any]]) -> list[dict[str,
 
     摘要自己记着「当时保留了多少条真消息」（`_compact_kept`），据此从摘要往前找回那段现场；
     往前扫时跳过内部消息（上一轮的摘要不是消息）。老会话没有这条摘要记录，原样返回。
+
+    增量压缩（`_compact_incremental`）不改写之前的摘要，只在其后追加一张：恢复时按落盘
+    顺序重放，增量摘要接在当时仍在用的摘要链后面，完整合并的摘要则另起一条链。
     """
     last = -1
+    chain: list[dict[str, Any]] = []
     for index, message in enumerate(messages):
         if isinstance(message, dict) and message.get("_compact_summary"):
             last = index
+            chain = [*chain, message] if message.get("_compact_incremental") else [message]
     if last < 0:
         return list(messages)
     try:
@@ -481,7 +563,18 @@ def _restore_compacted_history(messages: list[dict[str, Any]]) -> list[dict[str,
         index -= 1
     tail.reverse()
     system = messages[0] if messages and messages[0].get("role") == "system" else None
-    return ([system] if system is not None else []) + [messages[last]] + tail + messages[last + 1 :]
+    return ([system] if system is not None else []) + chain + tail + messages[last + 1 :]
+
+
+def _compaction_summary_prefix(messages: Sequence[dict[str, Any]], cut: int) -> int:
+    """messages[:cut] 里最后一张压缩摘要之后的位置；没有摘要返回 0。
+
+    这之前（system 和已有摘要）是增量压缩要原样保留的前缀。
+    """
+    for index in range(min(cut, len(messages)) - 1, -1, -1):
+        if messages[index].get("_compact_summary"):
+            return index + 1
+    return 0
 
 
 def _compact_excerpt(text: str, limit: int) -> str:

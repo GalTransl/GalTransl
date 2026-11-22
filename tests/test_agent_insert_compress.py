@@ -212,7 +212,10 @@ class InsertThenCompressTests(_TempSessions):
         self.assertFalse(any(m.get("_compact_instruction") for m in state.messages))
 
     def test_long_tool_run_compacts_multiple_times_before_finishing(self) -> None:
-        """一次用户任务可多次压缩；充分释放前缀后不必每次读取都压缩。"""
+        """一次用户任务可多次压缩；充分释放前缀后不必每次读取都压缩。
+
+        第二次超线时，旧的大型读取结果折叠成首尾预览就够了：不再发摘要请求。
+        """
         state = _state()
         state.messages = _oversized(100)
         runner = _runner(state, window=32000)
@@ -238,9 +241,13 @@ class InsertThenCompressTests(_TempSessions):
         ):
             runner.run()
 
-        self.assertEqual(rounds, [True, False, False, True, False])
-        self.assertEqual(sum(e.type == "compacted" for e in state.events), 2)
+        self.assertEqual(rounds, [True, False, False, False])
+        compacted = [e.data.get("mode") for e in state.events if e.type == "compacted"]
+        self.assertEqual(compacted, [None, "observation_mask"])
         self.assertEqual(len(runner._store.list_chunks()), 2)
+        folded = [m for m in state.messages if m["role"] == "tool"
+                  and m["content"].startswith(rt.OBSERVATION_MASK_PLACEHOLDER)]
+        self.assertEqual(len(folded), 1)
         self.assertEqual(state.status, "awaiting_input")
         self.assertEqual(state.messages[-1]["content"], "干完了")
         self.assertFalse(any(m.get("_compact_instruction") for m in state.messages))

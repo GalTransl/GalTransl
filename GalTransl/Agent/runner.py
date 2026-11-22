@@ -19,6 +19,7 @@ from GalTransl.Agent.context import (
     _DANGLING_TOOL_NOTE,
     _apply_prompt_cache,
     _assistant_parts,
+    _compaction_summary_prefix,
     _dangling_tool_calls,
     _estimate_message_tokens,
     _estimate_text_tokens,
@@ -26,9 +27,13 @@ from GalTransl.Agent.context import (
     _find_compaction_cut,
     _history_fingerprint,
     _is_internal_message,
+    _keep_recent_tokens,
     MICROCOMPACT_MIN_SAVED_TOKENS,
+    OBSERVATION_MASK_MIN_REDUCTION,
     _microcompact_tool_results,
     _microcompact_replacements,
+    _observation_mask_candidates,
+    _observation_mask_replacements,
     _restore_microcompacted_history,
     _messages_with_tool_placeholders,
     _reasoning_echo,
@@ -43,6 +48,8 @@ from GalTransl.Agent.core import (
     AgentStopRequested,
     COMPACT_ARCHIVE_MAX_LISTED,
     COMPACT_ARCHIVE_NAME,
+    COMPACT_INCREMENTAL_MIN_SAVED_TOKENS,
+    COMPACT_MAX_CHECKPOINTS,
     COMPACT_TRIGGER_RATIO,
     CONTEXT_RESERVE_TOKENS,
     DEFAULT_BACKEND_HOST,
@@ -51,6 +58,7 @@ from GalTransl.Agent.core import (
     LLM_MAX_RETRIES,
     MAX_STEPS,
     REASONING_FIELD_NAMES,
+    SUMMARY_MAX_TOKENS,
     _ContextOverflow,
     _SUBAGENT_STEP_EVENTS,
     _TRANSIENT_EVENT_TYPES,
@@ -75,6 +83,7 @@ from GalTransl.Agent.permissions import (
     _tool_risk,
 )
 from GalTransl.Agent.prompts import (
+    COMPACT_INCREMENTAL_INSTRUCTION_PROMPT,
     COMPACT_INSTRUCTION_PROMPT,
     build_initial_user_message,
     _build_system_prompt,
@@ -1260,6 +1269,10 @@ class AgentRunner:
         消息拼在会话尾部，由下一轮正常请求带着它一起发出去——system prompt、tools、
         待移除的历史前缀复用；最近一个助手起始轮次完整保留，不参与摘要请求。
         尾部只在请求投影中排除，不修改原始历史，失败时只需移除瞬时指令。
+
+        摘要之前先看折叠旧的大型工具结果（不调模型）能否降到目标以下，够就不发摘要请求；
+        不够时不折叠（折叠会改动前缀，让紧接着的摘要请求命中不了缓存），溢出恢复除外。
+        已有摘要卡时优先增量压缩：旧卡原样保留，只压最后一张之后的新历史。
         """
         if self._billion_context is not None:
             return False
@@ -1274,37 +1287,42 @@ class AgentRunner:
             if self._last_compaction_fingerprint == _history_fingerprint(self.state.messages):
                 return False
 
+        masked, mask_saved = self._plan_observation_mask(estimated, limit)
+        if masked and not force:
+            after = estimated - mask_saved
+            if after <= limit and after <= estimated * (1 - OBSERVATION_MASK_MIN_REDUCTION):
+                self._commit_observation_mask(masked, estimated, mask_saved)
+                return False
+        if masked and force:
+            if self._commit_observation_mask(masked, estimated, mask_saved):
+                estimated = max(0, estimated - mask_saved)
+
         messages = self.state.messages
         cut = _find_compaction_cut(messages)
         if cut <= 0:
             _log("  ⚠ 上下文超限但找不到安全切点，跳过本次压缩")
+            if masked and not force:  # 摘要做不了，折叠能省多少算多少
+                self._commit_observation_mask(masked, estimated, mask_saved)
             return False
         # 摘掉头部后仍在触发线以上：问题出在**保留段自身**（典型是尾部压着一条超大工具
         # 结果），压缩救不回来——别白花一次摘要请求，更别把摘要本身再摘要一遍。
         # force（溢出恢复）不走这里：那时只有压缩这一条路。
         if not force and limit > 0:
             # estimated 走锚点法（provider 真实 prompt_tokens + 锚点后新增消息的本地估算，
-            # 里面已经含 tools schema 那笔固定开销），下面这仓名是纯本地字符估算——两套单位
-            # 不能直接相减：中文场景本地估算偏低好几倍，一相减"保留段"就被放大到远超实际，
-            # 守卫每回合都误触发、压缩永远不跑（"爆上下文 157k/128k 却不压缩"的事故就是它）。
-            # 正确做法：把 estimated 里 messages 那一部分换算成比例，只按它折算保留段，
-            # 再把 tools 固定开销加回来一次——算出来的才是"压完那次请求"的真实大小。
-            overhead = self._request_overhead_tokens()
-            total_local = sum(_estimate_message_tokens(m) for m in messages)
-            head_local = sum(_estimate_message_tokens(m) for m in messages[:cut])
-            tail_local = total_local - head_local
-            message_est = max(0, estimated - overhead)
-            if total_local > 0 and message_est > 0:
-                tail_est = int(tail_local * message_est / total_local) + overhead
-            else:
-                tail_est = tail_local + overhead
+            # 里面已经含 tools schema 那笔固定开销），保留段是纯本地字符估算，两套单位不能
+            # 直接相减，先折算（见 _scale_local_tokens），再把 tools 固定开销加回来一次。
+            tail_local = sum(_estimate_message_tokens(m) for m in messages[cut:])
+            tail_est = self._scale_local_tokens(tail_local, estimated) + self._request_overhead_tokens()
             if tail_est >= limit:
                 _log("  ⚠ 保留段自身已到触发线（尾部有压不掉的大结果），压缩无益，跳过")
+                if masked:
+                    self._commit_observation_mask(masked, estimated, mask_saved)
                 return False
 
+        prefix = self._incremental_compaction_prefix(cut, estimated, limit)
         instruction = {
             "role": "user",
-            "content": COMPACT_INSTRUCTION_PROMPT,
+            "content": COMPACT_INCREMENTAL_INSTRUCTION_PROMPT if prefix else COMPACT_INSTRUCTION_PROMPT,
             "_compact_instruction": True,
         }
         messages.append(instruction)  # 只进内存：失败回滚时才不会污染落盘历史
@@ -1312,8 +1330,75 @@ class AgentRunner:
             "cut": cut,
             "estimated": estimated,
             "instruction": instruction,
+            "prefix": prefix,
         }
-        _log(f"  📦 准备压缩：将移除 {cut} 条（估算 {estimated} tokens，复用当前会话前缀）")
+        mode = f"增量，保留前 {prefix} 条" if prefix else "整体合并"
+        _log(f"  📦 准备压缩（{mode}）：将移除 {cut - prefix} 条（估算 {estimated} tokens，复用当前会话前缀）")
+        return True
+
+    def _scale_local_tokens(self, local: int, estimated: int) -> int:
+        """把本地字符估算折算成 estimated 的口径（锚点法，含 tools 开销）。
+
+        中文场景本地估算偏低好几倍，直接拿它和 estimated 加减会严重失真
+        （"爆上下文 157k/128k 却不压缩"的事故）。按 messages 部分的比例折算。
+        """
+        total_local = sum(_estimate_message_tokens(m) for m in self.state.messages)
+        message_est = max(0, estimated - self._request_overhead_tokens())
+        if total_local > 0 and message_est > 0:
+            return int(local * message_est / total_local)
+        return local
+
+    def _incremental_compaction_prefix(self, cut: int, estimated: int, limit: int) -> int:
+        """可以增量压缩时返回要原样保留的前缀长度（system + 已有摘要卡），否则 0。
+
+        摘要卡满 COMPACT_MAX_CHECKPOINTS 张，或新历史压掉后省得不够（降不到触发线、
+        或不足 COMPACT_INCREMENTAL_MIN_SAVED_TOKENS），就整体合并。
+        """
+        messages = self.state.messages
+        prefix = _compaction_summary_prefix(messages, cut)
+        if prefix <= 0:
+            return 0
+        if sum(1 for message in messages[:prefix] if message.get("_compact_summary")) >= COMPACT_MAX_CHECKPOINTS:
+            return 0
+        span = messages[prefix:cut]
+        if not any(message.get("role") != "system" and not _is_internal_message(message) for message in span):
+            return 0
+        saved = self._scale_local_tokens(sum(_estimate_message_tokens(m) for m in span), estimated) - SUMMARY_MAX_TOKENS
+        if saved < max(COMPACT_INCREMENTAL_MIN_SAVED_TOKENS, estimated - limit):
+            return 0
+        return prefix
+
+    def _plan_observation_mask(self, estimated: int, limit: int) -> tuple[list[int], int]:
+        """可折叠的工具结果下标，以及按 estimated 口径折算的预计释放量；只规划不修改。"""
+        messages = self.state.messages
+        indices = _observation_mask_candidates(messages, keep_recent_tokens=_keep_recent_tokens(limit))
+        if not indices:
+            return [], 0
+        archive = (COMPACT_ARCHIVE_NAME.format(index=len(self._store.list_chunks()) + 1)
+                   if self._store is not None else "")
+        replacements = _observation_mask_replacements(messages, indices, archive)
+        saved_local = sum(
+            _estimate_message_tokens(messages[index])
+            - _estimate_message_tokens({**messages[index], "content": item["content"]})
+            for index, item in zip(indices, replacements)
+        )
+        if saved_local < MICROCOMPACT_MIN_SAVED_TOKENS:
+            return [], 0
+        return indices, self._scale_local_tokens(saved_local, estimated)
+
+    def _commit_observation_mask(self, indices: list[int], estimated: int, saved: int) -> bool:
+        saved_local, archive = self._fold_tool_results(
+            indices, "observation mask，较早的大型工具结果", _observation_mask_replacements,
+        )
+        if not saved_local:
+            return False
+        self._emit("compacted", {
+            "mode": "observation_mask", "cleared": len(indices), "removed": 0,
+            "tokens_before": estimated, "tokens_after": max(0, estimated - saved),
+            "tokens_saved": saved, "archive": archive,
+        })
+        self._emit("compacting", {"phase": "done", "mode": "observation_mask", "applied": True})
+        _log(f"  📦 折叠 {len(indices)} 条较早的大型工具结果，估算释放 {saved} tokens，未调用模型")
         return True
 
     def _abort_compaction(self) -> None:
@@ -1350,7 +1435,7 @@ class AgentRunner:
         except Exception as exc:  # noqa: BLE001 - 压缩失败不能拖垮整回合
             _log(f"  ⚠ 压缩请求失败（{exc}），回退 microcompact")
             self._abort_compaction()
-            self._microcompact()
+            self._compact_without_model()
             return
         finally:
             self._stream_quiet = previous_quiet
@@ -1360,11 +1445,11 @@ class AgentRunner:
         if tool_calls:
             _log("  ⚠ 压缩请求返回了工具调用（没按指令走），回退 microcompact")
             self._abort_compaction()
-            self._microcompact()
+            self._compact_without_model()
             return
         if not self._finish_compaction(content, finish):
             _log("  ⚠ 压缩响应完整性校验失败，回退 microcompact")
-            self._microcompact()
+            self._compact_without_model()
 
     def _finish_compaction(self, content: str, finish_reason: str | None = None) -> bool:
         """摘要到手 → 归档被裁历史 → 重建消息列表。"""
@@ -1377,50 +1462,39 @@ class AgentRunner:
         topics = _parse_compact_topics(content)
         return self._rebuild_after_compaction(summary, topics)
 
-    def _microcompact(self) -> bool:
-        """主摘要失败后只清理较早读取结果；原对话、调用及最近现场原样保留。"""
+    def _compact_without_model(self) -> None:
+        """摘要拿不到时的本地兜底：先清理旧读取结果，再折叠剩下的大型工具结果。
+
+        microcompact 只认翻译 Agent 的读取工具；提取 Agent 的 bash/read 和其他工具的
+        大结果只有折叠能处理，不补这一步它们要等到上下文溢出才会被整理。
+        两步都没释放才算本回合压缩失败。
+        """
+        cleared = self._microcompact(mark_failure=False)
+        estimated = self._estimate_context_tokens()
+        limit = int(self._context_window * COMPACT_TRIGGER_RATIO) - CONTEXT_RESERVE_TOKENS
+        masked, mask_saved = self._plan_observation_mask(estimated, limit)
+        folded = bool(masked) and self._commit_observation_mask(masked, estimated, mask_saved)
+        if not (cleared or folded):
+            self._compact_failed_this_turn = True
+            self._emit("compacting", {"phase": "done", "mode": "microcompact", "applied": False})
+
+    def _microcompact(self, *, mark_failure: bool = True) -> bool:
+        """主摘要失败后只清理较早读取结果；原对话、调用及最近现场原样保留。
+
+        mark_failure=False 时没清出东西也不记失败：后面还有折叠一步（见 _compact_without_model）。
+        """
         if self.stop_event.is_set():
             raise AgentStopRequested()
         messages = self.state.messages
         indices = _microcompact_tool_results(messages)
-        if not indices:
-            self._compact_failed_this_turn = True
-            self._emit("compacting", {"phase": "done", "mode": "microcompact", "applied": False})
-            return False
-        # 归档包含完整原结果，读取工具本身有分页限制；转录 JSONL 仍保留原消息。
-        archive_indices = set(indices)
-        anchor = -1
-        for index, message in enumerate(messages):
-            if message.get("role") == "assistant":
-                anchor = index
-            if index in archive_indices and anchor >= 0:
-                archive_indices.add(anchor)
-        archive = self._archive_compacted(
-            [messages[index] for index in sorted(archive_indices)], "microcompact，较早读取结果",
-            full_tool_results=True,
-        )
-        if self._store is not None and not archive:
-            self._compact_failed_this_turn = True
-            self._emit("compacting", {"phase": "done", "mode": "microcompact", "applied": False})
-            return False
-        replacements = _microcompact_replacements(messages, indices, archive)
-        rebuilt = _restore_microcompacted_history(messages, [{"replacements": replacements}])
         tokens_before = sum(_estimate_message_tokens(message) for message in messages) + self._request_overhead_tokens()
-        saved = sum(_estimate_message_tokens(messages[index]) - _estimate_message_tokens(rebuilt[index]) for index in indices)
-        if saved < MICROCOMPACT_MIN_SAVED_TOKENS:
-            self._compact_failed_this_turn = True
-            self._emit("compacting", {"phase": "done", "mode": "microcompact", "applied": False})
+        saved, archive = (self._fold_tool_results(indices, "microcompact，较早读取结果", _microcompact_replacements)
+                          if indices else (0, ""))
+        if not saved:
+            if mark_failure:
+                self._compact_failed_this_turn = True
+                self._emit("compacting", {"phase": "done", "mode": "microcompact", "applied": False})
             return False
-        if self.stop_event.is_set():
-            raise AgentStopRequested()
-        if self._store is not None and not self._store.append_microcompact(replacements):
-            self._compact_failed_this_turn = True
-            self._emit("compacting", {"phase": "done", "mode": "microcompact", "applied": False})
-            return False
-        self.state.messages = rebuilt
-        self.state.last_prompt_tokens = 0
-        self.state.anchored_message_count = 0
-        self._last_compaction_fingerprint = _history_fingerprint(rebuilt)
         self._emit("compacted", {
             "mode": "microcompact", "cleared": len(indices), "removed": 0,
             "tokens_before": tokens_before, "tokens_after": tokens_before - saved,
@@ -1429,6 +1503,42 @@ class AgentRunner:
         self._emit("compacting", {"phase": "done", "mode": "microcompact", "applied": True})
         _log(f"  📦 microcompact：清理 {len(indices)} 条旧读取结果，估算释放 {saved} tokens")
         return True
+
+    def _fold_tool_results(self, indices: list[int], topics: str, build: Any) -> tuple[int, str]:
+        """归档并替换指定的工具结果，返回（本地估算释放的 token，归档名）；(0, "") 表示未改动。
+
+        归档包含完整原结果，读取工具本身有分页限制；转录 JSONL 仍保留原消息，
+        替换只作为投影追加落盘（见 _restore_microcompacted_history）。
+        """
+        if self.stop_event.is_set():
+            raise AgentStopRequested()
+        messages = self.state.messages
+        archive_indices = set(indices)
+        anchor = -1
+        for index, message in enumerate(messages):
+            if message.get("role") == "assistant":
+                anchor = index
+            if index in archive_indices and anchor >= 0:
+                archive_indices.add(anchor)
+        archive = self._archive_compacted(
+            [messages[index] for index in sorted(archive_indices)], topics, full_tool_results=True,
+        )
+        if self._store is not None and not archive:
+            return 0, ""
+        replacements = build(messages, indices, archive)
+        rebuilt = _restore_microcompacted_history(messages, [{"replacements": replacements}])
+        saved = sum(_estimate_message_tokens(messages[index]) - _estimate_message_tokens(rebuilt[index]) for index in indices)
+        if saved < MICROCOMPACT_MIN_SAVED_TOKENS:
+            return 0, ""
+        if self.stop_event.is_set():
+            raise AgentStopRequested()
+        if self._store is not None and not self._store.append_microcompact(replacements):
+            return 0, ""
+        self.state.messages = rebuilt
+        self.state.last_prompt_tokens = 0
+        self.state.anchored_message_count = 0
+        self._last_compaction_fingerprint = _history_fingerprint(rebuilt)
+        return saved, archive
 
     def _rebuild_after_compaction(self, summary: str, topics: str) -> bool:
         """用摘要替换被裁掉的那段历史：system 原样保留，摘要单独成条。
@@ -1455,11 +1565,19 @@ class AgentRunner:
             if pulled:
                 messages.extend(pulled)
             return False
+        # 增量压缩：system 与已有摘要卡原样保留（字节不变才能继续命中前缀缓存），
+        # 新卡只覆盖最后一张卡之后的历史。
+        prefix = int(ctx.get("prefix") or 0)
+        if not (0 < prefix <= cut and messages[prefix - 1].get("_compact_summary")):
+            prefix = 0
+        preserved = messages[:prefix]
         system = messages[0] if messages and messages[0].get("role") == "system" else None
-        head, tail = messages[:cut], messages[cut:]
+        head, tail = messages[prefix:cut], messages[cut:]
         kept = [*tail, *list(ctx.get("pulled") or [])]
         archive_name = self._archive_compacted(head, topics)
-        summary_msg = self._build_summary_message(summary, archive_name)
+        summary_msg = self._build_summary_message(summary, archive_name, incremental=bool(prefix))
+        if prefix:
+            summary_msg["_compact_incremental"] = True
         continuation = _task_continuation(head)
         if continuation:
             summary_msg["_compact_continuation"] = continuation
@@ -1471,7 +1589,11 @@ class AgentRunner:
         # 保证压缩后仍是「system 打头」的合法结构。
         if system is None:
             system = {"role": "system", "content": self._system_prompt()}
-        self.state.messages = [system, summary_msg, *kept]
+        if not preserved:
+            preserved = [system]
+        elif preserved[0] is not system:
+            preserved = [system, *preserved]
+        self.state.messages = [*preserved, summary_msg, *kept]
         # 摘要落盘。不能走 _persist_message：它会把这条再往 state.messages 末尾塞一份，
         # 而这条在内存里的位置是 system 之后。
         if self._store is not None:
@@ -1508,9 +1630,18 @@ class AgentRunner:
         )
         return True
 
-    def _build_summary_message(self, summary: str, archive_name: str) -> dict[str, Any]:
-        """摘要消息：模型认得的历史卡，外加归档索引（细节靠 read_history_archive 回查）。"""
+    def _build_summary_message(self, summary: str, archive_name: str, *, incremental: bool = False) -> dict[str, Any]:
+        """摘要消息：模型认得的历史卡，外加归档索引（细节靠 read_history_archive 回查）。
+
+        增量卡只列本段的归档：更早的归档已经列在前面的卡里，重复列只占上下文。
+        旧卡为了前缀缓存不能改写，里面的进度和待办会过期，所以由新卡的标题声明先后。
+        """
         lines = ["[早前对话的压缩摘要 —— 原对话已归档]", "", summary.strip()]
+        if incremental:
+            lines[0] = "[早前对话的压缩摘要（续）—— 接在前面的摘要之后；进度、待办或要求与前面的摘要冲突时以本卡为准；原对话已归档]"
+            if archive_name:
+                lines += ["", "---", f"📁 本段原对话已归档为 {archive_name}（需要细节时用 read_history_archive 回查）"]
+            return {"role": "user", "content": "\n".join(lines), "_compact_summary": True}
         chunks: list[dict[str, Any]] = []
         if self._store is not None:
             chunks = self._store.list_chunks()

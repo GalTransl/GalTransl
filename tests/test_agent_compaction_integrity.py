@@ -115,7 +115,7 @@ def test_stream_completion_reason_is_checked_before_history_replacement(finish):
 
     with (
         patch.object(runner, "_stream_llm_response", return_value=(SUMMARY, [], finish)),
-        patch.object(runner, "_microcompact", side_effect=fallback) as separate,
+        patch.object(runner, "_compact_without_model", side_effect=fallback) as separate,
     ):
         runner._run_compaction_request()
     separate.assert_called_once()

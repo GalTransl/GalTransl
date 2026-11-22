@@ -136,6 +136,8 @@
     "agentCompactNote_title_microcompact": "主摘要压缩失败后，已清理较早的读取结果，保留对话和最近 5 轮读取现场",
     "agentCompactNote_message_microcompact": "已轻量清理上下文 · 清理 {{cleared}} 条旧工具结果{{size}}",
     "agentCompactNote_message_doneContextEntry": "已压缩上下文 · 摘要 {{removed}} 条早期消息{{size}}",
+    "agentCompactNote_title_observationMask": "较早的大型工具结果已折叠为开头和结尾预览，完整内容已归档，可随时回查；本次没有调用模型生成摘要",
+    "agentCompactNote_message_observationMask": "已折叠上下文 · 折叠 {{cleared}} 条大型工具结果{{size}}",
     "nETWORKERROR_nETWORKERROR_connectionFailed": "连接失败",
     "tIMEOUT_tIMEOUT_text": "请求超时",
     "rATELIMITED_rATELIMITED_text": "被限流",

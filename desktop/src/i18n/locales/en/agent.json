@@ -136,6 +136,8 @@
     "agentCompactNote_title_microcompact": "Summary compaction failed. Earlier read results were cleared while preserving the conversation and the latest 5 read rounds.",
     "agentCompactNote_message_microcompact": "Context lightly compacted · {{cleared}} old tool results cleared{{size}}",
     "agentCompactNote_message_doneContextEntry": "Context compacted · {{removed}} earlier messages summarized{{size}}",
+    "agentCompactNote_title_observationMask": "Earlier large tool results were folded into head and tail previews. Full results are archived and can be read back; no model call was used for a summary.",
+    "agentCompactNote_message_observationMask": "Context folded · {{cleared}} large tool results folded{{size}}",
     "nETWORKERROR_nETWORKERROR_connectionFailed": "Connection failed",
     "tIMEOUT_tIMEOUT_text": "The request timed out",
     "rATELIMITED_rATELIMITED_text": "Rate limited",
