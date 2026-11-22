@@ -321,11 +321,9 @@ class TranslationToolTests(unittest.IsolatedAsyncioTestCase):
                 None, trans_list=sentences(2), sig_list=["abc", "def"], proofread=False,
                 messages=[{"role": "user", "content": "original input"}], progress_file="file",
             )
-        self.assertEqual(choices, [
-            {"type": "function", "function": {"name": "write_translation_result"}},
-            {"type": "function", "function": {"name": "write_translation_result"}},
-            {"type": "function", "function": {"name": "write_translation_result"}},
-        ])
+        # Write rounds use "auto": DeepSeek-style APIs return no reasoning when a tool is forced,
+        # so the file-progress light could never show "thinking" for tool templates.
+        self.assertEqual(choices, ["auto", "auto", "auto"])
         self.assertEqual(requests[2][:len(requests[1])], requests[1])
         self.assertIn("write_translation_result", requests[2][-1]["content"])
         self.assertEqual(requests[2][-2]["reasoning_content"], "thinking")
@@ -375,7 +373,7 @@ class TranslationToolTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(published), sum(batch_sizes[:-1]) + min(len(rows), step * 24))
             group = rows[step * 24 : (step + 1) * 24]
             self.assertTrue(group, "不应在本批全部写入后额外请求结尾")
-            self.assertEqual(kwargs["tool_choice"], {"type": "function", "function": {"name": "write_translation_result"}})
+            self.assertEqual(kwargs["tool_choice"], "auto")
             calls = []
             if group:
                 group_sizes.append(len(group))

@@ -324,7 +324,8 @@ class EnhanceJailbreakImageTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(choice["function"]["name"], "read_translation_input")
                 second, _, choice = requests[1]
                 self.assertEqual([m["role"] for m in second], ["system", "user", "assistant", "tool"])
-                self.assertEqual(choice["function"]["name"], "write_translation_result")
+                # Reading stays forced; writing is "auto" so reasoning models still stream their thinking.
+                self.assertEqual(choice, "auto")
                 history, _, current = second[-1]["content"].partition("<input>")
                 self.assertIn("cached-first", history)
                 self.assertIn("source-2", current)

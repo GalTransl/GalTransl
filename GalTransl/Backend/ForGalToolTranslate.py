@@ -337,7 +337,10 @@ class ForGalToolTranslate(ForGalJsonTranslate):
             response, reasoning = {}, {}
             preview.clear()
             next_tool = "write_translation_result" if input_read else "read_translation_input"
-            tool_choice = {"type": "function", "function": {"name": next_tool}}
+            # 写译文这一轮用 auto：DeepSeek 等接口在强制指定工具（具名或 required）时不返回思考内容，
+            # 「文件进度」就看不到思考中，模型也可能根本不思考。读取输入只是取数据，仍强制先读，
+            # 免得模型跳过读取直接写、在自动模式下被记成一次模板失败。
+            tool_choice = "auto" if input_read else {"type": "function", "function": {"name": next_tool}}
             content, token = await self.ask_chatbot(
                 messages=list(messages), tools=tools,
                 tool_choice=tool_choice, tool_response_holder=response, reasoning_holder=reasoning,
@@ -353,8 +356,7 @@ class ForGalToolTranslate(ForGalJsonTranslate):
                 self._record_tool_error(kwargs, failure_reason, token, attempt)
                 break  # 截断的工具调用绝不能应用
             calls = response.get("tool_calls", [])
-            # 部分兼容接口在指定 function 的请求里省略返回的 function.name。
-            # 本模板只开放一个工具，因此可依据请求补齐；必须在保存 assistant
+            # 部分兼容接口会省略返回的 function.name，按本轮期望的工具补齐；必须在保存 assistant
             # 历史前修正，避免下一轮把空名称再次发给接口。不同调用 ID 不合并。
             normalized_calls = []
             for call in calls:
