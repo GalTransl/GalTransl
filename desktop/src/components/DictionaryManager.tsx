@@ -370,6 +370,9 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     onResizerPointerDown,
   } = useResizableSidebar(DICTIONARY_SIDEBAR_WIDTH_KEY);
   const [searchTerm, setSearchTerm] = useState('');
+  /** 搜索期间编辑过的行（按对象引用）：改完不再匹配搜索词也继续显示，
+   *  否则按译文搜到再改译文，这一行会在输入时直接消失。搜索词一变就清空。 */
+  const [searchPinnedRows, setSearchPinnedRows] = useState<ReadonlySet<DictRow>>(() => new Set());
   const [sectionFilter, setSectionFilter] = useState('');
   const [mode, setMode] = useState<'card' | 'text'>('card');
   const [draftText, setDraftText] = useState<string>('');
@@ -463,8 +466,8 @@ export function DictionaryManager(props: DictionaryManagerProps) {
       });
     if (!effectiveSearchTerm.trim()) return visible;
     const needle = effectiveSearchTerm.toLowerCase();
-    return visible.filter(({ row }) => row.values.join('\t').toLowerCase().includes(needle));
-  }, [parsedRows, effectiveSearchTerm, activeSection, rowSections]);
+    return visible.filter(({ row }) => searchPinnedRows.has(row) || row.values.join('\t').toLowerCase().includes(needle));
+  }, [parsedRows, effectiveSearchTerm, activeSection, rowSections, searchPinnedRows]);
 
   const groupedRows = useMemo(() => {
     const groups: DictRowGroup[] = [];
@@ -731,6 +734,13 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     // Keep raw/type consistent with the edited values, without reparsing the
     // rest of the dictionary (e.g. changing diag to mono or adding a comment).
     next[rowIndex] = parseRows(rowsToText([{ ...row, values: nextValues }]), activeTab)[0];
+    // 编辑后行对象换了新引用，把新对象登记进固定集合，搜索结果里才留得住它
+    setSearchPinnedRows((prev) => {
+      const pinned = new Set(prev);
+      pinned.delete(row);
+      pinned.add(next[rowIndex]);
+      return pinned;
+    });
     // 不再整文件序列化再重解析：行数组就是真源，保存/切文本模式时才落地成文本
     setRowsOverride(next);
     setDirty(true);
@@ -1089,7 +1099,10 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                     type="text"
                     placeholder={translate("projects:dictionaryManager.dictToolbar_placeholder_searchDictionaryEntry")}
                     value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value);
+                      setSearchPinnedRows(new Set());
+                    }}
                     className="dict-search"
                   />
                   {mode === 'card' && (

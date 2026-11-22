@@ -262,3 +262,33 @@ test('card edits keep dictionary row classification consistent with serialized t
   assert.equal(heading.props.children, 'projects:dictionaryManager.getTypeLabel_message_textVariant4');
   act(() => renderer.unmount());
 });
+
+test('editing a row that matched the search keeps it visible until the search changes', () => {
+  // Regression: searching by translation and then editing that translation made the row vanish mid-edit.
+  const f = fixture();
+  const { DictionaryManager } = f.load(new URL('../src/components/DictionaryManager.tsx', import.meta.url));
+  const data = { pre_dict_files: [], post_dict_files: [], gpt_dict_files: ['gpt.txt'], dict_contents: { 'gpt.txt': { lines: ['猫\tcat', '犬\tdog'], mtime: 1 } } };
+  let renderer;
+  act(() => {
+    renderer = create(h(DictionaryManager, {
+      title: 'Dictionary', description: '', data, loading: false, error: null,
+      onReload: async () => {}, onCreateFile: async () => '', onDeleteFile: async () => {}, onSaveFile: async () => {},
+    }));
+  });
+  // Only the cells of rendered entries; the search box itself is also an input.
+  const cells = () => renderer.root.findAll(node => node.props['data-dict-row-index'] !== undefined && typeof node.type === 'string')
+    .flatMap(row => row.findAllByType('input'));
+  const values = () => cells().map(node => node.props.value);
+  const edit = (from, to) => act(() => cells().find(node => node.props.value === from).props.onChange({ target: { value: to } }));
+  const search = value => act(() => renderer.root.findByProps({ className: 'dict-search' }).props.onChange({ target: { value } }));
+  search('cat');
+  assert.deepEqual(values().filter(Boolean), ['猫', 'cat']);
+  edit('cat', 'kitty');
+  assert.ok(values().includes('kitty'));
+  edit('kitty', 'kitten');
+  assert.ok(values().includes('kitten'));
+  // A new search filters normally again; the edited row no longer matches 'cat'.
+  search('ca');
+  assert.ok(!values().includes('kitten'));
+  act(() => renderer.unmount());
+});
