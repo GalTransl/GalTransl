@@ -292,3 +292,48 @@ test('editing a row that matched the search keeps it visible until the search ch
   assert.ok(!values().includes('kitten'));
   act(() => renderer.unmount());
 });
+
+test('saving a GPT dictionary accepts empty and separator lines and still rejects half-filled rows', async () => {
+  // Regression: Dict/GPT字典.txt has a "=====" separator line. The save check treated it (and
+  // tab-only lines such as an unfilled card) as an entry missing its translation, so the dictionary
+  // could not be saved; card-mode saves also rewrote the separator as "=====\t\t".
+  const f = fixture();
+  const { DictionaryManager } = f.load(new URL('../src/components/DictionaryManager.tsx', import.meta.url));
+  const data = { pre_dict_files: [], post_dict_files: [], gpt_dict_files: ['gpt.txt'], dict_contents: { 'gpt.txt': { lines: ['猫\tcat', '\t\t', ' \t', '====='], mtime: 1 } } };
+  const saved = [];
+  let renderer;
+  act(() => {
+    renderer = create(h(DictionaryManager, {
+      title: 'Dictionary', description: '', data, loading: false, error: null,
+      onReload: async () => {}, onCreateFile: async () => '', onDeleteFile: async () => {},
+      onSaveFile: async (file, text) => { saved.push(text); },
+    }), { createNodeMock(element) {
+      if (element.props.className !== 'dict-card-list') return null;
+      const box = { getBoundingClientRect: () => ({ top: 0, bottom: 10, height: 10 }), offsetHeight: 10, clientHeight: 10, clientTop: 0, scrollTop: 0 };
+      return { ...box, querySelector(selector) {
+        const index = Number(selector.match(/"(\d+)"/)[1]);
+        return { ...box, classList: { add: () => located.push(index), remove() {} }, offsetWidth: 0, closest: () => null, querySelector: () => ({ focus() {} }) };
+      } };
+    } });
+  });
+  const located = [];
+  const cell = value => renderer.root.findAll(node => node.props['data-dict-row-index'] !== undefined && typeof node.type === 'string')
+    .flatMap(row => row.findAllByType('input')).find(node => node.props.value === value);
+  act(() => cell('cat').props.onChange({ target: { value: 'kitten' } }));
+  await act(async () => f.key());
+  assert.deepEqual(saved, ['猫\tkitten\t\n\n\n=====']);
+  // The stub onReload does not refresh `data`, so the editor shows the original 'cat' again.
+  // A row with only one of source/translation is still an error, not silently dropped, and every
+  // failed attempt points at the row again instead of looking like the button did nothing.
+  act(() => cell('cat').props.onChange({ target: { value: '' } }));
+  await act(async () => f.key());
+  await act(async () => f.key());
+  assert.equal(saved.length, 1);
+  assert.deepEqual(located, [0, 0]);
+  // Text mode keeps every other line byte-for-byte and only blanks the whitespace-only ones.
+  act(() => renderer.root.findByProps({ className: 'dict-panel-actions' }).findAllByType('button')[0].props.onClick());
+  act(() => renderer.root.findByType('textarea').props.onChange({ target: { value: '犬\tdog\n\t' } }));
+  await act(async () => f.key());
+  assert.deepEqual(saved, ['猫\tkitten\t\n\n\n=====', '犬\tdog\n']);
+  act(() => renderer.unmount());
+});

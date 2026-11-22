@@ -141,10 +141,18 @@ function parseRows(text: string, tab: DictTab): DictRow[] {
   });
 }
 
+/** 没填任何内容的 GPT 行（只有 Tab/空白）：保存时当空行，不算缺原文/译文 */
+function isEmptyGptRow(row: DictRow): boolean {
+  return row.type === 'gpt' && !row.values.join('').trim();
+}
+
 function rowsToText(rows: DictRow[]): string {
   return rows.map((row) => {
     if (row.type === 'blank') return '';
     if (row.type === 'comment') return row.values[0] ?? row.raw;
+    // 没有 Tab 的行（===== 分隔线等）卡片里不显示、也改不到，原样写回；
+    // 按列拼接会变成 "=====\t\t"，下次加载就成了译文为空的词条
+    if (!row.raw.includes('\t')) return row.raw;
     return row.values.join('\t');
   }).join('\n');
 }
@@ -813,7 +821,8 @@ export function DictionaryManager(props: DictionaryManagerProps) {
       const invalidRow = parsedRows
         .map((row, index) => ({ row, index }))
         .find(({ row }) => {
-          if (row.type !== 'gpt') return false;
+          // 没有 Tab 的行（===== 分隔线、说明文字等）后端加载时直接跳过、卡片里也不显示，不是词条
+          if (row.type !== 'gpt' || !row.raw.includes('\t') || isEmptyGptRow(row)) return false;
           const src = row.values[0]?.trim() ?? '';
           const dst = row.values[1]?.trim() ?? '';
           return !src || !dst;
@@ -821,6 +830,10 @@ export function DictionaryManager(props: DictionaryManagerProps) {
       if (invalidRow) {
         setLocalError(uiMessage("projects:dictionaryManager.handleSave_setLocalError_gPTDictionarySourceTranslationTextRequired", { value: invalidRow.index + 1 }));
         setInfo(null);
+        // 错误框已在显示时，再点保存文案不变、看起来像没反应：每次都定位并闪一下出错的行
+        setSearchTerm('');
+        setSectionFilter('');
+        setPendingPreviewRow(invalidRow.index);
         return;
       }
     }
@@ -831,13 +844,15 @@ export function DictionaryManager(props: DictionaryManagerProps) {
     try {
       // 卡片模式下行数组是真源：保存时才序列化一次
       const overrideAtSave = rowsOverride;
-      const textToSave = overrideAtSave ? rowsToText(overrideAtSave) : draftText;
+      let textToSave = overrideAtSave ? rowsToText(overrideAtSave) : draftText;
+      // 整行只有 Tab/空白的 GPT 行（没填的新卡片等）存成空行：后端会把它当成查找词为空的词条
+      if (activeTab === 'gpt') textToSave = textToSave.split('\n').map((line) => (line.trim() ? line : '')).join('\n');
       await onSaveFile(selectedFile, textToSave);
       const current = draftSnapshotRef.current;
       if (current.selectedFile === selectedFile
         && current.draftText === draftText
         && current.rowsOverride === overrideAtSave) {
-        if (overrideAtSave) {
+        if (overrideAtSave || textToSave !== draftText) {
           setRowsOverride(null);
           setDraftText(textToSave);
         }
