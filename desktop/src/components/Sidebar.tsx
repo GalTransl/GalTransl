@@ -742,9 +742,7 @@ export function Sidebar({ openProjects, wizardOpen, wizardProjectName, onCloseWi
   );
 
   return (
-    // 侧栏里没有可编辑文本：屏蔽浏览器自带的右键菜单（导航项是链接，会弹出"在新窗口中打开链接"等），
-    // 只留项目文件夹自己的菜单（handleProjectContextMenu 先处理并阻止冒泡，不受这里影响）。
-    <aside className={`sidebar ${expanded ? 'sidebar--expanded' : 'sidebar--collapsed'}`} onContextMenu={(e) => e.preventDefault()}>
+    <aside className={`sidebar ${expanded ? 'sidebar--expanded' : 'sidebar--collapsed'}`}>
       <div className="sidebar__header">
         <img src={logoUrl} alt="" className="sidebar__logo-img" />
         {expanded && <span className="sidebar__logo">{translate("common:sidebar.sidebarHeader_message_galTransl")}</span>}

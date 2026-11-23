@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { App } from './app/App';
 import { applyAnimationsPreference } from './lib/api';
 import { installDocumentMotionPause } from './lib/documentMotionPause';
+import { installNativeContextMenuBlock } from './lib/nativeContextMenu';
 import { initializeProjectStorage } from './lib/projectStorage';
 import { UiI18nProvider } from './i18n';
 import { UiMotionProvider } from './components/UiMotion';
@@ -13,6 +14,8 @@ initializeProjectStorage();
 applyAnimationsPreference();
 // 窗口不可见时停掉 CSS 动画，避免最小化期间继续占合成层。
 installDocumentMotionPause();
+// 浏览器自带的右键菜单只在输入框和选中文字上保留。
+installNativeContextMenuBlock();
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
