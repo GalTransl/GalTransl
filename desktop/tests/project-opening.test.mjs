@@ -357,7 +357,7 @@ test(`automatic creation waits for files, detected settings and name extraction 
     assert.equal(saved.length, 0);
     await act(async () => detection.resolve({ suggested: 'custom_reader', counts: { custom_reader: 1 }, unknown: [] }));
     assert.equal(saved.length, 0);
-    await act(async () => guidelines.resolve(['Other.md', 'Basic.md', '日译中_增强v2.md']));
+    await act(async () => guidelines.resolve(['Other.md', 'Basic.md', '日译中_增强v2.md', '日译中_增强v3.md']));
     assert.equal(saved.length, 1);
     assert.equal(saved[0].id, f.api.encodeProjectDir(directory));
     assert.equal(saved[0].payload.config_file_name, 'config.yaml');
@@ -366,7 +366,7 @@ test(`automatic creation waits for files, detected settings and name extraction 
     assert.equal(config.common.workersPerProject, 16);
     assert.equal(config.common['gpt.contextNum'], 8);
     assert.equal(config.common.language, uiLanguage === 'en' ? 'en' : 'zh-cn');
-    assert.equal(config.common['gpt.translation_guideline'], uiLanguage === 'en' ? 'Basic.md' : '日译中_增强v2.md');
+    assert.equal(config.common['gpt.translation_guideline'], uiLanguage === 'en' ? 'Basic.md' : '日译中_增强v3.md');
     assert.equal(config.plugin.filePlugin, 'custom_reader');
     assert.equal(config.plugin.custom_reader.encoding, 'utf-8');
     assert.equal(f.api.getSelectedBackendProfile(directory), 'default-model');

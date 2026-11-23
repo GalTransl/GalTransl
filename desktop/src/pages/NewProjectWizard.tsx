@@ -128,14 +128,18 @@ export function NewProjectWizard({ active, initialDirectory, autoCreate = false,
   const [settingsReady, setSettingsReady] = useState(false);
 
   // 目标语言与翻译规范的默认值跟随界面语言：英文界面默认 English + Basic.md，
-  // 中文界面保持原样（zh-cn + 日译中_增强v2）。用户手动选过之后就不再跟随，
+  // 中文界面保持原样（zh-cn + 日译中_增强v3）。用户手动选过之后就不再跟随，
   // 切换界面语言只改默认值，不会覆盖已选内容。
   const languageTouchedRef = useRef(false);
   const translationGuidelineTouchedRef = useRef(false);
   const preferredGuidelines = useMemo(
     () => (uiLanguage === 'en'
       ? [translate("projects:newProjectWizard.newProjectWizard_message_basicMd")]
-      : [translate("projects:newProjectWizard.newProjectWizard_message_v2Md"), translate("projects:newProjectWizard.newProjectWizard_message_md")]),
+      : [
+        translate("projects:newProjectWizard.newProjectWizard_message_v3Md"),
+        translate("projects:newProjectWizard.newProjectWizard_message_v2Md"),
+        translate("projects:newProjectWizard.newProjectWizard_message_md"),
+      ]),
     [uiLanguage],
   );
 

@@ -197,6 +197,7 @@
     "message_message_projectCreateSuccess": "The project has been created!",
     "message_message_createFailed": "Creation failed: {{value}}",
     "message_message_openFileFailed": "Failed to open the input folder: {{value}}",
+    "newProjectWizard_message_v3Md": "日译中_增强v3.md",
     "newProjectWizard_message_v2Md": "日译中_增强v2.md",
     "newProjectWizard_message_md": "日译中_增强.md",
     "newProjectWizard_message_basicMd": "Basic.md",
