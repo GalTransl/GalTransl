@@ -189,7 +189,7 @@
     "settingsNumberRow_message_text": "Browse text font size",
     "settingsToggleRowDesc_message_doneEnableCustomBackground": "The custom background is enabled.",
     "settingsToggleRowDesc_message_notSettingsCustomBackground": "No custom background is set.",
-    "settingsToggleRowDesc_div_themeBackgroundSettingsEffectiveOpenAutoOption": "Theme, background and container transparency changes apply immediately and are kept the next time the app opens. When the server is started automatically, the “Hide the server console” option decides whether the command window is shown.",
+    "settingsToggleRowDesc_div_themeBackgroundSettingsEffectiveOpenAutoOption": "Theme, background and container transparency changes apply immediately and are kept the next time the app opens. When the server is started automatically, the “Hide the server console” option decides whether the command window is shown; while it is hidden, the server no longer prints logs to the console.",
     "panelHeader_message_prompt": "Prompts",
     "panelHeader_message_translationDefaultPromptEditReset": "Manage the default prompts of each translation template; edit them separately and reset them to the built-in values with one click.",
     "settingsActionRow_message_changeDefaultPrompt": "Change the default prompts",

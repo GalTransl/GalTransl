@@ -131,6 +131,26 @@ class ServerPortBindingTests(unittest.TestCase):
                         first.shutdown()
                         worker.join(timeout=5)
 
+    def test_no_console_output_flag_silences_stdout_and_stderr(self):
+        """The desktop launcher passes --no-console-output when the console window is
+        hidden; the backend must then print nothing, while behaving the same otherwise."""
+        with BackendHTTPServer(("127.0.0.1", 0), ProbeHandler) as first:
+            command = [sys.executable, "run_backend.py", "--host", "127.0.0.1", "--port", str(first.server_port)]
+            options = dict(
+                cwd=Path(__file__).resolve().parents[1],
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=20,
+            )
+            visible = subprocess.run(command, **options)
+            hidden = subprocess.run([*command, "--no-console-output"], **options)
+        self.assertEqual(visible.returncode, 1, visible.stdout + visible.stderr)
+        self.assertIn("[错误]", visible.stdout)
+        self.assertEqual(hidden.returncode, 1, hidden.stdout + hidden.stderr)
+        self.assertEqual(hidden.stdout + hidden.stderr, "")
+
     def test_macos_rejects_live_listener_before_binding(self):
         for host in ("127.0.0.1", "0.0.0.0"):
             with self.subTest(host=host):

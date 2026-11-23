@@ -4974,12 +4974,29 @@ def serve(host: str = "127.0.0.1", port: int = 12333, *, ready_file: str | None 
             Path(ready_file).unlink(missing_ok=True)
 
 
+def _discard_console_output() -> None:
+    # 桌面端隐藏控制台窗口时没有人能看到输出：换成 devnull 后，print 和各 job 的
+    # 控制台日志 handler（创建时取 sys.stdout）都不再往控制台写。界面日志和
+    # GalTransl.log 走各自的 handler，不受影响。用真实文件而不是自制对象，
+    # 是因为第三方库会调用 fileno()/isatty()/reconfigure()。
+    sink = open(os.devnull, "w", encoding="utf-8", errors="replace")
+    sys.stdout = sink
+    sys.stderr = sink
+
+
 def main() -> None:
     parser = argparse.ArgumentParser("GalTransl backend mode")
     parser.add_argument("--host", default="127.0.0.1", help="bind host")
     parser.add_argument("--port", type=int, default=12333, help="bind port (0 selects an available port)")
     parser.add_argument("--ready-file", help="write the bound address as JSON for the desktop launcher")
+    parser.add_argument(
+        "--no-console-output",
+        action="store_true",
+        help="discard stdout/stderr (the desktop launcher passes this when the console window is hidden)",
+    )
     args = parser.parse_args()
+    if args.no_console_output:
+        _discard_console_output()
     serve(args.host, args.port, ready_file=args.ready_file)
 
 

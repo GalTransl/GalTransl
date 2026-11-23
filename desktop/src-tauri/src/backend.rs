@@ -184,6 +184,9 @@ impl BackendManager {
             use std::os::windows::process::CommandExt;
             if hide_console {
                 command.creation_flags(CREATE_NO_WINDOW);
+                // 没有窗口就没人看得到输出，让后端连控制台日志都不要打印。
+                // 其他平台没有独立的控制台窗口，输出跟随启动它的终端，保持原样。
+                command.arg("--no-console-output");
             }
         }
         #[cfg(not(target_os = "windows"))]
