@@ -434,8 +434,10 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
                 </label>
                 <label className="field field--inline">
                   <span>{translate("common:backendConfigEditor.fieldFieldInline_message_text")}</span>
-                  {/* 三态（跟随全局/是/否），开关表达不了「跟随全局」，这里保留下拉框 */}
+                  {/* 三态（跟随全局/是/否），开关表达不了「跟随全局」，用三个胶囊 */}
                   <CustomSelect
+                    segmented
+                    aria-label={translate("common:backendConfigEditor.fieldFieldInline_message_text")}
                     disabled={readOnly}
                     value={t.stream == null ? '' : String(t.stream)}
                     onChange={(e) => {
@@ -483,6 +485,8 @@ export function BackendConfigEditor({ config, onChange, readOnly = false, proxy 
           <label className="field">
             <span>{translate("common:backendConfigEditor.field_message_token")}</span>
             <CustomSelect
+              segmented
+              aria-label={translate("common:backendConfigEditor.field_message_token")}
               disabled={readOnly}
               value={String(oaiConfig.tokenStrategy ?? 'random')}
               onChange={(e) => updateOai('tokenStrategy', e.target.value)}

@@ -225,6 +225,76 @@ select option {
   max-height: 200px;
 }
 
+/* ── Segmented variant（CustomSelect segmented：选项少时的横向胶囊） ── */
+
+.segmented-select {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--color-neutral-soft);
+  /* 在 grid / 纵向 flex 的表单里不被拉满整行 */
+  justify-self: start;
+  align-self: flex-start;
+}
+
+.segmented-select__option {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 0 14px;
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 30px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.segmented-select__option:hover {
+  color: var(--color-text);
+}
+
+.segmented-select__option:focus-visible {
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.28);
+}
+
+.segmented-select__option--selected,
+.segmented-select__option--selected:hover {
+  background: var(--color-primary);
+  color: #fff;
+  font-weight: 600;
+  cursor: default;
+}
+
+.segmented-select--disabled {
+  opacity: 0.6;
+}
+
+.segmented-select__option--disabled {
+  cursor: not-allowed;
+}
+
+.segmented-select__option--disabled:not(.segmented-select__option--selected) {
+  opacity: 0.5;
+}
+
+.segmented-select__option--disabled:not(.segmented-select__option--selected):hover {
+  color: var(--color-text-muted);
+}
+
 /* ── Panel enter animation ── */
 
 @keyframes selectPanelEnter {
@@ -244,7 +314,8 @@ select option {
   select,
   .custom-select__trigger,
   .custom-select__arrow,
-  .custom-select__option {
+  .custom-select__option,
+  .segmented-select__option {
     transition: none;
   }
   .custom-select__panel {

@@ -42,8 +42,59 @@ interface OptionData {
 type CustomSelectProps = SelectHTMLAttributes<HTMLSelectElement> & {
   /** Compact variant (smaller height, for toolbars / inline use) */
   compact?: boolean;
+  /** 设置项用：选项少于 SEGMENTED_OPTION_LIMIT 个时横向排成胶囊，一眼看全、一次点击；
+   *  选项更多，或当前值不在选项里（胶囊无法显示它）时仍是下拉框。 */
+  segmented?: boolean;
   children: ReactNode;
 };
+
+const SEGMENTED_OPTION_LIMIT = 4;
+
+function SegmentedOptions({ options, value, disabled, className, onSelect, id, ariaLabel, ariaLabelledby, ariaDescribedby }: {
+  options: OptionData[]; value: unknown; disabled: boolean; className: string; onSelect: (value: string) => void;
+  id?: string; ariaLabel?: string; ariaLabelledby?: string; ariaDescribedby?: string;
+}) {
+  const groupRef = useRef<HTMLDivElement>(null);
+  const move = (from: number, step: 1 | -1) => {
+    for (let i = 1; i <= options.length; i++) {
+      const idx = (from + step * i + options.length * i) % options.length;
+      if (options[idx].disabled) continue;
+      onSelect(options[idx].value);
+      groupRef.current?.querySelectorAll<HTMLElement>('[role="radio"]')[idx]?.focus();
+      return;
+    }
+  };
+  return (
+    <div ref={groupRef} id={id} role="radiogroup" aria-label={ariaLabel} aria-labelledby={ariaLabelledby}
+      aria-describedby={ariaDescribedby} aria-disabled={disabled || undefined}
+      className={['segmented-select', disabled ? 'segmented-select--disabled' : '', className].filter(Boolean).join(' ')}>
+      {options.map((opt, idx) => {
+        const selected = opt.value === value;
+        const inert = disabled || Boolean(opt.disabled);
+        return (
+          // 不用 <button>：设置行多半包在 <label> 里，点到标签文字或胶囊间的空隙时
+          // 浏览器会把点击转给 label 内第一个按钮，等于误选第一项。
+          <div key={opt.value || `__empty_${idx}`} role="radio" aria-checked={selected} aria-disabled={inert || undefined}
+            tabIndex={selected && !inert ? 0 : -1} title={opt.label}
+            className={[
+              'segmented-select__option',
+              selected ? 'segmented-select__option--selected' : '',
+              inert ? 'segmented-select__option--disabled' : '',
+            ].filter(Boolean).join(' ')}
+            onClick={() => { if (!inert && !selected) onSelect(opt.value); }}
+            onKeyDown={(e) => {
+              if (inert) return;
+              if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); move(idx, 1); }
+              else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); move(idx, -1); }
+              else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (!selected) onSelect(opt.value); }
+            }}>
+            {opt.label}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 /* ── Helpers ── */
 
@@ -83,6 +134,7 @@ export function CustomSelect({
   disabled,
   className = '',
   compact,
+  segmented,
   ...rest
 }: CustomSelectProps) {
   const options = extractOptions(children);
@@ -255,6 +307,12 @@ export function CustomSelect({
     },
     [disabled, open, highlightIdx, options, value, notifyChange],
   );
+
+  if (segmented && options.length > 1 && options.length < SEGMENTED_OPTION_LIMIT && selectedOption) {
+    return <SegmentedOptions options={options} value={value} disabled={!!disabled} className={className}
+      onSelect={notifyChange} id={rest.id} ariaLabel={rest['aria-label']}
+      ariaLabelledby={rest['aria-labelledby'] as string | undefined} ariaDescribedby={rest['aria-describedby']} />;
+  }
 
   const rootClass = [
     'custom-select',

@@ -59,6 +59,8 @@ export function ConfigFieldRow({ field, value, onChange, onListChange, pathPrefi
     ) : field.type === 'select' ? (
       <CustomSelect
         id={fieldId}
+        segmented
+        aria-label={translate(field.labelKey)}
         value={displayValue}
         onChange={(e) => onChange(fullPath, e.target.value)}
       >

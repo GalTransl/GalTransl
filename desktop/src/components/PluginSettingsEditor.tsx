@@ -73,7 +73,7 @@ function PluginSettingRow({ settingKey, schema, defaultValue, value, onChange }:
     // 选项使用序号作为 DOM value，保留数字/布尔类型及空字符串。
     const selected = options.findIndex((option) => option.value === value);
     control = (
-      <CustomSelect id={id} aria-label={label} aria-describedby={describedBy}
+      <CustomSelect id={id} segmented aria-label={label} aria-describedby={describedBy}
         value={selected < 0 ? 'custom' : String(selected)}
         onChange={(event) => {
           const option = options[Number(event.target.value)];

@@ -448,6 +448,8 @@ export function SettingsPage() {
             <span className="settings-number-row__label">{translate("settings:settingsPage.settingsNumberRow_message_theme")}</span>
             <div className="settings-number-row__control">
               <CustomSelect
+                segmented
+                aria-label={translate("settings:settingsPage.settingsNumberRow_message_theme")}
                 value={themeMode}
                 onChange={(event) => {
                   applyThemeMode(event.target.value as ThemeMode);
@@ -463,7 +465,7 @@ export function SettingsPage() {
           <label className="settings-number-row">
             <span className="settings-number-row__label">{translate('settings:appearance.palette')}</span>
             <div className="settings-number-row__control">
-              <CustomSelect aria-label={translate('settings:appearance.palette')} value={themePalette}
+              <CustomSelect segmented aria-label={translate('settings:appearance.palette')} value={themePalette}
                 onChange={(event) => { applyThemePalette(event.target.value as ThemePalette); }}>
                 <option value="default">{translate('settings:appearance.paletteDefault')}</option>
                 <option value="sakura">{translate('settings:appearance.paletteSakura')}</option>
@@ -474,7 +476,7 @@ export function SettingsPage() {
           <label className="settings-number-row">
             <span className="settings-number-row__label">{translate('settings:appearance.language')}</span>
             <div className="settings-number-row__control">
-              <CustomSelect aria-label={translate('settings:appearance.language')} value={uiLanguage}
+              <CustomSelect segmented aria-label={translate('settings:appearance.language')} value={uiLanguage}
                 onChange={(event) => { void setUiLanguage(event.target.value as UiLanguage); }}>
                 <option value="zh-CN">{translate('settings:appearance.simplifiedChinese')}</option>
                 <option value="en">{translate('settings:appearance.english')}</option>

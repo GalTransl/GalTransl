@@ -247,6 +247,11 @@
   width: 100%;
 }
 
+/* 胶囊选择和开关一样靠右 */
+.config-field-row__input > .segmented-select {
+  margin-left: auto;
+}
+
 .config-field-row__input > input,
 .config-field-row__input select,
 .config-field-row__input .custom-select__trigger {
