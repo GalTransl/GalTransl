@@ -7,6 +7,27 @@ from GalTransl.Utils import check_for_tool_updates
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
 
+
+def _normalize_no_proxy_env() -> None:
+    # 部分代理工具把 NO_PROXY 写成带方括号的 "[::1]"。httpx 会把它拼成 "all://*[::1]" 再解析，
+    # 构造任何客户端都抛 InvalidURL: Invalid port: ':1]'，模型请求在发出前就全部失败。
+    # 去掉方括号后含义不变（httpx 自己会按 IPv6 处理裸的 "::1"）。
+    for name in ("NO_PROXY", "no_proxy"):
+        value = os.environ.get(name)
+        if not value or "[" not in value:
+            continue
+        hosts = []
+        for host in value.split(","):
+            host = host.strip()
+            if host.startswith("[") and host.endswith("]"):
+                host = host[1:-1]
+            if host and host not in hosts:
+                hosts.append(host)
+        os.environ[name] = ",".join(hosts)
+
+
+_normalize_no_proxy_env()
+
 PROGRAM_SPLASH1 = r"""
    ____       _ _____                    _ 
   / ___| __ _| |_   _| __ __ _ _ __  ___| |
