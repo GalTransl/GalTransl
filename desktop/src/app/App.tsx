@@ -7,6 +7,7 @@ import {
   DISABLE_ANIMATIONS_CHANGE_EVENT,
   OPEN_PROJECTS_CHANGE_EVENT,
   THEME_MODE_CHANGE_EVENT,
+  THEME_PALETTE_CHANGE_EVENT,
   type CustomBackgroundPreference,
   decodeProjectDir,
   encodeProjectDir,
@@ -14,6 +15,7 @@ import {
   getCustomBackgroundPreference,
   loadCustomBackgroundPreference,
   getThemeModePreference,
+  getThemePalettePreference,
   loadOpenProjects,
   saveOpenProjects,
 } from '../lib/api';
@@ -116,6 +118,7 @@ export function App() {
       const resolved = mode === 'system' ? (mediaQuery.matches ? 'dark' : 'light') : mode;
       root.dataset.themeMode = mode;
       root.dataset.theme = resolved;
+      root.dataset.palette = getThemePalettePreference();
     };
 
     const handleThemeModeChange = () => {
@@ -137,11 +140,13 @@ export function App() {
     applyTheme();
     applyAnimationsPreference();
     window.addEventListener(THEME_MODE_CHANGE_EVENT, handleThemeModeChange as EventListener);
+    window.addEventListener(THEME_PALETTE_CHANGE_EVENT, handleThemeModeChange as EventListener);
     window.addEventListener(DISABLE_ANIMATIONS_CHANGE_EVENT, handleDisableAnimationsChange as EventListener);
     mediaQuery.addEventListener('change', handleSystemSchemeChange);
 
     return () => {
       window.removeEventListener(THEME_MODE_CHANGE_EVENT, handleThemeModeChange as EventListener);
+      window.removeEventListener(THEME_PALETTE_CHANGE_EVENT, handleThemeModeChange as EventListener);
       window.removeEventListener(DISABLE_ANIMATIONS_CHANGE_EVENT, handleDisableAnimationsChange as EventListener);
       mediaQuery.removeEventListener('change', handleSystemSchemeChange);
     };

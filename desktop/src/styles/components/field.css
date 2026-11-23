@@ -46,7 +46,7 @@
 .cache-card__textarea {
   width: 100%;
   padding: 11px 14px;
-  border: 1px solid rgba(191, 208, 226, 0.92);
+  border: 1px solid rgba(var(--line-rgb), 0.92);
   border-radius: calc(var(--radius-control) + 2px);
   background: var(--color-surface-strong);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
@@ -74,7 +74,7 @@
 .dict-text-editor:hover,
 .plugin-setting-textarea:hover,
 .cache-card__textarea:hover {
-  border-color: rgba(47, 111, 235, 0.28);
+  border-color: rgba(var(--accent-rgb), 0.28);
 }
 
 .field textarea:focus,
@@ -82,11 +82,11 @@
 .plugin-setting-textarea:focus,
 .cache-card__textarea:focus {
   outline: none;
-  border-color: rgba(47, 111, 235, 0.72);
+  border-color: rgba(var(--accent-rgb), 0.72);
   background: var(--color-surface-strong);
   box-shadow:
-    0 0 0 4px rgba(47, 111, 235, 0.12),
-    0 10px 24px rgba(47, 111, 235, 0.08);
+    0 0 0 4px rgba(var(--accent-rgb), 0.12),
+    0 10px 24px rgba(var(--accent-rgb), 0.08);
 }
 
 .field textarea::placeholder,
@@ -101,7 +101,7 @@
 .plugin-setting-textarea:disabled,
 .cache-card__textarea:disabled {
   color: var(--color-text-muted);
-  background: rgba(241, 245, 249, 0.96);
+  background: rgba(var(--tint-f1f5f9), 0.96);
   border-color: rgba(203, 213, 225, 0.92);
   box-shadow: none;
   cursor: not-allowed;
@@ -109,8 +109,8 @@
 
 .field input:focus {
   outline: none;
-  border-color: rgba(47, 111, 235, 0.65);
-  box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);
+  border-color: rgba(var(--accent-rgb), 0.65);
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.12);
 }
 
 /* 布尔字段：标题在左、开关靠右，说明文字回到左列的第二行（设置项列表版式）。

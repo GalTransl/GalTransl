@@ -1501,6 +1501,7 @@ const TRANSLATOR_TEMPLATE_KEY = 'galtransl-project-translator-template';
 const HOME_HISTORY_LIMIT_KEY = 'galtransl-home-history-limit';
 const HOME_JOB_LIMIT_KEY = 'galtransl-home-job-limit';
 const THEME_MODE_KEY = 'galtransl-theme-mode';
+const THEME_PALETTE_KEY = 'galtransl-theme-palette';
 const CUSTOM_BACKGROUND_KEY = 'galtransl-custom-background';
 const HIDE_BACKEND_CONSOLE_KEY = 'galtransl-hide-backend-console';
 const CACHE_BROWSER_FONT_SIZE_KEY = 'galtransl-cache-browser-font-size';
@@ -1529,6 +1530,7 @@ export const PROJECT_CONFIG_DIRTY_CHANGE_EVENT = 'galtransl:project-config-dirty
 export const HOME_HISTORY_LIMIT_CHANGE_EVENT = 'galtransl:home-history-limit-change';
 export const HOME_JOB_LIMIT_CHANGE_EVENT = 'galtransl:home-job-limit-change';
 export const THEME_MODE_CHANGE_EVENT = 'galtransl:theme-mode-change';
+export const THEME_PALETTE_CHANGE_EVENT = 'galtransl:theme-palette-change';
 export const CUSTOM_BACKGROUND_CHANGE_EVENT = 'galtransl:custom-background-change';
 export const HIDE_BACKEND_CONSOLE_CHANGE_EVENT = 'galtransl:hide-backend-console-change';
 export const CACHE_BROWSER_FONT_SIZE_CHANGE_EVENT = 'galtransl:cache-browser-font-size-change';
@@ -2045,6 +2047,33 @@ export function setThemeModePreference(mode: ThemeMode): ThemeMode {
   try {
     localStorage.setItem(THEME_MODE_KEY, normalized);
     window.dispatchEvent(new CustomEvent(THEME_MODE_CHANGE_EVENT, { detail: normalized }));
+  } catch {
+    // ignore storage errors
+  }
+  return normalized;
+}
+
+/** 配色主题与明暗模式相互独立：任一配色都有浅色和暗色两套。 */
+export const THEME_PALETTES = ['default', 'sakura'] as const;
+export type ThemePalette = (typeof THEME_PALETTES)[number];
+
+function normalizeThemePalette(value: unknown): ThemePalette {
+  return THEME_PALETTES.includes(value as ThemePalette) ? (value as ThemePalette) : 'default';
+}
+
+export function getThemePalettePreference(): ThemePalette {
+  try {
+    return normalizeThemePalette(localStorage.getItem(THEME_PALETTE_KEY));
+  } catch {
+    return 'default';
+  }
+}
+
+export function setThemePalettePreference(palette: ThemePalette): ThemePalette {
+  const normalized = normalizeThemePalette(palette);
+  try {
+    localStorage.setItem(THEME_PALETTE_KEY, normalized);
+    window.dispatchEvent(new CustomEvent(THEME_PALETTE_CHANGE_EVENT, { detail: normalized }));
   } catch {
     // ignore storage errors
   }

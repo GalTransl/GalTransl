@@ -223,7 +223,10 @@
   "appearance": {
     "language": "Interface language",
     "simplifiedChinese": "简体中文",
-    "english": "English"
+    "english": "English",
+    "palette": "Color theme",
+    "paletteDefault": "Default (blue)",
+    "paletteSakura": "Sakura pink"
   },
   "settingsSectionNav": {
     "ariaLabel_sections": "Settings sections",

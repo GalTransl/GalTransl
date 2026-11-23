@@ -20,7 +20,7 @@
   --color-danger-soft: #fdecea;
   --color-neutral-soft: #eef2f7;
   --shadow-panel: 0 18px 48px rgba(16, 24, 40, 0.08);
-  --shadow-button: 0 10px 24px rgba(47, 111, 235, 0.2);
+  --shadow-button: 0 10px 24px rgba(var(--accent-rgb), 0.2);
   --radius-panel: 24px;
   --radius-card: 18px;
   --radius-control: 14px;
@@ -51,8 +51,23 @@
   --bg-glow-success: rgba(15, 157, 88, 0.08);
   --bg-gradient-top: #f8fbff;
   --bg-gradient-bottom: #edf2f8;
-  --scrollbar-thumb: rgba(191, 208, 226, 0.9);
+  --scrollbar-thumb: rgba(var(--line-rgb), 0.9);
   --scrollbar-thumb-hover: rgba(176, 195, 219, 0.94);
+
+  /* ── Palette channels ──
+   * 页面样式里原本写死的强调色/线条色都换成了这些 RGB 通道，配色主题只需改这里。
+   * 每个通道等于原来的字面量，且不随明暗模式变化：页面 CSS 本来就在暗色规则里
+   * 选用 --accent-bright-rgb 这类“暗色用”的通道，跟着模式变反而会改掉默认外观。 */
+  --accent-rgb: 47, 111, 235;
+  --accent-bright-rgb: 111, 160, 255;
+  --accent-glow-rgb: 67, 129, 255;
+  --accent-glow-rgb-2: 54, 122, 255;
+  --accent-alt-rgb: 59, 130, 246;
+  --accent-soft-rgb: 237, 243, 255;
+  --accent-pale-rgb: 143, 182, 255;
+  --line-rgb: 191, 208, 226;
+  --line-dark-rgb: 65, 83, 111;
+  --line-mid-rgb: 141, 170, 212;
 }
 
 :root[data-theme='dark'] {
@@ -75,11 +90,340 @@
   --color-danger-soft: rgba(255, 128, 120, 0.2);
   --color-neutral-soft: rgba(113, 144, 191, 0.18);
   --shadow-panel: 0 22px 52px rgba(0, 0, 0, 0.36);
-  --shadow-button: 0 12px 30px rgba(54, 122, 255, 0.35);
-  --bg-glow-primary: rgba(67, 129, 255, 0.22);
+  --shadow-button: 0 12px 30px rgba(var(--accent-glow-rgb-2), 0.35);
+  --bg-glow-primary: rgba(var(--accent-glow-rgb), 0.22);
   --bg-glow-success: rgba(65, 194, 132, 0.16);
   --bg-gradient-top: #101824;
   --bg-gradient-bottom: #0a0f16;
-  --scrollbar-thumb: rgba(65, 83, 111, 0.9);
+  --scrollbar-thumb: rgba(var(--line-dark-rgb), 0.9);
   --scrollbar-thumb-hover: rgba(81, 103, 137, 0.96);
+}
+
+/* ── 零散强调色通道（由各页面原先写死的蓝/青色抽出，默认值与原字面量一致） ── */
+:root {
+  --tint-0477b8: 4, 119, 184;
+  --tint-082f49: 8, 47, 73;
+  --tint-0c355a: 12, 53, 90;
+  --tint-0c4f7b: 12, 79, 123;
+  --tint-0e3663: 14, 54, 99;
+  --tint-0f2b53: 15, 43, 83;
+  --tint-162447: 22, 36, 71;
+  --tint-198cff: 25, 140, 255;
+  --tint-1a3060: 26, 48, 96;
+  --tint-1d5492: 29, 84, 146;
+  --tint-1e5692: 30, 86, 146;
+  --tint-2563eb: 37, 99, 235;
+  --tint-2e487a: 46, 72, 122;
+  --tint-2e96ff: 46, 150, 255;
+  --tint-3478f6: 52, 120, 246;
+  --tint-38bdf8: 56, 189, 248;
+  --tint-3b9dff: 59, 157, 255;
+  --tint-3d78ec: 61, 120, 236;
+  --tint-3da1ff: 61, 161, 255;
+  --tint-48aeec: 72, 174, 236;
+  --tint-4a90f4: 74, 144, 244;
+  --tint-4b84ff: 75, 132, 255;
+  --tint-4c8af0: 76, 138, 240;
+  --tint-4d7ff0: 77, 127, 240;
+  --tint-5b8bf0: 91, 139, 240;
+  --tint-5b8df6: 91, 141, 246;
+  --tint-5b8ef0: 91, 142, 240;
+  --tint-5b8ef5: 91, 142, 245;
+  --tint-5b9cf6: 91, 156, 246;
+  --tint-5e8cdc: 94, 140, 220;
+  --tint-60a5fa: 96, 165, 250;
+  --tint-6366f1: 99, 102, 241;
+  --tint-638cd2: 99, 140, 210;
+  --tint-63b3ed: 99, 179, 237;
+  --tint-67b3ec: 103, 179, 236;
+  --tint-67c6ff: 103, 198, 255;
+  --tint-6a98f2: 106, 152, 242;
+  --tint-6ec3ff: 110, 195, 255;
+  --tint-7bc7ff: 123, 199, 255;
+  --tint-7ea7ff: 126, 167, 255;
+  --tint-82baea: 130, 186, 234;
+  --tint-93c5fd: 147, 197, 253;
+  --tint-93d8ff: 147, 216, 255;
+  --tint-95d9ff: 149, 217, 255;
+  --tint-a8c3ff: 168, 195, 255;
+  --tint-a9c6ff: 169, 198, 255;
+  --tint-aecef4: 174, 206, 244;
+  --tint-b4cbe3: 180, 203, 227;
+  --tint-c3e7ff: 195, 231, 255;
+  --tint-c5e3ff: 197, 227, 255;
+  --tint-c6d8eb: 198, 216, 235;
+  --tint-cde8ff: 205, 232, 255;
+}
+
+/* 樱粉：蓝色映射为樱粉、青色映射为淡紫，保留原明度 */
+:root[data-palette='sakura'] {
+  --tint-0477b8: 107, 14, 174;
+  --tint-082f49: 46, 8, 73;
+  --tint-0c355a: 57, 12, 90;
+  --tint-0c4f7b: 77, 12, 123;
+  --tint-0e3663: 99, 14, 49;
+  --tint-0f2b53: 83, 15, 43;
+  --tint-162447: 71, 22, 42;
+  --tint-198cff: 156, 42, 238;
+  --tint-1a3060: 96, 26, 55;
+  --tint-1d5492: 146, 29, 78;
+  --tint-1e5692: 146, 30, 78;
+  --tint-2563eb: 235, 37, 119;
+  --tint-2e487a: 122, 46, 78;
+  --tint-2e96ff: 165, 62, 239;
+  --tint-3478f6: 239, 59, 134;
+  --tint-38bdf8: 167, 64, 240;
+  --tint-3b9dff: 171, 74, 240;
+  --tint-3d78ec: 236, 61, 134;
+  --tint-3da1ff: 172, 76, 240;
+  --tint-48aeec: 168, 72, 236;
+  --tint-4a90f4: 241, 77, 145;
+  --tint-4b84ff: 242, 89, 152;
+  --tint-4c8af0: 240, 76, 144;
+  --tint-4d7ff0: 240, 77, 145;
+  --tint-5b8bf0: 240, 91, 153;
+  --tint-5b8df6: 242, 95, 156;
+  --tint-5b8ef0: 240, 91, 153;
+  --tint-5b8ef5: 242, 94, 156;
+  --tint-5b9cf6: 242, 95, 156;
+  --tint-5e8cdc: 220, 94, 146;
+  --tint-60a5fa: 243, 103, 161;
+  --tint-6366f1: 241, 99, 158;
+  --tint-638cd2: 210, 99, 145;
+  --tint-63b3ed: 179, 99, 237;
+  --tint-67b3ec: 181, 103, 236;
+  --tint-67c6ff: 190, 114, 244;
+  --tint-6a98f2: 242, 106, 163;
+  --tint-6ec3ff: 193, 121, 244;
+  --tint-7bc7ff: 198, 133, 245;
+  --tint-7ea7ff: 245, 136, 181;
+  --tint-82baea: 191, 130, 234;
+  --tint-93c5fd: 247, 153, 192;
+  --tint-93d8ff: 209, 155, 247;
+  --tint-95d9ff: 210, 157, 247;
+  --tint-a8c3ff: 248, 175, 205;
+  --tint-a9c6ff: 249, 175, 206;
+  --tint-aecef4: 244, 174, 203;
+  --tint-b4cbe3: 207, 180, 227;
+  --tint-c3e7ff: 229, 199, 251;
+  --tint-c5e3ff: 230, 201, 251;
+  --tint-c6d8eb: 220, 198, 235;
+  --tint-cde8ff: 234, 209, 251;
+}
+
+/* ── 暗色表面与阴影通道（由各页面原先写死的深蓝灰抽出，默认值与原字面量一致） ── */
+:root {
+  --tint-0b1018: 11, 16, 24;
+  --tint-0c121c: 12, 18, 28;
+  --tint-0e1620: 14, 22, 32;
+  --tint-0f1621: 15, 22, 33;
+  --tint-0f1722: 15, 23, 34;
+  --tint-101721: 16, 23, 33;
+  --tint-101824: 16, 24, 36;
+  --tint-101828: 16, 24, 40;
+  --tint-111925: 17, 25, 37;
+  --tint-111a26: 17, 26, 38;
+  --tint-121b27: 18, 27, 39;
+  --tint-121b28: 18, 27, 40;
+  --tint-121d2a: 18, 29, 42;
+  --tint-141c28: 20, 28, 40;
+  --tint-141d29: 20, 29, 41;
+  --tint-141e2c: 20, 30, 44;
+  --tint-151d29: 21, 29, 41;
+  --tint-161e2c: 22, 30, 44;
+  --tint-162130: 22, 33, 48;
+  --tint-162231: 22, 34, 49;
+  --tint-172033: 23, 32, 51;
+  --tint-17212f: 23, 33, 47;
+  --tint-172130: 23, 33, 48;
+  --tint-172231: 23, 34, 49;
+  --tint-182230: 24, 34, 48;
+  --tint-182332: 24, 35, 50;
+  --tint-192535: 25, 37, 53;
+  --tint-1a1b26: 26, 27, 38;
+  --tint-1a2637: 26, 38, 55;
+  --tint-1a2638: 26, 38, 56;
+  --tint-1b2738: 27, 39, 56;
+  --tint-1c2636: 28, 38, 54;
+  --tint-1c283a: 28, 40, 58;
+  --tint-1d2838: 29, 40, 56;
+  --tint-1d293a: 29, 41, 58;
+  --tint-1d2b3f: 29, 43, 63;
+  --tint-1e283a: 30, 40, 58;
+  --tint-1e293b: 30, 41, 59;
+  --tint-1f2937: 31, 41, 55;
+  --tint-223148: 34, 49, 72;
+  --tint-2c3e56: 44, 62, 86;
+}
+
+/* 樱粉：深蓝灰映射为同明度的梅紫 */
+:root[data-palette='sakura'] {
+  --tint-0b1018: 24, 11, 24;
+  --tint-0c121c: 28, 12, 28;
+  --tint-0e1620: 32, 14, 32;
+  --tint-0f1621: 33, 15, 33;
+  --tint-0f1722: 34, 15, 34;
+  --tint-101721: 33, 16, 33;
+  --tint-101824: 36, 16, 36;
+  --tint-101828: 40, 16, 40;
+  --tint-111925: 37, 17, 37;
+  --tint-111a26: 38, 17, 38;
+  --tint-121b27: 39, 18, 39;
+  --tint-121b28: 40, 18, 40;
+  --tint-121d2a: 42, 18, 42;
+  --tint-141c28: 40, 20, 40;
+  --tint-141d29: 41, 20, 41;
+  --tint-141e2c: 44, 20, 44;
+  --tint-151d29: 41, 21, 41;
+  --tint-161e2c: 44, 22, 44;
+  --tint-162130: 48, 22, 48;
+  --tint-162231: 49, 22, 49;
+  --tint-172033: 51, 23, 51;
+  --tint-17212f: 47, 23, 47;
+  --tint-172130: 48, 23, 48;
+  --tint-172231: 49, 23, 49;
+  --tint-182230: 48, 24, 48;
+  --tint-182332: 50, 24, 50;
+  --tint-192535: 53, 25, 53;
+  --tint-1a1b26: 38, 26, 38;
+  --tint-1a2637: 55, 26, 55;
+  --tint-1a2638: 56, 26, 56;
+  --tint-1b2738: 56, 27, 56;
+  --tint-1c2636: 54, 28, 54;
+  --tint-1c283a: 58, 28, 58;
+  --tint-1d2838: 56, 29, 56;
+  --tint-1d293a: 58, 29, 58;
+  --tint-1d2b3f: 63, 29, 63;
+  --tint-1e283a: 58, 30, 58;
+  --tint-1e293b: 59, 30, 59;
+  --tint-1f2937: 55, 31, 55;
+  --tint-223148: 72, 34, 72;
+  --tint-2c3e56: 86, 44, 86;
+}
+
+/* ── 自定义背景半透明表面的通道（透明度由 calc 计算，单独抽出） ── */
+:root {
+  --tint-0c131e: 12, 19, 30;
+  --tint-141e2b: 20, 30, 43;
+}
+
+:root[data-palette='sakura'] {
+  --tint-0c131e: 30, 12, 30;
+  --tint-141e2b: 43, 20, 43;
+}
+
+/* ── 青色强调与偏蓝的近白底色通道（默认值与原字面量一致） ── */
+:root {
+  --tint-22d3ee: 34, 211, 238;
+  --tint-67e8f9: 103, 232, 249;
+  --tint-dbf1ff: 219, 241, 255;
+  --tint-e0f4ff: 224, 244, 255;
+  --tint-ebf6ff: 235, 246, 255;
+  --tint-ecf4ff: 236, 244, 255;
+  --tint-eef4fc: 238, 244, 252;
+  --tint-eef4ff: 238, 244, 255;
+  --tint-eef5ff: 238, 245, 255;
+  --tint-f1f5f9: 241, 245, 249;
+  --tint-f2fbff: 242, 251, 255;
+  --tint-f4f7fb: 244, 247, 251;
+  --tint-f4f8ff: 244, 248, 255;
+  --tint-f5f9ff: 245, 249, 255;
+  --tint-f5faff: 245, 250, 255;
+  --tint-f6faff: 246, 250, 255;
+  --tint-f7faff: 247, 250, 255;
+  --tint-f7fbff: 247, 251, 255;
+  --tint-f8fbff: 248, 251, 255;
+  --tint-f8fcff: 248, 252, 255;
+  --tint-fafcff: 250, 252, 255;
+  --tint-fafdff: 250, 253, 255;
+}
+
+/* 樱粉：青色映射为淡紫，偏蓝近白映射为偏粉近白 */
+:root[data-palette='sakura'] {
+  --tint-22d3ee: 153, 35, 237;
+  --tint-67e8f9: 187, 109, 243;
+  --tint-dbf1ff: 255, 219, 237;
+  --tint-e0f4ff: 255, 224, 240;
+  --tint-ebf6ff: 255, 235, 245;
+  --tint-ecf4ff: 255, 236, 246;
+  --tint-eef4fc: 252, 238, 245;
+  --tint-eef4ff: 255, 238, 246;
+  --tint-eef5ff: 255, 238, 246;
+  --tint-f1f5f9: 249, 241, 245;
+  --tint-f2fbff: 255, 242, 248;
+  --tint-f4f7fb: 251, 244, 248;
+  --tint-f4f8ff: 255, 244, 250;
+  --tint-f5f9ff: 255, 245, 250;
+  --tint-f5faff: 255, 245, 250;
+  --tint-f6faff: 255, 246, 251;
+  --tint-f7faff: 255, 247, 251;
+  --tint-f7fbff: 255, 247, 251;
+  --tint-f8fbff: 255, 248, 252;
+  --tint-f8fcff: 255, 248, 252;
+  --tint-fafcff: 255, 250, 252;
+  --tint-fafdff: 255, 250, 252;
+}
+
+/* ── 配色主题：樱粉 ──
+ * 取 galgame 主视觉常见的粉彩色调：樱粉为主色、浅樱紫渐变底、薄荷绿表示成功、
+ * 淡紫作辅助强调，文字用偏梅子色的深棕；暗色是夜樱的深紫靛。
+ * 浅色块用 :not([data-theme='dark'])：它和上面的暗色块优先级相同，
+ * 不排除暗色的话会因为写在后面而盖掉暗色模式的底色。 */
+:root[data-palette='sakura'] {
+  /* 滑块、复选框等原生控件默认是浏览器蓝 */
+  accent-color: var(--color-primary);
+  --accent-rgb: 214, 90, 140;
+  --accent-bright-rgb: 255, 143, 187;
+  --accent-glow-rgb: 255, 128, 180;
+  --accent-glow-rgb-2: 230, 96, 156;
+  --accent-alt-rgb: 157, 120, 214;
+  --accent-soft-rgb: 252, 236, 244;
+  --accent-pale-rgb: 246, 182, 212;
+  --line-rgb: 234, 204, 222;
+  --line-dark-rgb: 90, 65, 102;
+  --line-mid-rgb: 212, 160, 196;
+}
+
+:root[data-palette='sakura']:not([data-theme='dark']) {
+  --color-bg: #fcf3f8;
+  --color-surface: rgba(255, 252, 254, 0.88);
+  --color-surface-strong: #fffcfe;
+  --color-text: #43293a;
+  --color-text-muted: #8c6d80;
+  --color-line: #f1dce8;
+  --color-line-strong: #e3c4d7;
+  --color-primary: #d65a8c;
+  --color-primary-strong: #bd3f74;
+  --color-primary-soft: #fce8f1;
+  --color-success: #3f9f6c;
+  --color-success-soft: #e5f6eb;
+  --color-warning: #b86a12;
+  --color-warning-soft: #fff1de;
+  --color-neutral-soft: #f6ecf4;
+  --shadow-panel: 0 18px 48px rgba(140, 60, 110, 0.09);
+  --bg-glow-primary: rgba(244, 150, 195, 0.28);
+  --bg-glow-success: rgba(178, 150, 232, 0.2);
+  --bg-gradient-top: #fdf5fa;
+  --bg-gradient-bottom: #efe4f6;
+  --scrollbar-thumb-hover: rgba(214, 170, 200, 0.94);
+}
+
+:root[data-palette='sakura'][data-theme='dark'] {
+  --color-bg: #1b1424;
+  --color-surface: rgba(40, 28, 48, 0.9);
+  --color-surface-strong: #251b2f;
+  --color-text: #f8ebf3;
+  --color-text-muted: #c4a8bf;
+  --color-line: #3e2d48;
+  --color-line-strong: #5a4166;
+  --color-primary: #ff8fbb;
+  --color-primary-strong: #ffadd0;
+  --color-primary-soft: rgba(255, 143, 187, 0.2);
+  --color-success: #86dca6;
+  --color-success-soft: rgba(134, 220, 166, 0.18);
+  --color-neutral-soft: rgba(190, 150, 210, 0.18);
+  --bg-glow-success: rgba(160, 130, 235, 0.16);
+  --bg-gradient-top: #20172b;
+  --bg-gradient-bottom: #140e1b;
+  --scrollbar-thumb-hover: rgba(112, 82, 128, 0.96);
 }

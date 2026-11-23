@@ -223,7 +223,10 @@
   "appearance": {
     "language": "界面语言",
     "simplifiedChinese": "简体中文",
-    "english": "English"
+    "english": "English",
+    "palette": "配色主题",
+    "paletteDefault": "默认（蓝）",
+    "paletteSakura": "樱粉"
   },
   "settingsSectionNav": {
     "ariaLabel_sections": "设置分区",

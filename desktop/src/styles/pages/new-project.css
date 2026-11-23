@@ -29,7 +29,7 @@
   display: grid;
   gap: var(--space-2);
   align-content: start;
-  border: 1px solid rgba(191, 208, 226, 0.72);
+  border: 1px solid rgba(var(--line-rgb), 0.72);
   border-radius: var(--radius-card);
   background: var(--color-surface);
   box-shadow: var(--shadow-panel);
@@ -57,8 +57,8 @@
 
 .wizard-step--active {
   color: var(--color-primary);
-  background: rgba(47, 111, 235, 0.09);
-  border-color: rgba(47, 111, 235, 0.2);
+  background: rgba(var(--accent-rgb), 0.09);
+  border-color: rgba(var(--accent-rgb), 0.2);
   font-weight: 700;
 }
 
@@ -106,7 +106,7 @@
 }
 
 .wizard-step-summary {
-  border: 1px solid rgba(191, 208, 226, 0.72);
+  border: 1px solid rgba(var(--line-rgb), 0.72);
   border-radius: var(--radius-card);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.72));
   padding: var(--space-3) var(--space-4);
@@ -143,7 +143,7 @@
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--color-primary), #4d7ff0);
+  background: linear-gradient(90deg, var(--color-primary), rgb(var(--tint-4d7ff0)));
   transition: width 320ms var(--ease-bar-fill);
 }
 
@@ -209,7 +209,7 @@
 .wizard-path-preview {
   border: 1px solid var(--color-line);
   border-radius: var(--radius-control);
-  background: rgba(237, 243, 255, 0.55);
+  background: rgba(var(--accent-soft-rgb), 0.55);
   padding: var(--space-3);
   display: grid;
   gap: var(--space-2);
@@ -225,7 +225,7 @@
   display: block;
   padding: var(--space-2) var(--space-3);
   background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(191, 208, 226, 0.72);
+  border: 1px solid rgba(var(--line-rgb), 0.72);
   border-radius: 10px;
   color: var(--color-text);
   font-size: 12px;
@@ -253,8 +253,8 @@
   gap: var(--space-1);
   padding: var(--space-3);
   border-radius: var(--radius-control);
-  border: 1px solid rgba(47, 111, 235, 0.2);
-  background: linear-gradient(180deg, rgba(237, 243, 255, 0.72), rgba(237, 243, 255, 0.45));
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
+  background: linear-gradient(180deg, rgba(var(--accent-soft-rgb), 0.72), rgba(var(--accent-soft-rgb), 0.45));
 }
 
 /* ── 「完成」步骤里的后续流程清单 ── */
@@ -309,8 +309,8 @@
 }
 
 :root[data-theme='dark'] .wizard-flow__item {
-  background: rgba(24, 35, 50, 0.72);
-  border-color: rgba(65, 83, 111, 0.72);
+  background: rgba(var(--tint-182332), 0.72);
+  border-color: rgba(var(--line-dark-rgb), 0.72);
 }
 
 .wizard-tip-card strong {
@@ -343,7 +343,7 @@
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-4);
-  border: 1px solid rgba(191, 208, 226, 0.72);
+  border: 1px solid rgba(var(--line-rgb), 0.72);
   border-radius: var(--radius-card);
   background: var(--color-surface);
   box-shadow: var(--shadow-panel);
@@ -367,12 +367,12 @@
   gap: var(--space-3);
   min-height: 190px;
   padding: var(--space-7) var(--space-5);
-  border: 2px dashed rgba(47, 111, 235, 0.22);
+  border: 2px dashed rgba(var(--accent-rgb), 0.22);
   border-radius: var(--radius-card);
   text-align: center;
   color: var(--color-text-muted);
   cursor: pointer;
-  background: linear-gradient(180deg, rgba(47, 111, 235, 0.03), rgba(47, 111, 235, 0.07));
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.03), rgba(var(--accent-rgb), 0.07));
   transition:
     border-color var(--transition-fast),
     background-color var(--transition-fast),
@@ -381,8 +381,8 @@
 
 .drop-zone:hover,
 .drop-zone--over {
-  border-color: rgba(47, 111, 235, 0.6);
-  background: linear-gradient(180deg, rgba(47, 111, 235, 0.06), rgba(47, 111, 235, 0.13));
+  border-color: rgba(var(--accent-rgb), 0.6);
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.06), rgba(var(--accent-rgb), 0.13));
   transform: translateY(-1px);
 }
 
@@ -452,7 +452,7 @@
 .wizard-progress__fill {
   height: 100%;
   width: 100%;
-  background: linear-gradient(90deg, var(--color-primary), #5b8bf0);
+  background: linear-gradient(90deg, var(--color-primary), rgb(var(--tint-5b8bf0)));
   animation: wizard-progress-pulse 1.5s ease-in-out infinite;
 }
 
@@ -493,7 +493,7 @@
 
 .wizard-message--info {
   background: var(--color-primary-soft);
-  border-color: rgba(47, 111, 235, 0.2);
+  border-color: rgba(var(--accent-rgb), 0.2);
   color: var(--color-primary);
 }
 
@@ -503,31 +503,31 @@
 }
 
 :root[data-theme='dark'] .wizard-step-summary {
-  border-color: rgba(65, 83, 111, 0.8);
-  background: linear-gradient(180deg, rgba(24, 34, 48, 0.92), rgba(17, 26, 38, 0.88));
+  border-color: rgba(var(--line-dark-rgb), 0.8);
+  background: linear-gradient(180deg, rgba(var(--tint-182230), 0.92), rgba(var(--tint-111a26), 0.88));
 }
 
 :root[data-theme='dark'] .wizard-step-summary__bar {
-  background: rgba(65, 83, 111, 0.44);
+  background: rgba(var(--line-dark-rgb), 0.44);
 }
 
 :root[data-theme='dark'] .wizard-step-summary__bar > span {
-  background: linear-gradient(90deg, var(--color-primary), #7ea7ff);
+  background: linear-gradient(90deg, var(--color-primary), rgb(var(--tint-7ea7ff)));
 }
 
 :root[data-theme='dark'] .wizard-path-preview {
-  border-color: rgba(65, 83, 111, 0.72);
-  background: rgba(24, 35, 50, 0.66);
+  border-color: rgba(var(--line-dark-rgb), 0.72);
+  background: rgba(var(--tint-182332), 0.66);
 }
 
 :root[data-theme='dark'] .wizard-path-preview__path {
-  background: rgba(20, 29, 41, 0.88);
-  border-color: rgba(65, 83, 111, 0.72);
+  background: rgba(var(--tint-141d29), 0.88);
+  border-color: rgba(var(--line-dark-rgb), 0.72);
 }
 
 :root[data-theme='dark'] .wizard-tip-card {
-  border-color: rgba(111, 160, 255, 0.34);
-  background: linear-gradient(180deg, rgba(27, 39, 56, 0.78), rgba(20, 30, 44, 0.66));
+  border-color: rgba(var(--accent-bright-rgb), 0.34);
+  background: linear-gradient(180deg, rgba(var(--tint-1b2738), 0.78), rgba(var(--tint-141e2c), 0.66));
 }
 
 :root[data-theme='dark'] .wizard-tip-card span {
@@ -535,22 +535,22 @@
 }
 
 :root[data-theme='dark'] .wizard-progress__bar {
-  background: rgba(65, 83, 111, 0.5);
+  background: rgba(var(--line-dark-rgb), 0.5);
 }
 
 :root[data-theme='dark'] .wizard-progress__fill {
-  background: linear-gradient(90deg, var(--color-primary), #7ea7ff);
+  background: linear-gradient(90deg, var(--color-primary), rgb(var(--tint-7ea7ff)));
 }
 
 :root[data-theme='dark'] .wizard-steps,
 :root[data-theme='dark'] .wizard-nav {
-  border-color: rgba(65, 83, 111, 0.72);
-  background: rgba(21, 29, 41, 0.82);
+  border-color: rgba(var(--line-dark-rgb), 0.72);
+  background: rgba(var(--tint-151d29), 0.82);
 }
 
 :root[data-theme='dark'] .wizard-step--active {
-  background: rgba(111, 160, 255, 0.14);
-  border-color: rgba(111, 160, 255, 0.32);
+  background: rgba(var(--accent-bright-rgb), 0.14);
+  border-color: rgba(var(--accent-bright-rgb), 0.32);
 }
 
 /* ── Responsive ── */

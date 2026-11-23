@@ -16,7 +16,7 @@
   margin-bottom: var(--space-4);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(191, 208, 226, 0.8);
+  border: 1px solid rgba(var(--line-rgb), 0.8);
   color: var(--color-primary);
   font-size: 12px;
   font-weight: 700;
@@ -60,7 +60,7 @@
 }
 
 .panel {
-  border: 1px solid rgba(191, 208, 226, 0.72);
+  border: 1px solid rgba(var(--line-rgb), 0.72);
   border-radius: var(--radius-panel);
   padding: var(--space-6);
   background: var(--color-surface);
@@ -140,10 +140,10 @@
 
 /* ── Dark mode overrides ── */
 :root[data-theme='dark'] .panel {
-  border-color: rgba(65, 83, 111, 0.78);
+  border-color: rgba(var(--line-dark-rgb), 0.78);
 }
 
 :root[data-theme='dark'] .hero__eyebrow {
-  background: rgba(24, 34, 48, 0.72);
-  border-color: rgba(65, 83, 111, 0.8);
+  background: rgba(var(--tint-182230), 0.72);
+  border-color: rgba(var(--line-dark-rgb), 0.8);
 }

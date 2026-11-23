@@ -74,13 +74,13 @@
 }
 
 .common-guidelines-page__editor:hover {
-  border-color: rgba(47, 111, 235, 0.28);
+  border-color: rgba(var(--accent-rgb), 0.28);
 }
 
 .common-guidelines-page__editor:focus {
   outline: none;
-  border-color: rgba(47, 111, 235, 0.65);
-  box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);
+  border-color: rgba(var(--accent-rgb), 0.65);
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.12);
 }
 
 .common-guidelines-page__editor::placeholder {
@@ -135,8 +135,8 @@
 
 .common-guidelines-page__create-field input:focus {
   outline: none;
-  border-color: rgba(47, 111, 235, 0.65);
-  box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.12);
+  border-color: rgba(var(--accent-rgb), 0.65);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
 }
 
 .common-guidelines-page__create-tip {

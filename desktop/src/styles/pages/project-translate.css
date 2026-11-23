@@ -58,7 +58,7 @@
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(circle at top right, rgba(47, 111, 235, 0.12), transparent 26%),
+    radial-gradient(circle at top right, rgba(var(--accent-rgb), 0.12), transparent 26%),
     radial-gradient(circle at 20% 15%, rgba(15, 157, 88, 0.1), transparent 24%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.48), rgba(255, 255, 255, 0));
   z-index: 0;
@@ -98,12 +98,12 @@
   margin-top: 4px;
   padding: var(--space-2);
   border-radius: var(--radius-control);
-  border: 1px solid rgba(191, 208, 226, 0.9);
+  border: 1px solid rgba(var(--line-rgb), 0.9);
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(14px);
   box-shadow:
-    0 14px 28px rgba(16, 24, 40, 0.12),
-    0 4px 8px rgba(16, 24, 40, 0.06);
+    0 14px 28px rgba(var(--tint-101828), 0.12),
+    0 4px 8px rgba(var(--tint-101828), 0.06);
   opacity: 0;
   transform: translateY(-6px) scale(0.98);
   pointer-events: none;
@@ -185,9 +185,9 @@
 .project-translate-page .panel {
   position: relative;
   overflow: hidden;
-  border-color: rgba(191, 208, 226, 0.86);
+  border-color: rgba(var(--line-rgb), 0.86);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(248, 251, 255, 0.9)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(var(--tint-f8fbff), 0.9)),
     var(--color-surface);
   backdrop-filter: blur(14px);
   box-shadow:
@@ -200,7 +200,7 @@
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(120deg, transparent 0%, rgba(47, 111, 235, 0.08) 48%, transparent 100%);
+    linear-gradient(120deg, transparent 0%, rgba(var(--accent-rgb), 0.08) 48%, transparent 100%);
   opacity: 0.42;
 }
 
@@ -235,8 +235,8 @@
 .project-translate-page .job-card,
 .project-translate-page .empty-state,
 .project-translate-page .job-card__error {
-  border-color: rgba(191, 208, 226, 0.84);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 250, 255, 0.9));
+  border-color: rgba(var(--line-rgb), 0.84);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(var(--tint-f6faff), 0.9));
 }
 
 .project-translate-page .field input,
@@ -248,8 +248,8 @@
 }
 
 .project-translate-page .field input:focus {
-  border-color: rgba(47, 111, 235, 0.62);
-  box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);
+  border-color: rgba(var(--accent-rgb), 0.62);
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.12);
 }
 
 .runtime-dashboard-grid {
@@ -284,9 +284,9 @@
   gap: var(--space-4);
   padding: var(--space-5);
   border-radius: calc(var(--radius-card) + 2px);
-  border: 1px solid rgba(191, 208, 226, 0.9);
+  border: 1px solid rgba(var(--line-rgb), 0.9);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 250, 255, 0.94)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(var(--tint-f5faff), 0.94)),
     var(--color-surface-strong);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.7);
@@ -303,11 +303,11 @@
 
 .runtime-summary-strip::before {
   background:
-    linear-gradient(90deg, transparent, rgba(47, 111, 235, 0.08), transparent),
+    linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.08), transparent),
     repeating-linear-gradient(
       180deg,
-      rgba(191, 208, 226, 0.24) 0,
-      rgba(191, 208, 226, 0.24) 1px,
+      rgba(var(--line-rgb), 0.24) 0,
+      rgba(var(--line-rgb), 0.24) 1px,
       transparent 1px,
       transparent 18px
     );
@@ -365,10 +365,10 @@
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
   border-radius: calc(var(--radius-card) - 2px);
-  border: 1px solid rgba(191, 208, 226, 0.76);
+  border: 1px solid rgba(var(--line-rgb), 0.76);
   background:
-    radial-gradient(circle at top right, rgba(76, 138, 240, 0.08), transparent 32%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 251, 255, 0.88));
+    radial-gradient(circle at top right, rgba(var(--tint-4c8af0), 0.08), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(var(--tint-f8fbff), 0.88));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 
@@ -410,8 +410,8 @@
   height: 10px;
   overflow: hidden;
   border-radius: 999px;
-  border: 1px solid rgba(191, 208, 226, 0.74);
-  background: rgba(237, 243, 255, 0.72);
+  border: 1px solid rgba(var(--line-rgb), 0.74);
+  background: rgba(var(--accent-soft-rgb), 0.72);
   box-shadow: inset 0 1px 2px rgba(60, 88, 131, 0.05);
 }
 
@@ -419,8 +419,8 @@
   position: relative;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, rgba(47, 111, 235, 0.92) 0%, rgba(76, 138, 240, 0.82) 54%, rgba(52, 181, 122, 0.82) 100%);
-  box-shadow: 0 0 10px rgba(47, 111, 235, 0.14);
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.92) 0%, rgba(var(--tint-4c8af0), 0.82) 54%, rgba(52, 181, 122, 0.82) 100%);
+  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.14);
   transition: width 260ms cubic-bezier(0.22, 1, 0.36, 1), background 600ms ease-out, box-shadow 220ms ease, filter 220ms ease;
 }
 
@@ -493,7 +493,7 @@
 }
 
 .runtime-summary-strip--live .runtime-summary-strip__metrics .metric-card {
-  box-shadow: 0 8px 18px rgba(47, 111, 235, 0.05);
+  box-shadow: 0 8px 18px rgba(var(--accent-rgb), 0.05);
 }
 
 .runtime-summary-strip--live .runtime-summary-strip__metrics .metric-card::after {
@@ -533,8 +533,8 @@
   min-width: 0;
   padding: 10px 12px;
   border-radius: var(--radius-card);
-  border: 1px solid rgba(191, 208, 226, 0.82);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 250, 255, 0.9));
+  border: 1px solid rgba(var(--line-rgb), 0.82);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(var(--tint-f7faff), 0.9));
   opacity: 1;
   transform: translateZ(0);
   backface-visibility: hidden;
@@ -555,7 +555,7 @@
   bottom: 14px;
   width: 3px;
   border-radius: 999px;
-  background: rgba(191, 208, 226, 0.9);
+  background: rgba(var(--line-rgb), 0.9);
 }
 
 .runtime-event--error {
@@ -563,7 +563,7 @@
   padding: 10px 11px;
   border-color: rgba(217, 48, 37, 0.14);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 252, 255, 0.9)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(var(--tint-fafcff), 0.9)),
     var(--color-surface-strong);
 }
 
@@ -579,7 +579,7 @@
 .runtime-event--success {
   border-color: rgba(15, 157, 88, 0.18);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 252, 255, 0.9)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(var(--tint-fafcff), 0.9)),
     var(--color-surface-strong);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.72),
@@ -590,13 +590,13 @@
 
 .app-layout--custom-background .project-translate-page .panel {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(248, 251, 255, 0.64)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(var(--tint-f8fbff), 0.64)),
     rgba(255, 255, 255, 0.52);
 }
 
 .app-layout--custom-background .runtime-event--success {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(248, 252, 255, 0.64)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(var(--tint-f8fcff), 0.64)),
     rgba(255, 255, 255, 0.52);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.58),
@@ -697,7 +697,7 @@
   min-height: 24px;
   padding: 0 10px;
   border-radius: 999px;
-  border: 1px solid rgba(191, 208, 226, 0.9);
+  border: 1px solid rgba(var(--line-rgb), 0.9);
   background: rgba(255, 255, 255, 0.9);
   color: var(--color-text-muted);
   font-size: 11px;
@@ -734,9 +734,9 @@
 
 .runtime-event__pill--file-clickable:hover,
 .runtime-event__pill--file-clickable .runtime-event__file-name-btn:focus-visible {
-  border-color: rgba(47, 111, 235, 0.42);
+  border-color: rgba(var(--accent-rgb), 0.42);
   color: var(--color-primary);
-  background: rgba(237, 243, 255, 0.9);
+  background: rgba(var(--accent-soft-rgb), 0.9);
 }
 
 .runtime-event__pill--file-active {
@@ -921,7 +921,7 @@
   border-radius: 12px;
   border: 1px solid rgba(216, 225, 236, 0.9);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(244, 247, 251, 0.86)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(var(--tint-f4f7fb), 0.86)),
     var(--color-surface);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
@@ -984,9 +984,9 @@
 .runtime-success-filter-hint {
   margin-bottom: var(--space-3);
   padding: 8px 10px;
-  border: 1px solid rgba(47, 111, 235, 0.2);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
   border-radius: 10px;
-  background: rgba(237, 243, 255, 0.82);
+  background: rgba(var(--accent-soft-rgb), 0.82);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1004,7 +1004,7 @@
 
 .runtime-success-filter-hint__clear {
   flex-shrink: 0;
-  border: 1px solid rgba(191, 208, 226, 0.9);
+  border: 1px solid rgba(var(--line-rgb), 0.9);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.9);
   color: var(--color-text);
@@ -1017,9 +1017,9 @@
 
 .runtime-success-filter-hint__clear:hover,
 .runtime-success-filter-hint__clear:focus-visible {
-  border-color: rgba(47, 111, 235, 0.48);
+  border-color: rgba(var(--accent-rgb), 0.48);
   color: var(--color-primary);
-  background: rgba(237, 243, 255, 0.92);
+  background: rgba(var(--accent-soft-rgb), 0.92);
 }
 
 .file-progress-list--runtime {
@@ -1037,7 +1037,7 @@
 
 .file-progress-row--runtime {
   padding: var(--space-3) 0;
-  border-bottom: 1px solid rgba(191, 208, 226, 0.78);
+  border-bottom: 1px solid rgba(var(--line-rgb), 0.78);
 }
 
 .file-progress-row--runtime:last-child {
@@ -1084,20 +1084,20 @@
 
 .project-translate-page .progress-bar {
   height: 8px;
-  border: 1px solid rgba(191, 208, 226, 0.9);
-  background: rgba(237, 243, 255, 0.88);
+  border: 1px solid rgba(var(--line-rgb), 0.9);
+  background: rgba(var(--accent-soft-rgb), 0.88);
 }
 
 .project-translate-page .progress-bar__fill {
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, var(--color-primary), #34b57a);
-  box-shadow: 0 0 12px rgba(47, 111, 235, 0.18);
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.18);
 }
 
 .project-translate-page .button--secondary {
   background: var(--color-primary-soft);
-  border-color: rgba(47, 111, 235, 0.18);
+  border-color: rgba(var(--accent-rgb), 0.18);
   color: var(--color-primary);
 }
 
@@ -1201,23 +1201,23 @@
 @keyframes launchChargeUp {
   0% {
     box-shadow:
-      0 0 0 0 rgba(47, 111, 235, 0),
-      inset 0 0 0 0 rgba(47, 111, 235, 0);
+      0 0 0 0 rgba(var(--accent-rgb), 0),
+      inset 0 0 0 0 rgba(var(--accent-rgb), 0);
   }
   40% {
     box-shadow:
-      0 0 24px 4px rgba(47, 111, 235, 0.35),
-      inset 0 0 12px rgba(99, 179, 237, 0.12);
+      0 0 24px 4px rgba(var(--accent-rgb), 0.35),
+      inset 0 0 12px rgba(var(--tint-63b3ed), 0.12);
   }
   70% {
     box-shadow:
-      0 0 32px 8px rgba(47, 111, 235, 0.5),
-      inset 0 0 18px rgba(99, 179, 237, 0.2);
+      0 0 32px 8px rgba(var(--accent-rgb), 0.5),
+      inset 0 0 18px rgba(var(--tint-63b3ed), 0.2);
   }
   100% {
     box-shadow:
-      0 0 40px 12px rgba(47, 111, 235, 0.6),
-      inset 0 0 24px rgba(99, 179, 237, 0.25);
+      0 0 40px 12px rgba(var(--accent-rgb), 0.6),
+      inset 0 0 24px rgba(var(--tint-63b3ed), 0.25);
   }
 }
 
@@ -1225,8 +1225,8 @@
   0% {
     transform: scale(1);
     box-shadow:
-      0 0 40px 12px rgba(47, 111, 235, 0.6),
-      inset 0 0 24px rgba(99, 179, 237, 0.25);
+      0 0 40px 12px rgba(var(--accent-rgb), 0.6),
+      inset 0 0 24px rgba(var(--tint-63b3ed), 0.25);
   }
   30% {
     transform: scale(1.06);
@@ -1269,18 +1269,18 @@
 @keyframes stripBootGlow {
   0% {
     box-shadow:
-      inset 0 0 0 0 rgba(47, 111, 235, 0),
-      0 0 0 0 rgba(47, 111, 235, 0);
+      inset 0 0 0 0 rgba(var(--accent-rgb), 0),
+      0 0 0 0 rgba(var(--accent-rgb), 0);
   }
   50% {
     box-shadow:
-      inset 0 0 18px rgba(47, 111, 235, 0.08),
-      0 0 20px rgba(47, 111, 235, 0.12);
+      inset 0 0 18px rgba(var(--accent-rgb), 0.08),
+      0 0 20px rgba(var(--accent-rgb), 0.12);
   }
   100% {
     box-shadow:
-      inset 0 0 0 rgba(47, 111, 235, 0),
-      0 0 0 rgba(47, 111, 235, 0);
+      inset 0 0 0 rgba(var(--accent-rgb), 0),
+      0 0 0 rgba(var(--accent-rgb), 0);
   }
 }
 
@@ -1340,67 +1340,67 @@
 
 :root[data-theme='dark'] .project-translate-page::before {
   background:
-    radial-gradient(circle at top right, rgba(67, 129, 255, 0.2), transparent 28%),
+    radial-gradient(circle at top right, rgba(var(--accent-glow-rgb), 0.2), transparent 28%),
     radial-gradient(circle at 20% 15%, rgba(65, 194, 132, 0.14), transparent 26%),
-    linear-gradient(180deg, rgba(12, 18, 28, 0.5), rgba(12, 18, 28, 0));
+    linear-gradient(180deg, rgba(var(--tint-0c121c), 0.5), rgba(var(--tint-0c121c), 0));
 }
 
 :root[data-theme='dark'] .project-translate-page .panel {
-  border-color: rgba(65, 83, 111, 0.86);
+  border-color: rgba(var(--line-dark-rgb), 0.86);
   background:
-    linear-gradient(180deg, rgba(24, 34, 48, 0.95), rgba(16, 24, 36, 0.9)),
+    linear-gradient(180deg, rgba(var(--tint-182230), 0.95), rgba(var(--tint-101824), 0.9)),
     var(--color-surface);
-  box-shadow: inset 0 1px 0 rgba(141, 170, 212, 0.14);
+  box-shadow: inset 0 1px 0 rgba(var(--line-mid-rgb), 0.14);
 }
 
 :root[data-theme='dark'] .app-layout--custom-background .project-translate-page .panel {
   background:
-    linear-gradient(180deg, rgba(24, 34, 48, 0.72), rgba(16, 24, 36, 0.6)),
-    rgba(14, 22, 32, 0.52);
+    linear-gradient(180deg, rgba(var(--tint-182230), 0.72), rgba(var(--tint-101824), 0.6)),
+    rgba(var(--tint-0e1620), 0.52);
 }
 
 :root[data-theme='dark'] .project-translate-page .meta-grid div,
 :root[data-theme='dark'] .project-translate-page .job-card,
 :root[data-theme='dark'] .project-translate-page .empty-state,
 :root[data-theme='dark'] .project-translate-page .job-card__error {
-  border-color: rgba(65, 83, 111, 0.84);
-  background: linear-gradient(180deg, rgba(24, 34, 48, 0.95), rgba(17, 26, 38, 0.9));
+  border-color: rgba(var(--line-dark-rgb), 0.84);
+  background: linear-gradient(180deg, rgba(var(--tint-182230), 0.95), rgba(var(--tint-111a26), 0.9));
 }
 
 :root[data-theme='dark'] .runtime-summary-strip {
-  border-color: rgba(65, 83, 111, 0.88);
+  border-color: rgba(var(--line-dark-rgb), 0.88);
   background:
-    linear-gradient(180deg, rgba(24, 34, 48, 0.97), rgba(16, 24, 36, 0.92)),
+    linear-gradient(180deg, rgba(var(--tint-182230), 0.97), rgba(var(--tint-101824), 0.92)),
     var(--color-surface-strong);
-  box-shadow: inset 0 0 0 1px rgba(141, 170, 212, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(var(--line-mid-rgb), 0.18);
 }
 
 :root[data-theme='dark'] .runtime-summary-strip__hero {
-  border-color: rgba(65, 83, 111, 0.76);
+  border-color: rgba(var(--line-dark-rgb), 0.76);
   background:
-    radial-gradient(circle at top right, rgba(76, 138, 240, 0.12), transparent 32%),
-    linear-gradient(180deg, rgba(29, 40, 56, 0.9), rgba(18, 27, 40, 0.88));
-  box-shadow: inset 0 1px 0 rgba(141, 170, 212, 0.12);
+    radial-gradient(circle at top right, rgba(var(--tint-4c8af0), 0.12), transparent 32%),
+    linear-gradient(180deg, rgba(var(--tint-1d2838), 0.9), rgba(var(--tint-121b28), 0.88));
+  box-shadow: inset 0 1px 0 rgba(var(--line-mid-rgb), 0.12);
 }
 
 :root[data-theme='dark'] .runtime-event {
-  border-color: rgba(65, 83, 111, 0.82);
-  background: linear-gradient(180deg, rgba(24, 34, 48, 0.96), rgba(17, 26, 38, 0.9));
+  border-color: rgba(var(--line-dark-rgb), 0.82);
+  background: linear-gradient(180deg, rgba(var(--tint-182230), 0.96), rgba(var(--tint-111a26), 0.9));
 }
 
 :root[data-theme='dark'] .runtime-event--success {
   box-shadow:
-    inset 0 1px 0 rgba(141, 170, 212, 0.12),
+    inset 0 1px 0 rgba(var(--line-mid-rgb), 0.12),
     0 10px 24px rgba(15, 157, 88, 0.08);
 }
 
 :root[data-theme='dark'] .runtime-event--error {
   border-color: rgba(248, 113, 113, 0.24);
   background:
-    linear-gradient(180deg, rgba(28, 38, 54, 0.96), rgba(22, 30, 44, 0.92)),
+    linear-gradient(180deg, rgba(var(--tint-1c2636), 0.96), rgba(var(--tint-161e2c), 0.92)),
     var(--color-surface-strong);
   box-shadow:
-    inset 0 1px 0 rgba(141, 170, 212, 0.12),
+    inset 0 1px 0 rgba(var(--line-mid-rgb), 0.12),
     0 8px 22px rgba(217, 48, 37, 0.12);
 }
 
@@ -1411,40 +1411,40 @@
 }
 
 :root[data-theme='dark'] .runtime-success-filter-hint {
-  border-color: rgba(111, 160, 255, 0.36);
-  background: rgba(28, 40, 58, 0.82);
+  border-color: rgba(var(--accent-bright-rgb), 0.36);
+  background: rgba(var(--tint-1c283a), 0.82);
 }
 
 :root[data-theme='dark'] .runtime-success-filter-hint__text {
-  color: #8fb6ff;
+  color: rgb(var(--accent-pale-rgb));
 }
 
 :root[data-theme='dark'] .runtime-success-filter-hint__clear {
-  border-color: rgba(65, 83, 111, 0.86);
-  background: rgba(23, 33, 48, 0.82);
+  border-color: rgba(var(--line-dark-rgb), 0.86);
+  background: rgba(var(--tint-172130), 0.82);
   color: var(--color-text);
 }
 
 :root[data-theme='dark'] .runtime-success-filter-hint__clear:hover,
 :root[data-theme='dark'] .runtime-success-filter-hint__clear:focus-visible {
-  border-color: rgba(111, 160, 255, 0.6);
-  background: rgba(34, 49, 72, 0.92);
-  color: #8fb6ff;
+  border-color: rgba(var(--accent-bright-rgb), 0.6);
+  background: rgba(var(--tint-223148), 0.92);
+  color: rgb(var(--accent-pale-rgb));
 }
 
 :root[data-theme='dark'] .app-layout--custom-background .runtime-event--success {
   background:
-    linear-gradient(180deg, rgba(24, 34, 48, 0.74), rgba(17, 26, 38, 0.62)),
-    rgba(14, 22, 32, 0.52);
+    linear-gradient(180deg, rgba(var(--tint-182230), 0.74), rgba(var(--tint-111a26), 0.62)),
+    rgba(var(--tint-0e1620), 0.52);
   box-shadow:
-    inset 0 1px 0 rgba(141, 170, 212, 0.1),
+    inset 0 1px 0 rgba(var(--line-mid-rgb), 0.1),
     0 8px 20px rgba(15, 157, 88, 0.08);
 }
 
 :root[data-theme='dark'] .runtime-event--success .runtime-event__pill--file,
 :root[data-theme='dark'] .runtime-event--success .runtime-event__pill--translator {
-  border-color: rgba(65, 83, 111, 0.9);
-  background: rgba(28, 40, 58, 0.88);
+  border-color: rgba(var(--line-dark-rgb), 0.9);
+  background: rgba(var(--tint-1c283a), 0.88);
   color: var(--color-text);
 }
 
@@ -1452,8 +1452,8 @@
 :root[data-theme='dark'] .runtime-event--error .runtime-event__pill--file,
 :root[data-theme='dark'] .runtime-event--error .runtime-event__pill--translator,
 :root[data-theme='dark'] .runtime-event__meta div {
-  border-color: rgba(65, 83, 111, 0.9);
-  background: rgba(28, 40, 58, 0.88);
+  border-color: rgba(var(--line-dark-rgb), 0.9);
+  background: rgba(var(--tint-1c283a), 0.88);
   color: var(--color-text);
 }
 
@@ -1469,28 +1469,28 @@
 
 :root[data-theme='dark'] .runtime-event--success .runtime-event__pill--file-clickable:hover,
 :root[data-theme='dark'] .runtime-event--success .runtime-event__pill--file-clickable .runtime-event__file-name-btn:focus-visible {
-  border-color: rgba(111, 160, 255, 0.5);
-  background: rgba(34, 49, 72, 0.92);
+  border-color: rgba(var(--accent-bright-rgb), 0.5);
+  background: rgba(var(--tint-223148), 0.92);
   color: var(--color-primary);
 }
 
 :root[data-theme='dark'] .runtime-event--error .runtime-event__pill--file-clickable:hover,
 :root[data-theme='dark'] .runtime-event--error .runtime-event__pill--file-clickable .runtime-event__file-name-btn:focus-visible {
-  border-color: rgba(111, 160, 255, 0.5);
-  background: rgba(34, 49, 72, 0.92);
+  border-color: rgba(var(--accent-bright-rgb), 0.5);
+  background: rgba(var(--tint-223148), 0.92);
   color: var(--color-primary);
 }
 
 :root[data-theme='dark'] .runtime-success-compact {
-  border-color: rgba(65, 83, 111, 0.86);
+  border-color: rgba(var(--line-dark-rgb), 0.86);
   background:
-    linear-gradient(180deg, rgba(24, 34, 48, 0.95), rgba(17, 25, 37, 0.9)),
+    linear-gradient(180deg, rgba(var(--tint-182230), 0.95), rgba(var(--tint-111925), 0.9)),
     var(--color-surface);
-  box-shadow: inset 0 1px 0 rgba(141, 170, 212, 0.14);
+  box-shadow: inset 0 1px 0 rgba(var(--line-mid-rgb), 0.14);
 }
 
 :root[data-theme='dark'] .runtime-success-compact__line + .runtime-success-compact__line {
-  border-top-color: rgba(65, 83, 111, 0.7);
+  border-top-color: rgba(var(--line-dark-rgb), 0.7);
 }
 
 /* Phase 1: charge-up glow on button */
@@ -1747,9 +1747,9 @@
 
 .file-progress-row__filter-toggle:hover,
 .file-progress-row__filter-toggle:focus-visible {
-  border-color: rgba(34, 211, 238, 0.5);
-  color: #67e8f9;
-  background: rgba(8, 47, 73, 0.45);
+  border-color: rgba(var(--tint-22d3ee), 0.5);
+  color: rgb(var(--tint-67e8f9));
+  background: rgba(var(--tint-082f49), 0.45);
 }
 
 .file-progress-row__filter-toggle--active {

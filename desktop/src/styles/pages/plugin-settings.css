@@ -199,8 +199,8 @@
 
 .plugin-setting-input:focus {
   outline: none;
-  border-color: rgba(47, 111, 235, 0.65);
-  box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.1);
+  border-color: rgba(var(--accent-rgb), 0.65);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.1);
 }
 
 .plugin-setting-input--number {
@@ -214,7 +214,7 @@
 /* 开关（.toggle-switch）样式已提到 components/switch.css，由组件层统一维护。 */
 
 :root[data-theme='dark'] .plugin-settings-panel {
-  border-color: rgba(65, 83, 111, 0.78);
-  background: rgba(20, 29, 41, 0.78);
+  border-color: rgba(var(--line-dark-rgb), 0.78);
+  background: rgba(var(--tint-141d29), 0.78);
 }
 

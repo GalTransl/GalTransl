@@ -37,7 +37,7 @@
 .app-layout--custom-background .project-translate-page__folder-menu,
 .app-layout--custom-background .project-translate-page__folder-menu-content {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, calc(var(--custom-bg-surface-opacity-resolved) + 0.22)), rgba(248, 251, 255, calc(var(--custom-bg-surface-opacity-resolved) + 0.1))),
+    linear-gradient(180deg, rgba(255, 255, 255, calc(var(--custom-bg-surface-opacity-resolved) + 0.22)), rgba(var(--tint-f8fbff), calc(var(--custom-bg-surface-opacity-resolved) + 0.1))),
     rgba(255, 255, 255, var(--custom-bg-surface-opacity-resolved));
   backdrop-filter: blur(var(--custom-bg-surface-blur));
   -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur));
@@ -65,7 +65,7 @@
 .app-layout--custom-background .project-cache-page .cache-layout,
 .app-layout--custom-background .project-dictionary-page .dict-layout {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.14)), rgba(245, 249, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.04))),
+    linear-gradient(180deg, rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.14)), rgba(var(--tint-f5f9ff), calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.04))),
     rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.04)) !important;
   backdrop-filter: blur(var(--custom-bg-surface-blur-soft)) !important;
   -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft)) !important;
@@ -187,9 +187,9 @@
 }
 
 :root[data-theme='dark'] .app-layout--custom-background {
-  --custom-bg-fill-strong: rgba(20, 30, 43, calc(var(--custom-bg-surface-opacity-resolved) + 0.18));
-  --custom-bg-fill-soft: rgba(20, 30, 43, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.08));
-  --custom-bg-fill-soft-hover: rgba(34, 49, 72, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.12));
+  --custom-bg-fill-strong: rgba(var(--tint-141e2b), calc(var(--custom-bg-surface-opacity-resolved) + 0.18));
+  --custom-bg-fill-soft: rgba(var(--tint-141e2b), calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.08));
+  --custom-bg-fill-soft-hover: rgba(var(--tint-223148), calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.12));
 }
 
 :root[data-theme='dark'] .app-layout--custom-background .sidebar,
@@ -219,7 +219,7 @@
 :root[data-theme='dark'] .app-layout--custom-background .project-translate-page__folder-menu,
 :root[data-theme='dark'] .app-layout--custom-background .project-translate-page__folder-menu-content {
   background:
-    linear-gradient(180deg, rgba(24, 34, 48, calc(var(--custom-bg-surface-opacity-resolved) + 0.24)), rgba(14, 22, 32, calc(var(--custom-bg-surface-opacity-resolved) + 0.12))),
+    linear-gradient(180deg, rgba(var(--tint-182230), calc(var(--custom-bg-surface-opacity-resolved) + 0.24)), rgba(var(--tint-0e1620), calc(var(--custom-bg-surface-opacity-resolved) + 0.12))),
     rgba(14, 22, 32, var(--custom-bg-surface-opacity-resolved));
   backdrop-filter: blur(var(--custom-bg-surface-blur));
   -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur));
@@ -232,8 +232,8 @@
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-layout,
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-layout {
   background:
-    linear-gradient(180deg, rgba(24, 34, 48, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.18)), rgba(12, 19, 30, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.06))),
-    rgba(14, 22, 32, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.06)) !important;
+    linear-gradient(180deg, rgba(var(--tint-182230), calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.18)), rgba(var(--tint-0c131e), calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.06))),
+    rgba(var(--tint-0e1620), calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.06)) !important;
   backdrop-filter: blur(var(--custom-bg-surface-blur-soft)) !important;
   -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft)) !important;
 }
@@ -247,7 +247,7 @@
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-file-item--selected,
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-file-item--active,
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-file-list__selection-bar {
-  background: rgba(20, 30, 43, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.16)) !important;
+  background: rgba(var(--tint-141e2b), calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.16)) !important;
 }
 
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-card,
@@ -308,7 +308,7 @@
 :root[data-theme='dark'] .app-layout--custom-background .settings-number-row__control select,
 :root[data-theme='dark'] .app-layout--custom-background .sidebar__project-confirm-no,
 :root[data-theme='dark'] .app-layout--custom-background .sidebar__toggle-btn {
-  background: rgba(20, 30, 43, calc(var(--custom-bg-surface-opacity-resolved) + 0.2));
+  background: rgba(var(--tint-141e2b), calc(var(--custom-bg-surface-opacity-resolved) + 0.2));
 }
 
 :root[data-theme='dark'] .app-layout--custom-background .home-hero__chip,
@@ -331,7 +331,7 @@
 :root[data-theme='dark'] .app-layout--custom-background .problem-analyze-section__item,
 :root[data-theme='dark'] .app-layout--custom-background .problem-analyze-section__item--checked,
 :root[data-theme='dark'] .app-layout--custom-background .problem-analyze-section__item--extra {
-  background: rgba(20, 30, 43, calc(var(--custom-bg-surface-opacity-resolved) + 0.18));
+  background: rgba(var(--tint-141e2b), calc(var(--custom-bg-surface-opacity-resolved) + 0.18));
 }
 
 :root[data-theme='dark'] .app-layout--custom-background .home-history__item:hover,
@@ -354,7 +354,7 @@
 }
 
 :root[data-theme='dark'] .app-layout--custom-background .project-translate-page .ptv2-cockpit__folder-inline .project-translate-page__folder-menu-item:hover:not(:disabled) {
-  background: rgba(34, 49, 72, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.12)) !important;
+  background: rgba(var(--tint-223148), calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.12)) !important;
 }
 
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__input:focus,
@@ -374,11 +374,11 @@
 .app-layout--custom-background .agent-cockpit,
 .app-layout--custom-background .agent-sessions {
   background:
-    radial-gradient(circle at 92% -18%, rgba(47, 111, 235, 0.14), transparent 46%),
+    radial-gradient(circle at 92% -18%, rgba(var(--accent-rgb), 0.14), transparent 46%),
     linear-gradient(
       180deg,
       rgba(255, 255, 255, calc(var(--custom-bg-surface-opacity-resolved) + 0.22)),
-      rgba(248, 251, 255, calc(var(--custom-bg-surface-opacity-resolved) + 0.1))
+      rgba(var(--tint-f8fbff), calc(var(--custom-bg-surface-opacity-resolved) + 0.1))
     ),
     rgba(255, 255, 255, var(--custom-bg-surface-opacity-resolved));
 }
@@ -392,11 +392,11 @@
 :root[data-theme='dark'] .app-layout--custom-background .agent-cockpit,
 :root[data-theme='dark'] .app-layout--custom-background .agent-sessions {
   background:
-    radial-gradient(circle at 92% -18%, rgba(67, 129, 255, 0.2), transparent 48%),
+    radial-gradient(circle at 92% -18%, rgba(var(--accent-glow-rgb), 0.2), transparent 48%),
     linear-gradient(
       180deg,
-      rgba(24, 34, 48, calc(var(--custom-bg-surface-opacity-resolved) + 0.24)),
-      rgba(14, 22, 32, calc(var(--custom-bg-surface-opacity-resolved) + 0.12))
+      rgba(var(--tint-182230), calc(var(--custom-bg-surface-opacity-resolved) + 0.24)),
+      rgba(var(--tint-0e1620), calc(var(--custom-bg-surface-opacity-resolved) + 0.12))
     ),
     rgba(14, 22, 32, var(--custom-bg-surface-opacity-resolved));
 }

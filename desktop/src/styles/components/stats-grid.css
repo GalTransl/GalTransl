@@ -16,7 +16,7 @@
   gap: var(--space-2);
   min-width: 0;
   padding: var(--space-4);
-  border: 1px solid rgba(191, 208, 226, 0.9);
+  border: 1px solid rgba(var(--line-rgb), 0.9);
   border-radius: var(--radius-card);
   background: rgba(255, 255, 255, 0.92);
   color: var(--color-text);
@@ -67,12 +67,12 @@
 .metric-card--interactive:focus-visible,
 .metric-card--active {
   transform: translateY(-1px);
-  border-color: rgba(47, 111, 235, 0.42);
+  border-color: rgba(var(--accent-rgb), 0.42);
   box-shadow: 0 10px 26px rgba(15, 23, 42, 0.08);
 }
 
 .metric-card--accent {
-  background: linear-gradient(180deg, rgba(245, 249, 255, 0.98), rgba(236, 244, 255, 0.92));
+  background: linear-gradient(180deg, rgba(var(--tint-f5f9ff), 0.98), rgba(var(--tint-ecf4ff), 0.92));
 }
 
 .metric-card--success {

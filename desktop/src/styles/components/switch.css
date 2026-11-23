@@ -60,7 +60,7 @@
 }
 
 .toggle-switch input:focus-visible + .toggle-switch__slider {
-  box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.25);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
 }
 
 .toggle-switch--disabled {

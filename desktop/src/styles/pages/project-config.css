@@ -264,7 +264,7 @@
 .config-field-row__input textarea {
   width: 100%;
   padding: 11px 14px;
-  border: 1px solid rgba(191, 208, 226, 0.92);
+  border: 1px solid rgba(var(--line-rgb), 0.92);
   border-radius: 8px;
   background: var(--color-surface-strong);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
@@ -282,25 +282,25 @@
 
 .config-field-row__input input:focus {
   outline: none;
-  border-color: rgba(47, 111, 235, 0.65);
-  box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);
+  border-color: rgba(var(--accent-rgb), 0.65);
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.12);
 }
 
 .config-field-row__input textarea:focus {
   outline: none;
-  border-color: rgba(47, 111, 235, 0.72);
+  border-color: rgba(var(--accent-rgb), 0.72);
   background: var(--color-surface-strong);
   box-shadow:
-    0 0 0 4px rgba(47, 111, 235, 0.12),
-    0 10px 24px rgba(47, 111, 235, 0.08);
+    0 0 0 4px rgba(var(--accent-rgb), 0.12),
+    0 10px 24px rgba(var(--accent-rgb), 0.08);
 }
 
 .config-field-row__input input:hover {
-  border-color: rgba(47, 111, 235, 0.28);
+  border-color: rgba(var(--accent-rgb), 0.28);
 }
 
 .config-field-row__input textarea:hover {
-  border-color: rgba(47, 111, 235, 0.28);
+  border-color: rgba(var(--accent-rgb), 0.28);
 }
 
 .config-field-row__input textarea::placeholder {
@@ -309,7 +309,7 @@
 
 .config-field-row__input input:disabled {
   color: var(--color-text-muted);
-  background-color: rgba(241, 245, 249, 0.96);
+  background-color: rgba(var(--tint-f1f5f9), 0.96);
   border-color: rgba(203, 213, 225, 0.92);
   box-shadow: none;
   cursor: not-allowed;
@@ -317,7 +317,7 @@
 
 .config-field-row__input textarea:disabled {
   color: var(--color-text-muted);
-  background: rgba(241, 245, 249, 0.96);
+  background: rgba(var(--tint-f1f5f9), 0.96);
   border-color: rgba(203, 213, 225, 0.92);
   box-shadow: none;
   cursor: not-allowed;
@@ -522,18 +522,18 @@
 }
 
 .problem-analyze-section__item:hover {
-  border-color: rgba(47, 111, 235, 0.32);
+  border-color: rgba(var(--accent-rgb), 0.32);
 }
 
 .problem-analyze-section__item--checked {
-  border-color: rgba(47, 111, 235, 0.45);
-  background: linear-gradient(180deg, rgba(47, 111, 235, 0.06), rgba(47, 111, 235, 0.02));
-  box-shadow: 0 1px 2px rgba(47, 111, 235, 0.08);
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.06), rgba(var(--accent-rgb), 0.02));
+  box-shadow: 0 1px 2px rgba(var(--accent-rgb), 0.08);
 }
 
 .problem-analyze-section__item--checked:hover {
-  border-color: rgba(47, 111, 235, 0.65);
-  box-shadow: 0 2px 8px rgba(47, 111, 235, 0.12);
+  border-color: rgba(var(--accent-rgb), 0.65);
+  box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.12);
 }
 
 .problem-analyze-section__item--checked .problem-analyze-section__name {
@@ -586,24 +586,24 @@
 }
 
 .problem-analyze-section__checkbox:hover {
-  border-color: rgba(47, 111, 235, 0.55);
+  border-color: rgba(var(--accent-rgb), 0.55);
 }
 
 .problem-analyze-section__checkbox:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.2);
-  border-color: rgba(47, 111, 235, 0.65);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.2);
+  border-color: rgba(var(--accent-rgb), 0.65);
 }
 
 .problem-analyze-section__checkbox:checked {
   background: var(--color-primary);
   border-color: var(--color-primary);
-  box-shadow: 0 1px 3px rgba(47, 111, 235, 0.35);
+  box-shadow: 0 1px 3px rgba(var(--accent-rgb), 0.35);
 }
 
 .problem-analyze-section__checkbox:checked:hover {
   border-color: var(--color-primary);
-  box-shadow: 0 2px 6px rgba(47, 111, 235, 0.45);
+  box-shadow: 0 2px 6px rgba(var(--accent-rgb), 0.45);
 }
 
 .problem-analyze-section__checkbox:checked::after {
@@ -754,12 +754,12 @@
 
 .retransl-key-section__input:focus {
   outline: none;
-  border-color: rgba(47, 111, 235, 0.65);
-  box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);
+  border-color: rgba(var(--accent-rgb), 0.65);
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.12);
 }
 
 .retransl-key-section__input:hover {
-  border-color: rgba(47, 111, 235, 0.28);
+  border-color: rgba(var(--accent-rgb), 0.28);
 }
 
 .retransl-key-section__input--inline {
@@ -851,12 +851,12 @@
 }
 
 .retransl-key-section__item:hover {
-  border-color: rgba(47, 111, 235, 0.28);
+  border-color: rgba(var(--accent-rgb), 0.28);
 }
 
 .retransl-key-section__item--editing {
-  border-color: rgba(47, 111, 235, 0.55);
-  box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.08);
+  border-color: rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.08);
 }
 
 .retransl-key-section__index {
@@ -1025,13 +1025,13 @@
 }
 
 .project-guideline-section__editor:hover {
-  border-color: rgba(47, 111, 235, 0.28);
+  border-color: rgba(var(--accent-rgb), 0.28);
 }
 
 .project-guideline-section__editor:focus {
   outline: none;
-  border-color: rgba(47, 111, 235, 0.65);
-  box-shadow: 0 0 0 4px rgba(47, 111, 235, 0.12);
+  border-color: rgba(var(--accent-rgb), 0.65);
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.12);
 }
 
 .project-guideline-section__editor::placeholder {

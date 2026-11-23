@@ -21,6 +21,7 @@ import {
   DISABLE_ANIMATIONS_CHANGE_EVENT,
   type PluginInfo,
   type ThemeMode,
+  type ThemePalette,
   clearCustomBackgroundPreference,
   fetchVersion,
   fetchVersionCheck,
@@ -33,6 +34,7 @@ import {
   getHomeHistoryRetentionLimit,
   getHomeJobRetentionLimit,
   getThemeModePreference,
+  getThemePalettePreference,
   HOME_LIST_LIMIT_MAX,
   HOME_LIST_LIMIT_MIN,
   setCustomBackgroundPreference,
@@ -42,6 +44,7 @@ import {
   setHomeHistoryRetentionLimit,
   setHomeJobRetentionLimit,
   setThemeModePreference,
+  setThemePalettePreference,
   uploadCustomBackgroundImage,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
@@ -219,6 +222,7 @@ export function SettingsPage() {
   const [homeHistoryLimitInput, setHomeHistoryLimitInput] = useState(() => String(getHomeHistoryRetentionLimit()));
   const [homeJobLimitInput, setHomeJobLimitInput] = useState(() => String(getHomeJobRetentionLimit()));
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => getThemeModePreference());
+  const [themePalette, setThemePalette] = useState<ThemePalette>(() => getThemePalettePreference());
   const [cacheBrowserFontSizeInput, setCacheBrowserFontSizeInput] = useState(() => String(getCacheBrowserFontSizePreference()));
   const [hideBackendConsole, setHideBackendConsole] = useState(() => getHideBackendConsolePreference());
   const [disableAnimations, setDisableAnimations] = useState(() => getDisableAnimationsPreference());
@@ -314,6 +318,10 @@ export function SettingsPage() {
   const applyThemeMode = useCallback((mode: ThemeMode) => {
     const next = setThemeModePreference(mode);
     setThemeMode(next);
+  }, []);
+
+  const applyThemePalette = useCallback((palette: ThemePalette) => {
+    setThemePalette(setThemePalettePreference(palette));
   }, []);
 
   const applyCacheBrowserFontSize = useCallback((rawValue: string) => {
@@ -448,6 +456,17 @@ export function SettingsPage() {
                 <option value="light">{translate("settings:settingsPage.settingsNumberRowControl_message_light")}</option>
                 <option value="dark">{translate("settings:settingsPage.settingsNumberRowControl_message_dark")}</option>
                 <option value="system">{translate("settings:settingsPage.settingsNumberRowControl_message_system")}</option>
+              </CustomSelect>
+            </div>
+          </label>
+
+          <label className="settings-number-row">
+            <span className="settings-number-row__label">{translate('settings:appearance.palette')}</span>
+            <div className="settings-number-row__control">
+              <CustomSelect aria-label={translate('settings:appearance.palette')} value={themePalette}
+                onChange={(event) => { applyThemePalette(event.target.value as ThemePalette); }}>
+                <option value="default">{translate('settings:appearance.paletteDefault')}</option>
+                <option value="sakura">{translate('settings:appearance.paletteSakura')}</option>
               </CustomSelect>
             </div>
           </label>

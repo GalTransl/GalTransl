@@ -89,8 +89,8 @@
 .prompt-templates-page__editor:focus,
 .prompt-templates-page__select .custom-select .custom-select__trigger:focus {
   outline: none;
-  border-color: rgba(47, 111, 235, 0.62);
-  box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.12);
+  border-color: rgba(var(--accent-rgb), 0.62);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
 }
 
 .prompt-templates-page__meta {

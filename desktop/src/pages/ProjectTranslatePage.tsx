@@ -465,7 +465,8 @@ export function ProjectTranslatePage({ ctx }: { ctx: ProjectPageContext }) {
       const newParticles = Array.from({ length: LAUNCH.particleCount }, (_, i) => {
         const angle = (Math.PI * 2 * i) / LAUNCH.particleCount + (Math.random() - 0.5) * 0.4;
         const dist = LAUNCH.particleDistanceMin + Math.random() * (LAUNCH.particleDistanceMax - LAUNCH.particleDistanceMin);
-        const colors = ['#3b82f6', '#22d3ee', '#34d399', '#a78bfa', '#fbbf24'];
+        // 前两色走配色通道（默认值即原来的 #3b82f6、#22d3ee），否则其他配色下启动粒子仍是蓝色
+        const colors = ['rgb(var(--accent-alt-rgb))', 'rgb(var(--tint-22d3ee))', '#34d399', '#a78bfa', '#fbbf24'];
         return {
           id: Date.now() + i,
           x: 50,

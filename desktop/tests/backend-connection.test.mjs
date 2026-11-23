@@ -281,6 +281,16 @@ test('newly created backend profiles go to the top of the list while saving keep
   assert.equal(api.getBackendProfile('a')['OpenAI-Compatible'].tokens[0].modelName, 'edited');
 });
 
+test('theme palette preference persists and falls back to the default palette', () => {
+  const { api, storage } = taskBackendApi();
+  assert.equal(api.getThemePalettePreference(), 'default');
+  assert.equal(api.setThemePalettePreference('sakura'), 'sakura');
+  assert.equal(loadApi({ native: false, storage }).api.getThemePalettePreference(), 'sakura');
+  // 旧版本或手改的存储值不能让界面落到一个没有样式的配色上
+  storage.setItem('galtransl-theme-palette', 'removed-palette');
+  assert.equal(api.getThemePalettePreference(), 'default');
+});
+
 test('copied backend profile is placed right after its source', async () => {
   // 副本曾经追加到列表末尾，和原配置隔得很远，不方便对照修改。
   const { api } = taskBackendApi();

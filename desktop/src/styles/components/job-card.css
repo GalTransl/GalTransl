@@ -5,10 +5,10 @@
 }
 
 .job-card {
-  border: 1px solid rgba(191, 208, 226, 0.72);
+  border: 1px solid rgba(var(--line-rgb), 0.72);
   border-radius: var(--radius-card);
   padding: var(--space-5);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(250, 252, 255, 0.8));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(var(--tint-fafcff), 0.8));
 }
 
 .job-card__header {

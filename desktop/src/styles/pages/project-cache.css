@@ -48,7 +48,7 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid rgba(191, 208, 226, 0.72);
+  border: 1px solid rgba(var(--line-rgb), 0.72);
   border-radius: var(--radius-panel);
   background: var(--color-surface);
   /* 不加外阴影，与其他自适应页面的面板一致（见 components/panel.css）。 */
@@ -61,7 +61,7 @@
 }
 
 :root[data-theme='dark'] .cache-layout {
-  border-color: rgba(65, 83, 111, 0.78);
+  border-color: rgba(var(--line-dark-rgb), 0.78);
 }
 
 .cache-layout__sidebar {
@@ -442,7 +442,7 @@
   justify-content: center;
   padding: 6px 10px;
   background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(191, 208, 226, 0.9);
+  border: 1px solid rgba(var(--line-rgb), 0.9);
   border-radius: 999px;
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
   z-index: 2;
@@ -533,8 +533,8 @@
 }
 
 @keyframes cache-card-flash {
-  0% { box-shadow: 0 0 0 2px var(--color-primary), 0 0 12px rgba(47, 111, 235, 0.3); }
-  70% { box-shadow: 0 0 0 2px var(--color-primary), 0 0 12px rgba(47, 111, 235, 0.15); }
+  0% { box-shadow: 0 0 0 2px var(--color-primary), 0 0 12px rgba(var(--accent-rgb), 0.3); }
+  70% { box-shadow: 0 0 0 2px var(--color-primary), 0 0 12px rgba(var(--accent-rgb), 0.15); }
   100% { box-shadow: none; }
 }
 
@@ -907,8 +907,8 @@
 
 .cache-card__textarea:focus {
   box-shadow:
-    0 0 0 3px rgba(47, 111, 235, 0.12),
-    0 8px 18px rgba(47, 111, 235, 0.08);
+    0 0 0 3px rgba(var(--accent-rgb), 0.12),
+    0 8px 18px rgba(var(--accent-rgb), 0.08);
 }
 
 .cache-card__textarea--zh {
@@ -1454,8 +1454,8 @@
 }
 
 .search-result-card--selected {
-  border-color: rgba(59, 130, 246, 0.5);
-  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.25);
+  border-color: rgba(var(--accent-alt-rgb), 0.5);
+  box-shadow: 0 0 0 1px rgba(var(--accent-alt-rgb), 0.25);
 }
 
 .search-result-card:focus {
@@ -1658,7 +1658,7 @@
 
 .cache-problems-group__header:hover {
   background: var(--color-neutral-soft);
-  box-shadow: inset 0 0 0 1px rgba(47, 111, 235, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.2);
 }
 
 .cache-problems-group__summary {
@@ -1693,7 +1693,7 @@
   position: absolute;
   right: 8px;
   bottom: 8px;
-  border: 1px solid rgba(47, 111, 235, 0.25);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
   background: var(--color-primary-soft);
   color: var(--color-primary);
   cursor: pointer;
@@ -1727,8 +1727,8 @@
 }
 
 .cache-problems-group__retransl:hover {
-  background: rgba(47, 111, 235, 0.16);
-  border-color: rgba(47, 111, 235, 0.42);
+  background: rgba(var(--accent-rgb), 0.16);
+  border-color: rgba(var(--accent-rgb), 0.42);
 }
 
 .cache-problems-group__filter {
@@ -1837,7 +1837,7 @@
 
 .retransl-popover__input:focus {
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px rgba(47, 111, 235, 0.16);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.16);
 }
 
 .retransl-popover__actions {

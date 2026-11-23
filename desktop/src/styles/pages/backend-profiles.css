@@ -106,7 +106,7 @@
   align-items: center;
   justify-content: center;
   padding: var(--space-6);
-  background: rgba(16, 24, 40, 0.35);
+  background: rgba(var(--tint-101828), 0.35);
   backdrop-filter: blur(4px);
   z-index: 50;
   animation: bpDialogFadeIn 160ms var(--ease-default, ease-out);
@@ -120,7 +120,7 @@
   background: var(--color-surface);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-panel);
-  box-shadow: 0 20px 50px rgba(16, 24, 40, 0.18);
+  box-shadow: 0 20px 50px rgba(var(--tint-101828), 0.18);
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -195,7 +195,7 @@
 }
 
 .profile-card:hover {
-  box-shadow: 0 4px 16px rgba(16, 24, 40, 0.06);
+  box-shadow: 0 4px 16px rgba(var(--tint-101828), 0.06);
 }
 
 .profile-card__info {
@@ -244,8 +244,8 @@
 
 /* Agent 默认与翻译器默认用不同颜色区分，便于一眼看出哪个角色 */
 .profile-card__badge--agent {
-  background: var(--color-accent-soft, rgba(99, 102, 241, 0.14));
-  color: var(--color-accent, #6366f1);
+  background: var(--color-accent-soft, rgba(var(--tint-6366f1), 0.14));
+  color: var(--color-accent, rgb(var(--tint-6366f1)));
 }
 
 .profile-card__meta {

@@ -21,7 +21,7 @@
 }
 
 .page-state--loading {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(244, 248, 255, 0.84));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(var(--tint-f4f8ff), 0.84));
 }
 
 .page-state__icon {
@@ -31,7 +31,7 @@
   width: 42px;
   height: 42px;
   border-radius: 999px;
-  background: rgba(47, 111, 235, 0.1);
+  background: rgba(var(--accent-rgb), 0.1);
   color: var(--color-primary);
   font-size: 20px;
 }
@@ -52,11 +52,11 @@
 }
 
 :root[data-theme='dark'] .empty-state {
-  border-color: rgba(65, 83, 111, 0.82);
-  background: rgba(20, 29, 41, 0.62);
+  border-color: rgba(var(--line-dark-rgb), 0.82);
+  background: rgba(var(--tint-141d29), 0.62);
 }
 
 :root[data-theme='dark'] .page-state--loading {
-  background: linear-gradient(180deg, rgba(24, 34, 48, 0.82), rgba(17, 26, 38, 0.88));
+  background: linear-gradient(180deg, rgba(var(--tint-182230), 0.82), rgba(var(--tint-111a26), 0.88));
 }
 

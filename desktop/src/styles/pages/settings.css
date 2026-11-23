@@ -204,7 +204,7 @@
 }
 
 .settings-background-control__pick {
-  border: 1px solid rgba(47, 111, 235, 0.28);
+  border: 1px solid rgba(var(--accent-rgb), 0.28);
   background: var(--color-primary-soft);
   color: var(--color-primary);
 }
@@ -212,7 +212,7 @@
 .settings-background-control__pick:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-primary) 14%, transparent);
   border-color: var(--color-primary);
-  box-shadow: 0 2px 8px rgba(47, 111, 235, 0.18);
+  box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.18);
 }
 
 .settings-background-control__pick:active:not(:disabled) {
@@ -288,7 +288,7 @@
 
 .settings-number-row__control input:focus {
   outline: none;
-  border-color: rgba(47, 111, 235, 0.62);
-  box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.12);
+  border-color: rgba(var(--accent-rgb), 0.62);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
 }
 

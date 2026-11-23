@@ -10,7 +10,7 @@
   align-items: center;
   justify-content: center;
   padding: var(--space-6);
-  background: rgba(16, 24, 40, 0.35);
+  background: rgba(var(--tint-101828), 0.35);
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
   animation: updateNoticeFadeIn 160ms var(--ease-default);

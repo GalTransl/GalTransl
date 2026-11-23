@@ -229,7 +229,7 @@
 }
 
 .log-viewer {
-  background: #1a1b26;
+  background: rgb(var(--tint-1a1b26));
   color: #a9b1d6;
   border-radius: var(--radius-control);
   padding: var(--space-4);
