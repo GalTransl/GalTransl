@@ -6,7 +6,7 @@ import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
 
 /* 没有 DOM：用最小的假 window / 元素驱动 useDragReorder，守护"按下即可拖动"的手势
    （以前要长按 350ms 才能拖，按下移动会直接取消）。 */
-function setup(keys = ['a', 'b', 'c']) {
+function setup(keys = ['a', 'b', 'c'], containerStyle = { display: 'flex', flexDirection: 'column' }) {
   const listeners = new Map();
   const on = (type, fn) => listeners.set(type, [...(listeners.get(type) || []), fn]);
   const off = (type, fn) => listeners.set(type, (listeners.get(type) || []).filter((item) => item !== fn));
@@ -24,7 +24,7 @@ function setup(keys = ['a', 'b', 'c']) {
   const globals = {
     window: fakeWindow,
     document: { body: { style: { userSelect: '' } } },
-    getComputedStyle: () => ({ flexDirection: 'column', rowGap: '0px', columnGap: '0px' }),
+    getComputedStyle: () => ({ rowGap: '0px', columnGap: '0px', ...containerStyle }),
   };
   const { useDragReorder } = createTypeScriptLoader(globals)(new URL('../src/components/useDragReorder.ts', import.meta.url));
   const reorders = [];
@@ -59,6 +59,19 @@ test('pressing a folder and moving starts dragging right away, and releasing reo
   assert.deepEqual(f.reorders, [['a', 2]]);
   assert.equal(f.api().drag, null);
   assert.ok(!f.scroller.attributes.has('data-reordering'));
+  f.dispose();
+});
+
+test('rows in a non-flex container are dragged vertically', () => {
+  // 字典表格是 grid：flex-direction 的计算值仍是默认的 row，不能因此按横向拖动处理
+  // （否则竖着拖字典行时位移一直是 0，永远排不动）。
+  const f = setup(['0', '1', '2'], { display: 'grid', flexDirection: 'row' });
+  f.press('0', 20);
+  f.move(70);
+  assert.equal(f.api().drag.axis, 'y');
+  assert.equal(f.api().drag.toIndex, 1);
+  f.release();
+  assert.deepEqual(f.reorders, [['0', 1]]);
   f.dispose();
 });
 

@@ -38,6 +38,7 @@
     "dictCardBadges_message_entry": "{{count}}条",
     "dictCardBadges_message_entry_other": "{{count}}条",
     "dictCardTableHead_message_iD": "ID",
+    "dictCardCellIndex_title_dragReorder": "按住拖动可调整顺序",
     "dictCardHeadCell_message_text": "列{{value}}",
     "dictCardCell_placeholder_text": "列{{value}}",
     "dictCardRowOpenCache_title_textSearchCount": "在「浏览文本」里搜索这个词",

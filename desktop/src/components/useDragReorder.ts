@@ -25,7 +25,7 @@ function suppressNextClick() {
   window.addEventListener('pointerdown', release, { capture: true });
 }
 
-/** 侧栏文件夹的按下拖动排序。主侧栏和两个 Agent 侧栏共用，手感保持一致。
+/** 侧栏文件夹的按下拖动排序。主侧栏、两个 Agent 侧栏和字典表格的行共用，手感保持一致。
  *  - handle：只有按在这些元素上才会拖（文件夹标题行）；ignore：标题行里的按钮等不触发拖动。
  *  - container：滚动容器，默认取被拖项的父元素；排列方向按它的 flex-direction 判断，
  *    窄屏下 Agent 侧栏变成横排时也能横向拖。 */
@@ -102,13 +102,18 @@ export function useDragReorder({ keys, onReorder, onStart, handle, ignore, conta
     };
 
     const begin = () => {
+      // 先挂标记再量尺寸：字典表格的行平时开着 content-visibility:auto，屏幕外的行只有估算高度，
+      // 样式靠这个标记在拖动期间关掉它，量到的才是真实位置（否则长距离拖动会越拖越偏）。
+      scroller.setAttribute('data-reordering', '');
       const rects = order.map((item) => items.current.get(item)?.getBoundingClientRect());
       if (rects.some((rect) => !rect)) {
+        scroller.removeAttribute('data-reordering');
         cleanup();
         return;
       }
       const style = getComputedStyle(scroller);
-      axis = style.flexDirection.startsWith('row') ? 'x' : 'y';
+      // flex-direction 只对 flex 容器有意义：非 flex 容器（字典表格是 grid）的计算值也是 row，不能据此当成横排
+      axis = style.display.includes('flex') && style.flexDirection.startsWith('row') ? 'x' : 'y';
       startScroll = scrollPos();
       mids = rects.map((rect) => (axis === 'x' ? rect!.left + rect!.width / 2 : rect!.top + rect!.height / 2));
       const gap = parseFloat(axis === 'x' ? style.columnGap : style.rowGap) || 0;
@@ -117,7 +122,6 @@ export function useDragReorder({ keys, onReorder, onStart, handle, ignore, conta
       prevUserSelect = document.body.style.userSelect;
       document.body.style.userSelect = 'none';
       window.getSelection()?.removeAllRanges();
-      scroller.setAttribute('data-reordering', '');
       latest.current.onStart?.();
       update();
     };

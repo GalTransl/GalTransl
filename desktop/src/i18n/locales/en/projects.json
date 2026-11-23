@@ -38,6 +38,7 @@
     "dictCardBadges_message_entry": "{{count}} entries",
     "dictCardBadges_message_entry_other": "{{count}} entries",
     "dictCardTableHead_message_iD": "ID",
+    "dictCardCellIndex_title_dragReorder": "Drag to reorder",
     "dictCardHeadCell_message_text": "Column {{value}}",
     "dictCardCell_placeholder_text": "Column {{value}}",
     "dictCardRowOpenCache_title_textSearchCount": "Search for this word in “Browse text”",

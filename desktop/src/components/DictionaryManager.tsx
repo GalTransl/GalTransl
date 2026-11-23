@@ -1,5 +1,5 @@
 import { UiTrans, message as uiMessage, t as translate, useMessageState, useUiLanguage } from "../i18n";
-import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { usePageActive, useRetainPage } from './PageActivity';
 import { useSaveShortcut } from './useSaveShortcut';
 import { createPortal } from 'react-dom';
@@ -14,6 +14,8 @@ import type { DictFileContent, DictionaryCategory } from '../lib/api';
 import type { DictionaryPreviewTarget } from './ProjectPreviewContext';
 import { scrollWithinContainer } from '../lib/scrollWithinContainer';
 import { useResizableSidebar } from '../lib/useResizableSidebar';
+import { useDragReorder } from './useDragReorder';
+import { moveKey } from '../lib/dragReorder';
 
 type DictTab = DictionaryCategory;
 /** 侧栏不分页签，三类字典按翻译流程的先后各占一棵可折叠的树 */
@@ -30,6 +32,8 @@ type DictRow = {
 type DictRowWithIndex = {
   row: DictRow;
   rowIndex: number;
+  /** ID 列显示的序号：只数词条，空行、注释、分区标题不占号；不随搜索/类目筛选变化 */
+  entryNumber: number;
 };
 
 type DictRowGroup = {
@@ -210,18 +214,29 @@ function getSourceCellIndex(type: DictRowType): number {
 const DictEntryRow = memo(function DictEntryRow({
   row,
   rowIndex,
+  entryNumber,
   labels,
   sourceCellIndex,
   showOpenCache,
+  dragTransform,
+  isDragging,
+  dragItemRef,
+  onDragPointerDown,
   onCellChange,
   onDelete,
   onOpenInCache,
 }: {
   row: DictRow;
   rowIndex: number;
+  entryNumber: number;
   labels: string[];
   sourceCellIndex: number;
   showOpenCache: boolean;
+  /** 拖动排序中这一行的位移。传字符串而不是 style 对象：没在动的行 props 不变，memo 才挡得住 */
+  dragTransform: string | undefined;
+  isDragging: boolean;
+  dragItemRef: (key: string) => (node: HTMLElement | null) => void;
+  onDragPointerDown: (event: ReactPointerEvent<HTMLElement>, key: string) => void;
   onCellChange: (rowIndex: number, cellIndex: number, value: string) => void;
   onDelete: (rowIndex: number) => void;
   onOpenInCache?: (sourceWord: string) => void;
@@ -229,9 +244,18 @@ const DictEntryRow = memo(function DictEntryRow({
   useUiLanguage();
   // 「→」搜的是这一行的日文词：GPT 条目取原文列，其他类型取「搜索」列
   const sourceWord = sourceCellIndex >= 0 ? String(row.values[sourceCellIndex] ?? '').trim() : '';
+  const dragKey = String(rowIndex);
+  const setDragNode = useMemo(() => dragItemRef(dragKey), [dragItemRef, dragKey]);
   return (
-    <div className="dict-card__table-row" data-dict-row-index={rowIndex}>
-      <div className="dict-card__cell dict-card__cell--index">#{rowIndex + 1}</div>
+    <div
+      ref={setDragNode}
+      className={`dict-card__table-row${isDragging ? ' is-dragging' : ''}`}
+      style={dragTransform ? { transform: dragTransform } : undefined}
+      data-dict-row-index={rowIndex}
+      onPointerDown={(event) => onDragPointerDown(event, dragKey)}
+    >
+      {/* ID 格是拖动排序的把手（useDragReorder 的 handle），按在输入框上不会触发拖动 */}
+      <div className="dict-card__cell dict-card__cell--index" title={translate("projects:dictionaryManager.dictCardCellIndex_title_dragReorder")}>#{entryNumber}</div>
       {labels.map((label, ci) => (
         <div key={ci} className="dict-card__cell">
           <input
@@ -273,6 +297,7 @@ function DictEntryGroupCard({
   onCellChange,
   onDelete,
   onAddRow,
+  onMoveRow,
   onOpenInCache,
 }: {
   group: DictRowGroup;
@@ -282,11 +307,24 @@ function DictEntryGroupCard({
   onCellChange: (rowIndex: number, cellIndex: number, value: string) => void;
   onDelete: (rowIndex: number) => void;
   onAddRow: (rowType: DictRowType, insertAfterRowIndex: number) => void;
+  /** 把文件里第 fromRowIndex 行挪到第 toRowIndex 行现在的位置 */
+  onMoveRow: (fromRowIndex: number, toRowIndex: number) => void;
   onOpenInCache?: (sourceWord: string) => void;
 }) {
   const uiLanguage = useUiLanguage();
   // labels 引用稳定，memo 化的行组件才不会被每次 render 新建的数组打穿
   const labels = useMemo(() => getFieldLabels(group.type, tab), [group.type, tab, uiLanguage]);
+  // 按住 ID 格拖动排序。列表可能被搜索/类目筛过，所以落点按「目标行在文件里的行号」换算，
+  // 而不是按可见序号：拖到谁的位置，就排到谁在文件里的位置。
+  const rowKeys = useMemo(() => group.items.map((item) => String(item.rowIndex)), [group.items]);
+  const rowDrag = useDragReorder({
+    keys: rowKeys,
+    onReorder: (key, toIndex) => {
+      const target = group.items[toIndex];
+      if (target) onMoveRow(Number(key), target.rowIndex);
+    },
+    handle: '.dict-card__cell--index',
+  });
   const tableStyle = { '--dict-column-count': labels.length } as CSSProperties;
 
   return (
@@ -309,14 +347,19 @@ function DictEntryGroupCard({
           ))}
         </div>
 
-        {group.items.map(({ row, rowIndex }) => (
+        {group.items.map(({ row, rowIndex, entryNumber }, itemIndex) => (
           <DictEntryRow
             key={`${rowIndex}`}
             row={row}
             rowIndex={rowIndex}
+            entryNumber={entryNumber}
             labels={labels}
             sourceCellIndex={getSourceCellIndex(group.type)}
             showOpenCache={Boolean(onOpenInCache)}
+            dragTransform={rowDrag.itemStyle(itemIndex)?.transform}
+            isDragging={rowDrag.drag?.fromIndex === itemIndex}
+            dragItemRef={rowDrag.itemRef}
+            onDragPointerDown={rowDrag.onPointerDown}
             onCellChange={onCellChange}
             onDelete={onDelete}
             onOpenInCache={onOpenInCache}
@@ -462,16 +505,18 @@ export function DictionaryManager(props: DictionaryManagerProps) {
   const filteredRows = useMemo(() => {
     const visible = parsedRows
       .map((row, rowIndex) => ({ row, rowIndex }))
-      .filter(({ row, rowIndex }) => {
+      .filter(({ row }) => {
         // 过滤掉注释行（// 或 # 开头）
         if (row.type === 'comment') return false;
         // 过滤掉空行
         if (row.type === 'blank') return false;
         // 过滤掉少于 1 个 tab 分隔的行（即没有 tab 的行）
         if (!row.raw.includes('\t')) return false;
-        if (activeSection && rowSections[rowIndex] !== activeSection) return false;
         return true;
-      });
+      })
+      // 序号在类目筛选之前编：同一条词条在「全部」和某个类目下是同一个号
+      .map((item, entryIndex) => ({ ...item, entryNumber: entryIndex + 1 }))
+      .filter(({ rowIndex }) => !activeSection || rowSections[rowIndex] === activeSection);
     if (!effectiveSearchTerm.trim()) return visible;
     const needle = effectiveSearchTerm.toLowerCase();
     return visible.filter(({ row }) => searchPinnedRows.has(row) || row.values.join('\t').toLowerCase().includes(needle));
@@ -757,6 +802,14 @@ export function DictionaryManager(props: DictionaryManagerProps) {
 
   const deleteRow = useCallback((rowIndex: number) => {
     setRowsOverride(parsedRowsRef.current.filter((_, i) => i !== rowIndex));
+    setDirty(true);
+    setInfo(null);
+  }, []);
+
+  const moveRow = useCallback((fromRowIndex: number, toRowIndex: number) => {
+    const rows = parsedRowsRef.current;
+    if (!rows[fromRowIndex] || fromRowIndex === toRowIndex) return;
+    setRowsOverride(moveKey(rows, rows[fromRowIndex], toRowIndex));
     setDirty(true);
     setInfo(null);
   }, []);
@@ -1164,6 +1217,7 @@ export function DictionaryManager(props: DictionaryManagerProps) {
                           onCellChange={updateRowCell}
                           onDelete={deleteRow}
                           onAddRow={addRow}
+                          onMoveRow={moveRow}
                           onOpenInCache={showOpenInCache ? handleOpenInCache : undefined}
                         />
                       ))}

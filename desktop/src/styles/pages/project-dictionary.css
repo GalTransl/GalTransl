@@ -973,6 +973,29 @@
   font-weight: 700;
   color: var(--color-text-muted);
   background: rgba(var(--tint-f6faff), 0.85);
+  /* ID 格是拖动排序的把手 */
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+/* 拖动排序（useDragReorder，与侧栏文件夹同一套手感）：被拖的行跟手，其余行平移让位，松手后才真正重排。
+   拖动期间关掉 content-visibility，屏幕外的行才有真实高度可量，被拖行的阴影也不会被裁掉。 */
+.dict-card__table[data-reordering] {
+  cursor: grabbing;
+}
+
+.dict-card__table[data-reordering] .dict-card__table-row {
+  content-visibility: visible;
+  pointer-events: none;
+  transition: transform 160ms ease;
+}
+
+.dict-card__table[data-reordering] .dict-card__table-row.is-dragging {
+  z-index: 1;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
+  opacity: 0.94;
+  transition: none;
 }
 
 .dict-card__row-delete {
