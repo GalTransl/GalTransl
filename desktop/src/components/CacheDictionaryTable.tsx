@@ -32,18 +32,20 @@ function columns(type: RowType) {
 
 export function CacheDictionaryTable({ matches }: { matches: CacheDictionaryMatch[] }) {
   useUiLanguage();
-  const groups = new Map<string, { file: string; type: RowType; rows: TableRow[] }>();
+  const groups = new Map<string, { file: string; kind: CacheDictionaryMatch['kind']; type: RowType; rows: TableRow[] }>();
   for (const match of matches) {
     const row = parseMatch(match);
-    const key = JSON.stringify([match.file, row.type]);
+    const key = JSON.stringify([match.kind, match.file, row.type]);
     let group = groups.get(key);
-    if (!group) { group = { file: match.file, type: row.type, rows: [] }; groups.set(key, group); }
+    if (!group) { group = { file: match.file, kind: match.kind, type: row.type, rows: [] }; groups.set(key, group); }
     group.rows.push(row);
   }
   return <div className="cache-dictionary-mini-list">
     {[...groups.entries()].map(([key, group]) => {
       const labels = columns(group.type);
-      const typeLabel = group.type === 'gpt' ? 'GPT' : t(`projects:dictionaryManager.getTypeLabel_message_${({ normal: 'textVariant3', conditional: 'entry', situation: 'textVariant4' } as const)[group.type]}`);
+      const typeLabel = group.type === 'gpt' || group.kind === 'gpt' ? 'GPT' : t(`projects:cacheDictionary.${group.kind}Type`, {
+        type: t(`projects:dictionaryManager.getTypeLabel_message_${({ normal: 'textVariant3', conditional: 'entry', situation: 'textVariant4' } as const)[group.type]}`),
+      });
       return <div className={`cache-dictionary-mini cache-dictionary-mini--${group.type}`} key={key}>
         <div className="cache-dictionary-mini__header">
           <span className="cache-dictionary-mini__type">{typeLabel}</span>

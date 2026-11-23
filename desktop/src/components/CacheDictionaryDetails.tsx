@@ -29,15 +29,13 @@ export function CacheDictionaryDetails({ projectId, configFileName, entry, id }:
   }, [projectId, configFileName, sentenceKey, offset, retry]);
 
   const matches = result?.entries ?? [];
+  // 表头自带“译前·普通”这类标签，这里只负责按译前、译后、GPT 的顺序排好并去掉计数为 0 的类别。
+  const visible = result ? (['pre', 'post', 'gpt'] as const).flatMap(kind => result.counts[kind] > 0 ? matches.filter(match => match.kind === kind) : []) : [];
   return <section className="cache-dictionary-details" id={id} aria-label={t('projects:cacheDictionary.details')} aria-busy={loading}>
-    <p className="cache-dictionary-details__hint">{t('projects:cacheDictionary.hint')}</p>
     {loading && <p role="status">{t('common:actions.loading')}</p>}
     {error && <div role="alert">{error} <button type="button" onClick={() => setRetry(value => value + 1)}>{t('projects:cacheDictionary.retry')}</button></div>}
     {result && <>
-      {(['pre', 'post', 'gpt'] as const).filter(kind => result.counts[kind] > 0 && matches.some(match => match.kind === kind)).map(kind => <div key={kind} className="cache-dictionary-details__group">
-        <strong>{t(`projects:cacheDictionary.${kind}`)} · {result.counts[kind]}</strong>
-        <CacheDictionaryTable matches={matches.filter(match => match.kind === kind)} />
-      </div>)}
+      {visible.length > 0 && <CacheDictionaryTable matches={visible} />}
       {result.total === 0 && <p>{t('projects:cacheDictionary.empty')}</p>}
       {(result.total ?? 0) > 100 && <div className="cache-dictionary-details__pagination">
         <button type="button" disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 100))}>{t('projects:cacheDictionary.previous')}</button>

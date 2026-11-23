@@ -202,8 +202,11 @@ test('expanded details hide every zero-count category', async () => {
     counts: { pre: 0, post: 1, gpt: 0 }, total: 1, offset: 0,
     entries: [{ kind: 'post', file: 'post.txt', line: 1, rule: 'っ\t', search: 'っ', replacement: '', note: '' }],
   }] }));
-  const headings = renderer.root.findAllByType('strong').map(node => node.children.join(''));
-  assert.deepEqual(headings, ['projects:cacheDictionary.post · 1']);
+  // 分组标题和说明文字已去掉，译前/译后只体现在每张小表的类型标签里。
+  assert.equal(renderer.root.findAllByType('strong').length, 0);
+  assert.equal(renderer.root.findAllByProps({ className: 'cache-dictionary-details__hint' }).length, 0);
+  const labels = renderer.root.findAllByProps({ className: 'cache-dictionary-mini__type' }).map(node => node.children.join(''));
+  assert.deepEqual(labels, ['projects:cacheDictionary.postType']);
   assert.equal(renderer.root.findAllByType('table').length, 1);
   act(() => renderer.unmount());
 });
