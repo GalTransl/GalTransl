@@ -13,6 +13,9 @@ export interface ConfigFieldDef {
   descriptionKey: TranslationKey;
   type: FieldValueType;
   options?: ConfigOption[];
+  /** 选项在运行时填充、数量随用户文件变化（如翻译规范）：始终用下拉框，
+   *  不因为眼下恰好少于 4 项就排成胶囊。 */
+  dynamicOptions?: boolean;
   placeholder?: string;
   placeholderKey?: TranslationKey;
   rows?: number;
@@ -59,7 +62,7 @@ export function ConfigFieldRow({ field, value, onChange, onListChange, pathPrefi
     ) : field.type === 'select' ? (
       <CustomSelect
         id={fieldId}
-        segmented
+        segmented={!field.dynamicOptions}
         aria-label={translate(field.labelKey)}
         value={displayValue}
         onChange={(e) => onChange(fullPath, e.target.value)}

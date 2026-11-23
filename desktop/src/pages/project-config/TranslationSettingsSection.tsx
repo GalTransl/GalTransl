@@ -17,7 +17,7 @@ const PRIMARY_FIELDS: ConfigFieldDef[] = [
   { key: 'splitTailChunks', labelKey: "config:fields.splitTailChunks.label", descriptionKey: "config:fields.splitTailChunks.description", type: 'select', options: [{ value: 'true', labelKey: "config:translationSettingsSection.option_true" }, { value: 'false', labelKey: "config:translationSettingsSection.option_false" }] },
   { key: 'gpt.multiTurn', labelKey: "config:fields.gpt_multiTurn.label", descriptionKey: "config:fields.gpt_multiTurn.description", type: 'select', options: [{ value: 'true', labelKey: "config:translationSettingsSection.option_true" }, { value: 'false', labelKey: "config:translationSettingsSection.option_false" }] },
   { key: 'gpt.contextNum', labelKey: "config:fields.gpt_contextNum.label", descriptionKey: "config:fields.gpt_contextNum.description", type: 'number', placeholder: '8' },
-  { key: 'gpt.translation_guideline', labelKey: "config:fields.gpt_translation_guideline.label", descriptionKey: "config:fields.gpt_translation_guideline.description", type: 'select', options: [] },
+  { key: 'gpt.translation_guideline', labelKey: "config:fields.gpt_translation_guideline.label", descriptionKey: "config:fields.gpt_translation_guideline.description", type: 'select', options: [], dynamicOptions: true },
 ];
 
 // 只在「动态句数调整」开启时才有意义的两个字段：关闭时从常用设置里隐去
