@@ -70,7 +70,8 @@ export function useDragReorder({ keys, onReorder, onStart, handle, ignore, conta
     let axis: DragReorderState['axis'] = 'y';
     let startScroll = 0;
     let dragging = false;
-    let mids: number[] = [];
+    let starts: number[] = [];
+    let sizes: number[] = [];
     let shift = 0;
     let toIndex = fromIndex;
     let autoScrollFrame = 0;
@@ -81,7 +82,7 @@ export function useDragReorder({ keys, onReorder, onStart, handle, ignore, conta
 
     const update = () => {
       const offset = pointerPos() - (axis === 'x' ? startX : startY) + (scrollPos() - startScroll);
-      toIndex = dragTargetIndex(mids, fromIndex, mids[fromIndex] + offset);
+      toIndex = dragTargetIndex(starts, sizes, fromIndex, offset);
       setDrag({ key, fromIndex, toIndex, offset, shift, axis });
     };
 
@@ -115,9 +116,10 @@ export function useDragReorder({ keys, onReorder, onStart, handle, ignore, conta
       // flex-direction 只对 flex 容器有意义：非 flex 容器（字典表格是 grid）的计算值也是 row，不能据此当成横排
       axis = style.display.includes('flex') && style.flexDirection.startsWith('row') ? 'x' : 'y';
       startScroll = scrollPos();
-      mids = rects.map((rect) => (axis === 'x' ? rect!.left + rect!.width / 2 : rect!.top + rect!.height / 2));
+      starts = rects.map((rect) => (axis === 'x' ? rect!.left : rect!.top));
+      sizes = rects.map((rect) => (axis === 'x' ? rect!.width : rect!.height));
       const gap = parseFloat(axis === 'x' ? style.columnGap : style.rowGap) || 0;
-      shift = (axis === 'x' ? rects[fromIndex]!.width : rects[fromIndex]!.height) + gap;
+      shift = sizes[fromIndex] + gap;
       dragging = true;
       prevUserSelect = document.body.style.userSelect;
       document.body.style.userSelect = 'none';

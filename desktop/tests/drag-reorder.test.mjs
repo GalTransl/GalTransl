@@ -8,11 +8,29 @@ const { applySavedOrder, dragItemTransform, dragTargetIndex, moveKey, parseSaved
 const plain = (value) => [...value];
 
 test('a dragged folder lands at the slot whose midpoint its center has crossed', () => {
-  const mids = [10, 30, 50, 70];
-  assert.equal(dragTargetIndex(mids, 0, 25), 0);
-  assert.equal(dragTargetIndex(mids, 0, 55), 2);
-  assert.equal(dragTargetIndex(mids, 3, 5), 0);
-  assert.equal(dragTargetIndex(mids, 1, 31), 1);
+  const starts = [0, 20, 40, 60];
+  const sizes = [20, 20, 20, 20];
+  assert.equal(dragTargetIndex(starts, sizes, 0, 15), 0);
+  assert.equal(dragTargetIndex(starts, sizes, 0, 45), 2);
+  assert.equal(dragTargetIndex(starts, sizes, 3, -65), 0);
+  assert.equal(dragTargetIndex(starts, sizes, 1, 1), 1);
+});
+
+test('an expanded sidebar folder grabbed by its header can be dragged to the first slot', () => {
+  // 回归：第二、三个文件夹展开时拖不到首位。落点原先比的是中心，展开的文件夹有几百像素高，
+  // 手抓的却是顶部标题行，中心要越过第一项的中心，指针得移到列表上方之外。
+  // 两个折叠的文件夹（高 40）后面跟一个展开的（高 300），间距 4。
+  const starts = [0, 44, 88];
+  const sizes = [40, 40, 300];
+  // 标题行拖到第一项的位置（位移 -88）就该落在首位；旧算法要 -218 以上
+  assert.equal(dragTargetIndex(starts, sizes, 2, -40), 2);
+  assert.equal(dragTargetIndex(starts, sizes, 2, -50), 1);
+  assert.equal(dragTargetIndex(starts, sizes, 2, -89), 0);
+  // 反过来，折叠的文件夹越过展开的那个，也只需要盖住自己的高度，不必拖过它的中点
+  assert.equal(dragTargetIndex(starts, sizes, 1, 40), 1);
+  assert.equal(dragTargetIndex(starts, sizes, 1, 45), 2);
+  // 展开的文件夹在中间时同样能拖到首位
+  assert.equal(dragTargetIndex([0, 44, 348], [40, 300, 40], 1, -45), 0);
 });
 
 test('folders between the start and drop slots shift by one place along the list axis', () => {

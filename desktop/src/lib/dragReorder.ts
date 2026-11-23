@@ -13,11 +13,16 @@ export type DragReorderState = {
   axis: DragAxis;
 };
 
-/** 被拖项中心越过哪些项的中点，就落到哪个位置。mids 是按下时各项中点坐标。 */
-export function dragTargetIndex(mids: readonly number[], fromIndex: number, center: number): number {
+/** 被拖项盖住某一项的长度超过两者中较短那个的尺寸，就越过它。starts、sizes 是按下时各项的
+ *  起点坐标和尺寸，offset 是被拖项的位移。
+ *  各项等高时这等价于"中心越过中心"；不能直接比中心：展开的侧栏文件夹有几百像素高，
+ *  而手抓的是它顶部的标题行，要让它的中心越过第一项的中心，指针得拖到列表外面去。 */
+export function dragTargetIndex(starts: readonly number[], sizes: readonly number[], fromIndex: number, offset: number): number {
+  const size = sizes[fromIndex];
+  const start = starts[fromIndex] + offset;
   let next = fromIndex;
-  for (let i = fromIndex + 1; i < mids.length; i++) if (center > mids[i]) next = i;
-  for (let i = fromIndex - 1; i >= 0; i--) if (center < mids[i]) next = i;
+  for (let i = fromIndex + 1; i < starts.length; i++) if (start + size - starts[i] > Math.min(size, sizes[i])) next = i;
+  for (let i = fromIndex - 1; i >= 0; i--) if (starts[i] + sizes[i] - start > Math.min(size, sizes[i])) next = i;
   return next;
 }
 
