@@ -20,7 +20,7 @@ function mount(options = {}) {
     'react-dom': { createPortal: element => element },
     '../../components/Icon': { Icon: () => h('span') },
     '../../lib/errors': { normalizeError: error => error.message },
-    '../connection/ConnectionContext': { useConnection: () => ({ versionInfo: { version: '1.0.0', latest_version: '2.0.0', update_available: true } }) },
+    '../connection/ConnectionContext': { useConnection: () => ({ versionInfo: { version: '1.0.0', latest_version: '2.0.0', update_available: true, ...options.versionInfo } }) },
     '../../lib/externalLink': { RELEASE_LATEST_URL: 'release', openExternalUrl: async () => calls.push('download-page') },
     '../../lib/api': {
       getIgnoredUpdateVersion: () => '', setIgnoredUpdateVersion: version => calls.push(['ignore', version]),
@@ -104,4 +104,19 @@ test('browser mode retains the download-page action without starting an installe
   assert.deepEqual(dialog.calls, ['download-page']);
   assert.equal(dialog.renderer().toJSON(), null);
   act(() => dialog.renderer().unmount());
+});
+
+test('the notice shows the release summary under the versions and omits it when the release has none', async () => {
+  // 概述来自 release 正文；旧后端不返回该字段、自动生成的说明没有概述，这两种情况都不留空段落。
+  const summary = '本次更新调整了默认批次大小，工作台新增 Token 用量统计。';
+  const dialog = mount({ versionInfo: { release_summary: `  ${summary}\n` } });
+  await dialog.render();
+  assert.equal(dialog.renderer().root.findByProps({ className: 'update-notice__summary' }).children.join(''), summary);
+  act(() => dialog.renderer().unmount());
+  for (const versionInfo of [{}, { release_summary: '' }]) {
+    const plain = mount({ versionInfo });
+    await plain.render();
+    assert.equal(plain.renderer().root.findAllByProps({ className: 'update-notice__summary' }).length, 0);
+    act(() => plain.renderer().unmount());
+  }
 });

@@ -522,6 +522,8 @@ export type VersionCheckResponse = {
   version: string;
   latest_version: string | null;
   update_available: boolean;
+  /** 最新 release 正文里版本标题下的那段概述；旧后端或 release 没写时为空 */
+  release_summary?: string;
 };
 
 export async function fetchVersion() {

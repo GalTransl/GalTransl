@@ -176,12 +176,36 @@ def get_n_symbol(src_text: str):
     return n_symbols
 
 
-def check_for_tool_updates(new_version):
+def extract_release_summary(body) -> str:
+    """Release 正文里版本标题下面那段“本次更新……”的概述；没有就返回空串。
+
+    发布说明的结构是「# 标题 / 概述段落 / ## 分节……」。只取开头标题之后的第一个
+    普通段落：自动生成的说明（开头就是列表、表格或 HTML）没有概述，不拿列表项充数。
+    """
+    if not isinstance(body, str):
+        return ""
+    lines = []
+    for raw in body.replace("\r\n", "\n").split("\n"):
+        line = raw.strip()
+        if not lines:
+            if not line or line.startswith("#"):
+                continue
+            if re.match(r"([-*+>|<!`~]|\d+[.)]\s)", line):
+                return ""
+        elif not line or line.startswith("#"):
+            break
+        lines.append(line)
+    return "\n".join(lines)[:600]
+
+
+def check_for_tool_updates(new_version, release_summary=None):
     try:
         from application_update import RELEASE_API
         response = requests.get(RELEASE_API, timeout=5).json()
         latest_release = response["tag_name"]
         new_version.append(latest_release)
+        if release_summary is not None:
+            release_summary.append(extract_release_summary(response.get("body")))
     except Exception:
         pass
 

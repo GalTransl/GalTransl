@@ -140,6 +140,16 @@
   color: var(--color-primary);
 }
 
+.update-notice__summary {
+  margin: 0;
+  max-height: 9.6em;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
 .update-notice__hint {
   margin: 0;
   font-size: 13px;

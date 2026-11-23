@@ -32,6 +32,7 @@ export function UpdateNotice() {
 
   const currentVersion = versionInfo?.version ?? '';
   const latestVersion = versionInfo?.latest_version?.trim() ?? '';
+  const releaseSummary = versionInfo?.release_summary?.trim() ?? '';
   const visible = Boolean(
     versionInfo?.update_available &&
       latestVersion &&
@@ -152,6 +153,8 @@ export function UpdateNotice() {
             <dd>{translate("common:updateNotice.updateNoticeVersionRowUpdateNoticeVersionRowLatest_message_v", { latestVersion: latestVersion })}</dd>
           </div>
         </dl>
+
+        {releaseSummary && <p className="update-notice__summary">{releaseSummary}</p>}
 
         <p className="update-notice__hint">{translate("common:updateNotice.updateNotice_message_directoryProjectTranslationCache")}</p>
 

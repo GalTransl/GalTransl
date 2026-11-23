@@ -21,7 +21,7 @@ import sys
 from datetime import datetime
 from yaml import safe_load, safe_dump
 
-from GalTransl import TRANSLATOR_SUPPORTED, INPUT_FOLDERNAME, OUTPUT_FOLDERNAME, CACHE_FOLDERNAME, GALTRANSL_VERSION, new_version, update_thread
+from GalTransl import TRANSLATOR_SUPPORTED, INPUT_FOLDERNAME, OUTPUT_FOLDERNAME, CACHE_FOLDERNAME, GALTRANSL_VERSION, new_version, release_summary, update_thread
 from GalTransl import GUIDELINES_FOLDERNAME, DEFAULT_GUIDELINE_NAME
 from GalTransl.Service import JobSpec, JobState, create_job_state, run_job
 from GalTransl.AppSettings import load_app_settings, save_app_settings
@@ -3906,6 +3906,7 @@ def build_handler(registry: JobRegistry):
                         "version": GALTRANSL_VERSION,
                         "latest_version": latest_version,
                         "update_available": _has_newer_release(GALTRANSL_VERSION, latest_version),
+                        "release_summary": release_summary[0] if release_summary else "",
                     }
                 )
                 return
