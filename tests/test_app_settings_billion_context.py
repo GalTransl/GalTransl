@@ -1,4 +1,4 @@
-"""Plugin settings default on and partial HTTP saves preserve other preferences."""
+"""billion-context defaults off, agent-mnemon defaults on, and partial HTTP saves preserve other preferences."""
 import json
 from http.server import ThreadingHTTPServer
 from threading import Thread
@@ -10,14 +10,16 @@ from GalTransl.AppSettings import load_app_settings, save_app_settings
 
 
 @pytest.mark.parametrize("source", [None, {}, {"maxConcurrentJobs": 7}])
-def test_plugins_default_on_for_new_and_legacy_settings(tmp_path, monkeypatch, source):
+def test_plugin_defaults_for_new_and_legacy_settings(tmp_path, monkeypatch, source):
     path = tmp_path / "settings.json"
     monkeypatch.setenv("GALTRANSL_APP_SETTINGS_PATH", str(path))
+    # 没有设置文件时会回退读资源目录里的旧版 app_settings.json；指到空目录，免得读到开发机上的那份
+    monkeypatch.setenv("GALTRANSL_RESOURCE_DIR", str(tmp_path))
     if source is not None:
         path.write_text(json.dumps(source), encoding="utf-8")
     settings = load_app_settings()
-    assert settings["billionContextEnabled"] is True
-    assert settings["extractionBillionContextEnabled"] is True
+    assert settings["billionContextEnabled"] is False
+    assert settings["extractionBillionContextEnabled"] is False
     assert settings["mnemonEnabled"] is True
     assert settings["extractionMnemonEnabled"] is True
     assert save_app_settings(settings) == settings
@@ -58,7 +60,7 @@ def test_http_partial_settings_updates_preserve_plugin_and_other_preferences(tmp
     try:
         assert update({"billionContextEnabled": True}) == {
             "maxConcurrentJobs": 7, "printTranslationLogInTerminal": False,
-            "billionContextEnabled": True, "extractionBillionContextEnabled": True,
+            "billionContextEnabled": True, "extractionBillionContextEnabled": False,
             "mnemonEnabled": True, "extractionMnemonEnabled": True}
         assert update({"extractionBillionContextEnabled": True})["billionContextEnabled"] is True
         assert update({"maxConcurrentJobs": 3})["billionContextEnabled"] is True

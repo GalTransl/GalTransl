@@ -12,8 +12,8 @@ from GalTransl.RuntimePaths import get_app_settings_path, get_legacy_app_setting
 DEFAULT_APP_SETTINGS: dict[str, Any] = {
     "printTranslationLogInTerminal": True,
     "maxConcurrentJobs": 4,
-    "billionContextEnabled": True,
-    "extractionBillionContextEnabled": True,
+    "billionContextEnabled": False,
+    "extractionBillionContextEnabled": False,
     "mnemonEnabled": True,
     "extractionMnemonEnabled": True,
 }
