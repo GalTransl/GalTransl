@@ -72,6 +72,8 @@ class CustomBackgroundTests(unittest.TestCase):
         _, cleared = self.request(method="DELETE")
         self.assertEqual(cleared["imageVersion"], "")
         self.assertTrue(cleared["configured"])
+        # Regression: clearing the image used to reset both opacity sliders to defaults.
+        self.assertEqual((cleared["opacity"], cleared["surfaceOpacity"]), (70, 60))
         self.assertEqual(self.request()[1], cleared)
         self.assertEqual([item.name for item in self.directory.iterdir()], ["settings.json"])
 

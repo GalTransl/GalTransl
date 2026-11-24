@@ -8,6 +8,20 @@
   --custom-bg-fill-strong: rgba(255, 255, 255, calc(var(--custom-bg-surface-opacity-resolved) + 0.16));
   --custom-bg-fill-soft: rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.06));
   --custom-bg-fill-soft-hover: rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.18));
+  /* 嵌在已有半透明容器里的块：只加一点点底色，否则几层叠起来就接近不透明了 */
+  --custom-bg-fill-faint: rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) * 0.5));
+  --custom-bg-agent-glow: radial-gradient(circle at 92% -18%, rgba(var(--accent-rgb), 0.14), transparent 46%);
+  --custom-bg-panel:
+    linear-gradient(180deg, rgba(255, 255, 255, calc(var(--custom-bg-surface-opacity-resolved) + 0.22)), rgba(var(--tint-f8fbff), calc(var(--custom-bg-surface-opacity-resolved) + 0.1))),
+    rgba(255, 255, 255, var(--custom-bg-surface-opacity-resolved));
+
+  /* 表面色 token 在这里换成半透明：输入框、下拉框、卡片、标签页等上百处都用
+     var(--color-surface-strong) 之类做底色，逐个列选择器总会漏（新页面一加就又是一块纯白）。
+     弹层（对话框、下拉菜单、右键菜单）都 portal 到 body 下，不在 .app-layout 里，不受影响。 */
+  --color-surface-strong: rgba(255, 255, 255, calc(var(--custom-bg-surface-opacity-resolved) + 0.18));
+  --color-surface: rgba(255, 255, 255, calc(var(--custom-bg-surface-opacity-resolved) + 0.1));
+  --color-primary-soft: rgba(var(--accent-rgb), 0.13);
+  --color-neutral-soft: rgba(120, 140, 170, 0.14);
 }
 
 .app-layout--custom-background .sidebar,
@@ -62,15 +76,6 @@
   opacity: calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.08);
 }
 
-.app-layout--custom-background .project-cache-page .cache-layout,
-.app-layout--custom-background .project-dictionary-page .dict-layout {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.14)), rgba(var(--tint-f5f9ff), calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.04))),
-    rgba(255, 255, 255, calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.04)) !important;
-  backdrop-filter: blur(var(--custom-bg-surface-blur-soft)) !important;
-  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft)) !important;
-}
-
 .app-layout--custom-background .project-cache-page .cache-file-item--selected,
 .app-layout--custom-background .project-cache-page .cache-file-item--active,
 .app-layout--custom-background .project-cache-page .cache-file-list__selection-bar {
@@ -104,9 +109,9 @@
 }
 
  .app-layout--custom-background .project-dictionary-page .dict-layout__sidebar {
-  background: var(--custom-bg-fill-strong) !important;
-  backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
-  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+  background: var(--custom-bg-fill-faint) !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
  .app-layout--custom-background .project-dictionary-page .dict-card--normal,
@@ -129,9 +134,9 @@
 }
 
 .app-layout--custom-background .project-cache-page .cache-layout__sidebar {
-  background: var(--custom-bg-fill-strong) !important;
-  backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
-  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+  background: var(--custom-bg-fill-faint) !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .app-layout--custom-background .field input,
@@ -190,6 +195,16 @@
   --custom-bg-fill-strong: rgba(var(--tint-141e2b), calc(var(--custom-bg-surface-opacity-resolved) + 0.18));
   --custom-bg-fill-soft: rgba(var(--tint-141e2b), calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.08));
   --custom-bg-fill-soft-hover: rgba(var(--tint-223148), calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.12));
+  --custom-bg-fill-faint: rgba(var(--tint-141e2b), calc(var(--custom-bg-surface-soft-opacity-resolved) * 0.5));
+  --custom-bg-agent-glow: radial-gradient(circle at 92% -18%, rgba(var(--accent-glow-rgb), 0.2), transparent 48%);
+  --custom-bg-panel:
+    linear-gradient(180deg, rgba(var(--tint-182230), calc(var(--custom-bg-surface-opacity-resolved) + 0.24)), rgba(var(--tint-0e1620), calc(var(--custom-bg-surface-opacity-resolved) + 0.12))),
+    rgba(14, 22, 32, var(--custom-bg-surface-opacity-resolved));
+  --color-surface-strong: rgba(var(--tint-141e2b), calc(var(--custom-bg-surface-opacity-resolved) + 0.2));
+  --color-surface: rgba(var(--tint-141e2b), calc(var(--custom-bg-surface-opacity-resolved) + 0.12));
+  /* 暗色下这两个 token 本来就是半透明的，沿用暗色主题自己的值 */
+  --color-primary-soft: rgba(var(--accent-bright-rgb), 0.2);
+  --color-neutral-soft: rgba(113, 144, 191, 0.18);
 }
 
 :root[data-theme='dark'] .app-layout--custom-background .sidebar,
@@ -229,19 +244,10 @@
   opacity: calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.08);
 }
 
-:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-layout,
-:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-layout {
-  background:
-    linear-gradient(180deg, rgba(var(--tint-182230), calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.18)), rgba(var(--tint-0c131e), calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.06))),
-    rgba(var(--tint-0e1620), calc(var(--custom-bg-surface-soft-opacity-resolved) + 0.06)) !important;
-  backdrop-filter: blur(var(--custom-bg-surface-blur-soft)) !important;
-  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft)) !important;
-}
-
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-layout__sidebar {
-  background: var(--custom-bg-fill-strong) !important;
-  backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
-  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+  background: var(--custom-bg-fill-faint) !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-file-item--selected,
@@ -277,9 +283,9 @@
 }
 
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-layout__sidebar {
-  background: var(--custom-bg-fill-strong) !important;
-  backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
-  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+  background: var(--custom-bg-fill-faint) !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card--normal,
@@ -450,3 +456,166 @@
   -webkit-backdrop-filter: none;
 }
 
+
+/* ── 系统补全 ──
+   上面的名单是按页面逐个加出来的，下面按「层级」补齐没覆盖到的地方。统一用
+   :root[data-theme] 前缀：浅色、暗色都生效，优先级又压得过各页面自己的暗色规则
+   （:root[data-theme='dark'] .x），不必每条再抄一份暗色版本；颜色差异全在上面的变量里。
+
+   层级约定（新增元素照这个放）：
+   - 容器（直接压在壁纸上的块）：--custom-bg-panel + 模糊
+   - 控件（输入框、下拉框、按钮）：--color-surface-strong
+   - 容器里的块（卡片、编辑器、预览）：--custom-bg-fill-soft
+   - 块里再嵌的块（表格单元格、卡片里的输入框）：透明或 --custom-bg-fill-faint，
+     半透明每叠一层就更实，叠到三四层和不透明没区别 */
+
+/* 侧栏的模糊放到伪元素上：backdrop-filter 会让元素变成 position: fixed 后代的包含块，
+   侧栏又是 overflow: hidden，右键菜单、文件夹弹窗、通知伸出侧栏的部分就被裁掉了。 */
+:root[data-theme] .app-layout--custom-background .sidebar {
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+:root[data-theme] .app-layout--custom-background .sidebar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--custom-bg-panel);
+  backdrop-filter: blur(var(--custom-bg-surface-blur));
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur));
+  pointer-events: none;
+}
+
+/* 容器：原本不透明、又直接压在壁纸上的块 */
+:root[data-theme] .app-layout--custom-background .home-onboarding,
+:root[data-theme] .app-layout--custom-background .wizard-steps,
+:root[data-theme] .app-layout--custom-background .wizard-nav,
+:root[data-theme] .app-layout--custom-background .wizard-step-summary,
+:root[data-theme] .app-layout--custom-background .section-nav,
+:root[data-theme] .app-layout--custom-background .project-config-page__sidebar {
+  background: var(--custom-bg-panel);
+  backdrop-filter: blur(var(--custom-bg-surface-blur));
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur));
+}
+
+/* 设置页、配置页的分区导航原本没有底，文字直接压在壁纸上看不清 */
+:root[data-theme] .app-layout--custom-background .section-nav,
+:root[data-theme] .app-layout--custom-background .project-config-page__sidebar {
+  padding: var(--space-2);
+  border-radius: var(--radius-card);
+}
+
+/* Agent / 提取页最外层那块只是两个面板的衬底，面板自己已经是半透明容器。
+   模糊同样放在伪元素上、整页只做一次：里面有 position: fixed 的预览和对话框，
+   直接给它或面板加 backdrop-filter 会把这些弹层困在面板里。 */
+:root[data-theme] .app-layout--custom-background .agent-console {
+  position: relative;
+  isolation: isolate;
+  background: none;
+}
+
+:root[data-theme] .app-layout--custom-background .agent-console::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  backdrop-filter: blur(var(--custom-bg-surface-blur));
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur));
+  pointer-events: none;
+}
+
+/* 提取页的标题栏在面板外面（和面板同级），原先靠最外层的白底衬着。
+   把容器底色放到它们共同的父级上，标题栏和下面的对话区才是同一块。 */
+:root[data-theme] .app-layout--custom-background .extract-content {
+  background: var(--custom-bg-agent-glow), var(--custom-bg-panel);
+}
+
+:root[data-theme] .app-layout--custom-background .extract-content > .agent-cockpit {
+  background: none;
+}
+
+/* 浏览文本、项目字典是同一种「左栏 + 主区」的布局，主区里的 .panel 只是排版用的壳：
+   之前浏览文本那边的壳吃到了全局 .panel 的底色，字典那边没有，两页一实一虚。 */
+:root[data-theme] .app-layout--custom-background .cache-layout__main > .panel,
+:root[data-theme] .app-layout--custom-background .dict-layout__main > .panel {
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* 未打开文件时主区的空状态也在同一块布局里，不是独立容器：
+   吃到全局 .empty-state 的容器底色和模糊后，比左栏实一大截。跟左栏用同一层底色。 */
+:root[data-theme] .app-layout--custom-background .cache-layout__main > .cache-layout__empty,
+:root[data-theme] .app-layout--custom-background .dict-layout__main > .empty-state {
+  background: var(--custom-bg-fill-faint);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* 控件 */
+:root[data-theme] .app-layout--custom-background .custom-select__trigger,
+:root[data-theme] .app-layout--custom-background .button:not([class*='button--']),
+:root[data-theme] .app-layout--custom-background .model-name-row__fetch-btn:not(:hover) {
+  background-color: var(--color-surface-strong);
+}
+
+/* 容器里的块 */
+:root[data-theme] .app-layout--custom-background .agent-hero__step:not(:hover),
+:root[data-theme] .app-layout--custom-background .wizard-path-preview__path,
+:root[data-theme] .app-layout--custom-background .ptv2-filelist .file-progress-row:not(:hover),
+:root[data-theme] .app-layout--custom-background .prompt-templates-page__editor,
+:root[data-theme] .app-layout--custom-background .common-guidelines-page__editor,
+:root[data-theme] .app-layout--custom-background .token-entry,
+:root[data-theme] .app-layout--custom-background .home-onboarding__step {
+  background: var(--custom-bg-fill-soft);
+}
+
+:root[data-theme] .app-layout--custom-background .ptv2-filelist .file-progress-row:hover {
+  background: var(--custom-bg-fill-soft-hover);
+}
+
+:root[data-theme] .app-layout--custom-background .wizard-path-preview,
+:root[data-theme] .app-layout--custom-background .plugin-settings-panel,
+:root[data-theme] .app-layout--custom-background .token-list {
+  background: var(--custom-bg-fill-faint);
+}
+
+/* 字典表格：外层 dict-layout、卡片、表格、单元格、输入框原来每层都铺一遍底色，
+   五层叠下来表格区域几乎纯白。底色只留在卡片上，表头和序号列略加一点以示区分。 */
+:root[data-theme] .app-layout--custom-background .project-dictionary-page .dict-card--normal,
+:root[data-theme] .app-layout--custom-background .project-dictionary-page .dict-card--conditional,
+:root[data-theme] .app-layout--custom-background .project-dictionary-page .dict-card--situation,
+:root[data-theme] .app-layout--custom-background .project-dictionary-page .dict-card--gpt,
+:root[data-theme] .app-layout--custom-background .project-dictionary-page .dict-card--comment {
+  background: var(--custom-bg-fill-soft) !important;
+}
+
+:root[data-theme] .app-layout--custom-background .project-dictionary-page .dict-card__table,
+:root[data-theme] .app-layout--custom-background .project-dictionary-page .dict-card__fields,
+:root[data-theme] .app-layout--custom-background .project-dictionary-page .dict-card__cell,
+:root[data-theme] .app-layout--custom-background .project-dictionary-page .dict-card__input:not(:focus),
+:root[data-theme] .app-layout--custom-background .project-dictionary-page .dict-card__note-input:not(:focus) {
+  background: transparent !important;
+}
+
+:root[data-theme] .app-layout--custom-background .project-dictionary-page .dict-card__table-head,
+:root[data-theme] .app-layout--custom-background .project-dictionary-page .dict-card__table-add-row,
+:root[data-theme] .app-layout--custom-background .project-dictionary-page .dict-card__field-label,
+:root[data-theme] .app-layout--custom-background .project-dictionary-page .dict-card__cell--index {
+  background: var(--custom-bg-fill-faint) !important;
+}
+
+:root[data-theme] .app-layout--custom-background .project-dictionary-page .dict-card__input:focus,
+:root[data-theme] .app-layout--custom-background .project-dictionary-page .dict-card__note-input:focus {
+  background: var(--custom-bg-fill-strong) !important;
+}
+
+/* 缓存卡片里的输入框同理：卡片已有底色，输入框只留一点 */
+:root[data-theme] .app-layout--custom-background .project-cache-page .cache-card__input:not(:focus),
+:root[data-theme] .app-layout--custom-background .project-cache-page .cache-card__textarea:not(:focus),
+:root[data-theme] .app-layout--custom-background .project-cache-page .cache-card__readonly-textarea {
+  background: var(--custom-bg-fill-faint) !important;
+}

@@ -11,7 +11,7 @@ from uuid import uuid4
 from GalTransl.RuntimePaths import DATA_DIR_ENV, get_resource_root, get_user_data_dir
 
 _LOCK = RLock()
-_DEFAULT = {"imageVersion": "", "imageName": "", "opacity": 35, "surfaceOpacity": 33}
+_DEFAULT = {"imageVersion": "", "imageName": "", "opacity": 45, "surfaceOpacity": 25}
 _IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp", "image/avif", "image/svg+xml", "image/x-icon"}
 
 
@@ -112,6 +112,8 @@ def read_custom_background_image(version: str) -> tuple[bytes, str]:
 def clear_custom_background() -> dict:
     with _LOCK:
         previous = _read()
-        _write(dict(_DEFAULT))
+        # Clearing only drops the image; opacity choices stay for the next image.
+        value = {**_DEFAULT, "opacity": previous["opacity"], "surfaceOpacity": previous["surfaceOpacity"]}
+        _write(value)
         _remove_image(previous["imageVersion"])
-        return _public(dict(_DEFAULT))
+        return _public(value)
