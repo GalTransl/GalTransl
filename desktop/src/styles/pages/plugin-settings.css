@@ -146,8 +146,21 @@
   font-size: 13px;
 }
 
+/* 开关行：标题、说明占左列两行，开关在右列跨两行垂直居中（同 .field--switch） */
 .plugin-setting-row--boolean {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px var(--space-3);
   align-items: center;
+}
+
+.plugin-setting-row--boolean > .plugin-setting-row__label,
+.plugin-setting-row--boolean > .plugin-setting-row__hint {
+  grid-column: 1;
+}
+
+.plugin-setting-row--boolean > .toggle-switch {
+  grid-column: 2;
+  grid-row: 1 / span 2;
 }
 
 .plugin-setting-row--array {

@@ -117,6 +117,16 @@ function PluginSettingRow({ settingKey, schema, defaultValue, value, onChange }:
     control = <input id={id} aria-describedby={describedBy} type={schema.secret ? 'password' : 'text'} className="plugin-setting-input"
       value={String(value ?? '')} placeholder={schema.placeholder} onChange={(event) => onChange(event.target.value)} />;
   }
+  if (typeof defaultValue === 'boolean' && !options.length) {
+    // 开关和其它表单里的开关行一致：标题、说明在左，开关靠右
+    return (
+      <div className="plugin-setting-row plugin-setting-row--boolean">
+        <label htmlFor={id} className="plugin-setting-row__label">{label}</label>
+        {schema.description && <span id={hintId} className="plugin-setting-row__hint">{schema.description}</span>}
+        {control}
+      </div>
+    );
+  }
   return (
     <div className="plugin-setting-row">
       <label htmlFor={id} className="plugin-setting-row__label">{label}</label>

@@ -810,7 +810,8 @@ export function NewProjectWizard({ active, initialDirectory, autoCreate = false,
         />
         <span className="field__hint">{translate("projects:newProjectWizard.field_message_820")}</span>
       </div>
-      <label className="field field--switch">
+      {/* 开关行占满整行，开关才和下面「收尾拆分」一样贴在最右边 */}
+      <label className="field field--switch wizard-settings-grid__full">
         <span className="field__label">{translate("projects:newProjectWizard.field_message_sentence")}</span>
         <Switch checked={dynamicNumPerRequest} onChange={setDynamicNumPerRequest} />
         <span className="field__hint">{translate("projects:newProjectWizard.field_message_errorAutoSentence")}</span>
