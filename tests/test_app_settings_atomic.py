@@ -1,4 +1,4 @@
-"""Concurrent backend instances must save complete, independent settings."""
+"""Concurrent backend instances must each replace the settings file with their own whole document."""
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -34,8 +34,14 @@ class AtomicSettingsTests(TestCase):
                             {"maxConcurrentJobs": 3, "printTranslationLogInTerminal": False},
                             {"maxConcurrentJobs": 7, "printTranslationLogInTerminal": True},
                         ]))
-                self.assertCountEqual(written, saved)
-                self.assertEqual(load_app_settings(), written[-1])
+                # Only values that differ from the defaults are written.
+                self.assertCountEqual(written, [
+                    {"maxConcurrentJobs": 3, "printTranslationLogInTerminal": False, "storedFormat": 2},
+                    {"maxConcurrentJobs": 7, "storedFormat": 2},
+                ])
+                # The last completed replace wins as a whole document.
+                self.assertIn(load_app_settings(), saved)
+                self.assertEqual(load_app_settings()["maxConcurrentJobs"], written[-1]["maxConcurrentJobs"])
             self.assertEqual(list(Path(tmp).iterdir()), [path])
 
     def test_failed_write_or_replace_preserves_previous_settings_and_cleans_up(self):

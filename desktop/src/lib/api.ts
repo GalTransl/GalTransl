@@ -1,8 +1,10 @@
 import { UiError, message as uiMessage, resolveMessage, isUiMessage, type LocalizedText, type UiMessage } from "../i18n/core";
 import { invoke } from '@tauri-apps/api/core';
 import { readProjectStorage, removeProjectStorage, writeProjectStorage } from './projectStorage';
+import { storePreference } from './storedPreference';
 
 import type { PermissionDecision, PermissionMode } from './permissionMode';
+import { PERMISSION_MODE_STORAGE_KEY } from './permissionMode';
 
 const DEFAULT_BACKEND_URL = 'http://127.0.0.1:12333';
 let runtimeBackendBaseUrl: string | null = null;
@@ -1884,7 +1886,7 @@ export function getHomeHistoryRetentionLimit(): number {
 export function setHomeHistoryRetentionLimit(limit: number): number {
   const normalized = normalizeHomeListLimit(limit, HOME_HISTORY_LIMIT_DEFAULT);
   try {
-    localStorage.setItem(HOME_HISTORY_LIMIT_KEY, String(normalized));
+    storePreference(HOME_HISTORY_LIMIT_KEY, String(normalized), String(HOME_HISTORY_LIMIT_DEFAULT));
     window.dispatchEvent(new CustomEvent(HOME_HISTORY_LIMIT_CHANGE_EVENT, { detail: normalized }));
   } catch {
     // ignore storage errors
@@ -1904,7 +1906,7 @@ export function getCacheBrowserFontSizePreference(): number {
 export function setCacheBrowserFontSizePreference(size: number): number {
   const normalized = normalizeCacheBrowserFontSize(size);
   try {
-    localStorage.setItem(CACHE_BROWSER_FONT_SIZE_KEY, String(normalized));
+    storePreference(CACHE_BROWSER_FONT_SIZE_KEY, String(normalized), String(CACHE_BROWSER_FONT_SIZE_DEFAULT));
     window.dispatchEvent(new CustomEvent(CACHE_BROWSER_FONT_SIZE_CHANGE_EVENT, { detail: normalized }));
   } catch {
     // ignore storage errors
@@ -1924,7 +1926,7 @@ export function getHideBackendConsolePreference(): boolean {
 export function setHideBackendConsolePreference(enabled: boolean): boolean {
   const normalized = normalizeHideBackendConsole(enabled);
   try {
-    localStorage.setItem(HIDE_BACKEND_CONSOLE_KEY, String(normalized));
+    storePreference(HIDE_BACKEND_CONSOLE_KEY, String(normalized), String(HIDE_BACKEND_CONSOLE_DEFAULT));
     window.dispatchEvent(new CustomEvent(HIDE_BACKEND_CONSOLE_CHANGE_EVENT, { detail: normalized }));
   } catch {
     // ignore storage errors
@@ -1949,7 +1951,7 @@ export function getDisableAnimationsPreference(): boolean {
 export function setDisableAnimationsPreference(disabled: boolean): boolean {
   const normalized = normalizeDisableAnimations(disabled);
   try {
-    localStorage.setItem(DISABLE_ANIMATIONS_KEY, String(normalized));
+    storePreference(DISABLE_ANIMATIONS_KEY, String(normalized), String(DISABLE_ANIMATIONS_DEFAULT));
     window.dispatchEvent(new CustomEvent(DISABLE_ANIMATIONS_CHANGE_EVENT, { detail: normalized }));
   } catch {
     // ignore storage errors
@@ -1979,7 +1981,7 @@ export function getHomeJobRetentionLimit(): number {
 export function setHomeJobRetentionLimit(limit: number): number {
   const normalized = normalizeHomeListLimit(limit, HOME_JOB_LIMIT_DEFAULT);
   try {
-    localStorage.setItem(HOME_JOB_LIMIT_KEY, String(normalized));
+    storePreference(HOME_JOB_LIMIT_KEY, String(normalized), String(HOME_JOB_LIMIT_DEFAULT));
     window.dispatchEvent(new CustomEvent(HOME_JOB_LIMIT_CHANGE_EVENT, { detail: normalized }));
   } catch {
     // ignore storage errors
@@ -2047,12 +2049,47 @@ export function getThemeModePreference(): ThemeMode {
 export function setThemeModePreference(mode: ThemeMode): ThemeMode {
   const normalized = normalizeThemeMode(mode);
   try {
-    localStorage.setItem(THEME_MODE_KEY, normalized);
+    storePreference(THEME_MODE_KEY, normalized, 'system');
     window.dispatchEvent(new CustomEvent(THEME_MODE_CHANGE_EVENT, { detail: normalized }));
   } catch {
     // ignore storage errors
   }
   return normalized;
+}
+
+const STORED_DEFAULTS_MIGRATED_KEY = 'galtransl-stored-defaults-migrated';
+
+/**
+ * 8.5.3 及以前不管是不是默认值都把偏好写进 localStorage，存下来的值分不清是用户选的
+ * 还是当时的默认值。启动时把等于当时默认值的项删掉一次，让以后调整的默认值能覆盖到这些用户。
+ * 表里是 8.5.3 的默认值，描述的是旧数据，以后改默认值时不要跟着改。
+ * 必须在任何偏好被读取之前调用。
+ */
+export function migrateLegacyStoredDefaults(): void {
+  try {
+    if (localStorage.getItem(STORED_DEFAULTS_MIGRATED_KEY) === '1') return;
+    const legacyDefaults: Array<[string, string]> = [
+      [HOME_HISTORY_LIMIT_KEY, '20'],
+      [HOME_JOB_LIMIT_KEY, '20'],
+      [THEME_MODE_KEY, 'system'],
+      [THEME_PALETTE_KEY, 'default'],
+      [HIDE_BACKEND_CONSOLE_KEY, 'true'],
+      [CACHE_BROWSER_FONT_SIZE_KEY, '14'],
+      [DISABLE_ANIMATIONS_KEY, 'false'],
+      [PERMISSION_MODE_STORAGE_KEY, 'ask'],
+    ];
+    for (const [key, value] of legacyDefaults) {
+      if (localStorage.getItem(key) !== value) continue;
+      localStorage.removeItem(key);
+      if (key === HIDE_BACKEND_CONSOLE_KEY && typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+        // Rust 那份副本也是按旧规则写的，同步一次让它删掉文件。
+        void invoke('set_backend_console_preference', { hideConsole: HIDE_BACKEND_CONSOLE_DEFAULT }).catch(() => undefined);
+      }
+    }
+    localStorage.setItem(STORED_DEFAULTS_MIGRATED_KEY, '1');
+  } catch {
+    // localStorage 不可用：没有可迁移的数据
+  }
 }
 
 /** 配色主题与明暗模式相互独立：任一配色都有浅色和暗色两套。 */
@@ -2074,7 +2111,7 @@ export function getThemePalettePreference(): ThemePalette {
 export function setThemePalettePreference(palette: ThemePalette): ThemePalette {
   const normalized = normalizeThemePalette(palette);
   try {
-    localStorage.setItem(THEME_PALETTE_KEY, normalized);
+    storePreference(THEME_PALETTE_KEY, normalized, 'default');
     window.dispatchEvent(new CustomEvent(THEME_PALETTE_CHANGE_EVENT, { detail: normalized }));
   } catch {
     // ignore storage errors

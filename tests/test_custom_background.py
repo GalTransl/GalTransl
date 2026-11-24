@@ -77,6 +77,29 @@ class CustomBackgroundTests(unittest.TestCase):
         self.assertEqual(self.request()[1], cleared)
         self.assertEqual([item.name for item in self.directory.iterdir()], ["settings.json"])
 
+    def test_only_changed_values_are_written_so_defaults_can_change_later(self):
+        # Regression: defaults were stored with the image, so a later default change never reached old users.
+        _, saved = self.upload(b"image")
+        stored = json.loads((self.directory / "settings.json").read_text(encoding="utf-8"))
+        self.assertNotIn("opacity", stored)
+        self.assertNotIn("surfaceOpacity", stored)
+        self.request(method="PUT", data=b'{"opacity":60}')
+        self.request(method="DELETE")
+        self.assertEqual(json.loads((self.directory / "settings.json").read_text(encoding="utf-8")),
+                         {"opacity": 60, "storedFormat": 2})
+        self.assertTrue(self.request()[1]["configured"])
+        self.assertEqual(self.request()[1]["surfaceOpacity"], saved["surfaceOpacity"])
+
+    def test_old_release_defaults_read_as_unset(self):
+        # Files from 8.5.3 and earlier held the defaults of that release (35/33) alongside real choices.
+        self.directory.mkdir(parents=True)
+        (self.directory / "settings.json").write_text('{"opacity": 35, "surfaceOpacity": 60}', encoding="utf-8")
+        loaded = self.request()[1]
+        self.assertEqual((loaded["opacity"], loaded["surfaceOpacity"]), (45, 60))
+        # Once saved with the marker, an explicit 35 is the user's choice and stays.
+        self.request(method="PUT", data=b'{"opacity":35}')
+        self.assertEqual(self.request()[1]["opacity"], 35)
+
     def test_failed_replace_or_clear_keeps_previous_image_and_settings(self):
         _, previous = self.upload(b"previous")
         with patch("GalTransl.CustomBackground.os.replace", side_effect=OSError("disk full")):

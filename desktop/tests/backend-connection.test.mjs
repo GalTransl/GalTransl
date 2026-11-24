@@ -27,6 +27,8 @@ function loadApi({ native = true, dev = false, configured, invoke, storage, fetc
   const exports = {};
   const localStorage = storage ?? { getItem: () => null };
   const projectStorage = createTypeScriptLoader({ localStorage })(new URL('../src/lib/projectStorage.ts', import.meta.url));
+  const storedPreference = createTypeScriptLoader({ localStorage })(new URL('../src/lib/storedPreference.ts', import.meta.url));
+  const permissionMode = createTypeScriptLoader({ localStorage })(new URL('../src/lib/permissionMode.ts', import.meta.url));
   vm.runInNewContext(outputText, {
     exports,
     __importMeta: { env: { DEV: dev, VITE_BACKEND_URL: configured } },
@@ -36,6 +38,8 @@ function loadApi({ native = true, dev = false, configured, invoke, storage, fetc
     require: (name) => {
       if (name === '../i18n/core') return i18n;
       if (name === './projectStorage') return projectStorage;
+      if (name === './storedPreference') return storedPreference;
+      if (name === './permissionMode') return permissionMode;
       assert.equal(name, '@tauri-apps/api/core');
       return { invoke: invoke ?? (() => Promise.resolve({ url: 'http://127.0.0.1:45678' })) };
     },

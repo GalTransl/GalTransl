@@ -576,6 +576,9 @@ def test_extraction_restore_keeps_snapshot_and_usage_overhead(tmp_path):
 def test_real_model_loop_keeps_session_snapshot_and_journal(tmp_path, monkeypatch, model_server, runner_type, billion, request):
     monkeypatch.setenv("GALTRANSL_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("GALTRANSL_APP_SETTINGS_PATH", str(tmp_path / "settings.json"))
+    # Without a settings file the legacy app_settings.json in the resource directory is read;
+    # point it at an empty directory so the dev machine's copy cannot decide the defaults.
+    monkeypatch.setenv("GALTRANSL_RESOURCE_DIR", str(tmp_path))
     if billion is not None:
         save_app_settings({"mnemonEnabled": True, "extractionMnemonEnabled": True,
             "billionContextEnabled": billion, "extractionBillionContextEnabled": billion})
@@ -599,7 +602,8 @@ def test_real_model_loop_keeps_session_snapshot_and_journal(tmp_path, monkeypatc
             for message in requests[1]["messages"] if message["role"] == "user")
         names = {tool["function"]["name"] for tool in requests[0]["tools"]}
         assert MnemonSession.names <= names
-        assert (BillionContextSession.names <= names) is (billion is not False)
+        # billion-context is off by default; None means no saved settings.
+        assert (BillionContextSession.names <= names) is (billion is True)
         assert runner.state.messages[:2] == original
         assert runner._mnemon is None
         assert _tool_risk("mnemon_remember") == "high"

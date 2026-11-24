@@ -34,13 +34,28 @@ def atomic_json(path: Path, value: Any) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def load_settings() -> dict[str, Any]:
-    root = get_resource_root()
-    defaults = {
+# 4: only values that differ from the defaults are written.
+_PREFERENCES_VERSION = 4
+
+
+def _default_settings() -> dict[str, Any]:
+    return {
         "skill_dir": str(get_skills_dir()),
         "python_path": "",  # Optional system Python; run_python defaults to bundled.
         "skill_auto_update": True,
     }
+
+
+def _is_default(key: str, value: Any, default: Any) -> bool:
+    if key == "skill_dir":
+        # save_settings stores a resolved path; the default may be spelled differently.
+        return os.path.normcase(str(Path(value).resolve())) == os.path.normcase(str(Path(default).resolve()))
+    return value == default
+
+
+def load_settings() -> dict[str, Any]:
+    root = get_resource_root()
+    defaults = _default_settings()
     path = data_root() / "settings.json"
     if path.is_file():
         saved = json.loads(path.read_text(encoding="utf-8"))
@@ -49,13 +64,18 @@ def load_settings() -> dict[str, Any]:
         defaults.update({key: str(saved[key]) for key in ("skill_dir", "python_path") if key in saved})
         if isinstance(saved.get("skill_auto_update"), bool):
             defaults["skill_auto_update"] = saved["skill_auto_update"]
-        if saved.get("runtime_preferences_version") != 3:
+        version = saved.get("runtime_preferences_version")
+        if version not in (3, _PREFERENCES_VERSION):
             # Old releases stored PATH commands as defaults. Preserve explicit
             # custom paths while migrating automatic selections to bundled tools.
             if defaults["python_path"] in {"python", "python3", "py"}:
                 defaults["python_path"] = ""
             if Path(defaults["skill_dir"]) == root.parent / "GalTransl-GalGameReverse-Skill":
                 defaults["skill_dir"] = str(get_skills_dir())
+        if version != _PREFERENCES_VERSION and not Path(defaults["skill_dir"]).is_dir():
+            # Before version 4 the default Skill directory (under the install location)
+            # was saved as an absolute path; after the program moved it no longer exists.
+            defaults["skill_dir"] = str(get_skills_dir())
     return defaults
 
 
@@ -84,7 +104,12 @@ def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
                 # Resolving a venv's Python symlink would select the system interpreter instead.
                 value = str(Path(resolved).absolute())
             settings[key] = value
-    atomic_json(data_root() / "settings.json", {**settings, "runtime_preferences_version": 3})
+    # Persist only values that differ from the defaults: the default Skill directory
+    # lives under the install location, and a stored copy of it would keep pointing
+    # at the old place after the program moves or the default changes.
+    defaults = _default_settings()
+    stored = {key: value for key, value in settings.items() if not _is_default(key, value, defaults[key])}
+    atomic_json(data_root() / "settings.json", {**stored, "runtime_preferences_version": _PREFERENCES_VERSION})
     return settings
 
 

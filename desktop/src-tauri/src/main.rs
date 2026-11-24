@@ -77,8 +77,11 @@ fn read_console_preference(app: &tauri::AppHandle) -> bool {
     console_preference_path(app)
         .and_then(|path| std::fs::read_to_string(path).ok())
         .map(|value| !matches!(value.trim(), "false" | "0"))
-        .unwrap_or(true)
+        .unwrap_or(HIDE_CONSOLE_DEFAULT)
 }
+
+/// 与前端 HIDE_BACKEND_CONSOLE_DEFAULT 一致。
+const HIDE_CONSOLE_DEFAULT: bool = true;
 
 /// 由前端在切换「隐藏服务端控制台」时调用；写盘失败无所谓（只影响下次预热的窗口策略）。
 #[tauri::command]
@@ -86,6 +89,11 @@ fn set_backend_console_preference(app: tauri::AppHandle, hide_console: bool) {
     let Some(path) = console_preference_path(&app) else {
         return;
     };
+    // 等于默认值就不留文件，以后调整默认值时没改过这个开关的用户会跟着变。
+    if hide_console == HIDE_CONSOLE_DEFAULT {
+        let _ = std::fs::remove_file(path);
+        return;
+    }
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }

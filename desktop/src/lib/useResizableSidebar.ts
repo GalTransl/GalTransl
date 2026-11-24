@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react';
+import { storePreference } from './storedPreference';
 
 // 「浏览文本」和字典页的文件栏默认一样宽；用户拖过之后按 storageKey 各记各的。
 // 同一个 key 的多个实例（项目字典页和通用字典页、后台保活的页面）共享一份宽度，拖一边另一边立即跟上。
@@ -49,7 +50,7 @@ export function useResizableSidebar<T extends HTMLElement = HTMLDivElement>(stor
     };
     const onUp = () => {
       setResizing(false);
-      try { localStorage.setItem(storageKey, String(readWidth(storageKey))); } catch {}
+      try { storePreference(storageKey, String(readWidth(storageKey)), String(SIDEBAR_DEFAULT)); } catch {}
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);

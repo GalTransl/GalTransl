@@ -125,6 +125,40 @@ def test_bundled_defaults_and_legacy_migration(tmp_path, monkeypatch):
     assert module.builtin_python() == {"executable": sys.executable, "args": ["--extraction-python"], "source": "bundled"}
 
 
+def test_saving_default_settings_keeps_them_following_the_defaults(tmp_path, monkeypatch):
+    """Regression: saving wrote the resolved default Skill directory to disk, so it stayed pinned
+    to the old install location (and any later default change never reached the user)."""
+    old_skills, new_skills = tmp_path / "old-install/skills", tmp_path / "new-install/skills"
+    old_skills.mkdir(parents=True)
+    new_skills.mkdir(parents=True)
+    path = tmp_path / "data/settings.json"
+    monkeypatch.setattr(module, "get_resource_root", lambda: tmp_path / "old-install")
+    monkeypatch.setattr(module, "data_root", lambda: tmp_path / "data")
+    monkeypatch.setattr(module, "get_skills_dir", lambda: old_skills)
+    module.save_settings({"skill_dir": str(old_skills), "python_path": "", "skill_auto_update": True})
+    assert json.loads(path.read_text(encoding="utf-8")) == {"runtime_preferences_version": 4}
+    monkeypatch.setattr(module, "get_skills_dir", lambda: new_skills)
+    assert module.load_settings()["skill_dir"] == str(new_skills)
+    module.save_settings({"skill_auto_update": False})
+    assert json.loads(path.read_text(encoding="utf-8")) == {"skill_auto_update": False, "runtime_preferences_version": 4}
+
+
+def test_version_3_skill_dir_from_a_moved_install_falls_back_to_the_default(tmp_path, monkeypatch):
+    """Version 3 files saved the default Skill directory as an absolute path; once the program
+    moved that path is gone. A custom directory that still exists is kept."""
+    skills, custom = tmp_path / "new-install/skills", tmp_path / "my-skills"
+    skills.mkdir(parents=True)
+    custom.mkdir()
+    path = tmp_path / "data/settings.json"
+    monkeypatch.setattr(module, "get_resource_root", lambda: tmp_path / "new-install")
+    monkeypatch.setattr(module, "data_root", lambda: tmp_path / "data")
+    monkeypatch.setattr(module, "get_skills_dir", lambda: skills)
+    module.atomic_json(path, {"skill_dir": str(tmp_path / "old-install/skills"), "runtime_preferences_version": 3})
+    assert module.load_settings()["skill_dir"] == str(skills)
+    module.atomic_json(path, {"skill_dir": str(custom), "runtime_preferences_version": 3})
+    assert module.load_settings()["skill_dir"] == str(custom)
+
+
 def test_system_python_discovery_and_external_environment(monkeypatch):
     python = module.system_pythons(sys.executable)[0]
     assert os.path.normcase(python["executable"]) == os.path.normcase(sys.executable)

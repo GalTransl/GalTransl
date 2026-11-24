@@ -137,10 +137,12 @@ class RuntimePathTests(unittest.TestCase):
                 )
                 self.assertEqual(settings_path, Path(tmp) / "data" / "app_settings.json")
                 self.assertTrue(settings_path.is_file())
+                # Defaults are not written, only the changed values.
                 self.assertEqual(
                     json.loads(settings_path.read_text(encoding="utf-8")),
-                    saved,
+                    {"printTranslationLogInTerminal": False, "maxConcurrentJobs": 7, "storedFormat": 2},
                 )
+                self.assertEqual(load_app_settings(), saved)
                 self.assertEqual(load_app_settings()["maxConcurrentJobs"], 7)
 
 

@@ -24,6 +24,7 @@ function fixture(stored) {
     localStorage: {
       getItem: (key) => (store.has(key) ? store.get(key) : null),
       setItem: (key, value) => { store.set(key, String(value)); },
+      removeItem: (key) => { store.delete(key); },
     },
     window: {
       addEventListener: (type, fn) => listeners.add(fn),
@@ -63,6 +64,8 @@ test('enabling the setting persists, broadcasts, and flips the root dataset', ()
   // 关回去同样广播，dataset 复位。
   assert.equal(f.api.setDisableAnimationsPreference(false), false);
   assert.equal(f.events.at(-1).detail, false);
+  // 回到默认值时不留存储项，以后改默认值才能覆盖到没动过这个开关的用户。
+  assert.equal(f.store.has(KEY), false);
   f.api.applyAnimationsPreference();
   assert.equal(f.dataset.animations, 'on');
 });

@@ -18,6 +18,22 @@ DEFAULT_APP_SETTINGS: dict[str, Any] = {
     "extractionMnemonEnabled": True,
 }
 
+# Files written before _STORED_FORMAT existed held every setting, defaults included,
+# so a value there may be the user's choice or just the default of that release.
+# Values equal to the defaults of that last release are read as unset, letting the
+# current defaults apply (e.g. billion-context, which was on then and is off now).
+# Keep this table as it is: it describes old files, not today's defaults.
+_LEGACY_DEFAULTS: dict[str, Any] = {
+    "printTranslationLogInTerminal": True,
+    "maxConcurrentJobs": 4,
+    "billionContextEnabled": True,
+    "extractionBillionContextEnabled": True,
+    "mnemonEnabled": True,
+    "extractionMnemonEnabled": True,
+}
+_FORMAT_KEY = "storedFormat"
+_STORED_FORMAT = 2  # only settings that differ from the defaults are written
+
 # Kept for callers that imported the old constant. Runtime reads and writes use
 # get_app_settings_path() so user-home/environment overrides remain effective.
 _SETTINGS_PATH = str(get_app_settings_path())
@@ -67,9 +83,32 @@ def load_app_settings() -> dict[str, Any]:
             data = json.load(f)
         if not isinstance(data, dict):
             return dict(DEFAULT_APP_SETTINGS)
+        if data.get(_FORMAT_KEY) != _STORED_FORMAT:
+            data = {key: value for key, value in data.items()
+                    if key not in _LEGACY_DEFAULTS or value != _LEGACY_DEFAULTS[key]}
         return _normalize_settings(data)
     except Exception:
         return dict(DEFAULT_APP_SETTINGS)
+
+
+def _without_defaults(normalized: dict[str, Any]) -> dict[str, Any]:
+    """Drop every key that loading would fill back with the same value.
+
+    Only user changes are persisted, so a later change to a default reaches
+    everyone who never touched that setting. A key is dropped only when it
+    equals its default *and* reloading still yields the same settings: some
+    keys fall back to another key (extractionBillionContextEnabled ->
+    billionContextEnabled), and a non-default value kept only through that
+    fallback would start following the other switch.
+    """
+    stored = dict(normalized)
+    for key in list(stored):
+        if stored[key] != DEFAULT_APP_SETTINGS.get(key):
+            continue
+        candidate = {name: value for name, value in stored.items() if name != key}
+        if _normalize_settings(candidate) == normalized:
+            stored = candidate
+    return stored
 
 
 def save_app_settings(settings: dict[str, Any]) -> dict[str, Any]:
@@ -85,7 +124,7 @@ def save_app_settings(settings: dict[str, Any]) -> dict[str, Any]:
             prefix=f".{settings_path.name}.", suffix=".tmp", delete=False,
         ) as f:
             tmp_path = Path(f.name)
-            json.dump(normalized, f, ensure_ascii=False, indent=2)
+            json.dump({**_without_defaults(normalized), _FORMAT_KEY: _STORED_FORMAT}, f, ensure_ascii=False, indent=2)
         os.replace(tmp_path, settings_path)
     finally:
         if tmp_path is not None:

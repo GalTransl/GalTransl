@@ -1,4 +1,5 @@
 import { t as translate } from "../i18n/core";
+import { storePreference } from './storedPreference';
 /** Agent 权限模式：四档，与后端 runtime.py 的 PERMISSION_MODES 一一对应。
  *
  * 只存在前端 localStorage（与后端配置名同一套做法），随 start / message 一起送过去；
@@ -37,7 +38,7 @@ export const PERMISSION_MODE_HINTS: Record<PermissionMode, string> = {
   get 'auto-quiet'() { return translate("agent:permissionMode.autoQuiet_autoQuiet_autoProblemItem"); },
 };
 
-const STORAGE_KEY = 'galtransl.agent.permissionMode';
+export const PERMISSION_MODE_STORAGE_KEY = 'galtransl.agent.permissionMode';
 
 export function normalizePermissionMode(value: unknown): PermissionMode {
   return PERMISSION_MODES.includes(value as PermissionMode) ? (value as PermissionMode) : 'ask';
@@ -45,7 +46,7 @@ export function normalizePermissionMode(value: unknown): PermissionMode {
 
 export function loadPermissionMode(): PermissionMode {
   try {
-    return normalizePermissionMode(window.localStorage.getItem(STORAGE_KEY));
+    return normalizePermissionMode(window.localStorage.getItem(PERMISSION_MODE_STORAGE_KEY));
   } catch {
     return 'ask';
   }
@@ -53,7 +54,7 @@ export function loadPermissionMode(): PermissionMode {
 
 export function savePermissionMode(mode: PermissionMode): void {
   try {
-    window.localStorage.setItem(STORAGE_KEY, mode);
+    storePreference(PERMISSION_MODE_STORAGE_KEY, mode, 'ask');
   } catch {
     // localStorage 不可用（隐私模式等）：本次会话仍然生效，只是记不住
   }

@@ -12,6 +12,12 @@ from GalTransl.RuntimePaths import DATA_DIR_ENV, get_resource_root, get_user_dat
 
 _LOCK = RLock()
 _DEFAULT = {"imageVersion": "", "imageName": "", "opacity": 45, "surfaceOpacity": 25}
+# Files without _STORED_FORMAT held the defaults of their release alongside real
+# choices; values equal to those old defaults are read as unset so today's defaults
+# apply. Keep this table as it is: it describes old files, not today's defaults.
+_LEGACY_DEFAULTS = {"opacity": 35, "surfaceOpacity": 33}
+_FORMAT_KEY = "storedFormat"
+_STORED_FORMAT = 2  # only values that differ from _DEFAULT are written
 _IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp", "image/avif", "image/svg+xml", "image/x-icon"}
 
 
@@ -30,10 +36,18 @@ def _read() -> dict:
     version = str(value.get("imageVersion", ""))
     if version and not re.fullmatch(r"[0-9a-f]{32}", version):
         raise ValueError("invalid background image version")
+    if value.get(_FORMAT_KEY) != _STORED_FORMAT:
+        value = {key: item for key, item in value.items()
+                 if key not in _LEGACY_DEFAULTS or item != _LEGACY_DEFAULTS[key]}
     return {**_DEFAULT, **value}
 
 
 def _write(value: dict) -> None:
+    # Persist only what differs from _DEFAULT (_read fills the rest back in), so a
+    # later change to a default reaches users who never moved that slider. The
+    # file itself is still written: its existence marks the localStorage migration done.
+    value = {key: item for key, item in value.items() if key not in _DEFAULT or item != _DEFAULT[key]}
+    value[_FORMAT_KEY] = _STORED_FORMAT
     directory = background_directory()
     directory.mkdir(parents=True, exist_ok=True)
     temporary = None
