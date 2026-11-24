@@ -37,7 +37,9 @@ def read_plan(path: Path) -> UpdatePlan:
         raise ValueError("Application update has no files")
     root = Path(value["install_dir"]).resolve(strict=True)
     payload = Path(value["payload_dir"]).resolve(strict=True)
-    if not Path(value["executable"]).resolve().is_relative_to(root) or payload != path.parent.resolve() / "payload":
+    # The desktop shell passes the plan path from canonicalize(), which is \\?\C:\... on Windows,
+    # while payload_dir is a plain path: compare the directory itself, not its spelling.
+    if not Path(value["executable"]).resolve().is_relative_to(root) or not os.path.samefile(payload, path.parent / "payload"):
         raise ValueError("Application update paths do not match the installation")
     for name in value["files"]:
         relative = PurePosixPath(name)

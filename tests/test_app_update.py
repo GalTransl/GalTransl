@@ -261,6 +261,29 @@ def test_standalone_installer_waits_for_exit_and_restarts_without_backend_initia
     assert json.loads(result_file.read_text())["phase"] == "completed"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="verbatim paths are Windows-only")
+def test_standalone_installer_accepts_the_verbatim_plan_path_tauri_passes(update_server):
+    """The desktop shell passes the plan as canonicalize() returns it, i.e. \\\\?\\C:\\...\\plan.json.
+
+    read_plan used to compare the payload directory by string, so the verbatim prefix made
+    every Windows upgrade fail with "Application update paths do not match the installation"
+    after the download had already finished (8.5.3 -> 8.6.0).
+    """
+    _, installed, _, _, _, _ = update_server
+    state, stage = prepared(update_server)
+    assert state["phase"] == "ready"
+    result_file = Path(read_plan(stage / "plan.json").result_file)
+    verbatim_plan = "\\\\?\\" + str((stage / "plan.json").resolve())
+    parent = subprocess.Popen([sys.executable, "-c", "pass"])
+    parent.wait(timeout=5)
+    installer = subprocess.run([sys.executable, str(ROOT / "run_backend.py"), "--apply-update",
+                                verbatim_plan, "--parent-pid", str(parent.pid)],
+                               capture_output=True, timeout=20)
+    assert installer.returncode == 0, installer.stdout + installer.stderr
+    assert (installed / "plugins/existing.txt").read_text() == "updated plugin"
+    assert json.loads(result_file.read_text())["phase"] == "completed"
+
+
 def test_update_plan_rejects_paths_outside_the_payload(update_server):
     state, stage = prepared(update_server)
     assert state["phase"] == "ready"
