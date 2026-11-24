@@ -592,7 +592,7 @@
   border-radius: 14px;
   border: none;
   color: #ffffff;
-  background: linear-gradient(135deg, rgb(var(--accent-rgb)) 0%, rgb(var(--accent-alt-rgb)) 50%, rgb(var(--tint-22d3ee)) 100%);
+  background: linear-gradient(135deg, rgb(var(--accent-rgb)) 0%, rgb(var(--accent-alt-rgb)) 50%, rgb(var(--accent-gradient-end-rgb)) 100%);
   box-shadow:
     0 10px 24px -8px rgba(var(--accent-rgb), 0.55),
     inset 0 1px 0 rgba(255, 255, 255, 0.35),

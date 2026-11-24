@@ -49,7 +49,7 @@
 .extract-workspace button:not(.extract-primary):hover, .extract-preview button:not(.extract-primary):hover, .extract-dialog button:not(.extract-primary):hover { background: var(--agent-hover, var(--color-neutral-soft)); }
 .extract-workspace button:disabled, .extract-dialog button:disabled { cursor: default; opacity: .45; }
 .extract-page :is(button, textarea):focus-visible, .extract-dialog :focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
-.extract-page .extract-primary, .extract-dialog .extract-primary { display: inline-flex; align-items: center; justify-content: center; gap: 7px; background: linear-gradient(135deg, rgb(var(--accent-rgb)) 0%, rgb(var(--accent-alt-rgb)) 50%, rgb(var(--tint-22d3ee)) 100%); color: white; border-color: transparent; }
+.extract-page .extract-primary, .extract-dialog .extract-primary { display: inline-flex; align-items: center; justify-content: center; gap: 7px; background: linear-gradient(135deg, rgb(var(--accent-rgb)) 0%, rgb(var(--accent-alt-rgb)) 50%, rgb(var(--accent-gradient-end-rgb)) 100%); color: white; border-color: transparent; }
 .extract-page .extract-primary:hover, .extract-dialog .extract-primary:hover { filter: brightness(1.06); }
 .extract-pending pre, .extract-preview pre { font-family: var(--agent-mono, 'Cascadia Code', Consolas, monospace); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .extract-pending { max-height: min(340px, 38vh); overflow: hidden; }

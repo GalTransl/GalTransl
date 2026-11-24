@@ -63,6 +63,9 @@
   --accent-glow-rgb: 67, 129, 255;
   --accent-glow-rgb-2: 54, 122, 255;
   --accent-alt-rgb: 59, 130, 246;
+  /* 主按钮、用户气泡等「主色 → 辅助色 → 末端」渐变的末端。默认就是 --tint-22d3ee 的青色；
+     单独成变量是因为配色主题会把青色整体映射成别的颜色，渐变末端不一定要跟着走。 */
+  --accent-gradient-end-rgb: 34, 211, 238;
   --accent-soft-rgb: 237, 243, 255;
   --accent-pale-rgb: 143, 182, 255;
   --line-rgb: 191, 208, 226;
@@ -376,7 +379,9 @@
   --accent-bright-rgb: 255, 143, 187;
   --accent-glow-rgb: 255, 128, 180;
   --accent-glow-rgb-2: 230, 96, 156;
-  --accent-alt-rgb: 157, 120, 214;
+  /* 辅助色和渐变末端都留在粉色里：淡紫夹在两段粉之间会显得发蓝 */
+  --accent-alt-rgb: 236, 104, 156;
+  --accent-gradient-end-rgb: 199, 72, 132;
   --accent-soft-rgb: 252, 236, 244;
   --accent-pale-rgb: 246, 182, 212;
   --line-rgb: 234, 204, 222;

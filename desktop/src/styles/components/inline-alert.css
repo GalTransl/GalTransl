@@ -52,7 +52,7 @@
   justify-content: center;
   border-radius: 10px;
   color: #ffffff;
-  background: linear-gradient(135deg, rgb(var(--accent-alt-rgb)), rgb(var(--tint-22d3ee)));
+  background: linear-gradient(135deg, rgb(var(--accent-alt-rgb)), rgb(var(--accent-gradient-end-rgb)));
   box-shadow:
     0 6px 14px -4px rgba(var(--accent-rgb), 0.45),
     inset 0 1px 0 rgba(255, 255, 255, 0.35);
