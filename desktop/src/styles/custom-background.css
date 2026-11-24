@@ -47,9 +47,7 @@
 .app-layout--custom-background .project-dictionary-page .dict-layout,
 .app-layout--custom-background .sidebar__project-confirm-bubble,
 .app-layout--custom-background .sidebar__context-menu,
-.app-layout--custom-background .project-cache-page .cache-context-menu,
-.app-layout--custom-background .project-translate-page__folder-menu,
-.app-layout--custom-background .project-translate-page__folder-menu-content {
+.app-layout--custom-background .project-cache-page .cache-context-menu {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, calc(var(--custom-bg-surface-opacity-resolved) + 0.22)), rgba(var(--tint-f8fbff), calc(var(--custom-bg-surface-opacity-resolved) + 0.1))),
     rgba(255, 255, 255, var(--custom-bg-surface-opacity-resolved));
@@ -126,8 +124,7 @@
  .app-layout--custom-background .project-dictionary-page .dict-card__cell--index,
  .app-layout--custom-background .project-dictionary-page .dict-card__add-row-btn,
  .app-layout--custom-background .project-dictionary-page .dict-card__row-delete,
- .app-layout--custom-background .project-dictionary-page .dict-card__row-open-cache,
- .app-layout--custom-background .name-page .name-page__th {
+ .app-layout--custom-background .project-dictionary-page .dict-card__row-open-cache {
   background: var(--custom-bg-fill-strong) !important;
   backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
   -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
@@ -230,9 +227,7 @@
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-layout,
 :root[data-theme='dark'] .app-layout--custom-background .sidebar__project-confirm-bubble,
 :root[data-theme='dark'] .app-layout--custom-background .sidebar__context-menu,
-:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-context-menu,
-:root[data-theme='dark'] .app-layout--custom-background .project-translate-page__folder-menu,
-:root[data-theme='dark'] .app-layout--custom-background .project-translate-page__folder-menu-content {
+:root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-context-menu {
   background:
     linear-gradient(180deg, rgba(var(--tint-182230), calc(var(--custom-bg-surface-opacity-resolved) + 0.24)), rgba(var(--tint-0e1620), calc(var(--custom-bg-surface-opacity-resolved) + 0.12))),
     rgba(14, 22, 32, var(--custom-bg-surface-opacity-resolved));
@@ -300,8 +295,7 @@
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__cell--index,
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__add-row-btn,
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__row-delete,
-:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__row-open-cache,
-:root[data-theme='dark'] .app-layout--custom-background .name-page .name-page__th {
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__row-open-cache {
   background: var(--custom-bg-fill-strong) !important;
   backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
   -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
@@ -426,7 +420,6 @@
 .app-layout--custom-background .project-dictionary-page .dict-card__add-row-btn,
 .app-layout--custom-background .project-dictionary-page .dict-card__row-delete,
 .app-layout--custom-background .project-dictionary-page .dict-card__row-open-cache,
-.app-layout--custom-background .name-page .name-page__th,
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-card__input,
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-card__textarea,
 :root[data-theme='dark'] .app-layout--custom-background .project-cache-page .cache-card__readonly-textarea,
@@ -440,8 +433,7 @@
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__note-input,
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__add-row-btn,
 :root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__row-delete,
-:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__row-open-cache,
-:root[data-theme='dark'] .app-layout--custom-background .name-page .name-page__th {
+:root[data-theme='dark'] .app-layout--custom-background .project-dictionary-page .dict-card__row-open-cache {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
@@ -611,6 +603,14 @@
 :root[data-theme] .app-layout--custom-background .project-dictionary-page .dict-card__input:focus,
 :root[data-theme] .app-layout--custom-background .project-dictionary-page .dict-card__note-input:focus {
   background: var(--custom-bg-fill-strong) !important;
+}
+
+/* 人名表表头：保留主题色那层，表面色换成半透明。它吸顶、行从下面滚过，
+   所以留一层轻模糊把滚过的字糊掉；表头只有固定几格，不随条目增长，不影响滚动性能。 */
+:root[data-theme] .app-layout--custom-background .name-page .name-page__th {
+  background: linear-gradient(var(--name-page-th-tint), var(--name-page-th-tint)), var(--custom-bg-fill-strong);
+  backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
+  -webkit-backdrop-filter: blur(var(--custom-bg-surface-blur-soft));
 }
 
 /* 缓存卡片里的输入框同理：卡片已有底色，输入框只留一点 */

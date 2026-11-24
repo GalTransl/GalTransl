@@ -148,17 +148,35 @@
   font-size: var(--text-sm);
 }
 
+/* 表头是一条圆角的浅色条：小号、加字距、弱化颜色，只做列标识，不和数据抢视线。
+   底色先铺不透明的表面色再叠主题色——吸顶后下面有行滚过，不能透出来。 */
 .name-page__th {
+  --name-page-th-tint: rgba(var(--accent-rgb), 0.07);
   text-align: left;
-  padding: var(--space-2) var(--space-3);
+  padding: 9px var(--space-3);
+  font-size: var(--text-xs);
   font-weight: 600;
+  letter-spacing: 0.06em;
   color: var(--color-text-muted);
-  border-bottom: 2px solid var(--color-line);
   white-space: nowrap;
   position: sticky;
   top: 0;
-  background: var(--color-surface-strong);
+  background: linear-gradient(var(--name-page-th-tint), var(--name-page-th-tint)), var(--color-surface-strong);
   z-index: 1;
+}
+
+.name-page__th:first-child {
+  border-radius: var(--radius-control) 0 0 var(--radius-control);
+}
+
+.name-page__th:last-child {
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+}
+
+/* 和下面单元格的对齐方式保持一致 */
+.name-page__th--index,
+.name-page__th--count {
+  text-align: center;
 }
 
 .name-page__th--index {
@@ -167,6 +185,16 @@
 
 .name-page__th--count {
   width: 60px;
+}
+
+/* 单元格里是带内边距和边框的输入框，表头文字要多缩进这一截才和输入的文字对齐 */
+.name-page__th--jp,
+.name-page__th--cn {
+  padding-left: calc(var(--space-3) + var(--space-2) + 1px);
+}
+
+:root[data-theme='dark'] .name-page__th {
+  --name-page-th-tint: rgba(var(--accent-bright-rgb), 0.1);
 }
 
 .name-page__th--actions {
