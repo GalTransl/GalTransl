@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from asyncio import CancelledError, run
+from asyncio import run
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 import os
@@ -28,7 +28,9 @@ def _utcnow_text() -> str:
 
 
 def _should_skip_error_log(ex: BaseException) -> bool:
-    if isinstance(ex, (JobCancelledError, KeyboardInterrupt, CancelledError)):
+    # 用户停止走 JobCancelledError。裸的 CancelledError 到了这里就不是停止，而是某处意外的取消
+    # （如 pyreqwest 的 "Read was cancelled"），要留下堆栈，否则只剩工作台上一句话查不到来路
+    if isinstance(ex, (JobCancelledError, KeyboardInterrupt)):
         return True
 
     module_name = type(ex).__module__ or ""

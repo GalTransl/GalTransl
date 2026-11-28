@@ -1,5 +1,6 @@
 import asyncio
 import httpx
+import inspect
 from datetime import timedelta
 from opencc import OpenCC
 from typing import Optional, List
@@ -39,16 +40,49 @@ except Exception:
 
 
 if HttpxTransport is not None:
+    from pyreqwest.exceptions import PyreqwestError
+
+    try:
+        from pyreqwest.compatibility.httpx._internal import map_exception as _map_pyreqwest_exception
+    except Exception:  # 上游内部模块，没了就统一按 ReadError 处理
+        _map_pyreqwest_exception = None
 
     class _LiveByteStream(httpx.AsyncByteStream):
-        """用 read_chunk() 逐块交出响应体：到多少给多少，不等攒满一个块。"""
+        """用 read_chunk() 逐块交出响应体：到多少给多少，不等攒满一个块。
 
-        def __init__(self, inner) -> None:
+        正文是在模型生成期间边到边读的，读到一半出的错都要换成 httpx 异常，重试循环才会当网络错误重试：
+        - pyreqwest 读取被打断时抛 CancelledError("Read was cancelled")。它是 BaseException，
+          会绕过 ask_chatbot 的 except Exception，经 gather 把所有 worker 一起带走，整个任务失败
+          （8.6.1 上报的就是这句、没有别的线索）。当前任务确实在被取消（停止翻译、收尾）时照常抛出。
+        - 上游适配层只在发请求那一步映射异常，正文读到一半断线是原样的 pyreqwest 异常，
+          _is_transport_error 认不出，连续断线也不会刷新客户端。
+        """
+
+        def __init__(self, inner, request: httpx.Request) -> None:
             self._inner = inner
+            self._request = request
 
         async def __aiter__(self):
             reader = self._inner._body_reader
-            while (chunk := await reader.read_chunk()) is not None:
+            while True:
+                try:
+                    chunk = await reader.read_chunk()
+                except asyncio.CancelledError as exc:
+                    task = asyncio.current_task()
+                    if task is None or task.cancelling():
+                        raise
+                    raise httpx.ReadError(
+                        f"读取响应时被中断（{exc}），按网络错误重试", request=self._request
+                    ) from exc
+                except PyreqwestError as exc:
+                    mapped = (
+                        _map_pyreqwest_exception(exc, self._request)
+                        if _map_pyreqwest_exception is not None
+                        else None
+                    )
+                    raise (mapped or httpx.ReadError(str(exc), request=self._request)) from exc
+                if chunk is None:
+                    return
                 yield bytes(chunk)
 
         async def aclose(self) -> None:
@@ -70,7 +104,7 @@ if HttpxTransport is not None:
             response = await super().handle_async_request(request)
             # 上游内部结构变了就保持原样：只是流式退回整段到达，请求本身不受影响
             if hasattr(response.stream, "_body_reader"):
-                response.stream = _LiveByteStream(response.stream)
+                response.stream = _LiveByteStream(response.stream, request)
             return response
 
 
@@ -656,6 +690,24 @@ class BaseTranslate:
                 OSError,
             ),
         )
+
+    @staticmethod
+    async def _close_stream_quietly(response) -> None:
+        """关掉中途放弃的流式响应，释放连接；关不掉也不影响这次请求的结果。
+
+        openai 的 AsyncStream 只有 close()，没有 aclose()：以前只找 aclose，提前中断（解析到坏行）的流
+        从没关过。整段预读时这无所谓；改成边到边读之后，连接和后台收数据会一直挂到垃圾回收。
+        """
+        close_stream = getattr(response, "aclose", None) or getattr(response, "close", None)
+        if not callable(close_stream):
+            return
+        try:
+            result = close_stream()
+            if inspect.isawaitable(result):
+                await asyncio.wait_for(result, timeout=3.0)
+        except Exception:
+            # 关闭超时（TimeoutError）或出错都算了；任务本身被取消时的 CancelledError 照常抛出
+            pass
 
     async def _recycle_failed_client(
         self, failed_client: AsyncOpenAI, token: COpenAIToken
@@ -1496,12 +1548,7 @@ class BaseTranslate:
                                 pass
                     finally:
                         if not stream_completed or stream_abort_requested:
-                            close_stream = getattr(response, "aclose", None)
-                            if callable(close_stream):
-                                try:
-                                    await asyncio.wait_for(close_stream(), timeout=3.0)
-                                except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
-                                    pass
+                            await BaseTranslate._close_stream_quietly(response)
                 else:
                     if tool_response_holder is not None and response.choices:
                         finish_reason = response.choices[0].finish_reason
