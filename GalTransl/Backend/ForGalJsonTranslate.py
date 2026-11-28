@@ -22,6 +22,7 @@ from GalTransl.Backend.Prompts import (
     H_WORDS_LIST,
 )
 from GalTransl.Backend.MultiTurnTranslate import MultiTurnTranslate
+from GalTransl.Backend.BaseTranslate import TranslationParseError
 from openai._types import NOT_GIVEN
 
 
@@ -184,18 +185,27 @@ class ForGalJsonTranslate(MultiTurnTranslate):
             resp = None
             self._clear_chatbot_state()
             reasoning = {}
-            resp, token = await self._ask_translation_batch(
-                session,
-                trans_list=trans_list, sig_list=sig_list, proofread=proofread,
-                n_symbol=n_symbol,
-                reasoning_holder=reasoning,
-                messages=messages,
-                file_name=f"{filename}:{idx_tip}",
-                base_try_count=retry_count,
-                stream_line_callback=_parse_stream_lines,
-                max_retry_count=self.max_api_retries,
-                progress_file=filename,
-            )
+            try:
+                resp, token = await self._ask_translation_batch(
+                    session,
+                    trans_list=trans_list, sig_list=sig_list, proofread=proofread,
+                    n_symbol=n_symbol,
+                    reasoning_holder=reasoning,
+                    messages=messages,
+                    file_name=f"{filename}:{idx_tip}",
+                    base_try_count=retry_count,
+                    stream_line_callback=_parse_stream_lines,
+                    max_retry_count=self.max_api_retries,
+                    progress_file=filename,
+                )
+            except TranslationParseError as exc:
+                # 自动模式下工具模板在批内就抛出解析错误，走不到下面的解析；这次响应也要能录下来
+                self._record_translation_request(
+                    trans_list, input_src, gptdict, filename,
+                    self._apply_history_result("[history_result]", filename),
+                    0, str(exc),
+                )
+                raise
 
             result_text = resp or ""
 
@@ -252,6 +262,13 @@ class ForGalJsonTranslate(MultiTurnTranslate):
                     success_count += 1
                     if i >= len(trans_list) - 1:
                         break
+
+            # 录制模式：按这次响应的解析结果记一行（「仅成功」模式只写整批通过的）
+            self._record_translation_request(
+                trans_list, input_src, gptdict, filename,
+                self._apply_history_result("[history_result]", filename),
+                success_count, error_message or stream_parse_error_message,
+            )
 
             # 自动模式靠这个异常换模板/缩批；但已有通过校验的句子时不抛，
             # 照常按部分结果返回，由自动模式采用这几句并记一次模板失败

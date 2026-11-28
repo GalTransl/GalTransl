@@ -190,6 +190,7 @@ async def run_job_async(
         cfg.runtime_project_dir = spec.project_dir
         app_settings = load_app_settings()
         cfg.print_translation_log_in_terminal = bool(app_settings.get("printTranslationLogInTerminal", True))
+        cfg.request_record_mode = app_settings.get("requestRecordMode", "off")
         LOGGER.setLevel(
             DEBUG_LEVEL[cfg.getCommonConfigSection().get("loggingLevel", "info")]
         )

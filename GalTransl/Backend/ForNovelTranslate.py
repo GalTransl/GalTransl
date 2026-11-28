@@ -190,6 +190,13 @@ class ForNovelTranslate(MultiTurnTranslate):
                     if i >= len(trans_list) - 1:
                         break
 
+            # 录制模式：按这次响应的解析结果记一行（「仅成功」模式只写整批通过的）
+            self._record_translation_request(
+                trans_list, input_src, gptdict, filename,
+                self._apply_history_result("[history_result]", filename),
+                success_count, error_message or stream_parse_error_message,
+            )
+
             # 自动模式靠这个异常换模板/缩批；但已有通过校验的句子时不抛，
             # 照常按部分结果返回，由自动模式采用这几句并记一次模板失败
             if success_count <= 0 and (error_message or stream_parse_error_message or success_count != len(trans_list)):

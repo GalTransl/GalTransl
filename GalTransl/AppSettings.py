@@ -16,7 +16,10 @@ DEFAULT_APP_SETTINGS: dict[str, Any] = {
     "extractionBillionContextEnabled": False,
     "mnemonEnabled": True,
     "extractionMnemonEnabled": True,
+    # off / success / all: write each translation request into <project>/transl_record/<template>.csv
+    "requestRecordMode": "off",
 }
+_REQUEST_RECORD_MODES = ("off", "success", "all")
 
 # Files written before _STORED_FORMAT existed held every setting, defaults included,
 # so a value there may be the user's choice or just the default of that release.
@@ -41,7 +44,9 @@ _SETTINGS_PATH = str(get_app_settings_path())
 
 def _normalize_settings(data: dict[str, Any] | None) -> dict[str, Any]:
     source = data or {}
+    record_mode = source.get("requestRecordMode", DEFAULT_APP_SETTINGS["requestRecordMode"])
     return {
+        "requestRecordMode": record_mode if record_mode in _REQUEST_RECORD_MODES else "off",
         "mnemonEnabled": source.get("mnemonEnabled", DEFAULT_APP_SETTINGS["mnemonEnabled"]) is True,
         "extractionMnemonEnabled": source.get("extractionMnemonEnabled", DEFAULT_APP_SETTINGS["extractionMnemonEnabled"]) is True,
         "billionContextEnabled": source.get("billionContextEnabled", DEFAULT_APP_SETTINGS["billionContextEnabled"]) is True,

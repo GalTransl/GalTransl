@@ -228,9 +228,21 @@
     "paletteDefault": "Default (blue)",
     "paletteSakura": "Sakura pink"
   },
+  "requestRecord": {
+    "title": "Recording mode",
+    "description": "Save the full details of translation requests as CSV, for analyzing model behavior or building datasets.",
+    "label": "Record requests",
+    "off": "Off",
+    "success": "Successful only",
+    "all": "All",
+    "hint": "Saved per template to transl_record/<template>.csv in the project, including the input text, GPT dictionary, context, full request and response. \"Successful only\" records requests whose whole batch parsed successfully; \"All\" also records failed and partially parsed requests. Applies to translation jobs started afterwards.",
+    "loadFailed": "Could not load the recording setting: {{error}}",
+    "saveFailed": "Could not save the recording setting: {{error}}"
+  },
   "settingsSectionNav": {
     "ariaLabel_sections": "Settings sections",
     "label_appearance": "Appearance",
+    "label_advanced": "Advanced",
     "label_prompt": "Prompts",
     "label_guideline": "Guidelines",
     "label_plugins": "Plugin list",

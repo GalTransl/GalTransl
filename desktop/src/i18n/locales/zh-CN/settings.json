@@ -228,9 +228,21 @@
     "paletteDefault": "默认（蓝）",
     "paletteSakura": "樱粉"
   },
+  "requestRecord": {
+    "title": "录制模式",
+    "description": "把翻译请求的完整细节保存为 CSV，便于分析模型表现或整理数据。",
+    "label": "录制请求",
+    "off": "关",
+    "success": "仅成功",
+    "all": "全部",
+    "hint": "按模板保存到项目的 transl_record/<模板名>.csv，包含输入文本、GPT 字典、前文、完整请求和响应。「仅成功」只记录整批解析成功的请求，「全部」还会记录解析失败和部分解析的请求。对之后开始的翻译任务生效。",
+    "loadFailed": "读取录制设置失败：{{error}}",
+    "saveFailed": "保存录制设置失败：{{error}}"
+  },
   "settingsSectionNav": {
     "ariaLabel_sections": "设置分区",
     "label_appearance": "外观",
+    "label_advanced": "高级",
     "label_prompt": "提示词",
     "label_guideline": "翻译规范",
     "label_plugins": "插件清单",

@@ -23,6 +23,7 @@ from GalTransl.Dictionary import CGptDict
 from GalTransl.Utils import load_guideline_file, fix_quotes2
 from GalTransl.ProjectGuideline import combine_guidelines, read_project_guideline
 from GalTransl.Reasoning import apply_reasoning_kwargs
+from GalTransl.RequestRecorder import capture_exchange, clear_exchange, is_recording, record_translation_request
 from openai import RateLimitError, AsyncOpenAI, APIConnectionError, APITimeoutError
 from openai import DefaultAioHttpClient
 from openai._types import NOT_GIVEN
@@ -885,6 +886,36 @@ class BaseTranslate:
         except Exception:
             pass
 
+    def _record_translation_request(
+        self, trans_list: CTransList, input_text: str, gptdict: str, filename: str,
+        context: str, success_count: int, error: str = "",
+    ) -> None:
+        """录制模式：解析完一次响应后，把这次请求按模板记进项目的 transl_record/<模板>.csv。
+
+        整批都通过且没有错误才算 success；通过了开头几句是 partial；一句都没有是 parse_error。
+        """
+        total = len(trans_list)
+        if success_count >= total and not error:
+            status = "success"
+        elif success_count > 0:
+            status = "partial"
+            error = error or f"译文缺句：{success_count}/{total}"
+        else:
+            status = "parse_error"
+            error = error or "未解析到有效句子"
+        record_translation_request(
+            self.pj_config,
+            template=getattr(self, "eng_type", "") or type(self).__name__,
+            status=status,
+            error=error,
+            filename=filename,
+            index_range=self._build_idx_tip(trans_list),
+            sentence_count=len(trans_list),
+            input_text=input_text,
+            gpt_dict=gptdict,
+            context=context,
+        )
+
     def _has_speaker_column_in_translation(self, text, tran, output_speaker=""):
         """Reject a copied NAME column, while preserving pipes already in the source."""
         if "|" in tran.post_src or "｜" in tran.post_src:
@@ -1360,6 +1391,10 @@ class BaseTranslate:
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ]
+        # 录制模式：清掉上一次请求，免得这次没拿到响应（如 gemini no_candidates）时被当成这次的记下来
+        recording = is_recording(getattr(self, "pj_config", None))
+        if recording:
+            clear_exchange()
 
         while True:
             # Check stop_event before each API attempt so that cancelling
@@ -1587,6 +1622,11 @@ class BaseTranslate:
                 if reasoning_holder is not None:
                     reasoning_holder["field"] = reasoning_field or REASONING_FIELD_NAMES[0]
                     reasoning_holder["text"] = "".join(reasoning_parts)
+                if recording:
+                    capture_exchange(
+                        request_kwargs, result, "".join(reasoning_parts),
+                        [call for _, call in sorted(tool_calls.items())],
+                    )
                 return result, token
             except Exception as e:
                 if asked_stream_usage and _rejects_stream_options(e):

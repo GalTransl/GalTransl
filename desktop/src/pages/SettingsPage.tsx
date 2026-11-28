@@ -20,9 +20,11 @@ import {
   CUSTOM_BACKGROUND_CHANGE_EVENT,
   DISABLE_ANIMATIONS_CHANGE_EVENT,
   type PluginInfo,
+  type RequestRecordMode,
   type ThemeMode,
   type ThemePalette,
   clearCustomBackgroundPreference,
+  fetchAppSettings,
   fetchVersion,
   fetchVersionCheck,
   fetchPlugins,
@@ -45,6 +47,7 @@ import {
   setHomeJobRetentionLimit,
   setThemeModePreference,
   setThemePalettePreference,
+  updateAppSettings,
   uploadCustomBackgroundImage,
 } from '../lib/api';
 import { normalizeError } from '../lib/errors';
@@ -62,7 +65,7 @@ function pluginTypeLabel(type: string): string {
   return translate("settings:settingsPage.pluginCardHeader_message_text");
 }
 
-type SettingsSectionKey = 'appearance' | 'prompt' | 'guideline' | 'plugins' | 'about';
+type SettingsSectionKey = 'appearance' | 'prompt' | 'guideline' | 'plugins' | 'advanced' | 'about';
 
 /** 设置页二级菜单。label 写成 getter：切界面语言时不用重建这份数组也能跟着变。 */
 const SETTINGS_SECTIONS: { key: SettingsSectionKey; label: string; icon: IconName }[] = [
@@ -70,6 +73,7 @@ const SETTINGS_SECTIONS: { key: SettingsSectionKey; label: string; icon: IconNam
   { key: 'prompt', get label() { return translate("settings:settingsSectionNav.label_prompt"); }, icon: 'note' },
   { key: 'guideline', get label() { return translate("settings:settingsSectionNav.label_guideline"); }, icon: 'bookmark' },
   { key: 'plugins', get label() { return translate("settings:settingsSectionNav.label_plugins"); }, icon: 'plug' },
+  { key: 'advanced', get label() { return translate("settings:settingsSectionNav.label_advanced"); }, icon: 'sliders' },
   { key: 'about', get label() { return translate("settings:settingsSectionNav.label_about"); }, icon: 'help' },
 ];
 
@@ -189,6 +193,70 @@ export function PluginListSection() {
   );
 }
 
+
+/** 录制模式：存在后端的应用设置里，由之后启动的翻译任务读取。 */
+function RequestRecordSection({ backendUrl }: { backendUrl: string }) {
+  useUiLanguage();
+  const [mode, setMode] = useState<RequestRecordMode>('off');
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoaded(false);
+    setError('');
+    fetchAppSettings().then((settings) => {
+      if (cancelled) return;
+      setMode(settings.requestRecordMode ?? 'off');
+      setLoaded(true);
+    }).catch((err) => {
+      if (!cancelled) setError(translate('settings:requestRecord.loadFailed', { error: normalizeError(err, String(err)) }));
+    });
+    return () => { cancelled = true; };
+  }, [backendUrl]);
+
+  const change = (next: RequestRecordMode) => {
+    if (!loaded || saving) return;
+    const previous = mode;
+    setMode(next);
+    setSaving(true);
+    setError('');
+    updateAppSettings({ requestRecordMode: next }).then((settings) => {
+      setMode(settings.requestRecordMode ?? 'off');
+    }).catch((err) => {
+      setMode(previous);
+      setError(translate('settings:requestRecord.saveFailed', { error: normalizeError(err, String(err)) }));
+    }).finally(() => setSaving(false));
+  };
+
+  return (
+    <section className="panel">
+      <header className="panel__header">
+        <div>
+          <h2>{translate('settings:requestRecord.title')}</h2>
+          <p>{translate('settings:requestRecord.description')}</p>
+        </div>
+      </header>
+
+      <label className="settings-number-row">
+        <span className="settings-number-row__label">{translate('settings:requestRecord.label')}</span>
+        <div className="settings-number-row__control">
+          <CustomSelect segmented aria-label={translate('settings:requestRecord.label')} value={mode}
+            disabled={!loaded || saving}
+            onChange={(event) => { change(event.target.value as RequestRecordMode); }}>
+            <option value="off">{translate('settings:requestRecord.off')}</option>
+            <option value="success">{translate('settings:requestRecord.success')}</option>
+            <option value="all">{translate('settings:requestRecord.all')}</option>
+          </CustomSelect>
+        </div>
+      </label>
+
+      {error && <div className="settings-background-control__error" role="alert">{error}</div>}
+      <div className="settings-toggle-row__desc">{translate('settings:requestRecord.hint')}</div>
+    </section>
+  );
+}
 
 export function SettingsPage() {
   const uiLanguage = useUiLanguage();
@@ -796,6 +864,8 @@ export function SettingsPage() {
         )}
 
         {activeSection === 'plugins' && <PluginListSection />}
+
+        {activeSection === 'advanced' && <RequestRecordSection backendUrl={backendUrl} />}
         </div>
       </div>
     </div>

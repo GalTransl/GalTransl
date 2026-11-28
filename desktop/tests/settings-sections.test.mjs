@@ -8,6 +8,8 @@ import { createTypeScriptLoader } from './helpers/load-typescript.mjs';
 const background = { imageDataUrl: '', imageName: '', opacity: 35, surfaceOpacity: 33 };
 const promptOverrides = new Map();
 const guidelineSaves = [];
+const appSettingUpdates = [];
+let appSettings = { printTranslationLogInTerminal: true, requestRecordMode: 'success' };
 
 const apiMock = {
   CACHE_BROWSER_FONT_SIZE_MIN: 10,
@@ -21,6 +23,12 @@ const apiMock = {
   HOME_LIST_LIMIT_MIN: 1,
   HOME_LIST_LIMIT_MAX: 50,
   fetchPlugins: async () => [],
+  fetchAppSettings: async () => appSettings,
+  updateAppSettings: async (patch) => {
+    appSettingUpdates.push(patch);
+    appSettings = { ...appSettings, ...patch };
+    return appSettings;
+  },
   fetchVersion: async () => '8.4.3',
   fetchVersionCheck: async () => ({ version: '8.4.3', latest_version: '8.4.3', update_available: false }),
   getCacheBrowserFontSizePreference: () => 12,
@@ -118,7 +126,7 @@ async function mount(entry = '/settings') {
 test('设置页用二级菜单分区，默认停在外观', async () => {
   const view = await mount();
   try {
-    assert.deepEqual(navLabels(view.root()), ['外观', '提示词', '翻译规范', '插件清单', '关于']);
+    assert.deepEqual(navLabels(view.root()), ['外观', '提示词', '翻译规范', '插件清单', '高级', '关于']);
     assert.equal(activeNav(view.root()), 0);
     // 一次只渲染一个分区；首页记忆并在外观里
     assert.deepEqual(panelTitles(view.root()), ['外观', '首页记忆保留']);
@@ -132,7 +140,7 @@ test('点二级菜单只切换当前分区', async () => {
   try {
     // 后端连接并在关于里
     await view.click('关于');
-    assert.equal(activeNav(view.root()), 4);
+    assert.equal(activeNav(view.root()), 5);
     assert.deepEqual(panelTitles(view.root()), ['关于', '后端连接']);
 
     await view.click('插件清单');
@@ -207,7 +215,7 @@ test('?section= 决定初始分区，刷新和返回都停在原来那页', asyn
   // 合并掉的旧分区参数落到合并后的分区
   for (const [entry, index, titles] of [
     ['/settings?section=retention', 0, ['外观', '首页记忆保留']],
-    ['/settings?section=connection', 4, ['关于', '后端连接']],
+    ['/settings?section=connection', 5, ['关于', '后端连接']],
   ]) {
     const legacy = await mount(entry);
     try {
@@ -225,5 +233,24 @@ test('?section= 决定初始分区，刷新和返回都停在原来那页', asyn
     assert.deepEqual(panelTitles(fallback.root()), ['外观', '首页记忆保留']);
   } finally {
     fallback.unmount();
+  }
+});
+
+test('高级分区用一行胶囊切换录制模式：关 / 仅成功 / 全部', async () => {
+  appSettingUpdates.length = 0;
+  appSettings = { printTranslationLogInTerminal: true, requestRecordMode: 'success' };
+  const view = await mount('/settings?section=advanced');
+  try {
+    assert.equal(activeNav(view.root()), 4);
+    assert.deepEqual(panelTitles(view.root()), ['录制模式']);
+    const options = () => view.root().findAll((node) => node.type === 'div' && node.props.role === 'radio');
+    assert.deepEqual(options().map((node) => textOf(node.children)), ['关', '仅成功', '全部']);
+    assert.deepEqual(options().map((node) => node.props['aria-checked']), [false, true, false]);
+    await act(async () => options()[2].props.onClick());
+    // 补丁对象来自 vm 沙箱，原型和这里不同，按 JSON 比较
+    assert.equal(JSON.stringify(appSettingUpdates), JSON.stringify([{ requestRecordMode: 'all' }]));
+    assert.deepEqual(options().map((node) => node.props['aria-checked']), [false, false, true]);
+  } finally {
+    view.unmount();
   }
 });

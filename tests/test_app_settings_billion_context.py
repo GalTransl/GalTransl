@@ -106,7 +106,7 @@ def test_http_partial_settings_updates_preserve_plugin_and_other_preferences(tmp
         assert update({"billionContextEnabled": True}) == {
             "maxConcurrentJobs": 7, "printTranslationLogInTerminal": False,
             "billionContextEnabled": True, "extractionBillionContextEnabled": False,
-            "mnemonEnabled": True, "extractionMnemonEnabled": True}
+            "mnemonEnabled": True, "extractionMnemonEnabled": True, "requestRecordMode": "off"}
         assert update({"extractionBillionContextEnabled": True})["billionContextEnabled"] is True
         assert update({"maxConcurrentJobs": 3})["billionContextEnabled"] is True
         assert update({"billionContextEnabled": False})["maxConcurrentJobs"] == 3
@@ -117,7 +117,7 @@ def test_http_partial_settings_updates_preserve_plugin_and_other_preferences(tmp
         assert update({"extractionMnemonEnabled": False}) == {
             "maxConcurrentJobs": 3, "printTranslationLogInTerminal": False,
             "billionContextEnabled": False, "extractionBillionContextEnabled": False,
-            "mnemonEnabled": False, "extractionMnemonEnabled": False}
+            "mnemonEnabled": False, "extractionMnemonEnabled": False, "requestRecordMode": "off"}
         assert load_app_settings()["mnemonEnabled"] is False
         assert load_app_settings()["extractionMnemonEnabled"] is False
     finally:

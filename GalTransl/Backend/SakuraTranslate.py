@@ -231,6 +231,12 @@ class CSakuraTranslate(BaseTranslate):
                 trans_list[i].trans_by = self.eng_type
                 result_trans_list.append(trans_list[i])
 
+            # 录制模式：Sakura 出错时整批重翻，没有部分解析，失败一律按 0 句记
+            self._record_translation_request(
+                trans_list, input_str, gptdict, filename, last_translation,
+                0 if error_flag else len(result_trans_list), error_message,
+            )
+
             if error_flag:
                 self._raise_parse_error_for_auto(error_message)
                 try:

@@ -436,7 +436,11 @@ export type AppSettings = {
   extractionBillionContextEnabled?: boolean;
   mnemonEnabled?: boolean;
   extractionMnemonEnabled?: boolean;
+  requestRecordMode?: RequestRecordMode;
 };
+
+/** 录制模式：off 不记录，success 只记整批解析成功的请求，all 连解析失败的也记。 */
+export type RequestRecordMode = 'off' | 'success' | 'all';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
